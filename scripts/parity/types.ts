@@ -111,6 +111,7 @@ export type StubState = "down" | "up-with-models" | "up-empty-models";
 export type StubFixture =
   | "doctor"
   | "chat-text"
+  | "chat-del"
   | "chat-stream"
   | "chat-stream-nodone"
   | "chat-stream-options-400"

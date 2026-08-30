@@ -146,6 +146,7 @@ const excludedRequestHeaders = [
 const stubFixtures = [
   "doctor",
   "chat-text",
+  "chat-del",
   "chat-stream",
   "chat-stream-nodone",
   "chat-stream-options-400",

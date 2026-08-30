@@ -6,3 +6,4 @@ coverage/
 .DS_Store
 .parity-evidence/
 .probe-evidence/
+.live-smoke-evidence/

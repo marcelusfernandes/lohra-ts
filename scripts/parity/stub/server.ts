@@ -247,9 +247,11 @@ async function handle(
     return;
   }
   const text =
-    runtime.fixture === "side-divergent" && runtime.side === "candidate"
-      ? "STUB-MUTANT: divergent reply"
-      : "STUB-OK: deterministic reply";
+    runtime.fixture === "chat-del"
+      ? `a${String.fromCharCode(0x7f)}b`
+      : runtime.fixture === "side-divergent" && runtime.side === "candidate"
+        ? "STUB-MUTANT: divergent reply"
+        : "STUB-OK: deterministic reply";
   json(response, 200, completion({ role: "assistant", content: text }, "stop"));
 }
 
