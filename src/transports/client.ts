@@ -18,6 +18,19 @@ import type {
 const defaultTimeoutMs = 30_000;
 const defaultMaxBytes = 4_000_000;
 
+/** A stream-truncation error carries whatever bytes arrived before the
+ * connection reset, so a streaming caller can replay the already-received
+ * deltas through its callbacks (contract-t11 assertion 49: "quebra de
+ * transporte após delta parcial emite o delta e depois response.failed")
+ * instead of discarding them along with the failed read. */
+export interface StreamTruncationError extends Error {
+  readonly partialBody?: Uint8Array;
+}
+
+function hasPartialBody(error: unknown): error is StreamTruncationError & { partialBody: Uint8Array } {
+  return error instanceof Error && "partialBody" in error && (error as StreamTruncationError).partialBody !== undefined;
+}
+
 /** A chunked response whose connection resets mid-body (not a graceful close
  * after the terminating chunk) surfaces as a bare "aborted"/ECONNRESET from
  * Node's http client — rephrase it so the cause is legible to a caller that
@@ -25,7 +38,11 @@ const defaultMaxBytes = 4_000_000;
  * failure, which downstream parity comparisons key off of). A graceful close
  * with no error event is a separate, non-error path (clean EOF, handled as a
  * partial success by the SSE assembler) and never reaches this function. */
-function describeResponseStreamError(error: unknown, headers: NodeJS.Dict<string | string[]>): Error {
+function describeResponseStreamError(
+  error: unknown,
+  headers: NodeJS.Dict<string | string[]>,
+  partialBody?: Uint8Array,
+): Error {
   if (!(error instanceof Error)) return new Error(String(error));
   const transferEncoding = headers["transfer-encoding"];
   const chunked =
@@ -35,10 +52,14 @@ function describeResponseStreamError(error: unknown, headers: NodeJS.Dict<string
   const resetLike =
     (error as NodeJS.ErrnoException).code === "ECONNRESET" || error.message === "aborted";
   if (!chunked || !resetLike) return error;
-  return new Error(
+  const truncationError: StreamTruncationError = new Error(
     "peer closed connection without sending complete message body (incomplete chunked read)",
     { cause: error },
   );
+  if (partialBody !== undefined && partialBody.byteLength > 0) {
+    Object.assign(truncationError, { partialBody });
+  }
+  return truncationError;
 }
 
 async function readBounded(response: Response, maxBytes: number): Promise<Uint8Array> {
@@ -123,7 +144,7 @@ export class NativeChatHttpPort implements ChatHttpPort {
             chunks.push(chunk);
           });
           response.on("error", (error: unknown) => {
-            reject(describeResponseStreamError(error, response.headers));
+            reject(describeResponseStreamError(error, response.headers, Buffer.concat(chunks)));
           });
           response.on("end", () => {
             const headers = new Headers();
@@ -236,10 +257,27 @@ export class ChatCompletionsClient {
     const first = { ...kwargs, stream: true, stream_options: { include_usage: true } };
     let response: HttpResponseData;
     try {
-      response = await this.request(first);
+      try {
+        response = await this.request(first);
+      } catch (error) {
+        if (!String(error).includes("stream_options")) throw error;
+        response = await this.request({ ...kwargs, stream: true });
+      }
     } catch (error) {
-      if (!String(error).includes("stream_options")) throw error;
-      response = await this.request({ ...kwargs, stream: true });
+      // Assertion 49: a connection reset mid-body still discards the final
+      // turn (the caller's error path builds response.failed/an SSE error
+      // frame with no output), but whatever complete deltas DID arrive
+      // before the break must reach the caller's callbacks first — they
+      // are not still sitting in some buffer the caller could read later.
+      if (hasPartialBody(error)) {
+        try {
+          assembleStreamedResponse(parseSse(error.partialBody), callbacks);
+        } catch {
+          // A dangling/incomplete trailing frame in the partial buffer —
+          // whatever DID parse cleanly was already replayed above.
+        }
+      }
+      throw error;
     }
     return this.options.transport.normalizeResponse(
       assembleStreamedResponse(parseSse(response.body), callbacks),
