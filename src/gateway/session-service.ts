@@ -33,12 +33,23 @@ export class GatewaySessionRegistry {
   private readonly busySessions = new Set<string>();
   private readonly armedInterruptLatches = new Set<string>();
   private readonly activeTurnControllers = new Map<string, AbortController>();
+  // Models the oracle's SessionManager in-memory cache, which is distinct
+  // from the DB row: SessionManager.get() (the path prompt.submit uses)
+  // refuses a session whose DB row has end_reason=="compression" UNLESS
+  // it's already in the cache -- and create_session() populates the cache
+  // without ever consulting end_reason, which is exactly the mechanism
+  // that makes resurrection work (ADR-T12-04, L18). A dead parent this
+  // gateway process has never seen via session.create stays refused for
+  // prompt.submit; the moment session.create touches it (fresh id or
+  // resurrection), it's usable for the rest of this process's lifetime.
+  private readonly knownSessionIds = new Set<string>();
 
   public constructor(private readonly sessions: SessionRepository) {}
 
   public createOrResurrect(input: CreateOrResurrectInput): CreateOrResurrectResult {
     const sessionId = input.sessionId ?? randomUUID().replaceAll("-", "");
     const existing = this.sessions.getSession(sessionId);
+    this.knownSessionIds.add(sessionId);
     if (existing !== null) return { sessionId, created: false };
     this.sessions.createSession({
       id: sessionId,
@@ -48,6 +59,20 @@ export class GatewaySessionRegistry {
       cwd: input.cwd,
     });
     return { sessionId, created: true };
+  }
+
+  // The check prompt.submit uses: known-to-this-process sessions (via
+  // session.create, resurrection included) are always submittable; a
+  // session this process has never touched is submittable only if its DB
+  // row exists and is not a dead (compressed) parent -- lazily joining the
+  // cache the first time it's found submittable, matching a real
+  // SessionManager.get() cache-fill on first successful lookup.
+  public canSubmitPrompt(sessionId: string): boolean {
+    if (this.knownSessionIds.has(sessionId)) return true;
+    const row = this.sessions.getSession(sessionId);
+    if (row === null || row.end_reason === "compression") return false;
+    this.knownSessionIds.add(sessionId);
+    return true;
   }
 
   public list(): readonly Readonly<Record<string, unknown>>[] {

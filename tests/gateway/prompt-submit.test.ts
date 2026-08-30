@@ -70,6 +70,7 @@ interface StartServerOptions {
 async function startServer(options: StartServerOptions = {}): Promise<{
   readonly server: GatewayHttpServer;
   readonly home: string;
+  readonly sessions: SessionRepository;
 }> {
   const root = mkdtempSync(join(tmpdir(), "lohra-gateway-prompt-submit-"));
   roots.push(root);
@@ -96,7 +97,7 @@ async function startServer(options: StartServerOptions = {}): Promise<{
     onUpgrade,
   });
   activeServer = server;
-  return { server, home: root };
+  return { server, home: root, sessions };
 }
 
 const messageQueues = new WeakMap<
@@ -538,6 +539,55 @@ describe("prompt.submit: compaction absence over many turns (ADR-T12-01/assertio
     for (const message of historyResult.result.messages) {
       expect(message.content).not.toContain("[CONTEXT COMPACTION");
     }
+
+    ws.close();
+  });
+});
+
+describe("prompt.submit: lineage resurrection completes a real turn (ADR-T12-04/assertion 43)", () => {
+  it("session.create on a dead (end_reason=compression) parent resurrects it, and prompt.submit then grows message_count", async () => {
+    const { server, sessions } = await startServer({ transportScript: [() => response({ content: "resurrected reply" })] });
+    sessions.createSession({
+      id: "dead-parent",
+      model: "m",
+      systemPrompt: "sp",
+      cwd: "/tmp",
+      startedAt: 10,
+    });
+    sessions.appendMessage("dead-parent", { role: "user", content: "before death", createdAt: 11 });
+    sessions.appendMessage("dead-parent", { role: "assistant", content: "reply", createdAt: 12, finishReason: "stop" });
+    sessions.endSession("dead-parent", "compression", 20);
+    expect(Number(sessions.getSession("dead-parent")?.message_count)).toBe(2);
+
+    const ws = new WebSocket(`ws://127.0.0.1:${String(server.port)}/api/ws?token=${TOKEN}`);
+    await nextMessage(ws); // gateway.ready
+
+    // prompt.submit on the dead parent is refused, matching L18.
+    ws.send(
+      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "prompt.submit", params: { session_id: "dead-parent", text: "hi" } }),
+    );
+    const refused = JSON.parse(await nextMessage(ws)) as { error: { code: number; message: string } };
+    expect(refused.error).toEqual({ code: -32602, message: "unknown session_id" });
+
+    // session.create with the dead parent's own id resurrects it.
+    ws.send(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "session.create", params: { session_id: "dead-parent" } }));
+    const createResult = JSON.parse(await nextMessage(ws)) as { result: { session_id: string } };
+    expect(createResult.result.session_id).toBe("dead-parent");
+    await nextMessage(ws); // session.info
+
+    // A real turn now completes and grows message_count on the resurrected id.
+    ws.send(
+      JSON.stringify({ jsonrpc: "2.0", id: 3, method: "prompt.submit", params: { session_id: "dead-parent", text: "hi again" } }),
+    );
+    await nextMessage(ws); // rpc-ok
+    await nextMessage(ws); // message.start
+    const completeFrame = JSON.parse(await nextMessage(ws)) as { params: { payload: { status: string } } };
+    expect(completeFrame.params.payload.status).toBe("complete");
+
+    expect(Number(sessions.getSession("dead-parent")?.message_count)).toBe(4);
+    // end_reason on the row itself is untouched by resurrection -- only
+    // create_session()'s existence check was bypassed, per ADR-T12-04.
+    expect(sessions.getSession("dead-parent")?.end_reason).toBe("compression");
 
     ws.close();
   });

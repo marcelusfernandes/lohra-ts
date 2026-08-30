@@ -103,6 +103,37 @@ describe("GatewaySessionRegistry.history", () => {
   });
 });
 
+describe("GatewaySessionRegistry.canSubmitPrompt (L18/ADR-T12-04)", () => {
+  it("is false for a session that does not exist", () => {
+    const { registry } = setup();
+    expect(registry.canSubmitPrompt("nope")).toBe(false);
+  });
+
+  it("is true for a normal, never-compressed session found via the DB, and this lazily caches it", () => {
+    const { registry, sessions } = setup();
+    sessions.createSession({ id: "s1", model: "m", startedAt: 10 });
+    expect(registry.canSubmitPrompt("s1")).toBe(true);
+  });
+
+  it("is false for a dead (compressed) parent this process has never touched via session.create", () => {
+    const { registry, sessions } = setup();
+    sessions.createSession({ id: "parent", model: "m", startedAt: 10 });
+    sessions.endSession("parent", "compression", 20);
+    expect(registry.canSubmitPrompt("parent")).toBe(false);
+  });
+
+  it("becomes true after session.create resurrects the dead parent, even though end_reason is untouched", () => {
+    const { registry, sessions } = setup();
+    sessions.createSession({ id: "parent", model: "m", startedAt: 10 });
+    sessions.endSession("parent", "compression", 20);
+    expect(registry.canSubmitPrompt("parent")).toBe(false);
+
+    registry.createOrResurrect({ sessionId: "parent", model: "m", systemPrompt: "sp", cwd: "/tmp" });
+    expect(registry.canSubmitPrompt("parent")).toBe(true);
+    expect(sessions.getSession("parent")?.end_reason).toBe("compression");
+  });
+});
+
 describe("GatewaySessionRegistry.interrupt", () => {
   it("returns {ok:false} for an unknown or missing session id", () => {
     const { registry } = setup();
