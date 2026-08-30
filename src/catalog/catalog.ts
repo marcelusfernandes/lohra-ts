@@ -236,7 +236,7 @@ export async function buildCatalog(
         return status.alive
           ? new ProviderModels(
               "ollama",
-            "live",
+              "live",
               status.models,
               status.models.length,
               status.models.length === 0 ? "reachable, no models listed" : "",
