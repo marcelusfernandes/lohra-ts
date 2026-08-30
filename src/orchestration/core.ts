@@ -29,13 +29,27 @@ export interface SpawnConfig {
  * resolves with status "error"/"interrupted" and the relevant fields set;
  * rejection is reserved for programming errors in the runner itself, not
  * for anything the oracle's contract classifies as a child outcome.
+ *
+ * systemPrompt is the FROZEN subagent prompt text for this sub_id (contract
+ * decision 25) — captured once by the registry at spawn and handed to every
+ * subsequent call for the same sub_id verbatim. The runner must never build
+ * its own prompt text; it only ever receives what the registry already froze.
  */
-export type ChildRunner = (subId: string, config: SpawnConfig) => Promise<CollectResult>;
+export type ChildRunner = (
+  subId: string,
+  config: SpawnConfig,
+  systemPrompt: string,
+) => Promise<CollectResult>;
 
 export interface OrchestrationCoreOptions {
   readonly runChild: ChildRunner;
   readonly idSource: () => string;
   readonly maxSubsessions: number;
+  /** Builds the subagent system prompt text. Called exactly once per spawned
+   * child — the registry freezes the result on the SubSession entry and
+   * never calls this again for that sub_id, including across steer-driven
+   * later turns (contract decision 25 / assertion 51). */
+  readonly buildSubagentPrompt: () => string;
 }
 
 export type CollectOutcome =
@@ -45,6 +59,7 @@ export type CollectOutcome =
 
 interface SubSessionEntry {
   readonly subId: string;
+  readonly systemPrompt: string;
   status: SubSessionStatus;
   result: CollectResult | null;
   readonly promise: Promise<CollectResult>;
@@ -70,10 +85,17 @@ export class OrchestrationCore {
     return this.entries.size;
   }
 
+  /** The frozen subagent prompt captured at spawn for this sub_id (contract
+   * decision 25) — undefined for an unknown sub_id. */
+  public getSubagentPrompt(subId: string): string | undefined {
+    return this.entries.get(subId)?.systemPrompt;
+  }
+
   public spawn(config: SpawnConfig): { readonly subId: string } {
     this.evictOneTerminalIfOverCap();
     const subId = this.options.idSource();
-    const promise = this.options.runChild(subId, config).then((result) => {
+    const systemPrompt = this.options.buildSubagentPrompt();
+    const promise = this.options.runChild(subId, config, systemPrompt).then((result) => {
       const entry = this.entries.get(subId);
       if (entry !== undefined) {
         entry.status = result.status;
@@ -81,7 +103,7 @@ export class OrchestrationCore {
       }
       return result;
     });
-    this.entries.set(subId, { subId, status: "running", result: null, promise });
+    this.entries.set(subId, { subId, systemPrompt, status: "running", result: null, promise });
     this.insertionOrder.push(subId);
     return { subId };
   }

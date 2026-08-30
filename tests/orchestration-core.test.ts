@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { OrchestrationCore, type CollectResult } from "../src/orchestration/core.js";
 
+const stubPrompt = (): string => "SUBAGENT_SYSTEM_STUB";
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;
@@ -39,6 +41,7 @@ describe("OrchestrationCore.spawn", () => {
       },
       idSource: () => "aaaa",
       maxSubsessions: 200,
+      buildSubagentPrompt: stubPrompt,
     });
 
     order.push("before-spawn");
@@ -64,6 +67,7 @@ describe("OrchestrationCore.spawn", () => {
       },
       idSource: () => (call === 0 ? "kid-1" : "kid-2"),
       maxSubsessions: 1,
+      buildSubagentPrompt: stubPrompt,
     });
 
     const first = core.spawn({ prompt: "one" });
@@ -90,6 +94,7 @@ describe("OrchestrationCore.spawn", () => {
         return id;
       },
       maxSubsessions: 1,
+      buildSubagentPrompt: stubPrompt,
     });
 
     const first = core.spawn({ prompt: "one" });
@@ -109,6 +114,7 @@ describe("OrchestrationCore.collect", () => {
       runChild: () => Promise.resolve(okResult()),
       idSource: () => "x",
       maxSubsessions: 200,
+      buildSubagentPrompt: stubPrompt,
     });
     expect((await core.collect("deadbeef", true)).kind).toBe("not-found");
   });
@@ -119,6 +125,7 @@ describe("OrchestrationCore.collect", () => {
       runChild: () => child.promise,
       idSource: () => "aaaa",
       maxSubsessions: 200,
+      buildSubagentPrompt: stubPrompt,
     });
     const { subId } = core.spawn({ prompt: "x" });
 
@@ -134,6 +141,7 @@ describe("OrchestrationCore.collect", () => {
       runChild: () => child.promise,
       idSource: () => "aaaa",
       maxSubsessions: 200,
+      buildSubagentPrompt: stubPrompt,
     });
     const { subId } = core.spawn({ prompt: "x" });
 
@@ -158,6 +166,7 @@ describe("OrchestrationCore.collect", () => {
       runChild: () => Promise.resolve(okResult({ output: "first" })),
       idSource: () => "aaaa",
       maxSubsessions: 200,
+      buildSubagentPrompt: stubPrompt,
     });
     const { subId } = core.spawn({ prompt: "x" });
 
@@ -168,5 +177,74 @@ describe("OrchestrationCore.collect", () => {
     if (first.kind === "settled" && second.kind === "settled") {
       expect(second.result).toEqual(first.result);
     }
+  });
+});
+
+describe("OrchestrationCore subagent prompt freeze (contract decision 25 / assertion 51)", () => {
+  it("captures the subagent system prompt once at spawn and never calls the builder again for that sub_id", () => {
+    let calls = 0;
+    const capturedPrompts: string[] = [];
+    const core = new OrchestrationCore({
+      runChild: (_subId, _config, systemPrompt) => {
+        capturedPrompts.push(systemPrompt);
+        return Promise.resolve(okResult());
+      },
+      idSource: () => "aaaa",
+      maxSubsessions: 200,
+      // Deliberately returns a DIFFERENT string on every call — the
+      // strongest possible proof that the registry, not the builder, is
+      // what freezes the value. If the mechanism re-called this on a
+      // later turn, the captured text would visibly drift.
+      buildSubagentPrompt: () => {
+        calls += 1;
+        return `PROMPT-VERSION-${String(calls)}`;
+      },
+    });
+
+    const { subId } = core.spawn({ prompt: "x" });
+
+    expect(calls).toBe(1);
+    expect(capturedPrompts).toEqual(["PROMPT-VERSION-1"]);
+    // Retrieving the frozen prompt for the same sub_id, as many times as a
+    // future steer-resume implementation would need to, never re-invokes
+    // the builder and never returns a newer version.
+    expect(core.getSubagentPrompt(subId)).toBe("PROMPT-VERSION-1");
+    expect(core.getSubagentPrompt(subId)).toBe("PROMPT-VERSION-1");
+    expect(calls).toBe(1);
+  });
+
+  it("returns undefined for an unknown sub_id", () => {
+    const core = new OrchestrationCore({
+      runChild: () => Promise.resolve(okResult()),
+      idSource: () => "aaaa",
+      maxSubsessions: 200,
+      buildSubagentPrompt: stubPrompt,
+    });
+    expect(core.getSubagentPrompt("deadbeef")).toBeUndefined();
+  });
+
+  it("gives each spawned child its own frozen prompt, independent of the others", () => {
+    let idCalls = 0;
+    let promptCalls = 0;
+    const ids = ["kid-1", "kid-2"];
+    const core = new OrchestrationCore({
+      runChild: () => Promise.resolve(okResult()),
+      idSource: () => {
+        const id = ids[idCalls] ?? "unused";
+        idCalls += 1;
+        return id;
+      },
+      maxSubsessions: 200,
+      buildSubagentPrompt: () => {
+        promptCalls += 1;
+        return `PROMPT-VERSION-${String(promptCalls)}`;
+      },
+    });
+
+    const first = core.spawn({ prompt: "one" });
+    const second = core.spawn({ prompt: "two" });
+
+    expect(core.getSubagentPrompt(first.subId)).toBe("PROMPT-VERSION-1");
+    expect(core.getSubagentPrompt(second.subId)).toBe("PROMPT-VERSION-2");
   });
 });
