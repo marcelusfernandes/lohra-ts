@@ -19,6 +19,7 @@ import {
 import { run as bodyValidationBeforeAuthChat } from "./scenarios/t11-body-validation-before-auth-chat.js";
 import { run as chatNonstreamSuccessPartialUpstreamError } from "./scenarios/t11-chat-nonstream-success-partial-upstream-error.js";
 import { run as chatStreamSuccessUsageAndNoUsage } from "./scenarios/t11-chat-stream-success-usage-and-no-usage.js";
+import { run as responsesStreamSuccessNoDone } from "./scenarios/t11-responses-stream-success-no-done.js";
 import { run as surfaceHealthModelsDocs } from "./scenarios/t11-surface-health-models-docs.js";
 
 interface ScenarioResult {
@@ -40,6 +41,7 @@ const SCENARIOS: readonly ScenarioSpec[] = [
   { id: "t11-body-validation-before-auth-chat", config: {}, run: bodyValidationBeforeAuthChat },
   { id: "t11-chat-nonstream-success-partial-upstream-error", config: {}, run: chatNonstreamSuccessPartialUpstreamError },
   { id: "t11-chat-stream-success-usage-and-no-usage", config: {}, run: chatStreamSuccessUsageAndNoUsage },
+  { id: "t11-responses-stream-success-no-done", config: {}, run: responsesStreamSuccessNoDone },
 ];
 
 const guards = runGuards();
