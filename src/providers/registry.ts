@@ -202,17 +202,28 @@ for (const profile of builtinProfiles) {
   }
 }
 
+/** Mirrors Python's `_REGISTRY: dict[str, ProviderProfile]` — the single
+ * source `list_providers()` reads from, keyed by verbatim (non-lowercased)
+ * name so re-registering a name keeps its original insertion position. Both
+ * builtins and `registerProvider` additions go through this map, so a
+ * dynamically registered profile is visible to env-var auto-detection
+ * (`resolveProviderName`'s scan over `listProviders()`), exactly like the
+ * oracle. */
+const registry = new Map<string, ProviderProfile>();
+for (const profile of builtinProfiles) registry.set(profile.name, profile);
+
 export function listProviders(): readonly ProviderProfile[] {
-  return builtinProfiles;
+  return Array.from(registry.values());
 }
 export function getProviderProfile(value: string): ProviderProfile | null {
   return aliases.get(value.toLowerCase()) ?? null;
 }
 export function knownProviderNames(): readonly string[] {
-  return builtinProfiles.map((p) => p.name).toSorted();
+  return Array.from(registry.values(), (p) => p.name).toSorted();
 }
 
 export function registerProvider(profile: ProviderProfile): void {
+  registry.set(profile.name, profile);
   aliases.set(profile.name, profile);
   for (const alias of profile.aliases) aliases.set(alias, profile);
 }

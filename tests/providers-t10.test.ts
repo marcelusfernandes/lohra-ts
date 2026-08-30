@@ -4,8 +4,10 @@ import {
   CODEX_PROVIDER,
   getMaxTokens,
   getProviderProfile,
+  knownProviderNames,
   listProviders,
   registerProvider,
+  resolveProviderName,
 } from "../src/providers/index.js";
 import { buildClient } from "../src/transports/index.js";
 
@@ -33,6 +35,21 @@ describe("T10 provider registry", () => {
     });
     for (const name of ["ZZTest", "zztest", "UPPER", "upper"])
       expect(getProviderProfile(name)).toBeNull();
+  });
+
+  it("registerProvider is visible to listProviders/knownProviderNames and env-var auto-detect (contract T11 — matches Python's unified _REGISTRY, unlike a builtins-only list)", () => {
+    const before = listProviders().length;
+    registerProvider({
+      ...CODEX_PROVIDER,
+      name: "fakeprov-t11",
+      aliases: [],
+      apiMode: "chat_completions",
+      envVars: ["FAKE_T11_KEY"],
+    });
+    expect(listProviders().length).toBe(before + 1);
+    expect(listProviders().map((p) => p.name)).toContain("fakeprov-t11");
+    expect(knownProviderNames()).toContain("fakeprov-t11");
+    expect(resolveProviderName(undefined, undefined, { FAKE_T11_KEY: "x" })).toBe("fakeprov-t11");
   });
 
   it("does not trim module lookup and uses only profile defaults for max tokens", () => {
