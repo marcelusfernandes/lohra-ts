@@ -9,6 +9,8 @@ export interface ModelRequest {
   readonly maxTokens: number | null;
   readonly tools: readonly Readonly<Record<string, unknown>>[];
   readonly signal: AbortSignal;
+  /** Per-call text-delta sink; present only when the caller wants streaming. */
+  readonly onText?: (delta: string) => void;
 }
 
 export interface ModelTransport {

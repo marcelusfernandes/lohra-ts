@@ -84,6 +84,10 @@ export class ConversationRuntime {
     readonly temperature?: number | null;
     readonly sessionId?: string;
     readonly signal?: AbortSignal;
+    /** Fires with each text delta across every provider call of this turn
+     * (intermediate iterations included, tool calls excluded — mirrors the
+     * Python oracle's `on_delta`). Absent means non-streaming. */
+    readonly onDelta?: (delta: string) => void;
   }): Promise<ConversationTurnResult> {
     const sessionId = input.sessionId ?? this.options.idSource();
     let session = this.options.repository.session(sessionId);
@@ -142,6 +146,7 @@ export class ConversationRuntime {
             (this.options.toolDefinitions ?? []) as readonly Readonly<Record<string, unknown>>[],
           ),
           signal,
+          ...(input.onDelta ? { onText: input.onDelta } : {}),
         };
         emit("model.request.started");
         let response: NormalizedResponse;
