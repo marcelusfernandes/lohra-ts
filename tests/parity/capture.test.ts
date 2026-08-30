@@ -16,6 +16,27 @@ afterEach(() => {
 });
 
 describe("observable capture", () => {
+  it("records missing configured SQLite and event captures as exists false", () => {
+    const profile = mkdtempSync(join(tmpdir(), "lohra-parity-missing-capture-"));
+    temporaryDirectories.push(profile);
+    const capture = captureObservables(profile, {
+      tree: { enabled: false, root: "profile", exclude: [] },
+      sqlite: [
+        {
+          name: "missing-db",
+          root: "profile",
+          path: "missing.db",
+          pragmas: [],
+          tables: [],
+        },
+      ],
+      events: [{ name: "missing-events", root: "profile", path: "missing.jsonl", format: "jsonl" }],
+    });
+
+    expect(capture.sqlite["missing-db"]).toEqual({ exists: false });
+    expect(capture.events["missing-events"]).toEqual({ exists: false });
+  });
+
   it("captures a deterministic tree, SQLite state and JSONL events", () => {
     const profile = mkdtempSync(join(tmpdir(), "lohra-parity-capture-"));
     temporaryDirectories.push(profile);

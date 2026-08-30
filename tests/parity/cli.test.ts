@@ -42,6 +42,8 @@ describe("parity CLI", () => {
       },
       expectationPolicy: [],
       normalizationPolicy: [],
+      preconditionPolicy: [],
+      preconditions: [],
       runs: {
         oracle: {
           process: { exitCode: 0, signal: null, stdout: "", stderr: "" },

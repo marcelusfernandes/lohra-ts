@@ -11,6 +11,7 @@ import type {
   FixtureSpec,
   NormalizationSpec,
   OracleGuardSpec,
+  PreconditionSpec,
   RunnerSpec,
   ScenarioManifest,
   SqliteCaptureSpec,
@@ -305,6 +306,29 @@ function guard(value: unknown): OracleGuardSpec {
   };
 }
 
+function precondition(value: unknown, index: number): PreconditionSpec {
+  const label = `preconditions[${String(index)}]`;
+  const item = object(value, label);
+  exactKeys(item, ["kind", "host", "port"], label);
+  const kind = enumeration(item.kind, ["tcp-port-closed"], `${label}.kind`);
+  const host = string(item.host, `${label}.host`);
+  if (host !== "127.0.0.1") {
+    throw new HarnessError("MANIFEST_PRECONDITION", `${label}.host must be loopback 127.0.0.1`);
+  }
+  if (
+    typeof item.port !== "number" ||
+    !Number.isInteger(item.port) ||
+    item.port < 1 ||
+    item.port > 65_535
+  ) {
+    throw new HarnessError(
+      "MANIFEST_PRECONDITION",
+      `${label}.port must be an integer from 1 to 65535`,
+    );
+  }
+  return { kind, host, port: item.port };
+}
+
 export function parseScenarioManifest(value: unknown): ScenarioManifest {
   const item = object(value, "manifest");
   exactKeys(
@@ -315,6 +339,7 @@ export function parseScenarioManifest(value: unknown): ScenarioManifest {
       "description",
       "argv",
       "environment",
+      "preconditions",
       "fixtures",
       "runners",
       "limits",
@@ -431,6 +456,7 @@ export function parseScenarioManifest(value: unknown): ScenarioManifest {
     description: string(item.description, "description"),
     argv: strings(item.argv, "argv"),
     environment: { allow, set },
+    preconditions: array(item.preconditions ?? [], "preconditions").map(precondition),
     fixtures: array(item.fixtures, "fixtures").map(fixture),
     runners: parsedRunners,
     limits: { timeoutMs, maxOutputBytes },

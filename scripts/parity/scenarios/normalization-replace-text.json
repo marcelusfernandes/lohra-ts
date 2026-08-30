@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "id": "normalization-replace-text",
+  "description": "Versioned end-to-end replace-text normalization debt",
+  "argv": [],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin",
+      "PYTHONUTF8": "1",
+      "NO_COLOR": "1",
+      "COLUMNS": "80"
+    }
+  },
+  "preconditions": [],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/normalization-fixture.mjs", "text", "oracle"]
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/normalization-fixture.mjs",
+        "text",
+        "candidate"
+      ]
+    }
+  },
+  "limits": {
+    "timeoutMs": 10000,
+    "maxOutputBytes": 1048576
+  },
+  "capture": {
+    "tree": {
+      "enabled": false,
+      "root": "profile",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": []
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    },
+    {
+      "class": "byte",
+      "field": "process.stderr"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.stderr",
+      "encoding": "utf8",
+      "value": ""
+    }
+  ],
+  "normalizations": [
+    {
+      "field": "process.stdout",
+      "kind": "replace-text",
+      "search": "LEFT",
+      "replacement": "SIDE"
+    },
+    {
+      "field": "process.stdout",
+      "kind": "replace-text",
+      "search": "RIGHT",
+      "replacement": "SIDE"
+    }
+  ]
+}

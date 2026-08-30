@@ -8,6 +8,7 @@ const validManifest = {
   description: "A deterministic scenario",
   argv: ["--version"],
   environment: { allow: [], set: { PATH: "/usr/bin:/bin", NO_COLOR: "1" } },
+  preconditions: [],
   fixtures: [],
   runners: {
     oracle: { adapter: "python", executable: "node", prefixArgs: ["--version"] },
@@ -57,5 +58,20 @@ describe("scenario manifest", () => {
         fixtures: [{ root: "profile", path: "../outside", content: "nope", encoding: "utf8" }],
       }),
     ).toThrow(/relative.*profile/i);
+  });
+
+  it("accepts only a bounded loopback tcp-port-closed precondition", () => {
+    expect(
+      parseScenarioManifest({
+        ...validManifest,
+        preconditions: [{ kind: "tcp-port-closed", host: "127.0.0.1", port: 11_434 }],
+      }).preconditions,
+    ).toEqual([{ kind: "tcp-port-closed", host: "127.0.0.1", port: 11_434 }]);
+    expect(() =>
+      parseScenarioManifest({
+        ...validManifest,
+        preconditions: [{ kind: "tcp-port-closed", host: "0.0.0.0", port: 11_434 }],
+      }),
+    ).toThrow(/loopback/i);
   });
 });

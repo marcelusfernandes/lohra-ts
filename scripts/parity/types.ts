@@ -92,6 +92,18 @@ export interface OracleGuardSpec {
   readonly expectedVersion: string;
 }
 
+export interface TcpPortClosedPrecondition {
+  readonly kind: "tcp-port-closed";
+  readonly host: "127.0.0.1";
+  readonly port: number;
+}
+
+export type PreconditionSpec = TcpPortClosedPrecondition;
+
+export interface PreconditionRecord extends TcpPortClosedPrecondition {
+  readonly status: "passed";
+}
+
 export interface ScenarioManifest {
   readonly schemaVersion: 1;
   readonly id: string;
@@ -101,6 +113,7 @@ export interface ScenarioManifest {
     readonly allow: readonly string[];
     readonly set: Readonly<Record<string, string>>;
   };
+  readonly preconditions: readonly PreconditionSpec[];
   readonly fixtures: readonly FixtureSpec[];
   readonly runners: {
     readonly oracle: RunnerSpec;
@@ -207,6 +220,8 @@ export interface EvidenceRecord {
   readonly capturePolicy: CaptureSpec;
   readonly expectationPolicy: readonly ExpectationSpec[];
   readonly normalizationPolicy: readonly NormalizationSpec[];
+  readonly preconditionPolicy: readonly PreconditionSpec[];
+  readonly preconditions: readonly PreconditionRecord[];
   readonly oracleGuard?: GuardRecord;
   readonly runs: { readonly oracle: RunRecord; readonly candidate: RunRecord };
   readonly comparison: ComparisonResult;

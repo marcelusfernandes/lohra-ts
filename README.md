@@ -33,7 +33,16 @@ metade para sempre.
 
 ```bash
 npm install
+npm run build
 npm run typecheck && npm test && npm run lint && npm run format:check
+```
+
+O bootstrap da CLI também pode ser executado diretamente; o pacote expõe o
+mesmo entrypoint como o binário `lohra`:
+
+```bash
+node dist/cli.js --version
+node dist/cli.js doctor --json
 ```
 
 ## Harness de paridade

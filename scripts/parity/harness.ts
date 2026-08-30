@@ -15,6 +15,7 @@ import {
   type GuardProvider,
 } from "./guard.js";
 import { runPythonProcess, runTypeScriptProcess } from "./process.js";
+import { assertPreconditions, type TcpPortProbe } from "./preconditions.js";
 import {
   expandArgument,
   resolveExecutable,
@@ -37,6 +38,7 @@ export interface RunScenarioOptions {
   readonly executables?: Readonly<Record<string, string>>;
   readonly pythonExecutable?: string;
   readonly guardProvider?: GuardProvider;
+  readonly preconditionProbe?: TcpPortProbe;
 }
 
 const defaultProjectRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -92,10 +94,23 @@ function environment(
     }),
   );
   const declared = Object.fromEntries(
-    Object.entries(manifest.environment.set).map(([key, value]) => [
-      key,
-      expandArgument(value, projectRoot),
-    ]),
+    Object.entries(manifest.environment.set).map(([key, value]) => {
+      const usesRuntimePath = value.includes("{{home}}") || value.includes("{{profile}}");
+      const expanded = expandArgument(value, projectRoot)
+        .replaceAll("{{home}}", paths.home)
+        .replaceAll("{{profile}}", paths.profile);
+      if (usesRuntimePath) {
+        const absolute = resolve(expanded);
+        const sideRoot = resolve(paths.root);
+        if (absolute !== sideRoot && !absolute.startsWith(`${sideRoot}${sep}`)) {
+          throw new HarnessError(
+            "ISOLATION_ESCAPE",
+            `environment.set.${key} escaped the temporary execution root`,
+          );
+        }
+      }
+      return [key, expanded];
+    }),
   );
   return {
     ...inherited,
@@ -210,6 +225,11 @@ export function runScenario(
   manifest: ScenarioManifest,
   options: RunScenarioOptions = {},
 ): EvidenceRecord {
+  const preconditions = assertPreconditions(
+    manifest.preconditions,
+    manifest.limits,
+    options.preconditionProbe,
+  );
   const cwd = options.cwd ?? process.cwd();
   const projectRoot = options.projectRoot ?? defaultProjectRoot;
   const usesPythonAdapter = Object.values(manifest.runners).some(
@@ -322,6 +342,8 @@ export function runScenario(
       capturePolicy: manifest.capture,
       expectationPolicy: manifest.expectations,
       normalizationPolicy: manifest.normalizations,
+      preconditionPolicy: manifest.preconditions,
+      preconditions,
       ...(manifest.oracleGuard === undefined
         ? {}
         : {

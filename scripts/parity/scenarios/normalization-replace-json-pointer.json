@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "id": "normalization-replace-json-pointer",
+  "description": "Versioned end-to-end JSON Pointer normalization debt",
+  "argv": [],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin",
+      "PYTHONUTF8": "1",
+      "NO_COLOR": "1",
+      "COLUMNS": "80"
+    }
+  },
+  "preconditions": [],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/normalization-fixture.mjs", "jsonl", "oracle"]
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/normalization-fixture.mjs",
+        "jsonl",
+        "candidate"
+      ]
+    }
+  },
+  "limits": {
+    "timeoutMs": 10000,
+    "maxOutputBytes": 1048576
+  },
+  "capture": {
+    "tree": {
+      "enabled": false,
+      "root": "profile",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": [
+      {
+        "name": "fixture",
+        "root": "profile",
+        "path": "events.jsonl",
+        "format": "jsonl"
+      }
+    ]
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.stderr"
+    },
+    {
+      "class": "format",
+      "field": "events.fixture.records"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.stderr",
+      "encoding": "utf8",
+      "value": ""
+    }
+  ],
+  "normalizations": [
+    {
+      "field": "events.fixture.records",
+      "kind": "replace-json-pointer",
+      "pointer": "/0/side",
+      "replacement": "<SIDE>"
+    }
+  ]
+}
