@@ -16,10 +16,14 @@ import {
   type ServerConfig,
   type ServerHandle,
 } from "./harness.js";
+import { run as authMatrixAndTrailingSpace } from "./scenarios/t11-auth-matrix-and-trailing-space.js";
 import { run as bodyValidationBeforeAuthChat } from "./scenarios/t11-body-validation-before-auth-chat.js";
+import { run as bodyValidationBeforeAuthResponses } from "./scenarios/t11-body-validation-before-auth-responses.js";
 import { run as chatNonstreamSuccessPartialUpstreamError } from "./scenarios/t11-chat-nonstream-success-partial-upstream-error.js";
 import { run as chatStreamSuccessUsageAndNoUsage } from "./scenarios/t11-chat-stream-success-usage-and-no-usage.js";
+import { run as methodsRunsAndRootAbsence } from "./scenarios/t11-methods-runs-and-root-absence.js";
 import { run as responsesStreamSuccessNoDone } from "./scenarios/t11-responses-stream-success-no-done.js";
+import { run as routeNegativeSweepAndSlashRedirectClass } from "./scenarios/t11-route-negative-sweep-and-slash-redirect-class.js";
 import { run as sigintCleanupAndPortReuse } from "./scenarios/t11-sigint-cleanup-and-port-reuse.js";
 import { run as surfaceHealthModelsDocs } from "./scenarios/t11-surface-health-models-docs.js";
 
@@ -44,7 +48,12 @@ const ALL_SCENARIOS: readonly ScenarioSpec[] = [
   // scenario (health/docs are harmlessly redundant) against a config with
   // no models registered, so the models probe compares two real empty lists.
   { id: "t11-surface-empty-fallback-models", config: { emptyModels: true }, run: surfaceHealthModelsDocs },
+  { id: "t11-auth-matrix-and-trailing-space", config: {}, run: authMatrixAndTrailingSpace },
+  { id: "t11-auth-matrix-insecure", config: { insecure: true }, run: authMatrixAndTrailingSpace },
   { id: "t11-body-validation-before-auth-chat", config: {}, run: bodyValidationBeforeAuthChat },
+  { id: "t11-body-validation-before-auth-responses", config: {}, run: bodyValidationBeforeAuthResponses },
+  { id: "t11-methods-runs-and-root-absence", config: {}, run: methodsRunsAndRootAbsence },
+  { id: "t11-route-negative-sweep-and-slash-redirect-class", config: {}, run: routeNegativeSweepAndSlashRedirectClass },
   { id: "t11-chat-nonstream-success-partial-upstream-error", config: {}, run: chatNonstreamSuccessPartialUpstreamError },
   { id: "t11-chat-stream-success-usage-and-no-usage", config: {}, run: chatStreamSuccessUsageAndNoUsage },
   { id: "t11-responses-stream-success-no-done", config: {}, run: responsesStreamSuccessNoDone },
