@@ -15,8 +15,16 @@ import { subscriptionActive } from "./auth/credentials.js";
 import type { OAuthPost } from "./auth/oauth.js";
 import { runDoctor } from "./doctor/index.js";
 import type { OllamaStatus } from "./doctor/model.js";
-import { probeOllamaDown } from "./doctor/snapshot.js";
+import { buildEnvironment, probeOllamaDown } from "./doctor/snapshot.js";
 import { pythonJsonDumps } from "./serialization/python-json.js";
+import { runProfile } from "./onboarding/profiles.js";
+import {
+  Prompter,
+  runInit,
+  type OnboardingHarness,
+  type OnboardingSnapshot,
+} from "./onboarding/wizard.js";
+import { readExportable, writeExportable } from "./skills/export.js";
 
 const version = "0.0.11";
 const commands = [
@@ -41,6 +49,7 @@ export interface CliIo {
   readonly stderr: (value: string) => void;
   readonly probeOllama?: () => Promise<boolean | OllamaStatus>;
   readonly isTty?: boolean;
+  readonly readLine?: () => string;
   readonly oauthPost?: OAuthPost;
 }
 
@@ -54,6 +63,10 @@ function defaultIo(): CliIo {
     stdout: (value) => process.stdout.write(value),
     stderr: (value) => process.stderr.write(value),
   };
+}
+
+function stringField(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 function help(): string {
@@ -95,7 +108,10 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     command !== "tiers" &&
     command !== "auth" &&
     command !== "chat" &&
-    command !== "serve"
+    command !== "serve" &&
+    command !== "init" &&
+    command !== "profile" &&
+    command !== "skill"
   ) {
     if ((commands as readonly string[]).includes(command)) {
       io.stderr(`lohra: ${command} is not implemented in the TypeScript bootstrap\n`);
@@ -124,6 +140,90 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
   }
   applyEnvFile(paths.envFile, environment);
   const codexHome = environment.CODEX_HOME?.trim() || join(environment.HOME ?? "", ".codex");
+  const normalizeProbe = async (): Promise<OllamaStatus> => {
+    const value = await (io.probeOllama ?? probeOllamaDown)();
+    return typeof value === "boolean"
+      ? {
+          alive: value,
+          detail: value ? "" : "ConnectError",
+          models: [],
+          url: "http://localhost:11434/api/tags",
+        }
+      : value;
+  };
+  if (command === "profile") {
+    const result = runProfile(argv[1] ?? "", argv[2], {
+      base: paths.base,
+      activeProfile: paths.profile,
+    });
+    io.stdout(result.stdout);
+    io.stderr(result.stderr);
+    return result.code;
+  }
+  if (command === "skill") {
+    const action = argv[1] ?? "";
+    const name = argv[2] ?? "";
+    if (action !== "export") {
+      io.stderr("lohra: skill supports only `export` in this bootstrap\n");
+      return 2;
+    }
+    const toIndex = argv.indexOf("--to");
+    try {
+      if (toIndex >= 0) {
+        const destination = argv[toIndex + 1];
+        if (destination === undefined) {
+          io.stderr("lohra: error: argument --to: expected one argument\n");
+          return 2;
+        }
+        io.stdout(`wrote ${writeExportable(name, destination)}\n`);
+      } else {
+        io.stdout(readExportable(name));
+      }
+      return 0;
+    } catch (error) {
+      io.stderr(`error: ${error instanceof Error ? error.message : String(error)}\n`);
+      return 2;
+    }
+  }
+  if (command === "init") {
+    const ollama = await normalizeProbe();
+    const doctor = buildEnvironment(environment, paths, ollama);
+    const harnesses: OnboardingHarness[] = doctor.harnesses.map((value) => ({
+      name: stringField(value.name),
+      home: stringField(value.home),
+      installed: value.installed === true,
+      homePresent: value.home_present === true,
+    }));
+    const onboarding: OnboardingSnapshot = {
+      activeProfile: doctor.active_profile,
+      authPreference: doctor.auth_preference,
+      authRoute: doctor.auth_route,
+      detectedProvider: doctor.detected_provider,
+      envFile: doctor.env_file,
+      envFilePresent: doctor.env_file_present,
+      harnesses,
+      home: doctor.home,
+      interactive: io.isTty ?? doctor.interactive,
+      ollama: doctor.ollama,
+      providerError: doctor.provider_error,
+      providerOrigin: doctor.provider_origin,
+      providerNames: doctor.providers.map((provider) => provider.provider),
+      presentProviderVars: doctor.providers.flatMap((provider) => provider.present_vars),
+      pythonSupported: doctor.python_supported,
+      pythonVersion: doctor.python_version,
+      subscriptionActive: doctor.subscription_active,
+    };
+    return runInit({
+      snapshot: onboarding,
+      base: paths.base,
+      home: paths.home,
+      environment,
+      noInput: argv.includes("--no-input"),
+      isTty: io.isTty ?? false,
+      prompter: new Prompter(io.readLine ?? (() => ""), io.stderr),
+      writeOut: io.stdout,
+    });
+  }
   if (command === "auth") {
     const action = argv[1] ?? "status";
     const rawValue = argv[2];
@@ -159,17 +259,6 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     io.stderr(result.stderr);
     return result.code;
   }
-  const normalizeProbe = async (): Promise<OllamaStatus> => {
-    const value = await (io.probeOllama ?? probeOllamaDown)();
-    return typeof value === "boolean"
-      ? {
-          alive: value,
-          detail: value ? "" : "ConnectError",
-          models: [],
-          url: "http://localhost:11434/api/tags",
-        }
-      : value;
-  };
   if (command === "models") {
     const providerIndex = argv.indexOf("--provider");
     const provider = providerIndex < 0 ? undefined : argv[providerIndex + 1];

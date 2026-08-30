@@ -154,7 +154,7 @@ describe("lohra CLI bootstrap", () => {
     }
   });
 
-  it.each(["init", "dashboard", "cron", "workflow", "profile", "skill", "update"])(
+  it.each(["dashboard", "cron", "workflow", "update"])(
     "temporarily refuses future command %s with exit 2",
     async (command) => {
       const stderr: string[] = [];
