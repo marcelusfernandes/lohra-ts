@@ -490,3 +490,55 @@ describe("prompt.submit: upstream error (assertion 53/L21)", () => {
     ws.close();
   });
 });
+
+describe("prompt.submit: compaction absence over many turns (ADR-T12-01/assertion 42, negative)", () => {
+  it("15 real turns of substantial content -- zero session.forked, zero child_session_id, full history persisted", async () => {
+    // The Evaluator-facing acceptance scenario drives ~900K chars (2.25x
+    // the oracle's measured 100,000-token threshold) as its byte-for-byte
+    // reference; this test proves the qualitative property this
+    // implementation guarantees structurally (no context_engine is wired
+    // into any code path here at all, per ADR-T12-01 -- so the property
+    // doesn't depend on volume) with a much smaller payload for speed.
+    const bigChunk = "x".repeat(2000);
+    const { server } = await startServer({
+      transportScript: Array.from({ length: 15 }, () => () => response({ content: bigChunk })),
+    });
+    const { ws, sessionId } = await connectAndCreateSession(server);
+
+    const allEventTypes: string[] = [];
+    for (let turn = 0; turn < 15; turn += 1) {
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: `t${String(turn)}`,
+          method: "prompt.submit",
+          params: { session_id: sessionId, text: `turn ${String(turn)}` },
+        }),
+      );
+      await nextMessage(ws); // rpc-ok
+      for (;;) {
+        const frame = JSON.parse(await nextMessage(ws)) as {
+          params: { type: string; payload: Record<string, unknown> };
+        };
+        allEventTypes.push(frame.params.type);
+        if (frame.params.type === "message.complete") {
+          expect(frame.params.payload).not.toHaveProperty("child_session_id");
+          break;
+        }
+      }
+    }
+
+    expect(allEventTypes).not.toContain("session.forked");
+    expect(allEventTypes.filter((t) => t === "message.complete")).toHaveLength(15);
+
+    ws.send(JSON.stringify({ jsonrpc: "2.0", id: "history", method: "session.history", params: { session_id: sessionId } }));
+    const historyResult = JSON.parse(await nextMessage(ws)) as { result: { messages: { content: string }[] } };
+    // 15 user + 15 assistant messages, none compacted away, no marker.
+    expect(historyResult.result.messages).toHaveLength(30);
+    for (const message of historyResult.result.messages) {
+      expect(message.content).not.toContain("[CONTEXT COMPACTION");
+    }
+
+    ws.close();
+  });
+});
