@@ -21,6 +21,7 @@ import type {
   TreeCaptureSpec,
   StubFixture,
   StubSpec,
+  StubToolStep,
 } from "./types.js";
 
 type JsonObject = Record<string, unknown>;
@@ -157,6 +158,7 @@ const stubFixtures = [
   "chat-http-500",
   "chat-no-usage",
   "chat-incomplete-tool",
+  "chat-tool-sequence",
   "side-divergent",
 ] as const satisfies readonly StubFixture[];
 
@@ -166,7 +168,7 @@ function sameMembers(actual: readonly string[], expected: readonly string[]): bo
 
 function stub(value: unknown): StubSpec {
   const item = object(value, "stub");
-  exactKeys(item, ["state", "fixture", "requestLog"], "stub");
+  exactKeys(item, ["state", "fixture", "requestLog", "toolSequence"], "stub");
   const requestLog = object(item.requestLog, "stub.requestLog");
   exactKeys(requestLog, ["comparedHeaders", "excludedHeaders"], "stub.requestLog");
   const comparedHeaders = strings(requestLog.comparedHeaders, "stub.requestLog.comparedHeaders");
@@ -182,10 +184,32 @@ function stub(value: unknown): StubSpec {
       "stub request header policy must classify the versioned compared and excluded headers",
     );
   }
+  const toolSequence = array(item.toolSequence ?? [], "stub.toolSequence").map(
+    (raw, index): StubToolStep => {
+      const label = `stub.toolSequence[${String(index)}]`;
+      const step = object(raw, label);
+      exactKeys(step, ["calls"], label);
+      const calls = array(step.calls, `${label}.calls`).map((rawCall, callIndex) => {
+        const callLabel = `${label}.calls[${String(callIndex)}]`;
+        const call = object(rawCall, callLabel);
+        exactKeys(call, ["name", "argumentsRaw", "expectedResult", "validation"], callLabel);
+        return {
+          name: string(call.name, `${callLabel}.name`),
+          argumentsRaw: string(call.argumentsRaw, `${callLabel}.argumentsRaw`),
+          expectedResult: string(call.expectedResult, `${callLabel}.expectedResult`),
+          validation: enumeration(call.validation, ["exact", "skip"], `${callLabel}.validation`),
+        };
+      });
+      if (calls.length === 0)
+        throw new HarnessError("MANIFEST_STUB_TOOLS", `${label}.calls must not be empty`);
+      return { calls };
+    },
+  );
   return {
     state: enumeration(item.state, ["down", "up-with-models", "up-empty-models"], "stub.state"),
     fixture: enumeration(item.fixture, stubFixtures, "stub.fixture"),
     requestLog: { comparedHeaders, excludedHeaders },
+    ...(toolSequence.length === 0 ? {} : { toolSequence }),
   };
 }
 

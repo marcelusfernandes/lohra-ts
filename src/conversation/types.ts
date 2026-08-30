@@ -34,6 +34,7 @@ export interface TurnCommit {
   readonly sessionId: string;
   readonly user: Readonly<Record<string, unknown>>;
   readonly assistant: Readonly<Record<string, unknown>>;
+  readonly messages?: readonly Readonly<Record<string, unknown>>[];
   readonly usage: Usage | null;
   readonly cost: CostEstimate | null;
   readonly apiCalls: number;
@@ -89,8 +90,16 @@ export interface ConversationTurnResult {
   readonly model: string;
   readonly temperature: number | null;
   readonly response: NormalizedResponse;
+  readonly toolCalls?: readonly ExecutedToolCall[];
   readonly usageTotal: Usage | null;
   readonly cost: CostEstimate | null;
   readonly apiCalls: number;
   readonly sessionSummary: SessionSummary | null;
+}
+
+export interface ExecutedToolCall {
+  readonly id: string | null;
+  readonly name: string;
+  readonly arguments: string;
+  readonly result: string;
 }

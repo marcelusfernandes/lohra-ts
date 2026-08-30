@@ -1,4 +1,4 @@
-import type { StubFixture, StubSpec, StubState } from "../types.js";
+import type { StubFixture, StubSpec, StubState, StubToolStep } from "../types.js";
 
 export interface StubDriverConfig {
   readonly scenario: string;
@@ -33,6 +33,7 @@ export interface StubRuntime {
   readonly rawLog: string;
   readonly failures: string[];
   readonly sequence: string[];
+  readonly toolSequence: readonly StubToolStep[];
   posts: number;
   requests: number;
 }

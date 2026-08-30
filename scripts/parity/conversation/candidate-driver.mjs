@@ -26,7 +26,7 @@ function write(result, stdout = result.stdout, stderr = result.stderr) {
   return result.status ?? 1;
 }
 
-if (mode === "resume") {
+if (mode === "resume" || mode === "resume-rerender") {
   const divider = argv.indexOf("--next-input");
   if (divider < 0) throw new Error("RESUME_INPUT_MISSING");
   const firstArgs = argv.slice(0, divider);
@@ -35,6 +35,14 @@ if (mode === "resume") {
   const first = run(firstArgs);
   if (first.status !== 0) process.exitCode = write(first);
   else {
+    if (mode === "resume-rerender") {
+      const profileIndex = firstArgs.indexOf("--profile");
+      const profile = profileIndex < 0 ? "" : (firstArgs[profileIndex + 1] ?? "");
+      const home = resolve(process.env.HOME ?? "", ".lohra", "profiles", profile, "memories");
+      const { mkdirSync, writeFileSync } = await import("node:fs");
+      mkdirSync(home, { recursive: true });
+      writeFileSync(resolve(home, "MEMORY.md"), "CANARY-TURN-TWO", "utf8");
+    }
     const id = JSON.parse(first.stdout).session_id;
     const second = run([
       ...firstArgs.slice(0, 1),

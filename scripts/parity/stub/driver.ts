@@ -89,6 +89,7 @@ async function main(): Promise<number> {
     rawLog: config.logs.raw,
     failures: [],
     sequence: [],
+    toolSequence: config.stub.toolSequence ?? [],
     posts: 0,
     requests: 0,
   };

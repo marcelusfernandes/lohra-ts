@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   ConversationCancelledError,
@@ -52,7 +52,10 @@ class MemoryRepository implements ConversationRepository {
   commitTurn(commit: TurnCommit): void {
     this.commits.push(structuredClone(commit));
     const current = this.messages.get(commit.sessionId) ?? [];
-    this.messages.set(commit.sessionId, [...current, commit.user, commit.assistant]);
+    this.messages.set(commit.sessionId, [
+      ...current,
+      ...(commit.messages ?? [commit.user, commit.assistant]),
+    ]);
   }
 
   commitUsage(commit: unknown): void {
@@ -194,11 +197,12 @@ describe("ConversationRuntime", () => {
       response({ content: null, finishReason: "tool_calls", toolCalls: [tool] }),
       response({ content: null, finishReason: "tool_calls", toolCalls: [tool] }),
     ]);
+    const dispatch = vi.fn(() => Promise.resolve({ role: "tool", content: "ok" }));
     const runtime = new ConversationRuntime({
       repository,
       transport,
       promptSnapshot: () => "p",
-      toolDispatcher: { dispatch: () => Promise.resolve({ role: "tool", content: "ok" }) },
+      toolDispatcher: { dispatch },
       idSource: () => "s",
       clock: () => 1,
       maxIterations: 1,
@@ -206,7 +210,62 @@ describe("ConversationRuntime", () => {
     await expect(
       runtime.runTurn({ input: "x", provider: "ollama", model: "m", cwd: "/tmp" }),
     ).rejects.toBeInstanceOf(MaxIterationsError);
+    expect(dispatch).toHaveBeenCalledTimes(1);
     expect(repository.commits).toEqual([]);
+    expect(repository.usageCommits).toHaveLength(1);
+  });
+
+  it("dispatches parallel calls in input order and persists the four-message tool turn", async () => {
+    const repository = new MemoryRepository();
+    const calls = [
+      { id: "c1", name: "read_file", arguments: '{"path":"a"}', providerData: null },
+      { id: "c2", name: "read_file", arguments: '{"path":"b"}', providerData: null },
+    ];
+    const transport = new QueueTransport([
+      response({ content: null, finishReason: "tool_calls", toolCalls: calls }),
+      response(),
+    ]);
+    const runtime = new ConversationRuntime({
+      repository,
+      transport,
+      promptSnapshot: () => "p",
+      toolDefinitions: [{ type: "function", function: { name: "read_file" } }],
+      toolDispatcher: {
+        dispatch: async (call) => {
+          if (call.id === "c1") await new Promise((resolve) => setTimeout(resolve, 5));
+          return {
+            role: "tool",
+            name: call.name,
+            tool_call_id: call.id,
+            content: `result:${call.id ?? "null"}`,
+          };
+        },
+      },
+      idSource: () => "s",
+      clock: () => 1,
+    });
+    const result = await runtime.runTurn({
+      input: "x",
+      provider: "ollama",
+      model: "m",
+      cwd: "/tmp",
+    });
+    expect(transport.requests[0]?.tools).toHaveLength(1);
+    expect(transport.requests[1]?.messages.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "tool",
+      "tool",
+    ]);
+    expect(repository.messages.get("s")?.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "tool",
+      "tool",
+      "assistant",
+    ]);
+    expect(result.usageTotal).toMatchObject({ inputTokens: 22, outputTokens: 14 });
+    expect(result.toolCalls?.map((call) => call.result)).toEqual(["result:c1", "result:c2"]);
   });
 
   it("observes cancellation and always closes transport", async () => {

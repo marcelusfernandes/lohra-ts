@@ -87,7 +87,7 @@ async function portClosed(): Promise<boolean> {
   });
 }
 
-const root = mkdtempSync(join(tmpdir(), "lohra-t08-pack-"));
+const root = mkdtempSync(join(tmpdir(), "lohra-t09-pack-"));
 let server: Awaited<ReturnType<typeof startStub>> | undefined;
 try {
   if (!(await portClosed())) throw new Error("PRECONDITION_PORT_IN_USE");
@@ -118,9 +118,9 @@ try {
   const projected = join(root, "requests.jsonl");
   const raw = join(root, "requests-raw.jsonl");
   const runtime: StubRuntime = {
-    fixture: "chat-text",
+    fixture: "chat-tool-sequence",
     state: "up-with-models",
-    scenario: "t08-package-smoke",
+    scenario: "t09-package-smoke",
     side: "candidate",
     comparedHeaders: ["authorization", "accept", "content-type", "host", "x-stainless-retry-count"],
     excludedHeaders: [
@@ -141,6 +141,18 @@ try {
     rawLog: raw,
     failures: [],
     sequence: [],
+    toolSequence: [
+      {
+        calls: [
+          {
+            name: "write_file",
+            argumentsRaw: '{"path":"package-written/out.txt","content":"package-ok"}',
+            expectedResult: '{"ok": true, "bytes_written": 10, "path": "package-written/out.txt"}',
+            validation: "exact",
+          },
+        ],
+      },
+    ],
     posts: 0,
     requests: 0,
   };
@@ -162,24 +174,22 @@ try {
   if (version.stdout !== "lohra 0.0.11\n") throw new Error("PACK_VERSION_MISMATCH");
   const turn = await commandAsync(
     bin,
-    [
-      "chat",
-      "package smoke",
-      "--json",
-      "--no-tools",
-      "--provider",
-      "ollama",
-      "--model",
-      "stub-coder:1b",
-    ],
+    ["chat", "package smoke", "--json", "--provider", "ollama", "--model", "stub-coder:1b"],
     { cwd: project, env: isolatedEnvironment },
   );
   const envelope = JSON.parse(turn.stdout) as { completed?: unknown };
-  if (envelope.completed !== true || runtime.posts !== 1 || runtime.failures.length > 0)
+  const sideEffect = join(project, "package-written", "out.txt");
+  if (
+    envelope.completed !== true ||
+    runtime.posts !== 2 ||
+    runtime.failures.length > 0 ||
+    !existsSync(sideEffect) ||
+    readFileSync(sideEffect, "utf8") !== "package-ok"
+  )
     throw new Error("PACK_CHAT_MISMATCH");
   if (readFileSync(projected, "utf8").length === 0) throw new Error("PACK_REQUEST_LOG_EMPTY");
   process.stdout.write(
-    `${JSON.stringify({ packed: true, version: true, publicTurn: true, pythonOnPath: false, posts: runtime.posts })}\n`,
+    `${JSON.stringify({ packed: true, version: true, publicTurn: true, sideEffect: true, pythonOnPath: false, posts: runtime.posts })}\n`,
   );
 } finally {
   if (server !== undefined) {

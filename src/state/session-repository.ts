@@ -89,9 +89,10 @@ function reconstructMessage(row: Row): Readonly<Record<string, unknown>> {
     };
   }
   if (role === "assistant") {
+    const hasToolCalls = text(row.tool_calls) !== null;
     const result: Record<string, unknown> = {
       role,
-      content: text(row.content) ?? "",
+      content: hasToolCalls && text(row.content) === "" ? null : (text(row.content) ?? ""),
       finish_reason: text(row.finish_reason),
     };
     if (text(row.reasoning)) result.reasoning = text(row.reasoning);
@@ -199,6 +200,21 @@ export class SessionRepository {
         .prepare("UPDATE sessions SET message_count = message_count + 2 WHERE id = ?")
         .run(sessionId);
       if (input.usage !== undefined && input.usage !== null) this.addUsage(sessionId, input.usage);
+    });
+    transaction();
+  }
+
+  public recordMessages(
+    sessionId: string,
+    messages: readonly MessageInput[],
+    usage?: UsageIncrement | null,
+  ): void {
+    const transaction = this.database.transaction(() => {
+      for (const message of messages) this.insertMessage(sessionId, message);
+      this.database
+        .prepare("UPDATE sessions SET message_count = message_count + ? WHERE id = ?")
+        .run(messages.length, sessionId);
+      if (usage !== undefined && usage !== null) this.addUsage(sessionId, usage);
     });
     transaction();
   }

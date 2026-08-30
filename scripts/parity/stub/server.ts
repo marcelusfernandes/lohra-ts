@@ -56,11 +56,15 @@ function usage(): Readonly<Record<string, number>> {
   return { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 };
 }
 
-function toolCall(name: string): Readonly<Record<string, unknown>> {
+function toolCall(
+  name: string,
+  argumentsRaw = JSON.stringify({ path: toolPath }),
+  id = "call_stub_s1",
+): Readonly<Record<string, unknown>> {
   return {
-    id: "call_stub_s1",
+    id,
     type: "function",
-    function: { name, arguments: JSON.stringify({ path: toolPath }) },
+    function: { name, arguments: argumentsRaw },
   };
 }
 
@@ -152,20 +156,51 @@ function validateBody(runtime: StubRuntime, body: Record<string, unknown>): void
   }
   if (body.max_tokens !== 8192) runtime.failures.push("MAX_TOKENS_MISMATCH");
   if (body.model !== model) runtime.failures.push("MODEL_MISMATCH");
-  if (runtime.posts === 2 && runtime.fixture.includes("tool")) {
+  const hasDeclaredPreviousStep =
+    runtime.fixture === "chat-tool-sequence" &&
+    runtime.toolSequence[runtime.posts - 2] !== undefined;
+  if (
+    runtime.fixture.includes("tool") &&
+    ((runtime.fixture === "chat-tool-sequence" && hasDeclaredPreviousStep) ||
+      (runtime.fixture !== "chat-tool-sequence" && runtime.posts === 2))
+  ) {
     const messages = Array.isArray(body.messages) ? body.messages : [];
     const roles = messages.map((entry) =>
       typeof entry === "object" && entry !== null ? (entry as Record<string, unknown>).role : null,
     );
-    if (JSON.stringify(roles) !== JSON.stringify(["system", "user", "assistant", "tool"])) {
+    const declared = runtime.toolSequence[runtime.posts - 2];
+    const expectedToolCount = declared?.calls.length ?? 1;
+    const expectedRoles = [
+      "system",
+      "user",
+      "assistant",
+      ...Array.from({ length: expectedToolCount }, () => "tool"),
+    ];
+    if (JSON.stringify(roles) !== JSON.stringify(expectedRoles)) {
       runtime.failures.push("TOOL_ROLE_SEQUENCE");
     }
-    const toolMessage = messages[3] as Record<string, unknown> | undefined;
-    const expected =
-      runtime.fixture === "chat-tool-unknown"
-        ? '{"error": "Unknown tool: no_such_tool_xyz"}'
-        : '{"ok": true, "data": "STUB-TOOL-EVIDENCE v1\\n", "truncated": false, "path": "tool-target.txt"}';
-    if (toolMessage?.content !== expected) runtime.failures.push("TOOL_RESULT_MISMATCH");
+    const defaults = [
+      {
+        expectedResult:
+          runtime.fixture === "chat-tool-unknown"
+            ? '{"error": "Unknown tool: no_such_tool_xyz"}'
+            : '{"ok": true, "data": "STUB-TOOL-EVIDENCE v1\\n", "truncated": false, "path": "tool-target.txt"}',
+        validation: "exact" as const,
+      },
+    ];
+    for (const [index, expected] of (declared?.calls ?? defaults).entries()) {
+      const toolMessage = messages[3 + index] as Record<string, unknown> | undefined;
+      if (
+        toolMessage === undefined ||
+        JSON.stringify(Object.keys(toolMessage)) !==
+          JSON.stringify(["role", "tool_call_id", "content"])
+      ) {
+        runtime.failures.push("TOOL_MESSAGE_SHAPE");
+      }
+      if (expected.validation !== "skip" && toolMessage?.content !== expected.expectedResult) {
+        runtime.failures.push("TOOL_RESULT_MISMATCH");
+      }
+    }
   }
 }
 
@@ -249,6 +284,30 @@ async function handle(
       response,
       200,
       completion({ role: "assistant", content: null, tool_calls: [call] }, "tool_calls"),
+    );
+    return;
+  }
+  const declaredStep = runtime.toolSequence[runtime.posts - 1];
+  if (runtime.fixture === "chat-tool-sequence" && declaredStep !== undefined) {
+    json(
+      response,
+      200,
+      completion(
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: declaredStep.calls.map((declaredCall, index) =>
+            toolCall(
+              declaredCall.name,
+              declaredCall.argumentsRaw,
+              declaredStep.calls.length === 1
+                ? `call_stub_s${String(runtime.posts)}`
+                : `call_stub_s${String(runtime.posts)}_${String(index + 1)}`,
+            ),
+          ),
+        },
+        "tool_calls",
+      ),
     );
     return;
   }

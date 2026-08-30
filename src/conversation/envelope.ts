@@ -1,7 +1,7 @@
 import { pythonFloat, pythonJsonDumpsIndented } from "../serialization/python-json.js";
 import type { CostEstimate } from "../pricing/index.js";
 import type { ToolCall, Usage } from "../transports/index.js";
-import type { ConversationTurnResult, SessionSummary } from "./types.js";
+import type { ConversationTurnResult, ExecutedToolCall, SessionSummary } from "./types.js";
 
 function usage(value: Usage | null): Readonly<Record<string, unknown>> | null {
   if (value === null) return null;
@@ -57,6 +57,17 @@ function toolCalls(calls: readonly ToolCall[]): readonly Readonly<Record<string,
   }));
 }
 
+function executedToolCalls(
+  calls: readonly ExecutedToolCall[],
+): readonly Readonly<Record<string, unknown>>[] {
+  return calls.map((call) => ({
+    id: call.id,
+    name: call.name,
+    arguments: call.arguments,
+    result: call.result,
+  }));
+}
+
 export function successEnvelope(result: ConversationTurnResult): string {
   const value: Record<string, unknown> = {
     session_id: result.sessionId,
@@ -65,7 +76,10 @@ export function successEnvelope(result: ConversationTurnResult): string {
     input: result.input,
     output: result.response.content,
     reasoning: result.response.reasoning,
-    tool_calls: toolCalls(result.response.toolCalls),
+    tool_calls:
+      (result.toolCalls?.length ?? 0) > 0
+        ? executedToolCalls(result.toolCalls ?? [])
+        : toolCalls(result.response.toolCalls),
     usage: usage(result.response.usage),
     usage_total: usage(result.usageTotal),
     cost: cost(result.cost),
@@ -87,6 +101,8 @@ export function errorEnvelope(input: {
   readonly usage?: Usage | null;
   readonly cost?: CostEstimate | null;
   readonly sessionSummary?: SessionSummary | null;
+  readonly stopReason?: string | null;
+  readonly toolCalls?: readonly ExecutedToolCall[];
 }): string {
   const value: Record<string, unknown> = {
     session_id: input.sessionId,
@@ -95,11 +111,11 @@ export function errorEnvelope(input: {
     input: input.prompt,
     output: null,
     reasoning: null,
-    tool_calls: [],
+    tool_calls: executedToolCalls(input.toolCalls ?? []),
     usage: usage(input.usage ?? null),
     usage_total: usage(input.usage ?? null),
     cost: cost(input.cost ?? null),
-    stop_reason: null,
+    stop_reason: input.stopReason ?? null,
     completed: false,
     error: input.error,
     api_calls: input.apiCalls,

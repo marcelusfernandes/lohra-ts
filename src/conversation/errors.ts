@@ -44,9 +44,22 @@ export class IncompleteToolCallError extends ConversationError {
 
 export class MaxIterationsError extends ConversationError {
   override readonly name = "MaxIterationsError";
-  public constructor(sessionId: string, limit: number) {
+  public constructor(
+    sessionId: string,
+    limit: number,
+    public readonly usage: Usage | null = null,
+    public readonly cost: CostEstimate | null = null,
+    public readonly sessionSummary: SessionSummary | null = null,
+    public readonly toolCalls: readonly {
+      readonly id: string | null;
+      readonly name: string;
+      readonly arguments: string;
+      readonly result: string;
+    }[] = [],
+  ) {
     super("MAX_ITERATIONS", `max_iterations (${String(limit)}) reached without a final response`, {
       sessionId,
+      apiCalls: limit,
     });
   }
 }

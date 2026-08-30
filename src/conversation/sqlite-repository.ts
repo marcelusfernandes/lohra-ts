@@ -62,6 +62,23 @@ export class SqliteConversationRepository implements ConversationRepository {
   }
 
   public commitTurn(commit: TurnCommit): void {
+    if (commit.messages !== undefined) {
+      this.sessions.recordMessages(
+        commit.sessionId,
+        commit.messages.map((message) => ({
+          role: typeof message.role === "string" ? message.role : "assistant",
+          content: typeof message.content === "string" ? message.content : null,
+          toolCallId: typeof message.tool_call_id === "string" ? message.tool_call_id : null,
+          toolCalls: message.tool_calls,
+          name: typeof message.name === "string" ? message.name : null,
+          finishReason: typeof message.finish_reason === "string" ? message.finish_reason : null,
+          reasoning: typeof message.reasoning === "string" ? message.reasoning : null,
+          providerData: message.provider_data,
+        })),
+        usageIncrement(commit.usage, commit.cost, commit.apiCalls),
+      );
+      return;
+    }
     this.sessions.recordTurn(commit.sessionId, {
       user: {
         role: "user",

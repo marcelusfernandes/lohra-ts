@@ -122,7 +122,19 @@ export type StubFixture =
   | "chat-http-500"
   | "chat-no-usage"
   | "chat-incomplete-tool"
+  | "chat-tool-sequence"
   | "side-divergent";
+
+export interface StubToolCall {
+  readonly name: string;
+  readonly argumentsRaw: string;
+  readonly expectedResult: string;
+  readonly validation: "exact" | "skip";
+}
+
+export interface StubToolStep {
+  readonly calls: readonly StubToolCall[];
+}
 
 export interface StubSpec {
   readonly state: StubState;
@@ -131,6 +143,7 @@ export interface StubSpec {
     readonly comparedHeaders: readonly string[];
     readonly excludedHeaders: readonly string[];
   };
+  readonly toolSequence?: readonly StubToolStep[];
 }
 
 export interface TcpPortClosedPrecondition {

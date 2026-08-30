@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { loadProjectContext, buildSystemPrompt } from "../context/index.js";
 import {
@@ -8,12 +9,24 @@ import {
   ConversationRuntime,
   errorEnvelope,
   IncompleteToolCallError,
+  MaxIterationsError,
   SqliteConversationRepository,
   successEnvelope,
 } from "../conversation/index.js";
-import { loadSoul } from "../memory/index.js";
+import { loadSoul, MemoryStore } from "../memory/index.js";
 import { loadPriceOverrides } from "../pricing/index.js";
 import { openStateForEnvironment, SessionRepository } from "../state/index.js";
+import { SkillStore } from "../skills/index.js";
+import {
+  approval,
+  builtinRegistry,
+  composeDispatch,
+  ListModelsTool,
+  MemoryTool,
+  RegistryToolDispatcher,
+  SessionSearchTool,
+  SkillTool,
+} from "../tools/index.js";
 import {
   createChatCompletionsClient,
   ProviderCallFailed,
@@ -116,20 +129,57 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   const connection = openStateForEnvironment(options.environment);
   const sessions = new SessionRepository(connection.database, undefined, connection.ftsEnabled);
   const repository = new SqliteConversationRepository(sessions);
+  const useTools = !options.argv.includes("--no-tools");
+  const memoryStore = new MemoryStore(options.home);
+  const builtinSkills = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    "../../assets/skills/workflow-authoring",
+  );
+  const skillStore = new SkillStore(
+    options.home,
+    [join(options.cwd, ".claude", "skills")],
+    [builtinSkills],
+  );
   const snapshot = (): string => {
     const context = loadProjectContext(options.cwd);
     const identity = loadSoul(options.home);
+    const memory = useTools ? memoryStore.snapshot() : null;
     return buildSystemPrompt({
       ...(identity === undefined ? {} : { identity }),
       contextFiles: context.instructions,
       environmentHints: context.hints,
+      ...(memory === null || !memory.memory ? {} : { memorySnapshot: memory.memory }),
+      ...(memory === null || !memory.user ? {} : { userProfile: memory.user }),
+      ...(useTools ? { skillsIndex: skillStore.snapshot() } : {}),
     }).text;
   };
+  approval.reset();
+  approval.setYolo(options.argv.includes("--yolo"));
+  approval.setCallback(
+    options.argv.includes("--json") || options.argv.includes("--no-input") ? () => "deny" : null,
+  );
+  const baseDispatch = builtinRegistry.dispatch.bind(builtinRegistry);
+  const memoryTool = new MemoryTool(memoryStore);
+  const skillTool = new SkillTool(skillStore);
+  const listModels = new ListModelsTool(options.home, options.environment);
+  const dispatch = composeDispatch(baseDispatch, {
+    memory: (args) => memoryTool.handle(args),
+    skill_view: (args) => skillTool.view(args),
+    skill_manage: (args) => skillTool.manage(args),
+    session_search: (args) => new SessionSearchTool(sessions).handle(args),
+    list_models: (args) => listModels.handle(args),
+  });
   const client = createChatCompletionsClient(target.profile.name, options.environment);
   const runtime = new ConversationRuntime({
     repository,
     transport: new ChatCompletionsModel(client),
     promptSnapshot: snapshot,
+    ...(useTools
+      ? {
+          toolDefinitions: builtinRegistry.getDefinitions(),
+          toolDispatcher: new RegistryToolDispatcher(dispatch),
+        }
+      : {}),
     idSource: () => randomUUID().replaceAll("-", ""),
     clock: () => Date.now() / 1000,
     maxTokens: target.profile.defaultMaxTokens,
@@ -157,6 +207,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     const sessionId = error instanceof ConversationError ? (error.sessionId ?? "") : "";
     const apiCalls = error instanceof ConversationError ? error.apiCalls : 0;
     const incomplete = error instanceof IncompleteToolCallError ? error : null;
+    const bounded = error instanceof MaxIterationsError ? error : null;
     return {
       code: 1,
       stdout: errorEnvelope({
@@ -165,17 +216,23 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
         prompt: input,
         error: message,
         apiCalls,
-        ...(incomplete === null
+        ...(incomplete === null && bounded === null
           ? {}
           : {
-              usage: incomplete.usage,
-              cost: incomplete.cost,
-              sessionSummary: incomplete.sessionSummary,
+              usage: (incomplete ?? bounded)?.usage ?? null,
+              cost: (incomplete ?? bounded)?.cost ?? null,
+              sessionSummary: (incomplete ?? bounded)?.sessionSummary ?? null,
+              ...(bounded === null
+                ? {}
+                : { stopReason: "tool_calls", toolCalls: bounded.toolCalls }),
             }),
       }),
       stderr: `${sessionId ? `session: ${sessionId}  (resume with --session ${sessionId})\n` : ""}error: ${message}\n`,
     };
   } finally {
+    approval.setCallback(null);
+    approval.setYolo(false);
+    approval.reset();
     connection.close();
   }
 }

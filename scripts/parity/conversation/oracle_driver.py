@@ -23,7 +23,7 @@ def run(argv: list[str]) -> subprocess.CompletedProcess[str]:
 
 def main() -> int:
     mode, *argv = sys.argv[1:]
-    if mode != "resume":
+    if mode not in {"resume", "resume-rerender"}:
         result = run(argv)
         sys.stdout.write(result.stdout)
         sys.stderr.write(result.stderr)
@@ -36,6 +36,11 @@ def main() -> int:
         sys.stdout.write(first.stdout)
         sys.stderr.write(first.stderr)
         return first.returncode
+    if mode == "resume-rerender":
+        profile = first_args[first_args.index("--profile") + 1]
+        memory = Path(os.environ["HOME"]) / ".lohra" / "profiles" / profile / "memories" / "MEMORY.md"
+        memory.parent.mkdir(parents=True, exist_ok=True)
+        memory.write_text("CANARY-TURN-TWO", encoding="utf-8")
     session_id = json.loads(first.stdout)["session_id"]
     second = run([first_args[0], next_input, *first_args[2:], "--session", session_id])
     sys.stdout.write(second.stdout)
