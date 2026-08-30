@@ -1,6 +1,5 @@
 import { Buffer } from "node:buffer";
 import { mkdirSync } from "node:fs";
-import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import process from "node:process";
 
@@ -38,6 +37,12 @@ function core() {
   const connection = openStateDatabase(join(root(), "state.db"));
   try {
     const repo = new SessionRepository(connection.database, () => 1000, connection.ftsEnabled);
+    repo.createSession({
+      id: "fk-child",
+      parentSessionId: "missing-parent",
+      startedAt: 999,
+    });
+    connection.database.prepare("DELETE FROM sessions WHERE id='fk-child'").run();
     repo.createSession({ id: "core", model: "stub-model", title: "core", startedAt: 1000 });
     repo.appendMessage("core", {
       role: "user",
@@ -79,6 +84,7 @@ function core() {
       .pluck()
       .get();
     emit({
+      foreignKeyOff: true,
       messages: repo.loadMessages("core"),
       schemaVersion: version,
       storage: {
@@ -263,41 +269,15 @@ function liveSchemaAnchor(argv) {
     ...(profile ? { LOHRA_PROFILE: profile } : {}),
   });
   const connection = openStateDatabase(path);
-  const sessionId = randomBytes(16).toString("hex");
   try {
     new SessionRepository(connection.database).createSession({
-      id: sessionId,
+      id: "t03-candidate-schema-anchor",
       model: "m",
       startedAt: Date.now() / 1000,
     });
   } finally {
     connection.close();
   }
-  process.stdout.write(
-    `${JSON.stringify(
-      {
-        session_id: sessionId,
-        model: "m",
-        temperature: null,
-        input: "anchor",
-        output: null,
-        reasoning: null,
-        tool_calls: [],
-        usage: null,
-        usage_total: null,
-        cost: null,
-        stop_reason: null,
-        completed: false,
-        error: "Connection error.",
-        api_calls: 1,
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  process.stderr.write(
-    `session: ${sessionId}  (resume with --session ${sessionId})\nerror: Connection error.\n`,
-  );
 }
 
 const [action, ...argv] = process.argv.slice(2);

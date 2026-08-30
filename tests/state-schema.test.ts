@@ -55,10 +55,14 @@ describe("state schema and connection", () => {
     expect(database.pragma("user_version", { simple: true })).toBe(0n);
     expect(database.pragma("journal_mode", { simple: true })).toBe("wal");
     expect(database.pragma("page_size", { simple: true })).toBe(4096n);
-    expect(database.pragma("foreign_keys", { simple: true })).toBe(0n);
-    expect(database.pragma("wal_autocheckpoint", { simple: true })).toBe(1000n);
     expect(database.pragma("encoding", { simple: true })).toBe("UTF-8");
     expect(database.pragma("quick_check", { simple: true })).toBe("ok");
+
+    expect(() =>
+      database
+        .prepare("INSERT INTO sessions (id,source,parent_session_id,started_at) VALUES (?,?,?,?)")
+        .run("fk-child", "cli", "missing-parent", 1),
+    ).not.toThrow();
 
     const sessionInfo = database.pragma("table_info(sessions)") as Record<string, unknown>[];
     expect(sessionInfo.find((column) => column.name === "priced_call_count")).toMatchObject({

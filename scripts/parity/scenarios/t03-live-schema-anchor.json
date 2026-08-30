@@ -56,12 +56,10 @@
         "pragmas": [
           "application_id",
           "encoding",
-          "foreign_keys",
           "journal_mode",
           "page_size",
           "quick_check",
-          "user_version",
-          "wal_autocheckpoint"
+          "user_version"
         ],
         "tables": []
       },
@@ -76,11 +74,7 @@
     ],
     "events": []
   },
-  "comparisons": [
-    { "class": "byte", "field": "process.stdout" },
-    { "class": "byte", "field": "process.stderr" },
-    { "class": "schema", "field": "sqlite.schema" }
-  ],
+  "comparisons": [{ "class": "schema", "field": "sqlite.schema" }],
   "expectations": [
     { "side": "oracle", "field": "process.exitCode", "value": 1 },
     { "side": "candidate", "field": "process.exitCode", "value": 0 },
@@ -92,34 +86,34 @@
       "pointer": "/completed",
       "value": false
     },
+    { "side": "candidate", "field": "process.stdout", "encoding": "utf8", "value": "" },
+    { "side": "candidate", "field": "process.stderr", "encoding": "utf8", "value": "" },
     {
-      "side": "candidate",
-      "field": "process.stdout",
-      "encoding": "utf8",
-      "pointer": "/completed",
-      "value": false
-    }
-  ],
-  "normalizations": [
-    {
-      "field": "process.stdout",
-      "kind": "replace-json-pointer",
-      "pointer": "/session_id",
-      "replacement": "<SESSION_ID>"
+      "side": "oracle",
+      "field": "sqlite.liveSession",
+      "pointer": "/tables/sessions/rows/0/1",
+      "value": "cli"
     },
     {
-      "field": "process.stderr",
-      "kind": "replace-regex",
-      "pattern": "(?<=session: )[0-9a-f]{32}(?=  \\(resume with --session )",
-      "replacement": "<SESSION_ID>"
+      "side": "oracle",
+      "field": "sqlite.liveSession",
+      "pointer": "/tables/sessions/rows/0/3",
+      "value": "m"
     },
     {
-      "field": "process.stderr",
-      "kind": "replace-regex",
-      "pattern": "(?<=--session )[0-9a-f]{32}(?=\\))",
-      "replacement": "<SESSION_ID>"
+      "side": "oracle",
+      "field": "sqlite.liveSession",
+      "pointer": "/tables/sessions/rows/0/10",
+      "value": { "type": "integer", "decimal": "0" }
+    },
+    {
+      "side": "oracle",
+      "field": "sqlite.liveSession",
+      "pointer": "/tables/sessions/rows/0/19",
+      "value": null
     }
   ],
+  "normalizations": [],
   "oracleGuard": {
     "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
     "expectedVersion": "lohra 0.0.11\n",

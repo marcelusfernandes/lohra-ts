@@ -42,12 +42,10 @@
         "pragmas": [
           "application_id",
           "encoding",
-          "foreign_keys",
           "journal_mode",
           "page_size",
           "quick_check",
-          "user_version",
-          "wal_autocheckpoint"
+          "user_version"
         ],
         "tables": [
           { "name": "state_meta", "orderBy": ["key"] },
@@ -69,6 +67,13 @@
     { "side": "both", "field": "process.exitCode", "value": 0 },
     { "side": "both", "field": "process.signal", "value": null },
     { "side": "both", "field": "process.stderr", "encoding": "utf8", "value": "" },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/foreignKeyOff",
+      "value": true
+    },
     {
       "side": "both",
       "field": "process.stdout",

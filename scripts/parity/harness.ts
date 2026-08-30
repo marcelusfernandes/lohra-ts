@@ -229,6 +229,14 @@ function reproducibility(
     candidate: RunRecord;
   };
   const excludedRawPointers: string[] = [];
+  const comparedFields = new Set(Object.keys(base.comparison.normalized));
+  for (const field of ["process.stdout", "process.stderr"] as const) {
+    if (comparedFields.has(field)) continue;
+    for (const side of ["oracle", "candidate"] as const) {
+      setRunField(projectedRuns[side], field, "");
+      excludedRawPointers.push(`/runs/${side}/${field.replaceAll(".", "/")}`);
+    }
+  }
   for (const event of base.capturePolicy.events.filter(
     (entry) => entry.projection === "raw-only",
   )) {

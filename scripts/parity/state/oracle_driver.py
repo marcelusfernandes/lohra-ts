@@ -23,6 +23,9 @@ def open_db(path: Path) -> SessionDB:
 def core(root: Path) -> None:
     db = open_db(root / "state.db")
     try:
+        db.create_session("fk-child", parent_session_id="missing-parent")
+        db._connection.execute("DELETE FROM sessions WHERE id='fk-child'")
+        db._connection.commit()
         db.create_session("core", model="stub-model", title="core")
         db._connection.execute("UPDATE sessions SET started_at = 1000.0 WHERE id = 'core'")
         db._connection.commit()
@@ -77,6 +80,7 @@ def core(root: Path) -> None:
         ).fetchone()
         emit(
             {
+                "foreignKeyOff": True,
                 "messages": db.load_messages("core"),
                 "schemaVersion": db._connection.execute(
                     "SELECT value FROM state_meta WHERE key='schema_version'"
