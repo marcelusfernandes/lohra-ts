@@ -99,6 +99,7 @@ export function errorEnvelope(input: {
   readonly error: string;
   readonly apiCalls: number;
   readonly usage?: Usage | null;
+  readonly usageTotal?: Usage | null;
   readonly cost?: CostEstimate | null;
   readonly sessionSummary?: SessionSummary | null;
   readonly stopReason?: string | null;
@@ -113,7 +114,7 @@ export function errorEnvelope(input: {
     reasoning: null,
     tool_calls: executedToolCalls(input.toolCalls ?? []),
     usage: usage(input.usage ?? null),
-    usage_total: usage(input.usage ?? null),
+    usage_total: usage(input.usageTotal ?? input.usage ?? null),
     cost: cost(input.cost ?? null),
     stop_reason: input.stopReason ?? null,
     completed: false,

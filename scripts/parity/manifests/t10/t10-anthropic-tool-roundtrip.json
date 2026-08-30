@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "t10-anthropic-tool-roundtrip",
+  "layer": "turno-publico",
+  "transport": "anthropic",
+  "fixture": "tool",
+  "mode": "single",
+  "argv": [
+    "chat",
+    "prompt-anthropic-tool-roundtrip",
+    "--json",
+    "--yolo",
+    "--provider",
+    "anthropic",
+    "--model",
+    "stub-model"
+  ],
+  "expectedRequests": 2
+}

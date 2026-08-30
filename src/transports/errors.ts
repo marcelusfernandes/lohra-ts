@@ -57,8 +57,7 @@ function positiveSeconds(value: unknown): number | null {
 function headerValue(headers: unknown, name: string): unknown {
   if (headers instanceof Headers) return headers.get(name);
   const source = object(headers);
-  const match = Object.entries(source).find(([key]) => key.toLowerCase() === name);
-  return match?.[1];
+  return source[name];
 }
 
 export function retryAfterSeconds(error: unknown): number | null {

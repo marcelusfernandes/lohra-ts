@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "t10-chat-tool-raw-arguments",
+  "layer": "turno-publico",
+  "transport": "chat",
+  "fixture": "tool",
+  "mode": "single",
+  "argv": [
+    "chat",
+    "prompt-chat-tool-raw-arguments",
+    "--json",
+    "--yolo",
+    "--provider",
+    "openai",
+    "--model",
+    "stub-model"
+  ],
+  "expectedRequests": 2
+}

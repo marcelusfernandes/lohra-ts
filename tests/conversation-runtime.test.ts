@@ -268,6 +268,66 @@ describe("ConversationRuntime", () => {
     expect(result.toolCalls?.map((call) => call.result)).toEqual(["result:c1", "result:c2"]);
   });
 
+  it("replays pause responses without dispatch and persists provider data", async () => {
+    const repository = new MemoryRepository();
+    const transport = new QueueTransport([
+      response({
+        content: "PART1",
+        finishReason: "pause",
+        reasoning: "r1",
+        providerData: { thinking_blocks: [{ signature: "s", thinking: "r1", type: "thinking" }] },
+        usage: { ...usage, inputTokens: 10, outputTokens: 4 },
+      }),
+      response({
+        content: "PART2",
+        finishReason: "pause",
+        providerData: { thinking_blocks: [{ signature: "s2", thinking: "r2", type: "thinking" }] },
+        usage: { ...usage, inputTokens: 0, outputTokens: 0 },
+      }),
+      response({ content: "DONE", usage: { ...usage, inputTokens: 6, outputTokens: 3 } }),
+    ]);
+    const runtime = new ConversationRuntime({
+      repository,
+      transport,
+      promptSnapshot: () => "p",
+      idSource: () => "s",
+      clock: () => 1,
+    });
+    const result = await runtime.runTurn({
+      input: "x",
+      provider: "anthropic",
+      model: "m",
+      cwd: "/tmp",
+    });
+    expect(
+      transport.requests.map((request) =>
+        request.messages.map((message) => [message.role, message.content]),
+      ),
+    ).toEqual([
+      [["user", "x"]],
+      [
+        ["user", "x"],
+        ["assistant", "PART1"],
+      ],
+      [
+        ["user", "x"],
+        ["assistant", "PART1"],
+        ["assistant", "PART2"],
+      ],
+    ]);
+    expect(result.apiCalls).toBe(3);
+    expect(result.usageTotal).toMatchObject({ inputTokens: 16, outputTokens: 7 });
+    const storedPause = repository.messages.get("s")?.[1];
+    expect(storedPause).toMatchObject({
+      role: "assistant",
+      content: "PART1",
+      reasoning: "r1",
+    });
+    expect(
+      Array.isArray((storedPause?.provider_data as { thinking_blocks?: unknown }).thinking_blocks),
+    ).toBe(true);
+  });
+
   it("observes cancellation and always closes transport", async () => {
     const repository = new MemoryRepository();
     let observed = false;

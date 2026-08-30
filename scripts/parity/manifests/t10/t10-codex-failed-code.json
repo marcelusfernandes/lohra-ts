@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "t10-codex-failed-code",
+  "layer": "turno-publico",
+  "transport": "codex",
+  "fixture": "failed",
+  "mode": "single",
+  "argv": ["chat", "prompt-codex-failed-code", "--json", "--no-tools", "--model", "gpt-5.5"],
+  "expectedRequests": 1
+}

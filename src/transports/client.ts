@@ -3,6 +3,8 @@ import { ProviderCallFailed } from "./errors.js";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { ChatCompletionsTransport } from "./chat-completions.js";
+import type { AnthropicMessagesTransport } from "./anthropic-messages.js";
+import type { ResponsesTransport } from "./responses.js";
 import type {
   ChatHttpPort,
   ChatHttpRequest,
@@ -256,5 +258,233 @@ export class ChatCompletionsClient {
       }
       throw providerFailure(response);
     }
+  }
+}
+
+interface ProviderClientOptions<TTransport> {
+  readonly baseUrl: string;
+  readonly transport: TTransport;
+  readonly http?: ChatHttpPort;
+  readonly timeoutMs?: number;
+  readonly maxResponseBytes?: number;
+  readonly maxRetries?: number;
+}
+
+export interface AnthropicMessagesClientOptions extends ProviderClientOptions<AnthropicMessagesTransport> {
+  readonly apiKey: string;
+}
+
+async function providerPost(
+  http: ChatHttpPort,
+  request: ChatHttpRequest,
+  maxRetries: number,
+): Promise<HttpResponseData> {
+  let attempt = 0;
+  for (;;) {
+    const response = await http.post(request);
+    if (response.status >= 200 && response.status < 300) return response;
+    if (response.status >= 500 && attempt < maxRetries) {
+      attempt += 1;
+      continue;
+    }
+    throw providerFailure(response);
+  }
+}
+
+function anthropicStream(chunks: readonly unknown[]): unknown {
+  const content: Record<string, unknown>[] = [];
+  const usage: Record<string, unknown> = {};
+  let stopReason: unknown = null;
+  for (const raw of chunks) {
+    const event = record(raw);
+    if (event.type === "message_start") Object.assign(usage, record(record(event.message).usage));
+    if (event.type === "content_block_start") {
+      const index = typeof event.index === "number" ? event.index : content.length;
+      content[index] = { ...record(event.content_block) };
+    }
+    if (event.type === "content_block_delta") {
+      const index = typeof event.index === "number" ? event.index : 0;
+      const block = content[index] ?? {};
+      const delta = record(event.delta);
+      const string = (value: unknown): string => (typeof value === "string" ? value : "");
+      if (delta.type === "text_delta") block.text = string(block.text) + string(delta.text);
+      if (delta.type === "thinking_delta")
+        block.thinking = string(block.thinking) + string(delta.thinking);
+      if (delta.type === "signature_delta")
+        block.signature = string(block.signature) + string(delta.signature);
+      if (delta.type === "input_json_delta")
+        block.__json = string(block.__json) + string(delta.partial_json);
+      content[index] = block;
+    }
+    if (event.type === "message_delta") {
+      const delta = record(event.delta);
+      stopReason = delta.stop_reason ?? stopReason;
+      Object.assign(usage, record(event.usage));
+    }
+  }
+  for (const block of content) {
+    if (typeof block.__json === "string") {
+      try {
+        block.input = JSON.parse(block.__json) as unknown;
+      } catch {
+        block.input = {};
+      }
+      delete block.__json;
+    }
+  }
+  return { content, stop_reason: stopReason, usage };
+}
+
+export class AnthropicMessagesClient {
+  private readonly http: ChatHttpPort;
+  private readonly timeoutMs: number;
+  private readonly maxResponseBytes: number;
+  private readonly maxRetries: number;
+  private closed = false;
+
+  constructor(private readonly options: AnthropicMessagesClientOptions) {
+    this.http = options.http ?? new NativeChatHttpPort();
+    this.timeoutMs = options.timeoutMs ?? defaultTimeoutMs;
+    this.maxResponseBytes = options.maxResponseBytes ?? defaultMaxBytes;
+    this.maxRetries = options.maxRetries ?? 2;
+  }
+
+  async create(kwargs: ChatKwargs, signal?: AbortSignal): Promise<NormalizedResponse> {
+    const response = await this.request(kwargs, signal);
+    return this.options.transport.normalizeResponse(parseJson(response.body));
+  }
+
+  async stream(kwargs: ChatKwargs, callbacks: StreamCallbacks = {}): Promise<NormalizedResponse> {
+    const response = await this.request({ ...kwargs, stream: true });
+    const chunks = parseSse(response.body);
+    for (const raw of chunks) {
+      const event = record(raw);
+      const delta = record(event.delta);
+      if (
+        event.type === "content_block_delta" &&
+        delta.type === "text_delta" &&
+        typeof delta.text === "string"
+      )
+        callbacks.onText?.(delta.text);
+    }
+    return this.options.transport.normalizeResponse(anthropicStream(chunks));
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    await this.http.close?.();
+  }
+
+  private async request(body: ChatKwargs, signal?: AbortSignal): Promise<HttpResponseData> {
+    if (this.closed) throw new Error("CLIENT_CLOSED");
+    if (!this.options.apiKey)
+      throw new TypeError(
+        '"Could not resolve authentication method. Expected one of api_key, auth_token, or credentials to be set. Or for one of the `X-Api-Key` or `Authorization` headers to be explicitly omitted"',
+      );
+    return providerPost(
+      this.http,
+      {
+        url: `${this.options.baseUrl.replace(/\/$/u, "")}/v1/messages`,
+        headers: {
+          "x-api-key": this.options.apiKey,
+          "anthropic-version": "2023-06-01",
+          accept: "application/json",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+        timeoutMs: this.timeoutMs,
+        maxBytes: this.maxResponseBytes,
+        ...(signal === undefined ? {} : { signal }),
+      },
+      this.maxRetries,
+    );
+  }
+}
+
+export interface ResponsesClientOptions extends ProviderClientOptions<ResponsesTransport> {
+  readonly token: string;
+  readonly accountId?: string | null;
+  readonly headers?: Readonly<Record<string, string>>;
+}
+
+function responsesStream(chunks: readonly unknown[], callbacks: StreamCallbacks): unknown {
+  const done: unknown[] = [];
+  let terminal: Record<string, unknown> | null = null;
+  for (const raw of chunks) {
+    const event = record(raw);
+    if (event.type === "response.output_text.delta" && typeof event.delta === "string")
+      callbacks.onText?.(event.delta);
+    if (event.type === "response.output_item.done") done.push(record(event.item));
+    if (event.type === "response.failed") {
+      const response = record(event.response);
+      const error = record(response.error);
+      const code = typeof error.code === "string" ? error.code : undefined;
+      const message = typeof error.message === "string" ? error.message : "unknown error";
+      throw new ProviderCallFailed(`Responses API failed: ${code ?? ""} ${message}`.trimEnd(), {
+        ...(code === undefined ? {} : { code }),
+        payload: response,
+      });
+    }
+    if (event.type === "response.completed" || event.type === "response.incomplete")
+      terminal = record(event.response);
+  }
+  const result = { ...(terminal ?? {}) };
+  if (!Array.isArray(result.output) || result.output.length === 0) result.output = done;
+  return result;
+}
+
+export class ResponsesClient {
+  private readonly http: ChatHttpPort;
+  private readonly timeoutMs: number;
+  private readonly maxResponseBytes: number;
+  private readonly maxRetries: number;
+  private closed = false;
+
+  constructor(private readonly options: ResponsesClientOptions) {
+    this.http = options.http ?? new NativeChatHttpPort();
+    this.timeoutMs = options.timeoutMs ?? defaultTimeoutMs;
+    this.maxResponseBytes = options.maxResponseBytes ?? defaultMaxBytes;
+    this.maxRetries = options.maxRetries ?? 2;
+  }
+
+  create(kwargs: ChatKwargs, signal?: AbortSignal): Promise<NormalizedResponse> {
+    return this.stream(kwargs, {}, signal);
+  }
+
+  async stream(
+    kwargs: ChatKwargs,
+    callbacks: StreamCallbacks = {},
+    signal?: AbortSignal,
+  ): Promise<NormalizedResponse> {
+    if (this.closed) throw new Error("CLIENT_CLOSED");
+    const response = await providerPost(
+      this.http,
+      {
+        url: `${this.options.baseUrl.replace(/\/$/u, "")}/responses`,
+        headers: {
+          authorization: `Bearer ${this.options.token}`,
+          originator: "codex_cli_rs",
+          ...(this.options.accountId ? { "ChatGPT-Account-ID": this.options.accountId } : {}),
+          ...(this.options.headers ?? {}),
+          accept: "text/event-stream",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ ...kwargs, stream: true }),
+        timeoutMs: this.timeoutMs,
+        maxBytes: this.maxResponseBytes,
+        ...(signal === undefined ? {} : { signal }),
+      },
+      this.maxRetries,
+    );
+    return this.options.transport.normalizeResponse(
+      responsesStream(parseSse(response.body), callbacks),
+    );
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    await this.http.close?.();
   }
 }

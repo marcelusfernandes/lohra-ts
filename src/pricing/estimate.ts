@@ -14,6 +14,15 @@ const prices = new Map<string, ModelPrice>([
     },
   ],
   [
+    "openai\0gpt-5.5",
+    {
+      inputPerMillion: 5,
+      outputPerMillion: 30,
+      cacheReadPerMillion: 0.5,
+      source,
+    },
+  ],
+  [
     "anthropic\0claude-haiku-4-5",
     {
       inputPerMillion: 1,
@@ -25,6 +34,9 @@ const prices = new Map<string, ModelPrice>([
   ],
 ]);
 export type PriceTable = ReadonlyMap<string, ModelPrice>;
+const equivalents = new Map<string, readonly [string, string]>([
+  ["openai-codex\0gpt-5.5", ["openai", "gpt-5.5"]],
+]);
 export function priceKey(provider: string, model: string): string {
   return `${provider}\0${model}`;
 }
@@ -58,14 +70,14 @@ export function estimateCost(
       provider === "ollama"
         ? "local"
         : provider === "openai-codex" ||
-            options.equivalents?.has(priceKey(provider, model)) === true
+            (options.equivalents ?? equivalents).has(priceKey(provider, model))
           ? "api_equivalent"
           : "api_list_price";
   const direct = lookup(options.overrides ?? new Map(), provider, model);
   if (direct) return calculate(value, direct, basis);
   if (provider === "ollama") return { usd: 0, grossUsd: 0, savedUsd: 0, basis: "local" };
   if (provider === "openrouter") return null;
-  const mapped = options.equivalents?.get(priceKey(provider, model));
+  const mapped = (options.equivalents ?? equivalents).get(priceKey(provider, model));
   if (mapped) {
     [provider, model] = mapped;
     basis = "api_equivalent";

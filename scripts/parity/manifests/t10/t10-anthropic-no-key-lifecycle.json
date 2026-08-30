@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "t10-anthropic-no-key-lifecycle",
+  "layer": "turno-publico",
+  "transport": "anthropic",
+  "fixture": "no-key",
+  "mode": "single",
+  "argv": [
+    "chat",
+    "prompt-anthropic-no-key-lifecycle",
+    "--json",
+    "--no-tools",
+    "--provider",
+    "anthropic",
+    "--model",
+    "stub-model"
+  ],
+  "expectedRequests": 0
+}

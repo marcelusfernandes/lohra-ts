@@ -1,4 +1,4 @@
-import { pythonJsonDumps } from "../serialization/python-json.js";
+import { pythonJsonDumpsInsertionOrder } from "../serialization/python-json.js";
 import type {
   BuildKwargsOptions,
   ChatKwargs,
@@ -39,7 +39,7 @@ function cleanAssistant(message: Readonly<Record<string, unknown>>): Record<stri
           arguments:
             typeof argumentsValue === "string"
               ? argumentsValue
-              : pythonJsonDumps(argumentsValue || {}),
+              : pythonJsonDumpsInsertionOrder(argumentsValue || {}),
         },
       };
     });
@@ -70,6 +70,7 @@ function convertMessages(
 }
 
 function finishReason(value: unknown): FinishReason {
+  if (value === "pause") return "pause";
   if (value === "length" || value === "content_filter") return value;
   if (value === "tool_calls" || value === "function_call") return "tool_calls";
   return "stop";

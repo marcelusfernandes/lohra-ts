@@ -1,6 +1,6 @@
 import type { ProviderProfile } from "./types.js";
 
-const profiles: readonly ProviderProfile[] = Object.freeze(
+const builtinProfiles: readonly ProviderProfile[] = Object.freeze(
   (
     [
       {
@@ -183,6 +183,9 @@ const profiles: readonly ProviderProfile[] = Object.freeze(
   ).map((profile) =>
     Object.freeze({
       ...profile,
+      authType: "api_key" as const,
+      defaultHeaders: Object.freeze({}),
+      fixedTemperature: null,
       aliases: Object.freeze([...profile.aliases]),
       envVars: Object.freeze([...profile.envVars]),
       fallbackModels: Object.freeze([...profile.fallbackModels]),
@@ -191,7 +194,7 @@ const profiles: readonly ProviderProfile[] = Object.freeze(
 );
 
 const aliases = new Map<string, ProviderProfile>();
-for (const profile of profiles) {
+for (const profile of builtinProfiles) {
   for (const value of [profile.name, ...profile.aliases]) {
     const key = value.toLowerCase();
     if (aliases.has(key)) throw new Error(`PROVIDER_ALIAS_COLLISION:${key}`);
@@ -200,11 +203,42 @@ for (const profile of profiles) {
 }
 
 export function listProviders(): readonly ProviderProfile[] {
-  return profiles;
+  return builtinProfiles;
 }
 export function getProviderProfile(value: string): ProviderProfile | null {
-  return aliases.get(value.trim().toLowerCase()) ?? null;
+  return aliases.get(value.toLowerCase()) ?? null;
 }
 export function knownProviderNames(): readonly string[] {
-  return profiles.map((p) => p.name).toSorted();
+  return builtinProfiles.map((p) => p.name).toSorted();
 }
+
+export function registerProvider(profile: ProviderProfile): void {
+  aliases.set(profile.name, profile);
+  for (const alias of profile.aliases) aliases.set(alias, profile);
+}
+
+export function getMaxTokens(provider: string, _model?: string): number {
+  const profile = getProviderProfile(provider);
+  if (profile === null) throw new Error(`UNKNOWN_PROVIDER:${provider}`);
+  return profile.defaultMaxTokens;
+}
+
+export const CODEX_PROVIDER: ProviderProfile = Object.freeze({
+  name: "openai-codex",
+  apiMode: "responses",
+  aliases: Object.freeze([]),
+  displayName: "OpenAI Codex",
+  description: "OpenAI Responses through an explicitly enabled Codex subscription.",
+  signupUrl: "",
+  envVars: Object.freeze([]),
+  baseUrl: "https://chatgpt.com/backend-api/codex",
+  modelsUrl: "",
+  requiresApiKey: false,
+  supportsVision: true,
+  fallbackModels: Object.freeze(["gpt-5.5"]),
+  defaultMaxTokens: 16000,
+  defaultAuxModel: "",
+  authType: "oauth_external",
+  defaultHeaders: Object.freeze({}),
+  fixedTemperature: null,
+});

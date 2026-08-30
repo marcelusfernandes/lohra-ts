@@ -128,6 +128,7 @@ export class ConversationRuntime {
     emit("turn.started");
     let apiCalls = 0;
     let usageTotal: Usage | null = null;
+    let reasoningTotal = "";
     try {
       for (let iteration = 1; iteration <= this.maxIterations; iteration += 1) {
         if (signal.aborted) throw new ConversationCancelledError(sessionId, signal.reason);
@@ -152,7 +153,44 @@ export class ConversationRuntime {
         }
         apiCalls += 1;
         usageTotal = addUsage(usageTotal, response.usage);
+        if (response.reasoning !== null) reasoningTotal += response.reasoning;
         emit("model.request.completed");
+
+        if (response.finishReason === "pause") {
+          const assistantPauseMessage = {
+            role: "assistant",
+            content: response.content ?? "",
+            finish_reason: response.finishReason,
+            ...(response.reasoning === null ? {} : { reasoning: response.reasoning }),
+            ...(response.providerData === null
+              ? {}
+              : { provider_data: structuredClone(response.providerData) }),
+          } as const;
+          messages.push(assistantPauseMessage);
+          turnMessages.push(assistantPauseMessage);
+          if (iteration >= this.maxIterations) {
+            const cost = estimateCost(usageTotal, {
+              provider: input.provider,
+              model: input.model,
+              ...(this.options.pricingOverrides === undefined
+                ? {}
+                : { overrides: this.options.pricingOverrides }),
+            });
+            if (usageTotal !== null)
+              this.options.repository.commitUsage({ sessionId, usage: usageTotal, cost, apiCalls });
+            throw new MaxIterationsError(
+              sessionId,
+              this.maxIterations,
+              usageTotal,
+              cost,
+              this.options.repository.summary(sessionId),
+              executedToolCalls,
+              response.usage,
+              "pause",
+            );
+          }
+          continue;
+        }
 
         if (response.finishReason === "tool_calls" || response.toolCalls.length > 0) {
           if (
@@ -192,6 +230,10 @@ export class ConversationRuntime {
               type: "function",
               function: { name: call.name, arguments: call.arguments },
             })),
+            ...(response.reasoning === null ? {} : { reasoning: response.reasoning }),
+            ...(response.providerData === null
+              ? {}
+              : { provider_data: structuredClone(response.providerData) }),
           } as const;
           messages.push(assistantToolMessage);
           turnMessages.push({ ...assistantToolMessage, content: response.content ?? "" });
@@ -234,6 +276,8 @@ export class ConversationRuntime {
               cost,
               this.options.repository.summary(sessionId),
               executedToolCalls,
+              response.usage,
+              "tool_calls",
             );
           }
           continue;
@@ -251,6 +295,9 @@ export class ConversationRuntime {
           content: response.content ?? "",
           finish_reason: response.finishReason,
           ...(response.reasoning === null ? {} : { reasoning: response.reasoning }),
+          ...(response.providerData === null
+            ? {}
+            : { provider_data: structuredClone(response.providerData) }),
         } as const;
         turnMessages.push(finalAssistant);
         this.options.repository.commitTurn({
@@ -268,7 +315,10 @@ export class ConversationRuntime {
           input: input.input,
           model: input.model,
           temperature: input.temperature ?? null,
-          response,
+          response: {
+            ...response,
+            reasoning: reasoningTotal || null,
+          },
           toolCalls: executedToolCalls,
           usageTotal,
           cost,

@@ -3,18 +3,29 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadProjectContext, buildSystemPrompt } from "../context/index.js";
+import { readCodexModel } from "../auth/codex.js";
+import { resolveAuthRoute, resolveCredentials } from "../auth/credentials.js";
 import {
+  AnthropicMessagesModel,
   ChatCompletionsModel,
   ConversationError,
   ConversationRuntime,
   errorEnvelope,
   IncompleteToolCallError,
   MaxIterationsError,
+  ResponsesModel,
   SqliteConversationRepository,
   successEnvelope,
 } from "../conversation/index.js";
 import { loadSoul, MemoryStore } from "../memory/index.js";
 import { loadPriceOverrides } from "../pricing/index.js";
+import {
+  CODEX_PROVIDER,
+  getProviderProfile,
+  resolveApiKey,
+  type ProviderProfile,
+} from "../providers/index.js";
+import { pythonJsonDumpsInsertionOrder } from "../serialization/python-json.js";
 import { openStateForEnvironment, SessionRepository } from "../state/index.js";
 import { SkillStore } from "../skills/index.js";
 import {
@@ -28,10 +39,12 @@ import {
   SkillTool,
 } from "../tools/index.js";
 import {
-  createChatCompletionsClient,
+  AnthropicMessagesClient,
+  buildClient,
+  createResponsesClient,
   ProviderCallFailed,
-  resolveChatCompletionsTarget,
 } from "../transports/index.js";
+import type { ModelTransport } from "../conversation/index.js";
 import { runChatBoundary } from "./chat-boundary.js";
 
 export interface ChatCommandOptions {
@@ -103,15 +116,89 @@ function publicError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function initializationError(input: string, model: string | null, message: string): Result {
+  return {
+    code: 2,
+    stdout: `${pythonJsonDumpsInsertionOrder({
+      session_id: "",
+      model,
+      temperature: null,
+      input,
+      output: null,
+      reasoning: null,
+      tool_calls: [],
+      usage: null,
+      usage_total: null,
+      cost: null,
+      stop_reason: null,
+      completed: false,
+      error: message,
+      api_calls: 0,
+    })}\n`,
+    stderr: `${message}\n`,
+  };
+}
+
 export async function runChat(options: ChatCommandOptions): Promise<Result> {
   const input = prompt(options.argv);
   const provider = option(options.argv, "--provider");
-  if (provider === undefined)
+  const route = resolveAuthRoute(options.home);
+  if (route.error)
     return runChatBoundary({ home: options.home, codexHome: options.codexHome, input });
-  const target = resolveChatCompletionsTarget(provider, options.environment);
-  const model = option(options.argv, "--model") ?? target.profile.fallbackModels[0];
+  if (provider === undefined && route.mode !== "subscription")
+    return runChatBoundary({ home: options.home, codexHome: options.codexHome, input });
+
+  let profile: ProviderProfile;
+  let modelTransport: ModelTransport;
+  let subscriptionNote = "";
+  let model: string | undefined;
+  if (route.mode === "subscription") {
+    let credentials;
+    try {
+      credentials = await resolveCredentials(options.home, { codexHome: options.codexHome });
+    } catch {
+      return runChatBoundary({ home: options.home, codexHome: options.codexHome, input });
+    }
+    if (credentials === null)
+      return runChatBoundary({ home: options.home, codexHome: options.codexHome, input });
+    profile = CODEX_PROVIDER;
+    model = option(options.argv, "--model") ?? readCodexModel(options.codexHome) ?? "gpt-5.5";
+    modelTransport = new ResponsesModel(
+      createResponsesClient({
+        baseUrl: credentials.baseUrl,
+        token: credentials.token,
+        accountId: credentials.accountId,
+        headers: credentials.headers,
+      }),
+    );
+    if (provider !== undefined)
+      subscriptionNote = `subscription mode active — ignoring --provider ${provider}.\n`;
+  } else {
+    const resolved = getProviderProfile(provider as string);
+    if (resolved === null)
+      return initializationError(
+        input,
+        null,
+        `unknown provider '${String(provider).toLowerCase()}'`,
+      );
+    profile = resolved;
+    model = option(options.argv, "--model") ?? profile.fallbackModels[0];
+    const key = resolveApiKey(profile.name, options.environment);
+    if (profile.apiMode === "chat_completions" && key === null && profile.requiresApiKey) {
+      const message =
+        `could not initialize the ${profile.name} client: Missing credentials. ` +
+        "Please pass an `api_key`, `workload_identity`, `admin_api_key`, or set the `OPENAI_API_KEY` or `OPENAI_ADMIN_KEY` environment variable.";
+      return initializationError(input, model ?? null, message);
+    }
+    const client = buildClient(profile, key ?? (profile.name === "ollama" ? "lohra-local" : ""));
+    const streaming = !options.argv.includes("--json");
+    modelTransport =
+      client instanceof AnthropicMessagesClient
+        ? new AnthropicMessagesModel(client, streaming)
+        : new ChatCompletionsModel(client, streaming);
+  }
   if (model === undefined) {
-    const message = `provider '${target.profile.name}' has no default model — pass --model.`;
+    const message = `provider '${profile.name}' has no default model — pass --model.`;
     return {
       code: 2,
       stdout: errorEnvelope({
@@ -169,10 +256,9 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     session_search: (args) => new SessionSearchTool(sessions).handle(args),
     list_models: (args) => listModels.handle(args),
   });
-  const client = createChatCompletionsClient(target.profile.name, options.environment);
   const runtime = new ConversationRuntime({
     repository,
-    transport: new ChatCompletionsModel(client),
+    transport: modelTransport,
     promptSnapshot: snapshot,
     ...(useTools
       ? {
@@ -182,14 +268,14 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       : {}),
     idSource: () => randomUUID().replaceAll("-", ""),
     clock: () => Date.now() / 1000,
-    maxTokens: target.profile.defaultMaxTokens,
+    maxTokens: profile.defaultMaxTokens,
     ...(maxIterations === undefined ? {} : { maxIterations }),
     pricingOverrides: loadPriceOverrides(join(options.home, "pricing.json")),
   });
   try {
     const result = await runtime.runTurn({
       input,
-      provider: target.profile.name,
+      provider: profile.name,
       model,
       cwd: options.cwd,
       temperature,
@@ -199,8 +285,10 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     });
     return {
       code: 0,
-      stdout: successEnvelope(result),
-      stderr: `session: ${result.sessionId}  (resume with --session ${result.sessionId})\n`,
+      stdout: options.argv.includes("--json")
+        ? successEnvelope(result)
+        : `${result.response.content ?? ""}\n`,
+      stderr: `${subscriptionNote}session: ${result.sessionId}  (resume with --session ${result.sessionId})\n`,
     };
   } catch (error) {
     const message = publicError(error);
@@ -220,11 +308,14 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
           ? {}
           : {
               usage: (incomplete ?? bounded)?.usage ?? null,
+              ...(bounded === null
+                ? {}
+                : { usage: bounded.lastUsage ?? bounded.usage, usageTotal: bounded.usage }),
               cost: (incomplete ?? bounded)?.cost ?? null,
               sessionSummary: (incomplete ?? bounded)?.sessionSummary ?? null,
               ...(bounded === null
                 ? {}
-                : { stopReason: "tool_calls", toolCalls: bounded.toolCalls }),
+                : { stopReason: bounded.stopReason, toolCalls: bounded.toolCalls }),
             }),
       }),
       stderr: `${sessionId ? `session: ${sessionId}  (resume with --session ${sessionId})\n` : ""}error: ${message}\n`,

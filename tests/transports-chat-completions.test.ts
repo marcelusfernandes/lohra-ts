@@ -116,6 +116,7 @@ describe("ChatCompletionsTransport.normalizeResponse", () => {
       ["length", "length"],
       ["tool_calls", "tool_calls"],
       ["function_call", "tool_calls"],
+      ["pause", "pause"],
       ["content_filter", "content_filter"],
       [null, "stop"],
       ["weird", "stop"],

@@ -74,14 +74,13 @@ describe("credential evidence scrub", () => {
     const root = mkdtempSync(join(tmpdir(), "lohra-scrub-test-"));
     roots.push(root);
     mkdirSync(join(root, ".codex"), { recursive: true });
-    const payload = Buffer.from('{"chatgpt_account_id":"OPERATOR-ACCOUNT-T05"}').toString(
-      "base64url",
-    );
+    const account = "OPERATOR-ACCOUNT-T05-HIGH-ENTROPY";
+    const payload = Buffer.from(`{"chatgpt_account_id":"${account}"}`).toString("base64url");
     writeFileSync(
       join(root, ".codex", "auth.json"),
       `{"tokens":{"access_token":"x.${payload}.x"}}`,
     );
-    const record = evidence("OPERATOR-ACCOUNT-T05");
+    const record = evidence(account);
     expect(() => {
       assertCredentialClean(
         JSON.stringify(record),
@@ -91,5 +90,25 @@ describe("credential evidence scrub", () => {
         root,
       );
     }).toThrow(expect.objectContaining({ code: "CREDENTIAL_LEAK" }));
+  });
+
+  it("ignores short operator values and schema names", () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-scrub-test-"));
+    roots.push(root);
+    mkdirSync(join(root, ".codex"), { recursive: true });
+    writeFileSync(
+      join(root, ".codex", "auth.json"),
+      '{"access_token":"short","subscription":"openai-codex"}',
+    );
+    const record = evidence("OPENAI_API_KEY access_token subscription openai-codex short");
+    expect(() => {
+      assertCredentialClean(
+        JSON.stringify(record),
+        record,
+        [],
+        { fixtureTokens: false, operatorCredentials: true },
+        root,
+      );
+    }).not.toThrow();
   });
 });

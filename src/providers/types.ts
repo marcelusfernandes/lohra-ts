@@ -1,4 +1,4 @@
-export type ProviderApiMode = "anthropic_messages" | "chat_completions";
+export type ProviderApiMode = "anthropic_messages" | "chat_completions" | "responses";
 
 export interface ProviderProfile {
   readonly name: string;
@@ -15,6 +15,9 @@ export interface ProviderProfile {
   readonly fallbackModels: readonly string[];
   readonly defaultMaxTokens: number;
   readonly defaultAuxModel: string;
+  readonly authType?: "api_key" | "oauth_external";
+  readonly defaultHeaders?: Readonly<Record<string, string>>;
+  readonly fixedTemperature?: number | null;
 }
 
 export type ResolutionOrigin = "argument" | "config" | "env-var" | "api-key" | "keyless" | "none";

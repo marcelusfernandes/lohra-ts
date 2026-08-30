@@ -28,6 +28,7 @@ describe("provider error taxonomy", () => {
       }),
     ).toBe(2.5);
     expect(retryAfterSeconds({ response: { headers: { "retry-after": "11" } } })).toBe(11);
+    expect(retryAfterSeconds({ response: { headers: { "Retry-After": "11" } } })).toBeNull();
   });
 
   it.each([0, -1, true, "tomorrow", "Wed, 21 Oct 2015 07:28:00 GMT", null])(

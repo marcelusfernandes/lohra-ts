@@ -15,20 +15,30 @@ const object = (value: unknown): Record<string, unknown> | null =>
     ? (value as Record<string, unknown>)
     : null;
 
-function collect(value: unknown, sensitiveKeys: ReadonlySet<string>, markers: Set<string>): void {
+function collect(
+  value: unknown,
+  sensitiveKeys: ReadonlySet<string>,
+  markers: Set<string>,
+  minimumLength: number,
+): void {
   if (Array.isArray(value)) {
-    for (const entry of value) collect(entry, sensitiveKeys, markers);
+    for (const entry of value) collect(entry, sensitiveKeys, markers, minimumLength);
     return;
   }
   const record = object(value);
   if (record === null) return;
   for (const [key, entry] of Object.entries(record)) {
     const normalized = key.toLowerCase();
-    if (sensitiveKeys.has(normalized) && typeof entry === "string" && entry.length >= 4) {
+    if (
+      sensitiveKeys.has(normalized) &&
+      typeof entry === "string" &&
+      entry.length >= minimumLength
+    ) {
       markers.add(entry);
-      if (normalized.includes("token")) collectJwtClaims(entry, sensitiveKeys, markers);
+      if (normalized.includes("token"))
+        collectJwtClaims(entry, sensitiveKeys, markers, minimumLength);
     }
-    collect(entry, sensitiveKeys, markers);
+    collect(entry, sensitiveKeys, markers, minimumLength);
   }
 }
 
@@ -36,14 +46,22 @@ function collectJwtClaims(
   token: string,
   sensitiveKeys: ReadonlySet<string>,
   markers: Set<string>,
+  minimumLength: number,
 ): void {
-  const payload = token.split(".")[1];
+  const segments = token.split(".");
+  if (segments.length >= 3) {
+    for (const segment of segments) {
+      if (segment.length >= 4) markers.add(segment);
+    }
+  }
+  const payload = segments[1];
   if (payload === undefined) return;
   try {
     collect(
       JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as unknown,
       sensitiveKeys,
       markers,
+      minimumLength,
     );
   } catch {
     // Opaque tokens are still checked as complete marker strings.
@@ -55,9 +73,10 @@ function parseMarkers(
   sensitiveKeys: ReadonlySet<string>,
   markers: Set<string>,
   label: string,
+  minimumLength: number,
 ): void {
   try {
-    collect(JSON.parse(content) as unknown, sensitiveKeys, markers);
+    collect(JSON.parse(content) as unknown, sensitiveKeys, markers, minimumLength);
   } catch (error) {
     throw new HarnessError(
       "CREDENTIAL_SCRUB_READ",
@@ -77,7 +96,7 @@ function fixtureMarkers(fixtures: readonly FixtureSpec[]): Set<string> {
         ? Buffer.from(fixture.content, "base64").toString("utf8")
         : fixture.content;
     try {
-      collect(JSON.parse(content) as unknown, tokenKeys, markers);
+      collect(JSON.parse(content) as unknown, tokenKeys, markers, 4);
     } catch {
       // Non-JSON fixtures cannot contain structured credential fields.
     }
@@ -104,7 +123,7 @@ function realMarkers(operatorHome: string): Set<string> {
         { cause: error },
       );
     }
-    parseMarkers(content, operatorKeys, markers, relative);
+    parseMarkers(content, operatorKeys, markers, relative, 24);
   }
   return markers;
 }

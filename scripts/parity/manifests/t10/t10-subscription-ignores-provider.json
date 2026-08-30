@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "t10-subscription-ignores-provider",
+  "layer": "turno-publico",
+  "transport": "codex",
+  "fixture": "plain",
+  "mode": "single",
+  "argv": [
+    "chat",
+    "prompt-subscription-ignores-provider",
+    "--json",
+    "--no-tools",
+    "--provider",
+    "anthropic",
+    "--model",
+    "gpt-5.5"
+  ],
+  "expectedRequests": 1
+}

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "t10-codex-tool-encrypted-replay",
+  "layer": "turno-publico",
+  "transport": "codex",
+  "fixture": "tool-replay",
+  "mode": "single",
+  "argv": ["chat", "prompt-codex-tool-encrypted-replay", "--json", "--yolo", "--model", "gpt-5.5"],
+  "expectedRequests": 2
+}

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "t10-three-transport-pack-smoke",
+  "layer": "turno-publico",
+  "transport": "pack",
+  "fixture": "pack",
+  "mode": "single",
+  "argv": [],
+  "expectedRequests": 0
+}

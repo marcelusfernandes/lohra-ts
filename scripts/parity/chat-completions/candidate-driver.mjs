@@ -230,7 +230,7 @@ function errors() {
 function retryAfter() {
   return [
     retryAfterSeconds({ retryAfter: "2.5", response: { headers: { "retry-after": "11" } } }),
-    retryAfterSeconds({ response: { headers: { "Retry-After": "11" } } }),
+    retryAfterSeconds({ response: { headers: { "retry-after": "11" } } }),
     ...[0, -1, true, "tomorrow", "Wed, 21 Oct 2015 07:28:00 GMT"].map((value) =>
       retryAfterSeconds({ retryAfter: value }),
     ),

@@ -56,6 +56,8 @@ export class MaxIterationsError extends ConversationError {
       readonly arguments: string;
       readonly result: string;
     }[] = [],
+    public readonly lastUsage: Usage | null = null,
+    public readonly stopReason: string = "tool_calls",
   ) {
     super("MAX_ITERATIONS", `max_iterations (${String(limit)}) reached without a final response`, {
       sessionId,
