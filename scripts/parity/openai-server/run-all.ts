@@ -16,6 +16,7 @@ import {
   type ServerConfig,
   type ServerHandle,
 } from "./harness.js";
+import { run as agenticDefinitionDispatchDangerousCommand } from "./scenarios/t11-agentic-definition-dispatch-dangerous-command.js";
 import { run as authMatrixAndTrailingSpace } from "./scenarios/t11-auth-matrix-and-trailing-space.js";
 import { run as bodyValidationBeforeAuthChat } from "./scenarios/t11-body-validation-before-auth-chat.js";
 import { run as bodyValidationBeforeAuthResponses } from "./scenarios/t11-body-validation-before-auth-responses.js";
@@ -24,7 +25,9 @@ import { run as chatNonstreamSuccessPartialUpstreamError } from "./scenarios/t11
 import { run as chatStreamCleanEofEstimatedUsage } from "./scenarios/t11-chat-stream-clean-eof-estimated-usage.js";
 import { run as chatStreamPostOpenErrorDone } from "./scenarios/t11-chat-stream-post-open-error-done.js";
 import { run as chatStreamSuccessUsageAndNoUsage } from "./scenarios/t11-chat-stream-success-usage-and-no-usage.js";
+import { run as clientToolsNegativeDiscard } from "./scenarios/t11-client-tools-negative-discard.js";
 import { run as methodsRunsAndRootAbsence } from "./scenarios/t11-methods-runs-and-root-absence.js";
+import { runAgentic as relayAgenticNoToolCallLeakAgentic, runRelay as relayAgenticNoToolCallLeakRelay } from "./scenarios/t11-relay-agentic-no-tool-call-leak.js";
 import { run as requestCoercionsLimitsAndExtraFields } from "./scenarios/t11-request-coercions-limits-and-extra-fields.js";
 import { run as responsesNonstreamSuccessPartialUpstreamError } from "./scenarios/t11-responses-nonstream-success-partial-upstream-error.js";
 import { run as responsesPartsConcatenation } from "./scenarios/t11-responses-parts-concatenation.js";
@@ -75,6 +78,10 @@ const ALL_SCENARIOS: readonly ScenarioSpec[] = [
   { id: "t11-responses-stream-error-before-delta", config: {}, run: responsesStreamErrorBeforeDelta },
   { id: "t11-responses-stream-midbreak-discards-partial", config: {}, run: responsesStreamMidbreakDiscardsPartial },
   { id: "t11-responses-stream-clean-eof", config: {}, run: responsesStreamCleanEof },
+  { id: "t11-client-tools-negative-discard", config: {}, run: clientToolsNegativeDiscard },
+  { id: "t11-agentic-definition-dispatch-dangerous-command", config: { tools: "terminal" }, run: agenticDefinitionDispatchDangerousCommand },
+  { id: "t11-relay-agentic-no-tool-call-leak", config: { tools: "read_file" }, run: relayAgenticNoToolCallLeakAgentic },
+  { id: "t11-relay-no-tool-call-leak", config: {}, run: relayAgenticNoToolCallLeakRelay },
   { id: "t11-sigint-cleanup-and-port-reuse", config: {}, run: sigintCleanupAndPortReuse },
 ];
 

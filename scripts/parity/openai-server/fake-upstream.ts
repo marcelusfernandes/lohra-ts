@@ -69,9 +69,41 @@ function errorPayload(): { error: { message: string; type: string } } {
   return { error: { message: `${CAUSE_CANARY} upstream refused`, type: "teapot_error" } };
 }
 
-function chatNonStream(response: ServerResponse, scenario: string): void {
+/** Body-based branching (never a call counter): the shared fake upstream
+ * serves BOTH the oracle's and the candidate's calls within one scenario,
+ * interleaved in a known but not necessarily 1:1-alternating order, so
+ * "first call" must be read off the actual request content — the presence
+ * of a `role:"tool"` result message, exactly what a real provider would
+ * see — rather than a mutable counter. */
+function hasToolResult(body: Record<string, unknown>): boolean {
+  const messages = Array.isArray(body["messages"]) ? (body["messages"] as unknown[]) : [];
+  return messages.some((message) => (message as Record<string, unknown> | undefined)?.["role"] === "tool");
+}
+
+const TOOL_CALL_REQUESTS: Readonly<Record<string, { readonly name: string; readonly args: Record<string, unknown> }>> = {
+  "toolcall-danger": { name: "terminal", args: { command: "rm -rf /" } },
+  "toolcall-safe": { name: "read_file", args: { path: "tool-target.txt" } },
+};
+
+function chatNonStream(response: ServerResponse, scenario: string, body: Record<string, unknown>): void {
   if (scenario === "err418") {
     json(response, errorPayload(), 418);
+    return;
+  }
+  const toolCall = TOOL_CALL_REQUESTS[scenario];
+  if (toolCall !== undefined && !hasToolResult(body)) {
+    json(response, {
+      choices: [
+        {
+          message: {
+            content: null,
+            tool_calls: [{ id: "call_1", type: "function", function: { name: toolCall.name, arguments: JSON.stringify(toolCall.args) } }],
+          },
+          finish_reason: "tool_calls",
+        },
+      ],
+      usage: USAGE,
+    });
     return;
   }
   json(response, {
@@ -80,13 +112,32 @@ function chatNonStream(response: ServerResponse, scenario: string): void {
   });
 }
 
-function chatStream(response: ServerResponse, scenario: string): void {
+function chatStream(response: ServerResponse, scenario: string, body: Record<string, unknown>): void {
   if (scenario === "err418") {
     json(response, errorPayload(), 418);
     return;
   }
   const deltaEvent = (content: string) =>
     `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content }, finish_reason: null }] })}\n\n`;
+  const toolCall = TOOL_CALL_REQUESTS[scenario];
+  if (toolCall !== undefined && !hasToolResult(body)) {
+    const toolCallEvent = () =>
+      `data: ${JSON.stringify({
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: toolCall.name, arguments: JSON.stringify(toolCall.args) } }],
+            },
+            finish_reason: null,
+          },
+        ],
+      })}\n\n`;
+    const toolFinishEvent = () =>
+      `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }], usage: USAGE })}\n\n`;
+    sseFrames(response, [toolCallEvent(), toolFinishEvent()]);
+    return;
+  }
   const doneEvent = () =>
     `data: ${JSON.stringify({
       choices: [{ index: 0, delta: {}, finish_reason: scenario === "partial" ? "length" : "stop" }],
@@ -138,8 +189,8 @@ export function startFakeUpstream(): Promise<FakeUpstream> {
       requests.push({ method: request.method ?? "", path: request.url ?? "", headers, body, rawBody });
       const scenario = scenarioOf(body);
       const stream = body["stream"] === true;
-      if (stream) chatStream(response, scenario);
-      else chatNonStream(response, scenario);
+      if (stream) chatStream(response, scenario, body);
+      else chatNonStream(response, scenario, body);
     });
   });
   return new Promise((resolveStart) => {

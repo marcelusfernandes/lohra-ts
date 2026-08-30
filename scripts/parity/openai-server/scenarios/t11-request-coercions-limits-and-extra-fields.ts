@@ -24,7 +24,7 @@ function postRequestLines(path: string, apiKey: string | null, body: string): st
 // non-stream bodies are compact (`"id":"..."`) — the regex tolerates either.
 function normalizeIds(body: string): string {
   return body
-    .replaceAll(/"id":\s*"(chatcmpl|resp|msg_resp)-?[0-9a-f]{32}"/gu, '"id":"<ID>"')
+    .replaceAll(/"id":\s*"(chatcmpl-|msg_resp_|resp_)[0-9a-f]{32}"/gu, '"id":"<ID>"')
     .replaceAll(/"created":\s*\d+/gu, '"created":0')
     .replaceAll(/"created_at":\s*\d+/gu, '"created_at":0');
 }
