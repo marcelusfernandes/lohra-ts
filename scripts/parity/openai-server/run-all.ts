@@ -26,6 +26,7 @@ import { run as chatStreamCleanEofEstimatedUsage } from "./scenarios/t11-chat-st
 import { run as chatStreamPostOpenErrorDone } from "./scenarios/t11-chat-stream-post-open-error-done.js";
 import { run as chatStreamSuccessUsageAndNoUsage } from "./scenarios/t11-chat-stream-success-usage-and-no-usage.js";
 import { run as clientToolsNegativeDiscard } from "./scenarios/t11-client-tools-negative-discard.js";
+import { run as concurrentStreamIsolationAndDisconnectRecovery } from "./scenarios/t11-concurrent-stream-isolation-and-disconnect-recovery.js";
 import { run as methodsRunsAndRootAbsence } from "./scenarios/t11-methods-runs-and-root-absence.js";
 import { runAgentic as relayAgenticNoToolCallLeakAgentic, runRelay as relayAgenticNoToolCallLeakRelay } from "./scenarios/t11-relay-agentic-no-tool-call-leak.js";
 import { run as requestCoercionsLimitsAndExtraFields } from "./scenarios/t11-request-coercions-limits-and-extra-fields.js";
@@ -37,6 +38,7 @@ import { run as responsesStreamMidbreakDiscardsPartial } from "./scenarios/t11-r
 import { run as responsesStreamSuccessNoDone } from "./scenarios/t11-responses-stream-success-no-done.js";
 import { run as routeNegativeSweepAndSlashRedirectClass } from "./scenarios/t11-route-negative-sweep-and-slash-redirect-class.js";
 import { run as sigintCleanupAndPortReuse } from "./scenarios/t11-sigint-cleanup-and-port-reuse.js";
+import { run as statelessTwoRequests } from "./scenarios/t11-stateless-two-requests.js";
 import { run as surfaceHealthModelsDocs } from "./scenarios/t11-surface-health-models-docs.js";
 
 interface ScenarioResult {
@@ -82,6 +84,8 @@ const ALL_SCENARIOS: readonly ScenarioSpec[] = [
   { id: "t11-agentic-definition-dispatch-dangerous-command", config: { tools: "terminal" }, run: agenticDefinitionDispatchDangerousCommand },
   { id: "t11-relay-agentic-no-tool-call-leak", config: { tools: "read_file" }, run: relayAgenticNoToolCallLeakAgentic },
   { id: "t11-relay-no-tool-call-leak", config: {}, run: relayAgenticNoToolCallLeakRelay },
+  { id: "t11-stateless-two-requests", config: {}, run: statelessTwoRequests },
+  { id: "t11-concurrent-stream-isolation-and-disconnect-recovery", config: {}, run: concurrentStreamIsolationAndDisconnectRecovery },
   { id: "t11-sigint-cleanup-and-port-reuse", config: {}, run: sigintCleanupAndPortReuse },
 ];
 
