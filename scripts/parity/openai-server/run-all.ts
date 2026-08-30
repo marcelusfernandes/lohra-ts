@@ -20,6 +20,7 @@ import { run as bodyValidationBeforeAuthChat } from "./scenarios/t11-body-valida
 import { run as chatNonstreamSuccessPartialUpstreamError } from "./scenarios/t11-chat-nonstream-success-partial-upstream-error.js";
 import { run as chatStreamSuccessUsageAndNoUsage } from "./scenarios/t11-chat-stream-success-usage-and-no-usage.js";
 import { run as responsesStreamSuccessNoDone } from "./scenarios/t11-responses-stream-success-no-done.js";
+import { run as sigintCleanupAndPortReuse } from "./scenarios/t11-sigint-cleanup-and-port-reuse.js";
 import { run as surfaceHealthModelsDocs } from "./scenarios/t11-surface-health-models-docs.js";
 
 interface ScenarioResult {
@@ -47,6 +48,7 @@ const ALL_SCENARIOS: readonly ScenarioSpec[] = [
   { id: "t11-chat-nonstream-success-partial-upstream-error", config: {}, run: chatNonstreamSuccessPartialUpstreamError },
   { id: "t11-chat-stream-success-usage-and-no-usage", config: {}, run: chatStreamSuccessUsageAndNoUsage },
   { id: "t11-responses-stream-success-no-done", config: {}, run: responsesStreamSuccessNoDone },
+  { id: "t11-sigint-cleanup-and-port-reuse", config: {}, run: sigintCleanupAndPortReuse },
 ];
 
 // T11_ONLY=<id>[,<id>...] restricts the run to named scenarios — dev-only
