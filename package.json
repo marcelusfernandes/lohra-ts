@@ -24,6 +24,8 @@
     "parity:auth": "tsx scripts/parity/auth/run-all.ts",
     "parity:context": "tsx scripts/parity/local-context/run-all.ts",
     "parity:chat-completions": "tsx scripts/parity/chat-completions/run-all.ts",
+    "parity:workflow-spec": "tsx scripts/parity/workflow-spec/run-all.ts",
+    "probe:workflow-spec-ts-only": "node scripts/parity/workflow-spec/ts-only-probes.mjs",
     "probe:chat-completions-ts-only": "node scripts/parity/chat-completions/ts-only-probe.mjs",
     "probe:chat-completions-live-scrub": "node scripts/parity/chat-completions/live-smoke.mjs --canary",
     "smoke:chat-completions-live": "node scripts/parity/chat-completions/live-smoke.mjs",

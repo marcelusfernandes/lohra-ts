@@ -1,4 +1,4 @@
-function escapeString(value: string): string {
+function escapeString(value: string, ensureAscii = true): string {
   let result = '"';
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
@@ -10,7 +10,8 @@ function escapeString(value: string): string {
     else if (character === "\n") result += "\\n";
     else if (character === "\r") result += "\\r";
     else if (character === "\t") result += "\\t";
-    else if (code < 0x20 || code > 0x7e) result += `\\u${code.toString(16).padStart(4, "0")}`;
+    else if (code < 0x20 || (ensureAscii && code > 0x7e))
+      result += `\\u${code.toString(16).padStart(4, "0")}`;
     else result += character;
   }
   return `${result}"`;
@@ -88,25 +89,29 @@ function compareUnicode(left: string, right: string): number {
   return leftPoints.length - rightPoints.length;
 }
 
-function encode(value: unknown, sortKeys: boolean): string {
+function encode(value: unknown, sortKeys: boolean, ensureAscii = true): string {
   if (value instanceof PythonFloat) return encodeFloat(value.value);
   if (value === null) return "null";
   if (typeof value === "boolean") return value ? "true" : "false";
-  if (typeof value === "string") return escapeString(value);
+  if (typeof value === "string") return escapeString(value, ensureAscii);
   if (typeof value === "number") {
     if (Number.isSafeInteger(value) && !Object.is(value, -0)) return String(value);
     throw new TypeError(
       "Ambiguous or unsafe number: wrap Python float fields with pythonFloat(value)",
     );
   }
-  if (Array.isArray(value)) return `[${value.map((entry) => encode(entry, sortKeys)).join(", ")}]`;
+  if (Array.isArray(value))
+    return `[${value.map((entry) => encode(entry, sortKeys, ensureAscii)).join(", ")}]`;
   if (typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>).filter(
       ([, entry]) => entry !== undefined,
     );
     if (sortKeys) entries.sort(([left], [right]) => compareUnicode(left, right));
     return `{${entries
-      .map(([key, entry]) => `${escapeString(key)}: ${encode(entry, sortKeys)}`)
+      .map(
+        ([key, entry]) =>
+          `${escapeString(key, ensureAscii)}: ${encode(entry, sortKeys, ensureAscii)}`,
+      )
       .join(", ")}}`;
   }
   throw new TypeError(`Value of type ${typeof value} is not JSON serializable`);
@@ -118,6 +123,10 @@ export function pythonJsonDumps(value: unknown): string {
 
 export function pythonJsonDumpsInsertionOrder(value: unknown): string {
   return encode(value, false);
+}
+
+export function pythonJsonDumpsInsertionOrderUnicode(value: unknown): string {
+  return encode(value, false, false);
 }
 
 function encodeIndented(value: unknown, level: number): string {
