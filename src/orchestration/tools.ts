@@ -1,0 +1,143 @@
+import { pythonRepr } from "../serialization/python-repr.js";
+import { toolError, toolResult } from "../tools/envelope.js";
+import type { ToolArguments } from "../tools/types.js";
+import { summarizeCollectResult, type CollectResult, type OrchestrationCore, type SpawnConfig } from "./core.js";
+import {
+  coercePrompt,
+  validateCollectSubId,
+  validateDelegateTasks,
+  validateMaxIterations,
+  validateResumeOverrides,
+  validateResumeTasks,
+  validateSpawnPrompt,
+  validateSteerArgs,
+} from "./validation.js";
+
+/** "no sub-session 'deadbeef'" — the oracle's repr() of the sub_id, single
+ * quotes (L19). sub_id values are always uuid4().hex in practice, but a
+ * caller can pass a coerced non-string; repr() is used regardless so this
+ * never silently diverges for an unusual value. */
+function noSubSession(subId: string): string {
+  return toolError(`no sub-session ${pythonRepr(subId)}`);
+}
+
+function overridesFromArgs(args: ToolArguments): Omit<SpawnConfig, "prompt"> {
+  return {
+    ...(typeof args.model === "string" ? { model: args.model } : {}),
+    ...(typeof args.provider === "string" ? { provider: args.provider } : {}),
+    ...(typeof args.effort === "string" ? { effort: args.effort } : {}),
+    ...(typeof args.max_iterations === "number" ? { maxIterations: args.max_iterations } : {}),
+  };
+}
+
+export function spawnSessionTool(core: OrchestrationCore, args: ToolArguments): string {
+  const promptError = validateSpawnPrompt(args);
+  if (promptError !== null) return promptError;
+  const maxIterationsError = validateMaxIterations(args.max_iterations);
+  if (maxIterationsError !== null) return maxIterationsError;
+  const { subId } = core.spawn({ prompt: coercePrompt(args.prompt), ...overridesFromArgs(args) });
+  return toolResult(undefined, { sub_id: subId });
+}
+
+export function steerSessionTool(core: OrchestrationCore, args: ToolArguments): string {
+  const argsError = validateSteerArgs(args);
+  if (argsError !== null) return argsError;
+  const subId = args.sub_id as string;
+  const outcome = core.steer(subId, args.text as string);
+  if (outcome === null) return noSubSession(subId);
+  return toolResult(undefined, { queued: outcome.queued });
+}
+
+/** Maps the registry's CollectResult (camelCase) to the wire's snake_case
+ * envelope, in the contract's exact 13-key order (assertion 14). */
+function collectEnvelope(result: CollectResult): string {
+  return toolResult(undefined, {
+    status: result.status,
+    output: result.output,
+    tokens_in: result.tokensIn,
+    tokens_out: result.tokensOut,
+    cache_read_tokens: result.cacheReadTokens,
+    cache_write_tokens: result.cacheWriteTokens,
+    reasoning_tokens: result.reasoningTokens,
+    provider: result.provider,
+    model: result.model,
+    forced_fallback: result.forcedFallback,
+    error_kind: result.errorKind,
+    retry_after: result.retryAfter,
+  });
+}
+
+export async function collectSessionTool(
+  core: OrchestrationCore,
+  args: ToolArguments,
+): Promise<string> {
+  const subIdError = validateCollectSubId(args);
+  if (subIdError !== null) return subIdError;
+  const subId = String(args.sub_id);
+  const wait = args.wait === true;
+  const outcome = await core.collect(subId, wait);
+  if (outcome.kind === "not-found") return noSubSession(subId);
+  if (outcome.kind === "settled") return collectEnvelope(outcome.result);
+  // "pending" (wait:false, not yet settled): the oracle's exact envelope for
+  // this poll is NOT measured anywhere in the baseline evidence (searched;
+  // no "status":"running" collect capture exists) — this shape is a
+  // reasonable placeholder, not a verified claim, and must not be cited as
+  // byte-exact until measured against the real oracle.
+  return toolResult(undefined, {
+    status: "running",
+    output: "",
+    tokens_in: 0,
+    tokens_out: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    reasoning_tokens: 0,
+    provider: null,
+    model: null,
+    forced_fallback: false,
+    error_kind: null,
+    retry_after: null,
+  });
+}
+
+export async function delegateTaskTool(
+  core: OrchestrationCore,
+  args: ToolArguments,
+): Promise<string> {
+  const resumeOverridesError = validateResumeOverrides(args);
+  if (resumeOverridesError !== null) return resumeOverridesError;
+  const tasksOrError = validateDelegateTasks(args);
+  if (typeof tasksOrError === "string") return tasksOrError;
+  const { tasks } = tasksOrError;
+
+  if (args.resume_id !== undefined) {
+    const resumeTasksError = validateResumeTasks(args, tasks);
+    if (resumeTasksError !== null) return resumeTasksError;
+    const resumeId: unknown = args.resume_id;
+    const subId = String(resumeId);
+    const steerOutcome = core.steer(subId, tasks[0] ?? "");
+    if (steerOutcome === null) return noSubSession(subId);
+    const collectOutcome = await core.collect(subId, true);
+    if (collectOutcome.kind !== "settled") return noSubSession(subId);
+    const { result } = collectOutcome;
+    return toolResult(undefined, {
+      results: [
+        {
+          sub_id: subId,
+          status: result.status,
+          summary: summarizeCollectResult(result),
+        },
+      ],
+    });
+  }
+
+  const maxIterationsError = validateMaxIterations(args.max_iterations);
+  if (maxIterationsError !== null) return maxIterationsError;
+  const outcomes = await core.delegate(tasks, overridesFromArgs(args));
+  return toolResult(undefined, {
+    results: outcomes.map((outcome) => ({
+      sub_id: outcome.subId,
+      status: outcome.status,
+      summary: outcome.summary,
+    })),
+  });
+}

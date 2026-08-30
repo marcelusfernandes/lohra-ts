@@ -81,6 +81,17 @@ export interface DelegateOutcome {
   readonly summary: string;
 }
 
+/** "(subagent produced no output)" for an empty-output success, textually
+ * distinct from an error (contract L17) — shared by delegate()'s own batch
+ * path and any caller building a single-result batch envelope from a
+ * resume_id steer+collect (delegate_task's resume form), so the two never
+ * drift into producing different text for the same underlying result. */
+export function summarizeCollectResult(result: CollectResult | null): string {
+  if (result === null) return "";
+  if (result.status === "complete" && result.output === "") return "(subagent produced no output)";
+  return result.output;
+}
+
 interface SubSessionEntry {
   readonly subId: string;
   readonly systemPrompt: string;
@@ -179,14 +190,7 @@ export class OrchestrationCore {
       spawned.map(async ({ subId }): Promise<DelegateOutcome> => {
         const outcome = await this.collect(subId, true);
         const result = outcome.kind === "settled" ? outcome.result : null;
-        const status = result?.status ?? "error";
-        const summary =
-          result === null
-            ? ""
-            : status === "complete" && result.output === ""
-              ? "(subagent produced no output)"
-              : result.output;
-        return { subId, status, summary };
+        return { subId, status: result?.status ?? "error", summary: summarizeCollectResult(result) };
       }),
     );
   }
