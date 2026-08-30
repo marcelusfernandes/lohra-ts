@@ -77,20 +77,33 @@ describe("OrchestrationCore max-parallel fan-out (contract decision 8 / assertio
 
   it("spawn still returns a sub_id immediately even when the pool is saturated — the child sits queued, not blocked (L6's queued-in-pool case)", () => {
     const barrier = deferred<CollectResult>();
+    let idCalls = 0;
     const core = new OrchestrationCore({
       runChild: () => barrier.promise,
-      idSource: () => "kid-0",
+      // Two DISTINCT children are spawned below — a constant idSource would
+      // silently collapse both onto the same registry entry (the second
+      // spawn's entries.set would overwrite the first's), which this test's
+      // own assertions would never notice, since it only checks the second
+      // id is truthy. This is exactly the collapsed-identity hazard flagged
+      // after the second occurrence elsewhere in this session.
+      idSource: () => {
+        const id = `kid-${String(idCalls)}`;
+        idCalls += 1;
+        return id;
+      },
       maxSubsessions: 200,
       maxParallel: 1,
       buildSubagentPrompt: stubPrompt,
     });
 
-    core.spawn({ prompt: "one" });
+    const first = core.spawn({ prompt: "one" });
     // Second spawn saturates the pool (maxParallel: 1) — must still return
     // synchronously, proven by the fact this line executes at all without
     // ever awaiting the first child's completion.
     const second = core.spawn({ prompt: "two" });
     expect(second.subId).toBeTruthy();
+    expect(second.subId).not.toBe(first.subId);
+    expect(core.size).toBe(2); // both are genuinely distinct registry entries
   });
 
   it("a queued (not-yet-started) child is collectable as pending, same as a running one", async () => {
