@@ -9,6 +9,17 @@
  * var's raw value uses this rule, not the raw bytes, and a naive `'${raw}'`
  * template diverges for any raw value containing a quote, backslash, or
  * control character.
+ *
+ * Declared limit (Evaluator baseline §9/L27, evidence-s13b-repr-differential-
+ * cases.json): matches CPython's repr() exactly across 0x00-0x7F, but Python
+ * additionally escapes anything `str.isprintable()` rejects, which is a
+ * Unicode-category rule (Cc/Cf/Cs/Co/Cn, plus Zl/Zp/Zs-except-space) — this
+ * implementation only escapes C0 controls and DEL, so C1 controls (0x80-0x9F)
+ * and non-printable-but-non-control code points (e.g. U+00AD soft hyphen,
+ * U+200B ZWSP, U+FEFF BOM, unassigned code points) are left literal instead
+ * of escaped. Left undone deliberately rather than rushed: closing it needs
+ * Unicode-property-escape support matched to Python's unicodedata version,
+ * not a quick patch.
  */
 export function pythonRepr(value: string): string {
   const hasSingle = value.includes("'");
