@@ -16,6 +16,7 @@ import {
   type ServerConfig,
   type ServerHandle,
 } from "./harness.js";
+import { run as bodyValidationBeforeAuthChat } from "./scenarios/t11-body-validation-before-auth-chat.js";
 import { run as surfaceHealthModelsDocs } from "./scenarios/t11-surface-health-models-docs.js";
 
 interface ScenarioResult {
@@ -34,6 +35,7 @@ interface ScenarioSpec {
 
 const SCENARIOS: readonly ScenarioSpec[] = [
   { id: "t11-surface-health-models-docs", config: {}, run: surfaceHealthModelsDocs },
+  { id: "t11-body-validation-before-auth-chat", config: {}, run: bodyValidationBeforeAuthChat },
 ];
 
 const guards = runGuards();

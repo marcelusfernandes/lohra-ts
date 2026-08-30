@@ -328,6 +328,53 @@ export function headerValue(response: RawResponse, name: string): string | undef
   return response.headers.find(([key]) => key === name.toLowerCase())?.[1];
 }
 
+export interface NormalizedView {
+  readonly statusLine: string;
+  readonly headers: Record<string, string>;
+  readonly body: string;
+}
+
+/** Header field ORDER is not governed by the contract (assertion 9 only pins
+ * body key order) — sorted so comparisons aren't a false positive on
+ * ordering alone. `date`/`server` are declared-normalized away entirely
+ * (uvicorn sends `server`, Node sends neither header). */
+export function normalizeForComparison(
+  response: RawResponse,
+  bodyOverride?: string,
+  extraDroppedHeaders: readonly string[] = [],
+): NormalizedView {
+  const dropped = new Set(["date", "server", ...extraDroppedHeaders]);
+  return {
+    statusLine: response.statusLine,
+    headers: Object.fromEntries(
+      response.headers.filter(([name]) => !dropped.has(name)).toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+    ),
+    body: bodyOverride ?? response.body,
+  };
+}
+
+/** The default byte-exact comparison: status line, headers (order-insensitive,
+ * volatile ones dropped) and body must match exactly. Most 422/400/401/404/405
+ * probes need nothing more — scenarios with dynamic body fields (ids,
+ * `created`) normalize the body first and pass the result as `bodyOverride`. */
+export function compareRaw(
+  oracle: RawResponse,
+  candidate: RawResponse,
+  options: {
+    readonly oracleBody?: string;
+    readonly candidateBody?: string;
+    /** Extra headers to drop before comparing — e.g. `content-length` when
+     * an excused body field (a differing byte count) makes the true wire
+     * length meaningless to compare, even though the normalized body text
+     * itself is being compared. */
+    readonly extraDroppedHeaders?: readonly string[];
+  } = {},
+): { readonly match: boolean; readonly oracle: NormalizedView; readonly candidate: NormalizedView } {
+  const oracleView = normalizeForComparison(oracle, options.oracleBody, options.extraDroppedHeaders);
+  const candidateView = normalizeForComparison(candidate, options.candidateBody, options.extraDroppedHeaders);
+  return { match: JSON.stringify(oracleView) === JSON.stringify(candidateView), oracle: oracleView, candidate: candidateView };
+}
+
 export function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }

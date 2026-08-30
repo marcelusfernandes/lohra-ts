@@ -3,7 +3,7 @@
 // (/openapi.json paths + the three doc HTML routes, no auth). The trailing
 // slash redirect-as-router-class half of 14 lives in
 // t11-route-negative-sweep-and-slash-redirect-class instead.
-import { headerValue, probeBoth, type ProbeRecord, type RawResponse, type ServerHandle } from "../harness.js";
+import { compareRaw, headerValue, probeBoth, type ProbeRecord, type RawResponse, type ServerHandle } from "../harness.js";
 
 const DOC_PATHS = ["/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect"] as const;
 const PRODUCT_PATHS = ["/health", "/v1/chat/completions", "/v1/models", "/v1/responses"].toSorted();
@@ -49,15 +49,6 @@ function normalizeModelsBody(body: string): { text: string; createdOk: boolean }
     new Set(createdValues).size <= 1;
   for (const item of parsed.data ?? []) item["created"] = 0;
   return { text: JSON.stringify(parsed), createdOk };
-}
-
-/** Header field ORDER is not governed by the contract (assertion 9 only
- * pins body key order) — sort so the comparison isn't a false positive on
- * ordering alone. `date`/`server` are declared-normalized away entirely. */
-function stripVolatileHeaders(headers: RawResponse["headers"]): Record<string, string> {
-  return Object.fromEntries(
-    headers.filter(([name]) => name !== "date" && name !== "server").toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
-  );
 }
 
 const NORMALIZATIONS = [
@@ -138,22 +129,15 @@ export async function run(
     const candidateBody = isModels
       ? normalizeModelsBody(entry.candidate.body)
       : { text: entry.candidate.body, createdOk: true };
-    const oracleSide = {
-      statusLine: entry.oracle.statusLine,
-      headers: stripVolatileHeaders(entry.oracle.headers),
-      body: oracleBody.text,
-    };
-    const candidateSide = {
-      statusLine: entry.candidate.statusLine,
-      headers: stripVolatileHeaders(entry.candidate.headers),
-      body: candidateBody.text,
-    };
+    const comparison = compareRaw(entry.oracle, entry.candidate, {
+      oracleBody: oracleBody.text,
+      candidateBody: candidateBody.text,
+    });
     const contentTypeOracle = headerValue(entry.oracle, "content-type");
     const contentTypeCandidate = headerValue(entry.candidate, "content-type");
-    const bytesMatch = JSON.stringify(oracleSide) === JSON.stringify(candidateSide);
     const createdOk = oracleBody.createdOk && candidateBody.createdOk;
-    const ok = bytesMatch && createdOk && contentTypeOracle === contentTypeCandidate;
-    const record = { id: entry.id, normalized: { oracle: oracleSide, candidate: candidateSide }, match: ok };
+    const ok = comparison.match && createdOk && contentTypeOracle === contentTypeCandidate;
+    const record = { id: entry.id, normalized: { oracle: comparison.oracle, candidate: comparison.candidate }, match: ok };
     if (!ok) differences.push(record);
     return record;
   });
