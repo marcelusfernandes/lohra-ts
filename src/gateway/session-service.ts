@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { SessionRepository } from "../state/index.js";
+import { nullableInteger } from "../state/values.js";
 
 const GATEWAY_VERSION = "0.0.11";
 
@@ -49,7 +50,15 @@ export class GatewaySessionRegistry {
   }
 
   public list(): readonly Readonly<Record<string, unknown>>[] {
-    return this.sessions.listSessions();
+    // listSessions() runs against a defaultSafeIntegers(true) connection
+    // (src/state/connection.ts), so message_count (an INTEGER column)
+    // comes back as bigint -- JSON.stringify (and jsonStringifyPythonNumbers)
+    // cannot serialize bigint at all. started_at/ended_at are REAL columns
+    // and are unaffected. Normalize before this ever reaches the wire.
+    return this.sessions.listSessions().map((row) => ({
+      ...row,
+      message_count: nullableInteger(row.message_count as bigint | number | null, "message_count"),
+    }));
   }
 
   public history(sessionId: string | undefined): readonly Readonly<Record<string, unknown>>[] {
