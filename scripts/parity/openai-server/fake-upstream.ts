@@ -92,6 +92,33 @@ function chatStream(response: ServerResponse, scenario: string): void {
       choices: [{ index: 0, delta: {}, finish_reason: scenario === "partial" ? "length" : "stop" }],
       ...(scenario === "nousage" ? {} : { usage: USAGE }),
     })}\n\n`;
+  if (scenario === "cleaneof") {
+    // Protocol-clean chunked termination (a normal `.end()`, so Node emits
+    // the correct closing "0\r\n\r\n" chunk): role/content deltas arrive,
+    // then the connection just ends — no finish chunk, no [DONE]. The
+    // client must treat this implicit EOF as partial success, not a
+    // transport error (assertion 41).
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.end(deltaEvent(`FAKE-UPSTREAM-STREAM:${scenario}`));
+    return;
+  }
+  if (scenario === "midbreak") {
+    // Truncated mid-chunk: `.write()` still emits a well-formed chunk, but
+    // destroying the socket instead of calling `.end()` means the overall
+    // chunked body is missing its closing "0\r\n\r\n" terminator — a real
+    // connection reset, not a clean EOF (assertion 49's "incomplete
+    // chunked read"). The write's own callback only confirms the data left
+    // this process's userspace buffer, not that the peer's TCP stack
+    // received and delivered it to the client's HTTP parser before the
+    // RST — an immediate destroy() in that callback still races the OS,
+    // so a short setTimeout gives the bytes time to actually land before
+    // the connection dies mid-chunk instead of before any chunk at all.
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.write(deltaEvent(`FAKE-UPSTREAM-STREAM:${scenario}`), () => {
+      setTimeout(() => response.socket?.destroy(), 300);
+    });
+    return;
+  }
   sseFrames(response, [deltaEvent(`FAKE-UPSTREAM-STREAM:${scenario}`), doneEvent()]);
 }
 
