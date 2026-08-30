@@ -70,6 +70,15 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     }
     model = option(options.argv, "--model") ?? readCodexModel(options.codexHome) ?? "gpt-5.5";
     providerName = "codex";
+    // T11's approved streaming seam (091d540) never gave ResponsesModel a
+    // `streaming` constructor flag -- only ChatCompletionsModel and
+    // AnthropicMessagesModel got one. This session's own provisional seam
+    // had added one, but that commit was dropped at rebase per the
+    // coordinator's ruling (drop-and-adopt T11's version outright, no
+    // reconciliation). Reported as a real gap, not silently filled here:
+    // the subscription/Codex path currently cannot stream deltas --
+    // ResponsesModel.complete() always calls create(), which is a thin
+    // wrapper always passing empty stream callbacks.
     createModelTransport = () =>
       new ResponsesModel(
         createResponsesClient({
@@ -78,7 +87,6 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
           accountId: credentials.accountId,
           headers: credentials.headers,
         }),
-        true,
       );
   } else {
     const provider = option(options.argv, "--provider");
