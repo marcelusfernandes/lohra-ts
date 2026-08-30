@@ -7,6 +7,7 @@ import {
   ConversationTurnFailedError,
   IncompleteToolCallError,
   MaxIterationsError,
+  MessageInjectionError,
   UnexpectedToolCallError,
 } from "./errors.js";
 import type {
@@ -84,6 +85,14 @@ export class ConversationRuntime {
     readonly temperature?: number | null;
     readonly sessionId?: string;
     readonly signal?: AbortSignal;
+    /** Drains zero or more messages to append at the top of every iteration
+     * of this turn (the first included), before the next request is built —
+     * an orchestration adapter's steer inbox is the intended caller. Absent
+     * means no injection, and the turn behaves exactly as it did before this
+     * option existed. A thrown error is wrapped in MessageInjectionError and
+     * propagated (never swallowed, never left silent); no request is built
+     * for that iteration. */
+    readonly drainMessages?: () => readonly Readonly<Record<string, unknown>>[];
   }): Promise<ConversationTurnResult> {
     const sessionId = input.sessionId ?? this.options.idSource();
     let session = this.options.repository.session(sessionId);
@@ -132,6 +141,18 @@ export class ConversationRuntime {
     try {
       for (let iteration = 1; iteration <= this.maxIterations; iteration += 1) {
         if (signal.aborted) throw new ConversationCancelledError(sessionId, signal.reason);
+        if (input.drainMessages !== undefined) {
+          let injected: readonly Readonly<Record<string, unknown>>[];
+          try {
+            injected = input.drainMessages();
+          } catch (error) {
+            throw new MessageInjectionError(sessionId, error);
+          }
+          for (const injectedMessage of injected) {
+            messages.push(injectedMessage);
+            turnMessages.push(injectedMessage);
+          }
+        }
         const request: ModelRequest = {
           system: session.systemPrompt,
           messages: immutableMessages(messages),
