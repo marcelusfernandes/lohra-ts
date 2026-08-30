@@ -78,7 +78,7 @@ result["t10-tool-schema-mutation-three-way"] = {
     "anthropic_changed": anth_built["tools"][0]["input_schema"]["properties"]["x"]["type"] == "number",
     "responses_changed": resp_built["tools"][0]["parameters"]["properties"]["x"]["type"] == "number",
 }
-anth_raw = {"content": [{"type": "thinking", "signature": "s", "thinking": "r"}, {"type": "redacted_thinking", "data": "b"}, {"type": "text", "text": "x"}, {"type": "tool_use", "id": "c", "name": "read", "input": {"path": "café"}}], "stop_reason": "pause_turn", "usage": {"input_tokens": 70, "output_tokens": 30, "cache_read_input_tokens": 5}}
+anth_raw = {"content": [{"type": "thinking", "signature": "s", "thinking": "r"}, {"type": "redacted_thinking", "data": "b"}, {"type": "text", "text": "x"}, {"type": "tool_use", "id": "c", "name": "read", "input": {"path": "café", "whole": 1.0, "nested": {"value": 2.0}, "array": [3.0], "exponent": 1e2, "integer": 7}}], "stop_reason": "pause_turn", "usage": {"input_tokens": 70, "output_tokens": 30, "cache_read_input_tokens": 5}}
 result["t10-anthropic-normalize-stop-and-thinking"] = normalized(anthropic.normalize_response(anth_raw))
 resp_raw = {"status": "incomplete", "output": [{"type": "reasoning", "summary": [{"text": "why"}], "encrypted_content": "enc"}, {"type": "message", "content": [{"type": "refusal", "refusal": "no"}]}], "usage": {"input_tokens": 20, "output_tokens": 7, "input_tokens_details": {"cached_tokens": 5}, "output_tokens_details": {"reasoning_tokens": 3}}}
 result["t10-responses-normalize-status-refusal"] = normalized(responses.normalize_response(resp_raw))

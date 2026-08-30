@@ -24,6 +24,7 @@ type RequestRecord = {
   readonly path: string;
   readonly headers: Record<string, string>;
   readonly body: unknown;
+  readonly rawBody: string;
 };
 
 const root = resolve(import.meta.dirname, "../../..");
@@ -138,6 +139,13 @@ function anthropic(
       usage: usage(manifest.fixture === "pause" ? 6 : 3, manifest.fixture === "pause" ? 3 : 1),
     };
   if (!stream) {
+    if (manifest.fixture === "tool" && index === 0) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        '{"content":[{"type":"tool_use","id":"call-1","name":"terminal","input":{"command":"sleep 2","timeout":1.0}}],"stop_reason":"tool_use","usage":{"input_tokens":4,"output_tokens":2,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}',
+      );
+      return;
+    }
     json(response, payload);
     return;
   }
@@ -271,7 +279,13 @@ const server = createServer((request: IncomingMessage, response: ServerResponse)
         value === undefined ? [] : [[key, Array.isArray(value) ? value.join(", ") : value]],
       ),
     );
-    const record = { method: request.method ?? "", path: request.url ?? "", headers, body: parsed };
+    const record = {
+      method: request.method ?? "",
+      path: request.url ?? "",
+      headers,
+      body: parsed,
+      rawBody: text,
+    };
     active.requests.push(record);
     const index = active.requests.length - 1;
     const stream = parsed.stream === true;
@@ -454,6 +468,9 @@ function projectedRequests(records: readonly RequestRecord[]): unknown {
       ),
     ),
     body: normalizeRuntimePaths(record.body),
+    timeoutToken:
+      record.rawBody.match(/"timeout"\s*:\s*(-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/u)?.[1] ??
+      null,
   }));
 }
 

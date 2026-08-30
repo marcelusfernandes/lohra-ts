@@ -1,5 +1,6 @@
 import { assembleStreamedResponse } from "./stream.js";
 import { ProviderCallFailed } from "./errors.js";
+import { jsonStringifyPythonNumbers, pythonJsonLoads } from "../serialization/python-json.js";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { ChatCompletionsTransport } from "./chat-completions.js";
@@ -158,7 +159,10 @@ function providerFailure(response: HttpResponseData): ProviderCallFailed {
   });
 }
 
-function parseSse(body: Uint8Array): unknown[] {
+function parseSse(
+  body: Uint8Array,
+  parse: (value: string) => unknown = (value) => JSON.parse(value) as unknown,
+): unknown[] {
   const chunks: unknown[] = [];
   const blocks = new TextDecoder().decode(body).split(/\r?\n\r?\n/u);
   for (const block of blocks) {
@@ -169,7 +173,7 @@ function parseSse(body: Uint8Array): unknown[] {
       .join("\n");
     if (!data) continue;
     if (data === "[DONE]") break;
-    chunks.push(JSON.parse(data) as unknown);
+    chunks.push(parse(data));
   }
   return chunks;
 }
@@ -325,7 +329,7 @@ function anthropicStream(chunks: readonly unknown[]): unknown {
   for (const block of content) {
     if (typeof block.__json === "string") {
       try {
-        block.input = JSON.parse(block.__json) as unknown;
+        block.input = pythonJsonLoads(block.__json);
       } catch {
         block.input = {};
       }
@@ -351,12 +355,14 @@ export class AnthropicMessagesClient {
 
   async create(kwargs: ChatKwargs, signal?: AbortSignal): Promise<NormalizedResponse> {
     const response = await this.request(kwargs, signal);
-    return this.options.transport.normalizeResponse(parseJson(response.body));
+    return this.options.transport.normalizeResponse(
+      pythonJsonLoads(new TextDecoder().decode(response.body)),
+    );
   }
 
   async stream(kwargs: ChatKwargs, callbacks: StreamCallbacks = {}): Promise<NormalizedResponse> {
     const response = await this.request({ ...kwargs, stream: true });
-    const chunks = parseSse(response.body);
+    const chunks = parseSse(response.body, pythonJsonLoads);
     for (const raw of chunks) {
       const event = record(raw);
       const delta = record(event.delta);
@@ -392,7 +398,7 @@ export class AnthropicMessagesClient {
           accept: "application/json",
           "content-type": "application/json",
         },
-        body: JSON.stringify(body),
+        body: jsonStringifyPythonNumbers(body),
         timeoutMs: this.timeoutMs,
         maxBytes: this.maxResponseBytes,
         ...(signal === undefined ? {} : { signal }),

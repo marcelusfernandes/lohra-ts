@@ -5,6 +5,7 @@ import { TextEncoder } from "node:util";
 const Headers = globalThis.Headers;
 
 import { AuxClient, ClientPool } from "../../../dist/agent/index.js";
+import { pythonJsonLoads } from "../../../dist/serialization/python-json.js";
 import {
   CODEX_PROVIDER,
   getMaxTokens,
@@ -187,16 +188,9 @@ result["t10-tool-schema-mutation-three-way"] = {
   anthropic_changed: anthBuilt.tools[0].input_schema.properties.x.type === "number",
   responses_changed: respBuilt.tools[0].parameters.properties.x.type === "number",
 };
-const anthRaw = {
-  content: [
-    { type: "thinking", signature: "s", thinking: "r" },
-    { type: "redacted_thinking", data: "b" },
-    { type: "text", text: "x" },
-    { type: "tool_use", id: "c", name: "read", input: { path: "café" } },
-  ],
-  stop_reason: "pause_turn",
-  usage: { input_tokens: 70, output_tokens: 30, cache_read_input_tokens: 5 },
-};
+const anthRaw = pythonJsonLoads(
+  '{"content":[{"type":"thinking","signature":"s","thinking":"r"},{"type":"redacted_thinking","data":"b"},{"type":"text","text":"x"},{"type":"tool_use","id":"c","name":"read","input":{"path":"café","whole":1.0,"nested":{"value":2.0},"array":[3.0],"exponent":1e2,"integer":7}}],"stop_reason":"pause_turn","usage":{"input_tokens":70,"output_tokens":30,"cache_read_input_tokens":5}}',
+);
 result["t10-anthropic-normalize-stop-and-thinking"] = normalized(
   anthropic.normalizeResponse(anthRaw),
 );

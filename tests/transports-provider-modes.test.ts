@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  pythonJsonDumpsInsertionOrder,
+  pythonJsonLoads,
+} from "../src/serialization/python-json.js";
+import {
   AnthropicMessagesTransport,
   ResponsesTransport,
   listTransports,
@@ -92,6 +96,36 @@ describe("AnthropicMessagesTransport", () => {
         ],
       },
     });
+  });
+
+  it("preserves raw numeric kinds in tool_use input and replay", () => {
+    const transport = new AnthropicMessagesTransport();
+    const normalized = transport.normalizeResponse(
+      pythonJsonLoads(
+        '{"content":[{"type":"tool_use","id":"c1","name":"terminal","input":{"command":"sleep 2","timeout":1.0,"nested":{"value":2.0},"array":[3.0],"exponent":1e2,"integer":7}}],"stop_reason":"tool_use"}',
+      ),
+    );
+    expect(normalized.toolCalls[0]?.arguments).toBe(
+      '{"command": "sleep 2", "timeout": 1.0, "nested": {"value": 2.0}, "array": [3.0], "exponent": 100.0, "integer": 7}',
+    );
+    const replay = transport.buildKwargs({
+      model: "claude",
+      messages: [
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              id: "c1",
+              function: { name: "terminal", arguments: normalized.toolCalls[0]?.arguments },
+            },
+          ],
+        },
+      ],
+    });
+    expect(pythonJsonDumpsInsertionOrder(replay.messages)).toBe(
+      '[{"role": "assistant", "content": [{"type": "tool_use", "id": "c1", "name": "terminal", "input": {"command": "sleep 2", "timeout": 1.0, "nested": {"value": 2.0}, "array": [3.0], "exponent": 100.0, "integer": 7}}]}]',
+    );
   });
 });
 

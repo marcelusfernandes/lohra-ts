@@ -1,4 +1,4 @@
-import { pythonJsonDumpsInsertionOrder } from "../serialization/python-json.js";
+import { pythonJsonDumpsInsertionOrder, pythonJsonLoads } from "../serialization/python-json.js";
 import type {
   BuildKwargsOptions,
   ChatKwargs,
@@ -71,7 +71,7 @@ function assistant(message: Readonly<Record<string, unknown>>): Record<string, u
     let input: unknown = {};
     if (typeof fn.arguments === "string") {
       try {
-        input = JSON.parse(fn.arguments) as unknown;
+        input = pythonJsonLoads(fn.arguments);
       } catch {
         input = {};
       }

@@ -25,6 +25,117 @@ export function pythonFloat(value: number): PythonFloat {
   return new PythonFloat(value);
 }
 
+class PythonJsonParser {
+  private index = 0;
+
+  public constructor(private readonly source: string) {}
+
+  public parse(): unknown {
+    const value = this.value();
+    this.whitespace();
+    if (this.index !== this.source.length) throw new SyntaxError("Unexpected JSON suffix");
+    return value;
+  }
+
+  private whitespace(): void {
+    while (/\s/u.test(this.source[this.index] ?? "")) this.index += 1;
+  }
+
+  private value(): unknown {
+    this.whitespace();
+    const token = this.source[this.index];
+    if (token === '"') return this.string();
+    if (token === "{") return this.object();
+    if (token === "[") return this.array();
+    if (token === "t") return this.literal("true", true);
+    if (token === "f") return this.literal("false", false);
+    if (token === "n") return this.literal("null", null);
+    return this.number();
+  }
+
+  private string(): string {
+    const start = this.index;
+    this.index += 1;
+    while (this.index < this.source.length) {
+      const token = this.source[this.index];
+      if (token === "\\") {
+        this.index += 2;
+        continue;
+      }
+      this.index += 1;
+      if (token === '"') return JSON.parse(this.source.slice(start, this.index)) as string;
+    }
+    throw new SyntaxError("Unterminated JSON string");
+  }
+
+  private object(): Record<string, unknown> {
+    this.index += 1;
+    const result: Record<string, unknown> = {};
+    this.whitespace();
+    if (this.source[this.index] === "}") {
+      this.index += 1;
+      return result;
+    }
+    for (;;) {
+      this.whitespace();
+      if (this.source[this.index] !== '"') throw new SyntaxError("Expected JSON object key");
+      const key = this.string();
+      this.whitespace();
+      if (this.source[this.index] !== ":") throw new SyntaxError("Expected JSON colon");
+      this.index += 1;
+      Object.defineProperty(result, key, {
+        value: this.value(),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+      this.whitespace();
+      const delimiter = this.source[this.index];
+      this.index += 1;
+      if (delimiter === "}") return result;
+      if (delimiter !== ",") throw new SyntaxError("Expected JSON object delimiter");
+    }
+  }
+
+  private array(): unknown[] {
+    this.index += 1;
+    const result: unknown[] = [];
+    this.whitespace();
+    if (this.source[this.index] === "]") {
+      this.index += 1;
+      return result;
+    }
+    for (;;) {
+      result.push(this.value());
+      this.whitespace();
+      const delimiter = this.source[this.index];
+      this.index += 1;
+      if (delimiter === "]") return result;
+      if (delimiter !== ",") throw new SyntaxError("Expected JSON array delimiter");
+    }
+  }
+
+  private literal(text: string, value: unknown): unknown {
+    if (!this.source.startsWith(text, this.index)) throw new SyntaxError("Invalid JSON literal");
+    this.index += text.length;
+    return value;
+  }
+
+  private number(): number | PythonFloat {
+    const match = this.source
+      .slice(this.index)
+      .match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/u)?.[0];
+    if (!match) throw new SyntaxError("Invalid JSON number");
+    this.index += match.length;
+    const value = Number(match);
+    return match.includes(".") || /e/iu.test(match) ? pythonFloat(value) : value;
+  }
+}
+
+export function pythonJsonLoads(value: string): unknown {
+  return new PythonJsonParser(value).parse();
+}
+
 function decimalParts(value: number): { readonly digits: string; readonly exponent: number } {
   const raw = Math.abs(value).toString().toLowerCase();
   const exponentIndex = raw.indexOf("e");
@@ -115,6 +226,27 @@ function encode(value: unknown, sortKeys: boolean, ensureAscii = true): string {
       .join(", ")}}`;
   }
   throw new TypeError(`Value of type ${typeof value} is not JSON serializable`);
+}
+
+function encodeCompact(value: unknown): string {
+  if (value instanceof PythonFloat) return encodeFloat(value.value);
+  if (value === null) return "null";
+  if (typeof value === "string" || typeof value === "boolean" || typeof value === "number") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value))
+    return `[${value.map((entry) => (entry === undefined ? "null" : encodeCompact(entry))).join(",")}]`;
+  if (typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .map(([key, entry]) => `${JSON.stringify(key)}:${encodeCompact(entry)}`)
+      .join(",")}}`;
+  }
+  throw new TypeError(`Value of type ${typeof value} is not JSON serializable`);
+}
+
+export function jsonStringifyPythonNumbers(value: unknown): string {
+  return encodeCompact(value);
 }
 
 export function pythonJsonDumps(value: unknown): string {

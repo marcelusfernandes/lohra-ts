@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   pythonFloat,
+  pythonJsonLoads,
   pythonJsonDumps,
   pythonJsonDumpsInsertionOrder,
 } from "../src/serialization/python-json.js";
@@ -61,5 +62,14 @@ describe("Python-compatible JSON serializer", () => {
     for (const ambiguous of [-0, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
       expect(() => pythonJsonDumps({ n: ambiguous })).toThrow(/pythonFloat/);
     }
+  });
+
+  it("loads JSON numeric tokens with Python int/float identity at every depth", () => {
+    const loaded = pythonJsonLoads(
+      '{"integer":7,"whole":1.0,"nested":{"exponent":1e2},"array":[3.0,4]}',
+    );
+    expect(pythonJsonDumpsInsertionOrder(loaded)).toBe(
+      '{"integer": 7, "whole": 1.0, "nested": {"exponent": 100.0}, "array": [3.0, 4]}',
+    );
   });
 });

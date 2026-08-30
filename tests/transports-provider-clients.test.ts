@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { pythonFloat } from "../src/serialization/python-json.js";
 import {
   AnthropicMessagesClient,
   AnthropicMessagesTransport,
@@ -73,6 +74,58 @@ describe("AnthropicMessagesClient", () => {
       '"Could not resolve authentication method.',
     );
     expect(http.requests).toEqual([]);
+  });
+
+  it("emits Python float tokens in replayed Anthropic tool inputs", async () => {
+    const http = new QueueHttp([
+      body('{"content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{}}'),
+    ]);
+    const client = new AnthropicMessagesClient({
+      baseUrl: "http://127.0.0.1:9",
+      apiKey: "dummy",
+      transport: new AnthropicMessagesTransport(),
+      http,
+    });
+    await client.create({
+      model: "m",
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "c1",
+              name: "terminal",
+              input: { timeout: pythonFloat(1), ratio: pythonFloat(2.5), count: 7 },
+            },
+          ],
+        },
+      ],
+      max_tokens: 1,
+    });
+    expect(http.requests[0]?.body).toContain('"input":{"timeout":1.0,"ratio":2.5,"count":7}');
+  });
+
+  it("preserves numeric kinds in streamed Anthropic tool input deltas", async () => {
+    const http = new QueueHttp([
+      body(
+        [
+          'data: {"type":"message_start","message":{"usage":{"input_tokens":2}}}',
+          'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"c1","name":"terminal","input":{}}}',
+          'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"timeout\\":1.0,\\"ratio\\":2.5,\\"count\\":7}"}}',
+          'data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":1}}',
+          "",
+        ].join("\n\n"),
+      ),
+    ]);
+    const client = new AnthropicMessagesClient({
+      baseUrl: "http://127.0.0.1:9",
+      apiKey: "dummy",
+      transport: new AnthropicMessagesTransport(),
+      http,
+    });
+    const normalized = await client.stream({ model: "m", messages: [], max_tokens: 1 });
+    expect(normalized.toolCalls[0]?.arguments).toBe('{"timeout": 1.0, "ratio": 2.5, "count": 7}');
   });
 });
 
