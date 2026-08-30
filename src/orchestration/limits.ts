@@ -5,13 +5,16 @@ export interface EnvClampResult {
 
 /**
  * Mirrors Python's int(str): optional sign, digits only, surrounding
- * whitespace trimmed. Rejects decimals ("3.0") and non-numeric strings alike
- * — both fall into the same "not an integer" branch as the oracle.
+ * whitespace trimmed, with a single underscore allowed as a digit separator
+ * between digits (PEP 515) — "1_0" parses as 10, but "_10", "10_" and "1__0"
+ * are all rejected, same as the oracle. Rejects decimals ("3.0") and
+ * non-numeric strings alike — both fall into the same "not an integer"
+ * branch as the oracle.
  */
 function pythonInt(raw: string): number | null {
   const trimmed = raw.trim();
-  if (!/^[+-]?\d+$/.test(trimmed)) return null;
-  return Number(trimmed);
+  if (!/^[+-]?\d+(_\d+)*$/.test(trimmed)) return null;
+  return Number(trimmed.replace(/_/g, ""));
 }
 
 /**
@@ -42,7 +45,17 @@ export function positiveIntEnv(
   return { value: parsed, warning: null };
 }
 
-/** The CLI-flag clamp rule: invalid values floor to 1, never fall back to a default. */
+/**
+ * The CLI-flag clamp rule: an integer <= 0 floors to 1, never falls back to
+ * a default. Throws on non-integer input rather than truncating — the
+ * oracle's argparse(type=int) rejects a non-integer flag value outright
+ * (exit 2, usage message) before any clamping runs, so a non-integer must
+ * never reach this function on the real CLI path. The strict integer check
+ * belongs to the flag parser built alongside the CLI wiring, not here.
+ */
 export function clampFlagMinOne(value: number): number {
-  return Math.max(1, Math.trunc(value));
+  if (!Number.isInteger(value)) {
+    throw new Error(`clampFlagMinOne requires an integer, got ${String(value)}`);
+  }
+  return Math.max(1, value);
 }

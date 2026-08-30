@@ -74,6 +74,32 @@ describe("positiveIntEnv", () => {
       warning: null,
     });
   });
+
+  // Evaluator baseline §9/L26 (evidence-s12-env-edges.json): Python's int()
+  // accepts a single underscore as a digit separator between digits.
+  // "1_0" is accepted as 10 by the oracle, silently, no warning.
+  it("accepts a single underscore between digits as a Python int() digit separator", () => {
+    expect(positiveIntEnv("LOHRA_MAX_PARALLEL", "1_0", 4)).toEqual({
+      value: 10,
+      warning: null,
+    });
+  });
+
+  it("rejects underscore placements Python's int() itself rejects", () => {
+    // Leading, trailing, and doubled underscores are invalid int() literals.
+    expect(positiveIntEnv("LOHRA_MAX_PARALLEL", "_10", 4)).toEqual({
+      value: 4,
+      warning: "ignoring LOHRA_MAX_PARALLEL='_10': not an integer; using 4",
+    });
+    expect(positiveIntEnv("LOHRA_MAX_PARALLEL", "10_", 4)).toEqual({
+      value: 4,
+      warning: "ignoring LOHRA_MAX_PARALLEL='10_': not an integer; using 4",
+    });
+    expect(positiveIntEnv("LOHRA_MAX_PARALLEL", "1__0", 4)).toEqual({
+      value: 4,
+      warning: "ignoring LOHRA_MAX_PARALLEL='1__0': not an integer; using 4",
+    });
+  });
 });
 
 describe("clampFlagMinOne", () => {
@@ -82,13 +108,20 @@ describe("clampFlagMinOne", () => {
     expect(clampFlagMinOne(3)).toBe(3);
   });
 
-  it("clamps zero and negative values to 1 — the asymmetric flag rule (assertion 24)", () => {
+  it("clamps zero and negative integers to 1 — the asymmetric flag rule (assertion 24)", () => {
     expect(clampFlagMinOne(0)).toBe(1);
     expect(clampFlagMinOne(-5)).toBe(1);
   });
 
-  it("truncates non-integer numbers before clamping", () => {
-    expect(clampFlagMinOne(2.9)).toBe(2);
-    expect(clampFlagMinOne(-0.5)).toBe(1);
+  // Evaluator baseline §9/L26: `--max-parallel 2.9` never reaches a clamp —
+  // the oracle's argparse(type=int) rejects it outright with exit 2 and a
+  // usage message, before any clamping logic runs. Silently truncating and
+  // continuing (the v1 behavior) accepts an input the oracle refuses — the
+  // unsafe direction. This function now refuses to guess: it's the CLI
+  // layer's job (a strict integer parser, built with the flag wiring) to
+  // reject non-integers before ever calling this function.
+  it("throws on non-integer input instead of truncating — that input never reaches this function on the real CLI path", () => {
+    expect(() => clampFlagMinOne(2.9)).toThrow(/integer/);
+    expect(() => clampFlagMinOne(-0.5)).toThrow(/integer/);
   });
 });
