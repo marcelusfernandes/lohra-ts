@@ -32,6 +32,7 @@ export interface GatewaySessionInfo {
 export class GatewaySessionRegistry {
   private readonly busySessions = new Set<string>();
   private readonly armedInterruptLatches = new Set<string>();
+  private readonly activeTurnControllers = new Map<string, AbortController>();
 
   public constructor(private readonly sessions: SessionRepository) {}
 
@@ -65,10 +66,18 @@ export class GatewaySessionRegistry {
     return this.sessions.loadMessages(sessionId ?? "");
   }
 
+  // Idle session -> arm the one-shot latch a subsequent prompt.submit
+  // consumes. Busy session (a turn is actively running, possibly on a
+  // DIFFERENT socket -- interrupt is explicitly cross-socket, L19) -> abort
+  // that turn's controller, which ConversationRuntime.runTurn checks at the
+  // top of its next iteration and turns into ConversationCancelledError.
+  // Either way the RPC response is {ok:true} immediately (L16).
   public interrupt(sessionId: string | undefined): { readonly ok: boolean } {
     if (sessionId === undefined) return { ok: false };
     if (this.sessions.getSession(sessionId) === null) return { ok: false };
-    this.armedInterruptLatches.add(sessionId);
+    const activeController = this.activeTurnControllers.get(sessionId);
+    if (activeController !== undefined) activeController.abort();
+    else this.armedInterruptLatches.add(sessionId);
     return { ok: true };
   }
 
@@ -88,6 +97,22 @@ export class GatewaySessionRegistry {
 
   public clearBusy(sessionId: string): void {
     this.busySessions.delete(sessionId);
+  }
+
+  // Registers the AbortController driving sessionId's current turn so a
+  // session.interrupt arriving on ANY socket (including a different one)
+  // can reach it. Callers must also call markBusy/clearBusy around the
+  // same turn -- beginTurn does not do that itself, since the caller
+  // controls exactly when "busy" starts (after the idle-latch check) versus
+  // when the controller needs to exist.
+  public beginTurn(sessionId: string): AbortController {
+    const controller = new AbortController();
+    this.activeTurnControllers.set(sessionId, controller);
+    return controller;
+  }
+
+  public endTurn(sessionId: string): void {
+    this.activeTurnControllers.delete(sessionId);
   }
 
   public sessionInfo(input: {

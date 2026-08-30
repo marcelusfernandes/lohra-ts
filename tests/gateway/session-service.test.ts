@@ -124,6 +124,26 @@ describe("GatewaySessionRegistry.interrupt", () => {
     expect(registry.consumeInterruptLatch("s1")).toBe(true);
     expect(registry.consumeInterruptLatch("s1")).toBe(false);
   });
+
+  it("aborts the active turn's controller instead of arming the latch when a turn is running (L19: cross-socket)", () => {
+    const { registry, sessions } = setup();
+    sessions.createSession({ id: "s1", model: "m", startedAt: 10 });
+    const controller = registry.beginTurn("s1");
+    expect(registry.interrupt("s1")).toEqual({ ok: true });
+    expect(controller.signal.aborted).toBe(true);
+    // Because a turn was active, the idle latch is NOT what fired.
+    expect(registry.consumeInterruptLatch("s1")).toBe(false);
+  });
+
+  it("endTurn clears the active controller, so a later interrupt goes back to arming the latch", () => {
+    const { registry, sessions } = setup();
+    sessions.createSession({ id: "s1", model: "m", startedAt: 10 });
+    const controller = registry.beginTurn("s1");
+    registry.endTurn("s1");
+    registry.interrupt("s1");
+    expect(controller.signal.aborted).toBe(false);
+    expect(registry.consumeInterruptLatch("s1")).toBe(true);
+  });
 });
 
 describe("GatewaySessionRegistry busy tracking", () => {

@@ -108,7 +108,11 @@ function pythonRepr(value: unknown): string {
   return "None";
 }
 
-function publicError(error: unknown): string {
+// Exported for reuse by the gateway (T12), which needs the same causal
+// preservation (upstream status + canary survive to the client) for
+// message.complete.warning -- the exact repr text is a T10 boundary neither
+// ticket fixes byte-for-byte, only the status/canary presence.
+export function publicError(error: unknown): string {
   const cause = error instanceof Error ? error.cause : undefined;
   if (cause instanceof ProviderCallFailed && cause.statusCode !== undefined) {
     return `Error code: ${String(cause.statusCode)} - ${pythonRepr(cause.payload)}`;
