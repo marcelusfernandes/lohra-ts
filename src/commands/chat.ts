@@ -26,6 +26,7 @@ import {
   type ProviderProfile,
 } from "../providers/index.js";
 import { pythonJsonDumpsInsertionOrder } from "../serialization/python-json.js";
+import { pythonRepr } from "../serialization/python-repr.js";
 import { openStateForEnvironment, SessionRepository } from "../state/index.js";
 import { SkillStore } from "../skills/index.js";
 import {
@@ -87,25 +88,6 @@ function finite(value: string | undefined, name: string): number | undefined {
   const result = Number(value);
   if (!Number.isFinite(result)) throw new Error(`CHAT_OPTION_INVALID:${name}`);
   return result;
-}
-
-function pythonRepr(value: unknown): string {
-  if (value === null) return "None";
-  if (value === undefined) return "None";
-  if (value === true) return "True";
-  if (value === false) return "False";
-  if (typeof value === "string")
-    return `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
-  if (typeof value === "number") return String(value);
-  if (Array.isArray(value)) return `[${value.map(pythonRepr).join(", ")}]`;
-  if (typeof value === "object")
-    return `{${Object.entries(value as Record<string, unknown>)
-      .map(([key, entry]) => `${pythonRepr(key)}: ${pythonRepr(entry)}`)
-      .join(", ")}}`;
-  if (typeof value === "bigint") return String(value);
-  if (typeof value === "symbol") return value.description ?? "";
-  if (typeof value === "function") return value.name;
-  return "None";
 }
 
 function publicError(error: unknown): string {
