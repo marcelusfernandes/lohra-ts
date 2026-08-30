@@ -120,7 +120,7 @@ export interface RuntimePaths {
   readonly tmp: string;
 }
 
-function materialize(side: "oracle" | "candidate"): RuntimePaths {
+export function materialize(side: "oracle" | "candidate"): RuntimePaths {
   const runtimeRoot = mkdtempSync(join(tmpdir(), `lohra-t11-${side}-`));
   const home = join(runtimeRoot, "home");
   const cwd = join(runtimeRoot, "project");
@@ -139,13 +139,27 @@ export interface ServerHandle {
   stop(signal?: NodeJS.Signals): Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>;
 }
 
-export async function startServer(
+export interface ServeInvocation {
+  readonly executable: string;
+  readonly args: readonly string[];
+  readonly env: Record<string, string>;
+  readonly apiKey: string | null;
+}
+
+/** Builds the exact env/argv `startServer` and the `[processo-ts]` helpers
+ * both launch — a subscription-gate or occupied-port scenario needs the
+ * IDENTICAL invocation a bilateral scenario uses, just observed for
+ * refusal instead of success. `loopbackUpstreamUrl`/`FAKE_BASE_URL` are
+ * still required even when the gate is expected to fire before any
+ * provider call: `oracle-launcher.py` reads `os.environ["FAKE_BASE_URL"]`
+ * unconditionally while registering the fixture profile. */
+export function buildServeInvocation(
   side: "oracle" | "candidate",
   config: ServerConfig,
   loopbackUpstreamUrl: string,
-): Promise<ServerHandle> {
-  const port = await allocatePort();
-  const paths = materialize(side);
+  paths: RuntimePaths,
+  port: number,
+): ServeInvocation {
   const apiKey = config.insecure ? null : (config.apiKey ?? FIXED_API_KEY);
   const env: Record<string, string> = {
     PATH: side === "oracle" ? `${resolve(oraclePython, "..")}:/usr/bin:/bin` : "/usr/bin:/bin",
@@ -182,6 +196,17 @@ export async function startServer(
             ...(config.tools ? ["--tools", config.tools] : []),
           ],
         ];
+  return { executable, args, env, apiKey };
+}
+
+export async function startServer(
+  side: "oracle" | "candidate",
+  config: ServerConfig,
+  loopbackUpstreamUrl: string,
+): Promise<ServerHandle> {
+  const port = await allocatePort();
+  const paths = materialize(side);
+  const { executable, args, env, apiKey } = buildServeInvocation(side, config, loopbackUpstreamUrl, paths, port);
   const child: ChildProcessByStdio<null, Readable, Readable> = spawn(executable, args, {
     cwd: paths.cwd,
     env,
@@ -387,6 +412,71 @@ export function writeEvidence(id: string, record: unknown): string {
   }
   writeFileSync(join(evidenceRoot, `${id}.json`), `${text}\n`, "utf8");
   return sha256(text);
+}
+
+/** Seeds `home/auth.json` in the exact shape both sides' own config
+ * readers expect (`src/auth/store.ts`'s `readConfig`, and the oracle's
+ * equivalent) — `{"openai": {auth_mode, acknowledged_tos_risk, preference}}`.
+ * Used by the `[processo-ts]` subscription-gate scenarios. */
+export function seedSubscriptionAuth(
+  paths: RuntimePaths,
+  config: { readonly authMode: string; readonly acknowledgedTosRisk: boolean; readonly preference?: string },
+): void {
+  writeFileSync(
+    join(paths.home, "auth.json"),
+    JSON.stringify({
+      openai: {
+        auth_mode: config.authMode,
+        acknowledged_tos_risk: config.acknowledgedTosRisk,
+        preference: config.preference ?? "auto",
+      },
+    }),
+    "utf8",
+  );
+}
+
+export interface ProcessResult {
+  readonly exitCode: number | null;
+  readonly signal: NodeJS.Signals | null;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+/** Runs a `serve` invocation to completion (or kills it after `timeoutMs` —
+ * itself a failure for every `[processo-ts]` scenario that expects a fast,
+ * deterministic refusal) instead of waiting for it to start listening.
+ * Never touches the caller's `loopbackUpstreamUrl`/port beyond what
+ * `buildServeInvocation` already needs. */
+export function runProcessToCompletion(invocation: ServeInvocation, cwd: string, timeoutMs = 8000): Promise<ProcessResult> {
+  return new Promise((resolveRun, reject) => {
+    const child = spawn(invocation.executable, invocation.args, {
+      cwd,
+      env: invocation.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      child.kill("SIGKILL");
+      reject(new Error(`T11_PROCESS_TIMEOUT:stderr=${Buffer.concat(stderrChunks).toString("utf8")}`));
+    }, timeoutMs);
+    child.once("error", reject);
+    child.once("close", (exitCode, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolveRun({
+        exitCode,
+        signal,
+        stdout: Buffer.concat(stdoutChunks).toString("utf8"),
+        stderr: Buffer.concat(stderrChunks).toString("utf8"),
+      });
+    });
+  });
 }
 
 export { FIXED_API_KEY, FAKE_UPSTREAM_KEY };
