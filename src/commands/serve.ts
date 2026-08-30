@@ -95,13 +95,14 @@ export async function runServe(options: ServeCommandOptions): Promise<number> {
       options.stderr("    ⚠️  --insecure with tools = UNAUTHENTICATED remote code execution.\n");
   }
 
-  const modelTransport =
+  const [modelTransport, streamingModelTransport] =
     client instanceof AnthropicMessagesClient
-      ? new AnthropicMessagesModel(client, true)
-      : new ChatCompletionsModel(client, true);
+      ? [new AnthropicMessagesModel(client, false), new AnthropicMessagesModel(client, true)]
+      : [new ChatCompletionsModel(client, false), new ChatCompletionsModel(client, true)];
 
   const service = new CompletionService({
     transport: modelTransport,
+    streamingTransport: streamingModelTransport,
     systemPrompt: () => buildSystemPrompt().text,
     provider: profile.name,
     maxIterations,

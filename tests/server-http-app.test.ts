@@ -103,6 +103,7 @@ describe("createOpenAiServer — end-to-end HTTP/SSE wiring", () => {
   function start(transportResult: (request: ModelRequest) => NormalizedResponse, apiKey: string | null = "test-key") {
     const service = new CompletionService({
       transport: new ScriptedTransport(transportResult),
+      streamingTransport: new ScriptedTransport(transportResult),
       systemPrompt: () => "system",
       provider: "ollama",
       maxIterations: 8,

@@ -106,9 +106,11 @@ describe("clean EOF on a pure-text upstream stream (assertion 41)", () => {
       apiKey: "fake-key",
       transport: new ChatCompletionsTransport(),
     });
-    const model = new ChatCompletionsModel(client, true);
+    const model = new ChatCompletionsModel(client, false);
+    const streamingModel = new ChatCompletionsModel(client, true);
     const service = new CompletionService({
       transport: model,
+      streamingTransport: streamingModel,
       systemPrompt: () => "system",
       provider: "fakeprov",
       maxIterations: 8,

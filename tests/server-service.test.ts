@@ -48,6 +48,7 @@ describe("CompletionService", () => {
     const transport = new StubTransport(okResponse());
     const service = new CompletionService({
       transport,
+      streamingTransport: transport,
       systemPrompt: () => "system",
       provider: "ollama",
       maxIterations: 8,
@@ -78,6 +79,7 @@ describe("CompletionService", () => {
     const transport = new StubTransport(okResponse());
     const service = new CompletionService({
       transport,
+      streamingTransport: transport,
       systemPrompt: () => "system",
       provider: "ollama",
       maxIterations: 8,
@@ -99,6 +101,7 @@ describe("CompletionService", () => {
     const transport = new StubTransport(okResponse());
     const service = new CompletionService({
       transport,
+      streamingTransport: transport,
       systemPrompt: () => "system",
       provider: "ollama",
       maxIterations: 8,
@@ -121,6 +124,7 @@ describe("CompletionService", () => {
     const service = (finishReason: NormalizedResponse["finishReason"]) =>
       new CompletionService({
         transport: new StubTransport(okResponse({ finishReason })),
+        streamingTransport: new StubTransport(okResponse({ finishReason })),
         systemPrompt: () => "system",
         provider: "ollama",
         maxIterations: 8,
@@ -136,6 +140,7 @@ describe("CompletionService", () => {
     const transport = new StubTransport(okResponse());
     const service = new CompletionService({
       transport,
+      streamingTransport: transport,
       systemPrompt: () => "system",
       provider: "ollama",
       maxIterations: 8,
@@ -162,6 +167,7 @@ describe("CompletionService", () => {
     const transport = new StubTransport(okResponse({ usage: null, content: "abcdefgh" }));
     const service = new CompletionService({
       transport,
+      streamingTransport: transport,
       systemPrompt: () => "system",
       provider: "ollama",
       maxIterations: 8,
@@ -191,6 +197,7 @@ describe("CompletionService", () => {
     });
     const service = new CompletionService({
       transport,
+      streamingTransport: transport,
       systemPrompt: () => "system",
       provider: "ollama",
       maxIterations: 8,
@@ -220,6 +227,7 @@ describe("CompletionService", () => {
     };
     const service = new CompletionService({
       transport,
+      streamingTransport: transport,
       systemPrompt: () => "system",
       provider: "ollama",
       maxIterations: 8,
@@ -256,6 +264,7 @@ describe("CompletionService", () => {
     });
     const service = new CompletionService({
       transport,
+      streamingTransport: transport,
       systemPrompt: () => "system",
       provider: "ollama",
       maxIterations: 90,

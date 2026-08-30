@@ -15,7 +15,14 @@ import { RequestRepository } from "./request-repository.js";
 import { estimateUsage, wireUsage, type OpenAiUsage } from "./usage.js";
 
 export interface CompletionServiceDeps {
+  /** Non-streaming upstream call — used when the request has no onDelta. */
   readonly transport: ModelTransport;
+  /** Streaming upstream call — used when the request carries onDelta.
+   * Mirrors `loop.py`'s branch on `stream_delta_callback`: presence of a
+   * delta callback, not the client's `stream:` field, decides whether the
+   * upstream call itself streams (contract v2 assertion 29/64 — the wire
+   * request to the provider must not diverge from the oracle). */
+  readonly streamingTransport: ModelTransport;
   readonly systemPrompt: () => string;
   readonly provider: string;
   readonly maxIterations: number;
@@ -48,9 +55,10 @@ export class CompletionService {
   public constructor(private readonly deps: CompletionServiceDeps) {}
 
   public async run(input: RunTurnInput): Promise<CompletionResult> {
+    const transport = input.onDelta ? this.deps.streamingTransport : this.deps.transport;
     const runtime = new ConversationRuntime({
       repository: new RequestRepository(input.history),
-      transport: new NonClosingTransport(this.deps.transport),
+      transport: new NonClosingTransport(transport),
       promptSnapshot: this.deps.systemPrompt,
       idSource: () => randomUUID(),
       clock: () => Date.now(),
