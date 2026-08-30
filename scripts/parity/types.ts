@@ -195,6 +195,7 @@ export type TreeEntry =
   | {
       readonly path: string;
       readonly type: "file";
+      readonly mode: string;
       readonly size: number;
       readonly sha256: string;
     };

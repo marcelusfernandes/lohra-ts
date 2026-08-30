@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -42,6 +42,7 @@ describe("observable capture", () => {
     temporaryDirectories.push(profile);
     mkdirSync(join(profile, "nested"));
     writeFileSync(join(profile, "nested", "fixture.txt"), "fixture\n");
+    chmodSync(join(profile, "nested", "fixture.txt"), 0o600);
     writeFileSync(join(profile, "events.jsonl"), '{"kind":"started","sequence":1}\n');
 
     const database = new Database(join(profile, "state.db"));
@@ -73,6 +74,7 @@ describe("observable capture", () => {
       {
         path: "nested/fixture.txt",
         type: "file",
+        mode: "0600",
         size: 8,
         sha256: "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
       },

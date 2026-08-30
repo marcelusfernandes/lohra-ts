@@ -49,6 +49,7 @@ function captureTree(root: string, exclusions: readonly string[]): readonly Tree
         entries.push({
           path,
           type: "file",
+          mode: (stats.mode & 0o777).toString(8).padStart(4, "0"),
           size: stats.size,
           sha256: createHash("sha256").update(readFileSync(absolute)).digest("hex"),
         });

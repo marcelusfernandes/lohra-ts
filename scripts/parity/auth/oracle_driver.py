@@ -23,6 +23,7 @@ def store_merge():
     emit({"config":config_json(read_config(HOME)),"neighbor":auth["neighbor"],"future":auth["openai"]["future"],"authMode":permissions(HOME/"auth.json"),"oauthMode":permissions(HOME/"oauth.json"),"oauth":{"accountId":tokens.account_id,"expiresAt":tokens.expires_at,"redacted":repr(tokens)},"temporary":[p.name for p in HOME.iterdir() if ".tmp" in p.name]})
 
 def route_table():
+    from lohra import cli
     from lohra.subscription.credentials import route_for
     rows=[]
     for preference in ["auto","typo","api_key","subscription"]:
@@ -31,7 +32,9 @@ def route_table():
             if route.note is not None: row["note"]=route.note
             if route.error is not None: row["error"]=route.error
             rows.append(row)
-    emit(rows)
+    stdout=StringIO(); stderr=StringIO()
+    with redirect_stdout(stdout), redirect_stderr(stderr): code=cli.main(["auth", "prefer", "AUTO"])
+    emit({"invalidCase":{"code":code,"stdout":stdout.getvalue(),"stderr":stderr.getvalue()},"rows":rows})
 
 def credentials_resolution():
     from lohra.subscription.store import SubscriptionConfig, write_config

@@ -67,10 +67,10 @@ describe("comparison", () => {
 
   it("does not implicitly hide a different state.db-shm capture", () => {
     const left = record("", "", [
-      { path: ".lohra/state.db-shm", type: "file", size: 3, sha256: "aaa" },
+      { path: ".lohra/state.db-shm", type: "file", mode: "0600", size: 3, sha256: "aaa" },
     ]);
     const right = record("", "", [
-      { path: ".lohra/state.db-shm", type: "file", size: 3, sha256: "bbb" },
+      { path: ".lohra/state.db-shm", type: "file", mode: "0600", size: 3, sha256: "bbb" },
     ]);
     const result = compareRuns(left, right, {
       comparisons: [{ class: "schema", field: "tree" }],

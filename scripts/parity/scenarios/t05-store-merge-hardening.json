@@ -118,6 +118,30 @@
       "encoding": "utf8",
       "pointer": "/future",
       "value": "keep"
+    },
+    {
+      "side": "both",
+      "field": "tree",
+      "pointer": "/0/path",
+      "value": "auth.json"
+    },
+    {
+      "side": "both",
+      "field": "tree",
+      "pointer": "/0/mode",
+      "value": "0600"
+    },
+    {
+      "side": "both",
+      "field": "tree",
+      "pointer": "/1/path",
+      "value": "oauth.json"
+    },
+    {
+      "side": "both",
+      "field": "tree",
+      "pointer": "/1/mode",
+      "value": "0600"
     }
   ],
   "normalizations": [],

@@ -89,23 +89,69 @@ const pub = ({
   normalizations = [],
   preconditions = [],
   tree = true,
-}) => ({
-  schemaVersion: 1,
-  id,
-  description: `T05 public auth surface: ${id}`,
-  argv,
-  environment,
-  preconditions,
-  fixtures,
-  runners: publicRunners,
-  limits: { timeoutMs: 15000, maxOutputBytes: 4194304 },
-  capture,
-  comparisons: comparisons(tree),
-  expectations: [...baseExpectations(exitCode), ...expectations],
-  normalizations,
-  scrub,
-  oracleGuard: guard,
-});
+  socketSentinel = false,
+}) => {
+  const scenarioEnvironment = socketSentinel
+    ? {
+        ...environment,
+        set: {
+          ...environment.set,
+          NODE_OPTIONS: "--require={{projectRoot}}/scripts/parity/auth/socket-sentinel.cjs",
+          PYTHONPATH: "{{projectRoot}}/scripts/parity/auth/python-sentinel",
+          PYTHONDONTWRITEBYTECODE: "1",
+          LOHRA_SOCKET_SENTINEL: "{{profile}}/socket-sentinel.jsonl",
+        },
+      }
+    : environment;
+  const scenarioCapture = socketSentinel
+    ? {
+        ...capture,
+        tree: { ...capture.tree, exclude: ["socket-sentinel.jsonl"] },
+        events: [
+          {
+            name: "socketSentinel",
+            root: "profile",
+            path: "socket-sentinel.jsonl",
+            format: "jsonl",
+          },
+        ],
+      }
+    : capture;
+  return {
+    schemaVersion: 1,
+    id,
+    description: `T05 public auth surface: ${id}`,
+    argv,
+    environment: scenarioEnvironment,
+    preconditions,
+    fixtures,
+    runners: publicRunners,
+    limits: { timeoutMs: 15000, maxOutputBytes: 4194304 },
+    capture: scenarioCapture,
+    comparisons: [
+      ...comparisons(tree),
+      ...(socketSentinel ? [{ class: "probe", field: "events.socketSentinel" }] : []),
+    ],
+    expectations: [
+      ...baseExpectations(exitCode),
+      ...expectations,
+      ...(socketSentinel
+        ? [
+            { side: "both", field: "events.socketSentinel", pointer: "/exists", value: true },
+            {
+              side: "both",
+              field: "events.socketSentinel",
+              pointer: "/records",
+              value: [{ kind: "armed" }],
+            },
+          ]
+        : []),
+    ],
+    normalizations,
+    scrub,
+    oracleGuard: guard,
+  };
+};
 const out = (pointer, value, side = "both") => ({
   side,
   field: "process.stdout",
@@ -289,6 +335,7 @@ const manifests = [
     fixtures: [fixture("profile", "auth.json", auth())],
     exitCode: 2,
     expectations: [stream("process.stdout", "")],
+    socketSentinel: true,
   }),
   pub({
     id: "t05-serve-gate-api-key",
@@ -296,6 +343,7 @@ const manifests = [
     fixtures: [fixture("profile", "auth.json", auth("subscription", true, "api_key"))],
     exitCode: 2,
     expectations: [stream("process.stdout", "")],
+    socketSentinel: true,
   }),
 ];
 
@@ -334,12 +382,32 @@ manifests.push(
     mode: "store-merge-hardening",
     tree: true,
     fixtures: [fixture("profile", "auth.json", '{"neighbor":{"x":1},"openai":{"future":"keep"}}')],
-    expectations: [out("/authMode", "0600"), out("/oauthMode", "0600"), out("/future", "keep")],
+    expectations: [
+      out("/authMode", "0600"),
+      out("/oauthMode", "0600"),
+      out("/future", "keep"),
+      { side: "both", field: "tree", pointer: "/0/path", value: "auth.json" },
+      { side: "both", field: "tree", pointer: "/0/mode", value: "0600" },
+      { side: "both", field: "tree", pointer: "/1/path", value: "oauth.json" },
+      { side: "both", field: "tree", pointer: "/1/mode", value: "0600" },
+    ],
   }),
   probe({
     id: "t05-route-table",
     mode: "route-table",
-    expectations: [out("/5/mode", "api_key"), out("/6/mode", "api_key")],
+    expectations: [
+      out("/rows/5/mode", "api_key"),
+      out("/rows/6/mode", "api_key"),
+      out("/invalidCase/code", 2),
+      out("/invalidCase/stdout", ""),
+      out(
+        "/invalidCase/stderr",
+        "usage: lohra auth prefer <auto|subscription|api_key>\n" +
+          "  auto          use the subscription when it is enabled, else an API key (default)\n" +
+          "  subscription  require subscription mode (fails loudly when it is unusable)\n" +
+          "  api_key       always use an API key, KEEPING the subscription opt-in on file\n",
+      ),
+    ],
   }),
   probe({
     id: "t05-credentials-resolution",

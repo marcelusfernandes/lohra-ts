@@ -85,15 +85,36 @@
       "side": "both",
       "field": "process.stdout",
       "encoding": "utf8",
-      "pointer": "/5/mode",
+      "pointer": "/rows/5/mode",
       "value": "api_key"
     },
     {
       "side": "both",
       "field": "process.stdout",
       "encoding": "utf8",
-      "pointer": "/6/mode",
+      "pointer": "/rows/6/mode",
       "value": "api_key"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/invalidCase/code",
+      "value": 2
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/invalidCase/stdout",
+      "value": ""
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/invalidCase/stderr",
+      "value": "usage: lohra auth prefer <auto|subscription|api_key>\n  auto          use the subscription when it is enabled, else an API key (default)\n  subscription  require subscription mode (fails loudly when it is unusable)\n  api_key       always use an API key, KEEPING the subscription opt-in on file\n"
     }
   ],
   "normalizations": [],

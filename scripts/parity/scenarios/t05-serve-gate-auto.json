@@ -14,7 +14,11 @@
       "HOME": "{{home}}",
       "CODEX_HOME": "{{home}}/codex",
       "TMPDIR": "{{home}}/tmp",
-      "LOHRA_HOME": "{{profile}}"
+      "LOHRA_HOME": "{{profile}}",
+      "NODE_OPTIONS": "--require={{projectRoot}}/scripts/parity/auth/socket-sentinel.cjs",
+      "PYTHONPATH": "{{projectRoot}}/scripts/parity/auth/python-sentinel",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "LOHRA_SOCKET_SENTINEL": "{{profile}}/socket-sentinel.jsonl"
     }
   },
   "preconditions": [],
@@ -48,10 +52,17 @@
     "tree": {
       "enabled": true,
       "root": "profile",
-      "exclude": []
+      "exclude": ["socket-sentinel.jsonl"]
     },
     "sqlite": [],
-    "events": []
+    "events": [
+      {
+        "name": "socketSentinel",
+        "root": "profile",
+        "path": "socket-sentinel.jsonl",
+        "format": "jsonl"
+      }
+    ]
   },
   "comparisons": [
     {
@@ -73,6 +84,10 @@
     {
       "class": "schema",
       "field": "tree"
+    },
+    {
+      "class": "probe",
+      "field": "events.socketSentinel"
     }
   ],
   "expectations": [
@@ -91,6 +106,22 @@
       "field": "process.stdout",
       "encoding": "utf8",
       "value": ""
+    },
+    {
+      "side": "both",
+      "field": "events.socketSentinel",
+      "pointer": "/exists",
+      "value": true
+    },
+    {
+      "side": "both",
+      "field": "events.socketSentinel",
+      "pointer": "/records",
+      "value": [
+        {
+          "kind": "armed"
+        }
+      ]
     }
   ],
   "normalizations": [],

@@ -20,6 +20,7 @@ import {
   writeTokens,
 } from "../../../dist/auth/index.js";
 import { pythonFloat, pythonJsonDumps } from "../../../dist/serialization/python-json.js";
+import { runCli } from "../../../dist/cli.js";
 import { runAuth } from "../../../dist/commands/auth.js";
 
 const home = process.env.LOHRA_HOME;
@@ -62,12 +63,23 @@ function storeMerge() {
   });
 }
 
-function routeTable() {
+async function routeTable() {
   const rows = [];
   for (const preference of ["auto", "typo", "api_key", "subscription"])
     for (const active of [false, true])
       rows.push({ preference, active, ...routeFor(preference, active) });
-  emit(rows);
+  const invalidCase = { code: 0, stdout: "", stderr: "" };
+  invalidCase.code = await runCli(["auth", "prefer", "AUTO"], {
+    environment: { ...process.env },
+    stdout: (value) => {
+      invalidCase.stdout += value;
+    },
+    stderr: (value) => {
+      invalidCase.stderr += value;
+    },
+    isTty: false,
+  });
+  emit({ invalidCase, rows });
 }
 
 async function credentialsResolution() {
@@ -209,7 +221,7 @@ function profileIsolation() {
 
 const selected = process.argv[2];
 if (selected === "store-merge-hardening") storeMerge();
-else if (selected === "route-table") routeTable();
+else if (selected === "route-table") await routeTable();
 else if (selected === "credentials-resolution") await credentialsResolution();
 else if (selected === "oauth-device-flow") await oauthDeviceFlow();
 else if (selected === "jwt-redaction") jwtRedaction();
