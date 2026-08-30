@@ -75,6 +75,12 @@ export type CollectOutcome =
   | { readonly kind: "pending" }
   | { readonly kind: "settled"; readonly result: CollectResult };
 
+export interface DelegateOutcome {
+  readonly subId: string;
+  readonly status: SubSessionStatus;
+  readonly summary: string;
+}
+
 interface SubSessionEntry {
   readonly subId: string;
   readonly systemPrompt: string;
@@ -151,6 +157,38 @@ export class OrchestrationCore {
     });
     this.insertionOrder.push(subId);
     return { subId };
+  }
+
+  /**
+   * Spawns one child per task and BLOCKS until every one settles — the
+   * opposite of spawn's non-blocking contract (contract L5, the two verbs
+   * are opposite by design). Order in the returned array always matches
+   * task order, never completion order: Promise.all preserves index-based
+   * ordering of its input array regardless of which promise settles first,
+   * so no extra bookkeeping is needed to satisfy L17's shuffled-completion
+   * requirement. A failing task never aborts the batch or throws — each
+   * spawned child already resolves (never rejects) per ChildRunner's own
+   * contract, so Promise.all can't short-circuit here.
+   */
+  public async delegate(
+    tasks: readonly string[],
+    overrides: Omit<SpawnConfig, "prompt"> = {},
+  ): Promise<readonly DelegateOutcome[]> {
+    const spawned = tasks.map((task) => this.spawn({ ...overrides, prompt: task }));
+    return Promise.all(
+      spawned.map(async ({ subId }): Promise<DelegateOutcome> => {
+        const outcome = await this.collect(subId, true);
+        const result = outcome.kind === "settled" ? outcome.result : null;
+        const status = result?.status ?? "error";
+        const summary =
+          result === null
+            ? ""
+            : status === "complete" && result.output === ""
+              ? "(subagent produced no output)"
+              : result.output;
+        return { subId, status, summary };
+      }),
+    );
   }
 
   /**
