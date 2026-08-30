@@ -145,6 +145,16 @@ describe("GatewaySessionRegistry.list", () => {
     const rows = registry.list();
     expect(rows.map((row) => row.id)).toEqual(["b", "a"]);
   });
+
+  it("returns a JSON-serializable message_count, not a bigint (the state connection runs defaultSafeIntegers(true))", () => {
+    const { registry, sessions } = setup();
+    sessions.createSession({ id: "a", model: "m", startedAt: 10 });
+    sessions.appendMessage("a", { role: "user", content: "hi", createdAt: 11 });
+    const [row] = registry.list();
+    expect(typeof row?.message_count).toBe("number");
+    expect(row?.message_count).toBe(1);
+    expect(() => JSON.stringify(registry.list())).not.toThrow();
+  });
 });
 
 describe("GatewaySessionRegistry.sessionInfo", () => {
