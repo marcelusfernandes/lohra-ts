@@ -36,6 +36,16 @@ async function startServer(authRequired = true): Promise<GatewayHttpServer> {
     auth: { authRequired, expectedToken: TOKEN },
     sessionDefaults: { model: "gpt-5", systemPrompt: "sp", cwd: "/tmp" },
     toolNames: ["read_file"],
+    toolDefinitions: [],
+    home: root,
+    provider: "test-provider",
+    createModelTransport: () => {
+      throw new Error("no prompt.submit exercised in this test file -- see turn.test.ts / dashboard-command.test.ts");
+    },
+    createConversationRepository: () => {
+      throw new Error("no prompt.submit exercised in this test file -- see turn.test.ts / dashboard-command.test.ts");
+    },
+    dispatchTool: () => Promise.reject(new Error("no tool dispatch exercised in this test file")),
   });
   const server = await startGatewayHttpServer({
     host: "127.0.0.1",

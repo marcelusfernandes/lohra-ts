@@ -10,6 +10,14 @@ import { createGatewayUpgradeHandler } from "../gateway/ws/connection.js";
 import { startGatewayHttpServer } from "../gateway/http/server.js";
 import { routeGatewayRequest, type RouteContext } from "../gateway/http/routes.js";
 import { noProvider } from "./chat-boundary.js";
+import {
+  AnthropicMessagesModel,
+  ChatCompletionsModel,
+  ResponsesModel,
+  SqliteConversationRepository,
+} from "../conversation/index.js";
+import type { ModelTransport } from "../conversation/types.js";
+import { AnthropicMessagesClient, buildClient, createResponsesClient } from "../transports/index.js";
 
 const GATEWAY_VERSION = "0.0.11";
 const DEFAULT_PORT = 9119;
@@ -45,15 +53,33 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
   const route = resolveAuthRoute(options.home);
 
   let model: string;
+  let providerName: string;
+  let createModelTransport: () => ModelTransport;
   if (route.mode === "subscription") {
+    let credentials;
     try {
-      await resolveCredentials(options.home, { codexHome: options.codexHome });
+      credentials = await resolveCredentials(options.home, { codexHome: options.codexHome });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       options.stderr(`subscription mode: ${detail}\n`);
       return 2;
     }
+    if (credentials === null) {
+      options.stderr("subscription mode: not logged in\n");
+      return 2;
+    }
     model = option(options.argv, "--model") ?? readCodexModel(options.codexHome) ?? "gpt-5.5";
+    providerName = "codex";
+    createModelTransport = () =>
+      new ResponsesModel(
+        createResponsesClient({
+          baseUrl: credentials.baseUrl,
+          token: credentials.token,
+          accountId: credentials.accountId,
+          headers: credentials.headers,
+        }),
+        true,
+      );
   } else {
     const provider = option(options.argv, "--provider");
     if (provider === undefined) {
@@ -74,7 +100,17 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
       return 2;
     }
     model = option(options.argv, "--model") ?? profile.fallbackModels[0] ?? "unknown";
+    providerName = profile.name;
     if (route.note !== undefined) options.stderr(`${route.note}\n`);
+    // Fresh client + transport per turn, streaming:true (this gateway's own
+    // layer decides to stream -- onDelta alone does nothing, see the
+    // provisional seam commit) -- matches "cada request cria Agent novo".
+    createModelTransport = () => {
+      const client = buildClient(profile, key ?? (profile.name === "ollama" ? "lohra-local" : ""));
+      return client instanceof AnthropicMessagesClient
+        ? new AnthropicMessagesModel(client, true)
+        : new ChatCompletionsModel(client, true);
+    };
   }
 
   const token = options.environment.LOHRA_DASHBOARD_SESSION_TOKEN ?? generateSessionToken();
@@ -105,6 +141,12 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     auth: { authRequired: !insecure, expectedToken: token },
     sessionDefaults: { model, systemPrompt, cwd: options.cwd },
     toolNames: toolRuntime.toolNames,
+    toolDefinitions: toolRuntime.toolDefinitions,
+    home: options.home,
+    provider: providerName,
+    createModelTransport,
+    createConversationRepository: () => new SqliteConversationRepository(sessions),
+    dispatchTool: toolRuntime.dispatch,
   });
 
   const requestedPort = options.port ?? DEFAULT_PORT;

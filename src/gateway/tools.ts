@@ -1,10 +1,12 @@
 import { parseToolArguments } from "../tools/arguments.js";
 import { builtinRegistry, composeDispatch, MemoryTool } from "../tools/index.js";
+import type { ToolDefinition } from "../tools/types.js";
 import { MemoryStore } from "../memory/index.js";
 
 export interface GatewayToolRuntime {
   readonly dispatch: (name: string, argumentsJson: string) => Promise<string>;
   readonly toolNames: readonly string[];
+  readonly toolDefinitions: readonly ToolDefinition[];
 }
 
 // The gateway is a "parent" surface (unlike T11's subagent), so it gets the
@@ -22,9 +24,11 @@ export function createGatewayToolRuntime(home: string): GatewayToolRuntime {
   const composed = composeDispatch(builtinRegistry.dispatch.bind(builtinRegistry), {
     memory: (args) => memoryTool.handle(args),
   });
+  const toolDefinitions = builtinRegistry.getDefinitions();
   return {
     dispatch: (name, argumentsJson) => composed(name, parseToolArguments(argumentsJson)),
-    toolNames: builtinRegistry.getDefinitions().map((definition) => definition.function.name),
+    toolNames: toolDefinitions.map((definition) => definition.function.name),
+    toolDefinitions,
   };
 }
 
