@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { pythonFloat } from "../src/serialization/python-json.js";
+import { pythonJsonLoads } from "../src/serialization/python-json.js";
 import {
   AnthropicMessagesClient,
   AnthropicMessagesTransport,
@@ -96,14 +96,18 @@ describe("AnthropicMessagesClient", () => {
               type: "tool_use",
               id: "c1",
               name: "terminal",
-              input: { timeout: pythonFloat(1), ratio: pythonFloat(2.5), count: 7 },
+              input: pythonJsonLoads(
+                '{"timeout":1.0,"ratio":2.5,"count":7,"since_ns":1788107097189000000}',
+              ),
             },
           ],
         },
       ],
       max_tokens: 1,
     });
-    expect(http.requests[0]?.body).toContain('"input":{"timeout":1.0,"ratio":2.5,"count":7}');
+    expect(http.requests[0]?.body).toContain(
+      '"input":{"timeout":1.0,"ratio":2.5,"count":7,"since_ns":1788107097189000000}',
+    );
   });
 
   it("preserves numeric kinds in streamed Anthropic tool input deltas", async () => {
@@ -112,7 +116,7 @@ describe("AnthropicMessagesClient", () => {
         [
           'data: {"type":"message_start","message":{"usage":{"input_tokens":2}}}',
           'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"c1","name":"terminal","input":{}}}',
-          'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"timeout\\":1.0,\\"ratio\\":2.5,\\"count\\":7}"}}',
+          'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"timeout\\":1.0,\\"ratio\\":2.5,\\"count\\":7,\\"since_ns\\":1788107097189000000}"}}',
           'data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":1}}',
           "",
         ].join("\n\n"),
@@ -125,7 +129,9 @@ describe("AnthropicMessagesClient", () => {
       http,
     });
     const normalized = await client.stream({ model: "m", messages: [], max_tokens: 1 });
-    expect(normalized.toolCalls[0]?.arguments).toBe('{"timeout": 1.0, "ratio": 2.5, "count": 7}');
+    expect(normalized.toolCalls[0]?.arguments).toBe(
+      '{"timeout": 1.0, "ratio": 2.5, "count": 7, "since_ns": 1788107097189000000}',
+    );
   });
 });
 

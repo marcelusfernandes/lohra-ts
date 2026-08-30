@@ -102,11 +102,11 @@ describe("AnthropicMessagesTransport", () => {
     const transport = new AnthropicMessagesTransport();
     const normalized = transport.normalizeResponse(
       pythonJsonLoads(
-        '{"content":[{"type":"tool_use","id":"c1","name":"terminal","input":{"command":"sleep 2","timeout":1.0,"nested":{"value":2.0},"array":[3.0],"exponent":1e2,"integer":7}}],"stop_reason":"tool_use"}',
+        '{"content":[{"type":"tool_use","id":"c1","name":"terminal","input":{"command":"sleep 2","timeout":1.0,"since_ns":1788107097189000000,"nested":{"value":2.0,"huge":123456789012345678901234567890},"array":[3.0],"exponent":1e2,"integer":7}}],"stop_reason":"tool_use"}',
       ),
     );
     expect(normalized.toolCalls[0]?.arguments).toBe(
-      '{"command": "sleep 2", "timeout": 1.0, "nested": {"value": 2.0}, "array": [3.0], "exponent": 100.0, "integer": 7}',
+      '{"command": "sleep 2", "timeout": 1.0, "since_ns": 1788107097189000000, "nested": {"value": 2.0, "huge": 123456789012345678901234567890}, "array": [3.0], "exponent": 100.0, "integer": 7}',
     );
     const replay = transport.buildKwargs({
       model: "claude",
@@ -124,7 +124,7 @@ describe("AnthropicMessagesTransport", () => {
       ],
     });
     expect(pythonJsonDumpsInsertionOrder(replay.messages)).toBe(
-      '[{"role": "assistant", "content": [{"type": "tool_use", "id": "c1", "name": "terminal", "input": {"command": "sleep 2", "timeout": 1.0, "nested": {"value": 2.0}, "array": [3.0], "exponent": 100.0, "integer": 7}}]}]',
+      '[{"role": "assistant", "content": [{"type": "tool_use", "id": "c1", "name": "terminal", "input": {"command": "sleep 2", "timeout": 1.0, "since_ns": 1788107097189000000, "nested": {"value": 2.0, "huge": 123456789012345678901234567890}, "array": [3.0], "exponent": 100.0, "integer": 7}}]}]',
     );
   });
 });

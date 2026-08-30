@@ -142,7 +142,7 @@ function anthropic(
     if (manifest.fixture === "tool" && index === 0) {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
-        '{"content":[{"type":"tool_use","id":"call-1","name":"terminal","input":{"command":"sleep 2","timeout":1.0}}],"stop_reason":"tool_use","usage":{"input_tokens":4,"output_tokens":2,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}',
+        '{"content":[{"type":"tool_use","id":"call-1","name":"terminal","input":{"command":"sleep 2","timeout":1.0,"since_ns":1788107097189000000}}],"stop_reason":"tool_use","usage":{"input_tokens":4,"output_tokens":2,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}',
       );
       return;
     }
@@ -471,6 +471,7 @@ function projectedRequests(records: readonly RequestRecord[]): unknown {
     timeoutToken:
       record.rawBody.match(/"timeout"\s*:\s*(-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/u)?.[1] ??
       null,
+    sinceNsToken: record.rawBody.match(/"since_ns"\s*:\s*(-?(?:0|[1-9]\d*))/u)?.[1] ?? null,
   }));
 }
 

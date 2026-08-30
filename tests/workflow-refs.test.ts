@@ -47,7 +47,7 @@ describe("workflow refs", () => {
       "v=12345678901234567890",
     );
     expect(() => resolveValue("v=${unsafe}", { unsafe: Number.MAX_SAFE_INTEGER + 1 })).toThrow(
-      "pythonFloat",
+      "Ambiguous or unsafe number",
     );
   });
 

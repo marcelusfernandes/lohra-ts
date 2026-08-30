@@ -189,7 +189,7 @@ result["t10-tool-schema-mutation-three-way"] = {
   responses_changed: respBuilt.tools[0].parameters.properties.x.type === "number",
 };
 const anthRaw = pythonJsonLoads(
-  '{"content":[{"type":"thinking","signature":"s","thinking":"r"},{"type":"redacted_thinking","data":"b"},{"type":"text","text":"x"},{"type":"tool_use","id":"c","name":"read","input":{"path":"café","whole":1.0,"nested":{"value":2.0},"array":[3.0],"exponent":1e2,"integer":7}}],"stop_reason":"pause_turn","usage":{"input_tokens":70,"output_tokens":30,"cache_read_input_tokens":5}}',
+  '{"content":[{"type":"thinking","signature":"s","thinking":"r"},{"type":"redacted_thinking","data":"b"},{"type":"text","text":"x"},{"type":"tool_use","id":"c","name":"read","input":{"path":"café","whole":1.0,"unsafe":9007199254740993,"nested":{"value":2.0,"huge":123456789012345678901234567890},"array":[3.0],"exponent":1e2,"integer":7}}],"stop_reason":"pause_turn","usage":{"input_tokens":70,"output_tokens":30,"cache_read_input_tokens":5}}',
 );
 result["t10-anthropic-normalize-stop-and-thinking"] = normalized(
   anthropic.normalizeResponse(anthRaw),

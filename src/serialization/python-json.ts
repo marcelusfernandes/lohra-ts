@@ -25,6 +25,10 @@ export function pythonFloat(value: number): PythonFloat {
   return new PythonFloat(value);
 }
 
+class PythonInteger {
+  public constructor(public readonly value: bigint) {}
+}
+
 class PythonJsonParser {
   private index = 0;
 
@@ -121,14 +125,17 @@ class PythonJsonParser {
     return value;
   }
 
-  private number(): number | PythonFloat {
+  private number(): number | PythonFloat | PythonInteger {
     const match = this.source
       .slice(this.index)
       .match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/u)?.[0];
     if (!match) throw new SyntaxError("Invalid JSON number");
     this.index += match.length;
-    const value = Number(match);
-    return match.includes(".") || /e/iu.test(match) ? pythonFloat(value) : value;
+    if (match.includes(".") || /e/iu.test(match)) return pythonFloat(Number(match));
+    const integer = BigInt(match);
+    return integer >= BigInt(Number.MIN_SAFE_INTEGER) && integer <= BigInt(Number.MAX_SAFE_INTEGER)
+      ? Number(integer)
+      : new PythonInteger(integer);
   }
 }
 
@@ -201,15 +208,14 @@ function compareUnicode(left: string, right: string): number {
 }
 
 function encode(value: unknown, sortKeys: boolean, ensureAscii = true): string {
+  if (value instanceof PythonInteger) return value.value.toString();
   if (value instanceof PythonFloat) return encodeFloat(value.value);
   if (value === null) return "null";
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "string") return escapeString(value, ensureAscii);
   if (typeof value === "number") {
     if (Number.isSafeInteger(value) && !Object.is(value, -0)) return String(value);
-    throw new TypeError(
-      "Ambiguous or unsafe number: wrap Python float fields with pythonFloat(value)",
-    );
+    throw new TypeError("Ambiguous or unsafe number in Python-compatible JSON serialization");
   }
   if (Array.isArray(value))
     return `[${value.map((entry) => encode(entry, sortKeys, ensureAscii)).join(", ")}]`;
@@ -229,6 +235,7 @@ function encode(value: unknown, sortKeys: boolean, ensureAscii = true): string {
 }
 
 function encodeCompact(value: unknown): string {
+  if (value instanceof PythonInteger) return value.value.toString();
   if (value instanceof PythonFloat) return encodeFloat(value.value);
   if (value === null) return "null";
   if (typeof value === "string" || typeof value === "boolean" || typeof value === "number") {
@@ -268,7 +275,12 @@ function encodeIndented(value: unknown, level: number): string {
     const end = " ".repeat(level * 2);
     return `[\n${value.map((entry) => `${pad}${encodeIndented(entry, level + 1)}`).join(",\n")}\n${end}]`;
   }
-  if (typeof value === "object" && value !== null && !(value instanceof PythonFloat)) {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    !(value instanceof PythonFloat) &&
+    !(value instanceof PythonInteger)
+  ) {
     const entries = Object.entries(value as Record<string, unknown>).filter(
       ([, entry]) => entry !== undefined,
     );

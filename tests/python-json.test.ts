@@ -60,16 +60,35 @@ describe("Python-compatible JSON serializer", () => {
     expect(values.map((value) => pythonJsonDumps({ n: pythonFloat(value) }))).toEqual(expected);
     expect(pythonJsonDumps({ n: 1 })).toBe('{"n": 1}');
     for (const ambiguous of [-0, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
-      expect(() => pythonJsonDumps({ n: ambiguous })).toThrow(/pythonFloat/);
+      expect(() => pythonJsonDumps({ n: ambiguous })).toThrow(/Ambiguous or unsafe number/);
     }
   });
 
   it("loads JSON numeric tokens with Python int/float identity at every depth", () => {
     const loaded = pythonJsonLoads(
-      '{"integer":7,"whole":1.0,"nested":{"exponent":1e2},"array":[3.0,4]}',
+      '{"integer":7,"safe_max":9007199254740991,"negative_zero":-0,"whole":1.0,"unsafe":9007199254740993,"nested":{"exponent":1e2,"huge":123456789012345678901234567890},"array":[3.0,4]}',
     );
     expect(pythonJsonDumpsInsertionOrder(loaded)).toBe(
-      '{"integer": 7, "whole": 1.0, "nested": {"exponent": 100.0}, "array": [3.0, 4]}',
+      '{"integer": 7, "safe_max": 9007199254740991, "negative_zero": 0, "whole": 1.0, "unsafe": 9007199254740993, "nested": {"exponent": 100.0, "huge": 123456789012345678901234567890}, "array": [3.0, 4]}',
+    );
+  });
+
+  it("round-trips arbitrary JSON integers exactly against Python", () => {
+    const documents = [
+      "9007199254740991",
+      "9007199254740992",
+      "9007199254740993",
+      "-9007199254740993",
+      "123456789012345678901234567890",
+      "-123456789012345678901234567890",
+      "-0",
+      '{"nested":[9007199254740993,{"huge":123456789012345678901234567890}]}',
+    ];
+    const expected = pythonLines(
+      `import json\nfor raw in ${JSON.stringify(documents)}: print(json.dumps(json.loads(raw)))`,
+    );
+    expect(documents.map((raw) => pythonJsonDumpsInsertionOrder(pythonJsonLoads(raw)))).toEqual(
+      expected,
     );
   });
 });
