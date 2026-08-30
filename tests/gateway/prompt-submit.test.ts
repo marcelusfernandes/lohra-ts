@@ -268,6 +268,108 @@ describe("prompt.submit: busy session (assertion 31/47)", () => {
   });
 });
 
+describe("prompt.submit: mid-turn interrupt from a second socket (assertion 45/L19)", () => {
+  it("interrupt during a tool-calling turn aborts before the next iteration -- {status:interrupted}, second iteration's model call never runs", async () => {
+    let secondIterationCalls = 0;
+    const ref: { sessionId: string | undefined; server: GatewayHttpServer | undefined } = {
+      sessionId: undefined,
+      server: undefined,
+    };
+    const toolCall: ToolCall = { id: "call_1", name: "read_file", arguments: "{}", providerData: null };
+
+    const { server } = await startServer({
+      transportScript: [
+        () => response({ content: null, finishReason: "tool_calls", toolCalls: [toolCall] }),
+        () => {
+          secondIterationCalls += 1;
+          return response({ content: "should never be observed" });
+        },
+      ],
+      toolDispatch: async () => {
+        // Fire the interrupt from a genuinely different socket WHILE the
+        // tool call from iteration 1 is "in flight" -- by the time the
+        // runtime loop checks signal.aborted at the top of iteration 2,
+        // it must already be true.
+        const port = ref.server?.port;
+        const sessionId = ref.sessionId;
+        if (port === undefined || sessionId === undefined) throw new Error("test setup race");
+        const interruptSocket = new WebSocket(`ws://127.0.0.1:${String(port)}/api/ws?token=${TOKEN}`);
+        await nextMessage(interruptSocket); // gateway.ready
+        interruptSocket.send(
+          JSON.stringify({ jsonrpc: "2.0", id: "interrupt", method: "session.interrupt", params: { session_id: sessionId } }),
+        );
+        await nextMessage(interruptSocket); // {ok:true}
+        interruptSocket.close();
+        return '{"ok":true}';
+      },
+    });
+    ref.server = server;
+    const { ws, sessionId } = await connectAndCreateSession(server);
+    ref.sessionId = sessionId;
+
+    ws.send(
+      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "prompt.submit", params: { session_id: sessionId, text: "hi" } }),
+    );
+    await nextMessage(ws); // rpc-ok
+    const frames: { params: { type: string; payload: unknown } }[] = [];
+    for (let i = 0; i < 4; i += 1) {
+      frames.push(JSON.parse(await nextMessage(ws)) as { params: { type: string; payload: unknown } });
+    }
+    expect(frames.map((f) => f.params.type)).toEqual([
+      "message.start",
+      "tool.start",
+      "tool.complete",
+      "message.complete",
+    ]);
+    expect(frames[3]?.params.payload).toEqual({ text: "", status: "interrupted", usage: {} });
+    expect(secondIterationCalls).toBe(0);
+
+    ws.close();
+  });
+});
+
+describe("prompt.submit: same-socket serialization (assertion 46/L19)", () => {
+  it("session.list sent on the SAME socket mid-stream is answered only after message.complete", async () => {
+    let releaseTurn: (() => void) | undefined;
+    const gate = new Promise<void>((resolvePromise) => {
+      releaseTurn = resolvePromise;
+    });
+    const { server } = await startServer({
+      transportScript: [
+        async () => {
+          await gate;
+          return response();
+        },
+      ],
+    });
+    const { ws, sessionId } = await connectAndCreateSession(server);
+
+    ws.send(
+      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "prompt.submit", params: { session_id: sessionId, text: "hi" } }),
+    );
+    // Same socket, sent immediately after -- must queue behind the whole
+    // streaming turn, not interleave with message.start/delta/complete.
+    ws.send(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "session.list", params: {} }));
+
+    const seenTypes: string[] = [];
+    // rpc-ok for prompt.submit, then message.start arrive while the
+    // transport is still gated -- session.list must NOT have been answered
+    // yet at this point, proving it queued behind the in-flight turn.
+    for (let i = 0; i < 2; i += 1) {
+      const frame = JSON.parse(await nextMessage(ws)) as { id?: unknown; params?: { type: string } };
+      seenTypes.push(frame.params?.type ?? `rpc:${String(frame.id)}`);
+    }
+    releaseTurn?.();
+    const completeFrame = JSON.parse(await nextMessage(ws)) as { params: { type: string } };
+    seenTypes.push(completeFrame.params.type);
+    const listResponse = JSON.parse(await nextMessage(ws)) as { id: number; result: { sessions: unknown[] } };
+    expect(listResponse.id).toBe(2);
+    expect(seenTypes).toEqual(["rpc:1", "message.start", "message.complete"]);
+
+    ws.close();
+  });
+});
+
 describe("prompt.submit: idle interrupt latch (assertion 44/L16)", () => {
   it("interrupt on an idle session makes the next prompt.submit complete with zero upstream calls", async () => {
     let transportCalls = 0;
