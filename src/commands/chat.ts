@@ -26,7 +26,6 @@ import {
   type ProviderProfile,
 } from "../providers/index.js";
 import { pythonJsonDumpsInsertionOrder } from "../serialization/python-json.js";
-import { pythonRepr } from "../serialization/python-repr.js";
 import { openStateForEnvironment, SessionRepository } from "../state/index.js";
 import { SkillStore } from "../skills/index.js";
 import {
@@ -43,7 +42,7 @@ import {
   AnthropicMessagesClient,
   buildClient,
   createResponsesClient,
-  ProviderCallFailed,
+  publicCauseMessage,
 } from "../transports/index.js";
 import type { ModelTransport } from "../conversation/index.js";
 import { runChatBoundary } from "./chat-boundary.js";
@@ -88,14 +87,6 @@ function finite(value: string | undefined, name: string): number | undefined {
   const result = Number(value);
   if (!Number.isFinite(result)) throw new Error(`CHAT_OPTION_INVALID:${name}`);
   return result;
-}
-
-function publicError(error: unknown): string {
-  const cause = error instanceof Error ? error.cause : undefined;
-  if (cause instanceof ProviderCallFailed && cause.statusCode !== undefined) {
-    return `Error code: ${String(cause.statusCode)} - ${pythonRepr(cause.payload)}`;
-  }
-  return error instanceof Error ? error.message : String(error);
 }
 
 function initializationError(input: string, model: string | null, message: string): Result {
@@ -273,7 +264,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       stderr: `${subscriptionNote}session: ${result.sessionId}  (resume with --session ${result.sessionId})\n`,
     };
   } catch (error) {
-    const message = publicError(error);
+    const message = publicCauseMessage(error);
     const sessionId = error instanceof ConversationError ? (error.sessionId ?? "") : "";
     const apiCalls = error instanceof ConversationError ? error.apiCalls : 0;
     const incomplete = error instanceof IncompleteToolCallError ? error : null;

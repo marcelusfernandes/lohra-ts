@@ -30,6 +30,7 @@ export {
   type ChatCompletionsTarget,
 } from "./factory.js";
 export { assembleStreamedResponse } from "./stream.js";
+export { publicCauseMessage } from "./public-error.js";
 export type {
   BuildKwargsOptions,
   ChatHttpPort,
