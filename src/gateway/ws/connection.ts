@@ -95,8 +95,8 @@ async function handlePromptSubmit(
   deps: GatewayWsDeps,
 ): Promise<void> {
   const sessionId = typeof params.session_id === "string" ? params.session_id : undefined;
-  const known = sessionId !== undefined && sessionExists(deps, sessionId);
-  if (sessionId === undefined || !known) {
+  const submittable = sessionId !== undefined && deps.registry.canSubmitPrompt(sessionId);
+  if (sessionId === undefined || !submittable) {
     ws.send(
       encodeJsonRpcFrame({
         jsonrpc: "2.0",
@@ -204,15 +204,6 @@ async function handlePromptSubmit(
     deps.registry.endTurn(sessionId);
     deps.registry.clearBusy(sessionId);
   }
-}
-
-function sessionExists(deps: GatewayWsDeps, sessionId: string): boolean {
-  // interrupt() on an unknown id returns {ok:false} without side effects on
-  // a known session (it only arms/aborts for a session that already
-  // exists) -- reused here purely as an existence probe would be wrong
-  // because it WOULD arm the latch for a real session. Use the registry's
-  // own list instead, which is already the source of truth for "known".
-  return deps.registry.list().some((row) => row.id === sessionId);
 }
 
 async function handleTextMessage(
