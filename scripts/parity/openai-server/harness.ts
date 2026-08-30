@@ -26,6 +26,23 @@ mkdirSync(evidenceRoot, { recursive: true });
 const ORACLE_SHA = "16b4785d803ad0ca364a8a67346a04f949fbf592";
 const ORACLE_VERSION = "lohra 0.0.11\n";
 const FIXED_API_KEY = "T11-FIXED-TEST-KEY-do-not-rotate";
+const FAKE_UPSTREAM_KEY = "FAKE-UPSTREAM-KEY-T11";
+
+/** Assertion 8 — headers/body/logs/env/stderr-stdout/evidence get scrubbed.
+ * These two are our own fixed test credentials (never a real secret — the
+ * whole harness runs against a loopback fixture, decision 3), but they are
+ * still Authorization-shaped values, so `writeEvidence` redacts them from
+ * every record by default before it touches disk. */
+const redactedByDefault = new Set<string>([FIXED_API_KEY, FAKE_UPSTREAM_KEY]);
+
+/** A deliberately PLANTED canary — a value that must NEVER survive
+ * redaction. Only `t11-scrub-planted-canaries` (probe 6) registers one, to
+ * prove the scrub choke point in `writeEvidence` actually refuses a write
+ * and exits non-zero when contamination slips past redaction. */
+const scrubCanaries = new Set<string>();
+export function registerScrubCanary(value: string): void {
+  scrubCanaries.add(value);
+}
 
 export interface Guards {
   readonly oracleCommit: string;
@@ -214,9 +231,12 @@ export async function startServer(
   };
 }
 
-export async function stopAndCleanup(handle: ServerHandle): Promise<void> {
-  await handle.stop("SIGINT");
+export async function stopAndCleanup(
+  handle: ServerHandle,
+): Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }> {
+  const result = await handle.stop("SIGINT");
   rmSync(handle.paths.runtimeRoot, { recursive: true, force: true });
+  return result;
 }
 
 export interface RawResponse {
@@ -278,6 +298,32 @@ export function sendRaw(port: number, requestLines: string, body = ""): Promise<
   });
 }
 
+export interface ProbeRecord {
+  readonly id: string;
+  readonly request: string;
+  readonly oracle: RawResponse;
+  readonly candidate: RawResponse;
+}
+
+/** Oracle then candidate, never `Promise.all` — a scenario that talks to the
+ * shared fake upstream needs its two sides' upstream requests to land in a
+ * known order so a caller can slice `upstream.requests` cleanly between
+ * them and attribute per-side counts (assertions 21/29/64). A concurrent
+ * probe would interleave both sides' upstream traffic nondeterministically. */
+export async function probeBoth(
+  id: string,
+  oracle: ServerHandle,
+  candidate: ServerHandle,
+  requestLines: (apiKey: string | null, side: "oracle" | "candidate") => string,
+  body = "",
+): Promise<ProbeRecord> {
+  const oracleRequest = requestLines(oracle.apiKey, "oracle");
+  const oracleResponse = await sendRaw(oracle.port, oracleRequest, body);
+  const candidateRequest = requestLines(candidate.apiKey, "candidate");
+  const candidateResponse = await sendRaw(candidate.port, candidateRequest, body);
+  return { id, request: oracleRequest, oracle: oracleResponse, candidate: candidateResponse };
+}
+
 export function headerValue(response: RawResponse, name: string): string | undefined {
   return response.headers.find(([key]) => key === name.toLowerCase())?.[1];
 }
@@ -287,9 +333,13 @@ export function sha256(value: string): string {
 }
 
 export function writeEvidence(id: string, record: unknown): string {
-  const sha = sha256(JSON.stringify(record));
-  writeFileSync(join(evidenceRoot, `${id}.json`), `${JSON.stringify(record, null, 2)}\n`, "utf8");
-  return sha;
+  let text = JSON.stringify(record, null, 2);
+  for (const secret of redactedByDefault) text = text.replaceAll(secret, "<REDACTED>");
+  for (const canary of scrubCanaries) {
+    if (text.includes(canary)) throw new Error(`T11_SCRUB_HIT:${id}:${canary}`);
+  }
+  writeFileSync(join(evidenceRoot, `${id}.json`), `${text}\n`, "utf8");
+  return sha256(text);
 }
 
-export { FIXED_API_KEY };
+export { FIXED_API_KEY, FAKE_UPSTREAM_KEY };
