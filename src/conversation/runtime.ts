@@ -84,6 +84,11 @@ export class ConversationRuntime {
     readonly temperature?: number | null;
     readonly sessionId?: string;
     readonly signal?: AbortSignal;
+    // Provisional streaming seam (T12 gateway). Absent by default -- zero
+    // behavior change for every existing caller. Disposable: if T11 lands
+    // an approved equivalent first, this whole seam is dropped and T11's
+    // is adopted instead, not merged with it.
+    readonly onDelta?: (text: string) => void;
   }): Promise<ConversationTurnResult> {
     const sessionId = input.sessionId ?? this.options.idSource();
     let session = this.options.repository.session(sessionId);
@@ -142,6 +147,7 @@ export class ConversationRuntime {
             (this.options.toolDefinitions ?? []) as readonly Readonly<Record<string, unknown>>[],
           ),
           signal,
+          ...(input.onDelta ? { onText: input.onDelta } : {}),
         };
         emit("model.request.started");
         let response: NormalizedResponse;

@@ -9,6 +9,12 @@ export interface ModelRequest {
   readonly maxTokens: number | null;
   readonly tools: readonly Readonly<Record<string, unknown>>[];
   readonly signal: AbortSignal;
+  // Provisional streaming seam (T12 gateway, disposable if T11 lands an
+  // approved equivalent first -- see runtime.ts). Absent, never undefined,
+  // when the caller didn't request streaming; adapters must not stream
+  // just because this is set (see ModelTransport constructors' own
+  // `streaming` flag).
+  readonly onText?: (text: string) => void;
 }
 
 export interface ModelTransport {

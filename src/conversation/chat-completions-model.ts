@@ -18,7 +18,9 @@ export class ChatCompletionsModel implements ModelTransport {
       maxTokens: request.maxTokens,
       temperature: request.temperature,
     });
-    return this.streaming ? this.client.stream(kwargs) : this.client.create(kwargs, request.signal);
+    return this.streaming
+      ? this.client.stream(kwargs, request.onText ? { onText: request.onText } : {})
+      : this.client.create(kwargs, request.signal);
   }
 
   public close(): Promise<void> {
