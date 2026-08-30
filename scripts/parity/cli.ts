@@ -78,7 +78,7 @@ export function runCli(args: readonly string[]): number {
       executables: options.bindings,
     });
     const evidencePath = resolve(options.evidencePath ?? `.parity-evidence/${manifest.id}.json`);
-    writeEvidence(evidencePath, evidence);
+    writeEvidence(evidencePath, evidence, manifest);
     process.stdout.write(
       `${JSON.stringify({ scenario: manifest.id, verdict: evidence.verdict, evidence: evidencePath })}\n`,
     );

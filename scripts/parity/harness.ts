@@ -451,6 +451,7 @@ export function runScenario(
       capturePolicy: manifest.capture,
       expectationPolicy: manifest.expectations,
       normalizationPolicy: manifest.normalizations,
+      ...(manifest.scrub === undefined ? {} : { scrubPolicy: manifest.scrub }),
       ...(manifest.stub === undefined ? {} : { stubPolicy: manifest.stub }),
       preconditionPolicy: manifest.preconditions,
       preconditions,

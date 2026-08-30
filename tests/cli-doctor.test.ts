@@ -154,26 +154,18 @@ describe("lohra CLI bootstrap", () => {
     }
   });
 
-  it.each([
-    "init",
-    "chat",
-    "dashboard",
-    "serve",
-    "cron",
-    "workflow",
-    "profile",
-    "auth",
-    "skill",
-    "update",
-  ])("temporarily refuses future command %s with exit 2", async (command) => {
-    const stderr: string[] = [];
-    expect(
-      await runCli([command], {
-        environment: environment(),
-        stdout: () => undefined,
-        stderr: (value) => stderr.push(value),
-      }),
-    ).toBe(2);
-    expect(stderr.join("")).toContain("not implemented in the TypeScript bootstrap");
-  });
+  it.each(["init", "dashboard", "cron", "workflow", "profile", "skill", "update"])(
+    "temporarily refuses future command %s with exit 2",
+    async (command) => {
+      const stderr: string[] = [];
+      expect(
+        await runCli([command], {
+          environment: environment(),
+          stdout: () => undefined,
+          stderr: (value) => stderr.push(value),
+        }),
+      ).toBe(2);
+      expect(stderr.join("")).toContain("not implemented in the TypeScript bootstrap");
+    },
+  );
 });

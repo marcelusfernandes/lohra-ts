@@ -2,9 +2,25 @@ import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { readEnvFile } from "../config/env-file.js";
+import { PythonFloat } from "../serialization/python-json.js";
 import type { Check, DoctorEnvironment } from "./model.js";
 
 const maxBytes = 256_000;
+
+function formatLocalTime(epochSeconds: number, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("sv-SE", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(epochSeconds * 1000));
+  const value = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  return `${value("year")}-${value("month")}-${value("day")} ${value("hour")}:${value("minute")}`;
+}
 
 function readBounded(path: string): string | null {
   try {
@@ -70,6 +86,100 @@ export function runChecks(environment: DoctorEnvironment): readonly Check[] {
     (entry) => entry.installed === true || entry.home_present === true,
   );
   const workflowPolicy = join(environment.home, "workflow_policy.json");
+  const subscriptionPath = join(environment.home, "auth.json");
+  const providerCheck: Check =
+    environment.auth_route === "unusable"
+      ? {
+          name: "provider",
+          state: "fail",
+          detail: `preference=${environment.auth_preference} but subscription mode is not usable`,
+          remedy: "lohra auth login   # or take the key path: lohra auth prefer auto",
+        }
+      : environment.auth_route === "subscription"
+        ? environment.lohra_oauth_present || environment.codex_auth_present
+          ? {
+              name: "provider",
+              state: "ok",
+              detail: "OpenAI/Codex subscription (opt-in, ToS-gray)",
+              remedy: "",
+            }
+          : {
+              name: "provider",
+              state: "fail",
+              detail: "subscription mode is enabled but there is no login to use",
+              remedy: "lohra auth login   # or reuse the Codex CLI login: codex login",
+            }
+        : provider === undefined && !ollamaReady
+          ? {
+              name: "provider",
+              state: "fail",
+              detail: "none configured — no API key, no subscription, no local daemon",
+              remedy:
+                "lohra init   # or: export ANTHROPIC_API_KEY=... | lohra auth enable | ollama serve",
+            }
+          : provider === undefined
+            ? {
+                name: "provider",
+                state: "ok",
+                detail: `ollama (from keyless: ${environment.ollama.url}), model ${environment.ollama.models[0] as string}`,
+                remedy: "",
+              }
+            : {
+                name: "provider",
+                state: "ok",
+                detail: `${provider.provider} (from api-key: ${provider.present_vars[0] as string})`,
+                remedy: "",
+              };
+  const subscriptionCheck: Check = environment.subscription_active
+    ? environment.auth_preference === "api_key"
+      ? {
+          name: "subscription",
+          state: "ok",
+          detail:
+            "active, but preference=api_key — API keys are used (back: lohra auth prefer auto)",
+          remedy: "",
+        }
+      : {
+          name: "subscription",
+          state: "ok",
+          detail: `active (OpenAI/Codex) — ${subscriptionPath}`,
+          remedy: "",
+        }
+    : {
+        name: "subscription",
+        state: "ok",
+        detail: "off — API keys are used (enable: lohra auth enable)",
+        remedy: "",
+      };
+  const loginCheck: Check = environment.lohra_oauth_present
+    ? {
+        name: "login",
+        state: "ok",
+        detail: `own OAuth token valid until ${formatLocalTime(environment.lohra_oauth_expires_at instanceof PythonFloat ? environment.lohra_oauth_expires_at.value : (environment.lohra_oauth_expires_at as number), environment.timezone)}`,
+        remedy: "",
+      }
+    : {
+        name: "login",
+        state: "ok",
+        detail: "no own login (subscription mode only: lohra auth login)",
+        remedy: "",
+      };
+  const profileCheck: Check = environment.subscription_divergence
+    ? {
+        name: "profile",
+        state: "warn",
+        detail: `${environment.active_profile as string} has no subscription of its own — it bills a paid API key`,
+        remedy: `lohra auth enable --profile ${environment.active_profile as string}`,
+      }
+    : {
+        name: "profile",
+        state: "ok",
+        detail:
+          environment.active_profile === null
+            ? `none — shared home ${environment.base}`
+            : `${environment.active_profile} — ${environment.home}`,
+        remedy: "",
+      };
   const policyText = readBounded(workflowPolicy);
   let policy: Check;
   if (policyText === null) {
@@ -102,48 +212,10 @@ export function runChecks(environment: DoctorEnvironment): readonly Check[] {
 
   return [
     { name: "python", state: "ok", detail: "3.12.10 (supported: >=3.11,<3.14)", remedy: "" },
-    provider === undefined && !ollamaReady
-      ? {
-          name: "provider",
-          state: "fail",
-          detail: "none configured — no API key, no subscription, no local daemon",
-          remedy:
-            "lohra init   # or: export ANTHROPIC_API_KEY=... | lohra auth enable | ollama serve",
-        }
-      : provider === undefined
-        ? {
-            name: "provider",
-            state: "ok",
-            detail: `ollama (from keyless: ${environment.ollama.url}), model ${environment.ollama.models[0] as string}`,
-            remedy: "",
-          }
-        : {
-            name: "provider",
-            state: "ok",
-            detail: `${provider.provider} (from api-key: ${provider.present_vars[0] as string})`,
-            remedy: "",
-          },
-    {
-      name: "subscription",
-      state: "ok",
-      detail: "off — API keys are used (enable: lohra auth enable)",
-      remedy: "",
-    },
-    {
-      name: "login",
-      state: "ok",
-      detail: "no own login (subscription mode only: lohra auth login)",
-      remedy: "",
-    },
-    {
-      name: "profile",
-      state: "ok",
-      detail:
-        environment.active_profile === null
-          ? `none — shared home ${environment.base}`
-          : `${environment.active_profile} — ${environment.home}`,
-      remedy: "",
-    },
+    providerCheck,
+    subscriptionCheck,
+    loginCheck,
+    profileCheck,
     {
       name: ".env",
       state: "ok",

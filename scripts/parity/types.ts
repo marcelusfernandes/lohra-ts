@@ -142,6 +142,11 @@ export interface PreconditionRecord extends TcpPortClosedPrecondition {
   readonly status: "passed";
 }
 
+export interface ScrubSpec {
+  readonly fixtureTokens: boolean;
+  readonly operatorCredentials: boolean;
+}
+
 export interface ScenarioManifest {
   readonly schemaVersion: 1;
   readonly id: string;
@@ -165,6 +170,7 @@ export interface ScenarioManifest {
   readonly comparisons: readonly ComparisonSpec[];
   readonly expectations: readonly ExpectationSpec[];
   readonly normalizations: readonly NormalizationSpec[];
+  readonly scrub?: ScrubSpec;
   readonly stub?: StubSpec;
   readonly oracleGuard?: OracleGuardSpec;
 }
@@ -261,6 +267,7 @@ export interface EvidenceRecord {
   readonly capturePolicy: CaptureSpec;
   readonly expectationPolicy: readonly ExpectationSpec[];
   readonly normalizationPolicy: readonly NormalizationSpec[];
+  readonly scrubPolicy?: ScrubSpec;
   readonly stubPolicy?: StubSpec;
   readonly preconditionPolicy: readonly PreconditionSpec[];
   readonly preconditions: readonly PreconditionRecord[];

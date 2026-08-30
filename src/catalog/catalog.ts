@@ -208,18 +208,27 @@ export async function buildCatalog(
     readonly client?: CatalogHttpClient;
     readonly probeOllama?: typeof probeOllamaDown;
     readonly subscriptionActive?: boolean;
+    readonly subscriptionModel?: string;
   } = {},
 ): Promise<Catalog> {
   const environment = options.environment ?? {};
   if (options.providers?.map((p) => p.toLowerCase()).includes(subscriptionProvider))
     return new Catalog([
-      new ProviderModels(
-        subscriptionProvider,
-        "skipped",
-        [],
-        0,
-        "subscription mode is off — run `lohra auth enable` (opt-in) and `lohra auth login`",
-      ),
+      options.subscriptionActive
+        ? new ProviderModels(
+            subscriptionProvider,
+            "config",
+            [options.subscriptionModel ?? "gpt-5.5"],
+            1,
+            "subscription; no live listing — model from the Codex config",
+          )
+        : new ProviderModels(
+            subscriptionProvider,
+            "skipped",
+            [],
+            0,
+            "subscription mode is off — run `lohra auth enable` (opt-in) and `lohra auth login`",
+          ),
     ]);
   const selected =
     options.providers === undefined

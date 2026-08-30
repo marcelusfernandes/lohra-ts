@@ -1,4 +1,4 @@
-export type CatalogSource = "live" | "skipped" | "error";
+export type CatalogSource = "live" | "config" | "skipped" | "error";
 
 export interface ProviderModelsValue {
   readonly provider: string;

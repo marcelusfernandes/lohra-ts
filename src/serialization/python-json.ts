@@ -119,3 +119,28 @@ export function pythonJsonDumps(value: unknown): string {
 export function pythonJsonDumpsInsertionOrder(value: unknown): string {
   return encode(value, false);
 }
+
+function encodeIndented(value: unknown, level: number): string {
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "[]";
+    const pad = " ".repeat((level + 1) * 2);
+    const end = " ".repeat(level * 2);
+    return `[\n${value.map((entry) => `${pad}${encodeIndented(entry, level + 1)}`).join(",\n")}\n${end}]`;
+  }
+  if (typeof value === "object" && value !== null && !(value instanceof PythonFloat)) {
+    const entries = Object.entries(value as Record<string, unknown>).filter(
+      ([, entry]) => entry !== undefined,
+    );
+    if (entries.length === 0) return "{}";
+    const pad = " ".repeat((level + 1) * 2);
+    const end = " ".repeat(level * 2);
+    return `{\n${entries
+      .map(([key, entry]) => `${pad}${escapeString(key)}: ${encodeIndented(entry, level + 1)}`)
+      .join(",\n")}\n${end}}`;
+  }
+  return encode(value, false);
+}
+
+export function pythonJsonDumpsIndented(value: unknown): string {
+  return encodeIndented(value, 0);
+}

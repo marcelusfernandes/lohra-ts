@@ -3,7 +3,11 @@ import { get } from "node:http";
 import { delimiter, join } from "node:path";
 
 import type { LohraPaths } from "../config/paths.js";
+import { readConfig, readTokens } from "../auth/store.js";
+import { resolveAuthRoute, subscriptionActive } from "../auth/credentials.js";
+import { readCodexTokens } from "../auth/codex.js";
 import { AUTO_PROVIDER, resolveProviderName } from "../providers/resolve.js";
+import { pythonFloat } from "../serialization/python-json.js";
 import type { DoctorEnvironment, OllamaStatus } from "./model.js";
 import { providerStatuses } from "./providers.js";
 
@@ -68,6 +72,13 @@ export function buildEnvironment(
   }
   const userHome = environment.HOME ?? "";
   const codexHome = environment.CODEX_HOME?.trim() || join(userHome, ".codex");
+  const config = readConfig(paths.home);
+  const baseConfig = readConfig(paths.base);
+  const own = readTokens(paths.home);
+  const codex = readCodexTokens(codexHome);
+  const active = subscriptionActive(paths.home);
+  const baseActive = subscriptionActive(paths.base);
+  const route = resolveAuthRoute(paths.home);
   const harnesses = [
     { name: "claude", home: join(userHome, ".claude") },
     { name: "codex", home: codexHome },
@@ -82,13 +93,13 @@ export function buildEnvironment(
     };
   });
   const hasApiKey = providers.some((provider) => provider.configured);
-  return {
+  const snapshot = {
     active_profile: paths.profile,
-    auth_preference: "auto",
-    auth_route: "api_key",
+    auth_preference: config?.preference ?? "auto",
+    auth_route: route.error ? "unusable" : route.mode,
     base: paths.base,
-    base_auth_preference: "auto",
-    base_subscription_active: false,
+    base_auth_preference: baseConfig?.preference ?? "auto",
+    base_subscription_active: baseActive,
     codex_auth_present: isFile(join(codexHome, "auth.json")),
     codex_home: codexHome,
     detected_provider: detected,
@@ -99,8 +110,8 @@ export function buildEnvironment(
     home: paths.home,
     interactive: isTty(process.stdin.isTTY) && isTty(process.stderr.isTTY),
     lohra_auth_present: isFile(join(paths.home, "auth.json")),
-    lohra_oauth_expires_at: null,
-    lohra_oauth_present: false,
+    lohra_oauth_expires_at: own === null ? null : pythonFloat(own.expiresAt),
+    lohra_oauth_present: own !== null,
     ollama,
     os_name: process.platform === "win32" ? "nt" : "posix",
     platform: process.platform,
@@ -111,10 +122,18 @@ export function buildEnvironment(
     python_version: "3.12.10",
     stderr_tty: isTty(process.stderr.isTTY),
     stdin_tty: isTty(process.stdin.isTTY),
-    subscription_active: false,
-    subscription_divergence: false,
-    usable: hasApiKey || ollama.alive,
+    subscription_active: active,
+    subscription_divergence: paths.profile !== null && baseActive !== active,
+    usable:
+      hasApiKey ||
+      ollama.alive ||
+      (route.mode === "subscription" && (own !== null || codex !== null)),
   };
+  Object.defineProperty(snapshot, "timezone", {
+    value: environment.TZ ?? "UTC",
+    enumerable: false,
+  });
+  return snapshot as unknown as DoctorEnvironment;
 }
 
 export async function probeOllamaDown(): Promise<OllamaStatus> {

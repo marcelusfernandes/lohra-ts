@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "id": "t05-store-merge-hardening",
+  "description": "T05 bilateral auth probe: t05-store-merge-hardening",
+  "argv": [],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "NO_COLOR": "1",
+      "COLUMNS": "80",
+      "TZ": "UTC",
+      "HOME": "{{home}}",
+      "CODEX_HOME": "{{home}}/codex",
+      "TMPDIR": "{{home}}/tmp",
+      "LOHRA_HOME": "{{profile}}"
+    }
+  },
+  "preconditions": [],
+  "fixtures": [
+    {
+      "root": "profile",
+      "path": "auth.json",
+      "encoding": "utf8",
+      "content": "{\"neighbor\":{\"x\":1},\"openai\":{\"future\":\"keep\"}}"
+    }
+  ],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/auth/oracle_driver.py",
+        "store-merge-hardening"
+      ],
+      "cwd": "sandbox"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/auth/candidate-driver.mjs",
+        "store-merge-hardening"
+      ],
+      "cwd": "sandbox"
+    }
+  },
+  "limits": {
+    "timeoutMs": 15000,
+    "maxOutputBytes": 4194304
+  },
+  "capture": {
+    "tree": {
+      "enabled": true,
+      "root": "profile",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": []
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "probe",
+      "field": "process.stdout"
+    },
+    {
+      "class": "byte",
+      "field": "process.stderr"
+    },
+    {
+      "class": "schema",
+      "field": "tree"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "both",
+      "field": "process.stderr",
+      "encoding": "utf8",
+      "value": ""
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/authMode",
+      "value": "0600"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/oauthMode",
+      "value": "0600"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/future",
+      "value": "keep"
+    }
+  ],
+  "normalizations": [],
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10"
+  }
+}

@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "id": "t05-doctor-profile-divergence",
+  "description": "T05 public auth surface: t05-doctor-profile-divergence",
+  "argv": ["doctor", "--profile", "pf1", "--json"],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "NO_COLOR": "1",
+      "COLUMNS": "80",
+      "TZ": "UTC",
+      "HOME": "{{home}}",
+      "CODEX_HOME": "{{home}}/codex",
+      "TMPDIR": "{{home}}/tmp",
+      "LOHRA_HOME": "{{profile}}"
+    }
+  },
+  "preconditions": [
+    {
+      "kind": "tcp-port-closed",
+      "host": "127.0.0.1",
+      "port": 11434
+    }
+  ],
+  "fixtures": [
+    {
+      "root": "profile",
+      "path": "auth.json",
+      "encoding": "utf8",
+      "content": "{\n  \"openai\": {\n    \"auth_mode\": \"subscription\",\n    \"acknowledged_tos_risk\": true,\n    \"preference\": \"auto\"\n  }\n}"
+    }
+  ],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-lohra",
+      "prefixArgs": [],
+      "cwd": "sandbox"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": ["{{projectRoot}}/dist/cli.js"],
+      "cwd": "sandbox"
+    }
+  },
+  "limits": {
+    "timeoutMs": 15000,
+    "maxOutputBytes": 4194304
+  },
+  "capture": {
+    "tree": {
+      "enabled": true,
+      "root": "profile",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": []
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    },
+    {
+      "class": "byte",
+      "field": "process.stderr"
+    },
+    {
+      "class": "schema",
+      "field": "tree"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 2
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/environment/subscription_active",
+      "value": false
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/environment/base_subscription_active",
+      "value": true
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/environment/subscription_divergence",
+      "value": true
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/checks/4/detail",
+      "value": "pf1 has no subscription of its own — it bills a paid API key"
+    }
+  ],
+  "normalizations": [
+    {
+      "field": "process.stdout",
+      "kind": "replace-runtime-path",
+      "source": "profile",
+      "replacement": "<PROFILE>"
+    },
+    {
+      "field": "process.stdout",
+      "kind": "replace-runtime-path",
+      "source": "home",
+      "replacement": "<HOME>"
+    }
+  ],
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10"
+  }
+}

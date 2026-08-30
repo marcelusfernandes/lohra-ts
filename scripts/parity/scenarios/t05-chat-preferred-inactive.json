@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "id": "t05-chat-preferred-inactive",
+  "description": "T05 public auth surface: t05-chat-preferred-inactive",
+  "argv": ["chat", "fixture", "--json", "--no-input"],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "NO_COLOR": "1",
+      "COLUMNS": "80",
+      "TZ": "UTC",
+      "HOME": "{{home}}",
+      "CODEX_HOME": "{{home}}/codex",
+      "TMPDIR": "{{home}}/tmp",
+      "LOHRA_HOME": "{{profile}}"
+    }
+  },
+  "preconditions": [],
+  "fixtures": [
+    {
+      "root": "profile",
+      "path": "auth.json",
+      "encoding": "utf8",
+      "content": "{\n  \"openai\": {\n    \"auth_mode\": \"api_key\",\n    \"acknowledged_tos_risk\": false,\n    \"preference\": \"subscription\"\n  }\n}"
+    }
+  ],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-lohra",
+      "prefixArgs": [],
+      "cwd": "sandbox"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": ["{{projectRoot}}/dist/cli.js"],
+      "cwd": "sandbox"
+    }
+  },
+  "limits": {
+    "timeoutMs": 15000,
+    "maxOutputBytes": 4194304
+  },
+  "capture": {
+    "tree": {
+      "enabled": true,
+      "root": "profile",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": []
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    },
+    {
+      "class": "byte",
+      "field": "process.stderr"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 2
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/session_id",
+      "value": ""
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/model",
+      "value": null
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/api_calls",
+      "value": 0
+    }
+  ],
+  "normalizations": [],
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10"
+  }
+}

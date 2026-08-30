@@ -14,6 +14,7 @@ import type {
   PreconditionSpec,
   RunnerSpec,
   ScenarioManifest,
+  ScrubSpec,
   SqliteCaptureSpec,
   SqlitePragma,
   SqliteTableSpec,
@@ -37,6 +38,18 @@ function exactKeys(value: JsonObject, allowed: readonly string[], label: string)
       throw new HarnessError("MANIFEST_UNKNOWN_FIELD", `${label} has unknown field ${key}`);
     }
   }
+}
+
+function scrub(value: unknown): ScrubSpec {
+  const item = object(value, "scrub");
+  exactKeys(item, ["fixtureTokens", "operatorCredentials"], "scrub");
+  if (typeof item.fixtureTokens !== "boolean" || typeof item.operatorCredentials !== "boolean") {
+    throw new HarnessError("MANIFEST_INVALID", "scrub fields must be boolean");
+  }
+  return {
+    fixtureTokens: item.fixtureTokens,
+    operatorCredentials: item.operatorCredentials,
+  };
 }
 
 function string(value: unknown, label: string): string {
@@ -474,6 +487,7 @@ export function parseScenarioManifest(value: unknown): ScenarioManifest {
       "comparisons",
       "expectations",
       "normalizations",
+      "scrub",
       "stub",
       "oracleGuard",
     ],
@@ -592,6 +606,7 @@ export function parseScenarioManifest(value: unknown): ScenarioManifest {
     comparisons,
     expectations,
     normalizations,
+    ...(item.scrub === undefined ? {} : { scrub: scrub(item.scrub) }),
     ...(item.stub === undefined ? {} : { stub: stub(item.stub) }),
     ...(item.oracleGuard === undefined ? {} : { oracleGuard: guard(item.oracleGuard) }),
   };

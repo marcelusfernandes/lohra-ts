@@ -12,6 +12,8 @@ export interface ModelsOptions {
   readonly environment: Record<string, string>;
   readonly probeOllama: () => Promise<OllamaStatus>;
   readonly client?: CatalogHttpClient;
+  readonly subscriptionActive?: boolean;
+  readonly subscriptionModel?: string;
 }
 export async function runModels(
   options: ModelsOptions,
@@ -32,6 +34,12 @@ export async function runModels(
     providers: wanted ? [wanted] : undefined,
     probeOllama: options.probeOllama,
     ...(options.client ? { client: options.client } : {}),
+    ...(options.subscriptionActive === undefined
+      ? {}
+      : { subscriptionActive: options.subscriptionActive }),
+    ...(options.subscriptionModel === undefined
+      ? {}
+      : { subscriptionModel: options.subscriptionModel }),
   });
   const tiers = loadTiers(`${options.home}/workflow_tiers.json`);
   if (options.json) {

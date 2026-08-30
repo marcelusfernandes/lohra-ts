@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { realpathSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
@@ -8,6 +8,11 @@ import { resolvePaths } from "./config/paths.js";
 import { applyEnvFile } from "./config/env-file.js";
 import { runModels } from "./commands/models.js";
 import { runTiers } from "./commands/tiers.js";
+import { runAuth } from "./commands/auth.js";
+import { runChatBoundary } from "./commands/chat-boundary.js";
+import { readCodexModel } from "./auth/codex.js";
+import { subscriptionActive } from "./auth/credentials.js";
+import type { OAuthPost } from "./auth/oauth.js";
 import { runDoctor } from "./doctor/index.js";
 import type { OllamaStatus } from "./doctor/model.js";
 import { probeOllamaDown } from "./doctor/snapshot.js";
@@ -35,6 +40,8 @@ export interface CliIo {
   readonly stdout: (value: string) => void;
   readonly stderr: (value: string) => void;
   readonly probeOllama?: () => Promise<boolean | OllamaStatus>;
+  readonly isTty?: boolean;
+  readonly oauthPost?: OAuthPost;
 }
 
 function defaultIo(): CliIo {
@@ -82,7 +89,14 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     return 2;
   }
   const command = argv[0] as string;
-  if (command !== "doctor" && command !== "models" && command !== "tiers") {
+  if (
+    command !== "doctor" &&
+    command !== "models" &&
+    command !== "tiers" &&
+    command !== "auth" &&
+    command !== "chat" &&
+    command !== "serve"
+  ) {
     if ((commands as readonly string[]).includes(command)) {
       io.stderr(`lohra: ${command} is not implemented in the TypeScript bootstrap\n`);
     } else {
@@ -109,6 +123,42 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     return 2;
   }
   applyEnvFile(paths.envFile, environment);
+  const codexHome = environment.CODEX_HOME?.trim() || join(environment.HOME ?? "", ".codex");
+  if (command === "auth") {
+    const action = argv[1] ?? "status";
+    const rawValue = argv[2];
+    const value = rawValue?.startsWith("--") ? undefined : rawValue;
+    const result = await runAuth({
+      action,
+      ...(value === undefined ? {} : { value }),
+      assumeYes: argv.includes("--yes"),
+      noInput: argv.includes("--no-input"),
+      home: paths.home,
+      codexHome,
+      isTty: io.isTty ?? false,
+      ...(io.oauthPost === undefined ? {} : { post: io.oauthPost }),
+    });
+    io.stdout(result.stdout);
+    io.stderr(result.stderr);
+    return result.code;
+  }
+  if (command === "serve") {
+    if (subscriptionActive(paths.home)) {
+      io.stderr(
+        "refusing to serve: subscription mode is active, and relaying your ChatGPT/Codex subscription through this server would expose it. Run `lohra auth disable` (or use an API key) to serve — this gate is unconditional, so `lohra auth prefer api_key` does NOT lift it.\n",
+      );
+      return 2;
+    }
+    io.stderr("lohra: serve is not implemented in the TypeScript bootstrap\n");
+    return 2;
+  }
+  if (command === "chat") {
+    const input = argv.slice(1).find((entry) => !entry.startsWith("--")) ?? "";
+    const result = await runChatBoundary({ home: paths.home, codexHome, input });
+    io.stdout(result.stdout);
+    io.stderr(result.stderr);
+    return result.code;
+  }
   const normalizeProbe = async (): Promise<OllamaStatus> => {
     const value = await (io.probeOllama ?? probeOllamaDown)();
     return typeof value === "boolean"
@@ -128,6 +178,8 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
       home: paths.home,
       environment,
       probeOllama: normalizeProbe,
+      subscriptionActive: subscriptionActive(paths.home),
+      subscriptionModel: readCodexModel(codexHome) ?? "gpt-5.5",
       ...(provider === undefined ? {} : { provider }),
     });
     io.stdout(result.stdout);

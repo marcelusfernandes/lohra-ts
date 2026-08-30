@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 1,
+  "id": "t05-profile-isolation",
+  "description": "T05 bilateral auth probe: t05-profile-isolation",
+  "argv": [],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "NO_COLOR": "1",
+      "COLUMNS": "80",
+      "TZ": "UTC",
+      "HOME": "{{home}}",
+      "CODEX_HOME": "{{home}}/codex",
+      "TMPDIR": "{{home}}/tmp",
+      "LOHRA_HOME": "{{profile}}"
+    }
+  },
+  "preconditions": [],
+  "fixtures": [
+    {
+      "root": "profile",
+      "path": "auth.json",
+      "encoding": "utf8",
+      "content": "{\n  \"openai\": {\n    \"auth_mode\": \"subscription\",\n    \"acknowledged_tos_risk\": true,\n    \"preference\": \"auto\"\n  }\n}"
+    },
+    {
+      "root": "profile",
+      "path": "oauth.json",
+      "encoding": "utf8",
+      "content": "{\n  \"access_token\": \"DUMMY-ACCESS-T05\",\n  \"refresh_token\": \"DUMMY-REFRESH-T05\",\n  \"account_id\": \"ACCT-T05-DUMMY\",\n  \"expires_at\": 2000000000\n}"
+    },
+    {
+      "root": "profile",
+      "path": "profiles/p1/auth.json",
+      "encoding": "utf8",
+      "content": "{\n  \"openai\": {\n    \"auth_mode\": \"api_key\",\n    \"acknowledged_tos_risk\": false,\n    \"preference\": \"api_key\"\n  }\n}"
+    },
+    {
+      "root": "profile",
+      "path": "profiles/p2/auth.json",
+      "encoding": "utf8",
+      "content": "{\n  \"openai\": {\n    \"auth_mode\": \"subscription\",\n    \"acknowledged_tos_risk\": true,\n    \"preference\": \"subscription\"\n  }\n}"
+    },
+    {
+      "root": "profile",
+      "path": "profiles/p2/oauth.json",
+      "encoding": "utf8",
+      "content": "{\n  \"access_token\": \"DUMMY-ACCESS-T05\",\n  \"refresh_token\": \"DUMMY-REFRESH-T05\",\n  \"account_id\": \"ACCT-T05-DUMMY\",\n  \"expires_at\": 2000000000\n}"
+    },
+    {
+      "root": "home",
+      "path": "codex/auth.json",
+      "encoding": "utf8",
+      "content": "{\"tokens\":{\"access_token\":\"CODEX-DUMMY\"}}"
+    }
+  ],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/auth/oracle_driver.py", "profile-isolation"],
+      "cwd": "sandbox"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/auth/candidate-driver.mjs",
+        "profile-isolation"
+      ],
+      "cwd": "sandbox"
+    }
+  },
+  "limits": {
+    "timeoutMs": 15000,
+    "maxOutputBytes": 4194304
+  },
+  "capture": {
+    "tree": {
+      "enabled": true,
+      "root": "profile",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": []
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "probe",
+      "field": "process.stdout"
+    },
+    {
+      "class": "byte",
+      "field": "process.stderr"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "both",
+      "field": "process.stderr",
+      "encoding": "utf8",
+      "value": ""
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/default/own",
+      "value": true
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/p1/own",
+      "value": false
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/p2/own",
+      "value": true
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/codex/exists",
+      "value": true
+    }
+  ],
+  "normalizations": [],
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10"
+  }
+}
