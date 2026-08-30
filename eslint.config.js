@@ -2,7 +2,17 @@ import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist/", "node_modules/", "coverage/", "docs/"] },
+  {
+    ignores: [
+      "dist/",
+      "node_modules/",
+      "coverage/",
+      "docs/",
+      ".oracle-venv/",
+      ".parity-evidence/",
+      "lohra/",
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   {
@@ -17,7 +27,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["**/*.js"],
+    files: ["**/*.{js,mjs,cjs}"],
     ...tseslint.configs.disableTypeChecked,
   },
 );

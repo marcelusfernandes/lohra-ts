@@ -35,3 +35,22 @@ metade para sempre.
 npm install
 npm run typecheck && npm test && npm run lint && npm run format:check
 ```
+
+## Harness de paridade
+
+Os cenários versionados ficam em `scripts/parity/scenarios/`. O oracle é
+descoberto a partir do worktree principal ou pode ser ligado explicitamente por
+`--oracle-workspace`/`LOHRA_ORACLE_WORKSPACE`; esse workspace precisa conter os
+siblings read-only `lohra/` e `.oracle-venv/`.
+
+```bash
+npm run parity -- --manifest scripts/parity/scenarios/oracle-version.json
+npm run parity -- --manifest scripts/parity/scenarios/oracle-no-subcommand.json
+npm run parity -- --manifest scripts/parity/scenarios/oracle-workflow-list.json
+npm run parity -- --manifest scripts/parity/scenarios/events-jsonl-fixture.json
+npm run parity -- --manifest scripts/parity/scenarios/deliberate-divergence.json
+```
+
+Evidence canônica é gravada por padrão em `.parity-evidence/<scenario-id>.json`
+(gitignored). O CLI usa `0` para match, `1` para divergência e `2` para erro do
+harness; portanto o último cenário acima deve retornar `1`.

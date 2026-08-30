@@ -1,0 +1,347 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve, sep } from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
+
+import { canonicalJson, sha256 } from "./canonical.js";
+import { captureObservables } from "./capture.js";
+import { compareRuns, readRunField } from "./compare.js";
+import { errorMessage, HarnessError } from "./errors.js";
+import {
+  assertGuardAfter,
+  assertGuardBefore,
+  createGuardProvider,
+  type GuardProvider,
+} from "./guard.js";
+import { runPythonProcess, runTypeScriptProcess } from "./process.js";
+import {
+  expandArgument,
+  resolveExecutable,
+  resolveOracleWorkspace,
+  type OracleWorkspace,
+} from "./resolve.js";
+import type {
+  EvidenceRecord,
+  FixtureSpec,
+  RunRecord,
+  RunnerSpec,
+  RuntimePaths,
+  ScenarioManifest,
+} from "./types.js";
+
+export interface RunScenarioOptions {
+  readonly cwd?: string;
+  readonly projectRoot?: string;
+  readonly oracleWorkspace?: string;
+  readonly executables?: Readonly<Record<string, string>>;
+  readonly pythonExecutable?: string;
+  readonly guardProvider?: GuardProvider;
+}
+
+const defaultProjectRoot = fileURLToPath(new URL("../..", import.meta.url));
+
+function runtimePaths(root: string, side: "oracle" | "candidate"): RuntimePaths {
+  const sideRoot = join(root, side);
+  const paths = {
+    root: sideRoot,
+    home: join(sideRoot, "home"),
+    profile: join(sideRoot, "profile"),
+    sandbox: join(sideRoot, "sandbox"),
+  };
+  for (const path of Object.values(paths)) {
+    mkdirSync(path, { recursive: true });
+  }
+  for (const path of [paths.home, paths.profile, paths.sandbox]) {
+    if (!resolve(path).startsWith(`${resolve(sideRoot)}${sep}`)) {
+      throw new HarnessError("ISOLATION_ESCAPE", `${path} escaped the temporary execution root`);
+    }
+  }
+  return paths;
+}
+
+function fixtureRoot(paths: RuntimePaths, fixture: FixtureSpec): string {
+  return paths[fixture.root];
+}
+
+function materializeFixtures(paths: RuntimePaths, fixtures: readonly FixtureSpec[]): void {
+  for (const fixture of fixtures) {
+    const root = fixtureRoot(paths, fixture);
+    const target = resolve(root, fixture.path);
+    if (!target.startsWith(`${resolve(root)}${sep}`)) {
+      throw new HarnessError("FIXTURE_ESCAPE", `Fixture ${fixture.path} escaped ${fixture.root}`);
+    }
+    mkdirSync(dirname(target), { recursive: true });
+    const content =
+      fixture.encoding === "utf8"
+        ? Buffer.from(fixture.content)
+        : Buffer.from(fixture.content, "base64");
+    writeFileSync(target, content);
+  }
+}
+
+function environment(
+  manifest: ScenarioManifest,
+  paths: RuntimePaths,
+  projectRoot: string,
+): Readonly<Record<string, string>> {
+  const inherited = Object.fromEntries(
+    manifest.environment.allow.flatMap((key) => {
+      const value = process.env[key];
+      return value === undefined ? [] : [[key, value]];
+    }),
+  );
+  const declared = Object.fromEntries(
+    Object.entries(manifest.environment.set).map(([key, value]) => [
+      key,
+      expandArgument(value, projectRoot),
+    ]),
+  );
+  return {
+    ...inherited,
+    ...declared,
+    HOME: paths.home,
+    LOHRA_PARITY_PROFILE: paths.profile,
+  };
+}
+
+function commandArgs(
+  runner: RunnerSpec,
+  manifest: ScenarioManifest,
+  projectRoot: string,
+): string[] {
+  return [...runner.prefixArgs, ...manifest.argv].map((value) =>
+    expandArgument(value, projectRoot),
+  );
+}
+
+function executeSide(
+  side: "oracle" | "candidate",
+  manifest: ScenarioManifest,
+  paths: RuntimePaths,
+  context: {
+    readonly projectRoot: string;
+    readonly workspace?: OracleWorkspace;
+    readonly bindings?: Readonly<Record<string, string>>;
+    readonly pythonExecutable: string;
+  },
+): RunRecord {
+  const runner = manifest.runners[side];
+  const request = {
+    executable: resolveExecutable(runner.executable, {
+      ...(context.workspace === undefined ? {} : { oracle: context.workspace }),
+      ...(context.bindings === undefined ? {} : { bindings: context.bindings }),
+    }),
+    argv: commandArgs(runner, manifest, context.projectRoot),
+    cwd: paths.sandbox,
+    environment: environment(manifest, paths, context.projectRoot),
+    ...manifest.limits,
+  };
+  const processRecord =
+    runner.adapter === "python"
+      ? runPythonProcess(request, { pythonExecutable: context.pythonExecutable })
+      : runTypeScriptProcess(request);
+  return { process: processRecord, ...captureObservables(paths, manifest.capture) };
+}
+
+function setRunField(record: RunRecord, field: string, value: unknown): void {
+  let current = record as unknown as Record<string, unknown>;
+  const parts = field.split(".");
+  for (const part of parts.slice(0, -1)) {
+    current = current[part] as Record<string, unknown>;
+  }
+  const last = parts.at(-1);
+  if (last !== undefined) {
+    current[last] = structuredClone(value);
+  }
+}
+
+function reproducibility(
+  base: Omit<EvidenceRecord, "reproducibility">,
+): EvidenceRecord["reproducibility"] {
+  const projectedRuns = structuredClone(base.runs) as {
+    oracle: RunRecord;
+    candidate: RunRecord;
+  };
+  const excludedRawPointers: string[] = [];
+  for (const rule of base.normalizationPolicy) {
+    for (const side of ["oracle", "candidate"] as const) {
+      setRunField(projectedRuns[side], rule.field, base.comparison.normalized[rule.field]?.[side]);
+      excludedRawPointers.push(`/runs/${side}/${rule.field.replaceAll(".", "/")}`);
+    }
+  }
+  const projection = { ...base, runs: projectedRuns };
+  return {
+    excludedRawPointers,
+    projectionSha256: sha256(canonicalJson(projection)),
+  };
+}
+
+function expectationFailures(
+  manifest: ScenarioManifest,
+  runs: { readonly oracle: RunRecord; readonly candidate: RunRecord },
+): EvidenceRecord["expectations"]["failures"] {
+  const failures: EvidenceRecord["expectations"]["failures"][number][] = [];
+  for (const expectation of manifest.expectations) {
+    const sides =
+      expectation.side === "both"
+        ? (["oracle", "candidate"] as const)
+        : ([expectation.side] as const);
+    for (const side of sides) {
+      const raw = readRunField(runs[side], expectation.field);
+      const actual =
+        expectation.encoding === "utf8" && typeof raw === "string"
+          ? Buffer.from(raw, "base64").toString("utf8")
+          : raw;
+      if (canonicalJson(actual) !== canonicalJson(expectation.value)) {
+        failures.push({
+          side,
+          field: expectation.field,
+          expected: expectation.value,
+          actual,
+        });
+      }
+    }
+  }
+  return failures;
+}
+
+export function runScenario(
+  manifest: ScenarioManifest,
+  options: RunScenarioOptions = {},
+): EvidenceRecord {
+  const cwd = options.cwd ?? process.cwd();
+  const projectRoot = options.projectRoot ?? defaultProjectRoot;
+  const usesPythonAdapter = Object.values(manifest.runners).some(
+    (runner) => runner.adapter === "python",
+  );
+  const needsWorkspace =
+    (manifest.oracleGuard !== undefined && options.guardProvider === undefined) ||
+    (usesPythonAdapter && options.pythonExecutable === undefined) ||
+    Object.values(manifest.runners).some((runner) => runner.executable === "oracle-lohra");
+  const workspace = needsWorkspace
+    ? resolveOracleWorkspace({
+        cwd,
+        ...(options.oracleWorkspace === undefined
+          ? {}
+          : { explicitWorkspace: options.oracleWorkspace }),
+        ...manifest.limits,
+      })
+    : undefined;
+  const pythonExecutable = options.pythonExecutable ?? workspace?.python ?? "";
+  if (usesPythonAdapter && pythonExecutable.length === 0) {
+    throw new HarnessError(
+      "PYTHON_BINDING",
+      "Python adapter has no sanctioned interpreter binding",
+    );
+  }
+  const guard =
+    manifest.oracleGuard === undefined
+      ? undefined
+      : (options.guardProvider ??
+        createGuardProvider(workspace as OracleWorkspace, manifest.limits));
+  const root = mkdtempSync(join(tmpdir(), "lohra-parity-"));
+  const oraclePaths = runtimePaths(root, "oracle");
+  const candidatePaths = runtimePaths(root, "candidate");
+  let beforeCommit: string | undefined;
+  let primaryError: unknown;
+  let afterError: unknown;
+  let oracleRun: RunRecord | undefined;
+  let candidateRun: RunRecord | undefined;
+  try {
+    if (guard !== undefined && manifest.oracleGuard !== undefined) {
+      const before = guard.before();
+      assertGuardBefore(before, manifest.oracleGuard);
+      beforeCommit = before.commit;
+    }
+    materializeFixtures(oraclePaths, manifest.fixtures);
+    materializeFixtures(candidatePaths, manifest.fixtures);
+    const context = {
+      projectRoot,
+      ...(workspace === undefined ? {} : { workspace }),
+      ...(options.executables === undefined ? {} : { bindings: options.executables }),
+      pythonExecutable,
+    };
+    oracleRun = executeSide("oracle", manifest, oraclePaths, context);
+    candidateRun = executeSide("candidate", manifest, candidatePaths, context);
+  } catch (error) {
+    primaryError = error;
+  }
+  if (beforeCommit !== undefined && guard !== undefined && manifest.oracleGuard !== undefined) {
+    try {
+      assertGuardAfter(guard.after(), manifest.oracleGuard);
+    } catch (error) {
+      afterError = error;
+    }
+  }
+  try {
+    if (primaryError !== undefined && afterError !== undefined) {
+      throw new HarnessError(
+        "RUN_AND_POST_GUARD_FAILED",
+        `Scenario failed (${errorMessage(primaryError)}) and post-guard failed (${errorMessage(afterError)})`,
+        { cause: primaryError },
+      );
+    }
+    if (primaryError !== undefined) {
+      if (primaryError instanceof Error) {
+        throw primaryError;
+      }
+      throw new HarnessError("RUN_FAILED", errorMessage(primaryError));
+    }
+    if (afterError !== undefined) {
+      if (afterError instanceof Error) {
+        throw afterError;
+      }
+      throw new HarnessError("POST_GUARD_FAILED", errorMessage(afterError));
+    }
+    if (oracleRun === undefined || candidateRun === undefined) {
+      throw new HarnessError("RUN_MISSING", "Scenario did not produce both run records");
+    }
+    const comparison = compareRuns(oracleRun, candidateRun, {
+      comparisons: manifest.comparisons,
+      normalizations: manifest.normalizations,
+      runtimeValues: { oracle: oraclePaths, candidate: candidatePaths },
+    });
+    const expectations = {
+      failures: expectationFailures(manifest, { oracle: oracleRun, candidate: candidateRun }),
+    };
+    const commands = {
+      oracle: {
+        executable: manifest.runners.oracle.executable,
+        argv: [...manifest.runners.oracle.prefixArgs, ...manifest.argv],
+      },
+      candidate: {
+        executable: manifest.runners.candidate.executable,
+        argv: [...manifest.runners.candidate.prefixArgs, ...manifest.argv],
+      },
+    };
+    const base: Omit<EvidenceRecord, "reproducibility"> = {
+      schemaVersion: 1,
+      scenario: { id: manifest.id, manifestSha256: sha256(canonicalJson(manifest)) },
+      commands,
+      capturePolicy: manifest.capture,
+      expectationPolicy: manifest.expectations,
+      normalizationPolicy: manifest.normalizations,
+      ...(manifest.oracleGuard === undefined
+        ? {}
+        : {
+            oracleGuard: {
+              commit: beforeCommit as string,
+              version: manifest.oracleGuard.expectedVersion,
+              cleanBefore: true as const,
+              cleanAfter: true as const,
+            },
+          }),
+      runs: { oracle: oracleRun, candidate: candidateRun },
+      comparison,
+      expectations,
+      verdict:
+        comparison.verdict === "divergent" || expectations.failures.length > 0
+          ? "divergent"
+          : "match",
+    };
+    return { ...base, reproducibility: reproducibility(base) };
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}

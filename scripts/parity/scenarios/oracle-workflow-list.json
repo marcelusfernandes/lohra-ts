@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "id": "oracle-workflow-list",
+  "description": "Self-parity of workflow list with real HOME tree and SQLite capture",
+  "argv": ["workflow", "list"],
+  "environment": {
+    "allow": [],
+    "set": { "PATH": "/usr/bin:/bin", "PYTHONUTF8": "1", "NO_COLOR": "1" }
+  },
+  "fixtures": [],
+  "runners": {
+    "oracle": { "adapter": "python", "executable": "oracle-lohra", "prefixArgs": [] },
+    "candidate": { "adapter": "typescript", "executable": "oracle-lohra", "prefixArgs": [] }
+  },
+  "limits": { "timeoutMs": 10000, "maxOutputBytes": 1048576 },
+  "capture": {
+    "tree": {
+      "enabled": true,
+      "root": "home",
+      "exclude": [".lohra/state.db-shm"]
+    },
+    "sqlite": [
+      {
+        "name": "state",
+        "root": "home",
+        "path": ".lohra/state.db",
+        "pragmas": ["journal_mode", "user_version"],
+        "tables": []
+      }
+    ],
+    "events": []
+  },
+  "comparisons": [
+    { "class": "byte", "field": "process.exitCode" },
+    { "class": "byte", "field": "process.signal" },
+    { "class": "byte", "field": "process.stdout" },
+    { "class": "byte", "field": "process.stderr" },
+    { "class": "schema", "field": "tree" },
+    { "class": "schema", "field": "sqlite.state" }
+  ],
+  "expectations": [
+    { "side": "both", "field": "process.exitCode", "value": 0 },
+    { "side": "both", "field": "process.signal", "value": null },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "value": "no workflow runs\n"
+    },
+    { "side": "both", "field": "process.stderr", "encoding": "utf8", "value": "" },
+    { "side": "both", "field": "sqlite.state.exists", "value": true },
+    { "side": "both", "field": "sqlite.state.pragmas.journal_mode", "value": "wal" },
+    {
+      "side": "both",
+      "field": "sqlite.state.pragmas.user_version",
+      "value": { "type": "integer", "decimal": "0" }
+    }
+  ],
+  "normalizations": [],
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n"
+  }
+}

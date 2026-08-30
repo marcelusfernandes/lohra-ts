@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
+    "parity": "tsx scripts/parity/cli.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

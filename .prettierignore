@@ -1,7 +1,7 @@
 node_modules/
 dist/
 coverage/
-*.tsbuildinfo
-.env
-.DS_Store
+docs/reference/
+.oracle-venv/
 .parity-evidence/
+lohra/
