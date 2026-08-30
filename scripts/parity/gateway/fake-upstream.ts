@@ -29,10 +29,46 @@ export async function startFakeUpstream(): Promise<FakeUpstream> {
       }
       requests.push({ path: request.url ?? "", body: parsedBody });
 
+      const wantsStream =
+        typeof parsedBody === "object" &&
+        parsedBody !== null &&
+        (parsedBody as { stream?: unknown }).stream === true;
+      const id = `chatcmpl-${randomUUID().replaceAll("-", "")}`;
+      const created = Math.floor(Date.now() / 1000);
+
+      if (wantsStream) {
+        // Real chat_completions clients that request stream:true expect
+        // SSE chunks, not a single JSON blob -- both the oracle and this
+        // session's candidate stream by default when driving a real turn
+        // (dashboard.ts's per-turn transport factory), so this is not
+        // optional for any prompt.submit-dependent scenario.
+        response.writeHead(200, {
+          "content-type": "text/event-stream",
+          "cache-control": "no-cache",
+          connection: "keep-alive",
+        });
+        const chunkOf = (delta: Record<string, unknown>, finishReason: string | null): string =>
+          `data: ${JSON.stringify({
+            id,
+            object: "chat.completion.chunk",
+            created,
+            model: "fake-model-a",
+            choices: [{ index: 0, delta, finish_reason: finishReason }],
+          })}\n\n`;
+        response.write(chunkOf({ role: "assistant" }, null));
+        for (const word of nextContent.length > 0 ? nextContent.split(" ") : []) {
+          response.write(chunkOf({ content: `${word} ` }, null));
+        }
+        response.write(chunkOf({}, "stop"));
+        response.write("data: [DONE]\n\n");
+        response.end();
+        return;
+      }
+
       const payload = {
-        id: `chatcmpl-${randomUUID().replaceAll("-", "")}`,
+        id,
         object: "chat.completion",
-        created: Math.floor(Date.now() / 1000),
+        created,
         model: "fake-model-a",
         choices: [
           {
