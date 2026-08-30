@@ -101,6 +101,62 @@ const RELAY_CANDIDATE_PIN =
   'data: {"error": {"message": "provider returned tool_calls while tools are disabled", "type": "upstream_error"}}\n\n' +
   "data: [DONE]\n\n";
 
+// Round-1 Evaluator finding (F2): the streaming relay pin above only
+// covers `stream:true`. The SAME "unsolicited upstream tool_calls, no
+// dispatcher" condition on a NON-stream request diverges in a way the
+// streaming pin never surfaces: the oracle still completes normally
+// (200, empty content, finish "stop", full usage) since loop.py's
+// dispatch guard is the same regardless of stream mode, but the
+// candidate's CompletionService maps UnexpectedToolCallError to a 502
+// upstream_error (not an in-stream error frame, since there is no stream
+// to be mid-way through) — a STATUS-LEVEL divergence the streaming-only
+// scenario never declared. Pinned per side for the same T08-authority
+// reason as the streaming half.
+function normalizeCompactIds(body: string): string {
+  return body.replaceAll(/"id":"chatcmpl-[0-9a-f]{32}"/gu, '"id":"<ID>"').replaceAll(/"created":\d+/gu, '"created":0');
+}
+
+/** Relay (no --tools), non-stream: the unsolicited-tool_calls divergence
+ * is a STATUS-level split here (oracle 200, candidate 502), not just a
+ * body split — F2's declared gap. */
+export async function runRelayNonStream(oracle: ServerHandle, candidate: ServerHandle, upstream: FakeUpstream): Promise<Result> {
+  const body = JSON.stringify({ model: "m", messages: [{ role: "user", content: "SCEN:toolcall-safe hi" }] });
+  const before = upstream.requests.length;
+  const probe: ProbeRecord & { upstream: UpstreamRequestRecord[] } = {
+    ...(await probeBoth("relay-no-leak-nonstream", oracle, candidate, (apiKey) => postRequestLines(apiKey, body), body)),
+    upstream: upstream.requests.slice(before),
+  };
+  const rawEvidence = { request: probe.request, oracle: probe.oracle, candidate: probe.candidate, upstream: probe.upstream };
+  const oracleNormalized = normalizeCompactIds(probe.oracle.body);
+  const candidateNormalized = normalizeCompactIds(probe.candidate.body);
+  const checks = {
+    // The status-level split IS the finding — declared explicitly, not
+    // hidden behind a generic "both 2xx" style check.
+    oracleStatus200Ok: probe.oracle.statusLine.includes(" 200 "),
+    candidateStatus502Ok: probe.candidate.statusLine.includes(" 502 "),
+    oracleNoLeakOk: noToolCallLeak(probe.oracle.body),
+    candidateNoLeakOk: noToolCallLeak(probe.candidate.body),
+    oraclePinnedOk: oracleNormalized === '{"id":"<ID>","object":"chat.completion","created":0,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":11,"completion_tokens":5,"total_tokens":16,"prompt_tokens_details":{"cached_tokens":2,"cache_write_tokens":0},"completion_tokens_details":{"reasoning_tokens":0}}}',
+    candidatePinnedOk: candidateNormalized === '{"error":{"message":"provider returned tool_calls while tools are disabled","type":"upstream_error"}}',
+    upstreamCountOk: probe.upstream.length === 2,
+  };
+  const ok = Object.values(checks).every(Boolean);
+  const record = {
+    id: "relay-no-leak-nonstream",
+    checks,
+    note: "F2: status-level (200 vs 502) characterized divergence for the same T08-approved unsolicited-tool_calls condition as relay-no-leak's streaming half, declared explicitly per side.",
+    normalized: { oracle: oracleNormalized, candidate: candidateNormalized },
+    match: ok,
+  };
+  return {
+    projection: { probes: [record] },
+    rawEvidence,
+    match: ok,
+    differences: ok ? [] : [record],
+    expectedUpstreamRequests: 2,
+  };
+}
+
 /** Relay (no --tools): no dispatcher exists. The oracle's loop.py falls
  * through its `finish_reason == "tool_calls" and agent.tool_dispatch`
  * guard (dispatch is falsy) straight to the terminal branch and completes

@@ -90,6 +90,20 @@ function chatNonStream(response: ServerResponse, scenario: string, body: Record<
     json(response, errorPayload(), 418);
     return;
   }
+  if (scenario === "midbreak") {
+    // Round-1 Evaluator finding (F3): a non-stream upstream call reset
+    // mid-body (chunked, no content-length declared upfront — matches how
+    // the streaming midbreak mode already behaves) was previously
+    // unexercised. `.write()` confirms the partial chunk left this
+    // process's userspace buffer; the settle delay gives the OS time to
+    // actually deliver it before the RST, same reasoning as the streaming
+    // midbreak mode.
+    response.writeHead(200, { "content-type": "application/json" });
+    response.write('{"choices":[{"message":{"content":"partial', () => {
+      setTimeout(() => response.socket?.destroy(), 300);
+    });
+    return;
+  }
   const toolCall = TOOL_CALL_REQUESTS[scenario];
   if (toolCall !== undefined && !hasToolResult(body)) {
     json(response, {

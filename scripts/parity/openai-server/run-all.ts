@@ -21,14 +21,21 @@ import { run as authMatrixAndTrailingSpace } from "./scenarios/t11-auth-matrix-a
 import { run as bodyValidationBeforeAuthChat } from "./scenarios/t11-body-validation-before-auth-chat.js";
 import { run as bodyValidationBeforeAuthResponses } from "./scenarios/t11-body-validation-before-auth-responses.js";
 import { run as chatLastPartsLossVsHistory } from "./scenarios/t11-chat-last-parts-loss-vs-history.js";
-import { run as chatNonstreamSuccessPartialUpstreamError } from "./scenarios/t11-chat-nonstream-success-partial-upstream-error.js";
+import {
+  run as chatNonstreamSuccessPartialUpstreamError,
+  runTransportTruncation as chatNonstreamTransportTruncation,
+} from "./scenarios/t11-chat-nonstream-success-partial-upstream-error.js";
 import { run as chatStreamCleanEofEstimatedUsage } from "./scenarios/t11-chat-stream-clean-eof-estimated-usage.js";
 import { run as chatStreamPostOpenErrorDone } from "./scenarios/t11-chat-stream-post-open-error-done.js";
 import { run as chatStreamSuccessUsageAndNoUsage } from "./scenarios/t11-chat-stream-success-usage-and-no-usage.js";
 import { run as clientToolsNegativeDiscard } from "./scenarios/t11-client-tools-negative-discard.js";
 import { run as concurrentStreamIsolationAndDisconnectRecovery } from "./scenarios/t11-concurrent-stream-isolation-and-disconnect-recovery.js";
 import { run as methodsRunsAndRootAbsence } from "./scenarios/t11-methods-runs-and-root-absence.js";
-import { runAgentic as relayAgenticNoToolCallLeakAgentic, runRelay as relayAgenticNoToolCallLeakRelay } from "./scenarios/t11-relay-agentic-no-tool-call-leak.js";
+import {
+  runAgentic as relayAgenticNoToolCallLeakAgentic,
+  runRelay as relayAgenticNoToolCallLeakRelay,
+  runRelayNonStream as relayAgenticNoToolCallLeakRelayNonStream,
+} from "./scenarios/t11-relay-agentic-no-tool-call-leak.js";
 import { run as requestCoercionsLimitsAndExtraFields } from "./scenarios/t11-request-coercions-limits-and-extra-fields.js";
 import { run as responsesNonstreamSuccessPartialUpstreamError } from "./scenarios/t11-responses-nonstream-success-partial-upstream-error.js";
 import { run as responsesPartsConcatenation } from "./scenarios/t11-responses-parts-concatenation.js";
@@ -69,6 +76,7 @@ const ALL_SCENARIOS: readonly ScenarioSpec[] = [
   { id: "t11-methods-runs-and-root-absence", config: {}, run: methodsRunsAndRootAbsence },
   { id: "t11-route-negative-sweep-and-slash-redirect-class", config: {}, run: routeNegativeSweepAndSlashRedirectClass },
   { id: "t11-chat-nonstream-success-partial-upstream-error", config: {}, run: chatNonstreamSuccessPartialUpstreamError },
+  { id: "t11-chat-nonstream-transport-truncation", config: {}, run: chatNonstreamTransportTruncation },
   { id: "t11-responses-nonstream-success-partial-upstream-error", config: {}, run: responsesNonstreamSuccessPartialUpstreamError },
   { id: "t11-request-coercions-limits-and-extra-fields", config: {}, run: requestCoercionsLimitsAndExtraFields },
   { id: "t11-chat-last-parts-loss-vs-history", config: {}, run: chatLastPartsLossVsHistory },
@@ -84,6 +92,7 @@ const ALL_SCENARIOS: readonly ScenarioSpec[] = [
   { id: "t11-agentic-definition-dispatch-dangerous-command", config: { tools: "terminal" }, run: agenticDefinitionDispatchDangerousCommand },
   { id: "t11-relay-agentic-no-tool-call-leak", config: { tools: "read_file" }, run: relayAgenticNoToolCallLeakAgentic },
   { id: "t11-relay-no-tool-call-leak", config: {}, run: relayAgenticNoToolCallLeakRelay },
+  { id: "t11-relay-no-tool-call-leak-nonstream", config: {}, run: relayAgenticNoToolCallLeakRelayNonStream },
   { id: "t11-stateless-two-requests", config: {}, run: statelessTwoRequests },
   { id: "t11-concurrent-stream-isolation-and-disconnect-recovery", config: {}, run: concurrentStreamIsolationAndDisconnectRecovery },
   { id: "t11-sigint-cleanup-and-port-reuse", config: {}, run: sigintCleanupAndPortReuse },

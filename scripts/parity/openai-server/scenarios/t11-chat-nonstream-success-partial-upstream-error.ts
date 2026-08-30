@@ -141,3 +141,68 @@ export async function run(
     expectedUpstreamRequests: 6,
   };
 }
+
+// Round-1 Evaluator finding (F3): a non-stream upstream call reset mid-body
+// (not the immediate-418 case above, and not assertion 49's streaming
+// truncation) was previously unexercised. Measured divergence, pinned per
+// side: both sides map the failure to 502 upstream_error, but (a) the
+// error TEXT differs — the candidate's "peer closed connection without
+// sending complete message body (incomplete chunked read)" preserves MORE
+// cause than the oracle's generic "Connection error." (decision 8; not
+// weakened here), and (b) the upstream CALL COUNT differs — 3 upstream
+// calls for the oracle (its SDK retries a connection-level error, not
+// just a >=500 status; user-agent "OpenAI/Python..." on all 3) vs 1 for
+// the candidate (ChatCompletionsClient's retry loop only retries on an
+// HTTP response with status>=500 — a THROWN connection error propagates
+// immediately with zero retries; no user-agent header, the candidate's
+// own bare fetch). The retry-count gap may be T10 debt; it is named here,
+// not silently absorbed into a passing count check.
+const TRANSPORT_TRUNCATION_ORACLE_BODY = '{"error":{"message":"Connection error.","type":"upstream_error"}}';
+const TRANSPORT_TRUNCATION_CANDIDATE_BODY =
+  '{"error":{"message":"peer closed connection without sending complete message body (incomplete chunked read)","type":"upstream_error"}}';
+
+export async function runTransportTruncation(
+  oracle: ServerHandle,
+  candidate: ServerHandle,
+  upstream: FakeUpstream,
+): Promise<{
+  projection: unknown;
+  rawEvidence: unknown;
+  match: boolean;
+  differences: unknown[];
+  expectedUpstreamRequests: number;
+}> {
+  const body = JSON.stringify({ model: "m", messages: [{ role: "user", content: "SCEN:midbreak hi" }] });
+  const before = upstream.requests.length;
+  const probe: ProbeRecord & { upstream: UpstreamRequestRecord[] } = {
+    ...(await probeBoth("transport-truncation", oracle, candidate, (apiKey) => postRequestLines(apiKey, body), body)),
+    upstream: upstream.requests.slice(before),
+  };
+  const rawEvidence = { request: probe.request, oracle: probe.oracle, candidate: probe.candidate, upstream: probe.upstream };
+
+  const oracleCalls = probe.upstream.filter((record) => record.headers["user-agent"]?.startsWith("OpenAI/Python"));
+  const candidateCalls = probe.upstream.filter((record) => record.headers["user-agent"] === undefined);
+
+  const checks = {
+    bothStatus502Ok: probe.oracle.statusLine.includes(" 502 ") && probe.candidate.statusLine.includes(" 502 "),
+    oracleBodyPinnedOk: probe.oracle.body === TRANSPORT_TRUNCATION_ORACLE_BODY,
+    candidateBodyPinnedOk: probe.candidate.body === TRANSPORT_TRUNCATION_CANDIDATE_BODY,
+    oracleRetriedThreeTimesOk: oracleCalls.length === 3,
+    candidateDidNotRetryOk: candidateCalls.length === 1,
+    upstreamCountOk: probe.upstream.length === 4,
+  };
+  const ok = Object.values(checks).every(Boolean);
+  const record = {
+    id: "transport-truncation",
+    checks,
+    note: "F3: 502 upstream_error on both sides, but error text and upstream retry count both diverge — pinned per side, not asserted bilaterally.",
+    match: ok,
+  };
+  return {
+    projection: { probes: [record] },
+    rawEvidence,
+    match: ok,
+    differences: ok ? [] : [record],
+    expectedUpstreamRequests: 4,
+  };
+}

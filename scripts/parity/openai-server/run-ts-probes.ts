@@ -29,12 +29,40 @@ function record(id: string, pass: boolean, detail: unknown): void {
 }
 
 // 1. t11-auth-timing-safe-mutant-killed (assertion 18): the compare is a
-// genuine timing-safe primitive over fixed-size operands, not `===` — a
-// mutant swap would make this source-grep fail even if the functional
-// behavior happened to still look right.
+// genuine timing-safe primitive over fixed-size operands, not `===`.
+//
+// Round-1 Evaluator finding (F1): a whole-file `.includes("timingSafeEqual")`
+// substring search survives the named mutant
+// (`return timingSafeEqual(digest(a), digest(b));` -> `return a === b;`)
+// because the `import { ... timingSafeEqual }` line and the now-orphaned
+// `digest()` helper are still text-present elsewhere in the file — the grep
+// never actually looked at the call site the mutant changes. Fixed by
+// extracting ONLY `timingSafeStringEqual`'s own function body (balanced-
+// brace scan, not a line-based regex, so it survives reformatting) and
+// checking THAT substring both contains a `timingSafeEqual(` call and does
+// NOT contain a bare `a === b` return — the exact two facts the named
+// mutant flips.
+function extractFunctionBody(source: string, functionName: string): string | null {
+  const declarationIndex = source.indexOf(`function ${functionName}`);
+  if (declarationIndex < 0) return null;
+  const braceStart = source.indexOf("{", declarationIndex);
+  if (braceStart < 0) return null;
+  let depth = 0;
+  for (let index = braceStart; index < source.length; index += 1) {
+    if (source[index] === "{") depth += 1;
+    else if (source[index] === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(braceStart, index + 1);
+    }
+  }
+  return null;
+}
+
 {
   const authSource = readFileSync(resolve(root, "src/server/auth.ts"), "utf8");
-  const usesTimingSafePrimitive = authSource.includes("timingSafeEqual");
+  const compareBody = extractFunctionBody(authSource, "timingSafeStringEqual");
+  const usesTimingSafePrimitiveAtCallSite = compareBody !== null && /timingSafeEqual\s*\(/u.test(compareBody);
+  const noBareStrictEqualAtCallSite = compareBody !== null && !/return\s+a\s*===\s*b/u.test(compareBody);
   const functionalOk =
     timingSafeStringEqual("secret-key", "secret-key") &&
     !timingSafeStringEqual("secret-key", "secret-keyX") &&
@@ -43,10 +71,11 @@ function record(id: string, pass: boolean, detail: unknown): void {
     !authorized("Bearer wrong", "secret-key") &&
     !authorized(undefined, "secret-key") &&
     authorized("anything", null); // null key = --insecure semantics: any Authorization passes.
-  record("t11-auth-timing-safe-mutant-killed", usesTimingSafePrimitive && functionalOk, {
-    usesTimingSafePrimitive,
-    functionalOk,
-  });
+  record(
+    "t11-auth-timing-safe-mutant-killed",
+    usesTimingSafePrimitiveAtCallSite && noBareStrictEqualAtCallSite && functionalOk,
+    { usesTimingSafePrimitiveAtCallSite, noBareStrictEqualAtCallSite, functionalOk, compareBody },
+  );
 }
 
 // 2. t11-iteration-wiring-relay-8-agentic-90 (assertion 52): the real
@@ -77,11 +106,22 @@ function record(id: string, pass: boolean, detail: unknown): void {
 }
 
 // 3. t11-single-runtime-no-server-loop (assertion 69): the tool/turn loop
-// (`for (let iteration`) exists exactly once, in conversation/runtime.ts —
-// server/ files are adapters/projections and never duplicate it.
+// exists exactly once, in conversation/runtime.ts — server/ files are
+// adapters/projections and never duplicate it.
+//
+// Evaluator round-1 non-blocking note: matching only `for (let iteration`
+// misses a duplicated turn-loop rewritten with a different loop keyword or
+// counter name. Widening to ANY loop construct is the wrong fix — server/
+// files legitimately contain unrelated loops (array formatting, header
+// iteration) that would then false-positive the "no server loop" side.
+// Instead, match loops that are BOUNDED BY the turn loop's own governing
+// constant (`maxIterations`), which is what actually distinguishes "the
+// tool/turn loop" from an incidental array/header iteration, regardless of
+// for/while spelling or counter-variable name.
 {
+  const LOOP_BOUND_BY_MAX_ITERATIONS = /\b(?:for|while)\s*\([^{]*maxIterations[^{]*\)/gu;
   const runtimeSource = readFileSync(resolve(root, "src/conversation/runtime.ts"), "utf8");
-  const runtimeLoops = (runtimeSource.match(/for \(let iteration/gu) ?? []).length;
+  const runtimeLoops = (runtimeSource.match(LOOP_BOUND_BY_MAX_ITERATIONS) ?? []).length;
   const serverFiles = [
     "src/server/service.ts",
     "src/server/chat-handler.ts",
@@ -94,7 +134,7 @@ function record(id: string, pass: boolean, detail: unknown): void {
   const serverLoopCounts = Object.fromEntries(
     serverFiles.map((path) => {
       const source = readFileSync(resolve(root, path), "utf8");
-      return [path, (source.match(/for \(let iteration/gu) ?? []).length];
+      return [path, (source.match(LOOP_BOUND_BY_MAX_ITERATIONS) ?? []).length];
     }),
   );
   const serverHasNoLoops = Object.values(serverLoopCounts).every((count) => count === 0);
