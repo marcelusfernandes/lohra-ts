@@ -10,10 +10,71 @@ function escapeString(value: string): string {
     else if (character === "\n") result += "\\n";
     else if (character === "\r") result += "\\r";
     else if (character === "\t") result += "\\t";
-    else if (code < 0x20 || code >= 0x80) result += `\\u${code.toString(16).padStart(4, "0")}`;
+    else if (code < 0x20 || code > 0x7e) result += `\\u${code.toString(16).padStart(4, "0")}`;
     else result += character;
   }
   return `${result}"`;
+}
+
+export class PythonFloat {
+  public constructor(public readonly value: number) {}
+}
+
+export function pythonFloat(value: number): PythonFloat {
+  return new PythonFloat(value);
+}
+
+function decimalParts(value: number): { readonly digits: string; readonly exponent: number } {
+  const raw = Math.abs(value).toString().toLowerCase();
+  const exponentIndex = raw.indexOf("e");
+  if (exponentIndex >= 0) {
+    const mantissa = raw.slice(0, exponentIndex);
+    const exponent = Number(raw.slice(exponentIndex + 1));
+    return { digits: mantissa.replace(".", "").replace(/0+$/, ""), exponent };
+  }
+  const decimalIndex = raw.indexOf(".");
+  if (decimalIndex < 0) {
+    return { digits: raw.replace(/0+$/, ""), exponent: raw.length - 1 };
+  }
+  const integer = raw.slice(0, decimalIndex);
+  const fraction = raw.slice(decimalIndex + 1);
+  if (integer !== "0") {
+    return {
+      digits: `${integer}${fraction}`.replace(/0+$/, ""),
+      exponent: integer.length - 1,
+    };
+  }
+  const first = fraction.search(/[1-9]/);
+  return { digits: fraction.slice(first).replace(/0+$/, ""), exponent: -(first + 1) };
+}
+
+function exponentText(exponent: number): string {
+  const sign = exponent < 0 ? "-" : "+";
+  return `${sign}${Math.abs(exponent).toString().padStart(2, "0")}`;
+}
+
+function encodeFloat(value: number): string {
+  if (Number.isNaN(value)) return "NaN";
+  if (value === Number.POSITIVE_INFINITY) return "Infinity";
+  if (value === Number.NEGATIVE_INFINITY) return "-Infinity";
+  if (Object.is(value, -0)) return "-0.0";
+  if (value === 0) return "0.0";
+
+  const { digits, exponent } = decimalParts(value);
+  const sign = value < 0 ? "-" : "";
+  if (exponent < -4 || exponent >= 16) {
+    const fraction = digits.slice(1);
+    const mantissa = fraction.length === 0 ? digits.charAt(0) : `${digits.charAt(0)}.${fraction}`;
+    return `${sign}${mantissa}e${exponentText(exponent)}`;
+  }
+  if (exponent < 0) {
+    return `${sign}0.${"0".repeat(-exponent - 1)}${digits}`;
+  }
+  const integerLength = exponent + 1;
+  if (digits.length <= integerLength) {
+    return `${sign}${digits}${"0".repeat(integerLength - digits.length)}.0`;
+  }
+  return `${sign}${digits.slice(0, integerLength)}.${digits.slice(integerLength)}`;
 }
 
 function compareUnicode(left: string, right: string): number {
@@ -28,14 +89,15 @@ function compareUnicode(left: string, right: string): number {
 }
 
 function encode(value: unknown): string {
+  if (value instanceof PythonFloat) return encodeFloat(value.value);
   if (value === null) return "null";
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "string") return escapeString(value);
   if (typeof value === "number") {
-    if (Number.isNaN(value)) return "NaN";
-    if (value === Number.POSITIVE_INFINITY) return "Infinity";
-    if (value === Number.NEGATIVE_INFINITY) return "-Infinity";
-    return String(value);
+    if (Number.isSafeInteger(value) && !Object.is(value, -0)) return String(value);
+    throw new TypeError(
+      "Ambiguous or unsafe number: wrap Python float fields with pythonFloat(value)",
+    );
   }
   if (Array.isArray(value)) return `[${value.map((entry) => encode(entry)).join(", ")}]`;
   if (typeof value === "object") {
