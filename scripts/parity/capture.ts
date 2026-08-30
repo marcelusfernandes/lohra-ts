@@ -59,7 +59,35 @@ function captureTree(root: string, exclusions: readonly string[]): readonly Tree
   return entries;
 }
 
-function sqliteValue(value: unknown): SqliteValue {
+function sqliteValue(value: unknown, storageClass?: string): SqliteValue {
+  if (storageClass === "null") return null;
+  if (storageClass === "integer") {
+    if (typeof value !== "bigint" && (typeof value !== "number" || !Number.isSafeInteger(value))) {
+      throw new HarnessError("SQLITE_INTEGER_UNSAFE", "SQLite INTEGER is not lossless");
+    }
+    return { type: "integer", decimal: value.toString() };
+  }
+  if (storageClass === "real") {
+    if (typeof value !== "number") {
+      throw new HarnessError("SQLITE_VALUE", "SQLite REAL was not returned as a number");
+    }
+    return { type: "real", value };
+  }
+  if (storageClass === "text") {
+    if (typeof value !== "string") {
+      throw new HarnessError("SQLITE_VALUE", "SQLite TEXT was not returned as a string");
+    }
+    return value;
+  }
+  if (storageClass === "blob") {
+    if (!Buffer.isBuffer(value)) {
+      throw new HarnessError("SQLITE_VALUE", "SQLite BLOB was not returned as bytes");
+    }
+    return { type: "blob", base64: value.toString("base64") };
+  }
+  if (storageClass !== undefined) {
+    throw new HarnessError("SQLITE_VALUE", `Unsupported SQLite storage class ${storageClass}`);
+  }
   if (value === null || typeof value === "string") {
     return value;
   }
@@ -118,15 +146,23 @@ function captureSqlite(root: string, spec: SqliteCaptureSpec): SqliteRecord {
         const order = table.orderBy
           .map((column) => identifier(column, `SQLite order column ${column}`))
           .join(", ");
+        const projection = columns
+          .flatMap((column) => {
+            const name = identifier(column, `SQLite column ${column}`);
+            return [name, `typeof(${name})`];
+          })
+          .join(", ");
         const rows = database
-          ?.prepare(`SELECT * FROM ${tableName} ORDER BY ${order}`)
+          ?.prepare(`SELECT ${projection} FROM ${tableName} ORDER BY ${order}`)
           .raw(true)
           .all() as unknown[][];
         return [
           table.name,
           {
             columns,
-            rows: rows.map((row) => row.map((value) => sqliteValue(value))),
+            rows: rows.map((row) =>
+              columns.map((_, index) => sqliteValue(row[index * 2], String(row[index * 2 + 1]))),
+            ),
           },
         ] as const;
       }),

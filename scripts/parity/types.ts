@@ -33,15 +33,19 @@ export interface SqliteCaptureSpec {
   readonly path: string;
   readonly pragmas: readonly SqlitePragma[];
   readonly tables: readonly SqliteTableSpec[];
+  readonly projection?: "include" | "raw-only";
 }
 
 export type SqlitePragma =
   | "application_id"
+  | "encoding"
   | "foreign_keys"
   | "journal_mode"
   | "page_size"
+  | "quick_check"
   | "schema_version"
-  | "user_version";
+  | "user_version"
+  | "wal_autocheckpoint";
 
 export interface EventCaptureSpec {
   readonly name: string;

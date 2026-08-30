@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "id": "t03-state-core",
+  "description": "Bilateral Python and TypeScript session repositories with schema, rows and integral REAL usage",
+  "argv": [],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "NO_COLOR": "1",
+      "COLUMNS": "80",
+      "HOME": "{{home}}",
+      "TMPDIR": "{{home}}/tmp",
+      "LOHRA_HOME": "{{profile}}"
+    }
+  },
+  "preconditions": [],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/state/oracle_driver.py", "core"],
+      "cwd": "sandbox"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/state/candidate-driver.mjs", "core"],
+      "cwd": "sandbox"
+    }
+  },
+  "limits": { "timeoutMs": 60000, "maxOutputBytes": 16777216 },
+  "capture": {
+    "tree": { "enabled": false, "root": "profile", "exclude": [] },
+    "sqlite": [
+      {
+        "name": "state",
+        "root": "profile",
+        "path": "state.db",
+        "pragmas": [
+          "application_id",
+          "encoding",
+          "foreign_keys",
+          "journal_mode",
+          "page_size",
+          "quick_check",
+          "user_version",
+          "wal_autocheckpoint"
+        ],
+        "tables": [
+          { "name": "state_meta", "orderBy": ["key"] },
+          { "name": "sessions", "orderBy": ["id"] },
+          { "name": "messages", "orderBy": ["id"] }
+        ]
+      }
+    ],
+    "events": []
+  },
+  "comparisons": [
+    { "class": "byte", "field": "process.exitCode" },
+    { "class": "byte", "field": "process.signal" },
+    { "class": "byte", "field": "process.stdout" },
+    { "class": "byte", "field": "process.stderr" },
+    { "class": "schema", "field": "sqlite.state" }
+  ],
+  "expectations": [
+    { "side": "both", "field": "process.exitCode", "value": 0 },
+    { "side": "both", "field": "process.signal", "value": null },
+    { "side": "both", "field": "process.stderr", "encoding": "utf8", "value": "" },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/storage/storedToolCalls",
+      "value": "[{\"id\": \"c1\", \"type\": \"function\", \"function\": {\"name\": \"f\", \"arguments\": \"{\\\"a\\\": 1}\"}}]"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/storage/actualCost",
+      "value": "real"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/usage/actual_cost_usd",
+      "value": 0
+    }
+  ],
+  "normalizations": [],
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10"
+  }
+}

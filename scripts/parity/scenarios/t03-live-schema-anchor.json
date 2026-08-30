@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "id": "t03-live-schema-anchor",
+  "description": "Oracle public chat path creates the schema before its closed-port failure",
+  "argv": [
+    "chat",
+    "--provider",
+    "ollama",
+    "--model",
+    "m",
+    "--json",
+    "--no-input",
+    "--profile",
+    "t03a",
+    "anchor"
+  ],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "NO_COLOR": "1",
+      "LOHRA_NO_WIZARD": "1",
+      "COLUMNS": "80",
+      "HOME": "{{home}}",
+      "TMPDIR": "{{home}}/tmp"
+    }
+  },
+  "preconditions": [{ "kind": "tcp-port-closed", "host": "127.0.0.1", "port": 11434 }],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-lohra",
+      "prefixArgs": [],
+      "cwd": "sandbox"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/state/candidate-driver.mjs",
+        "live-schema-anchor"
+      ],
+      "cwd": "sandbox"
+    }
+  },
+  "limits": { "timeoutMs": 60000, "maxOutputBytes": 16777216 },
+  "capture": {
+    "tree": { "enabled": false, "root": "home", "exclude": [] },
+    "sqlite": [
+      {
+        "name": "schema",
+        "root": "home",
+        "path": ".lohra/profiles/t03a/state.db",
+        "pragmas": [
+          "application_id",
+          "encoding",
+          "foreign_keys",
+          "journal_mode",
+          "page_size",
+          "quick_check",
+          "user_version",
+          "wal_autocheckpoint"
+        ],
+        "tables": []
+      },
+      {
+        "name": "liveSession",
+        "root": "home",
+        "path": ".lohra/profiles/t03a/state.db",
+        "pragmas": [],
+        "tables": [{ "name": "sessions", "orderBy": ["id"] }],
+        "projection": "raw-only"
+      }
+    ],
+    "events": []
+  },
+  "comparisons": [
+    { "class": "byte", "field": "process.stdout" },
+    { "class": "byte", "field": "process.stderr" },
+    { "class": "schema", "field": "sqlite.schema" }
+  ],
+  "expectations": [
+    { "side": "oracle", "field": "process.exitCode", "value": 1 },
+    { "side": "candidate", "field": "process.exitCode", "value": 0 },
+    { "side": "both", "field": "process.signal", "value": null },
+    {
+      "side": "oracle",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/completed",
+      "value": false
+    },
+    {
+      "side": "candidate",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/completed",
+      "value": false
+    }
+  ],
+  "normalizations": [
+    {
+      "field": "process.stdout",
+      "kind": "replace-json-pointer",
+      "pointer": "/session_id",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=session: )[0-9a-f]{32}(?=  \\(resume with --session )",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=--session )[0-9a-f]{32}(?=\\))",
+      "replacement": "<SESSION_ID>"
+    }
+  ],
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10"
+  }
+}

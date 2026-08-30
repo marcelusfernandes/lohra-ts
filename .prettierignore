@@ -4,4 +4,5 @@ coverage/
 docs/reference/
 .oracle-venv/
 .parity-evidence/
+.probe-evidence/
 lohra/

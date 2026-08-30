@@ -88,7 +88,7 @@ function compareUnicode(left: string, right: string): number {
   return leftPoints.length - rightPoints.length;
 }
 
-function encode(value: unknown): string {
+function encode(value: unknown, sortKeys: boolean): string {
   if (value instanceof PythonFloat) return encodeFloat(value.value);
   if (value === null) return "null";
   if (typeof value === "boolean") return value ? "true" : "false";
@@ -99,16 +99,23 @@ function encode(value: unknown): string {
       "Ambiguous or unsafe number: wrap Python float fields with pythonFloat(value)",
     );
   }
-  if (Array.isArray(value)) return `[${value.map((entry) => encode(entry)).join(", ")}]`;
+  if (Array.isArray(value)) return `[${value.map((entry) => encode(entry, sortKeys)).join(", ")}]`;
   if (typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .filter(([, entry]) => entry !== undefined)
-      .sort(([left], [right]) => compareUnicode(left, right));
-    return `{${entries.map(([key, entry]) => `${escapeString(key)}: ${encode(entry)}`).join(", ")}}`;
+    const entries = Object.entries(value as Record<string, unknown>).filter(
+      ([, entry]) => entry !== undefined,
+    );
+    if (sortKeys) entries.sort(([left], [right]) => compareUnicode(left, right));
+    return `{${entries
+      .map(([key, entry]) => `${escapeString(key)}: ${encode(entry, sortKeys)}`)
+      .join(", ")}}`;
   }
   throw new TypeError(`Value of type ${typeof value} is not JSON serializable`);
 }
 
 export function pythonJsonDumps(value: unknown): string {
-  return encode(value);
+  return encode(value, true);
+}
+
+export function pythonJsonDumpsInsertionOrder(value: unknown): string {
+  return encode(value, false);
 }

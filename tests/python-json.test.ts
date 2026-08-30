@@ -3,7 +3,11 @@ import process from "node:process";
 
 import { describe, expect, it } from "vitest";
 
-import { pythonFloat, pythonJsonDumps } from "../src/serialization/python-json.js";
+import {
+  pythonFloat,
+  pythonJsonDumps,
+  pythonJsonDumpsInsertionOrder,
+} from "../src/serialization/python-json.js";
 
 function pythonLines(source: string): readonly string[] {
   const result = spawnSync(process.env.PYTHON ?? "python3", ["-c", source], {
@@ -18,6 +22,12 @@ describe("Python-compatible JSON serializer", () => {
   it("sorts object keys without sorting arrays and uses Python separators", () => {
     expect(pythonJsonDumps({ z: 1, a: [{ z: 2, a: 3 }, "first"] })).toBe(
       '{"a": [{"a": 3, "z": 2}, "first"], "z": 1}',
+    );
+  });
+
+  it("can preserve insertion order for Python json.dumps storage columns", () => {
+    expect(pythonJsonDumpsInsertionOrder({ z: 1, a: { y: 2, b: 3 } })).toBe(
+      '{"z": 1, "a": {"y": 2, "b": 3}}',
     );
   });
 

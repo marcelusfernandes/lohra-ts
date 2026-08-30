@@ -91,4 +91,47 @@ describe("observable capture", () => {
       records: [{ kind: "started", sequence: 1 }],
     });
   });
+
+  it("preserves SQLite storage classes including integral REAL and BLOB", () => {
+    const profile = mkdtempSync(join(tmpdir(), "lohra-parity-storage-capture-"));
+    temporaryDirectories.push(profile);
+    const database = new Database(join(profile, "typed.db"));
+    database.exec("CREATE TABLE typed_values (id INTEGER PRIMARY KEY, n, i, r, t, b BLOB)");
+    database
+      .prepare("INSERT INTO typed_values VALUES (?, ?, CAST(? AS INTEGER), CAST(? AS REAL), ?, ?)")
+      .run(1, null, 42, 0, "café — state", Buffer.from([0x00, 0xff, 0x80, 0x41]));
+    database.close();
+
+    const capture = captureObservables(profile, {
+      tree: { enabled: false, root: "profile", exclude: [] },
+      sqlite: [
+        {
+          name: "typed",
+          root: "profile",
+          path: "typed.db",
+          pragmas: [],
+          tables: [{ name: "typed_values", orderBy: ["id"] }],
+        },
+      ],
+      events: [],
+    });
+
+    expect(capture.sqlite.typed).toMatchObject({
+      exists: true,
+      tables: {
+        typed_values: {
+          rows: [
+            [
+              { type: "integer", decimal: "1" },
+              null,
+              { type: "integer", decimal: "42" },
+              { type: "real", value: 0 },
+              "café — state",
+              { type: "blob", base64: "AP+AQQ==" },
+            ],
+          ],
+        },
+      },
+    });
+  });
 });

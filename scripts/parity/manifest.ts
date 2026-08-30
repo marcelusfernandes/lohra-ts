@@ -209,11 +209,14 @@ function tree(value: unknown): TreeCaptureSpec {
 
 const pragmas = [
   "application_id",
+  "encoding",
   "foreign_keys",
   "journal_mode",
   "page_size",
+  "quick_check",
   "schema_version",
   "user_version",
+  "wal_autocheckpoint",
 ] as const satisfies readonly SqlitePragma[];
 
 function table(value: unknown, label: string): SqliteTableSpec {
@@ -230,7 +233,7 @@ function table(value: unknown, label: string): SqliteTableSpec {
 function sqlite(value: unknown, index: number): SqliteCaptureSpec {
   const label = `capture.sqlite[${String(index)}]`;
   const item = object(value, label);
-  exactKeys(item, ["name", "root", "path", "pragmas", "tables"], label);
+  exactKeys(item, ["name", "root", "path", "pragmas", "tables", "projection"], label);
   const parsedPragmas = array(item.pragmas, `${label}.pragmas`).map((entry, pragmaIndex) =>
     enumeration(entry, pragmas, `${label}.pragmas[${String(pragmaIndex)}]`),
   );
@@ -248,6 +251,10 @@ function sqlite(value: unknown, index: number): SqliteCaptureSpec {
     path: relativePath(item.path, `${label}.path`),
     pragmas: parsedPragmas,
     tables,
+    projection:
+      item.projection === undefined
+        ? "include"
+        : enumeration(item.projection, ["include", "raw-only"], `${label}.projection`),
   };
 }
 

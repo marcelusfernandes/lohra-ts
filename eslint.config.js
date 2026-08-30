@@ -10,6 +10,7 @@ export default tseslint.config(
       "docs/",
       ".oracle-venv/",
       ".parity-evidence/",
+      ".probe-evidence/",
       "lohra/",
     ],
   },

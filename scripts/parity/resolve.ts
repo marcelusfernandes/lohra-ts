@@ -137,6 +137,19 @@ export function resolveExecutable(
     }
     return options.oracle.executable;
   }
+  if (name === "oracle-python") {
+    if (options.oracle === undefined) {
+      throw new HarnessError("EXECUTABLE_BINDING", "oracle-python requires an oracle workspace");
+    }
+    const expected = join(options.oracle.root, ".oracle-venv", "bin", "python");
+    if (options.oracle.python !== expected || !existsSync(expected)) {
+      throw new HarnessError(
+        "ORACLE_OUTSIDE_VENV",
+        "Oracle Python binding must be the sanctioned .oracle-venv/bin/python entry",
+      );
+    }
+    return expected;
+  }
   if (name === "node") {
     return process.execPath;
   }

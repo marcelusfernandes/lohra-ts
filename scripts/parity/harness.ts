@@ -239,6 +239,16 @@ function reproducibility(
       excludedRawPointers.push(`/runs/${side}/events/${event.name}`);
     }
   }
+  for (const sqlite of base.capturePolicy.sqlite.filter(
+    (entry) => entry.projection === "raw-only",
+  )) {
+    for (const side of ["oracle", "candidate"] as const) {
+      setRunField(projectedRuns[side], `sqlite.${sqlite.name}`, {
+        exists: projectedRuns[side].sqlite[sqlite.name]?.exists ?? false,
+      });
+      excludedRawPointers.push(`/runs/${side}/sqlite/${sqlite.name}`);
+    }
+  }
   for (const rule of base.normalizationPolicy) {
     for (const side of ["oracle", "candidate"] as const) {
       setRunField(projectedRuns[side], rule.field, base.comparison.normalized[rule.field]?.[side]);
@@ -323,7 +333,9 @@ export function runScenario(
   const needsWorkspace =
     (manifest.oracleGuard !== undefined && options.guardProvider === undefined) ||
     (usesPythonAdapter && options.pythonExecutable === undefined) ||
-    Object.values(manifest.runners).some((runner) => runner.executable === "oracle-lohra");
+    Object.values(manifest.runners).some(
+      (runner) => runner.executable === "oracle-lohra" || runner.executable === "oracle-python",
+    );
   const workspace = needsWorkspace
     ? resolveOracleWorkspace({
         cwd,

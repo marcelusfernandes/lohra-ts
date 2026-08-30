@@ -20,6 +20,8 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "parity": "tsx scripts/parity/cli.ts",
+    "probe:state-cross-read": "node scripts/parity/state/cross-read.mjs",
+    "probe:state-multiprocess": "node scripts/parity/state/multiprocess.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
