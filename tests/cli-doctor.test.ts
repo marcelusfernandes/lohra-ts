@@ -161,8 +161,6 @@ describe("lohra CLI bootstrap", () => {
     "serve",
     "cron",
     "workflow",
-    "models",
-    "tiers",
     "profile",
     "auth",
     "skill",

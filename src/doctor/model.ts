@@ -34,8 +34,8 @@ export interface DoctorEnvironment {
   };
   readonly os_name: "nt" | "posix";
   readonly platform: string;
-  readonly provider_error: null;
-  readonly provider_origin: "api-key" | "none";
+  readonly provider_error: string | null;
+  readonly provider_origin: "api-key" | "env-var" | "none";
   readonly providers: readonly ProviderStatus[];
   readonly python_supported: true;
   readonly python_version: "3.12.10";

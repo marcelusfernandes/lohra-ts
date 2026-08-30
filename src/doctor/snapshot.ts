@@ -3,6 +3,7 @@ import { get } from "node:http";
 import { delimiter, join } from "node:path";
 
 import type { LohraPaths } from "../config/paths.js";
+import { AUTO_PROVIDER, resolveProviderName } from "../providers/resolve.js";
 import type { DoctorEnvironment, OllamaStatus } from "./model.js";
 import { providerStatuses } from "./providers.js";
 
@@ -53,7 +54,18 @@ export function buildEnvironment(
   },
 ): DoctorEnvironment {
   const providers = providerStatuses(environment);
-  const detected = providers.find((provider) => provider.configured)?.provider ?? null;
+  let detected: string | null = null;
+  let providerError: string | null = null;
+  let providerOrigin: "none" | "api-key" | "env-var" = "none";
+  try {
+    const resolved = resolveProviderName(undefined, undefined, environment);
+    if (resolved !== AUTO_PROVIDER) {
+      detected = resolved;
+      providerOrigin = (environment.LOHRA_PROVIDER ?? "").trim() ? "env-var" : "api-key";
+    }
+  } catch (error) {
+    providerError = error instanceof Error ? error.message : String(error);
+  }
   const userHome = environment.HOME ?? "";
   const codexHome = environment.CODEX_HOME?.trim() || join(userHome, ".codex");
   const harnesses = [
@@ -92,8 +104,8 @@ export function buildEnvironment(
     ollama,
     os_name: process.platform === "win32" ? "nt" : "posix",
     platform: process.platform,
-    provider_error: null,
-    provider_origin: detected === null ? "none" : "api-key",
+    provider_error: providerError,
+    provider_origin: providerOrigin,
     providers,
     python_supported: true,
     python_version: "3.12.10",

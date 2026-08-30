@@ -5,8 +5,12 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { resolvePaths } from "./config/paths.js";
+import { applyEnvFile } from "./config/env-file.js";
+import { runModels } from "./commands/models.js";
+import { runTiers } from "./commands/tiers.js";
 import { runDoctor } from "./doctor/index.js";
 import type { OllamaStatus } from "./doctor/model.js";
+import { probeOllamaDown } from "./doctor/snapshot.js";
 import { pythonJsonDumps } from "./serialization/python-json.js";
 
 const version = "0.0.11";
@@ -78,7 +82,7 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     return 2;
   }
   const command = argv[0] as string;
-  if (command !== "doctor") {
+  if (command !== "doctor" && command !== "models" && command !== "tiers") {
     if ((commands as readonly string[]).includes(command)) {
       io.stderr(`lohra: ${command} is not implemented in the TypeScript bootstrap\n`);
     } else {
@@ -95,13 +99,52 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
   }
   const environment = { ...io.environment };
   if (profile !== undefined) environment.LOHRA_PROFILE = profile;
+  let paths;
   try {
-    resolvePaths(environment);
+    paths = resolvePaths(environment);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (json) io.stdout(`${pythonJsonDumps({ error: message })}\n`);
     io.stderr(`${message}\n`);
     return 2;
+  }
+  applyEnvFile(paths.envFile, environment);
+  const normalizeProbe = async (): Promise<OllamaStatus> => {
+    const value = await (io.probeOllama ?? probeOllamaDown)();
+    return typeof value === "boolean"
+      ? {
+          alive: value,
+          detail: value ? "" : "ConnectError",
+          models: [],
+          url: "http://localhost:11434/api/tags",
+        }
+      : value;
+  };
+  if (command === "models") {
+    const providerIndex = argv.indexOf("--provider");
+    const provider = providerIndex < 0 ? undefined : argv[providerIndex + 1];
+    const result = await runModels({
+      json,
+      home: paths.home,
+      environment,
+      probeOllama: normalizeProbe,
+      ...(provider === undefined ? {} : { provider }),
+    });
+    io.stdout(result.stdout);
+    io.stderr(result.stderr);
+    return result.code;
+  }
+  if (command === "tiers") {
+    const result = await runTiers({
+      action: argv[1] ?? "",
+      noInput: argv.includes("--no-input"),
+      home: paths.home,
+      environment,
+      probeOllama: normalizeProbe,
+    });
+    io.stdout(result.stdout);
+    io.stderr(result.stderr);
+    return result.code;
   }
   const result = await runDoctor({
     json,

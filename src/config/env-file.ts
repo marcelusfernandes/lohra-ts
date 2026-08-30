@@ -29,8 +29,9 @@ export function readEnvFile(path: string): Readonly<Record<string, string>> {
   try {
     if (!statSync(path).isFile()) return {};
     return parseEnvText(readFileSync(path, "utf8"));
-  } catch {
-    return {};
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw error;
   }
 }
 
