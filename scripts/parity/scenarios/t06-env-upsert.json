@@ -101,6 +101,26 @@
       "encoding": "utf8",
       "pointer": "/changed",
       "value": ["A", "B"]
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/stages",
+      "value": [
+        ["create", "0666"],
+        ["write-close", "0666"],
+        ["chmod", "0600"],
+        ["replace", "0600"],
+        ["chmod", "0600"]
+      ]
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/fsyncCalls",
+      "value": 0
     }
   ],
   "normalizations": [],

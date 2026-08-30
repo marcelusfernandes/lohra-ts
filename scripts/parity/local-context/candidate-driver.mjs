@@ -1,16 +1,15 @@
 #!/usr/bin/env node
 import { Buffer } from "node:buffer";
 import {
-  chmodSync,
   mkdirSync,
   readFileSync,
   realpathSync,
   readdirSync,
-  renameSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import { dirname, join } from "node:path";
 import process from "node:process";
 
@@ -81,7 +80,10 @@ function memoryCore(mutant = false) {
   const path = join(home, "memories", "MEMORY.md");
   const file = new MemoryFile(path, 2200);
   const astral = "😀".repeat(1101);
-  const boundary = mutant ? astral.length <= 2200 : Array.from(astral).length <= 2200;
+  const boundary =
+    errorText(() =>
+      new MemoryFile(join(home, "memories", "ASTRAL.md"), mutant ? 1100 : 2200).add(astral),
+    ) === null;
   file.add("alpha");
   file.add("alpha");
   file.add("beta one");
@@ -283,26 +285,49 @@ function envUpsert() {
   const path = join(home, ".env");
   writeFileSync(path, "# keep\nA=old\nOTHER=x\nexport A=last\n", "utf8");
   const stages = [];
-  const ops = {
-    writeText(path, body) {
-      writeFileSync(path, body, { encoding: "utf8", mode: 0o666 });
-      stages.push(["write", mode(path)]);
-    },
-    chmod600(path) {
-      chmodSync(path, 0o600);
-      stages.push(["chmod", mode(path)]);
-    },
-    replace(source, destination) {
-      renameSync(source, destination);
-      stages.push(["replace", mode(destination)]);
-    },
+  const mutableFs = createRequire(import.meta.url)("node:fs");
+  const originalWriteFile = mutableFs.writeFileSync;
+  const originalChmod = mutableFs.chmodSync;
+  const originalRename = mutableFs.renameSync;
+  const originalFsync = mutableFs.fsyncSync;
+  let fsyncCalls = 0;
+  mutableFs.writeFileSync = (...args) => {
+    const result = originalWriteFile(...args);
+    const target = args[0];
+    if (typeof target === "string") {
+      stages.push(["create", mode(target)]);
+      stages.push(["write-close", mode(target)]);
+    }
+    return result;
   };
+  mutableFs.chmodSync = (...args) => {
+    const result = originalChmod(...args);
+    const target = args[0];
+    if (typeof target === "string") stages.push(["chmod", mode(target)]);
+    return result;
+  };
+  mutableFs.renameSync = (...args) => {
+    const result = originalRename(...args);
+    const destination = args[1];
+    if (typeof destination === "string") stages.push(["replace", mode(destination)]);
+    return result;
+  };
+  mutableFs.fsyncSync = (...args) => {
+    fsyncCalls += 1;
+    return originalFsync(...args);
+  };
+  syncBuiltinESMExports();
   const previous = process.umask(0);
   let changed;
   try {
-    changed = upsertEnvFile(path, { A: "two words", B: "line\nbreak" }, ops);
+    changed = upsertEnvFile(path, { A: "two words", B: "line\nbreak" });
   } finally {
     process.umask(previous);
+    mutableFs.writeFileSync = originalWriteFile;
+    mutableFs.chmodSync = originalChmod;
+    mutableFs.renameSync = originalRename;
+    mutableFs.fsyncSync = originalFsync;
+    syncBuiltinESMExports();
   }
   const content = readFileSync(path, "utf8");
   const second = upsertEnvFile(path, { A: "two words", B: "line" });
@@ -313,6 +338,7 @@ function envUpsert() {
     formats: [formatValue("plain"), formatValue("a b"), formatValue('a"b'), formatValue("a'\"b")],
     mode: mode(path),
     stages,
+    fsyncCalls,
   });
 }
 
@@ -380,7 +406,11 @@ function wizardConfigure(eof = false) {
     ],
   });
   const prompter = new Prompter(
-    () => answers.shift() ?? "",
+    () => {
+      const answer = answers.shift();
+      if (answer === undefined && eof) throw new Error("EOFError");
+      return answer ?? "";
+    },
     (text) => {
       prompts += text;
     },

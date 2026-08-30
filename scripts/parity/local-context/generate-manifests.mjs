@@ -187,7 +187,18 @@ const direct = [
   [
     "t06-env-upsert",
     "env-upsert",
-    [pointer("/mode", "0600"), pointer("/changed", ["A", "B"])],
+    [
+      pointer("/mode", "0600"),
+      pointer("/changed", ["A", "B"]),
+      pointer("/stages", [
+        ["create", "0666"],
+        ["write-close", "0666"],
+        ["chmod", "0600"],
+        ["replace", "0600"],
+        ["chmod", "0600"],
+      ]),
+      pointer("/fsyncCalls", 0),
+    ],
     true,
   ],
   [

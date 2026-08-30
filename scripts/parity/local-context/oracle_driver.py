@@ -85,7 +85,9 @@ def memory_core(mutant=False):
     path = home / "memories" / "MEMORY.md"
     file = MemoryFile(path, 2200)
     astral = "😀" * 1101
-    boundary = len(astral.encode("utf-16-le")) // 2 <= 2200 if mutant else len(astral) <= 2200
+    boundary = error_text(
+        lambda: MemoryFile(home / "memories" / "ASTRAL.md", 2200).add(astral)
+    ) is None
     file.add("alpha")
     file.add("alpha")
     file.add("beta one")
@@ -270,10 +272,17 @@ def env_upsert():
     stages = []
     original_chmod = env_write._chmod_600
     original_replace = env_write.os.replace
+    original_fsync = env_write.os.fsync
+    original_write_text = Path.write_text
+    fsync_calls = [0]
+
+    def observed_write_text(target, body, encoding="utf-8", **_kwargs):
+        written = original_write_text(target, body, encoding=encoding)
+        stages.append(["create", mode(Path(target))])
+        stages.append(["write-close", mode(Path(target))])
+        return written
 
     def observed_chmod(file):
-        if not stages:
-            stages.append(["write", mode(Path(file))])
         original_chmod(file)
         stages.append(["chmod", mode(Path(file))])
 
@@ -281,18 +290,26 @@ def env_upsert():
         original_replace(source, destination)
         stages.append(["replace", mode(Path(destination))])
 
+    def observed_fsync(descriptor):
+        fsync_calls[0] += 1
+        return original_fsync(descriptor)
+
     previous = os.umask(0)
     try:
         env_write._chmod_600 = observed_chmod
         env_write.os.replace = observed_replace
+        env_write.os.fsync = observed_fsync
+        Path.write_text = observed_write_text
         changed = env_write.upsert_env_file(path, {"A": "two words", "B": "line\nbreak"})
     finally:
         env_write._chmod_600 = original_chmod
         env_write.os.replace = original_replace
+        env_write.os.fsync = original_fsync
+        Path.write_text = original_write_text
         os.umask(previous)
     content = path.read_text(encoding="utf-8")
     second = env_write.upsert_env_file(path, {"A": "two words", "B": "line"})
-    emit({"changed": changed, "content": content, "second": second, "formats": [env_write.format_value("plain"), env_write.format_value("a b"), env_write.format_value('a"b'), env_write.format_value("a'\"b")], "mode": mode(path), "stages": stages})
+    emit({"changed": changed, "content": content, "second": second, "formats": [env_write.format_value("plain"), env_write.format_value("a b"), env_write.format_value('a"b'), env_write.format_value("a'\"b")], "mode": mode(path), "stages": stages, "fsyncCalls": fsync_calls[0]})
 
 
 def env_same_key():
@@ -318,11 +335,16 @@ def wizard_gates():
 
 
 class Reader:
-    def __init__(self, values):
+    def __init__(self, values, raise_on_eof=False):
         self.values = list(values)
+        self.raise_on_eof = raise_on_eof
 
     def readline(self):
-        return self.values.pop(0) + "\n" if self.values else ""
+        if self.values:
+            return self.values.pop(0) + "\n"
+        if self.raise_on_eof:
+            raise EOFError()
+        return ""
 
 
 class Writer:
@@ -349,7 +371,7 @@ def wizard_configure(eof=False):
         home=home,
         environ=environment,
         no_input=False,
-        reader=Reader(answers),
+        reader=Reader(answers, raise_on_eof=eof),
         out=output,
         err=prompt_writer,
     )
