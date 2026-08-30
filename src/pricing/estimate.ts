@@ -55,9 +55,12 @@ export function estimateCost(
   let provider = options.provider,
     model = options.model,
     basis: CostEstimate["basis"] =
-      provider === "openai-codex" || options.equivalents?.has(priceKey(provider, model)) === true
-        ? "api_equivalent"
-        : "api_list_price";
+      provider === "ollama"
+        ? "local"
+        : provider === "openai-codex" ||
+            options.equivalents?.has(priceKey(provider, model)) === true
+          ? "api_equivalent"
+          : "api_list_price";
   const direct = lookup(options.overrides ?? new Map(), provider, model);
   if (direct) return calculate(value, direct, basis);
   if (provider === "ollama") return { usd: 0, grossUsd: 0, savedUsd: 0, basis: "local" };

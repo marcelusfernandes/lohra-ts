@@ -9,7 +9,7 @@ import { applyEnvFile } from "./config/env-file.js";
 import { runModels } from "./commands/models.js";
 import { runTiers } from "./commands/tiers.js";
 import { runAuth } from "./commands/auth.js";
-import { runChatBoundary } from "./commands/chat-boundary.js";
+import { runChat } from "./commands/chat.js";
 import { readCodexModel } from "./auth/codex.js";
 import { subscriptionActive } from "./auth/credentials.js";
 import type { OAuthPost } from "./auth/oauth.js";
@@ -51,6 +51,7 @@ export interface CliIo {
   readonly isTty?: boolean;
   readonly readLine?: () => string;
   readonly oauthPost?: OAuthPost;
+  readonly cwd?: string;
 }
 
 function defaultIo(): CliIo {
@@ -253,8 +254,13 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     return 2;
   }
   if (command === "chat") {
-    const input = argv.slice(1).find((entry) => !entry.startsWith("--")) ?? "";
-    const result = await runChatBoundary({ home: paths.home, codexHome, input });
+    const result = await runChat({
+      argv,
+      environment,
+      home: paths.home,
+      codexHome,
+      cwd: io.cwd ?? process.cwd(),
+    });
     io.stdout(result.stdout);
     io.stderr(result.stderr);
     return result.code;

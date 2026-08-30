@@ -55,6 +55,7 @@ export interface ChatHttpRequest {
   readonly body: string;
   readonly timeoutMs: number;
   readonly maxBytes: number;
+  readonly signal?: AbortSignal;
 }
 
 export interface ChatHttpPort {

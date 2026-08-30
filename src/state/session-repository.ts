@@ -37,6 +37,12 @@ export interface UsageIncrement {
   readonly grossUsd?: number | null;
 }
 
+export interface RecordTurnInput {
+  readonly user: MessageInput;
+  readonly assistant: MessageInput;
+  readonly usage?: UsageIncrement | null;
+}
+
 export interface SessionUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
@@ -94,7 +100,8 @@ function reconstructMessage(row: Row): Readonly<Record<string, unknown>> {
       result.provider_data = JSON.parse(text(row.reasoning_details) as string);
     return result;
   }
-  return { role, content: text(row.content) };
+  if (role === "system") return { role, content: text(row.content) };
+  throw new Error(`SESSION_MESSAGE_ROLE_INVALID:${role}`);
 }
 
 export class SessionRepository {
@@ -150,33 +157,50 @@ export class SessionRepository {
       .all(Math.max(0, options.limit ?? 50)) as Row[];
   }
 
-  public appendMessage(sessionId: string, message: MessageInput): number {
-    const transaction = this.database.transaction(() => {
-      const result = this.database
-        .prepare(
-          `INSERT INTO messages
+  private insertMessage(sessionId: string, message: MessageInput): number {
+    const result = this.database
+      .prepare(
+        `INSERT INTO messages
            (session_id, role, content, tool_call_id, tool_calls, tool_name,
             timestamp, finish_reason, reasoning, reasoning_details, active)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-        )
-        .run(
-          sessionId,
-          message.role,
-          message.content ?? null,
-          message.toolCallId ?? null,
-          jsonText(message.toolCalls),
-          message.name ?? null,
-          message.createdAt ?? this.now(),
-          message.finishReason ?? null,
-          message.reasoning ?? null,
-          jsonText(message.providerData),
-        );
+      )
+      .run(
+        sessionId,
+        message.role,
+        message.content ?? null,
+        message.toolCallId ?? null,
+        jsonText(message.toolCalls),
+        message.name ?? null,
+        message.createdAt ?? this.now(),
+        message.finishReason ?? null,
+        message.reasoning ?? null,
+        jsonText(message.providerData),
+      );
+    return safeInteger(result.lastInsertRowid, "messages.id");
+  }
+
+  public appendMessage(sessionId: string, message: MessageInput): number {
+    const transaction = this.database.transaction(() => {
+      const id = this.insertMessage(sessionId, message);
       this.database
         .prepare("UPDATE sessions SET message_count = message_count + 1 WHERE id = ?")
         .run(sessionId);
-      return safeInteger(result.lastInsertRowid, "messages.id");
+      return id;
     });
     return transaction();
+  }
+
+  public recordTurn(sessionId: string, input: RecordTurnInput): void {
+    const transaction = this.database.transaction(() => {
+      this.insertMessage(sessionId, input.user);
+      this.insertMessage(sessionId, input.assistant);
+      this.database
+        .prepare("UPDATE sessions SET message_count = message_count + 2 WHERE id = ?")
+        .run(sessionId);
+      if (input.usage !== undefined && input.usage !== null) this.addUsage(sessionId, input.usage);
+    });
+    transaction();
   }
 
   public loadMessages(

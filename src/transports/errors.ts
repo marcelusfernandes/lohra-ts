@@ -15,6 +15,7 @@ export interface ProviderCallFailedOptions {
   readonly code?: string;
   readonly retryAfter?: number;
   readonly response?: unknown;
+  readonly payload?: unknown;
 }
 
 export class ProviderCallFailed extends Error {
@@ -23,6 +24,7 @@ export class ProviderCallFailed extends Error {
   readonly code: string | undefined;
   readonly retryAfter: number | undefined;
   readonly response: unknown;
+  readonly payload: unknown;
 
   constructor(message: string, options: ProviderCallFailedOptions = {}) {
     super(message, options.cause === undefined ? undefined : { cause: options.cause });
@@ -30,6 +32,7 @@ export class ProviderCallFailed extends Error {
     this.code = options.code;
     this.retryAfter = options.retryAfter;
     this.response = options.response;
+    this.payload = options.payload;
   }
 }
 

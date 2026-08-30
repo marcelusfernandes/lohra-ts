@@ -163,4 +163,37 @@ describe("session repository", () => {
     }
     close();
   });
+
+  it("rolls back both messages and usage when the assistant insert fails", () => {
+    const { repo, database, close } = repository();
+    repo.createSession({ id: "atomic", startedAt: 1 });
+    database
+      .prepare(
+        `CREATE TRIGGER reject_assistant BEFORE INSERT ON messages
+         WHEN NEW.role = 'assistant'
+         BEGIN SELECT RAISE(ABORT, 'assistant rejected'); END`,
+      )
+      .run();
+
+    expect(() => {
+      repo.recordTurn("atomic", {
+        user: { role: "user", content: "u" },
+        assistant: { role: "assistant", content: "a" },
+        usage: { inputTokens: 11, outputTokens: 7, apiCalls: 1, realUsd: 0, grossUsd: 0 },
+      });
+    }).toThrow("assistant rejected");
+    expect(database.prepare("SELECT count(*) AS n FROM messages").get()).toEqual({ n: 0n });
+    expect(repo.usage("atomic")).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reasoningTokens: 0,
+      apiCallCount: 0,
+      pricedCallCount: null,
+      actualCostUsd: null,
+      estimatedCostUsd: null,
+    });
+    close();
+  });
 });

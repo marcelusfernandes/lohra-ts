@@ -1,0 +1,277 @@
+{
+  "schemaVersion": 1,
+  "id": "t08-mutant-session-on-error",
+  "description": "T08 public conversation runtime: mutant-session-on-error",
+  "argv": [
+    "chat",
+    "error",
+    "--json",
+    "--no-tools",
+    "--provider",
+    "ollama",
+    "--model",
+    "stub-coder:1b"
+  ],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "PYTHONHASHSEED": "0",
+      "NO_COLOR": "1",
+      "LOHRA_NO_WIZARD": "1",
+      "COLUMNS": "80",
+      "TZ": "UTC",
+      "HOME": "{{home}}",
+      "LOHRA_HOME": "{{home}}/.lohra",
+      "CODEX_HOME": "{{home}}/codex",
+      "TMPDIR": "{{home}}/tmp"
+    }
+  },
+  "preconditions": [
+    {
+      "kind": "tcp-port-closed",
+      "host": "127.0.0.1",
+      "port": 11434
+    }
+  ],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/conversation/oracle_driver.py", "single"],
+      "cwd": "profile"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/conversation/candidate-driver.mjs",
+        "single@session-on-error"
+      ],
+      "cwd": "profile"
+    }
+  },
+  "limits": {
+    "timeoutMs": 60000,
+    "maxOutputBytes": 16777216
+  },
+  "capture": {
+    "tree": {
+      "enabled": false,
+      "root": "home",
+      "exclude": []
+    },
+    "sqlite": [
+      {
+        "name": "db",
+        "root": "home",
+        "path": ".lohra/state.db",
+        "pragmas": [
+          "application_id",
+          "encoding",
+          "journal_mode",
+          "page_size",
+          "quick_check",
+          "user_version"
+        ],
+        "tables": [
+          {
+            "name": "sessions",
+            "orderBy": ["id"]
+          },
+          {
+            "name": "messages",
+            "orderBy": ["id"]
+          }
+        ]
+      }
+    ],
+    "events": [
+      {
+        "name": "requests",
+        "root": "profile",
+        "path": "stub-requests.jsonl",
+        "format": "jsonl"
+      },
+      {
+        "name": "requestsRaw",
+        "root": "profile",
+        "path": "stub-requests-raw.jsonl",
+        "format": "jsonl",
+        "projection": "raw-only"
+      },
+      {
+        "name": "summary",
+        "root": "profile",
+        "path": "stub-summary.json",
+        "format": "json"
+      },
+      {
+        "name": "assertions",
+        "root": "profile",
+        "path": "stub-assertions.json",
+        "format": "json"
+      }
+    ]
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    },
+    {
+      "class": "byte",
+      "field": "process.stderr"
+    },
+    {
+      "class": "stub",
+      "field": "events.requests"
+    },
+    {
+      "class": "stub",
+      "field": "events.summary"
+    },
+    {
+      "class": "stub",
+      "field": "events.assertions"
+    },
+    {
+      "class": "schema",
+      "field": "sqlite.db"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "oracle",
+      "field": "process.exitCode",
+      "value": 1
+    },
+    {
+      "side": "candidate",
+      "field": "process.exitCode",
+      "value": 1
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "both",
+      "field": "events.summary",
+      "value": {
+        "exists": true,
+        "records": {
+          "gets": 0,
+          "posts": 1,
+          "sequence": ["POST /v1/chat/completions"]
+        }
+      }
+    },
+    {
+      "side": "both",
+      "field": "events.assertions",
+      "value": {
+        "exists": true,
+        "records": {
+          "valid": true,
+          "failures": []
+        }
+      }
+    }
+  ],
+  "normalizations": [
+    {
+      "field": "process.stdout",
+      "kind": "replace-json-pointer",
+      "pointer": "/session_id",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=session: )[0-9a-f]{32}(?=  \\(resume with --session )",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=--session )[0-9a-f]{32}(?=\\))",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "events.requests",
+      "kind": "replace-runtime-path",
+      "source": "profile",
+      "replacement": "<PROJECT>"
+    },
+    {
+      "field": "sqlite.db",
+      "kind": "replace-runtime-path",
+      "source": "profile",
+      "replacement": "<PROJECT>"
+    },
+    {
+      "field": "sqlite.db",
+      "kind": "replace-json-pointer",
+      "pointer": "/tables/sessions/rows/0/0",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "sqlite.db",
+      "kind": "replace-json-pointer",
+      "pointer": "/tables/sessions/rows/0/7",
+      "replacement": "<TIMESTAMP>"
+    }
+  ],
+  "stub": {
+    "state": "up-with-models",
+    "fixture": "chat-http-401",
+    "requestLog": {
+      "comparedHeaders": [
+        "authorization",
+        "accept",
+        "content-type",
+        "host",
+        "x-stainless-retry-count"
+      ],
+      "excludedHeaders": [
+        "accept-encoding",
+        "connection",
+        "content-length",
+        "user-agent",
+        "x-stainless-lang",
+        "x-stainless-package-version",
+        "x-stainless-os",
+        "x-stainless-arch",
+        "x-stainless-runtime",
+        "x-stainless-runtime-version",
+        "x-stainless-async",
+        "x-stainless-read-timeout"
+      ]
+    }
+  },
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10",
+    "expectedPackages": {
+      "openai": "3.6.0",
+      "httpx": "0.28.1"
+    }
+  }
+}

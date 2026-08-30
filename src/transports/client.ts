@@ -41,6 +41,11 @@ export class NativeChatHttpPort implements ChatHttpPort {
   async post(request: ChatHttpRequest): Promise<HttpResponseData> {
     if (this.fetcher === undefined) return this.postNative(request);
     const controller = new AbortController();
+    const abort = (): void => {
+      controller.abort(request.signal?.reason);
+    };
+    request.signal?.addEventListener("abort", abort, { once: true });
+    if (request.signal?.aborted === true) abort();
     const timeout = setTimeout(() => {
       controller.abort(new Error("REQUEST_TIMEOUT"));
     }, request.timeoutMs);
@@ -59,6 +64,7 @@ export class NativeChatHttpPort implements ChatHttpPort {
       };
     } finally {
       clearTimeout(timeout);
+      request.signal?.removeEventListener("abort", abort);
     }
   }
 
@@ -105,7 +111,18 @@ export class NativeChatHttpPort implements ChatHttpPort {
           });
         },
       );
-      child.setTimeout(request.timeoutMs, () => child.destroy(new Error("REQUEST_TIMEOUT")));
+      child.setTimeout(request.timeoutMs, () => {
+        child.destroy(new Error("REQUEST_TIMEOUT"));
+      });
+      const abort = (): void => {
+        const reason: unknown = request.signal?.reason;
+        child.destroy(reason instanceof Error ? reason : new Error("ABORTED"));
+      };
+      request.signal?.addEventListener("abort", abort, { once: true });
+      if (request.signal?.aborted === true) abort();
+      child.once("close", () => {
+        request.signal?.removeEventListener("abort", abort);
+      });
       child.on("error", reject);
       child.end(request.body);
     });
@@ -135,6 +152,7 @@ function providerFailure(response: HttpResponseData): ProviderCallFailed {
     statusCode: response.status,
     ...(code === undefined ? {} : { code }),
     response: { headers: response.headers },
+    payload,
   });
 }
 
@@ -178,8 +196,8 @@ export class ChatCompletionsClient {
     this.maxRetries = options.maxRetries ?? 2;
   }
 
-  async create(kwargs: ChatKwargs): Promise<NormalizedResponse> {
-    const response = await this.request(kwargs);
+  async create(kwargs: ChatKwargs, signal?: AbortSignal): Promise<NormalizedResponse> {
+    const response = await this.request(kwargs, signal);
     return this.options.transport.normalizeResponse(parseJson(response.body));
   }
 
@@ -203,7 +221,7 @@ export class ChatCompletionsClient {
     await this.http.close?.();
   }
 
-  private async request(body: ChatKwargs): Promise<HttpResponseData> {
+  private async request(body: ChatKwargs, signal?: AbortSignal): Promise<HttpResponseData> {
     if (this.closed) throw new Error("CLIENT_CLOSED");
     const request: ChatHttpRequest = {
       url: `${this.options.baseUrl.replace(/\/$/u, "")}/chat/completions`,
@@ -216,6 +234,7 @@ export class ChatCompletionsClient {
       body: JSON.stringify(body),
       timeoutMs: this.timeoutMs,
       maxBytes: this.maxResponseBytes,
+      ...(signal === undefined ? {} : { signal }),
     };
     let attempt = 0;
     for (;;) {

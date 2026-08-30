@@ -6,8 +6,18 @@ import { join } from "node:path";
 
 import { expect, it } from "vitest";
 
+import { completion } from "../../scripts/parity/stub/server.js";
+
 const driver = new URL("../../scripts/parity/stub/driver.ts", import.meta.url);
 const tsxLoader = import.meta.resolve("tsx");
+
+it("keeps usage in default completions and omits it only when requested", () => {
+  const message = { role: "assistant", content: "ok" };
+  expect(completion(message, "stop")).toMatchObject({
+    usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 },
+  });
+  expect(completion(message, "stop", false)).not.toHaveProperty("usage");
+});
 
 async function bindPort(): Promise<void> {
   const server = createServer();

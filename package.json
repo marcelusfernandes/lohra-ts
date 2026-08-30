@@ -25,6 +25,11 @@
     "parity:context": "tsx scripts/parity/local-context/run-all.ts",
     "parity:chat-completions": "tsx scripts/parity/chat-completions/run-all.ts",
     "parity:workflow-spec": "tsx scripts/parity/workflow-spec/run-all.ts",
+    "parity:t08": "tsx scripts/parity/cli.ts",
+    "parity:t08:all": "tsx scripts/parity/conversation/run-all.ts",
+    "probe:t08": "node scripts/parity/conversation/ts-only-probes.mjs",
+    "probe:t08:live-scrub": "node scripts/parity/conversation/live-smoke.mjs --canary",
+    "smoke:t08:live": "node scripts/parity/conversation/live-smoke.mjs",
     "probe:workflow-spec-ts-only": "node scripts/parity/workflow-spec/ts-only-probes.mjs",
     "probe:chat-completions-ts-only": "node scripts/parity/chat-completions/ts-only-probe.mjs",
     "probe:chat-completions-live-scrub": "node scripts/parity/chat-completions/live-smoke.mjs --canary",
@@ -33,7 +38,8 @@
     "probe:state-cross-read": "node scripts/parity/state/cross-read.mjs",
     "probe:state-multiprocess": "node scripts/parity/state/multiprocess.mjs",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "pack:check": "tsx scripts/pack-check.ts"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3"

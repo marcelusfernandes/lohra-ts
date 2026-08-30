@@ -7,6 +7,7 @@ export { SessionRepository } from "./session-repository.js";
 export type {
   CreateSessionInput,
   MessageInput,
+  RecordTurnInput,
   SessionUsage,
   UsageIncrement,
 } from "./session-repository.js";

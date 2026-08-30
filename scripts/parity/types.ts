@@ -120,6 +120,8 @@ export type StubFixture =
   | "chat-tool-unknown"
   | "chat-http-401"
   | "chat-http-500"
+  | "chat-no-usage"
+  | "chat-incomplete-tool"
   | "side-divergent";
 
 export interface StubSpec {

@@ -64,14 +64,18 @@ function toolCall(name: string): Readonly<Record<string, unknown>> {
   };
 }
 
-function completion(message: unknown, finishReason: string): Readonly<Record<string, unknown>> {
+export function completion(
+  message: unknown,
+  finishReason: string,
+  includeUsage = true,
+): Readonly<Record<string, unknown>> {
   return {
     id: "chatcmpl-stub-001",
     object: "chat.completion",
     created: 0,
     model,
     choices: [{ index: 0, message, finish_reason: finishReason }],
-    usage: usage(),
+    ...(includeUsage ? { usage: usage() } : {}),
   };
 }
 
@@ -127,14 +131,11 @@ function streamFrames(runtime: StubRuntime, firstPost: boolean): readonly unknow
 
 function validateBody(runtime: StubRuntime, body: Record<string, unknown>): void {
   const stream = body.stream === true;
-  if (runtime.scenario.includes("no-tools") && "tools" in body) {
+  const noTools = runtime.scenario.includes("no-tools") || runtime.scenario.startsWith("t08-");
+  if (noTools && "tools" in body) {
     runtime.failures.push("NO_TOOLS_KEY_PRESENT");
   }
-  if (
-    !runtime.scenario.includes("no-tools") &&
-    !runtime.scenario.includes("provider-without") &&
-    !Array.isArray(body.tools)
-  ) {
+  if (!noTools && !runtime.scenario.includes("provider-without") && !Array.isArray(body.tools)) {
     runtime.failures.push("TOOLS_MISSING");
   }
   if (stream) {
@@ -236,13 +237,18 @@ async function handle(
     return;
   }
   const firstTool =
-    runtime.posts === 1 && ["chat-tool", "chat-tool-unknown"].includes(runtime.fixture);
+    runtime.posts === 1 &&
+    ["chat-tool", "chat-tool-unknown", "chat-incomplete-tool"].includes(runtime.fixture);
   if (firstTool) {
     const name = runtime.fixture === "chat-tool-unknown" ? "no_such_tool_xyz" : "read_file";
+    const call =
+      runtime.fixture === "chat-incomplete-tool"
+        ? { id: "call_stub_s1", type: "function" }
+        : toolCall(name);
     json(
       response,
       200,
-      completion({ role: "assistant", content: null, tool_calls: [toolCall(name)] }, "tool_calls"),
+      completion({ role: "assistant", content: null, tool_calls: [call] }, "tool_calls"),
     );
     return;
   }
@@ -252,7 +258,11 @@ async function handle(
       : runtime.fixture === "side-divergent" && runtime.side === "candidate"
         ? "STUB-MUTANT: divergent reply"
         : "STUB-OK: deterministic reply";
-  json(response, 200, completion({ role: "assistant", content: text }, "stop"));
+  json(
+    response,
+    200,
+    completion({ role: "assistant", content: text }, "stop", runtime.fixture !== "chat-no-usage"),
+  );
 }
 
 export async function startStub(runtime: StubRuntime): Promise<Server> {
