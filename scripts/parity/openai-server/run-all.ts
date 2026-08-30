@@ -21,11 +21,13 @@ import { run as bodyValidationBeforeAuthChat } from "./scenarios/t11-body-valida
 import { run as bodyValidationBeforeAuthResponses } from "./scenarios/t11-body-validation-before-auth-responses.js";
 import { run as chatLastPartsLossVsHistory } from "./scenarios/t11-chat-last-parts-loss-vs-history.js";
 import { run as chatNonstreamSuccessPartialUpstreamError } from "./scenarios/t11-chat-nonstream-success-partial-upstream-error.js";
+import { run as chatStreamPostOpenErrorDone } from "./scenarios/t11-chat-stream-post-open-error-done.js";
 import { run as chatStreamSuccessUsageAndNoUsage } from "./scenarios/t11-chat-stream-success-usage-and-no-usage.js";
 import { run as methodsRunsAndRootAbsence } from "./scenarios/t11-methods-runs-and-root-absence.js";
 import { run as requestCoercionsLimitsAndExtraFields } from "./scenarios/t11-request-coercions-limits-and-extra-fields.js";
 import { run as responsesNonstreamSuccessPartialUpstreamError } from "./scenarios/t11-responses-nonstream-success-partial-upstream-error.js";
 import { run as responsesPartsConcatenation } from "./scenarios/t11-responses-parts-concatenation.js";
+import { run as responsesStreamErrorBeforeDelta } from "./scenarios/t11-responses-stream-error-before-delta.js";
 import { run as responsesStreamSuccessNoDone } from "./scenarios/t11-responses-stream-success-no-done.js";
 import { run as routeNegativeSweepAndSlashRedirectClass } from "./scenarios/t11-route-negative-sweep-and-slash-redirect-class.js";
 import { run as sigintCleanupAndPortReuse } from "./scenarios/t11-sigint-cleanup-and-port-reuse.js";
@@ -64,7 +66,9 @@ const ALL_SCENARIOS: readonly ScenarioSpec[] = [
   { id: "t11-chat-last-parts-loss-vs-history", config: {}, run: chatLastPartsLossVsHistory },
   { id: "t11-responses-parts-concatenation", config: {}, run: responsesPartsConcatenation },
   { id: "t11-chat-stream-success-usage-and-no-usage", config: {}, run: chatStreamSuccessUsageAndNoUsage },
+  { id: "t11-chat-stream-post-open-error-done", config: {}, run: chatStreamPostOpenErrorDone },
   { id: "t11-responses-stream-success-no-done", config: {}, run: responsesStreamSuccessNoDone },
+  { id: "t11-responses-stream-error-before-delta", config: {}, run: responsesStreamErrorBeforeDelta },
   { id: "t11-sigint-cleanup-and-port-reuse", config: {}, run: sigintCleanupAndPortReuse },
 ];
 
