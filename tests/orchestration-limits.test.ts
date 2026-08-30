@@ -85,6 +85,25 @@ describe("positiveIntEnv", () => {
     });
   });
 
+  // Evaluator baseline §9/L27 (evidence-s13-repr-edges.json): the warning's
+  // <raw> is Python's repr() of the raw value, not verbatim interpolation.
+  // A raw value containing a quote, backslash, or control character diverges
+  // from a naive '${raw}' template.
+  it("uses Python repr() for the raw value in the warning, not verbatim interpolation", () => {
+    expect(positiveIntEnv("LOHRA_MAX_PARALLEL", "a'b", 4)).toEqual({
+      value: 4,
+      warning: 'ignoring LOHRA_MAX_PARALLEL="a\'b": not an integer; using 4',
+    });
+    expect(positiveIntEnv("LOHRA_MAX_PARALLEL", "a\\b", 4)).toEqual({
+      value: 4,
+      warning: "ignoring LOHRA_MAX_PARALLEL='a\\\\b': not an integer; using 4",
+    });
+    expect(positiveIntEnv("LOHRA_MAX_PARALLEL", "a\nb", 4)).toEqual({
+      value: 4,
+      warning: "ignoring LOHRA_MAX_PARALLEL='a\\nb': not an integer; using 4",
+    });
+  });
+
   it("rejects underscore placements Python's int() itself rejects", () => {
     // Leading, trailing, and doubled underscores are invalid int() literals.
     expect(positiveIntEnv("LOHRA_MAX_PARALLEL", "_10", 4)).toEqual({
