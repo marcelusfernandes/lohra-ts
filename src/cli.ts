@@ -10,6 +10,7 @@ import { runModels } from "./commands/models.js";
 import { runTiers } from "./commands/tiers.js";
 import { runAuth } from "./commands/auth.js";
 import { runChat } from "./commands/chat.js";
+import { runServe } from "./commands/serve.js";
 import { readCodexModel } from "./auth/codex.js";
 import { subscriptionActive } from "./auth/credentials.js";
 import type { OAuthPost } from "./auth/oauth.js";
@@ -250,8 +251,12 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
       );
       return 2;
     }
-    io.stderr("lohra: serve is not implemented in the TypeScript bootstrap\n");
-    return 2;
+    return await runServe({
+      argv,
+      environment,
+      stdout: io.stdout,
+      stderr: io.stderr,
+    });
   }
   if (command === "chat") {
     const result = await runChat({
