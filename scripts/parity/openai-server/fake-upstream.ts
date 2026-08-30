@@ -63,35 +63,33 @@ const USAGE = {
   completion_tokens_details: { reasoning_tokens: 0 },
 };
 
+export const CAUSE_CANARY = "T11_CAUSE_CANARY";
+
+function errorPayload(): { error: { message: string; type: string } } {
+  return { error: { message: `${CAUSE_CANARY} upstream refused`, type: "teapot_error" } };
+}
+
 function chatNonStream(response: ServerResponse, scenario: string): void {
   if (scenario === "err418") {
-    json(
-      response,
-      { error: { message: "T11_CAUSE_CANARY upstream refused", type: "teapot_error" } },
-      418,
-    );
+    json(response, errorPayload(), 418);
     return;
   }
   json(response, {
-    choices: [{ message: { content: `FAKE-UPSTREAM-OK:${scenario}` }, finish_reason: "stop" }],
+    choices: [{ message: { content: `FAKE-UPSTREAM-OK:${scenario}` }, finish_reason: scenario === "partial" ? "length" : "stop" }],
     usage: scenario === "nousage" ? undefined : USAGE,
   });
 }
 
 function chatStream(response: ServerResponse, scenario: string): void {
   if (scenario === "err418") {
-    json(
-      response,
-      { error: { message: "T11_CAUSE_CANARY upstream refused", type: "teapot_error" } },
-      418,
-    );
+    json(response, errorPayload(), 418);
     return;
   }
   const deltaEvent = (content: string) =>
     `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content }, finish_reason: null }] })}\n\n`;
   const doneEvent = () =>
     `data: ${JSON.stringify({
-      choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+      choices: [{ index: 0, delta: {}, finish_reason: scenario === "partial" ? "length" : "stop" }],
       ...(scenario === "nousage" ? {} : { usage: USAGE }),
     })}\n\n`;
   sseFrames(response, [deltaEvent(`FAKE-UPSTREAM-STREAM:${scenario}`), doneEvent()]);

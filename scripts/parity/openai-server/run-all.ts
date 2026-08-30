@@ -7,7 +7,7 @@
 // versioned evidence under .parity-evidence/t11/.
 import { createHash } from "node:crypto";
 
-import { startFakeUpstream, type UpstreamRequestRecord } from "./fake-upstream.js";
+import { startFakeUpstream, type FakeUpstream, type UpstreamRequestRecord } from "./fake-upstream.js";
 import {
   runGuards,
   startServer,
@@ -17,6 +17,8 @@ import {
   type ServerHandle,
 } from "./harness.js";
 import { run as bodyValidationBeforeAuthChat } from "./scenarios/t11-body-validation-before-auth-chat.js";
+import { run as chatNonstreamSuccessPartialUpstreamError } from "./scenarios/t11-chat-nonstream-success-partial-upstream-error.js";
+import { run as chatStreamSuccessUsageAndNoUsage } from "./scenarios/t11-chat-stream-success-usage-and-no-usage.js";
 import { run as surfaceHealthModelsDocs } from "./scenarios/t11-surface-health-models-docs.js";
 
 interface ScenarioResult {
@@ -30,12 +32,14 @@ interface ScenarioResult {
 interface ScenarioSpec {
   readonly id: string;
   readonly config: ServerConfig;
-  readonly run: (oracle: ServerHandle, candidate: ServerHandle) => Promise<ScenarioResult>;
+  readonly run: (oracle: ServerHandle, candidate: ServerHandle, upstream: FakeUpstream) => Promise<ScenarioResult>;
 }
 
 const SCENARIOS: readonly ScenarioSpec[] = [
   { id: "t11-surface-health-models-docs", config: {}, run: surfaceHealthModelsDocs },
   { id: "t11-body-validation-before-auth-chat", config: {}, run: bodyValidationBeforeAuthChat },
+  { id: "t11-chat-nonstream-success-partial-upstream-error", config: {}, run: chatNonstreamSuccessPartialUpstreamError },
+  { id: "t11-chat-stream-success-usage-and-no-usage", config: {}, run: chatStreamSuccessUsageAndNoUsage },
 ];
 
 const guards = runGuards();
@@ -56,7 +60,7 @@ try {
     let oracleExit: { exitCode: number | null; signal: NodeJS.Signals | null };
     let candidateExit: { exitCode: number | null; signal: NodeJS.Signals | null };
     try {
-      result = await scenario.run(oracle, candidate);
+      result = await scenario.run(oracle, candidate, upstream);
       upstreamAtScenarioEnd = [...upstream.requests];
       oracleOutput = { stdout: oracle.stdout(), stderr: oracle.stderr() };
       candidateOutput = { stdout: candidate.stdout(), stderr: candidate.stderr() };
