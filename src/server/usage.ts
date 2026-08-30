@@ -9,6 +9,7 @@
 
 import { pythonRepr } from "../serialization/python-repr.js";
 import type { Usage } from "../transports/index.js";
+import { isPythonFalsy } from "./python-truthy.js";
 
 export interface OpenAiUsage {
   readonly prompt_tokens: number;
@@ -25,17 +26,9 @@ function estimateTokens(text: string): number {
   return Math.max(0, Math.floor(text.length / 4));
 }
 
-function isFalsyPython(value: unknown): boolean {
-  if (value === null || value === undefined || value === false || value === 0) return true;
-  if (typeof value === "string") return value === "";
-  if (Array.isArray(value)) return value.length === 0;
-  if (typeof value === "object") return Object.keys(value).length === 0;
-  return false;
-}
-
 /** `str(content or "")` — a non-string content value renders as Python's repr. */
 function pythonStrContent(content: unknown): string {
-  if (isFalsyPython(content)) return "";
+  if (isPythonFalsy(content)) return "";
   if (typeof content === "string") return content;
   return pythonRepr(content);
 }

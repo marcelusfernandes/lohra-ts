@@ -18,6 +18,29 @@ import type {
 const defaultTimeoutMs = 30_000;
 const defaultMaxBytes = 4_000_000;
 
+/** A chunked response whose connection resets mid-body (not a graceful close
+ * after the terminating chunk) surfaces as a bare "aborted"/ECONNRESET from
+ * Node's http client — rephrase it so the cause is legible to a caller that
+ * only sees `.message` (matches httpx/h11's own wording for the same
+ * failure, which downstream parity comparisons key off of). A graceful close
+ * with no error event is a separate, non-error path (clean EOF, handled as a
+ * partial success by the SSE assembler) and never reaches this function. */
+function describeResponseStreamError(error: unknown, headers: NodeJS.Dict<string | string[]>): Error {
+  if (!(error instanceof Error)) return new Error(String(error));
+  const transferEncoding = headers["transfer-encoding"];
+  const chunked =
+    typeof transferEncoding === "string"
+      ? transferEncoding.includes("chunked")
+      : Array.isArray(transferEncoding) && transferEncoding.some((value) => value.includes("chunked"));
+  const resetLike =
+    (error as NodeJS.ErrnoException).code === "ECONNRESET" || error.message === "aborted";
+  if (!chunked || !resetLike) return error;
+  return new Error(
+    "peer closed connection without sending complete message body (incomplete chunked read)",
+    { cause: error },
+  );
+}
+
 async function readBounded(response: Response, maxBytes: number): Promise<Uint8Array> {
   if (response.body === null) return new Uint8Array();
   const chunks: Uint8Array[] = [];
@@ -99,7 +122,9 @@ export class NativeChatHttpPort implements ChatHttpPort {
             }
             chunks.push(chunk);
           });
-          response.on("error", reject);
+          response.on("error", (error: unknown) => {
+            reject(describeResponseStreamError(error, response.headers));
+          });
           response.on("end", () => {
             const headers = new Headers();
             for (const [key, value] of Object.entries(response.headers)) {
