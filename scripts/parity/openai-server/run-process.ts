@@ -9,7 +9,12 @@ import { createHash } from "node:crypto";
 
 import { startFakeUpstream, type FakeUpstream } from "./fake-upstream.js";
 import { evidenceRoot, runGuards, writeEvidence } from "./harness.js";
+import { run as insecureAndEnvKeyStartup } from "./process-scenarios/t11-insecure-and-env-key-startup.js";
+import { run as occupiedPortRefusal } from "./process-scenarios/t11-occupied-port-refusal.js";
 import { run as subscriptionDefaultNoListener } from "./process-scenarios/t11-subscription-default-no-listener.js";
+import { run as subscriptionInsecureNoListener } from "./process-scenarios/t11-subscription-insecure-no-listener.js";
+import { run as subscriptionPreferenceNoListener } from "./process-scenarios/t11-subscription-preference-no-listener.js";
+import { run as subscriptionTwoNegativeControls } from "./process-scenarios/t11-subscription-two-negative-controls.js";
 
 export interface ProcessScenarioResult {
   readonly projection: unknown;
@@ -24,7 +29,12 @@ interface ProcessScenarioSpec {
 }
 
 const SCENARIOS: readonly ProcessScenarioSpec[] = [
+  { id: "t11-insecure-and-env-key-startup", run: insecureAndEnvKeyStartup },
   { id: "t11-subscription-default-no-listener", run: subscriptionDefaultNoListener },
+  { id: "t11-subscription-preference-no-listener", run: subscriptionPreferenceNoListener },
+  { id: "t11-subscription-insecure-no-listener", run: subscriptionInsecureNoListener },
+  { id: "t11-subscription-two-negative-controls", run: subscriptionTwoNegativeControls },
+  { id: "t11-occupied-port-refusal", run: occupiedPortRefusal },
 ];
 
 const guards = runGuards();

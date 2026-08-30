@@ -111,6 +111,16 @@ export interface ServerConfig {
   /** null = --insecure semantics tested elsewhere; a string pins the API
    * key so both sides authenticate with an identical, non-random value. */
   readonly apiKey?: string | null;
+  /** Pre-seeds `home/auth.json` before the process spawns — the only way
+   * to exercise the subscription-gate's positive/negative controls with a
+   * server that's actually expected to reach LISTEN (`startServer` waits
+   * for it), as opposed to `[processo-ts]`'s own `seedSubscriptionAuth` +
+   * `runProcessToCompletion` pairing for the REFUSAL cases. */
+  readonly seedAuth?: {
+    readonly authMode: string;
+    readonly acknowledgedTosRisk: boolean;
+    readonly preference?: string;
+  };
 }
 
 export interface RuntimePaths {
@@ -206,6 +216,7 @@ export async function startServer(
 ): Promise<ServerHandle> {
   const port = await allocatePort();
   const paths = materialize(side);
+  if (config.seedAuth !== undefined) seedSubscriptionAuth(paths, config.seedAuth);
   const { executable, args, env, apiKey } = buildServeInvocation(side, config, loopbackUpstreamUrl, paths, port);
   const child: ChildProcessByStdio<null, Readable, Readable> = spawn(executable, args, {
     cwd: paths.cwd,
