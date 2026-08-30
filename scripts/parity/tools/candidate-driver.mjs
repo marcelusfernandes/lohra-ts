@@ -2,7 +2,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
-import { setTimeout as delay } from "node:timers/promises";
 
 import { MemoryStore } from "../../../dist/memory/store.js";
 import { SkillStore } from "../../../dist/skills/store.js";
@@ -149,14 +148,37 @@ async function observe() {
   if (scenario === "dispatch-parallel-order") {
     const completion = [];
     const active = { value: 0, peak: 0 };
-    const results = await runBounded([0, 1, 2, 3, 4], 8, async (value) => {
+    let markAllStarted;
+    const allStarted = new Promise((resolveStarted) => {
+      markAllStarted = resolveStarted;
+    });
+    const gates = Array.from({ length: 5 }, () => {
+      let release;
+      let acknowledge;
+      const opened = new Promise((resolveOpened) => {
+        release = resolveOpened;
+      });
+      const completed = new Promise((resolveCompleted) => {
+        acknowledge = resolveCompleted;
+      });
+      return { opened, completed, release, acknowledge };
+    });
+    const resultsPromise = runBounded([0, 1, 2, 3, 4], 8, async (value) => {
       active.value += 1;
       active.peak = Math.max(active.peak, active.value);
-      await delay((5 - value) * 4);
+      if (active.value === 5) markAllStarted();
+      await gates[value].opened;
       completion.push(value);
       active.value -= 1;
+      gates[value].acknowledge();
       return value;
     });
+    await allStarted;
+    for (const value of [4, 3, 2, 1, 0]) {
+      gates[value].release();
+      await gates[value].completed;
+    }
+    const results = await resultsPromise;
     return { results, completion, peak: active.peak };
   }
   if (scenario === "tool-envelope-python-json") {

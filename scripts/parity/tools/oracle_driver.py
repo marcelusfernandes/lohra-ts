@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import time
 from pathlib import Path
 
 from lohra.agent.delegate import child_tool_definitions, subagent_dispatch
@@ -103,18 +102,24 @@ def observe():
         return {"values": values, "composeError": error}
     if scenario == "dispatch-parallel-order":
         completion = []
-        active = {"value": 0, "peak": 0}
+        active = {"value": 0, "peak": 0, "started": 0, "ready": False, "next": 4}
         import threading
-        lock = threading.Lock()
+        condition = threading.Condition()
         def dispatch(_name, args):
             value = args["value"]
-            with lock:
+            with condition:
                 active["value"] += 1
+                active["started"] += 1
                 active["peak"] = max(active["peak"], active["value"])
-            time.sleep((5 - value) * 0.004)
-            completion.append(value)
-            with lock:
+                if active["started"] == 5:
+                    active["ready"] = True
+                    condition.notify_all()
+                while not active["ready"] or value != active["next"]:
+                    condition.wait()
+                completion.append(value)
+                active["next"] -= 1
                 active["value"] -= 1
+                condition.notify_all()
             return tool_result(value)
         calls = tuple(ToolCall(str(value), "x", json.dumps({"value": value})) for value in range(5))
         messages = _execute_tool_calls(calls, dispatch)

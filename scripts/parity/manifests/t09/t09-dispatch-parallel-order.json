@@ -70,6 +70,27 @@
       "side": "both",
       "field": "process.signal",
       "value": null
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/results",
+      "value": [0, 1, 2, 3, 4]
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/completion",
+      "value": [4, 3, 2, 1, 0]
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/peak",
+      "value": 5
     }
   ],
   "normalizations": [],
