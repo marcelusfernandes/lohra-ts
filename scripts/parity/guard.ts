@@ -16,6 +16,10 @@ export interface GuardSnapshot {
     readonly stdout: string;
     readonly stderr: string;
   };
+  readonly runtime?: {
+    readonly pythonVersion: string;
+    readonly packages: Readonly<Record<string, string>>;
+  };
 }
 
 export interface GuardProvider {
@@ -49,6 +53,23 @@ export function assertGuardBefore(snapshot: GuardSnapshot, expected: OracleGuard
       "ORACLE_VERSION_MISMATCH",
       `Oracle version mismatch: expected ${JSON.stringify(expected.expectedVersion)}, received exit=${String(snapshot.version.exitCode)} stdout=${JSON.stringify(snapshot.version.stdout)} stderr=${JSON.stringify(snapshot.version.stderr)}`,
     );
+  }
+  if (expected.expectedPythonVersion !== undefined) {
+    if (snapshot.runtime?.pythonVersion !== expected.expectedPythonVersion) {
+      throw new HarnessError(
+        "ORACLE_PACKAGE_MISMATCH",
+        `Oracle Python mismatch: expected ${expected.expectedPythonVersion}, received ${snapshot.runtime?.pythonVersion ?? "missing"}`,
+      );
+    }
+  }
+  for (const [name, expectedVersion] of Object.entries(expected.expectedPackages ?? {})) {
+    const actual = snapshot.runtime?.packages[name];
+    if (actual !== expectedVersion) {
+      throw new HarnessError(
+        "ORACLE_PACKAGE_MISMATCH",
+        `Oracle package ${name} mismatch: expected ${expectedVersion}, received ${actual ?? "missing"}`,
+      );
+    }
   }
 }
 
@@ -107,6 +128,29 @@ export function createGuardProvider(
           environment: { HOME: guardRoot, PATH: "/usr/bin:/bin", PYTHONUTF8: "1" },
           ...limits,
         });
+        const runtime = runTypeScriptProcess({
+          executable: workspace.python,
+          argv: [
+            "-c",
+            "import json,platform; from importlib.metadata import version; print(json.dumps({'pythonVersion':platform.python_version(),'packages':{'openai':version('openai'),'httpx':version('httpx')}}))",
+          ],
+          cwd: guardRoot,
+          environment: { HOME: guardRoot, PATH: "/usr/bin:/bin", PYTHONUTF8: "1" },
+          ...limits,
+        });
+        if (runtime.exitCode !== 0 || runtime.signal !== null || decode(runtime.stderr) !== "") {
+          throw new HarnessError("ORACLE_PACKAGE_MISMATCH", "Oracle runtime package probe failed");
+        }
+        let runtimeValue: NonNullable<GuardSnapshot["runtime"]>;
+        try {
+          runtimeValue = JSON.parse(decode(runtime.stdout)) as NonNullable<
+            GuardSnapshot["runtime"]
+          >;
+        } catch (error) {
+          throw new HarnessError("ORACLE_PACKAGE_MISMATCH", "Oracle runtime probe was invalid", {
+            cause: error,
+          });
+        }
         return {
           ...repository,
           version: {
@@ -114,6 +158,7 @@ export function createGuardProvider(
             stdout: decode(version.stdout),
             stderr: decode(version.stderr),
           },
+          runtime: runtimeValue,
         };
       } finally {
         rmSync(guardRoot, { recursive: true, force: true });

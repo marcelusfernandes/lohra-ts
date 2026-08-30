@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { resolvePaths } from "./config/paths.js";
 import { runDoctor } from "./doctor/index.js";
+import type { OllamaStatus } from "./doctor/model.js";
 import { pythonJsonDumps } from "./serialization/python-json.js";
 
 const version = "0.0.11";
@@ -29,7 +30,7 @@ export interface CliIo {
   readonly environment: Record<string, string>;
   readonly stdout: (value: string) => void;
   readonly stderr: (value: string) => void;
-  readonly probeOllama?: () => Promise<boolean>;
+  readonly probeOllama?: () => Promise<boolean | OllamaStatus>;
 }
 
 function defaultIo(): CliIo {

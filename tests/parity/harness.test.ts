@@ -101,6 +101,60 @@ describe("parity harness", () => {
     ]);
   });
 
+  it("keeps a raw-only event in evidence but excludes its records from the projection", () => {
+    const source =
+      'import {writeFileSync} from "node:fs"; writeFileSync("events.jsonl", JSON.stringify({home:process.env.HOME})+"\\n")';
+    const manifest = parseScenarioManifest({
+      schemaVersion: 1,
+      id: "raw-only-event",
+      description: "raw event retention and projection contract",
+      argv: [],
+      environment: { allow: [], set: { PATH: "/usr/bin:/bin" } },
+      fixtures: [],
+      runners: {
+        oracle: {
+          adapter: "typescript",
+          executable: "node",
+          prefixArgs: ["--input-type=module", "-e", source],
+          cwd: "profile",
+        },
+        candidate: {
+          adapter: "typescript",
+          executable: "node",
+          prefixArgs: ["--input-type=module", "-e", source],
+          cwd: "profile",
+        },
+      },
+      limits: { timeoutMs: 10_000, maxOutputBytes: 1_048_576 },
+      capture: {
+        tree: { enabled: false, root: "profile", exclude: [] },
+        sqlite: [],
+        events: [
+          {
+            name: "raw",
+            root: "profile",
+            path: "events.jsonl",
+            format: "jsonl",
+            projection: "raw-only",
+          },
+        ],
+      },
+      comparisons: [{ class: "byte", field: "process.exitCode" }],
+      expectations: [],
+      normalizations: [],
+    });
+    const first = runScenario(manifest);
+    const second = runScenario(manifest);
+
+    expect(first.runs.oracle.events.raw).not.toEqual(first.runs.candidate.events.raw);
+    expect(first.runs.oracle.events.raw).not.toEqual(second.runs.oracle.events.raw);
+    expect(first.reproducibility).toEqual(second.reproducibility);
+    expect(first.reproducibility.excludedRawPointers).toEqual([
+      "/runs/oracle/events/raw",
+      "/runs/candidate/events/raw",
+    ]);
+  });
+
   it("does not inherit an environment variable outside the allowlist", () => {
     const previous = process.env.LOHRA_PARITY_SECRET;
     process.env.LOHRA_PARITY_SECRET = "must-not-leak";
@@ -198,5 +252,44 @@ describe("parity harness", () => {
     expect(evidence.comparison.verdict).toBe("match");
     expect(evidence.verdict).toBe("divergent");
     expect(evidence.expectations.failures).toHaveLength(2);
+  });
+
+  it("uses the manifest-declared working directory instead of the caller cwd", () => {
+    const manifest = parseScenarioManifest({
+      schemaVersion: 1,
+      id: "declared-cwd",
+      description: "runner cwd contract",
+      argv: [],
+      environment: { allow: [], set: { PATH: "/usr/bin:/bin" } },
+      preconditions: [],
+      fixtures: [{ root: "profile", path: "tool-target.txt", encoding: "utf8", content: "ok" }],
+      runners: {
+        oracle: {
+          adapter: "typescript",
+          executable: "node",
+          prefixArgs: ["--input-type=module", "-e", "process.stdout.write(process.cwd())"],
+          cwd: "profile",
+        },
+        candidate: {
+          adapter: "typescript",
+          executable: "node",
+          prefixArgs: ["--input-type=module", "-e", "process.stdout.write(process.cwd())"],
+          cwd: "profile",
+        },
+      },
+      limits: { timeoutMs: 10_000, maxOutputBytes: 1_048_576 },
+      capture: { tree: { enabled: false, root: "profile", exclude: [] }, sqlite: [], events: [] },
+      comparisons: [{ class: "byte", field: "process.stdout" }],
+      expectations: [],
+      normalizations: [
+        {
+          field: "process.stdout",
+          kind: "replace-runtime-path",
+          source: "profile",
+          replacement: "<PROFILE>",
+        },
+      ],
+    });
+    expect(runScenario(manifest).verdict).toBe("match");
   });
 });

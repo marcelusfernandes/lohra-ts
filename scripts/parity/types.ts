@@ -6,6 +6,7 @@ export interface RunnerSpec {
   readonly adapter: AdapterKind;
   readonly executable: string;
   readonly prefixArgs: readonly string[];
+  readonly cwd: CaptureRoot | "sandbox";
 }
 
 export interface FixtureSpec {
@@ -47,6 +48,7 @@ export interface EventCaptureSpec {
   readonly root: CaptureRoot;
   readonly path: string;
   readonly format: "json" | "jsonl";
+  readonly projection?: "include" | "raw-only";
 }
 
 export interface CaptureSpec {
@@ -65,6 +67,7 @@ export interface ExpectationSpec {
   readonly field: string;
   readonly value: unknown;
   readonly encoding?: "utf8" | "base64";
+  readonly pointer?: string;
 }
 
 export type NormalizationSpec =
@@ -85,11 +88,42 @@ export type NormalizationSpec =
       readonly kind: "replace-json-pointer";
       readonly pointer: string;
       readonly replacement: unknown;
+    }
+  | {
+      readonly field: string;
+      readonly kind: "replace-regex";
+      readonly pattern: string;
+      readonly replacement: string;
     };
 
 export interface OracleGuardSpec {
   readonly expectedCommit: string;
   readonly expectedVersion: string;
+  readonly expectedPythonVersion?: string;
+  readonly expectedPackages?: Readonly<Record<string, string>>;
+}
+
+export type StubState = "down" | "up-with-models" | "up-empty-models";
+export type StubFixture =
+  | "doctor"
+  | "chat-text"
+  | "chat-stream"
+  | "chat-stream-nodone"
+  | "chat-stream-options-400"
+  | "chat-tool"
+  | "chat-tool-stream"
+  | "chat-tool-unknown"
+  | "chat-http-401"
+  | "chat-http-500"
+  | "side-divergent";
+
+export interface StubSpec {
+  readonly state: StubState;
+  readonly fixture: StubFixture;
+  readonly requestLog: {
+    readonly comparedHeaders: readonly string[];
+    readonly excludedHeaders: readonly string[];
+  };
 }
 
 export interface TcpPortClosedPrecondition {
@@ -127,6 +161,7 @@ export interface ScenarioManifest {
   readonly comparisons: readonly ComparisonSpec[];
   readonly expectations: readonly ExpectationSpec[];
   readonly normalizations: readonly NormalizationSpec[];
+  readonly stub?: StubSpec;
   readonly oracleGuard?: OracleGuardSpec;
 }
 
@@ -208,6 +243,8 @@ export interface GuardRecord {
   readonly version: string;
   readonly cleanBefore: true;
   readonly cleanAfter: true;
+  readonly pythonVersion?: string;
+  readonly packages?: Readonly<Record<string, string>>;
 }
 
 export interface EvidenceRecord {
@@ -220,6 +257,7 @@ export interface EvidenceRecord {
   readonly capturePolicy: CaptureSpec;
   readonly expectationPolicy: readonly ExpectationSpec[];
   readonly normalizationPolicy: readonly NormalizationSpec[];
+  readonly stubPolicy?: StubSpec;
   readonly preconditionPolicy: readonly PreconditionSpec[];
   readonly preconditions: readonly PreconditionRecord[];
   readonly oracleGuard?: GuardRecord;

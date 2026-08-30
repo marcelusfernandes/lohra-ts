@@ -64,6 +64,7 @@ export function runChecks(environment: DoctorEnvironment): readonly Check[] {
   const provider = environment.providers.find(
     (entry) => entry.provider === environment.detected_provider,
   );
+  const ollamaReady = environment.ollama.alive && environment.ollama.models.length > 0;
   const envKeys = Object.keys(readEnvFile(environment.env_file)).sort();
   const foundHarnesses = environment.harnesses.filter(
     (entry) => entry.installed === true || entry.home_present === true,
@@ -101,7 +102,7 @@ export function runChecks(environment: DoctorEnvironment): readonly Check[] {
 
   return [
     { name: "python", state: "ok", detail: "3.12.10 (supported: >=3.11,<3.14)", remedy: "" },
-    provider === undefined
+    provider === undefined && !ollamaReady
       ? {
           name: "provider",
           state: "fail",
@@ -109,12 +110,19 @@ export function runChecks(environment: DoctorEnvironment): readonly Check[] {
           remedy:
             "lohra init   # or: export ANTHROPIC_API_KEY=... | lohra auth enable | ollama serve",
         }
-      : {
-          name: "provider",
-          state: "ok",
-          detail: `${provider.provider} (from api-key: ${provider.present_vars[0] as string})`,
-          remedy: "",
-        },
+      : provider === undefined
+        ? {
+            name: "provider",
+            state: "ok",
+            detail: `ollama (from keyless: ${environment.ollama.url}), model ${environment.ollama.models[0] as string}`,
+            remedy: "",
+          }
+        : {
+            name: "provider",
+            state: "ok",
+            detail: `${provider.provider} (from api-key: ${provider.present_vars[0] as string})`,
+            remedy: "",
+          },
     {
       name: "subscription",
       state: "ok",
@@ -164,12 +172,19 @@ export function runChecks(environment: DoctorEnvironment): readonly Check[] {
       (value) => countNamed(value, "tiers", "tier(s)"),
       "lohra tiers suggest",
     ),
-    {
-      name: "ollama",
-      state: "ok",
-      detail: "not running (http://localhost:11434/api/tags)",
-      remedy: "ollama serve   # keyless local models; no API key needed",
-    },
+    environment.ollama.alive
+      ? {
+          name: "ollama",
+          state: "ok",
+          detail: `running at ${environment.ollama.url} — ${String(environment.ollama.models.length)} model(s): ${environment.ollama.models.join(", ") || "none pulled"}`,
+          remedy: "",
+        }
+      : {
+          name: "ollama",
+          state: "ok",
+          detail: `not running (${environment.ollama.url})`,
+          remedy: "ollama serve   # keyless local models; no API key needed",
+        },
     foundHarnesses.length === 0
       ? {
           name: "harnesses",

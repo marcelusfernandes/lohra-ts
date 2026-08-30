@@ -27,9 +27,9 @@ export interface DoctorEnvironment {
   readonly lohra_oauth_expires_at: null;
   readonly lohra_oauth_present: false;
   readonly ollama: {
-    readonly alive: false;
-    readonly detail: "ConnectError";
-    readonly models: readonly [];
+    readonly alive: boolean;
+    readonly detail: string;
+    readonly models: readonly string[];
     readonly url: string;
   };
   readonly os_name: "nt" | "posix";
@@ -44,6 +44,13 @@ export interface DoctorEnvironment {
   readonly subscription_active: false;
   readonly subscription_divergence: false;
   readonly usable: boolean;
+}
+
+export interface OllamaStatus {
+  readonly alive: boolean;
+  readonly detail: string;
+  readonly models: readonly string[];
+  readonly url: string;
 }
 
 export interface DoctorPayload {

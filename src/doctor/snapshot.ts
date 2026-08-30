@@ -1,8 +1,9 @@
 import { accessSync, constants, statSync } from "node:fs";
+import { get } from "node:http";
 import { delimiter, join } from "node:path";
 
 import type { LohraPaths } from "../config/paths.js";
-import type { DoctorEnvironment } from "./model.js";
+import type { DoctorEnvironment, OllamaStatus } from "./model.js";
 import { providerStatuses } from "./providers.js";
 
 const ollamaUrl = "http://localhost:11434/api/tags";
@@ -44,6 +45,12 @@ function executable(name: string, environment: Readonly<Record<string, string>>)
 export function buildEnvironment(
   environment: Readonly<Record<string, string>>,
   paths: LohraPaths,
+  ollama: OllamaStatus = {
+    alive: false,
+    detail: "ConnectError",
+    models: [],
+    url: ollamaUrl,
+  },
 ): DoctorEnvironment {
   const providers = providerStatuses(environment);
   const detected = providers.find((provider) => provider.configured)?.provider ?? null;
@@ -82,7 +89,7 @@ export function buildEnvironment(
     lohra_auth_present: isFile(join(paths.home, "auth.json")),
     lohra_oauth_expires_at: null,
     lohra_oauth_present: false,
-    ollama: { alive: false, detail: "ConnectError", models: [], url: ollamaUrl },
+    ollama,
     os_name: process.platform === "win32" ? "nt" : "posix",
     platform: process.platform,
     provider_error: null,
@@ -94,15 +101,47 @@ export function buildEnvironment(
     stdin_tty: isTty(process.stdin.isTTY),
     subscription_active: false,
     subscription_divergence: false,
-    usable: hasApiKey,
+    usable: hasApiKey || ollama.alive,
   };
 }
 
-export async function probeOllamaDown(): Promise<boolean> {
-  try {
-    const response = await fetch(ollamaUrl, { signal: AbortSignal.timeout(500) });
-    return response.ok;
-  } catch {
-    return false;
-  }
+export async function probeOllamaDown(): Promise<OllamaStatus> {
+  return await new Promise<OllamaStatus>((resolve) => {
+    const request = get(
+      ollamaUrl,
+      { headers: { accept: "*/*", "user-agent": "lohra-ts/0.0.11" }, timeout: 500 },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () => {
+          const status = response.statusCode ?? 0;
+          if (status < 200 || status >= 300) {
+            resolve({ alive: false, detail: `HTTP ${String(status)}`, models: [], url: ollamaUrl });
+            return;
+          }
+          try {
+            const payload: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+            const values =
+              typeof payload === "object" && payload !== null && "models" in payload
+                ? (payload as { readonly models?: unknown }).models
+                : undefined;
+            const models = Array.isArray(values)
+              ? values.flatMap((entry: unknown) => {
+                  if (typeof entry !== "object" || entry === null || !("name" in entry)) return [];
+                  const name = (entry as { readonly name?: unknown }).name;
+                  return typeof name === "string" ? [name] : [];
+                })
+              : [];
+            resolve({ alive: true, detail: "", models, url: ollamaUrl });
+          } catch {
+            resolve({ alive: false, detail: "JSONDecodeError", models: [], url: ollamaUrl });
+          }
+        });
+      },
+    );
+    request.once("timeout", () => request.destroy());
+    request.once("error", () => {
+      resolve({ alive: false, detail: "ConnectError", models: [], url: ollamaUrl });
+    });
+  });
 }

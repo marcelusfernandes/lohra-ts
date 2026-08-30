@@ -74,4 +74,59 @@ describe("scenario manifest", () => {
       }),
     ).toThrow(/loopback/i);
   });
+
+  it("accepts the explicit T02 stub policy and runner cwd", () => {
+    const parsed = parseScenarioManifest({
+      ...validManifest,
+      runners: {
+        oracle: { ...validManifest.runners.oracle, cwd: "profile" },
+        candidate: { ...validManifest.runners.candidate, cwd: "home" },
+      },
+      stub: {
+        state: "up-with-models",
+        fixture: "chat-text",
+        requestLog: {
+          comparedHeaders: [
+            "authorization",
+            "accept",
+            "content-type",
+            "host",
+            "x-stainless-retry-count",
+          ],
+          excludedHeaders: [
+            "accept-encoding",
+            "connection",
+            "content-length",
+            "user-agent",
+            "x-stainless-lang",
+            "x-stainless-package-version",
+            "x-stainless-os",
+            "x-stainless-arch",
+            "x-stainless-runtime",
+            "x-stainless-runtime-version",
+            "x-stainless-async",
+            "x-stainless-read-timeout",
+          ],
+        },
+      },
+    });
+    expect(parsed.runners.oracle.cwd).toBe("profile");
+    expect(parsed.stub?.state).toBe("up-with-models");
+  });
+
+  it("rejects a stub header that is neither compared nor excluded", () => {
+    expect(() =>
+      parseScenarioManifest({
+        ...validManifest,
+        stub: {
+          state: "up-with-models",
+          fixture: "chat-text",
+          requestLog: {
+            comparedHeaders: ["host"],
+            excludedHeaders: [],
+          },
+        },
+      }),
+    ).toThrow(/header policy/i);
+  });
 });

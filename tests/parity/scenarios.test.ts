@@ -32,6 +32,27 @@ const sprint02Scenarios = [
   "serializer-json-stringify-divergence",
 ] as const;
 
+const sprint03Scenarios = [
+  "t02-doctor-down",
+  "t02-doctor-up",
+  "t02-doctor-empty-models",
+  "t02-chat-auto-json",
+  "t02-chat-auto-empty-models",
+  "t02-chat-json-no-tools",
+  "t02-chat-stream",
+  "t02-chat-stream-nodone",
+  "t02-chat-stream-options-retry",
+  "t02-chat-tool-read-file-json",
+  "t02-chat-tool-read-file-stream",
+  "t02-chat-tool-unknown",
+  "t02-chat-http-401",
+  "t02-chat-http-500",
+  "t02-chat-auto-down",
+  "t02-chat-explicit-down",
+  "t02-chat-provider-without-model-up",
+  "t02-deliberate-divergence",
+] as const;
+
 describe("versioned scenarios", () => {
   it.each(scenarios)("parses %s without an author-local absolute path", (name) => {
     const path = resolve(`scripts/parity/scenarios/${name}.json`);
@@ -86,5 +107,21 @@ describe("versioned scenarios", () => {
 
     expect(text.normalizations.map(({ kind }) => kind)).toContain("replace-text");
     expect(pointer.normalizations.map(({ kind }) => kind)).toContain("replace-json-pointer");
+  });
+
+  it.each(sprint03Scenarios)("parses Sprint 03 scenario %s with explicit stub policy", (name) => {
+    const path = resolve(`scripts/parity/scenarios/${name}.json`);
+    const source = readFileSync(path, "utf8");
+    const manifest = parseScenarioManifest(JSON.parse(source) as unknown);
+
+    expect(source).not.toContain("/Users/");
+    expect(manifest.id).toBe(name);
+    expect(manifest.stub).toBeDefined();
+    expect(manifest.preconditions).toEqual([
+      { kind: "tcp-port-closed", host: "127.0.0.1", port: 11434 },
+    ]);
+    expect(
+      manifest.capture.events.find(({ name: event }) => event === "requestsRaw"),
+    ).toMatchObject({ projection: "raw-only" });
   });
 });

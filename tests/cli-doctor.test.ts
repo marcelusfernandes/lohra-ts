@@ -81,6 +81,50 @@ describe("lohra CLI bootstrap", () => {
     expect(stderr).toEqual([]);
   });
 
+  it("distinguishes a live Ollama with models from a live empty daemon", async () => {
+    const withModels: string[] = [];
+    const empty: string[] = [];
+    const env = environment();
+    expect(
+      await runCli(["doctor", "--json"], {
+        environment: env,
+        stdout: (value) => withModels.push(value),
+        stderr: () => undefined,
+        probeOllama: () =>
+          Promise.resolve({
+            alive: true,
+            detail: "",
+            models: ["stub-coder:1b"],
+            url: "http://localhost:11434/api/tags",
+          }),
+      }),
+    ).toBe(0);
+    expect(
+      await runCli(["doctor", "--json"], {
+        environment: env,
+        stdout: (value) => empty.push(value),
+        stderr: () => undefined,
+        probeOllama: () =>
+          Promise.resolve({
+            alive: true,
+            detail: "",
+            models: [],
+            url: "http://localhost:11434/api/tags",
+          }),
+      }),
+    ).toBe(2);
+    expect(JSON.parse(withModels.join(""))).toMatchObject({
+      environment: { ollama: { alive: true, models: ["stub-coder:1b"] }, usable: true },
+      exit_code: 0,
+      ok: true,
+    });
+    expect(JSON.parse(empty.join(""))).toMatchObject({
+      environment: { ollama: { alive: true, models: [] }, usable: true },
+      exit_code: 2,
+      ok: false,
+    });
+  });
+
   it("advertises all 13 behavioral help subcommands", async () => {
     const stdout: string[] = [];
     expect(

@@ -18,6 +18,8 @@ import type {
   SqlitePragma,
   SqliteTableSpec,
   TreeCaptureSpec,
+  StubFixture,
+  StubSpec,
 } from "./types.js";
 
 type JsonObject = Record<string, unknown>;
@@ -95,11 +97,79 @@ function unique(values: readonly string[], label: string): void {
 
 function runner(value: unknown, label: string): RunnerSpec {
   const item = object(value, label);
-  exactKeys(item, ["adapter", "executable", "prefixArgs"], label);
+  exactKeys(item, ["adapter", "executable", "prefixArgs", "cwd"], label);
   return {
     adapter: enumeration(item.adapter, ["python", "typescript"], `${label}.adapter`),
     executable: string(item.executable, `${label}.executable`),
     prefixArgs: strings(item.prefixArgs ?? [], `${label}.prefixArgs`),
+    cwd:
+      item.cwd === undefined
+        ? "sandbox"
+        : enumeration(item.cwd, ["home", "profile", "sandbox"], `${label}.cwd`),
+  };
+}
+
+const comparedRequestHeaders = [
+  "authorization",
+  "accept",
+  "content-type",
+  "host",
+  "x-stainless-retry-count",
+] as const;
+const excludedRequestHeaders = [
+  "accept-encoding",
+  "connection",
+  "content-length",
+  "user-agent",
+  "x-stainless-lang",
+  "x-stainless-package-version",
+  "x-stainless-os",
+  "x-stainless-arch",
+  "x-stainless-runtime",
+  "x-stainless-runtime-version",
+  "x-stainless-async",
+  "x-stainless-read-timeout",
+] as const;
+const stubFixtures = [
+  "doctor",
+  "chat-text",
+  "chat-stream",
+  "chat-stream-nodone",
+  "chat-stream-options-400",
+  "chat-tool",
+  "chat-tool-stream",
+  "chat-tool-unknown",
+  "chat-http-401",
+  "chat-http-500",
+  "side-divergent",
+] as const satisfies readonly StubFixture[];
+
+function sameMembers(actual: readonly string[], expected: readonly string[]): boolean {
+  return actual.length === expected.length && expected.every((entry) => actual.includes(entry));
+}
+
+function stub(value: unknown): StubSpec {
+  const item = object(value, "stub");
+  exactKeys(item, ["state", "fixture", "requestLog"], "stub");
+  const requestLog = object(item.requestLog, "stub.requestLog");
+  exactKeys(requestLog, ["comparedHeaders", "excludedHeaders"], "stub.requestLog");
+  const comparedHeaders = strings(requestLog.comparedHeaders, "stub.requestLog.comparedHeaders");
+  const excludedHeaders = strings(requestLog.excludedHeaders, "stub.requestLog.excludedHeaders");
+  unique(comparedHeaders, "stub.requestLog.comparedHeaders");
+  unique(excludedHeaders, "stub.requestLog.excludedHeaders");
+  if (
+    !sameMembers(comparedHeaders, comparedRequestHeaders) ||
+    !sameMembers(excludedHeaders, excludedRequestHeaders)
+  ) {
+    throw new HarnessError(
+      "MANIFEST_HEADER_POLICY",
+      "stub request header policy must classify the versioned compared and excluded headers",
+    );
+  }
+  return {
+    state: enumeration(item.state, ["down", "up-with-models", "up-empty-models"], "stub.state"),
+    fixture: enumeration(item.fixture, stubFixtures, "stub.fixture"),
+    requestLog: { comparedHeaders, excludedHeaders },
   };
 }
 
@@ -184,12 +254,16 @@ function sqlite(value: unknown, index: number): SqliteCaptureSpec {
 function event(value: unknown, index: number): EventCaptureSpec {
   const label = `capture.events[${String(index)}]`;
   const item = object(value, label);
-  exactKeys(item, ["name", "root", "path", "format"], label);
+  exactKeys(item, ["name", "root", "path", "format", "projection"], label);
   return {
     name: string(item.name, `${label}.name`),
     root: root(item.root, `${label}.root`),
     path: relativePath(item.path, `${label}.path`),
     format: enumeration(item.format, ["json", "jsonl"], `${label}.format`),
+    projection:
+      item.projection === undefined
+        ? "include"
+        : enumeration(item.projection, ["include", "raw-only"], `${label}.projection`),
   };
 }
 
@@ -231,7 +305,7 @@ function comparison(value: unknown, index: number): ComparisonSpec {
 function expectation(value: unknown, index: number): ExpectationSpec {
   const label = `expectations[${String(index)}]`;
   const item = object(value, label);
-  exactKeys(item, ["side", "field", "value", "encoding"], label);
+  exactKeys(item, ["side", "field", "value", "encoding", "pointer"], label);
   if (!("value" in item)) {
     throw new HarnessError("MANIFEST_INVALID", `${label}.value is required`);
   }
@@ -246,11 +320,18 @@ function expectation(value: unknown, index: number): ExpectationSpec {
       `${label}.encoding is only valid for process.stdout/process.stderr`,
     );
   }
+  if (item.pointer !== undefined) {
+    const pointer = string(item.pointer, `${label}.pointer`);
+    if (!pointer.startsWith("/") || pointer === "/") {
+      throw new HarnessError("MANIFEST_INVALID", `${label}.pointer must address a child value`);
+    }
+  }
   return {
     side: enumeration(item.side, ["oracle", "candidate", "both"], `${label}.side`),
     field,
     value: item.value,
     ...(encoding === undefined ? {} : { encoding }),
+    ...(item.pointer === undefined ? {} : { pointer: string(item.pointer, `${label}.pointer`) }),
   };
 }
 
@@ -259,7 +340,7 @@ function normalization(value: unknown, index: number): NormalizationSpec {
   const item = object(value, label);
   const kind = enumeration(
     item.kind,
-    ["replace-runtime-path", "replace-text", "replace-json-pointer"],
+    ["replace-runtime-path", "replace-text", "replace-json-pointer", "replace-regex"],
     `${label}.kind`,
   );
   const field = string(item.field, `${label}.field`);
@@ -285,6 +366,24 @@ function normalization(value: unknown, index: number): NormalizationSpec {
       replacement: string(item.replacement, `${label}.replacement`),
     };
   }
+  if (kind === "replace-regex") {
+    exactKeys(item, ["field", "kind", "pattern", "replacement"], label);
+    const pattern = string(item.pattern, `${label}.pattern`);
+    if (pattern.length === 0 || pattern.length > 256) {
+      throw new HarnessError("MANIFEST_INVALID", `${label}.pattern must contain 1..256 chars`);
+    }
+    try {
+      new RegExp(pattern, "g");
+    } catch (error) {
+      throw new HarnessError("MANIFEST_INVALID", `${label}.pattern is invalid`, { cause: error });
+    }
+    return {
+      field,
+      kind,
+      pattern,
+      replacement: string(item.replacement, `${label}.replacement`),
+    };
+  }
   exactKeys(item, ["field", "kind", "pointer", "replacement"], label);
   if (!("replacement" in item)) {
     throw new HarnessError("MANIFEST_INVALID", `${label}.replacement is required`);
@@ -299,10 +398,31 @@ function normalization(value: unknown, index: number): NormalizationSpec {
 
 function guard(value: unknown): OracleGuardSpec {
   const item = object(value, "oracleGuard");
-  exactKeys(item, ["expectedCommit", "expectedVersion"], "oracleGuard");
+  exactKeys(
+    item,
+    ["expectedCommit", "expectedVersion", "expectedPythonVersion", "expectedPackages"],
+    "oracleGuard",
+  );
+  const packages =
+    item.expectedPackages === undefined
+      ? undefined
+      : Object.fromEntries(
+          Object.entries(object(item.expectedPackages, "oracleGuard.expectedPackages")).map(
+            ([name, version]) => [name, string(version, `oracleGuard.expectedPackages.${name}`)],
+          ),
+        );
   return {
     expectedCommit: string(item.expectedCommit, "oracleGuard.expectedCommit"),
     expectedVersion: string(item.expectedVersion, "oracleGuard.expectedVersion"),
+    ...(item.expectedPythonVersion === undefined
+      ? {}
+      : {
+          expectedPythonVersion: string(
+            item.expectedPythonVersion,
+            "oracleGuard.expectedPythonVersion",
+          ),
+        }),
+    ...(packages === undefined ? {} : { expectedPackages: packages }),
   };
 }
 
@@ -347,6 +467,7 @@ export function parseScenarioManifest(value: unknown): ScenarioManifest {
       "comparisons",
       "expectations",
       "normalizations",
+      "stub",
       "oracleGuard",
     ],
     "manifest",
@@ -464,6 +585,7 @@ export function parseScenarioManifest(value: unknown): ScenarioManifest {
     comparisons,
     expectations,
     normalizations,
+    ...(item.stub === undefined ? {} : { stub: stub(item.stub) }),
     ...(item.oracleGuard === undefined ? {} : { oracleGuard: guard(item.oracleGuard) }),
   };
   return parsed;

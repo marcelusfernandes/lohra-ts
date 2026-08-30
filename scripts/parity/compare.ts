@@ -38,18 +38,38 @@ function replaceString(
   replacement: string,
   field: string,
 ): unknown {
-  if (typeof value !== "string") {
-    throw new HarnessError("NORMALIZATION_TYPE", `Normalization field ${field} is not text`);
+  if (typeof value === "string") {
+    const decoded = streamField(field) ? Buffer.from(value, "base64").toString("utf8") : value;
+    if (!decoded.includes(search)) {
+      throw new HarnessError(
+        "NORMALIZATION_MISS",
+        `Normalization for ${field} did not find its declared value`,
+      );
+    }
+    const replaced = decoded.replaceAll(search, replacement);
+    return streamField(field) ? Buffer.from(replaced).toString("base64") : replaced;
   }
-  const decoded = streamField(field) ? Buffer.from(value, "base64").toString("utf8") : value;
-  if (!decoded.includes(search)) {
+  let matches = 0;
+  const visit = (entry: unknown): unknown => {
+    if (typeof entry === "string") {
+      const count = entry.split(search).length - 1;
+      matches += count;
+      return entry.replaceAll(search, replacement);
+    }
+    if (Array.isArray(entry)) return entry.map(visit);
+    if (typeof entry === "object" && entry !== null) {
+      return Object.fromEntries(Object.entries(entry).map(([key, child]) => [key, visit(child)]));
+    }
+    return entry;
+  };
+  const replaced = visit(value);
+  if (matches === 0) {
     throw new HarnessError(
       "NORMALIZATION_MISS",
       `Normalization for ${field} did not find its declared value`,
     );
   }
-  const replaced = decoded.replaceAll(search, replacement);
-  return streamField(field) ? Buffer.from(replaced).toString("base64") : replaced;
+  return replaced;
 }
 
 function pointerParts(pointer: string): readonly string[] {
@@ -71,6 +91,63 @@ function replacePointer(
   replacement: unknown,
   field: string,
 ): unknown {
+  if (streamField(field)) {
+    if (typeof value !== "string") {
+      throw new HarnessError("NORMALIZATION_TYPE", `Normalization field ${field} is not text`);
+    }
+    const decoded = Buffer.from(value, "base64").toString("utf8");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(decoded) as unknown;
+    } catch (error) {
+      throw new HarnessError("NORMALIZATION_JSON", `${field} is not valid JSON`, { cause: error });
+    }
+    const parts = pointerParts(pointer);
+    let current = parsed;
+    for (const part of parts) {
+      if (typeof current !== "object" || current === null || !(part in current)) {
+        throw new HarnessError(
+          "NORMALIZATION_POINTER_MISS",
+          `JSON Pointer ${pointer} does not exist in ${field}`,
+        );
+      }
+      current = (current as Record<string, unknown>)[part];
+    }
+    if (parts.length !== 1) {
+      throw new HarnessError(
+        "NORMALIZATION_POINTER",
+        "Stream JSON Pointer currently requires one top-level object key",
+      );
+    }
+    const key = JSON.stringify(parts[0]);
+    const expression = new RegExp(`${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:`, "g");
+    const locations = [...decoded.matchAll(expression)];
+    if (locations.length !== 1 || locations[0]?.index === undefined) {
+      throw new HarnessError(
+        "NORMALIZATION_POINTER_MISS",
+        `JSON Pointer ${pointer} is not uniquely addressable in ${field}`,
+      );
+    }
+    let start = locations[0].index + locations[0][0].length;
+    while (/\s/.test(decoded[start] ?? "")) start += 1;
+    let end = start;
+    if (decoded[start] === '"') {
+      end += 1;
+      let escaped = false;
+      while (end < decoded.length) {
+        const character = decoded[end];
+        end += 1;
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === '"') break;
+      }
+    } else {
+      while (end < decoded.length && !/[\s,}\]]/.test(decoded[end] as string)) end += 1;
+    }
+    const encodedReplacement = JSON.stringify(replacement);
+    const replaced = `${decoded.slice(0, start)}${encodedReplacement}${decoded.slice(end)}`;
+    return Buffer.from(replaced).toString("base64");
+  }
   const clone = structuredClone(value);
   const parts = pointerParts(pointer);
   let parent: unknown = clone;
@@ -94,6 +171,31 @@ function replacePointer(
   return clone;
 }
 
+function replaceRegex(
+  value: unknown,
+  pattern: string,
+  replacement: string,
+  field: string,
+): unknown {
+  if (typeof value !== "string") {
+    throw new HarnessError("NORMALIZATION_TYPE", `Normalization field ${field} is not text`);
+  }
+  const decoded = streamField(field) ? Buffer.from(value, "base64").toString("utf8") : value;
+  const expression = new RegExp(pattern, "g");
+  const matches = [...decoded.matchAll(expression)];
+  if (matches.length === 0) {
+    throw new HarnessError(
+      "NORMALIZATION_MISS",
+      `Normalization for ${field} did not match its declared pattern`,
+    );
+  }
+  if (matches.length > 16) {
+    throw new HarnessError("NORMALIZATION_LIMIT", `Normalization for ${field} exceeded 16 matches`);
+  }
+  const replaced = decoded.replace(expression, replacement);
+  return streamField(field) ? Buffer.from(replaced).toString("base64") : replaced;
+}
+
 function applyRule(
   value: unknown,
   rule: NormalizationSpec,
@@ -104,6 +206,9 @@ function applyRule(
   }
   if (rule.kind === "replace-text") {
     return replaceString(value, rule.search, rule.replacement, rule.field);
+  }
+  if (rule.kind === "replace-regex") {
+    return replaceRegex(value, rule.pattern, rule.replacement, rule.field);
   }
   return replacePointer(value, rule.pointer, rule.replacement, rule.field);
 }

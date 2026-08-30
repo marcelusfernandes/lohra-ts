@@ -1,0 +1,249 @@
+{
+  "schemaVersion": 1,
+  "id": "t02-chat-auto-json",
+  "description": "Oracle auto-selects the first local model and completes JSON chat",
+  "argv": ["chat", "hi", "--json", "--no-input", "--profile", "p"],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "NO_COLOR": "1",
+      "LOHRA_NO_WIZARD": "1",
+      "COLUMNS": "80",
+      "HOME": "{{home}}",
+      "TMPDIR": "{{home}}/tmp"
+    }
+  },
+  "preconditions": [
+    {
+      "kind": "tcp-port-closed",
+      "host": "127.0.0.1",
+      "port": 11434
+    }
+  ],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-lohra",
+      "prefixArgs": [],
+      "cwd": "home"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "oracle-lohra",
+      "prefixArgs": [],
+      "cwd": "home"
+    }
+  },
+  "limits": {
+    "timeoutMs": 60000,
+    "maxOutputBytes": 16777216
+  },
+  "capture": {
+    "tree": {
+      "enabled": false,
+      "root": "home",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": [
+      {
+        "name": "requests",
+        "root": "profile",
+        "path": "stub-requests.jsonl",
+        "format": "jsonl"
+      },
+      {
+        "name": "requestsRaw",
+        "root": "profile",
+        "path": "stub-requests-raw.jsonl",
+        "format": "jsonl",
+        "projection": "raw-only"
+      },
+      {
+        "name": "summary",
+        "root": "profile",
+        "path": "stub-summary.json",
+        "format": "json"
+      },
+      {
+        "name": "assertions",
+        "root": "profile",
+        "path": "stub-assertions.json",
+        "format": "json"
+      }
+    ]
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    },
+    {
+      "class": "byte",
+      "field": "process.stderr"
+    },
+    {
+      "class": "stub",
+      "field": "events.requests"
+    },
+    {
+      "class": "stub",
+      "field": "events.summary"
+    },
+    {
+      "class": "stub",
+      "field": "events.assertions"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "both",
+      "field": "events.summary",
+      "value": {
+        "exists": true,
+        "records": {
+          "gets": 1,
+          "posts": 1,
+          "sequence": ["GET /api/tags", "POST /v1/chat/completions"]
+        }
+      }
+    },
+    {
+      "side": "both",
+      "field": "events.assertions",
+      "value": {
+        "exists": true,
+        "records": {
+          "valid": true,
+          "failures": []
+        }
+      }
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/output",
+      "value": "STUB-OK: deterministic reply"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/usage",
+      "value": {
+        "input_tokens": 11,
+        "output_tokens": 7
+      }
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/cost",
+      "value": {
+        "usd": 0,
+        "gross_usd": 0,
+        "saved_usd": 0,
+        "basis": "local"
+      }
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/completed",
+      "value": true
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/api_calls",
+      "value": 1
+    }
+  ],
+  "normalizations": [
+    {
+      "field": "process.stdout",
+      "kind": "replace-json-pointer",
+      "pointer": "/session_id",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=session: )[0-9a-f]{32}(?=  \\(resume with --session )",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=--session )[0-9a-f]{32}(?=\\))",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "events.requests",
+      "kind": "replace-runtime-path",
+      "source": "home",
+      "replacement": "<HOME>"
+    }
+  ],
+  "stub": {
+    "state": "up-with-models",
+    "fixture": "chat-text",
+    "requestLog": {
+      "comparedHeaders": [
+        "authorization",
+        "accept",
+        "content-type",
+        "host",
+        "x-stainless-retry-count"
+      ],
+      "excludedHeaders": [
+        "accept-encoding",
+        "connection",
+        "content-length",
+        "user-agent",
+        "x-stainless-lang",
+        "x-stainless-package-version",
+        "x-stainless-os",
+        "x-stainless-arch",
+        "x-stainless-runtime",
+        "x-stainless-runtime-version",
+        "x-stainless-async",
+        "x-stainless-read-timeout"
+      ]
+    }
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10",
+    "expectedPackages": {
+      "openai": "3.6.0",
+      "httpx": "0.28.1"
+    }
+  }
+}

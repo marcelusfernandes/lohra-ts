@@ -31,6 +31,9 @@ import type {
   ScenarioManifest,
 } from "./types.js";
 
+const stubDriver = fileURLToPath(new URL("./stub/driver.ts", import.meta.url));
+const tsxLoader = import.meta.resolve("tsx");
+
 export interface RunScenarioOptions {
   readonly cwd?: string;
   readonly projectRoot?: string;
@@ -59,6 +62,7 @@ function runtimePaths(root: string, side: "oracle" | "candidate"): RuntimePaths 
       throw new HarnessError("ISOLATION_ESCAPE", `${path} escaped the temporary execution root`);
     }
   }
+  mkdirSync(join(paths.home, "tmp"), { recursive: true });
   return paths;
 }
 
@@ -142,20 +146,66 @@ function executeSide(
   },
 ): RunRecord {
   const runner = manifest.runners[side];
-  const request = {
-    executable: resolveExecutable(runner.executable, {
-      ...(context.workspace === undefined ? {} : { oracle: context.workspace }),
-      ...(context.bindings === undefined ? {} : { bindings: context.bindings }),
-    }),
+  const executable = resolveExecutable(runner.executable, {
+    ...(context.workspace === undefined ? {} : { oracle: context.workspace }),
+    ...(context.bindings === undefined ? {} : { bindings: context.bindings }),
+  });
+  const target = {
+    executable,
     argv: commandArgs(runner, manifest, context.projectRoot),
-    cwd: paths.sandbox,
+    cwd: paths[runner.cwd],
     environment: environment(manifest, paths, context.projectRoot),
+  };
+  let request = {
+    ...target,
     ...manifest.limits,
   };
+  if (manifest.stub !== undefined) {
+    const configPath = join(paths.root, "stub-driver.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        scenario: manifest.id,
+        side,
+        stub: manifest.stub,
+        limits: manifest.limits,
+        target,
+        logs: {
+          projected: join(paths.profile, "stub-requests.jsonl"),
+          raw: join(paths.profile, "stub-requests-raw.jsonl"),
+          summary: join(paths.profile, "stub-summary.json"),
+          assertions: join(paths.profile, "stub-assertions.json"),
+        },
+      }),
+    );
+    request = {
+      executable: process.execPath,
+      argv: ["--import", tsxLoader, stubDriver, configPath],
+      cwd: paths.root,
+      environment: { PATH: "/usr/bin:/bin" },
+      timeoutMs: manifest.limits.timeoutMs + 1_000,
+      maxOutputBytes: manifest.limits.maxOutputBytes,
+    };
+  }
   const processRecord =
     runner.adapter === "python"
       ? runPythonProcess(request, { pythonExecutable: context.pythonExecutable })
       : runTypeScriptProcess(request);
+  if (manifest.stub !== undefined && processRecord.exitCode === 86) {
+    throw new HarnessError("STUB_BIND_FAILED", "Stub could not bind 127.0.0.1:11434");
+  }
+  if (manifest.stub !== undefined) {
+    assertPreconditions(manifest.preconditions, manifest.limits);
+  }
+  if (manifest.stub !== undefined && processRecord.exitCode === 87) {
+    throw new HarnessError("STUB_DRIVER_FAILED", "Stub driver failed before target completion");
+  }
+  if (manifest.stub !== undefined && processRecord.exitCode === 88) {
+    throw new HarnessError("PROCESS_TIMEOUT", "Stub target exceeded limits.timeoutMs");
+  }
+  if (manifest.stub !== undefined && processRecord.exitCode === 89) {
+    throw new HarnessError("PROCESS_OUTPUT_LIMIT", "Stub target exceeded limits.maxOutputBytes");
+  }
   return { process: processRecord, ...captureObservables(paths, manifest.capture) };
 }
 
@@ -179,6 +229,16 @@ function reproducibility(
     candidate: RunRecord;
   };
   const excludedRawPointers: string[] = [];
+  for (const event of base.capturePolicy.events.filter(
+    (entry) => entry.projection === "raw-only",
+  )) {
+    for (const side of ["oracle", "candidate"] as const) {
+      setRunField(projectedRuns[side], `events.${event.name}`, {
+        exists: projectedRuns[side].events[event.name]?.exists ?? false,
+      });
+      excludedRawPointers.push(`/runs/${side}/events/${event.name}`);
+    }
+  }
   for (const rule of base.normalizationPolicy) {
     for (const side of ["oracle", "candidate"] as const) {
       setRunField(projectedRuns[side], rule.field, base.comparison.normalized[rule.field]?.[side]);
@@ -204,10 +264,35 @@ function expectationFailures(
         : ([expectation.side] as const);
     for (const side of sides) {
       const raw = readRunField(runs[side], expectation.field);
-      const actual =
+      let actual: unknown =
         expectation.encoding === "utf8" && typeof raw === "string"
           ? Buffer.from(raw, "base64").toString("utf8")
           : raw;
+      if (expectation.pointer !== undefined) {
+        if (expectation.encoding === "utf8" && typeof actual === "string") {
+          try {
+            actual = JSON.parse(actual) as unknown;
+          } catch (error) {
+            throw new HarnessError(
+              "EXPECTATION_JSON",
+              `Expectation field ${expectation.field} is not valid JSON`,
+              { cause: error },
+            );
+          }
+        }
+        for (const part of expectation.pointer
+          .slice(1)
+          .split("/")
+          .map((entry) => entry.replaceAll("~1", "/").replaceAll("~0", "~"))) {
+          if (typeof actual !== "object" || actual === null || !(part in actual)) {
+            throw new HarnessError(
+              "EXPECTATION_POINTER",
+              `Expectation pointer ${expectation.pointer} is missing in ${expectation.field}`,
+            );
+          }
+          actual = (actual as Record<string, unknown>)[part];
+        }
+      }
       if (canonicalJson(actual) !== canonicalJson(expectation.value)) {
         failures.push({
           side,
@@ -264,6 +349,8 @@ export function runScenario(
   const oraclePaths = runtimePaths(root, "oracle");
   const candidatePaths = runtimePaths(root, "candidate");
   let beforeCommit: string | undefined;
+  let beforePythonVersion: string | undefined;
+  let beforePackages: Readonly<Record<string, string>> | undefined;
   let primaryError: unknown;
   let afterError: unknown;
   let oracleRun: RunRecord | undefined;
@@ -273,6 +360,8 @@ export function runScenario(
       const before = guard.before();
       assertGuardBefore(before, manifest.oracleGuard);
       beforeCommit = before.commit;
+      beforePythonVersion = before.runtime?.pythonVersion;
+      beforePackages = before.runtime?.packages;
     }
     materializeFixtures(oraclePaths, manifest.fixtures);
     materializeFixtures(candidatePaths, manifest.fixtures);
@@ -342,6 +431,7 @@ export function runScenario(
       capturePolicy: manifest.capture,
       expectationPolicy: manifest.expectations,
       normalizationPolicy: manifest.normalizations,
+      ...(manifest.stub === undefined ? {} : { stubPolicy: manifest.stub }),
       preconditionPolicy: manifest.preconditions,
       preconditions,
       ...(manifest.oracleGuard === undefined
@@ -352,6 +442,8 @@ export function runScenario(
               version: manifest.oracleGuard.expectedVersion,
               cleanBefore: true as const,
               cleanAfter: true as const,
+              ...(beforePythonVersion === undefined ? {} : { pythonVersion: beforePythonVersion }),
+              ...(beforePackages === undefined ? {} : { packages: beforePackages }),
             },
           }),
       runs: { oracle: oracleRun, candidate: candidateRun },
