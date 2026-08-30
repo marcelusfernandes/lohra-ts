@@ -86,19 +86,30 @@ function analyze(body: string): AnalyzedResponsesSse {
     !("usage" in createdResponse) &&
     !("output_text" in createdResponse) &&
     completedResponse !== undefined &&
-    // Measured (both against baseline evidence in tests/server-responses-format.test.ts
-    // and again here, live, against the real pinned oracle): id, object,
-    // created_at, status, model, output, output_text, error,
-    // incomplete_details, instructions, metadata, parallel_tool_calls,
-    // tool_choice, tools, usage = 15 fields, not the 16 the contract prose
-    // states — trusting the measured wire shape over the paraphrase.
+    // Contract-prose erratum, not a candidate defect: assertions 31/46 both
+    // say "16 campos", but the contract's own cited authority disagrees.
+    // eval-t11-baseline/evidence-s03-nonstream.json probe "resp_ok" and
+    // evidence-s04-stream.json probe "resp_stream_ok"'s response.completed
+    // both measure 15 keys (id, object, created_at, status, model, output,
+    // output_text, error, incomplete_details, instructions, metadata,
+    // parallel_tool_calls, tool_choice, tools, usage) against the real
+    // pinned oracle — matching what this scenario measures live, and what
+    // tests/server-responses-format.test.ts already measured during
+    // implementation. The contract's own rule governs: "nas divergências
+    // listadas pelo baseline, prevalece a medição no fio".
     Object.keys(completedResponse).length === 15;
 
   const responseId = createdResponse?.["id"];
   const createdAt = createdResponse?.["created_at"];
+  const completedCreatedAt = completedResponse?.["created_at"];
   const idOk = typeof responseId === "string" && RESP_ID.test(responseId);
   const createdAtOk = typeof createdAt === "number" && Number.isInteger(createdAt);
-  const shapeOk = !parseFailed && idOk && createdAtOk;
+  // Assertion 33: created_at "permanece idêntico em todos os frames daquele
+  // stream" — not just present-and-integer on frame 0, but the SAME value
+  // on response.completed too (a candidate that re-stamped the clock at
+  // completion would otherwise pass every other check here).
+  const createdAtStableOk = createdAtOk && completedCreatedAt === createdAt;
+  const shapeOk = !parseFailed && idOk && createdAtStableOk;
 
   const normalizedFrames = frames.map((frame) => {
     const cloned = JSON.parse(JSON.stringify(frame.data)) as Record<string, unknown>;

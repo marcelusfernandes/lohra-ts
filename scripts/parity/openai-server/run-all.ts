@@ -36,13 +36,25 @@ interface ScenarioSpec {
   readonly run: (oracle: ServerHandle, candidate: ServerHandle, upstream: FakeUpstream) => Promise<ScenarioResult>;
 }
 
-const SCENARIOS: readonly ScenarioSpec[] = [
+const ALL_SCENARIOS: readonly ScenarioSpec[] = [
   { id: "t11-surface-health-models-docs", config: {}, run: surfaceHealthModelsDocs },
+  // Evaluator non-blocking note 1 (assertion 16): fallback_models:() must
+  // produce exactly {"object":"list","data":[]} — reruns the same surface
+  // scenario (health/docs are harmlessly redundant) against a config with
+  // no models registered, so the models probe compares two real empty lists.
+  { id: "t11-surface-empty-fallback-models", config: { emptyModels: true }, run: surfaceHealthModelsDocs },
   { id: "t11-body-validation-before-auth-chat", config: {}, run: bodyValidationBeforeAuthChat },
   { id: "t11-chat-nonstream-success-partial-upstream-error", config: {}, run: chatNonstreamSuccessPartialUpstreamError },
   { id: "t11-chat-stream-success-usage-and-no-usage", config: {}, run: chatStreamSuccessUsageAndNoUsage },
   { id: "t11-responses-stream-success-no-done", config: {}, run: responsesStreamSuccessNoDone },
 ];
+
+// T11_ONLY=<id>[,<id>...] restricts the run to named scenarios — dev-only
+// iteration speedup so adding scenario N doesn't relaunch every prior
+// server pair. Unset (the default, and what parity:t11/CI always use) runs
+// the full matrix; determinism (assertion 10) is only proven on that.
+const only = (process.env.T11_ONLY ?? "").split(",").map((id) => id.trim()).filter((id) => id.length > 0);
+const SCENARIOS = only.length === 0 ? ALL_SCENARIOS : ALL_SCENARIOS.filter((scenario) => only.includes(scenario.id));
 
 const guards = runGuards();
 const upstream = await startFakeUpstream();
