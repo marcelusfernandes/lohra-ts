@@ -149,7 +149,12 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     dispatchTool: toolRuntime.dispatch,
   });
 
-  const requestedPort = options.port ?? DEFAULT_PORT;
+  // Mirrors the oracle's `dashboard --port <n>` flag (T12 baseline harness's
+  // dash_launcher.py passes --port explicitly for hermetic testing).
+  // options.port stays available for programmatic/test injection and wins
+  // over argv when both are present.
+  const argvPort = option(options.argv, "--port");
+  const requestedPort = options.port ?? (argvPort === undefined ? DEFAULT_PORT : Number(argvPort));
   const printBootLines = (port: number): void => {
     options.stderr(`Lohra dashboard: http://127.0.0.1:${String(port)}\n`);
     options.stderr(

@@ -181,6 +181,32 @@ describe("runDashboard: SIGINT-equivalent shutdown (assertion 54)", () => {
   });
 });
 
+describe("runDashboard: --port CLI flag (mirrors the oracle's dashboard --port, needed by the parity harness to launch the real candidate binary)", () => {
+  it("binds the port given via --port in argv, not just the programmatic port option", async () => {
+    const probe: Server = createServer();
+    const freePort = await new Promise<number>((resolvePromise) => {
+      probe.listen(0, "127.0.0.1", () => {
+        const address = probe.address();
+        resolvePromise(typeof address === "object" && address !== null ? address.port : 0);
+      });
+    });
+    await new Promise<void>((resolvePromise) => probe.close(() => { resolvePromise(); }));
+
+    const options = baseOptions({ argv: ["--provider", "anthropic", "--port", String(freePort)] });
+    delete (options as { port?: number }).port;
+    let shutdown: (() => void) | undefined;
+    options.registerShutdownTrigger = (handler: () => void) => {
+      shutdown = handler;
+    };
+    const donePromise = runDashboard(options);
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+    expect(options.stderrLines[0]).toBe(`Lohra dashboard: http://127.0.0.1:${String(freePort)}\n`);
+
+    shutdown?.();
+    await donePromise;
+  });
+});
+
 describe("runDashboard: end-to-end real socket round trip", () => {
   it("boots, serves an authenticated /api/status, and accepts a real WS connection", async () => {
     const options = baseOptions();
