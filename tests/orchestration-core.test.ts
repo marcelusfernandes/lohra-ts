@@ -14,6 +14,16 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+// The concurrency gate's admission check is itself async (an `await` always
+// yields at least one microtask tick, even on an already-resolved promise),
+// so runChild starts one tick after spawn() returns, not synchronously
+// within it. This is still non-blocking per the contract (spawn's own call
+// never waits on the child), just not same-tick — flush enough microtasks
+// for that one hop to unwind before asserting on child-side effects.
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 4; i += 1) await Promise.resolve();
+}
+
 const okResult = (overrides: Partial<CollectResult> = {}): CollectResult => ({
   status: "complete",
   output: "done",
@@ -41,6 +51,7 @@ describe("OrchestrationCore.spawn", () => {
       },
       idSource: () => "aaaa",
       maxSubsessions: 200,
+      maxParallel: 200,
       buildSubagentPrompt: stubPrompt,
     });
 
@@ -49,9 +60,15 @@ describe("OrchestrationCore.spawn", () => {
     order.push("after-spawn");
 
     expect(subId).toBe("aaaa");
-    // spawn returned before the child settled — proven by call order, not
-    // latency, per the contract's own rejection of latency-based proof.
-    expect(order).toEqual(["before-spawn", "child-started", "after-spawn"]);
+    // spawn's own call never touches the child's execution — "before-spawn"
+    // and "after-spawn" are adjacent, with zero child activity between them.
+    expect(order).toEqual(["before-spawn", "after-spawn"]);
+
+    // The child only starts after the concurrency gate admits it (at least
+    // one microtask tick, by design — see flushMicrotasks) — still strictly
+    // after spawn() returned, proving non-blocking by order, not latency.
+    await flushMicrotasks();
+    expect(order).toEqual(["before-spawn", "after-spawn", "child-started"]);
 
     child.resolve(okResult());
     await Promise.resolve();
@@ -59,22 +76,31 @@ describe("OrchestrationCore.spawn", () => {
 
   it("evicts only a terminal entry when over the registry cap, and the running one survives (L9)", async () => {
     const child1 = deferred<CollectResult>();
-    let call = 0;
+    let idCalls = 0;
+    let runCalls = 0;
     const core = new OrchestrationCore({
+      // runChild's own counter is independent of idSource's: the gate defers
+      // the actual runChild invocation by a microtask tick, but idSource is
+      // still called synchronously inside spawn() — the two counters must
+      // not be conflated.
       runChild: () => {
-        call += 1;
-        return call === 1 ? child1.promise : Promise.resolve(okResult());
+        runCalls += 1;
+        return runCalls === 1 ? child1.promise : Promise.resolve(okResult());
       },
-      idSource: () => (call === 0 ? "kid-1" : "kid-2"),
+      idSource: () => {
+        const id = idCalls === 0 ? "kid-1" : "kid-2";
+        idCalls += 1;
+        return id;
+      },
       maxSubsessions: 1,
+      maxParallel: 200,
       buildSubagentPrompt: stubPrompt,
     });
 
     const first = core.spawn({ prompt: "one" });
     // First is still running; spawning a second over cap must not evict it.
     const second = core.spawn({ prompt: "two" });
-    await Promise.resolve();
-    await Promise.resolve();
+    await flushMicrotasks();
 
     expect(core.size).toBe(2);
     expect((await core.collect(first.subId, false)).kind).toBe("pending");
@@ -94,6 +120,7 @@ describe("OrchestrationCore.spawn", () => {
         return id;
       },
       maxSubsessions: 1,
+      maxParallel: 200,
       buildSubagentPrompt: stubPrompt,
     });
 
@@ -114,6 +141,7 @@ describe("OrchestrationCore.collect", () => {
       runChild: () => Promise.resolve(okResult()),
       idSource: () => "x",
       maxSubsessions: 200,
+      maxParallel: 200,
       buildSubagentPrompt: stubPrompt,
     });
     expect((await core.collect("deadbeef", true)).kind).toBe("not-found");
@@ -125,6 +153,7 @@ describe("OrchestrationCore.collect", () => {
       runChild: () => child.promise,
       idSource: () => "aaaa",
       maxSubsessions: 200,
+      maxParallel: 200,
       buildSubagentPrompt: stubPrompt,
     });
     const { subId } = core.spawn({ prompt: "x" });
@@ -141,6 +170,7 @@ describe("OrchestrationCore.collect", () => {
       runChild: () => child.promise,
       idSource: () => "aaaa",
       maxSubsessions: 200,
+      maxParallel: 200,
       buildSubagentPrompt: stubPrompt,
     });
     const { subId } = core.spawn({ prompt: "x" });
@@ -166,6 +196,7 @@ describe("OrchestrationCore.collect", () => {
       runChild: () => Promise.resolve(okResult({ output: "first" })),
       idSource: () => "aaaa",
       maxSubsessions: 200,
+      maxParallel: 200,
       buildSubagentPrompt: stubPrompt,
     });
     const { subId } = core.spawn({ prompt: "x" });
@@ -181,7 +212,7 @@ describe("OrchestrationCore.collect", () => {
 });
 
 describe("OrchestrationCore subagent prompt freeze (contract decision 25 / assertion 51)", () => {
-  it("captures the subagent system prompt once at spawn and never calls the builder again for that sub_id", () => {
+  it("captures the subagent system prompt once at spawn and never calls the builder again for that sub_id", async () => {
     let calls = 0;
     const capturedPrompts: string[] = [];
     const core = new OrchestrationCore({
@@ -191,6 +222,7 @@ describe("OrchestrationCore subagent prompt freeze (contract decision 25 / asser
       },
       idSource: () => "aaaa",
       maxSubsessions: 200,
+      maxParallel: 200,
       // Deliberately returns a DIFFERENT string on every call — the
       // strongest possible proof that the registry, not the builder, is
       // what freezes the value. If the mechanism re-called this on a
@@ -203,7 +235,12 @@ describe("OrchestrationCore subagent prompt freeze (contract decision 25 / asser
 
     const { subId } = core.spawn({ prompt: "x" });
 
+    // buildSubagentPrompt runs synchronously inside spawn(), unaffected by
+    // the concurrency gate's async admission — this assertion needs no flush.
     expect(calls).toBe(1);
+    // runChild itself is gated (deferred by at least one microtask tick),
+    // so the captured-prompt side effect needs a flush before it's visible.
+    await flushMicrotasks();
     expect(capturedPrompts).toEqual(["PROMPT-VERSION-1"]);
     // Retrieving the frozen prompt for the same sub_id, as many times as a
     // future steer-resume implementation would need to, never re-invokes
@@ -218,6 +255,7 @@ describe("OrchestrationCore subagent prompt freeze (contract decision 25 / asser
       runChild: () => Promise.resolve(okResult()),
       idSource: () => "aaaa",
       maxSubsessions: 200,
+      maxParallel: 200,
       buildSubagentPrompt: stubPrompt,
     });
     expect(core.getSubagentPrompt("deadbeef")).toBeUndefined();
@@ -235,6 +273,7 @@ describe("OrchestrationCore subagent prompt freeze (contract decision 25 / asser
         return id;
       },
       maxSubsessions: 200,
+      maxParallel: 200,
       buildSubagentPrompt: () => {
         promptCalls += 1;
         return `PROMPT-VERSION-${String(promptCalls)}`;

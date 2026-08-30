@@ -1,3 +1,5 @@
+import { ConcurrencyGate } from "./concurrency-gate.js";
+
 export type SubSessionStatus = "running" | "complete" | "error" | "interrupted";
 
 export interface CollectResult {
@@ -45,6 +47,13 @@ export interface OrchestrationCoreOptions {
   readonly runChild: ChildRunner;
   readonly idSource: () => string;
   readonly maxSubsessions: number;
+  /** Bounds how many children actually run runChild at once (contract
+   * decision 8 / assertions 24-27, --max-parallel/LOHRA_MAX_PARALLEL). A
+   * child spawned beyond this limit is registered and collectable
+   * immediately — spawn stays non-blocking — but its runChild call doesn't
+   * start until a slot frees, matching the oracle's queued-in-pool
+   * semantics (L6). */
+  readonly maxParallel: number;
   /** Builds the subagent system prompt text. Called exactly once per spawned
    * child — the registry freezes the result on the SubSession entry and
    * never calls this again for that sub_id, including across steer-driven
@@ -78,8 +87,11 @@ interface SubSessionEntry {
 export class OrchestrationCore {
   private readonly entries = new Map<string, SubSessionEntry>();
   private readonly insertionOrder: string[] = [];
+  private readonly gate: ConcurrencyGate;
 
-  public constructor(private readonly options: OrchestrationCoreOptions) {}
+  public constructor(private readonly options: OrchestrationCoreOptions) {
+    this.gate = new ConcurrencyGate(options.maxParallel);
+  }
 
   public get size(): number {
     return this.entries.size;
@@ -95,14 +107,16 @@ export class OrchestrationCore {
     this.evictOneTerminalIfOverCap();
     const subId = this.options.idSource();
     const systemPrompt = this.options.buildSubagentPrompt();
-    const promise = this.options.runChild(subId, config, systemPrompt).then((result) => {
-      const entry = this.entries.get(subId);
-      if (entry !== undefined) {
-        entry.status = result.status;
-        entry.result = result;
-      }
-      return result;
-    });
+    const promise = this.gate
+      .run(() => this.options.runChild(subId, config, systemPrompt))
+      .then((result) => {
+        const entry = this.entries.get(subId);
+        if (entry !== undefined) {
+          entry.status = result.status;
+          entry.result = result;
+        }
+        return result;
+      });
     this.entries.set(subId, { subId, systemPrompt, status: "running", result: null, promise });
     this.insertionOrder.push(subId);
     return { subId };
