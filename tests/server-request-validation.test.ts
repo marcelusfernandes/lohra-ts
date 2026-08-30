@@ -108,6 +108,24 @@ describe("parseRequestBody + validateChatBody — byte-exact against measured or
     expect(parsed.temperature).toBe(0.5);
   });
 
+  it("[probe-complementar] client tools/tool_choice are structurally impossible to reach the parsed body (assertion 51)", () => {
+    const value = parseRequestBody(
+      JSON.stringify({
+        model: "m",
+        messages: [{ role: "user", content: "x" }],
+        tools: [{ type: "function", function: { name: "evil" } }],
+        tool_choice: "evil",
+      }),
+      "application/json",
+    );
+    const parsed = validateChatBody(value);
+    expect(Object.keys(parsed)).not.toContain("tools");
+    expect(Object.keys(parsed)).not.toContain("toolChoice");
+    expect(Object.keys(parsed).sort()).toEqual(
+      ["maxTokens", "messages", "model", "stream", "streamOptions", "temperature"].sort(),
+    );
+  });
+
   it("extra unknown fields are ignored without error (assertion 25)", () => {
     const value = parseRequestBody(
       '{"model": "", "messages": [{"role": "user", "content": null}], "top_p": 1, "n": 2, "tools": [{}], "tool_choice": "auto"}',
@@ -174,6 +192,15 @@ describe("validateResponsesBody — union input field, byte-exact", () => {
         input: "x",
       },
     ]);
+  });
+
+  it("[probe-complementar] Responses has no tools/tool_choice field to begin with (assertion 51)", () => {
+    const parsed = validateResponsesBody(
+      parseRequestBody('{"model": "m", "input": "hi", "tools": [{"evil": true}]}', "application/json"),
+    );
+    expect(Object.keys(parsed).sort()).toEqual(
+      ["input", "instructions", "maxOutputTokens", "model", "stream", "temperature"].sort(),
+    );
   });
 
   it("a valid string input or a valid list-of-dicts input produces zero 422 errors", () => {
