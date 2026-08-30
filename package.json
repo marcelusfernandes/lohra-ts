@@ -37,6 +37,7 @@
     "parity:t10:gates": "tsx scripts/parity/provider-transports/run-gates.ts",
     "parity:t10:pack-smoke": "node scripts/parity/provider-transports/pack-smoke.mjs",
     "parity:t10:live-smoke": "node scripts/parity/provider-transports/live-smoke.mjs",
+    "parity:t11": "tsx scripts/parity/openai-server/run-all.ts",
     "probe:t09": "node scripts/parity/tools/ts-only-probes.mjs",
     "smoke:t09:live": "node scripts/parity/tools/live-smoke.mjs",
     "probe:workflow-spec-ts-only": "node scripts/parity/workflow-spec/ts-only-probes.mjs",
