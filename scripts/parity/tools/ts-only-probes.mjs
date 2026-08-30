@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import process from "node:process";
@@ -7,8 +7,10 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import {
   ApprovalManager,
+  CHILD_EXCLUDED_TOOLS,
   RegistryToolDispatcher,
   ToolRegistry,
+  approval,
   childToolDefinitions,
   createChildDispatch,
   runBounded,
@@ -57,17 +59,45 @@ const probes = {
     );
   },
   "t09-child-terminal-type": async () => {
-    let called = false;
-    const dispatch = createChildDispatch(async () => {
-      called = true;
-      return toolResult("executed");
+    const sandbox = join(evidenceDirectory, "child-security-sandbox");
+    const target = join(sandbox, "target.txt");
+    rmSync(sandbox, { recursive: true, force: true });
+    mkdirSync(sandbox, { recursive: true });
+    writeFileSync(target, "sentinel", { mode: 0o600 });
+    chmodSync(target, 0o600);
+    let baseCalls = 0;
+    const dispatch = createChildDispatch(async (_name, args) => {
+      baseCalls += 1;
+      return await terminalTool(args);
     });
-    const result = JSON.parse(await dispatch("terminal", { command: ["sudo", "x"] }));
-    return (
-      !called &&
-      result.error === "command was not approved by the user" &&
-      Array.isArray(result.command)
-    );
+    approval.setYolo(true);
+    try {
+      const excluded = await Promise.all(
+        CHILD_EXCLUDED_TOOLS.map(async (name) => {
+          const result = JSON.parse(await dispatch(name, {}));
+          return result.error === `the '${name}' tool is not available to subagents`;
+        }),
+      );
+      const command = `chmod 755 ${JSON.stringify(target)}`;
+      const dangerous = JSON.parse(await dispatch("terminal", { command }));
+      const nonString = JSON.parse(await dispatch("terminal", { command: ["sudo", "x"] }));
+      return (
+        CHILD_EXCLUDED_TOOLS.length === 19 &&
+        excluded.every(Boolean) &&
+        dangerous.error ===
+          "subagent auto-denied a dangerous command (broad permission change (chmod ...7xx))" &&
+        dangerous.command === command &&
+        (statSync(target).mode & 0o777) === 0o600 &&
+        nonString.error === "command was not approved by the user" &&
+        Array.isArray(nonString.command) &&
+        baseCalls === 0
+      );
+    } finally {
+      approval.setYolo(false);
+      approval.setCallback(null);
+      approval.reset();
+      rmSync(sandbox, { recursive: true, force: true });
+    }
   },
   "t09-parallel-cap": async () => {
     let active = 0;
