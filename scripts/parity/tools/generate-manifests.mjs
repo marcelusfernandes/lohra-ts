@@ -249,11 +249,19 @@ for (const filename of readdirSync(directory).filter(
     // breaks on its own every UTC/local midnight, with or without any
     // real divergence. All 14 t09-public-* scenarios carry it in both
     // events.requests and sqlite.db (measured, not assumed).
+    // hashOnly: true is load-bearing — round-1 Evaluator finding: without
+    // it, the rule ran BEFORE the comparison (same as every other
+    // normalization here), so a genuine oracle/candidate date mismatch —
+    // the exact bug T09 is the only gate that catches, since it doesn't
+    // pin TZ — was silently erased before the verdict was computed. The
+    // date is supposed to be IDENTICAL between both sides; a mismatch IS
+    // the signal, so it must be compared first and only stabilized after.
     {
       field: "sqlite.db",
       kind: "replace-regex",
       pattern: "Today's date is \\d{4}-\\d{2}-\\d{2}\\.",
       replacement: "Today's date is <DATE>.",
+      hashOnly: true,
     },
     {
       field: "events.requests",
@@ -266,6 +274,7 @@ for (const filename of readdirSync(directory).filter(
       kind: "replace-regex",
       pattern: "Today's date is \\d{4}-\\d{2}-\\d{2}\\.",
       replacement: "Today's date is <DATE>.",
+      hashOnly: true,
     },
   );
   for (let index = 0; index < messageCount; index += 1) {

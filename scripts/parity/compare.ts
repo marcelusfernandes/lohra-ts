@@ -252,11 +252,20 @@ export function compareRuns(
   for (const comparison of options.comparisons) {
     let oracleValue = structuredClone(readRunField(oracle, comparison.field));
     let candidateValue = structuredClone(readRunField(candidate, comparison.field));
-    for (const rule of options.normalizations.filter((entry) => entry.field === comparison.field)) {
+    const fieldRules = options.normalizations.filter((entry) => entry.field === comparison.field);
+    // Rules that affect the verdict (everything except hashOnly) apply
+    // first — a session id or a temp-directory path is EXPECTED to differ
+    // between two independent processes, so stripping it before comparing
+    // is correct. hashOnly rules apply AFTER the verdict below: they exist
+    // for content that's supposed to be identical across both sides (e.g.
+    // today's date), where a mismatch is itself the bug — normalizing it
+    // away before comparing would hide exactly the divergence a hashOnly
+    // rule's own field was added to catch.
+    for (const rule of fieldRules) {
+      if (rule.kind === "replace-regex" && rule.hashOnly === true) continue;
       oracleValue = applyRule(oracleValue, rule, options.runtimeValues.oracle);
       candidateValue = applyRule(candidateValue, rule, options.runtimeValues.candidate);
     }
-    normalized[comparison.field] = { oracle: oracleValue, candidate: candidateValue };
     if (canonicalJson(oracleValue) !== canonicalJson(candidateValue)) {
       differences.push({
         field: comparison.field,
@@ -265,6 +274,12 @@ export function compareRuns(
         candidate: candidateValue,
       });
     }
+    for (const rule of fieldRules) {
+      if (!(rule.kind === "replace-regex" && rule.hashOnly === true)) continue;
+      oracleValue = applyRule(oracleValue, rule, options.runtimeValues.oracle);
+      candidateValue = applyRule(candidateValue, rule, options.runtimeValues.candidate);
+    }
+    normalized[comparison.field] = { oracle: oracleValue, candidate: candidateValue };
   }
   return {
     verdict: differences.length === 0 ? "match" : "divergent",

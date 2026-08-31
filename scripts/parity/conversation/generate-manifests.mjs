@@ -141,11 +141,18 @@ function normalizations(rows = 2, includeSqlite = true, includeTodayInSqlite = t
     // — a digest that's meant to prove no-regression then breaks on its
     // own every UTC midnight, with or without any real divergence. Every
     // T08 scenario's captured request carries it at least once.
+    // hashOnly: true is load-bearing — unlike every other rule here, the
+    // date is supposed to be IDENTICAL between oracle and candidate; a
+    // mismatch is the bug this exists to catch, so it must still be
+    // compared BEFORE normalization, only stabilized after (round-1
+    // Evaluator finding: the non-hashOnly version silently absorbed a
+    // real oracle/candidate date divergence into "match").
     {
       field: "events.requests",
       kind: "replace-regex",
       pattern: "Today's date is \\d{4}-\\d{2}-\\d{2}\\.",
       replacement: "Today's date is <DATE>.",
+      hashOnly: true,
     },
   ];
   if (!includeSqlite) return result;
@@ -181,6 +188,7 @@ function normalizations(rows = 2, includeSqlite = true, includeTodayInSqlite = t
       kind: "replace-regex",
       pattern: "Today's date is \\d{4}-\\d{2}-\\d{2}\\.",
       replacement: "Today's date is <DATE>.",
+      hashOnly: true,
     });
   }
   for (let index = 0; index < rows; index += 1) {

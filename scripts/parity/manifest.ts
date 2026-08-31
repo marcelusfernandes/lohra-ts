@@ -414,7 +414,7 @@ function normalization(value: unknown, index: number): NormalizationSpec {
     };
   }
   if (kind === "replace-regex") {
-    exactKeys(item, ["field", "kind", "pattern", "replacement"], label);
+    exactKeys(item, ["field", "kind", "pattern", "replacement", "hashOnly"], label);
     const pattern = string(item.pattern, `${label}.pattern`);
     if (pattern.length === 0 || pattern.length > 256) {
       throw new HarnessError("MANIFEST_INVALID", `${label}.pattern must contain 1..256 chars`);
@@ -424,11 +424,15 @@ function normalization(value: unknown, index: number): NormalizationSpec {
     } catch (error) {
       throw new HarnessError("MANIFEST_INVALID", `${label}.pattern is invalid`, { cause: error });
     }
+    if ("hashOnly" in item && typeof item.hashOnly !== "boolean") {
+      throw new HarnessError("MANIFEST_INVALID", `${label}.hashOnly must be a boolean`);
+    }
     return {
       field,
       kind,
       pattern,
       replacement: string(item.replacement, `${label}.replacement`),
+      ...(item.hashOnly === true ? { hashOnly: true } : {}),
     };
   }
   exactKeys(item, ["field", "kind", "pointer", "replacement"], label);

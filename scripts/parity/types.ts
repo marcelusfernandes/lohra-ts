@@ -98,6 +98,15 @@ export type NormalizationSpec =
       readonly kind: "replace-regex";
       readonly pattern: string;
       readonly replacement: string;
+      /** When true, this rule is applied AFTER the match/divergent verdict
+       * is decided — it only stabilizes the STORED/HASHED projection
+       * against volatile-but-legitimately-identical content (e.g. today's
+       * date), and never masks a genuine oracle/candidate divergence in
+       * that same content from the comparator. Every other normalization
+       * kind still applies before comparison, same as before — this only
+       * exists for content that's supposed to be equal, where a mismatch
+       * IS the bug signal. */
+      readonly hashOnly?: boolean;
     };
 
 export interface OracleGuardSpec {

@@ -345,7 +345,8 @@
       "field": "events.requests",
       "kind": "replace-regex",
       "pattern": "Today's date is \\d{4}-\\d{2}-\\d{2}\\.",
-      "replacement": "Today's date is <DATE>."
+      "replacement": "Today's date is <DATE>.",
+      "hashOnly": true
     },
     {
       "field": "sqlite.db",
@@ -369,7 +370,8 @@
       "field": "sqlite.db",
       "kind": "replace-regex",
       "pattern": "Today's date is \\d{4}-\\d{2}-\\d{2}\\.",
-      "replacement": "Today's date is <DATE>."
+      "replacement": "Today's date is <DATE>.",
+      "hashOnly": true
     }
   ],
   "stub": {
