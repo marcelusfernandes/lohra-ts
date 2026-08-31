@@ -1,0 +1,242 @@
+{
+  "schemaVersion": 1,
+  "id": "t13-egress-tripwire-unknown-and-no-key-provider",
+  "description": "T13 bilateral CLI observation (expected match), item 17 of the versioned inventory (contract L13/assertion 35): spawn_session with an unknown provider override fails BEFORE any spawn — zero upstream requests, zero sub-session registry rows created. Deterministic and race-free: the tripwire check (client pool resolution) happens synchronously ahead of core.spawn() in both implementations, so there is nothing timing-dependent to observe here at all — the entire scenario is a single parent round trip.",
+  "argv": [
+    "chat",
+    "SCEN:parent try to spawn with an unknown provider",
+    "--json",
+    "--provider",
+    "ollama",
+    "--model",
+    "stub-coder:1b"
+  ],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "PYTHONHASHSEED": "0",
+      "NO_COLOR": "1",
+      "LOHRA_NO_WIZARD": "1",
+      "COLUMNS": "80",
+      "TZ": "UTC",
+      "HOME": "{{home}}",
+      "LOHRA_HOME": "{{home}}/.lohra",
+      "CODEX_HOME": "{{home}}/codex",
+      "TMPDIR": "{{home}}/tmp"
+    }
+  },
+  "preconditions": [
+    {
+      "kind": "tcp-port-closed",
+      "host": "127.0.0.1",
+      "port": 11434
+    }
+  ],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/conversation/oracle_driver.py", "single"],
+      "cwd": "profile"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/conversation/candidate-driver.mjs", "single"],
+      "cwd": "profile"
+    }
+  },
+  "limits": {
+    "timeoutMs": 20000,
+    "maxOutputBytes": 16777216
+  },
+  "capture": {
+    "tree": {
+      "enabled": false,
+      "root": "home",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": [
+      {
+        "name": "requests",
+        "root": "profile",
+        "path": "stub-requests.jsonl",
+        "format": "jsonl"
+      },
+      {
+        "name": "summary",
+        "root": "profile",
+        "path": "stub-summary.json",
+        "format": "json"
+      },
+      {
+        "name": "assertions",
+        "root": "profile",
+        "path": "stub-assertions.json",
+        "format": "json"
+      }
+    ]
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    },
+    {
+      "class": "byte",
+      "field": "process.stderr"
+    },
+    {
+      "class": "stub",
+      "field": "events.summary"
+    },
+    {
+      "class": "stub",
+      "field": "events.assertions"
+    },
+    {
+      "class": "stub",
+      "field": "events.requests"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/completed",
+      "value": true
+    },
+    {
+      "side": "both",
+      "field": "events.assertions",
+      "value": {
+        "exists": true,
+        "records": {
+          "valid": true,
+          "failures": []
+        }
+      }
+    },
+    {
+      "side": "both",
+      "field": "events.summary",
+      "value": {
+        "exists": true,
+        "records": {
+          "gets": 0,
+          "posts": 2,
+          "sequence": [
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions"
+          ]
+        }
+      }
+    }
+  ],
+  "normalizations": [
+    {
+      "field": "process.stdout",
+      "kind": "replace-json-pointer",
+      "pointer": "/session_id",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=session: )[0-9a-f]{32}(?=  \\(resume with --session )",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=--session )[0-9a-f]{32}(?=\\))",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "events.requests",
+      "kind": "replace-runtime-path",
+      "source": "profile",
+      "replacement": "<PROJECT>"
+    }
+  ],
+  "stub": {
+    "state": "up-with-models",
+    "fixture": "chat-lane-script",
+    "requestLog": {
+      "comparedHeaders": [
+        "authorization",
+        "accept",
+        "content-type",
+        "host",
+        "x-stainless-retry-count"
+      ],
+      "excludedHeaders": [
+        "accept-encoding",
+        "connection",
+        "content-length",
+        "user-agent",
+        "x-stainless-lang",
+        "x-stainless-package-version",
+        "x-stainless-os",
+        "x-stainless-arch",
+        "x-stainless-runtime",
+        "x-stainless-runtime-version",
+        "x-stainless-async",
+        "x-stainless-read-timeout"
+      ]
+    },
+    "laneSteps": {
+      "parent": [
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"SCEN:kid do it\",\"provider\":\"nonexistent-provider-xyz\"}"
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "content": "PARENT-DONE"
+        }
+      ]
+    }
+  },
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10",
+    "expectedPackages": {
+      "openai": "3.6.0",
+      "httpx": "0.28.1"
+    }
+  }
+}
