@@ -26,6 +26,19 @@ import {
   type OnboardingSnapshot,
 } from "./onboarding/wizard.js";
 import { readExportable, writeExportable } from "./skills/export.js";
+import {
+  AUTH_SPEC,
+  CHAT_SPEC,
+  DOCTOR_SPEC,
+  INIT_SPEC,
+  MODELS_SPEC,
+  PROFILE_SPEC,
+  SERVE_SPEC,
+  SKILL_EXPORT_SPEC,
+  TIERS_LIST_SPEC,
+  TIERS_SUGGEST_SPEC,
+} from "./cli/arg-spec.js";
+import { chatTypeErrorMessage, validateArgs, type ArgValidation } from "./cli/arg-validation.js";
 
 const version = "0.0.11";
 const commands = [
@@ -75,9 +88,54 @@ function help(): string {
   return `usage: lohra [-h] [--version]\n             {${commands.join(",")}}\n             ...\n\nLohra AI agent\n\npositional arguments:\n  {${commands.join(",")}}\n\noptions:\n  -h, --help  show this help message and exit\n  --version   show program's version number and exit\n`;
 }
 
+function usageBanner(): string {
+  return `usage: lohra [-h] [--version]\n             {${commands.join(",")}}\n             ...\n`;
+}
+
 function invalidOrder(value: string): string {
   const choices = commands.join(", ");
-  return `usage: lohra [-h] [--version]\n             {${commands.join(",")}}\n             ...\nlohra: error: argument command: invalid choice: '${value}' (choose from ${choices})\n`;
+  return `${usageBanner()}lohra: error: argument command: invalid choice: '${value}' (choose from ${choices})\n`;
+}
+
+function unrecognizedArguments(tokens: readonly string[]): string {
+  return `${usageBanner()}lohra: error: unrecognized arguments: ${tokens.join(" ")}\n`;
+}
+
+/** Validates `argv.slice(1)` against `command`'s spec and, for `tiers`
+ * (list/suggest) and `skill export`, the right nested spec — mirroring
+ * argparse's own per-subparser routing. Any sub-action the oracle handles
+ * outside a spec here (an unknown `tiers`/`skill` action) is left to the
+ * existing per-command error path below, unchanged: this returns no
+ * findings for it, exactly as if nothing were checked. */
+function validateCommandArgs(command: string, rest: readonly string[]): ArgValidation {
+  switch (command) {
+    case "init":
+      return validateArgs(INIT_SPEC, rest);
+    case "doctor":
+      return validateArgs(DOCTOR_SPEC, rest);
+    case "chat":
+      return validateArgs(CHAT_SPEC, rest);
+    case "serve":
+      return validateArgs(SERVE_SPEC, rest);
+    case "models":
+      return validateArgs(MODELS_SPEC, rest);
+    case "auth":
+      return validateArgs(AUTH_SPEC, rest);
+    case "profile":
+      return validateArgs(PROFILE_SPEC, rest);
+    case "tiers": {
+      const action = rest[0];
+      if (action === "list") return validateArgs(TIERS_LIST_SPEC, rest.slice(1));
+      if (action === "suggest") return validateArgs(TIERS_SUGGEST_SPEC, rest.slice(1));
+      return { unrecognized: [], typeError: null };
+    }
+    case "skill": {
+      if (rest[0] === "export") return validateArgs(SKILL_EXPORT_SPEC, rest.slice(1));
+      return { unrecognized: [], typeError: null };
+    }
+    default:
+      return { unrecognized: [], typeError: null };
+  }
 }
 
 function profileArgument(args: readonly string[]): string | undefined {
@@ -120,6 +178,20 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     } else {
       io.stderr(invalidOrder(command));
     }
+    return 2;
+  }
+
+  // Mirrors argparse: unrecognized/mistyped arguments are rejected before
+  // the program does anything else — no env/path resolution, no stdout
+  // envelope, even under --json (the oracle's own rejection writes zero
+  // bytes to stdout in every measured case).
+  const validation = validateCommandArgs(command, argv.slice(1));
+  if (command === "chat" && validation.typeError !== null) {
+    io.stderr(chatTypeErrorMessage(validation.typeError.flag, validation.typeError.value));
+    return 2;
+  }
+  if (validation.unrecognized.length > 0) {
+    io.stderr(unrecognizedArguments(validation.unrecognized));
     return 2;
   }
 

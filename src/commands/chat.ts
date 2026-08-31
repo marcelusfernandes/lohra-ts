@@ -22,9 +22,11 @@ import { loadPriceOverrides } from "../pricing/index.js";
 import {
   CODEX_PROVIDER,
   getProviderProfile,
+  knownProviderNames,
   resolveApiKey,
   type ProviderProfile,
 } from "../providers/index.js";
+import { CHAT_SPEC } from "../cli/arg-spec.js";
 import { pythonJsonDumpsInsertionOrder } from "../serialization/python-json.js";
 import { openStateForEnvironment, SessionRepository } from "../state/index.js";
 import { SkillStore } from "../skills/index.js";
@@ -62,18 +64,19 @@ function option(argv: readonly string[], name: string): string | undefined {
   return index < 0 ? undefined : argv[index + 1];
 }
 
+// Derived from CHAT_SPEC (src/cli/arg-spec.ts) rather than its own literal
+// set, so this can't drift from what cli.ts's validator actually accepts
+// the way it once did — that drift is what let `chat --max-parallel 4 hi`
+// misread "4" as the prompt (an unknown-to-this-function, known-to-the-
+// oracle flag whose value was never skipped).
+const CHAT_VALUE_FLAGS = new Set(
+  CHAT_SPEC.flags.filter((flag) => flag.takesValue).map((flag) => flag.name),
+);
+
 function prompt(argv: readonly string[]): string {
-  const takesValue = new Set([
-    "--provider",
-    "--model",
-    "--session",
-    "--temperature",
-    "--max-iterations",
-    "--profile",
-  ]);
   for (let index = 1; index < argv.length; index += 1) {
     const value = argv[index] as string;
-    if (takesValue.has(value)) {
+    if (CHAT_VALUE_FLAGS.has(value)) {
       index += 1;
       continue;
     }
@@ -89,7 +92,17 @@ function finite(value: string | undefined, name: string): number | undefined {
   return result;
 }
 
-function initializationError(input: string, model: string | null, message: string): Result {
+// `stderrMessage` defaults to the envelope message: most initialization
+// failures use the same short text on both channels. The unknown-provider
+// case is the exception (see its call site below) — the oracle puts a
+// generic envelope message on stdout and a separate, detailed one (with
+// the full known-provider list) on stderr.
+function initializationError(
+  input: string,
+  model: string | null,
+  message: string,
+  stderrMessage: string = message,
+): Result {
   return {
     code: 2,
     stdout: `${pythonJsonDumpsInsertionOrder({
@@ -108,9 +121,15 @@ function initializationError(input: string, model: string | null, message: strin
       error: message,
       api_calls: 0,
     })}\n`,
-    stderr: `${message}\n`,
+    stderr: `${stderrMessage}\n`,
   };
 }
+
+// Matches the short envelope message chat-boundary.ts already uses for
+// "route.mode !== subscription with no --provider" — the same generic text
+// the oracle shows across every no-provider-resolved chat failure.
+const NO_PROVIDER_CONFIGURED_SHORT =
+  "no provider configured — run `lohra init` (or `lohra doctor`); details on stderr";
 
 export async function runChat(options: ChatCommandOptions): Promise<Result> {
   const input = prompt(options.argv);
@@ -152,7 +171,8 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       return initializationError(
         input,
         null,
-        `unknown provider '${String(provider).toLowerCase()}'`,
+        NO_PROVIDER_CONFIGURED_SHORT,
+        `unknown provider '${String(provider).toLowerCase()}' (known: ${knownProviderNames().join(", ")})`,
       );
     profile = resolved;
     model = option(options.argv, "--model") ?? profile.fallbackModels[0];
@@ -184,7 +204,6 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       stderr: `${message}\n`,
     };
   }
-  const temperature = finite(option(options.argv, "--temperature"), "temperature") ?? null;
   const maxIterations = finite(option(options.argv, "--max-iterations"), "max-iterations");
   const connection = openStateForEnvironment(options.environment);
   const sessions = new SessionRepository(connection.database, undefined, connection.ftsEnabled);
@@ -251,7 +270,6 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       provider: profile.name,
       model,
       cwd: options.cwd,
-      temperature,
       ...(option(options.argv, "--session") === undefined
         ? {}
         : { sessionId: option(options.argv, "--session") as string }),
