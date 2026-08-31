@@ -26,6 +26,27 @@ class QueueHttp implements ChatHttpPort {
   }
 }
 
+class QueueStatusHttp implements ChatHttpPort {
+  readonly requests: ChatHttpRequest[] = [];
+  constructor(
+    private readonly responses: ReadonlyArray<{
+      status: number;
+      headers?: Record<string, string>;
+      body?: Uint8Array;
+    }>,
+  ) {}
+  post(request: ChatHttpRequest) {
+    const next = this.responses[this.requests.length];
+    this.requests.push(request);
+    if (next === undefined) return Promise.reject(new Error("queue exhausted"));
+    return Promise.resolve({
+      status: next.status,
+      headers: new Headers(next.headers ?? {}),
+      body: next.body ?? body('{"error":{"message":"rate limited"}}'),
+    });
+  }
+}
+
 describe("AnthropicMessagesClient", () => {
   it("uses Messages headers and streams without stream_options", async () => {
     const http = new QueueHttp([
@@ -133,6 +154,100 @@ describe("AnthropicMessagesClient", () => {
       '{"timeout": 1.0, "ratio": 2.5, "count": 7, "since_ns": 1788107097189000000}',
     );
   });
+
+  // T10 fixup: the oracle's AnthropicClient delegates retry policy to the
+  // anthropic SDK, which genuinely diverges from openai's here — [fio]
+  // measured directly against the real installed SDK (anthropic 1.2.0): it
+  // retries 429 like a 500, but unlike openai's SDK it never disarms on a
+  // Retry-After that exceeds its cap (60s here vs openai's 120s) — it just
+  // falls back to backoff instead of honoring the value literally. See
+  // errors.ts's anthropicRetryPolicy.
+  describe("429 retry policy (anthropic SDK parity)", () => {
+    const success = body('{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{}}');
+
+    it("retries a 429 up to maxRetries, same as a 500", async () => {
+      const http = new QueueStatusHttp([{ status: 429 }, { status: 429 }, { status: 429 }]);
+      const client = new AnthropicMessagesClient({
+        baseUrl: "http://127.0.0.1:9",
+        apiKey: "dummy",
+        transport: new AnthropicMessagesTransport(),
+        http,
+      });
+      vi.useFakeTimers();
+      try {
+        const pending = expect(
+          client.create({ model: "m", messages: [], max_tokens: 1 }),
+        ).rejects.toMatchObject({ statusCode: 429 });
+        await vi.runAllTimersAsync();
+        await pending;
+      } finally {
+        vi.useRealTimers();
+      }
+      expect(http.requests).toHaveLength(3);
+    });
+
+    it("does NOT disarm when Retry-After exceeds its cap, unlike openai", async () => {
+      const farFuture = new Date(Date.now() + 300_000).toUTCString();
+      const http = new QueueStatusHttp([
+        { status: 429, headers: { "retry-after": farFuture } },
+        { status: 429, headers: { "retry-after": farFuture } },
+        { status: 200, body: success },
+      ]);
+      const client = new AnthropicMessagesClient({
+        baseUrl: "http://127.0.0.1:9",
+        apiKey: "dummy",
+        transport: new AnthropicMessagesTransport(),
+        http,
+      });
+      vi.useFakeTimers();
+      try {
+        const pending = client.create({ model: "m", messages: [], max_tokens: 1 });
+        await vi.runAllTimersAsync();
+        await expect(pending).resolves.toMatchObject({ content: "ok" });
+      } finally {
+        vi.useRealTimers();
+      }
+      expect(http.requests).toHaveLength(3);
+    });
+
+    it("honors a numeric Retry-After up to its 60s cap as the literal delay", async () => {
+      const http = new QueueStatusHttp([
+        { status: 429, headers: { "retry-after": "5" } },
+        { status: 200, body: success },
+      ]);
+      const client = new AnthropicMessagesClient({
+        baseUrl: "http://127.0.0.1:9",
+        apiKey: "dummy",
+        transport: new AnthropicMessagesTransport(),
+        http,
+      });
+      vi.useFakeTimers();
+      try {
+        const pending = client.create({ model: "m", messages: [], max_tokens: 1 });
+        await vi.advanceTimersByTimeAsync(4_999);
+        expect(http.requests).toHaveLength(1);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(http.requests).toHaveLength(2);
+        await expect(pending).resolves.toMatchObject({ content: "ok" });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("honors an explicit x-should-retry: false override on an otherwise-eligible 429", async () => {
+      const http = new QueueStatusHttp([{ status: 429, headers: { "x-should-retry": "false" } }]);
+      const client = new AnthropicMessagesClient({
+        baseUrl: "http://127.0.0.1:9",
+        apiKey: "dummy",
+        transport: new AnthropicMessagesTransport(),
+        http,
+      });
+      await expect(client.create({ model: "m", messages: [], max_tokens: 1 })).rejects.toMatchObject({
+        statusCode: 429,
+      });
+      expect(http.requests).toHaveLength(1);
+    });
+  });
 });
 
 describe("ResponsesClient", () => {
@@ -189,5 +304,54 @@ describe("ResponsesClient", () => {
         code: undefined,
       } satisfies Partial<ProviderCallFailed>),
     );
+  });
+
+  // T10 fixup: ResponsesClient's oracle counterpart also wraps
+  // openai.OpenAI (agent/client.py), so it shares the openai SDK's retry
+  // policy — same 120s disarm cap as ChatCompletionsClient, not
+  // AnthropicMessagesClient's 60s/never-disarm policy.
+  describe("429 retry policy (openai SDK parity)", () => {
+    it("disarms retry outright when Retry-After exceeds the 120s cap", async () => {
+      const farFuture = new Date(Date.now() + 300_000).toUTCString();
+      const http = new QueueStatusHttp([{ status: 429, headers: { "retry-after": farFuture } }]);
+      const client = new ResponsesClient({
+        baseUrl: "http://127.0.0.1:9",
+        token: "dummy",
+        transport: new ResponsesTransport(),
+        http,
+      });
+      await expect(client.create({ model: "m", input: [] })).rejects.toMatchObject({
+        statusCode: 429,
+      });
+      expect(http.requests).toHaveLength(1);
+    });
+
+    it("retries a 429 up to maxRetries when Retry-After is within the cap", async () => {
+      const success = body(
+        [
+          'data: {"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],"usage":{}}}',
+          "",
+        ].join("\n\n"),
+      );
+      const http = new QueueStatusHttp([
+        { status: 429, headers: { "retry-after": "2" } },
+        { status: 200, body: success },
+      ]);
+      const client = new ResponsesClient({
+        baseUrl: "http://127.0.0.1:9",
+        token: "dummy",
+        transport: new ResponsesTransport(),
+        http,
+      });
+      vi.useFakeTimers();
+      try {
+        const pending = client.create({ model: "m", input: [] });
+        await vi.runAllTimersAsync();
+        await expect(pending).resolves.toMatchObject({ content: "ok" });
+      } finally {
+        vi.useRealTimers();
+      }
+      expect(http.requests).toHaveLength(2);
+    });
   });
 });

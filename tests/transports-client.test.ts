@@ -24,6 +24,16 @@ function response(
   };
 }
 
+function responseWithHeaders(
+  status: number,
+  body: unknown,
+  extraHeaders: Record<string, string>,
+): HttpResponseData {
+  const data = response(status, body);
+  for (const [key, value] of Object.entries(extraHeaders)) data.headers.set(key, value);
+  return data;
+}
+
 class QueuePort implements ChatHttpPort {
   readonly requests: ChatHttpRequest[] = [];
   constructor(private readonly queue: Array<HttpResponseData | Error>) {}
@@ -212,6 +222,169 @@ describe("ChatCompletionsClient", () => {
       ProviderCallFailed,
     );
     expect(port401.requests).toHaveLength(1);
+  });
+
+  // T10 fixup: the oracle's OpenAIClient/ResponsesClient delegate retry
+  // policy entirely to the openai SDK, which — unlike this client before
+  // this fix — retries 429 (up to maxRetries), honors a numeric Retry-After
+  // literally, and disarms retry outright when Retry-After parses but
+  // exceeds 120s. [fio] measured directly against the real installed SDK
+  // (openai 3.6.0) via a local HTTP stub; see errors.ts's openAiRetryPolicy.
+  describe("429 retry policy (openai SDK parity)", () => {
+    it("retries a 429 up to maxRetries, same as a 500", async () => {
+      const quota = () => response(429, { error: { message: "rate limited" } });
+      const port = new QueuePort([quota(), quota(), quota()]);
+      const client = new ChatCompletionsClient({
+        baseUrl: "http://localhost:11434/v1",
+        apiKey: "local",
+        transport: new ChatCompletionsTransport(),
+        http: port,
+      });
+      vi.useFakeTimers();
+      try {
+        const pending = expect(client.create({ model: "m", messages: [] })).rejects.toMatchObject({
+          statusCode: 429,
+        });
+        await vi.runAllTimersAsync();
+        await pending;
+      } finally {
+        vi.useRealTimers();
+      }
+      expect(port.requests).toHaveLength(3);
+    });
+
+    it("honors a numeric Retry-After as the literal backoff delay", async () => {
+      const port = new QueuePort([
+        responseWithHeaders(429, { error: { message: "rate limited" } }, { "retry-after": "7" }),
+        response(200, raw("ok")),
+      ]);
+      const client = new ChatCompletionsClient({
+        baseUrl: "http://localhost:11434/v1",
+        apiKey: "local",
+        transport: new ChatCompletionsTransport(),
+        http: port,
+      });
+      vi.useFakeTimers();
+      try {
+        const pending = client.create({ model: "m", messages: [] });
+        await vi.advanceTimersByTimeAsync(6_999);
+        expect(port.requests).toHaveLength(1);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(port.requests).toHaveLength(2);
+        await expect(pending).resolves.toMatchObject({ content: "ok" });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("disarms retry outright when Retry-After exceeds the 120s cap", async () => {
+      const farFuture = new Date(Date.now() + 300_000).toUTCString();
+      const port = new QueuePort([
+        responseWithHeaders(429, { error: { message: "rate limited" } }, { "retry-after": farFuture }),
+      ]);
+      const client = new ChatCompletionsClient({
+        baseUrl: "http://localhost:11434/v1",
+        apiKey: "local",
+        transport: new ChatCompletionsTransport(),
+        http: port,
+      });
+      await expect(client.create({ model: "m", messages: [] })).rejects.toMatchObject({
+        statusCode: 429,
+      });
+      expect(port.requests).toHaveLength(1);
+    });
+
+    it("does not disarm on a Retry-After that fails to parse at all", async () => {
+      const quota = () =>
+        responseWithHeaders(429, { error: { message: "rate limited" } }, { "retry-after": "banana" });
+      const port = new QueuePort([quota(), quota(), quota()]);
+      const client = new ChatCompletionsClient({
+        baseUrl: "http://localhost:11434/v1",
+        apiKey: "local",
+        transport: new ChatCompletionsTransport(),
+        http: port,
+      });
+      vi.useFakeTimers();
+      try {
+        const pending = expect(client.create({ model: "m", messages: [] })).rejects.toMatchObject({
+          statusCode: 429,
+        });
+        await vi.runAllTimersAsync();
+        await pending;
+      } finally {
+        vi.useRealTimers();
+      }
+      expect(port.requests).toHaveLength(3);
+    });
+
+    it("honors an explicit x-should-retry: false override on an otherwise-eligible 429", async () => {
+      const port = new QueuePort([
+        responseWithHeaders(429, { error: { message: "rate limited" } }, { "x-should-retry": "false" }),
+      ]);
+      const client = new ChatCompletionsClient({
+        baseUrl: "http://localhost:11434/v1",
+        apiKey: "local",
+        transport: new ChatCompletionsTransport(),
+        http: port,
+      });
+      await expect(client.create({ model: "m", messages: [] })).rejects.toMatchObject({
+        statusCode: 429,
+      });
+      expect(port.requests).toHaveLength(1);
+    });
+
+    it("treats Retry-After: 0 as unhonored (falls to backoff, still retries)", async () => {
+      const port = new QueuePort([
+        responseWithHeaders(429, { error: { message: "rate limited" } }, { "retry-after": "0" }),
+        response(200, raw("ok")),
+      ]);
+      const client = new ChatCompletionsClient({
+        baseUrl: "http://localhost:11434/v1",
+        apiKey: "local",
+        transport: new ChatCompletionsTransport(),
+        http: port,
+      });
+      vi.useFakeTimers();
+      try {
+        const pending = client.create({ model: "m", messages: [] });
+        await vi.runAllTimersAsync();
+        await expect(pending).resolves.toMatchObject({ content: "ok" });
+      } finally {
+        vi.useRealTimers();
+      }
+      expect(port.requests).toHaveLength(2);
+    });
+
+    it("never retries a connection-level exception (status-code eligibility only)", async () => {
+      const port = new QueuePort([new Error("ECONNRESET"), response(200, raw("ok"))]);
+      const client = new ChatCompletionsClient({
+        baseUrl: "http://localhost:11434/v1",
+        apiKey: "local",
+        transport: new ChatCompletionsTransport(),
+        http: port,
+      });
+      await expect(client.create({ model: "m", messages: [] })).rejects.toThrow("ECONNRESET");
+      expect(port.requests).toHaveLength(1);
+    });
+
+    it("aborts an honored Retry-After sleep promptly instead of waiting it out", async () => {
+      const port = new QueuePort([
+        responseWithHeaders(429, { error: { message: "rate limited" } }, { "retry-after": "30" }),
+      ]);
+      const client = new ChatCompletionsClient({
+        baseUrl: "http://localhost:11434/v1",
+        apiKey: "local",
+        transport: new ChatCompletionsTransport(),
+        http: port,
+      });
+      const controller = new AbortController();
+      const pending = client.create({ model: "m", messages: [] }, controller.signal);
+      queueMicrotask(() => {
+        controller.abort(new Error("CLIENT_DISCONNECTED"));
+      });
+      await expect(pending).rejects.toThrow("CLIENT_DISCONNECTED");
+      expect(port.requests).toHaveLength(1);
+    });
   });
 
   it("close is idempotent and rejects future calls", async () => {

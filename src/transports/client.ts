@@ -1,5 +1,12 @@
 import { assembleStreamedResponse } from "./stream.js";
-import { ProviderCallFailed } from "./errors.js";
+import {
+  ProviderCallFailed,
+  anthropicRetryPolicy,
+  calculateRetryDelayMs,
+  openAiRetryPolicy,
+  shouldRetryStatus,
+  type RetryPolicy,
+} from "./errors.js";
 import { jsonStringifyPythonNumbers, pythonJsonLoads } from "../serialization/python-json.js";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -178,6 +185,29 @@ export class NativeChatHttpPort implements ChatHttpPort {
   }
 }
 
+/** Abort-aware delay for the retry loop. A retry-after value can honor up
+ * to 120s (openai policy); without this listening for `signal`, a caller
+ * that aborts mid-wait (e.g. a client disconnect) would hang until the
+ * full backoff/retry-after elapsed instead of unwinding immediately. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(signal.reason instanceof Error ? signal.reason : new Error("ABORTED"));
+      return;
+    }
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(signal?.reason instanceof Error ? signal.reason : new Error("ABORTED"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 function parseJson(body: Uint8Array): unknown {
   return JSON.parse(new TextDecoder().decode(body)) as unknown;
 }
@@ -319,7 +349,8 @@ export class ChatCompletionsClient {
           : new ProviderCallFailed("provider request failed", { cause: error });
       }
       if (response.status >= 200 && response.status < 300) return response;
-      if (response.status >= 500 && attempt < this.maxRetries) {
+      if (attempt < this.maxRetries && shouldRetryStatus(response.status, response.headers, openAiRetryPolicy)) {
+        await sleep(calculateRetryDelayMs(attempt, response.headers, openAiRetryPolicy), signal);
         attempt += 1;
         continue;
       }
@@ -345,12 +376,14 @@ async function providerPost(
   http: ChatHttpPort,
   request: ChatHttpRequest,
   maxRetries: number,
+  policy: RetryPolicy,
 ): Promise<HttpResponseData> {
   let attempt = 0;
   for (;;) {
     const response = await http.post(request);
     if (response.status >= 200 && response.status < 300) return response;
-    if (response.status >= 500 && attempt < maxRetries) {
+    if (attempt < maxRetries && shouldRetryStatus(response.status, response.headers, policy)) {
+      await sleep(calculateRetryDelayMs(attempt, response.headers, policy), request.signal);
       attempt += 1;
       continue;
     }
@@ -467,6 +500,7 @@ export class AnthropicMessagesClient {
         ...(signal === undefined ? {} : { signal }),
       },
       this.maxRetries,
+      anthropicRetryPolicy,
     );
   }
 }
@@ -545,6 +579,7 @@ export class ResponsesClient {
         ...(signal === undefined ? {} : { signal }),
       },
       this.maxRetries,
+      openAiRetryPolicy,
     );
     return this.options.transport.normalizeResponse(
       responsesStream(parseSse(response.body), callbacks),
