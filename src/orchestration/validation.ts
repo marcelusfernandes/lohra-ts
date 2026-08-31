@@ -86,13 +86,20 @@ export function validateResumeOverrides(args: ToolArguments): string | null {
   return null;
 }
 
-/** resume_id requires at least one non-empty follow-up instruction in tasks. */
-export function validateResumeTasks(
-  args: ToolArguments,
-  tasks: readonly string[],
-): string | null {
+/**
+ * resume_id's own tasks check — only tasks[0] (the follow-up instruction)
+ * matters, and it is checked BEFORE and independently of the general,
+ * every-element validateDelegateTasks: the oracle's resume branch never
+ * reaches the generic checks at all, so resuming with tasks:[] or tasks:
+ * ["   "] gets THIS message, never "'tasks' must be a non-empty list..."
+ * or "each task must be a non-empty string" (L18/assertion 43).
+ */
+export function validateResumeTasks(args: ToolArguments): string | null {
   if (args.resume_id === undefined) return null;
-  if (!tasks.some(nonEmptyTrimmed)) {
+  const coerced = coerceTasks(args.tasks);
+  const first = coerced?.[0];
+  const firstText = typeof first === "string" ? first : String(first);
+  if (coerced === null || coerced.length === 0 || !nonEmptyTrimmed(firstText)) {
     return toolError("resume_id requires a follow-up instruction in 'tasks'");
   }
   return null;

@@ -5,6 +5,7 @@ import type { ToolArguments } from "../tools/types.js";
 import { summarizeCollectResult, type CollectResult, type OrchestrationCore, type SpawnConfig } from "./core.js";
 import {
   coercePrompt,
+  coerceTasks,
   validateCollectSubId,
   validateDelegateTasks,
   validateMaxIterations,
@@ -131,16 +132,15 @@ export async function delegateTaskTool(
 ): Promise<string> {
   const resumeOverridesError = validateResumeOverrides(args);
   if (resumeOverridesError !== null) return resumeOverridesError;
-  const tasksOrError = validateDelegateTasks(args);
-  if (typeof tasksOrError === "string") return tasksOrError;
-  const { tasks } = tasksOrError;
 
   if (args.resume_id !== undefined) {
-    const resumeTasksError = validateResumeTasks(args, tasks);
+    const resumeTasksError = validateResumeTasks(args);
     if (resumeTasksError !== null) return resumeTasksError;
+    const coerced = coerceTasks(args.tasks) as readonly unknown[];
+    const followUp = typeof coerced[0] === "string" ? coerced[0] : String(coerced[0]);
     const resumeId: unknown = args.resume_id;
     const subId = String(resumeId);
-    const steerOutcome = core.steer(subId, tasks[0] ?? "");
+    const steerOutcome = core.steer(subId, followUp);
     if (steerOutcome === null) return noSubSession(subId);
     const collectOutcome = await core.collect(subId, true);
     if (collectOutcome.kind !== "settled") return noSubSession(subId);
@@ -156,6 +156,9 @@ export async function delegateTaskTool(
     });
   }
 
+  const tasksOrError = validateDelegateTasks(args);
+  if (typeof tasksOrError === "string") return tasksOrError;
+  const { tasks } = tasksOrError;
   const maxIterationsError = validateMaxIterations(args.max_iterations);
   if (maxIterationsError !== null) return maxIterationsError;
   const outcomes = await core.delegate(tasks, overridesFromArgs(args));

@@ -136,18 +136,21 @@ describe("validateResumeOverrides", () => {
 });
 
 describe("validateResumeTasks", () => {
-  it("requires a non-empty follow-up instruction when resuming", () => {
+  it("requires a non-empty follow-up instruction when resuming — checked directly off tasks[0], never the generic every-element validation (L18/assertion 43)", () => {
     const expected = toolError("resume_id requires a follow-up instruction in 'tasks'");
-    expect(validateResumeTasks({ resume_id: "abc" }, [])).toBe(expected);
-    expect(validateResumeTasks({ resume_id: "abc" }, ["   "])).toBe(expected);
+    expect(validateResumeTasks({ resume_id: "abc", tasks: [] })).toBe(expected);
+    expect(validateResumeTasks({ resume_id: "abc", tasks: ["   "] })).toBe(expected);
+    expect(validateResumeTasks({ resume_id: "abc" })).toBe(expected);
+    expect(validateResumeTasks({ resume_id: "abc", tasks: "not a list but empty-ish" })).not.toBe(expected);
   });
 
   it("passes through when resume_id is absent, regardless of tasks", () => {
-    expect(validateResumeTasks({}, [])).toBeNull();
+    expect(validateResumeTasks({ tasks: [] })).toBeNull();
   });
 
-  it("accepts a non-empty follow-up instruction", () => {
-    expect(validateResumeTasks({ resume_id: "abc" }, ["keep going"])).toBeNull();
+  it("accepts a non-empty follow-up instruction, ignoring a blank second element (only tasks[0] is the follow-up)", () => {
+    expect(validateResumeTasks({ resume_id: "abc", tasks: ["keep going"] })).toBeNull();
+    expect(validateResumeTasks({ resume_id: "abc", tasks: ["keep going", "   "] })).toBeNull();
   });
 });
 

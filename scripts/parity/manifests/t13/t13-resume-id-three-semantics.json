@@ -1,0 +1,375 @@
+{
+  "schemaVersion": 1,
+  "id": "t13-resume-id-three-semantics",
+  "description": "T13 bilateral CLI observation (expected match), item 23 of the versioned inventory (contract L18/assertion 43): delegate_task's resume_id branch has THREE independent override semantics, none derivable from the others, plus its own tasks-follow-up check that never reaches the generic tasks validation. (1) provider is refused by TRUTHINESS — a non-empty provider is rejected with 'cannot switch provider when resuming a subagent', but provider:\"\" is falsy and ESCAPES the check entirely, letting the resume proceed. (2) max_iterations is refused by KEY PRESENCE, not value — even max_iterations:null is rejected with the resume-specific message, never L10's distinct '...not null' message (the resume branch wins the race). (3) model/effort are SILENTLY IGNORED during resume, never validated or rejected, resume proceeds normally as if they were absent. Also proves resume_id + tasks:[] / tasks:[\"   \"] produce the resume-specific 'resume_id requires a follow-up instruction' message, NOT the generic 'tasks must be a non-empty list'/'each task must be a non-empty string' messages a naive implementation would produce by validating tasks generically before checking resume semantics (this exact bug was found and fixed while building this manifest — see commit history). Finally proves the wire-level claim that a resumed child's second request carries exactly roles [system, user, assistant, user] — the resume is 'one-shot' at the call level, but the child's own history is NOT: it is the same persistent sub-session, continuing where it left off. Every rejected attempt costs zero upstream calls (validation-only); every accepted attempt costs exactly one real child round trip. Exactly the observable a unit test cannot prove: the candidate's own validateResumeOverrides/validateResumeTasks tests already verify the CANDIDATE's belief about these five oracle-authored messages; only the wire proves the oracle actually agrees.",
+  "argv": [
+    "chat",
+    "SCEN:parent probes resume_id's three override semantics",
+    "--json",
+    "--provider",
+    "ollama",
+    "--model",
+    "stub-coder:1b"
+  ],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "PYTHONHASHSEED": "0",
+      "NO_COLOR": "1",
+      "LOHRA_NO_WIZARD": "1",
+      "COLUMNS": "80",
+      "TZ": "UTC",
+      "HOME": "{{home}}",
+      "LOHRA_HOME": "{{home}}/.lohra",
+      "CODEX_HOME": "{{home}}/codex",
+      "TMPDIR": "{{home}}/tmp"
+    }
+  },
+  "preconditions": [
+    {
+      "kind": "tcp-port-closed",
+      "host": "127.0.0.1",
+      "port": 11434
+    }
+  ],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/conversation/oracle_driver.py", "single"],
+      "cwd": "profile"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/conversation/candidate-driver.mjs", "single"],
+      "cwd": "profile"
+    }
+  },
+  "limits": {
+    "timeoutMs": 20000,
+    "maxOutputBytes": 16777216
+  },
+  "capture": {
+    "tree": {
+      "enabled": false,
+      "root": "home",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": [
+      {
+        "name": "requests",
+        "root": "profile",
+        "path": "stub-requests.jsonl",
+        "format": "jsonl"
+      },
+      {
+        "name": "summary",
+        "root": "profile",
+        "path": "stub-summary.json",
+        "format": "json"
+      },
+      {
+        "name": "assertions",
+        "root": "profile",
+        "path": "stub-assertions.json",
+        "format": "json"
+      }
+    ]
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    },
+    {
+      "class": "byte",
+      "field": "process.stderr"
+    },
+    {
+      "class": "stub",
+      "field": "events.summary"
+    },
+    {
+      "class": "stub",
+      "field": "events.assertions"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/completed",
+      "value": true
+    },
+    {
+      "side": "both",
+      "field": "events.assertions",
+      "value": {
+        "exists": true,
+        "records": {
+          "valid": true,
+          "failures": []
+        }
+      }
+    },
+    {
+      "side": "both",
+      "field": "events.summary",
+      "value": {
+        "exists": true,
+        "records": {
+          "gets": 0,
+          "posts": 10,
+          "sequence": [
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions"
+          ]
+        }
+      }
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/tool_calls/1/result",
+      "value": "{\"error\": \"cannot switch provider when resuming a subagent\"}"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/tool_calls/3/result",
+      "value": "{\"error\": \"cannot change max_iterations when resuming a subagent\"}"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/tool_calls/4/result",
+      "value": "{\"error\": \"cannot change max_iterations when resuming a subagent\"}"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/tool_calls/5/result",
+      "value": "{\"error\": \"resume_id requires a follow-up instruction in 'tasks'\"}"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/tool_calls/6/result",
+      "value": "{\"error\": \"resume_id requires a follow-up instruction in 'tasks'\"}"
+    },
+    {
+      "side": "both",
+      "field": "events.requests",
+      "pointer": "/records/4/body/messages/0/role",
+      "value": "system"
+    },
+    {
+      "side": "both",
+      "field": "events.requests",
+      "pointer": "/records/4/body/messages/1/role",
+      "value": "user"
+    },
+    {
+      "side": "both",
+      "field": "events.requests",
+      "pointer": "/records/4/body/messages/2/role",
+      "value": "assistant"
+    },
+    {
+      "side": "both",
+      "field": "events.requests",
+      "pointer": "/records/4/body/messages/3/role",
+      "value": "user"
+    },
+    {
+      "side": "both",
+      "field": "events.requests",
+      "pointer": "/records/4/body/messages/3/content",
+      "value": "follow-up-b"
+    }
+  ],
+  "normalizations": [
+    {
+      "field": "process.stdout",
+      "kind": "replace-json-pointer",
+      "pointer": "/session_id",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stdout",
+      "kind": "replace-regex",
+      "pattern": "[0-9a-f]{32}",
+      "replacement": "<SUB_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=session: )[0-9a-f]{32}(?=  \\(resume with --session )",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=--session )[0-9a-f]{32}(?=\\))",
+      "replacement": "<SESSION_ID>"
+    }
+  ],
+  "stub": {
+    "state": "up-with-models",
+    "fixture": "chat-lane-script",
+    "requestLog": {
+      "comparedHeaders": [
+        "authorization",
+        "accept",
+        "content-type",
+        "host",
+        "x-stainless-retry-count"
+      ],
+      "excludedHeaders": [
+        "accept-encoding",
+        "connection",
+        "content-length",
+        "user-agent",
+        "x-stainless-lang",
+        "x-stainless-package-version",
+        "x-stainless-os",
+        "x-stainless-arch",
+        "x-stainless-runtime",
+        "x-stainless-runtime-version",
+        "x-stainless-async",
+        "x-stainless-read-timeout"
+      ]
+    },
+    "laneSteps": {
+      "parent": [
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "delegate_task",
+              "argumentsRaw": "{\"tasks\":[\"SCEN:kid do it\"]}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "delegate_task",
+              "argumentsRaw": "{\"resume_id\":\"__SUB__\",\"provider\":\"anthropic\",\"tasks\":[\"follow-up-a\"]}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "delegate_task",
+              "argumentsRaw": "{\"resume_id\":\"__SUB__\",\"provider\":\"\",\"model\":\"custom-model\",\"effort\":\"high\",\"tasks\":[\"follow-up-b\"]}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "delegate_task",
+              "argumentsRaw": "{\"resume_id\":\"__SUB__\",\"max_iterations\":5,\"tasks\":[\"follow-up-c\"]}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "delegate_task",
+              "argumentsRaw": "{\"resume_id\":\"__SUB__\",\"max_iterations\":null,\"tasks\":[\"follow-up-c\"]}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "delegate_task",
+              "argumentsRaw": "{\"resume_id\":\"__SUB__\",\"tasks\":[]}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "delegate_task",
+              "argumentsRaw": "{\"resume_id\":\"__SUB__\",\"tasks\":[\"   \"]}"
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "content": "PARENT-DONE"
+        }
+      ],
+      "kid": [
+        {
+          "kind": "text",
+          "content": "KID-DONE-1"
+        },
+        {
+          "kind": "text",
+          "content": "KID-DONE-2"
+        }
+      ]
+    }
+  },
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10",
+    "expectedPackages": {
+      "openai": "3.6.0",
+      "httpx": "0.28.1"
+    }
+  }
+}
