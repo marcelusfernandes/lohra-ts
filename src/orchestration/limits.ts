@@ -13,7 +13,7 @@ export interface EnvClampResult {
  * non-numeric strings alike — both fall into the same "not an integer"
  * branch as the oracle.
  */
-function pythonInt(raw: string): number | null {
+export function pythonInt(raw: string): number | null {
   const trimmed = raw.trim();
   if (!/^[+-]?\d+(_\d+)*$/.test(trimmed)) return null;
   return Number(trimmed.replace(/_/g, ""));

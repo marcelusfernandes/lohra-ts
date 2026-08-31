@@ -22,6 +22,7 @@ import { loadSoul, MemoryStore } from "../memory/index.js";
 import { orchestrationToolHandlers } from "../orchestration/chat-wiring.js";
 import { createChildRunner } from "../orchestration/child-runner.js";
 import { OrchestrationCore } from "../orchestration/core.js";
+import { resolveFanout } from "../orchestration/fanout-config.js";
 import { buildSubagentSystemPrompt } from "../orchestration/subagent-prompt.js";
 import { loadPriceOverrides } from "../pricing/index.js";
 import {
@@ -76,6 +77,7 @@ function prompt(argv: readonly string[]): string {
     "--session",
     "--temperature",
     "--max-iterations",
+    "--max-parallel",
     "--profile",
   ]);
   for (let index = 1; index < argv.length; index += 1) {
@@ -227,6 +229,12 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   }
   const temperature = finite(option(options.argv, "--temperature"), "temperature") ?? null;
   const maxIterations = finite(option(options.argv, "--max-iterations"), "max-iterations");
+  const fanout = resolveFanout(
+    option(options.argv, "--max-parallel"),
+    maxIterations,
+    options.environment,
+  );
+  const warningLines = fanout.warnings.map((warning) => `${warning}\n`).join("");
   const connection = openStateForEnvironment(options.environment);
   const sessions = new SessionRepository(connection.database, undefined, connection.ftsEnabled);
   const repository = new SqliteConversationRepository(sessions);
@@ -268,9 +276,6 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     codexHome: options.codexHome,
     environment: options.environment,
   });
-  // maxSubsessions/maxParallel are the oracle's own per-variable defaults
-  // (200/4) — LOHRA_MAX_SUBSESSIONS/LOHRA_MAX_PARALLEL/--max-parallel
-  // wiring (assertion 24's full clamp table) is a separate slice.
   const orchestrationCore = new OrchestrationCore({
     runChild: createChildRunner({
       sessions,
@@ -285,8 +290,8 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       childMaxIterations: 50,
     }),
     idSource: () => randomUUID().replaceAll("-", ""),
-    maxSubsessions: 200,
-    maxParallel: 4,
+    maxSubsessions: fanout.maxSubsessions,
+    maxParallel: fanout.maxParallel,
     buildSubagentPrompt: () => buildSubagentSystemPrompt(),
   });
   const dispatch = composeDispatch(baseDispatch, {
@@ -310,7 +315,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     idSource: () => parentSessionId,
     clock: () => Date.now() / 1000,
     maxTokens: profile.defaultMaxTokens,
-    ...(maxIterations === undefined ? {} : { maxIterations }),
+    maxIterations: fanout.parentMaxIterations,
     pricingOverrides: loadPriceOverrides(join(options.home, "pricing.json")),
   });
   try {
@@ -329,7 +334,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       stdout: options.argv.includes("--json")
         ? successEnvelope(result)
         : `${result.response.content ?? ""}\n`,
-      stderr: `${subscriptionNote}session: ${result.sessionId}  (resume with --session ${result.sessionId})\n`,
+      stderr: `${warningLines}${subscriptionNote}session: ${result.sessionId}  (resume with --session ${result.sessionId})\n`,
     };
   } catch (error) {
     const message = publicError(error);
@@ -359,7 +364,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
                 : { stopReason: bounded.stopReason, toolCalls: bounded.toolCalls }),
             }),
       }),
-      stderr: `${sessionId ? `session: ${sessionId}  (resume with --session ${sessionId})\n` : ""}error: ${message}\n`,
+      stderr: `${warningLines}${sessionId ? `session: ${sessionId}  (resume with --session ${sessionId})\n` : ""}error: ${message}\n`,
     };
   } finally {
     approval.setCallback(null);
