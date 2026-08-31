@@ -261,4 +261,28 @@ describe("createChildRunner", () => {
     expect(result.retryAfter).toBeNull();
     close();
   });
+
+  it("resolves (never rejects) when the per-task provider override is unknown — required so delegate_task's Promise.all can't be broken by one bad task (L17)", async () => {
+    const { sessions, close } = setup();
+    sessions.createSession({ id: "parent-1", source: "gateway" });
+    const parentProfile = getProviderProfile("openai");
+    if (parentProfile === null) throw new Error("openai profile missing");
+    const { client, port } = fakeClient([]);
+    const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
+    const runner = makeRunner(sessions, pool);
+
+    const result = await runner(
+      "child-6",
+      { prompt: "hi", provider: "zz-does-not-exist" },
+      "SYS",
+      () => [],
+    );
+
+    expect(result.status).toBe("error");
+    expect(result.output).toContain("unknown provider");
+    expect(result.provider).toBe("zz-does-not-exist");
+    // zero upstream requests — the failure happened before any client call
+    expect(port.requests).toHaveLength(0);
+    close();
+  });
 });
