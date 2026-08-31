@@ -17,6 +17,8 @@ import {
   SqliteConversationRepository,
   successEnvelope,
 } from "../conversation/index.js";
+import { registerConfiguredMcpServers } from "../mcp/index.js";
+import type { MCPManager } from "../mcp/index.js";
 import { loadSoul, MemoryStore } from "../memory/index.js";
 import { loadPriceOverrides } from "../pricing/index.js";
 import {
@@ -218,6 +220,14 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   approval.setCallback(
     options.argv.includes("--json") || options.argv.includes("--no-input") ? () => "deny" : null,
   );
+  // Connect any configured MCP servers BEFORE snapshotting definitions, so
+  // their tools are visible to the model this session (best-effort).
+  let mcpManager: MCPManager | null = null;
+  if (useTools) {
+    mcpManager = await registerConfiguredMcpServers(builtinRegistry, {
+      configPath: join(options.home, "mcp.json"),
+    });
+  }
   const baseDispatch = builtinRegistry.dispatch.bind(builtinRegistry);
   const memoryTool = new MemoryTool(memoryStore);
   const skillTool = new SkillTool(skillStore);
@@ -297,6 +307,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     approval.setCallback(null);
     approval.setYolo(false);
     approval.reset();
+    if (mcpManager !== null) await mcpManager.shutdown();
     connection.close();
   }
 }
