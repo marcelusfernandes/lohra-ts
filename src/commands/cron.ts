@@ -43,12 +43,19 @@ function parsePythonFloat(text: string): number | null {
 export function runCron(options: CronCommandOptions): Result {
   const { argv, home } = options;
   const rawAction = argv[1];
-  if (rawAction === undefined || !(ACTIONS as readonly string[]).includes(rawAction)) {
+  if (rawAction === undefined) {
+    return {
+      code: 2,
+      stdout: "",
+      stderr: "lohra cron: error: the following arguments are required: action\n",
+    };
+  }
+  if (!(ACTIONS as readonly string[]).includes(rawAction)) {
     return {
       code: 2,
       stdout: "",
       stderr:
-        `lohra cron: error: argument action: invalid choice: ${pythonRepr(rawAction ?? "")} ` +
+        `lohra cron: error: argument action: invalid choice: ${pythonRepr(rawAction)} ` +
         `(choose from 'list', 'add', 'remove', 'pause', 'resume')\n`,
     };
   }

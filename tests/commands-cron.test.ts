@@ -85,6 +85,25 @@ describe("runCron — schema, round-trip, restart (assertions 7–9, 42–43)", 
   });
 });
 
+describe("runCron — action argument, missing vs. invalid (two distinct argparse error classes)", () => {
+  it("no action at all: 'required arguments' class, byte-exact, distinct from invalid choice", () => {
+    expect(run([])).toEqual({
+      code: 2,
+      stdout: "",
+      stderr: "lohra cron: error: the following arguments are required: action\n",
+    });
+  });
+
+  it("an explicitly-provided but unrecognized action (including empty string): 'invalid choice' class", () => {
+    expect(run(["frobnicate"]).stderr).toBe(
+      "lohra cron: error: argument action: invalid choice: 'frobnicate' (choose from 'list', 'add', 'remove', 'pause', 'resume')\n",
+    );
+    expect(run([""]).stderr).toBe(
+      "lohra cron: error: argument action: invalid choice: '' (choose from 'list', 'add', 'remove', 'pause', 'resume')\n",
+    );
+  });
+});
+
 describe("runCron — validation goldens (byte-exact, decision 12/assertion 10-13)", () => {
   it("add needs one of --interval, --cron, or --at", () => {
     const result = run(["add", "--name", "n1", "--prompt", "p1"]);

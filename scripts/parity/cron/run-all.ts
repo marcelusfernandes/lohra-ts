@@ -130,6 +130,16 @@ const NAMED_EXCUSE_CASES: { readonly label: string; readonly argv: readonly stri
     oraclePrefix: "usage: lohra cron",
     candidatePrefix: "lohra cron: error: argument action: invalid choice:",
   },
+  {
+    // B1 (Evaluator round 1): a genuinely-missing action is a DIFFERENT
+    // argparse error class from an explicitly-provided-but-invalid one
+    // (above) -- "required arguments" vs. "invalid choice". Distinct
+    // scenario, not folded into "unknown-action".
+    label: "missing-action",
+    argv: [],
+    oraclePrefix: "lohra cron: error: the following arguments are required: action",
+    candidatePrefix: "lohra cron: error: the following arguments are required: action",
+  },
 ];
 
 function scenario3NamedExcuse(): void {

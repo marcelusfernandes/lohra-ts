@@ -182,6 +182,11 @@ describe("lohra CLI bootstrap", () => {
     });
     expect(code).toBe(2);
     expect(stderr.join("")).not.toContain("not implemented in the TypeScript bootstrap");
-    expect(stderr.join("")).toContain("argument action: invalid choice");
+    // `cron` with no action at all is argparse's "required argument missing" class
+    // (byte-exact: "the following arguments are required: action"), a DIFFERENT
+    // error class from "invalid choice" -- an explicitly-provided-but-wrong value
+    // (e.g. `cron frobnicate`) is what produces "invalid choice", exercised
+    // separately in tests/commands-cron.test.ts and the T18 cli-bilateral harness.
+    expect(stderr.join("")).toContain("the following arguments are required: action");
   });
 });
