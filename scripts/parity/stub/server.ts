@@ -98,10 +98,21 @@ function resolveArgumentsRaw(argumentsRaw: string, subs: readonly string[]): str
   return JSON.stringify(resolveSubSentinels(parsed, subs));
 }
 
-function nextLaneStep(runtime: StubRuntime, lane: string): StubLaneStep | undefined {
-  const index = runtime.laneStepIndex.get(lane) ?? 0;
-  runtime.laneStepIndex.set(lane, index + 1);
-  return runtime.laneSteps[lane]?.[index];
+/** stepIndex is the lane's own step counter (not the call's position within
+ * ONE step's calls array) — a lane that makes several separate tool_calls
+ * steps in the same conversation (e.g. spawn_session, then steer_session,
+ * then a probe) would otherwise mint the SAME "call_lane_<lane>_0" id for
+ * every one of them, since each step's own calls array restarts at index 0.
+ * Colliding ids corrupt --json's tool_calls aggregation on both sides
+ * (matched/grouped by id) — this is a stub-only artifact, not a product
+ * behavior, so it must never leak into an observed divergence. */
+function nextLaneStep(
+  runtime: StubRuntime,
+  lane: string,
+): { readonly step: StubLaneStep | undefined; readonly stepIndex: number } {
+  const stepIndex = runtime.laneStepIndex.get(lane) ?? 0;
+  runtime.laneStepIndex.set(lane, stepIndex + 1);
+  return { step: runtime.laneSteps[lane]?.[stepIndex], stepIndex };
 }
 
 /** A named one-shot latch: fireLatch resolves it (creating it first if
@@ -356,7 +367,7 @@ async function handleLaneScript(
 ): Promise<void> {
   const messages = Array.isArray(body.messages) ? (body.messages as Record<string, unknown>[]) : [];
   const lane = laneOf(messages);
-  const step = nextLaneStep(runtime, lane);
+  const { step, stepIndex } = nextLaneStep(runtime, lane);
   if (step?.signal !== undefined) fireLatch(runtime, step.signal);
   if (step?.awaitSignal !== undefined) await awaitLatch(runtime, step.awaitSignal);
   if (step?.gate !== undefined) await awaitLatch(runtime, step.gate);
@@ -382,7 +393,7 @@ async function handleLaneScript(
       toolCall(
         call.name,
         resolveArgumentsRaw(call.argumentsRaw, subs),
-        `call_lane_${lane}_${String(index)}`,
+        `call_lane_${lane}_${String(stepIndex)}_${String(index)}`,
       ),
     );
     finish = "tool_calls";
