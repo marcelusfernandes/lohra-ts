@@ -1,0 +1,219 @@
+{
+  "schemaVersion": 1,
+  "id": "t13-precedence-flag-over-env-both-directions",
+  "description": "T13 bilateral CLI observation (expected match), item 11 of the versioned inventory (contract assertion 24): --max-parallel 5 (a valid flag) is present alongside LOHRA_MAX_PARALLEL='abc' (an invalid env value) — the flag wins outright, and the env is never even consulted, so its own invalidity produces NO warning at all. This is the flag-present direction of precedence; the env-consulted-when-flag-absent direction is already proven by t13-fanout-clamp-not-an-integer-warning (the same env value alone DOES warn). Byte-exact absence of the env warning on stderr is exactly the kind of observable a unit test proves only for the candidate's own belief about precedence — the wire proves the oracle agrees.",
+  "argv": [
+    "chat",
+    "hello",
+    "--json",
+    "--provider",
+    "ollama",
+    "--model",
+    "stub-coder:1b",
+    "--max-parallel",
+    "5"
+  ],
+  "environment": {
+    "allow": ["LOHRA_MAX_PARALLEL"],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "PYTHONHASHSEED": "0",
+      "NO_COLOR": "1",
+      "LOHRA_NO_WIZARD": "1",
+      "COLUMNS": "80",
+      "TZ": "UTC",
+      "HOME": "{{home}}",
+      "LOHRA_HOME": "{{home}}/.lohra",
+      "CODEX_HOME": "{{home}}/codex",
+      "TMPDIR": "{{home}}/tmp",
+      "LOHRA_MAX_PARALLEL": "abc"
+    }
+  },
+  "preconditions": [
+    {
+      "kind": "tcp-port-closed",
+      "host": "127.0.0.1",
+      "port": 11434
+    }
+  ],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/conversation/oracle_driver.py", "single"],
+      "cwd": "profile"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/conversation/candidate-driver.mjs", "single"],
+      "cwd": "profile"
+    }
+  },
+  "limits": {
+    "timeoutMs": 20000,
+    "maxOutputBytes": 16777216
+  },
+  "capture": {
+    "tree": {
+      "enabled": false,
+      "root": "home",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": [
+      {
+        "name": "summary",
+        "root": "profile",
+        "path": "stub-summary.json",
+        "format": "json"
+      },
+      {
+        "name": "assertions",
+        "root": "profile",
+        "path": "stub-assertions.json",
+        "format": "json"
+      }
+    ]
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    },
+    {
+      "class": "byte",
+      "field": "process.stderr"
+    },
+    {
+      "class": "stub",
+      "field": "events.summary"
+    },
+    {
+      "class": "stub",
+      "field": "events.assertions"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/completed",
+      "value": true
+    },
+    {
+      "side": "both",
+      "field": "events.assertions",
+      "value": {
+        "exists": true,
+        "records": {
+          "valid": true,
+          "failures": []
+        }
+      }
+    },
+    {
+      "side": "both",
+      "field": "events.summary",
+      "value": {
+        "exists": true,
+        "records": {
+          "gets": 0,
+          "posts": 1,
+          "sequence": [
+            "POST /v1/chat/completions"
+          ]
+        }
+      }
+    }
+  ],
+  "normalizations": [
+    {
+      "field": "process.stdout",
+      "kind": "replace-json-pointer",
+      "pointer": "/session_id",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=session: )[0-9a-f]{32}(?=  \\(resume with --session )",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=--session )[0-9a-f]{32}(?=\\))",
+      "replacement": "<SESSION_ID>"
+    }
+  ],
+  "stub": {
+    "state": "up-with-models",
+    "fixture": "chat-lane-script",
+    "requestLog": {
+      "comparedHeaders": [
+        "authorization",
+        "accept",
+        "content-type",
+        "host",
+        "x-stainless-retry-count"
+      ],
+      "excludedHeaders": [
+        "accept-encoding",
+        "connection",
+        "content-length",
+        "user-agent",
+        "x-stainless-lang",
+        "x-stainless-package-version",
+        "x-stainless-os",
+        "x-stainless-arch",
+        "x-stainless-runtime",
+        "x-stainless-runtime-version",
+        "x-stainless-async",
+        "x-stainless-read-timeout"
+      ]
+    },
+    "laneSteps": {
+      "parent": [
+        {
+          "kind": "text",
+          "content": "PARENT-DONE"
+        }
+      ]
+    }
+  },
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10",
+    "expectedPackages": {
+      "openai": "3.6.0",
+      "httpx": "0.28.1"
+    }
+  }
+}
