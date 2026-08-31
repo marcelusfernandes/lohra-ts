@@ -53,3 +53,18 @@ export function connectSession(
   const http = options.http ?? connectHttpSession;
   return config.transport === "stdio" ? stdio(config) : http(config);
 }
+
+/**
+ * Mutable indirection point `registerConfiguredMcpServers` reads its default
+ * `sessionFactory` from. ES module named exports are read-only bindings from
+ * outside the defining module, so a harness cannot reassign `connectSession`
+ * itself the way the oracle's `mcp_fixture.py` reassigns
+ * `lohra.mcp.session.connect_session` as a plain module attribute. A
+ * `node --import <loader>` script can still mutate this object's `current`
+ * property before `dist/cli.js` runs, since both resolve the same cached
+ * module instance -- the same "patch shared state before construction, never
+ * touch product source" precedent as T18's `t18-mutant-loader.mjs`.
+ */
+export const defaultSessionFactory: { current: SessionFactory } = {
+  current: connectSession,
+};

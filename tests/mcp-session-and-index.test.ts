@@ -5,7 +5,12 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { registerConfiguredMcpServers } from "../src/mcp/index.js";
-import { connectHttpSession, connectSession, connectStdioSession } from "../src/mcp/session.js";
+import {
+  connectHttpSession,
+  connectSession,
+  connectStdioSession,
+  defaultSessionFactory,
+} from "../src/mcp/session.js";
 import { ToolRegistry } from "../src/tools/registry.js";
 import type { MCPServerConfig } from "../src/mcp/config.js";
 
@@ -100,5 +105,24 @@ describe("registerConfiguredMcpServers -- best-effort entrypoint", () => {
     expect(registry.namesInToolset("mcp-fix")).toEqual(["mcp_fix_echo"]);
     await manager?.shutdown();
     expect(registry.namesInToolset("mcp-fix")).toEqual([]);
+  });
+
+  it("falls back to defaultSessionFactory.current when no sessionFactory is passed -- the harness's fixture-injection seam", async () => {
+    writeFileSync(path, JSON.stringify({ mcpServers: { fix: { command: "npx" } } }));
+    const registry = new ToolRegistry();
+    const original = defaultSessionFactory.current;
+    defaultSessionFactory.current = () =>
+      Promise.resolve({
+        listTools: () => Promise.resolve([{ name: "echo" }]),
+        callTool: () => Promise.resolve({}),
+        close: () => Promise.resolve(),
+      });
+    try {
+      const manager = await registerConfiguredMcpServers(registry, { configPath: path });
+      expect(manager).not.toBeNull();
+      expect(registry.namesInToolset("mcp-fix")).toEqual(["mcp_fix_echo"]);
+    } finally {
+      defaultSessionFactory.current = original;
+    }
   });
 });

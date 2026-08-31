@@ -1,6 +1,6 @@
 import { loadMcpConfig, MCPConfigError } from "./config.js";
 import { MCPManager } from "./manager.js";
-import { connectSession } from "./session.js";
+import { defaultSessionFactory } from "./session.js";
 import type { SessionFactory } from "./session.js";
 import type { ToolRegistry } from "../tools/registry.js";
 
@@ -11,6 +11,7 @@ export {
   connectHttpSession,
   connectSession,
   connectStdioSession,
+  defaultSessionFactory,
 } from "./session.js";
 export type { MCPSession, SessionFactory } from "./session.js";
 export {
@@ -55,7 +56,7 @@ export async function registerConfiguredMcpServers(
     throw error;
   }
   if (configs.length === 0) return null;
-  const manager = new MCPManager(registry, options.sessionFactory ?? connectSession);
+  const manager = new MCPManager(registry, options.sessionFactory ?? defaultSessionFactory.current);
   await manager.connectAll(configs);
   return manager;
 }
