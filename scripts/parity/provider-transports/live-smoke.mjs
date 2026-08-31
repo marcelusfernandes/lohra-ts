@@ -1,12 +1,19 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import process from "node:process";
 
+import { readCodexTokens, SubscriptionCredentials } from "../../../dist/auth/index.js";
 import { applyEnvFile } from "../../../dist/config/env-file.js";
 import { resolvePaths } from "../../../dist/config/paths.js";
 import { getProviderProfile, resolveApiKey } from "../../../dist/providers/index.js";
-import { AnthropicMessagesClient, AnthropicMessagesTransport, NativeChatHttpPort } from "../../../dist/transports/index.js";
+import {
+  AnthropicMessagesClient,
+  AnthropicMessagesTransport,
+  NativeChatHttpPort,
+  ResponsesClient,
+  ResponsesTransport,
+} from "../../../dist/transports/index.js";
 
 const transports = new Set(["anthropic_messages", "chat_completions", "responses"]);
 const valueAfter = (name) => {
@@ -168,6 +175,27 @@ if (transport === null || !transports.has(transport)) {
     }
   }
 
+  function terminalResponsesEventType(raw) {
+    if (typeof raw !== "string") return null;
+    let type = null;
+    for (const block of raw.split(/\r?\n\r?\n/u)) {
+      const data = block
+        .split(/\r?\n/u)
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).trimStart())
+        .join("\n");
+      if (!data || data === "[DONE]") continue;
+      try {
+        const event = JSON.parse(data);
+        if (event.type === "response.completed" || event.type === "response.incomplete")
+          type = event.type;
+      } catch {
+        // Not a JSON data block — skip, the next candidate may still parse.
+      }
+    }
+    return type;
+  }
+
   async function smokeAnthropicMessages() {
     const environment = Object.fromEntries(
       Object.entries(process.env).filter((entry) => typeof entry[1] === "string"),
@@ -297,6 +325,102 @@ if (transport === null || !transports.has(transport)) {
     }
   }
 
+  // Nominally authorized by the operator: ~/.codex/auth.json (CODEX_HOME
+  // override, else <HOME>/.codex — mirrors cli.ts's own resolution),
+  // exclusively for this transport. Deliberately reads ONLY that file via
+  // readCodexTokens — never lohra's own subscription config/token store
+  // (auth/credentials.ts's resolveCredentials, which would also try
+  // readTokens(home) first), since that store was never part of what was
+  // authorized. This keeps the new source's reach as narrow as what was
+  // actually granted: this exact file, this exact transport, nothing else
+  // ever consulted.
+  async function smokeResponses() {
+    const environment = Object.fromEntries(
+      Object.entries(process.env).filter((entry) => typeof entry[1] === "string"),
+    );
+    const provider = "openai-codex";
+    const profile = getProviderProfile(provider);
+    if (profile === null || profile.apiMode !== "responses") {
+      unavailable(provider);
+      return;
+    }
+    const model = profile.fallbackModels[0] ?? null;
+    if (model === null) {
+      unavailable(provider);
+      return;
+    }
+    const codexHome = environment.CODEX_HOME?.trim() || join(environment.HOME ?? "", ".codex");
+    const tokens = readCodexTokens(codexHome);
+    if (tokens === null) {
+      unavailable(provider, model);
+      return;
+    }
+    const credentials = new SubscriptionCredentials(tokens.accessToken, tokens.accountId);
+    const prompt = "Reply with the single word OK.";
+    const expectedUrl = `${credentials.baseUrl.replace(/\/$/u, "")}/responses`;
+    const port = new AllowedRecordingPort(expectedUrl);
+    const transportImpl = new ResponsesTransport();
+    const client = new ResponsesClient({
+      baseUrl: credentials.baseUrl,
+      token: credentials.token,
+      accountId: credentials.accountId,
+      headers: credentials.headers,
+      transport: transportImpl,
+      http: port,
+      timeoutMs: 15_000,
+      maxResponseBytes: 256 * 1024,
+      maxRetries: 0,
+    });
+    try {
+      const kwargs = transportImpl.buildKwargs({
+        model,
+        messages: [{ role: "user", content: prompt }],
+        tools: [],
+      });
+      const response = await client.create(kwargs);
+      const evidence = baseEvidence("pass", provider, model, true, 0, port.requestCount);
+      // Responses' SSE stream has no single top-level "type" the way
+      // chat_completions has raw.object or anthropic_messages has
+      // raw.type — the closest analog is the terminal event's own type
+      // (response.completed/response.incomplete), scanned out of the raw
+      // SSE text rather than invented.
+      evidence.responseType = terminalResponsesEventType(port.raw);
+      evidence.finishReason = response.finishReason;
+      evidence.shape = {
+        hasOutput: response.content !== null || response.toolCalls.length > 0 || response.reasoning !== null,
+        // Responses' raw terminal event carries a string `status`
+        // (completed/incomplete), never a boolean completion field —
+        // legitimately always false here, same as anthropic_messages.
+        completedIsBoolean: false,
+        contentIsStringOrNull: typeof response.content === "string" || response.content === null,
+        toolCallsArray: Array.isArray(response.toolCalls),
+      };
+      evidence.usage = {
+        present: response.usage !== null,
+        inputTokens: response.usage?.inputTokens ?? 0,
+        outputTokens: response.usage?.outputTokens ?? 0,
+        cacheReadTokens: response.usage?.cacheReadTokens ?? 0,
+        cacheWriteTokens: response.usage?.cacheWriteTokens ?? 0,
+        reasoningTokens: response.usage?.reasoningTokens ?? 0,
+      };
+      // secrets order: [0]=token [1]=accountId [2]=prompt [3]=raw response
+      // text (SSE isn't single JSON, so the whole raw body stands in for
+      // "response content" here — strictly more conservative than
+      // extracting one field). accountId is scrubbed too: the whole
+      // auth.json is opaque, not just the bearer token.
+      persist(evidence, [credentials.token, credentials.accountId ?? "", prompt, port.raw ?? ""]);
+      process.stdout.write(`${JSON.stringify({ status: evidence.status, evidence: outputPath })}\n`);
+    } catch {
+      const evidence = baseEvidence("fail", provider, model, false, 1, port.requestCount);
+      // secrets order: [0]=token [1]=accountId [2]=prompt [3]=raw response text
+      persist(evidence, [credentials.token, credentials.accountId ?? "", prompt, port.raw ?? ""]);
+      process.stdout.write(`${JSON.stringify({ status: evidence.status, evidence: outputPath })}\n`);
+      process.exitCode = 1;
+    } finally {
+      await client.close();
+    }
+  }
+
   if (process.argv.includes("--canary")) {
     await canary();
   } else if (!allowed.includes(transport)) {
@@ -304,6 +428,8 @@ if (transport === null || !transports.has(transport)) {
     unavailable();
   } else if (transport === "anthropic_messages") {
     await smokeAnthropicMessages();
+  } else if (transport === "responses") {
+    await smokeResponses();
   } else {
     const evidence = baseEvidence("fail", null, null, false, 1, 0);
     persist(evidence);
