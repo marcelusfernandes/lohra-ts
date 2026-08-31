@@ -199,10 +199,14 @@ const TMPHOME_PATTERN = /lohra-t18-(?:oracle|candidate)-[A-Za-z0-9]+/gu;
 
 /** Assertion 44: `id` is normalized in every comparison/evidence record so
  * the digest is reproducible run-to-run (each `add` mints a fresh random
- * hex id on both sides) and so an injected divergence in this exact field
- * is the thing the masked-field self-test (probe-complementar 24) proves
- * the gate can still catch downstream of masking, not something masking
- * silently hides. */
+ * hex id on both sides). The mask is deliberately blind to VALUE: two adds
+ * that differ only in a well-formed 32-hex id must mask to identical text
+ * (proven explicitly as a positive control in t18-masked-field-injected-
+ * divergence-id). A format-violating id -- e.g. the 8-char truncated id the
+ * `id` mutant emits -- does not match `ID_PATTERN` at all, so it passes
+ * through unmasked; that is why the format-violation mutant stays visible
+ * after masking. It is not that masking inspects the value and chooses to
+ * let a divergence through. */
 function maskDynamicFields(value: unknown): unknown {
   if (typeof value === "string") {
     return value.replaceAll(ID_PATTERN, "<ID>").replaceAll(TMPHOME_PATTERN, "lohra-t18-<RUNTIME>");

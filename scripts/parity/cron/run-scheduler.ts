@@ -299,6 +299,46 @@ async function scenarioRestartSingleFire(): Promise<void> {
   }
 }
 
+// --- Scenario 21: masked field `last_run_at` -- markrun mutant refires across a restart the baseline never does (assertion 44, Emenda E5) ----
+// Candidate-only: `scenarioRestartSingleFire` above already establishes the
+// real bilateral baseline (0 refires on a normal restart, both sides). This
+// scenario only needs to show the mutant breaks THAT already-proven
+// baseline, so it doesn't re-boot the oracle.
+async function scenario21MaskedFieldLastRunAt(): Promise<void> {
+  const candidate = materialize("candidate");
+  try {
+    const due = String(Date.now() / 1000 - 3600);
+    runCandidateCron(["add", "--name", "n1", "--prompt", "SCEN:ok", "--at", due], candidate);
+
+    const first = await startCandidateScheduler({ paths: candidate, mutant: "markrun" });
+    await waitFor(() => first.upstream.requests.length >= 1, 8000);
+    await new Promise((r) => setTimeout(r, 300));
+    await first.stop();
+    const firstCalls = first.upstream.requests.length;
+
+    const second = await startCandidateScheduler({ paths: candidate, mutant: "markrun" });
+    await new Promise((r) => setTimeout(r, 2000));
+    await second.stop();
+    const secondCalls = second.upstream.requests.length;
+
+    // `markRun` under the mutant reports success without persisting
+    // `last_run_at` -- a fresh boot over the same store sees the job as
+    // never-run and refires it, unlike the real baseline established by
+    // `t18-restart-single-fire` (0 refires, both sides, unmutated).
+    const ok = firstCalls >= 1 && secondCalls >= 1;
+    record("t18-masked-field-injected-divergence-last-run-at", ok ? "mutant-refires-baseline-does-not" : "DIVERGENT", ok, {
+      firstBootCalls: firstCalls,
+      secondBootCalls: secondCalls,
+      note:
+        "candidate-only: the real 0-refire baseline is t18-restart-single-fire's unmutated measurement, " +
+        "reused rather than re-measured here. This scenario's own sha, over the raw call counts of both boots, " +
+        "is the published projection the field's masked-divergence self-test reacts through.",
+    });
+  } finally {
+    cleanup(candidate);
+  }
+}
+
 runGuards();
 await scenario15OnceDueAndFuture();
 await scenario16IntervalImmediate();
@@ -307,6 +347,7 @@ await scenario18FailedRunStillMarks();
 await scenario19TzDayBoundary();
 await scenario20NanNeverFires();
 await scenarioRestartSingleFire();
+await scenario21MaskedFieldLastRunAt();
 
 const digestInput = projections
   .toSorted((a, b) => a.id.localeCompare(b.id))
@@ -324,4 +365,4 @@ const result = {
   projections,
 };
 process.stdout.write(`${JSON.stringify(result)}\n`);
-process.exitCode = failures === 0 && projections.length === 7 ? 0 : 1;
+process.exitCode = failures === 0 && projections.length === 8 ? 0 : 1;

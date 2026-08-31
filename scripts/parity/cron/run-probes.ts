@@ -2,8 +2,10 @@
 // [oracle-only] + [processo-ts] + [probe-complementar] evidence classes for
 // T18: R7's tick() non-dict-abort probe, concurrent-add-no-lost-update,
 // candidate-scheduler-startup-refusal over the 16 fail-closed forms, and the
-// masked-field + fail-closed-guard mutation-kill self-tests (assertions 24,
-// 36-38, 44).
+// fail-closed-guard mutation-kill self-test (assertions 24, 36-38). The
+// masked-field self-tests (assertion 44, formerly probe-complementar 25-26)
+// were relocated to run-all.ts/run-scheduler.ts by Emenda E5 so their
+// evidence sha is part of those suites' own published aggregate digests.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -24,7 +26,7 @@ import {
   writeEvidence,
   type RuntimePaths,
 } from "./harness.js";
-import { startOracleScheduler, startCandidateScheduler, waitFor } from "./scheduler-harness.js";
+import { startOracleScheduler, startCandidateScheduler } from "./scheduler-harness.js";
 
 let failures = 0;
 const projections: { readonly id: string; readonly sha: string; readonly verdict: string }[] = [];
@@ -153,137 +155,6 @@ async function probeSchedulerStartupRefusal(): Promise<void> {
   });
 }
 
-// --- probe-complementar 24: masked field `id` -- format regex survives masking, mutant kills it ----
-function baselineAddEvidence(paths: RuntimePaths): { readonly ok: boolean; readonly stdout: string } {
-  const result = runCandidateCron(["add", "--name", "n1", "--prompt", "p1", "--interval", "5"], paths);
-  return { ok: /^added job [0-9a-f]{32}\n$/u.test(result.stdout), stdout: result.stdout };
-}
-
-function probeMaskedFieldId(): void {
-  const baselinePaths = materialize("candidate");
-  const mutantPaths = materialize("candidate");
-  try {
-    const baseline = baselineAddEvidence(baselinePaths);
-    const mutantResult = runCandidateCronMutant(["add", "--name", "n1", "--prompt", "p1", "--interval", "5"], mutantPaths, "id");
-    const mutantOk = /^added job [0-9a-f]{32}\n$/u.test(mutantResult.stdout);
-
-    // The mutant's truncated id is only 8 hex chars -- shorter than
-    // harness.ts's writeEvidence mask (which only matches the real 32-hex
-    // format), so it would otherwise leak a fresh random fragment into
-    // evidence on every run and break digest reproducibility for a reason
-    // that has nothing to do with a real divergence. Normalize it here too.
-    const normalizedMutantStdout = mutantResult.stdout.replaceAll(/\b[0-9a-f]{8}\b/gu, "<TRUNCATED-ID>");
-    const baselineSha = writeEvidence("t18-masked-field-injected-divergence-id__baseline", { stdout: baseline.stdout });
-    const mutantSha = writeEvidence("t18-masked-field-injected-divergence-id__mutant", { stdout: normalizedMutantStdout });
-
-    // The two halves assertion 44 requires: (a) the gate marks the mutant
-    // FAIL where baseline is PASS, (b) the digest (evidence sha) changed.
-    const gateCaughtIt = baseline.ok && !mutantOk;
-    const digestChanged = baselineSha !== mutantSha;
-    const ok = gateCaughtIt && digestChanged;
-    record("t18-masked-field-injected-divergence-id", ok ? "gate-and-digest-react" : "DIVERGENT", ok, {
-      baselineOk: baseline.ok,
-      mutantOk,
-      gateCaughtIt,
-      digestChanged,
-      baselineSha,
-      mutantSha,
-    });
-  } finally {
-    cleanup(baselinePaths);
-    cleanup(mutantPaths);
-  }
-}
-
-// --- probe-complementar 25: masked field `created_at` -- wall-clock-window sanity, mutant kills it ----
-function probeMaskedFieldCreatedAt(): void {
-  const baselinePaths = materialize("candidate");
-  const mutantPaths = materialize("candidate");
-  try {
-    const beforeBaseline = Date.now() / 1000;
-    runCandidateCron(["add", "--name", "n1", "--prompt", "p1", "--interval", "5"], baselinePaths);
-    const afterBaseline = Date.now() / 1000;
-    const baselineJob = (JSON.parse(readFileSync(jobsPathOf(baselinePaths), "utf8")) as { jobs: { created_at: number }[] })
-      .jobs[0];
-    const baselineOk = baselineJob !== undefined && baselineJob.created_at >= beforeBaseline && baselineJob.created_at <= afterBaseline;
-
-    runCandidateCronMutant(["add", "--name", "n1", "--prompt", "p1", "--interval", "5"], mutantPaths, "createdat");
-    const mutantJob = (JSON.parse(readFileSync(jobsPathOf(mutantPaths), "utf8")) as { jobs: { created_at: number }[] }).jobs[0];
-    const mutantOk = mutantJob !== undefined && mutantJob.created_at >= beforeBaseline && mutantJob.created_at <= afterBaseline;
-
-    // `created_at` is a real wall-clock epoch -- writing its raw value would
-    // make this evidence (and the sha computed over it) different on every
-    // run, breaking the aggregate suite digest's reproducibility for a
-    // reason that has nothing to do with a real divergence. Record only the
-    // window-membership boolean this probe actually tests.
-    const baselineSha = writeEvidence("t18-masked-field-injected-divergence-created-at__baseline", { insideWindow: baselineOk });
-    const mutantSha = writeEvidence("t18-masked-field-injected-divergence-created-at__mutant", { insideWindow: mutantOk });
-
-    const gateCaughtIt = baselineOk && !mutantOk;
-    const digestChanged = baselineSha !== mutantSha;
-    const ok = gateCaughtIt && digestChanged;
-    record("t18-masked-field-injected-divergence-created-at", ok ? "gate-and-digest-react" : "DIVERGENT", ok, {
-      baselineInsideWindow: baselineOk,
-      mutantInsideWindow: mutantOk,
-      gateCaughtIt,
-      digestChanged,
-      baselineSha,
-      mutantSha,
-    });
-  } finally {
-    cleanup(baselinePaths);
-    cleanup(mutantPaths);
-  }
-}
-
-// --- probe-complementar 26: masked field `last_run_at` -- restart-refire sanity, mutant kills it ----
-async function probeMaskedFieldLastRunAt(): Promise<void> {
-  async function measure(mutant: string | undefined): Promise<number> {
-    const paths = materialize("candidate");
-    try {
-      const due = String(Date.now() / 1000 - 3600);
-      runCandidateCron(["add", "--name", "n1", "--prompt", "SCEN:ok", "--at", due], paths);
-      const mutantOption = mutant === undefined ? {} : { mutant };
-      const first = await startCandidateScheduler({ paths, ...mutantOption });
-      await waitFor(() => first.upstream.requests.length >= 1, 8000);
-      await new Promise((r) => setTimeout(r, 300));
-      await first.stop();
-
-      const second = await startCandidateScheduler({ paths, ...mutantOption });
-      await new Promise((r) => setTimeout(r, 2000));
-      await second.stop();
-      const secondCalls = second.upstream.requests.length;
-      cleanup(paths);
-      return secondCalls;
-    } catch (error) {
-      cleanup(paths);
-      throw error;
-    }
-  }
-
-  const baselineSecondCalls = await measure(undefined);
-  const mutantSecondCalls = await measure("markrun");
-
-  const baselineOk = baselineSecondCalls === 0;
-  const mutantOk = mutantSecondCalls === 0;
-  const baselineSha = writeEvidence("t18-masked-field-injected-divergence-last-run-at__baseline", { secondBootCalls: baselineSecondCalls });
-  const mutantSha = writeEvidence("t18-masked-field-injected-divergence-last-run-at__mutant", { secondBootCalls: mutantSecondCalls });
-
-  const gateCaughtIt = baselineOk && !mutantOk;
-  const digestChanged = baselineSha !== mutantSha;
-  const ok = gateCaughtIt && digestChanged;
-  record("t18-masked-field-injected-divergence-last-run-at", ok ? "gate-and-digest-react" : "DIVERGENT", ok, {
-    baselineSecondBootCalls: baselineSecondCalls,
-    mutantSecondBootCalls: mutantSecondCalls,
-    baselineOk,
-    mutantOk,
-    gateCaughtIt,
-    digestChanged,
-    baselineSha,
-    mutantSha,
-  });
-}
-
 // --- assertion 24's own guard self-test: destroy-mutant and preserve-append-mutant must flip scenario 11/12's ADR verdict to an observed FAIL ----
 function probeAssertion24GuardKills(): void {
   const results: unknown[] = [];
@@ -340,9 +211,6 @@ runGuards();
 await probeR7TickNonDictAbort();
 await probeConcurrentAddNoLostUpdate();
 await probeSchedulerStartupRefusal();
-probeMaskedFieldId();
-probeMaskedFieldCreatedAt();
-await probeMaskedFieldLastRunAt();
 probeAssertion24GuardKills();
 
 const digestInput = projections
@@ -361,4 +229,4 @@ const result = {
   projections,
 };
 process.stdout.write(`${JSON.stringify(result)}\n`);
-process.exitCode = failures === 0 && projections.length === 7 ? 0 : 1;
+process.exitCode = failures === 0 && projections.length === 4 ? 0 : 1;

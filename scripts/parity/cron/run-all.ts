@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 // [cli-bilateral] evidence class for T18: one-shot `lohra cron` invocations,
 // oracle and candidate each in a fresh isolated HOME, real processes only
-// (assertion 6). Covers scenarios 1-14 of the contract's inventory.
+// (assertion 6). Covers scenarios 1-16 of the contract's inventory (15-16
+// are the id/created_at masked-field self-tests relocated here from
+// probe-complementar per Emenda E5, so their evidence sha is part of this
+// suite's own published aggregate digest rather than a private one).
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 import {
   ADD_CRASHES_BEFORE_WRITE_2,
@@ -21,6 +25,7 @@ import {
   materialize,
   readFileState,
   runCandidateCron,
+  runCandidateCronMutant,
   runGuards,
   runOracleCron,
   utcDay,
@@ -665,6 +670,125 @@ function scenario14RestartPersistence(): void {
   }
 }
 
+// --- Scenario 15: masked field `id` -- mask is value-blind by construction, format-violation mutant still visible (assertion 44, Emenda E5) ---
+function scenario15MaskedFieldId(): void {
+  const addArgv = ["add", "--name", "n1", "--prompt", "p1", "--interval", "5"];
+
+  // Positive control: two REAL adds that differ only in their (valid,
+  // 32-hex) id must mask to byte-identical text -- the mask is blind to
+  // VALUE by construction, not merely "happens to agree" on one sample.
+  const controlA = materialize("candidate");
+  const controlB = materialize("candidate");
+  let valueBlindByConstruction: boolean;
+  let controlAStdout: string;
+  let controlBStdout: string;
+  try {
+    controlAStdout = runCandidateCron(addArgv, controlA).stdout;
+    controlBStdout = runCandidateCron(addArgv, controlB).stdout;
+    valueBlindByConstruction =
+      /^added job [0-9a-f]{32}\n$/u.test(controlAStdout) &&
+      /^added job [0-9a-f]{32}\n$/u.test(controlBStdout) &&
+      controlAStdout !== controlBStdout &&
+      maskId(controlAStdout) === maskId(controlBStdout);
+  } finally {
+    cleanup(controlA);
+    cleanup(controlB);
+  }
+
+  // Format-violation mutant: `id` truncates to 8 hex chars, which does not
+  // match ID_PATTERN (\b[0-9a-f]{32}\b) at all -- it passes through masking
+  // unmasked, which is why the format check below still sees it.
+  const mutantPaths = materialize("candidate");
+  let mutantFormatOk: boolean;
+  let mutantStdout: string;
+  try {
+    const mutantResult = runCandidateCronMutant(addArgv, mutantPaths, "id");
+    mutantStdout = mutantResult.stdout;
+    mutantFormatOk = /^added job [0-9a-f]{32}\n$/u.test(mutantStdout);
+  } finally {
+    cleanup(mutantPaths);
+  }
+  // The mutant's 8-hex id is shorter than ID_PATTERN and would otherwise
+  // leak a fresh random fragment into evidence every run; normalize it too.
+  const normalizedMutantStdout = mutantStdout.replaceAll(/\b[0-9a-f]{8}\b/gu, "<TRUNCATED-ID>");
+
+  const ok = valueBlindByConstruction && !mutantFormatOk;
+  record("t18-masked-field-injected-divergence-id", ok ? "value-blind-format-checked" : "DIVERGENT", ok, {
+    valueBlindByConstruction,
+    controlAMasked: maskId(controlAStdout),
+    controlBMasked: maskId(controlBStdout),
+    mutantFormatOk,
+    mutantNormalized: normalizedMutantStdout,
+    note:
+      "two properties, kept distinct: (1) the mask hides VALUE -- two valid-but-different real ids mask " +
+      "identically -- and (2) the mask does not hide FORMAT -- the id mutant's 8-char truncated id fails " +
+      "ID_PATTERN, stays unmasked, and is still visible to the format check. This scenario's own sha, over " +
+      "both raw comparisons, is the published projection assertion 44's self-test reacts through -- not a " +
+      "private sha invented for this test alone.",
+  });
+}
+
+// --- Scenario 16: masked field `created_at` -- bilateral wall-clock-window sanity over the raw file, mutant kills it (assertion 44, decision 13, Emenda E5) ---
+function scenario16MaskedFieldCreatedAt(): void {
+  const addArgv = ["add", "--name", "n1", "--prompt", "p1", "--interval", "5"];
+
+  // Baseline: real oracle AND real candidate adds, bilaterally. `created_at`
+  // is masked in every wire comparison (decision 13), which also
+  // anticipates "toda comparação de envelope/arquivo" -- this scenario is
+  // that file-level route: read both sides' raw jobs.json directly and
+  // check created_at falls inside the real wall-clock window the add ran
+  // in. Only the window-membership booleans are recorded (never the raw
+  // epoch), so the digest stays reproducible run-to-run.
+  const oracle = materialize("oracle");
+  const candidate = materialize("candidate");
+  let oracleInWindow: boolean;
+  let candidateInWindow: boolean;
+  try {
+    const before = Date.now() / 1000;
+    runOracleCron(addArgv, oracle);
+    runCandidateCron(addArgv, candidate);
+    const after = Date.now() / 1000;
+    const oracleJob = (JSON.parse(readFileSync(jobsPathOf(oracle), "utf8")) as { jobs: { created_at: number }[] }).jobs[0];
+    const candidateJob = (JSON.parse(readFileSync(jobsPathOf(candidate), "utf8")) as { jobs: { created_at: number }[] })
+      .jobs[0];
+    oracleInWindow = oracleJob !== undefined && oracleJob.created_at >= before && oracleJob.created_at <= after;
+    candidateInWindow =
+      candidateJob !== undefined && candidateJob.created_at >= before && candidateJob.created_at <= after;
+  } finally {
+    cleanup(oracle);
+    cleanup(candidate);
+  }
+
+  // Mutant leg: candidate-only, `createdat` pins Date.now() to 0 -- falls
+  // outside any real wall-clock window while the (unmutated) oracle leg
+  // above stays in-window, giving a genuine bilateral divergence signal
+  // rather than a single side's self-reported boolean.
+  const mutantPaths = materialize("candidate");
+  let mutantInWindow: boolean;
+  try {
+    const before = Date.now() / 1000;
+    runCandidateCronMutant(addArgv, mutantPaths, "createdat");
+    const after = Date.now() / 1000;
+    const mutantJob = (JSON.parse(readFileSync(jobsPathOf(mutantPaths), "utf8")) as { jobs: { created_at: number }[] })
+      .jobs[0];
+    mutantInWindow = mutantJob !== undefined && mutantJob.created_at >= before && mutantJob.created_at <= after;
+  } finally {
+    cleanup(mutantPaths);
+  }
+
+  const ok = oracleInWindow && candidateInWindow && !mutantInWindow;
+  record("t18-masked-field-injected-divergence-created-at", ok ? "bilateral-window-checked" : "DIVERGENT", ok, {
+    oracleInWindow,
+    candidateInWindow,
+    mutantInWindow,
+    note:
+      "file-level route anchored to decision 13's 'toda comparação de envelope/arquivo': both real processes' " +
+      "raw jobs.json created_at is checked against the actual wall-clock window the add ran in, bilaterally. " +
+      "This scenario's own sha is the published projection the field's masked-divergence self-test reacts " +
+      "through.",
+  });
+}
+
 runGuards();
 scenario1SchemaRoundtrip();
 scenario2ByteExactGoldens();
@@ -682,6 +806,8 @@ scenario11aAbsentMatchBilateral();
 scenario12CandidateFailClosedMutations();
 scenario13NanAddAndListParity();
 scenario14RestartPersistence();
+scenario15MaskedFieldId();
+scenario16MaskedFieldCreatedAt();
 
 const digestInput = projections
   .toSorted((a, b) => a.id.localeCompare(b.id))
@@ -699,4 +825,4 @@ const result = {
   projections,
 };
 process.stdout.write(`${JSON.stringify(result)}\n`);
-process.exitCode = failures === 0 && projections.length === 16 ? 0 : 1;
+process.exitCode = failures === 0 && projections.length === 18 ? 0 : 1;
