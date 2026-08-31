@@ -520,7 +520,7 @@ function scenario11CandidateFailClosedList(): void {
       cleanup(candidate);
     }
   }
-  record("t18-candidate-failclosed-list-17-forms", ok ? "as-expected" : "DIVERGENT", ok, { note: "16 forms per Emenda E3", results });
+  record("t18-candidate-failclosed-list-16-forms", ok ? "as-expected" : "DIVERGENT", ok, { note: "16 forms per Emenda E3", results });
 }
 
 function scenario11aAbsentMatchBilateral(): void {
@@ -585,7 +585,7 @@ function scenario12CandidateFailClosedMutations(): void {
       }
     }
   }
-  record("t18-candidate-failclosed-mutations-17-forms", ok ? "as-expected" : "DIVERGENT", ok, { note: "16 forms per Emenda E3", results });
+  record("t18-candidate-failclosed-mutations-16-forms", ok ? "as-expected" : "DIVERGENT", ok, { note: "16 forms per Emenda E3", results });
 }
 
 // --- Scenario 13: NaN chain — accept/persist/list parity for nan/inf/-1 --------
@@ -643,7 +643,7 @@ function scenario14RestartPersistence(): void {
       maskId(oracleList.stdout) === maskId(candidateList.stdout) &&
       oracleList.stdout.includes(oracleAdd.stdout.trim().replace("added job ", "")) &&
       candidateList.stdout.includes(candidateAdd.stdout.trim().replace("added job ", ""));
-    record("t18-restart-persistence-and-single-fire", ok ? "match" : "DIVERGENT", ok, {
+    record("t18-restart-persistence", ok ? "match" : "DIVERGENT", ok, {
       oracleAdd,
       candidateAdd,
       oracleList,
