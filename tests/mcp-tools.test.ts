@@ -1,0 +1,183 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  convertMcpSchema,
+  deregisterServer,
+  mcpToolName,
+  registerServerTools,
+  wrapCallResult,
+} from "../src/mcp/tools.js";
+import { toolError, toolResult } from "../src/tools/envelope.js";
+import { ToolRegistry } from "../src/tools/registry.js";
+
+describe("mcpToolName", () => {
+  it("sanitizes both server and tool: lowercase, non-alnum runs -> _, stripped", () => {
+    expect(mcpToolName("fix", "echo")).toBe("mcp_fix_echo");
+    expect(mcpToolName("fix", "search_docs")).toBe("mcp_fix_search_docs");
+    expect(mcpToolName("fix", "Weird-Name!")).toBe("mcp_fix_weird_name");
+    expect(mcpToolName("github.com", "search")).toBe("mcp_github_com_search");
+    expect(mcpToolName("fix", "Do-Thing")).toBe("mcp_fix_do_thing");
+    expect(mcpToolName("fix", "do thing")).toBe("mcp_fix_do_thing");
+  });
+});
+
+describe("convertMcpSchema", () => {
+  it("reads description/inputSchema, dict shape", () => {
+    expect(convertMcpSchema({ description: "a good one", inputSchema: { type: "object", properties: { q: { type: "string" } }, required: ["q"] } })).toEqual({
+      description: "a good one",
+      parameters: { type: "object", properties: { q: { type: "string" } }, required: ["q"] },
+    });
+  });
+
+  it("non-dict/absent inputSchema -> empty object schema", () => {
+    expect(convertMcpSchema({ description: "bad schema", inputSchema: "not an object" }).parameters).toEqual({
+      type: "object",
+      properties: {},
+    });
+    expect(convertMcpSchema({ description: "no schema at all" }).parameters).toEqual({
+      type: "object",
+      properties: {},
+    });
+  });
+
+  it("description null/absent -> empty string", () => {
+    expect(convertMcpSchema({ description: null }).description).toBe("");
+    expect(convertMcpSchema({}).description).toBe("");
+  });
+
+  it("key order is description, parameters", () => {
+    expect(Object.keys(convertMcpSchema({ description: "x", inputSchema: {} }))).toEqual([
+      "description",
+      "parameters",
+    ]);
+  });
+});
+
+describe("wrapCallResult", () => {
+  it("two text blocks concatenate with no separator", () => {
+    expect(
+      wrapCallResult({ content: [{ type: "text", text: "part-one " }, { type: "text", text: "part-two" }] }),
+    ).toBe(toolResult(undefined, { content: "part-one part-two" }));
+  });
+
+  it("non-text block -> [type block] placeholder", () => {
+    expect(wrapCallResult({ content: [{ type: "image" }] })).toBe(
+      toolResult(undefined, { content: "[image block]" }),
+    );
+  });
+
+  it("isError with text -> tool_error(text)", () => {
+    expect(wrapCallResult({ content: [{ type: "text", text: "boom" }], isError: true })).toBe(
+      toolError("boom"),
+    );
+  });
+
+  it("isError with empty content -> tool_error('MCP tool reported an error')", () => {
+    expect(wrapCallResult({ content: [], isError: true })).toBe(
+      toolError("MCP tool reported an error"),
+    );
+  });
+});
+
+describe("registerServerTools / deregisterServer", () => {
+  it("registers under toolset mcp-{server}, handler routes to callTool with the ORIGINAL name", async () => {
+    const registry = new ToolRegistry();
+    const calls: { name: string; args: unknown }[] = [];
+    registerServerTools(registry, "fix", [{ name: "echo", description: "d", inputSchema: {} }], (name, args) => {
+      calls.push({ name, args });
+      return { content: [{ type: "text", text: "ok" }] };
+    });
+    expect(registry.namesInToolset("mcp-fix")).toEqual(["mcp_fix_echo"]);
+    await registry.dispatch("mcp_fix_echo", { q: "x" });
+    expect(calls).toEqual([{ name: "echo", args: { q: "x" } }]);
+  });
+
+  it("tool with empty/missing name is skipped silently", () => {
+    const registry = new ToolRegistry();
+    const added = registerServerTools(
+      registry,
+      "fix",
+      [{ name: "", description: "d" }, { description: "no name field" }],
+      () => ({}),
+    );
+    expect(added).toEqual([]);
+    expect(registry.namesInToolset("mcp-fix")).toEqual([]);
+  });
+
+  it("intra-server collision: same slug -> first wins, second skipped, exact warning text (M5)", () => {
+    const registry = new ToolRegistry();
+    const stderr: string[] = [];
+    const spy = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string) => {
+      stderr.push(chunk);
+      return true;
+    });
+    try {
+      const added = registerServerTools(
+        registry,
+        "fix",
+        [
+          { name: "Do-Thing", description: "first" },
+          { name: "do thing", description: "second" },
+          { name: "other", description: "third" },
+        ],
+        () => ({}),
+      );
+      expect(added).toEqual(["mcp_fix_do_thing", "mcp_fix_other"]);
+    } finally {
+      process.stderr.write = spy;
+    }
+    expect(stderr.join("")).toContain(
+      "MCP tool 'fix'/'do thing' collides with an earlier tool as 'mcp_fix_do_thing' — skipped",
+    );
+  });
+
+  it("cross-toolset collision with a builtin: MCP tool skipped, builtin intact", () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "mcp_fix_file",
+      toolset: "builtin",
+      schema: { description: "the real one", parameters: { type: "object", properties: {} } },
+      handler: () => toolResult("builtin"),
+    });
+    const added = registerServerTools(registry, "fix", [{ name: "file", description: "mcp one" }], () => ({}));
+    expect(added).toEqual([]);
+    expect(registry.namesInToolset("mcp-fix")).toEqual([]);
+    expect(registry.namesInToolset("builtin")).toEqual(["mcp_fix_file"]);
+  });
+
+  it("cross-server MCP collision: silent last-wins overwrite, no warning, loser's deregister removes nothing (M4/M4-bis)", () => {
+    const registry = new ToolRegistry();
+    const stderr: string[] = [];
+    const spy = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string) => {
+      stderr.push(chunk);
+      return true;
+    });
+    try {
+      registerServerTools(registry, "github.com", [{ name: "search", description: "A" }], () => "A");
+      registerServerTools(registry, "github_com", [{ name: "search", description: "B" }], () => "B");
+    } finally {
+      process.stderr.write = spy;
+    }
+    expect(stderr.join("")).toBe("");
+    // A's own toolset no longer sees the tool -- it moved to B's toolset.
+    expect(registry.namesInToolset("mcp-github.com")).toEqual([]);
+    expect(registry.namesInToolset("mcp-github_com")).toEqual(["mcp_github_com_search"]);
+
+    deregisterServer(registry, "github.com");
+    expect(registry.namesInToolset("mcp-github_com")).toEqual(["mcp_github_com_search"]);
+
+    deregisterServer(registry, "github_com");
+    expect(registry.namesInToolset("mcp-github_com")).toEqual([]);
+  });
+
+  it("deregisterServer removes only the named server's own toolset", () => {
+    const registry = new ToolRegistry();
+    registerServerTools(registry, "fix", [{ name: "echo" }], () => ({}));
+    registerServerTools(registry, "other", [{ name: "thing" }], () => ({}));
+    deregisterServer(registry, "fix");
+    expect(registry.namesInToolset("mcp-fix")).toEqual([]);
+    expect(registry.namesInToolset("mcp-other")).toEqual(["mcp_other_thing"]);
+  });
+});
