@@ -1,12 +1,10 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { readdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { resolveOracleWorkspace } from "../resolve.js";
 
 const root = resolve(import.meta.dirname, "../../..");
-const scenarios = resolve(root, "scripts/parity/scenarios");
 
 // The T03 probes below (unlike the main harness) don't auto-discover the
 // oracle workspace themselves — reuse the harness's own discovery here so

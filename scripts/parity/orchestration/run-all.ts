@@ -1,17 +1,38 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { runCli } from "../cli.js";
 
 const manifests = resolve("scripts/parity/manifests/t13");
 const evidenceDirectory = resolve(".parity-evidence/t13");
+const patchedDirectory = resolve(evidenceDirectory, "_patched");
 mkdirSync(evidenceDirectory, { recursive: true });
+mkdirSync(patchedDirectory, { recursive: true });
 
 const names = readdirSync(manifests)
   .filter((name) => name.startsWith("t13-") && name.endsWith(".json"))
   .sort();
+
+/**
+ * The child-prompt-freeze manifest (item 25) pins today's date inside four
+ * expectation values, since expectations can never be normalized (only
+ * `comparisons` can — see harness.ts's expectationFailures, which reads the
+ * raw captured field directly). Its "<TODAY>" placeholder is substituted
+ * here with the exact expression buildSystemPrompt itself uses, so the
+ * suite's digest stays reproducible on any calendar day rather than only
+ * the day the manifest was authored.
+ */
+function manifestPath(name: string): string {
+  const original = resolve(manifests, name);
+  const text = readFileSync(original, "utf8");
+  if (!text.includes("<TODAY>")) return original;
+  const today = new Date().toISOString().slice(0, 10);
+  const patched = resolve(patchedDirectory, name);
+  writeFileSync(patched, text.replaceAll("<TODAY>", today));
+  return patched;
+}
 
 /**
  * The one scenario that is divergent BY DESIGN (contract decision 3, errata
@@ -31,7 +52,7 @@ for (const name of names) {
   const evidence = resolve(evidenceDirectory, `${id}.json`);
   rmSync(evidence, { force: true });
   const expectedCode = divergent.has(id) ? 1 : 0;
-  const code = runCli(["--manifest", resolve(manifests, name), "--evidence", evidence]);
+  const code = runCli(["--manifest", manifestPath(name), "--evidence", evidence]);
   if (code !== expectedCode) failures += 1;
   try {
     const parsed = JSON.parse(readFileSync(evidence, "utf8")) as {
