@@ -167,8 +167,14 @@ function probeMaskedFieldId(): void {
     const mutantResult = runCandidateCronMutant(["add", "--name", "n1", "--prompt", "p1", "--interval", "5"], mutantPaths, "id");
     const mutantOk = /^added job [0-9a-f]{32}\n$/u.test(mutantResult.stdout);
 
+    // The mutant's truncated id is only 8 hex chars -- shorter than
+    // harness.ts's writeEvidence mask (which only matches the real 32-hex
+    // format), so it would otherwise leak a fresh random fragment into
+    // evidence on every run and break digest reproducibility for a reason
+    // that has nothing to do with a real divergence. Normalize it here too.
+    const normalizedMutantStdout = mutantResult.stdout.replaceAll(/\b[0-9a-f]{8}\b/gu, "<TRUNCATED-ID>");
     const baselineSha = writeEvidence("t18-masked-field-injected-divergence-id__baseline", { stdout: baseline.stdout });
-    const mutantSha = writeEvidence("t18-masked-field-injected-divergence-id__mutant", { stdout: mutantResult.stdout });
+    const mutantSha = writeEvidence("t18-masked-field-injected-divergence-id__mutant", { stdout: normalizedMutantStdout });
 
     // The two halves assertion 44 requires: (a) the gate marks the mutant
     // FAIL where baseline is PASS, (b) the digest (evidence sha) changed.
@@ -205,18 +211,20 @@ function probeMaskedFieldCreatedAt(): void {
     const mutantJob = (JSON.parse(readFileSync(jobsPathOf(mutantPaths), "utf8")) as { jobs: { created_at: number }[] }).jobs[0];
     const mutantOk = mutantJob !== undefined && mutantJob.created_at >= beforeBaseline && mutantJob.created_at <= afterBaseline;
 
-    const baselineSha = writeEvidence("t18-masked-field-injected-divergence-created-at__baseline", { createdAt: baselineJob?.created_at });
-    const mutantSha = writeEvidence("t18-masked-field-injected-divergence-created-at__mutant", { createdAt: mutantJob?.created_at });
+    // `created_at` is a real wall-clock epoch -- writing its raw value would
+    // make this evidence (and the sha computed over it) different on every
+    // run, breaking the aggregate suite digest's reproducibility for a
+    // reason that has nothing to do with a real divergence. Record only the
+    // window-membership boolean this probe actually tests.
+    const baselineSha = writeEvidence("t18-masked-field-injected-divergence-created-at__baseline", { insideWindow: baselineOk });
+    const mutantSha = writeEvidence("t18-masked-field-injected-divergence-created-at__mutant", { insideWindow: mutantOk });
 
     const gateCaughtIt = baselineOk && !mutantOk;
     const digestChanged = baselineSha !== mutantSha;
     const ok = gateCaughtIt && digestChanged;
     record("t18-masked-field-injected-divergence-created-at", ok ? "gate-and-digest-react" : "DIVERGENT", ok, {
-      window: [beforeBaseline, afterBaseline],
-      baselineCreatedAt: baselineJob?.created_at,
-      mutantCreatedAt: mutantJob?.created_at,
-      baselineOk,
-      mutantOk,
+      baselineInsideWindow: baselineOk,
+      mutantInsideWindow: mutantOk,
       gateCaughtIt,
       digestChanged,
       baselineSha,
