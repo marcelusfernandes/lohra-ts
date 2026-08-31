@@ -73,6 +73,33 @@ describe("Python-compatible JSON serializer", () => {
     );
   });
 
+  it("loads the NaN/Infinity/-Infinity literal extension, cross-checked against real json.loads", () => {
+    const documents = ['{"v": NaN}', '{"v": Infinity}', '{"v": -Infinity}', "[NaN, Infinity, -Infinity]"];
+    const expected = pythonLines(
+      `import json\nfor raw in ${JSON.stringify(documents)}: print(json.dumps(json.loads(raw)))`,
+    );
+    expect(documents.map((raw) => pythonJsonDumpsInsertionOrder(pythonJsonLoads(raw)))).toEqual(
+      expected,
+    );
+  });
+
+  it("rejects case/sign variants of the NaN/Infinity literals, matching Python's exact sensitivity", () => {
+    const rejected = ["nan", "inf", "+Infinity", "NAN", "Nan"];
+    const pythonRejects = pythonLines(
+      `import json
+for raw in ${JSON.stringify(rejected)}:
+    try:
+        json.loads(raw)
+        print("accepted")
+    except json.JSONDecodeError:
+        print("rejected")`,
+    );
+    expect(pythonRejects).toEqual(rejected.map(() => "rejected"));
+    for (const raw of rejected) {
+      expect(() => pythonJsonLoads(raw)).toThrow();
+    }
+  });
+
   it("round-trips arbitrary JSON integers exactly against Python", () => {
     const documents = [
       "9007199254740991",

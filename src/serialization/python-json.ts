@@ -54,6 +54,14 @@ class PythonJsonParser {
     if (token === "t") return this.literal("true", true);
     if (token === "f") return this.literal("false", false);
     if (token === "n") return this.literal("null", null);
+    // Python's `json.loads` accepts these three non-standard literals by default (a documented
+    // extension over strict RFC 8259); this parser mirrors that so a value the oracle's own
+    // `json.dumps`/`json.loads` round-trips doesn't spuriously fail here.
+    if (token === "N") return this.literal("NaN", pythonFloat(NaN));
+    if (token === "I") return this.literal("Infinity", pythonFloat(Number.POSITIVE_INFINITY));
+    if (token === "-" && this.source.startsWith("-Infinity", this.index)) {
+      return this.literal("-Infinity", pythonFloat(Number.NEGATIVE_INFINITY));
+    }
     return this.number();
   }
 
