@@ -14,6 +14,7 @@ import {
   ResponsesClient,
   ResponsesTransport,
 } from "../../../dist/transports/index.js";
+import { resolveResponsesProfile } from "./responses-profile.mjs";
 
 const transports = new Set(["anthropic_messages", "chat_completions", "responses"]);
 const valueAfter = (name) => {
@@ -359,11 +360,7 @@ if (transport === null || !transports.has(transport)) {
       Object.entries(process.env).filter((entry) => typeof entry[1] === "string"),
     );
     const provider = "openai-codex";
-    const profile = getProviderProfile(provider);
-    if (profile === null || profile.apiMode !== "responses") {
-      unavailable(provider);
-      return;
-    }
+    const profile = resolveResponsesProfile();
     const model = profile.fallbackModels[0] ?? null;
     if (model === null) {
       unavailable(provider);
