@@ -139,6 +139,53 @@ describe("OrchestrationCore.steer — idle/terminal form (contract decision 6 / 
     }
   });
 
+  /**
+   * Contract T13 decision 12/L12, probe-complementar
+   * t13-attribution-suppression-unit-static: the oracle's own _attribute
+   * (orchestration/core.py) drops a sub-session's (model, provider) to
+   * (None, None) the moment a later turn's actual (model, provider)
+   * disagrees with the one already attributed — because one running usage
+   * total can't honestly carry two different prices. On T13's real public
+   * surface that drop is UNREACHABLE: steer_session carries no override
+   * arguments of its own, so every resurrection must run with the exact
+   * SpawnConfig captured at spawn() — a second turn can never actually
+   * disagree with the first. The contract requires this proven
+   * unit/statically (not as a wire scenario, since the wire can't produce
+   * a disagreement to observe either way — a candidate that never
+   * implements the drop-to-null mechanism at all would still pass 100% of
+   * bilateral scenarios). This is that proof: every runChild call across
+   * three resurrections of the same child receives the IDENTICAL model
+   * and provider from spawn — never a value that could trigger a
+   * disagreement, on either side, because there is no code path through
+   * which one could arise.
+   */
+  it("L12: model/provider are structurally identical across every resurrection, making attribution disagreement (and any need to suppress it) unreachable", async () => {
+    const receivedConfigs: SpawnConfig[] = [];
+    const core = new OrchestrationCore({
+      runChild: (_subId, config) => {
+        receivedConfigs.push(config);
+        return Promise.resolve(okResult());
+      },
+      idSource: () => "aaaa",
+      maxSubsessions: 200,
+      maxParallel: 200,
+      buildSubagentPrompt: stubPrompt,
+    });
+
+    const { subId } = core.spawn({ prompt: "first task", model: "fixed-model", provider: "fixed-provider" });
+    await core.collect(subId, true);
+    core.steer(subId, "second turn");
+    await core.collect(subId, true);
+    core.steer(subId, "third turn");
+    await core.collect(subId, true);
+
+    expect(receivedConfigs).toHaveLength(3);
+    for (const config of receivedConfigs) {
+      expect(config.model).toBe("fixed-model");
+      expect(config.provider).toBe("fixed-provider");
+    }
+  });
+
   // Measured against the oracle's own OrchestrationCore._finalize
   // (backend/lohra/orchestration/core.py:483): "usage_total... ACCUMULATE
   // across turns" via `sub.tokens_in += ...`, never overwritten — a
