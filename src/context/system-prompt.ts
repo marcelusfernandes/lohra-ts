@@ -46,8 +46,20 @@ function contextText(files: readonly (readonly [string, string])[]): string {
     .join(SEPARATOR);
 }
 
+/** Mirrors the oracle's `datetime.date.today().isoformat()` — the SYSTEM's
+ * local calendar date, not UTC. `toISOString()` reads UTC components, so it
+ * disagrees with the oracle for roughly a third of every day (midnight
+ * local through midnight UTC, wider the further west of UTC the host is). */
+function todayLocalIsoDate(): string {
+  const now = new Date();
+  const year = String(now.getFullYear()).padStart(4, "0");
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function buildSystemPrompt(inputs: SystemPromptInputs = {}): SystemPromptSnapshot {
-  const today = inputs.today ?? new Date().toISOString().slice(0, 10);
+  const today = inputs.today ?? todayLocalIsoDate();
   const stable = [
     inputs.identity || DEFAULT_IDENTITY,
     environmentText(inputs.environmentHints ?? {}),

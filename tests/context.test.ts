@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildSystemPrompt,
@@ -119,5 +119,28 @@ describe("system prompt renderer", () => {
     expect(() => {
       (prompt as { stable: string }).stable = "changed";
     }).toThrow(TypeError);
+  });
+
+  it("falls back to the LOCAL calendar date, not UTC, inside the daily window where they disagree", () => {
+    // A same-day "today vs today" comparison passes 21 hours out of 24 and
+    // proves nothing — the real regression only shows up inside the window
+    // between local midnight and UTC midnight. 00:25 UTC on 2026-08-31 is
+    // 21:25 local on 2026-08-30 in America/Sao_Paulo (fixed UTC-3, no DST
+    // since Brazil abolished it in 2019), matching the oracle's
+    // `datetime.date.today()` (local calendar date), not
+    // `toISOString()` (UTC calendar date).
+    const originalTz = process.env.TZ;
+    process.env.TZ = "America/Sao_Paulo";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-31T00:25:00Z"));
+    try {
+      const prompt = buildSystemPrompt({});
+      expect(prompt.text).toContain("Today's date is 2026-08-30.");
+      expect(prompt.text).not.toContain("Today's date is 2026-08-31.");
+    } finally {
+      vi.useRealTimers();
+      if (originalTz === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTz;
+    }
   });
 });
