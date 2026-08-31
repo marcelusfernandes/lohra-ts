@@ -85,6 +85,15 @@ if (transport === null || !transports.has(transport)) {
   // (e.g. a short model response) stops being able to trigger a refusal.
   const MIN_SECRET_LENGTH = 24;
 
+  // A secret entry is either a plain string (the >=24 floor above applies,
+  // for values that could incidentally collide with ordinary short
+  // response text) or { value, exact: true } (checked at any non-empty
+  // length via exact substring match, no floor) — for identifiers like a
+  // codex accountId, which aren't the kind of short common word the floor
+  // exists to tolerate; gating them on length would only create a false
+  // negative below 24 characters, buying no false-positive protection in
+  // return, since an account id isn't a substring a real response would
+  // incidentally contain.
   const persist = (record, secrets = []) => {
     const keys = Object.keys(record);
     if (keys.length !== allowedKeys.length || keys.some((key, index) => key !== allowedKeys[index])) {
@@ -92,9 +101,13 @@ if (transport === null || !transports.has(transport)) {
       throw new Error("LIVE_EVIDENCE_SCHEMA");
     }
     const body = `${JSON.stringify(record)}\n`;
-    const matchedIndex = secrets.findIndex(
-      (secret) => secret.length >= MIN_SECRET_LENGTH && body.includes(secret),
-    );
+    const matchedIndex = secrets.findIndex((secret) => {
+      const exact = typeof secret === "object" && secret !== null;
+      const value = exact ? secret.value : secret;
+      if (value.length === 0) return false;
+      if (!exact && value.length < MIN_SECRET_LENGTH) return false;
+      return body.includes(value);
+    });
     if (matchedIndex >= 0) {
       rmSync(outputPath, { force: true });
       // Index only — never the value, its length, or a prefix. The caller
@@ -122,23 +135,30 @@ if (transport === null || !transports.has(transport)) {
     const key = "T10-CANARY-API-KEY-VALUE-EXACT";
     const canaryPrompt = "T10-CANARY-PROMPT-VALUE-EXACT";
     const response = "T10-CANARY-RESPONSE-VALUE-EXACT";
+    // Deliberately SHORT (< MIN_SECRET_LENGTH) — proves the exact/no-floor
+    // path (persist()'s { value, exact: true } form) still catches a
+    // short identifier like a codex accountId, which the floor alone
+    // would have let through.
+    const shortAccountId = "T10-SHORT-ID";
     rmSync(outputPath, { force: true });
     let caught = 0;
+    const allSecrets = [key, canaryPrompt, response, { value: shortAccountId, exact: true }];
     for (const [field, value] of [
       ["provider", key],
       ["model", canaryPrompt],
       ["responseType", response],
+      ["finishReason", shortAccountId],
     ]) {
       const evidence = baseEvidence("fail", "canary", "canary", false, 1, 0);
       evidence[field] = value;
       try {
-        persist(evidence, [key, canaryPrompt, response]);
+        persist(evidence, allSecrets);
       } catch (error) {
         if (error instanceof Error && error.message === "CREDENTIAL_LEAK") caught += 1;
         else throw error;
       }
     }
-    if (caught !== 3 || existsSync(outputPath)) throw new Error("LIVE_SCRUB_CANARY_FAILED");
+    if (caught !== 4 || existsSync(outputPath)) throw new Error("LIVE_SCRUB_CANARY_FAILED");
     process.stdout.write(
       `${JSON.stringify({ probe: "t10-live-scrub", transport, caught, evidenceAbsent: true })}\n`,
     );
@@ -406,14 +426,25 @@ if (transport === null || !transports.has(transport)) {
       // secrets order: [0]=token [1]=accountId [2]=prompt [3]=raw response
       // text (SSE isn't single JSON, so the whole raw body stands in for
       // "response content" here — strictly more conservative than
-      // extracting one field). accountId is scrubbed too: the whole
-      // auth.json is opaque, not just the bearer token.
-      persist(evidence, [credentials.token, credentials.accountId ?? "", prompt, port.raw ?? ""]);
+      // extracting one field). accountId is scrubbed too, exact/no-floor
+      // (see persist()'s comment) — the whole auth.json is opaque, not
+      // just the bearer token.
+      persist(evidence, [
+        credentials.token,
+        { value: credentials.accountId ?? "", exact: true },
+        prompt,
+        port.raw ?? "",
+      ]);
       process.stdout.write(`${JSON.stringify({ status: evidence.status, evidence: outputPath })}\n`);
     } catch {
       const evidence = baseEvidence("fail", provider, model, false, 1, port.requestCount);
       // secrets order: [0]=token [1]=accountId [2]=prompt [3]=raw response text
-      persist(evidence, [credentials.token, credentials.accountId ?? "", prompt, port.raw ?? ""]);
+      persist(evidence, [
+        credentials.token,
+        { value: credentials.accountId ?? "", exact: true },
+        prompt,
+        port.raw ?? "",
+      ]);
       process.stdout.write(`${JSON.stringify({ status: evidence.status, evidence: outputPath })}\n`);
       process.exitCode = 1;
     } finally {
