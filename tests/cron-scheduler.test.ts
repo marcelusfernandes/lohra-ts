@@ -91,6 +91,26 @@ describe("tick", () => {
     expect(calls).toEqual([]);
     expect(store.get(job.id)?.last_run_at).toBeNull();
   });
+
+  it("assertion 28: a permanently-unreachable NaN job reaches the diagnostics sink, never runJob/stdout", async () => {
+    const job = store.add({ name: "n", prompt: "p", type: "once", value: Number.NaN });
+    const calls: string[] = [];
+    const diagnosed: string[] = [];
+    await tick(store, recorder(calls), {
+      now: Number.MAX_SAFE_INTEGER,
+      diagnostics: (message) => diagnosed.push(message),
+    });
+    expect(calls).toEqual([]);
+    expect(diagnosed).toHaveLength(1);
+    expect(diagnosed[0]).toContain(job.id);
+  });
+
+  it("a job that is merely not-due-yet never reaches the diagnostics sink", async () => {
+    store.add({ name: "n", prompt: "p", type: "once", value: 1_000_000 });
+    const diagnosed: string[] = [];
+    await tick(store, recorder([]), { now: 100, diagnostics: (message) => diagnosed.push(message) });
+    expect(diagnosed).toEqual([]);
+  });
 });
 
 describe("runSchedulerLoop", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { cronMatches, isDue, parseCronField } from "../src/cron/schedule.js";
+import { cronMatches, isDue, isPermanentlyUnreachable, parseCronField } from "../src/cron/schedule.js";
 
 describe("parseCronField", () => {
   it("expands *, single, range, comma-list, and step", () => {
@@ -134,5 +134,22 @@ describe("isDue", () => {
     expect(() => isDue({ type: "bogus", value: 0 }, { now: 0 })).toThrow(
       "unknown job type 'bogus'",
     );
+  });
+});
+
+describe("isPermanentlyUnreachable", () => {
+  it("is true for a once job with a NaN or Infinity value", () => {
+    expect(isPermanentlyUnreachable({ type: "once", value: Number.NaN })).toBe(true);
+    expect(isPermanentlyUnreachable({ type: "once", value: Number.POSITIVE_INFINITY })).toBe(true);
+  });
+
+  it("is false for a once job with a finite value, including -1", () => {
+    expect(isPermanentlyUnreachable({ type: "once", value: -1 })).toBe(false);
+    expect(isPermanentlyUnreachable({ type: "once", value: 100 })).toBe(false);
+  });
+
+  it("is false for interval/cron jobs regardless of value", () => {
+    expect(isPermanentlyUnreachable({ type: "interval", value: Number.NaN })).toBe(false);
+    expect(isPermanentlyUnreachable({ type: "cron", value: Number.NaN })).toBe(false);
   });
 });

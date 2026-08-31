@@ -96,6 +96,15 @@ export interface CronJobLike {
   readonly last_run_at?: number | null;
 }
 
+/**
+ * A `once` job whose value is `NaN`/`Infinity` can never satisfy `now >= value` (assertion 28) —
+ * this is a distinct, permanent condition from "not due yet", used only to decide whether to emit
+ * a diagnostic (never stdout/stderr, decision 7), not to change `isDue`'s own comparison logic.
+ */
+export function isPermanentlyUnreachable(job: CronJobLike): boolean {
+  return job.type === "once" && !Number.isFinite(Number(job.value));
+}
+
 export function isDue(job: CronJobLike, options: { readonly now: number }): boolean {
   if (job.enabled === false) return false;
   const { now } = options;

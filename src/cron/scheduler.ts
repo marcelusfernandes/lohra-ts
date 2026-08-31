@@ -1,5 +1,5 @@
 import type { CronJob, CronStore } from "./store.js";
-import { isDue } from "./schedule.js";
+import { isDue, isPermanentlyUnreachable } from "./schedule.js";
 
 export interface TickResult {
   readonly jobId: string;
@@ -19,11 +19,19 @@ export interface TickResult {
 export async function tick(
   store: CronStore,
   runJob: (job: CronJob) => Promise<void>,
-  options: { readonly now: number },
+  options: { readonly now: number; readonly diagnostics?: (message: string) => void },
 ): Promise<readonly TickResult[]> {
   const results: TickResult[] = [];
   for (const job of store.list()) {
-    if (!isDue(job, { now: options.now })) continue;
+    if (!isDue(job, { now: options.now })) {
+      // Assertion 28: the NaN/Infinity `once` job is permanently unreachable, not merely
+      // not-due-yet — a diagnostic goes to an internal sink (never stdout/stderr) so a probe can
+      // confirm the mechanism fired, distinct from "the candidate stayed silent everywhere".
+      if (isPermanentlyUnreachable(job)) {
+        options.diagnostics?.(`cron job ${job.id} is permanently unreachable (value=${String(job.value)})`);
+      }
+      continue;
+    }
     let ok = true;
     try {
       await runJob(job);
@@ -47,6 +55,7 @@ export interface SchedulerLoopOptions {
   readonly tickIntervalMs?: number;
   readonly now?: () => number;
   readonly wait?: (ms: number) => Promise<void>;
+  readonly diagnostics?: (message: string) => void;
 }
 
 const DEFAULT_TICK_INTERVAL_MS = 60_000;
@@ -75,7 +84,10 @@ export async function runSchedulerLoop(options: SchedulerLoopOptions): Promise<v
 
   while (!options.stop.isSet()) {
     try {
-      await tick(options.store, options.runJob, { now: now() });
+      await tick(options.store, options.runJob, {
+        now: now(),
+        ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
+      });
     } catch {
       // Matches the oracle's log.warning-and-continue: a tick-level failure never kills the loop.
     }
