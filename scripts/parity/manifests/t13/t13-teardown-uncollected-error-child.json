@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "id": "t13-delegate-order-preserved-reverse-completion",
-  "description": "T13 bilateral CLI observation (expected match): delegate_task's results array preserves task-submission order even when the three children settle in the exact reverse order, forced by an in-process barrier chain (kid3 opens g2 unconditionally, kid2 waits on g2 then opens g1, kid1 waits on g1) — never by sleep/wall-clock. Proves order preservation survives two structurally different concurrency mechanisms (candidate: Promise.all over async children; oracle: ThreadPoolExecutor futures joined in submission order). KNOWN LIMIT (declared, not a gap to fix): events.requests is deliberately excluded from capture/comparisons here. recordRequest assigns each request's seq at ARRIVAL, before any gate wait, so with three children admitted concurrently the raw request-log ARRIVAL order is a scheduler artifact, not a semantic guarantee the barrier orders — it is not byte-stable run to run and must not be compared. The order-preservation proof lives entirely in process.stdout's /tool_calls/0/result (task-index order) plus events.summary's post/get counts, both of which are stable by construction, independent of arrival interleaving.",
+  "id": "t13-teardown-uncollected-error-child",
+  "description": "T13 bilateral CLI observation (expected match): a spawn_session child, never collected by the parent, fails on its own (only) upstream call with an HTTP 418 canary while gated during the parent's teardown drain. Deterministic by construction — the outcome does not depend on which side's cooperative-interrupt check wins a race, since the child's single call always resolves to the same upstream error once its gate opens, regardless of timing. Covers decision 14/ADR-T13-04 (uncollected child failure is silent on stdout/stderr, cause elsewhere) and the 'resolves error during drain' half of assertion 41 (shutdown does not swallow failures — it logs the cause). KNOWN LIMIT (declared, not a gap to fix): events.orchestrationLog is captured and checked via candidate-only expectations (side:\"candidate\"), never added to bilateral comparisons — the oracle has no equivalent file on this path (its own silent-failure channel is a separate mechanism, out of scope here), so comparing it would always mismatch on /exists alone. Consequently the reproducibility digest (projectionSha256) is NOT byte-stable run to run: the log's own subId and at fields are unnormalized and genuinely random/time-varying per run. Reproducibility here means comparison.verdict stays \"match\" and expectations.failures stays empty across repeated runs (verified 5/5) — not digest equality.",
   "argv": [
     "chat",
-    "SCEN:parent delegate three background checks",
+    "SCEN:parent spawn a child that will fail upstream",
     "--json",
     "--provider",
     "ollama",
@@ -72,6 +72,12 @@
         "root": "profile",
         "path": "stub-assertions.json",
         "format": "json"
+      },
+      {
+        "name": "orchestrationLog",
+        "root": "home",
+        "path": ".lohra/logs/orchestration.log",
+        "format": "jsonl"
       }
     ]
   },
@@ -121,6 +127,13 @@
     },
     {
       "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/error",
+      "value": null
+    },
+    {
+      "side": "both",
       "field": "events.assertions",
       "value": {
         "exists": true,
@@ -137,16 +150,26 @@
         "exists": true,
         "records": {
           "gets": 0,
-          "posts": 5,
+          "posts": 3,
           "sequence": [
-            "POST /v1/chat/completions",
-            "POST /v1/chat/completions",
             "POST /v1/chat/completions",
             "POST /v1/chat/completions",
             "POST /v1/chat/completions"
           ]
         }
       }
+    },
+    {
+      "side": "candidate",
+      "field": "events.orchestrationLog",
+      "pointer": "/exists",
+      "value": true
+    },
+    {
+      "side": "candidate",
+      "field": "events.orchestrationLog",
+      "pointer": "/records/0/status",
+      "value": "error"
     }
   ],
   "normalizations": [
@@ -207,36 +230,23 @@
           "kind": "tool_calls",
           "calls": [
             {
-              "name": "delegate_task",
-              "argumentsRaw": "{\"tasks\":[\"SCEN:kid1 do a\",\"SCEN:kid2 do b\",\"SCEN:kid3 do c\"]}"
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"SCEN:kid do it\"}"
             }
           ]
         },
         {
           "kind": "text",
-          "content": "PARENT-DONE"
+          "content": "PARENT-DONE",
+          "openGate": "release-kid"
         }
       ],
-      "kid3": [
+      "kid": [
         {
-          "kind": "text",
-          "content": "THREE-DONE",
-          "openGate": "g2"
-        }
-      ],
-      "kid2": [
-        {
-          "kind": "text",
-          "content": "TWO-DONE",
-          "gate": "g2",
-          "openGate": "g1"
-        }
-      ],
-      "kid1": [
-        {
-          "kind": "text",
-          "content": "ONE-DONE",
-          "gate": "g1"
+          "kind": "http_error",
+          "status": 418,
+          "message": "UPSTREAM_CANARY",
+          "gate": "release-kid"
         }
       ]
     }
