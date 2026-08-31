@@ -177,23 +177,52 @@ function replaceRegex(
   replacement: string,
   field: string,
 ): unknown {
-  if (typeof value !== "string") {
-    throw new HarnessError("NORMALIZATION_TYPE", `Normalization field ${field} is not text`);
+  if (typeof value === "string") {
+    const decoded = streamField(field) ? Buffer.from(value, "base64").toString("utf8") : value;
+    const expression = new RegExp(pattern, "g");
+    const matches = [...decoded.matchAll(expression)];
+    if (matches.length === 0) {
+      throw new HarnessError(
+        "NORMALIZATION_MISS",
+        `Normalization for ${field} did not match its declared pattern`,
+      );
+    }
+    if (matches.length > 16) {
+      throw new HarnessError("NORMALIZATION_LIMIT", `Normalization for ${field} exceeded 16 matches`);
+    }
+    const replaced = decoded.replace(expression, replacement);
+    return streamField(field) ? Buffer.from(replaced).toString("base64") : replaced;
   }
-  const decoded = streamField(field) ? Buffer.from(value, "base64").toString("utf8") : value;
-  const expression = new RegExp(pattern, "g");
-  const matches = [...decoded.matchAll(expression)];
-  if (matches.length === 0) {
+  // Structured (non-stream) fields, e.g. events.requests/sqlite.db, are
+  // objects/arrays, not raw text — walk them the same way replaceString's
+  // recursive-object case already does, applying the pattern to every
+  // string leaf rather than requiring the caller to pin an exact JSON
+  // Pointer to a value that embeds today's date (which changes daily).
+  let totalMatches = 0;
+  const visit = (entry: unknown): unknown => {
+    if (typeof entry === "string") {
+      const expression = new RegExp(pattern, "g");
+      const matches = [...entry.matchAll(expression)];
+      totalMatches += matches.length;
+      return entry.replace(expression, replacement);
+    }
+    if (Array.isArray(entry)) return entry.map(visit);
+    if (typeof entry === "object" && entry !== null) {
+      return Object.fromEntries(Object.entries(entry).map(([key, child]) => [key, visit(child)]));
+    }
+    return entry;
+  };
+  const replaced = visit(value);
+  if (totalMatches === 0) {
     throw new HarnessError(
       "NORMALIZATION_MISS",
       `Normalization for ${field} did not match its declared pattern`,
     );
   }
-  if (matches.length > 16) {
+  if (totalMatches > 16) {
     throw new HarnessError("NORMALIZATION_LIMIT", `Normalization for ${field} exceeded 16 matches`);
   }
-  const replaced = decoded.replace(expression, replacement);
-  return streamField(field) ? Buffer.from(replaced).toString("base64") : replaced;
+  return replaced;
 }
 
 function applyRule(

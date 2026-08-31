@@ -442,6 +442,20 @@ function normalizeRuntimePaths<T>(value: T): T {
   ) as T;
 }
 
+/** The system prompt's "Today's date is YYYY-MM-DD." reaches the hashed
+ * projection through several paths (an upstream request body, a stored
+ * system message row in `database.messages`, possibly the CLI's own
+ * stdout) — normalizing the whole projection object in one pass, right
+ * before hashing, catches all of them without having to enumerate each
+ * field individually. Anchored to the exact sentence (not a bare date
+ * pattern) so it can't accidentally swallow an unrelated YYYY-MM-DD-shaped
+ * value elsewhere in the projection. */
+function normalizeToday<T>(value: T): T {
+  return JSON.parse(
+    JSON.stringify(value).replace(/Today's date is \d{4}-\d{2}-\d{2}\./gu, "Today's date is <DATE>."),
+  ) as T;
+}
+
 function projectedRequests(records: readonly RequestRecord[]): unknown {
   return records.map((record) => ({
     method: record.method,
@@ -613,7 +627,7 @@ try {
       ...candidateRun,
       requests: projectedRequests(candidateRun.requests),
     };
-    const projection = {
+    const rawProjection = {
       oracle: {
         exitCode: oracleRun.process.exitCode,
         output: normalizedOutput(oracleRun.process.stdout),
@@ -627,18 +641,24 @@ try {
         database: candidateRun.database,
       },
     };
-    const oracleProjection = canonicalJson(projection.oracle);
-    const candidateProjection = canonicalJson(projection.candidate);
+    // The match/divergent verdict is computed from the UN-normalized
+    // projection — normalizeToday only stabilizes the hashed/stored
+    // projection against the daily date rollover; it must never blunt
+    // detection of a genuine oracle/candidate content mismatch (including a
+    // real date divergence, if the local-date fix ever regressed).
+    const oracleProjection = canonicalJson(rawProjection.oracle);
+    const candidateProjection = canonicalJson(rawProjection.candidate);
     const match =
       oracleProjection === candidateProjection &&
       oracleRun.requests.length === manifest.expectedRequests &&
       candidateRun.requests.length === manifest.expectedRequests;
     if (!match) failures += 1;
+    const projection = normalizeToday(rawProjection);
     const sha = createHash("sha256").update(JSON.stringify(projection)).digest("hex");
     projections.push({ id: manifest.id, sha, match });
     writeFileSync(
       join(evidenceRoot, `${manifest.id}.json`),
-      `${JSON.stringify({ schemaVersion: 1, manifest: parsedManifest, targetSha, raw: { oracle: safeOracleRun, candidate: safeCandidateRun }, projection, differences: match ? [] : [{ oracle: projection.oracle, candidate: projection.candidate }], projectionSha256: sha }, null, 2)}\n`,
+      `${JSON.stringify({ schemaVersion: 1, manifest: parsedManifest, targetSha, raw: { oracle: safeOracleRun, candidate: safeCandidateRun }, projection, differences: match ? [] : [{ oracle: rawProjection.oracle, candidate: rawProjection.candidate }], projectionSha256: sha }, null, 2)}\n`,
     );
   }
 } finally {

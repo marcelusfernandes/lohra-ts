@@ -42,7 +42,10 @@
     "oracle": {
       "adapter": "python",
       "executable": "oracle-python",
-      "prefixArgs": ["{{projectRoot}}/scripts/parity/conversation/oracle_driver.py", "resume"],
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/conversation/oracle_driver.py",
+        "resume"
+      ],
       "cwd": "profile"
     },
     "candidate": {
@@ -81,11 +84,15 @@
         "tables": [
           {
             "name": "sessions",
-            "orderBy": ["id"]
+            "orderBy": [
+              "id"
+            ]
           },
           {
             "name": "messages",
-            "orderBy": ["id"]
+            "orderBy": [
+              "id"
+            ]
           }
         ]
       }
@@ -176,7 +183,10 @@
         "records": {
           "gets": 0,
           "posts": 2,
-          "sequence": ["POST /v1/chat/completions", "POST /v1/chat/completions"]
+          "sequence": [
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions"
+          ]
         }
       }
     },
@@ -218,6 +228,12 @@
       "replacement": "<PROJECT>"
     },
     {
+      "field": "events.requests",
+      "kind": "replace-regex",
+      "pattern": "Today's date is \\d{4}-\\d{2}-\\d{2}\\.",
+      "replacement": "Today's date is <DATE>."
+    },
+    {
       "field": "sqlite.db",
       "kind": "replace-runtime-path",
       "source": "profile",
@@ -234,6 +250,12 @@
       "kind": "replace-json-pointer",
       "pointer": "/tables/sessions/rows/0/7",
       "replacement": "<TIMESTAMP>"
+    },
+    {
+      "field": "sqlite.db",
+      "kind": "replace-regex",
+      "pattern": "Today's date is \\d{4}-\\d{2}-\\d{2}\\.",
+      "replacement": "Today's date is <DATE>."
     },
     {
       "field": "sqlite.db",

@@ -221,7 +221,9 @@ for (const filename of readdirSync(directory).filter(
   ];
   if (!manifest.comparisons.some((item) => item.field === "sqlite.db"))
     manifest.comparisons.push({ class: "schema", field: "sqlite.db" });
-  manifest.normalizations = manifest.normalizations.filter((item) => item.field !== "sqlite.db");
+  manifest.normalizations = manifest.normalizations.filter(
+    (item) => item.field !== "sqlite.db" && item.field !== "events.requests",
+  );
   manifest.normalizations.push(
     {
       field: "sqlite.db",
@@ -240,6 +242,30 @@ for (const filename of readdirSync(directory).filter(
       kind: "replace-json-pointer",
       pointer: "/tables/sessions/rows/0/7",
       replacement: "<TIMESTAMP>",
+    },
+    // Cross-cutting fixup: the system prompt's "Today's date is
+    // YYYY-MM-DD." otherwise sits inside these two hashed fields
+    // unnormalized — a digest that's meant to prove no-regression then
+    // breaks on its own every UTC/local midnight, with or without any
+    // real divergence. All 14 t09-public-* scenarios carry it in both
+    // events.requests and sqlite.db (measured, not assumed).
+    {
+      field: "sqlite.db",
+      kind: "replace-regex",
+      pattern: "Today's date is \\d{4}-\\d{2}-\\d{2}\\.",
+      replacement: "Today's date is <DATE>.",
+    },
+    {
+      field: "events.requests",
+      kind: "replace-runtime-path",
+      source: "profile",
+      replacement: "<PROFILE>",
+    },
+    {
+      field: "events.requests",
+      kind: "replace-regex",
+      pattern: "Today's date is \\d{4}-\\d{2}-\\d{2}\\.",
+      replacement: "Today's date is <DATE>.",
     },
   );
   for (let index = 0; index < messageCount; index += 1) {

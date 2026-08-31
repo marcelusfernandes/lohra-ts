@@ -110,7 +110,7 @@ function capture(sqliteProjection = "include") {
   };
 }
 
-function normalizations(rows = 2, includeSqlite = true) {
+function normalizations(rows = 2, includeSqlite = true, includeTodayInSqlite = true) {
   const result = [
     {
       field: "process.stdout",
@@ -136,6 +136,17 @@ function normalizations(rows = 2, includeSqlite = true) {
       source: "profile",
       replacement: "<PROJECT>",
     },
+    // Cross-cutting fixup: the system prompt's "Today's date is
+    // YYYY-MM-DD." otherwise sits inside the hashed projection unnormalized
+    // — a digest that's meant to prove no-regression then breaks on its
+    // own every UTC midnight, with or without any real divergence. Every
+    // T08 scenario's captured request carries it at least once.
+    {
+      field: "events.requests",
+      kind: "replace-regex",
+      pattern: "Today's date is \\d{4}-\\d{2}-\\d{2}\\.",
+      replacement: "Today's date is <DATE>.",
+    },
   ];
   if (!includeSqlite) return result;
   result.push(
@@ -158,6 +169,20 @@ function normalizations(rows = 2, includeSqlite = true) {
       replacement: "<TIMESTAMP>",
     },
   );
+  // Same rationale as the events.requests rule above — the stored system
+  // message row in sqlite also embeds today's date, EXCEPT for the one
+  // scenario whose entire premise is that the prompt is NOT stored
+  // (mutant-prompt-not-stored): the oracle's sqlite.db has it, the
+  // candidate's deliberately doesn't, so requiring a match on both sides
+  // would fail the very divergence this scenario exists to prove.
+  if (includeTodayInSqlite) {
+    result.push({
+      field: "sqlite.db",
+      kind: "replace-regex",
+      pattern: "Today's date is \\d{4}-\\d{2}-\\d{2}\\.",
+      replacement: "Today's date is <DATE>.",
+    });
+  }
   for (let index = 0; index < rows; index += 1) {
     result.push(
       {
@@ -550,7 +575,11 @@ for (const definition of definitions) {
     capture: capture(definition.id.includes("tool-hardening") ? "raw-only" : "include"),
     comparisons,
     expectations,
-    normalizations: normalizations(definition.rows, !definition.id.includes("tool-hardening")),
+    normalizations: normalizations(
+      definition.rows,
+      !definition.id.includes("tool-hardening"),
+      definition.id !== "mutant-prompt-not-stored",
+    ),
     stub: {
       state: "up-with-models",
       fixture: definition.fixture,
