@@ -24,6 +24,11 @@ export interface LaunchCandidateFakeInput {
   readonly home: string;
   readonly insecure?: boolean;
   readonly bootTimeoutMs?: number;
+  /** Pins LOHRA_DASHBOARD_SESSION_TOKEN so a scenario can thread a KNOWN
+   * valid token through authenticated REST/WS calls instead of only
+   * exercising the no-token/wrong-token negative paths -- dashboard.ts
+   * honors this env var over its own secrets.token_urlsafe(32) fallback. */
+  readonly dashboardToken?: string;
 }
 
 const BOOT_LINE_PATTERN = /^Lohra dashboard: http:\/\/127\.0\.0\.1:(\d+)\n$/mu;
@@ -40,6 +45,7 @@ export async function launchCandidateFakeUpstreamDashboard(
     LOHRA_PORT: "0",
   };
   if (input.insecure === true) env.LOHRA_INSECURE = "1";
+  if (input.dashboardToken !== undefined) env.LOHRA_DASHBOARD_SESSION_TOKEN = input.dashboardToken;
 
   const child = spawn("npx", ["tsx", LAUNCHER_SCRIPT], {
     cwd: input.home,
