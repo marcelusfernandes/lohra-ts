@@ -83,6 +83,12 @@ export class ConversationRuntime {
     readonly model: string;
     readonly cwd: string;
     readonly temperature?: number | null;
+    /** contract L1/L9 (T13): only ever set for a child's turn via
+     * spawn_session/delegate_task's own `effort` override — the parent's
+     * own chat command has no surface to set this at all (the oracle's
+     * cli.py has no effort flag either), so this stays absent/null there
+     * and nothing changes for the parent's own requests. */
+    readonly effort?: string | null;
     readonly sessionId?: string;
     readonly signal?: AbortSignal;
     /** Drains zero or more messages to append at the top of every iteration
@@ -158,6 +164,7 @@ export class ConversationRuntime {
           messages: immutableMessages(messages),
           model: input.model,
           temperature: input.temperature ?? null,
+          effort: input.effort ?? null,
           maxTokens: this.options.maxTokens ?? null,
           tools: immutableMessages(
             (this.options.toolDefinitions ?? []) as readonly Readonly<Record<string, unknown>>[],

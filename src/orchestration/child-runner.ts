@@ -90,12 +90,12 @@ function zeroResult(
  * (OrchestrationCore's buildSubagentPrompt, captured once at spawn) owns
  * decision 25's freeze invariant; this function only reuses it.
  *
- * Effort overrides (SpawnConfig.effort) are accepted by the type but not yet
- * forwarded: ConversationRuntime's ModelRequest has no effort field today,
- * and none of the three ModelTransport wrappers pass it to the transport
- * layer's BuildKwargsOptions.effort — a pre-existing gap in shared
- * conversation/*.ts, not something this ticket introduced. Escalated to the
- * coordinator; tracked as a carried debt until authorized.
+ * Effort overrides (SpawnConfig.effort) are forwarded via runTurn's own
+ * effort input — added to ModelRequest/ConversationRuntime/the three
+ * ModelTransport wrappers as a dedicated, coordinator-authorized additive
+ * extension (mirroring drainMessages: absent means null, neutral for the
+ * parent's own chat command, which never sets it since the oracle's own
+ * parent CLI has no effort flag either).
  */
 export function createChildRunner(options: CreateChildRunnerOptions): ChildRunner {
   return async (
@@ -117,6 +117,7 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
         ? [configuredProvider, configuredClient]
         : await options.clientPool.get(null);
     const model = (configured?.["model"] as string | undefined) ?? modelOverride ?? options.defaultModel;
+    const effort = nonEmpty(config.effort);
     const maxIterations = config.maxIterations ?? options.childMaxIterations;
 
     // ConversationRuntime.runTurn() only creates a session when sessionId is
@@ -150,6 +151,7 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
         cwd: options.cwd,
         sessionId: subId,
         drainMessages,
+        effort,
       });
       return zeroResult(
         "complete",

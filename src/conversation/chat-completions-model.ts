@@ -17,6 +17,7 @@ export class ChatCompletionsModel implements ModelTransport {
       tools: request.tools,
       maxTokens: request.maxTokens,
       temperature: request.temperature,
+      effort: request.effort,
     });
     return this.streaming ? this.client.stream(kwargs) : this.client.create(kwargs, request.signal);
   }
