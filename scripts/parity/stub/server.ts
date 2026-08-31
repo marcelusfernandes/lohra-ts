@@ -380,6 +380,7 @@ async function handleLaneScript(
     response.writeHead(step.status ?? 418, {
       "content-type": "application/json",
       "content-length": String(payload.length),
+      ...step.headers,
     });
     response.end(payload);
     return;

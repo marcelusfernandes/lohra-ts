@@ -163,6 +163,10 @@ export interface StubLaneStep {
   readonly calls?: readonly StubLaneToolCall[];
   readonly status?: number;
   readonly message?: string;
+  /** Extra response headers for an http_error step (e.g. "retry-after") — never
+   * set for text/tool_calls steps, which always use the fixed content-type/
+   * content-length pair the fixture already emits. */
+  readonly headers?: Readonly<Record<string, string>>;
   readonly signal?: string;
   readonly awaitSignal?: string;
   readonly gate?: string;

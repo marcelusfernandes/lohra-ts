@@ -281,6 +281,21 @@ describe("chat-lane-script fixture", () => {
     expect(parsed.error?.message).toBe("T13_CANARY");
   });
 
+  it("serves an http_error step's declared extra headers (e.g. retry-after for quota scenarios)", async () => {
+    reset({
+      main: [{ kind: "http_error", status: 429, message: "slow down", headers: { "retry-after": "30" } }],
+    });
+    const response = await post({ model: "m", messages: [{ role: "user", content: "SCEN:main go" }] });
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("30");
+  });
+
+  it("omits extra headers entirely when an http_error step declares none", async () => {
+    reset({ main: [{ kind: "http_error", status: 429, message: "slow down" }] });
+    const response = await post({ model: "m", messages: [{ role: "user", content: "SCEN:main go" }] });
+    expect(response.headers.get("retry-after")).toBeNull();
+  });
+
   it("forces cross-lane ordering by barrier, never by sleep: a gated request only resolves after another lane opens it", async () => {
     reset({
       waiter: [{ kind: "text", content: "RELEASED", signal: "waiter-arrived", gate: "go" }],
