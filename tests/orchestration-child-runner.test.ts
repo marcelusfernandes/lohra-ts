@@ -248,12 +248,20 @@ describe("createChildRunner", () => {
     close();
   });
 
-  it("maps a 500 upstream failure to error_kind:null (L15 boundary)", async () => {
+  it("maps a 500 upstream failure to error_kind:null (L15 boundary), formatting output the same way the oracle's own SDK does", async () => {
     const { sessions, close } = setup();
     sessions.createSession({ id: "parent-1", source: "gateway" });
     const parentProfile = getProviderProfile("openai");
     if (parentProfile === null) throw new Error("openai profile missing");
-    const { client } = fakeClient([jsonResponse(500, { error: "boom" })]);
+    // Three identical 500s: the client retries a 5xx up to maxRetries (2)
+    // times, so the queue must survive every attempt with the SAME payload
+    // to observe the real, final classification rather than "queue
+    // exhausted" from a retry outrunning a single queued response.
+    const { client } = fakeClient([
+      jsonResponse(500, { error: "boom" }),
+      jsonResponse(500, { error: "boom" }),
+      jsonResponse(500, { error: "boom" }),
+    ]);
     const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
     const runner = makeRunner(sessions, pool);
 
@@ -262,6 +270,12 @@ describe("createChildRunner", () => {
     expect(result.status).toBe("error");
     expect(result.errorKind).toBeNull();
     expect(result.retryAfter).toBeNull();
+    // "Error code: N - {payload!r}" — Python's str(APIError), not the bare
+    // provider message. A delegate_task batch surfaces this verbatim in a
+    // failed task's summary (L17): losing this format was a real,
+    // measured bilateral divergence (t13-delegate-batch-isolated-failure-
+    // order-preserved), not a cosmetic nicety.
+    expect(result.output).toBe("Error code: 500 - {'error': 'boom'}");
     close();
   });
 

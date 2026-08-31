@@ -10,6 +10,7 @@ import {
 } from "../conversation/index.js";
 import type { ModelTransport } from "../conversation/index.js";
 import type { ProviderProfile } from "../providers/index.js";
+import { formatProviderFailureMessage } from "../serialization/provider-error-message.js";
 import type { SessionRepository } from "../state/index.js";
 import { childToolDefinitions, createChildDispatch, RegistryToolDispatcher } from "../tools/index.js";
 import type { RegistryDispatch, ToolDefinition } from "../tools/index.js";
@@ -188,7 +189,7 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
         const cause = error instanceof Error ? error.cause : undefined;
         const errorKind = classifyProviderError(cause);
         const retryAfter = errorKind === "quota_exhausted" ? retryAfterSeconds(cause) : null;
-        const message = error instanceof Error ? error.message : String(error);
+        const message = formatProviderFailureMessage(error);
         return zeroResult("error", message, profile, model, null, errorKind, retryAfter);
       }
     } catch (resolutionError) {

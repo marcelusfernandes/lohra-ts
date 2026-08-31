@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "id": "t13-delegate-order-preserved-reverse-completion",
-  "description": "T13 bilateral CLI observation (expected match): delegate_task's results array preserves task-submission order even when the three children settle in the exact reverse order, forced by an in-process barrier chain (kid3 opens g2 unconditionally, kid2 waits on g2 then opens g1, kid1 waits on g1) — never by sleep/wall-clock. Proves order preservation survives two structurally different concurrency mechanisms (candidate: Promise.all over async children; oracle: ThreadPoolExecutor futures joined in submission order). KNOWN LIMIT (declared, not a gap to fix): events.requests is deliberately excluded from capture/comparisons here. recordRequest assigns each request's seq at ARRIVAL, before any gate wait, so with three children admitted concurrently the raw request-log ARRIVAL order is a scheduler artifact, not a semantic guarantee the barrier orders — it is not byte-stable run to run and must not be compared. The order-preservation proof lives entirely in process.stdout's /tool_calls/0/result (task-index order) plus events.summary's post/get counts, both of which are stable by construction, independent of arrival interleaving.",
+  "id": "t13-delegate-batch-isolated-failure-order-preserved",
+  "description": "T13 bilateral CLI observation (expected match), item 22 of the versioned inventory (contract L17): a delegate_task batch of three — kid2 fails with an HTTP 418 upstream canary, kid1 and kid3 succeed — settles in the exact reverse of submission order (kid3, then kid2, then kid1), forced by an in-process barrier chain (kid3 opens g2 unconditionally, kid2 waits on g2 then opens g1, kid1 waits on g1), never by sleep/wall-clock. Proves both L17 halves at once: the isolated failure does not abort the batch or raise, and results preserves task-submission order — [ONE-DONE, kid2's error output, THREE-DONE] — regardless of completion order or which task failed, on both the candidate's Promise.all and the oracle's ThreadPoolExecutor-future join. KNOWN LIMIT (declared, not a gap to fix): events.requests is deliberately excluded from capture/comparisons here. recordRequest assigns each request's seq at ARRIVAL, before any gate wait, so with three children admitted concurrently the raw request-log ARRIVAL order is a scheduler artifact, not a semantic guarantee the barrier orders — it is not byte-stable run to run and must not be compared. The order-preservation proof lives entirely in process.stdout's /tool_calls/0/result (task-index order) plus events.summary's post/get counts, both of which are stable by construction, independent of arrival interleaving.",
   "argv": [
     "chat",
     "SCEN:parent delegate three background checks",
@@ -226,8 +226,9 @@
       ],
       "kid2": [
         {
-          "kind": "text",
-          "content": "TWO-DONE",
+          "kind": "http_error",
+          "status": 418,
+          "message": "UPSTREAM_CANARY",
           "gate": "g2",
           "openGate": "g1"
         }

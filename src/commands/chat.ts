@@ -46,10 +46,10 @@ import {
   buildClient,
   ChatCompletionsClient,
   createResponsesClient,
-  ProviderCallFailed,
   ResponsesClient,
 } from "../transports/index.js";
 import type { ModelTransport } from "../conversation/index.js";
+import { formatProviderFailureMessage } from "../serialization/provider-error-message.js";
 import { runChatBoundary } from "./chat-boundary.js";
 
 export interface ChatCommandOptions {
@@ -93,33 +93,6 @@ function finite(value: string | undefined, name: string): number | undefined {
   const result = Number(value);
   if (!Number.isFinite(result)) throw new Error(`CHAT_OPTION_INVALID:${name}`);
   return result;
-}
-
-function pythonRepr(value: unknown): string {
-  if (value === null) return "None";
-  if (value === undefined) return "None";
-  if (value === true) return "True";
-  if (value === false) return "False";
-  if (typeof value === "string")
-    return `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
-  if (typeof value === "number") return String(value);
-  if (Array.isArray(value)) return `[${value.map(pythonRepr).join(", ")}]`;
-  if (typeof value === "object")
-    return `{${Object.entries(value as Record<string, unknown>)
-      .map(([key, entry]) => `${pythonRepr(key)}: ${pythonRepr(entry)}`)
-      .join(", ")}}`;
-  if (typeof value === "bigint") return String(value);
-  if (typeof value === "symbol") return value.description ?? "";
-  if (typeof value === "function") return value.name;
-  return "None";
-}
-
-function publicError(error: unknown): string {
-  const cause = error instanceof Error ? error.cause : undefined;
-  if (cause instanceof ProviderCallFailed && cause.statusCode !== undefined) {
-    return `Error code: ${String(cause.statusCode)} - ${pythonRepr(cause.payload)}`;
-  }
-  return error instanceof Error ? error.message : String(error);
 }
 
 function initializationError(input: string, model: string | null, message: string): Result {
@@ -326,7 +299,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       stderr: `${warningLines}${subscriptionNote}session: ${result.sessionId}  (resume with --session ${result.sessionId})\n`,
     };
   } catch (error) {
-    const message = publicError(error);
+    const message = formatProviderFailureMessage(error);
     const sessionId = error instanceof ConversationError ? (error.sessionId ?? "") : "";
     const apiCalls = error instanceof ConversationError ? error.apiCalls : 0;
     const incomplete = error instanceof IncompleteToolCallError ? error : null;
