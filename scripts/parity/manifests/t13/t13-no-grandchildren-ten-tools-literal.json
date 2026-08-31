@@ -1,0 +1,362 @@
+{
+  "schemaVersion": 1,
+  "id": "t13-no-grandchildren-ten-tools-literal",
+  "description": "T13 bilateral CLI observation (expected match), item 4 of the versioned inventory (contract decision 4/L4): a child dispatching any of ten privileged tool names (the four orchestration verbs plus six more from the T13 baseline's own s06-privilege suite: memory, session_search, cronjob, list_models, run_workflow, skill_manage) gets the exact literal \"the '<name>' tool is not available to subagents\" for every single one, on both sides, byte-identical \u2014 no grandchildren, structurally: the child cannot spawn its own child (spawn_session/steer_session/collect_session/delegate_task included). This is oracle-authored text (the exact repr()-quoted name in the message), and it costs zero extra upstream calls beyond the child's own ten decision turns, since every one of these is refused before base dispatch is ever reached.",
+  "argv": [
+    "chat",
+    "SCEN:parent probes no-grandchildren",
+    "--json",
+    "--provider",
+    "ollama",
+    "--model",
+    "stub-coder:1b"
+  ],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "PYTHONHASHSEED": "0",
+      "NO_COLOR": "1",
+      "LOHRA_NO_WIZARD": "1",
+      "COLUMNS": "80",
+      "TZ": "UTC",
+      "HOME": "{{home}}",
+      "LOHRA_HOME": "{{home}}/.lohra",
+      "CODEX_HOME": "{{home}}/codex",
+      "TMPDIR": "{{home}}/tmp"
+    }
+  },
+  "preconditions": [
+    {
+      "kind": "tcp-port-closed",
+      "host": "127.0.0.1",
+      "port": 11434
+    }
+  ],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/conversation/oracle_driver.py",
+        "single"
+      ],
+      "cwd": "profile"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/conversation/candidate-driver.mjs",
+        "single"
+      ],
+      "cwd": "profile"
+    }
+  },
+  "limits": {
+    "timeoutMs": 20000,
+    "maxOutputBytes": 16777216
+  },
+  "capture": {
+    "tree": {
+      "enabled": false,
+      "root": "profile",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": [
+      {
+        "name": "summary",
+        "root": "profile",
+        "path": "stub-summary.json",
+        "format": "json"
+      },
+      {
+        "name": "assertions",
+        "root": "profile",
+        "path": "stub-assertions.json",
+        "format": "json"
+      }
+    ]
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    },
+    {
+      "class": "byte",
+      "field": "process.stderr"
+    },
+    {
+      "class": "stub",
+      "field": "events.summary"
+    },
+    {
+      "class": "stub",
+      "field": "events.assertions"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/completed",
+      "value": true
+    },
+    {
+      "side": "both",
+      "field": "events.assertions",
+      "value": {
+        "exists": true,
+        "records": {
+          "valid": true,
+          "failures": []
+        }
+      }
+    },
+    {
+      "side": "both",
+      "field": "events.summary",
+      "value": {
+        "exists": true,
+        "records": {
+          "gets": 0,
+          "posts": 14,
+          "sequence": [
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions"
+          ]
+        }
+      }
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/tool_calls/1/result",
+      "value": "{\"ok\": true, \"status\": \"complete\", \"output\": \"KID-DONE\", \"tokens_in\": 121, \"tokens_out\": 77, \"cache_read_tokens\": 0, \"cache_write_tokens\": 0, \"reasoning_tokens\": 0, \"provider\": \"ollama\", \"model\": \"stub-coder:1b\", \"forced_fallback\": false, \"error_kind\": null, \"retry_after\": null}"
+    }
+  ],
+  "normalizations": [
+    {
+      "field": "process.stdout",
+      "kind": "replace-json-pointer",
+      "pointer": "/session_id",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stdout",
+      "kind": "replace-regex",
+      "pattern": "[0-9a-f]{32}",
+      "replacement": "<SUB_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=session: )[0-9a-f]{32}(?=  \\(resume with --session )",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=--session )[0-9a-f]{32}(?=\\))",
+      "replacement": "<SESSION_ID>"
+    }
+  ],
+  "stub": {
+    "state": "up-with-models",
+    "fixture": "chat-lane-script",
+    "requestLog": {
+      "comparedHeaders": [
+        "authorization",
+        "accept",
+        "content-type",
+        "host",
+        "x-stainless-retry-count"
+      ],
+      "excludedHeaders": [
+        "accept-encoding",
+        "connection",
+        "content-length",
+        "user-agent",
+        "x-stainless-lang",
+        "x-stainless-package-version",
+        "x-stainless-os",
+        "x-stainless-arch",
+        "x-stainless-runtime",
+        "x-stainless-runtime-version",
+        "x-stainless-async",
+        "x-stainless-read-timeout"
+      ]
+    },
+    "laneSteps": {
+      "parent": [
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"SCEN:kid grandchildren attempt\"}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "collect_session",
+              "argumentsRaw": "{\"sub_id\":\"__SUB__\",\"wait\":true}"
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "content": "PARENT-DONE"
+        }
+      ],
+      "kid": [
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"grandchild\"}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "steer_session",
+              "argumentsRaw": "{\"sub_id\":\"x\",\"text\":\"y\"}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "collect_session",
+              "argumentsRaw": "{\"sub_id\":\"x\"}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "delegate_task",
+              "argumentsRaw": "{\"tasks\":[\"grandchild\"]}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "memory",
+              "argumentsRaw": "{\"action\":\"add\",\"text\":\"T13-CHILD-MEMORY-CANARY\"}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "session_search",
+              "argumentsRaw": "{\"query\":\"x\"}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "cronjob",
+              "argumentsRaw": "{\"action\":\"list\"}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "list_models",
+              "argumentsRaw": "{}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "run_workflow",
+              "argumentsRaw": "{\"spec\":{}}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "skill_manage",
+              "argumentsRaw": "{\"action\":\"create\",\"name\":\"x\"}"
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "content": "KID-DONE"
+        }
+      ]
+    }
+  },
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10",
+    "expectedPackages": {
+      "openai": "3.6.0",
+      "httpx": "0.28.1"
+    }
+  }
+}
