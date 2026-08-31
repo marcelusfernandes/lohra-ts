@@ -234,6 +234,23 @@ describe("collectSessionTool", () => {
     expect(parsed.status).toBe("error");
   });
 
+  it("renders a non-null retry_after as a Python-style float, never a bare integer (L15/assertion 39)", async () => {
+    const core = makeCore(() =>
+      Promise.resolve(
+        okResult({
+          status: "error",
+          errorKind: "quota_exhausted",
+          retryAfter: 1,
+        }),
+      ),
+    );
+    await spawnSessionTool(core, allowAllProviders, { prompt: "x" });
+    const envelope = await collectSessionTool(core, { sub_id: "aaaa", wait: true });
+    expect(envelope).toContain('"retry_after": 1.0');
+    expect(envelope).not.toContain('"retry_after": 1,');
+    expect(envelope).not.toContain('"retry_after": 1}');
+  });
+
   it("coerces a numeric sub_id to string before the no-sub-session repr (L19)", async () => {
     const core = makeCore(() => Promise.resolve(okResult()));
     expect(await collectSessionTool(core, { sub_id: 7, wait: true })).toBe(

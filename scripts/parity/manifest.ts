@@ -68,6 +68,16 @@ function strings(value: unknown, label: string): readonly string[] {
   return value as string[];
 }
 
+function stringRecord(value: unknown, label: string): Readonly<Record<string, string>> {
+  const record = object(value, label);
+  for (const [key, entry] of Object.entries(record)) {
+    if (typeof entry !== "string") {
+      throw new HarnessError("MANIFEST_INVALID", `${label}.${key} must be a string`);
+    }
+  }
+  return record as Record<string, string>;
+}
+
 function array(value: unknown, label: string): readonly unknown[] {
   if (!Array.isArray(value)) {
     throw new HarnessError("MANIFEST_INVALID", `${label} must be an array`);
@@ -217,7 +227,7 @@ function stub(value: unknown): StubSpec {
         const step = object(raw, label);
         exactKeys(
           step,
-          ["kind", "content", "calls", "status", "message", "signal", "awaitSignal", "gate", "openGate"],
+          ["kind", "content", "calls", "status", "message", "headers", "signal", "awaitSignal", "gate", "openGate"],
           label,
         );
         const kind = enumeration(step.kind, ["text", "tool_calls", "http_error"], `${label}.kind`);
@@ -248,6 +258,7 @@ function stub(value: unknown): StubSpec {
           ...(calls === undefined ? {} : { calls }),
           ...(step.status === undefined ? {} : { status: step.status as number }),
           ...(step.message === undefined ? {} : { message: string(step.message, `${label}.message`) }),
+          ...(step.headers === undefined ? {} : { headers: stringRecord(step.headers, `${label}.headers`) }),
           ...(step.signal === undefined ? {} : { signal: string(step.signal, `${label}.signal`) }),
           ...(step.awaitSignal === undefined
             ? {}

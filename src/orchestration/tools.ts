@@ -1,4 +1,5 @@
 import { ProviderError } from "../agent/client-pool.js";
+import { pythonFloat } from "../serialization/python-json.js";
 import { pythonRepr } from "../serialization/python-repr.js";
 import { toolError, toolResult } from "../tools/envelope.js";
 import type { ToolArguments } from "../tools/types.js";
@@ -76,7 +77,10 @@ export function steerSessionTool(core: OrchestrationCore, args: ToolArguments): 
 }
 
 /** Maps the registry's CollectResult (camelCase) to the wire's snake_case
- * envelope, in the contract's exact 13-key order (assertion 14). */
+ * envelope, in the contract's exact 13-key order (assertion 14). retry_after
+ * is the oracle's own `seconds if seconds > 0 else None` (L15/assertion 39) —
+ * a Python float, so a whole-number value like 1 renders as "1.0", never the
+ * bare "1" a plain JS number would produce. */
 function collectEnvelope(result: CollectResult): string {
   return toolResult(undefined, {
     status: result.status,
@@ -90,7 +94,7 @@ function collectEnvelope(result: CollectResult): string {
     model: result.model,
     forced_fallback: result.forcedFallback,
     error_kind: result.errorKind,
-    retry_after: result.retryAfter,
+    retry_after: result.retryAfter === null ? null : pythonFloat(result.retryAfter),
   });
 }
 
