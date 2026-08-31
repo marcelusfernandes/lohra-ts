@@ -1,0 +1,290 @@
+{
+  "schemaVersion": 1,
+  "id": "t13-child-system-prompt-frozen-across-idle-steer-second-turn",
+  "description": "T13 bilateral CLI observation (expected match), item 25 of the versioned inventory (contract decision 25/assertion 51(a)). DECLARED EXPLICITLY AS A REGRESSION GUARD, NOT PROOF OF MECHANISM (per the coordinator's own framing and the contract's assertion 51): the subagent's system prompt is totally static (decision 25/L28) \u2014 it never depends on the child, the turn, the process, or the environment. Because of that, this scenario (a child steered while idle, second turn) passes IDENTICALLY whether the candidate freezes the prompt at spawn or rebuilds byte-identical text from scratch every turn, since both produce the same bytes against this oracle. It is mandatory anyway \u2014 it catches accidental prompt drift across turns \u2014 but it must never be cited as proof that a freeze mechanism exists; that proof is probe-complementar item t13-child-prompt-frozen-instrumented-builder-not-recalled (a named-mutant unit test: an instrumented builder that would return DIFFERENT text on each call, asserting the second retrieval still returns the first call's text and the builder is invoked at most once per subsession \u2014 the one place in the contract where the freeze-vs-rebuild distinction is actually auditable). This manifest only asserts: the child's system message content in its second (steered, post-idle) request is byte-identical to its first request's system message content. KNOWN LIMIT (declared, not a gap to fix): the exact events.requests record index of the child turns differs between candidate ([1,4]) and oracle ([2,5]) \u2014 the same scheduler-interleaving difference documented elsewhere in this contract (Node event loop vs CPython+GIL+ThreadPoolExecutor) \u2014 so the four pinned pointer expectations are declared per-side (side:\"candidate\"/\"oracle\"), never side:\"both\" with one shared pointer, and never placed in comparisons (which would byte-diff the two differently-shaped request logs directly). The pinned system-prompt text also embeds this manifest's authoring date (2026-08-31, via buildSystemPrompt's default \"today\") since events.requests has no declared comparison to normalize against; a byte-exact re-run on a different calendar day needs the date segment refreshed \u2014 the freeze property itself (turn1==turn2 within a side) is what this manifest actually guards, not the specific date text.",
+  "argv": [
+    "chat",
+    "SCEN:parent steers an idle child",
+    "--json",
+    "--provider",
+    "ollama",
+    "--model",
+    "stub-coder:1b"
+  ],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "PYTHONHASHSEED": "0",
+      "NO_COLOR": "1",
+      "LOHRA_NO_WIZARD": "1",
+      "COLUMNS": "80",
+      "TZ": "UTC",
+      "HOME": "{{home}}",
+      "LOHRA_HOME": "{{home}}/.lohra",
+      "CODEX_HOME": "{{home}}/codex",
+      "TMPDIR": "{{home}}/tmp"
+    }
+  },
+  "preconditions": [
+    {
+      "kind": "tcp-port-closed",
+      "host": "127.0.0.1",
+      "port": 11434
+    }
+  ],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/conversation/oracle_driver.py",
+        "single"
+      ],
+      "cwd": "profile"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/conversation/candidate-driver.mjs",
+        "single"
+      ],
+      "cwd": "profile"
+    }
+  },
+  "limits": {
+    "timeoutMs": 20000,
+    "maxOutputBytes": 16777216
+  },
+  "capture": {
+    "tree": {
+      "enabled": false,
+      "root": "profile",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": [
+      {
+        "name": "requests",
+        "root": "profile",
+        "path": "stub-requests.jsonl",
+        "format": "jsonl"
+      },
+      {
+        "name": "summary",
+        "root": "profile",
+        "path": "stub-summary.json",
+        "format": "json"
+      },
+      {
+        "name": "assertions",
+        "root": "profile",
+        "path": "stub-assertions.json",
+        "format": "json"
+      }
+    ]
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    },
+    {
+      "class": "byte",
+      "field": "process.stderr"
+    },
+    {
+      "class": "stub",
+      "field": "events.summary"
+    },
+    {
+      "class": "stub",
+      "field": "events.assertions"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/completed",
+      "value": true
+    },
+    {
+      "side": "both",
+      "field": "events.assertions",
+      "value": {
+        "exists": true,
+        "records": {
+          "valid": true,
+          "failures": []
+        }
+      }
+    },
+    {
+      "side": "candidate",
+      "field": "events.requests",
+      "pointer": "/records/1/body/messages/0/content",
+      "value": "You are Lohra, a self-improving AI assistant. You are helpful, knowledgeable, and direct. You use tools to take real action and you never fabricate results \u2014 reporting a blocker honestly is always better than inventing an outcome.\n\nYou are an isolated subagent spawned to complete one specific task. You have no access to the parent conversation, its memory, or its skills, and you cannot delegate further. Use the available tools to complete the task, then end with a concise summary of what you did and the outcome.\n\nToday's date is 2026-08-31."
+    },
+    {
+      "side": "candidate",
+      "field": "events.requests",
+      "pointer": "/records/4/body/messages/0/content",
+      "value": "You are Lohra, a self-improving AI assistant. You are helpful, knowledgeable, and direct. You use tools to take real action and you never fabricate results \u2014 reporting a blocker honestly is always better than inventing an outcome.\n\nYou are an isolated subagent spawned to complete one specific task. You have no access to the parent conversation, its memory, or its skills, and you cannot delegate further. Use the available tools to complete the task, then end with a concise summary of what you did and the outcome.\n\nToday's date is 2026-08-31."
+    },
+    {
+      "side": "oracle",
+      "field": "events.requests",
+      "pointer": "/records/2/body/messages/0/content",
+      "value": "You are Lohra, a self-improving AI assistant. You are helpful, knowledgeable, and direct. You use tools to take real action and you never fabricate results \u2014 reporting a blocker honestly is always better than inventing an outcome.\n\nYou are an isolated subagent spawned to complete one specific task. You have no access to the parent conversation, its memory, or its skills, and you cannot delegate further. Use the available tools to complete the task, then end with a concise summary of what you did and the outcome.\n\nToday's date is 2026-08-31."
+    },
+    {
+      "side": "oracle",
+      "field": "events.requests",
+      "pointer": "/records/5/body/messages/0/content",
+      "value": "You are Lohra, a self-improving AI assistant. You are helpful, knowledgeable, and direct. You use tools to take real action and you never fabricate results \u2014 reporting a blocker honestly is always better than inventing an outcome.\n\nYou are an isolated subagent spawned to complete one specific task. You have no access to the parent conversation, its memory, or its skills, and you cannot delegate further. Use the available tools to complete the task, then end with a concise summary of what you did and the outcome.\n\nToday's date is 2026-08-31."
+    }
+  ],
+  "normalizations": [
+    {
+      "field": "process.stdout",
+      "kind": "replace-json-pointer",
+      "pointer": "/session_id",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stdout",
+      "kind": "replace-regex",
+      "pattern": "[0-9a-f]{32}",
+      "replacement": "<SUB_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=session: )[0-9a-f]{32}(?=  \\(resume with --session )",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=--session )[0-9a-f]{32}(?=\\))",
+      "replacement": "<SESSION_ID>"
+    }
+  ],
+  "stub": {
+    "state": "up-with-models",
+    "fixture": "chat-lane-script",
+    "requestLog": {
+      "comparedHeaders": [
+        "authorization",
+        "accept",
+        "content-type",
+        "host",
+        "x-stainless-retry-count"
+      ],
+      "excludedHeaders": [
+        "accept-encoding",
+        "connection",
+        "content-length",
+        "user-agent",
+        "x-stainless-lang",
+        "x-stainless-package-version",
+        "x-stainless-os",
+        "x-stainless-arch",
+        "x-stainless-runtime",
+        "x-stainless-runtime-version",
+        "x-stainless-async",
+        "x-stainless-read-timeout"
+      ]
+    },
+    "laneSteps": {
+      "parent": [
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"SCEN:kid first turn\"}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "collect_session",
+              "argumentsRaw": "{\"sub_id\":\"__SUB__\",\"wait\":true}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "steer_session",
+              "argumentsRaw": "{\"sub_id\":\"__SUB__\",\"text\":\"one more thing\"}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "collect_session",
+              "argumentsRaw": "{\"sub_id\":\"__SUB__\",\"wait\":true}"
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "content": "PARENT-DONE"
+        }
+      ],
+      "kid": [
+        {
+          "kind": "text",
+          "content": "KID-TURN-1-DONE"
+        },
+        {
+          "kind": "text",
+          "content": "KID-TURN-2-DONE"
+        }
+      ]
+    }
+  },
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10",
+    "expectedPackages": {
+      "openai": "3.6.0",
+      "httpx": "0.28.1"
+    }
+  }
+}
