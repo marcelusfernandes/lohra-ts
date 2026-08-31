@@ -1,5 +1,12 @@
-import type { ToolHandler } from "../tools/types.js";
-import type { OrchestrationCore } from "./core.js";
+import { randomUUID } from "node:crypto";
+
+import type { ClientPool } from "../agent/client-pool.js";
+import type { SessionRepository } from "../state/index.js";
+import type { RegistryDispatch, ToolDefinition, ToolHandler } from "../tools/types.js";
+import { createChildRunner } from "./child-runner.js";
+import { OrchestrationCore } from "./core.js";
+import type { FanoutResolution } from "./fanout-config.js";
+import { buildSubagentSystemPrompt } from "./subagent-prompt.js";
 import { collectSessionTool, delegateTaskTool, spawnSessionTool, steerSessionTool } from "./tools.js";
 import type { ProviderResolver } from "./tools.js";
 
@@ -20,4 +27,45 @@ export function orchestrationToolHandlers(
     collect_session: (args) => collectSessionTool(core, args),
     delegate_task: (args) => delegateTaskTool(core, args),
   };
+}
+
+export interface BuildOrchestrationCoreOptions {
+  readonly fanout: FanoutResolution;
+  readonly sessions: SessionRepository;
+  readonly parentSessionId: string;
+  readonly clientPool: ClientPool;
+  readonly baseDispatch: RegistryDispatch;
+  readonly parentToolDefinitions: readonly ToolDefinition[];
+  readonly defaultModel: string;
+  readonly cwd: string;
+}
+
+/**
+ * Builds the real OrchestrationCore commands/chat.ts wires in — extracted
+ * (like orchestrationToolHandlers above) so this exact construction path,
+ * including how fanout.maxParallel/maxSubsessions reach ConcurrencyGate, is
+ * unit-testable from outside chat.ts's closure. A hardcode reintroduced at
+ * the chat.ts call site (passing a literal instead of fanout.maxParallel)
+ * would only have been caught by a manual CLI smoke test before this;
+ * that's not a regression test that runs in CI.
+ */
+export function buildOrchestrationCore(options: BuildOrchestrationCoreOptions): OrchestrationCore {
+  return new OrchestrationCore({
+    runChild: createChildRunner({
+      sessions: options.sessions,
+      parentSessionId: options.parentSessionId,
+      clientPool: options.clientPool,
+      baseDispatch: options.baseDispatch,
+      parentToolDefinitions: options.parentToolDefinitions,
+      defaultModel: options.defaultModel,
+      cwd: options.cwd,
+      idSource: () => randomUUID().replaceAll("-", ""),
+      clock: () => Date.now() / 1000,
+      childMaxIterations: 50,
+    }),
+    idSource: () => randomUUID().replaceAll("-", ""),
+    maxSubsessions: options.fanout.maxSubsessions,
+    maxParallel: options.fanout.maxParallel,
+    buildSubagentPrompt: () => buildSubagentSystemPrompt(),
+  });
 }

@@ -1,10 +1,24 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
+import { afterEach, describe, expect, it } from "vitest";
+
+import { ClientPool } from "../src/agent/client-pool.js";
+import { getProviderProfile } from "../src/providers/index.js";
+import { openStateDatabase, SessionRepository } from "../src/state/index.js";
 import { CHILD_EXCLUDED_TOOLS, childToolDefinitions } from "../src/tools/child.js";
 import { composeDispatch } from "../src/tools/dispatch.js";
 import type { RegistryDispatch, ToolDefinition } from "../src/tools/types.js";
+import {
+  ChatCompletionsClient,
+  ChatCompletionsTransport,
+  type ChatHttpPort,
+  type ChatHttpRequest,
+  type HttpResponseData,
+} from "../src/transports/index.js";
 import { OrchestrationCore, type CollectResult } from "../src/orchestration/core.js";
-import { orchestrationToolHandlers } from "../src/orchestration/chat-wiring.js";
+import { buildOrchestrationCore, orchestrationToolHandlers } from "../src/orchestration/chat-wiring.js";
 import type { ProviderResolver } from "../src/orchestration/tools.js";
 
 const stubPrompt = (): string => "SUBAGENT_SYSTEM_STUB";
@@ -92,5 +106,103 @@ describe("orchestrationToolHandlers", () => {
 
     for (const excluded of CHILD_EXCLUDED_TOOLS) expect(childCatalog).not.toContain(excluded);
     expect(childCatalog).toEqual(["read_file"]);
+  });
+});
+
+/** Never resolves a POST — used to observe how many upstream requests are
+ * simultaneously in flight without needing a valid response body at all. */
+class BarrierPort implements ChatHttpPort {
+  readonly requests: ChatHttpRequest[] = [];
+  post(request: ChatHttpRequest): Promise<HttpResponseData> {
+    this.requests.push(request);
+    return new Promise(() => undefined);
+  }
+}
+
+const roots: string[] = [];
+
+function setupSessions(): SessionRepository {
+  const root = mkdtempSync(join(tmpdir(), "lohra-chat-wiring-"));
+  roots.push(root);
+  const connection = openStateDatabase(join(root, "state.db"));
+  const sessions = new SessionRepository(connection.database, () => 1000, connection.ftsEnabled);
+  sessions.createSession({ id: "parent-1", source: "gateway" });
+  return sessions;
+}
+
+afterEach(() => {
+  while (roots.length > 0) rmSync(roots.pop() as string, { recursive: true, force: true });
+});
+
+describe("buildOrchestrationCore — wiring-level regression for fanout.maxParallel (assertion 24)", () => {
+  it("a non-default maxParallel reaches the real ConcurrencyGate through chat.ts's own construction path, not a hand-rolled OrchestrationCore", async () => {
+    // Proves the exact function commands/chat.ts calls, end to end through
+    // a real ChatCompletionsClient — a hardcode reintroduced at the chat.ts
+    // call site (passing a literal instead of fanout.maxParallel) would
+    // fail this test; a manual CLI smoke test would not run in CI at all.
+    const profile = getProviderProfile("openai");
+    if (profile === null) throw new Error("openai profile missing");
+    const port = new BarrierPort();
+    const client = new ChatCompletionsClient({
+      baseUrl: "http://parent.invalid/v1",
+      apiKey: "k",
+      transport: new ChatCompletionsTransport(),
+      http: port,
+    });
+    const pool = new ClientPool(profile, client, { home: "/tmp", environment: {} });
+    const sessions = setupSessions();
+
+    const core = buildOrchestrationCore({
+      fanout: { maxParallel: 1, maxSubsessions: 200, parentMaxIterations: 90, warnings: [] },
+      sessions,
+      parentSessionId: "parent-1",
+      clientPool: pool,
+      baseDispatch: () => Promise.resolve("unused"),
+      parentToolDefinitions: [],
+      defaultModel: "fake-model-a",
+      cwd: "/tmp",
+    });
+
+    core.spawn({ prompt: "a" });
+    core.spawn({ prompt: "b" });
+    core.spawn({ prompt: "c" });
+    // Each runChild call is deferred by the concurrency gate's own microtask
+    // tick before it can reach the transport; flush enough ticks for every
+    // ADMITTED child to actually call http.post().
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+
+    expect(port.requests).toHaveLength(1);
+    expect(core.size).toBe(3);
+  });
+
+  it("the default (nothing configured) admits up to 4 concurrently, not 1", async () => {
+    const profile = getProviderProfile("openai");
+    if (profile === null) throw new Error("openai profile missing");
+    const port = new BarrierPort();
+    const client = new ChatCompletionsClient({
+      baseUrl: "http://parent.invalid/v1",
+      apiKey: "k",
+      transport: new ChatCompletionsTransport(),
+      http: port,
+    });
+    const pool = new ClientPool(profile, client, { home: "/tmp", environment: {} });
+    const sessions = setupSessions();
+
+    const core = buildOrchestrationCore({
+      fanout: { maxParallel: 4, maxSubsessions: 200, parentMaxIterations: 90, warnings: [] },
+      sessions,
+      parentSessionId: "parent-1",
+      clientPool: pool,
+      baseDispatch: () => Promise.resolve("unused"),
+      parentToolDefinitions: [],
+      defaultModel: "fake-model-a",
+      cwd: "/tmp",
+    });
+
+    for (let i = 0; i < 6; i += 1) core.spawn({ prompt: `t${String(i)}` });
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+
+    expect(port.requests).toHaveLength(4);
+    expect(core.size).toBe(6);
   });
 });

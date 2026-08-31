@@ -19,11 +19,8 @@ import {
   successEnvelope,
 } from "../conversation/index.js";
 import { loadSoul, MemoryStore } from "../memory/index.js";
-import { orchestrationToolHandlers } from "../orchestration/chat-wiring.js";
-import { createChildRunner } from "../orchestration/child-runner.js";
-import { OrchestrationCore } from "../orchestration/core.js";
+import { buildOrchestrationCore, orchestrationToolHandlers } from "../orchestration/chat-wiring.js";
 import { resolveFanout } from "../orchestration/fanout-config.js";
-import { buildSubagentSystemPrompt } from "../orchestration/subagent-prompt.js";
 import { loadPriceOverrides } from "../pricing/index.js";
 import {
   CODEX_PROVIDER,
@@ -276,23 +273,15 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     codexHome: options.codexHome,
     environment: options.environment,
   });
-  const orchestrationCore = new OrchestrationCore({
-    runChild: createChildRunner({
-      sessions,
-      parentSessionId,
-      clientPool,
-      baseDispatch,
-      parentToolDefinitions: builtinRegistry.getDefinitions(),
-      defaultModel: model,
-      cwd: options.cwd,
-      idSource: () => randomUUID().replaceAll("-", ""),
-      clock: () => Date.now() / 1000,
-      childMaxIterations: 50,
-    }),
-    idSource: () => randomUUID().replaceAll("-", ""),
-    maxSubsessions: fanout.maxSubsessions,
-    maxParallel: fanout.maxParallel,
-    buildSubagentPrompt: () => buildSubagentSystemPrompt(),
+  const orchestrationCore = buildOrchestrationCore({
+    fanout,
+    sessions,
+    parentSessionId,
+    clientPool,
+    baseDispatch,
+    parentToolDefinitions: builtinRegistry.getDefinitions(),
+    defaultModel: model,
+    cwd: options.cwd,
   });
   const dispatch = composeDispatch(baseDispatch, {
     memory: (args) => memoryTool.handle(args),
