@@ -36,6 +36,7 @@ mkdirSync(evidenceRoot, { recursive: true });
 interface ScenarioContext {
   readonly oraclePort: number;
   readonly candidatePort: number;
+  readonly fakeUpstream: FakeUpstream;
 }
 
 interface ScenarioResult {
@@ -159,6 +160,34 @@ interface RpcRoundTripResult {
   readonly candidateEnvelope: Record<string, unknown>;
 }
 
+// session.info is broadcast asynchronously, not strictly synchronous with
+// session.create -- it can arrive interleaved with an unrelated RPC's own
+// response depending on timing. Reading "the next frame" blindly after
+// sending an RPC request sometimes catches that stray event instead of
+// the actual result, desynchronizing whatever comes after. This drains
+// (and records) any event frames first, returning only the frame carrying
+// the given RPC id.
+async function nextRpcResultFrame(
+  ws: RawWsClient,
+  rpcId: number,
+  maxSkip = 5,
+): Promise<{ readonly envelope: Record<string, unknown>; readonly skippedEvents: readonly unknown[] }> {
+  const skippedEvents: unknown[] = [];
+  for (let i = 0; i < maxSkip; i += 1) {
+    const frame = await ws.nextFrame();
+    const envelope = JSON.parse(frame.payload.toString("utf8")) as Record<string, unknown>;
+    if (envelope.method === "event") {
+      skippedEvents.push(envelope);
+      continue;
+    }
+    if (envelope.id === rpcId) return { envelope, skippedEvents };
+    // A response for a different id -- keep it as evidence but keep
+    // waiting for the one this call actually asked for.
+    skippedEvents.push(envelope);
+  }
+  throw new Error(`NEXT_RPC_RESULT_FRAME_EXHAUSTED id=${String(rpcId)} skipped=${JSON.stringify(skippedEvents)}`);
+}
+
 // Sends the SAME JSON-RPC request to both raw WS connections and does a
 // masked structural+value comparison of the full response envelope
 // (including `result`, not just its key set) -- a candidate returning a
@@ -171,17 +200,46 @@ async function rpcRoundTrip(
 ): Promise<RpcRoundTripResult> {
   oracleWs.sendText(JSON.stringify(request));
   candidateWs.sendText(JSON.stringify(request));
-  const [oracleFrame, candidateFrame] = await Promise.all([oracleWs.nextFrame(), candidateWs.nextFrame()]);
-  const oracleEnvelope = JSON.parse(oracleFrame.payload.toString("utf8")) as Record<string, unknown>;
-  const candidateEnvelope = JSON.parse(candidateFrame.payload.toString("utf8")) as Record<string, unknown>;
-  if (oracleFrame.opcode !== candidateFrame.opcode) {
-    return {
-      divergence: `opcode oracle=${String(oracleFrame.opcode)} candidate=${String(candidateFrame.opcode)}`,
-      oracleEnvelope,
-      candidateEnvelope,
-    };
-  }
-  return { divergence: compareMasked(oracleEnvelope, candidateEnvelope), oracleEnvelope, candidateEnvelope };
+  const [oracleResult, candidateResult] = await Promise.all([
+    nextRpcResultFrame(oracleWs, request.id),
+    nextRpcResultFrame(candidateWs, request.id),
+  ]);
+  return {
+    divergence: compareMasked(oracleResult.envelope, candidateResult.envelope),
+    oracleEnvelope: oracleResult.envelope,
+    candidateEnvelope: candidateResult.envelope,
+  };
+}
+
+// Same as rpcRoundTrip, but for methods keyed on a session_id -- each side
+// gets a request built from ITS OWN session id (they're independently
+// random per process), not one shared literal request. rpcRoundTrip alone
+// would send the oracle's session_id to the candidate's socket too,
+// which is simply the wrong request there.
+async function perSessionRoundTrip(
+  oracleWs: RawWsClient,
+  candidateWs: RawWsClient,
+  rpcId: number,
+  method: string,
+  oracleSessionId: string,
+  candidateSessionId: string,
+  extraParams: Record<string, unknown> = {},
+): Promise<RpcRoundTripResult> {
+  oracleWs.sendText(
+    JSON.stringify({ jsonrpc: "2.0", id: rpcId, method, params: { session_id: oracleSessionId, ...extraParams } }),
+  );
+  candidateWs.sendText(
+    JSON.stringify({ jsonrpc: "2.0", id: rpcId, method, params: { session_id: candidateSessionId, ...extraParams } }),
+  );
+  const [oracleResult, candidateResult] = await Promise.all([
+    nextRpcResultFrame(oracleWs, rpcId),
+    nextRpcResultFrame(candidateWs, rpcId),
+  ]);
+  return {
+    divergence: compareMasked(oracleResult.envelope, candidateResult.envelope),
+    oracleEnvelope: oracleResult.envelope,
+    candidateEnvelope: candidateResult.envelope,
+  };
 }
 
 // -- [socket-bilateral] scenarios, secure mode (auth enforced) -------------
@@ -471,6 +529,88 @@ function eventTypeSequence(events: readonly DrainedEvent[]): readonly string[] {
   return events.map((event) => (event.kind === "event" ? (event.type ?? "?") : "rpc-result"));
 }
 
+function frameKey(envelope: { readonly method?: string; readonly id?: unknown; readonly params?: { readonly type?: string } }): string {
+  if (envelope.method === "event") return `event:${envelope.params?.type ?? "?"}`;
+  return `rpc:${String(envelope.id)}`;
+}
+
+// Reads frames one at a time until every key in `requiredKeys` has been
+// seen, keyed by identity (rpc:<id> or event:<type>) rather than
+// positionally -- session.info is broadcast asynchronously and can land
+// before, between, or after the frames a specific RPC call actually
+// produces, so a fixed read-order assumption is not reliable here. Any
+// EXTRA frame seen along the way (e.g. session.info itself) is kept in
+// the returned map too, so nothing is silently dropped.
+async function collectKeyedFrames(
+  ws: RawWsClient,
+  requiredKeys: readonly string[],
+  maxFrames = 5,
+  frameTimeoutMs = 5000,
+): Promise<Record<string, unknown>> {
+  const seen: Record<string, unknown> = {};
+  const required = new Set(requiredKeys);
+  for (let i = 0; i < maxFrames && required.size > 0; i += 1) {
+    const frame = await ws.nextFrame(frameTimeoutMs);
+    const envelope = JSON.parse(frame.payload.toString("utf8")) as Record<string, unknown>;
+    const key = frameKey(envelope);
+    seen[key] = envelope;
+    required.delete(key);
+  }
+  if (required.size > 0) {
+    throw new Error(`COLLECT_KEYED_FRAMES_EXHAUSTED missing=${JSON.stringify([...required])} seen=${JSON.stringify(Object.keys(seen))}`);
+  }
+  return seen;
+}
+
+// "Permanent silence" (ADR-T12-02) means this specific request never gets
+// a completion -- it does NOT mean the socket goes silent for every
+// purpose. session.info can legitimately arrive during the silence
+// window (it's an independent broadcast, unrelated to the ghost
+// request); tolerate and absorb it, but any OTHER frame is a genuine
+// violation. Returns null on true silence, or the offending frame's
+// parsed envelope if something else arrived.
+async function waitForSilenceToleratingSessionInfo(
+  ws: RawWsClient,
+  budgetMs: number,
+): Promise<Record<string, unknown> | null> {
+  const deadline = Date.now() + budgetMs;
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return null;
+    let frame;
+    try {
+      frame = await ws.nextFrame(remaining);
+    } catch {
+      return null;
+    }
+    const envelope = JSON.parse(frame.payload.toString("utf8")) as Record<string, unknown>;
+    if (frameKey(envelope) === "event:session.info") continue;
+    return envelope;
+  }
+}
+
+interface CreatedSessionPair {
+  readonly divergence: string | null;
+  readonly evidence: unknown;
+  readonly oracleSessionId: string;
+  readonly candidateSessionId: string;
+}
+
+async function createSessionBoth(oracleWs: RawWsClient, candidateWs: RawWsClient): Promise<CreatedSessionPair> {
+  const create = await rpcRoundTrip(oracleWs, candidateWs, {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "session.create",
+    params: {},
+  });
+  return {
+    divergence: create.divergence,
+    evidence: create,
+    oracleSessionId: (create.oracleEnvelope.result as { session_id: string } | undefined)?.session_id ?? "",
+    candidateSessionId: (create.candidateEnvelope.result as { session_id: string } | undefined)?.session_id ?? "",
+  };
+}
+
 const TURN_SCENARIOS: NamedScenario[] = [
   // t12-prompt-submit-basic-turn (assertions 27-32/44-47 subset): a full
   // real turn -- session.create, prompt.submit, streamed deltas, and
@@ -544,6 +684,191 @@ const TURN_SCENARIOS: NamedScenario[] = [
       }
     },
   },
+
+  // t12-idle-interrupt-latch-zero-upstream-calls (assertion 44/L16): a
+  // session.interrupt on an IDLE session (no turn in flight) latches, and
+  // the next prompt.submit consumes that latch instead of ever reaching
+  // the model -- zero upstream calls, "interrupted" status, empty text.
+  {
+    id: "t12-idle-interrupt-latch-zero-upstream-calls",
+    run: async (ctx) => {
+      const id = "t12-idle-interrupt-latch-zero-upstream-calls";
+      const [oracleWs, candidateWs] = await Promise.all([
+        connectRawWs("127.0.0.1", ctx.oraclePort, "/api/ws"),
+        connectRawWs("127.0.0.1", ctx.candidatePort, "/api/ws"),
+      ]);
+      try {
+        await Promise.all([oracleWs.nextFrame(), candidateWs.nextFrame()]); // drain gateway.ready
+
+        const created = await createSessionBoth(oracleWs, candidateWs);
+        if (created.divergence !== null) return divergent(id, `session.create: ${created.divergence}`, created.evidence);
+
+        const interrupt = await perSessionRoundTrip(
+          oracleWs,
+          candidateWs,
+          2,
+          "session.interrupt",
+          created.oracleSessionId,
+          created.candidateSessionId,
+        );
+        if (interrupt.divergence !== null) return divergent(id, `session.interrupt: ${interrupt.divergence}`, interrupt);
+
+        const requestsBefore = ctx.fakeUpstream.requests().length;
+
+        oracleWs.sendText(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 3,
+            method: "prompt.submit",
+            params: { session_id: created.oracleSessionId, text: "should never reach upstream" },
+          }),
+        );
+        candidateWs.sendText(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 3,
+            method: "prompt.submit",
+            params: { session_id: created.candidateSessionId, text: "should never reach upstream" },
+          }),
+        );
+
+        const [oracleEvents, candidateEvents] = await Promise.all([
+          drainUntilComplete(oracleWs),
+          drainUntilComplete(candidateWs),
+        ]);
+        const requestsAfter = ctx.fakeUpstream.requests().length;
+
+        const oracleSequence = eventTypeSequence(oracleEvents);
+        const candidateSequence = eventTypeSequence(candidateEvents);
+        if (JSON.stringify(oracleSequence) !== JSON.stringify(candidateSequence)) {
+          return divergent(
+            id,
+            `event sequence oracle=${JSON.stringify(oracleSequence)} candidate=${JSON.stringify(candidateSequence)}`,
+            { oracleEvents, candidateEvents },
+          );
+        }
+        const oracleComplete = oracleEvents.find((event) => event.type === "message.complete");
+        const candidateComplete = candidateEvents.find((event) => event.type === "message.complete");
+        const completeDivergence = compareMasked(oracleComplete?.payload, candidateComplete?.payload);
+        if (completeDivergence !== null) {
+          return divergent(id, `message.complete payload: ${completeDivergence}`, { oracleComplete, candidateComplete });
+        }
+        if (requestsAfter !== requestsBefore) {
+          return divergent(
+            id,
+            `expected zero upstream calls, saw ${String(requestsAfter - requestsBefore)}`,
+            { requestsBefore, requestsAfter },
+          );
+        }
+
+        return match(id, { eventSequence: oracleSequence, messageComplete: oracleComplete?.payload, upstreamCallDelta: 0 });
+      } finally {
+        oracleWs.close();
+        candidateWs.close();
+      }
+    },
+  },
+
+  // t12-ghost-turn-permanent-silence-then-lock-released (assertion
+  // 48/ADR-T12-02): prompt.submit with a non-string `text` triggers the
+  // ghost turn -- rpc-ok + message.start, then PERMANENT silence on this
+  // socket for this request (no message.complete, no error, no close).
+  // The session lock still releases: a normal follow-up prompt.submit on
+  // the SAME session must complete normally afterward.
+  {
+    id: "t12-ghost-turn-permanent-silence-then-lock-released",
+    run: async (ctx) => {
+      const id = "t12-ghost-turn-permanent-silence-then-lock-released";
+      const [oracleWs, candidateWs] = await Promise.all([
+        connectRawWs("127.0.0.1", ctx.oraclePort, "/api/ws"),
+        connectRawWs("127.0.0.1", ctx.candidatePort, "/api/ws"),
+      ]);
+      try {
+        await Promise.all([oracleWs.nextFrame(), candidateWs.nextFrame()]); // drain gateway.ready
+
+        const created = await createSessionBoth(oracleWs, candidateWs);
+        if (created.divergence !== null) return divergent(id, `session.create: ${created.divergence}`, created.evidence);
+
+        oracleWs.sendText(
+          JSON.stringify({ jsonrpc: "2.0", id: 2, method: "prompt.submit", params: { session_id: created.oracleSessionId, text: 42 } }),
+        );
+        candidateWs.sendText(
+          JSON.stringify({ jsonrpc: "2.0", id: 2, method: "prompt.submit", params: { session_id: created.candidateSessionId, text: 42 } }),
+        );
+
+        // session.info races asynchronously with the rpc-ack/message.start
+        // pair (see nextRpcResultFrame's comment) -- reading exactly 2
+        // frames positionally is not reliable here. Collect by identity
+        // instead: whichever order rpc:2 and event:message.start arrive
+        // in (absorbing session.info if it happens to land in between),
+        // then compare the keyed maps.
+        const [oracleAckSet, candidateAckSet] = await Promise.all([
+          collectKeyedFrames(oracleWs, ["rpc:2", "event:message.start"]),
+          collectKeyedFrames(candidateWs, ["rpc:2", "event:message.start"]),
+        ]);
+        const ackSetDivergence = compareMasked(oracleAckSet, candidateAckSet);
+        if (ackSetDivergence !== null) return divergent(id, `rpc-ack/message.start: ${ackSetDivergence}`, { oracleAckSet, candidateAckSet });
+
+        // Confirm permanent silence: a bounded wait, tolerating a
+        // late-arriving session.info (an unrelated broadcast), must find
+        // nothing else on BOTH sides -- anything else (message.complete,
+        // an error, a close) would mean the ghost turn actually responded.
+        const [oracleSilence, candidateSilence] = await Promise.all([
+          waitForSilenceToleratingSessionInfo(oracleWs, 1500),
+          waitForSilenceToleratingSessionInfo(candidateWs, 1500),
+        ]);
+        if (oracleSilence !== null || candidateSilence !== null) {
+          return divergent(id, `expected silence, oracle=${oracleSilence === null ? "silent" : "spoke"} candidate=${candidateSilence === null ? "silent" : "spoke"}`, {
+            oracle: oracleSilence,
+            candidate: candidateSilence,
+          });
+        }
+
+        // Prove the lock released: a normal follow-up prompt.submit on the
+        // SAME session must complete normally.
+        oracleWs.sendText(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 3,
+            method: "prompt.submit",
+            params: { session_id: created.oracleSessionId, text: "hello fake" },
+          }),
+        );
+        candidateWs.sendText(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 3,
+            method: "prompt.submit",
+            params: { session_id: created.candidateSessionId, text: "hello fake" },
+          }),
+        );
+        const [oracleEvents, candidateEvents] = await Promise.all([
+          drainUntilComplete(oracleWs),
+          drainUntilComplete(candidateWs),
+        ]);
+        const oracleSequence = eventTypeSequence(oracleEvents);
+        const candidateSequence = eventTypeSequence(candidateEvents);
+        if (JSON.stringify(oracleSequence) !== JSON.stringify(candidateSequence)) {
+          return divergent(
+            id,
+            `follow-up event sequence oracle=${JSON.stringify(oracleSequence)} candidate=${JSON.stringify(candidateSequence)}`,
+            { oracleEvents, candidateEvents },
+          );
+        }
+        const oracleComplete = oracleEvents.find((event) => event.type === "message.complete");
+        const candidateComplete = candidateEvents.find((event) => event.type === "message.complete");
+        const completeDivergence = compareMasked(oracleComplete?.payload, candidateComplete?.payload);
+        if (completeDivergence !== null) {
+          return divergent(id, `follow-up message.complete: ${completeDivergence}`, { oracleComplete, candidateComplete });
+        }
+
+        return match(id, { followUpEventSequence: oracleSequence, followUpComplete: oracleComplete?.payload });
+      } finally {
+        oracleWs.close();
+        candidateWs.close();
+      }
+    },
+  },
 ];
 
 // Both sides always launch against the SAME loopback fake upstream
@@ -573,7 +898,7 @@ async function runPhase(
         bootTimeoutMs: 20_000,
       }),
     ]);
-    const ctx: ScenarioContext = { oraclePort: oracle.port, candidatePort: candidate.port };
+    const ctx: ScenarioContext = { oraclePort: oracle.port, candidatePort: candidate.port, fakeUpstream };
     for (const scenario of scenarios) {
       try {
         results.push(await scenario.run(ctx));

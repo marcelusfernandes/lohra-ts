@@ -179,10 +179,18 @@ export async function launchOracleDashboard(
       );
     });
 
+    // Self-unregisters on match: left attached via .on(), this would keep
+    // firing on every LATER stderr write for the rest of the process's
+    // life (stderrText() is a cumulative buffer, so the match never stops
+    // being true) -- each stray refire calling removeAllListeners("exit")
+    // again, silently wiping out whatever exit listener kill() registers
+    // afterward. That left kill() waiting on an 'exit' event that would
+    // never fire even after the child had actually died.
     const checkForBootLine = (): void => {
       if (stderrText().includes(bootLine)) {
         clearTimeout(timeout);
         child.removeAllListeners("exit");
+        child.stderr.removeListener("data", checkForBootLine);
         resolvePromise();
       }
     };
@@ -196,10 +204,27 @@ export async function launchOracleDashboard(
     pid: child.pid ?? -1,
     stderrText,
     stdoutText,
+    // A graceful SIGINT shutdown can hang indefinitely if a request is
+    // still "in flight" server-side when the signal arrives -- the ghost
+    // turn (ADR-T12-02) is exactly that: a request the server never
+    // completes on purpose, and this harness's own client-side
+    // socket.destroy() never sends it a proper WS close handshake either.
+    // Escalating to SIGKILL after a bounded wait means cleanup always
+    // terminates, regardless of what state a scenario left the server in.
     kill: (signal = "SIGINT") =>
       new Promise((resolvePromise) => {
-        child.once("exit", (exitCode, exitSignal) => {
+        let settled = false;
+        const finish = (exitCode: number | null, exitSignal: NodeJS.Signals | null): void => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(escalation);
           resolvePromise({ exitCode, signal: exitSignal });
+        };
+        const escalation = setTimeout(() => {
+          child.kill("SIGKILL");
+        }, 5000);
+        child.once("exit", (exitCode, exitSignal) => {
+          finish(exitCode, exitSignal);
         });
         child.kill(signal);
       }),

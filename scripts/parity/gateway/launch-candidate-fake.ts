@@ -74,11 +74,17 @@ export async function launchCandidateFakeUpstreamDashboard(
       );
     });
 
+    // Self-unregisters on match: left attached via .on(), this would keep
+    // firing on every LATER stderr write (see launch-oracle.ts's identical
+    // fix for the full explanation) -- each stray refire calling
+    // removeAllListeners("exit") again, silently wiping out whatever exit
+    // listener kill() registers afterward.
     const checkForBootLine = (): void => {
       const match = BOOT_LINE_PATTERN.exec(stderrText());
       if (match !== null) {
         clearTimeout(timeout);
         child.removeAllListeners("exit");
+        child.stderr.removeListener("data", checkForBootLine);
         resolvePromise(Number(match[1]));
       }
     };
@@ -90,10 +96,24 @@ export async function launchCandidateFakeUpstreamDashboard(
     pid: child.pid ?? -1,
     stderrText,
     stdoutText,
+    // See launch-oracle.ts's identical kill() for why this escalates: a
+    // graceful SIGINT shutdown can hang indefinitely if a ghost-turn
+    // request (ADR-T12-02) is still "in flight" server-side when the
+    // signal arrives.
     kill: (signal = "SIGINT") =>
       new Promise((resolvePromise) => {
-        child.once("exit", (exitCode, exitSignal) => {
+        let settled = false;
+        const finish = (exitCode: number | null, exitSignal: NodeJS.Signals | null): void => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(escalation);
           resolvePromise({ exitCode, signal: exitSignal });
+        };
+        const escalation = setTimeout(() => {
+          child.kill("SIGKILL");
+        }, 5000);
+        child.once("exit", (exitCode, exitSignal) => {
+          finish(exitCode, exitSignal);
         });
         child.kill(signal);
       }),

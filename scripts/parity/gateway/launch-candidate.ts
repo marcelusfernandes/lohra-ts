@@ -64,11 +64,18 @@ export async function launchCandidateDashboard(
       );
     });
 
+    // Self-unregisters on match: left attached via .on(), this would keep
+    // firing on every LATER stderr write for the rest of the process's
+    // life (stderrText() is a cumulative buffer, so the match never stops
+    // being true) -- each stray refire calling removeAllListeners("exit")
+    // again, silently wiping out whatever exit listener kill() registers
+    // afterward, so it never resolves even after the child has died.
     const checkForBootLine = (): void => {
       const match = BOOT_LINE_PATTERN.exec(stderrText());
       if (match !== null) {
         clearTimeout(timeout);
         child.removeAllListeners("exit");
+        child.stderr.removeListener("data", checkForBootLine);
         resolvePromise(Number(match[1]));
       }
     };
