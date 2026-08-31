@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
 
@@ -180,7 +180,19 @@ if (transport === null || !transports.has(transport)) {
       Object.entries(environment).filter(([key]) => key !== "LOHRA_HOME"),
     );
     const sharedEnvFile = resolvePaths(environmentWithoutLohraHome).envFile;
-    const usesSharedEnvFile = paths.envFile === sharedEnvFile;
+    // Resolve symlinks before comparing: a path that only LOOKS different
+    // from the shared store (e.g. a symlink into it) is still the shared
+    // store. Falls back to the literal path when the file doesn't exist
+    // yet — nothing to resolve, and the literal comparison above already
+    // covers that case correctly.
+    const real = (path) => {
+      try {
+        return realpathSync(path);
+      } catch {
+        return path;
+      }
+    };
+    const usesSharedEnvFile = real(paths.envFile) === real(sharedEnvFile);
     applyEnvFile(paths.envFile, environment);
     const apiKey = resolveApiKey(provider, environment);
     if (apiKey === null || apiKey.length === 0) {
