@@ -1,3 +1,4 @@
+import { ProviderError } from "../agent/client-pool.js";
 import { pythonRepr } from "../serialization/python-repr.js";
 import { toolError, toolResult } from "../tools/envelope.js";
 import type { ToolArguments } from "../tools/types.js";
@@ -30,11 +31,36 @@ function overridesFromArgs(args: ToolArguments): Omit<SpawnConfig, "prompt"> {
   };
 }
 
-export function spawnSessionTool(core: OrchestrationCore, args: ToolArguments): string {
+/** The narrow slice of ClientPool that the egress tripwire needs — a real
+ * ClientPool satisfies this structurally. Kept narrow so tests don't have
+ * to construct a real provider/client pair to exercise spawn_session. */
+export interface ProviderResolver {
+  get(name: string): Promise<unknown>;
+}
+
+/** contract L13/assertion 35: an unknown or unauthorized provider override
+ * must produce zero upstream requests and zero subsession registry rows —
+ * checked BEFORE core.spawn() is ever called, not inside the child's own
+ * (already-defensive, per L17) error handling, since that path only runs
+ * after the registry entry already exists. */
+export async function spawnSessionTool(
+  core: OrchestrationCore,
+  clientPool: ProviderResolver,
+  args: ToolArguments,
+): Promise<string> {
   const promptError = validateSpawnPrompt(args);
   if (promptError !== null) return promptError;
   const maxIterationsError = validateMaxIterations(args.max_iterations);
   if (maxIterationsError !== null) return maxIterationsError;
+  const provider = typeof args.provider === "string" && args.provider.length > 0 ? args.provider : null;
+  if (provider !== null) {
+    try {
+      await clientPool.get(provider);
+    } catch (error) {
+      if (error instanceof ProviderError) return toolError(error.message);
+      throw error;
+    }
+  }
   const { subId } = core.spawn({ prompt: coercePrompt(args.prompt), ...overridesFromArgs(args) });
   return toolResult(undefined, { sub_id: subId });
 }
