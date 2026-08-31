@@ -326,12 +326,29 @@ export class OrchestrationCore {
       .run(() => this.options.runChild(subId, config, systemPrompt, drainMessages, abortController.signal))
       .then((result) => {
         const entry = this.entries.get(subId);
-        if (entry !== undefined) {
-          entry.status = result.status;
-          entry.result = result;
-          entry.inFlight = false;
-        }
-        return result;
+        if (entry === undefined) return result;
+        // Usage accumulates across every turn of the child's whole lifetime
+        // (measured against the oracle's own _finalize, sub.tokens_in += ...,
+        // never overwritten) — a resurrected child's collect reports the SUM
+        // of every turn's usage, not just the latest one. Every other field
+        // (status/output/provider/model/forcedFallback/errorKind/retryAfter)
+        // reflects the LATEST turn only, same as before.
+        const previous = entry.result;
+        const accumulated: CollectResult =
+          previous === null
+            ? result
+            : {
+                ...result,
+                tokensIn: previous.tokensIn + result.tokensIn,
+                tokensOut: previous.tokensOut + result.tokensOut,
+                cacheReadTokens: previous.cacheReadTokens + result.cacheReadTokens,
+                cacheWriteTokens: previous.cacheWriteTokens + result.cacheWriteTokens,
+                reasoningTokens: previous.reasoningTokens + result.reasoningTokens,
+              };
+        entry.status = accumulated.status;
+        entry.result = accumulated;
+        entry.inFlight = false;
+        return accumulated;
       });
     return { promise, abortController };
   }

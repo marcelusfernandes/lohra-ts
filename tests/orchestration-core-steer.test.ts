@@ -139,6 +139,53 @@ describe("OrchestrationCore.steer — idle/terminal form (contract decision 6 / 
     }
   });
 
+  // Measured against the oracle's own OrchestrationCore._finalize
+  // (backend/lohra/orchestration/core.py:483): "usage_total... ACCUMULATE
+  // across turns" via `sub.tokens_in += ...`, never overwritten — a
+  // resurrected child's second collect reports the SUM of every turn's
+  // usage, not just the latest one. The candidate's runChild already
+  // returns per-TURN usage (ConversationRuntime resets its own usageTotal
+  // to null at the top of every runTurn call, correctly), so the
+  // accumulation belongs here, in the registry that spans a child's whole
+  // lifecycle across resurrections — the same shape as every other finding
+  // this ticket has produced: a capability that exists correctly on one
+  // side (a single turn's own usage) never carried forward across the
+  // wider scope (a child's full, possibly-resurrected lifetime).
+  it("accumulates usage across a steer resurrection — collect reports the SUM of every turn's usage, not just the latest (measured against the oracle's _finalize)", async () => {
+    let call = 0;
+    const core = new OrchestrationCore({
+      runChild: () => {
+        call += 1;
+        return Promise.resolve(
+          call === 1
+            ? okResult({ tokensIn: 11, tokensOut: 7, cacheReadTokens: 2, cacheWriteTokens: 1, reasoningTokens: 3 })
+            : okResult({ tokensIn: 11, tokensOut: 7, cacheReadTokens: 2, cacheWriteTokens: 1, reasoningTokens: 3 }),
+        );
+      },
+      idSource: () => "aaaa",
+      maxSubsessions: 200,
+      maxParallel: 200,
+      buildSubagentPrompt: stubPrompt,
+    });
+
+    const { subId } = core.spawn({ prompt: "first task" });
+    await core.collect(subId, true);
+    core.steer(subId, "SECOND-TURN-TEXT");
+    const secondOutcome = await core.collect(subId, true);
+
+    expect(secondOutcome.kind).toBe("settled");
+    if (secondOutcome.kind === "settled") {
+      expect(secondOutcome.result.tokensIn).toBe(22);
+      expect(secondOutcome.result.tokensOut).toBe(14);
+      expect(secondOutcome.result.cacheReadTokens).toBe(4);
+      expect(secondOutcome.result.cacheWriteTokens).toBe(2);
+      expect(secondOutcome.result.reasoningTokens).toBe(6);
+      // Non-usage fields still reflect the LATEST turn only, never summed.
+      expect(secondOutcome.result.status).toBe("complete");
+      expect(secondOutcome.result.output).toBe("done");
+    }
+  });
+
   it("L7: collect(wait:false) during the resurrected turn keeps returning the STALE first-turn result — status lies, on purpose, reproduced not fixed", async () => {
     const secondTurn = deferred<CollectResult>();
     let call = 0;
