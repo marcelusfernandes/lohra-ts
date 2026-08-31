@@ -10,6 +10,7 @@ import { runModels } from "./commands/models.js";
 import { runTiers } from "./commands/tiers.js";
 import { runAuth } from "./commands/auth.js";
 import { runChat } from "./commands/chat.js";
+import { runCron } from "./commands/cron.js";
 import { runServe } from "./commands/serve.js";
 import { readCodexModel } from "./auth/codex.js";
 import { subscriptionActive } from "./auth/credentials.js";
@@ -113,7 +114,8 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     command !== "serve" &&
     command !== "init" &&
     command !== "profile" &&
-    command !== "skill"
+    command !== "skill" &&
+    command !== "cron"
   ) {
     if ((commands as readonly string[]).includes(command)) {
       io.stderr(`lohra: ${command} is not implemented in the TypeScript bootstrap\n`);
@@ -266,6 +268,12 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
       codexHome,
       cwd: io.cwd ?? process.cwd(),
     });
+    io.stdout(result.stdout);
+    io.stderr(result.stderr);
+    return result.code;
+  }
+  if (command === "cron") {
+    const result = runCron({ argv, home: paths.home });
     io.stdout(result.stdout);
     io.stderr(result.stderr);
     return result.code;

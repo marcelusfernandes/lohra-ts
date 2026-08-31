@@ -154,7 +154,11 @@ describe("lohra CLI bootstrap", () => {
     }
   });
 
-  it.each(["dashboard", "cron", "workflow", "update"])(
+  // "cron" removed from this list by T18: it is no longer a stub, it is a real, wired command
+  // (src/commands/cron.ts) -- this is exactly the boundary T18 supersedes, the same way T12
+  // superseded "dashboard" on this same fixture. See the dedicated test below proving the new
+  // real behavior (invalid-action error, not the old "not implemented" stub text) takes over.
+  it.each(["dashboard", "workflow", "update"])(
     "temporarily refuses future command %s with exit 2",
     async (command) => {
       const stderr: string[] = [];
@@ -168,4 +172,16 @@ describe("lohra CLI bootstrap", () => {
       expect(stderr.join("")).toContain("not implemented in the TypeScript bootstrap");
     },
   );
+
+  it("cron now takes the real command boundary, not the stub -- documents the T18 change", async () => {
+    const stderr: string[] = [];
+    const code = await runCli(["cron"], {
+      environment: environment(),
+      stdout: () => undefined,
+      stderr: (value) => stderr.push(value),
+    });
+    expect(code).toBe(2);
+    expect(stderr.join("")).not.toContain("not implemented in the TypeScript bootstrap");
+    expect(stderr.join("")).toContain("argument action: invalid choice");
+  });
 });
