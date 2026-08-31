@@ -1,4 +1,5 @@
 import { ConcurrencyGate } from "./concurrency-gate.js";
+import { logOrchestrationFailure } from "./failure-log.js";
 import { wrapSteerInbox } from "./steer-inbox.js";
 
 export type SubSessionStatus = "running" | "complete" | "error" | "interrupted";
@@ -44,12 +45,19 @@ export interface SpawnConfig {
  * wrapped into the busy-form <system-reminder> message (contract decision 6
  * / L6), or an empty array when nothing is pending. The runner must not
  * drain steer input any other way.
+ *
+ * signal must be threaded straight into the real turn loop's own cancellation
+ * hook (ConversationRuntime's signal option) — the same cooperative,
+ * checked-between-iterations mechanism as the parent's own Ctrl-C, never a
+ * mid-flight abort of an upstream call in progress (contract assertion 40).
+ * shutdown() is this signal's only trigger today (contract L16).
  */
 export type ChildRunner = (
   subId: string,
   config: SpawnConfig,
   systemPrompt: string,
   drainMessages: () => readonly Readonly<Record<string, unknown>>[],
+  signal: AbortSignal,
 ) => Promise<CollectResult>;
 
 export interface OrchestrationCoreOptions {
@@ -116,6 +124,10 @@ interface SubSessionEntry {
    * never the possibly-stale `result` above — reassigned on every steer
    * resurrection so a wait always tracks the turn actually in flight. */
   promise: Promise<CollectResult>;
+  /** Backs the LATEST turn's cancellation signal — reassigned alongside
+   * `promise` on every steer resurrection so shutdown() always aborts the
+   * turn actually in flight, never a stale controller from an earlier one. */
+  abortController: AbortController;
   /** Pending raw steer texts, merged into one <system-reminder> message and
    * drained by the runner's own iteration loop while this child is busy or
    * queued-in-pool (contract L6). */
@@ -155,7 +167,7 @@ export class OrchestrationCore {
     this.evictOneTerminalIfOverCap();
     const subId = this.options.idSource();
     const systemPrompt = this.options.buildSubagentPrompt();
-    const promise = this.runAndTrack(subId, config, systemPrompt);
+    const { promise, abortController } = this.runAndTrack(subId, config, systemPrompt);
     this.entries.set(subId, {
       subId,
       systemPrompt,
@@ -164,6 +176,7 @@ export class OrchestrationCore {
       result: null,
       inFlight: true,
       promise,
+      abortController,
       inbox: [],
     });
     this.insertionOrder.push(subId);
@@ -218,7 +231,13 @@ export class OrchestrationCore {
     // purpose — L7/ADR-T13-05 requires collect(wait:false) to keep
     // returning the stale prior result until the new turn actually settles.
     entry.inFlight = true;
-    entry.promise = this.runAndTrack(subId, { ...entry.originalConfig, prompt: text }, entry.systemPrompt);
+    const { promise, abortController } = this.runAndTrack(
+      subId,
+      { ...entry.originalConfig, prompt: text },
+      entry.systemPrompt,
+    );
+    entry.promise = promise;
+    entry.abortController = abortController;
     return { queued: false };
   }
 
@@ -248,6 +267,42 @@ export class OrchestrationCore {
     return { kind: "settled", result };
   }
 
+  /**
+   * Cooperatively interrupts every tracked child (the same AbortSignal
+   * machinery as the parent's own Ctrl-C, checked between iterations —
+   * never a mid-flight abort of an upstream call already in progress, per
+   * contract assertion 40) and blocks until every one actually settles: a
+   * child stuck in an in-flight call finishes normally before this
+   * resolves (drains, never abandons), and a child that would need another
+   * iteration terminates "interrupted" instead of starting one. Mirrors the
+   * oracle's `shutdown(wait=True)` — `shutdown(wait=False)` has no public
+   * surface in this commit (T15, contract's own dívidas table).
+   *
+   * Any child that settles "error" or "interrupted" during the drain has
+   * its cause logged via logOrchestrationFailure(home, ...) — the one
+   * channel backing both assertion 41 (teardown interrupt cause) and
+   * decision 14/ADR-T13-04 (uncollected child failure): shutdown does not
+   * swallow failures, it just keeps them off the compared stdout/stderr
+   * surface. `home` is passed in explicitly, never resolved here.
+   */
+  public async shutdown(home: string): Promise<void> {
+    const children = [...this.entries.values()];
+    for (const entry of children) entry.abortController.abort();
+    await Promise.all(
+      children.map(async (entry) => {
+        const result = await entry.promise;
+        if (result.status === "error" || result.status === "interrupted") {
+          logOrchestrationFailure(home, {
+            subId: entry.subId,
+            status: result.status,
+            output: result.output,
+            errorKind: result.errorKind,
+          });
+        }
+      }),
+    );
+  }
+
   /** Runs one child turn through the concurrency gate and updates the
    * entry's publicly-observable status/result once it settles. Shared by
    * spawn() (the initial turn) and steer()'s idle/terminal resurrection
@@ -255,16 +310,20 @@ export class OrchestrationCore {
    * config (fresh prompt vs. the original overrides plus the steer text)
    * is passed through. Looks the entry up by subId inside the settlement
    * callback (rather than closing over it directly) so it works both before
-   * spawn() has inserted the entry yet and after steer() replaces it. */
+   * spawn() has inserted the entry yet and after steer() replaces it.
+   * Creates a fresh AbortController per turn — shutdown() is its only
+   * trigger today — and hands the caller both so it can store the
+   * controller on the entry alongside the promise it backs. */
   private runAndTrack(
     subId: string,
     config: SpawnConfig,
     systemPrompt: string,
-  ): Promise<CollectResult> {
+  ): { readonly promise: Promise<CollectResult>; readonly abortController: AbortController } {
+    const abortController = new AbortController();
     const drainMessages = (): readonly Readonly<Record<string, unknown>>[] =>
       this.drainInboxFor(subId);
-    return this.gate
-      .run(() => this.options.runChild(subId, config, systemPrompt, drainMessages))
+    const promise = this.gate
+      .run(() => this.options.runChild(subId, config, systemPrompt, drainMessages, abortController.signal))
       .then((result) => {
         const entry = this.entries.get(subId);
         if (entry !== undefined) {
@@ -274,6 +333,7 @@ export class OrchestrationCore {
         }
         return result;
       });
+    return { promise, abortController };
   }
 
   /** "Running" for eviction purposes means inFlight, not the possibly-stale

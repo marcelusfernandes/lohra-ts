@@ -19,6 +19,9 @@ import { createChildRunner } from "../src/orchestration/child-runner.js";
 import type { SpawnConfig } from "../src/orchestration/core.js";
 
 const encoder = new TextEncoder();
+// Never aborted — these tests exercise turn behavior, not cancellation;
+// shutdown()'s cancellation wiring is covered separately.
+const noSignal = new AbortController().signal;
 
 function jsonResponse(status: number, body: unknown, headers: Record<string, string> = {}): HttpResponseData {
   return {
@@ -144,7 +147,7 @@ describe("createChildRunner", () => {
     const runner = makeRunner(sessions, pool);
 
     const config: SpawnConfig = { prompt: "do the thing" };
-    const result = await runner("child-1", config, "FROZEN SYSTEM PROMPT", () => []);
+    const result = await runner("child-1", config, "FROZEN SYSTEM PROMPT", () => [], noSignal);
 
     expect(result.status).toBe("complete");
     expect(result.output).toBe("hi from child");
@@ -190,7 +193,7 @@ describe("createChildRunner", () => {
     const runner = makeRunner(sessions, pool);
 
     const config: SpawnConfig = { prompt: "do the thing", provider: "zchildrunneralt" };
-    const result = await runner("child-2", config, "SYS", () => []);
+    const result = await runner("child-2", config, "SYS", () => [], noSignal);
 
     expect(result.status).toBe("complete");
     expect(result.output).toBe("hi from alt provider");
@@ -212,7 +215,7 @@ describe("createChildRunner", () => {
     const baseDispatch = (): Promise<string> => Promise.resolve(JSON.stringify({ ok: true, result: "x" }));
     const runner = makeRunner(sessions, pool, { childMaxIterations: 2, baseDispatch });
 
-    const result = await runner("child-3", { prompt: "loop forever" }, "SYS", () => []);
+    const result = await runner("child-3", { prompt: "loop forever" }, "SYS", () => [], noSignal);
 
     expect(result.status).toBe("error");
     expect(result.output).toContain("max_iterations (2)");
@@ -237,7 +240,7 @@ describe("createChildRunner", () => {
     const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
     const runner = makeRunner(sessions, pool);
 
-    const result = await runner("child-4", { prompt: "hi" }, "SYS", () => []);
+    const result = await runner("child-4", { prompt: "hi" }, "SYS", () => [], noSignal);
 
     expect(result.status).toBe("error");
     expect(result.errorKind).toBe("quota_exhausted");
@@ -254,7 +257,7 @@ describe("createChildRunner", () => {
     const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
     const runner = makeRunner(sessions, pool);
 
-    const result = await runner("child-5", { prompt: "hi" }, "SYS", () => []);
+    const result = await runner("child-5", { prompt: "hi" }, "SYS", () => [], noSignal);
 
     expect(result.status).toBe("error");
     expect(result.errorKind).toBeNull();
@@ -276,6 +279,7 @@ describe("createChildRunner", () => {
       { prompt: "hi", provider: "zz-does-not-exist" },
       "SYS",
       () => [],
+      noSignal,
     );
 
     expect(result.status).toBe("error");

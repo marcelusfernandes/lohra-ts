@@ -103,6 +103,7 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
     config: SpawnConfig,
     systemPrompt: string,
     drainMessages: () => readonly Readonly<Record<string, unknown>>[],
+    signal: AbortSignal,
   ): Promise<CollectResult> => {
     // ChildRunner's contract (see core.ts) is to always RESOLVE, never
     // reject — OrchestrationCore.runAndTrack has no .catch, so a rejection
@@ -166,6 +167,7 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
           sessionId: subId,
           drainMessages,
           effort,
+          signal,
         });
         return zeroResult(
           "complete",

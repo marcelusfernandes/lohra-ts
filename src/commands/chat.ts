@@ -359,6 +359,11 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     approval.setCallback(null);
     approval.setYolo(false);
     approval.reset();
+    // L16/assertions 40-41: drains every sub-session (interrupts cooperatively,
+    // waits for each to actually settle) before the DB connection a child's
+    // own write might still need goes away — same ordering as the oracle's
+    // finally (shutdown before db.close()).
+    await orchestrationCore.shutdown(options.home);
     connection.close();
   }
 }
