@@ -168,7 +168,19 @@ if (transport === null || !transports.has(transport)) {
     // rather than to something the caller actually named.
     const presentBeforeEnvFile = new Set(profile.envVars.filter((name) => name in environment));
     const paths = resolvePaths(environment);
-    const usesSharedEnvFile = !environment.LOHRA_HOME;
+    // Whether this run's env file IS the shared store's — by resolved
+    // path, not by whether LOHRA_HOME happens to be set. Checking
+    // `!environment.LOHRA_HOME` alone was a bypass: pointing LOHRA_HOME at
+    // the shared store itself (e.g. LOHRA_HOME=~/.lohra, the natural thing
+    // to type if you mean "the store") set the variable, so the presence
+    // check passed, while still reading the very file the guard exists to
+    // refuse. Comparing the two resolved envFile paths closes that: it
+    // catches "shared" no matter which spelling reaches it.
+    const environmentWithoutLohraHome = Object.fromEntries(
+      Object.entries(environment).filter(([key]) => key !== "LOHRA_HOME"),
+    );
+    const sharedEnvFile = resolvePaths(environmentWithoutLohraHome).envFile;
+    const usesSharedEnvFile = paths.envFile === sharedEnvFile;
     applyEnvFile(paths.envFile, environment);
     const apiKey = resolveApiKey(provider, environment);
     if (apiKey === null || apiKey.length === 0) {
@@ -176,14 +188,15 @@ if (transport === null || !transports.has(transport)) {
       return;
     }
     // Refuse-with-cause: a credential that only materialized from the
-    // operator's SHARED store (~/.lohra/.env — the default env file path
-    // whenever LOHRA_HOME isn't pinned to an isolated source) is not a
-    // credential anyone actually named for this smoke test. resolveApiKey
-    // cannot distinguish "the right key happened to be there" from "an
-    // unrelated real credential happened to be there", so both must be
-    // refused identically until the operator authorizes an explicit,
-    // isolated source (LOHRA_HOME pointed at an isolated profile, or the
-    // env var pre-set before this process starts).
+    // operator's SHARED store (~/.lohra/.env — the file that resolves by
+    // default, or that LOHRA_HOME points back at even when set explicitly)
+    // is not a credential anyone actually named for this smoke test.
+    // resolveApiKey cannot distinguish "the right key happened to be
+    // there" from "an unrelated real credential happened to be there", so
+    // both must be refused identically until the operator authorizes an
+    // explicit, isolated source (LOHRA_HOME pointed at a DIFFERENT,
+    // isolated profile file, or the env var pre-set before this process
+    // starts).
     const sourcedFromSharedEnvFile =
       usesSharedEnvFile &&
       profile.envVars.some((name) => !presentBeforeEnvFile.has(name) && name in environment);
