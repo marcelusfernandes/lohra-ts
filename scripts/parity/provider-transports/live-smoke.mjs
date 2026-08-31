@@ -1,7 +1,12 @@
 #!/usr/bin/env node
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
+
+import { applyEnvFile } from "../../../dist/config/env-file.js";
+import { resolvePaths } from "../../../dist/config/paths.js";
+import { getProviderProfile, resolveApiKey } from "../../../dist/providers/index.js";
+import { AnthropicMessagesClient, AnthropicMessagesTransport, NativeChatHttpPort } from "../../../dist/transports/index.js";
 
 const transports = new Set(["anthropic_messages", "chat_completions", "responses"]);
 const valueAfter = (name) => {
@@ -18,32 +23,6 @@ if (transport === null || !transports.has(transport)) {
   );
   const outputDirectory = resolve(".live-smoke-evidence/t10");
   const outputPath = resolve(outputDirectory, `${transport}.json`);
-  const unavailable = {
-    schemaVersion: 1,
-    status: "live-smoke-unavailable",
-    transport,
-    provider: null,
-    model: null,
-    success: false,
-    exitCode: 3,
-    responseType: null,
-    finishReason: null,
-    shape: {
-      hasOutput: false,
-      completedIsBoolean: false,
-      contentIsStringOrNull: false,
-      toolCallsArray: false,
-    },
-    usage: {
-      present: false,
-      inputTokens: 0,
-      outputTokens: 0,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      reasoningTokens: 0,
-    },
-    requestCount: 0,
-  };
   const allowedKeys = [
     "schemaVersion",
     "status",
@@ -58,24 +37,227 @@ if (transport === null || !transports.has(transport)) {
     "usage",
     "requestCount",
   ];
-  const persist = (record) => {
-    if (JSON.stringify(Object.keys(record)) !== JSON.stringify(allowedKeys))
+
+  function baseEvidence(status, provider, model, success, exitCode, requestCount) {
+    return {
+      schemaVersion: 1,
+      status,
+      transport,
+      provider,
+      model,
+      success,
+      exitCode,
+      responseType: null,
+      finishReason: null,
+      shape: {
+        hasOutput: false,
+        completedIsBoolean: false,
+        contentIsStringOrNull: false,
+        toolCallsArray: false,
+      },
+      usage: {
+        present: false,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningTokens: 0,
+      },
+      requestCount,
+    };
+  }
+
+  const persist = (record, secrets = []) => {
+    const keys = Object.keys(record);
+    if (keys.length !== allowedKeys.length || keys.some((key, index) => key !== allowedKeys[index])) {
+      rmSync(outputPath, { force: true });
       throw new Error("LIVE_EVIDENCE_SCHEMA");
-    rmSync(outputPath, { force: true });
+    }
+    const body = `${JSON.stringify(record)}\n`;
+    if (secrets.some((secret) => secret.length > 0 && body.includes(secret))) {
+      rmSync(outputPath, { force: true });
+      throw new Error("CREDENTIAL_LEAK");
+    }
     mkdirSync(outputDirectory, { recursive: true });
-    writeFileSync(outputPath, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+    writeFileSync(outputPath, body, { mode: 0o600 });
   };
 
-  // This branch intentionally precedes environment, auth, DNS, and socket access.
-  if (!allowed.includes(transport)) {
-    persist(unavailable);
-    process.stdout.write(
-      `${JSON.stringify({ status: unavailable.status, evidence: outputPath })}\n`,
-    );
+  function unavailable(provider = null, model = null) {
+    const evidence = baseEvidence("live-smoke-unavailable", provider, model, false, 3, 0);
+    persist(evidence);
+    process.stdout.write(`${JSON.stringify({ status: evidence.status, evidence: outputPath })}\n`);
     process.exitCode = 3;
+  }
+
+  async function canary() {
+    const key = "T10-CANARY-KEY-EXACT";
+    const canaryPrompt = "T10-CANARY-PROMPT-EXACT";
+    const response = "T10-CANARY-RESPONSE-EXACT";
+    rmSync(outputPath, { force: true });
+    let caught = 0;
+    for (const [field, value] of [
+      ["provider", key],
+      ["model", canaryPrompt],
+      ["responseType", response],
+    ]) {
+      const evidence = baseEvidence("fail", "canary", "canary", false, 1, 0);
+      evidence[field] = value;
+      try {
+        persist(evidence, [key, canaryPrompt, response]);
+      } catch (error) {
+        if (error instanceof Error && error.message === "CREDENTIAL_LEAK") caught += 1;
+        else throw error;
+      }
+    }
+    if (caught !== 3 || existsSync(outputPath)) throw new Error("LIVE_SCRUB_CANARY_FAILED");
+    process.stdout.write(
+      `${JSON.stringify({ probe: "t10-live-scrub", transport, caught, evidenceAbsent: true })}\n`,
+    );
+  }
+
+  // Recording port that refuses anything but the one allowlisted, exact
+  // Anthropic Messages endpoint, and refuses a second request. Mirrors
+  // chat-completions/live-smoke.mjs's AllowedRecordingPort: the caller
+  // never gets network access this class won't grant, so an accidental
+  // retry, redirect, or a future refactor pointing the client elsewhere
+  // fails closed instead of silently calling an unreviewed endpoint.
+  class AllowedRecordingPort {
+    requestCount = 0;
+    raw = null;
+    parsed = null;
+
+    constructor(expectedUrl) {
+      this.expectedUrl = expectedUrl;
+      this.delegate = new NativeChatHttpPort();
+    }
+
+    async post(request) {
+      if (request.url !== this.expectedUrl) throw new Error("LIVE_ENDPOINT_NOT_ALLOWLISTED");
+      if (this.requestCount >= 1) throw new Error("LIVE_REQUEST_CAP");
+      this.requestCount += 1;
+      const response = await this.delegate.post(request);
+      this.raw = new globalThis.TextDecoder().decode(response.body);
+      try {
+        this.parsed = JSON.parse(this.raw);
+      } catch {
+        this.parsed = null;
+      }
+      return response;
+    }
+  }
+
+  async function smokeAnthropicMessages() {
+    const environment = Object.fromEntries(
+      Object.entries(process.env).filter((entry) => typeof entry[1] === "string"),
+    );
+    const provider = "anthropic";
+    const profile = getProviderProfile(provider);
+    if (profile === null || profile.apiMode !== "anthropic_messages") {
+      unavailable(provider);
+      return;
+    }
+    const model = profile.fallbackModels[0] ?? null;
+    if (model === null) {
+      unavailable(provider);
+      return;
+    }
+    // Snapshot which of this provider's credential env vars were already
+    // present (e.g. a named, session-exported variable — a nominally
+    // authorized source) BEFORE the operator's env file is consulted, so a
+    // credential that only appears afterward can be attributed to the file
+    // rather than to something the caller actually named.
+    const presentBeforeEnvFile = new Set(profile.envVars.filter((name) => name in environment));
+    const paths = resolvePaths(environment);
+    const usesSharedEnvFile = !environment.LOHRA_HOME;
+    applyEnvFile(paths.envFile, environment);
+    const apiKey = resolveApiKey(provider, environment);
+    if (apiKey === null || apiKey.length === 0) {
+      unavailable(provider, model);
+      return;
+    }
+    // Refuse-with-cause: a credential that only materialized from the
+    // operator's SHARED store (~/.lohra/.env — the default env file path
+    // whenever LOHRA_HOME isn't pinned to an isolated source) is not a
+    // credential anyone actually named for this smoke test. resolveApiKey
+    // cannot distinguish "the right key happened to be there" from "an
+    // unrelated real credential happened to be there", so both must be
+    // refused identically until the operator authorizes an explicit,
+    // isolated source (LOHRA_HOME pointed at an isolated profile, or the
+    // env var pre-set before this process starts).
+    const sourcedFromSharedEnvFile =
+      usesSharedEnvFile &&
+      profile.envVars.some((name) => !presentBeforeEnvFile.has(name) && name in environment);
+    if (sourcedFromSharedEnvFile) {
+      process.stderr.write("LIVE_CREDENTIAL_SOURCE_NOT_AUTHORIZED\n");
+      unavailable(provider, model);
+      return;
+    }
+    const prompt = "Reply with the single word OK.";
+    const expectedUrl = `${profile.baseUrl.replace(/\/$/u, "")}/v1/messages`;
+    const port = new AllowedRecordingPort(expectedUrl);
+    const transportImpl = new AnthropicMessagesTransport();
+    const client = new AnthropicMessagesClient({
+      baseUrl: profile.baseUrl,
+      apiKey,
+      transport: transportImpl,
+      http: port,
+      timeoutMs: 15_000,
+      maxResponseBytes: 256 * 1024,
+      maxRetries: 0,
+    });
+    try {
+      const kwargs = transportImpl.buildKwargs({
+        model,
+        messages: [{ role: "user", content: prompt }],
+        tools: [],
+        maxTokens: 1,
+      });
+      const response = await client.create(kwargs);
+      const raw = port.parsed;
+      const evidence = baseEvidence("pass", provider, model, true, 0, port.requestCount);
+      evidence.responseType = typeof raw?.type === "string" ? raw.type : null;
+      evidence.finishReason = response.finishReason;
+      evidence.shape = {
+        hasOutput: Array.isArray(raw?.content) && raw.content.length > 0,
+        // Anthropic's raw /v1/messages response has no boolean-typed
+        // completion field (stop_reason is string|null, never boolean) —
+        // legitimately always false for this transport, unlike the other
+        // three shape checks, which do have real Anthropic mappings.
+        completedIsBoolean: false,
+        contentIsStringOrNull: typeof response.content === "string" || response.content === null,
+        toolCallsArray: Array.isArray(response.toolCalls),
+      };
+      evidence.usage = {
+        present: response.usage !== null,
+        inputTokens: response.usage?.inputTokens ?? 0,
+        outputTokens: response.usage?.outputTokens ?? 0,
+        cacheReadTokens: response.usage?.cacheReadTokens ?? 0,
+        cacheWriteTokens: response.usage?.cacheWriteTokens ?? 0,
+        reasoningTokens: response.usage?.reasoningTokens ?? 0,
+      };
+      persist(evidence, [apiKey, prompt, response.content ?? ""]);
+      process.stdout.write(`${JSON.stringify({ status: evidence.status, evidence: outputPath })}\n`);
+    } catch {
+      const responseText = typeof port.parsed?.content?.[0]?.text === "string" ? port.parsed.content[0].text : "";
+      const evidence = baseEvidence("fail", provider, model, false, 1, port.requestCount);
+      persist(evidence, [apiKey, prompt, responseText]);
+      process.stdout.write(`${JSON.stringify({ status: evidence.status, evidence: outputPath })}\n`);
+      process.exitCode = 1;
+    } finally {
+      await client.close();
+    }
+  }
+
+  if (process.argv.includes("--canary")) {
+    await canary();
+  } else if (!allowed.includes(transport)) {
+    // This branch intentionally precedes environment, auth, DNS, and socket access.
+    unavailable();
+  } else if (transport === "anthropic_messages") {
+    await smokeAnthropicMessages();
   } else {
-    const failed = { ...unavailable, status: "fail", exitCode: 1 };
-    persist(failed);
+    const evidence = baseEvidence("fail", null, null, false, 1, 0);
+    persist(evidence);
     process.stderr.write("LIVE_AUTHORIZATION_PRESENT_BUT_EXECUTION_NOT_CONFIGURED\n");
     process.exitCode = 1;
   }
