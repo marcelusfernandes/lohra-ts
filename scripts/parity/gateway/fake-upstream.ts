@@ -14,6 +14,43 @@ import { randomUUID } from "node:crypto";
 // "arm/consume" flag against each other.
 export const UPSTREAM_FAILURE_NONCE = "T12_JOINT_GATE_UPSTREAM_FAILURE_NONCE";
 
+export interface ToolCallScript {
+  readonly toolName: string;
+  readonly toolArguments: Record<string, unknown>;
+}
+
+// A request whose stringified body contains one of these markers gets a
+// scripted tool_calls response instead of plain content -- UNLESS it's the
+// follow-up call after the tool ran (detected by the last message in the
+// conversation having role:"tool"), which gets the normal plain-content
+// reply so the turn can finish. Argument shapes mirror this project's own
+// existing unit-test fixtures for these exact tools (tests/gateway/
+// tools.test.ts, tests/gateway/tool-event-payload.test.ts) so a triggered
+// scenario exercises the SAME real tool-dispatch code paths those tests
+// already proved work, just now driven end to end over a real socket
+// against the real oracle too.
+export const TOOL_CALL_TRIGGERS: Readonly<Record<string, ToolCallScript>> = {
+  T12_TRIGGER_READ_FILE_NONASCII: { toolName: "read_file", toolArguments: { path: "/não-existe-ção" } },
+  T12_TRIGGER_TERMINAL_SAFE: { toolName: "terminal", toolArguments: { command: "echo T12_TERMINAL_CANARY" } },
+  T12_TRIGGER_TERMINAL_DANGER: { toolName: "terminal", toolArguments: { command: "rm -rf /tmp/whatever" } },
+  T12_TRIGGER_MEMORY_LIST: { toolName: "memory", toolArguments: { action: "list" } },
+};
+
+function lastMessageRole(parsedBody: unknown): string | null {
+  if (typeof parsedBody !== "object" || parsedBody === null) return null;
+  const messages = (parsedBody as { messages?: unknown }).messages;
+  if (!Array.isArray(messages) || messages.length === 0) return null;
+  const last = messages[messages.length - 1] as { role?: unknown };
+  return typeof last.role === "string" ? last.role : null;
+}
+
+function matchedToolTrigger(raw: string): ToolCallScript | null {
+  for (const [marker, script] of Object.entries(TOOL_CALL_TRIGGERS)) {
+    if (raw.includes(marker)) return script;
+  }
+  return null;
+}
+
 export interface FakeUpstream {
   readonly port: number;
   readonly requests: () => readonly { readonly path: string; readonly body: unknown }[];
@@ -64,6 +101,55 @@ export async function startFakeUpstream(): Promise<FakeUpstream> {
         (parsedBody as { stream?: unknown }).stream === true;
       const id = `chatcmpl-${randomUUID().replaceAll("-", "")}`;
       const created = Math.floor(Date.now() / 1000);
+
+      const toolScript = matchedToolTrigger(raw);
+      const isToolFollowUp = lastMessageRole(parsedBody) === "tool";
+      if (toolScript !== null && !isToolFollowUp) {
+        const toolCall = {
+          id: "call_1",
+          type: "function",
+          function: { name: toolScript.toolName, arguments: JSON.stringify(toolScript.toolArguments) },
+        };
+        if (wantsStream) {
+          response.writeHead(200, {
+            "content-type": "text/event-stream",
+            "cache-control": "no-cache",
+            connection: "keep-alive",
+          });
+          const chunkOf = (delta: Record<string, unknown>, finishReason: string | null): string =>
+            `data: ${JSON.stringify({
+              id,
+              object: "chat.completion.chunk",
+              created,
+              model: "fake-model-a",
+              choices: [{ index: 0, delta, finish_reason: finishReason }],
+            })}\n\n`;
+          response.write(chunkOf({ role: "assistant" }, null));
+          response.write(chunkOf({ tool_calls: [{ index: 0, ...toolCall }] }, null));
+          response.write(chunkOf({}, "tool_calls"));
+          response.write("data: [DONE]\n\n");
+          response.end();
+          return;
+        }
+        const payload = {
+          id,
+          object: "chat.completion",
+          created,
+          model: "fake-model-a",
+          choices: [
+            {
+              index: 0,
+              message: { role: "assistant", content: null, tool_calls: [toolCall] },
+              finish_reason: "tool_calls",
+            },
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        };
+        const body = JSON.stringify(payload);
+        response.writeHead(200, { "content-type": "application/json", "content-length": String(Buffer.byteLength(body)) });
+        response.end(body);
+        return;
+      }
 
       if (wantsStream) {
         // Real chat_completions clients that request stream:true expect

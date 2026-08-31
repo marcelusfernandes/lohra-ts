@@ -121,6 +121,12 @@ export interface RawWsClient {
   sendText(text: string): void;
   sendBinary(payload: Buffer): void;
   nextFrame(timeoutMs?: number): Promise<RawWsFrame>;
+  /** Resolves once, the moment the underlying TCP socket actually closes
+   * (FIN/RST), regardless of whether a WS close frame was ever sent --
+   * needed to distinguish "the connection died with no close frame at
+   * all" from "still open, just no frame yet" (nextFrame's timeout alone
+   * can't tell those apart). */
+  readonly closed: Promise<void>;
   close(): void;
 }
 
@@ -205,6 +211,12 @@ export async function connectRawWs(
   const pendingFrames: RawWsFrame[] = decoder.feed(handshake.rest);
   const waiters: ((frame: RawWsFrame) => void)[] = [];
 
+  let resolveClosed: () => void = () => {};
+  const closed = new Promise<void>((resolvePromise) => {
+    resolveClosed = resolvePromise;
+  });
+  socket.once("close", resolveClosed);
+
   socket.on("data", (chunk: Buffer) => {
     const frames = decoder.feed(chunk);
     for (const frame of frames) {
@@ -216,6 +228,7 @@ export async function connectRawWs(
 
   return {
     handshake: handshake.result,
+    closed,
     sendText(text: string): void {
       socket.write(encodeClientFrame(WS_OPCODE.text, Buffer.from(text, "utf8")));
     },

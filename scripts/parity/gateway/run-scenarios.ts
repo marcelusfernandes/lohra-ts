@@ -27,242 +27,43 @@ import {
   type LaunchedGatewayProcess as LaunchedCandidateProcess,
 } from "./launch-candidate-fake.js";
 import { launchOracleDashboard, type LaunchedOracleProcess, verifyOracleGuard } from "./launch-oracle.js";
-import { sendRawHttpRequest, type RawHttpResponse } from "./raw-http-client.js";
-import { connectRawWs, decodeCloseFrame, WS_OPCODE, type RawWsClient } from "./raw-ws-client.js";
+import { sendRawHttpRequest } from "./raw-http-client.js";
+import { connectRawWs, decodeCloseFrame, WS_OPCODE } from "./raw-ws-client.js";
+import {
+  compareMasked,
+  createSessionBoth,
+  divergent,
+  drainUntilComplete,
+  eventTypeSequence,
+  headerValue,
+  jsonBody,
+  match,
+  normalizeForDigest,
+  perSessionRoundTrip,
+  probeBoth,
+  probeBothUpgrade,
+  rpcRoundTrip,
+  waitForSilenceToleratingSessionInfo,
+  collectKeyedFrames,
+  SECURE_PHASE_DASHBOARD_TOKEN,
+  type NamedScenario,
+  type ScenarioContext,
+  type ScenarioResult,
+} from "./scenario-helpers.js";
+import { AUTH_HEADER_MATRIX_SCENARIOS } from "./scenarios/t12-auth-header-envelope-and-duplicate-matrix.js";
+import { BUSY_4009_MULTISOCKET_SCENARIOS } from "./scenarios/t12-busy-4009-multisocket-race.js";
+import { BINARY_FRAME_SCENARIOS } from "./scenarios/t12-ws-binary-frame-kills-socket.js";
+import { DUAL_SERIALIZATION_SCENARIOS } from "./scenarios/t12-tool-frame-dual-serialization-nonascii.js";
+import { PERSISTED_SHAPES_SCENARIOS } from "./scenarios/t12-persisted-message-shapes-and-rest-equals-ws.js";
+import { RCE_DENY_SCENARIOS } from "./scenarios/t12-tool-terminal-rce-proof-and-dangerous-deny.js";
+import { REST_25_SWEEP_SCENARIOS } from "./scenarios/t12-rest-route-negative-sweep-25-routes.js";
+import { RPC_FRAMING_EDGES_SCENARIOS } from "./scenarios/t12-rpc-framing-edges-33-probes.js";
+import { UPSTREAM_ERROR_WARNING_SCENARIOS } from "./scenarios/t12-upstream-error-warning-field-no-error-event.js";
+import { WS_QUERY_AND_HEADER_TOKEN_SCENARIOS } from "./scenarios/t12-ws-query-multiplicity-and-header-token.js";
 
 const projectRoot = resolve(import.meta.dirname, "../../..");
 const evidenceRoot = resolve(projectRoot, ".parity-evidence/t12");
 mkdirSync(evidenceRoot, { recursive: true });
-
-interface ScenarioContext {
-  readonly oraclePort: number;
-  readonly candidatePort: number;
-  readonly fakeUpstream: FakeUpstream;
-}
-
-interface ScenarioResult {
-  readonly id: string;
-  readonly verdict: "match" | "divergent" | "error";
-  readonly detail?: string;
-  readonly evidence?: unknown;
-}
-
-interface NamedScenario {
-  readonly id: string;
-  readonly run: (ctx: ScenarioContext) => Promise<ScenarioResult>;
-}
-
-function jsonBody(response: RawHttpResponse): unknown {
-  try {
-    return JSON.parse(response.body.toString("utf8"));
-  } catch {
-    return response.body.toString("utf8");
-  }
-}
-
-function headerValue(response: RawHttpResponse, name: string): string | null {
-  const lower = name.toLowerCase();
-  for (const [key, value] of response.headers) if (key.toLowerCase() === lower) return value;
-  return null;
-}
-
-function match(id: string, evidence: unknown): ScenarioResult {
-  return { id, verdict: "match", evidence };
-}
-
-function divergent(id: string, detail: string, evidence?: unknown): ScenarioResult {
-  return { id, verdict: "divergent", detail, evidence };
-}
-
-async function probeBoth(
-  ctx: ScenarioContext,
-  path: string,
-  headers: readonly (readonly [string, string])[],
-  method = "GET",
-): Promise<{ readonly oracle: RawHttpResponse; readonly candidate: RawHttpResponse }> {
-  const [oracle, candidate] = await Promise.all([
-    sendRawHttpRequest("127.0.0.1", ctx.oraclePort, {
-      method,
-      path,
-      headers: [...headers, ["Host", "127.0.0.1"], ["Connection", "close"]],
-    }),
-    sendRawHttpRequest("127.0.0.1", ctx.candidatePort, {
-      method,
-      path,
-      headers: [...headers, ["Host", "127.0.0.1"], ["Connection", "close"]],
-    }),
-  ]);
-  return { oracle, candidate };
-}
-
-async function probeBothUpgrade(
-  ctx: ScenarioContext,
-  path: string,
-): Promise<{ readonly oracleStatus: number; readonly candidateStatus: number }> {
-  const headers: readonly (readonly [string, string])[] = [
-    ["Host", "127.0.0.1"],
-    ["Connection", "Upgrade"],
-    ["Upgrade", "websocket"],
-    ["Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ=="],
-    ["Sec-WebSocket-Version", "13"],
-  ];
-  const [oracle, candidate] = await Promise.all([
-    sendRawHttpRequest("127.0.0.1", ctx.oraclePort, { method: "GET", path, headers }),
-    sendRawHttpRequest("127.0.0.1", ctx.candidatePort, { method: "GET", path, headers }),
-  ]);
-  return { oracleStatus: oracle.status, candidateStatus: candidate.status };
-}
-
-// Recursively compares two values, treating a small set of known
-// instance-specific field names (session ids, timestamps, cwd) as
-// type-only checks rather than exact-value ones. Everything else -- key
-// sets, array lengths, primitive values -- must match exactly. Returns
-// null when equal, or a path-qualified description of the first
-// divergence found.
-const MASKED_KEYS = new Set(["session_id", "id", "created_at", "started_at", "ended_at", "cwd", "parent_session_id"]);
-
-function compareMasked(a: unknown, b: unknown, path = "$"): string | null {
-  if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b)) return `${path}: array-shape mismatch (${JSON.stringify(a)} vs ${JSON.stringify(b)})`;
-    if (a.length !== b.length) return `${path}: length ${String(a.length)} vs ${String(b.length)}`;
-    for (let i = 0; i < a.length; i += 1) {
-      const sub = compareMasked(a[i], b[i], `${path}[${String(i)}]`);
-      if (sub !== null) return sub;
-    }
-    return null;
-  }
-  if (typeof a === "object" && a !== null && typeof b === "object" && b !== null) {
-    const recordA = a as Record<string, unknown>;
-    const recordB = b as Record<string, unknown>;
-    const aKeys = Object.keys(recordA).sort();
-    const bKeys = Object.keys(recordB).sort();
-    if (JSON.stringify(aKeys) !== JSON.stringify(bKeys)) {
-      return `${path}: keys ${JSON.stringify(aKeys)} vs ${JSON.stringify(bKeys)}`;
-    }
-    for (const key of aKeys) {
-      if (MASKED_KEYS.has(key)) {
-        if (typeof recordA[key] !== typeof recordB[key]) {
-          return `${path}.${key}: type ${typeof recordA[key]} vs ${typeof recordB[key]}`;
-        }
-        continue;
-      }
-      const sub = compareMasked(recordA[key], recordB[key], `${path}.${key}`);
-      if (sub !== null) return sub;
-    }
-    return null;
-  }
-  if (a !== b) return `${path}: ${JSON.stringify(a)} vs ${JSON.stringify(b)}`;
-  return null;
-}
-
-// Same masking rule as compareMasked, but producing a stable value instead
-// of a divergence report: replaces every MASKED_KEYS field with a
-// type-tagged placeholder (session ids, timestamps) and sorts object keys,
-// so hashing the result is reproducible across runs even though the raw
-// evidence contains fresh random ids and clock-dependent timestamps every
-// time the scenarios execute.
-function normalizeForDigest(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map((item) => normalizeForDigest(item));
-  if (typeof value === "object" && value !== null) {
-    const record = value as Record<string, unknown>;
-    const normalized: Record<string, unknown> = {};
-    for (const key of Object.keys(record).sort()) {
-      normalized[key] = MASKED_KEYS.has(key)
-        ? `<masked:${typeof record[key]}>`
-        : normalizeForDigest(record[key]);
-    }
-    return normalized;
-  }
-  return value;
-}
-
-interface RpcRoundTripResult {
-  readonly divergence: string | null;
-  readonly oracleEnvelope: Record<string, unknown>;
-  readonly candidateEnvelope: Record<string, unknown>;
-}
-
-// session.info is broadcast asynchronously, not strictly synchronous with
-// session.create -- it can arrive interleaved with an unrelated RPC's own
-// response depending on timing. Reading "the next frame" blindly after
-// sending an RPC request sometimes catches that stray event instead of
-// the actual result, desynchronizing whatever comes after. This drains
-// (and records) any event frames first, returning only the frame carrying
-// the given RPC id.
-async function nextRpcResultFrame(
-  ws: RawWsClient,
-  rpcId: number,
-  maxSkip = 5,
-): Promise<{ readonly envelope: Record<string, unknown>; readonly skippedEvents: readonly unknown[] }> {
-  const skippedEvents: unknown[] = [];
-  for (let i = 0; i < maxSkip; i += 1) {
-    const frame = await ws.nextFrame();
-    const envelope = JSON.parse(frame.payload.toString("utf8")) as Record<string, unknown>;
-    if (envelope.method === "event") {
-      skippedEvents.push(envelope);
-      continue;
-    }
-    if (envelope.id === rpcId) return { envelope, skippedEvents };
-    // A response for a different id -- keep it as evidence but keep
-    // waiting for the one this call actually asked for.
-    skippedEvents.push(envelope);
-  }
-  throw new Error(`NEXT_RPC_RESULT_FRAME_EXHAUSTED id=${String(rpcId)} skipped=${JSON.stringify(skippedEvents)}`);
-}
-
-// Sends the SAME JSON-RPC request to both raw WS connections and does a
-// masked structural+value comparison of the full response envelope
-// (including `result`, not just its key set) -- a candidate returning a
-// wrong-but-same-shaped payload is caught here, not just a wrong-shaped
-// one.
-async function rpcRoundTrip(
-  oracleWs: RawWsClient,
-  candidateWs: RawWsClient,
-  request: { readonly jsonrpc: "2.0"; readonly id: number; readonly method: string; readonly params: unknown },
-): Promise<RpcRoundTripResult> {
-  oracleWs.sendText(JSON.stringify(request));
-  candidateWs.sendText(JSON.stringify(request));
-  const [oracleResult, candidateResult] = await Promise.all([
-    nextRpcResultFrame(oracleWs, request.id),
-    nextRpcResultFrame(candidateWs, request.id),
-  ]);
-  return {
-    divergence: compareMasked(oracleResult.envelope, candidateResult.envelope),
-    oracleEnvelope: oracleResult.envelope,
-    candidateEnvelope: candidateResult.envelope,
-  };
-}
-
-// Same as rpcRoundTrip, but for methods keyed on a session_id -- each side
-// gets a request built from ITS OWN session id (they're independently
-// random per process), not one shared literal request. rpcRoundTrip alone
-// would send the oracle's session_id to the candidate's socket too,
-// which is simply the wrong request there.
-async function perSessionRoundTrip(
-  oracleWs: RawWsClient,
-  candidateWs: RawWsClient,
-  rpcId: number,
-  method: string,
-  oracleSessionId: string,
-  candidateSessionId: string,
-  extraParams: Record<string, unknown> = {},
-): Promise<RpcRoundTripResult> {
-  oracleWs.sendText(
-    JSON.stringify({ jsonrpc: "2.0", id: rpcId, method, params: { session_id: oracleSessionId, ...extraParams } }),
-  );
-  candidateWs.sendText(
-    JSON.stringify({ jsonrpc: "2.0", id: rpcId, method, params: { session_id: candidateSessionId, ...extraParams } }),
-  );
-  const [oracleResult, candidateResult] = await Promise.all([
-    nextRpcResultFrame(oracleWs, rpcId),
-    nextRpcResultFrame(candidateWs, rpcId),
-  ]);
-  return {
-    divergence: compareMasked(oracleResult.envelope, candidateResult.envelope),
-    oracleEnvelope: oracleResult.envelope,
-    candidateEnvelope: candidateResult.envelope,
-  };
-}
 
 // -- [socket-bilateral] scenarios, secure mode (auth enforced) -------------
 
@@ -516,122 +317,6 @@ const INSECURE_SCENARIOS: NamedScenario[] = [
 // wired to the loopback fake upstream (oracle via oracle-dash-launcher.py,
 // candidate via candidate-dash-launcher.ts + the product's own
 // registerProvider()) rather than a real provider.
-
-interface DrainedEvent {
-  readonly kind: "event" | "rpc-result";
-  readonly type?: string;
-  readonly payload?: unknown;
-}
-
-async function drainUntilComplete(
-  ws: RawWsClient,
-  maxFrames = 12,
-  frameTimeoutMs = 10_000,
-): Promise<DrainedEvent[]> {
-  const drained: DrainedEvent[] = [];
-  for (let i = 0; i < maxFrames; i += 1) {
-    const frame = await ws.nextFrame(frameTimeoutMs);
-    if (frame.opcode !== WS_OPCODE.text) continue;
-    const envelope = JSON.parse(frame.payload.toString("utf8")) as {
-      readonly method?: string;
-      readonly params?: { readonly type: string; readonly payload: unknown };
-      readonly result?: unknown;
-    };
-    if (envelope.method === "event" && envelope.params !== undefined) {
-      drained.push({ kind: "event", type: envelope.params.type, payload: envelope.params.payload });
-      if (envelope.params.type === "message.complete") break;
-    } else {
-      drained.push({ kind: "rpc-result", payload: envelope.result });
-    }
-  }
-  return drained;
-}
-
-function eventTypeSequence(events: readonly DrainedEvent[]): readonly string[] {
-  return events.map((event) => (event.kind === "event" ? (event.type ?? "?") : "rpc-result"));
-}
-
-function frameKey(envelope: { readonly method?: string; readonly id?: unknown; readonly params?: { readonly type?: string } }): string {
-  if (envelope.method === "event") return `event:${envelope.params?.type ?? "?"}`;
-  return `rpc:${String(envelope.id)}`;
-}
-
-// Reads frames one at a time until every key in `requiredKeys` has been
-// seen, keyed by identity (rpc:<id> or event:<type>) rather than
-// positionally -- session.info is broadcast asynchronously and can land
-// before, between, or after the frames a specific RPC call actually
-// produces, so a fixed read-order assumption is not reliable here. Any
-// EXTRA frame seen along the way (e.g. session.info itself) is kept in
-// the returned map too, so nothing is silently dropped.
-async function collectKeyedFrames(
-  ws: RawWsClient,
-  requiredKeys: readonly string[],
-  maxFrames = 5,
-  frameTimeoutMs = 5000,
-): Promise<Record<string, unknown>> {
-  const seen: Record<string, unknown> = {};
-  const required = new Set(requiredKeys);
-  for (let i = 0; i < maxFrames && required.size > 0; i += 1) {
-    const frame = await ws.nextFrame(frameTimeoutMs);
-    const envelope = JSON.parse(frame.payload.toString("utf8")) as Record<string, unknown>;
-    const key = frameKey(envelope);
-    seen[key] = envelope;
-    required.delete(key);
-  }
-  if (required.size > 0) {
-    throw new Error(`COLLECT_KEYED_FRAMES_EXHAUSTED missing=${JSON.stringify([...required])} seen=${JSON.stringify(Object.keys(seen))}`);
-  }
-  return seen;
-}
-
-// "Permanent silence" (ADR-T12-02) means this specific request never gets
-// a completion -- it does NOT mean the socket goes silent for every
-// purpose. session.info can legitimately arrive during the silence
-// window (it's an independent broadcast, unrelated to the ghost
-// request); tolerate and absorb it, but any OTHER frame is a genuine
-// violation. Returns null on true silence, or the offending frame's
-// parsed envelope if something else arrived.
-async function waitForSilenceToleratingSessionInfo(
-  ws: RawWsClient,
-  budgetMs: number,
-): Promise<Record<string, unknown> | null> {
-  const deadline = Date.now() + budgetMs;
-  for (;;) {
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) return null;
-    let frame;
-    try {
-      frame = await ws.nextFrame(remaining);
-    } catch {
-      return null;
-    }
-    const envelope = JSON.parse(frame.payload.toString("utf8")) as Record<string, unknown>;
-    if (frameKey(envelope) === "event:session.info") continue;
-    return envelope;
-  }
-}
-
-interface CreatedSessionPair {
-  readonly divergence: string | null;
-  readonly evidence: unknown;
-  readonly oracleSessionId: string;
-  readonly candidateSessionId: string;
-}
-
-async function createSessionBoth(oracleWs: RawWsClient, candidateWs: RawWsClient): Promise<CreatedSessionPair> {
-  const create = await rpcRoundTrip(oracleWs, candidateWs, {
-    jsonrpc: "2.0",
-    id: 1,
-    method: "session.create",
-    params: {},
-  });
-  return {
-    divergence: create.divergence,
-    evidence: create,
-    oracleSessionId: (create.oracleEnvelope.result as { session_id: string } | undefined)?.session_id ?? "",
-    candidateSessionId: (create.candidateEnvelope.result as { session_id: string } | undefined)?.session_id ?? "",
-  };
-}
 
 const TURN_SCENARIOS: NamedScenario[] = [
   // t12-prompt-submit-basic-turn (assertions 27-32/44-47 subset): a full
@@ -905,22 +590,25 @@ async function runPhase(
   scenarios: readonly NamedScenario[],
   insecure: boolean,
   fakeUpstream: FakeUpstream,
+  dashboardToken?: string,
 ): Promise<ScenarioResult[]> {
   let oracle: LaunchedOracleProcess | undefined;
   let candidate: LaunchedCandidateProcess | undefined;
   const results: ScenarioResult[] = [];
   try {
     const home = mkdtempSync(join(tmpdir(), `lohra-t12-candidate-home-${label}-`));
+    const tokenOverride = dashboardToken === undefined ? {} : { dashboardToken };
     [oracle, candidate] = await Promise.all([
-      launchOracleDashboard({ fakeUpstreamPort: fakeUpstream.port, insecure }),
+      launchOracleDashboard({ fakeUpstreamPort: fakeUpstream.port, insecure, ...tokenOverride }),
       launchCandidateFakeUpstreamDashboard({
         fakeUpstreamPort: fakeUpstream.port,
         home,
         insecure,
         bootTimeoutMs: 20_000,
+        ...tokenOverride,
       }),
     ]);
-    const ctx: ScenarioContext = { oraclePort: oracle.port, candidatePort: candidate.port, fakeUpstream };
+    const ctx: ScenarioContext = { oraclePort: oracle.port, candidatePort: candidate.port, fakeUpstream, ...tokenOverride };
     for (const scenario of scenarios) {
       try {
         results.push(await scenario.run(ctx));
@@ -950,10 +638,31 @@ async function main(): Promise<void> {
   const fakeUpstream: FakeUpstream = await startFakeUpstream();
   let results: ScenarioResult[];
   try {
-    const secureResults = await runPhase("secure", SECURE_SCENARIOS, false, fakeUpstream);
+    const secureResults = await runPhase(
+      "secure",
+      [
+        ...SECURE_SCENARIOS,
+        ...AUTH_HEADER_MATRIX_SCENARIOS,
+        ...WS_QUERY_AND_HEADER_TOKEN_SCENARIOS,
+        ...REST_25_SWEEP_SCENARIOS,
+      ],
+      false,
+      fakeUpstream,
+      SECURE_PHASE_DASHBOARD_TOKEN,
+    );
     const insecureResults = await runPhase(
       "insecure",
-      [...INSECURE_SCENARIOS, ...TURN_SCENARIOS],
+      [
+        ...INSECURE_SCENARIOS,
+        ...TURN_SCENARIOS,
+        ...RPC_FRAMING_EDGES_SCENARIOS,
+        ...BINARY_FRAME_SCENARIOS,
+        ...DUAL_SERIALIZATION_SCENARIOS,
+        ...PERSISTED_SHAPES_SCENARIOS,
+        ...BUSY_4009_MULTISOCKET_SCENARIOS,
+        ...UPSTREAM_ERROR_WARNING_SCENARIOS,
+        ...RCE_DENY_SCENARIOS,
+      ],
       true,
       fakeUpstream,
     );

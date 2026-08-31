@@ -68,6 +68,12 @@ export interface LaunchOracleInput {
   readonly insecure?: boolean;
   readonly noOpen?: boolean;
   readonly bootTimeoutMs?: number;
+  /** Pins LOHRA_DASHBOARD_SESSION_TOKEN -- the oracle's own cli.py honors
+   * this env var over its secrets.token_urlsafe(32) fallback (same
+   * mechanism the TS candidate's dashboard.ts reproduces), letting a
+   * scenario thread a KNOWN valid token through both sides identically
+   * instead of only exercising no-token/wrong-token paths. */
+  readonly dashboardToken?: string;
 }
 
 // The oracle's `run_dashboard` prints the literal --port argument it was
@@ -145,6 +151,7 @@ export async function launchOracleDashboard(
   };
   if (input.insecure === true) env.LOHRA_INSECURE = "1";
   if (input.noOpen === true) env.LOHRA_NO_OPEN = "1";
+  if (input.dashboardToken !== undefined) env.LOHRA_DASHBOARD_SESSION_TOKEN = input.dashboardToken;
 
   const child = spawn(ORACLE_PYTHON, [LAUNCHER_SCRIPT], {
     cwd: home,
