@@ -17,6 +17,8 @@ import {
   SqliteConversationRepository,
   successEnvelope,
 } from "../conversation/index.js";
+import { CronTool } from "../cron/tool.js";
+import { CronStore } from "../cron/store.js";
 import { loadSoul, MemoryStore } from "../memory/index.js";
 import { loadPriceOverrides } from "../pricing/index.js";
 import {
@@ -222,12 +224,14 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   const memoryTool = new MemoryTool(memoryStore);
   const skillTool = new SkillTool(skillStore);
   const listModels = new ListModelsTool(options.home, options.environment);
+  const cronTool = new CronTool(new CronStore(options.home));
   const dispatch = composeDispatch(baseDispatch, {
     memory: (args) => memoryTool.handle(args),
     skill_view: (args) => skillTool.view(args),
     skill_manage: (args) => skillTool.manage(args),
     session_search: (args) => new SessionSearchTool(sessions).handle(args),
     list_models: (args) => listModels.handle(args),
+    cronjob: (args) => cronTool.handle(args),
   });
   const runtime = new ConversationRuntime({
     repository,
