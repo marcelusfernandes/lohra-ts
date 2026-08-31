@@ -279,6 +279,38 @@ describe("createChildRunner", () => {
     close();
   });
 
+  // The parent's own chat.ts already wires loadPriceOverrides(pricing.json)
+  // into its ConversationRuntime — a child's ConversationRuntime never
+  // received the same option, so any operator-configured price override
+  // would silently apply to the parent's own usage but not a child's,
+  // even though ConversationRuntime.commitUsage persists a real cost value
+  // for orchestration-sourced sessions too. Same class of gap as the
+  // max_iterations default, the effort wire, and the error-message format:
+  // the capability already exists on the parent's path and was never
+  // threaded through to the child's.
+  it("wires pricingOverrides into the child's ConversationRuntime the same way commands/chat.ts wires it for the parent", async () => {
+    const { sessions, close } = setup();
+    sessions.createSession({ id: "parent-1", source: "gateway" });
+    const parentProfile = getProviderProfile("openai") ?? (() => {
+      throw new Error("openai profile missing");
+    })();
+    const { client } = fakeClient([assistantStream("priced")]);
+    const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
+    const overridePrice = { inputPerMillion: 1_000_000, outputPerMillion: 1_000_000, source: "test" };
+    const runner = makeRunner(sessions, pool, {
+      pricingOverrides: new Map([[`${parentProfile.name}\0fake-model-a`, overridePrice]]),
+    });
+
+    await runner("child-priced", { prompt: "hi" }, "SYS", () => [], noSignal);
+
+    const usage = sessions.usage("child-priced");
+    // 11 input + 4 output tokens at $1,000,000/million each is far above
+    // zero — the built-in price table has no entry for "fake-model-a", so
+    // an unwired override would leave this at 0/null.
+    expect(usage?.estimatedCostUsd).toBeGreaterThan(0);
+    close();
+  });
+
   it("resolves (never rejects) when the per-task provider override is unknown — required so delegate_task's Promise.all can't be broken by one bad task (L17)", async () => {
     const { sessions, close } = setup();
     sessions.createSession({ id: "parent-1", source: "gateway" });

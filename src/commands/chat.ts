@@ -246,6 +246,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     codexHome: options.codexHome,
     environment: options.environment,
   });
+  const pricingOverrides = loadPriceOverrides(join(options.home, "pricing.json"));
   const orchestrationCore = buildOrchestrationCore({
     fanout,
     sessions,
@@ -255,6 +256,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     parentToolDefinitions: builtinRegistry.getDefinitions(),
     defaultModel: model,
     cwd: options.cwd,
+    pricingOverrides,
   });
   const dispatch = composeDispatch(baseDispatch, {
     memory: (args) => memoryTool.handle(args),
@@ -278,7 +280,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     clock: () => Date.now() / 1000,
     maxTokens: profile.defaultMaxTokens,
     maxIterations: fanout.parentMaxIterations,
-    pricingOverrides: loadPriceOverrides(join(options.home, "pricing.json")),
+    pricingOverrides,
   });
   try {
     const result = await runtime.runTurn({

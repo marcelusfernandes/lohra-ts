@@ -7,6 +7,7 @@ import {
   ConversationRuntime,
   MaxIterationsError,
   ResponsesModel,
+  type ConversationRuntimeOptions,
 } from "../conversation/index.js";
 import type { ModelTransport } from "../conversation/index.js";
 import type { ProviderProfile } from "../providers/index.js";
@@ -39,6 +40,13 @@ export interface CreateChildRunnerOptions {
    * (which bounds only the parent). Overridden per-spawn by
    * SpawnConfig.maxIterations (authored, 1-128), never by env. */
   readonly childMaxIterations: number;
+  /** The same operator-configured price table commands/chat.ts loads for
+   * the parent (loadPriceOverrides(pricing.json)) — a child's own turn
+   * persists a real cost via ConversationRuntime.commitUsage, so an
+   * override that applies to the parent's usage must apply to a child's
+   * too. Absent means the built-in price table only, same as the parent
+   * when no pricing.json exists. */
+  readonly pricingOverrides?: ConversationRuntimeOptions["pricingOverrides"];
 }
 
 function nonEmpty(value: string | undefined): string | null {
@@ -157,6 +165,7 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
         clock: options.clock,
         maxTokens: profile.defaultMaxTokens,
         maxIterations,
+        pricingOverrides: options.pricingOverrides,
       });
 
       try {

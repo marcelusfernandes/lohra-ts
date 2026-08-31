@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { ClientPool } from "../agent/client-pool.js";
+import type { ConversationRuntimeOptions } from "../conversation/index.js";
 import type { SessionRepository } from "../state/index.js";
 import type { RegistryDispatch, ToolDefinition, ToolHandler } from "../tools/types.js";
 import { createChildRunner } from "./child-runner.js";
@@ -38,6 +39,11 @@ export interface BuildOrchestrationCoreOptions {
   readonly parentToolDefinitions: readonly ToolDefinition[];
   readonly defaultModel: string;
   readonly cwd: string;
+  /** commands/chat.ts's loadPriceOverrides(pricing.json) — forwarded to
+   * every child's own ConversationRuntime so an operator's price override
+   * applies to a child's persisted cost the same way it applies to the
+   * parent's. */
+  readonly pricingOverrides?: ConversationRuntimeOptions["pricingOverrides"];
 }
 
 /**
@@ -62,6 +68,7 @@ export function buildOrchestrationCore(options: BuildOrchestrationCoreOptions): 
       idSource: () => randomUUID().replaceAll("-", ""),
       clock: () => Date.now() / 1000,
       childMaxIterations: 50,
+      pricingOverrides: options.pricingOverrides,
     }),
     idSource: () => randomUUID().replaceAll("-", ""),
     maxSubsessions: options.fanout.maxSubsessions,

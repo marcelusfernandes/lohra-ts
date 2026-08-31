@@ -206,3 +206,68 @@ describe("buildOrchestrationCore — wiring-level regression for fanout.maxParal
     expect(core.size).toBe(6);
   });
 });
+
+/** A single real streaming chat-completion response (finish: stop), the
+ * minimum needed for a spawned child's turn to actually settle and commit
+ * usage — BarrierPort above deliberately never resolves, which is right
+ * for admission-counting tests but wrong here, where the turn must finish
+ * to observe the persisted cost. */
+class CompletingPort implements ChatHttpPort {
+  readonly requests: ChatHttpRequest[] = [];
+  post(request: ChatHttpRequest): Promise<HttpResponseData> {
+    this.requests.push(request);
+    const frames = [
+      { choices: [{ delta: { content: "priced" }, finish_reason: "stop" }] },
+      { choices: [], usage: { prompt_tokens: 11, completion_tokens: 4 } },
+    ];
+    const body = frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join("");
+    return Promise.resolve({
+      status: 200,
+      headers: new Headers({ "content-type": "text/event-stream" }),
+      body: new TextEncoder().encode(body),
+    });
+  }
+}
+
+describe("buildOrchestrationCore — wiring-level regression for pricingOverrides", () => {
+  it("an operator price override reaches the real cost commands/chat.ts's own construction path persists for a child, not just the parent", async () => {
+    // Same class of proof as the maxParallel tests above: a hardcode or a
+    // forgotten pass-through at the chat.ts call site (never forwarding
+    // loadPriceOverrides(...) into buildOrchestrationCore) would fail this,
+    // where a unit test on createChildRunner alone cannot.
+    const profile = getProviderProfile("openai");
+    if (profile === null) throw new Error("openai profile missing");
+    const port = new CompletingPort();
+    const client = new ChatCompletionsClient({
+      baseUrl: "http://parent.invalid/v1",
+      apiKey: "k",
+      transport: new ChatCompletionsTransport(),
+      http: port,
+    });
+    const pool = new ClientPool(profile, client, { home: "/tmp", environment: {} });
+    const sessions = setupSessions();
+    const overridePrice = { inputPerMillion: 1_000_000, outputPerMillion: 1_000_000, source: "test" };
+
+    const core = buildOrchestrationCore({
+      fanout: { maxParallel: 4, maxSubsessions: 200, parentMaxIterations: 90, warnings: [] },
+      sessions,
+      parentSessionId: "parent-1",
+      clientPool: pool,
+      baseDispatch: () => Promise.resolve("unused"),
+      parentToolDefinitions: [],
+      defaultModel: "fake-model-a",
+      cwd: "/tmp",
+      pricingOverrides: new Map([[`${profile.name}\0fake-model-a`, overridePrice]]),
+    });
+
+    const { subId } = core.spawn({ prompt: "priced task" });
+    const outcome = await core.collect(subId, true);
+    if (outcome.kind !== "settled") throw new Error("expected the turn to settle");
+    expect(outcome.result.status).toBe("complete");
+
+    const usage = sessions.usage(subId);
+    // The built-in price table has no entry for "fake-model-a" — an
+    // unwired override would leave this at null.
+    expect(usage?.estimatedCostUsd).toBeGreaterThan(0);
+  });
+});
