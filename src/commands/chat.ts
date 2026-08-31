@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { loadProjectContext, buildSystemPrompt } from "../context/index.js";
 import { readCodexModel } from "../auth/codex.js";
 import { resolveAuthRoute, resolveCredentials } from "../auth/credentials.js";
+import { ClientPool } from "../agent/client-pool.js";
 import {
   AnthropicMessagesModel,
   ChatCompletionsModel,
@@ -18,6 +19,10 @@ import {
   successEnvelope,
 } from "../conversation/index.js";
 import { loadSoul, MemoryStore } from "../memory/index.js";
+import { orchestrationToolHandlers } from "../orchestration/chat-wiring.js";
+import { createChildRunner } from "../orchestration/child-runner.js";
+import { OrchestrationCore } from "../orchestration/core.js";
+import { buildSubagentSystemPrompt } from "../orchestration/subagent-prompt.js";
 import { loadPriceOverrides } from "../pricing/index.js";
 import {
   CODEX_PROVIDER,
@@ -41,8 +46,10 @@ import {
 import {
   AnthropicMessagesClient,
   buildClient,
+  ChatCompletionsClient,
   createResponsesClient,
   ProviderCallFailed,
+  ResponsesClient,
 } from "../transports/index.js";
 import type { ModelTransport } from "../conversation/index.js";
 import { runChatBoundary } from "./chat-boundary.js";
@@ -148,7 +155,15 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   if (provider === undefined && route.mode !== "subscription")
     return runChatBoundary({ home: options.home, codexHome: options.codexHome, input });
 
+  // Minted up front so it's known before ClientPool/OrchestrationCore/
+  // createChildRunner are constructed below (parent_session_id is fixed at
+  // their construction time, L21) — idSource is wired to return this same
+  // value later, so runTurn ends up with an identical sessionId either way,
+  // whether --session was given or not.
+  const parentSessionId = option(options.argv, "--session") ?? randomUUID().replaceAll("-", "");
+
   let profile: ProviderProfile;
+  let client: ChatCompletionsClient | AnthropicMessagesClient | ResponsesClient;
   let modelTransport: ModelTransport;
   let subscriptionNote = "";
   let model: string | undefined;
@@ -163,14 +178,13 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       return runChatBoundary({ home: options.home, codexHome: options.codexHome, input });
     profile = CODEX_PROVIDER;
     model = option(options.argv, "--model") ?? readCodexModel(options.codexHome) ?? "gpt-5.5";
-    modelTransport = new ResponsesModel(
-      createResponsesClient({
-        baseUrl: credentials.baseUrl,
-        token: credentials.token,
-        accountId: credentials.accountId,
-        headers: credentials.headers,
-      }),
-    );
+    client = createResponsesClient({
+      baseUrl: credentials.baseUrl,
+      token: credentials.token,
+      accountId: credentials.accountId,
+      headers: credentials.headers,
+    });
+    modelTransport = new ResponsesModel(client);
     if (provider !== undefined)
       subscriptionNote = `subscription mode active — ignoring --provider ${provider}.\n`;
   } else {
@@ -190,7 +204,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
         "Please pass an `api_key`, `workload_identity`, `admin_api_key`, or set the `OPENAI_API_KEY` or `OPENAI_ADMIN_KEY` environment variable.";
       return initializationError(input, model ?? null, message);
     }
-    const client = buildClient(profile, key ?? (profile.name === "ollama" ? "lohra-local" : ""));
+    client = buildClient(profile, key ?? (profile.name === "ollama" ? "lohra-local" : ""));
     const streaming = !options.argv.includes("--json");
     modelTransport =
       client instanceof AnthropicMessagesClient
@@ -249,12 +263,39 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   const memoryTool = new MemoryTool(memoryStore);
   const skillTool = new SkillTool(skillStore);
   const listModels = new ListModelsTool(options.home, options.environment);
+  const clientPool = new ClientPool(profile, client, {
+    home: options.home,
+    codexHome: options.codexHome,
+    environment: options.environment,
+  });
+  // maxSubsessions/maxParallel are the oracle's own per-variable defaults
+  // (200/4) — LOHRA_MAX_SUBSESSIONS/LOHRA_MAX_PARALLEL/--max-parallel
+  // wiring (assertion 24's full clamp table) is a separate slice.
+  const orchestrationCore = new OrchestrationCore({
+    runChild: createChildRunner({
+      sessions,
+      parentSessionId,
+      clientPool,
+      baseDispatch,
+      parentToolDefinitions: builtinRegistry.getDefinitions(),
+      defaultModel: model,
+      cwd: options.cwd,
+      idSource: () => randomUUID().replaceAll("-", ""),
+      clock: () => Date.now() / 1000,
+      childMaxIterations: 50,
+    }),
+    idSource: () => randomUUID().replaceAll("-", ""),
+    maxSubsessions: 200,
+    maxParallel: 4,
+    buildSubagentPrompt: () => buildSubagentSystemPrompt(),
+  });
   const dispatch = composeDispatch(baseDispatch, {
     memory: (args) => memoryTool.handle(args),
     skill_view: (args) => skillTool.view(args),
     skill_manage: (args) => skillTool.manage(args),
     session_search: (args) => new SessionSearchTool(sessions).handle(args),
     list_models: (args) => listModels.handle(args),
+    ...orchestrationToolHandlers(orchestrationCore, clientPool),
   });
   const runtime = new ConversationRuntime({
     repository,
@@ -266,7 +307,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
           toolDispatcher: new RegistryToolDispatcher(dispatch),
         }
       : {}),
-    idSource: () => randomUUID().replaceAll("-", ""),
+    idSource: () => parentSessionId,
     clock: () => Date.now() / 1000,
     maxTokens: profile.defaultMaxTokens,
     ...(maxIterations === undefined ? {} : { maxIterations }),
