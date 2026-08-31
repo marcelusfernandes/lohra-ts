@@ -25,6 +25,7 @@ import {
 import type {
   EvidenceRecord,
   FixtureSpec,
+  NormalizationSpec,
   RunRecord,
   RunnerSpec,
   RuntimePaths,
@@ -266,8 +267,51 @@ function reproducibility(
   const projection = { ...base, runs: projectedRuns };
   return {
     excludedRawPointers,
-    projectionSha256: sha256(canonicalJson(projection)),
+    projectionSha256: sha256(
+      scrubHashOnlyContent(canonicalJson(projection), base.normalizationPolicy),
+    ),
   };
+}
+
+/**
+ * Post-verdict-only stabilization of the HASHED projection text. The
+ * verdict has already been decided by compareRuns (compare.ts) by the time
+ * this runs, so this can never mask a genuine oracle/candidate divergence —
+ * it only keeps the hash from drifting on content that's supposed to be
+ * identical across both sides (e.g. today's date) but isn't guaranteed to
+ * land in comparison.normalized already-stabilized.
+ *
+ * compareRuns applies each hashOnly rule to comparison.normalized[field],
+ * but that's not the only place a hashOnly-covered field's raw content
+ * reaches the hash: comparison.differences intentionally keeps the
+ * PRE-hashOnly value (so a human can see what actually diverged) for any
+ * field that's genuinely divergent for an unrelated reason, and a scenario
+ * can legitimately have no hashOnly rule registered for a field at all
+ * (e.g. one side never produces it). Rather than enumerate every such path,
+ * this reapplies each hashOnly pattern globally over the already-serialized
+ * projection text: a suite with zero hashOnly rules gets zero
+ * substitutions (a no-op by construction), and a suite that has one gets
+ * its blast radius covered wherever the pattern appears in the hash input,
+ * not just the one field/path it was declared against.
+ *
+ * Deliberately does NOT reuse replaceRegex/applyRule from compare.ts: those
+ * throw on zero matches (expected here — most scenarios have none) or on
+ * more than 16 (a pattern can legitimately recur across every request in a
+ * conversation). Restricted to patterns whose match/replacement text is
+ * plain ASCII with no character that JSON would escape, so operating on
+ * the canonical-JSON string directly (instead of the pre-serialization
+ * object) is safe.
+ */
+function scrubHashOnlyContent(
+  serialized: string,
+  normalizationPolicy: readonly NormalizationSpec[],
+): string {
+  let result = serialized;
+  for (const rule of normalizationPolicy) {
+    if (rule.kind !== "replace-regex" || rule.hashOnly !== true) continue;
+    result = result.replaceAll(new RegExp(rule.pattern, "gu"), rule.replacement);
+  }
+  return result;
 }
 
 function expectationFailures(
