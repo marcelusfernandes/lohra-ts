@@ -58,6 +58,7 @@ import { PERSISTED_SHAPES_SCENARIOS } from "./scenarios/t12-persisted-message-sh
 import { RCE_DENY_SCENARIOS } from "./scenarios/t12-tool-terminal-rce-proof-and-dangerous-deny.js";
 import { REST_25_SWEEP_SCENARIOS } from "./scenarios/t12-rest-route-negative-sweep-25-routes.js";
 import { RPC_FRAMING_EDGES_SCENARIOS } from "./scenarios/t12-rpc-framing-edges-33-probes.js";
+import { RPC_NEGATIVE_SWEEP_SCENARIOS } from "./scenarios/t12-rpc-negative-sweep-39-methods.js";
 import { UPSTREAM_ERROR_WARNING_SCENARIOS } from "./scenarios/t12-upstream-error-warning-field-no-error-event.js";
 import { WS_QUERY_AND_HEADER_TOKEN_SCENARIOS } from "./scenarios/t12-ws-query-multiplicity-and-header-token.js";
 
@@ -656,6 +657,7 @@ async function main(): Promise<void> {
         ...INSECURE_SCENARIOS,
         ...TURN_SCENARIOS,
         ...RPC_FRAMING_EDGES_SCENARIOS,
+        ...RPC_NEGATIVE_SWEEP_SCENARIOS,
         ...BINARY_FRAME_SCENARIOS,
         ...DUAL_SERIALIZATION_SCENARIOS,
         ...PERSISTED_SHAPES_SCENARIOS,
