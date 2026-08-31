@@ -48,10 +48,6 @@ function providerMessage(error: unknown): string {
   return String(error);
 }
 
-function signalAborted(signal: AbortSignal): boolean {
-  return signal.aborted;
-}
-
 function addUsage(total: Usage | null, next: Usage | null): Usage | null {
   if (next === null) return total;
   if (total === null) return { ...next };
@@ -176,7 +172,6 @@ export class ConversationRuntime {
         try {
           response = await this.options.transport.complete(request);
         } catch (error) {
-          if (signalAborted(signal)) throw new ConversationCancelledError(sessionId, error);
           throw new ConversationTurnFailedError(sessionId, providerMessage(error), error);
         }
         apiCalls += 1;
