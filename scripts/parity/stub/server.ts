@@ -43,6 +43,61 @@ function laneOf(messages: readonly Record<string, unknown>[]): string {
   return "default";
 }
 
+const SUB_ID_IN_TOOL_CONTENT = /"sub_id":\s*"([0-9a-f]{32})"/g;
+
+/** Mirrors the Evaluator's own harness-fake_upstream.py _sub_ids: every
+ * sub_id this request's history has seen, in order of first appearance,
+ * read purely out of role:"tool" message content the loop already appended
+ * — no product cooperation, the stub just observes what the conversation
+ * already carries. */
+function subIdsSeen(messages: readonly Record<string, unknown>[]): readonly string[] {
+  const seen: string[] = [];
+  for (const entry of messages) {
+    if (entry.role !== "tool") continue;
+    const content = typeof entry.content === "string" ? entry.content : "";
+    for (const match of content.matchAll(SUB_ID_IN_TOOL_CONTENT)) {
+      const subId = match[1];
+      if (subId !== undefined && !seen.includes(subId)) seen.push(subId);
+    }
+  }
+  return seen;
+}
+
+/** Mirrors the Evaluator's own _resolve: replaces "__SUB__" (most recently
+ * seen) / "__SUBn__" (nth seen, 1-indexed) sentinel strings anywhere in a
+ * parsed JSON value with a real sub_id — the same literal "__NO_SUB__"
+ * error marker when the index doesn't resolve. Lets a manifest script a
+ * collect_session/steer_session call against a sub_id it can't know ahead
+ * of authoring time. */
+function resolveSubSentinels(value: unknown, subs: readonly string[]): unknown {
+  if (typeof value === "string") {
+    if (value === "__SUB__") return subs.length > 0 ? subs[subs.length - 1] : "__NO_SUB__";
+    const indexed = /^__SUB(\d+)__$/.exec(value);
+    if (indexed?.[1] !== undefined) {
+      const index = Number(indexed[1]) - 1;
+      return index >= 0 && index < subs.length ? subs[index] : "__NO_SUB__";
+    }
+    return value;
+  }
+  if (Array.isArray(value)) return value.map((entry) => resolveSubSentinels(entry, subs));
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, resolveSubSentinels(entry, subs)]),
+    );
+  }
+  return value;
+}
+
+/** No-op for every scenario that never writes a __SUB sentinel (checked via
+ * a cheap substring guard before ever parsing JSON) — byte-identical to the
+ * raw scripted string, preserving every existing lane-script fixture's
+ * proven no-op guarantee. */
+function resolveArgumentsRaw(argumentsRaw: string, subs: readonly string[]): string {
+  if (!argumentsRaw.includes("__SUB")) return argumentsRaw;
+  const parsed: unknown = JSON.parse(argumentsRaw);
+  return JSON.stringify(resolveSubSentinels(parsed, subs));
+}
+
 function nextLaneStep(runtime: StubRuntime, lane: string): StubLaneStep | undefined {
   const index = runtime.laneStepIndex.get(lane) ?? 0;
   runtime.laneStepIndex.set(lane, index + 1);
@@ -322,8 +377,13 @@ async function handleLaneScript(
   const msg: Record<string, unknown> = { role: "assistant", content: null };
   let finish: string;
   if (step?.kind === "tool_calls" && step.calls !== undefined) {
+    const subs = subIdsSeen(messages);
     msg.tool_calls = step.calls.map((call, index) =>
-      toolCall(call.name, call.argumentsRaw, `call_lane_${lane}_${String(index)}`),
+      toolCall(
+        call.name,
+        resolveArgumentsRaw(call.argumentsRaw, subs),
+        `call_lane_${lane}_${String(index)}`,
+      ),
     );
     finish = "tool_calls";
   } else {

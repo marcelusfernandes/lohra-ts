@@ -178,6 +178,101 @@ describe("chat-lane-script fixture", () => {
     );
   });
 
+  // Mirrors the Evaluator's own harness-fake_upstream.py __SUB__ sentinel
+  // (_sub_ids/_resolve): resolved from sub_id values the stub already sees
+  // in role:"tool" message content earlier in the SAME request's history —
+  // no product cooperation, purely observational, same as the Evaluator's
+  // reference implementation. Lets a manifest script a collect_session/
+  // steer_session call against a sub_id it can't know ahead of authoring
+  // time.
+  describe("__SUB__ sentinel resolution (mirrors the Evaluator's harness)", () => {
+    it("resolves __SUB__ to the most recently seen sub_id from a prior tool message in this request", async () => {
+      reset({
+        main: [
+          {
+            kind: "tool_calls",
+            calls: [{ name: "collect_session", argumentsRaw: '{"sub_id":"__SUB__","wait":true}' }],
+          },
+        ],
+      });
+      const response = await postJson({
+        model: "m",
+        messages: [
+          { role: "user", content: "SCEN:main go" },
+          { role: "assistant", content: null, tool_calls: [] },
+          {
+            role: "tool",
+            content: '{"ok": true, "sub_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}',
+          },
+        ],
+      });
+      expect(response.choices[0]?.message.tool_calls?.[0]?.function.arguments).toBe(
+        '{"sub_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","wait":true}',
+      );
+    });
+
+    it("resolves __SUB2__ to the second sub_id seen, in order of first appearance across multiple tool messages", async () => {
+      reset({
+        main: [
+          {
+            kind: "tool_calls",
+            calls: [{ name: "collect_session", argumentsRaw: '{"sub_id":"__SUB2__"}' }],
+          },
+        ],
+      });
+      const response = await postJson({
+        model: "m",
+        messages: [
+          { role: "user", content: "SCEN:main go" },
+          { role: "tool", content: '{"sub_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}' },
+          { role: "tool", content: '{"sub_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}' },
+        ],
+      });
+      expect(response.choices[0]?.message.tool_calls?.[0]?.function.arguments).toBe(
+        '{"sub_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}',
+      );
+    });
+
+    it("resolves an unmatched sentinel to the literal '__NO_SUB__' error marker, same as the Evaluator's harness", async () => {
+      reset({
+        main: [
+          {
+            kind: "tool_calls",
+            calls: [{ name: "collect_session", argumentsRaw: '{"sub_id":"__SUB__"}' }],
+          },
+        ],
+      });
+      const response = await postJson({
+        model: "m",
+        messages: [{ role: "user", content: "SCEN:main go" }],
+      });
+      expect(response.choices[0]?.message.tool_calls?.[0]?.function.arguments).toBe(
+        '{"sub_id":"__NO_SUB__"}',
+      );
+    });
+
+    it("leaves argumentsRaw byte-for-byte unchanged when it contains no __SUB sentinel — no-op for every existing scenario", async () => {
+      reset({
+        main: [
+          {
+            kind: "tool_calls",
+            calls: [{ name: "terminal", argumentsRaw: '{"command": ["sudo", "x"]}' }],
+          },
+        ],
+      });
+      const response = await postJson({
+        model: "m",
+        messages: [
+          { role: "user", content: "SCEN:main go" },
+          { role: "tool", content: '{"sub_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}' },
+        ],
+      });
+      expect(response.choices[0]?.message.tool_calls?.[0]?.function.arguments).toBe(
+        '{"command": ["sudo", "x"]}',
+      );
+    });
+  });
+
   it("serves an http_error step with the declared status and message", async () => {
     reset({ main: [{ kind: "http_error", status: 418, message: "T13_CANARY" }] });
     const response = await post({ model: "m", messages: [{ role: "user", content: "SCEN:main go" }] });
