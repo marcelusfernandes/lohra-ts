@@ -20,6 +20,7 @@ import type {
   SqliteTableSpec,
   TreeCaptureSpec,
   StubFixture,
+  StubLaneStep,
   StubSpec,
   StubToolStep,
 } from "./types.js";
@@ -160,6 +161,7 @@ const stubFixtures = [
   "chat-incomplete-tool",
   "chat-tool-sequence",
   "side-divergent",
+  "chat-lane-script",
 ] as const satisfies readonly StubFixture[];
 
 function sameMembers(actual: readonly string[], expected: readonly string[]): boolean {
@@ -168,7 +170,7 @@ function sameMembers(actual: readonly string[], expected: readonly string[]): bo
 
 function stub(value: unknown): StubSpec {
   const item = object(value, "stub");
-  exactKeys(item, ["state", "fixture", "requestLog", "toolSequence"], "stub");
+  exactKeys(item, ["state", "fixture", "requestLog", "toolSequence", "laneSteps"], "stub");
   const requestLog = object(item.requestLog, "stub.requestLog");
   exactKeys(requestLog, ["comparedHeaders", "excludedHeaders"], "stub.requestLog");
   const comparedHeaders = strings(requestLog.comparedHeaders, "stub.requestLog.comparedHeaders");
@@ -205,11 +207,63 @@ function stub(value: unknown): StubSpec {
       return { calls };
     },
   );
+  const laneStepsRaw = item.laneSteps;
+  const laneSteps: Record<string, readonly StubLaneStep[]> = {};
+  if (laneStepsRaw !== undefined) {
+    const lanes = object(laneStepsRaw, "stub.laneSteps");
+    for (const [lane, rawSteps] of Object.entries(lanes)) {
+      laneSteps[lane] = array(rawSteps, `stub.laneSteps.${lane}`).map((raw, index): StubLaneStep => {
+        const label = `stub.laneSteps.${lane}[${String(index)}]`;
+        const step = object(raw, label);
+        exactKeys(
+          step,
+          ["kind", "content", "calls", "status", "message", "signal", "awaitSignal", "gate", "openGate"],
+          label,
+        );
+        const kind = enumeration(step.kind, ["text", "tool_calls", "http_error"], `${label}.kind`);
+        if (kind === "text" && typeof step.content !== "string") {
+          throw new HarnessError("MANIFEST_INVALID", `${label}.content must be a string for kind "text"`);
+        }
+        if (kind === "http_error" && typeof step.status !== "number") {
+          throw new HarnessError("MANIFEST_INVALID", `${label}.status must be a number for kind "http_error"`);
+        }
+        const calls =
+          step.calls === undefined
+            ? undefined
+            : array(step.calls, `${label}.calls`).map((rawCall, callIndex) => {
+                const callLabel = `${label}.calls[${String(callIndex)}]`;
+                const call = object(rawCall, callLabel);
+                exactKeys(call, ["name", "argumentsRaw"], callLabel);
+                return {
+                  name: string(call.name, `${callLabel}.name`),
+                  argumentsRaw: string(call.argumentsRaw, `${callLabel}.argumentsRaw`),
+                };
+              });
+        if (kind === "tool_calls" && (calls === undefined || calls.length === 0)) {
+          throw new HarnessError("MANIFEST_STUB_LANE_STEP", `${label}.calls must not be empty`);
+        }
+        return {
+          kind,
+          ...(step.content === undefined ? {} : { content: string(step.content, `${label}.content`) }),
+          ...(calls === undefined ? {} : { calls }),
+          ...(step.status === undefined ? {} : { status: step.status as number }),
+          ...(step.message === undefined ? {} : { message: string(step.message, `${label}.message`) }),
+          ...(step.signal === undefined ? {} : { signal: string(step.signal, `${label}.signal`) }),
+          ...(step.awaitSignal === undefined
+            ? {}
+            : { awaitSignal: string(step.awaitSignal, `${label}.awaitSignal`) }),
+          ...(step.gate === undefined ? {} : { gate: string(step.gate, `${label}.gate`) }),
+          ...(step.openGate === undefined ? {} : { openGate: string(step.openGate, `${label}.openGate`) }),
+        };
+      });
+    }
+  }
   return {
     state: enumeration(item.state, ["down", "up-with-models", "up-empty-models"], "stub.state"),
     fixture: enumeration(item.fixture, stubFixtures, "stub.fixture"),
     requestLog: { comparedHeaders, excludedHeaders },
     ...(toolSequence.length === 0 ? {} : { toolSequence }),
+    ...(Object.keys(laneSteps).length === 0 ? {} : { laneSteps }),
   };
 }
 

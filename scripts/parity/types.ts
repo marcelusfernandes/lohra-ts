@@ -123,7 +123,8 @@ export type StubFixture =
   | "chat-no-usage"
   | "chat-incomplete-tool"
   | "chat-tool-sequence"
-  | "side-divergent";
+  | "side-divergent"
+  | "chat-lane-script";
 
 export interface StubToolCall {
   readonly name: string;
@@ -136,6 +137,38 @@ export interface StubToolStep {
   readonly calls: readonly StubToolCall[];
 }
 
+/**
+ * One scripted response for one lane under the "chat-lane-script" fixture
+ * (T13: multi-conversation orchestration scenarios — a parent turn and one
+ * or more concurrently-running children on the same stub). Lanes are
+ * discriminated purely from what the product already emits (see
+ * scripts/parity/stub/server.ts's laneOf/isChildRequest): a "SCEN:<name>"
+ * token the test author put in whatever prompt text reaches that
+ * conversation, forwarded unmodified by the product like any other prompt —
+ * never a header, field, or param the candidate has to emit specially.
+ *
+ * signal/awaitSignal/gate/openGate force cross-lane ordering by barrier,
+ * never by sleep/delay: a step can declare signal (fires a named latch on
+ * arrival, before responding) or awaitSignal/gate (blocks on a named latch
+ * another lane's step fires/opens) so a scenario can assert "N requests
+ * arrived before this gate opened" without any wall-clock dependency.
+ */
+export interface StubLaneToolCall {
+  readonly name: string;
+  readonly argumentsRaw: string;
+}
+export interface StubLaneStep {
+  readonly kind: "text" | "tool_calls" | "http_error";
+  readonly content?: string;
+  readonly calls?: readonly StubLaneToolCall[];
+  readonly status?: number;
+  readonly message?: string;
+  readonly signal?: string;
+  readonly awaitSignal?: string;
+  readonly gate?: string;
+  readonly openGate?: string;
+}
+
 export interface StubSpec {
   readonly state: StubState;
   readonly fixture: StubFixture;
@@ -144,6 +177,7 @@ export interface StubSpec {
     readonly excludedHeaders: readonly string[];
   };
   readonly toolSequence?: readonly StubToolStep[];
+  readonly laneSteps?: Readonly<Record<string, readonly StubLaneStep[]>>;
 }
 
 export interface TcpPortClosedPrecondition {
