@@ -605,18 +605,37 @@ try {
       } catch {
         packValue = { parseFailed: true };
       }
-      const match = packRun.exitCode === 0 && packValue.pass === true;
+      // pack-smoke.mjs independently runs `git rev-parse HEAD` on the same
+      // worktree this harness already resolved into `targetSha` above; the
+      // two must agree, or the tarball wasn't actually built from the
+      // checkout this run believes it's testing. This is the one genuine
+      // check targetSha can fail: it stays a *raw* comparison (fed into
+      // `match`, not hashOnly-scrubbed) so a real mismatch here still fails
+      // the gate even after the digest below stops moving on it.
+      const targetShaMatches = packValue.targetSha === targetSha;
+      const match = packRun.exitCode === 0 && packValue.pass === true && targetShaMatches;
       if (!match) failures += 1;
       const projection = {
         classification: "candidate-package-only",
         oracle: "not-applicable",
         candidate: packValue,
       };
-      const sha = createHash("sha256").update(canonicalJson(projection)).digest("hex");
+      // hashOnly: targetSha is `git rev-parse HEAD` of the very commit this
+      // digest is meant to be compared ACROSS — it changes on every commit
+      // by construction, so it was never a valid before/after invariant
+      // (same family as T07's manifestSha256 and T08's date-in-hash
+      // confounds). Scrubbed from the hashed view only; the real value
+      // stays in `projection`/`raw` below for a human to read, and the
+      // targetShaMatches check above still catches a genuine mismatch.
+      const hashProjection = {
+        ...projection,
+        candidate: { ...packValue, targetSha: "<hashOnly:targetSha>" },
+      };
+      const sha = createHash("sha256").update(canonicalJson(hashProjection)).digest("hex");
       projections.push({ id: manifest.id, sha, match });
       writeFileSync(
         join(evidenceRoot, `${manifest.id}.json`),
-        `${JSON.stringify({ schemaVersion: 1, manifest: parsedManifest, targetSha, raw: { exitCode: packRun.exitCode, stdout: packRun.stdout, stderr: packRun.stderr }, projection, differences: match ? [] : [{ candidate: packValue }], projectionSha256: sha }, null, 2)}\n`,
+        `${JSON.stringify({ schemaVersion: 1, manifest: parsedManifest, targetSha, raw: { exitCode: packRun.exitCode, stdout: packRun.stdout, stderr: packRun.stderr }, projection, differences: match ? [] : [{ candidate: packValue, targetShaMatches }], projectionSha256: sha }, null, 2)}\n`,
       );
       continue;
     }
