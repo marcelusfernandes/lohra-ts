@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
 
@@ -57,6 +57,17 @@ function baseEvidence(status, provider, model, success, exitCode, requestCount) 
   };
 }
 
+// Precedent: T10's operator-file scrub (contract-t10) treats >=24
+// characters as the threshold for content worth treating as credential
+// material. Reused here for the same reason: below this floor, a match is
+// far more likely to be incidental (a short word, a digit run, a stray
+// newline echoed back by the provider) than a genuine secret. None of
+// what this guard is actually meant to protect — a real provider API key,
+// or the fixed 31-character smoke prompt — drops below it; only content
+// that was never a credential to begin with (e.g. a short model response)
+// stops being able to trigger a refusal.
+const MIN_SECRET_LENGTH = 24;
+
 function persistEvidence(path, evidence, secrets) {
   const keys = Object.keys(evidence);
   if (keys.length !== allowedKeys.length || keys.some((key, index) => key !== allowedKeys[index])) {
@@ -64,8 +75,16 @@ function persistEvidence(path, evidence, secrets) {
     throw new Error("LIVE_EVIDENCE_SCHEMA");
   }
   const body = `${JSON.stringify(evidence)}\n`;
-  if (secrets.some((secret) => secret.length > 0 && body.includes(secret))) {
+  const matchedIndex = secrets.findIndex(
+    (secret) => secret.length >= MIN_SECRET_LENGTH && body.includes(secret),
+  );
+  if (matchedIndex >= 0) {
     rmSync(path, { force: true });
+    // Index only — never the value, its length, or a prefix. The caller
+    // passes secrets in a fixed, documented order, so the index alone is
+    // enough to diagnose which one matched without spending another real
+    // call to find out.
+    process.stderr.write(`LIVE_CREDENTIAL_LEAK_SECRET_INDEX=${matchedIndex}\n`);
     throw new Error("CREDENTIAL_LEAK");
   }
   mkdirSync(outputDirectory, { recursive: true });
@@ -73,9 +92,12 @@ function persistEvidence(path, evidence, secrets) {
 }
 
 async function canary() {
-  const key = "T07-CANARY-KEY-EXACT";
-  const canaryPrompt = "T07-CANARY-PROMPT-EXACT";
-  const response = "T07-CANARY-RESPONSE-EXACT";
+  // Each literal is deliberately >= MIN_SECRET_LENGTH so the probe still
+  // exercises the floor added for the false-positive fix, not just the
+  // substring match itself.
+  const key = "T07-CANARY-API-KEY-VALUE-EXACT";
+  const canaryPrompt = "T07-CANARY-PROMPT-VALUE-EXACT";
+  const response = "T07-CANARY-RESPONSE-VALUE-EXACT";
   rmSync(outputPath, { force: true });
   let caught = 0;
   for (const [field, value] of [
@@ -130,11 +152,38 @@ function unavailable(provider = null, model = null) {
   process.exitCode = 3;
 }
 
+const real = (path) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+};
+
 async function smoke() {
   const environment = Object.fromEntries(
     Object.entries(process.env).filter((entry) => typeof entry[1] === "string"),
   );
+  // Snapshot every key present in the RAW process env before the
+  // operator's env file is consulted. Which provider ends up in use isn't
+  // known yet (resolveProviderName decides after the merge below), so
+  // this can't be scoped to one provider's env vars in advance — any key
+  // that appears only after the merge came from the file, regardless of
+  // which provider it turns out to belong to.
+  const presentBeforeEnvFile = new Set(Object.keys(environment));
   const paths = resolvePaths(environment);
+  // Whether this run's env file IS the shared store's — by resolved path,
+  // not by whether LOHRA_HOME happens to be set (that was a bypass fixed
+  // in provider-transports/live-smoke.mjs: pointing LOHRA_HOME at the
+  // shared store itself, e.g. LOHRA_HOME=~/.lohra, sets the variable
+  // without isolating anything). Comparing the two resolved envFile paths
+  // — with symlinks resolved on both sides — catches "shared" no matter
+  // which spelling reaches it.
+  const environmentWithoutLohraHome = Object.fromEntries(
+    Object.entries(environment).filter(([key]) => key !== "LOHRA_HOME"),
+  );
+  const sharedEnvFile = resolvePaths(environmentWithoutLohraHome).envFile;
+  const usesSharedEnvFile = real(paths.envFile) === real(sharedEnvFile);
   applyEnvFile(paths.envFile, environment);
   let provider;
   try {
@@ -155,6 +204,23 @@ async function smoke() {
   const model = profile.fallbackModels[0] ?? null;
   if (model === null) {
     unavailable(provider);
+    return;
+  }
+  // Refuse-with-cause: a credential that only materialized from the
+  // operator's SHARED store is not a credential anyone actually
+  // authorized for this smoke test. resolveApiKey (called inside
+  // resolveChatCompletionsTarget below) cannot distinguish "the right key
+  // happened to be there" from "an unrelated real credential happened to
+  // be there", so both must be refused identically until the operator
+  // authorizes an explicit, isolated source (LOHRA_HOME pointed at a
+  // DIFFERENT, isolated profile file, or the env var pre-set before this
+  // process starts).
+  const sourcedFromSharedEnvFile =
+    usesSharedEnvFile &&
+    profile.envVars.some((name) => !presentBeforeEnvFile.has(name) && name in environment);
+  if (sourcedFromSharedEnvFile) {
+    process.stderr.write("LIVE_CREDENTIAL_SOURCE_NOT_AUTHORIZED\n");
+    unavailable(provider, model);
     return;
   }
   let target;
@@ -204,6 +270,7 @@ async function smoke() {
       cacheReadTokens: response.usage?.cacheReadTokens ?? 0,
       reasoningTokens: response.usage?.reasoningTokens ?? 0,
     };
+    // secrets order: [0]=apiKey [1]=prompt [2]=response content
     persistEvidence(outputPath, evidence, [target.apiKey, prompt, responseText]);
     process.stdout.write(`${JSON.stringify({ status: evidence.status, evidence: outputPath })}\n`);
   } catch {
@@ -212,6 +279,7 @@ async function smoke() {
         ? port.parsed.choices[0].message.content
         : "";
     const evidence = baseEvidence("fail", provider, model, false, 1, port.requestCount);
+    // secrets order: [0]=apiKey [1]=prompt [2]=partial response text
     persistEvidence(outputPath, evidence, [target.apiKey, prompt, responseText]);
     process.stdout.write(`${JSON.stringify({ status: evidence.status, evidence: outputPath })}\n`);
     process.exitCode = 1;
@@ -220,5 +288,17 @@ async function smoke() {
   }
 }
 
-if (process.argv.includes("--canary")) await canary();
-else await smoke();
+if (process.argv.includes("--canary")) {
+  await canary();
+} else {
+  const allowed = process.argv.flatMap((value, index) =>
+    value === "--allow-live" ? [process.argv[index + 1] ?? ""] : [],
+  );
+  if (!allowed.includes("chat_completions")) {
+    // This branch intentionally precedes environment, auth, DNS, and
+    // socket access — mirrors provider-transports/live-smoke.mjs.
+    unavailable();
+  } else {
+    await smoke();
+  }
+}

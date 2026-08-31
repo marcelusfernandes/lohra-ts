@@ -67,6 +67,17 @@ if (transport === null || !transports.has(transport)) {
     };
   }
 
+  // Precedent: T10's operator-file scrub (contract-t10) treats >=24
+  // characters as the threshold for content worth treating as credential
+  // material. Reused here for the same reason: below this floor, a match
+  // is far more likely to be incidental (a short word, a digit run, a
+  // stray newline echoed back by the provider) than a genuine secret.
+  // None of what this guard is actually meant to protect — a real
+  // provider API key, or the fixed 31-character smoke prompt — drops
+  // below it; only content that was never a credential to begin with
+  // (e.g. a short model response) stops being able to trigger a refusal.
+  const MIN_SECRET_LENGTH = 24;
+
   const persist = (record, secrets = []) => {
     const keys = Object.keys(record);
     if (keys.length !== allowedKeys.length || keys.some((key, index) => key !== allowedKeys[index])) {
@@ -74,8 +85,16 @@ if (transport === null || !transports.has(transport)) {
       throw new Error("LIVE_EVIDENCE_SCHEMA");
     }
     const body = `${JSON.stringify(record)}\n`;
-    if (secrets.some((secret) => secret.length > 0 && body.includes(secret))) {
+    const matchedIndex = secrets.findIndex(
+      (secret) => secret.length >= MIN_SECRET_LENGTH && body.includes(secret),
+    );
+    if (matchedIndex >= 0) {
       rmSync(outputPath, { force: true });
+      // Index only — never the value, its length, or a prefix. The caller
+      // passes secrets in a fixed, documented order, so the index alone
+      // is enough to diagnose which one matched without spending another
+      // real call to find out.
+      process.stderr.write(`LIVE_CREDENTIAL_LEAK_SECRET_INDEX=${matchedIndex}\n`);
       throw new Error("CREDENTIAL_LEAK");
     }
     mkdirSync(outputDirectory, { recursive: true });
@@ -90,9 +109,12 @@ if (transport === null || !transports.has(transport)) {
   }
 
   async function canary() {
-    const key = "T10-CANARY-KEY-EXACT";
-    const canaryPrompt = "T10-CANARY-PROMPT-EXACT";
-    const response = "T10-CANARY-RESPONSE-EXACT";
+    // Each literal is deliberately >= MIN_SECRET_LENGTH so the probe still
+    // exercises the floor added for the false-positive fix, not just the
+    // substring match itself.
+    const key = "T10-CANARY-API-KEY-VALUE-EXACT";
+    const canaryPrompt = "T10-CANARY-PROMPT-VALUE-EXACT";
+    const response = "T10-CANARY-RESPONSE-VALUE-EXACT";
     rmSync(outputPath, { force: true });
     let caught = 0;
     for (const [field, value] of [
@@ -260,11 +282,13 @@ if (transport === null || !transports.has(transport)) {
         cacheWriteTokens: response.usage?.cacheWriteTokens ?? 0,
         reasoningTokens: response.usage?.reasoningTokens ?? 0,
       };
+      // secrets order: [0]=apiKey [1]=prompt [2]=response content
       persist(evidence, [apiKey, prompt, response.content ?? ""]);
       process.stdout.write(`${JSON.stringify({ status: evidence.status, evidence: outputPath })}\n`);
     } catch {
       const responseText = typeof port.parsed?.content?.[0]?.text === "string" ? port.parsed.content[0].text : "";
       const evidence = baseEvidence("fail", provider, model, false, 1, port.requestCount);
+      // secrets order: [0]=apiKey [1]=prompt [2]=partial response text
       persist(evidence, [apiKey, prompt, responseText]);
       process.stdout.write(`${JSON.stringify({ status: evidence.status, evidence: outputPath })}\n`);
       process.exitCode = 1;
