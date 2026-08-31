@@ -122,6 +122,43 @@ export function runCandidateCronMutant(argv: readonly string[], paths: RuntimePa
   return { code: result.status ?? -1, stdout: result.stdout, stderr: result.stderr };
 }
 
+const oracleToolRunner = resolve(root, "scripts/parity/cron/oracle-tool-runner.py");
+const candidateToolRunner = resolve(root, "scripts/parity/cron/candidate-tool-runner.mjs");
+
+/** Real oracle process, one shot: builds the exact registry/dispatch wiring
+ * `lohra.agent.equip` uses for a real conversation turn, then dispatches one
+ * `cronjob` call (decision 10). Never a bare in-process `CronTool().handle()`
+ * bypassing the registry. */
+export function runOracleTool(args: Readonly<Record<string, unknown>>, paths: RuntimePaths): CliResult {
+  const result = spawnSync(oraclePython, [oracleToolRunner, paths.home, JSON.stringify(args)], {
+    cwd: paths.tmp,
+    env: {
+      HOME: paths.home,
+      LOHRA_HOME: paths.home,
+      TMPDIR: paths.tmp,
+      PATH: "/usr/bin:/bin",
+      PYTHONPATH: join(oracleCheckout, "backend"),
+      PYTHONUTF8: "1",
+      PYTHONDONTWRITEBYTECODE: "1",
+    },
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  return { code: result.status ?? -1, stdout: result.stdout, stderr: result.stderr };
+}
+
+/** Same real candidate process shape as `runOracleTool`, using the same
+ * `createBuiltinRegistry()` + `composeDispatch()` wiring `chat.ts` uses. */
+export function runCandidateTool(args: Readonly<Record<string, unknown>>, paths: RuntimePaths): CliResult {
+  const result = spawnSync(process.execPath, [candidateToolRunner, JSON.stringify(args)], {
+    cwd: paths.tmp,
+    env: baseEnv(paths),
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  return { code: result.status ?? -1, stdout: result.stdout, stderr: result.stderr };
+}
+
 export function jobsPathOf(paths: RuntimePaths): string {
   return join(paths.home, "cron", "jobs.json");
 }
