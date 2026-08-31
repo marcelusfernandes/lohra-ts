@@ -16,6 +16,7 @@
 // drifting the same wrong way; that check never substitutes for the
 // bilateral one. Every result carries the observed evidence, not just a
 // pass/fail label, so an auditor doesn't have to trust the verdict alone.
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -152,6 +153,27 @@ function compareMasked(a: unknown, b: unknown, path = "$"): string | null {
   }
   if (a !== b) return `${path}: ${JSON.stringify(a)} vs ${JSON.stringify(b)}`;
   return null;
+}
+
+// Same masking rule as compareMasked, but producing a stable value instead
+// of a divergence report: replaces every MASKED_KEYS field with a
+// type-tagged placeholder (session ids, timestamps) and sorts object keys,
+// so hashing the result is reproducible across runs even though the raw
+// evidence contains fresh random ids and clock-dependent timestamps every
+// time the scenarios execute.
+function normalizeForDigest(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => normalizeForDigest(item));
+  if (typeof value === "object" && value !== null) {
+    const record = value as Record<string, unknown>;
+    const normalized: Record<string, unknown> = {};
+    for (const key of Object.keys(record).sort()) {
+      normalized[key] = MASKED_KEYS.has(key)
+        ? `<masked:${typeof record[key]}>`
+        : normalizeForDigest(record[key]);
+    }
+    return normalized;
+  }
+  return value;
 }
 
 interface RpcRoundTripResult {
@@ -940,8 +962,33 @@ async function main(): Promise<void> {
     await fakeUpstream.close();
   }
 
+  // Per-scenario projection hash mirrors T11's own run-process.ts pattern
+  // (projectionSha256, then a suite digest over sorted "id=sha" lines) --
+  // needed because the raw evidence is not byte-hashable as-is (session
+  // ids and timestamps differ every run); normalizeForDigest masks exactly
+  // the fields compareMasked already treats as type-only, so two runs of
+  // an unchanged candidate/oracle pair produce an identical suite digest.
+  const projections = results.map((result) => {
+    const sha = createHash("sha256")
+      .update(
+        JSON.stringify({
+          verdict: result.verdict,
+          detail: result.detail,
+          evidence: normalizeForDigest(result.evidence),
+        }),
+      )
+      .digest("hex");
+    return { id: result.id, sha };
+  });
+  const digest = createHash("sha256")
+    .update(projections.map(({ id, sha }) => `${id}=${sha}\n`).join(""))
+    .digest("hex");
+
   const evidencePath = join(evidenceRoot, "run-scenarios.json");
-  writeFileSync(evidencePath, JSON.stringify({ results }, null, 2));
+  writeFileSync(
+    evidencePath,
+    JSON.stringify({ suite: "t12-gateway-dashboard-socket-bilateral", digest, projections, results }, null, 2),
+  );
 
   const failed = results.filter((result) => result.verdict !== "match");
   for (const result of results) {
@@ -949,6 +996,7 @@ async function main(): Promise<void> {
     console.log(`[${marker}] ${result.id}${result.detail !== undefined ? ` -- ${result.detail}` : ""}`);
   }
   console.log(`\n${String(results.length - failed.length)}/${String(results.length)} scenarios match.`);
+  console.log(`Digest: ${digest}`);
   console.log(`Evidence: ${evidencePath}`);
   if (failed.length > 0) process.exitCode = 1;
 }
