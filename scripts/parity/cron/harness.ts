@@ -106,6 +106,22 @@ export function runCandidateCron(argv: readonly string[], paths: RuntimePaths): 
   return { code: result.status ?? -1, stdout: result.stdout, stderr: result.stderr };
 }
 
+const mutantLoader = resolve(root, "scripts/parity/cron/t18-mutant-loader.mjs");
+
+/** Same real candidate process as `runCandidateCron`, but with a named
+ * mutation patched into `CronStore.prototype` before the CLI ever
+ * dispatches (assertions 24/44's self-tests — the mutation exists only
+ * inside this one process, never touches the delivery worktree). */
+export function runCandidateCronMutant(argv: readonly string[], paths: RuntimePaths, mutant: string): CliResult {
+  const result = spawnSync(process.execPath, ["--import", mutantLoader, candidateCli, "cron", ...argv], {
+    cwd: paths.tmp,
+    env: { ...baseEnv(paths), T18_MUTANT: mutant },
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  return { code: result.status ?? -1, stdout: result.stdout, stderr: result.stderr };
+}
+
 export function jobsPathOf(paths: RuntimePaths): string {
   return join(paths.home, "cron", "jobs.json");
 }

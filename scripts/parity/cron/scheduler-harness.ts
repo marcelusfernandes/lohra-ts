@@ -28,9 +28,15 @@ export function allocatePort(): Promise<number> {
   });
 }
 
+export interface ExitInfo {
+  readonly exited: boolean;
+  readonly code: number | null;
+}
+
 export interface SchedulerProcess {
   readonly upstream: FakeUpstream;
   readonly paths: RuntimePaths;
+  readonly exitInfo: () => ExitInfo;
   stop(): Promise<void>;
 }
 
@@ -38,6 +44,9 @@ interface StartOptions {
   readonly paths: RuntimePaths;
   readonly tz?: string;
   readonly tickIntervalMs?: number;
+  /** Selects a named mutation from `t18-mutant-loader.mjs` (assertions
+   * 24/44's self-tests) -- candidate-side only. */
+  readonly mutant?: string;
 }
 
 function spawnAndCollect(
@@ -45,11 +54,13 @@ function spawnAndCollect(
   args: readonly string[],
   env: Record<string, string>,
   cwd: string,
-): { readonly child: ChildProcess; readonly stop: () => Promise<void> } {
+): { readonly child: ChildProcess; readonly exitInfo: () => ExitInfo; readonly stop: () => Promise<void> } {
   const child = spawn(executable, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
   let settled = false;
-  child.once("exit", () => {
+  let exitCode: number | null = null;
+  child.once("exit", (code) => {
     settled = true;
+    exitCode = code;
   });
   const stop = (): Promise<void> =>
     new Promise((resolveStop) => {
@@ -66,7 +77,7 @@ function spawnAndCollect(
       }, 3000);
       setTimeout(resolveStop, 3500);
     });
-  return { child, stop };
+  return { child, exitInfo: () => ({ exited: settled, code: exitCode }), stop };
 }
 
 /** Boots the real oracle `lohra dashboard` (its background scheduler thread
@@ -90,8 +101,8 @@ export async function startOracleScheduler(options: StartOptions): Promise<Sched
     PYTHONDONTWRITEBYTECODE: "1",
     ...(options.tz === undefined ? {} : { TZ: options.tz }),
   };
-  const { stop } = spawnAndCollect(oraclePython, [oracleDashboardLauncher], env, options.paths.tmp);
-  return { upstream, paths: options.paths, stop: () => stop().then(() => upstream.close()) };
+  const { stop, exitInfo } = spawnAndCollect(oraclePython, [oracleDashboardLauncher], env, options.paths.tmp);
+  return { upstream, paths: options.paths, exitInfo, stop: () => stop().then(() => upstream.close()) };
 }
 
 /** Boots the real candidate scheduler launcher (a fresh Node process
@@ -109,9 +120,10 @@ export async function startCandidateScheduler(options: StartOptions): Promise<Sc
     FAKE_BASE_URL: upstream.url,
     LOHRA_T18_TICK_MS: String(options.tickIntervalMs ?? 500),
     ...(options.tz === undefined ? {} : { TZ: options.tz }),
+    ...(options.mutant === undefined ? {} : { T18_MUTANT: options.mutant }),
   };
-  const { stop } = spawnAndCollect(process.execPath, [candidateSchedulerLauncher], env, options.paths.tmp);
-  return { upstream, paths: options.paths, stop: () => stop().then(() => upstream.close()) };
+  const { stop, exitInfo } = spawnAndCollect(process.execPath, [candidateSchedulerLauncher], env, options.paths.tmp);
+  return { upstream, paths: options.paths, exitInfo, stop: () => stop().then(() => upstream.close()) };
 }
 
 export function waitFor(condition: () => boolean, timeoutMs = 8000, intervalMs = 100): Promise<boolean> {

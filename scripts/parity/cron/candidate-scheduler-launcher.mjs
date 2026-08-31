@@ -21,6 +21,14 @@ import { URL } from "node:url";
 import { CronStore } from "../../../dist/cron/store.js";
 import { runSchedulerLoop } from "../../../dist/cron/scheduler.js";
 
+// Probe 26 (assertion 44/decision 13's named example): T18_MUTANT=markrun
+// patches CronStore.prototype.markRun to a no-op-that-reports-success
+// before the store is ever constructed, so a restart re-fires an
+// already-fired job.
+if (process.env.T18_MUTANT !== undefined) {
+  await import("./t18-mutant-loader.mjs");
+}
+
 const home = process.env.LOHRA_HOME;
 const upstreamUrl = new URL(process.env.FAKE_BASE_URL);
 const tickIntervalMs = Number(process.env.LOHRA_T18_TICK_MS ?? "500");
