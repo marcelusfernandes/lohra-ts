@@ -12,8 +12,14 @@ mkdirSync(evidenceDirectory, { recursive: true });
 const names = readdirSync(manifests)
   .filter((name) => name.startsWith("t09-") && name.endsWith(".json"))
   .sort();
+// t09-child-unknown-hardening moved from divergent to match by T19/R1
+// (contract-t19 decision 1): child visibility is now `parent − E`, the
+// oracle's own deny-list mechanism reproduced directly, so a name that was
+// never in the 19-name deny-list -- including a fabricated MCP-shaped one
+// -- reaches the child on both sides now, same as the oracle always did.
+// Declared, not discovered: contract-t19's "Verdicts que mudam" table names
+// this flip explicitly before it happens.
 const divergent = new Set([
-  "t09-child-unknown-hardening",
   "t09-child-terminal-type-hardening",
   "t09-mutant-json-stringify",
   "t09-mutant-utf16-truncation",

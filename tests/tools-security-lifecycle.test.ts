@@ -23,7 +23,14 @@ const definition = (name: string): ToolDefinition => ({
 });
 
 describe("child tool hardening", () => {
-  it("uses a closed allow-list for definitions, including fabricated MCP tools", () => {
+  // T19/R1 (contract-t19 decision 1): child visibility is now `parent − E`,
+  // reproducing the oracle's own deny-list mechanism directly, not an
+  // allow-list intersection. A name that was never in the 19-name deny-list
+  // -- including a fabricated MCP-shaped one -- now reaches the child on
+  // both sides, same as the oracle always did. This is the T09 scenario
+  // `t09-child-unknown-hardening` flipping from `expected divergent` to
+  // `match`, named explicitly in the T19 contract's "Verdicts que mudam".
+  it("child visibility is parent minus the 19-name deny-list, including fabricated MCP-shaped names", () => {
     const all = [
       "read_file",
       "write_file",
@@ -39,22 +46,20 @@ describe("child tool hardening", () => {
       "terminal",
       "web_fetch",
       "web_search",
+      "mcp-secret-exfil",
     ]);
   });
 
-  it("rejects unknown names and non-string terminal commands before base dispatch", async () => {
+  it("dispatches a fabricated MCP-shaped name to base and still auto-denies non-string terminal commands", async () => {
     const base = vi.fn(() => Promise.resolve(toolResult("base")));
     const dispatch = createChildDispatch(base);
-    await expect(dispatch("mcp-secret-exfil", {})).resolves.toBe(
-      toolError("Unknown tool: mcp-secret-exfil"),
-    );
+    await expect(dispatch("mcp-secret-exfil", {})).resolves.toBe(toolResult("base"));
     await expect(dispatch("terminal", { command: ["sudo", "x"] })).resolves.toBe(
       toolError("command was not approved by the user", { command: ["sudo", "x"] }),
     );
-    expect(base).not.toHaveBeenCalled();
     await expect(dispatch("read_file", { path: "x" })).resolves.toBe(toolResult("base"));
     await expect(dispatch("terminal", { command: "echo safe" })).resolves.toBe(toolResult("base"));
-    expect(base).toHaveBeenCalledTimes(2);
+    expect(base).toHaveBeenCalledTimes(3);
   });
 
   it("matches the oracle literal for every known excluded tool before base dispatch", async () => {
