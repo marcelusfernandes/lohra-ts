@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "t13-teardown-uncollected-error-child",
+  "id": "t13-uncollected-failure-silent-wire-logged-to-file",
   "description": "T13 bilateral CLI observation (expected match): a spawn_session child, never collected by the parent, fails on its own (only) upstream call with an HTTP 418 canary while gated during the parent's teardown drain. Deterministic by construction — the outcome does not depend on which side's cooperative-interrupt check wins a race, since the child's single call always resolves to the same upstream error once its gate opens, regardless of timing. Covers decision 14/ADR-T13-04 (uncollected child failure is silent on stdout/stderr, cause elsewhere) and the 'resolves error during drain' half of assertion 41 (shutdown does not swallow failures — it logs the cause). KNOWN LIMIT (declared, not a gap to fix): events.orchestrationLog is captured and checked via candidate-only expectations (side:\"candidate\"), never added to bilateral comparisons — the oracle has no equivalent file on this path (its own silent-failure channel is a separate mechanism, out of scope here), so comparing it would always mismatch on /exists alone. Consequently the reproducibility digest (projectionSha256) is NOT byte-stable run to run: the log's own subId and at fields are unnormalized and genuinely random/time-varying per run. Reproducibility here means comparison.verdict stays \"match\" and expectations.failures stays empty across repeated runs (verified 5/5) — not digest equality.",
   "argv": [
     "chat",
