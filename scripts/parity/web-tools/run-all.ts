@@ -48,6 +48,7 @@ const expectedDivergent = new Set([
   "t20-redirect-flow",
   "t20-fetch-bounds",
   "t20-peer-matrix",
+  "t20-peer-divergent",
   "t20-ddg-byte-cap",
 ]);
 
@@ -114,7 +115,7 @@ try {
       (entry, index) => entry.sha === second.projections[index]?.sha,
     );
   const sameDigest = first.digest === second.digest;
-  const expectedCount = onlyScenarios?.size ?? 22;
+  const expectedCount = onlyScenarios?.size ?? 25;
   const pass =
     first.failures === 0 &&
     second.failures === 0 &&

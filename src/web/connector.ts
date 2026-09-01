@@ -7,11 +7,7 @@ import type {
   HttpConnector,
 } from "./types.js";
 
-export class ConnectorError extends WebTransportError {
-  constructor(message: string) {
-    super(message);
-  }
-}
+export class ConnectorError extends WebTransportError {}
 
 export interface PinnedDialRequest {
   readonly method: "GET" | "POST";
@@ -224,7 +220,6 @@ async function nodeDial(dialRequest: PinnedDialRequest): Promise<ConnectorRespon
         timer = null;
       }
     };
-    let nodeRequest: NodeRequestHandleLike;
     let nodeResponse: NodeResponseLike | null = null;
     let ended = false;
     let pendingRead: {
@@ -234,18 +229,11 @@ async function nodeDial(dialRequest: PinnedDialRequest): Promise<ConnectorRespon
     let streamListeners: {
       readable?: (...args: unknown[]) => void;
       end?: () => void;
-      error?: (error: Error) => void;
-      aborted?: () => void;
-      close?: () => void;
     } = {};
     const cleanupStreamListeners = (): void => {
       if (nodeResponse === null) return;
       for (const [event, listener] of Object.entries(streamListeners)) {
-        if (listener !== undefined)
-          nodeResponse.off(
-            event,
-            listener as (this: NodeResponseLike, ...args: unknown[]) => void,
-          );
+        nodeResponse.off(event, listener);
       }
       streamListeners = {};
     };
@@ -264,7 +252,7 @@ async function nodeDial(dialRequest: PinnedDialRequest): Promise<ConnectorRespon
       }
     };
     armTimer();
-    nodeRequest = transportRequest(
+    const nodeRequest = transportRequest(
       {
         host: dialRequest.host,
         port:
@@ -299,6 +287,29 @@ async function nodeDial(dialRequest: PinnedDialRequest): Promise<ConnectorRespon
             headers[name.toLowerCase()] = String(value);
           }
         }
+        const terminalListeners: {
+          error: (this: NodeResponseLike, error: unknown) => void;
+          aborted: (this: NodeResponseLike) => void;
+          close: (this: NodeResponseLike) => void;
+        } = {
+          error: (error: unknown): void => {
+            settleFailure(error instanceof Error ? error : new Error(String(error)));
+          },
+          aborted: (): void => {
+            settleFailure(new ConnectorError("response aborted"));
+          },
+          close: (): void => {
+            if (!ended) settleFailure(new ConnectorError("response closed before completion"));
+          },
+        };
+        response.once("error", terminalListeners.error);
+        response.once("aborted", terminalListeners.aborted);
+        response.once("close", terminalListeners.close);
+        const removeTerminalListeners = (): void => {
+          response.off("error", terminalListeners.error);
+          response.off("aborted", terminalListeners.aborted);
+          response.off("close", terminalListeners.close);
+        };
         const stream: ConnectorStream = {
           next() {
             if (ended) return Promise.resolve({ done: true, value: undefined });
@@ -322,13 +333,12 @@ async function nodeDial(dialRequest: PinnedDialRequest): Promise<ConnectorRespon
                     ended = true;
                     disarmTimer();
                     cleanupStreamListeners();
+                    removeTerminalListeners();
                     pendingRead = null;
                     resolveChunk({ done: true, value: undefined });
                   }
                   return;
                 }
-                disarmTimer();
-                cleanupStreamListeners();
                 pendingRead = null;
                 resolveChunk({ done: false, value: new Uint8Array(chunk as Buffer) });
               };
@@ -336,36 +346,19 @@ async function nodeDial(dialRequest: PinnedDialRequest): Promise<ConnectorRespon
                 ended = true;
                 disarmTimer();
                 cleanupStreamListeners();
+                removeTerminalListeners();
                 pendingRead = null;
                 resolveChunk({ done: true, value: undefined });
               };
-              const onError = (error: unknown): void => {
-                settleFailure(error instanceof Error ? error : new Error(String(error)));
-              };
-              const onAborted = (): void => {
-                settleFailure(new ConnectorError("response aborted"));
-              };
-              const onClose = (): void => {
-                if (!ended) settleFailure(new ConnectorError("response closed before completion"));
-              };
-              void 0;
-              streamListeners = {
-                readable: onReadable,
-                end: onEnd,
-                error: (error: Error): void => onError(error),
-                aborted: onAborted,
-                close: onClose,
-              };
-              response.once("readable", streamListeners.readable as (this: NodeResponseLike) => void);
-              response.once("end", streamListeners.end as (this: NodeResponseLike) => void);
-              response.once("error", streamListeners.error as (this: NodeResponseLike) => void);
-              response.once("aborted", streamListeners.aborted as (this: NodeResponseLike) => void);
-              response.once("close", streamListeners.close as (this: NodeResponseLike) => void);
+              streamListeners = { readable: onReadable, end: onEnd };
+              response.once("readable", onReadable);
+              response.once("end", onEnd);
             });
           },
           cancel() {
             disarmTimer();
             cleanupStreamListeners();
+            removeTerminalListeners();
             response.destroy();
             nodeRequest.destroy();
             return Promise.resolve();

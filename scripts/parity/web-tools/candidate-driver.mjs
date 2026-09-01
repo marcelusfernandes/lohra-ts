@@ -15,6 +15,7 @@ import { createBuiltinRegistry } from "../../../dist/tools/builtins.js";
 import { ConversationRuntime } from "../../../dist/conversation/runtime.js";
 import {
   ConnectorError,
+  createPinnedConnector,
   currentSearchBackend,
   currentWebTransport,
   setWebTransport,
@@ -99,15 +100,21 @@ function emit(value) {
 
 /* ---------- doubles ---------- */
 class Dns {
+  /* Per-host answer sequences: the last answer repeats (rebinding opt-in). */
   constructor(table) {
     this.table = table;
     this.calls = [];
+    this.answerCursor = {};
   }
   resolve(host) {
     this.calls.push(host);
     const ips = this.table[host];
     if (ips === undefined) throw new Error("fixture DNS failed");
-    return ips.map((address) => ({ address, family: address.includes(":") ? 6 : 4 }));
+    if (ips.length === 0) return [];
+    const index = this.answerCursor[host] ?? 0;
+    this.answerCursor[host] = Math.min(index + 1, ips.length - 1);
+    const answer = ips[index];
+    return [{ address: answer, family: answer.includes(":") ? 6 : 4 }];
   }
 }
 
@@ -155,6 +162,8 @@ function makeWorld(table) {
           world.requests.push(request.url);
           world.requestBodies.push(typeof request.body === "string" ? request.body : "");
           if ((request.headers["authorization"] ?? "") !== "") world.authorization.push("present");
+          const hopUrl = new URL(request.url);
+          if (hopUrl.username !== "" || hopUrl.password !== "") world.authorization.push("present");
           const raw = world.serve(request);
           const headers = {};
           for (const [name, value] of Object.entries(raw.headers ?? {})) headers[name.toLowerCase()] = value;
@@ -791,6 +800,62 @@ async function main() {
       setSearchBackend(previousBackend);
     }
     observation.rows = rows;
+  } else if (scenario === "peer-divergent") {
+    const world = makeWorld({ "divergent.test": [PUBLIC] });
+    world.serve = () => ({
+      status: 200,
+      headers: { "content-type": "text/plain" },
+      peer: "1.2.3.4",
+      body: world.chunked([new TextEncoder().encode("SIMULATED_DIVERGENT_BODY")]),
+    });
+    setWebTransport(world.transport());
+    observation = await toolFetch(world, "http://divergent.test/");
+  } else if (scenario === "rebinding") {
+    const world = makeWorld({ "once.test": [PUBLIC, "10.0.0.5"] });
+    world.serve = () => ({
+      status: 200,
+      headers: { "content-type": "text/plain" },
+      body: world.chunked([new TextEncoder().encode("rebinding ok")]),
+    });
+    setWebTransport(world.transport());
+    observation = await toolFetch(world, "http://once.test/");
+  } else if (scenario === "connector-tls") {
+    const observedDials = [];
+    const connector = createPinnedConnector({
+      requestFactory: () => (options, callback) => {
+        observedDials.push(options);
+        const response = {
+          statusCode: 200,
+          headers: { "content-type": "text/plain" },
+          socket: { remoteAddress: "93.184.216.34" },
+          readableEnded: false,
+          read: () => null,
+          once: () => undefined,
+          off: () => undefined,
+          destroy: () => undefined,
+        };
+        const request = {
+          on: () => undefined,
+          end: () => {
+            callback(response);
+          },
+          destroy: () => undefined,
+        };
+        return request;
+      },
+    });
+    const settled = await connector.request({
+      url: "https://public.test/a",
+      method: "GET",
+      headers: {},
+      allowedAddresses: [{ address: "93.184.216.34", family: 4 }],
+      hostname: "public.test",
+      timeoutSeconds: 10,
+      deadlineMs: 10_000,
+    });
+    await settled.stream.cancel();
+    const dialOptions = observedDials[0] ?? {};
+    observation = { tlsVerificationEnforced: dialOptions.rejectUnauthorized === true };
   } else {
     throw new Error(`unknown scenario ${scenario}`);
   }

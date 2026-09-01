@@ -39,24 +39,31 @@ DDG_RESULT_HTML = (
 
 
 class Dns:
+    """Per-host answer sequences: the last answer repeats (rebinding opt-in)."""
+
     def __init__(self, table: dict[str, list[str]]):
         self.table = table
         self.calls: list[str] = []
+        self.answer_cursor: dict[str, int] = {}
 
     def __call__(self, host: str, port: object = None) -> list:
         self.calls.append(host)
         ips = self.table.get(host)
         if ips is None:
             raise socket.gaierror("fixture DNS failed")
+        if len(ips) == 0:
+            return []
+        index = self.answer_cursor.get(host, 0)
+        self.answer_cursor[host] = min(index + 1, len(ips) - 1)
+        answer = ips[index]
         return [
             (
-                socket.AF_INET6 if ":" in ip else socket.AF_INET,
+                socket.AF_INET6 if ":" in answer else socket.AF_INET,
                 socket.SOCK_STREAM,
                 6,
                 "",
-                (ip, 0, 0, 0) if ":" in ip else (ip, 0),
+                (answer, 0, 0, 0) if ":" in answer else (answer, 0),
             )
-            for ip in ips
         ]
 
 
@@ -717,6 +724,29 @@ def main() -> None:
             finally:
                 web_tool.set_search_backend(original)
         observation = {"rows": rows}
+
+    elif scenario == "peer-divergent":
+        world = World({"divergent.test": [PUBLIC]})
+        world._serve = world.text(b"SIMULATED_DIVERGENT_BODY")
+        with world:
+            observation = tool_fetch(world, "http://divergent.test/")
+
+    elif scenario == "rebinding":
+        world = World({"once.test": [PUBLIC, "10.0.0.5"]})
+        world._serve = world.text(b"rebinding ok")
+        with world:
+            observation = tool_fetch(world, "http://once.test/")
+
+    elif scenario == "connector-tls":
+        import ssl
+
+        client = httpx.Client()
+        try:
+            pool = client._transport._pool  # noqa: SLF001 — the oracle stack observed
+            verify_mode = pool._ssl_context.verify_mode  # noqa: SLF001
+            observation = {"tlsVerificationEnforced": verify_mode == ssl.CERT_REQUIRED}
+        finally:
+            client.close()
 
     else:
         raise SystemExit(f"unknown scenario {scenario}")

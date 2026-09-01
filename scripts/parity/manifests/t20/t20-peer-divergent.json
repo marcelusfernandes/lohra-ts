@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "t20-non-public-hostname",
-  "description": "T20 bilateral observation: non-public-hostname",
+  "id": "t20-peer-divergent",
+  "description": "T20 bilateral observation: peer-divergent (expected divergent)",
   "argv": [
-    "non-public-hostname"
+    "peer-divergent"
   ],
   "environment": {
     "allow": [],
@@ -79,10 +79,16 @@
       "value": null
     },
     {
-      "side": "both",
+      "side": "oracle",
       "field": "process.stdout",
       "encoding": "utf8",
-      "value": "{\"rows\": [{\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [\"private.test\"], \"parserCalls\": 0, \"requestBodies\": [], \"requests\": [], \"result\": {\"error\": \"refusing to fetch a non-public address: 10.0.0.5 (host 'private.test')\", \"url\": \"http://private.test/\"}}, {\"authorization\": [], \"bodyBytesRead\": 5, \"dns\": [\"private.test\", \"mixed.test\"], \"parserCalls\": 0, \"requestBodies\": [\"\"], \"requests\": [\"http://mixed.test/\"], \"result\": {\"ok\": true, \"text\": \"never\", \"url\": \"http://mixed.test/\"}}]}\n"
+      "value": "{\"authorization\": [], \"bodyBytesRead\": 24, \"dns\": [\"divergent.test\"], \"parserCalls\": 0, \"requestBodies\": [\"\"], \"requests\": [\"http://divergent.test/\"], \"result\": {\"ok\": true, \"text\": \"SIMULATED_DIVERGENT_BODY\", \"url\": \"http://divergent.test/\"}}\n"
+    },
+    {
+      "side": "candidate",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "value": "{\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [\"divergent.test\"], \"parserCalls\": 0, \"requestBodies\": [\"\"], \"requests\": [\"http://divergent.test/\"], \"result\": {\"error\": \"refusing response from unvalidated peer: peer not in validated set\", \"url\": \"http://divergent.test/\"}}\n"
     }
   ],
   "normalizations": [],

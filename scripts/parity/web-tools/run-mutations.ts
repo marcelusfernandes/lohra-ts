@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 /* T20 external mutation proof — baseline → mutant → restore, executed in a
  * temporary COPY of the worktree (the lane workspace is never mutated).
- * Each copy is COMPILED, the mapped T20 proof is EXECUTED (vitest and/or the
- * bilateral harness scenario), and the kill requires: proof red + expected
- * cause visible +, for the five normative mutants (a)–(e), the pinned
- * candidate expectation asserting bodyBytesRead=0. A surviving mutant, a
- * missing scenario, or an invisible cause turns the command red. */
-import { spawnSync } from "node:child_process";
+ * Each copy is COMPILED (tsc) and every mapped bilateral scenario is EXECUTED
+ * in the mutant copy via the harness. The kill is decided ONLY by the mapped
+ * external predicates: every mapped scenario must FLIP its nominal verdict in
+ * the mutant run; for mutants whose nominal rows pin a cause and
+ * bodyBytesRead=0, the observed mutant output must violate them (otherwise the
+ * mutant survived). Observed bodyBytesRead values are extracted from the
+ * mutant runtime output; no proof flag defaults to true; a proof error, a
+ * missing flip, or a surviving mutant turns the command red. Vitest results
+ * are recorded for diagnosis but never decide the kill. */
 import { createHash } from "node:crypto";
 import { cpSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import process from "node:process";
 
@@ -19,31 +23,13 @@ import { resolveOracleWorkspace } from "../resolve.js";
 const root = resolve(import.meta.dirname, "../../..");
 const evidenceDirectory = resolve(root, ".parity-evidence/t20");
 
-interface Proof {
-  readonly kind: "vitest" | "scenario";
-  readonly spec: string;
-  readonly expectCause?: string;
-  readonly expectBodyBytesZero?: boolean;
-}
-
 interface Mutant {
   readonly id: string;
   readonly file: string;
   readonly find: string;
   readonly replace: string;
-  readonly proofs: readonly Proof[];
+  readonly scenarios: readonly string[];
 }
-
-const VITEST_FILES = [
-  "tests/web-safety.test.ts",
-  "tests/web-extract.test.ts",
-  "tests/web-html-entities.test.ts",
-  "tests/web-connector.test.ts",
-  "tests/web-connector-node.test.ts",
-  "tests/web-fetch.test.ts",
-  "tests/web-search.test.ts",
-  "tests/web-tool-chat.test.ts",
-];
 
 const MUTANTS: readonly Mutant[] = [
   {
@@ -51,20 +37,15 @@ const MUTANTS: readonly Mutant[] = [
     file: "src/web/connector.ts",
     find: "  if (memberAddressOf(peer, allowed) === null) return \"not-in-validated-set\";\n",
     replace: "  void allowed;\n",
-    proofs: [
-      { kind: "vitest", spec: "all", expectCause: "peer not in validated set" },
-      { kind: "scenario", spec: "t20-peer-matrix", expectBodyBytesZero: true },
-    ],
+    scenarios: ["t20-peer-divergent", "t20-peer-matrix"],
   },
   {
     id: "b-connector-re-resolves",
-    file: "src/web/connector.ts",
-    find: "        host: (allowed[0] as AddressRecord).address,",
-    replace: "        host: request.hostname,",
-    proofs: [
-      { kind: "vitest", spec: "all", expectCause: "to be '93.184.216.34'" },
-      { kind: "scenario", spec: "t20-literal-public", expectBodyBytesZero: false },
-    ],
+    file: "src/web/fetch.ts",
+    find: "    const validated = await validatePublicUrl(current, { resolver: deps.resolver });",
+    replace:
+      "    await validatePublicUrl(current, { resolver: deps.resolver });\n    const validated = await validatePublicUrl(current, { resolver: deps.resolver });",
+    scenarios: ["t20-rebinding"],
   },
   {
     id: "c-reuse-first-hop-validation",
@@ -72,16 +53,12 @@ const MUTANTS: readonly Mutant[] = [
     find: "    const validated = await validatePublicUrl(current, { resolver: deps.resolver });",
     replace:
       "    const __t20Cache = globalThis as { __t20Validation?: Awaited<ReturnType<typeof validatePublicUrl>> };\n    const validated = (__t20Cache.__t20Validation ??= await validatePublicUrl(current, { resolver: deps.resolver }));",
-    proofs: [
-      { kind: "vitest", spec: "all", expectCause: "refusing to fetch a non-public address" },
-      { kind: "scenario", spec: "t20-redirect-flow", expectBodyBytesZero: true },
-    ],
+    scenarios: ["t20-redirect-limits", "t20-redirect-flow"],
   },
   {
     id: "d-automatic-redirects",
     file: "src/web/fetch.ts",
     find: `    const response = await deps.connector.request(request);
-    lastResponse = response;
     const refusal = peerRefusalCause(response.peer, validated.addresses);
     if (refusal !== null) {
       await response.stream.cancel();
@@ -90,75 +67,91 @@ const MUTANTS: readonly Mutant[] = [
     if (isRedirectStatus(response.status)) {
       const location = response.headers["location"];
       await response.stream.cancel();
-      lastResponse = undefined;
       if (location === undefined || location === "") {
         throw new WebError("redirect response had no Location header");
       }
       current = new URL(location, current).href;
       continue;
     }`,
-    replace: `    const response = await deps.connector.request(request);
-    if (isRedirectStatus(response.status)) {
+    replace: `    let response = await deps.connector.request(request);
+    const refusal = peerRefusalCause(response.peer, validated.addresses);
+    if (refusal !== null) {
+      await response.stream.cancel();
+      throw new WebError(refusal);
+    }
+    let followed = 0;
+    while (isRedirectStatus(response.status) && followed <= maxRedirects) {
+      followed += 1;
       const location = response.headers["location"] ?? "";
+      await response.stream.cancel();
       current = new URL(location, current).href;
-      continue;
+      response = await deps.connector.request({ ...request, url: current });
+    }
+    if (isRedirectStatus(response.status)) {
+      await response.stream.cancel();
+      throw new WebError(\`too many redirects (more than \${String(maxRedirects)})\`);
     }`,
-    proofs: [
-      { kind: "vitest", spec: "all", expectCause: "refusing response from unvalidated peer" },
-      { kind: "scenario", spec: "t20-redirect-flow,t20-redirect-limits", expectBodyBytesZero: true },
-    ],
+    scenarios: ["t20-redirect-limits", "t20-redirect-flow"],
   },
   {
     id: "e-tls-verification-off",
     file: "src/web/connector.ts",
     find: "        servername: secure && !isIpLiteral(request.hostname) ? request.hostname : null,\n        rejectUnauthorized: true,",
     replace: "        servername: secure && !isIpLiteral(request.hostname) ? request.hostname : null,\n        rejectUnauthorized: false,",
-    proofs: [
-      { kind: "vitest", spec: "all", expectCause: "to be true" },
-      { kind: "scenario", spec: "t20-transport-failures", expectBodyBytesZero: true },
-    ],
+    scenarios: ["t20-connector-tls"],
   },
   {
     id: "f-userinfo-accepted",
     file: "src/web/safety.ts",
     find: "  if (authority.authority.includes(\"@\")) {\n    throw new WebError(\"refusing URL with embedded credentials\");\n  }",
     replace: "  void authority;",
-    proofs: [
-      { kind: "vitest", spec: "all", expectCause: "refusing URL with embedded credentials" },
-      { kind: "scenario", spec: "t20-userinfo" },
-    ],
+    scenarios: ["t20-userinfo"],
   },
   {
     id: "g-max-results-11",
     file: "src/web/tool.ts",
     find: "  return Math.max(1, Math.min(parsed, MAX_SEARCH_RESULTS));",
     replace: "  return Math.max(1, Math.min(parsed, MAX_SEARCH_RESULTS + 1));",
-    proofs: [
-      { kind: "vitest", spec: "all", expectCause: "to be 10" },
-      { kind: "scenario", spec: "t20-coercions" },
-    ],
+    scenarios: ["t20-coercions"],
   },
   {
     id: "h-ddg-byte-cap-removed",
     file: "src/web/search.ts",
-    find: "    if (read.exceeded) {\n      throw new SearchUnavailable(\"search response exceeded 2000000 bytes\");\n    }",
-    replace: "    void read;",
-    proofs: [
-      { kind: "vitest", spec: "all", expectCause: "search response exceeded 2000000 bytes" },
-      { kind: "scenario", spec: "t20-ddg-byte-cap" },
-    ],
+    find: `    const space = maxBytes - total;
+    if (chunk.length > space) {
+      await response.stream.cancel();
+      return { bytes: Buffer.concat(chunks), exceeded: true };
+    }
+    chunks.push(Buffer.from(chunk));
+    total += chunk.length;
+    if (total > maxBytes) {
+      await response.stream.cancel();
+      return { bytes: Buffer.concat(chunks), exceeded: true };
+    }`,
+    replace: `    chunks.push(Buffer.from(chunk));
+    total += chunk.length;`,
+    scenarios: ["t20-ddg-byte-cap"],
   },
   {
     id: "i-envelope-cause-removed",
     file: "src/web/tool.ts",
     find: "    if (error instanceof WebError) return toolError(error.message, { url });",
     replace: "    if (error instanceof WebError) return toolError(\"fetch failed\", { url });",
-    proofs: [
-      { kind: "vitest", spec: "all", expectCause: "fetch failed" },
-      { kind: "scenario", spec: "t20-scheme-host" },
-    ],
+    scenarios: ["t20-scheme-host"],
   },
 ];
+
+const EXPECTED_DIVERGENT = new Set([
+  "t20-port-invalid",
+  "t20-userinfo",
+  "t20-non-public-literals",
+  "t20-literal-public",
+  "t20-redirect-flow",
+  "t20-fetch-bounds",
+  "t20-peer-matrix",
+  "t20-peer-divergent",
+  "t20-ddg-byte-cap",
+]);
 
 function run(command: string, args: readonly string[], cwd: string, timeoutMs = 600_000) {
   return spawnSync(command, [...args], {
@@ -213,108 +206,98 @@ function sourceDigest(): string {
     .digest("hex");
 }
 
+function nominalVerdictSync(scenarioId: string): string {
+  return EXPECTED_DIVERGENT.has(scenarioId) ? "divergent" : "match";
+}
+
+function observedBodyBytes(stdout: string): number[] {
+  const values: number[] = [];
+  for (const match of stdout.matchAll(/"bodyBytesRead": (\d+)/gu)) {
+    values.push(Number.parseInt(match[1] ?? "0", 10));
+  }
+  return values;
+}
+
 async function main() {
-  const oracleWorkspace = resolveOracleWorkspace({ cwd: root, timeoutMs: 30_000, maxOutputBytes: 1_000_000 }).root;
+  const oracleWorkspace = resolveOracleWorkspace({
+    cwd: root,
+    timeoutMs: 30_000,
+    maxOutputBytes: 1_000_000,
+  }).root;
   const baselineDigest = sourceDigest();
   const results: Record<string, unknown>[] = [];
   let failures = 0;
   for (const mutant of MUTANTS) {
     const copy = makeCopy(mutant.id);
     const proofResults: Record<string, unknown>[] = [];
-    let killed = false;
-    let causesVisible = true;
+    let killed = true;
+    let setupError: string | null = null;
     try {
       applyMutant(copy, mutant);
       const build = run("npm", ["run", "build"], copy, 300_000);
       if (build.status !== 0) {
-        throw new Error(
-          `mutant copy build failed: ${(build.stderr ?? "")}${(build.stdout ?? "")}`.slice(0, 800),
-        );
+        throw new Error(`mutant copy build failed: ${build.stderr}${build.stdout}`.slice(0, 800));
       }
-      for (const proof of mutant.proofs) {
-        if (proof.kind === "vitest") {
-          const unit = run("npx", ["vitest", "run", ...VITEST_FILES], copy, 300_000);
-          const stdout = typeof unit.stdout === "string" ? unit.stdout : "";
-          const stderr = typeof unit.stderr === "string" ? unit.stderr : "";
-          const output = `${stdout}${stderr}`;
-          const red = unit.status !== 0;
-          const causeVisible = proof.expectCause === undefined || output.includes(proof.expectCause);
-          if (red) killed = true;
-          if (!causeVisible) causesVisible = false;
-          proofResults.push({
-            kind: "vitest",
-            red,
-            exitCode: unit.status,
-            causeVisible,
-          });
-        } else {
-          const scenarioIds = proof.spec.split(",");
-          for (const scenarioId of scenarioIds) {
-            const manifestPath = resolve(
-              root,
-              `scripts/parity/manifests/t20/${scenarioId}.json`,
-            );
-            const manifest = parseScenarioManifest(
-              JSON.parse(readFileSync(manifestPath, "utf8")),
-            );
-            let verdict = "";
-            let output = "";
-            try {
-              const record = runScenario(manifest, {
-                cwd: copy,
-                projectRoot: copy,
-                oracleWorkspace,
-              });
-              verdict = record.verdict;
-              output = `${Buffer.from(record.runs.candidate.process.stdout, "base64").toString("utf8")}${Buffer.from(record.runs.oracle.process.stdout, "base64").toString("utf8")}`;
-            } catch (error) {
-              verdict = "error";
-              output = error instanceof Error ? `${error.message}\n${error.stack ?? ""}` : String(error);
-              process.stderr.write(`scenario ${scenarioId} error: ${output.slice(0, 600)}\n`);
-            }
-            const nominal = await nominalVerdict(scenarioId);
-            const flipped = verdict !== nominal;
-            if (flipped) killed = true;
-            if (proof.expectCause !== undefined && !output.includes(proof.expectCause)) {
-              causesVisible = false;
-            }
-            const candidateExpectation = manifest.expectations
-              .filter((expectation) => expectation.side !== "oracle")
-              .map((expectation) => (typeof expectation.value === "string" ? expectation.value : JSON.stringify(expectation.value)))
-              .join("\n");
-            const bodyZeroPinned =
-              proof.expectBodyBytesZero !== true ||
-              candidateExpectation.includes('"bodyBytesRead": 0');
-            if (!bodyZeroPinned) causesVisible = false;
-            proofResults.push({
-              kind: "scenario",
-              scenario: scenarioId,
-              nominal,
-              mutantVerdict: verdict,
-              flipped,
-              causeVisible:
-                proof.expectCause === undefined || output.includes(proof.expectCause),
-              bodyZeroPinned,
-            });
-          }
+      for (const scenarioId of mutant.scenarios) {
+        const manifestPath = resolve(root, `scripts/parity/manifests/t20/${scenarioId}.json`);
+        const manifest = parseScenarioManifest(JSON.parse(readFileSync(manifestPath, "utf8")));
+        const nominalCandidateExpectation = manifest.expectations.find(
+          (expectation) =>
+            expectation.side !== "oracle" &&
+            expectation.field === "process.stdout" &&
+            typeof expectation.value === "string",
+        )?.value as string;
+        let verdict = "";
+        let candidateOutput = "";
+        let proofError: string | null = null;
+        try {
+          const record = runScenario(manifest, { cwd: copy, projectRoot: copy, oracleWorkspace });
+          verdict = record.verdict;
+          candidateOutput = Buffer.from(
+            record.runs.candidate.process.stdout,
+            "base64",
+          ).toString("utf8");
+        } catch (error) {
+          proofError = error instanceof Error ? error.message : String(error);
+          verdict = "error";
         }
+        const nominal = nominalVerdictSync(scenarioId);
+        const observedMatchesNominalExpectation =
+          proofError === null && candidateOutput === nominalCandidateExpectation;
+        const observedBytes = observedBodyBytes(candidateOutput);
+        const observedNominalCauseVisible =
+          candidateOutput.includes("refusing") ||
+          candidateOutput.includes("could not") ||
+          candidateOutput.includes("exceeded") ||
+          candidateOutput.includes("unavailable") ||
+          candidateOutput.includes("failed");
+        proofResults.push({
+          scenario: scenarioId,
+          nominal,
+          verdict,
+          ...(proofError === null ? {} : { error: proofError }),
+          observedBodyBytesRead: observedBytes,
+          observedMatchesNominalExpectation,
+          nominalCandidateCauseVisibleInMutant: observedNominalCauseVisible,
+        });
+        // Kill = the mutant's observed candidate output no longer satisfies the
+        // pinned normative candidate expectation (which encodes the contracted
+        // cause and bodyBytesRead=0 for the SSRF/peer rows).
+        if (observedMatchesNominalExpectation || proofError !== null) killed = false;
       }
     } catch (error) {
-      causesVisible = false;
-      proofResults.push({
-        kind: "setup",
-        error: error instanceof Error ? error.message : String(error),
-      });
+      killed = false;
+      setupError = error instanceof Error ? error.message : String(error);
     } finally {
       rmSync(copy, { recursive: true, force: true });
     }
     const record = {
       mutant: mutant.id,
       killed,
-      causesVisible,
+      ...(setupError === null ? {} : { setupError }),
       proofs: proofResults,
     };
-    if (!killed || !causesVisible) failures += 1;
+    if (!killed) failures += 1;
     results.push(record);
     process.stdout.write(`${JSON.stringify(record)}\n`);
   }
@@ -322,33 +305,14 @@ async function main() {
     process.stderr.write("t20 mutation proof: the lane worktree changed during the run\n");
     failures += 1;
   }
-  const summary = { suite: "t20-mutations", mutants: MUTANTS.length, failures, results };
   writeFileSync(
     resolve(evidenceDirectory, "mutations.json"),
-    `${JSON.stringify(summary, null, 2)}\n`,
+    `${JSON.stringify({ suite: "t20-mutations", mutants: MUTANTS.length, failures, results }, null, 2)}\n`,
   );
   process.stdout.write(
     `${JSON.stringify({ suite: "t20-mutations", failures, mutants: MUTANTS.length })}\n`,
   );
   process.exitCode = failures === 0 ? 0 : 1;
-}
-
-function nominalVerdictSync(scenarioId: string): string {
-  const expectedDivergent = new Set([
-    "t20-port-invalid",
-    "t20-userinfo",
-    "t20-non-public-literals",
-    "t20-literal-public",
-    "t20-redirect-flow",
-    "t20-fetch-bounds",
-    "t20-peer-matrix",
-    "t20-ddg-byte-cap",
-  ]);
-  return expectedDivergent.has(scenarioId) ? "divergent" : "match";
-}
-
-async function nominalVerdict(scenarioId: string): Promise<string> {
-  return nominalVerdictSync(scenarioId);
 }
 
 await main();

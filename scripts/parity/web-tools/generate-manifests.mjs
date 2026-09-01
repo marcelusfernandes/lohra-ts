@@ -19,6 +19,8 @@ function oraclePython() {
 }
 
 const matchScenarios = [
+  "rebinding",
+  "connector-tls",
   "definitions",
   "chat-canned",
   "missing-arguments",
@@ -36,6 +38,7 @@ const matchScenarios = [
 ];
 
 const divergentScenarios = [
+  "peer-divergent",
   "port-invalid",
   "userinfo",
   "non-public-literals",

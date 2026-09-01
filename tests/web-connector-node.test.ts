@@ -92,18 +92,18 @@ describe("nodeDial lifecycle over an in-memory http layer", () => {
   }
 
   it("keeps the timeout armed after headers and destroys a stalled body at the deadline", async () => {
-    let settled: { error?: Error; done?: boolean } = {};
+    let settled: { error?: unknown; done?: boolean } = {};
     const pending = dial(factory).then(
       (response) => {
         const next = response.stream.next();
         return next.then(
           () => ({ done: true }),
-          (error: Error) => ({ error }),
+          (error: unknown) => ({ error }),
         );
       },
-      (error: Error) => ({ error }),
+      (error: unknown) => ({ error }),
     );
-    pending.then((value) => {
+    void pending.then((value) => {
       settled = value;
     });
     await vi.advanceTimersByTimeAsync(9_999);
@@ -120,9 +120,13 @@ describe("nodeDial lifecycle over an in-memory http layer", () => {
     const response = exchanges[0]?.response;
     if (response === undefined) throw new Error("fixture response missing");
     const settled = pending.then(
-      (value) => value.stream.next().then(() => "done", (error: Error) => error.message),
-      (error: Error) => error.message,
+      (value) =>
+        value.stream
+          .next()
+          .then(() => "done", (error: unknown) => (error as Error).message),
+      (error: unknown) => (error as Error).message,
     );
+    void settled;
     await vi.advanceTimersByTimeAsync(0);
     response.emit("error", new Error("fixture stream aborted"));
     await vi.advanceTimersByTimeAsync(0);
@@ -137,9 +141,13 @@ describe("nodeDial lifecycle over an in-memory http layer", () => {
     const response = exchanges[0]?.response;
     if (response === undefined) throw new Error("fixture response missing");
     const settled = pending.then(
-      (value) => value.stream.next().then(() => "done", (error: Error) => error.message),
-      (error: Error) => error.message,
+      (value) =>
+        value.stream
+          .next()
+          .then(() => "done", (error: unknown) => (error as Error).message),
+      (error: unknown) => (error as Error).message,
     );
+    void settled;
     await vi.advanceTimersByTimeAsync(0);
     response.emit("aborted");
     await vi.advanceTimersByTimeAsync(0);
@@ -153,9 +161,13 @@ describe("nodeDial lifecycle over an in-memory http layer", () => {
     const response = exchanges[0]?.response;
     if (response === undefined) throw new Error("fixture response missing");
     const settled = pending.then(
-      (value) => value.stream.next().then(() => "done", (error: Error) => error.message),
-      (error: Error) => error.message,
+      (value) =>
+        value.stream
+          .next()
+          .then(() => "done", (error: unknown) => (error as Error).message),
+      (error: unknown) => (error as Error).message,
     );
+    void settled;
     await vi.advanceTimersByTimeAsync(0);
     response.emit("close");
     await vi.advanceTimersByTimeAsync(0);
@@ -208,6 +220,92 @@ describe("nodeDial lifecycle over an in-memory http layer", () => {
     expect(options.servername).toBe("public.test");
     expect(options.method).toBe("GET");
     expect(options.path).toBe("/a");
+  });
+
+  it("rejects the second read at the deadline when the body stalls after the first chunk", async () => {
+    const pending = dial(factory);
+    await vi.advanceTimersByTimeAsync(0);
+    const response = exchanges[0]?.response;
+    if (response === undefined) throw new Error("fixture response missing");
+    const first = await pending;
+    const firstChunk = first.stream.next();
+    await vi.advanceTimersByTimeAsync(5_000);
+    response.chunks.push(Buffer.from("partial"));
+    response.emit("readable");
+    const chunk = await firstChunk;
+    expect(chunk.done).toBe(false);
+    const second = first.stream.next();
+    let settled: string | null = null;
+    void second.then(
+      () => {
+        settled = "done";
+      },
+      (error: unknown) => {
+        settled = (error as Error).message;
+      },
+    );
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(settled).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(settled).toBe("request timed out after 10 seconds");
+    expect(response.listenerCount("readable")).toBe(0);
+    expect(response.listenerCount("error")).toBe(0);
+    expect(response.listenerCount("aborted")).toBe(0);
+    expect(response.listenerCount("close")).toBe(0);
+  });
+
+  it("rejects an error arriving between reads", async () => {
+    const pending = dial(factory);
+    await vi.advanceTimersByTimeAsync(0);
+    const response = exchanges[0]?.response;
+    if (response === undefined) throw new Error("fixture response missing");
+    const first = await pending;
+    const firstChunk = first.stream.next();
+    await vi.advanceTimersByTimeAsync(5_000);
+    response.chunks.push(Buffer.from("partial"));
+    response.emit("readable");
+    await firstChunk;
+    const second = first.stream.next();
+    let settled: string | null = null;
+    void second.then(
+      () => {
+        settled = "done";
+      },
+      (error: unknown) => {
+        settled = (error as Error).message;
+      },
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    response.emit("error", new Error("fixture stream aborted"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe("fixture stream aborted");
+  });
+
+  it("rejects an abort arriving between reads", async () => {
+    const pending = dial(factory);
+    await vi.advanceTimersByTimeAsync(0);
+    const response = exchanges[0]?.response;
+    if (response === undefined) throw new Error("fixture response missing");
+    const first = await pending;
+    const firstChunk = first.stream.next();
+    await vi.advanceTimersByTimeAsync(5_000);
+    response.chunks.push(Buffer.from("partial"));
+    response.emit("readable");
+    await firstChunk;
+    const second = first.stream.next();
+    let settled: string | null = null;
+    void second.then(
+      () => {
+        settled = "done";
+      },
+      (error: unknown) => {
+        settled = (error as Error).message;
+      },
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    response.emit("aborted");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe("response aborted");
   });
 
   it("surfaces a 3xx as-is so redirects are never followed automatically", async () => {

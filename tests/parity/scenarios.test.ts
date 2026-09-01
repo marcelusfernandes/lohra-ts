@@ -145,9 +145,12 @@ const t20Scenarios = readdirSync(resolve("scripts/parity/manifests/t20"))
   .sort();
 
 describe("sprint 05 T20 web tools matrix", () => {
-  it("declares the closed 22-scenario inventory", () => {
-    expect(t20Scenarios).toHaveLength(22);
+  it("declares the closed 25-scenario inventory", () => {
+    expect(t20Scenarios).toHaveLength(25);
     expect(t20Scenarios).toContain("t20-definitions");
+    expect(t20Scenarios).toContain("t20-peer-divergent");
+    expect(t20Scenarios).toContain("t20-rebinding");
+    expect(t20Scenarios).toContain("t20-connector-tls");
     expect(t20Scenarios).toContain("t20-chat-canned");
     expect(t20Scenarios).toContain("t20-port-invalid");
     expect(t20Scenarios).toContain("t20-userinfo");
