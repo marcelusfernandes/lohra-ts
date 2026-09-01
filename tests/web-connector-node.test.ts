@@ -346,6 +346,34 @@ describe("nodeDial lifecycle over an in-memory http layer", () => {
     expect(response.listenerCount("close")).toBe(0);
   });
 
+  it.each(["close", "aborted"] as const)(
+    "keeps the timeout cause when destroy emits %s synchronously",
+    async (terminalEvent) => {
+      const pending = dial(factory);
+      await vi.advanceTimersByTimeAsync(0);
+      const response = exchanges[0]?.response;
+      if (response === undefined) throw new Error("fixture response missing");
+      const first = await pending;
+      const firstChunk = first.stream.next();
+      await vi.advanceTimersByTimeAsync(5_000);
+      response.chunks.push(Buffer.from("partial"));
+      response.emit("readable");
+      await firstChunk;
+      response.destroy = () => {
+        response.emit(terminalEvent);
+      };
+
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await expect(first.stream.next()).rejects.toThrow("request timed out after 10 seconds");
+      expect(response.listenerCount("readable")).toBe(0);
+      expect(response.listenerCount("end")).toBe(0);
+      expect(response.listenerCount("error")).toBe(0);
+      expect(response.listenerCount("aborted")).toBe(0);
+      expect(response.listenerCount("close")).toBe(0);
+    },
+  );
+
   it("keeps read listeners constant across many async chunks and zero at terminal", async () => {
     const pending = dial(factory);
     await vi.advanceTimersByTimeAsync(0);

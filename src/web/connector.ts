@@ -199,9 +199,9 @@ async function nodeDial(dialRequest: PinnedDialRequest): Promise<ConnectorRespon
         const failure = new ConnectorError(
           `request timed out after ${String(Math.round(dialRequest.timeoutMs / 1000))} seconds`,
         );
+        settleFailure(failure);
         nodeResponse?.destroy();
         nodeRequest.destroy();
-        settleFailure(failure);
       }, dialRequest.timeoutMs);
       if (typeof timer.unref === "function") timer.unref();
     };
