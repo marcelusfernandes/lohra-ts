@@ -362,6 +362,7 @@ export class WorkflowService {
   private readonly autoResume: AutoResumeScheduler | undefined;
   private readonly homeRoot: string;
   private readonly fenceMemory: FenceMemory;
+  private readonly warn: (message: string) => void;
   /** Per-ACQUISITION sandbox context; the leaf dispatch of a stretch reads it
    * live, so a resume with a fresh policy/taint is what its leaves get. */
   private readonly stretches = new Map<
@@ -393,6 +394,8 @@ export class WorkflowService {
     readonly timerFactory?: (delay: number, fire: () => void) => Timer;
     /** Bounded fence memory; only tests shrink it below FENCE_MEMORY. */
     readonly fenceMemory?: number;
+    /** Where cleanup failures are recorded; defaults to console.warn. */
+    readonly onWarning?: (message: string) => void;
   }) {
     this.runtime = options.runtime;
     this.cache = options.cache ?? new MemoryWorkflowCache();
@@ -405,6 +408,7 @@ export class WorkflowService {
     this.taintTracker = options.taintTracker ?? new TaintTracker();
     this.homeRoot = options.homeRoot ?? ".";
     this.fenceMemory = new FenceMemory(options.fenceMemory ?? FENCE_MEMORY);
+    this.warn = options.onWarning ?? ((message) => { console.warn(message); });
     // Criterion 40: the operator capability policy is a FILE in the operator
     // home (`workflow_policy.json`), read per launch. An explicit path wins;
     // an absent file is deny-all, never a widening.
@@ -667,8 +671,10 @@ export class WorkflowService {
       options.tokenBudget ?? (resumeRunId !== undefined ? (priorView?.token_budget ?? null) : null);
     const refusal = refuseSpentBudgetMessage(runId, effectiveBudget, seeded.tokensIn + seeded.tokensOut);
     if (refusal !== null) {
+      // Never sit on a lease for a run we are not going to start — and give
+      // back only the one we took, conditioned on our own fence.
       this.heartbeat?.stop(runId);
-      store.locks.releaseRunLease(runId, store.holder);
+      store.locks.releaseRunLeaseAtFence(runId, store.holder, fence);
       return Object.freeze({ error: refusal });
     }
     // THIS acquisition, with an identity of its own. Keying anything by run_id
@@ -701,19 +707,36 @@ export class WorkflowService {
     // The wrapper is pinned to this stretch: once a newer acquisition exists,
     // this one's wrapper denies everything rather than serving stale capability.
     const install = this.runtime.installLeafSandbox?.bind(this.runtime);
-    if (install === undefined) {
+    // A launch that dies between taking the lease and handing the run over must
+    // give BOTH back: a lease nobody will renew locks every later resume out
+    // until the TTL runs down, and a heartbeat with no run behind it keeps
+    // renewing it. An installer that THROWS is the same failure as one that is
+    // missing, so both land here.
+    const abandonAcquisition = (): void => {
       this.heartbeat?.stop(runId);
-      store.locks.releaseRunLease(runId, store.holder);
       this.stretches.delete(runId);
+      store.locks.releaseRunLeaseAtFence(runId, store.holder, fence);
       this.fenceMemory.forget(fenceKey);
+    };
+    if (install === undefined) {
+      abandonAcquisition();
       return leafSandboxUnavailable(runId);
     }
-    const sandboxHandle: LeafSandboxHandle = install({
-      runId,
-      fence,
-      wrap: (base: LeafToolDispatch): LeafToolDispatch =>
-        this.stretchToolDispatch(runId, stretchId, base),
-    });
+    let sandboxHandle: LeafSandboxHandle;
+    try {
+      sandboxHandle = install({
+        runId,
+        fence,
+        wrap: (base: LeafToolDispatch): LeafToolDispatch =>
+          this.stretchToolDispatch(runId, stretchId, base),
+      });
+    } catch (error) {
+      abandonAcquisition();
+      this.warn(
+        `workflow: leaf sandbox install failed for run ${runId}: ${String(error)}`,
+      );
+      return leafSandboxUnavailable(runId);
+    }
     const engine = new WorkflowEngine({
       runtime: this.runtime,
       budget: new Budget({
@@ -755,6 +778,44 @@ export class WorkflowService {
           : { cache: this.cache }),
     });
     const record = this.makeRecord(runId, parsed.name, engine);
+    /**
+     * Hand this acquisition back: exactly once, and never by throwing.
+     *
+     * Every step is independent — a step that fails must not skip the ones
+     * after it, and none of them may stop the run from publishing a bounded
+     * result. A disposer that threw used to escape the success path, land in
+     * `.catch`, be called a second time, throw again, and leave the waiter
+     * hanging on a promise chain that rejected with nobody listening.
+     *
+     * The heartbeat stops FIRST: a tick that outlived the release would put the
+     * lease back and leave the run looking alive with nobody in it. The release
+     * itself is conditioned on this acquisition's fence INSIDE its own
+     * statement, so a takeover by the same holder cannot be deleted by it.
+     */
+    let finished = false;
+    const finishStretch = (): void => {
+      if (finished) return;
+      finished = true;
+      const step = (what: string, run: () => void): void => {
+        try {
+          run();
+        } catch (error) {
+          this.warn(`workflow: ${what} failed for run ${runId}: ${String(error)}`);
+        }
+      };
+      step("heartbeat stop", () => {
+        if (isCurrentStretch()) this.heartbeat?.stop(runId);
+      });
+      step("stretch deregistration", () => {
+        if (isCurrentStretch()) this.stretches.delete(runId);
+      });
+      step("lease release", () => {
+        store.locks.releaseRunLeaseAtFence(runId, store.holder, fence);
+      });
+      step("fence memory release", () => { this.fenceMemory.forget(fenceKey); });
+      // only THIS acquisition's installation
+      step("leaf sandbox disposal", () => { sandboxHandle.dispose(); });
+    };
     const carriedFaults = [...(priorView?.prior_faults ?? [])];
     if (orphaned) {
       carriedFaults.push(
@@ -873,23 +934,7 @@ export class WorkflowService {
             now: terminal.now,
           });
         }
-        // The heartbeat stops FIRST; a tick that outlived the release would put
-        // the lease back and leave the run looking alive with nobody in it.
-        //
-        // Release ONLY what this acquisition still holds. `releaseRunLease`
-        // deletes by (run, holder), so a stretch whose lease had already been
-        // taken over — by a newer acquisition using the SAME holder name, in
-        // this process or another — would delete the live stretch's lease. The
-        // fence on record is what says whether the lease is still ours.
-        if (isCurrentStretch()) {
-          this.heartbeat?.stop(runId);
-          this.stretches.delete(runId);
-        }
-        if (Number(store.locks.runFenceOf(runId) ?? -1) === fence) {
-          store.locks.releaseRunLease(runId, store.holder);
-        }
-        this.fenceMemory.forget(fenceKey);
-        sandboxHandle.dispose(); // only THIS acquisition's installation
+        finishStretch();
         record.settled = true;
         if (owned) {
           record.published = resultView(runId, parsed.name, result, engine.budget);
@@ -905,15 +950,7 @@ export class WorkflowService {
         }
       })
       .catch((error: unknown) => {
-        if (isCurrentStretch()) {
-          this.heartbeat?.stop(runId);
-          this.stretches.delete(runId);
-        }
-        if (Number(store.locks.runFenceOf(runId) ?? -1) === fence) {
-          store.locks.releaseRunLease(runId, store.holder);
-        }
-        this.fenceMemory.forget(fenceKey);
-        sandboxHandle.dispose();
+        finishStretch();
         record.settled = true;
         record.published = Object.freeze({
           run_id: runId,

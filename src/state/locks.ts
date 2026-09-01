@@ -125,6 +125,34 @@ export class LockRepository {
     }
   }
 
+  /**
+   * Release ONLY the lease this acquisition still holds.
+   *
+   * `releaseRunLease` deletes by (run_id, holder), so a caller that first reads
+   * the fence and then releases leaves a window: a new acquisition BY THE SAME
+   * HOLDER can take over in between, the stale check still passes, and the
+   * delete removes the live lease. The fence lives in a sibling table, so the
+   * condition rides inside the DELETE's own statement — there is no window to
+   * interpose an acquire into.
+   */
+  public releaseRunLeaseAtFence(runId: string, holder: string, fence: number): boolean {
+    try {
+      const result = this.database
+        .prepare(
+          `DELETE FROM workflow_run_locks
+           WHERE run_id = ? AND holder = ?
+             AND EXISTS (
+               SELECT 1 FROM workflow_run_fence WHERE run_id = ? AND fence = ?
+             )`,
+        )
+        .run(runId, holder, runId, fence);
+      return result.changes > 0;
+    } catch (error) {
+      if (error instanceof Error && /database is locked/i.test(error.message)) return false;
+      throw error;
+    }
+  }
+
   public renewRunLease(runId: string, holder: string, now: number, ttlSeconds: number): boolean {
     try {
       const result = this.database
