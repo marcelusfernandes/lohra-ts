@@ -633,7 +633,17 @@ results.push(
     const configObserved = await pair("hostile-aligned-config-containers", {
       prompt: "SCEN:mcpcall go",
       mcpConfig: {
-        mcpServers: { fix: { command: "fixture-command", args: "abc", env: { A: 1 } } },
+        mcpServers: {
+          fix: {
+            command: "fixture-command",
+            args: "abc",
+            env: [
+              [null, "nil"],
+              ["A", 1],
+              ["B", "x"],
+            ],
+          },
+        },
       },
       fixture: {
         servers: {
@@ -650,7 +660,7 @@ results.push(
       { name: "mcp_fix_object_desc", description: { source: "hostile-fixture" } },
     ];
     const expectedConfig =
-      'observed-config:{"name":"fix","transport":"stdio","command":"fixture-command","args":["a","b","c"],"env":{"A":1},"url":null}';
+      'observed-config:{"name":"fix","transport":"stdio","command":"fixture-command","args":["a","b","c"],"env":{"null":"nil","A":1,"B":"x"},"url":null}';
     const pass =
       exact(descriptionProjection(descriptions.oracle), expectedDescriptions) &&
       exact(descriptionProjection(descriptions.candidate), expectedDescriptions) &&

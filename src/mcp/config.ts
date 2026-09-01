@@ -21,6 +21,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function pythonMappingFromJson(name: string, value: unknown): Readonly<Record<string, unknown>> {
+  if (isRecord(value)) return { ...value };
+  if (!Array.isArray(value)) {
+    throw new MCPConfigError(`server ${pythonRepr(name)} field 'env' cannot construct a mapping`);
+  }
+
+  const mapping: Record<string, unknown> = {};
+  for (const entry of value) {
+    const pair: readonly unknown[] | undefined = Array.isArray(entry)
+      ? (entry as readonly unknown[])
+      : typeof entry === "string"
+        ? Array.from(entry)
+        : undefined;
+    if (pair?.length !== 2) {
+      throw new MCPConfigError(`server ${pythonRepr(name)} field 'env' cannot construct a mapping`);
+    }
+    const key = pair[0];
+    if (
+      key !== null &&
+      typeof key !== "string" &&
+      typeof key !== "number" &&
+      typeof key !== "boolean"
+    ) {
+      throw new MCPConfigError(`server ${pythonRepr(name)} field 'env' cannot construct a mapping`);
+    }
+    mapping[String(key)] = pair[1];
+  }
+  return mapping;
+}
+
 function parseServer(name: string, spec: unknown): MCPServerConfig {
   if (!isRecord(spec)) throw new MCPConfigError(`server ${pythonRepr(name)} must be an object`);
   if (isPythonTruthy(spec.url) && typeof spec.url !== "string") {
@@ -50,11 +80,7 @@ function parseServer(name: string, spec: unknown): MCPServerConfig {
     const rawEnv = spec.env;
     const env = !isPythonTruthy(rawEnv)
       ? {}
-      : isRecord(rawEnv)
-        ? { ...rawEnv }
-        : (() => {
-            throw new MCPConfigError(`server ${pythonRepr(name)} field 'env' cannot construct a mapping`);
-          })();
+      : pythonMappingFromJson(name, rawEnv);
     return { name, transport: "stdio", command, args, env };
   }
   throw new MCPConfigError(`server ${pythonRepr(name)} needs a 'command' (stdio) or 'url' (http)`);

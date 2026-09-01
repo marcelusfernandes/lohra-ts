@@ -125,7 +125,15 @@ describe("loadMcpConfig", () => {
       path,
       JSON.stringify({
         mcpServers: {
-          chars: { command: "npx", args: "abc", env: { A: 1 } },
+          chars: {
+            command: "npx",
+            args: "abc",
+            env: [
+              [null, "nil"],
+              ["A", 1],
+              ["B", "x"],
+            ],
+          },
           values: { command: "npx", args: [1, 2], env: { FLAG: true } },
         },
       }),
@@ -136,7 +144,7 @@ describe("loadMcpConfig", () => {
         transport: "stdio",
         command: "npx",
         args: ["a", "b", "c"],
-        env: { A: 1 },
+        env: { null: "nil", A: 1, B: "x" },
       },
       {
         name: "values",
