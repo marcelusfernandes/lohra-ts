@@ -9,6 +9,7 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -111,6 +112,47 @@ function imageId(source: () => string): string {
   return value;
 }
 
+/**
+ * An observable hook may relocate the whole outDir (rename to a contained
+ * sibling) so the owned inode no longer sits at its recorded pathname. Sweep
+ * the direct children of the trusted parent one level deep and remove any
+ * entry whose on-disk identity (dev, ino) matches an owned file — never a
+ * name, never through a symlink, never an unowned inode.
+ */
+function removeRelocated(
+  plan: OutputPlan,
+  entry: { readonly path: string; readonly dev: number; readonly ino: number },
+): void {
+  for (const child of readdirSync(plan.trustedParent)) {
+    const childPath = join(plan.trustedParent, child);
+    let childStats: Stats;
+    try {
+      childStats = lstatSync(childPath);
+    } catch {
+      continue;
+    }
+    if (childStats.isSymbolicLink() || !childStats.isDirectory()) continue;
+    let names: readonly string[];
+    try {
+      names = readdirSync(childPath);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      const candidatePath = join(childPath, name);
+      try {
+        const candidate = lstatSync(candidatePath);
+        if (candidate.dev === entry.dev && candidate.ino === entry.ino) {
+          rmSync(candidatePath, { force: true });
+          return;
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+}
+
 export async function persistGeneratedImages(options: {
   readonly plan: OutputPlan;
   readonly payloads: readonly string[];
@@ -140,6 +182,7 @@ export async function persistGeneratedImages(options: {
   }
   mkdirSync(options.plan.outDir, { recursive: true });
   checkControlledRoot(options.plan);
+  const rootIdentity = lstatSync(options.plan.outDir);
 
   const temps: string[] = [];
   const finals: string[] = [];
@@ -178,6 +221,17 @@ export async function persistGeneratedImages(options: {
         throw new Error("image publish index mismatch");
       await options.beforePublish?.(index, final);
       checkControlledRoot(options.plan);
+      // Revalidate the outDir directory identity itself: a hook may replace
+      // the pathname with a fresh contained directory (no symlink needed),
+      // leaving the owned stage in a relocated directory.
+      const rootNow = lstatSync(options.plan.outDir);
+      if (
+        rootNow.isSymbolicLink() ||
+        !rootNow.isDirectory() ||
+        rootNow.dev !== rootIdentity.dev ||
+        rootNow.ino !== rootIdentity.ino
+      )
+        throw new Error("output root changed after publish hook");
       // The hook no longer owns the stage path: revalidate identity, type,
       // size and bytes so a swapped/symlinked/tampered stage can never be
       // published under the provider's name, and restabilize the mode the
@@ -216,11 +270,22 @@ export async function persistGeneratedImages(options: {
       for (const entry of owned) {
         try {
           const current = lstatSync(entry.path);
-          if (current.dev !== entry.dev || current.ino !== entry.ino) continue;
+          if (current.dev !== entry.dev || current.ino !== entry.ino) {
+            removeRelocated(options.plan, entry);
+            continue;
+          }
           rmSync(entry.path, { force: true });
         } catch (cleanupError) {
-          if ((cleanupError as NodeJS.ErrnoException).code !== "ENOENT")
-            cleanupErrors.push(cleanupError);
+          if ((cleanupError as NodeJS.ErrnoException).code === "ENOENT") {
+            try {
+              removeRelocated(options.plan, entry);
+              continue;
+            } catch (scanError) {
+              cleanupErrors.push(scanError);
+              continue;
+            }
+          }
+          cleanupErrors.push(cleanupError);
         }
       }
       if (cleanupErrors.length > 0)

@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -254,6 +255,57 @@ describe("staged image persistence", () => {
       },
     });
     expect(lstatSync(paths[0] ?? "").mode & 0o777).toBe(0o644);
+  });
+
+  it("fails closed with zero residue when outDir is replaced without a symlink", async () => {
+    const directory = root();
+    const outDir = join(directory, "images");
+    const moved = join(directory, "moved");
+    const payload = Buffer.from("PRIVATE-PROVIDER-BYTES");
+    mkdirSync(outDir);
+    writeFileSync(join(outDir, "FOREIGN"), "keep");
+    await expect(
+      persistGeneratedImages({
+        plan: createOutputPlan(outDir),
+        payloads: [payload.toString("base64")],
+        requested: 1,
+        uuid: () => "d".repeat(32),
+        beforePublish: () => {
+          renameSync(outDir, moved);
+          mkdirSync(outDir);
+        },
+      }),
+    ).rejects.toThrow("output root changed after publish hook");
+    expect(readdirSync(moved).filter((name) => name.startsWith(".stage-"))).toEqual([]);
+    expect(existsSync(join(outDir, `${"d".repeat(32)}.png`))).toBe(false);
+    expect(readFileSync(join(moved, "FOREIGN"), "utf8")).toBe("keep");
+    expect(readdirSync(outDir)).toEqual([]);
+  });
+
+  it("relocates cleanup across every owned stage when the root is replaced mid-batch", async () => {
+    const directory = root();
+    const outDir = join(directory, "images");
+    const moved = join(directory, "moved");
+    const ids = ["a".repeat(32), "b".repeat(32)];
+    await expect(
+      persistGeneratedImages({
+        plan: createOutputPlan(outDir),
+        payloads: ["b25l", "dHdv"],
+        requested: 2,
+        uuid: () => ids.shift() ?? "c".repeat(32),
+        beforePublish: (index) => {
+          if (index === 1) {
+            renameSync(outDir, moved);
+            mkdirSync(outDir);
+          }
+        },
+      }),
+    ).rejects.toThrow("output root changed after publish hook");
+    const allOwned = [...readdirSync(moved), ...readdirSync(outDir)].filter(
+      (name) => name.startsWith(".stage-") || name.endsWith(".png"),
+    );
+    expect(allOwned).toEqual([]);
+    expect(existsSync(join(outDir, `${"a".repeat(32)}.png`))).toBe(false);
   });
 
   it("removes a staged seven-byte partial after a write fault", async () => {
