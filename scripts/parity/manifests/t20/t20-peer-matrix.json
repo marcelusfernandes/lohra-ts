@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "id": "t20-peer-matrix",
+  "description": "T20 bilateral observation: peer-matrix (expected divergent)",
+  "argv": [
+    "peer-matrix"
+  ],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "PYTHONHASHSEED": "0",
+      "NO_COLOR": "1",
+      "TZ": "UTC",
+      "HOME": "{{home}}",
+      "TMPDIR": "{{home}}/tmp",
+      "HTTP_PROXY": "http://127.0.0.1:1",
+      "HTTPS_PROXY": "http://127.0.0.1:1",
+      "ALL_PROXY": "http://127.0.0.1:1"
+    }
+  },
+  "preconditions": [],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/web-tools/oracle_driver.py"
+      ],
+      "cwd": "profile"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/web-tools/candidate-driver.mjs"
+      ],
+      "cwd": "profile"
+    }
+  },
+  "limits": {
+    "timeoutMs": 60000,
+    "maxOutputBytes": 16777216
+  },
+  "capture": {
+    "tree": {
+      "enabled": false,
+      "root": "profile",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": []
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "oracle",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "value": "{\"rows\": [{\"authorization\": [], \"bodyBytesRead\": 22, \"dns\": [\"rebind.test\"], \"input\": \"direct\", \"parserCalls\": 0, \"requestBodies\": [\"\"], \"requests\": [\"http://rebind.test/\"], \"result\": {\"ok\": true, \"text\": \"SIMULATED_PRIVATE_BODY\", \"url\": \"http://rebind.test/\"}}, {\"authorization\": [], \"bodyBytesRead\": 31, \"dns\": [\"start.test\", \"hop.test\"], \"input\": \"after-redirect\", \"parserCalls\": 0, \"requestBodies\": [\"\", \"\"], \"requests\": [\"http://start.test/\", \"http://hop.test/\"], \"result\": {\"ok\": true, \"text\": \"SIMULATED_REDIRECT_PRIVATE_BODY\", \"url\": \"http://start.test/\"}}]}\n"
+    },
+    {
+      "side": "candidate",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "value": "{\"rows\": [{\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [\"rebind.test\"], \"input\": \"direct\", \"parserCalls\": 0, \"requestBodies\": [\"\"], \"requests\": [\"http://rebind.test/\"], \"result\": {\"error\": \"refusing response from unvalidated peer: peer is non-public\", \"url\": \"http://rebind.test/\"}}, {\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [\"start.test\", \"hop.test\"], \"input\": \"after-redirect\", \"parserCalls\": 0, \"requestBodies\": [\"\", \"\"], \"requests\": [\"http://start.test/\", \"http://hop.test/\"], \"result\": {\"error\": \"refusing response from unvalidated peer: peer not in validated set\", \"url\": \"http://start.test/\"}}]}\n"
+    }
+  ],
+  "normalizations": [],
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10",
+    "expectedPackages": {
+      "openai": "3.6.0",
+      "httpx": "0.28.1"
+    }
+  }
+}

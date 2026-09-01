@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "id": "t20-definitions",
+  "description": "T20 bilateral observation: definitions",
+  "argv": [
+    "definitions"
+  ],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "PYTHONHASHSEED": "0",
+      "NO_COLOR": "1",
+      "TZ": "UTC",
+      "HOME": "{{home}}",
+      "TMPDIR": "{{home}}/tmp",
+      "HTTP_PROXY": "http://127.0.0.1:1",
+      "HTTPS_PROXY": "http://127.0.0.1:1",
+      "ALL_PROXY": "http://127.0.0.1:1"
+    }
+  },
+  "preconditions": [],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/web-tools/oracle_driver.py"
+      ],
+      "cwd": "profile"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/web-tools/candidate-driver.mjs"
+      ],
+      "cwd": "profile"
+    }
+  },
+  "limits": {
+    "timeoutMs": 60000,
+    "maxOutputBytes": 16777216
+  },
+  "capture": {
+    "tree": {
+      "enabled": false,
+      "root": "profile",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": []
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "value": "{\"definitions\": [{\"description\": \"Fetch a web page by URL and return its readable text content. Use this to read an article, doc, or page the conversation refers to. Only public http(s) URLs are allowed.\", \"name\": \"web_fetch\", \"parameters\": {\"properties\": {\"url\": {\"description\": \"The http(s) URL to fetch\", \"type\": \"string\"}}, \"required\": [\"url\"], \"type\": \"object\"}}, {\"description\": \"Search the web and return a list of results (title, url, snippet). Use this to find pages, then 'web_fetch' to read the most relevant one.\", \"name\": \"web_search\", \"parameters\": {\"properties\": {\"max_results\": {\"description\": \"How many results, 1-10 (default 5)\", \"type\": \"integer\"}, \"query\": {\"description\": \"What to search for\", \"type\": \"string\"}}, \"required\": [\"query\"], \"type\": \"object\"}}]}\n"
+    }
+  ],
+  "normalizations": [],
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10",
+    "expectedPackages": {
+      "openai": "3.6.0",
+      "httpx": "0.28.1"
+    }
+  }
+}

@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "id": "t20-non-public-literals",
+  "description": "T20 bilateral observation: non-public-literals (expected divergent)",
+  "argv": [
+    "non-public-literals"
+  ],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "PYTHONHASHSEED": "0",
+      "NO_COLOR": "1",
+      "TZ": "UTC",
+      "HOME": "{{home}}",
+      "TMPDIR": "{{home}}/tmp",
+      "HTTP_PROXY": "http://127.0.0.1:1",
+      "HTTPS_PROXY": "http://127.0.0.1:1",
+      "ALL_PROXY": "http://127.0.0.1:1"
+    }
+  },
+  "preconditions": [],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/web-tools/oracle_driver.py"
+      ],
+      "cwd": "profile"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/web-tools/candidate-driver.mjs"
+      ],
+      "cwd": "profile"
+    }
+  },
+  "limits": {
+    "timeoutMs": 60000,
+    "maxOutputBytes": 16777216
+  },
+  "capture": {
+    "tree": {
+      "enabled": false,
+      "root": "profile",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": []
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "oracle",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "value": "{\"rows\": [{\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [\"2130706433\"], \"parserCalls\": 0, \"requestBodies\": [], \"requests\": [], \"result\": {\"error\": \"refusing to fetch a non-public address: 127.0.0.1 (host '2130706433')\", \"url\": \"http://2130706433/\"}}, {\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [\"2130706433\", \"0x7f000001\"], \"parserCalls\": 0, \"requestBodies\": [], \"requests\": [], \"result\": {\"error\": \"refusing to fetch a non-public address: 127.0.0.1 (host '0x7f000001')\", \"url\": \"http://0x7f000001/\"}}, {\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [\"2130706433\", \"0x7f000001\", \"127.1\"], \"parserCalls\": 0, \"requestBodies\": [], \"requests\": [], \"result\": {\"error\": \"refusing to fetch a non-public address: 127.0.0.1 (host '127.1')\", \"url\": \"http://127.1/\"}}, {\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [\"2130706433\", \"0x7f000001\", \"127.1\", \"fe80::1\"], \"parserCalls\": 0, \"requestBodies\": [], \"requests\": [], \"result\": {\"error\": \"refusing to fetch a non-public address: fe80::1 (host 'fe80::1')\", \"url\": \"http://[fe80::1]/\"}}, {\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [\"2130706433\", \"0x7f000001\", \"127.1\", \"fe80::1\", \"::ffff:127.0.0.1\"], \"parserCalls\": 0, \"requestBodies\": [], \"requests\": [], \"result\": {\"error\": \"refusing to fetch a non-public address: ::ffff:127.0.0.1 (host '::ffff:127.0.0.1')\", \"url\": \"http://[::ffff:127.0.0.1]/\"}}, {\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [\"2130706433\", \"0x7f000001\", \"127.1\", \"fe80::1\", \"::ffff:127.0.0.1\", \"10.0.0.5\"], \"parserCalls\": 0, \"requestBodies\": [], \"requests\": [], \"result\": {\"error\": \"refusing to fetch a non-public address: 10.0.0.5 (host '10.0.0.5')\", \"url\": \"http://10.0.0.5:8080/\"}}]}\n"
+    },
+    {
+      "side": "candidate",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "value": "{\"rows\": [{\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [], \"parserCalls\": 0, \"requestBodies\": [], \"requests\": [], \"result\": {\"error\": \"refusing to fetch a non-public address: 127.0.0.1 (host '2130706433')\", \"url\": \"http://2130706433/\"}}, {\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [], \"parserCalls\": 0, \"requestBodies\": [], \"requests\": [], \"result\": {\"error\": \"refusing to fetch a non-public address: 127.0.0.1 (host '0x7f000001')\", \"url\": \"http://0x7f000001/\"}}, {\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [], \"parserCalls\": 0, \"requestBodies\": [], \"requests\": [], \"result\": {\"error\": \"refusing to fetch a non-public address: 127.0.0.1 (host '127.1')\", \"url\": \"http://127.1/\"}}, {\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [], \"parserCalls\": 0, \"requestBodies\": [], \"requests\": [], \"result\": {\"error\": \"refusing to fetch a non-public address: fe80::1 (host 'fe80::1')\", \"url\": \"http://[fe80::1]/\"}}, {\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [], \"parserCalls\": 0, \"requestBodies\": [], \"requests\": [], \"result\": {\"error\": \"refusing to fetch a non-public address: ::ffff:127.0.0.1 (host '::ffff:127.0.0.1')\", \"url\": \"http://[::ffff:127.0.0.1]/\"}}, {\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [], \"parserCalls\": 0, \"requestBodies\": [], \"requests\": [], \"result\": {\"error\": \"refusing to fetch a non-public address: 10.0.0.5 (host '10.0.0.5')\", \"url\": \"http://10.0.0.5:8080/\"}}]}\n"
+    }
+  ],
+  "normalizations": [],
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10",
+    "expectedPackages": {
+      "openai": "3.6.0",
+      "httpx": "0.28.1"
+    }
+  }
+}

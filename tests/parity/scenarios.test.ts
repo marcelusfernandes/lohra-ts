@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { readdirSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import { parseScenarioManifest } from "../../scripts/parity/manifest.js";
@@ -123,5 +125,73 @@ describe("versioned scenarios", () => {
     expect(
       manifest.capture.events.find(({ name: event }) => event === "requestsRaw"),
     ).toMatchObject({ projection: "raw-only" });
+  });
+});
+
+const expectedDivergentT20 = new Set([
+  "t20-port-invalid",
+  "t20-userinfo",
+  "t20-non-public-literals",
+  "t20-literal-public",
+  "t20-redirect-flow",
+  "t20-fetch-bounds",
+  "t20-peer-matrix",
+  "t20-ddg-byte-cap",
+]);
+
+const t20Scenarios = readdirSync(resolve("scripts/parity/manifests/t20"))
+  .filter((name) => name.startsWith("t20-") && name.endsWith(".json"))
+  .map((name) => name.slice(0, -5))
+  .sort();
+
+describe("sprint 05 T20 web tools matrix", () => {
+  it("declares the closed 22-scenario inventory", () => {
+    expect(t20Scenarios).toHaveLength(22);
+    expect(t20Scenarios).toContain("t20-definitions");
+    expect(t20Scenarios).toContain("t20-chat-canned");
+    expect(t20Scenarios).toContain("t20-port-invalid");
+    expect(t20Scenarios).toContain("t20-userinfo");
+    expect(t20Scenarios).toContain("t20-peer-matrix");
+    expect(t20Scenarios).toContain("t20-ddg-byte-cap");
+  });
+
+  it.each(t20Scenarios)("parses %s portably with the pinned oracle guard", (id) => {
+    const path = resolve(`scripts/parity/manifests/t20/${id}.json`);
+    const source = readFileSync(path, "utf8");
+    expect(source).not.toContain("/Users/");
+    const manifest = parseScenarioManifest(JSON.parse(source) as unknown);
+    expect(manifest.id).toBe(id);
+    expect(manifest.expectations.length).toBeGreaterThan(0);
+    expect(manifest.oracleGuard).toMatchObject({
+      expectedCommit: "16b4785d803ad0ca364a8a67346a04f949fbf592",
+      expectedVersion: "lohra 0.0.11\n",
+    });
+  });
+
+  it.each(t20Scenarios.filter((id) => expectedDivergentT20.has(id)))(
+    "pins %s as an expected divergence on both sides",
+    (id) => {
+      const source = JSON.parse(
+        readFileSync(resolve(`scripts/parity/manifests/t20/${id}.json`), "utf8"),
+      ) as {
+        expectations: Array<{ side: string; field: string }>;
+        comparisons: Array<{ field: string }>;
+      };
+      const sides = source.expectations.map((expectation) => expectation.side);
+      expect(sides).toContain("oracle");
+      expect(sides).toContain("candidate");
+      expect(source.comparisons.map(({ field }) => field)).toContain("process.stdout");
+    },
+  );
+
+  it("poisons proxy environment on every T20 scenario", () => {
+    for (const id of t20Scenarios) {
+      const source = JSON.parse(
+        readFileSync(resolve(`scripts/parity/manifests/t20/${id}.json`), "utf8"),
+      ) as { environment: { set: Record<string, string> } };
+      expect(source.environment.set.HTTP_PROXY).toContain("127.0.0.1:1");
+      expect(source.environment.set.HTTPS_PROXY).toContain("127.0.0.1:1");
+      expect(source.environment.set.ALL_PROXY).toContain("127.0.0.1:1");
+    }
   });
 });

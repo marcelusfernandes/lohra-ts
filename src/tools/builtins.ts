@@ -2,6 +2,7 @@ import { BUILTIN_DEFINITIONS } from "./builtin-definitions.js";
 import { toolError } from "./envelope.js";
 import { readFileTool, writeFileTool } from "./filesystem.js";
 import { registry, ToolRegistry } from "./registry.js";
+import { webFetchHandler, webSearchHandler } from "../web/tool.js";
 import { terminalTool } from "./terminal.js";
 import type { ToolHandler } from "./types.js";
 
@@ -47,9 +48,8 @@ function handler(name: string): ToolHandler {
   if (name === "read_file") return readFileTool;
   if (name === "write_file") return writeFileTool;
   if (name === "terminal") return terminalTool;
-  if (name === "web_fetch" || name === "web_search") {
-    return failSafe(`${name} is deferred to T20`);
-  }
+  if (name === "web_fetch") return webFetchHandler;
+  if (name === "web_search") return webSearchHandler;
   const intercepted = FAIL_SAFE_HANDLERS[name];
   if (intercepted === undefined) return failSafe(`no local handler registered for ${name}`);
   return intercepted;
