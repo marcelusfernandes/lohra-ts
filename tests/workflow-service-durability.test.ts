@@ -657,50 +657,77 @@ describe("workflow service — leaf capability sandbox", () => {
       const locks = new LockRepository(connection.database);
       const ownership = { fence: 0 as number, holder: "test", now: 1000 };
       const tracker = new TaintTracker();
+      const seen: string[] = [];
+      const results: { step: string; out: string }[] = [];
+      const running: { service: WorkflowService | null } = { service: null };
+      let runId = "";
+      // A leaf asks for its dispatch WHILE the stretch is live — that is when
+      // real leaves run, and it is the only place the acquisition's policy,
+      // working root and taint are the live ones.
+      const runtime: ChildRuntime = {
+        spawn(): string {
+          const owner = running.service;
+          if (owner !== null && results.length === 0) {
+            const dispatch = owner.leafToolDispatch(runId, (name) => { seen.push(name); return "OK"; });
+            const workingRoot = owner.workingRootFor(runId);
+            mkdirSync(workingRoot, { recursive: true });
+            const step = (label: string, out: string): void => { results.push({ step: label, out }); };
+            step("inside-working-root", dispatch("write_file", { path: join(workingRoot, "note.txt") }));
+            step("outside-every-root", dispatch("read_file", { path: join(root, "elsewhere.txt") }));
+            step("ro-root-read", dispatch("read_file", { path: join(readOnlyRoot, "a.txt") }));
+            step("ro-root-write", dispatch("write_file", { path: join(readOnlyRoot, "a.txt") }));
+            step("egress-denied", dispatch("web_fetch", { url: "https://evil.example.com/x" }));
+            step("taint-before", String(tracker.tainted));
+            step("egress-allowed", dispatch("web_fetch", { url: "https://DOCS.example.com/x" }));
+            step("taint-after", String(tracker.tainted));
+            step("tainted-fs", dispatch("read_file", { path: join(readOnlyRoot, "a.txt") }));
+            step("tainted-egress", dispatch("web_fetch", { url: "https://docs.example.com/x" }));
+          }
+          return "leaf-1";
+        },
+        collect: (): ChildResult => ({
+          status: "complete",
+          output: { answer: "ok" },
+          usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+        }),
+        steer: () => undefined,
+        cancel: () => undefined,
+      };
       const service = new WorkflowService({
-        runtime: runtimeStub(),
+        runtime,
         policyPath: path,
         taintTracker: tracker,
         homeRoot: root,
         store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
       });
+      running.service = service;
       // a spec that TRIES to widen its own capability changes nothing
       const started = service.start({
         meta: { name: "durable", fs_allow: ["/"], egress_allow: ["*"] },
         nodes: [{ id: "a", type: "agent", prompt: "do it" }],
       });
       if ("error" in started) throw new Error(started.error);
+      runId = started.run_id;
       await service.status(started.run_id, true);
-      const seen: string[] = [];
-      const dispatch = service.leafToolDispatch(started.run_id, (name) => { seen.push(name); return "OK"; });
-      const workingRoot = service.workingRootFor(started.run_id);
-      mkdirSync(workingRoot, { recursive: true });
-      // inside the run's own scratch root: allowed
-      expect(dispatch("write_file", { path: join(workingRoot, "note.txt") })).toBe("OK");
-      // outside every root: exact denial
-      expect(dispatch("read_file", { path: join(root, "elsewhere.txt") })).toBe(
-        "ERROR: path is outside the workflow working scope (sandbox denied)",
-      );
-      // under a read-only operator root: read ok, write refused with its own text
-      expect(dispatch("read_file", { path: join(readOnlyRoot, "a.txt") })).toBe("OK");
-      expect(dispatch("write_file", { path: join(readOnlyRoot, "a.txt") })).toBe(
-        "ERROR: path is under a read-only workflow root (sandbox denied the write)",
-      );
-      // egress: exact host match only
-      expect(dispatch("web_fetch", { url: "https://evil.example.com/x" })).toBe(
-        "ERROR: host is not in the workflow egress allowlist (sandbox denied)",
-      );
-      expect(tracker.tainted).toBe(false);
-      // the allowed fetch runs AND taints the session
-      expect(dispatch("web_fetch", { url: "https://DOCS.example.com/x" })).toBe("OK");
-      expect(tracker.tainted).toBe(true);
-      // taint is live inside the same stretch: fs and egress both close
-      expect(dispatch("read_file", { path: join(readOnlyRoot, "a.txt") })).toBe(
-        "ERROR: tainted run: filesystem access is disabled for leaves",
-      );
-      expect(dispatch("web_fetch", { url: "https://docs.example.com/x" })).toBe(
-        "ERROR: tainted run: web egress is disabled for leaves",
-      );
+      expect(results).toEqual([
+        // inside the run's own scratch root: allowed
+        { step: "inside-working-root", out: "OK" },
+        // outside every root: exact denial, and the SPEC's fs_allow ["/"] did
+        // not widen it — the policy is the operator file, only
+        { step: "outside-every-root", out: "ERROR: path is outside the workflow working scope (sandbox denied)" },
+        // under a read-only operator root: read ok, write refused with its own text
+        { step: "ro-root-read", out: "OK" },
+        { step: "ro-root-write", out: "ERROR: path is under a read-only workflow root (sandbox denied the write)" },
+        // egress: exact host match only; the spec's "*" widened nothing
+        { step: "egress-denied", out: "ERROR: host is not in the workflow egress allowlist (sandbox denied)" },
+        { step: "taint-before", out: "false" },
+        // the allowed fetch runs AND taints the session
+        { step: "egress-allowed", out: "OK" },
+        { step: "taint-after", out: "true" },
+        // taint is live inside the SAME stretch: fs and egress both close
+        { step: "tainted-fs", out: "ERROR: tainted run: filesystem access is disabled for leaves" },
+        { step: "tainted-egress", out: "ERROR: tainted run: web egress is disabled for leaves" },
+      ]);
       // a denied call never reached the base dispatch
       expect(seen).toEqual(["write_file", "read_file", "web_fetch"]);
       connection.close();

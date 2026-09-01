@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -23,6 +23,13 @@ function workspace(): string {
   const root = mkdtempSync(join(tmpdir(), "lohra-sandbox-"));
   roots.push(root);
   return root;
+}
+
+/** A working root that is ALREADY its own real path, so a test about resolving
+ * the TARGET is not accidentally satisfied by the root resolving too (macOS
+ * hands out /var/folders/..., a symlink to /private/var/folders/...). */
+function realWorkspace(): string {
+  return realpathSync(workspace());
 }
 
 const base: ToolDispatchLike = (name, args) => `allowed:${name}:${JSON.stringify(args)}`;
@@ -80,8 +87,8 @@ describe("sandboxDispatch — fs", () => {
   });
 
   it("resolves symlinks via realpath: an escape through a link is refused", () => {
-    const root = workspace();
-    const outside = mkdtempSync(join(tmpdir(), "lohra-outside-"));
+    const root = realWorkspace();
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), "lohra-outside-")));
     roots.push(outside);
     const secret = join(outside, "secret.txt");
     writeFileSync(secret, "s");
