@@ -51,10 +51,16 @@ const mutants: readonly Mutant[] = [
   },
   {
     id: "acquire-advances-fence-on-loser",
-    mechanism: "the losing acquirer also bumps the fence (monotonicity broken)",
-    edits: [{ file: locks, before: `      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== "EEXIST") throw error;`, after: `      const code = (error as NodeJS.ErrnoException).code;
-      void code;` }],
+    mechanism: "fence bump leaks outside the winning transaction (loser advances it)",
+    edits: [{ file: locks, before: `          this.database
+            .prepare("UPDATE workflow_run_fence SET fence = fence + 1, updated_at = ? WHERE run_id = ?")
+            .run(now, runId);`, after: `          try {
+            this.database
+              .prepare("UPDATE workflow_run_fence SET fence = fence + 1, updated_at = ? WHERE run_id = ?")
+              .run(now, runId);
+          } catch {
+            // mutant: bump swallowed but acquisition reports failure later
+          }` }],
   },
   {
     id: "release-deletes-fence-row",
