@@ -50,7 +50,7 @@ function config(name: string): MCPServerConfig {
 const results: ScenarioResult[] = [];
 
 results.push(
-  await scenario("t19-shadow-deregister-orphan", [15, 16], "process-ts supporting", () => {
+  await scenario("t19-shadow-deregister-orphan", [15, 16, 22], "process-ts supporting", () => {
     const registry = new ToolRegistry();
     const tool = [{ name: "search", description: "d", inputSchema: { type: "object" } }];
     registerServerTools(registry, "github.com", tool, () => ({ content: [], isError: false }));
@@ -63,20 +63,36 @@ results.push(
     const afterLoserDeregister = registry.namesInToolset("mcp-github_com");
     deregisterServer(registry, "github_com");
     const afterWinnerDeregister = registry.namesInToolset("mcp-github_com");
+
+    const rawToolsetRegistry = new ToolRegistry();
+    registerServerTools(
+      rawToolsetRegistry,
+      "My Server!",
+      [{ name: "Weird-Name!", description: "raw toolset proof" }],
+      () => ({ content: [], isError: false }),
+    );
+    const rawToolsetProof = {
+      raw: rawToolsetRegistry.namesInToolset("mcp-My Server!"),
+      sanitized: rawToolsetRegistry.namesInToolset("mcp-my_server"),
+    };
     return {
       pass:
         before.loser.length === 0 &&
         JSON.stringify(before.winner) === JSON.stringify(["mcp_github_com_search"]) &&
         JSON.stringify(afterLoserDeregister) === JSON.stringify(["mcp_github_com_search"]) &&
-        afterWinnerDeregister.length === 0,
+        afterWinnerDeregister.length === 0 &&
+        JSON.stringify(rawToolsetProof.raw) === JSON.stringify(["mcp_my_server_weird_name"]) &&
+        rawToolsetProof.sanitized.length === 0,
       projection: {
         before,
         afterLoserDeregister,
         afterWinnerDeregister,
+        rawToolsetProof,
         publicOwnerProof: "t19-cross-server-shadow-last-wins",
+        publicNamingProof: "t19-naming-sanitization",
         debtClosed: false,
       },
-      note: "Lifecycle consequence is supporting process evidence; public last-wins ownership is exercised in the linked chat-bilateral scenario.",
+      note: "Lifecycle and raw-toolset consequences are supporting process evidence; public ownership/name sanitization are exercised in the linked chat-bilateral scenarios.",
     };
   }),
 );
@@ -115,8 +131,16 @@ results.push(
     const searched = spawnSync("rg", ["-n", "\\.refresh\\(", "src", "--glob", "*.ts"], {
       cwd: root,
       encoding: "utf8",
-      env: { PATH: "/usr/bin:/bin" },
+      env: { PATH: process.env.PATH ?? "/usr/bin:/bin" },
     });
+    if (searched.error !== undefined) {
+      throw new Error(`T19_STATIC_SCAN_FAILED:${searched.error.message}`);
+    }
+    if (searched.status !== 0 && searched.status !== 1) {
+      throw new Error(
+        `T19_STATIC_SCAN_FAILED:exit=${String(searched.status)}:stderr=${searched.stderr}`,
+      );
+    }
     const matches = searched.stdout.split("\n").filter(Boolean);
     return {
       pass: searched.status === 1 && matches.length === 0,
