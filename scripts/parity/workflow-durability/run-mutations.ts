@@ -129,8 +129,8 @@ const mutants: readonly Mutant[] = [
     id: "terminal-write-after-release",
     mechanism: "terminal line is persisted after the lease is released",
     edits: [{ file: service,
-      before: "        this.persistSpend(store, runId, effectiveBudget, seeded, engine, stretchOwnership);\n        // The heartbeat stops FIRST; a tick that outlived the release would put\n        // the lease back and leave the run looking alive with nobody in it.\n        this.heartbeat?.stop(runId);",
-      after: "        this.persistSpend(store, runId, effectiveBudget, seeded, engine, stretchOwnership);\n        // The heartbeat stops FIRST; a tick that outlived the release would put\n        // the lease back and leave the run looking alive with nobody in it.\n        store.locks.releaseRunLease(runId, store.holder);\n        this.heartbeat?.stop(runId);" }],
+      before: "        this.persistSpend(store, runId, effectiveBudget, seeded, engine, stretchOwnership);\n        // The heartbeat stops FIRST; a tick that outlived the release would put\n        // the lease back and leave the run looking alive with nobody in it.\n        this.heartbeat?.stop(runId);\n        store.locks.releaseRunLease(runId, store.holder);",
+      after: "        // MUTANT: the ledger write happens AFTER the lease is released.\n        this.heartbeat?.stop(runId);\n        store.locks.releaseRunLease(runId, store.holder);\n        this.persistSpend(store, runId, effectiveBudget, seeded, engine, stretchOwnership);" }],
   },
   {
     id: "ownership-lost-publishes-success",
