@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ConversationCancelledError,
   ConversationRuntime,
+  ConversationTurnFailedError,
   IncompleteToolCallError,
   MaxIterationsError,
   UnexpectedToolCallError,
@@ -328,9 +329,25 @@ describe("ConversationRuntime", () => {
     ).toBe(true);
   });
 
-  it("observes cancellation and always closes transport", async () => {
+  // The loop classifies a failure ENTIRELY by the error the call itself
+  // raised — it never asks "was the signal aborted?" here, matching the
+  // oracle's own loop.py (interrupt is checked only before issuing the next
+  // call; the except block around the provider call classifies purely by
+  // the caught exception). This matters specifically for a transport that
+  // consumes the signal for real mid-flight cancellation (the non-streaming
+  // path): the resulting error is a genuine abort, but it is still just
+  // ANOTHER turn failure here — never reclassified into
+  // ConversationCancelledError after the fact. Cancellation is exclusively
+  // a pre-iteration, call-never-issued signal (see the next test); a call
+  // that was already issued and then failed — for any reason, including a
+  // real abort a consuming transport honored — is a turn failure. Getting
+  // this wrong previously meant every child failure during orchestration
+  // teardown (which unconditionally aborts every child before awaiting any
+  // of them) silently lost its real cause and reported as "interrupted".
+  it("classifies a mid-flight failure from an abort-consuming transport as a turn failure, not a cancellation, and always closes transport", async () => {
     const repository = new MemoryRepository();
     let observed = false;
+    let closes = 0;
     const transport: ModelTransport = {
       complete: ({ signal }) =>
         new Promise((_, reject) => {
@@ -338,12 +355,17 @@ describe("ConversationRuntime", () => {
             "abort",
             () => {
               observed = true;
-              reject(signal.reason instanceof Error ? signal.reason : new Error("ABORTED"));
+              const abortError = new Error("The operation was aborted");
+              abortError.name = "AbortError";
+              reject(abortError);
             },
             { once: true },
           );
         }),
-      close: () => Promise.resolve(),
+      close: () => {
+        closes += 1;
+        return Promise.resolve();
+      },
     };
     const runtime = new ConversationRuntime({
       repository,
@@ -361,9 +383,52 @@ describe("ConversationRuntime", () => {
       signal: controller.signal,
     });
     controller.abort();
-    await expect(turn).rejects.toBeInstanceOf(ConversationCancelledError);
+    await expect(turn).rejects.toBeInstanceOf(ConversationTurnFailedError);
+    await expect(turn).rejects.toThrow(/aborted/);
     expect(observed).toBe(true);
     expect(repository.commits).toEqual([]);
+    expect(closes).toBe(1);
+  });
+
+  it("throws ConversationCancelledError before issuing the next call when the signal is already aborted — the call is never made", async () => {
+    const repository = new MemoryRepository();
+    let calls = 0;
+    const transport = new QueueTransport([
+      response({ content: null, finishReason: "tool_calls", toolCalls: [{ id: "c1", name: "noop", arguments: "{}", providerData: null }] }),
+    ]);
+    const wrapped: ModelTransport = {
+      complete: (request) => {
+        calls += 1;
+        return transport.complete(request);
+      },
+      close: () => transport.close(),
+    };
+    const controller = new AbortController();
+    const runtime = new ConversationRuntime({
+      repository,
+      transport: wrapped,
+      promptSnapshot: () => "p",
+      idSource: () => "s",
+      clock: () => 1,
+      toolDispatcher: {
+        dispatch: () => {
+          controller.abort();
+          return Promise.resolve({ role: "tool", content: "ok" });
+        },
+      },
+    });
+    const turn = runtime.runTurn({
+      input: "x",
+      provider: "ollama",
+      model: "m",
+      cwd: "/tmp",
+      signal: controller.signal,
+    });
+    await expect(turn).rejects.toBeInstanceOf(ConversationCancelledError);
+    // The tool call's own iteration's request went out (calls === 1); the
+    // SECOND iteration's request — checked for abort before being built —
+    // must never be issued.
+    expect(calls).toBe(1);
   });
 
   it("records normalized usage but no messages for an incomplete tool call", async () => {

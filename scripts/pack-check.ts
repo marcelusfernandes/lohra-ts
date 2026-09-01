@@ -153,6 +153,9 @@ try {
         ],
       },
     ],
+    laneSteps: {},
+    laneStepIndex: new Map(),
+    latches: new Map(),
     posts: 0,
     requests: 0,
   };

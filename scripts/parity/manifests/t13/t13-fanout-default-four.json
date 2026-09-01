@@ -1,0 +1,377 @@
+{
+  "schemaVersion": 1,
+  "id": "t13-fanout-default-four",
+  "description": "T13 round-2 bilateral fan-out matrix (default -> 4), closing contract assertion 24/F4. This is a deterministic exact-concurrency proof, not a startup-warning proxy: 4 blocker children are spawned one at a time, and each next spawn is withheld by the harness until the previous child has reached its gated first request. Child 5 is then spawned and steered while the first 4 slots are occupied. If effective concurrency is below 4, the next blocker never arrives and the scenario times out; if it is above 4, child 5 starts before steer and its first request lacks the asserted system-reminder. Only exactly 4 satisfies both halves. No sleep, ambient credentials, or external egress.",
+  "argv": [
+    "chat",
+    "SCEN:parent t13-fanout-default-four",
+    "--json",
+    "--provider",
+    "ollama",
+    "--model",
+    "stub-coder:1b"
+  ],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "PYTHONHASHSEED": "0",
+      "NO_COLOR": "1",
+      "LOHRA_NO_WIZARD": "1",
+      "COLUMNS": "80",
+      "TZ": "UTC",
+      "HOME": "{{home}}",
+      "LOHRA_HOME": "{{home}}/.lohra",
+      "CODEX_HOME": "{{home}}/codex",
+      "TMPDIR": "{{home}}/tmp"
+    }
+  },
+  "preconditions": [
+    {
+      "kind": "tcp-port-closed",
+      "host": "127.0.0.1",
+      "port": 11434
+    }
+  ],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/conversation/oracle_driver.py",
+        "single"
+      ],
+      "cwd": "profile"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/conversation/candidate-driver.mjs",
+        "single"
+      ],
+      "cwd": "profile"
+    }
+  },
+  "limits": {
+    "timeoutMs": 60000,
+    "maxOutputBytes": 16777216
+  },
+  "capture": {
+    "tree": {
+      "enabled": false,
+      "root": "home",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": [
+      {
+        "name": "requests",
+        "root": "profile",
+        "path": "stub-requests.jsonl",
+        "format": "jsonl"
+      },
+      {
+        "name": "summary",
+        "root": "profile",
+        "path": "stub-summary.json",
+        "format": "json"
+      },
+      {
+        "name": "assertions",
+        "root": "profile",
+        "path": "stub-assertions.json",
+        "format": "json"
+      }
+    ]
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    },
+    {
+      "class": "byte",
+      "field": "process.stderr"
+    },
+    {
+      "class": "stub",
+      "field": "events.summary"
+    },
+    {
+      "class": "stub",
+      "field": "events.assertions"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/completed",
+      "value": true
+    },
+    {
+      "side": "both",
+      "field": "events.assertions",
+      "value": {
+        "exists": true,
+        "records": {
+          "valid": true,
+          "failures": []
+        }
+      }
+    },
+    {
+      "side": "both",
+      "field": "events.summary",
+      "value": {
+        "exists": true,
+        "records": {
+          "gets": 0,
+          "posts": 13,
+          "sequence": [
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions"
+          ]
+        }
+      }
+    },
+    {
+      "side": "both",
+      "field": "events.requests",
+      "pointer": "/records/11/body/messages/2",
+      "value": {
+        "role": "user",
+        "content": "<system-reminder>\nqueued-at-4\n</system-reminder>"
+      }
+    }
+  ],
+  "normalizations": [
+    {
+      "field": "process.stdout",
+      "kind": "replace-json-pointer",
+      "pointer": "/session_id",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stdout",
+      "kind": "replace-regex",
+      "pattern": "[0-9a-f]{32}",
+      "replacement": "<SUB_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=session: )[0-9a-f]{32}(?=  \\(resume with --session )",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=--session )[0-9a-f]{32}(?=\\))",
+      "replacement": "<SESSION_ID>"
+    }
+  ],
+  "stub": {
+    "state": "up-with-models",
+    "fixture": "chat-lane-script",
+    "requestLog": {
+      "comparedHeaders": [
+        "authorization",
+        "accept",
+        "content-type",
+        "host",
+        "x-stainless-retry-count"
+      ],
+      "excludedHeaders": [
+        "accept-encoding",
+        "connection",
+        "content-length",
+        "user-agent",
+        "x-stainless-lang",
+        "x-stainless-package-version",
+        "x-stainless-os",
+        "x-stainless-arch",
+        "x-stainless-runtime",
+        "x-stainless-runtime-version",
+        "x-stainless-async",
+        "x-stainless-read-timeout"
+      ]
+    },
+    "laneSteps": {
+      "kid1": [
+        {
+          "kind": "text",
+          "content": "KID1-DONE",
+          "signal": "kid1-arrived",
+          "gate": "release-blockers"
+        }
+      ],
+      "kid2": [
+        {
+          "kind": "text",
+          "content": "KID2-DONE",
+          "signal": "kid2-arrived",
+          "gate": "release-blockers"
+        }
+      ],
+      "kid3": [
+        {
+          "kind": "text",
+          "content": "KID3-DONE",
+          "signal": "kid3-arrived",
+          "gate": "release-blockers"
+        }
+      ],
+      "kid4": [
+        {
+          "kind": "text",
+          "content": "KID4-DONE",
+          "signal": "kid4-arrived",
+          "gate": "release-blockers"
+        }
+      ],
+      "kid5": [
+        {
+          "kind": "text",
+          "content": "KID5-DONE"
+        }
+      ],
+      "parent": [
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"SCEN:kid1 do it\"}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"SCEN:kid2 do it\"}"
+            }
+          ],
+          "awaitSignal": "kid1-arrived"
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"SCEN:kid3 do it\"}"
+            }
+          ],
+          "awaitSignal": "kid2-arrived"
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"SCEN:kid4 do it\"}"
+            }
+          ],
+          "awaitSignal": "kid3-arrived"
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"SCEN:kid5 do it\"}"
+            }
+          ],
+          "awaitSignal": "kid4-arrived"
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "steer_session",
+              "argumentsRaw": "{\"sub_id\":\"__SUB5__\",\"text\":\"queued-at-4\"}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "openGate": "release-blockers",
+          "calls": [
+            {
+              "name": "collect_session",
+              "argumentsRaw": "{\"sub_id\":\"__SUB1__\",\"wait\":true}"
+            },
+            {
+              "name": "collect_session",
+              "argumentsRaw": "{\"sub_id\":\"__SUB2__\",\"wait\":true}"
+            },
+            {
+              "name": "collect_session",
+              "argumentsRaw": "{\"sub_id\":\"__SUB3__\",\"wait\":true}"
+            },
+            {
+              "name": "collect_session",
+              "argumentsRaw": "{\"sub_id\":\"__SUB4__\",\"wait\":true}"
+            },
+            {
+              "name": "collect_session",
+              "argumentsRaw": "{\"sub_id\":\"__SUB5__\",\"wait\":true}"
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "content": "PARENT-DONE"
+        }
+      ]
+    }
+  },
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10",
+    "expectedPackages": {
+      "openai": "3.6.0",
+      "httpx": "0.28.1"
+    }
+  }
+}

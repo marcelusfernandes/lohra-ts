@@ -18,6 +18,7 @@ import { runDoctor } from "./doctor/index.js";
 import type { OllamaStatus } from "./doctor/model.js";
 import { buildEnvironment, probeOllamaDown } from "./doctor/snapshot.js";
 import { pythonJsonDumps } from "./serialization/python-json.js";
+import { pythonInt } from "./orchestration/limits.js";
 import { runProfile } from "./onboarding/profiles.js";
 import {
   Prompter,
@@ -85,6 +86,23 @@ function profileArgument(args: readonly string[]): string | undefined {
   return index < 0 ? undefined : args[index + 1];
 }
 
+function chatUsage(): string {
+  return `usage: lohra chat [-h] [--profile PROFILE] [--no-input] [--model MODEL]
+                  [--provider PROVIDER] [--session SESSION] [--no-tools]
+                  [--yolo] [--json] [--max-parallel MAX_PARALLEL]
+                  [--max-iterations MAX_ITERATIONS]
+                  prompt
+`;
+}
+
+function invalidChatMaxParallel(args: readonly string[]): string | null {
+  const index = args.indexOf("--max-parallel");
+  if (index < 0) return null;
+  const raw = args[index + 1];
+  if (raw === undefined || pythonInt(raw) !== null) return null;
+  return `${chatUsage()}lohra chat: error: argument --max-parallel: invalid int value: '${raw}'\n`;
+}
+
 export async function runCli(argv: readonly string[], supplied?: CliIo): Promise<number> {
   const io = supplied ?? defaultIo();
   if (argv[0] === "--version") {
@@ -121,6 +139,14 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
       io.stderr(invalidOrder(command));
     }
     return 2;
+  }
+
+  if (command === "chat") {
+    const invalidMaxParallel = invalidChatMaxParallel(argv);
+    if (invalidMaxParallel !== null) {
+      io.stderr(invalidMaxParallel);
+      return 2;
+    }
   }
 
   const json = argv.includes("--json");
