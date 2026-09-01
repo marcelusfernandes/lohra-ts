@@ -122,6 +122,8 @@ describe("workflow service durability", () => {
     const line = repository.getRunState(started.run_id);
     expect(line).not.toBeNull();
     expect((line as Record<string, unknown>).status).toBe("complete");
+    // the run-level ledger landed BEFORE the lease was released
+    expect(repository.getRunSpend(started.run_id)).not.toBeNull();
     close();
   });
 
@@ -197,6 +199,47 @@ describe("workflow service durability", () => {
     const payload = JSON.parse(String(line.pause_payload_json)) as { checkpoint: Record<string, unknown> };
     expect(payload.checkpoint).toMatchObject({ node_id: "cp1" });
     close();
+  });
+
+  it("seeds spend only AFTER acquiring the lease (seed read refused while busy)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-service-durability-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      const repository = new WorkflowRepository(connection.database);
+      const locks = new LockRepository(connection.database);
+      const ownership = { fence: 0 as number, holder: "test", now: 1000 };
+      let seedReads = 0;
+      const proxy = new Proxy(repository, {
+        get(target, prop, receiver) {
+          if (prop === "getRunSpend") {
+            return (...args: unknown[]) => {
+              seedReads += 1;
+              return (target.getRunSpend as (...a: unknown[]) => unknown)(...args);
+            };
+          }
+          return Reflect.get(target, prop, receiver);
+        },
+      });
+      const service = new WorkflowService({
+        runtime: runtimeStub(),
+        store: { repository: proxy as WorkflowRepository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership },
+      });
+      // foreign lease live: the start must fail busy WITHOUT any seed read
+      locks.acquireRunLease("seed-order-run", "foreign", 1000, 900);
+      repository.putRunState("seed-order-run", {
+        name: "s", owner: "foreign", status: "running", pauseReason: null,
+        pausePayloadJson: null, specJson: JSON.stringify(spec()), argsJson: "{}",
+        tokenBudget: null, tainted: false, progressJson: null, auditSegmentId: null,
+        updatedAt: 1000, fence: 1, holder: "foreign", now: 1000,
+      });
+      const out = service.start(spec(), {}, { resumeRunId: "seed-order-run" });
+      expect(out).toHaveProperty("error");
+      expect((out as { error: string }).error).toContain("is being resumed by another process");
+      expect(seedReads).toBe(0);
+    } finally {
+      connection.close();
+    }
   });
 
   it("runAndWait resolves bounded with the errata envelope when the terminal write loses ownership", async () => {

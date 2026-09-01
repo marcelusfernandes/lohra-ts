@@ -168,11 +168,13 @@ describe("AutoResumeScheduler", () => {
         tokenBudget: null, tainted: false, progressJson: null, auditSegmentId: null,
         updatedAt: 1000, fence, holder: "p1", now: 1000,
       });
+      const fenceB = locks.acquireRunLease("b-run", "p1", 1000, 60);
+      if (fenceB === null) throw new Error("lease b");
       repository.putRunState("b-run", {
         name: "b", owner: "p1", status: "paused", pauseReason: "token_budget_exhausted",
         pausePayloadJson: JSON.stringify({ attempts: 0 }), specJson: null, argsJson: "{}",
         tokenBudget: null, tainted: false, progressJson: null, auditSegmentId: null,
-        updatedAt: 1000, fence, holder: "p1", now: 1000,
+        updatedAt: 1000, fence: fenceB, holder: "p1", now: 1000,
       });
       const { factory } = timerFactory();
       const scheduler = new AutoResumeScheduler(() => ({ run_id: "x", status: "started" }), {
