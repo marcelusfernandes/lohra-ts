@@ -46,15 +46,17 @@ const sandbox = "src/workflow/sandbox.ts";
 const mutants: readonly Mutant[] = [
   {
     id: "state-fence-guard-removed",
-    mechanism: "state write accepts any fence (exact-equality guard dropped)",
-    edits: [{ file: repository, before: `const unleased = fields.requireUnleased === true;`, after: `const unleased = fields.requireUnleased === true; const ALWAYS_UNFENCED = true;` }],
+    mechanism: "owned state write skips the ownership guard entirely",
+    edits: [{ file: repository,
+      before: "    const guarded = `${sql}\n       FROM (SELECT 1 AS dual)\n       JOIN workflow_run_fence f ON f.run_id = ? AND f.fence = ?\n       JOIN workflow_run_locks l ON l.run_id = ? AND l.holder = ?\n         AND l.expires_at > ?`;",
+      after: "    const guarded = `${sql}`;" }],
   },
   {
     id: "acquire-advances-fence-on-loser",
     mechanism: "fence bump leaks outside the winning transaction (loser advances it)",
     edits: [{ file: locks,
-      before: "          this.database\n            .prepare(\n              \"UPDATE workflow_run_fence SET fence = fence + 1, updated_at = ? WHERE run_id = ?\",\n            )\n            .run(now, runId);",
-      after: "          try {\n            this.database\n              .prepare(\n                \"UPDATE workflow_run_fence SET fence = fence + 1, updated_at = ? WHERE run_id = ?\",\n              )\n              .run(now, runId);\n          } catch {\n            // mutant: bump swallowed\n          }" }],
+      before: "          this.database\n            .prepare(\n              \"UPDATE workflow_run_fence SET fence = fence + 1, updated_at = ? WHERE run_id = ?\",\n            )\n            .run(now, runId);\n          const row = this.database\n            .prepare(\"SELECT fence FROM workflow_run_fence WHERE run_id = ?\")\n            .get(runId) as { readonly fence: bigint };",
+      after: "          const row = this.database\n            .prepare(\"SELECT fence FROM workflow_run_fence WHERE run_id = ?\")\n            .get(runId) as { readonly fence: bigint };\n          this.database\n            .prepare(\n              \"UPDATE workflow_run_fence SET fence = fence + 1, updated_at = ?\",\n            )\n            .run(now);" }],
   },
   {
     id: "release-deletes-fence-row",
@@ -119,11 +121,9 @@ const mutants: readonly Mutant[] = [
   {
     id: "spec-widens-policy",
     mechanism: "spec-supplied fs_allow widens the operator capability",
-    edits: [{ file: sandbox, before: `export function loadPolicy(path: string): WorkflowPolicy {
-  try {`,
-      after: `export function loadPolicy(path: string, specAllow?: readonly string[]): WorkflowPolicy {
-    if (specAllow !== undefined) return { fsAllow: specAllow.map((entry) => ({ path: entry, writable: true })), egressAllow: [] };
-  try {` }],
+    edits: [{ file: sandbox,
+      before: "    if (!existsSync(path)) return { fsAllow: [], egressAllow: [] };",
+      after: "    if (!existsSync(path)) return { fsAllow: [{ path: \"/\", writable: true }], egressAllow: [\"*\"] };" }],
   },
   {
     id: "terminal-write-after-release",
