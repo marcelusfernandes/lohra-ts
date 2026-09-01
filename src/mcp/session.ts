@@ -1,4 +1,5 @@
 import type { MCPServerConfig } from "./config.js";
+import { pythonRepr } from "../serialization/python-repr.js";
 
 /**
  * Async view of a connected MCP server. TS needs no Python-style
@@ -44,14 +45,21 @@ export interface ConnectSessionOptions {
   readonly http?: (config: MCPServerConfig) => Promise<MCPSession>;
 }
 
-/** Route a config to the connector for its transport (stdio or http). */
+/** Route a config to the connector for its transport and reject unknown
+ * runtime values explicitly, mirroring the oracle instead of falling through
+ * to HTTP when an untyped caller constructs a config by hand. */
 export function connectSession(
   config: MCPServerConfig,
   options: ConnectSessionOptions = {},
 ): Promise<MCPSession> {
   const stdio = options.stdio ?? connectStdioSession;
   const http = options.http ?? connectHttpSession;
-  return config.transport === "stdio" ? stdio(config) : http(config);
+  const transport: unknown = config.transport;
+  if (transport === "stdio") return stdio(config);
+  if (transport === "http") return http(config);
+  return Promise.reject(
+    new Error(`MCP transport ${pythonRepr(transport)} not supported`),
+  );
 }
 
 /**

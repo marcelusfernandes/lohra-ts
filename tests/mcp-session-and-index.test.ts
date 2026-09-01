@@ -46,6 +46,25 @@ describe("session connectors -- the mcp SDK is absent in this environment (M1)",
     expect(stdioCalls).toEqual([stdioConfig]);
     expect(httpCalls).toEqual([httpConfig]);
   });
+
+  it("connectSession rejects an unknown runtime transport instead of routing it to HTTP", async () => {
+    const invalid = {
+      name: "bad",
+      transport: "websocket",
+      args: [],
+      env: {},
+    } as unknown as MCPServerConfig;
+    const httpCalls: MCPServerConfig[] = [];
+    await expect(
+      connectSession(invalid, {
+        http: (config) => {
+          httpCalls.push(config);
+          return Promise.reject(new Error("must not run"));
+        },
+      }),
+    ).rejects.toThrow("MCP transport 'websocket' not supported");
+    expect(httpCalls).toEqual([]);
+  });
 });
 
 describe("registerConfiguredMcpServers -- best-effort entrypoint", () => {

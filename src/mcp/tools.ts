@@ -1,6 +1,9 @@
 import { pythonRepr } from "../serialization/python-repr.js";
 import { toolError, toolResult } from "../tools/envelope.js";
-import type { ToolRegistry } from "../tools/registry.js";
+import {
+  ToolRegistrationCollisionError,
+  type ToolRegistry,
+} from "../tools/registry.js";
 import type { ToolFunctionSchema, ToolHandler } from "../tools/types.js";
 
 const EMPTY_SCHEMA: Readonly<Record<string, unknown>> = Object.freeze({
@@ -104,7 +107,8 @@ export function registerServerTools(
         handler: makeHandler(callTool, original),
         emoji: "🔌",
       });
-    } catch {
+    } catch (error) {
+      if (!(error instanceof ToolRegistrationCollisionError)) throw error;
       warn(`MCP tool ${pythonRepr(original)} shadows an existing ${pythonRepr(name)} — skipped`);
       continue;
     }

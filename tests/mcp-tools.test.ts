@@ -146,6 +146,23 @@ describe("registerServerTools / deregisterServer", () => {
     expect(registry.namesInToolset("builtin")).toEqual(["mcp_fix_file"]);
   });
 
+  it("does not relabel an unexpected registry failure as a shadow warning", () => {
+    class ExplodingRegistry extends ToolRegistry {
+      override register(): void {
+        throw new RangeError("structured clone exploded");
+      }
+    }
+
+    expect(() =>
+      registerServerTools(
+        new ExplodingRegistry(),
+        "fix",
+        [{ name: "echo", description: "d" }],
+        () => ({}),
+      ),
+    ).toThrow(new RangeError("structured clone exploded"));
+  });
+
   it("cross-server MCP collision: silent last-wins overwrite, no warning, loser's deregister removes nothing (M4/M4-bis)", () => {
     const registry = new ToolRegistry();
     const stderr: string[] = [];
