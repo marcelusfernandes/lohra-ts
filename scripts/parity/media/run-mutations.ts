@@ -3,6 +3,7 @@ import {
   chmodSync,
   cpSync,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -269,8 +270,8 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
         },
         {
           file: "media/persistence.ts",
-          from: "for (const entry of owned) {",
-          to: "for (const entry of [] as Array<{ readonly path: string; readonly dev: number; readonly ino: number }>) {",
+          from: "removeOwnedLinks(options.plan, owned);",
+          to: "void owned;",
         },
       ],
       async (media) => {
@@ -573,8 +574,8 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
       [
         {
           file: "media/persistence.ts",
-          from: "if (current.dev !== entry.dev || current.ino !== entry.ino) {\n            removeRelocated(options.plan, entry);\n            continue;\n          }",
-          to: "void current;",
+          from: "if (ownedIdentities.has(`${String(candidate.dev)}:${String(candidate.ino)}`))\n        rmSync(candidatePath, { force: true });",
+          to: "rmSync(candidatePath, { force: true });",
         },
       ],
       async (media) => {
@@ -670,15 +671,17 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
       [
         {
           file: "media/persistence.ts",
-          from: "  for (const child of readdirSync(plan.trustedParent)) {",
-          to: "  for (const child of [] as string[]) {",
+          from: "        pending.push(candidatePath);",
+          to: "        void candidatePath;",
         },
       ],
       async (media) => {
         const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-reloc-"));
         try {
           const outDir = join(runtime, "images");
-          const moved = join(runtime, "moved");
+          const holder = join(runtime, "holder");
+          const moved = join(holder, "moved");
+          mkdirSync(holder);
           try {
             await media.persistGeneratedImages({
               plan: media.createOutputPlan(outDir),
@@ -706,6 +709,99 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
           };
         } finally {
           rmSync(runtime, { recursive: true, force: true });
+        }
+      },
+    ),
+  );
+
+  results.push(
+    await persistenceMutation(
+      "relocated-hardlinks",
+      [
+        {
+          file: "media/persistence.ts",
+          from: "        rmSync(candidatePath, { force: true });",
+          to: "        { rmSync(candidatePath, { force: true }); return; }",
+        },
+      ],
+      async (media) => {
+        const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-hardlinks-"));
+        try {
+          const outDir = join(runtime, "images");
+          const aliasDir = join(runtime, "alias");
+          const moved = join(runtime, "moved");
+          mkdirSync(aliasDir);
+          try {
+            await media.persistGeneratedImages({
+              plan: media.createOutputPlan(outDir),
+              payloads: [Buffer.from("PRIVATE-PROVIDER-BYTES").toString("base64")],
+              requested: 1,
+              uuid: () => "d".repeat(32),
+              beforePublish: () => {
+                const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
+                if (stage === undefined) throw new Error("stage missing in hook");
+                linkSync(join(outDir, stage), join(aliasDir, "copy"));
+                renameSync(outDir, moved);
+                mkdirSync(outDir);
+              },
+            });
+          } catch {
+            // Expected side: every link to the owned inode must be removed.
+          }
+          const remaining = [
+            ...readdirSync(aliasDir).map((name) => join(aliasDir, name)),
+            ...readdirSync(moved).map((name) => join(moved, name)),
+          ].filter((path) => readFileSync(path).equals(Buffer.from("PRIVATE-PROVIDER-BYTES")));
+          return {
+            expected: { status: "error", remaining_payload_files: 0 },
+            actual: { status: "error", remaining_payload_files: remaining.length },
+          };
+        } finally {
+          rmSync(runtime, { recursive: true, force: true });
+        }
+      },
+    ),
+  );
+
+  results.push(
+    await persistenceMutation(
+      "replacement-symlink-cleanup",
+      [
+        {
+          file: "media/persistence.ts",
+          from: "      checkTrustedParent(options.plan);\n      parentSafe = true;",
+          to: "      checkControlledRoot(options.plan);\n      parentSafe = true;",
+        },
+      ],
+      async (media) => {
+        const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-rootlink-"));
+        const external = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-rootlink-external-"));
+        try {
+          const outDir = join(runtime, "images");
+          const moved = join(runtime, "moved");
+          try {
+            await media.persistGeneratedImages({
+              plan: media.createOutputPlan(outDir),
+              payloads: [Buffer.from("PRIVATE-PROVIDER-BYTES").toString("base64")],
+              requested: 1,
+              uuid: () => "d".repeat(32),
+              beforePublish: () => {
+                renameSync(outDir, moved);
+                symlinkSync(external, outDir);
+              },
+            });
+          } catch {
+            // Expected side: cleanup traverses the trusted parent, not the
+            // untrusted replacement root.
+          }
+          const leaked = readdirSync(moved).filter((name) => name.startsWith(".stage-"));
+          return {
+            expected: { status: "error", leaked_stage_count: 0 },
+            actual: { status: "error", leaked_stage_count: leaked.length },
+          };
+        } finally {
+          rmSync(runtime, { recursive: true, force: true });
+          rmSync(external, { recursive: true, force: true });
         }
       },
     ),

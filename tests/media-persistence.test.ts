@@ -1,6 +1,7 @@
 import {
   chmodSync,
   existsSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -306,6 +307,86 @@ describe("staged image persistence", () => {
     );
     expect(allOwned).toEqual([]);
     expect(existsSync(join(outDir, `${"a".repeat(32)}.png`))).toBe(false);
+  });
+
+  it("never exposes provider bytes when the publish hook relocates the root into a nested directory", async () => {
+    const directory = root();
+    const outDir = join(directory, "images");
+    const holder = join(directory, "holder");
+    const moved = join(holder, "moved");
+    const payload = Buffer.from("PRIVATE-PROVIDER-BYTES");
+    mkdirSync(holder);
+
+    await expect(
+      persistGeneratedImages({
+        plan: createOutputPlan(outDir),
+        payloads: [payload.toString("base64")],
+        requested: 1,
+        uuid: () => "e".repeat(32),
+        beforePublish: () => {
+          renameSync(outDir, moved);
+          mkdirSync(outDir);
+        },
+      }),
+    ).rejects.toThrow("output root changed after publish hook");
+
+    expect(readdirSync(moved).filter((name) => name.startsWith(".stage-"))).toEqual([]);
+    expect(readdirSync(outDir)).toEqual([]);
+  });
+
+  it("removes every hardlink to an owned stage after root replacement", async () => {
+    const directory = root();
+    const outDir = join(directory, "images");
+    const aliasDir = join(directory, "alias");
+    const moved = join(directory, "moved");
+    const payload = Buffer.from("PRIVATE-PROVIDER-BYTES");
+    mkdirSync(aliasDir);
+
+    await expect(
+      persistGeneratedImages({
+        plan: createOutputPlan(outDir),
+        payloads: [payload.toString("base64")],
+        requested: 1,
+        uuid: () => "e".repeat(32),
+        beforePublish: () => {
+          const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
+          if (stage === undefined) throw new Error("stage missing in hook");
+          linkSync(join(outDir, stage), join(aliasDir, "copy"));
+          renameSync(outDir, moved);
+          mkdirSync(outDir);
+        },
+      }),
+    ).rejects.toThrow("output root changed after publish hook");
+
+    expect(readdirSync(aliasDir)).toEqual([]);
+    expect(readdirSync(moved).filter((name) => name.startsWith(".stage-"))).toEqual([]);
+    expect(readdirSync(outDir)).toEqual([]);
+  });
+
+  it("cleans a relocated stage without following a replacement root symlink", async () => {
+    const directory = root();
+    const external = root();
+    const outDir = join(directory, "images");
+    const moved = join(directory, "moved");
+    const payload = Buffer.from("PRIVATE-PROVIDER-BYTES");
+    writeFileSync(join(external, "FOREIGN"), "keep");
+
+    await expect(
+      persistGeneratedImages({
+        plan: createOutputPlan(outDir),
+        payloads: [payload.toString("base64")],
+        requested: 1,
+        uuid: () => "e".repeat(32),
+        beforePublish: () => {
+          renameSync(outDir, moved);
+          symlinkSync(external, outDir);
+        },
+      }),
+    ).rejects.toThrow("symlink");
+
+    expect(readdirSync(moved).filter((name) => name.startsWith(".stage-"))).toEqual([]);
+    expect(readFileSync(join(external, "FOREIGN"), "utf8")).toBe("keep");
+    expect(readdirSync(external)).toEqual(["FOREIGN"]);
   });
 
   it("removes a staged seven-byte partial after a write fault", async () => {

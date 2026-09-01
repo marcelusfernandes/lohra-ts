@@ -50,7 +50,7 @@ function identity(stats: Stats, plan: OutputPlan): boolean {
   return stats.dev === plan.parentDev && stats.ino === plan.parentIno;
 }
 
-function checkControlledRoot(plan: OutputPlan): void {
+function checkTrustedParent(plan: OutputPlan): void {
   const parent = statSync(plan.trustedParent);
   if (
     !parent.isDirectory() ||
@@ -58,6 +58,10 @@ function checkControlledRoot(plan: OutputPlan): void {
     realpathSync(plan.trustedParent) !== plan.trustedParent
   )
     throw new Error("trusted output parent changed");
+}
+
+function checkControlledRoot(plan: OutputPlan): void {
+  checkTrustedParent(plan);
   if (!contained(plan.trustedParent, plan.outDir)) throw new Error("output escapes trusted parent");
   if (!existsSync(plan.outDir)) return;
   const output = lstatSync(plan.outDir);
@@ -113,42 +117,47 @@ function imageId(source: () => string): string {
 }
 
 /**
- * An observable hook may relocate the whole outDir (rename to a contained
- * sibling) so the owned inode no longer sits at its recorded pathname. Sweep
- * the direct children of the trusted parent one level deep and remove any
- * entry whose on-disk identity (dev, ino) matches an owned file — never a
- * name, never through a symlink, never an unowned inode.
+ * Remove every pathname below the trusted parent that references an inode
+ * owned by this operation. The traversal never follows symlinks, is not depth
+ * limited, and deliberately does not stop at the first hardlink. That makes a
+ * hook-visible relocation or alias set cleanable without deleting by name.
  */
-function removeRelocated(
+function removeOwnedLinks(
   plan: OutputPlan,
-  entry: { readonly path: string; readonly dev: number; readonly ino: number },
+  entries: readonly { readonly dev: number; readonly ino: number }[],
 ): void {
-  for (const child of readdirSync(plan.trustedParent)) {
-    const childPath = join(plan.trustedParent, child);
-    let childStats: Stats;
-    try {
-      childStats = lstatSync(childPath);
-    } catch {
-      continue;
-    }
-    if (childStats.isSymbolicLink() || !childStats.isDirectory()) continue;
-    let names: readonly string[];
-    try {
-      names = readdirSync(childPath);
-    } catch {
-      continue;
-    }
-    for (const name of names) {
-      const candidatePath = join(childPath, name);
+  const ownedIdentities = new Set(
+    entries.map((entry) => `${String(entry.dev)}:${String(entry.ino)}`),
+  );
+  if (ownedIdentities.size === 0) return;
+  const pending = [plan.trustedParent];
+  const visitedDirectories = new Set<string>();
+
+  while (pending.length > 0) {
+    const directory = pending.pop();
+    if (directory === undefined) continue;
+    const directoryStats = lstatSync(directory);
+    if (directoryStats.isSymbolicLink() || !directoryStats.isDirectory()) continue;
+    const directoryIdentity = `${String(directoryStats.dev)}:${String(directoryStats.ino)}`;
+    if (visitedDirectories.has(directoryIdentity)) continue;
+    visitedDirectories.add(directoryIdentity);
+
+    for (const name of readdirSync(directory)) {
+      const candidatePath = join(directory, name);
+      let candidate: Stats;
       try {
-        const candidate = lstatSync(candidatePath);
-        if (candidate.dev === entry.dev && candidate.ino === entry.ino) {
-          rmSync(candidatePath, { force: true });
-          return;
-        }
-      } catch {
+        candidate = lstatSync(candidatePath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
+      if (candidate.isSymbolicLink()) continue;
+      if (candidate.isDirectory()) {
+        pending.push(candidatePath);
         continue;
       }
+      if (ownedIdentities.has(`${String(candidate.dev)}:${String(candidate.ino)}`))
+        rmSync(candidatePath, { force: true });
     }
   }
 }
@@ -186,7 +195,7 @@ export async function persistGeneratedImages(options: {
 
   const temps: string[] = [];
   const finals: string[] = [];
-  const owned: Array<{ readonly path: string; readonly dev: number; readonly ino: number }> = [];
+  const owned: Array<{ readonly dev: number; readonly ino: number }> = [];
   try {
     for (let index = 0; index < decoded.length; index += 1) {
       const bytes = decoded[index];
@@ -198,7 +207,7 @@ export async function persistGeneratedImages(options: {
       const fd = openSync(temp, "wx", 0o600);
       const staged = fstatSync(fd);
       temps.push(temp);
-      owned.push({ path: temp, dev: staged.dev, ino: staged.ino });
+      owned.push({ dev: staged.dev, ino: staged.ino });
       try {
         (
           options.writeStage ??
@@ -221,9 +230,6 @@ export async function persistGeneratedImages(options: {
         throw new Error("image publish index mismatch");
       await options.beforePublish?.(index, final);
       checkControlledRoot(options.plan);
-      // Revalidate the outDir directory identity itself: a hook may replace
-      // the pathname with a fresh contained directory (no symlink needed),
-      // leaving the owned stage in a relocated directory.
       const rootNow = lstatSync(options.plan.outDir);
       if (
         rootNow.isSymbolicLink() ||
@@ -253,45 +259,26 @@ export async function persistGeneratedImages(options: {
       chmodSync(temp, IMAGE_FILE_MODE);
       linkSync(temp, final);
       const linked = lstatSync(final);
-      owned.push({ path: final, dev: linked.dev, ino: linked.ino });
+      owned.push({ dev: linked.dev, ino: linked.ino });
       rmSync(temp);
     }
     return Object.freeze([...finals]);
   } catch (error) {
-    let rootSafe = false;
+    let parentSafe = false;
     try {
-      checkControlledRoot(options.plan);
-      rootSafe = true;
+      checkTrustedParent(options.plan);
+      parentSafe = true;
     } catch {
-      // Never follow a root that failed containment merely to clean up.
+      // Never traverse a parent whose identity is no longer trusted.
     }
-    if (rootSafe) {
-      const cleanupErrors: unknown[] = [];
-      for (const entry of owned) {
-        try {
-          const current = lstatSync(entry.path);
-          if (current.dev !== entry.dev || current.ino !== entry.ino) {
-            removeRelocated(options.plan, entry);
-            continue;
-          }
-          rmSync(entry.path, { force: true });
-        } catch (cleanupError) {
-          if ((cleanupError as NodeJS.ErrnoException).code === "ENOENT") {
-            try {
-              removeRelocated(options.plan, entry);
-              continue;
-            } catch (scanError) {
-              cleanupErrors.push(scanError);
-              continue;
-            }
-          }
-          cleanupErrors.push(cleanupError);
-        }
-      }
-      if (cleanupErrors.length > 0)
-        throw new Error(`image cleanup failed for ${String(cleanupErrors.length)} paths`, {
+    if (parentSafe) {
+      try {
+        removeOwnedLinks(options.plan, owned);
+      } catch {
+        throw new Error("image cleanup failed", {
           cause: error,
         });
+      }
     }
     throw error;
   }
