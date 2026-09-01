@@ -34,5 +34,7 @@ for port in 11434 9119 8000; do
   fi
 done
 
-# Acquisition, all gated work, and release share this one shell invocation.
+# Acquisition, the complete unit suite, aggregate parity gates, and release
+# share this one shell invocation.
+npm test
 npm run parity:t19:gates:raw
