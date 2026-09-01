@@ -14,6 +14,7 @@ import {
   type WebTransport,
 } from "../src/web/index.js";
 import { SearchUnavailable } from "../src/web/search.js";
+import { WebError } from "../src/web/safety.js";
 import { responseOf } from "./web-connector.test.js";
 import type { Resolver } from "../src/web/index.js";
 
@@ -144,6 +145,33 @@ describe("web tool envelopes and coercions", () => {
     });
   });
 
+  it("propagates unexpected backend exceptions to the ToolRegistry boundary", async () => {
+    await withDoubles(async () => {
+      setSearchBackend({
+        search: () => {
+          const error = new TypeError("fixture unexpected");
+          throw error;
+        },
+      });
+      const registry = createBuiltinRegistry();
+      await expect(registry.dispatch("web_search", { query: "q" })).resolves.toBe(
+        toolError("Tool execution failed: TypeError: fixture unexpected"),
+      );
+      setWebTransport({
+        resolver: makeResolver([]),
+        connector: {
+          request: () => {
+            const error = new TypeError("fixture unexpected");
+            throw error;
+          },
+        },
+      });
+      await expect(registry.dispatch("web_fetch", { url: "http://public.test/" })).resolves.toBe(
+        toolError("Tool execution failed: TypeError: fixture unexpected"),
+      );
+    });
+  });
+
   it("distinguishes search unavailable from generic web failure", async () => {
     await withDoubles(async () => {
       setSearchBackend({
@@ -155,7 +183,7 @@ describe("web tool envelopes and coercions", () => {
       });
       const explicit = await webSearchHandler({ query: "q" });
       setSearchBackend({
-        search: () => Promise.reject(new Error("fixture other")),
+        search: () => Promise.reject(new WebError("fixture other")),
       });
       const generic = await webSearchHandler({ query: "q" });
       expect(unavailable).toBe(

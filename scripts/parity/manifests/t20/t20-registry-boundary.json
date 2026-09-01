@@ -82,7 +82,7 @@
       "side": "both",
       "field": "process.stdout",
       "encoding": "utf8",
-      "value": "{\"rows\": [{\"dispatch\": {\"error\": \"Tool execution failed: RuntimeError: fixture unexpected\"}}, {\"unknown\": {\"error\": \"Unknown tool: missing\"}}]}\n"
+      "value": "{\"rows\": [{\"dispatch\": {\"error\": \"Tool execution failed: RuntimeError: fixture unexpected\"}}, {\"unknown\": {\"error\": \"Unknown tool: missing\"}}, {\"search\": {\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [], \"parserCalls\": 0, \"requestBodies\": [], \"requests\": [], \"result\": {\"error\": \"Tool execution failed: TypeError: fixture unexpected\"}}}, {\"fetch\": {\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [\"public.test\"], \"parserCalls\": 0, \"requestBodies\": [], \"requests\": [], \"result\": {\"error\": \"could not resolve host 'public.test': fixture DNS failed\", \"url\": \"http://public.test/\"}}}]}\n"
     }
   ],
   "normalizations": [],

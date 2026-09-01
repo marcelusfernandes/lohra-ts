@@ -1,3 +1,5 @@
+import { HTML5_ENTITIES } from "./html5-entities.js";
+
 const SKIP_TAGS = new Set([
   "script",
   "style",
@@ -13,268 +15,98 @@ const RAW_TEXT_TAGS = new Set(["script", "style"]);
 
 export const MAX_HTML_TEXT_CHARS = 20_000;
 
-const NAMED_ENTITIES: Readonly<Record<string, string>> = {
-  amp: "&",
-  lt: "<",
-  gt: ">",
-  quot: '"',
-  apos: "'",
-  nbsp: " ",
-  iexcl: "¡",
-  cent: "¢",
-  pound: "£",
-  curren: "¤",
-  yen: "¥",
-  brvbar: "¦",
-  sect: "§",
-  uml: "¨",
-  copy: "©",
-  ordf: "ª",
-  laquo: "«",
-  not: "¬",
-  shy: "­",
-  reg: "®",
-  macr: "¯",
-  deg: "°",
-  plusmn: "±",
-  sup2: "²",
-  sup3: "³",
-  acute: "´",
-  micro: "µ",
-  para: "¶",
-  middot: "·",
-  cedil: "¸",
-  sup1: "¹",
-  ordm: "º",
-  raquo: "»",
-  frac14: "¼",
-  frac12: "½",
-  frac34: "¾",
-  iquest: "¿",
-  Agrave: "À",
-  Aacute: "Á",
-  Acirc: "Â",
-  Atilde: "Ã",
-  Auml: "Ä",
-  Aring: "Å",
-  AElig: "Æ",
-  Ccedil: "Ç",
-  Egrave: "È",
-  Eacute: "É",
-  Ecirc: "Ê",
-  Euml: "Ë",
-  Igrave: "Ì",
-  Iacute: "Í",
-  Icirc: "Î",
-  Iuml: "Ï",
-  ETH: "Ð",
-  Ntilde: "Ñ",
-  Ograve: "Ò",
-  Oacute: "Ó",
-  Ocirc: "Ô",
-  Otilde: "Õ",
-  Ouml: "Ö",
-  times: "×",
-  Oslash: "Ø",
-  Ugrave: "Ù",
-  Uacute: "Ú",
-  Ucirc: "Û",
-  Uuml: "Ü",
-  Yacute: "Ý",
-  THORN: "Þ",
-  szlig: "ß",
-  agrave: "à",
-  aacute: "á",
-  acirc: "â",
-  atilde: "ã",
-  auml: "ä",
-  aring: "å",
-  aelig: "æ",
-  ccedil: "ç",
-  egrave: "è",
-  eacute: "é",
-  ecirc: "ê",
-  euml: "ë",
-  igrave: "ì",
-  iacute: "í",
-  icirc: "î",
-  iuml: "ï",
-  eth: "ð",
-  ntilde: "ñ",
-  ograve: "ò",
-  oacute: "ó",
-  ocirc: "ô",
-  otilde: "õ",
-  ouml: "ö",
-  divide: "÷",
-  oslash: "ø",
-  ugrave: "ù",
-  uacute: "ú",
-  ucirc: "û",
-  uuml: "ü",
-  yacute: "ý",
-  thorn: "þ",
-  yuml: "ÿ",
-  OElig: "Œ",
-  oelig: "œ",
-  Scaron: "Š",
-  scaron: "š",
-  Yuml: "Ÿ",
-  fnof: "ƒ",
-  circ: "ˆ",
-  tilde: "˜",
-  ensp: " ",
-  emsp: " ",
-  thinsp: " ",
-  zwnj: "‌",
-  zwj: "‍",
-  lrm: "‎",
-  rlm: "‏",
-  ndash: "–",
-  mdash: "—",
-  lsquo: "‘",
-  rsquo: "’",
-  sbquo: "‚",
-  ldquo: "“",
-  rdquo: "”",
-  bdquo: "„",
-  dagger: "†",
-  Dagger: "‡",
-  bull: "•",
-  hellip: "…",
-  permil: "‰",
-  prime: "′",
-  Prime: "″",
-  lsaquo: "‹",
-  rsaquo: "›",
-  oline: "‾",
-  frasl: "⁄",
-  euro: "€",
-  trade: "™",
-  forall: "∀",
-  part: "∂",
-  exist: "∃",
-  empty: "∅",
-  nabla: "∇",
-  isin: "∈",
-  notin: "∉",
-  ni: "∋",
-  prod: "∏",
-  sum: "∑",
-  minus: "−",
-  lowast: "∗",
-  radic: "√",
-  prop: "∝",
-  infin: "∞",
-  ang: "∠",
-  and: "∧",
-  or: "∨",
-  cap: "∩",
-  cup: "∪",
-  int: "∫",
-  there4: "∴",
-  sim: "∼",
-  cong: "≅",
-  asymp: "≈",
-  ne: "≠",
-  equiv: "≡",
-  le: "≤",
-  ge: "≥",
-  sub: "⊂",
-  sup: "⊃",
-  nsub: "⊄",
-  sube: "⊆",
-  supe: "⊇",
-  oplus: "⊕",
-  otimes: "⊗",
-  perp: "⊥",
-  sdot: "⋅",
-  lceil: "⌈",
-  rceil: "⌉",
-  lfloor: "⌊",
-  rfloor: "⌋",
-  lang: "〈",
-  rang: "〉",
-  loz: "◊",
-  spades: "♠",
-  clubs: "♣",
-  hearts: "♥",
-  diams: "♦",
+/* CPython 3.12.10 html/__init__.py: numeric-reference remapping (verbatim). */
+const INVALID_CHARREFS: Readonly<Record<number, string>> = {
+  "0": "\ufffd",
+  "13": "\r",
+  "128": "\u20ac",
+  "129": "\u0081",
+  "130": "\u201a",
+  "131": "\u0192",
+  "132": "\u201e",
+  "133": "\u2026",
+  "134": "\u2020",
+  "135": "\u2021",
+  "136": "\u02c6",
+  "137": "\u2030",
+  "138": "\u0160",
+  "139": "\u2039",
+  "140": "\u0152",
+  "141": "\u008d",
+  "142": "\u017d",
+  "143": "\u008f",
+  "144": "\u0090",
+  "145": "\u2018",
+  "146": "\u2019",
+  "147": "\u201c",
+  "148": "\u201d",
+  "149": "\u2022",
+  "150": "\u2013",
+  "151": "\u2014",
+  "152": "\u02dc",
+  "153": "\u2122",
+  "154": "\u0161",
+  "155": "\u203a",
+  "156": "\u0153",
+  "157": "\u009d",
+  "158": "\u017e",
+  "159": "\u0178",
 };
 
-/** Python `html.unescape` over the subset of fixtures the parity matrix pins:
- * numeric decimal/hex references (with or without a trailing `;`) and the
- * named table (legacy amp/lt/gt/quot also match without the semicolon). */
+const INVALID_CODEPOINTS: ReadonlySet<number> = new Set<number>([
+  ...range(0x1, 0x8),
+  ...range(0xe, 0x1f),
+  ...range(0x7f, 0x9f),
+  ...range(0xfdd0, 0xfdef),
+  0xb,
+  0xfffe, 0xffff, 0x1fffe, 0x1ffff, 0x2fffe, 0x2ffff, 0x3fffe, 0x3ffff,
+  0x4fffe, 0x4ffff, 0x5fffe, 0x5ffff, 0x6fffe, 0x6ffff, 0x7fffe, 0x7ffff,
+  0x8fffe, 0x8ffff, 0x9fffe, 0x9ffff, 0xafffe, 0xaffff, 0xbfffe, 0xbffff,
+  0xcfffe, 0xcffff, 0xdfffe, 0xdffff, 0xefffe, 0xeffff, 0xffffe, 0xfffff,
+  0x10fffe, 0x10ffff,
+]);
+
+function range(fromInclusive: number, toInclusive: number): number[] {
+  const values: number[] = [];
+  for (let value = fromInclusive; value <= toInclusive; value += 1) values.push(value);
+  return values;
+}
+
+const HTML5_TABLE: ReadonlyMap<string, string> = new Map(
+  HTML5_ENTITIES.map((entry) => [entry.name, entry.value]),
+);
+
+/* CPython 3.12.10 html.unescape semantics, verbatim:
+ * r'&(#[0-9]+;?|#[xX][0-9a-fA-F]+;?|[^\t\n\f <&#;]{1,32};?)' */
+const CHARREF_PATTERN = /&(#[0-9]+;?|#[xX][0-9a-fA-F]+;?|[^\t\n\f <&#;]{1,32};?)/g;
+
+function replaceCharref(group: string): string {
+  if (group.startsWith("#")) {
+    let num: number;
+    if (group[1] === "x" || group[1] === "X") {
+      num = Number.parseInt(group.slice(2).replace(/;+$/, ""), 16);
+    } else {
+      num = Number.parseInt(group.slice(1).replace(/;+$/, ""), 10);
+    }
+    const remapped = INVALID_CHARREFS[num];
+    if (remapped !== undefined) return remapped;
+    if ((num >= 0xd800 && num <= 0xdfff) || num > 0x10ffff) return "\ufffd";
+    if (INVALID_CODEPOINTS.has(num)) return "";
+    return String.fromCodePoint(num);
+  }
+  const exact = HTML5_TABLE.get(group);
+  if (exact !== undefined) return exact;
+  for (let x = group.length - 1; x >= 2; x -= 1) {
+    const prefix = HTML5_TABLE.get(group.slice(0, x));
+    if (prefix !== undefined) return prefix + group.slice(x);
+  }
+  return `&${group}`;
+}
+
+/** Python `html.unescape` (CPython 3.12.10), byte-for-byte semantics. */
 export function decodeHtmlEntities(text: string): string {
   if (!text.includes("&")) return text;
-  let result = "";
-  let index = 0;
-  while (index < text.length) {
-    const ampersand = text.indexOf("&", index);
-    if (ampersand === -1) {
-      result += text.slice(index);
-      break;
-    }
-    result += text.slice(index, ampersand);
-    const decoded = decodeAt(text, ampersand + 1);
-    if (decoded === null) {
-      result += "&";
-      index = ampersand + 1;
-    } else {
-      result += decoded.text;
-      index = ampersand + 1 + decoded.consumed;
-    }
-  }
-  return result;
-}
-
-function decodeOne(name: string, consumed: number): { text: string; consumed: number } | null {
-  const named = NAMED_ENTITIES[name];
-  if (named === undefined) return null;
-  return { text: named, consumed };
-}
-
-function decodeNumeric(
-  body: string,
-  radix: 10 | 16,
-  terminated: boolean,
-  prefixLength: number,
-): { text: string; consumed: number } | null {
-  if (body.length === 0) return null;
-  const code = Number.parseInt(body, radix);
-  if (!Number.isSafeInteger(code) || code <= 0 || code > 0x10ffff) {
-    return terminated
-      ? { text: "\ufffd", consumed: prefixLength + body.length + 1 }
-      : null;
-  }
-  return {
-    text: String.fromCodePoint(code),
-    consumed: prefixLength + body.length + (terminated ? 1 : 0),
-  };
-}
-
-function decodeAt(text: string, start: number): { text: string; consumed: number } | null {
-  const rest = text.slice(start);
-  const hex = /^#[xX]([0-9a-fA-F]+)/.exec(rest);
-  if (hex !== null) {
-    const body = hex[1] ?? "";
-    const terminated = rest[2 + body.length] === ";";
-    return decodeNumeric(body, 16, terminated, 2);
-  }
-  const decimal = /^#([0-9]+)/.exec(rest);
-  if (decimal !== null) {
-    const body = decimal[1] ?? "";
-    const terminated = rest[1 + body.length] === ";";
-    return decodeNumeric(body, 10, terminated, 1);
-  }
-  const named = /^([a-zA-Z][a-zA-Z0-9]*);/.exec(rest);
-  if (named !== null) {
-    const decoded = decodeOne(named[1] ?? "", (named[1]?.length ?? 0) + 1);
-    return decoded === null ? null : { text: decoded.text, consumed: decoded.consumed };
-  }
-  const legacy = /^([a-zA-Z][a-zA-Z0-9]*)(?![a-zA-Z0-9])/.exec(rest);
-  if (legacy !== null) return decodeOne(legacy[1] ?? "", legacy[1]?.length ?? 0);
-  return null;
+  return text.replace(CHARREF_PATTERN, (_match, group: string) => replaceCharref(group));
 }
 
 function tagName(source: string, start: number, end: number): string {

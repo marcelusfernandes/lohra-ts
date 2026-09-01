@@ -1,5 +1,5 @@
 import nodeDns from "node:dns";
-import { isNonPublic, unmap } from "./safety.js";
+import { WebTransportError, isNonPublic, unmap } from "./safety.js";
 import type {
   AddressRecord,
   ConnectorResponse,
@@ -7,10 +7,9 @@ import type {
   HttpConnector,
 } from "./types.js";
 
-export class ConnectorError extends Error {
+export class ConnectorError extends WebTransportError {
   constructor(message: string) {
     super(message);
-    this.name = "ConnectorError";
   }
 }
 
@@ -25,12 +24,40 @@ export interface PinnedDialRequest {
   readonly rejectUnauthorized: boolean;
   readonly timeoutMs: number;
   readonly body?: string;
+  readonly requestFactory?: NodeRequestFactory;
+  readonly lookup?: ConnectorOptions["lookup"];
 }
 
 export type Dial = (request: PinnedDialRequest) => Promise<ConnectorResponse>;
 
+export interface NodeRequestHandleLike {
+  on(event: string, listener: (...args: unknown[]) => void): unknown;
+  end(body?: string): unknown;
+  destroy(): void;
+}
+
+export interface NodeResponseLike {
+  statusCode?: number;
+  headers: Readonly<Record<string, unknown>>;
+  socket: { remoteAddress?: string | null };
+  read(): unknown;
+  once(event: string, listener: (this: NodeResponseLike, ...args: unknown[]) => void): unknown;
+  off(event: string, listener: (this: NodeResponseLike, ...args: unknown[]) => void): unknown;
+  destroy(): void;
+  readonly readableEnded?: boolean;
+}
+
+export type NodeRequestFactory = (
+  secure: boolean,
+) => (
+  options: Record<string, unknown>,
+  callback: (response: NodeResponseLike) => void,
+) => NodeRequestHandleLike;
+
 export interface ConnectorOptions {
   readonly dial?: Dial;
+  readonly requestFactory?: NodeRequestFactory;
+  readonly lookup?: (host: string, options: unknown, callback: (error: Error | null, address?: string, family?: number) => void) => void;
 }
 
 export function normalizePeer(peer: string | null | undefined): string | null {
@@ -98,10 +125,11 @@ function isIpLiteral(hostname: string): boolean {
 }
 
 function hostHeader(url: URL, hostname: string): string {
+  const host = hostname.includes(":") ? `[${hostname}]` : hostname;
   const port = url.port === "" ? null : Number.parseInt(url.port, 10);
   const defaultPort = url.protocol === "https:" ? 443 : 80;
-  if (port === null || port === defaultPort) return hostname;
-  return `${hostname}:${String(port)}`;
+  if (port === null || port === defaultPort) return host;
+  return `${host}:${String(port)}`;
 }
 
 export function createPinnedConnector(options: ConnectorOptions = {}): HttpConnector {
@@ -125,13 +153,15 @@ export function createPinnedConnector(options: ConnectorOptions = {}): HttpConne
         servername: secure && !isIpLiteral(request.hostname) ? request.hostname : null,
         rejectUnauthorized: true,
         timeoutMs: request.timeoutSeconds * 1000,
+        ...(options.requestFactory === undefined ? {} : { requestFactory: options.requestFactory }),
+        ...(options.lookup === undefined ? {} : { lookup: options.lookup }),
       });
     },
   };
 }
 
-export function createPlainConnector(): HttpConnector {
-  const dial = nodeDial;
+export function createPlainConnector(options: ConnectorOptions = {}): HttpConnector {
+  const dial = options.dial ?? nodeDial;
   return {
     request(request) {
       const url = new URL(request.url);
@@ -147,30 +177,106 @@ export function createPlainConnector(): HttpConnector {
         servername: secure ? request.hostname : null,
         rejectUnauthorized: true,
         timeoutMs: request.timeoutSeconds * 1000,
+        ...(options.requestFactory === undefined ? {} : { requestFactory: options.requestFactory }),
+        ...(options.lookup === undefined ? {} : { lookup: options.lookup }),
       });
     },
   };
 }
 
 async function nodeDial(dialRequest: PinnedDialRequest): Promise<ConnectorResponse> {
-  const [nodeHttp, nodeHttps] = await Promise.all([
-    import("node:http"),
-    import("node:https"),
-  ]);
-  const transport = dialRequest.secure ? nodeHttps : nodeHttp;
+  let transportRequest: ReturnType<NodeRequestFactory>;
+  if (dialRequest.requestFactory !== undefined) {
+    transportRequest = dialRequest.requestFactory(dialRequest.secure);
+  } else {
+    const [nodeHttp, nodeHttps] = await Promise.all([
+      import("node:http"),
+      import("node:https"),
+    ]);
+    transportRequest = (dialRequest.secure ? nodeHttps : nodeHttp).request as ReturnType<NodeRequestFactory>;
+  }
   return new Promise<ConnectorResponse>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      nodeRequest.destroy();
-      reject(new ConnectorError(`request timed out after ${String(Math.round(dialRequest.timeoutMs / 1000))} seconds`));
-    }, dialRequest.timeoutMs);
-    if (typeof timer.unref === "function") timer.unref();
-    const nodeRequest = transport.request(
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const armTimer = (): void => {
+      timer = setTimeout(() => {
+        const failure = new ConnectorError(
+          `request timed out after ${String(Math.round(dialRequest.timeoutMs / 1000))} seconds`,
+        );
+        nodeResponse?.destroy();
+        nodeRequest.destroy();
+        if (pendingRead !== null) {
+          const { rejectChunk } = pendingRead;
+          pendingRead = null;
+          cleanupStreamListeners();
+          rejectChunk(failure);
+        }
+        if (!settled) {
+          settled = true;
+          reject(failure);
+        }
+      }, dialRequest.timeoutMs);
+      if (typeof timer.unref === "function") timer.unref();
+    };
+    const disarmTimer = (): void => {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    };
+    let nodeRequest: NodeRequestHandleLike;
+    let nodeResponse: NodeResponseLike | null = null;
+    let ended = false;
+    let pendingRead: {
+      resolveChunk: (result: IteratorResult<Uint8Array>) => void;
+      rejectChunk: (error: Error) => void;
+    } | null = null;
+    let streamListeners: {
+      readable?: (...args: unknown[]) => void;
+      end?: () => void;
+      error?: (error: Error) => void;
+      aborted?: () => void;
+      close?: () => void;
+    } = {};
+    const cleanupStreamListeners = (): void => {
+      if (nodeResponse === null) return;
+      for (const [event, listener] of Object.entries(streamListeners)) {
+        if (listener !== undefined)
+          nodeResponse.off(
+            event,
+            listener as (this: NodeResponseLike, ...args: unknown[]) => void,
+          );
+      }
+      streamListeners = {};
+    };
+    const settleFailure = (error: Error): void => {
+      disarmTimer();
+      cleanupStreamListeners();
+      if (pendingRead !== null) {
+        const { rejectChunk } = pendingRead;
+        pendingRead = null;
+        rejectChunk(error);
+        return;
+      }
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    };
+    armTimer();
+    nodeRequest = transportRequest(
       {
         host: dialRequest.host,
-        port: dialRequest.url.port === "" ? (dialRequest.secure ? 443 : 80) : Number.parseInt(dialRequest.url.port, 10),
+        port:
+          dialRequest.url.port === ""
+            ? dialRequest.secure
+              ? 443
+              : 80
+            : Number.parseInt(dialRequest.url.port, 10),
         method: dialRequest.method,
         path: `${dialRequest.url.pathname}${dialRequest.url.search}`,
         headers: { ...dialRequest.headers },
+        ...(dialRequest.lookup === undefined ? {} : { lookup: dialRequest.lookup }),
         ...(dialRequest.secure
           ? {
               ...(dialRequest.servername === null ? {} : { servername: dialRequest.servername }),
@@ -178,9 +284,12 @@ async function nodeDial(dialRequest: PinnedDialRequest): Promise<ConnectorRespon
             }
           : {}),
       },
-      (nodeResponse) => {
+      (response: NodeResponseLike) => {
+        nodeResponse = response;
         const headers: Record<string, string> = {};
-        const rawHeaders = nodeResponse.headers as Readonly<Record<string, string | string[] | number | undefined>>;
+        const rawHeaders = response.headers as Readonly<
+          Record<string, string | string[] | number | undefined>
+        >;
         for (const [name, value] of Object.entries(rawHeaders)) {
           if (Array.isArray(value)) {
             headers[name.toLowerCase()] = value.join(", ");
@@ -190,63 +299,88 @@ async function nodeDial(dialRequest: PinnedDialRequest): Promise<ConnectorRespon
             headers[name.toLowerCase()] = String(value);
           }
         }
-        let ended = false;
         const stream: ConnectorStream = {
           next() {
             if (ended) return Promise.resolve({ done: true, value: undefined });
-            const ready = nodeResponse.read() as Buffer | null;
-            if (ready !== null) return Promise.resolve({ done: false, value: new Uint8Array(ready) });
-            return new Promise((resolveChunk) => {
+            const ready = response.read();
+            if (ready !== null && ready !== undefined) {
+              return Promise.resolve({ done: false, value: new Uint8Array(ready as Buffer) });
+            }
+            if (pendingRead !== null) {
+              return new Promise((resolveChunk, rejectChunk) => {
+                const previous = pendingRead;
+                pendingRead = { resolveChunk, rejectChunk };
+                previous?.rejectChunk(new ConnectorError("fixture read superseded"));
+              });
+            }
+            return new Promise((resolveChunk, rejectChunk) => {
+              pendingRead = { resolveChunk, rejectChunk };
               const onReadable = (): void => {
-                cleanup();
-                const chunk = nodeResponse.read() as Buffer | null;
-                if (chunk === null) {
-                  if (nodeResponse.readableEnded) {
+                const chunk = response.read();
+                if (chunk === null || chunk === undefined) {
+                  if (response.readableEnded === true) {
                     ended = true;
+                    disarmTimer();
+                    cleanupStreamListeners();
+                    pendingRead = null;
                     resolveChunk({ done: true, value: undefined });
-                    return;
                   }
-                  const drained = nodeResponse.read() as Buffer | null;
-                  resolveChunk(
-                    drained === null
-                      ? { done: true, value: undefined }
-                      : { done: false, value: new Uint8Array(drained) },
-                  );
                   return;
                 }
-                resolveChunk({ done: false, value: new Uint8Array(chunk) });
+                disarmTimer();
+                cleanupStreamListeners();
+                pendingRead = null;
+                resolveChunk({ done: false, value: new Uint8Array(chunk as Buffer) });
               };
               const onEnd = (): void => {
-                cleanup();
                 ended = true;
+                disarmTimer();
+                cleanupStreamListeners();
+                pendingRead = null;
                 resolveChunk({ done: true, value: undefined });
               };
-              const cleanup = (): void => {
-                nodeResponse.off("readable", onReadable);
-                nodeResponse.off("end", onEnd);
+              const onError = (error: unknown): void => {
+                settleFailure(error instanceof Error ? error : new Error(String(error)));
               };
-              nodeResponse.once("readable", onReadable);
-              nodeResponse.once("end", onEnd);
+              const onAborted = (): void => {
+                settleFailure(new ConnectorError("response aborted"));
+              };
+              const onClose = (): void => {
+                if (!ended) settleFailure(new ConnectorError("response closed before completion"));
+              };
+              void 0;
+              streamListeners = {
+                readable: onReadable,
+                end: onEnd,
+                error: (error: Error): void => onError(error),
+                aborted: onAborted,
+                close: onClose,
+              };
+              response.once("readable", streamListeners.readable as (this: NodeResponseLike) => void);
+              response.once("end", streamListeners.end as (this: NodeResponseLike) => void);
+              response.once("error", streamListeners.error as (this: NodeResponseLike) => void);
+              response.once("aborted", streamListeners.aborted as (this: NodeResponseLike) => void);
+              response.once("close", streamListeners.close as (this: NodeResponseLike) => void);
             });
           },
           cancel() {
-            clearTimeout(timer);
-            nodeResponse.destroy();
+            disarmTimer();
+            cleanupStreamListeners();
+            response.destroy();
+            nodeRequest.destroy();
             return Promise.resolve();
           },
         };
-        clearTimeout(timer);
         resolve({
-          status: nodeResponse.statusCode ?? 0,
+          status: response.statusCode ?? 0,
           headers,
-          peer: normalizePeer(nodeResponse.socket.remoteAddress ?? null),
+          peer: normalizePeer(response.socket.remoteAddress ?? null),
           stream,
         });
       },
     );
-    nodeRequest.on("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
+    nodeRequest.on("error", (error: unknown) => {
+      settleFailure(error instanceof Error ? error : new Error(String(error)));
     });
     nodeRequest.end(dialRequest.body);
   });

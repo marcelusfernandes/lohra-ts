@@ -10,7 +10,7 @@ import {
   MAX_SEARCH_RESULTS,
   SearchUnavailable,
 } from "./search.js";
-import { WebError } from "./safety.js";
+import { WebError, WebTransportError } from "./safety.js";
 import type { SearchBackend, WebTransport } from "./types.js";
 
 export type { SearchBackend, WebTransport };
@@ -81,8 +81,10 @@ export async function webFetchHandler(args: Readonly<Record<string, unknown>>): 
     return toolResult(undefined, { url, text: htmlToText(outcome.text) });
   } catch (error) {
     if (error instanceof WebError) return toolError(error.message, { url });
-    const cause = error instanceof Error ? error.message : String(error);
-    return toolError(`could not fetch the page: ${cause}`, { url });
+    if (error instanceof WebTransportError) {
+      return toolError(`could not fetch the page: ${error.message}`, { url });
+    }
+    throw error;
   }
 }
 
@@ -110,7 +112,6 @@ export async function webSearchHandler(args: Readonly<Record<string, unknown>>):
     if (error instanceof WebError) {
       return toolError(`search failed: ${error.message}`, { query });
     }
-    const cause = error instanceof Error ? error.message : String(error);
-    return toolError(`search failed: ${cause}`, { query });
+    throw error;
   }
 }

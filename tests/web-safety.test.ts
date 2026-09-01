@@ -61,8 +61,51 @@ describe("ip classification", () => {
       "::ffff:127.0.0.1",
     ];
     for (const address of nonPublic) expect(isNonPublic(address), address).toBe(true);
-    for (const address of ["93.184.216.34", "8.8.8.8", "1.1.1.1", "2606:4700:4700::1111", "100.64.0.1"])
+    for (const address of [
+      "93.184.216.34",
+      "8.8.8.8",
+      "1.1.1.1",
+      "2606:4700:4700::1111",
+      "100.64.0.1",
+      "200.1.1.1",
+      "192.0.0.9",
+      "192.0.0.10",
+      "192.88.99.1",
+      "2001:1::1",
+      "2001:1::2",
+      "2001:3::1",
+      "2001:4:112::1",
+      "2001:20::1",
+      "2001:30::1",
+    ])
       expect(isNonPublic(address), address).toBe(false);
+  });
+
+  it("refuses the 3.12.10 adversarial set: 3fff::/20, 2002::/16, 64:ff9b:1::/48, fec0 excluded", () => {
+    for (const address of [
+      "3fff::1",
+      "3fff:fff::1",
+      "2002::1",
+      "64:ff9b:1::1",
+      "2001:44::1",
+      "2001:100::1",
+      "2001:1::3",
+      "5f00::1",
+    ]) {
+      expect(isNonPublic(address), address).toBe(true);
+    }
+    for (const address of ["fec0::1", "3fff:ffff::", "2001:1::2", "2001:3::1"]) {
+      expect(isNonPublic(address), address).toBe(false);
+    }
+    expect(isNonPublic("2001:1::4")).toBe(true);
+  });
+
+  it("classifies high first octet IPv4 literals without signed-bitwise wraparound", () => {
+    expect(parseIpv4Literal("200.1.1.1")).toBe("200.1.1.1");
+    expect(isNonPublic("200.1.1.1")).toBe(false);
+    expect(isNonPublic("224.0.0.5")).toBe(true);
+    expect(isNonPublic("240.0.0.1")).toBe(true);
+    expect(parseIpv4Literal("200.1.1.1") !== null).toBe(true);
   });
 
   it("unmaps IPv4-mapped IPv6 before classification", () => {

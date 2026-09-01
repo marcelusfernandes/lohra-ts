@@ -105,7 +105,9 @@ export async function fetchUrl(url: string, deps: FetchDeps): Promise<FetchOutco
   const maxRedirects = deps.maxRedirects ?? FETCH_LIMITS.maxRedirects;
   const timeoutSeconds = deps.timeoutSeconds ?? FETCH_LIMITS.timeoutSeconds;
   const clock = deps.clock ?? (() => Date.now());
+  const stats = { bufferedBytes: 0, cancelled: false, readCalls: 0 };
   let current = url;
+  let lastResponse: ConnectorResponse | undefined;
   for (let hop = 0; hop <= maxRedirects; hop += 1) {
     const validated = await validatePublicUrl(current, { resolver: deps.resolver });
     const deadlineMs = clock() + timeoutSeconds * 1000;
@@ -119,6 +121,7 @@ export async function fetchUrl(url: string, deps: FetchDeps): Promise<FetchOutco
       deadlineMs,
     };
     const response = await deps.connector.request(request);
+    lastResponse = response;
     const refusal = peerRefusalCause(response.peer, validated.addresses);
     if (refusal !== null) {
       await response.stream.cancel();
@@ -126,6 +129,8 @@ export async function fetchUrl(url: string, deps: FetchDeps): Promise<FetchOutco
     }
     if (isRedirectStatus(response.status)) {
       const location = response.headers["location"];
+      await response.stream.cancel();
+      lastResponse = undefined;
       if (location === undefined || location === "") {
         throw new WebError("redirect response had no Location header");
       }
@@ -147,5 +152,6 @@ export async function fetchUrl(url: string, deps: FetchDeps): Promise<FetchOutco
       },
     };
   }
+  if (lastResponse !== undefined) await lastResponse.stream.cancel();
   throw new WebError(`too many redirects (more than ${String(maxRedirects)})`);
 }

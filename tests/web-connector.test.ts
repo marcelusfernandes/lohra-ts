@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ConnectorError,
   createPinnedConnector,
   memberAddressOf,
   normalizePeer,
@@ -139,6 +140,40 @@ describe("createPinnedConnector", () => {
     expect(dial.timeoutMs).toBe(10_000);
   });
 
+  it("brackets IPv6 Host authority byte-exactly, with and without the port", async () => {
+    for (const [url, hostname, expected] of [
+      ["http://[2606:4700:4700::1111]/a", "2606:4700:4700::1111", "[2606:4700:4700::1111]"],
+      ["https://[2606:4700:4700::1111]/a", "2606:4700:4700::1111", "[2606:4700:4700::1111]"],
+      ["http://[2606:4700:4700::1111]:8443/a", "2606:4700:4700::1111", "[2606:4700:4700::1111]:8443"],
+      ["https://[2606:4700:4700::1111]:8443/a", "2606:4700:4700::1111", "[2606:4700:4700::1111]:8443"],
+      ["http://93.184.216.34/", "93.184.216.34", "93.184.216.34"],
+      ["http://public.test:8080/", "public.test", "public.test:8080"],
+      ["http://public.test/", "public.test", "public.test"],
+    ] as const) {
+      const dials: unknown[] = [];
+      const connector = createPinnedConnector({
+        dial: (request) => {
+          dials.push(request);
+          return Promise.resolve(responseOf({ chunks: [new TextEncoder().encode("ok")] }));
+        },
+      });
+      await connector.request({
+        url,
+        method: "GET",
+        headers: {},
+        allowedAddresses: [{ address: hostname, family: hostname.includes(":") ? 6 : 4 }],
+        hostname,
+        timeoutSeconds: 10,
+        deadlineMs: 10_000,
+      });
+      const dial = dials[0] as { headers: Record<string, string>; servername: string | null };
+      expect(dial.headers.host, url).toBe(expected);
+      if (hostname.includes(":")) {
+        expect(dial.servername, url).toBeNull();
+      }
+    }
+  });
+
   it("never invents SNI for literal IP hosts", async () => {
     const dials: unknown[] = [];
     const connector = createPinnedConnector({
@@ -171,6 +206,6 @@ describe("createPinnedConnector", () => {
         timeoutSeconds: 10,
         deadlineMs: 10_000,
       }),
-    ).rejects.toMatchObject({ name: "ConnectorError" });
+    ).rejects.toBeInstanceOf(ConnectorError);
   });
 });

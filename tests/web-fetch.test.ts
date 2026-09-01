@@ -150,6 +150,43 @@ describe("fetch request semantics", () => {
     expect(exhausted.requestsMade).toBe(5);
   });
 
+  it("cancels every intermediate redirect stream before the next hop", async () => {
+    const arrived = await fetchWith(
+      [
+        responseOf({ status: 302, headers: { location: "/b" } }),
+        responseOf({ status: 302, headers: { location: "//hop.test/c" } }),
+        responseOf({ chunks: [encoder.encode("final")] }),
+      ],
+      "http://public.test/a",
+    );
+    expect(arrived.text).toBe("final");
+    expect(arrived.cancelCalls).toEqual([1, 2]);
+    expect(arrived.requests).toHaveLength(3);
+    expect(arrived.resolverCalls).toEqual(["public.test", "public.test", "hop.test"]);
+  });
+
+  it("cancels the current stream on missing Location and on redirect exhaustion", async () => {
+    const noLocation = await fetchError(
+      [responseOf({ status: 302, headers: {} })],
+      "http://public.test/",
+    );
+    expect(noLocation.cause).toBe("redirect response had no Location header");
+    expect(noLocation.cancelCalls).toEqual([1]);
+
+    const exhausted = await fetchError(
+      [
+        responseOf({ status: 302, headers: { location: "/2" } }),
+        responseOf({ status: 302, headers: { location: "/3" } }),
+        responseOf({ status: 302, headers: { location: "/4" } }),
+        responseOf({ status: 302, headers: { location: "/5" } }),
+        responseOf({ status: 302, headers: { location: "/6" } }),
+      ],
+      "http://public.test/start",
+    );
+    expect(exhausted.cause).toBe("too many redirects (more than 4)");
+    expect(exhausted.cancelCalls).toEqual([1, 2, 3, 4, 5]);
+  });
+
   it("fails closed on redirect without Location and unsafe redirect targets", async () => {
     const noLocation = await fetchError([responseOf({ status: 302 })], "http://public.test/");
     expect(noLocation.cause).toBe("redirect response had no Location header");

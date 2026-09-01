@@ -51,9 +51,10 @@ const expectedDivergent = new Set([
   "t20-ddg-byte-cap",
 ]);
 
-function runPass() {
+function runPass(onlyScenarios?: ReadonlySet<string>) {
   const names = readdirSync(manifests)
     .filter((name) => name.startsWith("t20-") && name.endsWith(".json"))
+    .filter((name) => onlyScenarios === undefined || onlyScenarios.has(name.slice(0, -5)))
     .sort();
   const projections = [];
   let failures = 0;
@@ -99,9 +100,13 @@ if (!acquireLock()) {
   process.stderr.write(`t20 harness could not acquire ${LOCK_PATH}\n`);
   process.exit(1);
 }
+const scenarioFilter = process.argv[2];
+const onlyScenarios =
+  scenarioFilter === undefined ? undefined : new Set(scenarioFilter.split(",").filter((id) => id.length > 0));
+
 try {
-  const first = runPass();
-  const second = runPass();
+  const first = runPass(onlyScenarios);
+  const second = runPass(onlyScenarios);
   const sameInventory =
     first.projections.length === second.projections.length &&
     first.projections.every((entry, index) => entry.id === second.projections[index]?.id) &&
@@ -109,7 +114,13 @@ try {
       (entry, index) => entry.sha === second.projections[index]?.sha,
     );
   const sameDigest = first.digest === second.digest;
-  const pass = first.failures === 0 && second.failures === 0 && sameInventory && sameDigest;
+  const expectedCount = onlyScenarios?.size ?? 22;
+  const pass =
+    first.failures === 0 &&
+    second.failures === 0 &&
+    sameInventory &&
+    sameDigest &&
+    first.projections.length === expectedCount;
   const result = {
     suite: "t20-web-tools",
     scenarios: first.projections.length,

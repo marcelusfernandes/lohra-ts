@@ -14,6 +14,7 @@ import { ToolRegistry } from "../../../dist/tools/registry.js";
 import { createBuiltinRegistry } from "../../../dist/tools/builtins.js";
 import { ConversationRuntime } from "../../../dist/conversation/runtime.js";
 import {
+  ConnectorError,
   currentSearchBackend,
   currentWebTransport,
   setWebTransport,
@@ -741,12 +742,12 @@ async function main() {
           body: (function* () {
             world.served += 7;
             yield new TextEncoder().encode("partial");
-            throw new Error(message);
+            throw new ConnectorError(message);
           })(),
         });
       } else {
         world.serve = () => {
-          throw new Error(message);
+          throw new ConnectorError(message);
         };
       }
       setWebTransport(world.transport());
@@ -767,10 +768,29 @@ async function main() {
         throw error;
       },
     });
-    observation.rows = [
+    const rows = [
       { dispatch: JSON.parse(await registry.dispatch("boom", {})) },
       { unknown: JSON.parse(await registry.dispatch("missing", {})) },
     ];
+    const world = makeWorld({});
+    world.serve = () => {
+      throw new TypeError("fixture unexpected");
+    };
+    const previousBackend = currentSearchBackend();
+    try {
+      setSearchBackend({
+        search: () => Promise.reject(new TypeError("fixture unexpected")),
+      });
+      rows.push({ search: await toolSearch(world, { query: "q" }) });
+      setWebTransport({
+        resolver: (host) => world.dns.resolve(host),
+        connector: world.connector(),
+      });
+      rows.push({ fetch: await toolFetch(world, "http://public.test/") });
+    } finally {
+      setSearchBackend(previousBackend);
+    }
+    observation.rows = rows;
   } else {
     throw new Error(`unknown scenario ${scenario}`);
   }

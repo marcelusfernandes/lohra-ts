@@ -175,6 +175,14 @@ class World:
         }
 
 
+class UnexpectedBackend:
+    def __init__(self, value: Exception):
+        self.value = value
+
+    def search(self, query: str, *, max_results: int = 5):
+        raise self.value
+
+
 class DownBackend:
     def __init__(self, value: Exception):
         self.value = value
@@ -690,12 +698,25 @@ def main() -> None:
             raise RuntimeError("fixture unexpected")
 
         target.register("boom", "x", {"description": "d", "parameters": {}}, boom)
-        observation = {
-            "rows": [
-                {"dispatch": json.loads(target.dispatch("boom", {}))},
-                {"unknown": json.loads(target.dispatch("missing", {}))},
-            ]
-        }
+        rows = [
+            {"dispatch": json.loads(target.dispatch("boom", {}))},
+            {"unknown": json.loads(target.dispatch("missing", {}))},
+        ]
+        with World({}) as world:
+            world._serve = world.text(b"never")
+            original = web_tool._backend
+            try:
+                web_tool.set_search_backend(UnexpectedBackend(TypeError("fixture unexpected")))
+
+                def fetch_serve(request: httpx.Request) -> httpx.Response:
+                    raise TypeError("fixture unexpected")
+
+                world._serve = fetch_serve
+                rows.append({"search": tool_search(world, {"query": "q"})})
+                rows.append({"fetch": tool_fetch(world, "http://public.test/")})
+            finally:
+                web_tool.set_search_backend(original)
+        observation = {"rows": rows}
 
     else:
         raise SystemExit(f"unknown scenario {scenario}")

@@ -27,43 +27,44 @@ function parseComponent(text: string): number | null {
 }
 
 /** inet_aton-style positional IPv4 parsing: 1–4 dot-separated parts where the
- * last part carries the remaining bits. Returns the dotted canonical form. */
+ * last part carries the remaining bits. Returns the dotted canonical form.
+ * Pure BigInt arithmetic: no signed bitwise, so parts like 200.x are exact. */
 export function parseIpv4Literal(host: string): string | null {
   const parts = host.split(".");
   if (parts.length < 1 || parts.length > 4) return null;
   if (parts.some((part) => part.length === 0)) return null;
   const values = parts.map(parseComponent);
   if (values.some((value) => value === null)) return null;
-  const numeric = values as number[];
-  let value: number;
+  const numeric = values.map((value) => BigInt(value as number));
+  let value: bigint;
   if (numeric.length === 1) {
-    if (numeric[0] === undefined || numeric[0] > 0xffffffff) return null;
-    value = numeric[0];
+    if ((numeric[0] ?? 0n) > 0xffffffffn) return null;
+    value = numeric[0] ?? 0n;
   } else if (numeric.length === 2) {
-    if ((numeric[0] ?? 0) > 255 || (numeric[1] ?? 0) > 0xffffff) return null;
-    value = ((numeric[0] ?? 0) << 24) | (numeric[1] ?? 0);
+    if ((numeric[0] ?? 0n) > 255n || (numeric[1] ?? 0n) > 0xffffffn) return null;
+    value = ((numeric[0] ?? 0n) << 24n) | (numeric[1] ?? 0n);
   } else if (numeric.length === 3) {
     if (
-      (numeric[0] ?? 0) > 255 ||
-      (numeric[1] ?? 0) > 255 ||
-      (numeric[2] ?? 0) > 0xffff
+      (numeric[0] ?? 0n) > 255n ||
+      (numeric[1] ?? 0n) > 255n ||
+      (numeric[2] ?? 0n) > 0xffffn
     )
       return null;
-    value = ((numeric[0] ?? 0) << 24) | ((numeric[1] ?? 0) << 16) | (numeric[2] ?? 0);
+    value = ((numeric[0] ?? 0n) << 24n) | ((numeric[1] ?? 0n) << 16n) | (numeric[2] ?? 0n);
   } else {
-    if (numeric.some((part) => part > 255)) return null;
+    if (numeric.some((part) => part > 255n)) return null;
     value =
-      ((numeric[0] ?? 0) << 24) |
-      ((numeric[1] ?? 0) << 16) |
-      ((numeric[2] ?? 0) << 8) |
-      (numeric[3] ?? 0);
+      ((numeric[0] ?? 0n) << 24n) |
+      ((numeric[1] ?? 0n) << 16n) |
+      ((numeric[2] ?? 0n) << 8n) |
+      (numeric[3] ?? 0n);
   }
-  if (!Number.isSafeInteger(value) || value < 0) return null;
+  if (value < 0n || value > 0xffffffffn) return null;
   return [
-    String((value >>> 24) & 255),
-    String((value >>> 16) & 255),
-    String((value >>> 8) & 255),
-    String(value & 255),
+    String(Number((value >> 24n) & 255n)),
+    String(Number((value >> 16n) & 255n)),
+    String(Number((value >> 8n) & 255n)),
+    String(Number(value & 255n)),
   ].join(".");
 }
 function ipv6Groups(text: string): readonly number[] | null {
@@ -161,13 +162,14 @@ interface Range {
   readonly end: bigint;
 }
 
+/* Python 3.12.10 ipaddress.IPv4Address._constants._private_networks (verbatim). */
 const IPV4_PRIVATE: readonly Range[] = [
   range4("0.0.0.0", 8),
   range4("10.0.0.0", 8),
   range4("127.0.0.0", 8),
   range4("169.254.0.0", 16),
   range4("172.16.0.0", 12),
-  range4("192.0.0.0", 29),
+  range4("192.0.0.0", 24),
   range4("192.0.0.170", 31),
   range4("192.0.2.0", 24),
   range4("192.168.0.0", 16),
@@ -177,7 +179,12 @@ const IPV4_PRIVATE: readonly Range[] = [
   range4("240.0.0.0", 4),
   range4("255.255.255.255", 32),
 ];
-const IPV4_RESERVED: readonly Range[] = [range4("240.0.0.0", 4), range4("255.255.255.255", 32)];
+/* Python 3.12.10 _private_networks_exceptions for IPv4: 192.0.0.9/32 and 192.0.0.10/32. */
+const IPV4_PRIVATE_EXCEPTIONS: readonly Range[] = [
+  range4("192.0.0.9", 32),
+  range4("192.0.0.10", 32),
+];
+const IPV4_RESERVED: readonly Range[] = [range4("240.0.0.0", 4)];
 
 function range4(address: string, bits: number): Range {
   const parts = address.split(".").map((part) => BigInt(part));
@@ -195,8 +202,12 @@ function ipv4NonPublic(address: string): boolean {
     if (!/^[0-9]+$/.test(part)) return true;
     value = (value << 8n) | BigInt(part);
   }
+  const inPrivate = IPV4_PRIVATE.some((range) => value >= range.start && value <= range.end);
+  const exempted = IPV4_PRIVATE_EXCEPTIONS.some(
+    (range) => value >= range.start && value <= range.end,
+  );
   return (
-    IPV4_PRIVATE.some((range) => value >= range.start && value <= range.end) ||
+    (inPrivate && !exempted) ||
     IPV4_RESERVED.some((range) => value >= range.start && value <= range.end) ||
     (value >= 0xe0000000n && value <= 0xefffffffn)
   );
@@ -213,28 +224,59 @@ function hasPrefix(value: bigint, prefix: bigint, bits: number): boolean {
   return shifted === prefix >> (128n - BigInt(bits));
 }
 
+/* Python 3.12.10 ipaddress.IPv6Address._constants tables (verbatim). */
 const IPV6_PRIVATE_PREFIXES: readonly { prefix: bigint; bits: number }[] = [
-  { prefix: 1n, bits: 128 },
-  { prefix: 0n, bits: 128 },
-  { prefix: 0xffffn << 32n, bits: 96 },
-  { prefix: 0x100n << 112n, bits: 64 },
+  { prefix: 0x64n << 112n, bits: 64 },
   { prefix: 0x2001n << 112n, bits: 23 },
-  { prefix: 0x20010002n << 96n, bits: 48 },
   { prefix: 0x20010db8n << 96n, bits: 32 },
-  { prefix: 0x20010010n << 96n, bits: 28 },
+  { prefix: 0x2002n << 112n, bits: 16 },
+  { prefix: 0x3fffn << 112n, bits: 20 },
+  { prefix: 0x64ff9b01n << 96n, bits: 48 },
+  { prefix: 0n, bits: 128 },
+  { prefix: 1n, bits: 128 },
+  { prefix: 0xffffn << 32n, bits: 96 },
   { prefix: 0xfc00n << 112n, bits: 7 },
   { prefix: 0xfe80n << 112n, bits: 10 },
+];
+const IPV6_PRIVATE_EXCEPTIONS: readonly { prefix: bigint; bits: number }[] = [
+  { prefix: (0x20010001n << 96n) | 1n, bits: 128 },
+  { prefix: (0x20010001n << 96n) | 2n, bits: 128 },
+  { prefix: 0x20010020n << 96n, bits: 28 },
+  { prefix: 0x20010030n << 96n, bits: 28 },
+  { prefix: 0x20010003n << 96n, bits: 32 },
+  { prefix: (0x20010004n << 96n) | (0x112n << 80n), bits: 48 },
+];
+const IPV6_RESERVED_PREFIXES: readonly { prefix: bigint; bits: number }[] = [
+  { prefix: 0n, bits: 8 },
+  { prefix: 0x100n << 112n, bits: 8 },
+  { prefix: 0x200n << 112n, bits: 7 },
+  { prefix: 0x400n << 112n, bits: 6 },
+  { prefix: 0x800n << 112n, bits: 5 },
+  { prefix: 0x1000n << 112n, bits: 4 },
+  { prefix: 0x4000n << 112n, bits: 3 },
+  { prefix: 0x6000n << 112n, bits: 3 },
+  { prefix: 0x8000n << 112n, bits: 3 },
+  { prefix: 0xa000n << 112n, bits: 3 },
+  { prefix: 0xc000n << 112n, bits: 3 },
+  { prefix: 0xe000n << 112n, bits: 4 },
+  { prefix: 0xf000n << 112n, bits: 5 },
+  { prefix: 0xf800n << 112n, bits: 6 },
+  { prefix: 0xfe00n << 112n, bits: 9 },
 ];
 
 function ipv6NonPublic(address: string): boolean {
   const groups = ipv6Groups(address);
   if (groups === null) return true;
   const value = ipv6Value(groups);
-  const firstByte = value >> 120n;
-  const multicast = firstByte === 0xffn;
-  const reserved = hasPrefix(value, 0n, 8);
-  if (multicast || reserved) return true;
-  return IPV6_PRIVATE_PREFIXES.some((entry) => hasPrefix(value, entry.prefix, entry.bits));
+  const multicast = (value >> 120n) === 0xffn;
+  const loopback = value === 1n;
+  const unspecified = value === 0n;
+  const linkLocal = hasPrefix(value, 0xfe80n << 112n, 10);
+  const reserved = IPV6_RESERVED_PREFIXES.some((entry) => hasPrefix(value, entry.prefix, entry.bits));
+  if (multicast || loopback || unspecified || linkLocal || reserved) return true;
+  const inPrivate = IPV6_PRIVATE_PREFIXES.some((entry) => hasPrefix(value, entry.prefix, entry.bits));
+  const exempted = IPV6_PRIVATE_EXCEPTIONS.some((entry) => hasPrefix(value, entry.prefix, entry.bits));
+  return inPrivate && !exempted;
 }
 
 /** Python 3.12 ipaddress semantics: a non-public verdict for the classified
