@@ -201,16 +201,7 @@ async function nodeDial(dialRequest: PinnedDialRequest): Promise<ConnectorRespon
         );
         nodeResponse?.destroy();
         nodeRequest.destroy();
-        if (pendingRead !== null) {
-          const { rejectChunk } = pendingRead;
-          pendingRead = null;
-          cleanupStreamListeners();
-          rejectChunk(failure);
-        }
-        if (!settled) {
-          settled = true;
-          reject(failure);
-        }
+        settleFailure(failure);
       }, dialRequest.timeoutMs);
       if (typeof timer.unref === "function") timer.unref();
     };
@@ -311,7 +302,7 @@ async function nodeDial(dialRequest: PinnedDialRequest): Promise<ConnectorRespon
         response.once("error", terminalListeners.error);
         response.once("aborted", terminalListeners.aborted);
         response.once("close", terminalListeners.close);
-        const removeTerminalListeners = (): void => {
+        removeTerminalListeners = (): void => {
           response.off("error", terminalListeners.error);
           response.off("aborted", terminalListeners.aborted);
           response.off("close", terminalListeners.close);

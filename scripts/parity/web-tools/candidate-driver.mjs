@@ -8,6 +8,7 @@ import net from "node:net";
 import { EventEmitter } from "node:events";
 import { Buffer } from "node:buffer";
 import { TextEncoder } from "node:util";
+import { setImmediate } from "node:timers";
 import { URL } from "node:url";
 import process from "node:process";
 
@@ -863,19 +864,35 @@ async function main() {
       };
     const resolver = (host) => world.dns.resolve(host);
     const connector = createPinnedConnector({ requestFactory: nodeRequestFactory });
-    const outcome = await fetchUrl("http://once.test/", { resolver, connector });
-    const parsed = JSON.parse(
-      toolResult(undefined, { url: "http://once.test/", text: outcome.text }),
-    );
-    observation = {
-      result: parsed,
-      dns: [...world.dns.calls],
-      requests: dialOptions.map((options) => `dial:${String(options.host)}`),
-      requestBodies: [],
-      authorization: [],
-      bodyBytesRead: outcome.stats.bufferedBytes,
-      parserCalls: world.parserCalls,
-    };
+    try {
+      const outcome = await fetchUrl("http://once.test/", { resolver, connector });
+      const parsed = JSON.parse(
+        toolResult(undefined, { url: "http://once.test/", text: outcome.text }),
+      );
+      observation = {
+        result: parsed,
+        dns: [...world.dns.calls],
+        requests: dialOptions.map((options) => `dial:${String(options.host)}`),
+        requestBodies: [],
+        authorization: [],
+        bodyBytesRead: outcome.stats.bufferedBytes,
+        parserCalls: world.parserCalls,
+      };
+    } catch (error) {
+      observation = {
+        result: {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+          url: "http://once.test/",
+        },
+        dns: [...world.dns.calls],
+        requests: dialOptions.map((options) => `dial:${String(options.host)}`),
+        requestBodies: [],
+        authorization: [],
+        bodyBytesRead: 0,
+        parserCalls: world.parserCalls,
+      };
+    }
   } else if (scenario === "connector-tls") {
     const observedDials = [];
     const connector = createPinnedConnector({

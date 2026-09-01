@@ -4,12 +4,10 @@
  * Each copy is COMPILED (tsc) and every mapped bilateral scenario is EXECUTED
  * in the mutant copy via the harness. The kill is decided ONLY by the mapped
  * external predicates: every mapped scenario must FLIP its nominal verdict in
- * the mutant run; for mutants whose nominal rows pin a cause and
- * bodyBytesRead=0, the observed mutant output must violate them (otherwise the
- * mutant survived). Observed bodyBytesRead values are extracted from the
- * mutant runtime output; no proof flag defaults to true; a proof error, a
- * missing flip, or a surviving mutant turns the command red. Vitest results
- * are recorded for diagnosis but never decide the kill. */
+ * the mutant run. When a mutant declares a required proof, its runtime JSON
+ * must also expose the exact expected cause and byte counter; empty, malformed,
+ * or merely different stdout is never sufficient. Vitest results are recorded
+ * for diagnosis but never decide the kill. */
 import { createHash } from "node:crypto";
 import { cpSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -29,6 +27,10 @@ interface Mutant {
   readonly find: string;
   readonly replace: string;
   readonly scenarios: readonly string[];
+  readonly requiredProof?: {
+    readonly cause: string;
+    readonly bodyBytesRead: number;
+  };
 }
 
 const MUTANTS: readonly Mutant[] = [
@@ -45,6 +47,10 @@ const MUTANTS: readonly Mutant[] = [
     find: "        host: (allowed[0] as AddressRecord).address,",
     replace: "        host: request.hostname,",
     scenarios: ["t20-rebinding"],
+    requiredProof: {
+      cause: "refusing response from unvalidated peer: peer is non-public",
+      bodyBytesRead: 0,
+    },
   },
   {
     id: "c-reuse-first-hop-validation",
@@ -217,7 +223,32 @@ function observedBodyBytes(stdout: string): number[] {
   return values;
 }
 
-async function main() {
+function inspectRequiredProof(
+  stdout: string,
+  proof: NonNullable<Mutant["requiredProof"]> | undefined,
+): { readonly cause: boolean; readonly bodyBytesRead: boolean } {
+  if (proof === undefined) return { cause: true, bodyBytesRead: true };
+  try {
+    const observation = JSON.parse(stdout) as unknown;
+    if (typeof observation !== "object" || observation === null || Array.isArray(observation)) {
+      return { cause: false, bodyBytesRead: false };
+    }
+    const record = observation as Record<string, unknown>;
+    const result = record.result;
+    const resultRecord =
+      typeof result === "object" && result !== null && !Array.isArray(result)
+        ? (result as Record<string, unknown>)
+        : null;
+    return {
+      cause: resultRecord?.error === proof.cause,
+      bodyBytesRead: record.bodyBytesRead === proof.bodyBytesRead,
+    };
+  } catch {
+    return { cause: false, bodyBytesRead: false };
+  }
+}
+
+function main(): void {
   const oracleWorkspace = resolveOracleWorkspace({
     cwd: root,
     timeoutMs: 30_000,
@@ -270,6 +301,7 @@ async function main() {
           candidateOutput.includes("exceeded") ||
           candidateOutput.includes("unavailable") ||
           candidateOutput.includes("failed");
+        const requiredProof = inspectRequiredProof(candidateOutput, mutant.requiredProof);
         proofResults.push({
           scenario: scenarioId,
           nominal,
@@ -278,11 +310,26 @@ async function main() {
           observedBodyBytesRead: observedBytes,
           observedMatchesNominalExpectation,
           nominalCandidateCauseVisibleInMutant: observedNominalCauseVisible,
+          ...(mutant.requiredProof === undefined
+            ? {}
+            : {
+                requiredCause: mutant.requiredProof.cause,
+                requiredBodyBytesRead: mutant.requiredProof.bodyBytesRead,
+                observedRequiredCause: requiredProof.cause,
+                observedRequiredBodyBytes: requiredProof.bodyBytesRead,
+              }),
         });
         // Kill = the mutant's observed candidate output no longer satisfies the
         // pinned normative candidate expectation (which encodes the contracted
         // cause and bodyBytesRead=0 for the SSRF/peer rows).
-        if (observedMatchesNominalExpectation || proofError !== null) killed = false;
+        if (
+          observedMatchesNominalExpectation ||
+          proofError !== null ||
+          !requiredProof.cause ||
+          !requiredProof.bodyBytesRead
+        ) {
+          killed = false;
+        }
       }
     } catch (error) {
       killed = false;
@@ -314,4 +361,4 @@ async function main() {
   process.exitCode = failures === 0 ? 0 : 1;
 }
 
-await main();
+main();

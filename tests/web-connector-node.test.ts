@@ -312,6 +312,40 @@ describe("nodeDial lifecycle over an in-memory http layer", () => {
     expect(response.listenerCount("close")).toBe(0);
   });
 
+  it("persists a timeout that fires in the gap between reads", async () => {
+    const pending = dial(factory);
+    await vi.advanceTimersByTimeAsync(0);
+    const response = exchanges[0]?.response;
+    if (response === undefined) throw new Error("fixture response missing");
+    const first = await pending;
+    const firstChunk = first.stream.next();
+    await vi.advanceTimersByTimeAsync(5_000);
+    response.chunks.push(Buffer.from("partial"));
+    response.emit("readable");
+    await firstChunk;
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    const second = first.stream.next();
+    let settled: string | null = null;
+    void second.then(
+      () => {
+        settled = "done";
+      },
+      (error: unknown) => {
+        settled = (error as Error).message;
+      },
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(settled).toBe("request timed out after 10 seconds");
+    expect(response.listenerCount("readable")).toBe(0);
+    expect(response.listenerCount("end")).toBe(0);
+    expect(response.listenerCount("error")).toBe(0);
+    expect(response.listenerCount("aborted")).toBe(0);
+    expect(response.listenerCount("close")).toBe(0);
+  });
+
   it("keeps read listeners constant across many async chunks and zero at terminal", async () => {
     const pending = dial(factory);
     await vi.advanceTimersByTimeAsync(0);
