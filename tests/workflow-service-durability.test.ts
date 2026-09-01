@@ -432,7 +432,16 @@ describe("workflow service durability", () => {
     const thiefFence = locks.acquireRunLease(started.run_id, "thief", 1000, 900);
     if (thiefFence === null) throw new Error("thief should have won after expiry");
     ownership.fence = 99; // the stretch's writes now present a stale token
-    const result = (await service.status(started.run_id, true)) as Record<string, unknown>;
+    // BOUNDED: the waiter must settle on its own. Racing it against a short
+    // timer means a waiter left hanging fails here, not on a suite timeout.
+    let bell: ReturnType<typeof setTimeout> | undefined;
+    const result = (await Promise.race([
+      service.status(started.run_id, true),
+      new Promise<Record<string, unknown>>((resolveRace) => {
+        bell = setTimeout(() => { resolveRace({ error: "WAITER HUNG" }); }, 1_000);
+      }),
+    ])) as Record<string, unknown>;
+    clearTimeout(bell);
     expect(result).toMatchObject({
       error: "workflow ownership lost",
       cause: "STALE_FENCE_WRITE",
