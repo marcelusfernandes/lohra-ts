@@ -12,9 +12,66 @@ const patchedDirectory = resolve(evidenceDirectory, "_patched");
 mkdirSync(evidenceDirectory, { recursive: true });
 mkdirSync(patchedDirectory, { recursive: true });
 
+/**
+ * Contract inventory, pinned by ID rather than inferred from the directory.
+ * An aggregate parity runner is evidence only if deleting an unrelated row or
+ * adding an unreviewed one cannot silently redefine what "all" means.
+ */
+const expectedScenarioIds = [
+  "t13-child-dangerous-command-denied-no-yolo",
+  "t13-child-dangerous-command-denied-yolo-immune",
+  "t13-child-system-prompt-frozen-across-idle-steer-second-turn",
+  "t13-delegate-batch-isolated-failure-order-preserved",
+  "t13-delegate-child-terminal-nonstring-divergence",
+  "t13-egress-tripwire-unknown-and-no-key-provider",
+  "t13-eviction-running-never-cap-exceeded",
+  "t13-eviction-terminal-only-row-survives",
+  "t13-fanout-clamp-not-an-integer-warning",
+  "t13-fanout-default-four",
+  "t13-fanout-env-empty-falls-back-four-silent",
+  "t13-fanout-env-float-falls-back-four",
+  "t13-fanout-env-negative-falls-back-four",
+  "t13-fanout-env-padded-two",
+  "t13-fanout-env-plus-two",
+  "t13-fanout-env-repr-apostrophe-backslash",
+  "t13-fanout-env-two",
+  "t13-fanout-env-underscore-ten",
+  "t13-fanout-env-zero-falls-back-four",
+  "t13-fanout-flag-negative-clamps-one",
+  "t13-fanout-flag-noninteger-usage",
+  "t13-fanout-flag-one",
+  "t13-fanout-flag-two",
+  "t13-fanout-flag-zero-clamps-one",
+  "t13-fanout-precedence-flag-one-over-env-five",
+  "t13-fanout-precedence-flag-three-over-env-one",
+  "t13-leash-child-fifty-parent-ninety-env-does-not-reach-child",
+  "t13-max-iterations-authored-bounds-three-messages",
+  "t13-no-grandchildren-ten-tools-literal",
+  "t13-ok-true-status-error-envelope",
+  "t13-overrides-model-provider-effort-atomic-swap-post-body",
+  "t13-quota-error-kind-retry-after-zero-boundary",
+  "t13-resume-id-three-semantics",
+  "t13-spawn-nonblocking-vs-delegate-blocking-upstream-order",
+  "t13-steer-busy-merged-system-reminder",
+  "t13-steer-idle-raw-text-new-turn",
+  "t13-steer-queued-child-first-request-carries-reminder",
+  "t13-steer-terminal-child-resurrection-status-stale",
+  "t13-surface-four-tools-only-and-registry-failsafe",
+  "t13-uncollected-failure-silent-wire-logged-to-file",
+  "t13-validation-edges-coercions-repr-quotes",
+] as const;
+const expectedScenarioNames = new Set(expectedScenarioIds.map((id) => `${id}.json`));
+
 const names = readdirSync(manifests)
-  .filter((name) => name.startsWith("t13-") && name.endsWith(".json"))
+  .filter((name) => name.endsWith(".json"))
   .sort();
+const actualScenarioNames = new Set(names);
+const missingScenarioIds = expectedScenarioIds.filter(
+  (id) => !actualScenarioNames.has(`${id}.json`),
+);
+const unexpectedScenarioIds = names
+  .filter((name) => !expectedScenarioNames.has(name))
+  .map((name) => name.slice(0, -5));
 
 /**
  * The child-prompt-freeze manifest (item 25) pins today's date inside four
@@ -93,7 +150,7 @@ function decodedStderr(run: unknown): string | null {
   return Buffer.from(stderr, "base64").toString("utf8");
 }
 
-let failures = 0;
+let failures = missingScenarioIds.length + unexpectedScenarioIds.length;
 const projections: {
   readonly id: string;
   readonly sha: string;
@@ -111,13 +168,16 @@ for (const name of names) {
     const parsed = JSON.parse(readFileSync(evidence, "utf8")) as {
       readonly scenario: { readonly manifestSha256: string };
       readonly verdict: string;
-      readonly comparison: { readonly normalized: unknown };
+      readonly comparison: { readonly verdict: string; readonly normalized: unknown };
       readonly expectations: { readonly failures: readonly unknown[] };
       readonly reproducibility: { readonly projectionSha256: string };
       readonly runs: { readonly oracle: unknown; readonly candidate: unknown };
     };
     const expectedVerdict = divergent.has(id) ? "divergent" : "match";
     if (parsed.verdict !== expectedVerdict) failures += 1;
+    if (parsed.comparison.verdict !== expectedVerdict) failures += 1;
+    if (!Array.isArray(parsed.expectations.failures) || parsed.expectations.failures.length !== 0)
+      failures += 1;
     if (fanoutMatrix.has(id)) {
       const expectedWarning = fanoutMatrix.get(id) ?? null;
       for (const run of [parsed.runs.oracle, parsed.runs.candidate]) {
@@ -159,13 +219,16 @@ const digestInput = projections
   .map(({ id, sha }) => `${id}=${sha}\n`)
   .join("");
 const digest = createHash("sha256").update(digestInput, "utf8").digest("hex");
-const expectedMatches = names.length - divergent.size;
+const expectedMatches = expectedScenarioIds.length - divergent.size;
 for (const id of [...fanoutMatrix.keys(), invalidFlagId]) {
   if (!names.includes(`${id}.json`)) failures += 1;
 }
 const result = {
   suite: "t13-orchestration-delegation",
   scenarios: names.length,
+  expectedScenarios: expectedScenarioIds.length,
+  missingScenarioIds,
+  unexpectedScenarioIds,
   contractAssertions: 51,
   failures,
   expectedMatches,
@@ -173,9 +236,13 @@ const result = {
   fanoutMatrixScenarios: fanoutMatrix.size + 1,
   digest,
   digestFormula:
-    "sha256(sorted UTF-8 lines id=judgedProjectionSha256\\n; judged projection = manifest SHA + expected/actual verdict + comparison.normalized + expectation failures + runner assertions; trailing newline included; contract T13 ids only)",
+    "sha256(sorted UTF-8 lines id=judgedProjectionSha256\\n; judged projection = manifest SHA + expected/actual verdict + comparison.normalized + expectation failures + runner assertions; trailing newline included; exact contract T13 inventory enforced separately)",
   projections,
 };
 process.stdout.write(`${JSON.stringify(result)}\n`);
 process.exitCode =
-  failures === 0 && names.length === projections.length && names.length > 0 ? 0 : 1;
+  failures === 0 &&
+  names.length === projections.length &&
+  names.length === expectedScenarioIds.length
+    ? 0
+    : 1;
