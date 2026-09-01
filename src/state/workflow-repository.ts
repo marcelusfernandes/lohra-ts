@@ -46,6 +46,26 @@ function refuse(
   return false;
 }
 
+/**
+ * THE ownership guard — one shape, one place. Every owned write (state, cache,
+ * node-cost, spend, and the combined cache+cost transaction) appends this same
+ * suffix to its own statement: exact current fence, current holder, unexpired
+ * lease. There is no second copy to drift, and no read-then-write window.
+ */
+function ownershipGuard(
+  runId: string,
+  ownership: Ownership,
+): { readonly suffix: string; readonly params: readonly unknown[] } {
+  return {
+    suffix: `
+       FROM (SELECT 1 AS dual)
+       JOIN workflow_run_fence f ON f.run_id = ? AND f.fence = ?
+       JOIN workflow_run_locks l ON l.run_id = ? AND l.holder = ?
+         AND l.expires_at > ?`,
+    params: [runId, ownership.fence, runId, ownership.holder, ownership.now],
+  };
+}
+
 function ints(values: readonly number[]): number[] {
   return values.map((value) => {
     const numeric = Math.trunc(value);
@@ -228,30 +248,14 @@ export class WorkflowRepository {
     ownership: Ownership,
     cost: CacheCostInput | null,
   ): boolean {
+    const guard = ownershipGuard(runId, ownership);
+    const cellSql = `INSERT OR REPLACE INTO workflow_node_cache
+           (content_hash, run_id, node_id, output_json, status, updated_at)
+           SELECT ?, ?, ?, ?, ?, ?`;
     const write = this.database.transaction(() => {
       const cell = this.database
-        .prepare(
-          `INSERT OR REPLACE INTO workflow_node_cache
-           (content_hash, run_id, node_id, output_json, status, updated_at)
-           SELECT ?, ?, ?, ?, ?, ?
-           FROM (SELECT 1 AS dual)
-           JOIN workflow_run_fence f ON f.run_id = ? AND f.fence = ?
-           JOIN workflow_run_locks l ON l.run_id = ?
-             AND l.holder = ? AND l.expires_at > ?`,
-        )
-        .run(
-          hash,
-          runId,
-          nodeId,
-          outputJson,
-          status,
-          ownership.now,
-          runId,
-          ownership.fence,
-          runId,
-          ownership.holder,
-          ownership.now,
-        );
+        .prepare(`${cellSql}${guard.suffix}`)
+        .run(hash, runId, nodeId, outputJson, status, ownership.now, ...guard.params);
       if (cell.changes === 0) return false;
       if (cost !== null) {
         this.database
@@ -276,7 +280,9 @@ export class WorkflowRepository {
       return true;
     });
     try {
-      return write.immediate();
+      // A refused cell is a refused WRITE: it logs its cause like every other
+      // owned write, and the cost half never happened.
+      return write.immediate() || refuse(this.warning, "node cache", runId, ownership.fence);
     } catch (error) {
       if (error instanceof Error && /database is locked/i.test(error.message)) {
         return refuse(this.warning, "node cache", runId, ownership.fence);
@@ -436,15 +442,11 @@ export class WorkflowRepository {
     // One primitive, one shape: exact fence + live holder + unexpired lease,
     // appended to the write's own statement (never read-then-write). SQLite
     // needs the JOINs after a FROM-dual source, never directly after SELECT.
-    const guarded = `${sql}
-       FROM (SELECT 1 AS dual)
-       JOIN workflow_run_fence f ON f.run_id = ? AND f.fence = ?
-       JOIN workflow_run_locks l ON l.run_id = ? AND l.holder = ?
-         AND l.expires_at > ?`;
+    const guard = ownershipGuard(runId, ownership);
     try {
       const result = this.database
-        .prepare(guarded)
-        .run(...values, runId, ownership.fence, runId, ownership.holder, ownership.now);
+        .prepare(`${sql}${guard.suffix}`)
+        .run(...values, ...guard.params);
       if (result.changes > 0) return true;
     } catch (error) {
       if (error instanceof Error && /database is locked/i.test(error.message)) {

@@ -1,20 +1,70 @@
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 
 import { Budget } from "./budget.js";
 import { MemoryWorkflowCache, type WorkflowCache } from "./cache.js";
+import { SqliteWorkflowCache } from "./sqlite-cache.js";
 import type { WorkflowEvent, WorkflowLoader } from "./engine-contract.js";
 import { WorkflowEngine } from "./engine.js";
-import { LeaseHeartbeat } from "./durability.js";
+import { AutoResumeScheduler, LeaseHeartbeat, type Timer } from "./durability.js";
 import type { ChildRuntime } from "./runtime.js";
 import { validateSpec } from "./schema.js";
 import { ValidationError, type WorkflowSpec } from "./types.js";
 import type { RunResult } from "./accounting.js";
 import type { Ownership } from "../state/workflow-repository.js";
 import { WorkflowRepository } from "../state/workflow-repository.js";
+import {
+  DENY_ALL_POLICY,
+  loadPolicy,
+  sandboxDispatch,
+  taintWrap,
+  TaintTracker,
+  type ToolDispatchLike,
+  type SandboxPolicy,
+} from "./sandbox.js";
 import type { LockRepository } from "../state/locks.js";
 
 export const RUN_LEASE_TTL = 900;
 export const FENCE_MEMORY = 1024;
+
+/** The token an evicted run presents: never a number, so a forgotten fence can
+ * never be guessed into a write. Mirrors the oracle's EVICTED sentinel. */
+export const EVICTED = Symbol.for("lohra.workflow.fence.evicted");
+
+/**
+ * Bounded memory of the fence each run acquired, oldest evicted first at
+ * FENCE_MEMORY entries. An evicted run has no honest token left, so its owned
+ * writes are refused fail-closed rather than presented with a guess.
+ */
+export class FenceMemory {
+  private readonly fences = new Map<string, number>();
+
+  public constructor(private readonly capacity: number = FENCE_MEMORY) {}
+
+  public remember(runId: string, fence: number): void {
+    this.fences.delete(runId);
+    this.fences.set(runId, fence);
+    while (this.fences.size > Math.max(1, this.capacity)) {
+      const oldest = this.fences.keys().next();
+      if (oldest.done === true) break;
+      this.fences.delete(oldest.value);
+    }
+  }
+
+  public forget(runId: string): void {
+    this.fences.delete(runId);
+  }
+
+  public tokenOf(runId: string): number | typeof EVICTED {
+    const fence = this.fences.get(runId);
+    return fence === undefined ? EVICTED : fence;
+  }
+
+  public get size(): number {
+    return this.fences.size;
+  }
+}
+
 export const RECOVERED_FAULT = "recovered after process loss";
 export const CHECKPOINT_PAUSE = "checkpoint";
 export const QUOTA_PAUSE = "quota_exhausted";
@@ -174,6 +224,8 @@ export interface OwnershipStore {
   readonly holder: string;
   readonly ttl: number;
   readonly ownershipOf: () => Ownership;
+  /** The shared connection, for the default fenced SQLite node cache. */
+  readonly database: import("better-sqlite3").Database;
 }
 
 export interface WorkflowStartResult {
@@ -242,6 +294,16 @@ function resultView(
   });
 }
 
+function defaultServiceTimer(delay: number, fire: () => void): Timer {
+  const handle = setTimeout(fire, delay * 1000);
+  handle.unref();
+  return {
+    cancel: () => {
+      clearTimeout(handle);
+    },
+  };
+}
+
 function isLive(record: RunRecord | undefined): boolean {
   return record !== undefined && !record.settled;
 }
@@ -256,6 +318,17 @@ export class WorkflowService {
   private readonly store: OwnershipStore | undefined;
   private readonly cacheFactory: ((runId: string) => WorkflowCache) | undefined;
   private readonly heartbeat: LeaseHeartbeat | undefined;
+  private readonly policyLoader: (() => SandboxPolicy) | undefined;
+  private readonly taintTracker: TaintTracker | undefined;
+  private readonly autoResume: AutoResumeScheduler | undefined;
+  private readonly homeRoot: string;
+  private readonly fenceMemory: FenceMemory;
+  /** Per-ACQUISITION sandbox context; the leaf dispatch of a stretch reads it
+   * live, so a resume with a fresh policy/taint is what its leaves get. */
+  private readonly stretches = new Map<
+    string,
+    { readonly workingRoot: string; readonly policy: SandboxPolicy; readonly tainted: boolean }
+  >();
 
   public constructor(options: {
     readonly runtime: ChildRuntime;
@@ -265,6 +338,15 @@ export class WorkflowService {
     readonly onEvent?: (event: WorkflowEvent) => void;
     readonly store?: OwnershipStore;
     readonly cacheFactory?: (runId: string) => WorkflowCache;
+    /** Production wiring: read the operator capability policy per launch. */
+    readonly policyPath?: string;
+    readonly taintTracker?: TaintTracker;
+    /** Operator home root: `<home>/runs/<run_id>/work-<fence>` scratch. */
+    readonly homeRoot?: string;
+    /** Injectable for tests; production uses a real repeating timer. */
+    readonly timerFactory?: (delay: number, fire: () => void) => Timer;
+    /** Bounded fence memory; only tests shrink it below FENCE_MEMORY. */
+    readonly fenceMemory?: number;
   }) {
     this.runtime = options.runtime;
     this.cache = options.cache ?? new MemoryWorkflowCache();
@@ -273,14 +355,64 @@ export class WorkflowService {
     this.onEvent = options.onEvent;
     this.store = options.store;
     this.cacheFactory = options.cacheFactory;
-    if (options.store !== undefined) {
-      const store = options.store;
+    this.taintTracker = options.taintTracker;
+    this.homeRoot = options.homeRoot ?? ".";
+    this.fenceMemory = new FenceMemory(options.fenceMemory ?? FENCE_MEMORY);
+    const policyPath = options.policyPath;
+    this.policyLoader = policyPath === undefined ? undefined : () => loadPolicy(policyPath);
+    const store = options.store;
+    if (store !== undefined) {
+      const timerFactory = options.timerFactory ?? defaultServiceTimer;
+      this.autoResume = new AutoResumeScheduler(
+        (runId) => this.start(null, {}, { resumeRunId: runId }),
+        { timerFactory },
+      );
+      // Production heartbeat: a REAL repeating timer (setTimeout) renews the
+      // lease every TTL/3 while the run holds it. Tests inject their own
+      // timer factory; the service default is the live clock, not a no-op.
       this.heartbeat = new LeaseHeartbeat(
         (runId) =>
           store.locks.renewRunLease(runId, store.holder, store.ownershipOf().now, store.ttl),
-        { interval: store.ttl / 3, timerFactory: () => ({ cancel: () => undefined }) },
+        { interval: store.ttl / 3, timerFactory },
+      );
+      // Cold start: a dead process left quota-paused lines behind; re-arm them
+      // from the durable rows with the attempts they had already spent.
+      this.autoResume.rearmPendingResumes(
+        (pauseReason) =>
+          store.repository
+            .runStatesByPause(pauseReason, 50)
+            .map((row) => ({ run_id: String(row.run_id) })),
+        (runId) => this.durableOf(runId)?.attempts ?? 0,
       );
     }
+  }
+
+  /**
+   * The leaf capability seam: whoever implements `ChildRuntime` wraps its leaf
+   * tool dispatch with this, and the run's leaves get the operator policy (from
+   * operator config, NEVER the spec), the per-acquisition working root and the
+   * sticky taint gate. Evaluated per call, so a `web_fetch` that taints the
+   * session closes fs/egress for every call after it — in the same stretch.
+   */
+  public leafToolDispatch(runId: string, base: ToolDispatchLike): ToolDispatchLike {
+    const tracker = this.taintTracker;
+    // taint marks INSIDE the sandbox: a call the sandbox denied never taints.
+    const marked = tracker === undefined ? base : taintWrap(base, tracker);
+    return (name, args) => {
+      const stretch = this.stretches.get(runId);
+      const policy = stretch?.policy ?? this.policyLoader?.() ?? DENY_ALL_POLICY;
+      const workingRoot = stretch?.workingRoot ?? this.workingRootOf(runId, 0);
+      // Taint is ORed and never downgraded: the live stretch, the durable line
+      // a previous process wrote, and this session's tracker.
+      const tainted =
+        (stretch?.tainted ?? this.durableOf(runId)?.tainted === true) || tracker?.tainted === true;
+      return sandboxDispatch(marked, { workingRoot, policy, tainted })(name, args);
+    };
+  }
+
+  /** The scratch root the run's leaves may write to, for this acquisition. */
+  public workingRootFor(runId: string): string {
+    return this.stretches.get(runId)?.workingRoot ?? this.workingRootOf(runId, 0);
   }
 
   // --- launch --------------------------------------------------------------
@@ -347,6 +479,13 @@ export class WorkflowService {
     checkpointAnswers: Readonly<Record<string, unknown>>,
     tokenBudget: number | null,
   ): WorkflowStartResult {
+    // Even without a durable store the leaves are sandboxed: operator policy,
+    // a run-scoped working root, and whatever taint the session already has.
+    this.stretches.set(runId, {
+      workingRoot: this.workingRootOf(runId, 0),
+      policy: this.policyLoader?.() ?? DENY_ALL_POLICY,
+      tainted: this.taintTracker?.tainted === true,
+    });
     const engine = new WorkflowEngine({
       runtime: this.runtime,
       cache: this.cache,
@@ -408,7 +547,10 @@ export class WorkflowService {
         }
       }
     }
-    const tainted = priorView?.tainted === true;
+    // Taint is ORed, never downgraded: the session's tracker plus whatever the
+    // durable line already carried.
+    const tainted =
+      (priorView?.tainted === true) || (this.taintTracker?.tainted === true);
     const liveHere = this.runs.get(runId);
     const orphaned =
       resumeRunId !== undefined &&
@@ -435,6 +577,21 @@ export class WorkflowService {
       store.locks.releaseRunLease(runId, store.holder);
       return Object.freeze({ error: refusal });
     }
+    // The token of THIS acquisition, held in the BOUNDED fence memory: an
+    // evicted run has no honest token left, so its owned writes are refused
+    // fail-closed (null) instead of presenting a guessed fence.
+    this.fenceMemory.remember(runId, fence);
+    const stretchOwnership = (): Ownership | null => {
+      const token = this.fenceMemory.tokenOf(runId);
+      if (token === EVICTED) return null;
+      return { fence: token, holder: store.holder, now: store.ownershipOf().now };
+    };
+    // The operator capability policy is loaded per launch from operator
+    // config, never from the spec. The leaves of this stretch reach it through
+    // `leafToolDispatch`, which reads this record live.
+    const policy = this.policyLoader?.() ?? DENY_ALL_POLICY;
+    const workingRoot = this.workingRootOf(runId, fence);
+    this.stretches.set(runId, { workingRoot, policy, tainted });
     const engine = new WorkflowEngine({
       runtime: this.runtime,
       budget: new Budget({
@@ -446,9 +603,20 @@ export class WorkflowService {
       ...(this.loader === undefined ? {} : { loader: this.loader }),
       ...(Object.keys(answers).length > 0 ? { checkpointAnswers: answers } : {}),
       ...(this.onEvent === undefined ? {} : { onEvent: this.onEvent }),
-      ...(this.cacheFactory === undefined
-        ? {}
-        : { cache: this.cacheFactory(runId) }),
+      // Durable default: the FENCED SQLite node cache over the shared
+      // connection. An explicit cache/cacheFactory still wins.
+      ...(this.cacheFactory !== undefined
+        ? { cache: this.cacheFactory(runId) }
+        : this.cache instanceof MemoryWorkflowCache
+          ? {
+              cache: new SqliteWorkflowCache(
+                store.database,
+                runId,
+                () => stretchOwnership() ?? { fence: -1, holder: store.holder, now: store.ownershipOf().now },
+                { repository: store.repository },
+              ),
+            }
+          : { cache: this.cache }),
     });
     const record = this.makeRecord(runId, parsed.name, engine);
     const carriedFaults = [...(priorView?.prior_faults ?? [])];
@@ -480,12 +648,7 @@ export class WorkflowService {
     // The launch line presents the token of THIS acquisition for its writes:
     // keep a per-run ownership view pinned to the acquired fence so every
     // write of the stretch presents the same honest token.
-    const stretchOwnership: Ownership = {
-      fence,
-      holder: store.holder,
-      now: store.ownershipOf().now,
-    };
-    this.persistSpend(store, runId, effectiveBudget, seeded, engine, stretchOwnership);
+    this.persistSpend(store, runId, effectiveBudget, seeded, engine, stretchOwnership());
     void engine
       .run(parsed, args)
       .then((result) => {
@@ -494,7 +657,8 @@ export class WorkflowService {
         const degraded =
           priorDegraded ||
           result.faults.some((fault) => fault !== result.pauseFault);
-        const owned = this.persistLine(store, runId, {
+        const terminal = stretchOwnership();
+        const owned = terminal === null ? false : this.persistLine(store, runId, {
           name: parsed.name,
           owner: store.holder,
           status: result.status,
@@ -521,30 +685,75 @@ export class WorkflowService {
           tainted,
           progressJson: progressJsonOf(result),
           auditSegmentId: null,
-          updatedAt: stretchOwnership.now,
-          fence: stretchOwnership.fence,
-          holder: stretchOwnership.holder,
-          now: stretchOwnership.now,
+          updatedAt: terminal.now,
+          fence: terminal.fence,
+          holder: terminal.holder,
+          now: terminal.now,
         });
-        this.persistSpend(store, runId, effectiveBudget, seeded, engine, stretchOwnership);
+        this.persistSpend(store, runId, effectiveBudget, seeded, engine, stretchOwnership());
+        // A quota pause is the one failure that fixes itself given time: arm
+        // the retry here (bounded, capped); token-budget and checkpoint pauses
+        // arm nothing — waiting does not refill a budget, only an ANSWER moves
+        // a checkpoint.
+        let resumeAt: number | null = null;
+        if (owned && result.status === "paused" && result.pauseReason === QUOTA_PAUSE) {
+          const retryAfter =
+            result.checkpoint !== null &&
+            typeof (result.checkpoint as Record<string, unknown>).retry_after === "number"
+              ? ((result.checkpoint as Record<string, unknown>).retry_after as number)
+              : null;
+          resumeAt =
+            this.autoResume?.schedule(runId, {
+              attempts: (priorView?.attempts ?? 0) + 1,
+              retryAfter,
+            }) ?? null;
+        }
+        if (resumeAt !== null && terminal !== null) {
+          this.persistLine(store, runId, {
+            name: parsed.name,
+            owner: store.holder,
+            status: "paused",
+            pauseReason: QUOTA_PAUSE,
+            pausePayloadJson: JSON.stringify({
+              checkpoint: null,
+              resume_at: resumeAt,
+              attempts: (priorView?.attempts ?? 0) + 1,
+              prior_faults: faults,
+              prior_degraded: degraded,
+            }),
+            specJson: JSON.stringify(rawSpecOf(parsed)),
+            argsJson: JSON.stringify(args),
+            tokenBudget: effectiveBudget,
+            tainted,
+            progressJson: progressJsonOf(result),
+            auditSegmentId: null,
+            updatedAt: terminal.now,
+            fence: terminal.fence,
+            holder: terminal.holder,
+            now: terminal.now,
+          });
+        }
         // The heartbeat stops FIRST; a tick that outlived the release would put
         // the lease back and leave the run looking alive with nobody in it.
         this.heartbeat?.stop(runId);
         store.locks.releaseRunLease(runId, store.holder);
+        this.stretches.delete(runId);
         record.settled = true;
         if (owned) {
           record.resolve(resultView(runId, parsed.name, result, engine.budget));
         } else {
           // Fail-closed (errata E2): a stretch that lost ownership never
-          // publishes a terminal success; the waiter resolves bounded as ERROR.
+          // publishes a terminal success — no done, no notify, no publish; the
+          // waiter resolves BOUNDED with the errata envelope instead.
           record.resolve(
-            ownershipLost(runId, stretchOwnership.fence) as unknown as Readonly<Record<string, unknown>>,
+            ownershipLost(runId, fence) as unknown as Readonly<Record<string, unknown>>,
           );
         }
       })
       .catch((error: unknown) => {
         this.heartbeat?.stop(runId);
         store.locks.releaseRunLease(runId, store.holder);
+        this.stretches.delete(runId);
         record.settled = true;
         record.resolve({
           run_id: runId,
@@ -561,8 +770,11 @@ export class WorkflowService {
     budget: number | null,
     seeded: Readonly<{ tokensIn: number; tokensOut: number }>,
     engine: WorkflowEngine,
-    ownership: Ownership,
+    ownership: Ownership | null,
   ): void {
+    // Evicted from the bounded fence memory: no honest token to present, so
+    // the ledger write is refused here rather than guessed into SQL.
+    if (ownership === null) return;
     store.repository.putRunSpend(
       runId,
       budget,
@@ -574,6 +786,12 @@ export class WorkflowService {
       ownership,
     );
     void seeded;
+  }
+
+  /** One scratch directory per ACQUISITION, named by the fence, so a stale
+   * owner's leaves write harmlessly into their own obsolete root. */
+  private workingRootOf(runId: string, fence: number): string {
+    return join(this.homeRoot, "runs", runId, `work-${String(fence)}`);
   }
 
   private persistLine(store: OwnershipStore, runId: string, fields: Parameters<WorkflowRepository["putRunState"]>[1]): boolean {
@@ -741,10 +959,8 @@ export class WorkflowService {
     // rides in the write's own statement.
     const view = this.durableOf(runId);
     if (view === null) return Object.freeze({ error: `unknown workflow run '${runId}'` });
-    const expiry = store.locks.runLeaseExpiry(runId, store.ownershipOf().now);
-    if (expiry !== null) {
-      return Object.freeze({ error: "busy", run_id: runId });
-    }
+    // The BUSY decision rides in the write's own statement (requireUnleased):
+    // no read-before-write window in which an owner could acquire.
     const written = store.repository.putRunState(runId, {
       name: view.name,
       owner: view.owner,

@@ -10,25 +10,25 @@ export function toolError(message: string): string {
   return `${TOOL_ERROR_PREFIX}${message}`;
 }
 
-export interface FsRoot {
+export interface SandboxFsRoot {
   readonly path: string;
   readonly writable: boolean;
 }
 
-export interface WorkflowPolicy {
-  readonly fsAllow: readonly FsRoot[];
+export interface SandboxPolicy {
+  readonly fsAllow: readonly SandboxFsRoot[];
   readonly egressAllow: readonly string[];
 }
 
 const FS_MODES: Readonly<Record<string, boolean>> = { ro: false, rw: true };
 
 /** Operator-controlled capability policy (loaded from disk, never the spec). */
-export function loadPolicy(path: string): WorkflowPolicy {
+export function loadPolicy(path: string): SandboxPolicy {
   try {
     if (!existsSync(path)) return { fsAllow: [], egressAllow: [] };
     const data = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
     const rawAllow = Array.isArray(data.fs_allow) ? data.fs_allow : [];
-    const fsAllow: FsRoot[] = [];
+    const fsAllow: SandboxFsRoot[] = [];
     for (const entry of rawAllow) {
       let raw: unknown;
       let writable = true;
@@ -89,7 +89,7 @@ function fsDenial(
   name: string,
   rawPath: unknown,
   workingRoot: string,
-  policy: WorkflowPolicy,
+  policy: SandboxPolicy,
 ): string | null {
   const write = name === "write_file";
   const allowedRoots = [workingRoot, ...policy.fsAllow.filter((root) => root.writable || !write).map((root) => root.path)];
@@ -100,7 +100,7 @@ function fsDenial(
   return toolError("path is outside the workflow working scope (sandbox denied)");
 }
 
-function egressAllowed(rawUrl: unknown, policy: WorkflowPolicy): boolean {
+function egressAllowed(rawUrl: unknown, policy: SandboxPolicy): boolean {
   if (typeof rawUrl !== "string") return false;
   let host: string;
   try {
@@ -121,7 +121,7 @@ export function sandboxDispatch(
   base: ToolDispatchLike,
   options: {
     readonly workingRoot: string;
-    readonly policy: WorkflowPolicy;
+    readonly policy: SandboxPolicy;
     readonly tainted: boolean;
   },
 ): ToolDispatchLike {
@@ -170,3 +170,8 @@ export function ownershipOf(fence: number, holder: string, now: number): Workflo
   return { fence, holder, now };
 }
 
+/** Deny-by-default: what a run gets when no operator policy file is readable. */
+export const DENY_ALL_POLICY: SandboxPolicy = Object.freeze({
+  fsAllow: Object.freeze([]),
+  egressAllow: Object.freeze([]),
+});

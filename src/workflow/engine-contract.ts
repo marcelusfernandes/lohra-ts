@@ -67,6 +67,8 @@ export interface RunControl {
   pausePayload: Readonly<Record<string, unknown>> | null;
 }
 
+export const QUOTA_EXHAUSTED = "quota_exhausted";
+
 export interface WorkflowEngineOptions {
   readonly runtime: ChildRuntime;
   readonly budget?: Budget;

@@ -12,10 +12,14 @@ export class WorkflowTool {
   constructor(private readonly service: WorkflowService) {}
 
   run(args: ToolArguments): string {
+    const resumeRunId = args.resume_run_id;
+    if (resumeRunId !== undefined && typeof resumeRunId !== "string")
+      return toolError("'resume_run_id' must be a string");
     const spec = args.spec;
     if (spec !== undefined && record(spec) === null)
       return toolError("'spec' must be an object (with meta + nodes)");
-    if (spec === undefined) return toolError("run_workflow needs a 'spec' object (with meta + nodes)");
+    if (spec === undefined && resumeRunId === undefined)
+      return toolError("run_workflow needs a 'spec' object (with meta + nodes)");
     const runArgs = args.args;
     if (runArgs !== undefined && record(runArgs) === null)
       return toolError("'args' must be an object of run inputs (referenced as ${args.x})");
@@ -28,10 +32,15 @@ export class WorkflowTool {
       (typeof tokenBudget !== "number" || !Number.isInteger(tokenBudget) || tokenBudget <= 0)
     )
       return toolError("'token_budget' must be a positive integer");
-    const out = this.service.start(spec, record(runArgs) ?? {}, {
-      ...(answers === undefined ? {} : { checkpointAnswers: record(answers) ?? {} }),
-      ...(tokenBudget === undefined ? {} : { tokenBudget }),
-    });
+    const out = this.service.start(
+      spec === undefined ? null : spec,
+      record(runArgs) ?? {},
+      {
+        ...(answers === undefined ? {} : { checkpointAnswers: record(answers) ?? {} }),
+        ...(tokenBudget === undefined ? {} : { tokenBudget }),
+        ...(resumeRunId === undefined ? {} : { resumeRunId }),
+      },
+    );
     if ("error" in out)
       return out.invalid_spec === true ? toolError(`invalid workflow spec: ${out.error}`) : toolError(out.error);
     return toolResult(undefined, { ...out });

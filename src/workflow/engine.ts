@@ -5,7 +5,7 @@ import type { Usage } from "../pricing/types.js";
 import { addUsageToResult, deriveStatus, RunResult } from "./accounting.js";
 import { Budget, FanoutRejected, TokenBudgetExhausted } from "./budget.js";
 import { contentHash, MemoryWorkflowCache, type WorkflowCache } from "./cache.js";
-import { DEFAULT_LEAF_MAX_ITERATIONS, EMPTY_OUTPUT_CORRECTION, GATE_VERDICT_SCHEMA, JUDGE_SCORE_SCHEMA, LEAF_TIMEOUT_SECONDS, MAX_WORKFLOW_DEPTH, PIPELINE_TIMEOUT_SECONDS, type LeafExecution, type RunControl, type Strategy, type WorkflowEngineOptions, type WorkflowEvent, type WorkflowLoader, VERIFY_SCHEMA } from "./engine-contract.js";
+import { DEFAULT_LEAF_MAX_ITERATIONS, EMPTY_OUTPUT_CORRECTION, GATE_VERDICT_SCHEMA, JUDGE_SCORE_SCHEMA, LEAF_TIMEOUT_SECONDS, MAX_WORKFLOW_DEPTH, PIPELINE_TIMEOUT_SECONDS, QUOTA_EXHAUSTED, type LeafExecution, type RunControl, type Strategy, type WorkflowEngineOptions, type WorkflowEvent, type WorkflowLoader, VERIFY_SCHEMA } from "./engine-contract.js";
 import { asRecord, clampInteger, combine, nonEmpty, renderValue, resultUsage, routingIdentity, routingOf, strictResolve, verifyPrompt } from "./engine-utils.js";
 import { topologicalOrder } from "./graph.js";
 import { MAX_GATE_ATTEMPTS, MAX_NODE_MAX_ITERATIONS, MAX_NODE_RETRIES } from "./nodes.js";
@@ -90,6 +90,26 @@ export class WorkflowEngine {
 
   requestPause(): void {
     this.pause("user_requested", "run paused at the operator's request");
+  }
+
+  /** A leaf died because the provider is out of quota (WF-1): latch once, one
+   * fault with retry_after, and cancel the leaves still in flight. */
+  noteQuotaExhausted(nodeId: string, retryAfter: number | null): void {
+    if (this.control.paused || this.control.cancelled) return;
+    const hint = retryAfter !== null ? `${String(Math.trunc(retryAfter))}s` : "none";
+    this.control.pausePayload = retryAfter === null ? null : { retry_after: retryAfter };
+    this.pause(
+      "quota_exhausted",
+      `quota exhausted at '${nodeId}' (retry_after=${hint})`,
+    );
+    for (const id of [...this.activeLeaves]) {
+      try {
+        void this.runtime.cancel(id);
+      } catch {
+        // cleanup must never mask the pause itself
+      }
+    }
+    this.activeLeaves.clear();
   }
 
   private emit(event: WorkflowEvent): void {
@@ -184,6 +204,11 @@ export class WorkflowEngine {
       let total = resultUsage(collected);
       if (collected.status !== "complete") {
         this.account(node.id, id, collected);
+        if (collected.errorKind === QUOTA_EXHAUSTED) {
+          // Not this leaf's own failure — the whole run is out of quota.
+          this.noteQuotaExhausted(node.id, collected.retryAfter ?? null);
+          return { output: null, usage: total, complete: false };
+        }
         const kind = collected.errorKind === null || collected.errorKind === undefined
           ? ""
           : ` (${collected.errorKind})`;

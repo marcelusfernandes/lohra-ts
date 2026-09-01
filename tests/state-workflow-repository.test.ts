@@ -65,6 +65,98 @@ function writeState(
   });
 }
 
+/**
+ * The three conjuncts of the shared ownership guard, planted one at a time,
+ * per write category. Each category gets its own `it(...)` so the mutation
+ * harness can point a conjunct mutant at exactly one category's oracle.
+ */
+function plantedPhases(
+  write: (
+    repository: ReturnType<typeof repo>["repository"],
+    key: string,
+    ownership: { fence: number; holder: string; now: number },
+  ) => boolean,
+  landed: (
+    repository: ReturnType<typeof repo>["repository"],
+    key: string,
+  ) => boolean,
+): void {
+  const warnings: StateWarning[] = [];
+  const { repository, locks, close } = repo(warnings);
+  const fence = locks.acquireRunLease("run", "p1", 1000, 50);
+  if (fence === null) throw new Error("expected lease token");
+  // the live owner's own token lands
+  expect(write(repository, "ok", { fence, holder: "p1", now: 1000 })).toBe(true);
+  expect(landed(repository, "ok")).toBe(true);
+  // (i) stale fence F-1, everything else honest
+  expect(write(repository, "stale-fence", { fence: fence - 1, holder: "p1", now: 1000 })).toBe(false);
+  expect(landed(repository, "stale-fence")).toBe(false);
+  // (ii) wrong holder, fence exactly current, lease live
+  expect(write(repository, "wrong-holder", { fence, holder: "p2", now: 1000 })).toBe(false);
+  expect(landed(repository, "wrong-holder")).toBe(false);
+  // (iii) right fence and holder, lease EXPIRED (TTL 50 from 1000)
+  expect(write(repository, "expired", { fence, holder: "p1", now: 1051 })).toBe(false);
+  expect(landed(repository, "expired")).toBe(false);
+  expect(warnings.map((warning) => warning.cause as string)).toEqual([
+    "STALE_FENCE_WRITE",
+    "STALE_FENCE_WRITE",
+    "STALE_FENCE_WRITE",
+  ]);
+  close();
+}
+
+describe("workflow repository — planted guard phases per write category", () => {
+  it("guard state: stale fence, wrong holder and expired lease are each refused", () => {
+    // One row per run: a refused phase leaves the PREVIOUS status standing.
+    plantedPhases(
+      (repository, key, ownership) => writeState(repository, "run", ownership, key),
+      (repository, key) => repository.getRunState("run")?.status === key,
+    );
+  });
+
+  it("guard cache: stale fence, wrong holder and expired lease are each refused", () => {
+    plantedPhases(
+      (repository, key, ownership) =>
+        repository.putCacheCell("run", key, "node", "{}", "complete", ownership),
+      (repository, key) => repository.getCacheCell("run", key) !== null,
+    );
+  });
+
+  it("guard node-cost: stale fence, wrong holder and expired lease are each refused", () => {
+    plantedPhases(
+      (repository, key, ownership) =>
+        repository.putCacheCost("run", key, 1, 2, 0, 0, 0, ownership),
+      (repository, key) => repository.getCacheCost("run", key) !== null,
+    );
+  });
+
+  it("guard spend: stale fence, wrong holder and expired lease are each refused", () => {
+    // One ledger row per run: the phase marks itself in token_budget, so a
+    // refused phase leaves the previous marker standing.
+    const marker = (key: string): number => key.length * 1000 + key.charCodeAt(0);
+    plantedPhases(
+      (repository, key, ownership) =>
+        repository.putRunSpend("run", marker(key), 1, 2, 0, 0, 0, ownership),
+      (repository, key) => Number(repository.getRunSpend("run")?.token_budget) === marker(key),
+    );
+  });
+
+  it("guard combined cache+cost: a refused cell writes no cost (priced or absent)", () => {
+    plantedPhases(
+      (repository, key, ownership) =>
+        repository.putCacheCellWithCost("run", key, "node", "{}", "complete", ownership, {
+          tokensIn: 7,
+          tokensOut: 3,
+          cacheRead: 0,
+          cacheWrite: 0,
+          reasoning: 0,
+        }),
+      (repository, key) =>
+        repository.getCacheCell("run", key) !== null || repository.getCacheCost("run", key) !== null,
+    );
+  });
+});
+
 describe("workflow repository — owned writes demand live ownership", () => {
   it("refuses every owned write when the presented fence is stale (H1)", () => {
     const { repository, locks, database, close } = repo();

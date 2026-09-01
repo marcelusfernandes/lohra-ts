@@ -1,3 +1,0 @@
-// The wrong-holder test: after p2 acquires at 1001, write with holder p2 but fence from p1 (fence 1)...
-// p2's acquire BUMPED the fence to 2. So writeState with {...first(holder p2), fence 1} → exact-fence=1 vs current 2 → refused.
-// Test intent: the NEW owner (p2, fence 2) writes fine. Fix the test to use second acquisition.

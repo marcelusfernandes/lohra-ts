@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 
 import type { Usage } from "../pricing/types.js";
 import { usage } from "../pricing/usage.js";
+import { WorkflowRepository } from "../state/workflow-repository.js";
 import type { CacheLookup, WorkflowCache, WorkflowCacheOwnership } from "./cache.js";
 
 /**
@@ -12,18 +13,21 @@ import type { CacheLookup, WorkflowCache, WorkflowCacheOwnership } from "./cache
  */
 export class SqliteWorkflowCache implements WorkflowCache {
   private readonly onWrite: (() => void) | undefined;
+  /** The ONE guarded-write primitive; this cache owns no SQL guard of its own. */
+  private readonly repository: WorkflowRepository;
 
   public constructor(
     private readonly database: Database.Database,
     private readonly runId: string,
     private readonly ownershipOf: () => WorkflowCacheOwnership,
-    options: { readonly onWrite?: () => void } = {},
+    options: { readonly onWrite?: () => void; readonly repository?: WorkflowRepository } = {},
   ) {
     this.onWrite = options.onWrite;
+    this.repository = options.repository ?? new WorkflowRepository(database);
   }
 
-  public get(hash: string): CacheLookup {
-    return this.lookup(this.runId, hash);
+  public get(runId: string, hash: string): CacheLookup {
+    return this.lookup(runId, hash);
   }
 
   private lookup(runId: string, hash: string): CacheLookup {
@@ -74,53 +78,26 @@ export class SqliteWorkflowCache implements WorkflowCache {
         cost.cacheReadTokens !== 0 ||
         cost.cacheWriteTokens !== 0 ||
         cost.reasoningTokens !== 0);
-    const ok = this.database
-      .transaction(() => {
-        const cell = this.database
-          .prepare(
-            `INSERT OR REPLACE INTO workflow_node_cache
-             (content_hash, run_id, node_id, output_json, status, updated_at)
-             SELECT ?, ?, ?, ?, ?, ?
-             FROM (SELECT 1 AS dual)
-             JOIN workflow_run_fence f ON f.run_id = ? AND f.fence = ?
-             JOIN workflow_run_locks l ON l.run_id = ?
-               AND l.holder = ? AND l.expires_at > ?`,
-          )
-          .run(
-            hash,
-            this.runId,
-            nodeId,
-            output === null ? null : JSON.stringify(output),
-            "complete",
-            ownership.now,
-            this.runId,
-            ownership.fence,
-            this.runId,
-            ownership.holder,
-            ownership.now,
-          );
-        if (cell.changes === 0) return false;
-        if (priced) {
-          this.database
-            .prepare(
-              `INSERT OR REPLACE INTO workflow_node_cost
-               (run_id, content_hash, tokens_in, tokens_out, cache_read_tokens,
-                cache_write_tokens, reasoning_tokens)
-               VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            )
-            .run(
-              this.runId,
-              hash,
-              cost.inputTokens,
-              cost.outputTokens,
-              cost.cacheReadTokens,
-              cost.cacheWriteTokens,
-              cost.reasoningTokens,
-            );
-        }
-        return true;
-      })
-      .immediate();
+    // Cell + cost in ONE transaction, through the shared guard: the cell's
+    // INSERT carries the ownership guard, the cost INSERT only runs after that
+    // success inside the same transaction ("priced or absent").
+    const ok = this.repository.putCacheCellWithCost(
+      this.runId,
+      hash,
+      nodeId,
+      output === null ? null : JSON.stringify(output),
+      "complete",
+      ownership,
+      priced
+        ? {
+            tokensIn: cost.inputTokens,
+            tokensOut: cost.outputTokens,
+            cacheRead: cost.cacheReadTokens,
+            cacheWrite: cost.cacheWriteTokens,
+            reasoning: cost.reasoningTokens,
+          }
+        : null,
+    );
     if (ok) this.onWrite?.();
     return ok;
   }
