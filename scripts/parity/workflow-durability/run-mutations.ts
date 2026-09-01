@@ -128,19 +128,9 @@ const mutants: readonly Mutant[] = [
   {
     id: "terminal-write-after-release",
     mechanism: "terminal line is persisted after the lease is released",
-    edits: [{ file: service, before: `        this.heartbeat?.stop(runId);
-        store.locks.releaseRunLease(runId, store.holder);
-        record.settled = true;`,
-      after: `        this.heartbeat?.stop(runId);
-        store.locks.releaseRunLease(runId, store.holder);
-        this.persistLine(store, runId, {
-          name: parsed.name, owner: store.holder, status: "complete", pauseReason: null,
-          pausePayloadJson: null, specJson: "{}", argsJson: "{}", tokenBudget: null,
-          tainted: false, progressJson: null, auditSegmentId: null,
-          updatedAt: store.ownershipOf().now, fence: null, holder: null, now: store.ownershipOf().now,
-          requireUnleased: true,
-        });
-        record.settled = true;` }],
+    edits: [{ file: service,
+      before: "        this.persistSpend(store, runId, effectiveBudget, seeded, engine, stretchOwnership);\n        // The heartbeat stops FIRST; a tick that outlived the release would put\n        // the lease back and leave the run looking alive with nobody in it.\n        this.heartbeat?.stop(runId);",
+      after: "        this.persistSpend(store, runId, effectiveBudget, seeded, engine, stretchOwnership);\n        // The heartbeat stops FIRST; a tick that outlived the release would put\n        // the lease back and leave the run looking alive with nobody in it.\n        store.locks.releaseRunLease(runId, store.holder);\n        this.heartbeat?.stop(runId);" }],
   },
   {
     id: "ownership-lost-publishes-success",
