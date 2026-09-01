@@ -276,5 +276,18 @@ round2 = {
     "judgeInvalid": {"output": judge_invalid["outputs"]["n"], "steers": judge_invalid_factory.calls - judge_invalid_factory.spawns, "spawns": judge_invalid_factory.spawns},
     "gateInvalid": {"output": gate_invalid["outputs"]["n"], "steers": gate_invalid_factory.calls - gate_invalid_factory.spawns, "spawns": gate_invalid_factory.spawns},
 }
+anchor_schema = {"$defs": {"p": {"$anchor": "positive", "type": "integer", "minimum": 1}}, "$ref": "#positive"}
+dynamic_schema = {"$defs": {"p": {"$dynamicAnchor": "node", "type": "object"}}, "$dynamicRef": "#node"}
+embedded_id_schema = {"$defs": {"foo": {"$id": "urn:example:foo", "type": "integer"}}, "$ref": "urn:example:foo"}
+pointer_schema = {"$defs": {"text": {"type": "string"}}, "$ref": "#/$defs/text"}
+reference_matrix = {
+    "anchor": [parse_and_validate(2, anchor_schema)[0], parse_and_validate(0, anchor_schema)[0]],
+    "dynamic": [parse_and_validate({}, dynamic_schema)[0], parse_and_validate([], dynamic_schema)[0]],
+    "embeddedId": [parse_and_validate(2, embedded_id_schema)[0], parse_and_validate(json.dumps("2"), embedded_id_schema)[0]],
+    "pointer": [parse_and_validate(json.dumps("ok"), pointer_schema)[0], parse_and_validate(2, pointer_schema)[0]],
+    "unresolved": [parse_and_validate(2, {"$ref": reference})[0] for reference in ["#missing", "urn:missing:no-network"]],
+}
+multiple_of = [parse_and_validate(value, {"type": "number", "multipleOf": 0.1})[0] for value in [0.2, 0.3, 0.6, 0.7, 1.5]]
+round3 = {"referenceMatrix": reference_matrix, "multipleOf": multiple_of}
 
-print(json.dumps({"successes": successes, "failures": failures, "fanout": fanout, "budget": budget_out, "nullUpstream": null_upstream, "engineFault": engine_fault, "schemaRetry": schema_retry, "cache": cache_projection, "round1": round1, "round2": round2}, sort_keys=True))
+print(json.dumps({"successes": successes, "failures": failures, "fanout": fanout, "budget": budget_out, "nullUpstream": null_upstream, "engineFault": engine_fault, "schemaRetry": schema_retry, "cache": cache_projection, "round1": round1, "round2": round2, "round3": round3}, sort_keys=True))

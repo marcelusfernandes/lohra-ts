@@ -191,6 +191,50 @@ describe("workflow Draft 2020-12 output validation", () => {
       expect(parseAndValidate(value, schema).ok).toBe(false);
     });
   }
+
+  it("resolves local anchors for valid and invalid values", () => {
+    const schema = {
+      $defs: { positive: { $anchor: "positive", type: "integer", minimum: 1 } },
+      $ref: "#positive",
+    };
+    expect(parseAndValidate(2, schema).ok).toBe(true);
+    expect(parseAndValidate(0, schema).ok).toBe(false);
+  });
+
+  it("resolves a local dynamic anchor for object and array values", () => {
+    const schema = {
+      $defs: { node: { $dynamicAnchor: "node", type: "object" } },
+      $dynamicRef: "#node",
+    };
+    expect(parseAndValidate({}, schema).ok).toBe(true);
+    expect(parseAndValidate([], schema).ok).toBe(false);
+  });
+
+  it("resolves an embedded id without external lookup", () => {
+    const schema = {
+      $defs: { foo: { $id: "urn:example:foo", type: "integer" } },
+      $ref: "urn:example:foo",
+    };
+    expect(parseAndValidate(2, schema).ok).toBe(true);
+    expect(parseAndValidate(JSON.stringify("2"), schema).ok).toBe(false);
+  });
+
+  it("keeps JSON Pointer refs and names unresolved refs without fetching", () => {
+    const pointer = { $defs: { text: { type: "string" } }, $ref: "#/$defs/text" };
+    expect(parseAndValidate(JSON.stringify("ok"), pointer).ok).toBe(true);
+    expect(parseAndValidate(2, pointer).ok).toBe(false);
+    for (const $ref of ["#missing", "https://example.invalid/schema"]) {
+      const result = parseAndValidate(2, { $ref });
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain("schema error");
+    }
+  });
+
+  for (const [value, accepted] of [[0.2, true], [0.3, false], [0.6, false], [0.7, false], [1.5, true]] as const) {
+    it(`matches pinned multipleOf arithmetic for ${String(value)}`, () => {
+      expect(parseAndValidate(value, { type: "number", multipleOf: 0.1 }).ok).toBe(accepted);
+    });
+  }
 });
 
 describe("workflow validation and lifecycle", () => {

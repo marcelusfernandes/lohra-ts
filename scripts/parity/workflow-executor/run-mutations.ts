@@ -115,6 +115,60 @@ const mutants: readonly Mutant[] = [
     }],
   },
   {
+    id: "local-anchor-resolution-disabled",
+    mechanism: "plain local anchors cannot resolve",
+    edits: [{
+      file: "src/workflow/json-schema.ts",
+      before: "candidate[dynamic ? \"$dynamicAnchor\" : \"$anchor\"] === name ||",
+      after: "candidate.$dynamicAnchor === name ||",
+    }],
+  },
+  {
+    id: "dynamic-reference-resolution-disabled",
+    mechanism: "dynamicRef is treated as an ignored annotation",
+    edits: [{
+      file: "src/workflow/json-schema.ts",
+      before: "  if (typeof raw.$dynamicRef === \"string\")\n    errors.push(...validate(value, resolveReference(root, raw.$dynamicRef, true), path, root));",
+      after: "  void raw.$dynamicRef;",
+    }],
+  },
+  {
+    id: "embedded-id-resolution-disabled",
+    mechanism: "embedded resources cannot resolve by id",
+    edits: [{
+      file: "src/workflow/json-schema.ts",
+      before: "  const resource = findSchema(root, (candidate) => candidate.$id === resourceId);",
+      after: "  const resource = findSchema(root, () => false);",
+    }],
+  },
+  {
+    id: "json-pointer-resolution-disabled",
+    mechanism: "existing local JSON Pointer refs regress",
+    edits: [{
+      file: "src/workflow/json-schema.ts",
+      before: "  if (reference === \"#\") return root;\n  if (reference.startsWith(\"#/\")) return pointer(root, reference);",
+      after: "  if (reference === \"#\") return root;\n  if (reference.startsWith(\"#/\")) throw new SchemaDefinitionError(\"pointer disabled\");",
+    }],
+  },
+  {
+    id: "unresolved-reference-accepted",
+    mechanism: "unresolved external refs are silently accepted",
+    edits: [{
+      file: "src/workflow/json-schema.ts",
+      before: "  if (resource === undefined)\n    throw new SchemaDefinitionError(`unresolved reference ${reference}; external resolution disabled`);",
+      after: "  if (resource === undefined) return true;",
+    }],
+  },
+  {
+    id: "multiple-of-float-tolerance",
+    mechanism: "multipleOf uses a tolerance instead of pinned oracle quotient arithmetic",
+    edits: [{
+      file: "src/workflow/json-schema.ts",
+      before: "      if (Math.trunc(quotient) !== quotient)",
+      after: "      if (Math.abs(quotient - Math.round(quotient)) > Number.EPSILON * 10)",
+    }],
+  },
+  {
     id: "verify-lens-ignored",
     mechanism: "verify prompt ignores the selected skeptic lens",
     edits: [{

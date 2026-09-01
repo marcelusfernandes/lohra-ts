@@ -209,5 +209,17 @@ const gateInvalid = await runOne(
   { fail: "gate-invalid" },
 );
 const nanBudget = new Budget({ poolWidth: Number.NaN, maxFanout: Number.NaN, lifetime: Number.NaN });
+const anchorSchema = { $defs: { p: { $anchor: "positive", type: "integer", minimum: 1 } }, $ref: "#positive" };
+const dynamicSchema = { $defs: { p: { $dynamicAnchor: "node", type: "object" } }, $dynamicRef: "#node" };
+const embeddedIdSchema = { $defs: { foo: { $id: "urn:example:foo", type: "integer" } }, $ref: "urn:example:foo" };
+const pointerSchema = { $defs: { text: { type: "string" } }, $ref: "#/$defs/text" };
+const referenceMatrix = {
+  anchor: [parseAndValidate(2, anchorSchema).ok, parseAndValidate(0, anchorSchema).ok],
+  dynamic: [parseAndValidate({}, dynamicSchema).ok, parseAndValidate([], dynamicSchema).ok],
+  embeddedId: [parseAndValidate(2, embeddedIdSchema).ok, parseAndValidate(JSON.stringify("2"), embeddedIdSchema).ok],
+  pointer: [parseAndValidate(JSON.stringify("ok"), pointerSchema).ok, parseAndValidate(2, pointerSchema).ok],
+  unresolved: ["#missing", "urn:missing:no-network"].map(($ref) => parseAndValidate(2, { $ref }).ok),
+};
+const multipleOf = [0.2, 0.3, 0.6, 0.7, 1.5].map((value) => parseAndValidate(value, { type: "number", multipleOf: 0.1 }).ok);
 
-process.stdout.write(`${JSON.stringify({ successes, failures, fanout: fanout.value, budget: budget.value, nullUpstream: project(nullResult, nullRuntime), engineFault, schemaRetry: schemaRetry.value, cache: { spawns: cacheRuntime.requests.length, split: cache.totalSplit("same") }, round1: { pipelinePreflight: pipelinePreflight.value, schemaKeywords, verifyInvalid: { output: verifyInvalid.value.outputs.n, steers: verifyInvalid.runtime.steers.length, lens: verifyInvalid.runtime.requests.some((request) => request.prompt.includes("SECURITY-LENS")) }, judgePrompt: judgeWinner.runtime.requests.find((request) => request.causalContext.role === "judge.synthesis")?.prompt ?? null, gateSequential: gateSequential.value, nanBudget: [nanBudget.poolWidth, nanBudget.maxFanout, nanBudget.lifetimeRemaining] }, round2: { judgeInvalid: { output: judgeInvalid.value.outputs.n, steers: judgeInvalid.runtime.steers.length, spawns: judgeInvalid.runtime.requests.length }, gateInvalid: { output: gateInvalid.value.outputs.n, steers: gateInvalid.runtime.steers.length, spawns: gateInvalid.runtime.requests.length } } })}\n`);
+process.stdout.write(`${JSON.stringify({ successes, failures, fanout: fanout.value, budget: budget.value, nullUpstream: project(nullResult, nullRuntime), engineFault, schemaRetry: schemaRetry.value, cache: { spawns: cacheRuntime.requests.length, split: cache.totalSplit("same") }, round1: { pipelinePreflight: pipelinePreflight.value, schemaKeywords, verifyInvalid: { output: verifyInvalid.value.outputs.n, steers: verifyInvalid.runtime.steers.length, lens: verifyInvalid.runtime.requests.some((request) => request.prompt.includes("SECURITY-LENS")) }, judgePrompt: judgeWinner.runtime.requests.find((request) => request.causalContext.role === "judge.synthesis")?.prompt ?? null, gateSequential: gateSequential.value, nanBudget: [nanBudget.poolWidth, nanBudget.maxFanout, nanBudget.lifetimeRemaining] }, round2: { judgeInvalid: { output: judgeInvalid.value.outputs.n, steers: judgeInvalid.runtime.steers.length, spawns: judgeInvalid.runtime.requests.length }, gateInvalid: { output: gateInvalid.value.outputs.n, steers: gateInvalid.runtime.steers.length, spawns: gateInvalid.runtime.requests.length } }, round3: { referenceMatrix, multipleOf } })}\n`);

@@ -71,6 +71,69 @@ function pointer(root: Schema, reference: string): Schema {
   return schema(current, reference);
 }
 
+function schemaChildren(raw: Readonly<Record<string, unknown>>): readonly Schema[] {
+  const children: Schema[] = [];
+  for (const keyword of ["$defs", "definitions", "properties", "patternProperties", "dependentSchemas"] as const) {
+    if (raw[keyword] === undefined) continue;
+    const entries = record(raw[keyword], `$.${keyword}`);
+    for (const [key, child] of Object.entries(entries)) children.push(schema(child, `$.${keyword}.${key}`));
+  }
+  for (const keyword of ["allOf", "anyOf", "oneOf", "prefixItems"] as const)
+    if (raw[keyword] !== undefined) children.push(...schemas(raw[keyword], `$.${keyword}`));
+  for (const keyword of ["not", "if", "then", "else", "items", "contains", "additionalProperties", "propertyNames", "unevaluatedProperties", "unevaluatedItems"] as const)
+    if (raw[keyword] !== undefined) children.push(schema(raw[keyword], `$.${keyword}`));
+  return children;
+}
+
+function findSchema(
+  root: Schema,
+  predicate: (candidate: Readonly<Record<string, unknown>>) => boolean,
+): Schema | undefined {
+  const seen = new Set<Readonly<Record<string, unknown>>>();
+  const visit = (candidate: Schema): Schema | undefined => {
+    if (typeof candidate === "boolean" || seen.has(candidate)) return undefined;
+    seen.add(candidate);
+    if (predicate(candidate)) return candidate;
+    for (const child of schemaChildren(candidate)) {
+      const found = visit(child);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  };
+  return visit(root);
+}
+
+function namedAnchor(root: Schema, name: string, dynamic: boolean): Schema | undefined {
+  return findSchema(
+    root,
+    (candidate) =>
+      candidate[dynamic ? "$dynamicAnchor" : "$anchor"] === name ||
+      (!dynamic && candidate.$dynamicAnchor === name),
+  );
+}
+
+function resolveReference(root: Schema, reference: string, dynamic = false): Schema {
+  if (reference === "#") return root;
+  if (reference.startsWith("#/")) return pointer(root, reference);
+  if (reference.startsWith("#")) {
+    const name = decodeURIComponent(reference.slice(1));
+    const anchored = namedAnchor(root, name, dynamic);
+    if (anchored !== undefined) return anchored;
+    throw new SchemaDefinitionError(`unresolved local reference ${reference}`);
+  }
+  const fragmentAt = reference.indexOf("#");
+  const resourceId = fragmentAt < 0 ? reference : reference.slice(0, fragmentAt);
+  const resource = findSchema(root, (candidate) => candidate.$id === resourceId);
+  if (resource === undefined)
+    throw new SchemaDefinitionError(`unresolved reference ${reference}; external resolution disabled`);
+  if (fragmentAt < 0 || fragmentAt === reference.length - 1) return resource;
+  const fragment = reference.slice(fragmentAt);
+  if (fragment.startsWith("#/")) return pointer(resource, fragment);
+  const anchored = namedAnchor(resource, decodeURIComponent(fragment.slice(1)), dynamic);
+  if (anchored !== undefined) return anchored;
+  throw new SchemaDefinitionError(`unresolved local reference ${reference}`);
+}
+
 function patternEntries(raw: unknown, path: string): readonly (readonly [RegExp, Schema])[] {
   const patterns = raw === undefined ? {} : record(raw, path);
   return Object.entries(patterns).map(([pattern, child]) => {
@@ -91,7 +154,9 @@ function evaluatedObjectKeys(
   const evaluated = new Set<string>();
   if (typeof raw === "boolean") return evaluated;
   if (typeof raw.$ref === "string")
-    for (const key of evaluatedObjectKeys(value, pointer(root, raw.$ref), root)) evaluated.add(key);
+    for (const key of evaluatedObjectKeys(value, resolveReference(root, raw.$ref), root)) evaluated.add(key);
+  if (typeof raw.$dynamicRef === "string")
+    for (const key of evaluatedObjectKeys(value, resolveReference(root, raw.$dynamicRef, true), root)) evaluated.add(key);
   const properties = raw.properties === undefined ? {} : record(raw.properties, "$.properties");
   const patterns = patternEntries(raw.patternProperties, "$.patternProperties");
   for (const key of Object.keys(value)) {
@@ -137,7 +202,9 @@ function evaluatedItemIndexes(
   const evaluated = new Set<number>();
   if (typeof raw === "boolean") return evaluated;
   if (typeof raw.$ref === "string")
-    for (const index of evaluatedItemIndexes(value, pointer(root, raw.$ref), root)) evaluated.add(index);
+    for (const index of evaluatedItemIndexes(value, resolveReference(root, raw.$ref), root)) evaluated.add(index);
+  if (typeof raw.$dynamicRef === "string")
+    for (const index of evaluatedItemIndexes(value, resolveReference(root, raw.$dynamicRef, true), root)) evaluated.add(index);
   const prefix = raw.prefixItems === undefined ? [] : schemas(raw.prefixItems, "$.prefixItems");
   for (let index = 0; index < Math.min(prefix.length, value.length); index += 1) evaluated.add(index);
   if (raw.items !== undefined)
@@ -163,7 +230,10 @@ function validate(value: unknown, raw: Schema, path: string, root: Schema): stri
   if (raw === true) return [];
   if (raw === false) return [`${path}: false schema rejects every value`];
   const errors: string[] = [];
-  if (typeof raw.$ref === "string") errors.push(...validate(value, pointer(root, raw.$ref), path, root));
+  if (typeof raw.$ref === "string")
+    errors.push(...validate(value, resolveReference(root, raw.$ref), path, root));
+  if (typeof raw.$dynamicRef === "string")
+    errors.push(...validate(value, resolveReference(root, raw.$dynamicRef, true), path, root));
   const types = raw.type === undefined ? [] : Array.isArray(raw.type) ? raw.type : [raw.type];
   if (types.some((item) => typeof item !== "string" || !TYPES.has(item)))
     throw new SchemaDefinitionError(`${path}.type must name JSON Schema types`);
@@ -206,7 +276,7 @@ function validate(value: unknown, raw: Schema, path: string, root: Schema): stri
     if (multipleOf !== undefined) {
       if (multipleOf <= 0) throw new SchemaDefinitionError(`${path}.multipleOf must be positive`);
       const quotient = value / multipleOf;
-      if (Math.abs(quotient - Math.round(quotient)) > Number.EPSILON * 10)
+      if (Math.trunc(quotient) !== quotient)
         errors.push(`${path}: value is not a multiple of ${String(multipleOf)}`);
     }
   }
