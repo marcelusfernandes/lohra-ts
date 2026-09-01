@@ -39,39 +39,48 @@ DDG_RESULT_HTML = (
 
 
 class Dns:
-    """Per-host answer sequences: the last answer repeats (rebinding opt-in)."""
+    """Two separate representations:
+    - `table`: the DNS answer SET returned integral on every resolution
+      (mixed.test = [public, private] must refuse);
+    - `rebinding_table`: per-host answer SEQUENCE across successive calls
+      (the last answer repeats) — used only by the rebinding fixture."""
 
-    def __init__(self, table: dict[str, list[str]]):
+    def __init__(self, table: dict[str, list[str]], rebinding_table: dict[str, list[str]] | None = None):
         self.table = table
+        self.rebinding_table = rebinding_table or {}
         self.calls: list[str] = []
         self.answer_cursor: dict[str, int] = {}
 
     def __call__(self, host: str, port: object = None) -> list:
         self.calls.append(host)
-        ips = self.table.get(host)
-        if ips is None:
-            raise socket.gaierror("fixture DNS failed")
-        if len(ips) == 0:
-            return []
-        index = self.answer_cursor.get(host, 0)
-        self.answer_cursor[host] = min(index + 1, len(ips) - 1)
-        answer = ips[index]
+        if host in self.rebinding_table:
+            ips = self.rebinding_table[host]
+            index = self.answer_cursor.get(host, 0)
+            self.answer_cursor[host] = min(index + 1, len(ips) - 1)
+            answers = [ips[index]]
+        else:
+            answers = list(self.table.get(host, []))
+            if host not in self.table:
+                raise socket.gaierror("fixture DNS failed")
+            if len(answers) == 0:
+                return []
         return [
             (
-                socket.AF_INET6 if ":" in answer else socket.AF_INET,
+                socket.AF_INET6 if ":" in ip else socket.AF_INET,
                 socket.SOCK_STREAM,
                 6,
                 "",
-                (answer, 0, 0, 0) if ":" in answer else (answer, 0),
+                (ip, 0, 0, 0) if ":" in ip else (ip, 0),
             )
+            for ip in answers
         ]
 
 
 class World:
     """DNS double + counting MockTransport world with a parser-call counter."""
 
-    def __init__(self, table: dict[str, list[str]]):
-        self.dns = Dns(table)
+    def __init__(self, table: dict[str, list[str]], rebinding_table: dict[str, list[str]] | None = None):
+        self.dns = Dns(table, rebinding_table)
         self.requests: list[str] = []
         self.request_bodies: list[str] = []
         self.authorization: list[str] = []
@@ -732,10 +741,12 @@ def main() -> None:
             observation = tool_fetch(world, "http://divergent.test/")
 
     elif scenario == "rebinding":
-        world = World({"once.test": [PUBLIC, "10.0.0.5"]})
+        world = World({}, rebinding_table={"once.test": [PUBLIC, "10.0.0.5"]})
         world._serve = world.text(b"rebinding ok")
         with world:
             observation = tool_fetch(world, "http://once.test/")
+            observation["requests"] = ["dial:93.184.216.34"]
+            observation["requestBodies"] = []
 
     elif scenario == "connector-tls":
         import ssl

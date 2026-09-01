@@ -82,7 +82,7 @@
       "side": "both",
       "field": "process.stdout",
       "encoding": "utf8",
-      "value": "{\"rows\": [{\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [\"private.test\"], \"parserCalls\": 0, \"requestBodies\": [], \"requests\": [], \"result\": {\"error\": \"refusing to fetch a non-public address: 10.0.0.5 (host 'private.test')\", \"url\": \"http://private.test/\"}}, {\"authorization\": [], \"bodyBytesRead\": 5, \"dns\": [\"private.test\", \"mixed.test\"], \"parserCalls\": 0, \"requestBodies\": [\"\"], \"requests\": [\"http://mixed.test/\"], \"result\": {\"ok\": true, \"text\": \"never\", \"url\": \"http://mixed.test/\"}}]}\n"
+      "value": "{\"rows\": [{\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [\"private.test\"], \"parserCalls\": 0, \"requestBodies\": [], \"requests\": [], \"result\": {\"error\": \"refusing to fetch a non-public address: 10.0.0.5 (host 'private.test')\", \"url\": \"http://private.test/\"}}, {\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [\"private.test\", \"mixed.test\"], \"parserCalls\": 0, \"requestBodies\": [], \"requests\": [], \"result\": {\"error\": \"refusing to fetch a non-public address: 10.0.0.5 (host 'mixed.test')\", \"url\": \"http://mixed.test/\"}}]}\n"
     }
   ],
   "normalizations": [],

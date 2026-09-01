@@ -41,10 +41,9 @@ const MUTANTS: readonly Mutant[] = [
   },
   {
     id: "b-connector-re-resolves",
-    file: "src/web/fetch.ts",
-    find: "    const validated = await validatePublicUrl(current, { resolver: deps.resolver });",
-    replace:
-      "    await validatePublicUrl(current, { resolver: deps.resolver });\n    const validated = await validatePublicUrl(current, { resolver: deps.resolver });",
+    file: "src/web/connector.ts",
+    find: "        host: (allowed[0] as AddressRecord).address,",
+    replace: "        host: request.hostname,",
     scenarios: ["t20-rebinding"],
   },
   {

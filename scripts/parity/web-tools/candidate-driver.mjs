@@ -5,17 +5,20 @@
  * loop are the TS product under test. Output is byte-canonical with the oracle
  * driver (sorted keys, Python json.dumps formatting, ensure_ascii). */
 import net from "node:net";
+import { EventEmitter } from "node:events";
 import { Buffer } from "node:buffer";
 import { TextEncoder } from "node:util";
 import { URL } from "node:url";
 import process from "node:process";
 
 import { ToolRegistry } from "../../../dist/tools/registry.js";
+import { toolResult } from "../../../dist/tools/envelope.js";
 import { createBuiltinRegistry } from "../../../dist/tools/builtins.js";
 import { ConversationRuntime } from "../../../dist/conversation/runtime.js";
 import {
   ConnectorError,
   createPinnedConnector,
+  fetchUrl,
   currentSearchBackend,
   currentWebTransport,
   setWebTransport,
@@ -100,26 +103,35 @@ function emit(value) {
 
 /* ---------- doubles ---------- */
 class Dns {
-  /* Per-host answer sequences: the last answer repeats (rebinding opt-in). */
-  constructor(table) {
+  /* Two separate representations:
+   * - `table`: the DNS answer SET returned integral on every resolution
+   *   (mixed.test = [public, private] must refuse);
+   * - `rebindingTable`: per-host answer SEQUENCE across successive calls
+   *   (the last answer repeats) — used only by the rebinding fixture. */
+  constructor(table, rebindingTable) {
     this.table = table;
+    this.rebindingTable = rebindingTable ?? {};
     this.calls = [];
     this.answerCursor = {};
   }
   resolve(host) {
     this.calls.push(host);
+    if (host in this.rebindingTable) {
+      const ips = this.rebindingTable[host];
+      const index = this.answerCursor[host] ?? 0;
+      this.answerCursor[host] = Math.min(index + 1, ips.length - 1);
+      const answer = ips[index];
+      return [{ address: answer, family: answer.includes(":") ? 6 : 4 }];
+    }
     const ips = this.table[host];
     if (ips === undefined) throw new Error("fixture DNS failed");
     if (ips.length === 0) return [];
-    const index = this.answerCursor[host] ?? 0;
-    this.answerCursor[host] = Math.min(index + 1, ips.length - 1);
-    const answer = ips[index];
-    return [{ address: answer, family: answer.includes(":") ? 6 : 4 }];
+    return ips.map((address) => ({ address, family: address.includes(":") ? 6 : 4 }));
   }
 }
 
-function makeWorld(table) {
-  const dns = new Dns(table);
+function makeWorld(table, rebindingTable) {
+  const dns = new Dns(table, rebindingTable);
   const world = {
     dns,
     requests: [],
@@ -811,14 +823,59 @@ async function main() {
     setWebTransport(world.transport());
     observation = await toolFetch(world, "http://divergent.test/");
   } else if (scenario === "rebinding") {
-    const world = makeWorld({ "once.test": [PUBLIC, "10.0.0.5"] });
-    world.serve = () => ({
-      status: 200,
-      headers: { "content-type": "text/plain" },
-      body: world.chunked([new TextEncoder().encode("rebinding ok")]),
-    });
-    setWebTransport(world.transport());
-    observation = await toolFetch(world, "http://once.test/");
+    /* Exercises the REAL pinned connector through an in-memory http layer with
+     * the adversarial rebinding DNS double: a connector that re-resolves the
+     * hostname receives the private second answer and is refused (B=0). */
+    const world = makeWorld({}, { "once.test": [PUBLIC, "10.0.0.5"] });
+    const dialOptions = [];
+    const nodeRequestFactory =
+      () =>
+      (options, callback) => {
+        dialOptions.push(options);
+        let peer = options.host ?? "";
+        if (!/^\d+(\.\d+){3}$/.test(peer) && peer.includes(":") === false && peer !== "") {
+          peer = world.dns.resolve(peer)[0]?.address ?? peer;
+        }
+        const body = new TextEncoder().encode("rebinding ok");
+        let served = false;
+        const response = new EventEmitter();
+        response.statusCode = 200;
+        response.headers = { "content-type": "text/plain" };
+        response.socket = { remoteAddress: peer };
+        response.readableEnded = false;
+        response.read = () => {
+          if (served) return null;
+          served = true;
+          return body;
+        };
+        response.destroy = () => response.removeAllListeners();
+        const request = new EventEmitter();
+        request.end = () => {
+          callback(response);
+          setImmediate(() => {
+            response.readableEnded = true;
+            response.emit("end");
+          });
+        };
+        response.destroy = () => response.removeAllListeners();
+        request.destroy = () => request.removeAllListeners();
+        return request;
+      };
+    const resolver = (host) => world.dns.resolve(host);
+    const connector = createPinnedConnector({ requestFactory: nodeRequestFactory });
+    const outcome = await fetchUrl("http://once.test/", { resolver, connector });
+    const parsed = JSON.parse(
+      toolResult(undefined, { url: "http://once.test/", text: outcome.text }),
+    );
+    observation = {
+      result: parsed,
+      dns: [...world.dns.calls],
+      requests: dialOptions.map((options) => `dial:${String(options.host)}`),
+      requestBodies: [],
+      authorization: [],
+      bodyBytesRead: outcome.stats.bufferedBytes,
+      parserCalls: world.parserCalls,
+    };
   } else if (scenario === "connector-tls") {
     const observedDials = [];
     const connector = createPinnedConnector({

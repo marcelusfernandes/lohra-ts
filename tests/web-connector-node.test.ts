@@ -281,6 +281,69 @@ describe("nodeDial lifecycle over an in-memory http layer", () => {
     expect(settled).toBe("fixture stream aborted");
   });
 
+  it("persists a terminal error that arrives in the gap between reads", async () => {
+    const pending = dial(factory);
+    await vi.advanceTimersByTimeAsync(0);
+    const response = exchanges[0]?.response;
+    if (response === undefined) throw new Error("fixture response missing");
+    const first = await pending;
+    const firstChunk = first.stream.next();
+    await vi.advanceTimersByTimeAsync(5_000);
+    response.chunks.push(Buffer.from("partial"));
+    response.emit("readable");
+    await firstChunk;
+    response.emit("error", new Error("fixture terminal gap"));
+    const second = first.stream.next();
+    let settled: string | null = null;
+    void second.then(
+      () => {
+        settled = "done";
+      },
+      (error: unknown) => {
+        settled = (error as Error).message;
+      },
+    );
+    await vi.advanceTimersByTimeAsync(80_000);
+    expect(settled).toBe("fixture terminal gap");
+    expect(response.listenerCount("readable")).toBe(0);
+    expect(response.listenerCount("end")).toBe(0);
+    expect(response.listenerCount("error")).toBe(0);
+    expect(response.listenerCount("aborted")).toBe(0);
+    expect(response.listenerCount("close")).toBe(0);
+  });
+
+  it("keeps read listeners constant across many async chunks and zero at terminal", async () => {
+    const pending = dial(factory);
+    await vi.advanceTimersByTimeAsync(0);
+    const response = exchanges[0]?.response;
+    if (response === undefined) throw new Error("fixture response missing");
+    const counts: number[] = [];
+    const first = await pending;
+    process.stdout.write("loop start\n");
+    for (let index = 0; index < 12; index += 1) {
+      const read = first.stream.next();
+      counts.push(response.listenerCount("end"));
+
+      response.chunks.push(Buffer.from(`chunk-${String(index)}`));
+      response.emit("readable");
+
+      const result = await read;
+
+      expect(result.done).toBe(false);
+      expect(response.listenerCount("end"), `chunk ${String(index)}`).toBe(0);
+    }
+    expect(counts).toEqual(Array.from({ length: 12 }, () => 1));
+    const terminal = first.stream.next();
+    response.emit("end");
+    const done = await terminal;
+    expect(done.done).toBe(true);
+    expect(response.listenerCount("readable")).toBe(0);
+    expect(response.listenerCount("end")).toBe(0);
+    expect(response.listenerCount("error")).toBe(0);
+    expect(response.listenerCount("aborted")).toBe(0);
+    expect(response.listenerCount("close")).toBe(0);
+  });
+
   it("rejects an abort arriving between reads", async () => {
     const pending = dial(factory);
     await vi.advanceTimersByTimeAsync(0);

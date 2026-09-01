@@ -82,7 +82,7 @@
       "side": "both",
       "field": "process.stdout",
       "encoding": "utf8",
-      "value": "{\"authorization\": [], \"bodyBytesRead\": 12, \"dns\": [\"once.test\"], \"parserCalls\": 0, \"requestBodies\": [\"\"], \"requests\": [\"http://once.test/\"], \"result\": {\"ok\": true, \"text\": \"rebinding ok\", \"url\": \"http://once.test/\"}}\n"
+      "value": "{\"authorization\": [], \"bodyBytesRead\": 12, \"dns\": [\"once.test\"], \"parserCalls\": 0, \"requestBodies\": [], \"requests\": [\"dial:93.184.216.34\"], \"result\": {\"ok\": true, \"text\": \"rebinding ok\", \"url\": \"http://once.test/\"}}\n"
     }
   ],
   "normalizations": [],

@@ -222,6 +222,8 @@ async function nodeDial(dialRequest: PinnedDialRequest): Promise<ConnectorRespon
     };
     let nodeResponse: NodeResponseLike | null = null;
     let ended = false;
+    let terminalError: Error | null = null;
+    let removeTerminalListeners: () => void = (): void => {};
     let pendingRead: {
       resolveChunk: (result: IteratorResult<Uint8Array>) => void;
       rejectChunk: (error: Error) => void;
@@ -240,6 +242,8 @@ async function nodeDial(dialRequest: PinnedDialRequest): Promise<ConnectorRespon
     const settleFailure = (error: Error): void => {
       disarmTimer();
       cleanupStreamListeners();
+      removeTerminalListeners();
+      terminalError = terminalError ?? error;
       if (pendingRead !== null) {
         const { rejectChunk } = pendingRead;
         pendingRead = null;
@@ -250,6 +254,8 @@ async function nodeDial(dialRequest: PinnedDialRequest): Promise<ConnectorRespon
         settled = true;
         reject(error);
       }
+      // Otherwise the failure is persisted in `terminalError` and the next
+      // `next()` call rejects with the original cause.
     };
     armTimer();
     const nodeRequest = transportRequest(
@@ -312,6 +318,11 @@ async function nodeDial(dialRequest: PinnedDialRequest): Promise<ConnectorRespon
         };
         const stream: ConnectorStream = {
           next() {
+            if (terminalError !== null) {
+              cleanupStreamListeners();
+              removeTerminalListeners();
+              return Promise.reject(terminalError);
+            }
             if (ended) return Promise.resolve({ done: true, value: undefined });
             const ready = response.read();
             if (ready !== null && ready !== undefined) {
@@ -340,6 +351,7 @@ async function nodeDial(dialRequest: PinnedDialRequest): Promise<ConnectorRespon
                   return;
                 }
                 pendingRead = null;
+                cleanupStreamListeners();
                 resolveChunk({ done: false, value: new Uint8Array(chunk as Buffer) });
               };
               const onEnd = (): void => {
@@ -347,8 +359,12 @@ async function nodeDial(dialRequest: PinnedDialRequest): Promise<ConnectorRespon
                 disarmTimer();
                 cleanupStreamListeners();
                 removeTerminalListeners();
-                pendingRead = null;
-                resolveChunk({ done: true, value: undefined });
+                if (pendingRead !== null) {
+                  const { resolveChunk } = pendingRead;
+                  pendingRead = null;
+                  resolveChunk({ done: true, value: undefined });
+                }
+                // Otherwise `ended` persists: later next() calls return done.
               };
               streamListeners = { readable: onReadable, end: onEnd };
               response.once("readable", onReadable);
