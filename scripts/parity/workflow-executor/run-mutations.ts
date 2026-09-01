@@ -18,6 +18,7 @@ const focalTests = [
   "tests/workflow-executor.test.ts",
   "tests/workflow-nodes-tool.test.ts",
   "tests/workflow-hardening.test.ts",
+  "tests/parity/scenarios.test.ts",
 ] as const;
 
 interface Edit {
@@ -351,6 +352,51 @@ const mutants: readonly Mutant[] = [
     id: "chat-without-real-dispatch",
     mechanism: "public handler no longer dispatches run_workflow",
     edits: [{ file: "src/workflow/tool.ts", before: "    run_workflow: (args) => tool.run(args),", after: "    run_workflow_disabled: (args) => tool.run(args)," }],
+  },
+  {
+    id: "chat-run-id-normalization-removed",
+    mechanism: "volatile nested run_id is no longer normalized before the events.requests comparison",
+    edits: [{
+      file: "scripts/parity/manifests/t15/t15-chat-workflow.json",
+      before: `    { "field": "events.requests", "kind": "replace-regex", "pattern": "\\"run_id\\": \\"[^\\" ]+", "replacement": "\\"run_id\\": \\"<run-id>" }\n  ],`,
+      after: `  ],`,
+    }],
+  },
+  {
+    id: "chat-requests-comparison-removed",
+    mechanism: "events.request bodies are dropped from the real comparison set",
+    edits: [{
+      file: "scripts/parity/manifests/t15/t15-chat-workflow.json",
+      before: `    { "class": "stub", "field": "events.requests" },\n`,
+      after: ``,
+    }],
+  },
+  {
+    id: "chat-start-status-running",
+    mechanism: "run_workflow start envelope reports running instead of the pinned started",
+    edits: [{
+      file: "src/workflow/service.ts",
+      before: `    return Object.freeze({ run_id: id, status: "started" });`,
+      after: `    return Object.freeze({ run_id: id, status: "running" });`,
+    }],
+  },
+  {
+    id: "chat-start-reinsert-name",
+    mechanism: "run_workflow start envelope re-adds the name field the oracle omits",
+    edits: [{
+      file: "src/workflow/service.ts",
+      before: `    return Object.freeze({ run_id: id, status: "started" });`,
+      after: `    return Object.freeze({ run_id: id, name: parsed.name, status: "started" });`,
+    }],
+  },
+  {
+    id: "chat-prompt-composition-removed",
+    mechanism: "candidate probe reverts to the bare canned system prompt",
+    edits: [{
+      file: "scripts/parity/workflow-executor/candidate-chat.mjs",
+      before: `promptSnapshot: () => buildSystemPrompt({ systemMessage: "T15 canned workflow chat" }).text,`,
+      after: `promptSnapshot: () => "T15 canned workflow chat",`,
+    }],
   },
 ];
 

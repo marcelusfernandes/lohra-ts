@@ -506,9 +506,23 @@ describe("public workflow tool path", () => {
     });
     expect(result.response.content).toBe("workflow complete");
     expect(result.toolCalls?.map((call) => call.name)).toEqual(["run_workflow", "workflow_status"]);
-    expect(result.toolCalls?.[0]?.result).toContain('"run_id": "run-1"');
+    expect(result.toolCalls?.[0]?.result).toBe(
+      '{"ok": true, "run_id": "run-1", "status": "started"}',
+    );
     expect(result.toolCalls?.[1]?.result).toContain('"outputs": {"agent": "leaf-output"}');
     expect(model.requests[2]?.messages).toHaveLength(5);
+  });
+
+  it("returns the pinned oracle start envelope shape without extra fields", () => {
+    const service = new WorkflowService({
+      runtime: new QueueChildren([[ok("leaf-output")]]),
+      idSource: () => "run-1",
+    });
+    const out = service.start(
+      { meta: { name: "public" }, nodes: [{ id: "agent", type: "agent", prompt: "do it" }] },
+      {},
+    );
+    expect(out).toEqual({ run_id: "run-1", status: "started" });
   });
 
   it("rejects malformed public args with named causes", () => {

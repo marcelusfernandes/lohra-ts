@@ -19,8 +19,7 @@ interface RunRecord {
 
 export interface WorkflowStartResult {
   readonly run_id: string;
-  readonly name: string;
-  readonly status: "running";
+  readonly status: "started";
 }
 
 export interface WorkflowServiceError {
@@ -105,7 +104,7 @@ export class WorkflowService {
     });
     Object.assign(record, { id, name: parsed.name, engine, promise, result: null });
     this.runs.set(id, record);
-    return Object.freeze({ run_id: id, name: parsed.name, status: "running" });
+    return Object.freeze({ run_id: id, status: "started" });
   }
 
   async runAndWait(

@@ -48,6 +48,7 @@
     { "class": "byte", "field": "process.exitCode" },
     { "class": "byte", "field": "process.signal" },
     { "class": "byte", "field": "process.stdout" },
+    { "class": "stub", "field": "events.requests" },
     { "class": "stub", "field": "events.summary" },
     { "class": "stub", "field": "events.assertions" }
   ],
@@ -57,7 +58,9 @@
     { "side": "both", "field": "events.summary", "value": { "exists": true, "records": { "gets": 0, "posts": 2, "sequence": ["POST /v1/chat/completions", "POST /v1/chat/completions"] } } },
     { "side": "both", "field": "events.assertions", "value": { "exists": true, "records": { "valid": true, "failures": [] } } }
   ],
-  "normalizations": [],
+  "normalizations": [
+    { "field": "events.requests", "kind": "replace-regex", "pattern": "\"run_id\": \"[^\" ]+", "replacement": "\"run_id\": \"<run-id>" }
+  ],
   "stub": {
     "state": "up-with-models",
     "fixture": "chat-tool-sequence",

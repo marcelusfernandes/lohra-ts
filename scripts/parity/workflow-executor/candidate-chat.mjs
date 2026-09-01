@@ -12,6 +12,7 @@ import {
   ChatCompletionsTransport,
 } from "../../../dist/transports/index.js";
 import { composeDispatch, RegistryToolDispatcher } from "../../../dist/tools/index.js";
+import { buildSystemPrompt } from "../../../dist/context/index.js";
 import { WorkflowService, workflowToolHandlers } from "../../../dist/workflow/index.js";
 
 class Repository {
@@ -66,7 +67,7 @@ const client = new ChatCompletionsClient({
 const runtime = new ConversationRuntime({
   repository: new Repository(),
   transport: new ChatCompletionsModel(client),
-  promptSnapshot: () => "T15 canned workflow chat",
+  promptSnapshot: () => buildSystemPrompt({ systemMessage: "T15 canned workflow chat" }).text,
   toolDispatcher: new RegistryToolDispatcher(dispatch),
   toolDefinitions,
   idSource: () => "chat-1",

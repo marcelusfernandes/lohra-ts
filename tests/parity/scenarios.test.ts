@@ -3,7 +3,10 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { canonicalJson } from "../../scripts/parity/canonical.js";
+import { compareRuns } from "../../scripts/parity/compare.js";
 import { parseScenarioManifest } from "../../scripts/parity/manifest.js";
+import type { RunRecord } from "../../scripts/parity/types.js";
 
 const scenarios = [
   "oracle-version",
@@ -123,5 +126,176 @@ describe("versioned scenarios", () => {
     expect(
       manifest.capture.events.find(({ name: event }) => event === "requestsRaw"),
     ).toMatchObject({ projection: "raw-only" });
+  });
+});
+
+describe("t15 chat evidence reproducibility", () => {
+  const t15ManifestPath = "scripts/parity/manifests/t15/t15-chat-workflow.json";
+
+  interface T15Policy {
+    readonly comparisons: readonly { readonly class: string; readonly field: string }[];
+    readonly normalizations: readonly {
+      readonly field: string;
+      readonly kind: string;
+      readonly pattern?: string;
+      readonly hashOnly?: boolean;
+    }[];
+  }
+
+  const loadT15Policy = (): T15Policy =>
+    JSON.parse(readFileSync(resolve(t15ManifestPath), "utf8")) as T15Policy;
+
+  const requestRecord = (
+    toolContent: string,
+    model = "stub-coder:1b",
+  ): RunRecord => ({
+    process: {
+      exitCode: 0,
+      signal: null,
+      stdout: Buffer.from("").toString("base64"),
+      stderr: Buffer.from("").toString("base64"),
+    },
+    tree: [],
+    sqlite: {},
+    events: {
+      requests: {
+        exists: true,
+        records: [
+          {
+            seq: 2,
+            method: "POST",
+            path: "/v1/chat/completions",
+            headers: { host: "127.0.0.1:11434" },
+            body: {
+              model,
+              messages: [
+                { role: "user", content: "run the canned workflow" },
+                { role: "tool", tool_call_id: "call_stub_s1", content: toolContent },
+              ],
+            },
+          },
+        ],
+      },
+      summary: { exists: true, records: { gets: 0, posts: 2 } },
+      assertions: { exists: true, records: { valid: true, failures: [] } },
+    },
+  });
+
+  const runtimeValues = {
+    oracle: { home: "/one/home", profile: "/one/profile" },
+    candidate: { home: "/two/home", profile: "/two/profile" },
+  };
+
+  it("compares events.requests with a non-hash-only run-id normalization", () => {
+    const policy = loadT15Policy();
+
+    expect(policy.comparisons).toContainEqual({ class: "stub", field: "events.requests" });
+    const rule = policy.normalizations.find((entry) => entry.field === "events.requests");
+    expect(rule).toMatchObject({ kind: "replace-regex" });
+    expect(rule?.pattern).toContain('"run_id"');
+    expect(rule?.hashOnly).toBeUndefined();
+  });
+
+  it("matches bilateral run-id divergence for hex and pinned probe ids", () => {
+    const policy = loadT15Policy();
+    const oracle = requestRecord(
+      `{"ok": true, "run_id": "${"a".repeat(32)}", "status": "started"}`,
+    );
+    const candidate = requestRecord(
+      `{"ok": true, "run_id": "run-1", "status": "started"}`,
+    );
+
+    const result = compareRuns(oracle, candidate, {
+      comparisons: policy.comparisons as never,
+      normalizations: policy.normalizations as never,
+      runtimeValues,
+    });
+
+    expect(result.verdict).toBe("match");
+    const normalized = result.normalized["events.requests"];
+    expect(canonicalJson(normalized?.oracle)).toBe(canonicalJson(normalized?.candidate));
+    const rendered = JSON.stringify(normalized?.oracle);
+    expect(rendered).toContain("<run-id>");
+    expect(rendered).not.toContain("a".repeat(32));
+    expect(rendered).not.toContain("run-1");
+  });
+
+  it("does not mask an unrelated divergent field in events.requests", () => {
+    const policy = loadT15Policy();
+    const oracle = requestRecord(
+      `{"ok": true, "run_id": "${"a".repeat(32)}", "status": "started"}`,
+      "stub-coder:1b",
+    );
+    const candidate = requestRecord(
+      `{"ok": true, "run_id": "${"a".repeat(32)}", "status": "started"}`,
+      "stub-coder:9b",
+    );
+
+    const result = compareRuns(oracle, candidate, {
+      comparisons: policy.comparisons as never,
+      normalizations: policy.normalizations as never,
+      runtimeValues,
+    });
+
+    expect(result.verdict).toBe("divergent");
+  });
+
+  it("never normalizes the status or other fields around the run_id value", () => {
+    const policy = loadT15Policy();
+    const oracle = requestRecord(
+      `{"ok": true, "run_id": "${"a".repeat(32)}", "status": "started"}`,
+    );
+    const candidate = requestRecord(`{"ok": true, "run_id": "run-1", "status": "running"}`);
+
+    const result = compareRuns(oracle, candidate, {
+      comparisons: policy.comparisons as never,
+      normalizations: policy.normalizations as never,
+      runtimeValues,
+    });
+
+    expect(result.verdict).toBe("divergent");
+  });
+
+  it("fails closed when the run_id key or a non-empty value is missing", () => {
+    const policy = loadT15Policy();
+    const oracle = requestRecord(`{"ok": true, "run_id": "${"a".repeat(32)}", "status": "x"}`);
+    const candidate = requestRecord(`{"ok": true, "status": "started"}`);
+
+    expect(() =>
+      compareRuns(oracle, candidate, {
+        comparisons: policy.comparisons as never,
+        normalizations: policy.normalizations as never,
+        runtimeValues,
+      }),
+    ).toThrow(/NORMALIZATION_MISS|did not match its declared pattern/);
+  });
+
+  it("composes the candidate chat system prompt with the real product builder", () => {
+    const source = readFileSync(
+      resolve("scripts/parity/workflow-executor/candidate-chat.mjs"),
+      "utf8",
+    );
+
+    expect(source).toContain('buildSystemPrompt({ systemMessage: "T15 canned workflow chat" })');
+    expect(source).not.toContain('promptSnapshot: () => "T15 canned workflow chat"');
+  });
+
+  it("detects run-id divergence when the normalization rule is absent", () => {
+    const oracleRunId = "a".repeat(32);
+    const candidateRunId = "b".repeat(32);
+    const oracle = requestRecord(
+      `{"ok": true, "run_id": "${oracleRunId}", "status": "started"}`,
+    );
+    const candidate = requestRecord(
+      `{"ok": true, "run_id": "${candidateRunId}", "status": "started"}`,
+    );
+
+    const result = compareRuns(oracle, candidate, {
+      comparisons: [{ class: "stub", field: "events.requests" }],
+      normalizations: [],
+      runtimeValues,
+    });
+
+    expect(result.verdict).toBe("divergent");
   });
 });

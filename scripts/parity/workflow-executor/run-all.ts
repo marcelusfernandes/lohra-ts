@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { canonicalJson } from "../canonical.js";
@@ -83,19 +83,44 @@ try {
   const engineMatch = canonicalJson(candidateProjection) === canonicalJson(oracleProjection);
   if (!engineMatch) throw new Error("bilateral engine projections diverged");
 
-  const chatEvidence = resolve(evidenceDirectory, "t15-chat-workflow.json");
-  const chatExitCode = runCli([
-    "--manifest",
-    resolve(root, "scripts/parity/manifests/t15/t15-chat-workflow.json"),
-    "--evidence",
-    chatEvidence,
-  ]);
-  const chat = JSON.parse(readFileSync(chatEvidence, "utf8")) as {
+  interface ChatEvidence {
     readonly verdict?: string;
+    readonly comparison?: {
+      readonly normalized?: Readonly<Record<string, { readonly oracle: unknown; readonly candidate: unknown }>>;
+    };
     readonly reproducibility?: { readonly projectionSha256?: string };
+  }
+
+  const runChatProbe = (evidenceFileName: string) => {
+    const evidencePath = resolve(evidenceDirectory, evidenceFileName);
+    const exitCode = runCli([
+      "--manifest",
+      resolve(root, "scripts/parity/manifests/t15/t15-chat-workflow.json"),
+      "--evidence",
+      evidencePath,
+    ]);
+    if (exitCode !== 0)
+      throw new Error(`${evidenceFileName} chat probe failed with harness exit ${String(exitCode)}`);
+    const evidence = JSON.parse(readFileSync(evidencePath, "utf8")) as ChatEvidence;
+    if (evidence.verdict !== "match")
+      throw new Error(`${evidenceFileName} chat probe diverged: verdict=${evidence.verdict ?? "unavailable"}`);
+    return { evidencePath, evidence };
   };
-  const chatMatch = chatExitCode === 0 && chat.verdict === "match";
-  if (!chatMatch) throw new Error(`real chat probe diverged with exit ${String(chatExitCode)}`);
+
+  const chatPrimary = runChatProbe("t15-chat-workflow.json");
+  const chatRepeat = runChatProbe("t15-chat-workflow-repeat.json");
+  const primarySha = chatPrimary.evidence.reproducibility?.projectionSha256 ?? null;
+  const repeatSha = chatRepeat.evidence.reproducibility?.projectionSha256 ?? null;
+  const chatHashStable = primarySha !== null && primarySha === repeatSha;
+  const normalizedRequests = chatPrimary.evidence.comparison?.normalized?.["events.requests"];
+  const requestsMatch =
+    normalizedRequests !== undefined &&
+    canonicalJson(normalizedRequests.oracle) === canonicalJson(normalizedRequests.candidate);
+  const chatMatch = chatHashStable && requestsMatch;
+  if (!chatMatch)
+    throw new Error(
+      `real chat probe diverged: hashStable=${String(chatHashStable)} requestsMatch=${String(requestsMatch)} primarySha=${String(primarySha)} repeatSha=${String(repeatSha)}`,
+    );
 
   const evidence = {
     suite: "t15-workflow-executor",
@@ -108,8 +133,11 @@ try {
     },
     chat: {
       match: chatMatch,
-      evidence: chatEvidence,
-      projectionSha256: chat.reproducibility?.projectionSha256 ?? null,
+      evidence: chatPrimary.evidencePath,
+      repeatEvidence: chatRepeat.evidencePath,
+      projectionSha256: primarySha,
+      repeatProjectionSha256: repeatSha,
+      requestsNormalizedMatch: requestsMatch,
     },
     lock: {
       path: lockPath,
@@ -129,3 +157,4 @@ try {
 } finally {
   rmdirSync(lockPath);
 }
+if (existsSync(lockPath)) throw new Error(`lock not released at ${lockPath}`);
