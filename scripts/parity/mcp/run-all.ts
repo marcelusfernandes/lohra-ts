@@ -68,6 +68,10 @@ function normalizeRaisedEnvelope(value: string): string {
   return value.replace(/Tool execution failed: [A-Za-z_.]+:/u, "Tool execution failed: <CLASS>:");
 }
 
+function normalizeChildOutput(value: string): string {
+  return value.replace(/"sub_id": "[0-9a-f]{32}"/gu, '"sub_id": "<SUB_ID>"');
+}
+
 function mcpFunctions(observation: ChatObservation): readonly Record<string, unknown>[] {
   return (parent(observation)?.definitions ?? [])
     .map((entry) => (entry as Record<string, unknown>)["function"])
@@ -198,7 +202,7 @@ results.push(
           parent: candidateParent,
           child: candidateChild,
           exitCode: observed.candidate.exitCode,
-          output: output(observed.candidate),
+          output: normalizeChildOutput(output(observed.candidate)),
         },
         deferredIntegrationDependency: !candidateOk,
       },

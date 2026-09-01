@@ -35,32 +35,9 @@ for port in 11434 9119 8000; do
 done
 
 # Acquisition, both T19 suites, the complete unit suite, aggregate parity
-# gates, and release share this one shell invocation. Until T13 is integrated,
-# the one approved deferred chat scenario is allowed to finish its evidence
-# run, but the wrapper still exits non-zero after every other gate completes.
-chat_blocked=0
-chat_exit=0
-npm run parity:t19 || chat_exit=$?
-if test "$chat_exit" -eq 1; then
-  node -e '
-    const evidence = require("./.parity-evidence/t19/t19-chat-bilateral.json");
-    const failed = evidence.results.filter((result) => result.pass === false).map((result) => result.id);
-    if (evidence.failures !== 1 || JSON.stringify(failed) !== JSON.stringify(["t19-child-with-mcp-8-tools"])) {
-      process.stderr.write(`T19_UNEXPECTED_CHAT_FAILURES:${JSON.stringify(failed)}\n`);
-      process.exit(1);
-    }
-  '
-  chat_blocked=1
-elif test "$chat_exit" -ne 0; then
-  echo "T19_CHAT_SUITE_FAILED:$chat_exit" >&2
-  exit "$chat_exit"
-fi
-
+# gates, and release share this one shell invocation. The approved T13 line is
+# integrated, so every T19 scenario is now a strict blocking gate.
+npm run parity:t19
 npm run parity:t19:process
 npm test
 npm run parity:t19:gates:raw
-
-if test "$chat_blocked" -eq 1; then
-  echo "T19_BLOCKED_DEFERRED:t19-child-with-mcp-8-tools:requires-approved-T13-integration" >&2
-  exit 1
-fi
