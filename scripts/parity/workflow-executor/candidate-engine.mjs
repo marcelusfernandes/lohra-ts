@@ -1,0 +1,175 @@
+#!/usr/bin/env node
+import process from "node:process";
+
+import {
+  Budget,
+  MemoryWorkflowCache,
+  WorkflowEngine,
+  validateSpec,
+} from "../../../dist/workflow/index.js";
+
+const split = {
+  inputTokens: 5,
+  outputTokens: 3,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  reasoningTokens: 0,
+};
+
+class RulesRuntime {
+  constructor(fail = "") {
+    this.fail = fail;
+    this.requests = [];
+    this.byId = new Map();
+  }
+  spawn(request) {
+    const id = `leaf-${String(this.requests.length + 1)}`;
+    this.requests.push(request);
+    this.byId.set(id, 0);
+    return id;
+  }
+  collect(id) {
+    const request = this.requests[Number(id.split("-")[1]) - 1];
+    const count = this.byId.get(id) ?? 0;
+    this.byId.set(id, count + 1);
+    const role = request.causalContext.role;
+    if (this.fail === role || this.fail === "all")
+      return { status: "failed", output: `dead:${role}` };
+    if (this.fail === "schema" && role === "agent" && count === 0)
+      return { status: "complete", output: '{"wrong":true}', usage: split };
+    let output = "ok";
+    if (role === "verify.skeptic") output = { refuted: false, reason: "ok" };
+    else if (role === "judge.attempt") output = "draft";
+    else if (role === "judge.review") output = { score: 9, rationale: "ok" };
+    else if (role === "judge.synthesis") output = "final";
+    else if (role === "loop.round") output = request.prompt.includes("harvest 0") ? "item" : "";
+    else if (role === "gate.body") output = "draft";
+    else if (role === "gate.reviewer") output = { ok: true, feedback: "" };
+    else if (role === "completeness") output = { complete: true, missing: [] };
+    else if (this.fail === "schema" && role === "agent") output = { value: 1 };
+    const usage = this.fail === "schema" && role === "agent" && count > 0
+      ? { ...split, inputTokens: 10, outputTokens: 6 }
+      : split;
+    return { status: "complete", output, usage, provider: "stub", model: "canned" };
+  }
+  steer() {}
+  cancel() {}
+}
+
+function spec(raw) {
+  const value = validateSpec(raw);
+  if ("issues" in value) throw new Error(value.message);
+  return value;
+}
+
+const child = {
+  meta: { name: "child", version: 1 },
+  nodes: [{ id: "inner", type: "agent", prompt: "nested" }],
+};
+
+const successSpecs = {
+  agent: { meta: { name: "agent" }, nodes: [{ id: "n", type: "agent", prompt: "answer" }] },
+  parallel: { meta: { name: "parallel" }, nodes: [{ id: "n", type: "parallel", branches: ["a", "b"] }] },
+  pipeline: { meta: { name: "pipeline" }, nodes: [{ id: "n", type: "pipeline", items: ["a", "b"], stages: [{ prompt: "pipe ${item}" }] }] },
+  verify: { meta: { name: "verify" }, nodes: [{ id: "n", type: "verify", finding: "claim", skeptics: 1, kill_if_majority_refute: true }] },
+  judge_panel: { meta: { name: "judge" }, nodes: [{ id: "n", type: "judge_panel", attempts: ["attempt"], judges: 1, synthesize: { prompt: "polish ${winner}" } }] },
+  loop_until_dry: { meta: { name: "loop" }, nodes: [{ id: "n", type: "loop_until_dry", body: { prompt: "harvest ${round}" }, stop_after_k_empty: 1, max_rounds: 3 }] },
+  workflow: { meta: { name: "workflow" }, nodes: [{ id: "n", type: "workflow", ref: "child" }] },
+  gate: { meta: { name: "gate" }, nodes: [{ id: "n", type: "gate", body: { prompt: "draft" }, validator: "approve", attempts: 1 }] },
+  completeness_check: { meta: { name: "completeness" }, nodes: [{ id: "n", type: "completeness_check", task: "task", results: ["result"] }] },
+  checkpoint: { meta: { name: "checkpoint" }, nodes: [{ id: "n", type: "checkpoint", prompt: "approve?" }] },
+};
+
+function project(result, runtime) {
+  return {
+    status: result.status,
+    outputs: result.outputs,
+    faults: result.faults.length,
+    nullCount: result.nullCount,
+    engineFaults: result.engineFaults,
+    capTrips: result.capTrips,
+    validationRetries: result.validationRetries,
+    nodesTotal: result.nodesTotal,
+    tokens: [result.tokensIn, result.tokensOut, result.cacheReadTokens, result.cacheWriteTokens, result.reasoningTokens],
+    spawns: runtime.requests.length,
+  };
+}
+
+async function runOne(raw, options = {}) {
+  const runtime = new RulesRuntime(options.fail ?? "");
+  const engine = new WorkflowEngine({
+    runtime,
+    ...(options.budget ? { budget: options.budget } : {}),
+    loader: async (reference) => (reference === "child" ? child : null),
+    checkpointAnswers: options.answers ?? {},
+  });
+  return { value: project(await engine.run(spec(raw), options.args ?? {}), runtime), runtime, engine };
+}
+
+const successes = {};
+for (const [name, raw] of Object.entries(successSpecs)) {
+  const { value } = await runOne(raw, name === "checkpoint" ? { answers: { n: false } } : {});
+  successes[name] = value;
+}
+
+const failureRoles = {
+  agent: "agent",
+  parallel: "parallel.branch",
+  pipeline: "pipeline.stage",
+  verify: "verify.skeptic",
+  judge_panel: "judge.attempt",
+  loop_until_dry: "loop.round",
+  gate: "gate.body",
+  completeness_check: "completeness",
+};
+const failures = {};
+for (const [name, role] of Object.entries(failureRoles)) {
+  failures[name] = (await runOne(successSpecs[name], { fail: role })).value;
+}
+failures.checkpoint = (await runOne(successSpecs.checkpoint)).value;
+
+const deep = { meta: { name: "deep" }, nodes: [{ id: "deep", type: "workflow", ref: "child" }] };
+const depthRuntime = new RulesRuntime();
+const depthEngine = new WorkflowEngine({
+  runtime: depthRuntime,
+  loader: async (reference) => (reference === "child" ? deep : null),
+});
+failures.workflow = project(await depthEngine.run(spec(successSpecs.workflow)), depthRuntime);
+
+const fanout = await runOne(
+  { meta: { name: "fanout" }, nodes: [{ id: "n", type: "parallel", branches: "${args.items}" }] },
+  { args: { items: ["a", "b"] }, budget: new Budget({ maxFanout: 1 }) },
+);
+const budget = await runOne(
+  { meta: { name: "budget" }, nodes: [{ id: "a", type: "agent", prompt: "a" }, { id: "b", type: "agent", prompt: "b" }] },
+  { budget: new Budget({ tokenBudget: 7 }) },
+);
+const schemaRetry = await runOne(
+  { meta: { name: "schema" }, nodes: [{ id: "n", type: "agent", prompt: "x", schema: { type: "object", required: ["value"] } }] },
+  { fail: "schema" },
+);
+
+const nullRuntime = new RulesRuntime("agent");
+const nullResult = await new WorkflowEngine({ runtime: nullRuntime }).run(
+  spec({ meta: { name: "null-upstream" }, nodes: [{ id: "a", type: "agent", prompt: "x", retries: 0 }, { id: "b", type: "agent", prompt: "${a}" }] }),
+);
+
+const faultRuntime = new RulesRuntime();
+const faultEngine = new WorkflowEngine({ runtime: faultRuntime });
+faultEngine.setStrategyForTest("agent", (_engine, node) =>
+  node.id === "bad" ? Promise.reject(new TypeError("boom")) : Promise.resolve("ok"),
+);
+const engineFault = project(
+  await faultEngine.run(spec({ meta: { name: "engine-fault" }, nodes: [{ id: "bad", type: "agent", prompt: "x" }, { id: "good", type: "agent", prompt: "y" }] })),
+  faultRuntime,
+);
+
+const cacheRuntime = new RulesRuntime();
+const cache = new MemoryWorkflowCache();
+const base = spec({ meta: { name: "cache" }, nodes: [{ id: "n", type: "agent", prompt: "x" }] });
+const changed = spec({ meta: { name: "cache" }, nodes: [{ id: "n", type: "agent", prompt: "y" }] });
+await new WorkflowEngine({ runtime: cacheRuntime, cache, runId: "same" }).run(base);
+await new WorkflowEngine({ runtime: cacheRuntime, cache, runId: "same" }).run(base);
+await new WorkflowEngine({ runtime: cacheRuntime, cache, runId: "same" }).run(changed);
+
+process.stdout.write(`${JSON.stringify({ successes, failures, fanout: fanout.value, budget: budget.value, nullUpstream: project(nullResult, nullRuntime), engineFault, schemaRetry: schemaRetry.value, cache: { spawns: cacheRuntime.requests.length, split: cache.totalSplit("same") } })}\n`);
