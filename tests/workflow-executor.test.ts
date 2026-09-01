@@ -213,6 +213,7 @@ describe("workflow engine", () => {
     }).run(spec);
     expect(result.status).toBe("complete");
     expect(result.faults).toEqual([]);
+    expect(result.engineFaults).toBe(0);
     expect(logged).toHaveLength(1);
     expect((logged[0] as unknown[] | undefined)?.[1]).toBeInstanceOf(Error);
   });
