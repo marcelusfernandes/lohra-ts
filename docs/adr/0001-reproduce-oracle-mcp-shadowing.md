@@ -47,14 +47,22 @@ analogy.
 - Tool ownership in the registry no longer identifies the original registrant.
 - A losing server cannot remove the overwritten entry during its own
   deregistration.
-- Child agents receive MCP tools under T19's separately approved `parent − E`
-  rule, so a shadowed MCP entry can also be visible to a child when its final
-  name is not one of the 19 exclusions.
+- T19's separately approved `parent − E` rule is currently consumed by the
+  agentic HTTP server, not by a public TS child turn (that path is still the
+  T13 integration dependency). With today's 24 builtins it exposes the same
+  five names as the former allow-list, but it is fail-open for future builtins.
+  `serve` does not currently register MCP servers; if a future process combines
+  both surfaces, a shadowed non-excluded MCP entry becomes eligible for HTTP
+  exposure subject to the server's explicit `--tools` allow-list.
 
 The callable-orphan end state is not reachable through the current public
 product path: `MCPManager.refresh` has no product caller. This limits present
 reachability but does not reduce the defect. Adding any product caller for
 `refresh` expands the risk and requires a new security decision before merge.
+Refresh also deregisters before calling `listTools`; if that call fails, the
+server remains connected but has no registered tools (nuke without repave).
+This is oracle parity and currently unreachable, but becomes a separate
+availability/security debt as soon as a product caller is introduced.
 
 ## Boundaries and non-claims
 
@@ -87,4 +95,5 @@ Reopen this ADR before any of the following:
 - changing MCP name sanitization or registry ownership labels;
 - adding server trust tiers, namespace isolation or collision warnings;
 - enabling a real MCP SDK path in the default installation;
-- changing the child-tool visibility rule.
+- changing the child-tool visibility rule;
+- registering MCP servers in a process that also serves agentic HTTP.
