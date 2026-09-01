@@ -71,12 +71,99 @@ function pointer(root: Schema, reference: string): Schema {
   return schema(current, reference);
 }
 
+function patternEntries(raw: unknown, path: string): readonly (readonly [RegExp, Schema])[] {
+  const patterns = raw === undefined ? {} : record(raw, path);
+  return Object.entries(patterns).map(([pattern, child]) => {
+    try {
+      return [new RegExp(pattern, "u"), schema(child, `${path}.${pattern}`)] as const;
+    } catch (error) {
+      throw new SchemaDefinitionError(`${path} contains invalid regex`, { cause: error });
+    }
+  });
+}
+
+function evaluatedObjectKeys(
+  value: Readonly<Record<string, unknown>>,
+  raw: Schema,
+  root: Schema,
+  includeUnevaluated = true,
+): Set<string> {
+  const evaluated = new Set<string>();
+  if (typeof raw === "boolean") return evaluated;
+  if (typeof raw.$ref === "string")
+    for (const key of evaluatedObjectKeys(value, pointer(root, raw.$ref), root)) evaluated.add(key);
+  const properties = raw.properties === undefined ? {} : record(raw.properties, "$.properties");
+  const patterns = patternEntries(raw.patternProperties, "$.patternProperties");
+  for (const key of Object.keys(value)) {
+    if (properties[key] !== undefined || patterns.some(([pattern]) => pattern.test(key)))
+      evaluated.add(key);
+  }
+  if (raw.additionalProperties !== undefined)
+    for (const key of Object.keys(value)) evaluated.add(key);
+  for (const keyword of ["allOf", "anyOf", "oneOf"] as const) {
+    if (raw[keyword] === undefined) continue;
+    for (const child of schemas(raw[keyword], `$.${keyword}`)) {
+      if (keyword === "allOf" || validate(value, child, "$", root).length === 0)
+        for (const key of evaluatedObjectKeys(value, child, root)) evaluated.add(key);
+    }
+  }
+  if (raw.if !== undefined) {
+    const condition = schema(raw.if, "$.if");
+    const matches = validate(value, condition, "$", root).length === 0;
+    for (const key of evaluatedObjectKeys(value, condition, root)) evaluated.add(key);
+    const branch = matches ? raw.then : raw.else;
+    if (branch !== undefined)
+      for (const key of evaluatedObjectKeys(value, schema(branch, matches ? "$.then" : "$.else"), root))
+        evaluated.add(key);
+  }
+  if (raw.dependentSchemas !== undefined) {
+    const dependencies = record(raw.dependentSchemas, "$.dependentSchemas");
+    for (const [key, child] of Object.entries(dependencies))
+      if (key in value)
+        for (const annotated of evaluatedObjectKeys(value, schema(child, `$.dependentSchemas.${key}`), root))
+          evaluated.add(annotated);
+  }
+  if (includeUnevaluated && raw.unevaluatedProperties !== undefined)
+    for (const key of Object.keys(value)) evaluated.add(key);
+  return evaluated;
+}
+
+function evaluatedItemIndexes(
+  value: readonly unknown[],
+  raw: Schema,
+  root: Schema,
+  includeUnevaluated = true,
+): Set<number> {
+  const evaluated = new Set<number>();
+  if (typeof raw === "boolean") return evaluated;
+  if (typeof raw.$ref === "string")
+    for (const index of evaluatedItemIndexes(value, pointer(root, raw.$ref), root)) evaluated.add(index);
+  const prefix = raw.prefixItems === undefined ? [] : schemas(raw.prefixItems, "$.prefixItems");
+  for (let index = 0; index < Math.min(prefix.length, value.length); index += 1) evaluated.add(index);
+  if (raw.items !== undefined)
+    for (let index = prefix.length; index < value.length; index += 1) evaluated.add(index);
+  if (raw.contains !== undefined) {
+    const contains = schema(raw.contains, "$.contains");
+    for (let index = 0; index < value.length; index += 1)
+      if (validate(value[index], contains, `$[${String(index)}]`, root).length === 0) evaluated.add(index);
+  }
+  for (const keyword of ["allOf", "anyOf", "oneOf"] as const) {
+    if (raw[keyword] === undefined) continue;
+    for (const child of schemas(raw[keyword], `$.${keyword}`)) {
+      if (keyword === "allOf" || validate(value, child, "$", root).length === 0)
+        for (const index of evaluatedItemIndexes(value, child, root)) evaluated.add(index);
+    }
+  }
+  if (includeUnevaluated && raw.unevaluatedItems !== undefined)
+    for (let index = 0; index < value.length; index += 1) evaluated.add(index);
+  return evaluated;
+}
+
 function validate(value: unknown, raw: Schema, path: string, root: Schema): string[] {
   if (raw === true) return [];
   if (raw === false) return [`${path}: false schema rejects every value`];
-  if (typeof raw.$ref === "string") return validate(value, pointer(root, raw.$ref), path, root);
-
   const errors: string[] = [];
+  if (typeof raw.$ref === "string") errors.push(...validate(value, pointer(root, raw.$ref), path, root));
   const types = raw.type === undefined ? [] : Array.isArray(raw.type) ? raw.type : [raw.type];
   if (types.some((item) => typeof item !== "string" || !TYPES.has(item)))
     throw new SchemaDefinitionError(`${path}.type must name JSON Schema types`);
@@ -165,6 +252,13 @@ function validate(value: unknown, raw: Schema, path: string, root: Schema): stri
       if (count < minContains || (maxContains !== undefined && count > maxContains))
         errors.push(`${path}: contains matched ${String(count)} items`);
     }
+    if (raw.unevaluatedItems !== undefined) {
+      const unevaluated = schema(raw.unevaluatedItems, `${path}.unevaluatedItems`);
+      const evaluated = evaluatedItemIndexes(value, raw, root, false);
+      for (let index = 0; index < value.length; index += 1)
+        if (!evaluated.has(index))
+          errors.push(...validate(value[index], unevaluated, `${path}[${String(index)}]`, root));
+    }
   }
 
   if (value !== null && typeof value === "object" && !Array.isArray(value)) {
@@ -179,11 +273,7 @@ function validate(value: unknown, raw: Schema, path: string, root: Schema): stri
       throw new SchemaDefinitionError(`${path}.required must be an array of strings`);
     for (const key of required) if (!(key as string in object)) errors.push(`${path}.${key as string}: required`);
     const properties = raw.properties === undefined ? {} : record(raw.properties, `${path}.properties`);
-    const patterns = raw.patternProperties === undefined ? {} : record(raw.patternProperties, `${path}.patternProperties`);
-    const compiledPatterns = Object.entries(patterns).map(([pattern, child]) => {
-      try { return [new RegExp(pattern, "u"), schema(child, `${path}.patternProperties.${pattern}`)] as const; }
-      catch (error) { throw new SchemaDefinitionError(`${path}.patternProperties contains invalid regex`, { cause: error }); }
-    });
+    const compiledPatterns = patternEntries(raw.patternProperties, `${path}.patternProperties`);
     for (const key of keys) {
       const child = properties[key];
       if (child !== undefined) errors.push(...validate(object[key], schema(child, `${path}.properties.${key}`), `${path}.${key}`, root));
@@ -202,6 +292,22 @@ function validate(value: unknown, raw: Schema, path: string, root: Schema): stri
         if (key in object) for (const requiredKey of dependency) if (!(requiredKey as string in object))
           errors.push(`${path}.${requiredKey as string}: required by ${key}`);
       }
+    }
+    if (raw.dependentSchemas !== undefined) {
+      const dependencies = record(raw.dependentSchemas, `${path}.dependentSchemas`);
+      for (const [key, dependency] of Object.entries(dependencies))
+        if (key in object)
+          errors.push(...validate(value, schema(dependency, `${path}.dependentSchemas.${key}`), path, root));
+    }
+    if (raw.propertyNames !== undefined) {
+      const propertySchema = schema(raw.propertyNames, `${path}.propertyNames`);
+      for (const key of keys) errors.push(...validate(key, propertySchema, `${path}.${key}`, root));
+    }
+    if (raw.unevaluatedProperties !== undefined) {
+      const unevaluated = schema(raw.unevaluatedProperties, `${path}.unevaluatedProperties`);
+      const evaluated = evaluatedObjectKeys(object, raw, root, false);
+      for (const key of keys)
+        if (!evaluated.has(key)) errors.push(...validate(object[key], unevaluated, `${path}.${key}`, root));
     }
   }
   return errors;

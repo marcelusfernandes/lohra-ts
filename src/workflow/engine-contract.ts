@@ -21,6 +21,22 @@ export const VERIFY_SCHEMA = Object.freeze({
   }),
   required: Object.freeze(["refuted"]),
 });
+export const JUDGE_SCORE_SCHEMA = Object.freeze({
+  type: "object",
+  properties: Object.freeze({
+    score: Object.freeze({ type: "number" }),
+    rationale: Object.freeze({ type: "string" }),
+  }),
+  required: Object.freeze(["score"]),
+});
+export const GATE_VERDICT_SCHEMA = Object.freeze({
+  type: "object",
+  properties: Object.freeze({
+    ok: Object.freeze({ type: "boolean" }),
+    feedback: Object.freeze({ type: "string" }),
+  }),
+  required: Object.freeze(["ok"]),
+});
 
 export type WorkflowEvent = Readonly<{
   kind: "node" | "items" | "fault";

@@ -178,6 +178,12 @@ describe("workflow Draft 2020-12 output validation", () => {
     [JSON.stringify("abc"), { type: "string", pattern: "^z+$" }],
     [[1], { type: "array", minItems: 2 }],
     [3, { oneOf: [{ type: "string" }, { type: "number", minimum: 5 }] }],
+    [{ a: 1 }, { type: "object", dependentSchemas: { a: { required: ["b"] } } }],
+    [{ BAD: 1 }, { type: "object", propertyNames: { pattern: "^[a-z]+$" } }],
+    [
+      { a: 1, b: 2 },
+      { type: "object", properties: { a: { type: "number" } }, unevaluatedProperties: false },
+    ],
   ];
 
   for (const [value, schema] of rejected) {

@@ -35,6 +35,10 @@ class RulesClient(ModelClient):
             raise RuntimeError(f"dead:{kind}")
         if self.owner.fail == "verify-invalid" and kind == "verify.skeptic":
             text = '{"unexpected":true}'
+        elif self.owner.fail == "judge-invalid" and kind == "judge.review":
+            text = '{"unexpected":true}'
+        elif self.owner.fail == "gate-invalid" and kind == "gate.reviewer":
+            text = '{"unexpected":true}'
         elif self.owner.fail == "schema" and self.calls == 1:
             text = '{"wrong":true}'
         elif kind == "verify.skeptic":
@@ -233,6 +237,9 @@ schema_keywords = [
     parse_and_validate(json.dumps("abc"), {"type": "string", "pattern": "^z"})[0],
     parse_and_validate("[]", {"type": "array", "minItems": 1})[0],
     parse_and_validate("1", {"oneOf": [{"type": "number"}, {"const": 1}]})[0],
+    parse_and_validate('{"a":1}', {"type": "object", "dependentSchemas": {"a": {"required": ["b"]}}})[0],
+    parse_and_validate('{"BAD":1}', {"type": "object", "propertyNames": {"pattern": "^[a-z]+$"}})[0],
+    parse_and_validate('{"a":1,"b":2}', {"type": "object", "properties": {"a": {"type": "number"}}, "unevaluatedProperties": False})[0],
 ]
 verify_invalid, verify_factory = run_one(
     {"meta": {"name": "verify-invalid"}, "nodes": [{"id": "n", "type": "verify", "finding": "claim", "skeptics": 1, "lenses": ["SECURITY-LENS"], "kill_if_majority_refute": True}]},
@@ -243,6 +250,14 @@ judge_winner, judge_factory = run_one(
     fail="judge-winner",
 )
 gate_sequential = run_one(success_specs["gate"], budget=Budget(token_budget=100))[0]
+judge_invalid, judge_invalid_factory = run_one(
+    {"meta": {"name": "judge-invalid"}, "nodes": [{"id": "n", "type": "judge_panel", "attempts": ["attempt"], "judges": 1, "synthesize": None}]},
+    fail="judge-invalid",
+)
+gate_invalid, gate_invalid_factory = run_one(
+    {"meta": {"name": "gate-invalid"}, "nodes": [{"id": "n", "type": "gate", "body": {"prompt": "draft"}, "validator": "approve", "attempts": 1}]},
+    fail="gate-invalid",
+)
 nan_budget = Budget(pool_width=float("nan"), max_fanout=float("nan"), lifetime=float("nan"))
 
 round1 = {
@@ -257,5 +272,9 @@ round1 = {
     "gateSequential": gate_sequential,
     "nanBudget": [nan_budget.pool_width, nan_budget.max_fanout, nan_budget.lifetime_remaining],
 }
+round2 = {
+    "judgeInvalid": {"output": judge_invalid["outputs"]["n"], "steers": judge_invalid_factory.calls - judge_invalid_factory.spawns, "spawns": judge_invalid_factory.spawns},
+    "gateInvalid": {"output": gate_invalid["outputs"]["n"], "steers": gate_invalid_factory.calls - gate_invalid_factory.spawns, "spawns": gate_invalid_factory.spawns},
+}
 
-print(json.dumps({"successes": successes, "failures": failures, "fanout": fanout, "budget": budget_out, "nullUpstream": null_upstream, "engineFault": engine_fault, "schemaRetry": schema_retry, "cache": cache_projection, "round1": round1}, sort_keys=True))
+print(json.dumps({"successes": successes, "failures": failures, "fanout": fanout, "budget": budget_out, "nullUpstream": null_upstream, "engineFault": engine_fault, "schemaRetry": schema_retry, "cache": cache_projection, "round1": round1, "round2": round2}, sort_keys=True))

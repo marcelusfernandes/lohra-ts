@@ -5,7 +5,7 @@ import type { Usage } from "../pricing/types.js";
 import { addUsageToResult, deriveStatus, RunResult } from "./accounting.js";
 import { Budget, FanoutRejected, TokenBudgetExhausted } from "./budget.js";
 import { contentHash, MemoryWorkflowCache, type WorkflowCache } from "./cache.js";
-import { DEFAULT_LEAF_MAX_ITERATIONS, EMPTY_OUTPUT_CORRECTION, LEAF_TIMEOUT_SECONDS, MAX_WORKFLOW_DEPTH, PIPELINE_TIMEOUT_SECONDS, type LeafExecution, type RunControl, type Strategy, type WorkflowEngineOptions, type WorkflowEvent, type WorkflowLoader, VERIFY_SCHEMA } from "./engine-contract.js";
+import { DEFAULT_LEAF_MAX_ITERATIONS, EMPTY_OUTPUT_CORRECTION, GATE_VERDICT_SCHEMA, JUDGE_SCORE_SCHEMA, LEAF_TIMEOUT_SECONDS, MAX_WORKFLOW_DEPTH, PIPELINE_TIMEOUT_SECONDS, type LeafExecution, type RunControl, type Strategy, type WorkflowEngineOptions, type WorkflowEvent, type WorkflowLoader, VERIFY_SCHEMA } from "./engine-contract.js";
 import { asRecord, clampInteger, combine, nonEmpty, renderValue, resultUsage, routingIdentity, routingOf, strictResolve, verifyPrompt } from "./engine-utils.js";
 import { topologicalOrder } from "./graph.js";
 import { MAX_GATE_ATTEMPTS, MAX_NODE_MAX_ITERATIONS, MAX_NODE_RETRIES } from "./nodes.js";
@@ -577,7 +577,7 @@ export class WorkflowEngine {
         this.gateFanout(judges);
         reviews = await Promise.all(
           Array.from({ length: judges }, (_, judgeIndex) =>
-            this.collectLeaf(node, `Score: ${renderValue(attempt.output)}`, null, {
+            this.collectLeaf(node, `Score: ${renderValue(attempt.output)}`, JUDGE_SCORE_SCHEMA, {
               role: "judge.review",
               cellId: hash,
               itemIndex: judgeIndex,
@@ -748,7 +748,7 @@ export class WorkflowEngine {
         feedback = "\n\nPrevious draft was empty; produce a complete draft.";
         continue;
       }
-      const review = await this.collectLeaf(node, `${renderValue(validator)}\n\nCandidate:\n${renderValue(draft.output)}`, null, { role: "gate.reviewer", cellId: hash, attempt });
+      const review = await this.collectLeaf(node, `${renderValue(validator)}\n\nCandidate:\n${renderValue(draft.output)}`, GATE_VERDICT_SCHEMA, { role: "gate.reviewer", cellId: hash, attempt });
       total = combine(total, review.usage);
       const verdict = asRecord(review.output);
       if (verdict?.ok === true) {

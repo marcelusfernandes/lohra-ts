@@ -43,11 +43,13 @@ class RulesRuntime {
     if (this.fail === "verify-invalid" && role === "verify.skeptic") output = { unexpected: true };
     else if (role === "verify.skeptic") output = { refuted: false, reason: "ok" };
     else if (role === "judge.attempt") output = this.fail === "judge-winner" ? "BEST-CANDIDATE" : "draft";
-    else if (role === "judge.review") output = { score: 9, rationale: "ok" };
+    else if (this.fail === "judge-invalid" && role === "judge.review") output = '{"unexpected":true}';
+    else if (role === "judge.review") output = '{"score":9,"rationale":"ok"}';
     else if (role === "judge.synthesis") output = "final";
     else if (role === "loop.round") output = request.prompt.includes("harvest 0") ? "item" : "";
     else if (role === "gate.body") output = "draft";
-    else if (role === "gate.reviewer") output = { ok: true, feedback: "" };
+    else if (this.fail === "gate-invalid" && role === "gate.reviewer") output = '{"unexpected":true}';
+    else if (role === "gate.reviewer") output = '{"ok":true,"feedback":""}';
     else if (role === "completeness") output = { complete: true, missing: [] };
     else if (this.fail === "schema" && role === "agent") output = { value: 1 };
     const usage = this.fail === "schema" && role === "agent" && count > 0
@@ -185,6 +187,9 @@ const schemaKeywords = [
   [JSON.stringify("abc"), { type: "string", pattern: "^z" }],
   ["[]", { type: "array", minItems: 1 }],
   ["1", { oneOf: [{ type: "number" }, { const: 1 }] }],
+  ['{"a":1}', { type: "object", dependentSchemas: { a: { required: ["b"] } } }],
+  ['{"BAD":1}', { type: "object", propertyNames: { pattern: "^[a-z]+$" } }],
+  ['{"a":1,"b":2}', { type: "object", properties: { a: { type: "number" } }, unevaluatedProperties: false }],
 ].map(([output, schema]) => parseAndValidate(output, schema).ok);
 const verifyInvalid = await runOne(
   { meta: { name: "verify-invalid" }, nodes: [{ id: "n", type: "verify", finding: "claim", skeptics: 1, lenses: ["SECURITY-LENS"], kill_if_majority_refute: true }] },
@@ -195,6 +200,14 @@ const judgeWinner = await runOne(
   { fail: "judge-winner" },
 );
 const gateSequential = await runOne(successSpecs.gate, { budget: new Budget({ tokenBudget: 100 }) });
+const judgeInvalid = await runOne(
+  { meta: { name: "judge-invalid" }, nodes: [{ id: "n", type: "judge_panel", attempts: ["attempt"], judges: 1, synthesize: null }] },
+  { fail: "judge-invalid" },
+);
+const gateInvalid = await runOne(
+  { meta: { name: "gate-invalid" }, nodes: [{ id: "n", type: "gate", body: { prompt: "draft" }, validator: "approve", attempts: 1 }] },
+  { fail: "gate-invalid" },
+);
 const nanBudget = new Budget({ poolWidth: Number.NaN, maxFanout: Number.NaN, lifetime: Number.NaN });
 
-process.stdout.write(`${JSON.stringify({ successes, failures, fanout: fanout.value, budget: budget.value, nullUpstream: project(nullResult, nullRuntime), engineFault, schemaRetry: schemaRetry.value, cache: { spawns: cacheRuntime.requests.length, split: cache.totalSplit("same") }, round1: { pipelinePreflight: pipelinePreflight.value, schemaKeywords, verifyInvalid: { output: verifyInvalid.value.outputs.n, steers: verifyInvalid.runtime.steers.length, lens: verifyInvalid.runtime.requests.some((request) => request.prompt.includes("SECURITY-LENS")) }, judgePrompt: judgeWinner.runtime.requests.find((request) => request.causalContext.role === "judge.synthesis")?.prompt ?? null, gateSequential: gateSequential.value, nanBudget: [nanBudget.poolWidth, nanBudget.maxFanout, nanBudget.lifetimeRemaining] } })}\n`);
+process.stdout.write(`${JSON.stringify({ successes, failures, fanout: fanout.value, budget: budget.value, nullUpstream: project(nullResult, nullRuntime), engineFault, schemaRetry: schemaRetry.value, cache: { spawns: cacheRuntime.requests.length, split: cache.totalSplit("same") }, round1: { pipelinePreflight: pipelinePreflight.value, schemaKeywords, verifyInvalid: { output: verifyInvalid.value.outputs.n, steers: verifyInvalid.runtime.steers.length, lens: verifyInvalid.runtime.requests.some((request) => request.prompt.includes("SECURITY-LENS")) }, judgePrompt: judgeWinner.runtime.requests.find((request) => request.causalContext.role === "judge.synthesis")?.prompt ?? null, gateSequential: gateSequential.value, nanBudget: [nanBudget.poolWidth, nanBudget.maxFanout, nanBudget.lifetimeRemaining] }, round2: { judgeInvalid: { output: judgeInvalid.value.outputs.n, steers: judgeInvalid.runtime.steers.length, spawns: judgeInvalid.runtime.requests.length }, gateInvalid: { output: gateInvalid.value.outputs.n, steers: gateInvalid.runtime.steers.length, spawns: gateInvalid.runtime.requests.length } } })}\n`);

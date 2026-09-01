@@ -88,6 +88,33 @@ const mutants: readonly Mutant[] = [
     }],
   },
   {
+    id: "dependent-schemas-ignored",
+    mechanism: "dependentSchemas constraints are skipped",
+    edits: [{
+      file: "src/workflow/json-schema.ts",
+      before: "    if (raw.dependentSchemas !== undefined) {\n      const dependencies = record(raw.dependentSchemas, `${path}.dependentSchemas`);",
+      after: "    if (false && raw.dependentSchemas !== undefined) {\n      const dependencies = record(raw.dependentSchemas, `${path}.dependentSchemas`);",
+    }],
+  },
+  {
+    id: "property-names-ignored",
+    mechanism: "propertyNames constraints are skipped",
+    edits: [{
+      file: "src/workflow/json-schema.ts",
+      before: "    if (raw.propertyNames !== undefined) {\n      const propertySchema = schema(raw.propertyNames, `${path}.propertyNames`);",
+      after: "    if (false && raw.propertyNames !== undefined) {\n      const propertySchema = schema(raw.propertyNames, `${path}.propertyNames`);",
+    }],
+  },
+  {
+    id: "unevaluated-properties-ignored",
+    mechanism: "unevaluatedProperties constraints are skipped",
+    edits: [{
+      file: "src/workflow/json-schema.ts",
+      before: "    if (raw.unevaluatedProperties !== undefined) {\n      const unevaluated = schema(raw.unevaluatedProperties, `${path}.unevaluatedProperties`);",
+      after: "    if (false && raw.unevaluatedProperties !== undefined) {\n      const unevaluated = schema(raw.unevaluatedProperties, `${path}.unevaluatedProperties`);",
+    }],
+  },
+  {
     id: "verify-lens-ignored",
     mechanism: "verify prompt ignores the selected skeptic lens",
     edits: [{
@@ -103,6 +130,24 @@ const mutants: readonly Mutant[] = [
       file: engine,
       before: "return this.collectLeaf(node, verifyPrompt(finding, lens), VERIFY_SCHEMA, {",
       after: "return this.collectLeaf(node, verifyPrompt(finding, lens), null, {",
+    }],
+  },
+  {
+    id: "judge-score-schema-disabled",
+    mechanism: "judge reviewer textual scores bypass structured parsing and retries",
+    edits: [{
+      file: engine,
+      before: "this.collectLeaf(node, `Score: ${renderValue(attempt.output)}`, JUDGE_SCORE_SCHEMA, {",
+      after: "this.collectLeaf(node, `Score: ${renderValue(attempt.output)}`, null, {",
+    }],
+  },
+  {
+    id: "gate-verdict-schema-disabled",
+    mechanism: "gate reviewer textual verdicts bypass structured parsing and retries",
+    edits: [{
+      file: engine,
+      before: "`${renderValue(validator)}\\n\\nCandidate:\\n${renderValue(draft.output)}`, GATE_VERDICT_SCHEMA, {",
+      after: "`${renderValue(validator)}\\n\\nCandidate:\\n${renderValue(draft.output)}`, null, {",
     }],
   },
   {

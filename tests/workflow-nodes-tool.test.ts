@@ -151,6 +151,34 @@ describe("remaining workflow node strategies", () => {
     expect(runtime.requests).toHaveLength(2);
   });
 
+  it("parses a textual JSON judge score through the fixed schema", async () => {
+    const runtime = new QueueChildren([[ok("draft")], [ok('{"score":9,"rationale":"ok"}')]]);
+    const result = await new WorkflowEngine({ runtime }).run(
+      spec({
+        meta: { name: "judge-text-score" },
+        nodes: [{ id: "j", type: "judge_panel", attempts: ["draft"], judges: 1, synthesize: null }],
+      }),
+    );
+    expect(result.outputs.j).toBe("draft");
+    expect(runtime.requests).toHaveLength(2);
+    expect(runtime.steered).toHaveLength(0);
+  });
+
+  it("steers a malformed judge score twice and discards it fail-closed", async () => {
+    const invalid = ok('{"unexpected":true}');
+    const runtime = new QueueChildren([[ok("draft")], [invalid, invalid, invalid]]);
+    const result = await new WorkflowEngine({ runtime }).run(
+      spec({
+        meta: { name: "judge-invalid-score" },
+        nodes: [{ id: "j", type: "judge_panel", attempts: ["draft"], judges: 1, synthesize: null }],
+      }),
+    );
+    expect(result.outputs.j).toBeNull();
+    expect(runtime.requests).toHaveLength(2);
+    expect(runtime.steered).toHaveLength(2);
+    expect(result.faults.some((fault) => fault.includes("attempt unscored"))).toBe(true);
+  });
+
   it("always appends the winner to the judge synthesis prompt", async () => {
     const runtime = new QueueChildren([[ok("BEST-CANDIDATE")], [ok({ score: 9 })], [ok("FINAL")]]);
     const result = await new WorkflowEngine({ runtime }).run(
@@ -231,6 +259,34 @@ describe("remaining workflow node strategies", () => {
     expect(runtime.requests).toHaveLength(2);
     expect(result.outputs.g).toBe("DRAFT");
     expect(result.status).toBe("complete");
+  });
+
+  it("parses a textual JSON gate verdict and approves the first draft", async () => {
+    const runtime = new QueueChildren([[ok("DRAFT")], [ok('{"ok":true,"feedback":""}')]]);
+    const result = await new WorkflowEngine({ runtime }).run(
+      spec({
+        meta: { name: "gate-text-verdict" },
+        nodes: [{ id: "g", type: "gate", body: { prompt: "write" }, validator: "review", attempts: 2 }],
+      }),
+    );
+    expect(result.outputs.g).toBe("DRAFT");
+    expect(runtime.requests).toHaveLength(2);
+    expect(runtime.steered).toHaveLength(0);
+  });
+
+  it("steers a malformed gate verdict twice and fails closed", async () => {
+    const invalid = ok('{"unexpected":true}');
+    const runtime = new QueueChildren([[ok("DRAFT")], [invalid, invalid, invalid]]);
+    const result = await new WorkflowEngine({ runtime }).run(
+      spec({
+        meta: { name: "gate-invalid-verdict" },
+        nodes: [{ id: "g", type: "gate", body: { prompt: "write" }, validator: "review", attempts: 1 }],
+      }),
+    );
+    expect(result.outputs.g).toBeNull();
+    expect(runtime.requests).toHaveLength(2);
+    expect(runtime.steered).toHaveLength(2);
+    expect(result.faults.some((fault) => fault.includes("gate exhausted"))).toBe(true);
   });
 
   it("completeness forces its structured shape", async () => {
