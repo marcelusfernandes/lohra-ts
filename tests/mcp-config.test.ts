@@ -61,6 +61,46 @@ describe("loadMcpConfig", () => {
     expect(configs[0]?.name).toBe("fix");
   });
 
+  it("disabled follows Python JSON truthiness and therefore fails closed for truthy non-booleans", () => {
+    writeFileSync(
+      path,
+      JSON.stringify({
+        mcpServers: {
+          number: { command: "npx", disabled: 1 },
+          yes: { command: "npx", disabled: "yes" },
+          misleading: { command: "npx", disabled: "false" },
+          list: { command: "npx", disabled: [false] },
+          object: { command: "npx", disabled: { reason: "operator choice" } },
+        },
+      }),
+    );
+    expect(loadMcpConfig(path)).toEqual([]);
+  });
+
+  it("disabled preserves Python's falsy JSON values", () => {
+    writeFileSync(
+      path,
+      JSON.stringify({
+        mcpServers: {
+          falseBoolean: { command: "npx", disabled: false },
+          zero: { command: "npx", disabled: 0 },
+          emptyString: { command: "npx", disabled: "" },
+          nullValue: { command: "npx", disabled: null },
+          emptyList: { command: "npx", disabled: [] },
+          emptyObject: { command: "npx", disabled: {} },
+        },
+      }),
+    );
+    expect(loadMcpConfig(path).map((config) => config.name)).toEqual([
+      "falseBoolean",
+      "zero",
+      "emptyString",
+      "nullValue",
+      "emptyList",
+      "emptyObject",
+    ]);
+  });
+
   it("url present -> transport http, url preserved", () => {
     writeFileSync(path, JSON.stringify({ mcpServers: { remote: { url: "https://mcp.example.com/" } } }));
     expect(loadMcpConfig(path)).toEqual([

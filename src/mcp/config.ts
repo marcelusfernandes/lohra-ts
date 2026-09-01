@@ -20,6 +20,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+/** Python truthiness for values that can come from JSON. Kept local instead
+ * of importing the server-layer helper so the headless MCP module does not
+ * acquire a dependency on HTTP serving code. */
+function isPythonTruthyJson(value: unknown): boolean {
+  if (value === null || value === undefined || value === false || value === 0) return false;
+  if (typeof value === "string") return value !== "";
+  if (Array.isArray(value)) return value.length > 0;
+  if (isRecord(value)) return Object.keys(value).length > 0;
+  return true;
+}
+
 function parseServer(name: string, spec: unknown): MCPServerConfig {
   if (!isRecord(spec)) throw new MCPConfigError(`server ${pythonRepr(name)} must be an object`);
   const url = typeof spec.url === "string" && spec.url ? spec.url : undefined;
@@ -55,7 +66,7 @@ export function loadMcpConfig(path: string): readonly MCPServerConfig[] {
 
   const configs: MCPServerConfig[] = [];
   for (const [name, spec] of Object.entries(servers)) {
-    if (isRecord(spec) && spec.disabled === true) continue;
+    if (isRecord(spec) && isPythonTruthyJson(spec.disabled)) continue;
     configs.push(parseServer(name, spec));
   }
   return configs;

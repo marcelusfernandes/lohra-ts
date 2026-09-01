@@ -329,6 +329,21 @@ const configCases: readonly {
     config: { mcpServers: { fix: { command: "/bin/echo", disabled: true } } },
     expected: "",
   },
+  {
+    name: "disabled-number-truthy",
+    config: { mcpServers: { fix: { command: "/bin/echo", disabled: 1 } } },
+    expected: "",
+  },
+  {
+    name: "disabled-string-truthy",
+    config: { mcpServers: { fix: { command: "/bin/echo", disabled: "yes" } } },
+    expected: "",
+  },
+  {
+    name: "disabled-misleading-string-truthy",
+    config: { mcpServers: { fix: { command: "/bin/echo", disabled: "false" } } },
+    expected: "",
+  },
 ];
 
 results.push(
@@ -404,7 +419,11 @@ results.push(
         exact(mcpNames(observed.oracle), mcpNames(observed.candidate)) &&
         warningLines(observed.oracle).length === 0 &&
         warningLines(observed.candidate).length === 0,
-      projection: { oracle: mcpNames(observed.oracle), candidate: mcpNames(observed.candidate) },
+      projection: {
+        oracle: mcpNames(observed.oracle),
+        candidate: mcpNames(observed.candidate),
+        rawToolsetProof: "t19-shadow-deregister-orphan",
+      },
     };
   }),
 );
