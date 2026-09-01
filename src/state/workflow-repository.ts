@@ -98,6 +98,12 @@ export class WorkflowRepository {
   public putRunState(runId: string, fields: RunStateFields): boolean {
     // Ownerless writes (fence=null, the mark_cancelled path) demand — folded
     // into the SAME statement — that nobody holds a live lease on the run.
+    //
+    // That ONE condition is the whole guard. An earlier version also demanded
+    // `NOT EXISTS (fence > presented)` with a presented token of -1, which can
+    // never hold: the fence deliberately survives release, so every run that
+    // was ever acquired keeps fence >= 1 and the ownerless write was refused
+    // forever. Ownerless means "nobody owns it", not "nobody ever did".
     const unleased = fields.requireUnleased === true;
     if (unleased) {
       const sql = `INSERT OR REPLACE INTO workflow_run_state
@@ -106,9 +112,6 @@ export class WorkflowRepository {
           audit_segment_id, updated_at)
          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
          WHERE NOT EXISTS (
-           SELECT 1 FROM workflow_run_fence WHERE run_id = ? AND fence > ?
-         )
-         AND NOT EXISTS (
            SELECT 1 FROM workflow_run_locks WHERE run_id = ? AND expires_at > ?
          )`;
       const values: unknown[] = [
@@ -125,8 +128,6 @@ export class WorkflowRepository {
         fields.progressJson,
         fields.auditSegmentId,
         fields.updatedAt,
-        runId,
-        fields.fence ?? -1,
         runId,
         fields.now,
       ];

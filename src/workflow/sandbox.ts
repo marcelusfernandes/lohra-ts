@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 
 import type { WorkflowCacheOwnership } from "./cache.js";
 
@@ -59,25 +59,42 @@ export type ToolDispatchLike = (name: string, args: Readonly<Record<string, unkn
 const FS_TOOLS: ReadonlySet<string> = new Set(["read_file", "write_file"]);
 const EGRESS_TOOLS: ReadonlySet<string> = new Set(["web_fetch", "web_search"]);
 
-function realPathOf(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return path;
+/**
+ * Resolve `target` against the filesystem as far as the filesystem knows it:
+ * walk up to the NEAREST EXISTING ancestor, resolve that for real, and re-attach
+ * the segments that do not exist yet.
+ *
+ * Resolving only the immediate parent is not enough. Given `link -> outside`,
+ * the path `<root>/link/not/created/yet.txt` has no existing target AND no
+ * existing parent, so a parent-only rule falls back to the lexical path — which
+ * still starts with the root and therefore looks contained, while a create
+ * would land outside. Walking to the nearest existing ancestor resolves the
+ * link itself and the answer comes out right.
+ */
+function resolvedAgainstFilesystem(target: string): string {
+  const absolute = resolve(target);
+  const pending: string[] = [];
+  let current = absolute;
+  for (;;) {
+    const real = existsSync(current) ? realpathSync(current) : null;
+    if (real !== null) return pending.length === 0 ? real : resolve(real, ...pending);
+    const parent = dirname(current);
+    // hit the filesystem root without finding anything that exists
+    if (parent === current) return absolute;
+    pending.unshift(basename(current));
+    current = parent;
   }
 }
 
 function isWithin(target: string, root: string): boolean {
-  // Both sides are resolved so a symlink escape is refused. A target that
-  // EXISTS must resolve inside; only a NOT-YET-EXISTING target (a create) is
-  // judged by its real parent directory.
-  const resolvedRoot = realPathOf(root);
-  const inside = (candidate: string): boolean =>
+  // Both sides are resolved so a link that leaves the root is refused, whether
+  // the target exists, its parent exists, or neither does.
+  const resolvedRoot = resolvedAgainstFilesystem(root);
+  const candidate = resolvedAgainstFilesystem(target);
+  return (
     candidate === resolvedRoot ||
-    candidate.startsWith(resolvedRoot.endsWith("/") ? resolvedRoot : `${resolvedRoot}/`);
-  const resolvedTarget = realPathOf(target);
-  if (resolvedTarget !== target) return inside(resolvedTarget);
-  return inside(realPathOf(resolve(target, "..")));
+    candidate.startsWith(resolvedRoot.endsWith("/") ? resolvedRoot : `${resolvedRoot}/`)
+  );
 }
 
 function fsAllowed(rawPath: unknown, roots: readonly string[]): boolean {

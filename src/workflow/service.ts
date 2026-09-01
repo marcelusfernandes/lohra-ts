@@ -7,10 +7,11 @@ import { SqliteWorkflowCache } from "./sqlite-cache.js";
 import type { WorkflowEvent, WorkflowLoader } from "./engine-contract.js";
 import { WorkflowEngine } from "./engine.js";
 import { AutoResumeScheduler, LeaseHeartbeat, type Timer } from "./durability.js";
-import type { ChildRuntime } from "./runtime.js";
+import type { ChildRuntime, LeafSandboxHandle, LeafToolDispatch } from "./runtime.js";
 import { validateSpec } from "./schema.js";
 import { ValidationError, type WorkflowSpec } from "./types.js";
 import type { RunResult } from "./accounting.js";
+import type { ProgressSnapshot } from "./progress.js";
 import type { Ownership } from "../state/workflow-repository.js";
 import { WorkflowRepository } from "../state/workflow-repository.js";
 import {
@@ -18,6 +19,7 @@ import {
   loadPolicy,
   sandboxDispatch,
   taintWrap,
+  toolError,
   TaintTracker,
   type ToolDispatchLike,
   type SandboxPolicy,
@@ -238,6 +240,9 @@ export interface WorkflowStartResult {
 export interface WorkflowServiceError {
   readonly error: string;
   readonly invalid_spec?: boolean;
+  /** Nominal cause, when the refusal has one (see leafSandboxUnavailable). */
+  readonly cause?: string;
+  readonly run_id?: string;
 }
 
 export interface OwnershipLost {
@@ -245,6 +250,25 @@ export interface OwnershipLost {
   readonly cause: "STALE_FENCE_WRITE";
   readonly run_id: string;
   readonly fence: number;
+}
+
+export interface LeafSandboxUnavailable {
+  readonly error: "workflow leaf sandbox unavailable";
+  readonly cause: "LEAF_SANDBOX_UNAVAILABLE";
+  readonly run_id: string;
+}
+
+/**
+ * A durable run whose runtime cannot install the leaf sandbox does not start.
+ * Running leaves with the operator policy unenforced is the failure this whole
+ * capability exists to prevent, so the launch fails closed BEFORE any spawn.
+ */
+export function leafSandboxUnavailable(runId: string): LeafSandboxUnavailable {
+  return Object.freeze({
+    error: "workflow leaf sandbox unavailable" as const,
+    cause: "LEAF_SANDBOX_UNAVAILABLE" as const,
+    run_id: runId,
+  });
 }
 
 export function ownershipLost(runId: string, fence: number): OwnershipLost {
@@ -262,6 +286,14 @@ interface RunRecord {
   readonly engine: WorkflowEngine;
   readonly promise: Promise<Readonly<Record<string, unknown>>>;
   result: RunResult | null;
+  /**
+   * What this run PUBLISHES once it settles — the single terminal answer every
+   * channel reads. Keeping only `result` let `status` and `list` rebuild
+   * success from the engine's outcome after the terminal write had been
+   * refused, so a run whose durable line still said `running` was reported
+   * complete. Fail-closed means one published value, not one per channel.
+   */
+  published: Readonly<Record<string, unknown>> | null;
   readonly resolve: (value: Readonly<Record<string, unknown>>) => void;
   settled: boolean;
 }
@@ -310,6 +342,11 @@ function isLive(record: RunRecord | undefined): boolean {
   return record !== undefined && !record.settled;
 }
 
+/** What the registry-clash message names: the live entry's own status. */
+function liveStatusOf(record: RunRecord | undefined): string {
+  return record?.result?.status ?? "running";
+}
+
 export class WorkflowService {
   private readonly runs = new Map<string, RunRecord>();
   private readonly runtime: ChildRuntime;
@@ -321,7 +358,7 @@ export class WorkflowService {
   private readonly cacheFactory: ((runId: string) => WorkflowCache) | undefined;
   private readonly heartbeat: LeaseHeartbeat | undefined;
   private readonly policyLoader: (() => SandboxPolicy) | undefined;
-  private readonly taintTracker: TaintTracker | undefined;
+  private readonly taintTracker: TaintTracker;
   private readonly autoResume: AutoResumeScheduler | undefined;
   private readonly homeRoot: string;
   private readonly fenceMemory: FenceMemory;
@@ -329,8 +366,15 @@ export class WorkflowService {
    * live, so a resume with a fresh policy/taint is what its leaves get. */
   private readonly stretches = new Map<
     string,
-    { readonly workingRoot: string; readonly policy: SandboxPolicy; readonly tainted: boolean }
+    {
+      readonly stretchId: number;
+      readonly workingRoot: string;
+      readonly policy: SandboxPolicy;
+      readonly tainted: boolean;
+    }
   >();
+  /** Monotonic id per ACQUISITION, so two stretches of one run never share one. */
+  private stretchSeq = 0;
 
   public constructor(options: {
     readonly runtime: ChildRuntime;
@@ -357,7 +401,8 @@ export class WorkflowService {
     this.onEvent = options.onEvent;
     this.store = options.store;
     this.cacheFactory = options.cacheFactory;
-    this.taintTracker = options.taintTracker;
+    // Never optional: a run with no tracker could not notice a leaf tainting it.
+    this.taintTracker = options.taintTracker ?? new TaintTracker();
     this.homeRoot = options.homeRoot ?? ".";
     this.fenceMemory = new FenceMemory(options.fenceMemory ?? FENCE_MEMORY);
     // Criterion 40: the operator capability policy is a FILE in the operator
@@ -399,10 +444,36 @@ export class WorkflowService {
    * sticky taint gate. Evaluated per call, so a `web_fetch` that taints the
    * session closes fs/egress for every call after it — in the same stretch.
    */
+  /**
+   * The composition handed to the runtime, pinned to ONE acquisition. Once a
+   * newer stretch owns the run, the older stretch's wrapper stops granting
+   * anything: its working root and its taint are no longer the run's.
+   */
+  private stretchToolDispatch(
+    runId: string,
+    stretchId: number,
+    base: LeafToolDispatch,
+  ): LeafToolDispatch {
+    const tracker = this.taintTracker;
+    const marked = taintWrap(base, tracker);
+    return (name, args) => {
+      const stretch = this.stretches.get(runId);
+      if (stretch === undefined || stretch.stretchId !== stretchId) {
+        return toolError("workflow stretch is no longer current (sandbox denied)");
+      }
+      const tainted = stretch.tainted || tracker.tainted;
+      return sandboxDispatch(marked, {
+        workingRoot: stretch.workingRoot,
+        policy: stretch.policy,
+        tainted,
+      })(name, args);
+    };
+  }
+
   public leafToolDispatch(runId: string, base: ToolDispatchLike): ToolDispatchLike {
     const tracker = this.taintTracker;
     // taint marks INSIDE the sandbox: a call the sandbox denied never taints.
-    const marked = tracker === undefined ? base : taintWrap(base, tracker);
+    const marked = taintWrap(base, tracker);
     return (name, args) => {
       const stretch = this.stretches.get(runId);
       const policy = stretch?.policy ?? this.policyLoader?.() ?? DENY_ALL_POLICY;
@@ -410,7 +481,7 @@ export class WorkflowService {
       // Taint is ORed and never downgraded: the live stretch, the durable line
       // a previous process wrote, and this session's tracker.
       const tainted =
-        (stretch?.tainted ?? this.durableOf(runId)?.tainted === true) || tracker?.tainted === true;
+        (stretch?.tainted ?? this.durableOf(runId)?.tainted === true) || tracker.tainted;
       return sandboxDispatch(marked, { workingRoot, policy, tainted })(name, args);
     };
   }
@@ -486,10 +557,12 @@ export class WorkflowService {
   ): WorkflowStartResult {
     // Even without a durable store the leaves are sandboxed: operator policy,
     // a run-scoped working root, and whatever taint the session already has.
+    this.stretchSeq += 1;
     this.stretches.set(runId, {
+      stretchId: this.stretchSeq,
       workingRoot: this.workingRootOf(runId, 0),
       policy: this.policyLoader?.() ?? DENY_ALL_POLICY,
-      tainted: this.taintTracker?.tainted === true,
+      tainted: this.taintTracker.tainted,
     });
     const engine = new WorkflowEngine({
       runtime: this.runtime,
@@ -507,11 +580,17 @@ export class WorkflowService {
       .then((result) => {
         record.result = result;
         record.settled = true;
-        record.resolve(resultView(runId, parsed.name, result, engine.budget));
+        record.published = resultView(runId, parsed.name, result, engine.budget);
+        record.resolve(record.published);
       })
       .catch(() => {
         record.settled = true;
-        record.resolve({ run_id: runId, status: "failed", error: "workflow run failed" });
+        record.published = Object.freeze({
+          run_id: runId,
+          status: "failed",
+          error: "workflow run failed",
+        });
+        record.resolve(record.published);
       });
     return Object.freeze({ run_id: runId, status: "started" as const });
   }
@@ -554,9 +633,19 @@ export class WorkflowService {
     }
     // Taint is ORed, never downgraded: the session's tracker plus whatever the
     // durable line already carried.
-    const tainted =
-      (priorView?.tainted === true) || (this.taintTracker?.tainted === true);
+    const tainted = (priorView?.tainted === true) || this.taintTracker.tainted;
     const liveHere = this.runs.get(runId);
+    // Criterion 25 — the REGISTRY guard, checked before anything is acquired or
+    // written. A second engine on a run that has not stopped would share this
+    // one's node cache and working root, and the older stretch would go on
+    // writing into a run nobody tracks. Refuse, take no lease, touch no ledger.
+    if (isLive(liveHere)) {
+      return Object.freeze({
+        error:
+          `workflow run '${runId}' has not finished (status: ${liveStatusOf(liveHere)}); ` +
+          "wait for it (workflow_status) or cancel it before resuming",
+      });
+    }
     const orphaned =
       resumeRunId !== undefined &&
       priorView !== null &&
@@ -582,12 +671,22 @@ export class WorkflowService {
       store.locks.releaseRunLease(runId, store.holder);
       return Object.freeze({ error: refusal });
     }
-    // The token of THIS acquisition, held in the BOUNDED fence memory: an
-    // evicted run has no honest token left, so its owned writes are refused
-    // fail-closed (null) instead of presenting a guessed fence.
-    this.fenceMemory.remember(runId, fence);
+    // THIS acquisition, with an identity of its own. Keying anything by run_id
+    // alone let a later acquisition of the SAME run hand its fence to an older
+    // stretch still finishing: the old one then wrote a terminal line with a
+    // token it never held, and released a lease belonging to the live stretch.
+    // A stretch presents the fence IT acquired, and only while it is still the
+    // current one.
+    this.stretchSeq += 1;
+    const stretchId = this.stretchSeq;
+    const fenceKey = `${runId}#${String(stretchId)}`;
+    // Bounded fence memory: an evicted stretch has no honest token left, so its
+    // owned writes are refused fail-closed instead of presenting a guess.
+    this.fenceMemory.remember(fenceKey, fence);
+    const isCurrentStretch = (): boolean => this.stretches.get(runId)?.stretchId === stretchId;
     const stretchOwnership = (): Ownership | null => {
-      const token = this.fenceMemory.tokenOf(runId);
+      if (!isCurrentStretch()) return null;
+      const token = this.fenceMemory.tokenOf(fenceKey);
       if (token === EVICTED) return null;
       return { fence: token, holder: store.holder, now: store.ownershipOf().now };
     };
@@ -596,7 +695,25 @@ export class WorkflowService {
     // `leafToolDispatch`, which reads this record live.
     const policy = this.policyLoader?.() ?? DENY_ALL_POLICY;
     const workingRoot = this.workingRootOf(runId, fence);
-    this.stretches.set(runId, { workingRoot, policy, tainted });
+    this.stretches.set(runId, { stretchId, workingRoot, policy, tainted });
+    // The leaf sandbox is INSTALLED for this acquisition before a single leaf
+    // can spawn, and the run refuses to start if the runtime cannot take it.
+    // The wrapper is pinned to this stretch: once a newer acquisition exists,
+    // this one's wrapper denies everything rather than serving stale capability.
+    const install = this.runtime.installLeafSandbox?.bind(this.runtime);
+    if (install === undefined) {
+      this.heartbeat?.stop(runId);
+      store.locks.releaseRunLease(runId, store.holder);
+      this.stretches.delete(runId);
+      this.fenceMemory.forget(fenceKey);
+      return leafSandboxUnavailable(runId);
+    }
+    const sandboxHandle: LeafSandboxHandle = install({
+      runId,
+      fence,
+      wrap: (base: LeafToolDispatch): LeafToolDispatch =>
+        this.stretchToolDispatch(runId, stretchId, base),
+    });
     const engine = new WorkflowEngine({
       runtime: this.runtime,
       budget: new Budget({
@@ -618,7 +735,21 @@ export class WorkflowService {
                 store.database,
                 runId,
                 () => stretchOwnership() ?? { fence: -1, holder: store.holder, now: store.ownershipOf().now },
-                { repository: store.repository },
+                {
+                  repository: store.repository,
+                  // Cheap top-up (criterion 39): each cell that lands renews the
+                  // lease, so one long node cannot let it lapse between beats.
+                  // The heartbeat stays the guarantor; this is not a substitute.
+                  onWrite: () => {
+                    if (!isCurrentStretch()) return;
+                    store.locks.renewRunLease(
+                      runId,
+                      store.holder,
+                      store.ownershipOf().now,
+                      store.ttl,
+                    );
+                  },
+                },
               ),
             }
           : { cache: this.cache }),
@@ -663,6 +794,10 @@ export class WorkflowService {
           priorDegraded ||
           result.faults.some((fault) => fault !== result.pauseFault);
         const terminal = stretchOwnership();
+        // Taint acquired INSIDE this stretch counts: a leaf that ran an allowed
+        // web_fetch marked the tracker, and the line this stretch writes must
+        // carry that, not the value read before the engine started.
+        const taintedNow = tainted || this.taintTracker.tainted;
         const owned = terminal === null ? false : this.persistLine(store, runId, {
           name: parsed.name,
           owner: store.holder,
@@ -687,8 +822,8 @@ export class WorkflowService {
           specJson: JSON.stringify(rawSpecOf(parsed)),
           argsJson: JSON.stringify(args),
           tokenBudget: effectiveBudget,
-          tainted,
-          progressJson: progressJsonOf(result),
+          tainted: taintedNow,
+          progressJson: progressJsonOf(engine.progress()),
           auditSegmentId: null,
           updatedAt: terminal.now,
           fence: terminal.fence,
@@ -729,8 +864,8 @@ export class WorkflowService {
             specJson: JSON.stringify(rawSpecOf(parsed)),
             argsJson: JSON.stringify(args),
             tokenBudget: effectiveBudget,
-            tainted,
-            progressJson: progressJsonOf(result),
+            tainted: taintedNow,
+            progressJson: progressJsonOf(engine.progress()),
             auditSegmentId: null,
             updatedAt: terminal.now,
             fence: terminal.fence,
@@ -740,31 +875,52 @@ export class WorkflowService {
         }
         // The heartbeat stops FIRST; a tick that outlived the release would put
         // the lease back and leave the run looking alive with nobody in it.
-        this.heartbeat?.stop(runId);
-        store.locks.releaseRunLease(runId, store.holder);
-        this.stretches.delete(runId);
+        //
+        // Release ONLY what this acquisition still holds. `releaseRunLease`
+        // deletes by (run, holder), so a stretch whose lease had already been
+        // taken over — by a newer acquisition using the SAME holder name, in
+        // this process or another — would delete the live stretch's lease. The
+        // fence on record is what says whether the lease is still ours.
+        if (isCurrentStretch()) {
+          this.heartbeat?.stop(runId);
+          this.stretches.delete(runId);
+        }
+        if (Number(store.locks.runFenceOf(runId) ?? -1) === fence) {
+          store.locks.releaseRunLease(runId, store.holder);
+        }
+        this.fenceMemory.forget(fenceKey);
+        sandboxHandle.dispose(); // only THIS acquisition's installation
         record.settled = true;
         if (owned) {
-          record.resolve(resultView(runId, parsed.name, result, engine.budget));
+          record.published = resultView(runId, parsed.name, result, engine.budget);
+          record.resolve(record.published);
         } else {
           // Fail-closed (errata E2): a stretch that lost ownership never
           // publishes a terminal success — no done, no notify, no publish; the
           // waiter resolves BOUNDED with the errata envelope instead.
-          record.resolve(
-            ownershipLost(runId, fence) as unknown as Readonly<Record<string, unknown>>,
-          );
+          record.published = ownershipLost(runId, fence) as unknown as Readonly<
+            Record<string, unknown>
+          >;
+          record.resolve(record.published);
         }
       })
       .catch((error: unknown) => {
-        this.heartbeat?.stop(runId);
-        store.locks.releaseRunLease(runId, store.holder);
-        this.stretches.delete(runId);
+        if (isCurrentStretch()) {
+          this.heartbeat?.stop(runId);
+          this.stretches.delete(runId);
+        }
+        if (Number(store.locks.runFenceOf(runId) ?? -1) === fence) {
+          store.locks.releaseRunLease(runId, store.holder);
+        }
+        this.fenceMemory.forget(fenceKey);
+        sandboxHandle.dispose();
         record.settled = true;
-        record.resolve({
+        record.published = Object.freeze({
           run_id: runId,
           status: "failed",
           error: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
         });
+        record.resolve(record.published);
       });
     return Object.freeze({ run_id: runId, status: "started" as const });
   }
@@ -849,6 +1005,7 @@ export class WorkflowService {
       engine,
       promise,
       result: null,
+      published: null,
       resolve,
       settled: false,
     };
@@ -866,6 +1023,7 @@ export class WorkflowService {
         const settledView = await record.promise;
         return settledView;
       }
+      if (record.settled && record.published !== null) return record.published;
       if (record.result !== null && record.settled) {
         return resultView(record.id, record.name, record.result, record.engine.budget);
       }
@@ -895,10 +1053,12 @@ export class WorkflowService {
       readonly resumeRunId?: string;
     } = {},
   ): Promise<Readonly<Record<string, unknown>> | WorkflowServiceError> {
-    const record = this.runs.get(options.resumeRunId ?? "");
+    // Take the record AFTER `start`: capturing it before meant a resume waited
+    // on the PREVIOUS stretch's promise, which had already settled `paused`,
+    // while the new stretch went on to complete the run.
     const started = this.start(spec, args, options);
     if ("error" in started) return started;
-    const target = record ?? this.runs.get(started.run_id);
+    const target = this.runs.get(started.run_id);
     if (target === undefined) {
       return (await this.status(started.run_id, false));
     }
@@ -909,11 +1069,20 @@ export class WorkflowService {
     const entries: Record<string, unknown>[] = [];
     for (const record of this.runs.values()) {
       const progress = record.engine.progress();
+      // A settled run reports what it PUBLISHED. A stretch that lost ownership
+      // published an error envelope, and `list` must say so rather than read
+      // the engine's own (successful) outcome behind it.
+      const publishedStatus =
+        record.published !== null && typeof record.published.status === "string"
+          ? record.published.status
+          : record.published !== null
+            ? "ownership_lost"
+            : (record.result?.status ?? "complete");
       entries.push(
         Object.freeze({
           run_id: record.id,
           name: record.name,
-          status: record.settled ? (record.result?.status ?? "complete") : "running",
+          status: record.settled ? publishedStatus : "running",
           nodes_done: progress.done,
           nodes_total: progress.total,
           tokens_spent: record.engine.budget.tokensSpent,
@@ -998,7 +1167,7 @@ function rawSpecOf(parsed: WorkflowSpec): Record<string, unknown> {
   };
 }
 
-function progressJsonOf(result: RunResult): string | null {
-  void result;
-  return null;
+/** The oracle's None-when-empty rule: a run with no nodes persists no progress. */
+function progressJsonOf(progress: ProgressSnapshot): string | null {
+  return progress.total > 0 ? JSON.stringify(progress) : null;
 }

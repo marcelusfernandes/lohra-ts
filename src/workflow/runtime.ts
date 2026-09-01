@@ -40,6 +40,34 @@ export interface ChildResult {
 
 export type Awaitable<T> = T | Promise<T>;
 
+/** How a leaf runs one of its tools. */
+export type LeafToolDispatch = (
+  name: string,
+  args: Readonly<Record<string, unknown>>,
+) => string;
+
+/**
+ * One ACQUISITION's leaf sandbox, handed to the runtime before any leaf of that
+ * stretch spawns. `fence` is the token the acquisition holds and never changes:
+ * a runtime keys installations by it, so an older stretch can neither overwrite
+ * nor uninstall a newer acquisition's dispatch.
+ */
+export interface LeafSandboxInstallation {
+  readonly runId: string;
+  readonly fence: number;
+  /**
+   * Exactly the service's composition: operator policy + this acquisition's
+   * working root + live taint. The runtime must route every leaf tool call
+   * through the returned dispatch.
+   */
+  readonly wrap: (base: LeafToolDispatch) => LeafToolDispatch;
+}
+
+/** Removes ONLY the installation it came from. */
+export interface LeafSandboxHandle {
+  dispose(): void;
+}
+
 /** Provider-free port consumed by the workflow core. */
 export interface ChildRuntime {
   spawn(request: ChildSpawnRequest): Awaitable<string>;
@@ -47,4 +75,14 @@ export interface ChildRuntime {
   steer(id: string, prompt: string, causalContext?: CausalContext): Awaitable<void>;
   cancel(id: string): Awaitable<void>;
   causalSnapshot?(id: string): Awaitable<CausalContext | null>;
+  /**
+   * Install this acquisition's leaf sandbox.
+   *
+   * Structurally optional, so the non-durable T15 runtimes keep compiling. It
+   * is NOT optional in practice: a `WorkflowService` running with a durable
+   * store REQUIRES it and refuses the launch fail-closed when it is absent,
+   * before any leaf spawns. The optionality is compatibility, not permission to
+   * run leaves unsandboxed.
+   */
+  installLeafSandbox?(installation: LeafSandboxInstallation): LeafSandboxHandle;
 }

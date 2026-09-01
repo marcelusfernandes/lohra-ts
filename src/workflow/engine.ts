@@ -97,10 +97,13 @@ export class WorkflowEngine {
   noteQuotaExhausted(nodeId: string, retryAfter: number | null): void {
     if (this.control.paused || this.control.cancelled) return;
     const hint = retryAfter !== null ? `${String(Math.trunc(retryAfter))}s` : "none";
-    this.control.pausePayload = retryAfter === null ? null : { retry_after: retryAfter };
+    // The payload rides INTO pause: assigning it first and calling pause after
+    // overwrote it with null, so the provider's retry_after never reached the
+    // service and every quota pause silently fell back to the backoff curve.
     this.pause(
       "quota_exhausted",
       `quota exhausted at '${nodeId}' (retry_after=${hint})`,
+      retryAfter === null ? null : { retry_after: retryAfter },
     );
     for (const id of [...this.activeLeaves]) {
       try {
