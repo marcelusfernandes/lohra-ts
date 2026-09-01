@@ -779,9 +779,30 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
     ),
   );
 
-  results.push(
-    compared("unclassified-functional-difference", { result: { n: 1 } }, { result: { n: 2 } }),
-  );
+  const atomicRename = await mutantModule("atomic-rename-primitive", "media/persistence.ts", [
+    {
+      file: "media/persistence.ts",
+      from: "  renameSync,\n  rmSync,",
+      to: "  linkSync,\n  rmSync,",
+    },
+    {
+      file: "media/persistence.ts",
+      from: "      renameSync(temp, final);",
+      to: "      linkSync(temp, final);\n      rmSync(temp);",
+    },
+  ]);
+  try {
+    const implementation = String(atomicRename.module["persistGeneratedImages"]);
+    results.push(
+      compared(
+        "atomic-rename-primitive",
+        { primitive: "rename" },
+        { primitive: implementation.includes("renameSync(temp, final)") ? "rename" : "other" },
+      ),
+    );
+  } finally {
+    atomicRename.dispose();
+  }
   return Object.freeze(results);
 }
 

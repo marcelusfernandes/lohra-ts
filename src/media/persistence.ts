@@ -5,12 +5,12 @@ import {
   fchmodSync,
   fstatSync,
   fsyncSync,
-  linkSync,
   lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -251,10 +251,8 @@ export async function persistGeneratedImages(options: {
       )
         throw new Error("staged image changed after publish hook");
       chmodSync(temp, IMAGE_FILE_MODE);
-      linkSync(temp, final);
-      const linked = lstatSync(final);
-      owned.push({ path: final, dev: linked.dev, ino: linked.ino });
-      rmSync(temp);
+      renameSync(temp, final);
+      owned.push({ path: final, dev: staged.dev, ino: staged.ino });
     }
     return Object.freeze([...finals]);
   } catch (error) {

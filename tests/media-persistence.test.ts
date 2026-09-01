@@ -36,6 +36,12 @@ afterEach(() => {
 });
 
 describe("staged image persistence", () => {
+  it("uses the contract-required atomic rename primitive", () => {
+    const source = readFileSync(new URL("../src/media/persistence.ts", import.meta.url), "utf8");
+    expect(source).toContain("renameSync(temp, final);");
+    expect(source).not.toContain("linkSync(temp, final);");
+  });
+
   it.each([0o022, 0o077])(
     "sets 0644 under umask %o and never derives names from inputs",
     async (umask) => {
