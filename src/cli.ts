@@ -323,8 +323,16 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
       );
       return 2;
     }
+    const host = parsed.options.get("--host") as string | undefined;
+    const port = parsed.options.get("--port") as string | undefined;
+    const tools = parsed.options.get("--tools") as string | undefined;
     return await runServe({
-      argv,
+      configuration: {
+        host: host ?? "127.0.0.1",
+        port: Number.parseInt(port ?? "8000", 10),
+        insecure: parsed.options.has("--insecure"),
+        tools: tools ?? "",
+      },
       environment,
       stdout: io.stdout,
       stderr: io.stderr,

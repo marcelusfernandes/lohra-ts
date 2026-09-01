@@ -26,22 +26,25 @@ import { AnthropicMessagesModel, ChatCompletionsModel, type ToolDispatcher } fro
 import { AnthropicMessagesClient, buildClient } from "../transports/index.js";
 
 export interface ServeCommandOptions {
-  readonly argv: readonly string[];
+  readonly configuration: ServeConfiguration;
   readonly environment: Readonly<Record<string, string | undefined>>;
   readonly stdout: (value: string) => void;
   readonly stderr: (value: string) => void;
 }
 
-function option(argv: readonly string[], name: string): string | undefined {
-  const index = argv.indexOf(name);
-  return index < 0 ? undefined : argv[index + 1];
+/** Canonical, immutable projection of cli.ts's single ParseResult. runServe
+ * deliberately cannot see raw argv: accepted abbreviations and inline forms
+ * have already been normalized to their canonical option names by the shared
+ * parser before this boundary. */
+export interface ServeConfiguration {
+  readonly host: string;
+  readonly port: number;
+  readonly insecure: boolean;
+  readonly tools: string;
 }
 
 export async function runServe(options: ServeCommandOptions): Promise<number> {
-  const host = option(options.argv, "--host") ?? "127.0.0.1";
-  const port = Number.parseInt(option(options.argv, "--port") ?? "8000", 10);
-  const insecure = options.argv.includes("--insecure");
-  const toolsArg = option(options.argv, "--tools") ?? "";
+  const { host, port, insecure, tools: toolsArg } = options.configuration;
 
   const providerName = resolveProviderName(undefined, undefined, options.environment);
   if (providerName === AUTO_PROVIDER) {

@@ -39,7 +39,7 @@ describe("runServe", () => {
   it("refuses when no provider can be resolved from the environment", async () => {
     const stderr = collector();
     const code = await runServe({
-      argv: ["serve"],
+      configuration: { host: "127.0.0.1", port: 8000, insecure: false, tools: "" },
       environment: { PATH: "/usr/bin" },
       stdout: () => {},
       stderr: stderr.write,
@@ -52,7 +52,7 @@ describe("runServe", () => {
     const port = await freePort();
     const stderr = collector();
     const runPromise = runServe({
-      argv: ["serve", "--host", "127.0.0.1", "--port", String(port)],
+      configuration: { host: "127.0.0.1", port, insecure: false, tools: "" },
       environment: baseEnvironment(),
       stdout: () => {},
       stderr: stderr.write,
@@ -78,7 +78,7 @@ describe("runServe", () => {
     const port = await freePort();
     const stderr = collector();
     const runPromise = runServe({
-      argv: ["serve", "--host", "127.0.0.1", "--port", String(port), "--insecure"],
+      configuration: { host: "127.0.0.1", port, insecure: true, tools: "" },
       environment: baseEnvironment(),
       stdout: () => {},
       stderr: stderr.write,
@@ -93,7 +93,7 @@ describe("runServe", () => {
     const port = await freePort();
     const stderr = collector();
     const runPromise = runServe({
-      argv: ["serve", "--host", "127.0.0.1", "--port", String(port), "--tools", "nosuchtool"],
+      configuration: { host: "127.0.0.1", port, insecure: false, tools: "nosuchtool" },
       environment: baseEnvironment(),
       stdout: () => {},
       stderr: stderr.write,
@@ -112,7 +112,7 @@ describe("runServe", () => {
 
     const stderr = collector();
     const code = await runServe({
-      argv: ["serve", "--host", "127.0.0.1", "--port", String(port)],
+      configuration: { host: "127.0.0.1", port, insecure: false, tools: "" },
       environment: baseEnvironment(),
       stdout: () => {},
       stderr: stderr.write,

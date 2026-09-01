@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { getProviderProfile } from "../../src/providers/index.js";
-import type { ProviderProfile } from "../../src/providers/types.js";
-// Plain .mjs, no .d.ts — cast to the known shape below.
-import { resolveResponsesProfile as resolveResponsesProfileUntyped } from "../../scripts/parity/provider-transports/responses-profile.mjs";
-
-const resolveResponsesProfile = resolveResponsesProfileUntyped as () => ProviderProfile;
+import { resolveResponsesProfile } from "../../scripts/parity/provider-transports/responses-profile.mjs";
 
 // live-smoke.mjs's smokeResponses() must resolve the codex provider from
 // resolveResponsesProfile(), not by looking it up in the registry — a
