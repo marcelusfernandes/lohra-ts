@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 
 import { pythonRepr } from "../serialization/python-repr.js";
+import { isPythonTruthy } from "../serialization/python-truthy.js";
 
 /** Raised on a malformed mcp.json (never on a missing file). */
 export class MCPConfigError extends Error {}
@@ -11,8 +12,8 @@ export interface MCPServerConfig {
   readonly name: string;
   readonly transport: MCPTransport;
   readonly command?: string;
-  readonly args: readonly string[];
-  readonly env: Readonly<Record<string, string>>;
+  readonly args: readonly unknown[];
+  readonly env: Readonly<Record<string, unknown>>;
   readonly url?: string;
 }
 
@@ -20,32 +21,40 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-/** Python truthiness for values that can come from JSON. Kept local instead
- * of importing the server-layer helper so the headless MCP module does not
- * acquire a dependency on HTTP serving code. */
-function isPythonTruthyJson(value: unknown): boolean {
-  if (value === null || value === undefined || value === false || value === 0) return false;
-  if (typeof value === "string") return value !== "";
-  if (Array.isArray(value)) return value.length > 0;
-  if (isRecord(value)) return Object.keys(value).length > 0;
-  return true;
-}
-
 function parseServer(name: string, spec: unknown): MCPServerConfig {
   if (!isRecord(spec)) throw new MCPConfigError(`server ${pythonRepr(name)} must be an object`);
+  if (isPythonTruthy(spec.url) && typeof spec.url !== "string") {
+    throw new MCPConfigError(`server ${pythonRepr(name)} field 'url' must be a string`);
+  }
+  if (isPythonTruthy(spec.command) && typeof spec.command !== "string") {
+    throw new MCPConfigError(`server ${pythonRepr(name)} field 'command' must be a string`);
+  }
   const url = typeof spec.url === "string" && spec.url ? spec.url : undefined;
   const command = typeof spec.command === "string" && spec.command ? spec.command : undefined;
   if (url !== undefined) {
     return { name, transport: "http", args: [], env: {}, url };
   }
   if (command !== undefined) {
-    const args = Array.isArray(spec.args) ? spec.args.filter((v): v is string => typeof v === "string") : [];
-    const env: Record<string, string> = {};
-    if (isRecord(spec.env)) {
-      for (const [key, value] of Object.entries(spec.env)) {
-        if (typeof value === "string") env[key] = value;
-      }
-    }
+    const rawArgs = spec.args;
+    const args = !isPythonTruthy(rawArgs)
+      ? []
+      : Array.isArray(rawArgs)
+        ? Array.from(rawArgs as readonly unknown[])
+        : typeof rawArgs === "string"
+          ? Array.from(rawArgs)
+          : isRecord(rawArgs)
+            ? Object.keys(rawArgs)
+            : (() => {
+                throw new MCPConfigError(`server ${pythonRepr(name)} field 'args' is not iterable`);
+              })();
+    const rawEnv = spec.env;
+    const env = !isPythonTruthy(rawEnv)
+      ? {}
+      : isRecord(rawEnv)
+        ? { ...rawEnv }
+        : (() => {
+            throw new MCPConfigError(`server ${pythonRepr(name)} field 'env' cannot construct a mapping`);
+          })();
     return { name, transport: "stdio", command, args, env };
   }
   throw new MCPConfigError(`server ${pythonRepr(name)} needs a 'command' (stdio) or 'url' (http)`);
@@ -66,7 +75,7 @@ export function loadMcpConfig(path: string): readonly MCPServerConfig[] {
 
   const configs: MCPServerConfig[] = [];
   for (const [name, spec] of Object.entries(servers)) {
-    if (isRecord(spec) && isPythonTruthyJson(spec.disabled)) continue;
+    if (isRecord(spec) && isPythonTruthy(spec.disabled)) continue;
     configs.push(parseServer(name, spec));
   }
   return configs;

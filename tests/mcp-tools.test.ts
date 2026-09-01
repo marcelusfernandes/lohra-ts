@@ -45,6 +45,14 @@ describe("convertMcpSchema", () => {
     expect(convertMcpSchema({}).description).toBe("");
   });
 
+  it("kills the silent-description-coercion mutant: truthy non-string descriptions stay raw", () => {
+    expect(convertMcpSchema({ description: 123 }).description).toBe(123);
+    expect(convertMcpSchema({ description: { source: "mcp" } }).description).toEqual({
+      source: "mcp",
+    });
+    expect(convertMcpSchema({ description: false }).description).toBe("");
+  });
+
   it("key order is description, parameters", () => {
     expect(Object.keys(convertMcpSchema({ description: "x", inputSchema: {} }))).toEqual([
       "description",
@@ -63,6 +71,30 @@ describe("wrapCallResult", () => {
   it("non-text block -> [type block] placeholder", () => {
     expect(wrapCallResult({ content: [{ type: "image" }] })).toBe(
       toolResult(undefined, { content: "[image block]" }),
+    );
+  });
+
+  it("kills JS String spelling: null/booleans use Python placeholder spellings", () => {
+    expect(wrapCallResult({ content: [{ type: null }] })).toBe(
+      toolResult(undefined, { content: "[None block]" }),
+    );
+    expect(wrapCallResult({ content: [{ type: true }, { type: false }] })).toBe(
+      toolResult(undefined, { content: "[True block][False block]" }),
+    );
+  });
+
+  it("kills the success-empty mutant: truthy non-string text fails with a cause", () => {
+    expect(() => wrapCallResult({ content: [{ type: "text", text: 123 }] })).toThrow(
+      /must contain a string/u,
+    );
+    expect(wrapCallResult({ content: [{ type: "text", text: 0 }] })).toBe(
+      toolResult(undefined, { content: "" }),
+    );
+  });
+
+  it("kills the iterable-object mutant: structurally invalid content fails closed", () => {
+    expect(() => wrapCallResult({ content: { a: 1 } })).toThrow(
+      "MCP result content must be an array of blocks",
     );
   });
 
@@ -102,6 +134,42 @@ describe("registerServerTools / deregisterServer", () => {
     );
     expect(added).toEqual([]);
     expect(registry.namesInToolset("mcp-fix")).toEqual([]);
+  });
+
+  it("kills per-tool skip: a truthy non-string name rejects the batch before registry mutation", () => {
+    const registry = new ToolRegistry();
+    expect(() =>
+      registerServerTools(
+        registry,
+        "bad",
+        [{ name: "valid-prefix" }, { name: 123 }, { name: "valid-suffix" }],
+        () => ({}),
+      ),
+    ).toThrow(/truthy non-string tool name/u);
+    expect(registry.namesInToolset("mcp-bad")).toEqual([]);
+  });
+
+  it("keeps Python's falsy-name behavior while rejecting only truthy wrong types", () => {
+    const registry = new ToolRegistry();
+    expect(
+      registerServerTools(
+        registry,
+        "fix",
+        [{ name: null }, { name: false }, { name: 0 }, { name: [] }, { name: {} }],
+        () => ({}),
+      ),
+    ).toEqual([]);
+  });
+
+  it("surfaces non-string text through the public registry error envelope", async () => {
+    const registry = new ToolRegistry();
+    registerServerTools(registry, "fix", [{ name: "echo" }], () => ({
+      content: [{ type: "text", text: 123 }],
+    }));
+    const envelope = JSON.parse(await registry.dispatch("mcp_fix_echo", {})) as {
+      readonly error?: string;
+    };
+    expect(envelope.error).toMatch(/^Tool execution failed: TypeError: .+/u);
   });
 
   it("intra-server collision: same slug -> first wins, second skipped, exact warning text (M5)", () => {

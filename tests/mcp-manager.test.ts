@@ -72,6 +72,32 @@ describe("MCPManager.connectAll", () => {
     expect(closeSpy).toHaveBeenCalledTimes(1);
     expect(capture.lines.join("")).toBe("MCP server 'bad' failed to connect: cannot list\n");
   });
+
+  it("rejects an invalid-name batch atomically, closes it, and still connects a valid neighbor", async () => {
+    const registry = new ToolRegistry();
+    const badClose = vi.fn(() => Promise.resolve());
+    const factory = (cfg: MCPServerConfig) =>
+      Promise.resolve(
+        cfg.name === "bad"
+          ? fakeSession([{ name: "prefix" }, { name: 123 }, { name: "suffix" }], {
+              close: badClose,
+            })
+          : fakeSession([{ name: "ok" }]),
+      );
+    const manager = new MCPManager(registry, factory);
+    const capture = captureStderr();
+    try {
+      await manager.connectAll([config("bad"), config("good")]);
+    } finally {
+      capture.restore();
+    }
+    expect(registry.namesInToolset("mcp-bad")).toEqual([]);
+    expect(registry.namesInToolset("mcp-good")).toEqual(["mcp_good_ok"]);
+    expect(badClose).toHaveBeenCalledTimes(1);
+    expect(capture.lines.join("")).toMatch(
+      /^MCP server 'bad' failed to connect: MCP server 'bad' returned a truthy non-string tool name: 123\n$/u,
+    );
+  });
 });
 
 describe("MCPManager.refresh", () => {

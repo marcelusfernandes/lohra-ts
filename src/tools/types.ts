@@ -4,7 +4,7 @@ export type ToolHandler = (args: ToolArguments, kwargs?: ToolKwargs) => string |
 export type ToolCheck = () => boolean;
 
 export interface ToolFunctionSchema {
-  readonly description: string;
+  readonly description: unknown;
   readonly parameters: Readonly<Record<string, unknown>>;
   readonly name?: string;
 }

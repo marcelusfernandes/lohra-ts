@@ -120,6 +120,52 @@ describe("loadMcpConfig", () => {
     ]);
   });
 
+  it("kills silent filtering: preserves Python container construction for hostile args/env", () => {
+    writeFileSync(
+      path,
+      JSON.stringify({
+        mcpServers: {
+          chars: { command: "npx", args: "abc", env: { A: 1 } },
+          values: { command: "npx", args: [1, 2], env: { FLAG: true } },
+        },
+      }),
+    );
+    expect(loadMcpConfig(path)).toEqual([
+      {
+        name: "chars",
+        transport: "stdio",
+        command: "npx",
+        args: ["a", "b", "c"],
+        env: { A: 1 },
+      },
+      {
+        name: "values",
+        transport: "stdio",
+        command: "npx",
+        args: [1, 2],
+        env: { FLAG: true },
+      },
+    ]);
+  });
+
+  it("kills accepting execution-boundary shapes: truthy non-string url/command abort the set", () => {
+    writeFileSync(
+      path,
+      JSON.stringify({
+        mcpServers: { good: { command: "npx" }, bad: { url: 123 } },
+      }),
+    );
+    expect(() => loadMcpConfig(path)).toThrow("server 'bad' field 'url' must be a string");
+
+    writeFileSync(
+      path,
+      JSON.stringify({
+        mcpServers: { good: { command: "npx" }, bad: { command: ["npx", "server"] } },
+      }),
+    );
+    expect(() => loadMcpConfig(path)).toThrow("server 'bad' field 'command' must be a string");
+  });
+
   it("a config error aborts the whole set -- one bad server invalidates all", () => {
     writeFileSync(
       path,
