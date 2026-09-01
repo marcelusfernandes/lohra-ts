@@ -630,6 +630,14 @@ results.push(
       });
     }
 
+    const configFixture: McpFixture = {
+      servers: {
+        fix: {
+          echo_config: true,
+          tools: [{ name: "echo", description: "d", inputSchema: { type: "object" } }],
+        },
+      },
+    };
     const configObserved = await pair("hostile-aligned-config-containers", {
       prompt: "SCEN:mcpcall go",
       mcpConfig: {
@@ -646,14 +654,21 @@ results.push(
           },
         },
       },
-      fixture: {
-        servers: {
+      fixture: configFixture,
+      toolName: "mcp_fix_echo",
+    });
+    const configObservedListObject = await pair("hostile-aligned-config-list-object", {
+      prompt: "SCEN:mcpcall go",
+      mcpConfig: {
+        mcpServers: {
           fix: {
-            echo_config: true,
-            tools: [{ name: "echo", description: "d", inputSchema: { type: "object" } }],
+            command: "fixture-command",
+            args: [1, 2],
+            env: { A: 1 },
           },
         },
       },
+      fixture: configFixture,
       toolName: "mcp_fix_echo",
     });
     const expectedDescriptions = [
@@ -662,6 +677,8 @@ results.push(
     ];
     const expectedConfig =
       'observed-config:{"name":"fix","transport":"stdio","command":"fixture-command","args":["a","b","c"],"env":{"null":"nil","A":1,"B":"x","__proto__":{"polluted":true}},"url":null}';
+    const expectedConfigListObject =
+      'observed-config:{"name":"fix","transport":"stdio","command":"fixture-command","args":[1,2],"env":{"A":1},"url":null}';
     const pass =
       exact(descriptionProjection(descriptions.oracle), expectedDescriptions) &&
       exact(descriptionProjection(descriptions.candidate), expectedDescriptions) &&
@@ -670,7 +687,10 @@ results.push(
       placeholders.every((entry) => entry.pass) &&
       output(configObserved.oracle) === output(configObserved.candidate) &&
       mcpResultContent(configObserved.oracle) === expectedConfig &&
-      mcpResultContent(configObserved.candidate) === expectedConfig;
+      mcpResultContent(configObserved.candidate) === expectedConfig &&
+      output(configObservedListObject.oracle) === output(configObservedListObject.candidate) &&
+      mcpResultContent(configObservedListObject.oracle) === expectedConfigListObject &&
+      mcpResultContent(configObservedListObject.candidate) === expectedConfigListObject;
     return {
       pass,
       projection: {
@@ -685,8 +705,14 @@ results.push(
         },
         placeholders,
         configObserved: {
-          oracle: output(configObserved.oracle),
-          candidate: output(configObserved.candidate),
+          stringAndPairs: {
+            oracle: output(configObserved.oracle),
+            candidate: output(configObserved.candidate),
+          },
+          listAndObject: {
+            oracle: output(configObservedListObject.oracle),
+            candidate: output(configObservedListObject.candidate),
+          },
         },
       },
       note: "Oracle alignment for F5 rows 1/2/4/5/8; args/env remains an ADR 0002 reopen-before-live-SDK debt.",
