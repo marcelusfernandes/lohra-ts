@@ -1,7 +1,9 @@
 import {
+  chmodSync,
   closeSync,
   existsSync,
   fchmodSync,
+  fstatSync,
   fsyncSync,
   linkSync,
   lstatSync,
@@ -141,8 +143,7 @@ export async function persistGeneratedImages(options: {
 
   const temps: string[] = [];
   const finals: string[] = [];
-  const published: string[] = [];
-  const stageStats: Stats[] = [];
+  const owned: Array<{ readonly path: string; readonly dev: number; readonly ino: number }> = [];
   try {
     for (let index = 0; index < decoded.length; index += 1) {
       const bytes = decoded[index];
@@ -152,7 +153,9 @@ export async function persistGeneratedImages(options: {
       const temp = join(options.plan.outDir, `.stage-${randomUUID()}.tmp`);
       if (existsSync(final)) throw new Error("image UUID collision");
       const fd = openSync(temp, "wx", 0o600);
+      const staged = fstatSync(fd);
       temps.push(temp);
+      owned.push({ path: temp, dev: staged.dev, ino: staged.ino });
       try {
         (
           options.writeStage ??
@@ -165,7 +168,6 @@ export async function persistGeneratedImages(options: {
       } finally {
         closeSync(fd);
       }
-      stageStats.push(lstatSync(temp));
       finals.push(final);
     }
 
@@ -178,23 +180,26 @@ export async function persistGeneratedImages(options: {
       checkControlledRoot(options.plan);
       // The hook no longer owns the stage path: revalidate identity, type,
       // size and bytes so a swapped/symlinked/tampered stage can never be
-      // published under the provider's name.
-      const staged = stageStats[index];
+      // published under the provider's name, and restabilize the mode the
+      // contract requires.
+      const staged = owned[index];
       const expectedBytes = decoded[index];
-      const owned = lstatSync(temp);
+      const current = lstatSync(temp);
       if (
         staged === undefined ||
         expectedBytes === undefined ||
-        owned.isSymbolicLink() ||
-        !owned.isFile() ||
-        owned.dev !== staged.dev ||
-        owned.ino !== staged.ino ||
-        owned.size !== staged.size ||
+        current.isSymbolicLink() ||
+        !current.isFile() ||
+        current.dev !== staged.dev ||
+        current.ino !== staged.ino ||
+        current.size !== expectedBytes.byteLength ||
         !readFileSync(temp).equals(expectedBytes)
       )
         throw new Error("staged image changed after publish hook");
+      chmodSync(temp, IMAGE_FILE_MODE);
       linkSync(temp, final);
-      published.push(final);
+      const linked = lstatSync(final);
+      owned.push({ path: final, dev: linked.dev, ino: linked.ino });
       rmSync(temp);
     }
     return Object.freeze([...finals]);
@@ -208,11 +213,14 @@ export async function persistGeneratedImages(options: {
     }
     if (rootSafe) {
       const cleanupErrors: unknown[] = [];
-      for (const path of [...temps, ...published]) {
+      for (const entry of owned) {
         try {
-          rmSync(path, { force: true });
+          const current = lstatSync(entry.path);
+          if (current.dev !== entry.dev || current.ino !== entry.ino) continue;
+          rmSync(entry.path, { force: true });
         } catch (cleanupError) {
-          cleanupErrors.push(cleanupError);
+          if ((cleanupError as NodeJS.ErrnoException).code !== "ENOENT")
+            cleanupErrors.push(cleanupError);
         }
       }
       if (cleanupErrors.length > 0)

@@ -216,6 +216,46 @@ describe("staged image persistence", () => {
     expect(existsSync(join(outDir, `${"a".repeat(32)}.png`))).toBe(false);
   });
 
+  it("preserves a foreign file planted at the stage path during cleanup", async () => {
+    const directory = root();
+    const outDir = join(directory, "images");
+    await expect(
+      persistGeneratedImages({
+        plan: createOutputPlan(outDir),
+        payloads: [Buffer.from("provider").toString("base64")],
+        requested: 1,
+        uuid: () => "a".repeat(32),
+        beforePublish: () => {
+          const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
+          if (stage === undefined) throw new Error("stage missing in hook");
+          rmSync(join(outDir, stage));
+          writeFileSync(join(outDir, stage), "FOREIGN-SENTINEL");
+        },
+      }),
+    ).rejects.toThrow("staged image changed after publish hook");
+    expect(existsSync(join(outDir, `${"a".repeat(32)}.png`))).toBe(false);
+    const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
+    expect(stage).toBeDefined();
+    expect(readFileSync(join(outDir, stage ?? "missing"), "utf8")).toBe("FOREIGN-SENTINEL");
+  });
+
+  it("restabilizes 0644 when the hook tampers with the stage mode", async () => {
+    const directory = root();
+    const outDir = join(directory, "images");
+    const paths = await persistGeneratedImages({
+      plan: createOutputPlan(outDir),
+      payloads: [Buffer.from("provider").toString("base64")],
+      requested: 1,
+      uuid: () => "a".repeat(32),
+      beforePublish: () => {
+        const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
+        if (stage === undefined) throw new Error("stage missing in hook");
+        chmodSync(join(outDir, stage), 0o600);
+      },
+    });
+    expect(lstatSync(paths[0] ?? "").mode & 0o777).toBe(0o644);
+  });
+
   it("removes a staged seven-byte partial after a write fault", async () => {
     const directory = root();
     const outDir = join(directory, "images");

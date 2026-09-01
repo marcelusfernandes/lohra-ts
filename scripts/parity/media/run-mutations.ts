@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import {
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -7,6 +8,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -255,8 +257,8 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
         },
         {
           file: "media/persistence.ts",
-          from: "for (const path of [...temps, ...published]) {",
-          to: "for (const path of [] as string[]) {",
+          from: "for (const entry of owned) {",
+          to: "for (const entry of [] as Array<{ readonly path: string; readonly dev: number; readonly ino: number }>) {",
         },
       ],
       async (media) => {
@@ -507,6 +509,98 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
   } finally {
     encoded.dispose();
   }
+
+  results.push(
+    await persistenceMutation(
+      "stage-mode",
+      [
+        {
+          file: "media/persistence.ts",
+          from: "chmodSync(temp, IMAGE_FILE_MODE);",
+          to: "void IMAGE_FILE_MODE;",
+        },
+      ],
+      async (media) => {
+        const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-mode-"));
+        const outDir = join(runtime, "images");
+        try {
+          const final = join(outDir, `${"a".repeat(32)}.png`);
+          let mode = -1;
+          let status = "ok";
+          try {
+            const paths = await media.persistGeneratedImages({
+              plan: media.createOutputPlan(outDir),
+              payloads: [Buffer.from("provider").toString("base64")],
+              requested: 1,
+              uuid: () => "a".repeat(32),
+              beforePublish: () => {
+                const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
+                if (stage === undefined) throw new Error("stage missing in hook");
+                writeFileSync(join(outDir, stage), "provider");
+                chmodSync(join(outDir, stage), 0o600);
+              },
+            });
+            mode = statSync(paths[0] ?? final).mode & 0o777;
+          } catch {
+            status = "error";
+          }
+          return {
+            expected: { status: "ok", final_mode: 0o644 },
+            actual: { status, final_mode: mode },
+          };
+        } finally {
+          rmSync(runtime, { recursive: true, force: true });
+        }
+      },
+    ),
+  );
+
+  results.push(
+    await persistenceMutation(
+      "owned-cleanup",
+      [
+        {
+          file: "media/persistence.ts",
+          from: "if (current.dev !== entry.dev || current.ino !== entry.ino) continue;",
+          to: "void current;",
+        },
+      ],
+      async (media) => {
+        const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-owned-"));
+        const outDir = join(runtime, "images");
+        try {
+          let status = "error";
+          try {
+            await media.persistGeneratedImages({
+              plan: media.createOutputPlan(outDir),
+              payloads: [Buffer.from("provider").toString("base64")],
+              requested: 1,
+              uuid: () => "a".repeat(32),
+              beforePublish: () => {
+                const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
+                if (stage === undefined) throw new Error("stage missing in hook");
+                rmSync(join(outDir, stage));
+                writeFileSync(join(outDir, stage), "FOREIGN-SENTINEL");
+              },
+            });
+            status = "ok";
+          } catch {
+            // Expected side: revalidation must abort and cleanup must keep the
+            // foreign file at the stage path.
+          }
+          const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
+          const foreignPreserved =
+            stage !== undefined && readFileSync(join(outDir, stage), "utf8") === "FOREIGN-SENTINEL";
+          return {
+            expected: { status: "error", foreign_preserved: true },
+            actual: { status, foreign_preserved: foreignPreserved },
+          };
+        } finally {
+          rmSync(runtime, { recursive: true, force: true });
+        }
+      },
+    ),
+  );
 
   results.push(
     compared("unclassified-functional-difference", { result: { n: 1 } }, { result: { n: 2 } }),

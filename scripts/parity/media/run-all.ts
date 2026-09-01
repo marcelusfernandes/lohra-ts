@@ -139,14 +139,21 @@ try {
 } catch (error) {
   if (!(error instanceof Error) || error.message !== "NETWORK_DISABLED") throw error;
 }
-// The self-test must cover a resolver family that bypasses net/dgram entirely.
+// The self-test must cover resolver families that bypass net/dgram entirely:
+// the static promises mirror and the promises Resolver instance prototype.
 try {
   void dns.promises.resolve4("network-sentinel.invalid");
   throw new Error("T21_NETWORK_SENTINEL_DID_NOT_BLOCK");
 } catch (error) {
   if (!(error instanceof Error) || error.message !== "NETWORK_DISABLED") throw error;
 }
-if (sentinelProof.attempts() !== 2) throw new Error("T21_NETWORK_SENTINEL_COUNTER");
+try {
+  void new dns.promises.Resolver().resolve4("network-sentinel.invalid");
+  throw new Error("T21_NETWORK_SENTINEL_DID_NOT_BLOCK");
+} catch (error) {
+  if (!(error instanceof Error) || error.message !== "NETWORK_DISABLED") throw error;
+}
+if (sentinelProof.attempts() !== 3) throw new Error("T21_NETWORK_SENTINEL_COUNTER");
 sentinelProof.restore();
 const network = installNetworkSentinel();
 const media = await import("../../../src/media/index.js");

@@ -17,9 +17,15 @@ export function installNetworkSentinel() {
   };
   if (typeof globalThis.fetch === "function") block(globalThis, "fetch");
   // Every c-ares resolver entry point: dns.resolve*, the dns.promises mirror,
-  // reverse lookups and instance methods of dns.Resolver — all bypass
-  // net.Socket/dgram, so each must be poisoned explicitly.
-  for (const target of [dns, dns.promises, dns.Resolver.prototype]) {
+  // reverse lookups and the instance methods of BOTH dns.Resolver and
+  // dns.promises.Resolver (distinct classes) — all bypass net.Socket/dgram,
+  // so each must be poisoned explicitly.
+  for (const target of [
+    dns,
+    dns.promises,
+    dns.Resolver.prototype,
+    dns.promises.Resolver.prototype,
+  ]) {
     for (const key of Object.getOwnPropertyNames(target)) {
       if (/^(resolve|reverse|lookup)/.test(key) && typeof target[key] === "function")
         block(target, key);
