@@ -1082,6 +1082,271 @@ describe("workflow service — leaf capability sandbox", () => {
     }
   });
 
+  it("a takeover interposed between the fence check and the release keeps its lease", async () => {
+    // The release used to read the fence and then DELETE by (run, holder). A
+    // new acquisition BY THE SAME HOLDER landing between those two statements
+    // passed the stale check and had its lease deleted. The takeover is
+    // interposed here at exactly that point, deterministically.
+    const root = mkdtempSync(join(tmpdir(), "lohra-service-durability-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      const repository = new WorkflowRepository(connection.database);
+      const locks = new LockRepository(connection.database);
+      const clock = { now: 1000 };
+      let interposed = false;
+      let takeoverFence: number | null = null;
+      // The proxy fires the competing acquire the instant the cleanup reaches
+      // its release — the window the old read-then-delete left open.
+      const racingLocks = new Proxy(locks, {
+        get(target, prop, receiver) {
+          if (prop === "releaseRunLeaseAtFence" || prop === "releaseRunLease") {
+            return (...args: unknown[]) => {
+              if (!interposed) {
+                interposed = true;
+                // the finishing stretch's own lease (TTL 10) has lapsed, so a
+                // fresh acquisition by the SAME holder takes the run over here
+                clock.now = 1011;
+                takeoverFence = target.acquireRunLease("run-release-race", "same-holder", clock.now, 900);
+              }
+              return (target[prop as "releaseRunLease"] as (...a: unknown[]) => unknown).apply(
+                target,
+                args,
+              );
+            };
+          }
+          return Reflect.get(target, prop, receiver) as unknown;
+        },
+      });
+      const service = new WorkflowService({
+        runtime: withLeafSandbox({
+          spawn: (): string => "leaf-1",
+          collect: (): ChildResult => ({
+            status: "complete",
+            output: { answer: "ok" },
+            usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+          }),
+          steer: (): void => undefined,
+          cancel: (): void => undefined,
+        }),
+        idSource: () => "run-release-race",
+        timerFactory: () => ({ cancel: () => undefined }),
+        store: {
+          repository, locks: racingLocks, holder: "same-holder", ttl: 10,
+          ownershipOf: () => ({ fence: 0, holder: "same-holder", now: clock.now }),
+          database: connection.database,
+        },
+      });
+      const started = service.start(spec());
+      if ("error" in started) throw new Error(started.error);
+      await service.status("run-release-race", true);
+      expect(interposed).toBe(true);
+      expect(takeoverFence).toBe(2);
+      expect(Number(locks.runFenceOf("run-release-race"))).toBe(2);
+      // the takeover's lease SURVIVES the finishing stretch's cleanup
+      expect(locks.runLeaseExpiry("run-release-race", clock.now)).toBe(1911);
+      connection.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("an installer that throws gives the lease back and stops the heartbeat", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-service-durability-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      const repository = new WorkflowRepository(connection.database);
+      const locks = new LockRepository(connection.database);
+      const ownership = { fence: 0 as number, holder: "test", now: 1000 };
+      const timers: { cancelled: boolean }[] = [];
+      const warnings: string[] = [];
+      let spawns = 0;
+      const exploding: ChildRuntime = {
+        installLeafSandbox: () => { throw new Error("installer exploded"); },
+        spawn: () => { spawns += 1; return "leaf-1"; },
+        collect: (): ChildResult => ({ status: "complete", output: null }),
+        steer: () => undefined,
+        cancel: () => undefined,
+      };
+      const service = new WorkflowService({
+        runtime: exploding,
+        idSource: () => "run-install-throws",
+        onWarning: (message) => warnings.push(message),
+        timerFactory: () => {
+          const timer = { cancelled: false };
+          timers.push(timer);
+          return { cancel: () => { timer.cancelled = true; } };
+        },
+        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+      });
+      // the exception never escapes: the caller gets the nominal envelope
+      const started = service.start(spec());
+      expect(started).toMatchObject({
+        error: "workflow leaf sandbox unavailable",
+        cause: "LEAF_SANDBOX_UNAVAILABLE",
+        run_id: "run-install-throws",
+      });
+      expect(spawns).toBe(0);
+      // lease given back, no durable row, and no timer left able to renew it
+      expect(locks.runLeaseExpiry("run-install-throws", 1000)).toBeNull();
+      expect(repository.getRunState("run-install-throws")).toBeNull();
+      expect(timers.every((timer) => timer.cancelled)).toBe(true);
+      // the fence row survives (it always does) and the failure was recorded
+      expect(Number(locks.runFenceOf("run-install-throws"))).toBe(1);
+      expect(warnings.some((message) => message.includes("installer exploded"))).toBe(true);
+      // and the run is launchable again afterwards — nothing was left holding it
+      const retry = new WorkflowService({
+        runtime: withLeafSandbox({
+          spawn: (): string => "leaf-1",
+          collect: (): ChildResult => ({
+            status: "complete",
+            output: { answer: "ok" },
+            usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+          }),
+          steer: (): void => undefined,
+          cancel: (): void => undefined,
+        }),
+        idSource: () => "run-install-throws",
+        timerFactory: () => ({ cancel: () => undefined }),
+        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+      });
+      const second = retry.start(spec());
+      if ("error" in second) throw new Error(second.error);
+      const done = (await retry.status("run-install-throws", true)) as Record<string, unknown>;
+      expect(done.status).toBe("complete");
+      connection.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("a disposer that throws still lets the run publish a bounded, coherent result", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-service-durability-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown): void => { rejections.push(reason); };
+    process.on("unhandledRejection", onRejection);
+    try {
+      const repository = new WorkflowRepository(connection.database);
+      const locks = new LockRepository(connection.database);
+      const ownership = { fence: 0 as number, holder: "test", now: 1000 };
+      const warnings: string[] = [];
+      let disposeCalls = 0;
+      const runtime: ChildRuntime = {
+        installLeafSandbox: () => ({
+          dispose: () => { disposeCalls += 1; throw new Error("dispose exploded"); },
+        }),
+        spawn: () => "leaf-1",
+        collect: (): ChildResult => ({
+          status: "complete",
+          output: { answer: "ok" },
+          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+        }),
+        steer: () => undefined,
+        cancel: () => undefined,
+      };
+      const service = new WorkflowService({
+        runtime,
+        idSource: () => "run-dispose-throws",
+        onWarning: (message) => warnings.push(message),
+        timerFactory: () => ({ cancel: () => undefined }),
+        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+      });
+      const started = service.start(spec());
+      if ("error" in started) throw new Error(started.error);
+      // BOUNDED: the waiter settles on its own, it does not hang on a rejected chain
+      let bell: ReturnType<typeof setTimeout> | undefined;
+      const waited = (await Promise.race([
+        service.status("run-dispose-throws", true),
+        new Promise<Record<string, unknown>>((resolveRace) => {
+          bell = setTimeout(() => { resolveRace({ error: "WAITER HUNG" }); }, 1_000);
+        }),
+      ])) as Record<string, unknown>;
+      clearTimeout(bell);
+      expect(waited.status).toBe("complete");
+      // cleanup is idempotent: disposal is attempted once, not once per path
+      expect(disposeCalls).toBe(1);
+      expect(warnings.some((message) => message.includes("dispose exploded"))).toBe(true);
+      // and every channel agrees, with the lease handed back
+      expect((repository.getRunState("run-dispose-throws") as Record<string, unknown>).status).toBe("complete");
+      expect(service.list().find((entry) => entry.run_id === "run-dispose-throws")?.status).toBe("complete");
+      expect(locks.runLeaseExpiry("run-dispose-throws", 1000)).toBeNull();
+      await new Promise((resolveTick) => setTimeout(resolveTick, 10));
+      expect(rejections).toEqual([]);
+      connection.close();
+    } finally {
+      process.off("unhandledRejection", onRejection);
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("a publish that throws after cleanup does not hand the acquisition back twice", async () => {
+    // The reachable double-cleanup path: the terminal handler finishes the
+    // stretch, then building the published view throws (a leaf output that
+    // cannot be structured-cloned), so the chain lands in `.catch` — which
+    // finishes the stretch again. Cleanup must be idempotent, and the run must
+    // still publish something bounded.
+    const root = mkdtempSync(join(tmpdir(), "lohra-service-durability-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      const repository = new WorkflowRepository(connection.database);
+      const locks = new LockRepository(connection.database);
+      const ownership = { fence: 0 as number, holder: "test", now: 1000 };
+      let disposeCalls = 0;
+      let releaseCalls = 0;
+      const countingLocks = new Proxy(locks, {
+        get(target, prop, receiver) {
+          if (prop === "releaseRunLeaseAtFence" || prop === "releaseRunLease") {
+            return (...args: unknown[]) => {
+              releaseCalls += 1;
+              return (target[prop as "releaseRunLease"] as (...a: unknown[]) => unknown).apply(target, args);
+            };
+          }
+          return Reflect.get(target, prop, receiver) as unknown;
+        },
+      });
+      const runtime: ChildRuntime = {
+        installLeafSandbox: () => ({ dispose: () => { disposeCalls += 1; } }),
+        spawn: () => "leaf-1",
+        collect: (): ChildResult => ({
+          status: "complete",
+          // a function cannot be structured-cloned, so publishing this throws
+          output: { answer: () => "nope" },
+          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+        }),
+        steer: () => undefined,
+        cancel: () => undefined,
+      };
+      const service = new WorkflowService({
+        runtime,
+        idSource: () => "run-publish-throws",
+        timerFactory: () => ({ cancel: () => undefined }),
+        store: { repository, locks: countingLocks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+      });
+      const started = service.start(spec());
+      if ("error" in started) throw new Error(started.error);
+      let bell: ReturnType<typeof setTimeout> | undefined;
+      const waited = (await Promise.race([
+        service.status("run-publish-throws", true),
+        new Promise<Record<string, unknown>>((resolveRace) => {
+          bell = setTimeout(() => { resolveRace({ error: "WAITER HUNG" }); }, 1_000);
+        }),
+      ])) as Record<string, unknown>;
+      clearTimeout(bell);
+      // bounded: the waiter settles with the failure envelope, it does not hang
+      expect(waited.status).toBe("failed");
+      // and the acquisition was handed back exactly ONCE, not once per path
+      expect(disposeCalls).toBe(1);
+      expect(releaseCalls).toBe(1);
+      connection.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("refuses to launch a durable run when the runtime cannot install the leaf sandbox", async () => {
     // Fail-closed: no lease is kept, no line is written, and nothing spawns.
     const root = mkdtempSync(join(tmpdir(), "lohra-service-sandbox-"));

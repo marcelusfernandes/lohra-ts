@@ -321,9 +321,9 @@ const namedMutants: readonly Mutant[] = [
       {
         file: service,
         before:
-          "        this.fenceMemory.forget(fenceKey);\n        sandboxHandle.dispose(); // only THIS acquisition's installation",
+          "        finishStretch();\n        record.settled = true;\n        if (owned) {",
         after:
-          "        this.persistSpend(store, runId, effectiveBudget, seeded, engine, stretchOwnership());\n        this.fenceMemory.forget(fenceKey);\n        sandboxHandle.dispose(); // only THIS acquisition's installation",
+          "        finishStretch();\n        this.persistSpend(store, runId, effectiveBudget, seeded, engine, stretchOwnership());\n        record.settled = true;\n        if (owned) {",
       },
     ],
   },
@@ -364,8 +364,8 @@ const namedMutants: readonly Mutant[] = [
     edits: [
       {
         file: service,
-        before: "    if (install === undefined) {\n      this.heartbeat?.stop(runId);",
-        after: "    if (false as boolean) {\n      this.heartbeat?.stop(runId);",
+        before: "    if (install === undefined) {\n      abandonAcquisition();\n      return leafSandboxUnavailable(runId);\n    }",
+        after: "    if (install === undefined) {\n      return Object.freeze({ run_id: runId, status: \"started\" as const });\n    }",
       },
     ],
   },
@@ -392,19 +392,6 @@ const namedMutants: readonly Mutant[] = [
         file: service,
         before: "    if (isLive(liveHere)) {\n      return Object.freeze({\n        error:\n          `workflow run '${runId}' has not finished",
         after: "    if (false as boolean) {\n      return Object.freeze({\n        error:\n          `workflow run '${runId}' has not finished",
-      },
-    ],
-  },
-  {
-    id: "u/release-ignores-whose-lease-it-is",
-    category: "terminal",
-    mechanism: "a finished stretch releases by (run, holder) without checking the fence, deleting a newer acquisition's lease",
-    focus: { file: serviceTests, test: "never lends it the new fence" },
-    edits: [
-      {
-        file: service,
-        before: "        if (Number(store.locks.runFenceOf(runId) ?? -1) === fence) {\n          store.locks.releaseRunLease(runId, store.holder);\n        }\n        this.fenceMemory.forget(fenceKey);\n        sandboxHandle.dispose(); // only THIS acquisition's installation",
-        after: "        store.locks.releaseRunLease(runId, store.holder);\n        this.fenceMemory.forget(fenceKey);\n        sandboxHandle.dispose(); // only THIS acquisition's installation",
       },
     ],
   },
@@ -501,6 +488,76 @@ const namedMutants: readonly Mutant[] = [
         file: service,
         before: "        const taintedNow = tainted || this.taintTracker.tainted;",
         after: "        const taintedNow = tainted;",
+      },
+    ],
+  },
+  {
+    id: "ac/release-reads-the-fence-then-deletes",
+    category: "terminal",
+    mechanism: "the release checks the fence in one statement and deletes in another, so a takeover by the same holder landing in between loses its lease",
+    focus: { file: serviceTests, test: "takeover interposed between the fence check and the release" },
+    edits: [
+      {
+        file: service,
+        before: "      step(\"lease release\", () => {\n        store.locks.releaseRunLeaseAtFence(runId, store.holder, fence);\n      });",
+        after: "      step(\"lease release\", () => {\n        if (Number(store.locks.runFenceOf(runId) ?? -1) === fence) {\n          store.locks.releaseRunLease(runId, store.holder);\n        }\n      });",
+      },
+    ],
+  },
+  {
+    id: "ad/release-ignores-the-fence-entirely",
+    category: "terminal",
+    mechanism: "the release deletes by (run, holder) with no fence condition at all",
+    focus: { file: serviceTests, test: "takeover interposed between the fence check and the release" },
+    edits: [
+      {
+        file: service,
+        before: "        store.locks.releaseRunLeaseAtFence(runId, store.holder, fence);\n      });\n      step(\"fence memory release\"",
+        after: "        store.locks.releaseRunLease(runId, store.holder);\n      });\n      step(\"fence memory release\"",
+      },
+    ],
+  },
+  {
+    id: "ae/installer-exception-keeps-the-lease",
+    category: "sandbox",
+    mechanism: "an installer that throws propagates out of start, leaving the lease held and the heartbeat renewing a run nobody tracks",
+    focus: { file: serviceTests, test: "installer that throws gives the lease back" },
+    edits: [
+      {
+        file: service,
+        before: "    let sandboxHandle: LeafSandboxHandle;\n    try {\n      sandboxHandle = install({",
+        after: "    let sandboxHandle: LeafSandboxHandle;\n    if (true as boolean) {\n      sandboxHandle = install({",
+      },
+      {
+        file: service,
+        before: "    } catch (error) {\n      abandonAcquisition();\n      this.warn(\n        `workflow: leaf sandbox install failed for run ${runId}: ${String(error)}`,\n      );\n      return leafSandboxUnavailable(runId);\n    }",
+        after: "    } else {\n      return leafSandboxUnavailable(runId);\n    }",
+      },
+    ],
+  },
+  {
+    id: "af/disposal-failure-escapes-the-terminal-path",
+    category: "terminal",
+    mechanism: "a disposer that throws escapes cleanup, so the waiter never settles and the chain rejects with nobody listening",
+    focus: { file: serviceTests, test: "disposer that throws still lets the run publish" },
+    edits: [
+      {
+        file: service,
+        before: "      // only THIS acquisition's installation\n      step(\"leaf sandbox disposal\", () => { sandboxHandle.dispose(); });",
+        after: "      // only THIS acquisition's installation\n      sandboxHandle.dispose();",
+      },
+    ],
+  },
+  {
+    id: "ag/cleanup-runs-once-per-path",
+    category: "terminal",
+    mechanism: "cleanup is not idempotent, so the success path and the catch path each hand the acquisition back",
+    focus: { file: serviceTests, test: "publish that throws after cleanup" },
+    edits: [
+      {
+        file: service,
+        before: "      if (finished) return;\n      finished = true;",
+        after: "      finished = true;",
       },
     ],
   },
