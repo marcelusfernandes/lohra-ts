@@ -52,15 +52,9 @@ const mutants: readonly Mutant[] = [
   {
     id: "acquire-advances-fence-on-loser",
     mechanism: "fence bump leaks outside the winning transaction (loser advances it)",
-    edits: [{ file: locks, before: `          this.database
-            .prepare("UPDATE workflow_run_fence SET fence = fence + 1, updated_at = ? WHERE run_id = ?")
-            .run(now, runId);`, after: `          try {
-            this.database
-              .prepare("UPDATE workflow_run_fence SET fence = fence + 1, updated_at = ? WHERE run_id = ?")
-              .run(now, runId);
-          } catch {
-            // mutant: bump swallowed but acquisition reports failure later
-          }` }],
+    edits: [{ file: locks,
+      before: "          this.database\n            .prepare(\n              \"UPDATE workflow_run_fence SET fence = fence + 1, updated_at = ? WHERE run_id = ?\",\n            )\n            .run(now, runId);",
+      after: "          try {\n            this.database\n              .prepare(\n                \"UPDATE workflow_run_fence SET fence = fence + 1, updated_at = ? WHERE run_id = ?\",\n              )\n              .run(now, runId);\n          } catch {\n            // mutant: bump swallowed\n          }" }],
   },
   {
     id: "release-deletes-fence-row",
