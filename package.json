@@ -40,6 +40,7 @@
     "probe:t09": "node scripts/parity/tools/ts-only-probes.mjs",
     "smoke:t09:live": "node scripts/parity/tools/live-smoke.mjs",
     "parity:t13": "tsx scripts/parity/orchestration/run-all.ts",
+    "parity:t13:fanout:generate": "node scripts/parity/orchestration/generate-fanout-manifests.mjs",
     "parity:t13:probes": "tsx scripts/parity/orchestration/run-probes.ts",
     "parity:t13:gates": "tsx scripts/parity/orchestration/run-gates.ts",
     "parity:t13:live-smoke": "node scripts/parity/orchestration/live-smoke.mjs",

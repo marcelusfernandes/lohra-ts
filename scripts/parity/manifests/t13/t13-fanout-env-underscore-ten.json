@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "id": "t13-fanout-clamp-not-an-integer-warning",
-  "description": "T13 round-2 bilateral fan-out matrix (env abc falls back to 4), closing contract assertion 24/F4. This is a deterministic exact-concurrency proof, not a startup-warning proxy: 4 blocker children are spawned one at a time, and each next spawn is withheld by the harness until the previous child has reached its gated first request. Child 5 is then spawned and steered while the first 4 slots are occupied. If effective concurrency is below 4, the next blocker never arrives and the scenario times out; if it is above 4, child 5 starts before steer and its first request lacks the asserted system-reminder. Only exactly 4 satisfies both halves. No sleep, ambient credentials, or external egress.",
+  "id": "t13-fanout-env-underscore-ten",
+  "description": "T13 round-2 bilateral fan-out matrix (PEP 515 underscore env integer parses as 10), closing contract assertion 24/F4. This is a deterministic exact-concurrency proof, not a startup-warning proxy: 10 blocker children are spawned one at a time, and each next spawn is withheld by the harness until the previous child has reached its gated first request. Child 11 is then spawned and steered while the first 10 slots are occupied. If effective concurrency is below 10, the next blocker never arrives and the scenario times out; if it is above 10, child 11 starts before steer and its first request lacks the asserted system-reminder. Only exactly 10 satisfies both halves. No sleep, ambient credentials, or external egress. KNOWN HARNESS LIMIT: process.stdout is not a bilateral comparison for this width-10 row because its nested tool-call strings contain more than the harness's fail-closed ceiling of 16 dynamic sub_id matches. The exact width remains bilateral and machine-enforced by the lower-bound arrival chain plus the upper-bound queued-child reminder expectation on both sides, events.summary, exit code, stderr, and assertions.",
   "argv": [
     "chat",
-    "SCEN:parent t13-fanout-clamp-not-an-integer-warning",
+    "SCEN:parent t13-fanout-env-underscore-ten",
     "--json",
     "--provider",
     "ollama",
@@ -27,7 +27,7 @@
       "LOHRA_HOME": "{{home}}/.lohra",
       "CODEX_HOME": "{{home}}/codex",
       "TMPDIR": "{{home}}/tmp",
-      "LOHRA_MAX_PARALLEL": "abc"
+      "LOHRA_MAX_PARALLEL": "1_0"
     }
   },
   "preconditions": [
@@ -101,10 +101,6 @@
     },
     {
       "class": "byte",
-      "field": "process.stdout"
-    },
-    {
-      "class": "byte",
       "field": "process.stderr"
     },
     {
@@ -152,8 +148,20 @@
         "exists": true,
         "records": {
           "gets": 0,
-          "posts": 13,
+          "posts": 25,
           "sequence": [
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
             "POST /v1/chat/completions",
             "POST /v1/chat/completions",
             "POST /v1/chat/completions",
@@ -174,26 +182,14 @@
     {
       "side": "both",
       "field": "events.requests",
-      "pointer": "/records/11/body/messages/2",
+      "pointer": "/records/23/body/messages/2",
       "value": {
         "role": "user",
-        "content": "<system-reminder>\nqueued-at-4\n</system-reminder>"
+        "content": "<system-reminder>\nqueued-at-10\n</system-reminder>"
       }
     }
   ],
   "normalizations": [
-    {
-      "field": "process.stdout",
-      "kind": "replace-json-pointer",
-      "pointer": "/session_id",
-      "replacement": "<SESSION_ID>"
-    },
-    {
-      "field": "process.stdout",
-      "kind": "replace-regex",
-      "pattern": "[0-9a-f]{32}",
-      "replacement": "<SUB_ID>"
-    },
     {
       "field": "process.stderr",
       "kind": "replace-regex",
@@ -269,7 +265,55 @@
       "kid5": [
         {
           "kind": "text",
-          "content": "KID5-DONE"
+          "content": "KID5-DONE",
+          "signal": "kid5-arrived",
+          "gate": "release-blockers"
+        }
+      ],
+      "kid6": [
+        {
+          "kind": "text",
+          "content": "KID6-DONE",
+          "signal": "kid6-arrived",
+          "gate": "release-blockers"
+        }
+      ],
+      "kid7": [
+        {
+          "kind": "text",
+          "content": "KID7-DONE",
+          "signal": "kid7-arrived",
+          "gate": "release-blockers"
+        }
+      ],
+      "kid8": [
+        {
+          "kind": "text",
+          "content": "KID8-DONE",
+          "signal": "kid8-arrived",
+          "gate": "release-blockers"
+        }
+      ],
+      "kid9": [
+        {
+          "kind": "text",
+          "content": "KID9-DONE",
+          "signal": "kid9-arrived",
+          "gate": "release-blockers"
+        }
+      ],
+      "kid10": [
+        {
+          "kind": "text",
+          "content": "KID10-DONE",
+          "signal": "kid10-arrived",
+          "gate": "release-blockers"
+        }
+      ],
+      "kid11": [
+        {
+          "kind": "text",
+          "content": "KID11-DONE"
         }
       ],
       "parent": [
@@ -326,8 +370,68 @@
           "kind": "tool_calls",
           "calls": [
             {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"SCEN:kid6 do it\"}"
+            }
+          ],
+          "awaitSignal": "kid5-arrived"
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"SCEN:kid7 do it\"}"
+            }
+          ],
+          "awaitSignal": "kid6-arrived"
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"SCEN:kid8 do it\"}"
+            }
+          ],
+          "awaitSignal": "kid7-arrived"
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"SCEN:kid9 do it\"}"
+            }
+          ],
+          "awaitSignal": "kid8-arrived"
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"SCEN:kid10 do it\"}"
+            }
+          ],
+          "awaitSignal": "kid9-arrived"
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"SCEN:kid11 do it\"}"
+            }
+          ],
+          "awaitSignal": "kid10-arrived"
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
               "name": "steer_session",
-              "argumentsRaw": "{\"sub_id\":\"__SUB5__\",\"text\":\"queued-at-4\"}"
+              "argumentsRaw": "{\"sub_id\":\"__SUB11__\",\"text\":\"queued-at-10\"}"
             }
           ]
         },
@@ -354,6 +458,30 @@
             {
               "name": "collect_session",
               "argumentsRaw": "{\"sub_id\":\"__SUB5__\",\"wait\":true}"
+            },
+            {
+              "name": "collect_session",
+              "argumentsRaw": "{\"sub_id\":\"__SUB6__\",\"wait\":true}"
+            },
+            {
+              "name": "collect_session",
+              "argumentsRaw": "{\"sub_id\":\"__SUB7__\",\"wait\":true}"
+            },
+            {
+              "name": "collect_session",
+              "argumentsRaw": "{\"sub_id\":\"__SUB8__\",\"wait\":true}"
+            },
+            {
+              "name": "collect_session",
+              "argumentsRaw": "{\"sub_id\":\"__SUB9__\",\"wait\":true}"
+            },
+            {
+              "name": "collect_session",
+              "argumentsRaw": "{\"sub_id\":\"__SUB10__\",\"wait\":true}"
+            },
+            {
+              "name": "collect_session",
+              "argumentsRaw": "{\"sub_id\":\"__SUB11__\",\"wait\":true}"
             }
           ]
         },

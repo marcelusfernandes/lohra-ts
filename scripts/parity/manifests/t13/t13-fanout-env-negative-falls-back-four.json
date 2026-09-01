@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "id": "t13-fanout-clamp-not-an-integer-warning",
-  "description": "T13 round-2 bilateral fan-out matrix (env abc falls back to 4), closing contract assertion 24/F4. This is a deterministic exact-concurrency proof, not a startup-warning proxy: 4 blocker children are spawned one at a time, and each next spawn is withheld by the harness until the previous child has reached its gated first request. Child 5 is then spawned and steered while the first 4 slots are occupied. If effective concurrency is below 4, the next blocker never arrives and the scenario times out; if it is above 4, child 5 starts before steer and its first request lacks the asserted system-reminder. Only exactly 4 satisfies both halves. No sleep, ambient credentials, or external egress.",
+  "id": "t13-fanout-env-negative-falls-back-four",
+  "description": "T13 round-2 bilateral fan-out matrix (env -5 falls back to 4), closing contract assertion 24/F4. This is a deterministic exact-concurrency proof, not a startup-warning proxy: 4 blocker children are spawned one at a time, and each next spawn is withheld by the harness until the previous child has reached its gated first request. Child 5 is then spawned and steered while the first 4 slots are occupied. If effective concurrency is below 4, the next blocker never arrives and the scenario times out; if it is above 4, child 5 starts before steer and its first request lacks the asserted system-reminder. Only exactly 4 satisfies both halves. No sleep, ambient credentials, or external egress.",
   "argv": [
     "chat",
-    "SCEN:parent t13-fanout-clamp-not-an-integer-warning",
+    "SCEN:parent t13-fanout-env-negative-falls-back-four",
     "--json",
     "--provider",
     "ollama",
@@ -27,7 +27,7 @@
       "LOHRA_HOME": "{{home}}/.lohra",
       "CODEX_HOME": "{{home}}/codex",
       "TMPDIR": "{{home}}/tmp",
-      "LOHRA_MAX_PARALLEL": "abc"
+      "LOHRA_MAX_PARALLEL": "-5"
     }
   },
   "preconditions": [

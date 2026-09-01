@@ -1,20 +1,20 @@
 {
   "schemaVersion": 1,
-  "id": "t13-fanout-clamp-not-an-integer-warning",
-  "description": "T13 round-2 bilateral fan-out matrix (env abc falls back to 4), closing contract assertion 24/F4. This is a deterministic exact-concurrency proof, not a startup-warning proxy: 4 blocker children are spawned one at a time, and each next spawn is withheld by the harness until the previous child has reached its gated first request. Child 5 is then spawned and steered while the first 4 slots are occupied. If effective concurrency is below 4, the next blocker never arrives and the scenario times out; if it is above 4, child 5 starts before steer and its first request lacks the asserted system-reminder. Only exactly 4 satisfies both halves. No sleep, ambient credentials, or external egress.",
+  "id": "t13-fanout-flag-one",
+  "description": "T13 round-2 bilateral fan-out matrix (flag 1 -> 1), closing contract assertion 24/F4. This is a deterministic exact-concurrency proof, not a startup-warning proxy: 1 blocker children are spawned one at a time, and each next spawn is withheld by the harness until the previous child has reached its gated first request. Child 2 is then spawned and steered while the first 1 slots are occupied. If effective concurrency is below 1, the next blocker never arrives and the scenario times out; if it is above 1, child 2 starts before steer and its first request lacks the asserted system-reminder. Only exactly 1 satisfies both halves. No sleep, ambient credentials, or external egress.",
   "argv": [
     "chat",
-    "SCEN:parent t13-fanout-clamp-not-an-integer-warning",
+    "SCEN:parent t13-fanout-flag-one",
     "--json",
     "--provider",
     "ollama",
     "--model",
-    "stub-coder:1b"
+    "stub-coder:1b",
+    "--max-parallel",
+    "1"
   ],
   "environment": {
-    "allow": [
-      "LOHRA_MAX_PARALLEL"
-    ],
+    "allow": [],
     "set": {
       "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
       "PYTHONUTF8": "1",
@@ -26,8 +26,7 @@
       "HOME": "{{home}}",
       "LOHRA_HOME": "{{home}}/.lohra",
       "CODEX_HOME": "{{home}}/codex",
-      "TMPDIR": "{{home}}/tmp",
-      "LOHRA_MAX_PARALLEL": "abc"
+      "TMPDIR": "{{home}}/tmp"
     }
   },
   "preconditions": [
@@ -152,14 +151,8 @@
         "exists": true,
         "records": {
           "gets": 0,
-          "posts": 13,
+          "posts": 7,
           "sequence": [
-            "POST /v1/chat/completions",
-            "POST /v1/chat/completions",
-            "POST /v1/chat/completions",
-            "POST /v1/chat/completions",
-            "POST /v1/chat/completions",
-            "POST /v1/chat/completions",
             "POST /v1/chat/completions",
             "POST /v1/chat/completions",
             "POST /v1/chat/completions",
@@ -174,10 +167,10 @@
     {
       "side": "both",
       "field": "events.requests",
-      "pointer": "/records/11/body/messages/2",
+      "pointer": "/records/5/body/messages/2",
       "value": {
         "role": "user",
-        "content": "<system-reminder>\nqueued-at-4\n</system-reminder>"
+        "content": "<system-reminder>\nqueued-at-1\n</system-reminder>"
       }
     }
   ],
@@ -245,31 +238,7 @@
       "kid2": [
         {
           "kind": "text",
-          "content": "KID2-DONE",
-          "signal": "kid2-arrived",
-          "gate": "release-blockers"
-        }
-      ],
-      "kid3": [
-        {
-          "kind": "text",
-          "content": "KID3-DONE",
-          "signal": "kid3-arrived",
-          "gate": "release-blockers"
-        }
-      ],
-      "kid4": [
-        {
-          "kind": "text",
-          "content": "KID4-DONE",
-          "signal": "kid4-arrived",
-          "gate": "release-blockers"
-        }
-      ],
-      "kid5": [
-        {
-          "kind": "text",
-          "content": "KID5-DONE"
+          "content": "KID2-DONE"
         }
       ],
       "parent": [
@@ -296,38 +265,8 @@
           "kind": "tool_calls",
           "calls": [
             {
-              "name": "spawn_session",
-              "argumentsRaw": "{\"prompt\":\"SCEN:kid3 do it\"}"
-            }
-          ],
-          "awaitSignal": "kid2-arrived"
-        },
-        {
-          "kind": "tool_calls",
-          "calls": [
-            {
-              "name": "spawn_session",
-              "argumentsRaw": "{\"prompt\":\"SCEN:kid4 do it\"}"
-            }
-          ],
-          "awaitSignal": "kid3-arrived"
-        },
-        {
-          "kind": "tool_calls",
-          "calls": [
-            {
-              "name": "spawn_session",
-              "argumentsRaw": "{\"prompt\":\"SCEN:kid5 do it\"}"
-            }
-          ],
-          "awaitSignal": "kid4-arrived"
-        },
-        {
-          "kind": "tool_calls",
-          "calls": [
-            {
               "name": "steer_session",
-              "argumentsRaw": "{\"sub_id\":\"__SUB5__\",\"text\":\"queued-at-4\"}"
+              "argumentsRaw": "{\"sub_id\":\"__SUB2__\",\"text\":\"queued-at-1\"}"
             }
           ]
         },
@@ -342,18 +281,6 @@
             {
               "name": "collect_session",
               "argumentsRaw": "{\"sub_id\":\"__SUB2__\",\"wait\":true}"
-            },
-            {
-              "name": "collect_session",
-              "argumentsRaw": "{\"sub_id\":\"__SUB3__\",\"wait\":true}"
-            },
-            {
-              "name": "collect_session",
-              "argumentsRaw": "{\"sub_id\":\"__SUB4__\",\"wait\":true}"
-            },
-            {
-              "name": "collect_session",
-              "argumentsRaw": "{\"sub_id\":\"__SUB5__\",\"wait\":true}"
             }
           ]
         },

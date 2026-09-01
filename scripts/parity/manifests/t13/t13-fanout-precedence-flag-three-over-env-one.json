@@ -1,15 +1,17 @@
 {
   "schemaVersion": 1,
-  "id": "t13-fanout-clamp-not-an-integer-warning",
-  "description": "T13 round-2 bilateral fan-out matrix (env abc falls back to 4), closing contract assertion 24/F4. This is a deterministic exact-concurrency proof, not a startup-warning proxy: 4 blocker children are spawned one at a time, and each next spawn is withheld by the harness until the previous child has reached its gated first request. Child 5 is then spawned and steered while the first 4 slots are occupied. If effective concurrency is below 4, the next blocker never arrives and the scenario times out; if it is above 4, child 5 starts before steer and its first request lacks the asserted system-reminder. Only exactly 4 satisfies both halves. No sleep, ambient credentials, or external egress.",
+  "id": "t13-fanout-precedence-flag-three-over-env-one",
+  "description": "T13 round-2 bilateral fan-out matrix (flag 3 beats env 1), closing contract assertion 24/F4. This is a deterministic exact-concurrency proof, not a startup-warning proxy: 3 blocker children are spawned one at a time, and each next spawn is withheld by the harness until the previous child has reached its gated first request. Child 4 is then spawned and steered while the first 3 slots are occupied. If effective concurrency is below 3, the next blocker never arrives and the scenario times out; if it is above 3, child 4 starts before steer and its first request lacks the asserted system-reminder. Only exactly 3 satisfies both halves. No sleep, ambient credentials, or external egress.",
   "argv": [
     "chat",
-    "SCEN:parent t13-fanout-clamp-not-an-integer-warning",
+    "SCEN:parent t13-fanout-precedence-flag-three-over-env-one",
     "--json",
     "--provider",
     "ollama",
     "--model",
-    "stub-coder:1b"
+    "stub-coder:1b",
+    "--max-parallel",
+    "3"
   ],
   "environment": {
     "allow": [
@@ -27,7 +29,7 @@
       "LOHRA_HOME": "{{home}}/.lohra",
       "CODEX_HOME": "{{home}}/codex",
       "TMPDIR": "{{home}}/tmp",
-      "LOHRA_MAX_PARALLEL": "abc"
+      "LOHRA_MAX_PARALLEL": "1"
     }
   },
   "preconditions": [
@@ -152,10 +154,8 @@
         "exists": true,
         "records": {
           "gets": 0,
-          "posts": 13,
+          "posts": 11,
           "sequence": [
-            "POST /v1/chat/completions",
-            "POST /v1/chat/completions",
             "POST /v1/chat/completions",
             "POST /v1/chat/completions",
             "POST /v1/chat/completions",
@@ -174,10 +174,10 @@
     {
       "side": "both",
       "field": "events.requests",
-      "pointer": "/records/11/body/messages/2",
+      "pointer": "/records/9/body/messages/2",
       "value": {
         "role": "user",
-        "content": "<system-reminder>\nqueued-at-4\n</system-reminder>"
+        "content": "<system-reminder>\nqueued-at-3\n</system-reminder>"
       }
     }
   ],
@@ -261,15 +261,7 @@
       "kid4": [
         {
           "kind": "text",
-          "content": "KID4-DONE",
-          "signal": "kid4-arrived",
-          "gate": "release-blockers"
-        }
-      ],
-      "kid5": [
-        {
-          "kind": "text",
-          "content": "KID5-DONE"
+          "content": "KID4-DONE"
         }
       ],
       "parent": [
@@ -316,18 +308,8 @@
           "kind": "tool_calls",
           "calls": [
             {
-              "name": "spawn_session",
-              "argumentsRaw": "{\"prompt\":\"SCEN:kid5 do it\"}"
-            }
-          ],
-          "awaitSignal": "kid4-arrived"
-        },
-        {
-          "kind": "tool_calls",
-          "calls": [
-            {
               "name": "steer_session",
-              "argumentsRaw": "{\"sub_id\":\"__SUB5__\",\"text\":\"queued-at-4\"}"
+              "argumentsRaw": "{\"sub_id\":\"__SUB4__\",\"text\":\"queued-at-3\"}"
             }
           ]
         },
@@ -350,10 +332,6 @@
             {
               "name": "collect_session",
               "argumentsRaw": "{\"sub_id\":\"__SUB4__\",\"wait\":true}"
-            },
-            {
-              "name": "collect_session",
-              "argumentsRaw": "{\"sub_id\":\"__SUB5__\",\"wait\":true}"
             }
           ]
         },
