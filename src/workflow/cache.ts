@@ -28,6 +28,12 @@ export interface CacheLookup {
   readonly cost: Usage | null;
 }
 
+export interface WorkflowCacheOwnership {
+  readonly fence: number;
+  readonly holder: string;
+  readonly now: number;
+}
+
 export interface WorkflowCache {
   get(runId: string, hash: string): CacheLookup;
   put(
@@ -36,6 +42,7 @@ export interface WorkflowCache {
     nodeId: string,
     output: unknown,
     cost: Usage | null,
+    ownership?: WorkflowCacheOwnership,
   ): boolean;
   totalCost(runId: string): Readonly<{ inputTokens: number; outputTokens: number }>;
   totalSplit(runId: string): Usage;

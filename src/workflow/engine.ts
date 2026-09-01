@@ -119,7 +119,7 @@ export class WorkflowEngine {
   private gateTokens(): void {
     if (!this.budget.tokensExhausted) return;
     const message = `token budget exhausted: spent ${String(this.budget.tokensSpent)} of ${String(this.budget.tokenBudget)} tokens`;
-    this.pause("token_budget", message);
+    this.pause("token_budget_exhausted", message);
     throw new TokenBudgetExhausted(message);
   }
 
@@ -128,7 +128,7 @@ export class WorkflowEngine {
     const affordable = this.budget.affordableLeaves();
     if (affordable === null || width <= affordable) return;
     const message = `${this.currentNode}: fan-out of ${String(width)} exceeds affordable leaves ${String(affordable)} — token budget exhausted`;
-    this.pause("token_budget", message);
+    this.pause("token_budget_exhausted", message);
     throw new TokenBudgetExhausted(message);
   }
 

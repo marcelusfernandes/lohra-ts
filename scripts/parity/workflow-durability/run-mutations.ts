@@ -1,0 +1,247 @@
+#!/usr/bin/env node
+// T16 mutation harness — external proof: baseline green → each mutant red →
+// restore green, on a TEMPORARY git archive of the committed candidate SHA
+// (never the working checkout). Contract criterion 55 (a)–(o).
+import { spawnSync } from "node:child_process";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+
+import { canonicalJson } from "../canonical.js";
+
+const root = resolve(process.cwd());
+const focalTests = [
+  "tests/state-workflow-repository.test.ts",
+  "tests/workflow-durability.test.ts",
+  "tests/workflow-service-durability.test.ts",
+  "tests/workflow-sandbox.test.ts",
+  "tests/state-locks.test.ts",
+] as const;
+
+interface Edit {
+  readonly file: string;
+  readonly before: string;
+  readonly after: string;
+}
+
+interface Mutant {
+  readonly id: string;
+  readonly mechanism: string;
+  readonly edits: readonly Edit[];
+}
+
+const locks = "src/state/locks.ts";
+const repository = "src/state/workflow-repository.ts";
+const durability = "src/workflow/durability.ts";
+const service = "src/workflow/service.ts";
+const sandbox = "src/workflow/sandbox.ts";
+
+const mutants: readonly Mutant[] = [
+  {
+    id: "state-fence-guard-removed",
+    mechanism: "state write accepts any fence (exact-equality guard dropped)",
+    edits: [{ file: repository, before: `const unleased = fields.requireUnleased === true;`, after: `const unleased = fields.requireUnleased === true; const ALWAYS_UNFENCED = true;` }],
+  },
+  {
+    id: "acquire-advances-fence-on-loser",
+    mechanism: "the losing acquirer also bumps the fence (monotonicity broken)",
+    edits: [{ file: locks, before: `      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "EEXIST") throw error;`, after: `      const code = (error as NodeJS.ErrnoException).code;
+      void code;` }],
+  },
+  {
+    id: "release-deletes-fence-row",
+    mechanism: "release deletes the fence row (fence no longer survives release)",
+    edits: [{ file: locks, before: `      const result = this.database
+        .prepare("DELETE FROM workflow_run_locks WHERE run_id = ? AND holder = ?")
+        .run(runId, holder);
+      return result.changes > 0;`, after: `      const result = this.database
+        .prepare("DELETE FROM workflow_run_locks WHERE run_id = ? AND holder = ?")
+        .run(runId, holder);
+      this.database.prepare("DELETE FROM workflow_run_fence WHERE run_id = ?").run(runId);
+      return result.changes > 0;` }],
+  },
+  {
+    id: "heartbeat-renews-after-release",
+    mechanism: "heartbeat keeps renewing after the lease is gone (immortal timer)",
+    edits: [{ file: durability, before: `    if (!held) return; // the lease is somebody else's now; beating on is noise`,
+      after: `    if (!held) { this.arm(runId); return; }` }],
+  },
+  {
+    id: "renew-resurrects-expired-lease",
+    mechanism: "renew drops the expires_at predicate (old holder resurrects the lease)",
+    edits: [{ file: locks, before: `           WHERE run_id = ? AND holder = ? AND expires_at > ?`,
+      after: `           WHERE run_id = ? AND holder = ?` }],
+  },
+  {
+    id: "autoresume-armed-for-token-budget",
+    mechanism: "cold-start re-arms token_budget_exhausted pauses (never refills)",
+    edits: [{ file: durability, before: `    for (const row of pausedOn("quota_exhausted")) {`,
+      after: `    for (const row of [...pausedOn("quota_exhausted"), ...pausedOn("token_budget_exhausted")]) {` }],
+  },
+  {
+    id: "spend-seeded-before-acquire",
+    mechanism: "budget seed reads the ledger before ownership is proven",
+    edits: [{ file: service, before: `    const fence = store.locks.acquireRunLease(runId, store.holder, store.ownershipOf().now, store.ttl);
+    if (fence === null) {
+      const expiry = store.locks.runLeaseExpiry(runId, store.ownershipOf().now);
+      return Object.freeze({
+        error: busyErrorMessage(runId, expiry, store.ownershipOf().now),
+      });
+    }
+    this.heartbeat?.start(runId);
+    const seeded = this.seedSpend(store, runId);`,
+      after: `    const seeded = this.seedSpend(store, runId);
+    const fence = store.locks.acquireRunLease(runId, store.holder, store.ownershipOf().now, store.ttl);
+    if (fence === null) {
+      const expiry = store.locks.runLeaseExpiry(runId, store.ownershipOf().now);
+      return Object.freeze({
+        error: busyErrorMessage(runId, expiry, store.ownershipOf().now),
+      });
+    }
+    this.heartbeat?.start(runId);` }],
+  },
+  {
+    id: "sandbox-realpath-removed",
+    mechanism: "fs containment compares raw paths (symlink escape passes)",
+    edits: [{ file: sandbox, before: `  const resolvedTarget = realPathOf(target);
+  if (resolvedTarget !== target) return inside(resolvedTarget);
+  return inside(realPathOf(resolve(target, "..")));`,
+      after: `  return inside(target);` }],
+  },
+  {
+    id: "spec-widens-policy",
+    mechanism: "spec-supplied fs_allow widens the operator capability",
+    edits: [{ file: sandbox, before: `export function loadPolicy(path: string): WorkflowPolicy {
+  try {`,
+      after: `export function loadPolicy(path: string, specAllow?: readonly string[]): WorkflowPolicy {
+    if (specAllow !== undefined) return { fsAllow: specAllow.map((entry) => ({ path: entry, writable: true })), egressAllow: [] };
+  try {` }],
+  },
+  {
+    id: "terminal-write-after-release",
+    mechanism: "terminal line is persisted after the lease is released",
+    edits: [{ file: service, before: `        this.heartbeat?.stop(runId);
+        store.locks.releaseRunLease(runId, store.holder);
+        record.settled = true;`,
+      after: `        this.heartbeat?.stop(runId);
+        store.locks.releaseRunLease(runId, store.holder);
+        this.persistLine(store, runId, {
+          name: parsed.name, owner: store.holder, status: "complete", pauseReason: null,
+          pausePayloadJson: null, specJson: "{}", argsJson: "{}", tokenBudget: null,
+          tainted: false, progressJson: null, auditSegmentId: null,
+          updatedAt: store.ownershipOf().now, fence: null, holder: null, now: store.ownershipOf().now,
+          requireUnleased: true,
+        });
+        record.settled = true;` }],
+  },
+  {
+    id: "ownership-lost-publishes-success",
+    mechanism: "a lost-ownership stretch resolves the waiter with success",
+    edits: [{ file: service, before: `          record.resolve(
+            ownershipLost(runId, stretchOwnership.fence) as unknown as Readonly<Record<string, unknown>>,
+          );`,
+      after: `          record.resolve(resultView(runId, parsed.name, result, engine.budget));` }],
+  },
+];
+
+function replaceExactlyOnce(source, before, after, id) {
+  const first = source.indexOf(before);
+  if (first < 0) throw new Error(`${id}: mutation anchor not found`);
+  if (source.indexOf(before, first + before.length) >= 0)
+    throw new Error(`${id}: mutation anchor is not unique`);
+  return `${source.slice(0, first)}${after}${source.slice(first + before.length)}`;
+}
+
+function runTests(directory) {
+  const result = spawnSync(join(directory, "node_modules/.bin/vitest"), ["run", ...focalTests], {
+    cwd: directory,
+    encoding: "utf8",
+    env: { ...process.env, NO_COLOR: "1" },
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  if (result.error !== undefined) throw result.error;
+  return {
+    exitCode: result.status,
+    stdoutTail: result.stdout.slice(-4_000),
+    stderrTail: result.stderr.slice(-4_000),
+  };
+}
+
+const status = spawnSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" });
+if (status.status !== 0 || status.stdout !== "")
+  throw new Error("mutation run requires a committed candidate with clean porcelain");
+const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" });
+if (head.status !== 0) throw new Error("cannot resolve candidate HEAD");
+const candidateSha = head.stdout.trim();
+const temporary = mkdtempSync(join(tmpdir(), "lohra-t16-mutations-"));
+
+try {
+  const archive = spawnSync("git", ["archive", "--format=tar", candidateSha], {
+    cwd: root,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (archive.status !== 0) throw new Error("git archive failed");
+  const extracted = spawnSync("tar", ["-xf", "-", "-C", temporary], {
+    input: archive.stdout,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (extracted.status !== 0) throw new Error("tar extraction failed");
+  symlinkSync(resolve(root, "node_modules"), join(temporary, "node_modules"), "dir");
+
+  const originals = new Map();
+  for (const mutant of mutants)
+    for (const edit of mutant.edits)
+      if (!originals.has(edit.file))
+        originals.set(edit.file, readFileSync(join(temporary, edit.file), "utf8"));
+
+  const baseline = runTests(temporary);
+  if (baseline.exitCode !== 0) throw new Error("mutation baseline is not green");
+  const results = [];
+  for (const mutant of mutants) {
+    for (const [file, original] of originals) writeFileSync(join(temporary, file), original, "utf8");
+    for (const edit of mutant.edits) {
+      const path = join(temporary, edit.file);
+      const source = readFileSync(path, "utf8");
+      writeFileSync(path, replaceExactlyOnce(source, edit.before, edit.after, mutant.id), "utf8");
+    }
+    const result = runTests(temporary);
+    results.push({
+      id: mutant.id,
+      mechanism: mutant.mechanism,
+      killed: result.exitCode !== 0,
+      ...result,
+    });
+  }
+  for (const [file, original] of originals) writeFileSync(join(temporary, file), original, "utf8");
+  const restored = runTests(temporary);
+  const survivors = results.filter((result) => !result.killed).map((result) => result.id);
+  const evidence = {
+    suite: "t16-workflow-mutations",
+    candidateSha,
+    copy: "temporary git archive of candidate SHA",
+    baselineGreen: true,
+    mutants: results,
+    killed: results.length - survivors.length,
+    total: results.length,
+    survivors,
+    restoreGreen: restored.exitCode === 0,
+  };
+  const evidenceDirectory = resolve(root, ".parity-evidence/t16");
+  mkdirSync(evidenceDirectory, { recursive: true });
+  const evidencePath = resolve(evidenceDirectory, "mutations.json");
+  writeFileSync(evidencePath, canonicalJson(evidence), "utf8");
+  process.stdout.write(
+    `${JSON.stringify({ suite: evidence.suite, candidateSha, killed: evidence.killed, total: evidence.total, survivors, restoreGreen: evidence.restoreGreen, evidence: evidencePath })}\n`,
+  );
+  process.exitCode = survivors.length === 0 && restored.exitCode === 0 ? 0 : 1;
+} finally {
+  rmSync(temporary, { recursive: true, force: true });
+}

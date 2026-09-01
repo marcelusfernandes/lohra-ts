@@ -356,7 +356,7 @@ describe("remaining workflow node strategies", () => {
     );
     expect(runtime.requests).toHaveLength(1);
     expect(result.status).toBe("paused");
-    expect(result.pauseReason).toBe("token_budget");
+    expect(result.pauseReason).toBe("token_budget_exhausted");
   });
 
   it("turns nesting depth two into one engine fault without spawning", async () => {

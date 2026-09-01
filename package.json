@@ -54,6 +54,9 @@
     "probe:state-multiprocess": "node scripts/parity/state/multiprocess.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "parity:t16": "tsx scripts/parity/workflow-durability/run-all.ts",
+    "probe:t16": "tsx scripts/parity/workflow-durability/probe.ts",
+    "mutations:t16": "tsx scripts/parity/workflow-durability/run-mutations.ts",
     "pack:check": "tsx scripts/pack-check.ts"
   },
   "dependencies": {

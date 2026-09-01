@@ -233,7 +233,7 @@ describe("workflow engine", () => {
     }).run(spec);
     expect(runtime.spawned).toHaveLength(1);
     expect(result.status).toBe("paused");
-    expect(result.pauseReason).toBe("token_budget");
+    expect(result.pauseReason).toBe("token_budget_exhausted");
     expect(result.capTrips).toBe(0);
   });
 

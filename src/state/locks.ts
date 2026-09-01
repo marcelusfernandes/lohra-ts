@@ -125,6 +125,32 @@ export class LockRepository {
     }
   }
 
+  public renewRunLease(runId: string, holder: string, now: number, ttlSeconds: number): boolean {
+    try {
+      const result = this.database
+        .prepare(
+          `UPDATE workflow_run_locks SET expires_at = ?
+           WHERE run_id = ? AND holder = ? AND expires_at > ?`,
+        )
+        .run(now + ttlSeconds, runId, holder, now);
+      return result.changes > 0;
+    } catch (error) {
+      if (error instanceof Error && /database is locked/i.test(error.message)) return false;
+      throw error;
+    }
+  }
+
+  public runLeaseExpiry(runId: string, now: number): number | null {
+    const row = this.database
+      .prepare(
+        "SELECT expires_at FROM workflow_run_locks WHERE run_id = ? AND expires_at > ?",
+      )
+      .get(runId, now) as { readonly expires_at: bigint } | undefined;
+    return row === undefined
+      ? null
+      : safeInteger(row.expires_at, "workflow_run_locks.expires_at");
+  }
+
   public runFenceOf(runId: string): FenceToken | null {
     const row = this.database
       .prepare("SELECT fence FROM workflow_run_fence WHERE run_id = ?")
