@@ -70,6 +70,17 @@ step("cancel_missing", stranger.mark_cancelled("nope"))
 row_b = b.load("run-1")
 step("is_stale_running_no_lease", b.is_stale(row_b))
 
+# H1 hardening probe, registered NOT normalized: the oracle accepts a write
+# presented after its own release with the same (fence, holder); the candidate
+# refuses it. Measured here so the divergence is evidence, never a silent match.
+h = store("proc-h")
+h.acquire("run-h1")
+step("h1_write_owned", h.save(run_id="run-h1", name="h", status="running",
+                              spec={"meta": {"name": "h"}}, args={}))
+h.release("run-h1")
+step("h1_write_post_release", h.save(run_id="run-h1", status="complete"))
+step("h1_status_after", (db.run_state_get("run-h1") or {}).get("status"))
+
 # run ledger + node cache + cost (unfenced baseline writes, then fenced refusal)
 step("spend_put", db.run_spend_put("run-1", 100, 10, 5, fence=b.fence_of("run-1")))
 step("spend_row", db.run_spend_get("run-1"))

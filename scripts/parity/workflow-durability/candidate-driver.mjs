@@ -128,6 +128,25 @@ const viewB = rowB === null ? null : durableFromRow(rowB);
 const statusAfter = String((repository.getRunState("run-1") ?? {}).status);
 step("is_stale_running_no_lease", statusAfter === "running" && locks.runLeaseExpiry("run-1", CLOCK.now) !== null && viewB !== null ? pauseFields(viewB) === null : false);
 
+// H1 hardening probe (mirrors oracle-driver.py): same (fence, holder) after
+// this stretch RELEASED. The oracle accepts it; the candidate refuses, and the
+// bilateral record registers that as a security divergence, never a match.
+const hFence = Number(locks.acquireRunLease("run-h1", "proc-h", CLOCK.now, 900));
+step("h1_write_owned", repository.putRunState("run-h1", {
+  name: "h", owner: "proc-h", status: "running", pauseReason: null,
+  pausePayloadJson: null, specJson: JSON.stringify({ meta: { name: "h" } }), argsJson: "{}",
+  tokenBudget: null, tainted: false, progressJson: null, auditSegmentId: null,
+  updatedAt: CLOCK.now, fence: hFence, holder: "proc-h", now: CLOCK.now,
+}));
+locks.releaseRunLease("run-h1", "proc-h");
+step("h1_write_post_release", repository.putRunState("run-h1", {
+  name: "h", owner: "proc-h", status: "complete", pauseReason: null,
+  pausePayloadJson: null, specJson: null, argsJson: "{}",
+  tokenBudget: null, tainted: false, progressJson: null, auditSegmentId: null,
+  updatedAt: CLOCK.now, fence: hFence, holder: "proc-h", now: CLOCK.now,
+}));
+step("h1_status_after", String((repository.getRunState("run-h1") ?? {}).status));
+
 const envelope = ownershipLost("run-1", 7);
 step("ownership_lost_envelope", { ...envelope });
 
