@@ -42,7 +42,7 @@ describe("media Python coercions", () => {
     expect(coerceImagePrompt(true)).toBe("True");
     expect(coerceImagePrompt([1, "x"])).toBe("[1, 'x']");
     expect(coerceImagePrompt({ a: 1 })).toBe("{'a': 1}");
-    expect(() => coerceImagePrompt("   ")).toThrow("non-empty prompt");
+    expect(() => coerceImagePrompt("   ")).toThrow("non-empty 'prompt'");
   });
 
   it("implements int(), default and clamp semantics for n", () => {
@@ -203,7 +203,18 @@ describe("remote vision validation", () => {
     for (const host of ["ff02::1", "fec0::1", "100::1", "2001:2::1", "2001:20::1"]) {
       expect(() => validateRemoteImage(`http://[${host}]/a`)).toThrow("unsafe image host");
     }
+    for (const host of [
+      "::ffff:0:7f00:1",
+      "::ffff:0:127.0.0.1",
+      "0:1::1",
+      "1::1",
+      "2001:1::1",
+      "2001:4:112::1",
+    ]) {
+      expect(() => validateRemoteImage(`http://[${host}]/a`)).toThrow("unsafe image host");
+    }
     expect(validateRemoteImage("http://[::ffff:8.8.8.8]/a")).toBe("http://[::ffff:8.8.8.8]/a");
+    expect(validateRemoteImage("http://[::ffff:0:808:808]/a")).toBe("http://[::ffff:0:808:808]/a");
     expect(() => validateRemoteImage("http://[::127.0.0.1]/a")).toThrow("unsafe image host");
     expect(() => validateRemoteImage("http://[64:ff9b::7f00:1]/a")).toThrow("unsafe image host");
     expect(validateRemoteImage("http://[64:ff9b::808:808]/a")).toBe("http://[64:ff9b::808:808]/a");

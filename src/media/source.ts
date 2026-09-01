@@ -255,34 +255,30 @@ function embeddedIpv4(words: readonly number[]): string {
 function unsafeIpv6(host: string): boolean {
   const words = ipv6Words(host);
   if (words === null) return true;
+  // Embedded IPv4 forms are classified by their embedded address. This covers
+  // mapped (::ffff:0:0/96), IPv4-translated (::ffff:0:0/96 with 0xffff in the
+  // fifth word, RFC 6052), IPv4-compatible (::/96) and NAT64 (64:ff9b::/96).
   const isMapped = prefix(words, 96, [0, 0, 0, 0, 0, 0xffff]);
+  const isTranslated = prefix(words, 96, [0, 0, 0, 0, 0xffff, 0]);
   const isCompatible = prefix(words, 96, [0, 0, 0, 0, 0, 0]);
   const isNat64 = prefix(words, 96, [0x64, 0xff9b, 0, 0, 0, 0]);
-  const isSixToFour = prefix(words, 16, [0x2002]);
-  if (isMapped || isCompatible || isNat64) return unsafeIpv4(embeddedIpv4(words));
-  if (isSixToFour) {
+  if (isMapped || isTranslated || isCompatible || isNat64) return unsafeIpv4(embeddedIpv4(words));
+  if (prefix(words, 16, [0x2002])) {
     const high = words[1] ?? 0;
     const low = words[2] ?? 0;
     return unsafeIpv4(
       `${String(high >>> 8)}.${String(high & 0xff)}.${String(low >>> 8)}.${String(low & 0xff)}`,
     );
   }
+  // Default-deny: only global unicast (2000::/3) may pass, minus the IANA
+  // special-purpose ranges allocated inside it. Everything else — including
+  // 0000::/8 residuals, unassigned space and the reserved 5f00::/16 — is
+  // rejected without enumeration.
+  if (!prefix(words, 3, [0x2000])) return true;
   return (
-    words.every((value) => value === 0) ||
-    (words.slice(0, 7).every((value) => value === 0) && words[7] === 1) ||
-    prefix(words, 7, [0xfc00]) ||
-    prefix(words, 10, [0xfe80]) ||
-    prefix(words, 10, [0xfec0]) ||
-    prefix(words, 8, [0xff00]) ||
-    prefix(words, 64, [0x100, 0, 0, 0]) ||
-    prefix(words, 48, [0x64, 0xff9b, 1]) ||
-    prefix(words, 32, [0x2001, 0]) ||
-    prefix(words, 48, [0x2001, 2, 0]) ||
-    prefix(words, 28, [0x2001, 0x10]) ||
-    prefix(words, 28, [0x2001, 0x20]) ||
+    prefix(words, 23, [0x2001, 0]) ||
     prefix(words, 32, [0x2001, 0x0db8]) ||
-    prefix(words, 20, [0x3fff]) ||
-    prefix(words, 16, [0x5f00])
+    prefix(words, 20, [0x3fff])
   );
 }
 

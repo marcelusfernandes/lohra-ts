@@ -49,6 +49,81 @@ describe("media bilateral comparator", () => {
     ]);
   });
 
+  it("rejects a divergence that failed for the wrong reason", () => {
+    const oracle = [{ id: "row", value: { status: "ok", runner_calls: 1 } }];
+    const policy = {
+      row: {
+        classification: "intentional-divergence/bounded" as const,
+        candidate: { status: "error", runner_calls: 0 },
+        candidateErrorIncludes: ["too large"],
+      },
+    };
+    expect(
+      compareMediaRows(
+        oracle,
+        [
+          {
+            id: "row",
+            value: { status: "error", runner_calls: 0, error: "image data URI is too large" },
+          },
+        ],
+        policy,
+      ),
+    ).toMatchObject([{ pass: true, reason: null }]);
+    expect(
+      compareMediaRows(
+        oracle,
+        [{ id: "row", value: { status: "error", runner_calls: 0, error: "crash before bound" } }],
+        policy,
+      ),
+    ).toMatchObject([
+      {
+        pass: false,
+        reason: "candidate error message does not match the approved divergence reason",
+      },
+    ]);
+  });
+
+  it("rejects a divergence whose oracle side drifted from the approved reason", () => {
+    const policy = {
+      row: {
+        classification: "intentional-divergence/validation" as const,
+        candidate: { status: "error", runner_calls: 0 },
+        candidateErrorIncludes: ["EACCES"],
+        oracleErrorIncludes: ["Errno 13"],
+      },
+    };
+    const candidate = [
+      { id: "row", value: { status: "error", runner_calls: 0, error: "EACCES: denied" } },
+    ];
+    expect(
+      compareMediaRows(
+        [
+          {
+            id: "row",
+            value: { status: "error", runner_calls: 0, error: "[Errno 13] Permission denied" },
+          },
+        ],
+        candidate,
+        policy,
+      ),
+    ).toMatchObject([{ pass: true }]);
+    expect(
+      compareMediaRows(
+        [
+          {
+            id: "row",
+            value: { status: "error", runner_calls: 0, error: "something else happened" },
+          },
+        ],
+        candidate,
+        policy,
+      ),
+    ).toMatchObject([
+      { pass: false, reason: "oracle error message does not match the approved divergence reason" },
+    ]);
+  });
+
   it("fails missing and duplicate rows instead of normalizing them away", () => {
     expect(compareMediaRows([{ id: "only-oracle", value: 1 }], [])).toMatchObject([
       { classification: "unclassified", pass: false, reason: "missing candidate row" },

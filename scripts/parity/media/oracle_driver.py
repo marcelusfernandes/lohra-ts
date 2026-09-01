@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import re
 import socket
 import tempfile
@@ -11,6 +12,7 @@ from pathlib import Path
 
 
 network_attempts = 0
+_current_directory = ""
 _real_socket = socket.socket
 
 
@@ -58,7 +60,8 @@ def sha(value: bytes | str) -> str:
 def scrub_message(value: str) -> str:
     value = re.sub(r"data:[^\s]+", "<redacted-data-uri>", value)
     value = re.sub(r"https?://[^\s]+", "<redacted-url>", value)
-    return value.replace("CANARY-T21", "<redacted-canary>")
+    value = value.replace("CANARY-T21", "<redacted-canary>")
+    return value.replace(_current_directory, "<TMP>")
 
 
 def project_url(value: str) -> dict:
@@ -90,27 +93,36 @@ def project_url(value: str) -> dict:
     }
 
 
-def vision_case(identifier: str, url: str, prompt="x") -> dict:
+def vision_case(identifier: str, url: str | None = None, prompt="x", path: str | None = None) -> dict:
     requests: list[list[dict]] = []
 
     def runner(messages):
         requests.append(messages)
         return "oracle-analysis"
 
+    args = {"path": path} if path is not None else {"url": url}
+    args["prompt"] = prompt
     try:
-        result = json.loads(VisionTool(runner).handle({"url": url, "prompt": prompt}))
-        source = None
-        captured_prompt = None
-        if requests:
-            captured_prompt = requests[0][0]["content"][0]
-            source = project_url(requests[0][0]["content"][1]["image_url"]["url"])
-        value = {
-            "status": "ok",
-            "runner_calls": len(requests),
-            "result": result,
-            "prompt": captured_prompt,
-            "source": source,
-        }
+        result = json.loads(VisionTool(runner).handle(args))
+        if isinstance(result, dict) and "error" in result:
+            value = {
+                "status": "error",
+                "runner_calls": len(requests),
+                "error": scrub_message(str(result["error"])),
+            }
+        else:
+            source = None
+            captured_prompt = None
+            if requests:
+                captured_prompt = requests[0][0]["content"][0]
+                source = project_url(requests[0][0]["content"][1]["image_url"]["url"])
+            value = {
+                "status": "ok",
+                "runner_calls": len(requests),
+                "result": result,
+                "prompt": captured_prompt,
+                "source": source,
+            }
     except Exception as error:
         value = {
             "status": "error",
@@ -131,7 +143,11 @@ def image_case(identifier: str, args: dict, returned: list[str] | None = None) -
     try:
         result = json.loads(ImageGenTool(runner).handle(args))
         if "error" in result:
-            value = {"status": "error", "runner_calls": len(requests)}
+            value = {
+                "status": "error",
+                "runner_calls": len(requests),
+                "error": scrub_message(str(result["error"])),
+            }
         else:
             files = []
             for path in result.get("images", []):
@@ -167,50 +183,79 @@ def image_case(identifier: str, args: dict, returned: list[str] | None = None) -
 
 with tempfile.TemporaryDirectory(prefix="lohra-t21-oracle-") as directory:
     root = Path(directory)
+    _current_directory = str(root)
     image = root / "one.png"
     image.write_bytes(b"PNG-T21")
+    jpg = root / "photo.jpg"
+    jpg.write_bytes(b"PNG-T21")
+    noext = root / "noext"
+    noext.write_bytes(b"PNG-T21")
+    svg = root / "vector.svg"
+    svg.write_text('<svg xmlns="http://www.w3.org/2000/svg"/>')
+    txt = root / "notes.txt"
+    txt.write_text("hello")
+    target = root / "target.png"
+    target.write_bytes(b"PNG-T21")
+    link = root / "link.png"
+    os.symlink(target, link)
+    secret = root / "secret.png"
+    secret.write_bytes(b"PNG-T21")
+    secret.chmod(0)
+    outside = root.parent / "outside.png"
+    outside.write_bytes(b"PNG-T21")
     https_url = "https://example.test/a?sig=CANARY-T21"
     data_valid = "data:image/png;base64," + base64.b64encode(b"PNG-T21").decode()
     generated = root / "generated.png"
     generated.write_bytes(b"PNG-T21")
     generated.chmod(0o644)
-
-    rows = [
-        {"id": "vision.text-part", "value": text_part("x")},
-        {"id": "vision.local-part", "value": project_url(image_part_from_file(str(image))["image_url"]["url"])},
-        vision_case("vision.https", https_url, "   "),
-        vision_case("vision.http", "http://example.test/a"),
-        vision_case("vision.data-valid", data_valid),
-        vision_case("vision.http-oversize", "https://example.test/" + "a" * 16_384),
-        vision_case("vision.credentials", "https://u:p@example.test/a"),
-        vision_case("vision.malformed", "not a url"),
-        vision_case("vision.file-scheme", "file:///tmp/CANARY-T21"),
-        vision_case("vision.javascript", "javascript:alert(1)"),
-        vision_case("vision.localhost-dot", "http://localhost./a"),
-        vision_case("vision.private-ip", "http://127.0.0.1/a"),
-        vision_case("vision.reserved-ipv6", "http://[ff02::1]/a"),
-        vision_case("vision.data-non-image", "data:text/plain;base64,QQ=="),
-        vision_case("vision.data-invalid", "data:image/png;base64,%%%"),
-        vision_case("vision.data-oversize", "data:image/png;base64," + "A" * 27_962_032),
-        image_case("image.main", {"prompt": [1, "x"], "n": "2", "size": "512x512"}, [str(generated)]),
-        image_case("image.prompt-true", {"prompt": True}),
-        image_case("image.prompt-object", {"prompt": {"a": 1}}),
-        image_case("image.prompt-blank", {"prompt": "   "}),
-        image_case("image.n-string", {"prompt": "x", "n": "2"}),
-        image_case("image.n-float", {"prompt": "x", "n": 1.9}),
-        image_case("image.n-invalid", {"prompt": "x", "n": "1.9"}),
-        image_case("image.n-clamp", {"prompt": "x", "n": 50}),
-        image_case("image.size-invalid", {"prompt": "x", "size": "512x512"}),
-        image_case("image.over-return-12", {"prompt": "x", "n": 1}, ["<PATH>"] * 12),
-    ]
-    print(
-        json.dumps(
-            {
-                "rows": rows,
-                "network_attempts": network_attempts,
-                "network_sentinel_self_test": "blocked-before-lohra-imports",
-            },
-            sort_keys=True,
-            separators=(",", ":"),
+    try:
+        rows = [
+            {"id": "vision.text-part", "value": text_part("x")},
+            {"id": "vision.local-part", "value": project_url(image_part_from_file(str(image))["image_url"]["url"])},
+            vision_case("vision.local-jpg", path=str(jpg)),
+            vision_case("vision.local-noext", path=str(noext)),
+            vision_case("vision.local-svg", path=str(svg)),
+            vision_case("vision.local-txt", path=str(txt)),
+            vision_case("vision.local-missing", path=str(root / "missing.png")),
+            vision_case("vision.local-traversal", path=str(outside)),
+            vision_case("vision.local-symlink", path=str(link)),
+            vision_case("vision.local-read-fault", path=str(secret)),
+            vision_case("vision.https", https_url, "   "),
+            vision_case("vision.http", "http://example.test/a"),
+            vision_case("vision.data-valid", data_valid),
+            vision_case("vision.http-oversize", "https://example.test/" + "a" * 16_384),
+            vision_case("vision.credentials", "https://u:p@example.test/a"),
+            vision_case("vision.malformed", "not a url"),
+            vision_case("vision.file-scheme", "file:///tmp/CANARY-T21"),
+            vision_case("vision.javascript", "javascript:alert(1)"),
+            vision_case("vision.localhost-dot", "http://localhost./a"),
+            vision_case("vision.private-ip", "http://127.0.0.1/a"),
+            vision_case("vision.reserved-ipv6", "http://[ff02::1]/a"),
+            vision_case("vision.data-non-image", "data:text/plain;base64,QQ=="),
+            vision_case("vision.data-invalid", "data:image/png;base64,%%%"),
+            vision_case("vision.data-oversize", "data:image/png;base64," + "A" * 27_962_032),
+            image_case("image.main", {"prompt": [1, "x"], "n": "2", "size": "512x512"}, [str(generated)]),
+            image_case("image.prompt-true", {"prompt": True}),
+            image_case("image.prompt-object", {"prompt": {"a": 1}}),
+            image_case("image.prompt-blank", {"prompt": "   "}),
+            image_case("image.n-string", {"prompt": "x", "n": "2"}),
+            image_case("image.n-float", {"prompt": "x", "n": 1.9}),
+            image_case("image.n-invalid", {"prompt": "x", "n": "1.9"}),
+            image_case("image.n-clamp", {"prompt": "x", "n": 50}),
+            image_case("image.size-invalid", {"prompt": "x", "size": "512x512"}),
+            image_case("image.over-return-12", {"prompt": "x", "n": 1}, ["<PATH>"] * 12),
+        ]
+        print(
+            json.dumps(
+                {
+                    "rows": rows,
+                    "network_attempts": network_attempts,
+                    "network_sentinel_self_test": "blocked-before-lohra-imports",
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
         )
-    )
+    finally:
+        outside.unlink(missing_ok=True)
+        secret.chmod(0o644)

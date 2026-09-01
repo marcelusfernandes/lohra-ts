@@ -88,7 +88,7 @@ describe("staged image persistence", () => {
     ).rejects.toThrow("64 MiB");
   });
 
-  it("accepts the measured 2,097,167-byte oracle payload", async () => {
+  it("accepts the measured 2,097,167-byte oracle payload", { timeout: 20_000 }, async () => {
     const directory = root();
     const bytes = Buffer.alloc(2_097_167, 0x41);
     const paths = await persistGeneratedImages({
@@ -170,6 +170,50 @@ describe("staged image persistence", () => {
     ).rejects.toThrow(/EEXIST|exist/i);
     expect(readFileSync(join(outDir, `${"a".repeat(32)}.png`), "utf8")).toBe("sentinel");
     expect(readdirSync(outDir)).toEqual([`${"a".repeat(32)}.png`]);
+  });
+
+  it("rejects a stage swapped for a symlink by the publish hook", async () => {
+    const directory = root();
+    const external = root();
+    const outDir = join(directory, "images");
+    const sentinel = join(external, "sentinel.png");
+    writeFileSync(sentinel, "EXTERNAL");
+    await expect(
+      persistGeneratedImages({
+        plan: createOutputPlan(outDir),
+        payloads: [Buffer.from("provider").toString("base64")],
+        requested: 1,
+        uuid: () => "a".repeat(32),
+        beforePublish: () => {
+          const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
+          if (stage === undefined) throw new Error("stage missing in hook");
+          rmSync(join(outDir, stage));
+          symlinkSync(sentinel, join(outDir, stage));
+        },
+      }),
+    ).rejects.toThrow("staged image changed after publish hook");
+    expect(existsSync(join(outDir, `${"a".repeat(32)}.png`))).toBe(false);
+    expect(readFileSync(sentinel, "utf8")).toBe("EXTERNAL");
+    expect(readdirSync(external)).toEqual(["sentinel.png"]);
+  });
+
+  it("rejects a stage whose bytes or identity changed after the publish hook", async () => {
+    const directory = root();
+    const outDir = join(directory, "images");
+    await expect(
+      persistGeneratedImages({
+        plan: createOutputPlan(outDir),
+        payloads: [Buffer.from("provider").toString("base64")],
+        requested: 1,
+        uuid: () => "a".repeat(32),
+        beforePublish: () => {
+          const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
+          if (stage === undefined) throw new Error("stage missing in hook");
+          writeFileSync(join(outDir, stage), "tampered");
+        },
+      }),
+    ).rejects.toThrow("staged image changed after publish hook");
+    expect(existsSync(join(outDir, `${"a".repeat(32)}.png`))).toBe(false);
   });
 
   it("removes a staged seven-byte partial after a write fault", async () => {

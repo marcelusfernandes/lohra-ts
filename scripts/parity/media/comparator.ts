@@ -15,6 +15,10 @@ export interface MediaRow {
 export interface DivergenceSpec {
   readonly classification: Exclude<MediaClassification, "match">;
   readonly candidate: unknown;
+  /** Substrings the candidate error message must contain (wrong-reason guard). */
+  readonly candidateErrorIncludes?: readonly string[];
+  /** Substrings the oracle error message must contain (oracle-drift guard). */
+  readonly oracleErrorIncludes?: readonly string[];
 }
 
 export interface MediaComparison {
@@ -93,14 +97,35 @@ export function compareMediaRows(
           reason: "unclassified functional difference",
         };
       }
-      const pass = contains(candidateValue, policy.candidate);
+      const errorOf = (value: unknown): string | null => {
+        if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+        const message = (value as Record<string, unknown>)["error"];
+        return typeof message === "string" ? message : null;
+      };
+      const candidateError = errorOf(candidateValue);
+      const oracleError = errorOf(oracleValue);
+      const candidateFragments = policy.candidateErrorIncludes ?? [];
+      const oracleFragments = policy.oracleErrorIncludes ?? [];
+      const candidateMatches = candidateFragments.every((fragment) =>
+        typeof candidateError === "string" ? candidateError.includes(fragment) : false,
+      );
+      const oracleMatches = oracleFragments.every((fragment) =>
+        typeof oracleError === "string" ? oracleError.includes(fragment) : false,
+      );
+      const pass = contains(candidateValue, policy.candidate) && candidateMatches && oracleMatches;
       return {
         id,
         classification: policy.classification,
         pass,
         oracle: oracleValue,
         candidate: candidateValue,
-        reason: pass ? null : "candidate does not satisfy the approved divergence shape",
+        reason: pass
+          ? null
+          : candidateMatches && oracleMatches
+            ? "candidate does not satisfy the approved divergence shape"
+            : oracleMatches
+              ? "candidate error message does not match the approved divergence reason"
+              : "oracle error message does not match the approved divergence reason",
       };
     }),
   );

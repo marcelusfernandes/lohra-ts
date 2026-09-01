@@ -205,7 +205,7 @@ describe("image_gen handler and bindings", () => {
       outDir: join(directory, "blank"),
     });
     expect(await blankHandler({ prompt: "   " })).toBe(
-      '{"error": "image_gen requires a non-empty prompt"}',
+      `{"error": "image_gen requires a non-empty 'prompt'"}`,
     );
     expect(blank.requests).toHaveLength(0);
 

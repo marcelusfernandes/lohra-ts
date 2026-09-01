@@ -11,9 +11,9 @@ export function pythonTruthy(value: unknown): boolean {
 }
 
 export function coerceImagePrompt(value: unknown): string {
-  if (!pythonTruthy(value)) throw new Error("image_gen requires a non-empty prompt");
+  if (!pythonTruthy(value)) throw new Error("image_gen requires a non-empty 'prompt'");
   const prompt = typeof value === "string" ? value : pythonRepr(value);
-  if (prompt.trim().length === 0) throw new Error("image_gen requires a non-empty prompt");
+  if (prompt.trim().length === 0) throw new Error("image_gen requires a non-empty 'prompt'");
   return prompt;
 }
 

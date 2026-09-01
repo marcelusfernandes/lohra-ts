@@ -291,45 +291,162 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
     ),
   );
 
-  const unsafe = await mutantModule("unsafe-url", "media/source.ts", [
-    {
-      file: "media/source.ts",
-      from: 'if (unsafeHost(parsed.hostname)) throw new Error("unsafe image host");',
-      to: 'if (false && unsafeHost(parsed.hostname)) throw new Error("unsafe image host");',
-    },
-  ]);
-  try {
-    const validate = unsafe.module["validateRemoteImage"] as (value: string) => string;
-    results.push(
-      compared(
-        "unsafe-url",
-        { status: "error", runner_calls: 0 },
-        {
-          status: validate("http://localhost./a") === "http://localhost./a" ? "ok" : "error",
-          runner_calls: 1,
-        },
-      ),
-    );
-  } finally {
-    unsafe.dispose();
+  for (const [id, replacement, probe] of [
+    [
+      "unsafe-url-scheme",
+      {
+        file: "media/source.ts",
+        from: 'if (parsed.protocol !== "http:" && parsed.protocol !== "https:")',
+        to: 'if (false && parsed.protocol !== "http:" && parsed.protocol !== "https:")',
+      },
+      (validate: (value: string) => string) =>
+        validate("file:///tmp/CANARY-T21") === "file:///tmp/CANARY-T21",
+    ],
+    [
+      "unsafe-url-loopback",
+      {
+        file: "media/source.ts",
+        from: 'if (unsafeHost(parsed.hostname)) throw new Error("unsafe image host");',
+        to: 'if (false && unsafeHost(parsed.hostname)) throw new Error("unsafe image host");',
+      },
+      (validate: (value: string) => string) =>
+        validate("http://127.0.0.1/a") === "http://127.0.0.1/a",
+    ],
+    [
+      "unsafe-data",
+      {
+        file: "media/source.ts",
+        from: 'throw new Error("invalid image base64 payload");',
+        to: "bytes = new Uint8Array(0);",
+      },
+      (validate: (value: string) => string) =>
+        validate("data:image/png;base64,%%%") === "data:image/png;base64,%%%",
+    ],
+  ] as const) {
+    const unsafe = await mutantModule(id, "media/source.ts", [replacement]);
+    try {
+      const validate = unsafe.module["validateRemoteImage"] as (value: string) => string;
+      let accepted = false;
+      try {
+        accepted = probe(validate);
+      } catch {
+        accepted = false;
+      }
+      results.push(
+        compared(id, { status: "error", runner_calls: 0 }, { status: accepted ? "ok" : "error" }),
+      );
+    } finally {
+      unsafe.dispose();
+    }
   }
 
   const redaction = await mutantModule("redaction", "media/errors.ts", [
     {
       file: "media/errors.ts",
-      from: "return `${label}${name}: ${clean}`;",
+      from: "return `${label}${name}: ${scrub(raw)}`;",
       to: "return raw;",
     },
   ]);
   try {
     const safeMessage = redaction.module["safeMediaMessage"] as (error: unknown) => string;
-    const message = safeMessage(new Error("https://example.test/a?secret=CANARY-T21"));
+    const message = safeMessage(
+      new Error(
+        "https://example.test/a?secret=CANARY-URL data:image/png;base64,CANARYDATA== Bearer CANARY-TOKEN",
+      ),
+    );
     results.push(
-      compared("redaction", { raw_canary: false }, { raw_canary: message.includes("CANARY-T21") }),
+      compared(
+        "redaction",
+        { url_canary: false, data_canary: false, bearer_canary: false },
+        {
+          url_canary: message.includes("https://example.test/a?secret=CANARY-URL"),
+          data_canary: message.includes("data:image/png;base64,CANARYDATA"),
+          bearer_canary: message.includes("Bearer CANARY-TOKEN"),
+        },
+      ),
     );
   } finally {
     redaction.dispose();
   }
+
+  const redactionNested = await mutantModule("redaction-nested", "media/errors.ts", [
+    {
+      file: "media/errors.ts",
+      from: "return value.map((entry) => safeMediaValue(entry, depth + 1));",
+      to: "return value;",
+    },
+  ]);
+  try {
+    const safeValue = redactionNested.module["safeMediaValue"] as (value: unknown) => unknown;
+    const projected = JSON.stringify(
+      safeValue({ items: ["NESTED-CANARY-99", { deep: "DEEP-CANARY-77" }] }),
+    );
+    results.push(
+      compared(
+        "redaction-nested",
+        { nested_canary: false },
+        {
+          nested_canary:
+            projected.includes("NESTED-CANARY-99") || projected.includes("DEEP-CANARY-77"),
+        },
+      ),
+    );
+  } finally {
+    redactionNested.dispose();
+  }
+
+  results.push(
+    await persistenceMutation(
+      "stage-swap",
+      [
+        {
+          file: "media/persistence.ts",
+          from: 'throw new Error("staged image changed after publish hook");',
+          to: "void 0;",
+        },
+      ],
+      async (media) => {
+        const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-stage-"));
+        const external = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-external-"));
+        try {
+          const sentinel = join(external, "sentinel.png");
+          writeFileSync(sentinel, "EXTERNAL-SENTINEL");
+          const outDir = join(runtime, "images");
+          const final = join(outDir, `${"a".repeat(32)}.png`);
+          let paths: readonly string[] = [];
+          try {
+            paths = await media.persistGeneratedImages({
+              plan: media.createOutputPlan(outDir),
+              payloads: [Buffer.from("provider").toString("base64")],
+              requested: 1,
+              uuid: () => "a".repeat(32),
+              beforePublish: () => {
+                const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
+                if (stage === undefined) throw new Error("stage missing in hook");
+                rmSync(join(outDir, stage));
+                symlinkSync(sentinel, join(outDir, stage));
+              },
+            });
+          } catch {
+            // Expected side: the revalidation must abort the publish.
+          }
+          return {
+            expected: { status: "error", final_count: 0, external_untouched: true },
+            actual: {
+              status: paths.length > 0 ? "ok" : "error",
+              final_count: paths.length,
+              external_untouched: readFileSync(sentinel, "utf8") === "EXTERNAL-SENTINEL",
+              final_matches_external:
+                paths.length > 0 && readFileSync(final, "utf8") === "EXTERNAL-SENTINEL",
+            },
+          };
+        } finally {
+          rmSync(runtime, { recursive: true, force: true });
+          rmSync(external, { recursive: true, force: true });
+        }
+      },
+    ),
+  );
 
   const child = await mutantModule("child-deny", "tools/child.ts", [
     {

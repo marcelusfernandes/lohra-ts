@@ -7,6 +7,7 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  readFileSync,
   realpathSync,
   rmSync,
   statSync,
@@ -141,6 +142,7 @@ export async function persistGeneratedImages(options: {
   const temps: string[] = [];
   const finals: string[] = [];
   const published: string[] = [];
+  const stageStats: Stats[] = [];
   try {
     for (let index = 0; index < decoded.length; index += 1) {
       const bytes = decoded[index];
@@ -163,6 +165,7 @@ export async function persistGeneratedImages(options: {
       } finally {
         closeSync(fd);
       }
+      stageStats.push(lstatSync(temp));
       finals.push(final);
     }
 
@@ -173,6 +176,23 @@ export async function persistGeneratedImages(options: {
         throw new Error("image publish index mismatch");
       await options.beforePublish?.(index, final);
       checkControlledRoot(options.plan);
+      // The hook no longer owns the stage path: revalidate identity, type,
+      // size and bytes so a swapped/symlinked/tampered stage can never be
+      // published under the provider's name.
+      const staged = stageStats[index];
+      const expectedBytes = decoded[index];
+      const owned = lstatSync(temp);
+      if (
+        staged === undefined ||
+        expectedBytes === undefined ||
+        owned.isSymbolicLink() ||
+        !owned.isFile() ||
+        owned.dev !== staged.dev ||
+        owned.ino !== staged.ino ||
+        owned.size !== staged.size ||
+        !readFileSync(temp).equals(expectedBytes)
+      )
+        throw new Error("staged image changed after publish hook");
       linkSync(temp, final);
       published.push(final);
       rmSync(temp);
