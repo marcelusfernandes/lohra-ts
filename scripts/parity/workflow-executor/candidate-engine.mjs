@@ -4,6 +4,7 @@ import process from "node:process";
 import {
   Budget,
   MemoryWorkflowCache,
+  parseAndValidate,
   WorkflowEngine,
   validateSpec,
 } from "../../../dist/workflow/index.js";
@@ -20,6 +21,7 @@ class RulesRuntime {
   constructor(fail = "") {
     this.fail = fail;
     this.requests = [];
+    this.steers = [];
     this.byId = new Map();
   }
   spawn(request) {
@@ -38,8 +40,9 @@ class RulesRuntime {
     if (this.fail === "schema" && role === "agent" && count === 0)
       return { status: "complete", output: '{"wrong":true}', usage: split };
     let output = "ok";
-    if (role === "verify.skeptic") output = { refuted: false, reason: "ok" };
-    else if (role === "judge.attempt") output = "draft";
+    if (this.fail === "verify-invalid" && role === "verify.skeptic") output = { unexpected: true };
+    else if (role === "verify.skeptic") output = { refuted: false, reason: "ok" };
+    else if (role === "judge.attempt") output = this.fail === "judge-winner" ? "BEST-CANDIDATE" : "draft";
     else if (role === "judge.review") output = { score: 9, rationale: "ok" };
     else if (role === "judge.synthesis") output = "final";
     else if (role === "loop.round") output = request.prompt.includes("harvest 0") ? "item" : "";
@@ -52,7 +55,7 @@ class RulesRuntime {
       : split;
     return { status: "complete", output, usage, provider: "stub", model: "canned" };
   }
-  steer() {}
+  steer(id, prompt) { this.steers.push({ id, prompt }); }
   cancel() {}
 }
 
@@ -172,4 +175,26 @@ await new WorkflowEngine({ runtime: cacheRuntime, cache, runId: "same" }).run(ba
 await new WorkflowEngine({ runtime: cacheRuntime, cache, runId: "same" }).run(base);
 await new WorkflowEngine({ runtime: cacheRuntime, cache, runId: "same" }).run(changed);
 
-process.stdout.write(`${JSON.stringify({ successes, failures, fanout: fanout.value, budget: budget.value, nullUpstream: project(nullResult, nullRuntime), engineFault, schemaRetry: schemaRetry.value, cache: { spawns: cacheRuntime.requests.length, split: cache.totalSplit("same") } })}\n`);
+const pipelinePreflight = await runOne(
+  { meta: { name: "pipeline-preflight" }, nodes: [{ id: "n", type: "pipeline", items: ["a", "b", "c"], stages: [{ prompt: "pipe ${item}" }] }] },
+  { budget: new Budget({ maxFanout: 2 }) },
+);
+const schemaKeywords = [
+  ["0", { type: "number", minimum: 1 }],
+  ['{"extra":1}', { type: "object", additionalProperties: false }],
+  [JSON.stringify("abc"), { type: "string", pattern: "^z" }],
+  ["[]", { type: "array", minItems: 1 }],
+  ["1", { oneOf: [{ type: "number" }, { const: 1 }] }],
+].map(([output, schema]) => parseAndValidate(output, schema).ok);
+const verifyInvalid = await runOne(
+  { meta: { name: "verify-invalid" }, nodes: [{ id: "n", type: "verify", finding: "claim", skeptics: 1, lenses: ["SECURITY-LENS"], kill_if_majority_refute: true }] },
+  { fail: "verify-invalid" },
+);
+const judgeWinner = await runOne(
+  { meta: { name: "judge-winner" }, nodes: [{ id: "n", type: "judge_panel", attempts: ["attempt"], judges: 1, synthesize: { prompt: "polish this" } }] },
+  { fail: "judge-winner" },
+);
+const gateSequential = await runOne(successSpecs.gate, { budget: new Budget({ tokenBudget: 100 }) });
+const nanBudget = new Budget({ poolWidth: Number.NaN, maxFanout: Number.NaN, lifetime: Number.NaN });
+
+process.stdout.write(`${JSON.stringify({ successes, failures, fanout: fanout.value, budget: budget.value, nullUpstream: project(nullResult, nullRuntime), engineFault, schemaRetry: schemaRetry.value, cache: { spawns: cacheRuntime.requests.length, split: cache.totalSplit("same") }, round1: { pipelinePreflight: pipelinePreflight.value, schemaKeywords, verifyInvalid: { output: verifyInvalid.value.outputs.n, steers: verifyInvalid.runtime.steers.length, lens: verifyInvalid.runtime.requests.some((request) => request.prompt.includes("SECURITY-LENS")) }, judgePrompt: judgeWinner.runtime.requests.find((request) => request.causalContext.role === "judge.synthesis")?.prompt ?? null, gateSequential: gateSequential.value, nanBudget: [nanBudget.poolWidth, nanBudget.maxFanout, nanBudget.lifetimeRemaining] } })}\n`);

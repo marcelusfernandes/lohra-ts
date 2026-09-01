@@ -5,13 +5,8 @@ import type { Usage } from "../pricing/types.js";
 import { addUsageToResult, deriveStatus, RunResult } from "./accounting.js";
 import { Budget, FanoutRejected, TokenBudgetExhausted } from "./budget.js";
 import { contentHash, MemoryWorkflowCache, type WorkflowCache } from "./cache.js";
-import { DEFAULT_LEAF_MAX_ITERATIONS, EMPTY_OUTPUT_CORRECTION, LEAF_TIMEOUT_SECONDS,
-  MAX_WORKFLOW_DEPTH, PIPELINE_TIMEOUT_SECONDS, type LeafExecution, type RunControl,
-  type Strategy, type WorkflowEngineOptions, type WorkflowEvent, type WorkflowLoader,
-} from "./engine-contract.js";
-import { asRecord, clampInteger, combine, nonEmpty, renderValue, resultUsage,
-  routingIdentity, routingOf, strictResolve,
-} from "./engine-utils.js";
+import { DEFAULT_LEAF_MAX_ITERATIONS, EMPTY_OUTPUT_CORRECTION, LEAF_TIMEOUT_SECONDS, MAX_WORKFLOW_DEPTH, PIPELINE_TIMEOUT_SECONDS, type LeafExecution, type RunControl, type Strategy, type WorkflowEngineOptions, type WorkflowEvent, type WorkflowLoader, VERIFY_SCHEMA } from "./engine-contract.js";
+import { asRecord, clampInteger, combine, nonEmpty, renderValue, resultUsage, routingIdentity, routingOf, strictResolve, verifyPrompt } from "./engine-utils.js";
 import { topologicalOrder } from "./graph.js";
 import { MAX_GATE_ATTEMPTS, MAX_NODE_MAX_ITERATIONS, MAX_NODE_RETRIES } from "./nodes.js";
 import { correctionPrompt, isEmptyOutput, MAX_VALIDATION_RETRIES, parseAndValidate } from "./output-validation.js";
@@ -389,6 +384,7 @@ export class WorkflowEngine {
       : [];
     if (!Array.isArray(items)) return null;
     const itemValues = items as readonly unknown[];
+    if (itemValues.length > 0) this.budget.checkFanout(itemValues.length);
     this.progressTracker.noteItems(node.id, 0, items.length);
     this.emit({ kind: "items", nodeId: node.id, done: 0, total: items.length });
     let done = 0;
@@ -507,18 +503,20 @@ export class WorkflowEngine {
     const finding = strictResolve(node.fields.finding, context);
     if (finding === null) return null;
     const skeptics = Math.max(1, Math.trunc(Number(node.fields.skeptics ?? 1)));
-    const hash = this.cell([node.id, "verify", finding, skeptics, node.fields.lenses ?? null, node.fields.kill_if_majority_refute ?? false, ...routingIdentity(node, this.tiers)]);
+    const lenses = Array.isArray(node.fields.lenses) ? node.fields.lenses : [];
+    const hash = this.cell([node.id, "verify", finding, skeptics, lenses, node.fields.kill_if_majority_refute ?? false, ...routingIdentity(node, this.tiers)]);
     const cached = this.cacheGet(hash);
     if (cached !== CACHE_MISS) return cached;
     this.gateFanout(skeptics);
     const leaves = await Promise.all(
-      Array.from({ length: skeptics }, (_, index) =>
-        this.collectLeaf(node, `Refute this finding: ${renderValue(finding)}`, null, {
+      Array.from({ length: skeptics }, (_, index) => {
+        const lens: unknown = lenses[index % Math.max(1, lenses.length)] ?? "general correctness";
+        return this.collectLeaf(node, verifyPrompt(finding, lens), VERIFY_SCHEMA, {
           role: "verify.skeptic",
           cellId: hash,
           itemIndex: index,
-        }),
-      ),
+        });
+      }),
     );
     const verdicts = leaves.map((leaf) => asRecord(leaf.output));
     const counted = verdicts.filter((verdict) => verdict !== null);
@@ -616,7 +614,7 @@ export class WorkflowEngine {
     const prompt = strictResolve(synth.prompt, Object.freeze({ ...context, winner }));
     let synthesis: LeafExecution;
     try {
-      synthesis = await this.collectLeaf(node, renderValue(prompt), this.schemaOf(synth), {
+      synthesis = await this.collectLeaf(node, `${renderValue(prompt)}\n\nWINNER:\n${renderValue(winner)}`, this.schemaOf(synth), {
         role: "judge.synthesis",
         cellId: hash,
       });
@@ -735,7 +733,7 @@ export class WorkflowEngine {
     const validator = strictResolve(node.fields.validator, context);
     if (body === null || validator === null) return null;
     const attempts = Math.min(Math.max(1, Math.trunc(Number(node.fields.attempts ?? 2))), MAX_GATE_ATTEMPTS);
-    this.gateFanout(attempts * 2);
+    this.budget.checkFanout(attempts * 2);
     const prompt = strictResolve(body.prompt, context);
     if (prompt === null) return null;
     const hash = this.cell([node.id, "gate", prompt, this.schemaOf(body), validator, attempts, ...routingIdentity(node, this.tiers)]);

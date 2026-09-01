@@ -70,6 +70,69 @@ const mutants: readonly Mutant[] = [
     ],
   },
   {
+    id: "pipeline-width-preflight-removed",
+    mechanism: "pipeline item width is not checked before the first spawn",
+    edits: [{
+      file: engine,
+      before: "    if (itemValues.length > 0) this.budget.checkFanout(itemValues.length);",
+      after: "    void itemValues.length;",
+    }],
+  },
+  {
+    id: "draft202012-keywords-bypassed",
+    mechanism: "Draft 2020-12 keyword failures are accepted",
+    edits: [{
+      file: "src/workflow/output-validation.ts",
+      before: "    const errors = validateDraft202012(value, schema);",
+      after: "    const errors: readonly string[] = [];",
+    }],
+  },
+  {
+    id: "verify-lens-ignored",
+    mechanism: "verify prompt ignores the selected skeptic lens",
+    edits: [{
+      file: engine,
+      before: "        const lens: unknown = lenses[index % Math.max(1, lenses.length)] ?? \"general correctness\";",
+      after: "        const lens: unknown = \"general correctness\";",
+    }],
+  },
+  {
+    id: "verify-schema-disabled",
+    mechanism: "malformed skeptic verdicts bypass structured retries",
+    edits: [{
+      file: engine,
+      before: "return this.collectLeaf(node, verifyPrompt(finding, lens), VERIFY_SCHEMA, {",
+      after: "return this.collectLeaf(node, verifyPrompt(finding, lens), null, {",
+    }],
+  },
+  {
+    id: "judge-winner-append-removed",
+    mechanism: "synthesis prompt omits the mandatory winner suffix",
+    edits: [{
+      file: engine,
+      before: "`${renderValue(prompt)}\\n\\nWINNER:\\n${renderValue(winner)}`",
+      after: "renderValue(prompt)",
+    }],
+  },
+  {
+    id: "gate-uses-affordability-preflight",
+    mechanism: "sequential gate is rejected by parallel affordability",
+    edits: [{
+      file: engine,
+      before: "    this.budget.checkFanout(attempts * 2);",
+      after: "    this.gateFanout(attempts * 2);",
+    }],
+  },
+  {
+    id: "budget-nan-unbounded",
+    mechanism: "NaN structural limits survive normalization and disable caps",
+    edits: [{
+      file: "src/workflow/budget.ts",
+      before: "  return Number.isNaN(normalized) ? 1 : Math.max(1, normalized);",
+      after: "  return Math.max(1, normalized);",
+    }],
+  },
+  {
     id: "timeout-no-cooperative-cancel",
     mechanism: "timed-out leaf is not cancelled",
     edits: [{ file: engine, before: "        await this.runtime.cancel(id);\n        this.recordFault", after: "        this.recordFault" }],

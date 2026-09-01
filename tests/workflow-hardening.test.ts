@@ -4,6 +4,7 @@ import {
   Budget,
   contentHash,
   MemoryWorkflowCache,
+  parseAndValidate,
   WorkflowEngine,
   validateSpec,
   type ChildCollectOptions,
@@ -139,6 +140,51 @@ describe("workflow authored boundaries", () => {
     expect(result.capTrips).toBe(1);
     expect(result.faults).toHaveLength(1);
   });
+
+  it("rejects pipeline item width before the first spawn", async () => {
+    const runtime = new ScriptRuntime([[complete("a")], [complete("b")], [complete("c")]]);
+    const result = await new WorkflowEngine({
+      runtime,
+      budget: new Budget({ maxFanout: 2 }),
+    }).run(
+      parsed({
+        meta: { name: "pipeline-fanout" },
+        nodes: [
+          { id: "p", type: "pipeline", items: ["a", "b", "c"], stages: [{ prompt: "${item}" }] },
+        ],
+      }),
+    );
+    expect(runtime.requests).toHaveLength(0);
+    expect(result.outputs.p).toBeNull();
+    expect(result.capTrips).toBe(1);
+    expect(result.status).toBe("failed");
+  });
+
+  it("normalizes NaN structural limits to one", () => {
+    const budget = new Budget({ poolWidth: Number.NaN, maxFanout: Number.NaN, lifetime: Number.NaN });
+    expect(budget.poolWidth).toBe(1);
+    expect(budget.maxFanout).toBe(1);
+    expect(budget.lifetimeRemaining).toBe(1);
+    expect(() => {
+      budget.checkFanout(1_000_000_000);
+    }).toThrow();
+  });
+});
+
+describe("workflow Draft 2020-12 output validation", () => {
+  const rejected: readonly [unknown, Readonly<Record<string, unknown>>][] = [
+    [1, { type: "number", minimum: 10 }],
+    [{ known: true, extra: true }, { type: "object", properties: { known: { type: "boolean" } }, additionalProperties: false }],
+    [JSON.stringify("abc"), { type: "string", pattern: "^z+$" }],
+    [[1], { type: "array", minItems: 2 }],
+    [3, { oneOf: [{ type: "string" }, { type: "number", minimum: 5 }] }],
+  ];
+
+  for (const [value, schema] of rejected) {
+    it(`rejects ${JSON.stringify(value)} against ${JSON.stringify(schema)}`, () => {
+      expect(parseAndValidate(value, schema).ok).toBe(false);
+    });
+  }
 });
 
 describe("workflow validation and lifecycle", () => {

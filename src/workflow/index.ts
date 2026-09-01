@@ -4,6 +4,7 @@ export * from "./cache.js";
 export * from "./engine.js";
 export * from "./engine-contract.js";
 export * from "./graph.js";
+export * from "./json-schema.js";
 export * from "./jsonio.js";
 export * from "./nodes.js";
 export * from "./output-validation.js";

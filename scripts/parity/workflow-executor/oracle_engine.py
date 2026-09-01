@@ -13,6 +13,7 @@ from lohra.workflow.budget import Budget
 from lohra.workflow.cache import NodeCache
 from lohra.workflow.engine import WorkflowEngine
 from lohra.workflow.schema import validate_spec
+from lohra.workflow.validation import parse_and_validate
 
 
 class RulesClient(ModelClient):
@@ -25,20 +26,23 @@ class RulesClient(ModelClient):
         self.owner.calls += 1
         messages = kwargs.get("messages") or []
         prompt = str(messages[-1].get("content") if messages else "")
+        self.owner.prompts.append(prompt)
         kind = classify(prompt)
         targeted = self.owner.fail in {kind, "all"}
         if self.owner.fail == "parallel.branch" and prompt in {"a", "b"}:
             targeted = True
         if targeted:
             raise RuntimeError(f"dead:{kind}")
-        if self.owner.fail == "schema" and self.calls == 1:
+        if self.owner.fail == "verify-invalid" and kind == "verify.skeptic":
+            text = '{"unexpected":true}'
+        elif self.owner.fail == "schema" and self.calls == 1:
             text = '{"wrong":true}'
         elif kind == "verify.skeptic":
             text = '{"refuted":false,"reason":"ok"}'
         elif kind == "judge.review":
             text = '{"score":9,"rationale":"ok"}'
         elif kind == "judge.attempt":
-            text = "draft"
+            text = "BEST-CANDIDATE" if self.owner.fail == "judge-winner" else "draft"
         elif kind == "judge.synthesis":
             text = "final"
         elif kind == "loop.round":
@@ -85,6 +89,7 @@ class Factory:
         self.fail = fail
         self.calls = 0
         self.spawns = 0
+        self.prompts: list[str] = []
 
     def __call__(self) -> Agent:
         self.spawns += 1
@@ -218,4 +223,39 @@ try:
 finally:
     core.shutdown(); db.close()
 
-print(json.dumps({"successes": successes, "failures": failures, "fanout": fanout, "budget": budget_out, "nullUpstream": null_upstream, "engineFault": engine_fault, "schemaRetry": schema_retry, "cache": cache_projection}, sort_keys=True))
+pipeline_preflight = run_one(
+    {"meta": {"name": "pipeline-preflight"}, "nodes": [{"id": "n", "type": "pipeline", "items": ["a", "b", "c"], "stages": [{"prompt": "pipe ${item}"}]}]},
+    budget=Budget(max_fanout=2),
+)[0]
+schema_keywords = [
+    parse_and_validate("0", {"type": "number", "minimum": 1})[0],
+    parse_and_validate('{"extra":1}', {"type": "object", "additionalProperties": False})[0],
+    parse_and_validate(json.dumps("abc"), {"type": "string", "pattern": "^z"})[0],
+    parse_and_validate("[]", {"type": "array", "minItems": 1})[0],
+    parse_and_validate("1", {"oneOf": [{"type": "number"}, {"const": 1}]})[0],
+]
+verify_invalid, verify_factory = run_one(
+    {"meta": {"name": "verify-invalid"}, "nodes": [{"id": "n", "type": "verify", "finding": "claim", "skeptics": 1, "lenses": ["SECURITY-LENS"], "kill_if_majority_refute": True}]},
+    fail="verify-invalid",
+)
+judge_winner, judge_factory = run_one(
+    {"meta": {"name": "judge-winner"}, "nodes": [{"id": "n", "type": "judge_panel", "attempts": ["attempt"], "judges": 1, "synthesize": {"prompt": "polish this"}}]},
+    fail="judge-winner",
+)
+gate_sequential = run_one(success_specs["gate"], budget=Budget(token_budget=100))[0]
+nan_budget = Budget(pool_width=float("nan"), max_fanout=float("nan"), lifetime=float("nan"))
+
+round1 = {
+    "pipelinePreflight": pipeline_preflight,
+    "schemaKeywords": schema_keywords,
+    "verifyInvalid": {
+        "output": verify_invalid["outputs"]["n"],
+        "steers": verify_factory.calls - verify_factory.spawns,
+        "lens": any("SECURITY-LENS" in prompt for prompt in verify_factory.prompts),
+    },
+    "judgePrompt": next((prompt for prompt in judge_factory.prompts if "WINNER:" in prompt), None),
+    "gateSequential": gate_sequential,
+    "nanBudget": [nan_budget.pool_width, nan_budget.max_fanout, nan_budget.lifetime_remaining],
+}
+
+print(json.dumps({"successes": successes, "failures": failures, "fanout": fanout, "budget": budget_out, "nullUpstream": null_upstream, "engineFault": engine_fault, "schemaRetry": schema_retry, "cache": cache_projection, "round1": round1}, sort_keys=True))

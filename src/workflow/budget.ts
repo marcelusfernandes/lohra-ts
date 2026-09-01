@@ -3,6 +3,16 @@ export const DEFAULT_MAX_FANOUT = 64;
 export const DEFAULT_LIFETIME = 1000;
 export const ESTIMATED_TOKENS_PER_LEAF = 2000;
 
+function atLeastOne(value: number | undefined, fallback: number): number {
+  const normalized = Math.trunc(value ?? fallback);
+  return Number.isNaN(normalized) ? 1 : Math.max(1, normalized);
+}
+
+function atLeastZero(value: number | undefined): number {
+  const normalized = Math.trunc(value ?? 0);
+  return Number.isNaN(normalized) ? 0 : Math.max(0, normalized);
+}
+
 export class FanoutRejected extends Error {
   constructor(message: string) {
     super(message);
@@ -34,12 +44,12 @@ export class Budget {
     readonly tokensIn?: number;
     readonly tokensOut?: number;
   } = {}) {
-    this.poolWidth = Math.max(1, Math.trunc(options.poolWidth ?? DEFAULT_POOL_WIDTH));
-    this.maxFanout = Math.max(1, Math.trunc(options.maxFanout ?? DEFAULT_MAX_FANOUT));
-    this.lifetime = Math.max(1, Math.trunc(options.lifetime ?? DEFAULT_LIFETIME));
+    this.poolWidth = atLeastOne(options.poolWidth, DEFAULT_POOL_WIDTH);
+    this.maxFanout = atLeastOne(options.maxFanout, DEFAULT_MAX_FANOUT);
+    this.lifetime = atLeastOne(options.lifetime, DEFAULT_LIFETIME);
     this.tokenBudget = options.tokenBudget ?? null;
-    this.input = Math.max(0, Math.trunc(options.tokensIn ?? 0));
-    this.output = Math.max(0, Math.trunc(options.tokensOut ?? 0));
+    this.input = atLeastZero(options.tokensIn);
+    this.output = atLeastZero(options.tokensOut);
   }
 
   get lifetimeRemaining(): number {

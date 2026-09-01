@@ -41,6 +41,10 @@ export function renderValue(value: unknown): string {
   }
 }
 
+export function verifyPrompt(finding: unknown, lens: unknown): string {
+  return `You are a skeptic reviewing through the lens of: ${renderValue(lens)}. Try hard to REFUTE the following finding. Default to refuted=true if you find any real problem.\n\nFINDING:\n${renderValue(finding)}\n\nRespond with ONLY JSON: {"refuted": <true|false>, "reason": "<why>"}.`;
+}
+
 export function strictResolve(
   value: unknown,
   context: Readonly<Record<string, unknown>>,

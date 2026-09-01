@@ -13,6 +13,14 @@ export const MAX_WORKFLOW_DEPTH = 1;
 export const DEFAULT_LEAF_MAX_ITERATIONS = 50;
 export const EMPTY_OUTPUT_CORRECTION =
   "Your previous answer was empty. Produce a complete answer.";
+export const VERIFY_SCHEMA = Object.freeze({
+  type: "object",
+  properties: Object.freeze({
+    refuted: Object.freeze({ type: "boolean" }),
+    reason: Object.freeze({ type: "string" }),
+  }),
+  required: Object.freeze(["refuted"]),
+});
 
 export type WorkflowEvent = Readonly<{
   kind: "node" | "items" | "fault";

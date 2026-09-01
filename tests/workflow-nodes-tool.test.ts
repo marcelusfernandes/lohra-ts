@@ -41,6 +41,7 @@ const ok = (output: unknown): ChildResult => ({
 class QueueChildren implements ChildRuntime {
   readonly requests: ChildSpawnRequest[] = [];
   readonly cancelled: string[] = [];
+  readonly steered: string[] = [];
   private readonly scripts: ChildResult[][];
   private readonly active = new Map<string, ChildResult[]>();
 
@@ -59,7 +60,9 @@ class QueueChildren implements ChildRuntime {
     return this.active.get(id)?.shift() ?? { status: "failed", output: "missing" };
   }
 
-  steer(): void {}
+  steer(_id: string, prompt: string): void {
+    this.steered.push(prompt);
+  }
 
   cancel(id: string): void {
     this.cancelled.push(id);
@@ -86,6 +89,24 @@ describe("remaining workflow node strategies", () => {
     );
     expect(result.outputs.v).toMatchObject({ survived: false, refuted: 0, skeptics: 0 });
     expect(result.faults).toHaveLength(3);
+  });
+
+  it("verify includes the authored lens and discards a schema-invalid skeptic", async () => {
+    const runtime = new QueueChildren([[
+      ok({ unexpected: true }),
+      ok({ unexpected: true }),
+      ok({ unexpected: true }),
+    ]]);
+    const result = await new WorkflowEngine({ runtime }).run(
+      spec({
+        meta: { name: "verify-schema" },
+        nodes: [{ id: "v", type: "verify", finding: "CLAIM", skeptics: 1, lenses: ["SECURITY-LENS"] }],
+      }),
+    );
+    expect(runtime.requests[0]?.prompt).toContain("SECURITY-LENS");
+    expect(runtime.steered).toHaveLength(2);
+    expect(result.outputs.v).toMatchObject({ finding: null, survived: false, skeptics: 0 });
+    expect(result.faults.some((fault) => fault.includes("fail-closed"))).toBe(true);
   });
 
   it("judge panel synthesizes a scored winner and dead synthesis is null", async () => {
@@ -130,6 +151,24 @@ describe("remaining workflow node strategies", () => {
     expect(runtime.requests).toHaveLength(2);
   });
 
+  it("always appends the winner to the judge synthesis prompt", async () => {
+    const runtime = new QueueChildren([[ok("BEST-CANDIDATE")], [ok({ score: 9 })], [ok("FINAL")]]);
+    const result = await new WorkflowEngine({ runtime }).run(
+      spec({
+        meta: { name: "judge-winner-prompt" },
+        nodes: [{
+          id: "j",
+          type: "judge_panel",
+          attempts: ["draft"],
+          judges: 1,
+          synthesize: { prompt: "polish this" },
+        }],
+      }),
+    );
+    expect(result.outputs.j).toBe("FINAL");
+    expect(runtime.requests[2]?.prompt).toBe("polish this\n\nWINNER:\nBEST-CANDIDATE");
+  });
+
   it("loop keeps useful rounds and stops after an empty answer", async () => {
     const runtime = new QueueChildren([[ok("one")], [ok("")]]);
     const result = await new WorkflowEngine({ runtime }).run(
@@ -172,6 +211,26 @@ describe("remaining workflow node strategies", () => {
       "gate.body",
       "gate.reviewer",
     ]);
+  });
+
+  it("uses structural-only preflight for a sequential gate", async () => {
+    const eightTokens = (output: unknown): ChildResult => ({
+      ...ok(output),
+      usage: { ...meter, inputTokens: 4, outputTokens: 4 },
+    });
+    const runtime = new QueueChildren([[eightTokens("DRAFT")], [eightTokens({ ok: true, feedback: "" })]]);
+    const result = await new WorkflowEngine({
+      runtime,
+      budget: new Budget({ tokenBudget: 100 }),
+    }).run(
+      spec({
+        meta: { name: "gate-soft-budget" },
+        nodes: [{ id: "g", type: "gate", body: { prompt: "write" }, validator: "review", attempts: 1 }],
+      }),
+    );
+    expect(runtime.requests).toHaveLength(2);
+    expect(result.outputs.g).toBe("DRAFT");
+    expect(result.status).toBe("complete");
   });
 
   it("completeness forces its structured shape", async () => {
