@@ -82,13 +82,13 @@
       "side": "oracle",
       "field": "process.stdout",
       "encoding": "utf8",
-      "value": "{\"rows\": [{\"authorization\": [\"present\"], \"bodyBytesRead\": 8, \"dns\": [\"public.test\"], \"parserCalls\": 0, \"requestBodies\": [\"\"], \"requests\": [\"http://alice:secret@public.test/\"], \"result\": {\"ok\": true, \"text\": \"accepted\", \"url\": \"http://alice:secret@public.test/\"}}, {\"authorization\": [\"present\"], \"bodyBytesRead\": 8, \"dns\": [\"public.test\", \"public.test\"], \"parserCalls\": 0, \"requestBodies\": [\"\", \"\"], \"requests\": [\"http://public.test/one\", \"http://carol:pw@public.test/final\"], \"result\": {\"ok\": true, \"text\": \"accepted\", \"url\": \"http://public.test/one\"}}]}\n"
+      "value": "{\"rows\": [{\"authorization\": [\"present\"], \"bodyBytesRead\": 8, \"dns\": [\"public.test\"], \"parserCalls\": 0, \"requestBodies\": [\"\"], \"requests\": [\"http://userinfo:canary@public.test/\"], \"result\": {\"ok\": true, \"text\": \"accepted\", \"url\": \"http://userinfo:canary@public.test/\"}}, {\"authorization\": [\"present\"], \"bodyBytesRead\": 8, \"dns\": [\"public.test\", \"public.test\"], \"parserCalls\": 0, \"requestBodies\": [\"\", \"\"], \"requests\": [\"http://public.test/one\", \"http://userinfo:canary@public.test/final\"], \"result\": {\"ok\": true, \"text\": \"accepted\", \"url\": \"http://public.test/one\"}}]}\n"
     },
     {
       "side": "candidate",
       "field": "process.stdout",
       "encoding": "utf8",
-      "value": "{\"rows\": [{\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [], \"parserCalls\": 0, \"requestBodies\": [], \"requests\": [], \"result\": {\"error\": \"refusing URL with embedded credentials\", \"url\": \"http://alice:secret@public.test/\"}}, {\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [\"public.test\"], \"parserCalls\": 0, \"requestBodies\": [\"\"], \"requests\": [\"http://public.test/one\"], \"result\": {\"error\": \"refusing URL with embedded credentials\", \"url\": \"http://public.test/one\"}}]}\n"
+      "value": "{\"rows\": [{\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [], \"parserCalls\": 0, \"requestBodies\": [], \"requests\": [], \"result\": {\"error\": \"refusing URL with embedded credentials\", \"url\": \"http://userinfo:canary@public.test/\"}}, {\"authorization\": [], \"bodyBytesRead\": 0, \"dns\": [\"public.test\"], \"parserCalls\": 0, \"requestBodies\": [\"\"], \"requests\": [\"http://public.test/one\"], \"result\": {\"error\": \"refusing URL with embedded credentials\", \"url\": \"http://public.test/one\"}}]}\n"
     }
   ],
   "normalizations": [],

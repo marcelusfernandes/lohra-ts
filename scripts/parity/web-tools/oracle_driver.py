@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import socket
 import sys
 from typing import Any
@@ -147,11 +148,26 @@ class World:
             setattr(owner, name, value)
         self._patches = []
 
+    @staticmethod
+    def _mask_credentials(value: Any) -> Any:
+        pattern = re.compile(r"(?<=://)([^/@/?#]+)@")
+
+        def mask(entry: Any) -> Any:
+            if isinstance(entry, str):
+                return pattern.sub("userinfo:canary@", entry)
+            if isinstance(entry, list):
+                return [mask(item) for item in entry]
+            if isinstance(entry, dict):
+                return {key: mask(item) for key, item in entry.items()}
+            return entry
+
+        return mask(value)
+
     def observation(self, result: Any) -> dict:
         return {
-            "result": result,
+            "result": self._mask_credentials(result),
             "dns": list(self.dns.calls),
-            "requests": list(self.requests),
+            "requests": self._mask_credentials(list(self.requests)),
             "requestBodies": list(self.request_bodies),
             "authorization": list(self.authorization),
             "bodyBytesRead": self.served,

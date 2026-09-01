@@ -173,10 +173,18 @@ function makeWorld(table) {
       return { resolver: (host) => dns.resolve(host), connector: world.connector() };
     },
     observation(result) {
+      const maskCredentials = (entry) => {
+        if (typeof entry === "string") return entry.replace(/(?<=:\/\/)([^/@?#]+)@/, "userinfo:canary@");
+        if (Array.isArray(entry)) return entry.map(maskCredentials);
+        if (entry !== null && typeof entry === "object") {
+          return Object.fromEntries(Object.entries(entry).map(([key, value]) => [key, maskCredentials(value)]));
+        }
+        return entry;
+      };
       return {
-        result,
+        result: maskCredentials(result),
         dns: [...dns.calls],
-        requests: [...world.requests],
+        requests: maskCredentials([...world.requests]),
         requestBodies: [...world.requestBodies],
         authorization: [...world.authorization],
         bodyBytesRead: world.served,
