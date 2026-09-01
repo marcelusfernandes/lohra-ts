@@ -36,6 +36,7 @@ const durability = "src/workflow/durability.ts";
 const service = "src/workflow/service.ts";
 const sandbox = "src/workflow/sandbox.ts";
 const sqliteCache = "src/workflow/sqlite-cache.ts";
+const engine = "src/workflow/engine.ts";
 
 const repositoryTests = "tests/state-workflow-repository.test.ts";
 const serviceTests = "tests/workflow-service-durability.test.ts";
@@ -244,10 +245,8 @@ const namedMutants: readonly Mutant[] = [
     edits: [
       {
         file: sandbox,
-        before: `  const resolvedTarget = realPathOf(target);
-  if (resolvedTarget !== target) return inside(resolvedTarget);
-  return inside(realPathOf(resolve(target, "..")));`,
-        after: `  return inside(target);`,
+        before: "    const real = existsSync(current) ? realpathSync(current) : null;",
+        after: "    const real = existsSync(current) ? current : null;",
       },
     ],
   },
@@ -322,9 +321,9 @@ const namedMutants: readonly Mutant[] = [
       {
         file: service,
         before:
-          "        store.locks.releaseRunLease(runId, store.holder);\n        this.stretches.delete(runId);\n        record.settled = true;\n        if (owned) {",
+          "        this.fenceMemory.forget(fenceKey);\n        sandboxHandle.dispose(); // only THIS acquisition's installation",
         after:
-          "        store.locks.releaseRunLease(runId, store.holder);\n        this.persistSpend(store, runId, effectiveBudget, seeded, engine, stretchOwnership());\n        this.stretches.delete(runId);\n        record.settled = true;\n        if (owned) {",
+          "        this.persistSpend(store, runId, effectiveBudget, seeded, engine, stretchOwnership());\n        this.fenceMemory.forget(fenceKey);\n        sandboxHandle.dispose(); // only THIS acquisition's installation",
       },
     ],
   },
@@ -352,8 +351,156 @@ const namedMutants: readonly Mutant[] = [
       {
         file: service,
         before:
-          "          record.resolve(\n            ownershipLost(runId, fence) as unknown as Readonly<Record<string, unknown>>,\n          );",
+          "          record.published = ownershipLost(runId, fence) as unknown as Readonly<\n            Record<string, unknown>\n          >;\n          record.resolve(record.published);",
         after: "          record.settled = false;",
+      },
+    ],
+  },
+  {
+    id: "r/durable-run-starts-without-a-leaf-sandbox",
+    category: "sandbox",
+    mechanism: "a durable run launches even when the runtime cannot install the leaf sandbox, so leaves run with the operator policy unenforced",
+    focus: { file: serviceTests, test: "cannot install the leaf sandbox" },
+    edits: [
+      {
+        file: service,
+        before: "    if (install === undefined) {\n      this.heartbeat?.stop(runId);",
+        after: "    if (false as boolean) {\n      this.heartbeat?.stop(runId);",
+      },
+    ],
+  },
+  {
+    id: "s/superseded-stretch-keeps-granting",
+    category: "sandbox",
+    mechanism: "an older acquisition's leaf wrapper keeps granting capability after a newer acquisition owns the run",
+    focus: { file: serviceTests, test: "installs one sandbox per ACQUISITION" },
+    edits: [
+      {
+        file: service,
+        before: "      if (stretch === undefined || stretch.stretchId !== stretchId) {",
+        after: "      if (stretch === undefined) {",
+      },
+    ],
+  },
+  {
+    id: "t/registry-guard-removed",
+    category: "launch",
+    mechanism: "a second engine starts on a run that is still live in this process",
+    focus: { file: serviceTests, test: "falls to the registry guard" },
+    edits: [
+      {
+        file: service,
+        before: "    if (isLive(liveHere)) {\n      return Object.freeze({\n        error:\n          `workflow run '${runId}' has not finished",
+        after: "    if (false as boolean) {\n      return Object.freeze({\n        error:\n          `workflow run '${runId}' has not finished",
+      },
+    ],
+  },
+  {
+    id: "u/release-ignores-whose-lease-it-is",
+    category: "terminal",
+    mechanism: "a finished stretch releases by (run, holder) without checking the fence, deleting a newer acquisition's lease",
+    focus: { file: serviceTests, test: "never lends it the new fence" },
+    edits: [
+      {
+        file: service,
+        before: "        if (Number(store.locks.runFenceOf(runId) ?? -1) === fence) {\n          store.locks.releaseRunLease(runId, store.holder);\n        }\n        this.fenceMemory.forget(fenceKey);\n        sandboxHandle.dispose(); // only THIS acquisition's installation",
+        after: "        store.locks.releaseRunLease(runId, store.holder);\n        this.fenceMemory.forget(fenceKey);\n        sandboxHandle.dispose(); // only THIS acquisition's installation",
+      },
+    ],
+  },
+  {
+    id: "v/status-rebuilds-success-after-ownership-loss",
+    category: "terminal",
+    mechanism: "status ignores what the run published and rebuilds success from the engine's own outcome",
+    focus: { file: serviceTests, test: "no channel reports success" },
+    edits: [
+      {
+        file: service,
+        before: "      if (record.settled && record.published !== null) return record.published;\n",
+        after: "",
+      },
+    ],
+  },
+  {
+    id: "w/ownerless-cancel-demands-a-virgin-fence",
+    category: "cancel",
+    mechanism: "the ownerless write also demands no fence above the presented -1, which every acquired run fails forever",
+    focus: { file: repositoryTests, test: "ownerless cancel lands once the lease is gone" },
+    edits: [
+      {
+        file: repository,
+        before: "         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?\n         WHERE NOT EXISTS (\n           SELECT 1 FROM workflow_run_locks WHERE run_id = ? AND expires_at > ?\n         )`;",
+        after: "         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?\n         WHERE NOT EXISTS (\n           SELECT 1 FROM workflow_run_fence WHERE run_id = ? AND fence > -1\n         )\n         AND NOT EXISTS (\n           SELECT 1 FROM workflow_run_locks WHERE run_id = ? AND expires_at > ?\n         )`;",
+      },
+      {
+        file: repository,
+        before: "        fields.updatedAt,\n        runId,\n        fields.now,\n      ];",
+        after: "        fields.updatedAt,\n        runId,\n        runId,\n        fields.now,\n      ];",
+      },
+    ],
+  },
+  {
+    id: "x/containment-resolves-only-the-parent",
+    category: "sandbox",
+    mechanism: "containment resolves the target or its immediate parent, so a link escapes when neither exists yet",
+    focus: { file: sandboxTests, test: "neither the target NOR its parent exists" },
+    edits: [
+      {
+        file: sandbox,
+        before: "  const resolvedRoot = resolvedAgainstFilesystem(root);\n  const candidate = resolvedAgainstFilesystem(target);",
+        after: "  const resolvedRoot = resolvedAgainstFilesystem(root);\n  const candidate = existsSync(target)\n    ? realpathSync(target)\n    : existsSync(dirname(target))\n      ? resolve(realpathSync(dirname(target)), basename(target))\n      : resolve(target);",
+      },
+    ],
+  },
+  {
+    id: "y/quota-pause-drops-retry-after",
+    category: "auto-resume",
+    mechanism: "the provider's retry_after never reaches the pause payload, so the retry falls back to the backoff curve",
+    focus: { file: serviceTests, test: "not at the backoff curve" },
+    edits: [
+      {
+        file: engine,
+        before: "      retryAfter === null ? null : { retry_after: retryAfter },\n    );",
+        after: "    );",
+      },
+    ],
+  },
+  {
+    id: "z/runandwait-waits-on-the-settled-stretch",
+    category: "resume",
+    mechanism: "a resume's waiter prefers the record the previous stretch already settled",
+    focus: { file: serviceTests, test: "waits for the NEW stretch" },
+    edits: [
+      {
+        file: service,
+        before: "    const started = this.start(spec, args, options);\n    if (\"error\" in started) return started;\n    const target = this.runs.get(started.run_id);",
+        after: "    const previous = this.runs.get(options.resumeRunId ?? \"\");\n    const started = this.start(spec, args, options);\n    if (\"error\" in started) return started;\n    const target = previous ?? this.runs.get(started.run_id);",
+      },
+    ],
+  },
+  {
+    id: "aa/progress-never-persisted",
+    category: "durable-line",
+    mechanism: "the durable line stores no progress, so a cold reader loses it",
+    focus: { file: serviceTests, test: "progress is persisted for a cold reader" },
+    edits: [
+      {
+        file: service,
+        before: "  return progress.total > 0 ? JSON.stringify(progress) : null;",
+        after: "  void progress;\n  return null;",
+      },
+    ],
+  },
+  {
+    id: "ab/taint-frozen-before-the-leaves-run",
+    category: "sandbox",
+    mechanism: "the terminal line records the taint read before the engine started, losing taint a leaf picked up",
+    focus: { file: serviceTests, test: "carries the OPERATOR policy, not the spec" },
+    edits: [
+      {
+        file: service,
+        before: "        const taintedNow = tainted || this.taintTracker.tainted;",
+        after: "        const taintedNow = tainted;",
       },
     ],
   },

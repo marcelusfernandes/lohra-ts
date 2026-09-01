@@ -230,6 +230,52 @@ describe("workflow repository — owned writes demand live ownership", () => {
     close();
   });
 
+  it("ownerless cancel lands once the lease is gone, and is refused while one is live", () => {
+    // The fence deliberately OUTLIVES the release, so an ownerless write must
+    // ask "does anybody hold this run right now", never "was it ever held".
+    const { repository, locks, close } = repo();
+    const fence = locks.acquireRunLease("cancel-me", "p1", 1000, 900);
+    if (fence === null) throw new Error("expected lease token");
+    expect(writeState(repository, "cancel-me", { fence, holder: "p1", now: 1000 }, "complete")).toBe(true);
+
+    const cancel = (now: number): boolean =>
+      repository.putRunState("cancel-me", {
+        name: "n", owner: null, status: "cancelled", pauseReason: null,
+        pausePayloadJson: null, specJson: null, argsJson: "{}", tokenBudget: null,
+        tainted: false, progressJson: null, auditSegmentId: null,
+        updatedAt: now, fence: null, holder: null, now, requireUnleased: true,
+      });
+
+    // a live lease refuses it
+    expect(cancel(1000)).toBe(false);
+    expect(repository.getRunState("cancel-me")?.status).toBe("complete");
+    // released: the fence row survives at >= 1, and the cancel must still land
+    expect(locks.releaseRunLease("cancel-me", "p1")).toBe(true);
+    expect(locks.runFenceOf("cancel-me")).toBe(fence);
+    expect(locks.runLeaseExpiry("cancel-me", 1001)).toBeNull();
+    expect(cancel(1001)).toBe(true);
+    expect(repository.getRunState("cancel-me")?.status).toBe("cancelled");
+    close();
+  });
+
+  it("ownerless cancel lands after the lease EXPIRES without a release", () => {
+    const { repository, locks, close } = repo();
+    const fence = locks.acquireRunLease("expired-run", "p1", 1000, 50);
+    if (fence === null) throw new Error("expected lease token");
+    expect(writeState(repository, "expired-run", { fence, holder: "p1", now: 1000 })).toBe(true);
+    const cancel = (now: number): boolean =>
+      repository.putRunState("expired-run", {
+        name: "n", owner: null, status: "cancelled", pauseReason: null,
+        pausePayloadJson: null, specJson: null, argsJson: "{}", tokenBudget: null,
+        tainted: false, progressJson: null, auditSegmentId: null,
+        updatedAt: now, fence: null, holder: null, now, requireUnleased: true,
+      });
+    expect(cancel(1010)).toBe(false); // lease still live
+    expect(cancel(1051)).toBe(true); // TTL passed
+    expect(repository.getRunState("expired-run")?.status).toBe("cancelled");
+    close();
+  });
+
   it("stores combined cache+cost in one transaction: priced or absent", () => {
     const { repository, locks, close } = repo();
     const first = owned(locks.acquireRunLease("run", "p1", 1000, 50), "p1", 1000);

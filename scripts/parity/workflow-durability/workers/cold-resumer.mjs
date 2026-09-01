@@ -6,6 +6,7 @@
 // and proves the corpse can no longer write.
 //
 //   usage: cold-resumer.mjs <db> <runId> <holder> <now> <ttl> <deadFence> <deadHolder>
+import { join } from "node:path";
 import process from "node:process";
 
 import { openStateDatabase } from "../../../../dist/state/index.js";
@@ -22,12 +23,65 @@ const connection = openStateDatabase(db);
 const repository = new WorkflowRepository(connection.database);
 const locks = new LockRepository(connection.database);
 const clock = { now: Number(now) };
+const home = join(db, "..", "home");
+
+/**
+ * The evidence runtime really sandboxes its leaves: one installation per
+ * acquisition (keyed by fence), and the leaf's tool calls go through the
+ * wrapper the service installed for that acquisition. A no-op here would prove
+ * nothing, so the leaf below actually runs tools and the outcomes are reported.
+ */
+function leafSandboxSupport() {
+  const installed = new Map();
+  const disposed = [];
+  const observed = [];
+  const base = (name, args) => {
+    observed.push({ name, allowed: true, path: args.path ?? null });
+    return `allowed:${name}`;
+  };
+  return {
+    install(installation) {
+      installed.set(installation.fence, installation.wrap(base));
+      return {
+        dispose: () => {
+          installed.delete(installation.fence);
+          disposed.push(installation.fence);
+        },
+      };
+    },
+    runLeafTool(fence, name, args) {
+      const dispatch = installed.get(fence);
+      if (dispatch === undefined) return "NO-SANDBOX-INSTALLED";
+      const out = dispatch(name, args);
+      if (out.startsWith("ERROR: ")) observed.push({ name, allowed: false, denial: out });
+      return out;
+    },
+    installedFences: () => [...installed.keys()],
+    disposedFences: () => [...disposed],
+    observed: () => observed,
+  };
+}
+
+const sandbox = leafSandboxSupport();
+const leafToolOutcomes = [];
 const spawned = [];
 
 const runtime = {
+  installLeafSandbox: (installation) => sandbox.install(installation),
   spawn(request) {
     const node = request.causalContext.nodePath.at(-1) ?? "";
     spawned.push(node);
+    const fence = Number(locks.runFenceOf(runId) ?? -1);
+    const root = service.workingRootFor(runId);
+    leafToolOutcomes.push({
+      node,
+      // the NEW acquisition's working root is named by ITS fence, so a leaf of
+      // this stretch writing there is allowed while the dead one's is not
+      inside: sandbox.runLeafTool(fence, "write_file", { path: join(root, "leaf.txt") }),
+      deadStretchRoot: sandbox.runLeafTool(fence, "write_file", {
+        path: join(home, "runs", runId, `work-${deadFence}`, "leaf.txt"),
+      }),
+    });
     return `leaf-${node}`;
   },
   collect: () => ({
@@ -42,6 +96,7 @@ const runtime = {
 const before = repository.getRunState(runId) ?? {};
 const service = new WorkflowService({
   runtime,
+  homeRoot: home,
   timerFactory: () => ({ cancel: () => undefined }),
   store: {
     repository,
@@ -94,6 +149,8 @@ process.stdout.write(
     fenceAfter: fenceAfter === null ? null : Number(fenceAfter),
     // 'a' replayed from its durable cell; only the in-flight 'b' re-executed
     spawned,
+    sandboxDisposedFences: sandbox.disposedFences(),
+    leafToolOutcomes,
     faults: Array.isArray(result.faults) ? result.faults : [],
     lineFaults,
     lateWrites,

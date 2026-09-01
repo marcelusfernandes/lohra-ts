@@ -40,6 +40,12 @@ class Repository {
 
 class ChildRuntime {
   requests = [];
+  installed = new Map();
+  /** The durable path REQUIRES this: a runtime without it cannot launch. */
+  installLeafSandbox(installation) {
+    this.installed.set(installation.fence, installation.wrap((name) => `allowed:${name}`));
+    return { dispose: () => { this.installed.delete(installation.fence); } };
+  }
   spawn(request) { this.requests.push(request); return `leaf-${String(this.requests.length)}`; }
   collect() {
     return {

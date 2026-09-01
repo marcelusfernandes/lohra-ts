@@ -99,6 +99,27 @@ describe("sandboxDispatch — fs", () => {
     );
   });
 
+  it("a link escapes even when neither the target NOR its parent exists yet", () => {
+    // The create case the parent-only rule missed: `<root>/link/a/b/c.txt` has
+    // no existing target and no existing parent, so resolving only the parent
+    // fell back to the lexical path — which still starts with the root.
+    const root = realWorkspace();
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), "lohra-outside-")));
+    symlinkSync(outside, join(root, "link"), "dir");
+    const dispatch = sandboxDispatch(base, { workingRoot: root, policy: { fsAllow: [], egressAllow: [] }, tainted: false });
+    const denial = "ERROR: path is outside the workflow working scope (sandbox denied)";
+    // target exists
+    writeFileSync(join(outside, "there.txt"), "x");
+    expect(dispatch("write_file", { path: join(root, "link", "there.txt") })).toBe(denial);
+    // target missing, parent (the link) exists
+    expect(dispatch("write_file", { path: join(root, "link", "new.txt") })).toBe(denial);
+    // NEITHER the target nor any of its parents below the link exist
+    expect(dispatch("write_file", { path: join(root, "link", "a", "b", "c.txt") })).toBe(denial);
+    expect(dispatch("read_file", { path: join(root, "link", "a", "b", "c.txt") })).toBe(denial);
+    // and a deep path that never leaves the root is still allowed to be created
+    expect(dispatch("write_file", { path: join(root, "a", "b", "c.txt") })).toContain("allowed");
+  });
+
   it("a working root that is itself a symlink resolves to the real path", () => {
     const root = workspace();
     const real = mkdtempSync(join(tmpdir(), "lohra-real-"));

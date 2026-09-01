@@ -4,6 +4,7 @@
 // Protocol: mkdir lock at /tmp/lohra-parity-11434.lock (never removes a
 // foreign lock, blocker after 15 min, released in finally). Zero egress.
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmdirSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -68,6 +69,32 @@ function oracleGuard(): { commit: string; porcelain: string; pinned: boolean } {
   if (commit !== ORACLE_SHA) throw new Error(`oracle HEAD is ${commit}, expected ${ORACLE_SHA}`);
   if (porcelain !== "") throw new Error(`oracle worktree is dirty:\n${porcelain}`);
   return { commit, porcelain, pinned: true };
+}
+
+/**
+ * Manifest `normalizations` apply to the COMPARISON; the evidence file keeps
+ * what was captured. The captured tool messages carry the run's generated id,
+ * so the two chat artifacts hashed differently on every run even though the
+ * verdict was stable. The rule is declared in the record, applied to the
+ * delivered file, and narrow enough that nothing else (the oracle SHA, for one)
+ * is touched.
+ */
+const RUN_ID_RULE = {
+  field: "run_id",
+  kind: "replace-regex",
+  pattern: '(\\\\?"run_id\\\\?":\\s*\\\\?")([0-9a-f]{16,}|[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12})',
+  replacement: '$1<run-id>',
+  note: 'the id also appears JSON-escaped inside captured tool messages, so both quote forms match',
+} as const;
+
+function scrubGeneratedIds(path: string): string {
+  const before = readFileSync(path, "utf8");
+  const after = before.replaceAll(
+    /(\\?"run_id\\?":\s*\\?")([0-9a-f]{16,}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})/g,
+    "$1<run-id>",
+  );
+  if (after !== before) writeFileSync(path, after, "utf8");
+  return createHash("sha256").update(after, "utf8").digest("hex");
 }
 
 function sleep(ms: number): Promise<void> {
@@ -233,7 +260,10 @@ try {
     const evidence = JSON.parse(readFileSync(evidencePath, "utf8")) as ChatEvidence;
     if (evidence.verdict !== "match")
       throw new Error(`chat probe ${id} diverged: ${evidence.verdict ?? "missing"}`);
-    return { id, evidence: evidencePath, verdict: evidence.verdict, exitCode };
+    // Reproducible artifact: the generated run id is normalized in the file we
+    // deliver, and its digest goes into this record so drift is visible here.
+    const digest = scrubGeneratedIds(evidencePath);
+    return { id, evidence: evidencePath, verdict: evidence.verdict, exitCode, digest };
   });
 
   const oracleAfter = oracleGuard();
@@ -251,6 +281,7 @@ try {
       guard: { before: oracleBefore, after: oracleAfter },
     },
     bilateral: { match: bilateralMatch, compared },
+    normalizations: [RUN_ID_RULE],
     planted,
     chat: chats,
     lock: {

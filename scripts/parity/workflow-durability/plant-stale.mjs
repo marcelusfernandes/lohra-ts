@@ -170,7 +170,34 @@ const resumerIo = reader(resumer);
 const resumeResult = await resumerIo.next();
 await resumerIo.exit();
 
+// The leaves of the killed owner really ran tools through the sandbox the
+// service installed for THAT acquisition: inside its own scratch root allowed,
+// outside every root denied with the exact sentence.
+const sandboxEnforced =
+  Array.isArray(landed.leafToolOutcomes) &&
+  landed.leafToolOutcomes.length > 0 &&
+  landed.leafToolOutcomes.every(
+    (outcome) =>
+      outcome.inside === "allowed:write_file" &&
+      outcome.outside === "ERROR: path is outside the workflow working scope (sandbox denied)",
+  ) &&
+  JSON.stringify(landed.sandboxInstalledFences) === JSON.stringify([landed.fence]);
+
+const resumeSandboxEnforced =
+  Array.isArray(resumeResult.leafToolOutcomes) &&
+  resumeResult.leafToolOutcomes.length > 0 &&
+  resumeResult.leafToolOutcomes.every(
+    (outcome) =>
+      outcome.inside === "allowed:write_file" &&
+      // the DEAD acquisition's working root is not this one's
+      outcome.deadStretchRoot ===
+        "ERROR: path is outside the workflow working scope (sandbox denied)",
+  );
+
 const crash = {
+  sandboxEnforced,
+  resumeSandboxEnforced,
+  installedFences: landed.sandboxInstalledFences,
   killedSignal: killed.signal,
   killedFence: landed.fence,
   resumerIsANewProcess: resumeResult.pid !== landed.pid,
@@ -204,6 +231,8 @@ const ok =
   race.winnerFenceIsFirst &&
   liveOwner.writersRanInDistinctProcesses &&
   crash.resumerIsANewProcess &&
+  crash.sandboxEnforced &&
+  crash.resumeSandboxEnforced &&
   race.losersCarryNoFence &&
   liveOwner.ownerAliveDuringWrites &&
   liveOwner.allRefused &&

@@ -9,7 +9,13 @@ import { classifyProviderError, RateLimitError } from "../src/transports/errors.
 import { SqliteWorkflowCache } from "../src/workflow/sqlite-cache.js";
 import { TaintTracker } from "../src/workflow/sandbox.js";
 import { WorkflowService } from "../src/workflow/service.js";
-import type { ChildResult, ChildRuntime } from "../src/workflow/runtime.js";
+import type {
+  ChildResult,
+  ChildRuntime,
+  LeafSandboxHandle,
+  LeafSandboxInstallation,
+  LeafToolDispatch,
+} from "../src/workflow/runtime.js";
 import type { Usage } from "../src/pricing/types.js";
 
 const roots: string[] = [];
@@ -18,7 +24,7 @@ afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop() as string, { recursive: true, force: true });
 });
 
-function runtimeStub(output: unknown = { answer: "ok" }): ChildRuntime & { calls: number; releaseFirst(): void } {
+function runtimeStub(output: unknown = { answer: "ok" }): ChildRuntime & { calls: number; releaseFirst(): void; release(): void } & LeafSandboxed {
   const leaves = new Map<string, ChildResult>();
   let seq = 0;
   let release: (() => void) | null = null;
@@ -40,6 +46,10 @@ function runtimeStub(output: unknown = { answer: "ok" }): ChildRuntime & { calls
           release = res;
         });
       }
+    },
+    /** Let the blocked first leaf finish. */
+    release(): void {
+      release?.();
     },
     spawn() {
       seq += 1;
@@ -65,7 +75,83 @@ function runtimeStub(output: unknown = { answer: "ok" }): ChildRuntime & { calls
       return undefined;
     },
   };
-  return runtime;
+  return withLeafSandbox(runtime);
+}
+
+
+/**
+ * A reference `ChildRuntime` that really sandboxes its leaves. It keeps ONE
+ * installation per acquisition, keyed by that acquisition's fence, and every
+ * leaf tool call runs through the wrapper the service installed for it — so
+ * these tests exercise enforcement, not a no-op that merely accepts the call.
+ */
+interface LeafSandboxed {
+  /** Run a leaf tool through the wrapper installed for `fence`. */
+  leafTool(fence: number, name: string, args: Readonly<Record<string, unknown>>): string;
+  retiredTool(fence: number, name: string, args: Readonly<Record<string, unknown>>): string;
+  installedFences(): readonly number[];
+  disposedFences(): readonly number[];
+  baseCalls(): readonly string[];
+}
+
+function withLeafSandbox<T extends ChildRuntime>(runtime: T): T & LeafSandboxed {
+  const installed = new Map<number, LeafToolDispatch>();
+  const retired = new Map<number, LeafToolDispatch>();
+  const disposed: number[] = [];
+  const seen: string[] = [];
+  const base: LeafToolDispatch = (name) => {
+    seen.push(name);
+    return `allowed:${name}`;
+  };
+  return Object.assign(runtime, {
+    installLeafSandbox(installation: LeafSandboxInstallation): LeafSandboxHandle {
+      installed.set(installation.fence, installation.wrap(base));
+      return {
+        dispose: () => {
+          // ONLY this acquisition's installation
+          const dispatch = installed.get(installation.fence);
+          if (dispatch !== undefined) retired.set(installation.fence, dispatch);
+          installed.delete(installation.fence);
+          disposed.push(installation.fence);
+        },
+      };
+    },
+    leafTool(fence: number, name: string, args: Readonly<Record<string, unknown>>): string {
+      const dispatch = installed.get(fence);
+      if (dispatch === undefined) throw new Error(`no leaf sandbox installed for fence ${String(fence)}`);
+      return dispatch(name, args);
+    },
+    /** A wrapper from an acquisition that has already ended. */
+    retiredTool(fence: number, name: string, args: Readonly<Record<string, unknown>>): string {
+      const dispatch = retired.get(fence);
+      if (dispatch === undefined) throw new Error(`no retired sandbox for fence ${String(fence)}`);
+      return dispatch(name, args);
+    },
+    installedFences: (): readonly number[] => [...installed.keys()].sort((a, b) => a - b),
+    disposedFences: (): readonly number[] => [...disposed],
+    baseCalls: (): readonly string[] => [...seen],
+  });
+}
+
+
+/** A runtime whose single leaf genuinely stays in flight until released. */
+function gatedRuntime() {
+  let open!: () => void;
+  const gate = new Promise<void>((resolveGate) => { open = resolveGate; });
+  return withLeafSandbox({
+    spawn: (): string => "leaf-1",
+    collect: async (): Promise<ChildResult> => {
+      await gate;
+      return {
+        status: "complete",
+        output: { answer: "ok" },
+        usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+      };
+    },
+    steer: (): void => undefined,
+    cancel: (): void => undefined,
+    release: (): void => { open(); },
+  });
 }
 
 function spec(): Record<string, unknown> {
@@ -264,7 +350,7 @@ describe("workflow service durability", () => {
         timers.push(timer);
         return { cancel: () => { timer.cancelled = true; } };
       };
-      const successRuntime = {
+      const successRuntime = withLeafSandbox({
         spawned: 0,
         spawn(): string { this.spawned += 1; return `leaf-${String(this.spawned)}`; },
         collect(): { status: "complete"; output: unknown; usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number } } {
@@ -272,8 +358,8 @@ describe("workflow service durability", () => {
         },
         steer(): void {},
         cancel(): void {},
-      };
-      const quotaRuntime = {
+      });
+      const quotaRuntime = withLeafSandbox({
         spawned: 0,
         spawn(): string { this.spawned += 1; return `leaf-${String(this.spawned)}`; },
         collect(): { status: "failed"; output: null; usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number }; errorKind: string; retryAfter: number } {
@@ -281,7 +367,7 @@ describe("workflow service durability", () => {
         },
         steer(): void {},
         cancel(): void {},
-      };
+      });
       const budgetService = new WorkflowService({
         runtime: successRuntime,
         store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
@@ -338,7 +424,7 @@ describe("workflow service durability", () => {
       const repository = new WorkflowRepository(connection.database);
       const locks = new LockRepository(connection.database);
       const ownership = { fence: 0 as number, holder: "test", now: 1000 };
-      const runtime = {
+      const runtime = withLeafSandbox({
         spawned: 0,
         spawn(): string { this.spawned += 1; return `leaf-${String(this.spawned)}`; },
         collect(): { status: "complete"; output: unknown; usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number } } {
@@ -350,7 +436,7 @@ describe("workflow service durability", () => {
         },
         steer(): void {},
         cancel(): void {},
-      };
+      });
       const service = new WorkflowService({
         runtime,
         store: {
@@ -462,7 +548,7 @@ describe("workflow service durability", () => {
       const repository = new WorkflowRepository(connection.database);
       const locks = new LockRepository(connection.database);
       const ownership = { fence: 0 as number, holder: "test", now: 1000 };
-      const runtime: ChildRuntime = {
+      const runtime: ChildRuntime = withLeafSandbox({
         spawn(): string {
           // the leaf outlives the lease: TTL 900 from 1000, and it is now 1901
           ownership.now = 1000 + 901;
@@ -475,7 +561,7 @@ describe("workflow service durability", () => {
         }),
         steer: () => undefined,
         cancel: () => undefined,
-      };
+      });
       const service = new WorkflowService({
         runtime,
         // no live timers: a heartbeat renewal would be a second variable
@@ -497,6 +583,76 @@ describe("workflow service durability", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("a second acquisition of the same run by the same holder never lends it the new fence", async () => {
+    // The reproduced R2 failure: after the lease expired the SAME holder took
+    // fence 2 while the first stretch was still in flight. The old stretch then
+    // presented fence 2, wrote `complete`, and released the live stretch's
+    // lease. Its own fence is 1 and it must stay there.
+    const root = mkdtempSync(join(tmpdir(), "lohra-service-durability-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      const repository = new WorkflowRepository(connection.database);
+      const locks = new LockRepository(connection.database);
+      const clock = { now: 1000 };
+      const store = () => ({
+        repository, locks, holder: "same-holder", ttl: 10,
+        ownershipOf: () => ({ fence: 0, holder: "same-holder", now: clock.now }),
+        database: connection.database,
+      });
+      const timers = { cancel: () => undefined };
+      const first = gatedRuntime(); // its leaf genuinely stays in flight
+      // two SERVICES, one holder name — the same shape as two processes
+      const oldService = new WorkflowService({ runtime: first, idSource: () => "same-run", timerFactory: () => timers, store: store() });
+      const started = oldService.start(spec());
+      if ("error" in started) throw new Error(started.error);
+      expect(locks.runFenceOf("same-run")).toBe(1);
+
+      clock.now = 1011; // the first stretch's lease (TTL 10) has expired
+      const second = gatedRuntime(); // stays in flight, so it keeps holding the lease
+      const newService = new WorkflowService({ runtime: second, idSource: () => "same-run", timerFactory: () => timers, store: store() });
+      const resumed = newService.start(null, {}, { resumeRunId: "same-run" });
+      if ("error" in resumed) throw new Error(resumed.error);
+      expect(locks.runFenceOf("same-run")).toBe(2);
+      const liveExpiry = locks.runLeaseExpiry("same-run", clock.now);
+      expect(liveExpiry).toBe(1021);
+
+      // now let ONLY the old stretch finish
+      first.release();
+      const oldOutcome = (await oldService.status("same-run", true)) as Record<string, unknown>;
+      // it presented its own fence 1, which is stale: refused, fail-closed
+      expect(oldOutcome).toMatchObject({ error: "workflow ownership lost", cause: "STALE_FENCE_WRITE", fence: 1 });
+      // it did NOT write a terminal status over the live stretch's line
+      expect((repository.getRunState("same-run") as Record<string, unknown>).status).toBe("running");
+      // and it did NOT release the live stretch's lease
+      expect(locks.runLeaseExpiry("same-run", clock.now)).toBe(liveExpiry);
+      connection.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("a run that is live in THIS process falls to the registry guard, taking no lease", async () => {
+    const { service, repository, locks, runtime, close } = harness();
+    runtime.releaseFirst();
+    const started = service.start(spec());
+    if ("error" in started) throw new Error(started.error);
+    const fenceBefore = locks.runFenceOf(started.run_id);
+    const clash = service.start(null, {}, { resumeRunId: started.run_id });
+    expect(clash).toMatchObject({
+      error:
+        `workflow run '${started.run_id}' has not finished (status: running); ` +
+        "wait for it (workflow_status) or cancel it before resuming",
+    });
+    // the refusal acquired nothing: the fence did not move
+    expect(locks.runFenceOf(started.run_id)).toBe(fenceBefore);
+    expect((repository.getRunState(started.run_id) as Record<string, unknown>).status).toBe("running");
+    // let the live stretch finish before the connection goes away
+    runtime.release();
+    await service.status(started.run_id, true);
+    close();
   });
 
   it("a refused terminal write publishes NO done event and no terminal line", async () => {
@@ -537,6 +693,143 @@ describe("workflow service durability", () => {
     }
   });
 
+  it("after ownership loss, status and list keep saying so — no channel reports success", async () => {
+    // R2: the waiter got the envelope, but a LATER status rebuilt success from
+    // the engine's own outcome and list reported `complete`, while the durable
+    // line still said `running`. One published answer, read by every channel.
+    const { service, locks, runtime, close, repository } = harness();
+    runtime.releaseFirst();
+    const started = service.start(spec());
+    if ("error" in started) throw new Error(started.error);
+    connection_expireLease(started.run_id);
+    expect(locks.acquireRunLease(started.run_id, "thief", 1000, 900)).not.toBeNull();
+    const waiter = (await service.status(started.run_id, true)) as Record<string, unknown>;
+    expect(waiter.error).toBe("workflow ownership lost");
+    // asking again, later, must not turn it into a success
+    const later = (await service.status(started.run_id)) as Record<string, unknown>;
+    expect(later.error).toBe("workflow ownership lost");
+    expect(later.status).toBeUndefined();
+    const listed = service.list().find((entry) => entry.run_id === started.run_id);
+    expect(listed?.status).toBe("ownership_lost");
+    expect((repository.getRunState(started.run_id) as Record<string, unknown>).status).toBe("running");
+    close();
+  });
+
+  it("arms the retry at the provider's retry_after, not at the backoff curve", async () => {
+    // 137 is deliberately a value the exponential backoff never produces, so
+    // the assertion cannot pass by arithmetic coincidence.
+    const root = mkdtempSync(join(tmpdir(), "lohra-service-durability-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      const repository = new WorkflowRepository(connection.database);
+      const locks = new LockRepository(connection.database);
+      const ownership = { fence: 0 as number, holder: "test", now: 1000 };
+      const armed: number[] = [];
+      const runtime = withLeafSandbox({
+        spawn: (): string => "leaf-1",
+        collect: (): ChildResult => ({
+          status: "failed",
+          output: null,
+          usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+          errorKind: "quota_exhausted",
+          retryAfter: 137,
+        }),
+        steer: (): void => undefined,
+        cancel: (): void => undefined,
+      });
+      const service = new WorkflowService({
+        runtime,
+        // heartbeat interval is ttl/3 = 300; the retry must be distinguishable
+        timerFactory: (delay) => { armed.push(delay); return { cancel: () => undefined }; },
+        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+      });
+      const started = service.start(spec());
+      if ("error" in started) throw new Error(started.error);
+      const final = (await service.status(started.run_id, true)) as Record<string, unknown>;
+      expect(final.pause_reason).toBe("quota_exhausted");
+      expect((final.checkpoint as Record<string, unknown>).retry_after).toBe(137);
+      // 137 is neither the heartbeat (300) nor any backoff step (60,120,240,…)
+      expect(armed).toContain(137);
+      const payload = JSON.parse(
+        String((repository.getRunState(started.run_id) as Record<string, unknown>).pause_payload_json),
+      ) as { resume_at: number | null };
+      expect(payload.resume_at).toBe(137);
+      connection.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("runAndWait on a resume waits for the NEW stretch, not the settled one", async () => {
+    const { service, repository, close } = harness();
+    const checkpointSpec = {
+      meta: { name: "cp" },
+      nodes: [{ id: "cp1", type: "checkpoint", prompt: "answer?", default: "yes" }],
+    };
+    const started = service.start(checkpointSpec);
+    if ("error" in started) throw new Error(started.error);
+    const first = (await service.status(started.run_id, true)) as Record<string, unknown>;
+    expect(first.status).toBe("paused");
+    // resume takes the checkpoint's default and completes; the waiter must see
+    // THAT, not the paused answer the previous stretch already settled with
+    const resumed = (await service.runAndWait(null, {}, { resumeRunId: started.run_id })) as Record<string, unknown>;
+    expect(resumed.status).toBe("complete");
+    expect((repository.getRunState(started.run_id) as Record<string, unknown>).status).toBe("complete");
+    close();
+  });
+
+  it("each cached cell tops the lease up, and progress is persisted for a cold reader", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-service-durability-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      const repository = new WorkflowRepository(connection.database);
+      const locks = new LockRepository(connection.database);
+      const clock = { now: 1000 };
+      const runtime = withLeafSandbox({
+        spawn: (): string => { clock.now += 20; return `leaf-${String(clock.now)}`; },
+        collect: (): ChildResult => ({
+          status: "complete",
+          output: { answer: "ok" },
+          usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+        }),
+        steer: (): void => undefined,
+        cancel: (): void => undefined,
+      });
+      const service = new WorkflowService({
+        runtime,
+        // NO heartbeat ticks: the only thing that can keep the lease alive here
+        // is the per-cell top-up, and the run outlives the 30s TTL without it.
+        timerFactory: () => ({ cancel: () => undefined }),
+        store: {
+          repository, locks, holder: "test", ttl: 30,
+          ownershipOf: () => ({ fence: 0, holder: "test", now: clock.now }),
+          database: connection.database,
+        },
+      });
+      const started = service.start({
+        meta: { name: "long" },
+        nodes: [
+          { id: "a", type: "agent", prompt: "one" },
+          { id: "b", type: "agent", prompt: "two ${a.answer}" },
+          { id: "c", type: "agent", prompt: "three ${b.answer}" },
+        ],
+      });
+      if ("error" in started) throw new Error(started.error);
+      const final = (await service.status(started.run_id, true)) as Record<string, unknown>;
+      expect(final.status).toBe("complete");
+      const line = repository.getRunState(started.run_id) as Record<string, unknown>;
+      // progress persisted for a reader that never saw the engine
+      const progress = JSON.parse(String(line.progress_json)) as { total: number; done: number };
+      expect(progress.total).toBe(3);
+      expect(progress.done).toBe(3);
+      connection.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("evicting a run from the bounded fence memory refuses its writes fail-closed", async () => {
     // FENCE_MEMORY shrunk to 1: launching a second run forgets the first run's
     // token, and the first stretch has no honest fence left to present.
@@ -552,7 +845,7 @@ describe("workflow service durability", () => {
       const running: { service: WorkflowService | null } = { service: null };
       let evicted = false;
       let leafSeq = 0;
-      const runtime: ChildRuntime = {
+      const runtime = withLeafSandbox<ChildRuntime>({
         spawn(): string {
           const owner = running.service;
           if (!evicted && owner !== null) {
@@ -570,7 +863,7 @@ describe("workflow service durability", () => {
         }),
         steer: () => undefined,
         cancel: () => undefined,
-      };
+      });
       const service = new WorkflowService({
         runtime,
         idSource: (() => { let n = 0; return () => { n += 1; return `run-${String(n)}`; }; })(),
@@ -605,7 +898,7 @@ describe("workflow service durability", () => {
       const kind = classifyProviderError(new RateLimitError("429 slow down"));
       expect(kind).toBe("quota_exhausted");
       const timers: { delay: number }[] = [];
-      const runtime = {
+      const runtime = withLeafSandbox({
         spawn: () => "leaf-1",
         collect: (): ChildResult => ({
           status: "failed",
@@ -616,7 +909,7 @@ describe("workflow service durability", () => {
         }),
         steer: () => undefined,
         cancel: () => undefined,
-      };
+      });
       const service = new WorkflowService({
         runtime,
         timerFactory: (delay) => { timers.push({ delay }); return { cancel: () => undefined }; },
@@ -706,18 +999,20 @@ describe("workflow service — leaf capability sandbox", () => {
       const locks = new LockRepository(connection.database);
       const ownership = { fence: 0 as number, holder: "test", now: 1000 };
       const tracker = new TaintTracker();
-      const seen: string[] = [];
       const results: { step: string; out: string }[] = [];
       const running: { service: WorkflowService | null } = { service: null };
       let runId = "";
       // A leaf asks for its dispatch WHILE the stretch is live — that is when
       // real leaves run, and it is the only place the acquisition's policy,
       // working root and taint are the live ones.
-      const runtime: ChildRuntime = {
+      const runtime = withLeafSandbox<ChildRuntime>({
         spawn(): string {
           const owner = running.service;
           if (owner !== null && results.length === 0) {
-            const dispatch = owner.leafToolDispatch(runId, (name) => { seen.push(name); return "OK"; });
+            // Through the wrapper the SERVICE installed on this runtime for
+            // this acquisition — the path a real leaf's tools take.
+            const dispatch = (name: string, args: Readonly<Record<string, unknown>>): string =>
+              runtime.leafTool(1, name, args);
             const workingRoot = owner.workingRootFor(runId);
             mkdirSync(workingRoot, { recursive: true });
             const step = (label: string, out: string): void => { results.push({ step: label, out }); };
@@ -741,7 +1036,7 @@ describe("workflow service — leaf capability sandbox", () => {
         }),
         steer: () => undefined,
         cancel: () => undefined,
-      };
+      });
       const service = new WorkflowService({
         runtime,
         policyPath: path,
@@ -760,25 +1055,145 @@ describe("workflow service — leaf capability sandbox", () => {
       await service.status(started.run_id, true);
       expect(results).toEqual([
         // inside the run's own scratch root: allowed
-        { step: "inside-working-root", out: "OK" },
+        { step: "inside-working-root", out: "allowed:write_file" },
         // outside every root: exact denial, and the SPEC's fs_allow ["/"] did
         // not widen it — the policy is the operator file, only
         { step: "outside-every-root", out: "ERROR: path is outside the workflow working scope (sandbox denied)" },
         // under a read-only operator root: read ok, write refused with its own text
-        { step: "ro-root-read", out: "OK" },
+        { step: "ro-root-read", out: "allowed:read_file" },
         { step: "ro-root-write", out: "ERROR: path is under a read-only workflow root (sandbox denied the write)" },
         // egress: exact host match only; the spec's "*" widened nothing
         { step: "egress-denied", out: "ERROR: host is not in the workflow egress allowlist (sandbox denied)" },
         { step: "taint-before", out: "false" },
         // the allowed fetch runs AND taints the session
-        { step: "egress-allowed", out: "OK" },
+        { step: "egress-allowed", out: "allowed:web_fetch" },
         { step: "taint-after", out: "true" },
         // taint is live inside the SAME stretch: fs and egress both close
         { step: "tainted-fs", out: "ERROR: tainted run: filesystem access is disabled for leaves" },
         { step: "tainted-egress", out: "ERROR: tainted run: web egress is disabled for leaves" },
       ]);
       // a denied call never reached the base dispatch
-      expect(seen).toEqual(["write_file", "read_file", "web_fetch"]);
+      expect(runtime.baseCalls()).toEqual(["write_file", "read_file", "web_fetch"]);
+      // and the taint the leaf picked up landed on THIS stretch's durable row
+      expect(Number((repository.getRunState(started.run_id) as Record<string, unknown>).tainted)).toBe(1);
+      connection.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to launch a durable run when the runtime cannot install the leaf sandbox", async () => {
+    // Fail-closed: no lease is kept, no line is written, and nothing spawns.
+    const root = mkdtempSync(join(tmpdir(), "lohra-service-sandbox-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      const repository = new WorkflowRepository(connection.database);
+      const locks = new LockRepository(connection.database);
+      const ownership = { fence: 0 as number, holder: "test", now: 1000 };
+      let spawns = 0;
+      const bare: ChildRuntime = {
+        spawn: () => { spawns += 1; return "leaf-1"; },
+        collect: (): ChildResult => ({ status: "complete", output: null }),
+        steer: () => undefined,
+        cancel: () => undefined,
+      };
+      const service = new WorkflowService({
+        runtime: bare,
+        timerFactory: () => ({ cancel: () => undefined }),
+        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+      });
+      const started = service.start(spec());
+      expect(started).toMatchObject({
+        error: "workflow leaf sandbox unavailable",
+        cause: "LEAF_SANDBOX_UNAVAILABLE",
+      });
+      expect(spawns).toBe(0);
+      // the refused launch sat on nothing: no lease, no durable line
+      expect(locks.runLeaseExpiry("run-1", 1000)).toBeNull();
+      expect(repository.recentRunStates(10).length).toBe(0);
+      // a runtime that CAN install it launches the same spec fine
+      const sandboxed = new WorkflowService({
+        runtime: withLeafSandbox({
+          spawn: () => "leaf-1",
+          collect: (): ChildResult => ({
+            status: "complete",
+            output: { answer: "ok" },
+            usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+          }),
+          steer: () => undefined,
+          cancel: () => undefined,
+        }),
+        timerFactory: () => ({ cancel: () => undefined }),
+        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+      });
+      const ok = sandboxed.start(spec());
+      if ("error" in ok) throw new Error(ok.error);
+      const done = (await sandboxed.status(ok.run_id, true)) as Record<string, unknown>;
+      expect(done.status).toBe("complete");
+      connection.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("installs one sandbox per ACQUISITION and disposes only its own", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-service-sandbox-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      const repository = new WorkflowRepository(connection.database);
+      const locks = new LockRepository(connection.database);
+      const ownership = { fence: 0 as number, holder: "test", now: 1000 };
+      // The SECOND acquisition's leaf stays in flight, so stretch 2 is current
+      // while we ask stretch 1's retired wrapper for capability.
+      let openSecond!: () => void;
+      const secondLeaf = new Promise<void>((resolveLeaf) => { openSecond = resolveLeaf; });
+      let spawns = 0;
+      const runtime = withLeafSandbox({
+        spawn: (): string => { spawns += 1; return `leaf-${String(spawns)}`; },
+        collect: async (id: string): Promise<ChildResult> => {
+          if (id === "leaf-2") await secondLeaf;
+          return {
+            status: "complete",
+            output: { answer: "ok" },
+            usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+          };
+        },
+        steer: (): void => undefined,
+        cancel: (): void => undefined,
+      });
+      const service = new WorkflowService({
+        runtime,
+        homeRoot: root,
+        timerFactory: () => ({ cancel: () => undefined }),
+        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+      });
+      const first = service.start(spec());
+      if ("error" in first) throw new Error(first.error);
+      await service.status(first.run_id, true);
+      // fence 1 installed and then disposed — its own, by fence
+      expect(runtime.disposedFences()).toEqual([1]);
+      expect(runtime.installedFences()).toEqual([]);
+      // a second acquisition of the SAME run installs under its own fence, and
+      // stays in flight so it is the CURRENT stretch for the assertion below
+      const second = service.start(null, {}, { resumeRunId: first.run_id });
+      if ("error" in second) throw new Error(second.error);
+      expect(runtime.installedFences()).toEqual([2]);
+      // stretch 1's wrapper grants nothing now that stretch 2 owns the run —
+      // even for a path inside stretch 1's own former working root
+      mkdirSync(join(root, "runs", first.run_id, "work-1"), { recursive: true });
+      expect(runtime.retiredTool(1, "write_file", { path: join(root, "runs", first.run_id, "work-1", "x.txt") })).toBe(
+        "ERROR: workflow stretch is no longer current (sandbox denied)",
+      );
+      // stretch 2's own wrapper still works, in its own root
+      mkdirSync(join(root, "runs", first.run_id, "work-2"), { recursive: true });
+      expect(runtime.leafTool(2, "write_file", { path: join(root, "runs", first.run_id, "work-2", "x.txt") })).toBe(
+        "allowed:write_file",
+      );
+      openSecond();
+      await service.status(first.run_id, true);
+      expect(runtime.disposedFences()).toEqual([1, 2]);
       connection.close();
     } finally {
       rmSync(root, { recursive: true, force: true });

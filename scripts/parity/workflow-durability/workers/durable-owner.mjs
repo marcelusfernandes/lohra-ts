@@ -6,6 +6,9 @@
 // half a run finished.
 //
 //   usage: durable-owner.mjs <db> <runId> <holder> <now> <ttl>
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import process from "node:process";
 import { clearInterval, setInterval } from "node:timers";
 
@@ -23,14 +26,64 @@ const connection = openStateDatabase(db);
 const repository = new WorkflowRepository(connection.database);
 const locks = new LockRepository(connection.database);
 const clock = { now: Number(now) };
+const workspaceOutside = mkdtempSync(join(tmpdir(), "lohra-t16-outside-"));
 
+
+/**
+ * The evidence runtime really sandboxes its leaves: one installation per
+ * acquisition (keyed by fence), and the leaf's tool calls go through the
+ * wrapper the service installed for that acquisition. A no-op here would prove
+ * nothing, so the leaf below actually runs tools and the outcomes are reported.
+ */
+function leafSandboxSupport() {
+  const installed = new Map();
+  const disposed = [];
+  const observed = [];
+  const base = (name, args) => {
+    observed.push({ name, allowed: true, path: args.path ?? null });
+    return `allowed:${name}`;
+  };
+  return {
+    install(installation) {
+      installed.set(installation.fence, installation.wrap(base));
+      return {
+        dispose: () => {
+          installed.delete(installation.fence);
+          disposed.push(installation.fence);
+        },
+      };
+    },
+    runLeafTool(fence, name, args) {
+      const dispatch = installed.get(fence);
+      if (dispatch === undefined) return "NO-SANDBOX-INSTALLED";
+      const out = dispatch(name, args);
+      if (out.startsWith("ERROR: ")) observed.push({ name, allowed: false, denial: out });
+      return out;
+    },
+    installedFences: () => [...installed.keys()],
+    disposedFences: () => [...disposed],
+    observed: () => observed,
+  };
+}
+
+const sandbox = leafSandboxSupport();
+const leafToolOutcomes = [];
 const nodeOfLeaf = new Map();
 let leafSeq = 0;
 const runtime = {
+  installLeafSandbox: (installation) => sandbox.install(installation),
   spawn(request) {
     leafSeq += 1;
     const id = `leaf-${String(leafSeq)}`;
     nodeOfLeaf.set(id, request.causalContext.nodePath.at(-1) ?? "");
+    // The leaf really runs tools, through the wrapper installed for the
+    // acquisition that owns this run: one inside its scratch root, one outside.
+    const fence = Number(locks.runFenceOf(runId) ?? -1);
+    const root = service.workingRootFor(runId);
+    leafToolOutcomes.push({
+      inside: sandbox.runLeafTool(fence, "write_file", { path: join(root, "leaf.txt") }),
+      outside: sandbox.runLeafTool(fence, "read_file", { path: join(workspaceOutside, "secret.txt") }),
+    });
     return id;
   },
   collect(id) {
@@ -87,6 +140,8 @@ const timer = setInterval(() => {
       runId,
       fence: fence === null ? null : Number(fence),
       leaseExpiry: locks.runLeaseExpiry(runId, clock.now),
+      sandboxInstalledFences: sandbox.installedFences(),
+      leafToolOutcomes,
     })}\n`,
   );
   // hold the lease and the half-finished run open until we are killed
