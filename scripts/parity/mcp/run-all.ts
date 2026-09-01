@@ -641,6 +641,7 @@ results.push(
               [null, "nil"],
               ["A", 1],
               ["B", "x"],
+              ["__proto__", { polluted: true }],
             ],
           },
         },
@@ -660,7 +661,7 @@ results.push(
       { name: "mcp_fix_object_desc", description: { source: "hostile-fixture" } },
     ];
     const expectedConfig =
-      'observed-config:{"name":"fix","transport":"stdio","command":"fixture-command","args":["a","b","c"],"env":{"null":"nil","A":1,"B":"x"},"url":null}';
+      'observed-config:{"name":"fix","transport":"stdio","command":"fixture-command","args":["a","b","c"],"env":{"null":"nil","A":1,"B":"x","__proto__":{"polluted":true}},"url":null}';
     const pass =
       exact(descriptionProjection(descriptions.oracle), expectedDescriptions) &&
       exact(descriptionProjection(descriptions.candidate), expectedDescriptions) &&

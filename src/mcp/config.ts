@@ -46,7 +46,12 @@ function pythonMappingFromJson(name: string, value: unknown): Readonly<Record<st
     ) {
       throw new MCPConfigError(`server ${pythonRepr(name)} field 'env' cannot construct a mapping`);
     }
-    mapping[String(key)] = pair[1];
+    Object.defineProperty(mapping, String(key), {
+      value: pair[1],
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
   }
   return mapping;
 }

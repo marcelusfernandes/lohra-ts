@@ -132,28 +132,36 @@ describe("loadMcpConfig", () => {
               [null, "nil"],
               ["A", 1],
               ["B", "x"],
+              ["__proto__", { polluted: true }],
             ],
           },
           values: { command: "npx", args: [1, 2], env: { FLAG: true } },
         },
       }),
     );
-    expect(loadMcpConfig(path)).toEqual([
-      {
-        name: "chars",
-        transport: "stdio",
-        command: "npx",
-        args: ["a", "b", "c"],
-        env: { null: "nil", A: 1, B: "x" },
-      },
-      {
-        name: "values",
-        transport: "stdio",
-        command: "npx",
-        args: [1, 2],
-        env: { FLAG: true },
-      },
-    ]);
+    const configs = loadMcpConfig(path);
+    expect(configs[0]).toMatchObject({
+      name: "chars",
+      transport: "stdio",
+      command: "npx",
+      args: ["a", "b", "c"],
+      env: { null: "nil", A: 1, B: "x" },
+    });
+    const hostileEnv = configs[0]?.env;
+    expect(hostileEnv).toBeDefined();
+    expect(Object.hasOwn(hostileEnv ?? {}, "__proto__")).toBe(true);
+    expect(hostileEnv?.["__proto__"]).toEqual({ polluted: true });
+    expect(hostileEnv?.["polluted"]).toBeUndefined();
+    expect(JSON.stringify(hostileEnv)).toBe(
+      '{"null":"nil","A":1,"B":"x","__proto__":{"polluted":true}}',
+    );
+    expect(configs[1]).toEqual({
+      name: "values",
+      transport: "stdio",
+      command: "npx",
+      args: [1, 2],
+      env: { FLAG: true },
+    });
   });
 
   it("kills accepting execution-boundary shapes: truthy non-string url/command abort the set", () => {
