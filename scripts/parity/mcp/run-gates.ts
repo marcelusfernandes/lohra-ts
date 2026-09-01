@@ -1,10 +1,24 @@
 #!/usr/bin/env node
-import { readdirSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const root = resolve(import.meta.dirname, "../../..");
 const manifests = resolve(root, "scripts/parity/scenarios");
+const gateRuntime = mkdtempSync(join(tmpdir(), "lohra-t19-gates-"));
+const gateEnv: Readonly<Record<string, string>> = {
+  PATH: process.env.PATH ?? "/usr/bin:/bin",
+  HOME: gateRuntime,
+  TMPDIR: gateRuntime,
+  LANG: "C.UTF-8",
+  TZ: "UTC",
+  NO_COLOR: "1",
+};
+
+process.once("exit", () => {
+  rmSync(gateRuntime, { recursive: true, force: true });
+});
 
 function npm(argv: readonly string[]): {
   readonly status: number | null;
@@ -13,7 +27,7 @@ function npm(argv: readonly string[]): {
 } {
   const result = spawnSync("npm", argv, {
     cwd: root,
-    env: process.env,
+    env: gateEnv,
     encoding: "utf8",
     timeout: 300_000,
     maxBuffer: 64 * 1024 * 1024,
