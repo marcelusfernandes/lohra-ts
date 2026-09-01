@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 
 import {
   deregisterServer,
@@ -45,6 +46,25 @@ async function scenario(
 
 function config(name: string): MCPServerConfig {
   return { name, transport: "stdio", command: "/bin/echo", args: [], env: {} };
+}
+
+function sourceMatches(directory: string, needle: string): readonly string[] {
+  const matches: string[] = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      matches.push(...sourceMatches(path, needle));
+      continue;
+    }
+    if (!entry.isFile() || !entry.name.endsWith(".ts")) continue;
+    const lines = readFileSync(path, "utf8").split("\n");
+    for (const [index, line] of lines.entries()) {
+      if (line.includes(needle)) {
+        matches.push(`${relative(root, path)}:${String(index + 1)}:${line.trim()}`);
+      }
+    }
+  }
+  return matches;
 }
 
 const results: ScenarioResult[] = [];
@@ -128,22 +148,11 @@ results.push(
 
 results.push(
   await scenario("t19-refresh-no-product-caller", [17, 18, "18a"], "code non-principal", () => {
-    const searched = spawnSync("rg", ["-n", "\\.refresh\\(", "src", "--glob", "*.ts"], {
-      cwd: root,
-      encoding: "utf8",
-      env: { PATH: process.env.PATH ?? "/usr/bin:/bin" },
-    });
-    if (searched.error !== undefined) {
-      throw new Error(`T19_STATIC_SCAN_FAILED:${searched.error.message}`);
-    }
-    if (searched.status !== 0 && searched.status !== 1) {
-      throw new Error(
-        `T19_STATIC_SCAN_FAILED:exit=${String(searched.status)}:stderr=${searched.stderr}`,
-      );
-    }
-    const matches = searched.stdout.split("\n").filter(Boolean);
+    // Repository-native traversal: no caller PATH/tooling dependency. Any
+    // filesystem failure throws and is surfaced by scenario() as a hard fail.
+    const matches = sourceMatches(join(root, "src"), ".refresh(");
     return {
-      pass: searched.status === 1 && matches.length === 0,
+      pass: matches.length === 0,
       projection: {
         productCallers: matches,
         liveSdkPath: "NOT_MEASURED",
