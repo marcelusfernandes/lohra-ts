@@ -322,9 +322,9 @@ const namedMutants: readonly Mutant[] = [
       {
         file: service,
         before:
-          "        store.locks.releaseRunLease(runId, store.holder);\n        this.stretches.delete(runId);\n        record.settled = true;",
+          "        store.locks.releaseRunLease(runId, store.holder);\n        this.stretches.delete(runId);\n        record.settled = true;\n        if (owned) {",
         after:
-          "        store.locks.releaseRunLease(runId, store.holder);\n        this.persistSpend(store, runId, effectiveBudget, seeded, engine, stretchOwnership());\n        this.stretches.delete(runId);\n        record.settled = true;",
+          "        store.locks.releaseRunLease(runId, store.holder);\n        this.persistSpend(store, runId, effectiveBudget, seeded, engine, stretchOwnership());\n        this.stretches.delete(runId);\n        record.settled = true;\n        if (owned) {",
       },
     ],
   },
