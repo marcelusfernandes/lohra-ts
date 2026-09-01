@@ -9,7 +9,6 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
-  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -116,49 +115,53 @@ function imageId(source: () => string): string {
   return value;
 }
 
-/**
- * Remove every pathname below the trusted parent that references an inode
- * owned by this operation. The traversal never follows symlinks, is not depth
- * limited, and deliberately does not stop at the first hardlink. That makes a
- * hook-visible relocation or alias set cleanable without deleting by name.
- */
-function removeOwnedLinks(
-  plan: OutputPlan,
-  entries: readonly { readonly dev: number; readonly ino: number }[],
-): void {
-  const ownedIdentities = new Set(
-    entries.map((entry) => `${String(entry.dev)}:${String(entry.ino)}`),
-  );
-  if (ownedIdentities.size === 0) return;
-  const pending = [plan.trustedParent];
-  const visitedDirectories = new Set<string>();
+interface OwnedPath {
+  readonly path: string;
+  readonly dev: number;
+  readonly ino: number;
+}
 
-  while (pending.length > 0) {
-    const directory = pending.pop();
-    if (directory === undefined) continue;
-    const directoryStats = lstatSync(directory);
-    if (directoryStats.isSymbolicLink() || !directoryStats.isDirectory()) continue;
-    const directoryIdentity = `${String(directoryStats.dev)}:${String(directoryStats.ino)}`;
-    if (visitedDirectories.has(directoryIdentity)) continue;
-    visitedDirectories.add(directoryIdentity);
+function sameIdentity(path: string, expected: Pick<OwnedPath, "dev" | "ino">): boolean {
+  const current = lstatSync(path);
+  return !current.isSymbolicLink() && current.dev === expected.dev && current.ino === expected.ino;
+}
 
-    for (const name of readdirSync(directory)) {
-      const candidatePath = join(directory, name);
-      let candidate: Stats;
-      try {
-        candidate = lstatSync(candidatePath);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
-        throw error;
-      }
-      if (candidate.isSymbolicLink()) continue;
-      if (candidate.isDirectory()) {
-        pending.push(candidatePath);
-        continue;
-      }
-      if (ownedIdentities.has(`${String(candidate.dev)}:${String(candidate.ino)}`))
-        rmSync(candidatePath, { force: true });
+/** Remove only exact path+inode pairs created by this operation. */
+function removeOwnedPaths(entries: readonly OwnedPath[]): readonly unknown[] {
+  const failures: unknown[] = [];
+  for (const entry of [...entries].reverse()) {
+    try {
+      if (sameIdentity(entry.path, entry)) rmSync(entry.path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") failures.push(error);
     }
+  }
+  return failures;
+}
+
+function assertRootIdentity(plan: OutputPlan, expected: Pick<Stats, "dev" | "ino">): void {
+  checkControlledRoot(plan);
+  const current = lstatSync(plan.outDir);
+  if (
+    current.isSymbolicLink() ||
+    !current.isDirectory() ||
+    current.dev !== expected.dev ||
+    current.ino !== expected.ino
+  )
+    throw new Error("output root changed after publish hook");
+}
+
+async function runPublishHooks(
+  plan: OutputPlan,
+  finals: readonly string[],
+  rootIdentity: Pick<Stats, "dev" | "ino">,
+  hook: ((index: number, path: string) => void | Promise<void>) | undefined,
+): Promise<void> {
+  for (let index = 0; index < finals.length; index += 1) {
+    const final = finals[index];
+    if (final === undefined) throw new Error("image publish index mismatch");
+    await hook?.(index, final);
+    assertRootIdentity(plan, rootIdentity);
   }
 }
 
@@ -169,7 +172,7 @@ export async function persistGeneratedImages(options: {
   readonly uuid?: () => string;
   readonly afterRootPreflight?: () => void | Promise<void>;
   readonly beforePublish?: (index: number, path: string) => void | Promise<void>;
-  readonly writeStage?: (fd: number, bytes: Buffer) => void;
+  readonly faultAfterBytes?: number;
 }): Promise<readonly string[]> {
   if (options.payloads.length > options.requested)
     throw new Error(
@@ -193,34 +196,37 @@ export async function persistGeneratedImages(options: {
   checkControlledRoot(options.plan);
   const rootIdentity = lstatSync(options.plan.outDir);
 
+  const finals = ids.map((id) => join(options.plan.outDir, `${id}.png`));
+  // Hooks are intentionally exhausted before provider bytes exist on disk.
+  // The byte-bearing phase below is synchronous and has no external callback.
+  await runPublishHooks(options.plan, finals, rootIdentity, options.beforePublish);
+
   const temps: string[] = [];
-  const finals: string[] = [];
-  const owned: Array<{ readonly dev: number; readonly ino: number }> = [];
+  const owned: OwnedPath[] = [];
   try {
     for (let index = 0; index < decoded.length; index += 1) {
       const bytes = decoded[index];
-      const id = ids[index];
-      if (bytes === undefined || id === undefined) throw new Error("image staging index mismatch");
-      const final = join(options.plan.outDir, `${id}.png`);
+      const final = finals[index];
+      if (bytes === undefined || final === undefined)
+        throw new Error("image staging index mismatch");
       const temp = join(options.plan.outDir, `.stage-${randomUUID()}.tmp`);
       if (existsSync(final)) throw new Error("image UUID collision");
       const fd = openSync(temp, "wx", 0o600);
       const staged = fstatSync(fd);
       temps.push(temp);
-      owned.push({ dev: staged.dev, ino: staged.ino });
+      owned.push({ path: temp, dev: staged.dev, ino: staged.ino });
       try {
-        (
-          options.writeStage ??
-          ((target, value) => {
-            writeFileSync(target, value);
-          })
-        )(fd, bytes);
+        if (options.faultAfterBytes === undefined) writeFileSync(fd, bytes);
+        else {
+          const written = Math.max(0, Math.min(options.faultAfterBytes, bytes.byteLength));
+          writeFileSync(fd, bytes.subarray(0, written));
+          throw new Error(`fault after ${String(written)} bytes`);
+        }
         fsyncSync(fd);
         fchmodSync(fd, IMAGE_FILE_MODE);
       } finally {
         closeSync(fd);
       }
-      finals.push(final);
     }
 
     for (let index = 0; index < temps.length; index += 1) {
@@ -228,20 +234,8 @@ export async function persistGeneratedImages(options: {
       const final = finals[index];
       if (temp === undefined || final === undefined)
         throw new Error("image publish index mismatch");
-      await options.beforePublish?.(index, final);
-      checkControlledRoot(options.plan);
-      const rootNow = lstatSync(options.plan.outDir);
-      if (
-        rootNow.isSymbolicLink() ||
-        !rootNow.isDirectory() ||
-        rootNow.dev !== rootIdentity.dev ||
-        rootNow.ino !== rootIdentity.ino
-      )
-        throw new Error("output root changed after publish hook");
-      // The hook no longer owns the stage path: revalidate identity, type,
-      // size and bytes so a swapped/symlinked/tampered stage can never be
-      // published under the provider's name, and restabilize the mode the
-      // contract requires.
+      assertRootIdentity(options.plan, rootIdentity);
+      // Revalidate the exact inode and provider bytes before publishing.
       const staged = owned[index];
       const expectedBytes = decoded[index];
       const current = lstatSync(temp);
@@ -259,27 +253,20 @@ export async function persistGeneratedImages(options: {
       chmodSync(temp, IMAGE_FILE_MODE);
       linkSync(temp, final);
       const linked = lstatSync(final);
-      owned.push({ dev: linked.dev, ino: linked.ino });
+      owned.push({ path: final, dev: linked.dev, ino: linked.ino });
       rmSync(temp);
     }
     return Object.freeze([...finals]);
   } catch (error) {
-    let parentSafe = false;
+    let cleanupFailures: readonly unknown[] = [];
     try {
       checkTrustedParent(options.plan);
-      parentSafe = true;
+      cleanupFailures = removeOwnedPaths(owned);
     } catch {
-      // Never traverse a parent whose identity is no longer trusted.
+      // Never act on paths below a parent whose identity is no longer trusted.
     }
-    if (parentSafe) {
-      try {
-        removeOwnedLinks(options.plan, owned);
-      } catch {
-        throw new Error("image cleanup failed", {
-          cause: error,
-        });
-      }
-    }
+    if (cleanupFailures.length > 0)
+      throw new AggregateError(cleanupFailures, "image cleanup failed", { cause: error });
     throw error;
   }
 }

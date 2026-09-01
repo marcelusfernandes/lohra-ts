@@ -1,9 +1,7 @@
 #!/usr/bin/env node
 import {
-  chmodSync,
   cpSync,
   existsSync,
-  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -214,13 +212,8 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
         },
         {
           file: "media/persistence.ts",
-          from: `await options.beforePublish?.(index, final);\n      checkControlledRoot(options.plan);`,
-          to: `await options.beforePublish?.(index, final);\n      void options.plan;`,
-        },
-        {
-          file: "media/persistence.ts",
-          from: 'throw new Error("output root changed after publish hook");',
-          to: "void 0;",
+          from: "    current.isSymbolicLink() ||\n    !current.isDirectory() ||",
+          to: "    false ||\n    false ||",
         },
       ],
       async (media) => {
@@ -270,7 +263,7 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
         },
         {
           file: "media/persistence.ts",
-          from: "removeOwnedLinks(options.plan, owned);",
+          from: "cleanupFailures = removeOwnedPaths(owned);",
           to: "void owned;",
         },
       ],
@@ -284,10 +277,7 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
               payloads: [Buffer.from("complete-image").toString("base64")],
               requested: 1,
               uuid: () => "a".repeat(32),
-              writeStage: (fd: number, bytes: Buffer) => {
-                writeFileSync(fd, bytes.subarray(0, 7));
-                throw new Error("fault after seven bytes");
-              },
+              faultAfterBytes: 7,
             });
           } catch {
             // The comparator observes the forbidden final, not the thrown fault.
@@ -412,52 +402,41 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
 
   results.push(
     await persistenceMutation(
-      "stage-swap",
+      "hook-after-staging",
       [
         {
           file: "media/persistence.ts",
-          from: 'throw new Error("staged image changed after publish hook");',
-          to: "void 0;",
+          from: "  await runPublishHooks(options.plan, finals, rootIdentity, options.beforePublish);",
+          to: "  void options.beforePublish;",
+        },
+        {
+          file: "media/persistence.ts",
+          from: "        fsyncSync(fd);",
+          to: "        await options.beforePublish?.(index, final);\n        fsyncSync(fd);",
         },
       ],
       async (media) => {
         const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-stage-"));
-        const external = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-external-"));
         try {
-          const sentinel = join(external, "sentinel.png");
-          writeFileSync(sentinel, "EXTERNAL-SENTINEL");
           const outDir = join(runtime, "images");
-          const final = join(outDir, `${"a".repeat(32)}.png`);
-          let paths: readonly string[] = [];
-          try {
-            paths = await media.persistGeneratedImages({
-              plan: media.createOutputPlan(outDir),
-              payloads: [Buffer.from("provider").toString("base64")],
-              requested: 1,
-              uuid: () => "a".repeat(32),
-              beforePublish: () => {
-                const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
-                if (stage === undefined) throw new Error("stage missing in hook");
-                rmSync(join(outDir, stage));
-                symlinkSync(sentinel, join(outDir, stage));
-              },
-            });
-          } catch {
-            // Expected side: the revalidation must abort the publish.
-          }
-          return {
-            expected: { status: "error", final_count: 0, external_untouched: true },
-            actual: {
-              status: paths.length > 0 ? "ok" : "error",
-              final_count: paths.length,
-              external_untouched: readFileSync(sentinel, "utf8") === "EXTERNAL-SENTINEL",
-              final_matches_external:
-                paths.length > 0 && readFileSync(final, "utf8") === "EXTERNAL-SENTINEL",
+          let observedStages = -1;
+          await media.persistGeneratedImages({
+            plan: media.createOutputPlan(outDir),
+            payloads: [Buffer.from("provider").toString("base64")],
+            requested: 1,
+            uuid: () => "a".repeat(32),
+            beforePublish: () => {
+              observedStages = readdirSync(outDir).filter((name) =>
+                name.startsWith(".stage-"),
+              ).length;
             },
+          });
+          return {
+            expected: { stages_visible_to_hook: 0 },
+            actual: { stages_visible_to_hook: observedStages },
           };
         } finally {
           rmSync(runtime, { recursive: true, force: true });
-          rmSync(external, { recursive: true, force: true });
         }
       },
     ),
@@ -529,6 +508,11 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
       [
         {
           file: "media/persistence.ts",
+          from: "fchmodSync(fd, IMAGE_FILE_MODE);",
+          to: "void IMAGE_FILE_MODE;",
+        },
+        {
+          file: "media/persistence.ts",
           from: "chmodSync(temp, IMAGE_FILE_MODE);",
           to: "void IMAGE_FILE_MODE;",
         },
@@ -546,12 +530,6 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
               payloads: [Buffer.from("provider").toString("base64")],
               requested: 1,
               uuid: () => "a".repeat(32),
-              beforePublish: () => {
-                const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
-                if (stage === undefined) throw new Error("stage missing in hook");
-                writeFileSync(join(outDir, stage), "provider");
-                chmodSync(join(outDir, stage), 0o600);
-              },
             });
             mode = statSync(paths[0] ?? final).mode & 0o777;
           } catch {
@@ -570,43 +548,34 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
 
   results.push(
     await persistenceMutation(
-      "owned-cleanup",
+      "write-fault-cleanup",
       [
         {
           file: "media/persistence.ts",
-          from: "if (ownedIdentities.has(`${String(candidate.dev)}:${String(candidate.ino)}`))\n        rmSync(candidatePath, { force: true });",
-          to: "rmSync(candidatePath, { force: true });",
+          from: "cleanupFailures = removeOwnedPaths(owned);",
+          to: "void owned;",
         },
       ],
       async (media) => {
         const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-owned-"));
         const outDir = join(runtime, "images");
         try {
-          let status = "error";
+          let status = "ok";
           try {
             await media.persistGeneratedImages({
               plan: media.createOutputPlan(outDir),
               payloads: [Buffer.from("provider").toString("base64")],
               requested: 1,
               uuid: () => "a".repeat(32),
-              beforePublish: () => {
-                const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
-                if (stage === undefined) throw new Error("stage missing in hook");
-                rmSync(join(outDir, stage));
-                writeFileSync(join(outDir, stage), "FOREIGN-SENTINEL");
-              },
+              faultAfterBytes: 7,
             });
-            status = "ok";
           } catch {
-            // Expected side: revalidation must abort and cleanup must keep the
-            // foreign file at the stage path.
+            status = "error";
           }
-          const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
-          const foreignPreserved =
-            stage !== undefined && readFileSync(join(outDir, stage), "utf8") === "FOREIGN-SENTINEL";
+          const residue = readdirSync(outDir).filter((name) => name.startsWith(".stage-")).length;
           return {
-            expected: { status: "error", foreign_preserved: true },
-            actual: { status, foreign_preserved: foreignPreserved },
+            expected: { status: "error", residue: 0 },
+            actual: { status, residue },
           };
         } finally {
           rmSync(runtime, { recursive: true, force: true });
@@ -667,21 +636,20 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
 
   results.push(
     await persistenceMutation(
-      "relocated-cleanup",
+      "publish-hook-omitted",
       [
         {
           file: "media/persistence.ts",
-          from: "        pending.push(candidatePath);",
-          to: "        void candidatePath;",
+          from: "  await runPublishHooks(options.plan, finals, rootIdentity, options.beforePublish);",
+          to: "  void options.beforePublish;",
         },
       ],
       async (media) => {
         const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-reloc-"));
         try {
           const outDir = join(runtime, "images");
-          const holder = join(runtime, "holder");
-          const moved = join(holder, "moved");
-          mkdirSync(holder);
+          const moved = join(runtime, "moved");
+          let status = "ok";
           try {
             await media.persistGeneratedImages({
               plan: media.createOutputPlan(outDir),
@@ -694,17 +662,13 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
               },
             });
           } catch {
-            // Expected side: fail closed with zero relocated residue.
+            status = "error";
           }
-          const leaked = readdirSync(moved).filter((name) => name.startsWith(".stage-"));
-          const leakedBytes =
-            leaked[0] === undefined ? 0 : readFileSync(join(moved, leaked[0])).byteLength;
           return {
-            expected: { status: "error", leaked_stage_count: 0, leaked_bytes: 0 },
+            expected: { status: "error", hook_ran: true },
             actual: {
-              status: "error",
-              leaked_stage_count: leaked.length,
-              leaked_bytes: leakedBytes,
+              status,
+              hook_ran: existsSync(moved),
             },
           };
         } finally {
@@ -716,21 +680,25 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
 
   results.push(
     await persistenceMutation(
-      "relocated-hardlinks",
+      "root-check-before-hook",
       [
         {
           file: "media/persistence.ts",
-          from: "        rmSync(candidatePath, { force: true });",
-          to: "        { rmSync(candidatePath, { force: true }); return; }",
+          from: "    await hook?.(index, final);\n    assertRootIdentity(plan, rootIdentity);",
+          to: "    assertRootIdentity(plan, rootIdentity);\n    await hook?.(index, final);",
+        },
+        {
+          file: "media/persistence.ts",
+          from: "      assertRootIdentity(options.plan, rootIdentity);",
+          to: "      void rootIdentity;",
         },
       ],
       async (media) => {
-        const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-hardlinks-"));
+        const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-check-order-"));
         try {
           const outDir = join(runtime, "images");
-          const aliasDir = join(runtime, "alias");
           const moved = join(runtime, "moved");
-          mkdirSync(aliasDir);
+          let status = "ok";
           try {
             await media.persistGeneratedImages({
               plan: media.createOutputPlan(outDir),
@@ -738,23 +706,19 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
               requested: 1,
               uuid: () => "d".repeat(32),
               beforePublish: () => {
-                const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
-                if (stage === undefined) throw new Error("stage missing in hook");
-                linkSync(join(outDir, stage), join(aliasDir, "copy"));
                 renameSync(outDir, moved);
                 mkdirSync(outDir);
               },
             });
           } catch {
-            // Expected side: every link to the owned inode must be removed.
+            status = "error";
           }
-          const remaining = [
-            ...readdirSync(aliasDir).map((name) => join(aliasDir, name)),
-            ...readdirSync(moved).map((name) => join(moved, name)),
-          ].filter((path) => readFileSync(path).equals(Buffer.from("PRIVATE-PROVIDER-BYTES")));
           return {
-            expected: { status: "error", remaining_payload_files: 0 },
-            actual: { status: "error", remaining_payload_files: remaining.length },
+            expected: { status: "error", final_count: 0 },
+            actual: {
+              status,
+              final_count: readdirSync(outDir).filter((name) => name.endsWith(".png")).length,
+            },
           };
         } finally {
           rmSync(runtime, { recursive: true, force: true });
@@ -765,12 +729,17 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
 
   results.push(
     await persistenceMutation(
-      "replacement-symlink-cleanup",
+      "root-symlink-after-check",
       [
         {
           file: "media/persistence.ts",
-          from: "      checkTrustedParent(options.plan);\n      parentSafe = true;",
-          to: "      checkControlledRoot(options.plan);\n      parentSafe = true;",
+          from: "    await hook?.(index, final);\n    assertRootIdentity(plan, rootIdentity);",
+          to: "    assertRootIdentity(plan, rootIdentity);\n    await hook?.(index, final);",
+        },
+        {
+          file: "media/persistence.ts",
+          from: "      assertRootIdentity(options.plan, rootIdentity);",
+          to: "      void rootIdentity;",
         },
       ],
       async (media) => {
@@ -779,6 +748,7 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
         try {
           const outDir = join(runtime, "images");
           const moved = join(runtime, "moved");
+          let status = "ok";
           try {
             await media.persistGeneratedImages({
               plan: media.createOutputPlan(outDir),
@@ -791,13 +761,15 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
               },
             });
           } catch {
-            // Expected side: cleanup traverses the trusted parent, not the
-            // untrusted replacement root.
+            status = "error";
           }
-          const leaked = readdirSync(moved).filter((name) => name.startsWith(".stage-"));
           return {
-            expected: { status: "error", leaked_stage_count: 0 },
-            actual: { status: "error", leaked_stage_count: leaked.length },
+            expected: { status: "error", external_payloads: 0 },
+            actual: {
+              status,
+              external_payloads: readdirSync(external).filter((name) => name.endsWith(".png"))
+                .length,
+            },
           };
         } finally {
           rmSync(runtime, { recursive: true, force: true });

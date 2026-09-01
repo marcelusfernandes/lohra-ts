@@ -145,14 +145,15 @@ describe("staged image persistence", () => {
         payloads: ["b25l", "dHdv"],
         requested: 2,
         uuid: () => ids.shift() ?? "c".repeat(32),
-        beforePublish: (index) => {
-          if (index === 1) throw new Error("publish fault");
+        beforePublish: (index, final) => {
+          if (index === 1) writeFileSync(final, "FOREIGN-FINAL");
         },
       }),
-    ).rejects.toThrow("publish fault");
+    ).rejects.toThrow(/collision/i);
     expect(readFileSync(sentinel, "utf8")).toBe("keep");
     expect(existsSync(join(outDir, `${"a".repeat(32)}.png`))).toBe(false);
-    expect(existsSync(join(outDir, `${"b".repeat(32)}.png`))).toBe(false);
+    expect(readFileSync(join(outDir, `${"b".repeat(32)}.png`), "utf8")).toBe("FOREIGN-FINAL");
+    expect(readdirSync(outDir).filter((name) => name.startsWith(".stage-"))).toEqual([]);
     if (existsSync(outDir)) expect(readFileSync(sentinel, "utf8")).toBe("keep");
   });
 
@@ -169,79 +170,73 @@ describe("staged image persistence", () => {
           writeFileSync(final, "sentinel");
         },
       }),
-    ).rejects.toThrow(/EEXIST|exist/i);
+    ).rejects.toThrow(/collision|exist/i);
     expect(readFileSync(join(outDir, `${"a".repeat(32)}.png`), "utf8")).toBe("sentinel");
     expect(readdirSync(outDir)).toEqual([`${"a".repeat(32)}.png`]);
   });
 
-  it("rejects a stage swapped for a symlink by the publish hook", async () => {
+  it("runs the publish hook before any provider stage exists", async () => {
     const directory = root();
     const external = root();
     const outDir = join(directory, "images");
     const sentinel = join(external, "sentinel.png");
     writeFileSync(sentinel, "EXTERNAL");
-    await expect(
-      persistGeneratedImages({
-        plan: createOutputPlan(outDir),
-        payloads: [Buffer.from("provider").toString("base64")],
-        requested: 1,
-        uuid: () => "a".repeat(32),
-        beforePublish: () => {
-          const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
-          if (stage === undefined) throw new Error("stage missing in hook");
-          rmSync(join(outDir, stage));
-          symlinkSync(sentinel, join(outDir, stage));
-        },
-      }),
-    ).rejects.toThrow("staged image changed after publish hook");
-    expect(existsSync(join(outDir, `${"a".repeat(32)}.png`))).toBe(false);
+    const decoy = join(outDir, ".stage-foreign.tmp");
+    const paths = await persistGeneratedImages({
+      plan: createOutputPlan(outDir),
+      payloads: [Buffer.from("provider").toString("base64")],
+      requested: 1,
+      uuid: () => "a".repeat(32),
+      beforePublish: () => {
+        expect(readdirSync(outDir).filter((name) => name.startsWith(".stage-"))).toEqual([]);
+        symlinkSync(sentinel, decoy);
+      },
+    });
+    expect(readFileSync(paths[0] ?? "", "utf8")).toBe("provider");
     expect(readFileSync(sentinel, "utf8")).toBe("EXTERNAL");
     expect(readdirSync(external)).toEqual(["sentinel.png"]);
+    expect(lstatSync(decoy).isSymbolicLink()).toBe(true);
   });
 
-  it("rejects a stage whose bytes or identity changed after the publish hook", async () => {
+  it("does not let a stage-like hook decoy affect provider bytes", async () => {
     const directory = root();
     const outDir = join(directory, "images");
+    const decoy = join(outDir, ".stage-decoy.tmp");
+    const paths = await persistGeneratedImages({
+      plan: createOutputPlan(outDir),
+      payloads: [Buffer.from("provider").toString("base64")],
+      requested: 1,
+      uuid: () => "a".repeat(32),
+      beforePublish: () => {
+        expect(readdirSync(outDir).filter((name) => name.startsWith(".stage-"))).toEqual([]);
+        writeFileSync(decoy, "tampered");
+      },
+    });
+    expect(readFileSync(paths[0] ?? "", "utf8")).toBe("provider");
+    expect(readFileSync(decoy, "utf8")).toBe("tampered");
+  });
+
+  it("preserves a foreign stage-like file when publication later fails", async () => {
+    const directory = root();
+    const outDir = join(directory, "images");
+    const foreign = join(outDir, ".stage-foreign.tmp");
     await expect(
       persistGeneratedImages({
         plan: createOutputPlan(outDir),
         payloads: [Buffer.from("provider").toString("base64")],
         requested: 1,
         uuid: () => "a".repeat(32),
-        beforePublish: () => {
-          const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
-          if (stage === undefined) throw new Error("stage missing in hook");
-          writeFileSync(join(outDir, stage), "tampered");
+        beforePublish: (_index, final) => {
+          writeFileSync(foreign, "FOREIGN-SENTINEL");
+          writeFileSync(final, "FOREIGN-FINAL");
         },
       }),
-    ).rejects.toThrow("staged image changed after publish hook");
-    expect(existsSync(join(outDir, `${"a".repeat(32)}.png`))).toBe(false);
+    ).rejects.toThrow(/collision/i);
+    expect(readFileSync(join(outDir, `${"a".repeat(32)}.png`), "utf8")).toBe("FOREIGN-FINAL");
+    expect(readFileSync(foreign, "utf8")).toBe("FOREIGN-SENTINEL");
   });
 
-  it("preserves a foreign file planted at the stage path during cleanup", async () => {
-    const directory = root();
-    const outDir = join(directory, "images");
-    await expect(
-      persistGeneratedImages({
-        plan: createOutputPlan(outDir),
-        payloads: [Buffer.from("provider").toString("base64")],
-        requested: 1,
-        uuid: () => "a".repeat(32),
-        beforePublish: () => {
-          const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
-          if (stage === undefined) throw new Error("stage missing in hook");
-          rmSync(join(outDir, stage));
-          writeFileSync(join(outDir, stage), "FOREIGN-SENTINEL");
-        },
-      }),
-    ).rejects.toThrow("staged image changed after publish hook");
-    expect(existsSync(join(outDir, `${"a".repeat(32)}.png`))).toBe(false);
-    const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
-    expect(stage).toBeDefined();
-    expect(readFileSync(join(outDir, stage ?? "missing"), "utf8")).toBe("FOREIGN-SENTINEL");
-  });
-
-  it("restabilizes 0644 when the hook tampers with the stage mode", async () => {
+  it("publishes 0644 even when the hook changes a stage-like decoy mode", async () => {
     const directory = root();
     const outDir = join(directory, "images");
     const paths = await persistGeneratedImages({
@@ -250,9 +245,9 @@ describe("staged image persistence", () => {
       requested: 1,
       uuid: () => "a".repeat(32),
       beforePublish: () => {
-        const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
-        if (stage === undefined) throw new Error("stage missing in hook");
-        chmodSync(join(outDir, stage), 0o600);
+        const decoy = join(outDir, ".stage-decoy.tmp");
+        writeFileSync(decoy, "foreign");
+        chmodSync(decoy, 0o600);
       },
     });
     expect(lstatSync(paths[0] ?? "").mode & 0o777).toBe(0o644);
@@ -283,7 +278,7 @@ describe("staged image persistence", () => {
     expect(readdirSync(outDir)).toEqual([]);
   });
 
-  it("relocates cleanup across every owned stage when the root is replaced mid-batch", async () => {
+  it("creates no owned stage when the root is replaced by a later hook", async () => {
     const directory = root();
     const outDir = join(directory, "images");
     const moved = join(directory, "moved");
@@ -334,13 +329,14 @@ describe("staged image persistence", () => {
     expect(readdirSync(outDir)).toEqual([]);
   });
 
-  it("removes every hardlink to an owned stage after root replacement", async () => {
+  it("never exposes an owned stage for a hook to hardlink", async () => {
     const directory = root();
     const outDir = join(directory, "images");
     const aliasDir = join(directory, "alias");
     const moved = join(directory, "moved");
     const payload = Buffer.from("PRIVATE-PROVIDER-BYTES");
     mkdirSync(aliasDir);
+    const foreign = join(outDir, "FOREIGN");
 
     await expect(
       persistGeneratedImages({
@@ -349,16 +345,17 @@ describe("staged image persistence", () => {
         requested: 1,
         uuid: () => "e".repeat(32),
         beforePublish: () => {
-          const stage = readdirSync(outDir).find((name) => name.startsWith(".stage-"));
-          if (stage === undefined) throw new Error("stage missing in hook");
-          linkSync(join(outDir, stage), join(aliasDir, "copy"));
+          expect(readdirSync(outDir).filter((name) => name.startsWith(".stage-"))).toEqual([]);
+          writeFileSync(foreign, "FOREIGN");
+          linkSync(foreign, join(aliasDir, "copy"));
           renameSync(outDir, moved);
           mkdirSync(outDir);
         },
       }),
     ).rejects.toThrow("output root changed after publish hook");
 
-    expect(readdirSync(aliasDir)).toEqual([]);
+    expect(readFileSync(join(aliasDir, "copy"), "utf8")).toBe("FOREIGN");
+    expect(readFileSync(join(moved, "FOREIGN"), "utf8")).toBe("FOREIGN");
     expect(readdirSync(moved).filter((name) => name.startsWith(".stage-"))).toEqual([]);
     expect(readdirSync(outDir)).toEqual([]);
   });
@@ -389,6 +386,38 @@ describe("staged image persistence", () => {
     expect(readdirSync(external)).toEqual(["FOREIGN"]);
   });
 
+  it("does not depend on enumerating an unrelated unreadable subtree for cleanup", async () => {
+    const directory = root();
+    const outDir = join(directory, "images");
+    const moved = join(directory, "moved");
+    const blocked = join(directory, "zzzz-blocked");
+    const payload = Buffer.from("PRIVATE-PROVIDER-BYTES");
+    mkdirSync(blocked);
+    writeFileSync(join(blocked, "FOREIGN"), "keep");
+    chmodSync(blocked, 0o000);
+
+    try {
+      await expect(
+        persistGeneratedImages({
+          plan: createOutputPlan(outDir),
+          payloads: [payload.toString("base64")],
+          requested: 1,
+          uuid: () => "e".repeat(32),
+          beforePublish: () => {
+            renameSync(outDir, moved);
+            mkdirSync(outDir);
+          },
+        }),
+      ).rejects.toThrow("output root changed after publish hook");
+    } finally {
+      chmodSync(blocked, 0o700);
+    }
+
+    expect(readdirSync(moved).filter((name) => name.startsWith(".stage-"))).toEqual([]);
+    expect(readFileSync(join(blocked, "FOREIGN"), "utf8")).toBe("keep");
+    expect(readdirSync(outDir)).toEqual([]);
+  });
+
   it("removes a staged seven-byte partial after a write fault", async () => {
     const directory = root();
     const outDir = join(directory, "images");
@@ -398,10 +427,7 @@ describe("staged image persistence", () => {
         payloads: [Buffer.from("complete-image").toString("base64")],
         requested: 1,
         uuid: () => "f".repeat(32),
-        writeStage: (fd, bytes) => {
-          writeFileSync(fd, bytes.subarray(0, 7));
-          throw new Error("fault after 7 bytes");
-        },
+        faultAfterBytes: 7,
       }),
     ).rejects.toThrow("fault after 7 bytes");
     expect(readdirSync(outDir)).toEqual([]);
