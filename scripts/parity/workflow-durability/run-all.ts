@@ -51,6 +51,16 @@ function git(cwd: string, args: readonly string[]): string {
   return result.stdout.trim();
 }
 
+/** The candidate is the COMMITTED SHA under test: the record names it, and a
+ * dirty worktree means the evidence describes something nobody can check out. */
+function candidateGuard(): { sha: string; porcelain: string } {
+  const sha = git(root, ["rev-parse", "HEAD"]);
+  const porcelain = git(root, ["status", "--porcelain"]);
+  if (porcelain !== "")
+    throw new Error(`candidate worktree is dirty; evidence would not be reproducible:\n${porcelain}`);
+  return { sha, porcelain };
+}
+
 /** The oracle is read-only at a pinned SHA: assert it, never assume it. */
 function oracleGuard(): { commit: string; porcelain: string; pinned: boolean } {
   const commit = git(oracleWorkspace.repository, ["rev-parse", "HEAD"]);
@@ -132,6 +142,7 @@ const HARDENING: Readonly<Record<string, { oracle: unknown; candidate: unknown; 
 };
 
 mkdirSync(evidenceDirectory, { recursive: true });
+const candidateBefore = candidateGuard();
 const oracleBefore = oracleGuard();
 const waitedForLockMs = await acquireLock();
 
@@ -226,8 +237,13 @@ try {
   });
 
   const oracleAfter = oracleGuard();
+  const candidateAfter = candidateGuard();
   const evidence = {
     suite: "t16-workflow-durability",
+    candidate: {
+      targetSha: candidateBefore.sha,
+      guard: { before: candidateBefore, after: candidateAfter },
+    },
     oracle: {
       workspace: oracleWorkspace.repository,
       python: oraclePython.slice(oraclePython.indexOf(".oracle-venv")),
@@ -248,6 +264,7 @@ try {
   process.stdout.write(
     `${JSON.stringify({
       suite: evidence.suite,
+      targetSha: candidateBefore.sha,
       bilateralMatch,
       plantedOk: planted.ok,
       chats: chats.map((chat) => `${chat.id}=${chat.verdict}`),

@@ -25,6 +25,8 @@ import {
 import type { LockRepository } from "../state/locks.js";
 
 export const RUN_LEASE_TTL = 900;
+/** The operator capability policy, read from the operator home per launch. */
+export const OPERATOR_POLICY_FILE = "workflow_policy.json";
 export const FENCE_MEMORY = 1024;
 
 /** The token an evicted run presents: never a number, so a forgotten fence can
@@ -358,8 +360,11 @@ export class WorkflowService {
     this.taintTracker = options.taintTracker;
     this.homeRoot = options.homeRoot ?? ".";
     this.fenceMemory = new FenceMemory(options.fenceMemory ?? FENCE_MEMORY);
-    const policyPath = options.policyPath;
-    this.policyLoader = policyPath === undefined ? undefined : () => loadPolicy(policyPath);
+    // Criterion 40: the operator capability policy is a FILE in the operator
+    // home (`workflow_policy.json`), read per launch. An explicit path wins;
+    // an absent file is deny-all, never a widening.
+    const policyPath = options.policyPath ?? join(this.homeRoot, OPERATOR_POLICY_FILE);
+    this.policyLoader = () => loadPolicy(policyPath);
     const store = options.store;
     if (store !== undefined) {
       const timerFactory = options.timerFactory ?? defaultServiceTimer;

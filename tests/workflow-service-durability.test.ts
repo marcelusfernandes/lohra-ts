@@ -423,7 +423,7 @@ describe("workflow service durability", () => {
     // The ownership-loss window is post-TTL-expiry: the stretch's lease expires
     // while the leaf is in flight, another process acquires, and the stretch's
     // terminal write then presents an expired lease and must be refused.
-    const { service, locks, ownership, runtime, close } = harness();
+    const { service, locks, runtime, close } = harness();
     runtime.releaseFirst(); // arm the gate BEFORE start: leaf 1 blocks in flight
     const started = service.start(spec());
     if ("error" in started) throw new Error(started.error);
@@ -431,7 +431,8 @@ describe("workflow service durability", () => {
     connection_expireLease(started.run_id);
     const thiefFence = locks.acquireRunLease(started.run_id, "thief", 1000, 900);
     if (thiefFence === null) throw new Error("thief should have won after expiry");
-    ownership.fence = 99; // the stretch's writes now present a stale token
+    // The thief's acquire advanced the fence and moved the holder, so the
+    // stretch's terminal write presents a token that is no longer current.
     // BOUNDED: the waiter must settle on its own. Racing it against a short
     // timer means a waiter left hanging fails here, not on a suite timeout.
     let bell: ReturnType<typeof setTimeout> | undefined;
@@ -448,6 +449,54 @@ describe("workflow service durability", () => {
       run_id: started.run_id,
     });
     close();
+  });
+
+  it("the terminal write reads the clock AT WRITE TIME: a lease that expired mid-run is refused", async () => {
+    // R1's independent probe: a lease [1000, 1900) must not accept a terminal
+    // write once the clock has passed 1900. No thief and no DB surgery here —
+    // only time moving, so the sole thing under test is WHEN `now` is read.
+    const root = mkdtempSync(join(tmpdir(), "lohra-service-durability-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      const repository = new WorkflowRepository(connection.database);
+      const locks = new LockRepository(connection.database);
+      const ownership = { fence: 0 as number, holder: "test", now: 1000 };
+      const runtime: ChildRuntime = {
+        spawn(): string {
+          // the leaf outlives the lease: TTL 900 from 1000, and it is now 1901
+          ownership.now = 1000 + 901;
+          return "leaf-1";
+        },
+        collect: (): ChildResult => ({
+          status: "complete",
+          output: { answer: "ok" },
+          usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+        }),
+        steer: () => undefined,
+        cancel: () => undefined,
+      };
+      const service = new WorkflowService({
+        runtime,
+        // no live timers: a heartbeat renewal would be a second variable
+        timerFactory: () => ({ cancel: () => undefined }),
+        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+      });
+      const started = service.start(spec());
+      if ("error" in started) throw new Error(started.error);
+      expect(locks.runLeaseExpiry(started.run_id, 1000)).toBe(1900);
+      const result = (await service.status(started.run_id, true)) as Record<string, unknown>;
+      // presented at now=1901 against expires_at=1900: refused, fail-closed
+      expect(result).toMatchObject({ error: "workflow ownership lost", cause: "STALE_FENCE_WRITE" });
+      const line = repository.getRunState(started.run_id) as Record<string, unknown>;
+      expect(line.status).toBe("running");
+      // the LAUNCH ledger write (at now=1000, under a live lease) stands; the
+      // terminal one, carrying the leaf's 3+2, was refused
+      expect(Number(repository.getRunSpend(started.run_id)?.tokens_in)).toBe(0);
+      connection.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("a refused terminal write publishes NO done event and no terminal line", async () => {
@@ -474,7 +523,7 @@ describe("workflow service durability", () => {
         .prepare("UPDATE workflow_run_locks SET expires_at = 500 WHERE run_id = ?")
         .run(started.run_id);
       expect(locks.acquireRunLease(started.run_id, "thief", 1000, 900)).not.toBeNull();
-      ownership.fence = 99;
+      // the thief advanced the fence and took the holder slot
       const result = (await service.status(started.run_id, true)) as Record<string, unknown>;
       expect(result.error).toBe("workflow ownership lost");
       // the line the thief owns was never overwritten with a terminal status

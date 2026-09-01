@@ -358,6 +358,32 @@ const namedMutants: readonly Mutant[] = [
     ],
   },
   {
+    id: "p/stretch-clock-pinned-at-acquire",
+    category: "clock",
+    mechanism: "owned writes present the clock read at ACQUIRE time, so a lease that expired mid-run still accepts its terminal write",
+    focus: { file: serviceTests, test: "reads the clock AT WRITE TIME" },
+    edits: [
+      {
+        file: service,
+        before: "      return { fence: token, holder: store.holder, now: store.ownershipOf().now };",
+        after: "      return { fence: token, holder: store.holder, now };",
+      },
+    ],
+  },
+  {
+    id: "q/heartbeat-timer-is-a-noop",
+    category: "clock",
+    mechanism: "the production heartbeat is built on a no-op timer factory, so a live run never renews its lease",
+    focus: { file: serviceTests, test: "token budget pause never arms auto-resume" },
+    edits: [
+      {
+        file: service,
+        before: "        { interval: store.ttl / 3, timerFactory },",
+        after: "        { interval: store.ttl / 3, timerFactory: () => ({ cancel: () => undefined }) },",
+      },
+    ],
+  },
+  {
     id: "o/evicted-run-writes-unfenced",
     category: "fence-memory",
     mechanism: "a run evicted from the bounded fence memory re-reads the live fence and writes anyway",
