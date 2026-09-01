@@ -149,6 +149,7 @@ describe("loadMcpConfig", () => {
     });
     const hostileEnv = configs[0]?.env;
     expect(hostileEnv).toBeDefined();
+    expect(Object.getPrototypeOf(hostileEnv)).toBeNull();
     expect(Object.hasOwn(hostileEnv ?? {}, "__proto__")).toBe(true);
     expect(hostileEnv?.["__proto__"]).toEqual({ polluted: true });
     expect(hostileEnv?.["polluted"]).toBeUndefined();
@@ -162,6 +163,81 @@ describe("loadMcpConfig", () => {
       args: [1, 2],
       env: { FLAG: true },
     });
+  });
+
+  it("rejects env keys outside the representable T19 mapping domain with an explicit cause", () => {
+    const rejectedKeys: readonly [string, unknown][] = [
+      ["boolean", true],
+      ["integer", 1],
+      ["float", 1.5],
+      ["array", ["nested"]],
+      ["object", { nested: true }],
+    ];
+    for (const [label, key] of rejectedKeys) {
+      writeFileSync(
+        path,
+        JSON.stringify({ mcpServers: { fix: { command: "npx", env: [[key, label]] } } }),
+      );
+      expect(() => loadMcpConfig(path), label).toThrow(
+        "server 'fix' field 'env' entry 0 key must be a non-ambiguous string or null",
+      );
+    }
+  });
+
+  it("rejects canonical array-index strings but accepts neighboring non-index strings", () => {
+    for (const key of ["0", "1", "4294967294"]) {
+      writeFileSync(
+        path,
+        JSON.stringify({ mcpServers: { fix: { command: "npx", env: [[key, "x"]] } } }),
+      );
+      expect(() => loadMcpConfig(path), key).toThrow(
+        `server 'fix' field 'env' entry 0 key '${key}' is a canonical array-index string`,
+      );
+    }
+
+    writeFileSync(
+      path,
+      JSON.stringify({
+        mcpServers: {
+          fix: { command: "npx", env: [["4294967295", "max-plus-one"], ["00", "leading-zero"]] },
+        },
+      }),
+    );
+    const env = loadMcpConfig(path)[0]?.env;
+    expect(Object.getPrototypeOf(env)).toBeNull();
+    expect(JSON.stringify(env)).toBe('{"4294967295":"max-plus-one","00":"leading-zero"}');
+
+    writeFileSync(
+      path,
+      JSON.stringify({ mcpServers: { fix: { command: "npx", env: { 0: "object-index" } } } }),
+    );
+    expect(() => loadMcpConfig(path)).toThrow(
+      "server 'fix' field 'env' key '0' is a canonical array-index string",
+    );
+  });
+
+  it("rejects duplicate env keys after null coercion instead of collapsing them", () => {
+    for (const entries of [
+      [[null, "none"], ["null", "string"]],
+      [["A", 1], ["A", 2]],
+    ]) {
+      writeFileSync(
+        path,
+        JSON.stringify({ mcpServers: { fix: { command: "npx", env: entries } } }),
+      );
+      expect(() => loadMcpConfig(path)).toThrow(
+        "server 'fix' field 'env' entry 1 collides after key coercion",
+      );
+    }
+  });
+
+  it("rejects args outside the versioned string/list domain", () => {
+    for (const args of [{ A: 1 }, 1, true]) {
+      writeFileSync(path, JSON.stringify({ mcpServers: { fix: { command: "npx", args } } }));
+      expect(() => loadMcpConfig(path)).toThrow(
+        "server 'fix' field 'args' must be a string or array",
+      );
+    }
   });
 
   it("kills accepting execution-boundary shapes: truthy non-string url/command abort the set", () => {

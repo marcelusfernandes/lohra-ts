@@ -21,14 +21,59 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function isCanonicalArrayIndex(key: string): boolean {
+  if (!/^(?:0|[1-9][0-9]*)$/u.test(key)) return false;
+  if (key.length !== 10) return key.length < 10;
+  return key <= "4294967294";
+}
+
+function mappingKey(
+  name: string,
+  key: unknown,
+  location: string,
+): string {
+  const at = location === "" ? "" : ` ${location}`;
+  if (key !== null && typeof key !== "string") {
+    throw new MCPConfigError(
+      `server ${pythonRepr(name)} field 'env'${at} key must be a non-ambiguous string or null`,
+    );
+  }
+  const coerced = key === null ? "null" : key;
+  if (isCanonicalArrayIndex(coerced)) {
+    throw new MCPConfigError(
+      `server ${pythonRepr(name)} field 'env'${at} key ${pythonRepr(coerced)} is a canonical array-index string`,
+    );
+  }
+  return coerced;
+}
+
+function defineMappingEntry(
+  mapping: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void {
+  Object.defineProperty(mapping, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
+}
+
 function pythonMappingFromJson(name: string, value: unknown): Readonly<Record<string, unknown>> {
-  if (isRecord(value)) return { ...value };
+  const mapping = Object.create(null) as Record<string, unknown>;
+  if (isRecord(value)) {
+    for (const [key, entryValue] of Object.entries(value)) {
+      defineMappingEntry(mapping, mappingKey(name, key, ""), entryValue);
+    }
+    return mapping;
+  }
   if (!Array.isArray(value)) {
     throw new MCPConfigError(`server ${pythonRepr(name)} field 'env' cannot construct a mapping`);
   }
 
-  const mapping: Record<string, unknown> = {};
-  for (const entry of value) {
+  const seen = new Set<string>();
+  for (const [index, entry] of value.entries()) {
     const pair: readonly unknown[] | undefined = Array.isArray(entry)
       ? (entry as readonly unknown[])
       : typeof entry === "string"
@@ -37,23 +82,22 @@ function pythonMappingFromJson(name: string, value: unknown): Readonly<Record<st
     if (pair?.length !== 2) {
       throw new MCPConfigError(`server ${pythonRepr(name)} field 'env' cannot construct a mapping`);
     }
-    const key = pair[0];
-    if (
-      key !== null &&
-      typeof key !== "string" &&
-      typeof key !== "number" &&
-      typeof key !== "boolean"
-    ) {
-      throw new MCPConfigError(`server ${pythonRepr(name)} field 'env' cannot construct a mapping`);
+    const key = mappingKey(name, pair[0], `entry ${String(index)}`);
+    if (seen.has(key)) {
+      throw new MCPConfigError(
+        `server ${pythonRepr(name)} field 'env' entry ${String(index)} collides after key coercion: ${pythonRepr(key)}`,
+      );
     }
-    Object.defineProperty(mapping, String(key), {
-      value: pair[1],
-      enumerable: true,
-      configurable: true,
-      writable: true,
-    });
+    seen.add(key);
+    defineMappingEntry(mapping, key, pair[1]);
   }
   return mapping;
+}
+
+function pythonArgsFromJson(name: string, value: unknown): readonly unknown[] {
+  if (Array.isArray(value)) return Array.from(value as readonly unknown[]);
+  if (typeof value === "string") return Array.from(value);
+  throw new MCPConfigError(`server ${pythonRepr(name)} field 'args' must be a string or array`);
 }
 
 function parseServer(name: string, spec: unknown): MCPServerConfig {
@@ -71,21 +115,9 @@ function parseServer(name: string, spec: unknown): MCPServerConfig {
   }
   if (command !== undefined) {
     const rawArgs = spec.args;
-    const args = !isPythonTruthy(rawArgs)
-      ? []
-      : Array.isArray(rawArgs)
-        ? Array.from(rawArgs as readonly unknown[])
-        : typeof rawArgs === "string"
-          ? Array.from(rawArgs)
-          : isRecord(rawArgs)
-            ? Object.keys(rawArgs)
-            : (() => {
-                throw new MCPConfigError(`server ${pythonRepr(name)} field 'args' is not iterable`);
-              })();
+    const args = rawArgs === undefined || rawArgs === null ? [] : pythonArgsFromJson(name, rawArgs);
     const rawEnv = spec.env;
-    const env = !isPythonTruthy(rawEnv)
-      ? {}
-      : pythonMappingFromJson(name, rawEnv);
+    const env = rawEnv === undefined || rawEnv === null ? {} : pythonMappingFromJson(name, rawEnv);
     return { name, transport: "stdio", command, args, env };
   }
   throw new MCPConfigError(`server ${pythonRepr(name)} needs a 'command' (stdio) or 'url' (http)`);
