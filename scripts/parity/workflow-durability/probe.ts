@@ -12,8 +12,8 @@ import { durableFromRow } from "../../../dist/workflow/service.js";
 import { WorkflowRepository } from "../../../dist/state/workflow-repository.js";
 import { LeaseHeartbeat, resumeDelay, MIN_RESUME_DELAY, MAX_RESUME_DELAY, MAX_RESUME_ATTEMPTS } from "../../../dist/workflow/durability.js";
 
-const OUT = [];
-function step(name, value) {
+const OUT: { readonly step: string; readonly value: unknown }[] = [];
+function step(name: string, value: unknown): void {
   OUT.push({ step: name, value });
 }
 
@@ -24,9 +24,9 @@ try {
   const repository = new WorkflowRepository(connection.database);
 
   // heartbeat TTL/3 with injected timers
-  const timers = [];
+  const timers: { delay: number; fire(): void; cancelled: boolean; cancel(): void }[] = [];
   const clock = { owned: true };
-  const heartbeat = new LeaseHeartbeat((runId) => clock.owned, {
+  const heartbeat = new LeaseHeartbeat((_runId) => clock.owned, {
     interval: 300,
     timerFactory: (delay, fire) => {
       const timer = { delay, fire, cancelled: false, cancel: () => { timer.cancelled = true; } };

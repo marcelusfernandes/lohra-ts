@@ -2,9 +2,10 @@
 // One of the three planted-scenario processes. Each invocation is a separate
 // OS process competing over the same SQLite file: P1 acquires and holds,
 // P2/P3 present planted tokens and must be refused in every category.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+
+import process from "node:process";
 
 import { openStateDatabase } from "../../../dist/state/index.js";
 import { LockRepository } from "../../../dist/state/locks.js";

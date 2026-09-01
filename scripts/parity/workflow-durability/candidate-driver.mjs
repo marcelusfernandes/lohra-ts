@@ -6,6 +6,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import process from "node:process";
+
 import { openStateDatabase } from "../../../dist/state/index.js";
 import { WorkflowRepository } from "../../../dist/state/workflow-repository.js";
 import { LockRepository } from "../../../dist/state/locks.js";

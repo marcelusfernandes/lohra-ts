@@ -201,7 +201,7 @@ describe("workflow service durability", () => {
     close();
   });
 
-  it("seeds spend only AFTER acquiring the lease (seed read refused while busy)", async () => {
+  it("seeds spend only AFTER acquiring the lease (seed read refused while busy)", () => {
     const root = mkdtempSync(join(tmpdir(), "lohra-service-durability-"));
     roots.push(root);
     const connection = openStateDatabase(join(root, "state.db"));
@@ -210,20 +210,21 @@ describe("workflow service durability", () => {
       const locks = new LockRepository(connection.database);
       const ownership = { fence: 0 as number, holder: "test", now: 1000 };
       let seedReads = 0;
+      const target = repository;
       const proxy = new Proxy(repository, {
-        get(target, prop, receiver) {
+        get(t: WorkflowRepository, prop: string | symbol, receiver: unknown): unknown {
           if (prop === "getRunSpend") {
-            return (...args: unknown[]) => {
+            return (...args: Parameters<WorkflowRepository["getRunSpend"]>) => {
               seedReads += 1;
-              return (target.getRunSpend as (...a: unknown[]) => unknown)(...args);
+              return target.getRunSpend(...args);
             };
           }
-          return Reflect.get(target, prop, receiver);
+          return Reflect.get(t, prop, receiver);
         },
       });
       const service = new WorkflowService({
         runtime: runtimeStub(),
-        store: { repository: proxy as WorkflowRepository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership },
+        store: { repository: proxy, locks, holder: "test", ttl: 900, ownershipOf: () => ownership },
       });
       // foreign lease live: the start must fail busy WITHOUT any seed read
       locks.acquireRunLease("seed-order-run", "foreign", 1000, 900);

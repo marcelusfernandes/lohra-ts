@@ -142,7 +142,7 @@ const mutants: readonly Mutant[] = [
   },
 ];
 
-function replaceExactlyOnce(source, before, after, id) {
+function replaceExactlyOnce(source: string, before: string, after: string, id: string): string {
   const first = source.indexOf(before);
   if (first < 0) throw new Error(`${id}: mutation anchor not found`);
   if (source.indexOf(before, first + before.length) >= 0)
@@ -150,7 +150,7 @@ function replaceExactlyOnce(source, before, after, id) {
   return `${source.slice(0, first)}${after}${source.slice(first + before.length)}`;
 }
 
-function runTests(directory) {
+function runTests(directory: string): { exitCode: number | null; stdoutTail: string; stderrTail: string } {
   const result = spawnSync(join(directory, "node_modules/.bin/vitest"), ["run", ...focalTests], {
     cwd: directory,
     encoding: "utf8",
@@ -186,7 +186,7 @@ try {
   if (extracted.status !== 0) throw new Error("tar extraction failed");
   symlinkSync(resolve(root, "node_modules"), join(temporary, "node_modules"), "dir");
 
-  const originals = new Map();
+  const originals = new Map<string, string>();
   for (const mutant of mutants)
     for (const edit of mutant.edits)
       if (!originals.has(edit.file))
@@ -194,7 +194,7 @@ try {
 
   const baseline = runTests(temporary);
   if (baseline.exitCode !== 0) throw new Error("mutation baseline is not green");
-  const results = [];
+  const results: { id: string; mechanism: string; killed: boolean; exitCode: number | null; stdoutTail: string; stderrTail: string }[] = [];
   for (const mutant of mutants) {
     for (const [file, original] of originals) writeFileSync(join(temporary, file), original, "utf8");
     for (const edit of mutant.edits) {

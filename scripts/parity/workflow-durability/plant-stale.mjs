@@ -5,10 +5,9 @@
 //   Phase 2 — stale ownership with fence F after release / expiry / wrong holder.
 // Refusals must be 100% across executions; removing either guard turns this red.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
+import process from "node:process";
 
-const root = resolve(import.meta.dirname, "../../..");
 const WORKER = resolve(import.meta.dirname, "worker.mjs");
 
 function runWorker(workspace, scenario) {

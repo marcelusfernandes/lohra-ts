@@ -4,8 +4,7 @@
 // Protocol: mkdir lock at /tmp/lohra-parity-11434.lock (never removes a
 // foreign lock, blocker after 15 min, released in finally). Zero egress.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmdirSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { mkdirSync, readFileSync, rmdirSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -20,7 +19,7 @@ const oracleBackend = resolve(oracleWorkspace, "backend");
 const lockTimeoutMs = Number(process.env.LOHRA_T16_LOCK_TIMEOUT_MS ?? 900_000);
 const ORACLE_SHA = "16b4785d803ad0ca364a8a67346a04f949fbf592";
 
-function command(argv, environment = process.env) {
+function command(argv: readonly string[], environment: NodeJS.ProcessEnv = process.env): { argv: readonly string[]; exitCode: number | null; stdout: string; stderr: string } {
   const [executable, ...args] = argv;
   if (executable === undefined) throw new Error("empty command");
   const result = spawnSync(executable, args, {
@@ -33,8 +32,13 @@ function command(argv, environment = process.env) {
   return { argv, exitCode: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
-function sleep(ms) {
+function sleep(ms: number): Promise<void> {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+}
+
+
+interface PlantResult {
+  readonly ok: boolean;
 }
 
 async function acquireLock() {
@@ -44,7 +48,7 @@ async function acquireLock() {
       mkdirSync(lockPath);
       return Date.now() - startedAt;
     } catch (error) {
-      const code = error?.code;
+      const code = (error as NodeJS.ErrnoException | undefined)?.code;
       if (code !== "EEXIST") throw error;
       if (Date.now() - startedAt >= lockTimeoutMs) {
         throw new Error(`BLOCKED after ${String(lockTimeoutMs)}ms: foreign lock remains at ${lockPath}`, { cause: error });
@@ -54,19 +58,14 @@ async function acquireLock() {
   }
 }
 
-function sha256(text) {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return execFileSync("shasum", ["-a", "256"], { input: text, encoding: "utf8" }).split(" ")[0];
-}
-
-function normalizeSteps(projection) {
+function normalizeSteps(projection: readonly { step: string; value: unknown }[]): (step: string) => unknown {
   // Normalization declared once: oracle floats (1900.0) vs candidate ints,
   // oracle eviction sentinel vs candidate boolean refusal, and the cancel-
   // missing steps (oracle returns "missing" from its store; candidate checks
   // its durable line). Everything else compares structurally.
-  const map = new Map();
+  const map = new Map<string, unknown>();
   for (const entry of projection) map.set(entry.step, entry.value);
-  return (step) => {
+  return (step: string): unknown => {
     const value = map.get(step);
     if (typeof value === "number") return Number(value.toFixed(6));
     return value;
@@ -86,8 +85,8 @@ try {
   if (candidate.exitCode !== 0 || oracle.exitCode !== 0) {
     throw new Error(`driver failure: candidate=${String(candidate.exitCode)} oracle=${String(oracle.exitCode)}`);
   }
-  const candidateSteps = JSON.parse(candidate.stdout);
-  const oracleSteps = JSON.parse(oracle.stdout);
+  const candidateSteps = JSON.parse(candidate.stdout) as readonly { step: string; value: unknown }[];
+  const oracleSteps = JSON.parse(oracle.stdout) as readonly { step: string; value: unknown }[];
   const candidateAt = normalizeSteps(candidateSteps);
   const oracleAt = normalizeSteps(oracleSteps);
 
@@ -102,7 +101,7 @@ try {
     //   post-release/expiry/holder-mismatch; oracle-only acceptance is a
     //   registered security divergence.
     const hardened = new Set(["renew_after_expiry", "expiry_after_ttl"]);
-    let match = canonicalJson(o) === canonicalJson(c);
+    const match = canonicalJson(o) === canonicalJson(c);
     if (hardened.has(step)) {
       compared.push({ step, oracle: o, candidate: c, classification: "hardening-divergence" });
       continue;
@@ -122,12 +121,16 @@ try {
       plantDir,
     ]);
     if (plant.exitCode !== 0) throw new Error(`plant scenario failed: ${plant.stderr}`);
-    planted = JSON.parse(plant.stdout);
+    planted = JSON.parse(plant.stdout) as PlantResult;
   } finally {
     rmSync(plantDir, { recursive: true, force: true });
   }
 
   // 3. Canned chat → run_workflow → workflow_status with durability wiring.
+  interface ChatEvidence {
+    readonly scenario?: string;
+    readonly verdict?: string;
+  }
   const evidencePath = resolve(evidenceDirectory, "t16-chat-durability.json");
   const chatExit = runCli([
     "--manifest",
@@ -136,6 +139,8 @@ try {
     evidencePath,
   ]);
   if (chatExit !== 0) throw new Error(`chat probe failed: harness exit ${String(chatExit)}`);
+  const chatEvidence = JSON.parse(readFileSync(evidencePath, "utf8")) as ChatEvidence;
+  if (chatEvidence.verdict !== "match") throw new Error(`chat probe diverged: ${String(chatEvidence.verdict)}`);
 
   const evidence = {
     suite: "t16-workflow-durability",
