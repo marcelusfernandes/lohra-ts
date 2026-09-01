@@ -13,6 +13,7 @@ export function createMediaBindings(options: MediaBindingOptions): MediaBindings
       runner: options.visionRunner,
       model: options.visionModel,
       localRoot: options.localRoot,
+      ...(options.supportsVision === undefined ? {} : { supportsVision: options.supportsVision }),
     }),
     image_gen: createImageGenHandler({
       generator: options.imageGenerator,

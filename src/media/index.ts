@@ -7,3 +7,4 @@ export * from "./types.js";
 export * from "./handlers.js";
 export * from "./openai-images.js";
 export * from "./bindings.js";
+export * from "./base64.js";

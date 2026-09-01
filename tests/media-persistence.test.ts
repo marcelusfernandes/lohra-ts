@@ -4,6 +4,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -87,6 +88,18 @@ describe("staged image persistence", () => {
     ).rejects.toThrow("64 MiB");
   });
 
+  it("accepts the measured 2,097,167-byte oracle payload", async () => {
+    const directory = root();
+    const bytes = Buffer.alloc(2_097_167, 0x41);
+    const paths = await persistGeneratedImages({
+      plan: createOutputPlan(join(directory, "images")),
+      payloads: [bytes.toString("base64")],
+      requested: 1,
+      uuid: () => "e".repeat(32),
+    });
+    expect(readFileSync(paths[0] ?? "")).toEqual(bytes);
+  });
+
   it("rejects an over-return above the global cardinality cap", async () => {
     const directory = root();
     await expect(
@@ -139,6 +152,42 @@ describe("staged image persistence", () => {
     expect(existsSync(join(outDir, `${"a".repeat(32)}.png`))).toBe(false);
     expect(existsSync(join(outDir, `${"b".repeat(32)}.png`))).toBe(false);
     if (existsSync(outDir)) expect(readFileSync(sentinel, "utf8")).toBe("keep");
+  });
+
+  it("never overwrites or removes a concurrently-created final", async () => {
+    const directory = root();
+    const outDir = join(directory, "images");
+    await expect(
+      persistGeneratedImages({
+        plan: createOutputPlan(outDir),
+        payloads: [Buffer.from("provider").toString("base64")],
+        requested: 1,
+        uuid: () => "a".repeat(32),
+        beforePublish: (_index, final) => {
+          writeFileSync(final, "sentinel");
+        },
+      }),
+    ).rejects.toThrow(/EEXIST|exist/i);
+    expect(readFileSync(join(outDir, `${"a".repeat(32)}.png`), "utf8")).toBe("sentinel");
+    expect(readdirSync(outDir)).toEqual([`${"a".repeat(32)}.png`]);
+  });
+
+  it("removes a staged seven-byte partial after a write fault", async () => {
+    const directory = root();
+    const outDir = join(directory, "images");
+    await expect(
+      persistGeneratedImages({
+        plan: createOutputPlan(outDir),
+        payloads: [Buffer.from("complete-image").toString("base64")],
+        requested: 1,
+        uuid: () => "f".repeat(32),
+        writeStage: (fd, bytes) => {
+          writeFileSync(fd, bytes.subarray(0, 7));
+          throw new Error("fault after 7 bytes");
+        },
+      }),
+    ).rejects.toThrow("fault after 7 bytes");
+    expect(readdirSync(outDir)).toEqual([]);
   });
 
   it("rejects an existing symlink outDir but absorbs trusted parent aliases", () => {

@@ -1,13 +1,13 @@
 import {
-  chmodSync,
   closeSync,
   existsSync,
+  fchmodSync,
   fsyncSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   openSync,
   realpathSync,
-  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -23,6 +23,10 @@ import {
   MAX_IMAGES,
   MAX_DATA_URI_BASE64_CHARS,
 } from "./constants.js";
+import { decodeStrictBase64 } from "./base64.js";
+
+export const MEDIA_TOCTOU_LIMITATION =
+  "Node does not expose portable openat/renameat2; observable checkpoints are fail-closed, but an unobservable path swap between a check and a path syscall cannot be eliminated.";
 
 export interface OutputPlan {
   readonly trustedParent: string;
@@ -76,37 +80,18 @@ export function createOutputPlan(outDir: string): OutputPlan {
   return result;
 }
 
-function strictBase64(value: string): boolean {
-  if (value.length === 0 || value.length % 4 !== 0) return false;
-  const firstPadding = value.indexOf("=");
-  const bodyEnd = firstPadding === -1 ? value.length : firstPadding;
-  const padding = value.length - bodyEnd;
-  if (padding > 2) return false;
-  for (let index = bodyEnd; index < value.length; index += 1) {
-    if (value.charCodeAt(index) !== 61) return false;
-  }
-  for (let index = 0; index < bodyEnd; index += 1) {
-    const code = value.charCodeAt(index);
-    const valid =
-      (code >= 65 && code <= 90) ||
-      (code >= 97 && code <= 122) ||
-      (code >= 48 && code <= 57) ||
-      code === 43 ||
-      code === 47;
-    if (!valid) return false;
-  }
-  return true;
-}
-
 function decodePayloads(payloads: readonly string[]): readonly Buffer[] {
   const decoded: Buffer[] = [];
   let batchBytes = 0;
   for (const payload of payloads) {
     if (payload.length > MAX_DATA_URI_BASE64_CHARS)
       throw new Error("generated image exceeds 20 MiB limit");
-    if (!strictBase64(payload)) throw new Error("invalid base64 image payload");
-    const bytes = Buffer.from(payload, "base64");
-    if (bytes.toString("base64") !== payload) throw new Error("invalid base64 image payload");
+    let bytes: Buffer;
+    try {
+      bytes = decodeStrictBase64(payload);
+    } catch {
+      throw new Error("invalid base64 image payload");
+    }
     if (bytes.byteLength > MAX_IMAGE_BYTES) throw new Error("generated image exceeds 20 MiB limit");
     batchBytes += bytes.byteLength;
     if (batchBytes > MAX_IMAGE_BATCH_BYTES)
@@ -130,6 +115,7 @@ export async function persistGeneratedImages(options: {
   readonly uuid?: () => string;
   readonly afterRootPreflight?: () => void | Promise<void>;
   readonly beforePublish?: (index: number, path: string) => void | Promise<void>;
+  readonly writeStage?: (fd: number, bytes: Buffer) => void;
 }): Promise<readonly string[]> {
   if (options.payloads.length > options.requested)
     throw new Error(
@@ -154,20 +140,26 @@ export async function persistGeneratedImages(options: {
 
   const temps: string[] = [];
   const finals: string[] = [];
+  const published: string[] = [];
   try {
     for (let index = 0; index < decoded.length; index += 1) {
       const bytes = decoded[index];
       const id = ids[index];
       if (bytes === undefined || id === undefined) throw new Error("image staging index mismatch");
-      const temp = join(options.plan.outDir, `.${id}.tmp`);
       const final = join(options.plan.outDir, `${id}.png`);
+      const temp = join(options.plan.outDir, `.stage-${randomUUID()}.tmp`);
       if (existsSync(final)) throw new Error("image UUID collision");
       const fd = openSync(temp, "wx", 0o600);
       temps.push(temp);
       try {
-        writeFileSync(fd, bytes);
+        (
+          options.writeStage ??
+          ((target, value) => {
+            writeFileSync(target, value);
+          })
+        )(fd, bytes);
         fsyncSync(fd);
-        chmodSync(temp, IMAGE_FILE_MODE);
+        fchmodSync(fd, IMAGE_FILE_MODE);
       } finally {
         closeSync(fd);
       }
@@ -181,7 +173,9 @@ export async function persistGeneratedImages(options: {
         throw new Error("image publish index mismatch");
       await options.beforePublish?.(index, final);
       checkControlledRoot(options.plan);
-      renameSync(temp, final);
+      linkSync(temp, final);
+      published.push(final);
+      rmSync(temp);
     }
     return Object.freeze([...finals]);
   } catch (error) {
@@ -194,7 +188,7 @@ export async function persistGeneratedImages(options: {
     }
     if (rootSafe) {
       const cleanupErrors: unknown[] = [];
-      for (const path of [...temps, ...finals]) {
+      for (const path of [...temps, ...published]) {
         try {
           rmSync(path, { force: true });
         } catch (cleanupError) {

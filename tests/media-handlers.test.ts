@@ -127,6 +127,41 @@ describe("vision_analyze handler", () => {
     expect(failed).not.toContain("SECRET");
     expect(failed).not.toContain("CANARY");
   });
+
+  it("fails closed when the selected profile does not support vision", async () => {
+    const runner = new VisionStub(response("unused"));
+    const handler = createVisionAnalyzeHandler({
+      runner,
+      model: "m",
+      localRoot: root(),
+      supportsVision: false,
+    });
+    expect(await handler({ url: "https://example.test/a" })).toBe(
+      '{"error": "profile does not support vision"}',
+    );
+    expect(runner.requests).toHaveLength(0);
+  });
+
+  it("keeps path and cause in a read-failure envelope", async () => {
+    const directory = root();
+    const path = join(directory, "unreadable.png");
+    writeFileSync(path, "bytes");
+    const runner = new VisionStub(response("unused"));
+    const handler = createVisionAnalyzeHandler({
+      runner,
+      model: "m",
+      localRoot: directory,
+      readFile: () => {
+        const error = new Error("EACCES: permission denied");
+        Object.assign(error, { code: "EACCES" });
+        throw error;
+      },
+    });
+    const envelope = await handler({ path });
+    expect(envelope).toContain(`failed to read image ${path}: EACCES: permission denied`);
+    expect(envelope).not.toContain("at ");
+    expect(runner.requests).toHaveLength(0);
+  });
 });
 
 describe("image_gen handler and bindings", () => {
@@ -204,6 +239,7 @@ describe("image_gen handler and bindings", () => {
       visionRunner: runner,
       imageGenerator: generator,
       visionModel: "m",
+      supportsVision: false,
     });
     expect(await bindings.dispatch("other", {})).toBe("base:other");
     expect(await bindings.dispatch("image_gen", { prompt: "x" })).toBe(
@@ -212,5 +248,8 @@ describe("image_gen handler and bindings", () => {
     expect(base).toHaveBeenCalledTimes(1);
     expect(bindings.handlers).toHaveProperty("vision_analyze");
     expect(bindings.handlers).toHaveProperty("image_gen");
+    expect(await bindings.dispatch("vision_analyze", { url: "https://example.test/a" })).toBe(
+      '{"error": "profile does not support vision"}',
+    );
   });
 });

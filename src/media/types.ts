@@ -29,4 +29,5 @@ export interface MediaBindingOptions {
   readonly imageGenerator: ImageGenerationPort;
   readonly visionModel: string;
   readonly imageModel?: string;
+  readonly supportsVision?: boolean;
 }

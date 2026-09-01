@@ -9,6 +9,12 @@ const suites = [
   ["t11", "parity:t11"],
 ] as const;
 
+const APPROVED_DIGESTS: Readonly<Record<(typeof suites)[number][0], string>> = Object.freeze({
+  t09: "e6327b5c3c48158a49a85bc0b332291f39052e3f40395f097821e9d0a48219f5",
+  t10: "635f56867579c85fc51293e83223065c56cbac9269902b55b91662c2b1c8fd44",
+  t11: "d9e909a4cf20bd2a89a5802794164cd3733771eb1ca5c65a2c5f8bdcf4907c1e",
+});
+
 const results: Array<{ id: string; exitCode: number; summary: unknown }> = [];
 for (const [id, script] of suites) {
   const run = spawnSync("npm", ["run", script], {
@@ -26,7 +32,12 @@ for (const [id, script] of suites) {
     .split("\n")
     .reverse()
     .find((value) => value.trimStart().startsWith("{"));
-  results.push({ id, exitCode: 0, summary: line === undefined ? null : JSON.parse(line) });
+  const summary = line === undefined ? null : (JSON.parse(line) as Record<string, unknown>);
+  if (summary?.["digest"] !== APPROVED_DIGESTS[id])
+    throw new Error(
+      `${id.toUpperCase()}_DIGEST_CHANGED:${String(summary?.["digest"])}:${APPROVED_DIGESTS[id]}`,
+    );
+  results.push({ id, exitCode: 0, summary });
 }
 
 process.stdout.write(

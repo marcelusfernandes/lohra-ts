@@ -7,9 +7,21 @@ import { join, resolve } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
+import { installNetworkSentinel } from "./network-sentinel.mjs";
+
 const root = resolve(import.meta.dirname, "../../..");
 const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-pack-"));
 const evidenceRoot = resolve(root, ".parity-evidence/t21");
+const sentinelProof = installNetworkSentinel();
+try {
+  await globalThis.fetch("https://network-sentinel.invalid/");
+  throw new Error("T21_PACK_NETWORK_SENTINEL_DID_NOT_BLOCK");
+} catch (error) {
+  if (!(error instanceof Error) || error.message !== "NETWORK_DISABLED") throw error;
+}
+if (sentinelProof.attempts() !== 1) throw new Error("T21_PACK_NETWORK_SENTINEL_COUNTER");
+sentinelProof.restore();
+const network = installNetworkSentinel();
 
 function checked(executable, argv, cwd = root) {
   const result = spawnSync(executable, argv, {
@@ -42,6 +54,8 @@ try {
   if (media.coerceImageCount("2") !== 2) throw new Error("T21_PACK_COERCION_FAILED");
   const data = "data:image/png;base64,cG5n";
   if (media.validateRemoteImage(data) !== data) throw new Error("T21_PACK_DATA_FAILED");
+  const networkAttempts = network.attempts();
+  const failures = networkAttempts;
   const evidence = {
     suite: "t21-media-pack-smoke",
     imported: "dist/media/index.js",
@@ -53,14 +67,16 @@ try {
       decoded_bytes: 3,
       sha256: createHash("sha256").update("png").digest("hex"),
     },
-    network_attempts: 0,
-    failures: 0,
+    network_attempts: networkAttempts,
+    network_sentinel_self_test: "blocked-before-package-import",
+    failures,
   };
   mkdirSync(evidenceRoot, { recursive: true });
   writeFileSync(join(evidenceRoot, "media-pack-smoke.json"), `${JSON.stringify(evidence)}\n`, {
     mode: 0o600,
   });
   process.stdout.write(`${JSON.stringify(evidence)}\n`);
+  process.exitCode = failures === 0 ? 0 : 1;
 } finally {
   rmSync(runtime, { recursive: true, force: true });
 }

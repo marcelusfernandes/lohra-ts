@@ -7,6 +7,7 @@ import {
   MAX_HTTP_URL_CHARS,
   MAX_VISION_IMAGE_BYTES,
 } from "./constants.js";
+import { decodeStrictBase64 } from "./base64.js";
 
 export interface TextPart {
   readonly type: "text";
@@ -123,6 +124,7 @@ export async function buildLocalImagePart(options: {
   readonly path: string;
   readonly localRoot: string;
   readonly rootGuard?: LocalRootGuard;
+  readonly readFile?: (path: string) => Buffer;
   readonly afterInputPreflight?: () => void | Promise<void>;
 }): Promise<ImagePart> {
   const guard = options.rootGuard ?? captureLocalRoot(options.localRoot);
@@ -152,15 +154,29 @@ export async function buildLocalImagePart(options: {
 
   await options.afterInputPreflight?.();
 
-  let bytes: Buffer;
+  let second: Stats;
+  let secondCanonical: string;
   try {
     revalidateLocalRoot(guard);
     rejectSymlinks(root, candidate);
-    const second = statSync(candidate);
-    const secondCanonical = realpathSync(candidate);
+    second = statSync(candidate);
+    secondCanonical = realpathSync(candidate);
     if (secondCanonical !== canonical || !sameIdentity(initial, second))
       throw new Error("image changed after preflight");
-    bytes = readFileSync(candidate);
+  } catch (error) {
+    if (error instanceof Error && error.message === "localRoot changed after preflight")
+      throw error;
+    if (error instanceof Error && error.message === "image changed after preflight") throw error;
+    throw new Error("image changed after preflight", { cause: error });
+  }
+
+  let bytes: Buffer;
+  try {
+    bytes = (options.readFile ?? readFileSync)(candidate);
+  } catch (error) {
+    throw missing(options.path, error);
+  }
+  try {
     const final = statSync(candidate);
     if (!sameIdentity(second, final) || bytes.byteLength !== final.size)
       throw new Error("image changed after preflight");
@@ -184,6 +200,8 @@ function unsafeIpv4(host: string): boolean {
   const values = host.split(".").map(Number);
   const first = values[0] ?? -1;
   const second = values[1] ?? -1;
+  const third = values[2] ?? -1;
+  const fourth = values[3] ?? -1;
   return (
     first === 0 ||
     first === 10 ||
@@ -191,8 +209,9 @@ function unsafeIpv4(host: string): boolean {
     first === 127 ||
     (first === 169 && second === 254) ||
     (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 0) ||
-    (first === 192 && second === 2) ||
+    (first === 192 && second === 0 && third === 0 && fourth !== 9 && fourth !== 10) ||
+    (first === 192 && second === 0 && third === 2) ||
+    (first === 192 && second === 88 && third === 99) ||
     (first === 192 && second === 168) ||
     (first === 198 && (second === 18 || second === 19)) ||
     (first === 198 && second === 51 && values[2] === 100) ||
@@ -201,47 +220,82 @@ function unsafeIpv4(host: string): boolean {
   );
 }
 
-function unsafeHost(hostname: string): boolean {
-  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  if (host === "localhost" || host.endsWith(".localhost")) return true;
-  const version = isIP(host);
-  if (version === 4) return unsafeIpv4(host);
-  if (version === 6)
-    return (
-      host === "::" ||
-      host === "::1" ||
-      host.startsWith("fc") ||
-      host.startsWith("fd") ||
-      /^fe[89ab]/.test(host) ||
-      host.startsWith("2001:db8:") ||
-      host === "2001:db8::" ||
-      host.startsWith("::ffff:")
-    );
-  return false;
+function ipv6Words(host: string): readonly number[] | null {
+  const halves = host.split("::");
+  if (halves.length > 2) return null;
+  const left = (halves[0] ?? "").split(":").filter(Boolean);
+  const right = (halves[1] ?? "").split(":").filter(Boolean);
+  const missing = 8 - left.length - right.length;
+  if ((halves.length === 1 && missing !== 0) || (halves.length === 2 && missing < 1)) return null;
+  const values = [
+    ...left,
+    ...Array.from({ length: halves.length === 2 ? missing : 0 }, () => "0"),
+    ...right,
+  ].map((part) => Number.parseInt(part, 16));
+  return values.length === 8 && values.every((value) => Number.isInteger(value)) ? values : null;
 }
 
-function isBase64Alphabet(code: number): boolean {
+function prefix(words: readonly number[], bits: number, expected: readonly number[]): boolean {
+  const complete = Math.floor(bits / 16);
+  const remainder = bits % 16;
+  for (let index = 0; index < complete; index += 1) {
+    if (words[index] !== expected[index]) return false;
+  }
+  if (remainder === 0) return true;
+  const mask = (0xffff << (16 - remainder)) & 0xffff;
+  return ((words[complete] ?? 0) & mask) === ((expected[complete] ?? 0) & mask);
+}
+
+function embeddedIpv4(words: readonly number[]): string {
+  const high = words[6] ?? 0;
+  const low = words[7] ?? 0;
+  return `${String(high >>> 8)}.${String(high & 0xff)}.${String(low >>> 8)}.${String(low & 0xff)}`;
+}
+
+function unsafeIpv6(host: string): boolean {
+  const words = ipv6Words(host);
+  if (words === null) return true;
+  const isMapped = prefix(words, 96, [0, 0, 0, 0, 0, 0xffff]);
+  const isCompatible = prefix(words, 96, [0, 0, 0, 0, 0, 0]);
+  const isNat64 = prefix(words, 96, [0x64, 0xff9b, 0, 0, 0, 0]);
+  const isSixToFour = prefix(words, 16, [0x2002]);
+  if (isMapped || isCompatible || isNat64) return unsafeIpv4(embeddedIpv4(words));
+  if (isSixToFour) {
+    const high = words[1] ?? 0;
+    const low = words[2] ?? 0;
+    return unsafeIpv4(
+      `${String(high >>> 8)}.${String(high & 0xff)}.${String(low >>> 8)}.${String(low & 0xff)}`,
+    );
+  }
   return (
-    (code >= 0x41 && code <= 0x5a) ||
-    (code >= 0x61 && code <= 0x7a) ||
-    (code >= 0x30 && code <= 0x39) ||
-    code === 0x2b ||
-    code === 0x2f
+    words.every((value) => value === 0) ||
+    (words.slice(0, 7).every((value) => value === 0) && words[7] === 1) ||
+    prefix(words, 7, [0xfc00]) ||
+    prefix(words, 10, [0xfe80]) ||
+    prefix(words, 10, [0xfec0]) ||
+    prefix(words, 8, [0xff00]) ||
+    prefix(words, 64, [0x100, 0, 0, 0]) ||
+    prefix(words, 48, [0x64, 0xff9b, 1]) ||
+    prefix(words, 32, [0x2001, 0]) ||
+    prefix(words, 48, [0x2001, 2, 0]) ||
+    prefix(words, 28, [0x2001, 0x10]) ||
+    prefix(words, 28, [0x2001, 0x20]) ||
+    prefix(words, 32, [0x2001, 0x0db8]) ||
+    prefix(words, 20, [0x3fff]) ||
+    prefix(words, 16, [0x5f00])
   );
 }
 
-function isStrictBase64(value: string): boolean {
-  if (value.length === 0 || value.length % 4 !== 0) return false;
-  let bodyLength = value.length;
-  if (value.endsWith("==")) bodyLength -= 2;
-  else if (value.endsWith("=")) bodyLength -= 1;
-  for (let index = 0; index < bodyLength; index += 1) {
-    if (!isBase64Alphabet(value.charCodeAt(index))) return false;
-  }
-  for (let index = bodyLength; index < value.length; index += 1) {
-    if (value.charCodeAt(index) !== 0x3d) return false;
-  }
-  return true;
+function unsafeHost(hostname: string): boolean {
+  const host = hostname
+    .replace(/^\[|\]$/g, "")
+    .toLowerCase()
+    .replace(/\.+$/, "");
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  const version = isIP(host);
+  if (version === 4) return unsafeIpv4(host);
+  if (version === 6) return unsafeIpv6(host);
+  return false;
 }
 
 export function validateRemoteImage(
@@ -253,10 +307,12 @@ export function validateRemoteImage(
     if (match === null) throw new Error("expected an image data URI");
     const payload = match[2] ?? "";
     if (payload.length > MAX_DATA_URI_BASE64_CHARS) throw new Error("image data URI is too large");
-    if (!isStrictBase64(payload)) throw new Error("invalid image base64 payload");
-    const bytes = (options.decode ?? ((encoded) => Buffer.from(encoded, "base64")))(payload);
-    if (Buffer.from(bytes).toString("base64") !== payload)
+    let bytes: Uint8Array;
+    try {
+      bytes = decodeStrictBase64(payload, options.decode);
+    } catch {
       throw new Error("invalid image base64 payload");
+    }
     if (bytes.byteLength > MAX_VISION_IMAGE_BYTES)
       throw new Error("image data exceeds 20 MiB limit");
     return value;
@@ -283,6 +339,7 @@ export async function buildImagePart(options: {
   readonly url?: string;
   readonly localRoot?: string;
   readonly rootGuard?: LocalRootGuard;
+  readonly readFile?: (path: string) => Buffer;
   readonly afterInputPreflight?: () => void | Promise<void>;
 }): Promise<ImagePart> {
   if (options.path !== undefined)
@@ -290,6 +347,7 @@ export async function buildImagePart(options: {
       path: options.path,
       localRoot: options.localRoot ?? process.cwd(),
       ...(options.rootGuard === undefined ? {} : { rootGuard: options.rootGuard }),
+      ...(options.readFile === undefined ? {} : { readFile: options.readFile }),
       ...(options.afterInputPreflight === undefined
         ? {}
         : { afterInputPreflight: options.afterInputPreflight }),

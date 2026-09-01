@@ -160,6 +160,23 @@ describe("vision image parts", () => {
       }),
     ).rejects.toThrow("localRoot changed after preflight");
   });
+
+  it("preserves the supplied path and read cause without a stack", async () => {
+    const directory = root();
+    const source = join(directory, "unreadable.png");
+    writeFileSync(source, "bytes");
+    await expect(
+      buildImagePart({
+        path: source,
+        localRoot: directory,
+        readFile: () => {
+          const error = new Error("EACCES: permission denied");
+          Object.assign(error, { code: "EACCES" });
+          throw error;
+        },
+      }),
+    ).rejects.toThrow(`failed to read image ${source}: EACCES: permission denied`);
+  });
 });
 
 describe("remote vision validation", () => {
@@ -177,10 +194,24 @@ describe("remote vision validation", () => {
     expect(() => validateRemoteImage("file:///tmp/a.png")).toThrow("unsupported image URL");
     expect(() => validateRemoteImage("javascript:alert(1)")).toThrow("unsupported image URL");
     expect(() => validateRemoteImage("http://localhost/a")).toThrow("unsafe image host");
+    expect(() => validateRemoteImage("http://localhost./a")).toThrow("unsafe image host");
+    expect(() => validateRemoteImage("http://sub.localhost./a")).toThrow("unsafe image host");
     expect(() => validateRemoteImage("http://127.0.0.1/a")).toThrow("unsafe image host");
     expect(() => validateRemoteImage("http://192.0.2.1/a")).toThrow("unsafe image host");
     expect(() => validateRemoteImage("http://[2001:db8::1]/a")).toThrow("unsafe image host");
     expect(() => validateRemoteImage("http://[::ffff:127.0.0.1]/a")).toThrow("unsafe image host");
+    for (const host of ["ff02::1", "fec0::1", "100::1", "2001:2::1", "2001:20::1"]) {
+      expect(() => validateRemoteImage(`http://[${host}]/a`)).toThrow("unsafe image host");
+    }
+    expect(validateRemoteImage("http://[::ffff:8.8.8.8]/a")).toBe("http://[::ffff:8.8.8.8]/a");
+    expect(() => validateRemoteImage("http://[::127.0.0.1]/a")).toThrow("unsafe image host");
+    expect(() => validateRemoteImage("http://[64:ff9b::7f00:1]/a")).toThrow("unsafe image host");
+    expect(validateRemoteImage("http://[64:ff9b::808:808]/a")).toBe("http://[64:ff9b::808:808]/a");
+    expect(() => validateRemoteImage("http://[2002:7f00:1::]/a")).toThrow("unsafe image host");
+    expect(validateRemoteImage("http://192.0.0.9/a")).toBe("http://192.0.0.9/a");
+    expect(validateRemoteImage("http://[2606:4700:4700::1111]/a")).toBe(
+      "http://[2606:4700:4700::1111]/a",
+    );
     expect(() => validateRemoteImage("https://u:p@example.test/a")).toThrow("credentials");
     expect(() => validateRemoteImage("data:text/plain;base64,QQ==")).toThrow("image data URI");
     expect(() => validateRemoteImage("data:image/png;base64,%%%")).toThrow("base64");
@@ -217,6 +248,10 @@ describe("remote vision validation", () => {
     expect(exact).toHaveLength(MAX_DATA_URI_BASE64_CHARS);
     expect(validateRemoteImage(`data:image/png;base64,${exact}`).length).toBe(
       "data:image/png;base64,".length + exact.length,
+    );
+    const decodedLower = Buffer.alloc(MAX_VISION_IMAGE_BYTES - 1).toString("base64");
+    expect(validateRemoteImage(`data:image/png;base64,${decodedLower}`).length).toBe(
+      "data:image/png;base64,".length + decodedLower.length,
     );
     const decodedOverflow = Buffer.alloc(MAX_VISION_IMAGE_BYTES + 1).toString("base64");
     expect(decodedOverflow).toHaveLength(MAX_DATA_URI_BASE64_CHARS);

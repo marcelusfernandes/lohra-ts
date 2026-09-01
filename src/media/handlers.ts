@@ -29,6 +29,7 @@ export function createVisionAnalyzeHandler(options: {
   readonly localRoot?: string;
   readonly supportsVision?: boolean;
   readonly afterInputPreflight?: () => void | Promise<void>;
+  readonly readFile?: (path: string) => Buffer;
 }): ToolHandler {
   const localRoot = resolve(options.localRoot ?? process.cwd());
   const rootGuard = captureLocalRoot(localRoot);
@@ -47,6 +48,7 @@ export function createVisionAnalyzeHandler(options: {
           path: visionString("path", rawPath),
           localRoot,
           rootGuard,
+          ...(options.readFile === undefined ? {} : { readFile: options.readFile }),
           ...(options.afterInputPreflight === undefined
             ? {}
             : { afterInputPreflight: options.afterInputPreflight }),

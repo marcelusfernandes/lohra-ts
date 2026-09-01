@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   mkdirSync,
@@ -10,27 +10,23 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import process from "node:process";
 
 import type { ModelRequest, ModelTransport } from "../../../src/conversation/types.js";
-import {
-  createImageGenHandler,
-  createVisionAnalyzeHandler,
-  textPart,
-  type ImageGenerationPort,
-  type ImageGenerationRequest,
-} from "../../../src/media/index.js";
+import type { ImageGenerationPort, ImageGenerationRequest } from "../../../src/media/types.js";
 import type { NormalizedResponse } from "../../../src/transports/index.js";
 import { canonicalJson } from "../canonical.js";
-import { runMutations } from "./run-mutations.js";
+import { compareMediaRows, type DivergenceSpec, type MediaRow } from "./comparator.js";
+import { installNetworkSentinel } from "./network-sentinel.mjs";
 
 const root = resolve(import.meta.dirname, "../../..");
-const oracleCheckout = "/Users/marcelusfernandes/Desktop/playground-ai/lohra-ts/lohra";
-const oraclePython =
-  "/Users/marcelusfernandes/Desktop/playground-ai/lohra-ts/.oracle-venv/bin/python";
-const oracleLohra =
-  "/Users/marcelusfernandes/Desktop/playground-ai/lohra-ts/.oracle-venv/bin/lohra";
+const pythonWorkspace =
+  process.env["LOHRA_ORACLE_WORKSPACE"] ?? join(homedir(), "Desktop/playground-ai/lohra-ts");
+const oracleCheckout = join(pythonWorkspace, "lohra");
+const oraclePython = join(pythonWorkspace, ".oracle-venv/bin/python");
+const oracleLohra = join(pythonWorkspace, ".oracle-venv/bin/lohra");
 const oracleDriver = resolve(import.meta.dirname, "oracle_driver.py");
 const evidenceRoot = resolve(root, ".parity-evidence/t21");
 const evidencePath = resolve(evidenceRoot, "media-parity.json");
@@ -39,8 +35,8 @@ function command(executable: string, argv: readonly string[], cwd = root): strin
   const result = spawnSync(executable, argv, {
     cwd,
     encoding: "utf8",
-    timeout: 60_000,
-    maxBuffer: 32 * 1024 * 1024,
+    timeout: 120_000,
+    maxBuffer: 64 * 1024 * 1024,
     env: {
       PATH: "/usr/bin:/bin",
       HOME: tmpdir(),
@@ -60,12 +56,10 @@ function sha(value: Uint8Array | string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-const normalized = (value: string): string => value.replace(/Error:\s*/g, "");
-
 class VisionCapture implements ModelTransport {
-  request: ModelRequest | undefined;
+  readonly requests: ModelRequest[] = [];
   complete(request: ModelRequest): Promise<NormalizedResponse> {
-    this.request = request;
+    this.requests.push(request);
     return Promise.resolve({
       content: "oracle-analysis",
       finishReason: "stop",
@@ -79,123 +73,203 @@ class VisionCapture implements ModelTransport {
 }
 
 class ImageCapture implements ImageGenerationPort {
-  request: ImageGenerationRequest | undefined;
+  readonly requests: ImageGenerationRequest[] = [];
   constructor(private readonly payloads: readonly string[]) {}
   generate(request: ImageGenerationRequest): Promise<readonly string[]> {
-    this.request = request;
+    this.requests.push(request);
     return Promise.resolve(this.payloads);
   }
 }
 
-function projectImage(value: string): Record<string, unknown> {
+function projectUrl(value: string): Record<string, unknown> {
   if (value.startsWith("data:")) {
     const comma = value.indexOf(",");
     const header = value.slice(5, comma).replace(/;base64$/, "");
-    const bytes = Buffer.from(value.slice(comma + 1), "base64");
+    const payload = comma < 0 ? "" : value.slice(comma + 1);
+    const bytes = Buffer.from(payload, "base64");
+    const valid = payload.length > 0 && bytes.toString("base64") === payload;
     return {
       kind: "data",
       mime: header,
       length: value.length,
-      decoded_bytes: bytes.length,
-      sha256: sha(bytes),
+      encoded_length: payload.length,
+      decoded_bytes: valid ? bytes.length : 0,
+      valid_base64: valid,
+      sha256: valid ? sha(bytes) : null,
     };
   }
-  const parsed = new URL(value);
+  let scheme: string | null;
+  let hasUserinfo = false;
+  try {
+    const parsed = new URL(value);
+    scheme = parsed.protocol.slice(0, -1);
+    hasUserinfo = parsed.username !== "" || parsed.password !== "";
+  } catch {
+    scheme = value.includes(":") ? (value.split(":", 1)[0] ?? null) : null;
+  }
   return {
     kind: "url",
-    scheme: parsed.protocol.slice(0, -1),
+    scheme,
     length: value.length,
     sha256: sha(value),
-    has_query: parsed.search !== "",
-    has_userinfo: parsed.username !== "" || parsed.password !== "",
+    has_query: value.includes("?"),
+    has_userinfo: hasUserinfo,
   };
 }
 
-async function candidate(): Promise<Record<string, unknown>> {
-  const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-candidate-"));
+const sentinelProof = installNetworkSentinel();
+try {
+  await fetch("https://network-sentinel.invalid/");
+  throw new Error("T21_NETWORK_SENTINEL_DID_NOT_BLOCK");
+} catch (error) {
+  if (!(error instanceof Error) || error.message !== "NETWORK_DISABLED") throw error;
+}
+if (sentinelProof.attempts() !== 1) throw new Error("T21_NETWORK_SENTINEL_COUNTER");
+sentinelProof.restore();
+const network = installNetworkSentinel();
+const media = await import("../../../src/media/index.js");
+const { runMutations } = await import("./run-mutations.js");
+
+async function visionCase(id: string, url: string, prompt: unknown = "x"): Promise<MediaRow> {
+  const runner = new VisionCapture();
+  const directory = mkdtempSync(join(tmpdir(), "lohra-t21-vision-case-"));
   try {
-    const localRoot = join(runtime, "local");
-    const outParent = join(runtime, "output");
-    mkdirSync(localRoot);
-    mkdirSync(outParent);
-    const image = join(localRoot, "one.png");
-    writeFileSync(image, "PNG-T21");
-    const url = "https://example.test/a?sig=CANARY-T21";
-
-    const localRunner = new VisionCapture();
-    await createVisionAnalyzeHandler({ runner: localRunner, model: "m", localRoot })({
-      path: image,
-      prompt: "x",
-    });
-    const localMessage = localRunner.request?.messages[0] as
-      { content?: Array<{ image_url?: { url?: string } }> } | undefined;
-    const localUrl = localMessage?.content?.[1]?.image_url?.url ?? "";
-
-    const urlRunner = new VisionCapture();
-    const vision = createVisionAnalyzeHandler({ runner: urlRunner, model: "m", localRoot });
-    const visionResult = JSON.parse(await vision({ url, prompt: "   " })) as unknown;
-    const urlMessage = urlRunner.request?.messages[0] as
-      { content?: Array<Record<string, unknown>> } | undefined;
-    const parts = urlMessage?.content ?? [];
-    const imagePart = parts[1] as { image_url?: { url?: string } } | undefined;
-
-    const generated = new ImageCapture([Buffer.from("PNG-T21").toString("base64")]);
-    const imageHandler = createImageGenHandler({
-      generator: generated,
-      outDir: join(outParent, "images"),
-      uuid: () => "a".repeat(32),
-    });
-    const imageResult = JSON.parse(
-      await imageHandler({ prompt: [1, "x"], n: "2", size: "512x512" }),
-    ) as { images?: string[] };
-    const saved = imageResult.images?.[0];
-
-    const unsafe = normalized(await vision({ url: "file:///tmp/CANARY-T21" }));
-    const over = normalized(
-      await createImageGenHandler({
-        generator: new ImageCapture(["YQ==", "Yg=="]),
-        outDir: join(outParent, "over"),
-      })({ prompt: "x", n: 1 }),
-    );
-
+    const envelope = JSON.parse(
+      await media.createVisionAnalyzeHandler({ runner, model: "m", localRoot: directory })({
+        url,
+        prompt,
+      }),
+    ) as Record<string, unknown>;
+    if ("error" in envelope)
+      return { id, value: { status: "error", runner_calls: runner.requests.length } };
+    const content = runner.requests[0]?.messages[0]?.["content"] as
+      Array<{ text?: unknown; image_url?: { url?: string } }> | undefined;
     return {
-      vision: {
-        text: textPart("x"),
-        url: projectImage(imagePart?.image_url?.url ?? ""),
-        local: projectImage(localUrl),
-        handler: {
-          result: visionResult,
-          prompt: parts[0],
-          image: projectImage(imagePart?.image_url?.url ?? ""),
-        },
+      id,
+      value: {
+        status: "ok",
+        runner_calls: runner.requests.length,
+        result: envelope,
+        prompt: content?.[0],
+        source: projectUrl(content?.[1]?.image_url?.url ?? ""),
       },
-      image_gen: {
-        request: generated.request,
-        result: { ok: true, images: saved === undefined ? [] : ["<PATH>"] },
-        file:
-          saved === undefined
-            ? null
-            : {
-                bytes: statSync(saved).size,
-                mode: statSync(saved).mode & 0o777,
-                sha256: sha(readFileSync(saved)),
-              },
-      },
-      divergences: [
-        { id: "unsafe-scheme", class: "intentional-divergence/validation", envelope: unsafe },
-        {
-          id: "over-return",
-          class: "intentional-divergence/bounded",
-          envelope: over,
-          final_count: 0,
-        },
-      ],
-      network_attempts: 0,
     };
   } finally {
-    rmSync(runtime, { recursive: true, force: true });
+    rmSync(directory, { recursive: true, force: true });
   }
 }
+
+async function imageCase(
+  id: string,
+  args: Readonly<Record<string, unknown>>,
+  returned = 0,
+): Promise<MediaRow> {
+  const directory = mkdtempSync(join(tmpdir(), "lohra-t21-image-case-"));
+  try {
+    const generator = new ImageCapture(
+      Array.from({ length: returned }, () => Buffer.from("PNG-T21").toString("base64")),
+    );
+    const ids = Array.from({ length: Math.max(1, returned) }, (_, index) =>
+      index.toString(16).padStart(32, "0"),
+    );
+    const envelope = JSON.parse(
+      await media.createImageGenHandler({
+        generator,
+        outDir: join(directory, "images"),
+        uuid: () => ids.shift() ?? "f".repeat(32),
+      })(args),
+    ) as Record<string, unknown>;
+    if ("error" in envelope)
+      return { id, value: { status: "error", runner_calls: generator.requests.length } };
+    const request = generator.requests[0];
+    const images = Array.isArray(envelope["images"]) ? envelope["images"] : [];
+    const files = images.map((path) => {
+      const bytes = readFileSync(String(path));
+      return {
+        bytes: bytes.length,
+        mode: statSync(String(path)).mode & 0o777,
+        sha256: sha(bytes),
+      };
+    });
+    return {
+      id,
+      value: {
+        status: "ok",
+        runner_calls: generator.requests.length,
+        request:
+          request === undefined
+            ? null
+            : { prompt: request.prompt, size: request.size ?? null, n: request.n },
+        result: { ok: envelope["ok"] === true, image_count: images.length },
+        files,
+      },
+    };
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+async function candidateRows(): Promise<readonly MediaRow[]> {
+  const directory = mkdtempSync(join(tmpdir(), "lohra-t21-candidate-"));
+  try {
+    const image = join(directory, "one.png");
+    writeFileSync(image, "PNG-T21");
+    const local = await media.buildImagePart({ path: image, localRoot: directory });
+    const dataValid = `data:image/png;base64,${Buffer.from("PNG-T21").toString("base64")}`;
+    return [
+      { id: "vision.text-part", value: media.textPart("x") },
+      { id: "vision.local-part", value: projectUrl(local.image_url.url) },
+      await visionCase("vision.https", "https://example.test/a?sig=CANARY-T21", "   "),
+      await visionCase("vision.http", "http://example.test/a"),
+      await visionCase("vision.data-valid", dataValid),
+      await visionCase("vision.http-oversize", `https://example.test/${"a".repeat(16_384)}`),
+      await visionCase("vision.credentials", "https://u:p@example.test/a"),
+      await visionCase("vision.malformed", "not a url"),
+      await visionCase("vision.file-scheme", "file:///tmp/CANARY-T21"),
+      await visionCase("vision.javascript", "javascript:alert(1)"),
+      await visionCase("vision.localhost-dot", "http://localhost./a"),
+      await visionCase("vision.private-ip", "http://127.0.0.1/a"),
+      await visionCase("vision.reserved-ipv6", "http://[ff02::1]/a"),
+      await visionCase("vision.data-non-image", "data:text/plain;base64,QQ=="),
+      await visionCase("vision.data-invalid", "data:image/png;base64,%%%"),
+      await visionCase("vision.data-oversize", `data:image/png;base64,${"A".repeat(27_962_032)}`),
+      await imageCase("image.main", { prompt: [1, "x"], n: "2", size: "512x512" }, 1),
+      await imageCase("image.prompt-true", { prompt: true }),
+      await imageCase("image.prompt-object", { prompt: { a: 1 } }),
+      await imageCase("image.prompt-blank", { prompt: "   " }),
+      await imageCase("image.n-string", { prompt: "x", n: "2" }),
+      await imageCase("image.n-float", { prompt: "x", n: 1.9 }),
+      await imageCase("image.n-invalid", { prompt: "x", n: "1.9" }),
+      await imageCase("image.n-clamp", { prompt: "x", n: 50 }),
+      await imageCase("image.size-invalid", { prompt: "x", size: "512x512" }),
+      await imageCase("image.over-return-12", { prompt: "x", n: 1 }, 12),
+    ];
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+const divergence = (
+  classification: DivergenceSpec["classification"],
+  runnerCalls: number,
+): DivergenceSpec => ({
+  classification,
+  candidate: { status: "error", runner_calls: runnerCalls },
+});
+const divergences: Readonly<Record<string, DivergenceSpec>> = Object.freeze({
+  "vision.http-oversize": divergence("intentional-divergence/bounded", 0),
+  "vision.credentials": divergence("intentional-divergence/privacy", 0),
+  "vision.malformed": divergence("intentional-divergence/validation", 0),
+  "vision.file-scheme": divergence("intentional-divergence/validation", 0),
+  "vision.javascript": divergence("intentional-divergence/validation", 0),
+  "vision.localhost-dot": divergence("intentional-divergence/privacy", 0),
+  "vision.private-ip": divergence("intentional-divergence/privacy", 0),
+  "vision.reserved-ipv6": divergence("intentional-divergence/privacy", 0),
+  "vision.data-non-image": divergence("intentional-divergence/validation", 0),
+  "vision.data-invalid": divergence("intentional-divergence/validation", 0),
+  "vision.data-oversize": divergence("intentional-divergence/bounded", 0),
+  "image.over-return-12": divergence("intentional-divergence/bounded", 1),
+});
 
 const oracleCommit = command("/usr/bin/git", ["rev-parse", "HEAD"], oracleCheckout).trim();
 if (oracleCommit !== "16b4785d803ad0ca364a8a67346a04f949fbf592")
@@ -205,32 +279,41 @@ if (command("/usr/bin/git", ["status", "--porcelain"], oracleCheckout) !== "")
 if (command(oracleLohra, ["--version"], oracleCheckout) !== "lohra 0.0.11\n")
   throw new Error("T21_ORACLE_VERSION");
 
-const oracleFirst = JSON.parse(command(oraclePython, [oracleDriver], oracleCheckout)) as unknown;
-const oracleSecond = JSON.parse(command(oraclePython, [oracleDriver], oracleCheckout)) as unknown;
-const candidateFirst = await candidate();
-const candidateSecond = await candidate();
+type DriverResult = { readonly rows: readonly MediaRow[]; readonly network_attempts: number };
+const oracleFirst = JSON.parse(
+  command(oraclePython, [oracleDriver], oracleCheckout),
+) as DriverResult;
+const oracleSecond = JSON.parse(
+  command(oraclePython, [oracleDriver], oracleCheckout),
+) as DriverResult;
+const candidateFirst = await candidateRows();
+const candidateSecond = await candidateRows();
 if (canonicalJson(oracleFirst) !== canonicalJson(oracleSecond))
   throw new Error("T21_ORACLE_NONDETERMINISTIC");
 if (canonicalJson(candidateFirst) !== canonicalJson(candidateSecond))
   throw new Error("T21_CANDIDATE_NONDETERMINISTIC");
+const comparisons = compareMediaRows(oracleFirst.rows, candidateFirst, divergences);
 const mutations = await runMutations();
-if (mutations.some((entry) => !entry.killed)) throw new Error("T21_MUTANT_SURVIVED");
 if (command("/usr/bin/git", ["status", "--porcelain"], oracleCheckout) !== "")
   throw new Error("T21_ORACLE_DIRTY_AFTER");
 
+const comparisonFailures = comparisons.filter((entry) => !entry.pass).length;
+const mutationFailures = mutations.filter((entry) => !entry.killed).length;
+const networkAttempts = oracleFirst.network_attempts + network.attempts();
+const failures = comparisonFailures + mutationFailures + networkAttempts;
 const evidence = {
-  schema_version: 1,
+  schema_version: 2,
   suite: "t21-media",
-  oracle: { commit: oracleCommit, version: "lohra 0.0.11", projection: oracleFirst },
-  candidate: {
-    commit: command("/usr/bin/git", ["rev-parse", "HEAD"]).trim(),
-    projection: candidateFirst,
-  },
+  oracle: { commit: oracleCommit, version: "lohra 0.0.11" },
+  candidate: { commit: command("/usr/bin/git", ["rev-parse", "HEAD"]).trim() },
+  comparisons,
   mutations,
+  toctou_limitation: media.MEDIA_TOCTOU_LIMITATION,
   integration_gate: "integration_unavailable",
-  live_smoke: "not_authorized",
-  network_attempts: 0,
-  failures: 0,
+  live_smoke: { status: "not_authorized", provider: null, requests: 0 },
+  network_sentinel_self_test: "blocked-before-media-import",
+  network_attempts: networkAttempts,
+  failures,
 };
 const serialized = `${canonicalJson(evidence)}\n`;
 if (
@@ -243,5 +326,6 @@ mkdirSync(evidenceRoot, { recursive: true });
 writeFileSync(evidencePath, serialized, { mode: 0o600 });
 chmodSync(evidencePath, 0o600);
 process.stdout.write(
-  `${JSON.stringify({ suite: "t21-media", evidence: evidencePath, sha256: sha(serialized), scenarios: 7, mutants: mutations.length, failures: 0 })}\n`,
+  `${JSON.stringify({ suite: "t21-media", evidence: evidencePath, sha256: sha(serialized), scenarios: comparisons.length, mutants: mutations.length, network_attempts: networkAttempts, failures })}\n`,
 );
+process.exitCode = failures === 0 ? 0 : 1;
