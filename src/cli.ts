@@ -35,10 +35,22 @@ import {
   PROFILE_SPEC,
   SERVE_SPEC,
   SKILL_EXPORT_SPEC,
+  SKILL_SPEC,
   TIERS_LIST_SPEC,
+  TIERS_SPEC,
   TIERS_SUGGEST_SPEC,
+  type CommandSpec,
 } from "./cli/arg-spec.js";
-import { chatTypeErrorMessage, validateArgs, type ArgValidation } from "./cli/arg-validation.js";
+import {
+  classifyUnknownCommand,
+  invalidTopLevelChoice,
+  LEVELS,
+  parseCommand,
+  renderError,
+  unrecognizedArguments,
+  type Level,
+  type ParseResult,
+} from "./cli/arg-validation.js";
 
 const version = "0.0.11";
 const commands = [
@@ -56,6 +68,16 @@ const commands = [
   "skill",
   "update",
 ] as const;
+
+const SPEC_BY_COMMAND: Readonly<Record<string, { readonly spec: CommandSpec; readonly level: Level }>> = {
+  init: { spec: INIT_SPEC, level: LEVELS.init },
+  doctor: { spec: DOCTOR_SPEC, level: LEVELS.doctor },
+  chat: { spec: CHAT_SPEC, level: LEVELS.chat },
+  serve: { spec: SERVE_SPEC, level: LEVELS.serve },
+  models: { spec: MODELS_SPEC, level: LEVELS.models },
+  auth: { spec: AUTH_SPEC, level: LEVELS.auth },
+  profile: { spec: PROFILE_SPEC, level: LEVELS.profile },
+};
 
 export interface CliIo {
   readonly environment: Record<string, string>;
@@ -88,59 +110,51 @@ function help(): string {
   return `usage: lohra [-h] [--version]\n             {${commands.join(",")}}\n             ...\n\nLohra AI agent\n\npositional arguments:\n  {${commands.join(",")}}\n\noptions:\n  -h, --help  show this help message and exit\n  --version   show program's version number and exit\n`;
 }
 
-function usageBanner(): string {
-  return `usage: lohra [-h] [--version]\n             {${commands.join(",")}}\n             ...\n`;
-}
-
-function invalidOrder(value: string): string {
-  const choices = commands.join(", ");
-  return `${usageBanner()}lohra: error: argument command: invalid choice: '${value}' (choose from ${choices})\n`;
-}
-
-function unrecognizedArguments(tokens: readonly string[]): string {
-  return `${usageBanner()}lohra: error: unrecognized arguments: ${tokens.join(" ")}\n`;
-}
-
-/** Validates `argv.slice(1)` against `command`'s spec and, for `tiers`
- * (list/suggest) and `skill export`, the right nested spec — mirroring
- * argparse's own per-subparser routing. Any sub-action the oracle handles
- * outside a spec here (an unknown `tiers`/`skill` action) is left to the
- * existing per-command error path below, unchanged: this returns no
- * findings for it, exactly as if nothing were checked. */
-function validateCommandArgs(command: string, rest: readonly string[]): ArgValidation {
-  switch (command) {
-    case "init":
-      return validateArgs(INIT_SPEC, rest);
-    case "doctor":
-      return validateArgs(DOCTOR_SPEC, rest);
-    case "chat":
-      return validateArgs(CHAT_SPEC, rest);
-    case "serve":
-      return validateArgs(SERVE_SPEC, rest);
-    case "models":
-      return validateArgs(MODELS_SPEC, rest);
-    case "auth":
-      return validateArgs(AUTH_SPEC, rest);
-    case "profile":
-      return validateArgs(PROFILE_SPEC, rest);
-    case "tiers": {
-      const action = rest[0];
-      if (action === "list") return validateArgs(TIERS_LIST_SPEC, rest.slice(1));
-      if (action === "suggest") return validateArgs(TIERS_SUGGEST_SPEC, rest.slice(1));
-      return { unrecognized: [], typeError: null };
+/** Parses `rest` against `command`'s spec (or, for `tiers`/`skill`, first
+ * resolves the required sub-action and then the matching nested spec —
+ * mirroring argparse's own per-subparser routing), reports any error with
+ * that level's own usage banner, and returns the successful `ParseResult`
+ * otherwise. Returns `null` after already writing the rejection to
+ * `io.stderr` and the caller should return exit code 2 immediately. */
+function resolveParse(io: CliIo, command: string, rest: readonly string[]): ParseResult | null {
+  if (command === "tiers" || command === "skill") {
+    const isSkill = command === "skill";
+    const validActions = isSkill ? (["export"] as const) : (["list", "suggest"] as const);
+    const action = rest[0];
+    if (!(validActions as readonly string[]).includes(action ?? "")) {
+      const outer = parseCommand(isSkill ? SKILL_SPEC : TIERS_SPEC, rest);
+      const destName = isSkill ? "skill_cmd" : "tiers_cmd";
+      io.stderr(renderError(outer.error ?? { kind: "requiredMissing", name: destName }, isSkill ? LEVELS.skill : LEVELS.tiers));
+      return null;
     }
-    case "skill": {
-      if (rest[0] === "export") return validateArgs(SKILL_EXPORT_SPEC, rest.slice(1));
-      return { unrecognized: [], typeError: null };
+    const childSpec = isSkill
+      ? SKILL_EXPORT_SPEC
+      : action === "list"
+        ? TIERS_LIST_SPEC
+        : TIERS_SUGGEST_SPEC;
+    const level = isSkill ? LEVELS.skillExport : action === "list" ? LEVELS.tiersList : LEVELS.tiersSuggest;
+    const inner = parseCommand(childSpec, rest.slice(1));
+    if (inner.error !== null) {
+      io.stderr(renderError(inner.error, level));
+      return null;
     }
-    default:
-      return { unrecognized: [], typeError: null };
+    if (inner.extras.length > 0) {
+      io.stderr(unrecognizedArguments(inner.extras));
+      return null;
+    }
+    return inner;
   }
-}
-
-function profileArgument(args: readonly string[]): string | undefined {
-  const index = args.indexOf("--profile");
-  return index < 0 ? undefined : args[index + 1];
+  const entry = SPEC_BY_COMMAND[command] as { readonly spec: CommandSpec; readonly level: Level };
+  const parsed = parseCommand(entry.spec, rest);
+  if (parsed.error !== null) {
+    io.stderr(renderError(parsed.error, entry.level));
+    return null;
+  }
+  if (parsed.extras.length > 0) {
+    io.stderr(unrecognizedArguments(parsed.extras));
+    return null;
+  }
+  return parsed;
 }
 
 export async function runCli(argv: readonly string[], supplied?: CliIo): Promise<number> {
@@ -157,10 +171,6 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     io.stdout(help());
     return 0;
   }
-  if (argv[0] === "--profile") {
-    io.stderr(invalidOrder(argv[1] ?? ""));
-    return 2;
-  }
   const command = argv[0] as string;
   if (
     command !== "doctor" &&
@@ -176,7 +186,19 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     if ((commands as readonly string[]).includes(command)) {
       io.stderr(`lohra: ${command} is not implemented in the TypeScript bootstrap\n`);
     } else {
-      io.stderr(invalidOrder(command));
+      // Mirrors argparse's top-level parser: a token it can't match against
+      // -h/--version is skipped (deferred, not immediately rejected) while
+      // scanning for the first non-option-like token to test against the
+      // `command` positional's choices. Measured: `lohra --frobnicate`
+      // (solo) -> unrecognized; `lohra --profile foo` -> invalid choice
+      // 'foo' (NOT "unrecognized --profile"); `lohra --frobnicate extra1
+      // extra2` -> invalid choice 'extra1'.
+      const classification = classifyUnknownCommand(argv);
+      io.stderr(
+        classification.kind === "invalidChoice"
+          ? invalidTopLevelChoice(classification.value, commands)
+          : unrecognizedArguments(classification.tokens),
+      );
     }
     return 2;
   }
@@ -185,24 +207,13 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
   // the program does anything else — no env/path resolution, no stdout
   // envelope, even under --json (the oracle's own rejection writes zero
   // bytes to stdout in every measured case).
-  const validation = validateCommandArgs(command, argv.slice(1));
-  if (command === "chat" && validation.typeError !== null) {
-    io.stderr(chatTypeErrorMessage(validation.typeError.flag, validation.typeError.value));
-    return 2;
-  }
-  if (validation.unrecognized.length > 0) {
-    io.stderr(unrecognizedArguments(validation.unrecognized));
-    return 2;
-  }
+  const parsed = resolveParse(io, command, argv.slice(1));
+  if (parsed === null) return 2;
 
-  const json = argv.includes("--json");
-  const profile = profileArgument(argv);
-  if (argv.includes("--profile") && profile === undefined) {
-    io.stderr("lohra: error: argument --profile: expected one argument\n");
-    return 2;
-  }
+  const json = parsed.options.has("--json");
+  const profileValue = parsed.options.get("--profile") as string | undefined;
   const environment = { ...io.environment };
-  if (profile !== undefined) environment.LOHRA_PROFILE = profile;
+  if (profileValue !== undefined) environment.LOHRA_PROFILE = profileValue;
   let paths;
   try {
     paths = resolvePaths(environment);
@@ -226,7 +237,7 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
       : value;
   };
   if (command === "profile") {
-    const result = runProfile(argv[1] ?? "", argv[2], {
+    const result = runProfile(parsed.positionals[0] as string, parsed.positionals[1], {
       base: paths.base,
       activeProfile: paths.profile,
     });
@@ -235,20 +246,10 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     return result.code;
   }
   if (command === "skill") {
-    const action = argv[1] ?? "";
-    const name = argv[2] ?? "";
-    if (action !== "export") {
-      io.stderr("lohra: skill supports only `export` in this bootstrap\n");
-      return 2;
-    }
-    const toIndex = argv.indexOf("--to");
+    const name = parsed.positionals[0] as string;
+    const destination = parsed.options.get("--to") as string | undefined;
     try {
-      if (toIndex >= 0) {
-        const destination = argv[toIndex + 1];
-        if (destination === undefined) {
-          io.stderr("lohra: error: argument --to: expected one argument\n");
-          return 2;
-        }
+      if (destination !== undefined) {
         io.stdout(`wrote ${writeExportable(name, destination)}\n`);
       } else {
         io.stdout(readExportable(name));
@@ -292,21 +293,20 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
       base: paths.base,
       home: paths.home,
       environment,
-      noInput: argv.includes("--no-input"),
+      noInput: parsed.options.has("--no-input"),
       isTty: io.isTty ?? false,
       prompter: new Prompter(io.readLine ?? (() => ""), io.stderr),
       writeOut: io.stdout,
     });
   }
   if (command === "auth") {
-    const action = argv[1] ?? "status";
-    const rawValue = argv[2];
-    const value = rawValue?.startsWith("--") ? undefined : rawValue;
+    const action = parsed.positionals[0] as string;
+    const rawValue = parsed.positionals[1];
     const result = await runAuth({
       action,
-      ...(value === undefined ? {} : { value }),
-      assumeYes: argv.includes("--yes"),
-      noInput: argv.includes("--no-input"),
+      ...(rawValue === undefined ? {} : { value: rawValue }),
+      assumeYes: parsed.options.has("--yes"),
+      noInput: parsed.options.has("--no-input"),
       home: paths.home,
       codexHome,
       isTty: io.isTty ?? false,
@@ -332,7 +332,8 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
   }
   if (command === "chat") {
     const result = await runChat({
-      argv,
+      input: parsed.positionals[0] as string,
+      flags: parsed.options,
       environment,
       home: paths.home,
       codexHome,
@@ -343,8 +344,7 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     return result.code;
   }
   if (command === "models") {
-    const providerIndex = argv.indexOf("--provider");
-    const provider = providerIndex < 0 ? undefined : argv[providerIndex + 1];
+    const provider = parsed.options.get("--provider") as string | undefined;
     const result = await runModels({
       json,
       home: paths.home,
@@ -359,9 +359,13 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     return result.code;
   }
   if (command === "tiers") {
+    // The sub-action ("list"/"suggest") is the OUTER tiers_cmd positional,
+    // already validated by resolveParse (which passed rest.slice(1) — not
+    // this token — to the child spec); parsed.positionals here belongs to
+    // that child spec and never contains it.
     const result = await runTiers({
-      action: argv[1] ?? "",
-      noInput: argv.includes("--no-input"),
+      action: argv[1] as string,
+      noInput: parsed.options.has("--no-input"),
       home: paths.home,
       environment,
       probeOllama: normalizeProbe,

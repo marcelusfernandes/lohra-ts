@@ -26,7 +26,6 @@ import {
   resolveApiKey,
   type ProviderProfile,
 } from "../providers/index.js";
-import { CHAT_SPEC } from "../cli/arg-spec.js";
 import { pythonJsonDumpsInsertionOrder } from "../serialization/python-json.js";
 import { openStateForEnvironment, SessionRepository } from "../state/index.js";
 import { SkillStore } from "../skills/index.js";
@@ -50,7 +49,15 @@ import type { ModelTransport } from "../conversation/index.js";
 import { runChatBoundary } from "./chat-boundary.js";
 
 export interface ChatCommandOptions {
-  readonly argv: readonly string[];
+  // Both already resolved by cli.ts's single parseCommand(CHAT_SPEC, ...)
+  // call — this function never re-scans argv itself, so it can't drift
+  // from what was actually validated the way its old standalone prompt()/
+  // option() helpers once did (that drift caused `chat --max-parallel 4
+  // hi` to misread "4" as the prompt, and `chat --sess x hi` — an
+  // unambiguous prefix of --session the validator already accepted — to
+  // do the same).
+  readonly input: string;
+  readonly flags: ReadonlyMap<string, string | true>;
   readonly environment: Readonly<Record<string, string | undefined>>;
   readonly home: string;
   readonly codexHome: string;
@@ -59,30 +66,9 @@ export interface ChatCommandOptions {
 
 type Result = Readonly<{ code: number; stdout: string; stderr: string }>;
 
-function option(argv: readonly string[], name: string): string | undefined {
-  const index = argv.indexOf(name);
-  return index < 0 ? undefined : argv[index + 1];
-}
-
-// Derived from CHAT_SPEC (src/cli/arg-spec.ts) rather than its own literal
-// set, so this can't drift from what cli.ts's validator actually accepts
-// the way it once did — that drift is what let `chat --max-parallel 4 hi`
-// misread "4" as the prompt (an unknown-to-this-function, known-to-the-
-// oracle flag whose value was never skipped).
-const CHAT_VALUE_FLAGS = new Set(
-  CHAT_SPEC.flags.filter((flag) => flag.takesValue).map((flag) => flag.name),
-);
-
-function prompt(argv: readonly string[]): string {
-  for (let index = 1; index < argv.length; index += 1) {
-    const value = argv[index] as string;
-    if (CHAT_VALUE_FLAGS.has(value)) {
-      index += 1;
-      continue;
-    }
-    if (!value.startsWith("--")) return value;
-  }
-  return "";
+function stringFlag(flags: ReadonlyMap<string, string | true>, name: string): string | undefined {
+  const value = flags.get(name);
+  return typeof value === "string" ? value : undefined;
 }
 
 function finite(value: string | undefined, name: string): number | undefined {
@@ -132,8 +118,8 @@ const NO_PROVIDER_CONFIGURED_SHORT =
   "no provider configured — run `lohra init` (or `lohra doctor`); details on stderr";
 
 export async function runChat(options: ChatCommandOptions): Promise<Result> {
-  const input = prompt(options.argv);
-  const provider = option(options.argv, "--provider");
+  const input = options.input;
+  const provider = stringFlag(options.flags, "--provider");
   const route = resolveAuthRoute(options.home);
   if (route.error)
     return runChatBoundary({ home: options.home, codexHome: options.codexHome, input });
@@ -154,7 +140,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     if (credentials === null)
       return runChatBoundary({ home: options.home, codexHome: options.codexHome, input });
     profile = CODEX_PROVIDER;
-    model = option(options.argv, "--model") ?? readCodexModel(options.codexHome) ?? "gpt-5.5";
+    model = stringFlag(options.flags, "--model") ?? readCodexModel(options.codexHome) ?? "gpt-5.5";
     modelTransport = new ResponsesModel(
       createResponsesClient({
         baseUrl: credentials.baseUrl,
@@ -175,7 +161,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
         `unknown provider '${String(provider).toLowerCase()}' (known: ${knownProviderNames().join(", ")})`,
       );
     profile = resolved;
-    model = option(options.argv, "--model") ?? profile.fallbackModels[0];
+    model = stringFlag(options.flags, "--model") ?? profile.fallbackModels[0];
     const key = resolveApiKey(profile.name, options.environment);
     if (profile.apiMode === "chat_completions" && key === null && profile.requiresApiKey) {
       const message =
@@ -184,7 +170,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       return initializationError(input, model ?? null, message);
     }
     const client = buildClient(profile, key ?? (profile.name === "ollama" ? "lohra-local" : ""));
-    const streaming = !options.argv.includes("--json");
+    const streaming = !options.flags.has("--json");
     modelTransport =
       client instanceof AnthropicMessagesClient
         ? new AnthropicMessagesModel(client, streaming)
@@ -204,11 +190,11 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       stderr: `${message}\n`,
     };
   }
-  const maxIterations = finite(option(options.argv, "--max-iterations"), "max-iterations");
+  const maxIterations = finite(stringFlag(options.flags, "--max-iterations"), "max-iterations");
   const connection = openStateForEnvironment(options.environment);
   const sessions = new SessionRepository(connection.database, undefined, connection.ftsEnabled);
   const repository = new SqliteConversationRepository(sessions);
-  const useTools = !options.argv.includes("--no-tools");
+  const useTools = !options.flags.has("--no-tools");
   const memoryStore = new MemoryStore(options.home);
   const builtinSkills = resolve(
     dirname(fileURLToPath(import.meta.url)),
@@ -233,9 +219,9 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     }).text;
   };
   approval.reset();
-  approval.setYolo(options.argv.includes("--yolo"));
+  approval.setYolo(options.flags.has("--yolo"));
   approval.setCallback(
-    options.argv.includes("--json") || options.argv.includes("--no-input") ? () => "deny" : null,
+    options.flags.has("--json") || options.flags.has("--no-input") ? () => "deny" : null,
   );
   const baseDispatch = builtinRegistry.dispatch.bind(builtinRegistry);
   const memoryTool = new MemoryTool(memoryStore);
@@ -265,18 +251,17 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     pricingOverrides: loadPriceOverrides(join(options.home, "pricing.json")),
   });
   try {
+    const sessionId = stringFlag(options.flags, "--session");
     const result = await runtime.runTurn({
       input,
       provider: profile.name,
       model,
       cwd: options.cwd,
-      ...(option(options.argv, "--session") === undefined
-        ? {}
-        : { sessionId: option(options.argv, "--session") as string }),
+      ...(sessionId === undefined ? {} : { sessionId }),
     });
     return {
       code: 0,
-      stdout: options.argv.includes("--json")
+      stdout: options.flags.has("--json")
         ? successEnvelope(result)
         : `${result.response.content ?? ""}\n`,
       stderr: `${subscriptionNote}session: ${result.sessionId}  (resume with --session ${result.sessionId})\n`,

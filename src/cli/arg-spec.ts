@@ -1,19 +1,21 @@
 /** Declarative, per-command argument specs — a faithful transcription of
  * each subcommand's own `add_argument`/`parents=[common]` calls in the
  * oracle's `build_parser()` (backend/lohra/cli.py). This is the single
- * source both the shared unrecognized-argument validator
- * (`arg-validation.ts`) and `chat.ts`'s own prompt/option extraction read
- * from, so the two cannot drift apart the way `chat.ts`'s standalone
- * `takesValue` set once did (it was missing `--max-parallel`, a real oracle
- * flag, and carried `--temperature`, which the oracle's `chat` parser has
- * never declared).
+ * source `arg-parser.ts`'s shared `parseCommand()` reads from, and the only
+ * thing `chat.ts` reads its flags from — so extraction and validation can
+ * never independently drift the way `chat.ts`'s standalone `takesValue` set
+ * once did (it was missing `--max-parallel`, a real oracle flag, and
+ * carried `--temperature`, which the oracle's chat parser has never
+ * declared).
  *
  * Only commands actually implemented in this TypeScript bootstrap have a
  * spec here — `dashboard`, `cron`, `workflow`, and `update` are refused
- * before dispatch (see cli.ts) and are out of scope. Positional VALUES
- * (e.g. `profile`'s `action` choices, `auth`'s free-form `value`) are not
- * validated here — only how many bare (non-flag) tokens a command accepts,
- * matching what's needed to detect an unrecognized EXTRA argument. */
+ * before dispatch (see cli.ts) and are out of scope.
+ *
+ * Flag declaration ORDER is byte-significant: an ambiguous-prefix error
+ * (`ambiguous option: --pro could match --profile, --provider`) lists
+ * candidates in this array's order, matching argparse's own declaration
+ * order. Do not alphabetize. */
 
 export interface FlagSpec {
   readonly name: string;
@@ -21,9 +23,15 @@ export interface FlagSpec {
   readonly type?: "int";
 }
 
+export interface PositionalSpec {
+  readonly name: string;
+  readonly required: boolean;
+  readonly choices?: readonly string[];
+}
+
 export interface CommandSpec {
   readonly flags: readonly FlagSpec[];
-  readonly positionalCount: number;
+  readonly positionals: readonly PositionalSpec[];
 }
 
 const COMMON_FLAGS: readonly FlagSpec[] = [
@@ -31,13 +39,13 @@ const COMMON_FLAGS: readonly FlagSpec[] = [
   { name: "--no-input", takesValue: false },
 ];
 
-function spec(flags: readonly FlagSpec[], positionalCount: number): CommandSpec {
-  return { flags, positionalCount };
+function spec(flags: readonly FlagSpec[], positionals: readonly PositionalSpec[] = []): CommandSpec {
+  return { flags, positionals };
 }
 
-export const INIT_SPEC = spec(COMMON_FLAGS, 0);
+export const INIT_SPEC = spec(COMMON_FLAGS);
 
-export const DOCTOR_SPEC = spec([...COMMON_FLAGS, { name: "--json", takesValue: false }], 0);
+export const DOCTOR_SPEC = spec([...COMMON_FLAGS, { name: "--json", takesValue: false }]);
 
 export const CHAT_SPEC = spec(
   [
@@ -51,51 +59,59 @@ export const CHAT_SPEC = spec(
     { name: "--max-parallel", takesValue: true, type: "int" },
     { name: "--max-iterations", takesValue: true, type: "int" },
   ],
-  1,
+  [{ name: "prompt", required: true }],
 );
 
 // --port is a plain value flag here, not typed `int`: the oracle's own
-// `serve --port <bad>` invalid-int rejection banner has not been measured,
-// so emulating it would risk a byte-format guess. Declared open, not fixed.
-export const SERVE_SPEC = spec(
-  [
-    ...COMMON_FLAGS,
-    { name: "--host", takesValue: true },
-    { name: "--port", takesValue: true },
-    { name: "--insecure", takesValue: false },
-    { name: "--tools", takesValue: true },
-  ],
-  0,
-);
+// `serve --port <bad>` invalid-int rejection has not been measured, so
+// emulating its message would risk a byte-format guess. Declared open.
+export const SERVE_SPEC = spec([
+  ...COMMON_FLAGS,
+  { name: "--host", takesValue: true },
+  { name: "--port", takesValue: true },
+  { name: "--insecure", takesValue: false },
+  { name: "--tools", takesValue: true },
+]);
 
-export const MODELS_SPEC = spec(
-  [
-    ...COMMON_FLAGS,
-    { name: "--provider", takesValue: true },
-    { name: "--json", takesValue: false },
-  ],
-  0,
-);
+export const MODELS_SPEC = spec([
+  ...COMMON_FLAGS,
+  { name: "--provider", takesValue: true },
+  { name: "--json", takesValue: false },
+]);
 
 // `tiers` itself takes no flags — only its `list`/`suggest` children do
-// (each via its own `parents=[common]`). The top spec's single positional
-// is the sub-action token; cli.ts picks the child spec from it and, for any
-// action other than `list`/`suggest`, leaves validation to the existing
-// `runTiers` "unknown action" error path unchanged.
-export const TIERS_SPEC = spec([], 1);
-export const TIERS_LIST_SPEC = spec(COMMON_FLAGS, 0);
-export const TIERS_SUGGEST_SPEC = spec(
-  [...COMMON_FLAGS, { name: "--yes", takesValue: false }],
-  0,
-);
+// (each via its own `parents=[common]`). The dest name `tiers_cmd` and the
+// choice order below are argparse's own (`add_subparsers(dest="tiers_cmd")`
+// then `list`, `suggest` in declaration order) — both are byte-significant
+// for the "required"/"invalid choice" error text.
+export const TIERS_SPEC = spec([], [{ name: "tiers_cmd", required: true, choices: ["list", "suggest"] }]);
+export const TIERS_LIST_SPEC = spec(COMMON_FLAGS);
+export const TIERS_SUGGEST_SPEC = spec([...COMMON_FLAGS, { name: "--yes", takesValue: false }]);
 
 // `profile`'s own parser has no `parents=[common]` in the oracle — it does
 // NOT recognize `--profile`/`--no-input` at the argparse level, unlike
 // every other implemented command.
-export const PROFILE_SPEC = spec([], 2);
+export const PROFILE_SPEC = spec(
+  [],
+  [
+    { name: "action", required: true, choices: ["list", "create"] },
+    { name: "name", required: false },
+  ],
+);
 
-export const AUTH_SPEC = spec([...COMMON_FLAGS, { name: "--yes", takesValue: false }], 2);
+export const AUTH_SPEC = spec(
+  [...COMMON_FLAGS, { name: "--yes", takesValue: false }],
+  [
+    { name: "action", required: true, choices: ["status", "enable", "disable", "login", "logout", "prefer"] },
+    { name: "value", required: false },
+  ],
+);
 
-// `skill`'s only implemented sub-action is `export`; anything else is left
-// to cli.ts's existing "skill supports only `export`" error path, unchanged.
-export const SKILL_EXPORT_SPEC = spec([{ name: "--to", takesValue: true }], 1);
+// `skill`'s own parser has no `parents=[common]`; its only implemented
+// sub-action is `export` (dest `skill_cmd`) — anything else is left to
+// cli.ts's existing "skill supports only `export`" error path, unchanged.
+export const SKILL_SPEC = spec([], [{ name: "skill_cmd", required: true, choices: ["export"] }]);
+export const SKILL_EXPORT_SPEC = spec(
+  [{ name: "--to", takesValue: true }],
+  [{ name: "name", required: true }],
+);
