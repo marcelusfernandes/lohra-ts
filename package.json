@@ -45,7 +45,7 @@
     "parity:t11:live-smoke": "node scripts/parity/openai-server/live-smoke.mjs",
     "parity:t19": "tsx scripts/parity/mcp/run-all.ts",
     "parity:t19:process": "tsx scripts/parity/mcp/run-process.ts",
-    "parity:t19:all": "npm run parity:t19 && npm run parity:t19:process",
+    "parity:t19:all": "sh scripts/parity/mcp/run-regression-gates-locked.sh",
     "parity:t19:gates:raw": "tsx scripts/parity/mcp/run-gates.ts",
     "parity:t19:gates": "sh scripts/parity/mcp/run-regression-gates-locked.sh",
     "parity:t19:live-smoke": "node scripts/parity/mcp/live-smoke.mjs",
