@@ -695,7 +695,7 @@ results.push(
 );
 
 results.push(
-  await scenario("t19-hostile-inputs-fail-closed", [29, 32, 33], async () => {
+  await scenario("t19-hostile-inputs-fail-closed", [29, 32, 33, 34], async () => {
     const contentObject = await pair("hostile-closed-content-object", {
       prompt: "SCEN:mcpcall go",
       mcpConfig: ONE_SERVER,
@@ -747,6 +747,73 @@ results.push(
       });
     }
 
+    const ambiguousContainerShapes = [];
+    for (const [name, spec, cause] of [
+      [
+        "args-object",
+        { command: "fixture", args: { A: 1 } },
+        "server 'bad' field 'args' must be a string or array",
+      ],
+      [
+        "env-boolean-key",
+        { command: "fixture", env: [[true, "x"]] },
+        "server 'bad' field 'env' entry 0 key must be a non-ambiguous string or null",
+      ],
+      [
+        "env-number-key",
+        { command: "fixture", env: [[1, "x"]] },
+        "server 'bad' field 'env' entry 0 key must be a non-ambiguous string or null",
+      ],
+      [
+        "env-float-key",
+        { command: "fixture", env: [[1.5, "x"]] },
+        "server 'bad' field 'env' entry 0 key must be a non-ambiguous string or null",
+      ],
+      [
+        "env-array-key",
+        { command: "fixture", env: [[["nested"], "x"]] },
+        "server 'bad' field 'env' entry 0 key must be a non-ambiguous string or null",
+      ],
+      [
+        "env-object-key",
+        { command: "fixture", env: [[{ nested: true }, "x"]] },
+        "server 'bad' field 'env' entry 0 key must be a non-ambiguous string or null",
+      ],
+      [
+        "env-canonical-index",
+        { command: "fixture", env: [["1", "x"]] },
+        "server 'bad' field 'env' entry 0 key '1' is a canonical array-index string",
+      ],
+      [
+        "env-duplicate-after-null",
+        { command: "fixture", env: [[null, "none"], ["null", "string"]] },
+        "server 'bad' field 'env' entry 1 collides after key coercion: 'null'",
+      ],
+    ] as const) {
+      const observed = await pair(`hostile-closed-${name}`, {
+        mcpConfig: {
+          mcpServers: { bad: spec, good: { command: "fixture" } },
+        },
+        fixture: {
+          servers: {
+            bad: { tools: [{ name: "bad_tool" }] },
+            good: { tools: [{ name: "ok" }] },
+          },
+        },
+      });
+      ambiguousContainerShapes.push({
+        name,
+        oracleMcp: mcpNames(observed.oracle),
+        oracleStderr: observed.oracle.stderr,
+        candidateMcp: mcpNames(observed.candidate),
+        candidateStderr: observed.candidate.stderr,
+        pass:
+          mcpNames(observed.candidate).length === 0 &&
+          observed.candidate.stderr === `ignoring MCP config: ${cause}\n` &&
+          observed.candidate.exitCode === 0,
+      });
+    }
+
     const candidateBadTools = mcpNames(invalidName.candidate).filter((name) =>
       name.startsWith("mcp_bad_"),
     );
@@ -768,7 +835,8 @@ results.push(
       contentObject.oracle.exitCode === 0 &&
       contentObject.candidate.exitCode === 0 &&
       invalidNamePass &&
-      configShapes.every((entry) => entry.pass);
+      configShapes.every((entry) => entry.pass) &&
+      ambiguousContainerShapes.every((entry) => entry.pass);
     return {
       pass,
       projection: {
@@ -787,8 +855,9 @@ results.push(
           candidateAtomicBatchRejection: candidateBadTools.length === 0,
         },
         configShapes,
+        ambiguousContainerShapes,
       },
-      note: "ADR 0002 deliberate fail-closed policy for F5 rows 3/6/7; bilateral records expected oracle divergences instead of treating chat-bilateral as equality.",
+      note: "ADR 0002 deliberate fail-closed policy for F5 rows 3/6/7 and contract-v4 ambiguous args/env shapes; bilateral records expected oracle divergences instead of treating chat-bilateral as equality.",
     };
   }),
 );

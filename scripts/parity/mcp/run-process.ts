@@ -1,7 +1,9 @@
 #!/usr/bin/env node
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 
+import { loadMcpConfig } from "../../../src/mcp/config.js";
 import {
   deregisterServer,
   MCPManager,
@@ -222,6 +224,70 @@ results.push(
         activeProtection: false,
       },
     };
+  }),
+);
+
+results.push(
+  await scenario("t19-hostile-config-domain-guards", [34], "process-ts supporting", () => {
+    const directory = mkdtempSync(join(tmpdir(), "lohra-t19-config-domain-"));
+    const configPath = join(directory, "mcp.json");
+    const load = (spec: Readonly<Record<string, unknown>>) => {
+      writeFileSync(
+        configPath,
+        JSON.stringify({ mcpServers: { fix: { command: "fixture", ...spec } } }),
+      );
+      return loadMcpConfig(configPath);
+    };
+    try {
+      const accepted = load({
+        args: "ab",
+        env: [[null, "nil"], ["A", 1], ["__proto__", { safe: true }]],
+      })[0];
+      const acceptedEnv = accepted?.env;
+      const rejected = [];
+      for (const [name, spec] of [
+        ["args-object", { args: { A: 1 } }],
+        ["boolean-key", { env: [[true, "x"]] }],
+        ["number-key", { env: [[1, "x"]] }],
+        ["float-key", { env: [[1.5, "x"]] }],
+        ["array-key", { env: [[["nested"], "x"]] }],
+        ["object-key", { env: [[{ nested: true }, "x"]] }],
+        ["canonical-index", { env: [["1", "x"]] }],
+        ["duplicate-after-null", { env: [[null, "none"], ["null", "string"]] }],
+      ] as const) {
+        try {
+          load(spec);
+          rejected.push({ name, cause: null });
+        } catch (error) {
+          rejected.push({ name, cause: error instanceof Error ? error.message : String(error) });
+        }
+      }
+      return {
+        pass:
+          accepted?.args.join("") === "ab" &&
+          acceptedEnv !== undefined &&
+          Object.getPrototypeOf(acceptedEnv) === null &&
+          Object.hasOwn(acceptedEnv, "__proto__") &&
+          acceptedEnv["polluted"] === undefined &&
+          JSON.stringify(acceptedEnv) ===
+            '{"null":"nil","A":1,"__proto__":{"safe":true}}' &&
+          rejected.every((entry) => typeof entry.cause === "string" && entry.cause.length > 0),
+        projection: {
+          accepted: {
+            args: accepted?.args,
+            envJson: JSON.stringify(acceptedEnv),
+            nullPrototype: acceptedEnv !== undefined && Object.getPrototypeOf(acceptedEnv) === null,
+            protoOwnProperty: Object.hasOwn(acceptedEnv ?? {}, "__proto__"),
+            prototypePolluted: acceptedEnv?.["polluted"] !== undefined,
+          },
+          rejected,
+          principalProof: "t19-hostile-inputs-oracle-aligned + t19-hostile-inputs-fail-closed",
+        },
+        note: "Supporting mutation-kill surface for contract-v4 mapping guards; principal evidence remains chat-bilateral.",
+      };
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   }),
 );
 
