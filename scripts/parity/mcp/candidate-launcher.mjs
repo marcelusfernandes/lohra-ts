@@ -30,9 +30,10 @@ const fixture = JSON.parse(fixtureRaw ?? '{"servers":{}}');
 class FixtureSession {
   #listCalls = 0;
 
-  constructor(server, spec) {
+  constructor(server, spec, config) {
     this.server = server;
     this.spec = spec;
+    this.config = config;
   }
 
   async listTools() {
@@ -47,6 +48,20 @@ class FixtureSession {
   async callTool(name, args) {
     if (this.spec.call_raises) throw new Error(this.spec.call_raises);
     if (Object.hasOwn(this.spec.call_results ?? {}, name)) return this.spec.call_results[name];
+    if (this.spec.echo_config) {
+      const observed = {
+        name: this.config.name,
+        transport: this.config.transport,
+        command: this.config.command ?? null,
+        args: [...this.config.args],
+        env: { ...this.config.env },
+        url: this.config.url ?? null,
+      };
+      return {
+        content: [{ type: "text", text: `observed-config:${JSON.stringify(observed)}` }],
+        isError: false,
+      };
+    }
     return {
       content: [
         {
@@ -66,6 +81,6 @@ if (fixtureRaw !== undefined) {
     const spec = fixture.servers?.[config.name];
     if (spec === undefined) throw new Error(`no fixture for MCP server '${config.name}'`);
     if (spec.connect_raises) throw new Error(spec.connect_raises);
-    return new FixtureSession(config.name, spec);
+    return new FixtureSession(config.name, spec, config);
   };
 }

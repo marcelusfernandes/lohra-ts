@@ -68,6 +68,31 @@ function normalizeRaisedEnvelope(value: string): string {
   return value.replace(/Tool execution failed: [A-Za-z_.]+:/u, "Tool execution failed: <CLASS>:");
 }
 
+function mcpFunctions(observation: ChatObservation): readonly Record<string, unknown>[] {
+  return (parent(observation)?.definitions ?? [])
+    .map((entry) => (entry as Record<string, unknown>)["function"])
+    .filter((entry): entry is Record<string, unknown> => {
+      if (entry === null || typeof entry !== "object") return false;
+      const fn = entry as Record<string, unknown>;
+      return typeof fn["name"] === "string" && fn["name"].startsWith("mcp_");
+    });
+}
+
+function publicToolFailure(observation: ChatObservation): boolean {
+  return /Tool execution failed: [^:>]+: .+/u.test(output(observation));
+}
+
+function mcpResultContent(observation: ChatObservation): string | null {
+  const match = output(observation).match(/^MCPRESULT<(.*)>$/su);
+  if (match?.[1] === undefined) return null;
+  try {
+    const envelope = JSON.parse(match[1]) as Record<string, unknown>;
+    return typeof envelope["content"] === "string" ? envelope["content"] : null;
+  } catch {
+    return null;
+  }
+}
+
 async function pair(
   tag: string,
   options: {
@@ -543,6 +568,213 @@ results.push(
       projections.push({ name: item.name, oracle: oracleOutput, candidate: candidateOutput });
     }
     return { pass, projection: projections };
+  }),
+);
+
+results.push(
+  await scenario("t19-hostile-inputs-oracle-aligned", [27, 28, 30, 31, 34], async () => {
+    const descriptions = await pair("hostile-aligned-descriptions", {
+      mcpConfig: ONE_SERVER,
+      fixture: {
+        servers: {
+          fix: {
+            tools: [
+              { name: "number_desc", description: 123, inputSchema: { type: "object" } },
+              {
+                name: "object_desc",
+                description: { source: "hostile-fixture" },
+                inputSchema: { type: "object" },
+              },
+            ],
+          },
+        },
+      },
+    });
+    const descriptionProjection = (side: ChatObservation) =>
+      mcpFunctions(side).map((fn) => ({ name: fn["name"], description: fn["description"] }));
+
+    const textNonString = await pair("hostile-aligned-text-number", {
+      prompt: "SCEN:mcpcall go",
+      mcpConfig: ONE_SERVER,
+      fixture: oneToolFixture({
+        call_results: { echo: { content: [{ type: "text", text: 123 }], isError: false } },
+      }),
+      toolName: "mcp_fix_echo",
+    });
+
+    const placeholders = [];
+    for (const [name, type, expected] of [
+      ["none", null, "[None block]"],
+      ["true", true, "[True block]"],
+    ] as const) {
+      const observed = await pair(`hostile-aligned-placeholder-${name}`, {
+        prompt: "SCEN:mcpcall go",
+        mcpConfig: ONE_SERVER,
+        fixture: oneToolFixture({
+          call_results: { echo: { content: [{ type }], isError: false } },
+        }),
+        toolName: "mcp_fix_echo",
+      });
+      placeholders.push({
+        name,
+        expected,
+        oracle: output(observed.oracle),
+        candidate: output(observed.candidate),
+        pass:
+          output(observed.oracle) === output(observed.candidate) &&
+          output(observed.oracle).includes(expected),
+      });
+    }
+
+    const configObserved = await pair("hostile-aligned-config-containers", {
+      prompt: "SCEN:mcpcall go",
+      mcpConfig: {
+        mcpServers: { fix: { command: "fixture-command", args: "abc", env: { A: 1 } } },
+      },
+      fixture: {
+        servers: {
+          fix: {
+            echo_config: true,
+            tools: [{ name: "echo", description: "d", inputSchema: { type: "object" } }],
+          },
+        },
+      },
+      toolName: "mcp_fix_echo",
+    });
+    const expectedDescriptions = [
+      { name: "mcp_fix_number_desc", description: 123 },
+      { name: "mcp_fix_object_desc", description: { source: "hostile-fixture" } },
+    ];
+    const expectedConfig =
+      'observed-config:{"name":"fix","transport":"stdio","command":"fixture-command","args":["a","b","c"],"env":{"A":1},"url":null}';
+    const pass =
+      exact(descriptionProjection(descriptions.oracle), expectedDescriptions) &&
+      exact(descriptionProjection(descriptions.candidate), expectedDescriptions) &&
+      publicToolFailure(textNonString.oracle) &&
+      publicToolFailure(textNonString.candidate) &&
+      placeholders.every((entry) => entry.pass) &&
+      output(configObserved.oracle) === output(configObserved.candidate) &&
+      mcpResultContent(configObserved.oracle) === expectedConfig &&
+      mcpResultContent(configObserved.candidate) === expectedConfig;
+    return {
+      pass,
+      projection: {
+        descriptions: {
+          oracle: descriptionProjection(descriptions.oracle),
+          candidate: descriptionProjection(descriptions.candidate),
+        },
+        textNonString: {
+          oracle: normalizeRaisedEnvelope(output(textNonString.oracle)),
+          candidate: normalizeRaisedEnvelope(output(textNonString.candidate)),
+          semanticClass: "Tool execution failed with non-empty cause",
+        },
+        placeholders,
+        configObserved: {
+          oracle: output(configObserved.oracle),
+          candidate: output(configObserved.candidate),
+        },
+      },
+      note: "Oracle alignment for F5 rows 1/2/4/5/8; args/env remains an ADR 0002 reopen-before-live-SDK debt.",
+    };
+  }),
+);
+
+results.push(
+  await scenario("t19-hostile-inputs-fail-closed", [29, 32, 33], async () => {
+    const contentObject = await pair("hostile-closed-content-object", {
+      prompt: "SCEN:mcpcall go",
+      mcpConfig: ONE_SERVER,
+      fixture: oneToolFixture({
+        call_results: { echo: { content: { a: 1 }, isError: false } },
+      }),
+      toolName: "mcp_fix_echo",
+    });
+
+    const invalidName = await pair("hostile-closed-invalid-name", {
+      mcpConfig: {
+        mcpServers: { bad: { command: "fixture" }, good: { command: "fixture" } },
+      },
+      fixture: {
+        servers: {
+          bad: { tools: [{ name: "prefix" }, { name: 123 }, { name: "suffix" }] },
+          good: { tools: [{ name: "ok" }] },
+        },
+      },
+    });
+
+    const configShapes = [];
+    for (const [name, bad] of [
+      ["url", { url: 123 }],
+      ["command", { command: ["fixture", "server"] }],
+    ] as const) {
+      const observed = await pair(`hostile-closed-config-${name}`, {
+        mcpConfig: { mcpServers: { bad, good: { command: "fixture" } } },
+        fixture: {
+          servers: {
+            bad: { tools: [{ name: "bad_tool" }] },
+            good: { tools: [{ name: "ok" }] },
+          },
+        },
+      });
+      const candidateCause = `ignoring MCP config: server 'bad' field '${name}' must be a string\n`;
+      configShapes.push({
+        name,
+        oracleMcp: mcpNames(observed.oracle),
+        candidateMcp: mcpNames(observed.candidate),
+        oracleStderr: observed.oracle.stderr,
+        candidateStderr: observed.candidate.stderr,
+        pass:
+          mcpNames(observed.oracle).length === 2 &&
+          mcpNames(observed.candidate).length === 0 &&
+          observed.candidate.stderr === candidateCause &&
+          observed.oracle.exitCode === 0 &&
+          observed.candidate.exitCode === 0,
+      });
+    }
+
+    const candidateBadTools = mcpNames(invalidName.candidate).filter((name) =>
+      name.startsWith("mcp_bad_"),
+    );
+    const oracleBadTools = mcpNames(invalidName.oracle).filter((name) =>
+      name.startsWith("mcp_bad_"),
+    );
+    const invalidNamePass =
+      candidateBadTools.length === 0 &&
+      exact(mcpNames(invalidName.candidate), ["mcp_good_ok"]) &&
+      invalidName.candidate.stderr.includes(
+        "MCP server 'bad' failed to connect: MCP server 'bad' returned a truthy non-string tool name: 123",
+      ) &&
+      mcpNames(invalidName.oracle).includes("mcp_good_ok") &&
+      invalidName.oracle.exitCode === 0 &&
+      invalidName.candidate.exitCode === 0;
+    const pass =
+      output(contentObject.oracle).includes("[content block]") &&
+      publicToolFailure(contentObject.candidate) &&
+      contentObject.oracle.exitCode === 0 &&
+      contentObject.candidate.exitCode === 0 &&
+      invalidNamePass &&
+      configShapes.every((entry) => entry.pass);
+    return {
+      pass,
+      projection: {
+        contentObject: {
+          oracle: output(contentObject.oracle),
+          candidate: normalizeRaisedEnvelope(output(contentObject.candidate)),
+          expectedDivergence: "candidate fails closed",
+        },
+        invalidName: {
+          oracleMcp: mcpNames(invalidName.oracle),
+          oracleBadTools,
+          oracleStderr: invalidName.oracle.stderr,
+          candidateMcp: mcpNames(invalidName.candidate),
+          candidateBadTools,
+          candidateStderr: invalidName.candidate.stderr,
+          candidateAtomicBatchRejection: candidateBadTools.length === 0,
+        },
+        configShapes,
+      },
+      note: "ADR 0002 deliberate fail-closed policy for F5 rows 3/6/7; bilateral records expected oracle divergences instead of treating chat-bilateral as equality.",
+    };
   }),
 );
 
