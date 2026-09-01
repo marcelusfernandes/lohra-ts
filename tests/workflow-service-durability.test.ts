@@ -122,8 +122,12 @@ describe("workflow service durability", () => {
     const line = repository.getRunState(started.run_id);
     expect(line).not.toBeNull();
     expect((line as Record<string, unknown>).status).toBe("complete");
-    // the run-level ledger landed BEFORE the lease was released
-    expect(repository.getRunSpend(started.run_id)).not.toBeNull();
+    // the run-level ledger landed BEFORE the lease was released, with the
+    // terminal stretch's tokens (3+2) — a post-release persist would be refused
+    const spendRow = repository.getRunSpend(started.run_id);
+    expect(spendRow).not.toBeNull();
+    expect(Number(spendRow?.tokens_in)).toBe(3);
+    expect(Number(spendRow?.tokens_out)).toBe(2);
     close();
   });
 
