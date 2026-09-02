@@ -41,8 +41,10 @@ const mutants: readonly Mutant[] = [
     edits: [
       {
         file: auditModel,
-        before: 'const RAW_FIELDS = new Set([\n  "prompt",\n  "response",',
-        after: 'const RAW_FIELDS = new Set([\n  "response",',
+        before:
+          "function safeValue(value: unknown, key: string, depth: number): unknown {\n  if (RAW_FIELDS.has(key)) {",
+        after:
+          'function safeValue(value: unknown, key: string, depth: number): unknown {\n  if (key === "prompt") return value;\n  if (RAW_FIELDS.has(key)) {',
       },
     ],
   },
