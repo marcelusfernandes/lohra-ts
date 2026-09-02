@@ -154,7 +154,7 @@ describe("lohra CLI bootstrap", () => {
     }
   });
 
-  it.each(["dashboard", "cron", "workflow", "update"])(
+  it.each(["dashboard", "cron", "update"])(
     "temporarily refuses future command %s with exit 2",
     async (command) => {
       const stderr: string[] = [];
@@ -168,4 +168,16 @@ describe("lohra CLI bootstrap", () => {
       expect(stderr.join("")).toContain("not implemented in the TypeScript bootstrap");
     },
   );
+
+  it("requires a read-only workflow action", async () => {
+    const stderr: string[] = [];
+    expect(
+      await runCli(["workflow"], {
+        environment: environment(),
+        stdout: () => undefined,
+        stderr: (value) => stderr.push(value),
+      }),
+    ).toBe(2);
+    expect(stderr.join("")).toContain("the following arguments are required: workflow_cmd");
+  });
 });

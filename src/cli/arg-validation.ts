@@ -15,7 +15,12 @@ export type CommandError =
   | { readonly kind: "invalidInt"; readonly flag: string; readonly value: string }
   | { readonly kind: "unexpectedValue"; readonly flag: string; readonly value: string }
   | { readonly kind: "requiredMissing"; readonly name: string }
-  | { readonly kind: "invalidChoice"; readonly name: string; readonly value: string; readonly choices: readonly string[] };
+  | {
+      readonly kind: "invalidChoice";
+      readonly name: string;
+      readonly value: string;
+      readonly choices: readonly string[];
+    };
 
 export interface ParseResult {
   readonly options: ReadonlyMap<string, string | true>;
@@ -58,7 +63,8 @@ export function parseCommand(spec: CommandSpec, argv: readonly string[]): ParseR
       const name = eq < 0 ? token : token.slice(0, eq);
       const inline = eq < 0 ? undefined : token.slice(eq + 1);
       const exact = spec.flags.find((flag) => flag.name === name);
-      const candidates = exact !== undefined ? [exact] : spec.flags.filter((flag) => flag.name.startsWith(name));
+      const candidates =
+        exact !== undefined ? [exact] : spec.flags.filter((flag) => flag.name.startsWith(name));
       if (candidates.length === 0) {
         extras.push(token);
         continue;
@@ -68,13 +74,22 @@ export function parseCommand(spec: CommandSpec, argv: readonly string[]): ParseR
           options,
           positionals,
           extras,
-          error: { kind: "ambiguous", token: name, candidates: candidates.map((flag) => flag.name) },
+          error: {
+            kind: "ambiguous",
+            token: name,
+            candidates: candidates.map((flag) => flag.name),
+          },
         };
       }
       const flag = candidates[0] as FlagSpec;
       if (!flag.takesValue) {
         if (inline !== undefined)
-          return { options, positionals, extras, error: { kind: "unexpectedValue", flag: flag.name, value: inline } };
+          return {
+            options,
+            positionals,
+            extras,
+            error: { kind: "unexpectedValue", flag: flag.name, value: inline },
+          };
         options.set(flag.name, true);
         continue;
       }
@@ -88,7 +103,12 @@ export function parseCommand(spec: CommandSpec, argv: readonly string[]): ParseR
         return { options, positionals, extras, error: { kind: "missingValue", flag: flag.name } };
       if (consumesNext) index += 1;
       if (flag.type === "int" && !isPythonInt(next))
-        return { options, positionals, extras, error: { kind: "invalidInt", flag: flag.name, value: next } };
+        return {
+          options,
+          positionals,
+          extras,
+          error: { kind: "invalidInt", flag: flag.name, value: next },
+        };
       options.set(flag.name, next);
       continue;
     }
@@ -98,13 +118,19 @@ export function parseCommand(spec: CommandSpec, argv: readonly string[]): ParseR
       continue;
     }
     if (slot.choices !== undefined && !slot.choices.includes(token))
-      return { options, positionals, extras, error: { kind: "invalidChoice", name: slot.name, value: token, choices: slot.choices } };
+      return {
+        options,
+        positionals,
+        extras,
+        error: { kind: "invalidChoice", name: slot.name, value: token, choices: slot.choices },
+      };
     positionals.push(token);
   }
 
   for (let index = positionals.length; index < spec.positionals.length; index += 1) {
     const slot = spec.positionals[index] as { readonly name: string; readonly required: boolean };
-    if (slot.required) return { options, positionals, extras, error: { kind: "requiredMissing", name: slot.name } };
+    if (slot.required)
+      return { options, positionals, extras, error: { kind: "requiredMissing", name: slot.name } };
   }
 
   return { options, positionals, extras, error: null };
@@ -128,7 +154,10 @@ export const TOP_LEVEL: Level = {
 };
 
 export const LEVELS = {
-  init: { prefix: "lohra init", banner: "usage: lohra init [-h] [--profile PROFILE] [--no-input]\n" },
+  init: {
+    prefix: "lohra init",
+    banner: "usage: lohra init [-h] [--profile PROFILE] [--no-input]\n",
+  },
   doctor: {
     prefix: "lohra doctor",
     banner: "usage: lohra doctor [-h] [--profile PROFILE] [--no-input] [--json]\n",
@@ -175,6 +204,27 @@ export const LEVELS = {
     prefix: "lohra skill export",
     banner: "usage: lohra skill export [-h] [--to TO] name\n",
   },
+  workflow: {
+    prefix: "lohra workflow",
+    banner: "usage: lohra workflow [-h] [--profile PROFILE] [--no-input] {list,watch,audit} ...\n",
+  },
+  workflowList: {
+    prefix: "lohra workflow list",
+    banner: "usage: lohra workflow list [-h] [--limit LIMIT]\n",
+  },
+  workflowWatch: {
+    prefix: "lohra workflow watch",
+    banner: "usage: lohra workflow watch [-h] [--last] [--poll POLL] [run_id]\n",
+  },
+  workflowAudit: {
+    prefix: "lohra workflow audit",
+    banner:
+      "usage: lohra workflow audit [-h] [--node NODE_ID] [--event EVENT_TYPE]\n" +
+      "                            [--sub-id SUB_ID] [--segment-id SEGMENT_ID]\n" +
+      "                            [--attempt ATTEMPT] [--after-seq AFTER_SEQ]\n" +
+      "                            [--snapshot-seq SNAPSHOT_SEQ] [--limit LIMIT]\n" +
+      "                            run_id\n",
+  },
 } as const satisfies Record<string, Level>;
 
 export function renderError(error: CommandError, level: Level): string {
@@ -216,7 +266,9 @@ export function invalidTopLevelChoice(value: string, choices: readonly string[])
  * exercises that combination. */
 export function classifyUnknownCommand(
   argv: readonly string[],
-): { readonly kind: "invalidChoice"; readonly value: string } | { readonly kind: "unrecognized"; readonly tokens: readonly string[] } {
+):
+  | { readonly kind: "invalidChoice"; readonly value: string }
+  | { readonly kind: "unrecognized"; readonly tokens: readonly string[] } {
   for (const token of argv) {
     if (!looksLikeOption(token)) return { kind: "invalidChoice", value: token };
   }

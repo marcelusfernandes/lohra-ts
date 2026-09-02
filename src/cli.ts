@@ -11,6 +11,7 @@ import { runTiers } from "./commands/tiers.js";
 import { runAuth } from "./commands/auth.js";
 import { runChat } from "./commands/chat.js";
 import { runServe } from "./commands/serve.js";
+import { runWorkflowCommand } from "./commands/workflow.js";
 import { readCodexModel } from "./auth/codex.js";
 import { subscriptionActive } from "./auth/credentials.js";
 import type { OAuthPost } from "./auth/oauth.js";
@@ -39,6 +40,10 @@ import {
   TIERS_LIST_SPEC,
   TIERS_SPEC,
   TIERS_SUGGEST_SPEC,
+  WORKFLOW_AUDIT_SPEC,
+  WORKFLOW_LIST_SPEC,
+  WORKFLOW_SPEC,
+  WORKFLOW_WATCH_SPEC,
   type CommandSpec,
 } from "./cli/arg-spec.js";
 import {
@@ -69,7 +74,9 @@ const commands = [
   "update",
 ] as const;
 
-const SPEC_BY_COMMAND: Readonly<Record<string, { readonly spec: CommandSpec; readonly level: Level }>> = {
+const SPEC_BY_COMMAND: Readonly<
+  Record<string, { readonly spec: CommandSpec; readonly level: Level }>
+> = {
   init: { spec: INIT_SPEC, level: LEVELS.init },
   doctor: { spec: DOCTOR_SPEC, level: LEVELS.doctor },
   chat: { spec: CHAT_SPEC, level: LEVELS.chat },
@@ -117,6 +124,42 @@ function help(): string {
  * otherwise. Returns `null` after already writing the rejection to
  * `io.stderr` and the caller should return exit code 2 immediately. */
 function resolveParse(io: CliIo, command: string, rest: readonly string[]): ParseResult | null {
+  if (command === "workflow") {
+    const action = rest[0];
+    const actions = ["list", "watch", "audit"] as const;
+    if (!(actions as readonly string[]).includes(action ?? "")) {
+      const outer = parseCommand(WORKFLOW_SPEC, rest);
+      io.stderr(
+        renderError(
+          outer.error ?? { kind: "requiredMissing", name: "workflow_cmd" },
+          LEVELS.workflow,
+        ),
+      );
+      return null;
+    }
+    const childSpec =
+      action === "list"
+        ? WORKFLOW_LIST_SPEC
+        : action === "watch"
+          ? WORKFLOW_WATCH_SPEC
+          : WORKFLOW_AUDIT_SPEC;
+    const level =
+      action === "list"
+        ? LEVELS.workflowList
+        : action === "watch"
+          ? LEVELS.workflowWatch
+          : LEVELS.workflowAudit;
+    const inner = parseCommand(childSpec, rest.slice(1));
+    if (inner.error !== null) {
+      io.stderr(renderError(inner.error, level));
+      return null;
+    }
+    if (inner.extras.length > 0) {
+      io.stderr(unrecognizedArguments(inner.extras));
+      return null;
+    }
+    return inner;
+  }
   if (command === "tiers" || command === "skill") {
     const isSkill = command === "skill";
     const validActions = isSkill ? (["export"] as const) : (["list", "suggest"] as const);
@@ -124,7 +167,12 @@ function resolveParse(io: CliIo, command: string, rest: readonly string[]): Pars
     if (!(validActions as readonly string[]).includes(action ?? "")) {
       const outer = parseCommand(isSkill ? SKILL_SPEC : TIERS_SPEC, rest);
       const destName = isSkill ? "skill_cmd" : "tiers_cmd";
-      io.stderr(renderError(outer.error ?? { kind: "requiredMissing", name: destName }, isSkill ? LEVELS.skill : LEVELS.tiers));
+      io.stderr(
+        renderError(
+          outer.error ?? { kind: "requiredMissing", name: destName },
+          isSkill ? LEVELS.skill : LEVELS.tiers,
+        ),
+      );
       return null;
     }
     const childSpec = isSkill
@@ -132,7 +180,11 @@ function resolveParse(io: CliIo, command: string, rest: readonly string[]): Pars
       : action === "list"
         ? TIERS_LIST_SPEC
         : TIERS_SUGGEST_SPEC;
-    const level = isSkill ? LEVELS.skillExport : action === "list" ? LEVELS.tiersList : LEVELS.tiersSuggest;
+    const level = isSkill
+      ? LEVELS.skillExport
+      : action === "list"
+        ? LEVELS.tiersList
+        : LEVELS.tiersSuggest;
     const inner = parseCommand(childSpec, rest.slice(1));
     if (inner.error !== null) {
       io.stderr(renderError(inner.error, level));
@@ -181,7 +233,8 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     command !== "serve" &&
     command !== "init" &&
     command !== "profile" &&
-    command !== "skill"
+    command !== "skill" &&
+    command !== "workflow"
   ) {
     if ((commands as readonly string[]).includes(command)) {
       io.stderr(`lohra: ${command} is not implemented in the TypeScript bootstrap\n`);
@@ -201,6 +254,14 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
       );
     }
     return 2;
+  }
+
+  if (command === "workflow" && (argv[1] === "--help" || argv[1] === "-h")) {
+    io.stdout(
+      `${LEVELS.workflow.banner}\nlook at workflow runs (reads the durable state; no LLM)\n\n` +
+        "positional arguments:\n  {list,watch,audit}\n",
+    );
+    return 0;
   }
 
   // Mirrors argparse: unrecognized/mistyped arguments are rejected before
@@ -236,6 +297,31 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
         }
       : value;
   };
+  if (command === "workflow") {
+    const action = argv[1] as "list" | "watch" | "audit";
+    const option = (name: string): unknown => parsed.options.get(name);
+    return runWorkflowCommand({
+      action,
+      databasePath: join(paths.home, "state.db"),
+      stdout: io.stdout,
+      stderr: io.stderr,
+      args: {
+        ...(parsed.positionals[0] === undefined ? {} : { run_id: parsed.positionals[0] }),
+        ...(parsed.options.has("--last") ? { last: true } : {}),
+        ...(option("--poll") === undefined ? {} : { poll: option("--poll") }),
+        ...(option("--limit") === undefined ? {} : { limit: option("--limit") }),
+        ...(option("--node") === undefined ? {} : { node_id: option("--node") }),
+        ...(option("--event") === undefined ? {} : { event_type: option("--event") }),
+        ...(option("--sub-id") === undefined ? {} : { sub_id: option("--sub-id") }),
+        ...(option("--segment-id") === undefined ? {} : { segment_id: option("--segment-id") }),
+        ...(option("--attempt") === undefined ? {} : { attempt: option("--attempt") }),
+        ...(option("--after-seq") === undefined ? {} : { after_seq: option("--after-seq") }),
+        ...(option("--snapshot-seq") === undefined
+          ? {}
+          : { snapshot_seq: option("--snapshot-seq") }),
+      },
+    });
+  }
   if (command === "profile") {
     const result = runProfile(parsed.positionals[0] as string, parsed.positionals[1], {
       base: paths.base,

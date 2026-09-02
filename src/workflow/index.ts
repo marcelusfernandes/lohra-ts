@@ -1,4 +1,7 @@
 export * from "./accounting.js";
+export * from "./audit-model.js";
+export * from "./audit-query.js";
+export * from "./audit-trail.js";
 export * from "./budget.js";
 export * from "./cache.js";
 export * from "./durability.js";
@@ -7,6 +10,7 @@ export * from "./engine-contract.js";
 export * from "./graph.js";
 export * from "./json-schema.js";
 export * from "./jsonio.js";
+export * from "./live-events.js";
 export * from "./nodes.js";
 export * from "./output-validation.js";
 export * from "./pool.js";

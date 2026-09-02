@@ -57,6 +57,9 @@
     "parity:t16": "tsx scripts/parity/workflow-durability/run-all.ts",
     "probe:t16": "tsx scripts/parity/workflow-durability/probe.ts",
     "mutations:t16": "tsx scripts/parity/workflow-durability/run-mutations.ts",
+    "parity:t17": "tsx scripts/parity/workflow-audit-live/run-all.ts",
+    "probe:t17": "tsx scripts/parity/workflow-audit-live/probe.ts",
+    "mutations:t17": "tsx scripts/parity/workflow-audit-live/run-mutations.ts",
     "pack:check": "tsx scripts/pack-check.ts"
   },
   "dependencies": {

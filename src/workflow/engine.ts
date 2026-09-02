@@ -5,11 +5,43 @@ import type { Usage } from "../pricing/types.js";
 import { addUsageToResult, deriveStatus, RunResult } from "./accounting.js";
 import { Budget, FanoutRejected, TokenBudgetExhausted } from "./budget.js";
 import { contentHash, MemoryWorkflowCache, type WorkflowCache } from "./cache.js";
-import { DEFAULT_LEAF_MAX_ITERATIONS, EMPTY_OUTPUT_CORRECTION, GATE_VERDICT_SCHEMA, JUDGE_SCORE_SCHEMA, LEAF_TIMEOUT_SECONDS, MAX_WORKFLOW_DEPTH, PIPELINE_TIMEOUT_SECONDS, QUOTA_EXHAUSTED, type LeafExecution, type RunControl, type Strategy, type WorkflowEngineOptions, type WorkflowEvent, type WorkflowLoader, VERIFY_SCHEMA } from "./engine-contract.js";
-import { asRecord, clampInteger, combine, nonEmpty, renderValue, resultUsage, routingIdentity, routingOf, strictResolve, verifyPrompt } from "./engine-utils.js";
+import {
+  DEFAULT_LEAF_MAX_ITERATIONS,
+  EMPTY_OUTPUT_CORRECTION,
+  GATE_VERDICT_SCHEMA,
+  JUDGE_SCORE_SCHEMA,
+  LEAF_TIMEOUT_SECONDS,
+  MAX_WORKFLOW_DEPTH,
+  PIPELINE_TIMEOUT_SECONDS,
+  QUOTA_EXHAUSTED,
+  type LeafExecution,
+  type RunControl,
+  type Strategy,
+  type WorkflowEngineOptions,
+  type WorkflowEvent,
+  type WorkflowLoader,
+  VERIFY_SCHEMA,
+} from "./engine-contract.js";
+import {
+  asRecord,
+  clampInteger,
+  combine,
+  nonEmpty,
+  renderValue,
+  resultUsage,
+  routingIdentity,
+  routingOf,
+  strictResolve,
+  verifyPrompt,
+} from "./engine-utils.js";
 import { topologicalOrder } from "./graph.js";
 import { MAX_GATE_ATTEMPTS, MAX_NODE_MAX_ITERATIONS, MAX_NODE_RETRIES } from "./nodes.js";
-import { correctionPrompt, isEmptyOutput, MAX_VALIDATION_RETRIES, parseAndValidate } from "./output-validation.js";
+import {
+  correctionPrompt,
+  isEmptyOutput,
+  MAX_VALIDATION_RETRIES,
+  parseAndValidate,
+} from "./output-validation.js";
 import { ProgressTracker, type ProgressSnapshot } from "./progress.js";
 import { BoundedPool } from "./pool.js";
 import type { CausalContext, ChildResult, ChildRuntime } from "./runtime.js";
@@ -39,7 +71,6 @@ export class WorkflowEngine {
   private currentNode = "?";
   private specIdentity: readonly unknown[] = ["workflow", null];
   private readonly activeLeaves = new Set<string>();
-  private eventSinkDisabled = false;
   private accounted = new Set<string>();
   private leafCosts = new Map<string, Usage>();
 
@@ -47,7 +78,12 @@ export class WorkflowEngine {
     this.runtime = options.runtime;
     this.budget = options.budget ?? new Budget();
     this.pool = options.pool ?? new BoundedPool(this.budget.poolWidth);
-    this.control = options.control ?? { cancelled: false, paused: false, pauseReason: null, pausePayload: null };
+    this.control = options.control ?? {
+      cancelled: false,
+      paused: false,
+      pauseReason: null,
+      pausePayload: null,
+    };
     this.cache = options.cache ?? new MemoryWorkflowCache();
     this.loader = options.loader;
     this.runId = options.runId ?? randomUUID().replaceAll("-", "");
@@ -67,12 +103,18 @@ export class WorkflowEngine {
     this.strategies.set("parallel", (engine, node, context) => engine.runParallel(node, context));
     this.strategies.set("pipeline", (engine, node, context) => engine.runPipeline(node, context));
     this.strategies.set("verify", (engine, node, context) => engine.runVerify(node, context));
-    this.strategies.set("judge_panel", (engine, node, context) => engine.runJudgePanel(node, context));
+    this.strategies.set("judge_panel", (engine, node, context) =>
+      engine.runJudgePanel(node, context),
+    );
     this.strategies.set("loop_until_dry", (engine, node, context) => engine.runLoop(node, context));
     this.strategies.set("workflow", (engine, node, context) => engine.runNested(node, context));
     this.strategies.set("gate", (engine, node, context) => engine.runGate(node, context));
-    this.strategies.set("completeness_check", (engine, node, context) => engine.runCompleteness(node, context));
-    this.strategies.set("checkpoint", (engine, node, context) => Promise.resolve(engine.runCheckpoint(node, context)));
+    this.strategies.set("completeness_check", (engine, node, context) =>
+      engine.runCompleteness(node, context),
+    );
+    this.strategies.set("checkpoint", (engine, node, context) =>
+      Promise.resolve(engine.runCheckpoint(node, context)),
+    );
   }
 
   /** Deliberate test seam for proving engine-fault isolation. */
@@ -116,11 +158,9 @@ export class WorkflowEngine {
   }
 
   private emit(event: WorkflowEvent): void {
-    if (this.eventSinkDisabled) return;
     try {
       this.onEvent?.(Object.freeze({ ...event }));
     } catch (error) {
-      this.eventSinkDisabled = true;
       this.logError("workflow: live event failed", error);
     }
   }
@@ -130,7 +170,11 @@ export class WorkflowEngine {
     this.emit({ kind: "fault", nodeId: this.currentNode, text: message });
   }
 
-  private pause(reason: string, message: string, payload: Readonly<Record<string, unknown>> | null = null): void {
+  private pause(
+    reason: string,
+    message: string,
+    payload: Readonly<Record<string, unknown>> | null = null,
+  ): void {
     if (this.control.paused) return;
     this.control.paused = true;
     this.control.pauseReason = reason;
@@ -155,7 +199,11 @@ export class WorkflowEngine {
     throw new TokenBudgetExhausted(message);
   }
 
-  private causal(role: string, cellId: string, extra: { itemIndex?: number; stageIndex?: number; attempt?: number } = {}): CausalContext {
+  private causal(
+    role: string,
+    cellId: string,
+    extra: { itemIndex?: number; stageIndex?: number; attempt?: number } = {},
+  ): CausalContext {
     return Object.freeze({
       runId: this.runId,
       segmentId: this.segmentId,
@@ -173,7 +221,14 @@ export class WorkflowEngine {
     node: Node,
     prompt: string,
     schema: Readonly<Record<string, unknown>> | null,
-    options: { readonly role: string; readonly cellId: string; readonly itemIndex?: number; readonly stageIndex?: number; readonly attempt?: number; readonly aborted?: () => boolean } ,
+    options: {
+      readonly role: string;
+      readonly cellId: string;
+      readonly itemIndex?: number;
+      readonly stageIndex?: number;
+      readonly attempt?: number;
+      readonly aborted?: () => boolean;
+    },
   ): Promise<LeafExecution> {
     const release = await this.pool.acquire();
     let id: string | null = null;
@@ -197,11 +252,14 @@ export class WorkflowEngine {
       id = await this.runtime.spawn(request);
       this.activeLeaves.add(id);
       this.budget.charge();
-      const timeout = typeof node.fields.timeout === "number" ? node.fields.timeout : LEAF_TIMEOUT_SECONDS;
+      const timeout =
+        typeof node.fields.timeout === "number" ? node.fields.timeout : LEAF_TIMEOUT_SECONDS;
       let collected = await this.runtime.collect(id, { wait: true, timeoutSeconds: timeout });
       if (collected.status === "running") {
         await this.runtime.cancel(id);
-        this.recordFault(`${node.id}: leaf timeout after ${String(Math.trunc(timeout))}s (cancelled)`);
+        this.recordFault(
+          `${node.id}: leaf timeout after ${String(Math.trunc(timeout))}s (cancelled)`,
+        );
         return { output: null, usage: usage(), complete: false };
       }
       let total = resultUsage(collected);
@@ -212,10 +270,13 @@ export class WorkflowEngine {
           this.noteQuotaExhausted(node.id, collected.retryAfter ?? null);
           return { output: null, usage: total, complete: false };
         }
-        const kind = collected.errorKind === null || collected.errorKind === undefined
-          ? ""
-          : ` (${collected.errorKind})`;
-        this.recordFault(`${node.id}: leaf ${collected.status}${kind}: ${renderValue(collected.output ?? "no detail").slice(0, 200)}`);
+        const kind =
+          collected.errorKind === null || collected.errorKind === undefined
+            ? ""
+            : ` (${collected.errorKind})`;
+        this.recordFault(
+          `${node.id}: leaf ${collected.status}${kind}: ${renderValue(collected.output ?? "no detail").slice(0, 200)}`,
+        );
         return { output: null, usage: total, complete: false };
       }
       let output = collected.output;
@@ -228,30 +289,36 @@ export class WorkflowEngine {
         else usedFallback = true;
       }
       if (schema !== null && output !== null) {
-      for (let attempt = 0; attempt <= MAX_VALIDATION_RETRIES; attempt += 1) {
-        const parsed = parseAndValidate(output, schema);
-        if (parsed.ok) {
-          output = parsed.value;
-          break;
+        for (let attempt = 0; attempt <= MAX_VALIDATION_RETRIES; attempt += 1) {
+          const parsed = parseAndValidate(output, schema);
+          if (parsed.ok) {
+            output = parsed.value;
+            break;
+          }
+          if (attempt === MAX_VALIDATION_RETRIES) {
+            this.account(node.id, id, { ...collected, usage: total });
+            this.recordFault(`${node.id}: schema not satisfied after retries: ${parsed.error}`);
+            return { output: null, usage: total, complete: false };
+          }
+          this.result.validationRetries += 1;
+          await this.runtime.steer(
+            id,
+            correctionPrompt(schema, parsed.error),
+            this.causal(options.role, options.cellId, { ...options, attempt: attempt + 1 }),
+          );
+          collected = await this.runtime.collect(id, { wait: true, timeoutSeconds: timeout });
+          // collect() reports the sub-session's aggregate usage; only the terminal
+          // snapshot is charged, so steer turns are never double-counted.
+          total = resultUsage(collected);
+          if (collected.status !== "complete") {
+            this.account(node.id, id, { ...collected, usage: total });
+            this.recordFault(
+              `${node.id}: leaf ${collected.status}: ${renderValue(collected.output ?? "no detail").slice(0, 200)}`,
+            );
+            return { output: null, usage: total, complete: false };
+          }
+          output = collected.output;
         }
-        if (attempt === MAX_VALIDATION_RETRIES) {
-          this.account(node.id, id, { ...collected, usage: total });
-          this.recordFault(`${node.id}: schema not satisfied after retries: ${parsed.error}`);
-          return { output: null, usage: total, complete: false };
-        }
-        this.result.validationRetries += 1;
-        await this.runtime.steer(id, correctionPrompt(schema, parsed.error), this.causal(options.role, options.cellId, { ...options, attempt: attempt + 1 }));
-        collected = await this.runtime.collect(id, { wait: true, timeoutSeconds: timeout });
-        // collect() reports the sub-session's aggregate usage; only the terminal
-        // snapshot is charged, so steer turns are never double-counted.
-        total = resultUsage(collected);
-        if (collected.status !== "complete") {
-          this.account(node.id, id, { ...collected, usage: total });
-          this.recordFault(`${node.id}: leaf ${collected.status}: ${renderValue(collected.output ?? "no detail").slice(0, 200)}`);
-          return { output: null, usage: total, complete: false };
-        }
-        output = collected.output;
-      }
       }
       if (usedFallback || collected.forcedFallback === true) this.result.forcingFallbacks += 1;
       this.account(node.id, id, { ...collected, usage: total });
@@ -267,11 +334,19 @@ export class WorkflowEngine {
     this.accounted.add(id);
     const next = resultUsage(collected);
     this.leafCosts.set(id, next);
-    addUsageToResult(this.result, nodeId, next, collected.provider ?? null, collected.model ?? null);
+    addUsageToResult(
+      this.result,
+      nodeId,
+      next,
+      collected.provider ?? null,
+      collected.model ?? null,
+    );
     this.budget.chargeTokens(next.inputTokens, next.outputTokens);
   }
 
-  private schemaOf(node: Node | Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> | null {
+  private schemaOf(
+    node: Node | Readonly<Record<string, unknown>>,
+  ): Readonly<Record<string, unknown>> | null {
     const fields = node instanceof Node ? node.fields : node;
     const inline = asRecord(fields.schema);
     if (inline !== null) return inline;
@@ -286,7 +361,8 @@ export class WorkflowEngine {
   private cacheGet(hash: string): unknown {
     const found = this.cache.get(this.runId, hash);
     if (!found.hit) return CACHE_MISS;
-    if (found.cost !== null) addUsageToResult(this.result, this.currentNode, found.cost, null, null);
+    if (found.cost !== null)
+      addUsageToResult(this.result, this.currentNode, found.cost, null, null);
     return found.output;
   }
 
@@ -322,7 +398,8 @@ export class WorkflowEngine {
           this.recordFault(`${node.id}: ${error.message}`);
           this.result.capTrips += 1;
         } else {
-          const cause = error instanceof Error ? `${error.name}: ${error.message}` : renderValue(error);
+          const cause =
+            error instanceof Error ? `${error.name}: ${error.message}` : renderValue(error);
           this.recordFault(`${node.id}: engine fault: ${cause}`);
           this.result.engineFaults += 1;
           this.logError(`workflow: engine fault at node ${node.id}`, error);
@@ -383,7 +460,10 @@ export class WorkflowEngine {
     return null;
   }
 
-  private async runParallel(node: Node, context: Readonly<Record<string, unknown>>): Promise<unknown> {
+  private async runParallel(
+    node: Node,
+    context: Readonly<Record<string, unknown>>,
+  ): Promise<unknown> {
     const resolved = strictResolve(node.fields.branches, context);
     if (!Array.isArray(resolved)) return null;
     const hash = this.cell([node.id, "parallel", resolved, ...routingIdentity(node, this.tiers)]);
@@ -405,7 +485,10 @@ export class WorkflowEngine {
     return outputs;
   }
 
-  private async runPipeline(node: Node, context: Readonly<Record<string, unknown>>): Promise<unknown> {
+  private async runPipeline(
+    node: Node,
+    context: Readonly<Record<string, unknown>>,
+  ): Promise<unknown> {
     const items = strictResolve(node.fields.items, context);
     const stages: readonly unknown[] = Array.isArray(node.fields.stages)
       ? (node.fields.stages as readonly unknown[])
@@ -425,7 +508,11 @@ export class WorkflowEngine {
           if (expired) return null;
           const stage = asRecord(stages[stageIndex]);
           if (stage === null) return null;
-          const stageContext = Object.freeze({ ...context, item, stage: Object.freeze({ result: previous }) });
+          const stageContext = Object.freeze({
+            ...context,
+            item,
+            stage: Object.freeze({ result: previous }),
+          });
           const prompt = strictResolve(stage.prompt, stageContext);
           if (prompt === null) return null;
           const schema = this.schemaOf(stage);
@@ -454,17 +541,15 @@ export class WorkflowEngine {
           for (let attempt = 0; attempt <= retries; attempt += 1) {
             const leaf = await this.collectLeaf(
               stageNode,
-              correction === ""
-                ? renderValue(prompt)
-                : `${renderValue(prompt)}\n\n${correction}`,
+              correction === "" ? renderValue(prompt) : `${renderValue(prompt)}\n\n${correction}`,
               null,
               {
-              role: "pipeline.stage",
-              cellId: hash,
-              itemIndex,
-              stageIndex,
-              attempt,
-              aborted: () => expired,
+                role: "pipeline.stage",
+                cellId: hash,
+                itemIndex,
+                stageIndex,
+                attempt,
+                aborted: () => expired,
               },
             );
             total = combine(total, leaf.usage);
@@ -527,12 +612,23 @@ export class WorkflowEngine {
     return outputs;
   }
 
-  private async runVerify(node: Node, context: Readonly<Record<string, unknown>>): Promise<unknown> {
+  private async runVerify(
+    node: Node,
+    context: Readonly<Record<string, unknown>>,
+  ): Promise<unknown> {
     const finding = strictResolve(node.fields.finding, context);
     if (finding === null) return null;
     const skeptics = Math.max(1, Math.trunc(Number(node.fields.skeptics ?? 1)));
     const lenses = Array.isArray(node.fields.lenses) ? node.fields.lenses : [];
-    const hash = this.cell([node.id, "verify", finding, skeptics, lenses, node.fields.kill_if_majority_refute ?? false, ...routingIdentity(node, this.tiers)]);
+    const hash = this.cell([
+      node.id,
+      "verify",
+      finding,
+      skeptics,
+      lenses,
+      node.fields.kill_if_majority_refute ?? false,
+      ...routingIdentity(node, this.tiers),
+    ]);
     const cached = this.cacheGet(hash);
     if (cached !== CACHE_MISS) return cached;
     this.gateFanout(skeptics);
@@ -570,15 +666,23 @@ export class WorkflowEngine {
     return result;
   }
 
-  private async runJudgePanel(node: Node, context: Readonly<Record<string, unknown>>): Promise<unknown> {
+  private async runJudgePanel(
+    node: Node,
+    context: Readonly<Record<string, unknown>>,
+  ): Promise<unknown> {
     const attempts = strictResolve(node.fields.attempts, context);
     if (!Array.isArray(attempts)) return null;
     const judges = Math.max(1, Math.trunc(Number(node.fields.judges ?? 1)));
     const synth = asRecord(node.fields.synthesize);
-    this.budget.checkFanout(
-      attempts.length + attempts.length * judges + (synth === null ? 0 : 1),
-    );
-    const hash = this.cell([node.id, "judge_panel", attempts, judges, synth, ...routingIdentity(node, this.tiers)]);
+    this.budget.checkFanout(attempts.length + attempts.length * judges + (synth === null ? 0 : 1));
+    const hash = this.cell([
+      node.id,
+      "judge_panel",
+      attempts,
+      judges,
+      synth,
+      ...routingIdentity(node, this.tiers),
+    ]);
     const cached = this.cacheGet(hash);
     if (cached !== CACHE_MISS) return cached;
     this.gateFanout(attempts.length);
@@ -620,7 +724,9 @@ export class WorkflowEngine {
         throw error;
       }
       total = reviews.reduce((sum, review) => combine(sum, review.usage), total);
-      const scores = reviews.map((review) => Number(asRecord(review.output)?.score)).filter(Number.isFinite);
+      const scores = reviews
+        .map((review) => Number(asRecord(review.output)?.score))
+        .filter(Number.isFinite);
       if (scores.length > 0)
         scored.push({
           attempt: attempt.output,
@@ -636,16 +742,22 @@ export class WorkflowEngine {
     const winner = scored[0]?.attempt ?? null;
     if (winner === null) return null;
     if (synth === null) {
-      if (whole && scored.every((entry) => entry.whole)) this.cachePut(hash, node.id, winner, total);
+      if (whole && scored.every((entry) => entry.whole))
+        this.cachePut(hash, node.id, winner, total);
       return winner;
     }
     const prompt = strictResolve(synth.prompt, Object.freeze({ ...context, winner }));
     let synthesis: LeafExecution;
     try {
-      synthesis = await this.collectLeaf(node, `${renderValue(prompt)}\n\nWINNER:\n${renderValue(winner)}`, this.schemaOf(synth), {
-        role: "judge.synthesis",
-        cellId: hash,
-      });
+      synthesis = await this.collectLeaf(
+        node,
+        `${renderValue(prompt)}\n\nWINNER:\n${renderValue(winner)}`,
+        this.schemaOf(synth),
+        {
+          role: "judge.synthesis",
+          cellId: hash,
+        },
+      );
     } catch (error) {
       if (error instanceof TokenBudgetExhausted) return winner;
       throw error;
@@ -662,10 +774,21 @@ export class WorkflowEngine {
     if (body === null) return null;
     const stopAfter = Math.max(1, Math.trunc(Number(node.fields.stop_after_k_empty ?? 1)));
     const rounds = Math.max(1, Math.trunc(Number(node.fields.max_rounds ?? 1)));
-    const firstPrompt = strictResolve(body.prompt, Object.freeze({ ...context, round: 0, so_far: [] }));
+    const firstPrompt = strictResolve(
+      body.prompt,
+      Object.freeze({ ...context, round: 0, so_far: [] }),
+    );
     if (firstPrompt === null) return null;
     const bodySchema = this.schemaOf(body);
-    const hash = this.cell([node.id, "loop_until_dry", firstPrompt, bodySchema, stopAfter, rounds, ...routingIdentity(node, this.tiers)]);
+    const hash = this.cell([
+      node.id,
+      "loop_until_dry",
+      firstPrompt,
+      bodySchema,
+      stopAfter,
+      rounds,
+      ...routingIdentity(node, this.tiers),
+    ]);
     const cached = this.cacheGet(hash);
     if (cached !== CACHE_MISS) return cached;
     const collected: unknown[] = [];
@@ -673,7 +796,10 @@ export class WorkflowEngine {
     let intact = true;
     let total = usage();
     for (let round = 0; round < rounds && empty < stopAfter; round += 1) {
-      const prompt = strictResolve(body.prompt, Object.freeze({ ...context, round, so_far: Object.freeze([...collected]) }));
+      const prompt = strictResolve(
+        body.prompt,
+        Object.freeze({ ...context, round, so_far: Object.freeze([...collected]) }),
+      );
       if (prompt === null) return null;
       let leaf: LeafExecution;
       try {
@@ -683,8 +809,7 @@ export class WorkflowEngine {
           attempt: round,
         });
       } catch (error) {
-        if (error instanceof TokenBudgetExhausted)
-          return collected.length === 0 ? null : collected;
+        if (error instanceof TokenBudgetExhausted) return collected.length === 0 ? null : collected;
         throw error;
       }
       total = combine(total, leaf.usage);
@@ -709,8 +834,12 @@ export class WorkflowEngine {
     return output;
   }
 
-  private async runNested(node: Node, context: Readonly<Record<string, unknown>>): Promise<unknown> {
-    if (this.depth >= MAX_WORKFLOW_DEPTH) throw new Error(`workflow nesting exceeds depth ${String(MAX_WORKFLOW_DEPTH)}`);
+  private async runNested(
+    node: Node,
+    context: Readonly<Record<string, unknown>>,
+  ): Promise<unknown> {
+    if (this.depth >= MAX_WORKFLOW_DEPTH)
+      throw new Error(`workflow nesting exceeds depth ${String(MAX_WORKFLOW_DEPTH)}`);
     if (this.loader === undefined) throw new Error("workflow loader unavailable");
     const reference = strictResolve(node.fields.ref, context);
     if (typeof reference !== "string") return null;
@@ -760,23 +889,44 @@ export class WorkflowEngine {
     const body = asRecord(node.fields.body);
     const validator = strictResolve(node.fields.validator, context);
     if (body === null || validator === null) return null;
-    const attempts = Math.min(Math.max(1, Math.trunc(Number(node.fields.attempts ?? 2))), MAX_GATE_ATTEMPTS);
+    const attempts = Math.min(
+      Math.max(1, Math.trunc(Number(node.fields.attempts ?? 2))),
+      MAX_GATE_ATTEMPTS,
+    );
     this.budget.checkFanout(attempts * 2);
     const prompt = strictResolve(body.prompt, context);
     if (prompt === null) return null;
-    const hash = this.cell([node.id, "gate", prompt, this.schemaOf(body), validator, attempts, ...routingIdentity(node, this.tiers)]);
+    const hash = this.cell([
+      node.id,
+      "gate",
+      prompt,
+      this.schemaOf(body),
+      validator,
+      attempts,
+      ...routingIdentity(node, this.tiers),
+    ]);
     const cached = this.cacheGet(hash);
     if (cached !== CACHE_MISS) return cached;
     let feedback = "";
     let total = usage();
     for (let attempt = 0; attempt < attempts; attempt += 1) {
-      const draft = await this.collectLeaf(node, `${renderValue(prompt)}${feedback}`, this.schemaOf(body), { role: "gate.body", cellId: hash, attempt });
+      const draft = await this.collectLeaf(
+        node,
+        `${renderValue(prompt)}${feedback}`,
+        this.schemaOf(body),
+        { role: "gate.body", cellId: hash, attempt },
+      );
       total = combine(total, draft.usage);
       if (!nonEmpty(draft.output)) {
         feedback = "\n\nPrevious draft was empty; produce a complete draft.";
         continue;
       }
-      const review = await this.collectLeaf(node, `${renderValue(validator)}\n\nCandidate:\n${renderValue(draft.output)}`, GATE_VERDICT_SCHEMA, { role: "gate.reviewer", cellId: hash, attempt });
+      const review = await this.collectLeaf(
+        node,
+        `${renderValue(validator)}\n\nCandidate:\n${renderValue(draft.output)}`,
+        GATE_VERDICT_SCHEMA,
+        { role: "gate.reviewer", cellId: hash, attempt },
+      );
       total = combine(total, review.usage);
       const verdict = asRecord(review.output);
       if (verdict?.ok === true) {
@@ -789,19 +939,36 @@ export class WorkflowEngine {
     return null;
   }
 
-  private async runCompleteness(node: Node, context: Readonly<Record<string, unknown>>): Promise<unknown> {
+  private async runCompleteness(
+    node: Node,
+    context: Readonly<Record<string, unknown>>,
+  ): Promise<unknown> {
     const task = strictResolve(node.fields.task, context);
     const results = strictResolve(node.fields.results, context);
     if (task === null || results === null) return null;
     const schema = Object.freeze({
       type: "object",
       required: ["complete", "missing"],
-      properties: { complete: { type: "boolean" }, missing: { type: "array", items: { type: "string" } } },
+      properties: {
+        complete: { type: "boolean" },
+        missing: { type: "array", items: { type: "string" } },
+      },
     });
-    const hash = this.cell([node.id, "completeness_check", task, results, ...routingIdentity(node, this.tiers)]);
+    const hash = this.cell([
+      node.id,
+      "completeness_check",
+      task,
+      results,
+      ...routingIdentity(node, this.tiers),
+    ]);
     const cached = this.cacheGet(hash);
     if (cached !== CACHE_MISS) return cached;
-    const leaf = await this.collectLeaf(node, `Task: ${renderValue(task)}\nResults: ${renderValue(results)}`, schema, { role: "completeness", cellId: hash });
+    const leaf = await this.collectLeaf(
+      node,
+      `Task: ${renderValue(task)}\nResults: ${renderValue(results)}`,
+      schema,
+      { role: "completeness", cellId: hash },
+    );
     if (leaf.output !== null) this.cachePut(hash, node.id, leaf.output, leaf.usage);
     return leaf.output;
   }
@@ -817,7 +984,11 @@ export class WorkflowEngine {
       this.cache.put(this.runId, hash, node.id, answer, null);
       return answer;
     }
-    const payload = Object.freeze({ node_id: node.id, prompt, ...(Object.hasOwn(node.fields, "default") ? { default: node.fields.default } : {}) });
+    const payload = Object.freeze({
+      node_id: node.id,
+      prompt,
+      ...(Object.hasOwn(node.fields, "default") ? { default: node.fields.default } : {}),
+    });
     this.pause("checkpoint", `${node.id}: checkpoint waiting for answer`, payload);
     return null;
   }

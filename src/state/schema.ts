@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS workflow_audit_tombstones (
 );
 CREATE TABLE IF NOT EXISTS workflow_audit_events (
     run_id TEXT NOT NULL, seq INTEGER NOT NULL, segment_id TEXT, node_id TEXT,
-    sub_id TEXT, event_type TEXT NOT NULL, provenance TEXT NOT NULL,
+    sub_id TEXT, attempt INTEGER, event_type TEXT NOT NULL, provenance TEXT NOT NULL,
     payload_json TEXT NOT NULL, created_at REAL NOT NULL,
     PRIMARY KEY (run_id, seq)
 );
@@ -116,6 +116,7 @@ export const addedColumns = [
   ["sessions", "priced_call_count", "INTEGER"],
   ["workflow_run_state", "progress_json", "TEXT"],
   ["workflow_run_state", "audit_segment_id", "TEXT"],
+  ["workflow_audit_events", "attempt", "INTEGER"],
   ["workflow_node_cost", "cache_read_tokens", "INTEGER DEFAULT 0"],
   ["workflow_node_cost", "cache_write_tokens", "INTEGER DEFAULT 0"],
   ["workflow_node_cost", "reasoning_tokens", "INTEGER DEFAULT 0"],

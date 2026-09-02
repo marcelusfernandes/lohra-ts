@@ -172,9 +172,7 @@ describe("workflow engine", () => {
     });
     const engine = new WorkflowEngine({ runtime });
     engine.setStrategyForTest("agent", (_engine, node) => {
-      return node.id === "bad"
-        ? Promise.reject(new TypeError("boom"))
-        : Promise.resolve("ok");
+      return node.id === "bad" ? Promise.reject(new TypeError("boom")) : Promise.resolve("ok");
     });
     const result = await engine.run(spec);
     expect(result.outputs).toEqual({ bad: null, good: "ok" });
@@ -184,10 +182,7 @@ describe("workflow engine", () => {
   });
 
   it("treats required as runtime-inert", async () => {
-    const runtime = new FakeRuntime([
-      [{ status: "failed", output: "dead" }],
-      [complete("useful")],
-    ]);
+    const runtime = new FakeRuntime([[{ status: "failed", output: "dead" }], [complete("useful")]]);
     const spec = parsed({
       meta: { name: "required-inert" },
       nodes: [
@@ -200,10 +195,13 @@ describe("workflow engine", () => {
     expect(result.nullCount).toBe(1);
   });
 
-  it("logs and swallows a live sink failure without changing the run", async () => {
+  it("logs each live sink failure without detaching it or changing the run", async () => {
     const logged: unknown[] = [];
     const runtime = new FakeRuntime([[complete("ok")]]);
-    const spec = parsed({ meta: { name: "sink" }, nodes: [{ id: "a", type: "agent", prompt: "x" }] });
+    const spec = parsed({
+      meta: { name: "sink" },
+      nodes: [{ id: "a", type: "agent", prompt: "x" }],
+    });
     const result = await new WorkflowEngine({
       runtime,
       onEvent: () => {
@@ -214,7 +212,7 @@ describe("workflow engine", () => {
     expect(result.status).toBe("complete");
     expect(result.faults).toEqual([]);
     expect(result.engineFaults).toBe(0);
-    expect(logged).toHaveLength(1);
+    expect(logged).toHaveLength(2);
     expect((logged[0] as unknown[] | undefined)?.[1]).toBeInstanceOf(Error);
   });
 
@@ -241,7 +239,10 @@ describe("workflow engine", () => {
     const budget = new Budget({ tokenBudget: 100 });
     const runtime = new FakeRuntime([[complete("done", 2, 3)]]);
     await new WorkflowEngine({ runtime, budget }).run(
-      parsed({ meta: { name: "reasoning-report-only" }, nodes: [{ id: "a", type: "agent", prompt: "x" }] }),
+      parsed({
+        meta: { name: "reasoning-report-only" },
+        nodes: [{ id: "a", type: "agent", prompt: "x" }],
+      }),
     );
     expect(budget.tokensSpent).toBe(5);
     expect(budget.tokensRemaining).toBe(95);
@@ -250,7 +251,10 @@ describe("workflow engine", () => {
   it("replays a valid completion and never caches empty output", async () => {
     const cache = new MemoryWorkflowCache();
     const runtime = new FakeRuntime([[complete("hit")], [complete("")], [complete("recovered")]]);
-    const spec = parsed({ meta: { name: "cache" }, nodes: [{ id: "a", type: "agent", prompt: "x", retries: 0 }] });
+    const spec = parsed({
+      meta: { name: "cache" },
+      nodes: [{ id: "a", type: "agent", prompt: "x", retries: 0 }],
+    });
     const first = await new WorkflowEngine({ runtime, cache, runId: "same" }).run(spec);
     const second = await new WorkflowEngine({ runtime, cache, runId: "same" }).run(spec);
     expect(first.outputs).toEqual({ a: "hit" });
@@ -297,8 +301,14 @@ describe("workflow engine", () => {
   it("namespaces cell hashes by workflow meta identity", async () => {
     const cache = new MemoryWorkflowCache();
     const runtime = new FakeRuntime([[complete("one")], [complete("two")]]);
-    const one = parsed({ meta: { name: "one", version: 1 }, nodes: [{ id: "a", type: "agent", prompt: "x" }] });
-    const two = parsed({ meta: { name: "two", version: 1 }, nodes: [{ id: "a", type: "agent", prompt: "x" }] });
+    const one = parsed({
+      meta: { name: "one", version: 1 },
+      nodes: [{ id: "a", type: "agent", prompt: "x" }],
+    });
+    const two = parsed({
+      meta: { name: "two", version: 1 },
+      nodes: [{ id: "a", type: "agent", prompt: "x" }],
+    });
     await new WorkflowEngine({ runtime, cache, runId: "same" }).run(one);
     const result = await new WorkflowEngine({ runtime, cache, runId: "same" }).run(two);
     expect(result.outputs.a).toBe("two");
@@ -325,12 +335,22 @@ describe("workflow engine", () => {
     const spec = parsed({
       meta: { name: "pipeline" },
       nodes: [
-        { id: "p", type: "pipeline", items: ["a", "b"], stages: [{ prompt: "${item}-1" }, { prompt: "${stage.result}-2" }] },
+        {
+          id: "p",
+          type: "pipeline",
+          items: ["a", "b"],
+          stages: [{ prompt: "${item}-1" }, { prompt: "${stage.result}-2" }],
+        },
       ],
     });
     const result = await new WorkflowEngine({ runtime }).run(spec);
     expect(result.outputs.p).toEqual(["a2", "b2"]);
-    expect(runtime.spawned.map((request) => request.prompt)).toEqual(["a-1", "b-1", "a1-2", "b1-2"]);
+    expect(runtime.spawned.map((request) => request.prompt)).toEqual([
+      "a-1",
+      "b-1",
+      "a1-2",
+      "b1-2",
+    ]);
   });
 
   it("lets a fast item enter stage two before a slow item finishes stage one", async () => {
@@ -375,10 +395,16 @@ describe("workflow engine", () => {
   it("cancels work started before the pipeline deadline", async () => {
     class HangingRuntime implements ChildRuntime {
       readonly cancelled: string[] = [];
-      spawn(): string { return "hanging"; }
-      collect(): Promise<ChildResult> { return new Promise(() => undefined); }
+      spawn(): string {
+        return "hanging";
+      }
+      collect(): Promise<ChildResult> {
+        return new Promise(() => undefined);
+      }
       steer(): void {}
-      cancel(id: string): void { this.cancelled.push(id); }
+      cancel(id: string): void {
+        this.cancelled.push(id);
+      }
     }
     const runtime = new HangingRuntime();
     const result = await new WorkflowEngine({ runtime, pipelineTimeoutSeconds: 0.01 }).run(
@@ -394,8 +420,13 @@ describe("workflow engine", () => {
 
   it("checkpoint never spawns and an explicit falsy answer completes", async () => {
     const runtime = new FakeRuntime([]);
-    const spec = parsed({ meta: { name: "cp" }, nodes: [{ id: "approve", type: "checkpoint", prompt: "Approve?" }] });
-    const result = await new WorkflowEngine({ runtime, checkpointAnswers: { approve: false } }).run(spec);
+    const spec = parsed({
+      meta: { name: "cp" },
+      nodes: [{ id: "approve", type: "checkpoint", prompt: "Approve?" }],
+    });
+    const result = await new WorkflowEngine({ runtime, checkpointAnswers: { approve: false } }).run(
+      spec,
+    );
     expect(runtime.spawned).toHaveLength(0);
     expect(result.outputs.approve).toBe(false);
     expect(result.status).toBe("complete");

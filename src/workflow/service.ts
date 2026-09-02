@@ -25,6 +25,8 @@ import {
   type SandboxPolicy,
 } from "./sandbox.js";
 import type { LockRepository } from "../state/locks.js";
+import type { AuditTrail } from "./audit-trail.js";
+import { WorkflowLiveEvents, type WorkflowLiveEvent } from "./live-events.js";
 
 export const RUN_LEASE_TTL = 900;
 /** The operator capability policy, read from the operator home per launch. */
@@ -146,9 +148,7 @@ export function durableFromRow(row: Readonly<Record<string, unknown>>): DurableR
     spec: spec !== null && typeof spec === "object" ? (spec as Record<string, unknown>) : null,
     args: args !== null && typeof args === "object" ? (args as Record<string, unknown>) : {},
     token_budget:
-      row.token_budget === null || row.token_budget === undefined
-        ? null
-        : Number(row.token_budget),
+      row.token_budget === null || row.token_budget === undefined ? null : Number(row.token_budget),
     progress:
       progress !== null && typeof progress === "object"
         ? (progress as Record<string, unknown>)
@@ -161,9 +161,7 @@ export function durableFromRow(row: Readonly<Record<string, unknown>>): DurableR
   };
 }
 
-export function pauseFields(
-  view: DurableRunView,
-): Readonly<Record<string, unknown>> | null {
+export function pauseFields(view: DurableRunView): Readonly<Record<string, unknown>> | null {
   if (view.status !== "paused") return null;
   const fields: Record<string, unknown> = {
     reason: view.pause_reason,
@@ -356,6 +354,8 @@ export class WorkflowService {
   private readonly loader: WorkflowLoader | undefined;
   private readonly idSource: () => string;
   private readonly onEvent: ((event: WorkflowEvent) => void) | undefined;
+  private readonly auditTrail: AuditTrail | undefined;
+  private readonly liveEvents: WorkflowLiveEvents;
   private readonly store: OwnershipStore | undefined;
   private readonly cacheFactory: ((runId: string) => WorkflowCache) | undefined;
   private readonly heartbeat: LeaseHeartbeat | undefined;
@@ -385,6 +385,8 @@ export class WorkflowService {
     readonly loader?: WorkflowLoader;
     readonly idSource?: () => string;
     readonly onEvent?: (event: WorkflowEvent) => void;
+    readonly onLiveEvent?: (event: WorkflowLiveEvent) => void;
+    readonly auditTrail?: AuditTrail;
     readonly store?: OwnershipStore;
     readonly cacheFactory?: (runId: string) => WorkflowCache;
     /** Production wiring: read the operator capability policy per launch. */
@@ -404,13 +406,23 @@ export class WorkflowService {
     this.loader = options.loader;
     this.idSource = options.idSource ?? (() => randomUUID().replaceAll("-", ""));
     this.onEvent = options.onEvent;
+    this.auditTrail = options.auditTrail;
     this.store = options.store;
     this.cacheFactory = options.cacheFactory;
     // Never optional: a run with no tracker could not notice a leaf tainting it.
     this.taintTracker = options.taintTracker ?? new TaintTracker();
     this.homeRoot = options.homeRoot ?? ".";
     this.fenceMemory = new FenceMemory(options.fenceMemory ?? FENCE_MEMORY);
-    this.warn = options.onWarning ?? ((message) => { console.warn(message); });
+    this.warn =
+      options.onWarning ??
+      ((message) => {
+        console.warn(message);
+      });
+    this.liveEvents = new WorkflowLiveEvents(
+      options.onLiveEvent,
+      () => Date.now() / 1_000,
+      this.warn,
+    );
     // Criterion 40: the operator capability policy is a FILE in the operator
     // home (`workflow_policy.json`), read per launch. An explicit path wins;
     // an absent file is deny-all, never a widening.
@@ -441,6 +453,86 @@ export class WorkflowService {
         (runId) => this.durableOf(runId)?.attempts ?? 0,
       );
     }
+  }
+
+  private forwardEvent(runId: string, event: WorkflowEvent, ownership?: Ownership): void {
+    this.onEvent?.(Object.freeze({ ...event }));
+    const nodeId = event.nodeId;
+    const live: WorkflowLiveEvent =
+      event.kind === "fault"
+        ? Object.freeze({
+            kind: "fault",
+            run_id: runId,
+            node_id: nodeId,
+            fault: event.text ?? "workflow fault",
+          })
+        : event.kind === "items"
+          ? Object.freeze({
+              kind: "items",
+              run_id: runId,
+              node_id: nodeId,
+              ...(event.done === undefined ? {} : { done: event.done }),
+              ...(event.total === undefined ? {} : { total: event.total }),
+            })
+          : Object.freeze({
+              kind: "node",
+              run_id: runId,
+              node_id: nodeId,
+              ...(event.state === undefined ? {} : { state: event.state }),
+            });
+    const delivered = this.liveEvents.emit(live);
+    if (!delivered) return;
+    this.auditTrail?.record(
+      runId,
+      {
+        event_type: `workflow.${live.kind}`,
+        node_id: nodeId,
+        payload:
+          event.kind === "fault"
+            ? { state: "fault", content: event.text ?? "" }
+            : { state: event.state ?? "observed", done: event.done, total: event.total },
+      },
+      ownership,
+    );
+  }
+
+  private announcePlan(
+    runId: string,
+    spec: WorkflowSpec,
+    engine: WorkflowEngine,
+    ownership?: Ownership,
+  ): void {
+    const nodes = spec.nodes.map((node) => node.id);
+    const budget = engine.budget.snapshot();
+    this.liveEvents.emit(
+      Object.freeze({
+        kind: "plan",
+        run_id: runId,
+        name: spec.name,
+        nodes,
+        ...(budget === null ? {} : { budget }),
+      }),
+    );
+    this.auditTrail?.record(
+      runId,
+      {
+        event_type: "workflow.plan",
+        payload: { name: spec.name, budget: engine.budget.snapshot(), node_path: nodes },
+      },
+      ownership,
+    );
+  }
+
+  private announceDone(runId: string, status: string, ownership?: Ownership): void {
+    this.liveEvents.emit(Object.freeze({ kind: "done", run_id: runId, state: status }));
+    this.auditTrail?.record(
+      runId,
+      {
+        event_type: "workflow.done",
+        payload: { status, terminal: true },
+      },
+      ownership,
+    );
   }
 
   /**
@@ -543,11 +635,7 @@ export class WorkflowService {
     }
     const runId = resumeRunId ?? this.idSource();
     const runArgs =
-      resumeRunId === undefined
-        ? args
-        : Object.keys(args).length > 0
-          ? args
-          : (prior?.args ?? {});
+      resumeRunId === undefined ? args : Object.keys(args).length > 0 ? args : (prior?.args ?? {});
     if (this.store === undefined) {
       return this.launch(parsed, runId, runArgs, options.checkpointAnswers ?? {}, budget ?? null);
     }
@@ -577,19 +665,24 @@ export class WorkflowService {
       runId,
       ...(this.loader === undefined ? {} : { loader: this.loader }),
       ...(Object.keys(checkpointAnswers).length > 0 ? { checkpointAnswers } : {}),
-      ...(this.onEvent === undefined ? {} : { onEvent: this.onEvent }),
+      onEvent: (event) => {
+        this.forwardEvent(runId, event);
+      },
     });
+    this.announcePlan(runId, parsed, engine);
     const record = this.makeRecord(runId, parsed.name, engine);
     this.runs.set(runId, record);
     void engine
       .run(parsed, args)
       .then((result) => {
         record.result = result;
+        this.announceDone(runId, result.status);
         record.settled = true;
         record.published = resultView(runId, parsed.name, result, engine.budget);
         record.resolve(record.published);
       })
       .catch(() => {
+        this.announceDone(runId, "failed");
         record.settled = true;
         record.published = Object.freeze({
           run_id: runId,
@@ -619,14 +712,18 @@ export class WorkflowService {
     const resumeRunId = options.resumeRunId;
     const now = store.ownershipOf().now;
     const answers: Record<string, unknown> = { ...(options.checkpointAnswers ?? {}) };
-    if (!explicitSpec && priorView !== null && priorView.status === "paused" && priorView.pause_reason === CHECKPOINT_PAUSE) {
+    if (
+      !explicitSpec &&
+      priorView !== null &&
+      priorView.status === "paused" &&
+      priorView.pause_reason === CHECKPOINT_PAUSE
+    ) {
       const pending = priorView.checkpoint ?? {};
       const nodeId = pending.node_id;
       if (typeof nodeId === "string" && nodeId !== "" && !(nodeId in answers)) {
         if ("default" in pending) answers[nodeId] = pending.default;
         else {
-          const promptText =
-            typeof pending.prompt === "string" ? pending.prompt : "";
+          const promptText = typeof pending.prompt === "string" ? pending.prompt : "";
           const nodeIdText: string = typeof nodeId === "string" ? nodeId : JSON.stringify(nodeId);
           return Object.freeze({
             error:
@@ -639,7 +736,7 @@ export class WorkflowService {
     }
     // Taint is ORed, never downgraded: the session's tracker plus whatever the
     // durable line already carried.
-    const tainted = (priorView?.tainted === true) || this.taintTracker.tainted;
+    const tainted = priorView?.tainted === true || this.taintTracker.tainted;
     const liveHere = this.runs.get(runId);
     // Criterion 25 — the REGISTRY guard, checked before anything is acquired or
     // written. A second engine on a run that has not stopped would share this
@@ -660,7 +757,12 @@ export class WorkflowService {
       store.locks.runLeaseExpiry(runId, now) === null;
     // Acquire BEFORE reading the spend: the seed must not read a ledger the
     // previous owner was still finishing.
-    const fence = store.locks.acquireRunLease(runId, store.holder, store.ownershipOf().now, store.ttl);
+    const fence = store.locks.acquireRunLease(
+      runId,
+      store.holder,
+      store.ownershipOf().now,
+      store.ttl,
+    );
     if (fence === null) {
       const expiry = store.locks.runLeaseExpiry(runId, store.ownershipOf().now);
       return Object.freeze({
@@ -671,7 +773,11 @@ export class WorkflowService {
     const seeded = this.seedSpend(store, runId);
     const effectiveBudget =
       options.tokenBudget ?? (resumeRunId !== undefined ? (priorView?.token_budget ?? null) : null);
-    const refusal = refuseSpentBudgetMessage(runId, effectiveBudget, seeded.tokensIn + seeded.tokensOut);
+    const refusal = refuseSpentBudgetMessage(
+      runId,
+      effectiveBudget,
+      seeded.tokensIn + seeded.tokensOut,
+    );
     if (refusal !== null) {
       // Never sit on a lease for a run we are not going to start — and give
       // back only the one we took, conditioned on our own fence.
@@ -734,9 +840,7 @@ export class WorkflowService {
       });
     } catch (error) {
       abandonAcquisition();
-      this.warn(
-        `workflow: leaf sandbox install failed for run ${runId}: ${String(error)}`,
-      );
+      this.warn(`workflow: leaf sandbox install failed for run ${runId}: ${String(error)}`);
       return leafSandboxUnavailable(runId);
     }
     const engine = new WorkflowEngine({
@@ -749,7 +853,10 @@ export class WorkflowService {
       runId,
       ...(this.loader === undefined ? {} : { loader: this.loader }),
       ...(Object.keys(answers).length > 0 ? { checkpointAnswers: answers } : {}),
-      ...(this.onEvent === undefined ? {} : { onEvent: this.onEvent }),
+      onEvent: (event) => {
+        const ownership = stretchOwnership();
+        this.forwardEvent(runId, event, ownership ?? undefined);
+      },
       // Durable default: the FENCED SQLite node cache over the shared
       // connection. An explicit cache/cacheFactory still wins.
       ...(this.cacheFactory !== undefined
@@ -759,7 +866,12 @@ export class WorkflowService {
               cache: new SqliteWorkflowCache(
                 store.database,
                 runId,
-                () => stretchOwnership() ?? { fence: -1, holder: store.holder, now: store.ownershipOf().now },
+                () =>
+                  stretchOwnership() ?? {
+                    fence: -1,
+                    holder: store.holder,
+                    now: store.ownershipOf().now,
+                  },
                 {
                   repository: store.repository,
                   // Cheap top-up (criterion 39): each cell that lands renews the
@@ -814,9 +926,13 @@ export class WorkflowService {
       step("lease release", () => {
         store.locks.releaseRunLeaseAtFence(runId, store.holder, fence);
       });
-      step("fence memory release", () => { this.fenceMemory.forget(fenceKey); });
+      step("fence memory release", () => {
+        this.fenceMemory.forget(fenceKey);
+      });
       // only THIS acquisition's installation
-      step("leaf sandbox disposal", () => { sandboxHandle.dispose(); });
+      step("leaf sandbox disposal", () => {
+        sandboxHandle.dispose();
+      });
     };
     const carriedFaults = [...(priorView?.prior_faults ?? [])];
     if (orphaned) {
@@ -879,51 +995,54 @@ export class WorkflowService {
         fence: lost.fence,
       });
     }
+    this.announcePlan(runId, parsed, engine, stretchOwnership() ?? undefined);
     void engine
       .run(parsed, args)
       .then((result) => {
         record.result = result;
         const faults = [...priorFaults, ...result.faults];
         const degraded =
-          priorDegraded ||
-          result.faults.some((fault) => fault !== result.pauseFault);
+          priorDegraded || result.faults.some((fault) => fault !== result.pauseFault);
         const terminal = stretchOwnership();
         // Taint acquired INSIDE this stretch counts: a leaf that ran an allowed
         // web_fetch marked the tracker, and the line this stretch writes must
         // carry that, not the value read before the engine started.
         const taintedNow = tainted || this.taintTracker.tainted;
-        const owned = terminal === null ? false : this.persistLine(store, runId, {
-          name: parsed.name,
-          owner: store.holder,
-          status: result.status,
-          pauseReason: result.pauseReason,
-          pausePayloadJson:
-            result.status === "paused"
-              ? JSON.stringify({
-                  checkpoint: result.checkpoint,
-                  resume_at: null,
-                  attempts: (priorView?.attempts ?? 0) + 1,
-                  prior_faults: faults,
-                  prior_degraded: degraded,
-                })
-              : JSON.stringify({
-                  checkpoint: null,
-                  resume_at: null,
-                  attempts: (priorView?.attempts ?? 0) + 1,
-                  prior_faults: faults,
-                  prior_degraded: degraded,
-                }),
-          specJson: JSON.stringify(rawSpecOf(parsed)),
-          argsJson: JSON.stringify(args),
-          tokenBudget: effectiveBudget,
-          tainted: taintedNow,
-          progressJson: progressJsonOf(engine.progress()),
-          auditSegmentId: null,
-          updatedAt: terminal.now,
-          fence: terminal.fence,
-          holder: terminal.holder,
-          now: terminal.now,
-        });
+        const owned =
+          terminal === null
+            ? false
+            : this.persistLine(store, runId, {
+                name: parsed.name,
+                owner: store.holder,
+                status: result.status,
+                pauseReason: result.pauseReason,
+                pausePayloadJson:
+                  result.status === "paused"
+                    ? JSON.stringify({
+                        checkpoint: result.checkpoint,
+                        resume_at: null,
+                        attempts: (priorView?.attempts ?? 0) + 1,
+                        prior_faults: faults,
+                        prior_degraded: degraded,
+                      })
+                    : JSON.stringify({
+                        checkpoint: null,
+                        resume_at: null,
+                        attempts: (priorView?.attempts ?? 0) + 1,
+                        prior_faults: faults,
+                        prior_degraded: degraded,
+                      }),
+                specJson: JSON.stringify(rawSpecOf(parsed)),
+                argsJson: JSON.stringify(args),
+                tokenBudget: effectiveBudget,
+                tainted: taintedNow,
+                progressJson: progressJsonOf(engine.progress()),
+                auditSegmentId: null,
+                updatedAt: terminal.now,
+                fence: terminal.fence,
+                holder: terminal.holder,
+                now: terminal.now,
+              });
         this.persistSpend(store, runId, effectiveBudget, seeded, engine, stretchOwnership());
         // A quota pause is the one failure that fixes itself given time: arm
         // the retry here (bounded, capped); token-budget and checkpoint pauses
@@ -967,6 +1086,7 @@ export class WorkflowService {
             now: terminal.now,
           });
         }
+        if (owned && terminal !== null) this.announceDone(runId, result.status, terminal);
         finishStretch();
         record.settled = true;
         if (owned) {
@@ -983,6 +1103,8 @@ export class WorkflowService {
         }
       })
       .catch((error: unknown) => {
+        const terminal = stretchOwnership();
+        if (terminal !== null) this.announceDone(runId, "failed", terminal);
         finishStretch();
         record.settled = true;
         record.published = Object.freeze({
@@ -1025,11 +1147,18 @@ export class WorkflowService {
     return join(this.homeRoot, "runs", runId, `work-${String(fence)}`);
   }
 
-  private persistLine(store: OwnershipStore, runId: string, fields: Parameters<WorkflowRepository["putRunState"]>[1]): boolean {
+  private persistLine(
+    store: OwnershipStore,
+    runId: string,
+    fields: Parameters<WorkflowRepository["putRunState"]>[1],
+  ): boolean {
     return store.repository.putRunState(runId, fields);
   }
 
-  private seedSpend(store: OwnershipStore, runId: string): Readonly<{ tokensIn: number; tokensOut: number }> {
+  private seedSpend(
+    store: OwnershipStore,
+    runId: string,
+  ): Readonly<{ tokensIn: number; tokensOut: number }> {
     const fromRow = store.repository.getRunSpend(runId);
     const fromCells = store.repository.cacheCostTotals(runId);
     const rowIn = Number(fromRow?.tokens_in ?? 0);
@@ -1060,11 +1189,7 @@ export class WorkflowService {
 
   // --- records -----------------------------------------------------------------
 
-  private makeRecord(
-    runId: string,
-    name: string,
-    engine: WorkflowEngine,
-  ): RunRecord {
+  private makeRecord(runId: string, name: string, engine: WorkflowEngine): RunRecord {
     let resolve!: (value: Readonly<Record<string, unknown>>) => void;
     const promise = new Promise<Readonly<Record<string, unknown>>>((res) => {
       resolve = res;
@@ -1130,7 +1255,7 @@ export class WorkflowService {
     if ("error" in started) return started;
     const target = this.runs.get(started.run_id);
     if (target === undefined) {
-      return (await this.status(started.run_id, false));
+      return await this.status(started.run_id, false);
     }
     return target.promise;
   }

@@ -1,6 +1,8 @@
 import { toolError, toolResult } from "../tools/envelope.js";
 import type { ToolArguments, ToolHandler } from "../tools/types.js";
 import type { WorkflowService } from "./service.js";
+import type { AuditRepository } from "../state/audit-repository.js";
+import { parseAuditQuery } from "./audit-query.js";
 
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -9,7 +11,10 @@ function record(value: unknown): Readonly<Record<string, unknown>> | null {
 }
 
 export class WorkflowTool {
-  constructor(private readonly service: WorkflowService) {}
+  constructor(
+    private readonly service: WorkflowService,
+    private readonly auditRepository?: AuditRepository,
+  ) {}
 
   run(args: ToolArguments): string {
     const resumeRunId = args.resume_run_id;
@@ -32,17 +37,15 @@ export class WorkflowTool {
       (typeof tokenBudget !== "number" || !Number.isInteger(tokenBudget) || tokenBudget <= 0)
     )
       return toolError("'token_budget' must be a positive integer");
-    const out = this.service.start(
-      spec === undefined ? null : spec,
-      record(runArgs) ?? {},
-      {
-        ...(answers === undefined ? {} : { checkpointAnswers: record(answers) ?? {} }),
-        ...(tokenBudget === undefined ? {} : { tokenBudget }),
-        ...(resumeRunId === undefined ? {} : { resumeRunId }),
-      },
-    );
+    const out = this.service.start(spec === undefined ? null : spec, record(runArgs) ?? {}, {
+      ...(answers === undefined ? {} : { checkpointAnswers: record(answers) ?? {} }),
+      ...(tokenBudget === undefined ? {} : { tokenBudget }),
+      ...(resumeRunId === undefined ? {} : { resumeRunId }),
+    });
     if ("error" in out)
-      return out.invalid_spec === true ? toolError(`invalid workflow spec: ${out.error}`) : toolError(out.error);
+      return out.invalid_spec === true
+        ? toolError(`invalid workflow spec: ${out.error}`)
+        : toolError(out.error);
     return toolResult(undefined, { ...out });
   }
 
@@ -67,15 +70,26 @@ export class WorkflowTool {
     const out = this.service.cancel(args.run_id);
     return "error" in out ? toolError(String(out.error)) : toolResult(undefined, out);
   }
+
+  audit(args: ToolArguments): string {
+    const parsed = parseAuditQuery(args);
+    if ("error" in parsed) return toolError(parsed.error);
+    if (this.auditRepository === undefined) return toolError("workflow audit store is unavailable");
+    return toolResult(undefined, this.auditRepository.query(parsed.query));
+  }
 }
 
-export function workflowToolHandlers(service: WorkflowService): Readonly<Record<string, ToolHandler>> {
-  const tool = new WorkflowTool(service);
+export function workflowToolHandlers(
+  service: WorkflowService,
+  auditRepository?: AuditRepository,
+): Readonly<Record<string, ToolHandler>> {
+  const tool = new WorkflowTool(service, auditRepository);
   return Object.freeze({
     run_workflow: (args) => tool.run(args),
     workflow_status: (args) => tool.status(args),
     workflow_list: () => tool.list(),
     workflow_pause: (args) => tool.pause(args),
     workflow_cancel: (args) => tool.cancel(args),
+    workflow_audit: (args) => tool.audit(args),
   });
 }
