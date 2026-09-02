@@ -173,6 +173,9 @@ export class AuditTrail {
   }
 
   private async flushDropped(marker: DropBucket): Promise<boolean> {
+    const index = this.dropped.indexOf(marker);
+    if (index < 0) return true;
+    this.dropped.splice(index, 1);
     const gap: AuditInput = Object.freeze({
       event_type: "audit.gap",
       provenance: "dropped",
@@ -184,18 +187,51 @@ export class AuditTrail {
     });
     const outcome = await this.append(marker.runId, gap, marker.ownership);
     if (outcome === "failed") {
+      this.restoreDropped(marker);
       this.stopped = true;
       this.warning(`audit sink failed permanently for run ${marker.runId}`);
       return false;
     }
-    const index = this.dropped.indexOf(marker);
-    if (index >= 0) this.dropped.splice(index, 1);
     if (
       !this.dropped.some((entry) => entry.runId === marker.runId) &&
       !this.queue.some((entry) => entry.runId === marker.runId)
     )
       this.lastAcceptedOrder.delete(marker.runId);
     return true;
+  }
+
+  private restoreDropped(marker: DropBucket): void {
+    const priorIndex = this.dropped.findLastIndex(
+      (entry) => entry.runId === marker.runId && entry.reason === marker.reason,
+    );
+    const prior = priorIndex < 0 ? undefined : this.dropped[priorIndex];
+    if (prior !== undefined) {
+      const ownership = marker.ownership ?? prior.ownership;
+      this.dropped[priorIndex] = Object.freeze({
+        order: Math.min(marker.order, prior.order),
+        runId: marker.runId,
+        reason: marker.reason,
+        count: marker.count + prior.count,
+        ...(ownership === undefined ? {} : { ownership }),
+      });
+      return;
+    }
+    if (this.dropped.length < this.maxDropBuckets) {
+      this.dropped.push(marker);
+      return;
+    }
+    const aggregateIndex = this.dropped.findIndex(
+      (entry) => entry.runId === "$audit" && entry.reason === "drop_bucket_overflow",
+    );
+    const aggregate = aggregateIndex < 0 ? this.dropped.pop() : this.dropped[aggregateIndex];
+    const restored = Object.freeze({
+      order: Math.min(marker.order, aggregate?.order ?? marker.order),
+      runId: "$audit",
+      reason: "drop_bucket_overflow" as const,
+      count: marker.count + (aggregate?.count ?? 0),
+    });
+    if (aggregateIndex < 0) this.dropped.push(restored);
+    else this.dropped[aggregateIndex] = restored;
   }
 
   private kick(): void {

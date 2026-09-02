@@ -837,6 +837,77 @@ describe("T17 live events and sink failures", () => {
     ).toBe("unavailable");
   });
 
+  it("never persists an in-flight drop count twice when producers reenter", async () => {
+    const countOf = (input: { event_type: string; payload?: Record<string, unknown> }): number =>
+      input.event_type === "audit.gap" ? Number(input.payload?.dropped_count ?? 0) : 0;
+
+    const specificRows: { runId: string; count: number }[] = [];
+    let specificRejected = 0;
+    let specificReentered = false;
+    function specificRecord(runId: string, event_type: string): void {
+      if (!specificTrail.record(runId, { event_type })) specificRejected += 1;
+    }
+    const specificRepo = {
+      append: (runId: string, input: { event_type: string; payload?: Record<string, unknown> }) => {
+        const count = countOf(input);
+        if (count > 0) specificRows.push({ runId, count });
+        if (!specificReentered && runId === "specific" && input.event_type === "audit.gap") {
+          specificReentered = true;
+          specificRecord("accepted", "node.completed");
+          specificRecord("specific", "node.started");
+        }
+        return {} as never;
+      },
+      isBusyError: () => false,
+    } as unknown as AuditRepository;
+    const specificTrail = new AuditTrail(specificRepo, { capacity: 1 });
+    specificRecord("base", "node.started");
+    specificRecord("specific", "node.started");
+    expect(await specificTrail.flush()).toBe(true);
+    expect(specificRejected).toBe(2);
+    expect(
+      specificRows.reduce((total, row) => total + row.count, 0),
+      "MUTATION_CAUSE:M32-inflight-drop-double-count",
+    ).toBe(specificRejected);
+    expect(specificRows.map((row) => row.count)).toEqual([1, 1]);
+
+    const aggregateRows: { runId: string; count: number }[] = [];
+    let aggregateRejected = 0;
+    let phase = 0;
+    function aggregateRecord(runId: string, event_type: string): void {
+      if (!aggregateTrail.record(runId, { event_type })) aggregateRejected += 1;
+    }
+    const aggregateRepo = {
+      append: (runId: string, input: { event_type: string; payload?: Record<string, unknown> }) => {
+        const count = countOf(input);
+        if (count > 0) aggregateRows.push({ runId, count });
+        const reason = input.payload?.reason;
+        if (phase === 0 && runId === "r1" && reason === "queue_overflow") {
+          phase = 1;
+          aggregateRecord("accepted", "node.completed");
+          aggregateRecord("overflow-during-specific", "node.started");
+        } else if (phase === 1 && runId === "$audit" && reason === "drop_bucket_overflow") {
+          phase = 2;
+          for (let index = 1; index <= 255; index += 1)
+            aggregateRecord(`overflow-during-aggregate-${String(index)}`, "node.started");
+        }
+        return {} as never;
+      },
+      isBusyError: () => false,
+    } as unknown as AuditRepository;
+    const aggregateTrail = new AuditTrail(aggregateRepo, { capacity: 1 });
+    aggregateRecord("base", "node.started");
+    for (let index = 1; index <= 256; index += 1)
+      aggregateRecord(`r${String(index)}`, "node.started");
+    expect(await aggregateTrail.flush()).toBe(true);
+    expect(aggregateRejected).toBe(512);
+    expect(
+      aggregateRows.reduce((total, row) => total + row.count, 0),
+      "MUTATION_CAUSE:M32-inflight-drop-double-count",
+    ).toBe(aggregateRejected);
+    expect(aggregateRows.some((row) => row.runId === "$audit")).toBe(true);
+  });
+
   it("preserves corrupt_payload when sanitizer failure meets a full queue", async () => {
     const gaps: unknown[] = [];
     const repo = {

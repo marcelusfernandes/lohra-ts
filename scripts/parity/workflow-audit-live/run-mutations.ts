@@ -492,6 +492,27 @@ const mutants: readonly Mutant[] = [
       },
     ],
   },
+  {
+    id: "M32-inflight-drop-double-count",
+    assertion: "C4/A5",
+    test: "never persists an in-flight drop count twice when producers reenter",
+    cause: "MUTATION_CAUSE:M32-inflight-drop-double-count",
+    externalCause: "in-flight drop accounting probe failed",
+    edits: [
+      {
+        file: auditTrail,
+        before: "    this.dropped.splice(index, 1);\n    const gap: AuditInput = Object.freeze({",
+        after: "    const gap: AuditInput = Object.freeze({",
+      },
+      {
+        file: auditTrail,
+        before:
+          '    const outcome = await this.append(marker.runId, gap, marker.ownership);\n    if (outcome === "failed") {',
+        after:
+          '    const outcome = await this.append(marker.runId, gap, marker.ownership);\n    const persistedIndex = this.dropped.indexOf(marker);\n    if (persistedIndex >= 0) this.dropped.splice(persistedIndex, 1);\n    if (outcome === "failed") {',
+      },
+    ],
+  },
 ];
 
 function run(

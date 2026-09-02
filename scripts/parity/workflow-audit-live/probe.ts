@@ -425,6 +425,98 @@ async function probeRoundTwoRegressions(): Promise<Readonly<Record<string, unkno
   });
 }
 
+async function probeInFlightDropAccounting(): Promise<Readonly<Record<string, unknown>>> {
+  const gapCount = (input: AuditInput): number => {
+    const payload = input.payload as Readonly<Record<string, unknown>> | undefined;
+    return input.event_type === "audit.gap" ? Number(payload?.dropped_count ?? 0) : 0;
+  };
+
+  const specificCounts: number[] = [];
+  let specificRejected = 0;
+  let specificReentered = false;
+  function specificRecord(runId: string, event_type: string): void {
+    if (!specificTrail.record(runId, { event_type })) specificRejected += 1;
+  }
+  const specificRepository = {
+    append: (runId: string, input: AuditInput) => {
+      const count = gapCount(input);
+      if (count > 0) specificCounts.push(count);
+      if (!specificReentered && runId === "specific" && input.event_type === "audit.gap") {
+        specificReentered = true;
+        specificRecord("accepted", "node.completed");
+        specificRecord("specific", "node.started");
+      }
+      return {} as never;
+    },
+    isBusyError: () => false,
+  } as unknown as AuditRepository;
+  const specificTrail = new AuditTrail(specificRepository, { capacity: 1 });
+  specificRecord("base", "node.started");
+  specificRecord("specific", "node.started");
+  const specificFlush = await specificTrail.flush();
+  const specificEmitted = specificCounts.reduce((total, count) => total + count, 0);
+
+  const aggregateCounts: { runId: string; count: number }[] = [];
+  let aggregateRejected = 0;
+  let phase = 0;
+  function aggregateRecord(runId: string, event_type: string): void {
+    if (!aggregateTrail.record(runId, { event_type })) aggregateRejected += 1;
+  }
+  const aggregateRepository = {
+    append: (runId: string, input: AuditInput) => {
+      const count = gapCount(input);
+      if (count > 0) aggregateCounts.push({ runId, count });
+      const payload = input.payload as Readonly<Record<string, unknown>> | undefined;
+      if (phase === 0 && runId === "r1" && payload?.reason === "queue_overflow") {
+        phase = 1;
+        aggregateRecord("accepted", "node.completed");
+        aggregateRecord("overflow-during-specific", "node.started");
+      } else if (phase === 1 && runId === "$audit" && payload?.reason === "drop_bucket_overflow") {
+        phase = 2;
+        for (let index = 1; index <= 255; index += 1)
+          aggregateRecord(`overflow-during-aggregate-${String(index)}`, "node.started");
+      }
+      return {} as never;
+    },
+    isBusyError: () => false,
+  } as unknown as AuditRepository;
+  const aggregateTrail = new AuditTrail(aggregateRepository, { capacity: 1 });
+  aggregateRecord("base", "node.started");
+  for (let index = 1; index <= 256; index += 1)
+    aggregateRecord(`r${String(index)}`, "node.started");
+  const aggregateFlush = await aggregateTrail.flush();
+  const aggregateEmitted = aggregateCounts.reduce((total, row) => total + row.count, 0);
+
+  if (
+    !specificFlush ||
+    specificRejected !== 2 ||
+    specificEmitted !== specificRejected ||
+    specificCounts.join(",") !== "1,1" ||
+    !aggregateFlush ||
+    aggregateRejected !== 512 ||
+    aggregateEmitted !== aggregateRejected ||
+    !aggregateCounts.some((row) => row.runId === "$audit")
+  )
+    throw new Error(
+      `in-flight drop accounting probe failed: ${JSON.stringify({ specificFlush, specificRejected, specificEmitted, specificCounts, aggregateFlush, aggregateRejected, aggregateEmitted })}`,
+    );
+
+  return Object.freeze({
+    specific: Object.freeze({
+      flush: specificFlush,
+      rejected: specificRejected,
+      emitted: specificEmitted,
+      counts: Object.freeze(specificCounts),
+    }),
+    aggregate: Object.freeze({
+      flush: aggregateFlush,
+      rejected: aggregateRejected,
+      emitted: aggregateEmitted,
+      rows: aggregateCounts.length,
+    }),
+  });
+}
+
 function child(databasePath: string): Promise<void> {
   return new Promise((resolveChild, reject) => {
     const process = spawn(
@@ -512,6 +604,7 @@ try {
     const sinkOutcomes = await probeSinkOutcomes(connection.database);
     const roundOneRegressions = await probeRoundOneRegressions(connection.database);
     const roundTwoRegressions = await probeRoundTwoRegressions();
+    const inFlightDropAccounting = await probeInFlightDropAccounting();
     let focusedTests = 0;
     if (!mutationMode) {
       const tests = spawnSync(
@@ -599,6 +692,7 @@ try {
       sinkOutcomes,
       roundOneRegressions,
       roundTwoRegressions,
+      inFlightDropAccounting,
       cli,
     };
     const digest = createHash("sha256").update(canonicalJson(record)).digest("hex");
