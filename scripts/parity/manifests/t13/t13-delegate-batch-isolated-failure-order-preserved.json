@@ -1,0 +1,258 @@
+{
+  "schemaVersion": 1,
+  "id": "t13-delegate-batch-isolated-failure-order-preserved",
+  "description": "T13 bilateral CLI observation (expected match), item 22 of the versioned inventory (contract L17): a delegate_task batch of three — kid2 fails with an HTTP 418 upstream canary, kid1 and kid3 succeed — settles in the exact reverse of submission order (kid3, then kid2, then kid1), forced by an in-process barrier chain (kid3 opens g2 unconditionally, kid2 waits on g2 then opens g1, kid1 waits on g1), never by sleep/wall-clock. Proves both L17 halves at once: the isolated failure does not abort the batch or raise, and results preserves task-submission order — [ONE-DONE, kid2's error output, THREE-DONE] — regardless of completion order or which task failed, on both the candidate's Promise.all and the oracle's ThreadPoolExecutor-future join. KNOWN LIMIT (declared, not a gap to fix): events.requests is deliberately excluded from capture/comparisons here. recordRequest assigns each request's seq at ARRIVAL, before any gate wait, so with three children admitted concurrently the raw request-log ARRIVAL order is a scheduler artifact, not a semantic guarantee the barrier orders — it is not byte-stable run to run and must not be compared. The order-preservation proof lives entirely in process.stdout's /tool_calls/0/result (task-index order) plus events.summary's post/get counts, both of which are stable by construction, independent of arrival interleaving.",
+  "argv": [
+    "chat",
+    "SCEN:parent delegate three background checks",
+    "--json",
+    "--provider",
+    "ollama",
+    "--model",
+    "stub-coder:1b"
+  ],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "PYTHONHASHSEED": "0",
+      "NO_COLOR": "1",
+      "LOHRA_NO_WIZARD": "1",
+      "COLUMNS": "80",
+      "TZ": "UTC",
+      "HOME": "{{home}}",
+      "LOHRA_HOME": "{{home}}/.lohra",
+      "CODEX_HOME": "{{home}}/codex",
+      "TMPDIR": "{{home}}/tmp"
+    }
+  },
+  "preconditions": [
+    {
+      "kind": "tcp-port-closed",
+      "host": "127.0.0.1",
+      "port": 11434
+    }
+  ],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/conversation/oracle_driver.py", "single"],
+      "cwd": "profile"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/conversation/candidate-driver.mjs", "single"],
+      "cwd": "profile"
+    }
+  },
+  "limits": {
+    "timeoutMs": 20000,
+    "maxOutputBytes": 16777216
+  },
+  "capture": {
+    "tree": {
+      "enabled": false,
+      "root": "home",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": [
+      {
+        "name": "summary",
+        "root": "profile",
+        "path": "stub-summary.json",
+        "format": "json"
+      },
+      {
+        "name": "assertions",
+        "root": "profile",
+        "path": "stub-assertions.json",
+        "format": "json"
+      }
+    ]
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    },
+    {
+      "class": "byte",
+      "field": "process.stderr"
+    },
+    {
+      "class": "stub",
+      "field": "events.summary"
+    },
+    {
+      "class": "stub",
+      "field": "events.assertions"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/completed",
+      "value": true
+    },
+    {
+      "side": "both",
+      "field": "events.assertions",
+      "value": {
+        "exists": true,
+        "records": {
+          "valid": true,
+          "failures": []
+        }
+      }
+    },
+    {
+      "side": "both",
+      "field": "events.summary",
+      "value": {
+        "exists": true,
+        "records": {
+          "gets": 0,
+          "posts": 5,
+          "sequence": [
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions"
+          ]
+        }
+      }
+    }
+  ],
+  "normalizations": [
+    {
+      "field": "process.stdout",
+      "kind": "replace-json-pointer",
+      "pointer": "/session_id",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stdout",
+      "kind": "replace-regex",
+      "pattern": "[0-9a-f]{32}",
+      "replacement": "<SUB_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=session: )[0-9a-f]{32}(?=  \\(resume with --session )",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=--session )[0-9a-f]{32}(?=\\))",
+      "replacement": "<SESSION_ID>"
+    }
+  ],
+  "stub": {
+    "state": "up-with-models",
+    "fixture": "chat-lane-script",
+    "requestLog": {
+      "comparedHeaders": [
+        "authorization",
+        "accept",
+        "content-type",
+        "host",
+        "x-stainless-retry-count"
+      ],
+      "excludedHeaders": [
+        "accept-encoding",
+        "connection",
+        "content-length",
+        "user-agent",
+        "x-stainless-lang",
+        "x-stainless-package-version",
+        "x-stainless-os",
+        "x-stainless-arch",
+        "x-stainless-runtime",
+        "x-stainless-runtime-version",
+        "x-stainless-async",
+        "x-stainless-read-timeout"
+      ]
+    },
+    "laneSteps": {
+      "parent": [
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "delegate_task",
+              "argumentsRaw": "{\"tasks\":[\"SCEN:kid1 do a\",\"SCEN:kid2 do b\",\"SCEN:kid3 do c\"]}"
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "content": "PARENT-DONE"
+        }
+      ],
+      "kid3": [
+        {
+          "kind": "text",
+          "content": "THREE-DONE",
+          "openGate": "g2"
+        }
+      ],
+      "kid2": [
+        {
+          "kind": "http_error",
+          "status": 418,
+          "message": "UPSTREAM_CANARY",
+          "gate": "g2",
+          "openGate": "g1"
+        }
+      ],
+      "kid1": [
+        {
+          "kind": "text",
+          "content": "ONE-DONE",
+          "gate": "g1"
+        }
+      ]
+    }
+  },
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10",
+    "expectedPackages": {
+      "openai": "3.6.0",
+      "httpx": "0.28.1"
+    }
+  }
+}

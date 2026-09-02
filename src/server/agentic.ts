@@ -1,13 +1,16 @@
 /** Agentic mode — an opt-in server-side tool allow-list (mirrors
  * `lohra/server/agentic.py`). Exposing tools over HTTP is remote code
- * execution risk, so this is off by default (relay mode). The exposed tools
- * reuse the existing subagent guards (`src/tools/child.ts`): intercepted
- * tools (memory/skills/session_search/delegate_task/...) are never
- * reachable and dangerous shell commands are auto-denied — there is no
- * operator to approve them over HTTP. On top of that, the server's own
- * `--tools` allow-list gates EXECUTION, not just what the model sees: a
- * tool named by the model (or hallucinated, or client-injected) that
- * wasn't exposed is refused before the subagent guards even run. */
+ * execution risk, so this is off by default (relay mode). The second guard
+ * layer reuses `src/tools/child.ts`, whose T19 parity rule is a deny-list
+ * (`parent - E`): intercepted tools (memory/skills/session_search/
+ * delegate_task/...) are unreachable and dangerous shell commands are
+ * auto-denied. With today's 24 builtins this yields the same five names as
+ * the former closed allow-list, but future builtins are fail-open unless
+ * added to E. `serve` does not currently register MCP servers; if it ever
+ * does, non-excluded MCP tools also become candidates for HTTP exposure.
+ * The server's own `--tools` allow-list still gates EXECUTION, not just what
+ * the model sees: a tool named by the model (or hallucinated, or
+ * client-injected) that wasn't exposed is refused before these guards run. */
 
 import {
   builtinRegistry,

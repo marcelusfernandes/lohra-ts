@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
 import process from "node:process";
-
 import { describe, expect, it } from "vitest";
 
 import { pythonRepr } from "../src/serialization/python-repr.js";
@@ -56,5 +55,11 @@ describe("pythonRepr", () => {
     const value = { error: { message: "upstream refused", type: "teapot_error", code: 418 } };
     const expected = pythonStr(`print(str(${JSON.stringify(value)}))`);
     expect(pythonRepr(value)).toBe(expected);
+  });
+
+  it("preserves T13's repr edges for printable Unicode, slashes and controls", () => {
+    expect(pythonRepr("çã")).toBe("'çã'");
+    expect(pythonRepr("a\\b")).toBe("'a\\\\b'");
+    expect(pythonRepr("a\nb\rc\td\x01e")).toBe("'a\\nb\\rc\\td\\x01e'");
   });
 });

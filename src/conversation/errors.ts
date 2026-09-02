@@ -79,6 +79,16 @@ export class ConversationTurnFailedError extends ConversationError {
     super("MODEL_CALL_FAILED", message, { sessionId, apiCalls: 1, cause });
   }
 }
+
+export class MessageInjectionError extends ConversationError {
+  override readonly name = "MessageInjectionError";
+  public constructor(sessionId: string, cause: unknown) {
+    super("MESSAGE_INJECTION_FAILED", "drainMessages threw before the request was built", {
+      sessionId,
+      cause,
+    });
+  }
+}
 import type { CostEstimate } from "../pricing/index.js";
 import type { Usage } from "../transports/index.js";
 import type { SessionSummary } from "./types.js";

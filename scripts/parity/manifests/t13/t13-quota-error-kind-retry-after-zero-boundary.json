@@ -1,0 +1,303 @@
+{
+  "schemaVersion": 1,
+  "id": "t13-quota-error-kind-retry-after-zero-boundary",
+  "description": "T13 bilateral CLI observation (expected match), item 20 of the versioned inventory (contract decision 15/L15, assertion 39): a 429 that survives every SDK retry surfaces error_kind:\"quota_exhausted\" with retry_after taken from the response's own retry-after header — a positive value passes through as a Python-style float (never a bare integer: 1 must render as 1.0), a ZERO value is the exclusive boundary that collapses to null (seconds if seconds > 0 else None), an absent header is the same null, and a value that isn't parseable as a delay (an HTTP-date string) also collapses to null. HTTP 500 is the contrast case: same shape, error_kind stays null. Five sub-cases, one per spawned child, mirroring the T13 baseline's own measured evidence (evidence-s05b-quota.json): retry-after:0, no header, HTTP 500 (contrast), retry-after:1, retry-after as an HTTP-date. KNOWN LIMIT (declared, not a gap to fix): the NUMBER of upstream attempts before giving up is out of scope for T13 (contract: \"O numero de tentativas do SDK antes de desistir e fronteira T10; fixa-lo como paridade T13 e rejeicao pelo criterio 8.19\") and is NOT byte-comparable here — measured during this ticket's own investigation, the candidate's transport (src/transports/client.ts) retries only status>=500, never 429, so it reaches its final quota_exhausted classification after exactly ONE upstream attempt per 429 case, while the oracle's real SDK retries a 429 up to its own budget (measured: 3 total attempts, matching its own 500 behavior) before the unparseable-date case, where it also gives up after exactly one attempt. events.summary (upstream request count) is therefore excluded from comparisons on purpose; escalated separately as a candidate-side gap in T10's own retry policy, out of this ticket's authority to fix. Every child's FINAL observable envelope (error_kind/retry_after/output, the field this assertion is actually about) is asserted byte-exact regardless of how many attempts either side took to get there.",
+  "argv": [
+    "chat",
+    "SCEN:parent quota boundaries",
+    "--json",
+    "--provider",
+    "ollama",
+    "--model",
+    "stub-coder:1b"
+  ],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "PYTHONHASHSEED": "0",
+      "NO_COLOR": "1",
+      "LOHRA_NO_WIZARD": "1",
+      "COLUMNS": "80",
+      "TZ": "UTC",
+      "HOME": "{{home}}",
+      "LOHRA_HOME": "{{home}}/.lohra",
+      "CODEX_HOME": "{{home}}/codex",
+      "TMPDIR": "{{home}}/tmp"
+    }
+  },
+  "preconditions": [
+    {
+      "kind": "tcp-port-closed",
+      "host": "127.0.0.1",
+      "port": 11434
+    }
+  ],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/conversation/oracle_driver.py", "single"],
+      "cwd": "profile"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/conversation/candidate-driver.mjs", "single"],
+      "cwd": "profile"
+    }
+  },
+  "limits": {
+    "timeoutMs": 30000,
+    "maxOutputBytes": 16777216
+  },
+  "capture": {
+    "tree": {
+      "enabled": false,
+      "root": "home",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": [
+      {
+        "name": "assertions",
+        "root": "profile",
+        "path": "stub-assertions.json",
+        "format": "json"
+      }
+    ]
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    },
+    {
+      "class": "byte",
+      "field": "process.stderr"
+    },
+    {
+      "class": "stub",
+      "field": "events.assertions"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/completed",
+      "value": true
+    },
+    {
+      "side": "both",
+      "field": "events.assertions",
+      "value": {
+        "exists": true,
+        "records": {
+          "valid": true,
+          "failures": []
+        }
+      }
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/tool_calls/1/result",
+      "value": "{\"ok\": true, \"status\": \"error\", \"output\": \"Error code: 429 - {'error': {'message': 'T13_QUOTA_CANARY out of quota', 'type': 'teapot_error'}}\", \"tokens_in\": 0, \"tokens_out\": 0, \"cache_read_tokens\": 0, \"cache_write_tokens\": 0, \"reasoning_tokens\": 0, \"provider\": \"ollama\", \"model\": \"stub-coder:1b\", \"forced_fallback\": false, \"error_kind\": \"quota_exhausted\", \"retry_after\": null}"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/tool_calls/3/result",
+      "value": "{\"ok\": true, \"status\": \"error\", \"output\": \"Error code: 429 - {'error': {'message': 'T13_QUOTA_CANARY out of quota', 'type': 'teapot_error'}}\", \"tokens_in\": 0, \"tokens_out\": 0, \"cache_read_tokens\": 0, \"cache_write_tokens\": 0, \"reasoning_tokens\": 0, \"provider\": \"ollama\", \"model\": \"stub-coder:1b\", \"forced_fallback\": false, \"error_kind\": \"quota_exhausted\", \"retry_after\": null}"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/tool_calls/5/result",
+      "value": "{\"ok\": true, \"status\": \"error\", \"output\": \"Error code: 500 - {'error': {'message': 'T13_QUOTA_CANARY out of quota', 'type': 'teapot_error'}}\", \"tokens_in\": 0, \"tokens_out\": 0, \"cache_read_tokens\": 0, \"cache_write_tokens\": 0, \"reasoning_tokens\": 0, \"provider\": \"ollama\", \"model\": \"stub-coder:1b\", \"forced_fallback\": false, \"error_kind\": null, \"retry_after\": null}"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/tool_calls/7/result",
+      "value": "{\"ok\": true, \"status\": \"error\", \"output\": \"Error code: 429 - {'error': {'message': 'T13_QUOTA_CANARY out of quota', 'type': 'teapot_error'}}\", \"tokens_in\": 0, \"tokens_out\": 0, \"cache_read_tokens\": 0, \"cache_write_tokens\": 0, \"reasoning_tokens\": 0, \"provider\": \"ollama\", \"model\": \"stub-coder:1b\", \"forced_fallback\": false, \"error_kind\": \"quota_exhausted\", \"retry_after\": 1.0}"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/tool_calls/9/result",
+      "value": "{\"ok\": true, \"status\": \"error\", \"output\": \"Error code: 429 - {'error': {'message': 'T13_QUOTA_CANARY out of quota', 'type': 'teapot_error'}}\", \"tokens_in\": 0, \"tokens_out\": 0, \"cache_read_tokens\": 0, \"cache_write_tokens\": 0, \"reasoning_tokens\": 0, \"provider\": \"ollama\", \"model\": \"stub-coder:1b\", \"forced_fallback\": false, \"error_kind\": \"quota_exhausted\", \"retry_after\": null}"
+    }
+  ],
+  "normalizations": [
+    {
+      "field": "process.stdout",
+      "kind": "replace-json-pointer",
+      "pointer": "/session_id",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stdout",
+      "kind": "replace-regex",
+      "pattern": "[0-9a-f]{32}",
+      "replacement": "<SUB_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=session: )[0-9a-f]{32}(?=  \\(resume with --session )",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=--session )[0-9a-f]{32}(?=\\))",
+      "replacement": "<SESSION_ID>"
+    }
+  ],
+  "stub": {
+    "state": "up-with-models",
+    "fixture": "chat-lane-script",
+    "requestLog": {
+      "comparedHeaders": [
+        "authorization",
+        "accept",
+        "content-type",
+        "host",
+        "x-stainless-retry-count"
+      ],
+      "excludedHeaders": [
+        "accept-encoding",
+        "connection",
+        "content-length",
+        "user-agent",
+        "x-stainless-lang",
+        "x-stainless-package-version",
+        "x-stainless-os",
+        "x-stainless-arch",
+        "x-stainless-runtime",
+        "x-stainless-runtime-version",
+        "x-stainless-async",
+        "x-stainless-read-timeout"
+      ]
+    },
+    "laneSteps": {
+      "parent": [
+        {
+          "kind": "tool_calls",
+          "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"SCEN:qz rate limited\"}" }]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [{ "name": "collect_session", "argumentsRaw": "{\"sub_id\":\"__SUB1__\",\"wait\":true}" }]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"SCEN:qn rate limited\"}" }]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [{ "name": "collect_session", "argumentsRaw": "{\"sub_id\":\"__SUB2__\",\"wait\":true}" }]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"SCEN:q5 rate limited\"}" }]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [{ "name": "collect_session", "argumentsRaw": "{\"sub_id\":\"__SUB3__\",\"wait\":true}" }]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"SCEN:q1 rate limited\"}" }]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [{ "name": "collect_session", "argumentsRaw": "{\"sub_id\":\"__SUB4__\",\"wait\":true}" }]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"SCEN:qj rate limited\"}" }]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [{ "name": "collect_session", "argumentsRaw": "{\"sub_id\":\"__SUB5__\",\"wait\":true}" }]
+        },
+        {
+          "kind": "text",
+          "content": "PARENT-DONE"
+        }
+      ],
+      "qz": [
+        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "0" } },
+        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "0" } },
+        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "0" } },
+        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "0" } }
+      ],
+      "qn": [
+        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota" },
+        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota" },
+        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota" },
+        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota" }
+      ],
+      "q5": [
+        { "kind": "http_error", "status": 500, "message": "T13_QUOTA_CANARY out of quota" },
+        { "kind": "http_error", "status": 500, "message": "T13_QUOTA_CANARY out of quota" },
+        { "kind": "http_error", "status": 500, "message": "T13_QUOTA_CANARY out of quota" },
+        { "kind": "http_error", "status": 500, "message": "T13_QUOTA_CANARY out of quota" }
+      ],
+      "q1": [
+        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "1" } },
+        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "1" } },
+        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "1" } },
+        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "1" } }
+      ],
+      "qj": [
+        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" } },
+        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" } },
+        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" } },
+        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" } }
+      ]
+    }
+  },
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10",
+    "expectedPackages": {
+      "openai": "3.6.0",
+      "httpx": "0.28.1"
+    }
+  }
+}

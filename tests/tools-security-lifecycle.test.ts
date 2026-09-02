@@ -23,7 +23,14 @@ const definition = (name: string): ToolDefinition => ({
 });
 
 describe("child tool hardening", () => {
-  it("uses a closed allow-list for definitions, including fabricated MCP tools", () => {
+  // T19/R1 (contract-t19 decision 1): child visibility is now `parent − E`,
+  // reproducing the oracle's own deny-list mechanism directly, not an
+  // allow-list intersection. A name that was never in the 19-name deny-list
+  // -- including a fabricated MCP-shaped one -- now reaches the child on
+  // both sides, same as the oracle always did. This is the T09 scenario
+  // `t09-child-unknown-hardening` flipping from `expected divergent` to
+  // `match`, named explicitly in the T19 contract's "Verdicts que mudam".
+  it("child visibility is parent minus the 19-name deny-list, including fabricated MCP-shaped names", () => {
     const all = [
       "read_file",
       "write_file",
@@ -39,22 +46,20 @@ describe("child tool hardening", () => {
       "terminal",
       "web_fetch",
       "web_search",
+      "mcp-secret-exfil",
     ]);
   });
 
-  it("rejects unknown names and non-string terminal commands before base dispatch", async () => {
+  it("dispatches a fabricated MCP-shaped name to base and still auto-denies non-string terminal commands", async () => {
     const base = vi.fn(() => Promise.resolve(toolResult("base")));
     const dispatch = createChildDispatch(base);
-    await expect(dispatch("mcp-secret-exfil", {})).resolves.toBe(
-      toolError("Unknown tool: mcp-secret-exfil"),
-    );
+    await expect(dispatch("mcp-secret-exfil", {})).resolves.toBe(toolResult("base"));
     await expect(dispatch("terminal", { command: ["sudo", "x"] })).resolves.toBe(
       toolError("command was not approved by the user", { command: ["sudo", "x"] }),
     );
-    expect(base).not.toHaveBeenCalled();
     await expect(dispatch("read_file", { path: "x" })).resolves.toBe(toolResult("base"));
     await expect(dispatch("terminal", { command: "echo safe" })).resolves.toBe(toolResult("base"));
-    expect(base).toHaveBeenCalledTimes(2);
+    expect(base).toHaveBeenCalledTimes(3);
   });
 
   it("matches the oracle literal for every known excluded tool before base dispatch", async () => {
@@ -105,6 +110,50 @@ describe("child tool hardening", () => {
         ),
       );
       expect(statSync(target).mode & 0o777).toBe(0o600);
+    } finally {
+      approval.setYolo(false);
+      approval.setCallback(null);
+      approval.reset();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * Contract T13, decision 3, "Nota — prova por transitividade da forma (b)":
+   * the bilateral harness compares one candidate invocation against one
+   * oracle invocation, never two candidate invocations against each other,
+   * so "the child's denial is byte-identical whether or not the parent runs
+   * --yolo" (decision 3's form (b)) is proven here directly and combined by
+   * transitivity with the two bilateral manifests
+   * (t13-child-dangerous-command-denied-no-yolo,
+   * t13-child-dangerous-command-denied-yolo-immune), each of which proves
+   * candidate == oracle for one of the two yolo states on this exact field:
+   * the string createChildDispatch returns for the dangerous call, which the
+   * runtime writes verbatim as the corresponding tool-role message content
+   * in the child's own conversation history.
+   */
+  it("the child's dangerous-command denial is byte-identical whether or not the parent's own approval is yolo", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-child-yolo-parity-"));
+    const target = join(root, "victim.txt");
+    const command = `rm -rf ${JSON.stringify(target)}`;
+
+    try {
+      approval.setYolo(false);
+      writeFileSync(target, "KEEP-ME", { mode: 0o600 });
+      const noYoloDispatch = createChildDispatch((_name, args) => terminalTool(args));
+      const noYolo = await noYoloDispatch("terminal", { command });
+
+      approval.setYolo(true);
+      const yoloDispatch = createChildDispatch((_name, args) => terminalTool(args));
+      const yolo = await yoloDispatch("terminal", { command });
+
+      expect(yolo).toBe(noYolo);
+      expect(noYolo).toBe(
+        toolError("subagent auto-denied a dangerous command (recursive delete (rm -r))", {
+          command,
+        }),
+      );
+      expect(statSync(target).isFile()).toBe(true);
     } finally {
       approval.setYolo(false);
       approval.setCallback(null);

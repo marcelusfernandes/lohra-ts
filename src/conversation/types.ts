@@ -6,6 +6,7 @@ export interface ModelRequest {
   readonly messages: readonly Readonly<Record<string, unknown>>[];
   readonly model: string;
   readonly temperature: number | null;
+  readonly effort: string | null;
   readonly maxTokens: number | null;
   readonly tools: readonly Readonly<Record<string, unknown>>[];
   readonly signal: AbortSignal;

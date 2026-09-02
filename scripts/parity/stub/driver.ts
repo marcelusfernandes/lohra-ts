@@ -90,6 +90,9 @@ async function main(): Promise<number> {
     failures: [],
     sequence: [],
     toolSequence: config.stub.toolSequence ?? [],
+    laneSteps: config.stub.laneSteps ?? {},
+    laneStepIndex: new Map(),
+    latches: new Map(),
     posts: 0,
     requests: 0,
   };

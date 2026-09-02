@@ -1,4 +1,4 @@
-import type { StubFixture, StubSpec, StubState, StubToolStep } from "../types.js";
+import type { StubFixture, StubLaneStep, StubSpec, StubState, StubToolStep } from "../types.js";
 
 export interface StubDriverConfig {
   readonly scenario: string;
@@ -34,6 +34,19 @@ export interface StubRuntime {
   readonly failures: string[];
   readonly sequence: string[];
   readonly toolSequence: readonly StubToolStep[];
+  /** T13 lane-script fixture: per-lane step lists (chat-lane-script only —
+   * empty for every existing fixture, so this is a no-op elsewhere). */
+  laneSteps: Readonly<Record<string, readonly StubLaneStep[]>>;
+  /** Mutates independently per lane: which step each lane is on next. Never
+   * consulted outside chat-lane-script, so unrelated fixtures never touch
+   * it and it never affects their behavior. */
+  readonly laneStepIndex: Map<string, number>;
+  /** Named one-shot latches backing signal/awaitSignal/gate/openGate — an
+   * in-process barrier (the stub and the target run as separate processes,
+   * but the stub itself is single-process, so no file-based coordination is
+   * needed the way the Python reference implementation required across its
+   * own process boundary). */
+  readonly latches: Map<string, { readonly promise: Promise<void>; resolve: () => void }>;
   posts: number;
   requests: number;
 }

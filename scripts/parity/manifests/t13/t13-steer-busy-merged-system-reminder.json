@@ -1,0 +1,286 @@
+{
+  "schemaVersion": 1,
+  "id": "t13-steer-busy-merged-system-reminder",
+  "description": "T13 bilateral CLI observation (expected match), item 6 of the versioned inventory (contract decision 6/L6): steer_session called against a child that is definitionally still busy (spawn_session registers the child as inFlight synchronously, and its only call is gated open — never released until after the steer already happened, so busy-ness is guaranteed by construction, not a race) queues the raw text; it surfaces merged into a single <system-reminder>...</system-reminder> user message, drained at the top of the child's next iteration (its second, since its first tool_calls response already required one). Sentinel __SUB__ (mirrors the Evaluator's own harness) resolves the just-spawned child's real sub_id for the steer_session call. The parent makes an extra probe tool call AFTER steering and BEFORE opening the child's gate specifically to give the child's own post-release processing (parse tool_calls, dispatch read_file, drain the steer inbox, build iteration 2) a full extra real HTTP round trip of headroom before the parent's own turn can finish and teardown can fire — without it, this collapses into the exact same scheduler-dependent race documented in section O (candidate interrupts before the child's second iteration, oracle does not). KNOWN LIMIT (declared, not a gap to fix): events.requests is excluded from bilateral comparisons — the child's FIRST request's arrival position relative to the parent's is scheduler-dependent (measured stable-but-different: always index 1 on the candidate, always index 2 on the oracle, across repeated runs), the same class of non-discriminable-by-scheduling property as section O. The child's SECOND request (carrying the merged reminder) lands at a stable index on both sides once construction removes the interrupt race, so the reminder's exact content is still verified below via a targeted, side-scoped expectation at that fixed pointer.",
+  "argv": [
+    "chat",
+    "SCEN:parent spawn a child and steer it while busy",
+    "--json",
+    "--provider",
+    "ollama",
+    "--model",
+    "stub-coder:1b"
+  ],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "PYTHONHASHSEED": "0",
+      "NO_COLOR": "1",
+      "LOHRA_NO_WIZARD": "1",
+      "COLUMNS": "80",
+      "TZ": "UTC",
+      "HOME": "{{home}}",
+      "LOHRA_HOME": "{{home}}/.lohra",
+      "CODEX_HOME": "{{home}}/codex",
+      "TMPDIR": "{{home}}/tmp"
+    }
+  },
+  "preconditions": [
+    {
+      "kind": "tcp-port-closed",
+      "host": "127.0.0.1",
+      "port": 11434
+    }
+  ],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/conversation/oracle_driver.py", "single"],
+      "cwd": "profile"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/conversation/candidate-driver.mjs", "single"],
+      "cwd": "profile"
+    }
+  },
+  "limits": {
+    "timeoutMs": 20000,
+    "maxOutputBytes": 16777216
+  },
+  "capture": {
+    "tree": {
+      "enabled": false,
+      "root": "home",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": [
+      {
+        "name": "requests",
+        "root": "profile",
+        "path": "stub-requests.jsonl",
+        "format": "jsonl"
+      },
+      {
+        "name": "summary",
+        "root": "profile",
+        "path": "stub-summary.json",
+        "format": "json"
+      },
+      {
+        "name": "assertions",
+        "root": "profile",
+        "path": "stub-assertions.json",
+        "format": "json"
+      }
+    ]
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    },
+    {
+      "class": "byte",
+      "field": "process.stderr"
+    },
+    {
+      "class": "stub",
+      "field": "events.summary"
+    },
+    {
+      "class": "stub",
+      "field": "events.assertions"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/completed",
+      "value": true
+    },
+    {
+      "side": "both",
+      "field": "events.assertions",
+      "value": {
+        "exists": true,
+        "records": {
+          "valid": true,
+          "failures": []
+        }
+      }
+    },
+    {
+      "side": "both",
+      "field": "events.summary",
+      "value": {
+        "exists": true,
+        "records": {
+          "gets": 0,
+          "posts": 6,
+          "sequence": [
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions"
+          ]
+        }
+      }
+    },
+    {
+      "side": "both",
+      "field": "events.requests",
+      "pointer": "/records/5/body/messages/4",
+      "value": {
+        "role": "user",
+        "content": "<system-reminder>\nURGENT: also check the budget\n</system-reminder>"
+      }
+    }
+  ],
+  "normalizations": [
+    {
+      "field": "process.stdout",
+      "kind": "replace-json-pointer",
+      "pointer": "/session_id",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stdout",
+      "kind": "replace-regex",
+      "pattern": "[0-9a-f]{32}",
+      "replacement": "<SUB_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=session: )[0-9a-f]{32}(?=  \\(resume with --session )",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=--session )[0-9a-f]{32}(?=\\))",
+      "replacement": "<SESSION_ID>"
+    }
+  ],
+  "stub": {
+    "state": "up-with-models",
+    "fixture": "chat-lane-script",
+    "requestLog": {
+      "comparedHeaders": [
+        "authorization",
+        "accept",
+        "content-type",
+        "host",
+        "x-stainless-retry-count"
+      ],
+      "excludedHeaders": [
+        "accept-encoding",
+        "connection",
+        "content-length",
+        "user-agent",
+        "x-stainless-lang",
+        "x-stainless-package-version",
+        "x-stainless-os",
+        "x-stainless-arch",
+        "x-stainless-runtime",
+        "x-stainless-runtime-version",
+        "x-stainless-async",
+        "x-stainless-read-timeout"
+      ]
+    },
+    "laneSteps": {
+      "parent": [
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"SCEN:kid do it\"}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "steer_session",
+              "argumentsRaw": "{\"sub_id\":\"__SUB__\",\"text\":\"URGENT: also check the budget\"}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "read_file",
+              "argumentsRaw": "{\"path\":\"parent-probe.txt\"}"
+            }
+          ],
+          "openGate": "release-kid-1"
+        },
+        {
+          "kind": "text",
+          "content": "PARENT-DONE"
+        }
+      ],
+      "kid": [
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "read_file",
+              "argumentsRaw": "{\"path\":\"nonexistent.txt\"}"
+            }
+          ],
+          "gate": "release-kid-1"
+        },
+        {
+          "kind": "text",
+          "content": "KID-DONE"
+        }
+      ]
+    }
+  },
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10",
+    "expectedPackages": {
+      "openai": "3.6.0",
+      "httpx": "0.28.1"
+    }
+  }
+}

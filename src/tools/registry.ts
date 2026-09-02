@@ -25,6 +25,8 @@ function frozenClone<T>(value: T): T {
   return clone;
 }
 
+export class ToolRegistrationCollisionError extends Error {}
+
 export class ToolRegistry {
   readonly #entries = new Map<string, ToolEntry>();
   #generation = 0;
@@ -42,7 +44,7 @@ export class ToolRegistry {
       const bothMcp =
         existing.toolset.startsWith("mcp-") && registration.toolset.startsWith("mcp-");
       if (!bothMcp && registration.override !== true) {
-        throw new Error(
+        throw new ToolRegistrationCollisionError(
           `tool '${registration.name}' already registered under '${existing.toolset}'`,
         );
       }
@@ -58,7 +60,11 @@ export class ToolRegistry {
         ...(registration.checkFn === undefined ? {} : { checkFn: registration.checkFn }),
         requiresEnv: Object.freeze([...(registration.requiresEnv ?? [])]),
         isAsync: registration.isAsync ?? false,
-        description: registration.description ?? registration.schema.description,
+        description:
+          registration.description ??
+          (typeof registration.schema.description === "string"
+            ? registration.schema.description
+            : ""),
         emoji: registration.emoji ?? "⚡",
         maxResultSizeChars: registration.maxResultSizeChars ?? null,
       }),

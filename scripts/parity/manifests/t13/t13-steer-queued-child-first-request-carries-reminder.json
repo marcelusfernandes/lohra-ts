@@ -1,0 +1,295 @@
+{
+  "schemaVersion": 1,
+  "id": "t13-steer-queued-child-first-request-carries-reminder",
+  "description": "T13 bilateral CLI observation (expected match), item 8 of the versioned inventory (contract L6): with --max-parallel 1, a second spawned child is queued-in-pool (registered inFlight synchronously by spawn, but not yet admitted past the concurrency gate, which is occupied by the first child) — steering it while queued is indistinguishable from steering it while busy (both routes go through the same inFlight-true inbox path), so the merged <system-reminder> text appears in the queued child's very FIRST request once it is finally admitted, not a later one. Deterministic by construction: the two children are spawned in SEPARATE, sequential parent steps (never in the same batch) specifically because spawning both in one step measurably races on which one the gate admits first — the oracle's own ThreadPoolExecutor picks either with roughly 50/50 stability across repeated runs when both are submitted together (measured, not assumed: 2 of 4 identically-configured runs admitted the second-spawned child first). Spawning kid1 in its own earlier step and gating it open guarantees it occupies the single slot (a microtask-tick admission versus a full HTTP round trip before kid2 is even spawned is not a close race) before kid2 exists at all, so kid2 is unambiguously the queued one. Sentinel __SUB2__ (mirrors the Evaluator's own harness) resolves kid2's real sub_id for the steer_session call. KNOWN LIMIT (declared, not a gap to fix): events.requests is excluded from bilateral comparisons — kid1's own random sub_id appears unnormalized inside the parent's own accumulated tool-call history across multiple records, and pinpointing every occurrence is not worth the complexity here; the reminder's exact content and placement in kid2's first request is instead verified via a targeted expectation once observed to land at a stable index on both sides.",
+  "argv": [
+    "chat",
+    "SCEN:parent spawn kid1, then kid2, steer the queued one",
+    "--json",
+    "--provider",
+    "ollama",
+    "--model",
+    "stub-coder:1b",
+    "--max-parallel",
+    "1"
+  ],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "PYTHONHASHSEED": "0",
+      "NO_COLOR": "1",
+      "LOHRA_NO_WIZARD": "1",
+      "COLUMNS": "80",
+      "TZ": "UTC",
+      "HOME": "{{home}}",
+      "LOHRA_HOME": "{{home}}/.lohra",
+      "CODEX_HOME": "{{home}}/codex",
+      "TMPDIR": "{{home}}/tmp"
+    }
+  },
+  "preconditions": [
+    {
+      "kind": "tcp-port-closed",
+      "host": "127.0.0.1",
+      "port": 11434
+    }
+  ],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/conversation/oracle_driver.py", "single"],
+      "cwd": "profile"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/conversation/candidate-driver.mjs", "single"],
+      "cwd": "profile"
+    }
+  },
+  "limits": {
+    "timeoutMs": 20000,
+    "maxOutputBytes": 16777216
+  },
+  "capture": {
+    "tree": {
+      "enabled": false,
+      "root": "home",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": [
+      {
+        "name": "requests",
+        "root": "profile",
+        "path": "stub-requests.jsonl",
+        "format": "jsonl"
+      },
+      {
+        "name": "summary",
+        "root": "profile",
+        "path": "stub-summary.json",
+        "format": "json"
+      },
+      {
+        "name": "assertions",
+        "root": "profile",
+        "path": "stub-assertions.json",
+        "format": "json"
+      }
+    ]
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    },
+    {
+      "class": "byte",
+      "field": "process.stderr"
+    },
+    {
+      "class": "stub",
+      "field": "events.summary"
+    },
+    {
+      "class": "stub",
+      "field": "events.assertions"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/completed",
+      "value": true
+    },
+    {
+      "side": "both",
+      "field": "events.assertions",
+      "value": {
+        "exists": true,
+        "records": {
+          "valid": true,
+          "failures": []
+        }
+      }
+    },
+    {
+      "side": "both",
+      "field": "events.summary",
+      "value": {
+        "exists": true,
+        "records": {
+          "gets": 0,
+          "posts": 7,
+          "sequence": [
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions",
+            "POST /v1/chat/completions"
+          ]
+        }
+      }
+    },
+    {
+      "side": "both",
+      "field": "events.requests",
+      "pointer": "/records/6/body/messages/2",
+      "value": {
+        "role": "user",
+        "content": "<system-reminder>\nurgent addition for kid2\n</system-reminder>"
+      }
+    }
+  ],
+  "normalizations": [
+    {
+      "field": "process.stdout",
+      "kind": "replace-json-pointer",
+      "pointer": "/session_id",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stdout",
+      "kind": "replace-regex",
+      "pattern": "[0-9a-f]{32}",
+      "replacement": "<SUB_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=session: )[0-9a-f]{32}(?=  \\(resume with --session )",
+      "replacement": "<SESSION_ID>"
+    },
+    {
+      "field": "process.stderr",
+      "kind": "replace-regex",
+      "pattern": "(?<=--session )[0-9a-f]{32}(?=\\))",
+      "replacement": "<SESSION_ID>"
+    }
+  ],
+  "stub": {
+    "state": "up-with-models",
+    "fixture": "chat-lane-script",
+    "requestLog": {
+      "comparedHeaders": [
+        "authorization",
+        "accept",
+        "content-type",
+        "host",
+        "x-stainless-retry-count"
+      ],
+      "excludedHeaders": [
+        "accept-encoding",
+        "connection",
+        "content-length",
+        "user-agent",
+        "x-stainless-lang",
+        "x-stainless-package-version",
+        "x-stainless-os",
+        "x-stainless-arch",
+        "x-stainless-runtime",
+        "x-stainless-runtime-version",
+        "x-stainless-async",
+        "x-stainless-read-timeout"
+      ]
+    },
+    "laneSteps": {
+      "parent": [
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"SCEN:kid1 do it\"}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"SCEN:kid2 do it\"}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "steer_session",
+              "argumentsRaw": "{\"sub_id\":\"__SUB2__\",\"text\":\"urgent addition for kid2\"}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "read_file",
+              "argumentsRaw": "{\"path\":\"parent-probe.txt\"}"
+            }
+          ],
+          "openGate": "release-kid1"
+        },
+        {
+          "kind": "text",
+          "content": "PARENT-DONE"
+        }
+      ],
+      "kid1": [
+        {
+          "kind": "text",
+          "content": "KID1-DONE",
+          "gate": "release-kid1"
+        }
+      ],
+      "kid2": [
+        {
+          "kind": "text",
+          "content": "KID2-DONE"
+        }
+      ]
+    }
+  },
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10",
+    "expectedPackages": {
+      "openai": "3.6.0",
+      "httpx": "0.28.1"
+    }
+  }
+}

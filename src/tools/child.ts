@@ -2,14 +2,6 @@ import { detectDangerousCommand } from "./approval.js";
 import { toolError } from "./envelope.js";
 import type { RegistryDispatch, ToolArguments, ToolDefinition } from "./types.js";
 
-export const CHILD_TOOL_ALLOWLIST = Object.freeze([
-  "read_file",
-  "write_file",
-  "terminal",
-  "web_fetch",
-  "web_search",
-] as const);
-
 export const CHILD_EXCLUDED_TOOLS = Object.freeze([
   "delegate_task",
   "memory",
@@ -32,7 +24,6 @@ export const CHILD_EXCLUDED_TOOLS = Object.freeze([
   "list_models",
 ] as const);
 
-const allowed = new Set<string>(CHILD_TOOL_ALLOWLIST);
 const excluded = new Set<string>(CHILD_EXCLUDED_TOOLS);
 
 function frozenClone<T>(value: T): T {
@@ -46,12 +37,19 @@ function frozenClone<T>(value: T): T {
   return clone;
 }
 
+/**
+ * R1 (T19): child visibility is `parent − E` (the oracle's own deny-list
+ * mechanism), not an allow-list intersection. See contract-t19 decision 1 —
+ * this supersedes T09's allow-list hardening for visibility computation
+ * only; `terminal.command` non-string/dangerous-command guards below are a
+ * separate surface, untouched.
+ */
 export function childToolDefinitions(
   definitions: readonly ToolDefinition[],
 ): readonly ToolDefinition[] {
   return Object.freeze(
     definitions
-      .filter((definition) => allowed.has(definition.function.name))
+      .filter((definition) => !excluded.has(definition.function.name))
       .map((definition) => frozenClone(definition)),
   );
 }
@@ -63,7 +61,6 @@ export function createChildDispatch(
     if (excluded.has(name)) {
       return toolError(`the '${name}' tool is not available to subagents`);
     }
-    if (!allowed.has(name)) return toolError(`Unknown tool: ${name}`);
     if (name === "terminal" && typeof args.command !== "string") {
       return toolError("command was not approved by the user", { command: args.command });
     }

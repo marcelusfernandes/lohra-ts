@@ -7,6 +7,7 @@ import {
   ConversationTurnFailedError,
   IncompleteToolCallError,
   MaxIterationsError,
+  MessageInjectionError,
   UnexpectedToolCallError,
 } from "./errors.js";
 import type {
@@ -47,10 +48,6 @@ function providerMessage(error: unknown): string {
   return String(error);
 }
 
-function signalAborted(signal: AbortSignal): boolean {
-  return signal.aborted;
-}
-
 function addUsage(total: Usage | null, next: Usage | null): Usage | null {
   if (next === null) return total;
   if (total === null) return { ...next };
@@ -82,12 +79,26 @@ export class ConversationRuntime {
     readonly model: string;
     readonly cwd: string;
     readonly temperature?: number | null;
+    /** contract L1/L9 (T13): only ever set for a child's turn via
+     * spawn_session/delegate_task's own `effort` override — the parent's
+     * own chat command has no surface to set this at all (the oracle's
+     * cli.py has no effort flag either), so this stays absent/null there
+     * and nothing changes for the parent's own requests. */
+    readonly effort?: string | null;
     readonly sessionId?: string;
     readonly signal?: AbortSignal;
     /** Fires with each text delta across every provider call of this turn
      * (intermediate iterations included, tool calls excluded — mirrors the
      * Python oracle's `on_delta`). Absent means non-streaming. */
     readonly onDelta?: (delta: string) => void;
+    /** Drains zero or more messages to append at the top of every iteration
+     * of this turn (the first included), before the next request is built —
+     * an orchestration adapter's steer inbox is the intended caller. Absent
+     * means no injection, and the turn behaves exactly as it did before this
+     * option existed. A thrown error is wrapped in MessageInjectionError and
+     * propagated (never swallowed, never left silent); no request is built
+     * for that iteration. */
+    readonly drainMessages?: () => readonly Readonly<Record<string, unknown>>[];
   }): Promise<ConversationTurnResult> {
     const sessionId = input.sessionId ?? this.options.idSource();
     let session = this.options.repository.session(sessionId);
@@ -136,11 +147,24 @@ export class ConversationRuntime {
     try {
       for (let iteration = 1; iteration <= this.maxIterations; iteration += 1) {
         if (signal.aborted) throw new ConversationCancelledError(sessionId, signal.reason);
+        if (input.drainMessages !== undefined) {
+          let injected: readonly Readonly<Record<string, unknown>>[];
+          try {
+            injected = input.drainMessages();
+          } catch (error) {
+            throw new MessageInjectionError(sessionId, error);
+          }
+          for (const injectedMessage of injected) {
+            messages.push(injectedMessage);
+            turnMessages.push(injectedMessage);
+          }
+        }
         const request: ModelRequest = {
           system: session.systemPrompt,
           messages: immutableMessages(messages),
           model: input.model,
           temperature: input.temperature ?? null,
+          effort: input.effort ?? null,
           maxTokens: this.options.maxTokens ?? null,
           tools: immutableMessages(
             (this.options.toolDefinitions ?? []) as readonly Readonly<Record<string, unknown>>[],
@@ -153,7 +177,6 @@ export class ConversationRuntime {
         try {
           response = await this.options.transport.complete(request);
         } catch (error) {
-          if (signalAborted(signal)) throw new ConversationCancelledError(sessionId, error);
           throw new ConversationTurnFailedError(sessionId, providerMessage(error), error);
         }
         apiCalls += 1;

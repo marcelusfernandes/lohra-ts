@@ -1,7 +1,12 @@
 /** Python's `str()`/`repr()` for JSON-shaped values — single-quoted strings,
  * `True`/`False`/`None`, `", "`/`": "` separators. Mirrors CPython's
  * `unicode_repr`: prefers single quotes, switches to double quotes only when
- * the string holds a `'` and no `"`. */
+ * the string holds a `'` and no `"`.
+ *
+ * String fidelity matches CPython across ASCII controls/quotes/backslashes.
+ * Like the approved T13 implementation, it intentionally does not attempt
+ * Python's full Unicode `str.isprintable()` category table for C1 controls,
+ * format characters or unassigned code points. */
 
 function reprString(value: string): string {
   const quote = value.includes("'") && !value.includes('"') ? '"' : "'";
