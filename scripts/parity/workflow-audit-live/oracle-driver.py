@@ -4,15 +4,70 @@ import json
 import sqlite3
 import tempfile
 from pathlib import Path
+from typing import Any
 
+from lohra.agent.agent import Agent
+from lohra.agent.client import ModelClient
+from lohra.providers import get_provider_profile
 from lohra.state import SessionDB
 from lohra.workflow.audit import (
     DEFAULT_MAX_EVENT_BYTES, DEFAULT_MAX_EVENTS_PER_RUN, DEFAULT_MAX_RUNS,
     DEFAULT_QUEUE_LIMIT, DEFAULT_RETENTION_SECONDS, sanitize_audit_event,
 )
 from lohra.workflow.events import DONE, ITEMS, NODE, PLAN, EventEmitter
+from lohra.workflow.service import WorkflowService
 
 CANARY = "T17_PRIVATE_CANARY_🔒_秘密_🧪"
+
+
+class CannedClient(ModelClient):
+    def create(self, **_kwargs: Any) -> dict[str, Any]:
+        return {
+            "content": [{"type": "text", "text": "canned-complete"}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 5, "output_tokens": 3},
+        }
+
+    def stream(self, **kwargs: Any) -> dict[str, Any]:
+        return self.create(**kwargs)
+
+
+def canned_projection(root: Path) -> dict[str, Any]:
+    db = SessionDB(str(root / "canned.db"))
+    client = CannedClient()
+
+    def factory() -> Agent:
+        return Agent(
+            model="audit-test",
+            provider=get_provider_profile("anthropic"),
+            client=client,
+        )
+
+    service = WorkflowService(base_child_factory=factory, db=db, home=root, max_runs=1)
+    try:
+        started = service.start({
+            "meta": {"name": "t17-canned"},
+            "nodes": [{"id": "leaf", "type": "agent", "prompt": CANARY}],
+        })
+        run_id = started["run_id"]
+        result = service.status(run_id, wait=True, timeout=10)
+        assert service._audit.flush(timeout=2)
+        page = db.audit_query(run_id, limit=100)
+        event_types = [row["event_type"] for row in page["events"]]
+        encoded = json.dumps(page, ensure_ascii=False)
+        return {
+            "status": result["status"],
+            "lifecycle": {
+                "plan": "segment.started" in event_types,
+                "node_started": "node.started" in event_types,
+                "node_completed": "node.completed" in event_types,
+                "done": "segment.completed" in event_types,
+            },
+            "canary_absent": CANARY not in encoded,
+        }
+    finally:
+        service.shutdown()
+        db.close()
 
 def event(run_id: str, turn: int, event_type: str = "node.started"):
     return {"schema_version": 1, "event_type": event_type, "provenance": "observed",
@@ -76,17 +131,20 @@ def main():
         emitter.emit("live", DONE, {"status": "complete"}),
     ]
     print(json.dumps({
-        "limits": {"event_bytes": DEFAULT_MAX_EVENT_BYTES, "events_per_run": DEFAULT_MAX_EVENTS_PER_RUN,
-                   "runs": DEFAULT_MAX_RUNS, "queue": DEFAULT_QUEUE_LIMIT, "retention_seconds": DEFAULT_RETENTION_SECONDS},
-        "privacy": {"canary_absent": CANARY not in json.dumps(safe, ensure_ascii=False),
-                    "states": [safe["data"][key]["state"] for key in ("prompt", "response", "reasoning", "content", "arguments", "result")],
-                    "public_canary_absent": CANARY not in json.dumps(privacy_page, ensure_ascii=False),
-                    "database_canary_absent": CANARY not in json.dumps(stored_privacy, ensure_ascii=False)},
-        "unknown_read_model": unknown_read_model,
-        "sqlite": {"snapshot": snap, "frozen": [row["seq"] for row in frozen["events"]], "tail": [row["seq"] for row in tail["events"]],
-                   "retained": [row["seq"] for row in retained_events[1:]], "dropped": retained_events[0]["data"]["dropped_count"],
-                   "resumed": resurrected[1]["seq"]},
-        "live": {"outcomes": outcomes, "delivered": delivered, "tracked": emitter.tracked_nodes()},
+        "projection": {
+            "limits": {"event_bytes": DEFAULT_MAX_EVENT_BYTES, "events_per_run": DEFAULT_MAX_EVENTS_PER_RUN,
+                       "runs": DEFAULT_MAX_RUNS, "queue": DEFAULT_QUEUE_LIMIT, "retention_seconds": DEFAULT_RETENTION_SECONDS},
+            "privacy": {"canary_absent": CANARY not in json.dumps(safe, ensure_ascii=False),
+                        "states": [safe["data"][key]["state"] for key in ("prompt", "response", "reasoning", "content", "arguments", "result")],
+                        "public_canary_absent": CANARY not in json.dumps(privacy_page, ensure_ascii=False),
+                        "database_canary_absent": CANARY not in json.dumps(stored_privacy, ensure_ascii=False)},
+            "unknown_read_model": unknown_read_model,
+            "sqlite": {"snapshot": snap, "frozen": [row["seq"] for row in frozen["events"]], "tail": [row["seq"] for row in tail["events"]],
+                       "retained": [row["seq"] for row in retained_events[1:]], "dropped": retained_events[0]["data"]["dropped_count"],
+                       "resumed": resurrected[1]["seq"]},
+            "live": {"outcomes": outcomes, "delivered": delivered, "tracked": emitter.tracked_nodes()},
+        },
+        "canned": canned_projection(root),
     }, sort_keys=True))
 
 if __name__ == "__main__": main()

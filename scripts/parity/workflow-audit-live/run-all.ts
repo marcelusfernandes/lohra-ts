@@ -172,8 +172,17 @@ async function candidateProjection() {
         },
         canned: {
           status: "status" in canned ? canned.status : "error",
-          auditTypes: cannedAudit.events.map((event) => event.event_type),
-          canaryAbsent: !JSON.stringify(cannedAudit).includes(CANARY),
+          lifecycle: {
+            plan: cannedAudit.events.some((event) => event.event_type === "workflow.plan"),
+            node_started: cannedAudit.events.some(
+              (event) => event.event_type === "workflow.node" && event.data.state === "running",
+            ),
+            node_completed: cannedAudit.events.some(
+              (event) => event.event_type === "workflow.node" && event.data.state === "complete",
+            ),
+            done: cannedAudit.events.some((event) => event.event_type === "workflow.done"),
+          },
+          canary_absent: !JSON.stringify(cannedAudit).includes(CANARY),
         },
       };
     } finally {
@@ -211,21 +220,26 @@ try {
     },
   });
   if (outcome.status !== 0) throw new Error(`oracle driver failed: ${outcome.stderr}`);
-  const oracleProjection = JSON.parse(outcome.stdout) as unknown;
+  const oracleResult = JSON.parse(outcome.stdout) as {
+    readonly projection: unknown;
+    readonly canned: unknown;
+  };
   const candidateResult = await candidateProjection();
-  if (canonicalJson(oracleProjection) !== canonicalJson(candidateResult.projection))
+  if (canonicalJson(oracleResult.projection) !== canonicalJson(candidateResult.projection))
     throw new Error(
-      `bilateral mismatch\noracle=${canonicalJson(oracleProjection)}\ncandidate=${canonicalJson(candidateResult.projection)}`,
+      `bilateral mismatch\noracle=${canonicalJson(oracleResult.projection)}\ncandidate=${canonicalJson(candidateResult.projection)}`,
     );
-  if (candidateResult.canned.status !== "complete" || !candidateResult.canned.canaryAbsent)
-    throw new Error("canned workflow audit failed");
+  if (canonicalJson(oracleResult.canned) !== canonicalJson(candidateResult.canned))
+    throw new Error(
+      `canned workflow mismatch\noracle=${canonicalJson(oracleResult.canned)}\ncandidate=${canonicalJson(candidateResult.canned)}`,
+    );
   const record = {
     targetSha: candidate.sha,
     oracleSha: ORACLE_SHA,
     commands: ["oracle-driver.py", "candidateProjection"],
     normalizations: [],
     bilateralMatch: true,
-    canned: candidateResult.canned,
+    canned: { oracle: oracleResult.canned, candidate: candidateResult.canned, match: true },
     projection: candidateResult.projection,
   };
   const digest = sha(record);
