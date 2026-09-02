@@ -65,6 +65,29 @@ export const CHAT_SPEC = spec(
   [{ name: "prompt", required: true }],
 );
 
+export const DASHBOARD_SPEC = spec([
+  ...COMMON_FLAGS,
+  { name: "--model", takesValue: true },
+  { name: "--provider", takesValue: true },
+  { name: "--port", takesValue: true, type: "int" },
+  { name: "--insecure", takesValue: false },
+]);
+
+export const CRON_SPEC = spec(
+  [
+    ...COMMON_FLAGS,
+    { name: "--interval", takesValue: true, type: "int" },
+    { name: "--cron", takesValue: true },
+    { name: "--at", takesValue: true, type: "float" },
+    { name: "--name", takesValue: true },
+    { name: "--prompt", takesValue: true },
+  ],
+  [
+    { name: "action", required: true, choices: ["list", "add", "remove", "pause", "resume"] },
+    { name: "job_id", required: false },
+  ],
+);
+
 // --port is a plain value flag here, not typed `int`: the oracle's own
 // `serve --port <bad>` invalid-int rejection has not been measured, so
 // emulating its message would risk a byte-format guess. Declared open.
@@ -150,3 +173,8 @@ export const WORKFLOW_AUDIT_SPEC = spec(
   ],
   [{ name: "run_id", required: true }],
 );
+
+export const UPDATE_SPEC = spec([
+  { name: "--check", takesValue: false },
+  { name: "--reinstall", takesValue: false },
+]);

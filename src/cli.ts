@@ -14,6 +14,7 @@ import { runCron } from "./commands/cron.js";
 import { runServe } from "./commands/serve.js";
 import { runWorkflowCommand } from "./commands/workflow.js";
 import { runDashboard } from "./commands/dashboard.js";
+import { runUpdate } from "./commands/update.js";
 import { readCodexModel } from "./auth/codex.js";
 import { subscriptionActive } from "./auth/credentials.js";
 import type { OAuthPost } from "./auth/oauth.js";
@@ -32,6 +33,8 @@ import { readExportable, writeExportable } from "./skills/export.js";
 import {
   AUTH_SPEC,
   CHAT_SPEC,
+  CRON_SPEC,
+  DASHBOARD_SPEC,
   DOCTOR_SPEC,
   INIT_SPEC,
   MODELS_SPEC,
@@ -42,6 +45,7 @@ import {
   TIERS_LIST_SPEC,
   TIERS_SPEC,
   TIERS_SUGGEST_SPEC,
+  UPDATE_SPEC,
   WORKFLOW_AUDIT_SPEC,
   WORKFLOW_LIST_SPEC,
   WORKFLOW_SPEC,
@@ -82,10 +86,13 @@ const SPEC_BY_COMMAND: Readonly<
   init: { spec: INIT_SPEC, level: LEVELS.init },
   doctor: { spec: DOCTOR_SPEC, level: LEVELS.doctor },
   chat: { spec: CHAT_SPEC, level: LEVELS.chat },
+  dashboard: { spec: DASHBOARD_SPEC, level: LEVELS.dashboard },
+  cron: { spec: CRON_SPEC, level: LEVELS.cron },
   serve: { spec: SERVE_SPEC, level: LEVELS.serve },
   models: { spec: MODELS_SPEC, level: LEVELS.models },
   auth: { spec: AUTH_SPEC, level: LEVELS.auth },
   profile: { spec: PROFILE_SPEC, level: LEVELS.profile },
+  update: { spec: UPDATE_SPEC, level: LEVELS.update },
 };
 
 export interface CliIo {
@@ -238,7 +245,8 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     command !== "profile" &&
     command !== "skill" &&
     command !== "workflow" &&
-    command !== "cron"
+    command !== "cron" &&
+    command !== "update"
   ) {
     if ((commands as readonly string[]).includes(command)) {
       io.stderr(`lohra: ${command} is not implemented in the TypeScript bootstrap\n`);
@@ -264,6 +272,15 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     io.stdout(
       `${LEVELS.workflow.banner}\nlook at workflow runs (reads the durable state; no LLM)\n\n` +
         "positional arguments:\n  {list,watch,audit}\n",
+    );
+    return 0;
+  }
+
+  if (command === "update" && (argv[1] === "--help" || argv[1] === "-h")) {
+    io.stdout(
+      `${LEVELS.update.banner}\ncheck or fast-forward the installed Lohra git checkout\n\n` +
+        "options:\n  --check      fetch and report without moving HEAD\n" +
+        "  --reinstall  run npm install when dependency files changed\n",
     );
     return 0;
   }
@@ -456,6 +473,14 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     io.stdout(result.stdout);
     io.stderr(result.stderr);
     return result.code;
+  }
+  if (command === "update") {
+    return runUpdate({
+      check: parsed.options.has("--check"),
+      reinstall: parsed.options.has("--reinstall"),
+      stdout: io.stdout,
+      stderr: io.stderr,
+    });
   }
   if (command === "models") {
     const provider = parsed.options.get("--provider") as string | undefined;

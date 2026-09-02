@@ -184,6 +184,19 @@ export const LEVELS = {
       "                  [--max-iterations MAX_ITERATIONS]\n" +
       "                  prompt\n",
   },
+  dashboard: {
+    prefix: "lohra dashboard",
+    banner:
+      "usage: lohra dashboard [-h] [--profile PROFILE] [--no-input] [--model MODEL]\n" +
+      "                       [--provider PROVIDER] [--port PORT] [--insecure]\n",
+  },
+  cron: {
+    prefix: "lohra cron",
+    banner:
+      "usage: lohra cron [-h] [--profile PROFILE] [--no-input] [--interval INTERVAL]\n" +
+      "                  [--cron CRON] [--at AT] [--name NAME] [--prompt PROMPT]\n" +
+      "                  {list,add,remove,pause,resume} [job_id]\n",
+  },
   serve: {
     prefix: "lohra serve",
     banner:
@@ -237,6 +250,10 @@ export const LEVELS = {
       "                            [--attempt ATTEMPT] [--after-seq AFTER_SEQ]\n" +
       "                            [--snapshot-seq SNAPSHOT_SEQ] [--limit LIMIT]\n" +
       "                            run_id\n",
+  },
+  update: {
+    prefix: "lohra update",
+    banner: "usage: lohra update [-h] [--check] [--reinstall]\n",
   },
 } as const satisfies Record<string, Level>;
 
