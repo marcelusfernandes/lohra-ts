@@ -154,7 +154,26 @@ const directory = mkdtempSync(resolve(tmpdir(), "lohra-t17-probe-"));
 try {
   const path = resolve(directory, "state.db");
   const seed = openStateDatabase(path);
+  const rollbackRepository = new AuditRepository(seed.database);
+  seed.database
+    .prepare(
+      "CREATE TRIGGER t17_external_rollback BEFORE INSERT ON workflow_audit_events WHEN NEW.run_id='rollback-external' BEGIN SELECT RAISE(ABORT, 'planted rollback'); END",
+    )
+    .run();
+  let rollbackRejected = false;
+  try {
+    rollbackRepository.append("rollback-external", { event_type: "rejected", created_at: 1 });
+  } catch {
+    rollbackRejected = true;
+  }
+  seed.database.prepare("DROP TRIGGER t17_external_rollback").run();
+  const afterRollback = rollbackRepository.append("rollback-external", {
+    event_type: "accepted",
+    created_at: 2,
+  });
   seed.close();
+  if (!rollbackRejected || afterRollback?.seq !== 1)
+    throw new Error("rollback sequence probe failed");
   await Promise.all([child(path), child(path)]);
   const connection = openStateDatabase(path);
   try {
