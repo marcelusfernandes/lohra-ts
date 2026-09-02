@@ -154,7 +154,11 @@ describe("lohra CLI bootstrap", () => {
     }
   });
 
-  it.each(["cron", "update"])(
+  // "cron" removed from this list by T18: it is no longer a stub, it is a real, wired command
+  // (src/commands/cron.ts) -- this is exactly the boundary T18 supersedes, the same way T12
+  // superseded "dashboard" on this same fixture. See the dedicated test below proving the new
+  // real behavior (invalid-action error, not the old "not implemented" stub text) takes over.
+  it.each(["update"])(
     "temporarily refuses future command %s with exit 2",
     async (command) => {
       const stderr: string[] = [];
@@ -191,5 +195,22 @@ describe("lohra CLI bootstrap", () => {
     expect(code).toBe(2);
     expect(stderr.join("")).toContain("no provider configured — there are three ways in:");
     expect(stderr.join("")).not.toContain("not implemented in the TypeScript bootstrap");
+  });
+
+  it("cron now takes the real command boundary, not the stub -- documents the T18 change", async () => {
+    const stderr: string[] = [];
+    const code = await runCli(["cron"], {
+      environment: environment(),
+      stdout: () => undefined,
+      stderr: (value) => stderr.push(value),
+    });
+    expect(code).toBe(2);
+    expect(stderr.join("")).not.toContain("not implemented in the TypeScript bootstrap");
+    // `cron` with no action at all is argparse's "required argument missing" class
+    // (byte-exact: "the following arguments are required: action"), a DIFFERENT
+    // error class from "invalid choice" -- an explicitly-provided-but-wrong value
+    // (e.g. `cron frobnicate`) is what produces "invalid choice", exercised
+    // separately in tests/commands-cron.test.ts and the T18 cli-bilateral harness.
+    expect(stderr.join("")).toContain("the following arguments are required: action");
   });
 });
