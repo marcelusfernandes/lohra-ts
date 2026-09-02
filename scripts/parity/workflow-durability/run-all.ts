@@ -12,6 +12,7 @@ import { dirname, join, resolve } from "node:path";
 import { canonicalJson } from "../canonical.js";
 import { runCli } from "../cli.js";
 import { resolveExecutable, resolveOracleWorkspace } from "../resolve.js";
+import { EVIDENCE_NORMALIZATIONS, normalizeEvidence } from "./workers/normalize-evidence.mjs";
 
 const root = resolve(import.meta.dirname, "../../..");
 const evidenceDirectory = resolve(root, ".parity-evidence/t16");
@@ -71,28 +72,9 @@ function oracleGuard(): { commit: string; porcelain: string; pinned: boolean } {
   return { commit, porcelain, pinned: true };
 }
 
-/**
- * Manifest `normalizations` apply to the COMPARISON; the evidence file keeps
- * what was captured. The captured tool messages carry the run's generated id,
- * so the two chat artifacts hashed differently on every run even though the
- * verdict was stable. The rule is declared in the record, applied to the
- * delivered file, and narrow enough that nothing else (the oracle SHA, for one)
- * is touched.
- */
-const RUN_ID_RULE = {
-  field: "run_id",
-  kind: "replace-regex",
-  pattern: '(\\\\?"run_id\\\\?":\\s*\\\\?")([0-9a-f]{16,}|[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12})',
-  replacement: '$1<run-id>',
-  note: 'the id also appears JSON-escaped inside captured tool messages, so both quote forms match',
-} as const;
-
-function scrubGeneratedIds(path: string): string {
+function scrubDelivered(path: string): string {
   const before = readFileSync(path, "utf8");
-  const after = before.replaceAll(
-    /(\\?"run_id\\?":\s*\\?")([0-9a-f]{16,}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})/g,
-    "$1<run-id>",
-  );
+  const after = normalizeEvidence(before);
   if (after !== before) writeFileSync(path, after, "utf8");
   return createHash("sha256").update(after, "utf8").digest("hex");
 }
@@ -262,9 +244,40 @@ try {
       throw new Error(`chat probe ${id} diverged: ${evidence.verdict ?? "missing"}`);
     // Reproducible artifact: the generated run id is normalized in the file we
     // deliver, and its digest goes into this record so drift is visible here.
-    const digest = scrubGeneratedIds(evidencePath);
+    const digest = scrubDelivered(evidencePath);
     return { id, evidence: evidencePath, verdict: evidence.verdict, exitCode, digest };
   });
+
+  // 4. Cross-day proof: the SAME fixture, run twice with two different dates,
+  //    must deliver byte-identical artifacts. Without the date rule the two
+  //    runs differ, which is exactly how the handoff digests stopped verifying
+  //    once the clock rolled over.
+  const crossDayPath = resolve(evidenceDirectory, "cross-day.json");
+  const crossDayDigests = ["2026-01-02", "2026-12-31"].map((today) => {
+    const previous = process.env.LOHRA_T16_TODAY;
+    process.env.LOHRA_T16_TODAY = today;
+    try {
+      const exitCode = runCli([
+        "--manifest",
+        resolve(root, "scripts/parity/manifests/t16/t16-chat-cold-resume.json"),
+        "--evidence",
+        crossDayPath,
+      ]);
+      if (exitCode !== 0) throw new Error(`cross-day run for ${today} failed: exit ${String(exitCode)}`);
+    } finally {
+      if (previous === undefined) delete process.env.LOHRA_T16_TODAY;
+      else process.env.LOHRA_T16_TODAY = previous;
+    }
+    return { today, digest: scrubDelivered(crossDayPath) };
+  });
+  rmSync(crossDayPath, { force: true });
+  const crossDayStable =
+    new Set(crossDayDigests.map((entry) => entry.digest)).size === 1;
+  if (!crossDayStable) {
+    throw new Error(
+      `delivered evidence is not stable across dates: ${JSON.stringify(crossDayDigests)}`,
+    );
+  }
 
   const oracleAfter = oracleGuard();
   const candidateAfter = candidateGuard();
@@ -281,7 +294,8 @@ try {
       guard: { before: oracleBefore, after: oracleAfter },
     },
     bilateral: { match: bilateralMatch, compared },
-    normalizations: [RUN_ID_RULE],
+    normalizations: EVIDENCE_NORMALIZATIONS,
+    crossDay: { stable: crossDayStable, dates: crossDayDigests.map((entry) => entry.today) },
     planted,
     chat: chats,
     lock: {

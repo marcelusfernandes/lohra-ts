@@ -4,7 +4,9 @@
   "description": "T16 canned workflow that crosses persistence: run_workflow parks at a checkpoint, a NEW process resumes it with checkpoint_answers and completes (contract 47)",
   "argv": [],
   "environment": {
-    "allow": [],
+    "allow": [
+      "LOHRA_T16_TODAY"
+    ],
     "set": {
       "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
       "PYTHONUTF8": "1",
@@ -152,6 +154,12 @@
       "kind": "replace-regex",
       "pattern": "\"run_id\": \"[^\" ]+",
       "replacement": "\"run_id\": \"<run-id>"
+    },
+    {
+      "field": "events.requests",
+      "kind": "replace-regex",
+      "pattern": "(Today's date is )\\d{4}-\\d{2}-\\d{2}",
+      "replacement": "$1<date>"
     }
   ],
   "stub": {

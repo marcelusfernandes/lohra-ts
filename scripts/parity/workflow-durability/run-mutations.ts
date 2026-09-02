@@ -37,6 +37,7 @@ const service = "src/workflow/service.ts";
 const sandbox = "src/workflow/sandbox.ts";
 const sqliteCache = "src/workflow/sqlite-cache.ts";
 const engine = "src/workflow/engine.ts";
+const normalizer = "scripts/parity/workflow-durability/workers/normalize-evidence.mjs";
 
 const repositoryTests = "tests/state-workflow-repository.test.ts";
 const serviceTests = "tests/workflow-service-durability.test.ts";
@@ -558,6 +559,71 @@ const namedMutants: readonly Mutant[] = [
         file: service,
         before: "      if (finished) return;\n      finished = true;",
         after: "      finished = true;",
+      },
+    ],
+  },
+  {
+    id: "ah/launch-ignores-the-refused-line",
+    category: "launch",
+    mechanism: "the refused launch line is ignored, so a stretch that has already lost ownership goes on to run a leaf",
+    focus: { file: serviceTests, test: "refused launch LINE alone" },
+    edits: [
+      {
+        file: service,
+        before: "    if (!registered || !seedWritten) {",
+        after: "    if (!seedWritten) {",
+      },
+    ],
+  },
+  {
+    id: "ai/launch-ignores-the-refused-seed",
+    category: "launch",
+    mechanism: "the refused ledger seed is ignored, so a stretch with no honest token goes on to run a leaf",
+    focus: { file: serviceTests, test: "refused ledger SEED alone" },
+    edits: [
+      {
+        file: service,
+        before: "    if (!registered || !seedWritten) {",
+        after: "    if (!registered) {",
+      },
+    ],
+  },
+  {
+    id: "aj/launch-runs-anyway-after-the-refusal",
+    category: "launch",
+    mechanism: "the refusal is observed but the engine runs regardless, so the leaf spawns before the stretch ends",
+    focus: { file: serviceTests, test: "ownership lost during install" },
+    edits: [
+      {
+        file: service,
+        before: "    if (!registered || !seedWritten) {\n      // Hand back ONLY this acquisition's resources",
+        after: "    if ((false as boolean) && (!registered || !seedWritten)) {\n      // Hand back ONLY this acquisition's resources",
+      },
+    ],
+  },
+  {
+    id: "ak/delivered-evidence-keeps-the-volatile-date",
+    category: "evidence",
+    mechanism: "the date rule is dropped, so an artifact captured on one day cannot be byte-compared with the next day's",
+    focus: { file: serviceTests, test: "two different dates delivers identical bytes" },
+    edits: [
+      {
+        file: normalizer,
+        before: "  return text.replaceAll(RUN_ID, \"$1<run-id>\").replaceAll(TODAY, \"$1<date>\");",
+        after: "  return text.replaceAll(RUN_ID, \"$1<run-id>\");",
+      },
+    ],
+  },
+  {
+    id: "al/delivered-evidence-masks-more-than-declared",
+    category: "evidence",
+    mechanism: "the id rule is widened to any long hex run, which would sweep up the oracle SHA and hide real divergence",
+    focus: { file: serviceTests, test: "masking nothing else" },
+    edits: [
+      {
+        file: normalizer,
+        before: "  return text.replaceAll(RUN_ID, \"$1<run-id>\").replaceAll(TODAY, \"$1<date>\");",
+        after: "  return text.replaceAll(/[0-9a-f]{16,}/g, \"<run-id>\").replaceAll(TODAY, \"$1<date>\");",
       },
     ],
   },

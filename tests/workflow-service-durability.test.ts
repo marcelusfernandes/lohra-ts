@@ -4,11 +4,15 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { openStateDatabase, WorkflowRepository, LockRepository } from "../src/state/index.js";
+import { openStateDatabase, WorkflowRepository, LockRepository, type StateWarning } from "../src/state/index.js";
 import { classifyProviderError, RateLimitError } from "../src/transports/errors.js";
 import { SqliteWorkflowCache } from "../src/workflow/sqlite-cache.js";
 import { TaintTracker } from "../src/workflow/sandbox.js";
 import { WorkflowService } from "../src/workflow/service.js";
+import {
+  EVIDENCE_NORMALIZATIONS,
+  normalizeEvidence,
+} from "../scripts/parity/workflow-durability/workers/normalize-evidence.mjs";
 import type {
   ChildResult,
   ChildRuntime,
@@ -1082,6 +1086,172 @@ describe("workflow service — leaf capability sandbox", () => {
     }
   });
 
+  it("ownership lost during install: the refused first write ends the stretch before any leaf runs", async () => {
+    // The installer can block the event loop past the TTL. Another holder takes
+    // the run in that window, so the FIRST owned write comes back refused —
+    // which is the authoritative proof of ownership loss and must end the
+    // stretch before engine.run, not surface later at the terminal write.
+    const root = mkdtempSync(join(tmpdir(), "lohra-service-durability-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      const repository = new WorkflowRepository(connection.database);
+      const locks = new LockRepository(connection.database);
+      const clock = { now: 1000 };
+      const warnings: StateWarning[] = [];
+      const watched = new WorkflowRepository(connection.database, (warning) => warnings.push(warning));
+      let spawns = 0;
+      let disposals = 0;
+      let takeoverFence: number | null = null;
+      const timers: { cancelled: boolean }[] = [];
+      const runtime: ChildRuntime = {
+        installLeafSandbox: () => {
+          // the takeover lands while the installer is still running
+          clock.now = 1011;
+          takeoverFence = locks.acquireRunLease("run-lost-in-install", "other", clock.now, 900);
+          return { dispose: () => { disposals += 1; } };
+        },
+        spawn: () => { spawns += 1; return "leaf-1"; },
+        collect: (): ChildResult => ({ status: "complete", output: { answer: "ok" } }),
+        steer: () => undefined,
+        cancel: () => undefined,
+      };
+      const service = new WorkflowService({
+        runtime,
+        idSource: () => "run-lost-in-install",
+        timerFactory: () => {
+          const timer = { cancelled: false };
+          timers.push(timer);
+          return { cancel: () => { timer.cancelled = true; } };
+        },
+        store: {
+          repository: watched, locks, holder: "mine", ttl: 10,
+          ownershipOf: () => ({ fence: 0, holder: "mine", now: clock.now }),
+          database: connection.database,
+        },
+      });
+      const started = service.start(spec());
+      expect(takeoverFence).toBe(2);
+      // start refuses with the contract's nominal envelope, naming OUR fence
+      expect(started).toMatchObject({
+        error: "workflow ownership lost",
+        cause: "STALE_FENCE_WRITE",
+        run_id: "run-lost-in-install",
+        fence: 1,
+      });
+      // NO leaf ran — the refusal ended the stretch before engine.run
+      expect(spawns).toBe(0);
+      // this acquisition's resources are back: sandbox disposed, timers stopped
+      expect(disposals).toBe(1);
+      expect(timers.every((timer) => timer.cancelled)).toBe(true);
+      // the new owner's lease is untouched, and its fence still stands
+      expect(locks.runLeaseExpiry("run-lost-in-install", clock.now)).toBe(1911);
+      expect(Number(locks.runFenceOf("run-lost-in-install"))).toBe(2);
+      // nothing stale was written, and the refusal was logged with its cause
+      expect(repository.getRunState("run-lost-in-install")).toBeNull();
+      expect(repository.getRunSpend("run-lost-in-install")).toBeNull();
+      expect(warnings.map((warning) => warning.cause as string)).toContain("STALE_FENCE_WRITE");
+      // no live registry entry is left behind, and status falls through to disk
+      expect(service.list().some((entry) => entry.run_id === "run-lost-in-install")).toBe(false);
+      const after = (await service.status("run-lost-in-install")) as Record<string, unknown>;
+      expect(after.error).toBe("unknown workflow run 'run-lost-in-install'");
+      connection.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("a refused launch LINE alone ends the stretch before any leaf runs", () => {
+    // The two initial writes share one ownership condition, so a genuine loss
+    // refuses both. This plants the refusal on the LINE only, which is what
+    // makes observing that particular boolean load-bearing.
+    const root = mkdtempSync(join(tmpdir(), "lohra-service-durability-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      const repository = new WorkflowRepository(connection.database);
+      const locks = new LockRepository(connection.database);
+      const ownership = { fence: 0 as number, holder: "test", now: 1000 };
+      let spawns = 0;
+      const refusingLine = new Proxy(repository, {
+        get(target, prop, receiver) {
+          if (prop === "putRunState") return () => false;
+          return Reflect.get(target, prop, receiver) as unknown;
+        },
+      });
+      const service = new WorkflowService({
+        runtime: withLeafSandbox({
+          spawn: (): string => { spawns += 1; return "leaf-1"; },
+          collect: (): ChildResult => ({ status: "complete", output: { answer: "ok" } }),
+          steer: (): void => undefined,
+          cancel: (): void => undefined,
+        }),
+        idSource: () => "run-line-refused",
+        timerFactory: () => ({ cancel: () => undefined }),
+        store: { repository: refusingLine, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+      });
+      const started = service.start(spec());
+      expect(started).toMatchObject({ error: "workflow ownership lost", cause: "STALE_FENCE_WRITE", fence: 1 });
+      expect(spawns).toBe(0);
+      // the ledger the seed DID write is the only trace, and the lease is back
+      expect(locks.runLeaseExpiry("run-line-refused", 1000)).toBeNull();
+      expect(service.list().some((entry) => entry.run_id === "run-line-refused")).toBe(false);
+      connection.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("a refused ledger SEED alone ends the stretch before any leaf runs", () => {
+    // Here the line lands and only the seed is refused: the stretch was evicted
+    // from the bounded fence memory during install, so it has no honest token
+    // to present for the ledger even though its lease is still its own.
+    const root = mkdtempSync(join(tmpdir(), "lohra-service-durability-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      const repository = new WorkflowRepository(connection.database);
+      const locks = new LockRepository(connection.database);
+      const ownership = { fence: 0 as number, holder: "test", now: 1000 };
+      const running: { service: WorkflowService | null } = { service: null };
+      let evicted = false;
+      let spawns = 0;
+      const runtime: ChildRuntime = {
+        installLeafSandbox: () => {
+          const owner = running.service;
+          if (!evicted && owner !== null) {
+            evicted = true;
+            // a second run takes the only fence-memory slot
+            owner.start(spec());
+          }
+          return { dispose: () => undefined };
+        },
+        spawn: () => { spawns += 1; return "leaf-1"; },
+        collect: (): ChildResult => ({ status: "complete", output: { answer: "ok" } }),
+        steer: () => undefined,
+        cancel: () => undefined,
+      };
+      const service = new WorkflowService({
+        runtime,
+        fenceMemory: 1,
+        idSource: (() => { let n = 0; return () => { n += 1; return `evict-${String(n)}`; }; })(),
+        timerFactory: () => ({ cancel: () => undefined }),
+        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+      });
+      running.service = service;
+      const started = service.start(spec());
+      expect(evicted).toBe(true);
+      // the LINE landed (the lease is genuinely ours), the SEED could not
+      expect(repository.getRunState("evict-1")).not.toBeNull();
+      expect(repository.getRunSpend("evict-1")).toBeNull();
+      expect(started).toMatchObject({ error: "workflow ownership lost", cause: "STALE_FENCE_WRITE", fence: 1 });
+      expect(spawns).toBe(0);
+      connection.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("a takeover interposed between the fence check and the release keeps its lease", async () => {
     // The release used to read the fence and then DELETE by (run, holder). A
     // new acquisition BY THE SAME HOLDER landing between those two statements
@@ -1511,5 +1681,55 @@ describe("workflow service — leaf capability sandbox", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("delivered evidence normalization", () => {
+  /** One captured artifact, parameterised only by the volatile values. */
+  function artifact(runId: string, today: string): string {
+    return JSON.stringify({
+      verdict: "match",
+      runs: {
+        oracle: {
+          events: {
+            requests: {
+              records: [
+                { body: { messages: [{ role: "system", content: `You are lohra.\n\nToday's date is ${today}.` }] } },
+                { body: { messages: [{ role: "tool", content: `{"ok": true, "run_id": "${runId}", "status": "started"}` }] } },
+              ],
+            },
+          },
+        },
+      },
+      oracleGuard: { commit: "16b4785d803ad0ca364a8a67346a04f949fbf592" },
+    });
+  }
+
+  it("the same fixture captured on two different dates delivers identical bytes", () => {
+    // The handoff digests stopped verifying once the clock rolled over: both
+    // sides state the current date in the system prompt.
+    const monday = artifact("5fed570d32bd48309293b1123f6ca744", "2026-01-02");
+    const newYearsEve = artifact("d63a44a8c7ef47738fe648d4a6926770", "2026-12-31");
+    expect(monday).not.toBe(newYearsEve);
+    expect(normalizeEvidence(monday)).toBe(normalizeEvidence(newYearsEve));
+    expect(normalizeEvidence(monday)).toContain("Today's date is <date>.");
+    expect(normalizeEvidence(monday)).toContain('\\"run_id\\": \\"<run-id>');
+  });
+
+  it("normalizes ONLY the two declared volatile values, masking nothing else", () => {
+    const before = artifact("5fed570d32bd48309293b1123f6ca744", "2026-01-02");
+    const after = normalizeEvidence(before);
+    // every other captured field survives byte for byte
+    expect(after).toContain('"verdict":"match"');
+    expect(after).toContain('"role":"system"');
+    expect(after).toContain("You are lohra.");
+    expect(after).toContain('"status\\": \\"started');
+    // the oracle SHA is 40 hex characters and must NOT be swept up by the id rule
+    expect(after).toContain("16b4785d803ad0ca364a8a67346a04f949fbf592");
+    // and the rules are the declared ones, recorded with the evidence
+    expect(EVIDENCE_NORMALIZATIONS.map((rule) => rule.field)).toEqual([
+      "run_id",
+      "system_prompt.today",
+    ]);
   });
 });

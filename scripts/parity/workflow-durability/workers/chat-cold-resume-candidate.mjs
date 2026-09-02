@@ -154,7 +154,13 @@ const client = new ChatCompletionsClient({
 const conversation = new ConversationRuntime({
   repository: new Repository(),
   transport: new ChatCompletionsModel(client),
-  promptSnapshot: () => buildSystemPrompt({ systemMessage: "T16 canned durable workflow chat" }).text,
+  promptSnapshot: () =>
+    buildSystemPrompt({
+      systemMessage: "T16 canned durable workflow chat",
+      // Injectable so the harness can prove the delivered artifact is stable
+      // across dates; unset in a normal run, where the real date is used.
+      ...(process.env.LOHRA_T16_TODAY === undefined ? {} : { today: process.env.LOHRA_T16_TODAY }),
+    }).text,
   toolDispatcher: new RegistryToolDispatcher(dispatch),
   toolDefinitions,
   idSource: () => "chat-1",
