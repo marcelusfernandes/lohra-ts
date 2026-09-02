@@ -32,7 +32,7 @@ const live = "src/workflow/live-events.ts";
 const argSpec = "src/cli/arg-spec.ts";
 const cli = "src/cli.ts";
 const service = "src/workflow/service.ts";
-const chatTools = "src/commands/chat-tools.ts";
+const chat = "src/commands/chat.ts";
 
 const mutants: readonly Mutant[] = [
   {
@@ -211,10 +211,9 @@ const mutants: readonly Mutant[] = [
     externalCause: "public audit registry probe failed",
     edits: [
       {
-        file: chatTools,
-        before:
-          "  return createBuiltinRegistry({\n    workflow_audit: workflowAuditHandler(auditRepository),\n  });",
-        after: "  void auditRepository;\n  return createBuiltinRegistry();",
+        file: chat,
+        before: "return CHAT_TOOL_REGISTRY_FACTORIES.public(database, environment);",
+        after: "return CHAT_TOOL_REGISTRY_FACTORIES.failSafe(database, environment);",
       },
     ],
   },
@@ -273,8 +272,10 @@ const mutants: readonly Mutant[] = [
     edits: [
       {
         file: auditModel,
-        before: 'return Object.freeze({ state: "excluded_by_policy", bytes: value.byteLength });',
-        after: 'return Object.freeze({ state: "unavailable", bytes: value.byteLength });',
+        before:
+          'return Object.freeze({\n      state: "excluded_by_policy",\n      bytes: Math.min(value.byteLength, 256),\n    });',
+        after:
+          'return Object.freeze({\n      state: "excluded_by_policy",\n      bytes: value.byteLength,\n    });',
       },
     ],
   },
@@ -318,6 +319,36 @@ const mutants: readonly Mutant[] = [
         file: auditTrail,
         before: "const task = Promise.resolve().then(() => this.drain());",
         after: "const task = this.drain();",
+      },
+    ],
+  },
+  {
+    id: "M20-binary-marker-policy-state",
+    assertion: "A1/A3",
+    test: "keeps binary raw-field markers stable across the SQLite read boundary",
+    cause: "MUTATION_CAUSE:M16-binary-marker-idempotence",
+    externalCause: "raw marker idempotence probe failed",
+    edits: [
+      {
+        file: auditModel,
+        before:
+          'return Object.freeze({\n      state: "excluded_by_policy",\n      bytes: Math.min(value.byteLength, 256),\n    });',
+        after:
+          'return Object.freeze({\n      state: "unavailable",\n      bytes: Math.min(value.byteLength, 256),\n    });',
+      },
+    ],
+  },
+  {
+    id: "M21-bounded-accepted-order",
+    assertion: "A3/C4",
+    test: "releases accepted-order bookkeeping after runs become idle",
+    cause: "MUTATION_CAUSE:M21-bounded-accepted-order",
+    edits: [
+      {
+        file: auditTrail,
+        before:
+          "  private clearAcceptedOrderIfIdle(runId: string): void {\n    if (\n      !this.dropped.some((entry) => entry.runId === runId) &&\n      !this.queue.some((entry) => entry.runId === runId)\n    )\n      this.lastAcceptedOrder.delete(runId);\n  }",
+        after: "  private clearAcceptedOrderIfIdle(runId: string): void {\n    void runId;\n  }",
       },
     ],
   },
@@ -421,7 +452,14 @@ try {
         causeVisible:
           mutant.externalCause === undefined || externalOutput.includes(mutant.externalCause),
       }),
-      observation: `${output}\n${externalOutput}`.slice(-1_500),
+      observation: canonicalJson({
+        compileExit: compile.status,
+        testExit: test.status,
+        causeVisible,
+        externalExit: external?.status ?? null,
+        externalCauseVisible:
+          mutant.externalCause === undefined || externalOutput.includes(mutant.externalCause),
+      }),
     });
   }
   const survivors = observations.filter((item) => !item.killed);

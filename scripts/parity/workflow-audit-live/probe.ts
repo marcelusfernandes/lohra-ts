@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
-import { createChatToolRegistry } from "../../../src/commands/chat-tools.js";
+import { createChatSessionRegistry } from "../../../src/commands/chat.js";
 import { AuditRepository } from "../../../src/state/audit-repository.js";
 import { openStateDatabase } from "../../../src/state/connection.js";
 import type { Ownership } from "../../../src/state/workflow-repository.js";
@@ -123,7 +123,7 @@ async function probeRoundOneRegressions(
 ): Promise<Readonly<Record<string, unknown>>> {
   const repository = new AuditRepository(database);
   repository.append("public-audit", { event_type: "node.started", created_at: 1 });
-  const registry = createChatToolRegistry(database, {});
+  const registry = createChatSessionRegistry(database, {});
   let publicResult: Readonly<Record<string, unknown>>;
   try {
     publicResult = JSON.parse(
@@ -175,7 +175,7 @@ async function probeRoundOneRegressions(
 
   repository.append("binary-marker", {
     event_type: "node.completed",
-    payload: { result: new Uint8Array(42) },
+    payload: { result: new Uint8Array(1_000) },
     created_at: 3,
   });
   const binaryStored = JSON.parse(
@@ -190,7 +190,7 @@ async function probeRoundOneRegressions(
   const binaryReturned = repository.query({ runId: "binary-marker" }).events[0]?.data.result;
   if (
     JSON.stringify(binaryStored.data.result) !==
-      JSON.stringify({ state: "excluded_by_policy", bytes: 42 }) ||
+      JSON.stringify({ state: "excluded_by_policy", bytes: 256 }) ||
     JSON.stringify(binaryReturned) !== JSON.stringify(binaryStored.data.result)
   )
     throw new Error(

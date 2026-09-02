@@ -169,7 +169,10 @@ function rawMarker(value: unknown): AuditMarker {
       characters: Math.min(Array.from(value).length, 256),
     });
   if (value instanceof Uint8Array)
-    return Object.freeze({ state: "excluded_by_policy", bytes: value.byteLength });
+    return Object.freeze({
+      state: "excluded_by_policy",
+      bytes: Math.min(value.byteLength, 256),
+    });
   if (Array.isArray(value))
     return Object.freeze({ state: "excluded_by_policy", items: Math.min(value.length, 256) });
   if (value !== null && typeof value === "object")
@@ -225,7 +228,10 @@ function safeValue(value: unknown, key: string, depth: number): unknown {
     });
   }
   if (value instanceof Uint8Array)
-    return Object.freeze({ state: "unavailable", bytes: value.byteLength });
+    return Object.freeze({
+      state: "unavailable",
+      bytes: Math.min(value.byteLength, 256),
+    });
   if (Array.isArray(value)) {
     const items = value as readonly unknown[];
     if (key === "node_path")

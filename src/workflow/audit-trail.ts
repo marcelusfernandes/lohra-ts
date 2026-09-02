@@ -152,9 +152,11 @@ export class AuditTrail {
         if (gapOutcome === "failed") {
           this.stopped = true;
           this.warning(`audit sink failed permanently for run ${next.runId}`);
+          this.clearAcceptedOrderIfIdle(next.runId);
           return;
         }
       }
+      this.clearAcceptedOrderIfIdle(next.runId);
     }
   }
 
@@ -237,6 +239,14 @@ export class AuditTrail {
     });
     if (prior === undefined || acceptedSincePrior) this.dropped.push(marker);
     else this.dropped[priorIndex] = marker;
+  }
+
+  private clearAcceptedOrderIfIdle(runId: string): void {
+    if (
+      !this.dropped.some((entry) => entry.runId === runId) &&
+      !this.queue.some((entry) => entry.runId === runId)
+    )
+      this.lastAcceptedOrder.delete(runId);
   }
 
   private async withTimeout(pending: Promise<void>, timeoutMs: number): Promise<boolean> {

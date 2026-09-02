@@ -46,7 +46,7 @@ import {
 } from "../transports/index.js";
 import type { ModelTransport } from "../conversation/index.js";
 import { runChatBoundary } from "./chat-boundary.js";
-import { createChatToolRegistry } from "./chat-tools.js";
+import { CHAT_TOOL_REGISTRY_FACTORIES } from "./chat-tools.js";
 
 export interface ChatCommandOptions {
   // Both already resolved by cli.ts's single parseCommand(CHAT_SPEC, ...)
@@ -116,6 +116,13 @@ function initializationError(
 // the oracle shows across every no-provider-resolved chat failure.
 const NO_PROVIDER_CONFIGURED_SHORT =
   "no provider configured — run `lohra init` (or `lohra doctor`); details on stderr";
+
+export function createChatSessionRegistry(
+  database: Parameters<(typeof CHAT_TOOL_REGISTRY_FACTORIES)["public"]>[0],
+  environment: Parameters<(typeof CHAT_TOOL_REGISTRY_FACTORIES)["public"]>[1],
+) {
+  return CHAT_TOOL_REGISTRY_FACTORIES.public(database, environment);
+}
 
 export async function runChat(options: ChatCommandOptions): Promise<Result> {
   const input = options.input;
@@ -193,7 +200,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   const maxIterations = finite(stringFlag(options.flags, "--max-iterations"), "max-iterations");
   const connection = openStateForEnvironment(options.environment);
   const sessions = new SessionRepository(connection.database, undefined, connection.ftsEnabled);
-  const sessionRegistry = createChatToolRegistry(connection.database, options.environment);
+  const sessionRegistry = createChatSessionRegistry(connection.database, options.environment);
   const repository = new SqliteConversationRepository(sessions);
   const useTools = !options.flags.has("--no-tools");
   const memoryStore = new MemoryStore(options.home);

@@ -15,3 +15,17 @@ export function createChatToolRegistry(
     workflow_audit: workflowAuditHandler(auditRepository),
   });
 }
+
+function createFailSafeChatToolRegistry(
+  database: Database.Database,
+  environment: Readonly<Record<string, string | undefined>>,
+): ToolRegistry {
+  void database;
+  void environment;
+  return createBuiltinRegistry();
+}
+
+export const CHAT_TOOL_REGISTRY_FACTORIES = Object.freeze({
+  public: createChatToolRegistry,
+  failSafe: createFailSafeChatToolRegistry,
+});

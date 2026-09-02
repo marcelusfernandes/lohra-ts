@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { runCli, type CliIo } from "../src/cli.js";
-import { createChatToolRegistry } from "../src/commands/chat-tools.js";
+import { createChatSessionRegistry } from "../src/commands/chat.js";
 import { AuditRepository } from "../src/state/audit-repository.js";
 import { openStateDatabase } from "../src/state/connection.js";
 import {
@@ -38,7 +38,7 @@ describe("T17 metadata-only audit", () => {
     const { connection, audit } = database();
     try {
       audit.append("public-audit", { event_type: "node.started", created_at: 1 });
-      const registry = createChatToolRegistry(connection.database, {});
+      const registry = createChatSessionRegistry(connection.database, {});
       const output = JSON.parse(
         await registry.dispatch("workflow_audit", { run_id: "public-audit" }),
       ) as {
@@ -135,7 +135,7 @@ describe("T17 metadata-only audit", () => {
     try {
       audit.append("binary", {
         event_type: "node.completed",
-        payload: { result: new Uint8Array(42) },
+        payload: { result: new Uint8Array(1_000) },
         created_at: 1,
       });
       const stored = JSON.parse(
@@ -150,7 +150,7 @@ describe("T17 metadata-only audit", () => {
       const returned = audit.query({ runId: "binary" });
       expect(stored.data.result, "MUTATION_CAUSE:M16-binary-marker-idempotence").toEqual({
         state: "excluded_by_policy",
-        bytes: 42,
+        bytes: 256,
       });
       expect(
         returned.events[0]?.data.result,
@@ -711,6 +711,21 @@ describe("T17 live events and sink failures", () => {
     expect(await trail.flush()).toBe(true);
     expect(maximumActive, "MUTATION_CAUSE:M19-reentrant-drain").toBe(1);
     expect(events).toEqual(["node.started", "node.completed"]);
+  });
+
+  it("releases accepted-order bookkeeping after runs become idle", async () => {
+    const repo = {
+      append: () => ({}) as never,
+      isBusyError: () => false,
+    } as unknown as AuditRepository;
+    const trail = new AuditTrail(repo, { capacity: 5_001 });
+    for (let index = 0; index < 5_000; index += 1)
+      expect(trail.record(`idle-${String(index)}`, { event_type: "node.started" })).toBe(true);
+    expect(await trail.flush()).toBe(true);
+    const internal = trail as unknown as {
+      readonly lastAcceptedOrder: ReadonlyMap<string, number>;
+    };
+    expect(internal.lastAcceptedOrder.size, "MUTATION_CAUSE:M21-bounded-accepted-order").toBe(0);
   });
 
   it("audits every pipeline width even when the live surface throttles intermediates", async () => {
