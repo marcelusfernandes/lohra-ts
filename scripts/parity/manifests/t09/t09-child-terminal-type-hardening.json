@@ -1,0 +1,187 @@
+{
+  "schemaVersion": 1,
+  "id": "t09-child-terminal-type-hardening",
+  "description": "T09 bilateral direct observation: child-terminal-type-hardening",
+  "argv": ["child-terminal-type-hardening"],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "NO_COLOR": "1",
+      "HOME": "{{home}}",
+      "TMPDIR": "{{home}}/tmp"
+    }
+  },
+  "preconditions": [],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/tools/oracle_driver.py"],
+      "cwd": "profile"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/tools/candidate-driver.mjs"],
+      "cwd": "profile"
+    }
+  },
+  "limits": {
+    "timeoutMs": 10000,
+    "maxOutputBytes": 16777216
+  },
+  "capture": {
+    "tree": {
+      "enabled": false,
+      "root": "profile",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": []
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    },
+    {
+      "class": "byte",
+      "field": "process.stderr"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/baseCallsAfterDangerous",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/baseCallsAfterExcluded",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/dangerous/0/1/error",
+      "value": "subagent auto-denied a dangerous command (recursive delete (rm -r))"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/dangerous/1/1/error",
+      "value": "subagent auto-denied a dangerous command (recursive delete (rm -r))"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/dangerous/2/1/error",
+      "value": "subagent auto-denied a dangerous command (download piped into a shell)"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/dangerous/3/1/error",
+      "value": "subagent auto-denied a dangerous command (broad permission change (chmod ...7xx))"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/excluded",
+      "value": [
+        ["delegate_task", { "error": "the 'delegate_task' tool is not available to subagents" }],
+        ["memory", { "error": "the 'memory' tool is not available to subagents" }],
+        ["skill_view", { "error": "the 'skill_view' tool is not available to subagents" }],
+        ["skill_manage", { "error": "the 'skill_manage' tool is not available to subagents" }],
+        ["session_search", { "error": "the 'session_search' tool is not available to subagents" }],
+        ["cronjob", { "error": "the 'cronjob' tool is not available to subagents" }],
+        ["vision_analyze", { "error": "the 'vision_analyze' tool is not available to subagents" }],
+        ["image_gen", { "error": "the 'image_gen' tool is not available to subagents" }],
+        ["spawn_session", { "error": "the 'spawn_session' tool is not available to subagents" }],
+        ["steer_session", { "error": "the 'steer_session' tool is not available to subagents" }],
+        [
+          "collect_session",
+          { "error": "the 'collect_session' tool is not available to subagents" }
+        ],
+        ["run_workflow", { "error": "the 'run_workflow' tool is not available to subagents" }],
+        [
+          "workflow_status",
+          { "error": "the 'workflow_status' tool is not available to subagents" }
+        ],
+        ["workflow_audit", { "error": "the 'workflow_audit' tool is not available to subagents" }],
+        ["workflow_list", { "error": "the 'workflow_list' tool is not available to subagents" }],
+        ["workflow_pause", { "error": "the 'workflow_pause' tool is not available to subagents" }],
+        [
+          "workflow_cancel",
+          { "error": "the 'workflow_cancel' tool is not available to subagents" }
+        ],
+        [
+          "workflow_templates",
+          { "error": "the 'workflow_templates' tool is not available to subagents" }
+        ],
+        ["list_models", { "error": "the 'list_models' tool is not available to subagents" }]
+      ]
+    },
+    {
+      "side": "oracle",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/nonString",
+      "value": { "ok": true, "data": "executed" }
+    },
+    {
+      "side": "candidate",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/nonString",
+      "value": {
+        "error": "command was not approved by the user",
+        "command": ["sudo", "x"]
+      }
+    }
+  ],
+  "normalizations": [],
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10",
+    "expectedPackages": {
+      "openai": "3.6.0",
+      "httpx": "0.28.1"
+    }
+  }
+}

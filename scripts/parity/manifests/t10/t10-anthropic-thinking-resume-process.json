@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "t10-anthropic-thinking-resume-process",
+  "layer": "turno-publico",
+  "transport": "anthropic",
+  "fixture": "thinking-resume",
+  "mode": "resume",
+  "argv": [
+    "chat",
+    "prompt-anthropic-thinking-resume-process",
+    "--json",
+    "--no-tools",
+    "--provider",
+    "anthropic",
+    "--model",
+    "stub-model"
+  ],
+  "expectedRequests": 2
+}

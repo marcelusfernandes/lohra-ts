@@ -1,0 +1,255 @@
+import type { ProviderProfile } from "./types.js";
+
+const builtinProfiles: readonly ProviderProfile[] = Object.freeze(
+  (
+    [
+      {
+        name: "anthropic",
+        apiMode: "anthropic_messages",
+        aliases: ["claude"],
+        displayName: "Anthropic",
+        description: "Claude models via the Anthropic Messages API.",
+        signupUrl: "https://console.anthropic.com/",
+        envVars: ["ANTHROPIC_API_KEY"],
+        baseUrl: "https://api.anthropic.com",
+        modelsUrl: "https://api.anthropic.com/v1/models",
+        requiresApiKey: true,
+        supportsVision: true,
+        fallbackModels: ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"],
+        defaultMaxTokens: 16000,
+        defaultAuxModel: "claude-haiku-4-5",
+      },
+      {
+        name: "openai",
+        apiMode: "chat_completions",
+        aliases: ["oai"],
+        displayName: "OpenAI",
+        description: "OpenAI models via the Chat Completions API.",
+        signupUrl: "https://platform.openai.com/",
+        envVars: ["OPENAI_API_KEY"],
+        baseUrl: "https://api.openai.com/v1",
+        modelsUrl: "https://api.openai.com/v1/models",
+        requiresApiKey: true,
+        supportsVision: true,
+        fallbackModels: ["gpt-4o", "gpt-4o-mini"],
+        defaultMaxTokens: 16000,
+        defaultAuxModel: "gpt-4o-mini",
+      },
+      {
+        name: "openrouter",
+        apiMode: "chat_completions",
+        aliases: ["or"],
+        displayName: "OpenRouter",
+        description: "Many models behind one OpenAI-compatible endpoint.",
+        signupUrl: "https://openrouter.ai/",
+        envVars: ["OPENROUTER_API_KEY"],
+        baseUrl: "https://openrouter.ai/api/v1",
+        modelsUrl: "https://openrouter.ai/api/v1/models",
+        requiresApiKey: true,
+        supportsVision: false,
+        fallbackModels: ["openai/gpt-4o-mini"],
+        defaultMaxTokens: 8192,
+        defaultAuxModel: "",
+      },
+      {
+        name: "deepseek",
+        apiMode: "chat_completions",
+        aliases: [],
+        displayName: "DeepSeek",
+        description: "DeepSeek chat + reasoner via the OpenAI-compatible API.",
+        signupUrl: "https://platform.deepseek.com/",
+        envVars: ["DEEPSEEK_API_KEY"],
+        baseUrl: "https://api.deepseek.com",
+        modelsUrl: "",
+        requiresApiKey: true,
+        supportsVision: false,
+        fallbackModels: ["deepseek-chat", "deepseek-reasoner"],
+        defaultMaxTokens: 8192,
+        defaultAuxModel: "deepseek-chat",
+      },
+      {
+        name: "groq",
+        apiMode: "chat_completions",
+        aliases: [],
+        displayName: "Groq",
+        description: "Fast inference via Groq's OpenAI-compatible API.",
+        signupUrl: "https://console.groq.com/",
+        envVars: ["GROQ_API_KEY"],
+        baseUrl: "https://api.groq.com/openai/v1",
+        modelsUrl: "",
+        requiresApiKey: true,
+        supportsVision: false,
+        fallbackModels: ["llama-3.3-70b-versatile"],
+        defaultMaxTokens: 8192,
+        defaultAuxModel: "",
+      },
+      {
+        name: "together",
+        apiMode: "chat_completions",
+        aliases: [],
+        displayName: "Together AI",
+        description: "Open models via Together's OpenAI-compatible endpoint.",
+        signupUrl: "https://api.together.xyz/",
+        envVars: ["TOGETHER_API_KEY"],
+        baseUrl: "https://api.together.xyz/v1",
+        modelsUrl: "",
+        requiresApiKey: true,
+        supportsVision: false,
+        fallbackModels: ["meta-llama/Llama-3.3-70B-Instruct-Turbo"],
+        defaultMaxTokens: 8192,
+        defaultAuxModel: "",
+      },
+      {
+        name: "gemini",
+        apiMode: "chat_completions",
+        aliases: ["google"],
+        displayName: "Google Gemini",
+        description: "Gemini via Google's OpenAI-compatible endpoint.",
+        signupUrl: "https://aistudio.google.com/",
+        envVars: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+        modelsUrl: "",
+        requiresApiKey: true,
+        supportsVision: true,
+        fallbackModels: ["gemini-2.0-flash", "gemini-1.5-pro"],
+        defaultMaxTokens: 8192,
+        defaultAuxModel: "",
+      },
+      {
+        name: "xai",
+        apiMode: "chat_completions",
+        aliases: ["grok"],
+        displayName: "xAI",
+        description: "Grok models via xAI's OpenAI-compatible API.",
+        signupUrl: "https://console.x.ai/",
+        envVars: ["XAI_API_KEY"],
+        baseUrl: "https://api.x.ai/v1",
+        modelsUrl: "",
+        requiresApiKey: true,
+        supportsVision: true,
+        fallbackModels: ["grok-4.6", "grok-4.3"],
+        defaultMaxTokens: 8192,
+        defaultAuxModel: "grok-4.3",
+      },
+      {
+        name: "glm",
+        apiMode: "chat_completions",
+        aliases: ["zhipu", "zai"],
+        displayName: "Zhipu GLM",
+        description: "GLM models via Z.ai's OpenAI-compatible API.",
+        signupUrl: "https://z.ai/",
+        envVars: ["ZHIPUAI_API_KEY", "ZAI_API_KEY", "GLM_API_KEY"],
+        baseUrl: "https://api.z.ai/api/paas/v4",
+        modelsUrl: "",
+        requiresApiKey: true,
+        supportsVision: false,
+        fallbackModels: ["glm-5.3", "glm-5.3-flash"],
+        defaultMaxTokens: 8192,
+        defaultAuxModel: "glm-5.3-flash",
+      },
+      {
+        name: "kimi",
+        apiMode: "chat_completions",
+        aliases: ["moonshot"],
+        displayName: "Moonshot Kimi",
+        description: "Kimi models via Moonshot's OpenAI-compatible API.",
+        signupUrl: "https://platform.moonshot.ai/",
+        envVars: ["MOONSHOT_API_KEY"],
+        baseUrl: "https://api.moonshot.ai/v1",
+        modelsUrl: "",
+        requiresApiKey: true,
+        supportsVision: true,
+        fallbackModels: ["kimi-k3", "kimi-k2.6"],
+        defaultMaxTokens: 8192,
+        defaultAuxModel: "kimi-k2.6",
+      },
+      {
+        name: "ollama",
+        apiMode: "chat_completions",
+        aliases: [],
+        displayName: "Ollama",
+        description: "Local models via Ollama's OpenAI-compatible API.",
+        signupUrl: "",
+        envVars: ["OLLAMA_API_KEY"],
+        baseUrl: "http://localhost:11434/v1",
+        modelsUrl: "",
+        requiresApiKey: false,
+        supportsVision: false,
+        fallbackModels: [],
+        defaultMaxTokens: 8192,
+        defaultAuxModel: "",
+      },
+    ] satisfies readonly ProviderProfile[]
+  ).map((profile) =>
+    Object.freeze({
+      ...profile,
+      authType: "api_key" as const,
+      defaultHeaders: Object.freeze({}),
+      fixedTemperature: null,
+      aliases: Object.freeze([...profile.aliases]),
+      envVars: Object.freeze([...profile.envVars]),
+      fallbackModels: Object.freeze([...profile.fallbackModels]),
+    }),
+  ),
+);
+
+const aliases = new Map<string, ProviderProfile>();
+for (const profile of builtinProfiles) {
+  for (const value of [profile.name, ...profile.aliases]) {
+    const key = value.toLowerCase();
+    if (aliases.has(key)) throw new Error(`PROVIDER_ALIAS_COLLISION:${key}`);
+    aliases.set(key, profile);
+  }
+}
+
+/** Mirrors Python's `_REGISTRY: dict[str, ProviderProfile]` — the single
+ * source `list_providers()` reads from, keyed by verbatim (non-lowercased)
+ * name so re-registering a name keeps its original insertion position. Both
+ * builtins and `registerProvider` additions go through this map, so a
+ * dynamically registered profile is visible to env-var auto-detection
+ * (`resolveProviderName`'s scan over `listProviders()`), exactly like the
+ * oracle. */
+const registry = new Map<string, ProviderProfile>();
+for (const profile of builtinProfiles) registry.set(profile.name, profile);
+
+export function listProviders(): readonly ProviderProfile[] {
+  return Array.from(registry.values());
+}
+export function getProviderProfile(value: string): ProviderProfile | null {
+  return aliases.get(value.toLowerCase()) ?? null;
+}
+export function knownProviderNames(): readonly string[] {
+  return Array.from(registry.values(), (p) => p.name).toSorted();
+}
+
+export function registerProvider(profile: ProviderProfile): void {
+  registry.set(profile.name, profile);
+  aliases.set(profile.name, profile);
+  for (const alias of profile.aliases) aliases.set(alias, profile);
+}
+
+export function getMaxTokens(provider: string, _model?: string): number {
+  const profile = getProviderProfile(provider);
+  if (profile === null) throw new Error(`UNKNOWN_PROVIDER:${provider}`);
+  return profile.defaultMaxTokens;
+}
+
+export const CODEX_PROVIDER: ProviderProfile = Object.freeze({
+  name: "openai-codex",
+  apiMode: "responses",
+  aliases: Object.freeze([]),
+  displayName: "OpenAI Codex",
+  description: "OpenAI Responses through an explicitly enabled Codex subscription.",
+  signupUrl: "",
+  envVars: Object.freeze([]),
+  baseUrl: "https://chatgpt.com/backend-api/codex",
+  modelsUrl: "",
+  requiresApiKey: false,
+  supportsVision: true,
+  fallbackModels: Object.freeze(["gpt-5.5"]),
+  defaultMaxTokens: 16000,
+  defaultAuxModel: "",
+  authType: "oauth_external",
+  defaultHeaders: Object.freeze({}),
+  fixedTemperature: null,
+});

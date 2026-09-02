@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "id": "t05-serve-gate-api-key",
+  "description": "T05 public auth surface: t05-serve-gate-api-key",
+  "argv": ["serve"],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "NO_COLOR": "1",
+      "COLUMNS": "80",
+      "TZ": "UTC",
+      "HOME": "{{home}}",
+      "CODEX_HOME": "{{home}}/codex",
+      "TMPDIR": "{{home}}/tmp",
+      "LOHRA_HOME": "{{profile}}",
+      "NODE_OPTIONS": "--require={{projectRoot}}/scripts/parity/auth/socket-sentinel.cjs",
+      "PYTHONPATH": "{{projectRoot}}/scripts/parity/auth/python-sentinel",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "LOHRA_SOCKET_SENTINEL": "{{profile}}/socket-sentinel.jsonl"
+    }
+  },
+  "preconditions": [],
+  "fixtures": [
+    {
+      "root": "profile",
+      "path": "auth.json",
+      "encoding": "utf8",
+      "content": "{\n  \"openai\": {\n    \"auth_mode\": \"subscription\",\n    \"acknowledged_tos_risk\": true,\n    \"preference\": \"api_key\"\n  }\n}"
+    }
+  ],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-lohra",
+      "prefixArgs": [],
+      "cwd": "sandbox"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": ["{{projectRoot}}/dist/cli.js"],
+      "cwd": "sandbox"
+    }
+  },
+  "limits": {
+    "timeoutMs": 15000,
+    "maxOutputBytes": 4194304
+  },
+  "capture": {
+    "tree": {
+      "enabled": true,
+      "root": "profile",
+      "exclude": ["socket-sentinel.jsonl"]
+    },
+    "sqlite": [],
+    "events": [
+      {
+        "name": "socketSentinel",
+        "root": "profile",
+        "path": "socket-sentinel.jsonl",
+        "format": "jsonl"
+      }
+    ]
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    },
+    {
+      "class": "byte",
+      "field": "process.stderr"
+    },
+    {
+      "class": "schema",
+      "field": "tree"
+    },
+    {
+      "class": "probe",
+      "field": "events.socketSentinel"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 2
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "value": ""
+    },
+    {
+      "side": "both",
+      "field": "events.socketSentinel",
+      "pointer": "/exists",
+      "value": true
+    },
+    {
+      "side": "both",
+      "field": "events.socketSentinel",
+      "pointer": "/records",
+      "value": [
+        {
+          "kind": "armed"
+        }
+      ]
+    }
+  ],
+  "normalizations": [],
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10"
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "id": "t04-dotenv-profile",
+  "description": "Base dotenv preserves real environment",
+  "argv": [],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "NO_COLOR": "1",
+      "COLUMNS": "80",
+      "HOME": "{{home}}",
+      "TMPDIR": "{{home}}/tmp",
+      "LOHRA_HOME": "{{profile}}"
+    }
+  },
+  "preconditions": [],
+  "fixtures": [
+    {
+      "root": "profile",
+      "path": ".env",
+      "encoding": "utf8",
+      "content": "OPENAI_API_KEY=FILE_SENTINEL\nGROQ_API_KEY=FILE_GROQ\n"
+    }
+  ],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/providers/oracle_driver.py", "dotenv-profile"],
+      "cwd": "sandbox"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/providers/candidate-driver.mjs",
+        "dotenv-profile"
+      ],
+      "cwd": "sandbox"
+    }
+  },
+  "limits": { "timeoutMs": 30000, "maxOutputBytes": 4194304 },
+  "capture": {
+    "tree": { "enabled": true, "root": "profile", "exclude": [] },
+    "sqlite": [],
+    "events": []
+  },
+  "comparisons": [
+    { "class": "byte", "field": "process.exitCode" },
+    { "class": "byte", "field": "process.signal" },
+    { "class": "probe", "field": "process.stdout" },
+    { "class": "byte", "field": "process.stderr" },
+    { "class": "schema", "field": "tree" }
+  ],
+  "expectations": [
+    { "side": "both", "field": "process.exitCode", "value": 0 },
+    { "side": "both", "field": "process.signal", "value": null },
+    { "side": "both", "field": "process.stderr", "encoding": "utf8", "value": "" },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/openai",
+      "value": "real"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/groq",
+      "value": "present"
+    }
+  ],
+  "normalizations": [],
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10"
+  }
+}

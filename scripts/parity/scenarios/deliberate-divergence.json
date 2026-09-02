@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "id": "deliberate-divergence",
+  "description": "Falsification scenario proving a candidate stdout mismatch is detected",
+  "argv": ["--version"],
+  "environment": {
+    "allow": [],
+    "set": { "PATH": "/usr/bin:/bin", "PYTHONUTF8": "1", "NO_COLOR": "1" }
+  },
+  "fixtures": [],
+  "runners": {
+    "oracle": { "adapter": "python", "executable": "oracle-lohra", "prefixArgs": [] },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": ["--input-type=module", "-e", "process.stdout.write('lohra 9.9.9\\n')", "--"]
+    }
+  },
+  "limits": { "timeoutMs": 10000, "maxOutputBytes": 1048576 },
+  "capture": {
+    "tree": { "enabled": true, "root": "home", "exclude": [] },
+    "sqlite": [],
+    "events": []
+  },
+  "comparisons": [
+    { "class": "byte", "field": "process.exitCode" },
+    { "class": "byte", "field": "process.signal" },
+    { "class": "byte", "field": "process.stdout" },
+    { "class": "byte", "field": "process.stderr" },
+    { "class": "schema", "field": "tree" }
+  ],
+  "expectations": [
+    { "side": "oracle", "field": "process.exitCode", "value": 0 },
+    { "side": "oracle", "field": "process.signal", "value": null },
+    { "side": "oracle", "field": "process.stdout", "encoding": "utf8", "value": "lohra 0.0.11\n" },
+    { "side": "oracle", "field": "process.stderr", "encoding": "utf8", "value": "" }
+  ],
+  "normalizations": [],
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n"
+  }
+}

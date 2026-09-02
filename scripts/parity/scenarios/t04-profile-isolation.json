@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "id": "t04-profile-isolation",
+  "description": "Tiers and pricing stay isolated by profile",
+  "argv": [],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "NO_COLOR": "1",
+      "COLUMNS": "80",
+      "HOME": "{{home}}",
+      "TMPDIR": "{{home}}/tmp",
+      "LOHRA_HOME": "{{profile}}"
+    }
+  },
+  "preconditions": [],
+  "fixtures": [
+    {
+      "root": "profile",
+      "path": "workflow_tiers.json",
+      "encoding": "utf8",
+      "content": "{\"small\":{\"model\":\"d\"}}"
+    },
+    {
+      "root": "profile",
+      "path": "pricing.json",
+      "encoding": "utf8",
+      "content": "{\"openai\":{\"d\":{\"input_usd\":3,\"output_usd\":4}}}"
+    },
+    {
+      "root": "profile",
+      "path": "profiles/p1/workflow_tiers.json",
+      "encoding": "utf8",
+      "content": "{\"small\":{\"model\":\"p1\"}}"
+    },
+    {
+      "root": "profile",
+      "path": "profiles/p1/pricing.json",
+      "encoding": "utf8",
+      "content": "{\"openai\":{\"p1\":{\"input_usd\":4,\"output_usd\":5}}}"
+    },
+    {
+      "root": "profile",
+      "path": "profiles/p2/workflow_tiers.json",
+      "encoding": "utf8",
+      "content": "{\"small\":{\"model\":\"p2\"}}"
+    },
+    {
+      "root": "profile",
+      "path": "profiles/p2/pricing.json",
+      "encoding": "utf8",
+      "content": "{\"openai\":{\"p2\":{\"input_usd\":5,\"output_usd\":6}}}"
+    }
+  ],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/providers/oracle_driver.py",
+        "profile-isolation"
+      ],
+      "cwd": "sandbox"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/providers/candidate-driver.mjs",
+        "profile-isolation"
+      ],
+      "cwd": "sandbox"
+    }
+  },
+  "limits": { "timeoutMs": 30000, "maxOutputBytes": 4194304 },
+  "capture": {
+    "tree": { "enabled": true, "root": "profile", "exclude": [] },
+    "sqlite": [],
+    "events": []
+  },
+  "comparisons": [
+    { "class": "byte", "field": "process.exitCode" },
+    { "class": "byte", "field": "process.signal" },
+    { "class": "probe", "field": "process.stdout" },
+    { "class": "byte", "field": "process.stderr" },
+    { "class": "schema", "field": "tree" }
+  ],
+  "expectations": [
+    { "side": "both", "field": "process.exitCode", "value": 0 },
+    { "side": "both", "field": "process.signal", "value": null },
+    { "side": "both", "field": "process.stderr", "encoding": "utf8", "value": "" },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/default/small",
+      "value": "d"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/p1/small",
+      "value": "p1"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/p2/small",
+      "value": "p2"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/default/cost",
+      "value": 3
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/p1/cost",
+      "value": 4
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/p2/cost",
+      "value": 5
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/default/source",
+      "value": "pricing.json"
+    }
+  ],
+  "normalizations": [],
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10"
+  }
+}

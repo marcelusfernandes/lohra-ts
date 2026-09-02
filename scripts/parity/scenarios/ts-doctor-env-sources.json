@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "id": "ts-doctor-env-sources",
+  "description": "Doctor observes shell and base .env provider keys together",
+  "argv": ["doctor", "--json"],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin",
+      "PYTHONUTF8": "1",
+      "NO_COLOR": "1",
+      "COLUMNS": "80",
+      "OPENAI_API_KEY": "shell-fixture-value"
+    }
+  },
+  "preconditions": [
+    {
+      "kind": "tcp-port-closed",
+      "host": "127.0.0.1",
+      "port": 11434
+    }
+  ],
+  "fixtures": [
+    {
+      "root": "home",
+      "path": ".lohra/.env",
+      "encoding": "utf8",
+      "content": "ANTHROPIC_API_KEY=fixture-value\n"
+    }
+  ],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-lohra",
+      "prefixArgs": []
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": ["{{projectRoot}}/dist/cli.js"]
+    }
+  },
+  "limits": {
+    "timeoutMs": 10000,
+    "maxOutputBytes": 1048576
+  },
+  "capture": {
+    "tree": {
+      "enabled": true,
+      "root": "home",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": []
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    },
+    {
+      "class": "byte",
+      "field": "process.stderr"
+    },
+    {
+      "class": "schema",
+      "field": "tree"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "both",
+      "field": "process.stderr",
+      "encoding": "utf8",
+      "value": ""
+    },
+    {
+      "side": "both",
+      "field": "tree",
+      "value": [
+        {
+          "path": ".lohra",
+          "type": "directory"
+        },
+        {
+          "path": ".lohra/.env",
+          "type": "file",
+          "size": 32,
+          "sha256": "c619d3ceb6d852c024213afe3a3927b495b4e775308109891a2efebafa6c0eaf"
+        }
+      ]
+    }
+  ],
+  "normalizations": [
+    {
+      "field": "process.stdout",
+      "kind": "replace-runtime-path",
+      "source": "home",
+      "replacement": "<HOME>"
+    }
+  ],
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n"
+  }
+}

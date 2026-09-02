@@ -1,0 +1,167 @@
+{
+  "validMinimal": {
+    "meta": { "name": "minimal" },
+    "nodes": [{ "id": "a", "type": "agent", "prompt": "work" }]
+  },
+  "validAll": {
+    "meta": { "name": "all" },
+    "nodes": [
+      { "id": "agent", "type": "agent", "prompt": "work" },
+      { "id": "checkpoint", "type": "checkpoint", "prompt": "continue?" },
+      { "id": "complete", "type": "completeness_check", "task": "t", "results": [] },
+      { "id": "gate", "type": "gate", "body": { "prompt": 123 }, "validator": "ok" },
+      { "id": "judges", "type": "judge_panel", "attempts": [], "judges": [], "synthesize": "s" },
+      {
+        "id": "loop",
+        "type": "loop_until_dry",
+        "body": {},
+        "max_rounds": 2,
+        "stop_after_k_empty": 1
+      },
+      { "id": "parallel", "type": "parallel", "branches": [] },
+      { "id": "pipeline", "type": "pipeline", "items": [], "stages": [] },
+      { "id": "verify", "type": "verify", "finding": "f", "skeptics": [] },
+      { "id": "workflow", "type": "workflow", "ref": "child" }
+    ]
+  },
+  "doc": {
+    "meta": { "name": "doc" },
+    "nodes": [
+      { "id": "scan", "type": "agent", "prompt": "scan" },
+      { "id": "triage", "type": "agent", "prompt": "${scan.result}" },
+      { "id": "report", "type": "pipeline", "items": "${triage.result}", "stages": [] }
+    ]
+  },
+  "topLevel": [7, { "meta": { "name": "x" }, "nodes": [] }],
+  "meta": [
+    { "meta": [], "nodes": [{ "id": "a", "type": "agent", "prompt": "x" }] },
+    { "meta": { "name": "${a.x}" }, "nodes": [{ "id": "a", "type": "agent", "prompt": "x" }] }
+  ],
+  "schemas": [
+    {
+      "meta": { "name": "x" },
+      "schemas": [],
+      "nodes": [{ "id": "a", "type": "agent", "prompt": "x" }]
+    },
+    {
+      "meta": { "name": "x" },
+      "schemas": { "BAD": 7 },
+      "nodes": [{ "id": "a", "type": "agent", "prompt": "x" }]
+    }
+  ],
+  "nodeShape": [
+    { "meta": { "name": "x" }, "nodes": [7] },
+    { "meta": { "name": "x" }, "nodes": [{ "type": "agent", "prompt": "x" }] },
+    { "meta": { "name": "x" }, "nodes": [{ "id": "a", "type": "bogus" }] }
+  ],
+  "supported": {
+    "raw": {
+      "meta": { "name": "x" },
+      "nodes": [
+        { "id": "a", "type": "checkpoint", "prompt": "x" },
+        { "id": "b", "type": "agent", "prompt": "${a.x}" }
+      ]
+    },
+    "supported": ["agent"]
+  },
+  "fields": {
+    "meta": { "name": "x" },
+    "nodes": [{ "id": "a", "type": "agent", "prompt": "x", "bogus": true }]
+  },
+  "schema": {
+    "meta": { "name": "x" },
+    "schemas": { "OK": { "type": "object" } },
+    "nodes": [{ "id": "a", "type": "agent", "prompt": "x", "schema": 7, "schema_ref": "MISSING" }]
+  },
+  "refsValidation": {
+    "meta": { "name": "x" },
+    "nodes": [{ "id": "a", "type": "agent", "prompt": "${a+1} ${missing.x} ${args.ok}" }]
+  },
+  "lifecycle": {
+    "meta": { "name": "x" },
+    "nodes": [
+      {
+        "id": "a",
+        "type": "agent",
+        "prompt": "x",
+        "timeout": 0,
+        "retries": true,
+        "max_iterations": 129
+      }
+    ]
+  },
+  "tier": {
+    "meta": { "name": "x" },
+    "nodes": [{ "id": "a", "type": "agent", "prompt": "x", "tier": "huge" }]
+  },
+  "gate": {
+    "meta": { "name": "x" },
+    "nodes": [
+      { "id": "g", "type": "gate", "body": { "prompt": false }, "validator": 123, "attempts": 4 }
+    ]
+  },
+  "fanout": {
+    "meta": { "name": "x" },
+    "nodes": [
+      {
+        "id": "p",
+        "type": "parallel",
+        "branches": [
+          0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+          25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46,
+          47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64
+        ]
+      }
+    ]
+  },
+  "duplicates": {
+    "meta": { "name": "x" },
+    "nodes": [
+      { "id": "a", "type": "agent", "prompt": "x" },
+      { "id": "a", "type": "agent", "prompt": "x", "bogus": true }
+    ]
+  },
+  "cascade": {
+    "meta": { "name": "x" },
+    "nodes": [
+      { "id": "bad", "type": "bogus" },
+      { "id": "b", "type": "agent", "prompt": "${bad.x}" }
+    ]
+  },
+  "multi": { "meta": { "name": "x" }, "nodes": [{ "id": "p", "type": "pipeline" }] },
+  "cycle": {
+    "meta": { "name": "x" },
+    "nodes": [
+      { "id": "a", "type": "agent", "prompt": "${b.x} ${c.x}" },
+      { "id": "b", "type": "agent", "prompt": "${a.x}" },
+      { "id": "c", "type": "agent", "prompt": "${a.x}" }
+    ]
+  },
+  "quirks": {
+    "meta": { "name": "x" },
+    "inputs": [],
+    "nodes": [
+      {
+        "id": "a",
+        "type": "agent",
+        "prompt": "  ${args.x}  ",
+        "required": "false",
+        "depends_on": []
+      }
+    ]
+  },
+  "refs": { "context": { "a": { "b": { "ok": true } }, "lst": [7, 8, 9], "inj": "${a.b}" } },
+  "graph": {
+    "meta": { "name": "g" },
+    "nodes": [
+      { "id": "c", "type": "agent", "prompt": "${a.x}" },
+      { "id": "b", "type": "agent", "prompt": "${a.x}" },
+      { "id": "a", "type": "agent", "prompt": "x" },
+      { "id": "d", "type": "agent", "prompt": "${a.x}", "depends_on": ["b", "missing"] }
+    ]
+  },
+  "policy": {
+    "fs_allow": ["/rw", { "path": "/ro", "mode": "ro" }, { "path": "/bad", "mode": "bad" }, {}],
+    "egress_allow": ["api.test", 7, ""]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "t10-chat-stream",
+  "layer": "turno-publico",
+  "transport": "chat",
+  "fixture": "plain",
+  "mode": "single",
+  "argv": [
+    "chat",
+    "prompt-chat-stream",
+    "--no-tools",
+    "--provider",
+    "openai",
+    "--model",
+    "stub-model"
+  ],
+  "expectedRequests": 1
+}

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "t10-chat-canonical-pause-max-iterations",
+  "layer": "turno-publico",
+  "transport": "chat",
+  "fixture": "pause",
+  "mode": "single",
+  "argv": [
+    "chat",
+    "prompt-chat-canonical-pause-max-iterations",
+    "--json",
+    "--no-tools",
+    "--max-iterations",
+    "2",
+    "--provider",
+    "openai",
+    "--model",
+    "stub-model"
+  ],
+  "expectedRequests": 2
+}

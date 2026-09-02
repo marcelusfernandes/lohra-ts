@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "t10-codex-default-model",
+  "layer": "turno-publico",
+  "transport": "codex",
+  "fixture": "plain",
+  "mode": "default-model",
+  "argv": ["chat", "prompt-codex-default-model", "--json", "--no-tools"],
+  "expectedRequests": 1
+}

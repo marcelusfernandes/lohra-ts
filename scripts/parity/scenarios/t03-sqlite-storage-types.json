@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "id": "t03-sqlite-storage-types",
+  "description": "Versioned NULL INTEGER integral-REAL TEXT and BLOB capture",
+  "argv": [],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "NO_COLOR": "1",
+      "COLUMNS": "80",
+      "HOME": "{{home}}",
+      "TMPDIR": "{{home}}/tmp",
+      "LOHRA_HOME": "{{profile}}"
+    }
+  },
+  "preconditions": [],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/state/oracle_driver.py", "storage-types"],
+      "cwd": "sandbox"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/state/candidate-driver.mjs", "storage-types"],
+      "cwd": "sandbox"
+    }
+  },
+  "limits": { "timeoutMs": 60000, "maxOutputBytes": 16777216 },
+  "capture": {
+    "tree": { "enabled": false, "root": "profile", "exclude": [] },
+    "sqlite": [
+      {
+        "name": "typed",
+        "root": "profile",
+        "path": "typed.db",
+        "pragmas": ["quick_check"],
+        "tables": [{ "name": "typed_values", "orderBy": ["id"] }]
+      }
+    ],
+    "events": []
+  },
+  "comparisons": [
+    { "class": "byte", "field": "process.exitCode" },
+    { "class": "byte", "field": "process.signal" },
+    { "class": "byte", "field": "process.stdout" },
+    { "class": "byte", "field": "process.stderr" },
+    { "class": "schema", "field": "sqlite.typed" }
+  ],
+  "expectations": [
+    { "side": "both", "field": "process.exitCode", "value": 0 },
+    { "side": "both", "field": "process.signal", "value": null },
+    { "side": "both", "field": "process.stderr", "encoding": "utf8", "value": "" },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/classes",
+      "value": ["null", "integer", "real", "text", "blob"]
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/real",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/blob",
+      "value": "00ff8041"
+    }
+  ],
+  "normalizations": [],
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10"
+  }
+}

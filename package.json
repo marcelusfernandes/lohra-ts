@@ -1,18 +1,66 @@
 {
   "name": "lohra-ts",
-  "version": "0.0.1",
+  "version": "0.0.11",
   "private": true,
   "type": "module",
   "engines": {
     "node": ">=20"
   },
+  "bin": {
+    "lohra": "dist/cli.js"
+  },
+  "files": [
+    "dist/",
+    "assets/",
+    "README.md"
+  ],
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
+    "parity": "tsx scripts/parity/cli.ts",
+    "parity:auth": "tsx scripts/parity/auth/run-all.ts",
+    "parity:context": "tsx scripts/parity/local-context/run-all.ts",
+    "parity:chat-completions": "tsx scripts/parity/chat-completions/run-all.ts",
+    "parity:workflow-spec": "tsx scripts/parity/workflow-spec/run-all.ts",
+    "parity:t08": "tsx scripts/parity/cli.ts",
+    "parity:t08:all": "tsx scripts/parity/conversation/run-all.ts",
+    "probe:t08": "node scripts/parity/conversation/ts-only-probes.mjs",
+    "probe:t08:live-scrub": "node scripts/parity/conversation/live-smoke.mjs --canary",
+    "smoke:t08:live": "node scripts/parity/conversation/live-smoke.mjs",
+    "parity:t09": "tsx scripts/parity/cli.ts",
+    "parity:t09:all": "tsx scripts/parity/tools/run-all.ts",
+    "parity:t10": "tsx scripts/parity/provider-transports/run-all.ts",
+    "parity:t10:probes": "tsx scripts/parity/provider-transports/run-probes.ts && tsx scripts/parity/provider-transports/run-ts-probes.ts",
+    "parity:t10:gates": "tsx scripts/parity/provider-transports/run-gates.ts",
+    "parity:t10:pack-smoke": "node scripts/parity/provider-transports/pack-smoke.mjs",
+    "parity:t10:live-smoke": "node scripts/parity/provider-transports/live-smoke.mjs",
+    "parity:t11": "tsx scripts/parity/openai-server/run-all.ts",
+    "parity:t11:process": "tsx scripts/parity/openai-server/run-process.ts",
+    "parity:t11:probes": "tsx scripts/parity/openai-server/run-process.ts && tsx scripts/parity/openai-server/run-ts-probes.ts",
+    "parity:t11:gates": "tsx scripts/parity/openai-server/run-gates.ts",
+    "parity:t11:pack-smoke": "node scripts/parity/openai-server/pack-smoke.mjs",
+    "parity:t11:live-smoke": "node scripts/parity/openai-server/live-smoke.mjs",
+    "probe:t09": "node scripts/parity/tools/ts-only-probes.mjs",
+    "smoke:t09:live": "node scripts/parity/tools/live-smoke.mjs",
+    "probe:workflow-spec-ts-only": "node scripts/parity/workflow-spec/ts-only-probes.mjs",
+    "probe:chat-completions-ts-only": "node scripts/parity/chat-completions/ts-only-probe.mjs",
+    "probe:chat-completions-live-scrub": "node scripts/parity/chat-completions/live-smoke.mjs --canary",
+    "smoke:chat-completions-live": "node scripts/parity/chat-completions/live-smoke.mjs",
+    "probe:local-context-ts-only": "node scripts/parity/local-context/ts-only-probes.mjs",
+    "probe:state-cross-read": "node scripts/parity/state/cross-read.mjs",
+    "probe:state-multiprocess": "node scripts/parity/state/multiprocess.mjs",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "parity:t16": "tsx scripts/parity/workflow-durability/run-all.ts",
+    "probe:t16": "tsx scripts/parity/workflow-durability/probe.ts",
+    "mutations:t16": "tsx scripts/parity/workflow-durability/run-mutations.ts",
+    "parity:t17": "tsx scripts/parity/workflow-audit-live/run-all.ts",
+    "probe:t17": "tsx scripts/parity/workflow-audit-live/probe.ts",
+    "mutations:t17": "tsx scripts/parity/workflow-audit-live/run-mutations.ts",
+    "pack:check": "tsx scripts/pack-check.ts"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3"

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "t10-anthropic-max-tokens",
+  "layer": "turno-publico",
+  "transport": "anthropic",
+  "fixture": "max",
+  "mode": "single",
+  "argv": [
+    "chat",
+    "prompt-anthropic-max-tokens",
+    "--json",
+    "--no-tools",
+    "--provider",
+    "anthropic",
+    "--model",
+    "stub-model"
+  ],
+  "expectedRequests": 1
+}

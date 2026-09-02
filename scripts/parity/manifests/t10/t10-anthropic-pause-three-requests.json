@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "t10-anthropic-pause-three-requests",
+  "layer": "turno-publico",
+  "transport": "anthropic",
+  "fixture": "pause",
+  "mode": "single",
+  "argv": [
+    "chat",
+    "prompt-anthropic-pause-three-requests",
+    "--json",
+    "--no-tools",
+    "--provider",
+    "anthropic",
+    "--model",
+    "stub-model"
+  ],
+  "expectedRequests": 3
+}

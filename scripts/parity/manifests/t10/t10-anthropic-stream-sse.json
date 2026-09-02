@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "t10-anthropic-stream-sse",
+  "layer": "turno-publico",
+  "transport": "anthropic",
+  "fixture": "plain",
+  "mode": "single",
+  "argv": [
+    "chat",
+    "prompt-anthropic-stream-sse",
+    "--no-tools",
+    "--provider",
+    "anthropic",
+    "--model",
+    "stub-model"
+  ],
+  "expectedRequests": 1
+}

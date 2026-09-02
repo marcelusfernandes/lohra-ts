@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "id": "t03-fts-lineage",
+  "description": "FTS hit, malformed and blank queries plus visibility and nearest-100 lineage",
+  "argv": [],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "NO_COLOR": "1",
+      "COLUMNS": "80",
+      "HOME": "{{home}}",
+      "TMPDIR": "{{home}}/tmp",
+      "LOHRA_HOME": "{{profile}}"
+    }
+  },
+  "preconditions": [],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/state/oracle_driver.py", "fts-lineage"],
+      "cwd": "sandbox"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/state/candidate-driver.mjs", "fts-lineage"],
+      "cwd": "sandbox"
+    }
+  },
+  "limits": { "timeoutMs": 60000, "maxOutputBytes": 16777216 },
+  "capture": {
+    "tree": { "enabled": false, "root": "profile", "exclude": [] },
+    "sqlite": [
+      {
+        "name": "fts",
+        "root": "profile",
+        "path": "state.db",
+        "pragmas": ["journal_mode", "quick_check"],
+        "tables": [
+          { "name": "messages", "orderBy": ["id"] },
+          { "name": "messages_fts", "orderBy": ["message_id"] }
+        ]
+      }
+    ],
+    "events": []
+  },
+  "comparisons": [
+    { "class": "byte", "field": "process.exitCode" },
+    { "class": "byte", "field": "process.signal" },
+    { "class": "byte", "field": "process.stdout" },
+    { "class": "byte", "field": "process.stderr" },
+    { "class": "schema", "field": "sqlite.fts" }
+  ],
+  "expectations": [
+    { "side": "both", "field": "process.exitCode", "value": 0 },
+    { "side": "both", "field": "process.signal", "value": null },
+    { "side": "both", "field": "process.stderr", "encoding": "utf8", "value": "" },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/lineage/0",
+      "value": "lin-0005"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/lineage/99",
+      "value": "lin-0104"
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/search/0/snippet",
+      "value": "[hello] [stub] world  "
+    },
+    {
+      "side": "both",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/malformed",
+      "value": []
+    }
+  ],
+  "normalizations": [],
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10"
+  }
+}

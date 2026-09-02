@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "id": "t03-schema-stale-write-mutant",
+  "description": "Deliberate candidate write without same-statement fence guard must diverge",
+  "argv": [],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "NO_COLOR": "1",
+      "COLUMNS": "80",
+      "HOME": "{{home}}",
+      "TMPDIR": "{{home}}/tmp",
+      "LOHRA_HOME": "{{profile}}"
+    }
+  },
+  "preconditions": [],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/state/oracle_driver.py", "stale-write"],
+      "cwd": "sandbox"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/state/candidate-driver.mjs",
+        "stale-write-mutant"
+      ],
+      "cwd": "sandbox"
+    }
+  },
+  "limits": { "timeoutMs": 60000, "maxOutputBytes": 16777216 },
+  "capture": {
+    "tree": { "enabled": false, "root": "profile", "exclude": [] },
+    "sqlite": [
+      {
+        "name": "state",
+        "root": "profile",
+        "path": "state.db",
+        "pragmas": ["quick_check"],
+        "tables": [
+          { "name": "workflow_run_fence", "orderBy": ["run_id"] },
+          { "name": "workflow_run_state", "orderBy": ["run_id"] }
+        ]
+      }
+    ],
+    "events": []
+  },
+  "comparisons": [
+    { "class": "byte", "field": "process.exitCode" },
+    { "class": "byte", "field": "process.signal" },
+    { "class": "byte", "field": "process.stdout" },
+    { "class": "byte", "field": "process.stderr" },
+    { "class": "schema", "field": "sqlite.state" }
+  ],
+  "expectations": [
+    { "side": "both", "field": "process.exitCode", "value": 0 },
+    { "side": "both", "field": "process.signal", "value": null },
+    { "side": "both", "field": "process.stderr", "encoding": "utf8", "value": "" },
+    {
+      "side": "oracle",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/final/owner",
+      "value": "p2"
+    },
+    {
+      "side": "candidate",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "pointer": "/final/owner",
+      "value": "p1"
+    }
+  ],
+  "normalizations": [],
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10"
+  }
+}
