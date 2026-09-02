@@ -20,10 +20,11 @@ export const EVIDENCE_NORMALIZATIONS = Object.freeze([
   }),
   Object.freeze({
     field: "system_prompt.today",
-    kind: "replace-regex",
+    kind: "structural-replace-regex",
     pattern: "(Today's date is )\\d{4}-\\d{2}-\\d{2}",
     replacement: "$1<date>",
-    why: "the system prompt states the current date on both sides, so an artifact captured on one day cannot be byte-compared with one captured on the next",
+    scope: "message objects whose role is exactly system; only their string content is normalized",
+    why: "the system prompt states the current date on both sides, so an artifact captured on one day cannot be byte-compared with one captured on the next; identical text in user/tool messages remains semantic",
   }),
 ]);
 
@@ -31,7 +32,27 @@ const RUN_ID =
   /(\\?"run_id\\?":\s*\\?")([0-9a-f]{16,}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})/g;
 const TODAY = /(Today's date is )\d{4}-\d{2}-\d{2}/g;
 
+/** Normalize only the structural field declared above. */
+function normalizeSystemPromptToday(value) {
+  if (Array.isArray(value)) {
+    for (const entry of value) normalizeSystemPromptToday(entry);
+    return;
+  }
+  if (value === null || typeof value !== "object") return;
+
+  if (value.role === "system" && typeof value.content === "string") {
+    value.content = value.content.replaceAll(TODAY, "$1<date>");
+  }
+  for (const entry of Object.values(value)) normalizeSystemPromptToday(entry);
+}
+
 /** Apply the declared rules, and nothing else, to one artifact's bytes. */
 export function normalizeEvidence(text) {
-  return text.replaceAll(RUN_ID, "$1<run-id>").replaceAll(TODAY, "$1<date>");
+  const runIdsNormalized = text.replaceAll(RUN_ID, "$1<run-id>");
+  const parsed = JSON.parse(runIdsNormalized);
+  normalizeSystemPromptToday(parsed);
+
+  const pretty = runIdsNormalized.includes("\n");
+  const serialized = JSON.stringify(parsed, null, pretty ? 2 : undefined);
+  return runIdsNormalized.endsWith("\n") ? `${serialized}\n` : serialized;
 }

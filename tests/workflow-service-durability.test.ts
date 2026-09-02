@@ -1694,7 +1694,15 @@ describe("delivered evidence normalization", () => {
           events: {
             requests: {
               records: [
-                { body: { messages: [{ role: "system", content: `You are lohra.\n\nToday's date is ${today}.` }] } },
+                {
+                  body: {
+                    messages: [
+                      { role: "system", content: `You are lohra.\n\nToday's date is ${today}.` },
+                      { role: "user", content: "Today's date is 2031-03-04." },
+                      { role: "tool", content: "Today's date is 2042-05-06." },
+                    ],
+                  },
+                },
                 { body: { messages: [{ role: "tool", content: `{"ok": true, "run_id": "${runId}", "status": "started"}` }] } },
               ],
             },
@@ -1724,6 +1732,9 @@ describe("delivered evidence normalization", () => {
     expect(after).toContain('"role":"system"');
     expect(after).toContain("You are lohra.");
     expect(after).toContain('"status\\": \\"started');
+    expect(after.match(/Today's date is <date>\./g)).toHaveLength(1);
+    expect(after).toContain(`"role":"user","content":"Today's date is 2031-03-04."`);
+    expect(after).toContain(`"role":"tool","content":"Today's date is 2042-05-06."`);
     // the oracle SHA is 40 hex characters and must NOT be swept up by the id rule
     expect(after).toContain("16b4785d803ad0ca364a8a67346a04f949fbf592");
     // and the rules are the declared ones, recorded with the evidence
@@ -1731,5 +1742,7 @@ describe("delivered evidence normalization", () => {
       "run_id",
       "system_prompt.today",
     ]);
+    expect(EVIDENCE_NORMALIZATIONS[1]?.kind).toBe("structural-replace-regex");
+    expect(EVIDENCE_NORMALIZATIONS[1]?.scope).toContain("role is exactly system");
   });
 });

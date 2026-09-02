@@ -609,8 +609,8 @@ const namedMutants: readonly Mutant[] = [
     edits: [
       {
         file: normalizer,
-        before: "  return text.replaceAll(RUN_ID, \"$1<run-id>\").replaceAll(TODAY, \"$1<date>\");",
-        after: "  return text.replaceAll(RUN_ID, \"$1<run-id>\");",
+        before: "  normalizeSystemPromptToday(parsed);",
+        after: "  void parsed;",
       },
     ],
   },
@@ -622,8 +622,21 @@ const namedMutants: readonly Mutant[] = [
     edits: [
       {
         file: normalizer,
-        before: "  return text.replaceAll(RUN_ID, \"$1<run-id>\").replaceAll(TODAY, \"$1<date>\");",
-        after: "  return text.replaceAll(/[0-9a-f]{16,}/g, \"<run-id>\").replaceAll(TODAY, \"$1<date>\");",
+        before: "  const runIdsNormalized = text.replaceAll(RUN_ID, \"$1<run-id>\");",
+        after: "  const runIdsNormalized = text.replaceAll(/[0-9a-f]{16,}/g, \"<run-id>\");",
+      },
+    ],
+  },
+  {
+    id: "am/delivered-evidence-date-normalization-goes-global",
+    category: "evidence",
+    mechanism: "the date rule falls back to replaceAll over the serialized artifact and masks identical semantic text in user/tool messages",
+    focus: { file: serviceTests, test: "masking nothing else" },
+    edits: [
+      {
+        file: normalizer,
+        before: "  normalizeSystemPromptToday(parsed);",
+        after: "  return runIdsNormalized.replaceAll(TODAY, \"$1<date>\");",
       },
     ],
   },
