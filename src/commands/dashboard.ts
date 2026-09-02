@@ -18,6 +18,7 @@ import { noProvider } from "./chat-boundary.js";
 import {
   AnthropicMessagesModel,
   ChatCompletionsModel,
+  ConversationRuntime,
   ResponsesModel,
   SqliteConversationRepository,
 } from "../conversation/index.js";
@@ -39,6 +40,9 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { OrchestrationChildRuntime, WorkflowService } from "../workflow/index.js";
 import { composeSessionTools, createSessionToolBase } from "./session-tools.js";
+import { CronStore } from "../cron/store.js";
+import { runSchedulerLoop } from "../cron/scheduler.js";
+import { RegistryToolDispatcher } from "../tools/index.js";
 
 const GATEWAY_VERSION = "0.0.11";
 const DEFAULT_PORT = 9119;
@@ -66,7 +70,11 @@ function option(argv: readonly string[], name: string): string | undefined {
 }
 
 function isAddressInUse(error: unknown): boolean {
-  return typeof error === "object" && error !== null && (error as { code?: string }).code === "EADDRINUSE";
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: string }).code === "EADDRINUSE"
+  );
 }
 
 export async function runDashboard(options: DashboardCommandOptions): Promise<number> {
@@ -222,8 +230,55 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     supportsVision: profile.supportsVision,
   });
   const toolRuntime = createGatewayToolRuntime(options.home, sessionTools.registry);
+  const cronStore = new CronStore(options.home);
+  cronStore.list();
+  let schedulerStopped = false;
+  let wakeScheduler: (() => void) | undefined;
+  const schedulerLoop = runSchedulerLoop({
+    store: cronStore,
+    stop: { isSet: () => schedulerStopped },
+    wait: (milliseconds) =>
+      new Promise<void>((resolveWait) => {
+        if (schedulerStopped) {
+          resolveWait();
+          return;
+        }
+        const timer = setTimeout(resolveWait, milliseconds);
+        wakeScheduler = () => {
+          clearTimeout(timer);
+          resolveWait();
+        };
+      }),
+    runJob: async (job) => {
+      const transport = createModelTransport();
+      try {
+        const runtime = new ConversationRuntime({
+          repository: new SqliteConversationRepository(sessions),
+          transport,
+          promptSnapshot: () => systemPrompt,
+          toolDefinitions: sessionTools.toolDefinitions,
+          toolDispatcher: new RegistryToolDispatcher(sessionTools.dispatch),
+          idSource: () => randomUUID().replaceAll("-", ""),
+          clock: () => Date.now() / 1_000,
+          maxTokens: profile.defaultMaxTokens,
+          pricingOverrides,
+        });
+        await runtime.runTurn({
+          input: job.prompt,
+          provider: providerName,
+          model,
+          cwd: options.cwd,
+        });
+      } finally {
+        await transport.close();
+      }
+    },
+  });
 
   const closeResources = async (): Promise<void> => {
+    schedulerStopped = true;
+    wakeScheduler?.();
+    await schedulerLoop;
     await orchestrationCore.shutdown(options.home);
     await mcpManager?.shutdown();
     await visionRunner.close();
