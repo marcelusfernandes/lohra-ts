@@ -72,6 +72,15 @@ describe("T17 metadata-only audit", () => {
     expect(json).not.toContain("秘密");
     expect(safe.prompt).toEqual({ state: "excluded_by_policy", characters: 12 });
     expect(safe.arguments).toEqual({ state: "excluded_by_policy", fields: 1 });
+    const hostileEnvelope = publicAuditEvent(
+      "run",
+      1,
+      { event_type: canary, provenance: canary, payload: { content: canary } },
+      1,
+    );
+    expect(JSON.stringify(hostileEnvelope)).not.toContain(canary);
+    expect(hostileEnvelope.event_type).toBe("audit.unavailable");
+    expect(hostileEnvelope.provenance).toBe("unavailable");
     expect(
       safeAuditMetadata({
         reasoning: { state: "excluded_by_policy", characters: 999, fields: 2 },
@@ -83,8 +92,8 @@ describe("T17 metadata-only audit", () => {
   it("persists attempt and paginates only matching audit events", () => {
     const { connection, audit } = database();
     try {
-      audit.append("attempts", { event_type: "node", attempt: 1 });
-      audit.append("attempts", { event_type: "node", attempt: 2 });
+      audit.append("attempts", { event_type: "node.started", attempt: 1 });
+      audit.append("attempts", { event_type: "node.started", attempt: 2 });
       audit.append("attempts", { event_type: "done", attempt: 1 });
       const page = audit.query({ runId: "attempts", attempt: 1, limit: 2 });
       expect(page.events.map((event) => [event.seq, event.identity.attempt])).toEqual([
@@ -189,7 +198,7 @@ describe("T17 SQLite audit read model", () => {
       for (let index = 1; index <= 5; index += 1)
         expect(
           audit.append("run", {
-            event_type: "node",
+            event_type: "node.started",
             node_id: index % 2 ? "a" : "b",
             payload: { done: index },
             created_at: index,
@@ -216,15 +225,15 @@ describe("T17 SQLite audit read model", () => {
   it("resumes a tombstoned run monotonically and compacts expired identity", () => {
     const { connection, audit } = database({ maxRuns: 1, maxTombstones: 1, retentionSeconds: 10 });
     try {
-      audit.append("r1", { event_type: "node", created_at: 1 });
-      audit.append("r2", { event_type: "node", created_at: 2 });
-      expect(audit.append("r1", { event_type: "node", created_at: 3 })?.seq).toBe(2);
+      audit.append("r1", { event_type: "node.started", created_at: 1 });
+      audit.append("r2", { event_type: "node.started", created_at: 2 });
+      expect(audit.append("r1", { event_type: "node.started", created_at: 3 })?.seq).toBe(2);
       expect(
         (audit.query({ runId: "r1" }).integrity.notices as readonly unknown[])[0],
       ).toMatchObject({ event_type: "audit.gap" });
-      audit.append("fresh", { event_type: "node", created_at: 100 });
-      audit.append("newer", { event_type: "node", created_at: 200 });
-      expect(audit.append("r1", { event_type: "node", created_at: 200 })?.seq).toBe(1);
+      audit.append("fresh", { event_type: "node.started", created_at: 100 });
+      audit.append("newer", { event_type: "node.started", created_at: 200 });
+      expect(audit.append("r1", { event_type: "node.started", created_at: 200 })?.seq).toBe(1);
     } finally {
       connection.close();
     }
@@ -244,7 +253,7 @@ describe("T17 SQLite audit read model", () => {
       expect(
         audit.append(
           "run",
-          { event_type: "node", created_at: 2 },
+          { event_type: "node.started", created_at: 2 },
           { fence: 1, holder: "owner", now: 2 },
         ),
         "MUTATION_CAUSE:M6-fence-ignored",
@@ -255,7 +264,7 @@ describe("T17 SQLite audit read model", () => {
       expect(
         audit.append(
           "run",
-          { event_type: "node", created_at: 2 },
+          { event_type: "node.started", created_at: 2 },
           { fence: 2, holder: "owner", now: 2 },
         )?.seq,
       ).toBe(1);
@@ -270,12 +279,12 @@ describe("T17 SQLite audit read model", () => {
       connection.database.exec(
         "CREATE TRIGGER fail_audit BEFORE INSERT ON workflow_audit_events BEGIN SELECT RAISE(ABORT, 'planted failure'); END",
       );
-      expect(() => audit.append("rollback", { event_type: "node", created_at: 1 })).toThrow(
+      expect(() => audit.append("rollback", { event_type: "node.started", created_at: 1 })).toThrow(
         "planted failure",
       );
       connection.database.exec("DROP TRIGGER fail_audit");
       expect(
-        audit.append("rollback", { event_type: "node", created_at: 2 })?.seq,
+        audit.append("rollback", { event_type: "node.started", created_at: 2 })?.seq,
         "MUTATION_CAUSE:M5-nontransactional-seq",
       ).toBe(1);
     } finally {
@@ -392,7 +401,7 @@ describe("T17 live events and sink failures", () => {
       isBusyError: (error: unknown) => error instanceof Error && /locked/.test(error.message),
     } as unknown as AuditRepository;
     const trail = new AuditTrail(repo, { retryDelayMs: 0, sleep: () => Promise.resolve() });
-    expect(trail.record("r", { event_type: "node" })).toBe(true);
+    expect(trail.record("r", { event_type: "node.started" })).toBe(true);
     expect(await trail.flush()).toBe(true);
     expect(attempts).toBe(3);
 
@@ -408,7 +417,7 @@ describe("T17 live events and sink failures", () => {
       sleep: () => Promise.resolve(),
       warning: (message) => warnings.push(message),
     });
-    failed.record("r", { event_type: "node" });
+    failed.record("r", { event_type: "node.started" });
     expect(await failed.shutdown(100)).toBe(false);
     expect(warnings.join(" ")).toContain("failed");
   });

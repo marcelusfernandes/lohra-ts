@@ -113,7 +113,7 @@ export class AuditTrail {
       if (markerRun !== undefined && marker !== undefined) {
         const gap: AuditInput = Object.freeze({
           event_type: "audit.gap",
-          provenance: "audit",
+          provenance: "dropped",
           payload: Object.freeze({ reason: "queue_overflow", dropped_count: marker.count }),
         });
         const gapOutcome = await this.append(markerRun, gap, marker.ownership);
@@ -133,7 +133,7 @@ export class AuditTrail {
       if (saved === "failed") {
         const gap: AuditInput = Object.freeze({
           event_type: "audit.gap",
-          provenance: "audit",
+          provenance: "dropped",
           payload: Object.freeze({ reason: "sink_failure", dropped_count: 1 }),
         });
         const gapOutcome = await this.append(next.runId, gap, next.ownership);

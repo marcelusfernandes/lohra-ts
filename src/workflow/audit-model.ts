@@ -108,6 +108,14 @@ const SAFE_EVENT_TYPES = new Set([
   "workflow.node",
   "workflow.plan",
 ]);
+const SAFE_PROVENANCE = new Set([
+  "dropped",
+  "observed",
+  "replayed",
+  "synthetic",
+  "truncated",
+  "unavailable",
+]);
 const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
   reason: new Set([
     "corrupt_payload",
@@ -269,10 +277,13 @@ export function publicAuditEvent(
   input: AuditInput,
   now: number,
 ): PublicAuditEvent {
+  const eventType = SAFE_EVENT_TYPES.has(input.event_type) ? input.event_type : "audit.unavailable";
+  const requestedProvenance = input.provenance ?? "observed";
+  const provenance = SAFE_PROVENANCE.has(requestedProvenance) ? requestedProvenance : "unavailable";
   const event: PublicAuditEvent = Object.freeze({
     schema_version: 1,
-    event_type: clipped(input.event_type, 64),
-    provenance: clipped(input.provenance ?? "workflow", 64),
+    event_type: eventType,
+    provenance,
     identity: Object.freeze({
       run_id: clipped(runId, 128),
       ...(input.segment_id === undefined || input.segment_id === null
@@ -303,7 +314,7 @@ export function publicAuditEvent(
       state: "truncated",
       original_bytes: bytes,
       limit_bytes: AUDIT_EVENT_BYTES,
-      original_event_type: clipped(input.event_type, 64),
+      original_event_type: eventType,
     }),
     seq,
     created_at: input.created_at ?? now,
