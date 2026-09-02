@@ -88,13 +88,24 @@ function parseEvent(row: Readonly<Record<string, unknown>>): PublicAuditEvent {
 }
 
 const MARKER_TYPES = new Set(["audit.gap", "audit.truncated", "audit.unavailable"]);
-const FIELD_STATES = new Set([
+const FIELD_STATE_NAMES = Object.freeze([
   "redacted",
   "truncated",
   "unavailable",
   "excluded_by_policy",
   "excluded_private_state",
-]);
+] as const);
+const FIELD_STATES = new Set<string>(FIELD_STATE_NAMES);
+
+function fieldMarkerCounts(counts: ReadonlyMap<string, number>): Readonly<Record<string, number>> {
+  return Object.freeze(
+    Object.fromEntries(
+      [...FIELD_STATE_NAMES]
+        .sort((left, right) => left.localeCompare(right))
+        .map((state) => [state, counts.get(state) ?? 0]),
+    ),
+  );
+}
 
 function matches(event: PublicAuditEvent, query: AuditQuery): boolean {
   const identity = event.identity;
@@ -294,7 +305,7 @@ export class AuditRepository {
         integrity: Object.freeze({
           scope: "retained_snapshot",
           event_markers: Object.freeze({ gaps: 0, truncated: 0, unavailable: 1 }),
-          field_markers: Object.freeze({}),
+          field_markers: fieldMarkerCounts(new Map()),
           pagination_truncated: false,
           notices: Object.freeze([
             Object.freeze({
@@ -373,11 +384,7 @@ export class AuditRepository {
           truncated: eventCounts.get("audit.truncated") ?? 0,
           unavailable: eventCounts.get("audit.unavailable") ?? 0,
         }),
-        field_markers: Object.freeze(
-          Object.fromEntries(
-            [...fieldCounts.entries()].sort(([left], [right]) => left.localeCompare(right)),
-          ),
-        ),
+        field_markers: fieldMarkerCounts(fieldCounts),
         pagination_truncated: eligible.length > limit,
         notices: Object.freeze(returnedNotices),
         notices_total: notices.length,

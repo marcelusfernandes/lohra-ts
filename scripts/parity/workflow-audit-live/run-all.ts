@@ -35,7 +35,8 @@ function sha(value: unknown): string {
 async function candidateProjection() {
   const directory = mkdtempSync(resolve(tmpdir(), "lohra-t17-candidate-"));
   try {
-    const connection = openStateDatabase(resolve(directory, "state.db"));
+    const databasePath = resolve(directory, "state.db");
+    const connection = openStateDatabase(databasePath);
     try {
       const snapshot = new AuditRepository(connection.database);
       for (let turn = 0; turn < 3; turn += 1)
@@ -88,6 +89,25 @@ async function candidateProjection() {
       ];
 
       const audit = new AuditRepository(connection.database);
+      audit.append("privacy", {
+        event_type: "leaf.completed",
+        provenance: "observed",
+        segment_id: "s",
+        node_id: "n",
+        payload: Object.fromEntries(
+          ["prompt", "response", "reasoning", "content", "arguments", "result"].map((key) => [
+            key,
+            CANARY,
+          ]),
+        ),
+        created_at: 4000,
+      });
+      const privacyPage = audit.query({ runId: "privacy", limit: 10 });
+      const storedPrivacy = connection.database
+        .prepare("SELECT payload_json FROM workflow_audit_events WHERE run_id='privacy'")
+        .all()
+        .map((row) => String((row as Readonly<Record<string, unknown>>).payload_json));
+      const unknownReadModel = audit.query({ runId: "unknown-run" });
       const trail = new AuditTrail(audit);
       const runtime: ChildRuntime = {
         spawn: () => "leaf",
@@ -128,7 +148,10 @@ async function candidateProjection() {
               }),
             ).includes(CANARY),
             states: Array(6).fill("excluded_by_policy"),
+            public_canary_absent: !JSON.stringify(privacyPage).includes(CANARY),
+            database_canary_absent: !JSON.stringify(storedPrivacy).includes(CANARY),
           },
+          unknown_read_model: unknownReadModel,
           sqlite: {
             snapshot: firstSnapshot,
             frozen: frozen.events.map((event) => event.seq),

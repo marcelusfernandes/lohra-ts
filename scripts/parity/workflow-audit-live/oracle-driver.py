@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import tempfile
 from pathlib import Path
 
@@ -27,6 +28,19 @@ def main():
     safe = sanitize_audit_event(raw)
     with tempfile.TemporaryDirectory(prefix="lohra-t17-oracle-") as directory:
         root = Path(directory)
+        privacy_path = root / "privacy.db"
+        privacy = SessionDB(str(privacy_path))
+        append(privacy, raw, 4000)
+        privacy_page = privacy.audit_query("privacy", limit=10)
+        unknown_read_model = privacy.audit_query("unknown-run")
+        privacy.close()
+        with sqlite3.connect(privacy_path) as stored:
+            stored_privacy = [
+                str(row[0])
+                for row in stored.execute(
+                    "SELECT payload_json FROM workflow_audit_events WHERE run_id='privacy'"
+                ).fetchall()
+            ]
         snapshot = SessionDB(str(root / "snapshot.db"))
         for turn in range(3): append(snapshot, event("snapshot", turn), 1000 + turn)
         first = snapshot.audit_query("snapshot", limit=1)
@@ -65,7 +79,10 @@ def main():
         "limits": {"event_bytes": DEFAULT_MAX_EVENT_BYTES, "events_per_run": DEFAULT_MAX_EVENTS_PER_RUN,
                    "runs": DEFAULT_MAX_RUNS, "queue": DEFAULT_QUEUE_LIMIT, "retention_seconds": DEFAULT_RETENTION_SECONDS},
         "privacy": {"canary_absent": CANARY not in json.dumps(safe, ensure_ascii=False),
-                    "states": [safe["data"][key]["state"] for key in ("prompt", "response", "reasoning", "content", "arguments", "result")]},
+                    "states": [safe["data"][key]["state"] for key in ("prompt", "response", "reasoning", "content", "arguments", "result")],
+                    "public_canary_absent": CANARY not in json.dumps(privacy_page, ensure_ascii=False),
+                    "database_canary_absent": CANARY not in json.dumps(stored_privacy, ensure_ascii=False)},
+        "unknown_read_model": unknown_read_model,
         "sqlite": {"snapshot": snap, "frozen": [row["seq"] for row in frozen["events"]], "tail": [row["seq"] for row in tail["events"]],
                    "retained": [row["seq"] for row in retained_events[1:]], "dropped": retained_events[0]["data"]["dropped_count"],
                    "resumed": resurrected[1]["seq"]},
