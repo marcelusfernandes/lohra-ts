@@ -94,7 +94,8 @@ const mutants: readonly Mutant[] = [
     assertion: "B1",
     test: "rolls back sequence allocation",
     cause: "MUTATION_CAUSE:M5-nontransactional-seq",
-    externalCause: "cross-process sequence is not dense",
+    externalCause:
+      "UNIQUE constraint failed: workflow_audit_events.run_id, workflow_audit_events.seq",
     edits: [
       {
         file: repository,

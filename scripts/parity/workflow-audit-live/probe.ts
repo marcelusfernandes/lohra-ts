@@ -174,7 +174,7 @@ try {
     const stale = repository.append(
       "fenced",
       { event_type: "stale", created_at: 2 },
-      { fence: 1, holder: "old", now: 2 },
+      { fence: 1, holder: "owner", now: 2 },
     );
     const valid = repository.append(
       "fenced",
