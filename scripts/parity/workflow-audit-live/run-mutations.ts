@@ -76,8 +76,8 @@ const mutants: readonly Mutant[] = [
     edits: [
       {
         file: repository,
-        before: "Math.trunc(query.snapshotSeq ?? high)",
-        after: "Math.trunc(high)",
+        before: "Math.trunc(query.snapshotSeq ?? currentHigh)",
+        after: "Math.trunc(currentHigh)",
       },
     ],
   },
