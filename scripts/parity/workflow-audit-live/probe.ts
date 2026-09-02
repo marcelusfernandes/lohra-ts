@@ -293,6 +293,120 @@ async function probeRoundOneRegressions(
   });
 }
 
+async function probeRoundTwoRegressions(): Promise<Readonly<Record<string, unknown>>> {
+  let attempts = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolveGate) => {
+    release = resolveGate;
+  });
+  const permanent = {
+    append: () => {
+      attempts += 1;
+      throw new Error("database is locked");
+    },
+    isBusyError: () => true,
+  } as unknown as AuditRepository;
+  const shutdownTrail = new AuditTrail(permanent, {
+    retryLimit: 6,
+    retryDelayMs: 0,
+    sleep: () => gate,
+  });
+  shutdownTrail.record("shutdown", { event_type: "node.started" });
+  await Promise.resolve();
+  const shutdown = await shutdownTrail.shutdown(1);
+  const attemptsAtReturn = attempts;
+  release();
+  await new Promise<void>((resolveWait) => setTimeout(resolveWait, 0));
+  if (shutdown || attempts !== attemptsAtReturn)
+    throw new Error(
+      `late shutdown attempts probe failed: ${JSON.stringify({ shutdown, attemptsAtReturn, attempts })}`,
+    );
+
+  const persisted: { runId: string; reason: unknown; count: number }[] = [];
+  const boundedRepository = {
+    append: (runId: string, input: AuditInput) => {
+      if (input.event_type === "audit.gap") {
+        const payload = input.payload as Readonly<Record<string, unknown>> | undefined;
+        persisted.push({
+          runId,
+          reason: payload?.reason,
+          count: Number(payload?.dropped_count),
+        });
+      }
+      return {} as never;
+    },
+    isBusyError: () => false,
+  } as unknown as AuditRepository;
+  const boundedTrail = new AuditTrail(boundedRepository, { capacity: 1 });
+  boundedTrail.record("seed", { event_type: "node.started" });
+  for (let index = 0; index < 2_000; index += 1)
+    boundedTrail.record(`overflow-${String(index)}`, { event_type: "node.started" });
+  const boundedInternal = boundedTrail as unknown as {
+    readonly dropped: readonly { count: number; reason: string; runId: string }[];
+  };
+  const peakBuckets = boundedInternal.dropped.length;
+  const peakCount = boundedInternal.dropped.reduce((total, marker) => total + marker.count, 0);
+  if (!(await boundedTrail.flush())) throw new Error("bounded drop trail did not flush");
+  const persistedCount = persisted.reduce((total, marker) => total + marker.count, 0);
+  const aggregate = persisted.find(
+    (marker) => marker.runId === "$audit" && marker.reason === "drop_bucket_overflow",
+  );
+  if (peakBuckets !== 256 || peakCount !== 2_000 || persistedCount !== 2_000 || !aggregate)
+    throw new Error(
+      `bounded drop buckets probe failed: ${JSON.stringify({ peakBuckets, peakCount, persistedCount, aggregate })}`,
+    );
+
+  const corruptReasons: unknown[] = [];
+  const corruptRepository = {
+    append: (_runId: string, input: AuditInput) => {
+      const payload = input.payload as Readonly<Record<string, unknown>> | undefined;
+      if (input.event_type === "audit.gap") corruptReasons.push(payload?.reason);
+      return {} as never;
+    },
+    isBusyError: () => false,
+  } as unknown as AuditRepository;
+  const corruptTrail = new AuditTrail(corruptRepository, { capacity: 1 });
+  corruptTrail.record("seed", { event_type: "node.started" });
+  const hostile = new Proxy(Object.create(null) as Record<string, unknown>, {
+    ownKeys: () => {
+      throw new Error("hostile ownKeys");
+    },
+  });
+  corruptTrail.record("corrupt", { event_type: "node.started", payload: hostile });
+  if (!(await corruptTrail.flush()) || corruptReasons.join(",") !== "corrupt_payload")
+    throw new Error(`corrupt payload cause probe failed: ${JSON.stringify(corruptReasons)}`);
+
+  const privateMarker = { state: "excluded_private_state", fields: 3 };
+  const privateProjection = safeAuditMetadata({
+    prompt: privateMarker,
+    response: privateMarker,
+    reasoning: privateMarker,
+    content: privateMarker,
+    arguments: privateMarker,
+    result: privateMarker,
+  });
+  const privateStates = Object.fromEntries(
+    Object.entries(privateProjection).map(([key, value]) => [
+      key,
+      (value as Readonly<Record<string, unknown>>).state,
+    ]),
+  );
+  if (
+    privateStates.reasoning !== "excluded_private_state" ||
+    ["prompt", "response", "content", "arguments", "result"].some(
+      (key) => privateStates[key] !== "excluded_by_policy",
+    )
+  )
+    throw new Error(`private marker scope probe failed: ${JSON.stringify(privateStates)}`);
+
+  return Object.freeze({
+    shutdown: Object.freeze({ clean: shutdown, attemptsAtReturn, attempts }),
+    drops: Object.freeze({ peakBuckets, peakCount, persistedCount, aggregate }),
+    corruptReasons: Object.freeze(corruptReasons),
+    privateStates: Object.freeze(privateStates),
+  });
+}
+
 function child(databasePath: string): Promise<void> {
   return new Promise((resolveChild, reject) => {
     const process = spawn(
@@ -379,6 +493,7 @@ try {
     if (stale !== null || valid?.seq !== 1) throw new Error("stale fence probe failed");
     const sinkOutcomes = await probeSinkOutcomes(connection.database);
     const roundOneRegressions = await probeRoundOneRegressions(connection.database);
+    const roundTwoRegressions = await probeRoundTwoRegressions();
     let focusedTests = 0;
     if (!mutationMode) {
       const tests = spawnSync(
@@ -465,6 +580,7 @@ try {
       focusedTests,
       sinkOutcomes,
       roundOneRegressions,
+      roundTwoRegressions,
       cli,
     };
     const digest = createHash("sha256").update(canonicalJson(record)).digest("hex");

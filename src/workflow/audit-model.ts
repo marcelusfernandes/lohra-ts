@@ -207,7 +207,7 @@ function safeValue(value: unknown, key: string, depth: number): unknown {
       const preserved = marker(value as Readonly<Record<string, unknown>>);
       if (
         preserved?.state === "excluded_by_policy" ||
-        preserved?.state === "excluded_private_state"
+        (key === "reasoning" && preserved?.state === "excluded_private_state")
       )
         return preserved;
     }

@@ -395,6 +395,60 @@ const mutants: readonly Mutant[] = [
       },
     ],
   },
+  {
+    id: "M25-no-late-shutdown-attempts",
+    assertion: "B7(c)",
+    test: "never retries the sink after a timed-out shutdown returns",
+    cause: "MUTATION_CAUSE:M25-no-late-shutdown-attempts",
+    edits: [
+      {
+        file: auditTrail,
+        before:
+          'await this.sleep(this.retryDelay);\n        if (this.isStopped()) return "failed";',
+        after: "await this.sleep(this.retryDelay);",
+      },
+    ],
+  },
+  {
+    id: "M26-bounded-drop-buckets",
+    assertion: "A3/bounded_work",
+    test: "bounds loss buckets and conserves every overflowed event",
+    cause: "MUTATION_CAUSE:M26-bounded-drop-buckets",
+    edits: [
+      {
+        file: auditTrail,
+        before:
+          "      (prior === undefined || acceptedSincePrior) &&\n      this.dropped.length >= this.maxDropBuckets - 1",
+        after: "      false",
+      },
+    ],
+  },
+  {
+    id: "M27-corrupt-payload-cause",
+    assertion: "A5",
+    test: "preserves corrupt_payload when sanitizer failure meets a full queue",
+    cause: "MUTATION_CAUSE:M27-corrupt-payload-cause",
+    edits: [
+      {
+        file: auditTrail,
+        before: 'this.markDropped(order, runId, "corrupt_payload", ownership);',
+        after: 'this.markDropped(order, runId, "queue_overflow", ownership);',
+      },
+    ],
+  },
+  {
+    id: "M28-private-marker-scope",
+    assertion: "A1",
+    test: "rejects marker-shaped objects in raw fields except policy-produced markers",
+    cause: "MUTATION_CAUSE:M28-private-marker-scope",
+    edits: [
+      {
+        file: auditModel,
+        before: '(key === "reasoning" && preserved?.state === "excluded_private_state")',
+        after: 'preserved?.state === "excluded_private_state"',
+      },
+    ],
+  },
 ];
 
 function run(

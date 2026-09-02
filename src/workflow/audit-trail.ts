@@ -4,6 +4,7 @@ import { AUDIT_QUEUE_CAPACITY, safeAuditMetadata, type AuditInput } from "./audi
 
 export interface AuditTrailOptions {
   readonly capacity?: number;
+  readonly maxDropBuckets?: number;
   readonly retryLimit?: number;
   readonly retryDelayMs?: number;
   readonly warning?: (message: string) => void;
@@ -17,9 +18,11 @@ type Queued = Readonly<{
   ownership?: Ownership;
 }>;
 type AppendOutcome = "saved" | "refused" | "failed";
+type DropReason = "corrupt_payload" | "drop_bucket_overflow" | "queue_overflow";
 type DropBucket = Readonly<{
   order: number;
   runId: string;
+  reason: DropReason;
   count: number;
   ownership?: Ownership;
 }>;
@@ -29,6 +32,7 @@ export class AuditTrail {
   private readonly capacity: number;
   private readonly retries: number;
   private readonly retryDelay: number;
+  private readonly maxDropBuckets: number;
   private readonly warning: (message: string) => void;
   private readonly sleep: (milliseconds: number) => Promise<void>;
   private running: Promise<void> | null = null;
@@ -43,6 +47,7 @@ export class AuditTrail {
     options: AuditTrailOptions = {},
   ) {
     this.capacity = Math.max(1, Math.trunc(options.capacity ?? AUDIT_QUEUE_CAPACITY));
+    this.maxDropBuckets = Math.max(2, Math.trunc(options.maxDropBuckets ?? 256));
     this.retries = Math.max(1, Math.trunc(options.retryLimit ?? 3));
     this.retryDelay = Math.max(0, Math.trunc(options.retryDelayMs ?? 5));
     this.warning = options.warning ?? (() => undefined);
@@ -90,11 +95,11 @@ export class AuditTrail {
         );
         this.lastAcceptedOrder.set(runId, order);
         this.kick();
-      } else this.markDropped(order, runId, ownership);
+      } else this.markDropped(order, runId, "corrupt_payload", ownership);
       return false;
     }
     if (this.queue.length >= this.capacity) {
-      this.markDropped(order, runId, ownership);
+      this.markDropped(order, runId, "queue_overflow", ownership);
       this.warning(`audit queue overflow for run ${runId}`);
       this.kick();
       return false;
@@ -171,7 +176,7 @@ export class AuditTrail {
     const gap: AuditInput = Object.freeze({
       event_type: "audit.gap",
       provenance: "dropped",
-      payload: Object.freeze({ reason: "queue_overflow", dropped_count: marker.count }),
+      payload: Object.freeze({ reason: marker.reason, dropped_count: marker.count }),
     });
     const outcome = await this.append(marker.runId, gap, marker.ownership);
     if (outcome === "failed") {
@@ -210,6 +215,7 @@ export class AuditTrail {
     ownership?: Ownership,
   ): Promise<AppendOutcome> {
     for (let attempt = 0; attempt < this.retries; attempt += 1) {
+      if (this.isStopped()) return "failed";
       try {
         return this.repository.append(runId, input, ownership) === null ? "refused" : "saved";
       } catch (error) {
@@ -220,20 +226,52 @@ export class AuditTrail {
           return "failed";
         }
         await this.sleep(this.retryDelay);
+        if (this.isStopped()) return "failed";
       }
     }
     return "failed";
   }
 
-  private markDropped(order: number, runId: string, ownership?: Ownership): void {
-    const priorIndex = this.dropped.findLastIndex((entry) => entry.runId === runId);
+  private isStopped(): boolean {
+    return this.stopped;
+  }
+
+  private markDropped(
+    order: number,
+    runId: string,
+    reason: Exclude<DropReason, "drop_bucket_overflow">,
+    ownership?: Ownership,
+  ): void {
+    const priorIndex = this.dropped.findLastIndex(
+      (entry) => entry.runId === runId && entry.reason === reason,
+    );
     const prior = priorIndex < 0 ? undefined : this.dropped[priorIndex];
     const acceptedSincePrior = (this.lastAcceptedOrder.get(runId) ?? 0) > (prior?.order ?? 0);
+    if (
+      (prior === undefined || acceptedSincePrior) &&
+      this.dropped.length >= this.maxDropBuckets - 1
+    ) {
+      const aggregateIndex = this.dropped.findIndex(
+        (entry) => entry.runId === "$audit" && entry.reason === "drop_bucket_overflow",
+      );
+      const aggregate = aggregateIndex < 0 ? undefined : this.dropped[aggregateIndex];
+      const marker = Object.freeze({
+        order: aggregate === undefined ? order : Math.min(aggregate.order, order),
+        runId: "$audit",
+        reason: "drop_bucket_overflow" as const,
+        count: (aggregate?.count ?? 0) + 1,
+      });
+      if (aggregateIndex < 0) this.dropped.push(marker);
+      else this.dropped[aggregateIndex] = marker;
+      this.clearAcceptedOrderIfIdle(runId);
+      return;
+    }
     const markerOwnership =
       prior === undefined || acceptedSincePrior ? ownership : (prior.ownership ?? ownership);
     const marker = Object.freeze({
       order: prior === undefined || acceptedSincePrior ? order : Math.min(prior.order, order),
       runId,
+      reason,
       count: prior === undefined || acceptedSincePrior ? 1 : prior.count + 1,
       ...(markerOwnership === undefined ? {} : { ownership: markerOwnership }),
     });

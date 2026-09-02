@@ -243,6 +243,22 @@ describe("T17 metadata-only audit", () => {
     expect(
       safeAuditMetadata({ prompt: { state: "excluded_by_policy", characters: 7 } }).prompt,
     ).toEqual({ state: "excluded_by_policy", characters: 7 });
+
+    const privateMarker = { state: "excluded_private_state", fields: 3 };
+    const scopedPrivate = safeAuditMetadata({
+      prompt: privateMarker,
+      response: privateMarker,
+      reasoning: privateMarker,
+      content: privateMarker,
+      arguments: privateMarker,
+      result: privateMarker,
+    });
+    expect(scopedPrivate.reasoning).toEqual(privateMarker);
+    for (const field of ["prompt", "response", "content", "arguments", "result"])
+      expect(scopedPrivate[field], "MUTATION_CAUSE:M28-private-marker-scope").toEqual({
+        state: "excluded_by_policy",
+        fields: 2,
+      });
   });
 
   it("keeps binary raw-field markers stable across the SQLite read boundary", () => {
@@ -669,6 +685,37 @@ describe("T17 live events and sink failures", () => {
     expect(warnings.join(" ")).toContain("failed");
   });
 
+  it("never retries the sink after a timed-out shutdown returns", async () => {
+    let attempts = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const repo = {
+      append: () => {
+        attempts += 1;
+        throw new Error("database is locked");
+      },
+      isBusyError: () => true,
+    } as unknown as AuditRepository;
+    const warnings: string[] = [];
+    const trail = new AuditTrail(repo, {
+      retryLimit: 6,
+      retryDelayMs: 0,
+      sleep: () => gate,
+      warning: (message) => warnings.push(message),
+    });
+    expect(trail.record("shutdown", { event_type: "node.started" })).toBe(true);
+    await Promise.resolve();
+    expect(attempts).toBe(1);
+    expect(await trail.shutdown(1)).toBe(false);
+    const attemptsAtReturn = attempts;
+    release();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(attempts, "MUTATION_CAUSE:M25-no-late-shutdown-attempts").toBe(attemptsAtReturn);
+    expect(warnings.join(" ")).toContain("shutdown timed out");
+  });
+
   it("settles a stale-fence refusal without poisoning the shared writer", async () => {
     const calls: string[] = [];
     const repo = {
@@ -720,6 +767,63 @@ describe("T17 live events and sink failures", () => {
     expect(await trail.flush()).toBe(true);
     expect(inputs, "MUTATION_CAUSE:M3-silent-overflow").toContain("run-x:audit.gap");
     expect(inputs).not.toContain("run-y:audit.gap");
+  });
+
+  it("bounds loss buckets and conserves every overflowed event", async () => {
+    const persisted: { runId: string; reason: unknown; count: unknown }[] = [];
+    const repo = {
+      append: (runId: string, input: { event_type: string; payload?: Record<string, unknown> }) => {
+        if (input.event_type === "audit.gap")
+          persisted.push({
+            runId,
+            reason: input.payload?.reason,
+            count: input.payload?.dropped_count,
+          });
+        return {} as never;
+      },
+      isBusyError: () => false,
+    } as unknown as AuditRepository;
+    const trail = new AuditTrail(repo, { capacity: 1 });
+    expect(trail.record("seed", { event_type: "node.started" })).toBe(true);
+    for (let index = 0; index < 2_000; index += 1)
+      expect(trail.record(`overflow-${String(index)}`, { event_type: "node.started" })).toBe(false);
+    const internal = trail as unknown as {
+      readonly dropped: readonly { count: number; reason: string; runId: string }[];
+    };
+    expect(internal.dropped.length, "MUTATION_CAUSE:M26-bounded-drop-buckets").toBe(256);
+    expect(internal.dropped.reduce((total, marker) => total + marker.count, 0)).toBe(2_000);
+    expect(internal.dropped).toContainEqual(
+      expect.objectContaining({ runId: "$audit", reason: "drop_bucket_overflow" }),
+    );
+    expect(await trail.flush()).toBe(true);
+    expect(persisted.reduce((total, marker) => total + Number(marker.count), 0)).toBe(2_000);
+    expect(persisted).toContainEqual(
+      expect.objectContaining({ runId: "$audit", reason: "drop_bucket_overflow" }),
+    );
+  });
+
+  it("preserves corrupt_payload when sanitizer failure meets a full queue", async () => {
+    const gaps: unknown[] = [];
+    const repo = {
+      append: (
+        _runId: string,
+        input: { event_type: string; payload?: Record<string, unknown> },
+      ) => {
+        if (input.event_type === "audit.gap") gaps.push(input.payload?.reason);
+        return {} as never;
+      },
+      isBusyError: () => false,
+    } as unknown as AuditRepository;
+    const trail = new AuditTrail(repo, { capacity: 1 });
+    expect(trail.record("seed", { event_type: "node.started" })).toBe(true);
+    const hostile = new Proxy(Object.create(null) as Record<string, unknown>, {
+      ownKeys: () => {
+        throw new Error("hostile ownKeys");
+      },
+    });
+    expect(trail.record("corrupt", { event_type: "node.started", payload: hostile })).toBe(false);
+    expect(await trail.flush()).toBe(true);
+    expect(gaps, "MUTATION_CAUSE:M27-corrupt-payload-cause").toEqual(["corrupt_payload"]);
   });
 
   it("persists an already accepted event before its overflow gap", async () => {
