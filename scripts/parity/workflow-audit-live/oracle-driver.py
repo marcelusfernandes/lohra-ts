@@ -116,6 +116,7 @@ def main():
         append(tomb, event("r1", 1), 3002, max_runs=1)
         resurrected = tomb.audit_events("r1")
         tomb.close()
+        canned = canned_projection(root)
 
     ticks = iter([0.0, 0.1, 0.1, 1.0, 1.1])
     delivered = []
@@ -144,7 +145,7 @@ def main():
                        "resumed": resurrected[1]["seq"]},
             "live": {"outcomes": outcomes, "delivered": delivered, "tracked": emitter.tracked_nodes()},
         },
-        "canned": canned_projection(root),
+        "canned": canned,
     }, sort_keys=True))
 
 if __name__ == "__main__": main()
