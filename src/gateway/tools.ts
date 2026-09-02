@@ -1,5 +1,5 @@
 import { parseToolArguments } from "../tools/arguments.js";
-import { builtinRegistry, composeDispatch, MemoryTool } from "../tools/index.js";
+import { builtinRegistry, composeDispatch, MemoryTool, type ToolRegistry } from "../tools/index.js";
 import type { ToolDefinition } from "../tools/types.js";
 import { MemoryStore } from "../memory/index.js";
 
@@ -18,7 +18,16 @@ export interface GatewayToolRuntime {
 // producing terminal.ts's exact "command was not approved by the user"
 // message -- deliberately different from T11's subagent auto-deny message,
 // per assertion 40.
-export function createGatewayToolRuntime(home: string): GatewayToolRuntime {
+export function createGatewayToolRuntime(home: string, sessionRegistry?: ToolRegistry): GatewayToolRuntime {
+  if (sessionRegistry !== undefined) {
+    const toolDefinitions = sessionRegistry.getDefinitions();
+    return {
+      dispatch: (name, argumentsJson) =>
+        sessionRegistry.dispatch(name, parseToolArguments(argumentsJson)),
+      toolNames: toolDefinitions.map((definition) => definition.function.name),
+      toolDefinitions,
+    };
+  }
   const memoryStore = new MemoryStore(home);
   const memoryTool = new MemoryTool(memoryStore);
   const composed = composeDispatch(builtinRegistry.dispatch.bind(builtinRegistry), {

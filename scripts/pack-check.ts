@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -70,27 +69,9 @@ async function commandAsync(
   );
 }
 
-async function portClosed(): Promise<boolean> {
-  return await new Promise((resolvePort) => {
-    const socket = createConnection({ host: "127.0.0.1", port: 11_434 });
-    socket.once("connect", () => {
-      socket.destroy();
-      resolvePort(false);
-    });
-    socket.once("error", () => {
-      resolvePort(true);
-    });
-    socket.setTimeout(500, () => {
-      socket.destroy();
-      resolvePort(false);
-    });
-  });
-}
-
 const root = mkdtempSync(join(tmpdir(), "lohra-t09-pack-"));
 let server: Awaited<ReturnType<typeof startStub>> | undefined;
 try {
-  if (!(await portClosed())) throw new Error("PRECONDITION_PORT_IN_USE");
   const packDirectory = join(root, "pack");
   const installDirectory = join(root, "install");
   const home = join(root, "home");
@@ -107,7 +88,7 @@ try {
   const tarball = join(packDirectory, filename);
   command("npm", [
     "install",
-    "--ignore-scripts",
+    "--offline",
     "--no-audit",
     "--no-fund",
     "--prefix",
@@ -159,7 +140,9 @@ try {
     posts: 0,
     requests: 0,
   };
-  server = await startStub(runtime);
+  server = await startStub(runtime, 0);
+  const address = server.address();
+  if (address === null || typeof address === "string") throw new Error("PACK_STUB_ADDRESS_MISSING");
   const bin = resolve(installDirectory, "node_modules/.bin/lohra");
   if (!existsSync(bin)) throw new Error("PACK_BIN_MISSING");
   const isolatedEnvironment: NodeJS.ProcessEnv = {
@@ -172,6 +155,7 @@ try {
     NO_COLOR: "1",
     COLUMNS: "80",
     LOHRA_NO_WIZARD: "1",
+    LOHRA_PROVIDER_BASE_URL: `http://127.0.0.1:${String(address.port)}/v1`,
   };
   const version = command(bin, ["--version"], { cwd: project, env: isolatedEnvironment });
   if (version.stdout !== "lohra 0.0.11\n") throw new Error("PACK_VERSION_MISMATCH");

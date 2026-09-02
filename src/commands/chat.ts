@@ -18,8 +18,7 @@ import {
   SqliteConversationRepository,
   successEnvelope,
 } from "../conversation/index.js";
-import { CronTool } from "../cron/tool.js";
-import { CronStore } from "../cron/store.js";
+import { OpenAIImagesAdapter } from "../media/index.js";
 import { registerConfiguredMcpServers } from "../mcp/index.js";
 import type { MCPManager } from "../mcp/index.js";
 import { loadSoul, MemoryStore } from "../memory/index.js";
@@ -38,12 +37,7 @@ import { openStateForEnvironment, SessionRepository } from "../state/index.js";
 import { SkillStore } from "../skills/index.js";
 import {
   approval,
-  composeDispatch,
-  ListModelsTool,
-  MemoryTool,
   RegistryToolDispatcher,
-  SessionSearchTool,
-  SkillTool,
 } from "../tools/index.js";
 import {
   AnthropicMessagesClient,
@@ -56,6 +50,8 @@ import type { ModelTransport } from "../conversation/index.js";
 import { formatProviderFailureMessage } from "../serialization/provider-error-message.js";
 import { runChatBoundary } from "./chat-boundary.js";
 import { CHAT_TOOL_REGISTRY_FACTORIES } from "./chat-tools.js";
+import { composeSessionTools, createSessionToolBase } from "./session-tools.js";
+import { OrchestrationChildRuntime, WorkflowService } from "../workflow/index.js";
 
 export interface ChatCommandOptions {
   // Both already resolved by cli.ts's single parseCommand(CHAT_SPEC, ...)
@@ -155,6 +151,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   let modelTransport: ModelTransport;
   let subscriptionNote = "";
   let model: string | undefined;
+  let imageGenerator: OpenAIImagesAdapter | undefined;
   if (route.mode === "subscription") {
     let credentials;
     try {
@@ -184,7 +181,10 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
         NO_PROVIDER_CONFIGURED_SHORT,
         `unknown provider '${String(provider).toLowerCase()}' (known: ${knownProviderNames().join(", ")})`,
       );
-    profile = resolved;
+    profile =
+      options.environment.LOHRA_PROVIDER_BASE_URL === undefined
+        ? resolved
+        : Object.freeze({ ...resolved, baseUrl: options.environment.LOHRA_PROVIDER_BASE_URL });
     model = stringFlag(options.flags, "--model") ?? profile.fallbackModels[0];
     const key = resolveApiKey(profile.name, options.environment);
     if (profile.apiMode === "chat_completions" && key === null && profile.requiresApiKey) {
@@ -193,7 +193,11 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
         "Please pass an `api_key`, `workload_identity`, `admin_api_key`, or set the `OPENAI_API_KEY` or `OPENAI_ADMIN_KEY` environment variable.";
       return initializationError(input, model ?? null, message);
     }
-    client = buildClient(profile, key ?? (profile.name === "ollama" ? "lohra-local" : ""));
+    const apiKey = key ?? (profile.name === "ollama" ? "lohra-local" : "");
+    client = buildClient(profile, apiKey);
+    if (profile.apiMode === "chat_completions") {
+      imageGenerator = new OpenAIImagesAdapter({ apiKey, baseUrl: profile.baseUrl });
+    }
     const streaming = !options.flags.has("--json");
     modelTransport =
       client instanceof AnthropicMessagesClient
@@ -224,7 +228,8 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   const warningLines = fanout.warnings.map((warning) => `${warning}\n`).join("");
   const connection = openStateForEnvironment(options.environment);
   const sessions = new SessionRepository(connection.database, undefined, connection.ftsEnabled);
-  const sessionRegistry = createChatSessionRegistry(connection.database, options.environment);
+  const sessionToolBase = createSessionToolBase(connection.database, options.environment);
+  const sessionRegistry = sessionToolBase.registry;
   const repository = new SqliteConversationRepository(sessions);
   const useTools = !options.flags.has("--no-tools");
   const memoryStore = new MemoryStore(options.home);
@@ -265,10 +270,6 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     });
   }
   const baseDispatch = sessionRegistry.dispatch.bind(sessionRegistry);
-  const memoryTool = new MemoryTool(memoryStore);
-  const skillTool = new SkillTool(skillStore);
-  const listModels = new ListModelsTool(options.home, options.environment);
-  const cronTool = new CronTool(new CronStore(options.home));
   const clientPool = new ClientPool(profile, client, {
     home: options.home,
     codexHome: options.codexHome,
@@ -286,14 +287,24 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     cwd: options.cwd,
     pricingOverrides,
   });
-  const dispatch = composeDispatch(baseDispatch, {
-    memory: (args) => memoryTool.handle(args),
-    skill_view: (args) => skillTool.view(args),
-    skill_manage: (args) => skillTool.manage(args),
-    session_search: (args) => new SessionSearchTool(sessions).handle(args),
-    list_models: (args) => listModels.handle(args),
-    cronjob: (args) => cronTool.handle(args),
-    ...orchestrationToolHandlers(orchestrationCore, clientPool),
+  const workflowService = new WorkflowService({
+    runtime: new OrchestrationChildRuntime(orchestrationCore),
+    environment: options.environment,
+    homeRoot: options.home,
+  });
+  const tools = composeSessionTools({
+    base: sessionToolBase,
+    home: options.home,
+    cwd: options.cwd,
+    environment: options.environment,
+    sessions,
+    workflowService,
+    orchestrationHandlers: orchestrationToolHandlers(orchestrationCore, clientPool),
+    visionRunner: modelTransport,
+    ...(imageGenerator === undefined ? {} : { imageGenerator }),
+    visionModel: model,
+    imageModel: model,
+    supportsVision: profile.supportsVision,
   });
   const runtime = new ConversationRuntime({
     repository,
@@ -301,8 +312,8 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     promptSnapshot: snapshot,
     ...(useTools
       ? {
-          toolDefinitions: sessionRegistry.getDefinitions(),
-          toolDispatcher: new RegistryToolDispatcher(dispatch),
+          toolDefinitions: tools.toolDefinitions,
+          toolDispatcher: new RegistryToolDispatcher(tools.dispatch),
         }
       : {}),
     idSource: () => parentSessionId,
@@ -370,6 +381,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     // Children may dispatch MCP tools through the parent registry, so their
     // turns must settle before the MCP sessions are closed.
     if (mcpManager !== null) await mcpManager.shutdown();
+    await imageGenerator?.close();
     connection.close();
   }
 }

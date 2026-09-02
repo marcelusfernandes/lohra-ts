@@ -1,8 +1,11 @@
 {
   "name": "lohra-ts",
   "version": "0.0.11",
-  "private": true,
+  "description": "Headless TypeScript runtime for Lohra",
+  "license": "UNLICENSED",
   "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "engines": {
     "node": ">=20"
   },
@@ -12,7 +15,9 @@
   "files": [
     "dist/",
     "assets/",
-    "README.md"
+    "README.md",
+    "LICENSE",
+    "scripts/postinstall.mjs"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -20,6 +25,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
+    "postinstall": "node scripts/postinstall.mjs",
     "parity": "tsx scripts/parity/cli.ts",
     "parity:auth": "tsx scripts/parity/auth/run-all.ts",
     "parity:context": "tsx scripts/parity/local-context/run-all.ts",
@@ -82,10 +88,17 @@
     "parity:t17": "tsx scripts/parity/workflow-audit-live/run-all.ts",
     "probe:t17": "tsx scripts/parity/workflow-audit-live/probe.ts",
     "mutations:t17": "tsx scripts/parity/workflow-audit-live/run-mutations.ts",
+    "parity:t15": "tsx scripts/parity/workflow-executor/run-all.ts",
+    "mutations:t15": "tsx scripts/parity/workflow-executor/run-mutations.ts",
+    "parity:t21": "tsx scripts/parity/media/run-all.ts",
+    "parity:t21:gates": "tsx scripts/parity/media/run-gates.ts",
+    "mutations:t21": "tsx scripts/parity/media/run-mutations.ts",
+    "pack:t21": "node scripts/parity/media/pack-smoke.mjs",
     "pack:check": "tsx scripts/pack-check.ts"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
+    "node-pty": "https://registry.npmjs.org/node-pty/-/node-pty-1.1.0.tgz",
     "ws": "^8.21.3"
   },
   "devDependencies": {

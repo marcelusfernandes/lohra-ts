@@ -556,7 +556,7 @@ async function handle(
   );
 }
 
-export async function startStub(runtime: StubRuntime): Promise<Server> {
+export async function startStub(runtime: StubRuntime, port = 11_434): Promise<Server> {
   const server = createServer((request, response) => {
     void handle(runtime, request, response).catch((error: unknown) => {
       runtime.failures.push(
@@ -567,7 +567,7 @@ export async function startStub(runtime: StubRuntime): Promise<Server> {
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(11_434, "127.0.0.1", () => {
+    server.listen(port, "127.0.0.1", () => {
       server.off("error", reject);
       resolve();
     });

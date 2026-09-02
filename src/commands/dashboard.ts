@@ -1,7 +1,12 @@
 import { generateSessionToken } from "../gateway/auth.js";
 import { resolveAuthRoute, resolveCredentials } from "../auth/credentials.js";
 import { readCodexModel } from "../auth/codex.js";
-import { getProviderProfile, resolveApiKey } from "../providers/index.js";
+import {
+  CODEX_PROVIDER,
+  getProviderProfile,
+  resolveApiKey,
+  type ProviderProfile,
+} from "../providers/index.js";
 import { loadProjectContext, buildSystemPrompt } from "../context/index.js";
 import { openStateForEnvironment, SessionRepository } from "../state/index.js";
 import { GatewaySessionRegistry } from "../gateway/session-service.js";
@@ -17,7 +22,23 @@ import {
   SqliteConversationRepository,
 } from "../conversation/index.js";
 import type { ModelTransport } from "../conversation/types.js";
-import { AnthropicMessagesClient, buildClient, createResponsesClient } from "../transports/index.js";
+import {
+  AnthropicMessagesClient,
+  buildClient,
+  createResponsesClient,
+  type ChatCompletionsClient,
+  type ResponsesClient,
+} from "../transports/index.js";
+import { ClientPool } from "../agent/client-pool.js";
+import { buildOrchestrationCore, orchestrationToolHandlers } from "../orchestration/chat-wiring.js";
+import { resolveFanout } from "../orchestration/fanout-config.js";
+import { loadPriceOverrides } from "../pricing/index.js";
+import { OpenAIImagesAdapter } from "../media/index.js";
+import { registerConfiguredMcpServers, type MCPManager } from "../mcp/index.js";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { OrchestrationChildRuntime, WorkflowService } from "../workflow/index.js";
+import { composeSessionTools, createSessionToolBase } from "./session-tools.js";
 
 const GATEWAY_VERSION = "0.0.11";
 const DEFAULT_PORT = 9119;
@@ -54,6 +75,9 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
 
   let model: string;
   let providerName: string;
+  let profile: ProviderProfile;
+  let poolClient: ChatCompletionsClient | AnthropicMessagesClient | ResponsesClient;
+  let imageGenerator: OpenAIImagesAdapter | undefined;
   let createModelTransport: () => ModelTransport;
   if (route.mode === "subscription") {
     let credentials;
@@ -70,6 +94,13 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     }
     model = option(options.argv, "--model") ?? readCodexModel(options.codexHome) ?? "gpt-5.5";
     providerName = "codex";
+    profile = CODEX_PROVIDER;
+    poolClient = createResponsesClient({
+      baseUrl: credentials.baseUrl,
+      token: credentials.token,
+      accountId: credentials.accountId,
+      headers: credentials.headers,
+    });
     // T11's approved streaming seam (091d540) never gave ResponsesModel a
     // `streaming` constructor flag -- only ChatCompletionsModel and
     // AnthropicMessagesModel got one. This session's own provisional seam
@@ -94,11 +125,18 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
       options.stderr(noProvider);
       return 2;
     }
-    const profile = getProviderProfile(provider);
-    if (profile === null) {
+    const resolvedProfile = getProviderProfile(provider);
+    if (resolvedProfile === null) {
       options.stderr(`unknown provider '${provider.toLowerCase()}'\n`);
       return 2;
     }
+    profile =
+      options.environment.LOHRA_PROVIDER_BASE_URL === undefined
+        ? resolvedProfile
+        : Object.freeze({
+            ...resolvedProfile,
+            baseUrl: options.environment.LOHRA_PROVIDER_BASE_URL,
+          });
     const key = resolveApiKey(profile.name, options.environment);
     if (profile.apiMode === "chat_completions" && key === null && profile.requiresApiKey) {
       options.stderr(
@@ -109,12 +147,17 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     }
     model = option(options.argv, "--model") ?? profile.fallbackModels[0] ?? "unknown";
     providerName = profile.name;
+    const apiKey = key ?? (profile.name === "ollama" ? "lohra-local" : "");
+    poolClient = buildClient(profile, apiKey);
+    if (profile.apiMode === "chat_completions") {
+      imageGenerator = new OpenAIImagesAdapter({ apiKey, baseUrl: profile.baseUrl });
+    }
     if (route.note !== undefined) options.stderr(`${route.note}\n`);
     // Fresh client + transport per turn, streaming:true (this gateway's own
     // layer decides to stream -- onDelta alone does nothing, see the
     // provisional seam commit) -- matches "cada request cria Agent novo".
     createModelTransport = () => {
-      const client = buildClient(profile, key ?? (profile.name === "ollama" ? "lohra-local" : ""));
+      const client = buildClient(profile, apiKey);
       return client instanceof AnthropicMessagesClient
         ? new AnthropicMessagesModel(client, true)
         : new ChatCompletionsModel(client, true);
@@ -131,7 +174,62 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
   const connection = openStateForEnvironment(options.environment);
   const sessions = new SessionRepository(connection.database, undefined, connection.ftsEnabled);
   const registry = new GatewaySessionRegistry(sessions);
-  const toolRuntime = createGatewayToolRuntime(options.home);
+  const toolBase = createSessionToolBase(connection.database, options.environment);
+  let mcpManager: MCPManager | null = null;
+  try {
+    mcpManager = await registerConfiguredMcpServers(toolBase.registry, {
+      configPath: join(options.home, "mcp.json"),
+    });
+  } catch (error) {
+    connection.close();
+    throw error;
+  }
+  const clientPool = new ClientPool(profile, poolClient, {
+    home: options.home,
+    codexHome: options.codexHome,
+    environment: options.environment,
+  });
+  const pricingOverrides = loadPriceOverrides(join(options.home, "pricing.json"));
+  const orchestrationCore = buildOrchestrationCore({
+    fanout: resolveFanout(undefined, undefined, options.environment),
+    sessions,
+    parentSessionId: randomUUID().replaceAll("-", ""),
+    clientPool,
+    baseDispatch: toolBase.registry.dispatch.bind(toolBase.registry),
+    parentToolDefinitions: toolBase.registry.getDefinitions(),
+    defaultModel: model,
+    cwd: options.cwd,
+    pricingOverrides,
+  });
+  const workflowService = new WorkflowService({
+    runtime: new OrchestrationChildRuntime(orchestrationCore),
+    environment: options.environment,
+    homeRoot: options.home,
+  });
+  const visionRunner = createModelTransport();
+  const sessionTools = composeSessionTools({
+    base: toolBase,
+    home: options.home,
+    cwd: options.cwd,
+    environment: options.environment,
+    sessions,
+    workflowService,
+    orchestrationHandlers: orchestrationToolHandlers(orchestrationCore, clientPool),
+    visionRunner,
+    ...(imageGenerator === undefined ? {} : { imageGenerator }),
+    visionModel: model,
+    imageModel: model,
+    supportsVision: profile.supportsVision,
+  });
+  const toolRuntime = createGatewayToolRuntime(options.home, sessionTools.registry);
+
+  const closeResources = async (): Promise<void> => {
+    await orchestrationCore.shutdown(options.home);
+    await mcpManager?.shutdown();
+    await visionRunner.close();
+    await imageGenerator?.close();
+    connection.close();
+  };
 
   const routeContext: RouteContext = {
     expectedToken: token,
@@ -190,7 +288,7 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
       onUpgrade,
     });
   } catch (error) {
-    connection.close();
+    await closeResources();
     if (isAddressInUse(error)) return 3;
     throw error;
   }
@@ -200,8 +298,9 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
   return new Promise<number>((resolvePromise) => {
     const shutdown = (): void => {
       void server.close().finally(() => {
-        connection.close();
-        resolvePromise(0);
+        void closeResources().finally(() => {
+          resolvePromise(0);
+        });
       });
     };
     (options.registerShutdownTrigger ?? ((handler) => process.once("SIGINT", handler)))(shutdown);

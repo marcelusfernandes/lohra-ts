@@ -1,4 +1,8 @@
-import { spawn } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { spawn as spawnPty } from "node-pty";
 
 import { ApprovalManager, approval } from "./approval.js";
 import { pythonNumberKind } from "./arguments.js";
@@ -46,6 +50,29 @@ function timeoutMilliseconds(timeout: unknown): number | null {
   throw new TypeError(`invalid timeout: ${renderArgument(timeout)}`);
 }
 
+function quotePosix(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+function quoteWindows(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+function shellInvocation(
+  command: string,
+  stdoutPath: string,
+  stderrPath: string,
+): Readonly<{ executable: string; args: readonly string[] }> {
+  if (process.platform === "win32") {
+    const executable = process.env.ComSpec ?? "cmd.exe";
+    const wrapped = `(${command}) 1>${quoteWindows(stdoutPath)} 2>${quoteWindows(stderrPath)}`;
+    return { executable, args: ["/d", "/s", "/c", wrapped] };
+  }
+  const executable = process.env.SHELL ?? "/bin/sh";
+  const wrapped = `(${command}) 1>${quotePosix(stdoutPath)} 2>${quotePosix(stderrPath)}`;
+  return { executable, args: ["-lc", wrapped] };
+}
+
 export async function terminalTool(
   args: ToolArguments,
   options: TerminalOptions = {},
@@ -63,45 +90,56 @@ export async function terminalTool(
   const timeoutMs = timeoutMilliseconds(timeout);
   const cwd = args.cwd === undefined || args.cwd === null ? undefined : renderArgument(args.cwd);
 
+  const captureRoot = mkdtempSync(join(tmpdir(), "lohra-terminal-"));
+  const stdoutPath = join(captureRoot, "stdout");
+  const stderrPath = join(captureRoot, "stderr");
+  const invocation = shellInvocation(command, stdoutPath, stderrPath);
+
   return await new Promise<string>((resolve) => {
-    let stdout = "";
-    let stderr = "";
+    let ptyOutput = "";
     let timedOut = false;
-    let spawnError: Error | null = null;
-    const child = spawn(command, {
-      shell: true,
-      ...(cwd === undefined ? {} : { cwd }),
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      stdout = appendBounded(stdout, chunk);
-    });
-    child.stderr.on("data", (chunk: string) => {
-      stderr = appendBounded(stderr, chunk);
-    });
-    child.on("error", (error) => {
-      spawnError = error;
+    let settled = false;
+    let child;
+    try {
+      child = spawnPty(invocation.executable, [...invocation.args], {
+        cwd: cwd ?? process.cwd(),
+        env: process.env,
+        cols: 80,
+        rows: 24,
+        name: "xterm-256color",
+      });
+    } catch (error) {
+      rmSync(captureRoot, { recursive: true, force: true });
+      const detail = error instanceof Error ? error.message : String(error);
+      resolve(toolError(`could not run command: ${detail}`, { command }));
+      return;
+    }
+    child.onData((chunk) => {
+      ptyOutput = appendBounded(ptyOutput, chunk);
     });
     const timer =
       timeoutMs === null
         ? null
         : setTimeout(() => {
             timedOut = true;
-            child.kill("SIGKILL");
+            child.kill();
           }, timeoutMs);
-    child.on("close", (code) => {
+    child.onExit(({ exitCode }) => {
+      if (settled) return;
+      settled = true;
       if (timer !== null) clearTimeout(timer);
+      const stdout = existsSync(stdoutPath)
+        ? appendBounded("", readFileSync(stdoutPath, "utf8"))
+        : "";
+      const stderr = existsSync(stderrPath)
+        ? appendBounded("", readFileSync(stderrPath, "utf8"))
+        : ptyOutput;
+      rmSync(captureRoot, { recursive: true, force: true });
       if (timedOut) {
         resolve(toolError(`command timed out after ${timeoutLabel(args, timeout)}s`, { command }));
         return;
       }
-      if (spawnError !== null) {
-        resolve(toolError(`could not run command: ${spawnError.message}`, { command }));
-        return;
-      }
-      resolve(toolResult(undefined, { stdout, stderr, exit_code: code ?? 0 }));
+      resolve(toolResult(undefined, { stdout, stderr, exit_code: exitCode }));
     });
   });
 }

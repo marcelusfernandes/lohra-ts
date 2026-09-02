@@ -267,6 +267,13 @@ export class OrchestrationCore {
     return { kind: "settled", result };
   }
 
+  public cancel(subId: string): boolean {
+    const entry = this.entries.get(subId);
+    if (entry === undefined) return false;
+    entry.abortController.abort();
+    return true;
+  }
+
   /**
    * Cooperatively interrupts every tracked child (the same AbortSignal
    * machinery as the parent's own Ctrl-C, checked between iterations —

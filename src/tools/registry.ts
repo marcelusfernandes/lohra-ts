@@ -3,6 +3,7 @@ import type {
   ToolCheck,
   ToolDefinition,
   ToolEntry,
+  ToolHandler,
   ToolKwargs,
   ToolRegistration,
 } from "./types.js";
@@ -70,6 +71,17 @@ export class ToolRegistry {
 
   toolsetFor(name: string): string | null {
     return this.#entries.get(name)?.toolset ?? null;
+  }
+
+  /** Atomically replaces handlers without changing the public schemas or ownership. */
+  overrideHandlers(handlers: Readonly<Record<string, ToolHandler>>): void {
+    const next = new Map(this.#entries);
+    for (const [name, handler] of Object.entries(handlers)) {
+      const existing = next.get(name);
+      if (existing === undefined) throw new Error(`cannot override unknown tool '${name}'`);
+      next.set(name, Object.freeze({ ...existing, handler }));
+    }
+    this.#replaceEntries(next);
   }
 
   #registerInto(
