@@ -2,6 +2,7 @@ import { toolError, toolResult } from "../tools/envelope.js";
 import type { ToolArguments, ToolHandler } from "../tools/types.js";
 import type { WorkflowService } from "./service.js";
 import type { AuditRepository } from "../state/audit-repository.js";
+import { pythonJsonLoads } from "../serialization/python-json.js";
 import { parseAuditQuery } from "./audit-query.js";
 
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
@@ -75,7 +76,10 @@ export class WorkflowTool {
     const parsed = parseAuditQuery(args);
     if ("error" in parsed) return toolError(parsed.error);
     if (this.auditRepository === undefined) return toolError("workflow audit store is unavailable");
-    return toolResult(undefined, this.auditRepository.query(parsed.query));
+    const page = pythonJsonLoads(
+      JSON.stringify(this.auditRepository.query(parsed.query)),
+    ) as Readonly<Record<string, unknown>>;
+    return toolResult(undefined, page);
   }
 }
 

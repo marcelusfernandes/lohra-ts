@@ -18,6 +18,7 @@ import { AuditTrail } from "../src/workflow/audit-trail.js";
 import { WorkflowLiveEvents } from "../src/workflow/live-events.js";
 import { WorkflowService } from "../src/workflow/service.js";
 import type { ChildRuntime } from "../src/workflow/runtime.js";
+import { WorkflowTool } from "../src/workflow/tool.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -32,6 +33,27 @@ function database(options: ConstructorParameters<typeof AuditRepository>[1] = {}
 }
 
 describe("T17 metadata-only audit", () => {
+  it("serializes fractional audit timestamps through the public workflow tool", () => {
+    const { connection, audit } = database();
+    audit.append("fractional", { event_type: "node.started", created_at: 1.25 });
+    const runtime = {
+      spawn: () => "unused",
+      collect: () => ({ status: "complete", output: null, usage: null }),
+      steer: () => undefined,
+      cancel: () => undefined,
+    } as ChildRuntime;
+    const output = new WorkflowTool(new WorkflowService({ runtime }), audit).audit({
+      run_id: "fractional",
+    });
+    const parsed = JSON.parse(output) as {
+      readonly ok: boolean;
+      readonly events: readonly { readonly created_at: number }[];
+    };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.events[0]?.created_at).toBe(1.25);
+    connection.close();
+  });
+
   it("redacts every private raw field without leaking a unicode canary", () => {
     const canary = "PRIVATE-🔒-秘密";
     const safe = safeAuditMetadata({
