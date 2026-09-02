@@ -186,9 +186,10 @@ try {
         encoding: "utf8",
         env: cliEnvironment,
       });
-    const treeBefore = readdirSync(cliHome, { recursive: true }).map(String).sort();
+    const initialTree = readdirSync(cliHome, { recursive: true }).map(String).sort();
     const list = invokeCli(["workflow", "list"]);
     const unknown = invokeCli(["workflow", "audit", "unknown-run"]);
+    const treeBefore = readdirSync(cliHome, { recursive: true }).map(String).sort();
     const invalid = invokeCli(["workflow", "run"]);
     const treeAfter = readdirSync(cliHome, { recursive: true }).map(String).sort();
     const unknownBody = JSON.parse(unknown.stdout) as Readonly<Record<string, unknown>>;
@@ -206,6 +207,7 @@ try {
       );
     const cli = Object.freeze({
       environment: Object.freeze({ HOME: "<temporary>", PATH: "inherited", TZ: "UTC" }),
+      initialTree,
       treeBefore,
       treeAfter,
       commands: Object.freeze([
