@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
@@ -135,9 +135,21 @@ function child(databasePath: string): Promise<void> {
   });
 }
 
-const candidate = guardCandidate(root);
+const mutationSha = process.env.LOHRA_T17_MUTATION_ARCHIVE_SHA;
+const mutationId = process.env.LOHRA_T17_MUTATION_ID;
+const mutationMode = mutationSha !== undefined || mutationId !== undefined;
+if (
+  mutationMode &&
+  (mutationSha === undefined ||
+    mutationId === undefined ||
+    !/^[0-9a-f]{40}$/u.test(mutationSha) ||
+    existsSync(resolve(root, ".git")))
+)
+  throw new Error("invalid T17 mutation archive invocation");
+const candidate = mutationMode ? { sha: mutationSha as string } : guardCandidate(root);
+const ownsLock = !mutationMode;
 mkdirSync(evidenceDir, { recursive: true });
-acquireLock();
+if (ownsLock) acquireLock();
 const directory = mkdtempSync(resolve(tmpdir(), "lohra-t17-probe-"));
 try {
   const path = resolve(directory, "state.db");
@@ -171,16 +183,19 @@ try {
     );
     if (stale !== null || valid?.seq !== 1) throw new Error("stale fence probe failed");
     const sinkOutcomes = await probeSinkOutcomes(connection.database);
-    const tests = spawnSync(
-      resolve(root, "node_modules/.bin/vitest"),
-      ["run", "tests/workflow-audit-live.test.ts"],
-      { cwd: root, encoding: "utf8" },
-    );
-    if (tests.status !== 0)
-      throw new Error(`focused tests failed: ${tests.stdout}\n${tests.stderr}`);
-    const focusedMatch = /Tests\s+(\d+) passed/.exec(tests.stdout);
-    if (focusedMatch?.[1] === undefined) throw new Error("focused test count was not observable");
-    const focusedTests = Number.parseInt(focusedMatch[1], 10);
+    let focusedTests = 0;
+    if (!mutationMode) {
+      const tests = spawnSync(
+        resolve(root, "node_modules/.bin/vitest"),
+        ["run", "tests/workflow-audit-live.test.ts"],
+        { cwd: root, encoding: "utf8" },
+      );
+      if (tests.status !== 0)
+        throw new Error(`focused tests failed: ${tests.stdout}\n${tests.stderr}`);
+      const focusedMatch = /Tests\s+(\d+) passed/.exec(tests.stdout);
+      if (focusedMatch?.[1] === undefined) throw new Error("focused test count was not observable");
+      focusedTests = Number.parseInt(focusedMatch[1], 10);
+    }
     const cliHome = resolve(directory, "home");
     mkdirSync(cliHome, { recursive: true });
     const cliEnvironment = { HOME: cliHome, PATH: process.env.PATH ?? "", TZ: "UTC" };
@@ -262,5 +277,5 @@ try {
   }
 } finally {
   rmSync(directory, { recursive: true, force: true });
-  releaseLock();
+  if (ownsLock) releaseLock();
 }

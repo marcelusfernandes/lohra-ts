@@ -22,6 +22,7 @@ interface Mutant {
   readonly assertion: string;
   readonly test: string;
   readonly cause: string;
+  readonly externalCause?: string;
   readonly edits: readonly Edit[];
 }
 const auditModel = "src/workflow/audit-model.ts";
@@ -93,6 +94,7 @@ const mutants: readonly Mutant[] = [
     assertion: "B1",
     test: "rolls back sequence allocation",
     cause: "MUTATION_CAUSE:M5-nontransactional-seq",
+    externalCause: "cross-process sequence is not dense",
     edits: [
       {
         file: repository,
@@ -112,6 +114,7 @@ const mutants: readonly Mutant[] = [
     assertion: "B8",
     test: "rejects a stale fence",
     cause: "MUTATION_CAUSE:M6-fence-ignored",
+    externalCause: "stale fence probe failed",
     edits: [
       {
         file: repository,
@@ -151,6 +154,7 @@ const mutants: readonly Mutant[] = [
     assertion: "D5",
     test: "exposes only list/watch/audit",
     cause: "MUTATION_CAUSE:M9-workflow-run-accepted",
+    externalCause: "CLI probe failed",
     edits: [
       {
         file: argSpec,
@@ -200,8 +204,18 @@ const mutants: readonly Mutant[] = [
   },
 ];
 
-function run(cwd: string, executable: string, args: readonly string[]) {
-  return spawnSync(executable, [...args], { cwd, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+function run(
+  cwd: string,
+  executable: string,
+  args: readonly string[],
+  environment: Readonly<Record<string, string>> = {},
+) {
+  return spawnSync(executable, [...args], {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+    env: { ...process.env, ...environment },
+  });
 }
 
 function replaceExact(path: string, edit: Edit): void {
@@ -252,7 +266,23 @@ try {
         : compile;
     const output = `${test.stdout}\n${test.stderr}`;
     const causeVisible = output.includes(mutant.cause);
-    const killed = compile.status === 0 && test.status !== 0 && causeVisible;
+    const external =
+      compile.status === 0 && mutant.externalCause !== undefined
+        ? run(
+            copy,
+            resolve(root, "node_modules/.bin/tsx"),
+            ["scripts/parity/workflow-audit-live/probe.ts"],
+            {
+              LOHRA_T17_MUTATION_ARCHIVE_SHA: candidate.sha,
+              LOHRA_T17_MUTATION_ID: mutant.id,
+            },
+          )
+        : null;
+    const externalOutput = external === null ? "" : `${external.stdout}\n${external.stderr}`;
+    const externalPassed =
+      mutant.externalCause === undefined ||
+      (external?.status !== 0 && externalOutput.includes(mutant.externalCause));
+    const killed = compile.status === 0 && test.status !== 0 && causeVisible && externalPassed;
     observations.push({
       id: mutant.id,
       assertion: mutant.assertion,
@@ -261,7 +291,18 @@ try {
       exit: test.status,
       killed,
       causeVisible,
-      observation: output.slice(-1_000),
+      external: Object.freeze({
+        required: mutant.externalCause !== undefined,
+        command:
+          mutant.externalCause === undefined
+            ? null
+            : "tsx scripts/parity/workflow-audit-live/probe.ts",
+        exit: external?.status ?? null,
+        cause: mutant.externalCause ?? null,
+        causeVisible:
+          mutant.externalCause === undefined || externalOutput.includes(mutant.externalCause),
+      }),
+      observation: `${output}\n${externalOutput}`.slice(-1_500),
     });
   }
   const survivors = observations.filter((item) => !item.killed);
