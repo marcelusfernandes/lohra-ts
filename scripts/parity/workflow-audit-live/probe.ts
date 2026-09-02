@@ -5,13 +5,12 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
+import { createChatToolRegistry } from "../../../src/commands/chat-tools.js";
 import { AuditRepository } from "../../../src/state/audit-repository.js";
 import { openStateDatabase } from "../../../src/state/connection.js";
 import type { Ownership } from "../../../src/state/workflow-repository.js";
-import { createBuiltinRegistry } from "../../../src/tools/builtins.js";
 import { AuditTrail } from "../../../src/workflow/audit-trail.js";
 import { safeAuditMetadata, type AuditInput } from "../../../src/workflow/audit-model.js";
-import { workflowAuditHandler } from "../../../src/workflow/tool.js";
 import { canonicalJson } from "../canonical.js";
 import { acquireLock, guardCandidate, releaseLock } from "./support.js";
 
@@ -124,12 +123,18 @@ async function probeRoundOneRegressions(
 ): Promise<Readonly<Record<string, unknown>>> {
   const repository = new AuditRepository(database);
   repository.append("public-audit", { event_type: "node.started", created_at: 1 });
-  const registry = createBuiltinRegistry({
-    workflow_audit: workflowAuditHandler(repository),
-  });
-  const publicResult = JSON.parse(
-    await registry.dispatch("workflow_audit", { run_id: "public-audit" }),
-  ) as Readonly<Record<string, unknown>>;
+  const registry = createChatToolRegistry(database, {});
+  let publicResult: Readonly<Record<string, unknown>>;
+  try {
+    publicResult = JSON.parse(
+      await registry.dispatch("workflow_audit", { run_id: "public-audit" }),
+    ) as Readonly<Record<string, unknown>>;
+  } catch (error) {
+    throw new Error(
+      `public audit registry probe failed: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
   if (publicResult.ok !== true || !Array.isArray(publicResult.events))
     throw new Error("public audit registry probe failed");
 
@@ -168,6 +173,46 @@ async function probeRoundOneRegressions(
   if (markerStates.some((state) => state !== "excluded_by_policy"))
     throw new Error(`raw marker probe failed: ${JSON.stringify(markerStates)}`);
 
+  repository.append("binary-marker", {
+    event_type: "node.completed",
+    payload: { result: new Uint8Array(42) },
+    created_at: 3,
+  });
+  const binaryStored = JSON.parse(
+    String(
+      (
+        database
+          .prepare("SELECT payload_json FROM workflow_audit_events WHERE run_id=?")
+          .get("binary-marker") as Readonly<Record<string, unknown>>
+      ).payload_json,
+    ),
+  ) as { readonly data: Readonly<Record<string, unknown>> };
+  const binaryReturned = repository.query({ runId: "binary-marker" }).events[0]?.data.result;
+  if (
+    JSON.stringify(binaryStored.data.result) !==
+      JSON.stringify({ state: "excluded_by_policy", bytes: 42 }) ||
+    JSON.stringify(binaryReturned) !== JSON.stringify(binaryStored.data.result)
+  )
+    throw new Error(
+      `raw marker idempotence probe failed: ${JSON.stringify({ stored: binaryStored.data.result, returned: binaryReturned })}`,
+    );
+
+  const sharedRunPrefix = "r".repeat(160);
+  const leftRun = `${sharedRunPrefix}-left`;
+  const rightRun = `${sharedRunPrefix}-right`;
+  repository.append(leftRun, { event_type: "node.started", created_at: 4 });
+  repository.append(rightRun, { event_type: "leaf.failed", created_at: 5 });
+  const distinctRuns = database
+    .prepare("SELECT run_id FROM workflow_audit_state WHERE run_id LIKE 'rrrr%' ORDER BY run_id")
+    .all() as readonly { readonly run_id: string }[];
+  if (
+    distinctRuns.length !== 2 ||
+    distinctRuns[0]?.run_id === distinctRuns[1]?.run_id ||
+    repository.query({ runId: leftRun }).events[0]?.event_type !== "node.started" ||
+    repository.query({ runId: rightRun }).events[0]?.event_type !== "leaf.failed"
+  )
+    throw new Error(`bounded run identity collision probe failed: ${JSON.stringify(distinctRuns)}`);
+
   let release!: () => void;
   const gate = new Promise<void>((resolveGate) => {
     release = resolveGate;
@@ -187,17 +232,64 @@ async function probeRoundOneRegressions(
   } as unknown as AuditRepository;
   const trail = new AuditTrail(controlled, { capacity: 1, retryDelayMs: 0, sleep: () => gate });
   trail.record("causal", { event_type: "node.started" });
+  await Promise.resolve();
   trail.record("causal", { event_type: "node.completed" });
   trail.record("causal", { event_type: "node.failed" });
   release();
   if (!(await trail.flush()) || causalOrder.join(",") !== "node.started,node.completed,audit.gap")
     throw new Error(`causal overflow probe failed: ${causalOrder.join(",")}`);
 
+  let releaseEpoch!: () => void;
+  const epochGate = new Promise<void>((resolveGate) => {
+    releaseEpoch = resolveGate;
+  });
+  let blockEpoch = true;
+  let reenteredEpoch = false;
+  const epochOrder: string[] = [];
+  let enqueueEpoch = (): void => undefined;
+  const epochRepository = {
+    append: (_runId: string, input: AuditInput) => {
+      if (blockEpoch) {
+        blockEpoch = false;
+        throw new Error("database is locked");
+      }
+      epochOrder.push(input.event_type);
+      if (input.event_type === "node.completed" && !reenteredEpoch) {
+        reenteredEpoch = true;
+        enqueueEpoch();
+      }
+      return {} as never;
+    },
+    isBusyError: (error: unknown) => error instanceof Error && /locked/.test(error.message),
+  } as unknown as AuditRepository;
+  const epochTrail = new AuditTrail(epochRepository, {
+    capacity: 1,
+    retryDelayMs: 0,
+    sleep: () => epochGate,
+  });
+  enqueueEpoch = () => {
+    epochTrail.record("epochs", { event_type: "leaf.started" });
+    epochTrail.record("epochs", { event_type: "leaf.failed" });
+  };
+  epochTrail.record("epochs", { event_type: "node.started" });
+  await Promise.resolve();
+  epochTrail.record("epochs", { event_type: "node.completed" });
+  epochTrail.record("epochs", { event_type: "node.failed" });
+  releaseEpoch();
+  if (
+    !(await epochTrail.flush()) ||
+    epochOrder.join(",") !== "node.started,node.completed,audit.gap,leaf.started,audit.gap"
+  )
+    throw new Error(`overflow epochs probe failed: ${epochOrder.join(",")}`);
+
   return Object.freeze({
     publicRegistry: true,
     identityLengths: Object.freeze(identityLengths),
     markerStates: Object.freeze(markerStates),
+    binaryMarker: binaryReturned,
+    distinctBoundedRuns: distinctRuns.length,
     causalOrder: Object.freeze(causalOrder),
+    epochOrder: Object.freeze(epochOrder),
   });
 }
 

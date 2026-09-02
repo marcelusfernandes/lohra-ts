@@ -27,19 +27,17 @@ import {
   type ProviderProfile,
 } from "../providers/index.js";
 import { pythonJsonDumpsInsertionOrder } from "../serialization/python-json.js";
-import { AuditRepository, openStateForEnvironment, SessionRepository } from "../state/index.js";
+import { openStateForEnvironment, SessionRepository } from "../state/index.js";
 import { SkillStore } from "../skills/index.js";
 import {
   approval,
   composeDispatch,
-  createBuiltinRegistry,
   ListModelsTool,
   MemoryTool,
   RegistryToolDispatcher,
   SessionSearchTool,
   SkillTool,
 } from "../tools/index.js";
-import { workflowAuditHandler } from "../workflow/tool.js";
 import {
   AnthropicMessagesClient,
   buildClient,
@@ -48,6 +46,7 @@ import {
 } from "../transports/index.js";
 import type { ModelTransport } from "../conversation/index.js";
 import { runChatBoundary } from "./chat-boundary.js";
+import { createChatToolRegistry } from "./chat-tools.js";
 
 export interface ChatCommandOptions {
   // Both already resolved by cli.ts's single parseCommand(CHAT_SPEC, ...)
@@ -194,12 +193,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   const maxIterations = finite(stringFlag(options.flags, "--max-iterations"), "max-iterations");
   const connection = openStateForEnvironment(options.environment);
   const sessions = new SessionRepository(connection.database, undefined, connection.ftsEnabled);
-  const auditRepository = new AuditRepository(connection.database, {
-    environment: options.environment,
-  });
-  const sessionRegistry = createBuiltinRegistry({
-    workflow_audit: workflowAuditHandler(auditRepository),
-  });
+  const sessionRegistry = createChatToolRegistry(connection.database, options.environment);
   const repository = new SqliteConversationRepository(sessions);
   const useTools = !options.flags.has("--no-tools");
   const memoryStore = new MemoryStore(options.home);

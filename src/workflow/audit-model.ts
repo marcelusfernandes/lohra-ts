@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export const AUDIT_MODE = "metadata_only" as const;
 export const AUDIT_QUEUE_CAPACITY = 256;
 export const AUDIT_EVENT_BYTES = 2_048;
@@ -154,6 +156,12 @@ function clipped(value: string, limit: number): string {
   return Array.from(value).slice(0, limit).join("");
 }
 
+function boundedRunId(value: string): string {
+  if (Array.from(value).length <= 128) return value;
+  const digest = createHash("sha256").update(value).digest("hex").slice(0, 32);
+  return `${clipped(value, 95)}~${digest}`;
+}
+
 function rawMarker(value: unknown): AuditMarker {
   if (typeof value === "string")
     return Object.freeze({
@@ -161,7 +169,7 @@ function rawMarker(value: unknown): AuditMarker {
       characters: Math.min(Array.from(value).length, 256),
     });
   if (value instanceof Uint8Array)
-    return Object.freeze({ state: "unavailable", bytes: value.byteLength });
+    return Object.freeze({ state: "excluded_by_policy", bytes: value.byteLength });
   if (Array.isArray(value))
     return Object.freeze({ state: "excluded_by_policy", items: Math.min(value.length, 256) });
   if (value !== null && typeof value === "object")
@@ -182,6 +190,11 @@ function marker(value: Readonly<Record<string, unknown>>): AuditMarker | null {
     if (typeof value[key] === "number" && Number.isFinite(value[key]))
       out[key] = Math.max(0, Math.trunc(value[key]));
   if (value.side === "depth") out.side = "depth";
+  if (
+    typeof value.original_event_type === "string" &&
+    SAFE_EVENT_TYPES.has(value.original_event_type)
+  )
+    out.original_event_type = value.original_event_type;
   return Object.freeze(out);
 }
 
@@ -299,7 +312,7 @@ export function publicAuditEvent(
     schema_version: 1,
     event_type: "audit.truncated",
     provenance: "truncated",
-    identity: Object.freeze({ run_id: clipped(runId, 128) }),
+    identity: Object.freeze({ run_id: boundedRunId(runId) }),
     data: Object.freeze({
       state: "truncated",
       original_bytes: bytes,
@@ -316,7 +329,7 @@ export function publicAuditIdentity(
   input: Pick<AuditInput, "segment_id" | "node_id" | "sub_id" | "attempt">,
 ): Readonly<Record<string, unknown>> {
   return Object.freeze({
-    run_id: clipped(runId, 128),
+    run_id: boundedRunId(runId),
     ...(input.segment_id === undefined || input.segment_id === null
       ? {}
       : { segment_id: clipped(input.segment_id, 128) }),

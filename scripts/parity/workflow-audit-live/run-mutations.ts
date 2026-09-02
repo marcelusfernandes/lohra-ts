@@ -32,7 +32,7 @@ const live = "src/workflow/live-events.ts";
 const argSpec = "src/cli/arg-spec.ts";
 const cli = "src/cli.ts";
 const service = "src/workflow/service.ts";
-const builtins = "src/tools/builtins.ts";
+const chatTools = "src/commands/chat-tools.ts";
 
 const mutants: readonly Mutant[] = [
   {
@@ -211,9 +211,10 @@ const mutants: readonly Mutant[] = [
     externalCause: "public audit registry probe failed",
     edits: [
       {
-        file: builtins,
-        before: "handler: overrides[name] ?? handler(name),",
-        after: "handler: handler(name),",
+        file: chatTools,
+        before:
+          "  return createBuiltinRegistry({\n    workflow_audit: workflowAuditHandler(auditRepository),\n  });",
+        after: "  void auditRepository;\n  return createBuiltinRegistry();",
       },
     ],
   },
@@ -260,6 +261,63 @@ const mutants: readonly Mutant[] = [
         before:
           "      if (marker !== undefined && (next === undefined || marker[1].order < next.order)) {",
         after: "      if (marker !== undefined) {",
+      },
+    ],
+  },
+  {
+    id: "M16-binary-marker-idempotence",
+    assertion: "A1/A3",
+    test: "keeps binary raw-field markers stable across the SQLite read boundary",
+    cause: "MUTATION_CAUSE:M16-binary-marker-idempotence",
+    externalCause: "raw marker idempotence probe failed",
+    edits: [
+      {
+        file: auditModel,
+        before: 'return Object.freeze({ state: "excluded_by_policy", bytes: value.byteLength });',
+        after: 'return Object.freeze({ state: "unavailable", bytes: value.byteLength });',
+      },
+    ],
+  },
+  {
+    id: "M17-overflow-epochs",
+    assertion: "C4",
+    test: "separates overflow gaps when an accepted event starts a new loss epoch",
+    cause: "MUTATION_CAUSE:M17-overflow-epochs",
+    externalCause: "overflow epochs probe failed",
+    edits: [
+      {
+        file: auditTrail,
+        before:
+          "const acceptedSincePrior = (this.lastAcceptedOrder.get(runId) ?? 0) > (prior?.order ?? 0);",
+        after: "const acceptedSincePrior = false;",
+      },
+    ],
+  },
+  {
+    id: "M18-run-id-collision",
+    assertion: "A3/B1",
+    test: "keeps overlong run identifiers distinct after applying the public bound",
+    cause: "MUTATION_CAUSE:M18-run-id-collision",
+    externalCause: "bounded run identity collision probe failed",
+    edits: [
+      {
+        file: auditModel,
+        before:
+          'function boundedRunId(value: string): string {\n  if (Array.from(value).length <= 128) return value;\n  const digest = createHash("sha256").update(value).digest("hex").slice(0, 32);\n  return `${clipped(value, 95)}~${digest}`;\n}',
+        after: "function boundedRunId(value: string): string {\n  return clipped(value, 128);\n}",
+      },
+    ],
+  },
+  {
+    id: "M19-reentrant-drain",
+    assertion: "B1/C4",
+    test: "prevents a reentrant record from starting a concurrent drain",
+    cause: "MUTATION_CAUSE:M19-reentrant-drain",
+    edits: [
+      {
+        file: auditTrail,
+        before: "const task = Promise.resolve().then(() => this.drain());",
+        after: "const task = this.drain();",
       },
     ],
   },

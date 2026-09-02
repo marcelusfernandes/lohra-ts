@@ -17,7 +17,12 @@ type Queued = Readonly<{
   ownership?: Ownership;
 }>;
 type AppendOutcome = "saved" | "refused" | "failed";
-type DropBucket = Readonly<{ order: number; count: number; ownership?: Ownership }>;
+type DropBucket = Readonly<{
+  order: number;
+  runId: string;
+  count: number;
+  ownership?: Ownership;
+}>;
 
 export class AuditTrail {
   private readonly queue: Queued[] = [];
@@ -29,7 +34,8 @@ export class AuditTrail {
   private running: Promise<void> | null = null;
   private closing = false;
   private stopped = false;
-  private readonly dropped = new Map<string, DropBucket>();
+  private readonly dropped: DropBucket[] = [];
+  private readonly lastAcceptedOrder = new Map<string, number>();
   private nextOrder = 1;
 
   public constructor(
@@ -82,6 +88,7 @@ export class AuditTrail {
             ...(ownership === undefined ? {} : { ownership }),
           }),
         );
+        this.lastAcceptedOrder.set(runId, order);
         this.kick();
       } else this.markDropped(order, runId, ownership);
       return false;
@@ -100,13 +107,14 @@ export class AuditTrail {
         ...(ownership === undefined ? {} : { ownership }),
       }),
     );
+    this.lastAcceptedOrder.set(runId, order);
     this.kick();
     return true;
   }
 
   public async flush(timeoutMs = 5_000): Promise<boolean> {
     const deadline = Date.now() + Math.max(0, timeoutMs);
-    while (this.running !== null || this.queue.length > 0 || this.dropped.size > 0) {
+    while (this.running !== null || this.queue.length > 0 || this.dropped.length > 0) {
       this.kick();
       const pending = this.running;
       if (pending === null) break;
@@ -124,11 +132,11 @@ export class AuditTrail {
   }
 
   private async drain(): Promise<void> {
-    while (!this.closing || this.queue.length > 0 || this.dropped.size > 0) {
+    while (!this.closing || this.queue.length > 0 || this.dropped.length > 0) {
       const next = this.queue[0];
       const marker = this.earliestDropped();
-      if (marker !== undefined && (next === undefined || marker[1].order < next.order)) {
-        if (!(await this.flushDropped(marker[0]))) return;
+      if (marker !== undefined && (next === undefined || marker.order < next.order)) {
+        if (!(await this.flushDropped(marker))) return;
         continue;
       }
       if (next === undefined) return;
@@ -150,28 +158,32 @@ export class AuditTrail {
     }
   }
 
-  private earliestDropped(): readonly [string, DropBucket] | undefined {
-    let earliest: readonly [string, DropBucket] | undefined;
+  private earliestDropped(): DropBucket | undefined {
+    let earliest: DropBucket | undefined;
     for (const entry of this.dropped)
-      if (earliest === undefined || entry[1].order < earliest[1].order) earliest = entry;
+      if (earliest === undefined || entry.order < earliest.order) earliest = entry;
     return earliest;
   }
 
-  private async flushDropped(runId: string): Promise<boolean> {
-    const marker = this.dropped.get(runId);
-    if (marker === undefined) return true;
+  private async flushDropped(marker: DropBucket): Promise<boolean> {
     const gap: AuditInput = Object.freeze({
       event_type: "audit.gap",
       provenance: "dropped",
       payload: Object.freeze({ reason: "queue_overflow", dropped_count: marker.count }),
     });
-    const outcome = await this.append(runId, gap, marker.ownership);
+    const outcome = await this.append(marker.runId, gap, marker.ownership);
     if (outcome === "failed") {
       this.stopped = true;
-      this.warning(`audit sink failed permanently for run ${runId}`);
+      this.warning(`audit sink failed permanently for run ${marker.runId}`);
       return false;
     }
-    this.dropped.delete(runId);
+    const index = this.dropped.indexOf(marker);
+    if (index >= 0) this.dropped.splice(index, 1);
+    if (
+      !this.dropped.some((entry) => entry.runId === marker.runId) &&
+      !this.queue.some((entry) => entry.runId === marker.runId)
+    )
+      this.lastAcceptedOrder.delete(marker.runId);
     return true;
   }
 
@@ -179,14 +191,14 @@ export class AuditTrail {
     if (
       this.running !== null ||
       this.stopped ||
-      (this.queue.length === 0 && this.dropped.size === 0)
+      (this.queue.length === 0 && this.dropped.length === 0)
     )
       return;
-    const task = this.drain();
+    const task = Promise.resolve().then(() => this.drain());
     this.running = task;
     void task.finally(() => {
       if (this.running === task) this.running = null;
-      if ((this.queue.length > 0 || this.dropped.size > 0) && !this.stopped) this.kick();
+      if ((this.queue.length > 0 || this.dropped.length > 0) && !this.stopped) this.kick();
     });
   }
 
@@ -212,16 +224,19 @@ export class AuditTrail {
   }
 
   private markDropped(order: number, runId: string, ownership?: Ownership): void {
-    const prior = this.dropped.get(runId);
-    const markerOwnership = prior?.ownership ?? ownership;
-    this.dropped.set(
+    const priorIndex = this.dropped.findLastIndex((entry) => entry.runId === runId);
+    const prior = priorIndex < 0 ? undefined : this.dropped[priorIndex];
+    const acceptedSincePrior = (this.lastAcceptedOrder.get(runId) ?? 0) > (prior?.order ?? 0);
+    const markerOwnership =
+      prior === undefined || acceptedSincePrior ? ownership : (prior.ownership ?? ownership);
+    const marker = Object.freeze({
+      order: prior === undefined || acceptedSincePrior ? order : Math.min(prior.order, order),
       runId,
-      Object.freeze({
-        order: Math.min(prior?.order ?? order, order),
-        count: (prior?.count ?? 0) + 1,
-        ...(markerOwnership === undefined ? {} : { ownership: markerOwnership }),
-      }),
-    );
+      count: prior === undefined || acceptedSincePrior ? 1 : prior.count + 1,
+      ...(markerOwnership === undefined ? {} : { ownership: markerOwnership }),
+    });
+    if (prior === undefined || acceptedSincePrior) this.dropped.push(marker);
+    else this.dropped[priorIndex] = marker;
   }
 
   private async withTimeout(pending: Promise<void>, timeoutMs: number): Promise<boolean> {

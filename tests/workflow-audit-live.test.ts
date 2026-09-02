@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { runCli, type CliIo } from "../src/cli.js";
+import { createChatToolRegistry } from "../src/commands/chat-tools.js";
 import { AuditRepository } from "../src/state/audit-repository.js";
 import { openStateDatabase } from "../src/state/connection.js";
-import { createBuiltinRegistry } from "../src/tools/builtins.js";
 import {
   AUDIT_EVENT_BYTES,
   AUDIT_EVENTS_PER_RUN,
@@ -19,7 +19,7 @@ import { AuditTrail } from "../src/workflow/audit-trail.js";
 import { WorkflowLiveEvents } from "../src/workflow/live-events.js";
 import { WorkflowService } from "../src/workflow/service.js";
 import type { ChildRuntime } from "../src/workflow/runtime.js";
-import { WorkflowTool, workflowAuditHandler } from "../src/workflow/tool.js";
+import { WorkflowTool } from "../src/workflow/tool.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -38,9 +38,7 @@ describe("T17 metadata-only audit", () => {
     const { connection, audit } = database();
     try {
       audit.append("public-audit", { event_type: "node.started", created_at: 1 });
-      const registry = createBuiltinRegistry({
-        workflow_audit: workflowAuditHandler(audit),
-      });
+      const registry = createChatToolRegistry(connection.database, {});
       const output = JSON.parse(
         await registry.dispatch("workflow_audit", { run_id: "public-audit" }),
       ) as {
@@ -130,6 +128,38 @@ describe("T17 metadata-only audit", () => {
     expect(
       safeAuditMetadata({ prompt: { state: "excluded_by_policy", characters: 7 } }).prompt,
     ).toEqual({ state: "excluded_by_policy", characters: 7 });
+  });
+
+  it("keeps binary raw-field markers stable across the SQLite read boundary", () => {
+    const { connection, audit } = database();
+    try {
+      audit.append("binary", {
+        event_type: "node.completed",
+        payload: { result: new Uint8Array(42) },
+        created_at: 1,
+      });
+      const stored = JSON.parse(
+        String(
+          (
+            connection.database
+              .prepare("SELECT payload_json FROM workflow_audit_events WHERE run_id=?")
+              .get("binary") as Readonly<Record<string, unknown>>
+          ).payload_json,
+        ),
+      ) as { readonly data: Readonly<Record<string, unknown>> };
+      const returned = audit.query({ runId: "binary" });
+      expect(stored.data.result, "MUTATION_CAUSE:M16-binary-marker-idempotence").toEqual({
+        state: "excluded_by_policy",
+        bytes: 42,
+      });
+      expect(
+        returned.events[0]?.data.result,
+        "MUTATION_CAUSE:M16-binary-marker-idempotence",
+      ).toEqual(stored.data.result);
+      expect(returned.integrity.field_markers).toMatchObject({ excluded_by_policy: 1 });
+    } finally {
+      connection.close();
+    }
   });
 
   it("persists attempt and paginates only matching audit events", () => {
@@ -259,6 +289,31 @@ describe("T17 SQLite audit read model", () => {
       expect(
         connection.database.prepare("SELECT length(run_id) AS n FROM workflow_audit_state").get(),
       ).toEqual({ n: 128n });
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("keeps overlong run identifiers distinct after applying the public bound", () => {
+    const { connection, audit } = database();
+    try {
+      const shared = "r".repeat(160);
+      const left = `${shared}-left`;
+      const right = `${shared}-right`;
+      audit.append(left, { event_type: "node.started", created_at: 1 });
+      audit.append(right, { event_type: "leaf.failed", created_at: 2 });
+      const stored = connection.database
+        .prepare("SELECT run_id FROM workflow_audit_state ORDER BY run_id")
+        .all() as readonly { readonly run_id: string }[];
+      expect(stored, "MUTATION_CAUSE:M18-run-id-collision").toHaveLength(2);
+      expect(stored[0]?.run_id).not.toBe(stored[1]?.run_id);
+      expect(stored.every((row) => Array.from(row.run_id).length === 128)).toBe(true);
+      expect(audit.query({ runId: left }).events.map((event) => event.event_type)).toEqual([
+        "node.started",
+      ]);
+      expect(audit.query({ runId: right }).events.map((event) => event.event_type)).toEqual([
+        "leaf.failed",
+      ]);
     } finally {
       connection.close();
     }
@@ -538,6 +593,7 @@ describe("T17 live events and sink failures", () => {
     } as unknown as AuditRepository;
     const trail = new AuditTrail(repo, { capacity: 1, retryDelayMs: 0, sleep: () => gate });
     expect(trail.record("run-x", { event_type: "one" })).toBe(true);
+    await Promise.resolve();
     expect(trail.record("run-y", { event_type: "two" })).toBe(true);
     expect(trail.record("run-x", { event_type: "three" })).toBe(false);
     release();
@@ -566,6 +622,7 @@ describe("T17 live events and sink failures", () => {
     } as unknown as AuditRepository;
     const trail = new AuditTrail(repo, { capacity: 1, retryDelayMs: 0, sleep: () => gate });
     expect(trail.record("causal", { event_type: "node.started" })).toBe(true);
+    await Promise.resolve();
     expect(trail.record("causal", { event_type: "node.completed" })).toBe(true);
     expect(trail.record("causal", { event_type: "node.failed" })).toBe(false);
     release();
@@ -575,6 +632,85 @@ describe("T17 live events and sink failures", () => {
       "node.completed",
       "audit.gap",
     ]);
+  });
+
+  it("separates overflow gaps when an accepted event starts a new loss epoch", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let first = true;
+    let reentered = false;
+    const events: string[] = [];
+    let enqueueEpoch = (): void => undefined;
+    const repo = {
+      append: (_runId: string, input: { event_type: string }) => {
+        if (first) {
+          first = false;
+          throw new Error("database is locked");
+        }
+        events.push(input.event_type);
+        if (input.event_type === "node.completed" && !reentered) {
+          reentered = true;
+          enqueueEpoch();
+        }
+        return {} as never;
+      },
+      isBusyError: (error: unknown) => error instanceof Error && /locked/.test(error.message),
+    } as unknown as AuditRepository;
+    const trail = new AuditTrail(repo, {
+      capacity: 1,
+      retryDelayMs: 0,
+      sleep: () => gate,
+    });
+    enqueueEpoch = () => {
+      expect(trail.record("epochs", { event_type: "leaf.started" })).toBe(true);
+      expect(trail.record("epochs", { event_type: "leaf.failed" })).toBe(false);
+    };
+
+    expect(trail.record("epochs", { event_type: "node.started" })).toBe(true);
+    await Promise.resolve();
+    expect(trail.record("epochs", { event_type: "node.completed" })).toBe(true);
+    expect(trail.record("epochs", { event_type: "node.failed" })).toBe(false);
+    release();
+    expect(await trail.flush()).toBe(true);
+    expect(events, "MUTATION_CAUSE:M17-overflow-epochs").toEqual([
+      "node.started",
+      "node.completed",
+      "audit.gap",
+      "leaf.started",
+      "audit.gap",
+    ]);
+  });
+
+  it("prevents a reentrant record from starting a concurrent drain", async () => {
+    let enqueueReentrant = (): void => undefined;
+    let active = 0;
+    let maximumActive = 0;
+    let reentered = false;
+    const events: string[] = [];
+    const repo = {
+      append: (_runId: string, input: { event_type: string }) => {
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        events.push(input.event_type);
+        if (!reentered) {
+          reentered = true;
+          enqueueReentrant();
+        }
+        active -= 1;
+        return {} as never;
+      },
+      isBusyError: () => false,
+    } as unknown as AuditRepository;
+    const trail = new AuditTrail(repo);
+    enqueueReentrant = () => {
+      expect(trail.record("reentrant", { event_type: "node.completed" })).toBe(true);
+    };
+    expect(trail.record("reentrant", { event_type: "node.started" })).toBe(true);
+    expect(await trail.flush()).toBe(true);
+    expect(maximumActive, "MUTATION_CAUSE:M19-reentrant-drain").toBe(1);
+    expect(events).toEqual(["node.started", "node.completed"]);
   });
 
   it("audits every pipeline width even when the live surface throttles intermediates", async () => {
