@@ -1,11 +1,13 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import { runCli, type CliIo } from "../src/cli.js";
-import { createChatSessionRegistry } from "../src/commands/chat.js";
+import { createChatSessionRegistry, runChat } from "../src/commands/chat.js";
+import { registerProvider } from "../src/providers/registry.js";
 import { AuditRepository } from "../src/state/audit-repository.js";
 import { openStateDatabase } from "../src/state/connection.js";
 import {
@@ -33,6 +35,15 @@ function database(options: ConstructorParameters<typeof AuditRepository>[1] = {}
   return { root, connection, audit: new AuditRepository(connection.database, options) };
 }
 
+function closeServer(server: Server): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.close((error) => {
+      if (error === undefined) resolve();
+      else reject(error);
+    });
+  });
+}
+
 describe("T17 metadata-only audit", () => {
   it("installs workflow_audit in the same session registry used by public chat", async () => {
     const { connection, audit } = database();
@@ -49,6 +60,110 @@ describe("T17 metadata-only audit", () => {
       expect(output.events.map((event) => event.event_type)).toEqual(["node.started"]);
     } finally {
       connection.close();
+    }
+  });
+
+  it("routes workflow_audit through the actual runChat composition root", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-t17-public-chat-"));
+    roots.push(root);
+    const state = openStateDatabase(join(root, ".lohra", "state.db"));
+    new AuditRepository(state.database).append("public-audit", {
+      event_type: "node.started",
+      created_at: 1,
+    });
+    state.close();
+
+    const requests: Record<string, unknown>[] = [];
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+        requests.push(body);
+        const first = requests.length === 1;
+        const payload = {
+          id: `chatcmpl-t17-${String(requests.length)}`,
+          object: "chat.completion",
+          created: 0,
+          model: "t17-audit-model",
+          choices: [
+            {
+              index: 0,
+              message: first
+                ? {
+                    role: "assistant",
+                    content: null,
+                    tool_calls: [
+                      {
+                        id: "call-t17-audit",
+                        type: "function",
+                        function: {
+                          name: "workflow_audit",
+                          arguments: '{"run_id":"public-audit"}',
+                        },
+                      },
+                    ],
+                  }
+                : { role: "assistant", content: "audit complete" },
+              finish_reason: first ? "tool_calls" : "stop",
+            },
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: 1 },
+        };
+        const text = JSON.stringify(payload);
+        response.writeHead(200, {
+          "content-type": "application/json",
+          "content-length": String(Buffer.byteLength(text)),
+        });
+        response.end(text);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("missing test port");
+      const provider = "t17-audit-chat-probe";
+      registerProvider({
+        name: provider,
+        apiMode: "chat_completions",
+        aliases: [],
+        displayName: "T17 audit chat probe",
+        description: "Local in-memory composition-root probe.",
+        signupUrl: "",
+        envVars: [],
+        baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
+        modelsUrl: "",
+        requiresApiKey: false,
+        supportsVision: false,
+        fallbackModels: ["t17-audit-model"],
+        defaultMaxTokens: 256,
+        defaultAuxModel: "",
+      });
+      const result = await runChat({
+        input: "inspect public-audit",
+        flags: new Map<string, string | true>([
+          ["--provider", provider],
+          ["--model", "t17-audit-model"],
+          ["--json", true],
+          ["--no-input", true],
+        ]),
+        environment: { HOME: root, PATH: process.env.PATH ?? "" },
+        home: join(root, ".lohra"),
+        codexHome: join(root, ".codex"),
+        cwd: root,
+      });
+      expect(result.code).toBe(0);
+      expect(requests).toHaveLength(2);
+      const secondMessages = requests[1]?.messages as readonly Record<string, unknown>[];
+      const toolMessage = secondMessages.find((message) => message.role === "tool");
+      const toolResult = JSON.parse(String(toolMessage?.content)) as {
+        readonly ok: boolean;
+        readonly events: readonly { readonly event_type: string }[];
+      };
+      expect(toolResult.ok, "MUTATION_CAUSE:M22-run-chat-public-audit-wiring").toBe(true);
+      expect(toolResult.events.map((event) => event.event_type)).toEqual(["node.started"]);
+    } finally {
+      await closeServer(server);
     }
   });
 
@@ -148,14 +263,19 @@ describe("T17 metadata-only audit", () => {
         ),
       ) as { readonly data: Readonly<Record<string, unknown>> };
       const returned = audit.query({ runId: "binary" });
-      expect(stored.data.result, "MUTATION_CAUSE:M16-binary-marker-idempotence").toEqual({
-        state: "excluded_by_policy",
-        bytes: 256,
-      });
+      const storedResult = stored.data.result as Readonly<Record<string, unknown>>;
+      const returnedResult = returned.events[0]?.data.result as Readonly<Record<string, unknown>>;
+      expect(storedResult.state, "MUTATION_CAUSE:M20-binary-marker-policy-state").toBe(
+        "excluded_by_policy",
+      );
+      expect(storedResult.bytes, "MUTATION_CAUSE:M16-binary-marker-idempotence").toBe(1_000);
+      expect(returnedResult.bytes, "MUTATION_CAUSE:M23-binary-marker-read-size").toBe(1_000);
+      expect(returnedResult, "MUTATION_CAUSE:M16-binary-marker-idempotence").toEqual(storedResult);
       expect(
-        returned.events[0]?.data.result,
-        "MUTATION_CAUSE:M16-binary-marker-idempotence",
-      ).toEqual(stored.data.result);
+        (safeAuditMetadata({ before_seq: new Uint8Array(1_000) }).before_seq as { bytes: number })
+          .bytes,
+        "MUTATION_CAUSE:M24-binary-safe-value-size",
+      ).toBe(1_000);
       expect(returned.integrity.field_markers).toMatchObject({ excluded_by_policy: 1 });
     } finally {
       connection.close();

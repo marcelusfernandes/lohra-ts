@@ -273,9 +273,9 @@ const mutants: readonly Mutant[] = [
       {
         file: auditModel,
         before:
-          'return Object.freeze({\n      state: "excluded_by_policy",\n      bytes: Math.min(value.byteLength, 256),\n    });',
-        after:
           'return Object.freeze({\n      state: "excluded_by_policy",\n      bytes: value.byteLength,\n    });',
+        after:
+          'return Object.freeze({\n      state: "excluded_by_policy",\n      bytes: Math.min(value.byteLength, 256),\n    });',
       },
     ],
   },
@@ -326,15 +326,15 @@ const mutants: readonly Mutant[] = [
     id: "M20-binary-marker-policy-state",
     assertion: "A1/A3",
     test: "keeps binary raw-field markers stable across the SQLite read boundary",
-    cause: "MUTATION_CAUSE:M16-binary-marker-idempotence",
+    cause: "MUTATION_CAUSE:M20-binary-marker-policy-state",
     externalCause: "raw marker idempotence probe failed",
     edits: [
       {
         file: auditModel,
         before:
-          'return Object.freeze({\n      state: "excluded_by_policy",\n      bytes: Math.min(value.byteLength, 256),\n    });',
+          'return Object.freeze({\n      state: "excluded_by_policy",\n      bytes: value.byteLength,\n    });',
         after:
-          'return Object.freeze({\n      state: "unavailable",\n      bytes: Math.min(value.byteLength, 256),\n    });',
+          'return Object.freeze({\n      state: "unavailable",\n      bytes: value.byteLength,\n    });',
       },
     ],
   },
@@ -349,6 +349,49 @@ const mutants: readonly Mutant[] = [
         before:
           "  private clearAcceptedOrderIfIdle(runId: string): void {\n    if (\n      !this.dropped.some((entry) => entry.runId === runId) &&\n      !this.queue.some((entry) => entry.runId === runId)\n    )\n      this.lastAcceptedOrder.delete(runId);\n  }",
         after: "  private clearAcceptedOrderIfIdle(runId: string): void {\n    void runId;\n  }",
+      },
+    ],
+  },
+  {
+    id: "M22-run-chat-public-audit-wiring",
+    assertion: "D6",
+    test: "routes workflow_audit through the actual runChat composition root",
+    cause: "MUTATION_CAUSE:M22-run-chat-public-audit-wiring",
+    edits: [
+      {
+        file: chat,
+        before:
+          "const sessionRegistry = createChatSessionRegistry(connection.database, options.environment);",
+        after:
+          "const sessionRegistry = CHAT_TOOL_REGISTRY_FACTORIES.failSafe(connection.database, options.environment);",
+      },
+    ],
+  },
+  {
+    id: "M23-binary-marker-read-size",
+    assertion: "A1/A3",
+    test: "keeps binary raw-field markers stable across the SQLite read boundary",
+    cause: "MUTATION_CAUSE:M23-binary-marker-read-size",
+    edits: [
+      {
+        file: auditModel,
+        before: 'for (const key of ["bytes", "original_bytes", "limit_bytes"])',
+        after: 'for (const key of ["original_bytes", "limit_bytes"])',
+      },
+    ],
+  },
+  {
+    id: "M24-binary-safe-value-size",
+    assertion: "A1/A3",
+    test: "keeps binary raw-field markers stable across the SQLite read boundary",
+    cause: "MUTATION_CAUSE:M24-binary-safe-value-size",
+    edits: [
+      {
+        file: auditModel,
+        before:
+          'return Object.freeze({\n      state: "unavailable",\n      bytes: value.byteLength,\n    });',
+        after:
+          'return Object.freeze({\n      state: "unavailable",\n      bytes: Math.min(value.byteLength, 256),\n    });',
       },
     ],
   },

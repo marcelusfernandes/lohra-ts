@@ -171,7 +171,7 @@ function rawMarker(value: unknown): AuditMarker {
   if (value instanceof Uint8Array)
     return Object.freeze({
       state: "excluded_by_policy",
-      bytes: Math.min(value.byteLength, 256),
+      bytes: value.byteLength,
     });
   if (Array.isArray(value))
     return Object.freeze({ state: "excluded_by_policy", items: Math.min(value.length, 256) });
@@ -186,10 +186,10 @@ function rawMarker(value: unknown): AuditMarker {
 function marker(value: Readonly<Record<string, unknown>>): AuditMarker | null {
   if (typeof value.state !== "string" || !SAFE_MARKER_STATES.has(value.state)) return null;
   const out: Record<string, unknown> = { state: value.state };
-  for (const key of ["characters", "bytes", "items", "fields"])
+  for (const key of ["characters", "items", "fields"])
     if (typeof value[key] === "number" && Number.isFinite(value[key]))
       out[key] = Math.min(256, Math.max(0, Math.trunc(value[key])));
-  for (const key of ["original_bytes", "limit_bytes"])
+  for (const key of ["bytes", "original_bytes", "limit_bytes"])
     if (typeof value[key] === "number" && Number.isFinite(value[key]))
       out[key] = Math.max(0, Math.trunc(value[key]));
   if (value.side === "depth") out.side = "depth";
@@ -230,7 +230,7 @@ function safeValue(value: unknown, key: string, depth: number): unknown {
   if (value instanceof Uint8Array)
     return Object.freeze({
       state: "unavailable",
-      bytes: Math.min(value.byteLength, 256),
+      bytes: value.byteLength,
     });
   if (Array.isArray(value)) {
     const items = value as readonly unknown[];
