@@ -72,7 +72,7 @@ const mutants: readonly Mutant[] = [
       {
         file: auditTrail,
         before:
-          "      this.markDropped(runId, ownership);\n      this.warning(`audit queue overflow for run ${runId}`);",
+          "      this.markDropped(order, runId, ownership);\n      this.warning(`audit queue overflow for run ${runId}`);",
         after: "      this.warning(`audit queue overflow for run ${runId}`);",
       },
     ],
