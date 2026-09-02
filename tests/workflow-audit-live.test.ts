@@ -371,7 +371,7 @@ describe("T17 live events and sink failures", () => {
     } as unknown as AuditRepository;
     const trail = new AuditTrail(repo, { retryDelayMs: 0, sleep: () => Promise.resolve() });
     expect(trail.record("r", { event_type: "node" })).toBe(true);
-    expect(await trail.flush(), "MUTATION_CAUSE:M11-stale-refusal-poisons-writer").toBe(true);
+    expect(await trail.flush()).toBe(true);
     expect(attempts).toBe(3);
 
     const dead = {
@@ -405,7 +405,7 @@ describe("T17 live events and sink failures", () => {
     expect(
       trail.record("stale", { event_type: "node.started" }, { fence: 1, holder: "old", now: 2 }),
     ).toBe(true);
-    expect(await trail.flush()).toBe(true);
+    expect(await trail.flush(), "MUTATION_CAUSE:M11-stale-refusal-poisons-writer").toBe(true);
     expect(trail.record("healthy", { event_type: "node.started" })).toBe(true);
     expect(await trail.shutdown()).toBe(true);
     expect(calls, "MUTATION_CAUSE:M11-stale-refusal-poisons-writer").toEqual([
