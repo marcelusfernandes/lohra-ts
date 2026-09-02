@@ -65,6 +65,7 @@ export function createVisionAnalyzeHandler(options: {
           messages: [{ role: "user", content: [textPart(prompt), part] }],
           model: options.model,
           temperature: null,
+          effort: null,
           maxTokens: 1024,
           tools: [],
           signal: new AbortController().signal,
