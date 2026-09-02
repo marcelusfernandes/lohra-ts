@@ -106,8 +106,8 @@ const mutants: readonly Mutant[] = [
     edits: [
       {
         file: repository,
-        before: "      if (ownership !== undefined) {",
-        after: "      if (false && ownership !== undefined) {",
+        before: "WHERE f.run_id = ? AND f.fence = ? AND l.holder = ? AND l.expires_at > ?",
+        after: "WHERE f.run_id = ? AND ? IS NOT NULL AND l.holder = ? AND l.expires_at > ?",
       },
     ],
   },
@@ -130,8 +130,8 @@ const mutants: readonly Mutant[] = [
     edits: [
       {
         file: live,
-        before: "const last = snapshot.total !== undefined",
-        after: "const last = false && snapshot.total !== undefined",
+        before: "(snapshot.done ?? 0) >= snapshot.total",
+        after: "(snapshot.done ?? 0) > snapshot.total",
       },
     ],
   },

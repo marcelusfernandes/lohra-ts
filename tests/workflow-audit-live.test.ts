@@ -80,10 +80,15 @@ describe("T17 metadata-only audit", () => {
       {
         event_type: "node.output",
         payload: {
-          payload: Array.from({ length: 4 }, () => ({
-            provider: "😀".repeat(128),
-            model: "😀".repeat(128),
-          })),
+          provider: "😀".repeat(128),
+          model: "😀".repeat(128),
+          identity: "😀".repeat(128),
+          status: "😀".repeat(64),
+          state: "😀".repeat(64),
+          reason: "😀".repeat(64),
+          side: "😀".repeat(64),
+          cause: "😀".repeat(64),
+          name: "😀".repeat(64),
         },
       },
       1,
@@ -160,14 +165,14 @@ describe("T17 SQLite audit read model", () => {
         .run();
       connection.database
         .prepare(
-          "INSERT INTO workflow_run_locks(run_id,holder,acquired_at,expires_at) VALUES('run','new',1,100)",
+          "INSERT INTO workflow_run_locks(run_id,holder,acquired_at,expires_at) VALUES('run','owner',1,100)",
         )
         .run();
       expect(
         audit.append(
           "run",
           { event_type: "node", created_at: 2 },
-          { fence: 1, holder: "old", now: 2 },
+          { fence: 1, holder: "owner", now: 2 },
         ),
       ).toBeNull();
       expect(
@@ -177,7 +182,7 @@ describe("T17 SQLite audit read model", () => {
         audit.append(
           "run",
           { event_type: "node", created_at: 2 },
-          { fence: 2, holder: "new", now: 2 },
+          { fence: 2, holder: "owner", now: 2 },
         )?.seq,
       ).toBe(1);
     } finally {
