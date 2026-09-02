@@ -1,0 +1,9 @@
+export const MAX_IMAGES = 10;
+export const MAX_VISION_IMAGE_BYTES = 20 * 1024 * 1024;
+export const MAX_HTTP_URL_CHARS = 16_384;
+export const MAX_DATA_URI_BASE64_CHARS = 27_962_028;
+export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+export const MAX_IMAGE_BATCH_BYTES = 64 * 1024 * 1024;
+export const MAX_IMAGE_RESPONSE_BYTES = 96 * 1024 * 1024;
+export const IMAGE_REQUEST_TIMEOUT_MS = 60_000;
+export const IMAGE_FILE_MODE = 0o644;
