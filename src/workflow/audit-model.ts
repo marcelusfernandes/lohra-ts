@@ -19,11 +19,12 @@ export interface AuditInput {
 }
 
 export interface PublicAuditEvent extends Readonly<Record<string, unknown>> {
-  readonly run_id: string;
-  readonly seq: number;
+  readonly schema_version: 1;
   readonly event_type: string;
   readonly provenance: string;
-  readonly payload: unknown;
+  readonly identity: Readonly<Record<string, unknown>>;
+  readonly data: Readonly<Record<string, unknown>>;
+  readonly seq: number;
   readonly created_at: number;
 }
 
@@ -187,37 +188,42 @@ export function publicAuditEvent(
   now: number,
 ): PublicAuditEvent {
   const event: PublicAuditEvent = Object.freeze({
-    run_id: clipped(runId, 128),
-    seq,
+    schema_version: 1,
     event_type: clipped(input.event_type, 64),
     provenance: clipped(input.provenance ?? "workflow", 64),
-    ...(input.segment_id === undefined || input.segment_id === null
-      ? {}
-      : { segment_id: clipped(input.segment_id, 128) }),
-    ...(input.node_id === undefined || input.node_id === null
-      ? {}
-      : { node_id: clipped(input.node_id, 64) }),
-    ...(input.sub_id === undefined || input.sub_id === null
-      ? {}
-      : { sub_id: clipped(input.sub_id, 128) }),
-    ...(input.attempt === undefined || input.attempt === null
-      ? {}
-      : { attempt: Math.max(0, Math.trunc(input.attempt)) }),
-    payload: safeAuditMetadata(input.payload ?? {}),
+    identity: Object.freeze({
+      run_id: clipped(runId, 128),
+      ...(input.segment_id === undefined || input.segment_id === null
+        ? {}
+        : { segment_id: clipped(input.segment_id, 128) }),
+      ...(input.node_id === undefined || input.node_id === null
+        ? {}
+        : { node_path: Object.freeze([clipped(input.node_id, 64)]) }),
+      ...(input.sub_id === undefined || input.sub_id === null
+        ? {}
+        : { sub_id: clipped(input.sub_id, 128) }),
+      ...(input.attempt === undefined || input.attempt === null
+        ? {}
+        : { attempt: Math.max(0, Math.trunc(input.attempt)) }),
+    }),
+    data: safeAuditMetadata(input.payload ?? {}),
+    seq,
     created_at: input.created_at ?? now,
   });
   const bytes = eventBytes(event);
   if (bytes <= AUDIT_EVENT_BYTES) return event;
   return Object.freeze({
-    run_id: clipped(runId, 128),
-    seq,
+    schema_version: 1,
     event_type: "audit.truncated",
-    provenance: "audit",
-    payload: Object.freeze({
+    provenance: "truncated",
+    identity: Object.freeze({ run_id: clipped(runId, 128) }),
+    data: Object.freeze({
+      state: "truncated",
       original_bytes: bytes,
       limit_bytes: AUDIT_EVENT_BYTES,
       original_event_type: clipped(input.event_type, 64),
     }),
+    seq,
     created_at: input.created_at ?? now,
   });
 }
@@ -239,4 +245,24 @@ export function auditEnabled(
   if (raw === "off" || raw === "0" || raw === "false") return false;
   warning(`invalid LOHRA_AUDIT value '${raw}'; audit remains enabled`);
   return true;
+}
+
+export function resolveAuditSettings(
+  environment: Readonly<Record<string, string | undefined>>,
+  warning: (message: string) => void = () => undefined,
+): Readonly<{ enabled: boolean; maxEventsPerRun: number }> {
+  const raw = environment.LOHRA_AUDIT_MAX_EVENTS?.trim();
+  let maxEventsPerRun = AUDIT_EVENTS_PER_RUN;
+  if (raw !== undefined && raw !== "") {
+    const parsed = Number(raw);
+    if (Number.isSafeInteger(parsed) && parsed >= 1) maxEventsPerRun = parsed;
+    else
+      warning(
+        `ignoring LOHRA_AUDIT_MAX_EVENTS='${raw}': expected an integer >= 1; using ${String(AUDIT_EVENTS_PER_RUN)}`,
+      );
+  }
+  return Object.freeze({
+    enabled: auditEnabled(environment, warning),
+    maxEventsPerRun,
+  });
 }

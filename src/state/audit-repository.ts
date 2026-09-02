@@ -24,14 +24,13 @@ export interface AuditQuery {
 }
 
 export interface AuditPage extends Readonly<Record<string, unknown>> {
+  readonly run_id: string;
   readonly availability: "available" | "unavailable";
+  readonly filters: Readonly<Record<string, unknown>>;
   readonly events: readonly PublicAuditEvent[];
-  readonly notices: readonly Readonly<Record<string, unknown>>[];
-  readonly after_seq: number;
-  readonly next_after_seq: number;
-  readonly snapshot_seq: number;
-  readonly returned: number;
-  readonly has_more: boolean;
+  readonly page: Readonly<Record<string, unknown>>;
+  readonly policy: Readonly<Record<string, unknown>>;
+  readonly integrity: Readonly<Record<string, unknown>>;
 }
 
 export interface AuditRepositoryOptions {
@@ -51,21 +50,74 @@ function rowNumber(value: unknown): number {
 }
 
 function parseEvent(row: Readonly<Record<string, unknown>>): PublicAuditEvent {
-  const payload = JSON.parse(String(row.payload_json)) as unknown;
-  return Object.freeze({
-    run_id: String(row.run_id),
-    seq: rowNumber(row.seq),
-    event_type: String(row.event_type),
-    provenance: String(row.provenance),
-    ...(typeof row.segment_id === "string" ? { segment_id: row.segment_id } : {}),
-    ...(typeof row.node_id === "string" ? { node_id: row.node_id } : {}),
-    ...(typeof row.sub_id === "string" ? { sub_id: row.sub_id } : {}),
-    ...(row.attempt === null || row.attempt === undefined
-      ? {}
-      : { attempt: rowNumber(row.attempt) }),
-    payload,
-    created_at: Number(row.created_at),
-  });
+  const seq = rowNumber(row.seq);
+  const createdAt = Number(row.created_at);
+  try {
+    const stored = JSON.parse(String(row.payload_json)) as unknown;
+    if (stored === null || typeof stored !== "object" || Array.isArray(stored))
+      throw new Error("audit payload is not an object");
+    const record = stored as Readonly<Record<string, unknown>>;
+    return publicAuditEvent(
+      String(row.run_id),
+      seq,
+      {
+        event_type: String(row.event_type),
+        provenance: String(row.provenance),
+        ...(typeof row.segment_id === "string" ? { segment_id: row.segment_id } : {}),
+        ...(typeof row.node_id === "string" ? { node_id: row.node_id } : {}),
+        ...(typeof row.sub_id === "string" ? { sub_id: row.sub_id } : {}),
+        ...(row.attempt === null || row.attempt === undefined
+          ? {}
+          : { attempt: rowNumber(row.attempt) }),
+        payload: record.data,
+        created_at: createdAt,
+      },
+      createdAt,
+    );
+  } catch {
+    return Object.freeze({
+      schema_version: 1,
+      event_type: "audit.unavailable",
+      provenance: "unavailable",
+      identity: Object.freeze({ run_id: String(row.run_id) }),
+      data: Object.freeze({ reason: "corrupt_payload" }),
+      seq,
+      created_at: createdAt,
+    });
+  }
+}
+
+const MARKER_TYPES = new Set(["audit.gap", "audit.truncated", "audit.unavailable"]);
+const FIELD_STATES = new Set([
+  "redacted",
+  "truncated",
+  "unavailable",
+  "excluded_by_policy",
+  "excluded_private_state",
+]);
+
+function matches(event: PublicAuditEvent, query: AuditQuery): boolean {
+  const identity = event.identity;
+  const nodePath = Array.isArray(identity.node_path) ? identity.node_path : [];
+  return (
+    (query.nodeId === undefined || nodePath.includes(query.nodeId)) &&
+    (query.eventType === undefined || event.event_type === query.eventType) &&
+    (query.subId === undefined || identity.sub_id === query.subId) &&
+    (query.segmentId === undefined || identity.segment_id === query.segmentId) &&
+    (query.attempt === undefined || identity.attempt === query.attempt)
+  );
+}
+
+function countStates(value: unknown, counts: Map<string, number>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) countStates(item, counts);
+    return;
+  }
+  if (value === null || typeof value !== "object") return;
+  const record = value as Readonly<Record<string, unknown>>;
+  if (typeof record.state === "string" && FIELD_STATES.has(record.state))
+    counts.set(record.state, (counts.get(record.state) ?? 0) + 1);
+  for (const item of Object.values(record)) countStates(item, counts);
 }
 
 function isBusy(error: unknown): boolean {
@@ -157,13 +209,19 @@ export class AuditRepository {
           .run(
             runId,
             seq,
-            event.segment_id ?? null,
-            event.node_id ?? null,
-            event.sub_id ?? null,
-            event.attempt ?? null,
+            input.segment_id ?? null,
+            input.node_id ?? null,
+            input.sub_id ?? null,
+            input.attempt ?? null,
             event.event_type,
             event.provenance,
-            JSON.stringify(event.payload),
+            JSON.stringify({
+              schema_version: event.schema_version,
+              event_type: event.event_type,
+              provenance: event.provenance,
+              identity: event.identity,
+              data: event.data,
+            }),
             event.created_at,
           );
         this.pruneRun(runId);
@@ -179,82 +237,153 @@ export class AuditRepository {
 
   public query(query: AuditQuery): AuditPage {
     const after = Math.max(0, Math.trunc(query.afterSeq ?? 0));
-    const limit = Math.min(100, Math.max(1, Math.trunc(query.limit ?? 50)));
-    const state = this.database
-      .prepare("SELECT * FROM workflow_audit_state WHERE run_id = ?")
-      .get(query.runId) as Readonly<Record<string, unknown>> | undefined;
-    const tombstone =
-      state === undefined
-        ? this.database
-            .prepare("SELECT * FROM workflow_audit_tombstones WHERE run_id = ?")
-            .get(query.runId)
-        : undefined;
+    const requestedLimit = Math.trunc(query.limit ?? 50);
+    const limit = Math.min(100, Math.max(1, requestedLimit));
+    const frozen = this.database
+      .transaction(() => {
+        const state = this.database
+          .prepare("SELECT * FROM workflow_audit_state WHERE run_id = ?")
+          .get(query.runId) as Readonly<Record<string, unknown>> | undefined;
+        const tombstone =
+          state === undefined
+            ? (this.database
+                .prepare("SELECT * FROM workflow_audit_tombstones WHERE run_id = ?")
+                .get(query.runId) as Readonly<Record<string, unknown>> | undefined)
+            : undefined;
+        const rows = this.database
+          .prepare("SELECT * FROM workflow_audit_events WHERE run_id=? ORDER BY seq")
+          .all(query.runId) as readonly Readonly<Record<string, unknown>>[];
+        return Object.freeze({ state, tombstone, rows });
+      })
+      .deferred();
+    const { state, tombstone } = frozen;
+    const decoded = frozen.rows.map(parseEvent);
+    const currentHigh = decoded.reduce((high, event) => Math.max(high, event.seq), 0);
+    const snapshot = Math.min(
+      currentHigh,
+      Math.max(0, Math.trunc(query.snapshotSeq ?? currentHigh)),
+    );
+    const filtersEnvelope = Object.freeze(
+      Object.fromEntries(
+        [
+          ["node_id", query.nodeId],
+          ["event_type", query.eventType],
+          ["sub_id", query.subId],
+          ["segment_id", query.segmentId],
+          ["attempt", query.attempt],
+        ].filter((entry): entry is [string, string | number] => entry[1] !== undefined),
+      ),
+    );
     if (state === undefined && tombstone === undefined) {
       return Object.freeze({
-        ...AUDIT_POLICY,
+        run_id: query.runId,
         availability: "unavailable" as const,
+        filters: filtersEnvelope,
         events: Object.freeze([]),
-        notices: Object.freeze([
-          Object.freeze({ event_type: "audit.unavailable", reason: "not_recorded" }),
-        ]),
-        after_seq: after,
-        next_after_seq: after,
-        snapshot_seq: query.snapshotSeq ?? 0,
-        returned: 0,
-        has_more: false,
+        page: Object.freeze({
+          after_seq: after,
+          next_after_seq: after,
+          snapshot_seq: snapshot,
+          limit_requested: requestedLimit,
+          limit_effective: limit,
+          limit_clamped: requestedLimit !== limit,
+          returned: 0,
+          has_more: false,
+        }),
+        policy: AUDIT_POLICY,
+        integrity: Object.freeze({
+          scope: "retained_snapshot",
+          event_markers: Object.freeze({ gaps: 0, truncated: 0, unavailable: 1 }),
+          field_markers: Object.freeze({}),
+          pagination_truncated: false,
+          notices: Object.freeze([
+            Object.freeze({
+              event_type: "audit.unavailable",
+              provenance: "unavailable",
+              data: Object.freeze({ reason: "not_recorded" }),
+            }),
+          ]),
+          notices_total: 1,
+          notices_returned: 1,
+          notices_truncated: false,
+        }),
       });
     }
-    const high = Math.max(
-      0,
-      rowNumber(state?.next_seq) - 1,
-      rowNumber((tombstone as Readonly<Record<string, unknown>> | undefined)?.next_seq) - 1,
+    const snapshotEvents = decoded.filter((event) => event.seq <= snapshot);
+    const eligible = snapshotEvents.filter((event) => event.seq > after && matches(event, query));
+    const events = eligible.slice(0, limit);
+    const notices: Readonly<Record<string, unknown>>[] = snapshotEvents.filter((event) =>
+      MARKER_TYPES.has(event.event_type),
     );
-    const snapshot = Math.min(high, Math.max(0, Math.trunc(query.snapshotSeq ?? high)));
-    const clauses = ["run_id = ?", "seq > ?", "seq <= ?"];
-    const values: unknown[] = [query.runId, after, snapshot];
-    const filters: readonly [string, unknown][] = [
-      ["node_id", query.nodeId],
-      ["event_type", query.eventType],
-      ["sub_id", query.subId],
-      ["segment_id", query.segmentId],
-    ];
-    for (const [column, value] of filters)
-      if (value !== undefined) {
-        clauses.push(`${column} = ?`);
-        values.push(value);
-      }
-    if (query.attempt !== undefined) {
-      clauses.push("attempt = ?");
-      values.push(query.attempt);
-    }
-    const rows = this.database
-      .prepare(
-        `SELECT * FROM workflow_audit_events WHERE ${clauses.join(" AND ")} ORDER BY seq LIMIT ?`,
-      )
-      .all(...values, limit + 1) as readonly Readonly<Record<string, unknown>>[];
-    const events = rows.slice(0, limit).map(parseEvent);
-    const notices: Readonly<Record<string, unknown>>[] = [];
     const dropped = rowNumber(state?.retention_dropped);
     if (dropped > 0)
       notices.push(
         Object.freeze({
           event_type: "audit.gap",
-          reason: "retention_limit",
-          dropped_count: dropped,
-          before_seq: rowNumber(state?.dropped_before_seq),
+          provenance: "dropped",
+          data: Object.freeze({
+            reason: "retention_limit",
+            dropped_count: dropped,
+            before_seq: rowNumber(state?.dropped_before_seq),
+          }),
         }),
       );
+    if (state === undefined && tombstone !== undefined)
+      notices.push(
+        Object.freeze({
+          event_type: "audit.unavailable",
+          provenance: "unavailable",
+          data: Object.freeze({
+            reason: String(tombstone.reason),
+          }),
+        }),
+      );
+    const fieldCounts = new Map<string, number>();
+    const eventCounts = new Map<string, number>();
+    for (const event of snapshotEvents) {
+      countStates(event, fieldCounts);
+      if (MARKER_TYPES.has(event.event_type))
+        eventCounts.set(event.event_type, (eventCounts.get(event.event_type) ?? 0) + 1);
+    }
+    for (const notice of notices)
+      if (!("seq" in notice) && typeof notice.event_type === "string")
+        eventCounts.set(notice.event_type, (eventCounts.get(notice.event_type) ?? 0) + 1);
     const next = events.at(-1)?.seq ?? after;
+    const returnedNotices = notices.slice(0, 20);
     return Object.freeze({
-      ...AUDIT_POLICY,
-      availability: "available" as const,
+      run_id: query.runId,
+      availability: state !== undefined || decoded.length > 0 ? "available" : "unavailable",
+      filters: filtersEnvelope,
       events: Object.freeze(events),
-      notices: Object.freeze(notices),
-      after_seq: after,
-      next_after_seq: next,
-      snapshot_seq: snapshot,
-      returned: events.length,
-      has_more: rows.length > limit,
+      page: Object.freeze({
+        after_seq: after,
+        next_after_seq: next,
+        snapshot_seq: snapshot,
+        limit_requested: requestedLimit,
+        limit_effective: limit,
+        limit_clamped: requestedLimit !== limit,
+        returned: events.length,
+        has_more: eligible.length > limit,
+      }),
+      policy: AUDIT_POLICY,
+      integrity: Object.freeze({
+        scope: "retained_snapshot",
+        event_markers: Object.freeze({
+          gaps: eventCounts.get("audit.gap") ?? 0,
+          truncated: eventCounts.get("audit.truncated") ?? 0,
+          unavailable: eventCounts.get("audit.unavailable") ?? 0,
+        }),
+        field_markers: Object.freeze(
+          Object.fromEntries(
+            [...fieldCounts.entries()].sort(([left], [right]) => left.localeCompare(right)),
+          ),
+        ),
+        pagination_truncated: eligible.length > limit,
+        notices: Object.freeze(returnedNotices),
+        notices_total: notices.length,
+        notices_returned: returnedNotices.length,
+        notices_truncated: notices.length > returnedNotices.length,
+      }),
     });
   }
 

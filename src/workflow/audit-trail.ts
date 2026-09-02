@@ -1,6 +1,6 @@
 import type { Ownership } from "../state/workflow-repository.js";
 import type { AuditRepository } from "../state/audit-repository.js";
-import { AUDIT_QUEUE_CAPACITY, type AuditInput } from "./audit-model.js";
+import { AUDIT_QUEUE_CAPACITY, safeAuditMetadata, type AuditInput } from "./audit-model.js";
 
 export interface AuditTrailOptions {
   readonly capacity?: number;
@@ -42,13 +42,42 @@ export class AuditTrail {
       this.warning(`audit unavailable for run ${runId}: writer is closed`);
       return false;
     }
+    let sanitized: AuditInput;
+    try {
+      sanitized = Object.freeze({
+        event_type: input.event_type,
+        ...(input.provenance === undefined ? {} : { provenance: input.provenance }),
+        ...(input.segment_id === undefined ? {} : { segment_id: input.segment_id }),
+        ...(input.node_id === undefined ? {} : { node_id: input.node_id }),
+        ...(input.sub_id === undefined ? {} : { sub_id: input.sub_id }),
+        ...(input.attempt === undefined ? {} : { attempt: input.attempt }),
+        ...(input.created_at === undefined ? {} : { created_at: input.created_at }),
+        payload: safeAuditMetadata(input.payload ?? {}),
+      });
+    } catch (error) {
+      this.warning(
+        `audit sanitizer failed for run ${runId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      const gap: AuditInput = Object.freeze({
+        event_type: "audit.gap",
+        provenance: "dropped",
+        payload: Object.freeze({ reason: "corrupt_payload", dropped_count: 1 }),
+      });
+      if (this.queue.length < this.capacity) {
+        this.queue.push(
+          Object.freeze({ runId, input: gap, ...(ownership === undefined ? {} : { ownership }) }),
+        );
+        this.kick();
+      } else this.dropped += 1;
+      return false;
+    }
     if (this.queue.length >= this.capacity) {
       this.dropped += 1;
       this.warning(`audit queue overflow for run ${runId}`);
       return false;
     }
     this.queue.push(
-      Object.freeze({ runId, input, ...(ownership === undefined ? {} : { ownership }) }),
+      Object.freeze({ runId, input: sanitized, ...(ownership === undefined ? {} : { ownership }) }),
     );
     this.kick();
     return true;

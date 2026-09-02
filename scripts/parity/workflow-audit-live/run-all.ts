@@ -45,6 +45,7 @@ async function candidateProjection() {
           created_at: 1000 + turn,
         });
       const first = snapshot.query({ runId: "snapshot", limit: 1 });
+      const firstSnapshot = Number(first.page.snapshot_seq);
       snapshot.append("snapshot", {
         event_type: "node.started",
         payload: { state: "running" },
@@ -53,10 +54,10 @@ async function candidateProjection() {
       const frozen = snapshot.query({
         runId: "snapshot",
         afterSeq: 1,
-        snapshotSeq: first.snapshot_seq,
+        snapshotSeq: firstSnapshot,
         limit: 10,
       });
-      const tail = snapshot.query({ runId: "snapshot", afterSeq: first.snapshot_seq, limit: 10 });
+      const tail = snapshot.query({ runId: "snapshot", afterSeq: firstSnapshot, limit: 10 });
 
       const retained = new AuditRepository(connection.database, { maxEventsPerRun: 3 });
       for (let turn = 0; turn < 5; turn += 1)
@@ -129,11 +130,17 @@ async function candidateProjection() {
             states: Array(6).fill("excluded_by_policy"),
           },
           sqlite: {
-            snapshot: first.snapshot_seq,
+            snapshot: firstSnapshot,
             frozen: frozen.events.map((event) => event.seq),
             tail: tail.events.map((event) => event.seq),
             retained: retainedPage.events.map((event) => event.seq),
-            dropped: (retainedPage.notices[0] as { dropped_count: number }).dropped_count,
+            dropped: Number(
+              (
+                retainedPage.integrity.notices as readonly {
+                  data: Readonly<Record<string, unknown>>;
+                }[]
+              )[0]?.data.dropped_count,
+            ),
             resumed: resumed?.seq,
           },
           live: { outcomes, delivered, tracked: live.trackedNodes() },
