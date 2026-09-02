@@ -176,7 +176,11 @@ export class AuditTrail {
     const gap: AuditInput = Object.freeze({
       event_type: "audit.gap",
       provenance: "dropped",
-      payload: Object.freeze({ reason: marker.reason, dropped_count: marker.count }),
+      payload: Object.freeze({
+        reason: marker.reason,
+        dropped_count: marker.count,
+        ...(marker.runId === "$audit" ? { run_attribution: "unavailable" } : {}),
+      }),
     });
     const outcome = await this.append(marker.runId, gap, marker.ownership);
     if (outcome === "failed") {

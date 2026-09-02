@@ -259,6 +259,21 @@ describe("T17 metadata-only audit", () => {
         state: "excluded_by_policy",
         fields: 2,
       });
+    const privateFamily = safeAuditMetadata({
+      reasoning_content: privateMarker,
+      reasoning_details: privateMarker,
+      provider_data: privateMarker,
+      encrypted_content: privateMarker,
+    });
+    for (const field of [
+      "reasoning_content",
+      "reasoning_details",
+      "provider_data",
+      "encrypted_content",
+    ])
+      expect(privateFamily[field], "MUTATION_CAUSE:M31-private-marker-family").toEqual(
+        privateMarker,
+      );
   });
 
   it("keeps binary raw-field markers stable across the SQLite read boundary", () => {
@@ -770,15 +785,27 @@ describe("T17 live events and sink failures", () => {
   });
 
   it("bounds loss buckets and conserves every overflowed event", async () => {
-    const persisted: { runId: string; reason: unknown; count: unknown }[] = [];
+    expect(
+      safeAuditMetadata({ run_attribution: "unavailable" }).run_attribution,
+      "MUTATION_CAUSE:M30-drop-attribution-allowlist",
+    ).toBe("unavailable");
+    const persisted: {
+      runId: string;
+      reason: unknown;
+      count: unknown;
+      attribution: unknown;
+    }[] = [];
     const repo = {
       append: (runId: string, input: { event_type: string; payload?: Record<string, unknown> }) => {
-        if (input.event_type === "audit.gap")
+        if (input.event_type === "audit.gap") {
+          const payload = safeAuditMetadata(input.payload ?? {});
           persisted.push({
             runId,
-            reason: input.payload?.reason,
-            count: input.payload?.dropped_count,
+            reason: payload.reason,
+            count: payload.dropped_count,
+            attribution: payload.run_attribution,
           });
+        }
         return {} as never;
       },
       isBusyError: () => false,
@@ -798,8 +825,16 @@ describe("T17 live events and sink failures", () => {
     expect(await trail.flush()).toBe(true);
     expect(persisted.reduce((total, marker) => total + Number(marker.count), 0)).toBe(2_000);
     expect(persisted).toContainEqual(
-      expect.objectContaining({ runId: "$audit", reason: "drop_bucket_overflow" }),
+      expect.objectContaining({
+        runId: "$audit",
+        reason: "drop_bucket_overflow",
+        attribution: "unavailable",
+      }),
     );
+    expect(
+      persisted.find((marker) => marker.runId === "$audit")?.attribution,
+      "MUTATION_CAUSE:M29-drop-attribution-emission",
+    ).toBe("unavailable");
   });
 
   it("preserves corrupt_payload when sanitizer failure meets a full queue", async () => {

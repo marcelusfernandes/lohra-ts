@@ -51,6 +51,13 @@ const RAW_FIELDS = new Set([
   "cause",
   "name",
 ]);
+const PRIVATE_FIELDS = new Set([
+  "reasoning",
+  "reasoning_content",
+  "reasoning_details",
+  "provider_data",
+  "encrypted_content",
+]);
 const IDENTITY_FIELDS = new Set(["model", "provider"]);
 const OPAQUE_FIELDS = new Set(["tool_id"]);
 const NUMBER_FIELDS = new Set([
@@ -146,6 +153,7 @@ const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object
   side: new Set(["depth"]),
   count_state: new Set(["unavailable"]),
   private_state: new Set(["excluded_private_state", "not_observed"]),
+  run_attribution: new Set(["unavailable"]),
   source: new Set(["gateway", "harness", "human_checkpoint"]),
   tool_name_state: new Set(["known_tool", "unknown_tool"]),
   unit: new Set(["bytes", "characters", "items", "top_level_items"]),
@@ -207,7 +215,7 @@ function safeValue(value: unknown, key: string, depth: number): unknown {
       const preserved = marker(value as Readonly<Record<string, unknown>>);
       if (
         preserved?.state === "excluded_by_policy" ||
-        (key === "reasoning" && preserved?.state === "excluded_private_state")
+        (PRIVATE_FIELDS.has(key) && preserved?.state === "excluded_private_state")
       )
         return preserved;
     }

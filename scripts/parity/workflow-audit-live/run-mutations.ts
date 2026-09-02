@@ -243,7 +243,7 @@ const mutants: readonly Mutant[] = [
       {
         file: auditModel,
         before:
-          '      if (\n        preserved?.state === "excluded_by_policy" ||\n        (key === "reasoning" && preserved?.state === "excluded_private_state")\n      )\n        return preserved;',
+          '      if (\n        preserved?.state === "excluded_by_policy" ||\n        (PRIVATE_FIELDS.has(key) && preserved?.state === "excluded_private_state")\n      )\n        return preserved;',
         after: "      if (preserved !== null) return preserved;",
       },
     ],
@@ -445,8 +445,50 @@ const mutants: readonly Mutant[] = [
     edits: [
       {
         file: auditModel,
-        before: '(key === "reasoning" && preserved?.state === "excluded_private_state")',
+        before: '(PRIVATE_FIELDS.has(key) && preserved?.state === "excluded_private_state")',
         after: 'preserved?.state === "excluded_private_state"',
+      },
+    ],
+  },
+  {
+    id: "M29-drop-attribution-emission",
+    assertion: "A5/bounded_work",
+    test: "bounds loss buckets and conserves every overflowed event",
+    cause: "MUTATION_CAUSE:M29-drop-attribution-emission",
+    externalCause: "bounded drop buckets probe failed",
+    edits: [
+      {
+        file: auditTrail,
+        before: '        ...(marker.runId === "$audit" ? { run_attribution: "unavailable" } : {}),',
+        after: "",
+      },
+    ],
+  },
+  {
+    id: "M30-drop-attribution-allowlist",
+    assertion: "A5/bounded_work",
+    test: "bounds loss buckets and conserves every overflowed event",
+    cause: "MUTATION_CAUSE:M30-drop-attribution-allowlist",
+    externalCause: "bounded drop buckets probe failed",
+    edits: [
+      {
+        file: auditModel,
+        before: '  run_attribution: new Set(["unavailable"]),\n',
+        after: "",
+      },
+    ],
+  },
+  {
+    id: "M31-private-marker-family",
+    assertion: "A1",
+    test: "rejects marker-shaped objects in raw fields except policy-produced markers",
+    cause: "MUTATION_CAUSE:M31-private-marker-family",
+    externalCause: "private marker scope probe failed",
+    edits: [
+      {
+        file: auditModel,
+        before: "PRIVATE_FIELDS.has(key)",
+        after: 'key === "reasoning"',
       },
     ],
   },

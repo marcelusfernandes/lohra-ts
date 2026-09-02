@@ -322,15 +322,21 @@ async function probeRoundTwoRegressions(): Promise<Readonly<Record<string, unkno
       `late shutdown attempts probe failed: ${JSON.stringify({ shutdown, attemptsAtReturn, attempts })}`,
     );
 
-  const persisted: { runId: string; reason: unknown; count: number }[] = [];
+  const persisted: {
+    runId: string;
+    reason: unknown;
+    count: number;
+    attribution: unknown;
+  }[] = [];
   const boundedRepository = {
     append: (runId: string, input: AuditInput) => {
       if (input.event_type === "audit.gap") {
-        const payload = input.payload as Readonly<Record<string, unknown>> | undefined;
+        const payload = safeAuditMetadata(input.payload ?? {});
         persisted.push({
           runId,
-          reason: payload?.reason,
-          count: Number(payload?.dropped_count),
+          reason: payload.reason,
+          count: Number(payload.dropped_count),
+          attribution: payload.run_attribution,
         });
       }
       return {} as never;
@@ -351,7 +357,12 @@ async function probeRoundTwoRegressions(): Promise<Readonly<Record<string, unkno
   const aggregate = persisted.find(
     (marker) => marker.runId === "$audit" && marker.reason === "drop_bucket_overflow",
   );
-  if (peakBuckets !== 256 || peakCount !== 2_000 || persistedCount !== 2_000 || !aggregate)
+  if (
+    peakBuckets !== 256 ||
+    peakCount !== 2_000 ||
+    persistedCount !== 2_000 ||
+    aggregate?.attribution !== "unavailable"
+  )
     throw new Error(
       `bounded drop buckets probe failed: ${JSON.stringify({ peakBuckets, peakCount, persistedCount, aggregate })}`,
     );
@@ -384,6 +395,10 @@ async function probeRoundTwoRegressions(): Promise<Readonly<Record<string, unkno
     content: privateMarker,
     arguments: privateMarker,
     result: privateMarker,
+    reasoning_content: privateMarker,
+    reasoning_details: privateMarker,
+    provider_data: privateMarker,
+    encrypted_content: privateMarker,
   });
   const privateStates = Object.fromEntries(
     Object.entries(privateProjection).map(([key, value]) => [
@@ -395,6 +410,9 @@ async function probeRoundTwoRegressions(): Promise<Readonly<Record<string, unkno
     privateStates.reasoning !== "excluded_private_state" ||
     ["prompt", "response", "content", "arguments", "result"].some(
       (key) => privateStates[key] !== "excluded_by_policy",
+    ) ||
+    ["reasoning_content", "reasoning_details", "provider_data", "encrypted_content"].some(
+      (key) => privateStates[key] !== "excluded_private_state",
     )
   )
     throw new Error(`private marker scope probe failed: ${JSON.stringify(privateStates)}`);
