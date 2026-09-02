@@ -13,6 +13,7 @@ export type CommandError =
   | { readonly kind: "ambiguous"; readonly token: string; readonly candidates: readonly string[] }
   | { readonly kind: "missingValue"; readonly flag: string }
   | { readonly kind: "invalidInt"; readonly flag: string; readonly value: string }
+  | { readonly kind: "invalidFloat"; readonly flag: string; readonly value: string }
   | { readonly kind: "unexpectedValue"; readonly flag: string; readonly value: string }
   | { readonly kind: "requiredMissing"; readonly name: string }
   | {
@@ -34,6 +35,11 @@ export interface ParseResult {
  * non-digit text — that's the surface argparse's `type=int` relies on. */
 function isPythonInt(value: string): boolean {
   return /^[+-]?\d+$/.test(value.trim());
+}
+
+function isFinitePythonFloat(value: string): boolean {
+  const stripped = value.trim();
+  return stripped !== "" && Number.isFinite(Number(stripped));
 }
 
 /** argparse: a token starting with `-` is option-like unless it's exactly
@@ -108,6 +114,13 @@ export function parseCommand(spec: CommandSpec, argv: readonly string[]): ParseR
           positionals,
           extras,
           error: { kind: "invalidInt", flag: flag.name, value: next },
+        };
+      if (flag.type === "float" && !isFinitePythonFloat(next))
+        return {
+          options,
+          positionals,
+          extras,
+          error: { kind: "invalidFloat", flag: flag.name, value: next },
         };
       options.set(flag.name, next);
       continue;
@@ -236,6 +249,8 @@ export function renderError(error: CommandError, level: Level): string {
       return `${prefix}argument ${error.flag}: expected one argument\n`;
     case "invalidInt":
       return `${prefix}argument ${error.flag}: invalid int value: '${error.value}'\n`;
+    case "invalidFloat":
+      return `${prefix}argument ${error.flag}: invalid float value: '${error.value}'\n`;
     case "unexpectedValue":
       return `${prefix}argument ${error.flag}: ignored explicit argument '${error.value}'\n`;
     case "requiredMissing":

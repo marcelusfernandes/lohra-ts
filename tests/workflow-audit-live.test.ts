@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -585,5 +585,14 @@ describe("T17 workflow CLI", () => {
     expect(await runCli(["workflow", "audit", "unknown"], auditIo.value)).toBe(0);
     expect(auditIo.stdout.join("")).toContain('"availability": "unavailable"');
     expect(readFileSync(join(root, ".lohra", "state.db")).byteLength).toBeGreaterThan(0);
+  });
+
+  it("rejects a non-finite watch poll before opening durable state", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-t17-cli-"));
+    roots.push(root);
+    const watchIo = io(root);
+    expect(await runCli(["workflow", "watch", "run", "--poll", "NaN"], watchIo.value)).toBe(2);
+    expect(watchIo.stderr.join("")).toContain("argument --poll: invalid float value: 'NaN'");
+    expect(existsSync(join(root, ".lohra", "state.db"))).toBe(false);
   });
 });
