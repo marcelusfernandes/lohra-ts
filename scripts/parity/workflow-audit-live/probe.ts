@@ -8,8 +8,10 @@ import { resolve } from "node:path";
 import { AuditRepository } from "../../../src/state/audit-repository.js";
 import { openStateDatabase } from "../../../src/state/connection.js";
 import type { Ownership } from "../../../src/state/workflow-repository.js";
+import { createBuiltinRegistry } from "../../../src/tools/builtins.js";
 import { AuditTrail } from "../../../src/workflow/audit-trail.js";
-import type { AuditInput } from "../../../src/workflow/audit-model.js";
+import { safeAuditMetadata, type AuditInput } from "../../../src/workflow/audit-model.js";
+import { workflowAuditHandler } from "../../../src/workflow/tool.js";
 import { canonicalJson } from "../canonical.js";
 import { acquireLock, guardCandidate, releaseLock } from "./support.js";
 
@@ -117,6 +119,88 @@ async function probeSinkOutcomes(
   return result;
 }
 
+async function probeRoundOneRegressions(
+  database: ConstructorParameters<typeof AuditRepository>[0],
+): Promise<Readonly<Record<string, unknown>>> {
+  const repository = new AuditRepository(database);
+  repository.append("public-audit", { event_type: "node.started", created_at: 1 });
+  const registry = createBuiltinRegistry({
+    workflow_audit: workflowAuditHandler(repository),
+  });
+  const publicResult = JSON.parse(
+    await registry.dispatch("workflow_audit", { run_id: "public-audit" }),
+  ) as Readonly<Record<string, unknown>>;
+  if (publicResult.ok !== true || !Array.isArray(publicResult.events))
+    throw new Error("public audit registry probe failed");
+
+  const longRun = `identity-${"r".repeat(200)}`;
+  repository.append(longRun, {
+    event_type: "node.started",
+    segment_id: `segment-${"s".repeat(156)}`,
+    node_id: `node-${"n".repeat(104)}`,
+    sub_id: `sub-${"u".repeat(156)}`,
+    created_at: 2,
+  });
+  const identityRow = database
+    .prepare(
+      "SELECT length(run_id) AS run_id,length(segment_id) AS segment_id,length(node_id) AS node_id,length(sub_id) AS sub_id FROM workflow_audit_events WHERE seq=1 AND run_id LIKE 'identity-%'",
+    )
+    .get() as Readonly<Record<string, bigint>>;
+  const identityLengths = Object.fromEntries(
+    Object.entries(identityRow).map(([key, value]) => [key, Number(value)]),
+  );
+  if (
+    JSON.stringify(identityLengths) !==
+    JSON.stringify({ run_id: 128, segment_id: 128, node_id: 64, sub_id: 128 })
+  )
+    throw new Error(`bounded identity probe failed: ${JSON.stringify(identityLengths)}`);
+
+  const markerStates = Object.values(
+    safeAuditMetadata({
+      prompt: { state: "observed" },
+      response: { state: "unavailable" },
+      reasoning: { state: "redacted" },
+      content: { state: "truncated" },
+      arguments: { state: "not_observed" },
+      result: { state: "not_yet_available" },
+    }),
+  ).map((value) => (value as Readonly<Record<string, unknown>>).state);
+  if (markerStates.some((state) => state !== "excluded_by_policy"))
+    throw new Error(`raw marker probe failed: ${JSON.stringify(markerStates)}`);
+
+  let release!: () => void;
+  const gate = new Promise<void>((resolveGate) => {
+    release = resolveGate;
+  });
+  let first = true;
+  const causalOrder: string[] = [];
+  const controlled = {
+    append: (_runId: string, input: AuditInput) => {
+      if (first) {
+        first = false;
+        throw new Error("database is locked");
+      }
+      causalOrder.push(input.event_type);
+      return {} as never;
+    },
+    isBusyError: (error: unknown) => error instanceof Error && /locked/.test(error.message),
+  } as unknown as AuditRepository;
+  const trail = new AuditTrail(controlled, { capacity: 1, retryDelayMs: 0, sleep: () => gate });
+  trail.record("causal", { event_type: "node.started" });
+  trail.record("causal", { event_type: "node.completed" });
+  trail.record("causal", { event_type: "node.failed" });
+  release();
+  if (!(await trail.flush()) || causalOrder.join(",") !== "node.started,node.completed,audit.gap")
+    throw new Error(`causal overflow probe failed: ${causalOrder.join(",")}`);
+
+  return Object.freeze({
+    publicRegistry: true,
+    identityLengths: Object.freeze(identityLengths),
+    markerStates: Object.freeze(markerStates),
+    causalOrder: Object.freeze(causalOrder),
+  });
+}
+
 function child(databasePath: string): Promise<void> {
   return new Promise((resolveChild, reject) => {
     const process = spawn(
@@ -202,18 +286,27 @@ try {
     );
     if (stale !== null || valid?.seq !== 1) throw new Error("stale fence probe failed");
     const sinkOutcomes = await probeSinkOutcomes(connection.database);
+    const roundOneRegressions = await probeRoundOneRegressions(connection.database);
     let focusedTests = 0;
     if (!mutationMode) {
       const tests = spawnSync(
         resolve(root, "node_modules/.bin/vitest"),
-        ["run", "tests/workflow-audit-live.test.ts"],
-        { cwd: root, encoding: "utf8" },
+        ["run", "tests/workflow-audit-live.test.ts", "--reporter=json", "--no-color"],
+        {
+          cwd: root,
+          encoding: "utf8",
+          env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
+        },
       );
       if (tests.status !== 0)
         throw new Error(`focused tests failed: ${tests.stdout}\n${tests.stderr}`);
-      const focusedMatch = /Tests\s+(\d+) passed/.exec(tests.stdout);
-      if (focusedMatch?.[1] === undefined) throw new Error("focused test count was not observable");
-      focusedTests = Number.parseInt(focusedMatch[1], 10);
+      const focusedReport = JSON.parse(tests.stdout) as { readonly numPassedTests?: unknown };
+      if (
+        typeof focusedReport.numPassedTests !== "number" ||
+        !Number.isSafeInteger(focusedReport.numPassedTests)
+      )
+        throw new Error("focused test count was not observable");
+      focusedTests = focusedReport.numPassedTests;
     }
     const cliHome = resolve(directory, "home");
     mkdirSync(cliHome, { recursive: true });
@@ -279,6 +372,7 @@ try {
       validSeq: valid.seq,
       focusedTests,
       sinkOutcomes,
+      roundOneRegressions,
       cli,
     };
     const digest = createHash("sha256").update(canonicalJson(record)).digest("hex");

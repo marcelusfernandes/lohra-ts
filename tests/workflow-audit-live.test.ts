@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { runCli, type CliIo } from "../src/cli.js";
 import { AuditRepository } from "../src/state/audit-repository.js";
 import { openStateDatabase } from "../src/state/connection.js";
+import { createBuiltinRegistry } from "../src/tools/builtins.js";
 import {
   AUDIT_EVENT_BYTES,
   AUDIT_EVENTS_PER_RUN,
@@ -18,7 +19,7 @@ import { AuditTrail } from "../src/workflow/audit-trail.js";
 import { WorkflowLiveEvents } from "../src/workflow/live-events.js";
 import { WorkflowService } from "../src/workflow/service.js";
 import type { ChildRuntime } from "../src/workflow/runtime.js";
-import { WorkflowTool } from "../src/workflow/tool.js";
+import { WorkflowTool, workflowAuditHandler } from "../src/workflow/tool.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -33,6 +34,26 @@ function database(options: ConstructorParameters<typeof AuditRepository>[1] = {}
 }
 
 describe("T17 metadata-only audit", () => {
+  it("installs workflow_audit in the same session registry used by public chat", async () => {
+    const { connection, audit } = database();
+    try {
+      audit.append("public-audit", { event_type: "node.started", created_at: 1 });
+      const registry = createBuiltinRegistry({
+        workflow_audit: workflowAuditHandler(audit),
+      });
+      const output = JSON.parse(
+        await registry.dispatch("workflow_audit", { run_id: "public-audit" }),
+      ) as {
+        readonly ok: boolean;
+        readonly events: readonly { readonly event_type: string }[];
+      };
+      expect(output.ok, "MUTATION_CAUSE:M12-public-audit-wiring").toBe(true);
+      expect(output.events.map((event) => event.event_type)).toEqual(["node.started"]);
+    } finally {
+      connection.close();
+    }
+  });
+
   it("serializes fractional audit timestamps through the public workflow tool", () => {
     const { connection, audit } = database();
     audit.append("fractional", { event_type: "node.started", created_at: 1.25 });
@@ -87,6 +108,28 @@ describe("T17 metadata-only audit", () => {
       }).reasoning,
     ).toEqual({ state: "excluded_by_policy", characters: 256, fields: 2 });
     expect(json).toContain("excluded_private_state");
+  });
+
+  it("rejects marker-shaped objects in raw fields except policy-produced markers", () => {
+    const hostile = safeAuditMetadata({
+      prompt: { state: "observed" },
+      response: { state: "unavailable" },
+      reasoning: { state: "redacted" },
+      content: { state: "truncated" },
+      arguments: { state: "not_observed" },
+      result: { state: "not_yet_available" },
+    });
+    for (const field of ["prompt", "response", "reasoning", "content", "arguments", "result"])
+      expect(hostile[field], "MUTATION_CAUSE:M14-raw-marker-bypass").toEqual({
+        state: "excluded_by_policy",
+        fields: 1,
+      });
+    expect(
+      safeAuditMetadata({ reasoning: { state: "excluded_private_state", fields: 3 } }).reasoning,
+    ).toEqual({ state: "excluded_private_state", fields: 3 });
+    expect(
+      safeAuditMetadata({ prompt: { state: "excluded_by_policy", characters: 7 } }).prompt,
+    ).toEqual({ state: "excluded_by_policy", characters: 7 });
   });
 
   it("persists attempt and paginates only matching audit events", () => {
@@ -192,6 +235,35 @@ describe("T17 metadata-only audit", () => {
 });
 
 describe("T17 SQLite audit read model", () => {
+  it("bounds every persisted identity column before the SQLite boundary", () => {
+    const { connection, audit } = database();
+    try {
+      const runId = `run-${"r".repeat(204)}`;
+      audit.append(runId, {
+        event_type: "node.started",
+        segment_id: `segment-${"s".repeat(156)}`,
+        node_id: `node-${"n".repeat(104)}`,
+        sub_id: `sub-${"u".repeat(156)}`,
+        created_at: 1,
+      });
+      const row = connection.database
+        .prepare("SELECT run_id,segment_id,node_id,sub_id FROM workflow_audit_events LIMIT 1")
+        .get() as Readonly<Record<string, string>>;
+      expect(
+        Object.fromEntries(
+          Object.entries(row).map(([key, value]) => [key, Array.from(value).length]),
+        ),
+        "MUTATION_CAUSE:M13-unbounded-sqlite-identity",
+      ).toEqual({ run_id: 128, segment_id: 128, node_id: 64, sub_id: 128 });
+      expect(audit.query({ runId }).events).toHaveLength(1);
+      expect(
+        connection.database.prepare("SELECT length(run_id) AS n FROM workflow_audit_state").get(),
+      ).toEqual({ n: 128n });
+    } finally {
+      connection.close();
+    }
+  });
+
   it("allocates dense seq, freezes snapshots and keeps run-wide integrity notices", () => {
     const { connection, audit } = database({ maxEventsPerRun: 3 });
     try {
@@ -472,6 +544,37 @@ describe("T17 live events and sink failures", () => {
     expect(await trail.flush()).toBe(true);
     expect(inputs, "MUTATION_CAUSE:M3-silent-overflow").toContain("run-x:audit.gap");
     expect(inputs).not.toContain("run-y:audit.gap");
+  });
+
+  it("persists an already accepted event before its overflow gap", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let first = true;
+    const events: string[] = [];
+    const repo = {
+      append: (_runId: string, input: { event_type: string }) => {
+        if (first) {
+          first = false;
+          throw new Error("database is locked");
+        }
+        events.push(input.event_type);
+        return {} as never;
+      },
+      isBusyError: (error: unknown) => error instanceof Error && /locked/.test(error.message),
+    } as unknown as AuditRepository;
+    const trail = new AuditTrail(repo, { capacity: 1, retryDelayMs: 0, sleep: () => gate });
+    expect(trail.record("causal", { event_type: "node.started" })).toBe(true);
+    expect(trail.record("causal", { event_type: "node.completed" })).toBe(true);
+    expect(trail.record("causal", { event_type: "node.failed" })).toBe(false);
+    release();
+    expect(await trail.flush()).toBe(true);
+    expect(events, "MUTATION_CAUSE:M15-gap-before-accepted-event").toEqual([
+      "node.started",
+      "node.completed",
+      "audit.gap",
+    ]);
   });
 
   it("audits every pipeline width even when the live surface throttles intermediates", async () => {

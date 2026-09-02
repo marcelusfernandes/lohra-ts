@@ -55,16 +55,26 @@ function handler(name: string): ToolHandler {
   return intercepted;
 }
 
-function registerBuiltins(target: ToolRegistry): ToolRegistry {
+function registerBuiltins(
+  target: ToolRegistry,
+  overrides: Readonly<Record<string, ToolHandler>> = {},
+): ToolRegistry {
   for (const definition of BUILTIN_DEFINITIONS) {
     const { name, ...schema } = definition.function;
-    target.register({ name, toolset: toolset(name), schema, handler: handler(name) });
+    target.register({
+      name,
+      toolset: toolset(name),
+      schema,
+      handler: overrides[name] ?? handler(name),
+    });
   }
   return target;
 }
 
-export function createBuiltinRegistry(): ToolRegistry {
-  return registerBuiltins(new ToolRegistry());
+export function createBuiltinRegistry(
+  overrides: Readonly<Record<string, ToolHandler>> = {},
+): ToolRegistry {
+  return registerBuiltins(new ToolRegistry(), overrides);
 }
 
 export const builtinRegistry = registerBuiltins(registry);

@@ -10,9 +10,14 @@ export interface AuditTrailOptions {
   readonly sleep?: (milliseconds: number) => Promise<void>;
 }
 
-type Queued = Readonly<{ runId: string; input: AuditInput; ownership?: Ownership }>;
+type Queued = Readonly<{
+  order: number;
+  runId: string;
+  input: AuditInput;
+  ownership?: Ownership;
+}>;
 type AppendOutcome = "saved" | "refused" | "failed";
-type DropBucket = Readonly<{ count: number; ownership?: Ownership }>;
+type DropBucket = Readonly<{ order: number; count: number; ownership?: Ownership }>;
 
 export class AuditTrail {
   private readonly queue: Queued[] = [];
@@ -25,6 +30,7 @@ export class AuditTrail {
   private closing = false;
   private stopped = false;
   private readonly dropped = new Map<string, DropBucket>();
+  private nextOrder = 1;
 
   public constructor(
     private readonly repository: AuditRepository,
@@ -44,6 +50,8 @@ export class AuditTrail {
       this.warning(`audit unavailable for run ${runId}: writer is closed`);
       return false;
     }
+    const order = this.nextOrder;
+    this.nextOrder += 1;
     let sanitized: AuditInput;
     try {
       sanitized = Object.freeze({
@@ -67,20 +75,30 @@ export class AuditTrail {
       });
       if (this.queue.length < this.capacity) {
         this.queue.push(
-          Object.freeze({ runId, input: gap, ...(ownership === undefined ? {} : { ownership }) }),
+          Object.freeze({
+            order,
+            runId,
+            input: gap,
+            ...(ownership === undefined ? {} : { ownership }),
+          }),
         );
         this.kick();
-      } else this.markDropped(runId, ownership);
+      } else this.markDropped(order, runId, ownership);
       return false;
     }
     if (this.queue.length >= this.capacity) {
-      this.markDropped(runId, ownership);
+      this.markDropped(order, runId, ownership);
       this.warning(`audit queue overflow for run ${runId}`);
       this.kick();
       return false;
     }
     this.queue.push(
-      Object.freeze({ runId, input: sanitized, ...(ownership === undefined ? {} : { ownership }) }),
+      Object.freeze({
+        order,
+        runId,
+        input: sanitized,
+        ...(ownership === undefined ? {} : { ownership }),
+      }),
     );
     this.kick();
     return true;
@@ -107,29 +125,15 @@ export class AuditTrail {
 
   private async drain(): Promise<void> {
     while (!this.closing || this.queue.length > 0 || this.dropped.size > 0) {
-      const next = this.queue.shift();
-      const markerRun = next?.runId ?? this.dropped.keys().next().value;
-      const marker = markerRun === undefined ? undefined : this.dropped.get(markerRun);
-      if (markerRun !== undefined && marker !== undefined) {
-        const gap: AuditInput = Object.freeze({
-          event_type: "audit.gap",
-          provenance: "dropped",
-          payload: Object.freeze({ reason: "queue_overflow", dropped_count: marker.count }),
-        });
-        const gapOutcome = await this.append(markerRun, gap, marker.ownership);
-        if (gapOutcome === "failed") {
-          this.stopped = true;
-          this.warning(`audit sink failed permanently for run ${markerRun}`);
-          return;
-        }
-        this.dropped.delete(markerRun);
-      }
-      if (next === undefined) {
-        if (this.dropped.size === 0) return;
+      const next = this.queue[0];
+      const marker = this.earliestDropped();
+      if (marker !== undefined && (next === undefined || marker[1].order < next.order)) {
+        if (!(await this.flushDropped(marker[0]))) return;
         continue;
       }
+      if (next === undefined) return;
+      this.queue.shift();
       const saved = await this.append(next.runId, next.input, next.ownership);
-      if (saved === "refused") continue;
       if (saved === "failed") {
         const gap: AuditInput = Object.freeze({
           event_type: "audit.gap",
@@ -144,6 +148,31 @@ export class AuditTrail {
         }
       }
     }
+  }
+
+  private earliestDropped(): readonly [string, DropBucket] | undefined {
+    let earliest: readonly [string, DropBucket] | undefined;
+    for (const entry of this.dropped)
+      if (earliest === undefined || entry[1].order < earliest[1].order) earliest = entry;
+    return earliest;
+  }
+
+  private async flushDropped(runId: string): Promise<boolean> {
+    const marker = this.dropped.get(runId);
+    if (marker === undefined) return true;
+    const gap: AuditInput = Object.freeze({
+      event_type: "audit.gap",
+      provenance: "dropped",
+      payload: Object.freeze({ reason: "queue_overflow", dropped_count: marker.count }),
+    });
+    const outcome = await this.append(runId, gap, marker.ownership);
+    if (outcome === "failed") {
+      this.stopped = true;
+      this.warning(`audit sink failed permanently for run ${runId}`);
+      return false;
+    }
+    this.dropped.delete(runId);
+    return true;
   }
 
   private kick(): void {
@@ -182,11 +211,12 @@ export class AuditTrail {
     return "failed";
   }
 
-  private markDropped(runId: string, ownership?: Ownership): void {
+  private markDropped(order: number, runId: string, ownership?: Ownership): void {
     const prior = this.dropped.get(runId);
     this.dropped.set(
       runId,
       Object.freeze({
+        order: Math.min(prior?.order ?? order, order),
         count: (prior?.count ?? 0) + 1,
         ...(ownership === undefined ? {} : { ownership }),
       }),

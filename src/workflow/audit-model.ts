@@ -189,7 +189,11 @@ function safeValue(value: unknown, key: string, depth: number): unknown {
   if (RAW_FIELDS.has(key)) {
     if (value !== null && typeof value === "object" && !Array.isArray(value)) {
       const preserved = marker(value as Readonly<Record<string, unknown>>);
-      if (preserved !== null) return preserved;
+      if (
+        preserved?.state === "excluded_by_policy" ||
+        preserved?.state === "excluded_private_state"
+      )
+        return preserved;
     }
     return rawMarker(value);
   }
@@ -284,21 +288,7 @@ export function publicAuditEvent(
     schema_version: 1,
     event_type: eventType,
     provenance,
-    identity: Object.freeze({
-      run_id: clipped(runId, 128),
-      ...(input.segment_id === undefined || input.segment_id === null
-        ? {}
-        : { segment_id: clipped(input.segment_id, 128) }),
-      ...(input.node_id === undefined || input.node_id === null
-        ? {}
-        : { node_path: Object.freeze([clipped(input.node_id, 64)]) }),
-      ...(input.sub_id === undefined || input.sub_id === null
-        ? {}
-        : { sub_id: clipped(input.sub_id, 128) }),
-      ...(input.attempt === undefined || input.attempt === null
-        ? {}
-        : { attempt: Math.max(0, Math.trunc(input.attempt)) }),
-    }),
+    identity: publicAuditIdentity(runId, input),
     data: safeAuditMetadata(input.payload ?? {}),
     seq,
     created_at: input.created_at ?? now,
@@ -318,6 +308,27 @@ export function publicAuditEvent(
     }),
     seq,
     created_at: input.created_at ?? now,
+  });
+}
+
+export function publicAuditIdentity(
+  runId: string,
+  input: Pick<AuditInput, "segment_id" | "node_id" | "sub_id" | "attempt">,
+): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    run_id: clipped(runId, 128),
+    ...(input.segment_id === undefined || input.segment_id === null
+      ? {}
+      : { segment_id: clipped(input.segment_id, 128) }),
+    ...(input.node_id === undefined || input.node_id === null
+      ? {}
+      : { node_path: Object.freeze([clipped(input.node_id, 64)]) }),
+    ...(input.sub_id === undefined || input.sub_id === null
+      ? {}
+      : { sub_id: clipped(input.sub_id, 128) }),
+    ...(input.attempt === undefined || input.attempt === null
+      ? {}
+      : { attempt: Math.max(0, Math.trunc(input.attempt)) }),
   });
 }
 

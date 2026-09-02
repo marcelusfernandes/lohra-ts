@@ -27,18 +27,19 @@ import {
   type ProviderProfile,
 } from "../providers/index.js";
 import { pythonJsonDumpsInsertionOrder } from "../serialization/python-json.js";
-import { openStateForEnvironment, SessionRepository } from "../state/index.js";
+import { AuditRepository, openStateForEnvironment, SessionRepository } from "../state/index.js";
 import { SkillStore } from "../skills/index.js";
 import {
   approval,
-  builtinRegistry,
   composeDispatch,
+  createBuiltinRegistry,
   ListModelsTool,
   MemoryTool,
   RegistryToolDispatcher,
   SessionSearchTool,
   SkillTool,
 } from "../tools/index.js";
+import { workflowAuditHandler } from "../workflow/tool.js";
 import {
   AnthropicMessagesClient,
   buildClient,
@@ -193,6 +194,12 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   const maxIterations = finite(stringFlag(options.flags, "--max-iterations"), "max-iterations");
   const connection = openStateForEnvironment(options.environment);
   const sessions = new SessionRepository(connection.database, undefined, connection.ftsEnabled);
+  const auditRepository = new AuditRepository(connection.database, {
+    environment: options.environment,
+  });
+  const sessionRegistry = createBuiltinRegistry({
+    workflow_audit: workflowAuditHandler(auditRepository),
+  });
   const repository = new SqliteConversationRepository(sessions);
   const useTools = !options.flags.has("--no-tools");
   const memoryStore = new MemoryStore(options.home);
@@ -223,7 +230,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   approval.setCallback(
     options.flags.has("--json") || options.flags.has("--no-input") ? () => "deny" : null,
   );
-  const baseDispatch = builtinRegistry.dispatch.bind(builtinRegistry);
+  const baseDispatch = sessionRegistry.dispatch.bind(sessionRegistry);
   const memoryTool = new MemoryTool(memoryStore);
   const skillTool = new SkillTool(skillStore);
   const listModels = new ListModelsTool(options.home, options.environment);
@@ -240,7 +247,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     promptSnapshot: snapshot,
     ...(useTools
       ? {
-          toolDefinitions: builtinRegistry.getDefinitions(),
+          toolDefinitions: sessionRegistry.getDefinitions(),
           toolDispatcher: new RegistryToolDispatcher(dispatch),
         }
       : {}),

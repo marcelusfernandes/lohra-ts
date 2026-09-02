@@ -11,6 +11,19 @@ function record(value: unknown): Readonly<Record<string, unknown>> | null {
     : null;
 }
 
+function auditResult(repository: AuditRepository, args: ToolArguments): string {
+  const parsed = parseAuditQuery(args);
+  if ("error" in parsed) return toolError(parsed.error);
+  const page = pythonJsonLoads(JSON.stringify(repository.query(parsed.query))) as Readonly<
+    Record<string, unknown>
+  >;
+  return toolResult(undefined, page);
+}
+
+export function workflowAuditHandler(repository: AuditRepository): ToolHandler {
+  return (args) => auditResult(repository, args);
+}
+
 export class WorkflowTool {
   constructor(
     private readonly service: WorkflowService,
@@ -73,13 +86,8 @@ export class WorkflowTool {
   }
 
   audit(args: ToolArguments): string {
-    const parsed = parseAuditQuery(args);
-    if ("error" in parsed) return toolError(parsed.error);
     if (this.auditRepository === undefined) return toolError("workflow audit store is unavailable");
-    const page = pythonJsonLoads(
-      JSON.stringify(this.auditRepository.query(parsed.query)),
-    ) as Readonly<Record<string, unknown>>;
-    return toolResult(undefined, page);
+    return auditResult(this.auditRepository, args);
   }
 }
 

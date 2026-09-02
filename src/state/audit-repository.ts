@@ -5,6 +5,7 @@ import {
   AUDIT_RETENTION_SECONDS,
   AUDIT_RUN_CAP,
   publicAuditEvent,
+  publicAuditIdentity,
   resolveAuditSettings,
   type AuditInput,
   type PublicAuditEvent,
@@ -157,6 +158,9 @@ export class AuditRepository {
 
   public append(runId: string, input: AuditInput, ownership?: Ownership): PublicAuditEvent | null {
     const now = input.created_at ?? Date.now() / 1_000;
+    const identity = publicAuditIdentity(runId, input);
+    const auditRunId = String(identity.run_id);
+    const nodePath = Array.isArray(identity.node_path) ? identity.node_path : [];
     const transact = this.database
       .transaction((): PublicAuditEvent | null => {
         if (ownership !== undefined) {
@@ -172,12 +176,12 @@ export class AuditRepository {
         this.compact(now);
         const prior = this.database
           .prepare("SELECT * FROM workflow_audit_state WHERE run_id = ?")
-          .get(runId) as Readonly<Record<string, unknown>> | undefined;
+          .get(auditRunId) as Readonly<Record<string, unknown>> | undefined;
         const tombstone =
           prior === undefined
             ? (this.database
                 .prepare("SELECT * FROM workflow_audit_tombstones WHERE run_id = ?")
-                .get(runId) as Readonly<Record<string, unknown>> | undefined)
+                .get(auditRunId) as Readonly<Record<string, unknown>> | undefined)
             : undefined;
         const seq =
           prior === undefined
@@ -200,19 +204,19 @@ export class AuditRepository {
            (run_id,next_seq,touch_order,retained_events,retention_dropped,dropped_before_seq,updated_at)
            VALUES (?,?,?,?,?,?,?)`,
             )
-            .run(runId, seq + 1, touch, 1, lost, lost > 0 ? seq : null, now);
+            .run(auditRunId, seq + 1, touch, 1, lost, lost > 0 ? seq : null, now);
           this.database
             .prepare("DELETE FROM workflow_audit_tombstones WHERE run_id = ?")
-            .run(runId);
+            .run(auditRunId);
         } else {
           this.database
             .prepare(
               `UPDATE workflow_audit_state SET next_seq=?,touch_order=?,retained_events=retained_events+1,updated_at=?
            WHERE run_id=?`,
             )
-            .run(seq + 1, touch, now, runId);
+            .run(seq + 1, touch, now, auditRunId);
         }
-        const event = publicAuditEvent(runId, seq, input, now);
+        const event = publicAuditEvent(auditRunId, seq, input, now);
         this.database
           .prepare(
             `INSERT INTO workflow_audit_events
@@ -220,12 +224,12 @@ export class AuditRepository {
          VALUES (?,?,?,?,?,?,?,?,?,?)`,
           )
           .run(
-            runId,
+            auditRunId,
             seq,
-            input.segment_id ?? null,
-            input.node_id ?? null,
-            input.sub_id ?? null,
-            input.attempt ?? null,
+            identity.segment_id ?? null,
+            nodePath[0] ?? null,
+            identity.sub_id ?? null,
+            identity.attempt ?? null,
             event.event_type,
             event.provenance,
             JSON.stringify({
@@ -237,7 +241,7 @@ export class AuditRepository {
             }),
             event.created_at,
           );
-        this.pruneRun(runId);
+        this.pruneRun(auditRunId);
         this.pruneRuns(now);
         return event;
       })
@@ -249,6 +253,24 @@ export class AuditRepository {
   }
 
   public query(query: AuditQuery): AuditPage {
+    const identity = publicAuditIdentity(query.runId, {
+      ...(query.segmentId === undefined ? {} : { segment_id: query.segmentId }),
+      ...(query.nodeId === undefined ? {} : { node_id: query.nodeId }),
+      ...(query.subId === undefined ? {} : { sub_id: query.subId }),
+      ...(query.attempt === undefined ? {} : { attempt: query.attempt }),
+    });
+    const auditRunId = String(identity.run_id);
+    const nodePath = Array.isArray(identity.node_path) ? identity.node_path : [];
+    const segmentId = typeof identity.segment_id === "string" ? identity.segment_id : undefined;
+    const subId = typeof identity.sub_id === "string" ? identity.sub_id : undefined;
+    const normalizedQuery: AuditQuery = Object.freeze({
+      ...query,
+      runId: auditRunId,
+      ...(nodePath[0] === undefined ? {} : { nodeId: String(nodePath[0]) }),
+      ...(segmentId === undefined ? {} : { segmentId }),
+      ...(subId === undefined ? {} : { subId }),
+      ...(identity.attempt === undefined ? {} : { attempt: Number(identity.attempt) }),
+    });
     const after = Math.max(0, Math.trunc(query.afterSeq ?? 0));
     const requestedLimit = Math.trunc(query.limit ?? 50);
     const limit = Math.min(100, Math.max(1, requestedLimit));
@@ -256,16 +278,16 @@ export class AuditRepository {
       .transaction(() => {
         const state = this.database
           .prepare("SELECT * FROM workflow_audit_state WHERE run_id = ?")
-          .get(query.runId) as Readonly<Record<string, unknown>> | undefined;
+          .get(auditRunId) as Readonly<Record<string, unknown>> | undefined;
         const tombstone =
           state === undefined
             ? (this.database
                 .prepare("SELECT * FROM workflow_audit_tombstones WHERE run_id = ?")
-                .get(query.runId) as Readonly<Record<string, unknown>> | undefined)
+                .get(auditRunId) as Readonly<Record<string, unknown>> | undefined)
             : undefined;
         const rows = this.database
           .prepare("SELECT * FROM workflow_audit_events WHERE run_id=? ORDER BY seq")
-          .all(query.runId) as readonly Readonly<Record<string, unknown>>[];
+          .all(auditRunId) as readonly Readonly<Record<string, unknown>>[];
         return Object.freeze({ state, tombstone, rows });
       })
       .deferred();
@@ -279,17 +301,17 @@ export class AuditRepository {
     const filtersEnvelope = Object.freeze(
       Object.fromEntries(
         [
-          ["node_id", query.nodeId],
+          ["node_id", normalizedQuery.nodeId],
           ["event_type", query.eventType],
-          ["sub_id", query.subId],
-          ["segment_id", query.segmentId],
-          ["attempt", query.attempt],
+          ["sub_id", normalizedQuery.subId],
+          ["segment_id", normalizedQuery.segmentId],
+          ["attempt", normalizedQuery.attempt],
         ].filter((entry): entry is [string, string | number] => entry[1] !== undefined),
       ),
     );
     if (state === undefined && tombstone === undefined) {
       return Object.freeze({
-        run_id: query.runId,
+        run_id: auditRunId,
         availability: "unavailable" as const,
         filters: filtersEnvelope,
         events: Object.freeze([]),
@@ -323,7 +345,9 @@ export class AuditRepository {
       });
     }
     const snapshotEvents = decoded.filter((event) => event.seq <= snapshot);
-    const eligible = snapshotEvents.filter((event) => event.seq > after && matches(event, query));
+    const eligible = snapshotEvents.filter(
+      (event) => event.seq > after && matches(event, normalizedQuery),
+    );
     const events = eligible.slice(0, limit);
     const notices: Readonly<Record<string, unknown>>[] = snapshotEvents.filter((event) =>
       MARKER_TYPES.has(event.event_type),
@@ -364,7 +388,7 @@ export class AuditRepository {
     const next = events.at(-1)?.seq ?? after;
     const returnedNotices = notices.slice(0, 20);
     return Object.freeze({
-      run_id: query.runId,
+      run_id: auditRunId,
       availability: state !== undefined || decoded.length > 0 ? "available" : "unavailable",
       filters: filtersEnvelope,
       events: Object.freeze(events),

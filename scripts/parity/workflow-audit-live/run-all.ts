@@ -7,10 +7,11 @@ import { resolve } from "node:path";
 
 import { AuditRepository } from "../../../src/state/audit-repository.js";
 import { openStateDatabase } from "../../../src/state/connection.js";
+import { createBuiltinRegistry } from "../../../src/tools/builtins.js";
 import { WorkflowService } from "../../../src/workflow/service.js";
 import { AuditTrail } from "../../../src/workflow/audit-trail.js";
 import { WorkflowLiveEvents } from "../../../src/workflow/live-events.js";
-import { workflowToolHandlers } from "../../../src/workflow/tool.js";
+import { workflowAuditHandler } from "../../../src/workflow/tool.js";
 import {
   AUDIT_EVENT_BYTES,
   AUDIT_EVENTS_PER_RUN,
@@ -135,9 +136,12 @@ async function candidateProjection() {
       });
       const canned = await service.status("canned-run", true);
       await trail.flush();
-      const cannedTool = workflowToolHandlers(service, audit).workflow_audit;
-      if (cannedTool === undefined) throw new Error("workflow_audit handler is missing");
-      const cannedAudit = JSON.parse(await cannedTool({ run_id: "canned-run", limit: 100 })) as {
+      const sessionRegistry = createBuiltinRegistry({
+        workflow_audit: workflowAuditHandler(audit),
+      });
+      const cannedAudit = JSON.parse(
+        await sessionRegistry.dispatch("workflow_audit", { run_id: "canned-run", limit: 100 }),
+      ) as {
         readonly ok: boolean;
         readonly events: readonly {
           readonly event_type: string;

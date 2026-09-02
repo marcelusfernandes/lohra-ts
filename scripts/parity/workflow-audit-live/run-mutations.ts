@@ -32,6 +32,7 @@ const live = "src/workflow/live-events.ts";
 const argSpec = "src/cli/arg-spec.ts";
 const cli = "src/cli.ts";
 const service = "src/workflow/service.ts";
+const builtins = "src/tools/builtins.ts";
 
 const mutants: readonly Mutant[] = [
   {
@@ -199,6 +200,66 @@ const mutants: readonly Mutant[] = [
           'return this.repository.append(runId, input, ownership) === null ? "refused" : "saved";',
         after:
           'return this.repository.append(runId, input, ownership) === null ? "failed" : "saved";',
+      },
+    ],
+  },
+  {
+    id: "M12-public-audit-wiring",
+    assertion: "D6",
+    test: "installs workflow_audit in the same session registry used by public chat",
+    cause: "MUTATION_CAUSE:M12-public-audit-wiring",
+    externalCause: "public audit registry probe failed",
+    edits: [
+      {
+        file: builtins,
+        before: "handler: overrides[name] ?? handler(name),",
+        after: "handler: handler(name),",
+      },
+    ],
+  },
+  {
+    id: "M13-unbounded-sqlite-identity",
+    assertion: "A3",
+    test: "bounds every persisted identity column before the SQLite boundary",
+    cause: "MUTATION_CAUSE:M13-unbounded-sqlite-identity",
+    externalCause: "bounded identity probe failed",
+    edits: [
+      {
+        file: repository,
+        before:
+          "            auditRunId,\n            seq,\n            identity.segment_id ?? null,\n            nodePath[0] ?? null,\n            identity.sub_id ?? null,\n            identity.attempt ?? null,",
+        after:
+          "            runId,\n            seq,\n            input.segment_id ?? null,\n            input.node_id ?? null,\n            input.sub_id ?? null,\n            input.attempt ?? null,",
+      },
+    ],
+  },
+  {
+    id: "M14-raw-marker-bypass",
+    assertion: "A1/A3",
+    test: "rejects marker-shaped objects in raw fields except policy-produced markers",
+    cause: "MUTATION_CAUSE:M14-raw-marker-bypass",
+    externalCause: "raw marker probe failed",
+    edits: [
+      {
+        file: auditModel,
+        before:
+          '      if (\n        preserved?.state === "excluded_by_policy" ||\n        preserved?.state === "excluded_private_state"\n      )\n        return preserved;',
+        after: "      if (preserved !== null) return preserved;",
+      },
+    ],
+  },
+  {
+    id: "M15-gap-before-accepted-event",
+    assertion: "C4",
+    test: "persists an already accepted event before its overflow gap",
+    cause: "MUTATION_CAUSE:M15-gap-before-accepted-event",
+    externalCause: "causal overflow probe failed",
+    edits: [
+      {
+        file: auditTrail,
+        before:
+          "      if (marker !== undefined && (next === undefined || marker[1].order < next.order)) {",
+        after: "      if (marker !== undefined) {",
       },
     ],
   },
