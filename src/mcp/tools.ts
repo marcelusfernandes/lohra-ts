@@ -6,6 +6,7 @@ import {
   type ToolRegistry,
 } from "../tools/registry.js";
 import type { ToolFunctionSchema, ToolHandler } from "../tools/types.js";
+import type { ToolRegistration } from "../tools/types.js";
 
 const EMPTY_SCHEMA: Readonly<Record<string, unknown>> = Object.freeze({
   type: "object",
@@ -91,6 +92,17 @@ export type CallTool = (originalName: string, args: Readonly<Record<string, unkn
 
 export class MCPToolListError extends Error {}
 
+export class MCPToolNameCollisionError extends Error {
+  override readonly cause = "MCP_TOOL_NAME_COLLISION";
+  readonly toolName: string;
+
+  constructor(toolName: string) {
+    super(`MCP tool name collision: ${toolName}`);
+    this.name = "MCPToolNameCollisionError";
+    this.toolName = toolName;
+  }
+}
+
 function makeHandler(callTool: CallTool, originalName: string): ToolHandler {
   return async (args) => wrapCallResult(await callTool(originalName, args));
 }
@@ -99,6 +111,41 @@ function makeHandler(callTool: CallTool, originalName: string): ToolHandler {
  * `logging.lastResort` (M2): no `WARNING:`, no logger name, no timestamp. */
 function warn(message: string): void {
   process.stderr.write(`${message}\n`);
+}
+
+export interface PreparedMcpTools {
+  readonly names: readonly string[];
+  readonly registrations: readonly ToolRegistration[];
+}
+
+export function prepareServerTools(
+  server: string,
+  tools: readonly unknown[],
+  callTool: CallTool,
+): PreparedMcpTools {
+  const toolset = `mcp-${server}`;
+  const names = new Set<string>();
+  const registrations: ToolRegistration[] = [];
+  for (const tool of tools) {
+    const original = field<unknown>(tool, "name", undefined);
+    if (!isPythonTruthy(original)) continue;
+    if (typeof original !== "string") {
+      throw new MCPToolListError(
+        `MCP server ${pythonRepr(server)} returned a truthy non-string tool name: ${pythonRepr(original)}`,
+      );
+    }
+    const name = mcpToolName(server, original);
+    if (names.has(name)) throw new MCPToolNameCollisionError(name);
+    names.add(name);
+    registrations.push({
+      name,
+      toolset,
+      schema: convertMcpSchema(tool),
+      handler: makeHandler(callTool, original),
+      emoji: "🔌",
+    });
+  }
+  return { names: [...names], registrations };
 }
 
 /** Register every tool of one MCP server. Returns the registry names added.
@@ -110,41 +157,29 @@ export function registerServerTools(
   tools: readonly unknown[],
   callTool: CallTool,
 ): readonly string[] {
-  const toolset = `mcp-${server}`;
-  const registered: string[] = [];
-  const validated: { readonly tool: unknown; readonly original: string }[] = [];
-  for (const tool of tools) {
-    const original = field<unknown>(tool, "name", undefined);
-    if (!isPythonTruthy(original)) continue;
-    if (typeof original !== "string") {
-      throw new MCPToolListError(
-        `MCP server ${pythonRepr(server)} returned a truthy non-string tool name: ${pythonRepr(original)}`,
+  const prepared = prepareServerTools(server, tools, callTool);
+  const registrations = prepared.registrations.filter((registration) => {
+    const existingToolset = registry.toolsetFor(registration.name);
+    if (existingToolset === null) return true;
+    if (!existingToolset.startsWith("mcp-")) {
+      warn(
+        `MCP tool ${pythonRepr(registration.name)} shadows an existing ${pythonRepr(registration.name)} — skipped`,
       );
+      return false;
     }
-    validated.push({ tool, original });
+    throw new MCPToolNameCollisionError(registration.name);
+  });
+  try {
+    registry.registerBatch(registrations);
+  } catch (error) {
+    if (error instanceof ToolRegistrationCollisionError) {
+      const name = registrations.find((registration) => registry.toolsetFor(registration.name) !== null)
+        ?.name;
+      throw new MCPToolNameCollisionError(name ?? "unknown");
+    }
+    throw error;
   }
-  for (const { tool, original } of validated) {
-    const name = mcpToolName(server, original);
-    if (registered.includes(name)) {
-      warn(`MCP tool ${pythonRepr(server)}/${pythonRepr(original)} collides with an earlier tool as ${pythonRepr(name)} — skipped`);
-      continue;
-    }
-    try {
-      registry.register({
-        name,
-        toolset,
-        schema: convertMcpSchema(tool),
-        handler: makeHandler(callTool, original),
-        emoji: "🔌",
-      });
-    } catch (error) {
-      if (!(error instanceof ToolRegistrationCollisionError)) throw error;
-      warn(`MCP tool ${pythonRepr(original)} shadows an existing ${pythonRepr(name)} — skipped`);
-      continue;
-    }
-    registered.push(name);
-  }
-  return registered;
+  return registrations.map(({ name }) => name);
 }
 
 /** Nuke-and-repave: drop every tool a server registered (for refresh/shutdown). */

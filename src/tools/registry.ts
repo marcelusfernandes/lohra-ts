@@ -39,7 +39,50 @@ export class ToolRegistry {
   }
 
   register(registration: ToolRegistration): void {
-    const existing = this.#entries.get(registration.name);
+    const next = new Map(this.#entries);
+    this.#registerInto(next, registration, false);
+    this.#replaceEntries(next);
+  }
+
+  registerBatch(
+    registrations: readonly ToolRegistration[],
+    options: { readonly replaceToolsets?: readonly string[] } = {},
+  ): void {
+    const next = new Map(this.#entries);
+    const replaced = new Set(options.replaceToolsets ?? []);
+    if (replaced.size > 0) {
+      for (const [name, entry] of next) {
+        if (replaced.has(entry.toolset)) next.delete(name);
+      }
+    }
+    const names = new Set<string>();
+    for (const registration of registrations) {
+      if (names.has(registration.name)) {
+        throw new ToolRegistrationCollisionError(
+          `tool '${registration.name}' appears more than once in the registration batch`,
+        );
+      }
+      names.add(registration.name);
+      this.#registerInto(next, registration, true);
+    }
+    this.#replaceEntries(next);
+  }
+
+  toolsetFor(name: string): string | null {
+    return this.#entries.get(name)?.toolset ?? null;
+  }
+
+  #registerInto(
+    entries: Map<string, ToolEntry>,
+    registration: ToolRegistration,
+    strict: boolean,
+  ): void {
+    const existing = entries.get(registration.name);
+    if (strict && existing !== undefined && registration.override !== true) {
+      throw new ToolRegistrationCollisionError(
+        `tool '${registration.name}' already registered under '${existing.toolset}'`,
+      );
+    }
     if (existing !== undefined && existing.toolset !== registration.toolset) {
       const bothMcp =
         existing.toolset.startsWith("mcp-") && registration.toolset.startsWith("mcp-");
@@ -50,7 +93,7 @@ export class ToolRegistry {
       }
     }
     const schema = frozenClone({ ...registration.schema, name: registration.name });
-    this.#entries.set(
+    entries.set(
       registration.name,
       Object.freeze({
         name: registration.name,
@@ -69,6 +112,11 @@ export class ToolRegistry {
         maxResultSizeChars: registration.maxResultSizeChars ?? null,
       }),
     );
+  }
+
+  #replaceEntries(entries: ReadonlyMap<string, ToolEntry>): void {
+    this.#entries.clear();
+    for (const [name, entry] of entries) this.#entries.set(name, entry);
     this.#bump();
   }
 

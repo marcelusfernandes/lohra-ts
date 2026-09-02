@@ -1,6 +1,10 @@
 import type { MCPServerConfig } from "./config.js";
 import type { MCPSession, SessionFactory } from "./session.js";
-import { deregisterServer, registerServerTools } from "./tools.js";
+import {
+  deregisterServer,
+  MCPToolNameCollisionError,
+  prepareServerTools,
+} from "./tools.js";
 import { pythonRepr } from "../serialization/python-repr.js";
 import type { ToolRegistry } from "../tools/registry.js";
 
@@ -35,35 +39,61 @@ export class MCPManager {
    * connect" message -- reproduced imprecision (baseline M12), not
    * "corrected" without an ADR. */
   async connectAll(configs: readonly MCPServerConfig[]): Promise<void> {
-    for (const config of configs) {
-      try {
-        await this.#connect(config);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        warn(`MCP server ${pythonRepr(config.name)} failed to connect: ${message}`);
-      }
-    }
-  }
-
-  async #connect(config: MCPServerConfig): Promise<void> {
-    const session = await this.#sessionFactory(config);
+    const staged: Array<{
+      readonly config: MCPServerConfig;
+      readonly session: MCPSession;
+      readonly registrations: ReturnType<typeof prepareServerTools>["registrations"];
+    }> = [];
     try {
-      const tools = await session.listTools();
-      registerServerTools(this.#registry, config.name, tools, (name, args) => session.callTool(name, args));
+      for (const config of configs) {
+        const session = await this.#sessionFactory(config);
+        try {
+          const tools = await session.listTools();
+          const prepared = prepareServerTools(config.name, tools, (name, args) =>
+            session.callTool(name, args),
+          );
+          staged.push({ config, session, registrations: prepared.registrations });
+        } catch (error) {
+          await this.#closePreservingPrimary(session, config.name);
+          throw error;
+        }
+      }
+      const seen = new Set<string>();
+      const registrations = staged.flatMap((entry) => [...entry.registrations]);
+      for (const registration of registrations) {
+        if (seen.has(registration.name)) throw new MCPToolNameCollisionError(registration.name);
+        seen.add(registration.name);
+      }
+      this.#registry.registerBatch(registrations);
+      for (const { config, session } of staged) this.#sessions.set(config.name, session);
     } catch (error) {
-      await session.close(); // don't leak a session we couldn't register
+      for (const { config, session } of staged) {
+        await this.#closePreservingPrimary(session, config.name);
+      }
       throw error;
     }
-    this.#sessions.set(config.name, session);
   }
 
-  /** Re-list a server's tools and re-register them (nuke-and-repave). */
+  async #closePreservingPrimary(session: MCPSession, name: string): Promise<void> {
+    try {
+      await session.close();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      warn(`error closing transient MCP session ${pythonRepr(name)}: ${message}`);
+    }
+  }
+
+  /** Re-list a server's tools and atomically replace only its owned set. */
   async refresh(server: string): Promise<void> {
     const session = this.#sessions.get(server);
     if (session === undefined) return;
-    deregisterServer(this.#registry, server);
     const tools = await session.listTools();
-    registerServerTools(this.#registry, server, tools, (name, args) => session.callTool(name, args));
+    const prepared = prepareServerTools(server, tools, (name, args) =>
+      session.callTool(name, args),
+    );
+    this.#registry.registerBatch(prepared.registrations, {
+      replaceToolsets: [`mcp-${server}`],
+    });
   }
 
   /** Deregister every server's tools and close all sessions. */

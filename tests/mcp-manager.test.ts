@@ -32,24 +32,20 @@ function captureStderr(): { readonly lines: string[]; restore: () => void } {
 }
 
 describe("MCPManager.connectAll", () => {
-  it("registers a server's tools and isolates one server's failure from the rest", async () => {
+  it("rolls back the whole call and closes staged sessions when a later server fails", async () => {
     const registry = new ToolRegistry();
     const good = config("fix");
     const bad = config("broken");
+    const goodClose = vi.fn(() => Promise.resolve());
     const factory = vi.fn((cfg: MCPServerConfig) => {
       if (cfg.name === "broken") return Promise.reject(new Error("no such server"));
-      return Promise.resolve(fakeSession([{ name: "echo" }]));
+      return Promise.resolve(fakeSession([{ name: "echo" }], { close: goodClose }));
     });
     const manager = new MCPManager(registry, factory);
-    const capture = captureStderr();
-    try {
-      await manager.connectAll([bad, good]);
-    } finally {
-      capture.restore();
-    }
-    expect(registry.namesInToolset("mcp-fix")).toEqual(["mcp_fix_echo"]);
+    await expect(manager.connectAll([good, bad])).rejects.toThrow("no such server");
+    expect(registry.namesInToolset("mcp-fix")).toEqual([]);
     expect(registry.namesInToolset("mcp-broken")).toEqual([]);
-    expect(capture.lines.join("")).toBe("MCP server 'broken' failed to connect: no such server\n");
+    expect(goodClose).toHaveBeenCalledTimes(1);
   });
 
   it("a session that fails list_tools closes without leaking, and gets the SAME 'failed to connect' message a connect failure would (M12)", async () => {
@@ -63,40 +59,54 @@ describe("MCPManager.connectAll", () => {
         }),
       );
     const manager = new MCPManager(registry, factory);
-    const capture = captureStderr();
-    try {
-      await manager.connectAll([config("bad")]);
-    } finally {
-      capture.restore();
-    }
+    await expect(manager.connectAll([config("bad")])).rejects.toThrow("cannot list");
     expect(closeSpy).toHaveBeenCalledTimes(1);
-    expect(capture.lines.join("")).toBe("MCP server 'bad' failed to connect: cannot list\n");
   });
 
-  it("rejects an invalid-name batch atomically, closes it, and still connects a valid neighbor", async () => {
+  it("rejects an invalid-name batch atomically and closes every staged neighbor", async () => {
     const registry = new ToolRegistry();
     const badClose = vi.fn(() => Promise.resolve());
+    const goodClose = vi.fn(() => Promise.resolve());
     const factory = (cfg: MCPServerConfig) =>
       Promise.resolve(
         cfg.name === "bad"
           ? fakeSession([{ name: "prefix" }, { name: 123 }, { name: "suffix" }], {
               close: badClose,
             })
-          : fakeSession([{ name: "ok" }]),
+          : fakeSession([{ name: "ok" }], { close: goodClose }),
       );
     const manager = new MCPManager(registry, factory);
-    const capture = captureStderr();
-    try {
-      await manager.connectAll([config("bad"), config("good")]);
-    } finally {
-      capture.restore();
-    }
-    expect(registry.namesInToolset("mcp-bad")).toEqual([]);
-    expect(registry.namesInToolset("mcp-good")).toEqual(["mcp_good_ok"]);
-    expect(badClose).toHaveBeenCalledTimes(1);
-    expect(capture.lines.join("")).toMatch(
-      /^MCP server 'bad' failed to connect: MCP server 'bad' returned a truthy non-string tool name: 123\n$/u,
+    await expect(manager.connectAll([config("good"), config("bad")])).rejects.toThrow(
+      /truthy non-string tool name/u,
     );
+    expect(registry.namesInToolset("mcp-bad")).toEqual([]);
+    expect(registry.namesInToolset("mcp-good")).toEqual([]);
+    expect(badClose).toHaveBeenCalledTimes(1);
+    expect(goodClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a sanitized cross-server collision in either declaration order with no partial publication", async () => {
+    for (const names of [
+      ["github.com", "github_com"],
+      ["github_com", "github.com"],
+    ] as const) {
+      const registry = new ToolRegistry();
+      const closes = new Map(names.map((name) => [name, vi.fn(() => Promise.resolve())]));
+      const manager = new MCPManager(registry, (cfg) => {
+        const close = closes.get(cfg.name as (typeof names)[number]);
+        if (close === undefined) throw new Error("unexpected fixture server");
+        return Promise.resolve(fakeSession([{ name: "search" }], { close }));
+      });
+
+      await expect(manager.connectAll(names.map((name) => config(name)))).rejects.toMatchObject({
+        cause: "MCP_TOOL_NAME_COLLISION",
+        message: "MCP tool name collision: mcp_github_com_search",
+      });
+      expect(registry.namesInToolset(`mcp-${names[0]}`)).toEqual([]);
+      expect(registry.namesInToolset(`mcp-${names[1]}`)).toEqual([]);
+      expect(closes.get(names[0])).toHaveBeenCalledTimes(1);
+      expect(closes.get(names[1])).toHaveBeenCalledTimes(1);
+    }
   });
 });
 
@@ -124,6 +134,29 @@ describe("MCPManager.refresh", () => {
     expect(registry.namesInToolset("mcp-fix")).toEqual(["mcp_fix_one"]);
     await manager.refresh("fix");
     expect(registry.namesInToolset("mcp-fix")).toEqual(["mcp_fix_two"]);
+  });
+
+  it("preserves the old toolset when refresh validation fails", async () => {
+    const registry = new ToolRegistry();
+    let call = 0;
+    const manager = new MCPManager(registry, () =>
+      Promise.resolve(
+        fakeSession([], {
+          listTools: () => {
+            call += 1;
+            return Promise.resolve(
+              call === 1 ? [{ name: "stable" }] : [{ name: "Do-Thing" }, { name: "do thing" }],
+            );
+          },
+        }),
+      ),
+    );
+    await manager.connectAll([config("fix")]);
+
+    await expect(manager.refresh("fix")).rejects.toMatchObject({
+      cause: "MCP_TOOL_NAME_COLLISION",
+    });
+    expect(registry.namesInToolset("mcp-fix")).toEqual(["mcp_fix_stable"]);
   });
 });
 

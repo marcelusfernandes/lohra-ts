@@ -172,16 +172,10 @@ describe("registerServerTools / deregisterServer", () => {
     expect(envelope.error).toMatch(/^Tool execution failed: TypeError: .+/u);
   });
 
-  it("intra-server collision: same slug -> first wins, second skipped, exact warning text (M5)", () => {
+  it("rejects an intra-server sanitized-name collision before publishing any tool", () => {
     const registry = new ToolRegistry();
-    const stderr: string[] = [];
-    const spy = process.stderr.write.bind(process.stderr);
-    process.stderr.write = ((chunk: string) => {
-      stderr.push(chunk);
-      return true;
-    });
-    try {
-      const added = registerServerTools(
+    expect(() =>
+      registerServerTools(
         registry,
         "fix",
         [
@@ -190,14 +184,9 @@ describe("registerServerTools / deregisterServer", () => {
           { name: "other", description: "third" },
         ],
         () => ({}),
-      );
-      expect(added).toEqual(["mcp_fix_do_thing", "mcp_fix_other"]);
-    } finally {
-      process.stderr.write = spy;
-    }
-    expect(stderr.join("")).toContain(
-      "MCP tool 'fix'/'do thing' collides with an earlier tool as 'mcp_fix_do_thing' — skipped",
-    );
+      ),
+    ).toThrow("MCP tool name collision: mcp_fix_do_thing");
+    expect(registry.namesInToolset("mcp-fix")).toEqual([]);
   });
 
   it("cross-toolset collision with a builtin: MCP tool skipped, builtin intact", () => {
@@ -216,7 +205,7 @@ describe("registerServerTools / deregisterServer", () => {
 
   it("does not relabel an unexpected registry failure as a shadow warning", () => {
     class ExplodingRegistry extends ToolRegistry {
-      override register(): void {
+      override registerBatch(): void {
         throw new RangeError("structured clone exploded");
       }
     }
@@ -231,30 +220,17 @@ describe("registerServerTools / deregisterServer", () => {
     ).toThrow(new RangeError("structured clone exploded"));
   });
 
-  it("cross-server MCP collision: silent last-wins overwrite, no warning, loser's deregister removes nothing (M4/M4-bis)", () => {
+  it("cross-server MCP collision is rejected and preserves the first owner's registry", () => {
     const registry = new ToolRegistry();
-    const stderr: string[] = [];
-    const spy = process.stderr.write.bind(process.stderr);
-    process.stderr.write = ((chunk: string) => {
-      stderr.push(chunk);
-      return true;
-    });
-    try {
-      registerServerTools(registry, "github.com", [{ name: "search", description: "A" }], () => "A");
-      registerServerTools(registry, "github_com", [{ name: "search", description: "B" }], () => "B");
-    } finally {
-      process.stderr.write = spy;
-    }
-    expect(stderr.join("")).toBe("");
-    // A's own toolset no longer sees the tool -- it moved to B's toolset.
-    expect(registry.namesInToolset("mcp-github.com")).toEqual([]);
-    expect(registry.namesInToolset("mcp-github_com")).toEqual(["mcp_github_com_search"]);
+    registerServerTools(registry, "github.com", [{ name: "search", description: "A" }], () => "A");
+    expect(() =>
+      registerServerTools(registry, "github_com", [{ name: "search", description: "B" }], () => "B"),
+    ).toThrow("MCP tool name collision: mcp_github_com_search");
+    expect(registry.namesInToolset("mcp-github.com")).toEqual(["mcp_github_com_search"]);
+    expect(registry.namesInToolset("mcp-github_com")).toEqual([]);
 
     deregisterServer(registry, "github.com");
-    expect(registry.namesInToolset("mcp-github_com")).toEqual(["mcp_github_com_search"]);
-
-    deregisterServer(registry, "github_com");
-    expect(registry.namesInToolset("mcp-github_com")).toEqual([]);
+    expect(registry.namesInToolset("mcp-github.com")).toEqual([]);
   });
 
   it("deregisterServer removes only the named server's own toolset", () => {
