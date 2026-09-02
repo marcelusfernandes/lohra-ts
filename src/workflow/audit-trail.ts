@@ -214,8 +214,8 @@ export class AuditTrail {
     input: AuditInput,
     ownership?: Ownership,
   ): Promise<AppendOutcome> {
+    if (this.isStopped()) return "failed";
     for (let attempt = 0; attempt < this.retries; attempt += 1) {
-      if (this.isStopped()) return "failed";
       try {
         return this.repository.append(runId, input, ownership) === null ? "refused" : "saved";
       } catch (error) {

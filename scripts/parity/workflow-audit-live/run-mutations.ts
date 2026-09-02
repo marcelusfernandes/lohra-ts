@@ -419,7 +419,8 @@ const mutants: readonly Mutant[] = [
         file: auditTrail,
         before:
           "      (prior === undefined || acceptedSincePrior) &&\n      this.dropped.length >= this.maxDropBuckets - 1",
-        after: "      false",
+        after:
+          "      (prior === undefined || acceptedSincePrior) &&\n      this.dropped.length >= this.maxDropBuckets - 1 &&\n      this.maxDropBuckets < 0",
       },
     ],
   },
