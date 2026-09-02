@@ -243,7 +243,7 @@ const mutants: readonly Mutant[] = [
       {
         file: auditModel,
         before:
-          '      if (\n        preserved?.state === "excluded_by_policy" ||\n        preserved?.state === "excluded_private_state"\n      )\n        return preserved;',
+          '      if (\n        preserved?.state === "excluded_by_policy" ||\n        (key === "reasoning" && preserved?.state === "excluded_private_state")\n      )\n        return preserved;',
         after: "      if (preserved !== null) return preserved;",
       },
     ],
