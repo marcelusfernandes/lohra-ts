@@ -14,6 +14,7 @@ from lohra.workflow.audit import (
     DEFAULT_MAX_EVENT_BYTES, DEFAULT_MAX_EVENTS_PER_RUN, DEFAULT_MAX_RUNS,
     DEFAULT_QUEUE_LIMIT, DEFAULT_RETENTION_SECONDS, sanitize_audit_event,
 )
+from lohra.workflow.audit_query import WorkflowAuditTool
 from lohra.workflow.events import DONE, ITEMS, NODE, PLAN, EventEmitter
 from lohra.workflow.service import WorkflowService
 
@@ -52,7 +53,8 @@ def canned_projection(root: Path) -> dict[str, Any]:
         run_id = started["run_id"]
         result = service.status(run_id, wait=True, timeout=10)
         assert service._audit.flush(timeout=2)
-        page = db.audit_query(run_id, limit=100)
+        page = json.loads(WorkflowAuditTool(db).handle({"run_id": run_id, "limit": 100}))
+        assert page["ok"] is True
         event_types = [row["event_type"] for row in page["events"]]
         encoded = json.dumps(page, ensure_ascii=False)
         return {
@@ -64,6 +66,7 @@ def canned_projection(root: Path) -> dict[str, Any]:
                 "done": "segment.completed" in event_types,
             },
             "canary_absent": CANARY not in encoded,
+            "tool_ok": page["ok"],
         }
     finally:
         service.shutdown()
