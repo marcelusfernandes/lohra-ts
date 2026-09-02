@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "id": "t20-literal-public",
+  "description": "T20 bilateral observation: literal-public (expected divergent)",
+  "argv": [
+    "literal-public"
+  ],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "PYTHONHASHSEED": "0",
+      "NO_COLOR": "1",
+      "TZ": "UTC",
+      "HOME": "{{home}}",
+      "TMPDIR": "{{home}}/tmp",
+      "HTTP_PROXY": "http://127.0.0.1:1",
+      "HTTPS_PROXY": "http://127.0.0.1:1",
+      "ALL_PROXY": "http://127.0.0.1:1"
+    }
+  },
+  "preconditions": [],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/web-tools/oracle_driver.py"
+      ],
+      "cwd": "profile"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/web-tools/candidate-driver.mjs"
+      ],
+      "cwd": "profile"
+    }
+  },
+  "limits": {
+    "timeoutMs": 60000,
+    "maxOutputBytes": 16777216
+  },
+  "capture": {
+    "tree": {
+      "enabled": false,
+      "root": "profile",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": []
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "oracle",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "value": "{\"rows\": [{\"authorization\": [], \"bodyBytesRead\": 10, \"dns\": [\"93.184.216.34\"], \"parserCalls\": 0, \"requestBodies\": [\"\"], \"requests\": [\"http://93.184.216.34/\"], \"result\": {\"ok\": true, \"text\": \"literal ok\", \"url\": \"http://93.184.216.34/\"}}, {\"authorization\": [], \"bodyBytesRead\": 20, \"dns\": [\"93.184.216.34\", \"2606:4700:4700::1111\"], \"parserCalls\": 0, \"requestBodies\": [\"\", \"\"], \"requests\": [\"http://93.184.216.34/\", \"http://[2606:4700:4700::1111]/\"], \"result\": {\"ok\": true, \"text\": \"literal ok\", \"url\": \"http://[2606:4700:4700::1111]/\"}}]}\n"
+    },
+    {
+      "side": "candidate",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "value": "{\"rows\": [{\"authorization\": [], \"bodyBytesRead\": 10, \"dns\": [], \"parserCalls\": 0, \"requestBodies\": [\"\"], \"requests\": [\"http://93.184.216.34/\"], \"result\": {\"ok\": true, \"text\": \"literal ok\", \"url\": \"http://93.184.216.34/\"}}, {\"authorization\": [], \"bodyBytesRead\": 20, \"dns\": [], \"parserCalls\": 0, \"requestBodies\": [\"\", \"\"], \"requests\": [\"http://93.184.216.34/\", \"http://[2606:4700:4700::1111]/\"], \"result\": {\"ok\": true, \"text\": \"literal ok\", \"url\": \"http://[2606:4700:4700::1111]/\"}}]}\n"
+    }
+  ],
+  "normalizations": [],
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10",
+    "expectedPackages": {
+      "openai": "3.6.0",
+      "httpx": "0.28.1"
+    }
+  }
+}

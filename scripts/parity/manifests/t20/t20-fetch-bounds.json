@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "id": "t20-fetch-bounds",
+  "description": "T20 bilateral observation: fetch-bounds (expected divergent)",
+  "argv": [
+    "fetch-bounds"
+  ],
+  "environment": {
+    "allow": [],
+    "set": {
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+      "PYTHONUTF8": "1",
+      "PYTHONHASHSEED": "0",
+      "NO_COLOR": "1",
+      "TZ": "UTC",
+      "HOME": "{{home}}",
+      "TMPDIR": "{{home}}/tmp",
+      "HTTP_PROXY": "http://127.0.0.1:1",
+      "HTTPS_PROXY": "http://127.0.0.1:1",
+      "ALL_PROXY": "http://127.0.0.1:1"
+    }
+  },
+  "preconditions": [],
+  "fixtures": [],
+  "runners": {
+    "oracle": {
+      "adapter": "python",
+      "executable": "oracle-python",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/web-tools/oracle_driver.py"
+      ],
+      "cwd": "profile"
+    },
+    "candidate": {
+      "adapter": "typescript",
+      "executable": "node",
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/web-tools/candidate-driver.mjs"
+      ],
+      "cwd": "profile"
+    }
+  },
+  "limits": {
+    "timeoutMs": 60000,
+    "maxOutputBytes": 16777216
+  },
+  "capture": {
+    "tree": {
+      "enabled": false,
+      "root": "profile",
+      "exclude": []
+    },
+    "sqlite": [],
+    "events": []
+  },
+  "comparisons": [
+    {
+      "class": "byte",
+      "field": "process.exitCode"
+    },
+    {
+      "class": "byte",
+      "field": "process.signal"
+    },
+    {
+      "class": "byte",
+      "field": "process.stdout"
+    }
+  ],
+  "expectations": [
+    {
+      "side": "both",
+      "field": "process.exitCode",
+      "value": 0
+    },
+    {
+      "side": "both",
+      "field": "process.signal",
+      "value": null
+    },
+    {
+      "side": "oracle",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "value": "{\"rows\": [{\"bodyBytesRead\": 1999999, \"dnsCount\": 1, \"error\": null, \"input\": 0, \"requestCount\": 1, \"text\": {\"head\": \"xxxxxxxxxxxxxxxx\", \"length\": 20000, \"sha256\": \"42e8bc96b8eec8c4e5d503483ba0cb843ce95243c8ca8575ffc69cd25d12c61c\", \"tail\": \"xxxx\"}}, {\"bodyBytesRead\": 2000000, \"dnsCount\": 1, \"error\": null, \"input\": 1, \"requestCount\": 1, \"text\": {\"head\": \"xxxxxxxxxxxxxxxx\", \"length\": 20000, \"sha256\": \"42e8bc96b8eec8c4e5d503483ba0cb843ce95243c8ca8575ffc69cd25d12c61c\", \"tail\": \"xxxx\"}}, {\"bodyBytesRead\": 2000001, \"dnsCount\": 1, \"error\": null, \"input\": 2, \"requestCount\": 1, \"text\": {\"head\": \"xxxxxxxxxxxxxxxx\", \"length\": 20000, \"sha256\": \"42e8bc96b8eec8c4e5d503483ba0cb843ce95243c8ca8575ffc69cd25d12c61c\", \"tail\": \"xxxx\"}}, {\"bodyBytesRead\": 3000000, \"dnsCount\": 1, \"error\": null, \"input\": 3, \"requestCount\": 1, \"text\": {\"head\": \"\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\", \"length\": 20000, \"sha256\": \"28b4f41a7f3ee6d8cc87272db6e09c6d3566551fd4d18702b041a21658272a85\", \"tail\": \"\\u0000\\u0000\\u0000\\u0000\"}}, {\"bodyBytesRead\": 2000002, \"dnsCount\": 1, \"error\": null, \"input\": 4, \"requestCount\": 1, \"text\": {\"head\": \"xxxxxxxxxxxxxxxx\", \"length\": 20000, \"sha256\": \"42e8bc96b8eec8c4e5d503483ba0cb843ce95243c8ca8575ffc69cd25d12c61c\", \"tail\": \"xxxx\"}}]}\n"
+    },
+    {
+      "side": "candidate",
+      "field": "process.stdout",
+      "encoding": "utf8",
+      "value": "{\"rows\": [{\"bodyBytesRead\": 1999999, \"dnsCount\": 1, \"input\": 0, \"requestCount\": 1, \"text\": {\"head\": \"xxxxxxxxxxxxxxxx\", \"length\": 20000, \"sha256\": \"42e8bc96b8eec8c4e5d503483ba0cb843ce95243c8ca8575ffc69cd25d12c61c\", \"tail\": \"xxxx\"}}, {\"bodyBytesRead\": 2000000, \"dnsCount\": 1, \"input\": 1, \"requestCount\": 1, \"text\": {\"head\": \"xxxxxxxxxxxxxxxx\", \"length\": 20000, \"sha256\": \"42e8bc96b8eec8c4e5d503483ba0cb843ce95243c8ca8575ffc69cd25d12c61c\", \"tail\": \"xxxx\"}}, {\"bodyBytesRead\": 2000001, \"dnsCount\": 1, \"input\": 2, \"requestCount\": 1, \"text\": {\"head\": \"xxxxxxxxxxxxxxxx\", \"length\": 20000, \"sha256\": \"42e8bc96b8eec8c4e5d503483ba0cb843ce95243c8ca8575ffc69cd25d12c61c\", \"tail\": \"xxxx\"}}, {\"bodyBytesRead\": 3000000, \"dnsCount\": 1, \"input\": 3, \"requestCount\": 1, \"text\": {\"head\": \"\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\", \"length\": 20000, \"sha256\": \"28b4f41a7f3ee6d8cc87272db6e09c6d3566551fd4d18702b041a21658272a85\", \"tail\": \"\\u0000\\u0000\\u0000\\u0000\"}}, {\"bodyBytesRead\": 2000002, \"dnsCount\": 1, \"input\": 4, \"requestCount\": 1, \"text\": {\"head\": \"xxxxxxxxxxxxxxxx\", \"length\": 20000, \"sha256\": \"42e8bc96b8eec8c4e5d503483ba0cb843ce95243c8ca8575ffc69cd25d12c61c\", \"tail\": \"xxxx\"}}]}\n"
+    }
+  ],
+  "normalizations": [],
+  "scrub": {
+    "fixtureTokens": true,
+    "operatorCredentials": true
+  },
+  "oracleGuard": {
+    "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
+    "expectedVersion": "lohra 0.0.11\n",
+    "expectedPythonVersion": "3.12.10",
+    "expectedPackages": {
+      "openai": "3.6.0",
+      "httpx": "0.28.1"
+    }
+  }
+}
