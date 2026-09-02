@@ -259,7 +259,7 @@ const mutants: readonly Mutant[] = [
       {
         file: auditTrail,
         before:
-          "      if (marker !== undefined && (next === undefined || marker[1].order < next.order)) {",
+          "      if (marker !== undefined && (next === undefined || marker.order < next.order)) {",
         after: "      if (marker !== undefined) {",
       },
     ],
