@@ -41,8 +41,8 @@ const mutants: readonly Mutant[] = [
     edits: [
       {
         file: auditModel,
-        before: 'const RAW_FIELDS = new Set(["prompt", "response"',
-        after: 'const RAW_FIELDS = new Set(["response"',
+        before: 'const RAW_FIELDS = new Set([\n  "prompt",\n  "response",',
+        after: 'const RAW_FIELDS = new Set([\n  "response",',
       },
     ],
   },
