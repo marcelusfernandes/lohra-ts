@@ -9,7 +9,12 @@ import {
   MAX_SEARCH_RESULTS,
 } from "../src/web/index.js";
 import { responseOf } from "./web-connector.test.js";
-import type { AddressRecord, ConnectorRequest, ConnectorResponse, Resolver } from "../src/web/index.js";
+import type {
+  AddressRecord,
+  ConnectorRequest,
+  ConnectorResponse,
+  Resolver,
+} from "../src/web/index.js";
 
 const encoder = new TextEncoder();
 const DDG = "https://html.duckduckgo.com/html/";
@@ -59,7 +64,9 @@ function searchHarness(responses: readonly ConnectorResponse[]) {
 
 describe("decodeDdgHref", () => {
   it("decodes uddg wrappers and drops relative links", () => {
-    expect(decodeDdgHref("//duckduckgo.com/l/?uddg=https%3A%2F%2Fone.test")).toBe("https://one.test");
+    expect(decodeDdgHref("//duckduckgo.com/l/?uddg=https%3A%2F%2Fone.test")).toBe(
+      "https://one.test",
+    );
     expect(decodeDdgHref("https://direct.test")).toBe("https://direct.test");
     expect(decodeDdgHref("/relative")).toBe("");
     expect(decodeDdgHref("")).toBe("");
@@ -72,7 +79,7 @@ describe("parseDdgHtml", () => {
       '<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fone.test">One</a>',
       '<a class="result__snippet">The snippet</a>',
       '<a class="result__a" href="https://two.test">Two</a>',
-      '<span>no snippet</span>',
+      "<span>no snippet</span>",
     ].join("");
     const results = parseDdgHtml(html, 5);
     expect(results).toEqual([
@@ -86,7 +93,11 @@ describe("parseDdgHtml", () => {
   });
 
   it("clamps to the requested count", () => {
-    const html = Array.from({ length: 12 }, (_, index) => `<a class="result__a" href="https://${String(index)}.test">t${String(index)}</a>`).join("");
+    const html = Array.from(
+      { length: 12 },
+      (_, index) =>
+        `<a class="result__a" href="https://${String(index)}.test">t${String(index)}</a>`,
+    ).join("");
     expect(parseDdgHtml(html, 10)).toHaveLength(10);
     expect(parseDdgHtml(html, 3)).toHaveLength(3);
     expect(MAX_SEARCH_RESULTS).toBe(10);
@@ -141,9 +152,7 @@ describe("DuckDuckGoBackend", () => {
       [2_000_000, true],
       [2_000_001, false],
     ] as const) {
-      const harness = searchHarness([
-        responseOf({ chunks: [new Uint8Array(size).fill(120)] }),
-      ]);
+      const harness = searchHarness([responseOf({ chunks: [new Uint8Array(size).fill(120)] })]);
       if (shouldParse) {
         const results = await harness.backend.search("q", 5);
         expect(results).toEqual([]);
@@ -152,7 +161,9 @@ describe("DuckDuckGoBackend", () => {
           await harness.backend.search("q", 5);
           expect.unreachable("cap");
         } catch (error) {
-          expect((error as SearchUnavailable).message).toBe("search response exceeded 2000000 bytes");
+          expect((error as SearchUnavailable).message).toBe(
+            "search response exceeded 2000000 bytes",
+          );
         }
       }
       expect(harness.cancelCalls).toEqual(shouldParse ? [] : [1]);

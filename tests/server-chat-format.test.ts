@@ -20,9 +20,9 @@ describe("splitChatMessages", () => {
   });
 
   it("rejects a non-user last message with the exact oracle message", () => {
-    expect(() =>
-      splitChatMessages([{ role: "assistant", content: "hi" }]),
-    ).toThrow(new CompletionError("the last message must be a user message"));
+    expect(() => splitChatMessages([{ role: "assistant", content: "hi" }])).toThrow(
+      new CompletionError("the last message must be a user message"),
+    );
   });
 
   it("returns (history, lastUserText) for a valid conversation", () => {

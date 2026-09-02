@@ -11,7 +11,12 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { PythonFloat, pythonFloat, pythonJsonDumpsIndented, pythonJsonLoads } from "../serialization/python-json.js";
+import {
+  PythonFloat,
+  pythonFloat,
+  pythonJsonDumpsIndented,
+  pythonJsonLoads,
+} from "../serialization/python-json.js";
 import { CronStoreError, CronValidationError } from "./errors.js";
 import { validateJob } from "./validate.js";
 
@@ -85,8 +90,7 @@ function normalizeJob(record: Record<string, unknown>): CronJob {
     value: unwrapNumber(record.value),
     enabled: record.enabled as boolean,
     created_at: unwrapNumber(record.created_at) as number,
-    last_run_at:
-      record.last_run_at === null ? null : (unwrapNumber(record.last_run_at) as number),
+    last_run_at: record.last_run_at === null ? null : (unwrapNumber(record.last_run_at) as number),
   };
 }
 

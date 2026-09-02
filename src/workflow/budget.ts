@@ -36,14 +36,16 @@ export class Budget {
   private output = 0;
   private measuredLeaves = 0;
 
-  constructor(options: {
-    readonly poolWidth?: number;
-    readonly maxFanout?: number;
-    readonly lifetime?: number;
-    readonly tokenBudget?: number | null;
-    readonly tokensIn?: number;
-    readonly tokensOut?: number;
-  } = {}) {
+  constructor(
+    options: {
+      readonly poolWidth?: number;
+      readonly maxFanout?: number;
+      readonly lifetime?: number;
+      readonly tokenBudget?: number | null;
+      readonly tokensIn?: number;
+      readonly tokensOut?: number;
+    } = {},
+  ) {
     this.poolWidth = atLeastOne(options.poolWidth, DEFAULT_POOL_WIDTH);
     this.maxFanout = atLeastOne(options.maxFanout, DEFAULT_MAX_FANOUT);
     this.lifetime = atLeastOne(options.lifetime, DEFAULT_LIFETIME);
@@ -58,7 +60,9 @@ export class Budget {
 
   checkFanout(width: number): void {
     if (width > this.maxFanout)
-      throw new FanoutRejected(`fan-out of ${String(width)} exceeds max_fanout ${String(this.maxFanout)}`);
+      throw new FanoutRejected(
+        `fan-out of ${String(width)} exceeds max_fanout ${String(this.maxFanout)}`,
+      );
     if (width > this.lifetimeRemaining)
       throw new FanoutRejected(
         `fan-out of ${String(width)} exceeds lifetime remaining ${String(this.lifetimeRemaining)}`,

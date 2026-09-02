@@ -97,15 +97,11 @@
         "tables": [
           {
             "name": "sessions",
-            "orderBy": [
-              "id"
-            ]
+            "orderBy": ["id"]
           },
           {
             "name": "messages",
-            "orderBy": [
-              "id"
-            ]
+            "orderBy": ["id"]
           }
         ]
       }

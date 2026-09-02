@@ -65,9 +65,9 @@ describe("spawnSessionTool", () => {
 
   it("rejects an out-of-range max_iterations without spawning", async () => {
     const core = makeCore(() => Promise.resolve(okResult()));
-    expect(await spawnSessionTool(core, allowAllProviders, { prompt: "x", max_iterations: 0 })).toBe(
-      toolError("'max_iterations' must be between 1 and 128 (got 0)"),
-    );
+    expect(
+      await spawnSessionTool(core, allowAllProviders, { prompt: "x", max_iterations: 0 }),
+    ).toBe(toolError("'max_iterations' must be between 1 and 128 (got 0)"));
     expect(core.size).toBe(0);
   });
 
@@ -112,7 +112,8 @@ describe("spawnSessionTool", () => {
     it("refuses a provider with no configured API key before spawning — zero registry rows", async () => {
       const core = makeCore(() => Promise.resolve(okResult()));
       const resolver: ProviderResolver = {
-        get: (name) => Promise.reject(new ProviderError(`no API key configured for provider '${name}'`)),
+        get: (name) =>
+          Promise.reject(new ProviderError(`no API key configured for provider '${name}'`)),
       };
 
       const envelope = await spawnSessionTool(core, resolver, {

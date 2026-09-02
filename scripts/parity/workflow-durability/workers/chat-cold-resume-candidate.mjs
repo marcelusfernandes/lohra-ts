@@ -12,10 +12,7 @@ import process from "node:process";
 import { openStateDatabase } from "../../../../dist/state/index.js";
 import { LockRepository } from "../../../../dist/state/locks.js";
 import { WorkflowRepository } from "../../../../dist/state/workflow-repository.js";
-import {
-  ChatCompletionsModel,
-  ConversationRuntime,
-} from "../../../../dist/conversation/index.js";
+import { ChatCompletionsModel, ConversationRuntime } from "../../../../dist/conversation/index.js";
 import {
   ChatCompletionsClient,
   ChatCompletionsTransport,
@@ -30,12 +27,22 @@ const DB_PATH = join(HOME, "durable.db");
 class Repository {
   sessions = new Map();
   messages = new Map();
-  createSession(input) { this.sessions.set(input.id, input); }
-  session(id) { return this.sessions.get(id) ?? null; }
-  loadMessages(id) { return this.messages.get(id) ?? []; }
-  commitTurn(commit) { this.messages.set(commit.sessionId, commit.messages ?? [commit.user, commit.assistant]); }
+  createSession(input) {
+    this.sessions.set(input.id, input);
+  }
+  session(id) {
+    return this.sessions.get(id) ?? null;
+  }
+  loadMessages(id) {
+    return this.messages.get(id) ?? [];
+  }
+  commitTurn(commit) {
+    this.messages.set(commit.sessionId, commit.messages ?? [commit.user, commit.assistant]);
+  }
   commitUsage() {}
-  summary() { return null; }
+  summary() {
+    return null;
+  }
 }
 
 class ChildRuntime {
@@ -43,15 +50,31 @@ class ChildRuntime {
   installed = new Map();
   /** The durable path REQUIRES this: a runtime without it cannot launch. */
   installLeafSandbox(installation) {
-    this.installed.set(installation.fence, installation.wrap((name) => `allowed:${name}`));
-    return { dispose: () => { this.installed.delete(installation.fence); } };
+    this.installed.set(
+      installation.fence,
+      installation.wrap((name) => `allowed:${name}`),
+    );
+    return {
+      dispose: () => {
+        this.installed.delete(installation.fence);
+      },
+    };
   }
-  spawn(request) { this.requests.push(request); return `leaf-${String(this.requests.length)}`; }
+  spawn(request) {
+    this.requests.push(request);
+    return `leaf-${String(this.requests.length)}`;
+  }
   collect() {
     return {
       status: "complete",
       output: "leaf-output",
-      usage: { inputTokens: 5, outputTokens: 3, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+      usage: {
+        inputTokens: 5,
+        outputTokens: 3,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningTokens: 0,
+      },
       provider: "stub",
       model: "canned",
     };
@@ -83,7 +106,11 @@ function durableService(holder, now, child) {
 function sorted(value) {
   return JSON.stringify(value, (_key, item) =>
     item !== null && typeof item === "object" && !Array.isArray(item)
-      ? Object.fromEntries(Object.keys(item).sort().map((key) => [key, item[key]]))
+      ? Object.fromEntries(
+          Object.keys(item)
+            .sort()
+            .map((key) => [key, item[key]]),
+        )
       : item,
   );
 }

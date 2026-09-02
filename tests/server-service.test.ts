@@ -57,7 +57,10 @@ describe("CompletionService", () => {
 
     const result = await service.run({
       model: "m",
-      history: [{ role: "user", content: "prior" }, { role: "assistant", content: "reply" }],
+      history: [
+        { role: "user", content: "prior" },
+        { role: "assistant", content: "reply" },
+      ],
       userText: "hi",
       usageMessages: [{ role: "user", content: "hi" }],
       temperature: null,
@@ -129,7 +132,14 @@ describe("CompletionService", () => {
         provider: "ollama",
         maxIterations: 8,
         defaultMaxTokens: 8192,
-      }).run({ model: "m", history: [], userText: "hi", usageMessages: [], temperature: null, maxTokens: null });
+      }).run({
+        model: "m",
+        history: [],
+        userText: "hi",
+        usageMessages: [],
+        temperature: null,
+        maxTokens: null,
+      });
 
     expect((await service("length")).finishReason).toBe("length");
     expect((await service("stop")).finishReason).toBe("stop");
@@ -235,7 +245,14 @@ describe("CompletionService", () => {
     });
 
     await expect(
-      service.run({ model: "m", history: [], userText: "hi", usageMessages: [], temperature: null, maxTokens: null }),
+      service.run({
+        model: "m",
+        history: [],
+        userText: "hi",
+        usageMessages: [],
+        temperature: null,
+        maxTokens: null,
+      }),
     ).rejects.toThrow(
       new UpstreamError(
         "Error code: 418 - {'error': {'message': 'T11_CAUSE_NONCE42 upstream refused', 'type': 'teapot_error'}}",
@@ -248,7 +265,12 @@ describe("CompletionService", () => {
     const dispatcher: ToolDispatcher = {
       dispatch: (call) => {
         dispatched = true;
-        return Promise.resolve({ role: "tool", tool_call_id: call.id, name: call.name, content: "ok" });
+        return Promise.resolve({
+          role: "tool",
+          tool_call_id: call.id,
+          name: call.name,
+          content: "ok",
+        });
       },
     };
     let calls = 0;
@@ -273,7 +295,14 @@ describe("CompletionService", () => {
       toolDefinitions: [{ type: "function", function: { name: "noop" } }],
     });
 
-    await service.run({ model: "m", history: [], userText: "hi", usageMessages: [], temperature: null, maxTokens: null });
+    await service.run({
+      model: "m",
+      history: [],
+      userText: "hi",
+      usageMessages: [],
+      temperature: null,
+      maxTokens: null,
+    });
     expect(dispatched).toBe(true);
   });
 });

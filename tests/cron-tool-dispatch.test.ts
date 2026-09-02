@@ -34,14 +34,24 @@ describe("cronjob — reachable through the real registry/dispatch wiring src/co
       cronjob: (args) => cronTool.handle(args),
     });
 
-    const added = JSON.parse(await dispatch("cronjob", { action: "add", name: "n1", prompt: "p1", schedule_type: "interval", value: 5 })) as {
+    const added = JSON.parse(
+      await dispatch("cronjob", {
+        action: "add",
+        name: "n1",
+        prompt: "p1",
+        schedule_type: "interval",
+        value: 5,
+      }),
+    ) as {
       ok: boolean;
       job_id: string;
     };
     expect(added.ok).toBe(true);
     expect(added.job_id).toMatch(/^[0-9a-f]{32}$/u);
 
-    const listed = JSON.parse(await dispatch("cronjob", { action: "list" })) as { jobs: { id: string }[] };
+    const listed = JSON.parse(await dispatch("cronjob", { action: "list" })) as {
+      jobs: { id: string }[];
+    };
     expect(listed.jobs).toHaveLength(1);
     expect(listed.jobs[0]?.id).toBe(added.job_id);
   });

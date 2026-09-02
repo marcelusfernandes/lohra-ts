@@ -9,7 +9,11 @@ import {
 
 const TOKEN = "the-expected-token";
 
-function head(method: string, path: string, extraHeaders: readonly string[] = []): ReturnType<typeof parseHttpRequestHead> {
+function head(
+  method: string,
+  path: string,
+  extraHeaders: readonly string[] = [],
+): ReturnType<typeof parseHttpRequestHead> {
   return parseHttpRequestHead(
     Buffer.from(
       `${[`${method} ${path} HTTP/1.1`, "Host: 127.0.0.1:9119", ...extraHeaders].join("\r\n")}\r\n\r\n`,
@@ -147,7 +151,9 @@ describe("routeGatewayRequest: OPTIONS exemption and enumeration oracle (asserti
 describe("routeGatewayRequest: Location host derivation is verbatim and unvalidated (L23)", () => {
   it("reflects a bare Host with no port", () => {
     const request = parseHttpRequestHead(
-      Buffer.from("GET /api/status/ HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Lohra-Session-Token: the-expected-token\r\n\r\n"),
+      Buffer.from(
+        "GET /api/status/ HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Lohra-Session-Token: the-expected-token\r\n\r\n",
+      ),
     );
     const response = routeGatewayRequest(request, context());
     expect(response.headers.location).toBe("http://127.0.0.1/api/status");
@@ -227,7 +233,10 @@ describe("routeGatewayRequest: 25-route negative sweep (assertion 18)", () => {
 
 describe("routeGatewayRequest: --insecure mode (auth_required:false)", () => {
   it("serves /api/status without a token when authRequired is false", () => {
-    const response = routeGatewayRequest(head("GET", "/api/status"), context({ authRequired: false }));
+    const response = routeGatewayRequest(
+      head("GET", "/api/status"),
+      context({ authRequired: false }),
+    );
     expect(response.status).toBe(200);
   });
 

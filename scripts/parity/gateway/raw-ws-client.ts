@@ -35,7 +35,9 @@ export const WS_OPCODE = {
 } as const;
 
 function computeAccept(key: string): string {
-  return createHash("sha1").update(key + WS_GUID).digest("base64");
+  return createHash("sha1")
+    .update(key + WS_GUID)
+    .digest("base64");
 }
 
 function encodeClientFrame(opcode: number, payload: Buffer): Buffer {
@@ -201,9 +203,7 @@ export async function connectRawWs(
     const expected = computeAccept(key);
     if (acceptHeader !== expected) {
       socket.destroy();
-      throw new Error(
-        `RAW_WS_ACCEPT_MISMATCH expected=${expected} got=${String(acceptHeader)}`,
-      );
+      throw new Error(`RAW_WS_ACCEPT_MISMATCH expected=${expected} got=${String(acceptHeader)}`);
     }
   }
 
@@ -257,7 +257,10 @@ export async function connectRawWs(
 // Decodes a close frame's payload into (code, reason) per RFC6455 §5.5.1:
 // the first two bytes are the close code (big-endian uint16), the rest is
 // the UTF-8 reason. An empty payload means no code/reason were sent.
-export function decodeCloseFrame(payload: Buffer): { readonly code: number | null; readonly reason: string } {
+export function decodeCloseFrame(payload: Buffer): {
+  readonly code: number | null;
+  readonly reason: string;
+} {
   if (payload.length < 2) return { code: null, reason: "" };
   return { code: payload.readUInt16BE(0), reason: payload.subarray(2).toString("utf8") };
 }

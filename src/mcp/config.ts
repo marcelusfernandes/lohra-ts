@@ -27,11 +27,7 @@ function isCanonicalArrayIndex(key: string): boolean {
   return key <= "4294967294";
 }
 
-function mappingKey(
-  name: string,
-  key: unknown,
-  location: string,
-): string {
+function mappingKey(name: string, key: unknown, location: string): string {
   const at = location === "" ? "" : ` ${location}`;
   if (key !== null && typeof key !== "string") {
     throw new MCPConfigError(
@@ -47,11 +43,7 @@ function mappingKey(
   return coerced;
 }
 
-function defineMappingEntry(
-  mapping: Record<string, unknown>,
-  key: string,
-  value: unknown,
-): void {
+function defineMappingEntry(mapping: Record<string, unknown>, key: string, value: unknown): void {
   Object.defineProperty(mapping, key, {
     value,
     enumerable: true,

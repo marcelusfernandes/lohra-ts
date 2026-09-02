@@ -4,7 +4,15 @@
  * canonical digest, then writes the evidence summary. Holds the lane lock for
  * acquisition + work + release within this single invocation. */
 import { createHash } from "node:crypto";
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
 
@@ -64,11 +72,15 @@ function runPass(onlyScenarios?: ReadonlySet<string>) {
     const evidencePath = resolve(evidenceDirectory, `${id}.json`);
     let record;
     try {
-      const manifest = parseScenarioManifest(JSON.parse(readFileSync(resolve(manifests, name), "utf8")));
+      const manifest = parseScenarioManifest(
+        JSON.parse(readFileSync(resolve(manifests, name), "utf8")),
+      );
       record = runScenario(manifest, { cwd: root, projectRoot: root });
       writeEvidence(evidencePath, record, manifest);
     } catch (error) {
-      process.stderr.write(`t20 harness error [${id}]: ${error instanceof Error ? error.message : String(error)}\n`);
+      process.stderr.write(
+        `t20 harness error [${id}]: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
       failures += 1;
       continue;
     }
@@ -85,9 +97,7 @@ function runPass(onlyScenarios?: ReadonlySet<string>) {
     }
     projections.push({ id, sha: record.reproducibility.projectionSha256, verdict: record.verdict });
   }
-  const digestInput = projections
-    .map((entry) => `${entry.id}=${entry.sha}\n`)
-    .join("");
+  const digestInput = projections.map((entry) => `${entry.id}=${entry.sha}\n`).join("");
   const digest = createHash("sha256").update(digestInput, "utf8").digest("hex");
   return { projections, digest, failures, names };
 }
@@ -103,7 +113,9 @@ if (!acquireLock()) {
 }
 const scenarioFilter = process.argv[2];
 const onlyScenarios =
-  scenarioFilter === undefined ? undefined : new Set(scenarioFilter.split(",").filter((id) => id.length > 0));
+  scenarioFilter === undefined
+    ? undefined
+    : new Set(scenarioFilter.split(",").filter((id) => id.length > 0));
 
 try {
   const first = runPass(onlyScenarios);
@@ -111,9 +123,7 @@ try {
   const sameInventory =
     first.projections.length === second.projections.length &&
     first.projections.every((entry, index) => entry.id === second.projections[index]?.id) &&
-    first.projections.every(
-      (entry, index) => entry.sha === second.projections[index]?.sha,
-    );
+    first.projections.every((entry, index) => entry.sha === second.projections[index]?.sha);
   const sameDigest = first.digest === second.digest;
   const expectedCount = onlyScenarios?.size ?? 25;
   const pass =

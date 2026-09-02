@@ -72,7 +72,10 @@ function boolTypeError(loc: readonly (string | number)[], input: unknown): Valid
   return { type: "bool_type", loc, msg: "Input should be a valid boolean", input };
 }
 
-function boolParsingError(loc: readonly (string | number)[], input: unknown): ValidationErrorDetail {
+function boolParsingError(
+  loc: readonly (string | number)[],
+  input: unknown,
+): ValidationErrorDetail {
   return {
     type: "bool_parsing",
     loc,
@@ -81,7 +84,10 @@ function boolParsingError(loc: readonly (string | number)[], input: unknown): Va
   };
 }
 
-function floatParsingError(loc: readonly (string | number)[], input: unknown): ValidationErrorDetail {
+function floatParsingError(
+  loc: readonly (string | number)[],
+  input: unknown,
+): ValidationErrorDetail {
   return {
     type: "float_parsing",
     loc,
@@ -96,7 +102,11 @@ const BOOL_FALSE = new Set(["0", "off", "f", "false", "n", "no"]);
 /** Pydantic v2 lenient bool coercion. `undefined` = could not coerce; caller
  * distinguishes bool_type (fundamentally wrong kind) from bool_parsing
  * (a string/number was attempted and rejected). */
-function coerceBool(value: unknown): { readonly ok: true; readonly value: boolean } | { readonly ok: false; readonly parsingAttempted: boolean } {
+function coerceBool(
+  value: unknown,
+):
+  | { readonly ok: true; readonly value: boolean }
+  | { readonly ok: false; readonly parsingAttempted: boolean } {
   if (typeof value === "boolean") return { ok: true, value };
   if (value === 0 || value === 1) return { ok: true, value: value === 1 };
   if (typeof value === "string") {
@@ -148,12 +158,14 @@ export function validateChatBody(value: unknown): ParsedChatBody {
   const errors: ValidationErrorDetail[] = [];
   let model = "";
   if (!("model" in value)) errors.push(missingError(["body", "model"], value));
-  else if (typeof value["model"] !== "string") errors.push(stringTypeError(["body", "model"], value["model"]));
+  else if (typeof value["model"] !== "string")
+    errors.push(stringTypeError(["body", "model"], value["model"]));
   else model = value["model"];
 
   let messages: Readonly<Record<string, unknown>>[] = [];
   if (!("messages" in value)) errors.push(missingError(["body", "messages"], value));
-  else if (!Array.isArray(value["messages"])) errors.push(listTypeError(["body", "messages"], value["messages"]));
+  else if (!Array.isArray(value["messages"]))
+    errors.push(listTypeError(["body", "messages"], value["messages"]));
   else {
     const rawMessages = value["messages"];
     const itemErrors: ValidationErrorDetail[] = [];
@@ -179,7 +191,8 @@ export function validateChatBody(value: unknown): ParsedChatBody {
   let temperature: number | null = null;
   if ("temperature" in value && value["temperature"] !== null) {
     const coerced = coerceFloat(value["temperature"]);
-    if (coerced === undefined) errors.push(floatParsingError(["body", "temperature"], value["temperature"]));
+    if (coerced === undefined)
+      errors.push(floatParsingError(["body", "temperature"], value["temperature"]));
     else temperature = coerced;
   }
 
@@ -232,7 +245,8 @@ export function validateResponsesBody(value: unknown): ParsedResponsesBody {
   const errors: ValidationErrorDetail[] = [];
   let model = "";
   if (!("model" in value)) errors.push(missingError(["body", "model"], value));
-  else if (typeof value["model"] !== "string") errors.push(stringTypeError(["body", "model"], value["model"]));
+  else if (typeof value["model"] !== "string")
+    errors.push(stringTypeError(["body", "model"], value["model"]));
   else model = value["model"];
 
   let input: string | Readonly<Record<string, unknown>>[] = "";
@@ -278,7 +292,8 @@ export function validateResponsesBody(value: unknown): ParsedResponsesBody {
   let temperature: number | null = null;
   if ("temperature" in value && value["temperature"] !== null) {
     const coerced = coerceFloat(value["temperature"]);
-    if (coerced === undefined) errors.push(floatParsingError(["body", "temperature"], value["temperature"]));
+    if (coerced === undefined)
+      errors.push(floatParsingError(["body", "temperature"], value["temperature"]));
     else temperature = coerced;
   }
 

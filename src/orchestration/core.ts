@@ -203,7 +203,11 @@ export class OrchestrationCore {
       spawned.map(async ({ subId }): Promise<DelegateOutcome> => {
         const outcome = await this.collect(subId, true);
         const result = outcome.kind === "settled" ? outcome.result : null;
-        return { subId, status: result?.status ?? "error", summary: summarizeCollectResult(result) };
+        return {
+          subId,
+          status: result?.status ?? "error",
+          summary: summarizeCollectResult(result),
+        };
       }),
     );
   }
@@ -330,7 +334,9 @@ export class OrchestrationCore {
     const drainMessages = (): readonly Readonly<Record<string, unknown>>[] =>
       this.drainInboxFor(subId);
     const promise = this.gate
-      .run(() => this.options.runChild(subId, config, systemPrompt, drainMessages, abortController.signal))
+      .run(() =>
+        this.options.runChild(subId, config, systemPrompt, drainMessages, abortController.signal),
+      )
       .then((result) => {
         const entry = this.entries.get(subId);
         if (entry === undefined) return result;

@@ -11,7 +11,12 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { ADD_DESTROYS_11, ADD_PRESERVES_AND_APPENDS_4, FAIL_CLOSED_16, plantForm } from "./forms.js";
+import {
+  ADD_DESTROYS_11,
+  ADD_PRESERVES_AND_APPENDS_4,
+  FAIL_CLOSED_16,
+  plantForm,
+} from "./forms.js";
 import {
   candidateCli,
   cleanup,
@@ -32,7 +37,13 @@ let failures = 0;
 const projections: { readonly id: string; readonly sha: string; readonly verdict: string }[] = [];
 
 function record(id: string, verdict: string, ok: boolean, payload: unknown): void {
-  const sha = writeEvidence(id, { id, verdict, localDay: localDay(), utcDay: utcDay(), ...(payload as object) });
+  const sha = writeEvidence(id, {
+    id,
+    verdict,
+    localDay: localDay(),
+    utcDay: utcDay(),
+    ...(payload as object),
+  });
   projections.push({ id, sha, verdict });
   if (!ok) {
     failures += 1;
@@ -74,8 +85,21 @@ function spawnCandidateAdd(paths: RuntimePaths, index: number): Promise<number> 
   return new Promise((resolveExit) => {
     const child = spawn(
       process.execPath,
-      [candidateCli, "cron", "add", "--name", `n${String(index)}`, "--prompt", "p", "--interval", "5"],
-      { cwd: paths.tmp, env: { HOME: paths.home, LOHRA_HOME: paths.home, TMPDIR: paths.tmp, PATH: "/usr/bin:/bin" } },
+      [
+        candidateCli,
+        "cron",
+        "add",
+        "--name",
+        `n${String(index)}`,
+        "--prompt",
+        "p",
+        "--interval",
+        "5",
+      ],
+      {
+        cwd: paths.tmp,
+        env: { HOME: paths.home, LOHRA_HOME: paths.home, TMPDIR: paths.tmp, PATH: "/usr/bin:/bin" },
+      },
     );
     child.once("exit", (code) => {
       resolveExit(code ?? -1);
@@ -87,11 +111,15 @@ async function probeConcurrentAddNoLostUpdate(): Promise<void> {
   const candidate = materialize("candidate");
   try {
     const N = 12;
-    const exitCodes = await Promise.all(Array.from({ length: N }, (_, i) => spawnCandidateAdd(candidate, i)));
+    const exitCodes = await Promise.all(
+      Array.from({ length: N }, (_, i) => spawnCandidateAdd(candidate, i)),
+    );
     const listed = runCandidateCron(["list"], candidate);
     const jobCount = listed.stdout.split("\n").filter(Boolean).length;
     const lockDir = jobsPathOf(candidate) + ".lock";
-    const staleTmpFiles = readdirSync(join(candidate.home, "cron")).filter((name) => name.endsWith(".tmp"));
+    const staleTmpFiles = readdirSync(join(candidate.home, "cron")).filter((name) =>
+      name.endsWith(".tmp"),
+    );
     const allExited0 = exitCodes.every((code) => code === 0);
     const ok = allExited0 && jobCount === N && !existsSync(lockDir) && staleTmpFiles.length === 0;
     record("t18-concurrent-add-no-lost-update", ok ? "as-expected" : "DIVERGENT", ok, {
@@ -147,12 +175,17 @@ async function probeSchedulerStartupRefusal(): Promise<void> {
   }
   if (!absentOk) ok = false;
 
-  record("t18-candidate-failclosed-scheduler-startup-16-forms", ok ? "as-expected" : "DIVERGENT", ok, {
-    note: "[processo-ts] -- real scheduler-process refusal over the 16 fail-closed forms (Emenda E3); absent boots normally and is the positive control, outside this group (assertion 23)",
-    results,
-    absentOk,
-    absentExit,
-  });
+  record(
+    "t18-candidate-failclosed-scheduler-startup-16-forms",
+    ok ? "as-expected" : "DIVERGENT",
+    ok,
+    {
+      note: "[processo-ts] -- real scheduler-process refusal over the 16 fail-closed forms (Emenda E3); absent boots normally and is the positive control, outside this group (assertion 23)",
+      results,
+      absentOk,
+      absentExit,
+    },
+  );
 }
 
 // --- assertion 24's own guard self-test: destroy-mutant and preserve-append-mutant must flip scenario 11/12's ADR verdict to an observed FAIL ----
@@ -165,11 +198,18 @@ function probeAssertion24GuardKills(): void {
     const paths = materialize("candidate");
     try {
       plantForm(form, paths);
-      const baseline = runCandidateCron(["add", "--name", "n1", "--prompt", "p1", "--interval", "5"], paths);
+      const baseline = runCandidateCron(
+        ["add", "--name", "n1", "--prompt", "p1", "--interval", "5"],
+        paths,
+      );
       const baselineRefused = baseline.code !== 0;
       const mutantPaths = materialize("candidate");
       plantForm(form, mutantPaths);
-      const mutantResult = runCandidateCronMutant(["add", "--name", "n1", "--prompt", "p1", "--interval", "5"], mutantPaths, "destroy");
+      const mutantResult = runCandidateCronMutant(
+        ["add", "--name", "n1", "--prompt", "p1", "--interval", "5"],
+        mutantPaths,
+        "destroy",
+      );
       const mutantSucceeded = mutantResult.code === 0;
       const killed = baselineRefused && mutantSucceeded;
       results.push({ mutant: "destroy", form, baselineRefused, mutantSucceeded, killed });
@@ -185,7 +225,10 @@ function probeAssertion24GuardKills(): void {
     const paths = materialize("candidate");
     try {
       plantForm(form, paths);
-      const baseline = runCandidateCron(["add", "--name", "n1", "--prompt", "p1", "--interval", "5"], paths);
+      const baseline = runCandidateCron(
+        ["add", "--name", "n1", "--prompt", "p1", "--interval", "5"],
+        paths,
+      );
       const baselineRefused = baseline.code !== 0;
       const mutantPaths = materialize("candidate");
       plantForm(form, mutantPaths);
@@ -204,7 +247,9 @@ function probeAssertion24GuardKills(): void {
     }
   }
 
-  record("t18-assertion24-guard-mutation-kills", ok ? "both-mutations-killed" : "DIVERGENT", ok, { results });
+  record("t18-assertion24-guard-mutation-kills", ok ? "both-mutations-killed" : "DIVERGENT", ok, {
+    results,
+  });
 }
 
 runGuards();

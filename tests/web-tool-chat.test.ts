@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { ConversationRuntime, type ModelRequest, type ModelTransport } from "../src/conversation/index.js";
+import {
+  ConversationRuntime,
+  type ModelRequest,
+  type ModelTransport,
+} from "../src/conversation/index.js";
 import { createBuiltinRegistry, toolError, toolResult } from "../src/tools/index.js";
 import type { NormalizedResponse } from "../src/transports/index.js";
 import {
@@ -175,7 +179,8 @@ describe("web tool envelopes and coercions", () => {
   it("distinguishes search unavailable from generic web failure", async () => {
     await withDoubles(async () => {
       setSearchBackend({
-        search: () => Promise.reject(new SearchUnavailable("search request failed: fixture connect failed")),
+        search: () =>
+          Promise.reject(new SearchUnavailable("search request failed: fixture connect failed")),
       });
       const unavailable = await webSearchHandler({ query: "q" });
       setSearchBackend({
@@ -261,7 +266,12 @@ describe("web tools through registry dispatch and a canned chat turn", () => {
         canned({
           finishReason: "tool_calls",
           toolCalls: [
-            { id: "c1", name: "web_fetch", arguments: '{"url":"http://public.test/"}', providerData: null },
+            {
+              id: "c1",
+              name: "web_fetch",
+              arguments: '{"url":"http://public.test/"}',
+              providerData: null,
+            },
           ],
         }),
         canned({ content: "final answer" }),
@@ -290,9 +300,9 @@ describe("web tools through registry dispatch and a canned chat turn", () => {
         },
         transport: model,
         promptSnapshot: () => "frozen",
-        toolDefinitions: registry.getDefinitions().filter((definition) =>
-          ["web_fetch", "web_search"].includes(definition.function.name),
-        ),
+        toolDefinitions: registry
+          .getDefinitions()
+          .filter((definition) => ["web_fetch", "web_search"].includes(definition.function.name)),
         toolDispatcher: {
           dispatch: async (call) => ({
             role: "tool",
@@ -307,7 +317,12 @@ describe("web tools through registry dispatch and a canned chat turn", () => {
         idSource: () => "session-t20",
         clock: () => 1,
       });
-      const result = await runtime.runTurn({ input: "fetch", provider: "stub", model: "m", cwd: "/tmp" });
+      const result = await runtime.runTurn({
+        input: "fetch",
+        provider: "stub",
+        model: "m",
+        cwd: "/tmp",
+      });
       expect(result.response.content).toBe("final answer");
       expect(model.requests).toHaveLength(2);
       const resent = model.requests[1]?.messages ?? [];

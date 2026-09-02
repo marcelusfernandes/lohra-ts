@@ -7,7 +7,11 @@
 
 import { randomUUID } from "node:crypto";
 
-import { ConversationRuntime, type ModelTransport, type ToolDispatcher } from "../conversation/index.js";
+import {
+  ConversationRuntime,
+  type ModelTransport,
+  type ToolDispatcher,
+} from "../conversation/index.js";
 import { publicCauseMessage } from "../transports/index.js";
 import { UpstreamError } from "./chat-format.js";
 import { NonClosingTransport } from "./non-closing-transport.js";
@@ -84,9 +88,10 @@ export class CompletionService {
 
     const content = result.response.content ?? "";
     const finishReason = result.response.finishReason === "length" ? "length" : "stop";
-    const usage = result.usageTotal !== null
-      ? wireUsage(result.usageTotal)
-      : estimateUsage(input.usageMessages, content);
+    const usage =
+      result.usageTotal !== null
+        ? wireUsage(result.usageTotal)
+        : estimateUsage(input.usageMessages, content);
 
     return { model: input.model, content, finishReason, usage };
   }

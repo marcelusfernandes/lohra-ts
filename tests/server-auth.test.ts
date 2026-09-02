@@ -49,7 +49,10 @@ describe("timingSafeStringEqual", () => {
 
 describe("[probe-complementar] timing-safe primitive is actually wired, not ===", () => {
   it("the auth module source calls node:crypto's constant-time compare", () => {
-    const source = readFileSync(fileURLToPath(new URL("../src/server/auth.ts", import.meta.url)), "utf8");
+    const source = readFileSync(
+      fileURLToPath(new URL("../src/server/auth.ts", import.meta.url)),
+      "utf8",
+    );
     expect(source).toContain("timingSafeEqual");
     expect(source).toMatch(/from ["']node:crypto["']/u);
   });

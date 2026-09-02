@@ -137,8 +137,7 @@ export function parseDdgHtml(html: string, maxResults: number): SearchEnvelopeRe
       const hrefMatch = /href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(
         html.slice(open + 1, close),
       );
-      const href =
-        hrefMatch?.[1] ?? hrefMatch?.[2] ?? hrefMatch?.[3] ?? "";
+      const href = hrefMatch?.[1] ?? hrefMatch?.[2] ?? hrefMatch?.[3] ?? "";
       state.pending.url = decodeDdgHref(href);
     } else if (classes.includes("result__snippet")) {
       state.mode = "snippet";
@@ -189,10 +188,7 @@ interface CappedBody {
   readonly exceeded: boolean;
 }
 
-async function readBodyCapped(
-  response: ConnectorResponse,
-  maxBytes: number,
-): Promise<CappedBody> {
+async function readBodyCapped(response: ConnectorResponse, maxBytes: number): Promise<CappedBody> {
   const chunks: Buffer[] = [];
   let total = 0;
   for (;;) {

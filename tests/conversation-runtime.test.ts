@@ -394,7 +394,11 @@ describe("ConversationRuntime", () => {
     const repository = new MemoryRepository();
     let calls = 0;
     const transport = new QueueTransport([
-      response({ content: null, finishReason: "tool_calls", toolCalls: [{ id: "c1", name: "noop", arguments: "{}", providerData: null }] }),
+      response({
+        content: null,
+        finishReason: "tool_calls",
+        toolCalls: [{ id: "c1", name: "noop", arguments: "{}", providerData: null }],
+      }),
     ]);
     const wrapped: ModelTransport = {
       complete: (request) => {

@@ -18,7 +18,10 @@ export interface GatewayToolRuntime {
 // producing terminal.ts's exact "command was not approved by the user"
 // message -- deliberately different from T11's subagent auto-deny message,
 // per assertion 40.
-export function createGatewayToolRuntime(home: string, sessionRegistry?: ToolRegistry): GatewayToolRuntime {
+export function createGatewayToolRuntime(
+  home: string,
+  sessionRegistry?: ToolRegistry,
+): GatewayToolRuntime {
   if (sessionRegistry !== undefined) {
     const toolDefinitions = sessionRegistry.getDefinitions();
     return {

@@ -59,7 +59,9 @@ function candidateGuard(): { sha: string; porcelain: string } {
   const sha = git(root, ["rev-parse", "HEAD"]);
   const porcelain = git(root, ["status", "--porcelain"]);
   if (porcelain !== "")
-    throw new Error(`candidate worktree is dirty; evidence would not be reproducible:\n${porcelain}`);
+    throw new Error(
+      `candidate worktree is dirty; evidence would not be reproducible:\n${porcelain}`,
+    );
   return { sha, porcelain };
 }
 
@@ -171,7 +173,10 @@ try {
         `candidate stderr: ${candidate.stderr}\noracle stderr: ${oracle.stderr}`,
     );
   }
-  const candidateSteps = JSON.parse(candidate.stdout) as readonly { step: string; value: unknown }[];
+  const candidateSteps = JSON.parse(candidate.stdout) as readonly {
+    step: string;
+    value: unknown;
+  }[];
   const oracleSteps = JSON.parse(oracle.stdout) as readonly { step: string; value: unknown }[];
   const candidateAt = normalizeSteps(candidateSteps);
   const oracleAt = normalizeSteps(oracleSteps);
@@ -203,7 +208,9 @@ try {
     compared.push({ step, oracle: o, candidate: c, match });
   }
   if (divergenceFailures > 0) {
-    throw new Error(`${String(divergenceFailures)} registered hardening divergence(s) no longer hold`);
+    throw new Error(
+      `${String(divergenceFailures)} registered hardening divergence(s) no longer hold`,
+    );
   }
   const bilateralMatch = mismatches === 0;
 
@@ -212,11 +219,7 @@ try {
   const plantDir = mkdtempSync(join(tmpdir(), "lohra-t16-plant-"));
   let planted: PlantResult;
   try {
-    const plant = command([
-      "node",
-      "scripts/parity/workflow-durability/plant-stale.mjs",
-      plantDir,
-    ]);
+    const plant = command(["node", "scripts/parity/workflow-durability/plant-stale.mjs", plantDir]);
     if (plant.exitCode !== 0) throw new Error(`plant scenario failed: ${plant.stderr}`);
     planted = JSON.parse(plant.stdout) as PlantResult;
     if (!planted.ok) throw new Error(`plant scenario red: ${plant.stdout}`);
@@ -238,7 +241,8 @@ try {
       "--evidence",
       evidencePath,
     ]);
-    if (exitCode !== 0) throw new Error(`chat probe ${id} failed: harness exit ${String(exitCode)}`);
+    if (exitCode !== 0)
+      throw new Error(`chat probe ${id} failed: harness exit ${String(exitCode)}`);
     const evidence = JSON.parse(readFileSync(evidencePath, "utf8")) as ChatEvidence;
     if (evidence.verdict !== "match")
       throw new Error(`chat probe ${id} diverged: ${evidence.verdict ?? "missing"}`);
@@ -263,7 +267,8 @@ try {
         "--evidence",
         crossDayPath,
       ]);
-      if (exitCode !== 0) throw new Error(`cross-day run for ${today} failed: exit ${String(exitCode)}`);
+      if (exitCode !== 0)
+        throw new Error(`cross-day run for ${today} failed: exit ${String(exitCode)}`);
     } finally {
       if (previous === undefined) delete process.env.LOHRA_T16_TODAY;
       else process.env.LOHRA_T16_TODAY = previous;
@@ -271,8 +276,7 @@ try {
     return { today, digest: scrubDelivered(crossDayPath) };
   });
   rmSync(crossDayPath, { force: true });
-  const crossDayStable =
-    new Set(crossDayDigests.map((entry) => entry.digest)).size === 1;
+  const crossDayStable = new Set(crossDayDigests.map((entry) => entry.digest)).size === 1;
   if (!crossDayStable) {
     throw new Error(
       `delivered evidence is not stable across dates: ${JSON.stringify(crossDayDigests)}`,

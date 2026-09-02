@@ -18,11 +18,23 @@ const usage = {
 } as const;
 
 class MemoryRepository implements ConversationRepository {
-  private readonly sessions = new Map<string, { systemPrompt: string; model: string; cwd: string }>();
+  private readonly sessions = new Map<
+    string,
+    { systemPrompt: string; model: string; cwd: string }
+  >();
   private readonly messages = new Map<string, Readonly<Record<string, unknown>>[]>();
 
-  createSession(input: { readonly id: string; readonly systemPrompt: string; readonly model: string; readonly cwd: string }): void {
-    this.sessions.set(input.id, { systemPrompt: input.systemPrompt, model: input.model, cwd: input.cwd });
+  createSession(input: {
+    readonly id: string;
+    readonly systemPrompt: string;
+    readonly model: string;
+    readonly cwd: string;
+  }): void {
+    this.sessions.set(input.id, {
+      systemPrompt: input.systemPrompt,
+      model: input.model,
+      cwd: input.cwd,
+    });
   }
   session(id: string) {
     return this.sessions.get(id) ?? null;

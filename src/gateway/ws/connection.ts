@@ -148,7 +148,11 @@ async function handlePromptSubmit(
     ws.send(encodeJsonRpcFrame({ jsonrpc: "2.0", id: rpcId, result: { status: "streaming" } }));
     ws.send(encodeGatewayEventFrame("message.start", sessionId, {}));
     ws.send(
-      encodeGatewayEventFrame("message.complete", sessionId, { text: "", status: "interrupted", usage: {} }),
+      encodeGatewayEventFrame("message.complete", sessionId, {
+        text: "",
+        status: "interrupted",
+        usage: {},
+      }),
     );
     return;
   }
@@ -177,8 +181,12 @@ async function handlePromptSubmit(
   const controller = deps.registry.beginTurn(sessionId);
   try {
     const dispatcher = new GatewayEventingToolDispatcher(deps.dispatchTool, {
-      onToolStart: (payload) => { ws.send(encodeGatewayEventFrame("tool.start", sessionId, payload)); },
-      onToolComplete: (payload) => { ws.send(encodeGatewayEventFrame("tool.complete", sessionId, payload)); },
+      onToolStart: (payload) => {
+        ws.send(encodeGatewayEventFrame("tool.start", sessionId, payload));
+      },
+      onToolComplete: (payload) => {
+        ws.send(encodeGatewayEventFrame("tool.complete", sessionId, payload));
+      },
     });
     const runtime = new ConversationRuntime({
       repository: deps.createConversationRepository(),
@@ -198,7 +206,9 @@ async function handlePromptSubmit(
       model: deps.sessionDefaults.model,
       cwd: deps.sessionDefaults.cwd,
       signal: controller.signal,
-      onDelta: (text) => { ws.send(encodeGatewayEventFrame("message.delta", sessionId, { text })); },
+      onDelta: (text) => {
+        ws.send(encodeGatewayEventFrame("message.delta", sessionId, { text }));
+      },
     });
 
     if (outcome.status === "complete") {
@@ -211,7 +221,11 @@ async function handlePromptSubmit(
       );
     } else if (outcome.status === "interrupted") {
       ws.send(
-        encodeGatewayEventFrame("message.complete", sessionId, { text: "", status: "interrupted", usage: {} }),
+        encodeGatewayEventFrame("message.complete", sessionId, {
+          text: "",
+          status: "interrupted",
+          usage: {},
+        }),
       );
     } else {
       ws.send(
@@ -229,11 +243,7 @@ async function handlePromptSubmit(
   }
 }
 
-async function handleTextMessage(
-  ws: WebSocket,
-  text: string,
-  deps: GatewayWsDeps,
-): Promise<void> {
+async function handleTextMessage(ws: WebSocket, text: string, deps: GatewayWsDeps): Promise<void> {
   const decoded = decodeJsonRpcFrame(text);
   if (!decoded.ok) {
     ws.send(encodeJsonRpcFrame(decoded.response));
@@ -245,7 +255,12 @@ async function handleTextMessage(
     return;
   }
 
-  const outcome = dispatchSyncRpc(deps.registry, decoded.method, decoded.params, deps.sessionDefaults);
+  const outcome = dispatchSyncRpc(
+    deps.registry,
+    decoded.method,
+    decoded.params,
+    deps.sessionDefaults,
+  );
   if (outcome.kind === "unhandled") return;
   if (outcome.kind === "error") {
     ws.send(

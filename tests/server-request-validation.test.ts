@@ -34,7 +34,8 @@ describe("parseRequestBody + validateChatBody — byte-exact against measured or
   });
 
   it("Content-Type text/plain: the whole body is a raw string, not a dict", () => {
-    const raw = '{"model": "fake-model-a", "messages": [{"role": "user", "content": "SCEN:ok hi"}]}';
+    const raw =
+      '{"model": "fake-model-a", "messages": [{"role": "user", "content": "SCEN:ok hi"}]}';
     expect(detailBody(raw, "text/plain")).toBe(
       chatCompletionBody({
         detail: [
@@ -61,7 +62,7 @@ describe("parseRequestBody + validateChatBody — byte-exact against measured or
     );
   });
 
-  it("temperature:\"hot\"", () => {
+  it('temperature:"hot"', () => {
     expect(
       detailBody(
         '{"model": "m", "messages": [{"role": "user", "content": "x"}], "temperature": "hot"}',
@@ -78,7 +79,9 @@ describe("parseRequestBody + validateChatBody — byte-exact against measured or
         '{"model": "m", "messages": [{"role": "user", "content": "x"}], "stream": null}',
         "application/json",
       ),
-    ).toBe('{"detail":[{"type":"bool_type","loc":["body","stream"],"msg":"Input should be a valid boolean","input":null}]}');
+    ).toBe(
+      '{"detail":[{"type":"bool_type","loc":["body","stream"],"msg":"Input should be a valid boolean","input":null}]}',
+    );
   });
 
   it("JSON malformed: json_invalid with excused offset/ctx.error, everything else exact", () => {
@@ -98,7 +101,7 @@ describe("parseRequestBody + validateChatBody — byte-exact against measured or
     expect(typeof detail?.ctx?.["error"]).toBe("string");
   });
 
-  it("coerces stream:\"true\" and a numeric temperature string (assertion 27, lenient Pydantic parsing)", () => {
+  it('coerces stream:"true" and a numeric temperature string (assertion 27, lenient Pydantic parsing)', () => {
     const value = parseRequestBody(
       '{"model": "m", "messages": [{"role": "user", "content": "x"}], "stream": "true", "temperature": "0.5"}',
       "application/json",
@@ -160,7 +163,12 @@ describe("validateResponsesBody — union input field, byte-exact", () => {
       if (error instanceof ValidationError) caught = error;
     }
     expect(caught?.details).toEqual([
-      { type: "string_type", loc: ["body", "input", "str"], msg: "Input should be a valid string", input: 5 },
+      {
+        type: "string_type",
+        loc: ["body", "input", "str"],
+        msg: "Input should be a valid string",
+        input: 5,
+      },
       {
         type: "list_type",
         loc: ["body", "input", "list[dict[any,any]]"],
@@ -170,7 +178,7 @@ describe("validateResponsesBody — union input field, byte-exact", () => {
     ]);
   });
 
-  it("input:[\"x\"]: string branch fails on the whole array, list branch fails on the item", () => {
+  it('input:["x"]: string branch fails on the whole array, list branch fails on the item', () => {
     const value = parseRequestBody('{"model": "m", "input": ["x"]}', "application/json");
     let caught: ValidationError | undefined;
     try {
@@ -196,7 +204,10 @@ describe("validateResponsesBody — union input field, byte-exact", () => {
 
   it("[probe-complementar] Responses has no tools/tool_choice field to begin with (assertion 51)", () => {
     const parsed = validateResponsesBody(
-      parseRequestBody('{"model": "m", "input": "hi", "tools": [{"evil": true}]}', "application/json"),
+      parseRequestBody(
+        '{"model": "m", "input": "hi", "tools": [{"evil": true}]}',
+        "application/json",
+      ),
     );
     expect(Object.keys(parsed).sort()).toEqual(
       ["input", "instructions", "maxOutputTokens", "model", "stream", "temperature"].sort(),
@@ -209,7 +220,10 @@ describe("validateResponsesBody — union input field, byte-exact", () => {
     ).not.toThrow();
     expect(() =>
       validateResponsesBody(
-        parseRequestBody('{"model": "m", "input": [{"role": "user", "content": "hi"}]}', "application/json"),
+        parseRequestBody(
+          '{"model": "m", "input": [{"role": "user", "content": "hi"}]}',
+          "application/json",
+        ),
       ),
     ).not.toThrow();
   });

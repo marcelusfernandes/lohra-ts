@@ -46,7 +46,10 @@ for (const form of forms) {
         op: operation.op,
         code: result.code,
         stdout: result.code === 0 ? result.stdout.trim() : "",
-        exceptionClass: result.code !== 0 && result.stderr.includes("Traceback") ? lastExceptionLine(result.stderr) : "",
+        exceptionClass:
+          result.code !== 0 && result.stderr.includes("Traceback")
+            ? lastExceptionLine(result.stderr)
+            : "",
         bytePreserved: before.sha256 === after.sha256,
       });
     } finally {

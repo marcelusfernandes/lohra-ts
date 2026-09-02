@@ -1,10 +1,7 @@
 import { pythonRepr } from "../serialization/python-repr.js";
 import { isPythonTruthy } from "../serialization/python-truthy.js";
 import { toolError, toolResult } from "../tools/envelope.js";
-import {
-  ToolRegistrationCollisionError,
-  type ToolRegistry,
-} from "../tools/registry.js";
+import { ToolRegistrationCollisionError, type ToolRegistry } from "../tools/registry.js";
 import type { ToolFunctionSchema, ToolHandler } from "../tools/types.js";
 import type { ToolRegistration } from "../tools/types.js";
 
@@ -17,8 +14,14 @@ const INVALID = /[^a-z0-9]+/g;
 
 /** Deterministic registry name: `mcp_{server}_{tool}` (sanitized, lowercase). */
 export function mcpToolName(server: string, tool: string): string {
-  const serverSlug = server.toLowerCase().replaceAll(INVALID, "_").replace(/^_+|_+$/g, "");
-  const toolSlug = tool.toLowerCase().replaceAll(INVALID, "_").replace(/^_+|_+$/g, "");
+  const serverSlug = server
+    .toLowerCase()
+    .replaceAll(INVALID, "_")
+    .replace(/^_+|_+$/g, "");
+  const toolSlug = tool
+    .toLowerCase()
+    .replaceAll(INVALID, "_")
+    .replace(/^_+|_+$/g, "");
   return `mcp_${serverSlug}_${toolSlug}`;
 }
 
@@ -173,8 +176,9 @@ export function registerServerTools(
     registry.registerBatch(registrations);
   } catch (error) {
     if (error instanceof ToolRegistrationCollisionError) {
-      const name = registrations.find((registration) => registry.toolsetFor(registration.name) !== null)
-        ?.name;
+      const name = registrations.find(
+        (registration) => registry.toolsetFor(registration.name) !== null,
+      )?.name;
       throw new MCPToolNameCollisionError(name ?? "unknown");
     }
     throw error;

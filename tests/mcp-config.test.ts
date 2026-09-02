@@ -31,7 +31,9 @@ describe("loadMcpConfig", () => {
   it("malformed JSON throws MCPConfigError with a 'could not parse <path>: ...' prefix", () => {
     writeFileSync(path, "{not json");
     expect(() => loadMcpConfig(path)).toThrow(MCPConfigError);
-    expect(() => loadMcpConfig(path)).toThrow(new RegExp(`^could not parse ${path.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}: `));
+    expect(() => loadMcpConfig(path)).toThrow(
+      new RegExp(`^could not parse ${path.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}: `),
+    );
   });
 
   it("mcpServers non-object throws 'mcpServers' must be an object", () => {
@@ -41,7 +43,9 @@ describe("loadMcpConfig", () => {
 
   it("server without command/url throws named error", () => {
     writeFileSync(path, JSON.stringify({ mcpServers: { bad: {} } }));
-    expect(() => loadMcpConfig(path)).toThrow("server 'bad' needs a 'command' (stdio) or 'url' (http)");
+    expect(() => loadMcpConfig(path)).toThrow(
+      "server 'bad' needs a 'command' (stdio) or 'url' (http)",
+    );
   });
 
   it("server spec non-object throws named error", () => {
@@ -53,7 +57,10 @@ describe("loadMcpConfig", () => {
     writeFileSync(
       path,
       JSON.stringify({
-        mcpServers: { off: { command: "npx", disabled: true }, fix: { command: "npx", args: ["fix"] } },
+        mcpServers: {
+          off: { command: "npx", disabled: true },
+          fix: { command: "npx", args: ["fix"] },
+        },
       }),
     );
     const configs = loadMcpConfig(path);
@@ -102,7 +109,10 @@ describe("loadMcpConfig", () => {
   });
 
   it("url present -> transport http, url preserved", () => {
-    writeFileSync(path, JSON.stringify({ mcpServers: { remote: { url: "https://mcp.example.com/" } } }));
+    writeFileSync(
+      path,
+      JSON.stringify({ mcpServers: { remote: { url: "https://mcp.example.com/" } } }),
+    );
     expect(loadMcpConfig(path)).toEqual([
       { name: "remote", transport: "http", args: [], env: {}, url: "https://mcp.example.com/" },
     ]);
@@ -116,7 +126,13 @@ describe("loadMcpConfig", () => {
       }),
     );
     expect(loadMcpConfig(path)).toEqual([
-      { name: "fix", transport: "stdio", command: "npx", args: ["-y", "fix-server"], env: { TOKEN: "x" } },
+      {
+        name: "fix",
+        transport: "stdio",
+        command: "npx",
+        args: ["-y", "fix-server"],
+        env: { TOKEN: "x" },
+      },
     ]);
   });
 
@@ -199,7 +215,13 @@ describe("loadMcpConfig", () => {
       path,
       JSON.stringify({
         mcpServers: {
-          fix: { command: "npx", env: [["4294967295", "max-plus-one"], ["00", "leading-zero"]] },
+          fix: {
+            command: "npx",
+            env: [
+              ["4294967295", "max-plus-one"],
+              ["00", "leading-zero"],
+            ],
+          },
         },
       }),
     );
@@ -218,8 +240,14 @@ describe("loadMcpConfig", () => {
 
   it("rejects duplicate env keys after null coercion instead of collapsing them", () => {
     for (const entries of [
-      [[null, "none"], ["null", "string"]],
-      [["A", 1], ["A", 2]],
+      [
+        [null, "none"],
+        ["null", "string"],
+      ],
+      [
+        ["A", 1],
+        ["A", 2],
+      ],
     ]) {
       writeFileSync(
         path,
@@ -259,10 +287,9 @@ describe("loadMcpConfig", () => {
   });
 
   it("a config error aborts the whole set -- one bad server invalidates all", () => {
-    writeFileSync(
-      path,
-      JSON.stringify({ mcpServers: { fix: { command: "npx" }, bad: {} } }),
+    writeFileSync(path, JSON.stringify({ mcpServers: { fix: { command: "npx" }, bad: {} } }));
+    expect(() => loadMcpConfig(path)).toThrow(
+      "server 'bad' needs a 'command' (stdio) or 'url' (http)",
     );
-    expect(() => loadMcpConfig(path)).toThrow("server 'bad' needs a 'command' (stdio) or 'url' (http)");
   });
 });

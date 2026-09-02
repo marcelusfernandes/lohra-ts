@@ -4,14 +4,21 @@ import net from "node:net";
 import { rmSync } from "node:fs";
 
 import type { FakeUpstream } from "../fake-upstream.js";
-import { allocatePort, buildServeInvocation, materialize, runProcessToCompletion } from "../harness.js";
+import {
+  allocatePort,
+  buildServeInvocation,
+  materialize,
+  runProcessToCompletion,
+} from "../harness.js";
 import type { ProcessScenarioResult } from "../run-process.js";
 
 function occupyPort(port: number): Promise<net.Server> {
   return new Promise((resolveOccupy, reject) => {
     const server = net.createServer();
     server.once("error", reject);
-    server.listen(port, "127.0.0.1", () => { resolveOccupy(server); });
+    server.listen(port, "127.0.0.1", () => {
+      resolveOccupy(server);
+    });
   });
 }
 
@@ -22,7 +29,9 @@ function canConnect(port: number): Promise<boolean> {
       socket.destroy();
       resolveConnect(true);
     });
-    socket.once("error", () => { resolveConnect(false); });
+    socket.once("error", () => {
+      resolveConnect(false);
+    });
   });
 }
 
@@ -40,7 +49,11 @@ export async function run(upstream: FakeUpstream): Promise<ProcessScenarioResult
   // the candidate's failed bind attempt must not have touched it.
   const occupierStillAliveOk = await canConnect(port);
 
-  await new Promise<void>((resolveClose) => { occupier.close(() => { resolveClose(); }); });
+  await new Promise<void>((resolveClose) => {
+    occupier.close(() => {
+      resolveClose();
+    });
+  });
 
   const checks = {
     exitCodeIs2: result.exitCode === 2,

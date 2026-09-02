@@ -95,7 +95,10 @@ async function observeServeProcess(
     });
     const body = await response.text();
     child.kill("SIGINT");
-    await waitFor(() => processState.settled !== null, () => null);
+    await waitFor(
+      () => processState.settled !== null,
+      () => null,
+    );
     return {
       status: response.status,
       body,
@@ -149,14 +152,20 @@ describe("serve CLI parse result reaches the real process configuration", () => 
   ];
 
   for (const scenario of cases) {
-    it(scenario.label, async () => {
-      const observed = await observeServeProcess(scenario.buildArgs);
-      expect(observed.status).toBe(200);
-      expect(observed.body).toContain('"object":"list"');
-      expect(observed.stderr).toContain("agentic mode — server-side tools enabled: read_file");
-      expect(observed.stderr).toContain("--insecure with tools = UNAUTHENTICATED remote code execution");
-      expect(observed.stderr).not.toContain("API key:");
-      expect(observed.exitCode).toBe(0);
-    }, 15_000);
+    it(
+      scenario.label,
+      async () => {
+        const observed = await observeServeProcess(scenario.buildArgs);
+        expect(observed.status).toBe(200);
+        expect(observed.body).toContain('"object":"list"');
+        expect(observed.stderr).toContain("agentic mode — server-side tools enabled: read_file");
+        expect(observed.stderr).toContain(
+          "--insecure with tools = UNAUTHENTICATED remote code execution",
+        );
+        expect(observed.stderr).not.toContain("API key:");
+        expect(observed.exitCode).toBe(0);
+      },
+      15_000,
+    );
   }
 });

@@ -19,10 +19,12 @@ export function splitChatMessages(messages: readonly Readonly<Record<string, unk
 } {
   if (messages.length === 0) throw new CompletionError("'messages' must not be empty");
   const last = messages[messages.length - 1] as Readonly<Record<string, unknown>>;
-  if (last["role"] !== "user")
-    throw new CompletionError("the last message must be a user message");
+  if (last["role"] !== "user") throw new CompletionError("the last message must be a user message");
   const content = last["content"];
-  return { history: messages.slice(0, -1), lastUserText: typeof content === "string" ? content : "" };
+  return {
+    history: messages.slice(0, -1),
+    lastUserText: typeof content === "string" ? content : "",
+  };
 }
 
 export function buildChatCompletion(options: {
@@ -61,9 +63,7 @@ export function buildChunk(options: {
     object: "chat.completion.chunk",
     created: options.created,
     model: options.model,
-    choices: [
-      { index: 0, delta: options.delta, finish_reason: options.finishReason ?? null },
-    ],
+    choices: [{ index: 0, delta: options.delta, finish_reason: options.finishReason ?? null }],
   };
 }
 

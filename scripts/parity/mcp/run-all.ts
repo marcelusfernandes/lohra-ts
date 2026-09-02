@@ -812,7 +812,13 @@ results.push(
       ],
       [
         "env-duplicate-after-null",
-        { command: "fixture", env: [[null, "none"], ["null", "string"]] },
+        {
+          command: "fixture",
+          env: [
+            [null, "none"],
+            ["null", "string"],
+          ],
+        },
         "server 'bad' field 'env' entry 1 collides after key coercion: 'null'",
       ],
     ] as const) {

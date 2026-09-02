@@ -128,7 +128,12 @@ describe("GatewaySessionRegistry.canSubmitPrompt (L18/ADR-T12-04)", () => {
     sessions.endSession("parent", "compression", 20);
     expect(registry.canSubmitPrompt("parent")).toBe(false);
 
-    registry.createOrResurrect({ sessionId: "parent", model: "m", systemPrompt: "sp", cwd: "/tmp" });
+    registry.createOrResurrect({
+      sessionId: "parent",
+      model: "m",
+      systemPrompt: "sp",
+      cwd: "/tmp",
+    });
     expect(registry.canSubmitPrompt("parent")).toBe(true);
     expect(sessions.getSession("parent")?.end_reason).toBe("compression");
   });

@@ -9,10 +9,7 @@ function config(name: string, overrides: Partial<MCPServerConfig> = {}): MCPServ
   return { name, transport: "stdio", command: "npx", args: [], env: {}, ...overrides };
 }
 
-function fakeSession(
-  tools: readonly unknown[],
-  overrides: Partial<MCPSession> = {},
-): MCPSession {
+function fakeSession(tools: readonly unknown[], overrides: Partial<MCPSession> = {}): MCPSession {
   return {
     listTools: () => Promise.resolve(tools),
     callTool: () => Promise.resolve({}),
@@ -24,10 +21,10 @@ function fakeSession(
 function captureStderr(): { readonly lines: string[]; restore: () => void } {
   const lines: string[] = [];
   const original = process.stderr.write.bind(process.stderr);
-  process.stderr.write = ((chunk: string) => {
+  process.stderr.write = (chunk: string) => {
     lines.push(chunk);
     return true;
-  });
+  };
   return { lines, restore: () => (process.stderr.write = original) };
 }
 

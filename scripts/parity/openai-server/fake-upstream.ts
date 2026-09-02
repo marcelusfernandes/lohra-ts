@@ -33,7 +33,11 @@ function lastUserText(body: Record<string, unknown>): string {
     if (typeof content === "string") return content;
     if (Array.isArray(content)) {
       return content
-        .map((part) => (typeof part === "object" && part !== null ? (part as Record<string, unknown>)["text"] : ""))
+        .map((part) =>
+          typeof part === "object" && part !== null
+            ? (part as Record<string, unknown>)["text"]
+            : "",
+        )
         .filter((value) => typeof value === "string")
         .join("");
     }
@@ -77,15 +81,23 @@ function errorPayload(): { error: { message: string; type: string } } {
  * see — rather than a mutable counter. */
 function hasToolResult(body: Record<string, unknown>): boolean {
   const messages = Array.isArray(body["messages"]) ? (body["messages"] as unknown[]) : [];
-  return messages.some((message) => (message as Record<string, unknown> | undefined)?.["role"] === "tool");
+  return messages.some(
+    (message) => (message as Record<string, unknown> | undefined)?.["role"] === "tool",
+  );
 }
 
-const TOOL_CALL_REQUESTS: Readonly<Record<string, { readonly name: string; readonly args: Record<string, unknown> }>> = {
+const TOOL_CALL_REQUESTS: Readonly<
+  Record<string, { readonly name: string; readonly args: Record<string, unknown> }>
+> = {
   "toolcall-danger": { name: "terminal", args: { command: "rm -rf /" } },
   "toolcall-safe": { name: "read_file", args: { path: "tool-target.txt" } },
 };
 
-function chatNonStream(response: ServerResponse, scenario: string, body: Record<string, unknown>): void {
+function chatNonStream(
+  response: ServerResponse,
+  scenario: string,
+  body: Record<string, unknown>,
+): void {
   if (scenario === "err418") {
     json(response, errorPayload(), 418);
     return;
@@ -111,7 +123,13 @@ function chatNonStream(response: ServerResponse, scenario: string, body: Record<
         {
           message: {
             content: null,
-            tool_calls: [{ id: "call_1", type: "function", function: { name: toolCall.name, arguments: JSON.stringify(toolCall.args) } }],
+            tool_calls: [
+              {
+                id: "call_1",
+                type: "function",
+                function: { name: toolCall.name, arguments: JSON.stringify(toolCall.args) },
+              },
+            ],
           },
           finish_reason: "tool_calls",
         },
@@ -121,12 +139,21 @@ function chatNonStream(response: ServerResponse, scenario: string, body: Record<
     return;
   }
   json(response, {
-    choices: [{ message: { content: `FAKE-UPSTREAM-OK:${scenario}` }, finish_reason: scenario === "partial" ? "length" : "stop" }],
+    choices: [
+      {
+        message: { content: `FAKE-UPSTREAM-OK:${scenario}` },
+        finish_reason: scenario === "partial" ? "length" : "stop",
+      },
+    ],
     usage: scenario === "nousage" ? undefined : USAGE,
   });
 }
 
-function chatStream(response: ServerResponse, scenario: string, body: Record<string, unknown>): void {
+function chatStream(
+  response: ServerResponse,
+  scenario: string,
+  body: Record<string, unknown>,
+): void {
   if (scenario === "err418") {
     json(response, errorPayload(), 418);
     return;
@@ -141,7 +168,14 @@ function chatStream(response: ServerResponse, scenario: string, body: Record<str
           {
             index: 0,
             delta: {
-              tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: toolCall.name, arguments: JSON.stringify(toolCall.args) } }],
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_1",
+                  type: "function",
+                  function: { name: toolCall.name, arguments: JSON.stringify(toolCall.args) },
+                },
+              ],
             },
             finish_reason: null,
           },
@@ -200,7 +234,13 @@ export function startFakeUpstream(): Promise<FakeUpstream> {
           value === undefined ? [] : [[key, Array.isArray(value) ? value.join(", ") : value]],
         ),
       );
-      requests.push({ method: request.method ?? "", path: request.url ?? "", headers, body, rawBody });
+      requests.push({
+        method: request.method ?? "",
+        path: request.url ?? "",
+        headers,
+        body,
+        rawBody,
+      });
       const scenario = scenarioOf(body);
       const stream = body["stream"] === true;
       if (stream) chatStream(response, scenario, body);

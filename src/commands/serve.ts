@@ -22,7 +22,11 @@ import {
   resolveApiKey,
   resolveProviderName,
 } from "../providers/index.js";
-import { AnthropicMessagesModel, ChatCompletionsModel, type ToolDispatcher } from "../conversation/index.js";
+import {
+  AnthropicMessagesModel,
+  ChatCompletionsModel,
+  type ToolDispatcher,
+} from "../conversation/index.js";
 import { AnthropicMessagesClient, buildClient } from "../transports/index.js";
 
 export interface ServeCommandOptions {
@@ -60,12 +64,15 @@ export async function runServe(options: ServeCommandOptions): Promise<number> {
     return 2;
   }
   if (profile.apiMode !== "chat_completions" && profile.apiMode !== "anthropic_messages") {
-    options.stderr(`provider '${profile.name}' (api_mode '${profile.apiMode}') is not supported yet.\n`);
+    options.stderr(
+      `provider '${profile.name}' (api_mode '${profile.apiMode}') is not supported yet.\n`,
+    );
     return 2;
   }
 
   const upstreamKey =
-    resolveApiKey(profile.name, options.environment) ?? (profile.name === "ollama" ? "lohra-local" : "");
+    resolveApiKey(profile.name, options.environment) ??
+    (profile.name === "ollama" ? "lohra-local" : "");
   let client;
   try {
     client = buildClient(profile, upstreamKey);

@@ -41,10 +41,7 @@ export interface ChildResult {
 export type Awaitable<T> = T | Promise<T>;
 
 /** How a leaf runs one of its tools. */
-export type LeafToolDispatch = (
-  name: string,
-  args: Readonly<Record<string, unknown>>,
-) => string;
+export type LeafToolDispatch = (name: string, args: Readonly<Record<string, unknown>>) => string;
 
 /**
  * One ACQUISITION's leaf sandbox, handed to the runtime before any leaf of that

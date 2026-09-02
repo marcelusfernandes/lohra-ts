@@ -49,14 +49,25 @@ async function fetchWith(
     ...harness.deps,
     ...(overrides.maxBytes === undefined ? {} : { maxBytes: overrides.maxBytes }),
   });
-  return { ...outcome, requests: harness.requests, cancelCalls: harness.cancelCalls, resolverCalls: harness.resolverCalls };
+  return {
+    ...outcome,
+    requests: harness.requests,
+    cancelCalls: harness.cancelCalls,
+    resolverCalls: harness.resolverCalls,
+  };
 }
 
 async function fetchError(
   responses: readonly ConnectorResponse[],
   url: string,
   overrides: { readonly clock?: () => number; readonly maxBytes?: number } = {},
-): Promise<{ cause: string; requestedUrls: string[]; cancelCalls: number[]; resolverCalls: string[]; requestsMade: number }> {
+): Promise<{
+  cause: string;
+  requestedUrls: string[];
+  cancelCalls: number[];
+  resolverCalls: string[];
+  requestsMade: number;
+}> {
   const harness = fixture(responses, overrides.clock);
   try {
     await fetchUrl(url, {
@@ -84,7 +95,9 @@ describe("fetch request semantics", () => {
       { clock: () => now },
     );
     expect(outcome.text).toBe("hello");
-    expect(outcome.requests[0]?.headers["user-agent"]).toBe("lohra-web/0.1 (+https://github.com/lohra)");
+    expect(outcome.requests[0]?.headers["user-agent"]).toBe(
+      "lohra-web/0.1 (+https://github.com/lohra)",
+    );
     expect(outcome.requests[0]?.timeoutSeconds).toBe(10);
     expect(outcome.requests[0]?.deadlineMs).toBe(10_000);
     expect(outcome.requests).toHaveLength(1);
@@ -113,7 +126,10 @@ describe("fetch request semantics", () => {
   it("covers the 301/302/303/307/308 status matrix", async () => {
     for (const status of [301, 302, 303, 307, 308]) {
       const outcome = await fetchWith(
-        [responseOf({ status, headers: { location: "/b" } }), responseOf({ chunks: [encoder.encode("ok")] })],
+        [
+          responseOf({ status, headers: { location: "/b" } }),
+          responseOf({ chunks: [encoder.encode("ok")] }),
+        ],
         "http://public.test/",
       );
       expect(outcome.text).toBe("ok");
@@ -219,12 +235,16 @@ describe("fetch request semantics", () => {
 
   it("proves SSRF direct refusal with zero requests and mixed-DNS whole-set refusal", async () => {
     const direct = await fetchError([], "http://private.test/");
-    expect(direct.cause).toBe("refusing to fetch a non-public address: 10.0.0.5 (host 'private.test')");
+    expect(direct.cause).toBe(
+      "refusing to fetch a non-public address: 10.0.0.5 (host 'private.test')",
+    );
     expect(direct.requestsMade).toBe(0);
     expect(direct.resolverCalls).toEqual(["private.test"]);
 
     const mixed = await fetchError([], "http://mixed.test/");
-    expect(mixed.cause).toBe("refusing to fetch a non-public address: 10.0.0.5 (host 'mixed.test')");
+    expect(mixed.cause).toBe(
+      "refusing to fetch a non-public address: 10.0.0.5 (host 'mixed.test')",
+    );
     expect(mixed.requestsMade).toBe(0);
   });
 
@@ -239,7 +259,9 @@ describe("fetch request semantics", () => {
       });
       expect.unreachable("resolver");
     } catch (error) {
-      expect((error as Error).message).toBe("could not resolve host 'missing.test': fixture DNS failed");
+      expect((error as Error).message).toBe(
+        "could not resolve host 'missing.test': fixture DNS failed",
+      );
     }
   });
 });
@@ -250,18 +272,25 @@ describe("fetch peer hardening (expected divergences)", () => {
       [responseOf({ peer: "1.2.3.4", chunks: [encoder.encode("SIMULATED")] })],
       "http://public.test/",
     );
-    expect(failure.cause).toBe("refusing response from unvalidated peer: peer not in validated set");
+    expect(failure.cause).toBe(
+      "refusing response from unvalidated peer: peer not in validated set",
+    );
   });
 
   it("refuses rebinding after redirect before the second body", async () => {
     const failure = await fetchError(
       [
         responseOf({ status: 302, headers: { location: "http://hop.test/" }, peer: PUBLIC }),
-        responseOf({ peer: "1.2.3.4", chunks: [encoder.encode("SIMULATED_REDIRECT_PRIVATE_BODY")] }),
+        responseOf({
+          peer: "1.2.3.4",
+          chunks: [encoder.encode("SIMULATED_REDIRECT_PRIVATE_BODY")],
+        }),
       ],
       "http://public.test/",
     );
-    expect(failure.cause).toBe("refusing response from unvalidated peer: peer not in validated set");
+    expect(failure.cause).toBe(
+      "refusing response from unvalidated peer: peer not in validated set",
+    );
   });
 
   it("refuses an unavailable peer", async () => {
@@ -298,18 +327,20 @@ describe("fetch bounds, content types and encodings", () => {
 
   it("stops reading and cancels exactly at the cap across chunk boundaries", async () => {
     const big = new Uint8Array(1_500_000).fill(97);
-    const outcome = await fetchWith(
-      [responseOf({ chunks: [big, big] })],
-      "http://public.test/",
-      { maxBytes: 2_000_000 },
-    );
+    const outcome = await fetchWith([responseOf({ chunks: [big, big] })], "http://public.test/", {
+      maxBytes: 2_000_000,
+    });
     expect(outcome.stats.bufferedBytes).toBe(2_000_000);
     expect(outcome.stats.readCalls).toBe(2);
     expect(outcome.stats.cancelled).toBe(true);
     expect(outcome.cancelCalls).toEqual([1]);
 
     const crossed = await fetchWith(
-      [responseOf({ chunks: [new Uint8Array(1_000_000).fill(97), new Uint8Array(1_000_001).fill(98)] })],
+      [
+        responseOf({
+          chunks: [new Uint8Array(1_000_000).fill(97), new Uint8Array(1_000_001).fill(98)],
+        }),
+      ],
       "http://public.test/",
       { maxBytes: 2_000_000 },
     );

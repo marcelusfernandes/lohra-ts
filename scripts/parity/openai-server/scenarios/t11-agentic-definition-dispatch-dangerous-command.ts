@@ -26,9 +26,9 @@ function postRequestLines(apiKey: string | null, body: string): string {
 function toolResultMessage(record: UpstreamRequestRecord): Record<string, unknown> | undefined {
   const messages = record.body["messages"];
   if (!Array.isArray(messages)) return undefined;
-  return messages.find((message) => (message as Record<string, unknown> | undefined)?.["role"] === "tool") as
-    | Record<string, unknown>
-    | undefined;
+  return messages.find(
+    (message) => (message as Record<string, unknown> | undefined)?.["role"] === "tool",
+  ) as Record<string, unknown> | undefined;
 }
 
 export async function run(
@@ -47,20 +47,38 @@ export async function run(
   writeFileSync(canaryOraclePath, CANARY_CONTENT, "utf8");
   writeFileSync(canaryCandidatePath, CANARY_CONTENT, "utf8");
 
-  const body = JSON.stringify({ model: "m", messages: [{ role: "user", content: "SCEN:toolcall-danger hi" }] });
+  const body = JSON.stringify({
+    model: "m",
+    messages: [{ role: "user", content: "SCEN:toolcall-danger hi" }],
+  });
   const before = upstream.requests.length;
   const probe: ProbeRecord & { upstream: UpstreamRequestRecord[] } = {
-    ...(await probeBoth("dangerous-command", oracle, candidate, (apiKey) => postRequestLines(apiKey, body), body)),
+    ...(await probeBoth(
+      "dangerous-command",
+      oracle,
+      candidate,
+      (apiKey) => postRequestLines(apiKey, body),
+      body,
+    )),
     upstream: upstream.requests.slice(before),
   };
 
   const canaryOracleIntact = readFileSync(canaryOraclePath, "utf8") === CANARY_CONTENT;
   const canaryCandidateIntact = readFileSync(canaryCandidatePath, "utf8") === CANARY_CONTENT;
 
-  const rawEvidence = { request: probe.request, oracle: probe.oracle, candidate: probe.candidate, upstream: probe.upstream };
+  const rawEvidence = {
+    request: probe.request,
+    oracle: probe.oracle,
+    candidate: probe.candidate,
+    upstream: probe.upstream,
+  };
 
-  const secondCallOracle = probe.upstream.find((record, index) => index > 0 && toolResultMessage(record) !== undefined);
-  const toolMessages = probe.upstream.map((record) => toolResultMessage(record)).filter((message) => message !== undefined);
+  const secondCallOracle = probe.upstream.find(
+    (record, index) => index > 0 && toolResultMessage(record) !== undefined,
+  );
+  const toolMessages = probe.upstream
+    .map((record) => toolResultMessage(record))
+    .filter((message) => message !== undefined);
 
   const denialShapeOk = toolMessages.every((message) => {
     const content = message["content"];
@@ -75,12 +93,17 @@ export async function run(
   });
 
   const comparison = compareRaw(probe.oracle, probe.candidate, {
-    oracleBody: probe.oracle.body.replaceAll(/"id":"chatcmpl-[0-9a-f]{32}"/gu, '"id":"<ID>"').replaceAll(/"created":\d+/gu, '"created":0'),
-    candidateBody: probe.candidate.body.replaceAll(/"id":"chatcmpl-[0-9a-f]{32}"/gu, '"id":"<ID>"').replaceAll(/"created":\d+/gu, '"created":0'),
+    oracleBody: probe.oracle.body
+      .replaceAll(/"id":"chatcmpl-[0-9a-f]{32}"/gu, '"id":"<ID>"')
+      .replaceAll(/"created":\d+/gu, '"created":0'),
+    candidateBody: probe.candidate.body
+      .replaceAll(/"id":"chatcmpl-[0-9a-f]{32}"/gu, '"id":"<ID>"')
+      .replaceAll(/"created":\d+/gu, '"created":0'),
   });
 
   const checks = {
-    statusOk: probe.oracle.statusLine.includes(" 200 ") && probe.candidate.statusLine.includes(" 200 "),
+    statusOk:
+      probe.oracle.statusLine.includes(" 200 ") && probe.candidate.statusLine.includes(" 200 "),
     toolResultCountOk: toolMessages.length === 2,
     denialShapeOk,
     canaryOracleIntactOk: canaryOracleIntact,
@@ -89,14 +112,22 @@ export async function run(
     bilateralOk: comparison.match,
   };
   const ok = Object.values(checks).every(Boolean) && secondCallOracle !== undefined;
-  const record = { id: probe.id, checks, normalized: { oracle: comparison.oracle, candidate: comparison.candidate }, match: ok };
+  const record = {
+    id: probe.id,
+    checks,
+    normalized: { oracle: comparison.oracle, candidate: comparison.candidate },
+    match: ok,
+  };
   const differences = ok ? [] : [record];
 
   return {
     projection: {
       probes: [record],
       normalizations: [
-        { path: "/v1/chat/completions", rule: "`id`/`created` normalized before the bilateral diff." },
+        {
+          path: "/v1/chat/completions",
+          rule: "`id`/`created` normalized before the bilateral diff.",
+        },
         { path: "*", rule: "`date`/`server` headers dropped; header order not compared." },
       ],
     },

@@ -12,9 +12,7 @@ import type {
 } from "../conversation/index.js";
 
 export class RequestRepository implements ConversationRepository {
-  public constructor(
-    private readonly history: readonly Readonly<Record<string, unknown>>[],
-  ) {}
+  public constructor(private readonly history: readonly Readonly<Record<string, unknown>>[]) {}
 
   public createSession(_input: {
     readonly id: string;

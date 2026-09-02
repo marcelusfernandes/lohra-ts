@@ -222,51 +222,84 @@ function stub(value: unknown): StubSpec {
   if (laneStepsRaw !== undefined) {
     const lanes = object(laneStepsRaw, "stub.laneSteps");
     for (const [lane, rawSteps] of Object.entries(lanes)) {
-      laneSteps[lane] = array(rawSteps, `stub.laneSteps.${lane}`).map((raw, index): StubLaneStep => {
-        const label = `stub.laneSteps.${lane}[${String(index)}]`;
-        const step = object(raw, label);
-        exactKeys(
-          step,
-          ["kind", "content", "calls", "status", "message", "headers", "signal", "awaitSignal", "gate", "openGate"],
-          label,
-        );
-        const kind = enumeration(step.kind, ["text", "tool_calls", "http_error"], `${label}.kind`);
-        if (kind === "text" && typeof step.content !== "string") {
-          throw new HarnessError("MANIFEST_INVALID", `${label}.content must be a string for kind "text"`);
-        }
-        if (kind === "http_error" && typeof step.status !== "number") {
-          throw new HarnessError("MANIFEST_INVALID", `${label}.status must be a number for kind "http_error"`);
-        }
-        const calls =
-          step.calls === undefined
-            ? undefined
-            : array(step.calls, `${label}.calls`).map((rawCall, callIndex) => {
-                const callLabel = `${label}.calls[${String(callIndex)}]`;
-                const call = object(rawCall, callLabel);
-                exactKeys(call, ["name", "argumentsRaw"], callLabel);
-                return {
-                  name: string(call.name, `${callLabel}.name`),
-                  argumentsRaw: string(call.argumentsRaw, `${callLabel}.argumentsRaw`),
-                };
-              });
-        if (kind === "tool_calls" && (calls === undefined || calls.length === 0)) {
-          throw new HarnessError("MANIFEST_STUB_LANE_STEP", `${label}.calls must not be empty`);
-        }
-        return {
-          kind,
-          ...(step.content === undefined ? {} : { content: string(step.content, `${label}.content`) }),
-          ...(calls === undefined ? {} : { calls }),
-          ...(step.status === undefined ? {} : { status: step.status as number }),
-          ...(step.message === undefined ? {} : { message: string(step.message, `${label}.message`) }),
-          ...(step.headers === undefined ? {} : { headers: stringRecord(step.headers, `${label}.headers`) }),
-          ...(step.signal === undefined ? {} : { signal: string(step.signal, `${label}.signal`) }),
-          ...(step.awaitSignal === undefined
-            ? {}
-            : { awaitSignal: string(step.awaitSignal, `${label}.awaitSignal`) }),
-          ...(step.gate === undefined ? {} : { gate: string(step.gate, `${label}.gate`) }),
-          ...(step.openGate === undefined ? {} : { openGate: string(step.openGate, `${label}.openGate`) }),
-        };
-      });
+      laneSteps[lane] = array(rawSteps, `stub.laneSteps.${lane}`).map(
+        (raw, index): StubLaneStep => {
+          const label = `stub.laneSteps.${lane}[${String(index)}]`;
+          const step = object(raw, label);
+          exactKeys(
+            step,
+            [
+              "kind",
+              "content",
+              "calls",
+              "status",
+              "message",
+              "headers",
+              "signal",
+              "awaitSignal",
+              "gate",
+              "openGate",
+            ],
+            label,
+          );
+          const kind = enumeration(
+            step.kind,
+            ["text", "tool_calls", "http_error"],
+            `${label}.kind`,
+          );
+          if (kind === "text" && typeof step.content !== "string") {
+            throw new HarnessError(
+              "MANIFEST_INVALID",
+              `${label}.content must be a string for kind "text"`,
+            );
+          }
+          if (kind === "http_error" && typeof step.status !== "number") {
+            throw new HarnessError(
+              "MANIFEST_INVALID",
+              `${label}.status must be a number for kind "http_error"`,
+            );
+          }
+          const calls =
+            step.calls === undefined
+              ? undefined
+              : array(step.calls, `${label}.calls`).map((rawCall, callIndex) => {
+                  const callLabel = `${label}.calls[${String(callIndex)}]`;
+                  const call = object(rawCall, callLabel);
+                  exactKeys(call, ["name", "argumentsRaw"], callLabel);
+                  return {
+                    name: string(call.name, `${callLabel}.name`),
+                    argumentsRaw: string(call.argumentsRaw, `${callLabel}.argumentsRaw`),
+                  };
+                });
+          if (kind === "tool_calls" && (calls === undefined || calls.length === 0)) {
+            throw new HarnessError("MANIFEST_STUB_LANE_STEP", `${label}.calls must not be empty`);
+          }
+          return {
+            kind,
+            ...(step.content === undefined
+              ? {}
+              : { content: string(step.content, `${label}.content`) }),
+            ...(calls === undefined ? {} : { calls }),
+            ...(step.status === undefined ? {} : { status: step.status as number }),
+            ...(step.message === undefined
+              ? {}
+              : { message: string(step.message, `${label}.message`) }),
+            ...(step.headers === undefined
+              ? {}
+              : { headers: stringRecord(step.headers, `${label}.headers`) }),
+            ...(step.signal === undefined
+              ? {}
+              : { signal: string(step.signal, `${label}.signal`) }),
+            ...(step.awaitSignal === undefined
+              ? {}
+              : { awaitSignal: string(step.awaitSignal, `${label}.awaitSignal`) }),
+            ...(step.gate === undefined ? {} : { gate: string(step.gate, `${label}.gate`) }),
+            ...(step.openGate === undefined
+              ? {}
+              : { openGate: string(step.openGate, `${label}.openGate`) }),
+          };
+        },
+      );
     }
   }
   return {

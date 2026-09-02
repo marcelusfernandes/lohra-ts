@@ -43,7 +43,10 @@ function parseFrames(body: string): { frames: Frame[]; parseFailed: boolean; has
       continue;
     }
     try {
-      frames.push({ eventType: eventLine?.slice("event: ".length), data: JSON.parse(dataLine.slice("data: ".length)) as Record<string, unknown> });
+      frames.push({
+        eventType: eventLine?.slice("event: ".length),
+        data: JSON.parse(dataLine.slice("data: ".length)) as Record<string, unknown>,
+      });
     } catch {
       parseFailed = true;
     }
@@ -155,11 +158,25 @@ export async function run(
   const body = JSON.stringify({ model: "m", input: "SCEN:ok hi", stream: true });
   const before = upstream.requests.length;
   const probe: ProbeRecord & { upstream: UpstreamRequestRecord[] } = {
-    ...(await probeBoth("success", oracle, candidate, (apiKey) => postRequestLines(apiKey, body), body)),
+    ...(await probeBoth(
+      "success",
+      oracle,
+      candidate,
+      (apiKey) => postRequestLines(apiKey, body),
+      body,
+    )),
     upstream: upstream.requests.slice(before),
   };
 
-  const rawEvidence = [{ id: probe.id, request: probe.request, oracle: probe.oracle, candidate: probe.candidate, upstream: probe.upstream }];
+  const rawEvidence = [
+    {
+      id: probe.id,
+      request: probe.request,
+      oracle: probe.oracle,
+      candidate: probe.candidate,
+      upstream: probe.upstream,
+    },
+  ];
 
   const oracleAnalysis = analyze(probe.oracle.body);
   const candidateAnalysis = analyze(probe.candidate.body);
@@ -170,8 +187,12 @@ export async function run(
   });
   const headersOk = [probe.oracle, probe.candidate].every((response) => {
     const contentType = response.headers.find(([name]) => name === "content-type")?.[1] ?? "";
-    const transferEncoding = response.headers.find(([name]) => name === "transfer-encoding")?.[1] ?? "";
-    return contentType === "text/event-stream; charset=utf-8" && transferEncoding.toLowerCase() === "chunked";
+    const transferEncoding =
+      response.headers.find(([name]) => name === "transfer-encoding")?.[1] ?? "";
+    return (
+      contentType === "text/event-stream; charset=utf-8" &&
+      transferEncoding.toLowerCase() === "chunked"
+    );
   });
   const checks = {
     headersOk,
@@ -184,15 +205,26 @@ export async function run(
     upstreamCountOk: probe.upstream.length === 2,
   };
   const ok = comparison.match && Object.values(checks).every(Boolean);
-  const record = { id: probe.id, normalized: { oracle: comparison.oracle, candidate: comparison.candidate }, checks, match: ok };
+  const record = {
+    id: probe.id,
+    normalized: { oracle: comparison.oracle, candidate: comparison.candidate },
+    checks,
+    match: ok,
+  };
   const differences = ok ? [] : [record];
 
   return {
     projection: {
       probes: [record],
       normalizations: [
-        { path: "/v1/responses (stream)", rule: "`id` (resp_<32hex>, format-checked) and every `created_at` occurrence normalized before the bilateral body diff; `sequence_number` is compared literally (assertion 45 requires it start at 0 and increase by exactly 1, so normalizing it away would hide a real divergence)." },
-        { path: "*", rule: "`date`/`server` headers dropped; content-length dropped (SSE responses never carry one); header order not compared." },
+        {
+          path: "/v1/responses (stream)",
+          rule: "`id` (resp_<32hex>, format-checked) and every `created_at` occurrence normalized before the bilateral body diff; `sequence_number` is compared literally (assertion 45 requires it start at 0 and increase by exactly 1, so normalizing it away would hide a real divergence).",
+        },
+        {
+          path: "*",
+          rule: "`date`/`server` headers dropped; content-length dropped (SSE responses never carry one); header order not compared.",
+        },
       ],
     },
     rawEvidence,

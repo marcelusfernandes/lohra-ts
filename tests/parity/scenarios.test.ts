@@ -145,10 +145,7 @@ describe("t15 chat evidence reproducibility", () => {
   const loadT15Policy = (): T15Policy =>
     JSON.parse(readFileSync(resolve(t15ManifestPath), "utf8")) as T15Policy;
 
-  const requestRecord = (
-    toolContent: string,
-    model = "stub-coder:1b",
-  ): RunRecord => ({
+  const requestRecord = (toolContent: string, model = "stub-coder:1b"): RunRecord => ({
     process: {
       exitCode: 0,
       signal: null,
@@ -201,9 +198,7 @@ describe("t15 chat evidence reproducibility", () => {
     const oracle = requestRecord(
       `{"ok": true, "run_id": "${"a".repeat(32)}", "status": "started"}`,
     );
-    const candidate = requestRecord(
-      `{"ok": true, "run_id": "run-1", "status": "started"}`,
-    );
+    const candidate = requestRecord(`{"ok": true, "run_id": "run-1", "status": "started"}`);
 
     const result = compareRuns(oracle, candidate, {
       comparisons: policy.comparisons as never,
@@ -283,9 +278,7 @@ describe("t15 chat evidence reproducibility", () => {
   it("detects run-id divergence when the normalization rule is absent", () => {
     const oracleRunId = "a".repeat(32);
     const candidateRunId = "b".repeat(32);
-    const oracle = requestRecord(
-      `{"ok": true, "run_id": "${oracleRunId}", "status": "started"}`,
-    );
+    const oracle = requestRecord(`{"ok": true, "run_id": "${oracleRunId}", "status": "started"}`);
     const candidate = requestRecord(
       `{"ok": true, "run_id": "${candidateRunId}", "status": "started"}`,
     );

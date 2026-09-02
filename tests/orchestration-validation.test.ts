@@ -141,7 +141,9 @@ describe("validateResumeTasks", () => {
     expect(validateResumeTasks({ resume_id: "abc", tasks: [] })).toBe(expected);
     expect(validateResumeTasks({ resume_id: "abc", tasks: ["   "] })).toBe(expected);
     expect(validateResumeTasks({ resume_id: "abc" })).toBe(expected);
-    expect(validateResumeTasks({ resume_id: "abc", tasks: "not a list but empty-ish" })).not.toBe(expected);
+    expect(validateResumeTasks({ resume_id: "abc", tasks: "not a list but empty-ish" })).not.toBe(
+      expected,
+    );
   });
 
   it("passes through when resume_id is absent, regardless of tasks", () => {

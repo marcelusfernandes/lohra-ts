@@ -9,7 +9,10 @@ import {
 import type { NormalizedResponse, ToolCall } from "../../src/transports/index.js";
 import { ProviderCallFailed } from "../../src/transports/errors.js";
 import { driveGatewayTurn, GatewayEventingToolDispatcher } from "../../src/gateway/turn.js";
-import type { ToolCompletePayload, ToolStartPayload } from "../../src/gateway/rpc/tool-event-payload.js";
+import type {
+  ToolCompletePayload,
+  ToolStartPayload,
+} from "../../src/gateway/rpc/tool-event-payload.js";
 
 const usage = {
   inputTokens: 1,
@@ -20,11 +23,23 @@ const usage = {
 } as const;
 
 class MemoryRepository implements ConversationRepository {
-  private readonly sessions = new Map<string, { systemPrompt: string; model: string; cwd: string }>();
+  private readonly sessions = new Map<
+    string,
+    { systemPrompt: string; model: string; cwd: string }
+  >();
   public committed: unknown[] = [];
 
-  createSession(input: { readonly id: string; readonly systemPrompt: string; readonly model: string; readonly cwd: string }): void {
-    this.sessions.set(input.id, { systemPrompt: input.systemPrompt, model: input.model, cwd: input.cwd });
+  createSession(input: {
+    readonly id: string;
+    readonly systemPrompt: string;
+    readonly model: string;
+    readonly cwd: string;
+  }): void {
+    this.sessions.set(input.id, {
+      systemPrompt: input.systemPrompt,
+      model: input.model,
+      cwd: input.cwd,
+    });
   }
   session(id: string) {
     return this.sessions.get(id) ?? null;
@@ -169,9 +184,7 @@ describe("GatewayEventingToolDispatcher: tool.start/tool.complete emission and t
     const starts: ToolStartPayload[] = [];
     const completes: ToolCompletePayload[] = [];
     const rawDispatch = (_name: string, argumentsJson: string) =>
-      Promise.resolve(
-        JSON.stringify({ ok: true, echoed: JSON.parse(argumentsJson) as unknown }),
-      );
+      Promise.resolve(JSON.stringify({ ok: true, echoed: JSON.parse(argumentsJson) as unknown }));
     const dispatcher = new GatewayEventingToolDispatcher(rawDispatch, {
       onToolStart: (payload) => starts.push(payload),
       onToolComplete: (payload) => completes.push(payload),

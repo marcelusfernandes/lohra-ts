@@ -10,5 +10,7 @@ export function wrapSteerInbox(
   pending: readonly string[],
 ): readonly Readonly<Record<string, unknown>>[] {
   if (pending.length === 0) return [];
-  return [{ role: "user", content: `<system-reminder>\n${pending.join("\n")}\n</system-reminder>` }];
+  return [
+    { role: "user", content: `<system-reminder>\n${pending.join("\n")}\n</system-reminder>` },
+  ];
 }

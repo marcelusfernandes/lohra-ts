@@ -54,23 +54,25 @@ describe("resolveFanout — contract assertion 24 (13-row asymmetric clamp table
   });
 
   it("flag beats env in both directions (assertion 26)", () => {
-    expect(
-      resolveFanout("3", undefined, { LOHRA_MAX_PARALLEL: "1" }).maxParallel,
-    ).toBe(3);
-    expect(
-      resolveFanout("1", undefined, { LOHRA_MAX_PARALLEL: "5" }).maxParallel,
-    ).toBe(1);
+    expect(resolveFanout("3", undefined, { LOHRA_MAX_PARALLEL: "1" }).maxParallel).toBe(3);
+    expect(resolveFanout("1", undefined, { LOHRA_MAX_PARALLEL: "5" }).maxParallel).toBe(1);
   });
 
   it("throws CHAT_OPTION_INVALID:max-parallel for a non-integer flag value — mirrors finite()'s existing convention, not a byte-exact oracle claim (unmeasured)", () => {
-    expect(() => resolveFanout("abc", undefined, noEnv)).toThrow("CHAT_OPTION_INVALID:max-parallel");
-    expect(() => resolveFanout("3.0", undefined, noEnv)).toThrow("CHAT_OPTION_INVALID:max-parallel");
+    expect(() => resolveFanout("abc", undefined, noEnv)).toThrow(
+      "CHAT_OPTION_INVALID:max-parallel",
+    );
+    expect(() => resolveFanout("3.0", undefined, noEnv)).toThrow(
+      "CHAT_OPTION_INVALID:max-parallel",
+    );
   });
 
   it("LOHRA_MAX_SUBSESSIONS is env-only (assertion 27) and follows the same fallback rule", () => {
     const invalid = resolveFanout(undefined, undefined, { LOHRA_MAX_SUBSESSIONS: "abc" });
     expect(invalid.maxSubsessions).toBe(200);
-    expect(invalid.warnings).toEqual(["ignoring LOHRA_MAX_SUBSESSIONS='abc': not an integer; using 200"]);
+    expect(invalid.warnings).toEqual([
+      "ignoring LOHRA_MAX_SUBSESSIONS='abc': not an integer; using 200",
+    ]);
 
     const valid = resolveFanout(undefined, undefined, { LOHRA_MAX_SUBSESSIONS: "5" });
     expect(valid.maxSubsessions).toBe(5);
@@ -86,7 +88,9 @@ describe("resolveFanout — contract assertion 24 (13-row asymmetric clamp table
   it("LOHRA_MAX_ITERATIONS falls back to 90 on an invalid value, with the byte-exact template warning", () => {
     const result = resolveFanout(undefined, undefined, { LOHRA_MAX_ITERATIONS: "abc" });
     expect(result.parentMaxIterations).toBe(90);
-    expect(result.warnings).toEqual(["ignoring LOHRA_MAX_ITERATIONS='abc': not an integer; using 90"]);
+    expect(result.warnings).toEqual([
+      "ignoring LOHRA_MAX_ITERATIONS='abc': not an integer; using 90",
+    ]);
   });
 
   it("collects warnings from independently-invalid env vars in a stable, declared order", () => {

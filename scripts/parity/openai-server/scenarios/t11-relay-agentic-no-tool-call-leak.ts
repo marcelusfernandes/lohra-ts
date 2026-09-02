@@ -47,7 +47,9 @@ function noToolCallLeak(body: string): boolean {
 }
 
 function normalizeIds(body: string): string {
-  return body.replaceAll(/"id":\s*"chatcmpl-[0-9a-f]{32}"/gu, '"id":"<ID>"').replaceAll(/"created":\s*\d+/gu, '"created":0');
+  return body
+    .replaceAll(/"id":\s*"chatcmpl-[0-9a-f]{32}"/gu, '"id":"<ID>"')
+    .replaceAll(/"created":\s*\d+/gu, '"created":0');
 }
 
 interface Result {
@@ -61,28 +63,53 @@ interface Result {
 /** Agentic (--tools read_file): the loop dispatches read_file server-side
  * and completes; 2 upstream calls per side (tool_calls, then final), and
  * both sides must agree byte-for-byte once ids/created are normalized. */
-export async function runAgentic(oracle: ServerHandle, candidate: ServerHandle, upstream: FakeUpstream): Promise<Result> {
-  const body = JSON.stringify({ model: "m", messages: [{ role: "user", content: "SCEN:toolcall-safe hi" }], stream: true });
+export async function runAgentic(
+  oracle: ServerHandle,
+  candidate: ServerHandle,
+  upstream: FakeUpstream,
+): Promise<Result> {
+  const body = JSON.stringify({
+    model: "m",
+    messages: [{ role: "user", content: "SCEN:toolcall-safe hi" }],
+    stream: true,
+  });
   const before = upstream.requests.length;
   const probe: ProbeRecord & { upstream: UpstreamRequestRecord[] } = {
-    ...(await probeBoth("agentic-no-leak", oracle, candidate, (apiKey) => postRequestLines(apiKey, body), body)),
+    ...(await probeBoth(
+      "agentic-no-leak",
+      oracle,
+      candidate,
+      (apiKey) => postRequestLines(apiKey, body),
+      body,
+    )),
     upstream: upstream.requests.slice(before),
   };
-  const rawEvidence = { request: probe.request, oracle: probe.oracle, candidate: probe.candidate, upstream: probe.upstream };
+  const rawEvidence = {
+    request: probe.request,
+    oracle: probe.oracle,
+    candidate: probe.candidate,
+    upstream: probe.upstream,
+  };
   const comparison = compareRaw(probe.oracle, probe.candidate, {
     oracleBody: normalizeIds(probe.oracle.body),
     candidateBody: normalizeIds(probe.candidate.body),
     extraDroppedHeaders: ["content-length"],
   });
   const checks = {
-    statusOk: probe.oracle.statusLine.includes(" 200 ") && probe.candidate.statusLine.includes(" 200 "),
+    statusOk:
+      probe.oracle.statusLine.includes(" 200 ") && probe.candidate.statusLine.includes(" 200 "),
     oracleNoLeakOk: noToolCallLeak(probe.oracle.body),
     candidateNoLeakOk: noToolCallLeak(probe.candidate.body),
     bilateralOk: comparison.match,
     upstreamCountOk: probe.upstream.length === 4,
   };
   const ok = Object.values(checks).every(Boolean);
-  const record = { id: "agentic-no-leak", checks, normalized: { oracle: comparison.oracle, candidate: comparison.candidate }, match: ok };
+  const record = {
+    id: "agentic-no-leak",
+    checks,
+    normalized: { oracle: comparison.oracle, candidate: comparison.candidate },
+    match: ok,
+  };
   return {
     projection: { probes: [record] },
     rawEvidence,
@@ -113,20 +140,40 @@ const RELAY_CANDIDATE_PIN =
 // scenario never declared. Pinned per side for the same T08-authority
 // reason as the streaming half.
 function normalizeCompactIds(body: string): string {
-  return body.replaceAll(/"id":"chatcmpl-[0-9a-f]{32}"/gu, '"id":"<ID>"').replaceAll(/"created":\d+/gu, '"created":0');
+  return body
+    .replaceAll(/"id":"chatcmpl-[0-9a-f]{32}"/gu, '"id":"<ID>"')
+    .replaceAll(/"created":\d+/gu, '"created":0');
 }
 
 /** Relay (no --tools), non-stream: the unsolicited-tool_calls divergence
  * is a STATUS-level split here (oracle 200, candidate 502), not just a
  * body split — F2's declared gap. */
-export async function runRelayNonStream(oracle: ServerHandle, candidate: ServerHandle, upstream: FakeUpstream): Promise<Result> {
-  const body = JSON.stringify({ model: "m", messages: [{ role: "user", content: "SCEN:toolcall-safe hi" }] });
+export async function runRelayNonStream(
+  oracle: ServerHandle,
+  candidate: ServerHandle,
+  upstream: FakeUpstream,
+): Promise<Result> {
+  const body = JSON.stringify({
+    model: "m",
+    messages: [{ role: "user", content: "SCEN:toolcall-safe hi" }],
+  });
   const before = upstream.requests.length;
   const probe: ProbeRecord & { upstream: UpstreamRequestRecord[] } = {
-    ...(await probeBoth("relay-no-leak-nonstream", oracle, candidate, (apiKey) => postRequestLines(apiKey, body), body)),
+    ...(await probeBoth(
+      "relay-no-leak-nonstream",
+      oracle,
+      candidate,
+      (apiKey) => postRequestLines(apiKey, body),
+      body,
+    )),
     upstream: upstream.requests.slice(before),
   };
-  const rawEvidence = { request: probe.request, oracle: probe.oracle, candidate: probe.candidate, upstream: probe.upstream };
+  const rawEvidence = {
+    request: probe.request,
+    oracle: probe.oracle,
+    candidate: probe.candidate,
+    upstream: probe.upstream,
+  };
   const oracleNormalized = normalizeCompactIds(probe.oracle.body);
   const candidateNormalized = normalizeCompactIds(probe.candidate.body);
   const checks = {
@@ -136,8 +183,12 @@ export async function runRelayNonStream(oracle: ServerHandle, candidate: ServerH
     candidateStatus502Ok: probe.candidate.statusLine.includes(" 502 "),
     oracleNoLeakOk: noToolCallLeak(probe.oracle.body),
     candidateNoLeakOk: noToolCallLeak(probe.candidate.body),
-    oraclePinnedOk: oracleNormalized === '{"id":"<ID>","object":"chat.completion","created":0,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":11,"completion_tokens":5,"total_tokens":16,"prompt_tokens_details":{"cached_tokens":2,"cache_write_tokens":0},"completion_tokens_details":{"reasoning_tokens":0}}}',
-    candidatePinnedOk: candidateNormalized === '{"error":{"message":"provider returned tool_calls while tools are disabled","type":"upstream_error"}}',
+    oraclePinnedOk:
+      oracleNormalized ===
+      '{"id":"<ID>","object":"chat.completion","created":0,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":11,"completion_tokens":5,"total_tokens":16,"prompt_tokens_details":{"cached_tokens":2,"cache_write_tokens":0},"completion_tokens_details":{"reasoning_tokens":0}}}',
+    candidatePinnedOk:
+      candidateNormalized ===
+      '{"error":{"message":"provider returned tool_calls while tools are disabled","type":"upstream_error"}}',
     upstreamCountOk: probe.upstream.length === 2,
   };
   const ok = Object.values(checks).every(Boolean);
@@ -163,18 +214,38 @@ export async function runRelayNonStream(oracle: ServerHandle, candidate: ServerH
  * normally with empty content; the candidate raises UnexpectedToolCallError
  * — an approved T08 hardening divergence, pinned per side below rather
  * than asserted bilaterally. */
-export async function runRelay(oracle: ServerHandle, candidate: ServerHandle, upstream: FakeUpstream): Promise<Result> {
-  const body = JSON.stringify({ model: "m", messages: [{ role: "user", content: "SCEN:toolcall-safe hi" }], stream: true });
+export async function runRelay(
+  oracle: ServerHandle,
+  candidate: ServerHandle,
+  upstream: FakeUpstream,
+): Promise<Result> {
+  const body = JSON.stringify({
+    model: "m",
+    messages: [{ role: "user", content: "SCEN:toolcall-safe hi" }],
+    stream: true,
+  });
   const before = upstream.requests.length;
   const probe: ProbeRecord & { upstream: UpstreamRequestRecord[] } = {
-    ...(await probeBoth("relay-no-leak", oracle, candidate, (apiKey) => postRequestLines(apiKey, body), body)),
+    ...(await probeBoth(
+      "relay-no-leak",
+      oracle,
+      candidate,
+      (apiKey) => postRequestLines(apiKey, body),
+      body,
+    )),
     upstream: upstream.requests.slice(before),
   };
-  const rawEvidence = { request: probe.request, oracle: probe.oracle, candidate: probe.candidate, upstream: probe.upstream };
+  const rawEvidence = {
+    request: probe.request,
+    oracle: probe.oracle,
+    candidate: probe.candidate,
+    upstream: probe.upstream,
+  };
   const oracleNormalized = normalizeIds(probe.oracle.body);
   const candidateNormalized = normalizeIds(probe.candidate.body);
   const checks = {
-    statusOk: probe.oracle.statusLine.includes(" 200 ") && probe.candidate.statusLine.includes(" 200 "),
+    statusOk:
+      probe.oracle.statusLine.includes(" 200 ") && probe.candidate.statusLine.includes(" 200 "),
     oracleNoLeakOk: noToolCallLeak(probe.oracle.body),
     candidateNoLeakOk: noToolCallLeak(probe.candidate.body),
     oraclePinnedOk: oracleNormalized === RELAY_ORACLE_PIN,

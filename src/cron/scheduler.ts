@@ -28,7 +28,9 @@ export async function tick(
       // not-due-yet — a diagnostic goes to an internal sink (never stdout/stderr) so a probe can
       // confirm the mechanism fired, distinct from "the candidate stayed silent everywhere".
       if (isPermanentlyUnreachable(job)) {
-        options.diagnostics?.(`cron job ${job.id} is permanently unreachable (value=${String(job.value)})`);
+        options.diagnostics?.(
+          `cron job ${job.id} is permanently unreachable (value=${String(job.value)})`,
+        );
       }
       continue;
     }

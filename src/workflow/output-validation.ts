@@ -44,7 +44,8 @@ export function parseAndValidate(
     const errors = validateDraft202012(value, schema);
     return Object.freeze({ ok: errors.length === 0, value, error: errors.join("; ") });
   } catch (error) {
-    const message = error instanceof SchemaDefinitionError ? error.message : (error as Error).message;
+    const message =
+      error instanceof SchemaDefinitionError ? error.message : (error as Error).message;
     return Object.freeze({ ok: false, value: null, error: `schema error: ${message}` });
   }
 }

@@ -150,9 +150,13 @@ describe("clean EOF on a pure-text upstream stream (assertion 41)", () => {
     expect(contentDeltas).toBe("partial");
 
     const finishFrame = dataLines.find(
-      (d) => ((d["choices"] as { finish_reason: string | null }[] | undefined)?.[0]?.finish_reason ?? null) !== null,
+      (d) =>
+        ((d["choices"] as { finish_reason: string | null }[] | undefined)?.[0]?.finish_reason ??
+          null) !== null,
     );
-    expect((finishFrame?.["choices"] as { finish_reason: string }[])[0]?.finish_reason).toBe("stop");
+    expect((finishFrame?.["choices"] as { finish_reason: string }[])[0]?.finish_reason).toBe(
+      "stop",
+    );
 
     const usageFrame = dataLines.find((d) => "usage" in d);
     expect(usageFrame).toBeDefined();

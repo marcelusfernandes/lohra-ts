@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  CHILD_EXCLUDED_TOOLS,
-  childToolDefinitions,
-} from "../src/tools/child.js";
+import { CHILD_EXCLUDED_TOOLS, childToolDefinitions } from "../src/tools/child.js";
 import type { ToolDefinition } from "../src/tools/types.js";
 
 // T13 Errata E2 proved the historical subset relation on its approved SHA.

@@ -241,7 +241,11 @@ results.push(
     try {
       const accepted = load({
         args: "ab",
-        env: [[null, "nil"], ["A", 1], ["__proto__", { safe: true }]],
+        env: [
+          [null, "nil"],
+          ["A", 1],
+          ["__proto__", { safe: true }],
+        ],
       })[0];
       const acceptedEnv = accepted?.env;
       const rejected = [];
@@ -253,7 +257,15 @@ results.push(
         ["array-key", { env: [[["nested"], "x"]] }],
         ["object-key", { env: [[{ nested: true }, "x"]] }],
         ["canonical-index", { env: [["1", "x"]] }],
-        ["duplicate-after-null", { env: [[null, "none"], ["null", "string"]] }],
+        [
+          "duplicate-after-null",
+          {
+            env: [
+              [null, "none"],
+              ["null", "string"],
+            ],
+          },
+        ],
       ] as const) {
         try {
           load(spec);
@@ -269,8 +281,7 @@ results.push(
           Object.getPrototypeOf(acceptedEnv) === null &&
           Object.hasOwn(acceptedEnv, "__proto__") &&
           acceptedEnv["polluted"] === undefined &&
-          JSON.stringify(acceptedEnv) ===
-            '{"null":"nil","A":1,"__proto__":{"safe":true}}' &&
+          JSON.stringify(acceptedEnv) === '{"null":"nil","A":1,"__proto__":{"safe":true}}' &&
           rejected.every((entry) => typeof entry.cause === "string" && entry.cause.length > 0),
         projection: {
           accepted: {

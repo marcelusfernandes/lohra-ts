@@ -31,7 +31,12 @@ describe("ChildConversationRepository", () => {
     sessions.createSession({ id: "parent-1", source: "gateway" });
     const repo = new ChildConversationRepository(sessions, "parent-1");
 
-    repo.createSession({ id: "child-1", systemPrompt: "SUBAGENT_SYSTEM", model: "fake-model-a", cwd: "/tmp" });
+    repo.createSession({
+      id: "child-1",
+      systemPrompt: "SUBAGENT_SYSTEM",
+      model: "fake-model-a",
+      cwd: "/tmp",
+    });
 
     const row = sessions.getSession("child-1") as Readonly<Record<string, unknown>>;
     expect(row.source).toBe("orchestration");

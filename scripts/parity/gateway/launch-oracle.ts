@@ -29,7 +29,8 @@ export function verifyOracleGuard(): OracleGuardResult {
   const commit = spawnSync("git", ["-C", ORACLE_CHECKOUT, "rev-parse", "HEAD"], {
     encoding: "utf8",
   });
-  if (commit.status !== 0) return { ok: false, detail: `ORACLE_COMMIT_CHECK_FAILED:${commit.stderr}` };
+  if (commit.status !== 0)
+    return { ok: false, detail: `ORACLE_COMMIT_CHECK_FAILED:${commit.stderr}` };
   if (commit.stdout.trim() !== ORACLE_COMMIT) {
     return {
       ok: false,
@@ -60,7 +61,9 @@ export interface LaunchedOracleProcess {
   readonly pid: number;
   stderrText(): string;
   stdoutText(): string;
-  kill(signal?: NodeJS.Signals): Promise<{ readonly exitCode: number | null; readonly signal: NodeJS.Signals | null }>;
+  kill(
+    signal?: NodeJS.Signals,
+  ): Promise<{ readonly exitCode: number | null; readonly signal: NodeJS.Signals | null }>;
 }
 
 export interface LaunchOracleInput {

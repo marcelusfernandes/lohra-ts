@@ -6,7 +6,12 @@ import { runServe } from "../src/commands/serve.js";
 
 function collector(): { readonly text: () => string; readonly write: (value: string) => void } {
   let buffer = "";
-  return { text: () => buffer, write: (value) => { buffer += value; } };
+  return {
+    text: () => buffer,
+    write: (value) => {
+      buffer += value;
+    },
+  };
 }
 
 function baseEnvironment(): Record<string, string> {
@@ -30,7 +35,9 @@ function freePort(): Promise<number> {
     probe.listen(0, "127.0.0.1", () => {
       const address = probe.address();
       const port = typeof address === "object" && address !== null ? address.port : 0;
-      probe.close(() => { resolve(port); });
+      probe.close(() => {
+        resolve(port);
+      });
     });
   });
 }
@@ -70,7 +77,11 @@ describe("runServe", () => {
     await new Promise<void>((resolve, reject) => {
       const probe = net.createServer();
       probe.once("error", reject);
-      probe.listen(port, "127.0.0.1", () => probe.close(() => { resolve(); }));
+      probe.listen(port, "127.0.0.1", () =>
+        probe.close(() => {
+          resolve();
+        }),
+      );
     });
   });
 

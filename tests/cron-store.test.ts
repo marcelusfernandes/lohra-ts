@@ -67,8 +67,7 @@ describe("readJobs — the 16-form fail-closed boundary (Emenda E2/E3)", () => {
     jobs_null: '{"jobs": null}',
     entry_number: '{"jobs": [42]}',
     entry_empty_object: '{"jobs": [{}]}',
-    entry_missing_enabled:
-      '{"jobs": [{"id": "x", "name": "n", "type": "interval", "value": 5}]}',
+    entry_missing_enabled: '{"jobs": [{"id": "x", "name": "n", "type": "interval", "value": 5}]}',
   };
 
   for (const [form, content] of Object.entries(structurallyInvalid)) {

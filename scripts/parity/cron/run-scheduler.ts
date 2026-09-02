@@ -7,14 +7,35 @@
 // beyond the contract's stated minimum.
 import { createHash } from "node:crypto";
 
-import { cleanup, localDay, materialize, runCandidateCron, runGuards, runOracleCron, utcDay, writeEvidence } from "./harness.js";
-import { readSchedulerLog, startCandidateScheduler, startOracleScheduler, waitFor, type SchedulerProcess } from "./scheduler-harness.js";
+import {
+  cleanup,
+  localDay,
+  materialize,
+  runCandidateCron,
+  runGuards,
+  runOracleCron,
+  utcDay,
+  writeEvidence,
+} from "./harness.js";
+import {
+  readSchedulerLog,
+  startCandidateScheduler,
+  startOracleScheduler,
+  waitFor,
+  type SchedulerProcess,
+} from "./scheduler-harness.js";
 
 let failures = 0;
 const projections: { readonly id: string; readonly sha: string; readonly verdict: string }[] = [];
 
 function record(id: string, verdict: string, ok: boolean, payload: unknown): void {
-  const sha = writeEvidence(id, { id, verdict, localDay: localDay(), utcDay: utcDay(), ...(payload as object) });
+  const sha = writeEvidence(id, {
+    id,
+    verdict,
+    localDay: localDay(),
+    utcDay: utcDay(),
+    ...(payload as object),
+  });
   projections.push({ id, sha, verdict });
   if (!ok) {
     failures += 1;
@@ -76,7 +97,10 @@ async function scenario16IntervalImmediate(): Promise<void> {
     const oracleScheduler = await startOracleScheduler({ paths: oracle });
     const candidateScheduler = await startCandidateScheduler({ paths: candidate });
     const oracleFired = await waitFor(() => oracleScheduler.upstream.requests.length >= 1, 8000);
-    const candidateFired = await waitFor(() => candidateScheduler.upstream.requests.length >= 1, 8000);
+    const candidateFired = await waitFor(
+      () => candidateScheduler.upstream.requests.length >= 1,
+      8000,
+    );
     await stopBoth(oracleScheduler, candidateScheduler);
     const ok = oracleFired && candidateFired;
     record("t18-interval-null-fires-immediately", ok ? "match" : "DIVERGENT", ok, {
@@ -109,7 +133,9 @@ async function scenario17DisabledNeverFires(): Promise<void> {
     const candidateScheduler = await startCandidateScheduler({ paths: candidate });
     await new Promise((r) => setTimeout(r, 2500));
     await stopBoth(oracleScheduler, candidateScheduler);
-    const ok = oracleScheduler.upstream.requests.length === 0 && candidateScheduler.upstream.requests.length === 0;
+    const ok =
+      oracleScheduler.upstream.requests.length === 0 &&
+      candidateScheduler.upstream.requests.length === 0;
     record("t18-disabled-never-fires", ok ? "match" : "DIVERGENT", ok, {
       oracleCalls: oracleScheduler.upstream.requests.length,
       candidateCalls: candidateScheduler.upstream.requests.length,
@@ -141,8 +167,11 @@ async function scenario18FailedRunStillMarks(): Promise<void> {
 
     const oracleList = runOracleCron(["list"], oracle);
     const candidateList = runCandidateCron(["list"], candidate);
-    const oracleMarked = !oracleList.stdout.includes("no scheduled jobs") && lastRunAtFromList(oracleList.stdout);
-    const candidateMarked = !candidateList.stdout.includes("no scheduled jobs") && lastRunAtFromList(candidateList.stdout);
+    const oracleMarked =
+      !oracleList.stdout.includes("no scheduled jobs") && lastRunAtFromList(oracleList.stdout);
+    const candidateMarked =
+      !candidateList.stdout.includes("no scheduled jobs") &&
+      lastRunAtFromList(candidateList.stdout);
     // The real assertion isn't visible from `list`'s text (it never prints
     // last_run_at) -- it's proven by the store file itself still existing
     // and by re-running the scheduler and confirming NO second call despite
@@ -170,7 +199,9 @@ async function scenario18FailedRunStillMarks(): Promise<void> {
 
 // --- Scenario 19: TZ day boundary, Pacific/Kiritimati vs Etc/GMT+12 (assertions 29-31) ----
 function localDayInTZ(tz: string): number {
-  return Number(new Intl.DateTimeFormat("en-US", { timeZone: tz, day: "numeric" }).format(new Date()));
+  return Number(
+    new Intl.DateTimeFormat("en-US", { timeZone: tz, day: "numeric" }).format(new Date()),
+  );
 }
 
 async function scenario19TzDayBoundary(): Promise<void> {
@@ -191,9 +222,15 @@ async function scenario19TzDayBoundary(): Promise<void> {
     ] as const) {
       run(["add", "--name", "n1", "--prompt", "SCEN:ok", "--cron", cronExpr], paths);
     }
-    const oracleK = await startOracleScheduler({ paths: oracleKiritimati, tz: "Pacific/Kiritimati" });
+    const oracleK = await startOracleScheduler({
+      paths: oracleKiritimati,
+      tz: "Pacific/Kiritimati",
+    });
     const oracleB = await startOracleScheduler({ paths: oracleBaker, tz: "Etc/GMT+12" });
-    const candidateK = await startCandidateScheduler({ paths: candidateKiritimati, tz: "Pacific/Kiritimati" });
+    const candidateK = await startCandidateScheduler({
+      paths: candidateKiritimati,
+      tz: "Pacific/Kiritimati",
+    });
     const candidateB = await startCandidateScheduler({ paths: candidateBaker, tz: "Etc/GMT+12" });
 
     await waitFor(() => oracleK.upstream.requests.length >= 1, 8000);
@@ -205,8 +242,10 @@ async function scenario19TzDayBoundary(): Promise<void> {
     // 6) -- it fires on every minute-boundary tick that lands within the
     // target day, not exactly once, so ">= 1" is the correct fired-at-all
     // check; only the Baker Island side must observe exactly 0.
-    const oracleOk = oracleK.upstream.requests.length >= 1 && oracleB.upstream.requests.length === 0;
-    const candidateOk = candidateK.upstream.requests.length >= 1 && candidateB.upstream.requests.length === 0;
+    const oracleOk =
+      oracleK.upstream.requests.length >= 1 && oracleB.upstream.requests.length === 0;
+    const candidateOk =
+      candidateK.upstream.requests.length >= 1 && candidateB.upstream.requests.length === 0;
     const ok = oracleOk && candidateOk && dayKiritimati !== dayBaker;
     record("t18-tz-day-boundary-kiritimati-baker", ok ? "match" : "DIVERGENT", ok, {
       cronExpr,
@@ -233,7 +272,10 @@ async function scenario20NanNeverFires(): Promise<void> {
     runOracleCron(["add", "--name", "n1", "--prompt", "SCEN:ok", "--at", "nan"], oracle);
     runCandidateCron(["add", "--name", "n1", "--prompt", "SCEN:ok", "--at", "nan"], candidate);
     const oracleScheduler = await startOracleScheduler({ paths: oracle });
-    const candidateScheduler = await startCandidateScheduler({ paths: candidate, tickIntervalMs: 300 });
+    const candidateScheduler = await startCandidateScheduler({
+      paths: candidate,
+      tickIntervalMs: 300,
+    });
     await new Promise((r) => setTimeout(r, 2500));
     const schedulerLog = readSchedulerLog(candidate.home);
     await stopBoth(oracleScheduler, candidateScheduler);
@@ -326,14 +368,19 @@ async function scenario21MaskedFieldLastRunAt(): Promise<void> {
     // never-run and refires it, unlike the real baseline established by
     // `t18-restart-single-fire` (0 refires, both sides, unmutated).
     const ok = firstCalls >= 1 && secondCalls >= 1;
-    record("t18-masked-field-injected-divergence-last-run-at", ok ? "mutant-refires-baseline-does-not" : "DIVERGENT", ok, {
-      firstBootCalls: firstCalls,
-      secondBootCalls: secondCalls,
-      note:
-        "candidate-only: the real 0-refire baseline is t18-restart-single-fire's unmutated measurement, " +
-        "reused rather than re-measured here. This scenario's own sha, over the raw call counts of both boots, " +
-        "is the published projection the field's masked-divergence self-test reacts through.",
-    });
+    record(
+      "t18-masked-field-injected-divergence-last-run-at",
+      ok ? "mutant-refires-baseline-does-not" : "DIVERGENT",
+      ok,
+      {
+        firstBootCalls: firstCalls,
+        secondBootCalls: secondCalls,
+        note:
+          "candidate-only: the real 0-refire baseline is t18-restart-single-fire's unmutated measurement, " +
+          "reused rather than re-measured here. This scenario's own sha, over the raw call counts of both boots, " +
+          "is the published projection the field's masked-divergence self-test reacts through.",
+      },
+    );
   } finally {
     cleanup(candidate);
   }

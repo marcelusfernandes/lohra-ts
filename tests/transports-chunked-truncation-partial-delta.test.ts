@@ -52,7 +52,10 @@ describe("ChatCompletionsClient.stream — mid-body truncation after a partial d
 
     const received: string[] = [];
     await expect(
-      client.stream({ model: "m", messages: [{ role: "user", content: "hi" }] }, { onText: (text) => received.push(text) }),
+      client.stream(
+        { model: "m", messages: [{ role: "user", content: "hi" }] },
+        { onText: (text) => received.push(text) },
+      ),
     ).rejects.toThrow(/incomplete chunked read/u);
 
     expect(received.join("")).toBe("partial-before-break");

@@ -22,12 +22,12 @@ function repo(warnings: StateWarning[] = []) {
   roots.push(root);
   const connection = openStateDatabase(join(root, "state.db"));
   return {
-    repository: new WorkflowRepository(connection.database, (warning) =>
-      warnings.push(warning),
-    ),
+    repository: new WorkflowRepository(connection.database, (warning) => warnings.push(warning)),
     locks: new LockRepository(connection.database, (warning) => warnings.push(warning)),
     database: connection.database,
-    close: () => { connection.close(); },
+    close: () => {
+      connection.close();
+    },
   };
 }
 
@@ -76,10 +76,7 @@ function plantedPhases(
     key: string,
     ownership: { fence: number; holder: string; now: number },
   ) => boolean,
-  landed: (
-    repository: ReturnType<typeof repo>["repository"],
-    key: string,
-  ) => boolean,
+  landed: (repository: ReturnType<typeof repo>["repository"], key: string) => boolean,
 ): void {
   const warnings: StateWarning[] = [];
   const { repository, locks, close } = repo(warnings);
@@ -89,7 +86,9 @@ function plantedPhases(
   expect(write(repository, "ok", { fence, holder: "p1", now: 1000 })).toBe(true);
   expect(landed(repository, "ok")).toBe(true);
   // (i) stale fence F-1, everything else honest
-  expect(write(repository, "stale-fence", { fence: fence - 1, holder: "p1", now: 1000 })).toBe(false);
+  expect(write(repository, "stale-fence", { fence: fence - 1, holder: "p1", now: 1000 })).toBe(
+    false,
+  );
   expect(landed(repository, "stale-fence")).toBe(false);
   // (ii) wrong holder, fence exactly current, lease live
   expect(write(repository, "wrong-holder", { fence, holder: "p2", now: 1000 })).toBe(false);
@@ -124,8 +123,7 @@ describe("workflow repository — planted guard phases per write category", () =
 
   it("guard node-cost: stale fence, wrong holder and expired lease are each refused", () => {
     plantedPhases(
-      (repository, key, ownership) =>
-        repository.putCacheCost("run", key, 1, 2, 0, 0, 0, ownership),
+      (repository, key, ownership) => repository.putCacheCost("run", key, 1, 2, 0, 0, 0, ownership),
       (repository, key) => repository.getCacheCost("run", key) !== null,
     );
   });
@@ -152,7 +150,8 @@ describe("workflow repository — planted guard phases per write category", () =
           reasoning: 0,
         }),
       (repository, key) =>
-        repository.getCacheCell("run", key) !== null || repository.getCacheCost("run", key) !== null,
+        repository.getCacheCell("run", key) !== null ||
+        repository.getCacheCost("run", key) !== null,
     );
   });
 });
@@ -165,20 +164,21 @@ describe("workflow repository — owned writes demand live ownership", () => {
     expect(locks.releaseRunLease("run", "p1")).toBe(true);
     const second = owned(locks.acquireRunLease("run", "p2", 1001, 100), "p2", 1001);
     // stale fence F-1 against a live owner: refused for all four categories
-    const stale = { fence: (first.fence - 1), holder: "p1", now: 1002 };
+    const stale = { fence: first.fence - 1, holder: "p1", now: 1002 };
     expect(stale.fence).toBeLessThan(second.fence);
     expect(writeState(repository, "run", stale)).toBe(false);
     expect(repository.putCacheCell("run", "h1", "node", "{}", "complete", stale)).toBe(false);
-    expect(
-      repository.putCacheCost("run", "h1", 1, 2, 0, 0, 0, stale),
-    ).toBe(false);
+    expect(repository.putCacheCost("run", "h1", 1, 2, 0, 0, 0, stale)).toBe(false);
     expect(repository.putRunSpend("run", 100, 1, 2, 0, 0, 0, stale)).toBe(false);
     // forged/future fence is refused too (exact equality, not >=)
     expect(writeState(repository, "run", { ...second, fence: second.fence + 1 })).toBe(false);
     // nothing extra was written
-    expect(Number(
-      (database.prepare("SELECT count(*) AS n FROM workflow_node_cache").get() as { n: bigint }).n,
-    )).toBe(0);
+    expect(
+      Number(
+        (database.prepare("SELECT count(*) AS n FROM workflow_node_cache").get() as { n: bigint })
+          .n,
+      ),
+    ).toBe(0);
     close();
   });
 
@@ -236,14 +236,28 @@ describe("workflow repository — owned writes demand live ownership", () => {
     const { repository, locks, close } = repo();
     const fence = locks.acquireRunLease("cancel-me", "p1", 1000, 900);
     if (fence === null) throw new Error("expected lease token");
-    expect(writeState(repository, "cancel-me", { fence, holder: "p1", now: 1000 }, "complete")).toBe(true);
+    expect(
+      writeState(repository, "cancel-me", { fence, holder: "p1", now: 1000 }, "complete"),
+    ).toBe(true);
 
     const cancel = (now: number): boolean =>
       repository.putRunState("cancel-me", {
-        name: "n", owner: null, status: "cancelled", pauseReason: null,
-        pausePayloadJson: null, specJson: null, argsJson: "{}", tokenBudget: null,
-        tainted: false, progressJson: null, auditSegmentId: null,
-        updatedAt: now, fence: null, holder: null, now, requireUnleased: true,
+        name: "n",
+        owner: null,
+        status: "cancelled",
+        pauseReason: null,
+        pausePayloadJson: null,
+        specJson: null,
+        argsJson: "{}",
+        tokenBudget: null,
+        tainted: false,
+        progressJson: null,
+        auditSegmentId: null,
+        updatedAt: now,
+        fence: null,
+        holder: null,
+        now,
+        requireUnleased: true,
       });
 
     // a live lease refuses it
@@ -265,10 +279,22 @@ describe("workflow repository — owned writes demand live ownership", () => {
     expect(writeState(repository, "expired-run", { fence, holder: "p1", now: 1000 })).toBe(true);
     const cancel = (now: number): boolean =>
       repository.putRunState("expired-run", {
-        name: "n", owner: null, status: "cancelled", pauseReason: null,
-        pausePayloadJson: null, specJson: null, argsJson: "{}", tokenBudget: null,
-        tainted: false, progressJson: null, auditSegmentId: null,
-        updatedAt: now, fence: null, holder: null, now, requireUnleased: true,
+        name: "n",
+        owner: null,
+        status: "cancelled",
+        pauseReason: null,
+        pausePayloadJson: null,
+        specJson: null,
+        argsJson: "{}",
+        tokenBudget: null,
+        tainted: false,
+        progressJson: null,
+        auditSegmentId: null,
+        updatedAt: now,
+        fence: null,
+        holder: null,
+        now,
+        requireUnleased: true,
       });
     expect(cancel(1010)).toBe(false); // lease still live
     expect(cancel(1051)).toBe(true); // TTL passed

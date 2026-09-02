@@ -9,8 +9,7 @@ import { runCli } from "../cli.js";
 const root = resolve(import.meta.dirname, "../../..");
 const evidenceDirectory = resolve(root, ".parity-evidence/t15");
 const lockPath = "/tmp/lohra-parity-11434.lock";
-const oracleWorkspace =
-  "/Users/marcelusfernandes/Desktop/playground-ai/lohra-ts/lohra";
+const oracleWorkspace = "/Users/marcelusfernandes/Desktop/playground-ai/lohra-ts/lohra";
 const oracleBackend = resolve(oracleWorkspace, "backend");
 const lockTimeoutMs = Number(process.env.LOHRA_T15_LOCK_TIMEOUT_MS ?? 900_000);
 
@@ -21,7 +20,10 @@ interface CommandRecord {
   readonly stderr: string;
 }
 
-function command(argv: readonly string[], environment: NodeJS.ProcessEnv = process.env): CommandRecord {
+function command(
+  argv: readonly string[],
+  environment: NodeJS.ProcessEnv = process.env,
+): CommandRecord {
   const [executable, ...args] = argv;
   if (executable === undefined) throw new Error("empty command");
   const result = spawnSync(executable, args, {
@@ -68,10 +70,10 @@ const waitedForLockMs = await acquireLock();
 
 try {
   const candidate = command(["node", "scripts/parity/workflow-executor/candidate-engine.mjs"]);
-  const oracle = command(
-    ["python3", "scripts/parity/workflow-executor/oracle_engine.py"],
-    { ...process.env, PYTHONPATH: oracleBackend },
-  );
+  const oracle = command(["python3", "scripts/parity/workflow-executor/oracle_engine.py"], {
+    ...process.env,
+    PYTHONPATH: oracleBackend,
+  });
   if (candidate.exitCode !== 0 || oracle.exitCode !== 0) {
     throw new Error(
       `engine probe failed: candidate=${String(candidate.exitCode)} oracle=${String(oracle.exitCode)}`,
@@ -86,7 +88,9 @@ try {
   interface ChatEvidence {
     readonly verdict?: string;
     readonly comparison?: {
-      readonly normalized?: Readonly<Record<string, { readonly oracle: unknown; readonly candidate: unknown }>>;
+      readonly normalized?: Readonly<
+        Record<string, { readonly oracle: unknown; readonly candidate: unknown }>
+      >;
     };
     readonly reproducibility?: { readonly projectionSha256?: string };
   }
@@ -100,10 +104,14 @@ try {
       evidencePath,
     ]);
     if (exitCode !== 0)
-      throw new Error(`${evidenceFileName} chat probe failed with harness exit ${String(exitCode)}`);
+      throw new Error(
+        `${evidenceFileName} chat probe failed with harness exit ${String(exitCode)}`,
+      );
     const evidence = JSON.parse(readFileSync(evidencePath, "utf8")) as ChatEvidence;
     if (evidence.verdict !== "match")
-      throw new Error(`${evidenceFileName} chat probe diverged: verdict=${evidence.verdict ?? "unavailable"}`);
+      throw new Error(
+        `${evidenceFileName} chat probe diverged: verdict=${evidence.verdict ?? "unavailable"}`,
+      );
     return { evidencePath, evidence };
   };
 

@@ -58,7 +58,9 @@ describe("estimateUsage — no provider usage, Python-faithful str()-based estim
     ];
     const usage = estimateUsage(messages, "abcdefgh");
     expect(usage.prompt_tokens).not.toBe(15);
-    const jsonStringifyLength = JSON.stringify([{ type: "text", text: "SCEN:nousage abcd" }]).length;
+    const jsonStringifyLength = JSON.stringify([
+      { type: "text", text: "SCEN:nousage abcd" },
+    ]).length;
     expect(jsonStringifyLength).not.toBe(47); // sanity: JSON.stringify diverges from the Python repr
   });
 
@@ -79,8 +81,11 @@ describe("estimateUsage — no provider usage, Python-faithful str()-based estim
     expect(estimateUsage(messages, "abcdefgh").prompt_tokens).toBe(4);
   });
 
-  it("ignores non-string, non-object falsy content the same way Python's `or \"\"` does", () => {
-    const messages = [{ role: "user", content: null }, { role: "user", content: "" }];
+  it('ignores non-string, non-object falsy content the same way Python\'s `or ""` does', () => {
+    const messages = [
+      { role: "user", content: null },
+      { role: "user", content: "" },
+    ];
     expect(estimateUsage(messages, "x").prompt_tokens).toBe(0);
   });
 

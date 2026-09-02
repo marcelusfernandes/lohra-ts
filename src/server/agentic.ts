@@ -37,7 +37,9 @@ export interface AllowedTools {
 export function buildAllowedTools(allowedNames: readonly string[]): AllowedTools {
   const allowedSet = new Set(allowedNames);
   const safeDefinitions = childToolDefinitions(builtinRegistry.getDefinitions());
-  const definitions = safeDefinitions.filter((definition) => allowedSet.has(definition.function.name));
+  const definitions = safeDefinitions.filter((definition) =>
+    allowedSet.has(definition.function.name),
+  );
   const exposed = new Set(definitions.map((definition) => definition.function.name));
   const guarded = createChildDispatch(builtinRegistry.dispatch.bind(builtinRegistry));
 

@@ -24,8 +24,14 @@ import { describe, expect, it } from "vitest";
 // race -- see t12-busy-4009-multisocket-race), but the INTERNAL mechanism
 // genuinely differs, and that difference is declared rather than papered
 // over.
-const CONNECTION_SOURCE = readFileSync(resolve(import.meta.dirname, "../../src/gateway/ws/connection.ts"), "utf8");
-const SESSION_SERVICE_SOURCE = readFileSync(resolve(import.meta.dirname, "../../src/gateway/session-service.ts"), "utf8");
+const CONNECTION_SOURCE = readFileSync(
+  resolve(import.meta.dirname, "../../src/gateway/ws/connection.ts"),
+  "utf8",
+);
+const SESSION_SERVICE_SOURCE = readFileSync(
+  resolve(import.meta.dirname, "../../src/gateway/session-service.ts"),
+  "utf8",
+);
 
 describe("busy handling: single code path, no second race-only error-event branch (L20)", () => {
   it("the only busy-related outcome is the 4009 RPC error in ws/connection.ts", () => {

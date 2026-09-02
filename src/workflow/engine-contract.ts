@@ -11,8 +11,7 @@ export const LEAF_TIMEOUT_SECONDS = 120;
 export const PIPELINE_TIMEOUT_SECONDS = 1800;
 export const MAX_WORKFLOW_DEPTH = 1;
 export const DEFAULT_LEAF_MAX_ITERATIONS = 50;
-export const EMPTY_OUTPUT_CORRECTION =
-  "Your previous answer was empty. Produce a complete answer.";
+export const EMPTY_OUTPUT_CORRECTION = "Your previous answer was empty. Produce a complete answer.";
 export const VERIFY_SCHEMA = Object.freeze({
   type: "object",
   properties: Object.freeze({

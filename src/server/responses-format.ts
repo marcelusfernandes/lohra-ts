@@ -16,7 +16,9 @@ function contentText(content: unknown): string {
     return content
       .filter(
         (part): part is Readonly<Record<string, unknown>> =>
-          typeof part === "object" && part !== null && TEXT_PART_TYPES.has((part as Record<string, unknown>)["type"] as string),
+          typeof part === "object" &&
+          part !== null &&
+          TEXT_PART_TYPES.has((part as Record<string, unknown>)["type"] as string),
       )
       .map((part) => (typeof part["text"] === "string" ? part["text"] : ""))
       .join("");
@@ -50,11 +52,7 @@ export function parseResponsesInput(
   return messages;
 }
 
-function messageItem(
-  responseId: string,
-  content: string,
-  status: string,
-): Record<string, unknown> {
+function messageItem(responseId: string, content: string, status: string): Record<string, unknown> {
   return {
     type: "message",
     id: `msg_${responseId}`,

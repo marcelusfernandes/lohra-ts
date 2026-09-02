@@ -13,7 +13,11 @@ import type { ModelTransport } from "../conversation/index.js";
 import type { ProviderProfile } from "../providers/index.js";
 import { formatProviderFailureMessage } from "../serialization/provider-error-message.js";
 import type { SessionRepository } from "../state/index.js";
-import { childToolDefinitions, createChildDispatch, RegistryToolDispatcher } from "../tools/index.js";
+import {
+  childToolDefinitions,
+  createChildDispatch,
+  RegistryToolDispatcher,
+} from "../tools/index.js";
 import type { RegistryDispatch, ToolDefinition } from "../tools/index.js";
 import {
   AnthropicMessagesClient,
@@ -54,7 +58,8 @@ function nonEmpty(value: string | undefined): string | null {
 }
 
 function buildTransport(client: ClosableClient, streaming: boolean): ModelTransport {
-  if (client instanceof AnthropicMessagesClient) return new AnthropicMessagesModel(client, streaming);
+  if (client instanceof AnthropicMessagesClient)
+    return new AnthropicMessagesModel(client, streaming);
   if (client instanceof ResponsesClient) return new ResponsesModel(client);
   return new ChatCompletionsModel(client as ChatCompletionsClient, streaming);
 }
@@ -139,7 +144,8 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
         configuredProvider !== undefined && configuredClient !== undefined
           ? [configuredProvider, configuredClient]
           : await options.clientPool.get(null);
-      const model = (configured?.["model"] as string | undefined) ?? modelOverride ?? options.defaultModel;
+      const model =
+        (configured?.["model"] as string | undefined) ?? modelOverride ?? options.defaultModel;
       const effort = nonEmpty(config.effort);
       const maxIterations = config.maxIterations ?? options.childMaxIterations;
 

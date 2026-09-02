@@ -140,9 +140,7 @@ describe("runCron — validation goldens (byte-exact, decision 12/assertion 10-1
 
   it("cron field out of range", () => {
     const result = run(["add", "--name", "n1", "--prompt", "p1", "--cron", "60 * * * *"]);
-    expect(result.stderr).toBe(
-      "error: invalid cron expression: cron field out of range: '60'\n",
-    );
+    expect(result.stderr).toBe("error: invalid cron expression: cron field out of range: '60'\n");
   });
 
   it("remove needs a job id", () => {

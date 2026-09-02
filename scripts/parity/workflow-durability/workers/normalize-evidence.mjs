@@ -14,7 +14,8 @@ export const EVIDENCE_NORMALIZATIONS = Object.freeze([
   Object.freeze({
     field: "run_id",
     kind: "replace-regex",
-    pattern: '(\\\\?"run_id\\\\?":\\s*\\\\?")([0-9a-f]{16,}|[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12})',
+    pattern:
+      '(\\\\?"run_id\\\\?":\\s*\\\\?")([0-9a-f]{16,}|[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12})',
     replacement: "$1<run-id>",
     why: "the service generates it per run; it also appears JSON-escaped inside captured tool messages, so both quote forms match",
   }),

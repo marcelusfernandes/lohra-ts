@@ -8,7 +8,12 @@ import { createChildRunner } from "./child-runner.js";
 import { OrchestrationCore } from "./core.js";
 import type { FanoutResolution } from "./fanout-config.js";
 import { buildSubagentSystemPrompt } from "./subagent-prompt.js";
-import { collectSessionTool, delegateTaskTool, spawnSessionTool, steerSessionTool } from "./tools.js";
+import {
+  collectSessionTool,
+  delegateTaskTool,
+  spawnSessionTool,
+  steerSessionTool,
+} from "./tools.js";
 import type { ProviderResolver } from "./tools.js";
 
 /**

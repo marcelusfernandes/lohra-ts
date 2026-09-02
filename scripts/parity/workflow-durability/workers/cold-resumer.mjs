@@ -16,7 +16,9 @@ import { WorkflowService } from "../../../../dist/workflow/service.js";
 
 const [db, runId, holder, now, ttl, deadFence, deadHolder] = process.argv.slice(2);
 if (db === undefined || runId === undefined || holder === undefined) {
-  throw new Error("usage: cold-resumer.mjs <db> <runId> <holder> <now> <ttl> <deadFence> <deadHolder>");
+  throw new Error(
+    "usage: cold-resumer.mjs <db> <runId> <holder> <now> <ttl> <deadFence> <deadHolder>",
+  );
 }
 
 const connection = openStateDatabase(db);
@@ -87,7 +89,13 @@ const runtime = {
   collect: () => ({
     status: "complete",
     output: { answer: "b-done" },
-    usage: { inputTokens: 2, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+    usage: {
+      inputTokens: 2,
+      outputTokens: 2,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reasoningTokens: 0,
+    },
   }),
   steer: () => undefined,
   cancel: () => undefined,
@@ -121,10 +129,21 @@ const fenceAfter = locks.runFenceOf(runId);
 const corpse = { fence: Number(deadFence), holder: deadHolder, now: clock.now };
 const lateWrites = {
   state: repository.putRunState(runId, {
-    name: "corpse", owner: deadHolder, status: "zombie", pauseReason: null,
-    pausePayloadJson: null, specJson: "{}", argsJson: "{}", tokenBudget: null,
-    tainted: false, progressJson: null, auditSegmentId: null,
-    updatedAt: clock.now, fence: corpse.fence, holder: deadHolder, now: clock.now,
+    name: "corpse",
+    owner: deadHolder,
+    status: "zombie",
+    pauseReason: null,
+    pausePayloadJson: null,
+    specJson: "{}",
+    argsJson: "{}",
+    tokenBudget: null,
+    tainted: false,
+    progressJson: null,
+    auditSegmentId: null,
+    updatedAt: clock.now,
+    fence: corpse.fence,
+    holder: deadHolder,
+    now: clock.now,
   }),
   cache: repository.putCacheCell(runId, "corpse", "node", "{}", "complete", corpse),
   nodeCost: repository.putCacheCost(runId, "corpse", 1, 1, 0, 0, 0, corpse),
@@ -135,7 +154,11 @@ const line = repository.getRunState(runId) ?? {};
 // The RECOVERED_FAULT rides on the DURABLE line (what workflow_status rolls up
 // as faults_total), not only on the in-process result view.
 const payload = (() => {
-  try { return JSON.parse(String(line.pause_payload_json ?? "{}")); } catch { return {}; }
+  try {
+    return JSON.parse(String(line.pause_payload_json ?? "{}"));
+  } catch {
+    return {};
+  }
 })();
 const lineFaults = Array.isArray(payload.prior_faults) ? payload.prior_faults.map(String) : [];
 connection.close();

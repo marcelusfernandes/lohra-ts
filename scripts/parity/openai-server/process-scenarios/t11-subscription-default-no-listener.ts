@@ -25,14 +25,20 @@ function canConnect(port: number): Promise<boolean> {
       socket.destroy();
       resolveConnect(true);
     });
-    socket.once("error", () => { resolveConnect(false); });
+    socket.once("error", () => {
+      resolveConnect(false);
+    });
   });
 }
 
 export async function run(upstream: FakeUpstream): Promise<ProcessScenarioResult> {
   const port = await allocatePort();
   const paths = materialize("candidate");
-  seedSubscriptionAuth(paths, { authMode: "subscription", acknowledgedTosRisk: true, preference: "auto" });
+  seedSubscriptionAuth(paths, {
+    authMode: "subscription",
+    acknowledgedTosRisk: true,
+    preference: "auto",
+  });
   const invocation = buildServeInvocation("candidate", {}, upstream.url, paths, port);
   const before = upstream.requests.length;
 
@@ -47,13 +53,18 @@ export async function run(upstream: FakeUpstream): Promise<ProcessScenarioResult
         setTimeout(() => {
           canConnect(port)
             .then(resolveAttempt)
-            .catch(() => { resolveAttempt(false); });
+            .catch(() => {
+              resolveAttempt(false);
+            });
         }, i * 20);
       }),
     );
   }
 
-  const [result, connectResults] = await Promise.all([processPromise, Promise.all(connectAttempts)]);
+  const [result, connectResults] = await Promise.all([
+    processPromise,
+    Promise.all(connectAttempts),
+  ]);
   const neverAcceptedConnection = connectResults.every((connected) => !connected);
   const portFreeAfterExit = await canConnect(port).then((connected) => !connected);
 
@@ -69,7 +80,13 @@ export async function run(upstream: FakeUpstream): Promise<ProcessScenarioResult
 
   rmSync(paths.runtimeRoot, { recursive: true, force: true });
 
-  const record = { id: "subscription-default-no-listener", result, checks, upstreamRequests, match };
+  const record = {
+    id: "subscription-default-no-listener",
+    result,
+    checks,
+    upstreamRequests,
+    match,
+  };
   return {
     projection: { probes: [{ id: record.id, checks: record.checks, match }] },
     rawEvidence: [record],

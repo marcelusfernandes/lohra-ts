@@ -38,7 +38,10 @@ function parseFrames(body: string): { frames: Frame[]; parseFailed: boolean; has
       continue;
     }
     try {
-      frames.push({ eventType: eventLine?.slice("event: ".length), data: JSON.parse(dataLine.slice("data: ".length)) as Record<string, unknown> });
+      frames.push({
+        eventType: eventLine?.slice("event: ".length),
+        data: JSON.parse(dataLine.slice("data: ".length)) as Record<string, unknown>,
+      });
     } catch {
       parseFailed = true;
     }
@@ -65,11 +68,17 @@ function analyze(body: string): Analysis {
     frames[3]?.eventType === "response.failed" &&
     frames.every((frame) => frame.eventType === frame.data["type"]);
   const sequenceNumbers = frames.map((frame) => frame.data["sequence_number"]);
-  const sequenceOk = sequenceNumbers.every((value, index) => value === index) && sequenceNumbers.length > 0;
+  const sequenceOk =
+    sequenceNumbers.every((value, index) => value === index) && sequenceNumbers.length > 0;
   const failedResponse = frames.at(-1)?.data["response"] as Record<string, unknown> | undefined;
-  const errorMessageRaw = (failedResponse?.["error"] as Record<string, unknown> | undefined)?.["message"];
+  const errorMessageRaw = (failedResponse?.["error"] as Record<string, unknown> | undefined)?.[
+    "message"
+  ];
   const errorMessage = typeof errorMessageRaw === "string" ? errorMessageRaw : "";
-  const errorCauseOk = failedResponse?.["status"] === "failed" && errorMessage.includes("418") && errorMessage.includes(CAUSE_CANARY);
+  const errorCauseOk =
+    failedResponse?.["status"] === "failed" &&
+    errorMessage.includes("418") &&
+    errorMessage.includes(CAUSE_CANARY);
   const responseId = frames[0]?.data["response"] as Record<string, unknown> | undefined;
   const idValue = responseId?.["id"];
   const normalizedFrames = frames.map((frame) => {
@@ -84,7 +93,8 @@ function analyze(body: string): Analysis {
     .map((frame) => {
       const withZeroedCreated = { ...frame.data };
       const nested = withZeroedCreated["response"];
-      if (nested !== null && typeof nested === "object" && "created_at" in nested) (nested as Record<string, unknown>)["created_at"] = 0;
+      if (nested !== null && typeof nested === "object" && "created_at" in nested)
+        (nested as Record<string, unknown>)["created_at"] = 0;
       return `event: ${String(frame.eventType)}\ndata: ${JSON.stringify(withZeroedCreated)}`;
     })
     .join("\n\n");
@@ -112,11 +122,22 @@ export async function run(
   const body = JSON.stringify({ model: "m", input: "SCEN:err418 hi", stream: true });
   const before = upstream.requests.length;
   const probe: ProbeRecord & { upstream: UpstreamRequestRecord[] } = {
-    ...(await probeBoth("error-before-delta", oracle, candidate, (apiKey) => postRequestLines(apiKey, body), body)),
+    ...(await probeBoth(
+      "error-before-delta",
+      oracle,
+      candidate,
+      (apiKey) => postRequestLines(apiKey, body),
+      body,
+    )),
     upstream: upstream.requests.slice(before),
   };
 
-  const rawEvidence = { request: probe.request, oracle: probe.oracle, candidate: probe.candidate, upstream: probe.upstream };
+  const rawEvidence = {
+    request: probe.request,
+    oracle: probe.oracle,
+    candidate: probe.candidate,
+    upstream: probe.upstream,
+  };
 
   const oracleAnalysis = analyze(probe.oracle.body);
   const candidateAnalysis = analyze(probe.candidate.body);
@@ -127,7 +148,8 @@ export async function run(
   });
 
   const checks = {
-    statusOk: probe.oracle.statusLine.includes(" 200 ") && probe.candidate.statusLine.includes(" 200 "),
+    statusOk:
+      probe.oracle.statusLine.includes(" 200 ") && probe.candidate.statusLine.includes(" 200 "),
     shapeOk: oracleAnalysis.shapeOk && candidateAnalysis.shapeOk,
     typeSequenceOk: oracleAnalysis.typeSequenceOk && candidateAnalysis.typeSequenceOk,
     sequenceOk: oracleAnalysis.sequenceOk && candidateAnalysis.sequenceOk,
@@ -137,15 +159,26 @@ export async function run(
     bilateralOk: comparison.match,
   };
   const ok = Object.values(checks).every(Boolean);
-  const record = { id: probe.id, checks, normalized: { oracle: comparison.oracle, candidate: comparison.candidate }, match: ok };
+  const record = {
+    id: probe.id,
+    checks,
+    normalized: { oracle: comparison.oracle, candidate: comparison.candidate },
+    match: ok,
+  };
   const differences = ok ? [] : [record];
 
   return {
     projection: {
       probes: [record],
       normalizations: [
-        { path: "/v1/responses (stream)", rule: "`id` normalized before the bilateral diff; every `created_at` occurrence zeroed; `sequence_number` compared literally." },
-        { path: "*", rule: "`date`/`server` headers dropped; content-length dropped; header order not compared." },
+        {
+          path: "/v1/responses (stream)",
+          rule: "`id` normalized before the bilateral diff; every `created_at` occurrence zeroed; `sequence_number` compared literally.",
+        },
+        {
+          path: "*",
+          rule: "`date`/`server` headers dropped; content-length dropped; header order not compared.",
+        },
       ],
     },
     rawEvidence,

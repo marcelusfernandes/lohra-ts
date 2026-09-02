@@ -34,7 +34,11 @@ const stubPrompt = (): string => "SUBAGENT_SYSTEM_STUB";
 
 describe("OrchestrationCore max-parallel fan-out (contract decision 8 / assertions 24-27)", () => {
   it("bounds concurrent runChild invocations to maxParallel, queuing the rest", async () => {
-    const barriers = [deferred<CollectResult>(), deferred<CollectResult>(), deferred<CollectResult>()];
+    const barriers = [
+      deferred<CollectResult>(),
+      deferred<CollectResult>(),
+      deferred<CollectResult>(),
+    ];
     let started = 0;
     let idCalls = 0;
     const core = new OrchestrationCore({

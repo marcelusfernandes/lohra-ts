@@ -38,10 +38,14 @@ function reader(child) {
     exited = { code, signal, stderr };
     while (exitWaiters.length > 0) exitWaiters.shift()(exited);
     for (const waiter of waiters.splice(0)) {
-      waiter.reject(new Error(`worker exited (code=${String(code)} signal=${String(signal)}): ${stderr}`));
+      waiter.reject(
+        new Error(`worker exited (code=${String(code)} signal=${String(signal)}): ${stderr}`),
+      );
     }
   });
-  child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+  child.stderr.on("data", (chunk) => {
+    stderr += String(chunk);
+  });
   child.stdout.on("data", (chunk) => {
     buffer += String(chunk);
     let index = buffer.indexOf("\n");
@@ -61,16 +65,26 @@ function reader(child) {
     next: () =>
       new Promise((resolveLine, rejectLine) => {
         const ready = lines.shift();
-        if (ready !== undefined) { resolveLine(ready); return; }
+        if (ready !== undefined) {
+          resolveLine(ready);
+          return;
+        }
         if (exited !== null) {
-          rejectLine(new Error(`worker exited (code=${String(exited.code)} signal=${String(exited.signal)}): ${stderr}`));
+          rejectLine(
+            new Error(
+              `worker exited (code=${String(exited.code)} signal=${String(exited.signal)}): ${stderr}`,
+            ),
+          );
           return;
         }
         waiters.push({ resolve: resolveLine, reject: rejectLine });
       }),
     exit: () =>
       new Promise((resolveExit) => {
-        if (exited !== null) { resolveExit(exited); return; }
+        if (exited !== null) {
+          resolveExit(exited);
+          return;
+        }
         exitWaiters.push(resolveExit);
       }),
     stderr: () => stderr,
@@ -104,7 +118,9 @@ const race = {
   contenders: racers.map((racer) => racer.holder).sort(),
   winners: winners.length,
   winnerFenceIsFirst: winners.every((result) => result.fence === 1),
-  losersCarryNoFence: raceResults.filter((result) => !result.won).every((result) => result.fence === null),
+  losersCarryNoFence: raceResults
+    .filter((result) => !result.won)
+    .every((result) => result.fence === null),
   distinctPids: new Set(raceResults.map((result) => result.pid)).size === racers.length,
 };
 
@@ -115,13 +131,32 @@ const ownerReady = await ownerIo.next();
 if (ownerReady.ready !== true) throw new Error("P1 failed to acquire the lease");
 // P1 is alive and holding while P2/P3 run: assert liveness, not assume it.
 const ownerAlive = (() => {
-  try { process.kill(owner.pid, 0); return true; } catch { return false; }
+  try {
+    process.kill(owner.pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 })();
 const writers = [
   // P2 — phase 1: stale fence F-1, honest holder, live lease
-  worker("planted-writer.mjs", [db, "planted", "stale-fence", ownerReady.fence - 1, "p1", OWNER_NOW + 1]),
+  worker("planted-writer.mjs", [
+    db,
+    "planted",
+    "stale-fence",
+    ownerReady.fence - 1,
+    "p1",
+    OWNER_NOW + 1,
+  ]),
   // P3 — phase 2: fence exactly current, WRONG holder, live lease
-  worker("planted-writer.mjs", [db, "planted", "wrong-holder", ownerReady.fence, "p2", OWNER_NOW + 1]),
+  worker("planted-writer.mjs", [
+    db,
+    "planted",
+    "wrong-holder",
+    ownerReady.fence,
+    "p2",
+    OWNER_NOW + 1,
+  ]),
 ];
 const writerIo = writers.map((child) => reader(child));
 const concurrent = await Promise.all(writerIo.map(async (io) => io.next()));
@@ -132,7 +167,14 @@ await ownerIo.exit();
 
 // phase 2 continued, in its own process: fence current, holder current, but
 // the lease is GONE (post-release) — the hardening the oracle does not do.
-const afterRelease = worker("planted-writer.mjs", [db, "planted", "post-release", ownerReady.fence, "p1", OWNER_NOW + 2]);
+const afterRelease = worker("planted-writer.mjs", [
+  db,
+  "planted",
+  "post-release",
+  ownerReady.fence,
+  "p1",
+  OWNER_NOW + 2,
+]);
 const afterReleaseIo = reader(afterRelease);
 const postRelease = await afterReleaseIo.next();
 await afterReleaseIo.exit();
@@ -152,7 +194,9 @@ const liveOwner = {
     refusals: phase.refusals,
     landed: phase.landed,
   })),
-  allRefused: plantedPhases.every((phase) => phase.refusals === phase.attempts && phase.landed.length === 0),
+  allRefused: plantedPhases.every(
+    (phase) => phase.refusals === phase.attempts && phase.landed.length === 0,
+  ),
 };
 
 // --- C. SIGKILL the owner, resume in a NEW process ------------------------
@@ -164,7 +208,13 @@ dying.kill("SIGKILL");
 const killed = await dyingIo.exit();
 
 const resumer = worker("cold-resumer.mjs", [
-  db, "killed", "resumer", OWNER_NOW + OWNER_TTL + 1, 900, landed.fence, "owner",
+  db,
+  "killed",
+  "resumer",
+  OWNER_NOW + OWNER_TTL + 1,
+  900,
+  landed.fence,
+  "owner",
 ]);
 const resumerIo = reader(resumer);
 const resumeResult = await resumerIo.next();
@@ -216,7 +266,11 @@ const crash = {
 process.stderr.write(
   `${JSON.stringify({
     witness: {
-      racePids: raceResults.map((result) => ({ holder: result.holder, pid: result.pid, won: result.won })),
+      racePids: raceResults.map((result) => ({
+        holder: result.holder,
+        pid: result.pid,
+        won: result.won,
+      })),
       ownerPid: ownerReady.pid,
       writerPids: plantedPhases.map((phase) => phase.pid),
       killedPid: landed.pid,

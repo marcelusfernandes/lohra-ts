@@ -16,7 +16,13 @@ import type { MCPServerConfig } from "../src/mcp/config.js";
 
 describe("session connectors -- the mcp SDK is absent in this environment (M1)", () => {
   it("connectStdioSession and connectHttpSession both reject with the 'not installed' message", async () => {
-    const config: MCPServerConfig = { name: "fix", transport: "stdio", command: "npx", args: [], env: {} };
+    const config: MCPServerConfig = {
+      name: "fix",
+      transport: "stdio",
+      command: "npx",
+      args: [],
+      env: {},
+    };
     await expect(connectStdioSession(config)).rejects.toThrow(
       "the mcp SDK is not installed; run `npm install @modelcontextprotocol/sdk`",
     );
@@ -26,11 +32,27 @@ describe("session connectors -- the mcp SDK is absent in this environment (M1)",
   });
 
   it("connectSession routes by transport and is injectable (the R4 seam)", async () => {
-    const stdioConfig: MCPServerConfig = { name: "s", transport: "stdio", command: "x", args: [], env: {} };
-    const httpConfig: MCPServerConfig = { name: "h", transport: "http", url: "https://x", args: [], env: {} };
+    const stdioConfig: MCPServerConfig = {
+      name: "s",
+      transport: "stdio",
+      command: "x",
+      args: [],
+      env: {},
+    };
+    const httpConfig: MCPServerConfig = {
+      name: "h",
+      transport: "http",
+      url: "https://x",
+      args: [],
+      env: {},
+    };
     const stdioCalls: MCPServerConfig[] = [];
     const httpCalls: MCPServerConfig[] = [];
-    const session = { listTools: () => Promise.resolve([]), callTool: () => Promise.resolve({}), close: () => Promise.resolve() };
+    const session = {
+      listTools: () => Promise.resolve([]),
+      callTool: () => Promise.resolve({}),
+      close: () => Promise.resolve(),
+    };
     await connectSession(stdioConfig, {
       stdio: (c) => {
         stdioCalls.push(c);
@@ -96,12 +118,14 @@ describe("registerConfiguredMcpServers -- best-effort entrypoint", () => {
     const registry = new ToolRegistry();
     const lines: string[] = [];
     const original = process.stderr.write.bind(process.stderr);
-    process.stderr.write = ((chunk: string) => {
+    process.stderr.write = (chunk: string) => {
       lines.push(chunk);
       return true;
-    });
+    };
     try {
-      await expect(registerConfiguredMcpServers(registry, { configPath: path })).resolves.toBeNull();
+      await expect(
+        registerConfiguredMcpServers(registry, { configPath: path }),
+      ).resolves.toBeNull();
     } finally {
       process.stderr.write = original;
     }

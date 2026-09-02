@@ -16,7 +16,9 @@ export interface LaunchedGatewayProcess {
   readonly pid: number;
   stderrText(): string;
   stdoutText(): string;
-  kill(signal?: NodeJS.Signals): Promise<{ readonly exitCode: number | null; readonly signal: NodeJS.Signals | null }>;
+  kill(
+    signal?: NodeJS.Signals,
+  ): Promise<{ readonly exitCode: number | null; readonly signal: NodeJS.Signals | null }>;
 }
 
 export interface LaunchCandidateFakeInput {

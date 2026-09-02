@@ -34,8 +34,14 @@ export interface StreamTruncationError extends Error {
   readonly partialBody?: Uint8Array;
 }
 
-function hasPartialBody(error: unknown): error is StreamTruncationError & { partialBody: Uint8Array } {
-  return error instanceof Error && "partialBody" in error && (error as StreamTruncationError).partialBody !== undefined;
+function hasPartialBody(
+  error: unknown,
+): error is StreamTruncationError & { partialBody: Uint8Array } {
+  return (
+    error instanceof Error &&
+    "partialBody" in error &&
+    (error as StreamTruncationError).partialBody !== undefined
+  );
 }
 
 /** A chunked response whose connection resets mid-body (not a graceful close
@@ -55,7 +61,8 @@ function describeResponseStreamError(
   const chunked =
     typeof transferEncoding === "string"
       ? transferEncoding.includes("chunked")
-      : Array.isArray(transferEncoding) && transferEncoding.some((value) => value.includes("chunked"));
+      : Array.isArray(transferEncoding) &&
+        transferEncoding.some((value) => value.includes("chunked"));
   const resetLike =
     (error as NodeJS.ErrnoException).code === "ECONNRESET" || error.message === "aborted";
   if (!chunked || !resetLike) return error;
@@ -349,7 +356,10 @@ export class ChatCompletionsClient {
           : new ProviderCallFailed("provider request failed", { cause: error });
       }
       if (response.status >= 200 && response.status < 300) return response;
-      if (attempt < this.maxRetries && shouldRetryStatus(response.status, response.headers, openAiRetryPolicy)) {
+      if (
+        attempt < this.maxRetries &&
+        shouldRetryStatus(response.status, response.headers, openAiRetryPolicy)
+      ) {
         await sleep(calculateRetryDelayMs(attempt, response.headers, openAiRetryPolicy), signal);
         attempt += 1;
         continue;

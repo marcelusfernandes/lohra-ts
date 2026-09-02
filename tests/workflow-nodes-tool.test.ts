@@ -84,7 +84,9 @@ describe("remaining workflow node strategies", () => {
     const result = await new WorkflowEngine({ runtime }).run(
       spec({
         meta: { name: "verify" },
-        nodes: [{ id: "v", type: "verify", finding: "claim", skeptics: 2, kill_if_majority_refute: true }],
+        nodes: [
+          { id: "v", type: "verify", finding: "claim", skeptics: 2, kill_if_majority_refute: true },
+        ],
       }),
     );
     expect(result.outputs.v).toMatchObject({ survived: false, refuted: 0, skeptics: 0 });
@@ -92,15 +94,15 @@ describe("remaining workflow node strategies", () => {
   });
 
   it("verify includes the authored lens and discards a schema-invalid skeptic", async () => {
-    const runtime = new QueueChildren([[
-      ok({ unexpected: true }),
-      ok({ unexpected: true }),
-      ok({ unexpected: true }),
-    ]]);
+    const runtime = new QueueChildren([
+      [ok({ unexpected: true }), ok({ unexpected: true }), ok({ unexpected: true })],
+    ]);
     const result = await new WorkflowEngine({ runtime }).run(
       spec({
         meta: { name: "verify-schema" },
-        nodes: [{ id: "v", type: "verify", finding: "CLAIM", skeptics: 1, lenses: ["SECURITY-LENS"] }],
+        nodes: [
+          { id: "v", type: "verify", finding: "CLAIM", skeptics: 1, lenses: ["SECURITY-LENS"] },
+        ],
       }),
     );
     expect(runtime.requests[0]?.prompt).toContain("SECURITY-LENS");
@@ -141,9 +143,7 @@ describe("remaining workflow node strategies", () => {
     }).run(
       spec({
         meta: { name: "judge-no-synth" },
-        nodes: [
-          { id: "j", type: "judge_panel", attempts: ["draft"], judges: 1, synthesize: null },
-        ],
+        nodes: [{ id: "j", type: "judge_panel", attempts: ["draft"], judges: 1, synthesize: null }],
       }),
     );
     expect(result.outputs.j).toBe("draft");
@@ -184,13 +184,15 @@ describe("remaining workflow node strategies", () => {
     const result = await new WorkflowEngine({ runtime }).run(
       spec({
         meta: { name: "judge-winner-prompt" },
-        nodes: [{
-          id: "j",
-          type: "judge_panel",
-          attempts: ["draft"],
-          judges: 1,
-          synthesize: { prompt: "polish this" },
-        }],
+        nodes: [
+          {
+            id: "j",
+            type: "judge_panel",
+            attempts: ["draft"],
+            judges: 1,
+            synthesize: { prompt: "polish this" },
+          },
+        ],
       }),
     );
     expect(result.outputs.j).toBe("FINAL");
@@ -246,14 +248,19 @@ describe("remaining workflow node strategies", () => {
       ...ok(output),
       usage: { ...meter, inputTokens: 4, outputTokens: 4 },
     });
-    const runtime = new QueueChildren([[eightTokens("DRAFT")], [eightTokens({ ok: true, feedback: "" })]]);
+    const runtime = new QueueChildren([
+      [eightTokens("DRAFT")],
+      [eightTokens({ ok: true, feedback: "" })],
+    ]);
     const result = await new WorkflowEngine({
       runtime,
       budget: new Budget({ tokenBudget: 100 }),
     }).run(
       spec({
         meta: { name: "gate-soft-budget" },
-        nodes: [{ id: "g", type: "gate", body: { prompt: "write" }, validator: "review", attempts: 1 }],
+        nodes: [
+          { id: "g", type: "gate", body: { prompt: "write" }, validator: "review", attempts: 1 },
+        ],
       }),
     );
     expect(runtime.requests).toHaveLength(2);
@@ -266,7 +273,9 @@ describe("remaining workflow node strategies", () => {
     const result = await new WorkflowEngine({ runtime }).run(
       spec({
         meta: { name: "gate-text-verdict" },
-        nodes: [{ id: "g", type: "gate", body: { prompt: "write" }, validator: "review", attempts: 2 }],
+        nodes: [
+          { id: "g", type: "gate", body: { prompt: "write" }, validator: "review", attempts: 2 },
+        ],
       }),
     );
     expect(result.outputs.g).toBe("DRAFT");
@@ -280,7 +289,9 @@ describe("remaining workflow node strategies", () => {
     const result = await new WorkflowEngine({ runtime }).run(
       spec({
         meta: { name: "gate-invalid-verdict" },
-        nodes: [{ id: "g", type: "gate", body: { prompt: "write" }, validator: "review", attempts: 1 }],
+        nodes: [
+          { id: "g", type: "gate", body: { prompt: "write" }, validator: "review", attempts: 1 },
+        ],
       }),
     );
     expect(result.outputs.g).toBeNull();
@@ -324,7 +335,10 @@ describe("remaining workflow node strategies", () => {
     const runtime = new QueueChildren([[{ status: "failed", output: "inner dead", usage: meter }]]);
     const result = await new WorkflowEngine({
       runtime,
-      loader: () => ({ meta: { name: "inner" }, nodes: [{ id: "leaf", type: "agent", prompt: "x", retries: 0 }] }),
+      loader: () => ({
+        meta: { name: "inner" },
+        nodes: [{ id: "leaf", type: "agent", prompt: "x", retries: 0 }],
+      }),
     }).run(
       spec({ meta: { name: "outer" }, nodes: [{ id: "sub", type: "workflow", ref: "inner" }] }),
     );
@@ -365,10 +379,16 @@ describe("remaining workflow node strategies", () => {
       runtime,
       loader: (reference) =>
         reference === "middle"
-          ? { meta: { name: "middle" }, nodes: [{ id: "too-deep", type: "workflow", ref: "inner" }] }
+          ? {
+              meta: { name: "middle" },
+              nodes: [{ id: "too-deep", type: "workflow", ref: "inner" }],
+            }
           : { meta: { name: "inner" }, nodes: [{ id: "leaf", type: "agent", prompt: "x" }] },
     }).run(
-      spec({ meta: { name: "outer-depth" }, nodes: [{ id: "sub", type: "workflow", ref: "middle" }] }),
+      spec({
+        meta: { name: "outer-depth" },
+        nodes: [{ id: "sub", type: "workflow", ref: "middle" }],
+      }),
     );
     expect(result.engineFaults).toBe(1);
     expect(result.faults.some((fault) => fault.includes("nesting exceeds depth"))).toBe(true);
@@ -384,8 +404,28 @@ describe("remaining workflow node strategies", () => {
       spec({
         meta: { name: "structured" },
         nodes: [
-          { id: "forced", type: "agent", prompt: "a", tool_less: true, schema: { type: "object", required: ["value"], properties: { value: { type: "integer" } } } },
-          { id: "fallback", type: "agent", prompt: "b", tool_less: true, schema: { type: "object", required: ["value"], properties: { value: { type: "integer" } } } },
+          {
+            id: "forced",
+            type: "agent",
+            prompt: "a",
+            tool_less: true,
+            schema: {
+              type: "object",
+              required: ["value"],
+              properties: { value: { type: "integer" } },
+            },
+          },
+          {
+            id: "fallback",
+            type: "agent",
+            prompt: "b",
+            tool_less: true,
+            schema: {
+              type: "object",
+              required: ["value"],
+              properties: { value: { type: "integer" } },
+            },
+          },
         ],
       }),
     );
@@ -396,7 +436,10 @@ describe("remaining workflow node strategies", () => {
   it("checkpoint without answer pauses and spawns nothing", async () => {
     const runtime = new QueueChildren([]);
     const result = await new WorkflowEngine({ runtime }).run(
-      spec({ meta: { name: "checkpoint" }, nodes: [{ id: "cp", type: "checkpoint", prompt: "Approve?" }] }),
+      spec({
+        meta: { name: "checkpoint" },
+        nodes: [{ id: "cp", type: "checkpoint", prompt: "Approve?" }],
+      }),
     );
     expect(result.status).toBe("paused");
     expect(result.pauseReason).toBe("checkpoint");
@@ -406,11 +449,23 @@ describe("remaining workflow node strategies", () => {
 });
 
 class MemoryRepository implements ConversationRepository {
-  private readonly sessions = new Map<string, { systemPrompt: string; model: string; cwd: string }>();
+  private readonly sessions = new Map<
+    string,
+    { systemPrompt: string; model: string; cwd: string }
+  >();
   private readonly messages = new Map<string, readonly Readonly<Record<string, unknown>>[]>();
 
-  createSession(input: { readonly id: string; readonly systemPrompt: string; readonly model: string; readonly cwd: string }): void {
-    this.sessions.set(input.id, { systemPrompt: input.systemPrompt, model: input.model, cwd: input.cwd });
+  createSession(input: {
+    readonly id: string;
+    readonly systemPrompt: string;
+    readonly model: string;
+    readonly cwd: string;
+  }): void {
+    this.sessions.set(input.id, {
+      systemPrompt: input.systemPrompt,
+      model: input.model,
+      cwd: input.cwd,
+    });
   }
   session(id: string) {
     return this.sessions.get(id) ?? null;

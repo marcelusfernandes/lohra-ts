@@ -29,7 +29,9 @@ function normalizeEnvelope(body: string): { text: string; shapeOk: boolean; item
   }
   const id = parsed["id"];
   const createdAt = parsed["created_at"];
-  const output = Array.isArray(parsed["output"]) ? (parsed["output"] as Record<string, unknown>[]) : [];
+  const output = Array.isArray(parsed["output"])
+    ? (parsed["output"] as Record<string, unknown>[])
+    : [];
   const itemId = output[0]?.["id"];
   const shapeOk =
     typeof id === "string" &&
@@ -45,7 +47,10 @@ function normalizeEnvelope(body: string): { text: string; shapeOk: boolean; item
   return { text: JSON.stringify(parsed), shapeOk, itemIdOk };
 }
 
-function upstreamBodyOk(record: UpstreamRequestRecord | undefined, expected: Record<string, unknown>): boolean {
+function upstreamBodyOk(
+  record: UpstreamRequestRecord | undefined,
+  expected: Record<string, unknown>,
+): boolean {
   if (record === undefined) return false;
   return Object.entries(expected).every(([key, value]) => record.body[key] === value);
 }
@@ -61,24 +66,58 @@ export async function run(
   differences: unknown[];
   expectedUpstreamRequests: number;
 }> {
-  const probes: (ProbeRecord & { upstream: UpstreamRequestRecord[]; expectedStatus: number })[] = [];
+  const probes: (ProbeRecord & { upstream: UpstreamRequestRecord[]; expectedStatus: number })[] =
+    [];
 
-  const successBody = JSON.stringify({ model: "m", input: "SCEN:ok hi", temperature: 0.25, max_output_tokens: 77 });
+  const successBody = JSON.stringify({
+    model: "m",
+    input: "SCEN:ok hi",
+    temperature: 0.25,
+    max_output_tokens: 77,
+  });
   const before1 = upstream.requests.length;
-  const success = await probeBoth("success", oracle, candidate, (apiKey) => postRequestLines(apiKey, successBody), successBody);
+  const success = await probeBoth(
+    "success",
+    oracle,
+    candidate,
+    (apiKey) => postRequestLines(apiKey, successBody),
+    successBody,
+  );
   probes.push({ ...success, upstream: upstream.requests.slice(before1), expectedStatus: 200 });
 
   const partialBody = JSON.stringify({ model: "m", input: "SCEN:partial hi" });
   const before2 = upstream.requests.length;
-  const partial = await probeBoth("partial", oracle, candidate, (apiKey) => postRequestLines(apiKey, partialBody), partialBody);
+  const partial = await probeBoth(
+    "partial",
+    oracle,
+    candidate,
+    (apiKey) => postRequestLines(apiKey, partialBody),
+    partialBody,
+  );
   probes.push({ ...partial, upstream: upstream.requests.slice(before2), expectedStatus: 200 });
 
   const errorBody = JSON.stringify({ model: "m", input: "SCEN:err418 hi" });
   const before3 = upstream.requests.length;
-  const upstreamError = await probeBoth("upstream-error", oracle, candidate, (apiKey) => postRequestLines(apiKey, errorBody), errorBody);
-  probes.push({ ...upstreamError, upstream: upstream.requests.slice(before3), expectedStatus: 502 });
+  const upstreamError = await probeBoth(
+    "upstream-error",
+    oracle,
+    candidate,
+    (apiKey) => postRequestLines(apiKey, errorBody),
+    errorBody,
+  );
+  probes.push({
+    ...upstreamError,
+    upstream: upstream.requests.slice(before3),
+    expectedStatus: 502,
+  });
 
-  const rawEvidence = probes.map((entry) => ({ id: entry.id, request: entry.request, oracle: entry.oracle, candidate: entry.candidate, upstream: entry.upstream }));
+  const rawEvidence = probes.map((entry) => ({
+    id: entry.id,
+    request: entry.request,
+    oracle: entry.oracle,
+    candidate: entry.candidate,
+    upstream: entry.upstream,
+  }));
 
   const differences: unknown[] = [];
   const projectedProbes = probes.map((entry) => {
@@ -93,7 +132,12 @@ export async function run(
     const statusOk =
       entry.oracle.statusLine.includes(` ${String(entry.expectedStatus)} `) &&
       entry.candidate.statusLine.includes(` ${String(entry.expectedStatus)} `);
-    const shapeOk = entry.expectedStatus !== 200 || (oracleNorm.shapeOk && candidateNorm.shapeOk && oracleNorm.itemIdOk && candidateNorm.itemIdOk);
+    const shapeOk =
+      entry.expectedStatus !== 200 ||
+      (oracleNorm.shapeOk &&
+        candidateNorm.shapeOk &&
+        oracleNorm.itemIdOk &&
+        candidateNorm.itemIdOk);
     const causeOk =
       entry.expectedStatus !== 502 ||
       (entry.oracle.body.includes("418") &&
@@ -116,7 +160,14 @@ export async function run(
         entry.oracle.body.includes('"incomplete_details":null') &&
         entry.candidate.body.includes('"status":"completed"') &&
         entry.candidate.body.includes('"incomplete_details":null'));
-    const ok = comparison.match && statusOk && shapeOk && causeOk && upstreamCountOk && upstreamMappingOk && partialShapeOk;
+    const ok =
+      comparison.match &&
+      statusOk &&
+      shapeOk &&
+      causeOk &&
+      upstreamCountOk &&
+      upstreamMappingOk &&
+      partialShapeOk;
     const record = {
       id: entry.id,
       expectedStatus: entry.expectedStatus,
@@ -133,7 +184,10 @@ export async function run(
     projection: {
       probes: projectedProbes,
       normalizations: [
-        { path: "/v1/responses", rule: "`id` checked against resp_<32hex> then set to <ID>; `created_at` checked to be an integer then zeroed; item `id` checked against msg_resp_<same-hex> then set to <ITEM-ID>; envelope key count checked to be 15 (assertion 31 erratum, same authority as t11-responses-stream-success-no-done)." },
+        {
+          path: "/v1/responses",
+          rule: "`id` checked against resp_<32hex> then set to <ID>; `created_at` checked to be an integer then zeroed; item `id` checked against msg_resp_<same-hex> then set to <ITEM-ID>; envelope key count checked to be 15 (assertion 31 erratum, same authority as t11-responses-stream-success-no-done).",
+        },
         { path: "*", rule: "`date`/`server` headers dropped; header order not compared." },
       ],
     },

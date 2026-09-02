@@ -36,7 +36,10 @@ function parseFrames(body: string): { frames: Frame[]; parseFailed: boolean; has
       continue;
     }
     try {
-      frames.push({ eventType: eventLine?.slice("event: ".length), data: JSON.parse(dataLine.slice("data: ".length)) as Record<string, unknown> });
+      frames.push({
+        eventType: eventLine?.slice("event: ".length),
+        data: JSON.parse(dataLine.slice("data: ".length)) as Record<string, unknown>,
+      });
     } catch {
       parseFailed = true;
     }
@@ -60,9 +63,13 @@ function analyze(body: string): Analysis {
   const noProtocolErrorOk = frames.every((frame) => frame.eventType !== "response.failed");
   const completedResponse = frames.at(-1)?.data["response"] as Record<string, unknown> | undefined;
   const outputText = completedResponse?.["output_text"];
-  const contentPreservedOk = typeof outputText === "string" && outputText.includes("FAKE-UPSTREAM-STREAM:cleaneof");
+  const contentPreservedOk =
+    typeof outputText === "string" && outputText.includes("FAKE-UPSTREAM-STREAM:cleaneof");
   const usage = completedResponse?.["usage"] as Record<string, unknown> | undefined;
-  const usageEstimatedPresentOk = usage !== undefined && typeof usage["input_tokens"] === "number" && typeof usage["output_tokens"] === "number";
+  const usageEstimatedPresentOk =
+    usage !== undefined &&
+    typeof usage["input_tokens"] === "number" &&
+    typeof usage["output_tokens"] === "number";
   const responseId = frames[0]?.data["response"] as Record<string, unknown> | undefined;
   const idValue = responseId?.["id"];
   const normalizedFrames = frames.map((frame) => {
@@ -77,12 +84,14 @@ function analyze(body: string): Analysis {
     .map((frame) => {
       const withZeroedCreated = { ...frame.data };
       const nested = withZeroedCreated["response"];
-      if (nested !== null && typeof nested === "object" && "created_at" in nested) (nested as Record<string, unknown>)["created_at"] = 0;
+      if (nested !== null && typeof nested === "object" && "created_at" in nested)
+        (nested as Record<string, unknown>)["created_at"] = 0;
       // Estimation math is only required to agree in SHAPE at this
       // scenario's scope (assertion 62's own vectors govern the exact
       // arithmetic) — replace the usage object so a same-side numeric
       // rounding wobble across runs doesn't false-fail the bilateral diff.
-      if (nested !== null && typeof nested === "object" && "usage" in nested) (nested as Record<string, unknown>)["usage"] = "<USAGE>";
+      if (nested !== null && typeof nested === "object" && "usage" in nested)
+        (nested as Record<string, unknown>)["usage"] = "<USAGE>";
       return `event: ${String(frame.eventType)}\ndata: ${JSON.stringify(withZeroedCreated)}`;
     })
     .join("\n\n");
@@ -111,11 +120,22 @@ export async function run(
   const body = JSON.stringify({ model: "m", input: "SCEN:cleaneof hi", stream: true });
   const before = upstream.requests.length;
   const probe: ProbeRecord & { upstream: UpstreamRequestRecord[] } = {
-    ...(await probeBoth("clean-eof", oracle, candidate, (apiKey) => postRequestLines(apiKey, body), body)),
+    ...(await probeBoth(
+      "clean-eof",
+      oracle,
+      candidate,
+      (apiKey) => postRequestLines(apiKey, body),
+      body,
+    )),
     upstream: upstream.requests.slice(before),
   };
 
-  const rawEvidence = { request: probe.request, oracle: probe.oracle, candidate: probe.candidate, upstream: probe.upstream };
+  const rawEvidence = {
+    request: probe.request,
+    oracle: probe.oracle,
+    candidate: probe.candidate,
+    upstream: probe.upstream,
+  };
 
   const oracleAnalysis = analyze(probe.oracle.body);
   const candidateAnalysis = analyze(probe.candidate.body);
@@ -126,26 +146,40 @@ export async function run(
   });
 
   const checks = {
-    statusOk: probe.oracle.statusLine.includes(" 200 ") && probe.candidate.statusLine.includes(" 200 "),
+    statusOk:
+      probe.oracle.statusLine.includes(" 200 ") && probe.candidate.statusLine.includes(" 200 "),
     shapeOk: oracleAnalysis.shapeOk && candidateAnalysis.shapeOk,
-    endsWithCompletedOk: oracleAnalysis.endsWithCompletedOk && candidateAnalysis.endsWithCompletedOk,
+    endsWithCompletedOk:
+      oracleAnalysis.endsWithCompletedOk && candidateAnalysis.endsWithCompletedOk,
     noProtocolErrorOk: oracleAnalysis.noProtocolErrorOk && candidateAnalysis.noProtocolErrorOk,
     contentPreservedOk: oracleAnalysis.contentPreservedOk && candidateAnalysis.contentPreservedOk,
-    usageEstimatedPresentOk: oracleAnalysis.usageEstimatedPresentOk && candidateAnalysis.usageEstimatedPresentOk,
+    usageEstimatedPresentOk:
+      oracleAnalysis.usageEstimatedPresentOk && candidateAnalysis.usageEstimatedPresentOk,
     noDoneOk: oracleAnalysis.noDoneOk && candidateAnalysis.noDoneOk,
     upstreamCountOk: probe.upstream.length === 2,
     bilateralOk: comparison.match,
   };
   const ok = Object.values(checks).every(Boolean);
-  const record = { id: probe.id, checks, normalized: { oracle: comparison.oracle, candidate: comparison.candidate }, match: ok };
+  const record = {
+    id: probe.id,
+    checks,
+    normalized: { oracle: comparison.oracle, candidate: comparison.candidate },
+    match: ok,
+  };
   const differences = ok ? [] : [record];
 
   return {
     projection: {
       probes: [record],
       normalizations: [
-        { path: "/v1/responses (stream)", rule: "`id` normalized before the bilateral diff; every `created_at` occurrence zeroed; `usage` replaced with a placeholder (estimate arithmetic is governed by assertion 62's own vectors, not this scenario)." },
-        { path: "*", rule: "`date`/`server` headers dropped; content-length dropped; header order not compared." },
+        {
+          path: "/v1/responses (stream)",
+          rule: "`id` normalized before the bilateral diff; every `created_at` occurrence zeroed; `usage` replaced with a placeholder (estimate arithmetic is governed by assertion 62's own vectors, not this scenario).",
+        },
+        {
+          path: "*",
+          rule: "`date`/`server` headers dropped; content-length dropped; header order not compared.",
+        },
       ],
     },
     rawEvidence,

@@ -1,4 +1,3 @@
-
 export const MIN_RESUME_DELAY = 60;
 export const MAX_RESUME_DELAY = 6 * 60 * 60;
 export const MAX_RESUME_ATTEMPTS = 5;
@@ -69,7 +68,9 @@ export class LeaseHeartbeat {
   }
 
   private arm(runId: string): void {
-    const timer = this.timerFactory(this.interval, () => { this.tick(runId); });
+    const timer = this.timerFactory(this.interval, () => {
+      this.tick(runId);
+    });
     if (!this.active.has(runId)) {
       // a stop()/shutdown() won the race against this (re-)arm
       timer.cancel();
@@ -124,10 +125,17 @@ export class AutoResumeScheduler {
     this.resume = resume;
     this.timerFactory = options.timerFactory ?? defaultTimer;
     this.maxAttempts = Math.max(0, options.maxAttempts ?? MAX_RESUME_ATTEMPTS);
-    this.logWarning = options.logWarning ?? ((message) => { console.warn(message); });
+    this.logWarning =
+      options.logWarning ??
+      ((message) => {
+        console.warn(message);
+      });
   }
 
-  public schedule(runId: string, options: { attempts: number; retryAfter?: number | null }): number | null {
+  public schedule(
+    runId: string,
+    options: { attempts: number; retryAfter?: number | null },
+  ): number | null {
     if (options.attempts >= this.maxAttempts) {
       this.logWarning(
         `workflow: run ${runId} stays paused after ${String(options.attempts)} auto-resume attempt(s); resume it manually with run_workflow(resume_run_id=...)`,
@@ -135,7 +143,9 @@ export class AutoResumeScheduler {
       return null;
     }
     const delay = resumeDelay(options.attempts, options.retryAfter);
-    const timer = this.timerFactory(delay, () => { this.fire(runId); });
+    const timer = this.timerFactory(delay, () => {
+      this.fire(runId);
+    });
     this.drop(runId);
     this.timers.set(runId, timer);
     return delay;
@@ -189,7 +199,7 @@ export class AutoResumeScheduler {
       outcome !== null &&
       typeof outcome === "object" &&
       "error" in outcome &&
-      typeof (outcome).error === "string"
+      typeof outcome.error === "string"
     ) {
       this.logWarning(
         `workflow: auto-resume of run ${runId} refused: ${(outcome as { error: string }).error}`,

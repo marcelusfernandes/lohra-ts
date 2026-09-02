@@ -163,7 +163,9 @@ describe("AnthropicMessagesClient", () => {
   // falls back to backoff instead of honoring the value literally. See
   // errors.ts's anthropicRetryPolicy.
   describe("429 retry policy (anthropic SDK parity)", () => {
-    const success = body('{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{}}');
+    const success = body(
+      '{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{}}',
+    );
 
     it("retries a 429 up to maxRetries, same as a 500", async () => {
       const http = new QueueStatusHttp([{ status: 429 }, { status: 429 }, { status: 429 }]);
@@ -242,7 +244,9 @@ describe("AnthropicMessagesClient", () => {
         transport: new AnthropicMessagesTransport(),
         http,
       });
-      await expect(client.create({ model: "m", messages: [], max_tokens: 1 })).rejects.toMatchObject({
+      await expect(
+        client.create({ model: "m", messages: [], max_tokens: 1 }),
+      ).rejects.toMatchObject({
         statusCode: 429,
       });
       expect(http.requests).toHaveLength(1);

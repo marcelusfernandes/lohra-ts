@@ -35,10 +35,7 @@ import {
 import { pythonJsonDumpsInsertionOrder } from "../serialization/python-json.js";
 import { openStateForEnvironment, SessionRepository } from "../state/index.js";
 import { SkillStore } from "../skills/index.js";
-import {
-  approval,
-  RegistryToolDispatcher,
-} from "../tools/index.js";
+import { approval, RegistryToolDispatcher } from "../tools/index.js";
 import {
   AnthropicMessagesClient,
   buildClient,

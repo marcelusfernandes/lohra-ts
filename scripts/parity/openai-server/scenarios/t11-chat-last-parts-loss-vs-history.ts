@@ -41,20 +41,37 @@ export async function run(
   });
   const before = upstream.requests.length;
   const probe: ProbeRecord & { upstream: UpstreamRequestRecord[] } = {
-    ...(await probeBoth("last-parts-lost", oracle, candidate, (apiKey) => postRequestLines(apiKey, body), body)),
+    ...(await probeBoth(
+      "last-parts-lost",
+      oracle,
+      candidate,
+      (apiKey) => postRequestLines(apiKey, body),
+      body,
+    )),
     upstream: upstream.requests.slice(before),
   };
 
-  const rawEvidence = { request: probe.request, oracle: probe.oracle, candidate: probe.candidate, upstream: probe.upstream };
+  const rawEvidence = {
+    request: probe.request,
+    oracle: probe.oracle,
+    candidate: probe.candidate,
+    upstream: probe.upstream,
+  };
 
   const comparison = compareRaw(probe.oracle, probe.candidate, {
-    oracleBody: probe.oracle.body.replaceAll(/"id":"chatcmpl-[0-9a-f]{32}"/gu, '"id":"<ID>"').replaceAll(/"created":\d+/gu, '"created":0'),
-    candidateBody: probe.candidate.body.replaceAll(/"id":"chatcmpl-[0-9a-f]{32}"/gu, '"id":"<ID>"').replaceAll(/"created":\d+/gu, '"created":0'),
+    oracleBody: probe.oracle.body
+      .replaceAll(/"id":"chatcmpl-[0-9a-f]{32}"/gu, '"id":"<ID>"')
+      .replaceAll(/"created":\d+/gu, '"created":0'),
+    candidateBody: probe.candidate.body
+      .replaceAll(/"id":"chatcmpl-[0-9a-f]{32}"/gu, '"id":"<ID>"')
+      .replaceAll(/"created":\d+/gu, '"created":0'),
   });
 
   const lastLostOk = probe.upstream.every((record) => {
     const messages = record.body["messages"];
-    const last = Array.isArray(messages) ? (messages.at(-1) as Record<string, unknown> | undefined) : undefined;
+    const last = Array.isArray(messages)
+      ? (messages.at(-1) as Record<string, unknown> | undefined)
+      : undefined;
     return last?.["content"] === "";
   });
   // The system prompt is prepended ahead of the client's own messages, so
@@ -74,13 +91,18 @@ export async function run(
   const checks = { bilateralOk: comparison.match, lastLostOk, historyPreservedOk, upstreamCountOk };
   const match = Object.values(checks).every(Boolean);
   const record = { id: probe.id, checks, match };
-  const differences = match ? [] : [{ ...record, normalized: { oracle: comparison.oracle, candidate: comparison.candidate } }];
+  const differences = match
+    ? []
+    : [{ ...record, normalized: { oracle: comparison.oracle, candidate: comparison.candidate } }];
 
   return {
     projection: {
       probes: [record],
       normalizations: [
-        { path: "/v1/chat/completions", rule: "`id`/`created` normalized before the bilateral body diff." },
+        {
+          path: "/v1/chat/completions",
+          rule: "`id`/`created` normalized before the bilateral body diff.",
+        },
         { path: "*", rule: "`date`/`server` headers dropped; header order not compared." },
       ],
     },

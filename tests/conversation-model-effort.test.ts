@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { AnthropicMessagesModel, ChatCompletionsModel, ResponsesModel } from "../src/conversation/index.js";
+import {
+  AnthropicMessagesModel,
+  ChatCompletionsModel,
+  ResponsesModel,
+} from "../src/conversation/index.js";
 import type { ModelRequest } from "../src/conversation/index.js";
 import {
   AnthropicMessagesClient,
@@ -76,7 +80,11 @@ describe("ModelTransport effort forwarding (T13 plumbing — no ModelRequest.eff
           `data: ${JSON.stringify({ type: "response.output_text.delta", delta: text })}`,
           `data: ${JSON.stringify({
             type: "response.completed",
-            response: { status: "completed", output: [], usage: { input_tokens: 1, output_tokens: 1 } },
+            response: {
+              status: "completed",
+              output: [],
+              usage: { input_tokens: 1, output_tokens: 1 },
+            },
           })}`,
           "",
         ].join("\n\n"),

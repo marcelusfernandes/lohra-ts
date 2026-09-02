@@ -12,7 +12,8 @@ function modelsRequest(authLine: string): string {
   return `GET /v1/models HTTP/1.1\nHost: 127.0.0.1\n${authLine}Connection: close\n`;
 }
 
-const UNAUTHORIZED_BODY = '{"error":{"message":"missing or invalid API key","type":"authentication_error"}}';
+const UNAUTHORIZED_BODY =
+  '{"error":{"message":"missing or invalid API key","type":"authentication_error"}}';
 
 interface SecuredCase {
   readonly id: string;
@@ -23,11 +24,23 @@ interface SecuredCase {
 const SECURED_CASES: readonly SecuredCase[] = [
   { id: "no-auth-header", authLine: () => "", expectedStatus: 401 },
   { id: "empty-bearer", authLine: () => "Authorization: Bearer \n", expectedStatus: 401 },
-  { id: "wrong-bearer", authLine: () => "Authorization: Bearer not-the-real-key\n", expectedStatus: 401 },
-  { id: "lowercase-bearer", authLine: (key) => `Authorization: bearer ${key}\n`, expectedStatus: 401 },
+  {
+    id: "wrong-bearer",
+    authLine: () => "Authorization: Bearer not-the-real-key\n",
+    expectedStatus: 401,
+  },
+  {
+    id: "lowercase-bearer",
+    authLine: (key) => `Authorization: bearer ${key}\n`,
+    expectedStatus: 401,
+  },
   { id: "basic-scheme", authLine: () => "Authorization: Basic zzz\n", expectedStatus: 401 },
   { id: "raw-token-no-scheme", authLine: (key) => `Authorization: ${key}\n`, expectedStatus: 401 },
-  { id: "correct-with-trailing-spaces", authLine: (key) => `Authorization: Bearer ${key}  \n`, expectedStatus: 200 },
+  {
+    id: "correct-with-trailing-spaces",
+    authLine: (key) => `Authorization: Bearer ${key}  \n`,
+    expectedStatus: 200,
+  },
 ];
 
 const INSECURE_CASES: readonly { readonly id: string; readonly authLine: string }[] = [
@@ -52,20 +65,29 @@ export async function run(
 
   if (insecure) {
     for (const testCase of INSECURE_CASES) {
-      probes.push(await probeBoth(testCase.id, oracle, candidate, () => modelsRequest(testCase.authLine)));
+      probes.push(
+        await probeBoth(testCase.id, oracle, candidate, () => modelsRequest(testCase.authLine)),
+      );
       expectedStatusById.set(testCase.id, 200);
     }
   } else {
     for (const testCase of SECURED_CASES) {
       probes.push(
-        await probeBoth(testCase.id, oracle, candidate, (apiKey) => modelsRequest(testCase.authLine(apiKey ?? ""))),
+        await probeBoth(testCase.id, oracle, candidate, (apiKey) =>
+          modelsRequest(testCase.authLine(apiKey ?? "")),
+        ),
       );
       expectedStatusById.set(testCase.id, testCase.expectedStatus);
     }
   }
 
   const rawEvidence = {
-    probes: probes.map((entry) => ({ id: entry.id, request: entry.request, oracle: entry.oracle, candidate: entry.candidate })),
+    probes: probes.map((entry) => ({
+      id: entry.id,
+      request: entry.request,
+      oracle: entry.oracle,
+      candidate: entry.candidate,
+    })),
     oracleStderr: oracle.stderr(),
     candidateStderr: candidate.stderr(),
   };
@@ -73,9 +95,12 @@ export async function run(
   const differences: unknown[] = [];
   const projectedProbes = probes.map((entry) => {
     const expectedStatus = ` ${String(expectedStatusById.get(entry.id))} `;
-    const statusOk = entry.oracle.statusLine.includes(expectedStatus) && entry.candidate.statusLine.includes(expectedStatus);
+    const statusOk =
+      entry.oracle.statusLine.includes(expectedStatus) &&
+      entry.candidate.statusLine.includes(expectedStatus);
     const bodyOk =
-      expectedStatus.trim() !== "401" || (entry.oracle.body === UNAUTHORIZED_BODY && entry.candidate.body === UNAUTHORIZED_BODY);
+      expectedStatus.trim() !== "401" ||
+      (entry.oracle.body === UNAUTHORIZED_BODY && entry.candidate.body === UNAUTHORIZED_BODY);
     const comparison = compareRaw(entry.oracle, entry.candidate, {
       // 200 bodies are the full /v1/models list, already bilaterally proven
       // byte-exact (modulo `created`) by t11-surface-health-models-docs;
@@ -88,7 +113,11 @@ export async function run(
     });
     const ok = comparison.match && statusOk && bodyOk;
     const record = { id: entry.id, expectedStatus: expectedStatus.trim(), match: ok };
-    if (!ok) differences.push({ ...record, normalized: { oracle: comparison.oracle, candidate: comparison.candidate } });
+    if (!ok)
+      differences.push({
+        ...record,
+        normalized: { oracle: comparison.oracle, candidate: comparison.candidate },
+      });
     return record;
   });
 
@@ -99,7 +128,13 @@ export async function run(
   const stderrOk = insecure
     ? !keyLinePresentOracle && !keyLinePresentCandidate
     : keyLinePresentOracle && keyLinePresentCandidate;
-  if (!stderrOk) differences.push({ id: "stderr-key-line", insecure, keyLinePresentOracle, keyLinePresentCandidate });
+  if (!stderrOk)
+    differences.push({
+      id: "stderr-key-line",
+      insecure,
+      keyLinePresentOracle,
+      keyLinePresentCandidate,
+    });
 
   const match = differences.length === 0;
   return {
@@ -108,7 +143,10 @@ export async function run(
       probes: projectedProbes,
       stderrOk,
       normalizations: [
-        { path: "/v1/models (200 cases)", rule: "body excluded from this scenario's comparison — byte-exact list shape already proven in t11-surface-health-models-docs; here only the auth decision (status) matters." },
+        {
+          path: "/v1/models (200 cases)",
+          rule: "body excluded from this scenario's comparison — byte-exact list shape already proven in t11-surface-health-models-docs; here only the auth decision (status) matters.",
+        },
         { path: "*", rule: "`date`/`server` headers dropped; header order not compared." },
       ],
     },

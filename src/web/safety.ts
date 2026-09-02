@@ -44,11 +44,7 @@ export function parseIpv4Literal(host: string): string | null {
     if ((numeric[0] ?? 0n) > 255n || (numeric[1] ?? 0n) > 0xffffffn) return null;
     value = ((numeric[0] ?? 0n) << 24n) | (numeric[1] ?? 0n);
   } else if (numeric.length === 3) {
-    if (
-      (numeric[0] ?? 0n) > 255n ||
-      (numeric[1] ?? 0n) > 255n ||
-      (numeric[2] ?? 0n) > 0xffffn
-    )
+    if ((numeric[0] ?? 0n) > 255n || (numeric[1] ?? 0n) > 255n || (numeric[2] ?? 0n) > 0xffffn)
       return null;
     value = ((numeric[0] ?? 0n) << 24n) | ((numeric[1] ?? 0n) << 16n) | (numeric[2] ?? 0n);
   } else {
@@ -72,9 +68,7 @@ function ipv6Groups(text: string): readonly number[] | null {
   if (doubleColon.length > 2) return null;
   const head = doubleColon[0] === "" ? [] : (doubleColon[0] ?? "").split(":");
   const tail =
-    doubleColon.length === 2 && doubleColon[1] !== ""
-      ? (doubleColon[1] ?? "").split(":")
-      : [];
+    doubleColon.length === 2 && doubleColon[1] !== "" ? (doubleColon[1] ?? "").split(":") : [];
   if (doubleColon.length === 1 && head.length !== 8) return null;
   if (doubleColon.length === 2 && head.length + tail.length > 7) return null;
   if (doubleColon.length === 2 && (doubleColon[0] ?? "").endsWith(":")) return null;
@@ -149,8 +143,7 @@ export function parseIpv6Literal(host: string): string | null {
   if (host.includes("%")) return null;
   const groups = ipv6Groups(host);
   if (groups === null || groups.length !== 8) return null;
-  const mapped =
-    groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff;
+  const mapped = groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff;
   if (mapped) {
     return `::ffff:${dottedTail(groups)}`;
   }
@@ -189,9 +182,15 @@ const IPV4_RESERVED: readonly Range[] = [range4("240.0.0.0", 4)];
 function range4(address: string, bits: number): Range {
   const parts = address.split(".").map((part) => BigInt(part));
   const value =
-    ((parts[0] ?? 0n) << 24n) | ((parts[1] ?? 0n) << 16n) | ((parts[2] ?? 0n) << 8n) | (parts[3] ?? 0n);
+    ((parts[0] ?? 0n) << 24n) |
+    ((parts[1] ?? 0n) << 16n) |
+    ((parts[2] ?? 0n) << 8n) |
+    (parts[3] ?? 0n);
   const size = 32n - BigInt(bits);
-  return { start: value & ((~0n << (32n - BigInt(bits))) & 0xffffffffn), end: value | ((1n << size) - 1n) };
+  return {
+    start: value & ((~0n << (32n - BigInt(bits))) & 0xffffffffn),
+    end: value | ((1n << size) - 1n),
+  };
 }
 
 function ipv4NonPublic(address: string): boolean {
@@ -268,14 +267,20 @@ function ipv6NonPublic(address: string): boolean {
   const groups = ipv6Groups(address);
   if (groups === null) return true;
   const value = ipv6Value(groups);
-  const multicast = (value >> 120n) === 0xffn;
+  const multicast = value >> 120n === 0xffn;
   const loopback = value === 1n;
   const unspecified = value === 0n;
   const linkLocal = hasPrefix(value, 0xfe80n << 112n, 10);
-  const reserved = IPV6_RESERVED_PREFIXES.some((entry) => hasPrefix(value, entry.prefix, entry.bits));
+  const reserved = IPV6_RESERVED_PREFIXES.some((entry) =>
+    hasPrefix(value, entry.prefix, entry.bits),
+  );
   if (multicast || loopback || unspecified || linkLocal || reserved) return true;
-  const inPrivate = IPV6_PRIVATE_PREFIXES.some((entry) => hasPrefix(value, entry.prefix, entry.bits));
-  const exempted = IPV6_PRIVATE_EXCEPTIONS.some((entry) => hasPrefix(value, entry.prefix, entry.bits));
+  const inPrivate = IPV6_PRIVATE_PREFIXES.some((entry) =>
+    hasPrefix(value, entry.prefix, entry.bits),
+  );
+  const exempted = IPV6_PRIVATE_EXCEPTIONS.some((entry) =>
+    hasPrefix(value, entry.prefix, entry.bits),
+  );
   return inPrivate && !exempted;
 }
 
@@ -292,7 +297,12 @@ export function isNonPublic(address: string): boolean {
 function dottedTail(groups: readonly number[]): string {
   const sixth = groups[6] ?? 0;
   const seventh = groups[7] ?? 0;
-  return [String(sixth >> 8), String(sixth & 255), String(seventh >> 8), String(seventh & 255)].join(".");
+  return [
+    String(sixth >> 8),
+    String(sixth & 255),
+    String(seventh >> 8),
+    String(seventh & 255),
+  ].join(".");
 }
 
 function ipv4MappedOf(address: string): string | null {
@@ -306,12 +316,18 @@ export function unmap(address: string): string {
   return ipv4MappedOf(address) ?? address;
 }
 
-function authorityOf(url: string, schemeLength: number): { authority: string; hasDoubleSlash: boolean } {
+function authorityOf(
+  url: string,
+  schemeLength: number,
+): { authority: string; hasDoubleSlash: boolean } {
   const rest = url.slice(schemeLength);
   if (!rest.startsWith("//")) return { hasDoubleSlash: false, authority: "" };
   const remainder = rest.slice(2);
   const terminator = remainder.search(/[/?#]/);
-  return { hasDoubleSlash: true, authority: terminator === -1 ? remainder : remainder.slice(0, terminator) };
+  return {
+    hasDoubleSlash: true,
+    authority: terminator === -1 ? remainder : remainder.slice(0, terminator),
+  };
 }
 
 function displayHost(authority: string): string {
@@ -380,7 +396,9 @@ export async function validatePublicUrl(
   const literalV4 = hostname.includes(":") ? null : parseIpv4Literal(hostname);
   if (literalV4 !== null) {
     if (isNonPublic(literalV4)) {
-      throw new WebError(`refusing to fetch a non-public address: ${literalV4} (host '${rawHost}')`);
+      throw new WebError(
+        `refusing to fetch a non-public address: ${literalV4} (host '${rawHost}')`,
+      );
     }
     return {
       scheme,

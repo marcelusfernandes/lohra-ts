@@ -280,7 +280,11 @@ describe("ChatCompletionsClient", () => {
     it("disarms retry outright when Retry-After exceeds the 120s cap", async () => {
       const farFuture = new Date(Date.now() + 300_000).toUTCString();
       const port = new QueuePort([
-        responseWithHeaders(429, { error: { message: "rate limited" } }, { "retry-after": farFuture }),
+        responseWithHeaders(
+          429,
+          { error: { message: "rate limited" } },
+          { "retry-after": farFuture },
+        ),
       ]);
       const client = new ChatCompletionsClient({
         baseUrl: "http://localhost:11434/v1",
@@ -296,7 +300,11 @@ describe("ChatCompletionsClient", () => {
 
     it("does not disarm on a Retry-After that fails to parse at all", async () => {
       const quota = () =>
-        responseWithHeaders(429, { error: { message: "rate limited" } }, { "retry-after": "banana" });
+        responseWithHeaders(
+          429,
+          { error: { message: "rate limited" } },
+          { "retry-after": "banana" },
+        );
       const port = new QueuePort([quota(), quota(), quota()]);
       const client = new ChatCompletionsClient({
         baseUrl: "http://localhost:11434/v1",
@@ -319,7 +327,11 @@ describe("ChatCompletionsClient", () => {
 
     it("honors an explicit x-should-retry: false override on an otherwise-eligible 429", async () => {
       const port = new QueuePort([
-        responseWithHeaders(429, { error: { message: "rate limited" } }, { "x-should-retry": "false" }),
+        responseWithHeaders(
+          429,
+          { error: { message: "rate limited" } },
+          { "x-should-retry": "false" },
+        ),
       ]);
       const client = new ChatCompletionsClient({
         baseUrl: "http://localhost:11434/v1",

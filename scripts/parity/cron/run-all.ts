@@ -37,7 +37,13 @@ let failures = 0;
 const projections: { readonly id: string; readonly sha: string; readonly verdict: string }[] = [];
 
 function record(id: string, verdict: string, ok: boolean, payload: unknown): void {
-  const sha = writeEvidence(id, { id, verdict, localDay: localDay(), utcDay: utcDay(), ...( payload as object) });
+  const sha = writeEvidence(id, {
+    id,
+    verdict,
+    localDay: localDay(),
+    utcDay: utcDay(),
+    ...(payload as object),
+  });
   projections.push({ id, sha, verdict });
   if (!ok) {
     failures += 1;
@@ -61,7 +67,12 @@ function scenario1SchemaRoundtrip(): void {
       { op: "remove", argv: ["remove", "aaaabbbbccccdddd"] },
       { op: "list-empty", argv: ["list"] },
     ];
-    const results: { readonly op: string; readonly oracle: CliResult; readonly candidate: CliResult; readonly match: boolean }[] = [];
+    const results: {
+      readonly op: string;
+      readonly oracle: CliResult;
+      readonly candidate: CliResult;
+      readonly match: boolean;
+    }[] = [];
     let ok = true;
     for (const step of steps) {
       const oracleResult = runOracleCron(step.argv, oracle);
@@ -87,14 +98,22 @@ const BYTE_EXACT_GOLDENS: { readonly label: string; readonly argv: readonly stri
   { label: "empty-prompt", argv: ["add", "--name", "n1", "--prompt", "", "--interval", "5"] },
   { label: "interval-zero", argv: ["add", "--name", "n1", "--prompt", "p1", "--interval", "0"] },
   { label: "cron-4-fields", argv: ["add", "--name", "n1", "--prompt", "p1", "--cron", "* * * *"] },
-  { label: "cron-out-of-range", argv: ["add", "--name", "n1", "--prompt", "p1", "--cron", "60 * * * *"] },
+  {
+    label: "cron-out-of-range",
+    argv: ["add", "--name", "n1", "--prompt", "p1", "--cron", "60 * * * *"],
+  },
   { label: "remove-no-id", argv: ["remove"] },
   { label: "remove-nonexistent", argv: ["remove", "ghost"] },
 ];
 
 function scenario2ByteExactGoldens(): void {
   let ok = true;
-  const results: { readonly label: string; readonly oracle: CliResult; readonly candidate: CliResult; readonly match: boolean }[] = [];
+  const results: {
+    readonly label: string;
+    readonly oracle: CliResult;
+    readonly candidate: CliResult;
+    readonly match: boolean;
+  }[] = [];
   for (const golden of BYTE_EXACT_GOLDENS) {
     const oracle = materialize("oracle");
     const candidate = materialize("candidate");
@@ -106,7 +125,12 @@ function scenario2ByteExactGoldens(): void {
         oracleResult.stdout === candidateResult.stdout &&
         oracleResult.stderr === candidateResult.stderr;
       if (!match) ok = false;
-      results.push({ label: golden.label, oracle: oracleResult, candidate: candidateResult, match });
+      results.push({
+        label: golden.label,
+        oracle: oracleResult,
+        candidate: candidateResult,
+        match,
+      });
     } finally {
       cleanup(oracle);
       cleanup(candidate);
@@ -116,7 +140,12 @@ function scenario2ByteExactGoldens(): void {
 }
 
 // --- Scenario 3: named-excuse validation (structurally equivalent, not byte-identical) -----
-const NAMED_EXCUSE_CASES: { readonly label: string; readonly argv: readonly string[]; readonly oraclePrefix: string; readonly candidatePrefix: string }[] = [
+const NAMED_EXCUSE_CASES: {
+  readonly label: string;
+  readonly argv: readonly string[];
+  readonly oraclePrefix: string;
+  readonly candidatePrefix: string;
+}[] = [
   {
     label: "interval-float",
     argv: ["add", "--name", "n1", "--prompt", "p1", "--interval", "2.5"],
@@ -156,11 +185,18 @@ function scenario3NamedExcuse(): void {
     try {
       const oracleResult = runOracleCron(testCase.argv, oracle);
       const candidateResult = runCandidateCron(testCase.argv, candidate);
-      const oracleClass = oracleResult.code === 2 && oracleResult.stderr.includes(testCase.oraclePrefix);
-      const candidateClass = candidateResult.code === 2 && candidateResult.stderr.includes(testCase.candidatePrefix);
+      const oracleClass =
+        oracleResult.code === 2 && oracleResult.stderr.includes(testCase.oraclePrefix);
+      const candidateClass =
+        candidateResult.code === 2 && candidateResult.stderr.includes(testCase.candidatePrefix);
       const equivalent = oracleClass && candidateClass;
       if (!equivalent) ok = false;
-      results.push({ label: testCase.label, oracle: oracleResult, candidate: candidateResult, equivalent });
+      results.push({
+        label: testCase.label,
+        oracle: oracleResult,
+        candidate: candidateResult,
+        equivalent,
+      });
     } finally {
       cleanup(oracle);
       cleanup(candidate);
@@ -201,7 +237,10 @@ function scenario5CorruptionSilent(): void {
       plantForm(form, oracle);
       plantForm(form, candidate);
       const oracleResult = runOracleCron(["list"], oracle);
-      const oracleOk = oracleResult.code === 0 && oracleResult.stdout === "no scheduled jobs\n" && oracleResult.stderr === "";
+      const oracleOk =
+        oracleResult.code === 0 &&
+        oracleResult.stdout === "no scheduled jobs\n" &&
+        oracleResult.stderr === "";
 
       const candidatePath = jobsPathOf(candidate);
       const before = readFileState(candidatePath);
@@ -212,14 +251,29 @@ function scenario5CorruptionSilent(): void {
       let formOk: boolean;
       let verdict: string;
       if (form === "absent") {
-        formOk = candidateResult.code === 0 && candidateResult.stdout === "no scheduled jobs\n" && candidateResult.stderr === "";
+        formOk =
+          candidateResult.code === 0 &&
+          candidateResult.stdout === "no scheduled jobs\n" &&
+          candidateResult.stderr === "";
         verdict = "match";
       } else {
-        formOk = candidateResult.code !== 0 && candidateResult.stdout === "" && candidateResult.stderr !== "" && hashPreserved;
+        formOk =
+          candidateResult.code !== 0 &&
+          candidateResult.stdout === "" &&
+          candidateResult.stderr !== "" &&
+          hashPreserved;
         verdict = "ADR";
       }
       if (!(oracleOk && formOk)) ok = false;
-      results.push({ form, oracle: oracleResult, oracleOk, candidate: candidateResult, hashPreserved, verdict, formOk });
+      results.push({
+        form,
+        oracle: oracleResult,
+        oracleOk,
+        candidate: candidateResult,
+        hashPreserved,
+        verdict,
+        formOk,
+      });
     } finally {
       cleanup(oracle);
       cleanup(candidate);
@@ -251,16 +305,31 @@ function scenario6CorruptionCrash(): void {
       const candidateResult = runCandidateCron(["list"], candidate);
       const after = readFileState(candidatePath);
       const hashPreserved = before.sha256 === after.sha256;
-      const candidateOk = candidateResult.code !== 0 && candidateResult.stdout === "" && candidateResult.stderr !== "" && hashPreserved;
+      const candidateOk =
+        candidateResult.code !== 0 &&
+        candidateResult.stdout === "" &&
+        candidateResult.stderr !== "" &&
+        hashPreserved;
 
       if (!(oracleOk && candidateOk)) ok = false;
-      results.push({ form: form.name, oracleException: form.oracleException, oracle: oracleResult, oracleOk, candidate: candidateResult, hashPreserved, candidateOk, verdict: "ADR" });
+      results.push({
+        form: form.name,
+        oracleException: form.oracleException,
+        oracle: oracleResult,
+        oracleOk,
+        candidate: candidateResult,
+        hashPreserved,
+        candidateOk,
+        verdict: "ADR",
+      });
     } finally {
       cleanup(oracle);
       cleanup(candidate);
     }
   }
-  record("t18-corruption-crash-4-forms-exact-exception", ok ? "as-expected" : "DIVERGENT", ok, { results });
+  record("t18-corruption-crash-4-forms-exact-exception", ok ? "as-expected" : "DIVERGENT", ok, {
+    results,
+  });
 }
 
 // --- Scenario 7: nan_literal is alive, byte-exact on list --------------------
@@ -297,7 +366,10 @@ function scenario8AddDestroys(): void {
     try {
       plantForm(form, oracle);
       plantForm(form, candidate);
-      const oracleAdd = runOracleCron(["add", "--name", "n1", "--prompt", "p1", "--interval", "5"], oracle);
+      const oracleAdd = runOracleCron(
+        ["add", "--name", "n1", "--prompt", "p1", "--interval", "5"],
+        oracle,
+      );
       const oracleList = runOracleCron(["list"], oracle);
       const oracleDestroyed =
         oracleAdd.code === 0 &&
@@ -308,20 +380,34 @@ function scenario8AddDestroys(): void {
 
       const candidatePath = jobsPathOf(candidate);
       const before = readFileState(candidatePath);
-      const candidateAdd = runCandidateCron(["add", "--name", "n1", "--prompt", "p1", "--interval", "5"], candidate);
+      const candidateAdd = runCandidateCron(
+        ["add", "--name", "n1", "--prompt", "p1", "--interval", "5"],
+        candidate,
+      );
       const after = readFileState(candidatePath);
 
       let candidateOk: boolean;
       let verdict: string;
       if (form === "absent") {
-        candidateOk = candidateAdd.code === 0 && /^added job [0-9a-f]{32}\n$/u.test(candidateAdd.stdout) && after.exists;
+        candidateOk =
+          candidateAdd.code === 0 &&
+          /^added job [0-9a-f]{32}\n$/u.test(candidateAdd.stdout) &&
+          after.exists;
         verdict = "match";
       } else {
         candidateOk = candidateAdd.code !== 0 && before.sha256 === after.sha256;
         verdict = "ADR";
       }
       if (!(oracleDestroyed && candidateOk)) ok = false;
-      results.push({ form, oracleAdd, oracleList, oracleDestroyed, candidateAdd, candidateOk, verdict });
+      results.push({
+        form,
+        oracleAdd,
+        oracleList,
+        oracleDestroyed,
+        candidateAdd,
+        candidateOk,
+        verdict,
+      });
     } finally {
       cleanup(oracle);
       cleanup(candidate);
@@ -339,29 +425,50 @@ function scenario8AddDestroys(): void {
       plantForm(form, candidate);
       const oraclePath = jobsPathOf(oracle);
       const oracleBefore = readFileState(oraclePath);
-      const oracleAdd = runOracleCron(["add", "--name", "n1", "--prompt", "p1", "--interval", "5"], oracle);
+      const oracleAdd = runOracleCron(
+        ["add", "--name", "n1", "--prompt", "p1", "--interval", "5"],
+        oracle,
+      );
       const oracleAfter = readFileState(oraclePath);
       const oracleCrashedBeforeWrite =
-        oracleAdd.code !== 0 && !oracleAdd.stdout.includes("added job") && oracleBefore.sha256 === oracleAfter.sha256;
+        oracleAdd.code !== 0 &&
+        !oracleAdd.stdout.includes("added job") &&
+        oracleBefore.sha256 === oracleAfter.sha256;
 
       const candidatePath = jobsPathOf(candidate);
       const candidateBefore = readFileState(candidatePath);
-      const candidateAdd = runCandidateCron(["add", "--name", "n1", "--prompt", "p1", "--interval", "5"], candidate);
+      const candidateAdd = runCandidateCron(
+        ["add", "--name", "n1", "--prompt", "p1", "--interval", "5"],
+        candidate,
+      );
       const candidateAfter = readFileState(candidatePath);
-      const candidateOk = candidateAdd.code !== 0 && candidateBefore.sha256 === candidateAfter.sha256;
+      const candidateOk =
+        candidateAdd.code !== 0 && candidateBefore.sha256 === candidateAfter.sha256;
 
       const formOk = oracleCrashedBeforeWrite && candidateOk;
       if (!formOk) ok = false;
-      crashBeforeWriteResults.push({ form, oracleAdd, oracleCrashedBeforeWrite, candidateAdd, candidateOk, verdict: "ADR" });
+      crashBeforeWriteResults.push({
+        form,
+        oracleAdd,
+        oracleCrashedBeforeWrite,
+        candidateAdd,
+        candidateOk,
+        verdict: "ADR",
+      });
     } finally {
       cleanup(oracle);
       cleanup(candidate);
     }
   }
-  record("t18-add-destroys-11-forms-and-creates-from-absent", ok ? "as-expected" : "DIVERGENT", ok, {
-    results,
-    crashBeforeWriteResults,
-  });
+  record(
+    "t18-add-destroys-11-forms-and-creates-from-absent",
+    ok ? "as-expected" : "DIVERGENT",
+    ok,
+    {
+      results,
+      crashBeforeWriteResults,
+    },
+  );
 }
 
 // --- Scenario 8a: add preserves-and-appends 4 forms; nan_literal is candidate match (21c) ----
@@ -374,20 +481,27 @@ function scenario8aAddPreservesAppends(): void {
     try {
       plantForm(form, oracle);
       plantForm(form, candidate);
-      const oracleAdd = runOracleCron(["add", "--name", "n1", "--prompt", "p1", "--interval", "5"], oracle);
+      const oracleAdd = runOracleCron(
+        ["add", "--name", "n1", "--prompt", "p1", "--interval", "5"],
+        oracle,
+      );
       const oracleList = runOracleCron(["list"], oracle);
       // Preserve-and-append is proven by add succeeding AND the malformed entry
       // still being present afterward: for nan_literal, list succeeds and shows
       // 2 lines; for the other 3 (crash-class on list), list still crashes the
       // SAME way as before add, proving the bad entry survived alongside the new job.
-      const oracleAddOk = oracleAdd.code === 0 && /^added job [0-9a-f]{32}\n$/u.test(oracleAdd.stdout);
+      const oracleAddOk =
+        oracleAdd.code === 0 && /^added job [0-9a-f]{32}\n$/u.test(oracleAdd.stdout);
       const oracleAppendOk =
         form === "nan_literal"
           ? oracleList.code === 0 && oracleList.stdout.split("\n").filter(Boolean).length === 2
           : oracleList.code !== 0 && oracleList.stderr !== "";
 
       const candidatePath = jobsPathOf(candidate);
-      const candidateAdd = runCandidateCron(["add", "--name", "n1", "--prompt", "p1", "--interval", "5"], candidate);
+      const candidateAdd = runCandidateCron(
+        ["add", "--name", "n1", "--prompt", "p1", "--interval", "5"],
+        candidate,
+      );
 
       let candidateOk: boolean;
       let verdict: string;
@@ -400,13 +514,32 @@ function scenario8aAddPreservesAppends(): void {
           candidateList.stdout.split("\n").filter(Boolean).length === 2 &&
           candidateList.stdout.includes("(once=nan)");
         verdict = "match";
-        results.push({ form, oracleAdd, oracleList, oracleAddOk, oracleAppendOk, candidateAdd, candidateList, candidateOk, verdict });
+        results.push({
+          form,
+          oracleAdd,
+          oracleList,
+          oracleAddOk,
+          oracleAppendOk,
+          candidateAdd,
+          candidateList,
+          candidateOk,
+          verdict,
+        });
       } else {
         const before = readFileState(candidatePath);
         const after = readFileState(candidatePath);
         candidateOk = candidateAdd.code !== 0 && before.sha256 === after.sha256;
         verdict = "ADR";
-        results.push({ form, oracleAdd, oracleList, oracleAddOk, oracleAppendOk, candidateAdd, candidateOk, verdict });
+        results.push({
+          form,
+          oracleAdd,
+          oracleList,
+          oracleAddOk,
+          oracleAppendOk,
+          candidateAdd,
+          candidateOk,
+          verdict,
+        });
       }
       if (!(oracleAddOk && oracleAppendOk && candidateOk)) ok = false;
     } finally {
@@ -414,7 +547,9 @@ function scenario8aAddPreservesAppends(): void {
       cleanup(candidate);
     }
   }
-  record("t18-add-preserves-and-appends-4-forms", ok ? "as-expected" : "DIVERGENT", ok, { results });
+  record("t18-add-preserves-and-appends-4-forms", ok ? "as-expected" : "DIVERGENT", ok, {
+    results,
+  });
 }
 
 // --- Scenario 9: add with invalid args preserves all 18 forms (both sides match) ----
@@ -438,14 +573,23 @@ function scenario9AddInvalidPreserves(): void {
       const candidateResult = runCandidateCron(invalidArgv, candidate);
       const oracleAfter = readFileState(oraclePath);
       const candidateAfter = readFileState(candidatePath);
-      const bothPreserved = oracleBefore.sha256 === oracleAfter.sha256 && candidateBefore.sha256 === candidateAfter.sha256;
+      const bothPreserved =
+        oracleBefore.sha256 === oracleAfter.sha256 &&
+        candidateBefore.sha256 === candidateAfter.sha256;
       const bothSameError =
         oracleResult.code === candidateResult.code &&
         oracleResult.stderr === candidateResult.stderr &&
         oracleResult.stdout === candidateResult.stdout;
       const formOk = bothPreserved && bothSameError;
       if (!formOk) ok = false;
-      results.push({ form, oracle: oracleResult, candidate: candidateResult, bothPreserved, bothSameError, verdict: "match" });
+      results.push({
+        form,
+        oracle: oracleResult,
+        candidate: candidateResult,
+        bothPreserved,
+        bothSameError,
+        verdict: "match",
+      });
     } finally {
       cleanup(oracle);
       cleanup(candidate);
@@ -487,7 +631,10 @@ function scenario10RemovePauseResumePreserve(): void {
         const expectedException = EXPECTED_ORACLE_EXCEPTION[form];
         let oracleOk: boolean;
         if (expectedException !== undefined) {
-          oracleOk = oracleResult.code !== 0 && oracleResult.stderr.includes(expectedException) && oraclePreserved;
+          oracleOk =
+            oracleResult.code !== 0 &&
+            oracleResult.stderr.includes(expectedException) &&
+            oraclePreserved;
         } else {
           oracleOk =
             oracleResult.code === 1 &&
@@ -513,7 +660,9 @@ function scenario10RemovePauseResumePreserve(): void {
       }
     }
   }
-  record("t18-remove-pause-resume-preserve-18-forms", ok ? "as-expected" : "DIVERGENT", ok, { results });
+  record("t18-remove-pause-resume-preserve-18-forms", ok ? "as-expected" : "DIVERGENT", ok, {
+    results,
+  });
 }
 
 // --- Scenario 11: candidate fail-closed on list, 16 forms; 11a: absent match ----
@@ -528,14 +677,21 @@ function scenario11CandidateFailClosedList(): void {
       const before = readFileState(path);
       const result = runCandidateCron(["list"], candidate);
       const after = readFileState(path);
-      const formOk = result.code !== 0 && result.stdout === "" && result.stderr !== "" && before.sha256 === after.sha256;
+      const formOk =
+        result.code !== 0 &&
+        result.stdout === "" &&
+        result.stderr !== "" &&
+        before.sha256 === after.sha256;
       if (!formOk) ok = false;
       results.push({ form, result, formOk, verdict: "ADR" });
     } finally {
       cleanup(candidate);
     }
   }
-  record("t18-candidate-failclosed-list-16-forms", ok ? "as-expected" : "DIVERGENT", ok, { note: "16 forms per Emenda E3", results });
+  record("t18-candidate-failclosed-list-16-forms", ok ? "as-expected" : "DIVERGENT", ok, {
+    note: "16 forms per Emenda E3",
+    results,
+  });
 }
 
 function scenario11aAbsentMatchBilateral(): void {
@@ -552,8 +708,14 @@ function scenario11aAbsentMatchBilateral(): void {
       oracleListResult.stdout === candidateListResult.stdout &&
       oracleListResult.stderr === candidateListResult.stderr;
 
-    const oracleAddResult = runOracleCron(["add", "--name", "n1", "--prompt", "p1", "--interval", "5"], oracleAdd);
-    const candidateAddResult = runCandidateCron(["add", "--name", "n1", "--prompt", "p1", "--interval", "5"], candidateAdd);
+    const oracleAddResult = runOracleCron(
+      ["add", "--name", "n1", "--prompt", "p1", "--interval", "5"],
+      oracleAdd,
+    );
+    const candidateAddResult = runCandidateCron(
+      ["add", "--name", "n1", "--prompt", "p1", "--interval", "5"],
+      candidateAdd,
+    );
     const addMatch =
       oracleAddResult.code === 0 &&
       candidateAddResult.code === 0 &&
@@ -600,7 +762,10 @@ function scenario12CandidateFailClosedMutations(): void {
       }
     }
   }
-  record("t18-candidate-failclosed-mutations-16-forms", ok ? "as-expected" : "DIVERGENT", ok, { note: "16 forms per Emenda E3", results });
+  record("t18-candidate-failclosed-mutations-16-forms", ok ? "as-expected" : "DIVERGENT", ok, {
+    note: "16 forms per Emenda E3",
+    results,
+  });
 }
 
 // --- Scenario 13: NaN chain — accept/persist/list parity for nan/inf/-1 --------
@@ -713,19 +878,24 @@ function scenario15MaskedFieldId(): void {
   const normalizedMutantStdout = mutantStdout.replaceAll(/\b[0-9a-f]{8}\b/gu, "<TRUNCATED-ID>");
 
   const ok = valueBlindByConstruction && !mutantFormatOk;
-  record("t18-masked-field-injected-divergence-id", ok ? "value-blind-format-checked" : "DIVERGENT", ok, {
-    valueBlindByConstruction,
-    controlAMasked: maskId(controlAStdout),
-    controlBMasked: maskId(controlBStdout),
-    mutantFormatOk,
-    mutantNormalized: normalizedMutantStdout,
-    note:
-      "two properties, kept distinct: (1) the mask hides VALUE -- two valid-but-different real ids mask " +
-      "identically -- and (2) the mask does not hide FORMAT -- the id mutant's 8-char truncated id fails " +
-      "ID_PATTERN, stays unmasked, and is still visible to the format check. This scenario's own sha, over " +
-      "both raw comparisons, is the published projection assertion 44's self-test reacts through -- not a " +
-      "private sha invented for this test alone.",
-  });
+  record(
+    "t18-masked-field-injected-divergence-id",
+    ok ? "value-blind-format-checked" : "DIVERGENT",
+    ok,
+    {
+      valueBlindByConstruction,
+      controlAMasked: maskId(controlAStdout),
+      controlBMasked: maskId(controlBStdout),
+      mutantFormatOk,
+      mutantNormalized: normalizedMutantStdout,
+      note:
+        "two properties, kept distinct: (1) the mask hides VALUE -- two valid-but-different real ids mask " +
+        "identically -- and (2) the mask does not hide FORMAT -- the id mutant's 8-char truncated id fails " +
+        "ID_PATTERN, stays unmasked, and is still visible to the format check. This scenario's own sha, over " +
+        "both raw comparisons, is the published projection assertion 44's self-test reacts through -- not a " +
+        "private sha invented for this test alone.",
+    },
+  );
 }
 
 // --- Scenario 16: masked field `created_at` -- bilateral wall-clock-window sanity over the raw file, mutant kills it (assertion 44, decision 13, Emenda E5) ---
@@ -748,12 +918,18 @@ function scenario16MaskedFieldCreatedAt(): void {
     runOracleCron(addArgv, oracle);
     runCandidateCron(addArgv, candidate);
     const after = Date.now() / 1000;
-    const oracleJob = (JSON.parse(readFileSync(jobsPathOf(oracle), "utf8")) as { jobs: { created_at: number }[] }).jobs[0];
-    const candidateJob = (JSON.parse(readFileSync(jobsPathOf(candidate), "utf8")) as { jobs: { created_at: number }[] })
-      .jobs[0];
-    oracleInWindow = oracleJob !== undefined && oracleJob.created_at >= before && oracleJob.created_at <= after;
+    const oracleJob = (
+      JSON.parse(readFileSync(jobsPathOf(oracle), "utf8")) as { jobs: { created_at: number }[] }
+    ).jobs[0];
+    const candidateJob = (
+      JSON.parse(readFileSync(jobsPathOf(candidate), "utf8")) as { jobs: { created_at: number }[] }
+    ).jobs[0];
+    oracleInWindow =
+      oracleJob !== undefined && oracleJob.created_at >= before && oracleJob.created_at <= after;
     candidateInWindow =
-      candidateJob !== undefined && candidateJob.created_at >= before && candidateJob.created_at <= after;
+      candidateJob !== undefined &&
+      candidateJob.created_at >= before &&
+      candidateJob.created_at <= after;
   } finally {
     cleanup(oracle);
     cleanup(candidate);
@@ -769,24 +945,33 @@ function scenario16MaskedFieldCreatedAt(): void {
     const before = Date.now() / 1000;
     runCandidateCronMutant(addArgv, mutantPaths, "createdat");
     const after = Date.now() / 1000;
-    const mutantJob = (JSON.parse(readFileSync(jobsPathOf(mutantPaths), "utf8")) as { jobs: { created_at: number }[] })
-      .jobs[0];
-    mutantInWindow = mutantJob !== undefined && mutantJob.created_at >= before && mutantJob.created_at <= after;
+    const mutantJob = (
+      JSON.parse(readFileSync(jobsPathOf(mutantPaths), "utf8")) as {
+        jobs: { created_at: number }[];
+      }
+    ).jobs[0];
+    mutantInWindow =
+      mutantJob !== undefined && mutantJob.created_at >= before && mutantJob.created_at <= after;
   } finally {
     cleanup(mutantPaths);
   }
 
   const ok = oracleInWindow && candidateInWindow && !mutantInWindow;
-  record("t18-masked-field-injected-divergence-created-at", ok ? "bilateral-window-checked" : "DIVERGENT", ok, {
-    oracleInWindow,
-    candidateInWindow,
-    mutantInWindow,
-    note:
-      "file-level route anchored to decision 13's 'toda comparação de envelope/arquivo': both real processes' " +
-      "raw jobs.json created_at is checked against the actual wall-clock window the add ran in, bilaterally. " +
-      "This scenario's own sha is the published projection the field's masked-divergence self-test reacts " +
-      "through.",
-  });
+  record(
+    "t18-masked-field-injected-divergence-created-at",
+    ok ? "bilateral-window-checked" : "DIVERGENT",
+    ok,
+    {
+      oracleInWindow,
+      candidateInWindow,
+      mutantInWindow,
+      note:
+        "file-level route anchored to decision 13's 'toda comparação de envelope/arquivo': both real processes' " +
+        "raw jobs.json created_at is checked against the actual wall-clock window the add ran in, bilaterally. " +
+        "This scenario's own sha is the published projection the field's masked-divergence self-test reacts " +
+        "through.",
+    },
+  );
 }
 
 runGuards();

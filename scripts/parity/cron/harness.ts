@@ -40,7 +40,8 @@ export function runGuards(): Guards {
   if (oracleCommit !== ORACLE_SHA) throw new Error(`T18_ORACLE_PIN:${oracleCommit}`);
   if (checkedOutput("git", ["status", "--porcelain"], oracleCheckout) !== "")
     throw new Error("T18_ORACLE_DIRTY");
-  if (checkedOutput(oracleCliBin, ["--version"]) !== ORACLE_VERSION) throw new Error("T18_ORACLE_VERSION");
+  if (checkedOutput(oracleCliBin, ["--version"]) !== ORACLE_VERSION)
+    throw new Error("T18_ORACLE_VERSION");
   const targetSha = checkedOutput("git", ["rev-parse", "HEAD"]).trim();
   if (process.env.T18_HARNESS_DEV !== "1" && checkedOutput("git", ["status", "--porcelain"]) !== "")
     throw new Error("T18_CANDIDATE_DIRTY");
@@ -112,13 +113,21 @@ const mutantLoader = resolve(root, "scripts/parity/cron/t18-mutant-loader.mjs");
  * mutation patched into `CronStore.prototype` before the CLI ever
  * dispatches (assertions 24/44's self-tests — the mutation exists only
  * inside this one process, never touches the delivery worktree). */
-export function runCandidateCronMutant(argv: readonly string[], paths: RuntimePaths, mutant: string): CliResult {
-  const result = spawnSync(process.execPath, ["--import", mutantLoader, candidateCli, "cron", ...argv], {
-    cwd: paths.tmp,
-    env: { ...baseEnv(paths), T18_MUTANT: mutant },
-    encoding: "utf8",
-    timeout: 15_000,
-  });
+export function runCandidateCronMutant(
+  argv: readonly string[],
+  paths: RuntimePaths,
+  mutant: string,
+): CliResult {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", mutantLoader, candidateCli, "cron", ...argv],
+    {
+      cwd: paths.tmp,
+      env: { ...baseEnv(paths), T18_MUTANT: mutant },
+      encoding: "utf8",
+      timeout: 15_000,
+    },
+  );
   return { code: result.status ?? -1, stdout: result.stdout, stderr: result.stderr };
 }
 
@@ -129,7 +138,10 @@ const candidateToolRunner = resolve(root, "scripts/parity/cron/candidate-tool-ru
  * `lohra.agent.equip` uses for a real conversation turn, then dispatches one
  * `cronjob` call (decision 10). Never a bare in-process `CronTool().handle()`
  * bypassing the registry. */
-export function runOracleTool(args: Readonly<Record<string, unknown>>, paths: RuntimePaths): CliResult {
+export function runOracleTool(
+  args: Readonly<Record<string, unknown>>,
+  paths: RuntimePaths,
+): CliResult {
   const result = spawnSync(oraclePython, [oracleToolRunner, paths.home, JSON.stringify(args)], {
     cwd: paths.tmp,
     env: {
@@ -149,7 +161,10 @@ export function runOracleTool(args: Readonly<Record<string, unknown>>, paths: Ru
 
 /** Same real candidate process shape as `runOracleTool`, using the same
  * `createBuiltinRegistry()` + `composeDispatch()` wiring `chat.ts` uses. */
-export function runCandidateTool(args: Readonly<Record<string, unknown>>, paths: RuntimePaths): CliResult {
+export function runCandidateTool(
+  args: Readonly<Record<string, unknown>>,
+  paths: RuntimePaths,
+): CliResult {
   const result = spawnSync(process.execPath, [candidateToolRunner, JSON.stringify(args)], {
     cwd: paths.tmp,
     env: baseEnv(paths),
@@ -213,7 +228,9 @@ function maskDynamicFields(value: unknown): unknown {
   }
   if (Array.isArray(value)) return value.map(maskDynamicFields);
   if (value !== null && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, maskDynamicFields(entry)]));
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, maskDynamicFields(entry)]),
+    );
   }
   return value;
 }

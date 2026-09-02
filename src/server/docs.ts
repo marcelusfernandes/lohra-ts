@@ -22,11 +22,11 @@ function page(title: string, body: string): string {
 }
 
 export function docsHtml(): string {
-  return page("Lohra OpenAI-compatible server - Swagger UI", "<div id=\"swagger-ui\"></div>");
+  return page("Lohra OpenAI-compatible server - Swagger UI", '<div id="swagger-ui"></div>');
 }
 
 export function redocHtml(): string {
-  return page("Lohra OpenAI-compatible server - ReDoc", "<redoc spec-url=\"/openapi.json\"></redoc>");
+  return page("Lohra OpenAI-compatible server - ReDoc", '<redoc spec-url="/openapi.json"></redoc>');
 }
 
 export function oauthRedirectHtml(): string {

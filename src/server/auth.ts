@@ -20,7 +20,10 @@ const BEARER_PREFIX = "Bearer ";
 
 /** `apiKey === null` means auth is disabled (`--insecure`): everything passes,
  * including a garbage scheme, matching the oracle's unconditional bypass. */
-export function authorized(authorizationHeader: string | undefined, apiKey: string | null): boolean {
+export function authorized(
+  authorizationHeader: string | undefined,
+  apiKey: string | null,
+): boolean {
   if (apiKey === null) return true;
   if (!authorizationHeader || !authorizationHeader.startsWith(BEARER_PREFIX)) return false;
   const token = authorizationHeader.slice(BEARER_PREFIX.length).trim();

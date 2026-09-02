@@ -9,7 +9,11 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "../../..");
 
-function command(argv: readonly string[]): { status: number | null; stdout: string; stderr: string } {
+function command(argv: readonly string[]): {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+} {
   const result = spawnSync("npm", argv, {
     cwd: root,
     env: process.env,
@@ -40,9 +44,16 @@ for (const gate of gates) {
   const result = command(gate.argv);
   const pass = result.status === 0;
   if (!pass) failures += 1;
-  results.push({ id: gate.id, exitCode: result.status, pass, summary: lastJsonLine(result.stdout) });
+  results.push({
+    id: gate.id,
+    exitCode: result.status,
+    pass,
+    summary: lastJsonLine(result.stdout),
+  });
   if (!pass)
-    throw new Error(`T11_GATE_FAILED:${gate.id}:${String(result.status)}:${result.stdout}:${result.stderr}`);
+    throw new Error(
+      `T11_GATE_FAILED:${gate.id}:${String(result.status)}:${result.stdout}:${result.stderr}`,
+    );
 }
 
 process.stdout.write(`${JSON.stringify({ suite: "t11-regression-gates", results, failures })}\n`);

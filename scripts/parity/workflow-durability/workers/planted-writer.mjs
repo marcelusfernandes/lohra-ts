@@ -24,10 +24,21 @@ const attempts = [
     category: "state",
     run: () =>
       repository.putRunState(runId, {
-        name: "planted", owner: holder, status: key, pauseReason: null,
-        pausePayloadJson: null, specJson: "{}", argsJson: "{}", tokenBudget: null,
-        tainted: false, progressJson: null, auditSegmentId: null,
-        updatedAt: ownership.now, fence: ownership.fence, holder, now: ownership.now,
+        name: "planted",
+        owner: holder,
+        status: key,
+        pauseReason: null,
+        pausePayloadJson: null,
+        specJson: "{}",
+        argsJson: "{}",
+        tokenBudget: null,
+        tainted: false,
+        progressJson: null,
+        auditSegmentId: null,
+        updatedAt: ownership.now,
+        fence: ownership.fence,
+        holder,
+        now: ownership.now,
       }),
     landed: () => (repository.getRunState(runId) ?? {}).status === key,
   },
@@ -50,7 +61,11 @@ const attempts = [
     category: "combined",
     run: () =>
       repository.putCacheCellWithCost(runId, `${key}-c`, "node", "{}", "complete", ownership, {
-        tokensIn: 1, tokensOut: 1, cacheRead: 0, cacheWrite: 0, reasoning: 0,
+        tokensIn: 1,
+        tokensOut: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        reasoning: 0,
       }),
     landed: () =>
       repository.getCacheCell(runId, `${key}-c`) !== null ||

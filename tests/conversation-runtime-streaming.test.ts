@@ -135,7 +135,8 @@ describe("ConversationRuntime streaming deltas", () => {
     transport.complete = (request: ModelRequest) => {
       calls += 1;
       return calls === 1
-        ? (transport.sawOnText.push(typeof request.onText === "function"), Promise.resolve(toolResponse))
+        ? (transport.sawOnText.push(typeof request.onText === "function"),
+          Promise.resolve(toolResponse))
         : originalComplete(request);
     };
 

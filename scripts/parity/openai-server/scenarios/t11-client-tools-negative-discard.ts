@@ -8,7 +8,11 @@ import { compareRaw, probeBoth, type ProbeRecord, type ServerHandle } from "../h
 
 const EVIL_TOOL = {
   type: "function",
-  function: { name: "evil", description: "a canary tool that must never be offered upstream", parameters: {} },
+  function: {
+    name: "evil",
+    description: "a canary tool that must never be offered upstream",
+    parameters: {},
+  },
 };
 
 function postRequestLines(path: string, apiKey: string | null, body: string): string {
@@ -51,12 +55,26 @@ export async function run(
   });
   const before1 = upstream.requests.length;
   const chatProbe: ProbeRecord & { upstream: UpstreamRequestRecord[] } = {
-    ...(await probeBoth("chat-evil-tool", oracle, candidate, (apiKey) => postRequestLines("/v1/chat/completions", apiKey, chatBody), chatBody)),
+    ...(await probeBoth(
+      "chat-evil-tool",
+      oracle,
+      candidate,
+      (apiKey) => postRequestLines("/v1/chat/completions", apiKey, chatBody),
+      chatBody,
+    )),
     upstream: upstream.requests.slice(before1),
   };
-  rawEntries["chat"] = { request: chatProbe.request, oracle: chatProbe.oracle, candidate: chatProbe.candidate, upstream: chatProbe.upstream };
-  checks["chatUpstreamNoEvilOk"] = chatProbe.upstream.every((record) => !JSON.stringify(record.body).includes("evil"));
-  checks["chatResponseNoEvilOk"] = !chatProbe.oracle.body.includes("evil") && !chatProbe.candidate.body.includes("evil");
+  rawEntries["chat"] = {
+    request: chatProbe.request,
+    oracle: chatProbe.oracle,
+    candidate: chatProbe.candidate,
+    upstream: chatProbe.upstream,
+  };
+  checks["chatUpstreamNoEvilOk"] = chatProbe.upstream.every(
+    (record) => !JSON.stringify(record.body).includes("evil"),
+  );
+  checks["chatResponseNoEvilOk"] =
+    !chatProbe.oracle.body.includes("evil") && !chatProbe.candidate.body.includes("evil");
   const chatComparison = compareRaw(chatProbe.oracle, chatProbe.candidate, {
     oracleBody: normalizeIds(chatProbe.oracle.body),
     candidateBody: normalizeIds(chatProbe.candidate.body),
@@ -71,12 +89,26 @@ export async function run(
   });
   const before2 = upstream.requests.length;
   const responsesProbe: ProbeRecord & { upstream: UpstreamRequestRecord[] } = {
-    ...(await probeBoth("responses-evil-tool", oracle, candidate, (apiKey) => postRequestLines("/v1/responses", apiKey, responsesBody), responsesBody)),
+    ...(await probeBoth(
+      "responses-evil-tool",
+      oracle,
+      candidate,
+      (apiKey) => postRequestLines("/v1/responses", apiKey, responsesBody),
+      responsesBody,
+    )),
     upstream: upstream.requests.slice(before2),
   };
-  rawEntries["responses"] = { request: responsesProbe.request, oracle: responsesProbe.oracle, candidate: responsesProbe.candidate, upstream: responsesProbe.upstream };
-  checks["responsesUpstreamNoEvilOk"] = responsesProbe.upstream.every((record) => !JSON.stringify(record.body).includes("evil"));
-  checks["responsesResponseNoEvilOk"] = !responsesProbe.oracle.body.includes("evil") && !responsesProbe.candidate.body.includes("evil");
+  rawEntries["responses"] = {
+    request: responsesProbe.request,
+    oracle: responsesProbe.oracle,
+    candidate: responsesProbe.candidate,
+    upstream: responsesProbe.upstream,
+  };
+  checks["responsesUpstreamNoEvilOk"] = responsesProbe.upstream.every(
+    (record) => !JSON.stringify(record.body).includes("evil"),
+  );
+  checks["responsesResponseNoEvilOk"] =
+    !responsesProbe.oracle.body.includes("evil") && !responsesProbe.candidate.body.includes("evil");
   const responsesComparison = compareRaw(responsesProbe.oracle, responsesProbe.candidate, {
     oracleBody: normalizeIds(responsesProbe.oracle.body),
     candidateBody: normalizeIds(responsesProbe.candidate.body),

@@ -1,10 +1,6 @@
 import type { MCPServerConfig } from "./config.js";
 import type { MCPSession, SessionFactory } from "./session.js";
-import {
-  deregisterServer,
-  MCPToolNameCollisionError,
-  prepareServerTools,
-} from "./tools.js";
+import { deregisterServer, MCPToolNameCollisionError, prepareServerTools } from "./tools.js";
 import { pythonRepr } from "../serialization/python-repr.js";
 import type { ToolRegistry } from "../tools/registry.js";
 

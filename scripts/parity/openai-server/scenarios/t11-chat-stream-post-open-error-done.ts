@@ -48,24 +48,35 @@ function analyze(body: string): Analysis {
   const idsOk = ids.every((id) => typeof id === "string" && CHATCMPL_ID.test(id));
   const startsWithRoleDelta =
     parsedFrames.length > 0 &&
-    (parsedFrames[0]?.["choices"] as Array<{ delta?: { role?: string } }> | undefined)?.[0]?.delta?.role === "assistant";
+    (parsedFrames[0]?.["choices"] as Array<{ delta?: { role?: string } }> | undefined)?.[0]?.delta
+      ?.role === "assistant";
   const errorFrame = parsedFrames.find((frame) => "error" in frame);
   const hasErrorFrame = errorFrame !== undefined;
-  const errorMessageRaw = (errorFrame?.["error"] as Record<string, unknown> | undefined)?.["message"];
+  const errorMessageRaw = (errorFrame?.["error"] as Record<string, unknown> | undefined)?.[
+    "message"
+  ];
   const errorMessage = typeof errorMessageRaw === "string" ? errorMessageRaw : "";
   const errorType = (errorFrame?.["error"] as Record<string, unknown> | undefined)?.["type"];
-  const errorCauseOk = errorMessage.includes("418") && errorMessage.includes(CAUSE_CANARY) && errorType === "upstream_error";
+  const errorCauseOk =
+    errorMessage.includes("418") &&
+    errorMessage.includes(CAUSE_CANARY) &&
+    errorType === "upstream_error";
   const hasFinishOrUsage = parsedFrames.some(
     (frame) =>
       "usage" in frame ||
-      (frame["choices"] as Array<{ finish_reason?: unknown }> | undefined)?.some((choice) => choice.finish_reason !== null && choice.finish_reason !== undefined),
+      (frame["choices"] as Array<{ finish_reason?: unknown }> | undefined)?.some(
+        (choice) => choice.finish_reason !== null && choice.finish_reason !== undefined,
+      ),
   );
   const endsWithDone = dataLines.at(-1) === "[DONE]";
   for (const frame of parsedFrames) {
     if ("id" in frame) frame["id"] = "<ID>";
     if ("created" in frame) frame["created"] = 0;
   }
-  const normalizedText = [...parsedFrames.map((frame) => `data: ${JSON.stringify(frame)}`), ...(dataLines.includes("[DONE]") ? ["data: [DONE]"] : [])].join("\n\n");
+  const normalizedText = [
+    ...parsedFrames.map((frame) => `data: ${JSON.stringify(frame)}`),
+    ...(dataLines.includes("[DONE]") ? ["data: [DONE]"] : []),
+  ].join("\n\n");
   return {
     text: normalizedText,
     shapeOk: !parseFailed && idsOk,
@@ -88,14 +99,29 @@ export async function run(
   differences: unknown[];
   expectedUpstreamRequests: number;
 }> {
-  const body = JSON.stringify({ model: "m", messages: [{ role: "user", content: "SCEN:err418 hi" }], stream: true });
+  const body = JSON.stringify({
+    model: "m",
+    messages: [{ role: "user", content: "SCEN:err418 hi" }],
+    stream: true,
+  });
   const before = upstream.requests.length;
   const probe: ProbeRecord & { upstream: UpstreamRequestRecord[] } = {
-    ...(await probeBoth("post-open-error", oracle, candidate, (apiKey) => postRequestLines(apiKey, body), body)),
+    ...(await probeBoth(
+      "post-open-error",
+      oracle,
+      candidate,
+      (apiKey) => postRequestLines(apiKey, body),
+      body,
+    )),
     upstream: upstream.requests.slice(before),
   };
 
-  const rawEvidence = { request: probe.request, oracle: probe.oracle, candidate: probe.candidate, upstream: probe.upstream };
+  const rawEvidence = {
+    request: probe.request,
+    oracle: probe.oracle,
+    candidate: probe.candidate,
+    upstream: probe.upstream,
+  };
 
   const oracleAnalysis = analyze(probe.oracle.body);
   const candidateAnalysis = analyze(probe.candidate.body);
@@ -106,7 +132,8 @@ export async function run(
   });
 
   const checks = {
-    statusOk: probe.oracle.statusLine.includes(" 200 ") && probe.candidate.statusLine.includes(" 200 "),
+    statusOk:
+      probe.oracle.statusLine.includes(" 200 ") && probe.candidate.statusLine.includes(" 200 "),
     shapeOk: oracleAnalysis.shapeOk && candidateAnalysis.shapeOk,
     roleDeltaKeptOk: oracleAnalysis.startsWithRoleDelta && candidateAnalysis.startsWithRoleDelta,
     errorFrameOk: oracleAnalysis.hasErrorFrame && candidateAnalysis.hasErrorFrame,
@@ -117,15 +144,26 @@ export async function run(
     bilateralOk: comparison.match,
   };
   const ok = Object.values(checks).every(Boolean);
-  const record = { id: probe.id, checks, normalized: { oracle: comparison.oracle, candidate: comparison.candidate }, match: ok };
+  const record = {
+    id: probe.id,
+    checks,
+    normalized: { oracle: comparison.oracle, candidate: comparison.candidate },
+    match: ok,
+  };
   const differences = ok ? [] : [record];
 
   return {
     projection: {
       probes: [record],
       normalizations: [
-        { path: "/v1/chat/completions (stream)", rule: "every frame's `id`/`created` normalized before the bilateral diff; the error frame's message is checked for 418+canary content, then included as-is in the text comparison (its exact repr is not further excused here)." },
-        { path: "*", rule: "`date`/`server` headers dropped; content-length dropped; header order not compared." },
+        {
+          path: "/v1/chat/completions (stream)",
+          rule: "every frame's `id`/`created` normalized before the bilateral diff; the error frame's message is checked for 418+canary content, then included as-is in the text comparison (its exact repr is not further excused here).",
+        },
+        {
+          path: "*",
+          rule: "`date`/`server` headers dropped; content-length dropped; header order not compared.",
+        },
       ],
     },
     rawEvidence,

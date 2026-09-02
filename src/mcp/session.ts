@@ -57,9 +57,7 @@ export function connectSession(
   const transport: unknown = config.transport;
   if (transport === "stdio") return stdio(config);
   if (transport === "http") return http(config);
-  return Promise.reject(
-    new Error(`MCP transport ${pythonRepr(transport)} not supported`),
-  );
+  return Promise.reject(new Error(`MCP transport ${pythonRepr(transport)} not supported`));
 }
 
 /**

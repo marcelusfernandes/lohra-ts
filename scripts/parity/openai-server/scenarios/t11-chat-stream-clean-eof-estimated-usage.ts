@@ -44,15 +44,20 @@ function analyze(body: string): Analysis {
     }
   }
   const ids = parsedFrames.map((frame) => frame["id"]).filter((id) => id !== undefined);
-  const idsOk = ids.every((id) => typeof id === "string" && CHATCMPL_ID.test(id)) && new Set(ids).size <= 1;
+  const idsOk =
+    ids.every((id) => typeof id === "string" && CHATCMPL_ID.test(id)) && new Set(ids).size <= 1;
   const hasErrorFrame = parsedFrames.some((frame) => "error" in frame);
   const finishStopOk = parsedFrames.some((frame) =>
-    (frame["choices"] as Array<{ finish_reason?: unknown }> | undefined)?.some((choice) => choice.finish_reason === "stop"),
+    (frame["choices"] as Array<{ finish_reason?: unknown }> | undefined)?.some(
+      (choice) => choice.finish_reason === "stop",
+    ),
   );
   const hasUsageChunk = parsedFrames.some((frame) => frame["usage"] !== undefined);
   const contentPreservedOk = parsedFrames.some((frame) =>
     (frame["choices"] as Array<{ delta?: { content?: unknown } }> | undefined)?.some(
-      (choice) => typeof choice.delta?.content === "string" && choice.delta.content.includes("FAKE-UPSTREAM-STREAM:cleaneof"),
+      (choice) =>
+        typeof choice.delta?.content === "string" &&
+        choice.delta.content.includes("FAKE-UPSTREAM-STREAM:cleaneof"),
     ),
   );
   const endsWithDone = dataLines.at(-1) === "[DONE]";
@@ -61,7 +66,10 @@ function analyze(body: string): Analysis {
     if ("created" in frame) frame["created"] = 0;
     if (frame["usage"] !== undefined) frame["usage"] = "<USAGE>";
   }
-  const normalizedText = [...parsedFrames.map((frame) => `data: ${JSON.stringify(frame)}`), ...(dataLines.includes("[DONE]") ? ["data: [DONE]"] : [])].join("\n\n");
+  const normalizedText = [
+    ...parsedFrames.map((frame) => `data: ${JSON.stringify(frame)}`),
+    ...(dataLines.includes("[DONE]") ? ["data: [DONE]"] : []),
+  ].join("\n\n");
   return {
     text: normalizedText,
     shapeOk: !parseFailed && idsOk,
@@ -92,11 +100,22 @@ export async function run(
   });
   const before = upstream.requests.length;
   const probe: ProbeRecord & { upstream: UpstreamRequestRecord[] } = {
-    ...(await probeBoth("clean-eof", oracle, candidate, (apiKey) => postRequestLines(apiKey, body), body)),
+    ...(await probeBoth(
+      "clean-eof",
+      oracle,
+      candidate,
+      (apiKey) => postRequestLines(apiKey, body),
+      body,
+    )),
     upstream: upstream.requests.slice(before),
   };
 
-  const rawEvidence = { request: probe.request, oracle: probe.oracle, candidate: probe.candidate, upstream: probe.upstream };
+  const rawEvidence = {
+    request: probe.request,
+    oracle: probe.oracle,
+    candidate: probe.candidate,
+    upstream: probe.upstream,
+  };
 
   const oracleAnalysis = analyze(probe.oracle.body);
   const candidateAnalysis = analyze(probe.candidate.body);
@@ -107,7 +126,8 @@ export async function run(
   });
 
   const checks = {
-    statusOk: probe.oracle.statusLine.includes(" 200 ") && probe.candidate.statusLine.includes(" 200 "),
+    statusOk:
+      probe.oracle.statusLine.includes(" 200 ") && probe.candidate.statusLine.includes(" 200 "),
     shapeOk: oracleAnalysis.shapeOk && candidateAnalysis.shapeOk,
     noErrorFrameOk: !oracleAnalysis.hasErrorFrame && !candidateAnalysis.hasErrorFrame,
     finishStopOk: oracleAnalysis.finishStopOk && candidateAnalysis.finishStopOk,
@@ -118,15 +138,26 @@ export async function run(
     bilateralOk: comparison.match,
   };
   const ok = Object.values(checks).every(Boolean);
-  const record = { id: probe.id, checks, normalized: { oracle: comparison.oracle, candidate: comparison.candidate }, match: ok };
+  const record = {
+    id: probe.id,
+    checks,
+    normalized: { oracle: comparison.oracle, candidate: comparison.candidate },
+    match: ok,
+  };
   const differences = ok ? [] : [record];
 
   return {
     projection: {
       probes: [record],
       normalizations: [
-        { path: "/v1/chat/completions (stream)", rule: "`id`/`created` normalized before the bilateral diff; `usage` (the estimate) replaced with a placeholder since the two real processes' estimation math is only required to agree in SHAPE (finish:stop, a usage chunk present) at this scenario's scope — exact estimate arithmetic is covered by assertion 62's dedicated vectors." },
-        { path: "*", rule: "`date`/`server` headers dropped; content-length dropped; header order not compared." },
+        {
+          path: "/v1/chat/completions (stream)",
+          rule: "`id`/`created` normalized before the bilateral diff; `usage` (the estimate) replaced with a placeholder since the two real processes' estimation math is only required to agree in SHAPE (finish:stop, a usage chunk present) at this scenario's scope — exact estimate arithmetic is covered by assertion 62's dedicated vectors.",
+        },
+        {
+          path: "*",
+          rule: "`date`/`server` headers dropped; content-length dropped; header order not compared.",
+        },
       ],
     },
     rawEvidence,

@@ -2,9 +2,7 @@
   "schemaVersion": 1,
   "id": "t20-literal-public",
   "description": "T20 bilateral observation: literal-public (expected divergent)",
-  "argv": [
-    "literal-public"
-  ],
+  "argv": ["literal-public"],
   "environment": {
     "allow": [],
     "set": {
@@ -26,17 +24,13 @@
     "oracle": {
       "adapter": "python",
       "executable": "oracle-python",
-      "prefixArgs": [
-        "{{projectRoot}}/scripts/parity/web-tools/oracle_driver.py"
-      ],
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/web-tools/oracle_driver.py"],
       "cwd": "profile"
     },
     "candidate": {
       "adapter": "typescript",
       "executable": "node",
-      "prefixArgs": [
-        "{{projectRoot}}/scripts/parity/web-tools/candidate-driver.mjs"
-      ],
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/web-tools/candidate-driver.mjs"],
       "cwd": "profile"
     }
   },

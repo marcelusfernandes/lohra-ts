@@ -188,7 +188,10 @@ function replaceRegex(
       );
     }
     if (matches.length > 16) {
-      throw new HarnessError("NORMALIZATION_LIMIT", `Normalization for ${field} exceeded 16 matches`);
+      throw new HarnessError(
+        "NORMALIZATION_LIMIT",
+        `Normalization for ${field} exceeded 16 matches`,
+      );
     }
     const replaced = decoded.replace(expression, replacement);
     return streamField(field) ? Buffer.from(replaced).toString("base64") : replaced;

@@ -1,17 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  MAX_HTML_TEXT_CHARS,
-  decodeHtmlEntities,
-  htmlToText,
-} from "../src/web/index.js";
+import { MAX_HTML_TEXT_CHARS, decodeHtmlEntities, htmlToText } from "../src/web/index.js";
 
 describe("decodeHtmlEntities", () => {
   it("decodes named, decimal and hex references", () => {
     expect(decodeHtmlEntities("Hello &amp; welcome")).toBe("Hello & welcome");
-    expect(decodeHtmlEntities("&lt;tag&gt; &quot;q&quot; &apos;a&apos;")).toBe(
-      '<tag> "q" \'a\'',
-    );
+    expect(decodeHtmlEntities("&lt;tag&gt; &quot;q&quot; &apos;a&apos;")).toBe("<tag> \"q\" 'a'");
     expect(decodeHtmlEntities("&#72;&#73; &#x48;&#x49;")).toBe("HI HI");
     expect(decodeHtmlEntities("caf&eacute; &copy; &hellip;")).toBe("café © …");
   });

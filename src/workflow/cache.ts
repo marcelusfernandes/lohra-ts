@@ -7,7 +7,8 @@ function canonical(value: unknown): string {
   if (value === null) return "null";
   if (typeof value === "string") return JSON.stringify(value);
   if (typeof value === "boolean") return value ? "true" : "false";
-  if (typeof value === "number") return Number.isFinite(value) ? String(value) : JSON.stringify(String(value));
+  if (typeof value === "number")
+    return Number.isFinite(value) ? String(value) : JSON.stringify(String(value));
   if (Array.isArray(value)) return `[${value.map(canonical).join(", ")}]`;
   if (typeof value === "object") {
     const pairs = Object.entries(value as Record<string, unknown>)

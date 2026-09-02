@@ -7,7 +7,11 @@
 // versioned evidence under .parity-evidence/t11/.
 import { createHash } from "node:crypto";
 
-import { startFakeUpstream, type FakeUpstream, type UpstreamRequestRecord } from "./fake-upstream.js";
+import {
+  startFakeUpstream,
+  type FakeUpstream,
+  type UpstreamRequestRecord,
+} from "./fake-upstream.js";
 import {
   runGuards,
   startServer,
@@ -59,7 +63,11 @@ interface ScenarioResult {
 interface ScenarioSpec {
   readonly id: string;
   readonly config: ServerConfig;
-  readonly run: (oracle: ServerHandle, candidate: ServerHandle, upstream: FakeUpstream) => Promise<ScenarioResult>;
+  readonly run: (
+    oracle: ServerHandle,
+    candidate: ServerHandle,
+    upstream: FakeUpstream,
+  ) => Promise<ScenarioResult>;
 }
 
 const ALL_SCENARIOS: readonly ScenarioSpec[] = [
@@ -68,33 +76,93 @@ const ALL_SCENARIOS: readonly ScenarioSpec[] = [
   // produce exactly {"object":"list","data":[]} — reruns the same surface
   // scenario (health/docs are harmlessly redundant) against a config with
   // no models registered, so the models probe compares two real empty lists.
-  { id: "t11-surface-empty-fallback-models", config: { emptyModels: true }, run: surfaceHealthModelsDocs },
+  {
+    id: "t11-surface-empty-fallback-models",
+    config: { emptyModels: true },
+    run: surfaceHealthModelsDocs,
+  },
   { id: "t11-auth-matrix-and-trailing-space", config: {}, run: authMatrixAndTrailingSpace },
   { id: "t11-auth-matrix-insecure", config: { insecure: true }, run: authMatrixAndTrailingSpace },
   { id: "t11-body-validation-before-auth-chat", config: {}, run: bodyValidationBeforeAuthChat },
-  { id: "t11-body-validation-before-auth-responses", config: {}, run: bodyValidationBeforeAuthResponses },
+  {
+    id: "t11-body-validation-before-auth-responses",
+    config: {},
+    run: bodyValidationBeforeAuthResponses,
+  },
   { id: "t11-methods-runs-and-root-absence", config: {}, run: methodsRunsAndRootAbsence },
-  { id: "t11-route-negative-sweep-and-slash-redirect-class", config: {}, run: routeNegativeSweepAndSlashRedirectClass },
-  { id: "t11-chat-nonstream-success-partial-upstream-error", config: {}, run: chatNonstreamSuccessPartialUpstreamError },
-  { id: "t11-chat-nonstream-transport-truncation", config: {}, run: chatNonstreamTransportTruncation },
-  { id: "t11-responses-nonstream-success-partial-upstream-error", config: {}, run: responsesNonstreamSuccessPartialUpstreamError },
-  { id: "t11-request-coercions-limits-and-extra-fields", config: {}, run: requestCoercionsLimitsAndExtraFields },
+  {
+    id: "t11-route-negative-sweep-and-slash-redirect-class",
+    config: {},
+    run: routeNegativeSweepAndSlashRedirectClass,
+  },
+  {
+    id: "t11-chat-nonstream-success-partial-upstream-error",
+    config: {},
+    run: chatNonstreamSuccessPartialUpstreamError,
+  },
+  {
+    id: "t11-chat-nonstream-transport-truncation",
+    config: {},
+    run: chatNonstreamTransportTruncation,
+  },
+  {
+    id: "t11-responses-nonstream-success-partial-upstream-error",
+    config: {},
+    run: responsesNonstreamSuccessPartialUpstreamError,
+  },
+  {
+    id: "t11-request-coercions-limits-and-extra-fields",
+    config: {},
+    run: requestCoercionsLimitsAndExtraFields,
+  },
   { id: "t11-chat-last-parts-loss-vs-history", config: {}, run: chatLastPartsLossVsHistory },
   { id: "t11-responses-parts-concatenation", config: {}, run: responsesPartsConcatenation },
-  { id: "t11-chat-stream-success-usage-and-no-usage", config: {}, run: chatStreamSuccessUsageAndNoUsage },
+  {
+    id: "t11-chat-stream-success-usage-and-no-usage",
+    config: {},
+    run: chatStreamSuccessUsageAndNoUsage,
+  },
   { id: "t11-chat-stream-post-open-error-done", config: {}, run: chatStreamPostOpenErrorDone },
-  { id: "t11-chat-stream-clean-eof-estimated-usage", config: {}, run: chatStreamCleanEofEstimatedUsage },
+  {
+    id: "t11-chat-stream-clean-eof-estimated-usage",
+    config: {},
+    run: chatStreamCleanEofEstimatedUsage,
+  },
   { id: "t11-responses-stream-success-no-done", config: {}, run: responsesStreamSuccessNoDone },
-  { id: "t11-responses-stream-error-before-delta", config: {}, run: responsesStreamErrorBeforeDelta },
-  { id: "t11-responses-stream-midbreak-discards-partial", config: {}, run: responsesStreamMidbreakDiscardsPartial },
+  {
+    id: "t11-responses-stream-error-before-delta",
+    config: {},
+    run: responsesStreamErrorBeforeDelta,
+  },
+  {
+    id: "t11-responses-stream-midbreak-discards-partial",
+    config: {},
+    run: responsesStreamMidbreakDiscardsPartial,
+  },
   { id: "t11-responses-stream-clean-eof", config: {}, run: responsesStreamCleanEof },
   { id: "t11-client-tools-negative-discard", config: {}, run: clientToolsNegativeDiscard },
-  { id: "t11-agentic-definition-dispatch-dangerous-command", config: { tools: "terminal" }, run: agenticDefinitionDispatchDangerousCommand },
-  { id: "t11-relay-agentic-no-tool-call-leak", config: { tools: "read_file" }, run: relayAgenticNoToolCallLeakAgentic },
+  {
+    id: "t11-agentic-definition-dispatch-dangerous-command",
+    config: { tools: "terminal" },
+    run: agenticDefinitionDispatchDangerousCommand,
+  },
+  {
+    id: "t11-relay-agentic-no-tool-call-leak",
+    config: { tools: "read_file" },
+    run: relayAgenticNoToolCallLeakAgentic,
+  },
   { id: "t11-relay-no-tool-call-leak", config: {}, run: relayAgenticNoToolCallLeakRelay },
-  { id: "t11-relay-no-tool-call-leak-nonstream", config: {}, run: relayAgenticNoToolCallLeakRelayNonStream },
+  {
+    id: "t11-relay-no-tool-call-leak-nonstream",
+    config: {},
+    run: relayAgenticNoToolCallLeakRelayNonStream,
+  },
   { id: "t11-stateless-two-requests", config: {}, run: statelessTwoRequests },
-  { id: "t11-concurrent-stream-isolation-and-disconnect-recovery", config: {}, run: concurrentStreamIsolationAndDisconnectRecovery },
+  {
+    id: "t11-concurrent-stream-isolation-and-disconnect-recovery",
+    config: {},
+    run: concurrentStreamIsolationAndDisconnectRecovery,
+  },
   { id: "t11-sigint-cleanup-and-port-reuse", config: {}, run: sigintCleanupAndPortReuse },
 ];
 
@@ -102,8 +170,14 @@ const ALL_SCENARIOS: readonly ScenarioSpec[] = [
 // iteration speedup so adding scenario N doesn't relaunch every prior
 // server pair. Unset (the default, and what parity:t11/CI always use) runs
 // the full matrix; determinism (assertion 10) is only proven on that.
-const only = (process.env.T11_ONLY ?? "").split(",").map((id) => id.trim()).filter((id) => id.length > 0);
-const SCENARIOS = only.length === 0 ? ALL_SCENARIOS : ALL_SCENARIOS.filter((scenario) => only.includes(scenario.id));
+const only = (process.env.T11_ONLY ?? "")
+  .split(",")
+  .map((id) => id.trim())
+  .filter((id) => id.length > 0);
+const SCENARIOS =
+  only.length === 0
+    ? ALL_SCENARIOS
+    : ALL_SCENARIOS.filter((scenario) => only.includes(scenario.id));
 
 const guards = runGuards();
 const upstream = await startFakeUpstream();
@@ -128,7 +202,10 @@ try {
       oracleOutput = { stdout: oracle.stdout(), stderr: oracle.stderr() };
       candidateOutput = { stdout: candidate.stdout(), stderr: candidate.stderr() };
     } finally {
-      [oracleExit, candidateExit] = await Promise.all([stopAndCleanup(oracle), stopAndCleanup(candidate)]);
+      [oracleExit, candidateExit] = await Promise.all([
+        stopAndCleanup(oracle),
+        stopAndCleanup(candidate),
+      ]);
     }
     const upstreamCountOk = result.expectedUpstreamRequests === upstreamAtScenarioEnd.length;
     const match = result.match && upstreamCountOk;

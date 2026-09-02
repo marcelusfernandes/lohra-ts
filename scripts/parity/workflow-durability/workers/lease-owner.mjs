@@ -25,7 +25,9 @@ if (fence === null) {
   connection.close();
   process.exit(2);
 }
-process.stdout.write(`${JSON.stringify({ ready: true, fence: Number(fence), pid: process.pid })}\n`);
+process.stdout.write(
+  `${JSON.stringify({ ready: true, fence: Number(fence), pid: process.pid })}\n`,
+);
 
 if (mode === "crash") {
   // Hold the lease and never let go: the orchestrator kills this process.

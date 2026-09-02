@@ -47,7 +47,13 @@ describe("loadPolicy", () => {
     writeFileSync(
       join(root, "policy.json"),
       JSON.stringify({
-        fs_allow: ["/rw/root", { path: "/ro/root", mode: "ro" }, { path: "/x", mode: "bogus" }, { path: "", mode: "rw" }, 42],
+        fs_allow: [
+          "/rw/root",
+          { path: "/ro/root", mode: "ro" },
+          { path: "/x", mode: "bogus" },
+          { path: "", mode: "rw" },
+          42,
+        ],
         egress_allow: ["api.test", 7],
       }),
     );
@@ -63,7 +69,11 @@ describe("loadPolicy", () => {
 describe("sandboxDispatch — fs", () => {
   it("allows reads/writes inside the working root and denies outside with exact text", () => {
     const root = workspace();
-    const dispatch = sandboxDispatch(base, { workingRoot: root, policy: loadPolicy(join(root, "missing.json")), tainted: false });
+    const dispatch = sandboxDispatch(base, {
+      workingRoot: root,
+      policy: loadPolicy(join(root, "missing.json")),
+      tainted: false,
+    });
     expect(dispatch("read_file", { path: join(root, "a.txt") })).toContain("allowed");
     expect(dispatch("write_file", { path: join(root, "a.txt") })).toContain("allowed");
     expect(dispatch("read_file", { path: "/etc/passwd" })).toBe(
@@ -93,7 +103,11 @@ describe("sandboxDispatch — fs", () => {
     const secret = join(outside, "secret.txt");
     writeFileSync(secret, "s");
     symlinkSync(secret, join(root, "link.txt"));
-    const dispatch = sandboxDispatch(base, { workingRoot: root, policy: { fsAllow: [], egressAllow: [] }, tainted: false });
+    const dispatch = sandboxDispatch(base, {
+      workingRoot: root,
+      policy: { fsAllow: [], egressAllow: [] },
+      tainted: false,
+    });
     expect(dispatch("read_file", { path: join(root, "link.txt") })).toBe(
       "ERROR: path is outside the workflow working scope (sandbox denied)",
     );
@@ -106,7 +120,11 @@ describe("sandboxDispatch — fs", () => {
     const root = realWorkspace();
     const outside = realpathSync(mkdtempSync(join(tmpdir(), "lohra-outside-")));
     symlinkSync(outside, join(root, "link"), "dir");
-    const dispatch = sandboxDispatch(base, { workingRoot: root, policy: { fsAllow: [], egressAllow: [] }, tainted: false });
+    const dispatch = sandboxDispatch(base, {
+      workingRoot: root,
+      policy: { fsAllow: [], egressAllow: [] },
+      tainted: false,
+    });
     const denial = "ERROR: path is outside the workflow working scope (sandbox denied)";
     // target exists
     writeFileSync(join(outside, "there.txt"), "x");
@@ -124,8 +142,16 @@ describe("sandboxDispatch — fs", () => {
     const root = workspace();
     const real = mkdtempSync(join(tmpdir(), "lohra-real-"));
     roots.push(real);
-    try { symlinkSync(real, join(root, "link"), "dir"); } catch { /* concurrent run already linked */ }
-    const dispatch = sandboxDispatch(base, { workingRoot: join(root, "link"), policy: { fsAllow: [], egressAllow: [] }, tainted: false });
+    try {
+      symlinkSync(real, join(root, "link"), "dir");
+    } catch {
+      /* concurrent run already linked */
+    }
+    const dispatch = sandboxDispatch(base, {
+      workingRoot: join(root, "link"),
+      policy: { fsAllow: [], egressAllow: [] },
+      tainted: false,
+    });
     expect(dispatch("write_file", { path: join(real, "f.txt") })).toContain("allowed");
   });
 });

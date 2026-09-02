@@ -11,15 +11,27 @@ import { connectRawWs, WS_OPCODE, type RawWsClient } from "../raw-ws-client.js";
 import { createSessionBoth, divergent, match, type NamedScenario } from "../scenario-helpers.js";
 
 const TRIGGER = "T12_TRIGGER_READ_FILE_NONASCII";
-if (!(TRIGGER in TOOL_CALL_TRIGGERS)) throw new Error(`${TRIGGER} missing from fake-upstream.ts's TOOL_CALL_TRIGGERS`);
+if (!(TRIGGER in TOOL_CALL_TRIGGERS))
+  throw new Error(`${TRIGGER} missing from fake-upstream.ts's TOOL_CALL_TRIGGERS`);
 
 interface RawTurnFrames {
   readonly toolStartRaw: string | null;
   readonly toolCompleteRaw: string | null;
 }
 
-async function driveTriggeredTurn(ws: RawWsClient, sessionId: string, rpcId: number): Promise<RawTurnFrames> {
-  ws.sendText(JSON.stringify({ jsonrpc: "2.0", id: rpcId, method: "prompt.submit", params: { session_id: sessionId, text: `please ${TRIGGER}` } }));
+async function driveTriggeredTurn(
+  ws: RawWsClient,
+  sessionId: string,
+  rpcId: number,
+): Promise<RawTurnFrames> {
+  ws.sendText(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: rpcId,
+      method: "prompt.submit",
+      params: { session_id: sessionId, text: `please ${TRIGGER}` },
+    }),
+  );
   let toolStartRaw: string | null = null;
   let toolCompleteRaw: string | null = null;
   for (let i = 0; i < 15; i += 1) {
@@ -52,7 +64,8 @@ export const DUAL_SERIALIZATION_SCENARIOS: readonly NamedScenario[] = [
         await Promise.all([oracleWs.nextFrame(), candidateWs.nextFrame()]); // drain gateway.ready
 
         const created = await createSessionBoth(oracleWs, candidateWs);
-        if (created.divergence !== null) return divergent(id, `session.create: ${created.divergence}`, created.evidence);
+        if (created.divergence !== null)
+          return divergent(id, `session.create: ${created.divergence}`, created.evidence);
 
         const [oracleFrames, candidateFrames] = await Promise.all([
           driveTriggeredTurn(oracleWs, created.oracleSessionId, 2),
@@ -70,10 +83,14 @@ export const DUAL_SERIALIZATION_SCENARIOS: readonly NamedScenario[] = [
         const oracleArgsText = extractArgsText(oracleFrames.toolStartRaw);
         const candidateArgsText = extractArgsText(candidateFrames.toolStartRaw);
         if (oracleArgsText !== candidateArgsText) {
-          return divergent(id, `args_text oracle=${JSON.stringify(oracleArgsText)} candidate=${JSON.stringify(candidateArgsText)}`, {
-            oracleFrames,
-            candidateFrames,
-          });
+          return divergent(
+            id,
+            `args_text oracle=${JSON.stringify(oracleArgsText)} candidate=${JSON.stringify(candidateArgsText)}`,
+            {
+              oracleFrames,
+              candidateFrames,
+            },
+          );
         }
         if (oracleArgsText === null) return divergent(id, "args_text missing on both sides");
 
@@ -86,26 +103,42 @@ export const DUAL_SERIALIZATION_SCENARIOS: readonly NamedScenario[] = [
           return divergent(id, "args_text is not spaced (missing '\": \"')", { oracleArgsText });
         }
         if (!oracleArgsText.includes("\\u00e3")) {
-          return divergent(id, "args_text does not escape non-ASCII (missing \\u00e3)", { oracleArgsText });
+          return divergent(id, "args_text does not escape non-ASCII (missing \\u00e3)", {
+            oracleArgsText,
+          });
         }
-        const outerCompact = oracleFrames.toolStartRaw.includes('","') || oracleFrames.toolStartRaw.includes('":"');
+        const outerCompact =
+          oracleFrames.toolStartRaw.includes('","') || oracleFrames.toolStartRaw.includes('":"');
         if (!outerCompact) {
-          return divergent(id, "outer tool.start frame is not compact", { toolStartRaw: oracleFrames.toolStartRaw });
+          return divergent(id, "outer tool.start frame is not compact", {
+            toolStartRaw: oracleFrames.toolStartRaw,
+          });
         }
 
         if (oracleFrames.toolCompleteRaw === null || candidateFrames.toolCompleteRaw === null) {
-          return divergent(id, "tool.complete not observed on both sides", { oracleFrames, candidateFrames });
+          return divergent(id, "tool.complete not observed on both sides", {
+            oracleFrames,
+            candidateFrames,
+          });
         }
         const oracleCompleteHasLiteral = oracleFrames.toolCompleteRaw.includes("ção");
         const candidateCompleteHasLiteral = candidateFrames.toolCompleteRaw.includes("ção");
         if (oracleCompleteHasLiteral !== candidateCompleteHasLiteral || !oracleCompleteHasLiteral) {
-          return divergent(id, "tool.complete does not carry literal non-ASCII in args on both sides", {
-            oracleCompleteHasLiteral,
-            candidateCompleteHasLiteral,
-          });
+          return divergent(
+            id,
+            "tool.complete does not carry literal non-ASCII in args on both sides",
+            {
+              oracleCompleteHasLiteral,
+              candidateCompleteHasLiteral,
+            },
+          );
         }
 
-        return match(id, { argsText: oracleArgsText, outerCompact, toolCompleteHasLiteralNonAscii: true });
+        return match(id, {
+          argsText: oracleArgsText,
+          outerCompact,
+          toolCompleteHasLiteralNonAscii: true,
+        });
       } finally {
         oracleWs.close();
         candidateWs.close();

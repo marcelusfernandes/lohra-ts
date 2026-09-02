@@ -212,43 +212,63 @@
       "parent": [
         {
           "kind": "tool_calls",
-          "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"SCEN:qz rate limited\"}" }]
+          "calls": [
+            { "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"SCEN:qz rate limited\"}" }
+          ]
         },
         {
           "kind": "tool_calls",
-          "calls": [{ "name": "collect_session", "argumentsRaw": "{\"sub_id\":\"__SUB1__\",\"wait\":true}" }]
+          "calls": [
+            { "name": "collect_session", "argumentsRaw": "{\"sub_id\":\"__SUB1__\",\"wait\":true}" }
+          ]
         },
         {
           "kind": "tool_calls",
-          "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"SCEN:qn rate limited\"}" }]
+          "calls": [
+            { "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"SCEN:qn rate limited\"}" }
+          ]
         },
         {
           "kind": "tool_calls",
-          "calls": [{ "name": "collect_session", "argumentsRaw": "{\"sub_id\":\"__SUB2__\",\"wait\":true}" }]
+          "calls": [
+            { "name": "collect_session", "argumentsRaw": "{\"sub_id\":\"__SUB2__\",\"wait\":true}" }
+          ]
         },
         {
           "kind": "tool_calls",
-          "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"SCEN:q5 rate limited\"}" }]
+          "calls": [
+            { "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"SCEN:q5 rate limited\"}" }
+          ]
         },
         {
           "kind": "tool_calls",
-          "calls": [{ "name": "collect_session", "argumentsRaw": "{\"sub_id\":\"__SUB3__\",\"wait\":true}" }]
+          "calls": [
+            { "name": "collect_session", "argumentsRaw": "{\"sub_id\":\"__SUB3__\",\"wait\":true}" }
+          ]
         },
         {
           "kind": "tool_calls",
-          "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"SCEN:q1 rate limited\"}" }]
+          "calls": [
+            { "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"SCEN:q1 rate limited\"}" }
+          ]
         },
         {
           "kind": "tool_calls",
-          "calls": [{ "name": "collect_session", "argumentsRaw": "{\"sub_id\":\"__SUB4__\",\"wait\":true}" }]
+          "calls": [
+            { "name": "collect_session", "argumentsRaw": "{\"sub_id\":\"__SUB4__\",\"wait\":true}" }
+          ]
         },
         {
           "kind": "tool_calls",
-          "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"SCEN:qj rate limited\"}" }]
+          "calls": [
+            { "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"SCEN:qj rate limited\"}" }
+          ]
         },
         {
           "kind": "tool_calls",
-          "calls": [{ "name": "collect_session", "argumentsRaw": "{\"sub_id\":\"__SUB5__\",\"wait\":true}" }]
+          "calls": [
+            { "name": "collect_session", "argumentsRaw": "{\"sub_id\":\"__SUB5__\",\"wait\":true}" }
+          ]
         },
         {
           "kind": "text",
@@ -256,10 +276,30 @@
         }
       ],
       "qz": [
-        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "0" } },
-        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "0" } },
-        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "0" } },
-        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "0" } }
+        {
+          "kind": "http_error",
+          "status": 429,
+          "message": "T13_QUOTA_CANARY out of quota",
+          "headers": { "retry-after": "0" }
+        },
+        {
+          "kind": "http_error",
+          "status": 429,
+          "message": "T13_QUOTA_CANARY out of quota",
+          "headers": { "retry-after": "0" }
+        },
+        {
+          "kind": "http_error",
+          "status": 429,
+          "message": "T13_QUOTA_CANARY out of quota",
+          "headers": { "retry-after": "0" }
+        },
+        {
+          "kind": "http_error",
+          "status": 429,
+          "message": "T13_QUOTA_CANARY out of quota",
+          "headers": { "retry-after": "0" }
+        }
       ],
       "qn": [
         { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota" },
@@ -274,16 +314,56 @@
         { "kind": "http_error", "status": 500, "message": "T13_QUOTA_CANARY out of quota" }
       ],
       "q1": [
-        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "1" } },
-        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "1" } },
-        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "1" } },
-        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "1" } }
+        {
+          "kind": "http_error",
+          "status": 429,
+          "message": "T13_QUOTA_CANARY out of quota",
+          "headers": { "retry-after": "1" }
+        },
+        {
+          "kind": "http_error",
+          "status": 429,
+          "message": "T13_QUOTA_CANARY out of quota",
+          "headers": { "retry-after": "1" }
+        },
+        {
+          "kind": "http_error",
+          "status": 429,
+          "message": "T13_QUOTA_CANARY out of quota",
+          "headers": { "retry-after": "1" }
+        },
+        {
+          "kind": "http_error",
+          "status": 429,
+          "message": "T13_QUOTA_CANARY out of quota",
+          "headers": { "retry-after": "1" }
+        }
       ],
       "qj": [
-        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" } },
-        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" } },
-        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" } },
-        { "kind": "http_error", "status": 429, "message": "T13_QUOTA_CANARY out of quota", "headers": { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" } }
+        {
+          "kind": "http_error",
+          "status": 429,
+          "message": "T13_QUOTA_CANARY out of quota",
+          "headers": { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" }
+        },
+        {
+          "kind": "http_error",
+          "status": 429,
+          "message": "T13_QUOTA_CANARY out of quota",
+          "headers": { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" }
+        },
+        {
+          "kind": "http_error",
+          "status": 429,
+          "message": "T13_QUOTA_CANARY out of quota",
+          "headers": { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" }
+        },
+        {
+          "kind": "http_error",
+          "status": 429,
+          "message": "T13_QUOTA_CANARY out of quota",
+          "headers": { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" }
+        }
       ]
     }
   },

@@ -31,12 +31,19 @@ function streamBody(marker: string): string {
   // (`^SCEN:(\S+)`) captures only the first non-whitespace token; any
   // unrecognized marker falls through to its generic success path, which
   // echoes the marker itself back as content (FAKE-UPSTREAM-STREAM:<marker>).
-  return JSON.stringify({ model: "m", messages: [{ role: "user", content: `SCEN:concurrent-${marker}` }], stream: true });
+  return JSON.stringify({
+    model: "m",
+    messages: [{ role: "user", content: `SCEN:concurrent-${marker}` }],
+    stream: true,
+  });
 }
 
 const CHATCMPL_ID = /"id":\s*"(chatcmpl-[0-9a-f]{32})"/u;
 
-function analyzeConcurrentStream(body: string, marker: string): { text: string; id: string | null; hasOwnContent: boolean; endsWithDone: boolean } {
+function analyzeConcurrentStream(
+  body: string,
+  marker: string,
+): { text: string; id: string | null; hasOwnContent: boolean; endsWithDone: boolean } {
   const id = CHATCMPL_ID.exec(body)?.[1] ?? null;
   const normalized = id === null ? body : body.replaceAll(id, "<ID>");
   const text = normalized.replaceAll(/"created":\s*\d+/gu, '"created":0');
@@ -52,7 +59,11 @@ function analyzeConcurrentStream(body: string, marker: string): { text: string; 
  * genuinely open and the server has already committed bytes to the wire),
  * then destroys the socket — a real client disconnect mid-stream, not a
  * graceful close. */
-function connectReadRoleDeltaThenDisconnect(port: number, requestLines: string, body: string): Promise<void> {
+function connectReadRoleDeltaThenDisconnect(
+  port: number,
+  requestLines: string,
+  body: string,
+): Promise<void> {
   return new Promise((resolveDisconnect, reject) => {
     const socket = net.connect(port, "127.0.0.1", () => {
       socket.write(requestLines.replaceAll("\n", "\r\n") + "\r\n" + body);
@@ -80,7 +91,12 @@ function connectReadRoleDeltaThenDisconnect(port: number, requestLines: string, 
 async function checkIsolation(
   side: ServerHandle,
   upstream: FakeUpstream,
-): Promise<{ ok: boolean; checks: Record<string, boolean>; oracleLike: string; upstreamCount: number }> {
+): Promise<{
+  ok: boolean;
+  checks: Record<string, boolean>;
+  oracleLike: string;
+  upstreamCount: number;
+}> {
   const before = upstream.requests.length;
   const [responseA, responseB] = await Promise.all([
     sendRaw(side.port, postRequestLines(side.apiKey, streamBody("A")), streamBody("A")),
@@ -90,7 +106,8 @@ async function checkIsolation(
 
   const analysisA = analyzeConcurrentStream(responseA.body, "A");
   const analysisB = analyzeConcurrentStream(responseB.body, "B");
-  const idsDistinctOk = analysisA.id !== null && analysisB.id !== null && analysisA.id !== analysisB.id;
+  const idsDistinctOk =
+    analysisA.id !== null && analysisB.id !== null && analysisA.id !== analysisB.id;
   const contentIsolatedOk =
     analysisA.hasOwnContent &&
     !responseA.body.includes("FAKE-UPSTREAM-STREAM:concurrent-B") &&
@@ -99,8 +116,15 @@ async function checkIsolation(
   const doneOk = analysisA.endsWithDone && analysisB.endsWithDone;
   const checks = { idsDistinctOk, contentIsolatedOk, doneOk, upstreamCountOk: upstreamCount === 2 };
   const ok = Object.values(checks).every(Boolean);
-  const sortedPair = [analysisA, analysisB].sort((a, b) => (a.text < b.text ? -1 : a.text > b.text ? 1 : 0));
-  return { ok, checks, oracleLike: JSON.stringify(sortedPair.map((entry) => entry.text)), upstreamCount };
+  const sortedPair = [analysisA, analysisB].sort((a, b) =>
+    a.text < b.text ? -1 : a.text > b.text ? 1 : 0,
+  );
+  return {
+    ok,
+    checks,
+    oracleLike: JSON.stringify(sortedPair.map((entry) => entry.text)),
+    upstreamCount,
+  };
 }
 
 async function checkDisconnectRecovery(
@@ -109,7 +133,11 @@ async function checkDisconnectRecovery(
 ): Promise<{ ok: boolean; checks: Record<string, boolean>; followUp: RawResponse }> {
   const before = upstream.requests.length;
   const disconnectBody = streamBody("disconnect-drop");
-  await connectReadRoleDeltaThenDisconnect(side.port, postRequestLines(side.apiKey, disconnectBody), disconnectBody);
+  await connectReadRoleDeltaThenDisconnect(
+    side.port,
+    postRequestLines(side.apiKey, disconnectBody),
+    disconnectBody,
+  );
   // The role-delta chunk is written to the client BEFORE the server makes
   // its own upstream call (established by t11-chat-stream-post-open-error-
   // done — the role chunk survives even an upstream FAILURE), so seeing it
@@ -123,7 +151,11 @@ async function checkDisconnectRecovery(
   const afterDisconnect = upstream.requests.length;
 
   const followUpBody = streamBody("disconnect-followup");
-  const followUp = await sendRaw(side.port, postRequestLines(side.apiKey, followUpBody), followUpBody);
+  const followUp = await sendRaw(
+    side.port,
+    postRequestLines(side.apiKey, followUpBody),
+    followUpBody,
+  );
   const afterFollowUp = upstream.requests.length;
 
   const checks = {
@@ -131,7 +163,10 @@ async function checkDisconnectRecovery(
     // disconnect happens on the CLIENT'S downstream socket, after the
     // server already opened its own upstream call, so it is expected.
     disconnectMadeExactlyOneUpstreamCallOk: afterDisconnect - before === 1,
-    followUpCompletesNormallyOk: followUp.statusLine.includes(" 200 ") && followUp.body.trimEnd().endsWith("data: [DONE]") && followUp.body.includes(`FAKE-UPSTREAM-STREAM:concurrent-disconnect-followup`),
+    followUpCompletesNormallyOk:
+      followUp.statusLine.includes(" 200 ") &&
+      followUp.body.trimEnd().endsWith("data: [DONE]") &&
+      followUp.body.includes(`FAKE-UPSTREAM-STREAM:concurrent-disconnect-followup`),
     // The follow-up made exactly one MORE upstream call — no extra/ghost
     // request from the disconnected one (assertion 66b).
     noExtraUpstreamRequestOk: afterFollowUp - afterDisconnect === 1,
@@ -171,8 +206,17 @@ export async function run(
   const differences = match
     ? []
     : [
-        { id: "isolation", oracle: oracleIsolation.checks, candidate: candidateIsolation.checks, isolationBilateralOk },
-        { id: "disconnect", oracle: oracleDisconnect.checks, candidate: candidateDisconnect.checks },
+        {
+          id: "isolation",
+          oracle: oracleIsolation.checks,
+          candidate: candidateIsolation.checks,
+          isolationBilateralOk,
+        },
+        {
+          id: "disconnect",
+          oracle: oracleDisconnect.checks,
+          candidate: candidateDisconnect.checks,
+        },
       ];
 
   return {
@@ -181,8 +225,14 @@ export async function run(
       note: "Assertion 66's third clause (no listener/process/temp remains after the case) is structurally guaranteed by startServer/stopAndCleanup's own lifecycle, exercised identically by every scenario in this matrix, not independently re-proven here.",
     },
     rawEvidence: {
-      isolationUpstreamCounts: { oracle: oracleIsolation.upstreamCount, candidate: candidateIsolation.upstreamCount },
-      disconnectFollowUp: { oracle: oracleDisconnect.followUp, candidate: candidateDisconnect.followUp },
+      isolationUpstreamCounts: {
+        oracle: oracleIsolation.upstreamCount,
+        candidate: candidateIsolation.upstreamCount,
+      },
+      disconnectFollowUp: {
+        oracle: oracleDisconnect.followUp,
+        candidate: candidateDisconnect.followUp,
+      },
       upstreamAtEnd,
     },
     match,

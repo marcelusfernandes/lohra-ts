@@ -86,21 +86,34 @@ export function resolveInstalledRepo(moduleUrl: string = import.meta.url): strin
   return locateRepo(dirname(fileURLToPath(moduleUrl)));
 }
 
-export function checkUpdate(repo: string, runner: CommandRunner = defaultCommandRunner): UpdateResult {
+export function checkUpdate(
+  repo: string,
+  runner: CommandRunner = defaultCommandRunner,
+): UpdateResult {
   const tracking = branchAndUpstream(runner, repo);
   if ("status" in tracking) return tracking;
   try {
     const fetched = runGit(runner, repo, ["fetch", "--quiet"]);
-    if (fetched.code !== 0) return result("error", `could not check for updates: ${failure("git fetch", fetched).message}`);
+    if (fetched.code !== 0)
+      return result(
+        "error",
+        `could not check for updates: ${failure("git fetch", fetched).message}`,
+      );
     const count = Number(gitText(runner, repo, ["rev-list", "--count", "HEAD..@{u}"]));
     if (!Number.isSafeInteger(count) || count < 0) {
       return result("error", "could not check for updates: unexpected rev-list output");
     }
     return count === 0
       ? result("up_to_date", `${tracking.branch} is up to date.`)
-      : result("behind", `${tracking.branch} is ${String(count)} commit(s) behind — run \`lohra update\` to apply.`);
+      : result(
+          "behind",
+          `${tracking.branch} is ${String(count)} commit(s) behind — run \`lohra update\` to apply.`,
+        );
   } catch (error) {
-    return result("error", `could not check for updates: ${error instanceof Error ? error.message : String(error)}`);
+    return result(
+      "error",
+      `could not check for updates: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
@@ -111,7 +124,10 @@ export function performUpdate(
   try {
     const dirty = gitText(runner, repo, ["status", "--porcelain"]);
     if (dirty !== "") {
-      return result("dirty", "working tree has uncommitted changes — commit or stash before updating.");
+      return result(
+        "dirty",
+        "working tree has uncommitted changes — commit or stash before updating.",
+      );
     }
     const tracking = branchAndUpstream(runner, repo);
     if ("status" in tracking) return tracking;
@@ -134,17 +150,25 @@ export function performUpdate(
     const files = gitText(runner, repo, ["diff", "--name-only", `${oldSha}..${newSha}`])
       .split("\n")
       .filter(Boolean);
-    const reinstallRecommended = files.some((file) => REINSTALL_FILES.has(file.split("/").at(-1) ?? file));
+    const reinstallRecommended = files.some((file) =>
+      REINSTALL_FILES.has(file.split("/").at(-1) ?? file),
+    );
     return result(
       "updated",
       `updated ${tracking.branch}: ${String(files.length)} file(s) changed (${oldSha.slice(0, 7)}..${newSha.slice(0, 7)}).${reinstallRecommended ? " Dependencies changed (npm lockfile)." : ""}`,
       { changedFiles: files, reinstallRecommended, restartRequired: true, oldSha, newSha },
     );
   } catch (error) {
-    return result("error", `update failed: ${error instanceof Error ? error.message : String(error)}`);
+    return result(
+      "error",
+      `update failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
-export function reinstall(repo: string, runner: CommandRunner = defaultCommandRunner): CommandResult {
+export function reinstall(
+  repo: string,
+  runner: CommandRunner = defaultCommandRunner,
+): CommandResult {
   return runner("npm", ["install"], repo);
 }

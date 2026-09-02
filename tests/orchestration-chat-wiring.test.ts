@@ -18,7 +18,10 @@ import {
   type HttpResponseData,
 } from "../src/transports/index.js";
 import { OrchestrationCore, type CollectResult } from "../src/orchestration/core.js";
-import { buildOrchestrationCore, orchestrationToolHandlers } from "../src/orchestration/chat-wiring.js";
+import {
+  buildOrchestrationCore,
+  orchestrationToolHandlers,
+} from "../src/orchestration/chat-wiring.js";
 import type { ProviderResolver } from "../src/orchestration/tools.js";
 
 const stubPrompt = (): string => "SUBAGENT_SYSTEM_STUB";
@@ -80,7 +83,10 @@ describe("orchestrationToolHandlers", () => {
       calls.push([name, args]);
       return Promise.resolve("BASE-RESULT");
     };
-    const dispatch = composeDispatch(base, orchestrationToolHandlers(makeCore(), allowAllProviders));
+    const dispatch = composeDispatch(
+      base,
+      orchestrationToolHandlers(makeCore(), allowAllProviders),
+    );
 
     const result = await dispatch("read_file", { path: "x.txt" });
 
@@ -246,7 +252,11 @@ describe("buildOrchestrationCore — wiring-level regression for pricingOverride
     });
     const pool = new ClientPool(profile, client, { home: "/tmp", environment: {} });
     const sessions = setupSessions();
-    const overridePrice = { inputPerMillion: 1_000_000, outputPerMillion: 1_000_000, source: "test" };
+    const overridePrice = {
+      inputPerMillion: 1_000_000,
+      outputPerMillion: 1_000_000,
+      source: "test",
+    };
 
     const core = buildOrchestrationCore({
       fanout: { maxParallel: 4, maxSubsessions: 200, parentMaxIterations: 90, warnings: [] },

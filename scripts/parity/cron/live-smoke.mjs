@@ -27,10 +27,20 @@ const unavailable = {
   requestCount: 0,
 };
 
-const allowedKeys = ["schemaVersion", "status", "transport", "provider", "model", "success", "exitCode", "requestCount"];
+const allowedKeys = [
+  "schemaVersion",
+  "status",
+  "transport",
+  "provider",
+  "model",
+  "success",
+  "exitCode",
+  "requestCount",
+];
 
 function persist(record) {
-  if (JSON.stringify(Object.keys(record)) !== JSON.stringify(allowedKeys)) throw new Error("LIVE_EVIDENCE_SCHEMA");
+  if (JSON.stringify(Object.keys(record)) !== JSON.stringify(allowedKeys))
+    throw new Error("LIVE_EVIDENCE_SCHEMA");
   rmSync(outputPath, { force: true });
   mkdirSync(outputDirectory, { recursive: true });
   writeFileSync(outputPath, `${JSON.stringify(record)}\n`, { mode: 0o600 });

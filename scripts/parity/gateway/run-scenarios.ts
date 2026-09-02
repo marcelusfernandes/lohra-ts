@@ -26,7 +26,11 @@ import {
   launchCandidateFakeUpstreamDashboard,
   type LaunchedGatewayProcess as LaunchedCandidateProcess,
 } from "./launch-candidate-fake.js";
-import { launchOracleDashboard, type LaunchedOracleProcess, verifyOracleGuard } from "./launch-oracle.js";
+import {
+  launchOracleDashboard,
+  type LaunchedOracleProcess,
+  verifyOracleGuard,
+} from "./launch-oracle.js";
 import { sendRawHttpRequest } from "./raw-http-client.js";
 import { connectRawWs, decodeCloseFrame, WS_OPCODE } from "./raw-ws-client.js";
 import {
@@ -76,10 +80,16 @@ const SECURE_SCENARIOS: NamedScenario[] = [
       const id = "t12-surface-exact-routes-and-openapi-schema";
       const { oracle, candidate } = await probeBoth(ctx, "/openapi.json", []);
       if (oracle.status !== candidate.status) {
-        return divergent(id, `status oracle=${String(oracle.status)} candidate=${String(candidate.status)}`);
+        return divergent(
+          id,
+          `status oracle=${String(oracle.status)} candidate=${String(candidate.status)}`,
+        );
       }
-      if (oracle.status !== 200) return divergent(id, `expected 200, both sides got ${String(oracle.status)}`);
-      const oraclePaths = Object.keys((jsonBody(oracle) as { paths: Record<string, unknown> }).paths).sort();
+      if (oracle.status !== 200)
+        return divergent(id, `expected 200, both sides got ${String(oracle.status)}`);
+      const oraclePaths = Object.keys(
+        (jsonBody(oracle) as { paths: Record<string, unknown> }).paths,
+      ).sort();
       const candidatePaths = Object.keys(
         (jsonBody(candidate) as { paths: Record<string, unknown> }).paths,
       ).sort();
@@ -90,7 +100,11 @@ const SECURE_SCENARIOS: NamedScenario[] = [
           { oraclePaths, candidatePaths },
         );
       }
-      return match(id, { status: oracle.status, pathCount: oraclePaths.length, paths: oraclePaths });
+      return match(id, {
+        status: oracle.status,
+        pathCount: oraclePaths.length,
+        paths: oraclePaths,
+      });
     },
   },
 
@@ -101,9 +115,13 @@ const SECURE_SCENARIOS: NamedScenario[] = [
       const id = "t12-auth-order-precedes-routing";
       const { oracle, candidate } = await probeBoth(ctx, "/api/does-not-exist", []);
       if (oracle.status !== candidate.status) {
-        return divergent(id, `no-token oracle=${String(oracle.status)} candidate=${String(candidate.status)}`);
+        return divergent(
+          id,
+          `no-token oracle=${String(oracle.status)} candidate=${String(candidate.status)}`,
+        );
       }
-      if (oracle.status !== 401) return divergent(id, `expected 401, both sides got ${String(oracle.status)}`);
+      if (oracle.status !== 401)
+        return divergent(id, `expected 401, both sides got ${String(oracle.status)}`);
       return match(id, { status: oracle.status, body: jsonBody(oracle) });
     },
   },
@@ -115,11 +133,17 @@ const SECURE_SCENARIOS: NamedScenario[] = [
       const id = "t12-docs-open-and-no-spa";
       const root = await probeBoth(ctx, "/", []);
       if (root.oracle.status !== root.candidate.status) {
-        return divergent(id, `root oracle=${String(root.oracle.status)} candidate=${String(root.candidate.status)}`);
+        return divergent(
+          id,
+          `root oracle=${String(root.oracle.status)} candidate=${String(root.candidate.status)}`,
+        );
       }
       const docs = await probeBoth(ctx, "/docs", []);
       if (docs.oracle.status !== docs.candidate.status) {
-        return divergent(id, `docs oracle=${String(docs.oracle.status)} candidate=${String(docs.candidate.status)}`);
+        return divergent(
+          id,
+          `docs oracle=${String(docs.oracle.status)} candidate=${String(docs.candidate.status)}`,
+        );
       }
       if (docs.oracle.status !== 200) {
         return divergent(id, `expected docs=200, both sides got ${String(docs.oracle.status)}`);
@@ -167,21 +191,33 @@ const SECURE_SCENARIOS: NamedScenario[] = [
         sendRawHttpRequest("127.0.0.1", ctx.oraclePort, {
           method: "GET",
           path: "/docs/",
-          headers: [["Host", "evil.example:8080"], ["Connection", "close"]],
+          headers: [
+            ["Host", "evil.example:8080"],
+            ["Connection", "close"],
+          ],
         }),
         sendRawHttpRequest("127.0.0.1", ctx.candidatePort, {
           method: "GET",
           path: "/docs/",
-          headers: [["Host", "evil.example:8080"], ["Connection", "close"]],
+          headers: [
+            ["Host", "evil.example:8080"],
+            ["Connection", "close"],
+          ],
         }),
       ]);
       if (oracle.status !== candidate.status) {
-        return divergent(id, `status oracle=${String(oracle.status)} candidate=${String(candidate.status)}`);
+        return divergent(
+          id,
+          `status oracle=${String(oracle.status)} candidate=${String(candidate.status)}`,
+        );
       }
       const oracleLocation = headerValue(oracle, "location");
       const candidateLocation = headerValue(candidate, "location");
       if (oracleLocation !== candidateLocation) {
-        return divergent(id, `location oracle=${String(oracleLocation)} candidate=${String(candidateLocation)}`);
+        return divergent(
+          id,
+          `location oracle=${String(oracleLocation)} candidate=${String(candidateLocation)}`,
+        );
       }
       return match(id, { status: oracle.status, location: oracleLocation });
     },
@@ -207,29 +243,51 @@ const SECURE_SCENARIOS: NamedScenario[] = [
         );
       }
       if (oracleWs.handshake.status !== 101) {
-        return divergent(id, `expected handshake=101, both sides got ${String(oracleWs.handshake.status)}`);
+        return divergent(
+          id,
+          `expected handshake=101, both sides got ${String(oracleWs.handshake.status)}`,
+        );
       }
-      const [oracleFrame, candidateFrame] = await Promise.all([oracleWs.nextFrame(), candidateWs.nextFrame()]);
+      const [oracleFrame, candidateFrame] = await Promise.all([
+        oracleWs.nextFrame(),
+        candidateWs.nextFrame(),
+      ]);
       oracleWs.close();
       candidateWs.close();
       if (oracleFrame.opcode !== candidateFrame.opcode) {
-        return divergent(id, `opcode oracle=${String(oracleFrame.opcode)} candidate=${String(candidateFrame.opcode)}`);
+        return divergent(
+          id,
+          `opcode oracle=${String(oracleFrame.opcode)} candidate=${String(candidateFrame.opcode)}`,
+        );
       }
       if (oracleFrame.opcode !== WS_OPCODE.close) {
-        return divergent(id, `expected a close frame, both sides sent opcode ${String(oracleFrame.opcode)}`);
+        return divergent(
+          id,
+          `expected a close frame, both sides sent opcode ${String(oracleFrame.opcode)}`,
+        );
       }
       const oracleClose = decodeCloseFrame(oracleFrame.payload);
       const candidateClose = decodeCloseFrame(candidateFrame.payload);
-      if (oracleClose.code !== candidateClose.code || oracleClose.reason !== candidateClose.reason) {
+      if (
+        oracleClose.code !== candidateClose.code ||
+        oracleClose.reason !== candidateClose.reason
+      ) {
         return divergent(
           id,
           `close oracle=${String(oracleClose.code)}/${oracleClose.reason} candidate=${String(candidateClose.code)}/${candidateClose.reason}`,
         );
       }
       if (oracleClose.code !== 4401 || oracleClose.reason !== "") {
-        return divergent(id, `expected close=4401/"", both sides sent ${String(oracleClose.code)}/${oracleClose.reason}`);
+        return divergent(
+          id,
+          `expected close=4401/"", both sides sent ${String(oracleClose.code)}/${oracleClose.reason}`,
+        );
       }
-      return match(id, { handshakeStatus: oracleWs.handshake.status, closeCode: oracleClose.code, closeReason: oracleClose.reason });
+      return match(id, {
+        handshakeStatus: oracleWs.handshake.status,
+        closeCode: oracleClose.code,
+        closeReason: oracleClose.reason,
+      });
     },
   },
 
@@ -241,10 +299,15 @@ const SECURE_SCENARIOS: NamedScenario[] = [
     run: async (ctx) => {
       const id = "t12-ws-path-sweep-unauthenticated";
       const paths = ["/api/websocket", "/api/ws/", "/api/pty", "/api/pub", "/api/events"];
-      const results = await Promise.all(paths.map(async (path) => [path, await probeBothUpgrade(ctx, path)] as const));
+      const results = await Promise.all(
+        paths.map(async (path) => [path, await probeBothUpgrade(ctx, path)] as const),
+      );
       for (const [path, result] of results) {
         if (result.oracleStatus !== result.candidateStatus) {
-          return divergent(id, `${path}: oracle=${String(result.oracleStatus)} candidate=${String(result.candidateStatus)}`);
+          return divergent(
+            id,
+            `${path}: oracle=${String(result.oracleStatus)} candidate=${String(result.candidateStatus)}`,
+          );
         }
       }
       return match(
@@ -342,9 +405,11 @@ const TURN_SCENARIOS: NamedScenario[] = [
           method: "session.create",
           params: {},
         });
-        if (create.divergence !== null) return divergent(id, `session.create: ${create.divergence}`, create);
+        if (create.divergence !== null)
+          return divergent(id, `session.create: ${create.divergence}`, create);
         const oracleSessionId = (create.oracleEnvelope.result as { session_id: string }).session_id;
-        const candidateSessionId = (create.candidateEnvelope.result as { session_id: string }).session_id;
+        const candidateSessionId = (create.candidateEnvelope.result as { session_id: string })
+          .session_id;
 
         oracleWs.sendText(
           JSON.stringify({
@@ -379,13 +444,24 @@ const TURN_SCENARIOS: NamedScenario[] = [
         }
 
         const oracleComplete = oracleEvents.find((event) => event.type === "message.complete");
-        const candidateComplete = candidateEvents.find((event) => event.type === "message.complete");
-        const completeDivergence = compareMasked(oracleComplete?.payload, candidateComplete?.payload);
+        const candidateComplete = candidateEvents.find(
+          (event) => event.type === "message.complete",
+        );
+        const completeDivergence = compareMasked(
+          oracleComplete?.payload,
+          candidateComplete?.payload,
+        );
         if (completeDivergence !== null) {
-          return divergent(id, `message.complete payload: ${completeDivergence}`, { oracleComplete, candidateComplete });
+          return divergent(id, `message.complete payload: ${completeDivergence}`, {
+            oracleComplete,
+            candidateComplete,
+          });
         }
 
-        return match(id, { eventSequence: oracleSequence, messageComplete: oracleComplete?.payload });
+        return match(id, {
+          eventSequence: oracleSequence,
+          messageComplete: oracleComplete?.payload,
+        });
       } finally {
         oracleWs.close();
         candidateWs.close();
@@ -409,7 +485,8 @@ const TURN_SCENARIOS: NamedScenario[] = [
         await Promise.all([oracleWs.nextFrame(), candidateWs.nextFrame()]); // drain gateway.ready
 
         const created = await createSessionBoth(oracleWs, candidateWs);
-        if (created.divergence !== null) return divergent(id, `session.create: ${created.divergence}`, created.evidence);
+        if (created.divergence !== null)
+          return divergent(id, `session.create: ${created.divergence}`, created.evidence);
 
         const interrupt = await perSessionRoundTrip(
           oracleWs,
@@ -419,7 +496,8 @@ const TURN_SCENARIOS: NamedScenario[] = [
           created.oracleSessionId,
           created.candidateSessionId,
         );
-        if (interrupt.divergence !== null) return divergent(id, `session.interrupt: ${interrupt.divergence}`, interrupt);
+        if (interrupt.divergence !== null)
+          return divergent(id, `session.interrupt: ${interrupt.divergence}`, interrupt);
 
         const requestsBefore = ctx.fakeUpstream.requests().length;
 
@@ -456,10 +534,18 @@ const TURN_SCENARIOS: NamedScenario[] = [
           );
         }
         const oracleComplete = oracleEvents.find((event) => event.type === "message.complete");
-        const candidateComplete = candidateEvents.find((event) => event.type === "message.complete");
-        const completeDivergence = compareMasked(oracleComplete?.payload, candidateComplete?.payload);
+        const candidateComplete = candidateEvents.find(
+          (event) => event.type === "message.complete",
+        );
+        const completeDivergence = compareMasked(
+          oracleComplete?.payload,
+          candidateComplete?.payload,
+        );
         if (completeDivergence !== null) {
-          return divergent(id, `message.complete payload: ${completeDivergence}`, { oracleComplete, candidateComplete });
+          return divergent(id, `message.complete payload: ${completeDivergence}`, {
+            oracleComplete,
+            candidateComplete,
+          });
         }
         if (requestsAfter !== requestsBefore) {
           return divergent(
@@ -469,7 +555,11 @@ const TURN_SCENARIOS: NamedScenario[] = [
           );
         }
 
-        return match(id, { eventSequence: oracleSequence, messageComplete: oracleComplete?.payload, upstreamCallDelta: 0 });
+        return match(id, {
+          eventSequence: oracleSequence,
+          messageComplete: oracleComplete?.payload,
+          upstreamCallDelta: 0,
+        });
       } finally {
         oracleWs.close();
         candidateWs.close();
@@ -495,13 +585,24 @@ const TURN_SCENARIOS: NamedScenario[] = [
         await Promise.all([oracleWs.nextFrame(), candidateWs.nextFrame()]); // drain gateway.ready
 
         const created = await createSessionBoth(oracleWs, candidateWs);
-        if (created.divergence !== null) return divergent(id, `session.create: ${created.divergence}`, created.evidence);
+        if (created.divergence !== null)
+          return divergent(id, `session.create: ${created.divergence}`, created.evidence);
 
         oracleWs.sendText(
-          JSON.stringify({ jsonrpc: "2.0", id: 2, method: "prompt.submit", params: { session_id: created.oracleSessionId, text: 42 } }),
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 2,
+            method: "prompt.submit",
+            params: { session_id: created.oracleSessionId, text: 42 },
+          }),
         );
         candidateWs.sendText(
-          JSON.stringify({ jsonrpc: "2.0", id: 2, method: "prompt.submit", params: { session_id: created.candidateSessionId, text: 42 } }),
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 2,
+            method: "prompt.submit",
+            params: { session_id: created.candidateSessionId, text: 42 },
+          }),
         );
 
         // session.info races asynchronously with the rpc-ack/message.start
@@ -515,7 +616,11 @@ const TURN_SCENARIOS: NamedScenario[] = [
           collectKeyedFrames(candidateWs, ["rpc:2", "event:message.start"]),
         ]);
         const ackSetDivergence = compareMasked(oracleAckSet, candidateAckSet);
-        if (ackSetDivergence !== null) return divergent(id, `rpc-ack/message.start: ${ackSetDivergence}`, { oracleAckSet, candidateAckSet });
+        if (ackSetDivergence !== null)
+          return divergent(id, `rpc-ack/message.start: ${ackSetDivergence}`, {
+            oracleAckSet,
+            candidateAckSet,
+          });
 
         // Confirm permanent silence: a bounded wait, tolerating a
         // late-arriving session.info (an unrelated broadcast), must find
@@ -526,10 +631,14 @@ const TURN_SCENARIOS: NamedScenario[] = [
           waitForSilenceToleratingSessionInfo(candidateWs, 1500),
         ]);
         if (oracleSilence !== null || candidateSilence !== null) {
-          return divergent(id, `expected silence, oracle=${oracleSilence === null ? "silent" : "spoke"} candidate=${candidateSilence === null ? "silent" : "spoke"}`, {
-            oracle: oracleSilence,
-            candidate: candidateSilence,
-          });
+          return divergent(
+            id,
+            `expected silence, oracle=${oracleSilence === null ? "silent" : "spoke"} candidate=${candidateSilence === null ? "silent" : "spoke"}`,
+            {
+              oracle: oracleSilence,
+              candidate: candidateSilence,
+            },
+          );
         }
 
         // Prove the lock released: a normal follow-up prompt.submit on the
@@ -564,13 +673,24 @@ const TURN_SCENARIOS: NamedScenario[] = [
           );
         }
         const oracleComplete = oracleEvents.find((event) => event.type === "message.complete");
-        const candidateComplete = candidateEvents.find((event) => event.type === "message.complete");
-        const completeDivergence = compareMasked(oracleComplete?.payload, candidateComplete?.payload);
+        const candidateComplete = candidateEvents.find(
+          (event) => event.type === "message.complete",
+        );
+        const completeDivergence = compareMasked(
+          oracleComplete?.payload,
+          candidateComplete?.payload,
+        );
         if (completeDivergence !== null) {
-          return divergent(id, `follow-up message.complete: ${completeDivergence}`, { oracleComplete, candidateComplete });
+          return divergent(id, `follow-up message.complete: ${completeDivergence}`, {
+            oracleComplete,
+            candidateComplete,
+          });
         }
 
-        return match(id, { followUpEventSequence: oracleSequence, followUpComplete: oracleComplete?.payload });
+        return match(id, {
+          followUpEventSequence: oracleSequence,
+          followUpComplete: oracleComplete?.payload,
+        });
       } finally {
         oracleWs.close();
         candidateWs.close();
@@ -609,7 +729,12 @@ async function runPhase(
         ...tokenOverride,
       }),
     ]);
-    const ctx: ScenarioContext = { oraclePort: oracle.port, candidatePort: candidate.port, fakeUpstream, ...tokenOverride };
+    const ctx: ScenarioContext = {
+      oraclePort: oracle.port,
+      candidatePort: candidate.port,
+      fakeUpstream,
+      ...tokenOverride,
+    };
     for (const scenario of scenarios) {
       try {
         results.push(await scenario.run(ctx));
@@ -698,15 +823,23 @@ async function main(): Promise<void> {
   const evidencePath = join(evidenceRoot, "run-scenarios.json");
   writeFileSync(
     evidencePath,
-    JSON.stringify({ suite: "t12-gateway-dashboard-socket-bilateral", digest, projections, results }, null, 2),
+    JSON.stringify(
+      { suite: "t12-gateway-dashboard-socket-bilateral", digest, projections, results },
+      null,
+      2,
+    ),
   );
 
   const failed = results.filter((result) => result.verdict !== "match");
   for (const result of results) {
     const marker = result.verdict === "match" ? "PASS" : "FAIL";
-    console.log(`[${marker}] ${result.id}${result.detail !== undefined ? ` -- ${result.detail}` : ""}`);
+    console.log(
+      `[${marker}] ${result.id}${result.detail !== undefined ? ` -- ${result.detail}` : ""}`,
+    );
   }
-  console.log(`\n${String(results.length - failed.length)}/${String(results.length)} scenarios match.`);
+  console.log(
+    `\n${String(results.length - failed.length)}/${String(results.length)} scenarios match.`,
+  );
   console.log(`Digest: ${digest}`);
   console.log(`Evidence: ${evidencePath}`);
   if (failed.length > 0) process.exitCode = 1;

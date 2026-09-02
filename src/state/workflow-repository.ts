@@ -185,19 +185,13 @@ export class WorkflowRepository {
       .all(Math.max(0, Math.trunc(limit))) as readonly Record<string, unknown>[];
   }
 
-  public runStatesByPause(
-    pauseReason: string,
-    limit: number,
-  ): readonly Record<string, unknown>[] {
+  public runStatesByPause(pauseReason: string, limit: number): readonly Record<string, unknown>[] {
     return this.database
       .prepare(
         `SELECT * FROM workflow_run_state WHERE status = 'paused' AND pause_reason = ?
          ORDER BY updated_at DESC LIMIT ?`,
       )
-      .all(pauseReason, Math.max(0, Math.trunc(limit))) as readonly Record<
-      string,
-      unknown
-    >[];
+      .all(pauseReason, Math.max(0, Math.trunc(limit))) as readonly Record<string, unknown>[];
   }
 
   // --- node cache + cost -------------------------------------------------------
@@ -324,11 +318,8 @@ export class WorkflowRepository {
       cacheRead:
         row.cache_read_tokens === null ? 0 : safeInteger(row.cache_read_tokens, "cache_read"),
       cacheWrite:
-        row.cache_write_tokens === null
-          ? 0
-          : safeInteger(row.cache_write_tokens, "cache_write"),
-      reasoning:
-        row.reasoning_tokens === null ? 0 : safeInteger(row.reasoning_tokens, "reasoning"),
+        row.cache_write_tokens === null ? 0 : safeInteger(row.cache_write_tokens, "cache_write"),
+      reasoning: row.reasoning_tokens === null ? 0 : safeInteger(row.reasoning_tokens, "reasoning"),
     };
   }
 
@@ -445,9 +436,7 @@ export class WorkflowRepository {
     // needs the JOINs after a FROM-dual source, never directly after SELECT.
     const guard = ownershipGuard(runId, ownership);
     try {
-      const result = this.database
-        .prepare(`${sql}${guard.suffix}`)
-        .run(...values, ...guard.params);
+      const result = this.database.prepare(`${sql}${guard.suffix}`).run(...values, ...guard.params);
       if (result.changes > 0) return true;
     } catch (error) {
       if (error instanceof Error && /database is locked/i.test(error.message)) {

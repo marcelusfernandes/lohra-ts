@@ -28,9 +28,7 @@ export function isTextualContentType(contentType: string): boolean {
   if (contentType === "") return true;
   const lowered = contentType.toLowerCase();
   if (lowered.startsWith("text/")) return true;
-  return ["json", "xml", "html", "javascript", "csv"].some((token) =>
-    lowered.includes(token),
-  );
+  return ["json", "xml", "html", "javascript", "csv"].some((token) => lowered.includes(token));
 }
 
 function binaryContentCause(contentType: string): string {
@@ -59,7 +57,11 @@ function decodeBody(bytes: Uint8Array, contentType: string): string {
 
 interface CappedRead {
   readonly bytes: Uint8Array;
-  readonly stats: { readonly bufferedBytes: number; readonly cancelled: boolean; readonly readCalls: number };
+  readonly stats: {
+    readonly bufferedBytes: number;
+    readonly cancelled: boolean;
+    readonly readCalls: number;
+  };
 }
 
 async function readCapped(response: ConnectorResponse, maxBytes: number): Promise<CappedRead> {

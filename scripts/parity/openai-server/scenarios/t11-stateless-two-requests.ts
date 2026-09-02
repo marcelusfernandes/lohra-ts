@@ -27,23 +27,51 @@ export async function run(
   differences: unknown[];
   expectedUpstreamRequests: number;
 }> {
-  const body1 = JSON.stringify({ model: "model-one", messages: [{ role: "user", content: "SCEN:ok first-request-marker" }] });
+  const body1 = JSON.stringify({
+    model: "model-one",
+    messages: [{ role: "user", content: "SCEN:ok first-request-marker" }],
+  });
   const before1 = upstream.requests.length;
   const probe1: ProbeRecord & { upstream: UpstreamRequestRecord[] } = {
-    ...(await probeBoth("first", oracle, candidate, (apiKey) => postRequestLines(apiKey, body1), body1)),
+    ...(await probeBoth(
+      "first",
+      oracle,
+      candidate,
+      (apiKey) => postRequestLines(apiKey, body1),
+      body1,
+    )),
     upstream: upstream.requests.slice(before1),
   };
 
-  const body2 = JSON.stringify({ model: "model-two", messages: [{ role: "user", content: "SCEN:ok second-request-marker" }] });
+  const body2 = JSON.stringify({
+    model: "model-two",
+    messages: [{ role: "user", content: "SCEN:ok second-request-marker" }],
+  });
   const before2 = upstream.requests.length;
   const probe2: ProbeRecord & { upstream: UpstreamRequestRecord[] } = {
-    ...(await probeBoth("second", oracle, candidate, (apiKey) => postRequestLines(apiKey, body2), body2)),
+    ...(await probeBoth(
+      "second",
+      oracle,
+      candidate,
+      (apiKey) => postRequestLines(apiKey, body2),
+      body2,
+    )),
     upstream: upstream.requests.slice(before2),
   };
 
   const rawEvidence = {
-    first: { request: probe1.request, oracle: probe1.oracle, candidate: probe1.candidate, upstream: probe1.upstream },
-    second: { request: probe2.request, oracle: probe2.oracle, candidate: probe2.candidate, upstream: probe2.upstream },
+    first: {
+      request: probe1.request,
+      oracle: probe1.oracle,
+      candidate: probe1.candidate,
+      upstream: probe1.upstream,
+    },
+    second: {
+      request: probe2.request,
+      oracle: probe2.oracle,
+      candidate: probe2.candidate,
+      upstream: probe2.upstream,
+    },
   };
 
   function messagesOf(record: UpstreamRequestRecord | undefined): Record<string, unknown>[] {
@@ -56,19 +84,29 @@ export async function run(
 
   const shapeChecks = [...probe1.upstream, ...probe2.upstream].map((record) => {
     const messages = messagesOf(record);
-    return messages.length === 2 && messages[0]?.["role"] === "system" && messages[1]?.["role"] === "user";
+    return (
+      messages.length === 2 &&
+      messages[0]?.["role"] === "system" &&
+      messages[1]?.["role"] === "user"
+    );
   });
   checks["exactlyTwoMessagesOk"] = shapeChecks.every(Boolean);
 
-  const systemPrompts = [...probe1.upstream, ...probe2.upstream].map((record) => messagesOf(record)[0]?.["content"]);
+  const systemPrompts = [...probe1.upstream, ...probe2.upstream].map(
+    (record) => messagesOf(record)[0]?.["content"],
+  );
   checks["systemFrozenIdenticalOk"] = new Set(systemPrompts).size === 1;
 
   function userContent(record: UpstreamRequestRecord): string {
     const content = messagesOf(record)[1]?.["content"];
     return typeof content === "string" ? content : "";
   }
-  checks["firstUserContentOk"] = probe1.upstream.every((record) => userContent(record).includes("first-request-marker"));
-  checks["secondUserContentOk"] = probe2.upstream.every((record) => userContent(record).includes("second-request-marker"));
+  checks["firstUserContentOk"] = probe1.upstream.every((record) =>
+    userContent(record).includes("first-request-marker"),
+  );
+  checks["secondUserContentOk"] = probe2.upstream.every((record) =>
+    userContent(record).includes("second-request-marker"),
+  );
   checks["noCrossLeakOk"] =
     probe1.upstream.every((record) => !userContent(record).includes("second-request-marker")) &&
     probe2.upstream.every((record) => !userContent(record).includes("first-request-marker"));
@@ -81,12 +119,20 @@ export async function run(
   );
 
   const comparison1 = compareRaw(probe1.oracle, probe1.candidate, {
-    oracleBody: probe1.oracle.body.replaceAll(/"id":"chatcmpl-[0-9a-f]{32}"/gu, '"id":"<ID>"').replaceAll(/"created":\d+/gu, '"created":0'),
-    candidateBody: probe1.candidate.body.replaceAll(/"id":"chatcmpl-[0-9a-f]{32}"/gu, '"id":"<ID>"').replaceAll(/"created":\d+/gu, '"created":0'),
+    oracleBody: probe1.oracle.body
+      .replaceAll(/"id":"chatcmpl-[0-9a-f]{32}"/gu, '"id":"<ID>"')
+      .replaceAll(/"created":\d+/gu, '"created":0'),
+    candidateBody: probe1.candidate.body
+      .replaceAll(/"id":"chatcmpl-[0-9a-f]{32}"/gu, '"id":"<ID>"')
+      .replaceAll(/"created":\d+/gu, '"created":0'),
   });
   const comparison2 = compareRaw(probe2.oracle, probe2.candidate, {
-    oracleBody: probe2.oracle.body.replaceAll(/"id":"chatcmpl-[0-9a-f]{32}"/gu, '"id":"<ID>"').replaceAll(/"created":\d+/gu, '"created":0'),
-    candidateBody: probe2.candidate.body.replaceAll(/"id":"chatcmpl-[0-9a-f]{32}"/gu, '"id":"<ID>"').replaceAll(/"created":\d+/gu, '"created":0'),
+    oracleBody: probe2.oracle.body
+      .replaceAll(/"id":"chatcmpl-[0-9a-f]{32}"/gu, '"id":"<ID>"')
+      .replaceAll(/"created":\d+/gu, '"created":0'),
+    candidateBody: probe2.candidate.body
+      .replaceAll(/"id":"chatcmpl-[0-9a-f]{32}"/gu, '"id":"<ID>"')
+      .replaceAll(/"created":\d+/gu, '"created":0'),
   });
   checks["bilateralFirstOk"] = comparison1.match;
   checks["bilateralSecondOk"] = comparison2.match;

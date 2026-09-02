@@ -41,6 +41,7 @@ export function matchRoute(method: string, pathname: string): RouteMatch {
 
   const spec = ROUTES.get(pathname);
   if (spec === undefined) return { kind: "not-found" };
-  if (!spec.methods.includes(method)) return { kind: "method-not-allowed", allow: spec.methods.join(", ") };
+  if (!spec.methods.includes(method))
+    return { kind: "method-not-allowed", allow: spec.methods.join(", ") };
   return { kind: "route", name: spec.name, methods: spec.methods };
 }

@@ -15,15 +15,27 @@ interface Outcome {
   readonly closeCode: number | null;
 }
 
-async function observe(port: number, path: string, extraHeaders: readonly (readonly [string, string])[] = []): Promise<Outcome> {
+async function observe(
+  port: number,
+  path: string,
+  extraHeaders: readonly (readonly [string, string])[] = [],
+): Promise<Outcome> {
   const ws = await connectRawWs("127.0.0.1", port, path, extraHeaders);
   try {
-    if (ws.handshake.status !== 101) return { status: ws.handshake.status, kind: "other", closeCode: null };
+    if (ws.handshake.status !== 101)
+      return { status: ws.handshake.status, kind: "other", closeCode: null };
     const frame = await ws.nextFrame(5000);
     if (frame.opcode === WS_OPCODE.close) {
-      return { status: ws.handshake.status, kind: "close", closeCode: decodeCloseFrame(frame.payload).code };
+      return {
+        status: ws.handshake.status,
+        kind: "close",
+        closeCode: decodeCloseFrame(frame.payload).code,
+      };
     }
-    if (frame.opcode === WS_OPCODE.text && frame.payload.toString("utf8").includes("gateway.ready")) {
+    if (
+      frame.opcode === WS_OPCODE.text &&
+      frame.payload.toString("utf8").includes("gateway.ready")
+    ) {
       return { status: ws.handshake.status, kind: "ready", closeCode: null };
     }
     return { status: ws.handshake.status, kind: "other", closeCode: null };
@@ -38,7 +50,10 @@ export const WS_QUERY_AND_HEADER_TOKEN_SCENARIOS: readonly NamedScenario[] = [
     run: async (ctx) => {
       const id = "t12-ws-query-multiplicity-last-wins";
       if (ctx.dashboardToken === undefined) {
-        return divergent(id, "scenario requires a pinned dashboardToken but ctx.dashboardToken is undefined");
+        return divergent(
+          id,
+          "scenario requires a pinned dashboardToken but ctx.dashboardToken is undefined",
+        );
       }
       const t = ctx.dashboardToken;
       const cases: readonly { readonly name: string; readonly path: string }[] = [
@@ -49,10 +64,21 @@ export const WS_QUERY_AND_HEADER_TOKEN_SCENARIOS: readonly NamedScenario[] = [
       ];
       const results: Record<string, { readonly oracle: Outcome; readonly candidate: Outcome }> = {};
       for (const { name, path } of cases) {
-        const [oracle, candidate] = await Promise.all([observe(ctx.oraclePort, path), observe(ctx.candidatePort, path)]);
+        const [oracle, candidate] = await Promise.all([
+          observe(ctx.oraclePort, path),
+          observe(ctx.candidatePort, path),
+        ]);
         results[name] = { oracle, candidate };
-        if (oracle.status !== candidate.status || oracle.kind !== candidate.kind || oracle.closeCode !== candidate.closeCode) {
-          return divergent(id, `${name}: oracle=${JSON.stringify(oracle)} candidate=${JSON.stringify(candidate)}`, results);
+        if (
+          oracle.status !== candidate.status ||
+          oracle.kind !== candidate.kind ||
+          oracle.closeCode !== candidate.closeCode
+        ) {
+          return divergent(
+            id,
+            `${name}: oracle=${JSON.stringify(oracle)} candidate=${JSON.stringify(candidate)}`,
+            results,
+          );
         }
       }
       return match(id, results);
@@ -63,7 +89,10 @@ export const WS_QUERY_AND_HEADER_TOKEN_SCENARIOS: readonly NamedScenario[] = [
     run: async (ctx) => {
       const id = "t12-ws-header-token-rejected";
       if (ctx.dashboardToken === undefined) {
-        return divergent(id, "scenario requires a pinned dashboardToken but ctx.dashboardToken is undefined");
+        return divergent(
+          id,
+          "scenario requires a pinned dashboardToken but ctx.dashboardToken is undefined",
+        );
       }
       // The token in a header instead of the query string must be
       // rejected the same way an absent token is -- the WS layer only
@@ -72,8 +101,15 @@ export const WS_QUERY_AND_HEADER_TOKEN_SCENARIOS: readonly NamedScenario[] = [
         observe(ctx.oraclePort, "/api/ws", [[TOKEN_HEADER, ctx.dashboardToken]]),
         observe(ctx.candidatePort, "/api/ws", [[TOKEN_HEADER, ctx.dashboardToken]]),
       ]);
-      if (oracle.status !== candidate.status || oracle.kind !== candidate.kind || oracle.closeCode !== candidate.closeCode) {
-        return divergent(id, `oracle=${JSON.stringify(oracle)} candidate=${JSON.stringify(candidate)}`);
+      if (
+        oracle.status !== candidate.status ||
+        oracle.kind !== candidate.kind ||
+        oracle.closeCode !== candidate.closeCode
+      ) {
+        return divergent(
+          id,
+          `oracle=${JSON.stringify(oracle)} candidate=${JSON.stringify(candidate)}`,
+        );
       }
       return match(id, { oracle, candidate });
     },

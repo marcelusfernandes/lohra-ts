@@ -148,10 +148,7 @@
         "records": {
           "gets": 0,
           "posts": 2,
-          "sequence": [
-            "POST /v1/chat/completions",
-            "POST /v1/chat/completions"
-          ]
+          "sequence": ["POST /v1/chat/completions", "POST /v1/chat/completions"]
         }
       }
     }

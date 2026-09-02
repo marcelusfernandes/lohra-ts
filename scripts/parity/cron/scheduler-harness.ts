@@ -54,7 +54,11 @@ function spawnAndCollect(
   args: readonly string[],
   env: Record<string, string>,
   cwd: string,
-): { readonly child: ChildProcess; readonly exitInfo: () => ExitInfo; readonly stop: () => Promise<void> } {
+): {
+  readonly child: ChildProcess;
+  readonly exitInfo: () => ExitInfo;
+  readonly stop: () => Promise<void>;
+} {
   const child = spawn(executable, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
   let settled = false;
   let exitCode: number | null = null;
@@ -101,8 +105,18 @@ export async function startOracleScheduler(options: StartOptions): Promise<Sched
     PYTHONDONTWRITEBYTECODE: "1",
     ...(options.tz === undefined ? {} : { TZ: options.tz }),
   };
-  const { stop, exitInfo } = spawnAndCollect(oraclePython, [oracleDashboardLauncher], env, options.paths.tmp);
-  return { upstream, paths: options.paths, exitInfo, stop: () => stop().then(() => upstream.close()) };
+  const { stop, exitInfo } = spawnAndCollect(
+    oraclePython,
+    [oracleDashboardLauncher],
+    env,
+    options.paths.tmp,
+  );
+  return {
+    upstream,
+    paths: options.paths,
+    exitInfo,
+    stop: () => stop().then(() => upstream.close()),
+  };
 }
 
 /** Boots the real candidate scheduler launcher (a fresh Node process
@@ -122,11 +136,25 @@ export async function startCandidateScheduler(options: StartOptions): Promise<Sc
     ...(options.tz === undefined ? {} : { TZ: options.tz }),
     ...(options.mutant === undefined ? {} : { T18_MUTANT: options.mutant }),
   };
-  const { stop, exitInfo } = spawnAndCollect(process.execPath, [candidateSchedulerLauncher], env, options.paths.tmp);
-  return { upstream, paths: options.paths, exitInfo, stop: () => stop().then(() => upstream.close()) };
+  const { stop, exitInfo } = spawnAndCollect(
+    process.execPath,
+    [candidateSchedulerLauncher],
+    env,
+    options.paths.tmp,
+  );
+  return {
+    upstream,
+    paths: options.paths,
+    exitInfo,
+    stop: () => stop().then(() => upstream.close()),
+  };
 }
 
-export function waitFor(condition: () => boolean, timeoutMs = 8000, intervalMs = 100): Promise<boolean> {
+export function waitFor(
+  condition: () => boolean,
+  timeoutMs = 8000,
+  intervalMs = 100,
+): Promise<boolean> {
   const start = Date.now();
   return new Promise((resolveWait) => {
     const attempt = (): void => {

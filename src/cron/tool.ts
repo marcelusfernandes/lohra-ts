@@ -64,9 +64,7 @@ export class CronTool {
       if (action === "remove" || action === "pause" || action === "resume") {
         return this.target(action, args);
       }
-      return toolError(
-        `unknown action ${pythonRepr(action)} (use add/list/remove/pause/resume)`,
-      );
+      return toolError(`unknown action ${pythonRepr(action)} (use add/list/remove/pause/resume)`);
     } catch (error) {
       if (error instanceof CronValidationError || error instanceof CronStoreError) {
         return toolError(error.message);
@@ -94,11 +92,16 @@ export class CronTool {
     return toolResult(undefined, { jobs });
   }
 
-  private target(action: Extract<Action, "remove" | "pause" | "resume">, args: ToolArguments): string {
+  private target(
+    action: Extract<Action, "remove" | "pause" | "resume">,
+    args: ToolArguments,
+  ): string {
     const jobId = text(args.job_id);
     if (!jobId) return toolError(`'${action}' requires 'job_id'`);
     const found =
-      action === "remove" ? this.store.remove(jobId) : this.store.setEnabled(jobId, action === "resume");
+      action === "remove"
+        ? this.store.remove(jobId)
+        : this.store.setEnabled(jobId, action === "resume");
     if (!found) return toolError(`no job with id ${pythonRepr(jobId)}`);
     return toolResult(undefined, { job_id: jobId, action });
   }

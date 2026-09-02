@@ -23,7 +23,11 @@ const encoder = new TextEncoder();
 // shutdown()'s cancellation wiring is covered separately.
 const noSignal = new AbortController().signal;
 
-function jsonResponse(status: number, body: unknown, headers: Record<string, string> = {}): HttpResponseData {
+function jsonResponse(
+  status: number,
+  body: unknown,
+  headers: Record<string, string> = {},
+): HttpResponseData {
   return {
     status,
     headers: new Headers({ "content-type": "application/json", ...headers }),
@@ -78,7 +82,10 @@ class QueuePort implements ChatHttpPort {
   }
 }
 
-function fakeClient(queue: Array<HttpResponseData | Error>): { client: ChatCompletionsClient; port: QueuePort } {
+function fakeClient(queue: Array<HttpResponseData | Error>): {
+  client: ChatCompletionsClient;
+  port: QueuePort;
+} {
   const port = new QueuePort(queue);
   const client = new ChatCompletionsClient({
     baseUrl: "http://parent.invalid/v1",
@@ -136,9 +143,11 @@ describe("createChildRunner", () => {
   it("runs a turn via ClientPool's parent client, freezing systemPrompt and filtering tools to the child allow-list", async () => {
     const { sessions, close } = setup();
     sessions.createSession({ id: "parent-1", source: "gateway" });
-    const parentProfile = getProviderProfile("openai") ?? (() => {
-      throw new Error("openai profile missing");
-    })();
+    const parentProfile =
+      getProviderProfile("openai") ??
+      (() => {
+        throw new Error("openai profile missing");
+      })();
     const { client, port } = fakeClient([assistantStream("hi from child")]);
     const pool = new ClientPool(parentProfile, client, {
       home: "/tmp",
@@ -212,7 +221,8 @@ describe("createChildRunner", () => {
     const toolCall = (): HttpResponseData => toolCallStream("read_file", '{"path":"x"}', "call_1");
     const { client, port } = fakeClient([toolCall(), toolCall()]);
     const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
-    const baseDispatch = (): Promise<string> => Promise.resolve(JSON.stringify({ ok: true, result: "x" }));
+    const baseDispatch = (): Promise<string> =>
+      Promise.resolve(JSON.stringify({ ok: true, result: "x" }));
     const runner = makeRunner(sessions, pool, { childMaxIterations: 2, baseDispatch });
 
     const result = await runner("child-3", { prompt: "loop forever" }, "SYS", () => [], noSignal);
@@ -238,10 +248,14 @@ describe("createChildRunner", () => {
       // T11's approved retry policy honors a 30-second Retry-After. Disable
       // retry explicitly in this unit fixture so it measures T13's error
       // classification instead of sleeping through a real backoff.
-      jsonResponse(429, { error: "rate limited" }, {
-        "retry-after": "30",
-        "x-should-retry": "false",
-      }),
+      jsonResponse(
+        429,
+        { error: "rate limited" },
+        {
+          "retry-after": "30",
+          "x-should-retry": "false",
+        },
+      ),
     ]);
     const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
     const runner = makeRunner(sessions, pool);
@@ -297,12 +311,18 @@ describe("createChildRunner", () => {
   it("wires pricingOverrides into the child's ConversationRuntime the same way commands/chat.ts wires it for the parent", async () => {
     const { sessions, close } = setup();
     sessions.createSession({ id: "parent-1", source: "gateway" });
-    const parentProfile = getProviderProfile("openai") ?? (() => {
-      throw new Error("openai profile missing");
-    })();
+    const parentProfile =
+      getProviderProfile("openai") ??
+      (() => {
+        throw new Error("openai profile missing");
+      })();
     const { client } = fakeClient([assistantStream("priced")]);
     const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
-    const overridePrice = { inputPerMillion: 1_000_000, outputPerMillion: 1_000_000, source: "test" };
+    const overridePrice = {
+      inputPerMillion: 1_000_000,
+      outputPerMillion: 1_000_000,
+      source: "test",
+    };
     const runner = makeRunner(sessions, pool, {
       pricingOverrides: new Map([[`${parentProfile.name}\0fake-model-a`, overridePrice]]),
     });

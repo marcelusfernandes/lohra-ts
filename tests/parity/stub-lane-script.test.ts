@@ -101,7 +101,9 @@ interface StubCompletionJson {
     readonly finish_reason: string;
     readonly message: {
       readonly content: string | null;
-      readonly tool_calls?: readonly { readonly function: { readonly name: string; readonly arguments: string } }[];
+      readonly tool_calls?: readonly {
+        readonly function: { readonly name: string; readonly arguments: string };
+      }[];
     };
   }[];
   readonly error?: { readonly message: string };
@@ -155,12 +157,24 @@ describe("chat-lane-script fixture", () => {
 
   it("advances each lane's step list independently, regardless of interleaving with another lane", async () => {
     reset({
-      main: [{ kind: "text", content: "MAIN-1" }, { kind: "text", content: "MAIN-2" }],
+      main: [
+        { kind: "text", content: "MAIN-1" },
+        { kind: "text", content: "MAIN-2" },
+      ],
       kid: [{ kind: "text", content: "KID-1" }],
     });
-    const main1 = await postJson({ model: "m", messages: [{ role: "user", content: "SCEN:main a" }] });
-    const kid1 = await postJson({ model: "m", messages: [{ role: "user", content: "SCEN:kid b" }] });
-    const main2 = await postJson({ model: "m", messages: [{ role: "user", content: "SCEN:main c" }] });
+    const main1 = await postJson({
+      model: "m",
+      messages: [{ role: "user", content: "SCEN:main a" }],
+    });
+    const kid1 = await postJson({
+      model: "m",
+      messages: [{ role: "user", content: "SCEN:kid b" }],
+    });
+    const main2 = await postJson({
+      model: "m",
+      messages: [{ role: "user", content: "SCEN:main c" }],
+    });
     expect(main1.choices[0]?.message.content).toBe("MAIN-1");
     expect(kid1.choices[0]?.message.content).toBe("KID-1");
     expect(main2.choices[0]?.message.content).toBe("MAIN-2");
@@ -168,9 +182,17 @@ describe("chat-lane-script fixture", () => {
 
   it("scripts a tool_calls step matching a spawn_session-shaped call", async () => {
     reset({
-      main: [{ kind: "tool_calls", calls: [{ name: "spawn_session", argumentsRaw: '{"prompt":"SCEN:kid do it"}' }] }],
+      main: [
+        {
+          kind: "tool_calls",
+          calls: [{ name: "spawn_session", argumentsRaw: '{"prompt":"SCEN:kid do it"}' }],
+        },
+      ],
     });
-    const response = await postJson({ model: "m", messages: [{ role: "user", content: "SCEN:main go" }] });
+    const response = await postJson({
+      model: "m",
+      messages: [{ role: "user", content: "SCEN:main go" }],
+    });
     expect(response.choices[0]?.finish_reason).toBe("tool_calls");
     expect(response.choices[0]?.message.tool_calls?.[0]?.function.name).toBe("spawn_session");
     expect(response.choices[0]?.message.tool_calls?.[0]?.function.arguments).toBe(
@@ -275,7 +297,10 @@ describe("chat-lane-script fixture", () => {
 
   it("serves an http_error step with the declared status and message", async () => {
     reset({ main: [{ kind: "http_error", status: 418, message: "T13_CANARY" }] });
-    const response = await post({ model: "m", messages: [{ role: "user", content: "SCEN:main go" }] });
+    const response = await post({
+      model: "m",
+      messages: [{ role: "user", content: "SCEN:main go" }],
+    });
     const parsed = (await response.json()) as StubCompletionJson;
     expect(response.status).toBe(418);
     expect(parsed.error?.message).toBe("T13_CANARY");
@@ -283,16 +308,24 @@ describe("chat-lane-script fixture", () => {
 
   it("serves an http_error step's declared extra headers (e.g. retry-after for quota scenarios)", async () => {
     reset({
-      main: [{ kind: "http_error", status: 429, message: "slow down", headers: { "retry-after": "30" } }],
+      main: [
+        { kind: "http_error", status: 429, message: "slow down", headers: { "retry-after": "30" } },
+      ],
     });
-    const response = await post({ model: "m", messages: [{ role: "user", content: "SCEN:main go" }] });
+    const response = await post({
+      model: "m",
+      messages: [{ role: "user", content: "SCEN:main go" }],
+    });
     expect(response.status).toBe(429);
     expect(response.headers.get("retry-after")).toBe("30");
   });
 
   it("omits extra headers entirely when an http_error step declares none", async () => {
     reset({ main: [{ kind: "http_error", status: 429, message: "slow down" }] });
-    const response = await post({ model: "m", messages: [{ role: "user", content: "SCEN:main go" }] });
+    const response = await post({
+      model: "m",
+      messages: [{ role: "user", content: "SCEN:main go" }],
+    });
     expect(response.headers.get("retry-after")).toBeNull();
   });
 
@@ -306,15 +339,19 @@ describe("chat-lane-script fixture", () => {
       // own response (also un-gated at that point) would have had more
       // than enough real I/O opportunity to complete during that round
       // trip too. The second step actually opens the gate.
-      opener: [{ kind: "text", content: "PROBE" }, { kind: "text", content: "OPENED", openGate: "go" }],
+      opener: [
+        { kind: "text", content: "PROBE" },
+        { kind: "text", content: "OPENED", openGate: "go" },
+      ],
     });
     let waiterResolved = false;
-    const waiterPromise = post({ model: "m", messages: [{ role: "user", content: "SCEN:waiter hold" }] }).then(
-      (r) => {
-        waiterResolved = true;
-        return r;
-      },
-    );
+    const waiterPromise = post({
+      model: "m",
+      messages: [{ role: "user", content: "SCEN:waiter hold" }],
+    }).then((r) => {
+      waiterResolved = true;
+      return r;
+    });
     // Confirms the waiter's request has actually reached the server (fired
     // synchronously, before its own gate wait) before doing anything else —
     // real async causality, not a guess about timing.

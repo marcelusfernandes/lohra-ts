@@ -27,14 +27,20 @@ function canConnect(port: number): Promise<boolean> {
       socket.destroy();
       resolveConnect(true);
     });
-    socket.once("error", () => { resolveConnect(false); });
+    socket.once("error", () => {
+      resolveConnect(false);
+    });
   });
 }
 
 export async function run(upstream: FakeUpstream): Promise<ProcessScenarioResult> {
   const port = await allocatePort();
   const paths = materialize("candidate");
-  seedSubscriptionAuth(paths, { authMode: "subscription", acknowledgedTosRisk: true, preference: "api_key" });
+  seedSubscriptionAuth(paths, {
+    authMode: "subscription",
+    acknowledgedTosRisk: true,
+    preference: "api_key",
+  });
   const invocation = buildServeInvocation("candidate", {}, upstream.url, paths, port);
   const before = upstream.requests.length;
 
@@ -52,7 +58,13 @@ export async function run(upstream: FakeUpstream): Promise<ProcessScenarioResult
 
   rmSync(paths.runtimeRoot, { recursive: true, force: true });
 
-  const record = { id: "subscription-preference-no-listener", result, checks, upstreamRequests, match };
+  const record = {
+    id: "subscription-preference-no-listener",
+    result,
+    checks,
+    upstreamRequests,
+    match,
+  };
   return {
     projection: { probes: [{ id: record.id, checks: record.checks, match }] },
     rawEvidence: [record],

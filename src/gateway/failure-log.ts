@@ -8,10 +8,7 @@ import { join } from "node:path";
 // elsewhere (assertion 49/57: two lines, 0 bytes on stdout, always) -- a
 // console.error here would silently break those assertions the moment this
 // path fires. jobs.json (the cited precedent) is a file, not stderr.
-export function logGatewayFailure(
-  home: string,
-  entry: Readonly<Record<string, unknown>>,
-): void {
+export function logGatewayFailure(home: string, entry: Readonly<Record<string, unknown>>): void {
   const dir = join(home, "logs");
   mkdirSync(dir, { recursive: true });
   const line = `${JSON.stringify({ at: Date.now() / 1000, ...entry })}\n`;

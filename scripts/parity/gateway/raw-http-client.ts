@@ -22,10 +22,7 @@ export interface RawHttpResponse {
   readonly rawHead: Buffer;
 }
 
-function headerValue(
-  headers: readonly (readonly [string, string])[],
-  name: string,
-): string | null {
+function headerValue(headers: readonly (readonly [string, string])[], name: string): string | null {
   const lower = name.toLowerCase();
   for (const [key, value] of headers) if (key.toLowerCase() === lower) return value;
   return null;
@@ -154,7 +151,14 @@ export async function sendRawHttpRequest(
         return;
       }
       const { statusLine, status, statusText, headers } = parseStatusAndHeaders(parsedHead.head);
-      resolvePromise({ statusLine, status, statusText, headers, body: parsedHead.rest, rawHead: parsedHead.head });
+      resolvePromise({
+        statusLine,
+        status,
+        statusText,
+        headers,
+        body: parsedHead.rest,
+        rawHead: parsedHead.head,
+      });
     });
   });
 }

@@ -105,11 +105,20 @@ export async function probeBothUpgrade(
 // sets, array lengths, primitive values -- must match exactly. Returns
 // null when equal, or a path-qualified description of the first
 // divergence found.
-export const MASKED_KEYS = new Set(["session_id", "id", "created_at", "started_at", "ended_at", "cwd", "parent_session_id"]);
+export const MASKED_KEYS = new Set([
+  "session_id",
+  "id",
+  "created_at",
+  "started_at",
+  "ended_at",
+  "cwd",
+  "parent_session_id",
+]);
 
 export function compareMasked(a: unknown, b: unknown, path = "$"): string | null {
   if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b)) return `${path}: array-shape mismatch (${JSON.stringify(a)} vs ${JSON.stringify(b)})`;
+    if (!Array.isArray(a) || !Array.isArray(b))
+      return `${path}: array-shape mismatch (${JSON.stringify(a)} vs ${JSON.stringify(b)})`;
     if (a.length !== b.length) return `${path}: length ${String(a.length)} vs ${String(b.length)}`;
     for (let i = 0; i < a.length; i += 1) {
       const sub = compareMasked(a[i], b[i], `${path}[${String(i)}]`);
@@ -179,7 +188,10 @@ export async function nextRpcResultFrame(
   ws: RawWsClient,
   rpcId: number | string,
   maxSkip = 5,
-): Promise<{ readonly envelope: Record<string, unknown>; readonly skippedEvents: readonly unknown[] }> {
+): Promise<{
+  readonly envelope: Record<string, unknown>;
+  readonly skippedEvents: readonly unknown[];
+}> {
   const skippedEvents: unknown[] = [];
   for (let i = 0; i < maxSkip; i += 1) {
     const frame = await ws.nextFrame();
@@ -193,7 +205,9 @@ export async function nextRpcResultFrame(
     // waiting for the one this call actually asked for.
     skippedEvents.push(envelope);
   }
-  throw new Error(`NEXT_RPC_RESULT_FRAME_EXHAUSTED id=${String(rpcId)} skipped=${JSON.stringify(skippedEvents)}`);
+  throw new Error(
+    `NEXT_RPC_RESULT_FRAME_EXHAUSTED id=${String(rpcId)} skipped=${JSON.stringify(skippedEvents)}`,
+  );
 }
 
 // Sends the SAME JSON-RPC request to both raw WS connections and does a
@@ -204,7 +218,12 @@ export async function nextRpcResultFrame(
 export async function rpcRoundTrip(
   oracleWs: RawWsClient,
   candidateWs: RawWsClient,
-  request: { readonly jsonrpc: "2.0"; readonly id: number | string; readonly method: string; readonly params: unknown },
+  request: {
+    readonly jsonrpc: "2.0";
+    readonly id: number | string;
+    readonly method: string;
+    readonly params: unknown;
+  },
 ): Promise<RpcRoundTripResult> {
   oracleWs.sendText(JSON.stringify(request));
   candidateWs.sendText(JSON.stringify(request));
@@ -234,10 +253,20 @@ export async function perSessionRoundTrip(
   extraParams: Record<string, unknown> = {},
 ): Promise<RpcRoundTripResult> {
   oracleWs.sendText(
-    JSON.stringify({ jsonrpc: "2.0", id: rpcId, method, params: { session_id: oracleSessionId, ...extraParams } }),
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: rpcId,
+      method,
+      params: { session_id: oracleSessionId, ...extraParams },
+    }),
   );
   candidateWs.sendText(
-    JSON.stringify({ jsonrpc: "2.0", id: rpcId, method, params: { session_id: candidateSessionId, ...extraParams } }),
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: rpcId,
+      method,
+      params: { session_id: candidateSessionId, ...extraParams },
+    }),
   );
   const [oracleResult, candidateResult] = await Promise.all([
     nextRpcResultFrame(oracleWs, rpcId),
@@ -284,7 +313,11 @@ export function eventTypeSequence(events: readonly DrainedEvent[]): readonly str
   return events.map((event) => (event.kind === "event" ? (event.type ?? "?") : "rpc-result"));
 }
 
-export function frameKey(envelope: { readonly method?: string; readonly id?: unknown; readonly params?: { readonly type?: string } }): string {
+export function frameKey(envelope: {
+  readonly method?: string;
+  readonly id?: unknown;
+  readonly params?: { readonly type?: string };
+}): string {
   if (envelope.method === "event") return `event:${envelope.params?.type ?? "?"}`;
   return `rpc:${String(envelope.id)}`;
 }
@@ -312,7 +345,9 @@ export async function collectKeyedFrames(
     required.delete(key);
   }
   if (required.size > 0) {
-    throw new Error(`COLLECT_KEYED_FRAMES_EXHAUSTED missing=${JSON.stringify([...required])} seen=${JSON.stringify(Object.keys(seen))}`);
+    throw new Error(
+      `COLLECT_KEYED_FRAMES_EXHAUSTED missing=${JSON.stringify([...required])} seen=${JSON.stringify(Object.keys(seen))}`,
+    );
   }
   return seen;
 }
@@ -351,7 +386,10 @@ export interface CreatedSessionPair {
   readonly candidateSessionId: string;
 }
 
-export async function createSessionBoth(oracleWs: RawWsClient, candidateWs: RawWsClient): Promise<CreatedSessionPair> {
+export async function createSessionBoth(
+  oracleWs: RawWsClient,
+  candidateWs: RawWsClient,
+): Promise<CreatedSessionPair> {
   const create = await rpcRoundTrip(oracleWs, candidateWs, {
     jsonrpc: "2.0",
     id: 1,
@@ -361,7 +399,9 @@ export async function createSessionBoth(oracleWs: RawWsClient, candidateWs: RawW
   return {
     divergence: create.divergence,
     evidence: create,
-    oracleSessionId: (create.oracleEnvelope.result as { session_id: string } | undefined)?.session_id ?? "",
-    candidateSessionId: (create.candidateEnvelope.result as { session_id: string } | undefined)?.session_id ?? "",
+    oracleSessionId:
+      (create.oracleEnvelope.result as { session_id: string } | undefined)?.session_id ?? "",
+    candidateSessionId:
+      (create.candidateEnvelope.result as { session_id: string } | undefined)?.session_id ?? "",
   };
 }

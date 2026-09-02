@@ -24,7 +24,15 @@ registerProvider({
   defaultAuxModel: "fake-model-a",
 });
 
-const argv = ["dashboard", "--host", "127.0.0.1", "--port", process.env.LOHRA_PORT ?? "0", "--provider", "fakeprov"];
+const argv = [
+  "dashboard",
+  "--host",
+  "127.0.0.1",
+  "--port",
+  process.env.LOHRA_PORT ?? "0",
+  "--provider",
+  "fakeprov",
+];
 if (process.env.LOHRA_NO_OPEN === "1") argv.push("--no-open");
 if (process.env.LOHRA_INSECURE === "1") argv.push("--insecure");
 

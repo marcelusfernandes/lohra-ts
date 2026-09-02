@@ -41,7 +41,9 @@ describe("runDashboard: no provider configured (assertion 56)", () => {
     const options = baseOptions({ argv: [] });
     const code = await runDashboard(options);
     expect(code).toBe(2);
-    expect(options.stderrLines.join("")).toContain("no provider configured — there are three ways in:");
+    expect(options.stderrLines.join("")).toContain(
+      "no provider configured — there are three ways in:",
+    );
   });
 });
 
@@ -68,7 +70,10 @@ describe("runDashboard: subscription mode without login (assertion 50)", () => {
 
   it("boots successfully when acknowledged_tos_risk is false", async () => {
     const home = tempHome();
-    writeFileSync(join(home, "auth.json"), JSON.stringify({ openai: { auth_mode: "subscription", acknowledged_tos_risk: false } }));
+    writeFileSync(
+      join(home, "auth.json"),
+      JSON.stringify({ openai: { auth_mode: "subscription", acknowledged_tos_risk: false } }),
+    );
     const stderrLines: string[] = [];
     let shutdown: (() => void) | undefined;
     const donePromise = runDashboard({
@@ -95,7 +100,9 @@ describe("runDashboard: subscription mode without login (assertion 50)", () => {
     const home = tempHome();
     writeFileSync(
       join(home, "auth.json"),
-      JSON.stringify({ openai: { auth_mode: "subscription", acknowledged_tos_risk: true, preference: "api_key" } }),
+      JSON.stringify({
+        openai: { auth_mode: "subscription", acknowledged_tos_risk: true, preference: "api_key" },
+      }),
     );
     const stderrLines: string[] = [];
     let shutdown: (() => void) | undefined;
@@ -123,7 +130,11 @@ describe("runDashboard: subscription mode without login (assertion 50)", () => {
 describe("runDashboard: port already bound (assertion 55)", () => {
   it("exits 3, and the WS token line is printed before the bind failure", async () => {
     const blocker: Server = createServer();
-    await new Promise<void>((resolvePromise) => blocker.listen(0, "127.0.0.1", () => { resolvePromise(); }));
+    await new Promise<void>((resolvePromise) =>
+      blocker.listen(0, "127.0.0.1", () => {
+        resolvePromise();
+      }),
+    );
     const address = blocker.address();
     const occupiedPort = typeof address === "object" && address !== null ? address.port : 0;
 
@@ -132,7 +143,11 @@ describe("runDashboard: port already bound (assertion 55)", () => {
     expect(code).toBe(3);
     expect(options.stderrLines.some((line) => line.includes("WebSocket:"))).toBe(true);
 
-    await new Promise<void>((resolvePromise) => blocker.close(() => { resolvePromise(); }));
+    await new Promise<void>((resolvePromise) =>
+      blocker.close(() => {
+        resolvePromise();
+      }),
+    );
   });
 });
 
@@ -175,9 +190,15 @@ describe("runDashboard: SIGINT-equivalent shutdown (assertion 54)", () => {
     const rebind: Server = createServer();
     await new Promise<void>((resolvePromise, reject) => {
       rebind.once("error", reject);
-      rebind.listen(port, "127.0.0.1", () => { resolvePromise(); });
+      rebind.listen(port, "127.0.0.1", () => {
+        resolvePromise();
+      });
     });
-    await new Promise<void>((resolvePromise) => rebind.close(() => { resolvePromise(); }));
+    await new Promise<void>((resolvePromise) =>
+      rebind.close(() => {
+        resolvePromise();
+      }),
+    );
   });
 });
 
@@ -190,7 +211,11 @@ describe("runDashboard: --port CLI flag (mirrors the oracle's dashboard --port, 
         resolvePromise(typeof address === "object" && address !== null ? address.port : 0);
       });
     });
-    await new Promise<void>((resolvePromise) => probe.close(() => { resolvePromise(); }));
+    await new Promise<void>((resolvePromise) =>
+      probe.close(() => {
+        resolvePromise();
+      }),
+    );
 
     const options = baseOptions({ argv: ["--provider", "anthropic", "--port", String(freePort)] });
     delete (options as { port?: number }).port;

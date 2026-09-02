@@ -52,12 +52,15 @@ function analyzeSse(body: string): FrameCheck {
   }
   const ids = parsedFrames.map((frame) => frame["id"]);
   const createds = parsedFrames.map((frame) => frame["created"]);
-  const idsOk = ids.every((id) => typeof id === "string" && CHATCMPL_ID.test(id)) && new Set(ids).size <= 1;
+  const idsOk =
+    ids.every((id) => typeof id === "string" && CHATCMPL_ID.test(id)) && new Set(ids).size <= 1;
   const createdsOk =
-    createds.every((value) => typeof value === "number" && Number.isInteger(value)) && new Set(createds).size <= 1;
+    createds.every((value) => typeof value === "number" && Number.isInteger(value)) &&
+    new Set(createds).size <= 1;
   const startsWithRoleDelta =
     parsedFrames.length > 0 &&
-    (parsedFrames[0]?.["choices"] as Array<{ delta?: { role?: string } }> | undefined)?.[0]?.delta?.role === "assistant";
+    (parsedFrames[0]?.["choices"] as Array<{ delta?: { role?: string } }> | undefined)?.[0]?.delta
+      ?.role === "assistant";
   const endsWithDone = dataLines.at(-1) === "[DONE]";
   const hasUsageChunk = parsedFrames.some((frame) => frame["usage"] !== undefined);
   const leaksToolCalls = jsonFrames.some((line) => line.includes("tool_calls"));
@@ -65,7 +68,10 @@ function analyzeSse(body: string): FrameCheck {
     frame["id"] = "<ID>";
     frame["created"] = 0;
   }
-  const normalizedLines = [...parsedFrames.map((frame) => `data: ${JSON.stringify(frame)}`), ...(dataLines.includes("[DONE]") ? ["data: [DONE]"] : [])];
+  const normalizedLines = [
+    ...parsedFrames.map((frame) => `data: ${JSON.stringify(frame)}`),
+    ...(dataLines.includes("[DONE]") ? ["data: [DONE]"] : []),
+  ];
   return {
     text: normalizedLines.join("\n\n"),
     shapeOk: !parseFailed && idsOk && createdsOk,
@@ -111,7 +117,13 @@ export async function run(
   const probes: (ProbeRecord & { upstream: UpstreamRequestRecord[] })[] = [];
   for (const testCase of CASES) {
     const before = upstream.requests.length;
-    const probe = await probeBoth(testCase.id, oracle, candidate, (apiKey) => postRequestLines(apiKey, testCase.body), testCase.body);
+    const probe = await probeBoth(
+      testCase.id,
+      oracle,
+      candidate,
+      (apiKey) => postRequestLines(apiKey, testCase.body),
+      testCase.body,
+    );
     probes.push({ ...probe, upstream: upstream.requests.slice(before) });
   }
 
@@ -123,7 +135,9 @@ export async function run(
     upstream: entry.upstream,
   }));
 
-  const expectUsageById = new Map(CASES.map((testCase) => [testCase.id, testCase.includeUsage === true]));
+  const expectUsageById = new Map(
+    CASES.map((testCase) => [testCase.id, testCase.includeUsage === true]),
+  );
 
   const differences: unknown[] = [];
   const projectedProbes = probes.map((entry) => {
@@ -136,7 +150,8 @@ export async function run(
     });
     const headersOk = [entry.oracle, entry.candidate].every((response) => {
       const contentType = response.headers.find(([name]) => name === "content-type")?.[1] ?? "";
-      const transferEncoding = response.headers.find(([name]) => name === "transfer-encoding")?.[1] ?? "";
+      const transferEncoding =
+        response.headers.find(([name]) => name === "transfer-encoding")?.[1] ?? "";
       const hasContentLength = response.headers.some(([name]) => name === "content-length");
       const hasForbidden = response.headers.some(([name]) => FORBIDDEN_HEADERS.includes(name));
       return (
@@ -150,10 +165,20 @@ export async function run(
     const roleDeltaOk = oracleFrames.startsWithRoleDelta && candidateFrames.startsWithRoleDelta;
     const doneOk = oracleFrames.endsWithDone && candidateFrames.endsWithDone;
     const expectedUsage = expectUsageById.get(entry.id) ?? false;
-    const usageOk = oracleFrames.hasUsageChunk === expectedUsage && candidateFrames.hasUsageChunk === expectedUsage;
+    const usageOk =
+      oracleFrames.hasUsageChunk === expectedUsage &&
+      candidateFrames.hasUsageChunk === expectedUsage;
     const noToolLeakOk = !oracleFrames.leaksToolCalls && !candidateFrames.leaksToolCalls;
     const upstreamCountOk = entry.upstream.length === 2;
-    const ok = comparison.match && headersOk && shapeOk && roleDeltaOk && doneOk && usageOk && noToolLeakOk && upstreamCountOk;
+    const ok =
+      comparison.match &&
+      headersOk &&
+      shapeOk &&
+      roleDeltaOk &&
+      doneOk &&
+      usageOk &&
+      noToolLeakOk &&
+      upstreamCountOk;
     const record = {
       id: entry.id,
       normalized: { oracle: comparison.oracle, candidate: comparison.candidate },
@@ -169,8 +194,14 @@ export async function run(
     projection: {
       probes: projectedProbes,
       normalizations: [
-        { path: "/v1/chat/completions (stream)", rule: "every SSE frame's `id` checked against chatcmpl-<32hex> and SAME across frames, then set to <ID>; `created` checked integer and SAME across frames, then zeroed (assertions 30/33)." },
-        { path: "*", rule: "`date`/`server` headers dropped; content-length dropped (SSE responses never carry one); header order not compared." },
+        {
+          path: "/v1/chat/completions (stream)",
+          rule: "every SSE frame's `id` checked against chatcmpl-<32hex> and SAME across frames, then set to <ID>; `created` checked integer and SAME across frames, then zeroed (assertions 30/33).",
+        },
+        {
+          path: "*",
+          rule: "`date`/`server` headers dropped; content-length dropped (SSE responses never carry one); header order not compared.",
+        },
       ],
     },
     rawEvidence,

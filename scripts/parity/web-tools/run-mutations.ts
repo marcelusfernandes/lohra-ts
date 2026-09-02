@@ -37,7 +37,7 @@ const MUTANTS: readonly Mutant[] = [
   {
     id: "a-peer-membership",
     file: "src/web/connector.ts",
-    find: "  if (memberAddressOf(peer, allowed) === null) return \"not-in-validated-set\";\n",
+    find: '  if (memberAddressOf(peer, allowed) === null) return "not-in-validated-set";\n',
     replace: "  void allowed;\n",
     scenarios: ["t20-peer-divergent", "t20-peer-matrix"],
   },
@@ -102,13 +102,14 @@ const MUTANTS: readonly Mutant[] = [
     id: "e-tls-verification-off",
     file: "src/web/connector.ts",
     find: "        servername: secure && !isIpLiteral(request.hostname) ? request.hostname : null,\n        rejectUnauthorized: true,",
-    replace: "        servername: secure && !isIpLiteral(request.hostname) ? request.hostname : null,\n        rejectUnauthorized: false,",
+    replace:
+      "        servername: secure && !isIpLiteral(request.hostname) ? request.hostname : null,\n        rejectUnauthorized: false,",
     scenarios: ["t20-connector-tls"],
   },
   {
     id: "f-userinfo-accepted",
     file: "src/web/safety.ts",
-    find: "  if (authority.authority.includes(\"@\")) {\n    throw new WebError(\"refusing URL with embedded credentials\");\n  }",
+    find: '  if (authority.authority.includes("@")) {\n    throw new WebError("refusing URL with embedded credentials");\n  }',
     replace: "  void authority;",
     scenarios: ["t20-userinfo"],
   },
@@ -141,7 +142,7 @@ const MUTANTS: readonly Mutant[] = [
     id: "i-envelope-cause-removed",
     file: "src/web/tool.ts",
     find: "    if (error instanceof WebError) return toolError(error.message, { url });",
-    replace: "    if (error instanceof WebError) return toolError(\"fetch failed\", { url });",
+    replace: '    if (error instanceof WebError) return toolError("fetch failed", { url });',
     scenarios: ["t20-scheme-host"],
   },
 ];
@@ -283,10 +284,9 @@ function main(): void {
         try {
           const record = runScenario(manifest, { cwd: copy, projectRoot: copy, oracleWorkspace });
           verdict = record.verdict;
-          candidateOutput = Buffer.from(
-            record.runs.candidate.process.stdout,
-            "base64",
-          ).toString("utf8");
+          candidateOutput = Buffer.from(record.runs.candidate.process.stdout, "base64").toString(
+            "utf8",
+          );
         } catch (error) {
           proofError = error instanceof Error ? error.message : String(error);
           verdict = "error";

@@ -14,7 +14,10 @@ import { join } from "node:path";
  * 14/ADR-T13-04 (uncollected child failure), and ADR-T13-01 item 2
  * (privilege-escalation cause).
  */
-export function logOrchestrationFailure(home: string, entry: Readonly<Record<string, unknown>>): void {
+export function logOrchestrationFailure(
+  home: string,
+  entry: Readonly<Record<string, unknown>>,
+): void {
   const dir = join(home, "logs");
   mkdirSync(dir, { recursive: true });
   const line = `${JSON.stringify({ ...entry, at: Date.now() / 1000 })}\n`;

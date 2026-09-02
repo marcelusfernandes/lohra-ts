@@ -12,7 +12,11 @@ import { resolve } from "node:path";
 const root = resolve(import.meta.dirname, "../../..");
 const scenarios = resolve(root, "scripts/parity/scenarios");
 
-function command(argv: readonly string[]): { readonly status: number | null; readonly stdout: string; readonly stderr: string } {
+function command(argv: readonly string[]): {
+  readonly status: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+} {
   const result = spawnSync("npm", argv, {
     cwd: root,
     env: process.env,
@@ -23,11 +27,23 @@ function command(argv: readonly string[]): { readonly status: number | null; rea
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
-function runManifestGroup(prefix: string): { readonly id: string; readonly exitCode: number | null; readonly expected: number; readonly pass: boolean }[] {
+function runManifestGroup(
+  prefix: string,
+): {
+  readonly id: string;
+  readonly exitCode: number | null;
+  readonly expected: number;
+  readonly pass: boolean;
+}[] {
   const names = readdirSync(scenarios)
     .filter((name) => name.startsWith(`${prefix}-`) && name.endsWith(".json"))
     .sort();
-  const results: { readonly id: string; readonly exitCode: number | null; readonly expected: number; readonly pass: boolean }[] = [];
+  const results: {
+    readonly id: string;
+    readonly exitCode: number | null;
+    readonly expected: number;
+    readonly pass: boolean;
+  }[] = [];
   for (const name of names) {
     const result = command(["run", "parity", "--", "--manifest", resolve(scenarios, name)]);
     // Both naming conventions this repo uses for a deliberately-broken
@@ -36,7 +52,10 @@ function runManifestGroup(prefix: string): { readonly id: string; readonly exitC
     const expected = name.includes("deliberate-divergence") || name.includes("-mutant") ? 1 : 0;
     const pass = result.status === expected;
     results.push({ id: name.slice(0, -5), exitCode: result.status, expected, pass });
-    if (!pass) throw new Error(`T18_GATE_FAILED:${name}:${String(result.status)}:${result.stdout}:${result.stderr}`);
+    if (!pass)
+      throw new Error(
+        `T18_GATE_FAILED:${name}:${String(result.status)}:${result.stdout}:${result.stderr}`,
+      );
   }
   return results;
 }
@@ -56,11 +75,17 @@ const suites = [
   ["t08", "parity:t08:all"],
   ["t09", "parity:t09:all"],
 ] as const;
-const suiteResults: { readonly id: string; readonly exitCode: number | null; readonly summary: unknown }[] = [];
+const suiteResults: {
+  readonly id: string;
+  readonly exitCode: number | null;
+  readonly summary: unknown;
+}[] = [];
 for (const [id, script] of suites) {
   const result = command(["run", script]);
   if (result.status !== 0)
-    throw new Error(`${id.toUpperCase()}_GATE_FAILED:${String(result.status)}:${result.stdout}:${result.stderr}`);
+    throw new Error(
+      `${id.toUpperCase()}_GATE_FAILED:${String(result.status)}:${result.stdout}:${result.stderr}`,
+    );
   suiteResults.push({ id, exitCode: result.status, summary: lastJsonLine(result.stdout) });
 }
 

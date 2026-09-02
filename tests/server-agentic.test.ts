@@ -15,7 +15,12 @@ describe("relay/agentic iteration limits (assertion 52)", () => {
 
 describe("buildAllowedTools — server allowlist over the subagent guards", () => {
   it("--tools read_file,memory,delegate_task,nosuchtool exposes only read_file (assertion 53)", () => {
-    const { definitions } = buildAllowedTools(["read_file", "memory", "delegate_task", "nosuchtool"]);
+    const { definitions } = buildAllowedTools([
+      "read_file",
+      "memory",
+      "delegate_task",
+      "nosuchtool",
+    ]);
     expect(definitions.map((d) => d.function.name)).toEqual(["read_file"]);
   });
 

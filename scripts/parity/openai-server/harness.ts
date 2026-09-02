@@ -63,7 +63,8 @@ export function runGuards(): Guards {
   if (oracleCommit !== ORACLE_SHA) throw new Error(`T11_ORACLE_PIN:${oracleCommit}`);
   if (checkedOutput("git", ["status", "--porcelain"], oracleCheckout) !== "")
     throw new Error("T11_ORACLE_DIRTY");
-  if (checkedOutput(oracleCliBin, ["--version"]) !== ORACLE_VERSION) throw new Error("T11_ORACLE_VERSION");
+  if (checkedOutput(oracleCliBin, ["--version"]) !== ORACLE_VERSION)
+    throw new Error("T11_ORACLE_VERSION");
   const targetSha = checkedOutput("git", ["rev-parse", "HEAD"]).trim();
   if (process.env.T11_HARNESS_DEV !== "1" && checkedOutput("git", ["status", "--porcelain"]) !== "")
     throw new Error("T11_CANDIDATE_DIRTY");
@@ -77,7 +78,9 @@ export function allocatePort(): Promise<number> {
     probe.listen(0, "127.0.0.1", () => {
       const address = probe.address();
       const port = typeof address === "object" && address !== null ? address.port : 0;
-      probe.close(() => { resolvePort(port); });
+      probe.close(() => {
+        resolvePort(port);
+      });
     });
   });
 }
@@ -146,7 +149,9 @@ export interface ServerHandle {
   readonly apiKey: string | null;
   readonly stdout: () => string;
   readonly stderr: () => string;
-  stop(signal?: NodeJS.Signals): Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>;
+  stop(
+    signal?: NodeJS.Signals,
+  ): Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>;
 }
 
 export interface ServeInvocation {
@@ -186,7 +191,13 @@ export function buildServeInvocation(
     ...(config.insecure ? { LOHRA_INSECURE: "1" } : {}),
     ...(config.tools ? { LOHRA_TOOLS: config.tools } : {}),
     ...(apiKey !== null ? { LOHRA_OPENAI_API_KEY: apiKey } : {}),
-    ...(side === "oracle" ? { PYTHONPATH: join(oracleCheckout, "backend"), PYTHONUTF8: "1", PYTHONDONTWRITEBYTECODE: "1" } : {}),
+    ...(side === "oracle"
+      ? {
+          PYTHONPATH: join(oracleCheckout, "backend"),
+          PYTHONUTF8: "1",
+          PYTHONDONTWRITEBYTECODE: "1",
+        }
+      : {}),
   };
   const [executable, args] =
     side === "oracle"
@@ -217,7 +228,13 @@ export async function startServer(
   const port = await allocatePort();
   const paths = materialize(side);
   if (config.seedAuth !== undefined) seedSubscriptionAuth(paths, config.seedAuth);
-  const { executable, args, env, apiKey } = buildServeInvocation(side, config, loopbackUpstreamUrl, paths, port);
+  const { executable, args, env, apiKey } = buildServeInvocation(
+    side,
+    config,
+    loopbackUpstreamUrl,
+    paths,
+    port,
+  );
   const child: ChildProcessByStdio<null, Readable, Readable> = spawn(executable, args, {
     cwd: paths.cwd,
     env,
@@ -383,7 +400,9 @@ export function normalizeForComparison(
   return {
     statusLine: response.statusLine,
     headers: Object.fromEntries(
-      response.headers.filter(([name]) => !dropped.has(name)).toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+      response.headers
+        .filter(([name]) => !dropped.has(name))
+        .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
     ),
     body: bodyOverride ?? response.body,
   };
@@ -405,10 +424,26 @@ export function compareRaw(
      * itself is being compared. */
     readonly extraDroppedHeaders?: readonly string[];
   } = {},
-): { readonly match: boolean; readonly oracle: NormalizedView; readonly candidate: NormalizedView } {
-  const oracleView = normalizeForComparison(oracle, options.oracleBody, options.extraDroppedHeaders);
-  const candidateView = normalizeForComparison(candidate, options.candidateBody, options.extraDroppedHeaders);
-  return { match: JSON.stringify(oracleView) === JSON.stringify(candidateView), oracle: oracleView, candidate: candidateView };
+): {
+  readonly match: boolean;
+  readonly oracle: NormalizedView;
+  readonly candidate: NormalizedView;
+} {
+  const oracleView = normalizeForComparison(
+    oracle,
+    options.oracleBody,
+    options.extraDroppedHeaders,
+  );
+  const candidateView = normalizeForComparison(
+    candidate,
+    options.candidateBody,
+    options.extraDroppedHeaders,
+  );
+  return {
+    match: JSON.stringify(oracleView) === JSON.stringify(candidateView),
+    oracle: oracleView,
+    candidate: candidateView,
+  };
 }
 
 export function sha256(value: string): string {
@@ -431,7 +466,11 @@ export function writeEvidence(id: string, record: unknown): string {
  * Used by the `[processo-ts]` subscription-gate scenarios. */
 export function seedSubscriptionAuth(
   paths: RuntimePaths,
-  config: { readonly authMode: string; readonly acknowledgedTosRisk: boolean; readonly preference?: string },
+  config: {
+    readonly authMode: string;
+    readonly acknowledgedTosRisk: boolean;
+    readonly preference?: string;
+  },
 ): void {
   writeFileSync(
     join(paths.home, "auth.json"),
@@ -458,7 +497,11 @@ export interface ProcessResult {
  * deterministic refusal) instead of waiting for it to start listening.
  * Never touches the caller's `loopbackUpstreamUrl`/port beyond what
  * `buildServeInvocation` already needs. */
-export function runProcessToCompletion(invocation: ServeInvocation, cwd: string, timeoutMs = 8000): Promise<ProcessResult> {
+export function runProcessToCompletion(
+  invocation: ServeInvocation,
+  cwd: string,
+  timeoutMs = 8000,
+): Promise<ProcessResult> {
   return new Promise((resolveRun, reject) => {
     const child = spawn(invocation.executable, invocation.args, {
       cwd,
@@ -473,7 +516,9 @@ export function runProcessToCompletion(invocation: ServeInvocation, cwd: string,
     const timer = setTimeout(() => {
       if (settled) return;
       child.kill("SIGKILL");
-      reject(new Error(`T11_PROCESS_TIMEOUT:stderr=${Buffer.concat(stderrChunks).toString("utf8")}`));
+      reject(
+        new Error(`T11_PROCESS_TIMEOUT:stderr=${Buffer.concat(stderrChunks).toString("utf8")}`),
+      );
     }, timeoutMs);
     child.once("error", reject);
     child.once("close", (exitCode, signal) => {

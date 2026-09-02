@@ -47,5 +47,7 @@ for (const probe of probes) {
   results.push({ id: probe.id, passed, pass });
 }
 
-process.stdout.write(`${JSON.stringify({ suite: "t13-probe-complementar", probes: results, failures })}\n`);
+process.stdout.write(
+  `${JSON.stringify({ suite: "t13-probe-complementar", probes: results, failures })}\n`,
+);
 process.exitCode = failures === 0 ? 0 : 1;

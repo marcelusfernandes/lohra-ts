@@ -20,7 +20,14 @@ function timerFactory() {
   return {
     timers,
     factory: (delay: number, fire: () => void): Timer => {
-      const timer: TestTimer = { delay, fire, cancelled: false, cancel: () => { timer.cancelled = true; } };
+      const timer: TestTimer = {
+        delay,
+        fire,
+        cancelled: false,
+        cancel: () => {
+          timer.cancelled = true;
+        },
+      };
       timers.push(timer);
       return timer;
     },
@@ -45,10 +52,13 @@ describe("LeaseHeartbeat", () => {
   it("beats at TTL/3 and re-arms while ownership holds", () => {
     const { timers, factory } = timerFactory();
     const renewals: string[] = [];
-    const heartbeat = new LeaseHeartbeat((runId) => {
-      renewals.push(runId);
-      return true;
-    }, { interval: 300, timerFactory: factory });
+    const heartbeat = new LeaseHeartbeat(
+      (runId) => {
+        renewals.push(runId);
+        return true;
+      },
+      { interval: 300, timerFactory: factory },
+    );
     heartbeat.start("run");
     expect(timers.length).toBe(1);
     expect(timers[0]?.delay).toBe(300);
@@ -114,10 +124,13 @@ describe("AutoResumeScheduler", () => {
   it("schedules with clamped delay, reports resume_at and caps at 5 attempts", () => {
     const { timers, factory } = timerFactory();
     const resumes: string[] = [];
-    const scheduler = new AutoResumeScheduler((runId) => {
-      resumes.push(runId);
-      return { run_id: runId, status: "started" };
-    }, { timerFactory: factory });
+    const scheduler = new AutoResumeScheduler(
+      (runId) => {
+        resumes.push(runId);
+        return { run_id: runId, status: "started" };
+      },
+      { timerFactory: factory },
+    );
     expect(scheduler.schedule("run", { attempts: 0 })).toBe(60);
     const timer = timers.at(-1);
     if (timer === undefined) throw new Error("expected timer");
@@ -129,10 +142,13 @@ describe("AutoResumeScheduler", () => {
   it("cancel and shutdown drop timers; a fired timer claims itself (no resurrection)", () => {
     const { timers, factory } = timerFactory();
     const resumes: string[] = [];
-    const scheduler = new AutoResumeScheduler((runId) => {
-      resumes.push(runId);
-      return { run_id: runId };
-    }, { timerFactory: factory });
+    const scheduler = new AutoResumeScheduler(
+      (runId) => {
+        resumes.push(runId);
+        return { run_id: runId };
+      },
+      { timerFactory: factory },
+    );
     scheduler.schedule("run", { attempts: 0 });
     scheduler.cancel("run");
     const cancelled = timers.at(-1);
@@ -163,18 +179,40 @@ describe("AutoResumeScheduler", () => {
       const fence = locks.acquireRunLease("q-run", "p1", 1000, 60);
       if (fence === null) throw new Error("lease");
       repository.putRunState("q-run", {
-        name: "q", owner: "p1", status: "paused", pauseReason: "quota_exhausted",
-        pausePayloadJson: JSON.stringify({ attempts: 2 }), specJson: null, argsJson: "{}",
-        tokenBudget: null, tainted: false, progressJson: null, auditSegmentId: null,
-        updatedAt: 1000, fence, holder: "p1", now: 1000,
+        name: "q",
+        owner: "p1",
+        status: "paused",
+        pauseReason: "quota_exhausted",
+        pausePayloadJson: JSON.stringify({ attempts: 2 }),
+        specJson: null,
+        argsJson: "{}",
+        tokenBudget: null,
+        tainted: false,
+        progressJson: null,
+        auditSegmentId: null,
+        updatedAt: 1000,
+        fence,
+        holder: "p1",
+        now: 1000,
       });
       const fenceB = locks.acquireRunLease("b-run", "p1", 1000, 60);
       if (fenceB === null) throw new Error("lease b");
       repository.putRunState("b-run", {
-        name: "b", owner: "p1", status: "paused", pauseReason: "token_budget_exhausted",
-        pausePayloadJson: JSON.stringify({ attempts: 0 }), specJson: null, argsJson: "{}",
-        tokenBudget: null, tainted: false, progressJson: null, auditSegmentId: null,
-        updatedAt: 1000, fence: fenceB, holder: "p1", now: 1000,
+        name: "b",
+        owner: "p1",
+        status: "paused",
+        pauseReason: "token_budget_exhausted",
+        pausePayloadJson: JSON.stringify({ attempts: 0 }),
+        specJson: null,
+        argsJson: "{}",
+        tokenBudget: null,
+        tainted: false,
+        progressJson: null,
+        auditSegmentId: null,
+        updatedAt: 1000,
+        fence: fenceB,
+        holder: "p1",
+        now: 1000,
       });
       const { factory } = timerFactory();
       const scheduler = new AutoResumeScheduler(() => ({ run_id: "x", status: "started" }), {
@@ -190,9 +228,7 @@ describe("AutoResumeScheduler", () => {
       };
       const rearmed = scheduler.rearmPendingResumes(
         (reason) =>
-          repository
-            .runStatesByPause(reason, 50)
-            .map((row) => ({ run_id: String(row.run_id) })),
+          repository.runStatesByPause(reason, 50).map((row) => ({ run_id: String(row.run_id) })),
         attemptsOf,
       );
       expect(rearmed).toEqual(["q-run"]);

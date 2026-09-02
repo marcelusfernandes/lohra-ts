@@ -138,7 +138,8 @@ export function runCron(options: CronCommandOptions): Result {
     if (jobId === undefined) {
       return { code: 2, stdout: "", stderr: `${action} needs a job id\n` };
     }
-    const found = action === "remove" ? store.remove(jobId) : store.setEnabled(jobId, action === "resume");
+    const found =
+      action === "remove" ? store.remove(jobId) : store.setEnabled(jobId, action === "resume");
     if (!found) {
       return { code: 1, stdout: "", stderr: `no job with id ${pythonRepr(jobId)}\n` };
     }

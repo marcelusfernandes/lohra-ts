@@ -15,14 +15,50 @@ interface CaseSpec {
 
 const CASES: readonly CaseSpec[] = [
   { id: "post-models", method: "POST", path: "/v1/models", withAuth: true, expectedStatus: 405 },
-  { id: "options-chat-completions", method: "OPTIONS", path: "/v1/chat/completions", withAuth: true, expectedStatus: 405 },
+  {
+    id: "options-chat-completions",
+    method: "OPTIONS",
+    path: "/v1/chat/completions",
+    withAuth: true,
+    expectedStatus: 405,
+  },
   { id: "get-root", method: "GET", path: "/", withAuth: false, expectedStatus: 404 },
   { id: "get-runs-no-auth", method: "GET", path: "/v1/runs", withAuth: false, expectedStatus: 404 },
-  { id: "get-runs-with-auth", method: "GET", path: "/v1/runs", withAuth: true, expectedStatus: 404 },
-  { id: "post-runs-no-auth", method: "POST", path: "/v1/runs", withAuth: false, expectedStatus: 404 },
-  { id: "post-runs-with-auth", method: "POST", path: "/v1/runs", withAuth: true, expectedStatus: 404 },
-  { id: "get-runs-abc-no-auth", method: "GET", path: "/v1/runs/abc", withAuth: false, expectedStatus: 404 },
-  { id: "get-runs-abc-with-auth", method: "GET", path: "/v1/runs/abc", withAuth: true, expectedStatus: 404 },
+  {
+    id: "get-runs-with-auth",
+    method: "GET",
+    path: "/v1/runs",
+    withAuth: true,
+    expectedStatus: 404,
+  },
+  {
+    id: "post-runs-no-auth",
+    method: "POST",
+    path: "/v1/runs",
+    withAuth: false,
+    expectedStatus: 404,
+  },
+  {
+    id: "post-runs-with-auth",
+    method: "POST",
+    path: "/v1/runs",
+    withAuth: true,
+    expectedStatus: 404,
+  },
+  {
+    id: "get-runs-abc-no-auth",
+    method: "GET",
+    path: "/v1/runs/abc",
+    withAuth: false,
+    expectedStatus: 404,
+  },
+  {
+    id: "get-runs-abc-with-auth",
+    method: "GET",
+    path: "/v1/runs/abc",
+    withAuth: true,
+    expectedStatus: 404,
+  },
 ];
 
 function requestLines(method: string, path: string, authLine: string): string {
@@ -43,25 +79,43 @@ export async function run(
   for (const testCase of CASES) {
     probes.push(
       await probeBoth(testCase.id, oracle, candidate, (apiKey) =>
-        requestLines(testCase.method, testCase.path, testCase.withAuth ? `Authorization: Bearer ${apiKey ?? ""}\n` : ""),
+        requestLines(
+          testCase.method,
+          testCase.path,
+          testCase.withAuth ? `Authorization: Bearer ${apiKey ?? ""}\n` : "",
+        ),
       ),
     );
   }
 
-  const rawEvidence = probes.map((entry) => ({ id: entry.id, request: entry.request, oracle: entry.oracle, candidate: entry.candidate }));
+  const rawEvidence = probes.map((entry) => ({
+    id: entry.id,
+    request: entry.request,
+    oracle: entry.oracle,
+    candidate: entry.candidate,
+  }));
   const casesById = new Map(CASES.map((testCase) => [testCase.id, testCase]));
 
   const differences: unknown[] = [];
   const projectedProbes = probes.map((entry) => {
     const testCase = casesById.get(entry.id);
-    const expectedBody = testCase?.expectedStatus === 405 ? '{"detail":"Method Not Allowed"}' : '{"detail":"Not Found"}';
+    const expectedBody =
+      testCase?.expectedStatus === 405
+        ? '{"detail":"Method Not Allowed"}'
+        : '{"detail":"Not Found"}';
     const comparison = compareRaw(entry.oracle, entry.candidate);
     const expectedStatus = ` ${String(testCase?.expectedStatus)} `;
-    const statusOk = entry.oracle.statusLine.includes(expectedStatus) && entry.candidate.statusLine.includes(expectedStatus);
+    const statusOk =
+      entry.oracle.statusLine.includes(expectedStatus) &&
+      entry.candidate.statusLine.includes(expectedStatus);
     const bodyOk = entry.oracle.body === expectedBody && entry.candidate.body === expectedBody;
     const ok = comparison.match && statusOk && bodyOk;
     const record = { id: entry.id, expectedStatus: expectedStatus.trim(), expectedBody, match: ok };
-    if (!ok) differences.push({ ...record, normalized: { oracle: comparison.oracle, candidate: comparison.candidate } });
+    if (!ok)
+      differences.push({
+        ...record,
+        normalized: { oracle: comparison.oracle, candidate: comparison.candidate },
+      });
     return record;
   });
 
@@ -69,7 +123,9 @@ export async function run(
   return {
     projection: {
       probes: projectedProbes,
-      normalizations: [{ path: "*", rule: "`date`/`server` headers dropped; header order not compared." }],
+      normalizations: [
+        { path: "*", rule: "`date`/`server` headers dropped; header order not compared." },
+      ],
     },
     rawEvidence,
     match,

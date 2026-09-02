@@ -28,7 +28,6 @@ const locks = new LockRepository(connection.database);
 const clock = { now: Number(now) };
 const workspaceOutside = mkdtempSync(join(tmpdir(), "lohra-t16-outside-"));
 
-
 /**
  * The evidence runtime really sandboxes its leaves: one installation per
  * acquisition (keyed by fence), and the leaf's tool calls go through the
@@ -82,7 +81,9 @@ const runtime = {
     const root = service.workingRootFor(runId);
     leafToolOutcomes.push({
       inside: sandbox.runLeafTool(fence, "write_file", { path: join(root, "leaf.txt") }),
-      outside: sandbox.runLeafTool(fence, "read_file", { path: join(workspaceOutside, "secret.txt") }),
+      outside: sandbox.runLeafTool(fence, "read_file", {
+        path: join(workspaceOutside, "secret.txt"),
+      }),
     });
     return id;
   },
@@ -94,7 +95,13 @@ const runtime = {
     return {
       status: "complete",
       output: { answer: "a-done" },
-      usage: { inputTokens: 7, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+      usage: {
+        inputTokens: 7,
+        outputTokens: 5,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningTokens: 0,
+      },
     };
   },
   steer: () => undefined,

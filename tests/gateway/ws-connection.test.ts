@@ -40,10 +40,14 @@ async function startServer(authRequired = true): Promise<GatewayHttpServer> {
     home: root,
     provider: "test-provider",
     createModelTransport: () => {
-      throw new Error("no prompt.submit exercised in this test file -- see turn.test.ts / dashboard-command.test.ts");
+      throw new Error(
+        "no prompt.submit exercised in this test file -- see turn.test.ts / dashboard-command.test.ts",
+      );
     },
     createConversationRepository: () => {
-      throw new Error("no prompt.submit exercised in this test file -- see turn.test.ts / dashboard-command.test.ts");
+      throw new Error(
+        "no prompt.submit exercised in this test file -- see turn.test.ts / dashboard-command.test.ts",
+      );
     },
     dispatchTool: () => Promise.reject(new Error("no tool dispatch exercised in this test file")),
   });
@@ -69,7 +73,10 @@ const messageQueues = new WeakMap<
   { readonly queue: string[]; readonly waiters: ((value: string) => void)[] }
 >();
 
-function queueFor(ws: WebSocket): { readonly queue: string[]; readonly waiters: ((value: string) => void)[] } {
+function queueFor(ws: WebSocket): {
+  readonly queue: string[];
+  readonly waiters: ((value: string) => void)[];
+} {
   let state = messageQueues.get(ws);
   if (state === undefined) {
     state = { queue: [], waiters: [] };
@@ -92,7 +99,11 @@ function nextMessage(ws: WebSocket): Promise<string> {
 }
 
 interface GatewayEventFrame {
-  readonly params: { readonly type: string; readonly session_id: string | null; readonly payload: unknown };
+  readonly params: {
+    readonly type: string;
+    readonly session_id: string | null;
+    readonly payload: unknown;
+  };
 }
 
 function parseEventFrame(text: string): GatewayEventFrame {
@@ -136,14 +147,18 @@ describe("gateway WS: handshake always completes to 101 (assertion 19)", () => {
 describe("gateway WS: query multiplicity (assertion 20)", () => {
   it("good then bad -> last wins -> rejected", async () => {
     const server = await startServer();
-    const ws = new WebSocket(`ws://127.0.0.1:${String(server.port)}/api/ws?token=${TOKEN}&token=wrong`);
+    const ws = new WebSocket(
+      `ws://127.0.0.1:${String(server.port)}/api/ws?token=${TOKEN}&token=wrong`,
+    );
     const closed = await waitClose(ws);
     expect(closed.code).toBe(4401);
   });
 
   it("bad then good -> last wins -> accepted", async () => {
     const server = await startServer();
-    const ws = new WebSocket(`ws://127.0.0.1:${String(server.port)}/api/ws?token=wrong&token=${TOKEN}`);
+    const ws = new WebSocket(
+      `ws://127.0.0.1:${String(server.port)}/api/ws?token=wrong&token=${TOKEN}`,
+    );
     const message = await nextMessage(ws);
     expect(parseEventFrame(message).params.type).toBe("gateway.ready");
     ws.close();
@@ -247,7 +262,9 @@ describe("gateway WS: RPC round trip over a real socket (assertions 27-32)", () 
     const ws = new WebSocket(`ws://127.0.0.1:${String(server.port)}/api/ws?token=${TOKEN}`);
     await nextMessage(ws);
     ws.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "session.steer", params: {} }));
-    const response = JSON.parse(await nextMessage(ws)) as { error: { code: number; message: string } };
+    const response = JSON.parse(await nextMessage(ws)) as {
+      error: { code: number; message: string };
+    };
     expect(response.error).toEqual({ code: -32601, message: "unknown method: session.steer" });
     ws.close();
   });

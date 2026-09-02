@@ -35,7 +35,9 @@ describe("startGatewayHttpServer", () => {
       host: "127.0.0.1",
       port: 0,
       onRequest: (request) =>
-        Promise.resolve(jsonResponse(200, { path: request.head.path, method: request.head.method })),
+        Promise.resolve(
+          jsonResponse(200, { path: request.head.path, method: request.head.method }),
+        ),
       onUpgrade: () => {
         throw new Error("no upgrade expected in this test");
       },

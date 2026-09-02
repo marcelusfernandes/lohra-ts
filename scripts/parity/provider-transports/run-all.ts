@@ -452,7 +452,10 @@ function normalizeRuntimePaths<T>(value: T): T {
  * value elsewhere in the projection. */
 function normalizeToday<T>(value: T): T {
   return JSON.parse(
-    JSON.stringify(value).replace(/Today's date is \d{4}-\d{2}-\d{2}\./gu, "Today's date is <DATE>."),
+    JSON.stringify(value).replace(
+      /Today's date is \d{4}-\d{2}-\d{2}\./gu,
+      "Today's date is <DATE>.",
+    ),
   ) as T;
 }
 

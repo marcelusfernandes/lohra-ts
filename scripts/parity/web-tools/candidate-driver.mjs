@@ -158,7 +158,11 @@ function makeWorld(table, rebindingTable) {
         if (world.requests.length <= redirectCount) {
           return { status: 302, headers: { location: `/h${world.requests.length + 1}` } };
         }
-        return { status: 200, headers: { "content-type": "text/plain" }, body: world.chunked([body]) };
+        return {
+          status: 200,
+          headers: { "content-type": "text/plain" },
+          body: world.chunked([body]),
+        };
       };
     },
     chunked(chunks) {
@@ -179,7 +183,8 @@ function makeWorld(table, rebindingTable) {
           if (hopUrl.username !== "" || hopUrl.password !== "") world.authorization.push("present");
           const raw = world.serve(request);
           const headers = {};
-          for (const [name, value] of Object.entries(raw.headers ?? {})) headers[name.toLowerCase()] = value;
+          for (const [name, value] of Object.entries(raw.headers ?? {}))
+            headers[name.toLowerCase()] = value;
           return {
             status: raw.status,
             headers,
@@ -197,10 +202,13 @@ function makeWorld(table, rebindingTable) {
     },
     observation(result) {
       const maskCredentials = (entry) => {
-        if (typeof entry === "string") return entry.replace(/(?<=:\/\/)([^/@?#]+)@/, "userinfo:canary@");
+        if (typeof entry === "string")
+          return entry.replace(/(?<=:\/\/)([^/@?#]+)@/, "userinfo:canary@");
         if (Array.isArray(entry)) return entry.map(maskCredentials);
         if (entry !== null && typeof entry === "object") {
-          return Object.fromEntries(Object.entries(entry).map(([key, value]) => [key, maskCredentials(value)]));
+          return Object.fromEntries(
+            Object.entries(entry).map(([key, value]) => [key, maskCredentials(value)]),
+          );
         }
         return entry;
       };
@@ -330,24 +338,26 @@ async function chatCanned(world) {
       repository: memory,
       transport: model,
       promptSnapshot: () => "frozen",
-      toolDefinitions: registry.getDefinitions().filter((definition) =>
-        ["web_fetch", "web_search"].includes(definition.function.name),
-      ),
+      toolDefinitions: registry
+        .getDefinitions()
+        .filter((definition) => ["web_fetch", "web_search"].includes(definition.function.name)),
       toolDispatcher: {
         dispatch: async (call) => ({
           role: "tool",
           name: call.name,
           tool_call_id: call.id,
-          content: await registry.dispatch(
-            call.name,
-            JSON.parse(call.arguments),
-          ),
+          content: await registry.dispatch(call.name, JSON.parse(call.arguments)),
         }),
       },
       idSource: () => "session-t20",
       clock: () => 1,
     });
-    const result = await runtime.runTurn({ input: "fetch example", provider: "fixture", model: "stub-model", cwd: "/tmp" });
+    const result = await runtime.runTurn({
+      input: "fetch example",
+      provider: "fixture",
+      model: "stub-model",
+      cwd: "/tmp",
+    });
     const resent = model.requests[1]?.messages ?? [];
     const toolMessage = resent.find((message) => message.role === "tool") ?? {};
     return {
@@ -396,11 +406,23 @@ async function main() {
     const registry = createBuiltinRegistry();
     for (const url of [null, "", 0, false, [], {}]) {
       const parsed = JSON.parse(await registry.dispatch("web_fetch", url === null ? {} : { url }));
-      rows.push({ input: url, result: parsed, dnsCount: world.dns.calls.length, requestCount: world.requests.length });
+      rows.push({
+        input: url,
+        result: parsed,
+        dnsCount: world.dns.calls.length,
+        requestCount: world.requests.length,
+      });
     }
     for (const query of [null, "", "   ", 0, false]) {
-      const parsed = JSON.parse(await registry.dispatch("web_search", query === null ? {} : { query }));
-      rows.push({ input: query, result: parsed, dnsCount: world.dns.calls.length, requestCount: world.requests.length });
+      const parsed = JSON.parse(
+        await registry.dispatch("web_search", query === null ? {} : { query }),
+      );
+      rows.push({
+        input: query,
+        result: parsed,
+        dnsCount: world.dns.calls.length,
+        requestCount: world.requests.length,
+      });
     }
     observation.rows = rows;
   } else if (scenario === "coercions") {
@@ -411,7 +433,9 @@ async function main() {
       for (const maximum of [null, 0, -9, 11, "7", "bad", 2.9, true, false, []]) {
         const backend = new RecordingBackend();
         setSearchBackend(backend);
-        const envelope = JSON.parse(await registry.dispatch("web_search", { query: "q", max_results: maximum }));
+        const envelope = JSON.parse(
+          await registry.dispatch("web_search", { query: "q", max_results: maximum }),
+        );
         rows.push({
           input: maximum,
           backendQuery: backend.calls[0][0],
@@ -440,7 +464,12 @@ async function main() {
     const world = makeWorld({});
     world.serve = world.text("never");
     setWebTransport(world.transport());
-    for (const url of ["puBlic.test/x", "file:///etc/passwd", "ftp://public.test/x", "http:///path"]) {
+    for (const url of [
+      "puBlic.test/x",
+      "file:///etc/passwd",
+      "ftp://public.test/x",
+      "http:///path",
+    ]) {
       const row = await toolFetch(world, url);
       row.input = url;
       rows.push(row);
@@ -483,20 +512,22 @@ async function main() {
     const world = makeWorld({ "private.test": ["10.0.0.5"], "mixed.test": [PUBLIC, "10.0.0.5"] });
     world.serve = world.text("never");
     setWebTransport(world.transport());
-    for (const url of ["http://private.test/", "http://mixed.test/"]) rows.push(await toolFetch(world, url));
+    for (const url of ["http://private.test/", "http://mixed.test/"])
+      rows.push(await toolFetch(world, url));
     observation.rows = rows;
   } else if (scenario === "non-public-literals") {
     const rows = [];
     const world = makeWorld({
-      "2130706433": ["127.0.0.1"],
+      2130706433: ["127.0.0.1"],
       "0x7f000001": ["127.0.0.1"],
-      "127.1": ["127.0.0.1"],
+      127.1: ["127.0.0.1"],
       "fe80::1": ["fe80::1"],
       "::ffff:127.0.0.1": ["::ffff:127.0.0.1"],
     });
     world.serve = world.text("never");
     setWebTransport(world.transport());
-    for (const host of ["2130706433", "0x7f000001", "127.1"]) rows.push(await toolFetch(world, `http://${host}/`));
+    for (const host of ["2130706433", "0x7f000001", "127.1"])
+      rows.push(await toolFetch(world, `http://${host}/`));
     rows.push(await toolFetch(world, "http://[fe80::1]/"));
     rows.push(await toolFetch(world, "http://[::ffff:127.0.0.1]/"));
     rows.push(await toolFetch(world, "http://10.0.0.5:8080/"));
@@ -531,7 +562,11 @@ async function main() {
       } else {
         world.serve = () => {
           if (world.requests.length <= 1) return world.redirect(location, status)();
-          return { status: 200, headers: { "content-type": "text/plain" }, body: world.chunked([new TextEncoder().encode("arrived")]) };
+          return {
+            status: 200,
+            headers: { "content-type": "text/plain" },
+            body: world.chunked([new TextEncoder().encode("arrived")]),
+          };
         };
       }
       setWebTransport(world.transport());
@@ -542,7 +577,10 @@ async function main() {
     observation.rows = rows;
   } else if (scenario === "redirect-limits") {
     const rows = [];
-    for (const [name, redirectCount] of [["four-redirects", 4], ["five-redirects", 5]]) {
+    for (const [name, redirectCount] of [
+      ["four-redirects", 4],
+      ["five-redirects", 5],
+    ]) {
       const world = makeWorld({ "public.test": [PUBLIC] });
       world.serve = world.chain(redirectCount);
       setWebTransport(world.transport());
@@ -576,10 +614,16 @@ async function main() {
     ];
     for (let index = 0; index < bodiesBytes.length; index += 1) {
       const world = makeWorld({ "public.test": [PUBLIC] });
-      world.serve = () => ({ status: 200, headers: { "content-type": "text/plain" }, body: world.chunked([bodiesBytes[index]]) });
+      world.serve = () => ({
+        status: 200,
+        headers: { "content-type": "text/plain" },
+        body: world.chunked([bodiesBytes[index]]),
+      });
       setWebTransport(world.transport());
       const registry = createBuiltinRegistry();
-      const parsed = JSON.parse(await registry.dispatch("web_fetch", { url: "http://public.test/" }));
+      const parsed = JSON.parse(
+        await registry.dispatch("web_fetch", { url: "http://public.test/" }),
+      );
       const text = parsed.text ?? "";
       rows.push({
         input: index,
@@ -681,7 +725,11 @@ async function main() {
   } else if (scenario === "search-unavailable") {
     const rows = [];
     const non200 = makeWorld({ "html.duckduckgo.com": [PUBLIC] });
-    non200.serve = () => ({ status: 302, headers: { "content-type": "text/html" }, body: non200.chunked([new TextEncoder().encode("moved")]) });
+    non200.serve = () => ({
+      status: 302,
+      headers: { "content-type": "text/html" },
+      body: non200.chunked([new TextEncoder().encode("moved")]),
+    });
     installSearchWorld(non200);
     rows.push(await toolSearch(non200, { query: "q" }));
     const transport = makeWorld({ "html.duckduckgo.com": [PUBLIC] });
@@ -711,10 +759,21 @@ async function main() {
     observation = await toolSearch(world, { query: "fixture query", max_results: 5 });
   } else if (scenario === "ddg-empty-and-clamp") {
     const rows = [];
-    const many = Array.from({ length: 12 }, (_, index) => `<a class="result__a" href="https://${index}.test">t</a>`).join("");
-    for (const [name, html, maximum] of [["empty", "<p>no anchors</p>", 5], ["clamp-10", many, 5], ["clamp-3", many, 3]]) {
+    const many = Array.from(
+      { length: 12 },
+      (_, index) => `<a class="result__a" href="https://${index}.test">t</a>`,
+    ).join("");
+    for (const [name, html, maximum] of [
+      ["empty", "<p>no anchors</p>", 5],
+      ["clamp-10", many, 5],
+      ["clamp-3", many, 3],
+    ]) {
       const world = makeWorld({ "html.duckduckgo.com": [PUBLIC] });
-      world.serve = () => ({ status: 200, headers: { "content-type": "text/html" }, body: world.chunked([new TextEncoder().encode(html)]) });
+      world.serve = () => ({
+        status: 200,
+        headers: { "content-type": "text/html" },
+        body: world.chunked([new TextEncoder().encode(html)]),
+      });
       installSearchWorld(world);
       const row = await toolSearch(world, { query: "q", max_results: maximum });
       row.input = name;
@@ -829,39 +888,37 @@ async function main() {
      * hostname receives the private second answer and is refused (B=0). */
     const world = makeWorld({}, { "once.test": [PUBLIC, "10.0.0.5"] });
     const dialOptions = [];
-    const nodeRequestFactory =
-      () =>
-      (options, callback) => {
-        dialOptions.push(options);
-        let peer = options.host ?? "";
-        if (!/^\d+(\.\d+){3}$/.test(peer) && peer.includes(":") === false && peer !== "") {
-          peer = world.dns.resolve(peer)[0]?.address ?? peer;
-        }
-        const body = new TextEncoder().encode("rebinding ok");
-        let served = false;
-        const response = new EventEmitter();
-        response.statusCode = 200;
-        response.headers = { "content-type": "text/plain" };
-        response.socket = { remoteAddress: peer };
-        response.readableEnded = false;
-        response.read = () => {
-          if (served) return null;
-          served = true;
-          return body;
-        };
-        response.destroy = () => response.removeAllListeners();
-        const request = new EventEmitter();
-        request.end = () => {
-          callback(response);
-          setImmediate(() => {
-            response.readableEnded = true;
-            response.emit("end");
-          });
-        };
-        response.destroy = () => response.removeAllListeners();
-        request.destroy = () => request.removeAllListeners();
-        return request;
+    const nodeRequestFactory = () => (options, callback) => {
+      dialOptions.push(options);
+      let peer = options.host ?? "";
+      if (!/^\d+(\.\d+){3}$/.test(peer) && peer.includes(":") === false && peer !== "") {
+        peer = world.dns.resolve(peer)[0]?.address ?? peer;
+      }
+      const body = new TextEncoder().encode("rebinding ok");
+      let served = false;
+      const response = new EventEmitter();
+      response.statusCode = 200;
+      response.headers = { "content-type": "text/plain" };
+      response.socket = { remoteAddress: peer };
+      response.readableEnded = false;
+      response.read = () => {
+        if (served) return null;
+        served = true;
+        return body;
       };
+      response.destroy = () => response.removeAllListeners();
+      const request = new EventEmitter();
+      request.end = () => {
+        callback(response);
+        setImmediate(() => {
+          response.readableEnded = true;
+          response.emit("end");
+        });
+      };
+      response.destroy = () => response.removeAllListeners();
+      request.destroy = () => request.removeAllListeners();
+      return request;
+    };
     const resolver = (host) => world.dns.resolve(host);
     const connector = createPinnedConnector({ requestFactory: nodeRequestFactory });
     try {

@@ -108,7 +108,10 @@ describe("tick", () => {
   it("a job that is merely not-due-yet never reaches the diagnostics sink", async () => {
     store.add({ name: "n", prompt: "p", type: "once", value: 1_000_000 });
     const diagnosed: string[] = [];
-    await tick(store, recorder([]), { now: 100, diagnostics: (message) => diagnosed.push(message) });
+    await tick(store, recorder([]), {
+      now: 100,
+      diagnostics: (message) => diagnosed.push(message),
+    });
     expect(diagnosed).toEqual([]);
   });
 });

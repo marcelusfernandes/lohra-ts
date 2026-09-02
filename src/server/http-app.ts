@@ -23,7 +23,11 @@ export interface OpenAiServerOptions {
   readonly models: readonly string[];
 }
 
-function handleModels(req: IncomingMessage, res: ServerResponse, options: OpenAiServerOptions): void {
+function handleModels(
+  req: IncomingMessage,
+  res: ServerResponse,
+  options: OpenAiServerOptions,
+): void {
   if (!authorized(req.headers.authorization, options.apiKey)) {
     writeJson(res, 401, {
       error: { message: "missing or invalid API key", type: "authentication_error" },
@@ -92,7 +96,9 @@ export function createOpenAiServer(options: OpenAiServerOptions): Server {
       } else {
         res.destroy();
       }
-      process.stderr.write(`t11 server handler error: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+      process.stderr.write(
+        `t11 server handler error: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
+      );
     });
   });
 }

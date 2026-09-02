@@ -97,7 +97,10 @@ if (transport === null || !transports.has(transport)) {
   // incidentally contain.
   const persist = (record, secrets = []) => {
     const keys = Object.keys(record);
-    if (keys.length !== allowedKeys.length || keys.some((key, index) => key !== allowedKeys[index])) {
+    if (
+      keys.length !== allowedKeys.length ||
+      keys.some((key, index) => key !== allowedKeys[index])
+    ) {
       rmSync(outputPath, { force: true });
       throw new Error("LIVE_EVIDENCE_SCHEMA");
     }
@@ -333,13 +336,18 @@ if (transport === null || !transports.has(transport)) {
       };
       // secrets order: [0]=apiKey [1]=prompt [2]=response content
       persist(evidence, [apiKey, prompt, response.content ?? ""]);
-      process.stdout.write(`${JSON.stringify({ status: evidence.status, evidence: outputPath })}\n`);
+      process.stdout.write(
+        `${JSON.stringify({ status: evidence.status, evidence: outputPath })}\n`,
+      );
     } catch {
-      const responseText = typeof port.parsed?.content?.[0]?.text === "string" ? port.parsed.content[0].text : "";
+      const responseText =
+        typeof port.parsed?.content?.[0]?.text === "string" ? port.parsed.content[0].text : "";
       const evidence = baseEvidence("fail", provider, model, false, 1, port.requestCount);
       // secrets order: [0]=apiKey [1]=prompt [2]=partial response text
       persist(evidence, [apiKey, prompt, responseText]);
-      process.stdout.write(`${JSON.stringify({ status: evidence.status, evidence: outputPath })}\n`);
+      process.stdout.write(
+        `${JSON.stringify({ status: evidence.status, evidence: outputPath })}\n`,
+      );
       process.exitCode = 1;
     } finally {
       await client.close();
@@ -404,7 +412,8 @@ if (transport === null || !transports.has(transport)) {
       evidence.responseType = terminalResponsesEventType(port.raw);
       evidence.finishReason = response.finishReason;
       evidence.shape = {
-        hasOutput: response.content !== null || response.toolCalls.length > 0 || response.reasoning !== null,
+        hasOutput:
+          response.content !== null || response.toolCalls.length > 0 || response.reasoning !== null,
         // Responses' raw terminal event carries a string `status`
         // (completed/incomplete), never a boolean completion field —
         // legitimately always false here, same as anthropic_messages.
@@ -432,7 +441,9 @@ if (transport === null || !transports.has(transport)) {
         prompt,
         port.raw ?? "",
       ]);
-      process.stdout.write(`${JSON.stringify({ status: evidence.status, evidence: outputPath })}\n`);
+      process.stdout.write(
+        `${JSON.stringify({ status: evidence.status, evidence: outputPath })}\n`,
+      );
     } catch {
       const evidence = baseEvidence("fail", provider, model, false, 1, port.requestCount);
       // secrets order: [0]=token [1]=accountId [2]=prompt [3]=raw response text
@@ -442,7 +453,9 @@ if (transport === null || !transports.has(transport)) {
         prompt,
         port.raw ?? "",
       ]);
-      process.stdout.write(`${JSON.stringify({ status: evidence.status, evidence: outputPath })}\n`);
+      process.stdout.write(
+        `${JSON.stringify({ status: evidence.status, evidence: outputPath })}\n`,
+      );
       process.exitCode = 1;
     } finally {
       await client.close();

@@ -105,7 +105,10 @@ const messageQueues = new WeakMap<
   { readonly queue: string[]; readonly waiters: ((value: string) => void)[] }
 >();
 
-function queueFor(ws: WebSocket): { readonly queue: string[]; readonly waiters: ((value: string) => void)[] } {
+function queueFor(ws: WebSocket): {
+  readonly queue: string[];
+  readonly waiters: ((value: string) => void)[];
+} {
   let state = messageQueues.get(ws);
   if (state === undefined) {
     state = { queue: [], waiters: [] };
@@ -144,9 +147,16 @@ describe("prompt.submit: unknown/missing session_id (assertion 31)", () => {
     const ws = new WebSocket(`ws://127.0.0.1:${String(server.port)}/api/ws?token=${TOKEN}`);
     await nextMessage(ws);
     ws.send(
-      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "prompt.submit", params: { session_id: "nope", text: "hi" } }),
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "prompt.submit",
+        params: { session_id: "nope", text: "hi" },
+      }),
     );
-    const response_ = JSON.parse(await nextMessage(ws)) as { error: { code: number; message: string } };
+    const response_ = JSON.parse(await nextMessage(ws)) as {
+      error: { code: number; message: string };
+    };
     expect(response_.error).toEqual({ code: -32602, message: "unknown session_id" });
     ws.close();
   });
@@ -155,8 +165,12 @@ describe("prompt.submit: unknown/missing session_id (assertion 31)", () => {
     const { server } = await startServer();
     const ws = new WebSocket(`ws://127.0.0.1:${String(server.port)}/api/ws?token=${TOKEN}`);
     await nextMessage(ws);
-    ws.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "prompt.submit", params: { text: "hi" } }));
-    const response_ = JSON.parse(await nextMessage(ws)) as { error: { code: number; message: string } };
+    ws.send(
+      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "prompt.submit", params: { text: "hi" } }),
+    );
+    const response_ = JSON.parse(await nextMessage(ws)) as {
+      error: { code: number; message: string };
+    };
     expect(response_.error).toEqual({ code: -32602, message: "unknown session_id" });
     ws.close();
   });
@@ -220,14 +234,21 @@ describe("prompt.submit: successful turn frame order and usage (assertions 33-35
     const { ws, sessionId } = await connectAndCreateSession(server);
 
     ws.send(
-      JSON.stringify({ jsonrpc: "2.0", id: 9, method: "prompt.submit", params: { session_id: sessionId, text: "hi" } }),
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 9,
+        method: "prompt.submit",
+        params: { session_id: sessionId, text: "hi" },
+      }),
     );
     const rpcOk = JSON.parse(await nextMessage(ws)) as { id: number; result: { status: string } };
     expect(rpcOk).toEqual({ jsonrpc: "2.0", id: 9, result: { status: "streaming" } });
 
     const frames: { params: { type: string; payload: unknown } }[] = [];
     for (let i = 0; i < 4; i += 1) {
-      frames.push(JSON.parse(await nextMessage(ws)) as { params: { type: string; payload: unknown } });
+      frames.push(
+        JSON.parse(await nextMessage(ws)) as { params: { type: string; payload: unknown } },
+      );
     }
     expect(frames.map((f) => f.params.type)).toEqual([
       "message.start",
@@ -245,7 +266,12 @@ describe("prompt.submit: successful turn frame order and usage (assertions 33-35
 
 describe("prompt.submit: tool call emits tool.start/tool.complete with dual serialization", () => {
   it("emits tool.start then tool.complete around the dispatch, before message.complete", async () => {
-    const toolCall: ToolCall = { id: "call_1", name: "read_file", arguments: '{"path":"/x"}', providerData: null };
+    const toolCall: ToolCall = {
+      id: "call_1",
+      name: "read_file",
+      arguments: '{"path":"/x"}',
+      providerData: null,
+    };
     const { server } = await startServer({
       transportScript: [
         () => response({ content: null, finishReason: "tool_calls", toolCalls: [toolCall] }),
@@ -256,12 +282,19 @@ describe("prompt.submit: tool call emits tool.start/tool.complete with dual seri
     const { ws, sessionId } = await connectAndCreateSession(server);
 
     ws.send(
-      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "prompt.submit", params: { session_id: sessionId, text: "hi" } }),
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "prompt.submit",
+        params: { session_id: sessionId, text: "hi" },
+      }),
     );
     await nextMessage(ws); // rpc-ok
     const frames: { params: { type: string; payload: unknown } }[] = [];
     for (let i = 0; i < 4; i += 1) {
-      frames.push(JSON.parse(await nextMessage(ws)) as { params: { type: string; payload: unknown } });
+      frames.push(
+        JSON.parse(await nextMessage(ws)) as { params: { type: string; payload: unknown } },
+      );
     }
     expect(frames.map((f) => f.params.type)).toEqual([
       "message.start",
@@ -271,7 +304,11 @@ describe("prompt.submit: tool call emits tool.start/tool.complete with dual seri
     ]);
     expect((frames[1]?.params.payload as { tool_id: string }).tool_id).toBe("tool_1");
     expect((frames[2]?.params.payload as { tool_id: string }).tool_id).toBe("tool_1");
-    expect(frames[3]?.params.payload).toEqual({ text: "after tool", status: "complete", usage: {} });
+    expect(frames[3]?.params.payload).toEqual({
+      text: "after tool",
+      status: "complete",
+      usage: {},
+    });
 
     ws.close();
   });
@@ -294,7 +331,12 @@ describe("prompt.submit: busy session (assertion 31/47)", () => {
     const { ws, sessionId } = await connectAndCreateSession(server);
 
     ws.send(
-      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "prompt.submit", params: { session_id: sessionId, text: "hi" } }),
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "prompt.submit",
+        params: { session_id: sessionId, text: "hi" },
+      }),
     );
     await nextMessage(ws); // rpc-ok for first submit
     await nextMessage(ws); // message.start for first submit
@@ -302,9 +344,16 @@ describe("prompt.submit: busy session (assertion 31/47)", () => {
     const secondWs = new WebSocket(`ws://127.0.0.1:${String(server.port)}/api/ws?token=${TOKEN}`);
     await nextMessage(secondWs);
     secondWs.send(
-      JSON.stringify({ jsonrpc: "2.0", id: 2, method: "prompt.submit", params: { session_id: sessionId, text: "hi again" } }),
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "prompt.submit",
+        params: { session_id: sessionId, text: "hi again" },
+      }),
     );
-    const busyResponse = JSON.parse(await nextMessage(secondWs)) as { error: { code: number; message: string } };
+    const busyResponse = JSON.parse(await nextMessage(secondWs)) as {
+      error: { code: number; message: string };
+    };
     expect(busyResponse.error).toEqual({ code: 4009, message: "session busy" });
 
     releaseFirstCall?.();
@@ -320,7 +369,12 @@ describe("prompt.submit: mid-turn interrupt from a second socket (assertion 45/L
       sessionId: undefined,
       server: undefined,
     };
-    const toolCall: ToolCall = { id: "call_1", name: "read_file", arguments: "{}", providerData: null };
+    const toolCall: ToolCall = {
+      id: "call_1",
+      name: "read_file",
+      arguments: "{}",
+      providerData: null,
+    };
 
     const { server } = await startServer({
       transportScript: [
@@ -338,10 +392,17 @@ describe("prompt.submit: mid-turn interrupt from a second socket (assertion 45/L
         const port = ref.server?.port;
         const sessionId = ref.sessionId;
         if (port === undefined || sessionId === undefined) throw new Error("test setup race");
-        const interruptSocket = new WebSocket(`ws://127.0.0.1:${String(port)}/api/ws?token=${TOKEN}`);
+        const interruptSocket = new WebSocket(
+          `ws://127.0.0.1:${String(port)}/api/ws?token=${TOKEN}`,
+        );
         await nextMessage(interruptSocket); // gateway.ready
         interruptSocket.send(
-          JSON.stringify({ jsonrpc: "2.0", id: "interrupt", method: "session.interrupt", params: { session_id: sessionId } }),
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: "interrupt",
+            method: "session.interrupt",
+            params: { session_id: sessionId },
+          }),
         );
         await nextMessage(interruptSocket); // {ok:true}
         interruptSocket.close();
@@ -353,12 +414,19 @@ describe("prompt.submit: mid-turn interrupt from a second socket (assertion 45/L
     ref.sessionId = sessionId;
 
     ws.send(
-      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "prompt.submit", params: { session_id: sessionId, text: "hi" } }),
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "prompt.submit",
+        params: { session_id: sessionId, text: "hi" },
+      }),
     );
     await nextMessage(ws); // rpc-ok
     const frames: { params: { type: string; payload: unknown } }[] = [];
     for (let i = 0; i < 4; i += 1) {
-      frames.push(JSON.parse(await nextMessage(ws)) as { params: { type: string; payload: unknown } });
+      frames.push(
+        JSON.parse(await nextMessage(ws)) as { params: { type: string; payload: unknown } },
+      );
     }
     expect(frames.map((f) => f.params.type)).toEqual([
       "message.start",
@@ -390,7 +458,12 @@ describe("prompt.submit: same-socket serialization (assertion 46/L19)", () => {
     const { ws, sessionId } = await connectAndCreateSession(server);
 
     ws.send(
-      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "prompt.submit", params: { session_id: sessionId, text: "hi" } }),
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "prompt.submit",
+        params: { session_id: sessionId, text: "hi" },
+      }),
     );
     // Same socket, sent immediately after -- must queue behind the whole
     // streaming turn, not interleave with message.start/delta/complete.
@@ -401,13 +474,19 @@ describe("prompt.submit: same-socket serialization (assertion 46/L19)", () => {
     // transport is still gated -- session.list must NOT have been answered
     // yet at this point, proving it queued behind the in-flight turn.
     for (let i = 0; i < 2; i += 1) {
-      const frame = JSON.parse(await nextMessage(ws)) as { id?: unknown; params?: { type: string } };
+      const frame = JSON.parse(await nextMessage(ws)) as {
+        id?: unknown;
+        params?: { type: string };
+      };
       seenTypes.push(frame.params?.type ?? `rpc:${String(frame.id)}`);
     }
     releaseTurn?.();
     const completeFrame = JSON.parse(await nextMessage(ws)) as { params: { type: string } };
     seenTypes.push(completeFrame.params.type);
-    const listResponse = JSON.parse(await nextMessage(ws)) as { id: number; result: { sessions: unknown[] } };
+    const listResponse = JSON.parse(await nextMessage(ws)) as {
+      id: number;
+      result: { sessions: unknown[] };
+    };
     expect(listResponse.id).toBe(2);
     expect(seenTypes).toEqual(["rpc:1", "message.start", "message.complete"]);
 
@@ -428,16 +507,30 @@ describe("prompt.submit: idle interrupt latch (assertion 44/L16)", () => {
     });
     const { ws, sessionId } = await connectAndCreateSession(server);
 
-    ws.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "session.interrupt", params: { session_id: sessionId } }));
+    ws.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "session.interrupt",
+        params: { session_id: sessionId },
+      }),
+    );
     const interruptResult = JSON.parse(await nextMessage(ws)) as { result: { ok: boolean } };
     expect(interruptResult.result.ok).toBe(true);
 
     ws.send(
-      JSON.stringify({ jsonrpc: "2.0", id: 2, method: "prompt.submit", params: { session_id: sessionId, text: "hi" } }),
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "prompt.submit",
+        params: { session_id: sessionId, text: "hi" },
+      }),
     );
     await nextMessage(ws); // rpc-ok
     const startFrame = JSON.parse(await nextMessage(ws)) as { params: { type: string } };
-    const completeFrame = JSON.parse(await nextMessage(ws)) as { params: { type: string; payload: unknown } };
+    const completeFrame = JSON.parse(await nextMessage(ws)) as {
+      params: { type: string; payload: unknown };
+    };
     expect(startFrame.params.type).toBe("message.start");
     expect(completeFrame.params.type).toBe("message.complete");
     expect(completeFrame.params.payload).toEqual({ text: "", status: "interrupted", usage: {} });
@@ -470,7 +563,11 @@ describe("prompt.submit: ghost turn (ADR-T12-02, non-string text)", () => {
       // against a timeout instead of waiting forever.
       const raced = await Promise.race([
         nextMessage(ws).then(() => "message"),
-        new Promise<string>((resolvePromise) => setTimeout(() => { resolvePromise("timeout"); }, 200)),
+        new Promise<string>((resolvePromise) =>
+          setTimeout(() => {
+            resolvePromise("timeout");
+          }, 200),
+        ),
       ]);
       expect(raced).toBe("timeout");
 
@@ -488,18 +585,30 @@ describe("prompt.submit: ghost turn (ADR-T12-02, non-string text)", () => {
     const { ws, sessionId } = await connectAndCreateSession(server);
 
     ws.send(
-      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "prompt.submit", params: { session_id: sessionId, text: 5 } }),
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "prompt.submit",
+        params: { session_id: sessionId, text: 5 },
+      }),
     );
     await nextMessage(ws); // rpc-ok
     await nextMessage(ws); // message.start
 
     ws.send(
-      JSON.stringify({ jsonrpc: "2.0", id: 2, method: "prompt.submit", params: { session_id: sessionId, text: "hi" } }),
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "prompt.submit",
+        params: { session_id: sessionId, text: "hi" },
+      }),
     );
     const rpcOk = JSON.parse(await nextMessage(ws)) as { id: number; result: { status: string } };
     expect(rpcOk.id).toBe(2);
     const startFrame = JSON.parse(await nextMessage(ws)) as { params: { type: string } };
-    const completeFrame = JSON.parse(await nextMessage(ws)) as { params: { type: string; payload: unknown } };
+    const completeFrame = JSON.parse(await nextMessage(ws)) as {
+      params: { type: string; payload: unknown };
+    };
     expect(startFrame.params.type).toBe("message.start");
     expect(completeFrame.params.payload).toEqual({ text: "final", status: "complete", usage: {} });
 
@@ -519,12 +628,20 @@ describe("prompt.submit: upstream error (assertion 53/L21)", () => {
     const { ws, sessionId } = await connectAndCreateSession(server);
 
     ws.send(
-      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "prompt.submit", params: { session_id: sessionId, text: "hi" } }),
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "prompt.submit",
+        params: { session_id: sessionId, text: "hi" },
+      }),
     );
     await nextMessage(ws); // rpc-ok
     await nextMessage(ws); // message.start
     const completeFrame = JSON.parse(await nextMessage(ws)) as {
-      params: { type: string; payload: { status: string; warning: string; text: string; usage: unknown } };
+      params: {
+        type: string;
+        payload: { status: string; warning: string; text: string; usage: unknown };
+      };
     };
     expect(completeFrame.params.type).toBe("message.complete");
     expect(completeFrame.params.payload.status).toBe("error");
@@ -576,8 +693,17 @@ describe("prompt.submit: compaction absence over many turns (ADR-T12-01/assertio
     expect(allEventTypes).not.toContain("session.forked");
     expect(allEventTypes.filter((t) => t === "message.complete")).toHaveLength(15);
 
-    ws.send(JSON.stringify({ jsonrpc: "2.0", id: "history", method: "session.history", params: { session_id: sessionId } }));
-    const historyResult = JSON.parse(await nextMessage(ws)) as { result: { messages: { content: string }[] } };
+    ws.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: "history",
+        method: "session.history",
+        params: { session_id: sessionId },
+      }),
+    );
+    const historyResult = JSON.parse(await nextMessage(ws)) as {
+      result: { messages: { content: string }[] };
+    };
     // 15 user + 15 assistant messages, none compacted away, no marker.
     expect(historyResult.result.messages).toHaveLength(30);
     for (const message of historyResult.result.messages) {
@@ -590,7 +716,9 @@ describe("prompt.submit: compaction absence over many turns (ADR-T12-01/assertio
 
 describe("prompt.submit: lineage resurrection completes a real turn (ADR-T12-04/assertion 43)", () => {
   it("session.create on a dead (end_reason=compression) parent resurrects it, and prompt.submit then grows message_count", async () => {
-    const { server, sessions } = await startServer({ transportScript: [() => response({ content: "resurrected reply" })] });
+    const { server, sessions } = await startServer({
+      transportScript: [() => response({ content: "resurrected reply" })],
+    });
     sessions.createSession({
       id: "dead-parent",
       model: "m",
@@ -599,7 +727,12 @@ describe("prompt.submit: lineage resurrection completes a real turn (ADR-T12-04/
       startedAt: 10,
     });
     sessions.appendMessage("dead-parent", { role: "user", content: "before death", createdAt: 11 });
-    sessions.appendMessage("dead-parent", { role: "assistant", content: "reply", createdAt: 12, finishReason: "stop" });
+    sessions.appendMessage("dead-parent", {
+      role: "assistant",
+      content: "reply",
+      createdAt: 12,
+      finishReason: "stop",
+    });
     sessions.endSession("dead-parent", "compression", 20);
     expect(Number(sessions.getSession("dead-parent")?.message_count)).toBe(2);
 
@@ -608,24 +741,45 @@ describe("prompt.submit: lineage resurrection completes a real turn (ADR-T12-04/
 
     // prompt.submit on the dead parent is refused, matching L18.
     ws.send(
-      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "prompt.submit", params: { session_id: "dead-parent", text: "hi" } }),
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "prompt.submit",
+        params: { session_id: "dead-parent", text: "hi" },
+      }),
     );
-    const refused = JSON.parse(await nextMessage(ws)) as { error: { code: number; message: string } };
+    const refused = JSON.parse(await nextMessage(ws)) as {
+      error: { code: number; message: string };
+    };
     expect(refused.error).toEqual({ code: -32602, message: "unknown session_id" });
 
     // session.create with the dead parent's own id resurrects it.
-    ws.send(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "session.create", params: { session_id: "dead-parent" } }));
+    ws.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "session.create",
+        params: { session_id: "dead-parent" },
+      }),
+    );
     const createResult = JSON.parse(await nextMessage(ws)) as { result: { session_id: string } };
     expect(createResult.result.session_id).toBe("dead-parent");
     await nextMessage(ws); // session.info
 
     // A real turn now completes and grows message_count on the resurrected id.
     ws.send(
-      JSON.stringify({ jsonrpc: "2.0", id: 3, method: "prompt.submit", params: { session_id: "dead-parent", text: "hi again" } }),
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "prompt.submit",
+        params: { session_id: "dead-parent", text: "hi again" },
+      }),
     );
     await nextMessage(ws); // rpc-ok
     await nextMessage(ws); // message.start
-    const completeFrame = JSON.parse(await nextMessage(ws)) as { params: { payload: { status: string } } };
+    const completeFrame = JSON.parse(await nextMessage(ws)) as {
+      params: { payload: { status: string } };
+    };
     expect(completeFrame.params.payload.status).toBe("complete");
 
     expect(Number(sessions.getSession("dead-parent")?.message_count)).toBe(4);

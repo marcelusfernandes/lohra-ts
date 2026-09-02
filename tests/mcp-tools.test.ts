@@ -23,14 +23,21 @@ describe("mcpToolName", () => {
 
 describe("convertMcpSchema", () => {
   it("reads description/inputSchema, dict shape", () => {
-    expect(convertMcpSchema({ description: "a good one", inputSchema: { type: "object", properties: { q: { type: "string" } }, required: ["q"] } })).toEqual({
+    expect(
+      convertMcpSchema({
+        description: "a good one",
+        inputSchema: { type: "object", properties: { q: { type: "string" } }, required: ["q"] },
+      }),
+    ).toEqual({
       description: "a good one",
       parameters: { type: "object", properties: { q: { type: "string" } }, required: ["q"] },
     });
   });
 
   it("non-dict/absent inputSchema -> empty object schema", () => {
-    expect(convertMcpSchema({ description: "bad schema", inputSchema: "not an object" }).parameters).toEqual({
+    expect(
+      convertMcpSchema({ description: "bad schema", inputSchema: "not an object" }).parameters,
+    ).toEqual({
       type: "object",
       properties: {},
     });
@@ -64,7 +71,12 @@ describe("convertMcpSchema", () => {
 describe("wrapCallResult", () => {
   it("two text blocks concatenate with no separator", () => {
     expect(
-      wrapCallResult({ content: [{ type: "text", text: "part-one " }, { type: "text", text: "part-two" }] }),
+      wrapCallResult({
+        content: [
+          { type: "text", text: "part-one " },
+          { type: "text", text: "part-two" },
+        ],
+      }),
     ).toBe(toolResult(undefined, { content: "part-one part-two" }));
   });
 
@@ -115,10 +127,15 @@ describe("registerServerTools / deregisterServer", () => {
   it("registers under toolset mcp-{server}, handler routes to callTool with the ORIGINAL name", async () => {
     const registry = new ToolRegistry();
     const calls: { name: string; args: unknown }[] = [];
-    registerServerTools(registry, "fix", [{ name: "echo", description: "d", inputSchema: {} }], (name, args) => {
-      calls.push({ name, args });
-      return { content: [{ type: "text", text: "ok" }] };
-    });
+    registerServerTools(
+      registry,
+      "fix",
+      [{ name: "echo", description: "d", inputSchema: {} }],
+      (name, args) => {
+        calls.push({ name, args });
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+    );
     expect(registry.namesInToolset("mcp-fix")).toEqual(["mcp_fix_echo"]);
     await registry.dispatch("mcp_fix_echo", { q: "x" });
     expect(calls).toEqual([{ name: "echo", args: { q: "x" } }]);
@@ -197,7 +214,12 @@ describe("registerServerTools / deregisterServer", () => {
       schema: { description: "the real one", parameters: { type: "object", properties: {} } },
       handler: () => toolResult("builtin"),
     });
-    const added = registerServerTools(registry, "fix", [{ name: "file", description: "mcp one" }], () => ({}));
+    const added = registerServerTools(
+      registry,
+      "fix",
+      [{ name: "file", description: "mcp one" }],
+      () => ({}),
+    );
     expect(added).toEqual([]);
     expect(registry.namesInToolset("mcp-fix")).toEqual([]);
     expect(registry.namesInToolset("builtin")).toEqual(["mcp_fix_file"]);
@@ -224,7 +246,12 @@ describe("registerServerTools / deregisterServer", () => {
     const registry = new ToolRegistry();
     registerServerTools(registry, "github.com", [{ name: "search", description: "A" }], () => "A");
     expect(() =>
-      registerServerTools(registry, "github_com", [{ name: "search", description: "B" }], () => "B"),
+      registerServerTools(
+        registry,
+        "github_com",
+        [{ name: "search", description: "B" }],
+        () => "B",
+      ),
     ).toThrow("MCP tool name collision: mcp_github_com_search");
     expect(registry.namesInToolset("mcp-github.com")).toEqual(["mcp_github_com_search"]);
     expect(registry.namesInToolset("mcp-github_com")).toEqual([]);

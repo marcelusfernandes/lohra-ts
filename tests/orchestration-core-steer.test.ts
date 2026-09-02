@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { OrchestrationCore, type CollectResult, type SpawnConfig } from "../src/orchestration/core.js";
+import {
+  OrchestrationCore,
+  type CollectResult,
+  type SpawnConfig,
+} from "../src/orchestration/core.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -110,7 +114,9 @@ describe("OrchestrationCore.steer — idle/terminal form (contract decision 6 / 
         receivedConfigs.push(config);
         call += 1;
         return Promise.resolve(
-          call === 1 ? okResult({ output: "KID-FIRST-OUTPUT" }) : okResult({ output: "KID-SECOND-OUTPUT" }),
+          call === 1
+            ? okResult({ output: "KID-FIRST-OUTPUT" })
+            : okResult({ output: "KID-SECOND-OUTPUT" }),
         );
       },
       idSource: () => "aaaa",
@@ -172,7 +178,11 @@ describe("OrchestrationCore.steer — idle/terminal form (contract decision 6 / 
       buildSubagentPrompt: stubPrompt,
     });
 
-    const { subId } = core.spawn({ prompt: "first task", model: "fixed-model", provider: "fixed-provider" });
+    const { subId } = core.spawn({
+      prompt: "first task",
+      model: "fixed-model",
+      provider: "fixed-provider",
+    });
     await core.collect(subId, true);
     core.steer(subId, "second turn");
     await core.collect(subId, true);
@@ -205,8 +215,20 @@ describe("OrchestrationCore.steer — idle/terminal form (contract decision 6 / 
         call += 1;
         return Promise.resolve(
           call === 1
-            ? okResult({ tokensIn: 11, tokensOut: 7, cacheReadTokens: 2, cacheWriteTokens: 1, reasoningTokens: 3 })
-            : okResult({ tokensIn: 11, tokensOut: 7, cacheReadTokens: 2, cacheWriteTokens: 1, reasoningTokens: 3 }),
+            ? okResult({
+                tokensIn: 11,
+                tokensOut: 7,
+                cacheReadTokens: 2,
+                cacheWriteTokens: 1,
+                reasoningTokens: 3,
+              })
+            : okResult({
+                tokensIn: 11,
+                tokensOut: 7,
+                cacheReadTokens: 2,
+                cacheWriteTokens: 1,
+                reasoningTokens: 3,
+              }),
         );
       },
       idSource: () => "aaaa",
@@ -239,7 +261,9 @@ describe("OrchestrationCore.steer — idle/terminal form (contract decision 6 / 
     const core = new OrchestrationCore({
       runChild: () => {
         call += 1;
-        return call === 1 ? Promise.resolve(okResult({ output: "KID-FIRST-OUTPUT" })) : secondTurn.promise;
+        return call === 1
+          ? Promise.resolve(okResult({ output: "KID-FIRST-OUTPUT" }))
+          : secondTurn.promise;
       },
       idSource: () => "aaaa",
       maxSubsessions: 200,

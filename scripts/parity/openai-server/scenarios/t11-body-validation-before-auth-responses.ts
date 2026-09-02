@@ -20,21 +20,100 @@ interface CaseSpec {
 }
 
 const CASES: readonly CaseSpec[] = [
-  { id: "model-ausente-no-auth", contentType: "application/json", body: '{"input": "x"}', withAuth: false, expectedStatus: 422 },
-  { id: "valid-body-no-auth", contentType: "application/json", body: '{"model": "m", "input": "x"}', withAuth: false, expectedStatus: 401 },
-  { id: "body-vazio", contentType: "application/json", body: "", withAuth: false, expectedStatus: 422 },
-  { id: "content-type-text-plain", contentType: "text/plain", body: '{"model": "fake-model-a", "input": "SCEN:ok hi"}', withAuth: false, expectedStatus: 422 },
-  { id: "temperature-hot", contentType: "application/json", body: '{"model": "m", "input": "x", "temperature": "hot"}', withAuth: false, expectedStatus: 422 },
-  { id: "stream-null", contentType: "application/json", body: '{"model": "m", "input": "x", "stream": null}', withAuth: false, expectedStatus: 422 },
-  { id: "json-malformed", contentType: "application/json", body: "{nope", withAuth: false, expectedStatus: 422 },
-  { id: "input-numerico", contentType: "application/json", body: '{"model": "m", "input": 5}', withAuth: false, expectedStatus: 422, excuseTypeToken: true },
-  { id: "input-array-nao-dict", contentType: "application/json", body: '{"model": "m", "input": ["x"]}', withAuth: false, expectedStatus: 422, excuseTypeToken: true },
-  { id: "input-vazio-com-auth", contentType: "application/json", body: '{"model": "m", "input": ""}', withAuth: true, expectedStatus: 400 },
-  { id: "input-lista-vazia-com-auth", contentType: "application/json", body: '{"model": "m", "input": []}', withAuth: true, expectedStatus: 400 },
-  { id: "input-item-sem-role-com-auth", contentType: "application/json", body: '{"model": "m", "input": [{"content": "x"}]}', withAuth: true, expectedStatus: 400 },
+  {
+    id: "model-ausente-no-auth",
+    contentType: "application/json",
+    body: '{"input": "x"}',
+    withAuth: false,
+    expectedStatus: 422,
+  },
+  {
+    id: "valid-body-no-auth",
+    contentType: "application/json",
+    body: '{"model": "m", "input": "x"}',
+    withAuth: false,
+    expectedStatus: 401,
+  },
+  {
+    id: "body-vazio",
+    contentType: "application/json",
+    body: "",
+    withAuth: false,
+    expectedStatus: 422,
+  },
+  {
+    id: "content-type-text-plain",
+    contentType: "text/plain",
+    body: '{"model": "fake-model-a", "input": "SCEN:ok hi"}',
+    withAuth: false,
+    expectedStatus: 422,
+  },
+  {
+    id: "temperature-hot",
+    contentType: "application/json",
+    body: '{"model": "m", "input": "x", "temperature": "hot"}',
+    withAuth: false,
+    expectedStatus: 422,
+  },
+  {
+    id: "stream-null",
+    contentType: "application/json",
+    body: '{"model": "m", "input": "x", "stream": null}',
+    withAuth: false,
+    expectedStatus: 422,
+  },
+  {
+    id: "json-malformed",
+    contentType: "application/json",
+    body: "{nope",
+    withAuth: false,
+    expectedStatus: 422,
+  },
+  {
+    id: "input-numerico",
+    contentType: "application/json",
+    body: '{"model": "m", "input": 5}',
+    withAuth: false,
+    expectedStatus: 422,
+    excuseTypeToken: true,
+  },
+  {
+    id: "input-array-nao-dict",
+    contentType: "application/json",
+    body: '{"model": "m", "input": ["x"]}',
+    withAuth: false,
+    expectedStatus: 422,
+    excuseTypeToken: true,
+  },
+  {
+    id: "input-vazio-com-auth",
+    contentType: "application/json",
+    body: '{"model": "m", "input": ""}',
+    withAuth: true,
+    expectedStatus: 400,
+  },
+  {
+    id: "input-lista-vazia-com-auth",
+    contentType: "application/json",
+    body: '{"model": "m", "input": []}',
+    withAuth: true,
+    expectedStatus: 400,
+  },
+  {
+    id: "input-item-sem-role-com-auth",
+    contentType: "application/json",
+    body: '{"model": "m", "input": [{"content": "x"}]}',
+    withAuth: true,
+    expectedStatus: 400,
+  },
 ];
 
-function postRequestLines(path: string, contentType: string, body: string, authLine: string): string {
+function postRequestLines(
+  path: string,
+  contentType: string,
+  body: string,
+  authLine: string,
+): string {
   const length = Buffer.byteLength(body, "utf8");
   return (
     `POST ${path} HTTP/1.1\n` +
@@ -86,7 +165,11 @@ function normalizeTypeToken(body: string): { text: string; shapeOk: boolean } {
     details.every((detail) => {
       const loc = detail["loc"];
       return (
-        Array.isArray(loc) && loc.length >= 3 && loc[0] === "body" && loc[1] === "input" && typeof loc[2] === "string"
+        Array.isArray(loc) &&
+        loc.length >= 3 &&
+        loc[0] === "body" &&
+        loc[1] === "input" &&
+        typeof loc[2] === "string"
       );
     });
   if (shapeOk && Array.isArray(details)) {
@@ -124,7 +207,12 @@ export async function run(
     );
   }
 
-  const rawEvidence = probes.map((entry) => ({ id: entry.id, request: entry.request, oracle: entry.oracle, candidate: entry.candidate }));
+  const rawEvidence = probes.map((entry) => ({
+    id: entry.id,
+    request: entry.request,
+    oracle: entry.oracle,
+    candidate: entry.candidate,
+  }));
   const casesById = new Map(CASES.map((testCase) => [testCase.id, testCase]));
 
   const differences: unknown[] = [];
@@ -149,9 +237,16 @@ export async function run(
     });
     const shapeOk = oracleNorm.shapeOk && candidateNorm.shapeOk;
     const expectedStatus = ` ${String(testCase?.expectedStatus)} `;
-    const statusOk = entry.oracle.statusLine.includes(expectedStatus) && entry.candidate.statusLine.includes(expectedStatus);
+    const statusOk =
+      entry.oracle.statusLine.includes(expectedStatus) &&
+      entry.candidate.statusLine.includes(expectedStatus);
     const ok = comparison.match && shapeOk && statusOk;
-    const record = { id: entry.id, expectedStatus: expectedStatus.trim(), normalized: { oracle: comparison.oracle, candidate: comparison.candidate }, match: ok };
+    const record = {
+      id: entry.id,
+      expectedStatus: expectedStatus.trim(),
+      normalized: { oracle: comparison.oracle, candidate: comparison.candidate },
+      match: ok,
+    };
     if (!ok) differences.push(record);
     return record;
   });

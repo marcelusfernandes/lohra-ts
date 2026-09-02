@@ -10,7 +10,11 @@ import { createGatewayUpgradeHandler } from "../../src/gateway/ws/connection.js"
 import { startGatewayHttpServer, type GatewayHttpServer } from "../../src/gateway/http/server.js";
 import { routeGatewayRequest, type RouteContext } from "../../src/gateway/http/routes.js";
 import { sendRawHttpRequest } from "../../scripts/parity/gateway/raw-http-client.js";
-import { connectRawWs, decodeCloseFrame, WS_OPCODE } from "../../scripts/parity/gateway/raw-ws-client.js";
+import {
+  connectRawWs,
+  decodeCloseFrame,
+  WS_OPCODE,
+} from "../../scripts/parity/gateway/raw-ws-client.js";
 
 // Self-validation of the harness's own raw-socket primitives (the ones the
 // Evaluator-facing scenario harness will use as principal evidence)
@@ -91,7 +95,7 @@ describe("raw HTTP client: byte-exact request/response over a real socket", () =
     expect(response.body.toString("utf8")).toBe('{"ok":true,"version":"0.0.11","sessions":0}');
   });
 
-  it("GET /api/status without a token -> 401 {\"detail\":\"Unauthorized\"}", async () => {
+  it('GET /api/status without a token -> 401 {"detail":"Unauthorized"}', async () => {
     const server = await startServer();
     const response = await sendRawHttpRequest("127.0.0.1", server.port, {
       method: "GET",

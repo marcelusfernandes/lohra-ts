@@ -4,7 +4,9 @@ import { decodeJsonRpcFrame, encodeJsonRpcFrame } from "../../src/gateway/rpc/fr
 
 describe("decodeJsonRpcFrame", () => {
   it("decodes a well-formed request, echoing id and params verbatim", () => {
-    const decoded = decodeJsonRpcFrame('{"jsonrpc":"2.0","id":7,"method":"session.list","params":{}}');
+    const decoded = decodeJsonRpcFrame(
+      '{"jsonrpc":"2.0","id":7,"method":"session.list","params":{}}',
+    );
     expect(decoded).toEqual({ ok: true, id: 7, method: "session.list", params: {} });
   });
 

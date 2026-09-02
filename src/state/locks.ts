@@ -170,13 +170,9 @@ export class LockRepository {
 
   public runLeaseExpiry(runId: string, now: number): number | null {
     const row = this.database
-      .prepare(
-        "SELECT expires_at FROM workflow_run_locks WHERE run_id = ? AND expires_at > ?",
-      )
+      .prepare("SELECT expires_at FROM workflow_run_locks WHERE run_id = ? AND expires_at > ?")
       .get(runId, now) as { readonly expires_at: bigint } | undefined;
-    return row === undefined
-      ? null
-      : safeInteger(row.expires_at, "workflow_run_locks.expires_at");
+    return row === undefined ? null : safeInteger(row.expires_at, "workflow_run_locks.expires_at");
   }
 
   public runFenceOf(runId: string): FenceToken | null {

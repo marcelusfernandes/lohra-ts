@@ -150,7 +150,11 @@ export function shouldRetryStatus(status: number, headers: Headers, policy: Retr
  * (500ms * 2^attempt, capped at 8s, jitter in (0.75, 1]). `attempt` is the
  * count of retries already completed (0 for the first retry), matching
  * the SDKs' `nb_retries`. */
-export function calculateRetryDelayMs(attempt: number, headers: Headers, policy: RetryPolicy): number {
+export function calculateRetryDelayMs(
+  attempt: number,
+  headers: Headers,
+  policy: RetryPolicy,
+): number {
   const retryAfter = parseRetryAfterHeader(headers);
   if (retryAfter !== null && retryAfter > 0 && retryAfter <= policy.maxRetryAfterSeconds)
     return retryAfter * 1000;

@@ -23,9 +23,18 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { startServer, stopAndCleanup, sendRaw, type ServerHandle, type RawResponse } from "../openai-server/harness.js";
+import {
+  startServer,
+  stopAndCleanup,
+  sendRaw,
+  type ServerHandle,
+  type RawResponse,
+} from "../openai-server/harness.js";
 import { startFakeUpstream, UPSTREAM_FAILURE_NONCE, type FakeUpstream } from "./fake-upstream.js";
-import { launchCandidateFakeUpstreamDashboard, type LaunchedGatewayProcess } from "./launch-candidate-fake.js";
+import {
+  launchCandidateFakeUpstreamDashboard,
+  type LaunchedGatewayProcess,
+} from "./launch-candidate-fake.js";
 import { sendRawHttpRequest, type RawHttpResponse } from "./raw-http-client.js";
 import { connectRawWs, type RawWsClient } from "./raw-ws-client.js";
 
@@ -88,9 +97,19 @@ interface Fixture {
 }
 
 // -- server (T11) raw request helper ----------------------------------
-function serverRequestLines(method: string, path: string, body: string, auth: "valid" | "invalid" | "none", apiKey: string): string {
+function serverRequestLines(
+  method: string,
+  path: string,
+  body: string,
+  auth: "valid" | "invalid" | "none",
+  apiKey: string,
+): string {
   const authHeader =
-    auth === "valid" ? `Authorization: Bearer ${apiKey}\n` : auth === "invalid" ? "Authorization: Bearer wrong-key-entirely\n" : "";
+    auth === "valid"
+      ? `Authorization: Bearer ${apiKey}\n`
+      : auth === "invalid"
+        ? "Authorization: Bearer wrong-key-entirely\n"
+        : "";
   return (
     `${method} ${path} HTTP/1.1\n` +
     "Host: 127.0.0.1\n" +
@@ -129,8 +148,13 @@ async function gatewayRequest(
 async function g1StreamInvalidBeforeSse(fx: Fixture): Promise<GateResult> {
   const id = "t12-joint-gate-01-stream-invalid-before-sse";
   const body = JSON.stringify({ model: "fake-model-a", stream: true, messages: [] });
-  const serverResponse = await sendRaw(fx.server.port, serverRequestLines("POST", "/v1/chat/completions", body, "valid", fx.server.apiKey ?? ""), body);
-  const serverContentType = serverResponse.headers.find(([name]) => name === "content-type")?.[1] ?? "";
+  const serverResponse = await sendRaw(
+    fx.server.port,
+    serverRequestLines("POST", "/v1/chat/completions", body, "valid", fx.server.apiKey ?? ""),
+    body,
+  );
+  const serverContentType =
+    serverResponse.headers.find(([name]) => name === "content-type")?.[1] ?? "";
   const serverJson = jsonOf(serverResponse.body) as { error?: { type?: string; message?: string } };
   const serverOk =
     serverResponse.statusLine.includes(" 400 ") &&
@@ -143,13 +167,28 @@ async function g1StreamInvalidBeforeSse(fx: Fixture): Promise<GateResult> {
     return divergent(id, "server did not refuse pre-SSE as expected", { serverResponse });
   }
 
-  const gatewayResponse = await gatewayRequest(fx.dashboard, "POST", "/v1/chat/completions", "none", body);
+  const gatewayResponse = await gatewayRequest(
+    fx.dashboard,
+    "POST",
+    "/v1/chat/completions",
+    "none",
+    body,
+  );
   const gatewayJson = jsonOf(gatewayResponse.body.toString("utf8"));
-  const gatewayOk = gatewayResponse.status === 404 && JSON.stringify(gatewayJson) === JSON.stringify({ detail: "Not Found" });
+  const gatewayOk =
+    gatewayResponse.status === 404 &&
+    JSON.stringify(gatewayJson) === JSON.stringify({ detail: "Not Found" });
   if (!gatewayOk) {
-    return divergent(id, `gateway status=${String(gatewayResponse.status)} body=${gatewayResponse.body.toString("utf8")}`, { gatewayResponse });
+    return divergent(
+      id,
+      `gateway status=${String(gatewayResponse.status)} body=${gatewayResponse.body.toString("utf8")}`,
+      { gatewayResponse },
+    );
   }
-  return match(id, { server: { status: 400, error: serverJson.error }, gateway: { status: 404, body: gatewayJson } });
+  return match(id, {
+    server: { status: 400, error: serverJson.error },
+    gateway: { status: 404, body: gatewayJson },
+  });
 }
 
 // item 2: a real upstream failure (418 + a canary substring) surfaces on
@@ -173,14 +212,19 @@ async function g2UpstreamFailure(fx: Fixture): Promise<GateResult> {
     serverJson.error?.type === "upstream_error" &&
     (serverJson.error.message ?? "").includes("418") &&
     (serverJson.error.message ?? "").includes(UPSTREAM_FAILURE_NONCE);
-  if (!serverOk) return divergent(id, "server did not surface the upstream failure as expected", { serverResponse });
+  if (!serverOk)
+    return divergent(id, "server did not surface the upstream failure as expected", {
+      serverResponse,
+    });
 
   const ws = await connectRawWs("127.0.0.1", fx.dashboard.port, `/api/ws?token=${DASHBOARD_TOKEN}`);
   try {
     await ws.nextFrame(); // gateway.ready
     ws.sendText(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "session.create", params: {} }));
     const createFrame = await ws.nextFrame();
-    const createEnvelope = JSON.parse(createFrame.payload.toString("utf8")) as { result?: { session_id?: string } };
+    const createEnvelope = JSON.parse(createFrame.payload.toString("utf8")) as {
+      result?: { session_id?: string };
+    };
     const sessionId = createEnvelope.result?.session_id ?? "";
     ws.sendText(
       JSON.stringify({
@@ -205,9 +249,15 @@ async function g2UpstreamFailure(fx: Fixture): Promise<GateResult> {
       completePayload?.status === "error" &&
       (completePayload.warning ?? "").includes("418") &&
       (completePayload.warning ?? "").includes(UPSTREAM_FAILURE_NONCE);
-    if (!gatewayOk) return divergent(id, "gateway did not surface the upstream failure as expected", { completePayload });
+    if (!gatewayOk)
+      return divergent(id, "gateway did not surface the upstream failure as expected", {
+        completePayload,
+      });
 
-    return match(id, { server: { status: 502, error: serverJson.error }, gateway: { messageComplete: completePayload } });
+    return match(id, {
+      server: { status: 502, error: serverJson.error },
+      gateway: { messageComplete: completePayload },
+    });
   } finally {
     ws.close();
   }
@@ -228,7 +278,17 @@ async function g3RunsFourOfFour(fx: Fixture): Promise<GateResult> {
   const serverResults = await Promise.all(
     combos.map(async ([method, auth]) => {
       const body = method === "POST" ? "{}" : "";
-      const response = await sendRaw(fx.server.port, serverRequestLines(method, "/v1/runs", body, auth === "valid" ? "valid" : "none", fx.server.apiKey ?? ""), body);
+      const response = await sendRaw(
+        fx.server.port,
+        serverRequestLines(
+          method,
+          "/v1/runs",
+          body,
+          auth === "valid" ? "valid" : "none",
+          fx.server.apiKey ?? "",
+        ),
+        body,
+      );
       return { method, auth, status: response.statusLine, body: jsonOf(response.body) };
     }),
   );
@@ -236,13 +296,26 @@ async function g3RunsFourOfFour(fx: Fixture): Promise<GateResult> {
     combos.map(async ([method, auth]) => {
       const body = method === "POST" ? "{}" : "";
       const response = await gatewayRequest(fx.dashboard, method, "/v1/runs", auth, body);
-      return { method, auth, status: response.status, body: jsonOf(response.body.toString("utf8")) };
+      return {
+        method,
+        auth,
+        status: response.status,
+        body: jsonOf(response.body.toString("utf8")),
+      };
     }),
   );
   const expected = JSON.stringify({ detail: "Not Found" });
-  const serverOk = serverResults.every((r) => r.status.includes(" 404 ") && JSON.stringify(r.body) === expected);
-  const gatewayOk = gatewayResults.every((r) => r.status === 404 && JSON.stringify(r.body) === expected);
-  if (!serverOk || !gatewayOk) return divergent(id, "not all 4/4 combos were 404 on both surfaces", { serverResults, gatewayResults });
+  const serverOk = serverResults.every(
+    (r) => r.status.includes(" 404 ") && JSON.stringify(r.body) === expected,
+  );
+  const gatewayOk = gatewayResults.every(
+    (r) => r.status === 404 && JSON.stringify(r.body) === expected,
+  );
+  if (!serverOk || !gatewayOk)
+    return divergent(id, "not all 4/4 combos were 404 on both surfaces", {
+      serverResults,
+      gatewayResults,
+    });
   return match(id, { serverResults, gatewayResults });
 }
 
@@ -255,21 +328,35 @@ async function g3RunsFourOfFour(fx: Fixture): Promise<GateResult> {
 async function g4VocabulariesDiffer(fx: Fixture): Promise<GateResult> {
   const id = "t12-joint-gate-04-vocabularies-differ";
 
-  const serverUnauthed = await sendRaw(fx.server.port, serverRequestLines("GET", "/v1/models", "", "none", ""), "");
+  const serverUnauthed = await sendRaw(
+    fx.server.port,
+    serverRequestLines("GET", "/v1/models", "", "none", ""),
+    "",
+  );
   const serverUnauthedJson = jsonOf(serverUnauthed.body);
   const gatewayUnauthed = await gatewayRequest(fx.dashboard, "GET", "/api/status", "none");
   const gatewayUnauthedJson = jsonOf(gatewayUnauthed.body.toString("utf8"));
 
-  const envelopesDiffer = JSON.stringify(serverUnauthedJson) !== JSON.stringify(gatewayUnauthedJson);
+  const envelopesDiffer =
+    JSON.stringify(serverUnauthedJson) !== JSON.stringify(gatewayUnauthedJson);
   const serverShapeOk =
     serverUnauthed.statusLine.includes(" 401 ") &&
-    JSON.stringify(serverUnauthedJson) === JSON.stringify({ error: { message: "missing or invalid API key", type: "authentication_error" } });
-  const gatewayShapeOk = gatewayUnauthed.status === 401 && JSON.stringify(gatewayUnauthedJson) === JSON.stringify({ detail: "Unauthorized" });
+    JSON.stringify(serverUnauthedJson) ===
+      JSON.stringify({
+        error: { message: "missing or invalid API key", type: "authentication_error" },
+      });
+  const gatewayShapeOk =
+    gatewayUnauthed.status === 401 &&
+    JSON.stringify(gatewayUnauthedJson) === JSON.stringify({ detail: "Unauthorized" });
   if (!envelopesDiffer || !serverShapeOk || !gatewayShapeOk) {
-    return divergent(id, "401 envelopes did not both match their own known shape and differ from each other", {
-      serverUnauthedJson,
-      gatewayUnauthedJson,
-    });
+    return divergent(
+      id,
+      "401 envelopes did not both match their own known shape and differ from each other",
+      {
+        serverUnauthedJson,
+        gatewayUnauthedJson,
+      },
+    );
   }
 
   // cross-probe: each surface's OWN valid credential, presented to the
@@ -293,32 +380,63 @@ async function g4VocabulariesDiffer(fx: Fixture): Promise<GateResult> {
     `GET /v1/models HTTP/1.1\nHost: 127.0.0.1\nAuthorization: Bearer ${DASHBOARD_TOKEN}\nConnection: close\n`,
     dashboardCredOnServerBody,
   );
-  const crossOk = serverCredOnGatewayResponse.status === 401 && dashboardCredOnServer.statusLine.includes(" 401 ");
+  const crossOk =
+    serverCredOnGatewayResponse.status === 401 &&
+    dashboardCredOnServer.statusLine.includes(" 401 ");
   if (!crossOk) {
-    return divergent(id, "cross-surface credentials were not both rejected", { serverCredOnGatewayResponse, dashboardCredOnServer });
+    return divergent(id, "cross-surface credentials were not both rejected", {
+      serverCredOnGatewayResponse,
+      dashboardCredOnServer,
+    });
   }
   void serverCredOnGateway;
 
-  const serverOpenapi = await sendRaw(fx.server.port, "GET /openapi.json HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n", "");
+  const serverOpenapi = await sendRaw(
+    fx.server.port,
+    "GET /openapi.json HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n",
+    "",
+  );
   const gatewayOpenapi = await gatewayRequest(fx.dashboard, "GET", "/openapi.json", "none");
-  const serverPaths = Object.keys(((jsonOf(serverOpenapi.body) as { paths?: Record<string, unknown> }).paths) ?? {}).sort();
+  const serverPaths = Object.keys(
+    (jsonOf(serverOpenapi.body) as { paths?: Record<string, unknown> }).paths ?? {},
+  ).sort();
   const gatewayPaths = Object.keys(
-    ((jsonOf(gatewayOpenapi.body.toString("utf8")) as { paths?: Record<string, unknown> }).paths) ?? {},
+    (jsonOf(gatewayOpenapi.body.toString("utf8")) as { paths?: Record<string, unknown> }).paths ??
+      {},
   ).sort();
   const expectedServerPaths = ["/health", "/v1/chat/completions", "/v1/models", "/v1/responses"];
-  const expectedGatewayPaths = ["/api/config", "/api/sessions", "/api/sessions/{session_id}/messages", "/api/status"];
+  const expectedGatewayPaths = [
+    "/api/config",
+    "/api/sessions",
+    "/api/sessions/{session_id}/messages",
+    "/api/status",
+  ];
   const openapiOk =
     JSON.stringify(serverPaths) === JSON.stringify(expectedServerPaths) &&
     JSON.stringify(gatewayPaths) === JSON.stringify(expectedGatewayPaths);
-  if (!openapiOk) return divergent(id, "openapi path sets did not match their expected, disjoint shapes", { serverPaths, gatewayPaths });
+  if (!openapiOk)
+    return divergent(id, "openapi path sets did not match their expected, disjoint shapes", {
+      serverPaths,
+      gatewayPaths,
+    });
 
-  const serverMethodNotAllowed = await sendRaw(fx.server.port, "PUT /health HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n", "");
+  const serverMethodNotAllowed = await sendRaw(
+    fx.server.port,
+    "PUT /health HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n",
+    "",
+  );
   // POST, not HEAD: HEAD always strips the response body regardless of
   // status (routes.ts's stripBodyForHead), so a HEAD-based 405 body is
   // structurally empty no matter what -- comparing it against the
   // server's populated 405 body would be an apples-to-oranges harness bug,
   // not a genuine shape divergence.
-  const gatewayMethodNotAllowed = await gatewayRequest(fx.dashboard, "POST", "/api/status", "valid", "{}");
+  const gatewayMethodNotAllowed = await gatewayRequest(
+    fx.dashboard,
+    "POST",
+    "/api/status",
+    "valid",
+    "{}",
+  );
   const bothShape = JSON.stringify({ detail: "Method Not Allowed" });
   const methodNotAllowedOk =
     serverMethodNotAllowed.statusLine.includes(" 405 ") &&
@@ -326,7 +444,10 @@ async function g4VocabulariesDiffer(fx: Fixture): Promise<GateResult> {
     gatewayMethodNotAllowed.status === 405 &&
     JSON.stringify(jsonOf(gatewayMethodNotAllowed.body.toString("utf8"))) === bothShape;
   if (!methodNotAllowedOk) {
-    return divergent(id, "405 shape was not the identical FastAPI-style default on both surfaces", { serverMethodNotAllowed, gatewayMethodNotAllowed });
+    return divergent(id, "405 shape was not the identical FastAPI-style default on both surfaces", {
+      serverMethodNotAllowed,
+      gatewayMethodNotAllowed,
+    });
   }
 
   return match(id, {
@@ -342,11 +463,23 @@ async function g4VocabulariesDiffer(fx: Fixture): Promise<GateResult> {
 // silently succeeding or borrowing the other surface's response shape.
 async function g5MiddlewareNonLeakage(fx: Fixture): Promise<GateResult> {
   const id = "t12-joint-gate-05-middleware-non-leakage";
-  const gatewayResponse = await gatewayRequest(fx.dashboard, "POST", "/v1/chat/completions", "none", "{}");
+  const gatewayResponse = await gatewayRequest(
+    fx.dashboard,
+    "POST",
+    "/v1/chat/completions",
+    "none",
+    "{}",
+  );
   const gatewayJson = jsonOf(gatewayResponse.body.toString("utf8"));
-  const gatewayOk = gatewayResponse.status === 404 && JSON.stringify(gatewayJson) === JSON.stringify({ detail: "Not Found" });
+  const gatewayOk =
+    gatewayResponse.status === 404 &&
+    JSON.stringify(gatewayJson) === JSON.stringify({ detail: "Not Found" });
 
-  const serverResponse = await sendRaw(fx.server.port, "GET /api/status HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n", "");
+  const serverResponse = await sendRaw(
+    fx.server.port,
+    "GET /api/status HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n",
+    "",
+  );
   const serverJson = jsonOf(serverResponse.body);
   // Measured fact, not assumed: the server's route table has no entry for
   // /api/status at all, and its dispatch() routes BEFORE any auth check
@@ -354,12 +487,21 @@ async function g5MiddlewareNonLeakage(fx: Fixture): Promise<GateResult> {
   // never a 200 that would mean the gateway's OWN route handler got
   // reached through the wrong process, and never silently reusing the
   // gateway's {"detail":"Unauthorized"} shape either.
-  const serverOk = serverResponse.statusLine.includes(" 404 ") && JSON.stringify(serverJson) === JSON.stringify({ detail: "Not Found" });
+  const serverOk =
+    serverResponse.statusLine.includes(" 404 ") &&
+    JSON.stringify(serverJson) === JSON.stringify({ detail: "Not Found" });
 
   if (!gatewayOk || !serverOk) {
-    return divergent(id, "a cross-surface-only path did not fall through to that surface's own routing", { gatewayResponse, serverResponse });
+    return divergent(
+      id,
+      "a cross-surface-only path did not fall through to that surface's own routing",
+      { gatewayResponse, serverResponse },
+    );
   }
-  return match(id, { gateway: { status: 404, body: gatewayJson }, server: { status: 404, body: serverJson } });
+  return match(id, {
+    gateway: { status: 404, body: gatewayJson },
+    server: { status: 404, body: serverJson },
+  });
 }
 
 // item 6 (Evaluator-added): a full gateway WS turn and a full server SSE
@@ -369,32 +511,54 @@ async function g6ParallelTurnAndStream(fx: Fixture): Promise<GateResult> {
   const id = "t12-joint-gate-06-parallel-ws-turn-and-sse-stream";
   fx.fakeUpstream.setNextContent("joint gate parallel reply");
 
-  const serverBody = JSON.stringify({ model: "fake-model-a", stream: true, messages: [{ role: "user", content: "hello server" }] });
+  const serverBody = JSON.stringify({
+    model: "fake-model-a",
+    stream: true,
+    messages: [{ role: "user", content: "hello server" }],
+  });
   const serverStreamPromise = sendRaw(
     fx.server.port,
     serverRequestLines("POST", "/v1/chat/completions", serverBody, "valid", fx.server.apiKey ?? ""),
     serverBody,
   );
 
-  const gatewayTurnPromise = (async (): Promise<{ readonly sequence: readonly string[]; readonly completePayload: unknown }> => {
-    const ws: RawWsClient = await connectRawWs("127.0.0.1", fx.dashboard.port, `/api/ws?token=${DASHBOARD_TOKEN}`);
+  const gatewayTurnPromise = (async (): Promise<{
+    readonly sequence: readonly string[];
+    readonly completePayload: unknown;
+  }> => {
+    const ws: RawWsClient = await connectRawWs(
+      "127.0.0.1",
+      fx.dashboard.port,
+      `/api/ws?token=${DASHBOARD_TOKEN}`,
+    );
     try {
       await ws.nextFrame(); // gateway.ready
       ws.sendText(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "session.create", params: {} }));
       const createFrame = await ws.nextFrame();
-      const createEnvelope = JSON.parse(createFrame.payload.toString("utf8")) as { result?: { session_id?: string } };
+      const createEnvelope = JSON.parse(createFrame.payload.toString("utf8")) as {
+        result?: { session_id?: string };
+      };
       const sessionId = createEnvelope.result?.session_id ?? "";
       ws.sendText(
-        JSON.stringify({ jsonrpc: "2.0", id: 2, method: "prompt.submit", params: { session_id: sessionId, text: "hello gateway" } }),
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "prompt.submit",
+          params: { session_id: sessionId, text: "hello gateway" },
+        }),
       );
       const sequence: string[] = [];
       let completePayload: unknown = null;
       for (let i = 0; i < 12 && completePayload === null; i += 1) {
         const frame = await ws.nextFrame(10_000);
-        const envelope = JSON.parse(frame.payload.toString("utf8")) as { method?: string; params?: { type?: string; payload?: unknown } };
+        const envelope = JSON.parse(frame.payload.toString("utf8")) as {
+          method?: string;
+          params?: { type?: string; payload?: unknown };
+        };
         if (envelope.method === "event" && envelope.params !== undefined) {
           sequence.push(envelope.params.type ?? "?");
-          if (envelope.params.type === "message.complete") completePayload = envelope.params.payload;
+          if (envelope.params.type === "message.complete")
+            completePayload = envelope.params.payload;
         }
       }
       return { sequence, completePayload };
@@ -403,11 +567,16 @@ async function g6ParallelTurnAndStream(fx: Fixture): Promise<GateResult> {
     }
   })();
 
-  const [serverStreamResult, gatewayTurnResult] = await Promise.all([serverStreamPromise, gatewayTurnPromise]);
+  const [serverStreamResult, gatewayTurnResult] = await Promise.all([
+    serverStreamPromise,
+    gatewayTurnPromise,
+  ]);
 
   const serverOk =
     serverStreamResult.statusLine.includes(" 200 ") &&
-    (serverStreamResult.headers.find(([n]) => n === "content-type")?.[1] ?? "").includes("text/event-stream") &&
+    (serverStreamResult.headers.find(([n]) => n === "content-type")?.[1] ?? "").includes(
+      "text/event-stream",
+    ) &&
     serverStreamResult.body.trimEnd().endsWith("data: [DONE]") &&
     sseContent(serverStreamResult.body).trim() === "joint gate parallel reply";
   const gatewayOk =
@@ -416,7 +585,10 @@ async function g6ParallelTurnAndStream(fx: Fixture): Promise<GateResult> {
     (gatewayTurnResult.completePayload as { status?: string } | null)?.status !== "error";
 
   if (!serverOk || !gatewayOk) {
-    return divergent(id, "parallel turn/stream did not both complete cleanly", { serverStreamResult, gatewayTurnResult });
+    return divergent(id, "parallel turn/stream did not both complete cleanly", {
+      serverStreamResult,
+      gatewayTurnResult,
+    });
   }
   return match(id, { server: { done: true }, gateway: gatewayTurnResult });
 }
@@ -446,24 +618,41 @@ async function g7BusyRaceSameWindow(fx: Fixture): Promise<GateResult> {
     }
   };
 
-  const ws: RawWsClient = await connectRawWs("127.0.0.1", fx.dashboard.port, `/api/ws?token=${DASHBOARD_TOKEN}`);
+  const ws: RawWsClient = await connectRawWs(
+    "127.0.0.1",
+    fx.dashboard.port,
+    `/api/ws?token=${DASHBOARD_TOKEN}`,
+  );
   let ws2: RawWsClient | null = null;
   try {
     await ws.nextFrame(); // gateway.ready
     ws.sendText(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "session.create", params: {} }));
     const createFrame = await ws.nextFrame();
-    const createEnvelope = JSON.parse(createFrame.payload.toString("utf8")) as { result?: { session_id?: string } };
+    const createEnvelope = JSON.parse(createFrame.payload.toString("utf8")) as {
+      result?: { session_id?: string };
+    };
     const sessionId = createEnvelope.result?.session_id ?? "";
 
-    ws.sendText(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "prompt.submit", params: { session_id: sessionId, text: "hold me open" } }));
+    ws.sendText(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "prompt.submit",
+        params: { session_id: sessionId, text: "hold me open" },
+      }),
+    );
     // Wait for message.start -- proof the turn has genuinely begun (busy
     // engaged) before racing the second submit, rather than trusting
     // timing alone.
     let sawMessageStart = false;
     for (let i = 0; i < 6 && !sawMessageStart; i += 1) {
       const frame = await ws.nextFrame(5000);
-      const envelope = JSON.parse(frame.payload.toString("utf8")) as { method?: string; params?: { type?: string } };
-      if (envelope.method === "event" && envelope.params?.type === "message.start") sawMessageStart = true;
+      const envelope = JSON.parse(frame.payload.toString("utf8")) as {
+        method?: string;
+        params?: { type?: string };
+      };
+      if (envelope.method === "event" && envelope.params?.type === "message.start")
+        sawMessageStart = true;
     }
     if (!sawMessageStart) {
       releaseOnce();
@@ -478,13 +667,28 @@ async function g7BusyRaceSameWindow(fx: Fixture): Promise<GateResult> {
       const invalidBody = JSON.stringify({ model: "fake-model-a", stream: true, messages: [] });
       [busyFrame, serverInvalidResponse] = await Promise.all([
         (async (): Promise<Record<string, unknown>> => {
-          (ws2).sendText(
-            JSON.stringify({ jsonrpc: "2.0", id: 3, method: "prompt.submit", params: { session_id: sessionId, text: "second submit" } }),
+          ws2.sendText(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: 3,
+              method: "prompt.submit",
+              params: { session_id: sessionId, text: "second submit" },
+            }),
           );
-          const frame = await (ws2).nextFrame(5000);
+          const frame = await ws2.nextFrame(5000);
           return JSON.parse(frame.payload.toString("utf8")) as Record<string, unknown>;
         })(),
-        sendRaw(fx.server.port, serverRequestLines("POST", "/v1/chat/completions", invalidBody, "valid", fx.server.apiKey ?? ""), invalidBody),
+        sendRaw(
+          fx.server.port,
+          serverRequestLines(
+            "POST",
+            "/v1/chat/completions",
+            invalidBody,
+            "valid",
+            fx.server.apiKey ?? "",
+          ),
+          invalidBody,
+        ),
       ]);
     } finally {
       // ALWAYS release, even if the race itself threw -- otherwise the
@@ -494,7 +698,8 @@ async function g7BusyRaceSameWindow(fx: Fixture): Promise<GateResult> {
       releaseOnce();
     }
 
-    const busyOk = JSON.stringify(busyFrame.error) === JSON.stringify({ code: 4009, message: "session busy" });
+    const busyOk =
+      JSON.stringify(busyFrame.error) === JSON.stringify({ code: 4009, message: "session busy" });
     const serverInvalidJson = jsonOf(serverInvalidResponse.body) as { error?: { type?: string } };
     const serverInvalidOk =
       serverInvalidResponse.statusLine.includes(" 400 ") &&
@@ -506,14 +711,26 @@ async function g7BusyRaceSameWindow(fx: Fixture): Promise<GateResult> {
     let completed = false;
     for (let i = 0; i < 12 && !completed; i += 1) {
       const frame = await ws.nextFrame(10_000);
-      const envelope = JSON.parse(frame.payload.toString("utf8")) as { method?: string; params?: { type?: string } };
-      if (envelope.method === "event" && envelope.params?.type === "message.complete") completed = true;
+      const envelope = JSON.parse(frame.payload.toString("utf8")) as {
+        method?: string;
+        params?: { type?: string };
+      };
+      if (envelope.method === "event" && envelope.params?.type === "message.complete")
+        completed = true;
     }
 
     if (!busyOk || !serverInvalidOk || !completed) {
-      return divergent(id, "busy/pre-SSE race or cleanup drain did not match expectations", { busyFrame, serverInvalidResponse, completed });
+      return divergent(id, "busy/pre-SSE race or cleanup drain did not match expectations", {
+        busyFrame,
+        serverInvalidResponse,
+        completed,
+      });
     }
-    return match(id, { gatewayBusy: busyFrame.error, serverInvalid: serverInvalidJson.error, heldTurnCompleted: completed });
+    return match(id, {
+      gatewayBusy: busyFrame.error,
+      serverInvalid: serverInvalidJson.error,
+      heldTurnCompleted: completed,
+    });
   } finally {
     releaseOnce();
     ws2?.close();
@@ -536,9 +753,13 @@ async function g8Cleanup(fx: Fixture): Promise<GateResult> {
   async function portReleased(port: number): Promise<boolean> {
     return await new Promise((resolvePromise) => {
       const probe = createServer();
-      probe.once("error", () => { resolvePromise(false); });
+      probe.once("error", () => {
+        resolvePromise(false);
+      });
       probe.listen(port, "127.0.0.1", () => {
-        probe.close(() => { resolvePromise(true); });
+        probe.close(() => {
+          resolvePromise(true);
+        });
       });
     });
   }
@@ -546,7 +767,11 @@ async function g8Cleanup(fx: Fixture): Promise<GateResult> {
   const serverPortReleased = await portReleased(serverPort);
   const dashboardPortReleased = await portReleased(dashboardPort);
 
-  const ok = serverExit.exitCode === 0 && dashboardExit.exitCode === 0 && serverPortReleased && dashboardPortReleased;
+  const ok =
+    serverExit.exitCode === 0 &&
+    dashboardExit.exitCode === 0 &&
+    serverPortReleased &&
+    dashboardPortReleased;
   if (!ok) {
     return divergent(id, "cleanup did not produce exit 0 + released ports on both surfaces", {
       serverExit,
@@ -560,7 +785,11 @@ async function g8Cleanup(fx: Fixture): Promise<GateResult> {
 
 async function main(): Promise<void> {
   const fakeUpstream = await startFakeUpstream();
-  const server = await startServer("candidate", {}, `http://127.0.0.1:${String(fakeUpstream.port)}/v1`);
+  const server = await startServer(
+    "candidate",
+    {},
+    `http://127.0.0.1:${String(fakeUpstream.port)}/v1`,
+  );
   const dashboardHome = mkdtempSync(join(tmpdir(), "lohra-t12-joint-dashboard-home-"));
   const dashboard = await launchCandidateFakeUpstreamDashboard({
     fakeUpstreamPort: fakeUpstream.port,
@@ -569,7 +798,10 @@ async function main(): Promise<void> {
   });
   const fx: Fixture = { server, dashboard, fakeUpstream };
 
-  const gateItems: readonly { readonly id: string; readonly run: (fixture: Fixture) => Promise<GateResult> }[] = [
+  const gateItems: readonly {
+    readonly id: string;
+    readonly run: (fixture: Fixture) => Promise<GateResult>;
+  }[] = [
     { id: "g1", run: g1StreamInvalidBeforeSse },
     { id: "g2", run: g2UpstreamFailure },
     { id: "g3", run: g3RunsFourOfFour },
@@ -599,8 +831,14 @@ async function main(): Promise<void> {
         console.error(`-- ${item.id} -> ${result.verdict}`);
         results.push(result);
       } catch (error) {
-        console.error(`-- ${item.id} -> threw: ${error instanceof Error ? error.message : String(error)}`);
-        results.push({ id: item.id, verdict: "error", detail: error instanceof Error ? error.message : String(error) });
+        console.error(
+          `-- ${item.id} -> threw: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        results.push({
+          id: item.id,
+          verdict: "error",
+          detail: error instanceof Error ? error.message : String(error),
+        });
       }
     }
   } finally {
@@ -615,20 +853,41 @@ async function main(): Promise<void> {
   }
 
   const projections = results.map((result) => {
-    const sha = createHash("sha256").update(JSON.stringify({ verdict: result.verdict, detail: result.detail, evidence: result.evidence })).digest("hex");
+    const sha = createHash("sha256")
+      .update(
+        JSON.stringify({
+          verdict: result.verdict,
+          detail: result.detail,
+          evidence: result.evidence,
+        }),
+      )
+      .digest("hex");
     return { id: result.id, sha };
   });
-  const digest = createHash("sha256").update(projections.map(({ id, sha }) => `${id}=${sha}\n`).join("")).digest("hex");
+  const digest = createHash("sha256")
+    .update(projections.map(({ id, sha }) => `${id}=${sha}\n`).join(""))
+    .digest("hex");
 
   const evidencePath = join(evidenceRoot, "run-joint-gate.json");
-  writeFileSync(evidencePath, JSON.stringify({ suite: "t12-joint-gate-t11-serve-plus-t12-dashboard", digest, projections, results }, null, 2));
+  writeFileSync(
+    evidencePath,
+    JSON.stringify(
+      { suite: "t12-joint-gate-t11-serve-plus-t12-dashboard", digest, projections, results },
+      null,
+      2,
+    ),
+  );
 
   const failed = results.filter((result) => result.verdict !== "match");
   for (const result of results) {
     const marker = result.verdict === "match" ? "PASS" : "FAIL";
-    console.log(`[${marker}] ${result.id}${result.detail !== undefined ? ` -- ${result.detail}` : ""}`);
+    console.log(
+      `[${marker}] ${result.id}${result.detail !== undefined ? ` -- ${result.detail}` : ""}`,
+    );
   }
-  console.log(`\n${String(results.length - failed.length)}/${String(results.length)} gate items match.`);
+  console.log(
+    `\n${String(results.length - failed.length)}/${String(results.length)} gate items match.`,
+  );
   console.log(`Digest: ${digest}`);
   console.log(`Evidence: ${evidencePath}`);
   if (failed.length > 0) process.exitCode = 1;

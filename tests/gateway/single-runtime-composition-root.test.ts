@@ -13,7 +13,10 @@ import { describe, expect, it } from "vitest";
 // ADR-T12-04), which is exactly the kind of subtle, hard-to-provoke
 // difference a structural check on the composition root closes directly
 // instead of hoping a behavioral probe happens to catch it.
-const SOURCE = readFileSync(resolve(import.meta.dirname, "../../src/commands/dashboard.ts"), "utf8");
+const SOURCE = readFileSync(
+  resolve(import.meta.dirname, "../../src/commands/dashboard.ts"),
+  "utf8",
+);
 
 function occurrences(pattern: RegExp): number {
   return [...SOURCE.matchAll(pattern)].length;
@@ -35,14 +38,19 @@ describe("dashboard.ts composition root: single runtime, no duplicate loop (asse
     // duplicate loop would show up here as a SECOND `new
     // GatewaySessionRegistry(...)` passed to createGatewayUpgradeHandler
     // instead of the shared variable.
-    const restSection = SOURCE.slice(SOURCE.indexOf("const routeContext"), SOURCE.indexOf("const onUpgrade"));
+    const restSection = SOURCE.slice(
+      SOURCE.indexOf("const routeContext"),
+      SOURCE.indexOf("const onUpgrade"),
+    );
     expect(restSection).toMatch(/registry\.(list|history)\(/u);
     const wsCallSite = SOURCE.slice(SOURCE.indexOf("const onUpgrade"));
     expect(wsCallSite).toMatch(/createGatewayUpgradeHandler\(\{\s*registry,/u);
   });
 
   it("the per-connection conversation repository factory wraps the SAME sessions instance, not a fresh SessionRepository per connection", () => {
-    expect(SOURCE).toContain("createConversationRepository: () => new SqliteConversationRepository(sessions)");
+    expect(SOURCE).toContain(
+      "createConversationRepository: () => new SqliteConversationRepository(sessions)",
+    );
   });
 
   it("a mutant duplicating the registry for the WS path would be caught: constructing a second GatewaySessionRegistry and threading IT into createGatewayUpgradeHandler instead of the shared one would make the exactly-one-construction assertion above fail", () => {

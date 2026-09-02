@@ -4,9 +4,7 @@
   "description": "T16 canned workflow that crosses persistence: run_workflow parks at a checkpoint, a NEW process resumes it with checkpoint_answers and completes (contract 47)",
   "argv": [],
   "environment": {
-    "allow": [
-      "LOHRA_T16_TODAY"
-    ],
+    "allow": ["LOHRA_T16_TODAY"],
     "set": {
       "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
       "PYTHONUTF8": "1",
@@ -129,10 +127,7 @@
         "records": {
           "gets": 0,
           "posts": 2,
-          "sequence": [
-            "POST /v1/chat/completions",
-            "POST /v1/chat/completions"
-          ]
+          "sequence": ["POST /v1/chat/completions", "POST /v1/chat/completions"]
         }
       }
     },

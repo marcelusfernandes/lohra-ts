@@ -152,17 +152,23 @@ describe("validatePublicUrl", () => {
     expect(first.hostname).toBe("resolver-table");
     expect(first.scheme).toBe("http");
     expect(calls).toEqual(["resolver-table"]);
-    const second = await validatePublicUrl("https://v6-public.test/", { resolver: resolver(calls) });
+    const second = await validatePublicUrl("https://v6-public.test/", {
+      resolver: resolver(calls),
+    });
     expect(second.addresses).toEqual([{ address: "2606:4700:4700::1111", family: 6 }]);
     expect(calls).toEqual(["resolver-table", "v6-public.test"]);
   });
 
   it("pins public literals with zero resolver calls", async () => {
     const calls: string[] = [];
-    const validated = await validatePublicUrl("http://93.184.216.34/x", { resolver: resolver(calls) });
+    const validated = await validatePublicUrl("http://93.184.216.34/x", {
+      resolver: resolver(calls),
+    });
     expect(validated.addresses).toEqual([{ address: "93.184.216.34", family: 4 }]);
     expect(calls).toEqual([]);
-    const v6 = await validatePublicUrl("http://[2606:4700:4700::1111]/", { resolver: resolver(calls) });
+    const v6 = await validatePublicUrl("http://[2606:4700:4700::1111]/", {
+      resolver: resolver(calls),
+    });
     expect(v6.addresses).toEqual([{ address: "2606:4700:4700::1111", family: 6 }]);
     expect(calls).toEqual([]);
   });
@@ -223,7 +229,9 @@ describe("validatePublicUrl", () => {
       await validatePublicUrl("http://[fe80::1%25eth0]/", { resolver: resolver(calls) });
       expect.unreachable("zone");
     } catch (error) {
-      expect((error as WebError).message).toBe("invalid URL: IPv6 zone identifiers are not allowed");
+      expect((error as WebError).message).toBe(
+        "invalid URL: IPv6 zone identifiers are not allowed",
+      );
     }
     expect(calls).toEqual([]);
   });
@@ -248,7 +256,9 @@ describe("validatePublicUrl", () => {
       await validatePublicUrl("http://boom.test/", { resolver: resolver(calls) });
       expect.unreachable("gaierror");
     } catch (error) {
-      expect((error as WebError).message).toBe("could not resolve host 'boom.test': fixture DNS failed");
+      expect((error as WebError).message).toBe(
+        "could not resolve host 'boom.test': fixture DNS failed",
+      );
     }
     try {
       await validatePublicUrl("http://empty.test/", { resolver: resolver(calls) });
@@ -271,7 +281,9 @@ describe("validatePublicUrl", () => {
         await validatePublicUrl(url, { resolver: resolver(calls) });
         expect.unreachable(url);
       } catch (error) {
-        expect((error as WebError).message).toBe(`refusing to fetch a non-public address: ${ip} (host '${host}')`);
+        expect((error as WebError).message).toBe(
+          `refusing to fetch a non-public address: ${ip} (host '${host}')`,
+        );
       }
     }
     expect(calls).toEqual(["private.test", "mixed.test", "v6-loopback.test", "v6-mixed.test"]);
@@ -294,7 +306,9 @@ describe("validatePublicUrl", () => {
       await validatePublicUrl("http://[::1]/", { resolver: resolver(calls) });
       expect.unreachable("::1");
     } catch (error) {
-      expect((error as WebError).message).toBe("refusing to fetch a non-public address: ::1 (host '::1')");
+      expect((error as WebError).message).toBe(
+        "refusing to fetch a non-public address: ::1 (host '::1')",
+      );
     }
     expect(calls).toEqual([]);
   });

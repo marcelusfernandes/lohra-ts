@@ -46,7 +46,10 @@ const RAW_PROBES: readonly { readonly name: string; readonly raw: string }[] = [
   { name: "notification_no_id", raw: '{"jsonrpc":"2.0","method":"session.list"}' },
   { name: "id_string", raw: '{"jsonrpc":"2.0","id":"abc","method":"session.list"}' },
   { name: "id_object", raw: '{"jsonrpc":"2.0","id":{"k":1},"method":"session.list"}' },
-  { name: "extra_top_level_keys", raw: '{"jsonrpc":"2.0","id":17,"method":"session.list","extra":true}' },
+  {
+    name: "extra_top_level_keys",
+    raw: '{"jsonrpc":"2.0","id":17,"method":"session.list","extra":true}',
+  },
   { name: "p2_session_steer", raw: '{"jsonrpc":"2.0","id":20,"method":"session.steer"}' },
   { name: "case_sensitivity", raw: '{"jsonrpc":"2.0","id":30,"method":"Session.List"}' },
   { name: "method_whitespace", raw: '{"jsonrpc":"2.0","id":31,"method":" session.list "}' },
@@ -67,10 +70,17 @@ export const RPC_FRAMING_EDGES_SCENARIOS: readonly NamedScenario[] = [
         for (const probeCase of RAW_PROBES) {
           oracleWs.sendText(probeCase.raw);
           candidateWs.sendText(probeCase.raw);
-          const [oracleOutcome, candidateOutcome] = await Promise.all([classifyNext(oracleWs), classifyNext(candidateWs)]);
+          const [oracleOutcome, candidateOutcome] = await Promise.all([
+            classifyNext(oracleWs),
+            classifyNext(candidateWs),
+          ]);
           results[probeCase.name] = { oracle: oracleOutcome, candidate: candidateOutcome };
           if (oracleOutcome !== candidateOutcome) {
-            return divergent(id, `${probeCase.name}: oracle=${oracleOutcome} candidate=${candidateOutcome}`, results);
+            return divergent(
+              id,
+              `${probeCase.name}: oracle=${oracleOutcome} candidate=${candidateOutcome}`,
+              results,
+            );
           }
         }
         return match(id, { n: RAW_PROBES.length, results });

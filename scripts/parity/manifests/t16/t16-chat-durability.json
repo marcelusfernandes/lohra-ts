@@ -4,9 +4,7 @@
   "description": "T16 real chat workflow dispatch over the T02 loopback stub (durability wiring: same public path, canned transport)",
   "argv": [],
   "environment": {
-    "allow": [
-      "LOHRA_T16_TODAY"
-    ],
+    "allow": ["LOHRA_T16_TODAY"],
     "set": {
       "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
       "PYTHONUTF8": "1",
@@ -31,17 +29,13 @@
     "oracle": {
       "adapter": "python",
       "executable": "oracle-python",
-      "prefixArgs": [
-        "{{projectRoot}}/scripts/parity/workflow-executor/oracle_chat.py"
-      ],
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/workflow-executor/oracle_chat.py"],
       "cwd": "profile"
     },
     "candidate": {
       "adapter": "typescript",
       "executable": "node",
-      "prefixArgs": [
-        "{{projectRoot}}/scripts/parity/workflow-executor/candidate-chat.mjs"
-      ],
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/workflow-executor/candidate-chat.mjs"],
       "cwd": "profile"
     }
   },
@@ -129,10 +123,7 @@
         "records": {
           "gets": 0,
           "posts": 2,
-          "sequence": [
-            "POST /v1/chat/completions",
-            "POST /v1/chat/completions"
-          ]
+          "sequence": ["POST /v1/chat/completions", "POST /v1/chat/completions"]
         }
       }
     },

@@ -4,7 +4,10 @@ import { RequestRepository } from "../src/server/request-repository.js";
 
 describe("RequestRepository — per-request, seeded, discards everything else", () => {
   it("returns the seeded history regardless of session id, and never reports an existing session", () => {
-    const history = [{ role: "user", content: "prior" }, { role: "assistant", content: "reply" }];
+    const history = [
+      { role: "user", content: "prior" },
+      { role: "assistant", content: "reply" },
+    ];
     const repo = new RequestRepository(history);
 
     expect(repo.session("anything")).toBeNull();

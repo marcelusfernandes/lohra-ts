@@ -75,7 +75,14 @@ describe("nodeDial lifecycle over an in-memory http layer", () => {
     vi.useRealTimers();
   });
 
-  function dial(requestFactory: FakeFactory, lookup?: (host: string, opts: unknown, cb: (err: Error | null, address?: string, family?: number) => void) => void): Promise<ConnectorResponse> {
+  function dial(
+    requestFactory: FakeFactory,
+    lookup?: (
+      host: string,
+      opts: unknown,
+      cb: (err: Error | null, address?: string, family?: number) => void,
+    ) => void,
+  ): Promise<ConnectorResponse> {
     const connector = createPinnedConnector({
       requestFactory,
       ...(lookup === undefined ? {} : { lookup }),
@@ -121,9 +128,10 @@ describe("nodeDial lifecycle over an in-memory http layer", () => {
     if (response === undefined) throw new Error("fixture response missing");
     const settled = pending.then(
       (value) =>
-        value.stream
-          .next()
-          .then(() => "done", (error: unknown) => (error as Error).message),
+        value.stream.next().then(
+          () => "done",
+          (error: unknown) => (error as Error).message,
+        ),
       (error: unknown) => (error as Error).message,
     );
     void settled;
@@ -142,9 +150,10 @@ describe("nodeDial lifecycle over an in-memory http layer", () => {
     if (response === undefined) throw new Error("fixture response missing");
     const settled = pending.then(
       (value) =>
-        value.stream
-          .next()
-          .then(() => "done", (error: unknown) => (error as Error).message),
+        value.stream.next().then(
+          () => "done",
+          (error: unknown) => (error as Error).message,
+        ),
       (error: unknown) => (error as Error).message,
     );
     void settled;
@@ -162,9 +171,10 @@ describe("nodeDial lifecycle over an in-memory http layer", () => {
     if (response === undefined) throw new Error("fixture response missing");
     const settled = pending.then(
       (value) =>
-        value.stream
-          .next()
-          .then(() => "done", (error: unknown) => (error as Error).message),
+        value.stream.next().then(
+          () => "done",
+          (error: unknown) => (error as Error).message,
+        ),
       (error: unknown) => (error as Error).message,
     );
     void settled;

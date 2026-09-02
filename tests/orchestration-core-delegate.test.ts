@@ -112,7 +112,8 @@ describe("OrchestrationCore.delegate (contract L5 blocking, L17 batch semantics)
           return Promise.resolve(
             okResult({
               status: "error",
-              output: "Error code: 418 - {'error': {'message': 'T13_DELEGATE_CANARY upstream refused'}}",
+              output:
+                "Error code: 418 - {'error': {'message': 'T13_DELEGATE_CANARY upstream refused'}}",
               errorKind: null,
             }),
           );

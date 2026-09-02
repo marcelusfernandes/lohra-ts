@@ -42,7 +42,10 @@ function normalizeEnvelope(body: string): { text: string; shapeOk: boolean } {
   return { text: JSON.stringify(parsed), shapeOk };
 }
 
-function upstreamBodyOk(record: UpstreamRequestRecord | undefined, expected: Record<string, unknown>): boolean {
+function upstreamBodyOk(
+  record: UpstreamRequestRecord | undefined,
+  expected: Record<string, unknown>,
+): boolean {
   if (record === undefined) return false;
   return Object.entries(expected).every(([key, value]) => record.body[key] === value);
 }
@@ -58,7 +61,8 @@ export async function run(
   differences: unknown[];
   expectedUpstreamRequests: number;
 }> {
-  const probes: (ProbeRecord & { upstream: UpstreamRequestRecord[]; expectedStatus: number })[] = [];
+  const probes: (ProbeRecord & { upstream: UpstreamRequestRecord[]; expectedStatus: number })[] =
+    [];
 
   const successBody = JSON.stringify({
     model: "m",
@@ -67,18 +71,46 @@ export async function run(
     max_tokens: 321,
   });
   const before1 = upstream.requests.length;
-  const success = await probeBoth("success", oracle, candidate, (apiKey) => postRequestLines(apiKey, successBody), successBody);
+  const success = await probeBoth(
+    "success",
+    oracle,
+    candidate,
+    (apiKey) => postRequestLines(apiKey, successBody),
+    successBody,
+  );
   probes.push({ ...success, upstream: upstream.requests.slice(before1), expectedStatus: 200 });
 
-  const partialBody = JSON.stringify({ model: "m", messages: [{ role: "user", content: "SCEN:partial hi" }] });
+  const partialBody = JSON.stringify({
+    model: "m",
+    messages: [{ role: "user", content: "SCEN:partial hi" }],
+  });
   const before2 = upstream.requests.length;
-  const partial = await probeBoth("partial", oracle, candidate, (apiKey) => postRequestLines(apiKey, partialBody), partialBody);
+  const partial = await probeBoth(
+    "partial",
+    oracle,
+    candidate,
+    (apiKey) => postRequestLines(apiKey, partialBody),
+    partialBody,
+  );
   probes.push({ ...partial, upstream: upstream.requests.slice(before2), expectedStatus: 200 });
 
-  const errorBody = JSON.stringify({ model: "m", messages: [{ role: "user", content: "SCEN:err418 hi" }] });
+  const errorBody = JSON.stringify({
+    model: "m",
+    messages: [{ role: "user", content: "SCEN:err418 hi" }],
+  });
   const before3 = upstream.requests.length;
-  const upstreamError = await probeBoth("upstream-error", oracle, candidate, (apiKey) => postRequestLines(apiKey, errorBody), errorBody);
-  probes.push({ ...upstreamError, upstream: upstream.requests.slice(before3), expectedStatus: 502 });
+  const upstreamError = await probeBoth(
+    "upstream-error",
+    oracle,
+    candidate,
+    (apiKey) => postRequestLines(apiKey, errorBody),
+    errorBody,
+  );
+  probes.push({
+    ...upstreamError,
+    upstream: upstream.requests.slice(before3),
+    expectedStatus: 502,
+  });
 
   const rawEvidence = probes.map((entry) => ({
     id: entry.id,
@@ -110,11 +142,21 @@ export async function run(
         entry.candidate.body.includes(CAUSE_CANARY));
     const upstreamCountOk = entry.upstream.length === 2;
     const upstreamMappingOk =
-      !isSuccess || (upstreamBodyOk(entry.upstream[0], { temperature: 0.25, max_tokens: 321 }) && upstreamBodyOk(entry.upstream[1], { temperature: 0.25, max_tokens: 321 }));
+      !isSuccess ||
+      (upstreamBodyOk(entry.upstream[0], { temperature: 0.25, max_tokens: 321 }) &&
+        upstreamBodyOk(entry.upstream[1], { temperature: 0.25, max_tokens: 321 }));
     const finishReasonOk =
       !isPartial ||
-      (entry.oracle.body.includes('"finish_reason":"length"') && entry.candidate.body.includes('"finish_reason":"length"'));
-    const ok = comparison.match && statusOk && shapeOk && causeOk && upstreamCountOk && upstreamMappingOk && finishReasonOk;
+      (entry.oracle.body.includes('"finish_reason":"length"') &&
+        entry.candidate.body.includes('"finish_reason":"length"'));
+    const ok =
+      comparison.match &&
+      statusOk &&
+      shapeOk &&
+      causeOk &&
+      upstreamCountOk &&
+      upstreamMappingOk &&
+      finishReasonOk;
     const record = {
       id: entry.id,
       expectedStatus: entry.expectedStatus,
@@ -131,7 +173,10 @@ export async function run(
     projection: {
       probes: projectedProbes,
       normalizations: [
-        { path: "/v1/chat/completions", rule: "`id` checked against chatcmpl-<32hex> then set to <ID>; `created` checked to be an integer then zeroed (assertion 30/33)." },
+        {
+          path: "/v1/chat/completions",
+          rule: "`id` checked against chatcmpl-<32hex> then set to <ID>; `created` checked to be an integer then zeroed (assertion 30/33).",
+        },
         { path: "*", rule: "`date`/`server` headers dropped; header order not compared." },
       ],
     },
@@ -157,7 +202,8 @@ export async function run(
 // immediately with zero retries; no user-agent header, the candidate's
 // own bare fetch). The retry-count gap may be T10 debt; it is named here,
 // not silently absorbed into a passing count check.
-const TRANSPORT_TRUNCATION_ORACLE_BODY = '{"error":{"message":"Connection error.","type":"upstream_error"}}';
+const TRANSPORT_TRUNCATION_ORACLE_BODY =
+  '{"error":{"message":"Connection error.","type":"upstream_error"}}';
 const TRANSPORT_TRUNCATION_CANDIDATE_BODY =
   '{"error":{"message":"peer closed connection without sending complete message body (incomplete chunked read)","type":"upstream_error"}}';
 
@@ -172,19 +218,38 @@ export async function runTransportTruncation(
   differences: unknown[];
   expectedUpstreamRequests: number;
 }> {
-  const body = JSON.stringify({ model: "m", messages: [{ role: "user", content: "SCEN:midbreak hi" }] });
+  const body = JSON.stringify({
+    model: "m",
+    messages: [{ role: "user", content: "SCEN:midbreak hi" }],
+  });
   const before = upstream.requests.length;
   const probe: ProbeRecord & { upstream: UpstreamRequestRecord[] } = {
-    ...(await probeBoth("transport-truncation", oracle, candidate, (apiKey) => postRequestLines(apiKey, body), body)),
+    ...(await probeBoth(
+      "transport-truncation",
+      oracle,
+      candidate,
+      (apiKey) => postRequestLines(apiKey, body),
+      body,
+    )),
     upstream: upstream.requests.slice(before),
   };
-  const rawEvidence = { request: probe.request, oracle: probe.oracle, candidate: probe.candidate, upstream: probe.upstream };
+  const rawEvidence = {
+    request: probe.request,
+    oracle: probe.oracle,
+    candidate: probe.candidate,
+    upstream: probe.upstream,
+  };
 
-  const oracleCalls = probe.upstream.filter((record) => record.headers["user-agent"]?.startsWith("OpenAI/Python"));
-  const candidateCalls = probe.upstream.filter((record) => record.headers["user-agent"] === undefined);
+  const oracleCalls = probe.upstream.filter((record) =>
+    record.headers["user-agent"]?.startsWith("OpenAI/Python"),
+  );
+  const candidateCalls = probe.upstream.filter(
+    (record) => record.headers["user-agent"] === undefined,
+  );
 
   const checks = {
-    bothStatus502Ok: probe.oracle.statusLine.includes(" 502 ") && probe.candidate.statusLine.includes(" 502 "),
+    bothStatus502Ok:
+      probe.oracle.statusLine.includes(" 502 ") && probe.candidate.statusLine.includes(" 502 "),
     oracleBodyPinnedOk: probe.oracle.body === TRANSPORT_TRUNCATION_ORACLE_BODY,
     candidateBodyPinnedOk: probe.candidate.body === TRANSPORT_TRUNCATION_CANDIDATE_BODY,
     oracleRetriedThreeTimesOk: oracleCalls.length === 3,

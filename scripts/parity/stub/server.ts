@@ -23,7 +23,10 @@ const SUBAGENT_MARKER = "You are an isolated subagent spawned to complete one sp
  * this function is never called for them. */
 function isChildRequest(messages: readonly Record<string, unknown>[]): boolean {
   return messages.some(
-    (entry) => entry.role === "system" && typeof entry.content === "string" && entry.content.includes(SUBAGENT_MARKER),
+    (entry) =>
+      entry.role === "system" &&
+      typeof entry.content === "string" &&
+      entry.content.includes(SUBAGENT_MARKER),
   );
 }
 
@@ -122,7 +125,10 @@ function nextLaneStep(
  * and the scenario's driver share one Node process, so no cross-process
  * file signaling (the Python reference implementation's own approach) is
  * needed here — same barrier semantics, fewer moving parts. */
-function getOrCreateLatch(runtime: StubRuntime, name: string): { promise: Promise<void>; resolve: () => void } {
+function getOrCreateLatch(
+  runtime: StubRuntime,
+  name: string,
+): { promise: Promise<void>; resolve: () => void } {
   const existing = runtime.latches.get(name);
   if (existing !== undefined) return existing;
   let resolve: () => void = () => undefined;
@@ -177,8 +183,10 @@ function recordRequest(runtime: StubRuntime, request: IncomingMessage, body: unk
   // other fixture's projected/raw log entry keeps the exact same shape it
   // had before this field existed, byte for byte.
   const messages =
-    typeof body === "object" && body !== null && Array.isArray((body as { messages?: unknown }).messages)
-      ? ((body as { messages: Record<string, unknown>[] }).messages)
+    typeof body === "object" &&
+    body !== null &&
+    Array.isArray((body as { messages?: unknown }).messages)
+      ? (body as { messages: Record<string, unknown>[] }).messages
       : [];
   const laneFields =
     runtime.fixture === "chat-lane-script"
@@ -414,7 +422,12 @@ async function handleLaneScript(
           `data: ${JSON.stringify(
             chunk({
               tool_calls: [
-                { index, id: call.id, type: "function", function: { name: fn.name, arguments: fn.arguments } },
+                {
+                  index,
+                  id: call.id,
+                  type: "function",
+                  function: { name: fn.name, arguments: fn.arguments },
+                },
               ],
             }),
           )}\n\n`,

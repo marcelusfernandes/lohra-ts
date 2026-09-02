@@ -109,9 +109,18 @@ function fsDenial(
   policy: SandboxPolicy,
 ): string | null {
   const write = name === "write_file";
-  const allowedRoots = [workingRoot, ...policy.fsAllow.filter((root) => root.writable || !write).map((root) => root.path)];
+  const allowedRoots = [
+    workingRoot,
+    ...policy.fsAllow.filter((root) => root.writable || !write).map((root) => root.path),
+  ];
   if (fsAllowed(rawPath, allowedRoots)) return null;
-  if (write && fsAllowed(rawPath, policy.fsAllow.filter((root) => !root.writable).map((root) => root.path))) {
+  if (
+    write &&
+    fsAllowed(
+      rawPath,
+      policy.fsAllow.filter((root) => !root.writable).map((root) => root.path),
+    )
+  ) {
     return toolError("path is under a read-only workflow root (sandbox denied the write)");
   }
   return toolError("path is outside the workflow working scope (sandbox denied)");

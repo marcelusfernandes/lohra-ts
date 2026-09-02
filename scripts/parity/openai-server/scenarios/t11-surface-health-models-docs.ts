@@ -3,7 +3,14 @@
 // (/openapi.json paths + the three doc HTML routes, no auth). The trailing
 // slash redirect-as-router-class half of 14 lives in
 // t11-route-negative-sweep-and-slash-redirect-class instead.
-import { compareRaw, headerValue, probeBoth, type ProbeRecord, type RawResponse, type ServerHandle } from "../harness.js";
+import {
+  compareRaw,
+  headerValue,
+  probeBoth,
+  type ProbeRecord,
+  type RawResponse,
+  type ServerHandle,
+} from "../harness.js";
 
 const DOC_PATHS = ["/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect"] as const;
 const PRODUCT_PATHS = ["/health", "/v1/chat/completions", "/v1/models", "/v1/responses"].toSorted();
@@ -23,7 +30,8 @@ function checkDocResponse(path: string, response: RawResponse): string[] {
     try {
       const parsed = JSON.parse(response.body) as { paths?: Record<string, unknown> };
       const keys = Object.keys(parsed.paths ?? {}).toSorted();
-      if (JSON.stringify(keys) !== JSON.stringify(PRODUCT_PATHS)) problems.push(`paths:${JSON.stringify(keys)}`);
+      if (JSON.stringify(keys) !== JSON.stringify(PRODUCT_PATHS))
+        problems.push(`paths:${JSON.stringify(keys)}`);
     } catch {
       problems.push("openapi-json-parse-failed");
     }
@@ -62,8 +70,7 @@ const NORMALIZATIONS = [
   },
   {
     path: "/openapi.json, /docs, /redoc, /docs/oauth2-redirect",
-    rule:
-      "Checked structurally per side (status 200, content-type, and for /openapi.json the exact `paths` key-set) rather than bilaterally byte-diffed — assertion 14 only pins those properties, not FastAPI's CDN-templated Swagger/ReDoc HTML body.",
+    rule: "Checked structurally per side (status 200, content-type, and for /openapi.json the exact `paths` key-set) rather than bilaterally byte-diffed — assertion 14 only pins those properties, not FastAPI's CDN-templated Swagger/ReDoc HTML body.",
   },
 ];
 
@@ -80,29 +87,48 @@ export async function run(
   const probes: ProbeRecord[] = [];
 
   probes.push(
-    await probeBoth("health-ok", oracle, candidate, () => "GET /health HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n"),
+    await probeBoth(
+      "health-ok",
+      oracle,
+      candidate,
+      () => "GET /health HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n",
+    ),
   );
   probes.push(
     await probeBoth(
       "health-ignores-bad-auth",
       oracle,
       candidate,
-      () => "GET /health HTTP/1.1\nHost: 127.0.0.1\nAuthorization: Bearer not-a-real-key\nConnection: close\n",
+      () =>
+        "GET /health HTTP/1.1\nHost: 127.0.0.1\nAuthorization: Bearer not-a-real-key\nConnection: close\n",
     ),
   );
   probes.push(
-    await probeBoth("health-head-405", oracle, candidate, () => "HEAD /health HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n"),
+    await probeBoth(
+      "health-head-405",
+      oracle,
+      candidate,
+      () => "HEAD /health HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n",
+    ),
   );
   probes.push(
     await probeBoth(
       "models-with-auth",
       oracle,
       candidate,
-      (apiKey) => `GET /v1/models HTTP/1.1\nHost: 127.0.0.1\nAuthorization: Bearer ${apiKey ?? ""}\nConnection: close\n`,
+      (apiKey) =>
+        `GET /v1/models HTTP/1.1\nHost: 127.0.0.1\nAuthorization: Bearer ${apiKey ?? ""}\nConnection: close\n`,
     ),
   );
   for (const path of DOC_PATHS) {
-    probes.push(await probeBoth(`doc:${path}`, oracle, candidate, () => `GET ${path} HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n`));
+    probes.push(
+      await probeBoth(
+        `doc:${path}`,
+        oracle,
+        candidate,
+        () => `GET ${path} HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n`,
+      ),
+    );
   }
 
   // `rawEvidence` carries the untouched wire capture (assertion 7 — request
@@ -111,7 +137,12 @@ export async function run(
   // excluded from `projection`, which is what the digest hashes: assertion
   // 10 requires the SAME digest across two runs on one SHA, and `date`
   // changes every run.
-  const rawEvidence = probes.map((entry) => ({ id: entry.id, request: entry.request, oracle: entry.oracle, candidate: entry.candidate }));
+  const rawEvidence = probes.map((entry) => ({
+    id: entry.id,
+    request: entry.request,
+    oracle: entry.oracle,
+    candidate: entry.candidate,
+  }));
 
   const differences: unknown[] = [];
   const projectedProbes = probes.map((entry) => {
@@ -125,7 +156,9 @@ export async function run(
       return record;
     }
     const isModels = entry.id === "models-with-auth";
-    const oracleBody = isModels ? normalizeModelsBody(entry.oracle.body) : { text: entry.oracle.body, createdOk: true };
+    const oracleBody = isModels
+      ? normalizeModelsBody(entry.oracle.body)
+      : { text: entry.oracle.body, createdOk: true };
     const candidateBody = isModels
       ? normalizeModelsBody(entry.candidate.body)
       : { text: entry.candidate.body, createdOk: true };
@@ -137,7 +170,11 @@ export async function run(
     const contentTypeCandidate = headerValue(entry.candidate, "content-type");
     const createdOk = oracleBody.createdOk && candidateBody.createdOk;
     const ok = comparison.match && createdOk && contentTypeOracle === contentTypeCandidate;
-    const record = { id: entry.id, normalized: { oracle: comparison.oracle, candidate: comparison.candidate }, match: ok };
+    const record = {
+      id: entry.id,
+      normalized: { oracle: comparison.oracle, candidate: comparison.candidate },
+      match: ok,
+    };
     if (!ok) differences.push(record);
     return record;
   });

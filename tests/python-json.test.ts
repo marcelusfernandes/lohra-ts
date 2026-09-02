@@ -74,7 +74,12 @@ describe("Python-compatible JSON serializer", () => {
   });
 
   it("loads the NaN/Infinity/-Infinity literal extension, cross-checked against real json.loads", () => {
-    const documents = ['{"v": NaN}', '{"v": Infinity}', '{"v": -Infinity}', "[NaN, Infinity, -Infinity]"];
+    const documents = [
+      '{"v": NaN}',
+      '{"v": Infinity}',
+      '{"v": -Infinity}',
+      "[NaN, Infinity, -Infinity]",
+    ];
     const expected = pythonLines(
       `import json\nfor raw in ${JSON.stringify(documents)}: print(json.dumps(json.loads(raw)))`,
     );

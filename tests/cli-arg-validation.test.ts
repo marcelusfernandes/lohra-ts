@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
 
-import { parseCommand, renderError, LEVELS, classifyUnknownCommand } from "../src/cli/arg-validation.js";
-import { CHAT_SPEC, MODELS_SPEC, AUTH_SPEC, PROFILE_SPEC, TIERS_SPEC, SKILL_SPEC, SKILL_EXPORT_SPEC } from "../src/cli/arg-spec.js";
+import {
+  parseCommand,
+  renderError,
+  LEVELS,
+  classifyUnknownCommand,
+} from "../src/cli/arg-validation.js";
+import {
+  CHAT_SPEC,
+  MODELS_SPEC,
+  AUTH_SPEC,
+  PROFILE_SPEC,
+  TIERS_SPEC,
+  SKILL_SPEC,
+  SKILL_EXPORT_SPEC,
+} from "../src/cli/arg-spec.js";
 import { runCli, type CliIo } from "../src/cli.js";
 
 // Every expected byte sequence below was captured [fio] against the real
@@ -10,7 +23,9 @@ import { runCli, type CliIo } from "../src/cli.js";
 // oracle never writes to stdout when rejecting arguments — even under
 // --json — so every rejection assertion below pins stdout to "".
 
-function invoke(argv: readonly string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+function invoke(
+  argv: readonly string[],
+): Promise<{ code: number; stdout: string; stderr: string }> {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const io: CliIo = {
@@ -19,7 +34,11 @@ function invoke(argv: readonly string[]): Promise<{ code: number; stdout: string
     stderr: (value) => stderr.push(value),
     probeOllama: () => Promise.resolve(false),
   };
-  return runCli(argv, io).then((code) => ({ code, stdout: stdout.join(""), stderr: stderr.join("") }));
+  return runCli(argv, io).then((code) => ({
+    code,
+    stdout: stdout.join(""),
+    stderr: stderr.join(""),
+  }));
 }
 
 const TOP_LEVEL_USAGE =
@@ -52,7 +71,11 @@ describe("parseCommand — general mechanism (unit)", () => {
   it("(b) an ambiguous flag prefix raises immediately, listing candidates in spec declaration order", () => {
     // Oracle: `chat --pro x --no-input --json` -> ambiguous option: --pro could match --profile, --provider
     const result = parseCommand(CHAT_SPEC, ["--pro", "x", "--no-input", "--json"]);
-    expect(result.error).toEqual({ kind: "ambiguous", token: "--pro", candidates: ["--profile", "--provider"] });
+    expect(result.error).toEqual({
+      kind: "ambiguous",
+      token: "--pro",
+      candidates: ["--profile", "--provider"],
+    });
   });
 
   it("(b) an unambiguous flag prefix resolves to the canonical flag and consumes its value — closing the abbreviation-through-extraction gap", () => {
@@ -108,9 +131,9 @@ describe("parseCommand — general mechanism (unit)", () => {
 
 describe("renderError", () => {
   it("chat invalidInt uses the chat-level usage banner and prefix", () => {
-    expect(renderError({ kind: "invalidInt", flag: "--max-iterations", value: "abc" }, LEVELS.chat)).toBe(
-      `${CHAT_USAGE}lohra chat: error: argument --max-iterations: invalid int value: 'abc'\n`,
-    );
+    expect(
+      renderError({ kind: "invalidInt", flag: "--max-iterations", value: "abc" }, LEVELS.chat),
+    ).toBe(`${CHAT_USAGE}lohra chat: error: argument --max-iterations: invalid int value: 'abc'\n`);
   });
 
   it("requiredMissing for tiers uses the tiers_cmd dest name and tiers-level usage", () => {
@@ -123,12 +146,18 @@ describe("renderError", () => {
 describe("classifyUnknownCommand", () => {
   it("a solo unrecognized top-level token: every token is unrecognized, not an invalid choice", () => {
     // Oracle: `lohra --frobnicate` -> unrecognized arguments: --frobnicate
-    expect(classifyUnknownCommand(["--frobnicate"])).toEqual({ kind: "unrecognized", tokens: ["--frobnicate"] });
+    expect(classifyUnknownCommand(["--frobnicate"])).toEqual({
+      kind: "unrecognized",
+      tokens: ["--frobnicate"],
+    });
   });
 
   it("an option-like token followed by a non-option token: the non-option token is the invalid choice, not the flag", () => {
     // Oracle: `lohra --profile foo` -> invalid choice: 'foo' (NOT "unrecognized --profile")
-    expect(classifyUnknownCommand(["--profile", "foo"])).toEqual({ kind: "invalidChoice", value: "foo" });
+    expect(classifyUnknownCommand(["--profile", "foo"])).toEqual({
+      kind: "invalidChoice",
+      value: "foo",
+    });
   });
 
   it("multiple trailing tokens after an unmatched option: the first non-option token is the victim", () => {
@@ -141,7 +170,12 @@ describe("classifyUnknownCommand", () => {
 });
 
 describe("runCli — byte-exact against live oracle captures", () => {
-  const cases: readonly { readonly label: string; readonly argv: readonly string[]; readonly code: number; readonly stderr: string }[] = [
+  const cases: readonly {
+    readonly label: string;
+    readonly argv: readonly string[];
+    readonly code: number;
+    readonly stderr: string;
+  }[] = [
     {
       label: "C1: chat --max-iterations --no-input --json oi (next token looks like a flag)",
       argv: ["chat", "--max-iterations", "--no-input", "--json", "oi"],
@@ -170,7 +204,8 @@ describe("runCli — byte-exact against live oracle captures", () => {
       label: "C3: tiers --frobnicate (required tiers_cmd, tiers-level usage)",
       argv: ["tiers", "--frobnicate"],
       code: 2,
-      stderr: "usage: lohra tiers [-h] {list,suggest} ...\nlohra tiers: error: the following arguments are required: tiers_cmd\n",
+      stderr:
+        "usage: lohra tiers [-h] {list,suggest} ...\nlohra tiers: error: the following arguments are required: tiers_cmd\n",
     },
     {
       label: "C3: tiers bogus (invalid choice, tiers-level usage)",
@@ -183,25 +218,29 @@ describe("runCli — byte-exact against live oracle captures", () => {
       label: "C3: skill --frobnicate (required skill_cmd, skill-level usage)",
       argv: ["skill", "--frobnicate"],
       code: 2,
-      stderr: "usage: lohra skill [-h] {export} ...\nlohra skill: error: the following arguments are required: skill_cmd\n",
+      stderr:
+        "usage: lohra skill [-h] {export} ...\nlohra skill: error: the following arguments are required: skill_cmd\n",
     },
     {
       label: "C3: skill bogus (invalid choice, skill-level usage)",
       argv: ["skill", "bogus"],
       code: 2,
-      stderr: "usage: lohra skill [-h] {export} ...\nlohra skill: error: argument skill_cmd: invalid choice: 'bogus' (choose from export)\n",
+      stderr:
+        "usage: lohra skill [-h] {export} ...\nlohra skill: error: argument skill_cmd: invalid choice: 'bogus' (choose from export)\n",
     },
     {
       label: "C3: profile --frobnicate (required action, profile-level usage)",
       argv: ["profile", "--frobnicate"],
       code: 2,
-      stderr: "usage: lohra profile [-h] {list,create} [name]\nlohra profile: error: the following arguments are required: action\n",
+      stderr:
+        "usage: lohra profile [-h] {list,create} [name]\nlohra profile: error: the following arguments are required: action\n",
     },
     {
       label: "C3: profile bogus (invalid choice, profile-level usage)",
       argv: ["profile", "bogus"],
       code: 2,
-      stderr: "usage: lohra profile [-h] {list,create} [name]\nlohra profile: error: argument action: invalid choice: 'bogus' (choose from list, create)\n",
+      stderr:
+        "usage: lohra profile [-h] {list,create} [name]\nlohra profile: error: argument action: invalid choice: 'bogus' (choose from list, create)\n",
     },
     {
       label: "C3: auth --frobnicate (required action, auth-level usage)",
@@ -227,7 +266,8 @@ describe("runCli — byte-exact against live oracle captures", () => {
       label: "C3: doctor --profile (missing value, doctor-level usage and prefix — not top-level)",
       argv: ["doctor", "--profile"],
       code: 2,
-      stderr: "usage: lohra doctor [-h] [--profile PROFILE] [--no-input] [--json]\nlohra doctor: error: argument --profile: expected one argument\n",
+      stderr:
+        "usage: lohra doctor [-h] [--profile PROFILE] [--no-input] [--json]\nlohra doctor: error: argument --profile: expected one argument\n",
     },
     {
       label: "C5: chat --json= --no-input oi (boolean flag given =value)",
@@ -339,8 +379,16 @@ describe("spec sanity — AUTH_SPEC / TIERS_SPEC / SKILL_SPEC dest names and cho
   });
 
   it("TIERS_SPEC and SKILL_SPEC model their sub-action as a required choice positional", () => {
-    expect(TIERS_SPEC.positionals[0]).toEqual({ name: "tiers_cmd", required: true, choices: ["list", "suggest"] });
-    expect(SKILL_SPEC.positionals[0]).toEqual({ name: "skill_cmd", required: true, choices: ["export"] });
+    expect(TIERS_SPEC.positionals[0]).toEqual({
+      name: "tiers_cmd",
+      required: true,
+      choices: ["list", "suggest"],
+    });
+    expect(SKILL_SPEC.positionals[0]).toEqual({
+      name: "skill_cmd",
+      required: true,
+      choices: ["export"],
+    });
   });
 
   it("SKILL_EXPORT_SPEC's name positional is required", () => {

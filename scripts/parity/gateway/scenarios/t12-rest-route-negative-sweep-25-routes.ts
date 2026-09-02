@@ -43,10 +43,16 @@ export const REST_25_SWEEP_SCENARIOS: readonly NamedScenario[] = [
       const id = "t12-health-route-absent-not-t11-copypaste";
       const { oracle, candidate } = await probeBoth(ctx, "/health", []);
       if (oracle.status !== candidate.status) {
-        return divergent(id, `oracle=${String(oracle.status)} candidate=${String(candidate.status)}`);
+        return divergent(
+          id,
+          `oracle=${String(oracle.status)} candidate=${String(candidate.status)}`,
+        );
       }
       if (oracle.status !== 404) {
-        return divergent(id, `expected 404 (T12 gateway has no /health route, unlike T11's server), both sides got ${String(oracle.status)}`);
+        return divergent(
+          id,
+          `expected 404 (T12 gateway has no /health route, unlike T11's server), both sides got ${String(oracle.status)}`,
+        );
       }
       return match(id, { status: oracle.status });
     },

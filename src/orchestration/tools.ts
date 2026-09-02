@@ -3,7 +3,12 @@ import { pythonFloat } from "../serialization/python-json.js";
 import { pythonRepr } from "../serialization/python-repr.js";
 import { toolError, toolResult } from "../tools/envelope.js";
 import type { ToolArguments } from "../tools/types.js";
-import { summarizeCollectResult, type CollectResult, type OrchestrationCore, type SpawnConfig } from "./core.js";
+import {
+  summarizeCollectResult,
+  type CollectResult,
+  type OrchestrationCore,
+  type SpawnConfig,
+} from "./core.js";
 import {
   coercePrompt,
   coerceTasks,
@@ -54,7 +59,8 @@ export async function spawnSessionTool(
   if (promptError !== null) return promptError;
   const maxIterationsError = validateMaxIterations(args.max_iterations);
   if (maxIterationsError !== null) return maxIterationsError;
-  const provider = typeof args.provider === "string" && args.provider.length > 0 ? args.provider : null;
+  const provider =
+    typeof args.provider === "string" && args.provider.length > 0 ? args.provider : null;
   if (provider !== null) {
     try {
       await clientPool.get(provider);

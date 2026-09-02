@@ -30,7 +30,9 @@ function checked(executable, argv, options = {}) {
     maxBuffer: 32 * 1024 * 1024,
   });
   if (result.status !== 0)
-    throw new Error(`PACK_COMMAND_FAILED:${executable}:${String(result.status ?? result.signal)}:${result.stderr}`);
+    throw new Error(
+      `PACK_COMMAND_FAILED:${executable}:${String(result.status ?? result.signal)}:${result.stderr}`,
+    );
   return result;
 }
 
@@ -79,7 +81,10 @@ function sendRaw(port, requestLines, body = "") {
       const headerEnd = raw.indexOf("\r\n\r\n");
       const headerText = raw.subarray(0, headerEnd).toString("utf8");
       const [statusLine] = headerText.split("\r\n");
-      resolveSend({ statusLine: statusLine ?? "", body: raw.subarray(headerEnd + 4).toString("utf8") });
+      resolveSend({
+        statusLine: statusLine ?? "",
+        body: raw.subarray(headerEnd + 4).toString("utf8"),
+      });
     });
     socket.on("error", reject);
     setTimeout(() => {
@@ -95,7 +100,9 @@ const upstream = createServer((request, response) => {
   const chunks = [];
   request.on("data", (chunk) => chunks.push(chunk));
   request.on("end", () => {
-    const stream = Buffer.concat(chunks).toString("utf8").includes('"stream":true') || Buffer.concat(chunks).toString("utf8").includes('"stream": true');
+    const stream =
+      Buffer.concat(chunks).toString("utf8").includes('"stream":true') ||
+      Buffer.concat(chunks).toString("utf8").includes('"stream": true');
     requestCounts.chat += 1;
     if (stream) {
       response.writeHead(200, { "content-type": "text/event-stream" });
@@ -109,7 +116,10 @@ const upstream = createServer((request, response) => {
     }
     response.writeHead(200, { "content-type": "application/json" });
     response.end(
-      JSON.stringify({ choices: [{ message: { content: "PACK-CHAT" }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1 } }),
+      JSON.stringify({
+        choices: [{ message: { content: "PACK-CHAT" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      }),
     );
   });
 });
@@ -120,12 +130,22 @@ try {
   const installDirectory = join(runtimeRoot, "install");
   mkdirSync(packDirectory, { recursive: true });
   mkdirSync(installDirectory, { recursive: true });
-  const packed = checked("npm", ["pack", "--json", "--pack-destination", packDirectory], { cwd: projectRoot });
+  const packed = checked("npm", ["pack", "--json", "--pack-destination", packDirectory], {
+    cwd: projectRoot,
+  });
   const filename = JSON.parse(packed.stdout)[0]?.filename;
   if (typeof filename !== "string") throw new Error("PACK_TARBALL_MISSING");
   checked(
     "npm",
-    ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--prefix", installDirectory, join(packDirectory, filename)],
+    [
+      "install",
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+      "--prefix",
+      installDirectory,
+      join(packDirectory, filename),
+    ],
     { cwd: runtimeRoot },
   );
   const packageRoot = join(installDirectory, "node_modules/lohra-ts");
@@ -181,16 +201,29 @@ try {
   await waitForListening(port);
 
   const health = await sendRaw(port, "GET /health HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n");
-  const unauthorized = await sendRaw(port, "GET /v1/models HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n");
-  const authed = await sendRaw(port, `GET /v1/models HTTP/1.1\nHost: 127.0.0.1\nAuthorization: Bearer ${apiKey}\nConnection: close\n`);
+  const unauthorized = await sendRaw(
+    port,
+    "GET /v1/models HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n",
+  );
+  const authed = await sendRaw(
+    port,
+    `GET /v1/models HTTP/1.1\nHost: 127.0.0.1\nAuthorization: Bearer ${apiKey}\nConnection: close\n`,
+  );
 
-  const chatNonStreamBody = JSON.stringify({ model: "pack-model", messages: [{ role: "user", content: "hi" }] });
+  const chatNonStreamBody = JSON.stringify({
+    model: "pack-model",
+    messages: [{ role: "user", content: "hi" }],
+  });
   const chatNonStream = await sendRaw(
     port,
     `POST /v1/chat/completions HTTP/1.1\nHost: 127.0.0.1\nContent-Type: application/json\nContent-Length: ${String(Buffer.byteLength(chatNonStreamBody))}\nAuthorization: Bearer ${apiKey}\nConnection: close\n`,
     chatNonStreamBody,
   );
-  const chatStreamBody = JSON.stringify({ model: "pack-model", messages: [{ role: "user", content: "hi" }], stream: true });
+  const chatStreamBody = JSON.stringify({
+    model: "pack-model",
+    messages: [{ role: "user", content: "hi" }],
+    stream: true,
+  });
   const chatStream = await sendRaw(
     port,
     `POST /v1/chat/completions HTTP/1.1\nHost: 127.0.0.1\nContent-Type: application/json\nContent-Length: ${String(Buffer.byteLength(chatStreamBody))}\nAuthorization: Bearer ${apiKey}\nConnection: close\n`,

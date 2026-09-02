@@ -90,7 +90,12 @@ export async function handleResponses(
     startSse(res);
     const seq = new SequenceCounter();
     res.write(
-      buildResponseCreatedEvent({ responseId, model: parsed.model, created, sequenceNumber: seq.next() }),
+      buildResponseCreatedEvent({
+        responseId,
+        model: parsed.model,
+        created,
+        sequenceNumber: seq.next(),
+      }),
     );
     res.write(buildOutputItemAddedEvent({ responseId, sequenceNumber: seq.next() }));
     res.write(buildContentPartAddedEvent({ responseId, sequenceNumber: seq.next() }));

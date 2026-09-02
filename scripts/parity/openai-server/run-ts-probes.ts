@@ -15,7 +15,10 @@ import { resolve } from "node:path";
 
 import { AGENTIC_MAX_ITERATIONS, RELAY_MAX_ITERATIONS } from "../../../src/server/agentic.js";
 import { authorized, timingSafeStringEqual } from "../../../src/server/auth.js";
-import { jsonStringifyPythonNumbers, pythonJsonDumpsInsertionOrder } from "../../../src/serialization/python-json.js";
+import {
+  jsonStringifyPythonNumbers,
+  pythonJsonDumpsInsertionOrder,
+} from "../../../src/serialization/python-json.js";
 import { evidenceRoot, registerScrubCanary, writeEvidence } from "./harness.js";
 
 const root = resolve(import.meta.dirname, "../../..");
@@ -61,8 +64,10 @@ function extractFunctionBody(source: string, functionName: string): string | nul
 {
   const authSource = readFileSync(resolve(root, "src/server/auth.ts"), "utf8");
   const compareBody = extractFunctionBody(authSource, "timingSafeStringEqual");
-  const usesTimingSafePrimitiveAtCallSite = compareBody !== null && /timingSafeEqual\s*\(/u.test(compareBody);
-  const noBareStrictEqualAtCallSite = compareBody !== null && !/return\s+a\s*===\s*b/u.test(compareBody);
+  const usesTimingSafePrimitiveAtCallSite =
+    compareBody !== null && /timingSafeEqual\s*\(/u.test(compareBody);
+  const noBareStrictEqualAtCallSite =
+    compareBody !== null && !/return\s+a\s*===\s*b/u.test(compareBody);
   const functionalOk =
     timingSafeStringEqual("secret-key", "secret-key") &&
     !timingSafeStringEqual("secret-key", "secret-keyX") &&
@@ -93,16 +98,21 @@ function extractFunctionBody(source: string, functionName: string): string | nul
   const constantsOk = RELAY_MAX_ITERATIONS === 8 && AGENTIC_MAX_ITERATIONS === 90;
   const serveSource = readFileSync(resolve(root, "src/commands/serve.ts"), "utf8");
   const defaultsToRelayOk = /let maxIterations = RELAY_MAX_ITERATIONS/u.test(serveSource);
-  const allowlistBlock = /if \(allowedNames\.length > 0\) \{[\s\S]*?maxIterations = AGENTIC_MAX_ITERATIONS;[\s\S]*?\}/u.test(
-    serveSource,
+  const allowlistBlock =
+    /if \(allowedNames\.length > 0\) \{[\s\S]*?maxIterations = AGENTIC_MAX_ITERATIONS;[\s\S]*?\}/u.test(
+      serveSource,
+    );
+  record(
+    "t11-iteration-wiring-relay-8-agentic-90",
+    constantsOk && defaultsToRelayOk && allowlistBlock,
+    {
+      constantsOk,
+      defaultsToRelayOk,
+      allowlistBlock,
+      relayValue: RELAY_MAX_ITERATIONS,
+      agenticValue: AGENTIC_MAX_ITERATIONS,
+    },
   );
-  record("t11-iteration-wiring-relay-8-agentic-90", constantsOk && defaultsToRelayOk && allowlistBlock, {
-    constantsOk,
-    defaultsToRelayOk,
-    allowlistBlock,
-    relayValue: RELAY_MAX_ITERATIONS,
-    agenticValue: AGENTIC_MAX_ITERATIONS,
-  });
 }
 
 // 3. t11-single-runtime-no-server-loop (assertion 69): the tool/turn loop
@@ -155,14 +165,20 @@ function extractFunctionBody(source: string, functionName: string): string | nul
   const sample = { a: 1, b: "x", c: [1, 2] };
   const compact = jsonStringifyPythonNumbers(sample);
   const spaced = pythonJsonDumpsInsertionOrder(sample);
-  const outputsDifferOk = compact !== spaced && compact === '{"a":1,"b":"x","c":[1,2]}' && spaced.includes(": ");
+  const outputsDifferOk =
+    compact !== spaced && compact === '{"a":1,"b":"x","c":[1,2]}' && spaced.includes(": ");
   const httpIoSource = readFileSync(resolve(root, "src/server/http-io.ts"), "utf8");
   const chatFormatSource = readFileSync(resolve(root, "src/server/chat-format.ts"), "utf8");
-  const responsesFormatSource = readFileSync(resolve(root, "src/server/responses-format.ts"), "utf8");
+  const responsesFormatSource = readFileSync(
+    resolve(root, "src/server/responses-format.ts"),
+    "utf8",
+  );
   const nonStreamWiredToCompactOk =
-    httpIoSource.includes("chatCompletionBody") && chatFormatSource.includes("jsonStringifyPythonNumbers");
+    httpIoSource.includes("chatCompletionBody") &&
+    chatFormatSource.includes("jsonStringifyPythonNumbers");
   const sseWiredToSpacedOk =
-    chatFormatSource.includes("pythonJsonDumpsInsertionOrder") && responsesFormatSource.includes("pythonJsonDumpsInsertionOrder");
+    chatFormatSource.includes("pythonJsonDumpsInsertionOrder") &&
+    responsesFormatSource.includes("pythonJsonDumpsInsertionOrder");
   record(
     "t11-two-serializer-mutants-killed",
     outputsDifferOk && nonStreamWiredToCompactOk && sseWiredToSpacedOk,
@@ -204,7 +220,10 @@ function extractFunctionBody(source: string, functionName: string): string | nul
     writeEvidence("t11-probe-scrub-canary-plant", { secret: canary });
   } catch (error) {
     threw = true;
-    threwWithRightId = error instanceof Error && error.message.includes("T11_SCRUB_HIT") && error.message.includes(canary);
+    threwWithRightId =
+      error instanceof Error &&
+      error.message.includes("T11_SCRUB_HIT") &&
+      error.message.includes(canary);
   }
   record("t11-scrub-planted-canaries", threw && threwWithRightId, { threw, threwWithRightId });
 }
@@ -212,7 +231,10 @@ function extractFunctionBody(source: string, functionName: string): string | nul
 const digest = createHash("sha256")
   .update(
     Object.entries(results)
-      .map(([id, value]) => `${id}=${createHash("sha256").update(JSON.stringify(value)).digest("hex")}\n`)
+      .map(
+        ([id, value]) =>
+          `${id}=${createHash("sha256").update(JSON.stringify(value)).digest("hex")}\n`,
+      )
       .join(""),
   )
   .digest("hex");

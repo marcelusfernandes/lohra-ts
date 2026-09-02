@@ -53,7 +53,11 @@ for (const script of t03Probes) {
     .split("\n")
     .reverse()
     .find((value) => value.trimStart().startsWith("{"));
-  t03Results.push({ id: script, exitCode: result.status, summary: line ? (JSON.parse(line) as unknown) : null });
+  t03Results.push({
+    id: script,
+    exitCode: result.status,
+    summary: line ? (JSON.parse(line) as unknown) : null,
+  });
 }
 
 // T02/T07/T08/T09/T10 are already chained serially, one layer down, by
@@ -63,7 +67,9 @@ for (const script of t03Probes) {
 // contended port lock for no additional signal.
 const t10Result = command(["run", "parity:t10:gates"]);
 if (t10Result.status !== 0)
-  throw new Error(`T10_GATE_FAILED:${String(t10Result.status)}:${t10Result.stdout}:${t10Result.stderr}`);
+  throw new Error(
+    `T10_GATE_FAILED:${String(t10Result.status)}:${t10Result.stdout}:${t10Result.stderr}`,
+  );
 const t10Line = t10Result.stdout
   .split("\n")
   .reverse()
@@ -73,7 +79,10 @@ process.stdout.write(
   `${JSON.stringify({
     suite: "t13-regression-gates",
     t03: t03Results,
-    t02_t07_t08_t09_t10: { exitCode: t10Result.status, summary: t10Line ? (JSON.parse(t10Line) as unknown) : null },
+    t02_t07_t08_t09_t10: {
+      exitCode: t10Result.status,
+      summary: t10Line ? (JSON.parse(t10Line) as unknown) : null,
+    },
     failures: 0,
   })}\n`,
 );

@@ -4,7 +4,12 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { openStateDatabase, WorkflowRepository, LockRepository, type StateWarning } from "../src/state/index.js";
+import {
+  openStateDatabase,
+  WorkflowRepository,
+  LockRepository,
+  type StateWarning,
+} from "../src/state/index.js";
 import { classifyProviderError, RateLimitError } from "../src/transports/errors.js";
 import { SqliteWorkflowCache } from "../src/workflow/sqlite-cache.js";
 import { TaintTracker } from "../src/workflow/sandbox.js";
@@ -28,7 +33,9 @@ afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop() as string, { recursive: true, force: true });
 });
 
-function runtimeStub(output: unknown = { answer: "ok" }): ChildRuntime & { calls: number; releaseFirst(): void; release(): void } & LeafSandboxed {
+function runtimeStub(
+  output: unknown = { answer: "ok" },
+): ChildRuntime & { calls: number; releaseFirst(): void; release(): void } & LeafSandboxed {
   const leaves = new Map<string, ChildResult>();
   let seq = 0;
   let release: (() => void) | null = null;
@@ -82,7 +89,6 @@ function runtimeStub(output: unknown = { answer: "ok" }): ChildRuntime & { calls
   return withLeafSandbox(runtime);
 }
 
-
 /**
  * A reference `ChildRuntime` that really sandboxes its leaves. It keeps ONE
  * installation per acquisition, keyed by that acquisition's fence, and every
@@ -122,7 +128,8 @@ function withLeafSandbox<T extends ChildRuntime>(runtime: T): T & LeafSandboxed 
     },
     leafTool(fence: number, name: string, args: Readonly<Record<string, unknown>>): string {
       const dispatch = installed.get(fence);
-      if (dispatch === undefined) throw new Error(`no leaf sandbox installed for fence ${String(fence)}`);
+      if (dispatch === undefined)
+        throw new Error(`no leaf sandbox installed for fence ${String(fence)}`);
       return dispatch(name, args);
     },
     /** A wrapper from an acquisition that has already ended. */
@@ -137,11 +144,12 @@ function withLeafSandbox<T extends ChildRuntime>(runtime: T): T & LeafSandboxed 
   });
 }
 
-
 /** A runtime whose single leaf genuinely stays in flight until released. */
 function gatedRuntime() {
   let open!: () => void;
-  const gate = new Promise<void>((resolveGate) => { open = resolveGate; });
+  const gate = new Promise<void>((resolveGate) => {
+    open = resolveGate;
+  });
   return withLeafSandbox({
     spawn: (): string => "leaf-1",
     collect: async (): Promise<ChildResult> => {
@@ -149,12 +157,20 @@ function gatedRuntime() {
       return {
         status: "complete",
         output: { answer: "ok" },
-        usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+        usage: {
+          inputTokens: 3,
+          outputTokens: 2,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          reasoningTokens: 0,
+        },
       };
     },
     steer: (): void => undefined,
     cancel: (): void => undefined,
-    release: (): void => { open(); },
+    release: (): void => {
+      open();
+    },
   });
 }
 
@@ -202,7 +218,16 @@ function harness() {
         now: ownership.now,
       })),
   });
-  return { service, repository, locks, ownership, runtime: serviceRuntime, close: () => { connection.close(); } };
+  return {
+    service,
+    repository,
+    locks,
+    ownership,
+    runtime: serviceRuntime,
+    close: () => {
+      connection.close();
+    },
+  };
 }
 
 describe("workflow service durability", () => {
@@ -238,10 +263,21 @@ describe("workflow service durability", () => {
   it("refuses raise-only budget on resume with the didactic message", () => {
     const { service, repository, locks, close } = harness();
     repository.putRunState("spent-run", {
-      name: "s", owner: null, status: "paused", pauseReason: "token_budget_exhausted",
-      pausePayloadJson: null, specJson: JSON.stringify(spec()), argsJson: "{}",
-      tokenBudget: 100, tainted: false, progressJson: null, auditSegmentId: null,
-      updatedAt: 1000, fence: null, holder: null, now: 1000,
+      name: "s",
+      owner: null,
+      status: "paused",
+      pauseReason: "token_budget_exhausted",
+      pausePayloadJson: null,
+      specJson: JSON.stringify(spec()),
+      argsJson: "{}",
+      tokenBudget: 100,
+      tainted: false,
+      progressJson: null,
+      auditSegmentId: null,
+      updatedAt: 1000,
+      fence: null,
+      holder: null,
+      now: 1000,
     });
     // Seed the ledger via the owned path of a real lease so the refusal math
     // has a persisted floor (the oracle's row ledger).
@@ -276,7 +312,9 @@ describe("workflow service durability", () => {
     const final = (await service.status(started.run_id, true)) as Record<string, unknown>;
     // leaf spends 3 tokens > budget 1 → paused
     expect(final.status).toBe("paused");
-    expect(final.pause_reason ?? (final as { reason?: string }).reason).toBe("token_budget_exhausted");
+    expect(final.pause_reason ?? (final as { reason?: string }).reason).toBe(
+      "token_budget_exhausted",
+    );
     const line = repository.getRunState(started.run_id);
     expect((line as Record<string, unknown>).pause_reason).toBe("token_budget_exhausted");
     close();
@@ -293,7 +331,9 @@ describe("workflow service durability", () => {
     expect(paused.status).toBe("paused");
     const line = repository.getRunState(started.run_id) as Record<string, unknown>;
     expect(line.pause_reason).toBe("checkpoint");
-    const payload = JSON.parse(String(line.pause_payload_json)) as { checkpoint: Record<string, unknown> };
+    const payload = JSON.parse(String(line.pause_payload_json)) as {
+      checkpoint: Record<string, unknown>;
+    };
     expect(payload.checkpoint).toMatchObject({ node_id: "cp1" });
     close();
   });
@@ -321,15 +361,33 @@ describe("workflow service durability", () => {
       });
       const service = new WorkflowService({
         runtime: runtimeStub(),
-        store: { repository: proxy, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+        store: {
+          repository: proxy,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
       });
       // foreign lease live: the start must fail busy WITHOUT any seed read
       locks.acquireRunLease("seed-order-run", "foreign", 1000, 900);
       repository.putRunState("seed-order-run", {
-        name: "s", owner: "foreign", status: "running", pauseReason: null,
-        pausePayloadJson: null, specJson: JSON.stringify(spec()), argsJson: "{}",
-        tokenBudget: null, tainted: false, progressJson: null, auditSegmentId: null,
-        updatedAt: 1000, fence: 1, holder: "foreign", now: 1000,
+        name: "s",
+        owner: "foreign",
+        status: "running",
+        pauseReason: null,
+        pausePayloadJson: null,
+        specJson: JSON.stringify(spec()),
+        argsJson: "{}",
+        tokenBudget: null,
+        tainted: false,
+        progressJson: null,
+        auditSegmentId: null,
+        updatedAt: 1000,
+        fence: 1,
+        holder: "foreign",
+        now: 1000,
       });
       const out = service.start(spec(), {}, { resumeRunId: "seed-order-run" });
       expect(out).toHaveProperty("error");
@@ -352,34 +410,101 @@ describe("workflow service durability", () => {
       const timerFactory = (delay: number, fire: () => void) => {
         const timer = { delay, fire, cancelled: false };
         timers.push(timer);
-        return { cancel: () => { timer.cancelled = true; } };
+        return {
+          cancel: () => {
+            timer.cancelled = true;
+          },
+        };
       };
       const successRuntime = withLeafSandbox({
         spawned: 0,
-        spawn(): string { this.spawned += 1; return `leaf-${String(this.spawned)}`; },
-        collect(): { status: "complete"; output: unknown; usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number } } {
-          return { status: "complete", output: { answer: "ok" }, usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 } };
+        spawn(): string {
+          this.spawned += 1;
+          return `leaf-${String(this.spawned)}`;
+        },
+        collect(): {
+          status: "complete";
+          output: unknown;
+          usage: {
+            inputTokens: number;
+            outputTokens: number;
+            cacheReadTokens: number;
+            cacheWriteTokens: number;
+            reasoningTokens: number;
+          };
+        } {
+          return {
+            status: "complete",
+            output: { answer: "ok" },
+            usage: {
+              inputTokens: 3,
+              outputTokens: 2,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              reasoningTokens: 0,
+            },
+          };
         },
         steer(): void {},
         cancel(): void {},
       });
       const quotaRuntime = withLeafSandbox({
         spawned: 0,
-        spawn(): string { this.spawned += 1; return `leaf-${String(this.spawned)}`; },
-        collect(): { status: "failed"; output: null; usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number }; errorKind: string; retryAfter: number } {
-          return { status: "failed", output: null, usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }, errorKind: "quota_exhausted", retryAfter: 120 };
+        spawn(): string {
+          this.spawned += 1;
+          return `leaf-${String(this.spawned)}`;
+        },
+        collect(): {
+          status: "failed";
+          output: null;
+          usage: {
+            inputTokens: number;
+            outputTokens: number;
+            cacheReadTokens: number;
+            cacheWriteTokens: number;
+            reasoningTokens: number;
+          };
+          errorKind: string;
+          retryAfter: number;
+        } {
+          return {
+            status: "failed",
+            output: null,
+            usage: {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              reasoningTokens: 0,
+            },
+            errorKind: "quota_exhausted",
+            retryAfter: 120,
+          };
         },
         steer(): void {},
         cancel(): void {},
       });
       const budgetService = new WorkflowService({
         runtime: successRuntime,
-        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+        store: {
+          repository,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
         timerFactory,
       });
       // token budget pause: budget 1, two nodes spend 5 → second spawn gated, NO scheduler arm
       const budgeted = budgetService.start(
-        { meta: { name: "budget" }, nodes: [{ id: "a", type: "agent", prompt: "x" }, { id: "b", type: "agent", prompt: "y" }] },
+        {
+          meta: { name: "budget" },
+          nodes: [
+            { id: "a", type: "agent", prompt: "x" },
+            { id: "b", type: "agent", prompt: "y" },
+          ],
+        },
         {},
         { tokenBudget: 1 },
       );
@@ -388,12 +513,21 @@ describe("workflow service durability", () => {
       expect(timers.length).toBe(1); // heartbeat only
       const budgetLine = repository.getRunState(budgeted.run_id) as Record<string, unknown>;
       expect(budgetLine.pause_reason).toBe("token_budget_exhausted");
-      const budgetPayload = JSON.parse(String(budgetLine.pause_payload_json)) as { resume_at: number | null };
+      const budgetPayload = JSON.parse(String(budgetLine.pause_payload_json)) as {
+        resume_at: number | null;
+      };
       expect(budgetPayload.resume_at).toBeNull();
 
       const quotaService = new WorkflowService({
         runtime: quotaRuntime,
-        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+        store: {
+          repository,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
         timerFactory,
       });
       // quota pause: arms one bounded retry (retry_after 120 → delay 120), line carries resume_at
@@ -405,13 +539,19 @@ describe("workflow service durability", () => {
       const armedBefore = timers.length;
       const quotaFinal = (await quotaService.status(quota.run_id, true)) as Record<string, unknown>;
       expect(quotaFinal.status).toBe("paused");
-      expect((quotaFinal as { pause_reason?: string }).pause_reason ?? (quotaFinal as { reason?: string }).reason).toBe("quota_exhausted");
+      expect(
+        (quotaFinal as { pause_reason?: string }).pause_reason ??
+          (quotaFinal as { reason?: string }).reason,
+      ).toBe("quota_exhausted");
       // exactly ONE new timer over the quota stretch: the armed retry
       expect(timers.length).toBe(armedBefore + 1);
       expect(timers[timers.length - 1]?.delay).toBe(120);
       const quotaLine = repository.getRunState(quota.run_id) as Record<string, unknown>;
       expect(quotaLine.pause_reason).toBe("quota_exhausted");
-      const quotaPayload = JSON.parse(String(quotaLine.pause_payload_json)) as { resume_at: number | null; attempts: number };
+      const quotaPayload = JSON.parse(String(quotaLine.pause_payload_json)) as {
+        resume_at: number | null;
+        attempts: number;
+      };
       expect(quotaPayload.attempts).toBe(1);
       expect(quotaPayload.resume_at).not.toBeNull();
       connection.close();
@@ -430,12 +570,31 @@ describe("workflow service durability", () => {
       const ownership = { fence: 0 as number, holder: "test", now: 1000 };
       const runtime = withLeafSandbox({
         spawned: 0,
-        spawn(): string { this.spawned += 1; return `leaf-${String(this.spawned)}`; },
-        collect(): { status: "complete"; output: unknown; usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number } } {
+        spawn(): string {
+          this.spawned += 1;
+          return `leaf-${String(this.spawned)}`;
+        },
+        collect(): {
+          status: "complete";
+          output: unknown;
+          usage: {
+            inputTokens: number;
+            outputTokens: number;
+            cacheReadTokens: number;
+            cacheWriteTokens: number;
+            reasoningTokens: number;
+          };
+        } {
           return {
             status: "complete",
             output: { answer: "ok" },
-            usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+            usage: {
+              inputTokens: 3,
+              outputTokens: 2,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              reasoningTokens: 0,
+            },
           };
         },
         steer(): void {},
@@ -444,7 +603,10 @@ describe("workflow service durability", () => {
       const service = new WorkflowService({
         runtime,
         store: {
-          repository, locks, holder: "test", ttl: 900,
+          repository,
+          locks,
+          holder: "test",
+          ttl: 900,
           ownershipOf: () => ownership,
           database: connection.database,
         },
@@ -476,10 +638,21 @@ describe("workflow service durability", () => {
     // foreign lease live
     locks.acquireRunLease("cancel-busy", "foreign", 1000, 900);
     repository.putRunState("cancel-busy", {
-      name: "c", owner: "foreign", status: "running", pauseReason: null,
-      pausePayloadJson: null, specJson: "{}", argsJson: "{}", tokenBudget: null,
-      tainted: false, progressJson: null, auditSegmentId: null,
-      updatedAt: 1000, fence: 1, holder: "foreign", now: 1000,
+      name: "c",
+      owner: "foreign",
+      status: "running",
+      pauseReason: null,
+      pausePayloadJson: null,
+      specJson: "{}",
+      argsJson: "{}",
+      tokenBudget: null,
+      tainted: false,
+      progressJson: null,
+      auditSegmentId: null,
+      updatedAt: 1000,
+      fence: 1,
+      holder: "foreign",
+      now: 1000,
     });
     let writeAttempts = 0;
     const original = repository.putRunState.bind(repository);
@@ -497,9 +670,12 @@ describe("workflow service durability", () => {
     const cancelling = new WorkflowService({
       runtime: runtimeStub(),
       store: {
-        repository: spy, locks, holder: "canceller", ttl: 900,
+        repository: spy,
+        locks,
+        holder: "canceller",
+        ttl: 900,
         ownershipOf: () => ({ fence: 9, holder: "canceller", now: 1000 }),
-        database: (undefined as unknown as import("better-sqlite3").Database),
+        database: undefined as unknown as import("better-sqlite3").Database,
       },
     });
     const out = cancelling.cancel("cancel-busy");
@@ -529,7 +705,9 @@ describe("workflow service durability", () => {
     const result = (await Promise.race([
       service.status(started.run_id, true),
       new Promise<Record<string, unknown>>((resolveRace) => {
-        bell = setTimeout(() => { resolveRace({ error: "WAITER HUNG" }); }, 1_000);
+        bell = setTimeout(() => {
+          resolveRace({ error: "WAITER HUNG" });
+        }, 1_000);
       }),
     ])) as Record<string, unknown>;
     clearTimeout(bell);
@@ -561,7 +739,13 @@ describe("workflow service durability", () => {
         collect: (): ChildResult => ({
           status: "complete",
           output: { answer: "ok" },
-          usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+          usage: {
+            inputTokens: 3,
+            outputTokens: 2,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            reasoningTokens: 0,
+          },
         }),
         steer: () => undefined,
         cancel: () => undefined,
@@ -570,14 +754,24 @@ describe("workflow service durability", () => {
         runtime,
         // no live timers: a heartbeat renewal would be a second variable
         timerFactory: () => ({ cancel: () => undefined }),
-        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+        store: {
+          repository,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
       });
       const started = service.start(spec());
       if ("error" in started) throw new Error(started.error);
       expect(locks.runLeaseExpiry(started.run_id, 1000)).toBe(1900);
       const result = (await service.status(started.run_id, true)) as Record<string, unknown>;
       // presented at now=1901 against expires_at=1900: refused, fail-closed
-      expect(result).toMatchObject({ error: "workflow ownership lost", cause: "STALE_FENCE_WRITE" });
+      expect(result).toMatchObject({
+        error: "workflow ownership lost",
+        cause: "STALE_FENCE_WRITE",
+      });
       const line = repository.getRunState(started.run_id) as Record<string, unknown>;
       expect(line.status).toBe("running");
       // the LAUNCH ledger write (at now=1000, under a live lease) stands; the
@@ -602,21 +796,34 @@ describe("workflow service durability", () => {
       const locks = new LockRepository(connection.database);
       const clock = { now: 1000 };
       const store = () => ({
-        repository, locks, holder: "same-holder", ttl: 10,
+        repository,
+        locks,
+        holder: "same-holder",
+        ttl: 10,
         ownershipOf: () => ({ fence: 0, holder: "same-holder", now: clock.now }),
         database: connection.database,
       });
       const timers = { cancel: () => undefined };
       const first = gatedRuntime(); // its leaf genuinely stays in flight
       // two SERVICES, one holder name — the same shape as two processes
-      const oldService = new WorkflowService({ runtime: first, idSource: () => "same-run", timerFactory: () => timers, store: store() });
+      const oldService = new WorkflowService({
+        runtime: first,
+        idSource: () => "same-run",
+        timerFactory: () => timers,
+        store: store(),
+      });
       const started = oldService.start(spec());
       if ("error" in started) throw new Error(started.error);
       expect(locks.runFenceOf("same-run")).toBe(1);
 
       clock.now = 1011; // the first stretch's lease (TTL 10) has expired
       const second = gatedRuntime(); // stays in flight, so it keeps holding the lease
-      const newService = new WorkflowService({ runtime: second, idSource: () => "same-run", timerFactory: () => timers, store: store() });
+      const newService = new WorkflowService({
+        runtime: second,
+        idSource: () => "same-run",
+        timerFactory: () => timers,
+        store: store(),
+      });
       const resumed = newService.start(null, {}, { resumeRunId: "same-run" });
       if ("error" in resumed) throw new Error(resumed.error);
       expect(locks.runFenceOf("same-run")).toBe(2);
@@ -627,9 +834,15 @@ describe("workflow service durability", () => {
       first.release();
       const oldOutcome = (await oldService.status("same-run", true)) as Record<string, unknown>;
       // it presented its own fence 1, which is stale: refused, fail-closed
-      expect(oldOutcome).toMatchObject({ error: "workflow ownership lost", cause: "STALE_FENCE_WRITE", fence: 1 });
+      expect(oldOutcome).toMatchObject({
+        error: "workflow ownership lost",
+        cause: "STALE_FENCE_WRITE",
+        fence: 1,
+      });
       // it did NOT write a terminal status over the live stretch's line
-      expect((repository.getRunState("same-run") as Record<string, unknown>).status).toBe("running");
+      expect((repository.getRunState("same-run") as Record<string, unknown>).status).toBe(
+        "running",
+      );
       // and it did NOT release the live stretch's lease
       expect(locks.runLeaseExpiry("same-run", clock.now)).toBe(liveExpiry);
       connection.close();
@@ -652,7 +865,9 @@ describe("workflow service durability", () => {
     });
     // the refusal acquired nothing: the fence did not move
     expect(locks.runFenceOf(started.run_id)).toBe(fenceBefore);
-    expect((repository.getRunState(started.run_id) as Record<string, unknown>).status).toBe("running");
+    expect((repository.getRunState(started.run_id) as Record<string, unknown>).status).toBe(
+      "running",
+    );
     // let the live stretch finish before the connection goes away
     runtime.release();
     await service.status(started.run_id, true);
@@ -674,8 +889,20 @@ describe("workflow service durability", () => {
       runtime.releaseFirst();
       const service = new WorkflowService({
         runtime,
-        onEvent: (event) => { events.push({ kind: event.kind, ...(event.state === undefined ? {} : { state: event.state }) }); },
-        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+        onEvent: (event) => {
+          events.push({
+            kind: event.kind,
+            ...(event.state === undefined ? {} : { state: event.state }),
+          });
+        },
+        store: {
+          repository,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
       });
       const started = service.start(spec());
       if ("error" in started) throw new Error(started.error);
@@ -715,7 +942,9 @@ describe("workflow service durability", () => {
     expect(later.status).toBeUndefined();
     const listed = service.list().find((entry) => entry.run_id === started.run_id);
     expect(listed?.status).toBe("ownership_lost");
-    expect((repository.getRunState(started.run_id) as Record<string, unknown>).status).toBe("running");
+    expect((repository.getRunState(started.run_id) as Record<string, unknown>).status).toBe(
+      "running",
+    );
     close();
   });
 
@@ -735,7 +964,13 @@ describe("workflow service durability", () => {
         collect: (): ChildResult => ({
           status: "failed",
           output: null,
-          usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+          usage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            reasoningTokens: 0,
+          },
           errorKind: "quota_exhausted",
           retryAfter: 137,
         }),
@@ -745,8 +980,18 @@ describe("workflow service durability", () => {
       const service = new WorkflowService({
         runtime,
         // heartbeat interval is ttl/3 = 300; the retry must be distinguishable
-        timerFactory: (delay) => { armed.push(delay); return { cancel: () => undefined }; },
-        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+        timerFactory: (delay) => {
+          armed.push(delay);
+          return { cancel: () => undefined };
+        },
+        store: {
+          repository,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
       });
       const started = service.start(spec());
       if ("error" in started) throw new Error(started.error);
@@ -756,7 +1001,9 @@ describe("workflow service durability", () => {
       // 137 is neither the heartbeat (300) nor any backoff step (60,120,240,…)
       expect(armed).toContain(137);
       const payload = JSON.parse(
-        String((repository.getRunState(started.run_id) as Record<string, unknown>).pause_payload_json),
+        String(
+          (repository.getRunState(started.run_id) as Record<string, unknown>).pause_payload_json,
+        ),
       ) as { resume_at: number | null };
       expect(payload.resume_at).toBe(137);
       connection.close();
@@ -777,9 +1024,14 @@ describe("workflow service durability", () => {
     expect(first.status).toBe("paused");
     // resume takes the checkpoint's default and completes; the waiter must see
     // THAT, not the paused answer the previous stretch already settled with
-    const resumed = (await service.runAndWait(null, {}, { resumeRunId: started.run_id })) as Record<string, unknown>;
+    const resumed = (await service.runAndWait(null, {}, { resumeRunId: started.run_id })) as Record<
+      string,
+      unknown
+    >;
     expect(resumed.status).toBe("complete");
-    expect((repository.getRunState(started.run_id) as Record<string, unknown>).status).toBe("complete");
+    expect((repository.getRunState(started.run_id) as Record<string, unknown>).status).toBe(
+      "complete",
+    );
     close();
   });
 
@@ -792,11 +1044,20 @@ describe("workflow service durability", () => {
       const locks = new LockRepository(connection.database);
       const clock = { now: 1000 };
       const runtime = withLeafSandbox({
-        spawn: (): string => { clock.now += 20; return `leaf-${String(clock.now)}`; },
+        spawn: (): string => {
+          clock.now += 20;
+          return `leaf-${String(clock.now)}`;
+        },
         collect: (): ChildResult => ({
           status: "complete",
           output: { answer: "ok" },
-          usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+          usage: {
+            inputTokens: 3,
+            outputTokens: 2,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            reasoningTokens: 0,
+          },
         }),
         steer: (): void => undefined,
         cancel: (): void => undefined,
@@ -807,7 +1068,10 @@ describe("workflow service durability", () => {
         // is the per-cell top-up, and the run outlives the 30s TTL without it.
         timerFactory: () => ({ cancel: () => undefined }),
         store: {
-          repository, locks, holder: "test", ttl: 30,
+          repository,
+          locks,
+          holder: "test",
+          ttl: 30,
           ownershipOf: () => ({ fence: 0, holder: "test", now: clock.now }),
           database: connection.database,
         },
@@ -863,16 +1127,35 @@ describe("workflow service durability", () => {
         collect: (): ChildResult => ({
           status: "complete",
           output: { answer: "ok" },
-          usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+          usage: {
+            inputTokens: 3,
+            outputTokens: 2,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            reasoningTokens: 0,
+          },
         }),
         steer: () => undefined,
         cancel: () => undefined,
       });
       const service = new WorkflowService({
         runtime,
-        idSource: (() => { let n = 0; return () => { n += 1; return `run-${String(n)}`; }; })(),
+        idSource: (() => {
+          let n = 0;
+          return () => {
+            n += 1;
+            return `run-${String(n)}`;
+          };
+        })(),
         fenceMemory: 1,
-        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+        store: {
+          repository,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
       });
       running.service = service;
       const first = service.start(spec());
@@ -882,7 +1165,9 @@ describe("workflow service durability", () => {
       const result = (await service.status(first.run_id, true)) as Record<string, unknown>;
       expect(evicted).toBe(true);
       expect(result.error).toBe("workflow ownership lost");
-      expect((repository.getRunState(first.run_id) as Record<string, unknown>).status).toBe("running");
+      expect((repository.getRunState(first.run_id) as Record<string, unknown>).status).toBe(
+        "running",
+      );
       connection.close();
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -907,7 +1192,13 @@ describe("workflow service durability", () => {
         collect: (): ChildResult => ({
           status: "failed",
           output: null,
-          usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+          usage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            reasoningTokens: 0,
+          },
           errorKind: kind,
           retryAfter: 300,
         }),
@@ -916,8 +1207,18 @@ describe("workflow service durability", () => {
       });
       const service = new WorkflowService({
         runtime,
-        timerFactory: (delay) => { timers.push({ delay }); return { cancel: () => undefined }; },
-        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+        timerFactory: (delay) => {
+          timers.push({ delay });
+          return { cancel: () => undefined };
+        },
+        store: {
+          repository,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
       });
       const started = service.start(spec());
       if ("error" in started) throw new Error(started.error);
@@ -945,11 +1246,27 @@ describe("workflow service durability", () => {
       if (fence === null) throw new Error("expected lease");
       const paused = (runId: string, reason: string): void => {
         repository.putRunState(runId, {
-          name: "n", owner: "dead", status: "paused", pauseReason: reason,
-          pausePayloadJson: JSON.stringify({ checkpoint: null, resume_at: null, attempts: 1, prior_faults: [], prior_degraded: false }),
-          specJson: JSON.stringify(spec()), argsJson: "{}", tokenBudget: null,
-          tainted: false, progressJson: null, auditSegmentId: null,
-          updatedAt: 1000, fence, holder: "dead", now: 1000,
+          name: "n",
+          owner: "dead",
+          status: "paused",
+          pauseReason: reason,
+          pausePayloadJson: JSON.stringify({
+            checkpoint: null,
+            resume_at: null,
+            attempts: 1,
+            prior_faults: [],
+            prior_degraded: false,
+          }),
+          specJson: JSON.stringify(spec()),
+          argsJson: "{}",
+          tokenBudget: null,
+          tainted: false,
+          progressJson: null,
+          auditSegmentId: null,
+          updatedAt: 1000,
+          fence,
+          holder: "dead",
+          now: 1000,
         });
       };
       paused("orphan", "quota_exhausted");
@@ -957,18 +1274,44 @@ describe("workflow service durability", () => {
       const starved = locks.acquireRunLease("starved", "dead", 1000, 900);
       if (starved === null) throw new Error("expected lease");
       repository.putRunState("starved", {
-        name: "n", owner: "dead", status: "paused", pauseReason: "token_budget_exhausted",
-        pausePayloadJson: JSON.stringify({ checkpoint: null, resume_at: null, attempts: 1, prior_faults: [], prior_degraded: false }),
-        specJson: JSON.stringify(spec()), argsJson: "{}", tokenBudget: 1,
-        tainted: false, progressJson: null, auditSegmentId: null,
-        updatedAt: 1000, fence: starved, holder: "dead", now: 1000,
+        name: "n",
+        owner: "dead",
+        status: "paused",
+        pauseReason: "token_budget_exhausted",
+        pausePayloadJson: JSON.stringify({
+          checkpoint: null,
+          resume_at: null,
+          attempts: 1,
+          prior_faults: [],
+          prior_degraded: false,
+        }),
+        specJson: JSON.stringify(spec()),
+        argsJson: "{}",
+        tokenBudget: 1,
+        tainted: false,
+        progressJson: null,
+        auditSegmentId: null,
+        updatedAt: 1000,
+        fence: starved,
+        holder: "dead",
+        now: 1000,
       });
       locks.releaseRunLease("starved", "dead");
       const timers: { delay: number }[] = [];
       const cold = new WorkflowService({
         runtime: runtimeStub(),
-        timerFactory: (delay) => { timers.push({ delay }); return { cancel: () => undefined }; },
-        store: { repository, locks, holder: "cold", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+        timerFactory: (delay) => {
+          timers.push({ delay });
+          return { cancel: () => undefined };
+        },
+        store: {
+          repository,
+          locks,
+          holder: "cold",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
       });
       expect(cold).toBeInstanceOf(WorkflowService);
       // exactly ONE re-arm at construction: the quota line. The token-budget
@@ -1019,9 +1362,17 @@ describe("workflow service — leaf capability sandbox", () => {
               runtime.leafTool(1, name, args);
             const workingRoot = owner.workingRootFor(runId);
             mkdirSync(workingRoot, { recursive: true });
-            const step = (label: string, out: string): void => { results.push({ step: label, out }); };
-            step("inside-working-root", dispatch("write_file", { path: join(workingRoot, "note.txt") }));
-            step("outside-every-root", dispatch("read_file", { path: join(root, "elsewhere.txt") }));
+            const step = (label: string, out: string): void => {
+              results.push({ step: label, out });
+            };
+            step(
+              "inside-working-root",
+              dispatch("write_file", { path: join(workingRoot, "note.txt") }),
+            );
+            step(
+              "outside-every-root",
+              dispatch("read_file", { path: join(root, "elsewhere.txt") }),
+            );
             step("ro-root-read", dispatch("read_file", { path: join(readOnlyRoot, "a.txt") }));
             step("ro-root-write", dispatch("write_file", { path: join(readOnlyRoot, "a.txt") }));
             step("egress-denied", dispatch("web_fetch", { url: "https://evil.example.com/x" }));
@@ -1036,7 +1387,13 @@ describe("workflow service — leaf capability sandbox", () => {
         collect: (): ChildResult => ({
           status: "complete",
           output: { answer: "ok" },
-          usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+          usage: {
+            inputTokens: 3,
+            outputTokens: 2,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            reasoningTokens: 0,
+          },
         }),
         steer: () => undefined,
         cancel: () => undefined,
@@ -1046,7 +1403,14 @@ describe("workflow service — leaf capability sandbox", () => {
         policyPath: path,
         taintTracker: tracker,
         homeRoot: root,
-        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+        store: {
+          repository,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
       });
       running.service = service;
       // a spec that TRIES to widen its own capability changes nothing
@@ -1062,12 +1426,21 @@ describe("workflow service — leaf capability sandbox", () => {
         { step: "inside-working-root", out: "allowed:write_file" },
         // outside every root: exact denial, and the SPEC's fs_allow ["/"] did
         // not widen it — the policy is the operator file, only
-        { step: "outside-every-root", out: "ERROR: path is outside the workflow working scope (sandbox denied)" },
+        {
+          step: "outside-every-root",
+          out: "ERROR: path is outside the workflow working scope (sandbox denied)",
+        },
         // under a read-only operator root: read ok, write refused with its own text
         { step: "ro-root-read", out: "allowed:read_file" },
-        { step: "ro-root-write", out: "ERROR: path is under a read-only workflow root (sandbox denied the write)" },
+        {
+          step: "ro-root-write",
+          out: "ERROR: path is under a read-only workflow root (sandbox denied the write)",
+        },
         // egress: exact host match only; the spec's "*" widened nothing
-        { step: "egress-denied", out: "ERROR: host is not in the workflow egress allowlist (sandbox denied)" },
+        {
+          step: "egress-denied",
+          out: "ERROR: host is not in the workflow egress allowlist (sandbox denied)",
+        },
         { step: "taint-before", out: "false" },
         // the allowed fetch runs AND taints the session
         { step: "egress-allowed", out: "allowed:web_fetch" },
@@ -1079,7 +1452,9 @@ describe("workflow service — leaf capability sandbox", () => {
       // a denied call never reached the base dispatch
       expect(runtime.baseCalls()).toEqual(["write_file", "read_file", "web_fetch"]);
       // and the taint the leaf picked up landed on THIS stretch's durable row
-      expect(Number((repository.getRunState(started.run_id) as Record<string, unknown>).tainted)).toBe(1);
+      expect(
+        Number((repository.getRunState(started.run_id) as Record<string, unknown>).tainted),
+      ).toBe(1);
       connection.close();
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -1099,7 +1474,9 @@ describe("workflow service — leaf capability sandbox", () => {
       const locks = new LockRepository(connection.database);
       const clock = { now: 1000 };
       const warnings: StateWarning[] = [];
-      const watched = new WorkflowRepository(connection.database, (warning) => warnings.push(warning));
+      const watched = new WorkflowRepository(connection.database, (warning) =>
+        warnings.push(warning),
+      );
       let spawns = 0;
       let disposals = 0;
       let takeoverFence: number | null = null;
@@ -1109,9 +1486,16 @@ describe("workflow service — leaf capability sandbox", () => {
           // the takeover lands while the installer is still running
           clock.now = 1011;
           takeoverFence = locks.acquireRunLease("run-lost-in-install", "other", clock.now, 900);
-          return { dispose: () => { disposals += 1; } };
+          return {
+            dispose: () => {
+              disposals += 1;
+            },
+          };
         },
-        spawn: () => { spawns += 1; return "leaf-1"; },
+        spawn: () => {
+          spawns += 1;
+          return "leaf-1";
+        },
         collect: (): ChildResult => ({ status: "complete", output: { answer: "ok" } }),
         steer: () => undefined,
         cancel: () => undefined,
@@ -1122,10 +1506,17 @@ describe("workflow service — leaf capability sandbox", () => {
         timerFactory: () => {
           const timer = { cancelled: false };
           timers.push(timer);
-          return { cancel: () => { timer.cancelled = true; } };
+          return {
+            cancel: () => {
+              timer.cancelled = true;
+            },
+          };
         },
         store: {
-          repository: watched, locks, holder: "mine", ttl: 10,
+          repository: watched,
+          locks,
+          holder: "mine",
+          ttl: 10,
           ownershipOf: () => ({ fence: 0, holder: "mine", now: clock.now }),
           database: connection.database,
         },
@@ -1181,17 +1572,31 @@ describe("workflow service — leaf capability sandbox", () => {
       });
       const service = new WorkflowService({
         runtime: withLeafSandbox({
-          spawn: (): string => { spawns += 1; return "leaf-1"; },
+          spawn: (): string => {
+            spawns += 1;
+            return "leaf-1";
+          },
           collect: (): ChildResult => ({ status: "complete", output: { answer: "ok" } }),
           steer: (): void => undefined,
           cancel: (): void => undefined,
         }),
         idSource: () => "run-line-refused",
         timerFactory: () => ({ cancel: () => undefined }),
-        store: { repository: refusingLine, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+        store: {
+          repository: refusingLine,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
       });
       const started = service.start(spec());
-      expect(started).toMatchObject({ error: "workflow ownership lost", cause: "STALE_FENCE_WRITE", fence: 1 });
+      expect(started).toMatchObject({
+        error: "workflow ownership lost",
+        cause: "STALE_FENCE_WRITE",
+        fence: 1,
+      });
       expect(spawns).toBe(0);
       // the ledger the seed DID write is the only trace, and the lease is back
       expect(locks.runLeaseExpiry("run-line-refused", 1000)).toBeNull();
@@ -1226,7 +1631,10 @@ describe("workflow service — leaf capability sandbox", () => {
           }
           return { dispose: () => undefined };
         },
-        spawn: () => { spawns += 1; return "leaf-1"; },
+        spawn: () => {
+          spawns += 1;
+          return "leaf-1";
+        },
         collect: (): ChildResult => ({ status: "complete", output: { answer: "ok" } }),
         steer: () => undefined,
         cancel: () => undefined,
@@ -1234,9 +1642,22 @@ describe("workflow service — leaf capability sandbox", () => {
       const service = new WorkflowService({
         runtime,
         fenceMemory: 1,
-        idSource: (() => { let n = 0; return () => { n += 1; return `evict-${String(n)}`; }; })(),
+        idSource: (() => {
+          let n = 0;
+          return () => {
+            n += 1;
+            return `evict-${String(n)}`;
+          };
+        })(),
         timerFactory: () => ({ cancel: () => undefined }),
-        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+        store: {
+          repository,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
       });
       running.service = service;
       const started = service.start(spec());
@@ -1244,7 +1665,11 @@ describe("workflow service — leaf capability sandbox", () => {
       // the LINE landed (the lease is genuinely ours), the SEED could not
       expect(repository.getRunState("evict-1")).not.toBeNull();
       expect(repository.getRunSpend("evict-1")).toBeNull();
-      expect(started).toMatchObject({ error: "workflow ownership lost", cause: "STALE_FENCE_WRITE", fence: 1 });
+      expect(started).toMatchObject({
+        error: "workflow ownership lost",
+        cause: "STALE_FENCE_WRITE",
+        fence: 1,
+      });
       expect(spawns).toBe(0);
       connection.close();
     } finally {
@@ -1277,7 +1702,12 @@ describe("workflow service — leaf capability sandbox", () => {
                 // the finishing stretch's own lease (TTL 10) has lapsed, so a
                 // fresh acquisition by the SAME holder takes the run over here
                 clock.now = 1011;
-                takeoverFence = target.acquireRunLease("run-release-race", "same-holder", clock.now, 900);
+                takeoverFence = target.acquireRunLease(
+                  "run-release-race",
+                  "same-holder",
+                  clock.now,
+                  900,
+                );
               }
               return (target[prop as "releaseRunLease"] as (...a: unknown[]) => unknown).apply(
                 target,
@@ -1294,7 +1724,13 @@ describe("workflow service — leaf capability sandbox", () => {
           collect: (): ChildResult => ({
             status: "complete",
             output: { answer: "ok" },
-            usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+            usage: {
+              inputTokens: 1,
+              outputTokens: 1,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              reasoningTokens: 0,
+            },
           }),
           steer: (): void => undefined,
           cancel: (): void => undefined,
@@ -1302,7 +1738,10 @@ describe("workflow service — leaf capability sandbox", () => {
         idSource: () => "run-release-race",
         timerFactory: () => ({ cancel: () => undefined }),
         store: {
-          repository, locks: racingLocks, holder: "same-holder", ttl: 10,
+          repository,
+          locks: racingLocks,
+          holder: "same-holder",
+          ttl: 10,
           ownershipOf: () => ({ fence: 0, holder: "same-holder", now: clock.now }),
           database: connection.database,
         },
@@ -1333,8 +1772,13 @@ describe("workflow service — leaf capability sandbox", () => {
       const warnings: string[] = [];
       let spawns = 0;
       const exploding: ChildRuntime = {
-        installLeafSandbox: () => { throw new Error("installer exploded"); },
-        spawn: () => { spawns += 1; return "leaf-1"; },
+        installLeafSandbox: () => {
+          throw new Error("installer exploded");
+        },
+        spawn: () => {
+          spawns += 1;
+          return "leaf-1";
+        },
         collect: (): ChildResult => ({ status: "complete", output: null }),
         steer: () => undefined,
         cancel: () => undefined,
@@ -1346,9 +1790,20 @@ describe("workflow service — leaf capability sandbox", () => {
         timerFactory: () => {
           const timer = { cancelled: false };
           timers.push(timer);
-          return { cancel: () => { timer.cancelled = true; } };
+          return {
+            cancel: () => {
+              timer.cancelled = true;
+            },
+          };
         },
-        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+        store: {
+          repository,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
       });
       // the exception never escapes: the caller gets the nominal envelope
       const started = service.start(spec());
@@ -1372,14 +1827,27 @@ describe("workflow service — leaf capability sandbox", () => {
           collect: (): ChildResult => ({
             status: "complete",
             output: { answer: "ok" },
-            usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+            usage: {
+              inputTokens: 1,
+              outputTokens: 1,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              reasoningTokens: 0,
+            },
           }),
           steer: (): void => undefined,
           cancel: (): void => undefined,
         }),
         idSource: () => "run-install-throws",
         timerFactory: () => ({ cancel: () => undefined }),
-        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+        store: {
+          repository,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
       });
       const second = retry.start(spec());
       if ("error" in second) throw new Error(second.error);
@@ -1396,7 +1864,9 @@ describe("workflow service — leaf capability sandbox", () => {
     roots.push(root);
     const connection = openStateDatabase(join(root, "state.db"));
     const rejections: unknown[] = [];
-    const onRejection = (reason: unknown): void => { rejections.push(reason); };
+    const onRejection = (reason: unknown): void => {
+      rejections.push(reason);
+    };
     process.on("unhandledRejection", onRejection);
     try {
       const repository = new WorkflowRepository(connection.database);
@@ -1406,13 +1876,22 @@ describe("workflow service — leaf capability sandbox", () => {
       let disposeCalls = 0;
       const runtime: ChildRuntime = {
         installLeafSandbox: () => ({
-          dispose: () => { disposeCalls += 1; throw new Error("dispose exploded"); },
+          dispose: () => {
+            disposeCalls += 1;
+            throw new Error("dispose exploded");
+          },
         }),
         spawn: () => "leaf-1",
         collect: (): ChildResult => ({
           status: "complete",
           output: { answer: "ok" },
-          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            reasoningTokens: 0,
+          },
         }),
         steer: () => undefined,
         cancel: () => undefined,
@@ -1422,7 +1901,14 @@ describe("workflow service — leaf capability sandbox", () => {
         idSource: () => "run-dispose-throws",
         onWarning: (message) => warnings.push(message),
         timerFactory: () => ({ cancel: () => undefined }),
-        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+        store: {
+          repository,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
       });
       const started = service.start(spec());
       if ("error" in started) throw new Error(started.error);
@@ -1431,7 +1917,9 @@ describe("workflow service — leaf capability sandbox", () => {
       const waited = (await Promise.race([
         service.status("run-dispose-throws", true),
         new Promise<Record<string, unknown>>((resolveRace) => {
-          bell = setTimeout(() => { resolveRace({ error: "WAITER HUNG" }); }, 1_000);
+          bell = setTimeout(() => {
+            resolveRace({ error: "WAITER HUNG" });
+          }, 1_000);
         }),
       ])) as Record<string, unknown>;
       clearTimeout(bell);
@@ -1440,8 +1928,12 @@ describe("workflow service — leaf capability sandbox", () => {
       expect(disposeCalls).toBe(1);
       expect(warnings.some((message) => message.includes("dispose exploded"))).toBe(true);
       // and every channel agrees, with the lease handed back
-      expect((repository.getRunState("run-dispose-throws") as Record<string, unknown>).status).toBe("complete");
-      expect(service.list().find((entry) => entry.run_id === "run-dispose-throws")?.status).toBe("complete");
+      expect((repository.getRunState("run-dispose-throws") as Record<string, unknown>).status).toBe(
+        "complete",
+      );
+      expect(service.list().find((entry) => entry.run_id === "run-dispose-throws")?.status).toBe(
+        "complete",
+      );
       expect(locks.runLeaseExpiry("run-dispose-throws", 1000)).toBeNull();
       await new Promise((resolveTick) => setTimeout(resolveTick, 10));
       expect(rejections).toEqual([]);
@@ -1472,20 +1964,33 @@ describe("workflow service — leaf capability sandbox", () => {
           if (prop === "releaseRunLeaseAtFence" || prop === "releaseRunLease") {
             return (...args: unknown[]) => {
               releaseCalls += 1;
-              return (target[prop as "releaseRunLease"] as (...a: unknown[]) => unknown).apply(target, args);
+              return (target[prop as "releaseRunLease"] as (...a: unknown[]) => unknown).apply(
+                target,
+                args,
+              );
             };
           }
           return Reflect.get(target, prop, receiver) as unknown;
         },
       });
       const runtime: ChildRuntime = {
-        installLeafSandbox: () => ({ dispose: () => { disposeCalls += 1; } }),
+        installLeafSandbox: () => ({
+          dispose: () => {
+            disposeCalls += 1;
+          },
+        }),
         spawn: () => "leaf-1",
         collect: (): ChildResult => ({
           status: "complete",
           // a function cannot be structured-cloned, so publishing this throws
           output: { answer: () => "nope" },
-          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            reasoningTokens: 0,
+          },
         }),
         steer: () => undefined,
         cancel: () => undefined,
@@ -1494,7 +1999,14 @@ describe("workflow service — leaf capability sandbox", () => {
         runtime,
         idSource: () => "run-publish-throws",
         timerFactory: () => ({ cancel: () => undefined }),
-        store: { repository, locks: countingLocks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+        store: {
+          repository,
+          locks: countingLocks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
       });
       const started = service.start(spec());
       if ("error" in started) throw new Error(started.error);
@@ -1502,7 +2014,9 @@ describe("workflow service — leaf capability sandbox", () => {
       const waited = (await Promise.race([
         service.status("run-publish-throws", true),
         new Promise<Record<string, unknown>>((resolveRace) => {
-          bell = setTimeout(() => { resolveRace({ error: "WAITER HUNG" }); }, 1_000);
+          bell = setTimeout(() => {
+            resolveRace({ error: "WAITER HUNG" });
+          }, 1_000);
         }),
       ])) as Record<string, unknown>;
       clearTimeout(bell);
@@ -1528,7 +2042,10 @@ describe("workflow service — leaf capability sandbox", () => {
       const ownership = { fence: 0 as number, holder: "test", now: 1000 };
       let spawns = 0;
       const bare: ChildRuntime = {
-        spawn: () => { spawns += 1; return "leaf-1"; },
+        spawn: () => {
+          spawns += 1;
+          return "leaf-1";
+        },
         collect: (): ChildResult => ({ status: "complete", output: null }),
         steer: () => undefined,
         cancel: () => undefined,
@@ -1536,7 +2053,14 @@ describe("workflow service — leaf capability sandbox", () => {
       const service = new WorkflowService({
         runtime: bare,
         timerFactory: () => ({ cancel: () => undefined }),
-        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+        store: {
+          repository,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
       });
       const started = service.start(spec());
       expect(started).toMatchObject({
@@ -1554,13 +2078,26 @@ describe("workflow service — leaf capability sandbox", () => {
           collect: (): ChildResult => ({
             status: "complete",
             output: { answer: "ok" },
-            usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+            usage: {
+              inputTokens: 1,
+              outputTokens: 1,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              reasoningTokens: 0,
+            },
           }),
           steer: () => undefined,
           cancel: () => undefined,
         }),
         timerFactory: () => ({ cancel: () => undefined }),
-        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+        store: {
+          repository,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
       });
       const ok = sandboxed.start(spec());
       if ("error" in ok) throw new Error(ok.error);
@@ -1583,16 +2120,27 @@ describe("workflow service — leaf capability sandbox", () => {
       // The SECOND acquisition's leaf stays in flight, so stretch 2 is current
       // while we ask stretch 1's retired wrapper for capability.
       let openSecond!: () => void;
-      const secondLeaf = new Promise<void>((resolveLeaf) => { openSecond = resolveLeaf; });
+      const secondLeaf = new Promise<void>((resolveLeaf) => {
+        openSecond = resolveLeaf;
+      });
       let spawns = 0;
       const runtime = withLeafSandbox({
-        spawn: (): string => { spawns += 1; return `leaf-${String(spawns)}`; },
+        spawn: (): string => {
+          spawns += 1;
+          return `leaf-${String(spawns)}`;
+        },
         collect: async (id: string): Promise<ChildResult> => {
           if (id === "leaf-2") await secondLeaf;
           return {
             status: "complete",
             output: { answer: "ok" },
-            usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+            usage: {
+              inputTokens: 1,
+              outputTokens: 1,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              reasoningTokens: 0,
+            },
           };
         },
         steer: (): void => undefined,
@@ -1602,7 +2150,14 @@ describe("workflow service — leaf capability sandbox", () => {
         runtime,
         homeRoot: root,
         timerFactory: () => ({ cancel: () => undefined }),
-        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+        store: {
+          repository,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
       });
       const first = service.start(spec());
       if ("error" in first) throw new Error(first.error);
@@ -1618,14 +2173,18 @@ describe("workflow service — leaf capability sandbox", () => {
       // stretch 1's wrapper grants nothing now that stretch 2 owns the run —
       // even for a path inside stretch 1's own former working root
       mkdirSync(join(root, "runs", first.run_id, "work-1"), { recursive: true });
-      expect(runtime.retiredTool(1, "write_file", { path: join(root, "runs", first.run_id, "work-1", "x.txt") })).toBe(
-        "ERROR: workflow stretch is no longer current (sandbox denied)",
-      );
+      expect(
+        runtime.retiredTool(1, "write_file", {
+          path: join(root, "runs", first.run_id, "work-1", "x.txt"),
+        }),
+      ).toBe("ERROR: workflow stretch is no longer current (sandbox denied)");
       // stretch 2's own wrapper still works, in its own root
       mkdirSync(join(root, "runs", first.run_id, "work-2"), { recursive: true });
-      expect(runtime.leafTool(2, "write_file", { path: join(root, "runs", first.run_id, "work-2", "x.txt") })).toBe(
-        "allowed:write_file",
-      );
+      expect(
+        runtime.leafTool(2, "write_file", {
+          path: join(root, "runs", first.run_id, "work-2", "x.txt"),
+        }),
+      ).toBe("allowed:write_file");
       openSecond();
       await service.status(first.run_id, true);
       expect(runtime.disposedFences()).toEqual([1, 2]);
@@ -1650,33 +2209,53 @@ describe("workflow service — leaf capability sandbox", () => {
         policyPath: path,
         taintTracker: tracker,
         homeRoot: root,
-        store: { repository, locks, holder: "test", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+        store: {
+          repository,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
       });
       const started = service.start(spec());
       if ("error" in started) throw new Error(started.error);
       await service.status(started.run_id, true);
-      expect(Number((repository.getRunState(started.run_id) as Record<string, unknown>).tainted)).toBe(0);
+      expect(
+        Number((repository.getRunState(started.run_id) as Record<string, unknown>).tainted),
+      ).toBe(0);
       // a leaf taints the session, then the run is resumed by a FRESH service
       service.leafToolDispatch(started.run_id, () => "OK")("web_search", { query: "x" });
       expect(tracker.tainted).toBe(true);
       const resumed = service.start(null, {}, { resumeRunId: started.run_id });
       if ("error" in resumed) throw new Error(resumed.error);
       await service.status(started.run_id, true);
-      expect(Number((repository.getRunState(started.run_id) as Record<string, unknown>).tainted)).toBe(1);
+      expect(
+        Number((repository.getRunState(started.run_id) as Record<string, unknown>).tainted),
+      ).toBe(1);
       // a brand-new process (clean tracker) still gets a tainted stretch
       const cold = new WorkflowService({
         runtime: runtimeStub(),
         policyPath: path,
         taintTracker: new TaintTracker(),
         homeRoot: root,
-        store: { repository, locks, holder: "cold", ttl: 900, ownershipOf: () => ownership, database: connection.database },
+        store: {
+          repository,
+          locks,
+          holder: "cold",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
       });
       const again = cold.start(null, {}, { resumeRunId: started.run_id });
       if ("error" in again) throw new Error(again.error);
       await cold.status(started.run_id, true);
-      expect(cold.leafToolDispatch(started.run_id, () => "OK")("read_file", { path: join(root, "a.txt") })).toBe(
-        "ERROR: tainted run: filesystem access is disabled for leaves",
-      );
+      expect(
+        cold.leafToolDispatch(started.run_id, () => "OK")("read_file", {
+          path: join(root, "a.txt"),
+        }),
+      ).toBe("ERROR: tainted run: filesystem access is disabled for leaves");
       connection.close();
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -1703,7 +2282,16 @@ describe("delivered evidence normalization", () => {
                     ],
                   },
                 },
-                { body: { messages: [{ role: "tool", content: `{"ok": true, "run_id": "${runId}", "status": "started"}` }] } },
+                {
+                  body: {
+                    messages: [
+                      {
+                        role: "tool",
+                        content: `{"ok": true, "run_id": "${runId}", "status": "started"}`,
+                      },
+                    ],
+                  },
+                },
               ],
             },
           },

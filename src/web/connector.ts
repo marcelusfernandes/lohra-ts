@@ -1,11 +1,6 @@
 import nodeDns from "node:dns";
 import { WebTransportError, isNonPublic, unmap } from "./safety.js";
-import type {
-  AddressRecord,
-  ConnectorResponse,
-  ConnectorStream,
-  HttpConnector,
-} from "./types.js";
+import type { AddressRecord, ConnectorResponse, ConnectorStream, HttpConnector } from "./types.js";
 
 export class ConnectorError extends WebTransportError {}
 
@@ -53,7 +48,11 @@ export type NodeRequestFactory = (
 export interface ConnectorOptions {
   readonly dial?: Dial;
   readonly requestFactory?: NodeRequestFactory;
-  readonly lookup?: (host: string, options: unknown, callback: (error: Error | null, address?: string, family?: number) => void) => void;
+  readonly lookup?: (
+    host: string,
+    options: unknown,
+    callback: (error: Error | null, address?: string, family?: number) => void,
+  ) => void;
 }
 
 export function normalizePeer(peer: string | null | undefined): string | null {
@@ -70,7 +69,12 @@ export function normalizePeer(peer: string | null | undefined): string | null {
   ) {
     const sixth = Number.parseInt(groups[6] ?? "0", 16);
     const seventh = Number.parseInt(groups[7] ?? "0", 16);
-    return [String(sixth >> 8), String(sixth & 255), String(seventh >> 8), String(seventh & 255)].join(".");
+    return [
+      String(sixth >> 8),
+      String(sixth & 255),
+      String(seventh >> 8),
+      String(seventh & 255),
+    ].join(".");
   }
   return trimmed;
 }
@@ -87,16 +91,9 @@ export function memberAddressOf(
   return mapped?.address ?? null;
 }
 
-export type PeerVerdict =
-  | "unavailable"
-  | "not-in-validated-set"
-  | "non-public"
-  | "ok";
+export type PeerVerdict = "unavailable" | "not-in-validated-set" | "non-public" | "ok";
 
-export function peerVerdict(
-  peer: string | null,
-  allowed: readonly AddressRecord[],
-): PeerVerdict {
+export function peerVerdict(peer: string | null, allowed: readonly AddressRecord[]): PeerVerdict {
   if (peer === null) return "unavailable";
   const normalized = normalizePeer(peer) ?? peer;
   if (isNonPublic(unmap(normalized))) return "non-public";
@@ -185,11 +182,9 @@ async function nodeDial(dialRequest: PinnedDialRequest): Promise<ConnectorRespon
   if (dialRequest.requestFactory !== undefined) {
     transportRequest = dialRequest.requestFactory(dialRequest.secure);
   } else {
-    const [nodeHttp, nodeHttps] = await Promise.all([
-      import("node:http"),
-      import("node:https"),
-    ]);
-    transportRequest = (dialRequest.secure ? nodeHttps : nodeHttp).request as ReturnType<NodeRequestFactory>;
+    const [nodeHttp, nodeHttps] = await Promise.all([import("node:http"), import("node:https")]);
+    transportRequest = (dialRequest.secure ? nodeHttps : nodeHttp)
+      .request as ReturnType<NodeRequestFactory>;
   }
   return new Promise<ConnectorResponse>((resolve, reject) => {
     let settled = false;
@@ -387,7 +382,9 @@ async function nodeDial(dialRequest: PinnedDialRequest): Promise<ConnectorRespon
 }
 
 export function nodeResolver(host: string, _port: number | null): Promise<AddressRecord[]> {
-  return nodeDns.promises.lookup(host, { all: true, verbatim: true }).then((records) =>
-    records.map((record) => ({ address: record.address, family: record.family === 6 ? 6 : 4 })),
-  );
+  return nodeDns.promises
+    .lookup(host, { all: true, verbatim: true })
+    .then((records) =>
+      records.map((record) => ({ address: record.address, family: record.family === 6 ? 6 : 4 })),
+    );
 }

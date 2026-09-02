@@ -100,7 +100,10 @@ describe("createOpenAiServer — end-to-end HTTP/SSE wiring", () => {
   let server: Server;
   let port: number;
 
-  function start(transportResult: (request: ModelRequest) => NormalizedResponse, apiKey: string | null = "test-key") {
+  function start(
+    transportResult: (request: ModelRequest) => NormalizedResponse,
+    apiKey: string | null = "test-key",
+  ) {
     const service = new CompletionService({
       transport: new ScriptedTransport(transportResult),
       streamingTransport: new ScriptedTransport(transportResult),
@@ -160,7 +163,10 @@ describe("createOpenAiServer — end-to-end HTTP/SSE wiring", () => {
 
   it("GET /v1/models requires auth and lists the configured models", async () => {
     await start(() => okResponse());
-    const unauth = await sendRaw(port, "GET /v1/models HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n");
+    const unauth = await sendRaw(
+      port,
+      "GET /v1/models HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n",
+    );
     expect(unauth.statusLine).toBe("HTTP/1.1 401 Unauthorized");
 
     const authed = await sendRaw(
@@ -174,7 +180,10 @@ describe("createOpenAiServer — end-to-end HTTP/SSE wiring", () => {
 
   it("--insecure mode (apiKey null) accepts requests with no Authorization header", async () => {
     await start(() => okResponse(), null);
-    const res = await sendRaw(port, "GET /v1/models HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n");
+    const res = await sendRaw(
+      port,
+      "GET /v1/models HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n",
+    );
     expect(res.statusLine).toBe("HTTP/1.1 200 OK");
   });
 
@@ -241,7 +250,11 @@ describe("createOpenAiServer — end-to-end HTTP/SSE wiring", () => {
       request.onText?.("llo");
       return okResponse({ content: "hello" });
     });
-    const body = JSON.stringify({ model: "m", stream: true, messages: [{ role: "user", content: "hi" }] });
+    const body = JSON.stringify({
+      model: "m",
+      stream: true,
+      messages: [{ role: "user", content: "hi" }],
+    });
     const res = await sendRaw(
       port,
       `POST /v1/chat/completions HTTP/1.1\nHost: 127.0.0.1\nAuthorization: Bearer test-key\nContent-Type: application/json\nContent-Length: ${String(Buffer.byteLength(body))}\nConnection: close\n`,
@@ -254,13 +267,17 @@ describe("createOpenAiServer — end-to-end HTTP/SSE wiring", () => {
 
     const frames = res.body.split("\n\n").filter((f) => f.length > 0);
     expect(frames[frames.length - 1]).toBe("data: [DONE]");
-    const dataFrames = frames.filter((f) => f !== "data: [DONE]").map((f) => JSON.parse(f.slice(6)) as Record<string, unknown>);
+    const dataFrames = frames
+      .filter((f) => f !== "data: [DONE]")
+      .map((f) => JSON.parse(f.slice(6)) as Record<string, unknown>);
     expect((dataFrames[0]?.["choices"] as { delta: Record<string, unknown> }[])[0]?.delta).toEqual({
       role: "assistant",
     });
     const text = dataFrames
       .slice(1, -1)
-      .map((frame) => (frame["choices"] as { delta: Record<string, unknown> }[])[0]?.delta["content"])
+      .map(
+        (frame) => (frame["choices"] as { delta: Record<string, unknown> }[])[0]?.delta["content"],
+      )
       .join("");
     expect(text).toBe("hello");
     const last = dataFrames[dataFrames.length - 1] as { choices: { finish_reason: string }[] };
@@ -283,7 +300,11 @@ describe("createOpenAiServer — end-to-end HTTP/SSE wiring", () => {
 
   it("upstream failure mid-SSE keeps the role chunk, emits an error frame, still ends in [DONE]", async () => {
     await start(() => UPSTREAM_FAILS);
-    const body = JSON.stringify({ model: "m", stream: true, messages: [{ role: "user", content: "hi" }] });
+    const body = JSON.stringify({
+      model: "m",
+      stream: true,
+      messages: [{ role: "user", content: "hi" }],
+    });
     const res = await sendRaw(
       port,
       `POST /v1/chat/completions HTTP/1.1\nHost: 127.0.0.1\nAuthorization: Bearer test-key\nContent-Type: application/json\nContent-Length: ${String(Buffer.byteLength(body))}\nConnection: close\n`,

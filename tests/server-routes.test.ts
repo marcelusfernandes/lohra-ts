@@ -13,8 +13,16 @@ describe("matchRoute — exact 8-handler surface, trailing-slash as router class
   });
 
   it("matches each of the 8 known handlers with its declared method", () => {
-    expect(matchRoute("GET", "/health")).toEqual({ kind: "route", name: "health", methods: ["GET"] });
-    expect(matchRoute("GET", "/v1/models")).toEqual({ kind: "route", name: "models", methods: ["GET"] });
+    expect(matchRoute("GET", "/health")).toEqual({
+      kind: "route",
+      name: "health",
+      methods: ["GET"],
+    });
+    expect(matchRoute("GET", "/v1/models")).toEqual({
+      kind: "route",
+      name: "models",
+      methods: ["GET"],
+    });
     expect(matchRoute("POST", "/v1/chat/completions")).toEqual({
       kind: "route",
       name: "chatCompletions",
@@ -25,7 +33,11 @@ describe("matchRoute — exact 8-handler surface, trailing-slash as router class
       name: "responses",
       methods: ["POST"],
     });
-    expect(matchRoute("GET", "/openapi.json")).toEqual({ kind: "route", name: "openapi", methods: ["GET"] });
+    expect(matchRoute("GET", "/openapi.json")).toEqual({
+      kind: "route",
+      name: "openapi",
+      methods: ["GET"],
+    });
     expect(matchRoute("GET", "/docs")).toEqual({ kind: "route", name: "docs", methods: ["GET"] });
     expect(matchRoute("GET", "/redoc")).toEqual({ kind: "route", name: "redoc", methods: ["GET"] });
     expect(matchRoute("GET", "/docs/oauth2-redirect")).toEqual({

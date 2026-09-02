@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { cronMatches, isDue, isPermanentlyUnreachable, parseCronField } from "../src/cron/schedule.js";
+import {
+  cronMatches,
+  isDue,
+  isPermanentlyUnreachable,
+  parseCronField,
+} from "../src/cron/schedule.js";
 
 describe("parseCronField", () => {
   it("expands *, single, range, comma-list, and step", () => {
@@ -18,9 +23,7 @@ describe("parseCronField", () => {
   });
 
   it("rejects non-numeric parts with CPython's int() wording (named excuse)", () => {
-    expect(() => parseCronField("a", 0, 59)).toThrow(
-      "invalid literal for int() with base 10: 'a'",
-    );
+    expect(() => parseCronField("a", 0, 59)).toThrow("invalid literal for int() with base 10: 'a'");
     expect(() => parseCronField("1,,2", 0, 59)).toThrow(
       "invalid literal for int() with base 10: ''",
     );
@@ -62,9 +65,9 @@ describe("cronMatches", () => {
       process.env.TZ = "Pacific/Kiritimati";
       const kiritimatiDay = new Date(epochSeconds * 1000).getDate();
       expect(kiritimatiDay).not.toBe(utcDay);
-      expect(
-        cronMatches(`* * ${String(kiritimatiDay)} * *`, new Date(epochSeconds * 1000)),
-      ).toBe(true);
+      expect(cronMatches(`* * ${String(kiritimatiDay)} * *`, new Date(epochSeconds * 1000))).toBe(
+        true,
+      );
     } finally {
       if (originalTz === undefined) delete process.env.TZ;
       else process.env.TZ = originalTz;
@@ -117,16 +120,10 @@ describe("isDue", () => {
     const now = when.getTime() / 1000;
     const minuteFloorNow = now - (now % 60);
     expect(
-      isDue(
-        { type: "cron", value: "30 14 * * *", last_run_at: minuteFloorNow },
-        { now },
-      ),
+      isDue({ type: "cron", value: "30 14 * * *", last_run_at: minuteFloorNow }, { now }),
     ).toBe(false);
     expect(
-      isDue(
-        { type: "cron", value: "30 14 * * *", last_run_at: minuteFloorNow - 60 },
-        { now },
-      ),
+      isDue({ type: "cron", value: "30 14 * * *", last_run_at: minuteFloorNow - 60 }, { now }),
     ).toBe(true);
   });
 

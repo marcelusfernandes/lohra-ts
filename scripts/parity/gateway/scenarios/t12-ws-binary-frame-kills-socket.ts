@@ -28,7 +28,11 @@ async function observeBinaryFrame(port: number): Promise<BinaryFrameOutcome> {
       return "frame" as const;
     }),
     victim.closed.then(() => "closed" as const),
-    new Promise<"timeout">((resolvePromise) => setTimeout(() => { resolvePromise("timeout"); }, 4500)),
+    new Promise<"timeout">((resolvePromise) =>
+      setTimeout(() => {
+        resolvePromise("timeout");
+      }, 4500),
+    ),
   ]);
   victim.close();
   return { diedWithoutFrame: outcome === "closed" && !gotAFrame, gotAFrame };
@@ -44,10 +48,16 @@ export const BINARY_FRAME_SCENARIOS: readonly NamedScenario[] = [
         observeBinaryFrame(ctx.candidatePort),
       ]);
       if (oracleOutcome.diedWithoutFrame !== candidateOutcome.diedWithoutFrame) {
-        return divergent(id, `oracle=${JSON.stringify(oracleOutcome)} candidate=${JSON.stringify(candidateOutcome)}`);
+        return divergent(
+          id,
+          `oracle=${JSON.stringify(oracleOutcome)} candidate=${JSON.stringify(candidateOutcome)}`,
+        );
       }
       if (!oracleOutcome.diedWithoutFrame) {
-        return divergent(id, "expected the socket to die with no frame at all on both sides", { oracleOutcome, candidateOutcome });
+        return divergent(id, "expected the socket to die with no frame at all on both sides", {
+          oracleOutcome,
+          candidateOutcome,
+        });
       }
 
       // A second, independent socket on each side must survive.
@@ -57,13 +67,23 @@ export const BINARY_FRAME_SCENARIOS: readonly NamedScenario[] = [
       ]);
       try {
         await Promise.all([oracleOther.nextFrame(), candidateOther.nextFrame()]); // gateway.ready
-        oracleOther.sendText(JSON.stringify({ jsonrpc: "2.0", id: 99, method: "session.list", params: {} }));
-        candidateOther.sendText(JSON.stringify({ jsonrpc: "2.0", id: 99, method: "session.list", params: {} }));
-        const [oracleReply, candidateReply] = await Promise.all([oracleOther.nextFrame(5000), candidateOther.nextFrame(5000)]);
+        oracleOther.sendText(
+          JSON.stringify({ jsonrpc: "2.0", id: 99, method: "session.list", params: {} }),
+        );
+        candidateOther.sendText(
+          JSON.stringify({ jsonrpc: "2.0", id: 99, method: "session.list", params: {} }),
+        );
+        const [oracleReply, candidateReply] = await Promise.all([
+          oracleOther.nextFrame(5000),
+          candidateOther.nextFrame(5000),
+        ]);
         const oracleOk = oracleReply.payload.toString("utf8").includes('"result"');
         const candidateOk = candidateReply.payload.toString("utf8").includes('"result"');
         if (oracleOk !== candidateOk || !oracleOk) {
-          return divergent(id, `other socket survival: oracle=${String(oracleOk)} candidate=${String(candidateOk)}`);
+          return divergent(
+            id,
+            `other socket survival: oracle=${String(oracleOk)} candidate=${String(candidateOk)}`,
+          );
         }
       } finally {
         oracleOther.close();
@@ -72,12 +92,24 @@ export const BINARY_FRAME_SCENARIOS: readonly NamedScenario[] = [
 
       // The process itself (not just this one connection) must still be
       // answering plain HTTP.
-      const { oracle: oracleStatus, candidate: candidateStatus } = await probeBoth(ctx, "/api/status", []);
+      const { oracle: oracleStatus, candidate: candidateStatus } = await probeBoth(
+        ctx,
+        "/api/status",
+        [],
+      );
       if (oracleStatus.status !== candidateStatus.status) {
-        return divergent(id, `process alive: oracle=${String(oracleStatus.status)} candidate=${String(candidateStatus.status)}`);
+        return divergent(
+          id,
+          `process alive: oracle=${String(oracleStatus.status)} candidate=${String(candidateStatus.status)}`,
+        );
       }
 
-      return match(id, { oracleOutcome, candidateOutcome, otherSocketSurvived: true, processStatus: oracleStatus.status });
+      return match(id, {
+        oracleOutcome,
+        candidateOutcome,
+        otherSocketSurvived: true,
+        processStatus: oracleStatus.status,
+      });
     },
   },
 ];

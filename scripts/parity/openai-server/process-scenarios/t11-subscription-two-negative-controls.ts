@@ -8,8 +8,13 @@ import type { FakeUpstream } from "../fake-upstream.js";
 import type { ProcessScenarioResult } from "../run-process.js";
 
 async function healthOk(port: number): Promise<boolean> {
-  const response = await sendRaw(port, "GET /health HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n");
-  return response.statusLine.includes(" 200 ") && response.body === '{"ok":true,"version":"0.0.11"}';
+  const response = await sendRaw(
+    port,
+    "GET /health HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n",
+  );
+  return (
+    response.statusLine.includes(" 200 ") && response.body === '{"ok":true,"version":"0.0.11"}'
+  );
 }
 
 export async function run(upstream: FakeUpstream): Promise<ProcessScenarioResult> {

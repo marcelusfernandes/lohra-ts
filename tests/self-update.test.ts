@@ -62,9 +62,10 @@ describe("self-update state machine", () => {
   });
 
   it("refuses dirty, detached and no-upstream states before pull", () => {
-    expect(
-      performUpdate("/repo", runner({ "git status": [0, " M src/x.ts"] })),
-    ).toMatchObject({ status: "dirty", ok: false });
+    expect(performUpdate("/repo", runner({ "git status": [0, " M src/x.ts"] }))).toMatchObject({
+      status: "dirty",
+      ok: false,
+    });
     expect(
       performUpdate(
         "/repo",
@@ -91,12 +92,12 @@ describe("self-update state machine", () => {
       "git rev-parse HEAD": [0, "old"] as const,
       "git pull --ff-only": [1, "", "cannot fast-forward"] as const,
     };
-    expect(
-      performUpdate("/repo", runner({ ...base, "git merge-base": [1] })),
-    ).toMatchObject({ status: "diverged" });
-    expect(
-      performUpdate("/repo", runner({ ...base, "git merge-base": [0] })),
-    ).toMatchObject({ status: "error" });
+    expect(performUpdate("/repo", runner({ ...base, "git merge-base": [1] }))).toMatchObject({
+      status: "diverged",
+    });
+    expect(performUpdate("/repo", runner({ ...base, "git merge-base": [0] }))).toMatchObject({
+      status: "error",
+    });
   });
 
   it("reports changed files and requests npm reinstall for dependency manifests", () => {
@@ -147,13 +148,15 @@ describe("update command", () => {
       if (executable === "npm") return { code: 0, stdout: "ok", stderr: "" };
       if (key === "status --porcelain") return { code: 0, stdout: "", stderr: "" };
       if (key.startsWith("symbolic-ref")) return { code: 0, stdout: "main", stderr: "" };
-      if (key.startsWith("rev-parse --abbrev-ref")) return { code: 0, stdout: "origin/main", stderr: "" };
+      if (key.startsWith("rev-parse --abbrev-ref"))
+        return { code: 0, stdout: "origin/main", stderr: "" };
       if (key === "rev-parse HEAD") {
         shaCall += 1;
         return { code: 0, stdout: shaCall === 1 ? "old" : "new", stderr: "" };
       }
       if (key === "pull --ff-only") return { code: 0, stdout: "ok", stderr: "" };
-      if (key.startsWith("diff --name-only")) return { code: 0, stdout: "package.json", stderr: "" };
+      if (key.startsWith("diff --name-only"))
+        return { code: 0, stdout: "package.json", stderr: "" };
       throw new Error(`unexpected ${key}`);
     };
     expect(

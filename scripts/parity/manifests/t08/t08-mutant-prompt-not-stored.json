@@ -40,10 +40,7 @@
     "oracle": {
       "adapter": "python",
       "executable": "oracle-python",
-      "prefixArgs": [
-        "{{projectRoot}}/scripts/parity/conversation/oracle_driver.py",
-        "single"
-      ],
+      "prefixArgs": ["{{projectRoot}}/scripts/parity/conversation/oracle_driver.py", "single"],
       "cwd": "profile"
     },
     "candidate": {
@@ -82,15 +79,11 @@
         "tables": [
           {
             "name": "sessions",
-            "orderBy": [
-              "id"
-            ]
+            "orderBy": ["id"]
           },
           {
             "name": "messages",
-            "orderBy": [
-              "id"
-            ]
+            "orderBy": ["id"]
           }
         ]
       }
@@ -181,9 +174,7 @@
         "records": {
           "gets": 0,
           "posts": 1,
-          "sequence": [
-            "POST /v1/chat/completions"
-          ]
+          "sequence": ["POST /v1/chat/completions"]
         }
       }
     },

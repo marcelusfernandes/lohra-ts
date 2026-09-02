@@ -61,11 +61,7 @@ export function resolveFanout(
   if (maxIterationsFlag !== undefined) {
     parentMaxIterations = maxIterationsFlag;
   } else {
-    const result = positiveIntEnv(
-      "LOHRA_MAX_ITERATIONS",
-      environment.LOHRA_MAX_ITERATIONS,
-      90,
-    );
+    const result = positiveIntEnv("LOHRA_MAX_ITERATIONS", environment.LOHRA_MAX_ITERATIONS, 90);
     parentMaxIterations = result.value;
     if (result.warning !== null) warnings.push(result.warning);
   }

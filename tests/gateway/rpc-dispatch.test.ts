@@ -13,7 +13,10 @@ import {
 
 const roots: string[] = [];
 
-function setup(): { readonly registry: GatewaySessionRegistry; readonly sessions: SessionRepository } {
+function setup(): {
+  readonly registry: GatewaySessionRegistry;
+  readonly sessions: SessionRepository;
+} {
   const root = mkdtempSync(join(tmpdir(), "lohra-gateway-dispatch-"));
   roots.push(root);
   const connection = openStateDatabase(join(root, "state.db"));
@@ -40,8 +43,18 @@ describe("dispatchSyncRpc: session.create", () => {
 
   it("re-emits session.info on idempotent re-creation", () => {
     const { registry } = setup();
-    const first = dispatchSyncRpc(registry, "session.create", { session_id: "s1" }, SESSION_DEFAULTS);
-    const second = dispatchSyncRpc(registry, "session.create", { session_id: "s1" }, SESSION_DEFAULTS);
+    const first = dispatchSyncRpc(
+      registry,
+      "session.create",
+      { session_id: "s1" },
+      SESSION_DEFAULTS,
+    );
+    const second = dispatchSyncRpc(
+      registry,
+      "session.create",
+      { session_id: "s1" },
+      SESSION_DEFAULTS,
+    );
     if (first.kind !== "result" || second.kind !== "result") throw new Error("expected result");
     expect(first.emitSessionInfoFor).toBe("s1");
     expect(second.emitSessionInfoFor).toBe("s1");

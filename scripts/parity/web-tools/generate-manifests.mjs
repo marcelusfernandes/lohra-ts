@@ -59,10 +59,25 @@ function expectationRows(oracleStdout, candidateStdout, divergent) {
     { side: "both", field: "process.signal", value: null },
   ];
   if (divergent) {
-    expectations.push({ side: "oracle", field: "process.stdout", encoding: "utf8", value: oracleStdout });
-    expectations.push({ side: "candidate", field: "process.stdout", encoding: "utf8", value: candidateStdout });
+    expectations.push({
+      side: "oracle",
+      field: "process.stdout",
+      encoding: "utf8",
+      value: oracleStdout,
+    });
+    expectations.push({
+      side: "candidate",
+      field: "process.stdout",
+      encoding: "utf8",
+      value: candidateStdout,
+    });
   } else {
-    expectations.push({ side: "both", field: "process.stdout", encoding: "utf8", value: oracleStdout });
+    expectations.push({
+      side: "both",
+      field: "process.stdout",
+      encoding: "utf8",
+      value: oracleStdout,
+    });
   }
   return expectations;
 }

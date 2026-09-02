@@ -318,27 +318,114 @@
     },
     "laneSteps": {
       "parent": [
-        { "kind": "tool_calls", "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"\"}" }] },
-        { "kind": "tool_calls", "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"   \"}" }] },
+        {
+          "kind": "tool_calls",
+          "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"\"}" }]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"   \"}" }]
+        },
         { "kind": "tool_calls", "calls": [{ "name": "spawn_session", "argumentsRaw": "{}" }] },
-        { "kind": "tool_calls", "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":5}" }] },
-        { "kind": "tool_calls", "calls": [{ "name": "steer_session", "argumentsRaw": "{\"sub_id\":\"deadbeef\",\"text\":\"hi\"}" }] },
-        { "kind": "tool_calls", "calls": [{ "name": "steer_session", "argumentsRaw": "{\"sub_id\":\"deadbeef\"}" }] },
-        { "kind": "tool_calls", "calls": [{ "name": "steer_session", "argumentsRaw": "{\"sub_id\":\"deadbeef\",\"text\":\"  \"}" }] },
-        { "kind": "tool_calls", "calls": [{ "name": "collect_session", "argumentsRaw": "{\"sub_id\":\"deadbeef\"}" }] },
+        {
+          "kind": "tool_calls",
+          "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":5}" }]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            { "name": "steer_session", "argumentsRaw": "{\"sub_id\":\"deadbeef\",\"text\":\"hi\"}" }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [{ "name": "steer_session", "argumentsRaw": "{\"sub_id\":\"deadbeef\"}" }]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            { "name": "steer_session", "argumentsRaw": "{\"sub_id\":\"deadbeef\",\"text\":\"  \"}" }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [{ "name": "collect_session", "argumentsRaw": "{\"sub_id\":\"deadbeef\"}" }]
+        },
         { "kind": "tool_calls", "calls": [{ "name": "collect_session", "argumentsRaw": "{}" }] },
-        { "kind": "tool_calls", "calls": [{ "name": "collect_session", "argumentsRaw": "{\"sub_id\":7}" }] },
-        { "kind": "tool_calls", "calls": [{ "name": "delegate_task", "argumentsRaw": "{\"tasks\":[]}" }] },
-        { "kind": "tool_calls", "calls": [{ "name": "delegate_task", "argumentsRaw": "{\"tasks\":\"not a list\"}" }] },
-        { "kind": "tool_calls", "calls": [{ "name": "delegate_task", "argumentsRaw": "{\"tasks\":[\"ok\",\"  \"]}" }] },
+        {
+          "kind": "tool_calls",
+          "calls": [{ "name": "collect_session", "argumentsRaw": "{\"sub_id\":7}" }]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [{ "name": "delegate_task", "argumentsRaw": "{\"tasks\":[]}" }]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [{ "name": "delegate_task", "argumentsRaw": "{\"tasks\":\"not a list\"}" }]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [{ "name": "delegate_task", "argumentsRaw": "{\"tasks\":[\"ok\",\"  \"]}" }]
+        },
         { "kind": "tool_calls", "calls": [{ "name": "delegate_task", "argumentsRaw": "{}" }] },
-        { "kind": "tool_calls", "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"x\",\"max_iterations\":0}" }] },
-        { "kind": "tool_calls", "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"x\",\"max_iterations\":129}" }] },
-        { "kind": "tool_calls", "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"x\",\"max_iterations\":null}" }] },
-        { "kind": "tool_calls", "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"x\",\"max_iterations\":true}" }] },
-        { "kind": "tool_calls", "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"x\",\"max_iterations\":\"8\"}" }] },
-        { "kind": "tool_calls", "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"x\",\"provider\":\"nope-xyz\"}" }] },
-        { "kind": "tool_calls", "calls": [{ "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"x\",\"provider\":\"openai\"}" }] },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            { "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"x\",\"max_iterations\":0}" }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            { "name": "spawn_session", "argumentsRaw": "{\"prompt\":\"x\",\"max_iterations\":129}" }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"x\",\"max_iterations\":null}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"x\",\"max_iterations\":true}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"x\",\"max_iterations\":\"8\"}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"x\",\"provider\":\"nope-xyz\"}"
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "name": "spawn_session",
+              "argumentsRaw": "{\"prompt\":\"x\",\"provider\":\"openai\"}"
+            }
+          ]
+        },
         { "kind": "text", "content": "PARENT-DONE" }
       ],
       "default": [

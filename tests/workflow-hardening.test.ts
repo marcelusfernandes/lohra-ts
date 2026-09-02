@@ -117,7 +117,9 @@ describe("workflow authored boundaries", () => {
     ]);
     const workflow = parsed({
       meta: { name: "pipeline-retries" },
-      nodes: [{ id: "p", type: "pipeline", items: ["x"], stages: [{ prompt: "${item}", retries: 4 }] }],
+      nodes: [
+        { id: "p", type: "pipeline", items: ["x"], stages: [{ prompt: "${item}", retries: 4 }] },
+      ],
     });
     const result = await new WorkflowEngine({ runtime }).run(workflow);
     expect(runtime.requests).toHaveLength(4);
@@ -161,7 +163,11 @@ describe("workflow authored boundaries", () => {
   });
 
   it("normalizes NaN structural limits to one", () => {
-    const budget = new Budget({ poolWidth: Number.NaN, maxFanout: Number.NaN, lifetime: Number.NaN });
+    const budget = new Budget({
+      poolWidth: Number.NaN,
+      maxFanout: Number.NaN,
+      lifetime: Number.NaN,
+    });
     expect(budget.poolWidth).toBe(1);
     expect(budget.maxFanout).toBe(1);
     expect(budget.lifetimeRemaining).toBe(1);
@@ -174,7 +180,10 @@ describe("workflow authored boundaries", () => {
 describe("workflow Draft 2020-12 output validation", () => {
   const rejected: readonly [unknown, Readonly<Record<string, unknown>>][] = [
     [1, { type: "number", minimum: 10 }],
-    [{ known: true, extra: true }, { type: "object", properties: { known: { type: "boolean" } }, additionalProperties: false }],
+    [
+      { known: true, extra: true },
+      { type: "object", properties: { known: { type: "boolean" } }, additionalProperties: false },
+    ],
     [JSON.stringify("abc"), { type: "string", pattern: "^z+$" }],
     [[1], { type: "array", minItems: 2 }],
     [3, { oneOf: [{ type: "string" }, { type: "number", minimum: 5 }] }],
@@ -230,7 +239,13 @@ describe("workflow Draft 2020-12 output validation", () => {
     }
   });
 
-  for (const [value, accepted] of [[0.2, true], [0.3, false], [0.6, false], [0.7, false], [1.5, true]] as const) {
+  for (const [value, accepted] of [
+    [0.2, true],
+    [0.3, false],
+    [0.6, false],
+    [0.7, false],
+    [1.5, true],
+  ] as const) {
     it(`matches pinned multipleOf arithmetic for ${String(value)}`, () => {
       expect(parseAndValidate(value, { type: "number", multipleOf: 0.1 }).ok).toBe(accepted);
     });
@@ -249,7 +264,9 @@ describe("workflow validation and lifecycle", () => {
     const result = await new WorkflowEngine({ runtime }).run(
       parsed({
         meta: { name: "steer" },
-        nodes: [{ id: "a", type: "agent", prompt: "x", schema: { type: "object", required: ["value"] } }],
+        nodes: [
+          { id: "a", type: "agent", prompt: "x", schema: { type: "object", required: ["value"] } },
+        ],
       }),
     );
     expect(runtime.steers).toHaveLength(2);
@@ -259,10 +276,7 @@ describe("workflow validation and lifecycle", () => {
   });
 
   it("uses the leaf timeout default, accepts an override and cancels expiry", async () => {
-    const runtime = new ScriptRuntime([
-      [{ status: "running", output: null }],
-      [complete("ok")],
-    ]);
+    const runtime = new ScriptRuntime([[{ status: "running", output: null }], [complete("ok")]]);
     const workflow = parsed({
       meta: { name: "timeouts" },
       nodes: [
@@ -302,7 +316,10 @@ describe("workflow cache manifests", () => {
   it("refuses output and cost atomically and retries a partial fanout", async () => {
     const refusing = new MemoryWorkflowCache({ refuseWrite: () => true });
     const scalar = new ScriptRuntime([[complete("one")], [complete("two")]]);
-    const one = parsed({ meta: { name: "refusal" }, nodes: [{ id: "a", type: "agent", prompt: "x" }] });
+    const one = parsed({
+      meta: { name: "refusal" },
+      nodes: [{ id: "a", type: "agent", prompt: "x" }],
+    });
     await new WorkflowEngine({ runtime: scalar, cache: refusing, runId: "same" }).run(one);
     await new WorkflowEngine({ runtime: scalar, cache: refusing, runId: "same" }).run(one);
     expect(scalar.requests).toHaveLength(2);
@@ -315,7 +332,10 @@ describe("workflow cache manifests", () => {
       [complete("a2")],
       [complete("b2")],
     ]);
-    const parallel = parsed({ meta: { name: "partial" }, nodes: [{ id: "p", type: "parallel", branches: ["a", "b"] }] });
+    const parallel = parsed({
+      meta: { name: "partial" },
+      nodes: [{ id: "p", type: "parallel", branches: ["a", "b"] }],
+    });
     await new WorkflowEngine({ runtime: fanout, cache, runId: "same" }).run(parallel);
     await new WorkflowEngine({ runtime: fanout, cache, runId: "same" }).run(parallel);
     expect(fanout.requests).toHaveLength(4);
@@ -340,9 +360,15 @@ describe("workflow cache manifests", () => {
       runtime,
       cache,
       runId: "same",
-      loader: () => ({ meta: { name: "child", version: 2 }, nodes: [{ id: "leaf", type: "agent", prompt: "x" }] }),
+      loader: () => ({
+        meta: { name: "child", version: 2 },
+        nodes: [{ id: "leaf", type: "agent", prompt: "x" }],
+      }),
     });
-    const outer = parsed({ meta: { name: "outer" }, nodes: [{ id: "sub", type: "workflow", ref: "child" }] });
+    const outer = parsed({
+      meta: { name: "outer" },
+      nodes: [{ id: "sub", type: "workflow", ref: "child" }],
+    });
     await engine.run(outer);
     await engine.run(outer);
     expect(runtime.requests).toHaveLength(1);

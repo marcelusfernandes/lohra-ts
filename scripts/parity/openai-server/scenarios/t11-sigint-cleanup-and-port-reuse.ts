@@ -11,16 +11,25 @@ import { sendRaw, type ServerHandle } from "../harness.js";
 function canBindImmediately(port: number): Promise<boolean> {
   return new Promise((resolveBind) => {
     const probe = net.createServer();
-    probe.once("error", () => { resolveBind(false); });
+    probe.once("error", () => {
+      resolveBind(false);
+    });
     probe.listen(port, "127.0.0.1", () => {
-      probe.close(() => { resolveBind(true); });
+      probe.close(() => {
+        resolveBind(true);
+      });
     });
   });
 }
 
 async function healthOk(port: number): Promise<boolean> {
-  const response = await sendRaw(port, "GET /health HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n");
-  return response.statusLine.includes(" 200 ") && response.body === '{"ok":true,"version":"0.0.11"}';
+  const response = await sendRaw(
+    port,
+    "GET /health HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n",
+  );
+  return (
+    response.statusLine.includes(" 200 ") && response.body === '{"ok":true,"version":"0.0.11"}'
+  );
 }
 
 export async function run(
@@ -37,7 +46,10 @@ export async function run(
   const oracleUpBefore = await healthOk(oracle.port);
   const candidateUpBefore = await healthOk(candidate.port);
 
-  const [oracleStop, candidateStop] = await Promise.all([oracle.stop("SIGINT"), candidate.stop("SIGINT")]);
+  const [oracleStop, candidateStop] = await Promise.all([
+    oracle.stop("SIGINT"),
+    candidate.stop("SIGINT"),
+  ]);
 
   // Immediately, before any temp-dir cleanup — proves the OS-level bind is
   // free the instant the process exits, not just eventually.

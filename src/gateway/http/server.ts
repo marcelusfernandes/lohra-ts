@@ -12,9 +12,7 @@ export interface IncomingHttpRequest {
   readonly body: Buffer;
 }
 
-export type RequestHandler = (
-  request: IncomingHttpRequest,
-) => Promise<OutgoingHttpResponse>;
+export type RequestHandler = (request: IncomingHttpRequest) => Promise<OutgoingHttpResponse>;
 
 // Invoked for a GET request carrying `Connection: Upgrade` / `Upgrade:
 // websocket`. Receives the still-open raw socket plus any bytes already
@@ -76,7 +74,8 @@ class ConnectionState {
       if (this.buffer.length < bodyStart + length) return; // wait for more bytes
       const body = this.buffer.subarray(bodyStart, bodyStart + length);
       this.buffer = this.buffer.subarray(bodyStart + length);
-      const keepAlive = (firstHeaderValue(head.headers, "Connection") ?? "").toLowerCase() !== "close";
+      const keepAlive =
+        (firstHeaderValue(head.headers, "Connection") ?? "").toLowerCase() !== "close";
       this.dispatch({ head, body: Buffer.from(body) }, keepAlive);
     }
   }

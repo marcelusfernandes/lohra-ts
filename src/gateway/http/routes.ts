@@ -195,7 +195,11 @@ function docRoute(path: string): OutgoingHttpResponse {
 }
 
 function stripBodyForHead(response: OutgoingHttpResponse): OutgoingHttpResponse {
-  return { ...response, headers: { ...response.headers, "content-length": "0" }, body: Buffer.alloc(0) };
+  return {
+    ...response,
+    headers: { ...response.headers, "content-length": "0" },
+    body: Buffer.alloc(0),
+  };
 }
 
 export function routeGatewayRequest(

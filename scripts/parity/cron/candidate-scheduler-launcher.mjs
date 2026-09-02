@@ -49,7 +49,8 @@ function postToUpstream(job) {
       (response) => {
         response.on("data", () => undefined);
         response.on("end", () => {
-          if ((response.statusCode ?? 500) >= 400) reject(new Error(`upstream status ${String(response.statusCode)}`));
+          if ((response.statusCode ?? 500) >= 400)
+            reject(new Error(`upstream status ${String(response.statusCode)}`));
           else resolveRequest();
         });
       },

@@ -77,7 +77,9 @@ export async function handleChatCompletions(
   if (parsed.stream) {
     startSse(res);
     res.write(
-      sseEvent(buildChunk({ completionId, model: parsed.model, delta: { role: "assistant" }, created })),
+      sseEvent(
+        buildChunk({ completionId, model: parsed.model, delta: { role: "assistant" }, created }),
+      ),
     );
     try {
       const result = await deps.service.run({
@@ -89,7 +91,9 @@ export async function handleChatCompletions(
         maxTokens: parsed.maxTokens,
         onDelta: (delta) => {
           res.write(
-            sseEvent(buildChunk({ completionId, model: parsed.model, delta: { content: delta }, created })),
+            sseEvent(
+              buildChunk({ completionId, model: parsed.model, delta: { content: delta }, created }),
+            ),
           );
         },
       });
@@ -105,7 +109,11 @@ export async function handleChatCompletions(
         ),
       );
       if (includeUsage) {
-        res.write(sseEvent(buildUsageChunk({ completionId, model: parsed.model, created, usage: result.usage })));
+        res.write(
+          sseEvent(
+            buildUsageChunk({ completionId, model: parsed.model, created, usage: result.usage }),
+          ),
+        );
       }
     } catch (error) {
       if (!(error instanceof UpstreamError)) throw error;

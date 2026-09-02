@@ -3,14 +3,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
 
-import {
-  ChatCompletionsModel,
-  ConversationRuntime,
-} from "../../../dist/conversation/index.js";
-import {
-  ChatCompletionsClient,
-  ChatCompletionsTransport,
-} from "../../../dist/transports/index.js";
+import { ChatCompletionsModel, ConversationRuntime } from "../../../dist/conversation/index.js";
+import { ChatCompletionsClient, ChatCompletionsTransport } from "../../../dist/transports/index.js";
 import { composeDispatch, RegistryToolDispatcher } from "../../../dist/tools/index.js";
 import { buildSystemPrompt } from "../../../dist/context/index.js";
 import { WorkflowService, workflowToolHandlers } from "../../../dist/workflow/index.js";
@@ -18,22 +12,41 @@ import { WorkflowService, workflowToolHandlers } from "../../../dist/workflow/in
 class Repository {
   sessions = new Map();
   messages = new Map();
-  createSession(input) { this.sessions.set(input.id, input); }
-  session(id) { return this.sessions.get(id) ?? null; }
-  loadMessages(id) { return this.messages.get(id) ?? []; }
-  commitTurn(commit) { this.messages.set(commit.sessionId, commit.messages ?? [commit.user, commit.assistant]); }
+  createSession(input) {
+    this.sessions.set(input.id, input);
+  }
+  session(id) {
+    return this.sessions.get(id) ?? null;
+  }
+  loadMessages(id) {
+    return this.messages.get(id) ?? [];
+  }
+  commitTurn(commit) {
+    this.messages.set(commit.sessionId, commit.messages ?? [commit.user, commit.assistant]);
+  }
   commitUsage() {}
-  summary() { return null; }
+  summary() {
+    return null;
+  }
 }
 
 class ChildRuntime {
   requests = [];
-  spawn(request) { this.requests.push(request); return `leaf-${String(this.requests.length)}`; }
+  spawn(request) {
+    this.requests.push(request);
+    return `leaf-${String(this.requests.length)}`;
+  }
   collect() {
     return {
       status: "complete",
       output: "leaf-output",
-      usage: { inputTokens: 5, outputTokens: 3, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+      usage: {
+        inputTokens: 5,
+        outputTokens: 3,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningTokens: 0,
+      },
       provider: "stub",
       model: "canned",
     };
@@ -112,18 +125,27 @@ const projection = {
       accepted: started.status === "started" || started.status === "running",
     },
   },
-    run: {
-      run_id: "<RUN_ID>",
-      status: status.status,
+  run: {
+    run_id: "<RUN_ID>",
+    status: status.status,
     outputs: status.outputs,
     faults: status.faults,
     null_count: status.null_count,
     engine_faults: status.engine_faults,
     cap_trips: status.cap_trips,
     validation_retries: status.validation_retries,
-    tokens: [status.tokens_in, status.tokens_out, status.cache_read_tokens, status.cache_write_tokens, status.reasoning_tokens],
+    tokens: [
+      status.tokens_in,
+      status.tokens_out,
+      status.cache_read_tokens,
+      status.cache_write_tokens,
+      status.reasoning_tokens,
+    ],
   },
-  leafRequests: child.requests.map((request) => ({ prompt: request.prompt, role: request.causalContext.role })),
+  leafRequests: child.requests.map((request) => ({
+    prompt: request.prompt,
+    role: request.causalContext.role,
+  })),
   requests,
 };
 await client.close();

@@ -30,9 +30,18 @@ export interface ToolCallScript {
 // already proved work, just now driven end to end over a real socket
 // against the real oracle too.
 export const TOOL_CALL_TRIGGERS: Readonly<Record<string, ToolCallScript>> = {
-  T12_TRIGGER_READ_FILE_NONASCII: { toolName: "read_file", toolArguments: { path: "/não-existe-ção" } },
-  T12_TRIGGER_TERMINAL_SAFE: { toolName: "terminal", toolArguments: { command: "echo T12_TERMINAL_CANARY" } },
-  T12_TRIGGER_TERMINAL_DANGER: { toolName: "terminal", toolArguments: { command: "rm -rf /tmp/whatever" } },
+  T12_TRIGGER_READ_FILE_NONASCII: {
+    toolName: "read_file",
+    toolArguments: { path: "/não-existe-ção" },
+  },
+  T12_TRIGGER_TERMINAL_SAFE: {
+    toolName: "terminal",
+    toolArguments: { command: "echo T12_TERMINAL_CANARY" },
+  },
+  T12_TRIGGER_TERMINAL_DANGER: {
+    toolName: "terminal",
+    toolArguments: { command: "rm -rf /tmp/whatever" },
+  },
   T12_TRIGGER_MEMORY_LIST: { toolName: "memory", toolArguments: { action: "list" } },
 };
 
@@ -74,43 +83,95 @@ export async function startFakeUpstream(): Promise<FakeUpstream> {
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
       void (async (): Promise<void> => {
-      const raw = Buffer.concat(chunks).toString("utf8");
-      let parsedBody: unknown;
-      try {
-        parsedBody = raw.length > 0 ? JSON.parse(raw) : null;
-      } catch {
-        parsedBody = raw;
-      }
-      requests.push({ path: request.url ?? "", body: parsedBody });
+        const raw = Buffer.concat(chunks).toString("utf8");
+        let parsedBody: unknown;
+        try {
+          parsedBody = raw.length > 0 ? JSON.parse(raw) : null;
+        } catch {
+          parsedBody = raw;
+        }
+        requests.push({ path: request.url ?? "", body: parsedBody });
 
-      if (raw.includes(UPSTREAM_FAILURE_NONCE)) {
-        const failureBody = JSON.stringify({
-          error: { message: `${UPSTREAM_FAILURE_NONCE} upstream refused`, type: "teapot_error" },
-        });
-        response.writeHead(418, {
-          "content-type": "application/json",
-          "content-length": String(Buffer.byteLength(failureBody)),
-        });
-        response.end(failureBody);
-        return;
-      }
+        if (raw.includes(UPSTREAM_FAILURE_NONCE)) {
+          const failureBody = JSON.stringify({
+            error: { message: `${UPSTREAM_FAILURE_NONCE} upstream refused`, type: "teapot_error" },
+          });
+          response.writeHead(418, {
+            "content-type": "application/json",
+            "content-length": String(Buffer.byteLength(failureBody)),
+          });
+          response.end(failureBody);
+          return;
+        }
 
-      const wantsStream =
-        typeof parsedBody === "object" &&
-        parsedBody !== null &&
-        (parsedBody as { stream?: unknown }).stream === true;
-      const id = `chatcmpl-${randomUUID().replaceAll("-", "")}`;
-      const created = Math.floor(Date.now() / 1000);
+        const wantsStream =
+          typeof parsedBody === "object" &&
+          parsedBody !== null &&
+          (parsedBody as { stream?: unknown }).stream === true;
+        const id = `chatcmpl-${randomUUID().replaceAll("-", "")}`;
+        const created = Math.floor(Date.now() / 1000);
 
-      const toolScript = matchedToolTrigger(raw);
-      const isToolFollowUp = lastMessageRole(parsedBody) === "tool";
-      if (toolScript !== null && !isToolFollowUp) {
-        const toolCall = {
-          id: "call_1",
-          type: "function",
-          function: { name: toolScript.toolName, arguments: JSON.stringify(toolScript.toolArguments) },
-        };
+        const toolScript = matchedToolTrigger(raw);
+        const isToolFollowUp = lastMessageRole(parsedBody) === "tool";
+        if (toolScript !== null && !isToolFollowUp) {
+          const toolCall = {
+            id: "call_1",
+            type: "function",
+            function: {
+              name: toolScript.toolName,
+              arguments: JSON.stringify(toolScript.toolArguments),
+            },
+          };
+          if (wantsStream) {
+            response.writeHead(200, {
+              "content-type": "text/event-stream",
+              "cache-control": "no-cache",
+              connection: "keep-alive",
+            });
+            const chunkOf = (delta: Record<string, unknown>, finishReason: string | null): string =>
+              `data: ${JSON.stringify({
+                id,
+                object: "chat.completion.chunk",
+                created,
+                model: "fake-model-a",
+                choices: [{ index: 0, delta, finish_reason: finishReason }],
+              })}\n\n`;
+            response.write(chunkOf({ role: "assistant" }, null));
+            response.write(chunkOf({ tool_calls: [{ index: 0, ...toolCall }] }, null));
+            response.write(chunkOf({}, "tool_calls"));
+            response.write("data: [DONE]\n\n");
+            response.end();
+            return;
+          }
+          const payload = {
+            id,
+            object: "chat.completion",
+            created,
+            model: "fake-model-a",
+            choices: [
+              {
+                index: 0,
+                message: { role: "assistant", content: null, tool_calls: [toolCall] },
+                finish_reason: "tool_calls",
+              },
+            ],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          };
+          const body = JSON.stringify(payload);
+          response.writeHead(200, {
+            "content-type": "application/json",
+            "content-length": String(Buffer.byteLength(body)),
+          });
+          response.end(body);
+          return;
+        }
+
         if (wantsStream) {
+          // Real chat_completions clients that request stream:true expect
+          // SSE chunks, not a single JSON blob -- both the oracle and this
+          // session's candidate stream by default when driving a real turn
+          // (dashboard.ts's per-turn transport factory), so this is not
+          // optional for any prompt.submit-dependent scenario.
           response.writeHead(200, {
             "content-type": "text/event-stream",
             "cache-control": "no-cache",
@@ -125,12 +186,20 @@ export async function startFakeUpstream(): Promise<FakeUpstream> {
               choices: [{ index: 0, delta, finish_reason: finishReason }],
             })}\n\n`;
           response.write(chunkOf({ role: "assistant" }, null));
-          response.write(chunkOf({ tool_calls: [{ index: 0, ...toolCall }] }, null));
-          response.write(chunkOf({}, "tool_calls"));
+          if (pendingHold !== null) {
+            const hold = pendingHold;
+            pendingHold = null;
+            await hold.promise;
+          }
+          for (const word of nextContent.length > 0 ? nextContent.split(" ") : []) {
+            response.write(chunkOf({ content: `${word} ` }, null));
+          }
+          response.write(chunkOf({}, "stop"));
           response.write("data: [DONE]\n\n");
           response.end();
           return;
         }
+
         const payload = {
           id,
           object: "chat.completion",
@@ -139,72 +208,18 @@ export async function startFakeUpstream(): Promise<FakeUpstream> {
           choices: [
             {
               index: 0,
-              message: { role: "assistant", content: null, tool_calls: [toolCall] },
-              finish_reason: "tool_calls",
+              message: { role: "assistant", content: nextContent },
+              finish_reason: "stop",
             },
           ],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
         };
         const body = JSON.stringify(payload);
-        response.writeHead(200, { "content-type": "application/json", "content-length": String(Buffer.byteLength(body)) });
-        response.end(body);
-        return;
-      }
-
-      if (wantsStream) {
-        // Real chat_completions clients that request stream:true expect
-        // SSE chunks, not a single JSON blob -- both the oracle and this
-        // session's candidate stream by default when driving a real turn
-        // (dashboard.ts's per-turn transport factory), so this is not
-        // optional for any prompt.submit-dependent scenario.
         response.writeHead(200, {
-          "content-type": "text/event-stream",
-          "cache-control": "no-cache",
-          connection: "keep-alive",
+          "content-type": "application/json",
+          "content-length": String(Buffer.byteLength(body)),
         });
-        const chunkOf = (delta: Record<string, unknown>, finishReason: string | null): string =>
-          `data: ${JSON.stringify({
-            id,
-            object: "chat.completion.chunk",
-            created,
-            model: "fake-model-a",
-            choices: [{ index: 0, delta, finish_reason: finishReason }],
-          })}\n\n`;
-        response.write(chunkOf({ role: "assistant" }, null));
-        if (pendingHold !== null) {
-          const hold = pendingHold;
-          pendingHold = null;
-          await hold.promise;
-        }
-        for (const word of nextContent.length > 0 ? nextContent.split(" ") : []) {
-          response.write(chunkOf({ content: `${word} ` }, null));
-        }
-        response.write(chunkOf({}, "stop"));
-        response.write("data: [DONE]\n\n");
-        response.end();
-        return;
-      }
-
-      const payload = {
-        id,
-        object: "chat.completion",
-        created,
-        model: "fake-model-a",
-        choices: [
-          {
-            index: 0,
-            message: { role: "assistant", content: nextContent },
-            finish_reason: "stop",
-          },
-        ],
-        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-      };
-      const body = JSON.stringify(payload);
-      response.writeHead(200, {
-        "content-type": "application/json",
-        "content-length": String(Buffer.byteLength(body)),
-      });
-      response.end(body);
+        response.end(body);
       })();
     });
   });

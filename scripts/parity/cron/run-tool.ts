@@ -5,13 +5,29 @@
 // `CronTool().handle()` call).
 import { createHash } from "node:crypto";
 
-import { cleanup, localDay, maskId, materialize, runOracleTool, runCandidateTool, runGuards, utcDay, writeEvidence } from "./harness.js";
+import {
+  cleanup,
+  localDay,
+  maskId,
+  materialize,
+  runOracleTool,
+  runCandidateTool,
+  runGuards,
+  utcDay,
+  writeEvidence,
+} from "./harness.js";
 
 let failures = 0;
 const projections: { readonly id: string; readonly sha: string; readonly verdict: string }[] = [];
 
 function record(id: string, verdict: string, ok: boolean, payload: unknown): void {
-  const sha = writeEvidence(id, { id, verdict, localDay: localDay(), utcDay: utcDay(), ...(payload as object) });
+  const sha = writeEvidence(id, {
+    id,
+    verdict,
+    localDay: localDay(),
+    utcDay: utcDay(),
+    ...(payload as object),
+  });
   projections.push({ id, sha, verdict });
   if (!ok) {
     failures += 1;
@@ -24,14 +40,15 @@ function scenario27ToolRoundtrip(): void {
   const oracle = materialize("oracle");
   const candidate = materialize("candidate");
   try {
-    const steps: { readonly op: string; readonly action: string; readonly needsJobId: boolean }[] = [
-      { op: "add", action: "add", needsJobId: false },
-      { op: "list-1", action: "list", needsJobId: false },
-      { op: "pause", action: "pause", needsJobId: true },
-      { op: "resume", action: "resume", needsJobId: true },
-      { op: "remove", action: "remove", needsJobId: true },
-      { op: "list-2", action: "list", needsJobId: false },
-    ];
+    const steps: { readonly op: string; readonly action: string; readonly needsJobId: boolean }[] =
+      [
+        { op: "add", action: "add", needsJobId: false },
+        { op: "list-1", action: "list", needsJobId: false },
+        { op: "pause", action: "pause", needsJobId: true },
+        { op: "resume", action: "resume", needsJobId: true },
+        { op: "remove", action: "remove", needsJobId: true },
+        { op: "list-2", action: "list", needsJobId: false },
+      ];
     const results: unknown[] = [];
     let ok = true;
     // Each side mints its own random job id on `add` -- they're never equal,
@@ -49,9 +66,16 @@ function scenario27ToolRoundtrip(): void {
       const candidateArgs = step.needsJobId ? { ...baseArgs, job_id: candidateJobId } : baseArgs;
       const oracleResult = runOracleTool(oracleArgs, oracle);
       const candidateResult = runCandidateTool(candidateArgs, candidate);
-      const match = maskId(oracleResult.stdout) === maskId(candidateResult.stdout) && oracleResult.code === candidateResult.code;
+      const match =
+        maskId(oracleResult.stdout) === maskId(candidateResult.stdout) &&
+        oracleResult.code === candidateResult.code;
       if (!match) ok = false;
-      results.push({ op: step.op, oracle: { args: oracleArgs, result: oracleResult }, candidate: { args: candidateArgs, result: candidateResult }, match });
+      results.push({
+        op: step.op,
+        oracle: { args: oracleArgs, result: oracleResult },
+        candidate: { args: candidateArgs, result: candidateResult },
+        match,
+      });
 
       if (step.op === "add") {
         oracleJobId = (JSON.parse(oracleResult.stdout) as { job_id?: string }).job_id;
@@ -62,12 +86,25 @@ function scenario27ToolRoundtrip(): void {
     // Error mapping (assertion 40): CronError -> tool_error(str(exc)), same
     // byte-exact class as decision 12's `add` validation goldens where
     // applicable (empty name).
-    const invalidAdd = { action: "add", name: "", prompt: "p1", schedule_type: "interval", value: 5 };
+    const invalidAdd = {
+      action: "add",
+      name: "",
+      prompt: "p1",
+      schedule_type: "interval",
+      value: 5,
+    };
     const oracleInvalid = runOracleTool(invalidAdd, oracle);
     const candidateInvalid = runCandidateTool(invalidAdd, candidate);
-    const invalidMatch = oracleInvalid.stdout === candidateInvalid.stdout && oracleInvalid.code === candidateInvalid.code;
+    const invalidMatch =
+      oracleInvalid.stdout === candidateInvalid.stdout &&
+      oracleInvalid.code === candidateInvalid.code;
     if (!invalidMatch) ok = false;
-    results.push({ op: "add-invalid-cronerror-mapping", oracle: oracleInvalid, candidate: candidateInvalid, match: invalidMatch });
+    results.push({
+      op: "add-invalid-cronerror-mapping",
+      oracle: oracleInvalid,
+      candidate: candidateInvalid,
+      match: invalidMatch,
+    });
 
     record("t18-cronjob-tool-roundtrip", ok ? "match" : "DIVERGENT", ok, { results });
   } finally {
@@ -96,9 +133,16 @@ function scenario28ToolErrorEnvelopes(): void {
     try {
       const oracleResult = runOracleTool(testCase.args, oracle);
       const candidateResult = runCandidateTool(testCase.args, candidate);
-      const match = oracleResult.stdout === candidateResult.stdout && oracleResult.code === candidateResult.code;
+      const match =
+        oracleResult.stdout === candidateResult.stdout &&
+        oracleResult.code === candidateResult.code;
       if (!match) ok = false;
-      results.push({ label: testCase.label, oracle: oracleResult, candidate: candidateResult, match });
+      results.push({
+        label: testCase.label,
+        oracle: oracleResult,
+        candidate: candidateResult,
+        match,
+      });
     } finally {
       cleanup(oracle);
       cleanup(candidate);
