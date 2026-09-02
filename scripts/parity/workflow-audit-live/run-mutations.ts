@@ -88,12 +88,13 @@ const mutants: readonly Mutant[] = [
     edits: [
       {
         file: repository,
-        before: "const transact = this.database.transaction((): PublicAuditEvent | null => {",
+        before:
+          "const transact = this.database\n      .transaction((): PublicAuditEvent | null => {",
         after: "const transact = ((): PublicAuditEvent | null => {",
       },
       {
         file: repository,
-        before: "    }).immediate();\n    if (transact === null",
+        before: "      })\n      .immediate();\n    if (transact === null",
         after: "    })();\n    if (transact === null",
       },
     ],
