@@ -12,6 +12,7 @@ import { runAuth } from "./commands/auth.js";
 import { runChat } from "./commands/chat.js";
 import { runServe } from "./commands/serve.js";
 import { runWorkflowCommand } from "./commands/workflow.js";
+import { runDashboard } from "./commands/dashboard.js";
 import { readCodexModel } from "./auth/codex.js";
 import { subscriptionActive } from "./auth/credentials.js";
 import type { OAuthPost } from "./auth/oauth.js";
@@ -231,6 +232,7 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     command !== "auth" &&
     command !== "chat" &&
     command !== "serve" &&
+    command !== "dashboard" &&
     command !== "init" &&
     command !== "profile" &&
     command !== "skill" &&
@@ -421,6 +423,16 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
       },
       environment,
       stdout: io.stdout,
+      stderr: io.stderr,
+    });
+  }
+  if (command === "dashboard") {
+    return runDashboard({
+      argv,
+      environment,
+      home: paths.home,
+      codexHome,
+      cwd: io.cwd ?? process.cwd(),
       stderr: io.stderr,
     });
   }

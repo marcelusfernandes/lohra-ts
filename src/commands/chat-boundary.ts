@@ -1,7 +1,11 @@
 import { resolveAuthRoute, resolveCredentials } from "../auth/credentials.js";
 import { pythonJsonDumpsInsertionOrder } from "../serialization/python-json.js";
 
-const noProvider =
+// Exported for reuse by the dashboard command (T12), which measured the
+// identical "no provider configured" text on the wire (T12 baseline
+// evidence-s08-modes.json.no_provider) -- not a coincidence, both commands
+// share this boundary.
+export const noProvider =
   "no provider configured — there are three ways in:\n\n" +
   "  1. API key (paid, any provider)\n" +
   "       export ANTHROPIC_API_KEY=sk-...      # or OPENAI_API_KEY, OPENROUTER_API_KEY,\n" +

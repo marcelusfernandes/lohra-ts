@@ -43,6 +43,8 @@
     "parity:t11:gates": "tsx scripts/parity/openai-server/run-gates.ts",
     "parity:t11:pack-smoke": "node scripts/parity/openai-server/pack-smoke.mjs",
     "parity:t11:live-smoke": "node scripts/parity/openai-server/live-smoke.mjs",
+    "parity:t12": "tsx scripts/parity/gateway/run-scenarios.ts",
+    "parity:t12:joint": "tsx scripts/parity/gateway/run-joint-gate.ts",
     "probe:t09": "node scripts/parity/tools/ts-only-probes.mjs",
     "smoke:t09:live": "node scripts/parity/tools/live-smoke.mjs",
     "probe:workflow-spec-ts-only": "node scripts/parity/workflow-spec/ts-only-probes.mjs",
@@ -63,12 +65,14 @@
     "pack:check": "tsx scripts/pack-check.ts"
   },
   "dependencies": {
-    "better-sqlite3": "^13.0.3"
+    "better-sqlite3": "^13.0.3",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.4.0",
+    "@types/ws": "^8.18.1",
     "eslint": "^10.9.1",
     "prettier": "^3.9.6",
     "tsx": "^4.23.12",

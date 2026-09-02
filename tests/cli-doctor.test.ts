@@ -154,7 +154,7 @@ describe("lohra CLI bootstrap", () => {
     }
   });
 
-  it.each(["dashboard", "cron", "update"])(
+  it.each(["cron", "update"])(
     "temporarily refuses future command %s with exit 2",
     async (command) => {
       const stderr: string[] = [];
@@ -179,5 +179,17 @@ describe("lohra CLI bootstrap", () => {
       }),
     ).toBe(2);
     expect(stderr.join("")).toContain("the following arguments are required: workflow_cmd");
+  });
+
+  it("dashboard is wired (T12) -- exits 2 with the same no-provider boundary as chat when unconfigured, not the stub message", async () => {
+    const stderr: string[] = [];
+    const code = await runCli(["dashboard"], {
+      environment: environment(),
+      stdout: () => undefined,
+      stderr: (value) => stderr.push(value),
+    });
+    expect(code).toBe(2);
+    expect(stderr.join("")).toContain("no provider configured — there are three ways in:");
+    expect(stderr.join("")).not.toContain("not implemented in the TypeScript bootstrap");
   });
 });
