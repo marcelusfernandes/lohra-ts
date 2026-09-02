@@ -243,6 +243,8 @@ export interface WorkflowServiceError {
   /** Nominal cause, when the refusal has one (see leafSandboxUnavailable). */
   readonly cause?: string;
   readonly run_id?: string;
+  /** The fence this acquisition held, when the refusal is an ownership loss. */
+  readonly fence?: number;
 }
 
 export interface OwnershipLost {
@@ -825,7 +827,15 @@ export class WorkflowService {
     const priorFaults = carriedFaults;
     const priorDegraded = priorView?.prior_degraded === true;
     this.runs.set(runId, record);
-    this.persistLine(store, runId, {
+    // The launch line and the ledger seed are this stretch's FIRST owned
+    // writes, and their answer is authoritative: if the guard refused them,
+    // ownership changed hands while we were getting here — the installer can
+    // block the event loop past the TTL, and a new owner can take the run in
+    // that window. A refusal at this point is the proof, and it has to end the
+    // stretch BEFORE anything runs. Ignoring it let a leaf spawn and produce
+    // external effects under a fence somebody else had already replaced, with
+    // the loss only surfacing at the terminal write.
+    const registered = this.persistLine(store, runId, {
       name: parsed.name,
       owner: store.holder,
       status: "running",
@@ -845,7 +855,30 @@ export class WorkflowService {
     // The launch line presents the token of THIS acquisition for its writes:
     // keep a per-run ownership view pinned to the acquired fence so every
     // write of the stretch presents the same honest token.
-    this.persistSpend(store, runId, effectiveBudget, seeded, engine, stretchOwnership());
+    const seedWritten = this.persistSpend(
+      store,
+      runId,
+      effectiveBudget,
+      seeded,
+      engine,
+      stretchOwnership(),
+    );
+    if (!registered || !seedWritten) {
+      // Hand back ONLY this acquisition's resources — the new owner's lease is
+      // conditioned out of the release by its own fence — and never run.
+      finishStretch();
+      this.runs.delete(runId);
+      const lost = ownershipLost(runId, fence);
+      record.settled = true;
+      record.published = lost as unknown as Readonly<Record<string, unknown>>;
+      record.resolve(record.published);
+      return Object.freeze({
+        error: lost.error,
+        cause: lost.cause,
+        run_id: lost.run_id,
+        fence: lost.fence,
+      });
+    }
     void engine
       .run(parsed, args)
       .then((result) => {
@@ -969,11 +1002,12 @@ export class WorkflowService {
     seeded: Readonly<{ tokensIn: number; tokensOut: number }>,
     engine: WorkflowEngine,
     ownership: Ownership | null,
-  ): void {
+  ): boolean {
+    void seeded;
     // Evicted from the bounded fence memory: no honest token to present, so
     // the ledger write is refused here rather than guessed into SQL.
-    if (ownership === null) return;
-    store.repository.putRunSpend(
+    if (ownership === null) return false;
+    return store.repository.putRunSpend(
       runId,
       budget,
       engine.budget.tokensIn,
@@ -983,7 +1017,6 @@ export class WorkflowService {
       0,
       ownership,
     );
-    void seeded;
   }
 
   /** One scratch directory per ACQUISITION, named by the fence, so a stale
