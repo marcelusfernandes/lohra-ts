@@ -190,7 +190,7 @@ async function probeRoundOneRegressions(
   const binaryReturned = repository.query({ runId: "binary-marker" }).events[0]?.data.result;
   if (
     JSON.stringify(binaryStored.data.result) !==
-      JSON.stringify({ state: "excluded_by_policy", bytes: 256 }) ||
+      JSON.stringify({ state: "excluded_by_policy", bytes: 1_000 }) ||
     JSON.stringify(binaryReturned) !== JSON.stringify(binaryStored.data.result)
   )
     throw new Error(
