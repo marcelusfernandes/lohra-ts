@@ -824,7 +824,7 @@ describe("T17 live events and sink failures", () => {
     );
     expect(await trail.flush()).toBe(true);
     expect(persisted.reduce((total, marker) => total + Number(marker.count), 0)).toBe(2_000);
-    expect(persisted).toContainEqual(
+    expect(persisted, "MUTATION_CAUSE:M29-drop-attribution-emission").toContainEqual(
       expect.objectContaining({
         runId: "$audit",
         reason: "drop_bucket_overflow",
