@@ -24,6 +24,8 @@ export interface GatewaySessionInfo {
   readonly version: string;
 }
 
+export type PromptSubmissionRejection = "unknown" | "subsession";
+
 // Wraps SessionRepository with the gateway-specific concepts the oracle's
 // GatewaySession/SessionManager own that have no equivalent in the shared
 // state layer: session.create idempotency (including resurrecting a
@@ -67,12 +69,19 @@ export class GatewaySessionRegistry {
   // row exists and is not a dead (compressed) parent -- lazily joining the
   // cache the first time it's found submittable, matching a real
   // SessionManager.get() cache-fill on first successful lookup.
-  public canSubmitPrompt(sessionId: string): boolean {
-    if (this.knownSessionIds.has(sessionId)) return true;
+  public promptSubmissionRejection(sessionId: string): PromptSubmissionRejection | null {
     const row = this.sessions.getSession(sessionId);
-    if (row === null || row.end_reason === "compression") return false;
+    if (row !== null && (row.source === "orchestration" || row.parent_session_id !== null)) {
+      return "subsession";
+    }
+    if (this.knownSessionIds.has(sessionId)) return null;
+    if (row === null || row.end_reason === "compression") return "unknown";
     this.knownSessionIds.add(sessionId);
-    return true;
+    return null;
+  }
+
+  public canSubmitPrompt(sessionId: string): boolean {
+    return this.promptSubmissionRejection(sessionId) === null;
   }
 
   public list(): readonly Readonly<Record<string, unknown>>[] {

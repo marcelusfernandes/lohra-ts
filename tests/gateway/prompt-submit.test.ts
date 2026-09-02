@@ -160,6 +160,50 @@ describe("prompt.submit: unknown/missing session_id (assertion 31)", () => {
     expect(response_.error).toEqual({ code: -32602, message: "unknown session_id" });
     ws.close();
   });
+
+  it("denies orchestration subsession promotion before a gateway turn is created", async () => {
+    const { server, home, sessions } = await startServer();
+    sessions.createSession({
+      id: "parent-session",
+      source: "gateway",
+      model: "gpt-5",
+      systemPrompt: "parent",
+      cwd: "/tmp",
+    });
+    sessions.createSession({
+      id: "observed-sub-id",
+      source: "orchestration",
+      model: "gpt-5",
+      systemPrompt: "restricted child",
+      parentSessionId: "parent-session",
+      cwd: "/tmp",
+    });
+    const before = sessions.listSessions();
+    const ws = new WebSocket(`ws://127.0.0.1:${String(server.port)}/api/ws?token=${TOKEN}`);
+    await nextMessage(ws);
+    ws.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: "promote",
+        method: "prompt.submit",
+        params: { session_id: "observed-sub-id", text: "promote me" },
+      }),
+    );
+
+    const response_ = JSON.parse(await nextMessage(ws)) as {
+      error: { code: number; message: string };
+    };
+    expect(response_.error).toEqual({
+      code: -32602,
+      message: "subsession cannot be promoted to a gateway session",
+    });
+    expect(sessions.listSessions()).toEqual(before);
+    expect(sessions.loadMessages("observed-sub-id")).toEqual([]);
+    expect(readFileSync(join(home, "logs", "gateway.log"), "utf8")).toContain(
+      '"cause":"SUBSESSION_PRIVILEGE_PROMOTION_DENIED"',
+    );
+    ws.close();
+  });
 });
 
 describe("prompt.submit: successful turn frame order and usage (assertions 33-35)", () => {

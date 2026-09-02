@@ -95,13 +95,36 @@ async function handlePromptSubmit(
   deps: GatewayWsDeps,
 ): Promise<void> {
   const sessionId = typeof params.session_id === "string" ? params.session_id : undefined;
-  const submittable = sessionId !== undefined && deps.registry.canSubmitPrompt(sessionId);
-  if (sessionId === undefined || !submittable) {
+  if (sessionId === undefined) {
     ws.send(
       encodeJsonRpcFrame({
         jsonrpc: "2.0",
         id: rpcId,
         error: { code: -32602, message: "unknown session_id" },
+      }),
+    );
+    return;
+  }
+  const rejection = deps.registry.promptSubmissionRejection(sessionId);
+  if (rejection !== null) {
+    if (rejection === "subsession") {
+      logGatewayFailure(deps.home, {
+        kind: "security",
+        cause: "SUBSESSION_PRIVILEGE_PROMOTION_DENIED",
+        sessionId,
+      });
+    }
+    ws.send(
+      encodeJsonRpcFrame({
+        jsonrpc: "2.0",
+        id: rpcId,
+        error: {
+          code: -32602,
+          message:
+            rejection === "subsession"
+              ? "subsession cannot be promoted to a gateway session"
+              : "unknown session_id",
+        },
       }),
     );
     return;
