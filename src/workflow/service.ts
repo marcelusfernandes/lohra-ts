@@ -26,6 +26,7 @@ import {
 } from "./sandbox.js";
 import type { LockRepository } from "../state/locks.js";
 import type { AuditTrail } from "./audit-trail.js";
+import { auditEnabled } from "./audit-model.js";
 import { WorkflowLiveEvents, type WorkflowLiveEvent } from "./live-events.js";
 
 export const RUN_LEASE_TTL = 900;
@@ -387,6 +388,7 @@ export class WorkflowService {
     readonly onEvent?: (event: WorkflowEvent) => void;
     readonly onLiveEvent?: (event: WorkflowLiveEvent) => void;
     readonly auditTrail?: AuditTrail;
+    readonly environment?: Readonly<Record<string, string | undefined>>;
     readonly store?: OwnershipStore;
     readonly cacheFactory?: (runId: string) => WorkflowCache;
     /** Production wiring: read the operator capability policy per launch. */
@@ -406,7 +408,6 @@ export class WorkflowService {
     this.loader = options.loader;
     this.idSource = options.idSource ?? (() => randomUUID().replaceAll("-", ""));
     this.onEvent = options.onEvent;
-    this.auditTrail = options.auditTrail;
     this.store = options.store;
     this.cacheFactory = options.cacheFactory;
     // Never optional: a run with no tracker could not notice a leaf tainting it.
@@ -418,6 +419,9 @@ export class WorkflowService {
       ((message) => {
         console.warn(message);
       });
+    this.auditTrail = auditEnabled(options.environment ?? process.env, this.warn)
+      ? options.auditTrail
+      : undefined;
     this.liveEvents = new WorkflowLiveEvents(
       options.onLiveEvent,
       () => Date.now() / 1_000,
@@ -480,8 +484,7 @@ export class WorkflowService {
               node_id: nodeId,
               ...(event.state === undefined ? {} : { state: event.state }),
             });
-    const delivered = this.liveEvents.emit(live);
-    if (!delivered) return;
+    this.liveEvents.emit(live);
     this.auditTrail?.record(
       runId,
       {

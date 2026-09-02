@@ -108,6 +108,14 @@ async function candidateProjection() {
         .all()
         .map((row) => String((row as Readonly<Record<string, unknown>>).payload_json));
       const unknownReadModel = audit.query({ runId: "unknown-run" });
+      const privacyMetadata = safeAuditMetadata(
+        Object.fromEntries(
+          ["prompt", "response", "reasoning", "content", "arguments", "result"].map((key) => [
+            key,
+            CANARY,
+          ]),
+        ),
+      );
       const trail = new AuditTrail(audit);
       const runtime: ChildRuntime = {
         spawn: () => "leaf",
@@ -137,17 +145,11 @@ async function candidateProjection() {
             retention_seconds: AUDIT_RETENTION_SECONDS,
           },
           privacy: {
-            canary_absent: !JSON.stringify(
-              safeAuditMetadata({
-                prompt: CANARY,
-                response: CANARY,
-                reasoning: CANARY,
-                content: CANARY,
-                arguments: CANARY,
-                result: CANARY,
-              }),
-            ).includes(CANARY),
-            states: Array(6).fill("excluded_by_policy"),
+            canary_absent: !JSON.stringify(privacyMetadata).includes(CANARY),
+            states: ["prompt", "response", "reasoning", "content", "arguments", "result"].map(
+              (key) =>
+                (privacyMetadata[key] as Readonly<Record<string, unknown>> | undefined)?.state,
+            ),
             public_canary_absent: !JSON.stringify(privacyPage).includes(CANARY),
             database_canary_absent: !JSON.stringify(storedPrivacy).includes(CANARY),
           },

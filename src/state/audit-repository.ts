@@ -1,11 +1,11 @@
 import type Database from "better-sqlite3";
 
 import {
-  AUDIT_EVENTS_PER_RUN,
   AUDIT_POLICY,
   AUDIT_RETENTION_SECONDS,
   AUDIT_RUN_CAP,
   publicAuditEvent,
+  resolveAuditSettings,
   type AuditInput,
   type PublicAuditEvent,
 } from "../workflow/audit-model.js";
@@ -39,6 +39,7 @@ export interface AuditRepositoryOptions {
   readonly maxTombstones?: number;
   readonly retentionSeconds?: number;
   readonly warning?: (message: string) => void;
+  readonly environment?: Readonly<Record<string, string | undefined>>;
 }
 
 function rowNumber(value: unknown): number {
@@ -146,11 +147,12 @@ export class AuditRepository {
     private readonly database: Database.Database,
     options: AuditRepositoryOptions = {},
   ) {
-    this.maxEvents = Math.max(1, Math.trunc(options.maxEventsPerRun ?? AUDIT_EVENTS_PER_RUN));
+    this.warning = options.warning ?? (() => undefined);
+    const settings = resolveAuditSettings(options.environment ?? process.env, this.warning);
+    this.maxEvents = Math.max(1, Math.trunc(options.maxEventsPerRun ?? settings.maxEventsPerRun));
     this.maxRuns = Math.max(1, Math.trunc(options.maxRuns ?? AUDIT_RUN_CAP));
     this.maxTombstones = Math.max(1, Math.trunc(options.maxTombstones ?? AUDIT_RUN_CAP));
     this.retention = Math.max(1, Math.trunc(options.retentionSeconds ?? AUDIT_RETENTION_SECONDS));
-    this.warning = options.warning ?? (() => undefined);
   }
 
   public append(runId: string, input: AuditInput, ownership?: Ownership): PublicAuditEvent | null {

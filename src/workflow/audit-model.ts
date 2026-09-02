@@ -28,25 +28,29 @@ export interface PublicAuditEvent extends Readonly<Record<string, unknown>> {
   readonly created_at: number;
 }
 
-const RAW_FIELDS = new Set(["prompt", "response", "reasoning", "content", "arguments", "result"]);
-const IDENTITY_FIELDS = new Set([
-  "run_id",
-  "segment_id",
-  "node_id",
-  "sub_id",
-  "event_type",
-  "provenance",
-  "identity",
-  "model",
-  "provider",
-  "status",
-  "state",
-  "reason",
-  "side",
-  "original_event_type",
+const RAW_FIELDS = new Set([
+  "prompt",
+  "response",
+  "reasoning",
+  "reasoning_content",
+  "reasoning_details",
+  "provider_data",
+  "encrypted_content",
+  "text",
+  "content",
+  "args",
+  "arguments",
+  "result",
+  "output",
+  "command",
+  "url",
+  "error",
+  "message",
   "cause",
   "name",
 ]);
+const IDENTITY_FIELDS = new Set(["model", "provider"]);
+const OPAQUE_FIELDS = new Set(["tool_id"]);
 const NUMBER_FIELDS = new Set([
   "attempt",
   "done",
@@ -68,6 +72,75 @@ const NUMBER_FIELDS = new Set([
 const BOOLEAN_FIELDS = new Set(["tainted", "stale", "terminal"]);
 const PATH_FIELDS = new Set(["node_path", "branch_path"]);
 const CONTAINER_FIELDS = new Set(["payload", "metadata", "budget", "usage", "progress"]);
+const SAFE_MARKER_STATES = new Set([
+  "excluded_by_policy",
+  "excluded_private_state",
+  "not_observed",
+  "not_yet_available",
+  "observed",
+  "redacted",
+  "truncated",
+  "unavailable",
+]);
+const SAFE_EVENT_TYPES = new Set([
+  "audit.gap",
+  "audit.truncated",
+  "audit.unavailable",
+  "cache.missed",
+  "cache.replayed",
+  "cache.stored",
+  "cache.unavailable",
+  "leaf.completed",
+  "leaf.failed",
+  "leaf.started",
+  "node.completed",
+  "node.failed",
+  "node.output",
+  "node.paused",
+  "node.started",
+  "segment.completed",
+  "segment.started",
+  "tool.completed",
+  "tool.started",
+  "workflow.done",
+  "workflow.fault",
+  "workflow.items",
+  "workflow.node",
+  "workflow.plan",
+]);
+const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
+  reason: new Set([
+    "corrupt_payload",
+    "drop_bucket_overflow",
+    "lookup_failed",
+    "process_crash",
+    "queue_overflow",
+    "retention_limit",
+    "sink_failure",
+    "store_failed",
+    "tombstone_compaction",
+    "unavailable",
+  ]),
+  state: new Set([...SAFE_MARKER_STATES, "complete", "fault", "null", "pending", "running"]),
+  status: new Set([
+    "cancelled",
+    "complete",
+    "degraded",
+    "error",
+    "failed",
+    "interrupted",
+    "paused",
+    "success",
+    "unavailable",
+  ]),
+  side: new Set(["depth"]),
+  count_state: new Set(["unavailable"]),
+  private_state: new Set(["excluded_private_state", "not_observed"]),
+  source: new Set(["gateway", "harness", "human_checkpoint"]),
+  tool_name_state: new Set(["known_tool", "unknown_tool"]),
+  unit: new Set(["bytes", "characters", "items", "top_level_items"]),
+  original_event_type: SAFE_EVENT_TYPES,
+});
 
 function clipped(value: string, limit: number): string {
   return Array.from(value).slice(0, limit).join("");
@@ -92,16 +165,16 @@ function rawMarker(value: unknown): AuditMarker {
 }
 
 function marker(value: Readonly<Record<string, unknown>>): AuditMarker | null {
-  if (value.state === "excluded_private_state")
-    return Object.freeze({ state: "excluded_private_state" });
-  if (value.state === "excluded_by_policy") {
-    const out: Record<string, unknown> = { state: "excluded_by_policy" };
-    for (const key of ["characters", "bytes", "items", "fields"])
-      if (typeof value[key] === "number" && Number.isFinite(value[key]))
-        out[key] = Math.min(256, Math.max(0, Math.trunc(value[key])));
-    return Object.freeze(out);
-  }
-  return null;
+  if (typeof value.state !== "string" || !SAFE_MARKER_STATES.has(value.state)) return null;
+  const out: Record<string, unknown> = { state: value.state };
+  for (const key of ["characters", "bytes", "items", "fields"])
+    if (typeof value[key] === "number" && Number.isFinite(value[key]))
+      out[key] = Math.min(256, Math.max(0, Math.trunc(value[key])));
+  for (const key of ["original_bytes", "limit_bytes"])
+    if (typeof value[key] === "number" && Number.isFinite(value[key]))
+      out[key] = Math.max(0, Math.trunc(value[key]));
+  if (value.side === "depth") out.side = "depth";
+  return Object.freeze(out);
 }
 
 function safeValue(value: unknown, key: string, depth: number): unknown {
@@ -118,10 +191,11 @@ function safeValue(value: unknown, key: string, depth: number): unknown {
   if (typeof value === "number")
     return NUMBER_FIELDS.has(key) && Number.isFinite(value) ? value : undefined;
   if (typeof value === "string") {
-    if (IDENTITY_FIELDS.has(key))
-      return clipped(value, key === "model" || key === "provider" || key === "identity" ? 128 : 64);
+    if (IDENTITY_FIELDS.has(key)) return clipped(value, 128);
+    const allowed = SAFE_STRING_VALUES[key];
+    if (allowed !== undefined) return allowed.has(value) ? value : rawMarker(value);
     return Object.freeze({
-      state: "observed",
+      state: OPAQUE_FIELDS.has(key) ? "observed" : "excluded_by_policy",
       characters: Math.min(Array.from(value).length, 256),
     });
   }
@@ -158,9 +232,17 @@ function safeValue(value: unknown, key: string, depth: number): unknown {
       !NUMBER_FIELDS.has(childKey) &&
       !BOOLEAN_FIELDS.has(childKey) &&
       !PATH_FIELDS.has(childKey) &&
-      !CONTAINER_FIELDS.has(childKey)
-    )
+      !CONTAINER_FIELDS.has(childKey) &&
+      !OPAQUE_FIELDS.has(childKey) &&
+      SAFE_STRING_VALUES[childKey] === undefined
+    ) {
+      Object.defineProperty(out, childKey, {
+        value: rawMarker(child),
+        enumerable: true,
+      });
+      count += 1;
       continue;
+    }
     const safe = safeValue(child, childKey, depth + 1);
     if (safe !== undefined) {
       Object.defineProperty(out, childKey, { value: safe, enumerable: true });
@@ -241,8 +323,16 @@ export function auditEnabled(
   warning: (message: string) => void = () => undefined,
 ): boolean {
   const raw = environment.LOHRA_AUDIT?.trim().toLowerCase();
-  if (raw === undefined || raw === "" || raw === "on" || raw === "1" || raw === "true") return true;
-  if (raw === "off" || raw === "0" || raw === "false") return false;
+  if (
+    raw === undefined ||
+    raw === "" ||
+    raw === "on" ||
+    raw === "1" ||
+    raw === "true" ||
+    raw === "yes"
+  )
+    return true;
+  if (raw === "off" || raw === "0" || raw === "false" || raw === "no") return false;
   warning(`invalid LOHRA_AUDIT value '${raw}'; audit remains enabled`);
   return true;
 }

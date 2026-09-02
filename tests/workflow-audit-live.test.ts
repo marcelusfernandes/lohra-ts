@@ -46,7 +46,7 @@ describe("T17 metadata-only audit", () => {
       metadata: { reasoning: { state: "excluded_private_state", value: canary } },
     });
     const json = JSON.stringify(safe);
-    expect(json).not.toContain(canary);
+    expect(json, "MUTATION_CAUSE:M1-canary-leak").not.toContain(canary);
     expect(json).not.toContain("秘密");
     expect(safe.prompt).toEqual({ state: "excluded_by_policy", characters: 12 });
     expect(safe.arguments).toEqual({ state: "excluded_by_policy", fields: 1 });
@@ -84,19 +84,13 @@ describe("T17 metadata-only audit", () => {
         payload: {
           provider: "😀".repeat(128),
           model: "😀".repeat(128),
-          identity: "😀".repeat(128),
-          status: "😀".repeat(64),
-          state: "😀".repeat(64),
-          reason: "😀".repeat(64),
-          side: "😀".repeat(64),
-          cause: "😀".repeat(64),
-          name: "😀".repeat(64),
+          node_path: Array.from({ length: 8 }, () => "😀".repeat(64)),
         },
       },
       1,
     );
     expect(Buffer.byteLength(JSON.stringify(event), "utf8")).toBeLessThanOrEqual(AUDIT_EVENT_BYTES);
-    expect(event.event_type).toBe("audit.truncated");
+    expect(event.event_type, "MUTATION_CAUSE:M2-character-cap").toBe("audit.truncated");
     expect(event.data).toMatchObject({ limit_bytes: 2048, original_event_type: "node.output" });
   });
 
@@ -108,7 +102,8 @@ describe("T17 metadata-only audit", () => {
       branch_path: Array.from({ length: 12 }, (_, i) => i),
       payload: { payload: { payload: { payload: { state: "deep" } } } },
     });
-    expect(Object.keys(safe.metadata as object)).toHaveLength(0);
+    expect(Object.keys(safe.metadata as object)).toHaveLength(16);
+    expect(JSON.stringify(safe.metadata)).toContain('"state":"excluded_by_policy"');
     expect(safe.node_path).toEqual(["n4", "n5", "n6", "n7", "n8", "n9", "n10", "n11"]);
     expect(safe.branch_path).toEqual([4, 5, 6, 7, 8, 9, 10, 11]);
     expect(JSON.stringify(safe)).toContain('"side":"depth"');
@@ -123,6 +118,45 @@ describe("T17 metadata-only audit", () => {
     ).toEqual({ enabled: true, maxEventsPerRun: AUDIT_EVENTS_PER_RUN });
     expect(warnings).toHaveLength(2);
     expect(resolveAuditSettings({ LOHRA_AUDIT: "off" }).enabled).toBe(false);
+    expect(resolveAuditSettings({ LOHRA_AUDIT: "no" }).enabled).toBe(false);
+    expect(resolveAuditSettings({ LOHRA_AUDIT: "yes" }).enabled).toBe(true);
+  });
+
+  it("never carries arbitrary error or state prose through safe metadata", () => {
+    const canary = "PRIVATE-CAUSE-🔒";
+    const safe = safeAuditMetadata({
+      cause: canary,
+      name: canary,
+      reason: canary,
+      state: canary,
+      status: canary,
+      side: canary,
+      model: "model-id",
+      provider: "provider-id",
+    });
+    expect(JSON.stringify(safe)).not.toContain(canary);
+    expect(safe).toMatchObject({
+      cause: { state: "excluded_by_policy" },
+      name: { state: "excluded_by_policy" },
+      reason: { state: "excluded_by_policy" },
+      state: { state: "excluded_by_policy" },
+      status: { state: "excluded_by_policy" },
+      side: { state: "excluded_by_policy" },
+      model: "model-id",
+      provider: "provider-id",
+    });
+  });
+
+  it("applies the operator max-events environment at the SQLite boundary", () => {
+    const { connection, audit } = database({ environment: { LOHRA_AUDIT_MAX_EVENTS: "2" } });
+    try {
+      audit.append("env-cap", { event_type: "node.started", created_at: 1 });
+      audit.append("env-cap", { event_type: "node.started", created_at: 2 });
+      audit.append("env-cap", { event_type: "node.started", created_at: 3 });
+      expect(audit.query({ runId: "env-cap" }).events.map((event) => event.seq)).toEqual([2, 3]);
+    } finally {
+      connection.close();
+    }
   });
 });
 
@@ -140,7 +174,10 @@ describe("T17 SQLite audit read model", () => {
           })?.seq,
         ).toBe(index);
       const frozen = audit.query({ runId: "run", snapshotSeq: 4, nodeId: "a", limit: 10 });
-      expect(frozen.events.map((event) => event.seq)).toEqual([3]);
+      expect(
+        frozen.events.map((event) => event.seq),
+        "MUTATION_CAUSE:M4-moving-snapshot",
+      ).toEqual([3]);
       expect((frozen.integrity.notices as readonly unknown[])[0]).toEqual({
         event_type: "audit.gap",
         provenance: "dropped",
@@ -188,6 +225,7 @@ describe("T17 SQLite audit read model", () => {
           { event_type: "node", created_at: 2 },
           { fence: 1, holder: "owner", now: 2 },
         ),
+        "MUTATION_CAUSE:M6-fence-ignored",
       ).toBeNull();
       expect(
         connection.database.prepare("SELECT count(*) AS n FROM workflow_audit_events").get(),
@@ -214,7 +252,10 @@ describe("T17 SQLite audit read model", () => {
         "planted failure",
       );
       connection.database.exec("DROP TRIGGER fail_audit");
-      expect(audit.append("rollback", { event_type: "node", created_at: 2 })?.seq).toBe(1);
+      expect(
+        audit.append("rollback", { event_type: "node", created_at: 2 })?.seq,
+        "MUTATION_CAUSE:M5-nontransactional-seq",
+      ).toBe(1);
     } finally {
       connection.close();
     }
@@ -287,13 +328,35 @@ describe("T17 live events and sink failures", () => {
     expect(events.emit({ kind: "items", run_id: "r", node_id: "a", done: 1, total: 3 })).toBe(
       false,
     );
-    expect(events.emit({ kind: "items", run_id: "r", node_id: "b", done: 1, total: 3 })).toBe(true);
+    expect(
+      events.emit({ kind: "items", run_id: "r", node_id: "b", done: 1, total: 3 }),
+      "MUTATION_CAUSE:M7-global-throttle",
+    ).toBe(true);
     now += 0.1;
     expect(events.emit({ kind: "items", run_id: "r", node_id: "a", done: 3, total: 3 })).toBe(true);
     expect(events.emit({ kind: "done", run_id: "r" })).toBe(true);
     expect(attempts).toBe(4);
     expect(seen).toEqual(["r:b:1", "r:a:3", "r:done:"]);
     expect(events.trackedNodes()).toBe(0);
+  });
+
+  it("never suppresses the last item width", () => {
+    const seen: number[] = [];
+    const events = new WorkflowLiveEvents(
+      (event) => {
+        if (event.kind === "items") seen.push(event.done ?? -1);
+      },
+      () => 0,
+    );
+    expect(events.emit({ kind: "items", run_id: "r", node_id: "a", done: 0, total: 3 })).toBe(true);
+    expect(events.emit({ kind: "items", run_id: "r", node_id: "a", done: 1, total: 3 })).toBe(
+      false,
+    );
+    expect(
+      events.emit({ kind: "items", run_id: "r", node_id: "a", done: 3, total: 3 }),
+      "MUTATION_CAUSE:M8-last-suppressed",
+    ).toBe(true);
+    expect(seen).toEqual([0, 3]);
   });
 
   it("retries BUSY and makes shutdown failure explicit", async () => {
@@ -328,6 +391,30 @@ describe("T17 live events and sink failures", () => {
     expect(warnings.join(" ")).toContain("failed");
   });
 
+  it("settles a stale-fence refusal without poisoning the shared writer", async () => {
+    const calls: string[] = [];
+    const repo = {
+      append: (runId: string, input: { event_type: string }, ownership?: unknown) => {
+        calls.push(`${runId}:${input.event_type}`);
+        return ownership === undefined ? ({} as never) : null;
+      },
+      isBusyError: () => false,
+    } as unknown as AuditRepository;
+    const warnings: string[] = [];
+    const trail = new AuditTrail(repo, { warning: (message) => warnings.push(message) });
+    expect(
+      trail.record("stale", { event_type: "node.started" }, { fence: 1, holder: "old", now: 2 }),
+    ).toBe(true);
+    expect(await trail.flush()).toBe(true);
+    expect(trail.record("healthy", { event_type: "node.started" })).toBe(true);
+    expect(await trail.shutdown()).toBe(true);
+    expect(calls, "MUTATION_CAUSE:M11-stale-refusal-poisons-writer").toEqual([
+      "stale:node.started",
+      "healthy:node.started",
+    ]);
+    expect(warnings.join(" ")).not.toContain("failed permanently");
+  });
+
   it("turns queue overflow into an explicit gap", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -336,23 +423,58 @@ describe("T17 live events and sink failures", () => {
     let first = true;
     const inputs: string[] = [];
     const repo = {
-      append: (_runId: string, input: { event_type: string }) => {
+      append: (runId: string, input: { event_type: string }) => {
         if (first) {
           first = false;
           throw new Error("database is locked");
         }
-        inputs.push(input.event_type);
+        inputs.push(`${runId}:${input.event_type}`);
         return {} as never;
       },
       isBusyError: (error: unknown) => error instanceof Error && /locked/.test(error.message),
     } as unknown as AuditRepository;
     const trail = new AuditTrail(repo, { capacity: 1, retryDelayMs: 0, sleep: () => gate });
-    expect(trail.record("r", { event_type: "one" })).toBe(true);
-    expect(trail.record("r", { event_type: "two" })).toBe(true);
-    expect(trail.record("r", { event_type: "three" })).toBe(false);
+    expect(trail.record("run-x", { event_type: "one" })).toBe(true);
+    expect(trail.record("run-y", { event_type: "two" })).toBe(true);
+    expect(trail.record("run-x", { event_type: "three" })).toBe(false);
     release();
     expect(await trail.flush()).toBe(true);
-    expect(inputs).toContain("audit.gap");
+    expect(inputs, "MUTATION_CAUSE:M3-silent-overflow").toContain("run-x:audit.gap");
+    expect(inputs).not.toContain("run-y:audit.gap");
+  });
+
+  it("audits every pipeline width even when the live surface throttles intermediates", async () => {
+    const { connection, audit } = database();
+    try {
+      const trail = new AuditTrail(audit);
+      const service = new WorkflowService({
+        runtime: {
+          spawn: () => "leaf",
+          collect: () => ({ status: "complete", output: "ok", usage: null }),
+          steer: () => undefined,
+          cancel: () => undefined,
+        },
+        auditTrail: trail,
+        idSource: () => "pipeline-audit",
+      });
+      service.start({
+        meta: { name: "pipeline-audit" },
+        nodes: [
+          {
+            id: "p",
+            type: "pipeline",
+            items: ["a", "b", "c"],
+            stages: [{ prompt: "${item}" }],
+          },
+        ],
+      });
+      expect(await service.status("pipeline-audit", true)).toMatchObject({ status: "complete" });
+      expect(await trail.shutdown()).toBe(true);
+      const page = audit.query({ runId: "pipeline-audit", eventType: "workflow.items", limit: 20 });
+      expect(page.events, "MUTATION_CAUSE:M10-throttle-drops-audit").toHaveLength(4);
+    } finally {
+      connection.close();
+    }
   });
 
   it("projects a real service run into live and the metadata-only audit", async () => {
@@ -395,6 +517,33 @@ describe("T17 live events and sink failures", () => {
       connection.close();
     }
   });
+
+  it("honors the operator audit-off switch at the service boundary", async () => {
+    const { connection, audit } = database();
+    try {
+      const trail = new AuditTrail(audit);
+      const service = new WorkflowService({
+        runtime: {
+          spawn: () => "leaf",
+          collect: () => ({ status: "complete", output: "ok", usage: null }),
+          steer: () => undefined,
+          cancel: () => undefined,
+        },
+        auditTrail: trail,
+        environment: { LOHRA_AUDIT: "off" },
+        idSource: () => "audit-disabled",
+      });
+      service.start({
+        meta: { name: "disabled" },
+        nodes: [{ id: "leaf", type: "agent", prompt: "work" }],
+      });
+      expect(await service.status("audit-disabled", true)).toMatchObject({ status: "complete" });
+      expect(await trail.shutdown()).toBe(true);
+      expect(audit.query({ runId: "audit-disabled" }).availability).toBe("unavailable");
+    } finally {
+      connection.close();
+    }
+  });
 });
 
 describe("T17 workflow CLI", () => {
@@ -417,7 +566,10 @@ describe("T17 workflow CLI", () => {
     expect(helpIo.stdout.join("")).toContain("{list,watch,audit}");
     expect(helpIo.stdout.join("")).not.toContain("{list,watch,audit,run}");
     const badIo = io(root);
-    expect(await runCli(["workflow", "run"], badIo.value)).toBe(2);
+    expect(
+      await runCli(["workflow", "run"], badIo.value),
+      "MUTATION_CAUSE:M9-workflow-run-accepted",
+    ).toBe(2);
     expect(badIo.stderr.join("")).toContain(
       "invalid choice: 'run' (choose from list, watch, audit)",
     );

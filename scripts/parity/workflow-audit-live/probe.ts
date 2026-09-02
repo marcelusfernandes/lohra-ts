@@ -34,8 +34,9 @@ class ControlledRepository extends AuditRepository {
   ): ReturnType<AuditRepository["append"]> {
     this.attempts += 1;
     if (this.mode === "busy-twice" && this.attempts <= 2) throw new Error("database is busy");
-    if (this.mode === "permanent") return null;
-    if (this.mode === "lose-original" && input.event_type !== "audit.gap") return null;
+    if (this.mode === "permanent") throw new Error("planted sink failure");
+    if (this.mode === "lose-original" && input.event_type !== "audit.gap")
+      throw new Error("planted sink failure");
     return super.append(runId, input, ownership);
   }
 }
@@ -177,6 +178,9 @@ try {
     );
     if (tests.status !== 0)
       throw new Error(`focused tests failed: ${tests.stdout}\n${tests.stderr}`);
+    const focusedMatch = /Tests\s+(\d+) passed/.exec(tests.stdout);
+    if (focusedMatch?.[1] === undefined) throw new Error("focused test count was not observable");
+    const focusedTests = Number.parseInt(focusedMatch[1], 10);
     const cliHome = resolve(directory, "home");
     mkdirSync(cliHome, { recursive: true });
     const cliEnvironment = { HOME: cliHome, PATH: process.env.PATH ?? "", TZ: "UTC" };
@@ -239,7 +243,7 @@ try {
       dense: true,
       staleRejected: true,
       validSeq: valid.seq,
-      focusedTests: 17,
+      focusedTests,
       sinkOutcomes,
       cli,
     };

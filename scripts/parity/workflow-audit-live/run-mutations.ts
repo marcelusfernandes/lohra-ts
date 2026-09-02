@@ -21,6 +21,7 @@ interface Mutant {
   readonly id: string;
   readonly assertion: string;
   readonly test: string;
+  readonly cause: string;
   readonly edits: readonly Edit[];
 }
 const auditModel = "src/workflow/audit-model.ts";
@@ -29,12 +30,14 @@ const repository = "src/state/audit-repository.ts";
 const live = "src/workflow/live-events.ts";
 const argSpec = "src/cli/arg-spec.ts";
 const cli = "src/cli.ts";
+const service = "src/workflow/service.ts";
 
 const mutants: readonly Mutant[] = [
   {
     id: "M1-canary-leak",
     assertion: "A1",
     test: "redacts every private raw field",
+    cause: "MUTATION_CAUSE:M1-canary-leak",
     edits: [
       {
         file: auditModel,
@@ -47,6 +50,7 @@ const mutants: readonly Mutant[] = [
     id: "M2-character-cap",
     assertion: "A2",
     test: "caps public events by serialized UTF-8 bytes",
+    cause: "MUTATION_CAUSE:M2-character-cap",
     edits: [
       {
         file: auditModel,
@@ -59,13 +63,13 @@ const mutants: readonly Mutant[] = [
     id: "M3-silent-overflow",
     assertion: "A5/C4",
     test: "turns queue overflow into an explicit gap",
+    cause: "MUTATION_CAUSE:M3-silent-overflow",
     edits: [
       {
         file: auditTrail,
         before:
-          "      this.dropped += 1;\n      this.warning(`audit queue overflow for run ${runId}`);",
-        after:
-          "      this.dropped += 0;\n      this.warning(`audit queue overflow for run ${runId}`);",
+          "      this.markDropped(runId, ownership);\n      this.warning(`audit queue overflow for run ${runId}`);",
+        after: "      this.warning(`audit queue overflow for run ${runId}`);",
       },
     ],
   },
@@ -73,6 +77,7 @@ const mutants: readonly Mutant[] = [
     id: "M4-moving-snapshot",
     assertion: "B2",
     test: "freezes snapshots",
+    cause: "MUTATION_CAUSE:M4-moving-snapshot",
     edits: [
       {
         file: repository,
@@ -85,6 +90,7 @@ const mutants: readonly Mutant[] = [
     id: "M5-nontransactional-seq",
     assertion: "B1",
     test: "rolls back sequence allocation",
+    cause: "MUTATION_CAUSE:M5-nontransactional-seq",
     edits: [
       {
         file: repository,
@@ -103,6 +109,7 @@ const mutants: readonly Mutant[] = [
     id: "M6-fence-ignored",
     assertion: "B8",
     test: "rejects a stale fence",
+    cause: "MUTATION_CAUSE:M6-fence-ignored",
     edits: [
       {
         file: repository,
@@ -115,6 +122,7 @@ const mutants: readonly Mutant[] = [
     id: "M7-global-throttle",
     assertion: "C2",
     test: "throttles per run/node",
+    cause: "MUTATION_CAUSE:M7-global-throttle",
     edits: [
       {
         file: live,
@@ -126,7 +134,8 @@ const mutants: readonly Mutant[] = [
   {
     id: "M8-last-suppressed",
     assertion: "C3",
-    test: "throttles per run/node",
+    test: "never suppresses the last item width",
+    cause: "MUTATION_CAUSE:M8-last-suppressed",
     edits: [
       {
         file: live,
@@ -139,6 +148,7 @@ const mutants: readonly Mutant[] = [
     id: "M9-workflow-run-accepted",
     assertion: "D5",
     test: "exposes only list/watch/audit",
+    cause: "MUTATION_CAUSE:M9-workflow-run-accepted",
     edits: [
       {
         file: argSpec,
@@ -155,6 +165,34 @@ const mutants: readonly Mutant[] = [
         before: '  if (command === "workflow") {\n    const action = argv[1] as',
         after:
           '  if (command === "workflow") {\n    if (argv[1] === "run") return 0;\n    const action = argv[1] as',
+      },
+    ],
+  },
+  {
+    id: "M10-throttle-drops-audit",
+    assertion: "A5/C4",
+    test: "audits every pipeline width",
+    cause: "MUTATION_CAUSE:M10-throttle-drops-audit",
+    edits: [
+      {
+        file: service,
+        before: "    this.liveEvents.emit(live);\n    this.auditTrail?.record(",
+        after: "    if (!this.liveEvents.emit(live)) return;\n    this.auditTrail?.record(",
+      },
+    ],
+  },
+  {
+    id: "M11-stale-refusal-poisons-writer",
+    assertion: "A5/B8",
+    test: "settles a stale-fence refusal",
+    cause: "MUTATION_CAUSE:M11-stale-refusal-poisons-writer",
+    edits: [
+      {
+        file: auditTrail,
+        before:
+          'return this.repository.append(runId, input, ownership) === null ? "refused" : "saved";',
+        after:
+          'return this.repository.append(runId, input, ownership) === null ? "failed" : "saved";',
       },
     ],
   },
@@ -210,10 +248,9 @@ try {
             mutant.test,
           ])
         : compile;
-    const killed =
-      compile.status === 0 &&
-      test.status !== 0 &&
-      `${test.stdout}\n${test.stderr}`.includes(mutant.test);
+    const output = `${test.stdout}\n${test.stderr}`;
+    const causeVisible = output.includes(mutant.cause);
+    const killed = compile.status === 0 && test.status !== 0 && causeVisible;
     observations.push({
       id: mutant.id,
       assertion: mutant.assertion,
@@ -221,7 +258,8 @@ try {
       compiled: compile.status === 0,
       exit: test.status,
       killed,
-      causeVisible: `${test.stdout}\n${test.stderr}`.includes(mutant.test),
+      causeVisible,
+      observation: output.slice(-1_000),
     });
   }
   const survivors = observations.filter((item) => !item.killed);

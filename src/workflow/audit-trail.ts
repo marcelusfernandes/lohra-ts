@@ -11,6 +11,8 @@ export interface AuditTrailOptions {
 }
 
 type Queued = Readonly<{ runId: string; input: AuditInput; ownership?: Ownership }>;
+type AppendOutcome = "saved" | "refused" | "failed";
+type DropBucket = Readonly<{ count: number; ownership?: Ownership }>;
 
 export class AuditTrail {
   private readonly queue: Queued[] = [];
@@ -22,7 +24,7 @@ export class AuditTrail {
   private running: Promise<void> | null = null;
   private closing = false;
   private stopped = false;
-  private dropped = 0;
+  private readonly dropped = new Map<string, DropBucket>();
 
   public constructor(
     private readonly repository: AuditRepository,
@@ -68,12 +70,13 @@ export class AuditTrail {
           Object.freeze({ runId, input: gap, ...(ownership === undefined ? {} : { ownership }) }),
         );
         this.kick();
-      } else this.dropped += 1;
+      } else this.markDropped(runId, ownership);
       return false;
     }
     if (this.queue.length >= this.capacity) {
-      this.dropped += 1;
+      this.markDropped(runId, ownership);
       this.warning(`audit queue overflow for run ${runId}`);
+      this.kick();
       return false;
     }
     this.queue.push(
@@ -85,7 +88,7 @@ export class AuditTrail {
 
   public async flush(timeoutMs = 5_000): Promise<boolean> {
     const deadline = Date.now() + Math.max(0, timeoutMs);
-    while (this.running !== null || this.queue.length > 0) {
+    while (this.running !== null || this.queue.length > 0 || this.dropped.size > 0) {
       this.kick();
       const pending = this.running;
       if (pending === null) break;
@@ -103,28 +106,38 @@ export class AuditTrail {
   }
 
   private async drain(): Promise<void> {
-    while (!this.closing || this.queue.length > 0) {
+    while (!this.closing || this.queue.length > 0 || this.dropped.size > 0) {
       const next = this.queue.shift();
-      if (next === undefined) return;
-      if (this.dropped > 0) {
-        const count = this.dropped;
+      const markerRun = next?.runId ?? this.dropped.keys().next().value;
+      const marker = markerRun === undefined ? undefined : this.dropped.get(markerRun);
+      if (markerRun !== undefined && marker !== undefined) {
         const gap: AuditInput = Object.freeze({
           event_type: "audit.gap",
           provenance: "audit",
-          payload: Object.freeze({ reason: "queue_overflow", dropped_count: count }),
+          payload: Object.freeze({ reason: "queue_overflow", dropped_count: marker.count }),
         });
-        if (await this.append(next.runId, gap, next.ownership)) this.dropped = 0;
+        const gapOutcome = await this.append(markerRun, gap, marker.ownership);
+        if (gapOutcome === "failed") {
+          this.stopped = true;
+          this.warning(`audit sink failed permanently for run ${markerRun}`);
+          return;
+        }
+        this.dropped.delete(markerRun);
+      }
+      if (next === undefined) {
+        if (this.dropped.size === 0) return;
+        continue;
       }
       const saved = await this.append(next.runId, next.input, next.ownership);
-      if (!saved) {
-        this.dropped += 1;
+      if (saved === "refused") continue;
+      if (saved === "failed") {
         const gap: AuditInput = Object.freeze({
           event_type: "audit.gap",
           provenance: "audit",
           payload: Object.freeze({ reason: "sink_failure", dropped_count: 1 }),
         });
-        if (await this.append(next.runId, gap, next.ownership)) this.dropped -= 1;
-        else {
+        const gapOutcome = await this.append(next.runId, gap, next.ownership);
+        if (gapOutcome === "failed") {
           this.stopped = true;
           this.warning(`audit sink failed permanently for run ${next.runId}`);
           return;
@@ -134,30 +147,50 @@ export class AuditTrail {
   }
 
   private kick(): void {
-    if (this.running !== null || this.stopped || this.queue.length === 0) return;
+    if (
+      this.running !== null ||
+      this.stopped ||
+      (this.queue.length === 0 && this.dropped.size === 0)
+    )
+      return;
     const task = this.drain();
     this.running = task;
     void task.finally(() => {
       if (this.running === task) this.running = null;
-      if (this.queue.length > 0 && !this.stopped) this.kick();
+      if ((this.queue.length > 0 || this.dropped.size > 0) && !this.stopped) this.kick();
     });
   }
 
-  private async append(runId: string, input: AuditInput, ownership?: Ownership): Promise<boolean> {
+  private async append(
+    runId: string,
+    input: AuditInput,
+    ownership?: Ownership,
+  ): Promise<AppendOutcome> {
     for (let attempt = 0; attempt < this.retries; attempt += 1) {
       try {
-        return this.repository.append(runId, input, ownership) !== null;
+        return this.repository.append(runId, input, ownership) === null ? "refused" : "saved";
       } catch (error) {
         if (!this.repository.isBusyError(error) || attempt + 1 >= this.retries) {
           this.warning(
             `audit append failed for run ${runId}: ${error instanceof Error ? error.message : String(error)}`,
           );
-          return false;
+          return "failed";
         }
         await this.sleep(this.retryDelay);
       }
     }
-    return false;
+    return "failed";
+  }
+
+  private markDropped(runId: string, ownership?: Ownership): void {
+    const prior = this.dropped.get(runId);
+    this.dropped.set(
+      runId,
+      Object.freeze({
+        count: (prior?.count ?? 0) + 1,
+        ...(ownership === undefined ? {} : { ownership }),
+      }),
+    );
   }
 
   private async withTimeout(pending: Promise<void>, timeoutMs: number): Promise<boolean> {
