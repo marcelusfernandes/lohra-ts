@@ -247,7 +247,7 @@ export class AuditRepository {
       })
       .immediate();
     if (transact === null && ownership !== undefined) {
-      this.warning(`STALE_FENCE_WRITE audit run=${runId} fence=${String(ownership.fence)}`);
+      this.warning(`STALE_FENCE_WRITE audit run=${auditRunId} fence=${String(ownership.fence)}`);
     }
     return transact;
   }

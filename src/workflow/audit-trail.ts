@@ -213,12 +213,13 @@ export class AuditTrail {
 
   private markDropped(order: number, runId: string, ownership?: Ownership): void {
     const prior = this.dropped.get(runId);
+    const markerOwnership = prior?.ownership ?? ownership;
     this.dropped.set(
       runId,
       Object.freeze({
         order: Math.min(prior?.order ?? order, order),
         count: (prior?.count ?? 0) + 1,
-        ...(ownership === undefined ? {} : { ownership }),
+        ...(markerOwnership === undefined ? {} : { ownership: markerOwnership }),
       }),
     );
   }
