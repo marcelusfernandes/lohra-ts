@@ -1,7 +1,6 @@
 {
   "version": 1,
   "executions": [
-    { "id": "parity", "target": "tsx scripts/parity/cli.ts" },
     { "id": "parity:auth", "target": "tsx scripts/parity/auth/run-all.ts" },
     { "id": "parity:context", "target": "tsx scripts/parity/local-context/run-all.ts" },
     { "id": "parity:chat-completions", "target": "tsx scripts/parity/chat-completions/run-all.ts" },
@@ -79,8 +78,16 @@
     { "id": "verify:t22:evidence", "target": "tsx scripts/parity/closeout/verify-evidence.ts" }
   ],
   "aliases": [
-    { "id": "parity:t08", "target": "tsx scripts/parity/cli.ts", "coveredBy": "parity" },
-    { "id": "parity:t09", "target": "tsx scripts/parity/cli.ts", "coveredBy": "parity" },
+    {
+      "id": "parity:t08",
+      "target": "tsx scripts/parity/cli.ts",
+      "coveredBy": "parity:t08:all"
+    },
+    {
+      "id": "parity:t09",
+      "target": "tsx scripts/parity/cli.ts",
+      "coveredBy": "parity:t09:all"
+    },
     {
       "id": "parity:t18:tool",
       "target": "tsx scripts/parity/cron/run-tool.ts",
@@ -121,5 +128,5 @@
   ],
   "generators": ["parity:t13:fanout:generate", "parity:t20:generate-manifests"],
   "helpers": ["scripts/parity/mcp/oracle-r1-probe.py", "scripts/parity/mcp/r1-probe.mjs"],
-  "meta": ["parity:closeout", "mutations:closeout"]
+  "meta": ["parity", "parity:closeout", "mutations:closeout"]
 }
