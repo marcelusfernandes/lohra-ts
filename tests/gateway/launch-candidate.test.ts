@@ -40,7 +40,9 @@ describe("launchCandidateDashboard: a real subprocess, probed over raw sockets",
     const process_ = await launchCandidateDashboard({
       argv: ["--provider", "anthropic", "--insecure"],
       env: {
-        PATH: process.env.PATH ?? "",
+        // The launcher must use the project's pinned tsx entry point rather
+        // than discovering `npx` (or another runtime shim) through PATH.
+        PATH: join(home, "no-runtime-tools"),
         HOME: home,
         LOHRA_HOME: home,
         ANTHROPIC_API_KEY: "sk-test-not-a-real-key",

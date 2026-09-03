@@ -9,6 +9,7 @@ import { resolve } from "node:path";
 
 const projectRoot = resolve(import.meta.dirname, "../../..");
 const cliEntry = resolve(projectRoot, "src/cli.ts");
+const TSX_CLI = resolve(projectRoot, "node_modules/tsx/dist/cli.mjs");
 
 export interface LaunchedGatewayProcess {
   readonly port: number;
@@ -32,11 +33,15 @@ const BOOT_LINE_PATTERN = /^Lohra dashboard: http:\/\/127\.0\.0\.1:(\d+)\n$/mu;
 export async function launchCandidateDashboard(
   input: LaunchCandidateInput,
 ): Promise<LaunchedGatewayProcess> {
-  const child = spawn("npx", ["tsx", cliEntry, "dashboard", "--port", "0", ...input.argv], {
-    cwd: input.cwd,
-    env: input.env,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const child = spawn(
+    process.execPath,
+    [TSX_CLI, cliEntry, "dashboard", "--port", "0", ...input.argv],
+    {
+      cwd: input.cwd,
+      env: input.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
 
   const stderrChunks: Buffer[] = [];
   const stdoutChunks: Buffer[] = [];

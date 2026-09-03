@@ -10,6 +10,7 @@ import { resolve } from "node:path";
 
 const projectRoot = resolve(import.meta.dirname, "../../..");
 const LAUNCHER_SCRIPT = resolve(projectRoot, "scripts/parity/gateway/candidate-dash-launcher.ts");
+const TSX_CLI = resolve(projectRoot, "node_modules/tsx/dist/cli.mjs");
 
 export interface LaunchedGatewayProcess {
   readonly port: number;
@@ -49,7 +50,11 @@ export async function launchCandidateFakeUpstreamDashboard(
   if (input.insecure === true) env.LOHRA_INSECURE = "1";
   if (input.dashboardToken !== undefined) env.LOHRA_DASHBOARD_SESSION_TOKEN = input.dashboardToken;
 
-  const child = spawn("npx", ["tsx", LAUNCHER_SCRIPT], {
+  // Resolve the checked-in dependency from the project instead of asking
+  // `npx` to discover it from the fixture HOME.  The closeout harness uses a
+  // deliberately reduced PATH; discovery there could select an unrelated
+  // `lohra` shim or try the package registry, neither of which is hermetic.
+  const child = spawn(process.execPath, [TSX_CLI, LAUNCHER_SCRIPT], {
     cwd: input.home,
     env,
     stdio: ["ignore", "pipe", "pipe"],
