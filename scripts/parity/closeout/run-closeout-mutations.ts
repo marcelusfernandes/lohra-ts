@@ -45,7 +45,7 @@ const mutations: readonly Mutation[] = [
     before: "    ...workflowToolHandlers(options.workflowService, options.base.auditRepository),",
     after: "    ...{},",
     command: "composition",
-    expected: "COMPOSITION_RESULT_MISSING:chat:run_workflow",
+    expected: "COMPOSITION_PLACEHOLDER:chat:run_workflow",
   },
   {
     id: "T22-l22-promotion-reopened",
@@ -200,8 +200,6 @@ function command(
     return run(root, process.execPath, [tsx, "scripts/parity/closeout/no-python.ts"]);
   if (name === "concurrency")
     return run(root, process.execPath, [tsx, "scripts/parity/closeout/concurrency.ts"]);
-  const built = run(root, process.execPath, [tsc, "-p", "tsconfig.build.json"]);
-  if (built.status !== 0) return built;
   return run(root, process.execPath, [tsx, "scripts/parity/closeout/composition.ts"]);
 }
 
@@ -225,11 +223,15 @@ try {
     const extracted = run(copy, "/usr/bin/tar", ["-xf", archive]);
     if (extracted.status !== 0) throw new Error(`MUTATION_EXTRACT:${mutation.id}`);
     symlinkSync(nodeModules, join(copy, "node_modules"), "dir");
-    if (mutation.command !== "composition" && mutation.command !== "no-python") {
+    if (mutation.command !== "composition") {
       symlinkSync(dist, join(copy, "dist"), "dir");
     }
     replaceOnce(copy, mutation);
-    const compile = run(copy, process.execPath, [tsc, "--noEmit"]);
+    const compile = run(
+      copy,
+      process.execPath,
+      mutation.command === "composition" ? [tsc, "-p", "tsconfig.build.json"] : [tsc, "--noEmit"],
+    );
     const observed = compile.status === 0 ? command(copy, mutation.command) : compile;
     const killed =
       compile.status === 0 && observed.status !== 0 && observed.output.includes(mutation.expected);
@@ -254,7 +256,7 @@ const legacyIds = [
   "mutations:t21",
 ] as const;
 const legacy: Array<Readonly<Record<string, unknown>>> = [];
-for (const id of legacyIds) {
+for (const id of process.argv.includes("--t22-only") ? [] : legacyIds) {
   const digests: string[] = [];
   for (let iteration = 0; iteration < 2; iteration += 1) {
     const result = run(project, "npm", ["run", id], 20 * 60_000);
