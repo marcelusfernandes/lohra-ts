@@ -360,8 +360,7 @@ const mutants: readonly Mutant[] = [
     edits: [
       {
         file: chat,
-        before:
-          "const sessionRegistry = createChatSessionRegistry(connection.database, options.environment);",
+        before: "const sessionRegistry = sessionToolBase.registry;",
         after:
           "const sessionRegistry = CHAT_TOOL_REGISTRY_FACTORIES.failSafe(connection.database, options.environment);",
       },

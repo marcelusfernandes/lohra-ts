@@ -234,7 +234,12 @@ const namedMutants: readonly Mutant[] = [
     edits: [
       {
         file: service,
-        before: `    const fence = store.locks.acquireRunLease(runId, store.holder, store.ownershipOf().now, store.ttl);
+        before: `    const fence = store.locks.acquireRunLease(
+      runId,
+      store.holder,
+      store.ownershipOf().now,
+      store.ttl,
+    );
     if (fence === null) {
       const expiry = store.locks.runLeaseExpiry(runId, store.ownershipOf().now);
       return Object.freeze({
@@ -244,7 +249,12 @@ const namedMutants: readonly Mutant[] = [
     this.heartbeat?.start(runId);
     const seeded = this.seedSpend(store, runId);`,
         after: `    const seeded = this.seedSpend(store, runId);
-    const fence = store.locks.acquireRunLease(runId, store.holder, store.ownershipOf().now, store.ttl);
+    const fence = store.locks.acquireRunLease(
+      runId,
+      store.holder,
+      store.ownershipOf().now,
+      store.ttl,
+    );
     if (fence === null) {
       const expiry = store.locks.runLeaseExpiry(runId, store.ownershipOf().now);
       return Object.freeze({
@@ -584,7 +594,7 @@ const namedMutants: readonly Mutant[] = [
       {
         file: service,
         before:
-          "    } catch (error) {\n      abandonAcquisition();\n      this.warn(\n        `workflow: leaf sandbox install failed for run ${runId}: ${String(error)}`,\n      );\n      return leafSandboxUnavailable(runId);\n    }",
+          "    } catch (error) {\n      abandonAcquisition();\n      this.warn(`workflow: leaf sandbox install failed for run ${runId}: ${String(error)}`);\n      return leafSandboxUnavailable(runId);\n    }",
         after: "    } else {\n      return leafSandboxUnavailable(runId);\n    }",
       },
     ],
@@ -599,7 +609,7 @@ const namedMutants: readonly Mutant[] = [
       {
         file: service,
         before:
-          '      // only THIS acquisition\'s installation\n      step("leaf sandbox disposal", () => { sandboxHandle.dispose(); });',
+          '      // only THIS acquisition\'s installation\n      step("leaf sandbox disposal", () => {\n        sandboxHandle.dispose();\n      });',
         after: "      // only THIS acquisition's installation\n      sandboxHandle.dispose();",
       },
     ],
