@@ -291,6 +291,12 @@
     {
       "field": "sqlite.db",
       "kind": "replace-json-pointer",
+      "pointer": "/schema/17/sql",
+      "replacement": "<WORKFLOW_AUDIT_EVENTS_SCHEMA>"
+    },
+    {
+      "field": "sqlite.db",
+      "kind": "replace-json-pointer",
       "pointer": "/tables/sessions/rows/0/0",
       "replacement": "<SESSION_ID>"
     },

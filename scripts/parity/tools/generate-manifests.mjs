@@ -231,6 +231,17 @@ for (const filename of readdirSync(directory).filter(
       source: "profile",
       replacement: "<PROFILE>",
     },
+    // T17 extends the shared state database with the audit ledger after the
+    // T09 contract was frozen. T09 does not exercise that table; compare the
+    // rest of the schema and all captured session/message rows, while naming
+    // this later-owned schema slot explicitly instead of letting it turn
+    // every public T09 scenario into a false regression at closeout.
+    {
+      field: "sqlite.db",
+      kind: "replace-json-pointer",
+      pointer: "/schema/17/sql",
+      replacement: "<WORKFLOW_AUDIT_EVENTS_SCHEMA>",
+    },
     {
       field: "sqlite.db",
       kind: "replace-json-pointer",
