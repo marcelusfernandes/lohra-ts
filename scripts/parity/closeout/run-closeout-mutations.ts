@@ -180,6 +180,14 @@ const mutations: readonly Mutation[] = [
     command: "t22-test",
     expected: "MUTATION_CAUSE:T22-node20-sqlite-dependency",
   },
+  {
+    id: "T22-aggregate-evidence",
+    file: "scripts/parity/closeout/verify-evidence.ts",
+    before: "const aggregatesPass = parityAggregatePass && mutationAggregatePass;",
+    after: "const aggregatesPass = true;",
+    command: "t22-test",
+    expected: "MUTATION_CAUSE:T22-aggregate-evidence",
+  },
 ];
 
 function run(

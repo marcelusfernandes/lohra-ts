@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
@@ -28,6 +28,11 @@ const packageJson = JSON.parse(readFileSync(join(project, "package.json"), "utf8
   readonly scripts: Readonly<Record<string, string>>;
 };
 const evidenceDirectory = join(project, ".parity-evidence", "t22");
+const targetSha = spawnSync("git", ["rev-parse", "HEAD"], {
+  cwd: project,
+  encoding: "utf8",
+}).stdout.trim();
+if (!/^[0-9a-f]{40}$/u.test(targetSha)) throw new Error("CLOSEOUT_TARGET_SHA");
 const oracleWorkspace = resolveOracleWorkspace({
   cwd: project,
   environment: process.env,
@@ -156,6 +161,7 @@ if (JSON.stringify(first) !== JSON.stringify(second)) {
   throw new Error(`CLOSEOUT_NONDETERMINISTIC:${different.join(",")}`);
 }
 const observation = {
+  targetSha,
   inventory: inventoryObservation,
   executions: first,
   runs: 2,

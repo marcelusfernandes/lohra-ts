@@ -74,8 +74,7 @@
     { "id": "probe:t22:security", "target": "tsx scripts/parity/closeout/security.ts" },
     { "id": "probe:t22:pty", "target": "tsx scripts/parity/closeout/pty.ts" },
     { "id": "probe:t22:no-python", "target": "tsx scripts/parity/closeout/no-python.ts" },
-    { "id": "probe:t22:concurrency", "target": "tsx scripts/parity/closeout/concurrency.ts" },
-    { "id": "verify:t22:evidence", "target": "tsx scripts/parity/closeout/verify-evidence.ts" }
+    { "id": "probe:t22:concurrency", "target": "tsx scripts/parity/closeout/concurrency.ts" }
   ],
   "aliases": [
     {
@@ -128,5 +127,5 @@
   ],
   "generators": ["parity:t13:fanout:generate", "parity:t20:generate-manifests"],
   "helpers": ["scripts/parity/mcp/oracle-r1-probe.py", "scripts/parity/mcp/r1-probe.mjs"],
-  "meta": ["parity", "parity:closeout", "mutations:closeout"]
+  "meta": ["parity", "parity:closeout", "mutations:closeout", "verify:t22:evidence"]
 }

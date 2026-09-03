@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const project = resolve(import.meta.dirname, "../../..");
@@ -42,6 +42,13 @@ function evidence(name: string): Readonly<Record<string, unknown>> {
   >;
 }
 
+function optionalEvidence(name: string): Readonly<Record<string, unknown>> | undefined {
+  const path = join(evidenceDirectory, name);
+  return existsSync(path)
+    ? (JSON.parse(readFileSync(path, "utf8")) as Readonly<Record<string, unknown>>)
+    : undefined;
+}
+
 const targetSha = git(["rev-parse", "HEAD"]);
 const ancestry = approved.map(([ticket, sha]) => {
   const result = spawnSync("git", ["merge-base", "--is-ancestor", sha, "HEAD"], {
@@ -81,10 +88,60 @@ const upstreamResult = spawnSync("git", ["rev-parse", "@{upstream}"], {
   encoding: "utf8",
 });
 const upstream = upstreamResult.status === 0 ? upstreamResult.stdout.trim() : null;
+const closeout = optionalEvidence("closeout.json");
+const mutations = optionalEvidence("mutations-closeout.json");
+const nativeMac = optionalEvidence("native-macos.json");
+const gates = optionalEvidence("gates.json");
+const parityAggregatePass =
+  closeout?.targetSha === targetSha &&
+  closeout.runs === 2 &&
+  closeout.deterministic === true &&
+  closeout.missing === 0 &&
+  closeout.unexpected === 0 &&
+  closeout.skipped === 0 &&
+  closeout.failures === 0 &&
+  closeout.networkUsed === false &&
+  closeout.credentialsUsed === false;
+const mutationAggregatePass =
+  mutations?.targetSha === targetSha &&
+  mutations.restoreClean === true &&
+  mutations.networkUsed === false &&
+  mutations.credentialsUsed === false &&
+  Array.isArray(mutations.legacy) &&
+  (mutations.legacy as readonly unknown[]).every((row) => {
+    if (typeof row !== "object" || row === null) return false;
+    const record = row as Readonly<Record<string, unknown>>;
+    return record.runs === 2 && record.survivors === 0;
+  }) &&
+  typeof mutations.t22 === "object" &&
+  mutations.t22 !== null &&
+  "baseline" in mutations.t22 &&
+  mutations.t22.baseline === true &&
+  "survivors" in mutations.t22 &&
+  Array.isArray(mutations.t22.survivors) &&
+  mutations.t22.survivors.length === 0;
+const aggregatesPass = parityAggregatePass && mutationAggregatePass;
+const nativeMacPass =
+  nativeMac?.targetSha === targetSha &&
+  nativeMac.platform === "darwin" &&
+  nativeMac.arch === "arm64" &&
+  nativeMac.node20 === true &&
+  nativeMac.node22 === true &&
+  nativeMac.networkUsed === false &&
+  nativeMac.credentialsUsed === false;
+const gatesPass =
+  gates?.targetSha === targetSha &&
+  gates.typecheck === true &&
+  gates.lint === true &&
+  gates.build === true &&
+  gates.testFiles === 150 &&
+  gates.tests === 1474 &&
+  gates.format === true &&
+  gates.pack === true;
 const assertions = {
   A1: { status: worktreeClean && upstream === targetSha ? "PASS" : "PENDING", layer: "git" },
   A2: { status: "PASS", layer: "git", count: ancestry.length },
-  A3: { status: "PENDING", layer: "aggregate" },
+  A3: { status: aggregatesPass ? "PASS" : "PENDING", layer: "aggregate" },
   A4: { status: "PENDING_USER_RULINGS", layer: "docs", referenceTreePreserved: true },
   B5: { status: "PASS", layer: "real-git" },
   B6: { status: "PASS", layer: "real-git" },
@@ -94,15 +151,18 @@ const assertions = {
   C10: { status: "PASS", layer: "process" },
   C11: { status: "PASS", layer: "public-process" },
   C12: { status: "PASS", layer: "public-process-sqlite" },
-  C13: { status: "PENDING", layer: "aggregate" },
+  C13: { status: parityAggregatePass ? "PASS" : "PENDING", layer: "aggregate" },
   C14: { status: "PASS", layer: "adversarial-process" },
   D15: { status: "PASS", layer: "fresh-install" },
   D16: { status: "NOT_MEASURED", layer: "native-matrix", reason: "runner evidence pending" },
-  D17: { status: "PARTIAL_MAC_NODE22", layer: "native-pty" },
-  D18: { status: "PARTIAL_MAC_NODE22", layer: "fresh-install-canary" },
-  E19: { status: "PENDING", layer: "full-gates" },
+  D17: { status: nativeMacPass ? "PASS_MAC_NODE20_NODE22" : "PENDING", layer: "native-pty" },
+  D18: {
+    status: nativeMacPass ? "PASS_MAC_NODE20_NODE22" : "PENDING",
+    layer: "fresh-install-canary",
+  },
+  E19: { status: gatesPass ? "PASS" : "PENDING", layer: "full-gates" },
   E20: { status: "PASS", layer: "concurrent-process" },
-  E21: { status: "PENDING", layer: "aggregate" },
+  E21: { status: aggregatesPass ? "PASS" : "PENDING", layer: "aggregate" },
   E22: { status: "PASS", layer: "evidence-index" },
   E23: { status: "PENDING_EVALUATOR", layer: "independent-review" },
 };
@@ -120,9 +180,42 @@ const observation = {
         .digest("hex"),
     ]),
   ),
+  aggregateEvidence: {
+    closeout:
+      closeout === undefined
+        ? null
+        : createHash("sha256")
+            .update(`${JSON.stringify(closeout)}\n`)
+            .digest("hex"),
+    mutations:
+      mutations === undefined
+        ? null
+        : createHash("sha256")
+            .update(`${JSON.stringify(mutations)}\n`)
+            .digest("hex"),
+    nativeMac:
+      nativeMac === undefined
+        ? null
+        : createHash("sha256")
+            .update(`${JSON.stringify(nativeMac)}\n`)
+            .digest("hex"),
+    gates:
+      gates === undefined
+        ? null
+        : createHash("sha256")
+            .update(`${JSON.stringify(gates)}\n`)
+            .digest("hex"),
+  },
   assertions,
   finalReady: false,
-  blockers: ["D16_NATIVE_MATRIX", "A4_ARCHITECTURE_AND_PATH_RULINGS", "E21_AGGREGATE"],
+  blockers: [
+    "D16_WINDOWS_NATIVE_MATRIX",
+    "A4_ARCHITECTURE_AND_PATH_RULINGS",
+    "E23_INDEPENDENT_EVALUATOR",
+    ...(aggregatesPass ? [] : ["E21_AGGREGATE"]),
+    ...(nativeMacPass ? [] : ["D17_D18_MAC_NATIVE_MATRIX"]),
+    ...(gatesPass ? [] : ["E19_FULL_GATES"]),
+  ],
   networkUsed: false,
   credentialsUsed: false,
   liveProviderUsed: false,

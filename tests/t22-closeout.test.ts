@@ -132,4 +132,13 @@ describe("T22 closeout invariants", () => {
     expect(output).toContain('"evidenceSha":"<volatile-artifact-sha>"');
     expect(output).toContain('"evidenceSha":"must-survive"');
   });
+
+  it("requires exact-SHA aggregate evidence before marking the closeout complete", () => {
+    const verifier = source("scripts/parity/closeout/verify-evidence.ts");
+    expect(verifier, "MUTATION_CAUSE:T22-aggregate-evidence").toContain(
+      "const aggregatesPass = parityAggregatePass && mutationAggregatePass;",
+    );
+    expect(verifier).toContain("closeout?.targetSha === targetSha");
+    expect(verifier).toContain("mutations?.targetSha === targetSha");
+  });
 });
