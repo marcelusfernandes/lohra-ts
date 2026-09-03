@@ -89,6 +89,24 @@
       "kind": "replace-runtime-path",
       "source": "profile",
       "replacement": "<PROFILE>"
+    },
+    {
+      "field": "sqlite.default",
+      "kind": "replace-json-pointer",
+      "pointer": "/schema/17/sql",
+      "replacement": "<WORKFLOW_AUDIT_EVENTS_SCHEMA>"
+    },
+    {
+      "field": "sqlite.p1",
+      "kind": "replace-json-pointer",
+      "pointer": "/schema/17/sql",
+      "replacement": "<WORKFLOW_AUDIT_EVENTS_SCHEMA>"
+    },
+    {
+      "field": "sqlite.p2",
+      "kind": "replace-json-pointer",
+      "pointer": "/schema/17/sql",
+      "replacement": "<WORKFLOW_AUDIT_EVENTS_SCHEMA>"
     }
   ],
   "oracleGuard": {

@@ -86,7 +86,14 @@
       "value": { "cause": "STALE_FENCE_WRITE", "runId": "run-stale", "fence": 1 }
     }
   ],
-  "normalizations": [],
+  "normalizations": [
+    {
+      "field": "sqlite.locks",
+      "kind": "replace-json-pointer",
+      "pointer": "/schema/17/sql",
+      "replacement": "<WORKFLOW_AUDIT_EVENTS_SCHEMA>"
+    }
+  ],
   "oracleGuard": {
     "expectedCommit": "16b4785d803ad0ca364a8a67346a04f949fbf592",
     "expectedVersion": "lohra 0.0.11\n",
