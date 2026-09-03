@@ -353,7 +353,7 @@ manifest({
     pointer("/implemented/init", true, "candidate"),
     pointer("/implemented/profile", true, "candidate"),
     pointer("/implemented/skill", true, "candidate"),
-    pointer("/remaining", ["dashboard", "cron", "workflow", "update"], "candidate"),
+    pointer("/remaining", [], "candidate"),
     pointer("/help13", true, "candidate"),
   ],
 });

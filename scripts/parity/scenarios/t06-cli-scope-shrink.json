@@ -109,7 +109,7 @@
       "field": "process.stdout",
       "encoding": "utf8",
       "pointer": "/remaining",
-      "value": ["dashboard", "cron", "workflow", "update"]
+      "value": []
     },
     {
       "side": "candidate",
