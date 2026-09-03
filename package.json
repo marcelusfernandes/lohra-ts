@@ -94,6 +94,13 @@
     "parity:t21:gates": "tsx scripts/parity/media/run-gates.ts",
     "mutations:t21": "tsx scripts/parity/media/run-mutations.ts",
     "pack:t21": "node scripts/parity/media/pack-smoke.mjs",
+    "parity:t22:update": "tsx scripts/parity/closeout/update.ts",
+    "probe:t22:update": "tsx scripts/parity/closeout/update.ts",
+    "probe:t22:composition": "tsx scripts/parity/closeout/composition.ts",
+    "probe:t22:security": "tsx scripts/parity/closeout/security.ts",
+    "probe:t22:pty": "tsx scripts/parity/closeout/pty.ts",
+    "probe:t22:no-python": "tsx scripts/parity/closeout/no-python.ts",
+    "probe:t22:concurrency": "tsx scripts/parity/closeout/concurrency.ts",
     "pack:check": "tsx scripts/pack-check.ts"
   },
   "dependencies": {
