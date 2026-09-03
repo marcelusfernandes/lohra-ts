@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { checkUpdate, locateRepo, performUpdate } from "../../../src/self-update/index.js";
+import { evidenceTargetSha } from "./evidence.js";
 
 const project = resolve(import.meta.dirname, "../../..");
 const evidenceDirectory = join(project, ".parity-evidence", "t22");
@@ -120,6 +121,7 @@ try {
     "error",
   ];
   const observation = {
+    targetSha: evidenceTargetSha(project),
     statuses,
     refusalsMutatedHead: false,
     checkMutatedHead: false,

@@ -96,7 +96,7 @@ tickets, SHAs e dívidas está em [docs/closeout.md](docs/closeout.md).
 
 ## Decisão arquitetural
 
-O closeout produz a evidência necessária para a decisão obrigatória entre:
-TypeScript mainline, retorno ao Python com backports ou dual-track com
-fronteiras. A decisão final e a estratégia de preservação do arquivo local
-`docs/gate-decision.md` pertencem ao owner e não são inferidas pelo build.
+O owner escolheu `typescript-mainline` para o novo capítulo. A decisão, seus
+limites e a estratégia de preservação do arquivo local protegido estão em
+[docs/gate-decision-t22.md](docs/gate-decision-t22.md). O runtime Python segue
+somente como oracle semântico read-only; nenhuma implementação é feita nele.

@@ -188,6 +188,38 @@ const mutations: readonly Mutation[] = [
     command: "t22-test",
     expected: "MUTATION_CAUSE:T22-aggregate-evidence",
   },
+  {
+    id: "T22-component-sha-binding",
+    file: "scripts/parity/closeout/verify-evidence.ts",
+    before: "if (value.targetSha !== targetSha) throw new Error(`EVIDENCE_TARGET:${name}`);",
+    after: "if (false) throw new Error(`EVIDENCE_TARGET:${name}`);",
+    command: "t22-test",
+    expected: "MUTATION_CAUSE:T22-component-sha-binding",
+  },
+  {
+    id: "T22-owner-ruling-binding",
+    file: "scripts/parity/closeout/verify-evidence.ts",
+    before: 'gateDecision.includes("typescript-mainline") &&',
+    after: "true &&",
+    command: "t22-test",
+    expected: "MUTATION_CAUSE:T22-owner-ruling-binding",
+  },
+  {
+    id: "T22-measured-test-floor",
+    file: "scripts/parity/closeout/verify-evidence.ts",
+    before: "gates.tests >= 1475",
+    after: "gates.tests === 1474",
+    command: "t22-test",
+    expected: "MUTATION_CAUSE:T22-measured-test-floor",
+  },
+  {
+    id: "T22-docs-architecture-decided",
+    file: "README.md",
+    before: "O owner escolheu `typescript-mainline`",
+    after: "O owner ainda precisa escolher `typescript-mainline`",
+    command: "docs-test",
+    expected: "MUTATION_CAUSE:T22-docs-architecture-decided",
+  },
 ];
 
 function run(

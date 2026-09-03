@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 
 import { prepareOfflineTarballConsumer } from "../../offline-tarball-install.js";
+import { evidenceTargetSha } from "./evidence.js";
 
 const project = resolve(import.meta.dirname, "../../..");
 const root = mkdtempSync(join(tmpdir(), "lohra-t22-no-python-"));
@@ -211,6 +212,7 @@ try {
   if (attempts.length !== 0) throw new Error(`PYTHON_CANARY:${attempts.join(",")}`);
   const tarballBytes = readFileSync(tarball);
   const observation = {
+    targetSha: evidenceTargetSha(project),
     tarball: {
       sha256: createHash("sha256").update(tarballBytes).digest("hex"),
       entries: entries.length,

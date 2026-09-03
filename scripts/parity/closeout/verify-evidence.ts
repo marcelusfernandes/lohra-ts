@@ -1,10 +1,23 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 const project = resolve(import.meta.dirname, "../../..");
 const evidenceDirectory = join(project, ".parity-evidence", "t22");
+const artifactRoot = join(
+  homedir(),
+  ".traycer",
+  "epics",
+  "6d90265d-c5f9-4889-82f0-41835b76b4ec",
+  "artifacts",
+  "autobuild",
+  "lohra-ts-parity",
+  "sprint-07",
+);
+const rulingPath = join(artifactRoot, "gate-decision-ruling", "index.md");
+const runProvenancePath = join(artifactRoot, "t22-run-provenance", "index.md");
 const approved = [
   ["T00", "5b2d62c65f282683609d5d3801b3bfaf4448aff4"],
   ["T01", "8901ea084e5797980650bd512f4fcd8fe251c952"],
@@ -49,6 +62,10 @@ function optionalEvidence(name: string): Readonly<Record<string, unknown>> | und
     : undefined;
 }
 
+function fileDigest(path: string): string | null {
+  return existsSync(path) ? createHash("sha256").update(readFileSync(path)).digest("hex") : null;
+}
+
 const targetSha = git(["rev-parse", "HEAD"]);
 const ancestry = approved.map(([ticket, sha]) => {
   const result = spawnSync("git", ["merge-base", "--is-ancestor", sha, "HEAD"], {
@@ -71,6 +88,7 @@ const components = {
   concurrency: evidence("concurrency.json"),
 };
 for (const [name, value] of Object.entries(components)) {
+  if (value.targetSha !== targetSha) throw new Error(`EVIDENCE_TARGET:${name}`);
   for (const key of ["networkUsed", "credentialsUsed"] as const) {
     if (value[key] !== false) throw new Error(`EVIDENCE_FLAG:${name}:${key}`);
   }
@@ -92,6 +110,19 @@ const closeout = optionalEvidence("closeout.json");
 const mutations = optionalEvidence("mutations-closeout.json");
 const nativeMac = optionalEvidence("native-macos.json");
 const gates = optionalEvidence("gates.json");
+const gateDecisionPath = join(project, "docs", "gate-decision-t22.md");
+const gateDecision = existsSync(gateDecisionPath) ? readFileSync(gateDecisionPath, "utf8") : "";
+const ruling = existsSync(rulingPath) ? readFileSync(rulingPath, "utf8") : "";
+const runProvenance = existsSync(runProvenancePath) ? readFileSync(runProvenancePath, "utf8") : "";
+const architectureRulingPass =
+  gateDecision.includes("typescript-mainline") &&
+  ruling.includes("typescript-mainline") &&
+  ruling.includes("docs/gate-decision-t22.md") &&
+  ruling.includes("marcelusfernandes") &&
+  ruling.includes("2026-09-03");
+const componentEvidencePass = Object.values(components).every(
+  (value) => value.targetSha === targetSha,
+);
 const parityAggregatePass =
   closeout?.targetSha === targetSha &&
   closeout.runs === 2 &&
@@ -134,15 +165,34 @@ const gatesPass =
   gates.typecheck === true &&
   gates.lint === true &&
   gates.build === true &&
-  gates.testFiles === 150 &&
-  gates.tests === 1474 &&
+  typeof gates.testFiles === "number" &&
+  gates.testFiles >= 150 &&
+  typeof gates.tests === "number" &&
+  gates.tests >= 1475 &&
   gates.format === true &&
   gates.pack === true;
+const runProvenancePass =
+  runProvenance.includes(targetSha) &&
+  runProvenance.includes("gates.json") &&
+  runProvenance.includes("native-macos.json") &&
+  runProvenance.includes("manual provenance");
+const evidenceIndexPass =
+  componentEvidencePass &&
+  architectureRulingPass &&
+  runProvenancePass &&
+  closeout !== undefined &&
+  mutations !== undefined &&
+  nativeMac !== undefined &&
+  gates !== undefined;
 const assertions = {
   A1: { status: worktreeClean && upstream === targetSha ? "PASS" : "PENDING", layer: "git" },
   A2: { status: "PASS", layer: "git", count: ancestry.length },
   A3: { status: aggregatesPass ? "PASS" : "PENDING", layer: "aggregate" },
-  A4: { status: "PENDING_USER_RULINGS", layer: "docs", referenceTreePreserved: true },
+  A4: {
+    status: architectureRulingPass ? "PASS" : "PENDING_USER_RULINGS",
+    layer: "docs",
+    referenceTreePreserved: true,
+  },
   B5: { status: "PASS", layer: "real-git" },
   B6: { status: "PASS", layer: "real-git" },
   B7: { status: "PASS", layer: "real-git" },
@@ -163,7 +213,7 @@ const assertions = {
   E19: { status: gatesPass ? "PASS" : "PENDING", layer: "full-gates" },
   E20: { status: "PASS", layer: "concurrent-process" },
   E21: { status: aggregatesPass ? "PASS" : "PENDING", layer: "aggregate" },
-  E22: { status: "PASS", layer: "evidence-index" },
+  E22: { status: evidenceIndexPass ? "PASS" : "PENDING", layer: "evidence-index" },
   E23: { status: "PENDING_EVALUATOR", layer: "independent-review" },
 };
 const observation = {
@@ -172,6 +222,39 @@ const observation = {
   worktreeClean,
   ancestry,
   referenceTrees: { base: referenceBase, head: referenceHead, equal: true },
+  protectedPaths: {
+    policy: "T22 commits did not touch protected paths; .gitignore is inherited ancestry",
+    gitignore: {
+      base: git(["rev-parse", "7e7363baa4193037e06cae8f480b3ab868453fef:.gitignore"]),
+      head: git(["rev-parse", "HEAD:.gitignore"]),
+      inheritedFromApprovedHeads: [
+        "e4415ddabd6bf27196f443f7c95e282ebcef86af",
+        "846daf9c3de7766b1736d02a1a4b3a52fa02d5f2",
+        "879b16788d83ab32d45216c25403e9b4b8faecb1",
+        "78b93ec89995ae72f275ec58c1acea5739b96da9",
+        "9d98cc97473f5523d0a961ef48073456db40522d",
+        "3c39315f48665eea5230b03c6c57ddd25fe377bb",
+      ].every(
+        (sha) => git(["rev-parse", `${sha}:.gitignore`]) === git(["rev-parse", "HEAD:.gitignore"]),
+      ),
+    },
+  },
+  rulings: {
+    architecture: "typescript-mainline",
+    protectedPathStrategy: "docs/gate-decision-t22.md",
+    rulingArtifactSha256: fileDigest(rulingPath),
+    pass: architectureRulingPass,
+  },
+  interpretations: {
+    inventoryMeta:
+      "parity requires a manifest and verify:t22:evidence is the post-hoc verifier; neither executes recursively inside closeout",
+    t08t09:
+      "the all-runners are the stronger coverage parents for structurally identical parity CLI aliases",
+    evidenceIntegrity:
+      "E22 is derived from SHA-bound components, rulings, provenance, and aggregate files",
+    updateAliases:
+      "parity:t22:update and probe:t22:update share one runner whose update.json covers bilateral status and argv/tree effects",
+  },
   components: Object.fromEntries(
     Object.entries(components).map(([name, value]) => [
       name,
@@ -206,15 +289,20 @@ const observation = {
             .update(`${JSON.stringify(gates)}\n`)
             .digest("hex"),
   },
+  externalEvidence: {
+    ruling: fileDigest(rulingPath),
+    runProvenance: fileDigest(runProvenancePath),
+  },
   assertions,
   finalReady: false,
   blockers: [
     "D16_WINDOWS_NATIVE_MATRIX",
-    "A4_ARCHITECTURE_AND_PATH_RULINGS",
+    ...(architectureRulingPass ? [] : ["A4_ARCHITECTURE_AND_PATH_RULINGS"]),
     "E23_INDEPENDENT_EVALUATOR",
     ...(aggregatesPass ? [] : ["E21_AGGREGATE"]),
     ...(nativeMacPass ? [] : ["D17_D18_MAC_NATIVE_MATRIX"]),
     ...(gatesPass ? [] : ["E19_FULL_GATES"]),
+    ...(evidenceIndexPass ? [] : ["E22_EVIDENCE_PROVENANCE"]),
   ],
   networkUsed: false,
   credentialsUsed: false,

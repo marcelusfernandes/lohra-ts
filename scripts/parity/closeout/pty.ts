@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { ApprovalManager, terminalTool } from "../../../src/tools/index.js";
+import { evidenceTargetSha } from "./evidence.js";
 
 const project = resolve(import.meta.dirname, "../../..");
 const evidenceDirectory = join(project, ".parity-evidence", "t22");
@@ -71,6 +72,7 @@ try {
   if (!helperExecutable) throw new Error("PTY_HELPER_NOT_EXECUTABLE");
 
   const observation = {
+    targetSha: evidenceTargetSha(project),
     package: "node-pty@1.1.0",
     native: true,
     cwd: true,

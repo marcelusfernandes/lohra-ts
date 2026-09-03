@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
+import { evidenceTargetSha } from "./evidence.js";
+
 const project = resolve(import.meta.dirname, "../../..");
 const evidenceDirectory = join(project, ".parity-evidence", "t22");
 const legacyLock = "/tmp/lohra-parity-11434.lock";
@@ -68,6 +70,7 @@ if (typeof outputs[0]?.digest !== "string" || outputs[0].digest !== outputs[1]?.
 if (existsSync(legacyLock)) throw new Error("CONCURRENT_GATE_LOCK_LEAK");
 
 const observation = {
+  targetSha: evidenceTargetSha(project),
   runs: 2,
   overlapped: true,
   bothPassed: true,

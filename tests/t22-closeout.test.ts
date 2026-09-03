@@ -141,4 +141,28 @@ describe("T22 closeout invariants", () => {
     expect(verifier).toContain("closeout?.targetSha === targetSha");
     expect(verifier).toContain("mutations?.targetSha === targetSha");
   });
+
+  it("binds every component and owner ruling before evidence integrity passes", () => {
+    const verifier = source("scripts/parity/closeout/verify-evidence.ts");
+    expect(verifier, "MUTATION_CAUSE:T22-component-sha-binding").toContain(
+      "value.targetSha !== targetSha",
+    );
+    expect(verifier, "MUTATION_CAUSE:T22-owner-ruling-binding").toContain(
+      "const architectureRulingPass =",
+    );
+    expect(verifier, "MUTATION_CAUSE:T22-owner-ruling-binding").toContain(
+      'gateDecision.includes("typescript-mainline")',
+    );
+    expect(verifier).toContain('ruling.includes("docs/gate-decision-t22.md")');
+    expect(verifier).toContain("const evidenceIndexPass =");
+    expect(verifier).not.toContain('E22: { status: "PASS"');
+  });
+
+  it("accepts measured growth in the full suite without stale exact-count constants", () => {
+    const verifier = source("scripts/parity/closeout/verify-evidence.ts");
+    expect(verifier, "MUTATION_CAUSE:T22-measured-test-floor").toContain("gates.tests >= 1475");
+    expect(verifier, "MUTATION_CAUSE:T22-measured-test-floor").not.toContain(
+      "gates.tests === 1474",
+    );
+  });
 });

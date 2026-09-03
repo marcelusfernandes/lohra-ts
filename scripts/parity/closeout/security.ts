@@ -8,6 +8,7 @@ import { MCPToolNameCollisionError } from "../../../src/mcp/tools.js";
 import { openStateDatabase, SessionRepository } from "../../../src/state/index.js";
 import { createBuiltinRegistry } from "../../../src/tools/index.js";
 import { GatewaySessionRegistry } from "../../../src/gateway/session-service.js";
+import { evidenceTargetSha } from "./evidence.js";
 
 const project = resolve(import.meta.dirname, "../../..");
 const evidenceDirectory = join(project, ".parity-evidence", "t22");
@@ -111,6 +112,7 @@ try {
   connection.close();
 
   const observation = {
+    targetSha: evidenceTargetSha(project),
     mcp: {
       cause: "MCP_TOOL_NAME_COLLISION",
       message: "MCP tool name collision: mcp_first_ping",

@@ -10,6 +10,7 @@ import { WebSocket } from "ws";
 import Database from "better-sqlite3";
 
 import { CronStore } from "../../../src/cron/store.js";
+import { evidenceTargetSha } from "./evidence.js";
 
 const project = resolve(import.meta.dirname, "../../..");
 const installedRoot = process.env.LOHRA_T22_INSTALLED_ROOT ?? project;
@@ -470,6 +471,7 @@ async function main(): Promise<void> {
     }
   }
   const observation = {
+    targetSha: evidenceTargetSha(project),
     chat: captured.filter((entry) => entry.surface === "chat").map((entry) => entry.tool),
     dashboard: captured.filter((entry) => entry.surface === "dashboard").map((entry) => entry.tool),
     placeholders: 0,

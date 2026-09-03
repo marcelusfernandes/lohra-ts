@@ -35,6 +35,9 @@ describe("T22 public documentation", () => {
     expect(readme).toContain("não existe\n`workflow run`");
     expect(readme).toContain("não\nembute nem chama Python");
     expect(readme).toContain("NOT_MEASURED");
+    expect(readme, "MUTATION_CAUSE:T22-docs-architecture-decided").toContain(
+      "O owner escolheu `typescript-mainline`",
+    );
   });
 
   it("records 23 tickets, approved SHAs, debts and owner rulings", () => {
@@ -45,7 +48,12 @@ describe("T22 public documentation", () => {
     expect(closeout).toContain("D3 / M4 e M4-bis");
     expect(closeout).toContain("P2");
     expect(closeout).toContain("NOT_MEASURED");
-    expect(closeout).toContain("PENDING_FINAL_SHA");
+    expect(closeout).toContain("EVIDENCE_BOUND_FINAL_SHA");
+    expect(closeout, "MUTATION_CAUSE:T22-docs-architecture-decided").toContain(
+      "typescript-mainline",
+    );
+    expect(closeout).toContain("gate-decision-t22.md");
+    expect(closeout).not.toContain("Gate arquitetural pendente");
   });
 
   it("has no broken relative Markdown links in public docs", () => {
