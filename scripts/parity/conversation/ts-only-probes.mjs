@@ -6,8 +6,8 @@ import process from "node:process";
 import { isDeepStrictEqual } from "node:util";
 
 import {
-  ConversationCancelledError,
   ConversationRuntime,
+  ConversationTurnFailedError,
   MaxIterationsError,
   UnexpectedToolCallError,
 } from "../../../dist/conversation/index.js";
@@ -215,9 +215,12 @@ await guarded("t08-max-iterations", async () => {
     },
     expected: {
       thrown: "MaxIterationsError:MAX_ITERATIONS",
-      dispatched: 0,
+      // T09 deliberately superseded the original T08 pre-dispatch ceiling:
+      // the bounded tool result and its usage remain observable on the
+      // MaxIterationsError, while the turn itself is never committed.
+      dispatched: 1,
       turnCommits: 0,
-      usageCommits: 0,
+      usageCommits: 1,
       closes: 1,
     },
   };
@@ -275,7 +278,11 @@ await guarded("t08-cancel-cleanup", async () => {
   try {
     await turn;
   } catch (error) {
-    if (error instanceof ConversationCancelledError) thrown = `${error.name}:${error.code}`;
+    // T13 separated abort state from abort causation: once a provider call
+    // has started, its rejection remains a model-call failure even when an
+    // AbortSignal caused the transport to reject. Cancellation is reserved
+    // for the pre-iteration check, before a request is issued.
+    if (error instanceof ConversationTurnFailedError) thrown = `${error.name}:${error.code}`;
     else throw error;
   }
   return {
@@ -289,7 +296,7 @@ await guarded("t08-cancel-cleanup", async () => {
       failedEvent: events.at(-1),
     },
     expected: {
-      thrown: "ConversationCancelledError:CONVERSATION_CANCELLED",
+      thrown: "ConversationTurnFailedError:MODEL_CALL_FAILED",
       observedSignal: true,
       closes: 1,
       pending: false,
