@@ -54,13 +54,39 @@ describe("T22 closeout invariants", () => {
 
   it("normalizes reporter telemetry without masking semantic fields", () => {
     const input =
-      "user: Today's date is 2026-09-02; url=http://127.0.0.1:43210; path=/tmp/semantic\n Duration 12ms";
+      "user: Today's date is 2026-09-02; url=http://127.0.0.1:43210; path=/tmp/semantic\n Start at 02:33:59\n ✓ tests/example.test.ts (2 tests) 335ms\n Duration 12.5s";
     const output = normalizeCloseoutOutput(input);
     expect(output, "MUTATION_CAUSE:T22-normalization-scope").toContain(
       "Today's date is 2026-09-02",
     );
     expect(output).toContain("127.0.0.1:43210");
     expect(output).toContain("/tmp/semantic");
+    expect(output).toContain("Start at <clock>");
+    expect(output).toContain("✓ tests/example.test.ts (2 tests) <duration>");
     expect(output).toContain("Duration <duration>");
+  });
+
+  it("normalizes only volatile T13 artifact hashes in the structured suite summary", () => {
+    const summary = JSON.stringify({
+      suite: "t13-orchestration-delegation",
+      digest: "semantic-digest",
+      projections: [
+        {
+          id: "scenario",
+          sha: "judged-projection-sha",
+          evidenceSha: "volatile-evidence-sha",
+          class: "match",
+        },
+      ],
+    });
+    const semantic = JSON.stringify({
+      suite: "user-payload",
+      evidenceSha: "must-survive",
+    });
+    const output = normalizeCloseoutOutput(`${summary}\n${semantic}`);
+    expect(output).toContain('"digest":"semantic-digest"');
+    expect(output).toContain('"sha":"judged-projection-sha"');
+    expect(output).toContain('"evidenceSha":"<volatile-artifact-sha>"');
+    expect(output).toContain('"evidenceSha":"must-survive"');
   });
 });
