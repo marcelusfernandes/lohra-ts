@@ -72,6 +72,8 @@ export interface ExpectationSpec {
   readonly value: unknown;
   readonly encoding?: "utf8" | "base64";
   readonly pointer?: string;
+  /** Selects nested values; `*` expands one array/object level. */
+  readonly pointerPattern?: string;
 }
 
 export type NormalizationSpec =

@@ -29,6 +29,36 @@ describe("scenario manifest", () => {
     expect(parseScenarioManifest(validManifest).id).toBe("test-scenario");
   });
 
+  it("requires pointer patterns to contain a wildcard and forbids mixing pointer modes", () => {
+    expect(() =>
+      parseScenarioManifest({
+        ...validManifest,
+        expectations: [
+          {
+            side: "both",
+            field: "tree",
+            value: "x",
+            pointerPattern: "/records/0",
+          },
+        ],
+      }),
+    ).toThrow(/wildcard/i);
+    expect(() =>
+      parseScenarioManifest({
+        ...validManifest,
+        expectations: [
+          {
+            side: "both",
+            field: "tree",
+            value: "x",
+            pointer: "/records/0",
+            pointerPattern: "/records/*",
+          },
+        ],
+      }),
+    ).toThrow(/both pointer/i);
+  });
+
   it("rejects unknown fields instead of silently weakening the contract", () => {
     expect(() => parseScenarioManifest({ ...validManifest, normalizeEverything: true })).toThrow(
       /unknown field/i,

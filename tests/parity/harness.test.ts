@@ -312,6 +312,57 @@ describe("parity harness", () => {
     expect(evidence.expectations.failures).toHaveLength(2);
   });
 
+  it("matches expectation pointer patterns independently of array ordering", () => {
+    const manifest = parseScenarioManifest({
+      schemaVersion: 1,
+      id: "pointer-pattern-order",
+      description: "semantic expectation independent of concurrent record order",
+      argv: [],
+      environment: { allow: [], set: { PATH: "/usr/bin:/bin" } },
+      preconditions: [],
+      fixtures: [],
+      runners: {
+        oracle: {
+          adapter: "typescript",
+          executable: "node",
+          prefixArgs: [
+            "--input-type=module",
+            "-e",
+            'process.stdout.write(JSON.stringify({records:[{messages:["other"]},{messages:["denied"]}]}))',
+          ],
+        },
+        candidate: {
+          adapter: "typescript",
+          executable: "node",
+          prefixArgs: [
+            "--input-type=module",
+            "-e",
+            'process.stdout.write(JSON.stringify({records:[{messages:["denied"]},{messages:["other"]}]}))',
+          ],
+        },
+      },
+      limits: { timeoutMs: 10_000, maxOutputBytes: 1_048_576 },
+      capture: {
+        tree: { enabled: false, root: "home", exclude: [] },
+        sqlite: [],
+        events: [],
+      },
+      comparisons: [{ class: "byte", field: "process.exitCode" }],
+      expectations: [
+        {
+          side: "both",
+          field: "process.stdout",
+          encoding: "utf8",
+          pointerPattern: "/records/*/messages/*",
+          value: "denied",
+        },
+      ],
+      normalizations: [],
+    });
+    const evidence = runScenario(manifest);
+    expect(evidence.expectations.failures).toEqual([]);
+  });
+
   it("uses the manifest-declared working directory instead of the caller cwd", () => {
     const manifest = parseScenarioManifest({
       schemaVersion: 1,

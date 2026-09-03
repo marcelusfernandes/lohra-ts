@@ -450,7 +450,7 @@ function comparison(value: unknown, index: number): ComparisonSpec {
 function expectation(value: unknown, index: number): ExpectationSpec {
   const label = `expectations[${String(index)}]`;
   const item = object(value, label);
-  exactKeys(item, ["side", "field", "value", "encoding", "pointer"], label);
+  exactKeys(item, ["side", "field", "value", "encoding", "pointer", "pointerPattern"], label);
   if (!("value" in item)) {
     throw new HarnessError("MANIFEST_INVALID", `${label}.value is required`);
   }
@@ -471,12 +471,34 @@ function expectation(value: unknown, index: number): ExpectationSpec {
       throw new HarnessError("MANIFEST_INVALID", `${label}.pointer must address a child value`);
     }
   }
+  if (item.pointerPattern !== undefined) {
+    const pointerPattern = string(item.pointerPattern, `${label}.pointerPattern`);
+    if (
+      !pointerPattern.startsWith("/") ||
+      pointerPattern === "/" ||
+      !pointerPattern.split("/").includes("*")
+    ) {
+      throw new HarnessError(
+        "MANIFEST_INVALID",
+        `${label}.pointerPattern must address child values and include a wildcard segment`,
+      );
+    }
+    if (item.pointer !== undefined) {
+      throw new HarnessError(
+        "MANIFEST_INVALID",
+        `${label} cannot declare both pointer and pointerPattern`,
+      );
+    }
+  }
   return {
     side: enumeration(item.side, ["oracle", "candidate", "both"], `${label}.side`),
     field,
     value: item.value,
     ...(encoding === undefined ? {} : { encoding }),
     ...(item.pointer === undefined ? {} : { pointer: string(item.pointer, `${label}.pointer`) }),
+    ...(item.pointerPattern === undefined
+      ? {}
+      : { pointerPattern: string(item.pointerPattern, `${label}.pointerPattern`) }),
   };
 }
 

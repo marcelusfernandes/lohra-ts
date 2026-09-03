@@ -318,6 +318,22 @@ function expectationFailures(
   manifest: ScenarioManifest,
   runs: { readonly oracle: RunRecord; readonly candidate: RunRecord },
 ): EvidenceRecord["expectations"]["failures"] {
+  const pointerParts = (pointer: string): string[] =>
+    pointer
+      .slice(1)
+      .split("/")
+      .map((entry) => entry.replaceAll("~1", "/").replaceAll("~0", "~"));
+  const selectPattern = (value: unknown, parts: readonly string[]): readonly unknown[] => {
+    if (parts.length === 0) return [value];
+    if (typeof value !== "object" || value === null) return [];
+    const [part, ...rest] = parts;
+    if (part === "*") {
+      return Object.values(value).flatMap((entry) => selectPattern(entry, rest));
+    }
+    return part !== undefined && part in value
+      ? selectPattern((value as Record<string, unknown>)[part], rest)
+      : [];
+  };
   const failures: EvidenceRecord["expectations"]["failures"][number][] = [];
   for (const expectation of manifest.expectations) {
     const sides =
@@ -330,22 +346,23 @@ function expectationFailures(
         expectation.encoding === "utf8" && typeof raw === "string"
           ? Buffer.from(raw, "base64").toString("utf8")
           : raw;
-      if (expectation.pointer !== undefined) {
-        if (expectation.encoding === "utf8" && typeof actual === "string") {
-          try {
-            actual = JSON.parse(actual) as unknown;
-          } catch (error) {
-            throw new HarnessError(
-              "EXPECTATION_JSON",
-              `Expectation field ${expectation.field} is not valid JSON`,
-              { cause: error },
-            );
-          }
+      if (
+        (expectation.pointer !== undefined || expectation.pointerPattern !== undefined) &&
+        expectation.encoding === "utf8" &&
+        typeof actual === "string"
+      ) {
+        try {
+          actual = JSON.parse(actual) as unknown;
+        } catch (error) {
+          throw new HarnessError(
+            "EXPECTATION_JSON",
+            `Expectation field ${expectation.field} is not valid JSON`,
+            { cause: error },
+          );
         }
-        for (const part of expectation.pointer
-          .slice(1)
-          .split("/")
-          .map((entry) => entry.replaceAll("~1", "/").replaceAll("~0", "~"))) {
+      }
+      if (expectation.pointer !== undefined) {
+        for (const part of pointerParts(expectation.pointer)) {
           if (typeof actual !== "object" || actual === null || !(part in actual)) {
             throw new HarnessError(
               "EXPECTATION_POINTER",
@@ -355,12 +372,25 @@ function expectationFailures(
           actual = (actual as Record<string, unknown>)[part];
         }
       }
-      if (canonicalJson(actual) !== canonicalJson(expectation.value)) {
+      const pointerPattern = expectation.pointerPattern;
+      const selected =
+        pointerPattern === undefined ? null : selectPattern(actual, pointerParts(pointerPattern));
+      if (selected !== null && selected.length === 0) {
+        throw new HarnessError(
+          "EXPECTATION_POINTER",
+          `Expectation pointer pattern has no matches in ${expectation.field}`,
+        );
+      }
+      const matches =
+        selected === null
+          ? canonicalJson(actual) === canonicalJson(expectation.value)
+          : selected.some((entry) => canonicalJson(entry) === canonicalJson(expectation.value));
+      if (!matches) {
         failures.push({
           side,
           field: expectation.field,
           expected: expectation.value,
-          actual,
+          actual: selected ?? actual,
         });
       }
     }
