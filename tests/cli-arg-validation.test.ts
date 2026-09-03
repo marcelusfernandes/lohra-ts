@@ -10,10 +10,12 @@ import {
   CHAT_SPEC,
   MODELS_SPEC,
   AUTH_SPEC,
+  CRON_SPEC,
   PROFILE_SPEC,
   TIERS_SPEC,
   SKILL_SPEC,
   SKILL_EXPORT_SPEC,
+  WORKFLOW_WATCH_SPEC,
 } from "../src/cli/arg-spec.js";
 import { runCli, type CliIo } from "../src/cli.js";
 
@@ -126,6 +128,20 @@ describe("parseCommand — general mechanism (unit)", () => {
 
   it("--flag=value form is recognized for a known value-taking flag", () => {
     expect(parseCommand(MODELS_SPEC, ["--provider=bogus"]).options.get("--provider")).toBe("bogus");
+  });
+
+  it("keeps Python non-finite float spellings for cron while workflow polling stays finite", () => {
+    for (const value of ["nan", "inf", "-inf", "Infinity"]) {
+      const cron = parseCommand(CRON_SPEC, ["add", `--at=${value}`]);
+      expect(cron.error).toBeNull();
+      expect(cron.options.get("--at")).toBe(value);
+    }
+
+    expect(parseCommand(WORKFLOW_WATCH_SPEC, ["run", "--poll", "NaN"]).error).toEqual({
+      kind: "invalidFloat",
+      flag: "--poll",
+      value: "NaN",
+    });
   });
 });
 

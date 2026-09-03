@@ -42,6 +42,23 @@ function isFinitePythonFloat(value: string): boolean {
   return stripped !== "" && Number.isFinite(Number(stripped));
 }
 
+function isPythonFloat(value: string): boolean {
+  const stripped = value.trim();
+  const lower = stripped.toLowerCase();
+  return (
+    isFinitePythonFloat(stripped) ||
+    lower === "nan" ||
+    lower === "+nan" ||
+    lower === "-nan" ||
+    lower === "inf" ||
+    lower === "+inf" ||
+    lower === "-inf" ||
+    lower === "infinity" ||
+    lower === "+infinity" ||
+    lower === "-infinity"
+  );
+}
+
 /** argparse: a token starting with `-` is option-like unless it's exactly
  * "-" or looks like a negative number (no spec here declares a negative-
  * number-shaped flag, so that carve-out is unconditionally safe). Such a
@@ -115,7 +132,10 @@ export function parseCommand(spec: CommandSpec, argv: readonly string[]): ParseR
           extras,
           error: { kind: "invalidInt", flag: flag.name, value: next },
         };
-      if (flag.type === "float" && !isFinitePythonFloat(next))
+      if (
+        (flag.type === "float" && !isPythonFloat(next)) ||
+        (flag.type === "finiteFloat" && !isFinitePythonFloat(next))
+      )
         return {
           options,
           positionals,

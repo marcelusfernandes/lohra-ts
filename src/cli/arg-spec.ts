@@ -20,7 +20,7 @@
 export interface FlagSpec {
   readonly name: string;
   readonly takesValue: boolean;
-  readonly type?: "int" | "float";
+  readonly type?: "int" | "float" | "finiteFloat";
 }
 
 export interface PositionalSpec {
@@ -156,7 +156,7 @@ export const WORKFLOW_LIST_SPEC = spec([{ name: "--limit", takesValue: true, typ
 export const WORKFLOW_WATCH_SPEC = spec(
   [
     { name: "--last", takesValue: false },
-    { name: "--poll", takesValue: true, type: "float" },
+    { name: "--poll", takesValue: true, type: "finiteFloat" },
   ],
   [{ name: "run_id", required: false }],
 );
