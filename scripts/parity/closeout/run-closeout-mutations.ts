@@ -129,7 +129,7 @@ const mutations: readonly Mutation[] = [
     before: 'upstream.listen(0, "127.0.0.1"',
     after: 'upstream.listen(11434, "127.0.0.1"',
     command: "concurrency",
-    expected: "EADDRINUSE",
+    expected: "CONCURRENT_GATE_",
   },
   {
     id: "T22-platform-spoof",
