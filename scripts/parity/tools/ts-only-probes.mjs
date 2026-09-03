@@ -55,10 +55,10 @@ const probes = {
     return (
       JSON.stringify(
         childToolDefinitions(names.map(definition)).map((item) => item.function.name),
-      // T19 superseded the original T09 allow-list intersection with the
-      // oracle's parent-minus-deny-list rule. An arbitrary parent-provided
-      // MCP tool therefore remains visible; the explicitly excluded memory
-      // tool does not.
+        // T19 superseded the original T09 allow-list intersection with the
+        // oracle's parent-minus-deny-list rule. An arbitrary parent-provided
+        // MCP tool therefore remains visible; the explicitly excluded memory
+        // tool does not.
       ) === JSON.stringify(names.slice(0, 6))
     );
   },
