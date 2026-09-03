@@ -4,17 +4,26 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
+import {
+  architectureRulingMatches,
+  componentTargetMatches,
+  gatesEvidenceMatches,
+} from "./evidence-validation.js";
+
 const project = resolve(import.meta.dirname, "../../..");
 const evidenceDirectory = join(project, ".parity-evidence", "t22");
-const artifactRoot = join(
-  homedir(),
-  ".traycer",
-  "epics",
-  "6d90265d-c5f9-4889-82f0-41835b76b4ec",
-  "artifacts",
-  "autobuild",
-  "lohra-ts-parity",
-  "sprint-07",
+const artifactRoot = resolve(
+  process.env.LOHRA_T22_ARTIFACT_ROOT ??
+    join(
+      homedir(),
+      ".traycer",
+      "epics",
+      "6d90265d-c5f9-4889-82f0-41835b76b4ec",
+      "artifacts",
+      "autobuild",
+      "lohra-ts-parity",
+      "sprint-07",
+    ),
 );
 const rulingPath = join(artifactRoot, "gate-decision-ruling", "index.md");
 const runProvenancePath = join(artifactRoot, "t22-run-provenance", "index.md");
@@ -88,7 +97,7 @@ const components = {
   concurrency: evidence("concurrency.json"),
 };
 for (const [name, value] of Object.entries(components)) {
-  if (value.targetSha !== targetSha) throw new Error(`EVIDENCE_TARGET:${name}`);
+  if (!componentTargetMatches(value, targetSha)) throw new Error(`EVIDENCE_TARGET:${name}`);
   for (const key of ["networkUsed", "credentialsUsed"] as const) {
     if (value[key] !== false) throw new Error(`EVIDENCE_FLAG:${name}:${key}`);
   }
@@ -114,14 +123,9 @@ const gateDecisionPath = join(project, "docs", "gate-decision-t22.md");
 const gateDecision = existsSync(gateDecisionPath) ? readFileSync(gateDecisionPath, "utf8") : "";
 const ruling = existsSync(rulingPath) ? readFileSync(rulingPath, "utf8") : "";
 const runProvenance = existsSync(runProvenancePath) ? readFileSync(runProvenancePath, "utf8") : "";
-const architectureRulingPass =
-  gateDecision.includes("typescript-mainline") &&
-  ruling.includes("typescript-mainline") &&
-  ruling.includes("docs/gate-decision-t22.md") &&
-  ruling.includes("marcelusfernandes") &&
-  ruling.includes("2026-09-03");
-const componentEvidencePass = Object.values(components).every(
-  (value) => value.targetSha === targetSha,
+const architectureRulingPass = architectureRulingMatches(gateDecision, ruling);
+const componentEvidencePass = Object.values(components).every((value) =>
+  componentTargetMatches(value, targetSha),
 );
 const parityAggregatePass =
   closeout?.targetSha === targetSha &&
@@ -160,17 +164,7 @@ const nativeMacPass =
   nativeMac.node22 === true &&
   nativeMac.networkUsed === false &&
   nativeMac.credentialsUsed === false;
-const gatesPass =
-  gates?.targetSha === targetSha &&
-  gates.typecheck === true &&
-  gates.lint === true &&
-  gates.build === true &&
-  typeof gates.testFiles === "number" &&
-  gates.testFiles >= 150 &&
-  typeof gates.tests === "number" &&
-  gates.tests >= 1475 &&
-  gates.format === true &&
-  gates.pack === true;
+const gatesPass = gates !== undefined && gatesEvidenceMatches(gates, targetSha);
 const runProvenancePass =
   runProvenance.includes(targetSha) &&
   runProvenance.includes("gates.json") &&

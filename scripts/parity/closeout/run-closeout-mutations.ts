@@ -190,15 +190,15 @@ const mutations: readonly Mutation[] = [
   },
   {
     id: "T22-component-sha-binding",
-    file: "scripts/parity/closeout/verify-evidence.ts",
-    before: "if (value.targetSha !== targetSha) throw new Error(`EVIDENCE_TARGET:${name}`);",
-    after: "if (false) throw new Error(`EVIDENCE_TARGET:${name}`);",
+    file: "scripts/parity/closeout/evidence-validation.ts",
+    before: "return value.targetSha === targetSha;",
+    after: "return value.targetSha !== targetSha;",
     command: "t22-test",
     expected: "MUTATION_CAUSE:T22-component-sha-binding",
   },
   {
     id: "T22-owner-ruling-binding",
-    file: "scripts/parity/closeout/verify-evidence.ts",
+    file: "scripts/parity/closeout/evidence-validation.ts",
     before: 'gateDecision.includes("typescript-mainline") &&',
     after: "true &&",
     command: "t22-test",
@@ -206,7 +206,7 @@ const mutations: readonly Mutation[] = [
   },
   {
     id: "T22-measured-test-floor",
-    file: "scripts/parity/closeout/verify-evidence.ts",
+    file: "scripts/parity/closeout/evidence-validation.ts",
     before: "gates.tests >= 1475",
     after: "gates.tests === 1474",
     command: "t22-test",

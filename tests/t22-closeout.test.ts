@@ -3,6 +3,11 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import {
+  architectureRulingMatches,
+  componentTargetMatches,
+  gatesEvidenceMatches,
+} from "../scripts/parity/closeout/evidence-validation.js";
 import { normalizeCloseoutOutput } from "../scripts/parity/closeout/normalization.js";
 
 const root = resolve(import.meta.dirname, "..");
@@ -144,25 +149,47 @@ describe("T22 closeout invariants", () => {
 
   it("binds every component and owner ruling before evidence integrity passes", () => {
     const verifier = source("scripts/parity/closeout/verify-evidence.ts");
-    expect(verifier, "MUTATION_CAUSE:T22-component-sha-binding").toContain(
-      "value.targetSha !== targetSha",
+    expect(
+      componentTargetMatches({ targetSha: "stale" }, "current"),
+      "MUTATION_CAUSE:T22-component-sha-binding",
+    ).toBe(false);
+    expect(componentTargetMatches({ targetSha: "current" }, "current")).toBe(true);
+    expect(
+      architectureRulingMatches(
+        "decision absent",
+        "typescript-mainline docs/gate-decision-t22.md marcelusfernandes 2026-09-03",
+      ),
+      "MUTATION_CAUSE:T22-owner-ruling-binding",
+    ).toBe(false);
+    expect(
+      architectureRulingMatches(
+        "typescript-mainline",
+        "typescript-mainline docs/gate-decision-t22.md marcelusfernandes 2026-09-03",
+      ),
+    ).toBe(true);
+    expect(verifier).toContain(
+      "const architectureRulingPass = architectureRulingMatches(gateDecision, ruling)",
     );
-    expect(verifier, "MUTATION_CAUSE:T22-owner-ruling-binding").toContain(
-      "const architectureRulingPass =",
-    );
-    expect(verifier, "MUTATION_CAUSE:T22-owner-ruling-binding").toContain(
-      'gateDecision.includes("typescript-mainline")',
-    );
-    expect(verifier).toContain('ruling.includes("docs/gate-decision-t22.md")');
     expect(verifier).toContain("const evidenceIndexPass =");
     expect(verifier).not.toContain('E22: { status: "PASS"');
+    expect(verifier).toContain("process.env.LOHRA_T22_ARTIFACT_ROOT");
   });
 
   it("accepts measured growth in the full suite without stale exact-count constants", () => {
-    const verifier = source("scripts/parity/closeout/verify-evidence.ts");
-    expect(verifier, "MUTATION_CAUSE:T22-measured-test-floor").toContain("gates.tests >= 1475");
-    expect(verifier, "MUTATION_CAUSE:T22-measured-test-floor").not.toContain(
-      "gates.tests === 1474",
-    );
+    const valid = {
+      targetSha: "current",
+      typecheck: true,
+      lint: true,
+      build: true,
+      testFiles: 150,
+      tests: 1475,
+      format: true,
+      pack: true,
+    };
+    expect(gatesEvidenceMatches(valid, "current")).toBe(true);
+    expect(
+      gatesEvidenceMatches({ ...valid, tests: 1474 }, "current"),
+      "MUTATION_CAUSE:T22-measured-test-floor",
+    ).toBe(false);
   });
 });
