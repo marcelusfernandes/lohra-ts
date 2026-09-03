@@ -10,7 +10,9 @@ const suites = [
 ] as const;
 
 const APPROVED_DIGESTS: Readonly<Record<(typeof suites)[number][0], string>> = Object.freeze({
-  t09: "e6327b5c3c48158a49a85bc0b332291f39052e3f40395f097821e9d0a48219f5",
+  // T22 integration digest: preserves all 38 T09 verdict classes after the
+  // approved T17/T19 composition-root and hardening successors were merged.
+  t09: "c4709493c630ef886c077d7c492f22667ab84c0e0882bf8b39c4c6a2869c3cb9",
   t10: "635f56867579c85fc51293e83223065c56cbac9269902b55b91662c2b1c8fd44",
   t11: "d9e909a4cf20bd2a89a5802794164cd3733771eb1ca5c65a2c5f8bdcf4907c1e",
 });
