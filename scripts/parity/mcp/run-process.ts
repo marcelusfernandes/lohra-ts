@@ -11,6 +11,7 @@ import {
   type MCPSession,
   type MCPServerConfig,
 } from "../../../src/mcp/index.js";
+import { MCPToolNameCollisionError } from "../../../src/mcp/tools.js";
 import { createBuiltinRegistry, ToolRegistry } from "../../../src/tools/index.js";
 import {
   assertTcpPortsClosed,
@@ -76,15 +77,20 @@ results.push(
     const registry = new ToolRegistry();
     const tool = [{ name: "search", description: "d", inputSchema: { type: "object" } }];
     registerServerTools(registry, "github.com", tool, () => ({ content: [], isError: false }));
-    registerServerTools(registry, "github_com", tool, () => ({ content: [], isError: false }));
+    let collision: unknown;
+    try {
+      registerServerTools(registry, "github_com", tool, () => ({ content: [], isError: false }));
+    } catch (error) {
+      collision = error;
+    }
     const before = {
-      loser: registry.namesInToolset("mcp-github.com"),
-      winner: registry.namesInToolset("mcp-github_com"),
+      existingOwner: registry.namesInToolset("mcp-github.com"),
+      rejectedOwner: registry.namesInToolset("mcp-github_com"),
     };
-    deregisterServer(registry, "github.com");
-    const afterLoserDeregister = registry.namesInToolset("mcp-github_com");
     deregisterServer(registry, "github_com");
-    const afterWinnerDeregister = registry.namesInToolset("mcp-github_com");
+    const afterRejectedOwnerDeregister = registry.namesInToolset("mcp-github.com");
+    deregisterServer(registry, "github.com");
+    const afterExistingOwnerDeregister = registry.namesInToolset("mcp-github.com");
 
     const rawToolsetRegistry = new ToolRegistry();
     registerServerTools(
@@ -99,22 +105,30 @@ results.push(
     };
     return {
       pass:
-        before.loser.length === 0 &&
-        JSON.stringify(before.winner) === JSON.stringify(["mcp_github_com_search"]) &&
-        JSON.stringify(afterLoserDeregister) === JSON.stringify(["mcp_github_com_search"]) &&
-        afterWinnerDeregister.length === 0 &&
+        collision instanceof MCPToolNameCollisionError &&
+        Object.getOwnPropertyDescriptor(collision, "cause")?.value === "MCP_TOOL_NAME_COLLISION" &&
+        collision.message === "MCP tool name collision: mcp_github_com_search" &&
+        JSON.stringify(before.existingOwner) === JSON.stringify(["mcp_github_com_search"]) &&
+        before.rejectedOwner.length === 0 &&
+        JSON.stringify(afterRejectedOwnerDeregister) ===
+          JSON.stringify(["mcp_github_com_search"]) &&
+        afterExistingOwnerDeregister.length === 0 &&
         JSON.stringify(rawToolsetProof.raw) === JSON.stringify(["mcp_my_server_weird_name"]) &&
         rawToolsetProof.sanitized.length === 0,
       projection: {
+        collision:
+          collision instanceof MCPToolNameCollisionError
+            ? { cause: collision.cause, message: collision.message }
+            : null,
         before,
-        afterLoserDeregister,
-        afterWinnerDeregister,
+        afterRejectedOwnerDeregister,
+        afterExistingOwnerDeregister,
         rawToolsetProof,
-        publicOwnerProof: "t19-cross-server-shadow-last-wins",
+        publicOwnerProof: "t19-cross-server-shadow-last-wins (superseded by T22 D3)",
         publicNamingProof: "t19-naming-sanitization",
-        debtClosed: false,
+        t22AtomicCollision: true,
       },
-      note: "Lifecycle and raw-toolset consequences are supporting process evidence; public ownership/name sanitization are exercised in the linked chat-bilateral scenarios.",
+      note: "T22 D3 supersedes last-wins: a separate registration call preserves the existing owner, publishes nothing for the rejected owner, and deregistration remains ownership-scoped.",
     };
   }),
 );
