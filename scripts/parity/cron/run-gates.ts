@@ -27,9 +27,7 @@ function command(argv: readonly string[]): {
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
-function runManifestGroup(
-  prefix: string,
-): {
+function runManifestGroup(prefix: string): {
   readonly id: string;
   readonly exitCode: number | null;
   readonly expected: number;

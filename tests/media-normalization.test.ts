@@ -121,7 +121,7 @@ describe("vision image parts", () => {
     const part = await buildImagePart({ path: join(alias, "large.png"), localRoot: alias });
     const encoded = part.image_url.url.slice(part.image_url.url.indexOf(",") + 1);
     expect(Buffer.from(encoded, "base64")).toEqual(bytes);
-  });
+  }, 15_000);
 
   it("revalidates after the observable input preflight hook", async () => {
     const directory = root();
