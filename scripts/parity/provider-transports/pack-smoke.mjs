@@ -107,19 +107,29 @@ try {
   });
   const filename = JSON.parse(packed.stdout)[0]?.filename;
   if (typeof filename !== "string") throw new Error("PACK_TARBALL_MISSING");
+  const tarball = join(packDirectory, filename);
   checked(
-    "npm",
+    process.execPath,
     [
-      "install",
-      "--ignore-scripts",
-      "--no-audit",
-      "--no-fund",
-      "--prefix",
+      join(projectRoot, "node_modules/tsx/dist/cli.mjs"),
+      join(projectRoot, "scripts/offline-tarball-install-cli.ts"),
+      projectRoot,
       installDirectory,
-      join(packDirectory, filename),
+      tarball,
     ],
-    { cwd: runtimeRoot },
+    { cwd: projectRoot },
   );
+  checked("npm", ["ci", "--offline", "--no-audit", "--no-fund"], {
+    cwd: installDirectory,
+    env: {
+      ...process.env,
+      npm_config_offline: "true",
+      HTTP_PROXY: "http://127.0.0.1:9",
+      HTTPS_PROXY: "http://127.0.0.1:9",
+      ALL_PROXY: "http://127.0.0.1:9",
+      NO_PROXY: "",
+    },
+  });
   const packageRoot = join(installDirectory, "node_modules/lohra-ts");
   const bin = join(installDirectory, "node_modules/.bin/lohra");
   if (!existsSync(bin)) throw new Error("PACK_BIN_MISSING");

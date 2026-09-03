@@ -66,6 +66,9 @@ describe("T22 closeout invariants", () => {
     expect(source("scripts/parity/closeout/no-python.ts")).toContain(
       "prepareOfflineTarballConsumer",
     );
+    expect(source("scripts/parity/provider-transports/pack-smoke.mjs")).toContain(
+      "offline-tarball-install-cli.ts",
+    );
   });
 
   it("keeps successful T19 test diagnostics inside the normalized Vitest stream", () => {
