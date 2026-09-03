@@ -40,7 +40,10 @@
     "oracle": {
       "adapter": "python",
       "executable": "oracle-python",
-      "prefixArgs": ["{{projectRoot}}/scripts/parity/conversation/oracle_driver.py", "single"],
+      "prefixArgs": [
+        "{{projectRoot}}/scripts/parity/conversation/oracle_driver.py",
+        "single"
+      ],
       "cwd": "profile"
     },
     "candidate": {
@@ -79,11 +82,15 @@
         "tables": [
           {
             "name": "sessions",
-            "orderBy": ["id"]
+            "orderBy": [
+              "id"
+            ]
           },
           {
             "name": "messages",
-            "orderBy": ["id"]
+            "orderBy": [
+              "id"
+            ]
           }
         ]
       }
@@ -174,7 +181,9 @@
         "records": {
           "gets": 0,
           "posts": 1,
-          "sequence": ["POST /v1/chat/completions"]
+          "sequence": [
+            "POST /v1/chat/completions"
+          ]
         }
       }
     },
@@ -227,6 +236,12 @@
       "kind": "replace-runtime-path",
       "source": "profile",
       "replacement": "<PROJECT>"
+    },
+    {
+      "field": "sqlite.db",
+      "kind": "replace-json-pointer",
+      "pointer": "/schema/17/sql",
+      "replacement": "<WORKFLOW_AUDIT_EVENTS_SCHEMA>"
     },
     {
       "field": "sqlite.db",
