@@ -281,6 +281,20 @@ try {
     mkdirSync(copy, { recursive: true });
     const extracted = run(copy, "/usr/bin/tar", ["-xf", archive]);
     if (extracted.status !== 0) throw new Error(`MUTATION_EXTRACT:${mutation.id}`);
+    const initialized = run(copy, "git", ["init", "--quiet"]);
+    if (initialized.status !== 0) throw new Error(`MUTATION_GIT_INIT:${mutation.id}`);
+    const committed = run(copy, "git", [
+      "-c",
+      "user.name=T22 Mutation Harness",
+      "-c",
+      "user.email=t22-mutations@example.invalid",
+      "commit",
+      "--quiet",
+      "--allow-empty",
+      "-m",
+      "snapshot",
+    ]);
+    if (committed.status !== 0) throw new Error(`MUTATION_GIT_COMMIT:${mutation.id}`);
     symlinkSync(nodeModules, join(copy, "node_modules"), "dir");
     if (mutation.command !== "composition") {
       symlinkSync(dist, join(copy, "dist"), "dir");
