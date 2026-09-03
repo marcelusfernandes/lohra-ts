@@ -108,7 +108,7 @@
     "pack:check": "tsx scripts/pack-check.ts"
   },
   "dependencies": {
-    "better-sqlite3": "^13.0.3",
+    "better-sqlite3": "11.10.0",
     "node-pty": "https://registry.npmjs.org/node-pty/-/node-pty-1.1.0.tgz",
     "ws": "^8.21.3"
   },

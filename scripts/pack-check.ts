@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 
 import { startStub } from "./parity/stub/server.js";
 import type { StubRuntime } from "./parity/stub/types.js";
+import { prepareOfflineTarballConsumer } from "./offline-tarball-install.js";
 
 function command(
   executable: string,
@@ -86,15 +87,18 @@ try {
   const filename = packResult[0]?.filename;
   if (filename === undefined) throw new Error("PACK_TARBALL_MISSING");
   const tarball = join(packDirectory, filename);
-  command("npm", [
-    "install",
-    "--offline",
-    "--no-audit",
-    "--no-fund",
-    "--prefix",
-    installDirectory,
-    tarball,
-  ]);
+  prepareOfflineTarballConsumer({ project: process.cwd(), consumer: installDirectory, tarball });
+  command("npm", ["ci", "--offline", "--no-audit", "--no-fund"], {
+    cwd: installDirectory,
+    env: {
+      ...process.env,
+      npm_config_offline: "true",
+      HTTP_PROXY: "http://127.0.0.1:9",
+      HTTPS_PROXY: "http://127.0.0.1:9",
+      ALL_PROXY: "http://127.0.0.1:9",
+      NO_PROXY: "",
+    },
+  });
 
   const projected = join(root, "requests.jsonl");
   const raw = join(root, "requests-raw.jsonl");

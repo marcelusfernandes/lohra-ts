@@ -52,6 +52,22 @@ describe("T22 closeout invariants", () => {
     expect(composition).not.toContain("11434");
   });
 
+  it("keeps the native SQLite dependency compatible with the declared Node 20 floor", () => {
+    const manifest = JSON.parse(source("package.json")) as {
+      readonly dependencies?: Readonly<Record<string, string>>;
+      readonly engines?: Readonly<Record<string, string>>;
+    };
+    expect(manifest.engines?.node).toBe(">=20");
+    expect(
+      manifest.dependencies?.["better-sqlite3"],
+      "MUTATION_CAUSE:T22-node20-sqlite-dependency",
+    ).toBe("11.10.0");
+    expect(source("scripts/pack-check.ts")).toContain("prepareOfflineTarballConsumer");
+    expect(source("scripts/parity/closeout/no-python.ts")).toContain(
+      "prepareOfflineTarballConsumer",
+    );
+  });
+
   it("keeps successful T19 test diagnostics inside the normalized Vitest stream", () => {
     expect(
       source("scripts/parity/mcp/run-regression-gates-locked.sh"),

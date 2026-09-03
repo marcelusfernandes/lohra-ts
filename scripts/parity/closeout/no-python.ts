@@ -13,6 +13,8 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 
+import { prepareOfflineTarballConsumer } from "../../offline-tarball-install.js";
+
 const project = resolve(import.meta.dirname, "../../..");
 const root = mkdtempSync(join(tmpdir(), "lohra-t22-no-python-"));
 const evidenceDirectory = join(project, ".parity-evidence", "t22");
@@ -94,6 +96,10 @@ try {
     npm_config_fund: "false",
     npm_config_update_notifier: "false",
     npm_config_cache: npmCache,
+    HTTP_PROXY: "http://127.0.0.1:9",
+    HTTPS_PROXY: "http://127.0.0.1:9",
+    ALL_PROXY: "http://127.0.0.1:9",
+    NO_PROXY: "",
   };
   mkdirSync(environment.HOME as string, { recursive: true });
   mkdirSync(environment.TMPDIR as string, { recursive: true });
@@ -147,12 +153,11 @@ try {
 
   const consumer = join(root, "consumer");
   mkdirSync(consumer, { recursive: true });
-  writeFileSync(join(consumer, "package.json"), '{"name":"fixture","private":true}\n');
-  const installed = run(
-    process.execPath,
-    [npmCli, "install", "--offline", "--no-audit", "--no-fund", tarball],
-    { cwd: consumer, env: environment },
-  );
+  prepareOfflineTarballConsumer({ project, consumer, tarball });
+  const installed = run(process.execPath, [npmCli, "ci", "--offline", "--no-audit", "--no-fund"], {
+    cwd: consumer,
+    env: environment,
+  });
   assertOk("FRESH_INSTALL", installed);
   const installedRoot = join(consumer, "node_modules", "lohra-ts");
   const cli = join(installedRoot, "dist", "cli.js");

@@ -172,6 +172,14 @@ const mutations: readonly Mutation[] = [
     command: "docs-test",
     expected: "MUTATION_CAUSE:T22-docs-current-version",
   },
+  {
+    id: "T22-node20-sqlite-dependency",
+    file: "package.json",
+    before: '    "better-sqlite3": "11.10.0",',
+    after: '    "better-sqlite3": "^13.0.3",',
+    command: "t22-test",
+    expected: "MUTATION_CAUSE:T22-node20-sqlite-dependency",
+  },
 ];
 
 function run(
