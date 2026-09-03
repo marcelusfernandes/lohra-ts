@@ -351,13 +351,16 @@ function main(): void {
     process.stderr.write("t20 mutation proof: the lane worktree changed during the run\n");
     failures += 1;
   }
+  const survivors = results
+    .filter((result) => result.killed !== true)
+    .map((result) => String(result.mutant));
   mkdirSync(evidenceDirectory, { recursive: true });
   writeFileSync(
     resolve(evidenceDirectory, "mutations.json"),
-    `${JSON.stringify({ suite: "t20-mutations", mutants: MUTANTS.length, failures, results }, null, 2)}\n`,
+    `${JSON.stringify({ suite: "t20-mutations", mutants: MUTANTS.length, failures, survivors, results }, null, 2)}\n`,
   );
   process.stdout.write(
-    `${JSON.stringify({ suite: "t20-mutations", failures, mutants: MUTANTS.length })}\n`,
+    `${JSON.stringify({ suite: "t20-mutations", failures, mutants: MUTANTS.length, survivors })}\n`,
   );
   process.exitCode = failures === 0 ? 0 : 1;
 }

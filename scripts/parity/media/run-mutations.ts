@@ -804,6 +804,9 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
 if (process.argv[1] !== undefined && import.meta.url.endsWith(process.argv[1])) {
   const results = await runMutations();
   const failures = results.filter((result) => !result.killed).length;
-  process.stdout.write(`${JSON.stringify({ suite: "t21-mutations", results, failures })}\n`);
+  const survivors = results.filter((result) => !result.killed).map((result) => result.id);
+  process.stdout.write(
+    `${JSON.stringify({ suite: "t21-mutations", results, failures, survivors })}\n`,
+  );
   process.exitCode = failures === 0 ? 0 : 1;
 }
