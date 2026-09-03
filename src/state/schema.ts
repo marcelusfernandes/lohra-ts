@@ -103,8 +103,8 @@ CREATE TABLE IF NOT EXISTS workflow_audit_tombstones (
 );
 CREATE TABLE IF NOT EXISTS workflow_audit_events (
     run_id TEXT NOT NULL, seq INTEGER NOT NULL, segment_id TEXT, node_id TEXT,
-    sub_id TEXT, attempt INTEGER, event_type TEXT NOT NULL, provenance TEXT NOT NULL,
-    payload_json TEXT NOT NULL, created_at REAL NOT NULL,
+    sub_id TEXT, event_type TEXT NOT NULL, provenance TEXT NOT NULL,
+    payload_json TEXT NOT NULL, created_at REAL NOT NULL, attempt INTEGER,
     PRIMARY KEY (run_id, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_was_updated ON workflow_audit_state(updated_at);
