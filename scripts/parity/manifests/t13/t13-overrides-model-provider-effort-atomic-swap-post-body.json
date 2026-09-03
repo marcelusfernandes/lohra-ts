@@ -154,27 +154,15 @@
       }
     },
     {
-      "side": "oracle",
+      "side": "both",
       "field": "events.requests",
-      "pointer": "/records/2/body/model",
+      "pointerPattern": "/records/*/body/model",
       "value": "custom-model-x"
     },
     {
-      "side": "oracle",
+      "side": "both",
       "field": "events.requests",
-      "pointer": "/records/2/body/reasoning_effort",
-      "value": "high"
-    },
-    {
-      "side": "candidate",
-      "field": "events.requests",
-      "pointer": "/records/1/body/model",
-      "value": "custom-model-x"
-    },
-    {
-      "side": "candidate",
-      "field": "events.requests",
-      "pointer": "/records/1/body/reasoning_effort",
+      "pointerPattern": "/records/*/body/reasoning_effort",
       "value": "high"
     }
   ],
