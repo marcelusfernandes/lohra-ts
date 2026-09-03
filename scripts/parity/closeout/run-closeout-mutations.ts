@@ -12,6 +12,7 @@ interface Mutation {
   readonly extra?: Readonly<{ path: string; content: string }>;
   readonly command:
     | "t22-test"
+    | "docs-test"
     | "mcp-test"
     | "security"
     | "composition"
@@ -139,6 +140,14 @@ const mutations: readonly Mutation[] = [
     command: "t22-test",
     expected: "MUTATION_CAUSE:T22-platform-spoof",
   },
+  {
+    id: "T22-docs-obsolete",
+    file: "README.md",
+    before: "A versão atual é `0.0.11`.",
+    after: "A versão atual é `0.0.10`.",
+    command: "docs-test",
+    expected: "MUTATION_CAUSE:T22-docs-current-version",
+  },
 ];
 
 function run(
@@ -181,6 +190,8 @@ function command(
       "tests/t22-closeout.test.ts",
       "--reporter=dot",
     ]);
+  if (name === "docs-test")
+    return run(root, process.execPath, [vitest, "run", "tests/t22-docs.test.ts", "--reporter=dot"]);
   if (name === "mcp-test")
     return run(root, process.execPath, [
       vitest,
@@ -208,6 +219,7 @@ const baseline = run(project, process.execPath, [
   vitest,
   "run",
   "tests/t22-closeout.test.ts",
+  "tests/t22-docs.test.ts",
   "tests/mcp-manager.test.ts",
   "--reporter=dot",
 ]);

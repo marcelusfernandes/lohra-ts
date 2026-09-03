@@ -1,65 +1,102 @@
 # lohra-ts
 
-Laboratório TypeScript para validar hipóteses de runtime antes de qualquer port
-do [Lohra](https://github.com/marcelusfernandes/lohra) (Python). **Este repo não
-substitui o runtime Python** — ele prova mecanismos; as semânticas de verdade
-moram no repo Python e em sua documentação (`docs/reference/` aqui).
+Runtime TypeScript headless do Lohra, com CLI, gateway/dashboard, workflows
+duráveis, cron, MCP, ferramentas web e mídia. A versão atual é `0.0.11`.
 
-## Estratégia
+O port foi validado contra o runtime Python pinado. O pacote de produção não
+embute nem chama Python, pip, uv ou poetry; Python existe somente nos harnesses
+de paridade do repositório de desenvolvimento.
 
-Um núcleo headless orientado a eventos, consumido primeiro por uma **TUI**
-(Ink) e depois por uma **GUI Electron** (Mac + Windows). O protocolo de eventos
-é derivado do prior art do Python: `workflow/events.py`, liveview,
-`lohra chat --json` e os eventos WS do gateway.
+## Instalação
 
-## Hipóteses a validar (ordem de risco)
-
-1. **Durabilidade cross-process** (leases, fencing, WAL) via `better-sqlite3`
-   — prior art: `compression_locks`, `workflow_run_state`, fence #12.
-2. **Protocolo de eventos único** para TUI+GUI.
-3. **Gestão de terminal** via `node-pty` — prior art: `pty.rs` + `tools/terminal.py`.
-4. **Semânticas do harness** (budget, cache por célula, resume, checkpoint).
-
-Chat loop, tools de fs/web e streaming são triviais — não são o propósito do laboratório.
-
-## Gate de decisão
-
-Ao fim das hipóteses, decidir explicitamente: **(a)** lohra-ts vira mainline do
-novo capítulo, **(b)** volta ao Python com backports dos aprendizados, ou
-**(c)** dual-track com fronteiras claras. Sem essa decisão, dois runtimes pela
-metade para sempre.
-
-## Rodar
+Requer Node.js 20 ou 22 e npm. O terminal local usa o addon nativo `node-pty`,
+portanto a instalação executa o `postinstall` do pacote.
 
 ```bash
-npm install
+npm install -g lohra-ts@0.0.11
+lohra --version
+lohra doctor --json
+```
+
+Para desenvolver a partir do checkout:
+
+```bash
+npm ci
 npm run build
-npm run typecheck && npm test && npm run lint && npm run format:check
+npm run typecheck
+npm test
+npm run lint
+npm run format:check
 ```
 
-O bootstrap da CLI também pode ser executado diretamente; o pacote expõe o
-mesmo entrypoint como o binário `lohra`:
+## CLI
+
+Os comandos top-level públicos, na ordem exibida pelo help, são:
+
+`init`, `doctor`, `chat`, `dashboard`, `serve`, `cron`, `workflow`, `models`,
+`tiers`, `profile`, `auth`, `skill` e `update`.
+
+Exemplos:
 
 ```bash
-node dist/cli.js --version
-node dist/cli.js doctor --json
+lohra chat "Resuma este projeto" --json
+lohra dashboard --insecure --port 8000
+lohra cron list
+lohra workflow list
+lohra workflow watch RUN_ID
+lohra workflow audit RUN_ID
+lohra update --check
 ```
 
-## Harness de paridade
+`workflow` possui somente `list`, `watch` e `audit`; não existe
+`workflow run`. Chat e dashboard compartilham a mesma composition root para
+workflow/audit, orquestração, cron, MCP, web e mídia.
 
-Os cenários versionados ficam em `scripts/parity/scenarios/`. O oracle é
-descoberto a partir do worktree principal ou pode ser ligado explicitamente por
-`--oracle-workspace`/`LOHRA_ORACLE_WORKSPACE`; esse workspace precisa conter os
-siblings read-only `lohra/` e `.oracle-venv/`.
+## Self-update
+
+Em um checkout Git, `lohra update --check` faz fetch e mede o upstream sem
+mover `HEAD`. `lohra update` recusa árvore suja, detached HEAD, upstream ausente
+e divergência; quando permitido, usa apenas fast-forward. Mudanças em manifests
+de dependências produzem uma recomendação de `npm install`; `--reinstall`
+executa npm por executable/argv, sem shell.
+
+Uma instalação por tarball/npm não contém `.git`, então o updater recusa com a
+orientação de atualizar pelo npm.
+
+## Limites e superfícies não medidas
+
+- Budgets, fan-out, filas de audit e retenção são limitados e falham de forma
+  explícita.
+- Estado cross-process usa SQLite/WAL com lease e fencing.
+- URLs web passam por proteção SSRF, resolução pinada e revalidação por hop.
+- Subsessões de orquestração não podem ser promovidas a sessões privilegiadas
+  do gateway.
+- Registro e refresh MCP são transacionais por lote.
+- Smokes de providers/SDKs reais permanecem `NOT_MEASURED` sem credenciais; os
+  gates normais são offline e usam fixtures locais.
+- A matriz nativa Windows e Node 20/22 precisa ser executada em runners reais;
+  spoof de plataforma não conta como evidência.
+
+## Paridade e closeout
+
+O oracle Python de referência é lido no SHA
+`16b4785d803ad0ca364a8a67346a04f949fbf592`; ele nunca é modificado por este
+repo. Evidence fica em `.parity-evidence/` (gitignored).
 
 ```bash
-npm run parity -- --manifest scripts/parity/scenarios/oracle-version.json
-npm run parity -- --manifest scripts/parity/scenarios/oracle-no-subcommand.json
-npm run parity -- --manifest scripts/parity/scenarios/oracle-workflow-list.json
-npm run parity -- --manifest scripts/parity/scenarios/events-jsonl-fixture.json
-npm run parity -- --manifest scripts/parity/scenarios/deliberate-divergence.json
+LOHRA_ORACLE_WORKSPACE=/caminho/para/o/worktree-python npm run parity:closeout
+npm run mutations:closeout
+npm run verify:t22:evidence
 ```
 
-Evidence canônica é gravada por padrão em `.parity-evidence/<scenario-id>.json`
-(gitignored). O CLI usa `0` para match, `1` para divergência e `2` para erro do
-harness; portanto o último cenário acima deve retornar `1`.
+O aggregate compara um inventário fechado nos dois sentidos, executa cada
+suíte não-live duas vezes e recusa scripts ausentes, órfãos, skips, resultados
+não determinísticos ou mutantes sobreviventes. O relatório completo dos 23
+tickets, SHAs e dívidas está em [docs/closeout.md](docs/closeout.md).
+
+## Decisão arquitetural
+
+O closeout produz a evidência necessária para a decisão obrigatória entre:
+TypeScript mainline, retorno ao Python com backports ou dual-track com
+fronteiras. A decisão final e a estratégia de preservação do arquivo local
+`docs/gate-decision.md` pertencem ao owner e não são inferidas pelo build.

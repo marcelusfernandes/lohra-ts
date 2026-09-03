@@ -17,6 +17,7 @@
     "assets/",
     "README.md",
     "LICENSE",
+    "docs/closeout.md",
     "scripts/postinstall.mjs"
   ],
   "scripts": {
