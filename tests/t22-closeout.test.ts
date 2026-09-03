@@ -52,6 +52,13 @@ describe("T22 closeout invariants", () => {
     expect(composition).not.toContain("11434");
   });
 
+  it("keeps successful T19 test diagnostics inside the normalized Vitest stream", () => {
+    expect(
+      source("scripts/parity/mcp/run-regression-gates-locked.sh"),
+      "MUTATION_CAUSE:T22-t19-test-stream-order",
+    ).toContain("npm test 2>&1");
+  });
+
   it("normalizes reporter telemetry without masking semantic fields", () => {
     const input =
       "user: Today's date is 2026-09-02; url=http://127.0.0.1:43210; path=/tmp/semantic\n RUN  v3.2.4 /tmp/worktree\n ✓ tests/example.test.ts (2 tests) 335ms\nloop start\n Test Files  1 passed (1)\n Tests  2 passed (2)\n Start at 02:33:59\n Duration 12.5s";

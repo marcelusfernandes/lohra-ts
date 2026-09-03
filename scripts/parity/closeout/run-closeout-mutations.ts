@@ -141,6 +141,14 @@ const mutations: readonly Mutation[] = [
     expected: "MUTATION_CAUSE:T22-vitest-parallel-telemetry",
   },
   {
+    id: "T22-t19-test-stream-order",
+    file: "scripts/parity/mcp/run-regression-gates-locked.sh",
+    before: "npm test 2>&1",
+    after: "npm test",
+    command: "t22-test",
+    expected: "MUTATION_CAUSE:T22-t19-test-stream-order",
+  },
+  {
     id: "T22-fixed-port",
     file: "scripts/parity/closeout/composition.ts",
     before: 'upstream.listen(0, "127.0.0.1"',

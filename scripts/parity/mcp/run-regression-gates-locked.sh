@@ -39,5 +39,5 @@ done
 # integrated, so every T19 scenario is now a strict blocking gate.
 npm run parity:t19
 npm run parity:t19:process
-npm test
+npm test 2>&1
 npm run parity:t19:gates:raw
