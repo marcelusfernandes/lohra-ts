@@ -55,6 +55,21 @@ function warningLines(observation: ChatObservation): readonly string[] {
   return observation.stderr.split("\n").filter(Boolean);
 }
 
+function rejectedMcpBatch(
+  observation: ChatObservation,
+  errorName: string,
+  message: string,
+  cause?: string,
+): boolean {
+  return (
+    observation.exitCode === 1 &&
+    observation.stdout === "" &&
+    mcpNames(observation).length === 0 &&
+    observation.stderr.includes(`${errorName}: ${message}`) &&
+    (cause === undefined || observation.stderr.includes(`cause: '${cause}'`))
+  );
+}
+
 function servedBy(observation: ChatObservation): string | null {
   const match = output(observation).match(/served-by:([^:>]+):/u);
   return match?.[1] ?? null;
@@ -287,12 +302,20 @@ results.push(
         names: mcpNames(observed.candidate),
         owner: servedBy(observed.candidate),
         warnings: warningLines(observed.candidate),
+        rejectedAtomically: rejectedMcpBatch(
+          observed.candidate,
+          "MCPToolNameCollisionError",
+          "MCP tool name collision: mcp_github_com_search",
+          "MCP_TOOL_NAME_COLLISION",
+        ),
       };
       pass &&=
-        exact(oracleProjection, candidateProjection) &&
         exact(oracleProjection.names, ["mcp_github_com_search"]) &&
         oracleProjection.owner === expectedOwner &&
-        oracleProjection.warnings.length === 0;
+        oracleProjection.warnings.length === 0 &&
+        candidateProjection.names.length === 0 &&
+        candidateProjection.owner === null &&
+        candidateProjection.rejectedAtomically;
       projections.push({
         order,
         expectedOwner,
@@ -300,7 +323,11 @@ results.push(
         candidate: candidateProjection,
       });
     }
-    return { pass, projection: projections };
+    return {
+      pass,
+      projection: projections,
+      note: "T22 D3 deliberately supersedes the oracle's last-wins behavior: the candidate rejects the whole MCP batch with MCP_TOOL_NAME_COLLISION.",
+    };
   }),
 );
 
@@ -321,14 +348,23 @@ results.push(
       names: mcpNames(observed.candidate),
       total: parent(observed.candidate)?.toolNames.length,
       warnings: warningLines(observed.candidate),
+      rejectedAtomically: rejectedMcpBatch(
+        observed.candidate,
+        "MCPToolNameCollisionError",
+        "MCP tool name collision: mcp_fix_do_thing",
+        "MCP_TOOL_NAME_COLLISION",
+      ),
     };
     return {
       pass:
-        exact(oracleProjection, candidateProjection) &&
         exact(oracleProjection.names, ["mcp_fix_do_thing", "mcp_fix_other"]) &&
         oracleProjection.total === 26 &&
-        exact(oracleProjection.warnings, [expected]),
+        exact(oracleProjection.warnings, [expected]) &&
+        candidateProjection.names.length === 0 &&
+        candidateProjection.total === undefined &&
+        candidateProjection.rejectedAtomically,
       projection: { fixture: PINNED_COLLISION_FIXTURE, oracleProjection, candidateProjection },
+      note: "T22 D3 deliberately supersedes the oracle's intra-server skip: the candidate rejects before publishing any tool.",
     };
   }),
 );
@@ -854,13 +890,15 @@ results.push(
     );
     const invalidNamePass =
       candidateBadTools.length === 0 &&
-      exact(mcpNames(invalidName.candidate), ["mcp_good_ok"]) &&
-      invalidName.candidate.stderr.includes(
-        "MCP server 'bad' failed to connect: MCP server 'bad' returned a truthy non-string tool name: 123",
+      mcpNames(invalidName.candidate).length === 0 &&
+      rejectedMcpBatch(
+        invalidName.candidate,
+        "MCPToolListError",
+        "MCP server 'bad' returned a truthy non-string tool name: 123",
       ) &&
       mcpNames(invalidName.oracle).includes("mcp_good_ok") &&
       invalidName.oracle.exitCode === 0 &&
-      invalidName.candidate.exitCode === 0;
+      invalidName.candidate.exitCode === 1;
     const pass =
       output(contentObject.oracle).includes("[content block]") &&
       publicToolFailure(contentObject.candidate) &&
@@ -889,7 +927,7 @@ results.push(
         configShapes,
         ambiguousContainerShapes,
       },
-      note: "ADR 0002 deliberate fail-closed policy for F5 rows 3/6/7 and contract-v4 ambiguous args/env shapes; bilateral records expected oracle divergences instead of treating chat-bilateral as equality.",
+      note: "ADR 0002 deliberate fail-closed policy plus T22 E5 batch atomicity; bilateral records expected oracle divergences instead of treating chat-bilateral as equality.",
     };
   }),
 );
@@ -914,14 +952,20 @@ results.push(
       const candidateProjection = {
         stderr: observed.candidate.stderr,
         names: mcpNames(observed.candidate),
+        rejectedAtomically: rejectedMcpBatch(observed.candidate, "Error", "same cause"),
       };
       pass &&=
-        exact(oracleProjection, candidateProjection) &&
         oracleProjection.stderr === "MCP server 'bad' failed to connect: same cause\n" &&
-        exact(oracleProjection.names, ["mcp_good_ok"]);
+        exact(oracleProjection.names, ["mcp_good_ok"]) &&
+        candidateProjection.names.length === 0 &&
+        candidateProjection.rejectedAtomically;
       projections.push({ name, oracle: oracleProjection, candidate: candidateProjection });
     }
-    return { pass, projection: projections };
+    return {
+      pass,
+      projection: projections,
+      note: "T22 E5 deliberately supersedes per-server continuation: startup/list failure rolls back the entire candidate batch while preserving the first cause.",
+    };
   }),
 );
 
@@ -933,15 +977,25 @@ results.push(
     });
     const oracleWarnings = warningLines(observed.oracle);
     const candidateWarnings = warningLines(observed.candidate);
+    const candidateRejectedAtomically = rejectedMcpBatch(
+      observed.candidate,
+      "MCPToolNameCollisionError",
+      "MCP tool name collision: mcp_fix_do_thing",
+      "MCP_TOOL_NAME_COLLISION",
+    );
     const noPrefix = (line: string) =>
       !/^(WARNING|WARN|ERROR|INFO)(:|\s)/u.test(line) && !line.includes("lohra.mcp");
     return {
       pass:
-        exact(oracleWarnings, candidateWarnings) &&
         oracleWarnings.length === 1 &&
         oracleWarnings.every(noPrefix) &&
-        candidateWarnings.every(noPrefix),
-      projection: { oracleWarnings, candidateWarnings },
+        candidateRejectedAtomically,
+      projection: {
+        oracleWarnings,
+        candidateWarnings,
+        candidateRejectedAtomically,
+      },
+      note: "T22 D3 replaces the candidate warning path with an atomic typed rejection; the oracle warning remains checked as a bare stderr line.",
     };
   }),
 );
