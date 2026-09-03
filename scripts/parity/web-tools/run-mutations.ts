@@ -9,7 +9,7 @@
  * or merely different stdout is never sufficient. Vitest results are recorded
  * for diagnosis but never decide the kill. */
 import { createHash } from "node:crypto";
-import { cpSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import process from "node:process";
@@ -351,6 +351,7 @@ function main(): void {
     process.stderr.write("t20 mutation proof: the lane worktree changed during the run\n");
     failures += 1;
   }
+  mkdirSync(evidenceDirectory, { recursive: true });
   writeFileSync(
     resolve(evidenceDirectory, "mutations.json"),
     `${JSON.stringify({ suite: "t20-mutations", mutants: MUTANTS.length, failures, results }, null, 2)}\n`,
