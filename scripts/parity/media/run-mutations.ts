@@ -445,18 +445,13 @@ export async function runMutations(): Promise<readonly MutationResult[]> {
   const child = await mutantModule("child-deny", "tools/child.ts", [
     {
       file: "tools/child.ts",
-      from: ".filter((definition) => allowed.has(definition.function.name))",
+      from: ".filter((definition) => !excluded.has(definition.function.name))",
       to: ".filter(() => true)",
     },
     {
       file: "tools/child.ts",
       from: `if (excluded.has(name)) {\n      return toolError(\`the '\${name}' tool is not available to subagents\`);\n    }`,
       to: 'if (false && excluded.has(name)) throw new Error("unreachable");',
-    },
-    {
-      file: "tools/child.ts",
-      from: "if (!allowed.has(name)) return toolError(`Unknown tool: ${name}`);",
-      to: "if (false && !allowed.has(name)) return toolError(`Unknown tool: ${name}`);",
     },
   ]);
   try {
