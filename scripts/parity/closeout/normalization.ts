@@ -31,9 +31,25 @@ function normalizeT13Summary(line: string): string {
   });
 }
 
+function collapseSuccessfulVitestTelemetry(lines: readonly string[]): readonly string[] {
+  const normalized: string[] = [];
+  let insideRun = false;
+  for (const line of lines) {
+    if (/^\s*RUN\s+v\d/iu.test(line)) {
+      normalized.push("<vitest-success-telemetry>");
+      insideRun = true;
+      continue;
+    }
+    if (insideRun && /^\s*Test Files\b/iu.test(line)) {
+      insideRun = false;
+    }
+    if (!insideRun) normalized.push(line);
+  }
+  return normalized;
+}
+
 export function normalizeCloseoutOutput(value: string): string {
-  return stripAnsi(value)
-    .split("\n")
+  return collapseSuccessfulVitestTelemetry(stripAnsi(value).split("\n"))
     .map((line) => {
       const structured = normalizeT13Summary(line);
       if (/^\s*Start at\b/iu.test(structured)) {

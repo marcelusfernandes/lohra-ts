@@ -54,16 +54,33 @@ describe("T22 closeout invariants", () => {
 
   it("normalizes reporter telemetry without masking semantic fields", () => {
     const input =
-      "user: Today's date is 2026-09-02; url=http://127.0.0.1:43210; path=/tmp/semantic\n Start at 02:33:59\n ✓ tests/example.test.ts (2 tests) 335ms\n Duration 12.5s";
+      "user: Today's date is 2026-09-02; url=http://127.0.0.1:43210; path=/tmp/semantic\n RUN  v3.2.4 /tmp/worktree\n ✓ tests/example.test.ts (2 tests) 335ms\nloop start\n Test Files  1 passed (1)\n Tests  2 passed (2)\n Start at 02:33:59\n Duration 12.5s";
     const output = normalizeCloseoutOutput(input);
     expect(output, "MUTATION_CAUSE:T22-normalization-scope").toContain(
       "Today's date is 2026-09-02",
     );
     expect(output).toContain("127.0.0.1:43210");
     expect(output).toContain("/tmp/semantic");
+    expect(output).toContain("<vitest-success-telemetry>");
+    expect(output).not.toContain("tests/example.test.ts");
+    expect(output).not.toContain("loop start");
+    expect(output).toContain("Test Files  1 passed (1)");
+    expect(output).toContain("Tests  2 passed (2)");
     expect(output).toContain("Start at <clock>");
-    expect(output).toContain("✓ tests/example.test.ts (2 tests) <duration>");
     expect(output).toContain("Duration <duration>");
+  });
+
+  it("makes parallel successful Vitest scheduling and slow-test detail non-semantic", () => {
+    const prefix = '{"suite":"semantic","failures":0}\n RUN  v3.2.4 /tmp/worktree\n';
+    const suffix =
+      "\n Test Files  2 passed (2)\n Tests  3 passed (3)\n Start at 02:33:59\n Duration 12.5s";
+    const first = normalizeCloseoutOutput(
+      `${prefix} ✓ tests/a.test.ts (2 tests) 335ms\n ✓ tests/b.test.ts (1 test) 2s${suffix}`,
+    );
+    const second = normalizeCloseoutOutput(
+      `${prefix} ✓ tests/b.test.ts (1 test) 1s\n     ✓ slow detail 900ms\n ✓ tests/a.test.ts (2 tests) 20ms${suffix}`,
+    );
+    expect(first, "MUTATION_CAUSE:T22-vitest-parallel-telemetry").toBe(second);
   });
 
   it("normalizes only volatile T13 artifact hashes in the structured suite summary", () => {
