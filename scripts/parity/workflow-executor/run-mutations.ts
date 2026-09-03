@@ -195,7 +195,7 @@ const mutants: readonly Mutant[] = [
       {
         file: "src/workflow/json-schema.ts",
         before:
-          "  if (resource === undefined)\n    throw new SchemaDefinitionError(`unresolved reference ${reference}; external resolution disabled`);",
+          "  if (resource === undefined)\n    throw new SchemaDefinitionError(\n      `unresolved reference ${reference}; external resolution disabled`,\n    );",
         after: "  if (resource === undefined) return true;",
       },
     ],
@@ -253,9 +253,9 @@ const mutants: readonly Mutant[] = [
       {
         file: engine,
         before:
-          "`${renderValue(validator)}\\n\\nCandidate:\\n${renderValue(draft.output)}`, GATE_VERDICT_SCHEMA, {",
+          "`${renderValue(validator)}\\n\\nCandidate:\\n${renderValue(draft.output)}`,\n        GATE_VERDICT_SCHEMA,\n        {",
         after:
-          "`${renderValue(validator)}\\n\\nCandidate:\\n${renderValue(draft.output)}`, null, {",
+          "`${renderValue(validator)}\\n\\nCandidate:\\n${renderValue(draft.output)}`,\n        null,\n        {",
       },
     ],
   },
@@ -415,8 +415,8 @@ const mutants: readonly Mutant[] = [
     edits: [
       {
         file: engine,
-        before: "    if (this.depth >= MAX_WORKFLOW_DEPTH) throw new Error",
-        after: "    if (false) throw new Error",
+        before: "    if (this.depth >= MAX_WORKFLOW_DEPTH)\n      throw new Error",
+        after: "    if (false)\n      throw new Error",
       },
     ],
   },
@@ -437,9 +437,9 @@ const mutants: readonly Mutant[] = [
     edits: [
       {
         file: engine,
-        before: "      this.eventSinkDisabled = true;\n      this.logError",
+        before: '      this.logError("workflow: live event failed", error);',
         after:
-          "      this.eventSinkDisabled = true;\n      this.result.engineFaults += 1;\n      this.logError",
+          '      this.result.engineFaults += 1;\n      this.logError("workflow: live event failed", error);',
       },
     ],
   },
@@ -495,7 +495,13 @@ const mutants: readonly Mutant[] = [
     edits: [
       {
         file: "scripts/parity/manifests/t15/t15-chat-workflow.json",
-        before: `    { "field": "events.requests", "kind": "replace-regex", "pattern": "\\"run_id\\": \\"[^\\" ]+", "replacement": "\\"run_id\\": \\"<run-id>" }\n  ],`,
+        before: `    {
+      "field": "events.requests",
+      "kind": "replace-regex",
+      "pattern": "\\"run_id\\": \\"[^\\" ]+",
+      "replacement": "\\"run_id\\": \\"<run-id>"
+    }
+  ],`,
         after: `  ],`,
       },
     ],
@@ -517,8 +523,14 @@ const mutants: readonly Mutant[] = [
     edits: [
       {
         file: "src/workflow/service.ts",
-        before: `    return Object.freeze({ run_id: id, status: "started" });`,
-        after: `    return Object.freeze({ run_id: id, status: "running" });`,
+        before: `    return Object.freeze({ run_id: runId, status: "started" as const });
+  }
+
+  // --- durable launch/resume`,
+        after: `    return Object.freeze({ run_id: runId, status: "running" as const });
+  }
+
+  // --- durable launch/resume`,
       },
     ],
   },
@@ -528,8 +540,14 @@ const mutants: readonly Mutant[] = [
     edits: [
       {
         file: "src/workflow/service.ts",
-        before: `    return Object.freeze({ run_id: id, status: "started" });`,
-        after: `    return Object.freeze({ run_id: id, name: parsed.name, status: "started" });`,
+        before: `    return Object.freeze({ run_id: runId, status: "started" as const });
+  }
+
+  // --- durable launch/resume`,
+        after: `    return Object.freeze({ run_id: runId, name: parsed.name, status: "started" as const });
+  }
+
+  // --- durable launch/resume`,
       },
     ],
   },
