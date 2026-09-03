@@ -116,9 +116,10 @@ const mutations: readonly Mutation[] = [
   {
     id: "T22-normalization-broad",
     file: "scripts/parity/closeout/normalization.ts",
-    before: "export function normalizeCloseoutOutput(value: string): string {\n  return value",
+    before:
+      "export function normalizeCloseoutOutput(value: string): string {\n  return stripAnsi(value)",
     after:
-      "export function normalizeCloseoutOutput(value: string): string {\n  return value.replaceAll(/Today\\'s date is \\d{4}-\\d{2}-\\d{2}/gu, \"Today\\'s date is <date>\")",
+      "export function normalizeCloseoutOutput(value: string): string {\n  return stripAnsi(value).replaceAll(/Today\\'s date is \\d{4}-\\d{2}-\\d{2}/gu, \"Today\\'s date is <date>\")",
     command: "t22-test",
     expected: "MUTATION_CAUSE:T22-normalization-scope",
   },
