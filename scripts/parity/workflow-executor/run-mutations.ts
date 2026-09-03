@@ -35,7 +35,7 @@ const mutants: readonly Mutant[] = [
       {
         file: engine,
         before:
-          "          const cause = error instanceof Error ? `${error.name}: ${error.message}` : renderValue(error);\n          this.recordFault(`${node.id}: engine fault: ${cause}`);\n          this.result.engineFaults += 1;\n          this.logError(`workflow: engine fault at node ${node.id}`, error);",
+          "          const cause =\n            error instanceof Error ? `${error.name}: ${error.message}` : renderValue(error);\n          this.recordFault(`${node.id}: engine fault: ${cause}`);\n          this.result.engineFaults += 1;\n          this.logError(`workflow: engine fault at node ${node.id}`, error);",
         after: "          output = null;",
       },
     ],
