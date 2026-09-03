@@ -1,4 +1,5 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -32,6 +33,7 @@ const HEADER_ALLOWLIST = [
 
 let runtime: StubRuntime;
 let server: Awaited<ReturnType<typeof startStub>>;
+let stubPort: number;
 const roots: string[] = [];
 let projectedLog: string;
 let rawLog: string;
@@ -59,7 +61,8 @@ beforeAll(async () => {
     posts: 0,
     requests: 0,
   };
-  server = await startStub(runtime);
+  server = await startStub(runtime, 0);
+  stubPort = (server.address() as AddressInfo).port;
 });
 
 afterAll(async () => {
@@ -89,7 +92,7 @@ function reset(laneSteps: Readonly<Record<string, readonly StubLaneStep[]>>): vo
 }
 
 function post(body: unknown): Promise<Response> {
-  return fetch("http://127.0.0.1:11434/v1/chat/completions", {
+  return fetch(`http://127.0.0.1:${String(stubPort)}/v1/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
