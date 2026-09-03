@@ -360,9 +360,9 @@ const mutants: readonly Mutant[] = [
     edits: [
       {
         file: chat,
-        before: "const sessionRegistry = sessionToolBase.registry;",
+        before: "toolDispatcher: new RegistryToolDispatcher(tools.dispatch),",
         after:
-          "const sessionRegistry = CHAT_TOOL_REGISTRY_FACTORIES.failSafe(connection.database, options.environment);",
+          "toolDispatcher: new RegistryToolDispatcher(((registry) => registry.dispatch.bind(registry))(CHAT_TOOL_REGISTRY_FACTORIES.failSafe(connection.database, options.environment))),",
       },
     ],
   },
