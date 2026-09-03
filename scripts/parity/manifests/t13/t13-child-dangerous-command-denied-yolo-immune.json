@@ -186,9 +186,15 @@
       }
     },
     {
-      "side": "both",
+      "side": "oracle",
       "field": "events.requests",
       "pointer": "/records/4/body/messages/3/content",
+      "value": "{\"error\": \"subagent auto-denied a dangerous command (recursive delete (rm -r))\", \"command\": \"rm -rf victim2.txt\"}"
+    },
+    {
+      "side": "candidate",
+      "field": "events.requests",
+      "pointer": "/records/3/body/messages/3/content",
       "value": "{\"error\": \"subagent auto-denied a dangerous command (recursive delete (rm -r))\", \"command\": \"rm -rf victim2.txt\"}"
     }
   ],
