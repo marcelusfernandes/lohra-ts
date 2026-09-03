@@ -28,7 +28,12 @@ export interface LaunchCandidateInput {
   readonly bootTimeoutMs?: number;
 }
 
-const BOOT_LINE_PATTERN = /^Lohra dashboard: http:\/\/127\.0\.0\.1:(\d+)\n$/mu;
+const BOOT_LINE_PATTERN = /^Lohra dashboard: http:\/\/127\.0\.0\.1:(\d+)\r?$/mu;
+
+export function candidateDashboardPortFromStderr(stderr: string): number | null {
+  const match = BOOT_LINE_PATTERN.exec(stderr);
+  return match === null ? null : Number(match[1]);
+}
 
 export async function launchCandidateDashboard(
   input: LaunchCandidateInput,
@@ -78,12 +83,12 @@ export async function launchCandidateDashboard(
     // again, silently wiping out whatever exit listener kill() registers
     // afterward, so it never resolves even after the child has died.
     const checkForBootLine = (): void => {
-      const match = BOOT_LINE_PATTERN.exec(stderrText());
-      if (match !== null) {
+      const dashboardPort = candidateDashboardPortFromStderr(stderrText());
+      if (dashboardPort !== null) {
         clearTimeout(timeout);
         child.removeAllListeners("exit");
         child.stderr.removeListener("data", checkForBootLine);
-        resolvePromise(Number(match[1]));
+        resolvePromise(dashboardPort);
       }
     };
     child.stderr.on("data", checkForBootLine);

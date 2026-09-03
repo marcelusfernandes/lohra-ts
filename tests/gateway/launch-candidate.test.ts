@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  candidateDashboardPortFromStderr,
   launchCandidateDashboard,
   type LaunchedGatewayProcess,
 } from "../../scripts/parity/gateway/launch-candidate.js";
@@ -35,6 +36,14 @@ function tempHome(): string {
 }
 
 describe("launchCandidateDashboard: a real subprocess, probed over raw sockets", () => {
+  it("detects the dashboard boot line when later stderr shares the same chunk", () => {
+    expect(
+      candidateDashboardPortFromStderr(
+        "Lohra dashboard: http://127.0.0.1:55775\nWebSocket:       ws://127.0.0.1:55775/api/ws\n",
+      ),
+    ).toBe(55_775);
+  });
+
   it("boots, serves authenticated REST, and completes a real RFC6455 WS handshake", async () => {
     const home = tempHome();
     const process_ = await launchCandidateDashboard({
