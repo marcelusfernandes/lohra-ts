@@ -186,7 +186,9 @@ describe("T22 closeout invariants", () => {
       format: true,
       pack: true,
     };
-    expect(gatesEvidenceMatches(valid, "current")).toBe(true);
+    expect(gatesEvidenceMatches(valid, "current"), "MUTATION_CAUSE:T22-measured-test-floor").toBe(
+      true,
+    );
     expect(
       gatesEvidenceMatches({ ...valid, tests: 1474 }, "current"),
       "MUTATION_CAUSE:T22-measured-test-floor",
