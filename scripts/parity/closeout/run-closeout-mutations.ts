@@ -4,6 +4,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
+import { resolveOracleWorkspace } from "../resolve.js";
+
 interface Mutation {
   readonly id: string;
   readonly file: string;
@@ -30,6 +32,12 @@ const dist = join(project, "dist");
 const tsc = join(nodeModules, "typescript", "bin", "tsc");
 const vitest = join(nodeModules, "vitest", "vitest.mjs");
 const tsx = join(nodeModules, "tsx", "dist", "cli.mjs");
+const oracleWorkspace = resolveOracleWorkspace({
+  cwd: project,
+  environment: process.env,
+  timeoutMs: 5_000,
+  maxOutputBytes: 256 * 1024,
+});
 
 const mutations: readonly Mutation[] = [
   {
@@ -118,11 +126,19 @@ const mutations: readonly Mutation[] = [
     id: "T22-normalization-broad",
     file: "scripts/parity/closeout/normalization.ts",
     before:
-      "export function normalizeCloseoutOutput(value: string): string {\n  return stripAnsi(value)",
+      'export function normalizeCloseoutOutput(value: string): string {\n  return collapseSuccessfulVitestTelemetry(stripAnsi(value).split("\\n"))',
     after:
-      "export function normalizeCloseoutOutput(value: string): string {\n  return stripAnsi(value).replaceAll(/Today's date is \\d{4}-\\d{2}-\\d{2}/gu, \"Today's date is <date>\")",
+      'export function normalizeCloseoutOutput(value: string): string {\n  return collapseSuccessfulVitestTelemetry(\n    stripAnsi(value)\n      .replaceAll(/Today\'s date is \\d{4}-\\d{2}-\\d{2}/gu, "Today\'s date is <date>")\n      .split("\\n"),\n  )',
     command: "t22-test",
     expected: "MUTATION_CAUSE:T22-normalization-scope",
+  },
+  {
+    id: "T22-vitest-parallel-telemetry",
+    file: "scripts/parity/closeout/normalization.ts",
+    before: 'return collapseSuccessfulVitestTelemetry(stripAnsi(value).split("\\n"))',
+    after: 'return stripAnsi(value).split("\\n")',
+    command: "t22-test",
+    expected: "MUTATION_CAUSE:T22-vitest-parallel-telemetry",
   },
   {
     id: "T22-fixed-port",
@@ -158,7 +174,13 @@ function run(
 ): { readonly status: number; readonly output: string } {
   const result = spawnSync(executable, [...args], {
     cwd,
-    env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0", TZ: "UTC" },
+    env: {
+      ...process.env,
+      NO_COLOR: "1",
+      FORCE_COLOR: "0",
+      TZ: "UTC",
+      LOHRA_ORACLE_WORKSPACE: oracleWorkspace.root,
+    },
     encoding: "utf8",
     timeout,
     maxBuffer: 16 * 1024 * 1024,
