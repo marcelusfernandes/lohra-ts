@@ -101,6 +101,9 @@
     "probe:t22:pty": "tsx scripts/parity/closeout/pty.ts",
     "probe:t22:no-python": "tsx scripts/parity/closeout/no-python.ts",
     "probe:t22:concurrency": "tsx scripts/parity/closeout/concurrency.ts",
+    "verify:t22:evidence": "tsx scripts/parity/closeout/verify-evidence.ts",
+    "parity:closeout": "tsx scripts/parity/closeout/run-closeout.ts",
+    "mutations:closeout": "tsx scripts/parity/closeout/run-closeout-mutations.ts",
     "pack:check": "tsx scripts/pack-check.ts"
   },
   "dependencies": {

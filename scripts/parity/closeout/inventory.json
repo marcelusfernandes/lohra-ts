@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "executions": [
+    { "id": "parity", "target": "tsx scripts/parity/cli.ts" },
+    { "id": "parity:auth", "target": "tsx scripts/parity/auth/run-all.ts" },
+    { "id": "parity:context", "target": "tsx scripts/parity/local-context/run-all.ts" },
+    { "id": "parity:chat-completions", "target": "tsx scripts/parity/chat-completions/run-all.ts" },
+    { "id": "parity:workflow-spec", "target": "tsx scripts/parity/workflow-spec/run-all.ts" },
+    {
+      "id": "probe:workflow-spec-ts-only",
+      "target": "node scripts/parity/workflow-spec/ts-only-probes.mjs"
+    },
+    {
+      "id": "probe:chat-completions-ts-only",
+      "target": "node scripts/parity/chat-completions/ts-only-probe.mjs"
+    },
+    {
+      "id": "probe:local-context-ts-only",
+      "target": "node scripts/parity/local-context/ts-only-probes.mjs"
+    },
+    { "id": "probe:state-cross-read", "target": "node scripts/parity/state/cross-read.mjs" },
+    { "id": "probe:state-multiprocess", "target": "node scripts/parity/state/multiprocess.mjs" },
+    { "id": "parity:t08:all", "target": "tsx scripts/parity/conversation/run-all.ts" },
+    { "id": "probe:t08", "target": "node scripts/parity/conversation/ts-only-probes.mjs" },
+    { "id": "parity:t09:all", "target": "tsx scripts/parity/tools/run-all.ts" },
+    { "id": "probe:t09", "target": "node scripts/parity/tools/ts-only-probes.mjs" },
+    { "id": "parity:t10", "target": "tsx scripts/parity/provider-transports/run-all.ts" },
+    {
+      "id": "parity:t10:probes",
+      "target": "tsx scripts/parity/provider-transports/run-probes.ts && tsx scripts/parity/provider-transports/run-ts-probes.ts"
+    },
+    { "id": "parity:t10:gates", "target": "tsx scripts/parity/provider-transports/run-gates.ts" },
+    {
+      "id": "parity:t10:pack-smoke",
+      "target": "node scripts/parity/provider-transports/pack-smoke.mjs"
+    },
+    { "id": "parity:t11", "target": "tsx scripts/parity/openai-server/run-all.ts" },
+    { "id": "parity:t11:process", "target": "tsx scripts/parity/openai-server/run-process.ts" },
+    {
+      "id": "parity:t11:probes",
+      "target": "tsx scripts/parity/openai-server/run-process.ts && tsx scripts/parity/openai-server/run-ts-probes.ts"
+    },
+    { "id": "parity:t11:gates", "target": "tsx scripts/parity/openai-server/run-gates.ts" },
+    { "id": "parity:t11:pack-smoke", "target": "node scripts/parity/openai-server/pack-smoke.mjs" },
+    { "id": "parity:t12", "target": "tsx scripts/parity/gateway/run-scenarios.ts" },
+    { "id": "parity:t12:joint", "target": "tsx scripts/parity/gateway/run-joint-gate.ts" },
+    { "id": "parity:t13", "target": "tsx scripts/parity/orchestration/run-all.ts" },
+    { "id": "parity:t13:probes", "target": "tsx scripts/parity/orchestration/run-probes.ts" },
+    { "id": "parity:t13:gates", "target": "tsx scripts/parity/orchestration/run-gates.ts" },
+    { "id": "parity:t15", "target": "tsx scripts/parity/workflow-executor/run-all.ts" },
+    { "id": "mutations:t15", "target": "tsx scripts/parity/workflow-executor/run-mutations.ts" },
+    { "id": "parity:t16", "target": "tsx scripts/parity/workflow-durability/run-all.ts" },
+    { "id": "probe:t16", "target": "tsx scripts/parity/workflow-durability/probe.ts" },
+    { "id": "mutations:t16", "target": "tsx scripts/parity/workflow-durability/run-mutations.ts" },
+    { "id": "parity:t17", "target": "tsx scripts/parity/workflow-audit-live/run-all.ts" },
+    { "id": "probe:t17", "target": "tsx scripts/parity/workflow-audit-live/probe.ts" },
+    { "id": "mutations:t17", "target": "tsx scripts/parity/workflow-audit-live/run-mutations.ts" },
+    {
+      "id": "parity:t18",
+      "target": "tsx scripts/parity/cron/run-all.ts && tsx scripts/parity/cron/run-tool.ts"
+    },
+    { "id": "parity:t18:scheduler", "target": "tsx scripts/parity/cron/run-scheduler.ts" },
+    { "id": "parity:t18:probes", "target": "tsx scripts/parity/cron/run-probes.ts" },
+    { "id": "parity:t18:gates", "target": "tsx scripts/parity/cron/run-gates.ts" },
+    { "id": "parity:t19:all", "target": "sh scripts/parity/mcp/run-regression-gates-locked.sh" },
+    { "id": "parity:t20", "target": "tsx scripts/parity/web-tools/run-all.ts" },
+    { "id": "parity:t20:mutations", "target": "tsx scripts/parity/web-tools/run-mutations.ts" },
+    { "id": "parity:t21", "target": "tsx scripts/parity/media/run-all.ts" },
+    { "id": "parity:t21:gates", "target": "tsx scripts/parity/media/run-gates.ts" },
+    { "id": "mutations:t21", "target": "tsx scripts/parity/media/run-mutations.ts" },
+    { "id": "pack:t21", "target": "node scripts/parity/media/pack-smoke.mjs" },
+    { "id": "parity:t22:update", "target": "tsx scripts/parity/closeout/update.ts" },
+    { "id": "probe:t22:update", "target": "tsx scripts/parity/closeout/update.ts" },
+    { "id": "probe:t22:composition", "target": "tsx scripts/parity/closeout/composition.ts" },
+    { "id": "probe:t22:security", "target": "tsx scripts/parity/closeout/security.ts" },
+    { "id": "probe:t22:pty", "target": "tsx scripts/parity/closeout/pty.ts" },
+    { "id": "probe:t22:no-python", "target": "tsx scripts/parity/closeout/no-python.ts" },
+    { "id": "probe:t22:concurrency", "target": "tsx scripts/parity/closeout/concurrency.ts" },
+    { "id": "verify:t22:evidence", "target": "tsx scripts/parity/closeout/verify-evidence.ts" }
+  ],
+  "aliases": [
+    { "id": "parity:t08", "target": "tsx scripts/parity/cli.ts", "coveredBy": "parity" },
+    { "id": "parity:t09", "target": "tsx scripts/parity/cli.ts", "coveredBy": "parity" },
+    {
+      "id": "parity:t18:tool",
+      "target": "tsx scripts/parity/cron/run-tool.ts",
+      "coveredBy": "parity:t18"
+    },
+    {
+      "id": "parity:t19",
+      "target": "tsx scripts/parity/mcp/run-all.ts",
+      "coveredBy": "parity:t19:all"
+    },
+    {
+      "id": "parity:t19:process",
+      "target": "tsx scripts/parity/mcp/run-process.ts",
+      "coveredBy": "parity:t19:all"
+    },
+    {
+      "id": "parity:t19:gates:raw",
+      "target": "tsx scripts/parity/mcp/run-gates.ts",
+      "coveredBy": "parity:t19:all"
+    },
+    {
+      "id": "parity:t19:gates",
+      "target": "sh scripts/parity/mcp/run-regression-gates-locked.sh",
+      "coveredBy": "parity:t19:all"
+    }
+  ],
+  "excluded": [
+    "probe:chat-completions-live-scrub",
+    "probe:t08:live-scrub",
+    "smoke:chat-completions-live",
+    "smoke:t08:live",
+    "smoke:t09:live",
+    "parity:t10:live-smoke",
+    "parity:t11:live-smoke",
+    "parity:t13:live-smoke",
+    "parity:t18:live-smoke",
+    "parity:t19:live-smoke"
+  ],
+  "generators": ["parity:t13:fanout:generate", "parity:t20:generate-manifests"],
+  "helpers": ["scripts/parity/mcp/oracle-r1-probe.py", "scripts/parity/mcp/r1-probe.mjs"],
+  "meta": ["parity:closeout", "mutations:closeout"]
+}
