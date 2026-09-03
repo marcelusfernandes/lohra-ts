@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "n
 import { join, relative, resolve } from "node:path";
 
 import { normalizeCloseoutOutput } from "./normalization.js";
+import { resolveOracleWorkspace } from "../resolve.js";
 
 interface InventoryRow {
   readonly id: string;
@@ -27,6 +28,12 @@ const packageJson = JSON.parse(readFileSync(join(project, "package.json"), "utf8
   readonly scripts: Readonly<Record<string, string>>;
 };
 const evidenceDirectory = join(project, ".parity-evidence", "t22");
+const oracleWorkspace = resolveOracleWorkspace({
+  cwd: project,
+  environment: process.env,
+  timeoutMs: 60_000,
+  maxOutputBytes: 16 * 1024 * 1024,
+});
 
 function allFiles(directory: string): readonly string[] {
   const output: string[] = [];
@@ -93,9 +100,7 @@ function runId(id: string): Promise<{ readonly id: string; readonly normalized: 
         NO_COLOR: "1",
         FORCE_COLOR: "0",
         TZ: "UTC",
-        LOHRA_ORACLE_WORKSPACE:
-          process.env.LOHRA_ORACLE_WORKSPACE ??
-          "/Users/marcelusfernandes/.traycer/worktrees/marcelusfernandes__lohra/traycer-spry-moose-d146166d9241",
+        LOHRA_ORACLE_WORKSPACE: oracleWorkspace.root,
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
