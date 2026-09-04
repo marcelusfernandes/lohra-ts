@@ -27,17 +27,16 @@ async function runTarget(config: StubDriverConfig, activePort: number): Promise<
   if (config.port !== undefined) {
     targetEnvironment.LOHRA_PROVIDER_BASE_URL = `http://localhost:${String(activePort)}/v1`;
     targetEnvironment.LOHRA_OLLAMA_CONNECT_URL = `http://localhost:${String(activePort)}/api/tags`;
-    if (config.side === "oracle") {
-      const inheritedPythonPath = targetEnvironment.PYTHONPATH ?? "";
-      targetEnvironment.PYTHONDONTWRITEBYTECODE = "1";
-      targetEnvironment.LOHRA_PARITY_ORIGINAL_PYTHONPATH = inheritedPythonPath;
-      targetEnvironment.PYTHONPATH = [
-        join(import.meta.dirname, "python-sitecustomize"),
-        inheritedPythonPath,
-      ]
-        .filter((entry) => entry.length > 0)
-        .join(delimiter);
-    }
+    const inheritedPythonPath = targetEnvironment.PYTHONPATH ?? "";
+    targetEnvironment.PYTHONDONTWRITEBYTECODE = "1";
+    targetEnvironment.LOHRA_PARITY_ORIGINAL_PYTHONPATH = inheritedPythonPath;
+    const redirectedPythonPath = [
+      join(import.meta.dirname, "python-sitecustomize"),
+      inheritedPythonPath,
+    ]
+      .filter((entry) => entry.length > 0)
+      .join(delimiter);
+    targetEnvironment.PYTHONPATH = redirectedPythonPath;
   }
   const child = spawn(config.target.executable, [...config.target.argv], {
     cwd: config.target.cwd,

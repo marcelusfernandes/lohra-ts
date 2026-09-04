@@ -21,7 +21,8 @@ interface Mutation {
     | "no-python"
     | "pty"
     | "inventory"
-    | "concurrency";
+    | "concurrency"
+    | "stub-driver-test";
   readonly expected: string;
 }
 
@@ -242,6 +243,15 @@ const mutations: readonly Mutation[] = [
     expected: "CONCURRENT_PARITY_GATE_",
   },
   {
+    id: "T22-candidate-dynamic-stub-redirect",
+    file: "scripts/parity/stub/driver.ts",
+    before: "    targetEnvironment.PYTHONPATH = redirectedPythonPath;",
+    after:
+      '    targetEnvironment.PYTHONPATH =\n      config.side === "oracle" ? redirectedPythonPath : inheritedPythonPath;',
+    command: "stub-driver-test",
+    expected: "MUTATION_CAUSE:T22-candidate-dynamic-stub-redirect",
+  },
+  {
     id: "T22-concurrency-evidence",
     file: "scripts/parity/closeout/evidence-validation.ts",
     before: "value.realParityGates === 2 &&",
@@ -392,6 +402,13 @@ function command(
     return run(root, process.execPath, [tsx, "scripts/parity/closeout/no-python.ts"]);
   if (name === "concurrency")
     return run(root, process.execPath, [tsx, "scripts/parity/closeout/concurrency.ts"]);
+  if (name === "stub-driver-test")
+    return run(root, process.execPath, [
+      vitest,
+      "run",
+      "tests/parity/stub-driver.test.ts",
+      "--reporter=dot",
+    ]);
   return run(root, process.execPath, [tsx, "scripts/parity/closeout/composition.ts"]);
 }
 

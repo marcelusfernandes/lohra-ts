@@ -76,3 +76,61 @@ it("kills a timed-out target tree and releases the stub port before returning", 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+it("installs the dynamic-port redirect for candidate targets too", () => {
+  const root = mkdtempSync(join(tmpdir(), "lohra-stub-driver-candidate-"));
+  try {
+    const config = join(root, "config.json");
+    writeFileSync(
+      config,
+      JSON.stringify({
+        scenario: "candidate-dynamic-port",
+        side: "candidate",
+        port: 0,
+        stub: {
+          state: "up-with-models",
+          fixture: "doctor",
+          requestLog: { comparedHeaders: [], excludedHeaders: [] },
+        },
+        limits: { timeoutMs: 5_000, maxOutputBytes: 16_384 },
+        target: {
+          executable: process.execPath,
+          argv: [
+            "--input-type=module",
+            "-e",
+            "process.stdout.write(JSON.stringify({ pythonPath: process.env.PYTHONPATH, original: process.env.LOHRA_PARITY_ORIGINAL_PYTHONPATH }))",
+          ],
+          cwd: root,
+          environment: { PATH: "/usr/bin:/bin", PYTHONPATH: "/original" },
+        },
+        logs: {
+          projected: join(root, "projected.jsonl"),
+          raw: join(root, "raw.jsonl"),
+          summary: join(root, "summary.json"),
+          assertions: join(root, "assertions.json"),
+        },
+      }),
+    );
+
+    const result = spawnSync(process.execPath, ["--import", tsxLoader, driver.pathname, config], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    const environment = JSON.parse(result.stdout) as {
+      readonly pythonPath?: string;
+      readonly original?: string;
+    };
+    expect(environment.original, "MUTATION_CAUSE:T22-candidate-dynamic-stub-redirect").toBe(
+      "/original",
+    );
+    expect(environment.pythonPath, "MUTATION_CAUSE:T22-candidate-dynamic-stub-redirect").toContain(
+      "python-sitecustomize",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

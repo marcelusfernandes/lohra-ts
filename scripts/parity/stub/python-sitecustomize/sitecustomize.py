@@ -1,4 +1,4 @@
-"""Harness-only redirect from the oracle's frozen local endpoints to its stub."""
+"""Harness-only redirect from frozen local endpoints to the active parity stub."""
 
 from __future__ import annotations
 
