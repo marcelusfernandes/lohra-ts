@@ -208,6 +208,14 @@ const mutations: readonly Mutation[] = [
     expected: "MUTATION_CAUSE:T22-t19-serial-test-suite",
   },
   {
+    id: "T22-t17-dashboard-port-isolation",
+    file: "scripts/parity/workflow-audit-live/support.ts",
+    before: "for (const port of [11434, 8000])",
+    after: "for (const port of [11434, 9119, 8000])",
+    command: "t22-test",
+    expected: "MUTATION_CAUSE:T22-t17-dashboard-port-isolation",
+  },
+  {
     id: "T22-fixed-port",
     file: "scripts/parity/stub/driver.ts",
     before: "server = await startStub(runtime, config.port ?? 11_434);",

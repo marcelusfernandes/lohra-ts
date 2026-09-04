@@ -115,6 +115,13 @@ describe("T22 closeout invariants", () => {
     );
   });
 
+  it("does not reserve the user dashboard port for the non-network T17 harness", () => {
+    const support = source("scripts/parity/workflow-audit-live/support.ts");
+    expect(support, "MUTATION_CAUSE:T22-t17-dashboard-port-isolation").toContain(
+      "for (const port of [11434, 8000])",
+    );
+  });
+
   it("normalizes reporter telemetry without masking semantic fields", () => {
     const input =
       "user: Today's date is 2026-09-02; url=http://127.0.0.1:43210; path=/tmp/semantic\n RUN  v3.2.4 /tmp/worktree\n ✓ tests/example.test.ts (2 tests) 335ms\nloop start\n Test Files  1 passed (1)\n Tests  2 passed (2)\n Start at 02:33:59\n Duration 12.5s";

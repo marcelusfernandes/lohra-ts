@@ -19,7 +19,7 @@ export function guardCandidate(root: string): { sha: string; upstream: string } 
 }
 
 export function acquireLock(): void {
-  for (const port of [11434, 9119, 8000]) {
+  for (const port of [11434, 8000]) {
     const probe = spawnSync("/usr/sbin/lsof", ["-nP", `-iTCP:${String(port)}`, "-sTCP:LISTEN"], {
       encoding: "utf8",
     });
