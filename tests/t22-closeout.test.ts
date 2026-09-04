@@ -109,7 +109,7 @@ describe("T22 closeout invariants", () => {
 
   it("keeps successful T19 test diagnostics inside the normalized Vitest stream", () => {
     const wrapper = source("scripts/parity/mcp/run-regression-gates-locked.sh");
-    expect(wrapper, "MUTATION_CAUSE:T22-t19-test-stream-order").toMatch(/npm test .* 2>&1/u);
+    expect(wrapper, "MUTATION_CAUSE:T22-t19-test-stream-order").toMatch(/npm test\b[^\n]*2>&1/u);
     expect(wrapper, "MUTATION_CAUSE:T22-t19-serial-test-suite").toContain(
       "--no-file-parallelism --maxWorkers=1",
     );
