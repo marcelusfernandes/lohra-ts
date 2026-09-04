@@ -174,6 +174,25 @@ describe("T22 closeout invariants", () => {
     expect(unrelated).toContain('"waitedForLockMs":4201');
   });
 
+  it("normalizes only T18 scheduler evidence hashes while preserving verdicts", () => {
+    const summary = (digest: string, sha: string, verdict = "match"): string =>
+      JSON.stringify({
+        suite: "t18-cron-scheduler-bilateral",
+        scenarios: 8,
+        failures: verdict === "match" ? 0 : 1,
+        digest,
+        projections: [{ id: "scenario", sha, verdict }],
+      });
+    const first = normalizeCloseoutOutput(summary("first-digest", "first-sha"));
+    const second = normalizeCloseoutOutput(summary("second-digest", "second-sha"));
+    const divergent = normalizeCloseoutOutput(summary("third-digest", "third-sha", "DIVERGENT"));
+    expect(first, "MUTATION_CAUSE:T22-t18-scheduler-evidence-telemetry").toBe(second);
+    expect(first).toContain('"digest":"<volatile-evidence-digest>"');
+    expect(first).toContain('"sha":"<volatile-evidence-sha>"');
+    expect(first).toContain('"verdict":"match"');
+    expect(divergent).not.toBe(first);
+  });
+
   it("requires exact-SHA aggregate evidence before marking the closeout complete", () => {
     const verifier = source("scripts/parity/closeout/verify-evidence.ts");
     expect(verifier, "MUTATION_CAUSE:T22-aggregate-evidence").toContain(

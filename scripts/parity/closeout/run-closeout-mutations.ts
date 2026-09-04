@@ -151,10 +151,20 @@ const mutations: readonly Mutation[] = [
   {
     id: "T22-t16-lock-wait-telemetry",
     file: "scripts/parity/closeout/normalization.ts",
-    before: "const structured = normalizeT16Summary(normalizeT13Summary(line));",
-    after: "const structured = normalizeT13Summary(line);",
+    before:
+      "const structured = normalizeT18SchedulerSummary(\n        normalizeT16Summary(normalizeT13Summary(line)),\n      );",
+    after: "const structured = normalizeT18SchedulerSummary(normalizeT13Summary(line));",
     command: "t22-test",
     expected: "MUTATION_CAUSE:T22-t16-lock-wait-telemetry",
+  },
+  {
+    id: "T22-t18-scheduler-evidence-telemetry",
+    file: "scripts/parity/closeout/normalization.ts",
+    before:
+      "const structured = normalizeT18SchedulerSummary(\n        normalizeT16Summary(normalizeT13Summary(line)),\n      );",
+    after: "const structured = normalizeT16Summary(normalizeT13Summary(line));",
+    command: "t22-test",
+    expected: "MUTATION_CAUSE:T22-t18-scheduler-evidence-telemetry",
   },
   {
     id: "T22-t19-test-stream-order",

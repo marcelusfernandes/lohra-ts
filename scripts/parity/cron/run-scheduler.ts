@@ -6,9 +6,11 @@
 // 15-20) plus one additional scenario (restart-single-fire, assertion 43)
 // beyond the contract's stated minimum.
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 import {
   cleanup,
+  jobsPathOf,
   localDay,
   materialize,
   runCandidateCron,
@@ -16,6 +18,7 @@ import {
   runOracleCron,
   utcDay,
   writeEvidence,
+  type RuntimePaths,
 } from "./harness.js";
 import {
   readSchedulerLog,
@@ -49,6 +52,17 @@ function lastRunAtFromList(stdout: string): boolean {
   // request count; this helper is only used to confirm a job is still
   // listed (alive) after the scheduler stops, not to read the timestamp.
   return stdout.trim().length > 0;
+}
+
+function persistedLastRunAt(paths: RuntimePaths): boolean {
+  try {
+    const parsed = JSON.parse(readFileSync(jobsPathOf(paths), "utf8")) as {
+      readonly jobs?: readonly { readonly last_run_at?: unknown }[];
+    };
+    return parsed.jobs?.some((job) => typeof job.last_run_at === "number") ?? false;
+  } catch {
+    return false;
+  }
 }
 
 async function stopBoth(oracle: SchedulerProcess, candidate: SchedulerProcess): Promise<void> {
@@ -162,14 +176,18 @@ async function scenario18FailedRunStillMarks(): Promise<void> {
     const candidateScheduler = await startCandidateScheduler({ paths: candidate });
     await waitFor(() => oracleScheduler.upstream.requests.length >= 1, 8000);
     await waitFor(() => candidateScheduler.upstream.requests.length >= 1, 8000);
-    await new Promise((r) => setTimeout(r, 500));
+    const oraclePersisted = await waitFor(() => persistedLastRunAt(oracle), 8000);
+    const candidatePersisted = await waitFor(() => persistedLastRunAt(candidate), 8000);
     await stopBoth(oracleScheduler, candidateScheduler);
 
     const oracleList = runOracleCron(["list"], oracle);
     const candidateList = runCandidateCron(["list"], candidate);
     const oracleMarked =
-      !oracleList.stdout.includes("no scheduled jobs") && lastRunAtFromList(oracleList.stdout);
+      oraclePersisted &&
+      !oracleList.stdout.includes("no scheduled jobs") &&
+      lastRunAtFromList(oracleList.stdout);
     const candidateMarked =
+      candidatePersisted &&
       !candidateList.stdout.includes("no scheduled jobs") &&
       lastRunAtFromList(candidateList.stdout);
     // The real assertion isn't visible from `list`'s text (it never prints
