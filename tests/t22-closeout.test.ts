@@ -16,6 +16,14 @@ const root = resolve(import.meta.dirname, "..");
 const source = (path: string): string => readFileSync(resolve(root, path), "utf8");
 
 describe("T22 closeout invariants", () => {
+  it("budgets the complete nested T10 regression chain independently", () => {
+    const gates = source("scripts/parity/orchestration/run-gates.ts");
+    expect(gates, "MUTATION_CAUSE:T22-t13-nested-t10-timeout").toContain(
+      "const NESTED_T10_TIMEOUT_MS = 1_200_000;",
+    );
+    expect(gates).toContain('command(["run", "parity:t10:gates"], {}, NESTED_T10_TIMEOUT_MS)');
+  });
+
   it("detects a candidate boot line when stderr lines share one chunk", () => {
     expect(
       parseCandidateBootPort(

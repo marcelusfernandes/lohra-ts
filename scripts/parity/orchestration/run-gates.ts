@@ -5,6 +5,8 @@ import { resolve } from "node:path";
 import { resolveOracleWorkspace } from "../resolve.js";
 
 const root = resolve(import.meta.dirname, "../../..");
+const DEFAULT_COMMAND_TIMEOUT_MS = 300_000;
+const NESTED_T10_TIMEOUT_MS = 1_200_000;
 
 // The T03 probes below (unlike the main harness) don't auto-discover the
 // oracle workspace themselves — reuse the harness's own discovery here so
@@ -19,6 +21,7 @@ const oracleWorkspace = resolveOracleWorkspace({
 function command(
   argv: readonly string[],
   extraEnv: Readonly<Record<string, string>> = {},
+  timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS,
 ): {
   status: number | null;
   stdout: string;
@@ -28,7 +31,7 @@ function command(
     cwd: root,
     env: { ...process.env, ...extraEnv },
     encoding: "utf8",
-    timeout: 300_000,
+    timeout: timeoutMs,
     maxBuffer: 64 * 1024 * 1024,
   });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
@@ -65,7 +68,7 @@ for (const script of t03Probes) {
 // then its own transport checks) — delegated to rather than re-run here,
 // which would otherwise double every one of those suites under the same
 // contended port lock for no additional signal.
-const t10Result = command(["run", "parity:t10:gates"]);
+const t10Result = command(["run", "parity:t10:gates"], {}, NESTED_T10_TIMEOUT_MS);
 if (t10Result.status !== 0)
   throw new Error(
     `T10_GATE_FAILED:${String(t10Result.status)}:${t10Result.stdout}:${t10Result.stderr}`,

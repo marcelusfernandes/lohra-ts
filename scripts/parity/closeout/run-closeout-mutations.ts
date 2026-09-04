@@ -176,6 +176,14 @@ const mutations: readonly Mutation[] = [
     expected: "MUTATION_CAUSE:T22-t12-coalesced-boot-output",
   },
   {
+    id: "T22-t13-nested-t10-timeout",
+    file: "scripts/parity/orchestration/run-gates.ts",
+    before: "const NESTED_T10_TIMEOUT_MS = 1_200_000;",
+    after: "const NESTED_T10_TIMEOUT_MS = 300_000;",
+    command: "t22-test",
+    expected: "MUTATION_CAUSE:T22-t13-nested-t10-timeout",
+  },
+  {
     id: "T22-t19-test-stream-order",
     file: "scripts/parity/mcp/run-regression-gates-locked.sh",
     before: "npm test 2>&1",
