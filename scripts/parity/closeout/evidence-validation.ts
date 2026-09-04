@@ -29,6 +29,22 @@ export function gatesEvidenceMatches(
     typeof gates.tests === "number" &&
     gates.tests >= 1475 &&
     gates.format === true &&
-    gates.pack === true
+    gates.pack === true &&
+    gates.diffCheck === true
+  );
+}
+
+export function concurrencyEvidenceMatches(
+  value: Readonly<Record<string, unknown>>,
+  targetSha: string,
+): boolean {
+  return (
+    value.targetSha === targetSha &&
+    value.realParityGates === 2 &&
+    value.overlapped === true &&
+    value.bothPassed === true &&
+    value.dynamicStubPort === true &&
+    value.fixedPortUsed === false &&
+    value.resourcesReleased === true
   );
 }

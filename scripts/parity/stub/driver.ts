@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import process from "node:process";
 
 import { startStub } from "./server.js";
@@ -22,10 +22,26 @@ async function close(server: Awaited<ReturnType<typeof startStub>> | undefined):
   });
 }
 
-async function runTarget(config: StubDriverConfig): Promise<number> {
+async function runTarget(config: StubDriverConfig, activePort: number): Promise<number> {
+  const targetEnvironment: Record<string, string> = { ...config.target.environment };
+  if (config.port !== undefined) {
+    targetEnvironment.LOHRA_PROVIDER_BASE_URL = `http://localhost:${String(activePort)}/v1`;
+    targetEnvironment.LOHRA_OLLAMA_CONNECT_URL = `http://localhost:${String(activePort)}/api/tags`;
+    if (config.side === "oracle") {
+      const inheritedPythonPath = targetEnvironment.PYTHONPATH ?? "";
+      targetEnvironment.PYTHONDONTWRITEBYTECODE = "1";
+      targetEnvironment.LOHRA_PARITY_ORIGINAL_PYTHONPATH = inheritedPythonPath;
+      targetEnvironment.PYTHONPATH = [
+        join(import.meta.dirname, "python-sitecustomize"),
+        inheritedPythonPath,
+      ]
+        .filter((entry) => entry.length > 0)
+        .join(delimiter);
+    }
+  }
   const child = spawn(config.target.executable, [...config.target.argv], {
     cwd: config.target.cwd,
-    env: { ...config.target.environment },
+    env: targetEnvironment,
     stdio: ["ignore", "pipe", "pipe"],
     shell: false,
     detached: process.platform !== "win32",
@@ -93,19 +109,28 @@ async function main(): Promise<number> {
     laneSteps: config.stub.laneSteps ?? {},
     laneStepIndex: new Map(),
     latches: new Map(),
+    activePort: 11_434,
     posts: 0,
     requests: 0,
   };
   let server: Awaited<ReturnType<typeof startStub>> | undefined;
+  let activePort = config.port ?? 11_434;
   try {
     if (config.stub.state !== "down") {
       try {
-        server = await startStub(runtime);
+        server = await startStub(runtime, config.port ?? 11_434);
+        const address = server.address();
+        if (address === null || typeof address === "string")
+          throw new Error("stub address missing");
+        activePort = address.port;
+        runtime.activePort = activePort;
       } catch {
         return 86;
       }
+    } else if (config.port === 0) {
+      throw new Error("dynamic stub port requires a listening stub");
     }
-    return await runTarget(config);
+    return await runTarget(config, activePort);
   } finally {
     await close(server);
     writeFileSync(

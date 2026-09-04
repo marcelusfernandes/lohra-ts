@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   architectureRulingMatches,
   componentTargetMatches,
+  concurrencyEvidenceMatches,
   gatesEvidenceMatches,
 } from "../scripts/parity/closeout/evidence-validation.js";
 import { normalizeCloseoutOutput } from "../scripts/parity/closeout/normalization.js";
@@ -55,6 +56,14 @@ describe("T22 closeout invariants", () => {
       'upstream.listen(0, "127.0.0.1"',
     );
     expect(composition).not.toContain("11434");
+    const concurrency = source("scripts/parity/closeout/concurrency.ts");
+    expect(concurrency, "MUTATION_CAUSE:T22-real-concurrent-parity-gates").toContain(
+      '"--stub-port",\n        "0"',
+    );
+    expect(concurrency).toContain('scripts", "parity", "cli.ts');
+    expect(source("scripts/parity/stub/driver.ts")).toContain(
+      "startStub(runtime, config.port ?? 11_434)",
+    );
   });
 
   it("keeps the native SQLite dependency compatible with the declared Node 20 floor", () => {
@@ -212,6 +221,7 @@ describe("T22 closeout invariants", () => {
       tests: 1475,
       format: true,
       pack: true,
+      diffCheck: true,
     };
     expect(gatesEvidenceMatches(valid, "current"), "MUTATION_CAUSE:T22-measured-test-floor").toBe(
       true,
@@ -220,5 +230,26 @@ describe("T22 closeout invariants", () => {
       gatesEvidenceMatches({ ...valid, tests: 1474 }, "current"),
       "MUTATION_CAUSE:T22-measured-test-floor",
     ).toBe(false);
+    expect(
+      gatesEvidenceMatches({ ...valid, diffCheck: false }, "current"),
+      "MUTATION_CAUSE:T22-diff-check-gate",
+    ).toBe(false);
+  });
+
+  it("requires two overlapping real parity processes with dynamic stub ports", () => {
+    const valid = {
+      targetSha: "current",
+      realParityGates: 2,
+      overlapped: true,
+      bothPassed: true,
+      dynamicStubPort: true,
+      fixedPortUsed: false,
+      resourcesReleased: true,
+    };
+    expect(
+      concurrencyEvidenceMatches(valid, "current"),
+      "MUTATION_CAUSE:T22-concurrency-evidence",
+    ).toBe(true);
+    expect(concurrencyEvidenceMatches({ ...valid, fixedPortUsed: true }, "current")).toBe(false);
   });
 });

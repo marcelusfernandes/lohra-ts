@@ -132,15 +132,35 @@ export function performUpdate(
     const tracking = branchAndUpstream(runner, repo);
     if ("status" in tracking) return tracking;
     const oldSha = gitText(runner, repo, ["rev-parse", "HEAD"]);
-    const pulled = runGit(runner, repo, ["pull", "--ff-only"]);
-    if (pulled.code !== 0) {
-      const ancestor = runGit(runner, repo, ["merge-base", "--is-ancestor", "HEAD", "@{u}"]);
-      if (ancestor.code !== 0) {
+    const fetched = runGit(runner, repo, ["fetch", "--quiet"]);
+    if (fetched.code !== 0) {
+      return result("error", `git fetch failed:\n${fetched.stderr || fetched.stdout}`);
+    }
+    const behindOrEqual = runGit(runner, repo, ["merge-base", "--is-ancestor", "HEAD", "@{u}"]);
+    if (behindOrEqual.code > 1) {
+      return result(
+        "error",
+        `could not classify upstream: ${behindOrEqual.stderr || behindOrEqual.stdout}`,
+      );
+    }
+    if (behindOrEqual.code === 1) {
+      const ahead = runGit(runner, repo, ["merge-base", "--is-ancestor", "@{u}", "HEAD"]);
+      if (ahead.code > 1) {
+        return result("error", `could not classify upstream: ${ahead.stderr || ahead.stdout}`);
+      }
+      if (ahead.code === 1) {
         return result(
           "diverged",
-          `${tracking.branch} has diverged from its upstream — resolve manually.\n${pulled.stderr || pulled.stdout}`,
+          `${tracking.branch} has diverged from its upstream — resolve manually.`,
         );
       }
+      return result("up_to_date", `${tracking.branch} already contains its upstream.`, {
+        oldSha,
+        newSha: oldSha,
+      });
+    }
+    const pulled = runGit(runner, repo, ["pull", "--ff-only"]);
+    if (pulled.code !== 0) {
       return result("error", `git pull failed:\n${pulled.stderr || pulled.stdout}`);
     }
     const newSha = gitText(runner, repo, ["rev-parse", "HEAD"]);

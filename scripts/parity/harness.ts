@@ -43,6 +43,7 @@ export interface RunScenarioOptions {
   readonly pythonExecutable?: string;
   readonly guardProvider?: GuardProvider;
   readonly preconditionProbe?: TcpPortProbe;
+  readonly stubPort?: number;
 }
 
 const defaultProjectRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -144,6 +145,7 @@ function executeSide(
     readonly workspace?: OracleWorkspace;
     readonly bindings?: Readonly<Record<string, string>>;
     readonly pythonExecutable: string;
+    readonly stubPort?: number;
   },
 ): RunRecord {
   const runner = manifest.runners[side];
@@ -168,6 +170,7 @@ function executeSide(
       JSON.stringify({
         scenario: manifest.id,
         side,
+        ...(context.stubPort === undefined ? {} : { port: context.stubPort }),
         stub: manifest.stub,
         limits: manifest.limits,
         target,
@@ -193,7 +196,10 @@ function executeSide(
       ? runPythonProcess(request, { pythonExecutable: context.pythonExecutable })
       : runTypeScriptProcess(request);
   if (manifest.stub !== undefined && processRecord.exitCode === 86) {
-    throw new HarnessError("STUB_BIND_FAILED", "Stub could not bind 127.0.0.1:11434");
+    throw new HarnessError(
+      "STUB_BIND_FAILED",
+      `Stub could not bind 127.0.0.1:${String(context.stubPort ?? 11_434)}`,
+    );
   }
   if (manifest.stub !== undefined) {
     assertPreconditions(manifest.preconditions, manifest.limits);
@@ -402,9 +408,16 @@ export function runScenario(
   manifest: ScenarioManifest,
   options: RunScenarioOptions = {},
 ): EvidenceRecord {
+  const activeManifest =
+    options.stubPort === undefined || options.stubPort === 11_434
+      ? manifest
+      : {
+          ...manifest,
+          preconditions: manifest.preconditions.filter((entry) => entry.port !== 11_434),
+        };
   const preconditions = assertPreconditions(
-    manifest.preconditions,
-    manifest.limits,
+    activeManifest.preconditions,
+    activeManifest.limits,
     options.preconditionProbe,
   );
   const cwd = options.cwd ?? process.cwd();
@@ -464,9 +477,10 @@ export function runScenario(
       ...(workspace === undefined ? {} : { workspace }),
       ...(options.executables === undefined ? {} : { bindings: options.executables }),
       pythonExecutable,
+      ...(options.stubPort === undefined ? {} : { stubPort: options.stubPort }),
     };
-    oracleRun = executeSide("oracle", manifest, oraclePaths, context);
-    candidateRun = executeSide("candidate", manifest, candidatePaths, context);
+    oracleRun = executeSide("oracle", activeManifest, oraclePaths, context);
+    candidateRun = executeSide("candidate", activeManifest, candidatePaths, context);
   } catch (error) {
     primaryError = error;
   }

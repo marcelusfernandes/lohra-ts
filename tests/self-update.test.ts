@@ -84,20 +84,44 @@ describe("self-update state machine", () => {
     ).toMatchObject({ status: "no_upstream", ok: false });
   });
 
-  it("classifies structural divergence separately from a generic pull failure", () => {
+  it("refuses structural divergence before pull and classifies a later pull failure", () => {
+    const divergenceCalls: string[] = [];
     const base = {
       "git status": [0, ""] as const,
       "git symbolic-ref": [0, "main"] as const,
       "git rev-parse --abbrev-ref": [0, "origin/main"] as const,
       "git rev-parse HEAD": [0, "old"] as const,
-      "git pull --ff-only": [1, "", "cannot fast-forward"] as const,
+      "git fetch --quiet": [0] as const,
+      "git merge-base --is-ancestor HEAD": [1] as const,
+      "git merge-base --is-ancestor @{u}": [1] as const,
     };
-    expect(performUpdate("/repo", runner({ ...base, "git merge-base": [1] }))).toMatchObject({
+    expect(
+      performUpdate("/repo", runner(base, divergenceCalls)),
+      "MUTATION_CAUSE:T22-updater-divergence-before-pull",
+    ).toMatchObject({
       status: "diverged",
+      reinstallRecommended: false,
     });
-    expect(performUpdate("/repo", runner({ ...base, "git merge-base": [0] }))).toMatchObject({
-      status: "error",
-    });
+    expect(
+      divergenceCalls.some((call) => call.includes(" pull ")),
+      "MUTATION_CAUSE:T22-updater-divergence-before-pull",
+    ).toBe(false);
+
+    const failureCalls: string[] = [];
+    expect(
+      performUpdate(
+        "/repo",
+        runner(
+          {
+            ...base,
+            "git merge-base --is-ancestor HEAD": [0],
+            "git pull --ff-only": [1, "", "transport failed"],
+          },
+          failureCalls,
+        ),
+      ),
+    ).toMatchObject({ status: "error" });
+    expect(failureCalls.some((call) => call.includes(" pull "))).toBe(true);
   });
 
   it("reports changed files and requests npm reinstall for dependency manifests", () => {
@@ -113,6 +137,8 @@ describe("self-update state machine", () => {
         shaCall += 1;
         return { code: 0, stdout: shaCall === 1 ? "oldsha1" : "newsha2", stderr: "" };
       }
+      if (key === "fetch --quiet") return { code: 0, stdout: "", stderr: "" };
+      if (key === "merge-base --is-ancestor HEAD @{u}") return { code: 0, stdout: "", stderr: "" };
       if (key === "pull --ff-only") return { code: 0, stdout: "updated", stderr: "" };
       if (key.startsWith("diff --name-only")) {
         return { code: 0, stdout: "src/x.ts\npackage-lock.json", stderr: "" };
@@ -154,6 +180,8 @@ describe("update command", () => {
         shaCall += 1;
         return { code: 0, stdout: shaCall === 1 ? "old" : "new", stderr: "" };
       }
+      if (key === "fetch --quiet") return { code: 0, stdout: "", stderr: "" };
+      if (key === "merge-base --is-ancestor HEAD @{u}") return { code: 0, stdout: "", stderr: "" };
       if (key === "pull --ff-only") return { code: 0, stdout: "ok", stderr: "" };
       if (key.startsWith("diff --name-only"))
         return { code: 0, stdout: "package.json", stderr: "" };

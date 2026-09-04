@@ -137,9 +137,12 @@ export function buildEnvironment(
 }
 
 export async function probeOllamaDown(): Promise<OllamaStatus> {
+  const targetUrl =
+    process.env.LOHRA_OLLAMA_CONNECT_URL ?? process.env.LOHRA_OLLAMA_URL ?? ollamaUrl;
+  const reportedUrl = process.env.LOHRA_OLLAMA_URL ?? ollamaUrl;
   return await new Promise<OllamaStatus>((resolve) => {
     const request = get(
-      ollamaUrl,
+      targetUrl,
       { headers: { accept: "*/*", "user-agent": "lohra-ts/0.0.11" }, timeout: 500 },
       (response) => {
         const chunks: Buffer[] = [];
@@ -147,7 +150,12 @@ export async function probeOllamaDown(): Promise<OllamaStatus> {
         response.on("end", () => {
           const status = response.statusCode ?? 0;
           if (status < 200 || status >= 300) {
-            resolve({ alive: false, detail: `HTTP ${String(status)}`, models: [], url: ollamaUrl });
+            resolve({
+              alive: false,
+              detail: `HTTP ${String(status)}`,
+              models: [],
+              url: reportedUrl,
+            });
             return;
           }
           try {
@@ -163,16 +171,16 @@ export async function probeOllamaDown(): Promise<OllamaStatus> {
                   return typeof name === "string" ? [name] : [];
                 })
               : [];
-            resolve({ alive: true, detail: "", models, url: ollamaUrl });
+            resolve({ alive: true, detail: "", models, url: reportedUrl });
           } catch {
-            resolve({ alive: false, detail: "JSONDecodeError", models: [], url: ollamaUrl });
+            resolve({ alive: false, detail: "JSONDecodeError", models: [], url: reportedUrl });
           }
         });
       },
     );
     request.once("timeout", () => request.destroy());
     request.once("error", () => {
-      resolve({ alive: false, detail: "ConnectError", models: [], url: ollamaUrl });
+      resolve({ alive: false, detail: "ConnectError", models: [], url: reportedUrl });
     });
   });
 }

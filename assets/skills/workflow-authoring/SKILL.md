@@ -698,4 +698,3 @@ then put to a human. Nothing irreversible happens before the `checkpoint`.
 9. Is the spec itself lean enough to fit in one tool call (schemas hoisted into
    `schemas:` and referenced by `schema_ref`)?
 10. After it runs: did I read `status` and `faults` before believing `outputs`?
-

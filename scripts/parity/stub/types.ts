@@ -3,6 +3,7 @@ import type { StubFixture, StubLaneStep, StubSpec, StubState, StubToolStep } fro
 export interface StubDriverConfig {
   readonly scenario: string;
   readonly side: "oracle" | "candidate";
+  readonly port?: number;
   readonly stub: StubSpec;
   readonly limits: {
     readonly timeoutMs: number;
@@ -47,6 +48,7 @@ export interface StubRuntime {
    * needed the way the Python reference implementation required across its
    * own process boundary). */
   readonly latches: Map<string, { readonly promise: Promise<void>; resolve: () => void }>;
+  activePort?: number;
   posts: number;
   requests: number;
 }

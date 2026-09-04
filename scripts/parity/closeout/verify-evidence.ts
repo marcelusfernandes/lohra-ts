@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import {
   architectureRulingMatches,
   componentTargetMatches,
+  concurrencyEvidenceMatches,
   gatesEvidenceMatches,
 } from "./evidence-validation.js";
 
@@ -164,7 +165,14 @@ const nativeMacPass =
   nativeMac.node22 === true &&
   nativeMac.networkUsed === false &&
   nativeMac.credentialsUsed === false;
-const gatesPass = gates !== undefined && gatesEvidenceMatches(gates, targetSha);
+const diffCheckResult = spawnSync(
+  "git",
+  ["diff", "--check", "7e7363baa4193037e06cae8f480b3ab868453fef..HEAD"],
+  { cwd: project, encoding: "utf8" },
+);
+const diffCheckPass = diffCheckResult.status === 0;
+const gatesPass = gates !== undefined && gatesEvidenceMatches(gates, targetSha) && diffCheckPass;
+const concurrencyPass = concurrencyEvidenceMatches(components.concurrency, targetSha);
 const runProvenancePass =
   runProvenance.includes(targetSha) &&
   runProvenance.includes("gates.json") &&
@@ -205,7 +213,7 @@ const assertions = {
     layer: "fresh-install-canary",
   },
   E19: { status: gatesPass ? "PASS" : "PENDING", layer: "full-gates" },
-  E20: { status: "PASS", layer: "concurrent-process" },
+  E20: { status: concurrencyPass ? "PASS" : "PENDING", layer: "concurrent-parity-process" },
   E21: { status: aggregatesPass ? "PASS" : "PENDING", layer: "aggregate" },
   E22: { status: evidenceIndexPass ? "PASS" : "PENDING", layer: "evidence-index" },
   E23: { status: "PENDING_EVALUATOR", layer: "independent-review" },
@@ -288,6 +296,11 @@ const observation = {
     runProvenance: fileDigest(runProvenancePath),
   },
   assertions,
+  diffCheck: {
+    pass: diffCheckPass,
+    stderr: diffCheckResult.stderr.trim(),
+    stdout: diffCheckResult.stdout.trim(),
+  },
   finalReady: false,
   blockers: [
     "D16_WINDOWS_NATIVE_MATRIX",
@@ -296,6 +309,7 @@ const observation = {
     ...(aggregatesPass ? [] : ["E21_AGGREGATE"]),
     ...(nativeMacPass ? [] : ["D17_D18_MAC_NATIVE_MATRIX"]),
     ...(gatesPass ? [] : ["E19_FULL_GATES"]),
+    ...(concurrencyPass ? [] : ["E20_CONCURRENT_PARITY_GATES"]),
     ...(evidenceIndexPass ? [] : ["E22_EVIDENCE_PROVENANCE"]),
   ],
   networkUsed: false,

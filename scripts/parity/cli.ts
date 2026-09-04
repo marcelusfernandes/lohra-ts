@@ -12,11 +12,12 @@ interface CliOptions {
   readonly manifestPath: string;
   readonly evidencePath?: string;
   readonly oracleWorkspace?: string;
+  readonly stubPort?: number;
   readonly bindings: Readonly<Record<string, string>>;
 }
 
 function usage(): string {
-  return "usage: npm run parity -- --manifest <path> [--evidence <path>] [--oracle-workspace <absolute>] [--bind name=/absolute/path]";
+  return "usage: npm run parity -- --manifest <path> [--evidence <path>] [--oracle-workspace <absolute>] [--stub-port <0-65535>] [--bind name=/absolute/path]";
 }
 
 function argumentValue(args: readonly string[], index: number, option: string): string {
@@ -31,6 +32,7 @@ export function parseCli(args: readonly string[]): CliOptions {
   let manifestPath: string | undefined;
   let evidencePath: string | undefined;
   let oracleWorkspace: string | undefined;
+  let stubPort: number | undefined;
   const bindings: Record<string, string> = {};
   for (let index = 0; index < args.length; index += 1) {
     const option = args[index];
@@ -42,6 +44,13 @@ export function parseCli(args: readonly string[]): CliOptions {
       index += 1;
     } else if (option === "--oracle-workspace") {
       oracleWorkspace = argumentValue(args, index, option);
+      index += 1;
+    } else if (option === "--stub-port") {
+      const value = argumentValue(args, index, option);
+      stubPort = Number(value);
+      if (!Number.isInteger(stubPort) || stubPort < 0 || stubPort > 65_535) {
+        throw new HarnessError("CLI_ARGUMENT", "--stub-port must be an integer from 0 to 65535");
+      }
       index += 1;
     } else if (option === "--bind") {
       const binding = argumentValue(args, index, option);
@@ -62,6 +71,7 @@ export function parseCli(args: readonly string[]): CliOptions {
     manifestPath,
     ...(evidencePath === undefined ? {} : { evidencePath }),
     ...(oracleWorkspace === undefined ? {} : { oracleWorkspace }),
+    ...(stubPort === undefined ? {} : { stubPort }),
     bindings,
   };
 }
@@ -75,6 +85,7 @@ export function runCli(args: readonly string[]): number {
       ...(options.oracleWorkspace === undefined
         ? {}
         : { oracleWorkspace: resolve(options.oracleWorkspace) }),
+      ...(options.stubPort === undefined ? {} : { stubPort: options.stubPort }),
       executables: options.bindings,
     });
     const evidencePath = resolve(options.evidencePath ?? `.parity-evidence/${manifest.id}.json`);

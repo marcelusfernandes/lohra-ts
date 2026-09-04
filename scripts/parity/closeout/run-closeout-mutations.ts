@@ -90,6 +90,14 @@ const mutations: readonly Mutation[] = [
     expected: "MUTATION_CAUSE:T22-updater-ff-only",
   },
   {
+    id: "T22-updater-divergence-after-pull",
+    file: "src/self-update/service.ts",
+    before: "      if (ahead.code === 1) {",
+    after: "      if (ahead.code === 0) {",
+    command: "t22-test",
+    expected: "MUTATION_CAUSE:T22-updater-divergence-before-pull",
+  },
+  {
     id: "T22-updater-host-cwd",
     file: "src/self-update/service.ts",
     before: "locateRepo(dirname(fileURLToPath(moduleUrl)))",
@@ -158,11 +166,27 @@ const mutations: readonly Mutation[] = [
   },
   {
     id: "T22-fixed-port",
-    file: "scripts/parity/closeout/composition.ts",
-    before: 'upstream.listen(0, "127.0.0.1"',
-    after: 'upstream.listen(11434, "127.0.0.1"',
+    file: "scripts/parity/stub/driver.ts",
+    before: "server = await startStub(runtime, config.port ?? 11_434);",
+    after: "server = await startStub(runtime, 11_434);",
     command: "concurrency",
-    expected: "CONCURRENT_GATE_",
+    expected: "CONCURRENT_PARITY_GATE_",
+  },
+  {
+    id: "T22-concurrency-evidence",
+    file: "scripts/parity/closeout/evidence-validation.ts",
+    before: "value.realParityGates === 2 &&",
+    after: "value.realParityGates === 0 &&",
+    command: "t22-test",
+    expected: "MUTATION_CAUSE:T22-concurrency-evidence",
+  },
+  {
+    id: "T22-diff-check-gate",
+    file: "scripts/parity/closeout/evidence-validation.ts",
+    before: "gates.diffCheck === true",
+    after: 'typeof gates.diffCheck === "boolean"',
+    command: "t22-test",
+    expected: "MUTATION_CAUSE:T22-diff-check-gate",
   },
   {
     id: "T22-platform-spoof",
@@ -274,6 +298,7 @@ function command(
       vitest,
       "run",
       "tests/t22-closeout.test.ts",
+      "tests/self-update.test.ts",
       "--reporter=dot",
     ]);
   if (name === "docs-test")
@@ -305,6 +330,7 @@ const baseline = run(project, process.execPath, [
   vitest,
   "run",
   "tests/t22-closeout.test.ts",
+  "tests/self-update.test.ts",
   "tests/t22-docs.test.ts",
   "tests/mcp-manager.test.ts",
   "--reporter=dot",

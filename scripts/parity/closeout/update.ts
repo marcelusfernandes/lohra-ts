@@ -4,7 +4,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { checkUpdate, locateRepo, performUpdate } from "../../../src/self-update/index.js";
+import {
+  checkUpdate,
+  locateRepo,
+  performUpdate,
+  type CommandRunner,
+} from "../../../src/self-update/index.js";
 import { evidenceTargetSha } from "./evidence.js";
 
 const project = resolve(import.meta.dirname, "../../..");
@@ -48,8 +53,35 @@ function assertStatus(actual: string, expected: string): void {
   if (actual !== expected) throw new Error(`UPDATE_STATUS:${expected}:${actual}`);
 }
 
+function probeDivergenceRefusal(): readonly string[] {
+  const calls: string[] = [];
+  const runner: CommandRunner = (_executable, args) => {
+    const command = args.join(" ");
+    calls.push(command);
+    if (command === "status --porcelain") return { code: 0, stdout: "", stderr: "" };
+    if (command === "symbolic-ref --quiet --short HEAD") {
+      return { code: 0, stdout: "main", stderr: "" };
+    }
+    if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+      return { code: 0, stdout: "origin/main", stderr: "" };
+    }
+    if (command === "rev-parse HEAD") return { code: 0, stdout: "local", stderr: "" };
+    if (command === "fetch --quiet") return { code: 0, stdout: "", stderr: "" };
+    if (command.startsWith("merge-base --is-ancestor")) {
+      return { code: 1, stdout: "", stderr: "" };
+    }
+    throw new Error(`UPDATE_REFUSAL_UNEXPECTED_COMMAND:${command}`);
+  };
+  assertStatus(performUpdate("/repo", runner).status, "diverged");
+  if (calls.some((entry) => entry.startsWith("pull "))) {
+    throw new Error("UPDATE_DIVERGENCE_PULLED");
+  }
+  return calls;
+}
+
 const temporaryRoot = mkdtempSync(join(tmpdir(), "lohra-t22-update-"));
 try {
+  const divergenceRefusalCommands = probeDivergenceRefusal();
   const remote = join(temporaryRoot, "remote.git");
   const seed = join(temporaryRoot, "seed");
   const candidate = join(temporaryRoot, "candidate");
@@ -127,6 +159,8 @@ try {
     checkMutatedHead: false,
     fastForwardOnly: true,
     reinstallRecommended: true,
+    divergenceRefusedBeforePull: true,
+    divergenceRefusalCommands,
     graph: { baseSha, remoteSha, localSha, divergedRemoteSha },
     networkUsed: false,
     credentialsUsed: false,

@@ -176,8 +176,18 @@ function recordRequest(runtime: StubRuntime, request: IncomingMessage, body: unk
       runtime.failures.push(`REQUEST_HEADER_UNCLASSIFIED:${key}`);
     }
   }
+  const projectedHeaders =
+    runtime.activePort === undefined || runtime.activePort === 11_434
+      ? rawHeaders
+      : {
+          ...rawHeaders,
+          host: (rawHeaders.host ?? "").replace(
+            new RegExp(`:${String(runtime.activePort)}$`, "u"),
+            ":11434",
+          ),
+        };
   const headers = Object.fromEntries(
-    runtime.comparedHeaders.map((key) => [key, rawHeaders[key] ?? null]),
+    runtime.comparedHeaders.map((key) => [key, projectedHeaders[key] ?? null]),
   );
   // lane/isChild are only ever attached under chat-lane-script — every
   // other fixture's projected/raw log entry keeps the exact same shape it
