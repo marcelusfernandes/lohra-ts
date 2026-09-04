@@ -29,16 +29,7 @@ function runParity(manifest: string, evidencePath: string): Promise<ChildObserva
     const startedAt = Date.now();
     const child = spawn(
       process.execPath,
-      [
-        tsxLoader,
-        parityCli,
-        "--manifest",
-        manifest,
-        "--evidence",
-        evidencePath,
-        "--stub-port",
-        "0",
-      ],
+      [tsxLoader, parityCli, "--manifest", manifest, "--evidence", evidencePath],
       {
         cwd: project,
         env: { ...process.env, NO_COLOR: "1", TZ: "UTC" },

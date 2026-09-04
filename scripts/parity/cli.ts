@@ -81,11 +81,18 @@ export function runCli(args: readonly string[]): number {
     const options = parseCli(args);
     const parsed = JSON.parse(readFileSync(resolve(options.manifestPath), "utf8")) as unknown;
     const manifest = parseScenarioManifest(parsed);
+    const stubPort =
+      options.stubPort ??
+      (manifest.stub !== undefined &&
+      manifest.stub.state !== "down" &&
+      manifest.argv.includes("--provider")
+        ? 0
+        : undefined);
     const evidence = runScenario(manifest, {
       ...(options.oracleWorkspace === undefined
         ? {}
         : { oracleWorkspace: resolve(options.oracleWorkspace) }),
-      ...(options.stubPort === undefined ? {} : { stubPort: options.stubPort }),
+      ...(stubPort === undefined ? {} : { stubPort }),
       executables: options.bindings,
     });
     const evidencePath = resolve(options.evidencePath ?? `.parity-evidence/${manifest.id}.json`);

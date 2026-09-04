@@ -79,12 +79,12 @@ describe("T22 closeout invariants", () => {
     );
     expect(composition).not.toContain("11434");
     const concurrency = source("scripts/parity/closeout/concurrency.ts");
-    expect(concurrency, "MUTATION_CAUSE:T22-real-concurrent-parity-gates").toContain(
-      '"--stub-port",\n        "0"',
+    expect(concurrency, "MUTATION_CAUSE:T22-real-concurrent-parity-gates").not.toContain(
+      '"--stub-port"',
     );
     expect(concurrency).toContain('scripts", "parity", "cli.ts');
-    expect(source("scripts/parity/stub/driver.ts")).toContain(
-      "startStub(runtime, config.port ?? 11_434)",
+    expect(source("scripts/parity/cli.ts"), "MUTATION_CAUSE:T22-fixed-port").toContain(
+      'manifest.stub !== undefined &&\n      manifest.stub.state !== "down" &&\n      manifest.argv.includes("--provider")\n        ? 0\n        : undefined',
     );
   });
 

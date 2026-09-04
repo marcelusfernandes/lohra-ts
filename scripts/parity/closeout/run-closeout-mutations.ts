@@ -233,9 +233,11 @@ const mutations: readonly Mutation[] = [
   },
   {
     id: "T22-fixed-port",
-    file: "scripts/parity/stub/driver.ts",
-    before: "server = await startStub(runtime, config.port ?? 11_434);",
-    after: "server = await startStub(runtime, 11_434);",
+    file: "scripts/parity/cli.ts",
+    before:
+      'manifest.stub !== undefined &&\n      manifest.stub.state !== "down" &&\n      manifest.argv.includes("--provider")\n        ? 0\n        : undefined',
+    after:
+      'manifest.stub !== undefined &&\n      manifest.stub.state !== "down" &&\n      manifest.argv.includes("--provider")\n        ? 11_434\n        : undefined',
     command: "concurrency",
     expected: "CONCURRENT_PARITY_GATE_",
   },
