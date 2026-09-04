@@ -10,11 +10,23 @@ import {
   gatesEvidenceMatches,
 } from "../scripts/parity/closeout/evidence-validation.js";
 import { normalizeCloseoutOutput } from "../scripts/parity/closeout/normalization.js";
+import { parseCandidateBootPort } from "../scripts/parity/gateway/launch-candidate-fake.js";
 
 const root = resolve(import.meta.dirname, "..");
 const source = (path: string): string => readFileSync(resolve(root, path), "utf8");
 
 describe("T22 closeout invariants", () => {
+  it("detects a candidate boot line when stderr lines share one chunk", () => {
+    expect(
+      parseCandidateBootPort(
+        "Lohra dashboard: http://127.0.0.1:56896\nWebSocket: ws://127.0.0.1:56896/api/ws\n",
+      ),
+      "MUTATION_CAUSE:T22-t12-coalesced-boot-output",
+    ).toBe(56_896);
+    expect(parseCandidateBootPort("Lohra dashboard: http://127.0.0.1:43210\r\n")).toBe(43_210);
+    expect(parseCandidateBootPort("WebSocket: ws://127.0.0.1:43210/api/ws\n")).toBeNull();
+  });
+
   it("pins all approved ancestors and refuses platform spoofing", () => {
     const verifier = source("scripts/parity/closeout/verify-evidence.ts");
     for (const sha of [

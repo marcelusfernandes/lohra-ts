@@ -34,7 +34,12 @@ export interface LaunchCandidateFakeInput {
   readonly dashboardToken?: string;
 }
 
-const BOOT_LINE_PATTERN = /^Lohra dashboard: http:\/\/127\.0\.0\.1:(\d+)\n$/mu;
+const BOOT_LINE_PATTERN = /^Lohra dashboard: http:\/\/127\.0\.0\.1:(\d+)\r?$/mu;
+
+export function parseCandidateBootPort(stderr: string): number | null {
+  const match = BOOT_LINE_PATTERN.exec(stderr);
+  return match === null ? null : Number(match[1]);
+}
 
 export async function launchCandidateFakeUpstreamDashboard(
   input: LaunchCandidateFakeInput,
@@ -93,12 +98,12 @@ export async function launchCandidateFakeUpstreamDashboard(
     // removeAllListeners("exit") again, silently wiping out whatever exit
     // listener kill() registers afterward.
     const checkForBootLine = (): void => {
-      const match = BOOT_LINE_PATTERN.exec(stderrText());
-      if (match !== null) {
+      const bootPort = parseCandidateBootPort(stderrText());
+      if (bootPort !== null) {
         clearTimeout(timeout);
         child.removeAllListeners("exit");
         child.stderr.removeListener("data", checkForBootLine);
-        resolvePromise(Number(match[1]));
+        resolvePromise(bootPort);
       }
     };
     child.stderr.on("data", checkForBootLine);

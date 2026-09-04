@@ -167,6 +167,15 @@ const mutations: readonly Mutation[] = [
     expected: "MUTATION_CAUSE:T22-t18-scheduler-evidence-telemetry",
   },
   {
+    id: "T22-t12-coalesced-boot-output",
+    file: "scripts/parity/gateway/launch-candidate-fake.ts",
+    before:
+      "const BOOT_LINE_PATTERN = /^Lohra dashboard: http:\\/\\/127\\.0\\.0\\.1:(\\d+)\\r?$/mu;",
+    after: "const BOOT_LINE_PATTERN = /^Lohra dashboard: http:\\/\\/127\\.0\\.0\\.1:(\\d+)\\n$/mu;",
+    command: "t22-test",
+    expected: "MUTATION_CAUSE:T22-t12-coalesced-boot-output",
+  },
+  {
     id: "T22-t19-test-stream-order",
     file: "scripts/parity/mcp/run-regression-gates-locked.sh",
     before: "npm test 2>&1",
