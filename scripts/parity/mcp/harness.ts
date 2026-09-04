@@ -25,7 +25,7 @@ export const candidateCli = resolve(root, "dist/cli.js");
 
 const ORACLE_SHA = "16b4785d803ad0ca364a8a67346a04f949fbf592";
 const ORACLE_VERSION = "lohra 0.0.11\n";
-const FORBIDDEN_PORTS = [11434, 9119, 8000] as const;
+const FORBIDDEN_PORTS = [11434, 8000] as const;
 
 mkdirSync(evidenceRoot, { recursive: true });
 

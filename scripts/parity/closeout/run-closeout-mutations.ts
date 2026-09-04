@@ -216,6 +216,14 @@ const mutations: readonly Mutation[] = [
     expected: "MUTATION_CAUSE:T22-t19-dashboard-port-isolation",
   },
   {
+    id: "T22-t19-scenario-dashboard-port-isolation",
+    file: "scripts/parity/mcp/harness.ts",
+    before: "const FORBIDDEN_PORTS = [11434, 8000] as const;",
+    after: "const FORBIDDEN_PORTS = [11434, 9119, 8000] as const;",
+    command: "t22-test",
+    expected: "MUTATION_CAUSE:T22-t19-scenario-dashboard-port-isolation",
+  },
+  {
     id: "T22-t17-dashboard-port-isolation",
     file: "scripts/parity/workflow-audit-live/support.ts",
     before: "for (const port of [11434, 8000])",
