@@ -6,7 +6,7 @@ import { resolveOracleWorkspace } from "../resolve.js";
 
 const root = resolve(import.meta.dirname, "../../..");
 const DEFAULT_COMMAND_TIMEOUT_MS = 300_000;
-const NESTED_T10_TIMEOUT_MS = 1_200_000;
+const NESTED_T10_TIMEOUT_MS = 900_000;
 
 // The T03 probes below (unlike the main harness) don't auto-discover the
 // oracle workspace themselves — reuse the harness's own discovery here so
