@@ -141,6 +141,14 @@ const mutations: readonly Mutation[] = [
     expected: "MUTATION_CAUSE:T22-vitest-parallel-telemetry",
   },
   {
+    id: "T22-t16-lock-wait-telemetry",
+    file: "scripts/parity/closeout/normalization.ts",
+    before: "const structured = normalizeT16Summary(normalizeT13Summary(line));",
+    after: "const structured = normalizeT13Summary(line);",
+    command: "t22-test",
+    expected: "MUTATION_CAUSE:T22-t16-lock-wait-telemetry",
+  },
+  {
     id: "T22-t19-test-stream-order",
     file: "scripts/parity/mcp/run-regression-gates-locked.sh",
     before: "npm test 2>&1",

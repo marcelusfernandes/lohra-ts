@@ -138,6 +138,33 @@ describe("T22 closeout invariants", () => {
     expect(output).toContain('"evidenceSha":"must-survive"');
   });
 
+  it("normalizes only T16 lock-wait telemetry while preserving semantic fields", () => {
+    const first = normalizeCloseoutOutput(
+      JSON.stringify({
+        suite: "t16-workflow-durability",
+        targetSha: "semantic-sha",
+        bilateralMatch: true,
+        waitedForLockMs: 0,
+      }),
+    );
+    const second = normalizeCloseoutOutput(
+      JSON.stringify({
+        suite: "t16-workflow-durability",
+        targetSha: "semantic-sha",
+        bilateralMatch: true,
+        waitedForLockMs: 4_201,
+      }),
+    );
+    const unrelated = normalizeCloseoutOutput(
+      JSON.stringify({ suite: "user-payload", waitedForLockMs: 4_201 }),
+    );
+    expect(first, "MUTATION_CAUSE:T22-t16-lock-wait-telemetry").toBe(second);
+    expect(first).toContain('"targetSha":"semantic-sha"');
+    expect(first).toContain('"bilateralMatch":true');
+    expect(first).toContain('"waitedForLockMs":"<lock-wait>"');
+    expect(unrelated).toContain('"waitedForLockMs":4201');
+  });
+
   it("requires exact-SHA aggregate evidence before marking the closeout complete", () => {
     const verifier = source("scripts/parity/closeout/verify-evidence.ts");
     expect(verifier, "MUTATION_CAUSE:T22-aggregate-evidence").toContain(

@@ -31,6 +31,22 @@ function normalizeT13Summary(line: string): string {
   });
 }
 
+function normalizeT16Summary(line: string): string {
+  if (!line.startsWith("{")) return line;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return line;
+  }
+  if (typeof parsed !== "object" || parsed === null) return line;
+  const summary = parsed as Record<string, unknown>;
+  if (summary.suite !== "t16-workflow-durability" || typeof summary.waitedForLockMs !== "number") {
+    return line;
+  }
+  return JSON.stringify({ ...summary, waitedForLockMs: "<lock-wait>" });
+}
+
 function collapseSuccessfulVitestTelemetry(lines: readonly string[]): readonly string[] {
   const normalized: string[] = [];
   let insideRun = false;
@@ -51,7 +67,7 @@ function collapseSuccessfulVitestTelemetry(lines: readonly string[]): readonly s
 export function normalizeCloseoutOutput(value: string): string {
   return collapseSuccessfulVitestTelemetry(stripAnsi(value).split("\n"))
     .map((line) => {
-      const structured = normalizeT13Summary(line);
+      const structured = normalizeT16Summary(normalizeT13Summary(line));
       if (/^\s*Start at\b/iu.test(structured)) {
         return structured.replaceAll(/\b\d{2}:\d{2}:\d{2}\b/gu, "<clock>");
       }
