@@ -39,5 +39,9 @@ done
 # integrated, so every T19 scenario is now a strict blocking gate.
 npm run parity:t19
 npm run parity:t19:process
-npm test 2>&1
+# The media persistence boundary test is intentionally CPU-heavy. Running the
+# full suite with file-level parallelism inside the already nested closeout can
+# starve it past its semantic timeout, so keep the same suite and assertions
+# while serializing test files for reproducible closeout evidence.
+npm test -- --no-file-parallelism --maxWorkers=1 2>&1
 npm run parity:t19:gates:raw

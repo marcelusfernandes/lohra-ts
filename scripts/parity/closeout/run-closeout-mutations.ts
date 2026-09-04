@@ -194,10 +194,18 @@ const mutations: readonly Mutation[] = [
   {
     id: "T22-t19-test-stream-order",
     file: "scripts/parity/mcp/run-regression-gates-locked.sh",
-    before: "npm test 2>&1",
-    after: "npm test",
+    before: "npm test -- --no-file-parallelism --maxWorkers=1 2>&1",
+    after: "npm test -- --no-file-parallelism --maxWorkers=1",
     command: "t22-test",
     expected: "MUTATION_CAUSE:T22-t19-test-stream-order",
+  },
+  {
+    id: "T22-t19-serial-test-suite",
+    file: "scripts/parity/mcp/run-regression-gates-locked.sh",
+    before: "npm test -- --no-file-parallelism --maxWorkers=1 2>&1",
+    after: "npm test 2>&1",
+    command: "t22-test",
+    expected: "MUTATION_CAUSE:T22-t19-serial-test-suite",
   },
   {
     id: "T22-fixed-port",
