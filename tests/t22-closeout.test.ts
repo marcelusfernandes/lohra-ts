@@ -113,6 +113,9 @@ describe("T22 closeout invariants", () => {
     expect(wrapper, "MUTATION_CAUSE:T22-t19-serial-test-suite").toContain(
       "--no-file-parallelism --maxWorkers=1",
     );
+    expect(wrapper, "MUTATION_CAUSE:T22-t19-dashboard-port-isolation").toContain(
+      "for port in 11434 8000; do",
+    );
   });
 
   it("does not reserve the user dashboard port for the non-network T17 harness", () => {

@@ -27,7 +27,7 @@ fi
 # A lock coordinates cooperating lanes; it does not prove the sockets are
 # actually unused. Fail closed before starting any gate if a fixed listener is
 # already present, and let the trap release only this invocation's lock.
-for port in 11434 9119 8000; do
+for port in 11434 8000; do
   if /usr/bin/nc -z -w 1 127.0.0.1 "$port" >/dev/null 2>&1; then
     echo "PRECONDITION_TCP_PORT_IN_USE:$port" >&2
     exit 75
