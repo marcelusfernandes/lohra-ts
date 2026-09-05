@@ -1,5 +1,12 @@
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -18,10 +25,9 @@ function makeWorkdir(): string {
 }
 
 function runProva(cwd: string, slug: string): SpawnSyncReturns<string> {
-  const env = { ...process.env };
-  for (const key of Object.keys(env)) {
-    if (key.startsWith("VITEST")) delete env[key];
-  }
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith("VITEST")),
+  );
   return spawnSync(tsxBin, [runScript, slug], {
     cwd,
     encoding: "utf8",

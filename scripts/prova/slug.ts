@@ -19,10 +19,7 @@ export function branchSlug(branch: string): string | null {
  * `null` se a branch não segue a convenção, ou se `prova/<slug>.ts` não
  * existir segundo `exists`.
  */
-export function resolveProvaSlug(
-  branch: string,
-  exists: (path: string) => boolean,
-): string | null {
+export function resolveProvaSlug(branch: string, exists: (path: string) => boolean): string | null {
   const slug = branchSlug(branch);
   if (slug === null) return null;
   return exists(`prova/${slug}.ts`) ? slug : null;
