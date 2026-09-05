@@ -54,7 +54,7 @@ const FORBIDDEN_PATTERNS = [
 describe(".claude/settings.json", () => {
   it("declares exactly one PostToolUse hook group for Edit|Write, backed by the format script", () => {
     const groups = settings.hooks?.PostToolUse ?? [];
-    const editWrite = groups.filter((group) => group.matcher === "Edit|Write");
+    const editWrite = groups.filter((group) => group.matcher === "Edit|Write|MultiEdit");
     expect(editWrite).toHaveLength(1);
     const commands = editWrite[0]?.hooks.filter((hook) => hook.type === "command") ?? [];
     expect(commands).toHaveLength(1);
@@ -68,7 +68,7 @@ describe(".claude/settings.json", () => {
     expect(bash[0]?.hooks.map((hook) => hook.command).join()).toContain(
       ".claude/hooks/protege-main.sh",
     );
-    const write = pre.filter((group) => group.matcher === "Edit|Write");
+    const write = pre.filter((group) => group.matcher === "Edit|Write|MultiEdit");
     expect(write).toHaveLength(1);
     expect(write[0]?.hooks.map((hook) => hook.command).join()).toContain(
       ".claude/hooks/protege-escrita.sh",

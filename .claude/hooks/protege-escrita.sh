@@ -12,6 +12,13 @@
 # regras de dono único que não existem aqui.
 set -u
 payload=$(cat)
+# FAIL-CLOSED sem node: este hook é a ÚNICA camada que protege docs/reference/ e
+# lohra/ (não há pre-push, ruleset nem Action para escrita de arquivo).
+if ! command -v node >/dev/null 2>&1; then
+  reason="Bloqueado por .claude/hooks/protege-escrita.sh: node ausente no PATH; nego por segurança (fail-closed)."
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}' "$reason"
+  echo "$reason" >&2; exit 2
+fi
 
 PE_PAYLOAD="$payload" node -e '
   const { spawnSync } = require("child_process");

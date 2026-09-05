@@ -1,6 +1,9 @@
 #!/bin/sh
 # Cria/atualiza o ruleset da main — camada 3 da proteção (ADR 0004 item 9: é gate
 # humano; o owner roda). Idempotente: se já existe um ruleset com este nome, faz PUT.
+# ATENÇÃO (revisor, PR #38): o repositório é PRIVADO hoje e a API responde 403 —
+# rulesets em repo privado exigem GitHub Pro ou tornar o repo público. Até o owner
+# decidir, a camada 3 não existe; este script fica pronto e falha alto explicando.
 #
 #   PR obrigatória (0 aprovações humanas — o revisor é agente e a label é a
 #   condição; ver protege-main.sh), checks required `checks (20)`, `checks (22)`,
@@ -36,7 +39,16 @@ BODY=$(cat <<'JSON'
 }
 JSON
 )
-ID=$(gh api "repos/$REPO/rulesets" --jq ".[] | select(.name==\"$NAME\") | .id" 2>/dev/null || true)
+if ! LIST=$(gh api "repos/$REPO/rulesets" 2>&1); then
+  case "$LIST" in
+    *"Upgrade to GitHub Pro"*|*"make this repository public"*)
+      echo "ruleset: indisponível — o repositório é PRIVADO e o plano não inclui rulesets em repo privado." >&2
+      echo "         Opções: tornar o repo público, GitHub Pro, ou ficar com 3 camadas (hooks + pre-push + guarda-main)." >&2 ;;
+    *) echo "ruleset: falha ao listar: $LIST" >&2 ;;
+  esac
+  exit 1
+fi
+ID=$(printf '%s' "$LIST" | jq -r ".[] | select(.name==\"$NAME\") | .id")
 if [ -n "$ID" ]; then
   printf '%s' "$BODY" | gh api -X PUT "repos/$REPO/rulesets/$ID" --input - --jq '"ruleset atualizado: #\(.id) \(.name) [\(.enforcement)]"'
 else

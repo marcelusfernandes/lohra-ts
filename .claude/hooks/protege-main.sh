@@ -1,10 +1,10 @@
 #!/bin/sh
-# PreToolUse hook (Bash): proteção da main do lado do cliente — camada 1 de 4
-# (ADR 0004 item 4 e 9; .claude/hooks/README.md). Nega, antes de o comando rodar:
+# PreToolUse hook (Bash): proteção da main do lado do cliente — camada 1
+# (ADR 0004 itens 4 e 9; .claude/hooks/README.md). Nega, antes de o comando rodar:
 #
 #   1. push forçado (--force*, -f, +refspec) em qualquer branch — sem válvula
 #   2. push direto em main/master (ref explícita, HEAD:main, ou push a partir de main)
-#   3. apagar main/master (git branch -D, git push --delete)
+#   3. apagar main/master (git branch -D, git push --delete, :main)
 #   4. gh pr merge --admin — sem válvula
 #   5. gh pr merge sem todos os checks verdes, ou sem a label review:approved
 #      (nem reviewDecision APPROVED) — a condição mecânica de merge da ADR 0004
@@ -15,9 +15,13 @@
 #   LOHRA_MERGE_LIVRE=1         libera o item 5 (nunca o 4)
 #
 # Contrato: JSON da chamada em stdin; nega com permissionDecision "deny" + exit 2.
-# Parser em node (pré-requisito do projeto; sem jq). Fail-open se node faltar: há
-# o pre-push do git, o ruleset e o guarda-main como backstop. Portado do Apollo
-# (protege-main.sh); substitui o antigo block-force-push.sh.
+# Parser em node (pré-requisito do projeto; sem jq). FAIL-CLOSED se node ou git
+# faltarem: uma máquina sem node não roda o projeto, e sem git não dá para saber
+# a branch atual — e o gate de `gh pr merge` não tem backstop nenhum fora daqui.
+# Portado do Apollo (protege-main.sh); substitui o antigo block-force-push.sh.
+# Rodada 2 do revisor (PR #38): separadores `&` isolado, `(`, `)`, `{`, `}`;
+# tokens desaspados; `then`/`do`/`else`/`!` como posição de comando; seletor do
+# `gh pr merge` ignora o valor de --repo/-R.
 set -u
 payload=$(cat)
 
@@ -25,6 +29,15 @@ case "$payload" in
   *push*|*merge*|*branch*|*"pr "*) ;;
   *) exit 0 ;;
 esac
+
+deny_missing() {
+  reason="Bloqueado por .claude/hooks/protege-main.sh: $1 ausente no PATH; nego por segurança (fail-closed)."
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}' "$reason"
+  echo "$reason" >&2
+  exit 2
+}
+command -v node >/dev/null 2>&1 || deny_missing node
+command -v git >/dev/null 2>&1 || deny_missing git
 
 PM_PAYLOAD="$payload" node -e '
   const { spawnSync } = require("child_process");
@@ -47,30 +60,43 @@ PM_PAYLOAD="$payload" node -e '
     const r = spawnSync(args[0], args.slice(1), { cwd, encoding: "utf8" });
     return { ok: r.status === 0, out: String(r.stdout || ""), err: String(r.stderr || "") };
   };
-  const branchAtual = () => { const r = sh(["git", "rev-parse", "--abbrev-ref", "HEAD"]); return r.ok ? r.out.trim() : ""; };
+  const branchAtual = () => {
+    const r = sh(["git", "rev-parse", "--abbrev-ref", "HEAD"]);
+    if (!r.ok) negar("não consegui ler a branch atual (" + r.err.trim().slice(0, 120) + "); nego por segurança.");
+    return r.out.trim();
+  };
+  const unquote = (t) => t.replace(/^(["\x27])(.*)\1$/, "$2");
 
-  const valvula = (nome) => process.env[nome] === "1" || new RegExp("(?:^|[\\s;&|(])" + nome + "=1(?=\\s)").test(cmd);
+  const valvula = (nome) => process.env[nome] === "1" || new RegExp("(?:^|[\\s;&|(){}])" + nome + "=1(?=\\s)").test(cmd);
   const PERMITE_MAIN = valvula("LOHRA_PERMITE_PUSH_MAIN");
   const MERGE_LIVRE = valvula("LOHRA_MERGE_LIVRE");
 
-  // Segmentos em posição de comando: início ou depois de ; && || | ( e quebra de linha.
-  const segmentos = cmd.split(/&&|\|\||[;|\n(]/).map((s) => s.trim()).filter(Boolean)
+  // Segmentos em posição de comando. Separadores: && || ; | & (isolado, background)
+  // quebra de linha, e os agrupadores ( ) { }. Depois, strip de prefixos que não
+  // mudam o comando: VAR=x, sudo, env, e as palavras-chave then/do/else/!.
+  const segmentos = cmd
+    .replace(/&&|\|\|/g, "\n")
+    .split(/[;|&\n(){}]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => s.replace(/^(?:(?:then|do|else|!)\s+)*/, ""))
     .map((s) => s.replace(/^(?:\w+=\S*\s+|sudo\s+|env\s+)*/, ""));
 
   for (const seg of segmentos) {
     // ---- git push ---------------------------------------------------------
     const mPush = seg.match(/^git\s+(?:-C\s+\S+\s+|--\S+\s+)*push\b(.*)$/);
     if (mPush) {
-      const args = mPush[1];
+      const tokens = mPush[1].trim().split(/\s+/).filter(Boolean).map(unquote);
+      const args = " " + tokens.join(" ");
       const forcado = /--force\b/.test(args) || /(?:^|\s)-[A-Za-z]*f[A-Za-z]*(?=\s|$)/.test(args) || /\s\+\S/.test(args);
       if (forcado) negar("push forçado é proibido em qualquer branch: reescrever histórico quebra o invariante de proveniência (job provenance).");
-      const tokens = args.trim().split(/\s+/).filter(Boolean);
       const apagar = tokens.includes("--delete") || tokens.includes("-d");
       const refs = tokens.filter((t) => !t.startsWith("-"));
       const refspecs = refs.slice(1); // refs[0] costuma ser o remote
       let alvoMain = false;
       for (const r of refspecs) {
         const dest = r.includes(":") ? r.split(":").pop() : r;
+        if (r.startsWith(":") && PROTEGIDAS.test(r.slice(1))) negar("apagar main/master no remoto (:main) é proibido.");
         if (PROTEGIDAS.test(dest)) alvoMain = true;
       }
       if (refspecs.length === 0 || refspecs.every((r) => r === "HEAD")) {
@@ -82,17 +108,25 @@ PM_PAYLOAD="$payload" node -e '
       continue;
     }
     // ---- git branch -D main ---------------------------------------------
-    if (/^git\s+branch\s+.*(?:-D|--delete\s+--force|-d)\s+(?:main|master)\b/.test(seg))
+    if (/^git\s+branch\s+.*(?:-D|--delete\s+--force|-d)\s+["\x27]?(?:main|master)["\x27]?(?:\s|$)/.test(seg))
       negar("apagar main/master localmente é proibido.");
     // ---- gh pr merge ------------------------------------------------------
     const mMerge = seg.match(/^gh\s+pr\s+merge\b(.*)$/);
     if (mMerge) {
-      const args = mMerge[1];
-      if (/--admin\b/.test(args)) negar("gh pr merge --admin fura os checks; proibido.");
+      const tokens = mMerge[1].trim().split(/\s+/).filter(Boolean).map(unquote);
+      if (tokens.includes("--admin")) negar("gh pr merge --admin fura os checks; proibido.");
       if (MERGE_LIVRE) continue;
-      const alvo = args.trim().split(/\s+/).filter((t) => t && !t.startsWith("-"))[0] || "";
+      // seletor da PR = primeiro token que não é flag nem valor de flag que recebe valor
+      const COM_VALOR = new Set(["--repo", "-R", "--subject", "-t", "--body", "-b", "--body-file", "-F", "--match-head-commit", "--author-email", "-A"]);
+      let alvo = "", repoArg = "";
+      for (let i = 0; i < tokens.length; i++) {
+        const t = tokens[i];
+        if (t.startsWith("--repo=")) { repoArg = t.slice(7); continue; }
+        if (COM_VALOR.has(t)) { if ((t === "--repo" || t === "-R") && tokens[i + 1]) repoArg = tokens[i + 1]; i++; continue; }
+        if (t.startsWith("-")) continue;
+        if (!alvo) alvo = t;
+      }
       const ref = alvo ? [alvo] : [];
-      const repoArg = (args.match(/(?:--repo|-R)\s+(\S+)/) || [])[1];
       const repo = repoArg ? ["--repo", repoArg] : [];
       const checks = sh(["gh", "pr", "checks", ...ref, ...repo, "--json", "name,state"]);
       let lista = null;

@@ -116,9 +116,13 @@ it.
 ## Differences from Apollo's ADR 0012
 
 - **Merge commit instead of squash**, for the provenance invariant above.
-- **Public repository**: a real ruleset on `main` is available and is one of
-  the four protection layers in #32; Apollo, on a free private plan, had to
-  rely on hooks plus a detector.
+- **Repository visibility — corrected 2026-09-05 (reviewer, PR #38)**: this
+  repository is **private** on a free plan, so a ruleset on `main` is _not_
+  available (API answers 403) — the same situation as Apollo, not a
+  difference. The four-layer design of #32 keeps the ruleset script ready;
+  until the owner makes the repository public or upgrades the plan, the
+  effective layers are three: hooks, native `pre-push`, `guarda-main`. That
+  decision is a human gate (item 9).
 - **Language**: Portuguese everywhere except the ADR series, as the rest of
   this repository.
 - **No `banco`, `operador`, `explorador`** — Supabase, deploy and legacy-app
