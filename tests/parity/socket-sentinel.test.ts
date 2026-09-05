@@ -52,7 +52,7 @@ describe("serve socket sentinels", () => {
     const output = temporaryFile();
     const pythonPath = resolve("scripts/parity/auth/python-sentinel");
     const child = spawnSync(
-      "python3",
+      process.env.PYTHON ?? "python3",
       ["-c", "import socket; s=socket.socket(); s.bind(('127.0.0.1', 0)); s.listen(); s.close()"],
       {
         encoding: "utf8",

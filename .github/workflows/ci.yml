@@ -1,0 +1,72 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22"]
+    # Dependências de ambiente herdadas do ubuntu-latest, declaradas aqui de
+    # propósito em vez de por acidente:
+    # - node-pty@1.1.0 não traz prebuild linux-*; `npm ci` compila via node-gyp
+    #   e precisa de python3, make e g++ (todos presentes no runner).
+    # - better-sqlite3 baixa prebuild linux-x64.
+    # - Seis arquivos de teste ainda spawnam python3 como oráculo de stdlib
+    #   (tests/python-json, python-repr, parity/{socket-sentinel,harness,bounds,process}).
+    #   Somem em #17; até lá, PYTHON aponta para o python3 do runner.
+    env:
+      PYTHON: python3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: install
+        run: npm ci
+      # build antes de test enquanto #2 estiver aberta (um teste de paridade
+      # importa de dist/). Depois de #2, reordenar para provar a independência.
+      - name: build
+        id: build
+        run: npm run build
+      - name: typecheck
+        id: typecheck
+        run: npm run typecheck
+      - name: lint
+        id: lint
+        run: npm run lint
+      - name: format:check
+        id: format
+        run: npm run format:check
+      - name: test
+        id: test
+        run: npm test
+
+  provenance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      # Todo SHA aprovado em docs/closeout.md precisa ser ancestral do HEAD.
+      # Transforma o invariante de proveniência de prosa em gate.
+      - name: approved heads are ancestors of HEAD
+        run: npm run provenance:check

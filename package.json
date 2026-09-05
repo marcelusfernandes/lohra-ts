@@ -105,7 +105,8 @@
     "verify:t22:evidence": "tsx scripts/parity/closeout/verify-evidence.ts",
     "parity:closeout": "tsx scripts/parity/closeout/run-closeout.ts",
     "mutations:closeout": "tsx scripts/parity/closeout/run-closeout-mutations.ts",
-    "pack:check": "tsx scripts/pack-check.ts"
+    "pack:check": "tsx scripts/pack-check.ts",
+    "provenance:check": "tsx scripts/provenance/check-ancestry.ts"
   },
   "dependencies": {
     "better-sqlite3": "11.10.0",

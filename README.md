@@ -1,5 +1,7 @@
 # lohra-ts
 
+[![ci](https://github.com/marcelusfernandes/lohra-ts/actions/workflows/ci.yml/badge.svg)](https://github.com/marcelusfernandes/lohra-ts/actions/workflows/ci.yml)
+
 Runtime TypeScript headless do Lohra, com CLI, gateway/dashboard, workflows
 duráveis, cron, MCP, ferramentas web e mídia. A versão atual é `0.0.11`.
 
@@ -78,8 +80,11 @@ orientação de atualizar pelo npm.
 - Registro e refresh MCP são transacionais por lote.
 - Smokes de providers/SDKs reais permanecem `NOT_MEASURED` sem credenciais; os
   gates normais são offline e usam fixtures locais.
-- A matriz nativa Windows e Node 20/22 precisa ser executada em runners reais;
-  spoof de plataforma não conta como evidência.
+- O CI (`.github/workflows/ci.yml`) mede `ubuntu-latest` × Node 20/22 (Linux
+  x64): build, typecheck, lint, format:check e test em todo push na `main` e
+  toda PR, mais o job `provenance` que exige que cada SHA aprovado em
+  `docs/closeout.md` seja ancestral do HEAD. Windows nativo e macOS Node 20
+  permanecem `NOT_MEASURED`; spoof de plataforma não conta como evidência.
 
 ## Paridade e closeout
 
