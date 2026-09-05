@@ -13,6 +13,7 @@ export default tseslint.config(
       ".probe-evidence/",
       "lohra/",
       ".claude/worktrees/",
+      ".prova/",
     ],
   },
   js.configs.recommended,

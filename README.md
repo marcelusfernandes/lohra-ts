@@ -38,6 +38,48 @@ Em sessões de Claude Code, `.claude/settings.json` formata e aplica `eslint --f
 arquivo editado (hook `PostToolUse`) e libera sem prompt os comandos read-only acima; o gate
 continua sendo `npm run lint` + `npm run format:check`.
 
+## Prova por issue
+
+Cada issue declara sua prova em `prova/<slug>.ts` (`<slug>` é o mesmo da branch
+`<type>/<n>-<slug>`, ver `.claude/rules/git-workflow.md`):
+
+```ts
+export default { unit: ["tests/x.test.ts", "tests/y.test.ts"] } satisfies Declaracao;
+```
+
+`unit` lista os arquivos de teste que a issue cobre (caminhos relativos à
+raiz; precisam existir). `check` (opcional, default `false`) também roda
+`npm run typecheck` antes do vitest.
+
+```bash
+npm run prova -- <slug>
+```
+
+roda **só** os arquivos declarados (não a suíte inteira) e escreve
+`.prova/<slug>/resumo.json` — `{ ok, total, falhas }`, onde `total` é o
+número de testes **executados** (`passed`/`failed`; testes `skip`/`todo`
+individuais não contam para `total` e não viram falha — nunca rodaram) e
+cada `falhas[]` tem `{ nome, motivo }`. Três formas de falha explícita, além
+de um teste reprovado: um arquivo declarado que o vitest não reportou (fora
+do `include`, ou nunca alcançado) vira `"<arquivo> did not run"`; um arquivo
+que rodou mas cujos testes são **todos** `skip`/`todo` (nenhum de fato
+executou) vira `"<arquivo> ran zero tests"` — skip **parcial**, com pelo
+menos um teste executado no arquivo, continua verde; e um processo do
+vitest que sai com código diferente de zero e, mesmo assim, produziria um
+relatório "ok" vira `"vitest run"` em vez de `ok:true`. Nenhuma dessas três
+passa em silêncio. `vitest.json` e `resumo.json` de uma execução anterior
+do mesmo slug são apagados antes de cada execução (não o diretório
+`.prova/<slug>/` inteiro) — o relatório de uma corrida anterior nunca
+sobrevive para ser lido como se fosse desta; ambos são gerados de novo a
+cada execução e `.prova/` é ignorado por git, prettier e eslint.
+`LOHRA_PROVA_OUT` redireciona a saída para `<LOHRA_PROVA_OUT>/<slug>/` em
+vez de `.prova/<slug>/` (evita corrida entre execuções concorrentes do
+mesmo slug) — o hook `Stop` (#46) ignora essa variável e sempre lê
+`.prova/<slug>/resumo.json`, então ela serve para uma segunda execução em
+paralelo fora do caminho que o hook observa, não para redirecioná-lo. Sem
+`prova/<slug>.ts`, ou com um arquivo declarado inexistente, o comando sai
+com `exit 1` citando o caminho.
+
 ## CLI
 
 Os comandos top-level públicos, na ordem exibida pelo help, são:
