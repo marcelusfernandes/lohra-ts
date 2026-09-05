@@ -11,6 +11,12 @@ Closes #
 - [ ] `npm run build`, `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test` verdes
 - [ ] <execução real relevante — comando e resultado>
 
+## Acceptance Criteria (copiados da issue)
+
+<!-- Cole os AC da issue e marque os atendidos. O que não foi atendido fica explícito aqui. -->
+
+- [ ]
+
 ## Proof
 
 <!-- Comando da issue (`npm run prova -- <slug>`) e o `.prova/<slug>/resumo.json` resultante;
@@ -23,9 +29,3 @@ Closes #
 ## Files
 
 <!-- Globs declarados na issue; tudo que a PR toca precisa caber neles. -->
-
-## Acceptance Criteria (copiados da issue)
-
-<!-- Cole os AC da issue e marque os atendidos. O que não foi atendido fica explícito aqui. -->
-
-- [ ]

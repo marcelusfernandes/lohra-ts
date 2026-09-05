@@ -1,6 +1,7 @@
 #!/bin/sh
 # Abre a PR da branch atual contra main, ligada à issue: body no template com
-# `Closes #N` em texto puro e os Acceptance Criteria da issue como checklist;
+# `Closes #N` em texto puro, os Acceptance Criteria da issue como checklist e as
+# seções `## Proof` e `## Files` copiadas (aviso se a issue for anterior a #44);
 # labels e milestone herdados; verificação pós-criação via gh pr view --json.
 # Uso: open-pr.sh --issue N [--issue M ...] [--refs K ...] [--title T] [--repo o/r] [--dry-run]
 # A primeira --issue dá título, labels e milestone; os AC de todas viram checklist.
@@ -43,7 +44,13 @@ trap 'rm -f "$BODY"' EXIT
   echo "- [ ] dogfooding real (Codex e/ou OpenRouter): exit 0, error null, tool_calls"; echo
   for n in $ISSUES; do
     IBODY=$(gh issue view "$n" --repo "$REPO" --json body -q .body)
-    secao() { printf '%s\n' "$IBODY" | sed -n "/^## $1/,/^## /p" | sed '1d;$d' | sed '/^[[:space:]]*$/d'; }
+    # `##` (script) ou `###` (formulário issue.yml); o fim do range é o próximo
+    # cabeçalho do MESMO nível, para um `###` dentro de uma seção `##` não truncá-la
+    secao() {
+      OUT=$(printf '%s\n' "$IBODY" | sed -n "/^## $1/,/^## /p" | sed '1d;$d' | sed '/^[[:space:]]*$/d')
+      [ -n "$OUT" ] || OUT=$(printf '%s\n' "$IBODY" | sed -n "/^### $1/,/^### /p" | sed '1d;$d' | sed '/^[[:space:]]*$/d')
+      printf '%s\n' "$OUT"
+    }
     AC=$(secao "Acceptance Criteria" | grep '^- \[' || true)
     [ -n "$AC" ] || { echo "open-pr: a issue #$n não tem bloco '## Acceptance Criteria' com itens" >&2; exit 2; }
     echo "## Acceptance Criteria (copiados da issue #$n)"; echo; printf '%s\n' "$AC"; echo

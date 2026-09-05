@@ -22,13 +22,18 @@ Você implementa exatamente uma issue, do começo à PR. Nada além dela.
 
 ## Ciclo
 
-4. Escreva o teste que reprova. Commit `test(red): <o que ele cobre>`. Esse commit é o
-   controle negativo (verificado pelo CI quando #34 existir; até lá, pelo revisor).
+4. Escreva o teste que reprova. Módulo novo? Crie o arquivo com um **stub que lança**
+   (`export function x(): never { throw new Error("not implemented: x"); }`) para o
+   vermelho ser de runtime, não de compilação. Commit `test(red): <o que ele cobre>` com
+   os testes **e** os stubs. É o que o check `controle-negativo` do CI exige quando a
+   base reprova por erro estrutural (módulo novo não existe na base — o caso comum):
+   um commit `test(red):` no range que toca os testes do diff e adiciona
+   `throw new Error(` em arquivo não-teste; sem isso, PR de módulo novo reprova.
 5. Implemente até o teste ficar verde. Commit a cada verde (`<type>(<escopo>): <imperativo>`).
-6. Gates locais, **sempre os quatro**, mesmo em issue só de docs — o repo tem testes
-   que fixam prosa (`tests/t22-docs.test.ts`): `npm run build` primeiro, depois
-   `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`. Verde em todos.
-   Um despacho do orquestrador que liste menos gates não reduz esta lista.
+6. Gates locais, **sempre os cinco listados em `CLAUDE.md`** ("Gates") e
+   `npm run prova -- <slug>`, mesmo em issue só de docs — o repo tem testes que fixam
+   prosa (`tests/t22-docs.test.ts`). Verde em todos. Um despacho do orquestrador que
+   liste menos gates não reduz esta lista.
 7. **Dogfooding real** se a branch toca `src/`, `package.json` ou o lockfile:
    `lohra-ts chat --json "<tarefa que usa uma tool>"` via Codex e/ou OpenRouter — registre
    exit code, `error` e `tool_calls`. Se não toca, o test plan diz `N/A` e por quê.
