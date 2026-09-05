@@ -11,7 +11,8 @@ const BRANCH_RE = /^[a-z]+\/[0-9]+-([a-z0-9-]+)$/;
 
 /** `feat/12-workflow-store` → `"workflow-store"`; `main` → `null`. */
 export function branchSlug(branch: string): string | null {
-  throw new Error("not implemented");
+  const match = BRANCH_RE.exec(branch);
+  return match?.[1] ?? null;
 }
 
 /**
@@ -22,5 +23,7 @@ export function resolveProvaSlug(
   branch: string,
   exists: (path: string) => boolean,
 ): string | null {
-  throw new Error("not implemented");
+  const slug = branchSlug(branch);
+  if (slug === null) return null;
+  return exists(`prova/${slug}.ts`) ? slug : null;
 }
