@@ -1,3 +1,4 @@
+
 # lohra-ts — laboratório TS
 
 Runtime TypeScript de exploração. **Não é o runtime principal** — o Lohra em
@@ -6,6 +7,7 @@ verdade das semânticas. Toda decisão semântica começa lendo o Python e
 `docs/reference/`, nunca se inventa aqui.
 
 **IMPORTANTE:** Não serão feitas implementações no lohra/ em python, ele é somente referência para a implementação do typescript
+
 
 ## Meta de produto
 
@@ -43,3 +45,4 @@ Escrever a decisão em `docs/gate-decision.md` quando ocorrer.
 2. Falha nunca é silenciosa — fault com causa em todo caminho.
 3. Budget/fan-out nunca unbounded.
 4. Escrita de estado cross-process sempre sob lease/fence.
+\

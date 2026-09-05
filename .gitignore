@@ -7,3 +7,6 @@ coverage/
 .parity-evidence/
 .probe-evidence/
 .live-smoke-evidence/
+.oracle-venv/
+.lavish/
+lohra/
