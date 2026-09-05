@@ -1,0 +1,88 @@
+name: Issue
+description: Padrão de seções do repositório (User Story → … → Referências)
+title: "<type>: <descrição curta>"
+body:
+  - type: dropdown
+    id: tamanho
+    attributes:
+      label: Tamanho
+      description: Sessão de agente, não dias humanos. S = 1 sessão curta; M = 1 sessão média; L = múltiplas sessões (considere virar épico).
+      options: [S, M, L]
+    validations:
+      required: true
+  - type: input
+    id: parent
+    attributes:
+      label: Parent / Sub-issues
+      description: '#N do épico pai, ou "nenhuma". O vínculo nativo é feito depois pela API.'
+      placeholder: "#21"
+  - type: textarea
+    id: story
+    attributes:
+      label: User Story
+      value: |
+        **Como** <persona>,
+        **quero** <capacidade>,
+        **para que** <benefício>.
+    validations:
+      required: true
+  - type: textarea
+    id: contexto
+    attributes:
+      label: Contexto
+      description: Background técnico/negócio com citações arquivo:linha reais.
+    validations:
+      required: true
+  - type: textarea
+    id: cenario
+    attributes:
+      label: Cenário atual
+      description: O que acontece hoje, com precisão. Não é o problema — é a descrição.
+    validations:
+      required: true
+  - type: textarea
+    id: problema
+    attributes:
+      label: Problema
+      description: Numerado. O gap entre atual e desejável. Sem solução aqui.
+    validations:
+      required: true
+  - type: textarea
+    id: consequencias
+    attributes:
+      label: Consequências do problema
+      description: Bullets de impacto concreto.
+    validations:
+      required: true
+  - type: textarea
+    id: solucao
+    attributes:
+      label: O que é a solução
+    validations:
+      required: true
+  - type: textarea
+    id: resultado
+    attributes:
+      label: Resultado esperado com a solução
+      description: '"Depois disto, X acontece e Y deixa de acontecer" — verificável.'
+    validations:
+      required: true
+  - type: textarea
+    id: ac
+    attributes:
+      label: Acceptance Criteria
+      value: |
+        - [ ]
+        - [ ] Testes (quando aplicável)
+        - [ ] Documentação atualizada (quando aplicável)
+    validations:
+      required: true
+  - type: textarea
+    id: fora
+    attributes:
+      label: Fora de escopo
+  - type: textarea
+    id: refs
+    attributes:
+      label: Referências
+      description: arquivo:linha, issues, ADRs.
