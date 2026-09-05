@@ -8,8 +8,9 @@ duráveis, cron, MCP, ferramentas web e mídia. A versão atual é `0.0.11`.
 O runtime nasceu como port validado contra o runtime Python pinado até
 2026-09-04; desde essa data, por decisão do owner, evolui de forma
 independente do Python ([ADR 0003](docs/adr/0003-native-wire-format.md)). O
-pacote de produção não embute nem chama Python, pip, uv ou poetry; o Python
-aparece apenas no histórico de paridade do repositório de desenvolvimento.
+pacote de produção não
+embute nem chama Python, pip, uv ou poetry; o Python aparece apenas no
+histórico de paridade do repositório de desenvolvimento.
 
 ## Instalação
 
