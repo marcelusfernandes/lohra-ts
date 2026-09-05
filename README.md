@@ -38,6 +38,33 @@ Em sessões de Claude Code, `.claude/settings.json` formata e aplica `eslint --f
 arquivo editado (hook `PostToolUse`) e libera sem prompt os comandos read-only acima; o gate
 continua sendo `npm run lint` + `npm run format:check`.
 
+## Prova por issue
+
+Cada issue declara sua prova em `prova/<slug>.ts` (`<slug>` é o mesmo da branch
+`<type>/<n>-<slug>`, ver `.claude/rules/git-workflow.md`):
+
+```ts
+export default { unit: ["tests/x.test.ts", "tests/y.test.ts"] } satisfies Declaracao;
+```
+
+`unit` lista os arquivos de teste que a issue cobre (caminhos relativos à
+raiz; precisam existir). `check` (opcional, default `false`) também roda
+`npm run typecheck` antes do vitest.
+
+```bash
+npm run prova -- <slug>
+```
+
+roda **só** os arquivos declarados (não a suíte inteira) e escreve
+`.prova/<slug>/resumo.json` — `{ ok, total, falhas }`, onde `total` é o
+número de testes executados e cada `falhas[]` tem `{ nome, motivo }`. Um
+arquivo declarado que o vitest não reportou (fora do `include`, ou nunca
+alcançado) vira a falha `"<arquivo> did not run"` em vez de passar em
+silêncio. `.prova/` é gerado a cada execução e é ignorado por git, prettier
+e eslint; `LOHRA_PROVA_OUT` redireciona a saída (evita corrida entre
+execuções concorrentes do mesmo slug). Sem `prova/<slug>.ts`, ou com um
+arquivo declarado inexistente, o comando sai com `exit 1` citando o caminho.
+
 ## CLI
 
 Os comandos top-level públicos, na ordem exibida pelo help, são:
