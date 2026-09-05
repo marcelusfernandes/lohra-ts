@@ -122,6 +122,10 @@ describe("prova run.ts (subprocess)", () => {
     // The stale resumo.json (and the stale vitest.json backing it) must be
     // gone, not silently re-served as this run's result.
     expect(existsSync(resumoPath)).toBe(false);
+    // The failure message must name the actual cause (an exit code, or a
+    // signal) — not just "no report", which reads the same whether vitest
+    // never ran at all or crashed mid-run.
+    expect(second.stderr).toMatch(/exit code \d+|sinal/);
   });
 
   it("check: true folds a failing npm run typecheck into falhas", () => {
@@ -149,5 +153,74 @@ describe("prova run.ts (subprocess)", () => {
       total: 1,
       falhas: [{ nome: "npm run typecheck", motivo: "exit code 1" }],
     });
+  });
+
+  it("exits 1 when the declared file collects but every test is skip/todo", () => {
+    const dir = makeWorkdir();
+    writeFileSync(
+      join(dir, "prova", "skiponly.ts"),
+      'export default { unit: ["tests/allskip.test.ts"] };\n',
+    );
+    writeFileSync(
+      join(dir, "tests", "allskip.test.ts"),
+      [
+        'import { it } from "vitest";',
+        'it.skip("skipped", () => {});',
+        'it.todo("not implemented yet");',
+        "",
+      ].join("\n"),
+    );
+
+    const result = runProva(dir, "skiponly");
+
+    expect(result.status).toBe(1);
+    const resumoPath = join(dir, ".prova", "skiponly", "resumo.json");
+    const resumo = JSON.parse(readFileSync(resumoPath, "utf8")) as {
+      ok: boolean;
+      total: number;
+      falhas: { nome: string; motivo: string }[];
+    };
+    expect(resumo.ok).toBe(false);
+    expect(resumo.total).toBe(0);
+    expect(resumo.falhas).toHaveLength(1);
+    expect(resumo.falhas[0]?.nome).toBe("tests/allskip.test.ts ran zero tests");
+    expect(typeof resumo.falhas[0]?.motivo).toBe("string");
+  });
+
+  it("scopes LOHRA_PROVA_OUT by slug instead of sharing one directory across slugs", () => {
+    const dir = makeWorkdir();
+    writeFileSync(
+      join(dir, "prova", "scoped.ts"),
+      'export default { unit: ["tests/ok.test.ts"] };\n',
+    );
+    writeFileSync(
+      join(dir, "tests", "ok.test.ts"),
+      'import { expect, it } from "vitest";\nit("passes", () => { expect(1).toBe(1); });\n',
+    );
+
+    const env = {
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(([key]) => !key.startsWith("VITEST")),
+      ),
+      LOHRA_PROVA_OUT: "custom-out",
+    };
+    const result = spawnSync(tsxBin, [runScript, "scoped"], {
+      cwd: dir,
+      encoding: "utf8",
+      timeout: 60_000,
+      env,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const scopedResumoPath = join(dir, "custom-out", "scoped", "resumo.json");
+    expect(existsSync(scopedResumoPath)).toBe(true);
+    expect(JSON.parse(readFileSync(scopedResumoPath, "utf8"))).toEqual({
+      ok: true,
+      total: 1,
+      falhas: [],
+    });
+    // The default .prova/<slug>/ path must stay untouched — LOHRA_PROVA_OUT
+    // redirects, it doesn't also duplicate into the default location.
+    expect(existsSync(join(dir, ".prova", "scoped", "resumo.json"))).toBe(false);
   });
 });

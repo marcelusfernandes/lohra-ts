@@ -84,6 +84,39 @@ describe("montarResumo", () => {
     );
   });
 
+  it('marks a collected file that ran zero tests (all skip/todo) as "<arquivo> ran zero tests"', () => {
+    const resultado: ResultadoVitest = {
+      total: 0,
+      arquivos: [
+        {
+          arquivo: "tests/allskip.test.ts",
+          colecionou: true,
+          testes: [],
+        },
+      ],
+    };
+    const resumo = montarResumo(["tests/allskip.test.ts"], resultado);
+    expect(resumo.ok).toBe(false);
+    expect(resumo.falhas).toContainEqual(
+      expect.objectContaining({ nome: "tests/allskip.test.ts ran zero tests" }),
+    );
+  });
+
+  it("stays green on partial skip — at least one executed test is enough", () => {
+    const resultado: ResultadoVitest = {
+      total: 1,
+      arquivos: [
+        {
+          arquivo: "tests/partialskip.test.ts",
+          colecionou: true,
+          testes: [{ nome: "the one that ran", passou: true }],
+        },
+      ],
+    };
+    const resumo = montarResumo(["tests/partialskip.test.ts"], resultado);
+    expect(resumo).toEqual({ ok: true, total: 1, falhas: [] });
+  });
+
   it("never mutates the declarados array it receives", () => {
     const declarados = ["tests/a.test.ts"];
     const frozen = Object.freeze([...declarados]);
