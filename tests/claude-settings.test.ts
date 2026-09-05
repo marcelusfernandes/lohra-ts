@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 interface CommandHook {
   readonly type: string;
   readonly command: string;
+  readonly timeout?: number;
 }
 
 interface HookGroup {
