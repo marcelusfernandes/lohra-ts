@@ -61,6 +61,19 @@ describe(".claude/settings.json", () => {
     expect(commands[0]?.command).toContain(".claude/hooks/format-file.sh");
   });
 
+  it("guards the session with a PreToolUse force-push blocker and a Stop type-check", () => {
+    const pre = (settings.hooks?.PreToolUse ?? []).filter((group) => group.matcher === "Bash");
+    expect(pre).toHaveLength(1);
+    expect(pre[0]?.hooks.map((hook) => hook.command).join()).toContain(
+      ".claude/hooks/block-force-push.sh",
+    );
+    const stop = settings.hooks?.Stop ?? [];
+    expect(stop).toHaveLength(1);
+    expect(stop[0]?.hooks.map((hook) => hook.command).join()).toContain(
+      ".claude/hooks/tsc-check.sh",
+    );
+  });
+
   it("allows the read-only development commands the repo considers safe", () => {
     for (const rule of REQUIRED_ALLOW) expect(allow).toContain(rule);
   });
