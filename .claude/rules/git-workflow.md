@@ -128,7 +128,8 @@ fecha). Idioma: PT-BR, como o resto do repositório.
 - Nunca `git reset --hard`, `git clean` nem `git checkout <arquivo>` sobre
   trabalho não commitado — perdem o que não foi salvo. `git stash` é permitido.
 - Depois da segunda reprovação, ninguém insiste: `state:blocked` + `human`.
-- **Nunca force-push.** O hook `.claude/hooks/block-force-push.sh` nega na
-  sessão; a proteção server-side da `main` é o backstop. Reescrever histórico
+- **Nunca force-push.** Quatro camadas (`.claude/hooks/README.md`): `protege-main.sh`
+  nega na sessão, o `pre-push` nativo nega em qualquer push da máquina, o ruleset
+  nega no servidor, e `guarda-main.yml` abre issue `human` no que escapar. Reescrever histórico
   quebra o invariante de proveniência (`docs/closeout.md`, job `provenance`).
 - Nunca `Closes **#N**` — texto puro.

@@ -116,9 +116,16 @@ it.
 ## Differences from Apollo's ADR 0012
 
 - **Merge commit instead of squash**, for the provenance invariant above.
-- **Public repository**: a real ruleset on `main` is available and is one of
-  the four protection layers in #32; Apollo, on a free private plan, had to
-  rely on hooks plus a detector.
+- **Repository visibility**: the reviewer of PR #38 found the repository was
+  private on a free plan (ruleset API answered 403). The owner made it
+  **public on 2026-09-05** and the ruleset `protege-main` was applied — so,
+  unlike Apollo, the four protection layers of #32 are all effective. The
+  decision and its execution are recorded in issue #32.
+- **Hook parser scope is declared**: `protege-main.sh` parses commands in
+  command position with a listed set of prefixes and keywords; deliberate
+  evasion (`eval`, `sh -c`, variables, aliases) is out of its scope and is the
+  job of layers 2–4. A bypass inside the declared scope is a bug; outside it,
+  it is not (see `.claude/hooks/README.md`).
 - **Language**: Portuguese everywhere except the ADR series, as the rest of
   this repository.
 - **No `banco`, `operador`, `explorador`** — Supabase, deploy and legacy-app

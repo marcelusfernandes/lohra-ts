@@ -1,0 +1,43 @@
+# guarda-main — camada 4 da proteção da main (ADR 0004; .claude/hooks/README.md).
+#
+# Detector, não bloqueio: se o commit que chegou em main não pertence a nenhuma
+# PR, abre uma issue com label `human` e falha o job, para o histórico ficar
+# vermelho e alguém olhar. O bloqueio prévio é do ruleset (camada 3); esta
+# Action pega o que escapar (ruleset desligado, admin, bootstrap não declarado).
+#
+# Exceção declarada: commit cuja mensagem contenha "[permite-push-main]".
+
+name: guarda-main
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  push-direto:
+    runs-on: ubuntu-latest
+    steps:
+      - name: O commit veio de uma PR?
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+          MSG: ${{ github.event.head_commit.message }}
+          ATOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          case "$MSG" in *"[permite-push-main]"*) echo "bootstrap declarado; ok"; exit 0;; esac
+          n="$(gh api "repos/$REPO/commits/$SHA/pulls" --jq 'length')"
+          if [ "$n" -gt 0 ]; then echo "commit $SHA pertence a $n PR(s); ok"; exit 0; fi
+          titulo="Push direto em main sem PR ($ATOR, ${SHA:0:7})"
+          existe="$(gh issue list --repo "$REPO" --search "\"$titulo\" in:title" --state open --json number --jq 'length')"
+          if [ "$existe" = "0" ]; then
+            gh issue create --repo "$REPO" --title "$titulo" --label human \
+              --body "O commit \`$SHA\` chegou em \`main\` sem passar por PR (ator: $ATOR). Ver docs/adr/0004-trabalho-autonomo.md item 9 e .claude/hooks/README.md. Conferir o que entrou e, se preciso, reverter por PR."
+          fi
+          echo "::error::push direto em main sem PR ($SHA)"; exit 1

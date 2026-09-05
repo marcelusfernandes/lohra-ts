@@ -1,0 +1,36 @@
+#!/bin/sh
+# git-pre-push — hook pre-push nativo do git, instalado por
+# .claude/hooks/instalar-git-hooks.sh (chamado pelo postinstall em checkouts git).
+#
+# Camada 2 da proteção da main (ADR 0004; .claude/hooks/README.md): vale para
+# QUALQUER `git push` desta máquina, dentro ou fora do Claude Code. Recusa:
+#   1. push para refs/heads/main ou master (o merge é pelo orquestrador via gh pr merge)
+#   2. push não fast-forward para qualquer branch (é o que um force-push produz)
+#
+# Válvula de bootstrap: LOHRA_PERMITE_PUSH_MAIN=1 libera só o item 1.
+# O git chama este hook com "<remote> <url>" nos argumentos e uma linha por ref
+# em stdin: "<local ref> <local sha> <remote ref> <remote sha>".
+zero="0000000000000000000000000000000000000000"
+falhou=0
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -z "$remote_ref" ] && continue
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/master)
+      if [ "${LOHRA_PERMITE_PUSH_MAIN:-}" != "1" ]; then
+        echo "pre-push: push direto em $remote_ref é proibido. Abra uma PR; o orquestrador mergeia com CI verde + review:approved." >&2
+        echo "          (LOHRA_PERMITE_PUSH_MAIN=1 libera só para o bootstrap do repositório.)" >&2
+        falhou=1
+        continue
+      fi
+      ;;
+  esac
+  [ "$local_sha" = "$zero" ] && continue   # apagar branch de feature no remoto: legítimo
+  [ "$remote_sha" = "$zero" ] && continue  # branch nova no remoto: nada a comparar
+  if ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+    echo "pre-push: $remote_ref não é fast-forward a partir do remoto (isto é um force-push). Proibido." >&2
+    echo "          Faça merge de origin/<branch> por cima e envie de novo." >&2
+    falhou=1
+  fi
+done
+exit $falhou

@@ -54,18 +54,24 @@ const FORBIDDEN_PATTERNS = [
 describe(".claude/settings.json", () => {
   it("declares exactly one PostToolUse hook group for Edit|Write, backed by the format script", () => {
     const groups = settings.hooks?.PostToolUse ?? [];
-    const editWrite = groups.filter((group) => group.matcher === "Edit|Write");
+    const editWrite = groups.filter((group) => group.matcher === "Edit|Write|MultiEdit");
     expect(editWrite).toHaveLength(1);
     const commands = editWrite[0]?.hooks.filter((hook) => hook.type === "command") ?? [];
     expect(commands).toHaveLength(1);
     expect(commands[0]?.command).toContain(".claude/hooks/format-file.sh");
   });
 
-  it("guards the session with a PreToolUse force-push blocker and a Stop type-check", () => {
-    const pre = (settings.hooks?.PreToolUse ?? []).filter((group) => group.matcher === "Bash");
-    expect(pre).toHaveLength(1);
-    expect(pre[0]?.hooks.map((hook) => hook.command).join()).toContain(
-      ".claude/hooks/block-force-push.sh",
+  it("guards the session: protege-main on Bash, protege-escrita on Edit|Write, tsc-check on Stop", () => {
+    const pre = settings.hooks?.PreToolUse ?? [];
+    const bash = pre.filter((group) => group.matcher === "Bash");
+    expect(bash).toHaveLength(1);
+    expect(bash[0]?.hooks.map((hook) => hook.command).join()).toContain(
+      ".claude/hooks/protege-main.sh",
+    );
+    const write = pre.filter((group) => group.matcher === "Edit|Write|MultiEdit|NotebookEdit");
+    expect(write).toHaveLength(1);
+    expect(write[0]?.hooks.map((hook) => hook.command).join()).toContain(
+      ".claude/hooks/protege-escrita.sh",
     );
     const stop = settings.hooks?.Stop ?? [];
     expect(stop).toHaveLength(1);
