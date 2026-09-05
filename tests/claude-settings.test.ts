@@ -16,6 +16,7 @@ interface HookGroup {
 interface ProjectSettings {
   readonly permissions?: { readonly allow?: readonly string[] };
   readonly hooks?: Readonly<Record<string, readonly HookGroup[]>>;
+  readonly worktree?: { readonly symlinkDirectories?: readonly string[] };
 }
 
 const root = resolve(import.meta.dirname, "..");
@@ -78,6 +79,10 @@ describe(".claude/settings.json", () => {
     expect(stop[0]?.hooks.map((hook) => hook.command).join()).toContain(
       ".claude/hooks/tsc-check.sh",
     );
+  });
+
+  it("links node_modules into agent worktrees (skill worktree-segura, section A)", () => {
+    expect(settings.worktree?.symlinkDirectories).toEqual(["node_modules"]);
   });
 
   it("allows the read-only development commands the repo considers safe", () => {

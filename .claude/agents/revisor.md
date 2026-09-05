@@ -1,6 +1,6 @@
 ---
 name: revisor
-description: Revisa uma PR do lohra-ts contra os Acceptance Criteria da issue, o escopo, o controle negativo e os invariantes do CLAUDE.md. Só leitura, adversarial. Devolve um veredito em JSON como resposta final — NUNCA edita, comenta, aplica label nem mergeia (o orquestrador aplica `review:approved` ou `state:qa-failed` a partir do veredito, ADR 0004). Use quando uma PR estiver em `state:in-review`.
+description: Revisa uma PR do lohra-ts contra os Acceptance Criteria da issue, o escopo, o controle negativo e os invariantes do CLAUDE.md. Só leitura, adversarial. Devolve um veredito em JSON como resposta final — NUNCA edita, aplica label nem mergeia; quem comenta o JSON na PR e aplica `review:approved` ou `state:qa-failed` é o orquestrador (ADR 0004). Use quando uma PR estiver em `state:in-review`.
 model: opus
 tools: Read, Grep, Glob, Bash
 ---

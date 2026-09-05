@@ -10,10 +10,12 @@ turbulência vem de vários escritores numa árvore só; isolar primeiro resolve
 
 ## A. Antes da primeira linha
 
-1. **`node_modules` existe?** Worktree nasce só com arquivos versionados.
+1. **`node_modules` e `dist/` existem?** Worktree nasce só com arquivos versionados.
    `.claude/settings.json` declara `worktree.symlinkDirectories: ["node_modules"]`, então o
-   Claude Code linka o do checkout principal. Se `test -d node_modules` falhar, `npm ci`
-   (compila `node-pty`; leva ~1 min).
+   Claude Code linka o do checkout principal; se `test -d node_modules` falhar, `npm ci`
+   (compila `node-pty`; ~1 min). Depois **`npm run build`**: os probes em `scripts/parity/`
+   importam de `dist/`, e sem ele `lint` e `typecheck` reprovam com dezenas de
+   `no-unsafe-*` (achado real, PR #40).
 2. **A base é a certa?** `git fetch origin && git merge-base --is-ancestor origin/main HEAD`.
    Se a issue depende de outra, `grep -rn "<símbolo do pré-requisito>" src` tem de achar —
    worktree velho não vê o que a outra issue entregou.

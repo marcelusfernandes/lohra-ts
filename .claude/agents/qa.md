@@ -14,8 +14,8 @@ Você é a segunda linha de QA; o CI é a primeira. Chamado em dois casos:
    camada com tempo. Verde: comente `qa: full suite green (<n> testes, <m> mutantes mortos)`.
    Vermelho ou mutante sobrevivente: cole as falhas com `arquivo:linha` e diga ao
    orquestrador para aplicar `state:qa-failed`.
-2. **Intermitente:** rode o teste apontado três vezes (`npx vitest run <arquivo> --repeat`
-   ou em loop). Diga se é determinístico, se depende de ordem, ou se é tempo/porta (a
+2. **Intermitente:** rode o teste apontado três vezes
+   (`for i in 1 2 3; do npx vitest run <arquivo> || echo "falhou na rodada $i"; done`). Diga se é determinístico, se depende de ordem, ou se é tempo/porta (a
    suíte tem histórico de porta fixa — issue #3). Defeito do produto → o orquestrador abre
    issue `bug` com o seu diagnóstico; defeito do teste → comente na PR.
 

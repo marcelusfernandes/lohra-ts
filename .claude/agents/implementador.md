@@ -25,8 +25,10 @@ Você implementa exatamente uma issue, do começo à PR. Nada além dela.
 4. Escreva o teste que reprova. Commit `test(red): <o que ele cobre>`. Esse commit é o
    controle negativo (verificado pelo CI quando #34 existir; até lá, pelo revisor).
 5. Implemente até o teste ficar verde. Commit a cada verde (`<type>(<escopo>): <imperativo>`).
-6. Gates locais: `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`.
-   Verde em todos.
+6. Gates locais, **sempre os quatro**, mesmo em issue só de docs — o repo tem testes
+   que fixam prosa (`tests/t22-docs.test.ts`): `npm run build` primeiro, depois
+   `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`. Verde em todos.
+   Um despacho do orquestrador que liste menos gates não reduz esta lista.
 7. **Dogfooding real** se a branch toca `src/`, `package.json` ou o lockfile:
    `lohra-ts chat --json "<tarefa que usa uma tool>"` via Codex e/ou OpenRouter — registre
    exit code, `error` e `tool_calls`. Se não toca, o test plan diz `N/A` e por quê.
