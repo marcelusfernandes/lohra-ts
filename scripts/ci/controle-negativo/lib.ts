@@ -100,9 +100,8 @@ const THROWING_STUB_ADDED_RE = /^\+(?!\+\+).*\bthrow\s+new\s+Error\(/m;
  * "lança" (`expect(() => f()).toThrow(new Error(...))`) não passe por um
  * stub de produção de verdade.
  */
-export function contemStubQueLanca(_diffTexto: string): boolean {
-  void THROWING_STUB_ADDED_RE;
-  throw new Error("not implemented: contemStubQueLanca");
+export function contemStubQueLanca(diffTexto: string): boolean {
+  return THROWING_STUB_ADDED_RE.test(diffTexto);
 }
 
 // --- SKIP por classe (rodada 2 da PR #54, ADR 0004 item 7) ----------------
@@ -112,10 +111,9 @@ const DOCS_OU_PROCESS_PREFIXOS = ["docs/", ".claude/", ".github/"];
 /** Classes `docs` e `process` da ADR 0004 item 7 — nada que este check
  * precise controlar (uma PR só de documentação ou de configuração de CI
  * não declara `prova/<slug>.ts`, e não deveria precisar). */
-export function ehArquivoDocsOuProcess(_arquivo: string): boolean {
-  void DOCS_TOPO;
-  void DOCS_OU_PROCESS_PREFIXOS;
-  throw new Error("not implemented: ehArquivoDocsOuProcess");
+export function ehArquivoDocsOuProcess(arquivo: string): boolean {
+  if (DOCS_TOPO.has(arquivo)) return true;
+  return DOCS_OU_PROCESS_PREFIXOS.some((prefixo) => arquivo.startsWith(prefixo));
 }
 
 /**
@@ -125,8 +123,8 @@ export function ehArquivoDocsOuProcess(_arquivo: string): boolean {
  * comportamento anterior de reprovar quando `--base`/`--head` apontam pro
  * mesmo commit e não há `prova/<slug>.ts`).
  */
-export function deveSerIgnorado(_diff: readonly string[]): boolean {
-  throw new Error("not implemented: deveSerIgnorado");
+export function deveSerIgnorado(diff: readonly string[]): boolean {
+  return diff.length > 0 && diff.every(ehArquivoDocsOuProcess);
 }
 
 // --- Shape de `resumo.json` (rodada 2 da PR #54) --------------------------
@@ -146,9 +144,21 @@ function ehFalhaValida(valor: unknown): valor is Falha {
  * porque `ok` veio `undefined`). Lança citando `caminho` — `run.ts` propaga
  * isso como FAIL explícito.
  */
-export function validarResumo(_valor: unknown, _caminho: string): Resumo {
-  void ehFalhaValida;
-  throw new Error("not implemented: validarResumo");
+export function validarResumo(valor: unknown, caminho: string): Resumo {
+  if (typeof valor !== "object" || valor === null) {
+    throw new Error(`controle-negativo: ${caminho} não é um objeto`);
+  }
+  const bruto = valor as { ok?: unknown; total?: unknown; falhas?: unknown };
+  if (typeof bruto.ok !== "boolean") {
+    throw new Error(`controle-negativo: ${caminho} — "ok" precisa ser boolean`);
+  }
+  if (!Array.isArray(bruto.falhas) || !bruto.falhas.every(ehFalhaValida)) {
+    throw new Error(
+      `controle-negativo: ${caminho} — "falhas" precisa ser um array de {nome,motivo}`,
+    );
+  }
+  const total = typeof bruto.total === "number" ? bruto.total : 0;
+  return { ok: bruto.ok, total, falhas: bruto.falhas };
 }
 
 /** Argumentos de `npm run ci:controle-negativo -- --base <sha> --head <sha>

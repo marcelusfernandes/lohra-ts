@@ -358,16 +358,16 @@ function commitAdicionaStub(
  * commit `test(red):` no range também adiciona o stub que lança em algum
  * arquivo NÃO-teste — ver o cabeçalho deste arquivo e `lib.ts`. */
 function existeTestRedValido(
-  _root: string,
-  _base: string,
-  _head: string,
-  _testFiles: readonly string[],
-  _arquivosNaoTeste: readonly string[],
+  root: string,
+  base: string,
+  head: string,
+  testFiles: readonly string[],
+  arquivosNaoTeste: readonly string[],
 ): boolean {
-  void commitsQueTocamTestes;
-  void commitAdicionaStub;
-  void ehCommitTestRed;
-  throw new Error("not implemented: existeTestRedValido");
+  return commitsQueTocamTestes(root, base, head, testFiles).some(
+    (commit) =>
+      ehCommitTestRed(commit.subject) && commitAdicionaStub(root, commit.sha, arquivosNaoTeste),
+  );
 }
 
 function rodarCheck(
