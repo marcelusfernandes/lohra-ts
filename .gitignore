@@ -12,3 +12,4 @@ coverage/
 lohra/
 .claude/settings.local.json
 .claude/worktrees/
+.prova/
