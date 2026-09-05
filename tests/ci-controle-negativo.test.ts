@@ -7,7 +7,7 @@
 // controle negativo trata `npm run -s prova -- <slug>` como caixa-preta,
 // então o fake só precisa produzir um `resumo.json` no mesmo formato.
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -469,5 +469,26 @@ describe("controle-negativo/run.ts (subprocesso, repositório git descartável)"
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("sem harness na base");
+  });
+
+  it("exit 1 e sem diretório temporário vazando quando git worktree add falha (base inexistente)", () => {
+    const { dir, head, slug } = repoAssertionRed();
+    const baseInvalida = "0".repeat(40);
+    const antes = readdirSync(tmpdir()).filter((nome) => nome.startsWith("controle-negativo-"));
+
+    const result = runControleNegativo([
+      "--root",
+      dir,
+      "--base",
+      baseInvalida,
+      "--head",
+      head,
+      "--slug",
+      slug,
+    ]);
+
+    expect(result.status).toBe(1);
+    const depois = readdirSync(tmpdir()).filter((nome) => nome.startsWith("controle-negativo-"));
+    expect(depois).toEqual(antes);
   });
 });

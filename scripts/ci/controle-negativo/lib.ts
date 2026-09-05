@@ -92,25 +92,25 @@ export interface Args {
   readonly root?: string;
 }
 
+/** `["--base", "aaa", "--head", "bbb"]` → `[["base","aaa"], ["head","bbb"]]`
+ * — recursivo, sem mutar um acumulador (`--flag` sem valor, ou no fim do
+ * array, é descartado). */
+function paresChaveValor(argv: readonly string[]): readonly (readonly [string, string])[] {
+  if (argv.length === 0) return [];
+  const [chave, valor, ...resto] = argv;
+  if (chave === undefined || !chave.startsWith("--") || valor === undefined) {
+    return paresChaveValor(argv.slice(1));
+  }
+  return [[chave.slice(2), valor], ...paresChaveValor(resto)];
+}
+
 /** Parser posicional simples — sem dependência nova (AC da issue #48). */
 export function parseArgs(argv: readonly string[]): Args {
-  const valores = new Map<string, string>();
-  for (let indice = 0; indice < argv.length; indice += 1) {
-    const chave = argv[indice];
-    if (chave === undefined || !chave.startsWith("--")) continue;
-    const valor = argv[indice + 1];
-    if (valor === undefined) continue;
-    valores.set(chave.slice(2), valor);
-    indice += 1;
-  }
-  const base = valores.get("base");
-  const head = valores.get("head");
-  const slug = valores.get("slug");
-  const root = valores.get("root");
+  const pares = Object.fromEntries(paresChaveValor(argv));
   return {
-    ...(base !== undefined ? { base } : {}),
-    ...(head !== undefined ? { head } : {}),
-    ...(slug !== undefined ? { slug } : {}),
-    ...(root !== undefined ? { root } : {}),
+    ...(pares["base"] !== undefined ? { base: pares["base"] } : {}),
+    ...(pares["head"] !== undefined ? { head: pares["head"] } : {}),
+    ...(pares["slug"] !== undefined ? { slug: pares["slug"] } : {}),
+    ...(pares["root"] !== undefined ? { root: pares["root"] } : {}),
   };
 }

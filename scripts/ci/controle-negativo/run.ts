@@ -33,10 +33,14 @@
 // logado, não há como rodar (`lib.ts#semHarnessNaBase`).
 //
 // O worktree temporário é sempre removido (`finally`), inclusive quando o
-// check reprova: `rodarCheck` nunca chama `process.exit()` no seu próprio
-// corpo (só retorna um código), então o `finally` sempre roda antes do
-// ÚNICO `process.exit()` deste módulo, no fim de `main()` (mesma lição de
-// `scripts/prova/run.ts`).
+// check reprova ou quando o próprio `git worktree add` falha: `rodarCheck`
+// nunca chama `process.exit()` no seu próprio corpo (só retorna um código),
+// então o `finally` sempre roda antes do ÚNICO `process.exit()` deste
+// módulo, no fim de `main()` (mesma lição de `scripts/prova/run.ts`). Um
+// `git worktree add` que falha nunca registrou worktree nenhum — o
+// `finally` sabe disso (`registrado`) e só chama `git worktree remove`
+// quando há o que remover, sempre limpando o diretório temporário
+// (`rmSync`) de qualquer jeito.
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -83,9 +87,13 @@ function escreverSummary(bloco: string): void {
   if (summaryPath === undefined || summaryPath === "") return;
   try {
     writeFileSync(summaryPath, `${bloco}\n\n`, { flag: "a" });
-  } catch {
+  } catch (error) {
     // Sem GITHUB_STEP_SUMMARY gravável não é uma falha do check em si — é
-    // só telemetria a menos; nunca vira exit != 0 por conta disso.
+    // só telemetria a menos; nunca vira exit != 0 por conta disso. Mas a
+    // causa vai pro stderr — nunca engolida silenciosamente.
+    process.stderr.write(
+      `controle-negativo: não foi possível escrever em GITHUB_STEP_SUMMARY: ${String(error)}\n`,
+    );
   }
 }
 
@@ -152,19 +160,31 @@ function diffNomeStatus(root: string, base: string, head: string): readonly Arqu
     });
 }
 
-function worktreeAdd(root: string, tmpDir: string, base: string): void {
+/** `false` quando `git worktree add` falhou — não há worktree registrado
+ * para `git worktree remove` desfazer depois (`rodarCheck`'s `finally`
+ * checa isso antes de chamar `worktreeRemove`, senão logaria um "remove
+ * falhou" espúrio para um worktree que nunca existiu). Nunca chama
+ * `falhaFechada`/`process.exit()` aqui — isso pularia o `finally` de quem
+ * chama e vazaria `tmpDir` (o próprio `mkdtempSync`, que já rodou antes
+ * desta função).
+ */
+function worktreeAdd(root: string, tmpDir: string, base: string): boolean {
   const resultado = git(root, ["worktree", "add", "--detach", tmpDir, base]);
   if (resultado.status !== 0) {
-    falhaFechada(`controle-negativo: git worktree add falhou: ${resultado.stderr}`);
+    process.stderr.write(`controle-negativo: git worktree add falhou: ${resultado.stderr}\n`);
+    return false;
   }
+  return true;
 }
 
-function worktreeRemove(root: string, tmpDir: string): void {
-  const resultado = git(root, ["worktree", "remove", "--force", tmpDir]);
-  if (resultado.status !== 0) {
-    process.stderr.write(
-      `controle-negativo: git worktree remove falhou (${resultado.stderr.trim()}); limpando com rmSync mesmo assim\n`,
-    );
+function worktreeRemove(root: string, tmpDir: string, registrado: boolean): void {
+  if (registrado) {
+    const resultado = git(root, ["worktree", "remove", "--force", tmpDir]);
+    if (resultado.status !== 0) {
+      process.stderr.write(
+        `controle-negativo: git worktree remove falhou (${resultado.stderr.trim()}); limpando com rmSync mesmo assim\n`,
+      );
+    }
   }
   rmSync(tmpDir, { recursive: true, force: true });
 }
@@ -185,7 +205,17 @@ function overlay(
       cwd: root,
       encoding: "buffer",
     });
-    if (resultado.status !== 0) continue; // A/M não deveria falhar; não trava o check por isso
+    if (resultado.status !== 0) {
+      // Nunca silencioso: um A/M do diff que `git show` não consegue ler é
+      // uma inconsistência real (objeto ausente, `head` errado) — se
+      // ignorado, a base rodaria sem esse arquivo do overlay e o desfecho
+      // (`structural-red`/`vacuous-pass`) mentiria sobre o motivo. `throw`
+      // aqui propaga através do `finally` de `rodarCheck` (worktree
+      // removido) até o `catch` de `main()`, que reporta e sai 1.
+      throw new Error(
+        `controle-negativo: git show ${head}:${arquivo} falhou: ${resultado.stderr.toString("utf8")}`,
+      );
+    }
     mkdirSync(dirname(destino), { recursive: true });
     writeFileSync(destino, resultado.stdout);
   }
@@ -201,8 +231,10 @@ function linkNodeModules(root: string, tmpDir: string): void {
   if (!existsSync(origem) || existsSync(destino)) return;
   try {
     symlinkSync(origem, destino, "dir");
-  } catch {
-    // Ver comentário acima do link — deixa a ausência de resumo.json falar.
+  } catch (error) {
+    // Ver comentário acima do link — deixa a ausência de resumo.json falar
+    // pelo desfecho; a causa do symlink, ainda assim, vai pro stderr.
+    process.stderr.write(`controle-negativo: symlink de node_modules falhou: ${String(error)}\n`);
   }
 }
 
@@ -238,8 +270,14 @@ function rodarCheck(
   testFiles: readonly string[],
 ): number {
   const tmpDir = mkdtempSync(join(tmpdir(), "controle-negativo-"));
+  let registrado = false;
   try {
-    worktreeAdd(root, tmpDir, base);
+    registrado = worktreeAdd(root, tmpDir, base);
+    if (!registrado) {
+      return falhar(
+        `controle-negativo: não foi possível preparar a base ${base} — ver stderr acima`,
+      );
+    }
     overlay(root, tmpDir, head, overlayFiles);
 
     const pkgPath = join(tmpDir, "package.json");
@@ -294,7 +332,7 @@ function rodarCheck(
     escreverSummary(`## controle-negativo\n\n\`${desfecho}\` — PASS.`);
     return passar(`controle-negativo: ${desfecho} — PASS`);
   } finally {
-    worktreeRemove(root, tmpDir);
+    worktreeRemove(root, tmpDir, registrado);
   }
 }
 
