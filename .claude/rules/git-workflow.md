@@ -16,7 +16,9 @@ Sem issue, não começa.
    lockfile e fixtures — **não começar**: virar épico e decompor em sub-issues
    menores, cada uma com User Story e AC próprios, cada uma com sua PR.
 4. **Branch a partir da issue**, para o vínculo aparecer no painel Development:
-   `gh issue develop <n> --base main --name <type>/<slug> --checkout`
+   `gh issue develop <n> --base main --name <type>/<n>-<slug> --checkout`
+   O push da ref nova falha se ela já existir — **é o lock da issue** (ADR
+   0004 item 2). `<n>` liga branch, issue e slug de prova.
 
 Se alguém pedir para pular ("é pequeno", "depois eu crio"), o assistente
 sinaliza o gate ("criando a issue de tracking primeiro") e cumpre. Exceção
@@ -53,20 +55,33 @@ Slug em kebab-case, prefixo igual ao tipo do conventional commit:
 | `test/`     | Só testes                           |
 | `ci/`       | CI, GitHub Actions, hooks           |
 
-Exemplos: `feat/workflow-store`, `fix/stub-driver-port`, `docs/adr-0004`.
+Sempre `<type>/<n>-<slug>`, com `<n>` = número da issue. Exemplos:
+`feat/12-workflow-store`, `fix/3-stub-driver-port`, `docs/31-adr-0004`.
 
 ## Fluxo de uma mudança
 
 1. `git checkout main && git pull`
-2. `gh issue develop <n> --base main --name <type>/<slug> --checkout`
-3. Implementar e commitar na branch (TDD; gates locais verdes).
+2. `gh issue develop <n> --base main --name <type>/<n>-<slug> --checkout`
+   (a issue recebe `state:in-progress`)
+3. Implementar e commitar na branch: teste vermelho primeiro (`test(red):`),
+   depois verde, commit a cada verde. Gates locais verdes.
 4. **Dogfooding real, sempre que possível**: exercitar o runtime de verdade
    (`lohra chat --json` via Codex e/ou OpenRouter com uma tarefa que use
    tool) e registrar exit code, `error` e `tool_calls`. Testes verdes são
    necessários, não suficientes — fatos de execução são o critério.
-5. **Aguardar a pessoa confirmar** que está bom.
-6. Só então: `git push -u origin <type>/<slug>` e abrir a PR com a skill `pr`.
-7. Parar. A pessoa revisa e decide o merge.
+5. Push e PR pela skill `pr` (`Closes #N`, AC copiados, `state:in-review`).
+   Quem implementa **para aqui** — nunca mergeia.
+6. O orquestrador lança o `revisor` (só leitura). Veredito em JSON na PR;
+   aprovado → label `review:approved`; reprovado → `state:qa-failed` e volta
+   ao passo 3 com as `reasons`.
+7. **Merge pelo orquestrador**, só quando as duas condições mecânicas valem:
+   todos os checks obrigatórios verdes no HEAD da PR **e** `review:approved`.
+   Merge commit (`gh pr merge --merge`), nunca squash — o job `provenance`
+   verifica ancestralidade. `Closes #N` fecha a issue.
+8. Segunda reprovação → `state:blocked` + `human`; o orquestrador segue para
+   outra issue. Daí em diante é a pessoa.
+
+O laço completo, com quem age em cada passo: `orquestracao.md`.
 
 ## Commit
 
@@ -95,13 +110,19 @@ fecha). Idioma: PT-BR, como o resto do repositório.
 - Sub-issues herdam o milestone do épico.
 - O header `Tamanho` de cada issue vira a label `complexity:S|M|L`.
 - `severity:*` vem de review independente e **não** determina ordem de roadmap.
+- Estado: `state:ready → in-progress → in-review → done`; `state:qa-failed`
+  volta ao implementador; `state:blocked` + `human` após duas reprovações.
+  `review:approved` só o revisor põe.
 
 ## Regras invioláveis
 
 - Nunca começar trabalho sem issue rastreável (exceções acima).
 - Nunca commitar direto em `main`.
-- Nunca fazer merge de PR — a pessoa revisa e decide.
-- Não fazer push da branch antes da confirmação da pessoa.
+- Merge só pelo orquestrador, só com checks verdes **e** `review:approved`;
+  nunca `gh pr merge --admin`; nunca squash.
+- Quem implementa nunca mergeia; quem revisa nunca edita.
+- Push só depois dos gates locais e do dogfooding.
+- Depois da segunda reprovação, ninguém insiste: `state:blocked` + `human`.
 - **Nunca force-push.** O hook `.claude/hooks/block-force-push.sh` nega na
   sessão; a proteção server-side da `main` é o backstop. Reescrever histórico
   quebra o invariante de proveniência (`docs/closeout.md`, job `provenance`).

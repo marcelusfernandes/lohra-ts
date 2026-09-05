@@ -29,6 +29,7 @@ MILESTONE=$(printf '%s' "$META" | jq -r '.milestone.title // empty')
 [ -n "$TITLE" ] || TITLE=$ITITLE
 
 BODY=$(mktemp)
+trap 'rm -f "$BODY"' EXIT
 {
   echo "## Resumo"; echo
   echo "<!-- preencher: o que muda e por quê -->"; echo
@@ -40,7 +41,7 @@ BODY=$(mktemp)
   echo "- [ ] dogfooding real (Codex e/ou OpenRouter): exit 0, error null, tool_calls"; echo
   for n in $ISSUES; do
     AC=$(gh issue view "$n" --repo "$REPO" --json body -q .body | sed -n '/^## Acceptance Criteria/,/^## /p' | sed '1d;$d' | grep '^- \[' || true)
-    [ -n "$AC" ] || { echo "open-pr: a issue #$n não tem bloco '## Acceptance Criteria' com itens" >&2; rm -f "$BODY"; exit 2; }
+    [ -n "$AC" ] || { echo "open-pr: a issue #$n não tem bloco '## Acceptance Criteria' com itens" >&2; exit 2; }
     echo "## Acceptance Criteria (copiados da issue #$n)"; echo; printf '%s\n' "$AC"; echo
   done
 } > "$BODY"
@@ -50,10 +51,10 @@ set -- gh pr create --repo "$REPO" --base main --head "$BRANCH" --title "$TITLE"
 OLDIFS=$IFS; IFS=','; for l in $LABELS; do [ -n "$l" ] && set -- "$@" --label "$l"; done; IFS=$OLDIFS
 
 if [ "$DRY" -eq 1 ]; then
-  printf 'dry-run: %s\n' "$*"; echo "dry-run: body ↓"; cat "$BODY"; rm -f "$BODY"; exit 0
+  printf 'dry-run: %s\n' "$*"; echo "dry-run: body ↓"; cat "$BODY"; exit 0
 fi
 
-OUT=$("$@"); rm -f "$BODY"
+OUT=$("$@")
 URL=$(printf '%s\n' "$OUT" | tail -1)
 NUM=${URL##*/}
 CHECK=$(gh pr view "$NUM" --repo "$REPO" --json closingIssuesReferences,labels,milestone)

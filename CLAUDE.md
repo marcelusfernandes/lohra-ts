@@ -20,7 +20,8 @@ Núcleo headless orientado a eventos → **TUI** (Ink) → **GUI Electron**
 ## Decisões já tomadas
 
 - `docs/gate-decision-t22.md` — lohra-ts é a mainline (2026-09-03).
-- `docs/adr/` — decisões arquiteturais; a 0003 define o wire-format próprio.
+- `docs/adr/` — decisões arquiteturais; a 0003 define o wire-format próprio,
+  a 0004 o trabalho autônomo (orquestrador mergeia com CI + revisor).
 - Issues e milestones no GitHub registram o trabalho em andamento.
 
 ## Convenções
@@ -40,7 +41,8 @@ Núcleo headless orientado a eventos → **TUI** (Ink) → **GUI Electron**
 - Em sessões de Claude Code, `.claude/settings.json` formata e aplica
   `eslint --fix` a cada arquivo editado.
 - Fluxo de git (issue-first, branch por issue, PR para `main`, sem
-  force-push): `.claude/rules/git-workflow.md`.
+  force-push): `.claude/rules/git-workflow.md`. Quem mergeia e quando:
+  `.claude/rules/orquestracao.md` e `docs/adr/0004-trabalho-autonomo.md`.
 
 ## Invariantes do runtime
 

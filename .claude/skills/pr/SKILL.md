@@ -10,8 +10,8 @@ user-invocable: true
 
 ## Pré-condições (gates, não passos)
 
-1. **O usuário confirmou** que a implementação está boa. Sem isso, não há
-   push nem PR — a regra é "não fazer push antes da confirmação".
+1. Gates locais verdes e dogfooding feito (abaixo). Não há confirmação
+   humana no caminho normal (ADR 0004): o revisor e o CI são os gates.
 2. A branch traça de volta a uma issue (`--issue N`, ou inferida do painel
    Development se a branch foi criada com `gh issue develop`).
 3. Gates locais verdes: `npm run typecheck`, `lint`, `format:check`, `test`.
@@ -36,7 +36,9 @@ user-invocable: true
    é o que garante o fechamento automático no merge.
 
 3. Marcar no body os AC que foram atendidos; o que não foi fica explícito.
-4. Reportar a URL e parar. **Nunca mergeia**: a pessoa revisa e decide.
+4. Aplicar `state:in-review` na issue; reportar a URL e parar. **Quem
+   implementa nunca mergeia** — o orquestrador mergeia quando CI verde e
+   `review:approved` (`.claude/rules/orquestracao.md`).
 
 ## Regras
 
