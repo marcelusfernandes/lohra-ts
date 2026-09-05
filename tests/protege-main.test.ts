@@ -55,10 +55,11 @@ const CHECKS_VERMELHOS = JSON.stringify([
   { name: "provenance", state: "SUCCESS" },
 ]);
 
-function view(labels: readonly string[], files: readonly string[]): string {
+function view(labels: readonly string[], files: readonly string[], changedFiles?: number): string {
   return JSON.stringify({
     labels: labels.map((name) => ({ name })),
     reviewDecision: "",
+    changedFiles: changedFiles ?? files.length,
     files: files.map((p) => ({ path: p })),
   });
 }
@@ -127,6 +128,14 @@ describe("protege-main.sh", () => {
       expect(rodar(root, "env -i PATH=/usr/bin git push origin HEAD:main", bench()).status).toBe(2);
     });
 
+    it("`--` depois de sudo/env e `nice -n N` não escondem o push: nega", () => {
+      expect(rodar(root, "sudo -u root -- git push --force origin feat/1-x", bench()).status).toBe(
+        2,
+      );
+      expect(rodar(root, "env -- git push origin HEAD:main", bench()).status).toBe(2);
+      expect(rodar(root, "nice -n 10 git push --force origin feat/1-x", bench()).status).toBe(2);
+    });
+
     it("git branch -D main: nega", () => {
       expect(rodar(root, "git branch -D main", bench()).status).toBe(2);
     });
@@ -193,6 +202,17 @@ describe("protege-main.sh", () => {
         }),
       );
       expect(r.status).toBe(2);
+    });
+
+    it("lista de arquivos truncada pelo gh (changedFiles > files): não é classe docs, nega", () => {
+      const cem = Array.from({ length: 100 }, (_, i) => `docs/a${String(i).padStart(3, "0")}.md`);
+      const r = rodar(
+        root,
+        "gh pr merge 5 --merge",
+        bench({ LOHRA_PM_VIEW_JSON: view([], cem, 101) }),
+      );
+      expect(r.status).toBe(2);
+      expect(r.stderr).toMatch(/truncad/u);
     });
 
     it("PR sem arquivos: não é classe docs, nega sem label", () => {

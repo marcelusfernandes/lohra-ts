@@ -62,6 +62,8 @@ describe("protege-escrita.sh", () => {
     git(root, "worktree", "add", "-q", "--detach", path.join(root, ".claude", "worktrees", "w"));
     // symlink que escapa para docs/reference
     symlinkSync(path.join(root, "docs", "reference"), path.join(root, "atalho"));
+    // symlink que foge para FORA de qualquer repositório
+    symlinkSync(fora, path.join(root, "fuga"));
   });
   afterAll(() => {
     rmSync(root, { recursive: true, force: true });
@@ -95,6 +97,12 @@ describe("protege-escrita.sh", () => {
   it("symlink dentro do repo que resolve para docs/reference: nega", () => {
     const r = escrever(root, path.join(root, "atalho", "novo.md"));
     expect(r.status).toBe(2);
+  });
+
+  it("symlink dentro do repo que resolve para FORA de qualquer repo: nega (caminho textual está dentro)", () => {
+    const r = escrever(root, path.join(root, "fuga", "x.md"));
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/symlink/u);
   });
 
   it("worktree de agente em .claude/worktrees/w: docs/reference lá dentro é negado, com cwd na raiz do projeto", () => {
