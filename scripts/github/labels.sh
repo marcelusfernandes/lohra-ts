@@ -17,3 +17,12 @@ mk "severity:medium"  "E99695" "Severidade média de review independente; não d
 mk "independence:I1"  "BFD4F2" "Dependência de sequência: deve seguir trabalho pré-requisito"
 mk "independence:I2"  "C5DEF5" "Algum acoplamento ou provável sobreposição de arquivos"
 mk "independence:I3"  "0E8A16" "Altamente independente; adequado a trabalho paralelo"
+# estado do laço (ADR 0004 / .claude/rules/orquestracao.md)
+mk "state:ready"       "EDEDED" "Pronta para ser reivindicada (branch remota = lock)"
+mk "state:in-progress" "1D76DB" "Reivindicada; implementador em worktree"
+mk "state:in-review"   "5319E7" "PR aberta; aguardando CI + revisor"
+mk "state:qa-failed"   "E4E669" "Reprovada pelo CI ou pelo revisor; volta ao implementador"
+mk "state:blocked"     "B60205" "Duas reprovações; precisa de pessoa"
+mk "state:done"        "0E8A16" "Mergeada"
+mk "human"             "000000" "Gate humano (ADR 0004 item 9): só a pessoa resolve"
+mk "review:approved"   "0E8A16" "Revisor só-leitura aprovou; condição de merge junto com CI verde"

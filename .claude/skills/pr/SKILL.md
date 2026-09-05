@@ -1,6 +1,6 @@
 ---
 name: pr
-description: Abre a pull request de uma branch do lohra-ts contra a `main`, já ligada à issue — `Closes #N` em texto puro, Acceptance Criteria copiados da issue como checklist, labels e milestone herdados, e verificação pós-criação via `gh pr view --json`. Use quando o usuário pedir "abre a PR", "cria PR", "sobe isso pra review", ou depois de confirmar que a implementação de uma issue está pronta. NÃO use para mergear, nem antes de o usuário confirmar o push (regra em .claude/rules/git-workflow.md).
+description: Abre a pull request de uma branch do lohra-ts contra a `main`, já ligada à issue — `Closes #N` em texto puro, Acceptance Criteria copiados da issue como checklist, labels e milestone herdados (sem `state:*`/`epic`), e verificação pós-criação via `gh pr view --json`. Use quando os gates locais e o dogfooding (ou o `N/A` declarado) estiverem feitos e o usuário pedir "abre a PR", "cria PR", "sobe isso pra review". NÃO use para mergear: quem implementa nunca mergeia; o orquestrador mergeia com CI verde + `review:approved` (ADR 0004).
 argument-hint: '--issue N [--title "…"] [--dry-run]'
 allowed-tools: Bash, Read, Grep
 user-invocable: true
@@ -10,14 +10,16 @@ user-invocable: true
 
 ## Pré-condições (gates, não passos)
 
-1. **O usuário confirmou** que a implementação está boa. Sem isso, não há
-   push nem PR — a regra é "não fazer push antes da confirmação".
+1. Gates locais verdes e dogfooding feito (abaixo). Não há confirmação
+   humana no caminho normal (ADR 0004): o revisor e o CI são os gates.
 2. A branch traça de volta a uma issue (`--issue N`, ou inferida do painel
    Development se a branch foi criada com `gh issue develop`).
 3. Gates locais verdes: `npm run typecheck`, `lint`, `format:check`, `test`.
-4. **Dogfooding real feito e positivo**, quando possível: uma execução de
-   verdade do runtime (Codex e/ou OpenRouter) com exit 0, `error: null` e
-   `tool_calls` quando a tarefa exige tool. Vai no Test plan da PR.
+4. **Dogfooding real feito e positivo** quando a branch toca `src/`,
+   `package.json` ou o lockfile: uma execução de verdade do runtime (Codex
+   e/ou OpenRouter) com exit 0, `error: null` e `tool_calls` quando a tarefa
+   exige tool. Vai no Test plan da PR; se não toca, o test plan diz `N/A` e
+   por quê.
 
 ## Passos
 
@@ -36,7 +38,9 @@ user-invocable: true
    é o que garante o fechamento automático no merge.
 
 3. Marcar no body os AC que foram atendidos; o que não foi fica explícito.
-4. Reportar a URL e parar. **Nunca mergeia**: a pessoa revisa e decide.
+4. Aplicar `state:in-review` na issue; reportar a URL e parar. **Quem
+   implementa nunca mergeia** — o orquestrador mergeia quando CI verde e
+   `review:approved` (`.claude/rules/orquestracao.md`).
 
 ## Regras
 
