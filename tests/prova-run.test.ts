@@ -123,4 +123,31 @@ describe("prova run.ts (subprocess)", () => {
     // gone, not silently re-served as this run's result.
     expect(existsSync(resumoPath)).toBe(false);
   });
+
+  it("check: true folds a failing npm run typecheck into falhas", () => {
+    const dir = makeWorkdir();
+    writeFileSync(
+      join(dir, "package.json"),
+      JSON.stringify({ name: "tmp", version: "0.0.0", scripts: { typecheck: "exit 1" } }),
+    );
+    writeFileSync(
+      join(dir, "prova", "checktrue.ts"),
+      'export default { unit: ["tests/ok.test.ts"], check: true };\n',
+    );
+    writeFileSync(
+      join(dir, "tests", "ok.test.ts"),
+      'import { expect, it } from "vitest";\nit("passes", () => { expect(1).toBe(1); });\n',
+    );
+
+    const result = runProva(dir, "checktrue");
+
+    expect(result.status).toBe(1);
+    const resumoPath = join(dir, ".prova", "checktrue", "resumo.json");
+    const resumo: unknown = JSON.parse(readFileSync(resumoPath, "utf8"));
+    expect(resumo).toEqual({
+      ok: false,
+      total: 1,
+      falhas: [{ nome: "npm run typecheck", motivo: "exit code 1" }],
+    });
+  });
 });
