@@ -85,4 +85,42 @@ describe("prova run.ts (subprocess)", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("tests/does-not-exist.test.ts");
   });
+
+  it("never reports ok:true from a stale report when the second run's vitest crashes before writing one", () => {
+    const dir = makeWorkdir();
+    writeFileSync(
+      join(dir, "prova", "flaky.ts"),
+      'export default { unit: ["tests/ok.test.ts"] };\n',
+    );
+    writeFileSync(
+      join(dir, "tests", "ok.test.ts"),
+      'import { expect, it } from "vitest";\nit("passes", () => { expect(1).toBe(1); });\n',
+    );
+
+    const first = runProva(dir, "flaky");
+    expect(first.status, first.stderr).toBe(0);
+    const resumoPath = join(dir, ".prova", "flaky", "resumo.json");
+    expect(existsSync(resumoPath)).toBe(true);
+    expect(JSON.parse(readFileSync(resumoPath, "utf8"))).toEqual({
+      ok: true,
+      total: 1,
+      falhas: [],
+    });
+
+    // Break vitest's own startup for the SECOND run — a broken vitest.config.ts
+    // makes vitest die with a "Startup Error" before it ever opens the
+    // outputFile, so nothing overwrites the vitest.json from the first run.
+    // The harness must not read that leftover file as if it were fresh.
+    writeFileSync(
+      join(dir, "vitest.config.ts"),
+      'throw new Error("intentionally broken vitest.config.ts — prova stale-report repro");\n',
+    );
+
+    const second = runProva(dir, "flaky");
+
+    expect(second.status).not.toBe(0);
+    // The stale resumo.json (and the stale vitest.json backing it) must be
+    // gone, not silently re-served as this run's result.
+    expect(existsSync(resumoPath)).toBe(false);
+  });
 });
