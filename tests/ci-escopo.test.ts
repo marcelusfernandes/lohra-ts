@@ -266,7 +266,11 @@ describe("escopo/run.ts (dry-run, subprocesso)", () => {
       "files.txt",
       "scripts/ci/lib/globs.ts\nscripts/ci/escopo/run.ts\n",
     );
-    const issueBodyFile = escrever(dir, "issue.md", ["## Files", "", "- `scripts/ci/**`", ""].join("\n"));
+    const issueBodyFile = escrever(
+      dir,
+      "issue.md",
+      ["## Files", "", "- `scripts/ci/**`", ""].join("\n"),
+    );
     const prBodyFile = escrever(dir, "pr.md", "Closes #49\n");
 
     const r = rodar([
@@ -284,7 +288,11 @@ describe("escopo/run.ts (dry-run, subprocesso)", () => {
   it("authorised: na PR cobre um arquivo fora do glob da issue: exit 0", () => {
     const dir = workdir();
     const filesFile = escrever(dir, "files.txt", "scripts/ci/lib/globs.ts\npackage.json\n");
-    const issueBodyFile = escrever(dir, "issue.md", ["## Files", "", "- `scripts/ci/lib/**`", ""].join("\n"));
+    const issueBodyFile = escrever(
+      dir,
+      "issue.md",
+      ["## Files", "", "- `scripts/ci/lib/**`", ""].join("\n"),
+    );
     const prBodyFile = escrever(
       dir,
       "pr.md",

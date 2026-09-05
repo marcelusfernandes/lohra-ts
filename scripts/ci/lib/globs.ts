@@ -8,15 +8,25 @@
 // zero), `*` (qualquer coisa exceto `/`), o resto é literal. Paths são
 // comparados como POSIX-relativos (barra normal) — é o que `git diff
 // --name-only` sempre imprime.
-//
-// STUB (test(red), issue #49): implementação real vem no commit seguinte.
+
+function escaparRegExp(literal: string): string {
+  return literal.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+}
 
 /** Traduz um glob (`**`, `*`, literal) para uma RegExp ancorada (`^...$`). */
-export function globParaRegex(_glob: string): RegExp {
-  throw new Error("not implemented");
+export function globParaRegex(glob: string): RegExp {
+  const padrao = glob
+    .split(/(\*\*|\*)/)
+    .map((pedaco) => {
+      if (pedaco === "**") return ".*";
+      if (pedaco === "*") return "[^/]*";
+      return escaparRegExp(pedaco);
+    })
+    .join("");
+  return new RegExp(`^${padrao}$`);
 }
 
 /** `true` quando `caminho` casa com `glob` (`**`, `*`, literal). */
-export function casa(_glob: string, _caminho: string): boolean {
-  throw new Error("not implemented");
+export function casa(glob: string, caminho: string): boolean {
+  return globParaRegex(glob).test(caminho);
 }
