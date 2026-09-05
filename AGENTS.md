@@ -39,6 +39,8 @@ Núcleo headless orientado a eventos → **TUI** (Ink) → **GUI Electron**
   todo SHA aprovado em `docs/closeout.md` é ancestral do HEAD.
 - Em sessões de Claude Code, `.claude/settings.json` formata e aplica
   `eslint --fix` a cada arquivo editado.
+- Fluxo de git (issue-first, branch por issue, PR para `main`, sem
+  force-push): `.claude/rules/git-workflow.md`.
 
 ## Invariantes do runtime
 
