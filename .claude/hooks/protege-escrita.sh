@@ -42,27 +42,35 @@ PE_PAYLOAD="$payload" node -e '
 
   const cwdReal = realpath(cwd);
   if (cwdReal === null) negar("não consegui resolver o caminho real de cwd (" + cwd + "); nego por segurança.");
-  // Raiz do worktree: lohra/ é um repo git ANINHADO (checkout do Python), então
-  // `git rev-parse --show-toplevel` a partir de um cwd dentro dele devolveria
-  // lohra/ e as regras abaixo deixariam de casar (revisor, PR #38 rodada 2).
-  // Preferimos CLAUDE_PROJECT_DIR quando o cwd está dentro dele; senão, subimos
-  // até o toplevel MAIS EXTERNO.
-  function outermostToplevel(start) {
-    let dir = start, top = null;
+  // Raiz das regras (issue #61): calculada a partir do ALVO, não do cwd — o
+  // toplevel git mais INTERNO, subindo, que contenha .claude/settings.json.
+  // Dentro de um worktree de agente (.claude/worktrees/<x>) a raiz é o worktree,
+  // senão `.claude/worktrees/x/docs/reference/…` não casaria; dentro de lohra/
+  // (repo git aninhado, sem settings) a raiz é o projeto. Sem nenhum toplevel com
+  // settings: CLAUDE_PROJECT_DIR se o alvo está dentro dele; senão o toplevel mais
+  // externo; senão null (fora de qualquer repo).
+  function toplevels(start) {
+    const tops = [];
+    let dir = start;
     for (;;) {
       const r = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd: dir, encoding: "utf8" });
       if (r.status !== 0) break;
-      top = realpath(r.stdout.trim()) || r.stdout.trim();
+      const top = realpath(r.stdout.trim()) || r.stdout.trim();
+      tops.push(top);
       const parent = path.dirname(top);
       if (parent === top) break;
       dir = parent;
     }
-    return top;
+    return tops;
   }
   const projectDir = process.env.CLAUDE_PROJECT_DIR ? realpath(process.env.CLAUDE_PROJECT_DIR) : null;
-  let root = (projectDir && (cwdReal === projectDir || cwdReal.startsWith(projectDir + path.sep)))
-    ? projectDir
-    : (outermostToplevel(cwdReal) || cwdReal);
+  function rootFor(dir) {
+    if (dir === null || !fs.existsSync(dir)) return null;
+    const tops = toplevels(dir);
+    for (const t of tops) if (fs.existsSync(path.join(t, ".claude", "settings.json"))) return t;
+    if (projectDir && (dir === projectDir || dir.startsWith(projectDir + path.sep))) return projectDir;
+    return tops.length ? tops[tops.length - 1] : null;
+  }
 
   function resolveExistingAncestor(absolutePath) {
     let dir = path.dirname(absolutePath);
@@ -83,18 +91,17 @@ PE_PAYLOAD="$payload" node -e '
   }
 
   const abs = path.isAbsolute(filePath) ? toCanonicalPrefix(filePath) : path.resolve(cwdReal, filePath);
-  const textualRel = path.relative(root, abs).split(path.sep).join("/");
-  const textuallyInside = textualRel !== ".." && !textualRel.startsWith("../") && !path.isAbsolute(textualRel);
-
   const absReal = resolveExistingAncestor(abs);
   if (absReal === null) negar("não consegui resolver nenhum ancestral existente do alvo (" + abs + "); nego por segurança.");
-  const rel = path.relative(root, absReal).split(path.sep).join("/");
-  const resolvedOutside = rel === ".." || rel.startsWith("../") || path.isAbsolute(rel);
-
-  if (resolvedOutside) {
-    if (textuallyInside) negar("o alvo (" + filePath + ") parece estar dentro do worktree, mas um ancestral é symlink que resolve para fora (" + absReal + "); nego por segurança.");
+  const root = rootFor(path.dirname(absReal));
+  if (root === null) {
+    // resolvido fora de qualquer repo: permitido — salvo se o caminho TEXTUAL está
+    // dentro de um repo (symlink que foge para fora), que é negado por segurança
+    const rootTextual = rootFor(fs.existsSync(path.dirname(abs)) ? path.dirname(abs) : null);
+    if (rootTextual !== null) negar("o alvo (" + filePath + ") parece estar dentro do worktree, mas um ancestral é symlink que resolve para fora (" + absReal + "); nego por segurança.");
     process.exit(0); // genuinamente fora do worktree (scratchpad): sempre permitido
   }
+  const rel = path.relative(root, absReal).split(path.sep).join("/");
   if (rel === "docs/reference" || rel.startsWith("docs/reference/"))
     negar("docs/reference/ é documentação histórica congelada; não se edita.");
   if (rel === "lohra" || rel.startsWith("lohra/"))

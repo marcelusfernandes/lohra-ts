@@ -223,7 +223,7 @@ describe("protege-main.sh", () => {
       LOHRA_PM_VIEW_JSON: view(["review:approved"], ["src/x.ts"]),
     });
     expect(r.status).toBe(2);
-    expect(r.stderr).toMatch(/não consegui ler/u);
+    expect(r.stderr).toMatch(/não consegui ler|nenhum check/u);
   });
 
   it("comando sem push/merge/branch: sai 0 sem consultar nada", () => {

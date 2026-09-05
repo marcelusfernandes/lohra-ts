@@ -35,10 +35,12 @@
 # uma seam da bancada não vaza para um vitest real que a prova esteja rodando, e
 # um hook aninhado nunca se vê "em bancada" por herança.
 #
-# LIMITE DECLARADO: o hook não lê `stop_hook_active` — bloqueia toda vez que a
-# prova está vermelha ("loop until green", como o tsc-check fazia). Se a prova
-# não puder ficar verde (ex.: `npm run prova` inexistente), o turno não encerra;
-# por isso este hook só entra em main junto ou depois do harness (#42).
+# TETO DE BLOQUEIOS (issue #61, invariante 3 — nada unbounded): o payload traz
+# `stop_hook_active: true` quando o agente já está continuando por causa de um
+# bloqueio anterior deste hook. O contador `.prova/.stop-gate-bloqueios` conta
+# bloqueios CONSECUTIVOS da prova; no terceiro, o hook libera o turno com aviso
+# de teto e zera o contador. Prova verde (ou turno novo, sem stop_hook_active)
+# zera. tsc vermelho não conta — é sempre corrigível.
 #
 # Contrato: JSON do evento em stdin (`cwd`); exit 2 bloqueia o encerramento.
 # Raiz = toplevel git do `cwd` do payload (worktree de agente inclusive); sem
@@ -120,15 +122,27 @@ SG_PAYLOAD="$payload" node -e '
     aviso("nenhum prova/" + slug + ".ts para a branch \"" + branch + "\"; nada a provar ainda (não bloqueia).");
     process.exit(0);
   }
+  const contadorPath = path.join(root, ".prova", ".stop-gate-bloqueios");
+  const zerar = () => { try { fs.unlinkSync(contadorPath); } catch { /* já não existe */ } };
   const provaCmd = seam("PROVA_CMD") ?? ("npm run -s prova -- " + JSON.stringify(slug));
   const r = rodar(provaCmd, { LOHRA_STOP_GATE_ACTIVE: "1" });
   if (r.status !== 0) {
     const resumoPath = path.join(root, ".prova", slug, "resumo.json");
     let resumo = "(sem " + path.relative(root, resumoPath) + ")";
     try { resumo = fs.readFileSync(resumoPath, "utf8"); } catch { /* sem resumo: fica a mensagem acima */ }
-    aviso("a prova de \"" + slug + "\" reprovou (`" + provaCmd + "`).\n" + resumo);
+    let anteriores = 0;
+    if (j.stop_hook_active === true) { try { anteriores = parseInt(fs.readFileSync(contadorPath, "utf8"), 10) || 0; } catch { anteriores = 0; } }
+    const total = anteriores + 1;
+    if (total >= 3) {
+      zerar();
+      aviso("teto de 3 bloqueios consecutivos atingido; a prova de \"" + slug + "\" continua vermelha, mas o turno é liberado para não travar sem limite (invariante 3). Resumo:\n" + resumo);
+      process.exit(0);
+    }
+    try { fs.mkdirSync(path.dirname(contadorPath), { recursive: true }); fs.writeFileSync(contadorPath, String(total) + "\n"); } catch (e) { aviso("não consegui gravar o contador de bloqueios (" + String(e && e.message || e) + ")"); }
+    aviso("a prova de \"" + slug + "\" reprovou (`" + provaCmd + "`) — bloqueio " + total + "/3.\n" + resumo);
     process.exit(2);
   }
+  zerar();
   process.exit(0);
 '
 exit $?

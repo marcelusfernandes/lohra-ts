@@ -8,7 +8,18 @@
 #   4. gh pr merge --admin — sem válvula
 #   5. gh pr merge --squash / --rebase (-s / -r) — ADR 0004 exige merge commit; sem válvula
 #   6. gh pr merge sem todos os checks verdes, ou sem a label review:approved
-#      (nem reviewDecision APPROVED) — a condição mecânica de merge da ADR 0004
+#      (nem reviewDecision APPROVED) — a condição mecânica de merge da ADR 0004.
+#      WAIVER de classe (issue #61): se TODOS os arquivos da PR são classe `docs`
+#      (docs/**, README.md, CLAUDE.md, AGENTS.md — ADR 0004 item 7), a label é
+#      dispensada (avisado no stderr); os checks verdes continuam obrigatórios.
+#
+# `git push --all`/`--mirror` contam como push em main (empurram toda branch).
+# Prefixos com flag: `sudo -u X`, `env -i`, `env VAR=x` são atravessados.
+#
+# BANCADA (tests/protege-main.test.ts): `LOHRA_BENCH=1` é o único portão que
+# habilita as seams LOHRA_PM_BRANCH (branch atual), LOHRA_PM_CHECKS_JSON (saída
+# de `gh pr checks --json name,state`) e LOHRA_PM_VIEW_JSON (saída de
+# `gh pr view --json labels,reviewDecision,files`). Sem o portão nenhuma é lida.
 #
 # Válvulas, para bootstrap e operação humana consciente (valem no ambiente do
 # hook OU escritas no próprio comando, ex.: `LOHRA_PERMITE_PUSH_MAIN=1 git push`):
@@ -51,6 +62,8 @@ PM_PAYLOAD="$payload" node -e '
   if (j.tool_name !== "Bash") process.exit(0);
   const cmd = (j.tool_input && j.tool_input.command) || "";
   const cwd = j.cwd || process.cwd();
+  const bench = process.env.LOHRA_BENCH === "1";
+  const seam = (nome) => (bench && ("LOHRA_PM_" + nome) in process.env) ? String(process.env["LOHRA_PM_" + nome]) : undefined;
 
   const PROTEGIDAS = /^(?:refs\/heads\/)?(?:main|master)$/;
   const negar = (motivo) => {
@@ -66,6 +79,8 @@ PM_PAYLOAD="$payload" node -e '
     return { ok: r.status === 0, out: String(r.stdout || ""), err: String(r.stderr || "") };
   };
   const branchAtual = () => {
+    const viaSeam = seam("BRANCH");
+    if (viaSeam !== undefined) return viaSeam;
     const r = sh(["git", "rev-parse", "--abbrev-ref", "HEAD"]);
     if (!r.ok) negar("não consegui ler a branch atual (" + r.err.trim().slice(0, 120) + "); nego por segurança.");
     return r.out.trim();
@@ -78,7 +93,8 @@ PM_PAYLOAD="$payload" node -e '
 
   // Segmentos em posição de comando (ver LIMITE DECLARADO no cabeçalho).
   const PALAVRAS = /^(?:(?:if|elif|while|until|then|do|else|!)\s+)*/;
-  const PREFIXOS = /^(?:\w+=\S*\s+|sudo\s+|env\s+|command\s+|builtin\s+|exec\s+|time\s+|nohup\s+|nice\s+|\\)*/;
+  // sudo: flags com argumento (-u/-g/-C/-D/-h/-p/-r/-T) e flags soltas; env: -i, -u X, VAR=x
+  const PREFIXOS = /^(?:\w+=\S*\s+|sudo(?:\s+(?:-[ugCDhprT]\s+\S+|-[A-Za-z]+|--\S+))*\s+|env(?:\s+(?:-i|-u\s+\S+|--\S+|\w+=\S*))*\s+|command\s+|builtin\s+|exec\s+|time\s+|nohup\s+|nice\s+|\\)*/;
   const segmentos = cmd
     .replace(/&&|\|\|/g, "\n")
     .split(/[;|&\n(){}`]/)
@@ -104,7 +120,8 @@ PM_PAYLOAD="$payload" node -e '
         const dest = r.includes(":") ? r.split(":").pop() : r;
         if (PROTEGIDAS.test(dest)) alvoMain = true;
       }
-      if (refspecs.length === 0 || refspecs.every((r) => r === "HEAD")) {
+      if (tokens.includes("--all") || tokens.includes("--mirror")) alvoMain = true; // empurra main junto
+      else if (refspecs.length === 0 || refspecs.every((r) => r === "HEAD")) {
         if (PROTEGIDAS.test(branchAtual())) alvoMain = true;
       }
       if (apagar && refspecs.some((r) => PROTEGIDAS.test(r))) negar("apagar main/master no remoto é proibido.");
@@ -134,19 +151,29 @@ PM_PAYLOAD="$payload" node -e '
       }
       const ref = alvo ? [alvo] : [];
       const repo = repoArg ? ["--repo", repoArg] : [];
-      const checks = sh(["gh", "pr", "checks", ...ref, ...repo, "--json", "name,state"]);
+      const checksSeam = seam("CHECKS_JSON");
+      const checks = checksSeam !== undefined ? { ok: true, out: checksSeam, err: "" } : sh(["gh", "pr", "checks", ...ref, ...repo, "--json", "name,state"]);
       let lista = null;
       try { lista = JSON.parse(checks.out || "[]"); } catch {}
       if (!Array.isArray(lista)) negar("não consegui ler os checks da PR (" + (checks.err || "sem saída").trim().slice(0, 160) + ").");
       if (lista.length === 0) negar("a PR não tem nenhum check registrado; sem CI não há merge autônomo. (LOHRA_MERGE_LIVRE=1 só para bootstrap.)");
       const ruins = lista.filter((c) => !["SUCCESS", "SKIPPED", "NEUTRAL"].includes(String(c.state).toUpperCase()));
       if (ruins.length) negar("checks não verdes: " + ruins.map((c) => c.name + "=" + c.state).join(", ") + ".");
-      const view = sh(["gh", "pr", "view", ...ref, ...repo, "--json", "labels,reviewDecision"]);
+      const viewSeam = seam("VIEW_JSON");
+      const view = viewSeam !== undefined ? { ok: true, out: viewSeam, err: "" } : sh(["gh", "pr", "view", ...ref, ...repo, "--json", "labels,reviewDecision,files"]);
       let pr = null; try { pr = JSON.parse(view.out || "null"); } catch {}
       if (!pr) negar("não consegui ler a PR (" + (view.err || "sem saída").trim().slice(0, 160) + ").");
       const temLabel = (pr.labels || []).some((l) => l.name === "review:approved");
-      if (!temLabel && pr.reviewDecision !== "APPROVED")
-        negar("a PR não tem a label review:approved nem review APPROVED; o revisor precisa passar e o orquestrador aplicar a label antes do merge (ADR 0004 item 4).");
+      if (!temLabel && pr.reviewDecision !== "APPROVED") {
+        // waiver de classe docs (ADR 0004 item 7): só a label é dispensada; checks acima já foram exigidos
+        const ehDocs = (f) => f === "README.md" || f === "CLAUDE.md" || f === "AGENTS.md" || f.startsWith("docs/");
+        const arquivos = Array.isArray(pr.files) ? pr.files.map((f) => String(f && f.path || "")) : [];
+        if (arquivos.length > 0 && arquivos.every(ehDocs)) {
+          process.stderr.write("protege-main: PR de classe docs (" + arquivos.length + " arquivo(s) em docs/**, README, CLAUDE.md, AGENTS.md): label review:approved dispensada; checks verdes conferidos.\n");
+        } else {
+          negar("a PR não tem a label review:approved nem review APPROVED; o revisor precisa passar e o orquestrador aplicar a label antes do merge (ADR 0004 item 4).");
+        }
+      }
     }
   }
   process.exit(0);
