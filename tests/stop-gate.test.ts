@@ -34,9 +34,13 @@ function limparAmbiente(): Record<string, string> {
   return limpo;
 }
 
-function rodarHook(root: string, env: Record<string, string>): HookRun {
+function rodarHook(
+  root: string,
+  env: Record<string, string>,
+  payload: Record<string, unknown> = {},
+): HookRun {
   const r = spawnSync("sh", [HOOK], {
-    input: JSON.stringify({ hook_event_name: "Stop", cwd: root }),
+    input: JSON.stringify({ hook_event_name: "Stop", cwd: root, ...payload }),
     encoding: "utf8",
     env: { ...limparAmbiente(), ...env },
   });
@@ -165,5 +169,50 @@ describe("stop-gate.sh", () => {
       .filter((l) => l.startsWith("LOHRA_STOP_") || l.startsWith("LOHRA_BENCH="))
       .sort();
     expect(vistas).toEqual(["LOHRA_STOP_GATE_ACTIVE=1"]);
+  });
+  describe("teto de bloqueios (stop_hook_active, issue #61)", () => {
+    const contador = (): string => path.join(root, ".prova", ".stop-gate-bloqueios");
+
+    it("primeiro bloqueio: exit 2 e contador = 1", () => {
+      const r = rodarHook(root, bench({ LOHRA_STOP_PROVA_CMD: "false" }));
+      expect(r.status).toBe(2);
+      expect(readFileSync(contador(), "utf8").trim()).toBe("1");
+    });
+
+    it("segundo bloqueio consecutivo (stop_hook_active): exit 2 e contador = 2", () => {
+      mkdirSync(path.join(root, ".prova"), { recursive: true });
+      writeFileSync(contador(), "1\n");
+      const r = rodarHook(root, bench({ LOHRA_STOP_PROVA_CMD: "false" }), {
+        stop_hook_active: true,
+      });
+      expect(r.status).toBe(2);
+      expect(readFileSync(contador(), "utf8").trim()).toBe("2");
+    });
+
+    it("terceiro bloqueio consecutivo: libera o turno com aviso de teto e zera o contador", () => {
+      mkdirSync(path.join(root, ".prova"), { recursive: true });
+      writeFileSync(contador(), "2\n");
+      const r = rodarHook(root, bench({ LOHRA_STOP_PROVA_CMD: "false" }), {
+        stop_hook_active: true,
+      });
+      expect(r.status).toBe(0);
+      expect(r.stderr).toMatch(/teto/u);
+      expect(existsSync(contador())).toBe(false);
+    });
+
+    it("prova verde zera o contador", () => {
+      mkdirSync(path.join(root, ".prova"), { recursive: true });
+      writeFileSync(contador(), "2\n");
+      expect(rodarHook(root, bench()).status).toBe(0);
+      expect(existsSync(contador())).toBe(false);
+    });
+
+    it("sem stop_hook_active o contador reinicia (bloqueio de um turno novo)", () => {
+      mkdirSync(path.join(root, ".prova"), { recursive: true });
+      writeFileSync(contador(), "2\n");
+      const r = rodarHook(root, bench({ LOHRA_STOP_PROVA_CMD: "false" }));
+      expect(r.status).toBe(2);
+      expect(readFileSync(contador(), "utf8").trim()).toBe("1");
+    });
   });
 });
