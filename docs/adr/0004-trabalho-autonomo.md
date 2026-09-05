@@ -1,6 +1,7 @@
 # ADR 0004: Autonomous work — the orchestrator merges when the gates are mechanical
 
-- Status: Accepted by owner
+- Status: Accepted by owner on 2026-09-05 (issue #31, after two reviewer rounds;
+  explicit OK, with the `.claude/**` = `process` amendment)
 - Date: 2026-09-05
 - Baseline: `4b73f09` (`main` after PR #30, the first merge performed under this
   model)
@@ -72,14 +73,16 @@ origin/main` only before the first push; after the branch is published,
    `Files` globs do not intersect. Until #34 lands the `escopo` check, the
    orchestrator checks intersection by hand and keeps it at one or two.
 7. **PR classes, decided by the files touched.** `docs`: every file is under
-   `docs/**`, `README.md`, `CLAUDE.md`, `AGENTS.md` or is a `.md` under
-   `.claude/` — CI only, no reviewer. `process`: anything under
-   `.claude/hooks/`, `.claude/skills/**/scripts/`, `.github/`, `scripts/`,
-   `package.json` or the lockfile — only the orchestrator opens it, CI +
-   reviewer. Everything else (`src/`, `tests/`, …) is `feature`/`fix`/
-   `refactor`/`test`: CI + reviewer. A PR that mixes classes takes the
-   strictest one; PR #37, which introduces this ADR, touches `scripts/` and
-   a skill script and therefore had a reviewer.
+   `docs/**` or is `README.md`, `CLAUDE.md` or `AGENTS.md` — CI only, no
+   reviewer. `process`: anything under `.claude/**` (rules, skills, agents,
+   hooks — the files that define who merges and under which condition),
+   `.github/`, `scripts/`, `package.json` or the lockfile — only the
+   orchestrator opens it, CI + reviewer. Everything else (`src/`, `tests/`,
+   …) is `feature`/`fix`/`refactor`/`test`: CI + reviewer. A PR that mixes
+   classes takes the strictest one; PR #37, which introduces this ADR, is
+   `process`. Nothing under `.claude/` is ever exempt from review: a change to
+   the merge condition itself must pass the reviewer it is changing (owner
+   decision, 2026-09-05, issue #31).
 8. **Reconciliation before work.** At the start of a session the orchestrator
    re-reads GitHub — open PRs, `state:*` labels, linked branches — and never
    trusts its memory. An `in-progress` issue with no open PR and no recent
