@@ -12,15 +12,14 @@
 //     linhas, exceto `tests/fixtures/**` e `docs/reference/**`.
 //
 // Nota sobre os MARCADORES: a issue #50 cita `src/python-json.ts` e
-// `src/python-repr.ts`; hoje (checado em 2026-09) os módulos vivem em
-// `src/serialization/python-json.ts` e `src/serialization/python-repr.ts`
-// (#17 ainda aberta, ver `docs/reference` não — ver issue #17). Usamos o
-// caminho real: checar o caminho da issue literalmente deixaria a regra
-// ligada por default HOJE (o arquivo `src/python-json.ts` nunca existiu
-// nesse nome), o que contraria o próprio objetivo declarado na issue —
-// manter `import-proibido` desligada por default enquanto os módulos ainda
-// existem. Quando #17 remover os módulos, os MARCADORES somem e a regra
-// liga sozinha, sem precisar de `--apos-17`.
+// `src/python-repr.ts`; hoje (#17 ainda aberta) os módulos vivem em
+// `src/serialization/python-json.ts` e `src/serialization/python-repr.ts`.
+// Usamos o caminho real: checar o caminho da issue literalmente deixaria a
+// regra ligada por default HOJE (o arquivo `src/python-json.ts` nunca
+// existiu nesse nome), o que contraria o próprio objetivo declarado na
+// issue — manter `import-proibido` desligada por default enquanto os
+// módulos ainda existem. Quando #17 remover os módulos, os MARCADORES
+// somem e a regra liga sozinha, sem precisar de `--apos-17`.
 //
 // Dois modos:
 //   - CI: lê `GITHUB_EVENT_PATH` (evento `pull_request`), roda
@@ -40,7 +39,7 @@ import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import process from "node:process";
 
-import { rodarContratos, type Violacao } from "./lib.js";
+import { ID_IMPORT_PROIBIDO, rodarContratos, type Violacao } from "./lib.js";
 
 const MARCADORES_PYTHON_SERIALIZATION = [
   "src/serialization/python-json.ts",
@@ -143,8 +142,8 @@ function montarFonteCi(root: string): FonteDeDados {
   const evento = lerEventoPullRequest(eventPath);
   const baseBruto = evento.pull_request?.base?.sha;
   const headBruto = evento.pull_request?.head?.sha;
-  if (baseBruto === undefined || headBruto === undefined) {
-    falhaFechada(`${eventPath} não tem pull_request.base.sha/head.sha`);
+  if (typeof baseBruto !== "string" || typeof headBruto !== "string") {
+    falhaFechada(`${eventPath} não tem pull_request.base.sha/head.sha (string)`);
   }
   // Reatribuídos a consts próprios (em vez de usar `baseBruto`/`headBruto`
   // direto): a checagem acima só narrowa o tipo no escopo léxico deste
@@ -210,7 +209,7 @@ function main(): void {
 
   const ativo = ehImportProibidoAtivo(args, fonte);
   const todasAsViolacoes = rodarContratos(fonte.files, fonte.lerConteudo);
-  const violacoes = todasAsViolacoes.filter((v) => v.id !== "import-proibido" || ativo);
+  const violacoes = todasAsViolacoes.filter((v) => v.id !== ID_IMPORT_PROIBIDO || ativo);
 
   const ok = violacoes.length === 0;
   escreverSummary(ok, violacoes);

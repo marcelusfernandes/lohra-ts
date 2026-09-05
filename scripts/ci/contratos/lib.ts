@@ -67,6 +67,9 @@ function extrairSpecifiersDeImport(conteudo: string): readonly string[] {
   return specifiers;
 }
 
+/** Exportado para `run.ts` filtrar por id sem duplicar a string literal. */
+export const ID_IMPORT_PROIBIDO = "import-proibido";
+
 const ESCOPO_IMPORT_PROIBIDO = ["src/", "scripts/", "tests/"];
 const PREFIXO_AUTOEXCLUSAO = "scripts/ci/";
 const ARQUIVO_TESTE_CI_RE = /^tests\/ci-[^/]+\.test\.ts$/;
@@ -79,7 +82,7 @@ function noEscopoDeImportProibido(arquivo: string): boolean {
 }
 
 const importProibido: Regra = {
-  id: "import-proibido",
+  id: ID_IMPORT_PROIBIDO,
   descreve:
     "Import/require de python-json ou python-repr em src/**, scripts/** ou tests/** " +
     "(exceto scripts/ci/** e tests/ci-*.test.ts) — módulos removidos pela #17.",
@@ -91,7 +94,7 @@ const importProibido: Regra = {
     );
     if (specifiers.length === 0) return null;
     return {
-      id: "import-proibido",
+      id: ID_IMPORT_PROIBIDO,
       arquivo,
       descricao: `importa ${specifiers.join(", ")}`,
     };
