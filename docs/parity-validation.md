@@ -1,5 +1,10 @@
 # Validação de paridade por uso real
 
+> **HISTÓRICO** — procedimento válido de 2026-08-29 a 2026-09-04. Superado
+> pela decisão de desenvolvimento independente (ver `CLAUDE.md` e
+> `docs/adr/0003-native-wire-format.md`). Mantido como registro de como as
+> fixtures de paridade foram capturadas.
+
 Testes verdes são condição necessária, **nunca suficiente**, para aceitar uma
 fatia migrada. Toda entrega precisa de evidência de execução real nos dois
 runtimes, comparada concretamente.
@@ -16,9 +21,8 @@ venv dedicado na raiz deste repo:
 .oracle-venv/bin/lohra --version   # deve imprimir: lohra 0.0.11
 ```
 
-Atenção: `~/.pyenv/shims/lohra` resolve para outra instalação (`0.0.8`) em
-outro Python. **Sempre** invocar via `.oracle-venv/bin/lohra` para falar com o
-baseline pinado.
+Atenção: `~/.pyenv/shims/lohra` resolve para outra instalação. **Sempre**
+invocar via `.oracle-venv/bin/lohra` para falar com o baseline pinado.
 
 ## Perfil isolado
 
@@ -69,14 +73,14 @@ footguns de custo) está descrito em `lohra/docs/skills/use-lohra/SKILL.md`.
 
 ## O que cada tipo de fatia deve exercitar ao vivo
 
-| Fatia | Execução mínima real |
-| --- | --- |
-| CLI (chat, envelope) | `lohra chat --json` nos dois runtimes, diff do envelope |
-| Providers/auth | `lohra models`, `lohra auth status` e um chat real por provider suportado |
-| Estado/SQLite | inspecionar `state.db`/arquivos sob o profile após uso real |
-| Workflows | `lohra workflow …` + eventos/progresso durável comparados |
-| Server/gateway | subir os dois servers e comparar respostas HTTP/SSE/WS reais |
-| Tools | turno com tool real (fs/terminal/web) e comparação do resultado |
+| Fatia                | Execução mínima real                                                      |
+| -------------------- | ------------------------------------------------------------------------- |
+| CLI (chat, envelope) | `lohra chat --json` nos dois runtimes, diff do envelope                   |
+| Providers/auth       | `lohra models`, `lohra auth status` e um chat real por provider suportado |
+| Estado/SQLite        | inspecionar `state.db`/arquivos sob o profile após uso real               |
+| Workflows            | `lohra workflow …` + eventos/progresso durável comparados                 |
+| Server/gateway       | subir os dois servers e comparar respostas HTTP/SSE/WS reais              |
+| Tools                | turno com tool real (fs/terminal/web) e comparação do resultado           |
 
 ## Fonte da regra
 
