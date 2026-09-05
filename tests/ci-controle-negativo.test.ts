@@ -264,7 +264,7 @@ function repoAssertionRed(): { dir: string; base: string; head: string; slug: st
   writeFileSync(
     join(dir, "tests", "soma.test.ts"),
     [
-      'const { somar } = require("../src/soma.cjs");',
+      'const { somar } = require("./src/soma.cjs");',
       "module.exports.run = function () {",
       "  const resultado = somar(1, 2);",
       '  if (resultado !== 3) { throw new Error("esperava 3, obteve " + resultado); }',
@@ -307,7 +307,7 @@ function repoStructuralRed(ultimoCommitEhTestRed: boolean): {
   writeFileSync(
     join(dir, "tests", "estrutural.test.ts"),
     [
-      'const { somar } = require("../src/estrutural.cjs");',
+      'const { somar } = require("./src/estrutural.cjs");',
       "module.exports.run = function () {",
       '  if (somar(1, 2) !== 3) { throw new Error("nunca chega aqui"); }',
       "};",
@@ -321,7 +321,7 @@ function repoStructuralRed(ultimoCommitEhTestRed: boolean): {
     writeFileSync(
       join(dir, "tests", "estrutural.test.ts"),
       [
-        'const { somar } = require("../src/estrutural.cjs");',
+        'const { somar } = require("./src/estrutural.cjs");',
         "module.exports.run = function () {",
         "  // comentário adicionado depois do vermelho — não é mais o último",
         "  // commit a tocar este arquivo",
