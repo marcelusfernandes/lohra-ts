@@ -10,3 +10,4 @@ coverage/
 .oracle-venv/
 .lavish/
 lohra/
+.claude/settings.local.json

@@ -29,6 +29,10 @@ npm run lint
 npm run format:check
 ```
 
+Em sessões de Claude Code, `.claude/settings.json` formata e aplica `eslint --fix` em cada
+arquivo editado (hook `PostToolUse`) e libera sem prompt os comandos read-only acima; o gate
+continua sendo `npm run lint` + `npm run format:check`.
+
 ## CLI
 
 Os comandos top-level públicos, na ordem exibida pelo help, são:
