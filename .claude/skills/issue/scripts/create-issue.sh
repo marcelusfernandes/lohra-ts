@@ -23,12 +23,13 @@ done
 
 # 1. padrão de seções — presença E ordem (fail-closed: falta uma ou está fora
 #    de ordem, não cria). Proof e Files (issue #44) são lidos por máquina.
-PREV=0
+PREV=0; ANTERIOR="(início)"
 for s in "## User Story" "## Contexto" "## Cenário atual" "## Problema" "## Consequências do problema" "## O que é a solução" "## Resultado esperado com a solução" "## Acceptance Criteria" "## Proof" "## Files" "## Fora de escopo" "## Referências"; do
-  LINE=$(grep -n "^$s" "$BODY" | head -1 | cut -d: -f1)
+  # `##` (script) ou `###` (formulário issue.yml renderiza labels como h3)
+  LINE=$(grep -n "^##\{1,2\} ${s#\#\# }" "$BODY" | head -1 | cut -d: -f1)
   [ -n "$LINE" ] || { echo "create-issue: seção ausente no corpo: $s" >&2; exit 2; }
-  [ "$LINE" -gt "$PREV" ] || { echo "create-issue: seção fora de ordem: $s (linha $LINE, esperada depois da linha $PREV)" >&2; exit 2; }
-  PREV=$LINE
+  [ "$LINE" -gt "$PREV" ] || { echo "create-issue: seção fora de ordem: '$s' (linha $LINE) precisa vir depois de '$ANTERIOR' (linha $PREV)" >&2; exit 2; }
+  PREV=$LINE; ANTERIOR=$s
 done
 
 # 2. complexity:* derivada do header — única fonte

@@ -35,9 +35,11 @@ Núcleo headless orientado a eventos → **TUI** (Ink) → **GUI Electron**
 - Sem segredos no repo.
 - `docs/reference/` é documentação histórica do Python — não editar; não é
   normativa.
-- Gates: `npm run typecheck`, `lint`, `format:check`, `test`; o CI
-  (`.github/workflows/ci.yml`) roda os mesmos em Node 20/22 e verifica que
-  todo SHA aprovado em `docs/closeout.md` é ancestral do HEAD.
+- Gates (lista canônica; os outros documentos citam esta): `npm run build` →
+  `typecheck` → `lint` → `format:check` → `test`, e `npm run prova -- <slug>`
+  na branch de uma issue. O CI (`.github/workflows/ci.yml`) roda os mesmos em
+  Node 20/22, verifica que todo SHA aprovado em `docs/closeout.md` é ancestral
+  do HEAD e, em PR, roda `escopo`, `contratos` e `controle-negativo`.
 - Em sessões de Claude Code, `.claude/settings.json` formata e aplica
   `eslint --fix` a cada arquivo editado.
 - Fluxo de git (issue-first, branch por issue, PR para `main`, sem

@@ -2,16 +2,18 @@
 
 Decisão em `docs/adr/0004-trabalho-autonomo.md` (itens 4 e 9). Todos os hooks
 parseiam o stdin com **node** (pré-requisito do projeto) — sem `jq`; `protege-*`
-são **fail-closed** se node faltar. Portados do Apollo (`tacit-wl/apollo`). O
+são **fail-closed** se node faltar (o `stop-gate.sh` é **fail-open**: avisa e
+segue, porque o agente não tem como instalar node encerrando ou não o turno). Portados do Apollo (`tacit-wl/apollo`). O
 repositório é público desde 2026-09-05, então a camada 3 é um ruleset real.
 
-| camada | peça                                   | onde vale                         | o que faz                                                                                                                                              |
-| ------ | -------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1      | `protege-main.sh` (PreToolUse Bash)    | sessões Claude Code               | nega force-push (sem válvula), push em `main`, apagar `main`, `gh pr merge --admin` (sem válvula), `gh pr merge` sem checks verdes + `review:approved` |
-| 1      | `protege-escrita.sh` (PreToolUse Edit) | sessões Claude Code               | nega escrita em `docs/reference/**` e `lohra/**`; resolve symlink que escapa                                                                           |
-| 2      | `git-pre-push` (hook git nativo)       | qualquer `git push` desta máquina | recusa push em `main` e push não fast-forward; instalado por `instalar-git-hooks.sh` via `postinstall`                                                 |
-| 3      | ruleset da `main` (GitHub)             | servidor                          | PR obrigatória, checks required, só merge commit, sem force-push, sem delete — `scripts/github/ruleset.sh` (aplicado em 2026-09-05; gate humano)       |
-| 4      | `guarda-main.yml` (Action)             | servidor, pós-push                | commit em `main` sem PR → issue `human` + job falha                                                                                                    |
+| camada | peça                                   | onde vale                         | o que faz                                                                                                                                               |
+| ------ | -------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1      | `protege-main.sh` (PreToolUse Bash)    | sessões Claude Code               | nega force-push (sem válvula), push em `main`, apagar `main`, `gh pr merge --admin` (sem válvula), `gh pr merge` sem checks verdes + `review:approved`  |
+| 1      | `protege-escrita.sh` (PreToolUse Edit) | sessões Claude Code               | nega escrita em `docs/reference/**` e `lohra/**`; resolve symlink que escapa                                                                            |
+| 1      | `stop-gate.sh` (Stop)                  | sessões Claude Code               | tsc + `npm run prova -- <slug>` da branch; exit 2 até a prova ficar verde; **fail-open** sem node (avisa e segue); bancada em `tests/stop-gate.test.ts` |
+| 2      | `git-pre-push` (hook git nativo)       | qualquer `git push` desta máquina | recusa push em `main` e push não fast-forward; instalado por `instalar-git-hooks.sh` via `postinstall`                                                  |
+| 3      | ruleset da `main` (GitHub)             | servidor                          | PR obrigatória, checks required, só merge commit, sem force-push, sem delete — `scripts/github/ruleset.sh` (aplicado em 2026-09-05; gate humano)        |
+| 4      | `guarda-main.yml` (Action)             | servidor, pós-push                | commit em `main` sem PR → issue `human` + job falha                                                                                                     |
 
 Outros hooks: `format-file.sh` (PostToolUse Edit|Write: prettier + eslint --fix,
 nunca bloqueia) e `stop-gate.sh` (Stop, abaixo).
@@ -36,7 +38,9 @@ habilita as seams `LOHRA_STOP_BRANCH`, `LOHRA_STOP_LAST_COMMIT_MSG`,
 `LOHRA_STOP_TSC_CMD`, `LOHRA_STOP_PROVA_CMD`; sem ele nenhuma é lida.
 **Reentrância**: o filho da prova recebe `LOHRA_STOP_GATE_ACTIVE=1` e o hook sai
 0 ao encontrá-la (fora da bancada) — uma prova que exercite hooks não recursa.
-**Hermeticidade**: o filho nunca herda outra `LOHRA_STOP_*`.
+**Hermeticidade**: o filho nunca herda outra `LOHRA_STOP_*` nem `LOHRA_BENCH`.
+**Limite declarado**: o hook não lê `stop_hook_active` — bloqueia toda vez que a
+prova está vermelha; o teto de bloqueios por turno é a issue #61.
 
 ## Limite do parser (declarado)
 
