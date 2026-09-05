@@ -60,9 +60,13 @@ Exemplos: `feat/workflow-store`, `fix/stub-driver-port`, `docs/adr-0004`.
 1. `git checkout main && git pull`
 2. `gh issue develop <n> --base main --name <type>/<slug> --checkout`
 3. Implementar e commitar na branch (TDD; gates locais verdes).
-4. **Aguardar a pessoa confirmar** que está bom.
-5. Só então: `git push -u origin <type>/<slug>` e abrir a PR com a skill `pr`.
-6. Parar. A pessoa revisa e decide o merge.
+4. **Dogfooding real, sempre que possível**: exercitar o runtime de verdade
+   (`lohra chat --json` via Codex e/ou OpenRouter com uma tarefa que use
+   tool) e registrar exit code, `error` e `tool_calls`. Testes verdes são
+   necessários, não suficientes — fatos de execução são o critério.
+5. **Aguardar a pessoa confirmar** que está bom.
+6. Só então: `git push -u origin <type>/<slug>` e abrir a PR com a skill `pr`.
+7. Parar. A pessoa revisa e decide o merge.
 
 ## Commit
 
