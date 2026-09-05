@@ -55,8 +55,9 @@ origin/main` only before the first push; after the branch is published,
 4. **The orchestrator merges, mechanically conditioned.** A PR is merged when
    every required CI check is green on the PR head **and** the label
    `review:approved` is present. The reviewer is read-only and never touches
-   labels: it returns a JSON verdict as a PR comment, and the orchestrator
-   applies `review:approved` only on an `approved` verdict (or
+   labels: it returns a JSON verdict as its final answer; the orchestrator
+   posts that verdict as a PR comment and applies `review:approved` only on
+   an `approved` verdict (or
    `state:qa-failed` on `rejected`). The label is the machine-checkable trace
    of the verdict; the verdict itself is the comment. Nothing else is
    required — not a

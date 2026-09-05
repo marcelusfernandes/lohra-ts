@@ -24,7 +24,9 @@ BRANCH=$(git rev-parse --abbrev-ref HEAD)
 # primeira issue: título, labels, milestone
 META=$(gh issue view "$FIRST" --repo "$REPO" --json title,labels,milestone)
 ITITLE=$(printf '%s' "$META" | jq -r .title)
-LABELS=$(printf '%s' "$META" | jq -r '.labels | map(.name) | join(",")')
+# labels de tipo/complexidade sim; estado (state:*), estrutura (epic), gate (human) e
+# veredito (review:*) são da issue, não da PR (follow-up das PRs #30/#37, issue #35)
+LABELS=$(printf '%s' "$META" | jq -r '.labels | map(.name) | map(select(test("^(state:|review:)") | not)) | map(select(. != "epic" and . != "human")) | join(",")')
 MILESTONE=$(printf '%s' "$META" | jq -r '.milestone.title // empty')
 [ -n "$TITLE" ] || TITLE=$ITITLE
 

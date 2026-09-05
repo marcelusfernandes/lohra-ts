@@ -11,3 +11,4 @@ coverage/
 .lavish/
 lohra/
 .claude/settings.local.json
+.claude/worktrees/

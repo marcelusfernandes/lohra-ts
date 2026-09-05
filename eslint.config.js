@@ -12,6 +12,7 @@ export default tseslint.config(
       ".parity-evidence/",
       ".probe-evidence/",
       "lohra/",
+      ".claude/worktrees/",
     ],
   },
   js.configs.recommended,

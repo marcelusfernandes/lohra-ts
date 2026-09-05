@@ -43,6 +43,11 @@ Núcleo headless orientado a eventos → **TUI** (Ink) → **GUI Electron**
 - Fluxo de git (issue-first, branch por issue, PR para `main`, sem
   force-push): `.claude/rules/git-workflow.md`. Quem mergeia e quando:
   `.claude/rules/orquestracao.md` e `docs/adr/0004-trabalho-autonomo.md`.
+- Agentes de projeto (`.claude/agents/`): `implementador` (sonnet, worktree,
+  TDD → PR, nunca mergeia), `revisor` (opus, só leitura, JSON; o
+  orquestrador aplica a label), `qa` (suíte inteira + mutação em merge de
+  risco; só reporta), `documentador` (docs pós-merge). Skill
+  `worktree-segura` para quem escreve em worktree.
 
 ## Invariantes do runtime
 
