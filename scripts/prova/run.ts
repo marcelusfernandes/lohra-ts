@@ -7,11 +7,20 @@
 // existir); `check` (default `false`) também roda `npm run typecheck`.
 //
 // Escreve `.prova/<slug>/resumo.json` (`{ok, total, falhas}`) e
-// `.prova/<slug>/vitest.json` — ou, com `LOHRA_PROVA_OUT`, sob esse
-// diretório em vez do derivado do slug (evita corrida entre execuções
-// concorrentes do mesmo slug).
+// `.prova/<slug>/vitest.json` — ou, com `LOHRA_PROVA_OUT`, sob
+// `<LOHRA_PROVA_OUT>/<slug>/` em vez de `.prova/<slug>/` (evita corrida
+// entre execuções concorrentes do MESMO slug; o hook Stop, #46, ignora essa
+// variável e sempre lê `.prova/<slug>/resumo.json` — ela é para rodadas
+// paralelas fora do caminho que o hook observa, não para redirecioná-lo).
+//
+// Antes de rodar o vitest, `vitest.json`/`resumo.json` de uma execução
+// anterior do MESMO slug são apagados: sem isso, um vitest que trava antes
+// de escrever relatório (config quebrada, OOM, sinal) deixaria o relatório
+// velho no lugar, e `existsSync` sozinho não distingue "relatório desta
+// execução" de "relatório de uma execução anterior" — falha silenciosa
+// (CLAUDE.md, invariante 2).
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import process from "node:process";
@@ -81,11 +90,21 @@ async function main(): Promise<void> {
     falhaFechada(`prova: arquivo declarado não existe: ${ausentes.join(", ")}`);
   }
 
+  const provaOutEnv = process.env["LOHRA_PROVA_OUT"];
   const outDir =
-    process.env["LOHRA_PROVA_OUT"] !== undefined && process.env["LOHRA_PROVA_OUT"] !== ""
-      ? resolve(root, process.env["LOHRA_PROVA_OUT"])
+    provaOutEnv !== undefined && provaOutEnv !== ""
+      ? resolve(root, provaOutEnv, slug)
       : resolve(root, ".prova", slug);
   mkdirSync(outDir, { recursive: true });
+
+  const vitestJsonPath = join(outDir, "vitest.json");
+  const resumoJsonPath = join(outDir, "resumo.json");
+  // Apaga o que uma execução anterior do MESMO slug deixou. Sem isso, um
+  // vitest que morre antes de escrever relatório (config quebrada, sinal)
+  // deixaria `existsSync(vitestJsonPath)` enganosamente `true` — o
+  // relatório de uma corrida passada, não desta.
+  rmSync(vitestJsonPath, { force: true });
+  rmSync(resumoJsonPath, { force: true });
 
   const falhasExtras: Falha[] = [];
 
@@ -100,7 +119,6 @@ async function main(): Promise<void> {
     }
   }
 
-  const vitestJsonPath = join(outDir, "vitest.json");
   const vitestEntry = resolverVitestEntry();
   const vitestResult = spawnSync(
     process.execPath,
@@ -108,25 +126,43 @@ async function main(): Promise<void> {
     { cwd: root, stdio: "inherit" },
   );
 
+  const causaProcesso =
+    vitestResult.error !== undefined
+      ? `: ${vitestResult.error.message}`
+      : vitestResult.signal !== null
+        ? ` (encerrado pelo sinal ${vitestResult.signal})`
+        : ` (exit code ${String(vitestResult.status)})`;
+
   if (!existsSync(vitestJsonPath)) {
-    const causa =
-      vitestResult.error !== undefined
-        ? `: ${vitestResult.error.message}`
-        : vitestResult.signal !== null
-          ? ` (encerrado pelo sinal ${vitestResult.signal})`
-          : "";
     falhaFechada(
-      `prova: o vitest não produziu relatório em ${relative(root, vitestJsonPath)}${causa}`,
+      `prova: o vitest não produziu relatório em ${relative(root, vitestJsonPath)}${causaProcesso}`,
     );
   }
 
   const bruto: unknown = JSON.parse(readFileSync(vitestJsonPath, "utf8"));
   const resultado = normalizarRelatorioVitest(root, bruto);
   const resumoBase = montarResumo(declaracao.unit, resultado);
-  const resumo: Resumo =
+  let resumo: Resumo =
     falhasExtras.length === 0
       ? resumoBase
       : { ok: false, total: resumoBase.total, falhas: [...falhasExtras, ...resumoBase.falhas] };
+
+  // O vitest saiu com exit != 0 (ou por sinal) mas ainda assim escreveu UM
+  // relatório novo (existsSync acima já garante que não é o antigo). Se
+  // esse relatório, lido honestamente, disser "ok" mesmo assim, o processo
+  // sabe de algo que o relatório não capturou (ex.: crash logo após
+  // escrever um relatório parcial) — isso nunca pode virar `ok:true`
+  // silenciosamente (CLAUDE.md, invariante 2). Um teste vermelho de verdade
+  // já deixa `resumo.ok` `false` por conta própria, então esta checagem não
+  // duplica nada nesse caso comum.
+  const processoFalhou = vitestResult.status !== 0;
+  if (processoFalhou && resumo.ok) {
+    resumo = {
+      ok: false,
+      total: resumo.total,
+      falhas: [...resumo.falhas, { nome: "vitest run", motivo: `processo falhou${causaProcesso}` }],
+    };
+  }
 
   writeFileSync(join(outDir, "resumo.json"), `${JSON.stringify(resumo, null, 2)}\n`);
   process.stdout.write(`${JSON.stringify(resumo, null, 2)}\n`);
