@@ -1,6 +1,6 @@
 ---
 name: pr
-description: Abre a pull request de uma branch do lohra-ts contra a `main`, já ligada à issue — `Closes #N` em texto puro, Acceptance Criteria copiados da issue como checklist, labels e milestone herdados, e verificação pós-criação via `gh pr view --json`. Use quando o usuário pedir "abre a PR", "cria PR", "sobe isso pra review", ou depois de confirmar que a implementação de uma issue está pronta. NÃO use para mergear, nem antes de o usuário confirmar o push (regra em .claude/rules/git-workflow.md).
+description: Abre a pull request de uma branch do lohra-ts contra a `main`, já ligada à issue — `Closes #N` em texto puro, Acceptance Criteria copiados da issue como checklist, labels e milestone herdados (sem `state:*`/`epic`), e verificação pós-criação via `gh pr view --json`. Use quando os gates locais e o dogfooding estiverem feitos e o usuário pedir "abre a PR", "cria PR", "sobe isso pra review". NÃO use para mergear: quem implementa nunca mergeia; o orquestrador mergeia com CI verde + `review:approved` (ADR 0004).
 argument-hint: '--issue N [--title "…"] [--dry-run]'
 allowed-tools: Bash, Read, Grep
 user-invocable: true
