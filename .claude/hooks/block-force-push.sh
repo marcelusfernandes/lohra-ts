@@ -29,8 +29,10 @@ BFP_PAYLOAD="$payload" node -e '
   const cmd = (j.tool_input && j.tool_input.command) || "";
 
   // "git ... push" em POSIÇÃO DE COMANDO (início de linha ou após ; && || | \n "("),
-  // opcionalmente atrás de VAR=x / sudo / env. Evita bloquear a frase como dado
-  // (ex.: echo "git push --force"). Tolera "git -C dir push" e "git --no-pager push".
+  // opcionalmente atrás de VAR=x / sudo / env. A frase como dado sem separador
+  // antes (echo "git push --force") passa; com separador dentro de uma string
+  // ("&& git push --force") é negada — falso positivo na direção segura.
+  // Tolera "git -C dir push" e "git --no-pager push".
   const m = cmd.match(
     /(?:^|[;&|\n(])\s*((?:\w+=\S*\s+|sudo\s+|env\s+)*git\s+(?:-C\s+\S+\s+|--\S+\s+)*push\b)/
   );

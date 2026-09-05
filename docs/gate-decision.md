@@ -1,5 +1,10 @@
 # Gate decision: Lohra TypeScript mainline
 
+> **HISTÓRICO** — registro válido de 2026-08-29 a 2026-09-04. A premissa de
+> oracle/paridade descrita abaixo foi superada pela decisão de desenvolvimento
+> independente (ver `CLAUDE.md` e `docs/adr/0003-native-wire-format.md`). A
+> escolha de mainline TypeScript permanece; ver `docs/gate-decision-t22.md`.
+
 - **Status:** accepted
 - **Date:** 2026-08-29
 - **Decision:** `lohra-ts` becomes the mainline for the next Lohra runtime chapter.

@@ -87,7 +87,7 @@ describe(".claude/settings.json", () => {
   it("only allows `npm run <script>` for scripts that exist in package.json", () => {
     const scriptNames = Object.keys(packageJson.scripts);
     for (const rule of allow) {
-      const match = /^Bash\(npm run ([^ :)]+)/u.exec(rule);
+      const match = /^Bash\(npm run ([^ )]+)\)$/u.exec(rule);
       if (match === null) continue;
       expect(scriptNames, `allowlist references missing script: ${rule}`).toContain(match[1]);
     }

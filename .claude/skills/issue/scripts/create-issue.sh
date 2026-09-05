@@ -32,7 +32,7 @@ SIZE=$(sed -n 's/^> \*\*Tamanho:\*\* *\([SML]\).*/\1/p' "$BODY" | head -1)
 LABELS="complexity:$SIZE${LABELS:+,$LABELS}"
 
 set -- gh issue create --repo "$REPO" --title "$TITLE" --body-file "$BODY" --milestone "$MILESTONE"
-for l in $(printf '%s' "$LABELS" | tr ',' ' '); do set -- "$@" --label "$l"; done
+OLDIFS=$IFS; IFS=','; for l in $LABELS; do [ -n "$l" ] && set -- "$@" --label "$l"; done; IFS=$OLDIFS
 
 if [ "$DRY" -eq 1 ]; then
   printf 'dry-run: %s\n' "$*"
@@ -40,7 +40,8 @@ if [ "$DRY" -eq 1 ]; then
   exit 0
 fi
 
-URL=$("$@" | tail -1)
+OUT=$("$@")
+URL=$(printf '%s\n' "$OUT" | tail -1)
 NUM=${URL##*/}
 if [ -n "$PARENT" ]; then
   ID=$(gh api "repos/$REPO/issues/$NUM" --jq .id)

@@ -47,13 +47,14 @@ BODY=$(mktemp)
 
 set -- gh pr create --repo "$REPO" --base main --head "$BRANCH" --title "$TITLE" --body-file "$BODY"
 [ -n "$MILESTONE" ] && set -- "$@" --milestone "$MILESTONE"
-for l in $(printf '%s' "$LABELS" | tr ',' ' '); do set -- "$@" --label "$l"; done
+OLDIFS=$IFS; IFS=','; for l in $LABELS; do [ -n "$l" ] && set -- "$@" --label "$l"; done; IFS=$OLDIFS
 
 if [ "$DRY" -eq 1 ]; then
   printf 'dry-run: %s\n' "$*"; echo "dry-run: body ↓"; cat "$BODY"; rm -f "$BODY"; exit 0
 fi
 
-URL=$("$@" | tail -1); rm -f "$BODY"
+OUT=$("$@"); rm -f "$BODY"
+URL=$(printf '%s\n' "$OUT" | tail -1)
 NUM=${URL##*/}
 CHECK=$(gh pr view "$NUM" --repo "$REPO" --json closingIssuesReferences,labels,milestone)
 for n in $ISSUES; do
