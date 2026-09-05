@@ -47,7 +47,7 @@ habilita as seams `LOHRA_STOP_BRANCH`, `LOHRA_STOP_LAST_COMMIT_MSG`,
 Cada hook tem bancada em vitest que o invoca em subprocesso com payload
 sintético e afirma exit code e stderr: `tests/protege-main.test.ts`,
 `tests/protege-escrita.test.ts`, `tests/stop-gate.test.ts` — declaradas em
-`prova/hooks-bancada.ts` (`npm run prova -- hooks-bancada`). `LOHRA_BENCH=1` é
+`prova/bancada-hooks.ts` (`npm run prova -- bancada-hooks`). `LOHRA_BENCH=1` é
 o único portão das seams (`LOHRA_PM_*` no protege-main, `LOHRA_STOP_*` no
 stop-gate); sem ele os hooks consultam `git`/`gh` de verdade. O
 `protege-escrita` não tem seam: a bancada monta um repo temporário com
