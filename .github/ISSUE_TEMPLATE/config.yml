@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Padrão de issue (skill `issue`)
+    url: https://github.com/marcelusfernandes/lohra-ts/blob/main/.claude/skills/issue/references/template.md
+    about: Em sessões de Claude Code, prefira a skill `issue`, que já cria com milestone, labels e vínculo de sub-issue.

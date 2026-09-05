@@ -1,0 +1,33 @@
+name: label-complexity
+
+# Aplica complexity:S|M|L a partir do campo "Tamanho" do corpo da issue.
+# Cobre issues do form (### Tamanho / S) e do header da skill (> **Tamanho:** S — …).
+# Header e label são a mesma informação; este job mantém os dois coerentes.
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.issue.body || ''
+            const m = body.match(/Tamanho[^A-Za-z]{0,12}\b([SML])\b/)
+            if (!m) { core.info('sem campo Tamanho; nada a fazer'); return }
+            const want = `complexity:${m[1]}`
+            const issue_number = context.payload.issue.number
+            const current = context.payload.issue.labels.map((l) => l.name)
+            for (const l of current.filter((n) => n.startsWith('complexity:') && n !== want)) {
+              await github.rest.issues.removeLabel({ ...context.repo, issue_number, name: l })
+            }
+            if (!current.includes(want)) {
+              await github.rest.issues.addLabels({ ...context.repo, issue_number, labels: [want] })
+              core.info(`aplicada ${want}`)
+            }
