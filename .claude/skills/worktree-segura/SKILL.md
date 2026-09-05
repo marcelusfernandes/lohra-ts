@@ -41,9 +41,8 @@ turbulência vem de vários escritores numa árvore só; isolar primeiro resolve
    aceita base vermelha por erro estrutural se existir um `test(red):` no range que toca
    os testes do diff e adiciona `throw new Error(` em arquivo não-teste.
 8. **Confira com o comando exato do gate**, não com uma versão parcial: os cinco gates
-   do CLAUDE.md (`npm run build` → `typecheck` → `lint` → `format:check` → `test`) e
-   `npm run prova -- <slug>`. Um `tsc -p` parcial ou um `vitest` num arquivo só dá verde
-   falso.
+   listados em `CLAUDE.md` ("Gates") e `npm run prova -- <slug>`. Um `tsc -p` parcial
+   ou um `vitest` num arquivo só dá verde falso.
 9. **Desconfie de erro velho.** O Stop pode reportar um estado que a última edição já
    corrigiu. Rode de novo antes de "consertar" o que já passou.
 
