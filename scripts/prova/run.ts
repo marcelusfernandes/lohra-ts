@@ -37,7 +37,8 @@ function falhaFechada(mensagem: string): never {
   process.exit(1);
 }
 
-function validarDeclaracao(valor: unknown, declaracaoPath: string): Declaracao {
+/** Exportado para teste unitário direto (sem subprocesso). */
+export function validarDeclaracao(valor: unknown, declaracaoPath: string): Declaracao {
   if (typeof valor !== "object" || valor === null) {
     falhaFechada(`prova: ${declaracaoPath} não faz "export default" de um objeto`);
   }
@@ -169,6 +170,18 @@ async function main(): Promise<void> {
   process.exit(resumo.ok ? 0 : 1);
 }
 
-main().catch((error: unknown) => {
-  falhaFechada(`prova: erro inesperado: ${String(error)}`);
-});
+// Só roda `main()` quando este arquivo é o entry point (`tsx
+// scripts/prova/run.ts <slug>`) — nunca quando um teste importa
+// `validarDeclaracao` diretamente, o que executaria o harness de verdade
+// com o `process.argv` do test runner.
+function ehEntryPoint(): boolean {
+  const invocado = process.argv[1];
+  if (invocado === undefined) return false;
+  return import.meta.url === pathToFileURL(resolve(invocado)).href;
+}
+
+if (ehEntryPoint()) {
+  main().catch((error: unknown) => {
+    falhaFechada(`prova: erro inesperado: ${String(error)}`);
+  });
+}
