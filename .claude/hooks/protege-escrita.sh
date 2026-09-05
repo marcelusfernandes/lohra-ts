@@ -96,9 +96,12 @@ PE_PAYLOAD="$payload" node -e '
   const root = rootFor(path.dirname(absReal));
   if (root === null) {
     // resolvido fora de qualquer repo: permitido — salvo se o caminho TEXTUAL está
-    // dentro de um repo (symlink que foge para fora), que é negado por segurança
-    const rootTextual = rootFor(fs.existsSync(path.dirname(abs)) ? path.dirname(abs) : null);
-    if (rootTextual !== null) negar("o alvo (" + filePath + ") parece estar dentro do worktree, mas um ancestral é symlink que resolve para fora (" + absReal + "); nego por segurança.");
+    // dentro da raiz do cwd (symlink que foge para fora), negado por segurança.
+    // A comparação é textual de propósito: realpath resolveria o symlink.
+    const rootDoCwd = rootFor(cwdReal);
+    const dentro = (r) => r !== null && (abs === r || abs.startsWith(r + path.sep));
+    if (dentro(rootDoCwd) || dentro(projectDir))
+      negar("o alvo (" + filePath + ") parece estar dentro do worktree, mas um ancestral é symlink que resolve para fora (" + absReal + "); nego por segurança.");
     process.exit(0); // genuinamente fora do worktree (scratchpad): sempre permitido
   }
   const rel = path.relative(root, absReal).split(path.sep).join("/");

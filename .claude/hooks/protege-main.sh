@@ -13,8 +13,11 @@
 #      (docs/**, README.md, CLAUDE.md, AGENTS.md — ADR 0004 item 7), a label é
 #      dispensada (avisado no stderr); os checks verdes continuam obrigatórios.
 #
-# `git push --all`/`--mirror` contam como push em main (empurram toda branch).
-# Prefixos com flag: `sudo -u X`, `env -i`, `env VAR=x` são atravessados.
+# Os modos `--all`/`--mirror` do push contam como push em main (empurram toda branch).
+# Prefixos com flag: `sudo -u X [--]`, `env -i`, `env VAR=x [--]`, `nice -n N` são
+# atravessados. O waiver de docs exige `changedFiles == files.length`: o `gh`
+# devolve no máximo 100 arquivos em `files`, e uma lista truncada NÃO prova que
+# tudo é docs — nega, pedindo a label (fail-closed; revisão da PR #66).
 #
 # BANCADA (tests/protege-main.test.ts): `LOHRA_BENCH=1` é o único portão que
 # habilita as seams LOHRA_PM_BRANCH (branch atual), LOHRA_PM_CHECKS_JSON (saída
@@ -94,7 +97,7 @@ PM_PAYLOAD="$payload" node -e '
   // Segmentos em posição de comando (ver LIMITE DECLARADO no cabeçalho).
   const PALAVRAS = /^(?:(?:if|elif|while|until|then|do|else|!)\s+)*/;
   // sudo: flags com argumento (-u/-g/-C/-D/-h/-p/-r/-T) e flags soltas; env: -i, -u X, VAR=x
-  const PREFIXOS = /^(?:\w+=\S*\s+|sudo(?:\s+(?:-[ugCDhprT]\s+\S+|-[A-Za-z]+|--\S+))*\s+|env(?:\s+(?:-i|-u\s+\S+|--\S+|\w+=\S*))*\s+|command\s+|builtin\s+|exec\s+|time\s+|nohup\s+|nice\s+|\\)*/;
+  const PREFIXOS = /^(?:\w+=\S*\s+|sudo(?:\s+(?:-[ugCDhprT]\s+\S+|-[A-Za-z]+|--\S*))*\s+|env(?:\s+(?:-i|-u\s+\S+|--\S*|\w+=\S*))*\s+|command\s+|builtin\s+|exec\s+|time\s+|nohup\s+|nice(?:\s+-n\s+\S+)?\s+|\\)*/;
   const segmentos = cmd
     .replace(/&&|\|\|/g, "\n")
     .split(/[;|&\n(){}`]/)
@@ -160,7 +163,7 @@ PM_PAYLOAD="$payload" node -e '
       const ruins = lista.filter((c) => !["SUCCESS", "SKIPPED", "NEUTRAL"].includes(String(c.state).toUpperCase()));
       if (ruins.length) negar("checks não verdes: " + ruins.map((c) => c.name + "=" + c.state).join(", ") + ".");
       const viewSeam = seam("VIEW_JSON");
-      const view = viewSeam !== undefined ? { ok: true, out: viewSeam, err: "" } : sh(["gh", "pr", "view", ...ref, ...repo, "--json", "labels,reviewDecision,files"]);
+      const view = viewSeam !== undefined ? { ok: true, out: viewSeam, err: "" } : sh(["gh", "pr", "view", ...ref, ...repo, "--json", "labels,reviewDecision,files,changedFiles"]);
       let pr = null; try { pr = JSON.parse(view.out || "null"); } catch {}
       if (!pr) negar("não consegui ler a PR (" + (view.err || "sem saída").trim().slice(0, 160) + ").");
       const temLabel = (pr.labels || []).some((l) => l.name === "review:approved");
@@ -168,6 +171,9 @@ PM_PAYLOAD="$payload" node -e '
         // waiver de classe docs (ADR 0004 item 7): só a label é dispensada; checks acima já foram exigidos
         const ehDocs = (f) => f === "README.md" || f === "CLAUDE.md" || f === "AGENTS.md" || f.startsWith("docs/");
         const arquivos = Array.isArray(pr.files) ? pr.files.map((f) => String(f && f.path || "")) : [];
+        const total = typeof pr.changedFiles === "number" ? pr.changedFiles : -1;
+        if (arquivos.length > 0 && total !== arquivos.length)
+          negar("a lista de arquivos da PR veio truncada (" + arquivos.length + " de " + total + "); não dá para provar que é classe docs — o waiver não se aplica, aplique review:approved.");
         if (arquivos.length > 0 && arquivos.every(ehDocs)) {
           process.stderr.write("protege-main: PR de classe docs (" + arquivos.length + " arquivo(s) em docs/**, README, CLAUDE.md, AGENTS.md): label review:approved dispensada; checks verdes conferidos.\n");
         } else {

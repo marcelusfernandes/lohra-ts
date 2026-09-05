@@ -56,11 +56,15 @@ stop-gate); sem ele os hooks consultam `git`/`gh` de verdade. O
 **Waiver de classe `docs`** (`protege-main`, item 6): se todos os arquivos da PR
 são `docs/**`, `README.md`, `CLAUDE.md` ou `AGENTS.md`, a label
 `review:approved` é dispensada (avisado no stderr); checks verdes continuam
-obrigatórios. `LOHRA_MERGE_LIVRE=1` deixa de ser necessário para PR de docs.
+obrigatórios. O `gh` devolve no máximo 100 arquivos: se `changedFiles` for
+maior que a lista, o waiver não se aplica (fail-closed). `LOHRA_MERGE_LIVRE=1`
+deixa de ser necessário para PR de docs.
 
 **Raiz do `protege-escrita`**: toplevel git mais interno, a partir do alvo, que
 contenha `.claude/settings.json` — worktree de agente é raiz própria; `lohra/`
-(repo aninhado sem settings) cai na raiz do projeto.
+(repo aninhado sem settings) cai na raiz do projeto. Alvo que resolve para fora
+de qualquer repo é permitido (scratchpad), salvo quando o caminho textual está
+dentro da raiz do cwd — symlink que foge — que é negado.
 
 **Teto do `stop-gate`**: três bloqueios consecutivos da prova (payload
 `stop_hook_active`) liberam o turno com aviso; contador em
