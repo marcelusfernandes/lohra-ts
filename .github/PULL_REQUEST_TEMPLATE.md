@@ -8,8 +8,21 @@ Closes #
 
 ## Test plan
 
-- [ ] `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test` verdes
+- [ ] `npm run build`, `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test` verdes
 - [ ] <execução real relevante — comando e resultado>
+
+## Proof
+
+<!-- Comando da issue (`npm run prova -- <slug>`) e o `.prova/<slug>/resumo.json` resultante;
+     ou "N/A — classe docs/process sem prova executável" e o que a substitui (pipe-test, dry-run). -->
+
+```json
+
+```
+
+## Files
+
+<!-- Globs declarados na issue; tudo que a PR toca precisa caber neles. -->
 
 ## Acceptance Criteria (copiados da issue)
 

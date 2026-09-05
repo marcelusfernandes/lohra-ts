@@ -28,9 +28,11 @@ labels e — se houver épico pai — vínculo **nativo** de sub-issue (a API
    vem de review independente — não atribuir ao criar.
 5. **Milestone**: o do épico pai, se houver; senão o que o usuário indicou;
    senão perguntar. `gh api repos/{owner}/{repo}/milestones` lista os abertos.
-6. **Corpo** em `references/template.md`, todas as seções na ordem, nenhuma
-   pulada ("N/A" + uma frase quando não se aplica). Escrever num arquivo
-   temporário.
+6. **Corpo** em `references/template.md`, todas as doze seções na ordem, nenhuma
+   pulada ("N/A" + uma frase quando não se aplica). `Proof` é o comando que
+   prova (`npm run prova -- <slug>` + o que `prova/<slug>.ts` declara) e
+   `Files` são os globs que a PR pode tocar — os dois viram gate mecânico
+   (stop-gate, revisor, CI de escopo). Escrever num arquivo temporário.
 7. **Criar** com o script (ele valida as seções, deriva `complexity:*`, cria,
    liga ao pai e imprime a URL):
 
@@ -45,7 +47,8 @@ labels e — se houver épico pai — vínculo **nativo** de sub-issue (a API
 
 ## Regras
 
-- Padrão de seções é fixo; o script recusa corpo sem alguma delas.
+- Padrão de seções é fixo; o script recusa corpo sem alguma delas ou com
+  seção fora de ordem.
 - `Tamanho` no header e `complexity:*` são a mesma informação — nunca setar a
   label à mão.
 - Sub-issue é sempre nativa (`--parent`). "Parent / Sub-issues" no header é

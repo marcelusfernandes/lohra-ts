@@ -39,12 +39,24 @@ trap 'rm -f "$BODY"' EXIT
   for n in $REFS; do echo "Refs #$n"; done
   echo
   echo "## Test plan"; echo
-  echo '- [ ] `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test` verdes'
+  echo '- [ ] `npm run build`, `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test` verdes'
   echo "- [ ] dogfooding real (Codex e/ou OpenRouter): exit 0, error null, tool_calls"; echo
   for n in $ISSUES; do
-    AC=$(gh issue view "$n" --repo "$REPO" --json body -q .body | sed -n '/^## Acceptance Criteria/,/^## /p' | sed '1d;$d' | grep '^- \[' || true)
+    IBODY=$(gh issue view "$n" --repo "$REPO" --json body -q .body)
+    secao() { printf '%s\n' "$IBODY" | sed -n "/^## $1/,/^## /p" | sed '1d;$d' | sed '/^[[:space:]]*$/d'; }
+    AC=$(secao "Acceptance Criteria" | grep '^- \[' || true)
     [ -n "$AC" ] || { echo "open-pr: a issue #$n não tem bloco '## Acceptance Criteria' com itens" >&2; exit 2; }
     echo "## Acceptance Criteria (copiados da issue #$n)"; echo; printf '%s\n' "$AC"; echo
+    # Proof e Files (issue #44): copiados da issue; issue anterior ao padrão só avisa
+    PROOF=$(secao "Proof" || true); FILES=$(secao "Files" || true)
+    [ -n "$PROOF" ] || echo "open-pr: aviso — a issue #$n não tem '## Proof' (anterior ao padrão #44); preencha na PR" >&2
+    [ -n "$FILES" ] || echo "open-pr: aviso — a issue #$n não tem '## Files' (anterior ao padrão #44); preencha na PR" >&2
+    echo "## Proof (da issue #$n)"; echo
+    printf '%s\n' "${PROOF:-<!-- a issue não declara Proof; declare aqui o comando -->}"; echo
+    echo '<!-- cole `.prova/<slug>/resumo.json` abaixo, ou "N/A — classe docs/process sem prova executável" e o que a substitui -->'
+    echo '```json'; echo '```'; echo
+    echo "## Files (da issue #$n)"; echo
+    printf '%s\n' "${FILES:-<!-- a issue não declara Files; liste os globs tocados -->}"; echo
   done
 } > "$BODY"
 
