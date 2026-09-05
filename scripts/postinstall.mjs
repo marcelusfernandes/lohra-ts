@@ -23,5 +23,7 @@ const installer = join(process.cwd(), ".claude", "hooks", "instalar-git-hooks.sh
 if (existsSync(join(process.cwd(), ".git")) && existsSync(installer)) {
   const result = spawnSync("sh", [installer], { stdio: "inherit" });
   if (result.status !== 0)
-    console.error("postinstall: instalar-git-hooks.sh falhou (exit " + String(result.status) + ")");
+    process.stderr.write(
+      "postinstall: instalar-git-hooks.sh falhou (exit " + String(result.status) + ")" + "\n",
+    );
 }
