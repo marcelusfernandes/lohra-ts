@@ -7,5 +7,6 @@ export default {
     "tests/prova-resumo.test.ts",
     "tests/prova-vitest-relatorio.test.ts",
     "tests/prova-run.test.ts",
+    "tests/prova-run-validacao.test.ts",
   ],
 } satisfies Declaracao;
