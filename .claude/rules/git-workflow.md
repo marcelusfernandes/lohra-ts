@@ -31,7 +31,7 @@ leitura.
 ## Modelo de branch
 
 - `main` — trunk único. Atualizada **somente** por PR.
-- `<type>/<slug>` — toda mudança, criada a partir de `main`.
+- `<type>/<n>-<slug>` — toda mudança, criada a partir de `main`.
 
 Não existe `develop`. Se um dia existir, o fechamento automático de issues
 precisa do workflow `close-linked-issues` (o `Closes #N` nativo só dispara em
@@ -65,14 +65,16 @@ Sempre `<type>/<n>-<slug>`, com `<n>` = número da issue. Exemplos:
    (a issue recebe `state:in-progress`)
 3. Implementar e commitar na branch: teste vermelho primeiro (`test(red):`),
    depois verde, commit a cada verde. Gates locais verdes.
-4. **Dogfooding real, sempre que possível**: exercitar o runtime de verdade
-   (`lohra chat --json` via Codex e/ou OpenRouter com uma tarefa que use
-   tool) e registrar exit code, `error` e `tool_calls`. Testes verdes são
-   necessários, não suficientes — fatos de execução são o critério.
+4. **Dogfooding real**: obrigatório quando a branch toca `src/`, `package.json`
+   ou o lockfile — exercitar o runtime de verdade (`lohra chat --json` via
+   Codex e/ou OpenRouter com uma tarefa que use tool) e registrar exit code,
+   `error` e `tool_calls` no test plan. Quando não toca, o test plan declara
+   `N/A` com o motivo. Testes verdes são necessários, não suficientes.
 5. Push e PR pela skill `pr` (`Closes #N`, AC copiados, `state:in-review`).
    Quem implementa **para aqui** — nunca mergeia.
-6. O orquestrador lança o `revisor` (só leitura). Veredito em JSON na PR;
-   aprovado → label `review:approved`; reprovado → `state:qa-failed` e volta
+6. O orquestrador lança o `revisor` (só leitura, nunca aplica label). O
+   veredito vai em JSON como comentário na PR; o orquestrador aplica
+   `review:approved` se `approved`, ou `state:qa-failed` se `rejected` e volta
    ao passo 3 com as `reasons`.
 7. **Merge pelo orquestrador**, só quando as duas condições mecânicas valem:
    todos os checks obrigatórios verdes no HEAD da PR **e** `review:approved`.
@@ -112,7 +114,8 @@ fecha). Idioma: PT-BR, como o resto do repositório.
 - `severity:*` vem de review independente e **não** determina ordem de roadmap.
 - Estado: `state:ready → in-progress → in-review → done`; `state:qa-failed`
   volta ao implementador; `state:blocked` + `human` após duas reprovações.
-  `review:approved` só o revisor põe.
+  `review:approved` só o orquestrador põe, e só sobre um veredito `approved`
+  do revisor registrado na PR.
 
 ## Regras invioláveis
 
@@ -121,7 +124,9 @@ fecha). Idioma: PT-BR, como o resto do repositório.
 - Merge só pelo orquestrador, só com checks verdes **e** `review:approved`;
   nunca `gh pr merge --admin`; nunca squash.
 - Quem implementa nunca mergeia; quem revisa nunca edita.
-- Push só depois dos gates locais e do dogfooding.
+- Push só depois dos gates locais e do dogfooding (ou do `N/A` declarado).
+- Nunca `git reset --hard`, `git clean` nem `git checkout <arquivo>` sobre
+  trabalho não commitado — perdem o que não foi salvo. `git stash` é permitido.
 - Depois da segunda reprovação, ninguém insiste: `state:blocked` + `human`.
 - **Nunca force-push.** O hook `.claude/hooks/block-force-push.sh` nega na
   sessão; a proteção server-side da `main` é o backstop. Reescrever histórico

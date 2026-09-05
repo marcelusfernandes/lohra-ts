@@ -27,7 +27,7 @@ review. Its replacement is a merge conditioned on facts a machine can check.
 PR #30 was merged under that replacement before this ADR existed: CI green on
 the exact head, a read-only reviewer agent returned `rejected`, the
 implementer fixed every item, the reviewer returned `approved`, the
-orchestrator applied `review:approved` and merged. The reviewer caught a real
+orchestrator applied `review:approved` on the strength of that verdict and merged. The reviewer caught a real
 error (a document entering the repository asserting the premise the same PR
 revoked) and a fail-closed violation in a script. This ADR records the model
 that already worked.
@@ -52,8 +52,13 @@ origin/main` only before the first push; after the branch is published,
    conflicts are resolved with `git merge origin/main` on the branch. Never a
    force-push, on any branch.
 4. **The orchestrator merges, mechanically conditioned.** A PR is merged when
-   every required CI check is green on the PR head **and** the read-only
-   reviewer applied `review:approved`. Nothing else is required — not a
+   every required CI check is green on the PR head **and** the label
+   `review:approved` is present. The reviewer is read-only and never touches
+   labels: it returns a JSON verdict as a PR comment, and the orchestrator
+   applies `review:approved` only on an `approved` verdict (or
+   `state:qa-failed` on `rejected`). The label is the machine-checkable trace
+   of the verdict; the verdict itself is the comment. Nothing else is
+   required — not a
    human comment, not "the branch is up to date" (CI runs again on `main`
    after every merge and is the net). The merge is a **merge commit**, never a
    squash: `scripts/provenance/check-ancestry.ts` verifies that approved heads
@@ -66,10 +71,15 @@ origin/main` only before the first push; after the branch is published,
 6. **Parallelism is bounded by scope.** Up to four issues in flight whose
    `Files` globs do not intersect. Until #34 lands the `escopo` check, the
    orchestrator checks intersection by hand and keeps it at one or two.
-7. **PR classes.** `feature`/`fix`/`refactor`/`test`: CI + reviewer. `docs`:
-   CI only, no reviewer. `chore`/`ci` touching `.claude/`, `.github/`,
-   `package.json` or the lockfile: only the orchestrator opens them, CI +
-   reviewer.
+7. **PR classes, decided by the files touched.** `docs`: every file is under
+   `docs/**`, `README.md`, `CLAUDE.md`, `AGENTS.md` or is a `.md` under
+   `.claude/` — CI only, no reviewer. `process`: anything under
+   `.claude/hooks/`, `.claude/skills/**/scripts/`, `.github/`, `scripts/`,
+   `package.json` or the lockfile — only the orchestrator opens it, CI +
+   reviewer. Everything else (`src/`, `tests/`, …) is `feature`/`fix`/
+   `refactor`/`test`: CI + reviewer. A PR that mixes classes takes the
+   strictest one; PR #37, which introduces this ADR, touches `scripts/` and
+   a skill script and therefore had a reviewer.
 8. **Reconciliation before work.** At the start of a session the orchestrator
    re-reads GitHub — open PRs, `state:*` labels, linked branches — and never
    trusts its memory. An `in-progress` issue with no open PR and no recent
@@ -84,10 +94,12 @@ origin/main` only before the first push; after the branch is published,
 10. **Trunk is `main`.** No `develop`. If a second long-lived branch is ever
     introduced, the `Closes #N` auto-close no longer fires and a
     `close-linked-issues` workflow becomes necessary.
-11. **Dogfooding before push** stays a gate of the implementer: a real run of
-    the runtime (Codex and/or OpenRouter, a task that uses a tool) with exit
-    0, `error: null` and `tool_calls` recorded in the PR test plan (owner rule
-    of 2026-09-05, already in `git-workflow.md`).
+11. **Dogfooding before push** is a gate of the implementer whenever the
+    branch touches `src/`, `package.json` or the lockfile: a real run of the
+    runtime (Codex and/or OpenRouter, a task that uses a tool) with exit 0,
+    `error: null` and `tool_calls` recorded in the PR test plan. A branch
+    that touches none of those declares `N/A` with the reason (owner rule of
+    2026-09-05).
 
 ## Cost accepted
 
@@ -109,7 +121,14 @@ it.
 - **No `banco`, `operador`, `explorador`** — Supabase, deploy and legacy-app
   roles that do not exist here. `qa` gains mutation testing (#13).
 - **`git stash` is not denied**: the owner's global rules prescribe stashing
-  before destructive operations.
+  before destructive operations. `git reset --hard`, `git clean` and
+  `git checkout <file>` over uncommitted work remain forbidden, as in 0012.
+- **PR classes by globs are kept**, with this repository's paths (item 7).
+- **`.worktreeinclude` and "prove the secret arrived" are deferred to #35**:
+  this repository does not yet run implementers in worktrees; when it does,
+  the `.env` under `LOHRA_HOME` (not in the repo) is what dogfooding needs,
+  and the worktree checklist of #35 must prove it is reachable before the
+  first line.
 
 ## Evidence required to retain this decision
 

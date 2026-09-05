@@ -15,9 +15,11 @@ user-invocable: true
 2. A branch traça de volta a uma issue (`--issue N`, ou inferida do painel
    Development se a branch foi criada com `gh issue develop`).
 3. Gates locais verdes: `npm run typecheck`, `lint`, `format:check`, `test`.
-4. **Dogfooding real feito e positivo**, quando possível: uma execução de
-   verdade do runtime (Codex e/ou OpenRouter) com exit 0, `error: null` e
-   `tool_calls` quando a tarefa exige tool. Vai no Test plan da PR.
+4. **Dogfooding real feito e positivo** quando a branch toca `src/`,
+   `package.json` ou o lockfile: uma execução de verdade do runtime (Codex
+   e/ou OpenRouter) com exit 0, `error: null` e `tool_calls` quando a tarefa
+   exige tool. Vai no Test plan da PR; se não toca, o test plan diz `N/A` e
+   por quê.
 
 ## Passos
 
