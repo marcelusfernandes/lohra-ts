@@ -57,16 +57,21 @@ npm run prova -- <slug>
 
 roda **só** os arquivos declarados (não a suíte inteira) e escreve
 `.prova/<slug>/resumo.json` — `{ ok, total, falhas }`, onde `total` é o
-número de testes **executados** (`passed`/`failed`; testes `skip`/`todo` não
-contam e não viram falha — nunca rodaram) e cada `falhas[]` tem
-`{ nome, motivo }`. Um arquivo declarado que o vitest não reportou (fora do
-`include`, ou nunca alcançado) vira a falha `"<arquivo> did not run"` em vez
-de passar em silêncio; o mesmo vale se o processo do vitest sair com um
-código diferente de zero e, mesmo assim, o relatório resultante parecer
-"ok" — vira a falha `"vitest run"` em vez de `ok:true`. `.prova/<slug>/` é
-apagado antes de cada execução do mesmo slug (o relatório de uma corrida
-anterior nunca sobrevive para ser lido como se fosse desta) e é gerado de
-novo a cada execução; é ignorado por git, prettier e eslint.
+número de testes **executados** (`passed`/`failed`; testes `skip`/`todo`
+individuais não contam para `total` e não viram falha — nunca rodaram) e
+cada `falhas[]` tem `{ nome, motivo }`. Três formas de falha explícita, além
+de um teste reprovado: um arquivo declarado que o vitest não reportou (fora
+do `include`, ou nunca alcançado) vira `"<arquivo> did not run"`; um arquivo
+que rodou mas cujos testes são **todos** `skip`/`todo` (nenhum de fato
+executou) vira `"<arquivo> ran zero tests"` — skip **parcial**, com pelo
+menos um teste executado no arquivo, continua verde; e um processo do
+vitest que sai com código diferente de zero e, mesmo assim, produziria um
+relatório "ok" vira `"vitest run"` em vez de `ok:true`. Nenhuma dessas três
+passa em silêncio. `vitest.json` e `resumo.json` de uma execução anterior
+do mesmo slug são apagados antes de cada execução (não o diretório
+`.prova/<slug>/` inteiro) — o relatório de uma corrida anterior nunca
+sobrevive para ser lido como se fosse desta; ambos são gerados de novo a
+cada execução e `.prova/` é ignorado por git, prettier e eslint.
 `LOHRA_PROVA_OUT` redireciona a saída para `<LOHRA_PROVA_OUT>/<slug>/` em
 vez de `.prova/<slug>/` (evita corrida entre execuções concorrentes do
 mesmo slug) — o hook `Stop` (#46) ignora essa variável e sempre lê
