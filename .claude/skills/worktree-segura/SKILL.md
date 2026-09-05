@@ -37,10 +37,13 @@ turbulência vem de vários escritores numa árvore só; isolar primeiro resolve
 7. **Teste vermelho compila.** Um teste que importa símbolo inexistente é erro de
    compilação e trava o Stop hook (`tsc --noEmit`). Exporte um stub que lança
    (`throw new Error("not implemented")`) e faça o vermelho ser de runtime. Commit como
-   `test(red): …`.
-8. **Confira com o comando exato do gate**, não com uma versão parcial: `npm run typecheck`,
-   `npm run lint`, `npm run format:check`, `npm test` (e `npm run prova <slug>` quando #33
-   existir). Um `tsc -p` parcial ou um `vitest` num arquivo só dá verde falso.
+   `test(red): …` **com os testes e os stubs juntos**: o check `controle-negativo` só
+   aceita base vermelha por erro estrutural se existir um `test(red):` no range que toca
+   os testes do diff e adiciona `throw new Error(` em arquivo não-teste.
+8. **Confira com o comando exato do gate**, não com uma versão parcial: os cinco gates
+   do CLAUDE.md (`npm run build` → `typecheck` → `lint` → `format:check` → `test`) e
+   `npm run prova -- <slug>`. Um `tsc -p` parcial ou um `vitest` num arquivo só dá verde
+   falso.
 9. **Desconfie de erro velho.** O Stop pode reportar um estado que a última edição já
    corrigiu. Rode de novo antes de "consertar" o que já passou.
 

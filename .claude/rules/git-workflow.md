@@ -91,7 +91,8 @@ O laço completo, com quem age em cada passo: `orquestracao.md`.
 
 Tipos: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `ci`.
 Corpo explica o porquê. Rodapé com `Closes #N` (ou `Refs #N` quando não
-fecha). Idioma: PT-BR, como o resto do repositório.
+fecha); `(#N)` no fim do assunto vale como `Refs #N`. Idioma: PT-BR, como o
+resto do repositório.
 
 ## PR
 
@@ -100,7 +101,9 @@ fecha). Idioma: PT-BR, como o resto do repositório.
   Test plan, Acceptance Criteria copiados da issue.
 - **`Closes #N` em texto puro** — sem negrito nem itálico. O parser do GitHub
   não reconhece `Closes **#N**` e a issue fica aberta depois do merge.
-- Labels e milestone iguais aos da issue.
+- Labels de tipo (`bug`, `enhancement`, …) e `complexity:*` e milestone iguais
+  aos da issue; `state:*`, `epic`, `human` e `review:*` ficam na issue — a skill
+  `pr` filtra, e `review:approved` na PR é o rastro do veredito.
 - Verificar depois de criar:
   `gh pr view <n> --json closingIssuesReferences,labels,milestone`
   Se algum campo vier vazio, completar antes de pedir review.
