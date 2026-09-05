@@ -84,7 +84,6 @@ jobs:
     permissions:
       contents: read
       issues: read
-      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -131,8 +130,10 @@ jobs:
           cache: npm
       - run: npm ci
       # os testes do diff, aplicados sobre a base da PR, precisam reprovar
-      # (`npm run prova -- <slug>` na base). Só `vacuous-pass` falha; PR de
-      # classe docs/process é SKIP. head.sha, nunca github.sha (merge sintético).
+      # (`npm run prova -- <slug>` na base). Reprova em vacuous-pass, em
+      # structural-red sem test(red): válido, em feature sem prova/<slug>.ts e
+      # em base que não roda a prova; PR de classe docs/process é SKIP.
+      # head.sha, nunca github.sha (merge sintético). Detalhe: README "CI".
       - name: controle-negativo
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}

@@ -94,10 +94,21 @@ merge commit com todos verdes e `review:approved` (ADR 0004):
 | `controle-negativo`  | os testes do diff, aplicados sobre a base da PR, reprovam (`npm run prova -- <slug>` na base)                      | `npm run ci:controle-negativo -- --base <sha> --head <sha>`                              |
 
 Os três últimos rodam só em `pull_request` e escrevem um bloco no summary do
-job. Quando reprovam: `escopo` lista os arquivos fora dos globs — ou a issue
-declara o glob, ou o orquestrador escreve `authorised: \`glob\``na seção`## Files`da PR;`contratos`lista`regra: arquivo — motivo`;
-`controle-negativo`só falha em`vacuous-pass`(o teste novo já passa sem a
-implementação): escreva o teste que reprova primeiro, commit`test(red):`.
+job. Quando reprovam:
+
+- `escopo` lista os arquivos fora dos globs. Ou a issue passa a declarar o
+  glob em `## Files`, ou o orquestrador (só ele) escreve
+  `authorised: ` + glob em crase na seção `## Files` da PR. Issue anterior ao
+  padrão (#44) sem `## Files` reprova toda PR: o orquestrador acrescenta a
+  seção à issue antes de reivindicá-la.
+- `contratos` lista `regra: arquivo — motivo`.
+- `controle-negativo` reprova em `vacuous-pass` (o teste novo já passa na base
+  sem a implementação: escreva primeiro o teste que reprova, commit
+  `test(red):`), em `structural-red` sem um commit `test(red):` válido no range
+  (um que toque os testes do diff e adicione um stub que lança), em PR de
+  feature sem `prova/<slug>.ts`, e quando a base não consegue rodar a prova
+  (`package.json` ilegível, sem `resumo.json`). PR só de `docs`/`process` é
+  SKIP.
 
 ## CLI
 
