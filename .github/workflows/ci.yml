@@ -134,8 +134,8 @@ jobs:
       # (`npm run prova -- <slug>` na base). Só `vacuous-pass` falha; PR de
       # classe docs/process é SKIP. head.sha, nunca github.sha (merge sintético).
       - name: controle-negativo
-        run: >-
-          npm run ci:controle-negativo --
-          --base "${{ github.event.pull_request.base.sha }}"
-          --head "${{ github.event.pull_request.head.sha }}"
-          --branch "${{ github.head_ref }}"
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: npm run ci:controle-negativo -- --base "$BASE_SHA" --head "$HEAD_SHA" --branch "$HEAD_REF"
