@@ -55,28 +55,30 @@ export function classificar(resumo: Resumo): Desfecho {
 }
 
 /**
- * `true` quando o `package.json` da base não declara `scripts.prova` — o
- * harness (#42) ainda não existia naquele commit. Não é uma falha do
- * controle negativo: não há como rodar a prova ali, então conta como PASS
- * logado, não `vacuous-pass`.
+ * `true` quando o `package.json` da base (JSON válido) não declara
+ * `scripts.prova` — o harness (#42) ainda não existia naquele commit. Não
+ * é uma falha do controle negativo: não há como rodar a prova ali, então
+ * conta como PASS logado, não `vacuous-pass`.
+ *
+ * JSON inválido LANÇA — nunca vira `true` silenciosamente (rodada 2 da PR
+ * #54: um `package.json` corrompido na base é uma falha real, diferente
+ * de "harness ainda não existia"; `run.ts` distingue "arquivo ausente"
+ * — que nem chega a chamar esta função — de "arquivo ilegível" — que
+ * chama e deixa o `throw` propagar como FAIL explícito citando o caminho).
  */
 export function semHarnessNaBase(packageJsonText: string): boolean {
-  try {
-    const pkg = JSON.parse(packageJsonText) as { scripts?: Record<string, unknown> };
-    return typeof pkg.scripts?.["prova"] !== "string";
-  } catch {
-    // JSON inválido, ou texto vazio (package.json nem existe na base) —
-    // conta como "sem harness", não como erro.
-    return true;
-  }
+  const pkg = JSON.parse(packageJsonText) as { scripts?: Record<string, unknown> };
+  return typeof pkg.scripts?.["prova"] !== "string";
 }
 
 /**
- * `structural-red` só é aceito como controle negativo válido se o último
- * commit da PR que tocou os arquivos de teste for `test(red):` — a
- * convenção de `worktree-segura` §7 (stub que lança para o vermelho
- * compilar). Sem isso, uma falha estrutural é indistinguível de um overlay
- * quebrado por acidente (arquivo de produção que a base não tem).
+ * `structural-red` só é aceito como controle negativo válido quando existe
+ * PELO MENOS UM commit `test(red):` que toca os arquivos de teste do diff
+ * (`run.ts#existeTestRedValido` também exige que esse mesmo commit
+ * adicione um stub que lança — `contemStubQueLanca` abaixo). Rodada 2 da
+ * PR #54: a regra original exigia isso do ÚLTIMO commit que toca os
+ * testes, o que reprovava toda PR TDD normal (commit a cada verde depois
+ * do vermelho) — reproduzido contra a própria PR #54 e a #52 já mergeada.
  */
 const TEST_RED_RE = /^test\(red\):/;
 
@@ -84,11 +86,81 @@ export function ehCommitTestRed(subject: string): boolean {
   return TEST_RED_RE.test(subject.trim());
 }
 
-/** Argumentos de `npm run ci:controle-negativo -- --base <sha> --head <sha> [--slug <s>] [--root <dir>]`. */
+// `git show <sha> -- <arquivos-não-teste>` de um commit `test(red):` deve
+// ter uma linha ADICIONADA (`+`, nunca o cabeçalho `+++ b/arquivo`) com
+// `throw new Error(` — o stub que `worktree-segura` §7 pede para o
+// vermelho compilar. Mesma convenção do Apollo (`hasDeclaredThrowingStub`,
+// `.../tools/ci/lib/negative-control.mjs`); `(?!\+\+)` exclui o cabeçalho.
+const THROWING_STUB_ADDED_RE = /^\+(?!\+\+).*\bthrow\s+new\s+Error\(/m;
+
+/**
+ * `true` quando o texto de um diff (`git show`) tem uma linha adicionada
+ * com `throw new Error(` — verificado só nos arquivos NÃO-teste do commit
+ * (`run.ts` filtra antes de chamar), para que um teste que apenas AFIRMA
+ * "lança" (`expect(() => f()).toThrow(new Error(...))`) não passe por um
+ * stub de produção de verdade.
+ */
+export function contemStubQueLanca(_diffTexto: string): boolean {
+  void THROWING_STUB_ADDED_RE;
+  throw new Error("not implemented: contemStubQueLanca");
+}
+
+// --- SKIP por classe (rodada 2 da PR #54, ADR 0004 item 7) ----------------
+const DOCS_TOPO = new Set(["README.md", "CLAUDE.md", "AGENTS.md"]);
+const DOCS_OU_PROCESS_PREFIXOS = ["docs/", ".claude/", ".github/"];
+
+/** Classes `docs` e `process` da ADR 0004 item 7 — nada que este check
+ * precise controlar (uma PR só de documentação ou de configuração de CI
+ * não declara `prova/<slug>.ts`, e não deveria precisar). */
+export function ehArquivoDocsOuProcess(_arquivo: string): boolean {
+  void DOCS_TOPO;
+  void DOCS_OU_PROCESS_PREFIXOS;
+  throw new Error("not implemented: ehArquivoDocsOuProcess");
+}
+
+/**
+ * `true` só quando o diff não é vazio E todo arquivo cai nas classes
+ * `docs`/`process` — SKIP, exit 0, antes de sequer resolver o slug. Diff
+ * vazio NÃO conta (não é "classe docs/process", é "nada mudou" — mantém o
+ * comportamento anterior de reprovar quando `--base`/`--head` apontam pro
+ * mesmo commit e não há `prova/<slug>.ts`).
+ */
+export function deveSerIgnorado(_diff: readonly string[]): boolean {
+  throw new Error("not implemented: deveSerIgnorado");
+}
+
+// --- Shape de `resumo.json` (rodada 2 da PR #54) --------------------------
+function ehFalhaValida(valor: unknown): valor is Falha {
+  return (
+    typeof valor === "object" &&
+    valor !== null &&
+    typeof (valor as { nome?: unknown }).nome === "string" &&
+    typeof (valor as { motivo?: unknown }).motivo === "string"
+  );
+}
+
+/**
+ * Valida o shape de `resumo.json` lido da base antes de classificar — nunca
+ * um `as Resumo` cego (mesmo espírito de `scripts/prova/vitest-relatorio.ts`:
+ * um relatório ilegível não pode virar `empty-red`/PASS silencioso só
+ * porque `ok` veio `undefined`). Lança citando `caminho` — `run.ts` propaga
+ * isso como FAIL explícito.
+ */
+export function validarResumo(_valor: unknown, _caminho: string): Resumo {
+  void ehFalhaValida;
+  throw new Error("not implemented: validarResumo");
+}
+
+/** Argumentos de `npm run ci:controle-negativo -- --base <sha> --head <sha>
+ * [--slug <s>] [--branch <ref>] [--root <dir>]`. `--branch` é para o
+ * checkout detached do CI, onde `git branch --show-current` não resolve
+ * nada — `run.ts` usa `--branch` como a branch a passar para
+ * `resolveProvaSlug`/`branchSlug` quando `--slug` não vem explícito. */
 export interface Args {
   readonly base?: string;
   readonly head?: string;
   readonly slug?: string;
+  readonly branch?: string;
   readonly root?: string;
 }
 
@@ -111,6 +183,7 @@ export function parseArgs(argv: readonly string[]): Args {
     ...(pares["base"] !== undefined ? { base: pares["base"] } : {}),
     ...(pares["head"] !== undefined ? { head: pares["head"] } : {}),
     ...(pares["slug"] !== undefined ? { slug: pares["slug"] } : {}),
+    ...(pares["branch"] !== undefined ? { branch: pares["branch"] } : {}),
     ...(pares["root"] !== undefined ? { root: pares["root"] } : {}),
   };
 }
