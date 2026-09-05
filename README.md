@@ -57,13 +57,23 @@ npm run prova -- <slug>
 
 roda **só** os arquivos declarados (não a suíte inteira) e escreve
 `.prova/<slug>/resumo.json` — `{ ok, total, falhas }`, onde `total` é o
-número de testes executados e cada `falhas[]` tem `{ nome, motivo }`. Um
-arquivo declarado que o vitest não reportou (fora do `include`, ou nunca
-alcançado) vira a falha `"<arquivo> did not run"` em vez de passar em
-silêncio. `.prova/` é gerado a cada execução e é ignorado por git, prettier
-e eslint; `LOHRA_PROVA_OUT` redireciona a saída (evita corrida entre
-execuções concorrentes do mesmo slug). Sem `prova/<slug>.ts`, ou com um
-arquivo declarado inexistente, o comando sai com `exit 1` citando o caminho.
+número de testes **executados** (`passed`/`failed`; testes `skip`/`todo` não
+contam e não viram falha — nunca rodaram) e cada `falhas[]` tem
+`{ nome, motivo }`. Um arquivo declarado que o vitest não reportou (fora do
+`include`, ou nunca alcançado) vira a falha `"<arquivo> did not run"` em vez
+de passar em silêncio; o mesmo vale se o processo do vitest sair com um
+código diferente de zero e, mesmo assim, o relatório resultante parecer
+"ok" — vira a falha `"vitest run"` em vez de `ok:true`. `.prova/<slug>/` é
+apagado antes de cada execução do mesmo slug (o relatório de uma corrida
+anterior nunca sobrevive para ser lido como se fosse desta) e é gerado de
+novo a cada execução; é ignorado por git, prettier e eslint.
+`LOHRA_PROVA_OUT` redireciona a saída para `<LOHRA_PROVA_OUT>/<slug>/` em
+vez de `.prova/<slug>/` (evita corrida entre execuções concorrentes do
+mesmo slug) — o hook `Stop` (#46) ignora essa variável e sempre lê
+`.prova/<slug>/resumo.json`, então ela serve para uma segunda execução em
+paralelo fora do caminho que o hook observa, não para redirecioná-lo. Sem
+`prova/<slug>.ts`, ou com um arquivo declarado inexistente, o comando sai
+com `exit 1` citando o caminho.
 
 ## CLI
 
