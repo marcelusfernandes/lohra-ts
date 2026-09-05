@@ -14,7 +14,29 @@ repositório é público desde 2026-09-05, então a camada 3 é um ruleset real.
 | 4      | `guarda-main.yml` (Action)             | servidor, pós-push                | commit em `main` sem PR → issue `human` + job falha                                                                                                    |
 
 Outros hooks: `format-file.sh` (PostToolUse Edit|Write: prettier + eslint --fix,
-nunca bloqueia) e `tsc-check.sh` (Stop: `tsc --noEmit`, exit 2 até limpar).
+nunca bloqueia) e `stop-gate.sh` (Stop, abaixo).
+
+## Stop gate (`stop-gate.sh`, issue #43)
+
+Roda no fim de cada turno do agente; exit 2 impede o encerramento ("loop until
+green"). Substituiu o `tsc-check.sh`.
+
+1. `tsc --noEmit` sempre (sem `node_modules/.bin/tsc` avisa e segue).
+2. `npm run prova -- <slug>` com o slug da branch `<type>/<n>-<slug>` (mesma
+   regra de `scripts/prova/slug.ts`, #42). Prova vermelha → exit 2 com
+   `.prova/<slug>/resumo.json` no stderr. **Não bloqueia** quando a branch está
+   fora do padrão (`main`, worktree de agente), quando o último commit começa
+   com `test(red):` (controle negativo: a prova deve estar vermelha) ou quando
+   não existe `prova/<slug>.ts` (ausência de declaração ≠ prova vermelha).
+
+Raiz = toplevel git do `cwd` do payload (funciona em worktree de agente).
+
+**Bancada** (`tests/stop-gate.test.ts`): `LOHRA_BENCH=1` é o único portão que
+habilita as seams `LOHRA_STOP_BRANCH`, `LOHRA_STOP_LAST_COMMIT_MSG`,
+`LOHRA_STOP_TSC_CMD`, `LOHRA_STOP_PROVA_CMD`; sem ele nenhuma é lida.
+**Reentrância**: o filho da prova recebe `LOHRA_STOP_GATE_ACTIVE=1` e o hook sai
+0 ao encontrá-la (fora da bancada) — uma prova que exercite hooks não recursa.
+**Hermeticidade**: o filho nunca herda outra `LOHRA_STOP_*`.
 
 ## Limite do parser (declarado)
 
