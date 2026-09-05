@@ -61,7 +61,15 @@ function normalizarArquivo(root: string, bruto: unknown): ResultadoArquivo {
       typeof arquivo.message === "string" ? arquivo.message : "vitest não coletou este arquivo";
     return { arquivo: caminho, colecionou: false, motivoColeta, testes: [] };
   }
-  const testes = assertionResults.map(normalizarAssertion);
+  // "skipped"/"pending"/"todo" nunca rodaram — não são nem um passou:true
+  // nem um passou:false (isso os marcaria como falha), e não contam para
+  // `total` ("testes executados", não "testes declarados").
+  const executadas = assertionResults.filter((item) => {
+    if (typeof item !== "object" || item === null) return true; // deixa normalizarAssertion recusar
+    const status = (item as AssertionResultBruto).status;
+    return status === "passed" || status === "failed";
+  });
+  const testes = executadas.map(normalizarAssertion);
   return { arquivo: caminho, colecionou: true, testes };
 }
 
@@ -71,6 +79,13 @@ function normalizarArquivo(root: string, bruto: unknown): ResultadoArquivo {
  * exporta um tipo público para o reporter JSON. Falha fechado (lança) em
  * vez de devolver um resultado vazio quando o formato não bate — um
  * relatório ilegível não pode virar "zero falhas" silenciosamente.
+ *
+ * `total` é contado a partir de `arquivos[].testes` já filtrados (só
+ * "passed"/"failed"), não de `numTotalTests` do relatório bruto —
+ * `numTotalTests` do vitest inclui testes "skipped"/"todo", que nunca
+ * rodaram e não são prova de nada. `numTotalTests` continua validado como
+ * parte da checagem de formato (um relatório sem ele é tão inesperado
+ * quanto um sem `testResults`).
  */
 export function normalizarRelatorioVitest(root: string, bruto: unknown): ResultadoVitest {
   if (typeof bruto !== "object" || bruto === null) {
@@ -84,5 +99,6 @@ export function normalizarRelatorioVitest(root: string, bruto: unknown): Resulta
     return falhaFormato("testResults não é array");
   }
   const arquivos = relatorio.testResults.map((item: unknown) => normalizarArquivo(root, item));
-  return { total: relatorio.numTotalTests, arquivos };
+  const total = arquivos.reduce((soma, arquivo) => soma + arquivo.testes.length, 0);
+  return { total, arquivos };
 }
