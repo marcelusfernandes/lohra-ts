@@ -31,6 +31,19 @@ export function montarResumo(declarados: readonly string[], resultado: Resultado
       });
       continue;
     }
+    if (arquivo.testes.length === 0) {
+      // Coletou (não é o caso acima), mas todos os testes do arquivo são
+      // skip/todo — normalizarRelatorioVitest já os excluiu de `testes`
+      // (não rodaram, não passaram, não contam para `total`). Um arquivo
+      // que a issue declarou e que não prova nada não pode virar
+      // `ok:true` (CLAUDE.md, invariante 2). Skip PARCIAL — pelo menos um
+      // teste passou/falhou — não cai aqui, porque `testes` não está vazio.
+      falhas.push({
+        nome: `${arquivo.arquivo} ran zero tests`,
+        motivo: "todos os testes do arquivo são skip/todo — nenhum rodou de fato",
+      });
+      continue;
+    }
     for (const teste of arquivo.testes) {
       if (!teste.passou) {
         falhas.push({ nome: teste.nome, motivo: teste.motivo ?? "failed" });
