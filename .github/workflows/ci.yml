@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+    # `edited` faz `escopo` rerodar quando o orquestrador acrescenta
+    # `authorised:` ao corpo da PR (revisão da PR #52).
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
@@ -70,3 +73,46 @@ jobs:
       # Transforma o invariante de proveniência de prosa em gate.
       - name: approved heads are ancestors of HEAD
         run: npm run provenance:check
+
+  # ---- checks de PR (épico #34) ------------------------------------------
+  # Só em pull_request: cada um lê o payload do evento (base/head/corpo).
+  # `fetch-depth: 0` porque os scripts fazem `git diff base...head`.
+  # Reprodução local (dry-run, sem gh/git): README seção "CI".
+  escopo:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      # o diff da PR cabe nos globs de `## Files` da issue ligada por Closes #N
+      - name: escopo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: npm run ci:escopo
+
+  contratos:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      # paths proibidos (docs/reference, lohra), imports proibidos (após #17),
+      # arquivo > 800 linhas
+      - name: contratos
+        run: npm run ci:contratos

@@ -14,7 +14,7 @@ git em `git-workflow.md`. Quem age e qual gate existe em cada passo.
 | 5   | Teste vermelho primeiro, commit `test(red):`; implementar até verde, commit a cada verde                                                          | implementador  | Stop hook (`tsc`, e prova quando #33) |
 | 6   | Gates locais (`typecheck`, `lint`, `format:check`, `test`) e **dogfooding real** se tocou `src/`/`package.json`/lockfile (senão `N/A` com motivo) | implementador  | —                                     |
 | 7   | Push e PR pela skill `pr` (`Closes #N`, AC copiados, `state:in-review`). **Para. Nunca mergeia.**                                                 | implementador  | —                                     |
-| 8   | CI: `checks (20)`, `checks (22)`, `provenance` (e `controle-negativo`, `escopo`, `contratos` quando #34)                                          | GitHub Actions | required checks                       |
+| 8   | CI: `checks (20)`, `checks (22)`, `provenance`; em PR também `escopo`, `contratos` e `controle-negativo` (#34)                                    | GitHub Actions | required checks                       |
 | 9   | `revisor` (só leitura) avalia: AC × diff, escopo, controle negativo, invariantes, qualidade → JSON (resposta final)                               | revisor        | —                                     |
 | 9b  | Comentar o veredito na PR e aplicar a label: `approved` → `review:approved`; `rejected` → `state:qa-failed`                                       | orquestrador   | label = rastro do veredito            |
 | 10a | Checks verdes + `review:approved` → **merge commit** (`gh pr merge --merge`) → `state:done`                                                       | orquestrador   | nenhum humano                         |
