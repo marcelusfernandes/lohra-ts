@@ -5,9 +5,12 @@
 Runtime TypeScript headless do Lohra, com CLI, gateway/dashboard, workflows
 duráveis, cron, MCP, ferramentas web e mídia. A versão atual é `0.0.11`.
 
-O port foi validado contra o runtime Python pinado. O pacote de produção não
-embute nem chama Python, pip, uv ou poetry; Python existe somente nos harnesses
-de paridade do repositório de desenvolvimento.
+O runtime nasceu como port validado contra o runtime Python pinado até
+2026-09-04; desde essa data, por decisão do owner, evolui de forma
+independente do Python ([ADR 0003](docs/adr/0003-native-wire-format.md)). O
+pacote de produção não
+embute nem chama Python, pip, uv ou poetry; o Python aparece apenas no
+histórico de paridade do repositório de desenvolvimento.
 
 ## Instalação
 
@@ -86,26 +89,33 @@ orientação de atualizar pelo npm.
   `docs/closeout.md` seja ancestral do HEAD. Windows nativo e macOS Node 20
   permanecem `NOT_MEASURED`; spoof de plataforma não conta como evidência.
 
-## Paridade e closeout
+## Histórico de paridade
 
-O oracle Python de referência é lido no SHA
-`16b4785d803ad0ca364a8a67346a04f949fbf592`; ele nunca é modificado por este
-repo. Evidence fica em `.parity-evidence/` (gitignored).
+Até 2026-09-04 o runtime era desenvolvido como port validado bilateralmente
+contra o oracle Python pinado no SHA
+`16b4785d803ad0ca364a8a67346a04f949fbf592`
+([ADR 0003](docs/adr/0003-native-wire-format.md)). O aggregate de closeout
+comparava um inventário fechado nos dois sentidos, executava cada suíte
+não-live duas vezes e recusava scripts ausentes, órfãos, skips, resultados não
+determinísticos ou mutantes sobreviventes; evidence ficava em
+`.parity-evidence/` (gitignored). Desde essa data a validação contra o Python
+deixou de ser critério de aceite: as fixtures capturadas na fase de paridade
+são hoje o corpus de regressão do runtime, e a migração dos scripts
+`parity:*` para `regression:*` está rastreada em #8 e #19.
 
 ```bash
-LOHRA_ORACLE_WORKSPACE=/caminho/para/o/worktree-python npm run parity:closeout
 npm run mutations:closeout
 npm run verify:t22:evidence
 ```
 
-O aggregate compara um inventário fechado nos dois sentidos, executa cada
-suíte não-live duas vezes e recusa scripts ausentes, órfãos, skips, resultados
-não determinísticos ou mutantes sobreviventes. O relatório completo dos 23
-tickets, SHAs e dívidas está em [docs/closeout.md](docs/closeout.md).
+O relatório completo dos 23 tickets, SHAs e dívidas do fechamento está em
+[docs/closeout.md](docs/closeout.md).
 
 ## Decisão arquitetural
 
-O owner escolheu `typescript-mainline` para o novo capítulo. A decisão, seus
-limites e a estratégia de preservação do arquivo local protegido estão em
-[docs/gate-decision-t22.md](docs/gate-decision-t22.md). O runtime Python segue
-somente como oracle semântico read-only; nenhuma implementação é feita nele.
+O owner escolheu `typescript-mainline` para o novo capítulo em
+[docs/gate-decision-t22.md](docs/gate-decision-t22.md) (2026-09-03) e, em
+2026-09-04, encerrou a obrigação de paridade com o Python
+([ADR 0003](docs/adr/0003-native-wire-format.md)). O runtime Python segue
+somente como referência histórica; nenhuma implementação é feita nele, e
+nenhuma saída deste runtime precisa reproduzir os bytes dele.
