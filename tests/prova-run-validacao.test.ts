@@ -1,9 +1,16 @@
 // Teste unitário de validarDeclaracao — importa run.ts diretamente. Seguro
 // porque run.ts só chama main() quando é o entry point (process.argv[1]),
 // nunca quando importado por um teste.
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { validarDeclaracao } from "../scripts/prova/run.js";
+
+// Um `expect` que falha entre o spy e o `mockRestore()` manual deixaria
+// `process.stderr.write` mockado para os testes seguintes. `afterEach`
+// restaura mesmo quando o teste falha no meio.
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function comExitEspiado<T>(fn: () => T): { resultado?: T; codigoSaida?: number } {
   const exitSpy = vi.spyOn(process, "exit").mockImplementation(((codigo?: number) => {
@@ -45,14 +52,12 @@ describe("validarDeclaracao", () => {
     const { codigoSaida } = comExitEspiado(() => validarDeclaracao("not an object", "prova/x.ts"));
     expect(codigoSaida).toBe(1);
     expect(stderrSpy.mock.calls.join("")).toContain("prova/x.ts");
-    stderrSpy.mockRestore();
   });
 
   it("rejects a default export that is null", () => {
-    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     const { codigoSaida } = comExitEspiado(() => validarDeclaracao(null, "prova/x.ts"));
     expect(codigoSaida).toBe(1);
-    stderrSpy.mockRestore();
   });
 
   it('rejects "unit" that is not an array', () => {
@@ -62,7 +67,6 @@ describe("validarDeclaracao", () => {
     );
     expect(codigoSaida).toBe(1);
     expect(stderrSpy.mock.calls.join("")).toContain('"unit"');
-    stderrSpy.mockRestore();
   });
 
   it('rejects a "unit" array containing a non-string item', () => {
@@ -72,7 +76,6 @@ describe("validarDeclaracao", () => {
     );
     expect(codigoSaida).toBe(1);
     expect(stderrSpy.mock.calls.join("")).toContain('"unit"');
-    stderrSpy.mockRestore();
   });
 
   it('rejects "check" that is present but not boolean', () => {
@@ -82,6 +85,5 @@ describe("validarDeclaracao", () => {
     );
     expect(codigoSaida).toBe(1);
     expect(stderrSpy.mock.calls.join("")).toContain('"check"');
-    stderrSpy.mockRestore();
   });
 });
