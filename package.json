@@ -107,7 +107,8 @@
     "mutations:closeout": "tsx scripts/parity/closeout/run-closeout-mutations.ts",
     "pack:check": "tsx scripts/pack-check.ts",
     "provenance:check": "tsx scripts/provenance/check-ancestry.ts",
-    "prova": "tsx scripts/prova/run.ts"
+    "prova": "tsx scripts/prova/run.ts",
+    "ci:controle-negativo": "tsx scripts/ci/controle-negativo/run.ts"
   },
   "dependencies": {
     "better-sqlite3": "11.10.0",
