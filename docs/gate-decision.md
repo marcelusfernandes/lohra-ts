@@ -96,10 +96,10 @@ T10.
 Executado sob autorização nominal do usuário, com credencial no perfil isolado
 `lohra-ts-oracle`. **Dois requests no total, 32 tokens somados.**
 
-| Transport | Modelo | Resultado | `requestCount` |
-| --- | --- | --- | --- |
-| `anthropic_messages` | `claude-opus-4-8` | **pass**, exit 0 | 1 |
-| `chat_completions` | openrouter `openai/gpt-4o-mini` | **pass**, exit 0 | 1 |
+| Transport            | Modelo                          | Resultado        | `requestCount` |
+| -------------------- | ------------------------------- | ---------------- | -------------- |
+| `anthropic_messages` | `claude-opus-4-8`               | **pass**, exit 0 | 1              |
+| `chat_completions`   | openrouter `openai/gpt-4o-mini` | **pass**, exit 0 | 1              |
 
 **Pela primeira vez na migração, o runtime TypeScript completou um turno contra
 provider real.** Todas as fatias anteriores foram provadas contra upstream
