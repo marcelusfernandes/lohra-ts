@@ -11,8 +11,11 @@ export type Desfecho = "assertion-red" | "structural-red" | "empty-red" | "vacuo
  * (a própria declaração `prova/<slug>.ts`, que também precisa ir para a
  * base — sem ela `npm run prova -- <slug>` não sabe o que rodar lá).
  */
-export function arquivosDeTeste(_diff: readonly string[]): readonly string[] {
-  throw new Error("not implemented: arquivosDeTeste");
+const TESTE_RE = /^tests\/.+\.test\.ts$/;
+const PROVA_RE = /^prova\//;
+
+export function arquivosDeTeste(diff: readonly string[]): readonly string[] {
+  return diff.filter((arquivo) => TESTE_RE.test(arquivo) || PROVA_RE.test(arquivo));
 }
 
 // `nome` que `scripts/prova/resumo.ts` e `scripts/prova/run.ts` escrevem
@@ -29,8 +32,14 @@ export function arquivosDeTeste(_diff: readonly string[]): readonly string[] {
 // para um arquivo que nem foi coletado — import quebrado, erro de sintaxe).
 // Qualquer outro `nome` é o `fullName` de um teste do vitest que rodou e
 // reprovou de verdade — uma asserção.
-function ehFalhaEstrutural(_falha: Falha): boolean {
-  throw new Error("not implemented: ehFalhaEstrutural");
+const NOME_ESTRUTURAL_RE = /^(npm run typecheck|vitest run|.+ did not run|.+ ran zero tests)$/;
+
+function ehFalhaEstrutural(falha: Falha): boolean {
+  if (NOME_ESTRUTURAL_RE.test(falha.nome)) return true;
+  // Falha de coleta (`colecionou: false`): `resumo.ts` usa o próprio
+  // caminho do arquivo de teste como `nome` — nunca o `fullName` de um
+  // teste (que não termina em `.test.ts`).
+  return falha.nome.endsWith(".test.ts");
 }
 
 /**
@@ -38,9 +47,11 @@ function ehFalhaEstrutural(_falha: Falha): boolean {
  * deve reprovar o check — os outros três já são "vermelho o bastante" para
  * provar que o teste não passa sem a implementação.
  */
-export function classificar(_resumo: Resumo): Desfecho {
-  void ehFalhaEstrutural;
-  throw new Error("not implemented: classificar");
+export function classificar(resumo: Resumo): Desfecho {
+  if (resumo.ok) return "vacuous-pass";
+  if (resumo.falhas.length === 0) return "empty-red";
+  const naoEstruturais = resumo.falhas.filter((falha) => !ehFalhaEstrutural(falha));
+  return naoEstruturais.length > 0 ? "assertion-red" : "structural-red";
 }
 
 /**
@@ -49,8 +60,15 @@ export function classificar(_resumo: Resumo): Desfecho {
  * controle negativo: não há como rodar a prova ali, então conta como PASS
  * logado, não `vacuous-pass`.
  */
-export function semHarnessNaBase(_packageJsonText: string): boolean {
-  throw new Error("not implemented: semHarnessNaBase");
+export function semHarnessNaBase(packageJsonText: string): boolean {
+  try {
+    const pkg = JSON.parse(packageJsonText) as { scripts?: Record<string, unknown> };
+    return typeof pkg.scripts?.["prova"] !== "string";
+  } catch {
+    // JSON inválido, ou texto vazio (package.json nem existe na base) —
+    // conta como "sem harness", não como erro.
+    return true;
+  }
 }
 
 /**
@@ -60,8 +78,10 @@ export function semHarnessNaBase(_packageJsonText: string): boolean {
  * compilar). Sem isso, uma falha estrutural é indistinguível de um overlay
  * quebrado por acidente (arquivo de produção que a base não tem).
  */
-export function ehCommitTestRed(_subject: string): boolean {
-  throw new Error("not implemented: ehCommitTestRed");
+const TEST_RED_RE = /^test\(red\):/;
+
+export function ehCommitTestRed(subject: string): boolean {
+  return TEST_RED_RE.test(subject.trim());
 }
 
 /** Argumentos de `npm run ci:controle-negativo -- --base <sha> --head <sha> [--slug <s>] [--root <dir>]`. */
@@ -73,6 +93,24 @@ export interface Args {
 }
 
 /** Parser posicional simples — sem dependência nova (AC da issue #48). */
-export function parseArgs(_argv: readonly string[]): Args {
-  throw new Error("not implemented: parseArgs");
+export function parseArgs(argv: readonly string[]): Args {
+  const valores = new Map<string, string>();
+  for (let indice = 0; indice < argv.length; indice += 1) {
+    const chave = argv[indice];
+    if (chave === undefined || !chave.startsWith("--")) continue;
+    const valor = argv[indice + 1];
+    if (valor === undefined) continue;
+    valores.set(chave.slice(2), valor);
+    indice += 1;
+  }
+  const base = valores.get("base");
+  const head = valores.get("head");
+  const slug = valores.get("slug");
+  const root = valores.get("root");
+  return {
+    ...(base !== undefined ? { base } : {}),
+    ...(head !== undefined ? { head } : {}),
+    ...(slug !== undefined ? { slug } : {}),
+    ...(root !== undefined ? { root } : {}),
+  };
 }
