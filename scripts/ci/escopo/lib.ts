@@ -12,6 +12,15 @@
 
 import { casa } from "../lib/globs.js";
 
+/** Remove blocos de código (fence ```…```) do corpo ANTES de extrair
+ * qualquer seção — issue #62: um exemplo dentro de um fence (`authorised:`
+ * ilustrativo, ou um `## Files` de mentira colado como prosa) não pode
+ * contar como diretiva real, nem truncar a extração de uma seção de
+ * verdade que venha depois dele. */
+function removerBlocosDeCodigo(texto: string): string {
+  return texto.replace(/```[\s\S]*?```/g, "");
+}
+
 /** Resultado de `checarEscopo`. */
 export interface ResultadoEscopo {
   readonly ok: boolean;
@@ -42,7 +51,7 @@ function extrairSpansEmCrase(texto: string): string[] {
  * PR) e o próximo heading `## `. `null` se `heading` não aparece no corpo.
  */
 export function extrairSecao(body: string, heading: string): string | null {
-  const linhas = body.split(/\r?\n/);
+  const linhas = removerBlocosDeCodigo(body).split(/\r?\n/);
   const headingLower = heading.toLowerCase();
   const inicio = linhas.findIndex((linha) => {
     const trimmed = linha.trim();
