@@ -138,6 +138,16 @@ describe("stop-gate.sh", () => {
     expect(r.stderr).toMatch(/reentrante/u);
   });
 
+  it("payload ilegível: avisa e segue (não é silêncio)", () => {
+    const r = spawnSync("sh", [HOOK], {
+      input: "{nope",
+      encoding: "utf8",
+      env: { ...limparAmbiente(), ...bench({ LOHRA_STOP_BRANCH: "main" }) },
+    });
+    expect(r.status).toBe(0);
+    expect(r.stderr).toMatch(/payload ilegível/u);
+  });
+
   it("reentrância: com bench a marca é ignorada e a seam decide", () => {
     const r = rodarHook(
       root,
@@ -146,13 +156,13 @@ describe("stop-gate.sh", () => {
     expect(r.status).toBe(2);
   });
 
-  it("hermeticidade: o filho da prova vê só LOHRA_STOP_GATE_ACTIVE, nenhuma outra LOHRA_STOP_*", () => {
+  it("hermeticidade: o filho da prova vê só LOHRA_STOP_GATE_ACTIVE — nem outra LOHRA_STOP_*, nem LOHRA_BENCH", () => {
     const envFile = path.join(root, "env.txt");
     const r = rodarHook(root, bench({ LOHRA_STOP_PROVA_CMD: `env > "${envFile}"` }));
     expect(r.status).toBe(0);
     const vistas = readFileSync(envFile, "utf8")
       .split("\n")
-      .filter((l) => l.startsWith("LOHRA_STOP_"))
+      .filter((l) => l.startsWith("LOHRA_STOP_") || l.startsWith("LOHRA_BENCH="))
       .sort();
     expect(vistas).toEqual(["LOHRA_STOP_GATE_ACTIVE=1"]);
   });

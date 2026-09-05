@@ -30,9 +30,15 @@
 # novo, que chamaria a prova de novo, sem fim. Em bancada a marca é ignorada e a
 # seam decide, senão os casos da bancada que esperam exit 2 sairiam 0.
 #
-# HERMETICIDADE: o filho nunca herda LOHRA_STOP_* do ambiente do hook — só a
-# marca acima, reposta explicitamente depois da limpeza. Assim uma seam da
-# bancada não vaza para um vitest real que a prova esteja rodando.
+# HERMETICIDADE: o filho nunca herda LOHRA_STOP_* nem LOHRA_BENCH do ambiente
+# do hook — só a marca acima, reposta explicitamente depois da limpeza. Assim
+# uma seam da bancada não vaza para um vitest real que a prova esteja rodando, e
+# um hook aninhado nunca se vê "em bancada" por herança.
+#
+# LIMITE DECLARADO: o hook não lê `stop_hook_active` — bloqueia toda vez que a
+# prova está vermelha ("loop until green", como o tsc-check fazia). Se a prova
+# não puder ficar verde (ex.: `npm run prova` inexistente), o turno não encerra;
+# por isso este hook só entra em main junto ou depois do harness (#42).
 #
 # Contrato: JSON do evento em stdin (`cwd`); exit 2 bloqueia o encerramento.
 # Raiz = toplevel git do `cwd` do payload (worktree de agente inclusive); sem
@@ -52,10 +58,10 @@ SG_PAYLOAD="$payload" node -e '
   const path = require("path");
 
   let j = {};
-  try { j = JSON.parse(process.env.SG_PAYLOAD || "{}") || {}; } catch { /* payload ilegível: segue com cwd do processo */ }
+  const aviso = (m) => process.stderr.write("stop-gate: " + m + "\n");
+  try { j = JSON.parse(process.env.SG_PAYLOAD || "{}") || {}; } catch (e) { aviso("payload ilegível (" + String(e && e.message || e).slice(0, 80) + "); usando CLAUDE_PROJECT_DIR/cwd do processo."); }
   const bench = process.env.LOHRA_BENCH === "1";
   const seam = (nome) => (bench && ("LOHRA_STOP_" + nome) in process.env) ? String(process.env["LOHRA_STOP_" + nome]) : undefined;
-  const aviso = (m) => process.stderr.write("stop-gate: " + m + "\n");
 
   if (process.env.LOHRA_STOP_GATE_ACTIVE === "1" && !bench) {
     aviso("chamada reentrante (LOHRA_STOP_GATE_ACTIVE já no ambiente, via prova -> vitest -> hook); saindo 0 sem rodar tsc/prova de novo.");
@@ -65,11 +71,17 @@ SG_PAYLOAD="$payload" node -e '
   const cwd = j.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd();
   const top = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8" });
   const root = top.status === 0 ? top.stdout.trim() : cwd;
-  const git = (args) => (spawnSync("git", args, { cwd: root, encoding: "utf8" }).stdout || "").trim();
+  const git = (args) => {
+    const r = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+    if (r.error || r.status !== 0) aviso("git " + args.join(" ") + " falhou (" + String(r.error ? r.error.message : (r.stderr || "")).trim().slice(0, 80) + ")");
+    return (r.stdout || "").trim();
+  };
 
   const rodar = (cmd, extra) => {
     const env = {};
-    for (const [k, v] of Object.entries(process.env)) if (!k.startsWith("LOHRA_STOP_")) env[k] = v;
+    // nem as seams nem o portão da bancada chegam ao filho: um hook aninhado que
+    // herdasse LOHRA_BENCH=1 ignoraria a marca de reentrância (revisão da PR #46)
+    for (const [k, v] of Object.entries(process.env)) if (!k.startsWith("LOHRA_STOP_") && k !== "LOHRA_BENCH") env[k] = v;
     Object.assign(env, extra || {});
     return spawnSync("sh", ["-c", cmd], { cwd: root, encoding: "utf8", env });
   };
