@@ -68,7 +68,7 @@ describe(".claude/settings.json", () => {
     expect(bash[0]?.hooks.map((hook) => hook.command).join()).toContain(
       ".claude/hooks/protege-main.sh",
     );
-    const write = pre.filter((group) => group.matcher === "Edit|Write|MultiEdit");
+    const write = pre.filter((group) => group.matcher === "Edit|Write|MultiEdit|NotebookEdit");
     expect(write).toHaveLength(1);
     expect(write[0]?.hooks.map((hook) => hook.command).join()).toContain(
       ".claude/hooks/protege-escrita.sh",

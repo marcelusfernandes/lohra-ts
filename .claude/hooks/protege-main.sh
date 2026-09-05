@@ -6,22 +6,27 @@
 #   2. push direto em main/master (ref explícita, HEAD:main, ou push a partir de main)
 #   3. apagar main/master (git branch -D, git push --delete, :main)
 #   4. gh pr merge --admin — sem válvula
-#   5. gh pr merge sem todos os checks verdes, ou sem a label review:approved
+#   5. gh pr merge --squash / --rebase (-s / -r) — ADR 0004 exige merge commit; sem válvula
+#   6. gh pr merge sem todos os checks verdes, ou sem a label review:approved
 #      (nem reviewDecision APPROVED) — a condição mecânica de merge da ADR 0004
 #
 # Válvulas, para bootstrap e operação humana consciente (valem no ambiente do
 # hook OU escritas no próprio comando, ex.: `LOHRA_PERMITE_PUSH_MAIN=1 git push`):
 #   LOHRA_PERMITE_PUSH_MAIN=1   libera o item 2 (nunca o 1)
-#   LOHRA_MERGE_LIVRE=1         libera o item 5 (nunca o 4)
+#   LOHRA_MERGE_LIVRE=1         libera o item 6 (nunca o 4 nem o 5)
+#
+# LIMITE DECLARADO (rodada 3, PR #38): o hook lê comandos em POSIÇÃO DE COMANDO —
+# início, ou depois de ; | & && || ( ) { } crase e quebra de linha — com os
+# prefixos VAR=x, sudo, env, command, builtin, exec, time, nohup, nice, `\`, e as
+# palavras if/elif/while/until/then/do/else/!. Evasão deliberada (eval, sh -c,
+# variáveis, aliases, scripts) está FORA do escopo deste hook e é backstop das
+# camadas 2–4 (pre-push nativo, ruleset, guarda-main). Falso positivo em texto
+# como dado depois de um separador (heredoc, echo "…; git push …") é aceito na
+# direção segura.
 #
 # Contrato: JSON da chamada em stdin; nega com permissionDecision "deny" + exit 2.
 # Parser em node (pré-requisito do projeto; sem jq). FAIL-CLOSED se node ou git
-# faltarem: uma máquina sem node não roda o projeto, e sem git não dá para saber
-# a branch atual — e o gate de `gh pr merge` não tem backstop nenhum fora daqui.
-# Portado do Apollo (protege-main.sh); substitui o antigo block-force-push.sh.
-# Rodada 2 do revisor (PR #38): separadores `&` isolado, `(`, `)`, `{`, `}`;
-# tokens desaspados; `then`/`do`/`else`/`!` como posição de comando; seletor do
-# `gh pr merge` ignora o valor de --repo/-R.
+# faltarem. Portado do Apollo (protege-main.sh); substitui o block-force-push.sh.
 set -u
 payload=$(cat)
 
@@ -67,26 +72,26 @@ PM_PAYLOAD="$payload" node -e '
   };
   const unquote = (t) => t.replace(/^(["\x27])(.*)\1$/, "$2");
 
-  const valvula = (nome) => process.env[nome] === "1" || new RegExp("(?:^|[\\s;&|(){}])" + nome + "=1(?=\\s)").test(cmd);
+  const valvula = (nome) => process.env[nome] === "1" || new RegExp("(?:^|[\\s;&|(){}`])" + nome + "=1(?=\\s)").test(cmd);
   const PERMITE_MAIN = valvula("LOHRA_PERMITE_PUSH_MAIN");
   const MERGE_LIVRE = valvula("LOHRA_MERGE_LIVRE");
 
-  // Segmentos em posição de comando. Separadores: && || ; | & (isolado, background)
-  // quebra de linha, e os agrupadores ( ) { }. Depois, strip de prefixos que não
-  // mudam o comando: VAR=x, sudo, env, e as palavras-chave then/do/else/!.
+  // Segmentos em posição de comando (ver LIMITE DECLARADO no cabeçalho).
+  const PALAVRAS = /^(?:(?:if|elif|while|until|then|do|else|!)\s+)*/;
+  const PREFIXOS = /^(?:\w+=\S*\s+|sudo\s+|env\s+|command\s+|builtin\s+|exec\s+|time\s+|nohup\s+|nice\s+|\\)*/;
   const segmentos = cmd
     .replace(/&&|\|\|/g, "\n")
-    .split(/[;|&\n(){}]/)
+    .split(/[;|&\n(){}`]/)
     .map((s) => s.trim())
     .filter(Boolean)
-    .map((s) => s.replace(/^(?:(?:then|do|else|!)\s+)*/, ""))
-    .map((s) => s.replace(/^(?:\w+=\S*\s+|sudo\s+|env\s+)*/, ""));
+    .map((s) => s.replace(PALAVRAS, "").replace(PREFIXOS, "").replace(PALAVRAS, "").replace(PREFIXOS, ""));
 
+  const GIT_OPTS = /^git\s+(?:-C\s+\S+\s+|-c\s+\S+\s+|--\S+\s+)*/;
   for (const seg of segmentos) {
     // ---- git push ---------------------------------------------------------
-    const mPush = seg.match(/^git\s+(?:-C\s+\S+\s+|--\S+\s+)*push\b(.*)$/);
+    const mPush = seg.match(new RegExp(GIT_OPTS.source + "push\\b(.*)$"));
     if (mPush) {
-      const tokens = mPush[1].trim().split(/\s+/).filter(Boolean).map(unquote);
+      const tokens = mPush[1].trim().split(/\s+/).filter(Boolean).map(unquote).filter((t) => t !== "--");
       const args = " " + tokens.join(" ");
       const forcado = /--force\b/.test(args) || /(?:^|\s)-[A-Za-z]*f[A-Za-z]*(?=\s|$)/.test(args) || /\s\+\S/.test(args);
       if (forcado) negar("push forçado é proibido em qualquer branch: reescrever histórico quebra o invariante de proveniência (job provenance).");
@@ -95,8 +100,8 @@ PM_PAYLOAD="$payload" node -e '
       const refspecs = refs.slice(1); // refs[0] costuma ser o remote
       let alvoMain = false;
       for (const r of refspecs) {
-        const dest = r.includes(":") ? r.split(":").pop() : r;
         if (r.startsWith(":") && PROTEGIDAS.test(r.slice(1))) negar("apagar main/master no remoto (:main) é proibido.");
+        const dest = r.includes(":") ? r.split(":").pop() : r;
         if (PROTEGIDAS.test(dest)) alvoMain = true;
       }
       if (refspecs.length === 0 || refspecs.every((r) => r === "HEAD")) {
@@ -108,15 +113,16 @@ PM_PAYLOAD="$payload" node -e '
       continue;
     }
     // ---- git branch -D main ---------------------------------------------
-    if (/^git\s+branch\s+.*(?:-D|--delete\s+--force|-d)\s+["\x27]?(?:main|master)["\x27]?(?:\s|$)/.test(seg))
+    if (new RegExp(GIT_OPTS.source + "branch\\s+.*(?:-D|--delete\\s+--force|-d)\\s+[\"\\x27]?(?:main|master)[\"\\x27]?(?:\\s|$)").test(seg))
       negar("apagar main/master localmente é proibido.");
     // ---- gh pr merge ------------------------------------------------------
     const mMerge = seg.match(/^gh\s+pr\s+merge\b(.*)$/);
     if (mMerge) {
       const tokens = mMerge[1].trim().split(/\s+/).filter(Boolean).map(unquote);
       if (tokens.includes("--admin")) negar("gh pr merge --admin fura os checks; proibido.");
+      if (tokens.some((t) => t === "--squash" || t === "-s" || t === "--rebase" || t === "-r"))
+        negar("gh pr merge --squash/--rebase reescreve a branch fora da história; a ADR 0004 exige merge commit (--merge).");
       if (MERGE_LIVRE) continue;
-      // seletor da PR = primeiro token que não é flag nem valor de flag que recebe valor
       const COM_VALOR = new Set(["--repo", "-R", "--subject", "-t", "--body", "-b", "--body-file", "-F", "--match-head-commit", "--author-email", "-A"]);
       let alvo = "", repoArg = "";
       for (let i = 0; i < tokens.length; i++) {

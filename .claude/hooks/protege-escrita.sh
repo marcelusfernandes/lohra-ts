@@ -26,8 +26,8 @@ PE_PAYLOAD="$payload" node -e '
   const path = require("path");
   const raw = process.env.PE_PAYLOAD || "";
   let j; try { j = JSON.parse(raw); } catch { process.exit(0); }
-  if (!["Edit", "Write", "MultiEdit"].includes(j.tool_name)) process.exit(0);
-  const filePath = j.tool_input && j.tool_input.file_path;
+  if (!["Edit", "Write", "MultiEdit", "NotebookEdit"].includes(j.tool_name)) process.exit(0);
+  const filePath = j.tool_input && (j.tool_input.file_path || j.tool_input.notebook_path);
   if (!filePath) process.exit(0);
   const cwd = j.cwd || process.cwd();
 
@@ -42,9 +42,27 @@ PE_PAYLOAD="$payload" node -e '
 
   const cwdReal = realpath(cwd);
   if (cwdReal === null) negar("não consegui resolver o caminho real de cwd (" + cwd + "); nego por segurança.");
-  const r = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd: cwdReal, encoding: "utf8" });
-  let root = r.status === 0 ? r.stdout.trim() : cwdReal;
-  root = realpath(root) || root;
+  // Raiz do worktree: lohra/ é um repo git ANINHADO (checkout do Python), então
+  // `git rev-parse --show-toplevel` a partir de um cwd dentro dele devolveria
+  // lohra/ e as regras abaixo deixariam de casar (revisor, PR #38 rodada 2).
+  // Preferimos CLAUDE_PROJECT_DIR quando o cwd está dentro dele; senão, subimos
+  // até o toplevel MAIS EXTERNO.
+  function outermostToplevel(start) {
+    let dir = start, top = null;
+    for (;;) {
+      const r = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd: dir, encoding: "utf8" });
+      if (r.status !== 0) break;
+      top = realpath(r.stdout.trim()) || r.stdout.trim();
+      const parent = path.dirname(top);
+      if (parent === top) break;
+      dir = parent;
+    }
+    return top;
+  }
+  const projectDir = process.env.CLAUDE_PROJECT_DIR ? realpath(process.env.CLAUDE_PROJECT_DIR) : null;
+  let root = (projectDir && (cwdReal === projectDir || cwdReal.startsWith(projectDir + path.sep)))
+    ? projectDir
+    : (outermostToplevel(cwdReal) || cwdReal);
 
   function resolveExistingAncestor(absolutePath) {
     let dir = path.dirname(absolutePath);
