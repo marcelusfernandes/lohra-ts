@@ -1,7 +1,8 @@
 # Padrão de corpo de issue
 
-Seções fixas, nesta ordem. Nenhuma é pulada; se genuinamente não se aplica,
-escreva "N/A" e uma frase explicando.
+Doze seções fixas, nesta ordem. Nenhuma é pulada; se genuinamente não se
+aplica, escreva "N/A" e uma frase explicando. `Proof` e `Files` (issue #44)
+são o que o stop-gate, o revisor e o CI de escopo leem — não são prosa.
 
 ```markdown
 > **Tamanho:** <S | M | L> — <escopo em poucas palavras>
@@ -49,6 +50,18 @@ escreva "N/A" e uma frase explicando.
 - [ ] Testes (unit / integration / e2e conforme aplicável)
 - [ ] Documentação atualizada (quando aplicável)
 
+## Proof
+
+- Comando: `npm run prova -- <slug>` (slug = o da branch `<type>/<n>-<slug>`)
+- `prova/<slug>.ts` declara: `tests/<arquivo>.test.ts`, …
+- Sem teste executável (classe `docs`/`process`): "N/A — <por quê>" e o que
+  substitui a prova (pipe-test, dry-run, saída colada na PR)
+
+## Files
+
+- `src/<área>/**`, `tests/<área>*.test.ts`, `prova/<slug>.ts`, `docs/<…>.md`
+- Fora destes globs é desvio de escopo: o revisor reprova, o CI (#34) falha
+
 ## Fora de escopo
 
 - <o que fica explicitamente de fora>
@@ -73,3 +86,5 @@ escreva "N/A" e uma frase explicando.
 - Solução não vai dentro do Problema.
 - Citações concretas > prosa; toda `arquivo:linha` precisa existir.
 - Acceptance Criteria testáveis: "X passa a retornar Y quando Z", não "melhorar X".
+- `Proof` é um comando, não uma intenção; `Files` são globs, não "os arquivos
+  relevantes". Ambos viram gate mecânico.

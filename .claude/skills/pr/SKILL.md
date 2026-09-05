@@ -14,7 +14,8 @@ user-invocable: true
    humana no caminho normal (ADR 0004): o revisor e o CI são os gates.
 2. A branch traça de volta a uma issue (`--issue N`, ou inferida do painel
    Development se a branch foi criada com `gh issue develop`).
-3. Gates locais verdes: `npm run typecheck`, `lint`, `format:check`, `test`.
+3. Gates locais verdes: `npm run build`, `typecheck`, `lint`, `format:check`,
+   `test`.
 4. **Dogfooding real feito e positivo** quando a branch toca `src/`,
    `package.json` ou o lockfile: uma execução de verdade do runtime (Codex
    e/ou OpenRouter) com exit 0, `error: null` e `tool_calls` quando a tarefa
@@ -26,7 +27,8 @@ user-invocable: true
 1. `git push -u origin <branch>` se ainda não publicada.
 2. Rodar o script — ele lê a issue, monta o body no template
    (`.github/PULL_REQUEST_TEMPLATE.md`), garante `Closes #N` em texto puro,
-   copia os Acceptance Criteria como checklist, cria com `gh pr create
+   copia os Acceptance Criteria como checklist e as seções `Proof` e `Files`
+   da issue (aviso no stderr se a issue for anterior a esse padrão), cria com `gh pr create
 --base main`, aplica labels e milestone da issue, e **verifica**:
 
    ```bash
@@ -38,6 +40,9 @@ user-invocable: true
    é o que garante o fechamento automático no merge.
 
 3. Marcar no body os AC que foram atendidos; o que não foi fica explícito.
+   Em `## Proof`, colar o `.prova/<slug>/resumo.json` da execução na branch
+   (ou "N/A — …" e o que substitui a prova). Em `## Files`, conferir que
+   `git diff --name-only main...HEAD` cabe nos globs.
 4. Aplicar `state:in-review` na issue; reportar a URL e parar. **Quem
    implementa nunca mergeia** — o orquestrador mergeia quando CI verde e
    `review:approved` (`.claude/rules/orquestracao.md`).

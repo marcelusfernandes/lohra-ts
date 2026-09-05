@@ -21,9 +21,14 @@ done
 [ -n "$TITLE" ] && [ -n "$BODY" ] && [ -n "$MILESTONE" ] || { echo "create-issue: --title, --body-file e --milestone são obrigatórios" >&2; exit 2; }
 [ -f "$BODY" ] || { echo "create-issue: corpo não encontrado: $BODY" >&2; exit 2; }
 
-# 1. padrão de seções (fail-closed: falta uma, não cria)
-for s in "## User Story" "## Contexto" "## Cenário atual" "## Problema" "## Consequências do problema" "## O que é a solução" "## Resultado esperado com a solução" "## Acceptance Criteria" "## Fora de escopo" "## Referências"; do
-  grep -q "^$s" "$BODY" || { echo "create-issue: seção ausente no corpo: $s" >&2; exit 2; }
+# 1. padrão de seções — presença E ordem (fail-closed: falta uma ou está fora
+#    de ordem, não cria). Proof e Files (issue #44) são lidos por máquina.
+PREV=0
+for s in "## User Story" "## Contexto" "## Cenário atual" "## Problema" "## Consequências do problema" "## O que é a solução" "## Resultado esperado com a solução" "## Acceptance Criteria" "## Proof" "## Files" "## Fora de escopo" "## Referências"; do
+  LINE=$(grep -n "^$s" "$BODY" | head -1 | cut -d: -f1)
+  [ -n "$LINE" ] || { echo "create-issue: seção ausente no corpo: $s" >&2; exit 2; }
+  [ "$LINE" -gt "$PREV" ] || { echo "create-issue: seção fora de ordem: $s (linha $LINE, esperada depois da linha $PREV)" >&2; exit 2; }
+  PREV=$LINE
 done
 
 # 2. complexity:* derivada do header — única fonte

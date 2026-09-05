@@ -78,6 +78,25 @@ body:
     validations:
       required: true
   - type: textarea
+    id: proof
+    attributes:
+      label: Proof
+      description: Comando que prova a entrega e o que `prova/<slug>.ts` declara; ou "N/A — por quê" (classe docs/process sem teste executável).
+      value: |
+        - Comando: `npm run prova -- <slug>`
+        - `prova/<slug>.ts` declara:
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: Files
+      description: Globs que a PR pode tocar. Fora disso é desvio de escopo (revisor reprova; CI de escopo falha).
+      value: |
+        - `src/...`, `tests/...`, `prova/<slug>.ts`
+    validations:
+      required: true
+  - type: textarea
     id: fora
     attributes:
       label: Fora de escopo
