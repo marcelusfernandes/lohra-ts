@@ -62,7 +62,7 @@ describe(".claude/settings.json", () => {
     expect(commands[0]?.command).toContain(".claude/hooks/format-file.sh");
   });
 
-  it("guards the session: protege-main on Bash, protege-escrita on Edit|Write, tsc-check on Stop", () => {
+  it("guards the session: protege-main on Bash, protege-escrita on Edit|Write, stop-gate on Stop", () => {
     const pre = settings.hooks?.PreToolUse ?? [];
     const bash = pre.filter((group) => group.matcher === "Bash");
     expect(bash).toHaveLength(1);
@@ -77,8 +77,10 @@ describe(".claude/settings.json", () => {
     const stop = settings.hooks?.Stop ?? [];
     expect(stop).toHaveLength(1);
     expect(stop[0]?.hooks.map((hook) => hook.command).join()).toContain(
-      ".claude/hooks/tsc-check.sh",
+      ".claude/hooks/stop-gate.sh",
     );
+    // tsc + `npm run prova` da branch: o timeout do tsc-check (120s) não basta
+    expect(stop[0]?.hooks[0]?.timeout ?? 0).toBeGreaterThanOrEqual(300);
   });
 
   it("links node_modules into agent worktrees (skill worktree-segura, section A)", () => {
