@@ -25,7 +25,10 @@ function limparAmbiente(): Record<string, string> {
   const limpo: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
     if (v === undefined) continue;
-    if (k === "LOHRA_BENCH" || k.startsWith("LOHRA_STOP_")) continue;
+    // Só o portão e as quatro seams saem; LOHRA_STOP_GATE_ACTIVE fica — é a guarda
+    // de reentrância, e apagá-la aqui deixaria um caso futuro sem bench recursar.
+    if (k === "LOHRA_BENCH" || (k.startsWith("LOHRA_STOP_") && k !== "LOHRA_STOP_GATE_ACTIVE"))
+      continue;
     limpo[k] = v;
   }
   return limpo;
