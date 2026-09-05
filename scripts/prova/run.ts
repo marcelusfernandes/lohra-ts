@@ -102,14 +102,22 @@ async function main(): Promise<void> {
 
   const vitestJsonPath = join(outDir, "vitest.json");
   const vitestEntry = resolverVitestEntry();
-  spawnSync(
+  const vitestResult = spawnSync(
     process.execPath,
     [vitestEntry, "run", ...declaracao.unit, "--reporter=json", `--outputFile=${vitestJsonPath}`],
     { cwd: root, stdio: "inherit" },
   );
 
   if (!existsSync(vitestJsonPath)) {
-    falhaFechada(`prova: o vitest não produziu relatório em ${relative(root, vitestJsonPath)}`);
+    const causa =
+      vitestResult.error !== undefined
+        ? `: ${vitestResult.error.message}`
+        : vitestResult.signal !== null
+          ? ` (encerrado pelo sinal ${vitestResult.signal})`
+          : "";
+    falhaFechada(
+      `prova: o vitest não produziu relatório em ${relative(root, vitestJsonPath)}${causa}`,
+    );
   }
 
   const bruto: unknown = JSON.parse(readFileSync(vitestJsonPath, "utf8"));

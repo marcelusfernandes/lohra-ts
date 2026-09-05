@@ -4,20 +4,31 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 const root = resolve(import.meta.dirname, "..");
 const runScript = resolve(root, "scripts/prova/run.ts");
 const tsxBin = resolve(root, "node_modules/.bin/tsx");
 
+const workdirs: string[] = [];
+
+afterEach(() => {
+  while (workdirs.length > 0) {
+    const dir = workdirs.pop();
+    if (dir !== undefined) rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 function makeWorkdir(): string {
   const dir = mkdtempSync(join(tmpdir(), "lohra-prova-run-"));
+  workdirs.push(dir);
   symlinkSync(resolve(root, "node_modules"), join(dir, "node_modules"));
   mkdirSync(join(dir, "prova"), { recursive: true });
   mkdirSync(join(dir, "tests"), { recursive: true });
