@@ -1178,11 +1178,8 @@ describe("T17 workflow CLI", () => {
     roots.push(root);
     const helpIo = io(root);
     expect(await runCli(["workflow", "--help"], helpIo.value)).toBe(0);
-    const helpOutput = helpIo.stdout.join("");
-    expect(helpOutput).toMatch(/^\s+list\s+\S/mu);
-    expect(helpOutput).toMatch(/^\s+watch\s+\S/mu);
-    expect(helpOutput).toMatch(/^\s+audit\s+\S/mu);
-    expect(helpOutput).not.toMatch(/^\s+run\s/mu);
+    const shown = [...helpIo.stdout.join("").matchAll(/^\s+(list|watch|audit|run)\s+\S/gmu)];
+    expect(shown.map((match) => match[1])).toEqual(["list", "watch", "audit"]);
     const badIo = io(root);
     expect(
       await runCli(["workflow", "run"], badIo.value),
