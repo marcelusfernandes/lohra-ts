@@ -3,6 +3,7 @@ import { hostname } from "node:os";
 import type Database from "better-sqlite3";
 
 import { LockRepository } from "../state/locks.js";
+import type { StateWarning } from "../state/locks.js";
 import type { Ownership } from "../state/workflow-repository.js";
 import { WorkflowRepository } from "../state/workflow-repository.js";
 import { RUN_LEASE_TTL, type OwnershipStore } from "./service.js";
@@ -31,6 +32,10 @@ export function productionOwnershipStore(
     readonly holder?: string;
     /** Injectable clock, seconds since epoch; defaults to the wall clock. */
     readonly now?: () => number;
+    // Issue #135: not yet threaded to WorkflowRepository/LockRepository —
+    // the type exists so the test(red) commit compiles against the
+    // assertion it adds; the next commit wires it through.
+    readonly warning?: (warning: StateWarning) => void;
   } = {},
 ): OwnershipStore {
   const holder = options.holder ?? productionHolder();

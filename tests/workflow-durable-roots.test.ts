@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { OrchestrationCore, type ChildRunner } from "../src/orchestration/core.js";
+import type { StateWarning } from "../src/state/index.js";
 import { openStateDatabase, WorkflowRepository, LockRepository } from "../src/state/index.js";
 import {
   OrchestrationChildRuntime,
@@ -109,6 +110,76 @@ describe("productionOwnershipStore (AC: built over the caller's own connection, 
     try {
       const store = productionOwnershipStore(connection.database, { now: () => 1234 });
       expect(store.ownershipOf().now).toBe(1234);
+    } finally {
+      connection.close();
+    }
+  });
+});
+
+// Issue #135 (follow-up of #125/#101, PR #133 reviewer finding 4): the
+// three production construction sites built `WorkflowRepository` with its
+// default no-op warning sink, so a STALE_FENCE_WRITE refusal — a
+// concurrent resume or a late heartbeat — vanished in silence. These two
+// tests fix that `productionOwnershipStore` accepts and threads a `warning`
+// sink to BOTH the repository and the locks it builds.
+describe("productionOwnershipStore (issue #135): threads the warning sink", () => {
+  it("passes the sink to the WorkflowRepository it builds — a refused owned write reaches it", () => {
+    const connection = tmpDatabase();
+    try {
+      const warnings: StateWarning[] = [];
+      const store = productionOwnershipStore(connection.database, {
+        warning: (warning) => warnings.push(warning),
+      });
+      const runId = "run-repo-sink";
+      // No lease was ever acquired for this run — any fenced write presents
+      // a fence that cannot match, the exact case `refuse()` guards.
+      const ok = store.repository.putRunState(runId, {
+        name: null,
+        owner: null,
+        status: "running",
+        pauseReason: null,
+        pausePayloadJson: null,
+        specJson: null,
+        argsJson: null,
+        tokenBudget: null,
+        tainted: false,
+        progressJson: null,
+        auditSegmentId: null,
+        updatedAt: 1000,
+        fence: 1,
+        holder: store.holder,
+        now: 1000,
+      });
+      expect(ok).toBe(false);
+      expect(warnings).toEqual([{ cause: "STALE_FENCE_WRITE", runId, fence: 1 }]);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("passes the SAME sink to the LockRepository it builds — a stale probe write reaches it too (coherence: tryWriteProbeRunState is exercised only by tests, never by production code)", () => {
+    const connection = tmpDatabase();
+    try {
+      const warnings: StateWarning[] = [];
+      const store = productionOwnershipStore(connection.database, {
+        holder: "holder-a",
+        now: () => 1000,
+        warning: (warning) => warnings.push(warning),
+      });
+      const runId = "run-lock-sink";
+      const first = store.locks.acquireRunLease(runId, store.holder, 1000, RUN_LEASE_TTL);
+      if (first === null) throw new Error("expected lease token");
+      // Release before re-acquiring: `workflow_run_locks.run_id` is a
+      // primary key, so a second acquisition while the first is still live
+      // would hit a UNIQUE constraint, not the fence check this test wants.
+      expect(store.locks.releaseRunLease(runId, store.holder)).toBe(true);
+      const second = store.locks.acquireRunLease(runId, store.holder, 1000, RUN_LEASE_TTL);
+      expect(second).not.toBeNull();
+      // "second" bumped the fence past "first" — a probe write presenting
+      // the now-stale "first" token is refused and warns.
+      const ok = store.locks.tryWriteProbeRunState(runId, store.holder, "running", 1000, first);
+      expect(ok).toBe(false);
+      expect(warnings).toEqual([{ cause: "STALE_FENCE_WRITE", runId, fence: first }]);
     } finally {
       connection.close();
     }
