@@ -60,9 +60,10 @@ tarball pula os dois em silêncio):
 - `pre-commit` do [lefthook](https://lefthook.dev) (`lefthook.yml`):
   `prettier --check` e `eslint` nos arquivos staged (`.ts`/`.mjs`/`.js`,
   `prettier` cobre também `.md`/`.yml`/`.json`) — um commit desformatado é
-  recusado antes de chegar ao CI. A instalação chama sempre
-  `lefthook install pre-commit`, nunca `lefthook install` sem argumento, que
-  reescreveria todo `.git/hooks` e apagaria o `pre-push` acima.
+  recusado antes de chegar ao CI. `lefthook install` sem argumento instala
+  todos os hooks do `lefthook.yml` e faz backup dos existentes; usamos
+  `install pre-commit` para que o `pre-push` nativo continue sendo o de
+  `.claude/hooks/git-pre-push`.
 
 ## Prova por issue
 
