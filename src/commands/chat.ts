@@ -48,7 +48,12 @@ import { formatProviderFailureMessage } from "../serialization/provider-error-me
 import { runChatBoundary } from "./chat-boundary.js";
 import { CHAT_TOOL_REGISTRY_FACTORIES } from "./chat-tools.js";
 import { composeSessionTools, createSessionToolBase } from "./session-tools.js";
-import { OrchestrationChildRuntime, WorkflowService } from "../workflow/index.js";
+import {
+  AuditTrail,
+  OrchestrationChildRuntime,
+  productionOwnershipStore,
+  WorkflowService,
+} from "../workflow/index.js";
 
 export interface ChatCommandOptions {
   // Both already resolved by cli.ts's single parseCommand(CHAT_SPEC, ...)
@@ -288,6 +293,12 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     runtime: new OrchestrationChildRuntime(orchestrationCore),
     environment: options.environment,
     homeRoot: options.home,
+    // Durable by default: the store is built over THIS root's own
+    // connection.database (#101), never a second one, and the leaf sandbox
+    // OrchestrationChildRuntime now installs (#107) is what lets its runs
+    // actually spawn tool-using leaves instead of denying them fail-closed.
+    store: productionOwnershipStore(connection.database),
+    auditTrail: new AuditTrail(sessionToolBase.auditRepository),
   });
   const tools = composeSessionTools({
     base: sessionToolBase,

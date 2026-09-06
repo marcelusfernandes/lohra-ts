@@ -13,6 +13,7 @@ export * from "./jsonio.js";
 export * from "./live-events.js";
 export * from "./nodes.js";
 export * from "./output-validation.js";
+export * from "./ownership-store.js";
 export * from "./pool.js";
 export * from "./policy.js";
 export * from "./progress.js";
