@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // scripts/mutations/media.ts — migração do runner de mídia (issue #151,
 // passo 0d do épico #13; o antigo run-mutations.ts de mídia agora é um
 // shim). 20 mutantes declarativos (media-catalog-persistence.ts,

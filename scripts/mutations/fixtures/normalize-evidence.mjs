@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // The declared normalization applied to the evidence artifacts this suite
 // DELIVERS, so a digest quoted in a handoff can be verified later.
 //

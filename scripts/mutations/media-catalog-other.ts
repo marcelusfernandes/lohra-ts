@@ -1,10 +1,9 @@
 // Os 7 mutantes de `media/source.ts` (4 edits), `media/errors.ts` (2
 // edits) e `tools/child.ts` (2 edits num único mutante) — issue #151,
-// passo 0d do épico #13. Migrados de
-// `scripts/parity/media/run-mutations.ts` (agora um shim); os `edits` de
-// todos os 7 são byte a byte os do runner antigo — só o oráculo
-// (`expected`/`probe`) muda, em quatro dos sete (disclosure completa, PR
-// #176 rodada 1: o corpo original citava 5/7 e omitia dois):
+// passo 0d do épico #13. Migrados do runner de paridade aposentado desta
+// área; os `edits` de todos os 7 são byte a byte os do runner antigo — só o
+// oráculo (`expected`/`probe`) muda, em quatro dos sete (disclosure
+// completa, PR #176 rodada 1: o corpo original citava 5/7 e omitia dois):
 //
 // - `unsafe-url-scheme`, `unsafe-url-loopback`, `unsafe-data`: `expected`
 //   tinha a chave `runner_calls`, que `actual` nunca produzia — `actual`

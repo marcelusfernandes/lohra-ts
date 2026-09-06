@@ -82,7 +82,7 @@ describe("catálogo de mutação workflow-audit-live (t17)", () => {
   // As duas checagens abaixo cobrem os dois arquivos do runner (catálogo +
   // orquestração), não só o catálogo: `git grep -n
   // "16b4785d\|/usr/bin/\|scripts/parity"` roda sobre `scripts/mutations/
-  // workflow-audit-live*.ts` inteiro (achado da rodada 1 da PR #170: um
+  // workflow-audit-live*.ts` inteiro (achado da rodada 1 da PR #174: um
   // shebang `#!/usr/bin/env node` herdado do runner antigo e comentários
   // citando os literais em `workflow-audit-live.ts` escaparam de um teste
   // que só olhava o catálogo).
