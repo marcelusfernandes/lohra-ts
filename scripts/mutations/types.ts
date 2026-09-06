@@ -1,7 +1,7 @@
 // Tipos compartilhados do harness de mutação (issue #148, passo 0a do épico
-// #13). Absorve o embrião de `scripts/parity/workflow-durability/mutants-types.ts`
+// #13). Absorve o embrião do `mutants-types.ts` legado de paridade
 // (`Edit`, `Focus`, `Mutant`) e acrescenta `MutationReport`, o formato comum
-// que os seis runners de `scripts/parity/**` hoje produzem de seis jeitos
+// que os seis runners legados de paridade hoje produzem de seis jeitos
 // diferentes (t16 tem `byCategory`; t20/t21 não têm `killed`/`total`/
 // `restoreGreen`). Nenhum runner é migrado nesta issue — só o tipo existe.
 //

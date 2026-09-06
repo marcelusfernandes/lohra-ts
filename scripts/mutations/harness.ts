@@ -1,15 +1,13 @@
 // Harness comum de mutação (issue #148, passo 0a do épico #13). Fatia a
-// família A que os seis runners de `scripts/parity/**` reimplementam cada um
-// à sua maneira (t16 `run-mutations.ts:772-826`, t15
-// `workflow-executor/run-mutations.ts:590-626`, t17
-// `workflow-audit-live/run-mutations.ts:536-570`):
+// família A que os runners legados de paridade reimplementavam cada um à
+// sua maneira antes da migração (t16, t15, t17):
 //
 //   git status --porcelain limpo -> git rev-parse HEAD -> mkdtemp ->
 //   git archive | tar -x -> symlink de node_modules -> aplicar edit
 //   exato-uma-vez -> vitest run <focal> -t <título> -> restaurar -> rodar
 //   verde de novo.
 //
-// Nada aqui importa de `scripts/parity/**` — as duas árvores são
+// Nada aqui importa da árvore legada de paridade — as duas árvores são
 // independentes (issue #148); a única coisa realmente compartilhada é
 // `canonical.ts`, copiado, não importado.
 import { spawnSync } from "node:child_process";
@@ -110,11 +108,21 @@ function isVitestJsonReport(value: unknown): value is VitestJsonReport {
 }
 
 /** Interpreta a saída de `vitest run --reporter=json` num `RunOutcome`
- * determinístico (sem timestamps/duração). Função pura. */
-export function parseVitestOutcome(stdout: string, exitCode: number | null): RunOutcome {
+ * determinístico (sem timestamps/duração). Função pura.
+ *
+ * TODO(#149): sem JSON balanceado no stdout, hoje devolve um sentinela
+ * (`<no json report>`, `ranTests: 0`) que `classify` pode ler como
+ * `killed: true` — um mutante que nunca rodou vira morto por engano
+ * (veredito da PR #170, reason 1). Precisa lançar em vez disso. */
+export function parseVitestOutcome(
+  stdout: string,
+  exitCode: number | null,
+  stderr = "",
+): RunOutcome {
   const start = stdout.indexOf("{");
   const end = stdout.lastIndexOf("}");
   if (start < 0 || end <= start) {
+    void stderr;
     return { exitCode, failedTests: ["<no json report>"], ranTests: 0 };
   }
   const parsed: unknown = JSON.parse(stdout.slice(start, end + 1));
@@ -147,6 +155,25 @@ export function runFocusedVitest(directory: string, focus: Focus): RunOutcome {
   );
   if (result.error !== undefined) throw result.error;
   return parseVitestOutcome(result.stdout, result.status);
+}
+
+// TODO(#149): guarda de baseline/restore que o runner original (t16
+// `run-mutations.ts:845,882`) já tinha e o harness ainda não oferece —
+// sem ela, um foco obsoleto (`-t` que não bate nada) sai `{exitCode:0,
+// ranTests:0}` e um `restoreAll` mal aplicado nunca é notado.
+export function assertBaselineGreen(_outcome: RunOutcome, _context: string): void {
+  throw new Error("not implemented");
+}
+
+export function assertRestoreGreen(_outcome: RunOutcome): boolean {
+  throw new Error("not implemented");
+}
+
+/** Roda `vitest run <files...>` (sem `-t`) dentro de `directory` — a forma
+ * que t15 usa: a mesma bateria de arquivos focais roda inteira para cada
+ * mutante, sem afunilar num teste único. */
+export function runVitestFiles(_directory: string, _files: readonly string[]): RunOutcome {
+  throw new Error("not implemented");
 }
 
 /** Um mutante só é `killed` quando o processo saiu com código diferente de

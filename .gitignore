@@ -5,6 +5,7 @@ coverage/
 .env
 .DS_Store
 .parity-evidence/
+.mutation-evidence/
 .probe-evidence/
 .live-smoke-evidence/
 .oracle-venv/

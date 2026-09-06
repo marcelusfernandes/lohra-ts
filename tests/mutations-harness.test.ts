@@ -4,9 +4,17 @@
 // `tests/helpers/controle-negativo-repo.ts` `novoRepo`/`commitTudo`, mas com
 // um helper próprio aqui porque o formato do repo fake é diferente — não há
 // `package.json`/script de prova envolvido, só arquivos e commits).
+//
+// Issue #149 (veredito da PR #170, rodada 1) fecha três lacunas que a
+// migração dos runners de t15/t16 herdaria se o harness não as fechasse
+// primeiro: guarda de baseline/restore (`assertBaselineGreen`/
+// `assertRestoreGreen`), o sentinela `<no json report>` virando `killed`
+// (agora lança — é falha do harness, não um mutante morto), e `stderr` nas
+// mensagens de erro de subprocesso.
 import { spawnSync } from "node:child_process";
 import {
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -20,11 +28,14 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   applyEditExactlyOnce,
+  assertBaselineGreen,
+  assertRestoreGreen,
   classify,
   parseVitestOutcome,
   prepareArchiveSandbox,
   replaceExactlyOnce,
   restoreAll,
+  runVitestFiles,
   snapshotFiles,
   writeReport,
 } from "../scripts/mutations/harness.js";
@@ -140,9 +151,44 @@ describe("parseVitestOutcome", () => {
     expect(outcome).toEqual({ exitCode: 1, failedTests: ["b falha"], ranTests: 2 });
   });
 
-  it("sem json no stdout, devolve marcador de relatório ausente", () => {
-    const outcome = parseVitestOutcome("saída sem chaves balanceadas", 1);
-    expect(outcome).toEqual({ exitCode: 1, failedTests: ["<no json report>"], ranTests: 0 });
+  it("sem json no stdout, lança em vez de virar sentinela killed=true (#170, reason 1)", () => {
+    expect(() => parseVitestOutcome("saída sem chaves balanceadas", 1)).toThrow(/no json report/i);
+  });
+
+  it("sem json no stdout, a mensagem carrega o stderr do subprocesso", () => {
+    expect(() =>
+      parseVitestOutcome("saída sem chaves balanceadas", 1, "vitest: module not found"),
+    ).toThrow(/vitest: module not found/);
+  });
+});
+
+describe("assertBaselineGreen", () => {
+  it("não lança quando o baseline saiu 0 e rodou ao menos um teste", () => {
+    expect(() => {
+      assertBaselineGreen({ exitCode: 0, failedTests: [], ranTests: 3 }, "foco x");
+    }).not.toThrow();
+  });
+
+  it("lança quando o exitCode não é 0 (run-mutations.ts:845)", () => {
+    expect(() => {
+      assertBaselineGreen({ exitCode: 1, failedTests: ["a"], ranTests: 3 }, "foco x");
+    }).toThrow(/foco x/);
+  });
+
+  it("lança quando ranTests é 0 mesmo com exitCode 0 — foco obsoleto (-t inexistente)", () => {
+    expect(() => {
+      assertBaselineGreen({ exitCode: 0, failedTests: [], ranTests: 0 }, "foco x");
+    }).toThrow(/foco x/);
+  });
+});
+
+describe("assertRestoreGreen", () => {
+  it.each([
+    [{ exitCode: 0, failedTests: [], ranTests: 3 }, true],
+    [{ exitCode: 1, failedTests: [], ranTests: 3 }, false],
+    [{ exitCode: 0, failedTests: [], ranTests: 0 }, false],
+  ] as const)("assertRestoreGreen(%j) -> %s (run-mutations.ts:882)", (outcome, expected) => {
+    expect(assertRestoreGreen(outcome)).toBe(expected);
   });
 });
 
@@ -218,6 +264,33 @@ describe("prepareArchiveSandbox", () => {
     const after = readdirSync(tmpdir()).filter((name) => name.startsWith("lohra-mutations-"));
     expect(after).toEqual(before);
   });
+
+  it("a mensagem de erro carrega o stderr do subprocesso (#170, reason 4)", () => {
+    const dir = novoRepoGit();
+    writeFileSync(join(dir, "a.txt"), "a\n");
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-q", "-m", "inicial"]);
+
+    expect(() => prepareArchiveSandbox(dir, "0000000000000000000000000000000000000000")).toThrow(
+      /fatal:/,
+    );
+  });
+});
+
+describe("runVitestFiles", () => {
+  it("roda múltiplos arquivos sem `-t` e devolve o outcome agregado", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mutations-harness-runfiles-"));
+    workdirs.push(dir);
+    mkdirSync(join(dir, "node_modules/.bin"), { recursive: true });
+    writeFileSync(
+      join(dir, "node_modules/.bin/vitest"),
+      "#!/bin/sh\nprintf '%s' \"$*\" 1>&2\nprintf '{}'\n",
+      { mode: 0o755 },
+    );
+
+    const outcome = runVitestFiles(dir, ["tests/a.test.ts", "tests/b.test.ts"]);
+    expect(outcome).toEqual({ exitCode: 0, failedTests: [], ranTests: 0 });
+  });
 });
 
 describe("scripts/mutations não depende de scripts/parity", () => {
@@ -228,5 +301,18 @@ describe("scripts/mutations não depende de scripts/parity", () => {
     for (const line of importLines) {
       expect(line).not.toMatch(/parity/);
     }
+  });
+
+  it("nenhum arquivo em scripts/mutations/ menciona scripts/parity, nem em comentário (issue #149, AC 1)", () => {
+    const mutationsDir = resolve(repoRoot, "scripts/mutations");
+    const entries = readdirSync(mutationsDir, { recursive: true }) as string[];
+    const offenders: string[] = [];
+    for (const entry of entries) {
+      const path = join(mutationsDir, entry);
+      if (lstatSync(path).isDirectory()) continue;
+      const contents = readFileSync(path, "utf8");
+      if (contents.includes("scripts/parity")) offenders.push(entry);
+    }
+    expect(offenders).toEqual([]);
   });
 });

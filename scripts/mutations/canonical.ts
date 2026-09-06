@@ -1,7 +1,7 @@
-// Cópia de `scripts/parity/canonical.ts` (issue #148): `scripts/mutations/**`
-// não importa nada de `scripts/parity/**`, então o pouco que é realmente
-// compartilhado — serialização JSON com chaves ordenadas e hash — vem junto
-// em vez de virar uma dependência cruzada entre os dois diretórios.
+// Cópia do `canonical.ts` legado de paridade (issue #148): `scripts/mutations/**`
+// não importa nada da árvore legada de paridade, então o pouco que é
+// realmente compartilhado — serialização JSON com chaves ordenadas e hash —
+// vem junto em vez de virar uma dependência cruzada entre os dois diretórios.
 import { createHash } from "node:crypto";
 
 function sortValue(value: unknown): unknown {
