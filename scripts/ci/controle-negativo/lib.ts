@@ -92,8 +92,8 @@ export function ehCommitTestRed(subject: string): boolean {
 // vermelho compilar. Mesma convenção do Apollo (`hasDeclaredThrowingStub`,
 // `.../tools/ci/lib/negative-control.mjs`); `(?!\+\+)` exclui o cabeçalho.
 //
-// Issue #62 tentou excluir linhas que só COMENTAM o stub checando se a
-// linha adicionada começava com `//`/`*` logo após o `+` — mas isso deixava
+// Issue #62 excluía linhas que só COMENTAM o stub checando se a linha
+// adicionada começava com `//`/`*` logo após o `+` — mas isso deixava
 // passar (fail-open real, issue #78): um comentário de bloco de uma linha
 // só (`/** throw new Error( */`, `/* throw new Error( */` — não começam
 // com `//` nem com `*` sozinho) e um comentário de linha que não está no
@@ -101,13 +101,20 @@ export function ehCommitTestRed(subject: string): boolean {
 //
 // Correção (issue #78): juntar todas as linhas ADICIONADAS do diff (sem o
 // `+` do marcador, preservando a ordem — um comentário de bloco pode abrir
-// numa linha e fechar noutra), remover dali os comentários de linha (`//`
-// até o fim da linha) e de bloco (`/* … */`, non-greedy — pode juntar dois
-// blocos separados por engano; aceitável, o objetivo é fail-closed, não um
-// parser de verdade), e só então procurar `throw new Error(` no que
-// sobrar. Ignorar ocorrências dentro de strings não é necessário (mesma
-// issue).
+// numa linha e fechar noutra DESDE QUE as duas também sejam linhas
+// adicionadas), remover dali os comentários de linha (`//` até o fim da
+// linha) e de bloco (`/* … */`, non-greedy — pode juntar dois blocos
+// separados por engano; aceitável, o objetivo é fail-closed, não um parser
+// de verdade). A remoção de bloco sozinha NÃO cobre o caso em que o
+// abridor/fechador do bloco (`/**`/`*/`) são linhas de CONTEXTO (só a
+// continuação foi tocada, um `git show` de uma edição dentro de um bloco
+// já existente) — para esse caso, a heurística da #62 (excluir linha que
+// começa com `*`, depois de remover comentários de linha/bloco) continua
+// necessária: código de produção de verdade nunca começa uma linha com
+// `*`. Só então procura `throw new Error(` no que sobrar. Ignorar
+// ocorrências dentro de strings não é necessário (mesma issue).
 const LINHA_ADICIONADA_RE = /^\+(?!\+\+)(.*)$/gm;
+const LINHA_CONTINUACAO_DE_BLOCO_RE = /^\s*\*/;
 const THROW_NEW_ERROR_RE = /\bthrow\s+new\s+Error\(/;
 
 /** Conteúdo (sem o `+`) de cada linha ADICIONADA de um diff, na ordem
@@ -118,9 +125,15 @@ function linhasAdicionadas(diffTexto: string): string {
     .join("\n");
 }
 
-/** Remove comentários de bloco e de linha de um trecho de código. */
+/** Remove comentários de bloco e de linha, e qualquer linha remanescente
+ * que seja só a continuação de um bloco cujo abridor não foi capturado
+ * (ver o comentário acima de `LINHA_CONTINUACAO_DE_BLOCO_RE`). */
 function removerComentarios(codigo: string): string {
-  return codigo.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  const semBlocoNemLinha = codigo.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  return semBlocoNemLinha
+    .split("\n")
+    .filter((linha) => !LINHA_CONTINUACAO_DE_BLOCO_RE.test(linha))
+    .join("\n");
 }
 
 /**
