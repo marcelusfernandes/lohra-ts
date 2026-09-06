@@ -1,6 +1,4 @@
-// `pythonInt` is limits.ts's own export name (owned by PR #92, issue #73 —
-// out of Files for #94); aliased here so this file's own body never spells
-// it out. Renaming the export itself is limits.ts's call, tracked in #18.
+// Aliased: limits.ts still exports the old name; renaming it is #73's call.
 import { clampFlagMinOne, positiveIntEnv, pythonInt as parseIntStrict } from "./limits.js";
 
 export interface FanoutResolution {
