@@ -38,7 +38,12 @@ import { OpenAIImagesAdapter } from "../media/index.js";
 import { registerConfiguredMcpServers, type MCPManager } from "../mcp/index.js";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { OrchestrationChildRuntime, WorkflowService } from "../workflow/index.js";
+import {
+  AuditTrail,
+  OrchestrationChildRuntime,
+  productionOwnershipStore,
+  WorkflowService,
+} from "../workflow/index.js";
 import { composeSessionTools, createSessionToolBase } from "./session-tools.js";
 import { CronStore } from "../cron/store.js";
 import { runSchedulerLoop } from "../cron/scheduler.js";
@@ -213,6 +218,12 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     runtime: new OrchestrationChildRuntime(orchestrationCore),
     environment: options.environment,
     homeRoot: options.home,
+    // Durable by default: the store is built over THIS root's own
+    // connection.database (#101), never a second one, and the leaf sandbox
+    // OrchestrationChildRuntime now installs (#107) is what lets its runs
+    // actually spawn tool-using leaves instead of denying them fail-closed.
+    store: productionOwnershipStore(connection.database),
+    auditTrail: new AuditTrail(toolBase.auditRepository),
   });
   const visionRunner = createModelTransport();
   const sessionTools = composeSessionTools({

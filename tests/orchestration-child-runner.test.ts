@@ -361,4 +361,51 @@ describe("createChildRunner", () => {
     expect(port.requests).toHaveLength(0);
     close();
   });
+
+  // Issue #101/#107: the workflow leaf sandbox wraps the CHILD allow-list
+  // dispatch (childDispatch), never bypasses it, and — reverting
+  // child-runner.ts's `config.wrapDispatch === undefined ? childDispatch :
+  // config.wrapDispatch(childDispatch)` line to always use childDispatch —
+  // this is the test that catches it: the wrap's own denial must reach the
+  // model's tool message, and baseDispatch (the real tool) must never run.
+  it("SpawnConfig.wrapDispatch wraps the child dispatch, so a denying wrap's own text reaches the tool result and the real tool never runs (#101/#107)", async () => {
+    const { sessions, close } = setup();
+    sessions.createSession({ id: "parent-1", source: "gateway" });
+    const parentProfile = getProviderProfile("openai");
+    if (parentProfile === null) throw new Error("openai profile missing");
+    const { client, port } = fakeClient([
+      toolCallStream("read_file", '{"path":"x"}', "call_wrap_1"),
+      assistantStream("after tool"),
+    ]);
+    const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
+    let baseDispatchCalls = 0;
+    const baseDispatch = (): Promise<string> => {
+      baseDispatchCalls += 1;
+      return Promise.resolve(JSON.stringify({ ok: true, result: "should not be reached" }));
+    };
+    const runner = makeRunner(sessions, pool, { baseDispatch });
+
+    const config: SpawnConfig = {
+      prompt: "do the thing",
+      wrapDispatch: (base) => (name, args) => {
+        // A real sandbox wrap decides fs/egress/taint BEFORE ever calling
+        // `base` — this fixture never calls it either, standing in for a
+        // denial, and asserts on that never happening below.
+        void base;
+        return Promise.resolve(`DENIED:${name}:${JSON.stringify(args)}`);
+      },
+    };
+    const result = await runner("child-wrap-1", config, "SYS", () => [], noSignal);
+
+    expect(result.status).toBe("complete");
+    expect(result.output).toBe("after tool");
+    expect(baseDispatchCalls).toBe(0);
+    expect(port.requests).toHaveLength(2);
+    const secondBody = JSON.parse(port.requests[1]?.body ?? "null") as {
+      messages: readonly { role: string; content: string }[];
+    };
+    const toolMessage = secondBody.messages.find((message) => message.role === "tool");
+    expect(toolMessage?.content).toBe('DENIED:read_file:{"path":"x"}');
+    close();
+  });
 });
