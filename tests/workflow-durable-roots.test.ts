@@ -1,16 +1,18 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import { OrchestrationCore, type ChildRunner } from "../src/orchestration/core.js";
+import { orchestrationMutants } from "../scripts/parity/workflow-durability/mutants-orchestration.js";
 import type { StateWarning } from "../src/state/index.js";
 import { openStateDatabase, WorkflowRepository, LockRepository } from "../src/state/index.js";
 import {
   OrchestrationChildRuntime,
   productionHolder,
   productionOwnershipStore,
+  productionWarningSink,
   RUN_LEASE_TTL,
   SqliteWorkflowCache,
   WorkflowService,
@@ -264,5 +266,60 @@ describe("OrchestrationChildRuntime + productionOwnershipStore: durable launch w
     } finally {
       connection.close();
     }
+  });
+});
+
+// Issue #143 — the `qa` follow-up to PR #139 (mutation (c) on
+// `ownership-store.ts:36`): every existing test that exercises
+// `productionWarningSink` injects its OWN `write` and asserts the
+// structured `StateWarning` object, never the LINE the default sink writes
+// to `write` (`workflow: <cause> run=<runId> fence=<fence>`). Dropping the
+// `workflow: ` prefix — the actual mutation the `qa` pasted — left the
+// whole suite green. This test calls `productionWarningSink` directly with
+// a spy `write` and asserts the exact formatted line.
+describe("productionWarningSink (issue #143): the exact formatted line", () => {
+  it("formats a warning as workflow: <cause> run=<runId> fence=<fence>", () => {
+    const lines: string[] = [];
+    const sink = productionWarningSink((line) => lines.push(line));
+    sink({ cause: "STALE_FENCE_WRITE", runId: "run-143", fence: 7 });
+    expect(lines).toEqual(["workflow: STALE_FENCE_WRITE run=run-143 fence=7"]);
+  });
+});
+
+// Molded on `tests/orchestration-child-runner-mutation-catalog.test.ts`
+// (#112) and its siblings in `tests/workflow-shutdown.test.ts` (#129) and
+// `tests/workflow-progress-cobertura.test.ts` (#138): pins the catalog
+// entry's `before` as exact source text ahead of the slower
+// `npm run mutations:t16`, so a drift in `ownership-store.ts`'s format
+// string fails here first.
+const ownershipStoreSource = readFileSync(
+  resolve(__dirname, "..", "src/workflow/ownership-store.ts"),
+  "utf8",
+);
+
+const SINK_PREFIX_MUTANT_ID = "ar/sink-drops-the-workflow-prefix";
+
+function occurrences(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
+}
+
+describe("mutations:t16 catalog pins ownership-store.ts's warning line format (#143)", () => {
+  const mutant = orchestrationMutants.find((candidate) => candidate.id === SINK_PREFIX_MUTANT_ID);
+
+  it(`mutants-orchestration.ts declares ${SINK_PREFIX_MUTANT_ID}`, () => {
+    expect(mutant).toBeDefined();
+  });
+
+  it(`${SINK_PREFIX_MUTANT_ID}'s pinned "before" occurs exactly once, verbatim, in ownership-store.ts`, () => {
+    const before = mutant?.edits[0]?.before ?? "";
+    expect(before.length).toBeGreaterThan(0);
+    expect(occurrences(ownershipStoreSource, before)).toBe(1);
+  });
+
+  it(`${SINK_PREFIX_MUTANT_ID}'s focus names this file's format test`, () => {
+    expect(mutant?.focus.file).toBe("tests/workflow-durable-roots.test.ts");
+    expect(mutant?.focus.test).toBe(
+      "formats a warning as workflow: <cause> run=<runId> fence=<fence>",
+    );
   });
 });
