@@ -131,6 +131,95 @@ function tableCount(root: string, table: string): number {
   }
 }
 
+/**
+ * Issue #121, AC 2: same shape as `startDurableChatServer`, but the leaf's
+ * response is held for `leafDelayMs` — a real setTimeout, not a gate this
+ * test releases by hand — so it is still in flight (mid HTTP round trip)
+ * when both main turns are done and chat.ts's `finally` reaches
+ * `orchestrationCore.shutdown()` (chat.ts:388). That drain cooperatively
+ * waits for the leaf's real response, exercising the same race
+ * `workflowService.shutdown()` (chat.ts:397) exists to lose on purpose:
+ * the run's own completion handler releases its lease before
+ * `connection.close()`, instead of racing it.
+ */
+function startGatedLeafChatServer(leafDelayMs: number): {
+  readonly server: Server;
+  readonly port: number;
+} {
+  let mainCalls = 0;
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+        readonly messages: readonly Readonly<Record<string, unknown>>[];
+      };
+      const respond = (payload: Readonly<Record<string, unknown>>): void => {
+        const text = JSON.stringify(payload);
+        response.writeHead(200, {
+          "content-type": "application/json",
+          "content-length": String(Buffer.byteLength(text)),
+        });
+        response.end(text);
+      };
+      if (isLeafRequest(body.messages)) {
+        setTimeout(() => {
+          respond(chatResponse("leaf", { role: "assistant", content: "leaf done" }, "stop"));
+        }, leafDelayMs);
+        return;
+      }
+      mainCalls += 1;
+      respond(
+        mainCalls === 1
+          ? chatResponse(
+              "main-1",
+              {
+                role: "assistant",
+                content: null,
+                tool_calls: [
+                  {
+                    id: "call-run-workflow",
+                    type: "function",
+                    function: {
+                      name: "run_workflow",
+                      arguments: JSON.stringify({ spec: workflowSpec() }),
+                    },
+                  },
+                ],
+              },
+              "tool_calls",
+            )
+          : chatResponse("main-2", { role: "assistant", content: "workflow started" }, "stop"),
+      );
+    });
+  });
+  return { server, port: 0 };
+}
+
+function soleRunId(root: string): string {
+  const connection = openStateDatabase(join(root, ".lohra", "state.db"));
+  try {
+    const row = connection.database.prepare("SELECT run_id FROM workflow_run_state").get() as
+      { run_id: string } | undefined;
+    if (row === undefined) throw new Error("expected exactly one workflow_run_state row");
+    return row.run_id;
+  } finally {
+    connection.close();
+  }
+}
+
+function lockCountFor(root: string, runId: string): number {
+  const connection = openStateDatabase(join(root, ".lohra", "state.db"));
+  try {
+    const row = connection.database
+      .prepare("SELECT count(*) AS n FROM workflow_run_locks WHERE run_id = ?")
+      .get(runId) as { n: number | bigint };
+    return Number(row.n);
+  } finally {
+    connection.close();
+  }
+}
+
 describe("chat.ts composition root (issue #101, AC 3): run_workflow via runChat persists durably", () => {
   it("after a turn that dispatches run_workflow, workflow_run_state and workflow_run_spend have at least one row", async () => {
     const root = mkdtempSync(join(tmpdir(), "lohra-t101-durable-chat-"));
@@ -181,6 +270,54 @@ describe("chat.ts composition root (issue #101, AC 3): run_workflow via runChat 
       // orchestrationCore.shutdown() first), the queued record has had many
       // event-loop turns to drain.
       expect(tableCount(root, "workflow_audit_events")).toBeGreaterThan(0);
+    } finally {
+      await closeServer(server);
+    }
+  });
+});
+
+describe("chat.ts composition root (issue #121, AC 2): shutdown() releases a still-gated leaf's lease", () => {
+  it("workflow_run_locks is empty right after runChat, even though the leaf was still gated when the turn ended", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-t121-shutdown-roots-"));
+    roots.push(root);
+    const { server } = startGatedLeafChatServer(250);
+    await new Promise<void>((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("missing test port");
+      const provider = "t121-shutdown-roots-probe";
+      registerProvider({
+        name: provider,
+        apiMode: "chat_completions",
+        aliases: [],
+        displayName: "T121 shutdown roots probe",
+        description: "Local in-memory composition-root probe (issue #121).",
+        signupUrl: "",
+        envVars: [],
+        baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
+        modelsUrl: "",
+        requiresApiKey: false,
+        supportsVision: false,
+        fallbackModels: ["t121-shutdown-roots-model"],
+        defaultMaxTokens: 256,
+        defaultAuxModel: "",
+      });
+      const result = await runChat({
+        input: "run the shutdown-roots workflow",
+        flags: new Map<string, string | true>([
+          ["--provider", provider],
+          ["--model", "t121-shutdown-roots-model"],
+          ["--json", true],
+          ["--no-input", true],
+        ]),
+        environment: { HOME: root, PATH: process.env.PATH ?? "" },
+        home: join(root, ".lohra"),
+        codexHome: join(root, ".codex"),
+        cwd: root,
+      });
+      expect(result.code).toBe(0);
+      const runId = soleRunId(root);
+      expect(lockCountFor(root, runId)).toBe(0);
     } finally {
       await closeServer(server);
     }
