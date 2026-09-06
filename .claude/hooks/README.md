@@ -6,17 +6,15 @@ são **fail-closed** se node faltar (o `stop-gate.sh` é **fail-open**: avisa e
 segue, porque o agente não tem como instalar node encerrando ou não o turno). Portados do Apollo (`tacit-wl/apollo`). O
 repositório é público desde 2026-09-05, então a camada 3 é um ruleset real.
 
-| camada | peça                                   | onde vale                         | o que faz                                                                                                                                                                                                                                                                                 |
-| ------ | -------------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1      | `protege-main.sh` (PreToolUse Bash)    | sessões Claude Code               | nega force-push (sem válvula), push em `main`, apagar `main`, `gh pr merge --admin` (sem válvula), `gh pr merge` sem checks verdes + `review:approved`                                                                                                                                    |
-| 1      | `protege-escrita.sh` (PreToolUse Edit) | sessões Claude Code               | nega escrita em `docs/reference/**` e `lohra/**`; resolve symlink que escapa                                                                                                                                                                                                              |
-| 1      | `stop-gate.sh` (Stop)                  | sessões Claude Code               | tsc + `npm run prova -- <slug>` da branch; exit 2 até a prova ficar verde; **fail-open** sem node (avisa e segue); bancada em `tests/stop-gate.test.ts`                                                                                                                                   |
-| 2      | `git-pre-push` (hook git nativo)       | qualquer `git push` desta máquina | recusa push em `main` e push não fast-forward; instalado por `instalar-git-hooks.sh` via `postinstall`                                                                                                                                                                                    |
-| 3      | ruleset da `main` (GitHub)             | servidor                          | PR obrigatória, seis checks required (`checks (20)`, `checks (22)`, `provenance`, `escopo`, `contratos`, `controle-negativo` — #60), só merge commit, sem force-push, sem delete — `scripts/github/ruleset.sh` (aplicado em 2026-09-05 com três checks; reaplicar com seis é gate humano) |
-| 4      | `guarda-main.yml` (Action)             | servidor, pós-push                | commit em `main` sem PR → issue `human` + job falha                                                                                                                                                                                                                                       |
-
-Outros hooks: `format-file.sh` (PostToolUse Edit|Write: prettier + eslint --fix,
-nunca bloqueia) e `stop-gate.sh` (Stop, abaixo).
+| camada | peça                                       | onde vale                         | o que faz                                                                                                                                                                                                                                                                                 |
+| ------ | ------------------------------------------ | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1      | `protege-main.sh` (PreToolUse Bash)        | sessões Claude Code               | nega force-push (sem válvula), push em `main`, apagar `main`, `gh pr merge --admin` (sem válvula), `gh pr merge` sem checks verdes + `review:approved`                                                                                                                                    |
+| 1      | `protege-escrita.sh` (PreToolUse Edit)     | sessões Claude Code               | nega escrita em `docs/reference/**` e `lohra/**`; resolve symlink que escapa                                                                                                                                                                                                              |
+| 1      | `stop-gate.sh` (Stop)                      | sessões Claude Code               | tsc + `npm run prova -- <slug>` da branch; exit 2 até a prova ficar verde; **fail-open** sem node (avisa e segue); bancada em `tests/stop-gate.test.ts`                                                                                                                                   |
+| 2      | `git-pre-push` (hook git nativo)           | qualquer `git push` desta máquina | recusa push em `main` e push não fast-forward; instalado por `instalar-git-hooks.sh` via `postinstall`                                                                                                                                                                                    |
+| 3      | ruleset da `main` (GitHub)                 | servidor                          | PR obrigatória, seis checks required (`checks (20)`, `checks (22)`, `provenance`, `escopo`, `contratos`, `controle-negativo` — #60), só merge commit, sem force-push, sem delete — `scripts/github/ruleset.sh` (aplicado em 2026-09-05 com três checks; reaplicar com seis é gate humano) |
+| 4      | `guarda-main.yml` (Action)                 | servidor, pós-push                | commit em `main` sem PR → issue `human` + job falha                                                                                                                                                                                                                                       |
+| —      | `format-file.sh` (PostToolUse Edit\|Write) | sessões Claude Code               | prettier + `eslint --fix` no arquivo editado; nunca bloqueia                                                                                                                                                                                                                              |
 
 ## Stop gate (`stop-gate.sh`, issue #43)
 
@@ -64,7 +62,11 @@ deixa de ser necessário para PR de docs.
 contenha `.claude/settings.json` — worktree de agente é raiz própria; `lohra/`
 (repo aninhado sem settings) cai na raiz do projeto. Alvo que resolve para fora
 de qualquer repo é permitido (scratchpad), salvo quando o caminho textual está
-dentro da raiz do cwd — symlink que foge — que é negado.
+dentro da raiz do cwd — symlink que foge — que é negado. **Limitação
+declarada** (#77): com o cwd fora de qualquer repositório e sem
+`CLAUDE_PROJECT_DIR`, não há raiz para comparar, e um alvo que resolve por
+symlink para fora de qualquer repo é permitido — o caso não ocorre numa sessão
+aberta no repo, que é o único cenário suportado.
 
 **Teto do `stop-gate`**: três bloqueios consecutivos da prova (payload
 `stop_hook_active`) liberam o turno com aviso; contador em
@@ -101,4 +103,6 @@ printf 'refs/heads/x abc refs/heads/main def\n' | .claude/hooks/git-pre-push ori
 ```
 
 `exit=2` é negação (hooks do Claude Code); `exit=1` é recusa (hook do git). A
-bancada automatizada dos hooks é o épico #36.
+bancada automatizada está em `tests/protege-main.test.ts`,
+`tests/protege-escrita.test.ts` e `tests/stop-gate.test.ts`
+(`npm run prova -- bancada-hooks`).
