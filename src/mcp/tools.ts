@@ -1,4 +1,4 @@
-import { isPythonTruthy } from "../serialization/python-truthy.js";
+import { hasJsonValue } from "../serialization/json-presence.js";
 import { toolError, toolResult } from "../tools/envelope.js";
 import { ToolRegistrationCollisionError, type ToolRegistry } from "../tools/registry.js";
 import type { ToolFunctionSchema, ToolHandler } from "../tools/types.js";
@@ -47,7 +47,7 @@ export function convertMcpSchema(tool: unknown): ToolFunctionSchema {
   const parameters = field<unknown>(tool, "inputSchema", undefined);
   const description = field<unknown>(tool, "description", "");
   return {
-    description: isPythonTruthy(description) ? description : "",
+    description: hasJsonValue(description) ? description : "",
     parameters:
       parameters !== null && typeof parameters === "object" && !Array.isArray(parameters)
         ? (parameters as Readonly<Record<string, unknown>>)
@@ -70,7 +70,7 @@ export function wrapCallResult(result: unknown): string {
   for (const block of blocks) {
     if (field<unknown>(block, "type", undefined) === "text") {
       const text = field<unknown>(block, "text", "");
-      parts.push(isPythonTruthy(text) ? text : "");
+      parts.push(hasJsonValue(text) ? text : "");
     } else {
       const type = field<unknown>(block, "type", "content");
       // JSON.stringify returns the JS value `undefined` (not a string) for a
@@ -134,7 +134,7 @@ export function prepareServerTools(
   const registrations: ToolRegistration[] = [];
   for (const tool of tools) {
     const original = field<unknown>(tool, "name", undefined);
-    if (!isPythonTruthy(original)) continue;
+    if (!hasJsonValue(original)) continue;
     if (typeof original !== "string") {
       throw new MCPToolListError(
         `MCP server ${JSON.stringify(server)} returned a truthy non-string tool name: ${JSON.stringify(original)}`,

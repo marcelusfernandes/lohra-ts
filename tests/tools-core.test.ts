@@ -5,8 +5,8 @@ import {
   ToolRegistry,
   composeDispatch,
   detectDangerousCommand,
+  jsonNumberKind,
   parseToolArguments,
-  pythonNumberKind,
   runBounded,
   toolError,
   toolResult,
@@ -125,10 +125,10 @@ describe("tool argument parsing and dispatch composition", () => {
     expect(parseToolArguments(raw)).toEqual({});
   });
 
-  it("retains Python JSON numeric categories instead of raw lexemes", () => {
-    expect(pythonNumberKind(parseToolArguments('{"timeout":1}'), "timeout")).toBe("int");
+  it("retains JSON numeric categories instead of raw lexemes", () => {
+    expect(jsonNumberKind(parseToolArguments('{"timeout":1}'), "timeout")).toBe("int");
     for (const raw of ['{"timeout":1.0}', '{"timeout":2.50}', '{"timeout":1e0}']) {
-      expect(pythonNumberKind(parseToolArguments(raw), "timeout")).toBe("float");
+      expect(jsonNumberKind(parseToolArguments(raw), "timeout")).toBe("float");
     }
   });
 

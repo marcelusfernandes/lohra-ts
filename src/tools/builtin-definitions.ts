@@ -1,6 +1,7 @@
 import type { ToolDefinition } from "./types.js";
 
-// Generated from the pinned Python oracle registry. Preserve definition and key order.
+// Built-in tool schema registry. Definition and key order is a contract:
+// consumers rely on this exact shape and ordering.
 export const BUILTIN_DEFINITIONS = [
   {
     type: "function",
