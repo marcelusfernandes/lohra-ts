@@ -138,13 +138,24 @@ async function main(): Promise<number> {
         gets: runtime.sequence.filter((entry) => entry.startsWith("GET ")).length,
         posts: runtime.posts,
         sequence: runtime.sequence,
-        // A porta de fato vinculada pelo stub (server undefined quando
-        // config.stub.state === "down" — nenhum bind aconteceu). Único
-        // jeito de um teste que roda o driver como processo filho saber
-        // qual porta efêmera (config.port === 0) foi atribuída pelo SO,
-        // sem depender de um número fixo e conhecido (issue #3).
-        port: server === undefined ? null : activePort,
       }),
+    );
+    // A porta de fato vinculada pelo stub (null quando config.stub.state
+    // === "down" — nenhum bind aconteceu), num arquivo à parte de
+    // summary.json: summary.json é capturado inteiro e comparado por
+    // igualdade canônica exata em dezenas de manifests de paridade
+    // (scripts/parity/capture.ts, scripts/parity/compare.ts) — um campo a
+    // mais ali quebraria essa comparação. `dirname(path)` (o diretório do
+    // próprio config.json, `paths.root` em harness.ts) nunca é um
+    // `CaptureRoot` ("home" | "profile" — scripts/parity/types.ts) e
+    // nenhum tree/sqlite/events capture o alcança, então um arquivo novo
+    // ali não pode colidir com nenhum manifest existente. Único jeito de
+    // um teste que roda o driver como processo filho saber qual porta
+    // efêmera (config.port === 0) foi atribuída pelo SO, sem depender de
+    // um número fixo e conhecido (issue #3).
+    writeFileSync(
+      join(dirname(path), "stub-port.json"),
+      JSON.stringify({ port: server === undefined ? null : activePort }),
     );
     writeFileSync(
       config.logs.assertions,

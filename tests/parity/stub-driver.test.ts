@@ -2,9 +2,11 @@
 // paralelo (e com um Ollama real na máquina do dev). Os testes abaixo que
 // exercitam a vinculação de porta usam `port: 0` no config (porta efêmera,
 // atribuída pelo SO) e leem a porta de fato vinculada de volta em
-// `summary.json` — o driver a reporta ali porque é a única saída que
-// sobrevive ao processo filho encerrar. Nenhum teste deste arquivo vincula
-// mais um número de porta fixo e conhecido.
+// `stub-port.json` — um arquivo à parte de `summary.json`, que precisa
+// continuar byte-idêntico ao de antes porque dezenas de manifests de
+// paridade o comparam por igualdade canônica exata (rodada 1 desta PR).
+// Nenhum teste deste arquivo vincula mais um número de porta fixo e
+// conhecido.
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
@@ -41,14 +43,14 @@ async function bindPort(port: number): Promise<void> {
 }
 
 function stubPortFromSummary(root: string): number {
-  const summary = JSON.parse(readFileSync(join(root, "summary.json"), "utf8")) as {
+  const stubPort = JSON.parse(readFileSync(join(root, "stub-port.json"), "utf8")) as {
     readonly port?: number | null;
   };
   expect(
-    summary.port,
-    "o driver precisa reportar a porta efêmera que de fato vinculou em summary.json",
+    stubPort.port,
+    "o driver precisa reportar a porta efêmera que de fato vinculou em stub-port.json",
   ).toBeTypeOf("number");
-  return summary.port as number;
+  return stubPort.port as number;
 }
 
 it("kills a timed-out target tree and releases the stub port before returning", async () => {
@@ -91,6 +93,10 @@ it("kills a timed-out target tree and releases the stub port before returning", 
     expect(result.error).toBeUndefined();
     expect(result.status, result.stderr).toBe(88);
     const port = stubPortFromSummary(root);
+    // Corrida residual pequena e aceitável: entre o driver liberar a porta
+    // e este bind, outro processo poderia, em teoria, ocupá-la primeiro —
+    // não há como eliminar isso sem um lock cross-process, fora de escopo
+    // aqui. Na prática a janela é da ordem de milissegundos.
     await bindPort(port);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -154,6 +160,11 @@ it("kills a timed-out target tree even when 127.0.0.1:11434 is already occupied 
     });
 
     expect(result.error).toBeUndefined();
+    // A asserção que de fato prende o AC2 é o status 88 acima — se o driver
+    // tivesse caído no default fixo e colidido com o occupier, o retorno
+    // seria 86 (bind failed), não 88. O check de porta abaixo é apenas
+    // documentação do motivo (uma porta efêmera nunca é 11434 enquanto
+    // outro processo a segura), não uma proteção independente.
     expect(result.status, result.stderr).toBe(88);
     const port = stubPortFromSummary(root);
     expect(port, "a porta efêmera nunca deve coincidir com a porta ocupada").not.toBe(11_434);
