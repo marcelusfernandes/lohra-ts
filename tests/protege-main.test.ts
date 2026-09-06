@@ -4,7 +4,9 @@
 // e afirma o exit code (0 = permite, 2 = nega) e o motivo no stderr. O hook
 // consulta `git` (branch atual) e `gh` (checks, labels, arquivos da PR); sob
 // `LOHRA_BENCH=1` — o único portão — as seams `LOHRA_PM_BRANCH`,
-// `LOHRA_PM_CHECKS_JSON` e `LOHRA_PM_VIEW_JSON` substituem essas consultas. Sem
+// `LOHRA_PM_CHECKS_JSON` e `LOHRA_PM_VIEW_JSON` substituem essas consultas, e
+// `LOHRA_PM_ARGS_OUT` (#77) recebe, uma por linha, a linha de comando `gh` que o
+// hook executaria (prova que `--repo` e o número da PR são repassados). Sem
 // o portão nenhuma seam é lida e o hook consulta os binários de verdade.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
