@@ -1,5 +1,14 @@
 import { MAX_IMAGES } from "./constants.js";
 
+// TODO(#94, test-red): renomes reais chegam no commit seguinte.
+export function isPresentMediaValue(_value: unknown): boolean {
+  throw new Error("not implemented");
+}
+
+export function coerceInt(_value: unknown): number | undefined {
+  throw new Error("not implemented");
+}
+
 export function pythonTruthy(value: unknown): boolean {
   if (value === undefined || value === null || value === false) return false;
   if (typeof value === "number") return value !== 0 && !Number.isNaN(value);
