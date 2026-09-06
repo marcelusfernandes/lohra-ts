@@ -1,7 +1,606 @@
-// Stub (issue #151, test(red)): os 13 mutantes de `media/persistence.ts`
-// ainda não migraram do runner antigo — `mutations-t21-catalog.test.ts`
-// fica vermelho por uma asserção real (0 mutantes, não 20) até o commit
-// verde preencher este catálogo.
+// Os 13 mutantes de `media/persistence.ts` (issue #151, passo 0d do épico
+// #13) — migrados de `scripts/parity/media/run-mutations.ts` (agora um
+// shim). Sete `probe`s ganharam um caminho de baseline que faltava no
+// runner antigo (ver o header de `media.ts`): `over-return`,
+// `per-image-limit` e `batch-limit` não tratavam o `throw` do guard real
+// (a árvore restaurada quebraria a função em vez de produzir um `actual`
+// comparável); `out-dir-symlink` tinha uma chave (`returned_count`) que
+// `expected` não declarava, então `actual` nunca batia com `expected`
+// mesmo sem mutação. As outras dez já eram seguras nos dois caminhos.
+//
+// `out-dir-symlink` também ganhou um 4º edit — a ÚNICA mutação desta
+// migração cujos `edits` mudam, não só o `probe`. Os 3 edits originais
+// (bypassar os `checkControlledRoot` diretos de `persistGeneratedImages`
+// e as duas condições de `assertRootIdentity`) não bastam: `checkControlledRoot(plan)`
+// no TOPO de `assertRootIdentity` (persistence.ts:143, antes das
+// condições mutadas) continua ativo e chamado antes de qualquer escrita
+// (via `runPublishHooks`), então o outDir simbólico é sempre pego ali —
+// um mutante morto, mascarado pela chave `returned_count` que faltava em
+// `expected` no runner antigo (nunca "killed" por motivo certo, sempre
+// "killed" por causa da chave ausente). `git log -S` confirma que esse
+// `checkControlledRoot` (feat "isolate publish hooks from staged bytes")
+// é POSTERIOR ao mutante original (feat "bounded vision and image
+// generation") — defesa em profundidade que passou a existir depois. O
+// 4º edit completa a intenção original do nome do mutante ("parar de
+// checar a raiz depois do preflight") em vez de manter um mutante que não
+// testa mais nada.
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { MAX_IMAGE_BATCH_BYTES, MAX_IMAGE_BYTES } from "../../src/media/constants.js";
 import type { MediaMutant } from "./media-mutant.js";
 
-export const persistenceMutants: readonly MediaMutant[] = [];
+const ENTRY = "media/persistence.ts";
+
+interface PersistenceModule {
+  createOutputPlan(path: string): unknown;
+  persistGeneratedImages(options: Record<string, unknown>): Promise<readonly string[]>;
+}
+
+function persistence(module: Record<string, unknown>): PersistenceModule {
+  return module as unknown as PersistenceModule;
+}
+
+export const persistenceMutants: readonly MediaMutant[] = [
+  {
+    id: "over-return",
+    category: "limits",
+    entry: ENTRY,
+    edits: [
+      {
+        file: ENTRY,
+        before: "if (options.payloads.length > options.requested)",
+        after: "if (false && options.payloads.length > options.requested)",
+      },
+      {
+        file: ENTRY,
+        before: "if (options.payloads.length > MAX_IMAGES)",
+        after: "if (false && options.payloads.length > MAX_IMAGES)",
+      },
+    ],
+    expected: { status: "error", final_count: 0 },
+    probe: async (moduleUnknown) => {
+      const media = persistence(moduleUnknown);
+      const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-over-return-"));
+      try {
+        const ids = Array.from({ length: 12 }, (_, index) => index.toString(16).padStart(32, "0"));
+        let status = "ok";
+        let count = 0;
+        try {
+          const paths = await media.persistGeneratedImages({
+            plan: media.createOutputPlan(join(runtime, "images")),
+            payloads: Array.from({ length: 12 }, () => "YQ=="),
+            requested: 1,
+            uuid: () => ids.shift() ?? "f".repeat(32),
+          });
+          count = paths.length;
+        } catch {
+          status = "error";
+        }
+        return { status, final_count: count };
+      } finally {
+        rmSync(runtime, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    id: "per-image-limit",
+    category: "limits",
+    entry: ENTRY,
+    edits: [
+      {
+        file: ENTRY,
+        before: "if (bytes.byteLength > MAX_IMAGE_BYTES)",
+        after: "if (false && bytes.byteLength > MAX_IMAGE_BYTES)",
+      },
+    ],
+    expected: { status: "error", final_count: 0 },
+    probe: async (moduleUnknown) => {
+      const media = persistence(moduleUnknown);
+      const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-item-"));
+      try {
+        let status = "ok";
+        let count = 0;
+        try {
+          const paths = await media.persistGeneratedImages({
+            plan: media.createOutputPlan(join(runtime, "images")),
+            payloads: [Buffer.alloc(MAX_IMAGE_BYTES + 1).toString("base64")],
+            requested: 1,
+            uuid: () => "a".repeat(32),
+          });
+          count = paths.length;
+        } catch {
+          status = "error";
+        }
+        return { status, final_count: count };
+      } finally {
+        rmSync(runtime, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    id: "batch-limit",
+    category: "limits",
+    entry: ENTRY,
+    edits: [
+      {
+        file: ENTRY,
+        before: "if (batchBytes > MAX_IMAGE_BATCH_BYTES)",
+        after: "if (false && batchBytes > MAX_IMAGE_BATCH_BYTES)",
+      },
+    ],
+    expected: { status: "error", final_count: 0 },
+    probe: async (moduleUnknown) => {
+      const media = persistence(moduleUnknown);
+      const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-batch-"));
+      try {
+        const chunk = Buffer.alloc(Math.floor(MAX_IMAGE_BATCH_BYTES / 4) + 1).toString("base64");
+        const ids = ["a", "b", "c", "d"].map((value) => value.repeat(32));
+        let status = "ok";
+        let count = 0;
+        try {
+          const paths = await media.persistGeneratedImages({
+            plan: media.createOutputPlan(join(runtime, "images")),
+            payloads: [chunk, chunk, chunk, chunk],
+            requested: 4,
+            uuid: () => ids.shift() ?? "e".repeat(32),
+          });
+          count = paths.length;
+        } catch {
+          status = "error";
+        }
+        return { status, final_count: count };
+      } finally {
+        rmSync(runtime, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    id: "out-dir-symlink",
+    category: "path-safety",
+    entry: ENTRY,
+    edits: [
+      {
+        file: ENTRY,
+        before: "try {\n    checkControlledRoot(options.plan);\n  } catch {",
+        after: "try {\n    void options.plan;\n  } catch {",
+      },
+      {
+        file: ENTRY,
+        before:
+          "mkdirSync(options.plan.outDir, { recursive: true });\n  checkControlledRoot(options.plan);",
+        after: "mkdirSync(options.plan.outDir, { recursive: true });\n  void options.plan;",
+      },
+      {
+        file: ENTRY,
+        before: "    current.isSymbolicLink() ||\n    !current.isDirectory() ||",
+        after: "    false ||\n    false ||",
+      },
+      {
+        file: ENTRY,
+        before: "  checkControlledRoot(plan);\n  const current = lstatSync(plan.outDir);",
+        after: "  void plan;\n  const current = lstatSync(plan.outDir);",
+      },
+    ],
+    expected: { status: "error", external_count: 0, returned_count: 0 },
+    probe: async (moduleUnknown) => {
+      const media = persistence(moduleUnknown);
+      const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-root-"));
+      const external = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-external-"));
+      try {
+        const outDir = join(runtime, "images");
+        let paths: readonly string[] = [];
+        let status = "ok";
+        try {
+          paths = await media.persistGeneratedImages({
+            plan: media.createOutputPlan(outDir),
+            payloads: ["YQ=="],
+            requested: 1,
+            uuid: () => "a".repeat(32),
+            afterRootPreflight: () => {
+              symlinkSync(external, outDir);
+            },
+          });
+        } catch {
+          status = "error";
+        }
+        return {
+          status,
+          external_count: readdirSync(external).length,
+          returned_count: paths.length,
+        };
+      } finally {
+        rmSync(runtime, { recursive: true, force: true });
+        rmSync(external, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    id: "direct-final-write",
+    category: "atomicity",
+    entry: ENTRY,
+    edits: [
+      {
+        file: ENTRY,
+        before: "const temp = join(options.plan.outDir, `.stage-${randomUUID()}.tmp`);",
+        after: "const temp = final;",
+      },
+      {
+        file: ENTRY,
+        before: "cleanupFailures = removeOwnedPaths(owned);",
+        after: "void owned;",
+      },
+    ],
+    expected: { final_exists: false, final_bytes: 0 },
+    probe: async (moduleUnknown) => {
+      const media = persistence(moduleUnknown);
+      const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-final-"));
+      const final = join(runtime, "images", `${"a".repeat(32)}.png`);
+      try {
+        try {
+          await media.persistGeneratedImages({
+            plan: media.createOutputPlan(join(runtime, "images")),
+            payloads: [Buffer.from("complete-image").toString("base64")],
+            requested: 1,
+            uuid: () => "a".repeat(32),
+            faultAfterBytes: 7,
+          });
+        } catch {
+          // The comparator observes the forbidden final, not the thrown fault.
+        }
+        return {
+          final_exists: existsSync(final),
+          final_bytes: existsSync(final) ? readFileSync(final).length : 0,
+        };
+      } finally {
+        rmSync(runtime, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    id: "hook-after-staging",
+    category: "hook-timing",
+    entry: ENTRY,
+    edits: [
+      {
+        file: ENTRY,
+        before:
+          "  await runPublishHooks(options.plan, finals, rootIdentity, options.beforePublish);",
+        after: "  void options.beforePublish;",
+      },
+      {
+        file: ENTRY,
+        before: "        fsyncSync(fd);",
+        after: "        await options.beforePublish?.(index, final);\n        fsyncSync(fd);",
+      },
+    ],
+    expected: { stages_visible_to_hook: 0 },
+    probe: async (moduleUnknown) => {
+      const media = persistence(moduleUnknown);
+      const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-stage-"));
+      try {
+        const outDir = join(runtime, "images");
+        let observedStages = -1;
+        await media.persistGeneratedImages({
+          plan: media.createOutputPlan(outDir),
+          payloads: [Buffer.from("provider").toString("base64")],
+          requested: 1,
+          uuid: () => "a".repeat(32),
+          beforePublish: () => {
+            observedStages = readdirSync(outDir).filter((name) =>
+              name.startsWith(".stage-"),
+            ).length;
+          },
+        });
+        return { stages_visible_to_hook: observedStages };
+      } finally {
+        rmSync(runtime, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    id: "stage-mode",
+    category: "permissions",
+    entry: ENTRY,
+    edits: [
+      {
+        file: ENTRY,
+        before: "fchmodSync(fd, IMAGE_FILE_MODE);",
+        after: "void IMAGE_FILE_MODE;",
+      },
+      {
+        file: ENTRY,
+        before: "chmodSync(temp, IMAGE_FILE_MODE);",
+        after: "void IMAGE_FILE_MODE;",
+      },
+    ],
+    expected: { status: "ok", final_mode: 0o644 },
+    probe: async (moduleUnknown) => {
+      const media = persistence(moduleUnknown);
+      const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-mode-"));
+      const outDir = join(runtime, "images");
+      try {
+        const final = join(outDir, `${"a".repeat(32)}.png`);
+        let mode = -1;
+        let status = "ok";
+        try {
+          const paths = await media.persistGeneratedImages({
+            plan: media.createOutputPlan(outDir),
+            payloads: [Buffer.from("provider").toString("base64")],
+            requested: 1,
+            uuid: () => "a".repeat(32),
+          });
+          mode = statSync(paths[0] ?? final).mode & 0o777;
+        } catch {
+          status = "error";
+        }
+        return { status, final_mode: mode };
+      } finally {
+        rmSync(runtime, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    id: "write-fault-cleanup",
+    category: "cleanup",
+    entry: ENTRY,
+    edits: [
+      {
+        file: ENTRY,
+        before: "cleanupFailures = removeOwnedPaths(owned);",
+        after: "void owned;",
+      },
+    ],
+    expected: { status: "error", residue: 0 },
+    probe: async (moduleUnknown) => {
+      const media = persistence(moduleUnknown);
+      const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-owned-"));
+      const outDir = join(runtime, "images");
+      try {
+        let status = "ok";
+        try {
+          await media.persistGeneratedImages({
+            plan: media.createOutputPlan(outDir),
+            payloads: [Buffer.from("provider").toString("base64")],
+            requested: 1,
+            uuid: () => "a".repeat(32),
+            faultAfterBytes: 7,
+          });
+        } catch {
+          status = "error";
+        }
+        const residue = readdirSync(outDir).filter((name) => name.startsWith(".stage-")).length;
+        return { status, residue };
+      } finally {
+        rmSync(runtime, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    id: "root-identity",
+    category: "root-identity",
+    entry: ENTRY,
+    edits: [
+      {
+        file: ENTRY,
+        before: 'throw new Error("output root changed after publish hook");',
+        after: "void 0;",
+      },
+    ],
+    expected: {
+      status: "error",
+      error_named: "output root changed after publish hook",
+      final_count: 0,
+    },
+    probe: async (moduleUnknown) => {
+      const media = persistence(moduleUnknown);
+      const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-rootid-"));
+      try {
+        const outDir = join(runtime, "images");
+        const moved = join(runtime, "moved");
+        const payload = Buffer.from("PRIVATE-PROVIDER-BYTES");
+        let errorName = "none";
+        try {
+          await media.persistGeneratedImages({
+            plan: media.createOutputPlan(outDir),
+            payloads: [payload.toString("base64")],
+            requested: 1,
+            uuid: () => "d".repeat(32),
+            beforePublish: () => {
+              renameSync(outDir, moved);
+              mkdirSync(outDir);
+            },
+          });
+        } catch (error) {
+          errorName = error instanceof Error ? error.message : String(error);
+        }
+        return {
+          status: "error",
+          error_named: errorName,
+          final_count: existsSync(join(outDir, `${"d".repeat(32)}.png`)) ? 1 : 0,
+        };
+      } finally {
+        rmSync(runtime, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    id: "publish-hook-omitted",
+    category: "root-identity",
+    entry: ENTRY,
+    edits: [
+      {
+        file: ENTRY,
+        before:
+          "  await runPublishHooks(options.plan, finals, rootIdentity, options.beforePublish);",
+        after: "  void options.beforePublish;",
+      },
+    ],
+    expected: { status: "error", hook_ran: true },
+    probe: async (moduleUnknown) => {
+      const media = persistence(moduleUnknown);
+      const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-reloc-"));
+      try {
+        const outDir = join(runtime, "images");
+        const moved = join(runtime, "moved");
+        let status = "ok";
+        try {
+          await media.persistGeneratedImages({
+            plan: media.createOutputPlan(outDir),
+            payloads: [Buffer.from("PRIVATE-PROVIDER-BYTES").toString("base64")],
+            requested: 1,
+            uuid: () => "d".repeat(32),
+            beforePublish: () => {
+              renameSync(outDir, moved);
+              mkdirSync(outDir);
+            },
+          });
+        } catch {
+          status = "error";
+        }
+        return { status, hook_ran: existsSync(moved) };
+      } finally {
+        rmSync(runtime, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    id: "root-check-before-hook",
+    category: "root-identity",
+    entry: ENTRY,
+    edits: [
+      {
+        file: ENTRY,
+        before: "    await hook?.(index, final);\n    assertRootIdentity(plan, rootIdentity);",
+        after: "    assertRootIdentity(plan, rootIdentity);\n    await hook?.(index, final);",
+      },
+      {
+        file: ENTRY,
+        before: "      assertRootIdentity(options.plan, rootIdentity);",
+        after: "      void rootIdentity;",
+      },
+    ],
+    expected: { status: "error", final_count: 0 },
+    probe: async (moduleUnknown) => {
+      const media = persistence(moduleUnknown);
+      const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-check-order-"));
+      try {
+        const outDir = join(runtime, "images");
+        const moved = join(runtime, "moved");
+        let status = "ok";
+        try {
+          await media.persistGeneratedImages({
+            plan: media.createOutputPlan(outDir),
+            payloads: [Buffer.from("PRIVATE-PROVIDER-BYTES").toString("base64")],
+            requested: 1,
+            uuid: () => "d".repeat(32),
+            beforePublish: () => {
+              renameSync(outDir, moved);
+              mkdirSync(outDir);
+            },
+          });
+        } catch {
+          status = "error";
+        }
+        return {
+          status,
+          final_count: readdirSync(outDir).filter((name) => name.endsWith(".png")).length,
+        };
+      } finally {
+        rmSync(runtime, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    id: "root-symlink-after-check",
+    category: "root-identity",
+    entry: ENTRY,
+    edits: [
+      {
+        file: ENTRY,
+        before: "    await hook?.(index, final);\n    assertRootIdentity(plan, rootIdentity);",
+        after: "    assertRootIdentity(plan, rootIdentity);\n    await hook?.(index, final);",
+      },
+      {
+        file: ENTRY,
+        before: "      assertRootIdentity(options.plan, rootIdentity);",
+        after: "      void rootIdentity;",
+      },
+    ],
+    expected: { status: "error", external_payloads: 0 },
+    probe: async (moduleUnknown) => {
+      const media = persistence(moduleUnknown);
+      const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-rootlink-"));
+      const external = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-rootlink-external-"));
+      try {
+        const outDir = join(runtime, "images");
+        const moved = join(runtime, "moved");
+        let status = "ok";
+        try {
+          await media.persistGeneratedImages({
+            plan: media.createOutputPlan(outDir),
+            payloads: [Buffer.from("PRIVATE-PROVIDER-BYTES").toString("base64")],
+            requested: 1,
+            uuid: () => "d".repeat(32),
+            beforePublish: () => {
+              renameSync(outDir, moved);
+              symlinkSync(external, outDir);
+            },
+          });
+        } catch {
+          status = "error";
+        }
+        return {
+          status,
+          external_payloads: readdirSync(external).filter((name) => name.endsWith(".png")).length,
+        };
+      } finally {
+        rmSync(runtime, { recursive: true, force: true });
+        rmSync(external, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    id: "atomic-rename-primitive",
+    category: "atomicity",
+    entry: ENTRY,
+    edits: [
+      {
+        file: ENTRY,
+        before: "  renameSync,\n  rmSync,",
+        after: "  linkSync,\n  rmSync,",
+      },
+      {
+        file: ENTRY,
+        before: "      renameSync(temp, final);",
+        after: "      linkSync(temp, final);\n      rmSync(temp);",
+      },
+    ],
+    expected: { primitive: "rename" },
+    probe: (moduleUnknown) => {
+      // `Function.prototype.toString()` reflete a fonte JÁ TRANSPILADA
+      // (tsx/esbuild despe espaços: "renameSync(temp,final)", sem espaço
+      // após a vírgula) — checar por substring sem espaço é frágil ao
+      // formato do minificador; checar presença de `renameSync(` e
+      // ausência de `linkSync(` não depende de como o transpilador
+      // formata a chamada.
+      const implementation = String(moduleUnknown["persistGeneratedImages"]);
+      const usesRename =
+        implementation.includes("renameSync(") && !implementation.includes("linkSync(");
+      return Promise.resolve({
+        primitive: usesRename ? "rename" : "other",
+      });
+    },
+  },
+];

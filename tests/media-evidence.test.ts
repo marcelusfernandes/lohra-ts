@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { compareMediaRows } from "../scripts/parity/media/comparator.js";
+import { compareMediaRows } from "../scripts/mutations/media-comparator.js";
 
 describe("media bilateral comparator", () => {
   it("derives match and rejects an unclassified functional difference", () => {
