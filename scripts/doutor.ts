@@ -114,11 +114,15 @@ function localizarHooksDir(exec: Executor, raiz: string): string | undefined {
 }
 
 /** `git-pre-push` (camada 2 da proteção da main) instalado no hooks dir
- * deste checkout. */
+ * deste checkout, com o mesmo conteúdo do canônico versionado
+ * (`.claude/hooks/git-pre-push`) — comparado byte a byte, não só existência:
+ * um `pre-push` sobrescrito (ex. por `lefthook install` sem escopo) passaria
+ * como ok se só a existência fosse checada. */
 export function checarGitPrePush(
   exec: Executor,
   raiz: string,
   existe: (caminho: string) => boolean = existsSync,
+  ler: (caminho: string) => string = (caminho) => readFileSync(caminho, "utf8"),
 ): Checagem {
   const hooksDir = localizarHooksDir(exec, raiz);
   if (hooksDir === undefined) {
@@ -133,6 +137,14 @@ export function checarGitPrePush(
     return falta(
       "git-pre-push",
       "hook pre-push não instalado",
+      "sh .claude/hooks/instalar-git-hooks.sh",
+    );
+  }
+  const canonico = resolve(raiz, ".claude", "hooks", "git-pre-push");
+  if (ler(destino) !== ler(canonico)) {
+    return falta(
+      "git-pre-push",
+      `hook pre-push em ${destino} difere do canônico (${canonico})`,
       "sh .claude/hooks/instalar-git-hooks.sh",
     );
   }
