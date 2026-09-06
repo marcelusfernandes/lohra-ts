@@ -44,7 +44,13 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const root = resolve(import.meta.dirname, "..");
 const runScript = resolve(root, "scripts/prova/run.ts");
-const tsxBin = resolve(root, "node_modules/.bin/tsx");
+// Issue #142 (follow-up da #137): nunca pelo wrapper CLI do `tsx` (nem via o
+// shim `.bin/tsx` da pasta de dependências, que é um symlink pra ele) — o
+// handshake de sinal do wrapper (~30ms + 30ms ack, depois SIGKILL) é suspeito
+// de custo e de flake sob carga (#128/#131). `--import` com o loader do `tsx`
+// lança um único processo real (molde: `tests/helpers/controle-negativo-repo.ts`,
+// issue #137).
+const tsxLoader = import.meta.resolve("tsx");
 
 // Mesmo valor do `timeout` passado a `spawnSync` abaixo — o timeout do
 // TESTE nunca pode ser menor que o timeout do PROCESSO que ele espera.
@@ -72,7 +78,7 @@ function runProva(cwd: string, slug: string): SpawnSyncReturns<string> {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !key.startsWith("VITEST")),
   );
-  return spawnSync(tsxBin, [runScript, slug], {
+  return spawnSync(process.execPath, ["--import", tsxLoader, runScript, slug], {
     cwd,
     encoding: "utf8",
     timeout: SPAWN_TIMEOUT_MS,
@@ -263,7 +269,7 @@ describe("prova run.ts (subprocess)", () => {
         ),
         LOHRA_PROVA_OUT: "custom-out",
       };
-      const result = spawnSync(tsxBin, [runScript, "scoped"], {
+      const result = spawnSync(process.execPath, ["--import", tsxLoader, runScript, "scoped"], {
         cwd: dir,
         encoding: "utf8",
         timeout: SPAWN_TIMEOUT_MS,
