@@ -12,7 +12,7 @@ import {
   buildImagePart,
   coerceImageCount,
   coerceImagePrompt,
-  pythonTruthy,
+  isPresentMediaValue,
   textPart,
   validateRemoteImage,
 } from "../src/media/index.js";
@@ -28,13 +28,13 @@ afterEach(() => {
   for (const value of roots.splice(0)) rmSync(value, { recursive: true, force: true });
 });
 
-describe("media Python coercions", () => {
-  it.each([undefined, null, "", 0, false, [], {}])("treats %j as Python-falsy", (value) => {
-    expect(pythonTruthy(value)).toBe(false);
+describe("media presence and integer coercions", () => {
+  it.each([undefined, null, "", 0, false, [], {}])("treats %j as absent", (value) => {
+    expect(isPresentMediaValue(value)).toBe(false);
   });
 
-  it.each([[1], { a: 1 }, " ", 1, true])("treats %j as Python-truthy", (value) => {
-    expect(pythonTruthy(value)).toBe(true);
+  it.each([[1], { a: 1 }, " ", 1, true])("treats %j as present", (value) => {
+    expect(isPresentMediaValue(value)).toBe(true);
   });
 
   it("renders non-string truthy values as JSON", () => {
