@@ -34,11 +34,11 @@
 // violação, exit 0 se não, exit 2 em erro de uso/infra (ex.: nem
 // `GITHUB_EVENT_PATH` nem `--files-file`). Se `GITHUB_STEP_SUMMARY` estiver
 // definida, um resumo em markdown é anexado lá; senão, no-op.
-import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import process from "node:process";
 
+import { causaGit, git, gitDiffNames } from "../lib/git.js";
 import { ID_IMPORT_PROIBIDO, rodarContratos, type Violacao } from "./lib.js";
 
 const MARCADORES_PYTHON_SERIALIZATION = [
@@ -52,6 +52,17 @@ interface Argumentos {
   readonly apos17: boolean;
 }
 
+function falhaFechada(mensagem: string): never {
+  process.stderr.write(`contratos: ${mensagem}\n`);
+  process.exit(2);
+}
+
+const USO = "uso: contratos [--files-file <arquivo>] [--root <dir>] [--apos-17]";
+const FLAGS_CONHECIDAS = new Set(["--files-file", "--root", "--apos-17"]);
+
+/** Flag desconhecida (issue #62): antes era silenciosamente ignorada — um
+ * typo (`--apos17` sem hífen, por exemplo) desligava `import-proibido` sem
+ * avisar ninguém. Agora é erro de uso, exit 2. */
 function analisarArgumentos(argv: readonly string[]): Argumentos {
   let filesFile: string | undefined;
   let root: string | undefined;
@@ -66,6 +77,8 @@ function analisarArgumentos(argv: readonly string[]): Argumentos {
       root = argv[i];
     } else if (arg === "--apos-17") {
       apos17 = true;
+    } else if (arg !== undefined && !FLAGS_CONHECIDAS.has(arg)) {
+      falhaFechada(`flag desconhecida: ${arg} — ${USO}`);
     }
   }
   return {
@@ -73,11 +86,6 @@ function analisarArgumentos(argv: readonly string[]): Argumentos {
     ...(root !== undefined ? { root } : {}),
     apos17,
   };
-}
-
-function falhaFechada(mensagem: string): never {
-  process.stderr.write(`contratos: ${mensagem}\n`);
-  process.exit(2);
 }
 
 function linhasDeArquivo(caminho: string): readonly string[] {
@@ -119,17 +127,13 @@ interface EventoPullRequest {
   };
 }
 
+/** `JSON.parse` de um evento malformado lançava sem `try` — o processo
+ * morria com uma exceção não tratada (exit 1 do próprio Node), nunca o
+ * exit 2 que o contrato deste script promete para erro de infra (issue
+ * #62). `montarFonteCi` sempre chama isto dentro de um `try`. */
 function lerEventoPullRequest(eventPath: string): EventoPullRequest {
   const bruto: unknown = JSON.parse(readFileSync(eventPath, "utf8"));
   return bruto as EventoPullRequest;
-}
-
-function git(root: string, args: readonly string[]): { status: number; stdout: string } {
-  const resultado = spawnSync("git", args as string[], { cwd: root, encoding: "utf8" });
-  if (resultado.error !== undefined) {
-    falhaFechada(`git ${args.join(" ")} falhou: ${resultado.error.message}`);
-  }
-  return { status: resultado.status ?? 1, stdout: resultado.stdout };
 }
 
 function montarFonteCi(root: string): FonteDeDados {
@@ -139,7 +143,14 @@ function montarFonteCi(root: string): FonteDeDados {
       "modo CI precisa de GITHUB_EVENT_PATH (evento pull_request) — ou use --files-file para dry-run",
     );
   }
-  const evento = lerEventoPullRequest(eventPath);
+  let evento: EventoPullRequest;
+  try {
+    evento = lerEventoPullRequest(eventPath);
+  } catch (erro) {
+    falhaFechada(
+      `${eventPath} não é um evento pull_request válido (JSON inválido): ${erro instanceof Error ? erro.message : String(erro)}`,
+    );
+  }
   const baseBruto = evento.pull_request?.base?.sha;
   const headBruto = evento.pull_request?.head?.sha;
   if (typeof baseBruto !== "string" || typeof headBruto !== "string") {
@@ -152,14 +163,15 @@ function montarFonteCi(root: string): FonteDeDados {
   const base: string = baseBruto;
   const head: string = headBruto;
 
-  const diff = git(root, ["diff", "--no-renames", "--name-only", `${base}...${head}`]);
-  if (diff.status !== 0) {
-    falhaFechada(`git diff ${base}...${head} falhou (status ${String(diff.status)})`);
+  // `gitDiffNames` (`../lib/git.js`, issue #62): `-z` nunca escapa um
+  // caminho não-ASCII, e a causa completa (ENOENT/exit/sinal/stderr) nunca
+  // se perde quando o comando falha.
+  let files: readonly string[];
+  try {
+    files = gitDiffNames(root, base, head);
+  } catch (erro) {
+    falhaFechada(erro instanceof Error ? erro.message : String(erro));
   }
-  const files = diff.stdout
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
 
   function existeNoHead(caminho: string): boolean {
     return git(root, ["cat-file", "-e", `${head}:${caminho}`]).status === 0;
@@ -171,8 +183,10 @@ function montarFonteCi(root: string): FonteDeDados {
     lerConteudo: (arquivo) => {
       if (!existeNoHead(arquivo)) return null;
       const mostrado = git(root, ["show", `${head}:${arquivo}`]);
-      if (mostrado.status !== 0) {
-        falhaFechada(`git show ${head}:${arquivo} falhou apesar de existir no head`);
+      if (mostrado.error !== undefined || mostrado.status !== 0) {
+        falhaFechada(
+          `git show ${head}:${arquivo} falhou apesar de existir no head: ${causaGit(mostrado)}`,
+        );
       }
       return mostrado.stdout;
     },
@@ -189,6 +203,11 @@ function formatarViolacao(v: Violacao): string {
   return `${v.id}: ${v.arquivo} — ${v.descricao}`;
 }
 
+/** `GITHUB_STEP_SUMMARY` inválido (diretório inexistente, sem permissão)
+ * lançava sem `try` — issue #62, mesmo bug de `lerEventoPullRequest`: o
+ * contrato promete exit 2 para erro de infra, nunca uma exceção crua. As
+ * violações (se houver) já foram escritas em stderr por `main` ANTES de
+ * chamar isto — nunca ficam sem relatar só porque o summary falhou. */
 function escreverSummary(ok: boolean, violacoes: readonly Violacao[]): void {
   const summaryPath = process.env["GITHUB_STEP_SUMMARY"];
   if (summaryPath === undefined || summaryPath === "") return;
@@ -199,7 +218,13 @@ function escreverSummary(ok: boolean, violacoes: readonly Violacao[]): void {
     ...violacoes.map((v) => `- \`${v.arquivo}\` — ${v.id}: ${v.descricao}`),
     "",
   ];
-  appendFileSync(summaryPath, `${linhas.join("\n")}\n`);
+  try {
+    appendFileSync(summaryPath, `${linhas.join("\n")}\n`);
+  } catch (erro) {
+    falhaFechada(
+      `não foi possível escrever em GITHUB_STEP_SUMMARY (${summaryPath}): ${erro instanceof Error ? erro.message : String(erro)}`,
+    );
+  }
 }
 
 function main(): void {
@@ -210,12 +235,15 @@ function main(): void {
   const ativo = ehImportProibidoAtivo(args, fonte);
   const todasAsViolacoes = rodarContratos(fonte.files, fonte.lerConteudo);
   const violacoes = todasAsViolacoes.filter((v) => v.id !== ID_IMPORT_PROIBIDO || ativo);
-
   const ok = violacoes.length === 0;
-  escreverSummary(ok, violacoes);
 
   if (!ok) {
     process.stderr.write(`${violacoes.map(formatarViolacao).join("\n")}\n`);
+  }
+
+  escreverSummary(ok, violacoes);
+
+  if (!ok) {
     process.exit(1);
   }
   process.stdout.write(`contratos: ${String(fonte.files.length)} arquivo(s), nenhuma violação\n`);

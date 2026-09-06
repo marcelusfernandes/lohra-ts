@@ -1,22 +1,15 @@
 // Issue #48 — controle negativo: `classificar`/`arquivosDeTeste`/
 // `semHarnessNaBase`/`ehCommitTestRed`/`contemStubQueLanca`/
-// `deveSerIgnorado`/`validarResumo`/`parseArgs` (puros, `lib.ts`), `overlay`
-// (unitário, com `mostrarArquivo` injetado — sem git de verdade), e um caso
-// de integração de ponta a ponta em repositórios git temporários e
-// descartáveis (`run.ts`, via subprocesso — o mesmo padrão de
-// `tests/prova-run.test.ts`). O "harness" desses repositórios fake é um
-// script Node standalone (`prova-run.cjs`) que nunca toca vitest/tsx: o
-// controle negativo trata `npm run -s prova -- <slug>` como caixa-preta,
-// então o fake só precisa produzir um `resumo.json` no mesmo formato.
-//
-// Rodada 2 da PR #54: a regra de `structural-red` mudou de "o ÚLTIMO
-// commit que toca os testes precisa ser test(red):" (reprovava toda PR TDD
-// normal) para "existe PELO MENOS UM test(red): que toca os testes E
-// adiciona um stub que lança num arquivo não-teste do diff".
-import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+// `deveSerIgnorado`/`validarResumo`/`parseArgs` (puros, `lib.ts`), e as
+// funções unitárias de `run.ts` que recebem a execução do `git` injetada
+// (`overlay`, `commitsQueTocamTestes`, `commitAdicionaStub`) — sem git de
+// verdade. O caso de integração de ponta a ponta, em repositórios git
+// temporários e descartáveis, está em
+// `tests/ci-controle-negativo-integracao.test.ts` (issue #62, divisão do
+// arquivo de 862 linhas — AC "arquivos < 800 linhas").
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -27,16 +20,19 @@ import {
   deveSerIgnorado,
   ehArquivoDocsOuProcess,
   ehCommitTestRed,
+  ehDeclaracaoDeProva,
   parseArgs,
   semHarnessNaBase,
+  soDeclaracaoDeProvaExistenteEditada,
   validarResumo,
 } from "../scripts/ci/controle-negativo/lib.js";
-import { overlay } from "../scripts/ci/controle-negativo/run.js";
+import {
+  commitAdicionaStub,
+  commitsQueTocamTestes,
+  overlay,
+  TIMEOUT_PROVA_MS,
+} from "../scripts/ci/controle-negativo/run.js";
 import type { Resumo } from "../scripts/prova/tipos.js";
-
-const repoRoot = resolve(import.meta.dirname, "..");
-const runScript = resolve(repoRoot, "scripts/ci/controle-negativo/run.ts");
-const tsxBin = resolve(repoRoot, "node_modules/.bin/tsx");
 
 describe("classificar", () => {
   it("assertion-red: alguma falha não é estrutural", () => {
@@ -209,6 +205,34 @@ describe("contemStubQueLanca", () => {
     const diff = '-  throw new Error("velho");\n';
     expect(contemStubQueLanca(diff)).toBe(false);
   });
+
+  it("ignora linha adicionada que é comentário de linha (// throw new Error() — issue #62)", () => {
+    const diff = ["+++ b/src/x.ts", '+  // throw new Error("not implemented");', ""].join("\n");
+    expect(contemStubQueLanca(diff)).toBe(false);
+  });
+
+  it("ignora continuação de comentário de bloco (* throw new Error() — issue #62)", () => {
+    const diff = [
+      "+++ b/src/x.ts",
+      "+/**",
+      '+ * throw new Error("not implemented") — exemplo no comentário',
+      "+ */",
+      "",
+    ].join("\n");
+    expect(contemStubQueLanca(diff)).toBe(false);
+  });
+
+  it("ainda reconhece o stub real quando misturado com uma linha de comentário (issue #62)", () => {
+    const diff = [
+      "+++ b/src/x.ts",
+      '+// throw new Error("isto é só um comentário")',
+      "+export function x() {",
+      '+  throw new Error("not implemented: x");',
+      "+}",
+      "",
+    ].join("\n");
+    expect(contemStubQueLanca(diff)).toBe(true);
+  });
 });
 
 describe("ehArquivoDocsOuProcess / deveSerIgnorado", () => {
@@ -227,6 +251,17 @@ describe("ehArquivoDocsOuProcess / deveSerIgnorado", () => {
     expect(ehArquivoDocsOuProcess(".github/workflows/ci.yml")).toBe(true);
   });
 
+  it("classifica scripts/github/** e .worktreeinclude — tooling de processo (acréscimo #62)", () => {
+    expect(ehArquivoDocsOuProcess("scripts/github/ruleset.sh")).toBe(true);
+    expect(ehArquivoDocsOuProcess("scripts/github/labels.sh")).toBe(true);
+    expect(ehArquivoDocsOuProcess(".worktreeinclude")).toBe(true);
+  });
+
+  it("não classifica scripts/** fora de scripts/github/ — continua exigindo controle", () => {
+    expect(ehArquivoDocsOuProcess("scripts/ci/controle-negativo/lib.ts")).toBe(false);
+    expect(ehArquivoDocsOuProcess("scripts/prova/run.ts")).toBe(false);
+  });
+
   it("não classifica código de produção", () => {
     expect(ehArquivoDocsOuProcess("scripts/ci/controle-negativo/lib.ts")).toBe(false);
   });
@@ -241,6 +276,45 @@ describe("ehArquivoDocsOuProcess / deveSerIgnorado", () => {
 
   it("não faz SKIP para diff vazio (não é 'classe docs/process', é 'nada mudou')", () => {
     expect(deveSerIgnorado([])).toBe(false);
+  });
+});
+
+describe("ehDeclaracaoDeProva / soDeclaracaoDeProvaExistenteEditada (acréscimo à #62, bloqueia #65)", () => {
+  it("ehDeclaracaoDeProva: true só para prova/<slug>.ts (um segmento)", () => {
+    expect(ehDeclaracaoDeProva("prova/ruleset-seis-checks.ts")).toBe(true);
+    expect(ehDeclaracaoDeProva("prova/sub/x.ts")).toBe(false);
+    expect(ehDeclaracaoDeProva("tests/prova-run.test.ts")).toBe(false);
+    expect(ehDeclaracaoDeProva("scripts/prova/run.ts")).toBe(false);
+  });
+
+  it("SKIP quando o único arquivo fora de docs/process é uma declaração de prova JÁ EXISTENTE na base", () => {
+    const jaExiste = (arquivo: string): boolean => arquivo === "prova/stop-gate.ts";
+    expect(
+      soDeclaracaoDeProvaExistenteEditada(
+        [".claude/hooks/README.md", "prova/stop-gate.ts"],
+        jaExiste,
+      ),
+    ).toBe(true);
+  });
+
+  it("não SKIP quando a declaração de prova é NOVA (ausente na base)", () => {
+    const jaExiste = (): boolean => false;
+    expect(soDeclaracaoDeProvaExistenteEditada(["prova/novo-slug.ts"], jaExiste)).toBe(false);
+  });
+
+  it("não SKIP quando há qualquer tests/**, src/** ou scripts/** (fora de scripts/github/) no diff", () => {
+    const jaExiste = (): boolean => true;
+    expect(
+      soDeclaracaoDeProvaExistenteEditada(["prova/stop-gate.ts", "tests/algo.test.ts"], jaExiste),
+    ).toBe(false);
+    expect(soDeclaracaoDeProvaExistenteEditada(["prova/stop-gate.ts", "src/x.ts"], jaExiste)).toBe(
+      false,
+    );
+  });
+
+  it("false quando não sobra nada fora de docs/process (deveSerIgnorado já cobre esse caso)", () => {
+    const jaExiste = (): boolean => true;
+    expect(soDeclaracaoDeProvaExistenteEditada(["docs/a.md"], jaExiste)).toBe(false);
   });
 });
 
@@ -299,6 +373,12 @@ describe("parseArgs", () => {
   });
 });
 
+describe("TIMEOUT_PROVA_MS (issue #62 — rodarProvaNaBase sem timeout)", () => {
+  it("é 10 minutos em milissegundos", () => {
+    expect(TIMEOUT_PROVA_MS).toBe(10 * 60 * 1000);
+  });
+});
+
 describe("overlay (unitário, sem git de verdade — mostrarArquivo injetado)", () => {
   const overlayDirs: string[] = [];
   afterEach(() => {
@@ -348,515 +428,71 @@ describe("overlay (unitário, sem git de verdade — mostrarArquivo injetado)", 
   });
 });
 
-// --- Integração: repositórios git temporários e descartáveis -------------
-
-const PROVA_RUN_CJS = `
-const fs = require("fs");
-const path = require("path");
-const slug = process.argv[2];
-const testPath = path.join(__dirname, "tests", slug + ".test.ts");
-let resumo;
-try {
-  const src = fs.readFileSync(testPath, "utf8");
-  const mod = { exports: {} };
-  new Function("module", "exports", "require", src)(mod, mod.exports, require);
-  mod.exports.run();
-  resumo = { ok: true, total: 1, falhas: [] };
-} catch (err) {
-  const nome =
-    err && err.code === "MODULE_NOT_FOUND" ? "tests/" + slug + ".test.ts" : "asserção real";
-  resumo = { ok: false, total: 1, falhas: [{ nome, motivo: String((err && err.message) || err) }] };
-}
-const outDir = path.join(__dirname, ".prova", slug);
-fs.mkdirSync(outDir, { recursive: true });
-fs.writeFileSync(path.join(outDir, "resumo.json"), JSON.stringify(resumo, null, 2) + "\\n");
-process.stdout.write(JSON.stringify(resumo) + "\\n");
-process.exit(resumo.ok ? 0 : 1);
-`;
-
-const workdirs: string[] = [];
-
-afterEach(() => {
-  while (workdirs.length > 0) {
-    const dir = workdirs.pop();
-    if (dir !== undefined) rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-function git(cwd: string, args: string[]): void {
-  const result = spawnSync("git", args, { cwd, encoding: "utf8" });
-  if (result.status !== 0) {
-    throw new Error(`git ${args.join(" ")} falhou: ${result.stderr}`);
-  }
-}
-
-function gitCapture(cwd: string, args: string[]): string {
-  const result = spawnSync("git", args, { cwd, encoding: "utf8" });
-  if (result.status !== 0) {
-    throw new Error(`git ${args.join(" ")} falhou: ${result.stderr}`);
-  }
-  return result.stdout.trim();
-}
-
-function novoRepo(): string {
-  const dir = mkdtempSync(join(tmpdir(), "controle-negativo-"));
-  workdirs.push(dir);
-  git(dir, ["init", "-q", "-b", "main"]);
-  git(dir, ["config", "user.email", "prova@example.com"]);
-  git(dir, ["config", "user.name", "Prova"]);
-  writeFileSync(
-    join(dir, "package.json"),
-    `${JSON.stringify({ name: "fake", version: "0.0.0", scripts: { prova: "node prova-run.cjs" } }, null, 2)}\n`,
-  );
-  writeFileSync(join(dir, "prova-run.cjs"), PROVA_RUN_CJS);
-  return dir;
-}
-
-function commitTudo(dir: string, mensagem: string): string {
-  git(dir, ["add", "-A"]);
-  git(dir, ["commit", "-q", "-m", mensagem]);
-  return gitCapture(dir, ["rev-parse", "HEAD"]);
-}
-
-/** Base com uma implementação errada; HEAD acrescenta o teste (que passa a
- * reprovar de verdade contra o bug da base) — cenário `assertion-red`. */
-function repoAssertionRed(): { dir: string; base: string; head: string; slug: string } {
-  const dir = novoRepo();
-  mkdirSync(join(dir, "src"), { recursive: true });
-  writeFileSync(join(dir, "src", "soma.cjs"), "module.exports.somar = (a, b) => a - b;\n");
-  const base = commitTudo(dir, "feat: soma inicial (com bug)");
-
-  mkdirSync(join(dir, "tests"), { recursive: true });
-  mkdirSync(join(dir, "prova"), { recursive: true });
-  writeFileSync(
-    join(dir, "tests", "soma.test.ts"),
-    [
-      'const { somar } = require("./src/soma.cjs");',
-      "module.exports.run = function () {",
-      "  const resultado = somar(1, 2);",
-      '  if (resultado !== 3) { throw new Error("esperava 3, obteve " + resultado); }',
-      "};",
-      "",
-    ].join("\n"),
-  );
-  writeFileSync(join(dir, "prova", "soma.ts"), "// declaração de prova (fixture de teste)\n");
-  writeFileSync(join(dir, "src", "soma.cjs"), "module.exports.somar = (a, b) => a + b;\n");
-  const head = commitTudo(dir, "test(red): cobre soma com o bug corrigido");
-  return { dir, base, head, slug: "soma" };
-}
-
-/** Teste sem asserção nenhuma — passa até contra a base sem implementação. */
-function repoVacuousPass(): { dir: string; base: string; head: string; slug: string } {
-  const dir = novoRepo();
-  const base = commitTudo(dir, "chore: repo vazio");
-
-  mkdirSync(join(dir, "tests"), { recursive: true });
-  mkdirSync(join(dir, "prova"), { recursive: true });
-  writeFileSync(join(dir, "tests", "vazio.test.ts"), "module.exports.run = function () {};\n");
-  writeFileSync(join(dir, "prova", "vazio.ts"), "// declaração de prova (fixture de teste)\n");
-  const head = commitTudo(dir, "test: teste que não afirma nada");
-  return { dir, base, head, slug: "vazio" };
-}
-
-const TESTE_ESTRUTURAL = [
-  'const { somar } = require("./src/estrutural.cjs");',
-  "module.exports.run = function () {",
-  '  if (somar(1, 2) !== 3) { throw new Error("nunca chega aqui"); }',
-  "};",
-  "",
-].join("\n");
-
-/**
- * Base sem `src/estrutural.cjs` — o `require` no teste falha com
- * `MODULE_NOT_FOUND` (estrutural). As quatro variantes cobrem a regra nova
- * de `structural-red` (rodada 2 da PR #54):
- *   - "com-stub": um único commit `test(red):` que adiciona o teste E um
- *     stub que lança em `src/estrutural.cjs` (arquivo NÃO-teste) — aceito.
- *   - "com-fix-depois": o mesmo `test(red):` com stub, seguido de um
- *     commit comum que só toca o teste de novo — ainda aceito (o gate é
- *     "existe pelo menos um", não "o último").
- *   - "sem-test-red": nenhum commit no range é `test(red):` — reprovado.
- *   - "sem-stub": o commit É `test(red):`, mas não toca nenhum arquivo
- *     não-teste (sem stub declarado) — reprovado.
- */
-function repoStructuralRed(variante: "com-stub" | "com-fix-depois" | "sem-test-red" | "sem-stub"): {
-  dir: string;
-  base: string;
-  head: string;
-  slug: string;
-} {
-  const dir = novoRepo();
-  const base = commitTudo(dir, "chore: repo vazio");
-
-  mkdirSync(join(dir, "tests"), { recursive: true });
-  mkdirSync(join(dir, "prova"), { recursive: true });
-  writeFileSync(join(dir, "tests", "estrutural.test.ts"), TESTE_ESTRUTURAL);
-  writeFileSync(join(dir, "prova", "estrutural.ts"), "// declaração de prova (fixture de teste)\n");
-
-  if (variante === "sem-test-red") {
-    const head = commitTudo(dir, "feat: cobre estrutural (sem test(red):)");
-    return { dir, base, head, slug: "estrutural" };
-  }
-
-  if (variante === "sem-stub") {
-    // test(red) real, mas sem tocar nenhum arquivo não-teste — nenhum stub
-    // declarado (worktree-segura §7 pede o stub NO MESMO commit).
-    const head = commitTudo(dir, "test(red): cobre estrutural (sem stub de produção)");
-    return { dir, base, head, slug: "estrutural" };
-  }
-
-  // "com-stub" / "com-fix-depois": adiciona o stub que lança num arquivo
-  // não-teste, no MESMO commit `test(red):`.
-  mkdirSync(join(dir, "src"), { recursive: true });
-  writeFileSync(
-    join(dir, "src", "estrutural.cjs"),
-    'module.exports.somar = () => { throw new Error("not implemented: somar"); };\n',
-  );
-  let head = commitTudo(dir, "test(red): cobre estrutural (stub que lança)");
-
-  if (variante === "com-fix-depois") {
-    writeFileSync(
-      join(dir, "tests", "estrutural.test.ts"),
-      `${TESTE_ESTRUTURAL}// comentário adicionado depois do vermelho\n`,
+describe("commitsQueTocamTestes / commitAdicionaStub (git injetado — causa nunca engolida, issue #62)", () => {
+  it("commitsQueTocamTestes: [] quando testFiles é vazio, sem chamar git", () => {
+    const chamadas: string[][] = [];
+    const resultado = commitsQueTocamTestes(
+      (args) => {
+        chamadas.push([...args]);
+        return { status: 0, stdout: "", stderr: "" };
+      },
+      "base",
+      "head",
+      [],
     );
-    head = commitTudo(dir, "fix(ci): comentário no teste (não é test(red):)");
-  }
-
-  return { dir, base, head, slug: "estrutural" };
-}
-
-function runControleNegativo(args: readonly string[]): SpawnSyncReturns<string> {
-  const env = Object.fromEntries(
-    Object.entries(process.env).filter(
-      ([key]) => !key.startsWith("VITEST") && key !== "LOHRA_PROVA_OUT",
-    ),
-  );
-  return spawnSync(tsxBin, [runScript, ...args], { encoding: "utf8", timeout: 60_000, env });
-}
-
-describe("controle-negativo/run.ts (subprocesso, repositório git descartável)", () => {
-  it("assertion-red: exit 0, e o worktree temporário é removido", () => {
-    const { dir, base, head, slug } = repoAssertionRed();
-    const before = gitCapture(dir, ["worktree", "list", "--porcelain"]);
-
-    const result = runControleNegativo([
-      "--root",
-      dir,
-      "--base",
-      base,
-      "--head",
-      head,
-      "--slug",
-      slug,
-    ]);
-
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("assertion-red");
-    expect(gitCapture(dir, ["worktree", "list", "--porcelain"])).toBe(before);
+    expect(resultado).toEqual([]);
+    expect(chamadas).toEqual([]);
   });
 
-  it("vacuous-pass: exit 1, e o worktree temporário é removido mesmo reprovando", () => {
-    const { dir, base, head, slug } = repoVacuousPass();
-    const before = gitCapture(dir, ["worktree", "list", "--porcelain"]);
-
-    const result = runControleNegativo([
-      "--root",
-      dir,
-      "--base",
-      base,
-      "--head",
-      head,
-      "--slug",
-      slug,
-    ]);
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("vacuous-pass");
-    expect(gitCapture(dir, ["worktree", "list", "--porcelain"])).toBe(before);
-  });
-
-  it("structural-red aceito: um único commit test(red): com stub que lança", () => {
-    const { dir, base, head, slug } = repoStructuralRed("com-stub");
-
-    const result = runControleNegativo([
-      "--root",
-      dir,
-      "--base",
-      base,
-      "--head",
-      head,
-      "--slug",
-      slug,
-    ]);
-
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("structural-red");
-  });
-
-  it("structural-red aceito: test(red): com stub seguido de um commit de fix comum", () => {
-    const { dir, base, head, slug } = repoStructuralRed("com-fix-depois");
-
-    const result = runControleNegativo([
-      "--root",
-      dir,
-      "--base",
-      base,
-      "--head",
-      head,
-      "--slug",
-      slug,
-    ]);
-
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("structural-red");
-  });
-
-  it("structural-red reprovado: nenhum commit test(red): no range", () => {
-    const { dir, base, head, slug } = repoStructuralRed("sem-test-red");
-
-    const result = runControleNegativo([
-      "--root",
-      dir,
-      "--base",
-      base,
-      "--head",
-      head,
-      "--slug",
-      slug,
-    ]);
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("estrutural sem test(red) válido");
-  });
-
-  it("structural-red reprovado: test(red): existe mas não adiciona stub que lança", () => {
-    const { dir, base, head, slug } = repoStructuralRed("sem-stub");
-
-    const result = runControleNegativo([
-      "--root",
-      dir,
-      "--base",
-      base,
-      "--head",
-      head,
-      "--slug",
-      slug,
-    ]);
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("estrutural sem test(red) válido");
-  });
-
-  it("SKIP quando todo o diff é classe docs/process, mesmo sem prova/<slug>.ts", () => {
-    const dir = novoRepo();
-    const base = commitTudo(dir, "chore: init");
-    mkdirSync(join(dir, "docs"), { recursive: true });
-    writeFileSync(join(dir, "docs", "nota.md"), "# nota\n");
-    const head = commitTudo(dir, "docs: adiciona nota");
-
-    const result = runControleNegativo(["--root", dir, "--base", base, "--head", head]);
-
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("SKIP");
-  });
-
-  it("exit 1 citando o caminho quando prova/<slug>.ts não existe no HEAD (fora do SKIP)", () => {
-    const dir = novoRepo();
-    const base = commitTudo(dir, "chore: init");
-    mkdirSync(join(dir, "src"), { recursive: true });
-    writeFileSync(join(dir, "src", "algo.cjs"), "module.exports.algo = () => 1;\n");
-    const head = commitTudo(dir, "feat: adiciona algo (sem prova)");
-
-    const result = runControleNegativo([
-      "--root",
-      dir,
-      "--base",
-      base,
-      "--head",
-      head,
-      "--slug",
-      "inexistente",
-    ]);
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("prova/inexistente.ts");
-  });
-
-  it("--branch resolve o slug quando o HEAD está detached (checkout de CI)", () => {
-    const { dir, base, head, slug } = repoAssertionRed();
-    // Simula o checkout do CI: HEAD detached, sem branch local para `git
-    // branch --show-current` resolver.
-    git(dir, ["checkout", "--detach", head]);
-
-    const result = runControleNegativo([
-      "--root",
-      dir,
-      "--base",
-      base,
-      "--head",
-      head,
-      "--branch",
-      `feat/999-${slug}`,
-    ]);
-
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("assertion-red");
-  });
-
-  it("PASS logado quando a base não declara scripts.prova (harness ainda não existia)", () => {
-    const dir = mkdtempSync(join(tmpdir(), "controle-negativo-"));
-    workdirs.push(dir);
-    git(dir, ["init", "-q", "-b", "main"]);
-    git(dir, ["config", "user.email", "prova@example.com"]);
-    git(dir, ["config", "user.name", "Prova"]);
-    writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: "sem-harness" })}\n`);
-    const base = commitTudo(dir, "chore: repo antes do harness #42");
-
-    mkdirSync(join(dir, "tests"), { recursive: true });
-    mkdirSync(join(dir, "prova"), { recursive: true });
-    writeFileSync(join(dir, "tests", "algo.test.ts"), "module.exports.run = function () {};\n");
-    writeFileSync(join(dir, "prova", "algo.ts"), "// fixture\n");
-    const head = commitTudo(dir, "test(red): cobre algo");
-
-    const result = runControleNegativo([
-      "--root",
-      dir,
-      "--base",
-      base,
-      "--head",
-      head,
-      "--slug",
-      "algo",
-    ]);
-
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("sem harness na base");
-  });
-
-  it("exit 1 quando o package.json da base é JSON inválido (ilegível, não 'sem harness')", () => {
-    const dir = mkdtempSync(join(tmpdir(), "controle-negativo-"));
-    workdirs.push(dir);
-    git(dir, ["init", "-q", "-b", "main"]);
-    git(dir, ["config", "user.email", "prova@example.com"]);
-    git(dir, ["config", "user.name", "Prova"]);
-    writeFileSync(join(dir, "package.json"), "{ isso não é json");
-    const base = commitTudo(dir, "chore: package.json corrompido");
-
-    mkdirSync(join(dir, "tests"), { recursive: true });
-    mkdirSync(join(dir, "prova"), { recursive: true });
-    writeFileSync(join(dir, "tests", "z.test.ts"), "module.exports.run = function () {};\n");
-    writeFileSync(join(dir, "prova", "z.ts"), "// fixture\n");
-    const head = commitTudo(dir, "test(red): cobre z");
-
-    const result = runControleNegativo([
-      "--root",
-      dir,
-      "--base",
-      base,
-      "--head",
-      head,
-      "--slug",
-      "z",
-    ]);
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("package.json");
-    expect(result.stderr).not.toContain("sem harness");
-  });
-
-  it("exit 1 citando o caminho quando resumo.json da base tem shape inválido", () => {
-    const dir = mkdtempSync(join(tmpdir(), "controle-negativo-"));
-    workdirs.push(dir);
-    git(dir, ["init", "-q", "-b", "main"]);
-    git(dir, ["config", "user.email", "prova@example.com"]);
-    git(dir, ["config", "user.name", "Prova"]);
-    writeFileSync(
-      join(dir, "package.json"),
-      `${JSON.stringify({ scripts: { prova: "node prova-run.cjs" } })}\n`,
+  it("commitsQueTocamTestes: parseia sha\\x01subject por linha quando git log sai 0", () => {
+    const resultado = commitsQueTocamTestes(
+      () => ({
+        status: 0,
+        stdout: "aaa\x01test(red): cobre x\nbbb\x01fix: ajuste\n",
+        stderr: "",
+      }),
+      "base",
+      "head",
+      ["tests/x.test.ts"],
     );
-    writeFileSync(
-      join(dir, "prova-run.cjs"),
-      [
-        'const fs = require("fs");',
-        'const path = require("path");',
-        "const slug = process.argv[2];",
-        'const outDir = path.join(__dirname, ".prova", slug);',
-        "fs.mkdirSync(outDir, { recursive: true });",
-        'fs.writeFileSync(path.join(outDir, "resumo.json"), JSON.stringify({ total: 1 }) + "\\n");',
-        "process.exit(1);",
-        "",
-      ].join("\n"),
+    expect(resultado).toEqual([
+      { sha: "aaa", subject: "test(red): cobre x" },
+      { sha: "bbb", subject: "fix: ajuste" },
+    ]);
+  });
+
+  it("commitsQueTocamTestes: lança com a causa (nunca engole) quando git log falha de verdade", () => {
+    expect(() =>
+      commitsQueTocamTestes(
+        () => ({ status: 128, stdout: "", stderr: "fatal: bad revision 'base..head'" }),
+        "base",
+        "head",
+        ["tests/x.test.ts"],
+      ),
+    ).toThrow(/fatal: bad revision/);
+  });
+
+  it("commitAdicionaStub: false sem chamar git quando não há arquivo não-teste", () => {
+    const chamadas: string[][] = [];
+    const resultado = commitAdicionaStub(
+      (args) => {
+        chamadas.push([...args]);
+        return { status: 0, stdout: "", stderr: "" };
+      },
+      "aaa",
+      [],
     );
-    const base = commitTudo(dir, "chore: harness com resumo.json quebrado (sem 'ok')");
-
-    mkdirSync(join(dir, "tests"), { recursive: true });
-    mkdirSync(join(dir, "prova"), { recursive: true });
-    writeFileSync(join(dir, "tests", "x.test.ts"), "module.exports.run = function () {};\n");
-    writeFileSync(join(dir, "prova", "x.ts"), "// fixture\n");
-    const head = commitTudo(dir, "test(red): cobre x");
-
-    const result = runControleNegativo([
-      "--root",
-      dir,
-      "--base",
-      base,
-      "--head",
-      head,
-      "--slug",
-      "x",
-    ]);
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(".prova/x/resumo.json");
-    expect(result.stderr).toContain('"ok"');
+    expect(resultado).toBe(false);
+    expect(chamadas).toEqual([]);
   });
 
-  it("cita a causa do npm run prova quando a base não produz resumo.json", () => {
-    const dir = novoRepo();
-    // Sobrescreve o harness fake para nunca escrever resumo.json.
-    writeFileSync(join(dir, "prova-run.cjs"), "process.exit(7);\n");
-    const base = commitTudo(dir, "chore: harness quebrado (nunca escreve resumo.json)");
-
-    mkdirSync(join(dir, "tests"), { recursive: true });
-    mkdirSync(join(dir, "prova"), { recursive: true });
-    writeFileSync(join(dir, "tests", "y.test.ts"), "module.exports.run = function () {};\n");
-    writeFileSync(join(dir, "prova", "y.ts"), "// fixture\n");
-    const head = commitTudo(dir, "test(red): cobre y");
-
-    const result = runControleNegativo([
-      "--root",
-      dir,
-      "--base",
-      base,
-      "--head",
-      head,
-      "--slug",
-      "y",
-    ]);
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("resumo.json");
-    expect(result.stderr).toContain("exit code 7");
-  });
-
-  it("exit 1 e sem diretório temporário vazando quando git worktree add falha (base inexistente)", () => {
-    const { dir, head, slug } = repoAssertionRed();
-    const baseInvalida = "0".repeat(40);
-    const antes = readdirSync(tmpdir()).filter((nome) => nome.startsWith("controle-negativo-"));
-
-    const result = runControleNegativo([
-      "--root",
-      dir,
-      "--base",
-      baseInvalida,
-      "--head",
-      head,
-      "--slug",
-      slug,
-    ]);
-
-    expect(result.status).toBe(1);
-    const depois = readdirSync(tmpdir()).filter((nome) => nome.startsWith("controle-negativo-"));
-    expect(depois).toEqual(antes);
+  it("commitAdicionaStub: lança com a causa quando git show falha de verdade", () => {
+    expect(() =>
+      commitAdicionaStub(
+        () => ({ status: 128, stdout: "", stderr: "fatal: bad object aaa" }),
+        "aaa",
+        ["src/x.ts"],
+      ),
+    ).toThrow(/fatal: bad object/);
   });
 });

@@ -17,6 +17,49 @@ import { regras, rodarContratos, type Regra } from "../scripts/ci/contratos/lib.
 const root = resolve(import.meta.dirname, "..");
 const runScript = resolve(root, "scripts/ci/contratos/run.ts");
 const tsxBin = resolve(root, "node_modules/.bin/tsx");
+const tsxCliMjs = resolve(root, "node_modules/tsx/dist/cli.mjs");
+
+function gitCli(cwd: string, args: string[]): void {
+  const r = spawnSync("git", args, { cwd, encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`git ${args.join(" ")} falhou: ${r.stderr}`);
+}
+
+function gitCapture(cwd: string, args: string[]): string {
+  const r = spawnSync("git", args, { cwd, encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`git ${args.join(" ")} falhou: ${r.stderr}`);
+  return r.stdout.trim();
+}
+
+function novoRepoGit(dir: string): void {
+  gitCli(dir, ["init", "-q", "-b", "main"]);
+  gitCli(dir, ["config", "user.email", "prova@example.com"]);
+  gitCli(dir, ["config", "user.name", "Prova"]);
+}
+
+function commitTudo(dir: string, mensagem: string): string {
+  gitCli(dir, ["add", "-A"]);
+  gitCli(dir, ["commit", "-q", "--allow-empty", "-m", mensagem]);
+  return gitCapture(dir, ["rev-parse", "HEAD"]);
+}
+
+/** Roda `run.ts` num subprocesso com `PATH` vazio — `git` vira ENOENT.
+ * `process.execPath` + o CLI do `tsx` direto (issue #62, mesmo padrão de
+ * `tests/ci-escopo.test.ts`). */
+function rodarComPathVazio(
+  args: readonly string[],
+  extraEnv: Record<string, string>,
+): SpawnSyncReturns<string> {
+  const dirVazio = mkdtempSync(join(tmpdir(), "lohra-contratos-path-vazio-"));
+  try {
+    return spawnSync(process.execPath, [tsxCliMjs, runScript, ...args], {
+      encoding: "utf8",
+      timeout: 30_000,
+      env: { ...extraEnv, PATH: dirVazio },
+    });
+  } finally {
+    rmSync(dirVazio, { recursive: true, force: true });
+  }
+}
 
 function regra(id: string): Regra {
   const encontrada = regras.find((r) => r.id === id);
@@ -249,4 +292,93 @@ describe("run.ts (dry-run, subprocesso)", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("import-proibido: src/usa.ts");
   });
+
+  it("flag desconhecida: exit 2 com mensagem de uso (issue #62)", () => {
+    const dir = makeWorkdir();
+    const filesFile = join(dir, "files.txt");
+    writeFileSync(filesFile, "");
+
+    const result = runDryRun(dir, filesFile, ["--flag-que-nao-existe"]);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("uso");
+  });
+
+  it("GITHUB_EVENT_PATH com JSON inválido: exit 2 com a causa, nunca stack trace (issue #62)", () => {
+    const dir = makeWorkdir();
+    const eventPath = join(dir, "event.json");
+    writeFileSync(eventPath, "{ isso não é json");
+
+    const result = spawnSync(tsxBin, [runScript], {
+      encoding: "utf8",
+      timeout: 30_000,
+      cwd: dir,
+      env: { ...process.env, GITHUB_EVENT_PATH: eventPath },
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("contratos:");
+    expect(result.stderr).not.toMatch(/\n\s+at /);
+  });
+
+  it("GITHUB_STEP_SUMMARY inválido: exit 2 com a causa, violações ainda vão pro stderr (issue #62)", () => {
+    const dir = makeWorkdir();
+    mkdirSync(join(dir, "docs", "reference"), { recursive: true });
+    writeFileSync(join(dir, "docs", "reference", "x.md"), "não editar\n");
+    const filesFile = join(dir, "files.txt");
+    writeFileSync(filesFile, "docs/reference/x.md\n");
+
+    const result = spawnSync(tsxBin, [runScript, "--files-file", filesFile, "--root", dir], {
+      encoding: "utf8",
+      timeout: 30_000,
+      env: { ...process.env, GITHUB_STEP_SUMMARY: join(dir, "nao", "existe", "summary.md") },
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("caminho-proibido: docs/reference/x.md");
+    expect(result.stderr).not.toMatch(/\n\s+at /);
+  });
+
+  it("git ausente (PATH vazio): exit 2 (infra), mensagem com ENOENT (issue #62)", () => {
+    const dir = makeWorkdir();
+    novoRepoGit(dir);
+    writeFileSync(join(dir, "a.txt"), "x\n");
+    commitTudo(dir, "chore: init");
+    const eventPath = join(dir, "event.json");
+    writeFileSync(
+      eventPath,
+      JSON.stringify({ pull_request: { base: { sha: "aaa" }, head: { sha: "bbb" } } }),
+    );
+
+    const result = rodarComPathVazio([], { GITHUB_EVENT_PATH: eventPath });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("ENOENT");
+  });
+
+  it("café.md sob docs/reference/ num diff real (git): exit 1, nome completo no stderr (issue #62)", () => {
+    const dir = makeWorkdir();
+    novoRepoGit(dir);
+    const base = commitTudo(dir, "chore: base vazia");
+    mkdirSync(join(dir, "docs", "reference"), { recursive: true });
+    writeFileSync(join(dir, "docs", "reference", "café.md"), "não editar\n");
+    const head = commitTudo(dir, "docs: adiciona café.md");
+    const eventPath = join(dir, "event.json");
+    writeFileSync(
+      eventPath,
+      JSON.stringify({ pull_request: { base: { sha: base }, head: { sha: head } } }),
+    );
+
+    const result = spawnSync(tsxBin, [runScript], {
+      encoding: "utf8",
+      timeout: 30_000,
+      cwd: dir,
+      env: { ...process.env, GITHUB_EVENT_PATH: eventPath },
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr.normalize("NFC")).toContain(
+      "caminho-proibido: docs/reference/café.md".normalize("NFC"),
+    );
+  }, 30_000);
 });

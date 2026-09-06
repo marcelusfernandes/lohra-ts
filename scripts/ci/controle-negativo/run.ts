@@ -87,6 +87,7 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 
 import { branchSlug } from "../../prova/slug.js";
+import { causaGit, git, gitBinario, gitDiffNameStatus, type ExecucaoGit } from "../lib/git.js";
 import {
   type Args,
   arquivosDeTeste,
@@ -96,6 +97,7 @@ import {
   ehCommitTestRed,
   parseArgs,
   semHarnessNaBase,
+  soDeclaracaoDeProvaExistenteEditada,
   validarResumo,
 } from "./lib.js";
 
@@ -127,21 +129,6 @@ function escreverSummary(bloco: string): void {
       `controle-negativo: não foi possível escrever em GITHUB_STEP_SUMMARY: ${String(error)}\n`,
     );
   }
-}
-
-interface ResultadoGit {
-  readonly status: number;
-  readonly stdout: string;
-  readonly stderr: string;
-}
-
-function git(root: string, args: readonly string[]): ResultadoGit {
-  const resultado = spawnSync("git", [...args], { cwd: root, encoding: "utf8" });
-  return {
-    status: resultado.status ?? 1,
-    stdout: resultado.stdout,
-    stderr: resultado.stderr,
-  };
 }
 
 function existeNoCommit(root: string, commit: string, caminhoRelativo: string): boolean {
@@ -178,19 +165,15 @@ interface ArquivoDiff {
   readonly arquivo: string;
 }
 
+/** `git diff --name-status -z` via `../lib/git.js` (issue #62): nunca
+ * escapa um caminho não-ASCII, e a causa (ENOENT, sinal, exit code, stderr)
+ * nunca é perdida quando o comando falha. */
 function diffNomeStatus(root: string, base: string, head: string): readonly ArquivoDiff[] {
-  const resultado = git(root, ["diff", "--no-renames", "--name-status", `${base}...${head}`]);
-  if (resultado.status !== 0) {
-    falhaFechada(`controle-negativo: git diff ${base}...${head} falhou: ${resultado.stderr}`);
+  try {
+    return gitDiffNameStatus(root, base, head);
+  } catch (erro) {
+    falhaFechada(`controle-negativo: ${erro instanceof Error ? erro.message : String(erro)}`);
   }
-  return resultado.stdout
-    .split("\n")
-    .map((linha) => linha.trim())
-    .filter((linha) => linha.length > 0)
-    .map((linha) => {
-      const [status, ...resto] = linha.split("\t");
-      return { status: status ?? "", arquivo: resto.join("\t") };
-    });
 }
 
 /** `false` quando `git worktree add` falhou — não há worktree registrado
@@ -203,8 +186,8 @@ function diffNomeStatus(root: string, base: string, head: string): readonly Arqu
  */
 function worktreeAdd(root: string, tmpDir: string, base: string): boolean {
   const resultado = git(root, ["worktree", "add", "--detach", tmpDir, base]);
-  if (resultado.status !== 0) {
-    process.stderr.write(`controle-negativo: git worktree add falhou: ${resultado.stderr}\n`);
+  if (resultado.error !== undefined || resultado.status !== 0) {
+    process.stderr.write(`controle-negativo: git worktree add falhou: ${causaGit(resultado)}\n`);
     return false;
   }
   return true;
@@ -213,9 +196,9 @@ function worktreeAdd(root: string, tmpDir: string, base: string): boolean {
 function worktreeRemove(root: string, tmpDir: string, registrado: boolean): void {
   if (registrado) {
     const resultado = git(root, ["worktree", "remove", "--force", tmpDir]);
-    if (resultado.status !== 0) {
+    if (resultado.error !== undefined || resultado.status !== 0) {
       process.stderr.write(
-        `controle-negativo: git worktree remove falhou (${resultado.stderr.trim()}); limpando com rmSync mesmo assim\n`,
+        `controle-negativo: git worktree remove falhou (${causaGit(resultado)}); limpando com rmSync mesmo assim\n`,
       );
     }
   }
@@ -254,8 +237,10 @@ export function overlay(
     }
     const resultado = mostrarArquivo(arquivo);
     if (resultado.status !== 0) {
+      const stderrTexto = resultado.stderr.toString("utf8").trim();
       throw new Error(
-        `controle-negativo: git show ${head}:${arquivo} falhou: ${resultado.stderr.toString("utf8")}`,
+        `controle-negativo: git show ${head}:${arquivo} falhou: exit code ${String(resultado.status)}` +
+          (stderrTexto === "" ? "" : ` — ${stderrTexto}`),
       );
     }
     mkdirSync(dirname(destino), { recursive: true });
@@ -264,11 +249,7 @@ export function overlay(
 }
 
 function mostrarArquivoGit(root: string, head: string, arquivo: string): MostrarArquivo {
-  const resultado = spawnSync("git", ["show", `${head}:${arquivo}`], {
-    cwd: root,
-    encoding: "buffer",
-  });
-  return { status: resultado.status ?? 1, stdout: resultado.stdout, stderr: resultado.stderr };
+  return gitBinario(root, ["show", `${head}:${arquivo}`]);
 }
 
 /** `node_modules` é gitignorado — sem isso, `npm run prova` na base não
@@ -294,6 +275,13 @@ interface ExecucaoProva {
   readonly error?: Error;
 }
 
+/** Tempo máximo para `npm run prova -- <slug>` rodar NA BASE — issue #62: sem
+ * isso, um harness travado (loop infinito, processo pendurado) nunca
+ * devolve o controle ao check, que fica pendurado indefinidamente no CI.
+ * 10 minutos: generoso o bastante para a suíte inteira de uma issue grande,
+ * curto o bastante para não esconder um job travado por horas. */
+export const TIMEOUT_PROVA_MS = 10 * 60 * 1000;
+
 function rodarProvaNaBase(tmpDir: string, slug: string): ExecucaoProva {
   const npmBin = process.platform === "win32" ? "npm.cmd" : "npm";
   const env = Object.fromEntries(
@@ -305,6 +293,7 @@ function rodarProvaNaBase(tmpDir: string, slug: string): ExecucaoProva {
     cwd: tmpDir,
     stdio: "inherit",
     env,
+    timeout: TIMEOUT_PROVA_MS,
   });
   return {
     status: resultado.status,
@@ -324,15 +313,41 @@ interface CommitInfo {
   readonly subject: string;
 }
 
-function commitsQueTocamTestes(
-  root: string,
+/** Shape mínimo que `commitsQueTocamTestes`/`commitAdicionaStub` precisam de
+ * uma execução de `git` — permite injetar um fake nos testes unitários
+ * (mesmo espírito de `overlay`/`mostrarArquivo`), sem exigir `signal`/
+ * `error` de quem só quer simular `status`/`stdout`/`stderr`. */
+export type ResultadoGitMinimo = Pick<ExecucaoGit, "status" | "stdout" | "stderr">;
+
+function causaGitMinima(resultado: ResultadoGitMinimo): string {
+  return causaGit({ ...resultado, signal: null });
+}
+
+/** `git log --format=%H%x01%s base..head -- <testFiles>`, exportado para
+ * teste unitário com a execução do `git` injetada. Issue #62: um `git log`
+ * que falha de verdade (revisão inválida, repositório corrompido) antes só
+ * virava `[]` silenciosamente — indistinguível de "nenhum commit toca os
+ * testes". Agora lança, citando a causa completa; nunca um `structural-red`
+ * reprovado por engano por um problema de infraestrutura. */
+export function commitsQueTocamTestes(
+  executarGit: (args: readonly string[]) => ResultadoGitMinimo,
   base: string,
   head: string,
   testFiles: readonly string[],
 ): readonly CommitInfo[] {
   if (testFiles.length === 0) return [];
-  const resultado = git(root, ["log", "--format=%H%x01%s", `${base}..${head}`, "--", ...testFiles]);
-  if (resultado.status !== 0) return [];
+  const resultado = executarGit([
+    "log",
+    "--format=%H%x01%s",
+    `${base}..${head}`,
+    "--",
+    ...testFiles,
+  ]);
+  if (resultado.status !== 0) {
+    throw new Error(
+      `controle-negativo: git log ${base}..${head} falhou: ${causaGitMinima(resultado)}`,
+    );
+  }
   return resultado.stdout
     .split("\n")
     .map((linha) => linha.trim())
@@ -343,14 +358,19 @@ function commitsQueTocamTestes(
     });
 }
 
-function commitAdicionaStub(
-  root: string,
+/** `git show <sha> -- <arquivosNaoTeste>`, exportado para teste unitário com
+ * a execução do `git` injetada — mesma razão de `commitsQueTocamTestes`:
+ * uma falha real de `git show` nunca pode virar `false` silencioso. */
+export function commitAdicionaStub(
+  executarGit: (args: readonly string[]) => ResultadoGitMinimo,
   sha: string,
   arquivosNaoTeste: readonly string[],
 ): boolean {
   if (arquivosNaoTeste.length === 0) return false;
-  const resultado = git(root, ["show", sha, "--", ...arquivosNaoTeste]);
-  if (resultado.status !== 0) return false;
+  const resultado = executarGit(["show", sha, "--", ...arquivosNaoTeste]);
+  if (resultado.status !== 0) {
+    throw new Error(`controle-negativo: git show ${sha} falhou: ${causaGitMinima(resultado)}`);
+  }
   return contemStubQueLanca(resultado.stdout);
 }
 
@@ -364,9 +384,11 @@ function existeTestRedValido(
   testFiles: readonly string[],
   arquivosNaoTeste: readonly string[],
 ): boolean {
-  return commitsQueTocamTestes(root, base, head, testFiles).some(
+  const executarGit = (args: readonly string[]): ResultadoGitMinimo => git(root, args);
+  return commitsQueTocamTestes(executarGit, base, head, testFiles).some(
     (commit) =>
-      ehCommitTestRed(commit.subject) && commitAdicionaStub(root, commit.sha, arquivosNaoTeste),
+      ehCommitTestRed(commit.subject) &&
+      commitAdicionaStub(executarGit, commit.sha, arquivosNaoTeste),
   );
 }
 
@@ -478,9 +500,29 @@ function main(): void {
   const head = args.head;
 
   const alterados = diffNomeStatus(root, base, head);
-  if (deveSerIgnorado(alterados.map((item) => item.arquivo))) {
+  const arquivosAlterados = alterados.map((item) => item.arquivo);
+  if (deveSerIgnorado(arquivosAlterados)) {
     escreverSummary("## controle-negativo\n\nSKIP — PR de classe docs/process, nada a controlar.");
     process.stdout.write("controle-negativo: SKIP — PR de classe docs/process, nada a controlar\n");
+    process.exit(0);
+  }
+
+  // Acréscimo à issue #62 (bloqueava a #65): só uma declaração de prova
+  // (`prova/<slug>.ts`) JÁ EXISTENTE na base foi tocada — nenhum
+  // `tests/**`/`src/**`/`scripts/**` de verdade no diff, então não há
+  // comportamento novo para provar vermelho. `prova/<slug>.ts` ausente na
+  // base (declaração nova) NÃO entra aqui — continua exigindo controle.
+  if (
+    soDeclaracaoDeProvaExistenteEditada(arquivosAlterados, (arquivo) =>
+      existeNoCommit(root, base, arquivo),
+    )
+  ) {
+    escreverSummary(
+      "## controle-negativo\n\nSKIP — só declaração de prova existente editada, nada a controlar.",
+    );
+    process.stdout.write(
+      "controle-negativo: SKIP — só declaração de prova existente editada, nada a controlar\n",
+    );
     process.exit(0);
   }
 

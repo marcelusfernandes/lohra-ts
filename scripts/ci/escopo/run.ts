@@ -13,16 +13,22 @@
 //     "todo argumento tem padrão").
 //
 // Uma PR sem "Closes #N" no corpo (e sem `--issue-body-file`) é um erro de
-// quem abriu a PR, não uma exceção do programa: `falhaLimpa` escreve uma
-// mensagem e sai com 1, nunca deixa um stack trace de `throw` não pego
-// chegar ao topo (skill `worktree-segura`; precedente Apollo #28/#29).
+// quem abriu a PR, não uma exceção do programa — SALVO quando a seção
+// `## Files` da própria PR declara `authorised:` cobrindo o diff inteiro
+// (issue #62, git-workflow.md — exceções ao issue-first: typo, arquivo
+// pequeno, mudança exploratória — quem escreve `authorised:` é sempre o
+// orquestrador, nunca quem implementa). Fora desse caso, `falhaLimpa`
+// escreve uma mensagem e sai com 1, nunca deixa um stack trace de `throw`
+// não pego chegar ao topo (skill `worktree-segura`; precedente Apollo
+// #28/#29).
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { gitDiffNames } from "../lib/git.js";
 import { appendSummary } from "../lib/summary.js";
-import { checarEscopo, globsAutorizados, globsDaIssue } from "./lib.js";
+import { checarEscopo, extrairSecao, globsAutorizados, globsDaIssue } from "./lib.js";
 
 function falhaLimpa(mensagem: string): never {
   process.stderr.write(`escopo: ${mensagem}\n`);
@@ -59,20 +65,13 @@ function ghIssueBody(numero: string): string {
   const r = spawnSync("gh", ["issue", "view", numero, "--json", "body", "-q", ".body"], {
     encoding: "utf8",
   });
+  if (r.error !== undefined) {
+    throw new Error(`gh issue view ${numero} falhou: ${r.error.message}`);
+  }
   if (r.status !== 0) {
     throw new Error(`gh issue view ${numero} falhou: ${r.stderr || r.stdout}`);
   }
   return r.stdout;
-}
-
-function gitDiffNames(base: string, head: string): string[] {
-  const r = spawnSync("git", ["diff", "--no-renames", "--name-only", `${base}...${head}`], {
-    encoding: "utf8",
-  });
-  if (r.status !== 0) {
-    throw new Error(`git diff ${base}...${head} falhou: ${r.stderr}`);
-  }
-  return linhasNaoVazias(r.stdout);
 }
 
 interface EventoPullRequest {
@@ -106,7 +105,7 @@ export function main(argv: readonly string[]): void {
         "sem --files-file, e sem GITHUB_EVENT_PATH de um evento pull_request com base/head",
       );
     }
-    files = gitDiffNames(base, head);
+    files = [...gitDiffNames(process.cwd(), base, head)];
   }
   const dryRun = filesFile !== undefined;
 
@@ -116,26 +115,39 @@ export function main(argv: readonly string[]): void {
       ? readFileSync(prBodyFile, "utf8")
       : (evento?.pull_request?.body ?? "");
 
+  const authorised = globsAutorizados(prBody);
+  const closesMatch = /\bcloses\s+#(\d+)/i.exec(prBody);
+  const issueNumero = closesMatch?.[1];
+
   const issueBodyFile = args.get("issue-body-file");
-  let issueBody: string;
+  let issueBody: string | null = null;
   if (issueBodyFile !== undefined) {
     issueBody = readFileSync(issueBodyFile, "utf8");
-  } else {
-    const closesMatch = /\bcloses\s+#(\d+)/i.exec(prBody);
-    const issueNumero = closesMatch?.[1];
-    if (issueNumero === undefined) {
-      falhaLimpa('a PR não declara "Closes #N" no corpo — não dá para achar a issue linkada');
-    }
+  } else if (issueNumero !== undefined) {
     if (dryRun) {
       falhaLimpa(
         `modo dry-run precisa de --issue-body-file (achei "Closes #${issueNumero}", mas dry-run não chama gh)`,
       );
     }
     issueBody = ghIssueBody(issueNumero);
+  } else if (authorised.length === 0) {
+    // Sem "Closes #N" e sem `authorised:` — não há como achar a issue nem
+    // uma exceção explícita do orquestrador cobrindo o diff. Erro de quem
+    // abriu a PR (git-workflow.md), não do programa.
+    falhaLimpa('a PR não declara "Closes #N" no corpo — não dá para achar a issue linkada');
+  }
+  // else: sem "Closes #N", mas com `authorised:` — segue sem issue
+  // (`issueBody` fica `null`, `issueGlobs` fica vazio); só `authorised`
+  // decide o escopo (issue #62).
+
+  let issueGlobs: readonly string[] = [];
+  if (issueBody !== null) {
+    if (extrairSecao(issueBody, "## Files") === null) {
+      falhaLimpa(`issue #${issueNumero ?? "desconhecida"} não declara "## Files"`);
+    }
+    issueGlobs = globsDaIssue(issueBody);
   }
 
-  const issueGlobs = globsDaIssue(issueBody);
-  const authorised = globsAutorizados(prBody);
   const resultado = checarEscopo({ files, issueGlobs, authorised });
   const todosGlobs = [...issueGlobs, ...authorised];
 
