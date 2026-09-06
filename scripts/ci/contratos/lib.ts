@@ -7,6 +7,13 @@
 // de CI constroem fixtures com imports proibidos, como string, para provar
 // que o scanner os pega — nenhum dos dois é o invariante em si, e escaneá-los
 // faria o contrato tropeçar na própria definição).
+//
+// Issue #93: `Regra.avalia` ganhou um terceiro parâmetro, `conteudoBase` —
+// o conteúdo do mesmo arquivo na base do diff (`null` quando o arquivo não
+// existia lá, ou quando quem chama não sabe comparar com a base). Só a
+// regra `arquivo-grande` usa: reprova arquivo novo ou que cresceu em
+// relação à base, não arquivo que já era grande e só foi editado (ver o
+// comentário acima de `arquivoGrande` para a dívida conhecida em `main`).
 
 export interface Violacao {
   readonly id: string;
@@ -17,6 +24,10 @@ export interface Violacao {
 export interface Regra {
   readonly id: string;
   readonly descreve: string;
+  /** `conteudoBase`: conteúdo do arquivo na base do diff (issue #93);
+   * `null` para arquivo novo ou quando não há base para comparar. Opcional
+   * — regras que não comparam com a base (`caminho-proibido`,
+   * `import-proibido`) ignoram o parâmetro. */
   avalia(arquivo: string, conteudo: string | null, conteudoBase?: string | null): Violacao | null;
 }
 
