@@ -9,7 +9,12 @@
 //     Ligada por `--apos-17`, ou por default quando NENHUM dos MARCADORES
 //     abaixo existe no head/root (ver nota).
 //   - `arquivo-grande`: `.ts`/`.mjs`/`.sh`/`.md` do diff com mais de 800
-//     linhas, exceto `tests/fixtures/**` e `docs/reference/**`.
+//     linhas, exceto `tests/fixtures/**` e `docs/reference/**` — só reprova
+//     arquivo novo ou que cresceu em relação à base (issue #93). No modo CI,
+//     a base vem de `git show <base>:<arquivo>` (`null` se o arquivo não
+//     existia lá — arquivo novo). No modo `--files-file` (dry-run, sem
+//     conceito de base) todo arquivo é tratado como novo, fail-closed, com
+//     aviso no stderr de que a comparação com a base só existe no CI.
 //
 // Nota sobre os MARCADORES: a issue #50 cita `src/python-json.ts` e
 // `src/python-repr.ts`; hoje (#17 ainda aberta) os módulos vivem em
@@ -105,6 +110,10 @@ interface FonteDeDados {
   readonly root: string;
   readonly files: readonly string[];
   readonly lerConteudo: (arquivo: string) => string | null;
+  /** Conteúdo do arquivo na base (issue #93) — `null` quando o arquivo é
+   * novo (não existia na base). No modo dry-run (`--files-file`, sem
+   * conceito de base) sempre `null`: `montarFonteDryRun` avisa no stderr. */
+  readonly lerConteudoBase: (arquivo: string) => string | null;
   readonly marcadorExiste: (marcador: string) => boolean;
 }
 
@@ -114,6 +123,10 @@ function montarFonteDryRun(args: Argumentos): FonteDeDados {
   }
   const root = resolve(args.root ?? process.cwd());
   const files = linhasDeArquivo(args.filesFile);
+  process.stderr.write(
+    "contratos: --files-file não tem base — arquivo-grande trata todo arquivo " +
+      "como novo (fail-closed); a comparação com a base só existe no CI\n",
+  );
   return {
     root,
     files,
@@ -122,6 +135,7 @@ function montarFonteDryRun(args: Argumentos): FonteDeDados {
       if (!existsSync(caminho)) return null;
       return readFileSync(caminho, "utf8");
     },
+    lerConteudoBase: () => null,
     marcadorExiste: (marcador) => existsSync(join(root, marcador)),
   };
 }
@@ -183,6 +197,10 @@ function montarFonteCi(root: string): FonteDeDados {
     return git(root, ["cat-file", "-e", `${head}:${caminho}`]).status === 0;
   }
 
+  function existeNaBase(caminho: string): boolean {
+    return git(root, ["cat-file", "-e", `${base}:${caminho}`]).status === 0;
+  }
+
   return {
     root,
     files,
@@ -192,6 +210,18 @@ function montarFonteCi(root: string): FonteDeDados {
       if (mostrado.error !== undefined || mostrado.status !== 0) {
         falhaFechada(
           `git show ${head}:${arquivo} falhou apesar de existir no head: ${causaGit(mostrado)}`,
+        );
+      }
+      return mostrado.stdout;
+    },
+    // Issue #93: `null` quando o arquivo não existe na base — arquivo novo,
+    // a regra `arquivo-grande` trata isso como "sempre viola se > 800".
+    lerConteudoBase: (arquivo) => {
+      if (!existeNaBase(arquivo)) return null;
+      const mostrado = git(root, ["show", `${base}:${arquivo}`]);
+      if (mostrado.error !== undefined || mostrado.status !== 0) {
+        falhaFechada(
+          `git show ${base}:${arquivo} falhou apesar de existir na base: ${causaGit(mostrado)}`,
         );
       }
       return mostrado.stdout;
@@ -233,7 +263,7 @@ function main(): void {
     args.filesFile !== undefined ? montarFonteDryRun(args) : montarFonteCi(resolve(process.cwd()));
 
   const ativo = ehImportProibidoAtivo(args, fonte);
-  const todasAsViolacoes = rodarContratos(fonte.files, fonte.lerConteudo);
+  const todasAsViolacoes = rodarContratos(fonte.files, fonte.lerConteudo, fonte.lerConteudoBase);
   const violacoes = todasAsViolacoes.filter((v) => v.id !== ID_IMPORT_PROIBIDO || ativo);
   const ok = violacoes.length === 0;
 

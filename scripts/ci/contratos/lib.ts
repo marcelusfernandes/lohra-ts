@@ -114,19 +114,45 @@ function contarLinhas(conteudo: string): number {
   return ultimo === "" ? partes.length - 1 : partes.length;
 }
 
+// Issue #93: a regra compara com a base — só reprova arquivo novo (sem
+// `conteudoBase`, ou `null` porque não existia na base) ou que cresceu
+// (`linhas(head) > linhas(base)`). Arquivo já grande na base que mantém ou
+// reduz o tamanho passa: o limite de 800 bloqueia crescimento novo, não
+// dívida pré-existente. `conteudoBase` ausente (chamada com dois argumentos,
+// como o modo `--files-file` sem base — ver run.ts) é tratado como arquivo
+// novo, fail-closed — reproduz o comportamento anterior à #93 para quem não
+// sabe comparar com a base.
+//
+// Dívida conhecida em `main` no momento da #93 (não é para ser paga aqui —
+// ver "Fora de escopo" na issue): `tests/workflow-audit-live.test.ts`
+// (1216 linhas). `find src tests scripts -name '*.ts' -o -name '*.mjs' |
+// xargs wc -l | awk '$1>800'` lista o inventário completo a qualquer momento.
 const arquivoGrande: Regra = {
   id: "arquivo-grande",
-  descreve: `Arquivo .ts/.mjs/.sh/.md com mais de ${String(LIMITE_LINHAS)} linhas.`,
-  avalia(arquivo, conteudo) {
+  descreve:
+    `Arquivo .ts/.mjs/.sh/.md com mais de ${String(LIMITE_LINHAS)} linhas, ` +
+    "se novo ou se cresceu em relação à base (issue #93).",
+  avalia(arquivo, conteudo, conteudoBase = null) {
     if (conteudo === null) return null;
     if (!EXTENSOES_ARQUIVO_GRANDE.some((ext) => arquivo.endsWith(ext))) return null;
     if (EXCECOES_ARQUIVO_GRANDE.some((prefixo) => sobPrefixo(arquivo, prefixo))) return null;
-    const linhas = contarLinhas(conteudo);
-    if (linhas <= LIMITE_LINHAS) return null;
+    const linhasHead = contarLinhas(conteudo);
+    if (linhasHead <= LIMITE_LINHAS) return null;
+    if (conteudoBase === null) {
+      return {
+        id: "arquivo-grande",
+        arquivo,
+        descricao: `${String(linhasHead)} linhas (> ${String(LIMITE_LINHAS)}; novo)`,
+      };
+    }
+    const linhasBase = contarLinhas(conteudoBase);
+    if (linhasHead <= linhasBase) return null;
     return {
       id: "arquivo-grande",
       arquivo,
-      descricao: `${String(linhas)} linhas (> ${String(LIMITE_LINHAS)})`,
+      descricao:
+        `${String(linhasBase)} → ${String(linhasHead)} linhas (> ${String(LIMITE_LINHAS)}; ` +
+        `a base já tinha ${String(linhasBase)})`,
     };
   },
 };
