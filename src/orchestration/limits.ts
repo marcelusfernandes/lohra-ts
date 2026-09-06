@@ -1,5 +1,3 @@
-import { pythonRepr } from "../serialization/python-repr.js";
-
 export interface EnvClampResult {
   readonly value: number;
   readonly warning: string | null;
@@ -23,10 +21,10 @@ export function pythonInt(raw: string): number | null {
  * Reproduces _positive_int_env: unset/empty falls back silently, an
  * unparseable value warns "not an integer", a parsed value below 1 warns
  * "must be >= 1" — both warnings cite the per-variable default, never a
- * shared constant. The raw value in the warning is Python's repr() of the
- * original string (the oracle's `%r` formatting), never the trimmed value
- * and never verbatim interpolation — a raw value containing a quote,
- * backslash, or control character diverges from a naive template.
+ * shared constant. The raw value in the warning is JSON.stringify() of the
+ * original string, never the trimmed value and never verbatim
+ * interpolation — a raw value containing a quote, backslash, or control
+ * character diverges from a naive template.
  */
 export function positiveIntEnv(
   name: string,
@@ -38,13 +36,13 @@ export function positiveIntEnv(
   if (parsed === null) {
     return {
       value: fallback,
-      warning: `ignoring ${name}=${pythonRepr(raw)}: not an integer; using ${String(fallback)}`,
+      warning: `ignoring ${name}=${JSON.stringify(raw)}: not an integer; using ${String(fallback)}`,
     };
   }
   if (parsed < 1) {
     return {
       value: fallback,
-      warning: `ignoring ${name}=${pythonRepr(raw)}: must be >= 1; using ${String(fallback)}`,
+      warning: `ignoring ${name}=${JSON.stringify(raw)}: must be >= 1; using ${String(fallback)}`,
     };
   }
   return { value: parsed, warning: null };

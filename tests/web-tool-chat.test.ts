@@ -97,7 +97,7 @@ describe("web tool envelopes and coercions", () => {
       expect(await webSearchHandler({ query: ["x"] })).toBe(
         toolResult(undefined, { query: ["x"], results: [] }),
       );
-      expect(received.map((call) => call.query)).toEqual(["True", "7", "['x']"]);
+      expect(received.map((call) => call.query)).toEqual(["true", "7", '["x"]']);
     });
   });
 

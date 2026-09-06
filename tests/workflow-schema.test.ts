@@ -106,6 +106,46 @@ describe("validateSpec", () => {
       rule: "node_type",
       nodeId: "a",
       field: "type",
+      message: `unknown node type ${JSON.stringify(type)}`,
+    });
+  });
+
+  // Round 2 (PR #85 review): the array/object cases above render identically
+  // under the old pythonRepr and the new JSON.stringify ("[]" and "{}" have
+  // no quote/None divergence) — they never actually pinned the JSON switch.
+  // These three distinguish: a string cites with double quotes (was single),
+  // null cites as the JSON literal `null` (was `None`), and a missing type
+  // cites as the JS-native `undefined` (was also `None`).
+  it("cites an unknown string node type with double quotes, never Python's single quotes", () => {
+    const result = validateSpec({ meta: { name: "x" }, nodes: [{ id: "a", type: "bogus" }] });
+    expect(result).toBeInstanceOf(ValidationError);
+    expect(isValidationError(result) && result.issues[0]).toMatchObject({
+      rule: "node_type",
+      nodeId: "a",
+      field: "type",
+      message: 'unknown node type "bogus"',
+    });
+  });
+
+  it("cites a null node type as the JSON literal null, never Python's None", () => {
+    const result = validateSpec({ meta: { name: "x" }, nodes: [{ id: "a", type: null }] });
+    expect(result).toBeInstanceOf(ValidationError);
+    expect(isValidationError(result) && result.issues[0]).toMatchObject({
+      rule: "node_type",
+      nodeId: "a",
+      field: "type",
+      message: "unknown node type null",
+    });
+  });
+
+  it("cites a missing node type as the literal undefined, never Python's None", () => {
+    const result = validateSpec({ meta: { name: "x" }, nodes: [{ id: "a" }] });
+    expect(result).toBeInstanceOf(ValidationError);
+    expect(isValidationError(result) && result.issues[0]).toMatchObject({
+      rule: "node_type",
+      nodeId: "a",
+      field: "type",
+      message: "unknown node type undefined",
     });
   });
 

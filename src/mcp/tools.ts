@@ -1,4 +1,3 @@
-import { pythonRepr } from "../serialization/python-repr.js";
 import { isPythonTruthy } from "../serialization/python-truthy.js";
 import { toolError, toolResult } from "../tools/envelope.js";
 import { ToolRegistrationCollisionError, type ToolRegistry } from "../tools/registry.js";
@@ -11,6 +10,13 @@ const EMPTY_SCHEMA: Readonly<Record<string, unknown>> = Object.freeze({
 });
 
 const INVALID = /[^a-z0-9]+/g;
+
+/** `JSON.stringify` is typed to always return `string`, but at runtime
+ * returns the JS value `undefined` for a function, a symbol, or `undefined`
+ * itself — this widens the type so callers can cite that case explicitly. */
+function jsonStringifyOrUndefined(value: unknown): string | undefined {
+  return JSON.stringify(value);
+}
 
 /** Deterministic registry name: `mcp_{server}_{tool}` (sanitized, lowercase). */
 export function mcpToolName(server: string, tool: string): string {
@@ -67,16 +73,13 @@ export function wrapCallResult(result: unknown): string {
       parts.push(isPythonTruthy(text) ? text : "");
     } else {
       const type = field<unknown>(block, "type", "content");
+      // JSON.stringify returns the JS value `undefined` (not a string) for a
+      // function/symbol/undefined `type` — cited as the literal `undefined`
+      // explicitly, never left to template-literal coercion.
       const rendered =
-        type === null
-          ? "None"
-          : type === true
-            ? "True"
-            : type === false
-              ? "False"
-              : typeof type === "string" || typeof type === "number"
-                ? String(type)
-                : pythonRepr(type);
+        typeof type === "string" || typeof type === "number"
+          ? String(type)
+          : (jsonStringifyOrUndefined(type) ?? "undefined");
       parts.push(`[${rendered} block]`);
     }
   }
@@ -134,7 +137,7 @@ export function prepareServerTools(
     if (!isPythonTruthy(original)) continue;
     if (typeof original !== "string") {
       throw new MCPToolListError(
-        `MCP server ${pythonRepr(server)} returned a truthy non-string tool name: ${pythonRepr(original)}`,
+        `MCP server ${JSON.stringify(server)} returned a truthy non-string tool name: ${JSON.stringify(original)}`,
       );
     }
     const name = mcpToolName(server, original);
@@ -166,7 +169,7 @@ export function registerServerTools(
     if (existingToolset === null) return true;
     if (!existingToolset.startsWith("mcp-")) {
       warn(
-        `MCP tool ${pythonRepr(registration.name)} shadows an existing ${pythonRepr(registration.name)} — skipped`,
+        `MCP tool ${JSON.stringify(registration.name)} shadows an existing ${JSON.stringify(registration.name)} — skipped`,
       );
       return false;
     }

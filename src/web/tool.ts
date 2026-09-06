@@ -1,5 +1,4 @@
 import { isPythonTruthy } from "../server/python-truthy.js";
-import { pythonRepr } from "../serialization/python-repr.js";
 import { toolError, toolResult } from "../tools/envelope.js";
 import { htmlToText } from "./extract.js";
 import { fetchUrl } from "./fetch.js";
@@ -68,7 +67,7 @@ export function coerceMaxResults(value: unknown): number {
 export function isMissingQuery(query: unknown): boolean {
   if (!isPythonTruthy(query)) return true;
   if (typeof query === "string") return query.trim() === "";
-  return pythonRepr(query).trim() === "";
+  return JSON.stringify(query).trim() === "";
 }
 
 export async function webFetchHandler(args: Readonly<Record<string, unknown>>): Promise<string> {
@@ -94,7 +93,7 @@ export async function webSearchHandler(args: Readonly<Record<string, unknown>>):
     return toolError("missing required argument 'query' (string)");
   }
   const maxResults = coerceMaxResults(args["max_results"]);
-  const backendQuery = typeof query === "string" ? query : pythonRepr(query);
+  const backendQuery = typeof query === "string" ? query : JSON.stringify(query);
   try {
     const results = await searchBackend.search(backendQuery, maxResults);
     return toolResult(undefined, {

@@ -1,6 +1,5 @@
 import { ProviderError } from "../agent/client-pool.js";
 import { jsonFloat } from "../serialization/json-numbers.js";
-import { pythonRepr } from "../serialization/python-repr.js";
 import { toolError, toolResult } from "../tools/envelope.js";
 import type { ToolArguments } from "../tools/types.js";
 import {
@@ -21,12 +20,12 @@ import {
   validateSteerArgs,
 } from "./validation.js";
 
-/** "no sub-session 'deadbeef'" — the oracle's repr() of the sub_id, single
- * quotes (L19). sub_id values are always uuid4().hex in practice, but a
- * caller can pass a coerced non-string; repr() is used regardless so this
- * never silently diverges for an unusual value. */
+/** `no sub-session "deadbeef"` — the sub_id cited as JSON. sub_id values are
+ * always uuid4().hex in practice, but a caller can pass a coerced
+ * non-string; JSON.stringify is used regardless so this never silently
+ * diverges for an unusual value. */
 function noSubSession(subId: string): string {
-  return toolError(`no sub-session ${pythonRepr(subId)}`);
+  return toolError(`no sub-session ${JSON.stringify(subId)}`);
 }
 
 function overridesFromArgs(args: ToolArguments): Omit<SpawnConfig, "prompt"> {
@@ -84,9 +83,9 @@ export function steerSessionTool(core: OrchestrationCore, args: ToolArguments): 
 
 /** Maps the registry's CollectResult (camelCase) to the wire's snake_case
  * envelope, in the contract's exact 13-key order (assertion 14). retry_after
- * is the oracle's own `seconds if seconds > 0 else None` (L15/assertion 39) —
- * a Python float, so a whole-number value like 1 renders as "1.0", never the
- * bare "1" a plain JS number would produce. */
+ * is positive seconds, else null (L15/assertion 39) — a Python float, so a
+ * whole-number value like 1 renders as "1.0", never the bare "1" a plain JS
+ * number would produce. */
 function collectEnvelope(result: CollectResult): string {
   return toolResult(undefined, {
     status: result.status,

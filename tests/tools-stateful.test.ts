@@ -27,9 +27,9 @@ afterEach(() => {
 });
 
 describe("stateful tool handlers", () => {
-  it("mutates memory and preserves Python repr/default-target quirks", () => {
+  it("mutates memory and preserves the default-target quirk", () => {
     const tool = new MemoryTool(new MemoryStore(root()));
-    expect(tool.handle({})).toBe('{"error":"unknown action None (use add/replace/remove)"}');
+    expect(tool.handle({})).toBe('{"error":"unknown action undefined (use add/replace/remove)"}');
     expect(tool.handle({ action: "add", target: "nope", text: "fact" })).toBe(
       '{"ok":true,"target":"nope","entry_count":1}',
     );
@@ -56,7 +56,7 @@ describe("stateful tool handlers", () => {
       '{"ok":true,"action":"delete","name":"one"}',
     );
     expect(tool.manage({ name: "one" })).toBe(
-      '{"error":"unknown action None (use create/update/delete)"}',
+      '{"error":"unknown action undefined (use create/update/delete)"}',
     );
   });
 
@@ -70,9 +70,9 @@ describe("stateful tool handlers", () => {
     expect(tool.handle({ mode: "browse" })).toBe('{"ok":true,"sessions":[]}');
     expect(tool.handle({ mode: "read" })).toBe("{\"error\":\"'read' requires 'session_id'\"}");
     expect(tool.handle({ mode: "discovery" })).toBe("{\"error\":\"'discovery' requires 'query'\"}");
-    expect(tool.handle({})).toBe('{"error":"unknown mode None (use discovery/browse/read)"}');
+    expect(tool.handle({})).toBe('{"error":"unknown mode undefined (use discovery/browse/read)"}');
     expect(tool.handle({ mode: "frobnicate" })).toBe(
-      '{"error":"unknown mode \'frobnicate\' (use discovery/browse/read)"}',
+      '{"error":"unknown mode \\"frobnicate\\" (use discovery/browse/read)"}',
     );
   });
 
@@ -82,7 +82,7 @@ describe("stateful tool handlers", () => {
       '{"ok":true,"providers":[{"provider":"anthropic","source":"skipped","total":0,"models":[],"detail":"no API key — set ANTHROPIC_API_KEY"}],"tiers":{"small":null,"medium":null,"big":null}}',
     );
     expect(await tool.handle({ provider: "no_such_provider" })).toBe(
-      "{\"error\":\"unknown provider 'no_such_provider' — call list_models with no 'provider' to see the ones this install knows about\"}",
+      '{"error":"unknown provider \\"no_such_provider\\" — call list_models with no \'provider\' to see the ones this install knows about"}',
     );
   });
 });

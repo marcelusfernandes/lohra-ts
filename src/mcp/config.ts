@@ -1,6 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
 
-import { pythonRepr } from "../serialization/python-repr.js";
 import { isPythonTruthy } from "../serialization/python-truthy.js";
 
 /** Raised on a malformed mcp.json (never on a missing file). */
@@ -31,13 +30,13 @@ function mappingKey(name: string, key: unknown, location: string): string {
   const at = location === "" ? "" : ` ${location}`;
   if (key !== null && typeof key !== "string") {
     throw new MCPConfigError(
-      `server ${pythonRepr(name)} field 'env'${at} key must be a non-ambiguous string or null`,
+      `server ${JSON.stringify(name)} field 'env'${at} key must be a non-ambiguous string or null`,
     );
   }
   const coerced = key === null ? "null" : key;
   if (isCanonicalArrayIndex(coerced)) {
     throw new MCPConfigError(
-      `server ${pythonRepr(name)} field 'env'${at} key ${pythonRepr(coerced)} is a canonical array-index string`,
+      `server ${JSON.stringify(name)} field 'env'${at} key ${JSON.stringify(coerced)} is a canonical array-index string`,
     );
   }
   return coerced;
@@ -61,7 +60,9 @@ function pythonMappingFromJson(name: string, value: unknown): Readonly<Record<st
     return mapping;
   }
   if (!Array.isArray(value)) {
-    throw new MCPConfigError(`server ${pythonRepr(name)} field 'env' cannot construct a mapping`);
+    throw new MCPConfigError(
+      `server ${JSON.stringify(name)} field 'env' cannot construct a mapping`,
+    );
   }
 
   const seen = new Set<string>();
@@ -72,12 +73,14 @@ function pythonMappingFromJson(name: string, value: unknown): Readonly<Record<st
         ? Array.from(entry)
         : undefined;
     if (pair?.length !== 2) {
-      throw new MCPConfigError(`server ${pythonRepr(name)} field 'env' cannot construct a mapping`);
+      throw new MCPConfigError(
+        `server ${JSON.stringify(name)} field 'env' cannot construct a mapping`,
+      );
     }
     const key = mappingKey(name, pair[0], `entry ${String(index)}`);
     if (seen.has(key)) {
       throw new MCPConfigError(
-        `server ${pythonRepr(name)} field 'env' entry ${String(index)} collides after key coercion: ${pythonRepr(key)}`,
+        `server ${JSON.stringify(name)} field 'env' entry ${String(index)} collides after key coercion: ${JSON.stringify(key)}`,
       );
     }
     seen.add(key);
@@ -89,16 +92,16 @@ function pythonMappingFromJson(name: string, value: unknown): Readonly<Record<st
 function pythonArgsFromJson(name: string, value: unknown): readonly unknown[] {
   if (Array.isArray(value)) return Array.from(value as readonly unknown[]);
   if (typeof value === "string") return Array.from(value);
-  throw new MCPConfigError(`server ${pythonRepr(name)} field 'args' must be a string or array`);
+  throw new MCPConfigError(`server ${JSON.stringify(name)} field 'args' must be a string or array`);
 }
 
 function parseServer(name: string, spec: unknown): MCPServerConfig {
-  if (!isRecord(spec)) throw new MCPConfigError(`server ${pythonRepr(name)} must be an object`);
+  if (!isRecord(spec)) throw new MCPConfigError(`server ${JSON.stringify(name)} must be an object`);
   if (isPythonTruthy(spec.url) && typeof spec.url !== "string") {
-    throw new MCPConfigError(`server ${pythonRepr(name)} field 'url' must be a string`);
+    throw new MCPConfigError(`server ${JSON.stringify(name)} field 'url' must be a string`);
   }
   if (isPythonTruthy(spec.command) && typeof spec.command !== "string") {
-    throw new MCPConfigError(`server ${pythonRepr(name)} field 'command' must be a string`);
+    throw new MCPConfigError(`server ${JSON.stringify(name)} field 'command' must be a string`);
   }
   const url = typeof spec.url === "string" && spec.url ? spec.url : undefined;
   const command = typeof spec.command === "string" && spec.command ? spec.command : undefined;
@@ -112,7 +115,9 @@ function parseServer(name: string, spec: unknown): MCPServerConfig {
     const env = rawEnv === undefined || rawEnv === null ? {} : pythonMappingFromJson(name, rawEnv);
     return { name, transport: "stdio", command, args, env };
   }
-  throw new MCPConfigError(`server ${pythonRepr(name)} needs a 'command' (stdio) or 'url' (http)`);
+  throw new MCPConfigError(
+    `server ${JSON.stringify(name)} needs a 'command' (stdio) or 'url' (http)`,
+  );
 }
 
 /** Load enabled MCP server configs. Missing file -> []; malformed -> throws. */

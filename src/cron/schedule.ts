@@ -7,8 +7,6 @@
  * `TZ=UTC`): the mechanism does not control its own timezone, and this port reproduces that.
  */
 
-import { pythonRepr } from "../serialization/python-repr.js";
-
 const FIELD_BOUNDS: readonly (readonly [number, number])[] = [
   [0, 59],
   [0, 23],
@@ -25,7 +23,7 @@ const FIELD_BOUNDS: readonly (readonly [number, number])[] = [
 function pythonInt(text: string): number {
   const trimmed = text.trim();
   if (!/^[+-]?\d+$/.test(trimmed)) {
-    throw new Error(`invalid literal for int() with base 10: ${pythonRepr(text)}`);
+    throw new Error(`invalid literal for int() with base 10: ${JSON.stringify(text)}`);
   }
   return Number.parseInt(trimmed, 10);
 }
@@ -54,19 +52,19 @@ export function parseCronField(field: string, low: number, high: number): Set<nu
       end = start;
     }
     if (start < low || end > high || start > end || step < 1) {
-      throw new Error(`cron field out of range: ${pythonRepr(field)}`);
+      throw new Error(`cron field out of range: ${JSON.stringify(field)}`);
     }
     for (let value = start; value <= end; value += step) values.add(value);
   }
   return values;
 }
 
-/** True if `expr` (5 fields) fires at `when` (cron day-of-week 0=Sunday, matching Date#getDay). */
+/** Whether `expr` (5 fields) fires at `when` (cron day-of-week 0=Sunday, matching Date#getDay). */
 export function cronMatches(expr: string, when: Date): boolean {
   const fields = expr.split(/\s+/).filter((part) => part.length > 0);
   if (fields.length !== 5) {
     throw new Error(
-      `cron expression needs 5 fields, got ${String(fields.length)}: ${pythonRepr(expr)}`,
+      `cron expression needs 5 fields, got ${String(fields.length)}: ${JSON.stringify(expr)}`,
     );
   }
   // Date#getDay() is already 0=Sunday..6=Saturday, the same convention the oracle derives via
@@ -120,5 +118,6 @@ export function isDue(job: CronJobLike, options: { readonly now: number }): bool
     if (!cronMatches(String(job.value), new Date(now * 1000))) return false;
     return lastRun === null || lastRun < minuteFloor(now);
   }
-  throw new Error(`unknown job type ${pythonRepr(job.type)}`);
+  const cited = job.type === undefined ? "undefined" : JSON.stringify(job.type);
+  throw new Error(`unknown job type ${cited}`);
 }

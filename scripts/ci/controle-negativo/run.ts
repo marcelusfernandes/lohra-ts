@@ -4,11 +4,17 @@
 // que os testes novos de uma PR reprovam contra a base da PR, para que
 // "teste primeiro" seja verificado por máquina, não só prometido no commit.
 //
-// SKIP por classe (ADR 0004 item 7): se TODO o diff cai em `docs/**`,
-// `README.md`, `CLAUDE.md`, `AGENTS.md`, `.claude/**` ou `.github/**` —
-// classes `docs`/`process` — não há o que controlar: SKIP, exit 0, antes
-// de sequer resolver o slug (`lib.ts#deveSerIgnorado`). Diff vazio NÃO
-// conta como SKIP (ver o comentário de `deveSerIgnorado`).
+// SKIP por classe (ADR 0004 item 7, `lib.ts:114-160`) — dois casos, ambos
+// exit 0 ANTES de sequer resolver o slug:
+//   - classes `docs`/`process`: TODO o diff cai em `docs/**`, `README.md`,
+//     `CLAUDE.md`, `AGENTS.md`, `.worktreeinclude`, `.claude/**`,
+//     `.github/**` ou `scripts/github/**` (`lib.ts#ehArquivoDocsOuProcess`/
+//     `#deveSerIgnorado`). Diff vazio NÃO conta como SKIP (ver o comentário
+//     de `deveSerIgnorado`).
+//   - só declaração de prova já existente editada: tirando as classes
+//     acima, tudo que sobra no diff é `prova/<slug>.ts` que já existia na
+//     base — nenhum `tests/**`/`src/**`/`scripts/**` de comportamento novo
+//     entrou (`lib.ts#soDeclaracaoDeProvaExistenteEditada`).
 //
 // Mecânica (fora do caso SKIP): `git worktree add --detach <tmp> <base>`,
 // overlay só dos arquivos de teste do diff (`tests/**/*.test.ts`,
@@ -87,7 +93,15 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 
 import { branchSlug } from "../../prova/slug.js";
-import { causaGit, git, gitBinario, gitDiffNameStatus, type ExecucaoGit } from "../lib/git.js";
+import {
+  causaGit,
+  git,
+  gitBinario,
+  gitDiffNameStatus,
+  type ArquivoDiff,
+  type ExecucaoGit,
+} from "../lib/git.js";
+import { appendSummary } from "../lib/summary.js";
 import {
   type Args,
   arquivosDeTeste,
@@ -116,19 +130,13 @@ function passar(mensagem: string): number {
   return 0;
 }
 
+/** Delega a escrita para `appendSummary` (`../lib/summary.js`, issue #78) —
+ * nunca lança, nunca faz este check reagir diferente de `contratos` a um
+ * `GITHUB_STEP_SUMMARY` não gravável. A linha em branco extra mantém os
+ * blocos do job summary separados (mesmo espaçamento de antes da
+ * unificação, quando este arquivo escrevia `${bloco}\n\n` diretamente). */
 function escreverSummary(bloco: string): void {
-  const summaryPath = process.env["GITHUB_STEP_SUMMARY"];
-  if (summaryPath === undefined || summaryPath === "") return;
-  try {
-    writeFileSync(summaryPath, `${bloco}\n\n`, { flag: "a" });
-  } catch (error) {
-    // Sem GITHUB_STEP_SUMMARY gravável não é uma falha do check em si — é
-    // só telemetria a menos; nunca vira exit != 0 por conta disso. Mas a
-    // causa vai pro stderr — nunca engolida silenciosamente.
-    process.stderr.write(
-      `controle-negativo: não foi possível escrever em GITHUB_STEP_SUMMARY: ${String(error)}\n`,
-    );
-  }
+  appendSummary(`${bloco}\n`);
 }
 
 function existeNoCommit(root: string, commit: string, caminhoRelativo: string): boolean {
@@ -158,11 +166,6 @@ function resolverSlug(root: string, head: string, args: Args): string {
     falhaFechada(`controle-negativo: ${caminho} não existe em ${head} — PR sem prova declarada`);
   }
   return slug;
-}
-
-interface ArquivoDiff {
-  readonly status: string;
-  readonly arquivo: string;
 }
 
 /** `git diff --name-status -z` via `../lib/git.js` (issue #62): nunca

@@ -12,16 +12,6 @@ function text(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
-function pythonRepr(value: unknown): string {
-  if (value === undefined || value === null) return "None";
-  if (typeof value === "string")
-    return `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
-  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
-    return String(value);
-  }
-  return JSON.stringify(value);
-}
-
 export class MemoryTool {
   constructor(private readonly store: MemoryStore) {}
 
@@ -46,7 +36,8 @@ export class MemoryTool {
         if (!oldText) return toolError("'remove' requires 'old_text'");
         file.remove(oldText);
       } else {
-        return toolError(`unknown action ${pythonRepr(action)} (use add/replace/remove)`);
+        const cited = action === undefined ? "undefined" : JSON.stringify(action);
+        return toolError(`unknown action ${cited} (use add/replace/remove)`);
       }
     } catch (error) {
       return toolError(error instanceof Error ? error.message : String(error));
@@ -62,7 +53,7 @@ export class SkillTool {
     const name = text(args.name);
     if (!name) return toolError("'skill_view' requires 'name'");
     const skill = this.store.get(name);
-    if (skill === undefined) return toolError(`no skill named ${pythonRepr(name)}`);
+    if (skill === undefined) return toolError(`no skill named ${JSON.stringify(name)}`);
     return toolResult(undefined, { name: skill.name, version: skill.version, body: skill.body });
   }
 
@@ -92,10 +83,11 @@ export class SkillTool {
         return toolResult(undefined, { action: "update", name: skill.name });
       }
       if (action === "delete") {
-        if (!this.store.delete(name)) return toolError(`no skill named ${pythonRepr(name)}`);
+        if (!this.store.delete(name)) return toolError(`no skill named ${JSON.stringify(name)}`);
         return toolResult(undefined, { action: "delete", name });
       }
-      return toolError(`unknown action ${pythonRepr(action)} (use create/update/delete)`);
+      const cited = action === undefined ? "undefined" : JSON.stringify(action);
+      return toolError(`unknown action ${cited} (use create/update/delete)`);
     } catch (error) {
       return toolError(error instanceof Error ? error.message : String(error));
     }
@@ -134,7 +126,8 @@ export class SessionSearchTool {
       if (!sessionId) return toolError("'read' requires 'session_id'");
       return toolResult(undefined, { messages: this.repository.loadMessages(sessionId) });
     }
-    return toolError(`unknown mode ${pythonRepr(mode)} (use discovery/browse/read)`);
+    const cited = mode === undefined ? "undefined" : JSON.stringify(mode);
+    return toolError(`unknown mode ${cited} (use discovery/browse/read)`);
   }
 }
 
@@ -147,7 +140,7 @@ function coerceLimit(raw: unknown): { readonly value: number; readonly note: str
   if (typeof raw === "number" && Number.isInteger(raw)) value = raw;
   if (typeof raw === "string" && /^\s*[+-]?\d+\s*$/u.test(raw)) value = Number(raw);
   if (value === null) {
-    return { value: 25, note: `limit ${pythonRepr(raw)} is not a whole number \u2014 used 25` };
+    return { value: 25, note: `limit ${JSON.stringify(raw)} is not a whole number \u2014 used 25` };
   }
   return { value: Math.max(1, Math.min(100, value)), note: null };
 }
@@ -171,7 +164,7 @@ function renderProvider(
   };
   const notes: string[] = [];
   if (query && scanned)
-    notes.push(`${String(total)} of ${String(scanned)} matched ${pythonRepr(query)}`);
+    notes.push(`${String(total)} of ${String(scanned)} matched ${JSON.stringify(query)}`);
   if (total > Math.min(models.length, limit)) {
     notes.push(
       `showing ${String(Math.min(models.length, limit))} of ${String(total)} \u2014 refine with 'query' or raise 'limit'`,
@@ -205,7 +198,7 @@ export class ListModelsTool {
     }
     if (provider && catalog.entries.length === 0) {
       return toolError(
-        `unknown provider ${pythonRepr(provider)} \u2014 call list_models with no 'provider' to see the ones this install knows about`,
+        `unknown provider ${JSON.stringify(provider)} \u2014 call list_models with no 'provider' to see the ones this install knows about`,
       );
     }
     const tiers = this.tierLoader(join(this.home, "workflow_tiers.json"));

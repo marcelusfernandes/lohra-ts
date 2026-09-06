@@ -182,7 +182,7 @@ describe("image_gen handler and bindings", () => {
     };
     expect(generator.requests).toEqual([
       {
-        prompt: "[1, 'x']",
+        prompt: '[1,"x"]',
         model: "gpt-image-1",
         n: 2,
         size: "512x512",

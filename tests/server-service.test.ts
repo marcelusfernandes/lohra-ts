@@ -195,7 +195,7 @@ describe("CompletionService", () => {
       temperature: null,
       maxTokens: null,
     });
-    expect(result.usage.prompt_tokens).toBe(16);
+    expect(result.usage.prompt_tokens).toBe(15);
     expect(result.usage.completion_tokens).toBe(2);
   });
 
@@ -255,7 +255,7 @@ describe("CompletionService", () => {
       }),
     ).rejects.toThrow(
       new UpstreamError(
-        "Error code: 418 - {'error': {'message': 'T11_CAUSE_NONCE42 upstream refused', 'type': 'teapot_error'}}",
+        'Error code: 418 - {"error":{"message":"T11_CAUSE_NONCE42 upstream refused","type":"teapot_error"}}',
       ),
     );
   });

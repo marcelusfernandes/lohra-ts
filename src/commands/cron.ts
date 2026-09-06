@@ -1,4 +1,3 @@
-import { pythonRepr } from "../serialization/python-repr.js";
 import { CronStoreError, CronValidationError, CronStore } from "../cron/store.js";
 import { formatJobValue } from "../cron/format.js";
 
@@ -55,7 +54,7 @@ export function runCron(options: CronCommandOptions): Result {
       code: 2,
       stdout: "",
       stderr:
-        `lohra cron: error: argument action: invalid choice: ${pythonRepr(rawAction)} ` +
+        `lohra cron: error: argument action: invalid choice: ${JSON.stringify(rawAction)} ` +
         `(choose from 'list', 'add', 'remove', 'pause', 'resume')\n`,
     };
   }
@@ -73,7 +72,7 @@ export function runCron(options: CronCommandOptions): Result {
       return {
         code: 2,
         stdout: "",
-        stderr: `lohra cron: error: argument --interval: invalid int value: ${pythonRepr(intervalText)}\n`,
+        stderr: `lohra cron: error: argument --interval: invalid int value: ${JSON.stringify(intervalText)}\n`,
       };
     }
     interval = parsed;
@@ -85,7 +84,7 @@ export function runCron(options: CronCommandOptions): Result {
       return {
         code: 2,
         stdout: "",
-        stderr: `lohra cron: error: argument --at: invalid float value: ${pythonRepr(atText)}\n`,
+        stderr: `lohra cron: error: argument --at: invalid float value: ${JSON.stringify(atText)}\n`,
       };
     }
     at = parsed;
@@ -141,7 +140,7 @@ export function runCron(options: CronCommandOptions): Result {
     const found =
       action === "remove" ? store.remove(jobId) : store.setEnabled(jobId, action === "resume");
     if (!found) {
-      return { code: 1, stdout: "", stderr: `no job with id ${pythonRepr(jobId)}\n` };
+      return { code: 1, stdout: "", stderr: `no job with id ${JSON.stringify(jobId)}\n` };
     }
     return { code: 0, stdout: `${action} ${jobId}\n`, stderr: "" };
   } catch (error) {

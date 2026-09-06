@@ -177,6 +177,6 @@ describe("MCPManager.shutdown", () => {
     }
     expect(registry.namesInToolset("mcp-flaky")).toEqual([]);
     expect(registry.namesInToolset("mcp-fine")).toEqual([]);
-    expect(capture.lines.join("")).toBe("error closing MCP session 'flaky': stuck\n");
+    expect(capture.lines.join("")).toBe('error closing MCP session "flaky": stuck\n');
   });
 });

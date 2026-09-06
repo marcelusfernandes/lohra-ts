@@ -32,13 +32,19 @@
 //
 // Saída: `id: arquivo — descrição` por violação, em stderr; exit 1 se houver
 // violação, exit 0 se não, exit 2 em erro de uso/infra (ex.: nem
-// `GITHUB_EVENT_PATH` nem `--files-file`). Se `GITHUB_STEP_SUMMARY` estiver
-// definida, um resumo em markdown é anexado lá; senão, no-op.
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+// `GITHUB_EVENT_PATH` nem `--files-file`, ou JSON de evento inválido). Se
+// `GITHUB_STEP_SUMMARY` estiver definida, um resumo em markdown é anexado lá
+// via `../lib/summary.js` (compartilhado com `controle-negativo` e
+// `escopo`); senão, no-op. Um `GITHUB_STEP_SUMMARY` não gravável NÃO é erro
+// de infra deste check (issue #78, alinhado com `controle-negativo`): a
+// causa vai pro stderr e o exit code segue o resultado das regras (0/1) —
+// nunca vira 2 por conta disso.
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import process from "node:process";
 
 import { causaGit, git, gitDiffNames } from "../lib/git.js";
+import { appendSummary } from "../lib/summary.js";
 import { ID_IMPORT_PROIBIDO, rodarContratos, type Violacao } from "./lib.js";
 
 const MARCADORES_PYTHON_SERIALIZATION = [
@@ -203,14 +209,14 @@ function formatarViolacao(v: Violacao): string {
   return `${v.id}: ${v.arquivo} — ${v.descricao}`;
 }
 
-/** `GITHUB_STEP_SUMMARY` inválido (diretório inexistente, sem permissão)
- * lançava sem `try` — issue #62, mesmo bug de `lerEventoPullRequest`: o
- * contrato promete exit 2 para erro de infra, nunca uma exceção crua. As
- * violações (se houver) já foram escritas em stderr por `main` ANTES de
- * chamar isto — nunca ficam sem relatar só porque o summary falhou. */
-function escreverSummary(ok: boolean, violacoes: readonly Violacao[]): void {
-  const summaryPath = process.env["GITHUB_STEP_SUMMARY"];
-  if (summaryPath === undefined || summaryPath === "") return;
+/** Resumo em markdown do resultado de `contratos` — a escrita em si
+ * (incluindo o que fazer se `GITHUB_STEP_SUMMARY` não for gravável) é
+ * responsabilidade de `appendSummary` (`../lib/summary.js`, issue #78):
+ * nunca lança, nunca faz este check sair 2 por uma falha de infra do
+ * runner. As violações (se houver) já foram escritas em stderr por `main`
+ * ANTES de chamar isto — nunca ficam sem relatar só porque o summary
+ * falhou. */
+function resumoMarkdown(ok: boolean, violacoes: readonly Violacao[]): string {
   const linhas = [
     "## contratos",
     "",
@@ -218,13 +224,7 @@ function escreverSummary(ok: boolean, violacoes: readonly Violacao[]): void {
     ...violacoes.map((v) => `- \`${v.arquivo}\` — ${v.id}: ${v.descricao}`),
     "",
   ];
-  try {
-    appendFileSync(summaryPath, `${linhas.join("\n")}\n`);
-  } catch (erro) {
-    falhaFechada(
-      `não foi possível escrever em GITHUB_STEP_SUMMARY (${summaryPath}): ${erro instanceof Error ? erro.message : String(erro)}`,
-    );
-  }
+  return linhas.join("\n");
 }
 
 function main(): void {
@@ -241,7 +241,7 @@ function main(): void {
     process.stderr.write(`${violacoes.map(formatarViolacao).join("\n")}\n`);
   }
 
-  escreverSummary(ok, violacoes);
+  appendSummary(resumoMarkdown(ok, violacoes));
 
   if (!ok) {
     process.exit(1);

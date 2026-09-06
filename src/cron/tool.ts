@@ -1,4 +1,3 @@
-import { pythonRepr } from "../serialization/python-repr.js";
 import { toolError, toolResult } from "../tools/envelope.js";
 import type { ToolArguments, ToolFunctionSchema } from "../tools/types.js";
 import { CronStoreError, CronValidationError } from "./errors.js";
@@ -64,7 +63,9 @@ export class CronTool {
       if (action === "remove" || action === "pause" || action === "resume") {
         return this.target(action, args);
       }
-      return toolError(`unknown action ${pythonRepr(action)} (use add/list/remove/pause/resume)`);
+      return toolError(
+        `unknown action ${JSON.stringify(action)} (use add/list/remove/pause/resume)`,
+      );
     } catch (error) {
       if (error instanceof CronValidationError || error instanceof CronStoreError) {
         return toolError(error.message);
@@ -102,7 +103,7 @@ export class CronTool {
       action === "remove"
         ? this.store.remove(jobId)
         : this.store.setEnabled(jobId, action === "resume");
-    if (!found) return toolError(`no job with id ${pythonRepr(jobId)}`);
+    if (!found) return toolError(`no job with id ${JSON.stringify(jobId)}`);
     return toolResult(undefined, { job_id: jobId, action });
   }
 }
