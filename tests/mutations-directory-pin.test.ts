@@ -13,18 +13,27 @@
 // inteiro, não um runner por vez.
 //
 // Varre todo `.ts`/`.mts`/`.mjs`/`.json` sob `scripts/mutations/`
-// recursivamente (inclusive `fixtures/`). Uma única exceção é permitida, e
-// só por um motivo mecânico — nunca por prosa: `fixtures/t15-chat-workflow
-// .json`, campo `oracleGuard.expectedCommit`. Esse valor é consumido de
-// verdade por `scripts/parity/guard.ts`/`manifest.ts` para checar que o
-// checkout do oráculo Python está no commit esperado antes de rodar o
-// cenário bilateral do fixture — é dado funcional, não comentário citando
-// origem. Apagá-lo ou reescrevê-lo mudaria o comportamento do runner, que
-// esta issue declara fora de escopo ("Fora de escopo: comportamento dos
-// runners"). O allowlist abaixo é uma entrada exata (arquivo, padrão), não
-// uma exclusão de extensão: um `.json` novo sob `scripts/mutations/` que
-// citar qualquer um dos literais fora dessa entrada continua reprovando
-// aqui.
+// recursivamente (inclusive `fixtures/`).
+//
+// Hoje não há nenhuma exceção: `fixtures/t15-chat-workflow.json` tinha um
+// bloco `oracleGuard.expectedCommit` com o SHA do oráculo Python, mas essa
+// CÓPIA nunca é lida por `scripts/parity/guard.ts`/`manifest.ts` — só o
+// manifesto original em `scripts/parity/manifests/t15/t15-chat-workflow
+// .json` passa por esse harness (`scripts/parity/workflow-executor/run-all
+// .ts:102`). Os únicos leitores desta cópia são
+// `scripts/mutations/workflow-executor.ts:514,531` (dois mutantes que
+// editam só as chaves `normalizations`/`comparisons`) e
+// `tests/mutations-fixtures-workflow-executor.test.ts` (mesmas duas
+// chaves, via a interface `T15Policy`, que nem declara `oracleGuard`) —
+// o bloco era morto na cópia. Apagado (rodada 2 da PR #182, veredito do
+// revisor: a exceção original citava `guard.ts`/`manifest.ts` para uma
+// cópia que nenhum dos dois lê).
+//
+// O `ALLOWLIST` abaixo continua existindo como mecanismo — uma entrada
+// exata (arquivo, padrão), nunca uma exclusão de extensão — para o dia em
+// que uma exceção de verdade precisar ser documentada; hoje está vazio, e
+// o teste abaixo prova que continua vazio de propósito (nenhuma entrada
+// morta).
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -44,11 +53,11 @@ const FORBIDDEN: readonly ForbiddenPattern[] = [
   { id: "shebang", pattern: /^#!/m },
 ];
 
-/** Única exceção documentada: dado funcional consumido pelo guard do
- * oráculo, não prosa citando origem — ver o comentário do arquivo acima. */
-const ALLOWLIST: ReadonlySet<string> = new Set([
-  "scripts/mutations/fixtures/t15-chat-workflow.json::oracle-sha",
-]);
+/** Exceções documentadas (arquivo::padrão) a um literal proibido — nunca por
+ * prosa, só por um motivo mecânico verificável. Vazio hoje; ver o
+ * comentário do arquivo acima para o histórico da única exceção que já
+ * existiu aqui (removida, não substituída). */
+const ALLOWLIST: ReadonlySet<string> = new Set([]);
 
 const SCANNED_EXTENSIONS = /\.(ts|mts|mjs|json)$/;
 
