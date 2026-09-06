@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { orchestrationMutants } from "../scripts/parity/workflow-durability/mutants-orchestration.js";
+import { orchestrationMutants } from "../scripts/mutations/orchestration.js";
 
 // Issue #112 — the `qa` follow-up to PR #110: `child-runner.ts:169-170`
 // (`config.wrapDispatch === undefined ? childDispatch :
