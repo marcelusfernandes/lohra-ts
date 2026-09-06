@@ -28,7 +28,6 @@ import { rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { canonicalJson } from "./canonical.js";
 import {
   applyEditExactlyOnce,
   classify,
@@ -154,11 +153,15 @@ function main(): MutationReport {
 
 try {
   const report = main();
+  // Uma linha só (não `canonicalJson`, que é multilinha): o consumidor
+  // legado de `mutations:*` (scripts/parity/closeout/run-closeout-mutations.ts,
+  // fora de escopo desta issue) lê a última linha de stdout que começa com
+  // `{` e termina com `}`. O arquivo de evidência continua canônico.
   if (report.survivors.length > 0 || !report.restoreGreen) {
-    console.error(canonicalJson(report));
+    console.error(JSON.stringify(report));
     process.exitCode = 1;
   } else {
-    console.log(canonicalJson(report));
+    console.log(JSON.stringify(report));
   }
 } catch (cause) {
   console.error(cause instanceof Error ? (cause.stack ?? cause.message) : String(cause));
