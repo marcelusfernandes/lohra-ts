@@ -17,13 +17,13 @@
 //     entrou (`lib.ts#soDeclaracaoDeProvaExistenteEditada`).
 //   - diff inteiro cai no overlay (issue #114, bloqueava a PR #113; lacunas
 //     1 e 2 fechadas na #117): tirando as classes acima, tudo que sobra é
-//     `tests/**`+`prova/**` (fixtures contam nesse "tudo" — `ehArquivoDoOverlay`
-//     usa a `TESTES_PREFIXO_RE` mais larga), com pelo menos um
-//     `tests/**\/*.test.ts` especificamente (nunca uma fixture — aí sim
-//     `TESTE_RE`) que já existia na base (EDITADO, não criado, não deletado
-//     no head) — o overlay do HEAD sobre a base reproduz o próprio HEAD
-//     (base+overlay ≡ head) e o desfecho é sempre `vacuous-pass`, mesmo com
-//     um `test(red):` real — `lib.ts#soArquivosDoOverlay`.
+//     `tests/**`+`prova/**` (fixtures contam nesse "tudo" — `ehArquivoDoOverlay`,
+//     a mesma classe copiada de verdade por `arquivosDeTeste` desde a issue
+//     #123), com pelo menos um `tests/**\/*.test.ts` especificamente (nunca
+//     uma fixture — aí sim `TESTE_RE`) que já existia na base (EDITADO, não
+//     criado, não deletado no head) — o overlay do HEAD sobre a base
+//     reproduz o próprio HEAD (base+overlay ≡ head) e o desfecho é sempre
+//     `vacuous-pass`, mesmo com um `test(red):` real — `lib.ts#soArquivosDoOverlay`.
 //
 // Um `tests/**` inteiramente NOVO (sem nenhum já editado) não entra no SKIP
 // acima — não é um quarto pré-check estático, é um desvio dentro da
@@ -36,8 +36,9 @@
 // mecanismo (não um palpite sobre o diff) não discriminou.
 //
 // Mecânica (fora do caso SKIP): `git worktree add --detach <tmp> <base>`,
-// overlay só dos arquivos de teste do diff (`tests/**/*.test.ts`,
-// `prova/**` — `lib.ts#arquivosDeTeste`) copiados do HEAD por cima da
+// overlay de TODA a classe `tests/**`+`prova/**` do diff — helpers e
+// fixtures inclusos, não só `*.test.ts` (`lib.ts#arquivosDeTeste`, unificada
+// com `ehArquivoDoOverlay` desde a issue #123) — copiada do HEAD por cima da
 // base, roda `npm run -s prova -- <slug>` NA BASE (o próprio código de
 // produção da base, sem a implementação que os testes novos exigem), lê o
 // `.prova/<slug>/resumo.json` que sobrar lá — validado (`lib.ts#validarResumo`)
