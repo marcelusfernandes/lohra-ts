@@ -51,7 +51,7 @@
     "parity:t11:probes": "tsx scripts/parity/openai-server/run-process.ts && tsx scripts/parity/openai-server/run-ts-probes.ts",
     "parity:t11:gates": "tsx scripts/parity/openai-server/run-gates.ts",
     "parity:t11:pack-smoke": "node scripts/parity/openai-server/pack-smoke.mjs",
-    "parity:t20:mutations": "tsx scripts/parity/web-tools/run-mutations.ts",
+    "mutations:t20": "tsx scripts/mutations/web-tools.ts",
     "parity:t20:generate-manifests": "node scripts/parity/web-tools/generate-manifests.mjs",
     "parity:t11:live-smoke": "node scripts/parity/openai-server/live-smoke.mjs",
     "parity:t12": "tsx scripts/parity/gateway/run-scenarios.ts",
