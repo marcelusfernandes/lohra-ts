@@ -3,7 +3,7 @@
 // passo 0d do épico #13. Migrados de
 // `scripts/parity/media/run-mutations.ts` (agora um shim); os `edits` de
 // todos os 7 são byte a byte os do runner antigo — só o oráculo
-// (`expected`/`probe`) muda, em cinco dos sete (disclosure completa, PR
+// (`expected`/`probe`) muda, em quatro dos sete (disclosure completa, PR
 // #176 rodada 1: o corpo original citava 5/7 e omitia dois):
 //
 // - `unsafe-url-scheme`, `unsafe-url-loopback`, `unsafe-data`: `expected`

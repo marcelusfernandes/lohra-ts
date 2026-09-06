@@ -5,12 +5,14 @@
 // acrescentada ao AC 3 da issue #151 depois da rodada 1 da PR #176, que
 // tinha um 4º edit sobre uma premissa refutada — ver `out-dir-symlink`).
 //
-// Quatro `probe`s ganharam um caminho de baseline que faltava no runner
-// antigo (ver o header de `media.ts`): `over-return`, `per-image-limit` e
+// Cinco `probe`s mudaram (contagem exata — ver o header de `media.ts`, que
+// soma os 9 do catálogo inteiro): `over-return`, `per-image-limit` e
 // `batch-limit` não tratavam o `throw` do guard real (a árvore restaurada
 // quebraria a função em vez de produzir um `actual` comparável) —
-// encapsulado em try/catch, sem tocar os `edits`. As outras nove já eram
-// seguras nos dois caminhos.
+// encapsulado em try/catch, sem tocar os `edits`; `out-dir-symlink`, abaixo;
+// `atomic-rename-primitive`, cujo `probe` checava uma string que o
+// transpilador nunca produz literalmente (comentário inline no próprio
+// mutante). Os outros oito já eram seguros nos dois caminhos.
 //
 // `out-dir-symlink`: `expected` tinha só `status`/`external_count` e o
 // `probe` descartava a mensagem do `catch` — com a árvore restaurada,
