@@ -79,20 +79,30 @@ describe("catálogo de mutação workflow-audit-live (t17)", () => {
     }
   });
 
-  it("nenhum mutante depende do SHA hardcoded do oracle Python", () => {
-    const catalogSource = readFileSync(
-      resolve(repoRoot, "scripts/mutations/workflow-audit-live-mutants.ts"),
-      "utf8",
-    );
-    expect(catalogSource).not.toMatch(/16b4785d/);
+  // As duas checagens abaixo cobrem os dois arquivos do runner (catálogo +
+  // orquestração), não só o catálogo: `git grep -n
+  // "16b4785d\|/usr/bin/\|scripts/parity"` roda sobre `scripts/mutations/
+  // workflow-audit-live*.ts` inteiro (achado da rodada 1 da PR #170: um
+  // shebang `#!/usr/bin/env node` herdado do runner antigo e comentários
+  // citando os literais em `workflow-audit-live.ts` escaparam de um teste
+  // que só olhava o catálogo).
+  const runnerFiles = [
+    "scripts/mutations/workflow-audit-live-mutants.ts",
+    "scripts/mutations/workflow-audit-live.ts",
+  ] as const;
+
+  it("nenhum arquivo do runner depende do SHA hardcoded do oracle Python", () => {
+    for (const file of runnerFiles) {
+      const source = readFileSync(resolve(repoRoot, file), "utf8");
+      expect(source, file).not.toMatch(/16b4785d/);
+    }
   });
 
-  it("nenhum mutante referencia binários absolutos ou scripts/parity", () => {
-    const catalogSource = readFileSync(
-      resolve(repoRoot, "scripts/mutations/workflow-audit-live-mutants.ts"),
-      "utf8",
-    );
-    expect(catalogSource).not.toMatch(/\/usr\/bin\//);
-    expect(catalogSource).not.toMatch(/scripts\/parity/);
+  it("nenhum arquivo do runner referencia binários absolutos ou scripts/parity", () => {
+    for (const file of runnerFiles) {
+      const source = readFileSync(resolve(repoRoot, file), "utf8");
+      expect(source, file).not.toMatch(/\/usr\/bin\//);
+      expect(source, file).not.toMatch(/scripts\/parity/);
+    }
   });
 });

@@ -1,11 +1,11 @@
-#!/usr/bin/env node
 // Runner de mutação de `src/workflow/audit-*` e vizinhos (issue #150, passo
 // 13-S3 do épico #13). Substitui o antigo runner de mutação de
 // workflow-audit-live no diretório histórico de paridade: um único sandbox
 // de `git archive` (via `prepareArchiveSandbox` do harness comum), 32
 // mutantes aplicados um de cada vez com `applyEditExactlyOnce`/`restoreAll`,
-// classificados com `classify`, relatados com `writeReport`. Sem
-// `ORACLE_SHA`, sem `/usr/bin/*`, sem dependência do diretório de paridade.
+// classificados com `classify`, relatados com `writeReport`. Sem o SHA do
+// oracle Python hardcoded, sem os binários de sistema absolutos nem a
+// dependência do diretório histórico de paridade que o runner antigo tinha.
 //
 // Dois helpers locais que ainda não existem em `scripts/mutations/harness.ts`
 // (issue #149 está adicionando esses mesmos helpers ao harness comum —
@@ -38,7 +38,7 @@ import {
   writeReport,
   type RunOutcome,
 } from "./harness.js";
-import type { MutationReport } from "./types.js";
+import type { Focus, MutationReport } from "./types.js";
 import { mutants } from "./workflow-audit-live-mutants.js";
 
 const root = resolve(fileURLToPath(import.meta.url), "../../..");
@@ -69,7 +69,7 @@ function isKilled(outcome: RunOutcome): boolean {
   return outcome.ranTests > 0 && classify(outcome.exitCode, outcome.failedTests);
 }
 
-function focusKeyOf(focus: { readonly file: string; readonly test: string }): string {
+function focusKeyOf(focus: Focus): string {
   return `${focus.file}::${focus.test}`;
 }
 
@@ -86,13 +86,15 @@ function runAllMutants(sandbox: string): {
   const files = Array.from(new Set(mutants.flatMap((mutant) => mutant.edits.map((e) => e.file))));
   const originals = snapshotFiles(sandbox, files);
 
-  const baselines = new Map<string, RunOutcome>();
-  for (const mutant of mutants) {
-    const key = focusKeyOf(mutant.focus);
-    if (baselines.has(key)) continue;
-    const outcome = runFocusedVitest(sandbox, mutant.focus);
-    assertBaselineGreen(outcome, key);
-    baselines.set(key, outcome);
+  // Guarda o próprio `Focus` (não só a chave) — reconstruir `{file, test}`
+  // a partir de `key.split("::")` seria frágil se um título de teste algum
+  // dia contivesse o separador, e exigiria um fallback silencioso para
+  // suíte inteira quando a chave não tivesse o formato esperado.
+  const uniqueFoci = new Map<string, Focus>();
+  for (const mutant of mutants) uniqueFoci.set(focusKeyOf(mutant.focus), mutant.focus);
+
+  for (const [key, focus] of uniqueFoci) {
+    assertBaselineGreen(runFocusedVitest(sandbox, focus), key);
   }
 
   const results: MutantResult[] = [];
@@ -104,12 +106,8 @@ function runAllMutants(sandbox: string): {
   }
 
   restoreAll(sandbox, originals);
-  const restoreGreen = Array.from(baselines.keys()).every((key) => {
-    const [file, test] = key.split("::");
-    const outcome = runFocusedVitest(sandbox, {
-      file: file ?? "",
-      test: test ?? "",
-    });
+  const restoreGreen = Array.from(uniqueFoci.values()).every((focus) => {
+    const outcome = runFocusedVitest(sandbox, focus);
     return outcome.exitCode === 0 && outcome.ranTests > 0;
   });
 
@@ -154,9 +152,9 @@ function main(): MutationReport {
 try {
   const report = main();
   // Uma linha só (não `canonicalJson`, que é multilinha): o consumidor
-  // legado de `mutations:*` (scripts/parity/closeout/run-closeout-mutations.ts,
-  // fora de escopo desta issue) lê a última linha de stdout que começa com
-  // `{` e termina com `}`. O arquivo de evidência continua canônico.
+  // legado histórico de `mutations:*` (fora de escopo desta issue) lê a
+  // última linha de stdout que começa com `{` e termina com `}`. O arquivo
+  // de evidência continua canônico.
   if (report.survivors.length > 0 || !report.restoreGreen) {
     console.error(JSON.stringify(report));
     process.exitCode = 1;
