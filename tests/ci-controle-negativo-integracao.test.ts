@@ -631,15 +631,22 @@ describe("controle-negativo/run.ts (subprocesso, repositório git descartável)"
   );
 
   it(
-    "SKIP quando o diff é só tests/** (sem --slug, sem prova/<slug>.ts algum) — issue #114",
+    "SKIP quando o diff é só um tests/** JÁ EXISTENTE editado (sem --slug) — issue #114",
     () => {
-      // Sem --slug e sem `prova/<slug>.ts` no HEAD, o fluxo normal
-      // reprovaria pedindo --slug/--branch antes mesmo de chegar em
-      // `resolverSlug` — o SKIP precisa disparar ANTES disso.
+      // O `tests/**` precisa já existir na base (EDITADO, não criado) —
+      // ver `lib.ts#soArquivosDoOverlay`. Sem --slug e sem `prova/<slug>.ts`
+      // novo no diff, o fluxo normal reprovaria pedindo --slug/--branch
+      // antes mesmo de chegar em `resolverSlug` — o SKIP precisa disparar
+      // ANTES disso.
       const dir = novoRepo();
-      const base = commitTudo(dir, "chore: repo vazio");
       escreverTeste(dir, "so-teste");
-      const head = commitTudo(dir, "test(red): cobre so-teste, sem produção nenhuma");
+      const base = commitTudo(dir, "chore: so-teste já existe (sem produção)");
+
+      writeFileSync(
+        join(dir, "tests", "so-teste.test.ts"),
+        "module.exports.run = function () { /* editado */ };\n",
+      );
+      const head = commitTudo(dir, "test(red): edita so-teste, sem produção nenhuma");
 
       const { result, summary } = runControleNegativoComSummary([
         "--root",
@@ -658,17 +665,52 @@ describe("controle-negativo/run.ts (subprocesso, repositório git descartável)"
   );
 
   it(
-    "SKIP no caso concreto da PR #113/#111: tests/** + prova/<slug>.ts NOVO, sem produção",
+    "SKIP no caso concreto da PR #113/#111: tests/** JÁ EXISTENTE editado + prova/<slug>.ts NOVO",
     () => {
+      // Reproduz exatamente a forma do diff real (`git diff --name-status`
+      // contra o merge-base): `M tests/prova-run.test.ts` + `A
+      // prova/prova-run-timeout.ts` — o teste já existia na base (sem
+      // `prova/<slug>.ts` declarado ainda), só a declaração é nova.
       const dir = novoRepo();
-      const base = commitTudo(dir, "chore: repo vazio");
-      escreverTeste(dir, "prova-run-timeout");
-      const head = commitTudo(dir, "test(red): cobre timeout, prova/<slug>.ts novo");
+      mkdirSync(join(dir, "tests"), { recursive: true });
+      writeFileSync(
+        join(dir, "tests", "prova-run-timeout.test.ts"),
+        "module.exports.run = function () {};\n",
+      );
+      const base = commitTudo(dir, "chore: teste existente, sem prova declarada ainda");
+
+      mkdirSync(join(dir, "prova"), { recursive: true });
+      writeFileSync(
+        join(dir, "prova", "prova-run-timeout.ts"),
+        "// declaração de prova (fixture de teste)\n",
+      );
+      writeFileSync(
+        join(dir, "tests", "prova-run-timeout.test.ts"),
+        "module.exports.run = function () { /* cobre timeout */ };\n",
+      );
+      const head = commitTudo(dir, "test(red): cobre timeout, declara prova/<slug>.ts novo");
 
       const result = rodar(dir, base, head, "prova-run-timeout");
 
       expect(result.status, result.stderr).toBe(0);
       expect(result.stdout).toContain("o controle não discrimina");
+    },
+    TIMEOUT_TESTE,
+  );
+
+  it(
+    "NÃO faz SKIP quando o tests/** do diff é inteiramente NOVO (ausente na base), mesmo sem produção — mecânica normal (issue #114)",
+    () => {
+      // Mesma forma de `repoVacuousPass` — `tests/**` novo sem produção
+      // continua sendo controlado (e reprova em vacuous-pass), não vira
+      // SKIP silencioso: só um `tests/**` EDITADO qualifica.
+      const { dir, base, head, slug } = repoVacuousPass();
+
+      const result = rodar(dir, base, head, slug);
+
+      expect(result.status).toBe(1);
+      expect(result.stdout).not.toContain("SKIP");
+      expect(result.stderr).toContain("vacuous-pass");
     },
     TIMEOUT_TESTE,
   );

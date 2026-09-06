@@ -382,46 +382,69 @@ describe("ehArquivoDoOverlay / soArquivosDoOverlay (issue #114, bloqueava a PR #
     expect(ehArquivoDoOverlay("scripts/ci/controle-negativo/lib.ts")).toBe(false);
   });
 
-  it("true para diff só de tests/**", () => {
-    expect(soArquivosDoOverlay(["tests/a.test.ts"])).toBe(true);
+  it("true para diff só de tests/** JÁ EXISTENTE na base (editado)", () => {
+    const jaExiste = (): boolean => true;
+    expect(soArquivosDoOverlay(["tests/a.test.ts"], jaExiste)).toBe(true);
   });
 
-  it("true para diff de tests/** + prova/** (caso concreto da PR #113/#111)", () => {
-    expect(soArquivosDoOverlay(["tests/prova-run.test.ts", "prova/prova-run-timeout.ts"])).toBe(
-      true,
-    );
+  it("true para diff de tests/** (existente) + prova/** novo (caso concreto da PR #113/#111)", () => {
+    const jaExiste = (arquivo: string): boolean => arquivo === "tests/prova-run.test.ts";
+    expect(
+      soArquivosDoOverlay(["tests/prova-run.test.ts", "prova/prova-run-timeout.ts"], jaExiste),
+    ).toBe(true);
   });
 
   it("true com docs/process misturado no diff", () => {
+    const jaExiste = (): boolean => true;
     expect(
-      soArquivosDoOverlay(["docs/nota.md", "README.md", "tests/a.test.ts", "prova/b.ts"]),
+      soArquivosDoOverlay(["docs/nota.md", "README.md", "tests/a.test.ts", "prova/b.ts"], jaExiste),
     ).toBe(true);
   });
 
   it("true com scripts/github/** (classe process) misturado", () => {
-    expect(soArquivosDoOverlay(["tests/a.test.ts", "scripts/github/ruleset.sh"])).toBe(true);
-  });
-
-  it("false se houver qualquer src/** no diff", () => {
-    expect(soArquivosDoOverlay(["tests/a.test.ts", "src/y.ts"])).toBe(false);
-  });
-
-  it("false se houver qualquer scripts/** fora de scripts/github/ no diff", () => {
-    expect(soArquivosDoOverlay(["tests/a.test.ts", "scripts/ci/controle-negativo/lib.ts"])).toBe(
-      false,
+    const jaExiste = (): boolean => true;
+    expect(soArquivosDoOverlay(["tests/a.test.ts", "scripts/github/ruleset.sh"], jaExiste)).toBe(
+      true,
     );
   });
 
+  it("false se houver qualquer src/** no diff", () => {
+    const jaExiste = (): boolean => true;
+    expect(soArquivosDoOverlay(["tests/a.test.ts", "src/y.ts"], jaExiste)).toBe(false);
+  });
+
+  it("false se houver qualquer scripts/** fora de scripts/github/ no diff", () => {
+    const jaExiste = (): boolean => true;
+    expect(
+      soArquivosDoOverlay(["tests/a.test.ts", "scripts/ci/controle-negativo/lib.ts"], jaExiste),
+    ).toBe(false);
+  });
+
   it("false para diff vazio (mesma regra de deveSerIgnorado/soDeclaracaoDeProvaExistenteEditada)", () => {
-    expect(soArquivosDoOverlay([])).toBe(false);
+    const jaExiste = (): boolean => true;
+    expect(soArquivosDoOverlay([], jaExiste)).toBe(false);
   });
 
   it("false quando só resta docs/process (deveSerIgnorado já cobre esse caso)", () => {
-    expect(soArquivosDoOverlay(["docs/a.md"])).toBe(false);
+    const jaExiste = (): boolean => true;
+    expect(soArquivosDoOverlay(["docs/a.md"], jaExiste)).toBe(false);
   });
 
   it("false quando o único arquivo fora de docs/process é uma declaração de prova sozinha — sem nenhum tests/**, é o caso de soDeclaracaoDeProvaExistenteEditada (existente) ou de feature nova sem teste, nunca este SKIP", () => {
-    expect(soArquivosDoOverlay(["prova/novo-slug.ts"])).toBe(false);
+    const jaExiste = (): boolean => true;
+    expect(soArquivosDoOverlay(["prova/novo-slug.ts"], jaExiste)).toBe(false);
+  });
+
+  it("false quando o tests/** do diff é NOVO (ausente na base) — mesmo cenário de repoVacuousPass, continua exigindo controle", () => {
+    const jaExiste = (): boolean => false;
+    expect(soArquivosDoOverlay(["tests/vazio.test.ts", "prova/vazio.ts"], jaExiste)).toBe(false);
+  });
+
+  it("false quando o tests/** editado existe, mas outro tests/** do diff é novo E nenhum dos existentes conta — combinação mista ainda passa se AO MENOS UM tests/** já existe", () => {
+    const soOSegundoExiste = (arquivo: string): boolean => arquivo === "tests/b.test.ts";
+    expect(soArquivosDoOverlay(["tests/a.test.ts", "tests/b.test.ts"], soOSegundoExiste)).toBe(
+      true,
+    );
   });
 });
 
