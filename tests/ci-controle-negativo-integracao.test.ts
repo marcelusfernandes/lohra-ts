@@ -740,6 +740,56 @@ describe("controle-negativo/run.ts (subprocesso, repositório git descartável)"
   );
 
   it(
+    "SKIP quando o tests/** do diff é inteiramente NOVO E existe um commit test(red): que o toca (issue #117, lacuna 3)",
+    () => {
+      // Mesma forma de repoVacuousPass (teste novo, sem produção, vacuous
+      // por construção), mas com o commit test(red): que a issue #114
+      // (Contexto item 3) deixou sem saída mecânica — vira SKIP citando o
+      // sha, para o revisor conferir manualmente.
+      const dir = novoRepo();
+      const base = commitTudo(dir, "chore: repo vazio");
+      escreverTeste(dir, "vazio-red");
+      const head = commitTudo(dir, "test(red): cobre vazio-red (sem produção nenhuma)");
+
+      const { result, summary } = runControleNegativoComSummary([
+        "--root",
+        dir,
+        "--base",
+        base,
+        "--head",
+        head,
+        "--slug",
+        "vazio-red",
+      ]);
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain("SKIP");
+      expect(result.stdout).toContain(`test(red): ${head}`);
+      expect(summary).toContain(`test(red): ${head}`);
+    },
+    TIMEOUT_TESTE,
+  );
+
+  it(
+    "reprova citando a exigência quando o tests/** do diff é inteiramente NOVO e NÃO há commit test(red): (issue #117, lacuna 3)",
+    () => {
+      // Mesmo repoVacuousPass do teste "NÃO faz SKIP..." acima — a
+      // diferença é a mensagem: antes desta issue, o motivo era só
+      // "vacuous-pass"; agora nomeia a exigência que faltou (nenhum commit
+      // test(red): em base..head que toque os testes do diff).
+      const { dir, base, head, slug } = repoVacuousPass();
+
+      const result = rodar(dir, base, head, slug);
+
+      expect(result.status).toBe(1);
+      expect(result.stdout).not.toContain("SKIP");
+      expect(result.stderr).toContain("vacuous-pass");
+      expect(result.stderr).toContain("test(red)");
+    },
+    TIMEOUT_TESTE,
+  );
+
+  it(
     "NÃO faz SKIP quando há src/** no diff além de tests/** — mecânica normal (issue #114)",
     () => {
       const { dir, base, head, slug } = repoAssertionRed();

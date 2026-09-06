@@ -486,44 +486,10 @@ function rodarCheck(
     const desfecho = classificar(resumo);
 
     if (desfecho === "vacuous-pass") {
-      // Issue #117 (lacuna 3, Contexto item 3 da issue #114): diff
-      // overlay-only sem nenhum `tests/**` editado (`ehOverlayOnly` só é
-      // `true` aqui porque `soArquivosDoOverlay` já foi `false` em
-      // `main()`) — teste inteiramente novo, sem produção. base+overlay ≡
-      // head faz vacuous-pass acontecer POR CONSTRUÇÃO, mesmo com um
-      // `test(red):` real (não há src/** para o mecanismo discriminar). Em
-      // vez de reprovar sempre, aceita um commit `test(red):` que toque os
-      // testes do diff como controle manual — mesmo critério de commit que
-      // `existeTestRedValido` usa para `structural-red`, sem o requisito do
-      // stub (não há arquivo de produção para carregar um).
-      //
-      // Gated no desfecho de VERDADE (não um pré-check em `main()`, ao
-      // contrário dos outros dois SKIPs): um pré-check estático no formato
-      // do diff apanharia também `repoStructuralRed("sem-stub")` — um
-      // commit `test(red):` sem stub, que a checagem de `structural-red`
-      // abaixo corretamente reprova — e faria SKIP nela, fail-open real.
-      if (ehOverlayOnly) {
-        const executarGit = (args: readonly string[]): ResultadoGitMinimo => git(root, args);
-        const commitRed = commitsQueTocamTestes(executarGit, base, head, testFiles).find((commit) =>
-          ehCommitTestRed(commit.subject),
-        );
-        if (commitRed !== undefined) {
-          const motivo =
-            `SKIP — teste novo sem produção: vacuous-pass na base, controle manual pelo commit ` +
-            `test(red): ${commitRed.sha}`;
-          escreverSummary(`## controle-negativo\n\n${motivo}`);
-          return passar(`controle-negativo: ${motivo}`);
-        }
-        escreverSummary(
-          `## controle-negativo\n\n**FAILED** — \`vacuous-pass\`: a prova de \`${slug}\` passa na ` +
-            `base \`${base}\` — teste novo sem produção e sem nenhum commit \`test(red):\` em ` +
-            `\`${base}..${head}\` que toque os testes do diff.`,
-        );
-        return falhar(
-          `controle-negativo: vacuous-pass — a prova de ${slug} passa na base ${base} sem a ` +
-            `implementação, e sem commit test(red): em ${base}..${head} que toque os testes do diff`,
-        );
-      }
+      // TODO(#117, lacuna 3): `ehOverlayOnly` ainda não é usado aqui — a
+      // próxima mudança liga o commit `test(red):` como controle manual
+      // para o caso "teste novo sem produção" (`repoVacuousPass`-like).
+      void ehOverlayOnly;
       escreverSummary(
         `## controle-negativo\n\n**FAILED** — \`vacuous-pass\`: a prova de \`${slug}\` passa na ` +
           `base \`${base}\`, sem a implementação que a PR adiciona.`,
