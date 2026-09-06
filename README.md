@@ -38,6 +38,12 @@ Em sessões de Claude Code, `.claude/settings.json` formata e aplica `eslint --f
 arquivo editado (hook `PostToolUse`) e libera sem prompt os comandos read-only acima; o gate
 continua sendo `npm run lint` + `npm run format:check`.
 
+`npm test` roda a suíte inteira independente de `npm run build`: nenhum arquivo de teste
+importa de `dist/` (`npm ci && npm test` já passa em checkout limpo). `npm run typecheck` e
+`npm run lint`, ao contrário, exigem `dist/` — alguns scripts de paridade sob `scripts/`
+importam o pacote compilado de propósito (smoke tests do artefato publicado), por isso a
+ordem acima mantém `npm run build` antes deles.
+
 ## Desenvolvimento
 
 `npm run doutor` confere se esta máquina tem o que o checkout precisa — Node
@@ -112,13 +118,13 @@ com `exit 1` citando o caminho.
 Toda PR passa por cinco checks (`.github/workflows/ci.yml`); `main` só recebe
 merge commit com todos verdes e `review:approved` (ADR 0004):
 
-| check                | prova                                                                                                                                                       | reproduzir localmente                                                                    |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `checks (20)`/`(22)` | build, typecheck, lint, format, suíte inteira em Node 20 e 22                                                                                               | `npm run build && npm run typecheck && npm run lint && npm run format:check && npm test` |
-| `provenance`         | todo SHA aprovado em `docs/closeout.md` é ancestral do HEAD                                                                                                 | `npm run provenance:check`                                                               |
-| `escopo`             | o diff cabe nos globs de `## Files` da issue ligada por `Closes #N` (mais `authorised:` que só o orquestrador põe)                                          | `npm run ci:escopo -- --files-file f --issue-body-file i --pr-body-file p`               |
-| `contratos`          | nada em `docs/reference/**`/`lohra/**`; sem import de `python-json`/`python-repr` (após #17); arquivo ≤ 800 linhas, ou já assim na base e sem crescer (#93) | `npm run ci:contratos -- --files-file f [--apos-17]`                                     |
-| `controle-negativo`  | os testes do diff, aplicados sobre a base da PR, reprovam (`npm run prova -- <slug>` na base)                                                               | `npm run ci:controle-negativo -- --base <sha> --head <sha>`                              |
+| check                | prova                                                                                                                                                                                                    | reproduzir localmente                                                                    |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `checks (20)`/`(22)` | build, typecheck, lint, format, suíte inteira em Node 20 e 22                                                                                                                                            | `npm run build && npm run typecheck && npm run lint && npm run format:check && npm test` |
+| `provenance`         | todo SHA aprovado em `docs/closeout.md` é ancestral do HEAD                                                                                                                                              | `npm run provenance:check`                                                               |
+| `escopo`             | o diff cabe nos globs de `## Files` da issue ligada por `Closes #N` (mais `authorised:` que só o orquestrador põe)                                                                                       | `npm run ci:escopo -- --files-file f --issue-body-file i --pr-body-file p`               |
+| `contratos`          | nada em `docs/reference/**`/`lohra/**`; sem import de `python-json`/`python-repr` (após #17); arquivo ≤ 800 linhas, ou já assim na base e sem crescer (#93), ou com `@generated` na primeira linha (#91) | `npm run ci:contratos -- --files-file f [--apos-17]`                                     |
+| `controle-negativo`  | os testes do diff, aplicados sobre a base da PR, reprovam (`npm run prova -- <slug>` na base)                                                                                                            | `npm run ci:controle-negativo -- --base <sha> --head <sha>`                              |
 
 Os três últimos rodam só em `pull_request` e escrevem um bloco no summary do
 job. Quando reprovam:
@@ -141,7 +147,9 @@ job. Quando reprovam:
   (`1216 → 1220 linhas (> 800; a base já tinha 1216)`). O modo dry-run
   (`--files-file`, usado no comando de reprodução local acima) não conhece a
   base do CI: trata todo arquivo como novo, fail-closed, e avisa disso no
-  stderr.
+  stderr. Arquivo com `@generated` na primeira linha fica isento do limite —
+  tabela de dados gerada (`src/web/html5-entities.ts`), não código escrito à
+  mão; o marcador em qualquer outro lugar do arquivo não conta (#91).
 - `controle-negativo` reprova em `vacuous-pass` (o teste novo já passa na base
   sem a implementação: escreva primeiro o teste que reprova, commit
   `test(red):`), em `structural-red` sem um commit `test(red):` válido no range

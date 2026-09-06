@@ -1,4 +1,4 @@
-/* Generated from the pinned Python oracle (3.12.10 html.entities.html5).
+/* @generated from the pinned Python oracle (3.12.10 html.entities.html5).
  * Preserve verbatim; regenerate only against a new pinned oracle. */
 
 export const HTML5_ENTITIES: readonly { readonly name: string; readonly value: string }[] = [
