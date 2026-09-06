@@ -21,6 +21,13 @@
 // (vitest, threads por arquivo) derrubava a comparação antes/depois
 // intermitentemente, sem vazamento real nenhum. Corrigido isolando o
 // `TMPDIR` do subprocesso por execução (`runControleNegativoComEnv`).
+//
+// Fora de escopo desta correção (pré-existente, não coberto por nenhum
+// teste antes nem depois): não há como forçar `git worktree add` a falhar
+// com uma base VÁLIDA (para exercitar `registrado=false` seguido do
+// `rmSync` de `worktreeRemove` em `run.ts`) sem depender de condição de
+// corrida ou de mock de `git` — o cenário de base inexistente (abaixo)
+// reprova antes disso, em `diffNomeStatus`.
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -349,7 +356,7 @@ describe("controle-negativo/run.ts (subprocesso, repositório git descartável)"
   );
 
   it(
-    "exit 1 e sem diretório temporário vazando quando git worktree add falha (base inexistente) — issue #122",
+    "exit 1 sem workdir vazando quando a base é inexistente (reprova em diffNomeStatus, antes de mkdtempSync) — checagem isolada do tmpdir global (issue #122)",
     () => {
       const { dir, head, slug } = repoAssertionRed();
       const baseInvalida = "0".repeat(40);
@@ -378,6 +385,13 @@ describe("controle-negativo/run.ts (subprocesso, repositório git descartável)"
         // checagem abaixo, presa ao diretório isolado, fica imune a isso.
         novoRepo();
 
+        // Com uma base que nunca existiu, `diffNomeStatus` (main():571)
+        // reprova ANTES de `rodarCheck`/`mkdtempSync` (linha ~435) — este
+        // cenário nunca chega a criar um workdir de verdade (isso é
+        // exercitado pelo controle positivo abaixo, com base válida).
+        // Fixar a causa aqui, em vez de só o exit code, prende o cenário
+        // real e evita o título divergir de novo do que o teste cobre.
+        expect(result.stderr).toContain("git diff --name-status");
         expect(result.status).toBe(1);
         const dentroDoIsolado = readdirSync(tmpIsolado).filter((nome) =>
           nome.startsWith("controle-negativo-"),
