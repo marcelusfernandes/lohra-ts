@@ -100,9 +100,16 @@ describe("workflow service — progress persisted per node (issue #125)", () => 
       expect(line.status).toBe("running");
       // Issue #135: the refusal is no longer silent — the sink registered
       // on the production store's repository sees every STALE_FENCE_WRITE
-      // the stale acquisition triggers (node "b"'s own progress write, and
-      // the terminal write attempted after it).
-      expect(warnings.length).toBeGreaterThan(0);
+      // the stale acquisition triggers. Issue #143 hardened this from
+      // `toBeGreaterThan(0)` to an exact count, traced by instrumenting the
+      // sink with a stack trace once (reverted, not committed): FOUR owned
+      // writes present node "b"'s stale token past the run's engine.ts —
+      // its own cache cell+cost write (`SqliteWorkflowCache.put`, node "b"'s
+      // agent result), its own intermediate progress write (the #125
+      // per-node hook), the terminal write, and the spend write persisted
+      // right after the terminal write (service.ts:1049). Reproduced
+      // identically across 5 runs.
+      expect(warnings).toHaveLength(4);
       for (const warning of warnings) {
         expect(warning.cause).toBe("STALE_FENCE_WRITE");
         expect(warning.runId).toBe(started.run_id);
