@@ -43,6 +43,8 @@ describe("doctor remedy for broken JSON files (issue #94)", () => {
     );
     expect(mcp.remedy).not.toContain("python3");
     expect(mcp.remedy).not.toContain("json.tool");
+    expect(mcp.detail).toBe(`${join(home, "mcp.json")} — invalid JSON`);
+    expect(mcp.detail).not.toContain("JSONDecodeError");
   });
 
   it("points at a JSON validator instead of python3 for a broken workflow_policy.json", async () => {
@@ -59,5 +61,51 @@ describe("doctor remedy for broken JSON files (issue #94)", () => {
     expect(policy.remedy).toBe(`inspect it with a JSON validator, e.g. jq . ${path}`);
     expect(policy.remedy).not.toContain("python3");
     expect(policy.remedy).not.toContain("json.tool");
+    expect(policy.detail).toBe(`${path} — invalid JSON`);
+    expect(policy.detail).not.toContain("JSONDecodeError");
+  });
+});
+
+describe("doctor remedy text no longer names a Python exception (issue #97)", () => {
+  it("reports 'invalid JSON' for a malformed catalog HTTP response, not JSONDecodeError", async () => {
+    const { fetchModels } = await import("../src/catalog/catalog.js");
+    const { getProviderProfile } = await import("../src/providers/registry.js");
+    const profile = getProviderProfile("openai");
+    if (profile === null) throw new Error("missing test profile: openai");
+    const malformed = {
+      get: () => Promise.resolve({ status: 200, body: new TextEncoder().encode("{ not json") }),
+    };
+    const result = await fetchModels(profile, "x", malformed);
+    expect(result.detail).toBe("invalid JSON");
+    expect(result.detail).not.toContain("JSONDecodeError");
+  });
+
+  it("reports 'invalid JSON' for a malformed ollama probe response, not JSONDecodeError", async () => {
+    const { createServer } = await import("node:http");
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end("{ not json");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("no server address");
+    const url = `http://127.0.0.1:${String(address.port)}/`;
+    const originalConnect = process.env.LOHRA_OLLAMA_CONNECT_URL;
+    process.env.LOHRA_OLLAMA_CONNECT_URL = url;
+    try {
+      const { probeOllamaDown } = await import("../src/doctor/snapshot.js");
+      const status = await probeOllamaDown();
+      expect(status.detail).toBe("invalid JSON");
+      expect(status.detail).not.toContain("JSONDecodeError");
+    } finally {
+      if (originalConnect === undefined) delete process.env.LOHRA_OLLAMA_CONNECT_URL;
+      else process.env.LOHRA_OLLAMA_CONNECT_URL = originalConnect;
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+    }
   });
 });

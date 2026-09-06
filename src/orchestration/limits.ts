@@ -17,6 +17,12 @@ export function pythonInt(raw: string): number | null {
   return Number(trimmed.replace(/_/g, ""));
 }
 
+// TODO(#97, commit vermelho): stub temporário; a implementação real substitui
+// pythonInt acima e este export desaparece no commit verde.
+export function parseIntStrict(_raw: string): never {
+  throw new Error("not implemented");
+}
+
 /**
  * Reproduces _positive_int_env: unset/empty falls back silently, an
  * unparseable value warns "not an integer", a parsed value below 1 warns

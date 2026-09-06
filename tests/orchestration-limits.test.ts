@@ -1,6 +1,26 @@
 import { describe, expect, it } from "vitest";
 
-import { clampFlagMinOne, positiveIntEnv } from "../src/orchestration/limits.js";
+import { clampFlagMinOne, parseIntStrict, positiveIntEnv } from "../src/orchestration/limits.js";
+
+describe("parseIntStrict", () => {
+  it("parses signed integers, trimming surrounding whitespace", () => {
+    expect(parseIntStrict("2")).toBe(2);
+    expect(parseIntStrict(" +2 ")).toBe(2);
+    expect(parseIntStrict("-5")).toBe(-5);
+  });
+
+  it("accepts a single underscore digit separator, rejects other placements", () => {
+    expect(parseIntStrict("1_0")).toBe(10);
+    expect(parseIntStrict("_10")).toBeNull();
+    expect(parseIntStrict("10_")).toBeNull();
+    expect(parseIntStrict("1__0")).toBeNull();
+  });
+
+  it("rejects decimals and non-numeric strings alike", () => {
+    expect(parseIntStrict("3.0")).toBeNull();
+    expect(parseIntStrict("abc")).toBeNull();
+  });
+});
 
 describe("positiveIntEnv", () => {
   it("returns the default silently when the variable is unset or empty", () => {
