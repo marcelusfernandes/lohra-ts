@@ -14,8 +14,11 @@
 #      dispensada (avisado no stderr); os checks verdes continuam obrigatórios.
 #
 # Os modos `--all`/`--mirror` do push contam como push em main (empurram toda branch).
-# Prefixos com flag: `sudo -u X [--]`, `env -i`, `env -u X`/`env -uX`, `env VAR=x [--]`,
-# `nice -n N`/`nice -nN` são atravessados (valor separado ou colado ao flag; #77). O waiver de docs exige `changedFiles == files.length`: o `gh`
+# Prefixos com flag: `sudo -u X [--]`, `env -i`, `env -u X`/`env -uX`,
+# `env VAR=x [--]`, `nice -n N`/`nice -nN` são atravessados (valor separado ou
+# colado ao flag; #77).
+#
+# O waiver de docs exige `changedFiles == files.length`: o `gh`
 # devolve no máximo 100 arquivos em `files`, e uma lista truncada NÃO prova que
 # tudo é docs — nega, pedindo a label (fail-closed; revisão da PR #66).
 #

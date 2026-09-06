@@ -14,6 +14,11 @@
 // regra `arquivo-grande` usa: reprova arquivo novo ou que cresceu em
 // relação à base, não arquivo que já era grande e só foi editado (ver o
 // comentário acima de `arquivoGrande` para a dívida conhecida em `main`).
+//
+// Issue #91: `arquivo-grande` também isenta arquivo com "@generated" na
+// primeira linha — tabela de dados gerada (ex.: `src/web/html5-entities.ts`)
+// não é código escrito à mão; o limite de 800 linhas continua valendo para
+// código. Ver `marcadoComoGerado`.
 
 export interface Violacao {
   readonly id: string;
@@ -116,6 +121,20 @@ const EXTENSOES_ARQUIVO_GRANDE = [".ts", ".mjs", ".sh", ".md"];
 const LIMITE_LINHAS = 800;
 const EXCECOES_ARQUIVO_GRANDE = ["tests/fixtures/", "docs/reference/"];
 
+// Issue #91: marcador que isenta um arquivo da regra `arquivo-grande` sem
+// precisar de uma entrada em `EXCECOES_ARQUIVO_GRANDE` — viaja com o
+// arquivo. Só a PRIMEIRA linha conta (`marcadoComoGerado`): a mesma string
+// em qualquer outro lugar do arquivo (comentário no meio, string de dado)
+// não isenta nada — senão bastaria mencionar "@generated" em um comentário
+// solto para desligar o limite de 800 linhas em código escrito à mão.
+const MARCADOR_GERADO = "@generated";
+
+function marcadoComoGerado(conteudo: string): boolean {
+  const fimPrimeiraLinha = conteudo.indexOf("\n");
+  const primeiraLinha = fimPrimeiraLinha === -1 ? conteudo : conteudo.slice(0, fimPrimeiraLinha);
+  return primeiraLinha.includes(MARCADOR_GERADO);
+}
+
 function contarLinhas(conteudo: string): number {
   if (conteudo === "") return 0;
   const partes = conteudo.split("\n");
@@ -143,11 +162,14 @@ const arquivoGrande: Regra = {
   id: "arquivo-grande",
   descreve:
     `Arquivo .ts/.mjs/.sh/.md com mais de ${String(LIMITE_LINHAS)} linhas, ` +
-    "se novo ou se cresceu em relação à base (issue #93).",
+    "se novo ou se cresceu em relação à base (issue #93), exceto com " +
+    `"${MARCADOR_GERADO}" na primeira linha — tabela de dados gerada, não ` +
+    "código escrito à mão (issue #91).",
   avalia(arquivo, conteudo, conteudoBase = null) {
     if (conteudo === null) return null;
     if (!EXTENSOES_ARQUIVO_GRANDE.some((ext) => arquivo.endsWith(ext))) return null;
     if (EXCECOES_ARQUIVO_GRANDE.some((prefixo) => sobPrefixo(arquivo, prefixo))) return null;
+    if (marcadoComoGerado(conteudo)) return null;
     const linhasHead = contarLinhas(conteudo);
     if (linhasHead <= LIMITE_LINHAS) return null;
     if (conteudoBase === null) {

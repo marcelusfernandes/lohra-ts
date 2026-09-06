@@ -161,12 +161,19 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
         repository.createSession({ id: subId, systemPrompt, model, cwd: options.cwd });
       }
 
+      const childDispatch = createChildDispatch(options.baseDispatch);
+      // The leaf sandbox wrap (workflow durable leaves, #107) applies ON TOP
+      // of the child allow-list dispatch, never in place of it — the
+      // exclusions in child.ts:57-78 still run first, and only what they let
+      // through ever reaches the sandbox's fs/egress/taint checks.
+      const dispatch =
+        config.wrapDispatch === undefined ? childDispatch : config.wrapDispatch(childDispatch);
       const runtime = new ConversationRuntime({
         repository,
         transport: new NonClosingTransport(buildTransport(client, true)),
         promptSnapshot: () => systemPrompt,
         toolDefinitions: childToolDefinitions(options.parentToolDefinitions),
-        toolDispatcher: new RegistryToolDispatcher(createChildDispatch(options.baseDispatch)),
+        toolDispatcher: new RegistryToolDispatcher(dispatch),
         idSource: options.idSource,
         clock: options.clock,
         maxTokens: profile.defaultMaxTokens,

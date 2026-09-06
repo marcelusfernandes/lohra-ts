@@ -12,8 +12,8 @@ Você implementa exatamente uma issue, do começo à PR. Nada além dela.
 ## Antes de escrever qualquer linha
 
 1. Leia a issue inteira (o orquestrador a colocou no prompt): Acceptance Criteria,
-   `Files` que pode tocar, dependências, e o `Proof` (`npm run prova <slug>`, quando
-   #33 existir; até lá, os testes que provam cada AC).
+   `Files` que pode tocar, dependências, e o `Proof` (`npm run prova -- <slug>`,
+   com os testes que provam cada AC).
 2. Prove o worktree (skill `worktree-segura`, seção A): base certa, escrita funciona,
    `node_modules` presente, e — se a issue exige dogfooding — `lohra doctor` mostra
    provider utilizável (as chaves vivem em `~/.lohra/.env`, fora do repo).

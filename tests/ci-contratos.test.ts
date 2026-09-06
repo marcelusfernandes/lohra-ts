@@ -208,6 +208,37 @@ describe("regra arquivo-grande", () => {
     );
     expect(violacao).toBeNull();
   });
+
+  // Issue #91: marcador `@generated` na primeira linha isenta o arquivo da
+  // regra — tabela gerada (dados), não código escrito à mão. Testado antes
+  // e depois da comparação com a base (issue #93): o marcador vale nos dois
+  // modos.
+  it("arquivo com @generated na primeira linha não dispara (novo, sem base)", () => {
+    const violacao = regra("arquivo-grande").avalia(
+      "src/gerado.ts",
+      `// @generated\n${linhas(900)}`,
+      null,
+    );
+    expect(violacao).toBeNull();
+  });
+
+  it("arquivo com @generated na primeira linha não dispara mesmo crescendo em relação à base", () => {
+    const violacao = regra("arquivo-grande").avalia(
+      "src/gerado.ts",
+      `// @generated\n${linhas(900)}`,
+      `// @generated\n${linhas(810)}`,
+    );
+    expect(violacao).toBeNull();
+  });
+
+  it("@generated fora da primeira linha não isenta o arquivo (continua disparando)", () => {
+    const violacao = regra("arquivo-grande").avalia(
+      "src/gerado.ts",
+      `x\n// @generated\n${linhas(900)}`,
+      null,
+    );
+    expect(violacao?.id).toBe("arquivo-grande");
+  });
 });
 
 describe("rodarContratos", () => {
@@ -302,6 +333,19 @@ describe("run.ts (dry-run, subprocesso)", () => {
     const result = runDryRun(dir, filesFile);
 
     expect(result.status, result.stderr).toBe(0);
+  });
+
+  // Issue #91, AC2: o arquivo real, gerado, com o marcador — dry-run trata
+  // tudo como novo (fail-closed) mas o `@generated` isenta mesmo assim.
+  it("src/web/html5-entities.ts (real, gerado, marcado) não dispara arquivo-grande em --files-file", () => {
+    const filesFile = join(mkdtempSync(join(tmpdir(), "lohra-contratos-")), "files.txt");
+    workdirs.push(resolve(filesFile, ".."));
+    writeFileSync(filesFile, "src/web/html5-entities.ts\n");
+
+    const result = runDryRun(root, filesFile);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).not.toContain("arquivo-grande: src/web/html5-entities.ts");
   });
 
   it("auto-exclusão em subprocesso: escanear o repo real com este próprio arquivo de teste não dispara import-proibido", () => {

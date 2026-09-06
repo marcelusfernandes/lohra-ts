@@ -3,13 +3,17 @@
 # `### <nome>`, se não houver `##`) até o próximo heading de nível IGUAL OU
 # SUPERIOR — um `###` dentro de uma seção `##` fica; a última seção do corpo
 # vai até o fim (nada de `sed '1d;$d'`, que perdia a última linha). Linhas em
-# branco são removidas. Comparação do nome é literal (prefixo), como antes.
-# Usado por open-pr.sh (#79); bancada em tests/claude-skills-scripts.test.ts.
+# branco são removidas. Blocos de código (fences ```) são descartados antes
+# da busca, como faz o check `escopo` (#99). Comparação do nome é literal
+# (prefixo), como antes. Usado por open-pr.sh (#79); bancada em
+# tests/claude-skills-scripts.test.ts.
 # Uso: secao.sh "<nome>" < corpo
 set -eu
 [ $# -eq 1 ] || { echo "secao: uso: secao.sh \"<nome>\" < corpo" >&2; exit 2; }
 NOME=$1
-CORPO=$(cat)
+# Remove fences: alterna um flag a cada linha que começa com ``` e descarta
+# tudo (inclusive as próprias linhas ```) enquanto o flag estiver ligado.
+CORPO=$(awk '/^[[:space:]]*```/ { fence = !fence; next } !fence { print }')
 
 extrair() {
   # $1 = nível do heading (2 ou 3)

@@ -40,8 +40,12 @@ jobs:
           cache: npm
       - name: install
         run: npm ci
-      # build antes de test enquanto #2 estiver aberta (um teste de paridade
-      # importa de dist/). Depois de #2, reordenar para provar a independência.
+      # test ANTES de build: prova a cada run que a suíte não depende de dist/
+      # (#2, PR #105). typecheck e lint vêm depois do build porque scripts de
+      # paridade no include do tsconfig importam de dist/ (#108).
+      - name: test
+        id: test
+        run: npm test
       - name: build
         id: build
         run: npm run build
@@ -54,9 +58,6 @@ jobs:
       - name: format:check
         id: format
         run: npm run format:check
-      - name: test
-        id: test
-        run: npm test
 
   provenance:
     runs-on: ubuntu-latest

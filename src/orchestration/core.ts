@@ -19,12 +19,31 @@ export interface CollectResult {
   readonly retryAfter: number | null;
 }
 
+/** A child's async tool dispatch: `(name, args) => Promise<string>`, the
+ * shape `createChildDispatch` already returns (child.ts:57-59). */
+export type ChildToolDispatch = (
+  name: string,
+  args: Readonly<Record<string, unknown>>,
+) => Promise<string>;
+
 export interface SpawnConfig {
   readonly prompt: string;
   readonly model?: string;
   readonly provider?: string;
   readonly effort?: string;
   readonly maxIterations?: number;
+  /**
+   * Opt-in per-leaf dispatch wrapper (workflow durable leaves, issue #107).
+   * `OrchestrationChildRuntime.spawn` sets this from the acquisition's
+   * installed leaf sandbox; `spawn_session`/`delegate_task` (tools.ts) never
+   * set it, so their children are unaffected. Applied in child-runner.ts on
+   * top of `createChildDispatch(baseDispatch)` — never in place of it, so the
+   * child allow-list exclusions (child.ts:57-78) still run first. Carried
+   * verbatim through steer()'s idle/terminal resurrection via
+   * `entry.originalConfig` (no change needed there: the spread already
+   * includes whatever this field holds).
+   */
+  readonly wrapDispatch?: (base: ChildToolDispatch) => ChildToolDispatch;
 }
 
 /**

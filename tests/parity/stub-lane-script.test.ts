@@ -13,8 +13,8 @@ import type { StubLaneStep } from "../../scripts/parity/types.js";
 // shared runtime object in place — avoids the repeated bind/unbind-the-
 // same-port churn that made this file flaky under vitest's fast sequential
 // execution (a distinct issue from the lane-script logic itself, and the
-// same class of port-11434-under-load flakiness already carried as debt
-// for tests/parity/stub-driver.test.ts).
+// same class of port-11434-under-load flakiness that used to affect
+// tests/parity/stub-driver.test.ts, fixed by issue #3).
 const HEADER_ALLOWLIST = [
   "authorization",
   "accept",
