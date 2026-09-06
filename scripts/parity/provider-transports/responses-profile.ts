@@ -1,3 +1,4 @@
+import { CODEX_PROVIDER } from "../../../src/providers/index.js";
 import type { ProviderProfile } from "../../../src/providers/types.js";
 
 // Gêmeo, consumido só por `tests/parity/responses-profile.test.ts`, de
@@ -12,5 +13,5 @@ import type { ProviderProfile } from "../../../src/providers/types.js";
 // existir. Este arquivo importa `src/` diretamente, então roda sob `vitest`
 // (que transforma `.ts` em memória) sem exigir `npm run build` antes.
 export function resolveResponsesProfile(): ProviderProfile {
-  throw new Error("not implemented");
+  return CODEX_PROVIDER;
 }
