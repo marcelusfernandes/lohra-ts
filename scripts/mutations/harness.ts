@@ -1,0 +1,163 @@
+// Harness comum de mutação (issue #148, passo 0a do épico #13). Fatia a
+// família A que os seis runners de `scripts/parity/**` reimplementam cada um
+// à sua maneira (t16 `run-mutations.ts:772-826`, t15
+// `workflow-executor/run-mutations.ts:590-626`, t17
+// `workflow-audit-live/run-mutations.ts:536-570`):
+//
+//   git status --porcelain limpo -> git rev-parse HEAD -> mkdtemp ->
+//   git archive | tar -x -> symlink de node_modules -> aplicar edit
+//   exato-uma-vez -> vitest run <focal> -t <título> -> restaurar -> rodar
+//   verde de novo.
+//
+// Nada aqui importa de `scripts/parity/**` — as duas árvores são
+// independentes (issue #148); a única coisa realmente compartilhada é
+// `canonical.ts`, copiado, não importado.
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+
+import { canonicalJson } from "./canonical.js";
+import type { Edit, Focus, MutationReport } from "./types.js";
+
+export interface RunOutcome {
+  readonly exitCode: number | null;
+  readonly failedTests: readonly string[];
+  readonly ranTests: number;
+}
+
+/** Substitui `before` por `after` em `source`; lança se a âncora não ocorrer
+ * exatamente uma vez. Função pura — não toca disco. */
+export function replaceExactlyOnce(
+  source: string,
+  before: string,
+  after: string,
+  id: string,
+): string {
+  const first = source.indexOf(before);
+  if (first < 0) throw new Error(`${id}: mutation anchor not found`);
+  if (source.indexOf(before, first + before.length) >= 0)
+    throw new Error(`${id}: mutation anchor is not unique`);
+  return `${source.slice(0, first)}${after}${source.slice(first + before.length)}`;
+}
+
+/** Lê `directory/edit.file`, aplica `replaceExactlyOnce` e escreve de volta. */
+export function applyEditExactlyOnce(directory: string, edit: Edit, id: string): void {
+  const path = join(directory, edit.file);
+  const source = readFileSync(path, "utf8");
+  writeFileSync(path, replaceExactlyOnce(source, edit.before, edit.after, id), "utf8");
+}
+
+/** Snapshot byte a byte (sem decodificar) do conteúdo atual de cada arquivo
+ * em `files`, relativo a `directory`. */
+export function snapshotFiles(
+  directory: string,
+  files: readonly string[],
+): ReadonlyMap<string, Buffer> {
+  const snapshot = new Map<string, Buffer>();
+  for (const file of files) snapshot.set(file, readFileSync(join(directory, file)));
+  return snapshot;
+}
+
+/** Restaura cada arquivo do snapshot, byte a byte. */
+export function restoreAll(directory: string, snapshot: ReadonlyMap<string, Buffer>): void {
+  for (const [file, original] of snapshot) writeFileSync(join(directory, file), original);
+}
+
+/**
+ * Prepara um sandbox descartável para `candidateSha`: recusa se
+ * `git status --porcelain` em `root` não estiver vazio, cria um `mkdtemp`,
+ * extrai `git archive --format=tar candidateSha | tar -x` nele e faz
+ * symlink de `root/node_modules` para dentro do sandbox. Devolve o caminho
+ * do sandbox; quem chama é responsável por removê-lo depois. Em qualquer
+ * falha depois do `mkdtemp`, o sandbox parcial é removido antes de propagar
+ * o erro — ninguém herda um diretório órfão de uma corrida que nunca chegou
+ * a existir de verdade.
+ */
+export function prepareArchiveSandbox(root: string, candidateSha: string): string {
+  const status = spawnSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" });
+  if (status.status !== 0 || status.stdout !== "")
+    throw new Error("mutation run requires a committed candidate with clean porcelain");
+
+  const sandbox = mkdtempSync(join(tmpdir(), "lohra-mutations-"));
+  try {
+    const archive = spawnSync("git", ["archive", "--format=tar", candidateSha], {
+      cwd: root,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    if (archive.status !== 0) throw new Error(`git archive failed for ${candidateSha}`);
+    const extracted = spawnSync("tar", ["-xf", "-", "-C", sandbox], {
+      input: archive.stdout,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    if (extracted.status !== 0) throw new Error("tar extraction failed");
+    symlinkSync(resolve(root, "node_modules"), join(sandbox, "node_modules"), "dir");
+    return sandbox;
+  } catch (cause) {
+    rmSync(sandbox, { recursive: true, force: true });
+    throw cause;
+  }
+}
+
+interface VitestJsonReport {
+  readonly testResults?: readonly {
+    readonly assertionResults?: readonly { readonly status: string; readonly fullName: string }[];
+  }[];
+}
+
+function isVitestJsonReport(value: unknown): value is VitestJsonReport {
+  return typeof value === "object" && value !== null;
+}
+
+/** Interpreta a saída de `vitest run --reporter=json` num `RunOutcome`
+ * determinístico (sem timestamps/duração). Função pura. */
+export function parseVitestOutcome(stdout: string, exitCode: number | null): RunOutcome {
+  const start = stdout.indexOf("{");
+  const end = stdout.lastIndexOf("}");
+  if (start < 0 || end <= start) {
+    return { exitCode, failedTests: ["<no json report>"], ranTests: 0 };
+  }
+  const parsed: unknown = JSON.parse(stdout.slice(start, end + 1));
+  const report = isVitestJsonReport(parsed) ? parsed : {};
+  const assertions = (report.testResults ?? []).flatMap((file) => file.assertionResults ?? []);
+  const ran = assertions.filter(
+    (assertion) => assertion.status !== "pending" && assertion.status !== "skipped",
+  );
+  return {
+    exitCode,
+    failedTests: ran
+      .filter((assertion) => assertion.status === "failed")
+      .map((assertion) => assertion.fullName)
+      .sort(),
+    ranTests: ran.length,
+  };
+}
+
+/** Roda `vitest run <focus.file> -t <focus.test>` dentro de `directory`. */
+export function runFocusedVitest(directory: string, focus: Focus): RunOutcome {
+  const result = spawnSync(
+    join(directory, "node_modules/.bin/vitest"),
+    ["run", focus.file, "-t", focus.test, "--reporter=json", "--outputFile=/dev/stdout"],
+    {
+      cwd: directory,
+      encoding: "utf8",
+      env: { ...process.env, NO_COLOR: "1" },
+      maxBuffer: 32 * 1024 * 1024,
+    },
+  );
+  if (result.error !== undefined) throw result.error;
+  return parseVitestOutcome(result.stdout, result.status);
+}
+
+/** Um mutante só é `killed` quando o processo saiu com código diferente de
+ * zero E pelo menos um teste falhou nesse foco. */
+export function classify(exitCode: number | null, failedTests: readonly string[]): boolean {
+  return exitCode !== 0 && failedTests.length > 0;
+}
+
+/** Escreve `report` em `dir/mutations.json`, em JSON canônico (chaves
+ * ordenadas, terminado em newline). */
+export function writeReport(dir: string, report: MutationReport): void {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "mutations.json"), canonicalJson(report), "utf8");
+}
