@@ -27,6 +27,7 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "postinstall": "node scripts/postinstall.mjs",
+    "doutor": "tsx scripts/doutor.ts",
     "parity": "tsx scripts/parity/cli.ts",
     "parity:auth": "tsx scripts/parity/auth/run-all.ts",
     "parity:context": "tsx scripts/parity/local-context/run-all.ts",
