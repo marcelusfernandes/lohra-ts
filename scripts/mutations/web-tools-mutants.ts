@@ -124,7 +124,11 @@ export const webToolsMutants: readonly Mutant[] = [
     category: "safety",
     mechanism:
       "validatePublicUrl para de recusar URLs com credenciais embutidas (user:pass@host) — decision 1 do oráculo deixa de valer",
-    focus: { file: safetyTests, test: "refuses userinfo before any resolution (decision 1)" },
+    // O título completo do teste tem "(decision 1)" no fim; `-t` do vitest
+    // trata o padrão como regex e parênteses não escapados não casam com os
+    // parênteses literais do título, então o foco usa só o prefixo — único
+    // dentro do arquivo (conferido em tests/mutations-t20-catalog.test.ts).
+    focus: { file: safetyTests, test: "refuses userinfo before any resolution" },
     edits: [
       {
         file: safety,
@@ -153,9 +157,11 @@ export const webToolsMutants: readonly Mutant[] = [
     category: "search",
     mechanism:
       "readBodyCapped para de aplicar o teto de 2_000_000 bytes na resposta do DuckDuckGo antes de decodificar/parsear — decision 3 do oráculo deixa de valer",
+    // Mesmo motivo do foco de `f-userinfo-accepted`: o título completo tem
+    // "(decision 3)", e parênteses não escapados quebram o `-t` do vitest.
     focus: {
       file: searchTests,
-      test: "applies the byte cap before decode/parse (decision 3)",
+      test: "applies the byte cap before decode/parse",
     },
     edits: [
       {

@@ -76,12 +76,16 @@ describe("mutations:t20 catalog (src/web/**)", () => {
 
     it(`${mutant.id}: o foco existe em tests/web-*.test.ts e o título do teste está lá`, () => {
       expect(mutant.focus.file).toMatch(/^tests\/web-.*\.test\.ts$/);
+      // `focus.test` vira o padrão `-t` do vitest (regex): parênteses não
+      // escapados não casam com parênteses literais no título ("(decision
+      // 1)"), então alguns focos usam só um prefixo do título — o teste
+      // aqui é que esse prefixo case, sem exigir aspas ao redor.
+      expect(mutant.focus.test).not.toMatch(/[()]/u);
       const testSource = sourceOf(mutant.focus.file);
       expect(
-        testSource.includes(`"${mutant.focus.test}"`) ||
-          testSource.includes(`'${mutant.focus.test}'`),
-        `${mutant.id}: título "${mutant.focus.test}" ausente de ${mutant.focus.file}`,
-      ).toBe(true);
+        occurrences(testSource, mutant.focus.test),
+        `${mutant.id}: "${mutant.focus.test}" não ocorre exatamente uma vez em ${mutant.focus.file}`,
+      ).toBe(1);
     });
   }
 });
