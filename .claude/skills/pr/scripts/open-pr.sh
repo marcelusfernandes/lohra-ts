@@ -44,13 +44,10 @@ trap 'rm -f "$BODY"' EXIT
   echo "- [ ] dogfooding real (Codex e/ou OpenRouter): exit 0, error null, tool_calls"; echo
   for n in $ISSUES; do
     IBODY=$(gh issue view "$n" --repo "$REPO" --json body -q .body)
-    # `##` (script) ou `###` (formulário issue.yml); o fim do range é o próximo
-    # cabeçalho do MESMO nível, para um `###` dentro de uma seção `##` não truncá-la
-    secao() {
-      OUT=$(printf '%s\n' "$IBODY" | sed -n "/^## $1/,/^## /p" | sed '1d;$d' | sed '/^[[:space:]]*$/d')
-      [ -n "$OUT" ] || OUT=$(printf '%s\n' "$IBODY" | sed -n "/^### $1/,/^### /p" | sed '1d;$d' | sed '/^[[:space:]]*$/d')
-      printf '%s\n' "$OUT"
-    }
+    # secao.sh (#79): `##` ou `###` (formulário issue.yml); vai até o próximo
+    # heading de nível igual ou superior (um `###` interno fica) ou até o fim
+    # do corpo (a última seção não perde a última linha).
+    secao() { printf '%s\n' "$IBODY" | sh "$(dirname "$0")/secao.sh" "$1"; }
     AC=$(secao "Acceptance Criteria" | grep '^- \[' || true)
     [ -n "$AC" ] || { echo "open-pr: a issue #$n não tem bloco '## Acceptance Criteria' com itens" >&2; exit 2; }
     echo "## Acceptance Criteria (copiados da issue #$n)"; echo; printf '%s\n' "$AC"; echo

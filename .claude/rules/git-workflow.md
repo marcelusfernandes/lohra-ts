@@ -26,7 +26,10 @@ seletiva vira nenhuma exceção.
 
 **Exceções** (não precisam de issue): correção de typo; edição de um arquivo com
 menos de 50 linhas e baixa carga cognitiva; comandos exploratórios ou de
-leitura.
+leitura. Uma PR de exceção declara no corpo uma linha `authorised: <glob>` por
+arquivo (ou glob) tocado, no lugar de `Closes #N`: o check `escopo` aceita a PR
+quando essas linhas cobrem o diff inteiro (#62); sem `Closes` nem `authorised:`
+completo, o `escopo` reprova.
 
 ## Modelo de branch
 
