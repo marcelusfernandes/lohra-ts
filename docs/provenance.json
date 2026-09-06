@@ -1,0 +1,142 @@
+{
+  "entries": [
+    {
+      "ticket": "T00",
+      "sha": "5b2d62c65f282683609d5d3801b3bfaf4448aff4",
+      "result": "integrado",
+      "status": "approved"
+    },
+    {
+      "ticket": "T01",
+      "sha": "8901ea084e5797980650bd512f4fcd8fe251c952",
+      "result": "integrado",
+      "status": "approved"
+    },
+    {
+      "ticket": "T02",
+      "sha": "931e0faf599d2017fabed1e47a12467227b69feb",
+      "result": "integrado",
+      "status": "approved"
+    },
+    {
+      "ticket": "T03",
+      "sha": "3175a936e0f4c03af8380daf4f5dbd192a742500",
+      "result": "integrado",
+      "status": "approved"
+    },
+    {
+      "ticket": "T04",
+      "sha": "4655d8ad8ad1fc3d168c92fe3144c4aab1d1b1cb",
+      "result": "integrado",
+      "status": "approved"
+    },
+    {
+      "ticket": "T05",
+      "sha": "dc419d078f330470b111e2f8ec6e582ad65eecca",
+      "result": "integrado",
+      "status": "approved"
+    },
+    {
+      "ticket": "T06",
+      "sha": "006ea20c3894fa7c90c576ad3d152cb1d45bda6e",
+      "result": "integrado",
+      "status": "approved"
+    },
+    {
+      "ticket": "T07",
+      "sha": "141ef75c8950e24bf3d5ae9c346bfbf93e9f4349",
+      "result": "integrado",
+      "status": "approved"
+    },
+    {
+      "ticket": "T08",
+      "sha": "8d80d8adb4717722ac0337aaf7ab3ad4a6b4cc02",
+      "result": "integrado",
+      "status": "approved"
+    },
+    {
+      "ticket": "T09",
+      "sha": "f11443e2425439065e08a8a25b39c4585ddbab95",
+      "result": "integrado",
+      "status": "approved"
+    },
+    {
+      "ticket": "T10",
+      "sha": "bc9a487e06523c3018561b5d13bb402c0370a586",
+      "result": "integrado",
+      "status": "approved"
+    },
+    {
+      "ticket": "T11",
+      "sha": "2f212dea99dfa924a388243f8068e6dfe204590d",
+      "result": "integrado",
+      "status": "approved"
+    },
+    {
+      "ticket": "T12",
+      "sha": "e4415ddabd6bf27196f443f7c95e282ebcef86af",
+      "result": "integrado",
+      "status": "approved"
+    },
+    {
+      "ticket": "T13",
+      "sha": "7703b2f7bd8a604d24246ed5cd21e1cb74e3e86b",
+      "result": "integrado",
+      "status": "approved"
+    },
+    {
+      "ticket": "T14",
+      "sha": "a69bbcaa889f111a9b1d5c6760bf21e89e74f0fc",
+      "result": "integrado",
+      "status": "approved"
+    },
+    {
+      "ticket": "T15",
+      "sha": "0023a6b58f4264ec7fb3ca52607efd10144f84ce",
+      "result": "integrado; Evaluator 100/100",
+      "status": "approved"
+    },
+    {
+      "ticket": "T16",
+      "sha": "45a2f7d7f1e8a2f1e8ed50df8e53368d3237dd13",
+      "result": "integrado; Evaluator 100/100",
+      "status": "approved"
+    },
+    {
+      "ticket": "T17",
+      "sha": "846daf9c3de7766b1736d02a1a4b3a52fa02d5f2",
+      "result": "integrado; Evaluator 99/100",
+      "status": "approved"
+    },
+    {
+      "ticket": "T18",
+      "sha": "879b16788d83ab32d45216c25403e9b4b8faecb1",
+      "result": "integrado",
+      "status": "approved"
+    },
+    {
+      "ticket": "T19",
+      "sha": "78b93ec89995ae72f275ec58c1acea5739b96da9",
+      "result": "integrado; Evaluator 98/100",
+      "status": "approved"
+    },
+    {
+      "ticket": "T20",
+      "sha": "9d98cc97473f5523d0a961ef48073456db40522d",
+      "result": "integrado; Evaluator 100/100",
+      "status": "approved"
+    },
+    {
+      "ticket": "T21",
+      "sha": "3c39315f48665eea5230b03c6c57ddd25fe377bb",
+      "result": "integrado; QA 100/100",
+      "status": "approved"
+    },
+    {
+      "ticket": "T22",
+      "sha": "EVIDENCE_BOUND_FINAL_SHA",
+      "result": "SHA exato vinculado no evidence index",
+      "status": "pending"
+    }
+  ]
+}

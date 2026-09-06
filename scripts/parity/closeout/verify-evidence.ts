@@ -10,6 +10,7 @@ import {
   concurrencyEvidenceMatches,
   gatesEvidenceMatches,
 } from "./evidence-validation.js";
+import { approvedHeadPairs } from "../../provenance/extract.js";
 
 const project = resolve(import.meta.dirname, "../../..");
 const evidenceDirectory = join(project, ".parity-evidence", "t22");
@@ -28,30 +29,9 @@ const artifactRoot = resolve(
 );
 const rulingPath = join(artifactRoot, "gate-decision-ruling", "index.md");
 const runProvenancePath = join(artifactRoot, "t22-run-provenance", "index.md");
-const approved = [
-  ["T00", "5b2d62c65f282683609d5d3801b3bfaf4448aff4"],
-  ["T01", "8901ea084e5797980650bd512f4fcd8fe251c952"],
-  ["T02", "931e0faf599d2017fabed1e47a12467227b69feb"],
-  ["T03", "3175a936e0f4c03af8380daf4f5dbd192a742500"],
-  ["T04", "4655d8ad8ad1fc3d168c92fe3144c4aab1d1b1cb"],
-  ["T05", "dc419d078f330470b111e2f8ec6e582ad65eecca"],
-  ["T06", "006ea20c3894fa7c90c576ad3d152cb1d45bda6e"],
-  ["T07", "141ef75c8950e24bf3d5ae9c346bfbf93e9f4349"],
-  ["T08", "8d80d8adb4717722ac0337aaf7ab3ad4a6b4cc02"],
-  ["T09", "f11443e2425439065e08a8a25b39c4585ddbab95"],
-  ["T10", "bc9a487e06523c3018561b5d13bb402c0370a586"],
-  ["T11", "2f212dea99dfa924a388243f8068e6dfe204590d"],
-  ["T12", "e4415ddabd6bf27196f443f7c95e282ebcef86af"],
-  ["T13", "7703b2f7bd8a604d24246ed5cd21e1cb74e3e86b"],
-  ["T14", "a69bbcaa889f111a9b1d5c6760bf21e89e74f0fc"],
-  ["T15", "0023a6b58f4264ec7fb3ca52607efd10144f84ce"],
-  ["T16", "45a2f7d7f1e8a2f1e8ed50df8e53368d3237dd13"],
-  ["T17", "846daf9c3de7766b1736d02a1a4b3a52fa02d5f2"],
-  ["T18", "879b16788d83ab32d45216c25403e9b4b8faecb1"],
-  ["T19", "78b93ec89995ae72f275ec58c1acea5739b96da9"],
-  ["T20", "9d98cc97473f5523d0a961ef48073456db40522d"],
-  ["T21", "3c39315f48665eea5230b03c6c57ddd25fe377bb"],
-] as const;
+// Fonte canônica: docs/provenance.json (issue #158). Lançar aqui é
+// fail-closed — sem SHAs aprovados não há evidência de proveniência.
+const approved = approvedHeadPairs();
 
 function git(args: readonly string[]): string {
   const result = spawnSync("git", [...args], { cwd: project, encoding: "utf8" });
