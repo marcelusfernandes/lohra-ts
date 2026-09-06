@@ -7,8 +7,8 @@
  * length (ADR 0003 item 5).
  */
 
+import { isEmptyJsonValue } from "../serialization/json-presence.js";
 import type { Usage } from "../transports/index.js";
-import { isPythonFalsy } from "./python-truthy.js";
 
 export interface OpenAiUsage {
   readonly prompt_tokens: number;
@@ -28,7 +28,7 @@ function estimateTokens(text: string): number {
 /** `content or ""` — a non-string, truthy content value counts as its
  * JSON.stringify length. */
 function stringifyContent(content: unknown): string {
-  if (isPythonFalsy(content)) return "";
+  if (isEmptyJsonValue(content)) return "";
   if (typeof content === "string") return content;
   return JSON.stringify(content);
 }

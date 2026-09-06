@@ -50,7 +50,7 @@ export class SubscriptionCredentials {
     });
   }
   toString(): string {
-    return `SubscriptionCreds(token=***, account_id=${repr(this.accountId)}, base_url='${this.baseUrl}')`;
+    return `SubscriptionCreds(token=***, account_id=${repr(this.accountId)}, base_url=${JSON.stringify(this.baseUrl)})`;
   }
 }
 
@@ -60,4 +60,4 @@ export interface AuthRoute {
   readonly error?: string;
 }
 
-const repr = (value: string | null): string => (value === null ? "None" : `'${value}'`);
+const repr = (value: string | null): string => JSON.stringify(value);

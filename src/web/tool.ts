@@ -1,4 +1,4 @@
-import { isPythonTruthy } from "../server/python-truthy.js";
+import { hasJsonValue } from "../serialization/json-presence.js";
 import { toolError, toolResult } from "../tools/envelope.js";
 import { htmlToText } from "./extract.js";
 import { fetchUrl } from "./fetch.js";
@@ -40,9 +40,10 @@ export function currentSearchBackend(): SearchBackend {
   return searchBackend;
 }
 
-/** Python `int()` coercion: booleans, ints and digit strings convert;
- * floats truncate; anything else raises (mapped to the default). */
-function pythonInt(value: unknown): number | null {
+/** Coercion to an integer for this tool's `max_results` argument: booleans,
+ * ints and digit strings convert; floats truncate; anything else is not a
+ * valid integer (mapped to the default). */
+function coerceInt(value: unknown): number | null {
   if (typeof value === "boolean") return value ? 1 : 0;
   if (typeof value === "number") {
     if (!Number.isFinite(value)) return null;
@@ -59,13 +60,13 @@ function pythonInt(value: unknown): number | null {
 }
 
 export function coerceMaxResults(value: unknown): number {
-  const parsed = pythonInt(value);
+  const parsed = coerceInt(value);
   if (parsed === null) return DEFAULT_SEARCH_RESULTS;
   return Math.max(1, Math.min(parsed, MAX_SEARCH_RESULTS));
 }
 
 export function isMissingQuery(query: unknown): boolean {
-  if (!isPythonTruthy(query)) return true;
+  if (!hasJsonValue(query)) return true;
   if (typeof query === "string") return query.trim() === "";
   return JSON.stringify(query).trim() === "";
 }

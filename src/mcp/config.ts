@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 
-import { isPythonTruthy } from "../serialization/python-truthy.js";
+import { hasJsonValue } from "../serialization/json-presence.js";
 
 /** Raised on a malformed mcp.json (never on a missing file). */
 export class MCPConfigError extends Error {}
@@ -51,7 +51,7 @@ function defineMappingEntry(mapping: Record<string, unknown>, key: string, value
   });
 }
 
-function pythonMappingFromJson(name: string, value: unknown): Readonly<Record<string, unknown>> {
+function mappingFromJson(name: string, value: unknown): Readonly<Record<string, unknown>> {
   const mapping = Object.create(null) as Record<string, unknown>;
   if (isRecord(value)) {
     for (const [key, entryValue] of Object.entries(value)) {
@@ -89,7 +89,7 @@ function pythonMappingFromJson(name: string, value: unknown): Readonly<Record<st
   return mapping;
 }
 
-function pythonArgsFromJson(name: string, value: unknown): readonly unknown[] {
+function argsFromJson(name: string, value: unknown): readonly unknown[] {
   if (Array.isArray(value)) return Array.from(value as readonly unknown[]);
   if (typeof value === "string") return Array.from(value);
   throw new MCPConfigError(`server ${JSON.stringify(name)} field 'args' must be a string or array`);
@@ -97,10 +97,10 @@ function pythonArgsFromJson(name: string, value: unknown): readonly unknown[] {
 
 function parseServer(name: string, spec: unknown): MCPServerConfig {
   if (!isRecord(spec)) throw new MCPConfigError(`server ${JSON.stringify(name)} must be an object`);
-  if (isPythonTruthy(spec.url) && typeof spec.url !== "string") {
+  if (hasJsonValue(spec.url) && typeof spec.url !== "string") {
     throw new MCPConfigError(`server ${JSON.stringify(name)} field 'url' must be a string`);
   }
-  if (isPythonTruthy(spec.command) && typeof spec.command !== "string") {
+  if (hasJsonValue(spec.command) && typeof spec.command !== "string") {
     throw new MCPConfigError(`server ${JSON.stringify(name)} field 'command' must be a string`);
   }
   const url = typeof spec.url === "string" && spec.url ? spec.url : undefined;
@@ -110,9 +110,9 @@ function parseServer(name: string, spec: unknown): MCPServerConfig {
   }
   if (command !== undefined) {
     const rawArgs = spec.args;
-    const args = rawArgs === undefined || rawArgs === null ? [] : pythonArgsFromJson(name, rawArgs);
+    const args = rawArgs === undefined || rawArgs === null ? [] : argsFromJson(name, rawArgs);
     const rawEnv = spec.env;
-    const env = rawEnv === undefined || rawEnv === null ? {} : pythonMappingFromJson(name, rawEnv);
+    const env = rawEnv === undefined || rawEnv === null ? {} : mappingFromJson(name, rawEnv);
     return { name, transport: "stdio", command, args, env };
   }
   throw new MCPConfigError(
@@ -135,7 +135,7 @@ export function loadMcpConfig(path: string): readonly MCPServerConfig[] {
 
   const configs: MCPServerConfig[] = [];
   for (const [name, spec] of Object.entries(servers)) {
-    if (isRecord(spec) && isPythonTruthy(spec.disabled)) continue;
+    if (isRecord(spec) && hasJsonValue(spec.disabled)) continue;
     configs.push(parseServer(name, spec));
   }
   return configs;

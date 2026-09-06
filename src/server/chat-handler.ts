@@ -18,7 +18,7 @@ import {
   sseEvent,
 } from "./chat-format.js";
 import { readBody, startSse, writeJson } from "./http-io.js";
-import { isPythonTruthy } from "./python-truthy.js";
+import { hasJsonValue } from "../serialization/json-presence.js";
 import {
   parseRequestBody,
   validateChatBody,
@@ -72,7 +72,7 @@ export async function handleChatCompletions(
 
   const completionId = `chatcmpl-${randomUUID().replaceAll("-", "")}`;
   const created = Math.floor(Date.now() / 1000);
-  const includeUsage = isPythonTruthy(parsed.streamOptions?.["include_usage"]);
+  const includeUsage = hasJsonValue(parsed.streamOptions?.["include_usage"]);
 
   if (parsed.stream) {
     startSse(res);

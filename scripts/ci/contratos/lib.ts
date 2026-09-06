@@ -7,6 +7,13 @@
 // de CI constroem fixtures com imports proibidos, como string, para provar
 // que o scanner os pega — nenhum dos dois é o invariante em si, e escaneá-los
 // faria o contrato tropeçar na própria definição).
+//
+// Issue #93: `Regra.avalia` ganhou um terceiro parâmetro, `conteudoBase` —
+// o conteúdo do mesmo arquivo na base do diff (`null` quando o arquivo não
+// existia lá, ou quando quem chama não sabe comparar com a base). Só a
+// regra `arquivo-grande` usa: reprova arquivo novo ou que cresceu em
+// relação à base, não arquivo que já era grande e só foi editado (ver o
+// comentário acima de `arquivoGrande` para a dívida conhecida em `main`).
 
 export interface Violacao {
   readonly id: string;
@@ -17,7 +24,11 @@ export interface Violacao {
 export interface Regra {
   readonly id: string;
   readonly descreve: string;
-  avalia(arquivo: string, conteudo: string | null): Violacao | null;
+  /** `conteudoBase`: conteúdo do arquivo na base do diff (issue #93);
+   * `null` para arquivo novo ou quando não há base para comparar. Opcional
+   * — regras que não comparam com a base (`caminho-proibido`,
+   * `import-proibido`) ignoram o parâmetro. */
+  avalia(arquivo: string, conteudo: string | null, conteudoBase?: string | null): Violacao | null;
 }
 
 const PREFIXOS_PROIBIDOS = ["docs/reference/", "lohra/"];
@@ -114,19 +125,46 @@ function contarLinhas(conteudo: string): number {
   return ultimo === "" ? partes.length - 1 : partes.length;
 }
 
+// Issue #93: a regra compara com a base — só reprova arquivo novo (sem
+// `conteudoBase`, ou `null` porque não existia na base) ou que cresceu
+// (`linhas(head) > linhas(base)`). Arquivo já grande na base que mantém ou
+// reduz o tamanho passa: o limite de 800 bloqueia crescimento novo, não
+// dívida pré-existente. `conteudoBase` ausente (chamada com dois argumentos,
+// como o modo `--files-file` sem base — ver run.ts) é tratado como arquivo
+// novo, fail-closed — reproduz o comportamento anterior à #93 para quem não
+// sabe comparar com a base.
+//
+// Dívida conhecida em `main` no momento da #93 (não é para ser paga aqui —
+// ver "Fora de escopo" na issue): `tests/workflow-audit-live.test.ts`
+// (1213 linhas, entre outros — inventário completo no corpo da PR #93).
+// `find src tests scripts -name '*.ts' -o -name '*.mjs' | xargs wc -l |
+// awk '$1>800'` lista o inventário atualizado a qualquer momento.
 const arquivoGrande: Regra = {
   id: "arquivo-grande",
-  descreve: `Arquivo .ts/.mjs/.sh/.md com mais de ${String(LIMITE_LINHAS)} linhas.`,
-  avalia(arquivo, conteudo) {
+  descreve:
+    `Arquivo .ts/.mjs/.sh/.md com mais de ${String(LIMITE_LINHAS)} linhas, ` +
+    "se novo ou se cresceu em relação à base (issue #93).",
+  avalia(arquivo, conteudo, conteudoBase = null) {
     if (conteudo === null) return null;
     if (!EXTENSOES_ARQUIVO_GRANDE.some((ext) => arquivo.endsWith(ext))) return null;
     if (EXCECOES_ARQUIVO_GRANDE.some((prefixo) => sobPrefixo(arquivo, prefixo))) return null;
-    const linhas = contarLinhas(conteudo);
-    if (linhas <= LIMITE_LINHAS) return null;
+    const linhasHead = contarLinhas(conteudo);
+    if (linhasHead <= LIMITE_LINHAS) return null;
+    if (conteudoBase === null) {
+      return {
+        id: "arquivo-grande",
+        arquivo,
+        descricao: `${String(linhasHead)} linhas (> ${String(LIMITE_LINHAS)}; novo)`,
+      };
+    }
+    const linhasBase = contarLinhas(conteudoBase);
+    if (linhasHead <= linhasBase) return null;
     return {
       id: "arquivo-grande",
       arquivo,
-      descricao: `${String(linhas)} linhas (> ${String(LIMITE_LINHAS)})`,
+      descricao:
+        `${String(linhasBase)} → ${String(linhasHead)} linhas (> ${String(LIMITE_LINHAS)}; ` +
+        `a base já tinha ${String(linhasBase)})`,
     };
   },
 };
@@ -140,12 +178,14 @@ export const regras: readonly Regra[] = [caminhoProibido, importProibido, arquiv
 export function rodarContratos(
   files: readonly string[],
   lerConteudo: (arquivo: string) => string | null,
+  lerConteudoBase: (arquivo: string) => string | null = () => null,
 ): readonly Violacao[] {
   const violacoes: Violacao[] = [];
   for (const arquivo of files) {
     const conteudo = lerConteudo(arquivo);
+    const conteudoBase = lerConteudoBase(arquivo);
     for (const regra of regras) {
-      const violacao = regra.avalia(arquivo, conteudo);
+      const violacao = regra.avalia(arquivo, conteudo, conteudoBase);
       if (violacao !== null) violacoes.push(violacao);
     }
   }

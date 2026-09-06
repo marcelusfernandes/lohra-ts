@@ -86,7 +86,7 @@ describe("terminal tool", () => {
     ['{"command":"sleep 4","timeout":1.0}', "1.0s"],
     ['{"command":"sleep 4","timeout":2.50}', "2.5s"],
     ['{"command":"sleep 4","timeout":1e0}', "1.0s"],
-    ['{"command":"sleep 4","timeout":true}', "Trues"],
+    ['{"command":"sleep 4","timeout":true}', "trues"],
     ['{"command":"sleep 4","timeout":0}', "0s"],
   ])("renders Python timeout semantics for %s", async (raw, rendered) => {
     const args = parseToolArguments(raw);
