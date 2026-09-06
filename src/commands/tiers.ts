@@ -17,7 +17,7 @@ export async function runTiers(options: {
       return existsSync(path)
         ? {
             code: 1,
-            stdout: `${path} — exists but no usable tier was loaded (broken JSON or unknown keys)\ninspect it: python3 -m json.tool ${path}\n`,
+            stdout: `${path} — exists but no usable tier was loaded (broken JSON or unknown keys)\ninspect it with a JSON validator, e.g. jq . ${path}\n`,
             stderr: "",
           }
         : {

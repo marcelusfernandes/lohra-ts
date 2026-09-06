@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 
-import { isPythonTruthy } from "../serialization/python-truthy.js";
+import { hasJsonValue } from "../serialization/json-presence.js";
 
 /** Raised on a malformed mcp.json (never on a missing file). */
 export class MCPConfigError extends Error {}
@@ -97,10 +97,10 @@ function pythonArgsFromJson(name: string, value: unknown): readonly unknown[] {
 
 function parseServer(name: string, spec: unknown): MCPServerConfig {
   if (!isRecord(spec)) throw new MCPConfigError(`server ${JSON.stringify(name)} must be an object`);
-  if (isPythonTruthy(spec.url) && typeof spec.url !== "string") {
+  if (hasJsonValue(spec.url) && typeof spec.url !== "string") {
     throw new MCPConfigError(`server ${JSON.stringify(name)} field 'url' must be a string`);
   }
-  if (isPythonTruthy(spec.command) && typeof spec.command !== "string") {
+  if (hasJsonValue(spec.command) && typeof spec.command !== "string") {
     throw new MCPConfigError(`server ${JSON.stringify(name)} field 'command' must be a string`);
   }
   const url = typeof spec.url === "string" && spec.url ? spec.url : undefined;
@@ -135,7 +135,7 @@ export function loadMcpConfig(path: string): readonly MCPServerConfig[] {
 
   const configs: MCPServerConfig[] = [];
   for (const [name, spec] of Object.entries(servers)) {
-    if (isRecord(spec) && isPythonTruthy(spec.disabled)) continue;
+    if (isRecord(spec) && hasJsonValue(spec.disabled)) continue;
     configs.push(parseServer(name, spec));
   }
   return configs;

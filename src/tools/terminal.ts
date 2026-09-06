@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { spawn as spawnPty } from "node-pty";
 
 import { ApprovalManager, approval } from "./approval.js";
-import { pythonNumberKind } from "./arguments.js";
+import { jsonNumberKind } from "./arguments.js";
 import { toolError, toolResult } from "./envelope.js";
 import type { ToolArguments } from "./types.js";
 
@@ -35,7 +35,7 @@ function renderArgument(value: unknown): string {
 function timeoutLabel(args: ToolArguments, timeout: unknown): string {
   if (typeof timeout === "boolean") return JSON.stringify(timeout);
   if (typeof timeout === "number") {
-    if (pythonNumberKind(args, "timeout") === "float" && Number.isInteger(timeout)) {
+    if (jsonNumberKind(args, "timeout") === "float" && Number.isInteger(timeout)) {
       return timeout.toFixed(1);
     }
     return String(timeout);

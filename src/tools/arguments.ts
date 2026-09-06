@@ -1,9 +1,9 @@
-export type PythonNumberKind = "int" | "float";
+export type JsonNumberKind = "int" | "float";
 
-const numberKinds = new WeakMap<object, ReadonlyMap<string, PythonNumberKind>>();
+const numberKinds = new WeakMap<object, ReadonlyMap<string, JsonNumberKind>>();
 
-function rawNumberKinds(raw: string): ReadonlyMap<string, PythonNumberKind> {
-  const kinds = new Map<string, PythonNumberKind>();
+function rawNumberKinds(raw: string): ReadonlyMap<string, JsonNumberKind> {
+  const kinds = new Map<string, JsonNumberKind>();
   const property = /"((?:\\.|[^"\\])*)"\s*:\s*(-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/gu;
   for (const match of raw.matchAll(property)) {
     const encodedKey = match[1];
@@ -31,9 +31,9 @@ export function parseToolArguments(raw: string): Readonly<Record<string, unknown
   }
 }
 
-export function pythonNumberKind(
+export function jsonNumberKind(
   args: Readonly<Record<string, unknown>>,
   key: string,
-): PythonNumberKind | null {
+): JsonNumberKind | null {
   return numberKinds.get(args)?.get(key) ?? null;
 }
