@@ -28,9 +28,17 @@
 // `rmSync` de `worktreeRemove` em `run.ts`) sem depender de condição de
 // corrida ou de mock de `git` — o cenário de base inexistente (abaixo)
 // reprova antes disso, em `diffNomeStatus`.
-import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -596,4 +604,34 @@ describe("controle-negativo/run.ts (subprocesso, repositório git descartável)"
     },
     TIMEOUT_TESTE,
   );
+});
+
+// Issue #137: os três helpers que ainda lançavam `tsx` pelo wrapper
+// `tsx/dist/cli.mjs` (direto ou via o shim `node_modules/.bin/tsx`, que é um
+// symlink para o mesmo `cli.mjs`) precisam trocar para `node --import <tsx
+// loader>`, igual a `scripts/parity/gateway/launch-candidate.ts` (issue
+// #132) — um processo real, sem o handshake de sinal do wrapper. Escaneia o
+// texto-fonte dos três arquivos-alvo (os dois `ci-*.test.ts` que fazem
+// `spawnSync` direto e o helper compartilhado do controle-negativo) em vez
+// de rodar `grep` num subprocesso — mais rápido e sem depender de `grep`
+// estar no PATH.
+describe("tsx sem wrapper nos helpers de teste (issue #137)", () => {
+  const arquivosAlvo = [
+    resolve(import.meta.dirname, "ci-contratos.test.ts"),
+    resolve(import.meta.dirname, "ci-escopo.test.ts"),
+    resolve(import.meta.dirname, "helpers", "controle-negativo-repo.ts"),
+  ];
+
+  it("nenhum lança tsx pelo wrapper (cli.mjs ou o shim .bin/tsx) — todos usam --import", () => {
+    for (const caminho of arquivosAlvo) {
+      const conteudo = readFileSync(caminho, "utf8");
+      expect(conteudo, `${caminho}: não pode resolver node_modules/tsx/dist/cli.mjs`).not.toContain(
+        "node_modules/tsx/dist/cli.mjs",
+      );
+      expect(conteudo, `${caminho}: não pode resolver node_modules/.bin/tsx`).not.toContain(
+        "node_modules/.bin/tsx",
+      );
+      expect(conteudo, `${caminho}: precisa lançar tsx via --import`).toContain("--import");
+    }
+  });
 });

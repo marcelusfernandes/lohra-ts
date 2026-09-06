@@ -22,17 +22,22 @@ import {
 
 const root = resolve(import.meta.dirname, "..");
 const runScript = resolve(root, "scripts/ci/escopo/run.ts");
-const tsxBin = resolve(root, "node_modules/.bin/tsx");
-const tsxCliMjs = resolve(root, "node_modules/tsx/dist/cli.mjs");
+// Issue #137: nunca pelo wrapper CLI do `tsx` (nem via o shim `.bin/tsx`
+// da pasta de dependências, que é um symlink pra ele) — o handshake de sinal
+// do wrapper (~30ms + 30ms ack, depois SIGKILL) é suspeito de custo e de
+// flake sob carga (#128/#131). `--import` com o loader do `tsx` lança um
+// único processo real (molde: `scripts/parity/gateway/launch-candidate.ts`,
+// issue #132).
+const tsxLoader = import.meta.resolve("tsx");
 
 /** Roda `run.ts` num subprocesso com `PATH` vazio — `git` vira ENOENT. Usa
- * `process.execPath` + o CLI do `tsx` direto (não o shim `.bin/tsx`, cujo
- * shebang `#!/usr/bin/env node` depende do PATH externo, não do que
- * passamos ao filho — issue #62). */
+ * `process.execPath` + `--import` do loader do `tsx` direto (não o shim
+ * `.bin/tsx`, cujo shebang `#!/usr/bin/env node` depende do PATH externo,
+ * não do que passamos ao filho — issue #62). */
 function rodarComPathVazio(args: readonly string[], extraEnv: Record<string, string>) {
   const dirVazio = mkdtempSync(join(tmpdir(), "lohra-ci-path-vazio-"));
   try {
-    return spawnSync(process.execPath, [tsxCliMjs, runScript, ...args], {
+    return spawnSync(process.execPath, ["--import", tsxLoader, runScript, ...args], {
       encoding: "utf8",
       timeout: 30_000,
       env: { ...extraEnv, PATH: dirVazio },
@@ -288,7 +293,7 @@ describe("escopo/run.ts (dry-run, subprocesso)", () => {
         ([key]) => key !== "GITHUB_EVENT_PATH" && key !== "GITHUB_STEP_SUMMARY",
       ),
     );
-    return spawnSync(tsxBin, [runScript, ...args], {
+    return spawnSync(process.execPath, ["--import", tsxLoader, runScript, ...args], {
       cwd: root,
       encoding: "utf8",
       timeout: 30_000,

@@ -16,8 +16,13 @@ import { regras, rodarContratos, type Regra } from "../scripts/ci/contratos/lib.
 
 const root = resolve(import.meta.dirname, "..");
 const runScript = resolve(root, "scripts/ci/contratos/run.ts");
-const tsxBin = resolve(root, "node_modules/.bin/tsx");
-const tsxCliMjs = resolve(root, "node_modules/tsx/dist/cli.mjs");
+// Issue #137: nunca pelo wrapper CLI do `tsx` (nem via o shim `.bin/tsx`
+// da pasta de dependências, que é um symlink pra ele) — o handshake de sinal
+// do wrapper (~30ms + 30ms ack, depois SIGKILL) é suspeito de custo e de
+// flake sob carga (#128/#131). `--import` com o loader do `tsx` lança um
+// único processo real (molde: `scripts/parity/gateway/launch-candidate.ts`,
+// issue #132).
+const tsxLoader = import.meta.resolve("tsx");
 
 function gitCli(cwd: string, args: string[]): void {
   const r = spawnSync("git", args, { cwd, encoding: "utf8" });
@@ -43,15 +48,16 @@ function commitTudo(dir: string, mensagem: string): string {
 }
 
 /** Roda `run.ts` num subprocesso com `PATH` vazio — `git` vira ENOENT.
- * `process.execPath` + o CLI do `tsx` direto (issue #62, mesmo padrão de
- * `tests/ci-escopo.test.ts`). */
+ * `process.execPath` + `--import` do loader do `tsx` direto (issue #62,
+ * mesmo padrão de `tests/ci-escopo.test.ts`; issue #137, sem o wrapper CLI
+ * do `tsx`). */
 function rodarComPathVazio(
   args: readonly string[],
   extraEnv: Record<string, string>,
 ): SpawnSyncReturns<string> {
   const dirVazio = mkdtempSync(join(tmpdir(), "lohra-contratos-path-vazio-"));
   try {
-    return spawnSync(process.execPath, [tsxCliMjs, runScript, ...args], {
+    return spawnSync(process.execPath, ["--import", tsxLoader, runScript, ...args], {
       encoding: "utf8",
       timeout: 30_000,
       env: { ...extraEnv, PATH: dirVazio },
@@ -286,8 +292,8 @@ describe("run.ts (dry-run, subprocesso)", () => {
     extraArgs: string[] = [],
   ): SpawnSyncReturns<string> {
     return spawnSync(
-      tsxBin,
-      [runScript, "--files-file", filesFile, "--root", root_, ...extraArgs],
+      process.execPath,
+      ["--import", tsxLoader, runScript, "--files-file", filesFile, "--root", root_, ...extraArgs],
       { encoding: "utf8", timeout: 30_000 },
     );
   }
@@ -440,7 +446,7 @@ describe("run.ts (dry-run, subprocesso)", () => {
     const eventPath = join(dir, "event.json");
     writeFileSync(eventPath, "{ isso não é json");
 
-    const result = spawnSync(tsxBin, [runScript], {
+    const result = spawnSync(process.execPath, ["--import", tsxLoader, runScript], {
       encoding: "utf8",
       timeout: 30_000,
       cwd: dir,
@@ -459,11 +465,15 @@ describe("run.ts (dry-run, subprocesso)", () => {
     const filesFile = join(dir, "files.txt");
     writeFileSync(filesFile, "docs/reference/x.md\n");
 
-    const result = spawnSync(tsxBin, [runScript, "--files-file", filesFile, "--root", dir], {
-      encoding: "utf8",
-      timeout: 30_000,
-      env: { ...process.env, GITHUB_STEP_SUMMARY: join(dir, "nao", "existe", "summary.md") },
-    });
+    const result = spawnSync(
+      process.execPath,
+      ["--import", tsxLoader, runScript, "--files-file", filesFile, "--root", dir],
+      {
+        encoding: "utf8",
+        timeout: 30_000,
+        env: { ...process.env, GITHUB_STEP_SUMMARY: join(dir, "nao", "existe", "summary.md") },
+      },
+    );
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("caminho-proibido: docs/reference/x.md");
@@ -477,11 +487,15 @@ describe("run.ts (dry-run, subprocesso)", () => {
     const filesFile = join(dir, "files.txt");
     writeFileSync(filesFile, "src/ok.ts\n");
 
-    const result = spawnSync(tsxBin, [runScript, "--files-file", filesFile, "--root", dir], {
-      encoding: "utf8",
-      timeout: 30_000,
-      env: { ...process.env, GITHUB_STEP_SUMMARY: join(dir, "nao", "existe", "summary.md") },
-    });
+    const result = spawnSync(
+      process.execPath,
+      ["--import", tsxLoader, runScript, "--files-file", filesFile, "--root", dir],
+      {
+        encoding: "utf8",
+        timeout: 30_000,
+        env: { ...process.env, GITHUB_STEP_SUMMARY: join(dir, "nao", "existe", "summary.md") },
+      },
+    );
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stderr).toContain("GITHUB_STEP_SUMMARY");
@@ -518,7 +532,7 @@ describe("run.ts (dry-run, subprocesso)", () => {
       JSON.stringify({ pull_request: { base: { sha: base }, head: { sha: head } } }),
     );
 
-    const result = spawnSync(tsxBin, [runScript], {
+    const result = spawnSync(process.execPath, ["--import", tsxLoader, runScript], {
       encoding: "utf8",
       timeout: 30_000,
       cwd: dir,
@@ -550,7 +564,7 @@ describe("run.ts (dry-run, subprocesso)", () => {
       JSON.stringify({ pull_request: { base: { sha: base }, head: { sha: head } } }),
     );
 
-    const result = spawnSync(tsxBin, [runScript], {
+    const result = spawnSync(process.execPath, ["--import", tsxLoader, runScript], {
       encoding: "utf8",
       timeout: 30_000,
       cwd: dir,
@@ -574,7 +588,7 @@ describe("run.ts (dry-run, subprocesso)", () => {
       JSON.stringify({ pull_request: { base: { sha: base }, head: { sha: head } } }),
     );
 
-    const result = spawnSync(tsxBin, [runScript], {
+    const result = spawnSync(process.execPath, ["--import", tsxLoader, runScript], {
       encoding: "utf8",
       timeout: 30_000,
       cwd: dir,
