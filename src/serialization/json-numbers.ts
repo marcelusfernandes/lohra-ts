@@ -48,8 +48,10 @@ class JsonNumberParser {
     if (token === "f") return this.literal("false", false);
     if (token === "n") return this.literal("null", null);
     // A JSON extension this runtime accepts by default on read, matching the
-    // permissiveness `json.loads` had in the Python predecessor: a value
-    // this runtime's own writer round-trips must not spuriously fail here.
+    // permissiveness `json.loads` had in the Python predecessor. This is
+    // read tolerance for legacy or hand-edited stores only — the writer
+    // (`stringifyJsonPreservingNumbers`) never emits these tokens; a
+    // non-finite number at a write boundary throws instead (issue #71).
     if (token === "N") return this.literal("NaN", jsonFloat(NaN));
     if (token === "I") return this.literal("Infinity", jsonFloat(Number.POSITIVE_INFINITY));
     if (token === "-" && this.source.startsWith("-Infinity", this.index)) {
@@ -200,33 +202,76 @@ function encodeFloat(value: number): string {
   return `${sign}${digits.slice(0, integerLength)}.${digits.slice(integerLength)}`;
 }
 
-function encodeCompact(value: unknown): string {
-  if (value instanceof JsonInteger) return value.value.toString();
-  if (value instanceof JsonFloat) return encodeFloat(value.value);
-  if (value === null) return "null";
-  if (typeof value === "string" || typeof value === "boolean" || typeof value === "number") {
-    return JSON.stringify(value);
+/** A non-finite number reaching this boundary is a fault with a cause
+ * (docs/adr/0003-native-wire-format.md, "JSON output" item 4; CLAUDE.md
+ * invariant 2) — `JSON.stringify` would otherwise silently turn it into the
+ * `null` byte, and the bare `NaN`/`Infinity` tokens are not valid JSON. */
+function assertFinite(value: number, path: string): void {
+  if (!Number.isFinite(value)) {
+    throw new TypeError(`Cannot serialize non-finite number (${String(value)}) at ${path} to JSON`);
   }
-  if (Array.isArray(value))
-    return `[${value.map((entry) => (entry === undefined ? "null" : encodeCompact(entry))).join(",")}]`;
-  if (typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .filter(([, entry]) => entry !== undefined)
-      .map(([key, entry]) => `${JSON.stringify(key)}:${encodeCompact(entry)}`)
-      .join(",")}}`;
-  }
-  throw new TypeError(`Value of type ${typeof value} is not JSON serializable`);
 }
 
-/** Compact JSON stringify that respects `JsonFloat`/`JsonInteger` markers —
- * a float keeps its trailing `.0`, an out-of-range integer keeps every
- * digit. Plain `number`s serialize with the JS engine's own rules.
- *
- * TODO(#71, test-red): `indent` is not implemented yet, and non-finite
- * numbers are not yet rejected — the next commit makes this throw
- * (docs/adr/0003-native-wire-format.md, "JSON output" item 4) and adds the
- * two-space indent shape (item 3). */
+function encode(value: unknown, path: string, indent: number | undefined, depth: number): string {
+  if (value instanceof JsonInteger) return value.value.toString();
+  if (value instanceof JsonFloat) {
+    assertFinite(value.value, path);
+    return encodeFloat(value.value);
+  }
+  if (value === null) return "null";
+  if (typeof value === "number") {
+    assertFinite(value, path);
+    return JSON.stringify(value);
+  }
+  if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "[]";
+    const entries = value.map((entry, index) =>
+      encode(entry === undefined ? null : entry, `${path}[${String(index)}]`, indent, depth + 1),
+    );
+    return joinArray(entries, indent, depth);
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .map(
+        ([key, entry]) =>
+          [JSON.stringify(key), encode(entry, `${path}.${key}`, indent, depth + 1)] as const,
+      );
+    if (entries.length === 0) return "{}";
+    return joinObject(entries, indent, depth);
+  }
+  throw new TypeError(`Value of type ${typeof value} is not JSON serializable at ${path}`);
+}
+
+function joinArray(entries: readonly string[], indent: number | undefined, depth: number): string {
+  if (indent === undefined) return `[${entries.join(",")}]`;
+  const pad = " ".repeat(indent * (depth + 1));
+  const end = " ".repeat(indent * depth);
+  return `[\n${entries.map((entry) => `${pad}${entry}`).join(",\n")}\n${end}]`;
+}
+
+function joinObject(
+  entries: readonly (readonly [string, string])[],
+  indent: number | undefined,
+  depth: number,
+): string {
+  if (indent === undefined) {
+    return `{${entries.map(([key, entry]) => `${key}:${entry}`).join(",")}}`;
+  }
+  const pad = " ".repeat(indent * (depth + 1));
+  const end = " ".repeat(indent * depth);
+  return `{\n${entries.map(([key, entry]) => `${pad}${key}: ${entry}`).join(",\n")}\n${end}}`;
+}
+
+/** JSON stringify that respects `JsonFloat`/`JsonInteger` markers — a float
+ * keeps its trailing `.0`, an out-of-range integer keeps every digit. Plain
+ * `number`s serialize with the JS engine's own rules. Compact by default
+ * (JSON.stringify's own separators, insertion order, UTF-8 direct); pass
+ * `indent: 2` for the two-space shape of `JSON.stringify(value, null, 2)`
+ * (docs/adr/0003-native-wire-format.md, "JSON output" items 1-3). Throws a
+ * `TypeError` naming the key path for any non-finite number, marked or bare
+ * (item 4) — this is the only stringify `src/` uses for JSON output. */
 export function stringifyJsonPreservingNumbers(value: unknown, indent?: 2): string {
-  void indent;
-  return encodeCompact(value);
+  return encode(value, "$", indent, 0);
 }
