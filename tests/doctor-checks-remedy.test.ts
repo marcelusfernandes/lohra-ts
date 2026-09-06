@@ -44,7 +44,6 @@ describe("doctor remedy for broken JSON files (issue #94)", () => {
     expect(mcp.remedy).not.toContain("python3");
     expect(mcp.remedy).not.toContain("json.tool");
     expect(mcp.detail).toBe(`${join(home, "mcp.json")} — invalid JSON`);
-    expect(mcp.detail).not.toContain("JSONDecodeError");
   });
 
   it("points at a JSON validator instead of python3 for a broken workflow_policy.json", async () => {
@@ -62,12 +61,11 @@ describe("doctor remedy for broken JSON files (issue #94)", () => {
     expect(policy.remedy).not.toContain("python3");
     expect(policy.remedy).not.toContain("json.tool");
     expect(policy.detail).toBe(`${path} — invalid JSON`);
-    expect(policy.detail).not.toContain("JSONDecodeError");
   });
 });
 
 describe("doctor remedy text no longer names a Python exception (issue #97)", () => {
-  it("reports 'invalid JSON' for a malformed catalog HTTP response, not JSONDecodeError", async () => {
+  it("reports 'invalid JSON' for a malformed catalog HTTP response", async () => {
     const { fetchModels } = await import("../src/catalog/catalog.js");
     const { getProviderProfile } = await import("../src/providers/registry.js");
     const profile = getProviderProfile("openai");
@@ -77,10 +75,9 @@ describe("doctor remedy text no longer names a Python exception (issue #97)", ()
     };
     const result = await fetchModels(profile, "x", malformed);
     expect(result.detail).toBe("invalid JSON");
-    expect(result.detail).not.toContain("JSONDecodeError");
   });
 
-  it("reports 'invalid JSON' for a malformed ollama probe response, not JSONDecodeError", async () => {
+  it("reports 'invalid JSON' for a malformed ollama probe response", async () => {
     const { createServer } = await import("node:http");
     const server = createServer((_request, response) => {
       response.writeHead(200, { "content-type": "application/json" });
@@ -96,7 +93,6 @@ describe("doctor remedy text no longer names a Python exception (issue #97)", ()
       const { probeOllamaDown } = await import("../src/doctor/snapshot.js");
       const status = await probeOllamaDown();
       expect(status.detail).toBe("invalid JSON");
-      expect(status.detail).not.toContain("JSONDecodeError");
     } finally {
       if (originalConnect === undefined) delete process.env.LOHRA_OLLAMA_CONNECT_URL;
       else process.env.LOHRA_OLLAMA_CONNECT_URL = originalConnect;

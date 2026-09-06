@@ -53,7 +53,7 @@ function jsonCheck(
     return {
       name,
       state: "warn",
-      detail: `${path} — invalid JSON (JSONDecodeError)`,
+      detail: `${path} — invalid JSON`,
       remedy: `inspect it with a JSON validator, e.g. jq . ${path}`,
     };
   }
@@ -204,7 +204,7 @@ export function runChecks(environment: DoctorEnvironment): readonly Check[] {
       policy = {
         name: "workflow_policy.json",
         state: "warn",
-        detail: `${workflowPolicy} — invalid JSON (JSONDecodeError)`,
+        detail: `${workflowPolicy} — invalid JSON`,
         remedy: `inspect it with a JSON validator, e.g. jq . ${workflowPolicy}`,
       };
     }
