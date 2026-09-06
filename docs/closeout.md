@@ -3,6 +3,10 @@
 Este documento registra a integração T00–T22. Os SHAs T00–T21 abaixo são os
 heads aprovados exatos e precisam permanecer ancestrais do SHA final T22.
 
+A fonte canônica, legível por máquina, é [`docs/provenance.json`](provenance.json);
+a tabela abaixo é a prosa correspondente e um teste bidirecional reprova se
+uma divergir da outra.
+
 | Ticket | SHA aprovado                               | Resultado                             |
 | ------ | ------------------------------------------ | ------------------------------------- |
 | T00    | `5b2d62c65f282683609d5d3801b3bfaf4448aff4` | integrado                             |
