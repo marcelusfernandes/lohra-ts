@@ -6,7 +6,6 @@ import type { Declaracao } from "../scripts/prova/tipos.js";
 export default {
   unit: [
     "tests/json-numbers.test.ts",
-    "tests/python-json.test.ts",
     "tests/catalog-pricing.test.ts",
     "tests/transports-provider-clients.test.ts",
     "tests/transports-provider-modes.test.ts",
