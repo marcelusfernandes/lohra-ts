@@ -12,6 +12,7 @@ import {
   productionHolder,
   productionOwnershipStore,
   RUN_LEASE_TTL,
+  SqliteWorkflowCache,
   WorkflowService,
 } from "../src/workflow/index.js";
 
@@ -180,6 +181,32 @@ describe("productionOwnershipStore (issue #135): threads the warning sink", () =
       const ok = store.locks.tryWriteProbeRunState(runId, store.holder, "running", 1000, first);
       expect(ok).toBe(false);
       expect(warnings).toEqual([{ cause: "STALE_FENCE_WRITE", runId, fence: first }]);
+    } finally {
+      connection.close();
+    }
+  });
+
+  // The third production site named in issue #135's Contexto:
+  // sqlite-cache.ts:26 falls back to `new WorkflowRepository(database)`
+  // ONLY when the caller does not supply `repository` (service.ts's real
+  // composition always does, via `store.repository` — already covered by
+  // the two tests above). This is the "or an option" half.
+  it("SqliteWorkflowCache's own `warning` option reaches the WorkflowRepository it builds when no `repository` is supplied", () => {
+    const connection = tmpDatabase();
+    try {
+      const warnings: StateWarning[] = [];
+      const runId = "run-cache-sink";
+      const cache = new SqliteWorkflowCache(
+        connection.database,
+        runId,
+        () => ({ fence: 1, holder: "h", now: 1000 }),
+        { warning: (warning) => warnings.push(warning) },
+      );
+      // No lease was ever acquired for this run — the presented fence (1)
+      // cannot match, the exact case `refuse()` guards.
+      const ok = cache.put(runId, "hash", "node", { x: 1 }, null);
+      expect(ok).toBe(false);
+      expect(warnings).toEqual([{ cause: "STALE_FENCE_WRITE", runId, fence: 1 }]);
     } finally {
       connection.close();
     }
