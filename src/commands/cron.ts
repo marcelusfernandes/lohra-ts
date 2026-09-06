@@ -16,12 +16,12 @@ function option(argv: readonly string[], name: string): string | undefined {
   return index < 0 ? undefined : argv[index + 1];
 }
 
-function parsePythonInt(text: string): number | null {
+function parseIntegerFlag(text: string): number | null {
   const trimmed = text.trim();
   return /^[+-]?\d+$/.test(trimmed) ? Number.parseInt(trimmed, 10) : null;
 }
 
-function parsePythonFloat(text: string): number | null {
+function parseFloatFlag(text: string): number | null {
   const trimmed = text.trim();
   const lower = trimmed.toLowerCase();
   if (lower === "nan" || lower === "+nan" || lower === "-nan") return Number.NaN;
@@ -65,7 +65,7 @@ export function runCron(options: CronCommandOptions): Result {
   const atText = option(argv, "--at");
   let interval: number | undefined;
   if (intervalText !== undefined) {
-    const parsed = parsePythonInt(intervalText);
+    const parsed = parseIntegerFlag(intervalText);
     if (parsed === null) {
       return {
         code: 2,
@@ -77,7 +77,7 @@ export function runCron(options: CronCommandOptions): Result {
   }
   let at: number | undefined;
   if (atText !== undefined) {
-    const parsed = parsePythonFloat(atText);
+    const parsed = parseFloatFlag(atText);
     if (parsed === null) {
       return {
         code: 2,
