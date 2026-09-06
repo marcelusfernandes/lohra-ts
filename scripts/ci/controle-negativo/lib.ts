@@ -5,18 +5,44 @@ import type { Falha, Resumo } from "../../prova/tipos.js";
 /** Os quatro desfechos possíveis de rodar a prova da PR contra a base. */
 export type Desfecho = "assertion-red" | "structural-red" | "empty-red" | "vacuous-pass";
 
-/**
- * Filtra o diff da PR para os arquivos que compõem o "overlay" aplicado
- * sobre a base: os testes em `tests/**\/*.test.ts` e tudo sob `prova/**`
- * (a própria declaração `prova/<slug>.ts`, que também precisa ir para a
- * base — sem ela `npm run prova -- <slug>` não sabe o que rodar lá).
- */
-const TESTE_RE = /^tests\/.+\.test\.ts$/;
+// --- Overlay: toda a classe tests/**+prova/** (issue #123) ----------------
+// Uma única definição para duas perguntas antes distintas: "este arquivo é
+// copiado de verdade da PR por cima da base?" (`arquivosDeTeste`, usada por
+// `run.ts#overlay`) e "este arquivo cai na classe overlay para fins de SKIP?"
+// (`ehArquivoDoOverlay`, usada por `ehDiffSoDoOverlay`/`soArquivosDoOverlay`
+// mais abaixo). Antes da issue #123 elas divergiam: `arquivosDeTeste` só
+// copiava `tests/**\/*.test.ts` e `prova/**` — um helper/fixture novo sob
+// `tests/helpers/**` ficava fora do overlay real, e um teste que o
+// importasse falhava de CARGA na base (`Cannot find module`), degradando
+// `assertion-red` para `structural-red` (achado da rodada 2 da PR #119,
+// reason 1 do veredito da PR #124).
+const TESTES_PREFIXO_RE = /^tests\//;
 const PROVA_RE = /^prova\//;
 
-export function arquivosDeTeste(diff: readonly string[]): readonly string[] {
-  return diff.filter((arquivo) => TESTE_RE.test(arquivo) || PROVA_RE.test(arquivo));
+/** `true` para qualquer arquivo sob `tests/**` (não só `*.test.ts` —
+ * fixtures/helpers contam) ou `prova/**`. */
+export function ehArquivoDoOverlay(arquivo: string): boolean {
+  return TESTES_PREFIXO_RE.test(arquivo) || PROVA_RE.test(arquivo);
 }
+
+/**
+ * Filtra o diff da PR para os arquivos que compõem o overlay real aplicado
+ * sobre a base (`run.ts#overlay`): a classe inteira `ehArquivoDoOverlay`
+ * acima — todo `tests/**` (helpers/fixtures inclusos) e `prova/**` (a
+ * própria declaração `prova/<slug>.ts`, que também precisa ir para a base —
+ * sem ela `npm run prova -- <slug>` não sabe o que rodar lá).
+ */
+export function arquivosDeTeste(diff: readonly string[]): readonly string[] {
+  return diff.filter((arquivo) => ehArquivoDoOverlay(arquivo));
+}
+
+/** Mais estreita que `ehArquivoDoOverlay`: só `tests/**\/*.test.ts` de
+ * verdade, nunca uma fixture/helper. Não decide mais o que é copiado pelo
+ * overlay (isso é `ehArquivoDoOverlay`, acima, desde a issue #123) —
+ * sobrevive só como discriminador de "algum `.test.ts` JÁ EXISTIA na base e
+ * foi EDITADO" em `existeTesteJaEditado`/`soArquivosDoOverlay`, mais abaixo
+ * (lógica da lacuna 1 da issue #117, intacta). */
+const TESTE_RE = /^tests\/.+\.test\.ts$/;
 
 // `nome` que `scripts/prova/resumo.ts` e `scripts/prova/run.ts` escrevem
 // quando a falha não é uma asserção real, mas a incapacidade de rodar o
@@ -241,24 +267,16 @@ export function soDeclaracaoDeProvaExistenteEditada(
 // explícito e distinto dos outros dois, para o revisor conferir o
 // `test(red):` manualmente.
 //
-// `TESTES_PREFIXO_RE` é deliberadamente mais larga que `TESTE_RE` (que só
-// aceita `tests/**/*.test.ts`, usado no overlay de verdade): fixtures e
-// helpers sob `tests/**` sem o sufixo `.test.ts` também não são
-// comportamento de produção, e o texto da issue #114 fala em `tests/**` —
-// mas essa largura vale só para decidir QUE arquivos entram na classe
-// overlay (`ehArquivoDoOverlay`, "every" abaixo). Verificar "já existia
-// editado na base" (o "some" de `soArquivosDoOverlay`) exige `TESTE_RE`:
-// uma fixture nunca é overlaid de verdade por `run.ts` (só os arquivos que
-// batem com `TESTE_RE`/`PROVA_RE` entram no overlay — `arquivosDeTeste`
-// acima), então "base+overlay ≡ head" não vale para ela (issue #117,
-// lacuna 1 do veredito da PR #116).
-const TESTES_PREFIXO_RE = /^tests\//;
-
-/** `true` para qualquer arquivo sob `tests/**` (não só `*.test.ts` —
- * fixtures/helpers contam) ou `prova/**`. */
-export function ehArquivoDoOverlay(arquivo: string): boolean {
-  return TESTES_PREFIXO_RE.test(arquivo) || PROVA_RE.test(arquivo);
-}
+// `ehArquivoDoOverlay` (topo do arquivo) é a mesma classe copiada de verdade
+// por `arquivosDeTeste` desde a issue #123 — antes, ela era mais larga que o
+// overlay real (`TESTE_RE`+`PROVA_RE`), o que fazia uma fixture "cair" na
+// classe do SKIP sem nunca ter sido copiada de fato. `TESTE_RE`, mais
+// estreita (só `tests/**\/*.test.ts`), continua sendo o discriminador de
+// "algum `.test.ts` JÁ EXISTIA na base e foi EDITADO" — a premissa deste
+// SKIP é que um TESTE (a asserção que a PR muda) foi editado, para o revisor
+// conferir manualmente; uma fixture editada sozinha, sem nenhum `.test.ts`
+// no diff, não tem asserção nenhuma para conferir e segue pelo mecanismo
+// normal (`ehDiffSoDoOverlay`/`ehOverlayOnly`, ver `run.ts`).
 
 function semDocsOuProcess(diff: readonly string[]): readonly string[] {
   return diff.filter((arquivo) => !ehArquivoDocsOuProcess(arquivo));
@@ -285,7 +303,7 @@ export function ehDiffSoDoOverlay(diff: readonly string[]): boolean {
 }
 
 /** `true` quando algum arquivo do diff (já sem `docs`/`process`) é um
- * `tests/**\/*.test.ts` de verdade (`TESTE_RE` — nunca a `TESTES_PREFIXO_RE`
+ * `tests/**\/*.test.ts` de verdade (`TESTE_RE` — nunca a `ehArquivoDoOverlay`
  * mais larga, que também aceita fixtures) que JÁ EXISTIA na base e não foi
  * deletado no head. `statusNoDiff` devolve o status do `git diff
  * --name-status` (`A`/`M`/`D`) — `run.ts` já tem esse dado (veio de
@@ -328,13 +346,21 @@ function existeTesteJaEditado(
  * verdade: o próprio arquivo de teste, seu conteúdo final, é o que a
  * correção prova, e ele inteiro já está no overlay.
  *
- * Lacunas 1 e 2 da issue #117 (veredito da PR #116): (1) o `some` usava
- * `TESTES_PREFIXO_RE` (qualquer `tests/**`, inclusive fixtures) em vez de
- * `TESTE_RE` — uma fixture já existente na base não é overlaid de verdade,
- * então "base+overlay ≡ head" é falso para ela; (2) um arquivo deletado
- * (`status === "D"`) existe na base por definição (é o que está sendo
- * apagado) mas nunca existiu no head — deleção nunca deveria contar como
- * "editado".
+ * Lacunas 1 e 2 da issue #117 (veredito da PR #116): (1) o `some` usava a
+ * classe larga (qualquer `tests/**`, inclusive fixtures — hoje
+ * `ehArquivoDoOverlay`) em vez de `TESTE_RE`. Na época, uma fixture já
+ * existente na base não era overlaid de verdade (`arquivosDeTeste` só
+ * copiava `TESTE_RE`+`PROVA_RE`), então "base+overlay ≡ head" era falso para
+ * ela. Desde a issue #123, `arquivosDeTeste` usa `ehArquivoDoOverlay` —
+ * fixtures também são copiadas —, mas `TESTE_RE` continua sendo o
+ * discriminador aqui: a premissa deste SKIP é que um TESTE foi editado (a
+ * asserção que o revisor confere manualmente via `test(red):`), não que
+ * qualquer arquivo do overlay tenha mudado; uma fixture editada sozinha
+ * (sem nenhum `.test.ts` já existente no diff) não tem asserção nenhuma
+ * para conferir e segue pelo mecanismo normal (`ehOverlayOnly`, `run.ts`).
+ * (2) um arquivo deletado (`status === "D"`) existe na base por definição
+ * (é o que está sendo apagado) mas nunca existiu no head — deleção nunca
+ * deveria contar como "editado".
  */
 export function soArquivosDoOverlay(
   diff: readonly string[],

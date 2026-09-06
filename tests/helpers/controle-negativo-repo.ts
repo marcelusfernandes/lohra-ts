@@ -244,6 +244,55 @@ export function repoStructuralRed(variante: VarianteEstrutural): RepoCenario {
   return { dir, base, head, slug: "estrutural" };
 }
 
+/**
+ * Base com bug em `src/soma.cjs`; HEAD extrai um verificador para
+ * `tests/helpers/**` — helper NOVO, teste NOVO que o importa, e a correção
+ * do bug em `src/**` no mesmo commit (issue #123). Antes da unificação do
+ * overlay (`arquivosDeTeste` passou a usar `ehArquivoDoOverlay`), o helper
+ * ficava fora do overlay real e o `require` falhava com `MODULE_NOT_FOUND`
+ * na base — degradando o desfecho para `structural-red` em vez do
+ * `assertion-red` de verdade (a asserção do helper, contra o bug ainda
+ * presente na base).
+ */
+export function repoAssertionRedComHelperNovo(): RepoCenario {
+  const dir = novoRepo();
+  mkdirSync(join(dir, "src"), { recursive: true });
+  writeFileSync(join(dir, "src", "soma.cjs"), "module.exports.somar = (a, b) => a - b;\n");
+  const base = commitTudo(dir, "feat: soma inicial (com bug)");
+
+  mkdirSync(join(dir, "tests", "helpers"), { recursive: true });
+  mkdirSync(join(dir, "prova"), { recursive: true });
+  writeFileSync(
+    join(dir, "tests", "helpers", "soma-ajuda.cjs"),
+    [
+      "module.exports.verificarSoma = function (resultado, esperado) {",
+      "  if (resultado !== esperado) {",
+      '    throw new Error("esperava " + esperado + ", obteve " + resultado);',
+      "  }",
+      "};",
+      "",
+    ].join("\n"),
+  );
+  writeFileSync(
+    join(dir, "tests", "soma-helper.test.ts"),
+    [
+      'const { somar } = require("./src/soma.cjs");',
+      'const { verificarSoma } = require("./tests/helpers/soma-ajuda.cjs");',
+      "module.exports.run = function () {",
+      "  verificarSoma(somar(1, 2), 3);",
+      "};",
+      "",
+    ].join("\n"),
+  );
+  writeFileSync(
+    join(dir, "prova", "soma-helper.ts"),
+    "// declaração de prova (fixture de teste)\n",
+  );
+  writeFileSync(join(dir, "src", "soma.cjs"), "module.exports.somar = (a, b) => a + b;\n");
+  const head = commitTudo(dir, "test(red): cobre soma com helper extraído (issue #123)");
+  return { dir, base, head, slug: "soma-helper" };
+}
+
 function envSemVitest(): Record<string, string | undefined> {
   return Object.fromEntries(
     Object.entries(process.env).filter(

@@ -124,7 +124,7 @@ merge commit com todos verdes e `review:approved` (ADR 0004):
 | `provenance`         | todo SHA aprovado em `docs/closeout.md` é ancestral do HEAD                                                                                                                                              | `npm run provenance:check`                                                               |
 | `escopo`             | o diff cabe nos globs de `## Files` da issue ligada por `Closes #N` (mais `authorised:` que só o orquestrador põe)                                                                                       | `npm run ci:escopo -- --files-file f --issue-body-file i --pr-body-file p`               |
 | `contratos`          | nada em `docs/reference/**`/`lohra/**`; sem import de `python-json`/`python-repr` (após #17); arquivo ≤ 800 linhas, ou já assim na base e sem crescer (#93), ou com `@generated` na primeira linha (#91) | `npm run ci:contratos -- --files-file f [--apos-17]`                                     |
-| `controle-negativo`  | os testes do diff, aplicados sobre a base da PR, reprovam (`npm run prova -- <slug>` na base)                                                                                                            | `npm run ci:controle-negativo -- --base <sha> --head <sha>`                              |
+| `controle-negativo`  | os testes do diff (overlay do diff inteiro em `tests/**`+`prova/**`, helpers/fixtures inclusos — #123), aplicados sobre a base da PR, reprovam (`npm run prova -- <slug>` na base)                       | `npm run ci:controle-negativo -- --base <sha> --head <sha>`                              |
 
 Os três últimos rodam só em `pull_request` e escrevem um bloco no summary do
 job. Quando reprovam:
