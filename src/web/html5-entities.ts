@@ -1,5 +1,5 @@
-/* HTML5 named character reference table (per the WHATWG HTML spec's
- * `html5` entity list). Preserve verbatim; entry order is a contract. */
+/* Generated from the pinned Python oracle (3.12.10 html.entities.html5).
+ * Preserve verbatim; regenerate only against a new pinned oracle. */
 
 export const HTML5_ENTITIES: readonly { readonly name: string; readonly value: string }[] = [
   { name: "CounterClockwiseContourIntegral;", value: "\u2233" },
