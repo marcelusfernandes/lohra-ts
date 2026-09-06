@@ -3,10 +3,10 @@
 // `web-tools.ts` (que roda o harness de verdade ao ser executado). O
 // `tests/mutations-t20-catalog.test.ts` importa só este arquivo para pinar
 // cada `before` contra o `src/web/**` de verdade, sem pagar o custo de rodar
-// vitest em sandbox (padrão de `mutants-orchestration.ts`/
-// `mutants-types.ts` em `scripts/parity/workflow-durability/`).
+// vitest em sandbox (mesmo padrão do catálogo de mutantes de
+// workflow-durability, separado da orquestração).
 //
-// Os 9 mutantes são a migração de `scripts/parity/web-tools/run-mutations.ts`
+// Os 9 mutantes são a migração do runner de paridade aposentado desta área
 // (368 linhas, fora de escopo): alvos `src/web/connector.ts` ×3, `tool.ts`
 // ×2, `fetch.ts` ×2, `search.ts`, `safety.ts`. Cada `focus` é um teste
 // TypeScript já existente em `tests/web-*.test.ts` que a mutação vira

@@ -1,20 +1,20 @@
-#!/usr/bin/env node
 // Runner de mutação de `src/web/**` (issue #152, passo 0e do épico #13).
-// Migra os 9 mutantes de `scripts/parity/web-tools/run-mutations.ts` para o
+// Migra os 9 mutantes do runner de paridade aposentado desta área para o
 // harness comum (`scripts/mutations/harness.ts`, issue #148): mecânica A
 // (git archive do HEAD + vitest focado). Sem oráculo externo: nenhuma
 // resolução de workspace Python, nenhuma execução de cenário bilateral por
-// manifesto, nenhum manifesto de `scripts/parity/manifests/t20/**`, e sem
-// compilar o sandbox no caminho de morte. O oráculo de morte passa a ser
-// inteiramente TypeScript: cada mutante precisa deixar vermelho um teste já existente (ou
+// manifesto, nenhum manifesto do oráculo aposentado, e sem compilar o
+// sandbox no caminho de morte. O oráculo de morte passa a ser inteiramente
+// TypeScript: cada mutante precisa deixar vermelho um teste já existente (ou
 // novo, `test(red):`) em `tests/web-*.test.ts`. O catálogo em si mora em
 // `web-tools-mutants.ts` (módulo de dados puro, sem efeito colateral no
 // import) para que `tests/mutations-t20-catalog.test.ts` possa pinar cada
 // `before` sem pagar o custo de rodar este runner.
 //
 // Prova: baseline verde por foco -> mutante vermelho nesse foco -> restore
-// verde (o mesmo desenho de `scripts/parity/workflow-durability/run-mutations.ts`,
-// só que sobre o harness comum em vez de reimplementar archive/restore).
+// verde (o mesmo desenho do runner de paridade aposentado de
+// workflow-durability, só que sobre o harness comum em vez de reimplementar
+// archive/restore).
 import { rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -82,12 +82,13 @@ function main(): void {
       restoreAll(sandbox, snapshot);
       for (const edit of mutant.edits) applyEditExactlyOnce(sandbox, edit, mutant.id);
       const outcome = runFocusedVitest(sandbox, mutant.focus);
-      // `runFocusedVitest`'s `<no json report>` sentinel (harness.ts,
-      // fail-open herdado do runner original) dá `failedTests.length > 0`
-      // com `ranTests: 0` — sem coleta nenhuma, `classify` leria isso como
-      // morto. `assertBaselineGreen` já cobriu o lado pré-mutação; aqui, do
-      // lado pós-mutação, um foco que deixou de coletar teste nenhum nunca
-      // conta como morto.
+      // `runFocusedVitest` lança se o vitest não produzir JSON (harness.ts,
+      // `parseVitestOutcome` — fail-closed, não devolve mais um sentinela).
+      // A guarda abaixo cobre o caso que ainda passa por JSON válido: um
+      // foco que, pós-mutação, deixou de coletar teste nenhum
+      // (`ranTests: 0`). `assertBaselineGreen` já cobriu o lado
+      // pré-mutação; aqui, do lado pós-mutação, esse foco nunca conta como
+      // morto.
       const killed = outcome.ranTests > 0 && classify(outcome.exitCode, outcome.failedTests);
       return {
         id: mutant.id,
