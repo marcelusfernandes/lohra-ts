@@ -11,7 +11,7 @@ export interface EnvClampResult {
  * non-numeric strings alike — both fall into the same "not an integer"
  * branch as the oracle.
  */
-export function pythonInt(raw: string): number | null {
+export function parseIntStrict(raw: string): number | null {
   const trimmed = raw.trim();
   if (!/^[+-]?\d+(_\d+)*$/.test(trimmed)) return null;
   return Number(trimmed.replace(/_/g, ""));
@@ -32,7 +32,7 @@ export function positiveIntEnv(
   fallback: number,
 ): EnvClampResult {
   if (!raw) return { value: fallback, warning: null };
-  const parsed = pythonInt(raw);
+  const parsed = parseIntStrict(raw);
   if (parsed === null) {
     return {
       value: fallback,

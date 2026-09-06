@@ -143,7 +143,7 @@ export async function fetchModels(
     try {
       payload = JSON.parse(new TextDecoder().decode(response.body)) as unknown;
     } catch {
-      return new ProviderModels(profile.name, "error", [], 0, "JSONDecodeError");
+      return new ProviderModels(profile.name, "error", [], 0, "invalid JSON");
     }
     const ids = modelIds(payload);
     if (ids === null)

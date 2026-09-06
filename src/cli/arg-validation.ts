@@ -32,20 +32,20 @@ export interface ParseResult {
 /** An integer flag accepts an optional sign and ASCII digits, with
  * surrounding whitespace trimmed; decimals, empty strings, and non-digit
  * text are all rejected. */
-function isPythonInt(value: string): boolean {
+function isIntegerToken(value: string): boolean {
   return /^[+-]?\d+$/.test(value.trim());
 }
 
-function isFinitePythonFloat(value: string): boolean {
+function isFiniteFloatToken(value: string): boolean {
   const stripped = value.trim();
   return stripped !== "" && Number.isFinite(Number(stripped));
 }
 
-function isPythonFloat(value: string): boolean {
+function isFloatToken(value: string): boolean {
   const stripped = value.trim();
   const lower = stripped.toLowerCase();
   return (
-    isFinitePythonFloat(stripped) ||
+    isFiniteFloatToken(stripped) ||
     lower === "nan" ||
     lower === "+nan" ||
     lower === "-nan" ||
@@ -123,7 +123,7 @@ export function parseCommand(spec: CommandSpec, argv: readonly string[]): ParseR
       if (next === undefined || (consumesNext && looksLikeOption(next)))
         return { options, positionals, extras, error: { kind: "missingValue", flag: flag.name } };
       if (consumesNext) index += 1;
-      if (flag.type === "int" && !isPythonInt(next))
+      if (flag.type === "int" && !isIntegerToken(next))
         return {
           options,
           positionals,
@@ -131,8 +131,8 @@ export function parseCommand(spec: CommandSpec, argv: readonly string[]): ParseR
           error: { kind: "invalidInt", flag: flag.name, value: next },
         };
       if (
-        (flag.type === "float" && !isPythonFloat(next)) ||
-        (flag.type === "finiteFloat" && !isFinitePythonFloat(next))
+        (flag.type === "float" && !isFloatToken(next)) ||
+        (flag.type === "finiteFloat" && !isFiniteFloatToken(next))
       )
         return {
           options,

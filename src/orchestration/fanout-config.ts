@@ -1,5 +1,4 @@
-// Aliased: limits.ts still exports the old name; renaming it is #73's call.
-import { clampFlagMinOne, positiveIntEnv, pythonInt as parseIntStrict } from "./limits.js";
+import { clampFlagMinOne, parseIntStrict, positiveIntEnv } from "./limits.js";
 
 export interface FanoutResolution {
   readonly maxParallel: number;

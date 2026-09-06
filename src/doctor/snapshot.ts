@@ -173,7 +173,7 @@ export async function probeOllamaDown(): Promise<OllamaStatus> {
               : [];
             resolve({ alive: true, detail: "", models, url: reportedUrl });
           } catch {
-            resolve({ alive: false, detail: "JSONDecodeError", models: [], url: reportedUrl });
+            resolve({ alive: false, detail: "invalid JSON", models: [], url: reportedUrl });
           }
         });
       },
