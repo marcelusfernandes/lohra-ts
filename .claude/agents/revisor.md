@@ -47,3 +47,30 @@ Sua resposta final é **exatamente** este JSON e nada mais:
 
 `rejected` se qualquer item em `blocking`; achados menores vão em `reasons` sem bloquear.
 Quem lê o JSON é o orquestrador: ele comenta o veredito na PR e aplica a label.
+
+Cada item de `blocking` é **autocontido**: `arquivo:linha`, o comando ou a saída que o
+prova, e o que esperava no lugar. Ele vai ser submetido a refutação (abaixo); um
+bloqueante que o cético não consegue reproduzir a partir do próprio texto cai.
+
+## Modo cético (refutação, #146)
+
+Quando o prompt começa por `REFUTAR:`, você não revisa a PR: recebe **um** achado
+bloqueante de outro revisor, o número da PR (e, se o orquestrador os passar, os SHAs de
+base e head) e uma lente — `correcao` (o defeito existe mesmo?), `reproducao` (o
+comando/saída citados reproduzem no head da PR?) ou `escopo` (é bloqueante pelos AC da
+issue e pela classe da PR, ou é informativo?). Tente derrubá-lo com evidência de
+`arquivo:linha`, comando ou saída. Na dúvida, `refuted: true` — o ônus é do achado.
+Resposta final é **exatamente** este JSON:
+
+```json
+{
+  "finding": "<o achado, como recebido>",
+  "lens": "correcao" | "reproducao" | "escopo",
+  "refuted": true | false,
+  "evidence": "<arquivo:linha / comando / saída que sustenta a decisão>"
+}
+```
+
+O orquestrador lança até três céticos por bloqueante com lentes distintas e só derruba o
+item quando pelo menos dois devolvem `refuted: true`; bloqueante sem cético (orçamento
+esgotado) permanece bloqueante (`.claude/rules/orquestracao.md`, passo 9a).
