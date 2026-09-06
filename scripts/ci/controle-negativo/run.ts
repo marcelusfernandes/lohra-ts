@@ -15,14 +15,25 @@
 //     acima, tudo que sobra no diff é `prova/<slug>.ts` que já existia na
 //     base — nenhum `tests/**`/`src/**`/`scripts/**` de comportamento novo
 //     entrou (`lib.ts#soDeclaracaoDeProvaExistenteEditada`).
-//   - diff inteiro cai no overlay (issue #114, bloqueava a PR #113): tirando
-//     as classes acima, tudo que sobra é `tests/**`/`prova/**`, com pelo
-//     menos um `tests/**` que já existia na base (EDITADO, não criado) — o
-//     overlay do HEAD sobre a base reproduz o próprio HEAD (base+overlay ≡
-//     head) e o desfecho é sempre `vacuous-pass`, mesmo com um `test(red):`
-//     real. Um `tests/**` inteiramente NOVO sem nenhum `src/**` continua
-//     exigindo controle — é o caso normal de `vacuous-pass`/`structural-red`
-//     que a suíte de integração já cobre — `lib.ts#soArquivosDoOverlay`.
+//   - diff inteiro cai no overlay (issue #114, bloqueava a PR #113; lacunas
+//     1 e 2 fechadas na #117): tirando as classes acima, tudo que sobra é
+//     `tests/**`+`prova/**` (fixtures contam nesse "tudo" — `ehArquivoDoOverlay`
+//     usa a `TESTES_PREFIXO_RE` mais larga), com pelo menos um
+//     `tests/**\/*.test.ts` especificamente (nunca uma fixture — aí sim
+//     `TESTE_RE`) que já existia na base (EDITADO, não criado, não deletado
+//     no head) — o overlay do HEAD sobre a base reproduz o próprio HEAD
+//     (base+overlay ≡ head) e o desfecho é sempre `vacuous-pass`, mesmo com
+//     um `test(red):` real — `lib.ts#soArquivosDoOverlay`.
+//
+// Um `tests/**` inteiramente NOVO (sem nenhum já editado) não entra no SKIP
+// acima — não é um quarto pré-check estático, é um desvio dentro da
+// mecânica normal: um pré-check pelo formato do diff sozinho não distingue
+// "vacuous-pass por construção" (issue #117, lacuna 3 — sem `src/**`, o
+// mecanismo nunca teria como discriminar) de um `structural-red` legítimo
+// que ainda precisa do commit `test(red):` COM stub (`repoStructuralRed
+// ("sem-stub")` — um `test(red):` sem stub continua reprovado). O gate fica
+// só no branch de `vacuous-pass`, abaixo: só ali sabemos de verdade que o
+// mecanismo (não um palpite sobre o diff) não discriminou.
 //
 // Mecânica (fora do caso SKIP): `git worktree add --detach <tmp> <base>`,
 // overlay só dos arquivos de teste do diff (`tests/**/*.test.ts`,
@@ -53,7 +64,13 @@
 //                     normalizada (ex.: `{ok:false,total:0,falhas:[]}`).
 //                     PASS: `ok` é autoritativo mesmo sem detalhe.
 //   vacuous-pass    — a prova passa NA BASE, sem a implementação. FAIL: o
-//                     teste não prova nada.
+//                     teste não prova nada — EXCETO (issue #117, lacuna 3)
+//                     quando o diff é overlay-only sem nenhum `tests/**`
+//                     editado (teste inteiramente novo, sem produção): aí
+//                     PASS logado como SKIP quando existe um commit
+//                     `test(red):` que toca os testes do diff (controle
+//                     manual pelo revisor), FAIL citando a exigência quando
+//                     não existe.
 //
 // Sem `prova/<slug>.ts` no HEAD → FAIL explícito citando o caminho (PR de
 // feature sem prova declarada, issue #42) — fora do caso SKIP acima. Base
@@ -117,6 +134,7 @@ import {
   contemStubQueLanca,
   deveSerIgnorado,
   ehCommitTestRed,
+  ehDiffSoDoOverlay,
   parseArgs,
   semHarnessNaBase,
   soArquivosDoOverlay,
@@ -412,6 +430,7 @@ function rodarCheck(
   overlayFiles: readonly ArquivoDiff[],
   testFiles: readonly string[],
   arquivosNaoTeste: readonly string[],
+  ehOverlayOnly: boolean,
 ): number {
   const tmpDir = mkdtempSync(join(tmpdir(), "controle-negativo-"));
   let registrado = false;
@@ -468,6 +487,44 @@ function rodarCheck(
     const desfecho = classificar(resumo);
 
     if (desfecho === "vacuous-pass") {
+      // Issue #117 (lacuna 3, Contexto item 3 da issue #114): diff
+      // overlay-only sem nenhum `tests/**` editado (`ehOverlayOnly` só é
+      // `true` aqui porque `soArquivosDoOverlay` já foi `false` em
+      // `main()`) — teste inteiramente novo, sem produção. base+overlay ≡
+      // head faz vacuous-pass acontecer POR CONSTRUÇÃO, mesmo com um
+      // `test(red):` real (não há src/** para o mecanismo discriminar). Em
+      // vez de reprovar sempre, aceita um commit `test(red):` que toque os
+      // testes do diff como controle manual — mesmo critério de commit que
+      // `existeTestRedValido` usa para `structural-red`, sem o requisito do
+      // stub (não há arquivo de produção para carregar um).
+      //
+      // Gated no desfecho de VERDADE (não um pré-check em `main()`, ao
+      // contrário dos outros dois SKIPs): um pré-check estático no formato
+      // do diff apanharia também `repoStructuralRed("sem-stub")` — um
+      // commit `test(red):` sem stub, que a checagem de `structural-red`
+      // abaixo corretamente reprova — e faria SKIP nela, fail-open real.
+      if (ehOverlayOnly) {
+        const executarGit = (args: readonly string[]): ResultadoGitMinimo => git(root, args);
+        const commitRed = commitsQueTocamTestes(executarGit, base, head, testFiles).find((commit) =>
+          ehCommitTestRed(commit.subject),
+        );
+        if (commitRed !== undefined) {
+          const motivo =
+            `SKIP — teste novo sem produção: vacuous-pass na base, controle manual pelo commit ` +
+            `test(red): ${commitRed.sha}`;
+          escreverSummary(`## controle-negativo\n\n${motivo}`);
+          return passar(`controle-negativo: ${motivo}`);
+        }
+        escreverSummary(
+          `## controle-negativo\n\n**FAILED** — \`vacuous-pass\`: a prova de \`${slug}\` passa na ` +
+            `base \`${base}\` — teste novo sem produção e sem nenhum commit \`test(red):\` em ` +
+            `\`${base}..${head}\` que toque os testes do diff.`,
+        );
+        return falhar(
+          `controle-negativo: vacuous-pass — a prova de ${slug} passa na base ${base} sem a ` +
+            `implementação, e sem commit test(red): em ${base}..${head} que toque os testes do diff`,
+        );
+      }
       escreverSummary(
         `## controle-negativo\n\n**FAILED** — \`vacuous-pass\`: a prova de \`${slug}\` passa na ` +
           `base \`${base}\`, sem a implementação que a PR adiciona.`,
@@ -538,13 +595,29 @@ function main(): void {
     process.exit(0);
   }
 
+  // `statusPorArquivo`/`statusNoDiff`: já temos o status (`A`/`M`/`D`) de
+  // cada arquivo do `git diff --name-status` (`alterados`) — zero I/O novo,
+  // só reaproveitar o que `diffNomeStatus` já leu. Issue #117 (lacuna 2):
+  // um arquivo deletado existe na base por definição, mas nunca existiu no
+  // head — sem excluir `status === "D"`, uma PR que só apaga um `tests/**`
+  // virava SKIP indevido.
+  const statusPorArquivo = new Map(alterados.map((item) => [item.arquivo, item.status]));
+  // `?? "D"`, não `"M"`: todo `arquivo` passado aqui vem do próprio `diff`
+  // (`arquivosAlterados`/`alterados`), então o `get` nunca deveria falhar —
+  // mas se falhar (bug futuro, refactor que perde a correspondência), o
+  // fallback fail-closed é tratar como deletado (nunca "editado", nunca
+  // SKIP), não como "modificado" (que abriria o SKIP por engano). Hoje
+  // inalcançável; nota do revisor da PR #119.
+  const statusNoDiff = (arquivo: string): string => statusPorArquivo.get(arquivo) ?? "D";
+  const arquivoJaExisteNaBase = (arquivo: string): boolean => existeNoCommit(root, base, arquivo);
+
   // Issue #114 (bloqueava a PR #113): diff inteiro dentro do overlay
   // (`tests/**`+`prova/**`, com pelo menos um `tests/**` JÁ EXISTENTE na
-  // base, editado) — base+overlay ≡ head, o mecanismo abaixo nunca
-  // consegue discriminar vermelho de verde. Motivo explícito e distinto
-  // dos outros dois SKIPs: o revisor confere o commit `test(red):`
+  // base, editado, não deletado) — base+overlay ≡ head, o mecanismo abaixo
+  // nunca consegue discriminar vermelho de verde. Motivo explícito e
+  // distinto dos outros dois SKIPs: o revisor confere o commit `test(red):`
   // manualmente.
-  if (soArquivosDoOverlay(arquivosAlterados, (arquivo) => existeNoCommit(root, base, arquivo))) {
+  if (soArquivosDoOverlay(arquivosAlterados, arquivoJaExisteNaBase, statusNoDiff)) {
     const motivo =
       "SKIP — diff só de tests/**+prova/**: base+overlay ≡ head, o controle não discrimina; " +
       "o revisor confere o commit test(red):";
@@ -553,6 +626,14 @@ function main(): void {
     process.exit(0);
   }
 
+  // Issue #117 (lacuna 3): diff overlay-only mas SEM nenhum `tests/**`
+  // editado (a condição acima já foi `false`) — teste inteiramente novo,
+  // sem produção. NÃO é um SKIP antecipado como os três acima: o mecanismo
+  // roda normalmente (`rodarCheck` recebe `ehOverlayOnly` e só abre a
+  // exceção quando o desfecho de verdade é `vacuous-pass` — ver o
+  // cabeçalho do arquivo e o comentário de `ehDiffSoDoOverlay`, `lib.ts`).
+  const ehOverlayOnly = ehDiffSoDoOverlay(arquivosAlterados);
+
   const slug = resolverSlug(root, head, args);
   const testFiles = arquivosDeTeste(alterados.map((item) => item.arquivo));
   const overlayFiles = alterados.filter((item) => testFiles.includes(item.arquivo));
@@ -560,7 +641,9 @@ function main(): void {
     .filter((item) => !testFiles.includes(item.arquivo))
     .map((item) => item.arquivo);
 
-  process.exit(rodarCheck(root, base, head, slug, overlayFiles, testFiles, arquivosNaoTeste));
+  process.exit(
+    rodarCheck(root, base, head, slug, overlayFiles, testFiles, arquivosNaoTeste, ehOverlayOnly),
+  );
 }
 
 // Só roda `main()` quando este arquivo é o entry point — nunca quando um

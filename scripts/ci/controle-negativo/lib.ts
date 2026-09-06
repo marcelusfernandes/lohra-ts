@@ -244,7 +244,14 @@ export function soDeclaracaoDeProvaExistenteEditada(
 // `TESTES_PREFIXO_RE` é deliberadamente mais larga que `TESTE_RE` (que só
 // aceita `tests/**/*.test.ts`, usado no overlay de verdade): fixtures e
 // helpers sob `tests/**` sem o sufixo `.test.ts` também não são
-// comportamento de produção, e o texto da issue #114 fala em `tests/**`.
+// comportamento de produção, e o texto da issue #114 fala em `tests/**` —
+// mas essa largura vale só para decidir QUE arquivos entram na classe
+// overlay (`ehArquivoDoOverlay`, "every" abaixo). Verificar "já existia
+// editado na base" (o "some" de `soArquivosDoOverlay`) exige `TESTE_RE`:
+// uma fixture nunca é overlaid de verdade por `run.ts` (só os arquivos que
+// batem com `TESTE_RE`/`PROVA_RE` entram no overlay — `arquivosDeTeste`
+// acima), então "base+overlay ≡ head" não vale para ela (issue #117,
+// lacuna 1 do veredito da PR #116).
 const TESTES_PREFIXO_RE = /^tests\//;
 
 /** `true` para qualquer arquivo sob `tests/**` (não só `*.test.ts` —
@@ -253,12 +260,57 @@ export function ehArquivoDoOverlay(arquivo: string): boolean {
   return TESTES_PREFIXO_RE.test(arquivo) || PROVA_RE.test(arquivo);
 }
 
+function semDocsOuProcess(diff: readonly string[]): readonly string[] {
+  return diff.filter((arquivo) => !ehArquivoDocsOuProcess(arquivo));
+}
+
+/**
+ * `true` quando, depois de remover as classes `docs`/`process`
+ * (`ehArquivoDocsOuProcess`), o diff é não vazio e cai inteiro em
+ * `ehArquivoDoOverlay` — não distingue "editado" de "novo" (isso é
+ * `soArquivosDoOverlay`, que decide o SKIP antecipado abaixo).
+ *
+ * Uso real (issue #117, lacuna 3): `run.ts` computa isto UMA VEZ em
+ * `main()` e passa para `rodarCheck`. Se `rodarCheck` recebe `true` aqui, é
+ * porque `soArquivosDoOverlay` já foi `false` antes (senão o SKIP já teria
+ * disparado em `main()`, antes de sequer chegar em `rodarCheck`) — logo
+ * nenhum `tests/**` do diff já existia (editado) na base: é sempre o caso
+ * "teste novo, sem produção alguma". `rodarCheck` usa essa garantia para
+ * decidir se um desfecho `vacuous-pass` pode, ainda assim, virar SKIP via
+ * commit `test(red):` (ver o branch de `vacuous-pass` em `run.ts`).
+ */
+export function ehDiffSoDoOverlay(diff: readonly string[]): boolean {
+  const resto = semDocsOuProcess(diff);
+  return resto.length > 0 && resto.every(ehArquivoDoOverlay);
+}
+
+/** `true` quando algum arquivo do diff (já sem `docs`/`process`) é um
+ * `tests/**\/*.test.ts` de verdade (`TESTE_RE` — nunca a `TESTES_PREFIXO_RE`
+ * mais larga, que também aceita fixtures) que JÁ EXISTIA na base e não foi
+ * deletado no head. `statusNoDiff` devolve o status do `git diff
+ * --name-status` (`A`/`M`/`D`) — `run.ts` já tem esse dado (veio de
+ * `gitDiffNameStatus`), zero I/O novo. O default (`() => "M"`) existe só
+ * para os testes unitários de antes da #117 continuarem compilando e
+ * passando sem edição (2 argumentos, nunca deletado); `run.ts` sempre
+ * injeta o status real. */
+function existeTesteJaEditado(
+  diffSemDocsOuProcess: readonly string[],
+  arquivoJaExisteNaBase: (arquivo: string) => boolean,
+  statusNoDiff: (arquivo: string) => string,
+): boolean {
+  return diffSemDocsOuProcess.some(
+    (arquivo) =>
+      TESTE_RE.test(arquivo) && statusNoDiff(arquivo) !== "D" && arquivoJaExisteNaBase(arquivo),
+  );
+}
+
 /**
  * `true` só quando, depois de remover as classes `docs`/`process`
  * (`ehArquivoDocsOuProcess`), o restante do diff é não vazio, cai inteiro em
- * `ehArquivoDoOverlay`, E existe pelo menos um `tests/**` que JÁ EXISTIA na
- * base (foi EDITADO, não criado). `arquivoJaExisteNaBase` é injetado — quem
- * faz I/O (`git cat-file -e base:<arquivo>`) é `run.ts`, mesmo padrão de
+ * `ehArquivoDoOverlay`, E existe pelo menos um `tests/**\/*.test.ts` que JÁ
+ * EXISTIA na base (foi EDITADO, não criado) E não foi deletado no head.
+ * `arquivoJaExisteNaBase` é injetado — quem faz I/O (`git cat-file -e
+ * base:<arquivo>`) é `run.ts`, mesmo padrão de
  * `soDeclaracaoDeProvaExistenteEditada`.
  *
  * A exigência "editado, não novo" não está explícita na descrição da issue,
@@ -269,22 +321,28 @@ export function ehArquivoDoOverlay(arquivo: string): boolean {
  * "sem-stub")`, e os quatro testes de infraestrutura da base que usam
  * `escreverTeste` depois do commit de base — nenhum deles editado por esta
  * issue). Um teste novo sem produção nenhuma é precisamente "afirmação sem
- * prova" — o controle ainda consegue e deve reprovar isso. O caso real que
+ * prova" — o controle ainda consegue e deve reprovar isso (issue #117,
+ * lacuna 3, ver o branch de `vacuous-pass` em `run.ts`). O caso real que
  * motivou a issue (PR #113/#111) sempre EDITA um `tests/**` já existente
  * (`tests/prova-run.test.ts`) — é aí que "base+overlay ≡ head" se aplica de
  * verdade: o próprio arquivo de teste, seu conteúdo final, é o que a
  * correção prova, e ele inteiro já está no overlay.
+ *
+ * Lacunas 1 e 2 da issue #117 (veredito da PR #116): (1) o `some` usava
+ * `TESTES_PREFIXO_RE` (qualquer `tests/**`, inclusive fixtures) em vez de
+ * `TESTE_RE` — uma fixture já existente na base não é overlaid de verdade,
+ * então "base+overlay ≡ head" é falso para ela; (2) um arquivo deletado
+ * (`status === "D"`) existe na base por definição (é o que está sendo
+ * apagado) mas nunca existiu no head — deleção nunca deveria contar como
+ * "editado".
  */
 export function soArquivosDoOverlay(
   diff: readonly string[],
   arquivoJaExisteNaBase: (arquivo: string) => boolean,
+  statusNoDiff: (arquivo: string) => string = () => "M",
 ): boolean {
-  const naoDocsOuProcess = diff.filter((arquivo) => !ehArquivoDocsOuProcess(arquivo));
-  if (naoDocsOuProcess.length === 0) return false;
-  if (!naoDocsOuProcess.every(ehArquivoDoOverlay)) return false;
-  return naoDocsOuProcess.some(
-    (arquivo) => TESTES_PREFIXO_RE.test(arquivo) && arquivoJaExisteNaBase(arquivo),
-  );
+  if (!ehDiffSoDoOverlay(diff)) return false;
+  return existeTesteJaEditado(semDocsOuProcess(diff), arquivoJaExisteNaBase, statusNoDiff);
 }
 
 // --- Shape de `resumo.json` (rodada 2 da PR #54) --------------------------

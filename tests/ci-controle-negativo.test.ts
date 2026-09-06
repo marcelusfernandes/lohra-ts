@@ -440,11 +440,21 @@ describe("ehArquivoDoOverlay / soArquivosDoOverlay (issue #114, bloqueava a PR #
     expect(soArquivosDoOverlay(["tests/vazio.test.ts", "prova/vazio.ts"], jaExiste)).toBe(false);
   });
 
-  it("false quando o tests/** editado existe, mas outro tests/** do diff é novo E nenhum dos existentes conta — combinação mista ainda passa se AO MENOS UM tests/** já existe", () => {
+  it("true quando ao menos um tests/** editado já existe na base, mesmo com outro tests/** novo no mesmo diff (combinação mista)", () => {
     const soOSegundoExiste = (arquivo: string): boolean => arquivo === "tests/b.test.ts";
     expect(soArquivosDoOverlay(["tests/a.test.ts", "tests/b.test.ts"], soOSegundoExiste)).toBe(
       true,
     );
+  });
+});
+
+// --- issue #117: lacunas do SKIP #114 apontadas no veredito da PR #116 ----
+describe("soArquivosDoOverlay — lacuna 1 (guarda mais larga que o overlay)", () => {
+  it("false quando o tests/** NOVO vem acompanhado de uma FIXTURE (não .test.ts) já existente na base — a fixture não é overlaid de verdade, 'existir na base' só conta para TESTE_RE", () => {
+    const soAFixtureExiste = (arquivo: string): boolean => arquivo === "tests/fixtures/x.json";
+    expect(
+      soArquivosDoOverlay(["tests/novo.test.ts", "tests/fixtures/x.json"], soAFixtureExiste),
+    ).toBe(false);
   });
 });
 
