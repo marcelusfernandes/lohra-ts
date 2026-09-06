@@ -2,304 +2,40 @@
 // repositórios git temporários e descartáveis — via subprocesso (`run.ts`).
 // Extraído de `tests/ci-controle-negativo.test.ts` (issue #62, divisão do
 // arquivo de 862 linhas — AC "arquivos < 800 linhas"); os testes puros e
-// unitários (com git injetado) ficaram lá.
-//
-// O "harness" desses repositórios fake é um script Node standalone
-// (`prova-run.cjs`) que nunca toca vitest/tsx: o controle negativo trata
-// `npm run -s prova -- <slug>` como caixa-preta, então o fake só precisa
-// produzir um `resumo.json` no mesmo formato.
+// unitários (com git injetado) ficaram lá. Os três casos novos das lacunas
+// da issue #117 (fixture, deleção, teste inteiramente novo) foram para
+// `tests/ci-controle-negativo-lacunas.test.ts` (rodada 2 do revisor da PR
+// #119 — este arquivo tinha passado de 800 linhas); os helpers de
+// repositório git ficaram em `tests/helpers/controle-negativo-repo.ts`,
+// reusados pelos dois arquivos.
 //
 // Timeout explícito (60s) em todo teste que spawna `tsx` + `git worktree` +
 // um `npm run prova` aninhado — o default do vitest (5s) já estourou uma vez
 // nesta suíte rodando em paralelo com outra suíte na mesma máquina.
-import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-const repoRoot = resolve(import.meta.dirname, "..");
-const runScript = resolve(repoRoot, "scripts/ci/controle-negativo/run.ts");
-const tsxBin = resolve(repoRoot, "node_modules/.bin/tsx");
-const tsxCliMjs = resolve(repoRoot, "node_modules/tsx/dist/cli.mjs");
+import {
+  commitTudo,
+  escreverTeste,
+  git,
+  gitCapture,
+  limparWorkdirs,
+  novoRepo,
+  repoAssertionRed,
+  repoStructuralRed,
+  repoVacuousPass,
+  rodar,
+  rodarComPathVazio,
+  runControleNegativo,
+  runControleNegativoComSummary,
+  TIMEOUT_TESTE,
+} from "./helpers/controle-negativo-repo.js";
 
-const TIMEOUT_TESTE = 60_000;
-
-const PROVA_RUN_CJS = `
-const fs = require("fs");
-const path = require("path");
-const slug = process.argv[2];
-const testPath = path.join(__dirname, "tests", slug + ".test.ts");
-let resumo;
-try {
-  const src = fs.readFileSync(testPath, "utf8");
-  const mod = { exports: {} };
-  new Function("module", "exports", "require", src)(mod, mod.exports, require);
-  mod.exports.run();
-  resumo = { ok: true, total: 1, falhas: [] };
-} catch (err) {
-  const nome =
-    err && err.code === "MODULE_NOT_FOUND" ? "tests/" + slug + ".test.ts" : "asserção real";
-  resumo = { ok: false, total: 1, falhas: [{ nome, motivo: String((err && err.message) || err) }] };
-}
-const outDir = path.join(__dirname, ".prova", slug);
-fs.mkdirSync(outDir, { recursive: true });
-fs.writeFileSync(path.join(outDir, "resumo.json"), JSON.stringify(resumo, null, 2) + "\\n");
-process.stdout.write(JSON.stringify(resumo) + "\\n");
-process.exit(resumo.ok ? 0 : 1);
-`;
-
-const workdirs: string[] = [];
-
-afterEach(() => {
-  while (workdirs.length > 0) {
-    const dir = workdirs.pop();
-    if (dir !== undefined) rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-function git(cwd: string, args: string[]): void {
-  const result = spawnSync("git", args, { cwd, encoding: "utf8" });
-  if (result.status !== 0) {
-    throw new Error(`git ${args.join(" ")} falhou: ${result.stderr}`);
-  }
-}
-
-function gitCapture(cwd: string, args: string[]): string {
-  const result = spawnSync("git", args, { cwd, encoding: "utf8" });
-  if (result.status !== 0) {
-    throw new Error(`git ${args.join(" ")} falhou: ${result.stderr}`);
-  }
-  return result.stdout.trim();
-}
-
-interface OpcoesRepo {
-  readonly packageJsonText?: string;
-  readonly provaRunCjs?: string;
-}
-
-function novoRepo(opcoes: OpcoesRepo = {}): string {
-  const dir = mkdtempSync(join(tmpdir(), "controle-negativo-"));
-  workdirs.push(dir);
-  git(dir, ["init", "-q", "-b", "main"]);
-  git(dir, ["config", "user.email", "prova@example.com"]);
-  git(dir, ["config", "user.name", "Prova"]);
-  writeFileSync(
-    join(dir, "package.json"),
-    opcoes.packageJsonText ??
-      `${JSON.stringify(
-        { name: "fake", version: "0.0.0", scripts: { prova: "node prova-run.cjs" } },
-        null,
-        2,
-      )}\n`,
-  );
-  writeFileSync(join(dir, "prova-run.cjs"), opcoes.provaRunCjs ?? PROVA_RUN_CJS);
-  return dir;
-}
-
-function commitTudo(dir: string, mensagem: string): string {
-  git(dir, ["add", "-A"]);
-  git(dir, ["commit", "-q", "-m", mensagem]);
-  return gitCapture(dir, ["rev-parse", "HEAD"]);
-}
-
-function escreverTeste(
-  dir: string,
-  slug: string,
-  corpo = "module.exports.run = function () {};\n",
-): void {
-  mkdirSync(join(dir, "tests"), { recursive: true });
-  mkdirSync(join(dir, "prova"), { recursive: true });
-  writeFileSync(join(dir, "tests", `${slug}.test.ts`), corpo);
-  writeFileSync(join(dir, "prova", `${slug}.ts`), "// declaração de prova (fixture de teste)\n");
-}
-
-/** Base com uma implementação errada; HEAD acrescenta o teste (que passa a
- * reprovar de verdade contra o bug da base) — cenário `assertion-red`. */
-function repoAssertionRed(): { dir: string; base: string; head: string; slug: string } {
-  const dir = novoRepo();
-  mkdirSync(join(dir, "src"), { recursive: true });
-  writeFileSync(join(dir, "src", "soma.cjs"), "module.exports.somar = (a, b) => a - b;\n");
-  const base = commitTudo(dir, "feat: soma inicial (com bug)");
-
-  escreverTeste(
-    dir,
-    "soma",
-    [
-      'const { somar } = require("./src/soma.cjs");',
-      "module.exports.run = function () {",
-      "  const resultado = somar(1, 2);",
-      '  if (resultado !== 3) { throw new Error("esperava 3, obteve " + resultado); }',
-      "};",
-      "",
-    ].join("\n"),
-  );
-  writeFileSync(join(dir, "src", "soma.cjs"), "module.exports.somar = (a, b) => a + b;\n");
-  const head = commitTudo(dir, "test(red): cobre soma com o bug corrigido");
-  return { dir, base, head, slug: "soma" };
-}
-
-/** Teste sem asserção nenhuma — passa até contra a base sem implementação. */
-function repoVacuousPass(): { dir: string; base: string; head: string; slug: string } {
-  const dir = novoRepo();
-  const base = commitTudo(dir, "chore: repo vazio");
-  escreverTeste(dir, "vazio");
-  const head = commitTudo(dir, "test: teste que não afirma nada");
-  return { dir, base, head, slug: "vazio" };
-}
-
-const TESTE_ESTRUTURAL = [
-  'const { somar } = require("./src/estrutural.cjs");',
-  "module.exports.run = function () {",
-  '  if (somar(1, 2) !== 3) { throw new Error("nunca chega aqui"); }',
-  "};",
-  "",
-].join("\n");
-
-type VarianteEstrutural =
-  | "com-stub"
-  | "com-fix-depois"
-  | "sem-test-red"
-  | "sem-stub"
-  | "comentario"
-  | "muda-producao-sem-throw";
-
-/**
- * Base sem `src/estrutural.cjs` — o `require` no teste falha com
- * `MODULE_NOT_FOUND` (estrutural). As variantes cobrem a regra de
- * `structural-red` (rodada 2 da PR #54, mais issue #62):
- *   - "com-stub": um único commit `test(red):` que adiciona o teste E um
- *     stub que lança em `src/estrutural.cjs` (arquivo NÃO-teste) — aceito.
- *   - "com-fix-depois": o mesmo `test(red):` com stub, seguido de um
- *     commit comum que só toca o teste de novo — ainda aceito (o gate é
- *     "existe pelo menos um", não "o último").
- *   - "sem-test-red": nenhum commit no range é `test(red):` — reprovado.
- *   - "sem-stub": o commit É `test(red):`, mas não toca nenhum arquivo
- *     não-teste (sem stub declarado) — reprovado.
- *   - "comentario" (issue #62): o commit É `test(red):` e toca
- *     `src/estrutural.cjs`, mas o `throw new Error(` está só num
- *     comentário — reprovado (git show real, não a fixture unitária de
- *     `contemStubQueLanca`).
- *   - "muda-producao-sem-throw" (issue #62): o commit É `test(red):` e
- *     toca `src/estrutural.cjs` com uma mudança real (não-comentário), mas
- *     sem `throw` — reprovado; distingue de "sem-stub" (que nem toca
- *     arquivo não-teste) exercitando o `git show` de verdade.
- */
-function repoStructuralRed(variante: VarianteEstrutural): {
-  dir: string;
-  base: string;
-  head: string;
-  slug: string;
-} {
-  const dir = novoRepo();
-  const base = commitTudo(dir, "chore: repo vazio");
-  escreverTeste(dir, "estrutural", TESTE_ESTRUTURAL);
-
-  if (variante === "sem-test-red") {
-    const head = commitTudo(dir, "feat: cobre estrutural (sem test(red):)");
-    return { dir, base, head, slug: "estrutural" };
-  }
-
-  if (variante === "sem-stub") {
-    const head = commitTudo(dir, "test(red): cobre estrutural (sem stub de produção)");
-    return { dir, base, head, slug: "estrutural" };
-  }
-
-  mkdirSync(join(dir, "src"), { recursive: true });
-
-  if (variante === "comentario") {
-    writeFileSync(
-      join(dir, "src", "estrutural.cjs"),
-      '// throw new Error("not implemented: somar");\nmodule.exports.somar = () => 0;\n',
-    );
-    const head = commitTudo(dir, "test(red): cobre estrutural (stub só em comentário)");
-    return { dir, base, head, slug: "estrutural" };
-  }
-
-  if (variante === "muda-producao-sem-throw") {
-    writeFileSync(join(dir, "src", "estrutural.cjs"), "module.exports.somar = () => 0;\n");
-    const head = commitTudo(dir, "test(red): cobre estrutural (implementação errada, sem throw)");
-    return { dir, base, head, slug: "estrutural" };
-  }
-
-  // "com-stub" / "com-fix-depois": adiciona o stub que lança num arquivo
-  // não-teste, no MESMO commit `test(red):`.
-  writeFileSync(
-    join(dir, "src", "estrutural.cjs"),
-    'module.exports.somar = () => { throw new Error("not implemented: somar"); };\n',
-  );
-  let head = commitTudo(dir, "test(red): cobre estrutural (stub que lança)");
-
-  if (variante === "com-fix-depois") {
-    writeFileSync(
-      join(dir, "tests", "estrutural.test.ts"),
-      `${TESTE_ESTRUTURAL}// comentário adicionado depois do vermelho\n`,
-    );
-    head = commitTudo(dir, "fix(ci): comentário no teste (não é test(red):)");
-  }
-
-  return { dir, base, head, slug: "estrutural" };
-}
-
-function runControleNegativo(args: readonly string[]): SpawnSyncReturns<string> {
-  const env = Object.fromEntries(
-    Object.entries(process.env).filter(
-      ([key]) => !key.startsWith("VITEST") && key !== "LOHRA_PROVA_OUT",
-    ),
-  );
-  return spawnSync(tsxBin, [runScript, ...args], { encoding: "utf8", timeout: 60_000, env });
-}
-
-/** Atalho: roda com `--root`/`--base`/`--head`/`--slug` — os quatro
- * argumentos usados por quase todo teste abaixo. */
-function rodar(dir: string, base: string, head: string, slug?: string): SpawnSyncReturns<string> {
-  const args = ["--root", dir, "--base", base, "--head", head];
-  if (slug !== undefined) args.push("--slug", slug);
-  return runControleNegativo(args);
-}
-
-/** Igual a `runControleNegativo`, mas com `GITHUB_STEP_SUMMARY` apontando
- * para um arquivo descartável — para os testes que precisam confirmar o
- * motivo do SKIP no summary do job, não só no stdout (issue #114). */
-function runControleNegativoComSummary(args: readonly string[]): {
-  result: SpawnSyncReturns<string>;
-  summary: string;
-} {
-  const summaryPath = join(mkdtempSync(join(tmpdir(), "controle-negativo-summary-")), "summary.md");
-  workdirs.push(join(summaryPath, ".."));
-  writeFileSync(summaryPath, "");
-  const env = Object.fromEntries(
-    Object.entries(process.env).filter(
-      ([key]) => !key.startsWith("VITEST") && key !== "LOHRA_PROVA_OUT",
-    ),
-  );
-  const result = spawnSync(tsxBin, [runScript, ...args], {
-    encoding: "utf8",
-    timeout: 60_000,
-    env: { ...env, GITHUB_STEP_SUMMARY: summaryPath },
-  });
-  return { result, summary: readFileSync(summaryPath, "utf8") };
-}
-
-/** Roda `run.ts` com `PATH` vazio — `git` vira ENOENT (issue #62). */
-function rodarComPathVazio(dir: string, base: string, head: string, slug: string) {
-  const dirVazio = mkdtempSync(join(tmpdir(), "controle-negativo-path-vazio-"));
-  try {
-    const env = Object.fromEntries(
-      Object.entries(process.env).filter(
-        ([key]) => !key.startsWith("VITEST") && key !== "LOHRA_PROVA_OUT",
-      ),
-    );
-    return spawnSync(
-      process.execPath,
-      [tsxCliMjs, runScript, "--root", dir, "--base", base, "--head", head, "--slug", slug],
-      { encoding: "utf8", timeout: 60_000, env: { ...env, PATH: dirVazio } },
-    );
-  } finally {
-    rmSync(dirVazio, { recursive: true, force: true });
-  }
-}
+afterEach(limparWorkdirs);
 
 describe("controle-negativo/run.ts (subprocesso, repositório git descartável)", () => {
   it(
@@ -665,30 +401,6 @@ describe("controle-negativo/run.ts (subprocesso, repositório git descartável)"
   );
 
   it(
-    "NÃO faz SKIP quando o diff é só a DELEÇÃO de um tests/** que existia na base (issue #117, lacuna 2)",
-    () => {
-      // `git cat-file -e base:<arquivo>` acerta para um arquivo deletado
-      // (ele existe na base, é o que está sendo apagado) — sem excluir
-      // status "D", isso virava SKIP indevido; antes da #114 era controlado
-      // (vacuous-pass por construção, mesmo raciocínio de repoVacuousPass).
-      const dir = novoRepo();
-      escreverTeste(dir, "del-teste");
-      const base = commitTudo(dir, "chore: del-teste existe na base");
-
-      rmSync(join(dir, "tests", "del-teste.test.ts"));
-      const head = commitTudo(dir, "chore: remove tests/del-teste.test.ts");
-
-      const result = runControleNegativo(["--root", dir, "--base", base, "--head", head]);
-
-      // Sem --slug/--branch reconhecível, o fluxo normal reprova em
-      // resolverSlug — o ponto do teste é que NUNCA chega a fazer SKIP.
-      expect(result.status).toBe(1);
-      expect(result.stdout).not.toContain("SKIP");
-    },
-    TIMEOUT_TESTE,
-  );
-
-  it(
     "SKIP no caso concreto da PR #113/#111: tests/** JÁ EXISTENTE editado + prova/<slug>.ts NOVO",
     () => {
       // Reproduz exatamente a forma do diff real (`git diff --name-status`
@@ -727,7 +439,9 @@ describe("controle-negativo/run.ts (subprocesso, repositório git descartável)"
     () => {
       // Mesma forma de `repoVacuousPass` — `tests/**` novo sem produção
       // continua sendo controlado (e reprova em vacuous-pass), não vira
-      // SKIP silencioso: só um `tests/**` EDITADO qualifica.
+      // SKIP silencioso: só um `tests/**` EDITADO qualifica. A variante com
+      // commit `test(red):` (SKIP e reprova citando a exigência) está em
+      // `tests/ci-controle-negativo-lacunas.test.ts` (issue #117, lacuna 3).
       const { dir, base, head, slug } = repoVacuousPass();
 
       const result = rodar(dir, base, head, slug);
@@ -735,56 +449,6 @@ describe("controle-negativo/run.ts (subprocesso, repositório git descartável)"
       expect(result.status).toBe(1);
       expect(result.stdout).not.toContain("SKIP");
       expect(result.stderr).toContain("vacuous-pass");
-    },
-    TIMEOUT_TESTE,
-  );
-
-  it(
-    "SKIP quando o tests/** do diff é inteiramente NOVO E existe um commit test(red): que o toca (issue #117, lacuna 3)",
-    () => {
-      // Mesma forma de repoVacuousPass (teste novo, sem produção, vacuous
-      // por construção), mas com o commit test(red): que a issue #114
-      // (Contexto item 3) deixou sem saída mecânica — vira SKIP citando o
-      // sha, para o revisor conferir manualmente.
-      const dir = novoRepo();
-      const base = commitTudo(dir, "chore: repo vazio");
-      escreverTeste(dir, "vazio-red");
-      const head = commitTudo(dir, "test(red): cobre vazio-red (sem produção nenhuma)");
-
-      const { result, summary } = runControleNegativoComSummary([
-        "--root",
-        dir,
-        "--base",
-        base,
-        "--head",
-        head,
-        "--slug",
-        "vazio-red",
-      ]);
-
-      expect(result.status, result.stderr).toBe(0);
-      expect(result.stdout).toContain("SKIP");
-      expect(result.stdout).toContain(`test(red): ${head}`);
-      expect(summary).toContain(`test(red): ${head}`);
-    },
-    TIMEOUT_TESTE,
-  );
-
-  it(
-    "reprova citando a exigência quando o tests/** do diff é inteiramente NOVO e NÃO há commit test(red): (issue #117, lacuna 3)",
-    () => {
-      // Mesmo repoVacuousPass do teste "NÃO faz SKIP..." acima — a
-      // diferença é a mensagem: antes desta issue, o motivo era só
-      // "vacuous-pass"; agora nomeia a exigência que faltou (nenhum commit
-      // test(red): em base..head que toque os testes do diff).
-      const { dir, base, head, slug } = repoVacuousPass();
-
-      const result = rodar(dir, base, head, slug);
-
-      expect(result.status).toBe(1);
-      expect(result.stdout).not.toContain("SKIP");
-      expect(result.stderr).toContain("vacuous-pass");
-      expect(result.stderr).toContain("test(red)");
     },
     TIMEOUT_TESTE,
   );

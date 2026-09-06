@@ -17,12 +17,13 @@
 //     entrou (`lib.ts#soDeclaracaoDeProvaExistenteEditada`).
 //   - diff inteiro cai no overlay (issue #114, bloqueava a PR #113; lacunas
 //     1 e 2 fechadas na #117): tirando as classes acima, tudo que sobra é
-//     `tests/**\/*.test.ts`+`prova/**`, com pelo menos um `tests/**\/*.test.ts`
-//     (nunca uma fixture — `TESTE_RE`, não a `TESTES_PREFIXO_RE` mais larga)
-//     que já existia na base (EDITADO, não criado, não deletado no head) —
-//     o overlay do HEAD sobre a base reproduz o próprio HEAD (base+overlay
-//     ≡ head) e o desfecho é sempre `vacuous-pass`, mesmo com um
-//     `test(red):` real — `lib.ts#soArquivosDoOverlay`.
+//     `tests/**`+`prova/**` (fixtures contam nesse "tudo" — `ehArquivoDoOverlay`
+//     usa a `TESTES_PREFIXO_RE` mais larga), com pelo menos um
+//     `tests/**\/*.test.ts` especificamente (nunca uma fixture — aí sim
+//     `TESTE_RE`) que já existia na base (EDITADO, não criado, não deletado
+//     no head) — o overlay do HEAD sobre a base reproduz o próprio HEAD
+//     (base+overlay ≡ head) e o desfecho é sempre `vacuous-pass`, mesmo com
+//     um `test(red):` real — `lib.ts#soArquivosDoOverlay`.
 //
 // Um `tests/**` inteiramente NOVO (sem nenhum já editado) não entra no SKIP
 // acima — não é um quarto pré-check estático, é um desvio dentro da

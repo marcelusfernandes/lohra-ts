@@ -162,9 +162,9 @@ job. Quando reprovam:
   Fora do checkout de CI (sem `--branch`), uma branch local que não segue
   `<type>/<n>-<slug>` reprova pedindo `--slug`/`--branch` explícito. PR só de
   `docs`/`process` é SKIP; PR cujo diff (tirando `docs`/`process`) cai
-  inteiro em `tests/**`/`prova/**`, com pelo menos um `tests/**\/*.test.ts`
-  (nunca uma fixture) EDITADO (não criado, não deletado no head), também é
-  SKIP — o overlay reproduz o próprio HEAD (base+overlay ≡ head) e o
+  inteiro em `tests/**`/`prova/**` (fixtures contam nesse "inteiro"), com
+  pelo menos um `tests/**\/*.test.ts` especificamente (nunca uma fixture)
+  EDITADO (não criado, não deletado no head), também é SKIP — o overlay reproduz o próprio HEAD (base+overlay ≡ head) e o
   mecanismo nunca discrimina vermelho de verde; o revisor confere o commit
   `test(red):` manualmente. Um `tests/**` inteiramente NOVO (nenhum editado)
   também vira `vacuous-pass` por construção — sem `src/**` no diff, o
