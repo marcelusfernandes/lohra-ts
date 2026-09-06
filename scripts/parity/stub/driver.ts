@@ -138,6 +138,12 @@ async function main(): Promise<number> {
         gets: runtime.sequence.filter((entry) => entry.startsWith("GET ")).length,
         posts: runtime.posts,
         sequence: runtime.sequence,
+        // A porta de fato vinculada pelo stub (server undefined quando
+        // config.stub.state === "down" — nenhum bind aconteceu). Único
+        // jeito de um teste que roda o driver como processo filho saber
+        // qual porta efêmera (config.port === 0) foi atribuída pelo SO,
+        // sem depender de um número fixo e conhecido (issue #3).
+        port: server === undefined ? null : activePort,
       }),
     );
     writeFileSync(
