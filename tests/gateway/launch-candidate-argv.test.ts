@@ -52,11 +52,34 @@ it("launches the candidate via --import tsx, never through tsx's cli.mjs wrapper
 
   const process_ = await resultPromise;
   expect(process_.port).toBe(55_775);
+  expect(process_.pid).toBe(4242);
 
   expect(spawnMock).toHaveBeenCalledTimes(1);
-  const [command, args] = spawnMock.mock.calls[0] as [string, string[]];
+  const [command, args, options] = spawnMock.mock.calls[0] as [
+    string,
+    string[],
+    { cwd?: string; env?: Record<string, string> },
+  ];
   expect(command).toBe(process.execPath);
   expect(args.some((arg) => arg.includes("tsx/dist/cli.mjs"))).toBe(false);
-  expect(args).toContain("--import");
-  expect(args.some((arg) => arg.includes("src/cli.ts"))).toBe(true);
+
+  // The candidate is launched via `--import <tsx loader>`, immediately
+  // followed by the CLI entry and, unchanged, the same argv this function
+  // received: no wrapper argument is inserted before or between them.
+  const importIndex = args.indexOf("--import");
+  expect(importIndex).toBeGreaterThanOrEqual(0);
+  expect(args[importIndex + 1]).toBe(import.meta.resolve("tsx"));
+
+  const entryIndex = args.findIndex((arg) => arg.endsWith("/src/cli.ts"));
+  expect(entryIndex).toBe(importIndex + 2);
+  expect(args.slice(entryIndex + 1)).toEqual([
+    "dashboard",
+    "--port",
+    "0",
+    "--provider",
+    "anthropic",
+    "--insecure",
+  ]);
+
+  expect(options).toMatchObject({ cwd: "/tmp", env: { HOME: "/tmp/does-not-matter" } });
 });
