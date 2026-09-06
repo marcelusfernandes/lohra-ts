@@ -1,29 +1,44 @@
 // Os 13 mutantes de `media/persistence.ts` (issue #151, passo 0d do épico
 // #13) — migrados de `scripts/parity/media/run-mutations.ts` (agora um
-// shim). Sete `probe`s ganharam um caminho de baseline que faltava no
-// runner antigo (ver o header de `media.ts`): `over-return`,
-// `per-image-limit` e `batch-limit` não tratavam o `throw` do guard real
-// (a árvore restaurada quebraria a função em vez de produzir um `actual`
-// comparável); `out-dir-symlink` tinha uma chave (`returned_count`) que
-// `expected` não declarava, então `actual` nunca batia com `expected`
-// mesmo sem mutação. As outras dez já eram seguras nos dois caminhos.
+// shim); os `edits` de todos os 13 são byte a byte os do runner antigo —
+// só o oráculo (`expected`/`probe`) muda, nos casos abaixo (regra
+// acrescentada ao AC 3 da issue #151 depois da rodada 1 da PR #176, que
+// tinha um 4º edit sobre uma premissa refutada — ver `out-dir-symlink`).
 //
-// `out-dir-symlink` também ganhou um 4º edit — a ÚNICA mutação desta
-// migração cujos `edits` mudam, não só o `probe`. Os 3 edits originais
-// (bypassar os `checkControlledRoot` diretos de `persistGeneratedImages`
-// e as duas condições de `assertRootIdentity`) não bastam: `checkControlledRoot(plan)`
-// no TOPO de `assertRootIdentity` (persistence.ts:143, antes das
-// condições mutadas) continua ativo e chamado antes de qualquer escrita
-// (via `runPublishHooks`), então o outDir simbólico é sempre pego ali —
-// um mutante morto, mascarado pela chave `returned_count` que faltava em
-// `expected` no runner antigo (nunca "killed" por motivo certo, sempre
-// "killed" por causa da chave ausente). `git log -S` confirma que esse
-// `checkControlledRoot` (feat "isolate publish hooks from staged bytes")
-// é POSTERIOR ao mutante original (feat "bounded vision and image
-// generation") — defesa em profundidade que passou a existir depois. O
-// 4º edit completa a intenção original do nome do mutante ("parar de
-// checar a raiz depois do preflight") em vez de manter um mutante que não
-// testa mais nada.
+// Quatro `probe`s ganharam um caminho de baseline que faltava no runner
+// antigo (ver o header de `media.ts`): `over-return`, `per-image-limit` e
+// `batch-limit` não tratavam o `throw` do guard real (a árvore restaurada
+// quebraria a função em vez de produzir um `actual` comparável) —
+// encapsulado em try/catch, sem tocar os `edits`. As outras nove já eram
+// seguras nos dois caminhos.
+//
+// `out-dir-symlink`: `expected` tinha só `status`/`external_count` e o
+// `probe` descartava a mensagem do `catch` — com a árvore restaurada,
+// `actual` teria `returned_count` (chave que `expected` não declarava) e
+// SEM ela `actual` nunca batia `expected`, mutado ou não (rodada 1,
+// PR #176: revisor "seis checks verdes... 19/20 preservam os edits";
+// achado de que os 3 edits eram "mortos" era o próprio bug — o defeito
+// real era só a chave ausente). Reprodução (`git log -S`, saídas reais):
+//
+//   $ git log -S 'checkControlledRoot(plan);' --oneline -- src/media/persistence.ts
+//   9879c7b fix(media): isolate publish hooks from staged bytes
+//   $ git log -S 'out-dir-symlink' --oneline -- scripts/parity/media/run-mutations.ts
+//   e7bf4f5 feat(media): add bounded vision and image generation
+//
+//   (9879c7b é POSTERIOR a e7bf4f5 — a defesa em profundidade dentro de
+//   `assertRootIdentity`, persistence.ts:143, é mais nova que o mutante;
+//   mas ela muda a MENSAGEM do erro, não faz o mutante parar de divergir.)
+//
+//   baseline  {"status":"error","external_count":0,"returned_count":0,"error_named":"output root changed after preflight"}
+//   3 edits   {"status":"error","external_count":0,"returned_count":0,"error_named":"output root contains a symlink"}
+//
+// `error_named` diverge (a exceção migra de `persistence.ts:191-194`, o
+// catch do preflight, para `checkControlledRoot(plan)` dentro de
+// `assertRootIdentity`, persistence.ts:143→69, chamado via
+// `runPublishHooks` — não tocado por nenhum dos 3 edits) — o mutante É
+// observável, só não pelas chaves que o `probe` checava. Corrigido
+// acrescentando `error_named` a `expected` e ao `probe` (mesmo padrão de
+// `root-identity`, abaixo), sem tocar os `edits`.
 import {
   existsSync,
   mkdirSync,
@@ -52,7 +67,7 @@ function persistence(module: Record<string, unknown>): PersistenceModule {
   return module as unknown as PersistenceModule;
 }
 
-export const persistenceMutants: readonly MediaMutant[] = [
+export const persistenceMutants: readonly MediaMutant[] = Object.freeze([
   {
     id: "over-return",
     category: "limits",
@@ -187,13 +202,13 @@ export const persistenceMutants: readonly MediaMutant[] = [
         before: "    current.isSymbolicLink() ||\n    !current.isDirectory() ||",
         after: "    false ||\n    false ||",
       },
-      {
-        file: ENTRY,
-        before: "  checkControlledRoot(plan);\n  const current = lstatSync(plan.outDir);",
-        after: "  void plan;\n  const current = lstatSync(plan.outDir);",
-      },
     ],
-    expected: { status: "error", external_count: 0, returned_count: 0 },
+    expected: {
+      status: "error",
+      external_count: 0,
+      returned_count: 0,
+      error_named: "output root changed after preflight",
+    },
     probe: async (moduleUnknown) => {
       const media = persistence(moduleUnknown);
       const runtime = mkdtempSync(join(tmpdir(), "lohra-t21-mutant-root-"));
@@ -202,6 +217,7 @@ export const persistenceMutants: readonly MediaMutant[] = [
         const outDir = join(runtime, "images");
         let paths: readonly string[] = [];
         let status = "ok";
+        let errorName = "none";
         try {
           paths = await media.persistGeneratedImages({
             plan: media.createOutputPlan(outDir),
@@ -212,13 +228,15 @@ export const persistenceMutants: readonly MediaMutant[] = [
               symlinkSync(external, outDir);
             },
           });
-        } catch {
+        } catch (error) {
           status = "error";
+          errorName = error instanceof Error ? error.message : String(error);
         }
         return {
           status,
           external_count: readdirSync(external).length,
           returned_count: paths.length,
+          error_named: errorName,
         };
       } finally {
         rmSync(runtime, { recursive: true, force: true });
@@ -603,4 +621,4 @@ export const persistenceMutants: readonly MediaMutant[] = [
       });
     },
   },
-];
+]);

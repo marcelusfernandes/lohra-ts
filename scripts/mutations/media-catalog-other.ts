@@ -1,29 +1,39 @@
 // Os 7 mutantes de `media/source.ts` (4 edits), `media/errors.ts` (2
 // edits) e `tools/child.ts` (2 edits num único mutante) — issue #151,
 // passo 0d do épico #13. Migrados de
-// `scripts/parity/media/run-mutations.ts` (agora um shim); os `edits` em
-// si não mudam. Três `probe`s de `source.ts` (`unsafe-url-*`) tinham uma
-// chave (`runner_calls`) em `expected` que `actual` nunca produzia — ver o
-// header de `media.ts`; corrigidas para o shape que `actual` de fato tem.
+// `scripts/parity/media/run-mutations.ts` (agora um shim); os `edits` de
+// todos os 7 são byte a byte os do runner antigo — só o oráculo
+// (`expected`/`probe`) muda, em cinco dos sete (disclosure completa, PR
+// #176 rodada 1: o corpo original citava 5/7 e omitia dois):
 //
-// `unsafe-url-scheme` também trocou o valor de entrada do `probe`
-// (`file:///tmp/CANARY-T21` -> `ftp://example.test/CANARY-T21`): uma URL
-// `file:` tem `hostname` vazio, e `validateRemoteImage` rejeita hostname
-// vazio (`source.ts` — o guard SEGUINTE ao que este mutante desliga) antes
-// mesmo de chegar no guard mutado — o mesmo mutante morto, mascarado pela
-// mesma chave ausente. `ftp://example.test/...` tem hostname não-vazio e
-// não é `localhost`/IP (`unsafeHost` deixa passar), então só o guard de
-// protocolo (o mutado) decide; confirmado empiricamente contra o módulo
-// carregado: mutado aceita, restaurado lança.
+// - `unsafe-url-scheme`, `unsafe-url-loopback`, `unsafe-data`: `expected`
+//   tinha a chave `runner_calls`, que `actual` nunca produzia — `actual`
+//   nunca batia `expected`, mutado ou não. `runner_calls` removida de
+//   `expected` nos três (funcional).
+// - `unsafe-url-scheme` também trocou o valor de entrada do `probe`
+//   (`file:///tmp/CANARY-T21` -> `ftp://example.test/CANARY-T21`): uma URL
+//   `file:` tem `hostname` vazio, e `validateRemoteImage` rejeita hostname
+//   vazio (`source.ts` — o guard SEGUINTE ao que este mutante desliga)
+//   antes mesmo de chegar no guard mutado. `ftp://example.test/...` tem
+//   hostname não-vazio e não é `localhost`/IP (`unsafeHost` deixa passar),
+//   então só o guard de protocolo (o mutado) decide; confirmado
+//   empiricamente contra o módulo carregado: mutado aceita, restaurado
+//   lança (funcional).
+// - `unsafe-url-loopback` e `unsafe-data`: só o `let accepted = false`
+//   virou `let accepted: boolean` (sem inicializador) — a mesma correção
+//   de lint (`no-useless-assignment`, a primeira atribuição nunca era lida
+//   antes de ser sobrescrita no `try`) que `unsafe-url-scheme` precisou;
+//   sem mudança de comportamento, mas é um `probe` tecnicamente diferente
+//   do runner antigo — citado aqui para não ficar só no diff.
+// - `redaction-nested`: os canários (`NESTED-CANARY-99`/`DEEP-CANARY-77`
+//   -> `secret-NESTED99`/`token-DEEPCANARY77`): `scrub()` (errors.ts) só
+//   redige URL/data-URI/Bearer/segredo com prefixo sk|key|token|secret —
+//   um canário que não bate nenhum padrão passa intacto mesmo pela
+//   recursão CORRETA (restaurada), então `restoreGreen` acusava falso
+//   positivo com os canários antigos (funcional).
 //
-// `redaction-nested` também trocou os canários (`NESTED-CANARY-99`/
-// `DEEP-CANARY-77` -> `secret-NESTED99`/`token-DEEPCANARY77`): `scrub()`
-// (errors.ts) só redige URL/data-URI/Bearer/segredo com prefixo
-// sk|key|token|secret — um canário que não bate nenhum padrão passa
-// intacto mesmo pela recursão CORRETA (restaurada), então `restoreGreen`
-// acusava falso positivo com os canários antigos. As outras duas
-// (`redaction`, `child-deny`) já eram seguras nos dois caminhos (mutado e
-// restaurado).
+// `encoded-precheck`, `redaction` e `child-deny` já eram seguros nos dois
+// caminhos (mutado e restaurado) e não mudaram.
 import type { MediaMutant } from "./media-mutant.js";
 import { MAX_DATA_URI_BASE64_CHARS } from "../../src/media/constants.js";
 
@@ -35,7 +45,7 @@ function asValidator(module: Record<string, unknown>): (value: string) => string
   return module["validateRemoteImage"] as (value: string) => string;
 }
 
-export const otherMediaMutants: readonly MediaMutant[] = [
+export const otherMediaMutants: readonly MediaMutant[] = Object.freeze([
   {
     id: "unsafe-url-scheme",
     category: "validation",
@@ -223,4 +233,4 @@ export const otherMediaMutants: readonly MediaMutant[] = [
       return { base_calls: baseCalls };
     },
   },
-];
+]);

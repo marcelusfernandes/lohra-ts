@@ -15,8 +15,18 @@
 // (decide `killed`) e contra uma cópia SEM os edits, a "árvore restaurada"
 // (decide `restoreGreen`). Sem essa segunda corrida um `probe` cujo
 // `actual` nunca bate com `expected` apareceria sempre "killed", mutação
-// ou não — o bug que sete `probe`s do runner antigo tinham (ver os
-// comentários em media-catalog-persistence.ts e media-catalog-other.ts).
+// ou não — o problema que 9 dos 20 oráculos do runner antigo tinham
+// (contagem completa, com motivo por id, nos headers de
+// media-catalog-persistence.ts e media-catalog-other.ts), de três formas:
+// três `probe`s sem tratamento do `throw` no caminho restaurado (crash,
+// não silêncio), quatro com uma chave em `expected` que `actual` nunca
+// produzia, e dois com dado de teste que nunca convergia independente da
+// mutação (canário fora do padrão de redação; checagem de string que o
+// transpilador nunca produz literalmente). `out-dir-symlink` (rodada 1 da
+// PR #176) mostrou o risco do diagnóstico errado: tratar o sintoma
+// (`restoreGreen: false`) como "mutante morto" sem checar se havia sinal
+// observável em outro campo — tinha (`error_named`); o defeito era só a
+// chave ausente em `expected`, igual às outras três `unsafe-url-*`.
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
