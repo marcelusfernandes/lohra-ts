@@ -1,14 +1,17 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { runUpdate } from "../src/commands/update.js";
 import {
   checkUpdate,
+  defaultCommandRunner,
   locateRepo,
   performUpdate,
+  resolveInstalledRepo,
   type CommandRunner,
 } from "../src/self-update/index.js";
 
@@ -39,6 +42,38 @@ describe("self-update repository discovery", () => {
     const nested = join(root, "dist", "commands");
     mkdirSync(nested, { recursive: true });
     expect(locateRepo(nested)).toBe(realpathSync(root));
+  });
+
+  it("resolves the installed repo from the module's own location, not the process cwd", () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-update-host-"));
+    roots.push(root);
+    mkdirSync(join(root, ".git"));
+    const nested = join(root, "dist", "commands");
+    mkdirSync(nested, { recursive: true });
+    const moduleUrl = pathToFileURL(join(nested, "update.js")).href;
+    // Guarda contra falso-positivo: se o cwd do processo também caísse
+    // dentro de `root`, a asserção abaixo passaria mesmo com a mutação
+    // (locateRepo(process.cwd()) em vez de locateRepo do moduleUrl).
+    expect(
+      process.cwd().startsWith(realpathSync(root)),
+      "MUTATION_CAUSE:T22-updater-host-cwd:fixture-overlaps-cwd",
+    ).toBe(false);
+    expect(resolveInstalledRepo(moduleUrl), "MUTATION_CAUSE:T22-updater-host-cwd").toBe(
+      realpathSync(root),
+    );
+  });
+});
+
+describe("self-update default command runner", () => {
+  it("runs the subprocess with shell:false, so each argument is passed literally", () => {
+    // Com shell:false, spawnSync nunca reinterpreta metacaracteres de shell
+    // nos argumentos — "echo" recebe cada um deles como uma string literal e
+    // o imprime tal como veio, numa linha só. Com shell:true, node junta
+    // comando+args com espaço e entrega a /bin/sh -c, que reinterpreta "&&"
+    // como separador de comandos e produz duas linhas.
+    const result = defaultCommandRunner("echo", ["marker", "&&", "echo", "injected"], "/");
+    expect(result.code, "MUTATION_CAUSE:T22-updater-shell").toBe(0);
+    expect(result.stdout, "MUTATION_CAUSE:T22-updater-shell").toBe("marker && echo injected");
   });
 });
 

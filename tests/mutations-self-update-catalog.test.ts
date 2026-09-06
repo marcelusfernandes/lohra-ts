@@ -16,10 +16,14 @@ const repoRoot = resolve(import.meta.dirname, "..");
 
 function realTestTitles(testSource: string): ReadonlySet<string> {
   const titles = new Set<string>();
-  const pattern = /\b(?:it|test)\(\s*["'`]([^"'`]+)["'`]/g;
+  // O grupo 1 fixa QUAL aspa abriu a string, e o corpo é lido até essa
+  // mesma aspa reaparecer -- ao contrário de um `[^"'`]+` genérico, isso
+  // sobrevive a um apóstrofo dentro de um título entre aspas duplas (ex.:
+  // "the module's own location").
+  const pattern = /\b(?:it|test)\(\s*(["'`])((?:(?!\1).)*)\1/g;
   let match;
   while ((match = pattern.exec(testSource)) !== null) {
-    const title = match[1];
+    const title = match[2];
     if (title !== undefined) titles.add(title);
   }
   return titles;
