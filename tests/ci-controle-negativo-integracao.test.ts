@@ -611,15 +611,17 @@ describe("controle-negativo/run.ts (subprocesso, repositório git descartável)"
 // symlink para o mesmo `cli.mjs`) precisam trocar para `node --import <tsx
 // loader>`, igual a `scripts/parity/gateway/launch-candidate.ts` (issue
 // #132) — um processo real, sem o handshake de sinal do wrapper. Escaneia o
-// texto-fonte dos três arquivos-alvo (os dois `ci-*.test.ts` que fazem
-// `spawnSync` direto e o helper compartilhado do controle-negativo) em vez
-// de rodar `grep` num subprocesso — mais rápido e sem depender de `grep`
-// estar no PATH.
+// texto-fonte dos arquivos-alvo (os `ci-*.test.ts` que fazem `spawnSync`
+// direto, o helper compartilhado do controle-negativo, e — issue #142,
+// follow-up da #137 — `tests/prova-run.test.ts`, o último spawn de `npm
+// test` que ainda passava pelo shim `.bin/tsx`) em vez de rodar `grep` num
+// subprocesso — mais rápido e sem depender de `grep` estar no PATH.
 describe("tsx sem wrapper nos helpers de teste (issue #137)", () => {
   const arquivosAlvo = [
     resolve(import.meta.dirname, "ci-contratos.test.ts"),
     resolve(import.meta.dirname, "ci-escopo.test.ts"),
     resolve(import.meta.dirname, "helpers", "controle-negativo-repo.ts"),
+    resolve(import.meta.dirname, "prova-run.test.ts"),
   ];
 
   it("nenhum lança tsx pelo wrapper (cli.mjs ou o shim .bin/tsx) — todos usam --import", () => {
