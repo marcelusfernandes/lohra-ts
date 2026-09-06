@@ -130,6 +130,15 @@ function passar(mensagem: string): number {
   return 0;
 }
 
+/** Delega a escrita para `appendSummary` (`../lib/summary.js`, issue #78) —
+ * nunca lança, nunca faz este check reagir diferente de `contratos` a um
+ * `GITHUB_STEP_SUMMARY` não gravável. A linha em branco extra mantém os
+ * blocos do job summary separados (mesmo espaçamento de antes da
+ * unificação, quando este arquivo escrevia `${bloco}\n\n` diretamente). */
+function escreverSummary(bloco: string): void {
+  appendSummary(`${bloco}\n`);
+}
+
 function existeNoCommit(root: string, commit: string, caminhoRelativo: string): boolean {
   return git(root, ["cat-file", "-e", `${commit}:${caminhoRelativo}`]).status === 0;
 }
@@ -408,7 +417,7 @@ function rodarCheck(
 
     const pkgPath = join(tmpDir, "package.json");
     if (!existsSync(pkgPath)) {
-      appendSummary(
+      escreverSummary(
         `## controle-negativo\n\nBase \`${base}\` sem \`package.json\` — o harness (#42) ainda não ` +
           "existia naquele commit; PASS logado.",
       );
@@ -427,7 +436,7 @@ function rodarCheck(
       );
     }
     if (semHarness) {
-      appendSummary(
+      escreverSummary(
         `## controle-negativo\n\nBase \`${base}\` sem \`scripts.prova\` — o harness (#42) ainda ` +
           "não existia naquele commit; PASS logado.",
       );
@@ -450,7 +459,7 @@ function rodarCheck(
     const desfecho = classificar(resumo);
 
     if (desfecho === "vacuous-pass") {
-      appendSummary(
+      escreverSummary(
         `## controle-negativo\n\n**FAILED** — \`vacuous-pass\`: a prova de \`${slug}\` passa na ` +
           `base \`${base}\`, sem a implementação que a PR adiciona.`,
       );
@@ -463,7 +472,7 @@ function rodarCheck(
       desfecho === "structural-red" &&
       !existeTestRedValido(root, base, head, testFiles, arquivosNaoTeste)
     ) {
-      appendSummary(
+      escreverSummary(
         `## controle-negativo\n\n**FAILED** — estrutural sem test(red) válido: nenhum commit ` +
           `\`test(red):\` em \`${base}..${head}\` que toca os testes do diff e adiciona um stub que ` +
           "lança (`throw new Error(`) num arquivo não-teste.",
@@ -475,7 +484,7 @@ function rodarCheck(
       );
     }
 
-    appendSummary(`## controle-negativo\n\n\`${desfecho}\` — PASS.`);
+    escreverSummary(`## controle-negativo\n\n\`${desfecho}\` — PASS.`);
     return passar(`controle-negativo: ${desfecho} — PASS`);
   } finally {
     worktreeRemove(root, tmpDir, registrado);
@@ -496,7 +505,7 @@ function main(): void {
   const alterados = diffNomeStatus(root, base, head);
   const arquivosAlterados = alterados.map((item) => item.arquivo);
   if (deveSerIgnorado(arquivosAlterados)) {
-    appendSummary("## controle-negativo\n\nSKIP — PR de classe docs/process, nada a controlar.");
+    escreverSummary("## controle-negativo\n\nSKIP — PR de classe docs/process, nada a controlar.");
     process.stdout.write("controle-negativo: SKIP — PR de classe docs/process, nada a controlar\n");
     process.exit(0);
   }
@@ -511,7 +520,7 @@ function main(): void {
       existeNoCommit(root, base, arquivo),
     )
   ) {
-    appendSummary(
+    escreverSummary(
       "## controle-negativo\n\nSKIP — só declaração de prova existente editada, nada a controlar.",
     );
     process.stdout.write(

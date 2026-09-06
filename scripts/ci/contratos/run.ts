@@ -222,6 +222,7 @@ function resumoMarkdown(ok: boolean, violacoes: readonly Violacao[]): string {
     "",
     ok ? "Nenhuma violação." : "**FAILED**:",
     ...violacoes.map((v) => `- \`${v.arquivo}\` — ${v.id}: ${v.descricao}`),
+    "",
   ];
   return linhas.join("\n");
 }
