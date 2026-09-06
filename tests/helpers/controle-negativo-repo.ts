@@ -260,6 +260,22 @@ export function runControleNegativo(args: readonly string[]): SpawnSyncReturns<s
   });
 }
 
+/** Igual a `runControleNegativo`, mas com variáveis extra no ambiente do
+ * subprocesso (issue #122) — usado para sobrescrever `TMPDIR`: `run.ts`
+ * chama `mkdtempSync(tmpdir(), ...)`, e `os.tmpdir()` do Node lê `TMPDIR`
+ * do PRÓPRIO processo a cada chamada, então isso basta para isolar onde o
+ * workdir do subprocesso nasce, sem tocar `run.ts`. */
+export function runControleNegativoComEnv(
+  args: readonly string[],
+  envExtra: Record<string, string>,
+): SpawnSyncReturns<string> {
+  return spawnSync(tsxBin, [runScript, ...args], {
+    encoding: "utf8",
+    timeout: TIMEOUT_TESTE,
+    env: { ...envSemVitest(), ...envExtra },
+  });
+}
+
 /** Atalho: roda com `--root`/`--base`/`--head`/`--slug` — os quatro
  * argumentos usados por quase todo teste. */
 export function rodar(

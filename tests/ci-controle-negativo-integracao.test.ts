@@ -12,7 +12,23 @@
 // Timeout explícito (60s) em todo teste que spawna `tsx` + `git worktree` +
 // um `npm run prova` aninhado — o default do vitest (5s) já estourou uma vez
 // nesta suíte rodando em paralelo com outra suíte na mesma máquina.
-import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
+//
+// Issue #122: o teste de vazamento de diretório temporário lia
+// `readdirSync(tmpdir())` GLOBAL, compartilhado com toda a suíte (o mesmo
+// prefixo `controle-negativo-` é usado por `novoRepo()` aqui, pelas
+// fixtures unitárias de `ci-controle-negativo.test.ts` e por `run.ts`
+// mesmo) — uma corrida entre arquivos de teste rodando em paralelo
+// (vitest, threads por arquivo) derrubava a comparação antes/depois
+// intermitentemente, sem vazamento real nenhum. Corrigido isolando o
+// `TMPDIR` do subprocesso por execução (`runControleNegativoComEnv`).
+//
+// Fora de escopo desta correção (pré-existente, não coberto por nenhum
+// teste antes nem depois): não há como forçar `git worktree add` a falhar
+// com uma base VÁLIDA (para exercitar `registrado=false` seguido do
+// `rmSync` de `worktreeRemove` em `run.ts`) sem depender de condição de
+// corrida ou de mock de `git` — o cenário de base inexistente (abaixo)
+// reprova antes disso, em `diffNomeStatus`.
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -25,12 +41,14 @@ import {
   gitCapture,
   limparWorkdirs,
   novoRepo,
+  PROVA_RUN_CJS,
   repoAssertionRed,
   repoStructuralRed,
   repoVacuousPass,
   rodar,
   rodarComPathVazio,
   runControleNegativo,
+  runControleNegativoComEnv,
   runControleNegativoComSummary,
   TIMEOUT_TESTE,
 } from "./helpers/controle-negativo-repo.js";
@@ -338,17 +356,105 @@ describe("controle-negativo/run.ts (subprocesso, repositório git descartável)"
   );
 
   it(
-    "exit 1 e sem diretório temporário vazando quando git worktree add falha (base inexistente)",
+    "exit 1 sem workdir vazando quando a base é inexistente (reprova em diffNomeStatus, antes de mkdtempSync) — checagem isolada do tmpdir global (issue #122)",
     () => {
       const { dir, head, slug } = repoAssertionRed();
       const baseInvalida = "0".repeat(40);
-      const antes = readdirSync(tmpdir()).filter((nome) => nome.startsWith("controle-negativo-"));
 
-      const result = rodar(dir, baseInvalida, head, slug);
+      // TMPDIR isolado por execução (issue #122): `run.ts` (linha ~435)
+      // cria seu workdir com `mkdtempSync(tmpdir(), "controle-negativo-")`,
+      // e `os.tmpdir()` do Node lê `TMPDIR` do processo A CADA CHAMADA (não
+      // cacheado no startup) — sobrescrever só para o subprocesso basta
+      // para que ele nasça aqui dentro, onde mais ninguém escreve. Antes,
+      // a checagem lia o tmpdir GLOBAL, compartilhado com toda a suíte
+      // (`ci-controle-negativo.test.ts`'s fixtures "overlay-*", `novoRepo()`
+      // de qualquer arquivo que importe este helper) — uma corrida entre
+      // arquivos de teste rodando em paralelo (vitest, um worker por
+      // arquivo) fazia a lista global divergir entre "antes" e "depois",
+      // sem vazamento real nenhum deste teste (PR #120).
+      const tmpIsolado = mkdtempSync(join(tmpdir(), "controle-negativo-leak-check-"));
+      try {
+        const result = runControleNegativoComEnv(
+          ["--root", dir, "--base", baseInvalida, "--head", head, "--slug", slug],
+          { TMPDIR: tmpIsolado },
+        );
 
-      expect(result.status).toBe(1);
-      const depois = readdirSync(tmpdir()).filter((nome) => nome.startsWith("controle-negativo-"));
-      expect(depois).toEqual(antes);
+        // Ruído concorrente simulado (mesma reprodução do commit
+        // `test(red):` desta issue) — outro teste criando um repositório
+        // fake com o mesmo prefixo no tmpdir GLOBAL durante a janela. A
+        // checagem abaixo, presa ao diretório isolado, fica imune a isso.
+        novoRepo();
+
+        // Com uma base que nunca existiu, `diffNomeStatus` (main():571)
+        // reprova ANTES de `rodarCheck`/`mkdtempSync` (linha ~435) — este
+        // cenário nunca chega a criar um workdir de verdade (isso é
+        // exercitado pelo controle positivo abaixo, com base válida).
+        // Fixar a causa aqui, em vez de só o exit code, prende o cenário
+        // real e evita o título divergir de novo do que o teste cobre.
+        expect(result.stderr).toContain("git diff --name-status");
+        expect(result.status).toBe(1);
+        const dentroDoIsolado = readdirSync(tmpIsolado).filter((nome) =>
+          nome.startsWith("controle-negativo-"),
+        );
+        expect(dentroDoIsolado).toEqual([]);
+      } finally {
+        rmSync(tmpIsolado, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT_TESTE,
+  );
+
+  it(
+    "TMPDIR isolado é onde run.ts de fato cria e limpa o workdir — controle positivo do isolamento acima (issue #122)",
+    () => {
+      // O teste anterior prova "nada sobrou no diretório isolado" — o que
+      // seria vácuo se `run.ts` ignorasse o `TMPDIR` sobrescrito e usasse o
+      // tmpdir global de qualquer jeito (o isolado ficaria vazio por não
+      // ser usado, não por limpeza correta). Este cenário usa uma base
+      // válida — chega em `rodarCheck`, que de fato chama `mkdtempSync` e
+      // roda `npm run prova` com `cwd: tmpDir` — e confirma que o
+      // subprocesso escreveu DENTRO do diretório isolado antes de limpar.
+      const provaRunComCwd = `process.stdout.write(process.cwd() + "\\n");\n${PROVA_RUN_CJS}`;
+      const dir = novoRepo({ provaRunCjs: provaRunComCwd });
+      mkdirSync(join(dir, "src"), { recursive: true });
+      writeFileSync(join(dir, "src", "soma.cjs"), "module.exports.somar = (a, b) => a - b;\n");
+      const base = commitTudo(dir, "feat: soma inicial (com bug)");
+      escreverTeste(
+        dir,
+        "soma",
+        [
+          'const { somar } = require("./src/soma.cjs");',
+          "module.exports.run = function () {",
+          "  const resultado = somar(1, 2);",
+          '  if (resultado !== 3) { throw new Error("esperava 3, obteve " + resultado); }',
+          "};",
+          "",
+        ].join("\n"),
+      );
+      writeFileSync(join(dir, "src", "soma.cjs"), "module.exports.somar = (a, b) => a + b;\n");
+      const head = commitTudo(dir, "test(red): cobre soma com o bug corrigido");
+
+      const tmpIsolado = mkdtempSync(join(tmpdir(), "controle-negativo-leak-check-"));
+      try {
+        const result = runControleNegativoComEnv(
+          ["--root", dir, "--base", base, "--head", head, "--slug", "soma"],
+          { TMPDIR: tmpIsolado },
+        );
+
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.stdout).toContain("assertion-red");
+        // `realpathSync`: no macOS, `tmpdir()` devolve `/var/folders/...`,
+        // mas `process.cwd()` do subprocesso resolve para `/private/var/...`
+        // (symlink) — comparar caminhos resolvidos evita falso negativo.
+        expect(result.stdout).toContain(realpathSync(tmpIsolado));
+
+        const dentroDoIsolado = readdirSync(tmpIsolado).filter((nome) =>
+          nome.startsWith("controle-negativo-"),
+        );
+        expect(dentroDoIsolado).toEqual([]);
+      } finally {
+        rmSync(tmpIsolado, { recursive: true, force: true });
+      }
     },
     TIMEOUT_TESTE,
   );
