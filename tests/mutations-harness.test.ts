@@ -211,6 +211,36 @@ describe("writeReport", () => {
       ["candidateSha", "killed", "restoreGreen", "suite", "survivors", "total"].sort(),
     );
   });
+
+  it("aceita e grava o detalhe por mutante em `mutants` (#149, follow-up PR #173/#152)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mutations-harness-report-mutants-"));
+    workdirs.push(dir);
+    const report: MutationReport = {
+      suite: "t148-harness",
+      candidateSha: "deadbeef",
+      killed: 1,
+      total: 2,
+      survivors: ["survivor-id"],
+      restoreGreen: true,
+      mutants: [
+        {
+          id: "killed-id",
+          category: "clock",
+          killed: true,
+          killedBy: ["um teste falhou"],
+          files: ["src/a.ts"],
+        },
+        {
+          id: "survivor-id",
+          killed: false,
+          files: ["src/b.ts"],
+        },
+      ],
+    };
+    writeReport(dir, report);
+    const written = JSON.parse(readFileSync(join(dir, "mutations.json"), "utf8")) as unknown;
+    expect(written).toEqual(report);
+  });
 });
 
 describe("prepareArchiveSandbox", () => {

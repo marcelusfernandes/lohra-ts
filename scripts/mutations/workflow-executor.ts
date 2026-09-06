@@ -589,6 +589,7 @@ interface ExecutorMutationReport extends MutationReport {
     readonly killed: boolean;
     readonly ranTests: number;
     readonly killedBy: readonly string[];
+    readonly files: readonly string[];
   }[];
 }
 
@@ -618,6 +619,7 @@ function main(): void {
         ranTests: outcome.ranTests,
         killed: classify(outcome.exitCode, outcome.failedTests),
         killedBy: outcome.failedTests,
+        files: mutant.edits.map((edit) => edit.file).sort(),
       };
     });
 
