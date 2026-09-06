@@ -51,7 +51,7 @@ function defineMappingEntry(mapping: Record<string, unknown>, key: string, value
   });
 }
 
-function pythonMappingFromJson(name: string, value: unknown): Readonly<Record<string, unknown>> {
+function mappingFromJson(name: string, value: unknown): Readonly<Record<string, unknown>> {
   const mapping = Object.create(null) as Record<string, unknown>;
   if (isRecord(value)) {
     for (const [key, entryValue] of Object.entries(value)) {
@@ -89,7 +89,7 @@ function pythonMappingFromJson(name: string, value: unknown): Readonly<Record<st
   return mapping;
 }
 
-function pythonArgsFromJson(name: string, value: unknown): readonly unknown[] {
+function argsFromJson(name: string, value: unknown): readonly unknown[] {
   if (Array.isArray(value)) return Array.from(value as readonly unknown[]);
   if (typeof value === "string") return Array.from(value);
   throw new MCPConfigError(`server ${JSON.stringify(name)} field 'args' must be a string or array`);
@@ -110,9 +110,9 @@ function parseServer(name: string, spec: unknown): MCPServerConfig {
   }
   if (command !== undefined) {
     const rawArgs = spec.args;
-    const args = rawArgs === undefined || rawArgs === null ? [] : pythonArgsFromJson(name, rawArgs);
+    const args = rawArgs === undefined || rawArgs === null ? [] : argsFromJson(name, rawArgs);
     const rawEnv = spec.env;
-    const env = rawEnv === undefined || rawEnv === null ? {} : pythonMappingFromJson(name, rawEnv);
+    const env = rawEnv === undefined || rawEnv === null ? {} : mappingFromJson(name, rawEnv);
     return { name, transport: "stdio", command, args, env };
   }
   throw new MCPConfigError(
