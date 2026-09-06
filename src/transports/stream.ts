@@ -74,7 +74,7 @@ export function assembleStreamedResponse(
     throw new Error("incomplete tool-call stream");
   if (slots.size > 0 && !toolFinish) {
     callbacks.onWarning?.(
-      `discarding ${String(slots.size)} orphaned tool-call stream slot(s); finish_reason=${finishReason === null ? "None" : `'${finishReason}'`}`,
+      `discarding ${String(slots.size)} orphaned tool-call stream slot(s); finish_reason=${JSON.stringify(finishReason)}`,
     );
   } else if (toolCalls.length > 0) {
     message.tool_calls = toolCalls;

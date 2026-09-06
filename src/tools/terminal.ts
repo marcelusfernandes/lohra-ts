@@ -33,7 +33,7 @@ function renderArgument(value: unknown): string {
 }
 
 function timeoutLabel(args: ToolArguments, timeout: unknown): string {
-  if (typeof timeout === "boolean") return timeout ? "True" : "False";
+  if (typeof timeout === "boolean") return JSON.stringify(timeout);
   if (typeof timeout === "number") {
     if (pythonNumberKind(args, "timeout") === "float" && Number.isInteger(timeout)) {
       return timeout.toFixed(1);
