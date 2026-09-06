@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { getProviderProfile } from "../../src/providers/index.js";
-import { resolveResponsesProfile } from "../../scripts/parity/provider-transports/responses-profile.mjs";
+import { resolveResponsesProfile } from "../../scripts/parity/provider-transports/responses-profile.js";
 
 // live-smoke.mjs's smokeResponses() must resolve the codex provider from
 // resolveResponsesProfile(), not by looking it up in the registry — a
@@ -14,6 +14,15 @@ import { resolveResponsesProfile } from "../../scripts/parity/provider-transport
 // covered by providers-t10.test.ts and did not catch this defect, because
 // the bug was in which function the script called, not in what either
 // function returns on its own.
+//
+// resolveResponsesProfile here comes from responses-profile.ts, a twin of
+// live-smoke.mjs's responses-profile.mjs (issue #2). The .mjs one imports
+// CODEX_PROVIDER from dist/ on purpose — live-smoke.mjs is a real smoke
+// test of the compiled package, run with plain `node`, never `tsx` — so it
+// can't run against a checkout without `npm run build`. This test only
+// needs to prove the resolution logic never falls back to the by-name
+// registry lookup; the .ts twin imports the same CODEX_PROVIDER straight
+// from src/, so `npm test` never requires `dist/` to exist.
 describe("live-smoke responses/codex profile resolution", () => {
   it("resolves the codex profile the same way the real subscription path does", () => {
     const profile = resolveResponsesProfile();
