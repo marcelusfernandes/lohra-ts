@@ -133,9 +133,9 @@ describe("clampFlagMinOne", () => {
   });
 
   // Evaluator baseline §9/L26: `--max-parallel 2.9` never reaches a clamp —
-  // the oracle's argparse(type=int) rejects it outright with exit 2 and a
-  // usage message, before any clamping logic runs. Silently truncating and
-  // continuing (the v1 behavior) accepts an input the oracle refuses — the
+  // the CLI's own flag parser rejects it outright with exit 2 and a usage
+  // message, before any clamping logic runs. Silently truncating and
+  // continuing (the v1 behavior) accepts an input the parser refuses — the
   // unsafe direction. This function now refuses to guess: it's the CLI
   // layer's job (a strict integer parser, built with the flag wiring) to
   // reject non-integers before ever calling this function.

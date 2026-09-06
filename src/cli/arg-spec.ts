@@ -178,3 +178,7 @@ export const UPDATE_SPEC = spec([
   { name: "--check", takesValue: false },
   { name: "--reinstall", takesValue: false },
 ]);
+
+// TODO(#73): one phrase per declared flag, read by `renderHelp`. Empty
+// until the green commit lands — the coverage test is red until then.
+export const FLAG_HELP: Readonly<Record<string, string>> = {};

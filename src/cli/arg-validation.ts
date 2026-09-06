@@ -326,3 +326,15 @@ export function classifyUnknownCommand(
   }
   return { kind: "unrecognized", tokens: argv };
 }
+
+// TODO(#73): renders `--help` for one command (usage banner, summary,
+// options). Not implemented yet — the tests exercising it are red until the
+// green commit lands.
+export function renderHelp(
+  _level: Level,
+  _spec: CommandSpec,
+  _summary: string,
+  _subcommands?: Readonly<Record<string, string>>,
+): string {
+  throw new Error("not implemented");
+}
