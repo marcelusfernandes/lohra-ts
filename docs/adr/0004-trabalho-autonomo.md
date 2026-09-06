@@ -63,8 +63,8 @@ origin/main` only before the first push; after the branch is published,
    required — not a
    human comment, not "the branch is up to date" (CI runs again on `main`
    after every merge and is the net). The merge is a **merge commit**, never a
-   squash: `scripts/provenance/check-ancestry.ts` verifies that approved heads
-   are ancestors of `main`, and a squash would rewrite the branch out of the
+   squash: [`scripts/provenance/check-ancestry.ts`](../provenance.md) verifies
+   that approved heads are ancestors of `main`, and a squash would rewrite the branch out of the
    history it protects. `gh pr merge --admin` is never used.
 5. **Two rejected rounds escalate.** After the second `rejected` (CI or
    reviewer) the orchestrator labels the issue `state:blocked` and `human`,
