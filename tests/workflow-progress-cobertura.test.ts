@@ -203,6 +203,12 @@ describe("workflow service — progress write cardinality and taint (issue #138)
       // mutant) makes look correct even when the intermediate write itself
       // was forced to `tainted: false`.
       expect(putRunState.mock.calls.length).toBe(4);
+      // The registration write [0] happens BEFORE the leaf even spawns —
+      // proof that what follows is a real false-to-true TRANSITION during
+      // node "a", not a run that was already tainted from the start.
+      const registration = putRunState.mock.calls[0]?.[1] as
+        { readonly tainted: boolean } | undefined;
+      expect(registration?.tainted).toBe(false);
       const intermediateForA = putRunState.mock.calls[1]?.[1] as
         { readonly tainted: boolean } | undefined;
       expect(intermediateForA?.tainted).toBe(true);
