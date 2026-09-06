@@ -54,7 +54,7 @@ function jsonCheck(
       name,
       state: "warn",
       detail: `${path} — invalid JSON (JSONDecodeError)`,
-      remedy: `python3 -m json.tool ${path}   # shows the syntax error; fix it, then re-run`,
+      remedy: `inspect it with a JSON validator, e.g. jq . ${path}`,
     };
   }
 }
@@ -205,7 +205,7 @@ export function runChecks(environment: DoctorEnvironment): readonly Check[] {
         name: "workflow_policy.json",
         state: "warn",
         detail: `${workflowPolicy} — invalid JSON (JSONDecodeError)`,
-        remedy: `python3 -m json.tool ${workflowPolicy}   # shows the syntax error; fix it, then re-run`,
+        remedy: `inspect it with a JSON validator, e.g. jq . ${workflowPolicy}`,
       };
     }
   }

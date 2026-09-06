@@ -1,4 +1,5 @@
-import { clampFlagMinOne, positiveIntEnv, pythonInt } from "./limits.js";
+// Aliased: limits.ts still exports the old name; renaming it is #73's call.
+import { clampFlagMinOne, positiveIntEnv, pythonInt as parseIntStrict } from "./limits.js";
 
 export interface FanoutResolution {
   readonly maxParallel: number;
@@ -41,7 +42,7 @@ export function resolveFanout(
 
   let maxParallel: number;
   if (maxParallelFlag !== undefined) {
-    const parsed = pythonInt(maxParallelFlag);
+    const parsed = parseIntStrict(maxParallelFlag);
     if (parsed === null) throw new Error("CHAT_OPTION_INVALID:max-parallel");
     maxParallel = clampFlagMinOne(parsed);
   } else {

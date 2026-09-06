@@ -20,7 +20,7 @@ const FIELD_BOUNDS: readonly (readonly [number, number])[] = [
  * excuse" class (CPython's own wording), distinct from the byte-exact "cron field out of range"
  * class that only fires once every int() call in the field has already succeeded.
  */
-function pythonInt(text: string): number {
+function parseIntStrict(text: string): number {
   const trimmed = text.trim();
   if (!/^[+-]?\d+$/.test(trimmed)) {
     throw new Error(`invalid literal for int() with base 10: ${JSON.stringify(text)}`);
@@ -36,7 +36,7 @@ export function parseCronField(field: string, low: number, high: number): Set<nu
     if (part.includes("/")) {
       const [base, stepText] = part.split("/", 2) as [string, string];
       part = base;
-      step = pythonInt(stepText);
+      step = parseIntStrict(stepText);
     }
     let start: number;
     let end: number;
@@ -45,10 +45,10 @@ export function parseCronField(field: string, low: number, high: number): Set<nu
       end = high;
     } else if (part.includes("-")) {
       const [startText, endText] = part.split("-", 2) as [string, string];
-      start = pythonInt(startText);
-      end = pythonInt(endText);
+      start = parseIntStrict(startText);
+      end = parseIntStrict(endText);
     } else {
-      start = pythonInt(part);
+      start = parseIntStrict(part);
       end = start;
     }
     if (start < low || end > high || start > end || step < 1) {

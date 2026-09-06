@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { hasJsonValue, isEmptyJsonValue } from "../src/serialization/json-presence.js";
 
 describe("isEmptyJsonValue / hasJsonValue", () => {
-  it("treats None/False/0/''/[]/{} as empty", () => {
+  it('treats null/false/0/""/[]/{} as empty', () => {
     for (const value of [null, undefined, false, 0, "", [], {}]) {
       expect(isEmptyJsonValue(value)).toBe(true);
       expect(hasJsonValue(value)).toBe(false);

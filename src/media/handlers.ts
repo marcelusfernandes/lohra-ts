@@ -7,8 +7,8 @@ import {
   coerceImageCount,
   coerceImagePrompt,
   coerceImageSize,
+  isPresentMediaValue,
   jsonType,
-  pythonTruthy,
 } from "./coercion.js";
 import { safeMediaMessage } from "./errors.js";
 import { createOutputPlan, persistGeneratedImages } from "./persistence.js";
@@ -37,13 +37,13 @@ export function createVisionAnalyzeHandler(options: {
     try {
       if (options.supportsVision === false) throw new Error("profile does not support vision");
       const rawPrompt = args["prompt"];
-      const prompt = pythonTruthy(rawPrompt)
+      const prompt = isPresentMediaValue(rawPrompt)
         ? visionString("prompt", rawPrompt)
         : DEFAULT_VISION_PROMPT;
       const rawPath = args["path"];
       const rawUrl = args["url"];
       let part;
-      if (pythonTruthy(rawPath)) {
+      if (isPresentMediaValue(rawPath)) {
         part = await buildImagePart({
           path: visionString("path", rawPath),
           localRoot,
@@ -53,7 +53,7 @@ export function createVisionAnalyzeHandler(options: {
             ? {}
             : { afterInputPreflight: options.afterInputPreflight }),
         });
-      } else if (pythonTruthy(rawUrl)) {
+      } else if (isPresentMediaValue(rawUrl)) {
         part = await buildImagePart({ url: visionString("url", rawUrl), localRoot, rootGuard });
       } else {
         throw new Error("vision_analyze requires a 'path' or a 'url'");

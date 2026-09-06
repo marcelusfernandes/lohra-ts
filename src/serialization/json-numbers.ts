@@ -1,13 +1,11 @@
 /** Fidelity primitives for JSON numbers read/written by providers and stores,
  * and this runtime's own JSON stringify/parse
  * (docs/adr/0003-native-wire-format.md, "Number fidelity is a separate
- * concern and is kept" and "JSON output"). `python-json.ts` (the
- * `json.dumps`-mimicking module this replaced, issue #71) is gone; this is
- * the only module `src/` uses to read or write JSON. Nothing here targets
- * Python bytes: it exists so a float that arrived as `1.0` doesn't silently
- * become the integer `1`, and an integer beyond `Number.MAX_SAFE_INTEGER`
- * doesn't silently lose precision, anywhere this runtime parses or emits
- * JSON. */
+ * concern and is kept" and "JSON output"). This is the only module `src/`
+ * uses to read or write JSON: it exists so a float that arrived as `1.0`
+ * doesn't silently become the integer `1`, and an integer beyond
+ * `Number.MAX_SAFE_INTEGER` doesn't silently lose precision, anywhere this
+ * runtime parses or emits JSON. */
 
 export class JsonFloat {
   public constructor(public readonly value: number) {}
