@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 
 import type { Usage } from "../pricing/types.js";
 import { usage } from "../pricing/usage.js";
+import type { StateWarning } from "../state/locks.js";
 import { WorkflowRepository } from "../state/workflow-repository.js";
 import type { CacheLookup, WorkflowCache, WorkflowCacheOwnership } from "./cache.js";
 
@@ -20,10 +21,19 @@ export class SqliteWorkflowCache implements WorkflowCache {
     private readonly database: Database.Database,
     private readonly runId: string,
     private readonly ownershipOf: () => WorkflowCacheOwnership,
-    options: { readonly onWrite?: () => void; readonly repository?: WorkflowRepository } = {},
+    options: {
+      readonly onWrite?: () => void;
+      readonly repository?: WorkflowRepository;
+      // Issue #135: only used when `repository` is NOT supplied — the
+      // production path (service.ts) always passes `store.repository`,
+      // which already carries the store's own sink. This is the "or an
+      // option" half of that composition, for a caller that builds a
+      // SqliteWorkflowCache directly.
+      readonly warning?: (warning: StateWarning) => void;
+    } = {},
   ) {
     this.onWrite = options.onWrite;
-    this.repository = options.repository ?? new WorkflowRepository(database);
+    this.repository = options.repository ?? new WorkflowRepository(database, options.warning);
   }
 
   public get(runId: string, hash: string): CacheLookup {

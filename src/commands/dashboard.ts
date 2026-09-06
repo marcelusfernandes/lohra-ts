@@ -42,6 +42,7 @@ import {
   AuditTrail,
   OrchestrationChildRuntime,
   productionOwnershipStore,
+  productionWarningSink,
   WorkflowService,
 } from "../workflow/index.js";
 import { composeSessionTools, createSessionToolBase } from "./session-tools.js";
@@ -222,7 +223,9 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     // connection.database (#101), never a second one, and the leaf sandbox
     // OrchestrationChildRuntime now installs (#107) is what lets its runs
     // actually spawn tool-using leaves instead of denying them fail-closed.
-    store: productionOwnershipStore(connection.database),
+    // The warning sink (#135) prints a refused owned write to stderr — a
+    // concurrent resume or a late heartbeat never disappears in silence.
+    store: productionOwnershipStore(connection.database, { warning: productionWarningSink() }),
     auditTrail: new AuditTrail(toolBase.auditRepository),
   });
   const visionRunner = createModelTransport();

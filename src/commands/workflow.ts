@@ -4,6 +4,7 @@ import { AuditRepository } from "../state/audit-repository.js";
 import { openStateDatabase } from "../state/connection.js";
 import { WorkflowRepository } from "../state/workflow-repository.js";
 import { parseAuditQuery } from "../workflow/audit-query.js";
+import { productionWarningSink } from "../workflow/ownership-store.js";
 
 export interface WorkflowCommandOptions {
   readonly action: "list" | "watch" | "audit";
@@ -69,7 +70,16 @@ function render(
 export async function runWorkflowCommand(options: WorkflowCommandOptions): Promise<number> {
   const connection = openStateDatabase(options.databasePath);
   try {
-    const repository = new WorkflowRepository(connection.database);
+    // Read-only here (list/watch/audit never take a lease or write a run
+    // line), so no owned write of this repository's can ever be refused —
+    // wired for coherence with the other two production sites (#135), not
+    // because a warning is expected in practice.
+    const repository = new WorkflowRepository(
+      connection.database,
+      productionWarningSink((message) => {
+        options.stderr(`${message}\n`);
+      }),
+    );
     const now = options.now ?? (() => Date.now() / 1_000);
     if (options.action === "audit") {
       const parsed = parseAuditQuery(options.args);
