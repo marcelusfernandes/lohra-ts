@@ -97,15 +97,28 @@ it("kills a timed-out target tree and releases the stub port before returning", 
   }
 });
 
-it("kills a timed-out target tree even when 127.0.0.1:11434 is already occupied by another process", async () => {
-  const root = mkdtempSync(join(tmpdir(), "lohra-stub-driver-occupied-"));
-  const occupier = createServer();
+// Tenta ocupar 11434 para simular um Ollama real (ou outro worker do
+// vitest) já escutando ali. Se a porta já estiver ocupada por outra coisa
+// (o próprio cenário que este teste quer cobrir), não é um erro — o
+// precondition desejado já vale, então segue sem o próprio bind.
+async function tryOccupy11434(): Promise<ReturnType<typeof createServer> | undefined> {
+  const server = createServer();
   try {
     await new Promise<void>((resolve, reject) => {
-      occupier.once("error", reject);
-      occupier.listen(11_434, "127.0.0.1", resolve);
+      server.once("error", reject);
+      server.listen(11_434, "127.0.0.1", resolve);
     });
+    return server;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") return undefined;
+    throw error;
+  }
+}
 
+it("kills a timed-out target tree even when 127.0.0.1:11434 is already occupied by another process", async () => {
+  const root = mkdtempSync(join(tmpdir(), "lohra-stub-driver-occupied-"));
+  const occupier = await tryOccupy11434();
+  try {
     const config = join(root, "config.json");
     writeFileSync(
       config,
@@ -145,12 +158,14 @@ it("kills a timed-out target tree even when 127.0.0.1:11434 is already occupied 
     const port = stubPortFromSummary(root);
     expect(port, "a porta efêmera nunca deve coincidir com a porta ocupada").not.toBe(11_434);
   } finally {
-    await new Promise<void>((resolve, reject) => {
-      occupier.close((error) => {
-        if (error === undefined) resolve();
-        else reject(error);
+    if (occupier !== undefined) {
+      await new Promise<void>((resolve, reject) => {
+        occupier.close((error) => {
+          if (error === undefined) resolve();
+          else reject(error);
+        });
       });
-    });
+    }
     rmSync(root, { recursive: true, force: true });
   }
 });
