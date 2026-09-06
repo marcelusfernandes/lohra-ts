@@ -33,6 +33,7 @@ import { readExportable, writeExportable } from "./skills/export.js";
 import {
   AUTH_SPEC,
   CHAT_SPEC,
+  COMMAND_SUMMARY,
   CRON_SPEC,
   DASHBOARD_SPEC,
   DOCTOR_SPEC,
@@ -42,6 +43,7 @@ import {
   SERVE_SPEC,
   SKILL_EXPORT_SPEC,
   SKILL_SPEC,
+  SUBCOMMAND_HELP,
   TIERS_LIST_SPEC,
   TIERS_SPEC,
   TIERS_SUGGEST_SPEC,
@@ -58,7 +60,9 @@ import {
   LEVELS,
   parseCommand,
   renderError,
-  unrecognizedArguments,
+  renderHelp,
+  TOP_LEVEL,
+  unexpectedArguments,
   type Level,
   type ParseResult,
 } from "./cli/arg-validation.js";
@@ -95,6 +99,67 @@ const SPEC_BY_COMMAND: Readonly<
   update: { spec: UPDATE_SPEC, level: LEVELS.update },
 };
 
+interface HelpEntry {
+  readonly spec: CommandSpec;
+  readonly level: Level;
+  readonly summary: string;
+  readonly subcommands?: Readonly<Record<string, string>>;
+}
+
+// One entry per top-level command, read by `lohra <command> --help`. Unlike
+// `SPEC_BY_COMMAND`, this also covers `workflow`, `tiers`, and `skill` —
+// dispatcher commands whose own spec never reaches `resolveParse`'s generic
+// branch but still needs a `--help` rendering of its own.
+const HELP_BY_COMMAND: Readonly<Record<string, HelpEntry>> = {
+  init: { spec: INIT_SPEC, level: LEVELS.init, summary: COMMAND_SUMMARY.init as string },
+  doctor: { spec: DOCTOR_SPEC, level: LEVELS.doctor, summary: COMMAND_SUMMARY.doctor as string },
+  chat: { spec: CHAT_SPEC, level: LEVELS.chat, summary: COMMAND_SUMMARY.chat as string },
+  dashboard: {
+    spec: DASHBOARD_SPEC,
+    level: LEVELS.dashboard,
+    summary: COMMAND_SUMMARY.dashboard as string,
+  },
+  serve: { spec: SERVE_SPEC, level: LEVELS.serve, summary: COMMAND_SUMMARY.serve as string },
+  cron: {
+    spec: CRON_SPEC,
+    level: LEVELS.cron,
+    summary: COMMAND_SUMMARY.cron as string,
+    subcommands: SUBCOMMAND_HELP.cron,
+  },
+  workflow: {
+    spec: WORKFLOW_SPEC,
+    level: LEVELS.workflow,
+    summary: COMMAND_SUMMARY.workflow as string,
+    subcommands: SUBCOMMAND_HELP.workflow,
+  },
+  models: { spec: MODELS_SPEC, level: LEVELS.models, summary: COMMAND_SUMMARY.models as string },
+  tiers: {
+    spec: TIERS_SPEC,
+    level: LEVELS.tiers,
+    summary: COMMAND_SUMMARY.tiers as string,
+    subcommands: SUBCOMMAND_HELP.tiers,
+  },
+  profile: {
+    spec: PROFILE_SPEC,
+    level: LEVELS.profile,
+    summary: COMMAND_SUMMARY.profile as string,
+    subcommands: SUBCOMMAND_HELP.profile,
+  },
+  auth: {
+    spec: AUTH_SPEC,
+    level: LEVELS.auth,
+    summary: COMMAND_SUMMARY.auth as string,
+    subcommands: SUBCOMMAND_HELP.auth,
+  },
+  skill: {
+    spec: SKILL_SPEC,
+    level: LEVELS.skill,
+    summary: COMMAND_SUMMARY.skill as string,
+    subcommands: SUBCOMMAND_HELP.skill,
+  },
+  update: { spec: UPDATE_SPEC, level: LEVELS.update, summary: COMMAND_SUMMARY.update as string },
+};
+
 export interface CliIo {
   readonly environment: Record<string, string>;
   readonly stdout: (value: string) => void;
@@ -123,15 +188,26 @@ function stringField(value: unknown): string {
 }
 
 function help(): string {
-  return `usage: lohra [-h] [--version]\n             {${commands.join(",")}}\n             ...\n\nLohra AI agent\n\npositional arguments:\n  {${commands.join(",")}}\n\noptions:\n  -h, --help  show this help message and exit\n  --version   show program's version number and exit\n`;
+  const lines = [
+    TOP_LEVEL.banner.trimEnd(),
+    "",
+    "Lohra AI agent.",
+    "",
+    "commands:",
+    ...commands.map((name) => `  ${name.padEnd(12)}${COMMAND_SUMMARY[name] as string}`),
+    "",
+    "options:",
+    "  --version           show the installed version",
+  ];
+  return `${lines.join("\n")}\n`;
 }
 
 /** Parses `rest` against `command`'s spec (or, for `tiers`/`skill`, first
- * resolves the required sub-action and then the matching nested spec —
- * mirroring argparse's own per-subparser routing), reports any error with
- * that level's own usage banner, and returns the successful `ParseResult`
- * otherwise. Returns `null` after already writing the rejection to
- * `io.stderr` and the caller should return exit code 2 immediately. */
+ * resolves the required sub-action and then the matching nested spec),
+ * reports any error with that level's own usage banner, and returns the
+ * successful `ParseResult` otherwise. Returns `null` after already writing
+ * the rejection to `io.stderr` and the caller should return exit code 2
+ * immediately. */
 function resolveParse(io: CliIo, command: string, rest: readonly string[]): ParseResult | null {
   if (command === "workflow") {
     const action = rest[0];
@@ -164,7 +240,7 @@ function resolveParse(io: CliIo, command: string, rest: readonly string[]): Pars
       return null;
     }
     if (inner.extras.length > 0) {
-      io.stderr(unrecognizedArguments(inner.extras));
+      io.stderr(unexpectedArguments(inner.extras));
       return null;
     }
     return inner;
@@ -200,7 +276,7 @@ function resolveParse(io: CliIo, command: string, rest: readonly string[]): Pars
       return null;
     }
     if (inner.extras.length > 0) {
-      io.stderr(unrecognizedArguments(inner.extras));
+      io.stderr(unexpectedArguments(inner.extras));
       return null;
     }
     return inner;
@@ -212,7 +288,7 @@ function resolveParse(io: CliIo, command: string, rest: readonly string[]): Pars
     return null;
   }
   if (parsed.extras.length > 0) {
-    io.stderr(unrecognizedArguments(parsed.extras));
+    io.stderr(unexpectedArguments(parsed.extras));
     return null;
   }
   return parsed;
@@ -251,44 +327,29 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     if ((commands as readonly string[]).includes(command)) {
       io.stderr(`lohra: ${command} is not implemented in the TypeScript bootstrap\n`);
     } else {
-      // Mirrors argparse's top-level parser: a token it can't match against
-      // -h/--version is skipped (deferred, not immediately rejected) while
-      // scanning for the first non-option-like token to test against the
-      // `command` positional's choices. Measured: `lohra --frobnicate`
-      // (solo) -> unrecognized; `lohra --profile foo` -> invalid choice
-      // 'foo' (NOT "unrecognized --profile"); `lohra --frobnicate extra1
-      // extra2` -> invalid choice 'extra1'.
+      // classifyUnknownCommand scans for the first non-option-like token to
+      // test against the known command names. Measured: `lohra --frobnicate`
+      // (solo) -> unexpected argument; `lohra --profile foo` -> unknown
+      // command "foo" (NOT "unexpected --profile"); `lohra --frobnicate
+      // extra1 extra2` -> unknown command "extra1".
       const classification = classifyUnknownCommand(argv);
       io.stderr(
         classification.kind === "invalidChoice"
           ? invalidTopLevelChoice(classification.value, commands)
-          : unrecognizedArguments(classification.tokens),
+          : unexpectedArguments(classification.tokens),
       );
     }
     return 2;
   }
 
-  if (command === "workflow" && (argv[1] === "--help" || argv[1] === "-h")) {
-    io.stdout(
-      `${LEVELS.workflow.banner}\nlook at workflow runs (reads the durable state; no LLM)\n\n` +
-        "positional arguments:\n  {list,watch,audit}\n",
-    );
+  if (argv[1] === "--help" || argv[1] === "-h") {
+    const entry = HELP_BY_COMMAND[command] as HelpEntry;
+    io.stdout(renderHelp(entry.level, entry.spec, entry.summary, entry.subcommands));
     return 0;
   }
 
-  if (command === "update" && (argv[1] === "--help" || argv[1] === "-h")) {
-    io.stdout(
-      `${LEVELS.update.banner}\ncheck or fast-forward the installed Lohra git checkout\n\n` +
-        "options:\n  --check      fetch and report without moving HEAD\n" +
-        "  --reinstall  run npm install when dependency files changed\n",
-    );
-    return 0;
-  }
-
-  // Mirrors argparse: unrecognized/mistyped arguments are rejected before
-  // the program does anything else — no env/path resolution, no stdout
-  // envelope, even under --json (the oracle's own rejection writes zero
-  // bytes to stdout in every measured case).
+  // Argument-shape rejection happens before the program does anything else
+  // — no env/path resolution, no stdout envelope, even under --json.
   const parsed = resolveParse(io, command, argv.slice(1));
   if (parsed === null) return 2;
 

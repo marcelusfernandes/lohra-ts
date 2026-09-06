@@ -178,6 +178,41 @@ lohra update --check
 `workflow run`. Chat e dashboard compartilham a mesma composition root para
 workflow/audit, orquestração, cron, MCP, web e mídia.
 
+### Erros e `--help`
+
+O texto de erro e de ajuda da CLI é próprio deste produto — não é um
+mimetismo do `argparse` nem de qualquer outra biblioteca, e pode mudar sem
+ADR (`docs/adr/0003-native-wire-format.md`, "Human-facing text", item 5).
+Exit codes, esses sim, são contrato e não mudam.
+
+Todo uso incorreto (comando desconhecido, opção desconhecida, opção sem
+valor, valor inválido) imprime duas linhas em `stderr` e sai com **exit 2**:
+
+```
+usage: lohra <comando> [options]
+lohra: error: <mensagem>
+```
+
+Exemplos:
+
+```
+$ lohra nope
+usage: lohra <command> [options]
+lohra: error: unknown command "nope"; available commands: init, doctor, chat, dashboard, serve, cron, workflow, models, tiers, profile, auth, skill, update
+
+$ lohra chat --model
+usage: lohra chat [options]
+lohra: error: option --model needs a value
+
+$ lohra cron --interval x
+usage: lohra cron [options]
+lohra: error: option --interval expects an integer, got "x"
+```
+
+`lohra --help` e `lohra <comando> --help` (exit 0) listam, respectivamente,
+todos os comandos e as opções/sub-ações de um comando, cada uma com uma
+frase de descrição.
+
 ### Envelope `--json`
 
 Todo comando com `--json` (`chat`, `doctor`, `models`, …) e `auth status`

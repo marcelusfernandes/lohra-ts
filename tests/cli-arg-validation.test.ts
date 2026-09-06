@@ -3,27 +3,40 @@ import { describe, expect, it } from "vitest";
 import {
   parseCommand,
   renderError,
+  renderHelp,
   LEVELS,
   classifyUnknownCommand,
 } from "../src/cli/arg-validation.js";
 import {
   CHAT_SPEC,
+  DOCTOR_SPEC,
+  DASHBOARD_SPEC,
+  SERVE_SPEC,
   MODELS_SPEC,
   AUTH_SPEC,
   CRON_SPEC,
   PROFILE_SPEC,
   TIERS_SPEC,
+  TIERS_LIST_SPEC,
+  TIERS_SUGGEST_SPEC,
   SKILL_SPEC,
   SKILL_EXPORT_SPEC,
+  INIT_SPEC,
+  UPDATE_SPEC,
+  WORKFLOW_SPEC,
+  WORKFLOW_LIST_SPEC,
   WORKFLOW_WATCH_SPEC,
+  WORKFLOW_AUDIT_SPEC,
+  FLAG_HELP,
 } from "../src/cli/arg-spec.js";
 import { runCli, type CliIo } from "../src/cli.js";
 
-// Every expected byte sequence below was captured [fio] against the real
-// oracle CLI (backend/lohra/cli.py, argparse-based) in an isolated, hermetic
-// HOME with `env -i`, not inferred from reading the Python source. The
-// oracle never writes to stdout when rejecting arguments — even under
-// --json — so every rejection assertion below pins stdout to "".
+// Every expected error/behavior below exercises a specific parsing rule
+// (what's an option, what's a value, what's a subcommand); the text each
+// rule renders is this product's own (ADR 0003, "Human-facing text") and is
+// not a byte contract with anything else. Comments marked "Scenario:"
+// describe the shape of the input being tested, not any external program's
+// output.
 
 function invoke(
   argv: readonly string[],
@@ -43,21 +56,12 @@ function invoke(
   }));
 }
 
-const TOP_LEVEL_USAGE =
-  "usage: lohra [-h] [--version]\n" +
-  "             {init,doctor,chat,dashboard,serve,cron,workflow,models,tiers,profile,auth,skill,update}\n" +
-  "             ...\n";
-
-const CHAT_USAGE =
-  "usage: lohra chat [-h] [--profile PROFILE] [--no-input] [--model MODEL]\n" +
-  "                  [--provider PROVIDER] [--session SESSION] [--no-tools]\n" +
-  "                  [--yolo] [--json] [--max-parallel MAX_PARALLEL]\n" +
-  "                  [--max-iterations MAX_ITERATIONS]\n" +
-  "                  prompt\n";
+const TOP_LEVEL_USAGE = "usage: lohra <command> [options]\n";
+const CHAT_USAGE = "usage: lohra chat [options]\n";
 
 describe("parseCommand — general mechanism (unit)", () => {
   it("(a) a `-`-prefixed token is never consumed as an option's value: unknown short flag becomes an extra, not a positional", () => {
-    // Oracle: `chat -z --no-input --json oi` -> unrecognized arguments: -z
+    // Scenario: `chat -z --no-input --json oi` -> -z is unrecognized, not the prompt
     const result = parseCommand(CHAT_SPEC, ["-z", "--no-input", "--json", "oi"]);
     expect(result.error).toBeNull();
     expect(result.extras).toEqual(["-z"]);
@@ -65,13 +69,13 @@ describe("parseCommand — general mechanism (unit)", () => {
   });
 
   it("(a) a known value-flag whose next token looks like an option raises missingValue, not a bad consumption", () => {
-    // Oracle: `chat --max-iterations --no-input --json oi` -> expected one argument
+    // Scenario: `chat --max-iterations --no-input --json oi` -> --max-iterations has no value
     const result = parseCommand(CHAT_SPEC, ["--max-iterations", "--no-input", "--json", "oi"]);
     expect(result.error).toEqual({ kind: "missingValue", flag: "--max-iterations" });
   });
 
   it("(b) an ambiguous flag prefix raises immediately, listing candidates in spec declaration order", () => {
-    // Oracle: `chat --pro x --no-input --json` -> ambiguous option: --pro could match --profile, --provider
+    // Scenario: `chat --pro x --no-input --json` -> --pro matches both --profile and --provider
     const result = parseCommand(CHAT_SPEC, ["--pro", "x", "--no-input", "--json"]);
     expect(result.error).toEqual({
       kind: "ambiguous",
@@ -81,7 +85,7 @@ describe("parseCommand — general mechanism (unit)", () => {
   });
 
   it("(b) an unambiguous flag prefix resolves to the canonical flag and consumes its value — closing the abbreviation-through-extraction gap", () => {
-    // Oracle: `chat --sess x --no-input --json hi` -> session=x, prompt=hi
+    // Scenario: `chat --sess x --no-input --json hi` -> session=x, prompt=hi
     const result = parseCommand(CHAT_SPEC, ["--sess", "x", "--no-input", "--json", "hi"]);
     expect(result.error).toBeNull();
     expect(result.options.get("--session")).toBe("x");
@@ -89,27 +93,27 @@ describe("parseCommand — general mechanism (unit)", () => {
   });
 
   it("(b) a required positional left unfilled raises at this level, using this level's dest name", () => {
-    // Oracle: `chat --no-input --json` (no prompt) -> the following arguments are required: prompt
+    // Scenario: `chat --no-input --json` (no prompt given)
     const result = parseCommand(CHAT_SPEC, ["--no-input", "--json"]);
     expect(result.error).toEqual({ kind: "requiredMissing", name: "prompt" });
   });
 
   it("(c) `--` ends option parsing: everything after it is positional, even if it looks like a flag", () => {
-    // Oracle: `chat --no-input --json -- --frobnicate` -> executes, input: "--frobnicate"
+    // Scenario: `chat --no-input --json -- --frobnicate` -> input: "--frobnicate"
     const result = parseCommand(CHAT_SPEC, ["--no-input", "--json", "--", "--frobnicate"]);
     expect(result.error).toBeNull();
     expect(result.extras).toEqual([]);
     expect(result.positionals).toEqual(["--frobnicate"]);
   });
 
-  it("a boolean flag given =value is rejected (ignored explicit argument)", () => {
-    // Oracle: `chat --json= --no-input oi` -> argument --json: ignored explicit argument ''
+  it("a boolean flag given =value is rejected", () => {
+    // Scenario: `chat --json= --no-input oi` -> --json takes no value
     const result = parseCommand(CHAT_SPEC, ["--json=", "--no-input", "oi"]);
     expect(result.error).toEqual({ kind: "unexpectedValue", flag: "--json", value: "" });
   });
 
   it("an invalid choice on a required positional raises immediately, distinct from requiredMissing", () => {
-    // Oracle: `profile bogus` -> argument action: invalid choice: 'bogus' (choose from list, create)
+    // Scenario: `profile bogus` -> 'bogus' is not list|create
     const result = parseCommand(PROFILE_SPEC, ["bogus"]);
     expect(result.error).toEqual({
       kind: "invalidChoice",
@@ -120,7 +124,7 @@ describe("parseCommand — general mechanism (unit)", () => {
   });
 
   it("an optional positional never triggers requiredMissing, so trailing extras still bubble", () => {
-    // Oracle: `profile create --xx` -> unrecognized arguments: --xx (NOT "usage of profile")
+    // Scenario: `profile create --xx` -> --xx is unrecognized, not "usage of profile"
     const result = parseCommand(PROFILE_SPEC, ["create", "--xx"]);
     expect(result.error).toBeNull();
     expect(result.extras).toEqual(["--xx"]);
@@ -145,31 +149,42 @@ describe("parseCommand — general mechanism (unit)", () => {
   });
 });
 
-describe("renderError", () => {
-  it("chat invalidInt uses the chat-level usage banner and prefix", () => {
+describe("renderError — the usage banner + `lohra: error:` molde", () => {
+  it("invalidInt: option name, level's own usage banner, and the offending value", () => {
     expect(
       renderError({ kind: "invalidInt", flag: "--max-iterations", value: "abc" }, LEVELS.chat),
-    ).toBe(`${CHAT_USAGE}lohra chat: error: argument --max-iterations: invalid int value: 'abc'\n`);
+    ).toBe(`${CHAT_USAGE}lohra: error: option --max-iterations expects an integer, got "abc"\n`);
   });
 
   it("requiredMissing for tiers uses the tiers_cmd dest name and tiers-level usage", () => {
     expect(renderError({ kind: "requiredMissing", name: "tiers_cmd" }, LEVELS.tiers)).toBe(
-      "usage: lohra tiers [-h] {list,suggest} ...\nlohra tiers: error: the following arguments are required: tiers_cmd\n",
+      "usage: lohra tiers [options]\nlohra: error: missing required argument: tiers_cmd\n",
+    );
+  });
+
+  it("invalidChoice lists the offending value and the full choice set", () => {
+    expect(
+      renderError(
+        { kind: "invalidChoice", name: "action", value: "bogus", choices: ["list", "create"] },
+        LEVELS.profile,
+      ),
+    ).toBe(
+      'usage: lohra profile [options]\nlohra: error: invalid value "bogus" for action; choose from list, create\n',
     );
   });
 });
 
 describe("classifyUnknownCommand", () => {
-  it("a solo unrecognized top-level token: every token is unrecognized, not an invalid choice", () => {
-    // Oracle: `lohra --frobnicate` -> unrecognized arguments: --frobnicate
+  it("a solo unrecognized top-level token: every token is unexpected, not an unknown command", () => {
+    // Scenario: `lohra --frobnicate` -> no non-option-like token exists
     expect(classifyUnknownCommand(["--frobnicate"])).toEqual({
       kind: "unrecognized",
       tokens: ["--frobnicate"],
     });
   });
 
-  it("an option-like token followed by a non-option token: the non-option token is the invalid choice, not the flag", () => {
-    // Oracle: `lohra --profile foo` -> invalid choice: 'foo' (NOT "unrecognized --profile")
+  it("an option-like token followed by a non-option token: the non-option token is the unknown command, not the flag", () => {
+    // Scenario: `lohra --profile foo` -> "foo" is the attempted command name
     expect(classifyUnknownCommand(["--profile", "foo"])).toEqual({
       kind: "invalidChoice",
       value: "foo",
@@ -177,7 +192,7 @@ describe("classifyUnknownCommand", () => {
   });
 
   it("multiple trailing tokens after an unmatched option: the first non-option token is the victim", () => {
-    // Oracle: `lohra --frobnicate extra1 extra2` -> invalid choice: 'extra1'
+    // Scenario: `lohra --frobnicate extra1 extra2` -> "extra1" is the attempted command name
     expect(classifyUnknownCommand(["--frobnicate", "extra1", "extra2"])).toEqual({
       kind: "invalidChoice",
       value: "extra1",
@@ -185,7 +200,43 @@ describe("classifyUnknownCommand", () => {
   });
 });
 
-describe("runCli — byte-exact against live oracle captures", () => {
+describe("runCli — the usage + `lohra: error:` molde, exit 2 (AC: one test per case)", () => {
+  it("unknown command: `lohra nope`", async () => {
+    const result = await invoke(["nope"]);
+    expect(result.code).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(
+      `${TOP_LEVEL_USAGE}lohra: error: unknown command "nope"; available commands: init, doctor, chat, dashboard, serve, cron, workflow, models, tiers, profile, auth, skill, update\n`,
+    );
+  });
+
+  it("unknown option: `lohra doctor --frobnicate`", async () => {
+    const result = await invoke(["doctor", "--frobnicate"]);
+    expect(result.code).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(
+      `${TOP_LEVEL_USAGE}lohra: error: unexpected argument "--frobnicate"\n`,
+    );
+  });
+
+  it("option without a value: `lohra chat --model` (no value)", async () => {
+    const result = await invoke(["chat", "--model"]);
+    expect(result.code).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(`${CHAT_USAGE}lohra: error: option --model needs a value\n`);
+  });
+
+  it("invalid value: `lohra cron --interval x`", async () => {
+    const result = await invoke(["cron", "--interval", "x"]);
+    expect(result.code).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(
+      `usage: lohra cron [options]\nlohra: error: option --interval expects an integer, got "x"\n`,
+    );
+  });
+});
+
+describe("runCli — byte-exact against these captures", () => {
   const cases: readonly {
     readonly label: string;
     readonly argv: readonly string[];
@@ -193,110 +244,104 @@ describe("runCli — byte-exact against live oracle captures", () => {
     readonly stderr: string;
   }[] = [
     {
-      label: "C1: chat --max-iterations --no-input --json oi (next token looks like a flag)",
+      label: "chat --max-iterations --no-input --json oi (next token looks like a flag)",
       argv: ["chat", "--max-iterations", "--no-input", "--json", "oi"],
       code: 2,
-      stderr: `${CHAT_USAGE}lohra chat: error: argument --max-iterations: expected one argument\n`,
+      stderr: `${CHAT_USAGE}lohra: error: option --max-iterations needs a value\n`,
     },
     {
-      label: "C1: chat -z --no-input --json oi (unknown short flag, not the prompt)",
+      label: "chat -z --no-input --json oi (unknown short flag, not the prompt)",
       argv: ["chat", "-z", "--no-input", "--json", "oi"],
       code: 2,
-      stderr: `${TOP_LEVEL_USAGE}lohra: error: unrecognized arguments: -z\n`,
+      stderr: `${TOP_LEVEL_USAGE}lohra: error: unexpected argument "-z"\n`,
     },
     {
-      label: "C2: lohra --frobnicate (unrecognized, not invalid choice)",
+      label: "lohra --frobnicate (unexpected, not unknown command)",
       argv: ["--frobnicate"],
       code: 2,
-      stderr: `${TOP_LEVEL_USAGE}lohra: error: unrecognized arguments: --frobnicate\n`,
+      stderr: `${TOP_LEVEL_USAGE}lohra: error: unexpected argument "--frobnicate"\n`,
     },
     {
-      label: "C2: lohra --profile foo (invalid choice 'foo', not unrecognized --profile)",
+      label: "lohra --profile foo (unknown command 'foo', not unexpected --profile)",
       argv: ["--profile", "foo"],
       code: 2,
-      stderr: `${TOP_LEVEL_USAGE}lohra: error: argument command: invalid choice: 'foo' (choose from init, doctor, chat, dashboard, serve, cron, workflow, models, tiers, profile, auth, skill, update)\n`,
+      stderr: `${TOP_LEVEL_USAGE}lohra: error: unknown command "foo"; available commands: init, doctor, chat, dashboard, serve, cron, workflow, models, tiers, profile, auth, skill, update\n`,
     },
     {
-      label: "C3: tiers --frobnicate (required tiers_cmd, tiers-level usage)",
+      label: "tiers --frobnicate (required tiers_cmd, tiers-level usage)",
       argv: ["tiers", "--frobnicate"],
       code: 2,
-      stderr:
-        "usage: lohra tiers [-h] {list,suggest} ...\nlohra tiers: error: the following arguments are required: tiers_cmd\n",
+      stderr: "usage: lohra tiers [options]\nlohra: error: missing required argument: tiers_cmd\n",
     },
     {
-      label: "C3: tiers bogus (invalid choice, tiers-level usage)",
+      label: "tiers bogus (invalid choice, tiers-level usage)",
       argv: ["tiers", "bogus"],
       code: 2,
       stderr:
-        "usage: lohra tiers [-h] {list,suggest} ...\nlohra tiers: error: argument tiers_cmd: invalid choice: 'bogus' (choose from list, suggest)\n",
+        'usage: lohra tiers [options]\nlohra: error: invalid value "bogus" for tiers_cmd; choose from list, suggest\n',
     },
     {
-      label: "C3: skill --frobnicate (required skill_cmd, skill-level usage)",
+      label: "skill --frobnicate (required skill_cmd, skill-level usage)",
       argv: ["skill", "--frobnicate"],
       code: 2,
-      stderr:
-        "usage: lohra skill [-h] {export} ...\nlohra skill: error: the following arguments are required: skill_cmd\n",
+      stderr: "usage: lohra skill [options]\nlohra: error: missing required argument: skill_cmd\n",
     },
     {
-      label: "C3: skill bogus (invalid choice, skill-level usage)",
+      label: "skill bogus (invalid choice, skill-level usage)",
       argv: ["skill", "bogus"],
       code: 2,
       stderr:
-        "usage: lohra skill [-h] {export} ...\nlohra skill: error: argument skill_cmd: invalid choice: 'bogus' (choose from export)\n",
+        'usage: lohra skill [options]\nlohra: error: invalid value "bogus" for skill_cmd; choose from export\n',
     },
     {
-      label: "C3: profile --frobnicate (required action, profile-level usage)",
+      label: "profile --frobnicate (required action, profile-level usage)",
       argv: ["profile", "--frobnicate"],
       code: 2,
-      stderr:
-        "usage: lohra profile [-h] {list,create} [name]\nlohra profile: error: the following arguments are required: action\n",
+      stderr: "usage: lohra profile [options]\nlohra: error: missing required argument: action\n",
     },
     {
-      label: "C3: profile bogus (invalid choice, profile-level usage)",
+      label: "profile bogus (invalid choice, profile-level usage)",
       argv: ["profile", "bogus"],
       code: 2,
       stderr:
-        "usage: lohra profile [-h] {list,create} [name]\nlohra profile: error: argument action: invalid choice: 'bogus' (choose from list, create)\n",
+        'usage: lohra profile [options]\nlohra: error: invalid value "bogus" for action; choose from list, create\n',
     },
     {
-      label: "C3: auth --frobnicate (required action, auth-level usage)",
+      label: "auth --frobnicate (required action, auth-level usage)",
       argv: ["auth", "--frobnicate"],
       code: 2,
-      stderr:
-        "usage: lohra auth [-h] [--profile PROFILE] [--no-input] [--yes]\n                  {status,enable,disable,login,logout,prefer} [value]\nlohra auth: error: the following arguments are required: action\n",
+      stderr: "usage: lohra auth [options]\nlohra: error: missing required argument: action\n",
     },
     {
-      label: "C3: auth bogus (invalid choice, auth-level usage)",
+      label: "auth bogus (invalid choice, auth-level usage)",
       argv: ["auth", "bogus"],
       code: 2,
       stderr:
-        "usage: lohra auth [-h] [--profile PROFILE] [--no-input] [--yes]\n                  {status,enable,disable,login,logout,prefer} [value]\nlohra auth: error: argument action: invalid choice: 'bogus' (choose from status, enable, disable, login, logout, prefer)\n",
+        'usage: lohra auth [options]\nlohra: error: invalid value "bogus" for action; choose from status, enable, disable, login, logout, prefer\n',
     },
     {
-      label: "C3: chat --pro x --no-input --json (ambiguous prefix, chat-level usage)",
+      label: "chat --pro x --no-input --json (ambiguous prefix, chat-level usage)",
       argv: ["chat", "--pro", "x", "--no-input", "--json"],
       code: 2,
-      stderr: `${CHAT_USAGE}lohra chat: error: ambiguous option: --pro could match --profile, --provider\n`,
+      stderr: `${CHAT_USAGE}lohra: error: option --pro is ambiguous; could match --profile, --provider\n`,
     },
     {
-      label: "C3: doctor --profile (missing value, doctor-level usage and prefix — not top-level)",
+      label: "doctor --profile (missing value, doctor-level usage)",
       argv: ["doctor", "--profile"],
       code: 2,
-      stderr:
-        "usage: lohra doctor [-h] [--profile PROFILE] [--no-input] [--json]\nlohra doctor: error: argument --profile: expected one argument\n",
+      stderr: "usage: lohra doctor [options]\nlohra: error: option --profile needs a value\n",
     },
     {
-      label: "C5: chat --json= --no-input oi (boolean flag given =value)",
+      label: "chat --json= --no-input oi (boolean flag given =value)",
       argv: ["chat", "--json=", "--no-input", "oi"],
       code: 2,
-      stderr: `${CHAT_USAGE}lohra chat: error: argument --json: ignored explicit argument ''\n`,
+      stderr: `${CHAT_USAGE}lohra: error: option --json does not take a value (got "")\n`,
     },
     {
-      label: "bare auth defaults nowhere: oracle requires an action too",
+      label: "bare auth defaults nowhere: an action is required too",
       argv: ["auth"],
       code: 2,
-      stderr:
-        "usage: lohra auth [-h] [--profile PROFILE] [--no-input] [--yes]\n                  {status,enable,disable,login,logout,prefer} [value]\nlohra auth: error: the following arguments are required: action\n",
+      stderr: "usage: lohra auth [options]\nlohra: error: missing required argument: action\n",
     },
   ];
 
@@ -309,7 +354,7 @@ describe("runCli — byte-exact against live oracle captures", () => {
     });
   }
 
-  it("C4: chat --no-input --json -- --frobnicate executes with input '--frobnicate'", async () => {
+  it("chat --no-input --json -- --frobnicate executes with input '--frobnicate'", async () => {
     const result = await invoke(["chat", "--no-input", "--json", "--", "--frobnicate"]);
     expect(result.code).toBe(2); // no provider configured
     const envelope = JSON.parse(result.stdout) as { input: string };
@@ -321,7 +366,7 @@ describe("runCli — byte-exact against live oracle captures", () => {
     expect(result).toEqual({
       code: 2,
       stdout: "",
-      stderr: `${TOP_LEVEL_USAGE}lohra: error: unrecognized arguments: --frobnicate\n`,
+      stderr: `${TOP_LEVEL_USAGE}lohra: error: unexpected argument "--frobnicate"\n`,
     });
   });
 
@@ -330,7 +375,7 @@ describe("runCli — byte-exact against live oracle captures", () => {
     expect(result).toEqual({
       code: 2,
       stdout: "",
-      stderr: `${TOP_LEVEL_USAGE}lohra: error: unrecognized arguments: --frobnicate oi\n`,
+      stderr: `${TOP_LEVEL_USAGE}lohra: error: unexpected arguments: "--frobnicate", "oi"\n`,
     });
   });
 
@@ -377,7 +422,7 @@ describe("runCli — byte-exact against live oracle captures", () => {
     expect(envelope.input).toBe("hi");
   });
 
-  it("chat --max-parallel 4 --no-input --json hi: a real, valid oracle flag no longer corrupts the prompt", async () => {
+  it("chat --max-parallel 4 --no-input --json hi: a real, valid flag no longer corrupts the prompt", async () => {
     const result = await invoke(["chat", "--max-parallel", "4", "--no-input", "--json", "hi"]);
     expect(result.code).toBe(2);
     const envelope = JSON.parse(result.stdout) as { input: string };
@@ -385,8 +430,94 @@ describe("runCli — byte-exact against live oracle captures", () => {
   });
 });
 
+describe("--help — exit 0, lists options with a description (AC)", () => {
+  it("lohra --help lists every top-level command", async () => {
+    const result = await invoke(["--help"]);
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("usage: lohra <command> [options]");
+    for (const name of [
+      "init",
+      "doctor",
+      "chat",
+      "dashboard",
+      "serve",
+      "cron",
+      "workflow",
+      "models",
+      "tiers",
+      "profile",
+      "auth",
+      "skill",
+      "update",
+    ]) {
+      expect(result.stdout).toMatch(new RegExp(`^\\s+${name}\\s+\\S`, "mu"));
+    }
+  });
+
+  it("lohra chat --help lists its options with a description", async () => {
+    const result = await invoke(["chat", "--help"]);
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain(CHAT_USAGE.trim());
+    for (const flag of CHAT_SPEC.flags) {
+      expect(result.stdout).toMatch(new RegExp(`^\\s+${flag.name}\\s+\\S`, "mu"));
+    }
+  });
+
+  it("lohra tiers --help lists its sub-actions with a description", async () => {
+    const result = await invoke(["tiers", "--help"]);
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("usage: lohra tiers [options]");
+    expect(result.stdout).toMatch(/^\s+list\s+\S/mu);
+    expect(result.stdout).toMatch(/^\s+suggest\s+\S/mu);
+  });
+});
+
+describe("renderHelp — throws rather than printing a blank description for an undeclared flag", () => {
+  it("fails closed when a flag has no FLAG_HELP entry", () => {
+    expect(() =>
+      renderHelp(
+        LEVELS.chat,
+        { flags: [{ name: "--mystery", takesValue: false }], positionals: [] },
+        "x",
+      ),
+    ).toThrow(/--mystery/);
+  });
+});
+
+describe("FLAG_HELP — every declared flag has a non-empty description (fail-closed)", () => {
+  const specs = [
+    INIT_SPEC,
+    DOCTOR_SPEC,
+    CHAT_SPEC,
+    DASHBOARD_SPEC,
+    CRON_SPEC,
+    SERVE_SPEC,
+    MODELS_SPEC,
+    TIERS_LIST_SPEC,
+    TIERS_SUGGEST_SPEC,
+    PROFILE_SPEC,
+    AUTH_SPEC,
+    SKILL_EXPORT_SPEC,
+    WORKFLOW_SPEC,
+    WORKFLOW_LIST_SPEC,
+    WORKFLOW_WATCH_SPEC,
+    WORKFLOW_AUDIT_SPEC,
+    UPDATE_SPEC,
+  ];
+  const flagNames = new Set(specs.flatMap((spec) => spec.flags.map((flag) => flag.name)));
+
+  for (const name of flagNames) {
+    it(`has help text for ${name}`, () => {
+      expect(FLAG_HELP[name]).toBeTruthy();
+    });
+  }
+});
+
 describe("spec sanity — AUTH_SPEC / TIERS_SPEC / SKILL_SPEC dest names and choice order", () => {
-  it("AUTH_SPEC's action choices match the oracle's declared order", () => {
+  it("AUTH_SPEC's action choices match the declared order", () => {
     expect(AUTH_SPEC.positionals[0]).toEqual({
       name: "action",
       required: true,

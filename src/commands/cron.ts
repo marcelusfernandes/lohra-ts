@@ -34,10 +34,10 @@ function parsePythonFloat(text: string): number | null {
 }
 
 /**
- * Manages scheduled jobs (list/add/remove/pause/resume). Ports cli.py's `run_cron` and its
- * argparse setup byte-exact for goldens (decision 12), with a dedicated, stable exit code (1) for
- * every store fail-closed error, distinguishable from the oracle's exit taxonomy (0/1/2) since
- * the fail-closed collapse (decision 3) has no oracle-side equivalent to reuse a code from.
+ * Manages scheduled jobs (list/add/remove/pause/resume), with a dedicated,
+ * stable exit code (1) for every store fail-closed error — distinct from
+ * the exit code 2 used for a malformed command line, so a caller can tell
+ * "you asked for something invalid" apart from "the store itself refused".
  */
 export function runCron(options: CronCommandOptions): Result {
   const { argv, home } = options;
@@ -46,16 +46,14 @@ export function runCron(options: CronCommandOptions): Result {
     return {
       code: 2,
       stdout: "",
-      stderr: "lohra cron: error: the following arguments are required: action\n",
+      stderr: "lohra: error: missing required argument: action\n",
     };
   }
   if (!(ACTIONS as readonly string[]).includes(rawAction)) {
     return {
       code: 2,
       stdout: "",
-      stderr:
-        `lohra cron: error: argument action: invalid choice: ${JSON.stringify(rawAction)} ` +
-        `(choose from 'list', 'add', 'remove', 'pause', 'resume')\n`,
+      stderr: `lohra: error: invalid value ${JSON.stringify(rawAction)} for action; choose from ${ACTIONS.join(", ")}\n`,
     };
   }
   const action = rawAction as CronAction;
@@ -72,7 +70,7 @@ export function runCron(options: CronCommandOptions): Result {
       return {
         code: 2,
         stdout: "",
-        stderr: `lohra cron: error: argument --interval: invalid int value: ${JSON.stringify(intervalText)}\n`,
+        stderr: `lohra: error: option --interval expects an integer, got ${JSON.stringify(intervalText)}\n`,
       };
     }
     interval = parsed;
@@ -84,7 +82,7 @@ export function runCron(options: CronCommandOptions): Result {
       return {
         code: 2,
         stdout: "",
-        stderr: `lohra cron: error: argument --at: invalid float value: ${JSON.stringify(atText)}\n`,
+        stderr: `lohra: error: option --at expects a number, got ${JSON.stringify(atText)}\n`,
       };
     }
     at = parsed;

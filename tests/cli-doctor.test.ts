@@ -178,7 +178,37 @@ describe("lohra CLI bootstrap", () => {
         stderr: (value) => stderr.push(value),
       }),
     ).toBe(2);
-    expect(stderr.join("")).toContain("the following arguments are required: workflow_cmd");
+    expect(stderr.join("")).toContain("missing required argument: workflow_cmd");
+  });
+
+  it("chat --help lists its options with a description, exit 0", async () => {
+    const stdout: string[] = [];
+    expect(
+      await runCli(["chat", "--help"], {
+        environment: environment(),
+        stdout: (value) => stdout.push(value),
+        stderr: () => undefined,
+      }),
+    ).toBe(0);
+    const output = stdout.join("");
+    expect(output).toContain("usage: lohra chat [options]");
+    expect(output).toMatch(/^\s+--model\s+\S/mu);
+    expect(output).toMatch(/^\s+--provider\s+\S/mu);
+  });
+
+  it("tiers --help lists its sub-actions with a description, exit 0", async () => {
+    const stdout: string[] = [];
+    expect(
+      await runCli(["tiers", "--help"], {
+        environment: environment(),
+        stdout: (value) => stdout.push(value),
+        stderr: () => undefined,
+      }),
+    ).toBe(0);
+    const output = stdout.join("");
+    expect(output).toContain("usage: lohra tiers [options]");
+    expect(output).toMatch(/^\s+list\s+\S/mu);
+    expect(output).toMatch(/^\s+suggest\s+\S/mu);
   });
 
   it("dashboard is wired (T12) -- exits 2 with the same no-provider boundary as chat when unconfigured, not the stub message", async () => {
@@ -202,11 +232,11 @@ describe("lohra CLI bootstrap", () => {
     });
     expect(code).toBe(2);
     expect(stderr.join("")).not.toContain("not implemented in the TypeScript bootstrap");
-    // `cron` with no action at all is argparse's "required argument missing" class
-    // (byte-exact: "the following arguments are required: action"), a DIFFERENT
-    // error class from "invalid choice" -- an explicitly-provided-but-wrong value
-    // (e.g. `cron frobnicate`) is what produces "invalid choice", exercised
+    // `cron` with no action at all is the "required argument missing" class
+    // (byte-exact: "missing required argument: action"), a DIFFERENT error
+    // class from "invalid value" -- an explicitly-provided-but-wrong value
+    // (e.g. `cron frobnicate`) is what produces "invalid value", exercised
     // separately in tests/commands-cron.test.ts and the T18 cli-bilateral harness.
-    expect(stderr.join("")).toContain("the following arguments are required: action");
+    expect(stderr.join("")).toContain("missing required argument: action");
   });
 });

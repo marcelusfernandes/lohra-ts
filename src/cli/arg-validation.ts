@@ -1,8 +1,7 @@
-import type { CommandSpec, FlagSpec } from "./arg-spec.js";
+import { FLAG_HELP, type CommandSpec, type FlagSpec } from "./arg-spec.js";
 
-/** A faithful, general-purpose transcription of argparse's own parsing
- * rules (not a per-cell patch list): a `-`-prefixed token is never consumed
- * as an option's value; an error belongs to whichever parser level
+/** The parsing rules shared by every command: a `-`-prefixed token is never
+ * consumed as an option's value; an error belongs to whichever parser level
  * encountered it, reported with that level's own usage banner; `--` ends
  * option processing. One parse produces one truth — both `cli.ts`'s
  * rejection reporting and (for `chat`) the command's own flag/positional
@@ -30,9 +29,9 @@ export interface ParseResult {
   readonly error: CommandError | null;
 }
 
-/** Python's `int()` accepts an optional sign and ASCII digits (with
- * surrounding whitespace); it rejects decimals, empty strings, and
- * non-digit text — that's the surface argparse's `type=int` relies on. */
+/** An integer flag accepts an optional sign and ASCII digits, with
+ * surrounding whitespace trimmed; decimals, empty strings, and non-digit
+ * text are all rejected. */
 function isPythonInt(value: string): boolean {
   return /^[+-]?\d+$/.test(value.trim());
 }
@@ -59,11 +58,10 @@ function isPythonFloat(value: string): boolean {
   );
 }
 
-/** argparse: a token starting with `-` is option-like unless it's exactly
- * "-" or looks like a negative number (no spec here declares a negative-
- * number-shaped flag, so that carve-out is unconditionally safe). Such a
- * token is never eligible to fill a positional slot or be consumed as an
- * option's value. */
+/** A token starting with `-` is option-like unless it's exactly "-" or looks
+ * like a negative number (no spec here declares a negative-number-shaped
+ * flag, so that carve-out is unconditionally safe). Such a token is never
+ * eligible to fill a positional slot or be consumed as an option's value. */
 function looksLikeOption(token: string): boolean {
   if (!token.startsWith("-") || token === "-") return false;
   return !/^-\d+$/.test(token) && !/^-\d*\.\d+$/.test(token);
@@ -170,152 +168,86 @@ export function parseCommand(spec: CommandSpec, argv: readonly string[]): ParseR
 }
 
 export interface Level {
-  readonly prefix: string;
   readonly banner: string;
 }
 
-// Byte-exact against live oracle runs (`--help`-shaped usage lines, and
-// forced parse errors for each subcommand). Argparse's usage-wrapping
-// algorithm is not reproduced generatively here — every banner below is a
-// direct capture, not a computed layout.
-export const TOP_LEVEL: Level = {
-  prefix: "lohra",
-  banner:
-    "usage: lohra [-h] [--version]\n" +
-    "             {init,doctor,chat,dashboard,serve,cron,workflow,models,tiers,profile,auth,skill,update}\n" +
-    "             ...\n",
-};
+function level(path: string): Level {
+  return { banner: `usage: lohra ${path} [options]\n` };
+}
 
+export const TOP_LEVEL: Level = { banner: "usage: lohra <command> [options]\n" };
+
+// Each level's usage banner is a single, stable, greppable line — no flag
+// list, no `[-h]`, no `{choice,list}`. Per-flag and per-subcommand detail
+// lives in `--help` (`renderHelp` below), not in this banner.
 export const LEVELS = {
-  init: {
-    prefix: "lohra init",
-    banner: "usage: lohra init [-h] [--profile PROFILE] [--no-input]\n",
-  },
-  doctor: {
-    prefix: "lohra doctor",
-    banner: "usage: lohra doctor [-h] [--profile PROFILE] [--no-input] [--json]\n",
-  },
-  chat: {
-    prefix: "lohra chat",
-    banner:
-      "usage: lohra chat [-h] [--profile PROFILE] [--no-input] [--model MODEL]\n" +
-      "                  [--provider PROVIDER] [--session SESSION] [--no-tools]\n" +
-      "                  [--yolo] [--json] [--max-parallel MAX_PARALLEL]\n" +
-      "                  [--max-iterations MAX_ITERATIONS]\n" +
-      "                  prompt\n",
-  },
-  dashboard: {
-    prefix: "lohra dashboard",
-    banner:
-      "usage: lohra dashboard [-h] [--profile PROFILE] [--no-input] [--model MODEL]\n" +
-      "                       [--provider PROVIDER] [--port PORT] [--insecure]\n",
-  },
-  cron: {
-    prefix: "lohra cron",
-    banner:
-      "usage: lohra cron [-h] [--profile PROFILE] [--no-input] [--interval INTERVAL]\n" +
-      "                  [--cron CRON] [--at AT] [--name NAME] [--prompt PROMPT]\n" +
-      "                  {list,add,remove,pause,resume} [job_id]\n",
-  },
-  serve: {
-    prefix: "lohra serve",
-    banner:
-      "usage: lohra serve [-h] [--profile PROFILE] [--no-input] [--host HOST]\n" +
-      "                   [--port PORT] [--insecure] [--tools TOOLS]\n",
-  },
-  models: {
-    prefix: "lohra models",
-    banner:
-      "usage: lohra models [-h] [--profile PROFILE] [--no-input]\n" +
-      "                    [--provider PROVIDER] [--json]\n",
-  },
-  tiers: { prefix: "lohra tiers", banner: "usage: lohra tiers [-h] {list,suggest} ...\n" },
-  tiersList: {
-    prefix: "lohra tiers list",
-    banner: "usage: lohra tiers list [-h] [--profile PROFILE] [--no-input]\n",
-  },
-  tiersSuggest: {
-    prefix: "lohra tiers suggest",
-    banner: "usage: lohra tiers suggest [-h] [--profile PROFILE] [--no-input] [--yes]\n",
-  },
-  profile: { prefix: "lohra profile", banner: "usage: lohra profile [-h] {list,create} [name]\n" },
-  auth: {
-    prefix: "lohra auth",
-    banner:
-      "usage: lohra auth [-h] [--profile PROFILE] [--no-input] [--yes]\n" +
-      "                  {status,enable,disable,login,logout,prefer} [value]\n",
-  },
-  skill: { prefix: "lohra skill", banner: "usage: lohra skill [-h] {export} ...\n" },
-  skillExport: {
-    prefix: "lohra skill export",
-    banner: "usage: lohra skill export [-h] [--to TO] name\n",
-  },
-  workflow: {
-    prefix: "lohra workflow",
-    banner: "usage: lohra workflow [-h] [--profile PROFILE] [--no-input] {list,watch,audit} ...\n",
-  },
-  workflowList: {
-    prefix: "lohra workflow list",
-    banner: "usage: lohra workflow list [-h] [--limit LIMIT]\n",
-  },
-  workflowWatch: {
-    prefix: "lohra workflow watch",
-    banner: "usage: lohra workflow watch [-h] [--last] [--poll POLL] [run_id]\n",
-  },
-  workflowAudit: {
-    prefix: "lohra workflow audit",
-    banner:
-      "usage: lohra workflow audit [-h] [--node NODE_ID] [--event EVENT_TYPE]\n" +
-      "                            [--sub-id SUB_ID] [--segment-id SEGMENT_ID]\n" +
-      "                            [--attempt ATTEMPT] [--after-seq AFTER_SEQ]\n" +
-      "                            [--snapshot-seq SNAPSHOT_SEQ] [--limit LIMIT]\n" +
-      "                            run_id\n",
-  },
-  update: {
-    prefix: "lohra update",
-    banner: "usage: lohra update [-h] [--check] [--reinstall]\n",
-  },
+  init: level("init"),
+  doctor: level("doctor"),
+  chat: level("chat"),
+  dashboard: level("dashboard"),
+  cron: level("cron"),
+  serve: level("serve"),
+  models: level("models"),
+  tiers: level("tiers"),
+  tiersList: level("tiers list"),
+  tiersSuggest: level("tiers suggest"),
+  profile: level("profile"),
+  auth: level("auth"),
+  skill: level("skill"),
+  skillExport: level("skill export"),
+  workflow: level("workflow"),
+  workflowList: level("workflow list"),
+  workflowWatch: level("workflow watch"),
+  workflowAudit: level("workflow audit"),
+  update: level("update"),
 } as const satisfies Record<string, Level>;
 
 export function renderError(error: CommandError, level: Level): string {
-  const prefix = `${level.banner}${level.prefix}: error: `;
+  const prefix = `${level.banner}lohra: error: `;
   switch (error.kind) {
     case "ambiguous":
-      return `${prefix}ambiguous option: ${error.token} could match ${error.candidates.join(", ")}\n`;
+      return `${prefix}option ${error.token} is ambiguous; could match ${error.candidates.join(", ")}\n`;
     case "missingValue":
-      return `${prefix}argument ${error.flag}: expected one argument\n`;
+      return `${prefix}option ${error.flag} needs a value\n`;
     case "invalidInt":
-      return `${prefix}argument ${error.flag}: invalid int value: '${error.value}'\n`;
+      return `${prefix}option ${error.flag} expects an integer, got ${JSON.stringify(error.value)}\n`;
     case "invalidFloat":
-      return `${prefix}argument ${error.flag}: invalid float value: '${error.value}'\n`;
+      return `${prefix}option ${error.flag} expects a number, got ${JSON.stringify(error.value)}\n`;
     case "unexpectedValue":
-      return `${prefix}argument ${error.flag}: ignored explicit argument '${error.value}'\n`;
+      return `${prefix}option ${error.flag} does not take a value (got ${JSON.stringify(error.value)})\n`;
     case "requiredMissing":
-      return `${prefix}the following arguments are required: ${error.name}\n`;
+      return `${prefix}missing required argument: ${error.name}\n`;
     case "invalidChoice":
-      return `${prefix}argument ${error.name}: invalid choice: '${error.value}' (choose from ${error.choices.join(", ")})\n`;
+      return `${prefix}invalid value ${JSON.stringify(error.value)} for ${error.name}; choose from ${error.choices.join(", ")}\n`;
   }
 }
 
-export function unrecognizedArguments(tokens: readonly string[]): string {
-  return `${TOP_LEVEL.banner}${TOP_LEVEL.prefix}: error: unrecognized arguments: ${tokens.join(" ")}\n`;
+/** Extra tokens a command's own spec never declared — always reported
+ * against the top-level banner, since that is the level that ultimately
+ * gives up on them. */
+export function unexpectedArguments(tokens: readonly string[]): string {
+  const quoted = tokens.map((token) => JSON.stringify(token));
+  const message =
+    quoted.length === 1
+      ? `unexpected argument ${quoted.join(", ")}`
+      : `unexpected arguments: ${quoted.join(", ")}`;
+  return `${TOP_LEVEL.banner}lohra: error: ${message}\n`;
 }
 
 export function invalidTopLevelChoice(value: string, choices: readonly string[]): string {
-  return `${TOP_LEVEL.banner}${TOP_LEVEL.prefix}: error: argument command: invalid choice: '${value}' (choose from ${choices.join(", ")})\n`;
+  return `${TOP_LEVEL.banner}lohra: error: unknown command ${JSON.stringify(value)}; available commands: ${choices.join(", ")}\n`;
 }
 
-/** When `argv[0]` doesn't resolve to a known command, the oracle's own
- * top-level parser scans forward for the first non-option-like token to
- * test as the `command` positional's value (a bad value there is an
- * immediate "invalid choice" error); if no such token exists anywhere in
- * argv, every token is an unmatched extra instead — measured against
- * `lohra --frobnicate` (solo, unrecognized), `lohra --profile foo`
- * (invalid choice: 'foo', not 'invalid --profile'), and
- * `lohra --frobnicate extra1 extra2` (invalid choice: 'extra1'). A flag
- * appearing before a VALID subcommand name is not handled — cli.ts's
- * dispatch only ever inspects `argv[0]` directly, and no measured case
- * exercises that combination. */
+/** When the first argument doesn't resolve to a known command, scan forward
+ * for the first token that isn't option-shaped and treat it as the
+ * attempted command name (an "unknown command" error); if every token looks
+ * like an option, there is no command candidate at all and every token is
+ * reported as an unexpected argument instead — measured against `lohra
+ * --frobnicate` (solo, unexpected), `lohra --profile foo` (unknown command
+ * "foo", not "unexpected --profile"), and `lohra --frobnicate extra1
+ * extra2` (unknown command "extra1"). A flag appearing before a VALID
+ * command name is not handled — cli.ts's dispatch only ever inspects
+ * `argv[0]` directly, and no case exercises that combination. */
 export function classifyUnknownCommand(
   argv: readonly string[],
 ):
@@ -325,4 +257,40 @@ export function classifyUnknownCommand(
     if (!looksLikeOption(token)) return { kind: "invalidChoice", value: token };
   }
   return { kind: "unrecognized", tokens: argv };
+}
+
+function flagDescription(flag: FlagSpec): string {
+  const description = FLAG_HELP[flag.name];
+  if (description === undefined) {
+    throw new Error(`missing help text for flag ${flag.name} — add it to FLAG_HELP in arg-spec.ts`);
+  }
+  return description;
+}
+
+/** Renders `--help`/`-h` for one command: its usage banner, a one-line
+ * summary, an optional "commands:" section (for a dispatcher command like
+ * `tiers` or `workflow`, one line per sub-action), and an "options:"
+ * section with one line per declared flag. Every flag must have an entry in
+ * `FLAG_HELP` — a missing one is a programmer error and throws rather than
+ * printing a blank description. */
+export function renderHelp(
+  commandLevel: Level,
+  spec: CommandSpec,
+  summary: string,
+  subcommands?: Readonly<Record<string, string>>,
+): string {
+  const sections = [commandLevel.banner.trimEnd(), "", summary];
+  if (subcommands !== undefined) {
+    sections.push("", "commands:");
+    for (const [name, description] of Object.entries(subcommands)) {
+      sections.push(`  ${name.padEnd(12)}${description}`);
+    }
+  }
+  if (spec.flags.length > 0) {
+    sections.push("", "options:");
+    for (const flag of spec.flags) {
+      sections.push(`  ${flag.name.padEnd(20)}${flagDescription(flag)}`);
+    }
+  }
+  return `${sections.join("\n")}\n`;
 }

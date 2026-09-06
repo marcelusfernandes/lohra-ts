@@ -18,16 +18,11 @@ function home(): string {
   return value;
 }
 
-const usage = `usage: lohra chat [-h] [--profile PROFILE] [--no-input] [--model MODEL]
-                  [--provider PROVIDER] [--session SESSION] [--no-tools]
-                  [--yolo] [--json] [--max-parallel MAX_PARALLEL]
-                  [--max-iterations MAX_ITERATIONS]
-                  prompt
-`;
+const usage = "usage: lohra chat [options]\n";
 
 describe("chat CLI argument boundary", () => {
   it.each(["2.9", "abc"])(
-    "rejects non-integer --max-parallel %s like argparse before runChat",
+    "rejects non-integer --max-parallel %s before runChat ever sees it",
     async (raw) => {
       const stdout: string[] = [];
       const stderr: string[] = [];
@@ -52,7 +47,7 @@ describe("chat CLI argument boundary", () => {
       expect(code).toBe(2);
       expect(stdout.join("")).toBe("");
       expect(stderr.join("")).toBe(
-        `${usage}lohra chat: error: argument --max-parallel: invalid int value: '${raw}'\n`,
+        `${usage}lohra: error: option --max-parallel expects an integer, got "${raw}"\n`,
       );
     },
   );
