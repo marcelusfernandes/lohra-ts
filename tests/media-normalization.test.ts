@@ -37,11 +37,11 @@ describe("media Python coercions", () => {
     expect(pythonTruthy(value)).toBe(true);
   });
 
-  it("renders JSON values with Python str semantics", () => {
+  it("renders non-string truthy values as JSON", () => {
     expect(coerceImagePrompt(7)).toBe("7");
-    expect(coerceImagePrompt(true)).toBe("True");
-    expect(coerceImagePrompt([1, "x"])).toBe("[1, 'x']");
-    expect(coerceImagePrompt({ a: 1 })).toBe("{'a': 1}");
+    expect(coerceImagePrompt(true)).toBe("true");
+    expect(coerceImagePrompt([1, "x"])).toBe('[1,"x"]');
+    expect(coerceImagePrompt({ a: 1 })).toBe('{"a":1}');
     expect(() => coerceImagePrompt("   ")).toThrow("non-empty 'prompt'");
   });
 

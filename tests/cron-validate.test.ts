@@ -22,7 +22,7 @@ describe("validateJob", () => {
   it("rejects an unknown job type", () => {
     expect(() => {
       validateJob("n", "p", "daily", 5);
-    }).toThrow("unknown job type 'daily' (use once/interval/cron)");
+    }).toThrow('unknown job type "daily" (use once/interval/cron)');
   });
 
   it("interval must be a positive number", () => {
@@ -58,10 +58,10 @@ describe("validateJob", () => {
   it("cron expression is validated via cronMatches, wrapped with a prefix", () => {
     expect(() => {
       validateJob("n", "p", "cron", "* * * *");
-    }).toThrow("invalid cron expression: cron expression needs 5 fields, got 4: '* * * *'");
+    }).toThrow('invalid cron expression: cron expression needs 5 fields, got 4: "* * * *"');
     expect(() => {
       validateJob("n", "p", "cron", "60 * * * *");
-    }).toThrow("invalid cron expression: cron field out of range: '60'");
+    }).toThrow('invalid cron expression: cron field out of range: "60"');
     expect(() => {
       validateJob("n", "p", "cron", "0 0 * * 7");
     }).not.toThrow();

@@ -35,33 +35,19 @@ describe("wireUsage — provider-reported usage projected to the OpenAI wire sha
   });
 });
 
-describe("estimateUsage — no provider usage, Python-faithful str()-based estimate", () => {
-  it("matches the mandatory B5 vector: parts content 66 chars -> prompt 16", () => {
-    // evidence-s09-gaps.json#estimate_parts_content:
-    // "SCEN:nousage seed" (17) + "ok" (2) + repr([{'type':'text','text':'SCEN:nousage abcd'}]) (47) = 66
+describe("estimateUsage — no provider usage, JSON-compact-str()-based estimate", () => {
+  it("counts a non-string content part as its JSON.stringify length: 63 chars -> prompt 15", () => {
+    // "SCEN:nousage seed" (17) + "ok" (2) +
+    // JSON.stringify([{type:"text",text:"SCEN:nousage abcd"}]) (44) = 63
     const messages = [
       { role: "user", content: "SCEN:nousage seed" },
       { role: "assistant", content: "ok" },
       { role: "user", content: [{ type: "text", text: "SCEN:nousage abcd" }] },
     ];
     const usage = estimateUsage(messages, "abcdefgh");
-    expect(usage.prompt_tokens).toBe(16);
+    expect(usage.prompt_tokens).toBe(15);
     expect(usage.completion_tokens).toBe(2);
-    expect(usage.total_tokens).toBe(18);
-  });
-
-  it("a JSON.stringify-compact estimate (63 chars -> 15) must NOT be what this produces", () => {
-    const messages = [
-      { role: "user", content: "SCEN:nousage seed" },
-      { role: "assistant", content: "ok" },
-      { role: "user", content: [{ type: "text", text: "SCEN:nousage abcd" }] },
-    ];
-    const usage = estimateUsage(messages, "abcdefgh");
-    expect(usage.prompt_tokens).not.toBe(15);
-    const jsonStringifyLength = JSON.stringify([
-      { type: "text", text: "SCEN:nousage abcd" },
-    ]).length;
-    expect(jsonStringifyLength).not.toBe(47); // sanity: JSON.stringify diverges from the Python repr
+    expect(usage.total_tokens).toBe(17);
   });
 
   it("chat content string 31 chars -> prompt 7", () => {

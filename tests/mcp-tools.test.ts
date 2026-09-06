@@ -86,12 +86,24 @@ describe("wrapCallResult", () => {
     );
   });
 
-  it("kills JS String spelling: null/booleans use Python placeholder spellings", () => {
+  it("renders a non-string, non-number type via JSON quoting", () => {
     expect(wrapCallResult({ content: [{ type: null }] })).toBe(
-      toolResult(undefined, { content: "[None block]" }),
+      toolResult(undefined, { content: "[null block]" }),
     );
     expect(wrapCallResult({ content: [{ type: true }, { type: false }] })).toBe(
-      toolResult(undefined, { content: "[True block][False block]" }),
+      toolResult(undefined, { content: "[true block][false block]" }),
+    );
+  });
+
+  // Round 2 (PR #85 review): JSON.stringify returns the JS value `undefined`
+  // (not a string) for a function/symbol type — the render must cite that
+  // explicitly as the literal `undefined`, not fall through uncovered.
+  it("cites a function or symbol type as the literal undefined", () => {
+    expect(wrapCallResult({ content: [{ type: () => undefined }] })).toBe(
+      toolResult(undefined, { content: "[undefined block]" }),
+    );
+    expect(wrapCallResult({ content: [{ type: Symbol("weird") }] })).toBe(
+      toolResult(undefined, { content: "[undefined block]" }),
     );
   });
 

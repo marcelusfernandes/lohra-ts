@@ -18,21 +18,6 @@ const record = (value: unknown): Record<string, unknown> | null =>
     ? (value as Record<string, unknown>)
     : null;
 
-const pythonRepr = (value: unknown): string => {
-  if (typeof value === "string") return `'${value}'`;
-  if (value === null) return "None";
-  if (value === true) return "True";
-  if (value === false) return "False";
-  if (Array.isArray(value)) return `[${value.map(pythonRepr).join(", ")}]`;
-  if (record(value) !== null)
-    return `{${Object.entries(value as Record<string, unknown>)
-      .map(([k, v]) => `${pythonRepr(k)}: ${pythonRepr(v)}`)
-      .join(", ")}}`;
-  if (typeof value === "number" || typeof value === "bigint") return value.toString();
-  if (value === undefined) return "None";
-  return "<unknown>";
-};
-
 const allowedExample = (fields: readonly string[]): string =>
   `allowed: [${[...fields]
     .sort()
@@ -118,10 +103,11 @@ function validateShape(
   }
   const nodeType = raw.type;
   if (typeof nodeType !== "string" || !NODE_TYPES.has(nodeType)) {
+    const citedType = nodeType === undefined ? "undefined" : JSON.stringify(nodeType);
     issue(
       issues,
       "node_type",
-      `unknown node type ${pythonRepr(nodeType)}`,
+      `unknown node type ${citedType}`,
       id,
       "type",
       `type: one of [${[...NODE_TYPES]

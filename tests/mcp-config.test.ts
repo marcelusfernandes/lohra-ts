@@ -44,13 +44,13 @@ describe("loadMcpConfig", () => {
   it("server without command/url throws named error", () => {
     writeFileSync(path, JSON.stringify({ mcpServers: { bad: {} } }));
     expect(() => loadMcpConfig(path)).toThrow(
-      "server 'bad' needs a 'command' (stdio) or 'url' (http)",
+      "server \"bad\" needs a 'command' (stdio) or 'url' (http)",
     );
   });
 
   it("server spec non-object throws named error", () => {
     writeFileSync(path, JSON.stringify({ mcpServers: { bad: "nope" } }));
-    expect(() => loadMcpConfig(path)).toThrow("server 'bad' must be an object");
+    expect(() => loadMcpConfig(path)).toThrow('server "bad" must be an object');
   });
 
   it("disabled: true is skipped", () => {
@@ -195,7 +195,7 @@ describe("loadMcpConfig", () => {
         JSON.stringify({ mcpServers: { fix: { command: "npx", env: [[key, label]] } } }),
       );
       expect(() => loadMcpConfig(path), label).toThrow(
-        "server 'fix' field 'env' entry 0 key must be a non-ambiguous string or null",
+        "server \"fix\" field 'env' entry 0 key must be a non-ambiguous string or null",
       );
     }
   });
@@ -207,7 +207,7 @@ describe("loadMcpConfig", () => {
         JSON.stringify({ mcpServers: { fix: { command: "npx", env: [[key, "x"]] } } }),
       );
       expect(() => loadMcpConfig(path), key).toThrow(
-        `server 'fix' field 'env' entry 0 key '${key}' is a canonical array-index string`,
+        `server "fix" field 'env' entry 0 key ${JSON.stringify(key)} is a canonical array-index string`,
       );
     }
 
@@ -234,7 +234,7 @@ describe("loadMcpConfig", () => {
       JSON.stringify({ mcpServers: { fix: { command: "npx", env: { 0: "object-index" } } } }),
     );
     expect(() => loadMcpConfig(path)).toThrow(
-      "server 'fix' field 'env' key '0' is a canonical array-index string",
+      'server "fix" field \'env\' key "0" is a canonical array-index string',
     );
   });
 
@@ -254,7 +254,7 @@ describe("loadMcpConfig", () => {
         JSON.stringify({ mcpServers: { fix: { command: "npx", env: entries } } }),
       );
       expect(() => loadMcpConfig(path)).toThrow(
-        "server 'fix' field 'env' entry 1 collides after key coercion",
+        "server \"fix\" field 'env' entry 1 collides after key coercion",
       );
     }
   });
@@ -263,7 +263,7 @@ describe("loadMcpConfig", () => {
     for (const args of [{ A: 1 }, 1, true]) {
       writeFileSync(path, JSON.stringify({ mcpServers: { fix: { command: "npx", args } } }));
       expect(() => loadMcpConfig(path)).toThrow(
-        "server 'fix' field 'args' must be a string or array",
+        "server \"fix\" field 'args' must be a string or array",
       );
     }
   });
@@ -275,7 +275,7 @@ describe("loadMcpConfig", () => {
         mcpServers: { good: { command: "npx" }, bad: { url: 123 } },
       }),
     );
-    expect(() => loadMcpConfig(path)).toThrow("server 'bad' field 'url' must be a string");
+    expect(() => loadMcpConfig(path)).toThrow("server \"bad\" field 'url' must be a string");
 
     writeFileSync(
       path,
@@ -283,13 +283,13 @@ describe("loadMcpConfig", () => {
         mcpServers: { good: { command: "npx" }, bad: { command: ["npx", "server"] } },
       }),
     );
-    expect(() => loadMcpConfig(path)).toThrow("server 'bad' field 'command' must be a string");
+    expect(() => loadMcpConfig(path)).toThrow("server \"bad\" field 'command' must be a string");
   });
 
   it("a config error aborts the whole set -- one bad server invalidates all", () => {
     writeFileSync(path, JSON.stringify({ mcpServers: { fix: { command: "npx" }, bad: {} } }));
     expect(() => loadMcpConfig(path)).toThrow(
-      "server 'bad' needs a 'command' (stdio) or 'url' (http)",
+      "server \"bad\" needs a 'command' (stdio) or 'url' (http)",
     );
   });
 });

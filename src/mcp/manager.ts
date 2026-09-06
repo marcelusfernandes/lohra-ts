@@ -1,7 +1,6 @@
 import type { MCPServerConfig } from "./config.js";
 import type { MCPSession, SessionFactory } from "./session.js";
 import { deregisterServer, MCPToolNameCollisionError, prepareServerTools } from "./tools.js";
-import { pythonRepr } from "../serialization/python-repr.js";
 import type { ToolRegistry } from "../tools/registry.js";
 
 /** Bare stderr line, no level prefix -- mirrors the oracle's
@@ -75,7 +74,7 @@ export class MCPManager {
       await session.close();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      warn(`error closing transient MCP session ${pythonRepr(name)}: ${message}`);
+      warn(`error closing transient MCP session ${JSON.stringify(name)}: ${message}`);
     }
   }
 
@@ -100,7 +99,7 @@ export class MCPManager {
         await session.close();
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        warn(`error closing MCP session ${pythonRepr(name)}: ${message}`);
+        warn(`error closing MCP session ${JSON.stringify(name)}: ${message}`);
       }
     }
     this.#sessions.clear();
