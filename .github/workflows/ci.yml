@@ -79,7 +79,8 @@ jobs:
           PENDING_OK: ${{ github.event_name == 'pull_request' && '--pending-ok' || '' }}
         run: |
           set +e
-          npm run provenance:check -- --json $PENDING_OK > provenance.json
+          # --silent tira o banner do npm do stdout: só o JSON vai para o arquivo.
+          npm run --silent provenance:check -- --json $PENDING_OK > provenance.json
           status=$?
           {
             echo '## provenance'

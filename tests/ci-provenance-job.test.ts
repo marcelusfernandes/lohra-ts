@@ -37,6 +37,10 @@ describe("ci.yml — job provenance (#160)", () => {
     expect(bloco).toContain("GITHUB_STEP_SUMMARY");
   });
 
+  it("captura só o JSON: npm run --silent, sem o banner do npm dentro da fence", () => {
+    expect(bloco).toMatch(/npm run --silent provenance:check -- --json/);
+  });
+
   it("não engole o exit code do verificador ao escrever o summary", () => {
     expect(bloco).toMatch(/exit \$status|exit "\$status"/);
   });
