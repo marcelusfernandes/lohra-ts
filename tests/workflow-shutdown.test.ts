@@ -196,6 +196,41 @@ describe("WorkflowService.shutdown()", () => {
     }
   });
 
+  // Issue #121, AC 3: runShutdown had `this.warn` at hand but discarded the
+  // boolean auditTrail.shutdown() returns — a failed flush was silent unless
+  // the caller had ALSO wired AuditTrail's own `warning` option (chat.ts and
+  // dashboard.ts leave it at the default no-op).
+  it("warns via this.warn when the audit trail's flush fails on shutdown", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-workflow-shutdown-audit-warn-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      const auditTrail = new AuditTrail(new AuditRepository(connection.database));
+      vi.spyOn(auditTrail, "shutdown").mockResolvedValue(false);
+      const repository = new WorkflowRepository(connection.database);
+      const locks = new LockRepository(connection.database);
+      const ownership = { fence: 0 as number, holder: "test", now: 1000 };
+      const warnings: string[] = [];
+      const service = new WorkflowService({
+        runtime: gatedRuntime(),
+        auditTrail,
+        onWarning: (message) => warnings.push(message),
+        store: {
+          repository,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
+      });
+      await service.shutdown();
+      expect(warnings.some((message) => message.includes("audit trail flush failed"))).toBe(true);
+    } finally {
+      connection.close();
+    }
+  });
+
   it("warns once when store is undefined outside a test environment", () => {
     const warnings: string[] = [];
     const service = new WorkflowService({

@@ -283,6 +283,13 @@ export function ownershipLost(runId: string, fence: number): OwnershipLost {
   });
 }
 
+/** Per-ACQUISITION sandbox context a stretch's leaf dispatch reads live, so a resume gets a fresh policy/taint. */
+type StretchContext = Readonly<{
+  stretchId: number;
+  workingRoot: string;
+  policy: SandboxPolicy;
+  tainted: boolean;
+}>;
 interface RunRecord {
   readonly id: string;
   readonly name: string;
@@ -372,19 +379,10 @@ export class WorkflowService {
   private readonly fenceMemory: FenceMemory;
   private readonly warn: (message: string) => void;
   private readonly environment: Readonly<Record<string, string | undefined>>;
+  private readonly timerFactory: (delay: number, fire: () => void) => Timer;
   private warnedEphemeral = false;
   private shuttingDown: Promise<void> | undefined;
-  /** Per-ACQUISITION sandbox context; the leaf dispatch of a stretch reads it
-   * live, so a resume with a fresh policy/taint is what its leaves get. */
-  private readonly stretches = new Map<
-    string,
-    {
-      readonly stretchId: number;
-      readonly workingRoot: string;
-      readonly policy: SandboxPolicy;
-      readonly tainted: boolean;
-    }
-  >();
+  private readonly stretches = new Map<string, StretchContext>();
   /** Monotonic id per ACQUISITION, so two stretches of one run never share one. */
   private stretchSeq = 0;
 
@@ -427,6 +425,7 @@ export class WorkflowService {
       ((message) => {
         console.warn(message);
       });
+    this.timerFactory = options.timerFactory ?? defaultServiceTimer;
     this.environment = options.environment ?? process.env;
     this.auditTrail = auditEnabled(this.environment, this.warn) ? options.auditTrail : undefined;
     this.liveEvents = new WorkflowLiveEvents(
@@ -441,7 +440,7 @@ export class WorkflowService {
     this.policyLoader = () => loadPolicy(policyPath);
     const store = options.store;
     if (store !== undefined) {
-      const timerFactory = options.timerFactory ?? defaultServiceTimer;
+      const timerFactory = this.timerFactory;
       this.autoResume = new AutoResumeScheduler(
         (runId) => this.start(null, {}, { resumeRunId: runId }),
         { timerFactory },
@@ -1302,7 +1301,7 @@ export class WorkflowService {
     for (const record of live) record.engine.cancel();
     let timer: Timer | undefined;
     const expired = new Promise<boolean>((resolve) => {
-      timer = defaultServiceTimer(SHUTDOWN_SETTLE_TIMEOUT_MS / 1000, () => {
+      timer = this.timerFactory(SHUTDOWN_SETTLE_TIMEOUT_MS / 1000, () => {
         resolve(false);
       });
     });
@@ -1315,8 +1314,9 @@ export class WorkflowService {
           "their lease is left to expire on the TTL (heartbeat already stopped)",
       );
     }
-    this.autoResume?.shutdown();
-    if (this.auditTrail !== undefined) await this.auditTrail.shutdown();
+    this.autoResume?.shutdown(); // also cancels a resume schedule()d mid-wait
+    const auditOk = this.auditTrail === undefined || (await this.auditTrail.shutdown());
+    if (!auditOk) this.warn("workflow: shutdown's audit trail flush failed");
   }
 
   cancel(runId: string): WorkflowServiceError | Readonly<Record<string, unknown>> {
