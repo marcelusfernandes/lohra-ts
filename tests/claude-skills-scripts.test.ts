@@ -1,9 +1,9 @@
 // Bancada dos scripts das skills de processo (`.claude/skills/**/scripts`),
-// issue #79: `secao.sh` (extração de seção usada por `open-pr.sh`) e a
+// issue #79 (e #99: fences ignorados, bit de execução): `secao.sh` (extração de seção usada por `open-pr.sh`) e a
 // validação de seções de `create-issue.sh --dry-run`. Nenhum dos dois toca a
 // rede nesses caminhos; `create-issue.sh --dry-run` só imprime o comando.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -75,6 +75,29 @@ describe("secao.sh", () => {
   it("um `#` de nível superior encerra a seção", () => {
     const corpo = "## Files\n\n- `x`\n\n# Outro\n\n- y\n";
     expect(secao("Files", corpo).out).toBe("- `x`\n");
+  });
+
+  it("heading dentro de bloco de código (fence) é ignorado — mesma regra do check `escopo`", () => {
+    const corpo = [
+      "## Proof",
+      "",
+      "- Comando: `npm run prova -- x`",
+      "",
+      "```",
+      "## Files",
+      "- falso",
+      "```",
+      "",
+      "## Files",
+      "",
+      "- `x`",
+      "",
+    ].join("\n");
+    expect(secao("Files", corpo).out).toBe("- `x`\n");
+  });
+
+  it("secao.sh tem bit de execução (modo 100755, como open-pr.sh)", () => {
+    expect(statSync(SECAO).mode & 0o111).not.toBe(0);
   });
 });
 

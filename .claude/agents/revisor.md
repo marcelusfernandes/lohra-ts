@@ -19,7 +19,7 @@ stdin). Seja rigoroso e adversarial: procure o que está errado. Mas não invent
 2. **Escopo:** `gh pr diff --name-only` cabe nos `Files` da issue e na classe da PR (ADR
    0004 item 7)? Mudança sem issue?
 3. **Controle negativo:** existe commit `test(red):` e o teste reprovaria contra a base?
-   (Verificado pelo CI quando #34 existir; até lá, leia o diff dos testes.) Onde a PR afirma
+   (O job `controle-negativo` verifica; confira o diff dos testes mesmo assim.) Onde a PR afirma
    verificação (pipe-test, dogfooding, CI), há evidência concreta ou é afirmação solta?
 4. **Invariantes do `CLAUDE.md`:** fail-closed (nenhuma exceção engolida — `|| true`,
    `2>/dev/null`, `| tail` mascarando exit), imutabilidade, ≤ 800 linhas, conventional
