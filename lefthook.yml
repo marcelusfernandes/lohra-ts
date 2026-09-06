@@ -1,9 +1,10 @@
 # lefthook.yml — pre-commit local (issue #63): prettier --check e eslint nos
 # arquivos staged. Instalado por `npm ci`/`npm install` via
 # `scripts/postinstall.mjs`, que chama `lefthook install pre-commit` — só
-# esse hook. Nunca rode `lefthook install` sem argumento aqui: ele
-# reescreveria TODOS os hooks em `.git/hooks`, inclusive o `pre-push` nativo
-# (camada 2 da proteção da main, `.claude/hooks/git-pre-push`, instalado por
+# esse hook. `lefthook install` sem argumento instala todos os hooks deste
+# arquivo e faz backup dos existentes; usamos `install pre-commit` para que
+# o `pre-push` nativo continue sendo o de `.claude/hooks/git-pre-push`
+# (camada 2 da proteção da main, instalado por
 # `.claude/hooks/instalar-git-hooks.sh`) — este arquivo por isso não declara
 # um bloco `pre-push`. Ver README "Desenvolvimento".
 pre-commit:
