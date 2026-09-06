@@ -70,10 +70,26 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
-      # Todo SHA aprovado em docs/closeout.md precisa ser ancestral do HEAD.
-      # Transforma o invariante de proveniência de prosa em gate.
+      # Todo SHA aprovado em docs/provenance.json precisa ser ancestral do HEAD.
+      # Transforma o invariante de proveniência de prosa em gate. Push em main
+      # é estrito; pull_request tolera `pending` com SHA real (--pending-ok,
+      # #160). O --json vai para o step summary sem engolir o exit code.
       - name: approved heads are ancestors of HEAD
-        run: npm run provenance:check
+        env:
+          PENDING_OK: ${{ github.event_name == 'pull_request' && '--pending-ok' || '' }}
+        run: |
+          set +e
+          # --silent tira o banner do npm do stdout: só o JSON vai para o arquivo.
+          npm run --silent provenance:check -- --json $PENDING_OK > provenance.json
+          status=$?
+          {
+            echo '## provenance'
+            echo '```json'
+            cat provenance.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat provenance.json
+          exit $status
 
   # ---- checks de PR (épico #34) ------------------------------------------
   # Só em pull_request: cada um lê o payload do evento (base/head/corpo).
