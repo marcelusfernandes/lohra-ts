@@ -1,14 +1,15 @@
-import { jsonFloat } from "../serialization/json-numbers.js";
-import { pythonJsonDumps } from "../serialization/python-json.js";
+import { jsonFloat, stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
 
 /** CPython's `str(float)` — same digit precision as JSON's float encoding, different tokens
- * for the three special values (`nan`/`inf`/`-inf`, lowercase, vs JSON's `NaN`/`Infinity`). */
+ * for the three special values (`nan`/`inf`/`-inf`, lowercase). This is human-facing text
+ * (cron list's stdout, not a JSON output boundary — docs/adr/0003-native-wire-format.md,
+ * "Human-facing text"), so non-finite values are formatted directly instead of going through
+ * `stringifyJsonPreservingNumbers` (which throws for them at JSON write boundaries). */
 export function pythonFloatStr(value: number): string {
-  const json = pythonJsonDumps(jsonFloat(value));
-  if (json === "NaN") return "nan";
-  if (json === "Infinity") return "inf";
-  if (json === "-Infinity") return "-inf";
-  return json;
+  if (Number.isNaN(value)) return "nan";
+  if (value === Number.POSITIVE_INFINITY) return "inf";
+  if (value === Number.NEGATIVE_INFINITY) return "-inf";
+  return stringifyJsonPreservingNumbers(jsonFloat(value));
 }
 
 /**
