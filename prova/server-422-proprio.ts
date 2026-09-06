@@ -7,5 +7,7 @@ export default {
     "tests/server-request-validation.test.ts",
     "tests/gateway/http-routes.test.ts",
     "tests/server-http-app.test.ts",
+    "tests/server-docs.test.ts",
+    "tests/server-routes.test.ts",
   ],
 } satisfies Declaracao;
