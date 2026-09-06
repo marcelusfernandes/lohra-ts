@@ -4,11 +4,19 @@ import type {
   ChildResult,
   ChildRuntime,
   ChildSpawnRequest,
+  LeafSandboxHandle,
+  LeafSandboxInstallation,
 } from "./runtime.js";
 
 /** Uses the same child pool as public orchestration tools for workflow leaves. */
 export class OrchestrationChildRuntime implements ChildRuntime {
   public constructor(private readonly core: OrchestrationCore) {}
+
+  // TODO(#107, red): install/dispose bookkeeping and the sync/async shim
+  // land in the next commit.
+  public installLeafSandbox(_installation: LeafSandboxInstallation): LeafSandboxHandle {
+    throw new Error("not implemented");
+  }
 
   public spawn(request: ChildSpawnRequest): string {
     return this.core.spawn({
