@@ -4,12 +4,22 @@
 // Runs against source via tsx rather than the packaged dist/ binary; the
 // packaged-binary path is a separate concern (assertion 73's pack-smoke),
 // not what these protocol-level scenarios are proving.
+//
+// Issue #132: launched via `node --import <tsx loader> src/cli.ts`, never
+// through tsx's own CLI wrapper (`tsx/dist/cli.mjs`). That wrapper spawns a
+// second, real child process and relays signals to it over an IPC
+// handshake (~30ms + 30ms ack, then SIGKILL + `process.exit(128 + signal)`
+// if the ack doesn't arrive in time); under load that window is plausibly
+// missed, producing a flaky exit 130 that has nothing to do with this
+// project's own shutdown behavior (diagnosed in PR #131). `--import`
+// bypasses the wrapper entirely: a single real process, clean exit on
+// SIGINT.
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 
 const projectRoot = resolve(import.meta.dirname, "../../..");
 const cliEntry = resolve(projectRoot, "src/cli.ts");
-const TSX_CLI = resolve(projectRoot, "node_modules/tsx/dist/cli.mjs");
+const tsxLoader = import.meta.resolve("tsx");
 
 export interface LaunchedGatewayProcess {
   readonly port: number;
@@ -40,7 +50,7 @@ export async function launchCandidateDashboard(
 ): Promise<LaunchedGatewayProcess> {
   const child = spawn(
     process.execPath,
-    [TSX_CLI, cliEntry, "dashboard", "--port", "0", ...input.argv],
+    ["--import", tsxLoader, cliEntry, "dashboard", "--port", "0", ...input.argv],
     {
       cwd: input.cwd,
       env: input.env,
