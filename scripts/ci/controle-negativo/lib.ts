@@ -211,6 +211,13 @@ export function ehDeclaracaoDeProva(arquivo: string): boolean {
  * NOVA (`prova/<slug>.ts` ausente na base) continua exigindo controle: é
  * exatamente o caso normal de uma PR de feature. `provaJaExisteNaBase` é
  * injetado — quem faz I/O (`git cat-file -e base:<arquivo>`) é `run.ts`.
+ *
+ * NÃO é caso particular de `soArquivosDoOverlay` (abaixo, issue #114) — são
+ * irmãs, cada uma testando "já existia na base" no seu próprio universo de
+ * arquivo (`prova/<slug>.ts` aqui, `tests/**` lá). Um diff com só uma
+ * declaração de prova (nova ou editada) e nenhum `tests/**` nunca satisfaz
+ * `soArquivosDoOverlay` (ela exige um `tests/**` editado) — por isso as duas
+ * são checadas em sequência, cada uma com seu motivo.
  */
 export function soDeclaracaoDeProvaExistenteEditada(
   diff: readonly string[],
@@ -220,6 +227,63 @@ export function soDeclaracaoDeProvaExistenteEditada(
   if (naoDocsOuProcess.length === 0) return false;
   return naoDocsOuProcess.every(
     (arquivo) => ehDeclaracaoDeProva(arquivo) && provaJaExisteNaBase(arquivo),
+  );
+}
+
+// --- SKIP: diff inteiro cai no overlay (issue #114, bloqueava a PR #113) --
+// PR só de teste (`tests/**`/`prova/**`, sem `src/**`/`scripts/**` de
+// produção) faz o mecanismo de `run.ts` (overlay do HEAD sobre a base,
+// `arquivosDeTeste`) reproduzir a própria base — base+overlay ≡ head — e o
+// desfecho é sempre `vacuous-pass`, mesmo quando existe um `test(red):` real
+// (caso concreto: PR #113/#111, `tests/prova-run.test.ts` +
+// `prova/prova-run-timeout.ts`). Quando isso acontece, o controle não tem
+// como discriminar — em vez de reprovar por construção, SKIP com motivo
+// explícito e distinto dos outros dois, para o revisor conferir o
+// `test(red):` manualmente.
+//
+// `TESTES_PREFIXO_RE` é deliberadamente mais larga que `TESTE_RE` (que só
+// aceita `tests/**/*.test.ts`, usado no overlay de verdade): fixtures e
+// helpers sob `tests/**` sem o sufixo `.test.ts` também não são
+// comportamento de produção, e o texto da issue #114 fala em `tests/**`.
+const TESTES_PREFIXO_RE = /^tests\//;
+
+/** `true` para qualquer arquivo sob `tests/**` (não só `*.test.ts` —
+ * fixtures/helpers contam) ou `prova/**`. */
+export function ehArquivoDoOverlay(arquivo: string): boolean {
+  return TESTES_PREFIXO_RE.test(arquivo) || PROVA_RE.test(arquivo);
+}
+
+/**
+ * `true` só quando, depois de remover as classes `docs`/`process`
+ * (`ehArquivoDocsOuProcess`), o restante do diff é não vazio, cai inteiro em
+ * `ehArquivoDoOverlay`, E existe pelo menos um `tests/**` que JÁ EXISTIA na
+ * base (foi EDITADO, não criado). `arquivoJaExisteNaBase` é injetado — quem
+ * faz I/O (`git cat-file -e base:<arquivo>`) é `run.ts`, mesmo padrão de
+ * `soDeclaracaoDeProvaExistenteEditada`.
+ *
+ * A exigência "editado, não novo" não está explícita na descrição da issue,
+ * mas é necessária: sem ela, este SKIP capturaria também um `tests/<slug>
+ * .test.ts` inteiramente NOVO sem nenhum `src/**` — exatamente o cenário
+ * que a suíte de integração já cobre como `vacuous-pass`/`structural-red`
+ * de verdade (`repoVacuousPass`, `repoStructuralRed("sem-test-red"|
+ * "sem-stub")`, e os quatro testes de infraestrutura da base que usam
+ * `escreverTeste` depois do commit de base — nenhum deles editado por esta
+ * issue). Um teste novo sem produção nenhuma é precisamente "afirmação sem
+ * prova" — o controle ainda consegue e deve reprovar isso. O caso real que
+ * motivou a issue (PR #113/#111) sempre EDITA um `tests/**` já existente
+ * (`tests/prova-run.test.ts`) — é aí que "base+overlay ≡ head" se aplica de
+ * verdade: o próprio arquivo de teste, seu conteúdo final, é o que a
+ * correção prova, e ele inteiro já está no overlay.
+ */
+export function soArquivosDoOverlay(
+  diff: readonly string[],
+  arquivoJaExisteNaBase: (arquivo: string) => boolean,
+): boolean {
+  const naoDocsOuProcess = diff.filter((arquivo) => !ehArquivoDocsOuProcess(arquivo));
+  if (naoDocsOuProcess.length === 0) return false;
+  if (!naoDocsOuProcess.every(ehArquivoDoOverlay)) return false;
+  return naoDocsOuProcess.some(
+    (arquivo) => TESTES_PREFIXO_RE.test(arquivo) && arquivoJaExisteNaBase(arquivo),
   );
 }
 
