@@ -1,11 +1,15 @@
 // Issue #63: `scripts/postinstall.mjs` continua instalando o `git-pre-push`
 // nativo (camada 2 da proteção da main) e passa a instalar também o hook
 // `pre-commit` do lefthook — escopado ("install pre-commit"), nunca
-// `lefthook install` sem argumento, que sobrescreveria o `pre-push` recém
-// instalado. Cada teste roda o script real em subprocesso, `cwd` num
-// checkout git temporário com duplos de `.claude/hooks/instalar-git-hooks.sh`
-// e `node_modules/.bin/lefthook` — nunca no worktree real (git hooks são
-// compartilhados entre worktrees; skill `worktree-segura`).
+// `lefthook install` sem argumento, que tocaria (e faria backup de) todos os
+// hooks do `lefthook.yml`, inclusive um `pre-push` que viesse a ser
+// declarado lá. É esse escopo — não a ordem em que os dois instaladores
+// rodam — que garante que o `pre-push` continua sendo o de
+// `.claude/hooks/git-pre-push`. Cada teste roda o script real em subprocesso,
+// `cwd` num checkout git temporário com duplos de
+// `.claude/hooks/instalar-git-hooks.sh` e `node_modules/.bin/lefthook` —
+// nunca no worktree real (git hooks são compartilhados entre worktrees;
+// skill `worktree-segura`).
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
@@ -78,10 +82,10 @@ const LINHA_PUSH_MAIN =
 const INSTALADOR_OK = "#!/bin/sh\necho instalar-git-hooks-chamado\nexit 0\n";
 const LEFTHOOK_FAKE = (marcador: string): string =>
   `#!/bin/sh\necho "$@" > "${marcador}"\nexit 0\n`;
-/** Ambos os duplos apendam ao mesmo log — prova a ORDEM de execução (o que
- * realmente protege o pre-push: instalar-git-hooks.sh sempre corre antes do
- * lefthook, então qualquer coisa que o lefthook escreva em pre-push é
- * sobrescrita depois). */
+/** Ambos os duplos apendam ao mesmo log — prova a ordem determinística de
+ * execução do postinstall (instalar-git-hooks.sh sempre antes do lefthook).
+ * A ordem não é o que protege o `pre-push`: é o escopo de
+ * `lefthook install pre-commit`, que nunca toca o hook `pre-push`. */
 const INSTALADOR_LOG = (log: string): string => `#!/bin/sh\necho instalar-git-hooks >> "${log}"\n`;
 const LEFTHOOK_LOG = (log: string): string => `#!/bin/sh\necho "lefthook $*" >> "${log}"\n`;
 
@@ -143,7 +147,7 @@ describe("postinstall.mjs — pre-commit do lefthook (issue #63)", () => {
     expect(r.stderr).toContain("lefthook install pre-commit falhou");
   });
 
-  it("instalar-git-hooks.sh sempre roda ANTES do lefthook install (é isso que protege o pre-push)", () => {
+  it("instalar-git-hooks.sh sempre roda ANTES do lefthook install (só determinismo — o escopo `pre-commit` é o que protege o pre-push)", () => {
     const dir = novoDir();
     mkdirSync(join(dir, ".git"));
     const log = join(dir, "ordem.log");

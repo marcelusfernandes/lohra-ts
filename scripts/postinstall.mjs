@@ -29,12 +29,13 @@ if (existsSync(join(process.cwd(), ".git")) && existsSync(installer)) {
 }
 
 // Pre-commit local via lefthook (issue #63, lefthook.yml): prettier --check
-// + eslint nos arquivos staged. Escopo explícito ("install pre-commit") —
-// NUNCA `lefthook install` sem argumento, que reescreveria todo o diretório
-// de hooks, inclusive o pre-push instalado acima (README "Desenvolvimento").
-// Sem `.git` (tarball) ou sem o binário (instalação de produção,
-// `--omit=dev`, sem devDependencies) pula em silêncio; falha aqui também não
-// quebra o install (o hook não é a única barreira).
+// + eslint nos arquivos staged. `lefthook install` sem argumento instala
+// todos os hooks do lefthook.yml e faz backup dos existentes; usamos
+// `install pre-commit` (escopo explícito) para que o pre-push nativo
+// continue sendo o instalado acima (README "Desenvolvimento"). Sem `.git`
+// (tarball) ou sem o binário (instalação de produção, `--omit=dev`, sem
+// devDependencies) pula em silêncio; falha aqui também não quebra o install
+// (o hook não é a única barreira).
 if (existsSync(join(process.cwd(), ".git"))) {
   const lefthookBin = join(
     process.cwd(),
