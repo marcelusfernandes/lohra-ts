@@ -2,7 +2,7 @@ import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { readEnvFile } from "../config/env-file.js";
-import { PythonFloat } from "../serialization/python-json.js";
+import { JsonFloat } from "../serialization/json-numbers.js";
 import type { Check, DoctorEnvironment } from "./model.js";
 
 const maxBytes = 256_000;
@@ -155,7 +155,7 @@ export function runChecks(environment: DoctorEnvironment): readonly Check[] {
     ? {
         name: "login",
         state: "ok",
-        detail: `own OAuth token valid until ${formatLocalTime(environment.lohra_oauth_expires_at instanceof PythonFloat ? environment.lohra_oauth_expires_at.value : (environment.lohra_oauth_expires_at as number), environment.timezone)}`,
+        detail: `own OAuth token valid until ${formatLocalTime(environment.lohra_oauth_expires_at instanceof JsonFloat ? environment.lohra_oauth_expires_at.value : (environment.lohra_oauth_expires_at as number), environment.timezone)}`,
         remedy: "",
       }
     : {

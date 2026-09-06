@@ -7,7 +7,10 @@ import {
   shouldRetryStatus,
   type RetryPolicy,
 } from "./errors.js";
-import { jsonStringifyPythonNumbers, pythonJsonLoads } from "../serialization/python-json.js";
+import {
+  parseJsonPreservingNumbers,
+  stringifyJsonPreservingNumbers,
+} from "../serialization/json-numbers.js";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { ChatCompletionsTransport } from "./chat-completions.js";
@@ -435,7 +438,7 @@ function anthropicStream(chunks: readonly unknown[]): unknown {
   for (const block of content) {
     if (typeof block.__json === "string") {
       try {
-        block.input = pythonJsonLoads(block.__json);
+        block.input = parseJsonPreservingNumbers(block.__json);
       } catch {
         block.input = {};
       }
@@ -462,13 +465,13 @@ export class AnthropicMessagesClient {
   async create(kwargs: ChatKwargs, signal?: AbortSignal): Promise<NormalizedResponse> {
     const response = await this.request(kwargs, signal);
     return this.options.transport.normalizeResponse(
-      pythonJsonLoads(new TextDecoder().decode(response.body)),
+      parseJsonPreservingNumbers(new TextDecoder().decode(response.body)),
     );
   }
 
   async stream(kwargs: ChatKwargs, callbacks: StreamCallbacks = {}): Promise<NormalizedResponse> {
     const response = await this.request({ ...kwargs, stream: true });
-    const chunks = parseSse(response.body, pythonJsonLoads);
+    const chunks = parseSse(response.body, parseJsonPreservingNumbers);
     for (const raw of chunks) {
       const event = record(raw);
       const delta = record(event.delta);
@@ -504,7 +507,7 @@ export class AnthropicMessagesClient {
           accept: "application/json",
           "content-type": "application/json",
         },
-        body: jsonStringifyPythonNumbers(body),
+        body: stringifyJsonPreservingNumbers(body),
         timeoutMs: this.timeoutMs,
         maxBytes: this.maxResponseBytes,
         ...(signal === undefined ? {} : { signal }),

@@ -1,4 +1,5 @@
-import { pythonFloat, pythonJsonDumpsIndented } from "../serialization/python-json.js";
+import { jsonFloat } from "../serialization/json-numbers.js";
+import { pythonJsonDumpsIndented } from "../serialization/python-json.js";
 import type { CostEstimate } from "../pricing/index.js";
 import type { ToolCall, Usage } from "../transports/index.js";
 import type { ConversationTurnResult, ExecutedToolCall, SessionSummary } from "./types.js";
@@ -17,9 +18,9 @@ function usage(value: Usage | null): Readonly<Record<string, unknown>> | null {
 function cost(value: CostEstimate | null): Readonly<Record<string, unknown>> | null {
   if (value === null) return null;
   return {
-    usd: pythonFloat(Math.round(value.usd * 1_000_000) / 1_000_000),
-    gross_usd: pythonFloat(Math.round(value.grossUsd * 1_000_000) / 1_000_000),
-    saved_usd: pythonFloat(Math.round(value.savedUsd * 1_000_000) / 1_000_000),
+    usd: jsonFloat(Math.round(value.usd * 1_000_000) / 1_000_000),
+    gross_usd: jsonFloat(Math.round(value.grossUsd * 1_000_000) / 1_000_000),
+    saved_usd: jsonFloat(Math.round(value.savedUsd * 1_000_000) / 1_000_000),
     basis: value.basis,
     ...(value.source === undefined ? {} : { source: value.source }),
     ...(value.note === undefined ? {} : { note: value.note }),
@@ -38,8 +39,8 @@ function session(value: SessionSummary): Readonly<Record<string, unknown>> {
   };
   if (value.actualCostUsd !== null) {
     result.cost = {
-      usd: pythonFloat(Math.round(value.actualCostUsd * 1_000_000) / 1_000_000),
-      gross_usd: pythonFloat(
+      usd: jsonFloat(Math.round(value.actualCostUsd * 1_000_000) / 1_000_000),
+      gross_usd: jsonFloat(
         Math.round((value.estimatedCostUsd ?? value.actualCostUsd) * 1_000_000) / 1_000_000,
       ),
       ...((value.pricedCallCount ?? 0) < value.apiCallCount ? { partial: true } : {}),
@@ -72,7 +73,7 @@ export function successEnvelope(result: ConversationTurnResult): string {
   const value: Record<string, unknown> = {
     session_id: result.sessionId,
     model: result.model,
-    temperature: result.temperature === null ? null : pythonFloat(result.temperature),
+    temperature: result.temperature === null ? null : jsonFloat(result.temperature),
     input: result.input,
     output: result.response.content,
     reasoning: result.response.reasoning,

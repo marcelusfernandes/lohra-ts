@@ -1,5 +1,5 @@
 import type { AuthPreference } from "../auth/types.js";
-import type { PythonFloat } from "../serialization/python-json.js";
+import type { JsonFloat } from "../serialization/json-numbers.js";
 import type { ProviderStatus } from "./providers.js";
 
 export interface Check {
@@ -26,7 +26,7 @@ export interface DoctorEnvironment {
   readonly home: string;
   readonly interactive: boolean;
   readonly lohra_auth_present: boolean;
-  readonly lohra_oauth_expires_at: number | PythonFloat | null;
+  readonly lohra_oauth_expires_at: number | JsonFloat | null;
   readonly lohra_oauth_present: boolean;
   readonly ollama: {
     readonly alive: boolean;

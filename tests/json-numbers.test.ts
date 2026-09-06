@@ -6,11 +6,9 @@ import {
   stringifyJsonPreservingNumbers,
 } from "../src/serialization/json-numbers.js";
 
-// Golden values below were derived once from the pre-extraction behaviour of
-// `src/serialization/python-json.ts` (`pythonJsonLoads` /
-// `jsonStringifyPythonNumbers`, now `parseJsonPreservingNumbers` /
-// `stringifyJsonPreservingNumbers`) — no `python3`/`spawnSync` here, per
-// issue #70 AC3. See docs/adr/0003-native-wire-format.md.
+// Golden values below were derived once from the pre-extraction fidelity
+// primitives this module replaces (issue #70) — no `python3`/`spawnSync`
+// here, per issue #70 AC3. See docs/adr/0003-native-wire-format.md.
 describe("JSON number fidelity", () => {
   it("preserves int/float identity at every depth", () => {
     const loaded = parseJsonPreservingNumbers(

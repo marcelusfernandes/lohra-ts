@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { pythonJsonLoads } from "../src/serialization/python-json.js";
+import { parseJsonPreservingNumbers } from "../src/serialization/json-numbers.js";
 import {
   AnthropicMessagesClient,
   AnthropicMessagesTransport,
@@ -117,7 +117,7 @@ describe("AnthropicMessagesClient", () => {
               type: "tool_use",
               id: "c1",
               name: "terminal",
-              input: pythonJsonLoads(
+              input: parseJsonPreservingNumbers(
                 '{"timeout":1.0,"ratio":2.5,"count":7,"since_ns":1788107097189000000}',
               ),
             },

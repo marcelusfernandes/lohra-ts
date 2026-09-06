@@ -87,7 +87,7 @@ export class GatewaySessionRegistry {
   public list(): readonly Readonly<Record<string, unknown>>[] {
     // listSessions() runs against a defaultSafeIntegers(true) connection
     // (src/state/connection.ts), so message_count (an INTEGER column)
-    // comes back as bigint -- JSON.stringify (and jsonStringifyPythonNumbers)
+    // comes back as bigint -- JSON.stringify (and stringifyJsonPreservingNumbers)
     // cannot serialize bigint at all. started_at/ended_at are REAL columns
     // and are unaffected. Normalize before this ever reaches the wire.
     return this.sessions.listSessions().map((row) => ({

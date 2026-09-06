@@ -1,3 +1,9 @@
+/** `json.dumps`-mimicking serializers (separators, key sorting, ASCII
+ * escaping). Number fidelity (`JsonFloat`/`JsonInteger`, parse/stringify)
+ * lives in `./json-numbers.js` — a concern this module still needs for its
+ * own `instanceof` checks, but doesn't own or re-export (issue #70). */
+import { JsonFloat, JsonInteger } from "./json-numbers.js";
+
 function escapeString(value: string, ensureAscii = true): string {
   let result = '"';
   for (let index = 0; index < value.length; index += 1) {
@@ -15,140 +21,6 @@ function escapeString(value: string, ensureAscii = true): string {
     else result += character;
   }
   return `${result}"`;
-}
-
-export class PythonFloat {
-  public constructor(public readonly value: number) {}
-}
-
-export function pythonFloat(value: number): PythonFloat {
-  return new PythonFloat(value);
-}
-
-class PythonInteger {
-  public constructor(public readonly value: bigint) {}
-}
-
-class PythonJsonParser {
-  private index = 0;
-
-  public constructor(private readonly source: string) {}
-
-  public parse(): unknown {
-    const value = this.value();
-    this.whitespace();
-    if (this.index !== this.source.length) throw new SyntaxError("Unexpected JSON suffix");
-    return value;
-  }
-
-  private whitespace(): void {
-    while (/\s/u.test(this.source[this.index] ?? "")) this.index += 1;
-  }
-
-  private value(): unknown {
-    this.whitespace();
-    const token = this.source[this.index];
-    if (token === '"') return this.string();
-    if (token === "{") return this.object();
-    if (token === "[") return this.array();
-    if (token === "t") return this.literal("true", true);
-    if (token === "f") return this.literal("false", false);
-    if (token === "n") return this.literal("null", null);
-    // Python's `json.loads` accepts these three non-standard literals by default (a documented
-    // extension over strict RFC 8259); this parser mirrors that so a value the oracle's own
-    // `json.dumps`/`json.loads` round-trips doesn't spuriously fail here.
-    if (token === "N") return this.literal("NaN", pythonFloat(NaN));
-    if (token === "I") return this.literal("Infinity", pythonFloat(Number.POSITIVE_INFINITY));
-    if (token === "-" && this.source.startsWith("-Infinity", this.index)) {
-      return this.literal("-Infinity", pythonFloat(Number.NEGATIVE_INFINITY));
-    }
-    return this.number();
-  }
-
-  private string(): string {
-    const start = this.index;
-    this.index += 1;
-    while (this.index < this.source.length) {
-      const token = this.source[this.index];
-      if (token === "\\") {
-        this.index += 2;
-        continue;
-      }
-      this.index += 1;
-      if (token === '"') return JSON.parse(this.source.slice(start, this.index)) as string;
-    }
-    throw new SyntaxError("Unterminated JSON string");
-  }
-
-  private object(): Record<string, unknown> {
-    this.index += 1;
-    const result: Record<string, unknown> = {};
-    this.whitespace();
-    if (this.source[this.index] === "}") {
-      this.index += 1;
-      return result;
-    }
-    for (;;) {
-      this.whitespace();
-      if (this.source[this.index] !== '"') throw new SyntaxError("Expected JSON object key");
-      const key = this.string();
-      this.whitespace();
-      if (this.source[this.index] !== ":") throw new SyntaxError("Expected JSON colon");
-      this.index += 1;
-      Object.defineProperty(result, key, {
-        value: this.value(),
-        enumerable: true,
-        configurable: true,
-        writable: true,
-      });
-      this.whitespace();
-      const delimiter = this.source[this.index];
-      this.index += 1;
-      if (delimiter === "}") return result;
-      if (delimiter !== ",") throw new SyntaxError("Expected JSON object delimiter");
-    }
-  }
-
-  private array(): unknown[] {
-    this.index += 1;
-    const result: unknown[] = [];
-    this.whitespace();
-    if (this.source[this.index] === "]") {
-      this.index += 1;
-      return result;
-    }
-    for (;;) {
-      result.push(this.value());
-      this.whitespace();
-      const delimiter = this.source[this.index];
-      this.index += 1;
-      if (delimiter === "]") return result;
-      if (delimiter !== ",") throw new SyntaxError("Expected JSON array delimiter");
-    }
-  }
-
-  private literal(text: string, value: unknown): unknown {
-    if (!this.source.startsWith(text, this.index)) throw new SyntaxError("Invalid JSON literal");
-    this.index += text.length;
-    return value;
-  }
-
-  private number(): number | PythonFloat | PythonInteger {
-    const match = this.source
-      .slice(this.index)
-      .match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/u)?.[0];
-    if (!match) throw new SyntaxError("Invalid JSON number");
-    this.index += match.length;
-    if (match.includes(".") || /e/iu.test(match)) return pythonFloat(Number(match));
-    const integer = BigInt(match);
-    return integer >= BigInt(Number.MIN_SAFE_INTEGER) && integer <= BigInt(Number.MAX_SAFE_INTEGER)
-      ? Number(integer)
-      : new PythonInteger(integer);
-  }
-}
-
-export function pythonJsonLoads(value: string): unknown {
-  return new PythonJsonParser(value).parse();
 }
 
 function decimalParts(value: number): { readonly digits: string; readonly exponent: number } {
@@ -216,8 +88,8 @@ function compareUnicode(left: string, right: string): number {
 }
 
 function encode(value: unknown, sortKeys: boolean, ensureAscii = true): string {
-  if (value instanceof PythonInteger) return value.value.toString();
-  if (value instanceof PythonFloat) return encodeFloat(value.value);
+  if (value instanceof JsonInteger) return value.value.toString();
+  if (value instanceof JsonFloat) return encodeFloat(value.value);
   if (value === null) return "null";
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "string") return escapeString(value, ensureAscii);
@@ -242,28 +114,6 @@ function encode(value: unknown, sortKeys: boolean, ensureAscii = true): string {
   throw new TypeError(`Value of type ${typeof value} is not JSON serializable`);
 }
 
-function encodeCompact(value: unknown): string {
-  if (value instanceof PythonInteger) return value.value.toString();
-  if (value instanceof PythonFloat) return encodeFloat(value.value);
-  if (value === null) return "null";
-  if (typeof value === "string" || typeof value === "boolean" || typeof value === "number") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value))
-    return `[${value.map((entry) => (entry === undefined ? "null" : encodeCompact(entry))).join(",")}]`;
-  if (typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .filter(([, entry]) => entry !== undefined)
-      .map(([key, entry]) => `${JSON.stringify(key)}:${encodeCompact(entry)}`)
-      .join(",")}}`;
-  }
-  throw new TypeError(`Value of type ${typeof value} is not JSON serializable`);
-}
-
-export function jsonStringifyPythonNumbers(value: unknown): string {
-  return encodeCompact(value);
-}
-
 export function pythonJsonDumps(value: unknown): string {
   return encode(value, true);
 }
@@ -286,8 +136,8 @@ function encodeIndented(value: unknown, level: number): string {
   if (
     typeof value === "object" &&
     value !== null &&
-    !(value instanceof PythonFloat) &&
-    !(value instanceof PythonInteger)
+    !(value instanceof JsonFloat) &&
+    !(value instanceof JsonInteger)
   ) {
     const entries = Object.entries(value as Record<string, unknown>).filter(
       ([, entry]) => entry !== undefined,

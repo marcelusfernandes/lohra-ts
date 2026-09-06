@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
-import { pythonFloat, pythonJsonDumpsIndented } from "../serialization/python-json.js";
+import { jsonFloat } from "../serialization/json-numbers.js";
+import { pythonJsonDumpsIndented } from "../serialization/python-json.js";
 import { atomicWrite0600 } from "./json-file.js";
 import {
   OAuthTokens,
@@ -97,7 +98,7 @@ export function writeTokens(home: string, tokens: OAuthTokensValue): void {
       access_token: tokens.accessToken,
       refresh_token: tokens.refreshToken,
       account_id: tokens.accountId,
-      expires_at: pythonFloat(tokens.expiresAt),
+      expires_at: jsonFloat(tokens.expiresAt),
     }),
   );
 }

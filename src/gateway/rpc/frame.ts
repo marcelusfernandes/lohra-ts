@@ -1,4 +1,4 @@
-import { jsonStringifyPythonNumbers } from "../../serialization/python-json.js";
+import { stringifyJsonPreservingNumbers } from "../../serialization/json-numbers.js";
 
 export type JsonRpcId = string | number | boolean | null | Readonly<Record<string, unknown>>;
 
@@ -83,7 +83,7 @@ export function decodeJsonRpcFrame(text: string): DecodedJsonRpcFrame {
 // inner (spaced/escaped) convention explicitly; this function never
 // re-derives that distinction on its own.
 export function encodeJsonRpcFrame(frame: unknown): string {
-  return jsonStringifyPythonNumbers(frame);
+  return stringifyJsonPreservingNumbers(frame);
 }
 
 export type GatewayEventName =
