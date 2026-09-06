@@ -108,6 +108,26 @@ describe("staged image persistence", () => {
     expect(readFileSync(paths[0] ?? "")).toEqual(bytes);
   });
 
+  // Issue #128: sob carga (duas suítes completas em paralelo), este teste
+  // reprovou com "Test timed out in 20000ms" (24890ms observados antes do
+  // corte). Isolado, o trabalho real (persistGeneratedImages + readFileSync)
+  // leva ~20-30ms mesmo sob carga pesada — o custo todo está em
+  // `expect(...).toEqual(bytes)`: para um Buffer de ~2MB, o comparador
+  // profundo do vitest (iterableEquality) percorre elemento a elemento e
+  // leva ~2.7-9.3s medidos (sem carga a ~3s), contra ~0.3ms de
+  // `Buffer.prototype.equals` (mesmo memcmp, mesma garantia de igualdade
+  // byte-a-byte). O orçamento de 20_000ms não precisava mudar por causa do
+  // payload — precisava deixar de pagar por uma comparação O(n) elemento a
+  // elemento quando existe uma O(n) nativa. Meta-teste abaixo prende que
+  // este teste não carrega um timeout inflado para compensar isso.
+  it("budget: o teste do payload grande não precisa de um timeout inflado (issue #128)", (ctx) => {
+    const nomeAlvo = "accepts the measured 2,097,167-byte oracle payload";
+    const alvo = ctx.task.suite?.tasks.find((t) => t.name === nomeAlvo);
+    if (alvo === undefined) throw new Error(`teste-alvo "${nomeAlvo}" não encontrado nesta suíte`);
+    const timeout = (alvo as { timeout?: number }).timeout;
+    expect(timeout).toBeLessThanOrEqual(5_000);
+  });
+
   it("rejects an over-return above the global cardinality cap", async () => {
     const directory = root();
     await expect(
