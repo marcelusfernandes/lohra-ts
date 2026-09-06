@@ -3,11 +3,10 @@
  * Two sources: the provider's real token counts (wire-inclusive: OpenAI's
  * `prompt_tokens` covers the WHOLE prompt, cache is a breakdown of it, not a
  * discount from it), or — absent that — a same-shape estimate over the
- * request's own messages, using Python's `str()` on non-string content
- * (list/dict parts render as a single-quoted repr, not JSON).
+ * request's own messages, counting non-string content as its JSON.stringify
+ * length (ADR 0003 item 5).
  */
 
-import { pythonRepr } from "../serialization/python-repr.js";
 import type { Usage } from "../transports/index.js";
 import { isPythonFalsy } from "./python-truthy.js";
 
@@ -26,11 +25,12 @@ function estimateTokens(text: string): number {
   return Math.max(0, Math.floor(text.length / 4));
 }
 
-/** `str(content or "")` — a non-string content value renders as Python's repr. */
-function pythonStrContent(content: unknown): string {
+/** `content or ""` — a non-string, truthy content value counts as its
+ * JSON.stringify length. */
+function stringifyContent(content: unknown): string {
   if (isPythonFalsy(content)) return "";
   if (typeof content === "string") return content;
-  return pythonRepr(content);
+  return JSON.stringify(content);
 }
 
 export function wireUsage(usage: Usage): OpenAiUsage {
@@ -55,7 +55,7 @@ export function estimateUsage(
   messages: readonly Readonly<Record<string, unknown>>[],
   content: string,
 ): OpenAiUsage {
-  const promptText = messages.map((message) => pythonStrContent(message["content"])).join("");
+  const promptText = messages.map((message) => stringifyContent(message["content"])).join("");
   const promptTokens = estimateTokens(promptText);
   const completionTokens = Math.max(1, estimateTokens(content));
   return {

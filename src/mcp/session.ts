@@ -1,5 +1,4 @@
 import type { MCPServerConfig } from "./config.js";
-import { pythonRepr } from "../serialization/python-repr.js";
 
 /**
  * Async view of a connected MCP server. TS needs no Python-style
@@ -57,7 +56,8 @@ export function connectSession(
   const transport: unknown = config.transport;
   if (transport === "stdio") return stdio(config);
   if (transport === "http") return http(config);
-  return Promise.reject(new Error(`MCP transport ${pythonRepr(transport)} not supported`));
+  const cited = transport === undefined ? "undefined" : JSON.stringify(transport);
+  return Promise.reject(new Error(`MCP transport ${cited} not supported`));
 }
 
 /**

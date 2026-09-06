@@ -38,7 +38,9 @@ describe("resolveFanout — contract assertion 24 (13-row asymmetric clamp table
   ])("LOHRA_MAX_PARALLEL=%s falls back to 4 (env never clamps to 1)", (raw, reason) => {
     const result = resolveFanout(undefined, undefined, { LOHRA_MAX_PARALLEL: raw });
     expect(result.maxParallel).toBe(4);
-    expect(result.warnings).toEqual([`ignoring LOHRA_MAX_PARALLEL='${raw}': ${reason}; using 4`]);
+    expect(result.warnings).toEqual([
+      `ignoring LOHRA_MAX_PARALLEL=${JSON.stringify(raw)}: ${reason}; using 4`,
+    ]);
   });
 
   it("LOHRA_MAX_PARALLEL='' falls back to 4 silently — no warning line at all", () => {
@@ -71,7 +73,7 @@ describe("resolveFanout — contract assertion 24 (13-row asymmetric clamp table
     const invalid = resolveFanout(undefined, undefined, { LOHRA_MAX_SUBSESSIONS: "abc" });
     expect(invalid.maxSubsessions).toBe(200);
     expect(invalid.warnings).toEqual([
-      "ignoring LOHRA_MAX_SUBSESSIONS='abc': not an integer; using 200",
+      'ignoring LOHRA_MAX_SUBSESSIONS="abc": not an integer; using 200',
     ]);
 
     const valid = resolveFanout(undefined, undefined, { LOHRA_MAX_SUBSESSIONS: "5" });
@@ -89,7 +91,7 @@ describe("resolveFanout — contract assertion 24 (13-row asymmetric clamp table
     const result = resolveFanout(undefined, undefined, { LOHRA_MAX_ITERATIONS: "abc" });
     expect(result.parentMaxIterations).toBe(90);
     expect(result.warnings).toEqual([
-      "ignoring LOHRA_MAX_ITERATIONS='abc': not an integer; using 90",
+      'ignoring LOHRA_MAX_ITERATIONS="abc": not an integer; using 90',
     ]);
   });
 
@@ -100,9 +102,9 @@ describe("resolveFanout — contract assertion 24 (13-row asymmetric clamp table
       LOHRA_MAX_ITERATIONS: "abc",
     });
     expect(result.warnings).toEqual([
-      "ignoring LOHRA_MAX_PARALLEL='abc': not an integer; using 4",
-      "ignoring LOHRA_MAX_SUBSESSIONS='abc': not an integer; using 200",
-      "ignoring LOHRA_MAX_ITERATIONS='abc': not an integer; using 90",
+      'ignoring LOHRA_MAX_PARALLEL="abc": not an integer; using 4',
+      'ignoring LOHRA_MAX_SUBSESSIONS="abc": not an integer; using 200',
+      'ignoring LOHRA_MAX_ITERATIONS="abc": not an integer; using 90',
     ]);
   });
 });

@@ -66,7 +66,7 @@ describe("createGatewayToolRuntime: memory reaches the handler, not auto-denied 
     const result = JSON.parse(
       await runtime.dispatch("memory", JSON.stringify({ action: "list" })),
     ) as { error: string };
-    expect(result).toEqual({ error: "unknown action 'list' (use add/replace/remove)" });
+    expect(result).toEqual({ error: 'unknown action "list" (use add/replace/remove)' });
   });
 });
 

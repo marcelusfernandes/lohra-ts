@@ -195,7 +195,7 @@ describe("CompletionService", () => {
       temperature: null,
       maxTokens: null,
     });
-    expect(result.usage.prompt_tokens).toBe(16);
+    expect(result.usage.prompt_tokens).toBe(15);
     expect(result.usage.completion_tokens).toBe(2);
   });
 

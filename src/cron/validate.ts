@@ -1,4 +1,3 @@
-import { pythonRepr } from "../serialization/python-repr.js";
 import { CronValidationError } from "./errors.js";
 import { cronMatches } from "./schedule.js";
 
@@ -23,7 +22,7 @@ export function validateJob(
   }
   if (!(JOB_TYPES as readonly string[]).includes(jobType)) {
     throw new CronValidationError(
-      `unknown job type ${pythonRepr(jobType)} (use once/interval/cron)`,
+      `unknown job type ${JSON.stringify(jobType)} (use once/interval/cron)`,
     );
   }
   if (jobType === "interval") {

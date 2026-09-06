@@ -1,4 +1,3 @@
-import { pythonRepr } from "../serialization/python-repr.js";
 import { MAX_IMAGES } from "./constants.js";
 
 export function pythonTruthy(value: unknown): boolean {
@@ -12,7 +11,7 @@ export function pythonTruthy(value: unknown): boolean {
 
 export function coerceImagePrompt(value: unknown): string {
   if (!pythonTruthy(value)) throw new Error("image_gen requires a non-empty 'prompt'");
-  const prompt = typeof value === "string" ? value : pythonRepr(value);
+  const prompt = typeof value === "string" ? value : JSON.stringify(value);
   if (prompt.trim().length === 0) throw new Error("image_gen requires a non-empty 'prompt'");
   return prompt;
 }
