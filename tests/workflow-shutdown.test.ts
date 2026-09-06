@@ -1,6 +1,6 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -10,6 +10,7 @@ import { AuditTrail } from "../src/workflow/audit-trail.js";
 import { WorkflowService } from "../src/workflow/service.js";
 import type { ChildResult, ChildRuntime } from "../src/workflow/runtime.js";
 import type { Timer } from "../src/workflow/durability.js";
+import { orchestrationMutants } from "../scripts/parity/workflow-durability/mutants-orchestration.js";
 
 const roots: string[] = [];
 
@@ -310,5 +311,46 @@ describe("WorkflowService.shutdown()", () => {
       ),
     ).toBe(true);
     runtime.release(); // let the still-in-flight leaf settle before the test ends
+  });
+});
+
+// Issue #129 — follow-up to #121/PR #127's review (reason 4): the ceiling
+// test just above pins `timers[0]?.delay` to the literal `5`, which already
+// kills a mutant that collapses SHUTDOWN_SETTLE_TIMEOUT_MS to 0 whenever
+// `npm test` runs — but until now `mutations:t16`'s own catalog
+// (`mutants-orchestration.ts`) had no entry saying so, so that mutant was
+// only ever dead by the suite, never by the harness (the same gap #112
+// closed for child-runner.ts's wrap wiring). Molded on
+// `tests/orchestration-child-runner-mutation-catalog.test.ts`: pins the
+// mutant's `before` as exact source text, so a drift in service.ts fails
+// here before the slower `npm run mutations:t16` ever runs.
+const serviceSource = readFileSync(resolve(__dirname, "..", "src/workflow/service.ts"), "utf8");
+
+const SHUTDOWN_CEILING_MUTANT_ID = "ao/shutdown-ceiling-collapses-to-zero";
+
+function occurrences(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
+}
+
+describe("mutations:t16 catalog pins service.ts's SHUTDOWN_SETTLE_TIMEOUT_MS (#129)", () => {
+  const mutant = orchestrationMutants.find(
+    (candidate) => candidate.id === SHUTDOWN_CEILING_MUTANT_ID,
+  );
+
+  it(`mutants-orchestration.ts declares ${SHUTDOWN_CEILING_MUTANT_ID}`, () => {
+    expect(mutant).toBeDefined();
+  });
+
+  it(`${SHUTDOWN_CEILING_MUTANT_ID}'s pinned "before" occurs exactly once, verbatim, in service.ts`, () => {
+    const before = mutant?.edits[0]?.before ?? "";
+    expect(before.length).toBeGreaterThan(0);
+    expect(occurrences(serviceSource, before)).toBe(1);
+  });
+
+  it(`${SHUTDOWN_CEILING_MUTANT_ID}'s focus names this file's shutdown-ceiling test`, () => {
+    expect(mutant?.focus.file).toBe("tests/workflow-shutdown.test.ts");
+    expect(mutant?.focus.test).toBe(
+      "hits the shutdown ceiling: a live run that never settles fires the timed-out warning",
+    );
   });
 });

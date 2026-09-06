@@ -133,14 +133,20 @@ function tableCount(root: string, table: string): number {
 
 /**
  * Issue #121, AC 2: same shape as `startDurableChatServer`, but the leaf's
- * response is held for `leafDelayMs` — a real setTimeout, not a gate this
- * test releases by hand — so it is still in flight (mid HTTP round trip)
- * when both main turns are done and chat.ts's `finally` reaches
- * `orchestrationCore.shutdown()` (chat.ts:388). That drain cooperatively
- * waits for the leaf's real response, exercising the same race
- * `workflowService.shutdown()` (chat.ts:397) exists to lose on purpose:
- * the run's own completion handler releases its lease before
- * `connection.close()`, instead of racing it.
+ * request is what gates the SECOND main turn's response, not a fixed
+ * delay — the race the reviewer flagged in PR #127 was that nothing
+ * guaranteed the leaf's own request had gone out BEFORE the main turn
+ * ended, so a run could settle before shutdown() ever saw it as live. Once
+ * the leaf has been dispatched at least once (`leafRequests.count >= 1`),
+ * the stub answers turn 2 — deterministic, no polling, no timer — and only
+ * THEN, after `leafDelayMs`, answers the leaf itself. That keeps the leaf's
+ * own response still in flight (mid HTTP round trip) when both main turns
+ * are done and chat.ts's `finally` reaches `orchestrationCore.shutdown()`
+ * (chat.ts:388). That drain cooperatively waits for the leaf's real
+ * response, exercising the same race `workflowService.shutdown()`
+ * (chat.ts:397) exists to lose on purpose: the run's own completion
+ * handler releases its lease before `connection.close()`, instead of
+ * racing it.
  */
 function startGatedLeafChatServer(leafDelayMs: number): {
   readonly server: Server;
@@ -152,6 +158,10 @@ function startGatedLeafChatServer(leafDelayMs: number): {
 } {
   let mainCalls = 0;
   const leafRequests = { count: 0 };
+  let leafArrived: () => void;
+  const leafArrivedOnce = new Promise<void>((resolvePromise) => {
+    leafArrived = resolvePromise;
+  });
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -169,34 +179,41 @@ function startGatedLeafChatServer(leafDelayMs: number): {
       };
       if (isLeafRequest(body.messages)) {
         leafRequests.count += 1;
+        leafArrived();
         setTimeout(() => {
           respond(chatResponse("leaf", { role: "assistant", content: "leaf done" }, "stop"));
         }, leafDelayMs);
         return;
       }
       mainCalls += 1;
-      respond(
-        mainCalls === 1
-          ? chatResponse(
-              "main-1",
-              {
-                role: "assistant",
-                content: null,
-                tool_calls: [
-                  {
-                    id: "call-run-workflow",
-                    type: "function",
-                    function: {
-                      name: "run_workflow",
-                      arguments: JSON.stringify({ spec: workflowSpec() }),
-                    },
+      if (mainCalls === 1) {
+        respond(
+          chatResponse(
+            "main-1",
+            {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                {
+                  id: "call-run-workflow",
+                  type: "function",
+                  function: {
+                    name: "run_workflow",
+                    arguments: JSON.stringify({ spec: workflowSpec() }),
                   },
-                ],
-              },
-              "tool_calls",
-            )
-          : chatResponse("main-2", { role: "assistant", content: "workflow started" }, "stop"),
-      );
+                },
+              ],
+            },
+            "tool_calls",
+          ),
+        );
+        return;
+      }
+      // Turn 2 (workflow started) only answers once the leaf's own request
+      // has actually gone out — see the docstring above.
+      void leafArrivedOnce.then(() => {
+        respond(chatResponse("main-2", { role: "assistant", content: "workflow started" }, "stop"));
+      });
     });
   });
   return { server, port: 0, leafRequests };
