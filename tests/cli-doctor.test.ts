@@ -43,7 +43,7 @@ describe("lohra CLI bootstrap", () => {
     expect(hint.join("")).toBe("lohra 0.0.11 — see `lohra --help`\n");
   });
 
-  it("emits invalid Unicode profile as ASCII JSON and raw UTF-8 stderr", async () => {
+  it("emits invalid Unicode profile as UTF-8-direct JSON and raw UTF-8 stderr (issue #71)", async () => {
     const stdout: string[] = [];
     const stderr: string[] = [];
     expect(
@@ -53,12 +53,14 @@ describe("lohra CLI bootstrap", () => {
         stderr: (v) => stderr.push(v),
       }),
     ).toBe(2);
-    expect(stdout.join("")).toContain("caf\\u00e9");
-    expect(stdout.join("")).not.toContain("café");
+    // docs/adr/0003-native-wire-format.md item 2: no more \uXXXX escaping in
+    // JSON output -- stdout carries the same literal UTF-8 as stderr now.
+    expect(stdout.join("")).not.toContain("caf\\u00e9");
+    expect(stdout.join("")).toContain("café");
     expect(stderr.join("")).toContain("café");
   });
 
-  it("emits a sorted Python-compatible doctor payload without writing", async () => {
+  it("emits a compact, UTF-8-direct doctor payload without writing (issue #71)", async () => {
     const stdout: string[] = [];
     const stderr: string[] = [];
     const env = environment();
@@ -70,9 +72,9 @@ describe("lohra CLI bootstrap", () => {
         probeOllama: () => Promise.resolve(false),
       }),
     ).toBe(2);
-    expect(stdout.join("")).toMatch(/^\{"checks": \[/);
-    expect(stdout.join("")).toContain("\\u2014");
-    expect(stdout.join("")).not.toContain("—");
+    expect(stdout.join("")).toMatch(/^\{"checks":\[/);
+    expect(stdout.join("")).not.toContain("\\u2014");
+    expect(stdout.join("")).toContain("—");
     expect(JSON.parse(stdout.join(""))).toMatchObject({
       environment: { interactive: false, stderr_tty: false, stdin_tty: false },
       exit_code: 2,

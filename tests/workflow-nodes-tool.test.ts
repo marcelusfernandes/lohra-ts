@@ -561,10 +561,8 @@ describe("public workflow tool path", () => {
     });
     expect(result.response.content).toBe("workflow complete");
     expect(result.toolCalls?.map((call) => call.name)).toEqual(["run_workflow", "workflow_status"]);
-    expect(result.toolCalls?.[0]?.result).toBe(
-      '{"ok": true, "run_id": "run-1", "status": "started"}',
-    );
-    expect(result.toolCalls?.[1]?.result).toContain('"outputs": {"agent": "leaf-output"}');
+    expect(result.toolCalls?.[0]?.result).toBe('{"ok":true,"run_id":"run-1","status":"started"}');
+    expect(result.toolCalls?.[1]?.result).toContain('"outputs":{"agent":"leaf-output"}');
     expect(model.requests[2]?.messages).toHaveLength(5);
   });
 

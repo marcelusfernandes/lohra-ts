@@ -18,16 +18,14 @@ const schema = {
 } as const;
 
 describe("tool envelopes", () => {
-  it("uses Python json.dumps spacing and ASCII escaping", () => {
-    expect(toolResult("café ☕ 😀")).toBe(
-      '{"ok": true, "data": "caf\\u00e9 \\u2615 \\ud83d\\ude00"}',
-    );
-    expect(toolError("não aprovado ☕")).toBe('{"error": "n\\u00e3o aprovado \\u2615"}');
+  it("uses JSON.stringify's compact separators and UTF-8 direct, no \\u escaping", () => {
+    expect(toolResult("café ☕ 😀")).toBe('{"ok":true,"data":"café ☕ 😀"}');
+    expect(toolError("não aprovado ☕")).toBe('{"error":"não aprovado ☕"}');
   });
 
   it("allows extras to overwrite the base envelope like Python", () => {
-    expect(toolResult(undefined, { ok: false })).toBe('{"ok": false}');
-    expect(toolError("a", { error: "b" })).toBe('{"error": "b"}');
+    expect(toolResult(undefined, { ok: false })).toBe('{"ok":false}');
+    expect(toolError("a", { error: "b" })).toBe('{"error":"b"}');
   });
 });
 
@@ -99,9 +97,9 @@ describe("ToolRegistry", () => {
     });
     expect(registry.getDefinitions()).toEqual([]);
     expect(await registry.dispatch("hidden", { x: 1 }, { y: 2 })).toBe(
-      '{"ok": true, "data": {"args": {"x": 1}, "kwargs": {"y": 2}}}',
+      '{"ok":true,"data":{"args":{"x":1},"kwargs":{"y":2}}}',
     );
-    expect(await registry.dispatch("missing", {})).toBe('{"error": "Unknown tool: missing"}');
+    expect(await registry.dispatch("missing", {})).toBe('{"error":"Unknown tool: missing"}');
   });
 
   it("converts handler failures to named error envelopes", async () => {
@@ -117,7 +115,7 @@ describe("ToolRegistry", () => {
       },
     });
     expect(await registry.dispatch("bad", {})).toBe(
-      '{"error": "Tool execution failed: RuntimeError: boom"}',
+      '{"error":"Tool execution failed: RuntimeError: boom"}',
     );
   });
 });

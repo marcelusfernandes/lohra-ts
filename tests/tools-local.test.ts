@@ -40,7 +40,7 @@ describe("filesystem tools", () => {
 
   it("distinguishes missing, directory, and invalid UTF-8 inputs", () => {
     const directory = root();
-    expect(readFileTool({})).toBe('{"error": "missing required argument \'path\'"}');
+    expect(readFileTool({})).toBe('{"error":"missing required argument \'path\'"}');
     expect(readFileTool({ path: join(directory, "missing") })).toContain("file not found:");
     expect(readFileTool({ path: directory })).toContain("path is a directory:");
     const binary = join(directory, "binary");
@@ -51,11 +51,11 @@ describe("filesystem tools", () => {
   it("writes parent directories, UTF-8 bytes, and validates content", () => {
     const path = join(root(), "sub", "out.txt");
     expect(writeFileTool({ path, content: "café 😀" })).toBe(
-      `{"ok": true, "bytes_written": 10, "path": "${path}"}`,
+      `{"ok":true,"bytes_written":10,"path":"${path}"}`,
     );
     expect(readFileSync(path, "utf8")).toBe("café 😀");
-    expect(writeFileTool({ path })).toBe('{"error": "missing required argument \'content\'"}');
-    expect(writeFileTool({ path, content: 1 })).toBe('{"error": "\'content\' must be a string"}');
+    expect(writeFileTool({ path })).toBe('{"error":"missing required argument \'content\'"}');
+    expect(writeFileTool({ path, content: 1 })).toBe('{"error":"\'content\' must be a string"}');
   });
 });
 
@@ -76,7 +76,7 @@ describe("terminal tool", () => {
     const sentinel = join(directory, "sentinel");
     const command = `sudo touch ${sentinel}`;
     expect(await terminalTool({ command }, { approvalManager: new ApprovalManager() })).toBe(
-      `{"error": "command was not approved by the user", "command": "${command}"}`,
+      `{"error":"command was not approved by the user","command":"${command}"}`,
     );
     expect(() => readFileSync(sentinel)).toThrow();
   });
@@ -126,7 +126,7 @@ describe("terminal tool", () => {
     const directory = root();
     mkdirSync(join(directory, "kept"));
     expect(await terminalTool({ command: ["sudo", "x"] })).toBe(
-      '{"error": "missing required argument \'command\' (string)"}',
+      '{"error":"missing required argument \'command\' (string)"}',
     );
   });
 });

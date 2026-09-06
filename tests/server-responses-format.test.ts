@@ -140,7 +140,7 @@ describe("Responses non-stream object", () => {
   });
 });
 
-describe("Responses SSE event sequence — byte-exact against the measured oracle", () => {
+describe("Responses SSE event sequence — compact JSON (issue #71)", () => {
   it("matches the measured response.created frame", () => {
     expect(
       buildResponseCreatedEvent({
@@ -150,7 +150,7 @@ describe("Responses SSE event sequence — byte-exact against the measured oracl
         sequenceNumber: 0,
       }),
     ).toBe(
-      'event: response.created\ndata: {"type": "response.created", "sequence_number": 0, "response": {"id": "resp_5cbb027aa4f1437f82e6deac6bb87f5b", "object": "response", "created_at": 1788115771, "status": "in_progress", "model": "m", "output": [], "error": null, "incomplete_details": null, "instructions": null, "metadata": {}, "parallel_tool_calls": false, "tool_choice": "auto", "tools": []}}\n\n',
+      'event: response.created\ndata: {"type":"response.created","sequence_number":0,"response":{"id":"resp_5cbb027aa4f1437f82e6deac6bb87f5b","object":"response","created_at":1788115771,"status":"in_progress","model":"m","output":[],"error":null,"incomplete_details":null,"instructions":null,"metadata":{},"parallel_tool_calls":false,"tool_choice":"auto","tools":[]}}\n\n',
     );
   });
 
@@ -161,7 +161,7 @@ describe("Responses SSE event sequence — byte-exact against the measured oracl
         sequenceNumber: 1,
       }),
     ).toBe(
-      'event: response.output_item.added\ndata: {"type": "response.output_item.added", "sequence_number": 1, "output_index": 0, "item": {"type": "message", "id": "msg_resp_5cbb027aa4f1437f82e6deac6bb87f5b", "status": "in_progress", "role": "assistant", "content": []}}\n\n',
+      'event: response.output_item.added\ndata: {"type":"response.output_item.added","sequence_number":1,"output_index":0,"item":{"type":"message","id":"msg_resp_5cbb027aa4f1437f82e6deac6bb87f5b","status":"in_progress","role":"assistant","content":[]}}\n\n',
     );
   });
 
@@ -172,7 +172,7 @@ describe("Responses SSE event sequence — byte-exact against the measured oracl
         sequenceNumber: 2,
       }),
     ).toBe(
-      'event: response.content_part.added\ndata: {"type": "response.content_part.added", "sequence_number": 2, "item_id": "msg_resp_5cbb027aa4f1437f82e6deac6bb87f5b", "output_index": 0, "content_index": 0, "part": {"type": "output_text", "text": "", "annotations": []}}\n\n',
+      'event: response.content_part.added\ndata: {"type":"response.content_part.added","sequence_number":2,"item_id":"msg_resp_5cbb027aa4f1437f82e6deac6bb87f5b","output_index":0,"content_index":0,"part":{"type":"output_text","text":"","annotations":[]}}\n\n',
     );
   });
 
@@ -184,7 +184,7 @@ describe("Responses SSE event sequence — byte-exact against the measured oracl
         sequenceNumber: 3,
       }),
     ).toBe(
-      'event: response.output_text.delta\ndata: {"type": "response.output_text.delta", "sequence_number": 3, "item_id": "msg_resp_b9ebecef30a847149d136eff274b907b", "output_index": 0, "content_index": 0, "delta": "par", "logprobs": []}\n\n',
+      'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","sequence_number":3,"item_id":"msg_resp_b9ebecef30a847149d136eff274b907b","output_index":0,"content_index":0,"delta":"par","logprobs":[]}\n\n',
     );
   });
 
@@ -205,8 +205,8 @@ describe("Responses SSE event sequence — byte-exact against the measured oracl
     });
     const completed = buildResponseCompletedEvent(object, { sequenceNumber: 5 });
     expect(completed.startsWith("event: response.completed\ndata: ")).toBe(true);
-    expect(completed).toContain('"type": "response.completed"');
-    expect(completed).toContain('"sequence_number": 5');
+    expect(completed).toContain('"type":"response.completed"');
+    expect(completed).toContain('"sequence_number":5');
     expect(completed.endsWith("\n\n")).toBe(true);
 
     const failed = buildResponseFailedEvent(object, { sequenceNumber: 6 });

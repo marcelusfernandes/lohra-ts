@@ -348,7 +348,7 @@ describe("createOpenAiServer — end-to-end HTTP/SSE wiring", () => {
       body,
     );
     const frames = res.body.split("\n\n").filter((f) => f.length > 0);
-    expect(frames[0]).toContain('"role": "assistant"');
+    expect(frames[0]).toContain('"role":"assistant"');
     expect(frames[frames.length - 1]).toBe("data: [DONE]");
     const errorFrame = frames.find((f) => f.includes('"error"'));
     expect(errorFrame).toBeDefined();
@@ -408,6 +408,6 @@ describe("createOpenAiServer — end-to-end HTTP/SSE wiring", () => {
     );
     expect(res.body).not.toContain("[DONE]");
     expect(res.body).toContain("event: response.failed");
-    expect(res.body).toContain('"output": []');
+    expect(res.body).toContain('"output":[]');
   });
 });

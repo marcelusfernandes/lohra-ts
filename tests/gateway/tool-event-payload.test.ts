@@ -6,19 +6,17 @@ import {
 } from "../../src/gateway/rpc/tool-event-payload.js";
 import { encodeGatewayEventFrame } from "../../src/gateway/rpc/frame.js";
 import { stringifyJsonPreservingNumbers } from "../../src/serialization/json-numbers.js";
-import { pythonJsonDumpsInsertionOrder } from "../../src/serialization/python-json.js";
 
-// Golden fixture from the T12 baseline (evidence-s06-tools.json / T12
-// baseline §2 L8): a single frame carries two serialization conventions --
-// the outer WS frame is compact + literal non-ASCII (WebSocket.send_json),
-// while args_text/result (JSON embedded as a *string* field) are spaced +
-// escaped, matching Python's json.dumps default. This is the trap: a
-// candidate using one serializer for the whole frame breaks it invisibly
-// to any test that only does JSON.parse-and-compare-objects.
+// Issue #71 / docs/adr/0003-native-wire-format.md, "JSON output" item 1: the
+// outer WS frame and the embedded args_text/args/result string fields now
+// share ONE convention — compact, insertion order, UTF-8 direct (no
+// \uXXXX). The pre-#71 baseline had two conventions on purpose (outer frame
+// compact + literal, args_text/result spaced + \u-escaped, matching Python
+// json.dumps); that split is gone by design, not by omission.
 const NON_ASCII_PATH = "/não-existe-ção";
 
-describe("tool.start / tool.complete dual serialization", () => {
-  it("tool.start: args_text is spaced + escaped inside a compact + literal outer frame (byte-exact)", () => {
+describe("tool.start / tool.complete: one serializer, compact + literal, everywhere", () => {
+  it("tool.start: args_text and the outer frame use the same compact, UTF-8-direct format", () => {
     const argsObject = { path: NON_ASCII_PATH };
     const payload = buildToolStartPayload({
       toolId: "tool_1",
@@ -26,9 +24,9 @@ describe("tool.start / tool.complete dual serialization", () => {
       argumentsJson: JSON.stringify(argsObject),
     });
 
-    // Independently derive the expected bytes from the pre-existing,
-    // already-tested serializer primitives -- not from the code under test.
-    const expectedArgsText = pythonJsonDumpsInsertionOrder(argsObject);
+    // Independently derive the expected bytes from the already-tested
+    // serializer primitive -- not from the code under test.
+    const expectedArgsText = stringifyJsonPreservingNumbers(argsObject);
     const expectedFrame = stringifyJsonPreservingNumbers({
       jsonrpc: "2.0",
       method: "event",
@@ -42,15 +40,14 @@ describe("tool.start / tool.complete dual serialization", () => {
     const frame = encodeGatewayEventFrame("tool.start", "sess", payload);
     expect(frame).toBe(expectedFrame);
 
-    // Sanity checks on the intermediate value itself, matching the exact
-    // baseline byte sequence for this fixture.
-    expect(expectedArgsText).toBe('{"path": "/n\\u00e3o-existe-\\u00e7\\u00e3o"}');
-    // The outer frame is compact (no ", " / ": ") and non-ASCII is literal.
+    expect(expectedArgsText).toBe('{"path":"/não-existe-ção"}');
+    // Compact everywhere (no ", " / ": ") and non-ASCII is literal UTF-8.
     expect(frame).not.toContain(", ");
+    expect(frame).not.toContain("\\u");
     expect(frame).toContain('"session_id":"sess"');
   });
 
-  it("tool.complete: args is compact + literal, result is spaced + escaped (byte-exact)", () => {
+  it("tool.complete: args and result use the same compact, UTF-8-direct format", () => {
     const argsObject = { path: NON_ASCII_PATH };
     const resultObject = { error: `file not found: ${NON_ASCII_PATH}` };
     const payload = buildToolCompletePayload({
@@ -60,7 +57,7 @@ describe("tool.start / tool.complete dual serialization", () => {
       resultJson: JSON.stringify(resultObject),
     });
 
-    const expectedResultText = pythonJsonDumpsInsertionOrder(resultObject);
+    const expectedResultText = stringifyJsonPreservingNumbers(resultObject);
     const expectedFrame = stringifyJsonPreservingNumbers({
       jsonrpc: "2.0",
       method: "event",
@@ -78,23 +75,23 @@ describe("tool.start / tool.complete dual serialization", () => {
 
     const frame = encodeGatewayEventFrame("tool.complete", "sess", payload);
     expect(frame).toBe(expectedFrame);
-    expect(expectedResultText).toBe(
-      '{"error": "file not found: /n\\u00e3o-existe-\\u00e7\\u00e3o"}',
-    );
-    // args is embedded with literal (non-escaped) non-ASCII, matching
-    // ensure_ascii=False on the outer frame.
+    expect(expectedResultText).toBe('{"error":"file not found: /não-existe-ção"}');
     expect(frame).toContain('"args":{"path":"/não-existe-ção"}');
+    expect(frame).not.toContain("\\u");
   });
 
-  it("a single-serializer mutant (JSON.stringify for args_text too) diverges from the golden", () => {
-    const argsObject = { path: NON_ASCII_PATH };
-    const naive = JSON.stringify(argsObject);
+  it("normalizes non-canonical input JSON, proving the parse-and-re-encode step still does work", () => {
+    // A mutant that passes `argumentsJson` straight through (instead of
+    // parsing and re-encoding via stringifyJsonPreservingNumbers) would
+    // leak the input's own spacing/formatting into args_text. Feeding
+    // spaced, non-canonical JSON in and asserting compact JSON comes out
+    // proves the normalization step still runs.
     const correct = buildToolStartPayload({
       toolId: "tool_1",
       name: "read_file",
-      argumentsJson: JSON.stringify(argsObject),
+      argumentsJson: '{ "path" : "x" }',
     }).args_text;
-    expect(naive).not.toBe(correct);
+    expect(correct).toBe('{"path":"x"}');
   });
 
   it("message.delta text is literal non-ASCII on the wire, not escaped", () => {

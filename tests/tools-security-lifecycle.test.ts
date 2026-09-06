@@ -164,14 +164,14 @@ describe("child tool hardening", () => {
 });
 
 describe("tool lifecycle wrapper", () => {
-  it("emits Python-shaped start/complete pairs with session-local ids", async () => {
+  it("emits compact, UTF-8-direct start/complete pairs with session-local ids", async () => {
     const events: ToolLifecycleEvent[] = [];
     const base = vi.fn((_name: string, args: Readonly<Record<string, unknown>>) =>
       Promise.resolve(toolResult(args)),
     );
     const dispatch = wrapToolDispatch(base, (event) => events.push(event));
     await expect(dispatch("x", { text: "café", n: 1 })).resolves.toBe(
-      '{"ok": true, "data": {"text": "caf\\u00e9", "n": 1}}',
+      '{"ok":true,"data":{"text":"café","n":1}}',
     );
     await dispatch("y", {});
     expect(events).toEqual([
@@ -180,7 +180,7 @@ describe("tool lifecycle wrapper", () => {
         payload: {
           tool_id: "tool_1",
           name: "x",
-          args_text: '{"text": "caf\\u00e9", "n": 1}',
+          args_text: '{"text":"café","n":1}',
         },
       },
       {
@@ -189,7 +189,7 @@ describe("tool lifecycle wrapper", () => {
           tool_id: "tool_1",
           name: "x",
           args: { text: "café", n: 1 },
-          result: '{"ok": true, "data": {"text": "caf\\u00e9", "n": 1}}',
+          result: '{"ok":true,"data":{"text":"café","n":1}}',
         },
       },
       {
@@ -202,7 +202,7 @@ describe("tool lifecycle wrapper", () => {
           tool_id: "tool_2",
           name: "y",
           args: {},
-          result: '{"ok": true, "data": {}}',
+          result: '{"ok":true,"data":{}}',
         },
       },
     ]);
