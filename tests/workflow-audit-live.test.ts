@@ -1145,7 +1145,7 @@ describe("T17 live events and sink failures", () => {
           cancel: () => undefined,
         },
         auditTrail: trail,
-        environment: { LOHRA_AUDIT: "off" },
+        environment: { LOHRA_AUDIT: "off", VITEST: "true" },
         idSource: () => "audit-disabled",
       });
       service.start({

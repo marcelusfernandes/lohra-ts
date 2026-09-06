@@ -33,6 +33,8 @@ export const RUN_LEASE_TTL = 900;
 /** The operator capability policy, read from the operator home per launch. */
 export const OPERATOR_POLICY_FILE = "workflow_policy.json";
 export const FENCE_MEMORY = 1024;
+/** shutdown() never waits past this for a live run to settle (invariant 3). */
+export const SHUTDOWN_SETTLE_TIMEOUT_MS = 5_000;
 
 /** The token an evicted run presents: never a number, so a forgotten fence can
  * never be guessed into a write. Mirrors the oracle's EVICTED sentinel. */
@@ -288,11 +290,10 @@ interface RunRecord {
   readonly promise: Promise<Readonly<Record<string, unknown>>>;
   result: RunResult | null;
   /**
-   * What this run PUBLISHES once it settles — the single terminal answer every
-   * channel reads. Keeping only `result` let `status` and `list` rebuild
-   * success from the engine's outcome after the terminal write had been
-   * refused, so a run whose durable line still said `running` was reported
-   * complete. Fail-closed means one published value, not one per channel.
+   * What this run PUBLISHES once it settles — the single terminal answer
+   * every channel reads (fail-closed: one published value, not one per
+   * channel — `result` alone let a refused terminal write still report
+   * "complete").
    */
   published: Readonly<Record<string, unknown>> | null;
   readonly resolve: (value: Readonly<Record<string, unknown>>) => void;
@@ -339,6 +340,10 @@ function defaultServiceTimer(delay: number, fire: () => void): Timer {
   };
 }
 
+function isTestEnvironment(env: Readonly<Record<string, string | undefined>>): boolean {
+  return env.VITEST === "true" || env.NODE_ENV === "test";
+}
+
 function isLive(record: RunRecord | undefined): boolean {
   return record !== undefined && !record.settled;
 }
@@ -366,6 +371,9 @@ export class WorkflowService {
   private readonly homeRoot: string;
   private readonly fenceMemory: FenceMemory;
   private readonly warn: (message: string) => void;
+  private readonly environment: Readonly<Record<string, string | undefined>>;
+  private warnedEphemeral = false;
+  private shuttingDown: Promise<void> | undefined;
   /** Per-ACQUISITION sandbox context; the leaf dispatch of a stretch reads it
    * live, so a resume with a fresh policy/taint is what its leaves get. */
   private readonly stretches = new Map<
@@ -419,9 +427,8 @@ export class WorkflowService {
       ((message) => {
         console.warn(message);
       });
-    this.auditTrail = auditEnabled(options.environment ?? process.env, this.warn)
-      ? options.auditTrail
-      : undefined;
+    this.environment = options.environment ?? process.env;
+    this.auditTrail = auditEnabled(this.environment, this.warn) ? options.auditTrail : undefined;
     this.liveEvents = new WorkflowLiveEvents(
       options.onLiveEvent,
       () => Date.now() / 1_000,
@@ -539,13 +546,6 @@ export class WorkflowService {
   }
 
   /**
-   * The leaf capability seam: whoever implements `ChildRuntime` wraps its leaf
-   * tool dispatch with this, and the run's leaves get the operator policy (from
-   * operator config, NEVER the spec), the per-acquisition working root and the
-   * sticky taint gate. Evaluated per call, so a `web_fetch` that taints the
-   * session closes fs/egress for every call after it — in the same stretch.
-   */
-  /**
    * The composition handed to the runtime, pinned to ONE acquisition. Once a
    * newer stretch owns the run, the older stretch's wrapper stops granting
    * anything: its working root and its taint are no longer the run's.
@@ -640,6 +640,14 @@ export class WorkflowService {
     const runArgs =
       resumeRunId === undefined ? args : Object.keys(args).length > 0 ? args : (prior?.args ?? {});
     if (this.store === undefined) {
+      // Test-only (#102): production always wires a store (#101); warn once.
+      if (!this.warnedEphemeral && !isTestEnvironment(this.environment)) {
+        this.warnedEphemeral = true;
+        this.warn(
+          "workflow: WorkflowService constructed without a durable store outside a test " +
+            "environment — runs launched here are in-memory only and never survive the process",
+        );
+      }
       return this.launch(parsed, runId, runArgs, options.checkpointAnswers ?? {}, budget ?? null);
     }
     return this.launchDurable(this.store, parsed, runId, runArgs, options, explicitSpec, prior);
@@ -652,7 +660,7 @@ export class WorkflowService {
     checkpointAnswers: Readonly<Record<string, unknown>>,
     tokenBudget: number | null,
   ): WorkflowStartResult {
-    // Even without a durable store the leaves are sandboxed: operator policy,
+    // Even without a durable store, leaves are sandboxed: operator policy,
     // a run-scoped working root, and whatever taint the session already has.
     this.stretchSeq += 1;
     this.stretches.set(runId, {
@@ -741,10 +749,9 @@ export class WorkflowService {
     // durable line already carried.
     const tainted = priorView?.tainted === true || this.taintTracker.tainted;
     const liveHere = this.runs.get(runId);
-    // Criterion 25 — the REGISTRY guard, checked before anything is acquired or
-    // written. A second engine on a run that has not stopped would share this
-    // one's node cache and working root, and the older stretch would go on
-    // writing into a run nobody tracks. Refuse, take no lease, touch no ledger.
+    // Criterion 25 — the REGISTRY guard, before anything is acquired: a second
+    // engine on a run that has not stopped would share this one's node cache
+    // and working root. Refuse, take no lease, touch no ledger.
     if (isLive(liveHere)) {
       return Object.freeze({
         error:
@@ -788,12 +795,9 @@ export class WorkflowService {
       store.locks.releaseRunLeaseAtFence(runId, store.holder, fence);
       return Object.freeze({ error: refusal });
     }
-    // THIS acquisition, with an identity of its own. Keying anything by run_id
-    // alone let a later acquisition of the SAME run hand its fence to an older
-    // stretch still finishing: the old one then wrote a terminal line with a
-    // token it never held, and released a lease belonging to the live stretch.
-    // A stretch presents the fence IT acquired, and only while it is still the
-    // current one.
+    // THIS acquisition, with an identity of its own: keying by run_id alone
+    // let a later acquisition hand its fence to an older, still-finishing
+    // stretch. A stretch presents the fence IT acquired, only while current.
     this.stretchSeq += 1;
     const stretchId = this.stretchSeq;
     const fenceKey = `${runId}#${String(stretchId)}`;
@@ -818,11 +822,9 @@ export class WorkflowService {
     // The wrapper is pinned to this stretch: once a newer acquisition exists,
     // this one's wrapper denies everything rather than serving stale capability.
     const install = this.runtime.installLeafSandbox?.bind(this.runtime);
-    // A launch that dies between taking the lease and handing the run over must
-    // give BOTH back: a lease nobody will renew locks every later resume out
-    // until the TTL runs down, and a heartbeat with no run behind it keeps
-    // renewing it. An installer that THROWS is the same failure as one that is
-    // missing, so both land here.
+    // A launch that dies between taking the lease and handing the run over
+    // must give BOTH back (a lease nobody renews locks every resume out until
+    // the TTL); an installer that THROWS is the same failure as one missing.
     const abandonAcquisition = (): void => {
       this.heartbeat?.stop(runId);
       this.stretches.delete(runId);
@@ -900,9 +902,7 @@ export class WorkflowService {
      *
      * Every step is independent — a step that fails must not skip the ones
      * after it, and none of them may stop the run from publishing a bounded
-     * result. A disposer that threw used to escape the success path, land in
-     * `.catch`, be called a second time, throw again, and leave the waiter
-     * hanging on a promise chain that rejected with nobody listening.
+     * result (a disposer that threw used to leave the waiter hanging).
      *
      * The heartbeat stops FIRST: a tick that outlived the release would put the
      * lease back and leave the run looking alive with nobody in it. The release
@@ -947,14 +947,11 @@ export class WorkflowService {
     const priorDegraded = priorView?.prior_degraded === true;
     this.runs.set(runId, record);
     // The launch line and the ledger seed are this stretch's FIRST owned
-    // writes, and their answer is authoritative: if the guard refused them,
-    // ownership changed hands while we were getting here — the installer can
-    // block the event loop past the TTL, and a new owner can take the run in
-    // that window. A refusal at this point is the proof, and it has to end the
-    // stretch BEFORE anything runs. Ignoring it let a leaf spawn and produce
-    // external effects under a fence somebody else had already replaced, with
-    // the loss only surfacing at the terminal write.
-    const registered = this.persistLine(store, runId, {
+    // writes, and their answer is authoritative: a refusal here means
+    // ownership changed hands while we were getting here (the installer can
+    // block the event loop past the TTL) and must end the stretch BEFORE
+    // anything runs, not surface only at the terminal write.
+    const registered = store.repository.putRunState(runId, {
       name: parsed.name,
       owner: store.holder,
       status: "running",
@@ -1011,30 +1008,29 @@ export class WorkflowService {
         // web_fetch marked the tracker, and the line this stretch writes must
         // carry that, not the value read before the engine started.
         const taintedNow = tainted || this.taintTracker.tainted;
-        const owned =
+        // Shared by both terminal writes below (they differ only in status/
+        // pauseReason/checkpoint/resume_at).
+        const pausePayload = (checkpoint: unknown, resumeAt: number | null): string =>
+          JSON.stringify({
+            checkpoint,
+            resume_at: resumeAt,
+            attempts: (priorView?.attempts ?? 0) + 1,
+            prior_faults: faults,
+            prior_degraded: degraded,
+          });
+        const persistTerminal = (
+          status: string,
+          pauseReason: string | null,
+          pausePayloadJson: string,
+        ): boolean =>
           terminal === null
             ? false
-            : this.persistLine(store, runId, {
+            : store.repository.putRunState(runId, {
                 name: parsed.name,
                 owner: store.holder,
-                status: result.status,
-                pauseReason: result.pauseReason,
-                pausePayloadJson:
-                  result.status === "paused"
-                    ? JSON.stringify({
-                        checkpoint: result.checkpoint,
-                        resume_at: null,
-                        attempts: (priorView?.attempts ?? 0) + 1,
-                        prior_faults: faults,
-                        prior_degraded: degraded,
-                      })
-                    : JSON.stringify({
-                        checkpoint: null,
-                        resume_at: null,
-                        attempts: (priorView?.attempts ?? 0) + 1,
-                        prior_faults: faults,
-                        prior_degraded: degraded,
-                      }),
+                status,
+                pauseReason,
+                pausePayloadJson,
                 specJson: JSON.stringify(rawSpecOf(parsed)),
                 argsJson: JSON.stringify(args),
                 tokenBudget: effectiveBudget,
@@ -1046,6 +1042,11 @@ export class WorkflowService {
                 holder: terminal.holder,
                 now: terminal.now,
               });
+        const owned = persistTerminal(
+          result.status,
+          result.pauseReason,
+          pausePayload(result.status === "paused" ? result.checkpoint : null, null),
+        );
         this.persistSpend(store, runId, effectiveBudget, seeded, engine, stretchOwnership());
         // A quota pause is the one failure that fixes itself given time: arm
         // the retry here (bounded, capped); token-budget and checkpoint pauses
@@ -1064,30 +1065,8 @@ export class WorkflowService {
               retryAfter,
             }) ?? null;
         }
-        if (resumeAt !== null && terminal !== null) {
-          this.persistLine(store, runId, {
-            name: parsed.name,
-            owner: store.holder,
-            status: "paused",
-            pauseReason: QUOTA_PAUSE,
-            pausePayloadJson: JSON.stringify({
-              checkpoint: null,
-              resume_at: resumeAt,
-              attempts: (priorView?.attempts ?? 0) + 1,
-              prior_faults: faults,
-              prior_degraded: degraded,
-            }),
-            specJson: JSON.stringify(rawSpecOf(parsed)),
-            argsJson: JSON.stringify(args),
-            tokenBudget: effectiveBudget,
-            tainted: taintedNow,
-            progressJson: progressJsonOf(engine.progress()),
-            auditSegmentId: null,
-            updatedAt: terminal.now,
-            fence: terminal.fence,
-            holder: terminal.holder,
-            now: terminal.now,
-          });
+        if (resumeAt !== null) {
+          persistTerminal("paused", QUOTA_PAUSE, pausePayload(null, resumeAt));
         }
         if (owned && terminal !== null) this.announceDone(runId, result.status, terminal);
         finishStretch();
@@ -1150,14 +1129,6 @@ export class WorkflowService {
     return join(this.homeRoot, "runs", runId, `work-${String(fence)}`);
   }
 
-  private persistLine(
-    store: OwnershipStore,
-    runId: string,
-    fields: Parameters<WorkflowRepository["putRunState"]>[1],
-  ): boolean {
-    return store.repository.putRunState(runId, fields);
-  }
-
   private seedSpend(
     store: OwnershipStore,
     runId: string,
@@ -1177,10 +1148,6 @@ export class WorkflowService {
     if (store === undefined) return 0;
     const seeded = this.seedSpend(store, runId);
     return seeded.tokensIn + seeded.tokensOut;
-  }
-
-  private seedSpendOfRun(runId: string): number {
-    return this.seedSpendTotal(runId);
   }
 
   private durableOf(runId: string): DurableRunView | null {
@@ -1300,7 +1267,7 @@ export class WorkflowService {
           status: view.status,
           nodes_done: Number(view.progress?.done ?? 0),
           nodes_total: Number(view.progress?.total ?? 0),
-          tokens_spent: this.seedSpendOfRun(view.run_id),
+          tokens_spent: this.seedSpendTotal(view.run_id),
           token_budget: view.token_budget,
         };
         if (view.status === "running" && store.locks.runLeaseExpiry(view.run_id, now) === null) {
@@ -1317,6 +1284,39 @@ export class WorkflowService {
     if (record === undefined) return Object.freeze({ error: `unknown workflow run '${runId}'` });
     record.engine.requestPause();
     return Object.freeze({ run_id: runId, status: "paused" });
+  }
+
+  // --- shutdown --------------------------------------------------------------
+
+  /** Idempotent: stops heartbeat/auto-resume, cancels + awaits (bounded) every
+   * live run so ITS OWN completion handler releases its lease before
+   * `connection.close()` runs, then flushes the audit trail (invariant 4). */
+  public shutdown(): Promise<void> {
+    return (this.shuttingDown ??= this.runShutdown());
+  }
+
+  private async runShutdown(): Promise<void> {
+    this.autoResume?.shutdown();
+    this.heartbeat?.shutdown();
+    const live = [...this.runs.values()].filter((record) => !record.settled);
+    for (const record of live) record.engine.cancel();
+    let timer: Timer | undefined;
+    const expired = new Promise<boolean>((resolve) => {
+      timer = defaultServiceTimer(SHUTDOWN_SETTLE_TIMEOUT_MS / 1000, () => {
+        resolve(false);
+      });
+    });
+    const settled = Promise.all(live.map((record) => record.promise)).then(() => true);
+    const ok = await Promise.race([settled, expired]);
+    timer?.cancel();
+    if (!ok) {
+      this.warn(
+        `workflow: shutdown timed out waiting for ${String(live.length)} run(s) to settle; ` +
+          "their lease is left to expire on the TTL (heartbeat already stopped)",
+      );
+    }
+    this.autoResume?.shutdown();
+    if (this.auditTrail !== undefined) await this.auditTrail.shutdown();
   }
 
   cancel(runId: string): WorkflowServiceError | Readonly<Record<string, unknown>> {
