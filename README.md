@@ -38,6 +38,32 @@ Em sessões de Claude Code, `.claude/settings.json` formata e aplica `eslint --f
 arquivo editado (hook `PostToolUse`) e libera sem prompt os comandos read-only acima; o gate
 continua sendo `npm run lint` + `npm run format:check`.
 
+## Desenvolvimento
+
+`npm run doutor` confere se esta máquina tem o que o checkout precisa — Node
+≥ 20, `python3`/`make`/`g++` (só em Linux, build nativo do `node-pty`), `gh`
+autenticado, e os dois hooks locais (`git-pre-push`, `pre-commit` do
+lefthook) instalados. Cada falta vem com o comando que resolve; sai `1` se
+sobrar alguma:
+
+```
+FALTA  gh — gh não encontrado no PATH
+       resolve com: brew install gh && gh auth login
+```
+
+`npm ci`/`npm install` (`scripts/postinstall.mjs`) instalam dois hooks
+nativos do git neste checkout, sempre que há um `.git` (instalação por
+tarball pula os dois em silêncio):
+
+- `git-pre-push` — camada 2 da proteção da `main` (`.claude/hooks/README.md`):
+  nega push direto em `main`/`master` e qualquer push não fast-forward.
+- `pre-commit` do [lefthook](https://lefthook.dev) (`lefthook.yml`):
+  `prettier --check` e `eslint` nos arquivos staged (`.ts`/`.mjs`/`.js`,
+  `prettier` cobre também `.md`/`.yml`/`.json`) — um commit desformatado é
+  recusado antes de chegar ao CI. A instalação chama sempre
+  `lefthook install pre-commit`, nunca `lefthook install` sem argumento, que
+  reescreveria todo `.git/hooks` e apagaria o `pre-push` acima.
+
 ## Prova por issue
 
 Cada issue declara sua prova em `prova/<slug>.ts` (`<slug>` é o mesmo da branch
