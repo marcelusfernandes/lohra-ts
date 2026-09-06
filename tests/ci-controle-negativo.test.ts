@@ -233,6 +233,29 @@ describe("contemStubQueLanca", () => {
     ].join("\n");
     expect(contemStubQueLanca(diff)).toBe(true);
   });
+
+  // Issue #78: a checagem anterior só excluía linhas que COMEÇAVAM com
+  // `//`/`*` — um comentário de bloco de uma linha só, ou um comentário de
+  // linha que não está no início, passava como stub real (fail-open).
+  it("ignora comentário de bloco de documentação numa linha só (/** throw new Error( */ — issue #78)", () => {
+    const diff = ["+++ b/src/x.ts", "+/** throw new Error( */", ""].join("\n");
+    expect(contemStubQueLanca(diff)).toBe(false);
+  });
+
+  it("ignora comentário de bloco simples numa linha só (/* throw new Error( */ — issue #78)", () => {
+    const diff = ["+++ b/src/x.ts", "+/* throw new Error( */", ""].join("\n");
+    expect(contemStubQueLanca(diff)).toBe(false);
+  });
+
+  it("ignora comentário de linha que não está no início da linha (x(); // throw new Error( — issue #78)", () => {
+    const diff = ["+++ b/src/x.ts", "+x(); // throw new Error(", ""].join("\n");
+    expect(contemStubQueLanca(diff)).toBe(false);
+  });
+
+  it('ainda aceita o stub real, único caso aceito (throw new Error("not implemented") — issue #78)', () => {
+    const diff = ["+++ b/src/x.ts", '+  throw new Error("not implemented");', ""].join("\n");
+    expect(contemStubQueLanca(diff)).toBe(true);
+  });
 });
 
 describe("ehArquivoDocsOuProcess / deveSerIgnorado", () => {
