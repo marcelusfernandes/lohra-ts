@@ -16,8 +16,13 @@ import { join, resolve } from "node:path";
 
 const repoRoot = resolve(import.meta.dirname, "..", "..");
 export const runScript = resolve(repoRoot, "scripts/ci/controle-negativo/run.ts");
-export const tsxBin = resolve(repoRoot, "node_modules/.bin/tsx");
-export const tsxCliMjs = resolve(repoRoot, "node_modules/tsx/dist/cli.mjs");
+// Issue #137: nunca pelo wrapper CLI do `tsx` (nem via o shim `.bin/tsx`
+// da pasta de dependências, que é um symlink pra ele) — o handshake de sinal
+// do wrapper (~30ms + 30ms ack, depois SIGKILL) é suspeito de custo e de
+// flake sob carga (#128/#131). `--import` com o loader do `tsx` lança um
+// único processo real (molde: `scripts/parity/gateway/launch-candidate.ts`,
+// issue #132).
+export const tsxLoader = import.meta.resolve("tsx");
 
 export const TIMEOUT_TESTE = 60_000;
 
@@ -302,7 +307,7 @@ function envSemVitest(): Record<string, string | undefined> {
 }
 
 export function runControleNegativo(args: readonly string[]): SpawnSyncReturns<string> {
-  return spawnSync(tsxBin, [runScript, ...args], {
+  return spawnSync(process.execPath, ["--import", tsxLoader, runScript, ...args], {
     encoding: "utf8",
     timeout: TIMEOUT_TESTE,
     env: envSemVitest(),
@@ -318,7 +323,7 @@ export function runControleNegativoComEnv(
   args: readonly string[],
   envExtra: Record<string, string>,
 ): SpawnSyncReturns<string> {
-  return spawnSync(tsxBin, [runScript, ...args], {
+  return spawnSync(process.execPath, ["--import", tsxLoader, runScript, ...args], {
     encoding: "utf8",
     timeout: TIMEOUT_TESTE,
     env: { ...envSemVitest(), ...envExtra },
@@ -348,7 +353,7 @@ export function runControleNegativoComSummary(args: readonly string[]): {
   const summaryPath = join(mkdtempSync(join(tmpdir(), "controle-negativo-summary-")), "summary.md");
   workdirs.push(join(summaryPath, ".."));
   writeFileSync(summaryPath, "");
-  const result = spawnSync(tsxBin, [runScript, ...args], {
+  const result = spawnSync(process.execPath, ["--import", tsxLoader, runScript, ...args], {
     encoding: "utf8",
     timeout: TIMEOUT_TESTE,
     env: { ...envSemVitest(), GITHUB_STEP_SUMMARY: summaryPath },
@@ -367,7 +372,19 @@ export function rodarComPathVazio(
   try {
     return spawnSync(
       process.execPath,
-      [tsxCliMjs, runScript, "--root", dir, "--base", base, "--head", head, "--slug", slug],
+      [
+        "--import",
+        tsxLoader,
+        runScript,
+        "--root",
+        dir,
+        "--base",
+        base,
+        "--head",
+        head,
+        "--slug",
+        slug,
+      ],
       { encoding: "utf8", timeout: TIMEOUT_TESTE, env: { ...envSemVitest(), PATH: dirVazio } },
     );
   } finally {
