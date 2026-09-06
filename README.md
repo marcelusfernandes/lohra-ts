@@ -191,6 +191,17 @@ lohra update --check
 `workflow run`. Chat e dashboard compartilham a mesma composition root para
 workflow/audit, orquestração, cron, MCP, web e mídia.
 
+Um run de `run_workflow` sobrevive ao processo que o lançou: `chat`/
+`dashboard` gravam cada nó concluído (`workflow_node_cache`), o estado do run
+e a trilha de auditoria no `state.db` da sessão sob um lease com TTL, não em
+memória. Se esse processo morrer no meio de um run, `lohra workflow list`,
+`watch` e `audit` — de qualquer terminal, contra o mesmo `state.db` — ainda
+enxergam o run; `watch` mostra o sufixo `(stale)` quando o lease expirou
+(o processo que o mantinha desapareceu). `run_workflow(resume_run_id=...)`
+retoma o run reaproveitando o cache: os nós já concluídos não são
+reexecutados, só o trabalho que ainda faltava quando o processo anterior
+parou (issue #103, `tests/workflow-cross-process.test.ts`).
+
 ### Erros e `--help`
 
 O texto de erro e de ajuda da CLI é próprio deste produto — não é um
