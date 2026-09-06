@@ -602,7 +602,13 @@ function main(): void {
   // head — sem excluir `status === "D"`, uma PR que só apaga um `tests/**`
   // virava SKIP indevido.
   const statusPorArquivo = new Map(alterados.map((item) => [item.arquivo, item.status]));
-  const statusNoDiff = (arquivo: string): string => statusPorArquivo.get(arquivo) ?? "M";
+  // `?? "D"`, não `"M"`: todo `arquivo` passado aqui vem do próprio `diff`
+  // (`arquivosAlterados`/`alterados`), então o `get` nunca deveria falhar —
+  // mas se falhar (bug futuro, refactor que perde a correspondência), o
+  // fallback fail-closed é tratar como deletado (nunca "editado", nunca
+  // SKIP), não como "modificado" (que abriria o SKIP por engano). Hoje
+  // inalcançável; nota do revisor da PR #119.
+  const statusNoDiff = (arquivo: string): string => statusPorArquivo.get(arquivo) ?? "D";
   const arquivoJaExisteNaBase = (arquivo: string): boolean => existeNoCommit(root, base, arquivo);
 
   // Issue #114 (bloqueava a PR #113): diff inteiro dentro do overlay
