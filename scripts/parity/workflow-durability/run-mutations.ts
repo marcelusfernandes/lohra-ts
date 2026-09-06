@@ -20,6 +20,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { canonicalJson } from "../canonical.js";
+import { orchestrationMutants } from "./mutants-orchestration.js";
+import type { Focus, Mutant } from "./mutants-types.js";
 
 const root = resolve(process.cwd());
 
@@ -31,34 +33,11 @@ const sandbox = "src/workflow/sandbox.ts";
 const sqliteCache = "src/workflow/sqlite-cache.ts";
 const engine = "src/workflow/engine.ts";
 const normalizer = "scripts/parity/workflow-durability/workers/normalize-evidence.mjs";
-const childRunner = "src/orchestration/child-runner.ts";
 
 const repositoryTests = "tests/state-workflow-repository.test.ts";
 const serviceTests = "tests/workflow-service-durability.test.ts";
 const durabilityTests = "tests/workflow-durability.test.ts";
-const childRunnerTests = "tests/orchestration-child-runner.test.ts";
 const sandboxTests = "tests/workflow-sandbox.test.ts";
-
-interface Edit {
-  readonly file: string;
-  readonly before: string;
-  readonly after: string;
-}
-
-interface Focus {
-  /** The test file the oracle for this mutant lives in. */
-  readonly file: string;
-  /** vitest -t pattern naming the exact test that must go red. */
-  readonly test: string;
-}
-
-interface Mutant {
-  readonly id: string;
-  readonly category: string;
-  readonly mechanism: string;
-  readonly focus: Focus;
-  readonly edits: readonly Edit[];
-}
 
 // --- the shared guard's three conjuncts -------------------------------------
 // Each rewrite consumes its own bound parameter (`? IS NOT NULL`), so arity is
@@ -761,27 +740,14 @@ const namedMutants: readonly Mutant[] = [
       },
     ],
   },
-  {
-    id: "an/child-runner-bypasses-the-leaf-wrap",
-    category: "sandbox",
-    mechanism:
-      "createChildRunner drops SpawnConfig.wrapDispatch and always uses the unwrapped child allow-list dispatch, so a leaf sandbox wrap (workflow durable leaves, #107) never runs and a denial never reaches the model",
-    focus: {
-      file: childRunnerTests,
-      test: "wraps the child dispatch, so a denying wrap's own text reaches the tool result",
-    },
-    edits: [
-      {
-        file: childRunner,
-        before:
-          "      const dispatch =\n        config.wrapDispatch === undefined ? childDispatch : config.wrapDispatch(childDispatch);",
-        after: "      const dispatch = childDispatch;",
-      },
-    ],
-  },
 ];
 
-const mutants: readonly Mutant[] = [...guardMutants, ...combinedMutants, ...namedMutants];
+const mutants: readonly Mutant[] = [
+  ...guardMutants,
+  ...combinedMutants,
+  ...namedMutants,
+  ...orchestrationMutants,
+];
 
 function replaceExactlyOnce(source: string, before: string, after: string, id: string): string {
   const first = source.indexOf(before);
