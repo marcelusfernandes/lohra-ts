@@ -83,9 +83,9 @@ export function steerSessionTool(core: OrchestrationCore, args: ToolArguments): 
 
 /** Maps the registry's CollectResult (camelCase) to the wire's snake_case
  * envelope, in the contract's exact 13-key order (assertion 14). retry_after
- * is the oracle's own `seconds if seconds > 0 else None` (L15/assertion 39) —
- * a Python float, so a whole-number value like 1 renders as "1.0", never the
- * bare "1" a plain JS number would produce. */
+ * is positive seconds, else null (L15/assertion 39) — a Python float, so a
+ * whole-number value like 1 renders as "1.0", never the bare "1" a plain JS
+ * number would produce. */
 function collectEnvelope(result: CollectResult): string {
   return toolResult(undefined, {
     status: result.status,

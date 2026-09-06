@@ -59,7 +59,7 @@ export function parseCronField(field: string, low: number, high: number): Set<nu
   return values;
 }
 
-/** True if `expr` (5 fields) fires at `when` (cron day-of-week 0=Sunday, matching Date#getDay). */
+/** Whether `expr` (5 fields) fires at `when` (cron day-of-week 0=Sunday, matching Date#getDay). */
 export function cronMatches(expr: string, when: Date): boolean {
   const fields = expr.split(/\s+/).filter((part) => part.length > 0);
   if (fields.length !== 5) {
