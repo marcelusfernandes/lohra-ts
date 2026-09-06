@@ -75,7 +75,9 @@ export function restoreAll(directory: string, snapshot: ReadonlyMap<string, Buff
 export function prepareArchiveSandbox(root: string, candidateSha: string): string {
   const status = spawnSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" });
   if (status.status !== 0 || status.stdout !== "")
-    throw new Error("mutation run requires a committed candidate with clean porcelain");
+    throw new Error(
+      `mutation run requires a committed candidate with clean porcelain: ${status.stderr}`,
+    );
 
   const sandbox = mkdtempSync(join(tmpdir(), "lohra-mutations-"));
   try {
@@ -83,12 +85,14 @@ export function prepareArchiveSandbox(root: string, candidateSha: string): strin
       cwd: root,
       maxBuffer: 64 * 1024 * 1024,
     });
-    if (archive.status !== 0) throw new Error(`git archive failed for ${candidateSha}`);
+    if (archive.status !== 0)
+      throw new Error(`git archive failed for ${candidateSha}: ${archive.stderr.toString("utf8")}`);
     const extracted = spawnSync("tar", ["-xf", "-", "-C", sandbox], {
       input: archive.stdout,
       maxBuffer: 64 * 1024 * 1024,
     });
-    if (extracted.status !== 0) throw new Error("tar extraction failed");
+    if (extracted.status !== 0)
+      throw new Error(`tar extraction failed: ${extracted.stderr.toString("utf8")}`);
     symlinkSync(resolve(root, "node_modules"), join(sandbox, "node_modules"), "dir");
     return sandbox;
   } catch (cause) {
@@ -110,10 +114,10 @@ function isVitestJsonReport(value: unknown): value is VitestJsonReport {
 /** Interpreta a saída de `vitest run --reporter=json` num `RunOutcome`
  * determinístico (sem timestamps/duração). Função pura.
  *
- * TODO(#149): sem JSON balanceado no stdout, hoje devolve um sentinela
- * (`<no json report>`, `ranTests: 0`) que `classify` pode ler como
- * `killed: true` — um mutante que nunca rodou vira morto por engano
- * (veredito da PR #170, reason 1). Precisa lançar em vez disso. */
+ * Sem JSON balanceado no stdout é uma falha do HARNESS, não um teste que
+ * rodou e não falhou — devolver um sentinela deixaria `classify` ler
+ * `killed: true` para um mutante que nunca chegou a rodar (veredito da PR
+ * #170, reason 1). Por isso lança, com o `stderr` do subprocesso na causa. */
 export function parseVitestOutcome(
   stdout: string,
   exitCode: number | null,
@@ -122,8 +126,7 @@ export function parseVitestOutcome(
   const start = stdout.indexOf("{");
   const end = stdout.lastIndexOf("}");
   if (start < 0 || end <= start) {
-    void stderr;
-    return { exitCode, failedTests: ["<no json report>"], ranTests: 0 };
+    throw new Error(`vitest produced no JSON report (exitCode=${String(exitCode)}): ${stderr}`);
   }
   const parsed: unknown = JSON.parse(stdout.slice(start, end + 1));
   const report = isVitestJsonReport(parsed) ? parsed : {};
@@ -141,11 +144,10 @@ export function parseVitestOutcome(
   };
 }
 
-/** Roda `vitest run <focus.file> -t <focus.test>` dentro de `directory`. */
-export function runFocusedVitest(directory: string, focus: Focus): RunOutcome {
+function runVitestReporterJson(directory: string, args: readonly string[]): RunOutcome {
   const result = spawnSync(
     join(directory, "node_modules/.bin/vitest"),
-    ["run", focus.file, "-t", focus.test, "--reporter=json", "--outputFile=/dev/stdout"],
+    ["run", ...args, "--reporter=json", "--outputFile=/dev/stdout"],
     {
       cwd: directory,
       encoding: "utf8",
@@ -154,26 +156,38 @@ export function runFocusedVitest(directory: string, focus: Focus): RunOutcome {
     },
   );
   if (result.error !== undefined) throw result.error;
-  return parseVitestOutcome(result.stdout, result.status);
+  return parseVitestOutcome(result.stdout, result.status, result.stderr);
 }
 
-// TODO(#149): guarda de baseline/restore que o runner original (t16
-// `run-mutations.ts:845,882`) já tinha e o harness ainda não oferece —
-// sem ela, um foco obsoleto (`-t` que não bate nada) sai `{exitCode:0,
-// ranTests:0}` e um `restoreAll` mal aplicado nunca é notado.
-export function assertBaselineGreen(_outcome: RunOutcome, _context: string): void {
-  throw new Error("not implemented");
+/** Roda `vitest run <focus.file> -t <focus.test>` dentro de `directory`. */
+export function runFocusedVitest(directory: string, focus: Focus): RunOutcome {
+  return runVitestReporterJson(directory, [focus.file, "-t", focus.test]);
 }
 
-export function assertRestoreGreen(_outcome: RunOutcome): boolean {
-  throw new Error("not implemented");
+/** Lança se `outcome` não é um baseline verde: precisa exitCode 0 E ter
+ * rodado pelo menos um teste (o runner original, t16 `run-mutations.ts:845`,
+ * já tinha esta guarda; sem ela um foco obsoleto — `-t` que não bate
+ * nenhum teste — sai `{exitCode:0, ranTests:0}` e nunca prova nada). */
+export function assertBaselineGreen(outcome: RunOutcome, context: string): void {
+  if (outcome.exitCode !== 0 || outcome.ranTests === 0)
+    throw new Error(
+      `${context}: baseline is not green (exit=${String(outcome.exitCode)}, ran=${String(outcome.ranTests)})`,
+    );
+}
+
+/** O mesmo predicado do baseline, aplicado depois de `restoreAll`: devolve
+ * `true` só quando o foco voltou a sair 0 E rodou pelo menos um teste
+ * (t16 `run-mutations.ts:882`). Não lança — o chamador guarda o resultado
+ * como dado no relatório (`restoreGreen`), não como fault fatal. */
+export function assertRestoreGreen(outcome: RunOutcome): boolean {
+  return outcome.exitCode === 0 && outcome.ranTests > 0;
 }
 
 /** Roda `vitest run <files...>` (sem `-t`) dentro de `directory` — a forma
  * que t15 usa: a mesma bateria de arquivos focais roda inteira para cada
  * mutante, sem afunilar num teste único. */
-export function runVitestFiles(_directory: string, _files: readonly string[]): RunOutcome {
-  throw new Error("not implemented");
+export function runVitestFiles(directory: string, files: readonly string[]): RunOutcome {
+  return runVitestReporterJson(directory, [...files]);
 }
 
 /** Um mutante só é `killed` quando o processo saiu com código diferente de
