@@ -346,6 +346,18 @@ describe("controle-negativo/run.ts (subprocesso, repositório git descartável)"
 
       const result = rodar(dir, baseInvalida, head, slug);
 
+      // Issue #122: outro teste concorrente (mesmo arquivo ou outro rodando
+      // em paralelo — ex.: `novoRepo()` em `ci-controle-negativo.test.ts` ou
+      // `ci-controle-negativo-lacunas.test.ts`) que crie um repositório fake
+      // com o MESMO prefixo `controle-negativo-` no tmpdir GLOBAL, bem nessa
+      // janela, quebra a comparação abaixo — não por vazamento deste teste,
+      // mas porque a checagem lê um recurso compartilhado com a suíte
+      // inteira. Simulado aqui de forma determinística (em vez de esperar
+      // pela corrida real): reproduz byte a byte a falha intermitente que o
+      // `qa` capturou na PR #120 (`AssertionError: expected [...] to deeply
+      // equal [...]`, entradas extras no lado "Received").
+      novoRepo();
+
       expect(result.status).toBe(1);
       const depois = readdirSync(tmpdir()).filter((nome) => nome.startsWith("controle-negativo-"));
       expect(depois).toEqual(antes);
