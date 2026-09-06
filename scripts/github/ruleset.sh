@@ -6,7 +6,10 @@
 #
 #   PR obrigatória (0 aprovações humanas — o revisor é agente e a label é a
 #   condição; ver protege-main.sh), checks required `checks (20)`, `checks (22)`,
-#   `provenance`, sem force-push (non_fast_forward), sem delete.
+#   `provenance` e, desde #60, os checks de PR do épico #34 — `escopo`,
+#   `contratos`, `controle-negativo` (só rodam em pull_request, que é onde o
+#   ruleset avalia; `strict` fica false para não exigir branch atualizada) —
+#   sem force-push (non_fast_forward), sem delete.
 #
 # Uso: scripts/github/ruleset.sh [owner/repo]
 set -eu
@@ -33,7 +36,10 @@ BODY=$(cat <<'JSON'
         "required_status_checks": [
           { "context": "checks (20)" },
           { "context": "checks (22)" },
-          { "context": "provenance" } ] } }
+          { "context": "provenance" },
+          { "context": "escopo" },
+          { "context": "contratos" },
+          { "context": "controle-negativo" } ] } }
   ]
 }
 JSON
