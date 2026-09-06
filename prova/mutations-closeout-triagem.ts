@@ -1,8 +1,12 @@
 // Declaração de prova da issue #153 (triagem do catálogo de closeout — 8
 // mutantes de src/ migram para scripts/mutations/self-update.ts, passo 0f
-// do épico #13). Lista o pino do catálogo, o pino do agregador de closeout
-// aposentado (tests/t22-closeout.test.ts, que continua verde) e os arquivos
-// de tests/**  que hospedam o foco de algum dos 8 mutantes.
+// do épico #13). Nome do arquivo casa com o slug derivado do nome da branch
+// (`chore/153-mutations-closeout-triagem` -> `mutations-closeout-triagem`),
+// não com o nome do script npm (`mutations:self-update`) -- os dois não
+// precisam coincidir (reconciliação da issue após a rodada 1 da PR #183).
+// Lista o pino do catálogo, o pino do agregador de closeout aposentado
+// (tests/t22-closeout.test.ts, que continua verde) e os arquivos de
+// tests/** que hospedam o foco de algum dos 8 mutantes.
 import type { Declaracao } from "../scripts/prova/tipos.js";
 
 export default {
