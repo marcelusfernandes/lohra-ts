@@ -1,3 +1,28 @@
+// Issue #111: cada `it(...)` abaixo spawna um vitest aninhado via
+// `runProva`/`spawnSync` com `timeout: SPAWN_TIMEOUT_MS` (60s) — mas sem um
+// timeout de teste explícito, o `testTimeout` default do vitest (5s,
+// `vitest.config.ts` não o define) podia expirar o `it()` ANTES do
+// `spawnSync` ter chance de terminar sob carga (10 execuções seguidas de
+// `npm test`, ou suítes pesadas concorrentes): PR #106, rodada 2, run 9.
+// Isso é flake por tempo, não por comportamento — o `spawnSync` já tem seu
+// próprio timeout e motivo de falha (exit code/sinal); o teste não precisa
+// de outro relógio mais apertado por cima.
+//
+// Solução: cada `it()` que spawna vitest aninhado declara o mesmo
+// `SPAWN_TIMEOUT_MS` como timeout de teste — nunca menor que o timeout do
+// `spawnSync` que ele espera. Medido sem carga (3 execuções de
+// `npx vitest run tests/prova-run.test.ts`): 250ms–1.3s por caso, ~5s no
+// total — bem abaixo de 60s; reduzir a fixture não teria evitado o run 9 (a
+// fixture do caso `check: true` já é mínima, um `exit 1` em vez de rodar
+// `tsc` de verdade). Por isso a escolha aqui é subir o timeout do TESTE
+// para casar com o do `spawnSync`, não encolher o trabalho — `vitest.config.ts`
+// fica fora (fora de escopo da issue #111: um `testTimeout` global
+// mascararia lentidão real em qualquer outro teste da suíte).
+//
+// O teste "cada caso pesado declara o timeout" (no fim do describe) lê o
+// próprio arquivo-fonte e confere isso por texto — não há um jeito de
+// introspectar, de dentro do vitest, o timeout já registrado de um `it()`
+// deste mesmo arquivo.
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import {
   existsSync,
@@ -10,12 +35,17 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 const root = resolve(import.meta.dirname, "..");
 const runScript = resolve(root, "scripts/prova/run.ts");
 const tsxBin = resolve(root, "node_modules/.bin/tsx");
+
+// Mesmo valor do `timeout` passado a `spawnSync` abaixo — o timeout do
+// TESTE nunca pode ser menor que o timeout do PROCESSO que ele espera.
+const SPAWN_TIMEOUT_MS = 60_000;
 
 const workdirs: string[] = [];
 
@@ -42,7 +72,7 @@ function runProva(cwd: string, slug: string): SpawnSyncReturns<string> {
   return spawnSync(tsxBin, [runScript, slug], {
     cwd,
     encoding: "utf8",
-    timeout: 60_000,
+    timeout: SPAWN_TIMEOUT_MS,
     env,
   });
 }
@@ -207,7 +237,7 @@ describe("prova run.ts (subprocess)", () => {
     const result = spawnSync(tsxBin, [runScript, "scoped"], {
       cwd: dir,
       encoding: "utf8",
-      timeout: 60_000,
+      timeout: SPAWN_TIMEOUT_MS,
       env,
     });
 
@@ -222,5 +252,31 @@ describe("prova run.ts (subprocess)", () => {
     // The default .prova/<slug>/ path must stay untouched — LOHRA_PROVA_OUT
     // redirects, it doesn't also duplicate into the default location.
     expect(existsSync(join(dir, ".prova", "scoped", "resumo.json"))).toBe(false);
+  });
+
+  it("every case that spawns nested vitest declares a test timeout >= SPAWN_TIMEOUT_MS", () => {
+    const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
+    // Split right after every top-level `it(` call — each chunk holds the
+    // body of one case (plus, for the last chunk, this very assertion's own
+    // source). "\n  it(" only matches the two-space indent used directly
+    // under `describe(...)`, never a nested call.
+    const chunks = source.split("\n  it(");
+    const cases = chunks.slice(1);
+    const own = cases[cases.length - 1];
+    // Anchor the self-exclusion: if this stops being the last case (someone
+    // appends another `it()` below it), fail loudly here instead of via a
+    // confusing mismatch further down.
+    expect(own).toContain("every case that spawns nested vitest");
+    const otherCases = cases.slice(0, -1);
+    const heavyCases = otherCases.filter(
+      (chunk) => chunk.includes("runProva(") || chunk.includes("spawnSync("),
+    );
+    // Every non-meta case in this file spawns a nested process — none can
+    // silently skip the timeout by not matching this filter.
+    expect(heavyCases).toHaveLength(otherCases.length);
+    expect(heavyCases.length).toBeGreaterThan(0);
+    for (const chunk of heavyCases) {
+      expect(chunk).toMatch(/,\s*SPAWN_TIMEOUT_MS\s*,?\s*\)\s*;/);
+    }
   });
 });
