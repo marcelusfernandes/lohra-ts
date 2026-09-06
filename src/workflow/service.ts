@@ -1319,6 +1319,12 @@ export class WorkflowService {
     return Object.freeze({ run_id: runId, status: "paused" });
   }
 
+  // --- shutdown --------------------------------------------------------------
+
+  public shutdown(): Promise<void> {
+    return Promise.reject(new Error("not implemented"));
+  }
+
   cancel(runId: string): WorkflowServiceError | Readonly<Record<string, unknown>> {
     const record = this.runs.get(runId);
     if (record !== undefined) {
