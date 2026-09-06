@@ -21,6 +21,13 @@
 // intermediate progress write or the `tainted` value AT the instant of
 // that write (only the final, terminal-write state). Both entries below
 // are scored against `tests/workflow-progress-cobertura.test.ts`.
+//
+// Issue #143 — the `qa` follow-up to PR #139 (mutation (c)): dropping the
+// `workflow: ` prefix `productionWarningSink` (ownership-store.ts:36)
+// writes to its default sink left the whole suite green, because every
+// existing test injects its own `write` and asserts the structured
+// `StateWarning`, never the formatted line. Scored against
+// `tests/workflow-durable-roots.test.ts`.
 import type { Mutant } from "./mutants-types.js";
 
 const childRunner = "src/orchestration/child-runner.ts";
@@ -28,6 +35,8 @@ const childRunnerTests = "tests/orchestration-child-runner.test.ts";
 const workflowService = "src/workflow/service.ts";
 const workflowShutdownTests = "tests/workflow-shutdown.test.ts";
 const workflowProgressCoberturaTests = "tests/workflow-progress-cobertura.test.ts";
+const ownershipStore = "src/workflow/ownership-store.ts";
+const workflowDurableRootsTests = "tests/workflow-durable-roots.test.ts";
 
 export const orchestrationMutants: readonly Mutant[] = [
   {
@@ -97,6 +106,24 @@ export const orchestrationMutants: readonly Mutant[] = [
         before:
           '          persistLine("running", null, null, tainted || this.taintTracker.tainted, ownership);',
         after: '          persistLine("running", null, null, false, ownership);',
+      },
+    ],
+  },
+  {
+    id: "ar/sink-drops-the-workflow-prefix",
+    category: "durable-line",
+    mechanism:
+      "productionWarningSink's default write drops the `workflow: ` prefix from the formatted line, so a STALE_FENCE_WRITE refusal is still reported but no longer greppable as `workflow:` — every existing test asserts the structured StateWarning, never the formatted line, so this survived until #143",
+    focus: {
+      file: workflowDurableRootsTests,
+      test: "formats a warning as workflow: <cause> run=<runId> fence=<fence>",
+    },
+    edits: [
+      {
+        file: ownershipStore,
+        before:
+          "    write(`workflow: ${warning.cause} run=${warning.runId} fence=${String(warning.fence)}`);",
+        after: "    write(`${warning.cause} run=${warning.runId} fence=${String(warning.fence)}`);",
       },
     ],
   },
