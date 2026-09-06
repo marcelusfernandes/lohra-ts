@@ -228,6 +228,9 @@ describe("dashboard.ts composition root (issue #101, AC 4): run_workflow via run
 
       expect(tableCount(root, "workflow_run_state")).toBeGreaterThan(0);
       expect(tableCount(root, "workflow_run_spend")).toBeGreaterThan(0);
+      // AC 1 also names `auditTrail`, not just `store` — see the identical
+      // rationale in tests/workflow-durable-chat.test.ts.
+      expect(tableCount(root, "workflow_audit_events")).toBeGreaterThan(0);
 
       shutdown?.();
       await donePromise;

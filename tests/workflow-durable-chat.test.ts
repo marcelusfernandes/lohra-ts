@@ -173,6 +173,14 @@ describe("chat.ts composition root (issue #101, AC 3): run_workflow via runChat 
       expect(result.code).toBe(0);
       expect(tableCount(root, "workflow_run_state")).toBeGreaterThan(0);
       expect(tableCount(root, "workflow_run_spend")).toBeGreaterThan(0);
+      // AC 1 also names `auditTrail`, not just `store` — without it, no
+      // event ever reaches workflow_audit_events regardless of the launch
+      // succeeding. announcePlan's auditTrail.record() runs synchronously
+      // inside service.start() (the run_workflow tool call itself); by the
+      // time runChat returns (its own finally awaits
+      // orchestrationCore.shutdown() first), the queued record has had many
+      // event-loop turns to drain.
+      expect(tableCount(root, "workflow_audit_events")).toBeGreaterThan(0);
     } finally {
       await closeServer(server);
     }
