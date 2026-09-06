@@ -321,7 +321,7 @@ describe("run.ts (dry-run, subprocesso)", () => {
     expect(result.stderr).not.toMatch(/\n\s+at /);
   });
 
-  it("GITHUB_STEP_SUMMARY inválido: exit 2 com a causa, violações ainda vão pro stderr (issue #62)", () => {
+  it("GITHUB_STEP_SUMMARY inválido, com violação: exit 1 (nunca 2), violações ainda vão pro stderr (issue #78)", () => {
     const dir = makeWorkdir();
     mkdirSync(join(dir, "docs", "reference"), { recursive: true });
     writeFileSync(join(dir, "docs", "reference", "x.md"), "não editar\n");
@@ -334,8 +334,26 @@ describe("run.ts (dry-run, subprocesso)", () => {
       env: { ...process.env, GITHUB_STEP_SUMMARY: join(dir, "nao", "existe", "summary.md") },
     });
 
-    expect(result.status).toBe(2);
+    expect(result.status).toBe(1);
     expect(result.stderr).toContain("caminho-proibido: docs/reference/x.md");
+    expect(result.stderr).not.toMatch(/\n\s+at /);
+  });
+
+  it("GITHUB_STEP_SUMMARY inválido, sem violação: exit 0 com aviso no stderr, nunca exit 2 (issue #78)", () => {
+    const dir = makeWorkdir();
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src", "ok.ts"), "export const x = 1;\n");
+    const filesFile = join(dir, "files.txt");
+    writeFileSync(filesFile, "src/ok.ts\n");
+
+    const result = spawnSync(tsxBin, [runScript, "--files-file", filesFile, "--root", dir], {
+      encoding: "utf8",
+      timeout: 30_000,
+      env: { ...process.env, GITHUB_STEP_SUMMARY: join(dir, "nao", "existe", "summary.md") },
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain("GITHUB_STEP_SUMMARY");
     expect(result.stderr).not.toMatch(/\n\s+at /);
   });
 

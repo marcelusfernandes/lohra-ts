@@ -233,6 +233,59 @@ describe("contemStubQueLanca", () => {
     ].join("\n");
     expect(contemStubQueLanca(diff)).toBe(true);
   });
+
+  // Issue #78: a checagem anterior só excluía linhas que COMEÇAVAM com
+  // `//`/`*` — um comentário de bloco de uma linha só, ou um comentário de
+  // linha que não está no início, passava como stub real (fail-open).
+  it("ignora comentário de bloco de documentação numa linha só (/** throw new Error( */ — issue #78)", () => {
+    const diff = ["+++ b/src/x.ts", "+/** throw new Error( */", ""].join("\n");
+    expect(contemStubQueLanca(diff)).toBe(false);
+  });
+
+  it("ignora comentário de bloco simples numa linha só (/* throw new Error( */ — issue #78)", () => {
+    const diff = ["+++ b/src/x.ts", "+/* throw new Error( */", ""].join("\n");
+    expect(contemStubQueLanca(diff)).toBe(false);
+  });
+
+  it("ignora comentário de linha que não está no início da linha (x(); // throw new Error( — issue #78)", () => {
+    const diff = ["+++ b/src/x.ts", "+x(); // throw new Error(", ""].join("\n");
+    expect(contemStubQueLanca(diff)).toBe(false);
+  });
+
+  it('ainda aceita o stub real, único caso aceito (throw new Error("not implemented") — issue #78)', () => {
+    const diff = ["+++ b/src/x.ts", '+  throw new Error("not implemented");', ""].join("\n");
+    expect(contemStubQueLanca(diff)).toBe(true);
+  });
+
+  it("ignora continuação de comentário de bloco cujo abridor é linha de contexto, não adicionada (issue #78)", () => {
+    // `/**` e `*/` são linhas de CONTEXTO (sem `+`) — só a linha do meio foi
+    // adicionada. `linhasAdicionadas` nunca vê o abridor/fechador do bloco,
+    // então a remoção de comentário de bloco (que precisa ver `/*`...`*/`
+    // dentro do próprio texto extraído) não pega esse caso — só a exclusão
+    // de linha que começa com `*` (herdada da issue #62) pega.
+    const diff = [
+      "+++ b/src/x.ts",
+      " /**",
+      '+ * throw new Error("not implemented") — exemplo',
+      "  */",
+      "",
+    ].join("\n");
+    expect(contemStubQueLanca(diff)).toBe(false);
+  });
+
+  it("ignora bloco cujo abridor foi adicionado mas o fechador é linha de contexto (issue #78)", () => {
+    // O abridor `/**...` FOI adicionado (contém o texto do stub), mas o
+    // `*/` que fecharia o bloco é uma linha de CONTEXTO — `linhasAdicionadas`
+    // nunca vê o fechador, então a remoção de bloco (que precisa achar um
+    // `*/` no próprio texto extraído) não encontra par e não remove nada.
+    const diff = [
+      "+++ b/src/x.ts",
+      '+/** throw new Error("not implemented") — exemplo',
+      "  */",
+      "",
+    ].join("\n");
+    expect(contemStubQueLanca(diff)).toBe(false);
+  });
 });
 
 describe("ehArquivoDocsOuProcess / deveSerIgnorado", () => {
