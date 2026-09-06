@@ -7,7 +7,7 @@
 // `LOHRA_PM_CHECKS_JSON` e `LOHRA_PM_VIEW_JSON` substituem essas consultas. Sem
 // o portão nenhuma seam é lida e o hook consulta os binários de verdade.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -128,6 +128,12 @@ describe("protege-main.sh", () => {
       expect(rodar(root, "env -i PATH=/usr/bin git push origin HEAD:main", bench()).status).toBe(2);
     });
 
+    it("valor colado ao flag (`nice -n10`, `env -uFOO`) não esconde o push: nega (#77)", () => {
+      expect(rodar(root, "nice -n10 git push --force origin feat/1-x", bench()).status).toBe(2);
+      expect(rodar(root, "env -uFOO git push origin HEAD:main", bench()).status).toBe(2);
+      expect(rodar(root, "env -u FOO git push origin HEAD:main", bench()).status).toBe(2);
+    });
+
     it("`--` depois de sudo/env e `nice -n N` não escondem o push: nega", () => {
       expect(rodar(root, "sudo -u root -- git push --force origin feat/1-x", bench()).status).toBe(
         2,
@@ -231,9 +237,25 @@ describe("protege-main.sh", () => {
       ).toBe(0);
     });
 
-    it("--repo é repassado ao gh (seam registra os argumentos)", () => {
-      const r = rodar(root, "gh pr merge 5 --repo o/r --merge", bench());
+    it("--repo é repassado ao gh (LOHRA_PM_ARGS_OUT registra os argumentos sob LOHRA_BENCH)", () => {
+      const saida = path.join(root, "args.txt");
+      const r = rodar(
+        root,
+        "gh pr merge 5 --repo o/r --merge",
+        bench({ LOHRA_PM_ARGS_OUT: saida }),
+      );
       expect(r.status).toBe(0);
+      const linhas = readFileSync(saida, "utf8").trim().split("\n");
+      expect(linhas).toEqual([
+        "gh pr checks 5 --repo o/r --json name,state",
+        "gh pr view 5 --repo o/r --json labels,reviewDecision,files,changedFiles",
+      ]);
+    });
+
+    it("LOHRA_PM_ARGS_OUT sem LOHRA_BENCH não é lido: nada é gravado", () => {
+      const saida = path.join(root, "args-sem-bench.txt");
+      rodar(root, "gh pr merge 5 --repo o/r --merge", { LOHRA_PM_ARGS_OUT: saida });
+      expect(existsSync(saida)).toBe(false);
     });
   });
 
