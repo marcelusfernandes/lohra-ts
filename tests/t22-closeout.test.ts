@@ -39,6 +39,23 @@ describe("T22 closeout invariants", () => {
 
   it("pins all approved ancestors and refuses platform spoofing", () => {
     const verifier = source("scripts/parity/closeout/verify-evidence.ts");
+    // Desde a issue #158, os 22 SHAs aprovados não são mais uma lista literal
+    // em verify-evidence.ts — vêm de docs/provenance.json via
+    // scripts/provenance/extract.ts. O que fica pinado aqui é que o
+    // verificador consome essa fonte (em vez de reintroduzir a duplicação) e
+    // que a fonte, por sua vez, contém os sete SHAs abaixo como `approved`.
+    // As seis últimas dessas sete permanecem também literais em
+    // `inheritedFromApprovedHeads` (verificação de herança do .gitignore),
+    // que é uma lista independente e não migrou nesta issue.
+    expect(verifier, "MUTATION_CAUSE:T22-ancestor-source").toContain(
+      'import { approvedHeadPairs } from "../../provenance/extract.js"',
+    );
+    expect(verifier, "MUTATION_CAUSE:T22-ancestor-source-wired").toContain(
+      "const approved = approvedHeadPairs();",
+    );
+    const provenance = JSON.parse(source("docs/provenance.json")) as {
+      readonly entries: readonly { ticket: string; sha: string; status: string }[];
+    };
     for (const sha of [
       "5b2d62c65f282683609d5d3801b3bfaf4448aff4",
       "e4415ddabd6bf27196f443f7c95e282ebcef86af",
@@ -48,7 +65,10 @@ describe("T22 closeout invariants", () => {
       "9d98cc97473f5523d0a961ef48073456db40522d",
       "3c39315f48665eea5230b03c6c57ddd25fe377bb",
     ]) {
-      expect(verifier, "MUTATION_CAUSE:T22-ancestor-inventory").toContain(sha);
+      expect(
+        provenance.entries.some((entry) => entry.sha === sha && entry.status === "approved"),
+        `MUTATION_CAUSE:T22-ancestor-inventory:${sha}`,
+      ).toBe(true);
     }
     expect(verifier, "MUTATION_CAUSE:T22-platform-spoof").toContain(
       'D16: { status: "NOT_MEASURED"',
