@@ -95,6 +95,18 @@ describe("wrapCallResult", () => {
     );
   });
 
+  // Round 2 (PR #85 review): JSON.stringify returns the JS value `undefined`
+  // (not a string) for a function/symbol type — the render must cite that
+  // explicitly as the literal `undefined`, not fall through uncovered.
+  it("cites a function or symbol type as the literal undefined", () => {
+    expect(wrapCallResult({ content: [{ type: () => undefined }] })).toBe(
+      toolResult(undefined, { content: "[undefined block]" }),
+    );
+    expect(wrapCallResult({ content: [{ type: Symbol("weird") }] })).toBe(
+      toolResult(undefined, { content: "[undefined block]" }),
+    );
+  });
+
   it("kills the success-empty mutant: truthy non-string text fails with a cause", () => {
     expect(() => wrapCallResult({ content: [{ type: "text", text: 123 }] })).toThrow(
       /must contain a string/u,

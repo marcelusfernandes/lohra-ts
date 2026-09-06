@@ -11,6 +11,13 @@ const EMPTY_SCHEMA: Readonly<Record<string, unknown>> = Object.freeze({
 
 const INVALID = /[^a-z0-9]+/g;
 
+/** `JSON.stringify` is typed to always return `string`, but at runtime
+ * returns the JS value `undefined` for a function, a symbol, or `undefined`
+ * itself — this widens the type so callers can cite that case explicitly. */
+function jsonStringifyOrUndefined(value: unknown): string | undefined {
+  return JSON.stringify(value);
+}
+
 /** Deterministic registry name: `mcp_{server}_{tool}` (sanitized, lowercase). */
 export function mcpToolName(server: string, tool: string): string {
   const serverSlug = server
@@ -66,8 +73,13 @@ export function wrapCallResult(result: unknown): string {
       parts.push(isPythonTruthy(text) ? text : "");
     } else {
       const type = field<unknown>(block, "type", "content");
+      // JSON.stringify returns the JS value `undefined` (not a string) for a
+      // function/symbol/undefined `type` — cited as the literal `undefined`
+      // explicitly, never left to template-literal coercion.
       const rendered =
-        typeof type === "string" || typeof type === "number" ? String(type) : JSON.stringify(type);
+        typeof type === "string" || typeof type === "number"
+          ? String(type)
+          : (jsonStringifyOrUndefined(type) ?? "undefined");
       parts.push(`[${rendered} block]`);
     }
   }
