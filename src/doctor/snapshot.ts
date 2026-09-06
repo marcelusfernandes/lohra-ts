@@ -7,7 +7,7 @@ import { readConfig, readTokens } from "../auth/store.js";
 import { resolveAuthRoute, subscriptionActive } from "../auth/credentials.js";
 import { readCodexTokens } from "../auth/codex.js";
 import { AUTO_PROVIDER, resolveProviderName } from "../providers/resolve.js";
-import { pythonFloat } from "../serialization/python-json.js";
+import { jsonFloat } from "../serialization/json-numbers.js";
 import type { DoctorEnvironment, OllamaStatus } from "./model.js";
 import { providerStatuses } from "./providers.js";
 
@@ -110,7 +110,7 @@ export function buildEnvironment(
     home: paths.home,
     interactive: isTty(process.stdin.isTTY) && isTty(process.stderr.isTTY),
     lohra_auth_present: isFile(join(paths.home, "auth.json")),
-    lohra_oauth_expires_at: own === null ? null : pythonFloat(own.expiresAt),
+    lohra_oauth_expires_at: own === null ? null : jsonFloat(own.expiresAt),
     lohra_oauth_present: own !== null,
     ollama,
     os_name: process.platform === "win32" ? "nt" : "posix",

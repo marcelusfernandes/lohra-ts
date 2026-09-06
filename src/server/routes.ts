@@ -1,8 +1,10 @@
-/** Pure route matching — exactly the 8 handlers the oracle exposes (contract
- * v2 assertion 13), plus the router-level trailing-slash class (assertion 14)
- * and a closed-world 404/405 (assertions 23/24/24a). No framework: a route
- * table + a small decision function, so the negative sweep and the slash
- * class are provable without spinning up a real listener. */
+/** Pure route matching — the product's 5 handlers (4 API routes plus
+ * `/openapi.json`), the router-level trailing-slash class, and a
+ * closed-world 404/405. No framework: a route table + a small decision
+ * function, so the negative sweep and the slash class are provable without
+ * spinning up a real listener. `/docs`, `/redoc` and the Swagger UI OAuth2
+ * redirect page were removed (issue #74 / ADR 0003 item 6); unknown routes,
+ * including those, are a plain 404. */
 
 export const PRODUCT_PATHS = [
   "/health",
@@ -22,9 +24,6 @@ const ROUTES: ReadonlyMap<string, RouteSpec> = new Map([
   ["/v1/chat/completions", { name: "chatCompletions", methods: ["POST"] }],
   ["/v1/responses", { name: "responses", methods: ["POST"] }],
   ["/openapi.json", { name: "openapi", methods: ["GET"] }],
-  ["/docs", { name: "docs", methods: ["GET"] }],
-  ["/redoc", { name: "redoc", methods: ["GET"] }],
-  ["/docs/oauth2-redirect", { name: "oauthRedirect", methods: ["GET"] }],
 ]);
 
 export type RouteMatch =

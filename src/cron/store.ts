@@ -11,12 +11,8 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 
-import {
-  PythonFloat,
-  pythonFloat,
-  pythonJsonDumpsIndented,
-  pythonJsonLoads,
-} from "../serialization/python-json.js";
+import { JsonFloat, jsonFloat, parseJsonPreservingNumbers } from "../serialization/json-numbers.js";
+import { pythonJsonDumpsIndented } from "../serialization/python-json.js";
 import { CronStoreError, CronValidationError } from "./errors.js";
 import { validateJob } from "./validate.js";
 
@@ -54,11 +50,11 @@ function pathKind(path: string): PathKind {
 }
 
 function unwrapNumber(value: unknown): unknown {
-  return value instanceof PythonFloat ? value.value : value;
+  return value instanceof JsonFloat ? value.value : value;
 }
 
 function isNumeric(value: unknown): boolean {
-  return typeof value === "number" || value instanceof PythonFloat;
+  return typeof value === "number" || value instanceof JsonFloat;
 }
 
 /**
@@ -116,7 +112,7 @@ export function readJobs(path: string): CronJob[] {
 
   let parsed: unknown;
   try {
-    parsed = pythonJsonLoads(raw);
+    parsed = parseJsonPreservingNumbers(raw);
   } catch {
     throw new CronStoreError(path, "content is not valid JSON");
   }
@@ -140,7 +136,7 @@ export function readJobs(path: string): CronJob[] {
 
 function wrapValueForWrite(value: unknown, type: string): unknown {
   if (type === "interval") return value;
-  if (type === "once") return typeof value === "number" ? pythonFloat(value) : value;
+  if (type === "once") return typeof value === "number" ? jsonFloat(value) : value;
   return value;
 }
 
@@ -152,8 +148,8 @@ function serializeJobs(jobs: readonly CronJob[]): string {
     type: job.type,
     value: wrapValueForWrite(job.value, job.type),
     enabled: job.enabled,
-    created_at: pythonFloat(job.created_at),
-    last_run_at: job.last_run_at === null ? null : pythonFloat(job.last_run_at),
+    created_at: jsonFloat(job.created_at),
+    last_run_at: job.last_run_at === null ? null : jsonFloat(job.last_run_at),
   }));
   return pythonJsonDumpsIndented({ jobs: wire });
 }

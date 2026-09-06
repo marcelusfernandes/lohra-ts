@@ -9,8 +9,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { authorized } from "./auth.js";
 import { handleChatCompletions } from "./chat-handler.js";
 import { buildModelsList } from "./chat-format.js";
-import { docsHtml, oauthRedirectHtml, openapiSchema, redocHtml } from "./docs.js";
-import { writeHtml, writeJson, writeRedirect } from "./http-io.js";
+import { openapiSchema } from "./docs.js";
+import { writeJson, writeRedirect } from "./http-io.js";
 import { matchRoute } from "./routes.js";
 import { handleResponses } from "./responses-handler.js";
 import type { CompletionService } from "./service.js";
@@ -69,15 +69,6 @@ async function dispatch(
       return;
     case "openapi":
       writeJson(res, 200, openapiSchema());
-      return;
-    case "docs":
-      writeHtml(res, docsHtml());
-      return;
-    case "redoc":
-      writeHtml(res, redocHtml());
-      return;
-    case "oauthRedirect":
-      writeHtml(res, oauthRedirectHtml());
       return;
     case "chatCompletions":
       await handleChatCompletions(req, res, options);

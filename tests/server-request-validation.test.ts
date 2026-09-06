@@ -9,99 +9,226 @@ import {
 } from "../src/server/request-validation.js";
 import { chatCompletionBody } from "../src/server/chat-format.js";
 
-function detailBody(raw: string, contentType: string | undefined): string {
+/** Round-trips through the real wire serializer and back to a loose value —
+ * asserts on the envelope's data shape, never on the internal detail type,
+ * so this test only ever fails on behavior, never on a field rename. */
+function detailEnvelope(raw: string, contentType: string | undefined): unknown {
   try {
     const value = parseRequestBody(raw, contentType);
     validateChatBody(value);
     throw new Error("expected ValidationError");
   } catch (error) {
     if (!(error instanceof ValidationError)) throw error;
-    return chatCompletionBody(validationErrorBody(error.details));
+    return JSON.parse(chatCompletionBody(validationErrorBody(error.details)));
   }
 }
 
-describe("parseRequestBody + validateChatBody — byte-exact against measured oracle 422 bodies", () => {
-  it("model ausente: input echoes the submitted body", () => {
-    expect(detailBody('{"messages": [{"role": "user", "content": "x"}]}', "application/json")).toBe(
-      '{"detail":[{"type":"missing","loc":["body","model"],"msg":"Field required","input":{"messages":[{"role":"user","content":"x"}]}}]}',
-    );
-  });
+function responsesEnvelope(raw: string): unknown {
+  try {
+    const value = parseRequestBody(raw, "application/json");
+    validateResponsesBody(value);
+    throw new Error("expected ValidationError");
+  } catch (error) {
+    if (!(error instanceof ValidationError)) throw error;
+    return JSON.parse(chatCompletionBody(validationErrorBody(error.details)));
+  }
+}
 
+describe("validationErrorBody — own OpenAI-style envelope (issue #74)", () => {
   it("body vazio: a zero-length body is a missing body, not invalid JSON", () => {
-    expect(detailBody("", "application/json")).toBe(
-      '{"detail":[{"type":"missing","loc":["body"],"msg":"Field required","input":null}]}',
-    );
+    expect(detailEnvelope("", "application/json")).toEqual({
+      error: {
+        message: "request body is required",
+        type: "invalid_request_error",
+        param: null,
+        code: "validation_error",
+        details: [{ path: ["body"], message: "request body is required" }],
+      },
+    });
   });
 
-  it("Content-Type text/plain: the whole body is a raw string, not a dict", () => {
+  it("JSON malformed: message names the field and embeds the parse cause", () => {
+    const body = detailEnvelope("{nope", "application/json") as {
+      error: { message: string; param: string | null; details: { message: string }[] };
+    };
+    expect(body.error.param).toBeNull();
+    expect(body.error.message).toMatch(/^request body is not valid JSON: .+/u);
+    expect(body.error.details).toHaveLength(1);
+    expect(body.error.details[0]?.message).toBe(body.error.message);
+  });
+
+  it("Content-Type text/plain: the whole body is a raw string, not an object", () => {
     const raw =
       '{"model": "fake-model-a", "messages": [{"role": "user", "content": "SCEN:ok hi"}]}';
-    expect(detailBody(raw, "text/plain")).toBe(
-      chatCompletionBody({
-        detail: [
-          {
-            type: "model_attributes_type",
-            loc: ["body"],
-            msg: "Input should be a valid dictionary or object to extract fields from",
-            input: raw,
-          },
-        ],
-      }),
-    );
+    expect(detailEnvelope(raw, "text/plain")).toEqual({
+      error: {
+        message: "expected a JSON object",
+        type: "invalid_request_error",
+        param: null,
+        code: "validation_error",
+        details: [{ path: ["body"], message: "expected a JSON object", received: raw }],
+      },
+    });
   });
 
-  it("messages não-lista", () => {
-    expect(detailBody('{"model": "m", "messages": "x"}', "application/json")).toBe(
-      '{"detail":[{"type":"list_type","loc":["body","messages"],"msg":"Input should be a valid list","input":"x"}]}',
-    );
-  });
-
-  it("item de messages não-dict", () => {
-    expect(detailBody('{"model": "m", "messages": ["x"]}', "application/json")).toBe(
-      '{"detail":[{"type":"dict_type","loc":["body","messages",0],"msg":"Input should be a valid dictionary","input":"x"}]}',
-    );
-  });
-
-  it('temperature:"hot"', () => {
+  it("model ausente: campo obrigatório, sem 'received' (não há o que ecoar)", () => {
     expect(
-      detailBody(
+      detailEnvelope('{"messages": [{"role": "user", "content": "x"}]}', "application/json"),
+    ).toEqual({
+      error: {
+        message: "model: field is required",
+        type: "invalid_request_error",
+        param: "model",
+        code: "validation_error",
+        details: [{ path: ["body", "model"], message: "field is required" }],
+      },
+    });
+  });
+
+  it("messages não-lista: tipo errado, com 'received' e path indexado", () => {
+    expect(detailEnvelope('{"model": "m", "messages": "x"}', "application/json")).toEqual({
+      error: {
+        message: "messages: expected an array",
+        type: "invalid_request_error",
+        param: "messages",
+        code: "validation_error",
+        details: [{ path: ["body", "messages"], message: "expected an array", received: "x" }],
+      },
+    });
+  });
+
+  it("item de messages não-dict: path aponta para o índice do array (assertion de enum-adjacent shape)", () => {
+    expect(detailEnvelope('{"model": "m", "messages": ["x"]}', "application/json")).toEqual({
+      error: {
+        message: "messages[0]: expected an object",
+        type: "invalid_request_error",
+        param: "messages[0]",
+        code: "validation_error",
+        details: [{ path: ["body", "messages", 0], message: "expected an object", received: "x" }],
+      },
+    });
+  });
+
+  it('temperature:"hot": valor não coercível é reportado como parsing failure', () => {
+    expect(
+      detailEnvelope(
         '{"model": "m", "messages": [{"role": "user", "content": "x"}], "temperature": "hot"}',
         "application/json",
       ),
-    ).toBe(
-      '{"detail":[{"type":"float_parsing","loc":["body","temperature"],"msg":"Input should be a valid number, unable to parse string as a number","input":"hot"}]}',
-    );
+    ).toEqual({
+      error: {
+        message: "temperature: expected a number, could not parse the given value",
+        type: "invalid_request_error",
+        param: "temperature",
+        code: "validation_error",
+        details: [
+          {
+            path: ["body", "temperature"],
+            message: "expected a number, could not parse the given value",
+            received: "hot",
+          },
+        ],
+      },
+    });
   });
 
-  it("stream:null", () => {
+  it("stream:null: tipo fundamentalmente errado (não uma tentativa de parse)", () => {
     expect(
-      detailBody(
+      detailEnvelope(
         '{"model": "m", "messages": [{"role": "user", "content": "x"}], "stream": null}',
         "application/json",
       ),
-    ).toBe(
-      '{"detail":[{"type":"bool_type","loc":["body","stream"],"msg":"Input should be a valid boolean","input":null}]}',
-    );
+    ).toEqual({
+      error: {
+        message: "stream: expected a boolean",
+        type: "invalid_request_error",
+        param: "stream",
+        code: "validation_error",
+        details: [{ path: ["body", "stream"], message: "expected a boolean", received: null }],
+      },
+    });
   });
 
-  it("JSON malformed: json_invalid with excused offset/ctx.error, everything else exact", () => {
-    let caught: ValidationError | undefined;
-    try {
-      parseRequestBody("{nope", "application/json");
-    } catch (error) {
-      if (error instanceof ValidationError) caught = error;
-    }
-    expect(caught).toBeDefined();
-    const detail = caught?.details[0];
-    expect(detail?.type).toBe("json_invalid");
-    expect(detail?.loc[0]).toBe("body");
-    expect(typeof detail?.loc[1]).toBe("number");
-    expect(detail?.msg).toBe("JSON decode error");
-    expect(detail?.input).toEqual({});
-    expect(typeof detail?.ctx?.["error"]).toBe("string");
+  it('stream:"maybe": string que tentou e falhou a coerção -- parsing, não type', () => {
+    expect(
+      detailEnvelope(
+        '{"model": "m", "messages": [{"role": "user", "content": "x"}], "stream": "maybe"}',
+        "application/json",
+      ),
+    ).toEqual({
+      error: {
+        message: "stream: expected a boolean, could not parse the given value",
+        type: "invalid_request_error",
+        param: "stream",
+        code: "validation_error",
+        details: [
+          {
+            path: ["body", "stream"],
+            message: "expected a boolean, could not parse the given value",
+            received: "maybe",
+          },
+        ],
+      },
+    });
   });
 
-  it('coerces stream:"true" and a numeric temperature string (assertion 27, lenient Pydantic parsing)', () => {
+  it("stream_options não-dict: tipo errado", () => {
+    expect(
+      detailEnvelope(
+        '{"model": "m", "messages": [{"role": "user", "content": "x"}], "stream_options": "x"}',
+        "application/json",
+      ),
+    ).toEqual({
+      error: {
+        message: "stream_options: expected an object",
+        type: "invalid_request_error",
+        param: "stream_options",
+        code: "validation_error",
+        details: [
+          { path: ["body", "stream_options"], message: "expected an object", received: "x" },
+        ],
+      },
+    });
+  });
+
+  it('max_tokens:"nope": integer parsing failure', () => {
+    expect(
+      detailEnvelope(
+        '{"model": "m", "messages": [{"role": "user", "content": "x"}], "max_tokens": "nope"}',
+        "application/json",
+      ),
+    ).toEqual({
+      error: {
+        message: "max_tokens: expected an integer, could not parse the given value",
+        type: "invalid_request_error",
+        param: "max_tokens",
+        code: "validation_error",
+        details: [
+          {
+            path: ["body", "max_tokens"],
+            message: "expected an integer, could not parse the given value",
+            received: "nope",
+          },
+        ],
+      },
+    });
+  });
+
+  it("multiple errors: message/param reflect the first, details carries every failure", () => {
+    const body = detailEnvelope('{"messages": "x", "stream": null}', "application/json") as {
+      error: { message: string; param: string | null; details: { path: unknown[] }[] };
+    };
+    expect(body.error.param).toBe("model");
+    expect(body.error.message).toBe("model: field is required");
+    expect(body.error.details).toHaveLength(3);
+    expect(body.error.details.map((detail) => detail.path)).toEqual([
+      ["body", "model"],
+      ["body", "messages"],
+      ["body", "stream"],
+    ]);
+  });
+
+  it('coerces stream:"true" and a numeric temperature string (assertion 27, lenient parsing kept)', () => {
     const value = parseRequestBody(
       '{"model": "m", "messages": [{"role": "user", "content": "x"}], "stream": "true", "temperature": "0.5"}',
       "application/json",
@@ -129,7 +256,7 @@ describe("parseRequestBody + validateChatBody — byte-exact against measured or
     );
   });
 
-  it("extra unknown fields are ignored without error (assertion 25)", () => {
+  it("extra unknown fields are ignored without error (assertion 25) -- not rejected, so no 422 case for them", () => {
     const value = parseRequestBody(
       '{"model": "", "messages": [{"role": "user", "content": null}], "top_p": 1, "n": 2, "tools": [{}], "tool_choice": "auto"}',
       "application/json",
@@ -140,66 +267,47 @@ describe("parseRequestBody + validateChatBody — byte-exact against measured or
   });
 });
 
-describe("validateResponsesBody — union input field, byte-exact", () => {
+describe("validateResponsesBody — union input field, own envelope", () => {
   it("model ausente for Responses", () => {
-    const value = parseRequestBody('{"input": "x"}', "application/json");
-    let caught: ValidationError | undefined;
-    try {
-      validateResponsesBody(value);
-    } catch (error) {
-      if (error instanceof ValidationError) caught = error;
-    }
-    expect(caught?.details).toEqual([
-      { type: "missing", loc: ["body", "model"], msg: "Field required", input: { input: "x" } },
-    ]);
+    expect(responsesEnvelope('{"input": "x"}')).toEqual({
+      error: {
+        message: "model: field is required",
+        type: "invalid_request_error",
+        param: "model",
+        code: "validation_error",
+        details: [{ path: ["body", "model"], message: "field is required" }],
+      },
+    });
   });
 
-  it("input numérico: two union-branch errors in order (string then list[dict])", () => {
-    const value = parseRequestBody('{"model": "m", "input": 5}', "application/json");
-    let caught: ValidationError | undefined;
-    try {
-      validateResponsesBody(value);
-    } catch (error) {
-      if (error instanceof ValidationError) caught = error;
-    }
-    expect(caught?.details).toEqual([
-      {
-        type: "string_type",
-        loc: ["body", "input", "str"],
-        msg: "Input should be a valid string",
-        input: 5,
+  it("input numérico: neither a string nor a list -- one detail, not a leaked union-branch pair", () => {
+    expect(responsesEnvelope('{"model": "m", "input": 5}')).toEqual({
+      error: {
+        message: "input: expected a string or a list of objects",
+        type: "invalid_request_error",
+        param: "input",
+        code: "validation_error",
+        details: [
+          {
+            path: ["body", "input"],
+            message: "expected a string or a list of objects",
+            received: 5,
+          },
+        ],
       },
-      {
-        type: "list_type",
-        loc: ["body", "input", "list[dict[any,any]]"],
-        msg: "Input should be a valid list",
-        input: 5,
-      },
-    ]);
+    });
   });
 
-  it('input:["x"]: string branch fails on the whole array, list branch fails on the item', () => {
-    const value = parseRequestBody('{"model": "m", "input": ["x"]}', "application/json");
-    let caught: ValidationError | undefined;
-    try {
-      validateResponsesBody(value);
-    } catch (error) {
-      if (error instanceof ValidationError) caught = error;
-    }
-    expect(caught?.details).toEqual([
-      {
-        type: "string_type",
-        loc: ["body", "input", "str"],
-        msg: "Input should be a valid string",
-        input: ["x"],
+  it('input:["x"]: the array shape is fine, only the bad item is reported', () => {
+    expect(responsesEnvelope('{"model": "m", "input": ["x"]}')).toEqual({
+      error: {
+        message: "input[0]: expected an object",
+        type: "invalid_request_error",
+        param: "input[0]",
+        code: "validation_error",
+        details: [{ path: ["body", "input", 0], message: "expected an object", received: "x" }],
       },
-      {
-        type: "dict_type",
-        loc: ["body", "input", "list[dict[any,any]]", 0],
-        msg: "Input should be a valid dictionary",
-        input: "x",
-      },
-    ]);
+    });
   });
 
   it("[probe-complementar] Responses has no tools/tool_choice field to begin with (assertion 51)", () => {

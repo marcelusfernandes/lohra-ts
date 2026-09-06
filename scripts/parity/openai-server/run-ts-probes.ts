@@ -15,10 +15,8 @@ import { resolve } from "node:path";
 
 import { AGENTIC_MAX_ITERATIONS, RELAY_MAX_ITERATIONS } from "../../../src/server/agentic.js";
 import { authorized, timingSafeStringEqual } from "../../../src/server/auth.js";
-import {
-  jsonStringifyPythonNumbers,
-  pythonJsonDumpsInsertionOrder,
-} from "../../../src/serialization/python-json.js";
+import { stringifyJsonPreservingNumbers } from "../../../src/serialization/json-numbers.js";
+import { pythonJsonDumpsInsertionOrder } from "../../../src/serialization/python-json.js";
 import { evidenceRoot, registerScrubCanary, writeEvidence } from "./harness.js";
 
 const root = resolve(import.meta.dirname, "../../..");
@@ -155,7 +153,7 @@ function extractFunctionBody(source: string, functionName: string): string | nul
 }
 
 // 4. t11-two-serializer-mutants-killed (assertions 9/29/36): non-stream
-// bodies (jsonStringifyPythonNumbers, wired through chatCompletionBody)
+// bodies (stringifyJsonPreservingNumbers, wired through chatCompletionBody)
 // and SSE frames (pythonJsonDumpsInsertionOrder, wired through
 // sseEvent/responsesSse) are genuinely DIFFERENT encoder functions — a
 // mutant that merges them (either direction) is caught functionally: the
@@ -163,7 +161,7 @@ function extractFunctionBody(source: string, functionName: string): string | nul
 // source-level wiring.
 {
   const sample = { a: 1, b: "x", c: [1, 2] };
-  const compact = jsonStringifyPythonNumbers(sample);
+  const compact = stringifyJsonPreservingNumbers(sample);
   const spaced = pythonJsonDumpsInsertionOrder(sample);
   const outputsDifferOk =
     compact !== spaced && compact === '{"a":1,"b":"x","c":[1,2]}' && spaced.includes(": ");
@@ -175,7 +173,7 @@ function extractFunctionBody(source: string, functionName: string): string | nul
   );
   const nonStreamWiredToCompactOk =
     httpIoSource.includes("chatCompletionBody") &&
-    chatFormatSource.includes("jsonStringifyPythonNumbers");
+    chatFormatSource.includes("stringifyJsonPreservingNumbers");
   const sseWiredToSpacedOk =
     chatFormatSource.includes("pythonJsonDumpsInsertionOrder") &&
     responsesFormatSource.includes("pythonJsonDumpsInsertionOrder");

@@ -26,19 +26,6 @@ export function jsonResponse(status: number, body: unknown): OutgoingHttpRespons
   };
 }
 
-export function htmlResponse(status: number, html: string): OutgoingHttpResponse {
-  const encoded = Buffer.from(html, "utf8");
-  return {
-    status,
-    statusText: STATUS_TEXT[status] ?? "",
-    headers: {
-      "content-type": "text/html; charset=utf-8",
-      "content-length": String(encoded.length),
-    },
-    body: encoded,
-  };
-}
-
 export function emptyResponse(
   status: number,
   headers: Readonly<Record<string, string>> = {},

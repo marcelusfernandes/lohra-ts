@@ -45,14 +45,6 @@ export function writeJson(
   res.end(payload);
 }
 
-export function writeHtml(res: ServerResponse, html: string): void {
-  res.writeHead(200, {
-    "content-type": "text/html; charset=utf-8",
-    "content-length": String(Buffer.byteLength(html)),
-  });
-  res.end(html);
-}
-
 export function writeRedirect(res: ServerResponse, host: string | undefined, target: string): void {
   res.writeHead(307, {
     location: `http://${host ?? ""}${target}`,

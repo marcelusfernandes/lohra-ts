@@ -1,5 +1,5 @@
 import { ProviderError } from "../agent/client-pool.js";
-import { pythonFloat } from "../serialization/python-json.js";
+import { jsonFloat } from "../serialization/json-numbers.js";
 import { pythonRepr } from "../serialization/python-repr.js";
 import { toolError, toolResult } from "../tools/envelope.js";
 import type { ToolArguments } from "../tools/types.js";
@@ -100,7 +100,7 @@ function collectEnvelope(result: CollectResult): string {
     model: result.model,
     forced_fallback: result.forcedFallback,
     error_kind: result.errorKind,
-    retry_after: result.retryAfter === null ? null : pythonFloat(result.retryAfter),
+    retry_after: result.retryAfter === null ? null : jsonFloat(result.retryAfter),
   });
 }
 

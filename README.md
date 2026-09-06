@@ -170,6 +170,43 @@ lohra update --check
 `workflow run`. Chat e dashboard compartilham a mesma composition root para
 workflow/audit, orquestração, cron, MCP, web e mídia.
 
+### Servidor (`lohra serve`)
+
+`lohra serve` expõe uma superfície compatível com a API da OpenAI:
+`GET /health`, `GET /v1/models`, `POST /v1/chat/completions`,
+`POST /v1/responses` e `GET /openapi.json` (documento OpenAPI mínimo, com
+`operationId` em cada rota). Rotas desconhecidas — incluindo `/docs`,
+`/redoc` e `/docs/oauth2-redirect`, removidas na issue #74 — respondem 404
+como qualquer outra.
+
+Todo corpo de requisição inválido nas duas rotas `POST` responde **422** no
+envelope de erro da própria API, não em um formato específico de framework
+(`docs/adr/0003-native-wire-format.md`, item 6 "HTTP server"):
+
+```json
+{
+  "error": {
+    "message": "model: field is required",
+    "type": "invalid_request_error",
+    "param": "model",
+    "code": "validation_error",
+    "details": [{ "path": ["body", "model"], "message": "field is required" }]
+  }
+}
+```
+
+`message` e `param` refletem o primeiro item de `details` (`param` é o
+`path` sem o prefixo `"body"`, em notação `campo[índice].subcampo`; `null`
+quando a falha é do corpo inteiro). `details` é uma extensão própria deste
+servidor e traz todas as falhas encontradas, cada uma com `path`, `message`
+e, quando há um valor de fato recebido, `received`. Corpo ausente
+(`Content-Length: 0`) responde com `details: [{"path": ["body"], "message":
+"request body is required"}]`; JSON malformado responde com uma mensagem que
+embute a causa: `"request body is not valid JSON: <causa>"`. As coerções
+sempre aceitas por este servidor (`temperature`/`max_tokens` como string
+numérica, `stream` como `"true"`/`0`/`1`/…) continuam aceitas — só a forma do
+erro mudou.
+
 ## Self-update
 
 Em um checkout Git, `lohra update --check` faz fetch e mede o upstream sem

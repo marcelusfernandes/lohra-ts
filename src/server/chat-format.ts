@@ -2,10 +2,8 @@
  * Two serializers on purpose (contract v2 decision 3): non-stream bodies are
  * compact JSON, SSE frames preserve Python `json.dumps` default spacing. */
 
-import {
-  jsonStringifyPythonNumbers,
-  pythonJsonDumpsInsertionOrder,
-} from "../serialization/python-json.js";
+import { stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
+import { pythonJsonDumpsInsertionOrder } from "../serialization/python-json.js";
 import type { OpenAiUsage } from "./usage.js";
 
 export class CompletionError extends Error {}
@@ -100,7 +98,7 @@ export function buildModelsList(
 
 /** Compact, no-space JSON — every non-stream response body. */
 export function chatCompletionBody(value: unknown): string {
-  return jsonStringifyPythonNumbers(value);
+  return stringifyJsonPreservingNumbers(value);
 }
 
 /** One SSE `data:` line, Python `json.dumps` default spacing. */

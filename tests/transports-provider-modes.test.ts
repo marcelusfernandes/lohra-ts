@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  pythonJsonDumpsInsertionOrder,
-  pythonJsonLoads,
-} from "../src/serialization/python-json.js";
+import { parseJsonPreservingNumbers } from "../src/serialization/json-numbers.js";
+import { pythonJsonDumpsInsertionOrder } from "../src/serialization/python-json.js";
 import {
   AnthropicMessagesTransport,
   ResponsesTransport,
@@ -101,7 +99,7 @@ describe("AnthropicMessagesTransport", () => {
   it("preserves raw numeric kinds in tool_use input and replay", () => {
     const transport = new AnthropicMessagesTransport();
     const normalized = transport.normalizeResponse(
-      pythonJsonLoads(
+      parseJsonPreservingNumbers(
         '{"content":[{"type":"tool_use","id":"c1","name":"terminal","input":{"command":"sleep 2","timeout":1.0,"since_ns":1788107097189000000,"nested":{"value":2.0,"huge":123456789012345678901234567890},"array":[3.0],"exponent":1e2,"integer":7}}],"stop_reason":"tool_use"}',
       ),
     );

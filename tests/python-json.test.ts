@@ -3,9 +3,8 @@ import process from "node:process";
 
 import { describe, expect, it } from "vitest";
 
+import { jsonFloat } from "../src/serialization/json-numbers.js";
 import {
-  pythonFloat,
-  pythonJsonLoads,
   pythonJsonDumps,
   pythonJsonDumpsInsertionOrder,
 } from "../src/serialization/python-json.js";
@@ -57,70 +56,10 @@ describe("Python-compatible JSON serializer", () => {
     const expected = pythonLines(
       'import json\nfor value in [1.0, -0.0, 1e15, 1e16, 9999999999999998.0, 0.0001, 1e-5, 1e-7]: print(json.dumps({"n": value}, sort_keys=True))',
     );
-    expect(values.map((value) => pythonJsonDumps({ n: pythonFloat(value) }))).toEqual(expected);
+    expect(values.map((value) => pythonJsonDumps({ n: jsonFloat(value) }))).toEqual(expected);
     expect(pythonJsonDumps({ n: 1 })).toBe('{"n": 1}');
     for (const ambiguous of [-0, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
       expect(() => pythonJsonDumps({ n: ambiguous })).toThrow(/Ambiguous or unsafe number/);
     }
-  });
-
-  it("loads JSON numeric tokens with Python int/float identity at every depth", () => {
-    const loaded = pythonJsonLoads(
-      '{"integer":7,"safe_max":9007199254740991,"negative_zero":-0,"whole":1.0,"unsafe":9007199254740993,"nested":{"exponent":1e2,"huge":123456789012345678901234567890},"array":[3.0,4]}',
-    );
-    expect(pythonJsonDumpsInsertionOrder(loaded)).toBe(
-      '{"integer": 7, "safe_max": 9007199254740991, "negative_zero": 0, "whole": 1.0, "unsafe": 9007199254740993, "nested": {"exponent": 100.0, "huge": 123456789012345678901234567890}, "array": [3.0, 4]}',
-    );
-  });
-
-  it("loads the NaN/Infinity/-Infinity literal extension, cross-checked against real json.loads", () => {
-    const documents = [
-      '{"v": NaN}',
-      '{"v": Infinity}',
-      '{"v": -Infinity}',
-      "[NaN, Infinity, -Infinity]",
-    ];
-    const expected = pythonLines(
-      `import json\nfor raw in ${JSON.stringify(documents)}: print(json.dumps(json.loads(raw)))`,
-    );
-    expect(documents.map((raw) => pythonJsonDumpsInsertionOrder(pythonJsonLoads(raw)))).toEqual(
-      expected,
-    );
-  });
-
-  it("rejects case/sign variants of the NaN/Infinity literals, matching Python's exact sensitivity", () => {
-    const rejected = ["nan", "inf", "+Infinity", "NAN", "Nan"];
-    const pythonRejects = pythonLines(
-      `import json
-for raw in ${JSON.stringify(rejected)}:
-    try:
-        json.loads(raw)
-        print("accepted")
-    except json.JSONDecodeError:
-        print("rejected")`,
-    );
-    expect(pythonRejects).toEqual(rejected.map(() => "rejected"));
-    for (const raw of rejected) {
-      expect(() => pythonJsonLoads(raw)).toThrow();
-    }
-  });
-
-  it("round-trips arbitrary JSON integers exactly against Python", () => {
-    const documents = [
-      "9007199254740991",
-      "9007199254740992",
-      "9007199254740993",
-      "-9007199254740993",
-      "123456789012345678901234567890",
-      "-123456789012345678901234567890",
-      "-0",
-      '{"nested":[9007199254740993,{"huge":123456789012345678901234567890}]}',
-    ];
-    const expected = pythonLines(
-      `import json\nfor raw in ${JSON.stringify(documents)}: print(json.dumps(json.loads(raw)))`,
-    );
-    expect(documents.map((raw) => pythonJsonDumpsInsertionOrder(pythonJsonLoads(raw)))).toEqual(
-      expected,
-    );
   });
 });

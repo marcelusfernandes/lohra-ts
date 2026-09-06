@@ -5,10 +5,8 @@ import {
   buildToolStartPayload,
 } from "../../src/gateway/rpc/tool-event-payload.js";
 import { encodeGatewayEventFrame } from "../../src/gateway/rpc/frame.js";
-import {
-  jsonStringifyPythonNumbers,
-  pythonJsonDumpsInsertionOrder,
-} from "../../src/serialization/python-json.js";
+import { stringifyJsonPreservingNumbers } from "../../src/serialization/json-numbers.js";
+import { pythonJsonDumpsInsertionOrder } from "../../src/serialization/python-json.js";
 
 // Golden fixture from the T12 baseline (evidence-s06-tools.json / T12
 // baseline §2 L8): a single frame carries two serialization conventions --
@@ -31,7 +29,7 @@ describe("tool.start / tool.complete dual serialization", () => {
     // Independently derive the expected bytes from the pre-existing,
     // already-tested serializer primitives -- not from the code under test.
     const expectedArgsText = pythonJsonDumpsInsertionOrder(argsObject);
-    const expectedFrame = jsonStringifyPythonNumbers({
+    const expectedFrame = stringifyJsonPreservingNumbers({
       jsonrpc: "2.0",
       method: "event",
       params: {
@@ -63,7 +61,7 @@ describe("tool.start / tool.complete dual serialization", () => {
     });
 
     const expectedResultText = pythonJsonDumpsInsertionOrder(resultObject);
-    const expectedFrame = jsonStringifyPythonNumbers({
+    const expectedFrame = stringifyJsonPreservingNumbers({
       jsonrpc: "2.0",
       method: "event",
       params: {

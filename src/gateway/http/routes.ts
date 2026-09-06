@@ -1,6 +1,6 @@
 import { timingSafeTokenEqual } from "../auth.js";
 import { firstHeaderValue, type ParsedRequestHead } from "./request-parser.js";
-import { htmlResponse, jsonResponse, type OutgoingHttpResponse } from "./response.js";
+import { jsonResponse, type OutgoingHttpResponse } from "./response.js";
 
 const TOKEN_HEADER = "X-Lohra-Session-Token";
 
@@ -57,22 +57,23 @@ const NOT_FOUND = jsonResponse(404, { detail: "Not Found" });
 const METHOD_NOT_ALLOWED = jsonResponse(405, { detail: "Method Not Allowed" });
 
 const OPENAPI_DOCUMENT: Readonly<Record<string, unknown>> = {
-  info: { title: "Lohra", version: "0.1.0" },
+  info: {
+    title: "Lohra",
+    description: "Internal control gateway (sessions, config, status) used by the TUI/GUI.",
+    version: "0.1.0",
+  },
   paths: {
-    "/api/config": {},
-    "/api/sessions": {},
-    "/api/sessions/{session_id}/messages": {},
-    "/api/status": {},
+    "/api/config": { get: { operationId: "getConfig" } },
+    "/api/sessions": { get: { operationId: "listSessions" } },
+    "/api/sessions/{session_id}/messages": { get: { operationId: "getSessionMessages" } },
+    "/api/status": { get: { operationId: "getStatus" } },
   },
 };
 
 const SESSION_MESSAGES_PATTERN = /^\/api\/sessions\/([^/]+)\/messages$/u;
-const DOC_ROUTES: ReadonlySet<string> = new Set([
-  "/openapi.json",
-  "/docs",
-  "/redoc",
-  "/docs/oauth2-redirect",
-]);
+// /docs, /redoc and the Swagger UI OAuth2 redirect page were removed (issue
+// #74 / ADR 0003 item 6): unknown routes, including those, are a plain 404.
+const DOC_ROUTES: ReadonlySet<string> = new Set(["/openapi.json"]);
 
 function splitPath(rawPath: string): { readonly path: string; readonly query: string } {
   const index = rawPath.indexOf("?");
@@ -189,9 +190,8 @@ function routeUnderApi(
   return NOT_FOUND;
 }
 
-function docRoute(path: string): OutgoingHttpResponse {
-  if (path === "/openapi.json") return jsonResponse(200, OPENAPI_DOCUMENT);
-  return htmlResponse(200, `<html><body>${path}</body></html>`);
+function docRoute(): OutgoingHttpResponse {
+  return jsonResponse(200, OPENAPI_DOCUMENT);
 }
 
 function stripBodyForHead(response: OutgoingHttpResponse): OutgoingHttpResponse {
@@ -211,10 +211,8 @@ export function routeGatewayRequest(
   const response = underApiPrefix(path)
     ? routeUnderApi(head.method, head, path, context)
     : DOC_ROUTES.has(path)
-      ? docRoute(path)
-      : path === "/docs/"
-        ? redirectTo(head, "/docs")
-        : NOT_FOUND;
+      ? docRoute()
+      : NOT_FOUND;
 
   // HEAD never carries a response body, regardless of status -- generic
   // HTTP semantics, not oracle-specific. /api/status HEAD -> 405 (assertion

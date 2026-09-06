@@ -14,7 +14,8 @@ import { getProviderProfile } from "../src/providers/registry.js";
 import { estimateCost, priceKey } from "../src/pricing/estimate.js";
 import { loadPriceOverrides } from "../src/pricing/overrides.js";
 import { combineUsage, usage } from "../src/pricing/usage.js";
-import { pythonFloat, pythonJsonDumps } from "../src/serialization/python-json.js";
+import { jsonFloat } from "../src/serialization/json-numbers.js";
+import { pythonJsonDumps } from "../src/serialization/python-json.js";
 
 const response = (payload: unknown, status = 200): CatalogHttpClient => ({
   get: () => Promise.resolve({ status, body: new TextEncoder().encode(JSON.stringify(payload)) }),
@@ -142,11 +143,11 @@ describe("usage and pricing", () => {
     const openai = requiredCost(estimateCost(value, { provider: "openai", model: "gpt-4o-mini" }));
     expect(openai.usd).toBe(0.0002775);
     expect(openai.grossUsd).toBe(0.000315);
-    expect(pythonJsonDumps({ saved: pythonFloat(openai.savedUsd) })).toBe(
+    expect(pythonJsonDumps({ saved: jsonFloat(openai.savedUsd) })).toBe(
       '{"saved": 3.749999999999999e-05}',
     );
     const local = requiredCost(estimateCost(value, { provider: "ollama", model: "m" }));
-    expect(pythonJsonDumps({ usd: pythonFloat(local.usd) })).toBe('{"usd": 0.0}');
+    expect(pythonJsonDumps({ usd: jsonFloat(local.usd) })).toBe('{"usd": 0.0}');
     expect(estimateCost(value, { provider: "openrouter", model: "m" })).toBeNull();
   });
   it("lets overrides win local and dynamic short-circuits", () => {
