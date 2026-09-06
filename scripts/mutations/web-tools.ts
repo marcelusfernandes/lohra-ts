@@ -82,15 +82,22 @@ function main(): void {
       restoreAll(sandbox, snapshot);
       for (const edit of mutant.edits) applyEditExactlyOnce(sandbox, edit, mutant.id);
       const outcome = runFocusedVitest(sandbox, mutant.focus);
+      // `runFocusedVitest`'s `<no json report>` sentinel (harness.ts,
+      // fail-open herdado do runner original) dá `failedTests.length > 0`
+      // com `ranTests: 0` — sem coleta nenhuma, `classify` leria isso como
+      // morto. `assertBaselineGreen` já cobriu o lado pré-mutação; aqui, do
+      // lado pós-mutação, um foco que deixou de coletar teste nenhum nunca
+      // conta como morto.
+      const killed = outcome.ranTests > 0 && classify(outcome.exitCode, outcome.failedTests);
       return {
         id: mutant.id,
         category: mutant.category,
         mechanism: mutant.mechanism,
         focus: mutant.focus,
         ranTests: outcome.ranTests,
-        killed: classify(outcome.exitCode, outcome.failedTests),
+        killed,
         killedBy: outcome.failedTests,
-        files: mutant.edits.map((edit) => edit.file).sort(),
+        files: [...new Set(mutant.edits.map((edit) => edit.file))].sort(),
       };
     });
 

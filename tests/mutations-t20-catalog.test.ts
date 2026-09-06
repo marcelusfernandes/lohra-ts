@@ -35,14 +35,17 @@ describe("mutations:t20 catalog (src/web/**)", () => {
   });
 
   it("mira apenas src/web/connector.ts (×3), fetch.ts (×2), safety.ts (×1), search.ts (×1), tool.ts (×2)", () => {
-    const files = webToolsMutants.flatMap((mutant) => mutant.edits.map((edit) => edit.file));
-    const counts = files.reduce<Record<string, number>>((acc, file) => {
-      acc[file] = (acc[file] ?? 0) + 1;
-      return acc;
-    }, {});
+    // Conta MUTANTES por arquivo (não edits): `d-automatic-redirects` tem 2
+    // edits no mesmo arquivo (fetch.ts) e continua sendo 1 mutante.
+    const counts: Record<string, number> = {};
+    for (const mutant of webToolsMutants) {
+      for (const file of new Set(mutant.edits.map((edit) => edit.file))) {
+        counts[file] = (counts[file] ?? 0) + 1;
+      }
+    }
     expect(counts).toEqual({
       "src/web/connector.ts": 3,
-      "src/web/fetch.ts": 3,
+      "src/web/fetch.ts": 2,
       "src/web/safety.ts": 1,
       "src/web/search.ts": 1,
       "src/web/tool.ts": 2,
