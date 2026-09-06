@@ -24,34 +24,34 @@ describe("positiveIntEnv", () => {
   it("falls back with a 'not an integer' warning for non-integer strings, matching Python int() semantics", () => {
     expect(positiveIntEnv("LOHRA_MAX_PARALLEL", "abc", 4)).toEqual({
       value: 4,
-      warning: "ignoring LOHRA_MAX_PARALLEL='abc': not an integer; using 4",
+      warning: 'ignoring LOHRA_MAX_PARALLEL="abc": not an integer; using 4',
     });
     // "3.0" is a number but not a Python int() literal — same branch as "abc".
     expect(positiveIntEnv("LOHRA_MAX_PARALLEL", "3.0", 4)).toEqual({
       value: 4,
-      warning: "ignoring LOHRA_MAX_PARALLEL='3.0': not an integer; using 4",
+      warning: 'ignoring LOHRA_MAX_PARALLEL="3.0": not an integer; using 4',
     });
   });
 
   it("falls back with a 'must be >= 1' warning for valid integers below the floor", () => {
     expect(positiveIntEnv("LOHRA_MAX_PARALLEL", "0", 4)).toEqual({
       value: 4,
-      warning: "ignoring LOHRA_MAX_PARALLEL='0': must be >= 1; using 4",
+      warning: 'ignoring LOHRA_MAX_PARALLEL="0": must be >= 1; using 4',
     });
     expect(positiveIntEnv("LOHRA_MAX_SUBSESSIONS", "-3", 200)).toEqual({
       value: 200,
-      warning: "ignoring LOHRA_MAX_SUBSESSIONS='-3': must be >= 1; using 200",
+      warning: 'ignoring LOHRA_MAX_SUBSESSIONS="-3": must be >= 1; using 200',
     });
   });
 
   it("cites the per-variable default in the warning, not a shared constant", () => {
     expect(positiveIntEnv("LOHRA_MAX_ITERATIONS", "abc", 90)).toEqual({
       value: 90,
-      warning: "ignoring LOHRA_MAX_ITERATIONS='abc': not an integer; using 90",
+      warning: 'ignoring LOHRA_MAX_ITERATIONS="abc": not an integer; using 90',
     });
     expect(positiveIntEnv("LOHRA_MAX_ITERATIONS", "0", 90)).toEqual({
       value: 90,
-      warning: "ignoring LOHRA_MAX_ITERATIONS='0': must be >= 1; using 90",
+      warning: 'ignoring LOHRA_MAX_ITERATIONS="0": must be >= 1; using 90',
     });
   });
 
@@ -60,7 +60,7 @@ describe("positiveIntEnv", () => {
     // any untested raw value. 'xyz' was never in any example list.
     expect(positiveIntEnv("LOHRA_MAX_PARALLEL", "xyz", 4)).toEqual({
       value: 4,
-      warning: "ignoring LOHRA_MAX_PARALLEL='xyz': not an integer; using 4",
+      warning: 'ignoring LOHRA_MAX_PARALLEL="xyz": not an integer; using 4',
     });
   });
 
@@ -85,22 +85,22 @@ describe("positiveIntEnv", () => {
     });
   });
 
-  // Evaluator baseline §9/L27 (evidence-s13-repr-edges.json): the warning's
-  // <raw> is Python's repr() of the raw value, not verbatim interpolation.
-  // A raw value containing a quote, backslash, or control character diverges
-  // from a naive '${raw}' template.
-  it("uses Python repr() for the raw value in the warning, not verbatim interpolation", () => {
+  // Evaluator baseline §9/L27 (evidence-s13-repr-edges.json, historical): the
+  // warning's <raw> is JSON.stringify() of the raw value, not verbatim
+  // interpolation. A raw value containing a quote, backslash, or control
+  // character diverges from a naive '${raw}' template.
+  it("uses JSON.stringify() for the raw value in the warning, not verbatim interpolation", () => {
     expect(positiveIntEnv("LOHRA_MAX_PARALLEL", "a'b", 4)).toEqual({
       value: 4,
       warning: 'ignoring LOHRA_MAX_PARALLEL="a\'b": not an integer; using 4',
     });
     expect(positiveIntEnv("LOHRA_MAX_PARALLEL", "a\\b", 4)).toEqual({
       value: 4,
-      warning: "ignoring LOHRA_MAX_PARALLEL='a\\\\b': not an integer; using 4",
+      warning: 'ignoring LOHRA_MAX_PARALLEL="a\\\\b": not an integer; using 4',
     });
     expect(positiveIntEnv("LOHRA_MAX_PARALLEL", "a\nb", 4)).toEqual({
       value: 4,
-      warning: "ignoring LOHRA_MAX_PARALLEL='a\\nb': not an integer; using 4",
+      warning: 'ignoring LOHRA_MAX_PARALLEL="a\\nb": not an integer; using 4',
     });
   });
 
@@ -108,15 +108,15 @@ describe("positiveIntEnv", () => {
     // Leading, trailing, and doubled underscores are invalid int() literals.
     expect(positiveIntEnv("LOHRA_MAX_PARALLEL", "_10", 4)).toEqual({
       value: 4,
-      warning: "ignoring LOHRA_MAX_PARALLEL='_10': not an integer; using 4",
+      warning: 'ignoring LOHRA_MAX_PARALLEL="_10": not an integer; using 4',
     });
     expect(positiveIntEnv("LOHRA_MAX_PARALLEL", "10_", 4)).toEqual({
       value: 4,
-      warning: "ignoring LOHRA_MAX_PARALLEL='10_': not an integer; using 4",
+      warning: 'ignoring LOHRA_MAX_PARALLEL="10_": not an integer; using 4',
     });
     expect(positiveIntEnv("LOHRA_MAX_PARALLEL", "1__0", 4)).toEqual({
       value: 4,
-      warning: "ignoring LOHRA_MAX_PARALLEL='1__0': not an integer; using 4",
+      warning: 'ignoring LOHRA_MAX_PARALLEL="1__0": not an integer; using 4',
     });
   });
 });

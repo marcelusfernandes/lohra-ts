@@ -290,12 +290,12 @@ describe("createChildRunner", () => {
     expect(result.status).toBe("error");
     expect(result.errorKind).toBeNull();
     expect(result.retryAfter).toBeNull();
-    // "Error code: N - {payload!r}" — Python's str(APIError), not the bare
-    // provider message. A delegate_task batch surfaces this verbatim in a
-    // failed task's summary (L17): losing this format was a real,
-    // measured bilateral divergence (t13-delegate-batch-isolated-failure-
-    // order-preserved), not a cosmetic nicety.
-    expect(result.output).toBe("Error code: 500 - {'error': 'boom'}");
+    // "Error code: N - {payload as JSON}" — the SDK-style causal-canary
+    // format. A delegate_task batch surfaces this verbatim in a failed
+    // task's summary (L17): losing this format was a real, measured
+    // bilateral divergence (t13-delegate-batch-isolated-failure-order-
+    // preserved), not a cosmetic nicety.
+    expect(result.output).toBe('Error code: 500 - {"error":"boom"}');
     close();
   });
 

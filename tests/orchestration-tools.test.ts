@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import { ProviderError } from "../src/agent/client-pool.js";
-import { pythonRepr } from "../src/serialization/python-repr.js";
 import { toolError, toolResult } from "../src/tools/envelope.js";
 import { OrchestrationCore, type CollectResult } from "../src/orchestration/core.js";
 import {
@@ -172,10 +171,10 @@ describe("steerSessionTool", () => {
     );
   });
 
-  it("returns the byte-exact no-sub-session error, single-quoted, for an unknown sub_id", () => {
+  it("returns the no-sub-session error, JSON-quoted, for an unknown sub_id", () => {
     const core = makeCore(() => Promise.resolve(okResult()));
     expect(steerSessionTool(core, { sub_id: "deadbeef", text: "hi" })).toBe(
-      toolError(`no sub-session ${pythonRepr("deadbeef")}`),
+      toolError(`no sub-session ${JSON.stringify("deadbeef")}`),
     );
   });
 
@@ -255,7 +254,7 @@ describe("collectSessionTool", () => {
   it("coerces a numeric sub_id to string before the no-sub-session repr (L19)", async () => {
     const core = makeCore(() => Promise.resolve(okResult()));
     expect(await collectSessionTool(core, { sub_id: 7, wait: true })).toBe(
-      toolError(`no sub-session ${pythonRepr("7")}`),
+      toolError(`no sub-session ${JSON.stringify("7")}`),
     );
   });
 

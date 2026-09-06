@@ -106,6 +106,7 @@ describe("validateSpec", () => {
       rule: "node_type",
       nodeId: "a",
       field: "type",
+      message: `unknown node type ${JSON.stringify(type)}`,
     });
   });
 

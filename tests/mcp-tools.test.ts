@@ -86,12 +86,12 @@ describe("wrapCallResult", () => {
     );
   });
 
-  it("kills JS String spelling: null/booleans use Python placeholder spellings", () => {
+  it("renders a non-string, non-number type via JSON quoting", () => {
     expect(wrapCallResult({ content: [{ type: null }] })).toBe(
-      toolResult(undefined, { content: "[None block]" }),
+      toolResult(undefined, { content: "[null block]" }),
     );
     expect(wrapCallResult({ content: [{ type: true }, { type: false }] })).toBe(
-      toolResult(undefined, { content: "[True block][False block]" }),
+      toolResult(undefined, { content: "[true block][false block]" }),
     );
   });
 

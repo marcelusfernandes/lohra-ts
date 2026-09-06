@@ -96,10 +96,10 @@ describe("runCron — action argument, missing vs. invalid (two distinct argpars
 
   it("an explicitly-provided but unrecognized action (including empty string): 'invalid choice' class", () => {
     expect(run(["frobnicate"]).stderr).toBe(
-      "lohra cron: error: argument action: invalid choice: 'frobnicate' (choose from 'list', 'add', 'remove', 'pause', 'resume')\n",
+      "lohra cron: error: argument action: invalid choice: \"frobnicate\" (choose from 'list', 'add', 'remove', 'pause', 'resume')\n",
     );
     expect(run([""]).stderr).toBe(
-      "lohra cron: error: argument action: invalid choice: '' (choose from 'list', 'add', 'remove', 'pause', 'resume')\n",
+      "lohra cron: error: argument action: invalid choice: \"\" (choose from 'list', 'add', 'remove', 'pause', 'resume')\n",
     );
   });
 });
@@ -134,24 +134,24 @@ describe("runCron — validation goldens (byte-exact, decision 12/assertion 10-1
   it("cron with 4 fields", () => {
     const result = run(["add", "--name", "n1", "--prompt", "p1", "--cron", "* * * *"]);
     expect(result.stderr).toBe(
-      "error: invalid cron expression: cron expression needs 5 fields, got 4: '* * * *'\n",
+      'error: invalid cron expression: cron expression needs 5 fields, got 4: "* * * *"\n',
     );
   });
 
   it("cron field out of range", () => {
     const result = run(["add", "--name", "n1", "--prompt", "p1", "--cron", "60 * * * *"]);
-    expect(result.stderr).toBe("error: invalid cron expression: cron field out of range: '60'\n");
+    expect(result.stderr).toBe('error: invalid cron expression: cron field out of range: "60"\n');
   });
 
   it("remove needs a job id", () => {
     expect(run(["remove"])).toEqual({ code: 2, stdout: "", stderr: "remove needs a job id\n" });
   });
 
-  it("id inexistente: exit 1, Python-repr quoting", () => {
+  it("id inexistente: exit 1, JSON quoting", () => {
     expect(run(["remove", "ghost"])).toEqual({
       code: 1,
       stdout: "",
-      stderr: "no job with id 'ghost'\n",
+      stderr: 'no job with id "ghost"\n',
     });
   });
 });

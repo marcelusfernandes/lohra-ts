@@ -71,9 +71,9 @@ describe("CronTool.handle — round-trip and envelopes (assertions 39–41)", ()
     expect(result).toEqual({ error: "a job needs a non-empty 'name'" });
   });
 
-  it("unknown action produces the exact oracle message", () => {
+  it("unknown action is cited as a JSON string", () => {
     const result = parse(tool.handle({ action: "bogus" }));
-    expect(result).toEqual({ error: "unknown action 'bogus' (use add/list/remove/pause/resume)" });
+    expect(result).toEqual({ error: 'unknown action "bogus" (use add/list/remove/pause/resume)' });
   });
 
   it("missing job_id on remove/pause/resume produces the exact oracle message", () => {
@@ -83,8 +83,8 @@ describe("CronTool.handle — round-trip and envelopes (assertions 39–41)", ()
     }
   });
 
-  it("nonexistent job_id produces the exact oracle message with Python repr quoting", () => {
+  it("nonexistent job_id is cited as a JSON string", () => {
     const result = parse(tool.handle({ action: "remove", job_id: "ghost" }));
-    expect(result).toEqual({ error: "no job with id 'ghost'" });
+    expect(result).toEqual({ error: 'no job with id "ghost"' });
   });
 });

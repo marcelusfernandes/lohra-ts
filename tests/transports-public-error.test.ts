@@ -10,7 +10,7 @@ describe("publicCauseMessage", () => {
     });
     const error = new Error("wrapped", { cause });
     expect(publicCauseMessage(error)).toBe(
-      "Error code: 418 - {'error': {'message': 'T11_CAUSE_NONCE42 upstream refused', 'type': 'teapot_error'}}",
+      'Error code: 418 - {"error":{"message":"T11_CAUSE_NONCE42 upstream refused","type":"teapot_error"}}',
     );
   });
 

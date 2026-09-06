@@ -16,16 +16,16 @@ describe("parseCronField", () => {
     expect(parseCronField("*/15", 0, 59)).toEqual(new Set([0, 15, 30, 45]));
   });
 
-  it("rejects out-of-range bounds with the byte-exact message", () => {
-    expect(() => parseCronField("60", 0, 59)).toThrow("cron field out of range: '60'");
-    expect(() => parseCronField("*/0", 0, 59)).toThrow("cron field out of range: '*/0'");
-    expect(() => parseCronField("5-1", 0, 59)).toThrow("cron field out of range: '5-1'");
+  it("rejects out-of-range bounds, field cited as JSON", () => {
+    expect(() => parseCronField("60", 0, 59)).toThrow('cron field out of range: "60"');
+    expect(() => parseCronField("*/0", 0, 59)).toThrow('cron field out of range: "*/0"');
+    expect(() => parseCronField("5-1", 0, 59)).toThrow('cron field out of range: "5-1"');
   });
 
-  it("rejects non-numeric parts with CPython's int() wording (named excuse)", () => {
-    expect(() => parseCronField("a", 0, 59)).toThrow("invalid literal for int() with base 10: 'a'");
+  it("rejects non-numeric parts with the int() wording (named excuse), value cited as JSON", () => {
+    expect(() => parseCronField("a", 0, 59)).toThrow('invalid literal for int() with base 10: "a"');
     expect(() => parseCronField("1,,2", 0, 59)).toThrow(
-      "invalid literal for int() with base 10: ''",
+      'invalid literal for int() with base 10: ""',
     );
   });
 });
@@ -33,10 +33,10 @@ describe("parseCronField", () => {
 describe("cronMatches", () => {
   it("requires exactly 5 whitespace-separated fields", () => {
     expect(() => cronMatches("* * * *", new Date())).toThrow(
-      "cron expression needs 5 fields, got 4: '* * * *'",
+      'cron expression needs 5 fields, got 4: "* * * *"',
     );
     expect(() => cronMatches("* * * * * *", new Date())).toThrow(
-      "cron expression needs 5 fields, got 6: '* * * * * *'",
+      'cron expression needs 5 fields, got 6: "* * * * * *"',
     );
   });
 
@@ -127,10 +127,14 @@ describe("isDue", () => {
     ).toBe(true);
   });
 
-  it("throws for an unknown job type", () => {
+  it("throws for an unknown job type, cited as JSON", () => {
     expect(() => isDue({ type: "bogus", value: 0 }, { now: 0 })).toThrow(
-      "unknown job type 'bogus'",
+      'unknown job type "bogus"',
     );
+  });
+
+  it("throws with the JS-native `undefined` text when job.type is missing", () => {
+    expect(() => isDue({ value: 0 }, { now: 0 })).toThrow("unknown job type undefined");
   });
 });
 

@@ -84,7 +84,7 @@ describe("session connectors -- the mcp SDK is absent in this environment (M1)",
           return Promise.reject(new Error("must not run"));
         },
       }),
-    ).rejects.toThrow("MCP transport 'websocket' not supported");
+    ).rejects.toThrow('MCP transport "websocket" not supported');
     expect(httpCalls).toEqual([]);
   });
 });

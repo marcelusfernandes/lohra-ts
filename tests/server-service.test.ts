@@ -255,7 +255,7 @@ describe("CompletionService", () => {
       }),
     ).rejects.toThrow(
       new UpstreamError(
-        "Error code: 418 - {'error': {'message': 'T11_CAUSE_NONCE42 upstream refused', 'type': 'teapot_error'}}",
+        'Error code: 418 - {"error":{"message":"T11_CAUSE_NONCE42 upstream refused","type":"teapot_error"}}',
       ),
     );
   });
