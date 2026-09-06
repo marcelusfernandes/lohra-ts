@@ -31,6 +31,12 @@ const WRAP_DISPATCH_ANCHOR =
   "      const dispatch =\n" +
   "        config.wrapDispatch === undefined ? childDispatch : config.wrapDispatch(childDispatch);";
 
+// `run-mutations.ts`'s `Edit.before` is a TS string LITERAL on disk — its
+// newline is the two-character escape `\n` (backslash, n), never an actual
+// newline byte. Comparing raw file text needs the anchor spelled the same
+// way the catalog spells it, not the real newline `childRunnerSource` has.
+const WRAP_DISPATCH_ANCHOR_AS_SOURCE_LITERAL = WRAP_DISPATCH_ANCHOR.replaceAll("\n", "\\n");
+
 function occurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
 }
@@ -41,6 +47,6 @@ describe("mutations:t16 catalog pins child-runner.ts's wrapDispatch wiring (#112
   });
 
   it("run-mutations.ts carries this exact text as a mutant's pinned `before`", () => {
-    expect(mutationsCatalogSource).toContain(WRAP_DISPATCH_ANCHOR);
+    expect(mutationsCatalogSource).toContain(WRAP_DISPATCH_ANCHOR_AS_SOURCE_LITERAL);
   });
 });
