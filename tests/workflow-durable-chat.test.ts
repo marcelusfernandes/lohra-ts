@@ -145,8 +145,13 @@ function tableCount(root: string, table: string): number {
 function startGatedLeafChatServer(leafDelayMs: number): {
   readonly server: Server;
   readonly port: number;
+  /** Requests the leaf actually made it to (not merely answered) — a test
+   * asserting on the lock alone could pass vacuously if the leaf's own
+   * request never went out before shutdown (see the module doc above). */
+  readonly leafRequests: { count: number };
 } {
   let mainCalls = 0;
+  const leafRequests = { count: 0 };
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -163,6 +168,7 @@ function startGatedLeafChatServer(leafDelayMs: number): {
         response.end(text);
       };
       if (isLeafRequest(body.messages)) {
+        leafRequests.count += 1;
         setTimeout(() => {
           respond(chatResponse("leaf", { role: "assistant", content: "leaf done" }, "stop"));
         }, leafDelayMs);
@@ -193,7 +199,7 @@ function startGatedLeafChatServer(leafDelayMs: number): {
       );
     });
   });
-  return { server, port: 0 };
+  return { server, port: 0, leafRequests };
 }
 
 function soleRunId(root: string): string {
@@ -280,7 +286,7 @@ describe("chat.ts composition root (issue #121, AC 2): shutdown() releases a sti
   it("workflow_run_locks is empty right after runChat, even though the leaf was still gated when the turn ended", async () => {
     const root = mkdtempSync(join(tmpdir(), "lohra-t121-shutdown-roots-"));
     roots.push(root);
-    const { server } = startGatedLeafChatServer(250);
+    const { server, leafRequests } = startGatedLeafChatServer(250);
     await new Promise<void>((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
     try {
       const address = server.address();
@@ -316,6 +322,11 @@ describe("chat.ts composition root (issue #121, AC 2): shutdown() releases a sti
         cwd: root,
       });
       expect(result.code).toBe(0);
+      // Guards against a vacuous pass: if the leaf's request never actually
+      // went out before shutdown (a legitimate outcome — see the module doc
+      // above), the lock could be empty for a reason that has nothing to do
+      // with workflowService.shutdown().
+      expect(leafRequests.count).toBe(1);
       const runId = soleRunId(root);
       expect(lockCountFor(root, runId)).toBe(0);
     } finally {
