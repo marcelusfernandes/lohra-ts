@@ -12,12 +12,15 @@
 // `SPAWN_TIMEOUT_MS` como timeout de teste — nunca menor que o timeout do
 // `spawnSync` que ele espera. Medido sem carga (3 execuções de
 // `npx vitest run tests/prova-run.test.ts`): 250ms–1.3s por caso, ~5s no
-// total — bem abaixo de 60s; reduzir a fixture não teria evitado o run 9 (a
-// fixture do caso `check: true` já é mínima, um `exit 1` em vez de rodar
-// `tsc` de verdade). Por isso a escolha aqui é subir o timeout do TESTE
-// para casar com o do `spawnSync`, não encolher o trabalho — `vitest.config.ts`
-// fica fora (fora de escopo da issue #111: um `testTimeout` global
-// mascararia lentidão real em qualquer outro teste da suíte).
+// total; sob carga real (10 execuções deste arquivo enquanto 2×`npm test`
+// da suíte inteira rodavam em paralelo): até 4.4s por caso (run 1) — ainda
+// bem abaixo dos 5s do default antigo e bem abaixo dos 60s novos. Reduzir a
+// fixture não teria evitado o run 9 da PR #106 (a fixture do caso
+// `check: true` já é mínima, um `exit 1` em vez de rodar `tsc` de verdade).
+// Por isso a escolha aqui é subir o timeout do TESTE para casar com o do
+// `spawnSync`, não encolher o trabalho — `vitest.config.ts` fica fora (fora
+// de escopo da issue #111: um `testTimeout` global mascararia lentidão real
+// em qualquer outro teste da suíte).
 //
 // O teste "cada caso pesado declara o timeout" (no fim do describe) lê o
 // próprio arquivo-fonte e confere isso por texto — não há um jeito de
