@@ -38,6 +38,12 @@ Em sessões de Claude Code, `.claude/settings.json` formata e aplica `eslint --f
 arquivo editado (hook `PostToolUse`) e libera sem prompt os comandos read-only acima; o gate
 continua sendo `npm run lint` + `npm run format:check`.
 
+`npm test` roda a suíte inteira independente de `npm run build`: nenhum arquivo de teste
+importa de `dist/` (`npm ci && npm test` já passa em checkout limpo). `npm run typecheck` e
+`npm run lint`, ao contrário, exigem `dist/` — alguns scripts de paridade sob `scripts/`
+importam o pacote compilado de propósito (smoke tests do artefato publicado), por isso a
+ordem acima mantém `npm run build` antes deles.
+
 ## Desenvolvimento
 
 `npm run doutor` confere se esta máquina tem o que o checkout precisa — Node
