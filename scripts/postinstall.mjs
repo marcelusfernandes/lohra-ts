@@ -27,3 +27,28 @@ if (existsSync(join(process.cwd(), ".git")) && existsSync(installer)) {
       "postinstall: instalar-git-hooks.sh falhou (exit " + String(result.status) + ")" + "\n",
     );
 }
+
+// Pre-commit local via lefthook (issue #63, lefthook.yml): prettier --check
+// + eslint nos arquivos staged. Escopo explícito ("install pre-commit") —
+// NUNCA `lefthook install` sem argumento, que reescreveria todo o diretório
+// de hooks, inclusive o pre-push instalado acima (README "Desenvolvimento").
+// Sem `.git` (tarball) ou sem o binário (instalação de produção,
+// `--omit=dev`, sem devDependencies) pula em silêncio; falha aqui também não
+// quebra o install (o hook não é a única barreira).
+if (existsSync(join(process.cwd(), ".git"))) {
+  const lefthookBin = join(
+    process.cwd(),
+    "node_modules",
+    ".bin",
+    process.platform === "win32" ? "lefthook.cmd" : "lefthook",
+  );
+  if (existsSync(lefthookBin)) {
+    const lefthookResult = spawnSync(lefthookBin, ["install", "pre-commit"], { stdio: "inherit" });
+    if (lefthookResult.status !== 0)
+      process.stderr.write(
+        "postinstall: lefthook install pre-commit falhou (exit " +
+          String(lefthookResult.status) +
+          ")\n",
+      );
+  }
+}
