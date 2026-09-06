@@ -94,7 +94,7 @@
     "mutations:t15": "tsx scripts/parity/workflow-executor/run-mutations.ts",
     "parity:t21": "tsx scripts/parity/media/run-all.ts",
     "parity:t21:gates": "tsx scripts/parity/media/run-gates.ts",
-    "mutations:t21": "tsx scripts/parity/media/run-mutations.ts",
+    "mutations:t21": "tsx scripts/mutations/media.ts",
     "pack:t21": "node scripts/parity/media/pack-smoke.mjs",
     "parity:t22:update": "tsx scripts/parity/closeout/update.ts",
     "probe:t22:update": "tsx scripts/parity/closeout/update.ts",
