@@ -130,13 +130,32 @@ describe("checarGitPrePush", () => {
     const c = checarGitPrePush(exec, raiz, () => false);
     expect(c.status).toBe("falta");
     expect(c.nome).toBe("git-pre-push");
+    expect(c.comando).toContain("instalar-git-hooks.sh");
   });
 
-  it("hook pre-push presente é ok", () => {
+  it("hook pre-push com conteúdo igual ao canônico (.claude/hooks/git-pre-push) é ok", () => {
     const raiz = novoDir("doutor-prepush-");
     const exec: Executor = () => ok(join(raiz, ".git", "hooks"));
-    const c = checarGitPrePush(exec, raiz, () => true);
+    const c = checarGitPrePush(
+      exec,
+      raiz,
+      () => true,
+      () => "#!/bin/sh\necho conteudo-canonico\n",
+    );
     expect(c.status).toBe("ok");
+  });
+
+  it("hook pre-push com conteúdo diferente do canônico é falta, com a dica instalar-git-hooks.sh", () => {
+    const raiz = novoDir("doutor-prepush-");
+    const exec: Executor = () => ok(join(raiz, ".git", "hooks"));
+    const ler = (caminho: string): string =>
+      caminho.includes(".claude")
+        ? "#!/bin/sh\necho canonico\n"
+        : "#!/bin/sh\necho outro-conteudo\n";
+    const c = checarGitPrePush(exec, raiz, () => true, ler);
+    expect(c.status).toBe("falta");
+    expect(c.nome).toBe("git-pre-push");
+    expect(c.comando).toContain("instalar-git-hooks.sh");
   });
 });
 
