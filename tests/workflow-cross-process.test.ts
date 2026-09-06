@@ -174,12 +174,12 @@ describe("cross-process durability: list/watch/audit/resume see a run across a k
       expect(listFresh.stdout).toContain(runId.slice(0, 8));
       expect(listFresh.stdout).toContain("running");
       expect(listFresh.stdout).not.toContain("(stale)");
-      // progress_json is only persisted at the terminal write
-      // (service.ts's engine.run().then(...)) — a run killed mid-flight
-      // never reaches it, so list legitimately renders 0/0 nodes here;
-      // this is the existing, unchanged rendering, not a bug this issue
-      // introduces.
-      expect(listFresh.stdout).toContain("0/0 nodes");
+      // progress_json is persisted after EVERY completed node (issue #125),
+      // not only at the terminal write — "first" landed in
+      // workflow_node_cache and its progress row before the kill, so a run
+      // killed mid-flight (with "second" still in flight) shows 1/2 here,
+      // not 0/0.
+      expect(listFresh.stdout).toContain("1/2 nodes");
 
       const listStale = await runCommand({
         action: "list",
