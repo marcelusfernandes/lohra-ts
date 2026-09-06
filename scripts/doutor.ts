@@ -9,10 +9,8 @@
 // injetável (mesmo padrão de `scripts/ci/lib/git.ts`) — os testes trocam a
 // execução real por um duplo, sem depender do PATH desta máquina (issue #63,
 // AC "testes unitários com exec injetado").
-//
-// STUB (test(red), issue #63): as checagens lançam "not implemented"; a
-// implementação real vem no commit seguinte.
 import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
@@ -38,49 +36,138 @@ export interface Checagem {
   readonly comando?: string;
 }
 
+function ok(nome: string, detalhe: string): Checagem {
+  return { nome, status: "ok", detalhe };
+}
+
+function falta(nome: string, detalhe: string, comando: string): Checagem {
+  return { nome, status: "falta", detalhe, comando };
+}
+
+// `SpawnSyncReturns<string>.stdout`/`.stderr` são tipados como sempre
+// `string` (nunca `| undefined`) em `@types/node`, mas quando o processo nem
+// chega a rodar (ENOENT — binário ausente), o Node devolve `undefined` de
+// verdade nesses dois campos (mesma observação de `scripts/ci/lib/git.ts`).
+function textoOuVazio(valor: string | undefined): string {
+  return valor ?? "";
+}
+
 /** `Executor` de verdade — só usado por `main()`; os testes nunca importam
  * este símbolo, sempre injetam um duplo nas checagens. */
-export const executorReal: Executor = (_cmd, _args) => {
-  throw new Error("not implemented");
+export const executorReal: Executor = (cmd, args) => {
+  const r = spawnSync(cmd, args as string[], { encoding: "utf8", timeout: 10_000 });
+  return {
+    status: r.status,
+    stdout: textoOuVazio(r.stdout),
+    stderr: textoOuVazio(r.stderr),
+    ...(r.error !== undefined ? { error: r.error } : {}),
+  };
 };
 
 /** Node >= 20 (`engines.node` do `package.json`). */
-export function checarNode(_versao: string = process.version): Checagem {
-  throw new Error("not implemented");
+export function checarNode(versao: string = process.version): Checagem {
+  const major = Number(versao.replace(/^v/u, "").split(".")[0]);
+  if (Number.isFinite(major) && major >= 20) return ok("Node", `${versao} (>= 20)`);
+  return falta("Node", `${versao} é menor que 20`, "nvm install 20 && nvm use 20");
 }
 
 /** `python3`/`make`/`g++` — só exigidos em Linux (build nativo do node-pty;
  * macOS usa o Xcode Command Line Tools, Windows não builda na instalação). */
-export function checarToolchainNativo(_plataforma: NodeJS.Platform, _exec: Executor): Checagem {
-  throw new Error("not implemented");
+export function checarToolchainNativo(plataforma: NodeJS.Platform, exec: Executor): Checagem {
+  if (plataforma !== "linux") {
+    return ok("toolchain nativo (node-pty)", `não exigido em ${plataforma}`);
+  }
+  const faltando = ["python3", "make", "g++"].filter((cmd) => {
+    const r = exec(cmd, ["--version"]);
+    return r.error !== undefined || r.status !== 0;
+  });
+  if (faltando.length === 0) {
+    return ok("toolchain nativo (node-pty)", "python3, make, g++ presentes");
+  }
+  return falta(
+    "toolchain nativo (node-pty)",
+    `faltando: ${faltando.join(", ")}`,
+    "sudo apt-get install -y python3 make g++",
+  );
 }
 
 /** `gh auth status` — binário ausente e binário presente mas deslogado são
  * duas causas de "falta" distintas, cada uma com o comando certo. */
-export function checarGh(_exec: Executor): Checagem {
-  throw new Error("not implemented");
+export function checarGh(exec: Executor): Checagem {
+  const r = exec("gh", ["auth", "status"]);
+  if (r.error !== undefined) {
+    return falta("gh", "gh não encontrado no PATH", "brew install gh && gh auth login");
+  }
+  if (r.status === 0) return ok("gh", "autenticado");
+  return falta("gh", "gh instalado mas não autenticado", "gh auth login");
+}
+
+/** Diretório de hooks deste checkout (`git rev-parse --git-path hooks`) —
+ * resolve certo mesmo de dentro de um worktree, onde os hooks são os do
+ * checkout principal, compartilhados. `undefined` quando não dá para saber
+ * (fora de um repo git, ou `git` ausente). */
+function localizarHooksDir(exec: Executor, raiz: string): string | undefined {
+  const r = exec("git", ["-C", raiz, "rev-parse", "--git-path", "hooks"]);
+  if (r.error !== undefined || r.status !== 0) return undefined;
+  const caminho = r.stdout.trim();
+  return caminho === "" ? undefined : resolve(raiz, caminho);
 }
 
 /** `git-pre-push` (camada 2 da proteção da main) instalado no hooks dir
- * deste checkout — `git rev-parse --git-path hooks` resolve certo mesmo de
- * dentro de um worktree (hooks dir é o do checkout principal, compartilhado). */
+ * deste checkout. */
 export function checarGitPrePush(
-  _exec: Executor,
-  _raiz: string,
-  _existe: (caminho: string) => boolean = existsSync,
+  exec: Executor,
+  raiz: string,
+  existe: (caminho: string) => boolean = existsSync,
 ): Checagem {
-  throw new Error("not implemented");
+  const hooksDir = localizarHooksDir(exec, raiz);
+  if (hooksDir === undefined) {
+    return falta(
+      "git-pre-push",
+      "não foi possível localizar .git/hooks (rode dentro do checkout)",
+      "git rev-parse --git-path hooks",
+    );
+  }
+  const destino = resolve(hooksDir, "pre-push");
+  if (!existe(destino)) {
+    return falta(
+      "git-pre-push",
+      "hook pre-push não instalado",
+      "sh .claude/hooks/instalar-git-hooks.sh",
+    );
+  }
+  return ok("git-pre-push", `instalado em ${destino}`);
 }
 
 /** `pre-commit` do lefthook instalado — existe e é de fato gerenciado pelo
  * lefthook (não um hook de outra origem com o mesmo nome). */
 export function checarLefthook(
-  _exec: Executor,
-  _raiz: string,
-  _existe: (caminho: string) => boolean = existsSync,
-  _ler: (caminho: string) => string = (caminho) => readFileSync(caminho, "utf8"),
+  exec: Executor,
+  raiz: string,
+  existe: (caminho: string) => boolean = existsSync,
+  ler: (caminho: string) => string = (caminho) => readFileSync(caminho, "utf8"),
 ): Checagem {
-  throw new Error("not implemented");
+  const hooksDir = localizarHooksDir(exec, raiz);
+  if (hooksDir === undefined) {
+    return falta(
+      "lefthook",
+      "não foi possível localizar .git/hooks (rode dentro do checkout)",
+      "npx lefthook install pre-commit",
+    );
+  }
+  const destino = resolve(hooksDir, "pre-commit");
+  if (!existe(destino)) {
+    return falta("lefthook", "hook pre-commit (lefthook) não instalado", "npm ci");
+  }
+  const conteudo = ler(destino);
+  if (!conteudo.toLowerCase().includes("lefthook")) {
+    return falta(
+      "lefthook",
+      "pre-commit existe mas não é gerenciado pelo lefthook",
+      "npx lefthook install pre-commit --force",
+    );
+  }
+  return ok("lefthook", `instalado em ${destino}`);
 }
 
 function imprimirChecagem(c: Checagem): void {
