@@ -137,6 +137,44 @@ describe("GatewaySessionRegistry.canSubmitPrompt (L18/ADR-T12-04)", () => {
     expect(registry.canSubmitPrompt("parent")).toBe(true);
     expect(sessions.getSession("parent")?.end_reason).toBe("compression");
   });
+
+  it("is false for an orchestration-owned subsession, even after session.create makes it known", () => {
+    const { registry, sessions } = setup();
+    sessions.createSession({ id: "sub", source: "orchestration", model: "m", startedAt: 10 });
+    expect(
+      registry.promptSubmissionRejection("sub"),
+      "MUTATION_CAUSE:T22-l22-promotion-reopened",
+    ).toBe("subsession");
+    expect(registry.canSubmitPrompt("sub"), "MUTATION_CAUSE:T22-l22-promotion-reopened").toBe(
+      false,
+    );
+
+    registry.createOrResurrect({ sessionId: "sub", model: "m", systemPrompt: "sp", cwd: "/tmp" });
+    // session.create nunca reabre a promoção de privilégio de uma
+    // subsessão -- o gateway não pode virar um jeito de prompt.submit
+    // escalar uma sessão que a orquestração possui.
+    expect(registry.canSubmitPrompt("sub"), "MUTATION_CAUSE:T22-l22-promotion-reopened").toBe(
+      false,
+    );
+  });
+
+  it("is false for a session with a parent_session_id, regardless of source", () => {
+    const { registry, sessions } = setup();
+    sessions.createSession({ id: "root", model: "m", startedAt: 10 });
+    sessions.createSession({
+      id: "child",
+      model: "m",
+      startedAt: 11,
+      parentSessionId: "root",
+    });
+    expect(
+      registry.promptSubmissionRejection("child"),
+      "MUTATION_CAUSE:T22-l22-promotion-reopened",
+    ).toBe("subsession");
+    expect(registry.canSubmitPrompt("child"), "MUTATION_CAUSE:T22-l22-promotion-reopened").toBe(
+      false,
+    );
+  });
 });
 
 describe("GatewaySessionRegistry.interrupt", () => {
