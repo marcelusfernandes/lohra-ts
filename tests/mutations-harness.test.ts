@@ -333,14 +333,27 @@ describe("scripts/mutations não depende de scripts/parity", () => {
     }
   });
 
-  it("nenhum arquivo em scripts/mutations/ menciona scripts/parity, nem em comentário (issue #149, AC 1)", () => {
+  // Escopo: só os arquivos que a #149 é dona (harness comum + catálogos de
+  // t15/t16). Outras issues (#150/#151/#152) migram seus próprios runners
+  // para scripts/mutations/** em paralelo e podem legitimamente mencionar
+  // "scripts/parity" em prosa histórica nos ARQUIVOS DELAS — a #149 não
+  // pode varrer o diretório inteiro sem colidir com o trabalho alheio.
+  const ARQUIVOS_DA_149 = [
+    "canonical.ts",
+    "harness.ts",
+    "types.ts",
+    "orchestration.ts",
+    "workflow-durability.ts",
+    "workflow-durability-guard.ts",
+    "workflow-durability-named.ts",
+    "workflow-executor.ts",
+  ];
+
+  it("nenhum arquivo da #149 em scripts/mutations/ menciona scripts/parity, nem em comentário (AC 1)", () => {
     const mutationsDir = resolve(repoRoot, "scripts/mutations");
-    const entries = readdirSync(mutationsDir, { recursive: true }) as string[];
     const offenders: string[] = [];
-    for (const entry of entries) {
-      const path = join(mutationsDir, entry);
-      if (lstatSync(path).isDirectory()) continue;
-      const contents = readFileSync(path, "utf8");
+    for (const entry of ARQUIVOS_DA_149) {
+      const contents = readFileSync(join(mutationsDir, entry), "utf8");
       if (contents.includes("scripts/parity")) offenders.push(entry);
     }
     expect(offenders).toEqual([]);
