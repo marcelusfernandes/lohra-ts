@@ -105,16 +105,24 @@ export function ehCommitTestRed(subject: string): boolean {
 // adicionadas), remover dali os comentários de linha (`//` até o fim da
 // linha) e de bloco (`/* … */`, non-greedy — pode juntar dois blocos
 // separados por engano; aceitável, o objetivo é fail-closed, não um parser
-// de verdade). A remoção de bloco sozinha NÃO cobre o caso em que o
-// abridor/fechador do bloco (`/**`/`*/`) são linhas de CONTEXTO (só a
-// continuação foi tocada, um `git show` de uma edição dentro de um bloco
-// já existente) — para esse caso, a heurística da #62 (excluir linha que
-// começa com `*`, depois de remover comentários de linha/bloco) continua
-// necessária: código de produção de verdade nunca começa uma linha com
-// `*`. Só então procura `throw new Error(` no que sobrar. Ignorar
+// de verdade). Só então procura `throw new Error(` no que sobrar. Ignorar
 // ocorrências dentro de strings não é necessário (mesma issue).
+//
+// A remoção de bloco completo sozinha não cobre dois casos em que só
+// METADE do bloco foi capturada nas linhas adicionadas — o resto é linha
+// de CONTEXTO (um `git show` de uma edição dentro de um bloco de comentário
+// já existente):
+//   - só a continuação foi tocada (abridor/fechador são contexto): a
+//     heurística da #62 — excluir linha que começa com `*`, depois de
+//     remover comentários de linha/bloco — continua necessária: código de
+//     produção de verdade nunca começa uma linha assim.
+//   - só o abridor foi tocado (o fechador `*/` é contexto): sobra um `/*`
+//     sem par no texto extraído; removido explicitamente até o fim da
+//     linha, pelo mesmo motivo — nenhum código de produção de verdade
+//     carrega um `/*` desacompanhado até o fim da linha.
 const LINHA_ADICIONADA_RE = /^\+(?!\+\+)(.*)$/gm;
 const LINHA_CONTINUACAO_DE_BLOCO_RE = /^\s*\*/;
+const ABRIDOR_DE_BLOCO_SEM_PAR_RE = /\/\*.*$/gm;
 const THROW_NEW_ERROR_RE = /\bthrow\s+new\s+Error\(/;
 
 /** Conteúdo (sem o `+`) de cada linha ADICIONADA de um diff, na ordem
@@ -125,11 +133,15 @@ function linhasAdicionadas(diffTexto: string): string {
     .join("\n");
 }
 
-/** Remove comentários de bloco e de linha, e qualquer linha remanescente
- * que seja só a continuação de um bloco cujo abridor não foi capturado
- * (ver o comentário acima de `LINHA_CONTINUACAO_DE_BLOCO_RE`). */
+/** Remove comentários de bloco (completos, e abridores sem fechador no
+ * texto extraído) e de linha, e qualquer linha remanescente que seja só a
+ * continuação de um bloco cujo abridor não foi capturado (ver os dois
+ * casos acima de `LINHA_CONTINUACAO_DE_BLOCO_RE`/`ABRIDOR_DE_BLOCO_SEM_PAR_RE`). */
 function removerComentarios(codigo: string): string {
-  const semBlocoNemLinha = codigo.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  const semBlocoCompleto = codigo.replace(/\/\*[\s\S]*?\*\//g, "");
+  const semBlocoNemLinha = semBlocoCompleto
+    .replace(ABRIDOR_DE_BLOCO_SEM_PAR_RE, "")
+    .replace(/\/\/.*$/gm, "");
   return semBlocoNemLinha
     .split("\n")
     .filter((linha) => !LINHA_CONTINUACAO_DE_BLOCO_RE.test(linha))
