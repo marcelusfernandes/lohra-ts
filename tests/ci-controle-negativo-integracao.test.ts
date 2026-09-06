@@ -665,6 +665,30 @@ describe("controle-negativo/run.ts (subprocesso, repositório git descartável)"
   );
 
   it(
+    "NÃO faz SKIP quando o diff é só a DELEÇÃO de um tests/** que existia na base (issue #117, lacuna 2)",
+    () => {
+      // `git cat-file -e base:<arquivo>` acerta para um arquivo deletado
+      // (ele existe na base, é o que está sendo apagado) — sem excluir
+      // status "D", isso virava SKIP indevido; antes da #114 era controlado
+      // (vacuous-pass por construção, mesmo raciocínio de repoVacuousPass).
+      const dir = novoRepo();
+      escreverTeste(dir, "del-teste");
+      const base = commitTudo(dir, "chore: del-teste existe na base");
+
+      rmSync(join(dir, "tests", "del-teste.test.ts"));
+      const head = commitTudo(dir, "chore: remove tests/del-teste.test.ts");
+
+      const result = runControleNegativo(["--root", dir, "--base", base, "--head", head]);
+
+      // Sem --slug/--branch reconhecível, o fluxo normal reprova em
+      // resolverSlug — o ponto do teste é que NUNCA chega a fazer SKIP.
+      expect(result.status).toBe(1);
+      expect(result.stdout).not.toContain("SKIP");
+    },
+    TIMEOUT_TESTE,
+  );
+
+  it(
     "SKIP no caso concreto da PR #113/#111: tests/** JÁ EXISTENTE editado + prova/<slug>.ts NOVO",
     () => {
       // Reproduz exatamente a forma do diff real (`git diff --name-status`
