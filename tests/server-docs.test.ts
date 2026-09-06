@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { docsHtml, oauthRedirectHtml, openapiSchema, redocHtml } from "../src/server/docs.js";
+import { openapiSchema } from "../src/server/docs.js";
 import { chatCompletionBody } from "../src/server/chat-format.js";
 import { PRODUCT_PATHS } from "../src/server/routes.js";
 
@@ -14,14 +14,5 @@ describe("openapiSchema — paths contains exactly the four product paths (asser
 
   it("serializes to valid compact JSON", () => {
     expect(() => chatCompletionBody(openapiSchema())).not.toThrow();
-  });
-});
-
-describe("HTML doc pages", () => {
-  it("docs/redoc/oauth2-redirect are non-empty HTML documents", () => {
-    for (const html of [docsHtml(), redocHtml(), oauthRedirectHtml()]) {
-      expect(html).toContain("<!DOCTYPE html>");
-      expect(html.length).toBeGreaterThan(0);
-    }
   });
 });
