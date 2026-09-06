@@ -31,7 +31,11 @@ const rulingPath = join(artifactRoot, "gate-decision-ruling", "index.md");
 const runProvenancePath = join(artifactRoot, "t22-run-provenance", "index.md");
 // Fonte canônica: docs/provenance.json (issue #158). Lançar aqui é
 // fail-closed — sem SHAs aprovados não há evidência de proveniência.
+// `entries: []` sozinho passaria no schema e o `some()` mais abaixo ficaria
+// vacuamente falso, sem causa nomeada nenhuma (veredito da PR #171, #158):
+// a mesma guarda que `check-ancestry.ts:23-26` já tinha.
 const approved = approvedHeadPairs();
+if (approved.length === 0) throw new Error("PROVENANCE_EMPTY");
 
 function git(args: readonly string[]): string {
   const result = spawnSync("git", [...args], { cwd: project, encoding: "utf8" });

@@ -75,6 +75,18 @@ describe("T22 closeout invariants", () => {
     );
   });
 
+  it("fails closed when the provenance source has no approved entries", () => {
+    // verify-evidence.ts é um script com efeitos colaterais no topo do
+    // módulo (lê evidência real, spawna git, escreve arquivo) -- importá-lo
+    // aqui rodaria o closeout inteiro. A guarda em si (acréscimo do veredito
+    // da PR #171, #158) é pinada por texto-fonte, como o resto deste
+    // arquivo faz para verify-evidence.ts.
+    const verifier = source("scripts/parity/closeout/verify-evidence.ts");
+    expect(verifier, "MUTATION_CAUSE:T22-provenance-empty").toContain(
+      'if (approved.length === 0) throw new Error("PROVENANCE_EMPTY");',
+    );
+  });
+
   it("keeps updater subprocesses explicit, FF-only, and module-relative", () => {
     expect(source("src/self-update/repo.ts"), "MUTATION_CAUSE:T22-updater-shell").toContain(
       "shell: false",
