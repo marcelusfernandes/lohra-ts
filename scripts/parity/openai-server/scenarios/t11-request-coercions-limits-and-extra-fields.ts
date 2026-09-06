@@ -20,8 +20,12 @@ function postRequestLines(path: string, apiKey: string | null, body: string): st
   );
 }
 
-// SSE frames use the spaced python-json.dumps style (`"id": "..."`), while
-// non-stream bodies are compact (`"id":"..."`) — the regex tolerates either.
+// Issue #71: SSE frames and non-stream bodies both use the compact
+// `stringifyJsonPreservingNumbers` serializer now (`"id":"..."`,
+// docs/adr/0003-native-wire-format.md item 1) — the `\s*` here is
+// vestigial tolerance from when SSE was spaced Python `json.dumps` style
+// (`"id": "..."`) and is kept for robustness, not because either side still
+// emits a space.
 function normalizeIds(body: string): string {
   return body
     .replaceAll(/"id":\s*"(chatcmpl-|msg_resp_|resp_)[0-9a-f]{32}"/gu, '"id":"<ID>"')

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { parseJsonPreservingNumbers } from "../src/serialization/json-numbers.js";
-import { pythonJsonDumpsInsertionOrder } from "../src/serialization/python-json.js";
+import {
+  parseJsonPreservingNumbers,
+  stringifyJsonPreservingNumbers,
+} from "../src/serialization/json-numbers.js";
 import {
   AnthropicMessagesTransport,
   ResponsesTransport,
@@ -77,7 +79,7 @@ describe("AnthropicMessagesTransport", () => {
       content: "answer",
       finishReason: "pause",
       toolCalls: [
-        { id: "c1", name: "read", arguments: '{"path": "caf\\u00e9", "n": 1}', providerData: null },
+        { id: "c1", name: "read", arguments: '{"path":"café","n":1}', providerData: null },
       ],
       reasoning: "why",
       usage: {
@@ -104,7 +106,7 @@ describe("AnthropicMessagesTransport", () => {
       ),
     );
     expect(normalized.toolCalls[0]?.arguments).toBe(
-      '{"command": "sleep 2", "timeout": 1.0, "since_ns": 1788107097189000000, "nested": {"value": 2.0, "huge": 123456789012345678901234567890}, "array": [3.0], "exponent": 100.0, "integer": 7}',
+      '{"command":"sleep 2","timeout":1.0,"since_ns":1788107097189000000,"nested":{"value":2.0,"huge":123456789012345678901234567890},"array":[3.0],"exponent":100.0,"integer":7}',
     );
     const replay = transport.buildKwargs({
       model: "claude",
@@ -121,8 +123,8 @@ describe("AnthropicMessagesTransport", () => {
         },
       ],
     });
-    expect(pythonJsonDumpsInsertionOrder(replay.messages)).toBe(
-      '[{"role": "assistant", "content": [{"type": "tool_use", "id": "c1", "name": "terminal", "input": {"command": "sleep 2", "timeout": 1.0, "since_ns": 1788107097189000000, "nested": {"value": 2.0, "huge": 123456789012345678901234567890}, "array": [3.0], "exponent": 100.0, "integer": 7}}]}]',
+    expect(stringifyJsonPreservingNumbers(replay.messages)).toBe(
+      '[{"role":"assistant","content":[{"type":"tool_use","id":"c1","name":"terminal","input":{"command":"sleep 2","timeout":1.0,"since_ns":1788107097189000000,"nested":{"value":2.0,"huge":123456789012345678901234567890},"array":[3.0],"exponent":100.0,"integer":7}}]}]',
     );
   });
 });

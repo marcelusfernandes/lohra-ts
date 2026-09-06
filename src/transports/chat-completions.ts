@@ -1,4 +1,4 @@
-import { pythonJsonDumpsInsertionOrder } from "../serialization/python-json.js";
+import { stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
 import type {
   BuildKwargsOptions,
   ChatKwargs,
@@ -39,7 +39,7 @@ function cleanAssistant(message: Readonly<Record<string, unknown>>): Record<stri
           arguments:
             typeof argumentsValue === "string"
               ? argumentsValue
-              : pythonJsonDumpsInsertionOrder(argumentsValue || {}),
+              : stringifyJsonPreservingNumbers(argumentsValue || {}),
         },
       };
     });

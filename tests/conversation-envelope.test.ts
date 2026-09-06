@@ -35,7 +35,7 @@ const summary = {
 };
 
 describe("conversation envelopes", () => {
-  it("keeps insertion order, Python floats, omitted usage zeros and ensure_ascii", () => {
+  it("keeps insertion order, float fidelity, omitted usage zeros and UTF-8-direct text (issue #71)", () => {
     const body = successEnvelope({
       sessionId: "s",
       model: "m",
@@ -54,8 +54,12 @@ describe("conversation envelopes", () => {
       apiCalls: 1,
       sessionSummary: summary,
     });
-    expect(body).toContain('"input": "ol\\u00e1 \\ud83d\\ude00 \\u007f"');
-    expect(Buffer.from(body).some((byte) => byte > 0x7e)).toBe(false);
+    // docs/adr/0003-native-wire-format.md item 2: non-ASCII is literal UTF-8
+    // now, no \uXXXX escaping -- U+007F (DEL) is not escaped either (it is
+    // not a control character JSON.stringify escapes).
+    expect(body).toContain(`"input": "olá 😀 ${String.fromCharCode(0x7f)}"`);
+    expect(body).not.toContain("\\u");
+    expect(Buffer.from(body).some((byte) => byte > 0x7e)).toBe(true);
     expect(body.match(/0\.0/g)).toHaveLength(5);
     expect(body.indexOf('"session_id"')).toBeLessThan(body.indexOf('"model"'));
     expect(body.indexOf('"api_calls"')).toBeLessThan(body.indexOf('"session"'));

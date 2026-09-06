@@ -77,7 +77,7 @@ describe("chat completion wire shapes — byte-exact against the measured oracle
     );
   });
 
-  it("builds a chat.completion.chunk and frames it as an SSE event with Python spacing", () => {
+  it("builds a chat.completion.chunk and frames it as a compact SSE event (issue #71)", () => {
     const chunk = buildChunk({
       completionId: "chatcmpl-x",
       model: "m",
@@ -85,7 +85,7 @@ describe("chat completion wire shapes — byte-exact against the measured oracle
       created: 1,
     });
     expect(sseEvent(chunk)).toBe(
-      'data: {"id": "chatcmpl-x", "object": "chat.completion.chunk", "created": 1, "model": "m", "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": null}]}\n\n',
+      'data: {"id":"chatcmpl-x","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n',
     );
   });
 

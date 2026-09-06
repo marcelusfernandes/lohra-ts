@@ -29,34 +29,34 @@ afterEach(() => {
 describe("stateful tool handlers", () => {
   it("mutates memory and preserves the default-target quirk", () => {
     const tool = new MemoryTool(new MemoryStore(root()));
-    expect(tool.handle({})).toBe('{"error": "unknown action undefined (use add/replace/remove)"}');
+    expect(tool.handle({})).toBe('{"error":"unknown action undefined (use add/replace/remove)"}');
     expect(tool.handle({ action: "add", target: "nope", text: "fact" })).toBe(
-      '{"ok": true, "target": "nope", "entry_count": 1}',
+      '{"ok":true,"target":"nope","entry_count":1}',
     );
     expect(tool.handle({ action: "replace", old_text: "fact", new_text: "changed" })).toBe(
-      '{"ok": true, "target": "memory", "entry_count": 1}',
+      '{"ok":true,"target":"memory","entry_count":1}',
     );
     expect(tool.handle({ action: "remove", old_text: "changed" })).toBe(
-      '{"ok": true, "target": "memory", "entry_count": 0}',
+      '{"ok":true,"target":"memory","entry_count":0}',
     );
   });
 
   it("creates, views, updates and deletes skills", () => {
     const tool = new SkillTool(new SkillStore(root()));
     expect(tool.manage({ action: "create", name: "one", body: "body" })).toBe(
-      '{"ok": true, "action": "create", "name": "one", "scope": "home"}',
+      '{"ok":true,"action":"create","name":"one","scope":"home"}',
     );
     expect(tool.view({ name: "one" })).toBe(
-      '{"ok": true, "name": "one", "version": "1.0.0", "body": "body"}',
+      '{"ok":true,"name":"one","version":"1.0.0","body":"body"}',
     );
     expect(tool.manage({ action: "update", name: "one", description: "new" })).toBe(
-      '{"ok": true, "action": "update", "name": "one"}',
+      '{"ok":true,"action":"update","name":"one"}',
     );
     expect(tool.manage({ action: "delete", name: "one" })).toBe(
-      '{"ok": true, "action": "delete", "name": "one"}',
+      '{"ok":true,"action":"delete","name":"one"}',
     );
     expect(tool.manage({ name: "one" })).toBe(
-      '{"error": "unknown action undefined (use create/update/delete)"}',
+      '{"error":"unknown action undefined (use create/update/delete)"}',
     );
   });
 
@@ -67,24 +67,22 @@ describe("stateful tool handlers", () => {
       loadMessages: (id: string) => [{ id }],
     };
     const tool = new SessionSearchTool(db);
-    expect(tool.handle({ mode: "browse" })).toBe('{"ok": true, "sessions": []}');
-    expect(tool.handle({ mode: "read" })).toBe("{\"error\": \"'read' requires 'session_id'\"}");
-    expect(tool.handle({ mode: "discovery" })).toBe(
-      "{\"error\": \"'discovery' requires 'query'\"}",
-    );
-    expect(tool.handle({})).toBe('{"error": "unknown mode undefined (use discovery/browse/read)"}');
+    expect(tool.handle({ mode: "browse" })).toBe('{"ok":true,"sessions":[]}');
+    expect(tool.handle({ mode: "read" })).toBe("{\"error\":\"'read' requires 'session_id'\"}");
+    expect(tool.handle({ mode: "discovery" })).toBe("{\"error\":\"'discovery' requires 'query'\"}");
+    expect(tool.handle({})).toBe('{"error":"unknown mode undefined (use discovery/browse/read)"}');
     expect(tool.handle({ mode: "frobnicate" })).toBe(
-      '{"error": "unknown mode \\"frobnicate\\" (use discovery/browse/read)"}',
+      '{"error":"unknown mode \\"frobnicate\\" (use discovery/browse/read)"}',
     );
   });
 
   it("lists one explicit no-key provider with zero ambient credentials", async () => {
     const tool = new ListModelsTool(root(), {});
     expect(await tool.handle({ provider: "anthropic" })).toBe(
-      '{"ok": true, "providers": [{"provider": "anthropic", "source": "skipped", "total": 0, "models": [], "detail": "no API key \\u2014 set ANTHROPIC_API_KEY"}], "tiers": {"small": null, "medium": null, "big": null}}',
+      '{"ok":true,"providers":[{"provider":"anthropic","source":"skipped","total":0,"models":[],"detail":"no API key — set ANTHROPIC_API_KEY"}],"tiers":{"small":null,"medium":null,"big":null}}',
     );
     expect(await tool.handle({ provider: "no_such_provider" })).toBe(
-      '{"error": "unknown provider \\"no_such_provider\\" \\u2014 call list_models with no \'provider\' to see the ones this install knows about"}',
+      '{"error":"unknown provider \\"no_such_provider\\" — call list_models with no \'provider\' to see the ones this install knows about"}',
     );
   });
 });

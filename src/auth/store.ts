@@ -1,8 +1,7 @@
 import { existsSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
-import { jsonFloat } from "../serialization/json-numbers.js";
-import { pythonJsonDumpsIndented } from "../serialization/python-json.js";
+import { jsonFloat, stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
 import { atomicWrite0600 } from "./json-file.js";
 import {
   OAuthTokens,
@@ -69,7 +68,7 @@ export function writeConfig(home: string, config: SubscriptionConfig): void {
     acknowledged_tos_risk: config.acknowledgedTosRisk,
     preference: config.preference,
   };
-  atomicWrite0600(authPath(home), pythonJsonDumpsIndented(root));
+  atomicWrite0600(authPath(home), stringifyJsonPreservingNumbers(root, 2));
 }
 
 export function readTokens(home: string): OAuthTokens | null {
@@ -94,12 +93,15 @@ export function readTokens(home: string): OAuthTokens | null {
 export function writeTokens(home: string, tokens: OAuthTokensValue): void {
   atomicWrite0600(
     tokenPath(home),
-    pythonJsonDumpsIndented({
-      access_token: tokens.accessToken,
-      refresh_token: tokens.refreshToken,
-      account_id: tokens.accountId,
-      expires_at: jsonFloat(tokens.expiresAt),
-    }),
+    stringifyJsonPreservingNumbers(
+      {
+        access_token: tokens.accessToken,
+        refresh_token: tokens.refreshToken,
+        account_id: tokens.accountId,
+        expires_at: jsonFloat(tokens.expiresAt),
+      },
+      2,
+    ),
   );
 }
 

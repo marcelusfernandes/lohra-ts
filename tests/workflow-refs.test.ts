@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { jsonFloat } from "../src/serialization/json-numbers.js";
+import { jsonFloat, jsonInteger } from "../src/serialization/json-numbers.js";
 import {
   InvalidReferenceError,
   findRefs,
@@ -41,18 +41,26 @@ describe("workflow refs", () => {
     });
   });
 
-  it("uses Python-compatible numeric stringification", () => {
+  it("uses native JSON numeric stringification, JsonInteger for exact big integers", () => {
     expect(resolveValue("v=${num}", { num: jsonFloat(1) })).toBe("v=1.0");
     expect(resolveValue("v=${big}", { big: 12_345_678_901_234_567_890n })).toBe(
       "v=12345678901234567890",
     );
-    expect(() => resolveValue("v=${unsafe}", { unsafe: Number.MAX_SAFE_INTEGER + 1 })).toThrow(
-      "Ambiguous or unsafe number",
+    // docs/adr/0003-native-wire-format.md item 1: unmarked numbers use
+    // JSON.stringify's own rules (issue #71) -- no more python-json.ts
+    // "ambiguous or unsafe number" guard for a plain number outside the
+    // safe integer range. A caller that needs exactness wraps with
+    // `jsonInteger`, which is unaffected and stays exact either way.
+    expect(resolveValue("v=${unsafe}", { unsafe: Number.MAX_SAFE_INTEGER + 1 })).toBe(
+      `v=${String(Number.MAX_SAFE_INTEGER + 1)}`,
+    );
+    expect(resolveValue("v=${exact}", { exact: jsonInteger(9_007_199_254_740_995n) })).toBe(
+      "v=9007199254740995",
     );
   });
 
   it("preserves Unicode when embedding non-string JSON values", () => {
-    expect(resolveValue("v=${obj}", { obj: { label: "café" } })).toBe('v={"label": "café"}');
+    expect(resolveValue("v=${obj}", { obj: { label: "café" } })).toBe('v={"label":"café"}');
   });
 
   it("reports the first strict null without rescanning", () => {

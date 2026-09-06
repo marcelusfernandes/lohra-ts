@@ -80,7 +80,10 @@ describe("ChatCompletionsTransport.buildKwargs", () => {
     expect(outputTools).toEqual(tools);
     expect(outputTools).not.toBe(tools);
     expect(calls[0]?.function.arguments).toBe(`a${String.fromCharCode(0x7f)}b`);
-    expect(calls[1]?.function.arguments).toBe('{"k": "a\\u007fb"}');
+    // docs/adr/0003-native-wire-format.md item 2: JSON.stringify's own rules
+    // -- U+007F (DEL) is not a control character it escapes, so it comes
+    // through literally, same as any other non-ASCII byte (issue #71).
+    expect(calls[1]?.function.arguments).toBe(`{"k":"a${String.fromCharCode(0x7f)}b"}`);
     expect(messages).toEqual([
       { role: "user", content },
       {

@@ -170,6 +170,31 @@ lohra update --check
 `workflow run`. Chat e dashboard compartilham a mesma composition root para
 workflow/audit, orquestração, cron, MCP, web e mídia.
 
+### Envelope `--json`
+
+Todo comando com `--json` (`chat`, `doctor`, `models`, …) e `auth status`
+(sempre JSON, sem flag própria) emitem o corpo com `JSON.stringify` nativo,
+não um mimetismo de `json.dumps` (`docs/adr/0003-native-wire-format.md`,
+seção "JSON output"):
+
+- Chaves em ordem de inserção — nunca ordenadas por code point.
+- Caracteres não-ASCII saem como UTF-8 literal; não há escape `\uXXXX` além
+  do que o próprio `JSON.stringify` já faz para caracteres de controle.
+- Compacto (separadores padrão de `JSON.stringify`) onde a saída sempre foi
+  compacta; indentado com 2 espaços (`JSON.stringify(valor, null, 2)`) onde
+  já era indentado antes — `chat --json`, `auth status`, o arquivo
+  `auth.json`/`oauth.json` e o `jobs.json` do cron.
+- `NaN`/`Infinity`/`-Infinity` nunca aparecem como literal na saída: um
+  número não-finito numa fronteira de serialização é erro com causa
+  (`TypeError`), não um byte silenciosamente inválido. O cron store é a
+  única exceção documentada — uma agenda `once` não-finita (`nan_literal`,
+  Emenda E3) continua sendo aceita e relida, mas é persistida como um
+  objeto JSON-safe, nunca como o token bare `NaN`.
+
+Qualquer consumidor que faça `JSON.parse` (em vez de comparar bytes) não é
+afetado: os nomes e tipos de campo do envelope não mudaram, só a forma dos
+bytes.
+
 ### Servidor (`lohra serve`)
 
 `lohra serve` expõe uma superfície compatível com a API da OpenAI:

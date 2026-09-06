@@ -21,7 +21,7 @@ import type { OAuthPost } from "./auth/oauth.js";
 import { runDoctor } from "./doctor/index.js";
 import type { OllamaStatus } from "./doctor/model.js";
 import { buildEnvironment, probeOllamaDown } from "./doctor/snapshot.js";
-import { pythonJsonDumps } from "./serialization/python-json.js";
+import { stringifyJsonPreservingNumbers } from "./serialization/json-numbers.js";
 import { runProfile } from "./onboarding/profiles.js";
 import {
   Prompter,
@@ -301,7 +301,7 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     paths = resolvePaths(environment);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (json) io.stdout(`${pythonJsonDumps({ error: message })}\n`);
+    if (json) io.stdout(`${stringifyJsonPreservingNumbers({ error: message })}\n`);
     io.stderr(`${message}\n`);
     return 2;
   }

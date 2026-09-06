@@ -13,7 +13,7 @@ import {
   writeTokens,
   type OAuthPost,
 } from "../auth/index.js";
-import { pythonJsonDumpsIndented } from "../serialization/python-json.js";
+import { stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
 
 export const PREFER_USAGE =
   "usage: lohra auth prefer <auto|subscription|api_key>\n" +
@@ -60,7 +60,7 @@ export async function runAuth(options: AuthCommandOptions): Promise<CommandResul
   if (options.action === "status")
     return result(
       0,
-      `${pythonJsonDumpsIndented(status(options.home, { codexHome: options.codexHome }))}\n`,
+      `${stringifyJsonPreservingNumbers(status(options.home, { codexHome: options.codexHome }), 2)}\n`,
     );
   if (options.action === "disable") {
     disable(options.home);

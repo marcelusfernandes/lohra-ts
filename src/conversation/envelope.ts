@@ -1,5 +1,4 @@
-import { jsonFloat } from "../serialization/json-numbers.js";
-import { pythonJsonDumpsIndented } from "../serialization/python-json.js";
+import { jsonFloat, stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
 import type { CostEstimate } from "../pricing/index.js";
 import type { ToolCall, Usage } from "../transports/index.js";
 import type { ConversationTurnResult, ExecutedToolCall, SessionSummary } from "./types.js";
@@ -90,7 +89,7 @@ export function successEnvelope(result: ConversationTurnResult): string {
     api_calls: result.apiCalls,
   };
   if (result.sessionSummary !== null) value.session = session(result.sessionSummary);
-  return `${pythonJsonDumpsIndented(value)}\n`;
+  return `${stringifyJsonPreservingNumbers(value, 2)}\n`;
 }
 
 export function errorEnvelope(input: {
@@ -124,5 +123,5 @@ export function errorEnvelope(input: {
   };
   if (input.sessionSummary !== undefined && input.sessionSummary !== null)
     value.session = session(input.sessionSummary);
-  return `${pythonJsonDumpsIndented(value)}\n`;
+  return `${stringifyJsonPreservingNumbers(value, 2)}\n`;
 }

@@ -180,6 +180,23 @@ describe("CronStore — schema, atomicity, and mutation semantics", () => {
     expect(jobs.some((job) => job.name === "n1")).toBe(true);
   });
 
+  // docs/adr/0003-native-wire-format.md item 4: a non-finite `once` value is
+  // a legitimate ghost job (Emenda E3, ` nan_literal`) that must keep
+  // round-tripping, but the store must never persist the bare, non-standard
+  // `NaN` token into jobs.json bytes — every byte it writes must be accepted
+  // by a standards-conformant JSON parser (issue #71 AC4).
+  it("persists a non-finite 'once' value as valid JSON, never as a bare NaN/Infinity literal", () => {
+    const store = new CronStore(home);
+    store.add({ name: "n1", prompt: "p1", type: "once", value: Number.NaN });
+    const raw = readFileSync(jobsPath, "utf8");
+    // Standard, non-lenient JSON.parse must accept every byte written.
+    expect(() => JSON.parse(raw) as unknown).not.toThrow();
+    // No bare (unquoted) NaN/Infinity/-Infinity token anywhere in the bytes.
+    expect(raw).not.toMatch(/[:[,]\s*(NaN|-?Infinity)\b/u);
+    const relisted = store.list();
+    expect(Number.isNaN(relisted[0]?.value)).toBe(true);
+  });
+
   it("add on a genuinely corrupted store (fail-closed) refuses and never destroys bytes", () => {
     plant("{nope");
     const before = readFileSync(jobsPath, "utf8");

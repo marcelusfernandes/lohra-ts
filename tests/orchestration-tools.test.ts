@@ -246,9 +246,9 @@ describe("collectSessionTool", () => {
     );
     await spawnSessionTool(core, allowAllProviders, { prompt: "x" });
     const envelope = await collectSessionTool(core, { sub_id: "aaaa", wait: true });
-    expect(envelope).toContain('"retry_after": 1.0');
-    expect(envelope).not.toContain('"retry_after": 1,');
-    expect(envelope).not.toContain('"retry_after": 1}');
+    expect(envelope).toContain('"retry_after":1.0');
+    expect(envelope).not.toContain('"retry_after":1,');
+    expect(envelope).not.toContain('"retry_after":1}');
   });
 
   it("coerces a numeric sub_id to string before the no-sub-session repr (L19)", async () => {

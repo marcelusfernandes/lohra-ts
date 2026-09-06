@@ -30,7 +30,7 @@ afterEach(() => {
 });
 
 describe("session repository", () => {
-  it("round-trips role-aware messages and stores Python-spaced JSON bytes", () => {
+  it("round-trips role-aware messages and stores compact JSON bytes (issue #71)", () => {
     const { repo, database, close } = repository();
     repo.createSession({ id: "s1", model: "m", startedAt: 10 });
     repo.appendMessage("s1", { role: "user", content: "hello stub world", createdAt: 11 });
@@ -56,9 +56,9 @@ describe("session repository", () => {
       )
       .get() as Record<string, unknown>;
     expect(stored.tool_calls).toBe(
-      '[{"id": "c1", "type": "function", "function": {"name": "f", "arguments": "{\\"a\\": 1}"}}]',
+      '[{"id":"c1","type":"function","function":{"name":"f","arguments":"{\\"a\\": 1}"}}]',
     );
-    expect(stored.reasoning_details).toBe('{"z": 2, "a": 1}');
+    expect(stored.reasoning_details).toBe('{"z":2,"a":1}');
     expect(stored.timestamp_type).toBe("real");
     expect(repo.loadMessages("s1")).toEqual([
       { role: "user", content: "hello stub world" },

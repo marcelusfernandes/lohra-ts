@@ -108,12 +108,17 @@ describe("public provider commands", () => {
     });
     return { code, stdout: stdout.join(""), stderr: stderr.join("") };
   }
-  it("matches the 1392-byte offline models JSON and encoding split", async () => {
+  it("matches the 1250-byte offline models JSON, UTF-8 direct in both JSON and text (issue #71)", async () => {
     const home = root();
     const json = await invoke(["models", "--json"], { HOME: home, PATH: "/usr/bin:/bin" });
     expect(json.code).toBe(0);
-    expect(Buffer.byteLength(json.stdout)).toBe(1392);
-    expect([...Buffer.from(json.stdout)].filter((b) => b > 0x7f)).toHaveLength(0);
+    expect(Buffer.byteLength(json.stdout)).toBe(1250);
+    // docs/adr/0003-native-wire-format.md item 2: non-ASCII is emitted as
+    // literal UTF-8 in JSON now too, no more \uXXXX escaping -- so the same
+    // em dashes that show up in the human text also show up as raw UTF-8
+    // bytes in the JSON payload (10 occurrences x 3 bytes each).
+    expect([...Buffer.from(json.stdout)].filter((b) => b > 0x7f)).toHaveLength(30);
+    expect(json.stdout).not.toContain("\\u");
     const text = await invoke(["models"], { HOME: home, PATH: "/usr/bin:/bin" });
     expect(text.code).toBe(0);
     expect([...Buffer.from(text.stdout)].filter((b) => b > 0x7f)).toHaveLength(63);

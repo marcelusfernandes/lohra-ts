@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // T02/T03/T08/T09 regression, run serially, each gate reported separately
 // (contract's "Comandos de aceite propostos" section) -- T18 touches a
-// shared file (src/serialization/python-json.ts, the NaN/Infinity parser
-// extension) and the tool registry (src/commands/chat.ts), so this proves
-// neither shared-file touch regressed anything already approved. Never
-// loosens, normalizes, or re-baselines an earlier fixture to make T18 pass.
+// shared file (src/serialization/json-numbers.ts, the NaN/Infinity parser
+// extension and JSON stringify every consumer shares since issue #71) and
+// the tool registry (src/commands/chat.ts), so this proves neither
+// shared-file touch regressed anything already approved. Never loosens,
+// normalizes, or re-baselines an earlier fixture to make T18 pass.
 import { spawnSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { resolve } from "node:path";

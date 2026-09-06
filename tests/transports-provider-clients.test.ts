@@ -151,7 +151,7 @@ describe("AnthropicMessagesClient", () => {
     });
     const normalized = await client.stream({ model: "m", messages: [], max_tokens: 1 });
     expect(normalized.toolCalls[0]?.arguments).toBe(
-      '{"timeout": 1.0, "ratio": 2.5, "count": 7, "since_ns": 1788107097189000000}',
+      '{"timeout":1.0,"ratio":2.5,"count":7,"since_ns":1788107097189000000}',
     );
   });
 

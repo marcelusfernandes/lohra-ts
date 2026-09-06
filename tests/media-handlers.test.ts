@@ -70,7 +70,7 @@ describe("vision_analyze handler", () => {
     });
 
     expect(await handler({ path, url: "https://example.test/ignored", prompt: "" })).toBe(
-      '{"ok": true, "analysis": "seen"}',
+      '{"ok":true,"analysis":"seen"}',
     );
     expect(runner.requests).toHaveLength(1);
     expect(runner.requests[0]).toMatchObject({
@@ -95,7 +95,7 @@ describe("vision_analyze handler", () => {
     const runner = new VisionStub(response(null));
     const handler = createVisionAnalyzeHandler({ runner, model: "m", localRoot: root() });
     expect(await handler({ url: "https://example.test/a", prompt: "   " })).toBe(
-      '{"ok": true, "analysis": ""}',
+      '{"ok":true,"analysis":""}',
     );
     const message = runner.requests[0]?.messages[0] as { content?: unknown[] } | undefined;
     expect(message?.content?.[0]).toEqual({ type: "text", text: "   " });
@@ -105,13 +105,13 @@ describe("vision_analyze handler", () => {
     const runner = new VisionStub(response("unused"));
     const handler = createVisionAnalyzeHandler({ runner, model: "m", localRoot: root() });
     expect(await handler({ url: { secret: "CANARY" } })).toBe(
-      '{"error": "vision field \'url\' must be a string, got object"}',
+      '{"error":"vision field \'url\' must be a string, got object"}',
     );
     expect(await handler({ path: ["CANARY"], url: "https://example.test/a" })).toBe(
-      '{"error": "vision field \'path\' must be a string, got array"}',
+      '{"error":"vision field \'path\' must be a string, got array"}',
     );
     expect(await handler({ url: "https://example.test/a?secret=CANARY", prompt: ["CANARY"] })).toBe(
-      '{"error": "vision field \'prompt\' must be a string, got array"}',
+      '{"error":"vision field \'prompt\' must be a string, got array"}',
     );
     expect(runner.requests).toHaveLength(0);
   });
@@ -137,7 +137,7 @@ describe("vision_analyze handler", () => {
       supportsVision: false,
     });
     expect(await handler({ url: "https://example.test/a" })).toBe(
-      '{"error": "profile does not support vision"}',
+      '{"error":"profile does not support vision"}',
     );
     expect(runner.requests).toHaveLength(0);
   });
@@ -205,7 +205,7 @@ describe("image_gen handler and bindings", () => {
       outDir: join(directory, "blank"),
     });
     expect(await blankHandler({ prompt: "   " })).toBe(
-      `{"error": "image_gen requires a non-empty 'prompt'"}`,
+      `{"error":"image_gen requires a non-empty 'prompt'"}`,
     );
     expect(blank.requests).toHaveLength(0);
 
@@ -223,7 +223,7 @@ describe("image_gen handler and bindings", () => {
       outDir: join(directory, "images"),
     });
     expect(await handler({ prompt: "x" })).toBe(
-      '{"error": "this provider does not support image generation"}',
+      '{"error":"this provider does not support image generation"}',
     );
   });
 
@@ -242,14 +242,12 @@ describe("image_gen handler and bindings", () => {
       supportsVision: false,
     });
     expect(await bindings.dispatch("other", {})).toBe("base:other");
-    expect(await bindings.dispatch("image_gen", { prompt: "x" })).toBe(
-      '{"ok": true, "images": []}',
-    );
+    expect(await bindings.dispatch("image_gen", { prompt: "x" })).toBe('{"ok":true,"images":[]}');
     expect(base).toHaveBeenCalledTimes(1);
     expect(bindings.handlers).toHaveProperty("vision_analyze");
     expect(bindings.handlers).toHaveProperty("image_gen");
     expect(await bindings.dispatch("vision_analyze", { url: "https://example.test/a" })).toBe(
-      '{"error": "profile does not support vision"}',
+      '{"error":"profile does not support vision"}',
     );
   });
 });

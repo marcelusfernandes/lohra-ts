@@ -1,9 +1,10 @@
-/** OpenAI Chat Completions wire shapes — mirrors `lohra/server/format.py`.
- * Two serializers on purpose (contract v2 decision 3): non-stream bodies are
- * compact JSON, SSE frames preserve Python `json.dumps` default spacing. */
+/** OpenAI Chat Completions wire shapes.
+ * One serializer for every JSON body (docs/adr/0003-native-wire-format.md,
+ * "JSON output" item 1): `stringifyJsonPreservingNumbers` compact, for both
+ * non-stream bodies and SSE frames — no more Python `json.dumps`-spaced
+ * variant for the stream side. */
 
 import { stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
-import { pythonJsonDumpsInsertionOrder } from "../serialization/python-json.js";
 import type { OpenAiUsage } from "./usage.js";
 
 export class CompletionError extends Error {}
@@ -101,9 +102,9 @@ export function chatCompletionBody(value: unknown): string {
   return stringifyJsonPreservingNumbers(value);
 }
 
-/** One SSE `data:` line, Python `json.dumps` default spacing. */
+/** One SSE `data:` line, compact JSON — same serializer as non-stream bodies. */
 export function sseEvent(payload: Readonly<Record<string, unknown>>): string {
-  return `data: ${pythonJsonDumpsInsertionOrder(payload)}\n\n`;
+  return `data: ${stringifyJsonPreservingNumbers(payload)}\n\n`;
 }
 
 export function buildDone(): string {

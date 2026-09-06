@@ -1,6 +1,6 @@
 import { applyEnvFile } from "../config/env-file.js";
 import { resolvePaths } from "../config/paths.js";
-import { pythonJsonDumps } from "../serialization/python-json.js";
+import { stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
 import { renderChecks, runChecks } from "./checks.js";
 import type { DoctorPayload, OllamaStatus } from "./model.js";
 import { buildEnvironment, probeOllamaDown } from "./snapshot.js";
@@ -30,5 +30,8 @@ export async function runDoctor(
   const checks = runChecks(snapshot);
   const code = checks.some((check) => check.state === "fail") ? 2 : 0;
   const payload: DoctorPayload = { checks, environment: snapshot, exit_code: code, ok: code === 0 };
-  return { code, output: options.json ? `${pythonJsonDumps(payload)}\n` : renderChecks(checks) };
+  return {
+    code,
+    output: options.json ? `${stringifyJsonPreservingNumbers(payload)}\n` : renderChecks(checks),
+  };
 }

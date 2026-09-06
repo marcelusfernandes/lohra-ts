@@ -11,8 +11,12 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { JsonFloat, jsonFloat, parseJsonPreservingNumbers } from "../serialization/json-numbers.js";
-import { pythonJsonDumpsIndented } from "../serialization/python-json.js";
+import {
+  JsonFloat,
+  jsonFloat,
+  parseJsonPreservingNumbers,
+  stringifyJsonPreservingNumbers,
+} from "../serialization/json-numbers.js";
 import { CronStoreError, CronValidationError } from "./errors.js";
 import { validateJob } from "./validate.js";
 
@@ -49,8 +53,43 @@ function pathKind(path: string): PathKind {
   return "file";
 }
 
+// docs/adr/0003-native-wire-format.md item 4: a `once` job's value can be
+// NaN/Infinity by design — a ghost job (Emenda E3/R5) that is well-formed
+// but semantically unreachable (schedule.ts's isPermanentlyUnreachable) —
+// and this store must keep round-tripping it without ever writing the bare
+// `NaN`/`Infinity` token, which is not valid JSON. `NON_FINITE_KEY` is a
+// small, self-describing, standards-conformant JSON object used only for
+// this wire slot; `stringifyJsonPreservingNumbers` never sees a non-finite
+// number and therefore never throws while (re)writing a pre-existing ghost.
+const NON_FINITE_KEY = "__lohra_cron_non_finite__";
+type NonFiniteToken = "NaN" | "Infinity" | "-Infinity";
+
+function nonFiniteToken(value: number): NonFiniteToken {
+  if (Number.isNaN(value)) return "NaN";
+  return value > 0 ? "Infinity" : "-Infinity";
+}
+
+function tokenToNumber(token: NonFiniteToken): number {
+  if (token === "NaN") return Number.NaN;
+  return token === "Infinity" ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+}
+
+function encodeNonFinite(value: number): { readonly [NON_FINITE_KEY]: NonFiniteToken } {
+  return { [NON_FINITE_KEY]: nonFiniteToken(value) };
+}
+
+function decodeNonFinite(value: unknown): number | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const token = (value as Record<string, unknown>)[NON_FINITE_KEY];
+  return token === "NaN" || token === "Infinity" || token === "-Infinity"
+    ? tokenToNumber(token)
+    : null;
+}
+
 function unwrapNumber(value: unknown): unknown {
-  return value instanceof JsonFloat ? value.value : value;
+  if (value instanceof JsonFloat) return value.value;
+  const decoded = decodeNonFinite(value);
+  return decoded === null ? value : decoded;
 }
 
 function isNumeric(value: unknown): boolean {
@@ -136,7 +175,9 @@ export function readJobs(path: string): CronJob[] {
 
 function wrapValueForWrite(value: unknown, type: string): unknown {
   if (type === "interval") return value;
-  if (type === "once") return typeof value === "number" ? jsonFloat(value) : value;
+  if (type === "once" && typeof value === "number") {
+    return Number.isFinite(value) ? jsonFloat(value) : encodeNonFinite(value);
+  }
   return value;
 }
 
@@ -151,7 +192,7 @@ function serializeJobs(jobs: readonly CronJob[]): string {
     created_at: jsonFloat(job.created_at),
     last_run_at: job.last_run_at === null ? null : jsonFloat(job.last_run_at),
   }));
-  return pythonJsonDumpsIndented({ jobs: wire });
+  return stringifyJsonPreservingNumbers({ jobs: wire }, 2);
 }
 
 /** Atomic write: unique temp file per call (never a fixed name, per the ADR), rename over target. */
