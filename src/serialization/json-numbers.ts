@@ -181,10 +181,9 @@ function exponentText(exponent: number): string {
   return `${sign}${Math.abs(exponent).toString().padStart(2, "0")}`;
 }
 
+/** Only ever called with a finite value — `encode()` calls `assertFinite`
+ * first, and this function has no other caller. */
 function encodeFloat(value: number): string {
-  if (Number.isNaN(value)) return "NaN";
-  if (value === Number.POSITIVE_INFINITY) return "Infinity";
-  if (value === Number.NEGATIVE_INFINITY) return "-Infinity";
   if (Object.is(value, -0)) return "-0.0";
   if (value === 0) return "0.0";
 
