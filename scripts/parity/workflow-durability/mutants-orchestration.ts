@@ -14,12 +14,20 @@
 // `run-mutations.ts` is the file that is frozen (`arquivo-grande`), and it
 // already imports and spreads only `orchestrationMutants`; this is the one
 // sibling catalog module wired in without touching that file.
+//
+// Issue #138 — the `qa` follow-up to PR #133's review (reason 5): two
+// manual mutations against `onEvent`'s progress hook (#125, service.ts
+// ~:860-866) survived because no test watched the CARDINALITY of the
+// intermediate progress write or the `tainted` value AT the instant of
+// that write (only the final, terminal-write state). Both entries below
+// are scored against `tests/workflow-progress-cobertura.test.ts`.
 import type { Mutant } from "./mutants-types.js";
 
 const childRunner = "src/orchestration/child-runner.ts";
 const childRunnerTests = "tests/orchestration-child-runner.test.ts";
 const workflowService = "src/workflow/service.ts";
 const workflowShutdownTests = "tests/workflow-shutdown.test.ts";
+const workflowProgressCoberturaTests = "tests/workflow-progress-cobertura.test.ts";
 
 export const orchestrationMutants: readonly Mutant[] = [
   {
@@ -54,6 +62,41 @@ export const orchestrationMutants: readonly Mutant[] = [
         file: workflowService,
         before: "export const SHUTDOWN_SETTLE_TIMEOUT_MS = 5_000;",
         after: "export const SHUTDOWN_SETTLE_TIMEOUT_MS = 0;",
+      },
+    ],
+  },
+  {
+    id: "ap/progress-line-predicate-always-fires",
+    category: "durable-line",
+    mechanism:
+      'the onEvent hook\'s guard (event.kind === "node" && event.state !== "running") collapses to always-true, so the intermediate progress write also fires on each node\'s OWN "running" start event — 2N inert writes per run instead of N — and no test reading only the final progress content ever notices',
+    focus: {
+      file: workflowProgressCoberturaTests,
+      test: "persists exactly one intermediate progress write per COMPLETED node, none on start",
+    },
+    edits: [
+      {
+        file: workflowService,
+        before: '        if (event.kind === "node" && event.state !== "running") {',
+        after: '        if (event.kind === "node" && true) {',
+      },
+    ],
+  },
+  {
+    id: "aq/progress-line-tainted-forced-false-at-write",
+    category: "sandbox",
+    mechanism:
+      "the intermediate progress write's call site forces its own tainted argument to false regardless of tainted || this.taintTracker.tainted, so a run tainted by its first node's leaf persists an untainted intermediate line — invisible to any test that only reads tainted from the terminal write (which uses the unmutated taintedNow) after the whole run settles",
+    focus: {
+      file: workflowProgressCoberturaTests,
+      test: "the intermediate write after a tainted leaf already carries tainted=1, before the terminal write",
+    },
+    edits: [
+      {
+        file: workflowService,
+        before:
+          '          persistLine("running", null, null, tainted || this.taintTracker.tainted, ownership);',
+        after: '          persistLine("running", null, null, false, ownership);',
       },
     ],
   },
