@@ -17,7 +17,7 @@ export interface Violacao {
 export interface Regra {
   readonly id: string;
   readonly descreve: string;
-  avalia(arquivo: string, conteudo: string | null): Violacao | null;
+  avalia(arquivo: string, conteudo: string | null, conteudoBase?: string | null): Violacao | null;
 }
 
 const PREFIXOS_PROIBIDOS = ["docs/reference/", "lohra/"];
@@ -140,12 +140,14 @@ export const regras: readonly Regra[] = [caminhoProibido, importProibido, arquiv
 export function rodarContratos(
   files: readonly string[],
   lerConteudo: (arquivo: string) => string | null,
+  lerConteudoBase: (arquivo: string) => string | null = () => null,
 ): readonly Violacao[] {
   const violacoes: Violacao[] = [];
   for (const arquivo of files) {
     const conteudo = lerConteudo(arquivo);
+    const conteudoBase = lerConteudoBase(arquivo);
     for (const regra of regras) {
-      const violacao = regra.avalia(arquivo, conteudo);
+      const violacao = regra.avalia(arquivo, conteudo, conteudoBase);
       if (violacao !== null) violacoes.push(violacao);
     }
   }

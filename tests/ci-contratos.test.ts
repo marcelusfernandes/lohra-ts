@@ -169,6 +169,45 @@ describe("regra arquivo-grande", () => {
     const violacao = regra("arquivo-grande").avalia("src/gigante.ts", null);
     expect(violacao).toBeNull();
   });
+
+  // Issue #93: a regra compara com a base — só reprova arquivo novo (sem
+  // `conteudoBase`/`null`) ou que cresceu, não arquivo que já era grande na
+  // base e só foi editado (mantido) ou encolhido.
+  it("arquivo novo (conteudoBase null) com 900 linhas dispara", () => {
+    const violacao = regra("arquivo-grande").avalia("src/novo.ts", linhas(900), null);
+    expect(violacao?.id).toBe("arquivo-grande");
+    expect(violacao?.descricao).toContain("900 linhas");
+    expect(violacao?.descricao).toContain("novo");
+  });
+
+  it("arquivo já grande na base (1216) que permanece 1216 na head não dispara", () => {
+    const violacao = regra("arquivo-grande").avalia(
+      "tests/workflow-audit-live.test.ts",
+      linhas(1216),
+      linhas(1216),
+    );
+    expect(violacao).toBeNull();
+  });
+
+  it("arquivo já grande na base (1216) que cresce para 1220 na head dispara, citando as duas contagens", () => {
+    const violacao = regra("arquivo-grande").avalia(
+      "tests/workflow-audit-live.test.ts",
+      linhas(1220),
+      linhas(1216),
+    );
+    expect(violacao?.id).toBe("arquivo-grande");
+    expect(violacao?.descricao).toContain("1216");
+    expect(violacao?.descricao).toContain("1220");
+  });
+
+  it("arquivo já grande na base (1216) que encolhe para 900 na head não dispara", () => {
+    const violacao = regra("arquivo-grande").avalia(
+      "tests/workflow-audit-live.test.ts",
+      linhas(900),
+      linhas(1216),
+    );
+    expect(violacao).toBeNull();
+  });
 });
 
 describe("rodarContratos", () => {
@@ -233,6 +272,24 @@ describe("run.ts (dry-run, subprocesso)", () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("caminho-proibido: docs/reference/x.md");
+  });
+
+  // Issue #93, AC3: `--files-file` não conhece base — trata todo arquivo
+  // como novo (fail-closed) e avisa no stderr que a comparação com a base
+  // só existe no CI.
+  it("--files-file sem base: arquivo grande é violação (fail-closed) e avisa no stderr", () => {
+    const dir = makeWorkdir();
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src", "gigante.ts"), "x\n".repeat(900));
+    const filesFile = join(dir, "files.txt");
+    writeFileSync(filesFile, "src/gigante.ts\n");
+
+    const result = runDryRun(dir, filesFile);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("arquivo-grande: src/gigante.ts");
+    expect(result.stderr.toLowerCase()).toContain("comparação com a base");
+    expect(result.stderr.toLowerCase()).toContain("ci");
   });
 
   it("exit 0 quando o diff não viola nada", () => {
@@ -398,5 +455,61 @@ describe("run.ts (dry-run, subprocesso)", () => {
     expect(result.stderr.normalize("NFC")).toContain(
       "caminho-proibido: docs/reference/café.md".normalize("NFC"),
     );
+  }, 30_000);
+
+  // Issue #93: modo CI (GITHUB_EVENT_PATH) compara head com a base de
+  // verdade via `git show <base>:<arquivo>` — arquivo já grande na base que
+  // só é editado (sem crescer) passa; se cresce, reprova.
+  it("arquivo-grande num diff real (git): arquivo já grande na base que não cresce passa (issue #93)", () => {
+    const dir = makeWorkdir();
+    novoRepoGit(dir);
+    mkdirSync(join(dir, "tests"), { recursive: true });
+    const linhaOriginal = "x\n".repeat(810);
+    writeFileSync(join(dir, "tests", "gigante.test.ts"), linhaOriginal);
+    const base = commitTudo(dir, "test: arquivo já grande");
+    // Edita sem crescer: substitui uma linha por outra, mantém 810 linhas.
+    writeFileSync(join(dir, "tests", "gigante.test.ts"), `y\n${"x\n".repeat(809)}`);
+    const head = commitTudo(dir, "test: edita arquivo grande sem crescer");
+    const eventPath = join(dir, "event.json");
+    writeFileSync(
+      eventPath,
+      JSON.stringify({ pull_request: { base: { sha: base }, head: { sha: head } } }),
+    );
+
+    const result = spawnSync(tsxBin, [runScript], {
+      encoding: "utf8",
+      timeout: 30_000,
+      cwd: dir,
+      env: { ...process.env, GITHUB_EVENT_PATH: eventPath },
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+  }, 30_000);
+
+  it("arquivo-grande num diff real (git): arquivo já grande na base que cresce reprova citando as duas contagens (issue #93)", () => {
+    const dir = makeWorkdir();
+    novoRepoGit(dir);
+    mkdirSync(join(dir, "tests"), { recursive: true });
+    writeFileSync(join(dir, "tests", "gigante.test.ts"), "x\n".repeat(810));
+    const base = commitTudo(dir, "test: arquivo já grande");
+    writeFileSync(join(dir, "tests", "gigante.test.ts"), "x\n".repeat(815));
+    const head = commitTudo(dir, "test: cresce arquivo grande");
+    const eventPath = join(dir, "event.json");
+    writeFileSync(
+      eventPath,
+      JSON.stringify({ pull_request: { base: { sha: base }, head: { sha: head } } }),
+    );
+
+    const result = spawnSync(tsxBin, [runScript], {
+      encoding: "utf8",
+      timeout: 30_000,
+      cwd: dir,
+      env: { ...process.env, GITHUB_EVENT_PATH: eventPath },
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("arquivo-grande: tests/gigante.test.ts");
+    expect(result.stderr).toContain("810");
+    expect(result.stderr).toContain("815");
   }, 30_000);
 });
