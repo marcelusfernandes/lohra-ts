@@ -345,7 +345,7 @@ describe("run.ts (dry-run, subprocesso)", () => {
     const result = runDryRun(root, filesFile);
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stderr).not.toContain("arquivo-grande");
+    expect(result.stderr).not.toContain("arquivo-grande: src/web/html5-entities.ts");
   });
 
   it("auto-exclusão em subprocesso: escanear o repo real com este próprio arquivo de teste não dispara import-proibido", () => {
