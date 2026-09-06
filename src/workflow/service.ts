@@ -860,6 +860,10 @@ export class WorkflowService {
       onEvent: (event) => {
         const ownership = stretchOwnership();
         this.forwardEvent(runId, event, ownership ?? undefined);
+        // Progress per completed node (#125), fenced same as any owned write.
+        if (event.kind === "node" && event.state !== "running") {
+          persistLine("running", null, null, tainted || this.taintTracker.tainted, ownership);
+        }
       },
       // Durable default: the FENCED SQLite node cache over the shared
       // connection. An explicit cache/cacheFactory still wins.
@@ -895,6 +899,33 @@ export class WorkflowService {
             }
           : { cache: this.cache }),
     });
+    // One shape for the run line: registration, progress (#125), terminal.
+    const persistLine = (
+      status: string,
+      pauseReason: string | null,
+      pausePayloadJson: string | null,
+      taintedFlag: boolean,
+      ownership: Ownership | null,
+    ): boolean =>
+      ownership === null
+        ? false
+        : store.repository.putRunState(runId, {
+            name: parsed.name,
+            owner: store.holder,
+            status,
+            pauseReason,
+            pausePayloadJson,
+            specJson: JSON.stringify(rawSpecOf(parsed)),
+            argsJson: JSON.stringify(args),
+            tokenBudget: effectiveBudget,
+            tainted: taintedFlag,
+            progressJson: progressJsonOf(engine.progress()),
+            auditSegmentId: null,
+            updatedAt: ownership.now,
+            fence: ownership.fence,
+            holder: ownership.holder,
+            now: ownership.now,
+          });
     const record = this.makeRecord(runId, parsed.name, engine);
     /**
      * Hand this acquisition back: exactly once, and never by throwing.
@@ -950,19 +981,7 @@ export class WorkflowService {
     // ownership changed hands while we were getting here (the installer can
     // block the event loop past the TTL) and must end the stretch BEFORE
     // anything runs, not surface only at the terminal write.
-    const registered = store.repository.putRunState(runId, {
-      name: parsed.name,
-      owner: store.holder,
-      status: "running",
-      pauseReason: null,
-      pausePayloadJson: null,
-      specJson: JSON.stringify(rawSpecOf(parsed)),
-      argsJson: JSON.stringify(args),
-      tokenBudget: effectiveBudget,
-      tainted,
-      progressJson: null,
-      auditSegmentId: null,
-      updatedAt: store.ownershipOf().now,
+    const registered = persistLine("running", null, null, tainted, {
       fence,
       holder: store.holder,
       now: store.ownershipOf().now,
@@ -1021,26 +1040,7 @@ export class WorkflowService {
           status: string,
           pauseReason: string | null,
           pausePayloadJson: string,
-        ): boolean =>
-          terminal === null
-            ? false
-            : store.repository.putRunState(runId, {
-                name: parsed.name,
-                owner: store.holder,
-                status,
-                pauseReason,
-                pausePayloadJson,
-                specJson: JSON.stringify(rawSpecOf(parsed)),
-                argsJson: JSON.stringify(args),
-                tokenBudget: effectiveBudget,
-                tainted: taintedNow,
-                progressJson: progressJsonOf(engine.progress()),
-                auditSegmentId: null,
-                updatedAt: terminal.now,
-                fence: terminal.fence,
-                holder: terminal.holder,
-                now: terminal.now,
-              });
+        ): boolean => persistLine(status, pauseReason, pausePayloadJson, taintedNow, terminal);
         const owned = persistTerminal(
           result.status,
           result.pauseReason,
