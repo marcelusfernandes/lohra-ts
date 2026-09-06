@@ -17,7 +17,7 @@ import { WorkflowService } from "../src/workflow/service.js";
 import {
   EVIDENCE_NORMALIZATIONS,
   normalizeEvidence,
-} from "../scripts/parity/workflow-durability/workers/normalize-evidence.mjs";
+} from "../scripts/mutations/fixtures/normalize-evidence.mjs";
 import type {
   ChildResult,
   ChildRuntime,

@@ -10,7 +10,7 @@ import { AuditTrail } from "../src/workflow/audit-trail.js";
 import { WorkflowService } from "../src/workflow/service.js";
 import type { ChildResult, ChildRuntime } from "../src/workflow/runtime.js";
 import type { Timer } from "../src/workflow/durability.js";
-import { orchestrationMutants } from "../scripts/parity/workflow-durability/mutants-orchestration.js";
+import { orchestrationMutants } from "../scripts/mutations/orchestration.js";
 
 const roots: string[] = [];
 

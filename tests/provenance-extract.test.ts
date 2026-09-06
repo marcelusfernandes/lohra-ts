@@ -65,9 +65,18 @@ describe("extractApprovedHeads", () => {
 
 describe("docs/provenance.json ↔ docs/closeout.md (bidirectional)", () => {
   it(
-    "has the exact same ticket/sha/result/status on both sides — a divergence on " +
-      "either side fails this test (MUTATION_CAUSE:T158-provenance-bidirectional)",
+    "has the exact same ticket/sha/result on both sides, and a status coherent with the " +
+      "shape of the sha — a divergence on either side fails this test " +
+      "(MUTATION_CAUSE:T158-provenance-bidirectional)",
     () => {
+      // Issue #159 (acréscimo do veredito de #171): o status vem sempre de
+      // `entry.status` — nunca é reinferido aqui a partir da forma do SHA.
+      // Reinferir impediria um SHA de 40 hex de ficar registrado como
+      // "pending" (o caso que `--pending-ok` existe para tolerar, em
+      // scripts/provenance/check-ancestry.ts); a única coisa que este teste
+      // ainda garante sobre `status` é a coerência com o SHA: um SHA que não
+      // é 40 hex (o placeholder do T22) só pode ser "pending" — nunca
+      // "approved", porque `parseProvenanceDocument` já rejeita isso.
       const markdown = readFileSync(resolve(root, "docs", "closeout.md"), "utf8");
       const rows = extractTableRows(markdown);
       const document = readProvenance(resolve(root, "docs", "provenance.json"));
@@ -77,12 +86,16 @@ describe("docs/provenance.json ↔ docs/closeout.md (bidirectional)", () => {
 
       for (const [index, row] of rows.entries()) {
         const entry = document.entries[index];
-        expect(entry, `MUTATION_CAUSE:T158-provenance-bidirectional:${row.ticket}`).toEqual({
+        expect(entry, `MUTATION_CAUSE:T158-provenance-bidirectional:${row.ticket}`).toMatchObject({
           ticket: row.ticket,
           sha: row.sha,
           result: row.result,
-          status: /^[0-9a-f]{40}$/u.test(row.sha) ? "approved" : "pending",
         });
+        const shaIsFullHex = /^[0-9a-f]{40}$/u.test(row.sha);
+        expect(
+          entry?.status,
+          `MUTATION_CAUSE:T158-provenance-bidirectional:${row.ticket}:status-coherence`,
+        ).toEqual(shaIsFullHex ? expect.stringMatching(/^(approved|pending)$/u) : "pending");
       }
     },
   );

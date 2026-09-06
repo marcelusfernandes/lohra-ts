@@ -5,7 +5,8 @@ heads aprovados exatos e precisam permanecer ancestrais do SHA final T22.
 
 A fonte canônica, legível por máquina, é [`docs/provenance.json`](provenance.json);
 a tabela abaixo é a prosa correspondente e um teste bidirecional reprova se
-uma divergir da outra.
+uma divergir da outra. [`docs/provenance.md`](provenance.md) descreve o
+formato do JSON, o script de verificação e as flags.
 
 | Ticket | SHA aprovado                               | Resultado                             |
 | ------ | ------------------------------------------ | ------------------------------------- |

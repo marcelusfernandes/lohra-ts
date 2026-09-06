@@ -3,17 +3,17 @@
 // config.wrapDispatch(childDispatch)`, #101/#107) had no `mutations:t16`
 // entry watching it, so a regression that dropped the wrap survived
 // (96/96 killed, none of them here). This module carries that one entry —
-// split out of `run-mutations.ts` (contract `arquivo-grande`, #93/#112:
-// that file is already over the 800-line limit and may not grow) — and is
-// a plain data module: no top-level side effects, safe for
-// `tests/orchestration-child-runner-mutation-catalog.test.ts` to import
-// directly, unlike `run-mutations.ts` itself.
+// split out of the t16 runner (contract `arquivo-grande`, #93/#112: that
+// file was already over the 800-line limit and could not grow) — and is a
+// plain data module: no top-level side effects, safe for the pinned
+// catalog tests to import directly, unlike a runner that executes the
+// harness at import time.
 //
 // Issue #129 adds a second entry here, for `src/workflow/service.ts`'s
-// SHUTDOWN_SETTLE_TIMEOUT_MS ceiling — not an orchestration mutant, but
-// `run-mutations.ts` is the file that is frozen (`arquivo-grande`), and it
-// already imports and spreads only `orchestrationMutants`; this is the one
-// sibling catalog module wired in without touching that file.
+// SHUTDOWN_SETTLE_TIMEOUT_MS ceiling — not an orchestration mutant, but the
+// runner file is the one that is frozen (`arquivo-grande`), and it already
+// imports and spreads only this catalog; this is the one sibling module
+// wired in without touching that file.
 //
 // Issue #138 — the `qa` follow-up to PR #133's review (reason 5): two
 // manual mutations against `onEvent`'s progress hook (#125, service.ts
@@ -28,7 +28,11 @@
 // existing test injects its own `write` and asserts the structured
 // `StateWarning`, never the formatted line. Scored against
 // `tests/workflow-durable-roots.test.ts`.
-import type { Mutant } from "./mutants-types.js";
+//
+// Issue #149 (passo 0b do épico #13): migrado do módulo legado de
+// paridade para `scripts/mutations/**`, sem mudar id/mechanism/edits — só
+// o caminho e o tipo importado mudam.
+import type { Mutant } from "./types.js";
 
 const childRunner = "src/orchestration/child-runner.ts";
 const childRunnerTests = "tests/orchestration-child-runner.test.ts";

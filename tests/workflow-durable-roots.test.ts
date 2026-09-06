@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { OrchestrationCore, type ChildRunner } from "../src/orchestration/core.js";
-import { orchestrationMutants } from "../scripts/parity/workflow-durability/mutants-orchestration.js";
+import { orchestrationMutants } from "../scripts/mutations/orchestration.js";
 import type { StateWarning } from "../src/state/index.js";
 import { openStateDatabase, WorkflowRepository, LockRepository } from "../src/state/index.js";
 import {

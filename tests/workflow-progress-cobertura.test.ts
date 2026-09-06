@@ -28,7 +28,7 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { LockRepository, openStateDatabase, WorkflowRepository } from "../src/state/index.js";
-import { orchestrationMutants } from "../scripts/parity/workflow-durability/mutants-orchestration.js";
+import { orchestrationMutants } from "../scripts/mutations/orchestration.js";
 import { WorkflowService } from "../src/workflow/service.js";
 import type {
   ChildResult,

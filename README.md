@@ -329,7 +329,8 @@ orientação de atualizar pelo npm.
 - O CI (`.github/workflows/ci.yml`) mede `ubuntu-latest` × Node 20/22 (Linux
   x64): build, typecheck, lint, format:check e test em todo push na `main` e
   toda PR, mais o job `provenance` que exige que cada SHA aprovado em
-  `docs/closeout.md` seja ancestral do HEAD. Windows nativo e macOS Node 20
+  `docs/closeout.md` seja ancestral do HEAD (formato, script e flags em
+  [`docs/provenance.md`](docs/provenance.md)). Windows nativo e macOS Node 20
   permanecem `NOT_MEASURED`; spoof de plataforma não conta como evidência.
 
 ## Histórico de paridade
