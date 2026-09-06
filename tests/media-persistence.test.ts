@@ -96,7 +96,7 @@ describe("staged image persistence", () => {
     ).rejects.toThrow("64 MiB");
   });
 
-  it("accepts the measured 2,097,167-byte oracle payload", { timeout: 20_000 }, async () => {
+  it("accepts the measured 2,097,167-byte oracle payload", async () => {
     const directory = root();
     const bytes = Buffer.alloc(2_097_167, 0x41);
     const paths = await persistGeneratedImages({
@@ -105,7 +105,10 @@ describe("staged image persistence", () => {
       requested: 1,
       uuid: () => "e".repeat(32),
     });
-    expect(readFileSync(paths[0] ?? "")).toEqual(bytes);
+    // Byte-exact readback via Buffer.prototype.equals (memcmp, O(n)), not
+    // toEqual (deep, per-element iterableEquality) — see the comment below
+    // for why this matters for a ~2MB buffer.
+    expect(readFileSync(paths[0] ?? "").equals(bytes)).toBe(true);
   });
 
   // Issue #128: sob carga (duas suítes completas em paralelo), este teste
