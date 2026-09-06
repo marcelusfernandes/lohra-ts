@@ -13,7 +13,7 @@
 // um `npm run prova` aninhado — o default do vitest (5s) já estourou uma vez
 // nesta suíte rodando em paralelo com outra suíte na mesma máquina.
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -257,6 +257,29 @@ function rodar(dir: string, base: string, head: string, slug?: string): SpawnSyn
   const args = ["--root", dir, "--base", base, "--head", head];
   if (slug !== undefined) args.push("--slug", slug);
   return runControleNegativo(args);
+}
+
+/** Igual a `runControleNegativo`, mas com `GITHUB_STEP_SUMMARY` apontando
+ * para um arquivo descartável — para os testes que precisam confirmar o
+ * motivo do SKIP no summary do job, não só no stdout (issue #114). */
+function runControleNegativoComSummary(args: readonly string[]): {
+  result: SpawnSyncReturns<string>;
+  summary: string;
+} {
+  const summaryPath = join(mkdtempSync(join(tmpdir(), "controle-negativo-summary-")), "summary.md");
+  workdirs.push(join(summaryPath, ".."));
+  writeFileSync(summaryPath, "");
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([key]) => !key.startsWith("VITEST") && key !== "LOHRA_PROVA_OUT",
+    ),
+  );
+  const result = spawnSync(tsxBin, [runScript, ...args], {
+    encoding: "utf8",
+    timeout: 60_000,
+    env: { ...env, GITHUB_STEP_SUMMARY: summaryPath },
+  });
+  return { result, summary: readFileSync(summaryPath, "utf8") };
 }
 
 /** Roda `run.ts` com `PATH` vazio — `git` vira ENOENT (issue #62). */
@@ -603,6 +626,87 @@ describe("controle-negativo/run.ts (subprocesso, repositório git descartável)"
 
       expect(result.status).toBe(1);
       expect(result.stderr).toContain("ENOENT");
+    },
+    TIMEOUT_TESTE,
+  );
+
+  it(
+    "SKIP quando o diff é só tests/** (sem --slug, sem prova/<slug>.ts algum) — issue #114",
+    () => {
+      // Sem --slug e sem `prova/<slug>.ts` no HEAD, o fluxo normal
+      // reprovaria pedindo --slug/--branch antes mesmo de chegar em
+      // `resolverSlug` — o SKIP precisa disparar ANTES disso.
+      const dir = novoRepo();
+      const base = commitTudo(dir, "chore: repo vazio");
+      escreverTeste(dir, "so-teste");
+      const head = commitTudo(dir, "test(red): cobre so-teste, sem produção nenhuma");
+
+      const { result, summary } = runControleNegativoComSummary([
+        "--root",
+        dir,
+        "--base",
+        base,
+        "--head",
+        head,
+      ]);
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain("SKIP — diff só de tests/**+prova/**: base+overlay ≡ head");
+      expect(summary).toContain("base+overlay ≡ head");
+    },
+    TIMEOUT_TESTE,
+  );
+
+  it(
+    "SKIP no caso concreto da PR #113/#111: tests/** + prova/<slug>.ts NOVO, sem produção",
+    () => {
+      const dir = novoRepo();
+      const base = commitTudo(dir, "chore: repo vazio");
+      escreverTeste(dir, "prova-run-timeout");
+      const head = commitTudo(dir, "test(red): cobre timeout, prova/<slug>.ts novo");
+
+      const result = rodar(dir, base, head, "prova-run-timeout");
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain("o controle não discrimina");
+    },
+    TIMEOUT_TESTE,
+  );
+
+  it(
+    "NÃO faz SKIP quando há src/** no diff além de tests/** — mecânica normal (issue #114)",
+    () => {
+      const { dir, base, head, slug } = repoAssertionRed();
+
+      const result = rodar(dir, base, head, slug);
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain("assertion-red");
+      expect(result.stdout).not.toContain("SKIP");
+    },
+    TIMEOUT_TESTE,
+  );
+
+  it(
+    "NÃO faz SKIP quando o único arquivo fora de docs/process é uma declaração de prova sozinha (sem tests/**)",
+    () => {
+      // Mesmo repo/diff do teste "NÃO faz SKIP quando a declaração de prova
+      // é NOVA" (SKIP de declaração existente) — aqui a garantia é que o
+      // novo SKIP overlay-only também não dispara para esse caso: uma
+      // declaração de prova sozinha, sem nenhum tests/**, não é "correção
+      // só de teste" (User Story da issue #114).
+      const dir = novoRepo();
+      const base = commitTudo(dir, "chore: repo vazio");
+
+      writeFileSync(join(dir, "CLAUDE.md"), "# nota\n");
+      mkdirSync(join(dir, "prova"), { recursive: true });
+      writeFileSync(join(dir, "prova", "nova-feature.ts"), "export default { unit: [] };\n");
+      const head = commitTudo(dir, "feat: declara prova de nova-feature (sem testes ainda)");
+
+      const result = runControleNegativo(["--root", dir, "--base", base, "--head", head]);
+
+      expect(result.status).toBe(1);
+      expect(result.stdout).not.toContain("SKIP");
     },
     TIMEOUT_TESTE,
   );

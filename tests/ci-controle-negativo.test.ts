@@ -19,10 +19,12 @@ import {
   contemStubQueLanca,
   deveSerIgnorado,
   ehArquivoDocsOuProcess,
+  ehArquivoDoOverlay,
   ehCommitTestRed,
   ehDeclaracaoDeProva,
   parseArgs,
   semHarnessNaBase,
+  soArquivosDoOverlay,
   soDeclaracaoDeProvaExistenteEditada,
   validarResumo,
 } from "../scripts/ci/controle-negativo/lib.js";
@@ -368,6 +370,58 @@ describe("ehDeclaracaoDeProva / soDeclaracaoDeProvaExistenteEditada (acréscimo 
   it("false quando não sobra nada fora de docs/process (deveSerIgnorado já cobre esse caso)", () => {
     const jaExiste = (): boolean => true;
     expect(soDeclaracaoDeProvaExistenteEditada(["docs/a.md"], jaExiste)).toBe(false);
+  });
+});
+
+describe("ehArquivoDoOverlay / soArquivosDoOverlay (issue #114, bloqueava a PR #113)", () => {
+  it("ehArquivoDoOverlay: true para tests/** e prova/**, false para src/** e scripts/**", () => {
+    expect(ehArquivoDoOverlay("tests/algo.test.ts")).toBe(true);
+    expect(ehArquivoDoOverlay("tests/fixtures/algo.json")).toBe(true);
+    expect(ehArquivoDoOverlay("prova/algo.ts")).toBe(true);
+    expect(ehArquivoDoOverlay("src/x.ts")).toBe(false);
+    expect(ehArquivoDoOverlay("scripts/ci/controle-negativo/lib.ts")).toBe(false);
+  });
+
+  it("true para diff só de tests/**", () => {
+    expect(soArquivosDoOverlay(["tests/a.test.ts"])).toBe(true);
+  });
+
+  it("true para diff de tests/** + prova/** (caso concreto da PR #113/#111)", () => {
+    expect(soArquivosDoOverlay(["tests/prova-run.test.ts", "prova/prova-run-timeout.ts"])).toBe(
+      true,
+    );
+  });
+
+  it("true com docs/process misturado no diff", () => {
+    expect(
+      soArquivosDoOverlay(["docs/nota.md", "README.md", "tests/a.test.ts", "prova/b.ts"]),
+    ).toBe(true);
+  });
+
+  it("true com scripts/github/** (classe process) misturado", () => {
+    expect(soArquivosDoOverlay(["tests/a.test.ts", "scripts/github/ruleset.sh"])).toBe(true);
+  });
+
+  it("false se houver qualquer src/** no diff", () => {
+    expect(soArquivosDoOverlay(["tests/a.test.ts", "src/y.ts"])).toBe(false);
+  });
+
+  it("false se houver qualquer scripts/** fora de scripts/github/ no diff", () => {
+    expect(soArquivosDoOverlay(["tests/a.test.ts", "scripts/ci/controle-negativo/lib.ts"])).toBe(
+      false,
+    );
+  });
+
+  it("false para diff vazio (mesma regra de deveSerIgnorado/soDeclaracaoDeProvaExistenteEditada)", () => {
+    expect(soArquivosDoOverlay([])).toBe(false);
+  });
+
+  it("false quando só resta docs/process (deveSerIgnorado já cobre esse caso)", () => {
+    expect(soArquivosDoOverlay(["docs/a.md"])).toBe(false);
+  });
+
+  it("false quando o único arquivo fora de docs/process é uma declaração de prova sozinha — sem nenhum tests/**, é o caso de soDeclaracaoDeProvaExistenteEditada (existente) ou de feature nova sem teste, nunca este SKIP", () => {
+    expect(soArquivosDoOverlay(["prova/novo-slug.ts"])).toBe(false);
   });
 });
 

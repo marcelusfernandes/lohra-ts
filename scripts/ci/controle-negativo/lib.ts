@@ -211,6 +211,13 @@ export function ehDeclaracaoDeProva(arquivo: string): boolean {
  * NOVA (`prova/<slug>.ts` ausente na base) continua exigindo controle: é
  * exatamente o caso normal de uma PR de feature. `provaJaExisteNaBase` é
  * injetado — quem faz I/O (`git cat-file -e base:<arquivo>`) é `run.ts`.
+ *
+ * Caso particular de `soArquivosDoOverlay` (abaixo, issue #114): roda ANTES
+ * dela e com um motivo mais específico, porque "declaração já existente
+ * editada" é informativo por si só (nenhuma linha de comportamento no
+ * diff) — `soArquivosDoOverlay` cobre o caso mais genérico de qualquer
+ * mistura de `tests/**`/`prova/**`, inclusive quando há teste novo de
+ * verdade.
  */
 export function soDeclaracaoDeProvaExistenteEditada(
   diff: readonly string[],
@@ -221,6 +228,24 @@ export function soDeclaracaoDeProvaExistenteEditada(
   return naoDocsOuProcess.every(
     (arquivo) => ehDeclaracaoDeProva(arquivo) && provaJaExisteNaBase(arquivo),
   );
+}
+
+// --- SKIP: diff inteiro cai no overlay (issue #114, bloqueava a PR #113) --
+// PR só de teste (`tests/**`/`prova/**`, sem `src/**`/`scripts/**` de
+// produção) faz o mecanismo de `run.ts` (overlay do HEAD sobre a base,
+// `arquivosDeTeste`) reproduzir a própria base — base+overlay ≡ head — e o
+// desfecho é sempre `vacuous-pass`, mesmo quando existe um `test(red):` real
+// (caso concreto: PR #113/#111, `tests/prova-run.test.ts` +
+// `prova/prova-run-timeout.ts`). Quando isso acontece, o controle não tem
+// como discriminar — em vez de reprovar por construção, SKIP com motivo
+// explícito e distinto dos outros dois, para o revisor conferir o
+// `test(red):` manualmente.
+export function ehArquivoDoOverlay(_arquivo: string): boolean {
+  throw new Error("not implemented");
+}
+
+export function soArquivosDoOverlay(_diff: readonly string[]): boolean {
+  throw new Error("not implemented");
 }
 
 // --- Shape de `resumo.json` (rodada 2 da PR #54) --------------------------
