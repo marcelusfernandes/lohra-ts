@@ -51,9 +51,9 @@ export function positiveIntEnv(
 /**
  * The CLI-flag clamp rule: an integer <= 0 floors to 1, never falls back to
  * a default. Throws on non-integer input rather than truncating — the
- * oracle's argparse(type=int) rejects a non-integer flag value outright
- * (exit 2, usage message) before any clamping runs, so a non-integer must
- * never reach this function on the real CLI path. The strict integer check
+ * CLI's own flag parser rejects a non-integer flag value outright (exit 2,
+ * usage message) before any clamping runs, so a non-integer must never
+ * reach this function on the real CLI path. The strict integer check
  * belongs to the flag parser built alongside the CLI wiring, not here.
  */
 export function clampFlagMinOne(value: number): number {

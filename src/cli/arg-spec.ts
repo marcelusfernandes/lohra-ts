@@ -1,21 +1,19 @@
-/** Declarative, per-command argument specs — a faithful transcription of
- * each subcommand's own `add_argument`/`parents=[common]` calls in the
- * oracle's `build_parser()` (backend/lohra/cli.py). This is the single
- * source `arg-parser.ts`'s shared `parseCommand()` reads from, and the only
+/** Declarative, per-command argument specs — each subcommand's own flags
+ * and positionals, declared once. This is the single source
+ * `arg-validation.ts`'s shared `parseCommand()` reads from, and the only
  * thing `chat.ts` reads its flags from — so extraction and validation can
  * never independently drift the way `chat.ts`'s standalone `takesValue` set
- * once did (it was missing `--max-parallel`, a real oracle flag, and
- * carried `--temperature`, which the oracle's chat parser has never
- * declared).
+ * once did (it was missing `--max-parallel`, a real flag, and carried
+ * `--temperature`, which `chat`'s spec has never declared).
  *
  * Only commands actually implemented in this TypeScript bootstrap have a
  * spec here — `dashboard`, `cron`, `workflow`, and `update` are refused
  * before dispatch (see cli.ts) and are out of scope.
  *
- * Flag declaration ORDER is byte-significant: an ambiguous-prefix error
- * (`ambiguous option: --pro could match --profile, --provider`) lists
- * candidates in this array's order, matching argparse's own declaration
- * order. Do not alphabetize. */
+ * Flag declaration ORDER is significant: an ambiguous-prefix error (e.g.
+ * `option --pro is ambiguous; could match --profile, --provider`) lists
+ * candidates in this array's own declaration order — a deliberate design
+ * choice, not a computed sort. Do not alphabetize. */
 
 export interface FlagSpec {
   readonly name: string;
@@ -106,10 +104,11 @@ export const MODELS_SPEC = spec([
 ]);
 
 // `tiers` itself takes no flags — only its `list`/`suggest` children do
-// (each via its own `parents=[common]`). The dest name `tiers_cmd` and the
-// choice order below are argparse's own (`add_subparsers(dest="tiers_cmd")`
-// then `list`, `suggest` in declaration order) — both are byte-significant
-// for the "required"/"invalid choice" error text.
+// (each also accepting the common `--profile`/`--no-input` flags). The dest
+// name `tiers_cmd` and the choice order below (`list` then `suggest`) are
+// this command's own contract: both feed directly into the "missing
+// required argument"/"invalid value" error text, so changing either
+// changes user-facing output.
 export const TIERS_SPEC = spec(
   [],
   [{ name: "tiers_cmd", required: true, choices: ["list", "suggest"] }],
@@ -117,9 +116,9 @@ export const TIERS_SPEC = spec(
 export const TIERS_LIST_SPEC = spec(COMMON_FLAGS);
 export const TIERS_SUGGEST_SPEC = spec([...COMMON_FLAGS, { name: "--yes", takesValue: false }]);
 
-// `profile`'s own parser has no `parents=[common]` in the oracle — it does
-// NOT recognize `--profile`/`--no-input` at the argparse level, unlike
-// every other implemented command.
+// `profile` does not accept the common `--profile`/`--no-input` flags,
+// unlike every other implemented command — a deliberate command-specific
+// choice, not an oversight.
 export const PROFILE_SPEC = spec(
   [],
   [
@@ -140,9 +139,10 @@ export const AUTH_SPEC = spec(
   ],
 );
 
-// `skill`'s own parser has no `parents=[common]`; its only implemented
-// sub-action is `export` (dest `skill_cmd`) — anything else is left to
-// cli.ts's existing "skill supports only `export`" error path, unchanged.
+// `skill` does not accept the common `--profile`/`--no-input` flags; its
+// only implemented sub-action is `export` (dest `skill_cmd`) — anything
+// else is left to cli.ts's existing "skill supports only `export`" error
+// path, unchanged.
 export const SKILL_SPEC = spec([], [{ name: "skill_cmd", required: true, choices: ["export"] }]);
 export const SKILL_EXPORT_SPEC = spec(
   [{ name: "--to", takesValue: true }],
@@ -179,6 +179,99 @@ export const UPDATE_SPEC = spec([
   { name: "--reinstall", takesValue: false },
 ]);
 
-// TODO(#73): one phrase per declared flag, read by `renderHelp`. Empty
-// until the green commit lands — the coverage test is red until then.
-export const FLAG_HELP: Readonly<Record<string, string>> = {};
+/** One phrase per declared flag, keyed by its `--name` — read by
+ * `renderHelp` in `arg-validation.ts` to print `--help`. Every flag that
+ * appears in a `*_SPEC` above must have an entry here; `renderHelp` throws
+ * rather than printing a blank description if one is missing. */
+export const FLAG_HELP: Readonly<Record<string, string>> = {
+  "--profile": "use a named profile instead of the active one",
+  "--no-input": "never prompt; fail instead of asking (headless/CI)",
+  "--json": "print machine-readable JSON instead of text",
+  "--model": "override the model for this run",
+  "--provider": "override the provider for this run",
+  "--session": "resume an existing session id",
+  "--no-tools": "disable tool calls for this run",
+  "--yolo": "skip the tool-call confirmation prompt",
+  "--max-parallel": "maximum tool calls to run at once",
+  "--max-iterations": "maximum agent loop iterations",
+  "--port": "TCP port to listen on",
+  "--insecure": "bind without the local auth token",
+  "--interval": "run every N minutes",
+  "--cron": "run on a 5-field cron schedule",
+  "--at": "run once, N seconds from now",
+  "--name": "the job's display name",
+  "--prompt": "the prompt the job sends",
+  "--host": "address to bind",
+  "--tools": "comma-separated list of tools to enable",
+  "--yes": "assume yes to any confirmation",
+  "--to": "destination directory for the export",
+  "--limit": "maximum number of rows to show",
+  "--last": "watch the most recent run",
+  "--poll": "seconds between polls",
+  "--node": "filter by node id",
+  "--event": "filter by event type",
+  "--sub-id": "filter by sub-run id",
+  "--segment-id": "filter by segment id",
+  "--attempt": "filter by attempt number",
+  "--after-seq": "only events after this sequence number",
+  "--snapshot-seq": "only the snapshot at this sequence number",
+  "--check": "fetch and report without moving HEAD",
+  "--reinstall": "run npm install when dependency files changed",
+};
+
+/** One-line summary per top-level command, read by `cli.ts` for both
+ * `lohra --help` (the full command list) and `lohra <command> --help`
+ * (the header line above that command's own options). */
+export const COMMAND_SUMMARY: Readonly<Record<string, string>> = {
+  init: "set up Lohra: pick a provider and write the profile config",
+  doctor: "check whether the current profile can actually run",
+  chat: "send one prompt to the agent and print the result",
+  dashboard: "run the interactive terminal dashboard",
+  serve: "run the OpenAI-compatible HTTP server",
+  cron: "manage scheduled jobs",
+  workflow: "look at workflow runs (reads the durable state; no LLM)",
+  models: "list models available to the current provider",
+  tiers: "list or suggest model tiers for the current provider",
+  profile: "list or create named profiles",
+  auth: "manage authentication for the current profile",
+  skill: "export a bundled skill to a directory",
+  update: "check or fast-forward the installed Lohra git checkout",
+};
+
+/** Sub-action descriptions for the dispatcher-style commands (`--help`
+ * lists these under "commands:", one line each). Declared with `as const`
+ * so member access (`SUBCOMMAND_HELP.tiers`) is a known property, not an
+ * index-signature lookup that could be `undefined`. */
+export const SUBCOMMAND_HELP = {
+  cron: {
+    list: "list scheduled jobs",
+    add: "schedule a new job",
+    remove: "delete a job",
+    pause: "disable a job without deleting it",
+    resume: "re-enable a paused job",
+  },
+  workflow: {
+    list: "list workflow runs",
+    watch: "follow a running workflow",
+    audit: "inspect the event log of one run",
+  },
+  tiers: {
+    list: "list configured tiers",
+    suggest: "suggest tier settings based on your models",
+  },
+  profile: {
+    list: "list existing profiles",
+    create: "create a new profile",
+  },
+  auth: {
+    status: "show the current auth state",
+    enable: "turn on subscription auth",
+    disable: "turn off subscription auth",
+    login: "start the OAuth login flow",
+    logout: "clear stored OAuth credentials",
+    prefer: "set the preferred auth route",
+  },
+  skill: {
+    export: "write a bundled skill's files to a directory",
+  },
+} as const;
