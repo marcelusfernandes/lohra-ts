@@ -112,13 +112,13 @@ com `exit 1` citando o caminho.
 Toda PR passa por cinco checks (`.github/workflows/ci.yml`); `main` só recebe
 merge commit com todos verdes e `review:approved` (ADR 0004):
 
-| check                | prova                                                                                                              | reproduzir localmente                                                                    |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| `checks (20)`/`(22)` | build, typecheck, lint, format, suíte inteira em Node 20 e 22                                                      | `npm run build && npm run typecheck && npm run lint && npm run format:check && npm test` |
-| `provenance`         | todo SHA aprovado em `docs/closeout.md` é ancestral do HEAD                                                        | `npm run provenance:check`                                                               |
-| `escopo`             | o diff cabe nos globs de `## Files` da issue ligada por `Closes #N` (mais `authorised:` que só o orquestrador põe) | `npm run ci:escopo -- --files-file f --issue-body-file i --pr-body-file p`               |
-| `contratos`          | nada em `docs/reference/**`/`lohra/**`; sem import de `python-json`/`python-repr` (após #17); arquivo ≤ 800 linhas | `npm run ci:contratos -- --files-file f [--apos-17]`                                     |
-| `controle-negativo`  | os testes do diff, aplicados sobre a base da PR, reprovam (`npm run prova -- <slug>` na base)                      | `npm run ci:controle-negativo -- --base <sha> --head <sha>`                              |
+| check                | prova                                                                                                                                                       | reproduzir localmente                                                                    |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `checks (20)`/`(22)` | build, typecheck, lint, format, suíte inteira em Node 20 e 22                                                                                               | `npm run build && npm run typecheck && npm run lint && npm run format:check && npm test` |
+| `provenance`         | todo SHA aprovado em `docs/closeout.md` é ancestral do HEAD                                                                                                 | `npm run provenance:check`                                                               |
+| `escopo`             | o diff cabe nos globs de `## Files` da issue ligada por `Closes #N` (mais `authorised:` que só o orquestrador põe)                                          | `npm run ci:escopo -- --files-file f --issue-body-file i --pr-body-file p`               |
+| `contratos`          | nada em `docs/reference/**`/`lohra/**`; sem import de `python-json`/`python-repr` (após #17); arquivo ≤ 800 linhas, ou já assim na base e sem crescer (#93) | `npm run ci:contratos -- --files-file f [--apos-17]`                                     |
+| `controle-negativo`  | os testes do diff, aplicados sobre a base da PR, reprovam (`npm run prova -- <slug>` na base)                                                               | `npm run ci:controle-negativo -- --base <sha> --head <sha>`                              |
 
 Os três últimos rodam só em `pull_request` e escrevem um bloco no summary do
 job. Quando reprovam:
@@ -135,6 +135,13 @@ job. Quando reprovam:
 - `contratos` lista `regra: arquivo — motivo`; erro de uso (flag desconhecida)
   ou de infraestrutura (evento malformado, `GITHUB_STEP_SUMMARY` inválido,
   `git` ausente) sai com exit 2, nunca um exit 1 indistinguível de violação.
+  `arquivo-grande` compara `linhas(head)` com `linhas(base)` (#93): arquivo
+  já acima de 800 linhas na base que só é editado, sem crescer, passa; que
+  cresce ou que é novo reprova, citando as duas contagens quando há base
+  (`1216 → 1220 linhas (> 800; a base já tinha 1216)`). O modo dry-run
+  (`--files-file`, usado no comando de reprodução local acima) não conhece a
+  base do CI: trata todo arquivo como novo, fail-closed, e avisa disso no
+  stderr.
 - `controle-negativo` reprova em `vacuous-pass` (o teste novo já passa na base
   sem a implementação: escreva primeiro o teste que reprova, commit
   `test(red):`), em `structural-red` sem um commit `test(red):` válido no range
