@@ -93,9 +93,20 @@ describe("assembleStreamedResponse", () => {
       { onWarning: warning },
     );
     expect(warning).toHaveBeenCalledWith(
-      "discarding 1 orphaned tool-call stream slot(s); finish_reason='stop'",
+      'discarding 1 orphaned tool-call stream slot(s); finish_reason="stop"',
     );
     expect(raw).not.toHaveProperty("choices.0.message.tool_calls");
+  });
+
+  it("cites a null finish_reason as JSON null in the orphan-slot warning", () => {
+    const warning = vi.fn();
+    assembleStreamedResponse(
+      [chunk({ tool_calls: [{ index: 0, id: "c", function: { name: "x" } }] })],
+      { onWarning: warning },
+    );
+    expect(warning).toHaveBeenCalledWith(
+      "discarding 1 orphaned tool-call stream slot(s); finish_reason=null",
+    );
   });
 
   it("fuzzes interleaved slot indices while preserving first-seen order", () => {
