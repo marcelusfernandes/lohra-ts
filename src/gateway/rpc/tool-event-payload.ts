@@ -1,13 +1,14 @@
-import { pythonJsonDumpsInsertionOrder } from "../../serialization/python-json.js";
+import { stringifyJsonPreservingNumbers } from "../../serialization/json-numbers.js";
 
 // The tool dispatcher (src/tools/dispatch.ts) returns arguments/results as
 // pre-serialized JSON *strings*, formatted however each tool happened to
-// serialize them (plain JSON.stringify, typically compact and non-escaped).
-// The gateway wire format requires a specific, different formatting for
-// args_text/result (Python json.dumps default: spaced, ensure_ascii=True)
-// and a specific formatting for args (compact, ensure_ascii=False, as part
-// of the outer frame) -- so both are re-derived from the parsed structural
-// value rather than trusted as already-correct strings.
+// serialize them. docs/adr/0003-native-wire-format.md, "JSON output" item 1
+// makes every JSON output in this runtime compact/insertion-order/UTF-8
+// direct, so args_text/result and the outer frame's args field now share
+// one format -- but args_text/result are still re-derived from the parsed
+// structural value (not trusted as already-correct strings) for
+// normalization: a tool's own JSON string may use different spacing or key
+// order than `stringifyJsonPreservingNumbers` would.
 function parseToolJson(raw: string): unknown {
   return JSON.parse(raw);
 }
@@ -26,7 +27,7 @@ export function buildToolStartPayload(input: {
   return {
     tool_id: input.toolId,
     name: input.name,
-    args_text: pythonJsonDumpsInsertionOrder(parseToolJson(input.argumentsJson)),
+    args_text: stringifyJsonPreservingNumbers(parseToolJson(input.argumentsJson)),
   };
 }
 
@@ -47,6 +48,6 @@ export function buildToolCompletePayload(input: {
     tool_id: input.toolId,
     name: input.name,
     args: parseToolJson(input.argumentsJson),
-    result: pythonJsonDumpsInsertionOrder(parseToolJson(input.resultJson)),
+    result: stringifyJsonPreservingNumbers(parseToolJson(input.resultJson)),
   };
 }

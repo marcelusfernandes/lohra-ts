@@ -4,8 +4,8 @@
  * indexes into: created -> output_item.added -> content_part.added ->
  * output_text.delta* -> completed|failed. */
 
+import { stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
 import { CompletionError } from "./chat-format.js";
-import { pythonJsonDumpsInsertionOrder } from "../serialization/python-json.js";
 import type { OpenAiUsage } from "./usage.js";
 
 const TEXT_PART_TYPES = new Set(["input_text", "output_text", "text"]);
@@ -109,7 +109,7 @@ export function buildResponseObject(options: {
 }
 
 function responsesSse(eventType: string, payload: Readonly<Record<string, unknown>>): string {
-  return `event: ${eventType}\ndata: ${pythonJsonDumpsInsertionOrder(payload)}\n\n`;
+  return `event: ${eventType}\ndata: ${stringifyJsonPreservingNumbers(payload)}\n\n`;
 }
 
 export function buildResponseCreatedEvent(options: {

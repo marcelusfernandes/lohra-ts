@@ -1,5 +1,7 @@
-import { parseJsonPreservingNumbers } from "../serialization/json-numbers.js";
-import { pythonJsonDumpsInsertionOrder } from "../serialization/python-json.js";
+import {
+  parseJsonPreservingNumbers,
+  stringifyJsonPreservingNumbers,
+} from "../serialization/json-numbers.js";
 import type {
   BuildKwargsOptions,
   ChatKwargs,
@@ -187,7 +189,7 @@ export class AnthropicMessagesTransport {
         calls.push({
           id: typeof block.id === "string" ? block.id : null,
           name: typeof block.name === "string" ? block.name : "",
-          arguments: pythonJsonDumpsInsertionOrder(record(block.input)),
+          arguments: stringifyJsonPreservingNumbers(record(block.input)),
           providerData: null,
         });
       }

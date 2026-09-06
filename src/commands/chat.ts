@@ -32,7 +32,7 @@ import {
   resolveApiKey,
   type ProviderProfile,
 } from "../providers/index.js";
-import { pythonJsonDumpsInsertionOrder } from "../serialization/python-json.js";
+import { stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
 import { openStateForEnvironment, SessionRepository } from "../state/index.js";
 import { SkillStore } from "../skills/index.js";
 import { approval, RegistryToolDispatcher } from "../tools/index.js";
@@ -93,7 +93,7 @@ function initializationError(
 ): Result {
   return {
     code: 2,
-    stdout: `${pythonJsonDumpsInsertionOrder({
+    stdout: `${stringifyJsonPreservingNumbers({
       session_id: "",
       model,
       temperature: null,

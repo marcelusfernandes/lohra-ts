@@ -2,7 +2,7 @@ import { buildCatalog } from "../catalog/catalog.js";
 import type { CatalogHttpClient } from "../catalog/catalog.js";
 import type { OllamaStatus } from "../doctor/model.js";
 import { getProviderProfile } from "../providers/registry.js";
-import { pythonJsonDumpsInsertionOrder } from "../serialization/python-json.js";
+import { stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
 import { loadTiers, MODEL_TIERS } from "../workflow/tiers.js";
 
 export interface ModelsOptions {
@@ -24,7 +24,7 @@ export async function runModels(
     return options.json
       ? {
           code: 2,
-          stdout: `${pythonJsonDumpsInsertionOrder({ error: message, providers: [], tiers: {} })}\n`,
+          stdout: `${stringifyJsonPreservingNumbers({ error: message, providers: [], tiers: {} })}\n`,
           stderr: "",
         }
       : { code: 2, stdout: "", stderr: `error: ${message}\n` };
@@ -50,7 +50,7 @@ export async function runModels(
     }
     return {
       code: 0,
-      stdout: `${pythonJsonDumpsInsertionOrder({ providers: catalog.entries.map((entry) => entry.toJSON()), tiers: tierPayload })}\n`,
+      stdout: `${stringifyJsonPreservingNumbers({ providers: catalog.entries.map((entry) => entry.toJSON()), tiers: tierPayload })}\n`,
       stderr: "",
     };
   }

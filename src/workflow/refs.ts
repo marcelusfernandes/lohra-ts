@@ -1,4 +1,4 @@
-import { pythonJsonDumpsInsertionOrderUnicode } from "../serialization/python-json.js";
+import { stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
 import { loadsLenient, UNPARSEABLE } from "./jsonio.js";
 
 const REF_PATTERN = /\$\{([^}]*)\}/gu;
@@ -83,7 +83,7 @@ function lookup(reference: string, context: unknown): unknown {
 function stringify(value: unknown): string {
   if (typeof value === "string") return value;
   if (typeof value === "bigint") return value.toString();
-  return pythonJsonDumpsInsertionOrderUnicode(value);
+  return stringifyJsonPreservingNumbers(value);
 }
 
 function assertValid(value: unknown): void {

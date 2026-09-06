@@ -1,4 +1,4 @@
-import { pythonJsonDumpsInsertionOrder } from "../serialization/python-json.js";
+import { stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
 import type { RegistryDispatch, ToolArguments } from "./types.js";
 
 export interface ToolStartEvent {
@@ -36,7 +36,7 @@ export function wrapToolDispatch(
       payload: {
         tool_id: toolId,
         name,
-        args_text: pythonJsonDumpsInsertionOrder(args),
+        args_text: stringifyJsonPreservingNumbers(args),
       },
     });
     const result = await base(name, args);

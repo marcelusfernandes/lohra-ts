@@ -16,7 +16,6 @@ import { resolve } from "node:path";
 import { AGENTIC_MAX_ITERATIONS, RELAY_MAX_ITERATIONS } from "../../../src/server/agentic.js";
 import { authorized, timingSafeStringEqual } from "../../../src/server/auth.js";
 import { stringifyJsonPreservingNumbers } from "../../../src/serialization/json-numbers.js";
-import { pythonJsonDumpsInsertionOrder } from "../../../src/serialization/python-json.js";
 import { evidenceRoot, registerScrubCanary, writeEvidence } from "./harness.js";
 
 const root = resolve(import.meta.dirname, "../../..");
@@ -152,19 +151,19 @@ function extractFunctionBody(source: string, functionName: string): string | nul
   });
 }
 
-// 4. t11-two-serializer-mutants-killed (assertions 9/29/36): non-stream
-// bodies (stringifyJsonPreservingNumbers, wired through chatCompletionBody)
-// and SSE frames (pythonJsonDumpsInsertionOrder, wired through
-// sseEvent/responsesSse) are genuinely DIFFERENT encoder functions — a
-// mutant that merges them (either direction) is caught functionally: the
-// two outputs for the SAME object must differ (spacing), not just the
-// source-level wiring.
+// 4. t11-two-serializer-mutants-killed (assertions 9/29/36): issue #71
+// merged the two encoders on purpose (docs/adr/0003-native-wire-format.md,
+// "JSON output" item 1 — one serializer, compact, for every JSON body).
+// This probe's invariant used to be "the two outputs differ (spacing)"; that
+// premise is abolished by the ADR, so what it now proves is that BOTH the
+// non-stream body and the SSE frame path are wired to the SAME single
+// serializer (`stringifyJsonPreservingNumbers`) and that neither file still
+// references the removed `pythonJsonDumps*` family — a mutant reintroducing
+// a second, divergent encoder for either path is what this catches.
 {
   const sample = { a: 1, b: "x", c: [1, 2] };
   const compact = stringifyJsonPreservingNumbers(sample);
-  const spaced = pythonJsonDumpsInsertionOrder(sample);
-  const outputsDifferOk =
-    compact !== spaced && compact === '{"a":1,"b":"x","c":[1,2]}' && spaced.includes(": ");
+  const compactOk = compact === '{"a":1,"b":"x","c":[1,2]}';
   const httpIoSource = readFileSync(resolve(root, "src/server/http-io.ts"), "utf8");
   const chatFormatSource = readFileSync(resolve(root, "src/server/chat-format.ts"), "utf8");
   const responsesFormatSource = readFileSync(
@@ -174,13 +173,15 @@ function extractFunctionBody(source: string, functionName: string): string | nul
   const nonStreamWiredToCompactOk =
     httpIoSource.includes("chatCompletionBody") &&
     chatFormatSource.includes("stringifyJsonPreservingNumbers");
-  const sseWiredToSpacedOk =
-    chatFormatSource.includes("pythonJsonDumpsInsertionOrder") &&
-    responsesFormatSource.includes("pythonJsonDumpsInsertionOrder");
+  const sseWiredToSameSerializerOk =
+    chatFormatSource.includes("stringifyJsonPreservingNumbers") &&
+    responsesFormatSource.includes("stringifyJsonPreservingNumbers") &&
+    !chatFormatSource.includes("pythonJsonDumps") &&
+    !responsesFormatSource.includes("pythonJsonDumps");
   record(
     "t11-two-serializer-mutants-killed",
-    outputsDifferOk && nonStreamWiredToCompactOk && sseWiredToSpacedOk,
-    { outputsDifferOk, nonStreamWiredToCompactOk, sseWiredToSpacedOk, compact, spaced },
+    compactOk && nonStreamWiredToCompactOk && sseWiredToSameSerializerOk,
+    { compactOk, nonStreamWiredToCompactOk, sseWiredToSameSerializerOk, compact },
   );
 }
 

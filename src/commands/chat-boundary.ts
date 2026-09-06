@@ -1,5 +1,5 @@
 import { resolveAuthRoute, resolveCredentials } from "../auth/credentials.js";
-import { pythonJsonDumpsInsertionOrder } from "../serialization/python-json.js";
+import { stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
 
 // Exported for reuse by the dashboard command (T12), which measured the
 // identical "no provider configured" text on the wire (T12 baseline
@@ -25,7 +25,7 @@ export const noProvider =
   "`lohra doctor` for a read-only report with the exact command for each gap.\n";
 
 const envelope = (input: string, model: string | null, error: string): string =>
-  `${pythonJsonDumpsInsertionOrder({
+  `${stringifyJsonPreservingNumbers({
     session_id: "",
     model,
     temperature: null,

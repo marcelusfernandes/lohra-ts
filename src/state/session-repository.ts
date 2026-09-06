@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-import { pythonJsonDumpsInsertionOrder } from "../serialization/python-json.js";
+import { stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
 import { nullableInteger, safeInteger } from "./values.js";
 
 export interface CreateSessionInput {
@@ -66,7 +66,7 @@ function meaningful(value: unknown): boolean {
 }
 
 function jsonText(value: unknown): string | null {
-  return meaningful(value) ? pythonJsonDumpsInsertionOrder(value) : null;
+  return meaningful(value) ? stringifyJsonPreservingNumbers(value) : null;
 }
 
 function text(value: unknown): string | null {
