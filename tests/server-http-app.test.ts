@@ -150,6 +150,34 @@ describe("createOpenAiServer — end-to-end HTTP/SSE wiring", () => {
     }
   });
 
+  it("/docs, /redoc, /docs/oauth2-redirect and /docs/ are 404 -- removed, issue #74", async () => {
+    await start(() => okResponse());
+    for (const path of ["/docs", "/redoc", "/docs/oauth2-redirect", "/docs/"]) {
+      const res = await sendRaw(port, `GET ${path} HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n`);
+      expect(res.statusLine, path).toBe("HTTP/1.1 404 Not Found");
+      expect(res.body, path).toBe('{"detail":"Not Found"}');
+    }
+  });
+
+  it("GET /openapi.json is 200 with paths = the 4 product routes and an operationId each", async () => {
+    await start(() => okResponse());
+    const res = await sendRaw(
+      port,
+      "GET /openapi.json HTTP/1.1\nHost: 127.0.0.1\nConnection: close\n",
+    );
+    expect(res.statusLine).toBe("HTTP/1.1 200 OK");
+    const body = JSON.parse(res.body) as {
+      paths: Record<string, Record<string, { operationId?: string }>>;
+    };
+    expect(Object.keys(body.paths).sort()).toEqual(
+      ["/health", "/v1/models", "/v1/chat/completions", "/v1/responses"].sort(),
+    );
+    for (const [path, methods] of Object.entries(body.paths)) {
+      const operationIds = Object.values(methods).map((operation) => operation.operationId);
+      expect(operationIds, path).toEqual([expect.any(String)]);
+    }
+  });
+
   it("trailing slash on a known path 307s with an absolute Location from Host", async () => {
     await start(() => okResponse());
     const res = await sendRaw(
@@ -187,7 +215,7 @@ describe("createOpenAiServer — end-to-end HTTP/SSE wiring", () => {
     expect(res.statusLine).toBe("HTTP/1.1 200 OK");
   });
 
-  it("body validation precedes auth: missing model + no auth is 422, not 401", async () => {
+  it("body validation precedes auth: missing model + no auth is 422, not 401, own error envelope", async () => {
     await start(() => okResponse());
     const body = JSON.stringify({ messages: [{ role: "user", content: "x" }] });
     const res = await sendRaw(
@@ -196,6 +224,15 @@ describe("createOpenAiServer — end-to-end HTTP/SSE wiring", () => {
       body,
     );
     expect(res.statusLine).toBe("HTTP/1.1 422 Unprocessable Entity");
+    expect(JSON.parse(res.body)).toEqual({
+      error: {
+        message: "model: field is required",
+        type: "invalid_request_error",
+        param: "model",
+        code: "validation_error",
+        details: [{ path: ["body", "model"], message: "field is required" }],
+      },
+    });
   });
 
   it("valid body + no auth is 401", async () => {

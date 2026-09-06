@@ -195,22 +195,34 @@ describe("routeGatewayRequest: docs and no SPA (assertion 17)", () => {
     );
   });
 
-  it("info.version is the FastAPI default 0.1.0, not the package version", () => {
+  it("every path in openapi.json carries an operationId under its GET method (issue #74)", () => {
+    const response = routeGatewayRequest(head("GET", "/openapi.json"), context());
+    const body = JSON.parse(response.body.toString()) as {
+      paths: Record<string, { get?: { operationId?: string } }>;
+    };
+    for (const [path, item] of Object.entries(body.paths)) {
+      expect(item.get?.operationId, path).toEqual(expect.any(String));
+      expect(item.get?.operationId, path).not.toBe("");
+    }
+  });
+
+  it("info.version stays 0.1.0 -- this gateway's own doc, not the package version", () => {
     const response = routeGatewayRequest(head("GET", "/openapi.json"), context());
     const body = JSON.parse(response.body.toString()) as { info: { version: string } };
     expect(body.info.version).toBe("0.1.0");
   });
 
-  it.each(["/docs", "/redoc", "/docs/oauth2-redirect"])("%s is open, 200 HTML", (path) => {
-    const response = routeGatewayRequest(head("GET", path), context());
-    expect(response.status).toBe(200);
-    expect(response.headers["content-type"]).toContain("text/html");
-  });
+  it.each(["/docs", "/redoc", "/docs/oauth2-redirect"])(
+    "%s is removed (issue #74) -- 404 like any unknown route",
+    (path) => {
+      expect(routeGatewayRequest(head("GET", path), context()).status).toBe(404);
+      expect(routeGatewayRequest(authed(path), context()).status).toBe(404);
+    },
+  );
 
-  it("/docs/ redirects to /docs with a Host-derived absolute Location", () => {
+  it("/docs/ is also just an unknown route now -- 404, no redirect", () => {
     const response = routeGatewayRequest(head("GET", "/docs/"), context());
-    expect(response.status).toBe(307);
-    expect(response.headers.location).toBe("http://127.0.0.1:9119/docs");
+    expect(response.status).toBe(404);
   });
 });
 
