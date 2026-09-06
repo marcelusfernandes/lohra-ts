@@ -1,6 +1,6 @@
 // Os 13 mutantes de `media/persistence.ts` (issue #151, passo 0d do épico
-// #13) — migrados de `scripts/parity/media/run-mutations.ts` (agora um
-// shim); os `edits` de todos os 13 são byte a byte os do runner antigo —
+// #13) — migrados do runner de paridade aposentado desta área; os `edits`
+// de todos os 13 são byte a byte os do runner antigo —
 // só o oráculo (`expected`/`probe`) muda, nos casos abaixo (regra
 // acrescentada ao AC 3 da issue #151 depois da rodada 1 da PR #176, que
 // tinha um 4º edit sobre uma premissa refutada — ver `out-dir-symlink`).
@@ -24,7 +24,7 @@
 //
 //   $ git log -S 'checkControlledRoot(plan);' --oneline -- src/media/persistence.ts
 //   9879c7b fix(media): isolate publish hooks from staged bytes
-//   $ git log -S 'out-dir-symlink' --oneline -- scripts/parity/media/run-mutations.ts
+//   $ git log -S 'out-dir-symlink' --oneline -- ':(glob)**/media/run-mutations.ts'
 //   e7bf4f5 feat(media): add bounded vision and image generation
 //
 //   (9879c7b é POSTERIOR a e7bf4f5 — a defesa em profundidade dentro de

@@ -1,7 +1,7 @@
-// Movido de `scripts/parity/media/comparator.ts` (issue #151, passo 0d do
-// épico #13): `scripts/mutations/**` não importa nada de
-// `scripts/parity/**`, então o comparador vem para cá e passa a usar a
-// cópia local de `canonical.ts` (#148).
+// Movido do comparador do runner de paridade aposentado (issue #151, passo
+// 0d do épico #13): `scripts/mutations/**` não importa nada do diretório
+// aposentado, então o comparador vem para cá e passa a usar a cópia local
+// de `canonical.ts` (#148).
 import { canonicalJson } from "./canonical.js";
 
 export type MediaClassification =

@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // T16 mutation harness — external proof on a TEMPORARY git archive of the
 // committed candidate SHA (never the working checkout). Issue #149 (passo
 // 0b do épico #13): migrado do runner legado de paridade para
