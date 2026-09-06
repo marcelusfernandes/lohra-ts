@@ -11,7 +11,9 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { LockRepository, openStateDatabase, WorkflowRepository } from "../src/state/index.js";
+import { openStateDatabase } from "../src/state/index.js";
+import type { StateWarning } from "../src/state/index.js";
+import { productionOwnershipStore } from "../src/workflow/ownership-store.js";
 import { WorkflowService } from "../src/workflow/service.js";
 import type { ChildResult, ChildRuntime, LeafSandboxHandle } from "../src/workflow/runtime.js";
 
@@ -36,9 +38,16 @@ describe("workflow service — progress persisted per node (issue #125)", () => 
     roots.push(root);
     const connection = openStateDatabase(join(root, "state.db"));
     try {
-      const repository = new WorkflowRepository(connection.database);
-      const locks = new LockRepository(connection.database);
-      const ownership = { fence: 0 as number, holder: "test", now: 1000 };
+      // Issue #135: the sink is threaded through `productionOwnershipStore`
+      // (not a bare `new WorkflowRepository(...)`, which defaults to a
+      // no-op) — that's the actual composition chat.ts/dashboard.ts use.
+      const warnings: StateWarning[] = [];
+      let clock = 1000;
+      const store = productionOwnershipStore(connection.database, {
+        holder: "test",
+        now: () => clock,
+        warning: (warning) => warnings.push(warning),
+      });
       let leafSeq = 0;
       const runtime: ChildRuntime = withMinimalLeafSandbox({
         spawn(): string {
@@ -47,7 +56,7 @@ describe("workflow service — progress persisted per node (issue #125)", () => 
           // OWN progress write landed under a live lease; push the clock
           // past the 900s TTL so "b"'s progress write (and the terminal
           // write after it) both present a stale token and are refused.
-          if (leafSeq === 2) ownership.now = 1000 + 901;
+          if (leafSeq === 2) clock = 1000 + 901;
           return `leaf-${String(leafSeq)}`;
         },
         collect: (): ChildResult => ({
@@ -69,14 +78,7 @@ describe("workflow service — progress persisted per node (issue #125)", () => 
         // no live timers: only the per-cell top-up could renew the lease,
         // and node "b"'s own top-up attempt is itself refused past the TTL
         timerFactory: () => ({ cancel: () => undefined }),
-        store: {
-          repository,
-          locks,
-          holder: "test",
-          ttl: 900,
-          ownershipOf: () => ownership,
-          database: connection.database,
-        },
+        store,
       });
       const started = service.start({
         meta: { name: "progress-fence" },
@@ -87,7 +89,7 @@ describe("workflow service — progress persisted per node (issue #125)", () => 
       });
       if ("error" in started) throw new Error(started.error);
       await service.status(started.run_id, true);
-      const line = repository.getRunState(started.run_id) as Record<string, unknown>;
+      const line = store.repository.getRunState(started.run_id) as Record<string, unknown>;
       // "a"'s progress write landed (done=1); "b"'s own progress write and
       // the terminal write were both refused — the line never advances past
       // what the last LIVE acquisition wrote, and status stays "running"
@@ -96,6 +98,15 @@ describe("workflow service — progress persisted per node (issue #125)", () => 
       expect(progress.total).toBe(2);
       expect(progress.done).toBe(1);
       expect(line.status).toBe("running");
+      // Issue #135: the refusal is no longer silent — the sink registered
+      // on the production store's repository sees every STALE_FENCE_WRITE
+      // the stale acquisition triggers (node "b"'s own progress write, and
+      // the terminal write attempted after it).
+      expect(warnings.length).toBeGreaterThan(0);
+      for (const warning of warnings) {
+        expect(warning.cause).toBe("STALE_FENCE_WRITE");
+        expect(warning.runId).toBe(started.run_id);
+      }
       connection.close();
     } finally {
       rmSync(root, { recursive: true, force: true });
