@@ -145,6 +145,32 @@ describe("arquivosDeTeste", () => {
   it("descarta arquivo fora de tests/ mesmo terminando em .test.ts", () => {
     expect(arquivosDeTeste(["scripts/foo.test.ts"])).toEqual([]);
   });
+
+  // Issue #123: antes desta issue, um helper/fixture novo sob `tests/**`
+  // sem o sufixo `.test.ts` (ex.: `tests/helpers/x.ts`) ficava fora do
+  // overlay real — um teste que o importasse falhava de CARGA na base
+  // (`Cannot find module`), degradando o desfecho para `structural-red`.
+  it("mantém helpers/fixtures sob tests/** sem sufixo .test.ts (issue #123)", () => {
+    expect(arquivosDeTeste(["tests/helpers/controle-negativo-repo.ts"])).toEqual([
+      "tests/helpers/controle-negativo-repo.ts",
+    ]);
+    expect(arquivosDeTeste(["tests/fixtures/algo.json"])).toEqual(["tests/fixtures/algo.json"]);
+  });
+
+  // Issue #123 (AC 1): `arquivosDeTeste` e `ehArquivoDoOverlay` usam a
+  // mesma definição — o overlay copiado é exatamente a classe inteira.
+  it("é exatamente diff.filter(ehArquivoDoOverlay) — mesma definição do SKIP (issue #123)", () => {
+    const diff = [
+      "tests/helpers/x.ts",
+      "tests/fixtures/a.json",
+      "tests/a.test.ts",
+      "prova/x.ts",
+      "src/x.ts",
+      "scripts/foo.test.ts",
+      "docs/a.md",
+    ];
+    expect(arquivosDeTeste(diff)).toEqual(diff.filter(ehArquivoDoOverlay));
+  });
 });
 
 describe("semHarnessNaBase", () => {

@@ -17,6 +17,7 @@ import {
   escreverTeste,
   limparWorkdirs,
   novoRepo,
+  repoAssertionRedComHelperNovo,
   repoVacuousPass,
   rodar,
   runControleNegativo,
@@ -99,6 +100,23 @@ describe("controle-negativo/run.ts — lacunas da issue #117 (subprocesso, repos
       expect(result.stdout).not.toContain("SKIP");
       expect(result.stderr).toContain("vacuous-pass");
       expect(result.stderr).toContain("test(red)");
+    },
+    TIMEOUT_TESTE,
+  );
+});
+
+// --- issue #123: overlay unifica arquivosDeTeste com ehArquivoDoOverlay ---
+describe("controle-negativo/run.ts — overlay copia helpers novos sob tests/** (issue #123)", () => {
+  it(
+    "helper novo em tests/helpers/** importado por teste novo, com fix em src/**, dá assertion-red (não structural-red)",
+    () => {
+      const { dir, base, head, slug } = repoAssertionRedComHelperNovo();
+
+      const result = rodar(dir, base, head, slug);
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain("assertion-red");
+      expect(result.stdout).not.toContain("structural-red");
     },
     TIMEOUT_TESTE,
   );
