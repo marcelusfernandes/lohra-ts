@@ -20,6 +20,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { canonicalJson } from "../canonical.js";
+import { orchestrationMutants } from "./mutants-orchestration.js";
+import type { Focus, Mutant } from "./mutants-types.js";
 
 const root = resolve(process.cwd());
 
@@ -36,27 +38,6 @@ const repositoryTests = "tests/state-workflow-repository.test.ts";
 const serviceTests = "tests/workflow-service-durability.test.ts";
 const durabilityTests = "tests/workflow-durability.test.ts";
 const sandboxTests = "tests/workflow-sandbox.test.ts";
-
-interface Edit {
-  readonly file: string;
-  readonly before: string;
-  readonly after: string;
-}
-
-interface Focus {
-  /** The test file the oracle for this mutant lives in. */
-  readonly file: string;
-  /** vitest -t pattern naming the exact test that must go red. */
-  readonly test: string;
-}
-
-interface Mutant {
-  readonly id: string;
-  readonly category: string;
-  readonly mechanism: string;
-  readonly focus: Focus;
-  readonly edits: readonly Edit[];
-}
 
 // --- the shared guard's three conjuncts -------------------------------------
 // Each rewrite consumes its own bound parameter (`? IS NOT NULL`), so arity is
@@ -761,7 +742,12 @@ const namedMutants: readonly Mutant[] = [
   },
 ];
 
-const mutants: readonly Mutant[] = [...guardMutants, ...combinedMutants, ...namedMutants];
+const mutants: readonly Mutant[] = [
+  ...guardMutants,
+  ...combinedMutants,
+  ...namedMutants,
+  ...orchestrationMutants,
+];
 
 function replaceExactlyOnce(source: string, before: string, after: string, id: string): string {
   const first = source.indexOf(before);
