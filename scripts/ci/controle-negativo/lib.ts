@@ -91,26 +91,41 @@ export function ehCommitTestRed(subject: string): boolean {
 // `throw new Error(` — o stub que `worktree-segura` §7 pede para o
 // vermelho compilar. Mesma convenção do Apollo (`hasDeclaredThrowingStub`,
 // `.../tools/ci/lib/negative-control.mjs`); `(?!\+\+)` exclui o cabeçalho.
-const THROWING_STUB_ADDED_RE = /^\+(?!\+\+).*\bthrow\s+new\s+Error\(/m;
+//
+// Issue #62: uma linha adicionada que só COMENTA o stub (`// throw new
+// Error(...)`, ou a continuação de um bloco `/** ... */` — `* throw new
+// Error(...)`) não é um stub de produção de verdade — não pode contar. A
+// segunda negative lookahead, logo após o `+`, exclui espaço opcional
+// seguido de `//` ou `*`.
+const THROWING_STUB_ADDED_RE = /^\+(?!\+\+)(?!\s*(?:\/\/|\*)).*\bthrow\s+new\s+Error\(/m;
 
 /**
  * `true` quando o texto de um diff (`git show`) tem uma linha adicionada
- * com `throw new Error(` — verificado só nos arquivos NÃO-teste do commit
- * (`run.ts` filtra antes de chamar), para que um teste que apenas AFIRMA
- * "lança" (`expect(() => f()).toThrow(new Error(...))`) não passe por um
- * stub de produção de verdade.
+ * com `throw new Error(`, que não seja um comentário — verificado só nos
+ * arquivos NÃO-teste do commit (`run.ts` filtra antes de chamar), para que
+ * um teste que apenas AFIRMA "lança" (`expect(() =>
+ * f()).toThrow(new Error(...))`) não passe por um stub de produção de
+ * verdade, nem um comentário que só menciona o padrão.
  */
 export function contemStubQueLanca(diffTexto: string): boolean {
   return THROWING_STUB_ADDED_RE.test(diffTexto);
 }
 
 // --- SKIP por classe (rodada 2 da PR #54, ADR 0004 item 7) ----------------
-const DOCS_TOPO = new Set(["README.md", "CLAUDE.md", "AGENTS.md"]);
-const DOCS_OU_PROCESS_PREFIXOS = ["docs/", ".claude/", ".github/"];
+// Acréscimo à issue #62 (bloqueava a #65): `scripts/github/**` é tooling de
+// GitHub (ruleset, labels) — processo, igual a `.claude/**`/`.github/**`,
+// nunca comportamento a controlar; `.worktreeinclude` é o único arquivo de
+// processo hoje no topo do repo além de `README.md`/`CLAUDE.md`/`AGENTS.md`
+// (`lefthook.yml` não existe neste repositório).
+const DOCS_TOPO = new Set(["README.md", "CLAUDE.md", "AGENTS.md", ".worktreeinclude"]);
+const DOCS_OU_PROCESS_PREFIXOS = ["docs/", ".claude/", ".github/", "scripts/github/"];
 
 /** Classes `docs` e `process` da ADR 0004 item 7 — nada que este check
  * precise controlar (uma PR só de documentação ou de configuração de CI
- * não declara `prova/<slug>.ts`, e não deveria precisar). */
+ * não declara `prova/<slug>.ts`, e não deveria precisar). Note que
+ * `scripts/**` fora de `scripts/github/` continua FORA desta classe — é
+ * exatamente o tipo de mudança comportamental (`scripts/ci/**`,
+ * `scripts/prova/**`) que este check existe para controlar. */
 export function ehArquivoDocsOuProcess(arquivo: string): boolean {
   if (DOCS_TOPO.has(arquivo)) return true;
   return DOCS_OU_PROCESS_PREFIXOS.some((prefixo) => arquivo.startsWith(prefixo));
@@ -125,6 +140,38 @@ export function ehArquivoDocsOuProcess(arquivo: string): boolean {
  */
 export function deveSerIgnorado(diff: readonly string[]): boolean {
   return diff.length > 0 && diff.every(ehArquivoDocsOuProcess);
+}
+
+// --- SKIP: só declaração de prova já existente editada (acréscimo à #62,
+// bloqueava a #65) -----------------------------------------------------
+const DECLARACAO_DE_PROVA_RE = /^prova\/[^/]+\.ts$/;
+
+/** `true` só para `prova/<slug>.ts` — um único segmento sob `prova/`, nunca
+ * `prova/sub/x.ts` nem um arquivo de teste em `tests/`. */
+export function ehDeclaracaoDeProva(arquivo: string): boolean {
+  return DECLARACAO_DE_PROVA_RE.test(arquivo);
+}
+
+/**
+ * SKIP adicional: depois de tirar as classes `docs`/`process`
+ * (`ehArquivoDocsOuProcess`), se tudo que sobra são declarações de prova
+ * (`prova/<slug>.ts`) que JÁ EXISTIAM na base — só metadado de "quais
+ * testes essa issue já declarada roda" mudou, nenhum `tests/**`, `src/**`
+ * nem `scripts/**` (fora de `scripts/github/`, já coberto acima) entrou no
+ * diff — não há comportamento novo para provar vermelho. Uma declaração
+ * NOVA (`prova/<slug>.ts` ausente na base) continua exigindo controle: é
+ * exatamente o caso normal de uma PR de feature. `provaJaExisteNaBase` é
+ * injetado — quem faz I/O (`git cat-file -e base:<arquivo>`) é `run.ts`.
+ */
+export function soDeclaracaoDeProvaExistenteEditada(
+  diff: readonly string[],
+  provaJaExisteNaBase: (arquivo: string) => boolean,
+): boolean {
+  const naoDocsOuProcess = diff.filter((arquivo) => !ehArquivoDocsOuProcess(arquivo));
+  if (naoDocsOuProcess.length === 0) return false;
+  return naoDocsOuProcess.every(
+    (arquivo) => ehDeclaracaoDeProva(arquivo) && provaJaExisteNaBase(arquivo),
+  );
 }
 
 // --- Shape de `resumo.json` (rodada 2 da PR #54) --------------------------

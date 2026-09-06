@@ -23,6 +23,24 @@ import {
 const root = resolve(import.meta.dirname, "..");
 const runScript = resolve(root, "scripts/ci/escopo/run.ts");
 const tsxBin = resolve(root, "node_modules/.bin/tsx");
+const tsxCliMjs = resolve(root, "node_modules/tsx/dist/cli.mjs");
+
+/** Roda `run.ts` num subprocesso com `PATH` vazio — `git` vira ENOENT. Usa
+ * `process.execPath` + o CLI do `tsx` direto (não o shim `.bin/tsx`, cujo
+ * shebang `#!/usr/bin/env node` depende do PATH externo, não do que
+ * passamos ao filho — issue #62). */
+function rodarComPathVazio(args: readonly string[], extraEnv: Record<string, string>) {
+  const dirVazio = mkdtempSync(join(tmpdir(), "lohra-ci-path-vazio-"));
+  try {
+    return spawnSync(process.execPath, [tsxCliMjs, runScript, ...args], {
+      encoding: "utf8",
+      timeout: 30_000,
+      env: { ...extraEnv, PATH: dirVazio },
+    });
+  } finally {
+    rmSync(dirVazio, { recursive: true, force: true });
+  }
+}
 
 describe("globs (globParaRegex, casa)", () => {
   it("`src/x/**` casa `src/x/a/b.ts` e não `src/y/a.ts`", () => {
@@ -52,6 +70,18 @@ describe("globs (globParaRegex, casa)", () => {
   it("`**` casa qualquer número de segmentos aninhados", () => {
     expect(casa("src/x/**", "src/x/a/b/c.ts")).toBe(true);
     expect(casa("src/x/**", "src/x/a.ts")).toBe(true);
+  });
+
+  it("`**/` casa zero segmentos — `**/*.md` casa `README.md` (issue #62)", () => {
+    expect(casa("**/*.md", "README.md")).toBe(true);
+    expect(casa("**/*.md", "docs/a/b.md")).toBe(true);
+    expect(casa("**/*.md", "docs/a.txt")).toBe(false);
+  });
+
+  it("`?` é literal, não coringa — precisa ser escapado (issue #62)", () => {
+    expect(casa("a?b.ts", "a?b.ts")).toBe(true);
+    expect(casa("a?b.ts", "axb.ts")).toBe(false);
+    expect(casa("a?b.ts", "ab.ts")).toBe(false);
   });
 });
 
@@ -163,6 +193,37 @@ describe("escopo/lib.ts — globsAutorizados", () => {
   it("authorised: com múltiplos globs em crase na mesma linha", () => {
     const body = ["## Files", "", "authorised: `a.ts`, `b.ts`"].join("\n");
     expect(globsAutorizados(body)).toEqual(["a.ts", "b.ts"]);
+  });
+
+  it("ignora 'authorised:' dentro de um bloco de código (fence) — issue #62", () => {
+    const body = [
+      "## Files",
+      "",
+      "- `real/glob.ts`",
+      "",
+      "```",
+      "authorised: `evil.ts`",
+      "```",
+      "",
+    ].join("\n");
+    expect(globsAutorizados(body)).toEqual([]);
+  });
+
+  it("uma fence antes de '## Files' não trunca a seção nem esconde o authorised real (issue #62)", () => {
+    const body = [
+      "## Resumo",
+      "",
+      "```",
+      "## Files",
+      "conteúdo de exemplo, não é a seção real",
+      "```",
+      "",
+      "## Files",
+      "",
+      "- authorised: `real.ts`",
+      "",
+    ].join("\n");
+    expect(globsAutorizados(body)).toEqual(["real.ts"]);
   });
 });
 
@@ -325,5 +386,81 @@ describe("escopo/run.ts (dry-run, subprocesso)", () => {
     expect(r.stderr.toLowerCase()).toMatch(/closes/);
     expect(r.stderr).not.toMatch(/\n\s+at /);
     expect(r.stderr).not.toContain("not implemented");
+  });
+
+  it("issue sem '## Files': mensagem específica citando o número da issue (issue #62)", () => {
+    const dir = workdir();
+    const filesFile = escrever(dir, "files.txt", "a.ts\n");
+    const issueBodyFile = escrever(dir, "issue.md", "## Resumo\n\nsem seção Files\n");
+    const prBodyFile = escrever(dir, "pr.md", "Closes #44\n");
+
+    const r = rodar([
+      "--files-file",
+      filesFile,
+      "--issue-body-file",
+      issueBodyFile,
+      "--pr-body-file",
+      prBodyFile,
+    ]);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('issue #44 não declara "## Files"');
+  });
+
+  it("PR sem 'Closes #N' mas com 'authorised:' cobrindo o diff inteiro: exit 0 (issue #62)", () => {
+    const dir = workdir();
+    const filesFile = escrever(dir, "files.txt", "a.ts\nb.ts\n");
+    const prBodyFile = escrever(
+      dir,
+      "pr.md",
+      ["## Resumo", "", "## Files", "", "- authorised: `a.ts`, `b.ts`", ""].join("\n"),
+    );
+
+    const r = rodar(["--files-file", filesFile, "--pr-body-file", prBodyFile]);
+
+    expect(r.status, r.stderr).toBe(0);
+  });
+
+  it("PR sem 'Closes #N' e 'authorised:' não cobre o diff inteiro: exit 1 listando o que sobrou (issue #62)", () => {
+    const dir = workdir();
+    const filesFile = escrever(dir, "files.txt", "a.ts\nb.ts\n");
+    const prBodyFile = escrever(
+      dir,
+      "pr.md",
+      ["## Resumo", "", "## Files", "", "- authorised: `a.ts`", ""].join("\n"),
+    );
+
+    const r = rodar(["--files-file", filesFile, "--pr-body-file", prBodyFile]);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("b.ts");
+  });
+});
+
+describe("escopo/run.ts modo CI (GITHUB_EVENT_PATH real) — causa de erro do git (issue #62)", () => {
+  const workdirs: string[] = [];
+  afterEach(() => {
+    while (workdirs.length > 0) {
+      const dir = workdirs.pop();
+      if (dir !== undefined) rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("git ausente (PATH vazio): exit 1, mensagem com ENOENT, sem stack trace", () => {
+    const dir = mkdtempSync(join(tmpdir(), "lohra-ci-escopo-evento-"));
+    workdirs.push(dir);
+    const eventPath = join(dir, "event.json");
+    writeFileSync(
+      eventPath,
+      JSON.stringify({
+        pull_request: { body: "Closes #62", base: { sha: "aaa" }, head: { sha: "bbb" } },
+      }),
+    );
+
+    const r = rodarComPathVazio([], { GITHUB_EVENT_PATH: eventPath });
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("ENOENT");
+    expect(r.stderr).not.toMatch(/\n\s+at /);
   });
 });

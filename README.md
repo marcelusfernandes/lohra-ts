@@ -99,16 +99,27 @@ job. Quando reprovam:
 - `escopo` lista os arquivos fora dos globs. Ou a issue passa a declarar o
   glob em `## Files`, ou o orquestrador (só ele) escreve
   `authorised: ` + glob em crase na seção `## Files` da PR. Issue anterior ao
-  padrão (#44) sem `## Files` reprova toda PR: o orquestrador acrescenta a
-  seção à issue antes de reivindicá-la.
-- `contratos` lista `regra: arquivo — motivo`.
+  padrão (#44) sem `## Files` reprova toda PR com uma mensagem citando o
+  número da issue: o orquestrador acrescenta a seção à issue antes de
+  reivindicá-la. Uma PR sem `Closes #N` no corpo (exceções do
+  `git-workflow.md` — typo, arquivo pequeno, mudança exploratória) também
+  passa quando `authorised:` cobre o diff inteiro, sem precisar de issue
+  linkada; `authorised:` dentro de um bloco de código (fence) nunca conta.
+- `contratos` lista `regra: arquivo — motivo`; erro de uso (flag desconhecida)
+  ou de infraestrutura (evento malformado, `GITHUB_STEP_SUMMARY` inválido,
+  `git` ausente) sai com exit 2, nunca um exit 1 indistinguível de violação.
 - `controle-negativo` reprova em `vacuous-pass` (o teste novo já passa na base
   sem a implementação: escreva primeiro o teste que reprova, commit
   `test(red):`), em `structural-red` sem um commit `test(red):` válido no range
-  (um que toque os testes do diff e adicione um stub que lança), em PR de
-  feature sem `prova/<slug>.ts`, e quando a base não consegue rodar a prova
-  (`package.json` ilegível, sem `resumo.json`). PR só de `docs`/`process` é
-  SKIP.
+  (um que toque os testes do diff e adicione um stub que lança — um stub só
+  dentro de um comentário não conta), em PR de feature sem `prova/<slug>.ts`,
+  e quando a base não consegue rodar a prova (`package.json` ilegível, sem
+  `resumo.json`, `npm run prova` sem terminar dentro de 10 minutos). Base sem
+  harness (`package.json` ausente, ou sem `scripts.prova` — o harness #42
+  ainda não existia naquele commit) é PASS logado no summary, não falha.
+  Fora do checkout de CI (sem `--branch`), uma branch local que não segue
+  `<type>/<n>-<slug>` reprova pedindo `--slug`/`--branch` explícito. PR só de
+  `docs`/`process` é SKIP.
 
 ## CLI
 

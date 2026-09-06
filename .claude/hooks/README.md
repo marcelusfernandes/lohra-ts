@@ -39,8 +39,36 @@ habilita as seams `LOHRA_STOP_BRANCH`, `LOHRA_STOP_LAST_COMMIT_MSG`,
 **Reentrância**: o filho da prova recebe `LOHRA_STOP_GATE_ACTIVE=1` e o hook sai
 0 ao encontrá-la (fora da bancada) — uma prova que exercite hooks não recursa.
 **Hermeticidade**: o filho nunca herda outra `LOHRA_STOP_*` nem `LOHRA_BENCH`.
-**Limite declarado**: o hook não lê `stop_hook_active` — bloqueia toda vez que a
-prova está vermelha; o teto de bloqueios por turno é a issue #61.
+**Teto**: lê `stop_hook_active`; no terceiro bloqueio consecutivo libera o turno
+(seção "Bancada").
+
+## Bancada (issue #61)
+
+Cada hook tem bancada em vitest que o invoca em subprocesso com payload
+sintético e afirma exit code e stderr: `tests/protege-main.test.ts`,
+`tests/protege-escrita.test.ts`, `tests/stop-gate.test.ts` — declaradas em
+`prova/bancada-hooks.ts` (`npm run prova -- bancada-hooks`). `LOHRA_BENCH=1` é
+o único portão das seams (`LOHRA_PM_*` no protege-main, `LOHRA_STOP_*` no
+stop-gate); sem ele os hooks consultam `git`/`gh` de verdade. O
+`protege-escrita` não tem seam: a bancada monta um repo temporário com
+`.claude/settings.json`, `lohra/` aninhado e um worktree em `.claude/worktrees/`.
+
+**Waiver de classe `docs`** (`protege-main`, item 6): se todos os arquivos da PR
+são `docs/**`, `README.md`, `CLAUDE.md` ou `AGENTS.md`, a label
+`review:approved` é dispensada (avisado no stderr); checks verdes continuam
+obrigatórios. O `gh` devolve no máximo 100 arquivos: se `changedFiles` for
+maior que a lista, o waiver não se aplica (fail-closed). `LOHRA_MERGE_LIVRE=1`
+deixa de ser necessário para PR de docs.
+
+**Raiz do `protege-escrita`**: toplevel git mais interno, a partir do alvo, que
+contenha `.claude/settings.json` — worktree de agente é raiz própria; `lohra/`
+(repo aninhado sem settings) cai na raiz do projeto. Alvo que resolve para fora
+de qualquer repo é permitido (scratchpad), salvo quando o caminho textual está
+dentro da raiz do cwd — symlink que foge — que é negado.
+
+**Teto do `stop-gate`**: três bloqueios consecutivos da prova (payload
+`stop_hook_active`) liberam o turno com aviso; contador em
+`.prova/.stop-gate-bloqueios`, zerado por prova verde ou turno novo.
 
 ## Limite do parser (declarado)
 
