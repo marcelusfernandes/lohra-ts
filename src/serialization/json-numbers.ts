@@ -220,7 +220,13 @@ function encodeCompact(value: unknown): string {
 
 /** Compact JSON stringify that respects `JsonFloat`/`JsonInteger` markers —
  * a float keeps its trailing `.0`, an out-of-range integer keeps every
- * digit. Plain `number`s serialize with the JS engine's own rules. */
-export function stringifyJsonPreservingNumbers(value: unknown): string {
+ * digit. Plain `number`s serialize with the JS engine's own rules.
+ *
+ * TODO(#71, test-red): `indent` is not implemented yet, and non-finite
+ * numbers are not yet rejected — the next commit makes this throw
+ * (docs/adr/0003-native-wire-format.md, "JSON output" item 4) and adds the
+ * two-space indent shape (item 3). */
+export function stringifyJsonPreservingNumbers(value: unknown, indent?: 2): string {
+  void indent;
   return encodeCompact(value);
 }
