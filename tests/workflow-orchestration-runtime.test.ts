@@ -363,3 +363,44 @@ describe("OrchestrationChildRuntime — end to end with a real WorkflowService",
     }
   });
 });
+
+describe("OrchestrationChildRuntime — ephemeral launch: leaves deny-all until the store path installs (#101)", () => {
+  it("a WorkflowService with no store (chat.ts/dashboard.ts's own wiring) never calls installLeafSandbox, so a leaf's tool call is denied fail-closed", async () => {
+    // launch() (no store, service.ts) never installs a sandbox — only
+    // launchDurable() does. This is a KNOWN, spec'd consequence of #107's
+    // AC "spawn com causalContext.runId sem instalação viva não despacha
+    // tool sem sandbox": before this issue, an ephemeral leaf's tool calls
+    // ran through createChildDispatch(baseDispatch) unsandboxed; after,
+    // every one is denied fail-closed until #101 wires a store (and thus
+    // launchDurable) into production. Confirmed live via dogfooding
+    // (run_workflow through chat.ts with no store): the leaf's read_file
+    // call came back denied with exactly this message.
+    let capturedWrapDispatch: WrapDispatch | undefined;
+    const baseCalls: string[] = [];
+    const runChild: ChildRunner = async (_subId, config) => {
+      capturedWrapDispatch = config.wrapDispatch;
+      const base: ChildToolDispatch = (name) => {
+        baseCalls.push(name);
+        return Promise.resolve(`allowed:${name}`);
+      };
+      const dispatch = config.wrapDispatch === undefined ? base : config.wrapDispatch(base);
+      const out = await dispatch("read_file", { path: "/tmp/whatever" });
+      return ok(out);
+    };
+    const runtime = new OrchestrationChildRuntime(makeCore(runChild));
+    // no `store` at all — exactly chat.ts:287/dashboard.ts:212's own shape
+    const service = new WorkflowService({ runtime });
+
+    const started = service.start(spec());
+    if ("error" in started) throw new Error(started.error);
+    const done = (await service.status(started.run_id, true)) as Record<string, unknown>;
+
+    expect(done.status).toBe("complete");
+    expect(done.outputs).toEqual({
+      a: "ERROR: no leaf sandbox installed for this run — 'read_file' denied fail-closed",
+    });
+    // the deny short-circuited before the real leaf tool dispatch
+    expect(baseCalls).toEqual([]);
+    expect(capturedWrapDispatch).toBeDefined();
+  });
+});
