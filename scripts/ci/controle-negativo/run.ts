@@ -4,7 +4,7 @@
 // que os testes novos de uma PR reprovam contra a base da PR, para que
 // "teste primeiro" seja verificado por máquina, não só prometido no commit.
 //
-// SKIP por classe (ADR 0004 item 7, `lib.ts:114-160`) — dois casos, ambos
+// SKIP por classe (ADR 0004 item 7, `lib.ts:114-160`) — três casos, todos
 // exit 0 ANTES de sequer resolver o slug:
 //   - classes `docs`/`process`: TODO o diff cai em `docs/**`, `README.md`,
 //     `CLAUDE.md`, `AGENTS.md`, `.worktreeinclude`, `.claude/**`,
@@ -15,6 +15,14 @@
 //     acima, tudo que sobra no diff é `prova/<slug>.ts` que já existia na
 //     base — nenhum `tests/**`/`src/**`/`scripts/**` de comportamento novo
 //     entrou (`lib.ts#soDeclaracaoDeProvaExistenteEditada`).
+//   - diff inteiro cai no overlay (issue #114, bloqueava a PR #113): tirando
+//     as classes acima, tudo que sobra é `tests/**`/`prova/**`, com pelo
+//     menos um `tests/**` que já existia na base (EDITADO, não criado) — o
+//     overlay do HEAD sobre a base reproduz o próprio HEAD (base+overlay ≡
+//     head) e o desfecho é sempre `vacuous-pass`, mesmo com um `test(red):`
+//     real. Um `tests/**` inteiramente NOVO sem nenhum `src/**` continua
+//     exigindo controle — é o caso normal de `vacuous-pass`/`structural-red`
+//     que a suíte de integração já cobre — `lib.ts#soArquivosDoOverlay`.
 //
 // Mecânica (fora do caso SKIP): `git worktree add --detach <tmp> <base>`,
 // overlay só dos arquivos de teste do diff (`tests/**/*.test.ts`,
@@ -111,6 +119,7 @@ import {
   ehCommitTestRed,
   parseArgs,
   semHarnessNaBase,
+  soArquivosDoOverlay,
   soDeclaracaoDeProvaExistenteEditada,
   validarResumo,
 } from "./lib.js";
@@ -526,6 +535,21 @@ function main(): void {
     process.stdout.write(
       "controle-negativo: SKIP — só declaração de prova existente editada, nada a controlar\n",
     );
+    process.exit(0);
+  }
+
+  // Issue #114 (bloqueava a PR #113): diff inteiro dentro do overlay
+  // (`tests/**`+`prova/**`, com pelo menos um `tests/**` JÁ EXISTENTE na
+  // base, editado) — base+overlay ≡ head, o mecanismo abaixo nunca
+  // consegue discriminar vermelho de verde. Motivo explícito e distinto
+  // dos outros dois SKIPs: o revisor confere o commit `test(red):`
+  // manualmente.
+  if (soArquivosDoOverlay(arquivosAlterados, (arquivo) => existeNoCommit(root, base, arquivo))) {
+    const motivo =
+      "SKIP — diff só de tests/**+prova/**: base+overlay ≡ head, o controle não discrimina; " +
+      "o revisor confere o commit test(red):";
+    escreverSummary(`## controle-negativo\n\n${motivo}`);
+    process.stdout.write(`controle-negativo: ${motivo}\n`);
     process.exit(0);
   }
 

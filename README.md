@@ -161,7 +161,12 @@ job. Quando reprovam:
   ainda não existia naquele commit) é PASS logado no summary, não falha.
   Fora do checkout de CI (sem `--branch`), uma branch local que não segue
   `<type>/<n>-<slug>` reprova pedindo `--slug`/`--branch` explícito. PR só de
-  `docs`/`process` é SKIP.
+  `docs`/`process` é SKIP; PR cujo diff (tirando `docs`/`process`) cai
+  inteiro em `tests/**`/`prova/**`, com pelo menos um `tests/**` EDITADO
+  (não criado), também é SKIP — o overlay reproduz o próprio HEAD
+  (base+overlay ≡ head) e o mecanismo nunca discrimina vermelho de verde; o
+  revisor confere o commit `test(red):` manualmente. Um `tests/**`
+  inteiramente novo sem produção continua controlado normalmente.
 
 ## CLI
 
