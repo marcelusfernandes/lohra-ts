@@ -11,5 +11,6 @@ export default {
     "tests/transports-provider-clients.test.ts",
     "tests/transports-provider-modes.test.ts",
     "tests/workflow-refs.test.ts",
+    "tests/gateway/tool-event-payload.test.ts",
   ],
 } satisfies Declaracao;
