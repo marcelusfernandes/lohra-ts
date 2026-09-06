@@ -256,6 +256,22 @@ describe("contemStubQueLanca", () => {
     const diff = ["+++ b/src/x.ts", '+  throw new Error("not implemented");', ""].join("\n");
     expect(contemStubQueLanca(diff)).toBe(true);
   });
+
+  it("ignora continuação de comentário de bloco cujo abridor é linha de contexto, não adicionada (issue #78)", () => {
+    // `/**` e `*/` são linhas de CONTEXTO (sem `+`) — só a linha do meio foi
+    // adicionada. `linhasAdicionadas` nunca vê o abridor/fechador do bloco,
+    // então a remoção de comentário de bloco (que precisa ver `/*`...`*/`
+    // dentro do próprio texto extraído) não pega esse caso — só a exclusão
+    // de linha que começa com `*` (herdada da issue #62) pega.
+    const diff = [
+      "+++ b/src/x.ts",
+      " /**",
+      '+ * throw new Error("not implemented") — exemplo',
+      "  */",
+      "",
+    ].join("\n");
+    expect(contemStubQueLanca(diff)).toBe(false);
+  });
 });
 
 describe("ehArquivoDocsOuProcess / deveSerIgnorado", () => {
