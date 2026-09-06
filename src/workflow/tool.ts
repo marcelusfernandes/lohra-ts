@@ -2,7 +2,7 @@ import { toolError, toolResult } from "../tools/envelope.js";
 import type { ToolArguments, ToolHandler } from "../tools/types.js";
 import type { WorkflowService } from "./service.js";
 import type { AuditRepository } from "../state/audit-repository.js";
-import { pythonJsonLoads } from "../serialization/python-json.js";
+import { parseJsonPreservingNumbers } from "../serialization/json-numbers.js";
 import { parseAuditQuery } from "./audit-query.js";
 
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
@@ -14,9 +14,9 @@ function record(value: unknown): Readonly<Record<string, unknown>> | null {
 function auditResult(repository: AuditRepository, args: ToolArguments): string {
   const parsed = parseAuditQuery(args);
   if ("error" in parsed) return toolError(parsed.error);
-  const page = pythonJsonLoads(JSON.stringify(repository.query(parsed.query))) as Readonly<
-    Record<string, unknown>
-  >;
+  const page = parseJsonPreservingNumbers(
+    JSON.stringify(repository.query(parsed.query)),
+  ) as Readonly<Record<string, unknown>>;
   return toolResult(undefined, page);
 }
 

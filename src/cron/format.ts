@@ -1,9 +1,10 @@
-import { pythonFloat, pythonJsonDumps } from "../serialization/python-json.js";
+import { jsonFloat } from "../serialization/json-numbers.js";
+import { pythonJsonDumps } from "../serialization/python-json.js";
 
 /** CPython's `str(float)` — same digit precision as JSON's float encoding, different tokens
  * for the three special values (`nan`/`inf`/`-inf`, lowercase, vs JSON's `NaN`/`Infinity`). */
 export function pythonFloatStr(value: number): string {
-  const json = pythonJsonDumps(pythonFloat(value));
+  const json = pythonJsonDumps(jsonFloat(value));
   if (json === "NaN") return "nan";
   if (json === "Infinity") return "inf";
   if (json === "-Infinity") return "-inf";

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { pythonFloat } from "../src/serialization/python-json.js";
+import { jsonFloat } from "../src/serialization/json-numbers.js";
 import {
   InvalidReferenceError,
   findRefs,
@@ -42,7 +42,7 @@ describe("workflow refs", () => {
   });
 
   it("uses Python-compatible numeric stringification", () => {
-    expect(resolveValue("v=${num}", { num: pythonFloat(1) })).toBe("v=1.0");
+    expect(resolveValue("v=${num}", { num: jsonFloat(1) })).toBe("v=1.0");
     expect(resolveValue("v=${big}", { big: 12_345_678_901_234_567_890n })).toBe(
       "v=12345678901234567890",
     );
