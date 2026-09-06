@@ -390,6 +390,11 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     // turns must settle before the MCP sessions are closed.
     if (mcpManager !== null) await mcpManager.shutdown();
     await imageGenerator?.close();
+    // WorkflowService.shutdown() BEFORE connection.close() (#102): a durable
+    // run's own completion handler releases its lease and writes its
+    // terminal line while the connection is still open, instead of racing
+    // this close and failing later against a closed one.
+    await workflowService.shutdown();
     connection.close();
   }
 }
