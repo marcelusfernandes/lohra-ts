@@ -85,26 +85,40 @@ describe("OrchestrationChildRuntime — leaf sandbox installation", () => {
       return Promise.resolve(ok("done"));
     };
     const runtime = new OrchestrationChildRuntime(makeCore(runChild));
+    const tagCalls: string[] = [];
+    // A real sandbox wrap only inspects name/args and returns base's result
+    // UNCHANGED when it doesn't deny — the sync/async shim's pending token
+    // has to survive untouched through it, so this test wrap records which
+    // fence ran via a side channel instead of transforming the string.
     const tagWrap =
       (tag: string): ((base: LeafToolDispatch) => LeafToolDispatch) =>
       (base) =>
-      (name, args) =>
-        `${tag}:${base(name, args)}`;
+      (name, args) => {
+        tagCalls.push(`${tag}:${name}`);
+        return base(name, args);
+      };
 
     const handle1 = runtime.installLeafSandbox({ runId: "r1", fence: 1, wrap: tagWrap("A") });
     const handle2 = runtime.installLeafSandbox({ runId: "r1", fence: 2, wrap: tagWrap("B") });
     // dispose from the OLDER fence must not touch the newer, still-live install
     handle1.dispose();
 
-    runtime.spawn(spawnRequest("r1"));
+    const id1 = runtime.spawn(spawnRequest("r1"));
+    // ConcurrencyGate.run() awaits an already-resolved promise before
+    // calling runChild, so it only actually runs on a later microtask —
+    // collect(wait:true) is the honest way to wait for that.
+    await runtime.collect(id1, { wait: true, timeoutSeconds: 5 });
     const wrapDispatch = captured[0];
     if (wrapDispatch === undefined) throw new Error("wrapDispatch missing");
     const base: ChildToolDispatch = (name) => Promise.resolve(`base:${name}`);
-    await expect(wrapDispatch(base)("read_file", {})).resolves.toBe("B:base:read_file");
+    await expect(wrapDispatch(base)("read_file", {})).resolves.toBe("base:read_file");
+    // fence 2 (B), not fence 1 (A), ran — dispose(fence 1) was a no-op
+    expect(tagCalls).toEqual(["B:read_file"]);
 
     // now retire the still-live fence 2 install: a later spawn gets nothing
     handle2.dispose();
-    runtime.spawn(spawnRequest("r1"));
+    const id2 = runtime.spawn(spawnRequest("r1"));
+    await runtime.collect(id2, { wait: true, timeoutSeconds: 5 });
     const secondWrapDispatch = captured[1];
     if (secondWrapDispatch === undefined) throw new Error("second wrapDispatch missing");
     const secondBaseCalls: string[] = [];
@@ -128,7 +142,8 @@ describe("OrchestrationChildRuntime — fail-closed without a live installation"
     const runtime = new OrchestrationChildRuntime(makeCore(runChild));
 
     // no installLeafSandbox call at all for this runId
-    runtime.spawn(spawnRequest("orphan-run"));
+    const id = runtime.spawn(spawnRequest("orphan-run"));
+    await runtime.collect(id, { wait: true, timeoutSeconds: 5 });
     if (captured === undefined) throw new Error("wrapDispatch missing");
     const baseCalls: string[] = [];
     const base: ChildToolDispatch = (name) => {
@@ -155,13 +170,22 @@ describe("OrchestrationChildRuntime — steer keeps the original wrap", () => {
       return ok(out);
     };
     const runtime = new OrchestrationChildRuntime(makeCore(runChild));
-    const wrap: (base: LeafToolDispatch) => LeafToolDispatch = (base) => (name, args) =>
-      `wrapped:${base(name, args)}`;
+    const wrapCalls: string[] = [];
+    // A real sandbox wrap (sandboxDispatch/taintWrap/stretchToolDispatch)
+    // only inspects name/args and returns base's result UNCHANGED when it
+    // doesn't deny — the sync/async shim's pending token has to survive
+    // untouched through it, so this test wrap mirrors that instead of
+    // transforming the string (which would break the shim, not this test).
+    const wrap: (base: LeafToolDispatch) => LeafToolDispatch = (base) => (name, args) => {
+      wrapCalls.push(name);
+      return base(name, args);
+    };
     runtime.installLeafSandbox({ runId: "r-steer", fence: 1, wrap });
 
     const id = runtime.spawn(spawnRequest("r-steer"));
     const first = await runtime.collect(id, { wait: true, timeoutSeconds: 5 });
-    expect(first.output).toBe("wrapped:allowed:read_file");
+    expect(first.output).toBe("allowed:read_file");
+    expect(wrapCalls).toEqual(["read_file"]);
 
     // resurrect via steer — no causalContext passed, mirroring the real
     // ChildRuntime.steer(id, prompt) call; the wrap must still come from the
@@ -169,7 +193,9 @@ describe("OrchestrationChildRuntime — steer keeps the original wrap", () => {
     // entry.originalConfig, which already carries wrapDispatch).
     runtime.steer(id, "again");
     const second = await runtime.collect(id, { wait: true, timeoutSeconds: 5 });
-    expect(second.output).toBe("wrapped:allowed:read_file");
+    expect(second.output).toBe("allowed:read_file");
+    // the SAME wrap (not a fresh one, and not the raw base) ran again
+    expect(wrapCalls).toEqual(["read_file", "read_file"]);
   });
 });
 
