@@ -358,6 +358,11 @@ describe("run.ts (dry-run, subprocesso)", () => {
     expect(result.status, result.stderr).toBe(0);
   });
 
+  // Issue #128: única chamada dupla de runDryRun (subprocesso tsx real)
+  // nesta suíte; medido isoladamente sob carga real em 3966-5039ms — 30_000
+  // alinha com o padrão já usado no arquivo para subprocesso real (ver o
+  // terceiro argumento `30_000` nos testes baseados em git/HEAD abaixo), com
+  // margem generosa sobre o pior caso medido.
   it("import-proibido desligada por default quando o marcador (python-json.ts/python-repr.ts) existe no root", () => {
     const dir = makeWorkdir();
     mkdirSync(join(dir, "src", "serialization"), { recursive: true });
@@ -376,6 +381,31 @@ describe("run.ts (dry-run, subprocesso)", () => {
     const comFlag = runDryRun(dir, filesFile, ["--apos-17"]);
     expect(comFlag.status).toBe(1);
     expect(comFlag.stderr).toContain("import-proibido: src/usa.ts");
+  }, 30_000);
+
+  // Issue #128: sob carga pesada da máquina (duas suítes completas em
+  // paralelo), este arquivo reprovou com "Test timed out in 5000ms" no teste
+  // acima — capturado em duas execuções reais (PR #128):
+  //   FAIL tests/ci-contratos.test.ts > ... > import-proibido desligada por
+  //   default quando o marcador (python-json.ts/python-repr.ts) existe no
+  //   root — "Error: Test timed out in 5000ms." (7743ms de wall time até o
+  //   corte).
+  // Causa: é o único teste desta suíte que chama `runDryRun` (um subprocesso
+  // `tsx` real) DUAS vezes em série — seus vizinhos de UMA chamada (as
+  // outras `it(...)` acima que usam `runDryRun`) confiam no default do
+  // vitest (5_000ms) e não reproduziram falha nas mesmas rodadas sob carga.
+  // Medido isoladamente sob carga real (duas suítes completas em paralelo):
+  // 3966–5039ms para as duas chamadas — o orçamento precisa de pelo menos o
+  // dobro do default de uma chamada única. Meta-teste abaixo prende esse
+  // orçamento estruturalmente: se alguém remover o `30_000` do teste-alvo,
+  // este meta-teste reprova antes que a suíte volte a flakar.
+  it("budget: o teste com dois runDryRun tem pelo menos o dobro do default de uma chamada única (issue #128)", (ctx) => {
+    const nomeAlvo =
+      "import-proibido desligada por default quando o marcador (python-json.ts/python-repr.ts) existe no root";
+    const alvo = ctx.task.suite?.tasks.find((t) => t.name === nomeAlvo);
+    if (alvo === undefined) throw new Error(`teste-alvo "${nomeAlvo}" não encontrado nesta suíte`);
+    const timeout = (alvo as { timeout?: number }).timeout;
+    expect(timeout).toBeGreaterThanOrEqual(10_000);
   });
 
   it("import-proibido ligada por default quando o marcador não existe no root", () => {
