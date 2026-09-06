@@ -125,8 +125,9 @@ function contarLinhas(conteudo: string): number {
 //
 // Dívida conhecida em `main` no momento da #93 (não é para ser paga aqui —
 // ver "Fora de escopo" na issue): `tests/workflow-audit-live.test.ts`
-// (1216 linhas). `find src tests scripts -name '*.ts' -o -name '*.mjs' |
-// xargs wc -l | awk '$1>800'` lista o inventário completo a qualquer momento.
+// (1213 linhas, entre outros — inventário completo no corpo da PR #93).
+// `find src tests scripts -name '*.ts' -o -name '*.mjs' | xargs wc -l |
+// awk '$1>800'` lista o inventário atualizado a qualquer momento.
 const arquivoGrande: Regra = {
   id: "arquivo-grande",
   descreve:
