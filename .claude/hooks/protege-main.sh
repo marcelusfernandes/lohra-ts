@@ -14,15 +14,18 @@
 #      dispensada (avisado no stderr); os checks verdes continuam obrigatórios.
 #
 # Os modos `--all`/`--mirror` do push contam como push em main (empurram toda branch).
-# Prefixos com flag: `sudo -u X [--]`, `env -i`, `env VAR=x [--]`, `nice -n N` são
-# atravessados. O waiver de docs exige `changedFiles == files.length`: o `gh`
+# Prefixos com flag: `sudo -u X [--]`, `env -i`, `env -u X`/`env -uX`, `env VAR=x [--]`,
+# `nice -n N`/`nice -nN` são atravessados (valor separado ou colado ao flag; #77). O waiver de docs exige `changedFiles == files.length`: o `gh`
 # devolve no máximo 100 arquivos em `files`, e uma lista truncada NÃO prova que
 # tudo é docs — nega, pedindo a label (fail-closed; revisão da PR #66).
 #
 # BANCADA (tests/protege-main.test.ts): `LOHRA_BENCH=1` é o único portão que
 # habilita as seams LOHRA_PM_BRANCH (branch atual), LOHRA_PM_CHECKS_JSON (saída
-# de `gh pr checks --json name,state`) e LOHRA_PM_VIEW_JSON (saída de
-# `gh pr view --json labels,reviewDecision,files`). Sem o portão nenhuma é lida.
+# de `gh pr checks --json name,state`), LOHRA_PM_VIEW_JSON (saída de
+# `gh pr view --json labels,reviewDecision,files,changedFiles`) e LOHRA_PM_ARGS_OUT
+# (arquivo onde o hook anexa, uma por linha, a linha de comando `gh` que
+# executaria — a bancada prova que `--repo` e o número da PR são repassados).
+# Sem o portão nenhuma é lida.
 #
 # Válvulas, para bootstrap e operação humana consciente (valem no ambiente do
 # hook OU escritas no próprio comando, ex.: `LOHRA_PERMITE_PUSH_MAIN=1 git push`):
@@ -81,6 +84,11 @@ PM_PAYLOAD="$payload" node -e '
     const r = spawnSync(args[0], args.slice(1), { cwd, encoding: "utf8" });
     return { ok: r.status === 0, out: String(r.stdout || ""), err: String(r.stderr || "") };
   };
+  // Bancada: sob LOHRA_BENCH=1, LOHRA_PM_ARGS_OUT recebe a linha `gh` que seria executada (#77).
+  const registrarArgs = (args) => {
+    const alvo = seam("ARGS_OUT");
+    if (alvo !== undefined) require("fs").appendFileSync(alvo, args.join(" ") + "\n");
+  };
   const branchAtual = () => {
     const viaSeam = seam("BRANCH");
     if (viaSeam !== undefined) return viaSeam;
@@ -97,7 +105,7 @@ PM_PAYLOAD="$payload" node -e '
   // Segmentos em posição de comando (ver LIMITE DECLARADO no cabeçalho).
   const PALAVRAS = /^(?:(?:if|elif|while|until|then|do|else|!)\s+)*/;
   // sudo: flags com argumento (-u/-g/-C/-D/-h/-p/-r/-T) e flags soltas; env: -i, -u X, VAR=x
-  const PREFIXOS = /^(?:\w+=\S*\s+|sudo(?:\s+(?:-[ugCDhprT]\s+\S+|-[A-Za-z]+|--\S*))*\s+|env(?:\s+(?:-i|-u\s+\S+|--\S*|\w+=\S*))*\s+|command\s+|builtin\s+|exec\s+|time\s+|nohup\s+|nice(?:\s+-n\s+\S+)?\s+|\\)*/;
+  const PREFIXOS = /^(?:\w+=\S*\s+|sudo(?:\s+(?:-[ugCDhprT]\s+\S+|-[A-Za-z]+|--\S*))*\s+|env(?:\s+(?:-i|-u\s*\S+|--\S*|\w+=\S*))*\s+|command\s+|builtin\s+|exec\s+|time\s+|nohup\s+|nice(?:\s+-n\s*\S+)?\s+|\\)*/;
   const segmentos = cmd
     .replace(/&&|\|\|/g, "\n")
     .split(/[;|&\n(){}`]/)
@@ -154,16 +162,20 @@ PM_PAYLOAD="$payload" node -e '
       }
       const ref = alvo ? [alvo] : [];
       const repo = repoArg ? ["--repo", repoArg] : [];
+      const argsChecks = ["gh", "pr", "checks", ...ref, ...repo, "--json", "name,state"];
+      registrarArgs(argsChecks);
       const checksSeam = seam("CHECKS_JSON");
-      const checks = checksSeam !== undefined ? { ok: true, out: checksSeam, err: "" } : sh(["gh", "pr", "checks", ...ref, ...repo, "--json", "name,state"]);
+      const checks = checksSeam !== undefined ? { ok: true, out: checksSeam, err: "" } : sh(argsChecks);
       let lista = null;
       try { lista = JSON.parse(checks.out || "[]"); } catch {}
       if (!Array.isArray(lista)) negar("não consegui ler os checks da PR (" + (checks.err || "sem saída").trim().slice(0, 160) + ").");
       if (lista.length === 0) negar("a PR não tem nenhum check registrado; sem CI não há merge autônomo. (LOHRA_MERGE_LIVRE=1 só para bootstrap.)");
       const ruins = lista.filter((c) => !["SUCCESS", "SKIPPED", "NEUTRAL"].includes(String(c.state).toUpperCase()));
       if (ruins.length) negar("checks não verdes: " + ruins.map((c) => c.name + "=" + c.state).join(", ") + ".");
+      const argsView = ["gh", "pr", "view", ...ref, ...repo, "--json", "labels,reviewDecision,files,changedFiles"];
+      registrarArgs(argsView);
       const viewSeam = seam("VIEW_JSON");
-      const view = viewSeam !== undefined ? { ok: true, out: viewSeam, err: "" } : sh(["gh", "pr", "view", ...ref, ...repo, "--json", "labels,reviewDecision,files,changedFiles"]);
+      const view = viewSeam !== undefined ? { ok: true, out: viewSeam, err: "" } : sh(argsView);
       let pr = null; try { pr = JSON.parse(view.out || "null"); } catch {}
       if (!pr) negar("não consegui ler a PR (" + (view.err || "sem saída").trim().slice(0, 160) + ").");
       const temLabel = (pr.labels || []).some((l) => l.name === "review:approved");
