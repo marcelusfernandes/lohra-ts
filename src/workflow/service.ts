@@ -1369,3 +1369,5 @@ function rawSpecOf(parsed: WorkflowSpec): Record<string, unknown> {
 function progressJsonOf(progress: ProgressSnapshot): string | null {
   return progress.total > 0 ? JSON.stringify(progress) : null;
 }
+
+// sondagem #156: comentário sem efeito, PR fechada sem merge

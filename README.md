@@ -126,6 +126,15 @@ merge commit com todos verdes e `review:approved` (ADR 0004):
 | `contratos`          | nada em `docs/reference/**`/`lohra/**`; sem import de `python-json`/`python-repr` (após #17); arquivo ≤ 800 linhas, ou já assim na base e sem crescer (#93), ou com `@generated` na primeira linha (#91) | `npm run ci:contratos -- --files-file f [--apos-17]`                                     |
 | `controle-negativo`  | os testes do diff (overlay do diff inteiro em `tests/**`+`prova/**`, helpers/fixtures inclusos — #123), aplicados sobre a base da PR, reprovam (`npm run prova -- <slug>` na base)                       | `npm run ci:controle-negativo -- --base <sha> --head <sha>`                              |
 
+Um sexto workflow, `mutations.yml` (#156), não é required: em `pull_request`
+que toca `src/**`, `scripts/mutations/**` ou o próprio workflow, o job `plan`
+roda `scripts/github/mutations-matrix.ts` (lê `scripts/mutations/slices.json`
+e o diff `base...head`; mudança em `scripts/mutations/**` seleciona todas as
+fatias) e o job `mutate` roda `npm run mutations:<fatia>` uma vez por fatia
+selecionada, com o `.mutation-evidence/` de cada uma como artefato
+`mutation-evidence-<fatia>`. PR só de docs não dispara nada. Reproduzir
+localmente a seleção: `npx tsx scripts/github/mutations-matrix.ts --files-file f`.
+
 Os três últimos rodam só em `pull_request` e escrevem um bloco no summary do
 job. Quando reprovam:
 
