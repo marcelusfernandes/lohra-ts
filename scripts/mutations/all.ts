@@ -8,13 +8,12 @@
 // fatia e o id do sobrevivente se um aparecer em qualquer corrida, ou se
 // `restoreGreen` vier `false`; falha com `MUTATION_NONDETERMINISTIC:<fatia>`
 // se os digests das duas corridas da mesma fatia divergirem — a mesma
-// mecânica do agregador legado (`scripts/parity/closeout/run-closeout-mutations.ts`,
-// hoje aposentado; ver `git show e55d540~1:scripts/parity/closeout/run-closeout-mutations.ts:476-510`),
-// portada sem o diretório de closeout T22 e sem `--t22-only`.
+// mecânica do agregador de closeout T22 hoje aposentado (issue #153; o
+// histórico de `git log` do commit `e55d540~1` guarda a implementação
+// original, linhas 476-510), portada sem o diretório de closeout T22 e sem
+// `--t22-only`. `scripts/mutations/**` não referencia o diretório histórico
+// de paridade por literal (`tests/mutations-directory-pin.test.ts`, #178).
 //
-// STUB (commit `test(red)`): as funções abaixo têm o shape final mas ainda
-// lançam — o vermelho de `tests/mutations-all.test.ts` é de runtime, não de
-// compilação (`worktree-segura`, seção B7).
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -22,6 +21,10 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 
 import { canonicalJson, sha256 } from "./canonical.js";
+
+function isStringArray(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
 
 /** Os dois únicos campos de cada entrada de `slices.json` que este
  * agregador usa — o schema completo já é provado por
@@ -74,8 +77,19 @@ const RUN_TIMEOUT_MS = 20 * 60_000;
 /** Lê e valida `scripts/mutations/slices.json` (ou `path`, para teste),
  * extraindo só `slice`/`script`. */
 export function readSliceConfigs(path: string = SLICES_PATH): readonly SliceConfig[] {
-  const raw = readFileSync(path, "utf8");
-  throw new Error(`not implemented: readSliceConfigs(${path}, ${String(raw.length)} bytes)`);
+  const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+  if (!Array.isArray(parsed)) throw new Error(`${path}: esperava um array no topo`);
+  return parsed.map((entry, index) => {
+    if (typeof entry !== "object" || entry === null)
+      throw new Error(`${path}[${String(index)}]: esperava um objeto`);
+    const candidate = entry as Record<string, unknown>;
+    const { slice, script } = candidate;
+    if (typeof slice !== "string" || slice === "")
+      throw new Error(`${path}[${String(index)}]: "slice" precisa ser string não-vazia`);
+    if (typeof script !== "string" || script === "")
+      throw new Error(`${path}[${String(index)}] (${slice}): "script" precisa ser string`);
+    return { slice, script };
+  });
 }
 
 /** Extrai a última linha de `output` que parece um objeto JSON completo
@@ -84,13 +98,32 @@ export function readSliceConfigs(path: string = SLICES_PATH): readonly SliceConf
  * histórico... lê a última linha de stdout que começa com `{` e termina
  * com `}`"). Lança se nenhuma linha bater. */
 export function extractJsonLine(output: string, context: string): string {
-  throw new Error(`not implemented: extractJsonLine(${context}, ${String(output.length)} bytes)`);
+  const line = output
+    .split("\n")
+    .map((value) => value.trim())
+    .filter((value) => value.startsWith("{") && value.endsWith("}"))
+    .at(-1);
+  if (line === undefined) throw new Error(`MUTATION_ALL_NO_REPORT:${context}`);
+  return line;
 }
 
 /** Valida o shape mínimo de `ParsedSliceReport` a partir de uma linha JSON
  * já extraída. */
 export function parseSliceReport(line: string, context: string): ParsedSliceReport {
-  throw new Error(`not implemented: parseSliceReport(${context}, ${String(line.length)} bytes)`);
+  const parsed: unknown = JSON.parse(line);
+  if (typeof parsed !== "object" || parsed === null)
+    throw new Error(`MUTATION_ALL_BAD_REPORT:${context}`);
+  const candidate = parsed as Record<string, unknown>;
+  const { suite, candidateSha, killed, total, survivors, restoreGreen } = candidate;
+  if (typeof suite !== "string") throw new Error(`MUTATION_ALL_BAD_REPORT:${context}:suite`);
+  if (typeof candidateSha !== "string")
+    throw new Error(`MUTATION_ALL_BAD_REPORT:${context}:candidateSha`);
+  if (typeof killed !== "number") throw new Error(`MUTATION_ALL_BAD_REPORT:${context}:killed`);
+  if (typeof total !== "number") throw new Error(`MUTATION_ALL_BAD_REPORT:${context}:total`);
+  if (!isStringArray(survivors)) throw new Error(`MUTATION_ALL_BAD_REPORT:${context}:survivors`);
+  if (typeof restoreGreen !== "boolean")
+    throw new Error(`MUTATION_ALL_BAD_REPORT:${context}:restoreGreen`);
+  return { suite, candidateSha, killed, total, survivors, restoreGreen };
 }
 
 /** Reduz uma corrida bruta ao relatório interpretado e ao digest
@@ -100,21 +133,43 @@ export function evaluateRun(
   run: RunResult,
   context: string,
 ): { readonly report: ParsedSliceReport; readonly digest: string } {
-  const marker = sha256(context);
-  throw new Error(
-    `not implemented: evaluateRun(${context}, exit=${String(run.status)}, marker=${marker})`,
-  );
+  const line = extractJsonLine(`${run.stdout}\n${run.stderr}`, context);
+  return { report: parseSliceReport(line, context), digest: sha256(line) };
 }
 
-/** Roda `slice.script` duas vezes via `execute` e decide o veredito:
- * sobrevivente em qualquer corrida, `restoreGreen === false` em qualquer
- * corrida, ou digest divergente entre as duas — todas fault, nunca
- * silenciosas (CLAUDE.md, invariante 2). */
+/** Lança se `report` tem sobrevivente ou se `restoreGreen` veio `false` —
+ * fault com causa, nunca silenciosa (CLAUDE.md, invariante 2). */
+function assertRunClean(report: ParsedSliceReport, slice: string): void {
+  if (report.survivors.length > 0) {
+    const [survivorId] = report.survivors;
+    throw new Error(`MUTATION_SURVIVOR:${slice}:${String(survivorId)}`);
+  }
+  if (!report.restoreGreen) throw new Error(`MUTATION_RESTORE_NOT_GREEN:${slice}`);
+}
+
+/** Roda `slice.script` até duas vezes via `execute`: a segunda corrida só
+ * acontece se a primeira já não tiver reprovado (sobrevivente ou
+ * `restoreGreen` falso) — sem isso, uma fatia com sobrevivente óbvio pagaria
+ * duas corridas de até 20 minutos cada por nada (CLAUDE.md invariante 3,
+ * "budget nunca unbounded"). */
 export function runSliceTwice(
   slice: SliceConfig,
   execute: (script: string) => RunResult,
 ): SliceOutcome {
-  throw new Error(`not implemented: runSliceTwice(${slice.slice}, ${typeof execute})`);
+  const first = evaluateRun(execute(slice.script), slice.slice);
+  assertRunClean(first.report, slice.slice);
+
+  const second = evaluateRun(execute(slice.script), slice.slice);
+  assertRunClean(second.report, slice.slice);
+
+  if (first.digest !== second.digest) throw new Error(`MUTATION_NONDETERMINISTIC:${slice.slice}`);
+
+  return {
+    slice: slice.slice,
+    script: slice.script,
+    ...first.report,
+    digest: first.digest,
+  };
 }
 
 /** Roda todas as fatias, em ordem, parando na primeira que falhar
@@ -124,14 +179,20 @@ export function runAllSlices(
   slices: readonly SliceConfig[],
   execute: (script: string) => RunResult,
 ): readonly SliceOutcome[] {
-  throw new Error(`not implemented: runAllSlices(${String(slices.length)}, ${typeof execute})`);
+  return slices.map((slice) => runSliceTwice(slice, execute));
 }
 
 /** Agrega os vereditos por fatia no relatório final. Lança se a lista vier
  * vazia, ou se alguma fatia relatar um `candidateSha` diferente da
  * primeira (sinal de que o código mudou no meio da corrida). */
 export function buildReport(slices: readonly SliceOutcome[]): AllMutationsReport {
-  throw new Error(`not implemented: buildReport(${String(slices.length)})`);
+  const [first] = slices;
+  if (first === undefined) throw new Error("MUTATION_ALL_EMPTY_SLICES");
+  for (const outcome of slices) {
+    if (outcome.candidateSha !== first.candidateSha)
+      throw new Error(`MUTATION_ALL_SHA_MISMATCH:${outcome.slice}`);
+  }
+  return { candidateSha: first.candidateSha, slices };
 }
 
 /** Escreve `report` em `path` (default `.mutation-evidence/all.json`), em
