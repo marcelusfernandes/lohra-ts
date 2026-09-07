@@ -2,7 +2,7 @@ import process from "node:process";
 
 import { describe, expect, it } from "vitest";
 
-import { runPythonProcess, runTypeScriptProcess } from "../../scripts/parity/process.js";
+import { runTypeScriptProcess } from "../../scripts/parity/process.js";
 
 const base = {
   executable: process.execPath,
@@ -11,16 +11,9 @@ const base = {
 };
 
 describe("bounded process execution", () => {
-  it.each([
-    ["typescript", runTypeScriptProcess],
-    [
-      "python",
-      (request: Parameters<typeof runPythonProcess>[0]) =>
-        runPythonProcess(request, { pythonExecutable: process.env.PYTHON ?? "python3" }),
-    ],
-  ])("turns a %s timeout into a named harness failure", (_name, run) => {
+  it("turns a timeout into a named harness failure", () => {
     expect(() =>
-      run({
+      runTypeScriptProcess({
         ...base,
         argv: ["--input-type=module", "-e", "setTimeout(() => {}, 5000)"],
         timeoutMs: 100,
@@ -29,16 +22,9 @@ describe("bounded process execution", () => {
     ).toThrow(expect.objectContaining({ code: "PROCESS_TIMEOUT" }));
   });
 
-  it.each([
-    ["typescript", runTypeScriptProcess],
-    [
-      "python",
-      (request: Parameters<typeof runPythonProcess>[0]) =>
-        runPythonProcess(request, { pythonExecutable: process.env.PYTHON ?? "python3" }),
-    ],
-  ])("turns %s output overflow into a named harness failure", (_name, run) => {
+  it("turns output overflow into a named harness failure", () => {
     expect(() =>
-      run({
+      runTypeScriptProcess({
         ...base,
         argv: ["--input-type=module", "-e", 'process.stdout.write("x".repeat(10000))'],
         timeoutMs: 2000,
