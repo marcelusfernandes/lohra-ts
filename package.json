@@ -96,6 +96,7 @@
     "parity:t21:gates": "tsx scripts/parity/media/run-gates.ts",
     "mutations:t21": "tsx scripts/mutations/media.ts",
     "mutations:self-update": "tsx scripts/mutations/self-update.ts",
+    "mutations:all": "tsx scripts/mutations/all.ts",
     "pack:t21": "node scripts/parity/media/pack-smoke.mjs",
     "parity:t22:update": "tsx scripts/parity/closeout/update.ts",
     "probe:t22:update": "tsx scripts/parity/closeout/update.ts",
