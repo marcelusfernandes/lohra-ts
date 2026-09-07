@@ -1,10 +1,36 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { COMMAND_SUMMARY, WORKFLOW_SPEC } from "../src/cli/arg-spec.js";
+
 const root = resolve(import.meta.dirname, "..");
 const read = (path: string): string => readFileSync(resolve(root, path), "utf8");
+
+interface PackageJsonShape {
+  readonly version: string;
+  readonly dependencies?: Readonly<Record<string, string>>;
+  readonly devDependencies?: Readonly<Record<string, string>>;
+}
+
+const packageJson = JSON.parse(read("package.json")) as PackageJsonShape;
+
+// Issue #164: "não embute nem chama Python" é um fato sobre duas coisas —
+// nenhuma dependência do pacote referencia Python, e nenhuma linha de
+// `src/` dá spawn/exec num interpretador Python. Não usa o literal
+// `"python3"` sozinho: `src/doctor/*` e `src/onboarding/wizard.ts`
+// legitimamente relatam a versão do Python do *host* (não chamam nada),
+// então a checagem mira a forma de chamada, não a palavra.
+const PYTHON_SPAWN_RE =
+  /\b(?:spawn|spawnSync|exec|execFile|execSync|execFileSync)\s*\(\s*["'`]python/iu;
+
+function listTsFiles(dir: string): string[] {
+  const base = resolve(root, dir);
+  return readdirSync(base, { recursive: true })
+    .filter((entry): entry is string => typeof entry === "string" && entry.endsWith(".ts"))
+    .map((entry) => resolve(base, entry));
+}
 
 describe("T22 public documentation", () => {
   // Issue #164: nenhum `toContain` deste arquivo pode fixar prosa byte a
@@ -22,30 +48,49 @@ describe("T22 public documentation", () => {
   it("documents the exact public CLI and current package", () => {
     const readme = read("README.md");
     expect(readme, "MUTATION_CAUSE:T22-docs-current-version").toContain(
-      "A versão atual é `0.0.11`.",
+      `A versão atual é \`${packageJson.version}\`.`,
     );
-    const expected = [
-      "init",
-      "doctor",
-      "chat",
-      "dashboard",
-      "serve",
-      "cron",
-      "workflow",
-      "models",
-      "tiers",
-      "profile",
-      "auth",
-      "skill",
-      "update",
-    ];
-    const documented = /Os comandos top-level públicos[\s\S]*?`update`\./u
+
+    // Fonte da verdade dos comandos públicos é `COMMAND_SUMMARY`
+    // (`src/cli/arg-spec.ts`), não a prosa do README — os dois lados
+    // derivam do mesmo fato, mas quem muda é `arg-spec.ts`.
+    const expectedCommands = Object.keys(COMMAND_SUMMARY);
+    const lastCommand = expectedCommands.at(-1);
+    expect(lastCommand, "COMMAND_SUMMARY não pode ficar vazio").toBeDefined();
+    const commandsBlockRe = new RegExp(
+      `Os comandos top-level públicos[\\s\\S]*?\`${String(lastCommand)}\`\\.`,
+      "u",
+    );
+    const documented = commandsBlockRe
       .exec(readme)?.[0]
       .match(/`([a-z-]+)`/gu)
       ?.map((value) => value.slice(1, -1));
-    expect(documented).toEqual(expected);
-    expect(readme).toContain("não existe\n`workflow run`");
-    expect(readme).toContain("não\nembute nem chama Python");
+    expect(documented).toEqual(expectedCommands);
+
+    // "não existe `workflow run`" é um fato sobre `WORKFLOW_SPEC`, não
+    // sobre a quebra de linha da frase do README que o afirma.
+    const workflowCmd = WORKFLOW_SPEC.positionals.find((p) => p.name === "workflow_cmd");
+    expect(workflowCmd, "WORKFLOW_SPEC perdeu o positional workflow_cmd").toBeDefined();
+    expect(workflowCmd?.choices, "workflow_cmd sem choices declarados").toBeDefined();
+    expect(workflowCmd?.choices).not.toContain("run");
+
+    const dependencyNames = Object.keys({
+      ...packageJson.dependencies,
+      ...packageJson.devDependencies,
+    });
+    const pythonDependencies = dependencyNames.filter((name) =>
+      name.toLowerCase().includes("python"),
+    );
+    expect(pythonDependencies).toEqual([]);
+
+    const pythonSpawningLines = listTsFiles("src").flatMap((file) =>
+      readFileSync(file, "utf8")
+        .split("\n")
+        .filter((line) => PYTHON_SPAWN_RE.test(line))
+        .map((line) => `${file}: ${line.trim()}`),
+    );
+    expect(pythonSpawningLines).toEqual([]);
+
     expect(readme).toContain("NOT_MEASURED");
     expect(readme, "MUTATION_CAUSE:T22-docs-architecture-decided").toContain(
       "O owner escolheu `typescript-mainline`",
