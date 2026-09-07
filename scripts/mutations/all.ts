@@ -1,9 +1,10 @@
 // scripts/mutations/all.ts — agregador único de mutação (issue #155, passo
-// 11 de `orquestracao.md`). Lê `slices.json`, roda cada `script` DUAS vezes
-// por subprocesso (`npm run <script>` — nunca por import: cinco dos seis
-// runners chamam `main()` incondicionalmente ao serem importados, `#186`
-// corrige isso em paralelo em `scripts/mutations/**`), agrega
-// `{slice, killed, total, survivors, digest}` por fatia e escreve
+// 11 de `orquestracao.md`). Lê `slices.json`, roda cada `script` até duas
+// vezes por subprocesso (`npm run <script>` — nunca por import: cinco dos
+// seis runners chamam `main()` incondicionalmente ao serem importados,
+// `#186` corrige isso em paralelo em `scripts/mutations/**`); a segunda
+// corrida só acontece se a primeira não reprovar (`runSliceTwice` abaixo).
+// Agrega `{slice, killed, total, survivors, digest}` por fatia e escreve
 // `.mutation-evidence/all.json`. Falha (`process.exitCode = 1`) nomeando a
 // fatia e o id do sobrevivente se um aparecer em qualquer corrida, ou se
 // `restoreGreen` vier `false`; falha com `MUTATION_NONDETERMINISTIC:<fatia>`
@@ -128,11 +129,15 @@ export function parseSliceReport(line: string, context: string): ParsedSliceRepo
 
 /** Reduz uma corrida bruta ao relatório interpretado e ao digest
  * determinístico (sha256 da linha JSON bruta — não uma reserialização, para
- * que reordenar chaves no runner nunca esconda não-determinismo real). */
+ * que reordenar chaves no runner nunca esconda não-determinismo real).
+ * `status === null` (processo morto por sinal — timeout do `spawnSync`
+ * inclusive) lança uma causa nomeada em vez de deixar `extractJsonLine`
+ * relatar "sem relatório" para o sintoma errado. */
 export function evaluateRun(
   run: RunResult,
   context: string,
 ): { readonly report: ParsedSliceReport; readonly digest: string } {
+  if (run.status === null) throw new Error(`MUTATION_ALL_KILLED:${context}`);
   const line = extractJsonLine(`${run.stdout}\n${run.stderr}`, context);
   return { report: parseSliceReport(line, context), digest: sha256(line) };
 }

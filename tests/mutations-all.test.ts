@@ -164,6 +164,12 @@ describe("evaluateRun", () => {
     const b = evaluateRun(okRun(), "ctx");
     expect(a.digest).toBe(b.digest);
   });
+
+  it("lança MUTATION_ALL_KILLED quando status é null (processo morto por sinal/timeout), sem tentar extrair JSON", () => {
+    expect(() => evaluateRun({ status: null, stdout: "", stderr: "" }, "ctx")).toThrow(
+      /MUTATION_ALL_KILLED:ctx/,
+    );
+  });
 });
 
 const fakeSlice: SliceConfig = { slice: "fake", script: "mutations:fake" };
