@@ -163,6 +163,14 @@ export function parseVitestOutcome(
   };
 }
 
+/** Monta os args de `vitest run` com `--reporter=json` e `--outputFile`
+ * apontando para `outputFile` — nunca `/dev/stdout` (issue #191: no runner
+ * ubuntu do Actions, `/dev/stdout` do processo filho é um socket que
+ * `open()` recusa com `ENXIO`). Função pura — não toca disco nem spawna. */
+export function vitestArgs(_args: readonly string[], _outputFile: string): readonly string[] {
+  throw new Error("not implemented");
+}
+
 function runVitestReporterJson(directory: string, args: readonly string[]): RunOutcome {
   const result = spawnSync(
     join(directory, "node_modules/.bin/vitest"),

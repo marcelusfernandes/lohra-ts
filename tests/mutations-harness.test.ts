@@ -37,6 +37,7 @@ import {
   restoreAll,
   runVitestFiles,
   snapshotFiles,
+  vitestArgs,
   writeReport,
 } from "../scripts/mutations/harness.js";
 import type { MutationReport } from "../scripts/mutations/types.js";
@@ -307,19 +308,82 @@ describe("prepareArchiveSandbox", () => {
   });
 });
 
+// Vitest falso que escreve `json` no caminho recebido via `--outputFile=` e
+// nada em stdout — molde do ubuntu-latest real (issue #191). Quando o
+// caminho é `/dev/stdout` — o que a implementação anterior sempre passava —
+// o script simula o ENXIO real do runner do Actions: não escreve nada em
+// lugar nenhum, em vez de vazar o conteúdo pelo stdout capturado (o que
+// aconteceria de verdade num shell local e mascararia a reprovação). Assim
+// o teste reprova de fato contra a implementação antiga, que ignorava o
+// caminho passado e sempre usava `/dev/stdout`.
+function fakeVitestQueEscreveNoOutputFile(json: string): string {
+  return [
+    "#!/bin/sh",
+    'for arg in "$@"; do',
+    '  case "$arg" in',
+    '    --outputFile=*) file="${arg#--outputFile=}" ;;',
+    "  esac",
+    "done",
+    'if [ "$file" = "/dev/stdout" ]; then exit 1; fi',
+    `printf '%s' '${json}' > "$file"`,
+  ].join("\n");
+}
+
 describe("runVitestFiles", () => {
-  it("roda múltiplos arquivos sem `-t` e devolve o outcome agregado", () => {
+  it("roda múltiplos arquivos sem `-t` e devolve o outcome agregado, lido do --outputFile (#191)", () => {
     const dir = mkdtempSync(join(tmpdir(), "mutations-harness-runfiles-"));
+    workdirs.push(dir);
+    mkdirSync(join(dir, "node_modules/.bin"), { recursive: true });
+    writeFileSync(join(dir, "node_modules/.bin/vitest"), fakeVitestQueEscreveNoOutputFile("{}"), {
+      mode: 0o755,
+    });
+
+    const outcome = runVitestFiles(dir, ["tests/a.test.ts", "tests/b.test.ts"]);
+    expect(outcome).toEqual({ exitCode: 0, failedTests: [], ranTests: 0 });
+  });
+});
+
+describe("runVitestReporterJson lê o relatório de --outputFile, não de /dev/stdout (#191)", () => {
+  it("a linha de comando montada não contém /dev/stdout", () => {
+    const args = vitestArgs(["tests/a.test.ts", "-t", "foo"], "/tmp/lohra-mutations-x/vitest.json");
+    expect(args).toEqual([
+      "run",
+      "tests/a.test.ts",
+      "-t",
+      "foo",
+      "--reporter=json",
+      "--outputFile=/tmp/lohra-mutations-x/vitest.json",
+    ]);
+    expect(args.join(" ")).not.toContain("/dev/stdout");
+  });
+
+  it("vitest falso escreve o json no --outputFile e nada em stdout: outcome lido do arquivo", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mutations-harness-outputfile-"));
     workdirs.push(dir);
     mkdirSync(join(dir, "node_modules/.bin"), { recursive: true });
     writeFileSync(
       join(dir, "node_modules/.bin/vitest"),
-      "#!/bin/sh\nprintf '%s' \"$*\" 1>&2\nprintf '{}'\n",
+      fakeVitestQueEscreveNoOutputFile(
+        JSON.stringify({
+          testResults: [{ assertionResults: [{ status: "failed", fullName: "x falha" }] }],
+        }),
+      ),
       { mode: 0o755 },
     );
 
-    const outcome = runVitestFiles(dir, ["tests/a.test.ts", "tests/b.test.ts"]);
-    expect(outcome).toEqual({ exitCode: 0, failedTests: [], ranTests: 0 });
+    const outcome = runVitestFiles(dir, ["tests/a.test.ts"]);
+    expect(outcome).toEqual({ exitCode: 0, failedTests: ["x falha"], ranTests: 1 });
+  });
+
+  it("vitest falso que não escreve o --outputFile: 'vitest produced no JSON report'", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mutations-harness-outputfile-ausente-"));
+    workdirs.push(dir);
+    mkdirSync(join(dir, "node_modules/.bin"), { recursive: true });
+    writeFileSync(join(dir, "node_modules/.bin/vitest"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+
+    expect(() => runVitestFiles(dir, ["tests/a.test.ts"])).toThrow(
+      /vitest produced no json report/i,
+    );
   });
 });
 
