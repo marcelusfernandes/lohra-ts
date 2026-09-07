@@ -164,19 +164,20 @@ export function parseVitestOutcome(
 }
 
 /** Monta os args de `vitest run` com `--reporter=json` e `--outputFile`
- * apontando para `outputFile` — nunca `/dev/stdout` (issue #191: no runner
- * ubuntu do Actions, `/dev/stdout` do processo filho é um socket que
- * `open()` recusa com `ENXIO`). Função pura — não toca disco nem spawna. */
+ * apontando para `outputFile`, um caminho real em disco (issue #191: no
+ * runner ubuntu do Actions, o dispositivo especial de saída padrão do
+ * processo filho é um socket que `open()` recusa com `ENXIO`). Função
+ * pura — não toca disco nem spawna. */
 export function vitestArgs(args: readonly string[], outputFile: string): readonly string[] {
   return ["run", ...args, "--reporter=json", `--outputFile=${outputFile}`];
 }
 
 /** Lança `vitest run` com `--outputFile` apontando para um `mkdtemp`
- * descartável, lê o relatório do arquivo depois do `spawnSync` (nunca de
- * `result.stdout` — issue #191) e remove o diretório temporário sempre, com
- * ou sem erro. Arquivo ausente (vitest falhou antes de escrevê-lo) vira
- * stdout vazio para `parseVitestOutcome`, que lança o mesmo
- * `vitest produced no JSON report` de sempre, com o `stderr` do
+ * descartável, lê o relatório do arquivo depois do `spawnSync` (nunca da
+ * saída padrão capturada — issue #191) e remove o diretório temporário
+ * sempre, com ou sem erro. Arquivo ausente (vitest falhou antes de
+ * escrevê-lo) vira relatório vazio para `parseVitestOutcome`, que lança o
+ * mesmo `vitest produced no JSON report` de sempre, com o `stderr` do
  * subprocesso. */
 function runVitestReporterJson(directory: string, args: readonly string[]): RunOutcome {
   const scratch = mkdtempSync(join(tmpdir(), "lohra-vitest-out-"));
