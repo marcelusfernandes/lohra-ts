@@ -7,6 +7,18 @@ const root = resolve(import.meta.dirname, "..");
 const read = (path: string): string => readFileSync(resolve(root, path), "utf8");
 
 describe("T22 public documentation", () => {
+  // Issue #164: nenhum `toContain` deste arquivo pode fixar prosa byte a
+  // byte (string com `\n` embutido) — mudar a quebra de linha de uma frase
+  // do README não pode reprovar o CI. Meta-teste permanente: lê o próprio
+  // arquivo e reprova se essa forma reaparecer.
+  it("has no toContain assertion on prose with an embedded newline", () => {
+    const source = read("tests/t22-docs.test.ts");
+    const embeddedNewlineAssertions = [
+      ...source.matchAll(/toContain\(\s*(["'`])(?:(?!\1).)*\\n(?:(?!\1).)*\1/gu),
+    ];
+    expect(embeddedNewlineAssertions.map((match) => match[0])).toEqual([]);
+  });
+
   it("documents the exact public CLI and current package", () => {
     const readme = read("README.md");
     expect(readme, "MUTATION_CAUSE:T22-docs-current-version").toContain(
