@@ -71,6 +71,10 @@ tarball pula os dois em silêncio):
   `install pre-commit` para que o `pre-push` nativo continue sendo o de
   `.claude/hooks/git-pre-push`.
 
+Mutation testing (mecânicas do harness, formato do catálogo, contagem por
+fatia e como adicionar um mutante ou uma fatia nova) está em
+[docs/mutation-testing.md](docs/mutation-testing.md).
+
 ## Prova por issue
 
 Cada issue declara sua prova em `prova/<slug>.ts` (`<slug>` é o mesmo da branch
@@ -348,9 +352,14 @@ são hoje o corpus de regressão do runtime, e a migração dos scripts
 `parity:*` para `regression:*` está rastreada em #8 e #19.
 
 ```bash
-npm run mutations:closeout
 npm run verify:t22:evidence
 ```
+
+`mutations:closeout` foi retirado do `package.json` em #153: os 8 mutantes
+que miravam `src/` migraram para `mutations:self-update` (hoje agregado por
+`npm run mutations:all`, ver [docs/mutation-testing.md](docs/mutation-testing.md));
+os outros 27 miravam artefato exclusivo do processo de closeout T22 e foram
+aposentados com registro em `docs/regression-inventory.md`.
 
 O relatório completo dos 23 tickets, SHAs e dívidas do fechamento está em
 [docs/closeout.md](docs/closeout.md).
