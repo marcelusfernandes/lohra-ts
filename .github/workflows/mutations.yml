@@ -1,0 +1,73 @@
+name: mutations
+
+# Mutation testing por fatia, filtrado por path (issue #156, épico #13).
+# `plan` lê scripts/mutations/slices.json e o diff base...head e escolhe as
+# fatias; `mutate` roda uma por job. Não é required no ruleset (decisão do
+# owner depois de medir o tempo por fatia). PR só de docs não dispara nada.
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "scripts/mutations/**"
+      - ".github/workflows/mutations.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutations-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      count: ${{ steps.matrix.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: fatias que o diff exige
+        id: matrix
+        run: |
+          npx tsx scripts/github/mutations-matrix.ts \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head "${{ github.event.pull_request.head.sha }}" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+  mutate:
+    needs: plan
+    if: needs.plan.outputs.count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.plan.outputs.matrix) }}
+    # node-pty compila via node-gyp em `npm ci` (mesma nota de ci.yml).
+    env:
+      PYTHON: python3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # os harnesses fazem `git archive <sha>` do candidato
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: ${{ matrix.slice }}
+        run: npm run ${{ matrix.script }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutation-evidence-${{ matrix.slice }}
+          path: .mutation-evidence/
+          if-no-files-found: warn

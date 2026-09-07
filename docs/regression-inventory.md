@@ -202,3 +202,5 @@ A tabela `## Mutantes aposentados com #8` acima cataloga **mutantes** (`id`),
 não arquivos — não entram na soma de 556. Todos miram arquivos da classe D
 (`scripts/parity/closeout/**`) desta seção, exceto os que miram `README.md`/
 `package.json` (fora de `scripts/parity`, também fora da soma).
+
+<!-- sondagem #156: PR só de docs, fechada sem merge -->
