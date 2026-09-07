@@ -6,19 +6,30 @@
 //   2. todo catálogo de dado puro (`*-mutants.ts`/`*catalog*.ts` sob
 //      `scripts/mutations/`) aparece em algum `catalog` do JSON — uma fatia
 //      nova nesse padrão sem entrada reprova aqui;
-//   3. todo `script` de cada entrada existe em `package.json#scripts`;
-//   4. todo `focusFiles[]` existe em disco;
-//   5. a contagem total de mutantes é a soma exata dos catálogos — os oito
+//   3. os `catalog` do JSON (fora `workflow-executor.ts`) batem, como
+//      conjunto, com os oito catálogos de dado puro importados abaixo —
+//      um `catalog` novo no JSON sem import correspondente aqui (ou
+//      vice-versa) reprova, o que impede o número da contagem (4) de
+//      driftar silenciosamente do JSON;
+//   4. todo `script` de cada entrada existe em `package.json#scripts`;
+//   5. todo `focusFiles[]` existe em disco, e (exceto `media`, que não tem
+//      conceito de teste focal) bate exatamente com a união dos
+//      `focus.file` dos mutantes do(s) catálogo(s) da fatia;
+//   6. a contagem total de mutantes é a soma exata dos catálogos — os oito
 //      arquivos de dado puro são importados de verdade (`import` estático,
 //      sem efeito colateral: nenhum chama `main()` no escopo do módulo) e
-//      somados; `workflow-executor.ts` é o único catálogo que TAMBÉM é um
-//      runner (chama `main()` na última linha — side effect real, dispara
-//      uma corrida de mutação completa), então sua contagem é lida do texto
-//      fonte por regex ancorada em vez de importado;
-//   6. todo diretório de primeiro nível de `src/` está coberto por algum
+//      somados via o mapa `CATALOGOS`; `workflow-executor.ts` é o único
+//      catálogo que TAMBÉM é um runner (chama `main()` incondicionalmente
+//      na última linha — side effect real, dispara uma corrida de mutação
+//      completa em subprocesso), então sua contagem é lida do texto fonte
+//      por regex ancorada em vez de importado;
+//   7. todo diretório de primeiro nível de `src/` está coberto por algum
 //      `srcGlobs` de alguma fatia OU está na lista `SEM_FATIA` abaixo, com
-//      motivo -- um diretório novo sem entrada em nenhum dos dois reprova
-//      (fail-closed, CLAUDE.md invariante 2).
+//      motivo não-vazio e diretório que ainda existe -- um diretório novo
+//      sem entrada em nenhum dos dois reprova, e uma entrada morta em
+//      `SEM_FATIA` (diretório apagado ou motivo vazio) também reprova
+//      (mesma convenção de "sem entrada morta" de
+//      `tests/mutations-directory-pin.test.ts`).
 //
 // Catálogos que são pura estrutura de dado (sem `main()` de topo) e por
 // isso seguros para `import` estático dentro deste arquivo de teste:
@@ -28,11 +39,14 @@
 // `*-mutants.ts`/`*catalog*.ts`. Os outros seis arquivos de
 // `scripts/mutations/*.ts` são RUNNERS (`workflow-executor.ts`,
 // `workflow-durability.ts`, `workflow-audit-live.ts`, `web-tools.ts`,
-// `media.ts`, `self-update.ts`) — quatro deles chamam `main()`
-// incondicionalmente na última linha do módulo; `media.ts` guarda a
-// chamada atrás de um `import.meta.url` check e por isso não teria efeito
-// colateral, mas ainda assim não é importado aqui por uniformidade com os
-// outros cinco runners.
+// `media.ts`, `self-update.ts`): `workflow-executor.ts`,
+// `workflow-durability.ts` e `web-tools.ts` chamam `main()` incondicional
+// na última linha; `workflow-audit-live.ts` e `self-update.ts` chamam
+// `main()` dentro de um `try {}` de topo (também incondicional); só
+// `media.ts` guarda a chamada atrás de um `import.meta.url` check e por
+// isso não teria efeito colateral -- mesmo assim não é importado aqui, por
+// uniformidade com os outros cinco runners (nenhum runner entra neste
+// arquivo de teste, só catálogos).
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -49,6 +63,41 @@ import { webToolsMutants } from "../scripts/mutations/web-tools-mutants.js";
 const repoRoot = resolve(import.meta.dirname, "..");
 const slicesPath = resolve(repoRoot, "scripts/mutations/slices.json");
 const mutationsDir = resolve(repoRoot, "scripts/mutations");
+const EXECUTOR_CATALOG = "scripts/mutations/workflow-executor.ts";
+
+/** Um mutante genérico o bastante para cobrir `Mutant` (tem `focus`) e
+ * `MediaMutant` (não tem): só o que este teste precisa ler. */
+interface CatalogEntry {
+  readonly id: string;
+  readonly focus?: { readonly file: string };
+}
+
+/** Os oito catálogos de dado puro, chave = caminho relativo à raiz do repo
+ * igual ao que aparece em `slices.json#catalog` -- a checagem de item 3 do
+ * cabeçalho acima compara as CHAVES deste mapa contra a união dos
+ * `catalog` do JSON (menos `workflow-executor.ts`), então um `catalog`
+ * novo no JSON sem entrada aqui (ou uma entrada aqui sem uso no JSON)
+ * reprova antes mesmo de chegar na soma. */
+function asCatalog(entries: readonly CatalogEntry[]): readonly CatalogEntry[] {
+  return entries;
+}
+
+const CATALOGOS: ReadonlyMap<string, readonly CatalogEntry[]> = new Map<
+  string,
+  readonly CatalogEntry[]
+>([
+  [
+    "scripts/mutations/workflow-durability-guard.ts",
+    asCatalog([...guardMutants, ...combinedMutants]),
+  ],
+  ["scripts/mutations/workflow-durability-named.ts", asCatalog(namedMutants)],
+  ["scripts/mutations/orchestration.ts", asCatalog(orchestrationMutants)],
+  ["scripts/mutations/workflow-audit-live-mutants.ts", asCatalog(auditLiveMutants)],
+  ["scripts/mutations/web-tools-mutants.ts", asCatalog(webToolsMutants)],
+  ["scripts/mutations/media-catalog-other.ts", asCatalog(otherMediaMutants)],
+  ["scripts/mutations/media-catalog-persistence.ts", asCatalog(persistenceMutants)],
+  ["scripts/mutations/self-update-mutants.ts", asCatalog(selfUpdateMutants)],
+]);
 
 interface Slice {
   readonly slice: string;
@@ -206,20 +255,68 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
+  it("os catalog do JSON (fora workflow-executor.ts) batem, como conjunto, com CATALOGOS", () => {
+    const slices = readSlices();
+    const declaredNonExecutor = new Set(
+      slices.flatMap((entry) => entry.catalog).filter((path) => path !== EXECUTOR_CATALOG),
+    );
+    const known = new Set(CATALOGOS.keys());
+
+    const declaredSemImport = [...declaredNonExecutor].filter((path) => !known.has(path));
+    expect(
+      declaredSemImport,
+      `catalog em slices.json sem import correspondente em CATALOGOS: ${declaredSemImport.join(", ")}`,
+    ).toEqual([]);
+
+    const importadoSemUsoNoJson = [...known].filter((path) => !declaredNonExecutor.has(path));
+    expect(
+      importadoSemUsoNoJson,
+      `CATALOGOS importa um catálogo que nenhum slice.catalog referencia: ${importadoSemUsoNoJson.join(", ")}`,
+    ).toEqual([]);
+  });
+
+  it("focusFiles bate com a união de focus.file dos catálogos da fatia (exceto media, sem foco)", () => {
+    const slices = readSlices();
+    for (const entry of slices) {
+      if (entry.slice === "media") {
+        // `MediaMutant` (scripts/mutations/media-mutant.ts) não tem
+        // `focus`: "aqui não existe um teste focal -- o oráculo é o
+        // `expected` do próprio mutante" (mecânica B: cópia de `src/` +
+        // `probe` in-process, não vitest em subprocesso contra um teste
+        // focal). `focusFiles: []` é o valor correto, não um buraco.
+        expect(entry.focusFiles).toEqual([]);
+        continue;
+      }
+      if (entry.slice === "workflow-executor") {
+        // Catálogo não importado (ver "a contagem total…" abaixo); a
+        // mesma fonte lida por regex ali confirma os cinco arquivos de
+        // `focalTests` que já estão em `focusFiles`.
+        const source = readFileSync(resolve(repoRoot, EXECUTOR_CATALOG), "utf8");
+        const block = /const focalTests = \[([\s\S]*?)\] as const;/.exec(source);
+        expect(block, "workflow-executor.ts: bloco focalTests não encontrado").not.toBeNull();
+        const files = [...(block?.[1]?.matchAll(/"([^"]+)"/g) ?? [])].map((m) => m[1]);
+        expect(new Set(entry.focusFiles)).toEqual(new Set(files));
+        continue;
+      }
+      const catalogs = entry.catalog.map((path) => {
+        const found = CATALOGOS.get(path);
+        if (found === undefined) throw new Error(`catálogo não importado: ${path}`);
+        return found;
+      });
+      const derived = new Set(
+        catalogs.flatMap((mutants) =>
+          mutants.filter((m) => m.focus !== undefined).map((m) => m.focus?.file),
+        ),
+      );
+      expect(new Set(entry.focusFiles), `slice ${entry.slice}`).toEqual(derived);
+    }
+  });
+
   it("a contagem total de mutantes é 170 (soma dos catálogos, oito importados + um lido do texto)", () => {
-    // Os oito catálogos de dado puro, importados de verdade: nenhum destes
-    // módulos chama `main()` no escopo do arquivo -- todos exportam só
-    // arrays literais (mais, no caso da mídia, `expected`/`probe`).
-    const importedCount =
-      guardMutants.length +
-      combinedMutants.length +
-      namedMutants.length +
-      orchestrationMutants.length +
-      auditLiveMutants.length +
-      webToolsMutants.length +
-      otherMediaMutants.length +
-      persistenceMutants.length +
-      selfUpdateMutants.length;
+    // Os oito catálogos de dado puro, importados de verdade via CATALOGOS:
+    // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
+    // exportam só arrays literais (mais, no caso da mídia, `expected`/`probe`).
+    const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
     expect(importedCount).toBe(126);
 
     // `workflow-executor.ts` é o único catálogo que também é o runner:
@@ -229,10 +326,7 @@ describe("scripts/mutations/slices.json", () => {
     // fonte por regex ancorada na indentação real do array de mutantes
     // (`    id: "..."`, 4 espaços -- a mesma que classifica cada entrada de
     // `executorMutants`), não executada.
-    const executorSource = readFileSync(
-      resolve(repoRoot, "scripts/mutations/workflow-executor.ts"),
-      "utf8",
-    );
+    const executorSource = readFileSync(resolve(repoRoot, EXECUTOR_CATALOG), "utf8");
     const executorIds = executorSource.match(/^ {4}id: "/gm) ?? [];
     expect(executorIds.length).toBe(44);
 
@@ -261,5 +355,17 @@ describe("scripts/mutations/slices.json", () => {
       uncovered,
       `diretório(s) de src/ sem fatia e sem motivo em SEM_FATIA: ${uncovered.join(", ")}`,
     ).toEqual([]);
+  });
+
+  it("SEM_FATIA não tem entrada morta (diretório existe, motivo não é vazio)", () => {
+    const topLevelDirNames = new Set(
+      readdirSync(resolve(repoRoot, "src"), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name),
+    );
+    for (const [dir, motivo] of SEM_FATIA) {
+      expect(topLevelDirNames.has(dir), `SEM_FATIA: "${dir}" não existe mais em src/`).toBe(true);
+      expect(motivo.trim().length > 0, `SEM_FATIA: motivo vazio para "${dir}"`).toBe(true);
+    }
   });
 });
