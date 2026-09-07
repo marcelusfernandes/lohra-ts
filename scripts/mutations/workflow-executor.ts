@@ -20,6 +20,7 @@ import {
   assertBaselineGreen,
   assertRestoreGreen,
   classify,
+  ehEntryPoint,
   prepareArchiveSandbox,
   restoreAll as restoreSnapshot,
   runVitestFiles,
@@ -592,7 +593,7 @@ interface ExecutorMutationReport extends MutationReport {
   }[];
 }
 
-function main(): void {
+export function main(): void {
   const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" });
   if (head.status !== 0) throw new Error("cannot resolve candidate HEAD");
   const candidateSha = head.stdout.trim();
@@ -655,4 +656,4 @@ function main(): void {
   }
 }
 
-main();
+if (ehEntryPoint(import.meta.url)) main();

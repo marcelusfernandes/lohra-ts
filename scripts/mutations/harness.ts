@@ -14,9 +14,28 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import process from "node:process";
+import { pathToFileURL } from "node:url";
 
 import { canonicalJson } from "./canonical.js";
 import type { Edit, Focus, MutationReport } from "./types.js";
+
+/**
+ * Guarda de entry-point compartilhada pelos seis runners de
+ * `scripts/mutations/`: `if (ehEntryPoint(import.meta.url)) main();`. Molde
+ * de `scripts/provenance/check-ancestry.ts` `ehEntryPoint()`, mas parametrizada
+ * pela URL do MÓDULO CHAMADOR — um helper aqui em `harness.ts` não pode
+ * comparar a própria `import.meta.url` (a de `harness.ts`) contra
+ * `process.argv[1]`; só o módulo importador sabe qual é a sua própria URL.
+ * Devolve `true` só quando o processo foi invocado com este módulo como
+ * script de entrada (`tsx scripts/mutations/<runner>.ts`), nunca quando o
+ * módulo foi importado por outro (teste, outro runner) — issue #186.
+ */
+export function ehEntryPoint(moduleUrl: string): boolean {
+  const invocado = process.argv[1];
+  if (invocado === undefined) return false;
+  return moduleUrl === pathToFileURL(resolve(invocado)).href;
+}
 
 export interface RunOutcome {
   readonly exitCode: number | null;

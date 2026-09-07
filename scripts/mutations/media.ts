@@ -33,7 +33,7 @@ import { join, resolve } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
-import { applyEditExactlyOnce, writeReport } from "./harness.js";
+import { applyEditExactlyOnce, ehEntryPoint, writeReport } from "./harness.js";
 import { otherMediaMutants } from "./media-catalog-other.js";
 import { persistenceMutants } from "./media-catalog-persistence.js";
 import { compareMediaRows } from "./media-comparator.js";
@@ -169,8 +169,15 @@ export async function runMediaMutations(): Promise<
   return { ...report, evidence: join(evidenceDirectory, "mutations.json") };
 }
 
-if (process.argv[1] !== undefined && import.meta.url.endsWith(process.argv[1])) {
+/** Guarda de entry-point uniforme com os outros cinco runners (issue #186;
+ * antes: `process.argv[1] !== undefined && import.meta.url.endsWith(...)`,
+ * um estilo próprio deste arquivo). */
+export async function main(): Promise<void> {
   const outcome = await runMediaMutations();
   process.stdout.write(`${JSON.stringify(outcome)}\n`);
   process.exitCode = outcome.survivors.length > 0 || !outcome.restoreGreen ? 1 : 0;
+}
+
+if (ehEntryPoint(import.meta.url)) {
+  await main();
 }
