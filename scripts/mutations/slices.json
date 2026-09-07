@@ -1,0 +1,84 @@
+[
+  {
+    "slice": "workflow-executor",
+    "script": "mutations:t15",
+    "catalog": ["scripts/mutations/workflow-executor.ts"],
+    "srcGlobs": ["src/workflow/**"],
+    "focusFiles": [
+      "tests/workflow-executor.test.ts",
+      "tests/workflow-nodes-tool.test.ts",
+      "tests/workflow-hardening.test.ts",
+      "tests/parity/scenarios.test.ts",
+      "tests/mutations-fixtures-workflow-executor.test.ts"
+    ]
+  },
+  {
+    "slice": "workflow-durability",
+    "script": "mutations:t16",
+    "catalog": [
+      "scripts/mutations/workflow-durability-guard.ts",
+      "scripts/mutations/workflow-durability-named.ts",
+      "scripts/mutations/orchestration.ts"
+    ],
+    "srcGlobs": ["src/state/**", "src/workflow/**", "src/orchestration/**"],
+    "focusFiles": [
+      "tests/state-workflow-repository.test.ts",
+      "tests/workflow-service-durability.test.ts",
+      "tests/workflow-durability.test.ts",
+      "tests/workflow-sandbox.test.ts",
+      "tests/orchestration-child-runner.test.ts",
+      "tests/workflow-shutdown.test.ts",
+      "tests/workflow-progress-cobertura.test.ts",
+      "tests/workflow-durable-roots.test.ts"
+    ]
+  },
+  {
+    "slice": "workflow-audit-live",
+    "script": "mutations:t17",
+    "catalog": ["scripts/mutations/workflow-audit-live-mutants.ts"],
+    "srcGlobs": ["src/workflow/**", "src/state/**", "src/cli/**", "src/commands/**"],
+    "focusFiles": ["tests/workflow-audit-live.test.ts"]
+  },
+  {
+    "slice": "media",
+    "script": "mutations:t21",
+    "catalog": [
+      "scripts/mutations/media-catalog-other.ts",
+      "scripts/mutations/media-catalog-persistence.ts"
+    ],
+    "srcGlobs": ["src/media/**", "src/tools/**"],
+    "focusFiles": []
+  },
+  {
+    "slice": "web-tools",
+    "script": "mutations:t20",
+    "catalog": ["scripts/mutations/web-tools-mutants.ts"],
+    "srcGlobs": ["src/web/**"],
+    "focusFiles": [
+      "tests/web-connector.test.ts",
+      "tests/web-fetch.test.ts",
+      "tests/web-safety.test.ts",
+      "tests/web-search.test.ts",
+      "tests/web-tool-chat.test.ts"
+    ]
+  },
+  {
+    "slice": "self-update",
+    "script": "mutations:self-update",
+    "catalog": ["scripts/mutations/self-update-mutants.ts"],
+    "srcGlobs": [
+      "src/self-update/**",
+      "src/tools/**",
+      "src/mcp/**",
+      "src/gateway/**",
+      "src/commands/**"
+    ],
+    "focusFiles": [
+      "tests/self-update.test.ts",
+      "tests/mcp-manager.test.ts",
+      "tests/gateway/session-service.test.ts",
+      "tests/session-tools.test.ts",
+      "tests/tools-local.test.ts"
+    ]
+  }
+]
