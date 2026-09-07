@@ -21,8 +21,9 @@
 // manifesto original em `scripts/parity/manifests/t15/t15-chat-workflow
 // .json` passa por esse harness (`scripts/parity/workflow-executor/run-all
 // .ts:102`). Os únicos leitores desta cópia são
-// `scripts/mutations/workflow-executor.ts:514,531` (dois mutantes que
-// editam só as chaves `normalizations`/`comparisons`) e
+// `scripts/mutations/workflow-executor-mutants.ts` (dois mutantes que
+// editam só as chaves `normalizations`/`comparisons`; catálogo extraído do
+// runner na issue #186 — antes era `workflow-executor.ts:514,531`) e
 // `tests/mutations-fixtures-workflow-executor.test.ts` (mesmas duas
 // chaves, via a interface `T15Policy`, que nem declara `oracleGuard`) —
 // o bloco era morto na cópia. Apagado (rodada 2 da PR #182, veredito do

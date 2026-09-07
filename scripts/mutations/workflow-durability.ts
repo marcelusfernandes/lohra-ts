@@ -17,6 +17,7 @@ import {
   assertBaselineGreen,
   assertRestoreGreen,
   classify,
+  ehEntryPoint,
   prepareArchiveSandbox,
   runFocusedVitest,
   snapshotFiles,
@@ -59,7 +60,7 @@ interface DurabilityMutationReport extends MutationReport {
   readonly restore: readonly { readonly focus: string; readonly green: boolean }[];
 }
 
-function main(): void {
+export function main(): void {
   const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" });
   if (head.status !== 0) throw new Error("cannot resolve candidate HEAD");
   const candidateSha = head.stdout.trim();
@@ -151,4 +152,4 @@ function main(): void {
   }
 }
 
-main();
+if (ehEntryPoint(import.meta.url)) main();
