@@ -16,7 +16,7 @@ describe("parity harness", () => {
       fixtures: [],
       runners: {
         oracle: {
-          adapter: "python",
+          adapter: "typescript",
           executable: "node",
           prefixArgs: ["--input-type=module", "-e", 'process.stdout.write("same\\n")'],
         },
@@ -43,10 +43,7 @@ describe("parity harness", () => {
       normalizations: [],
     });
 
-    const options = {
-      executables: { node: process.execPath },
-      pythonExecutable: process.env.PYTHON ?? "python3",
-    };
+    const options = { executables: { node: process.execPath } };
     expect(runScenario(manifest, options)).toEqual(runScenario(manifest, options));
   });
 
@@ -60,7 +57,7 @@ describe("parity harness", () => {
       fixtures: [],
       runners: {
         oracle: {
-          adapter: "python",
+          adapter: "typescript",
           executable: "node",
           prefixArgs: ["--input-type=module", "-e", "process.stdout.write(process.env.HOME)"],
         },
@@ -87,9 +84,8 @@ describe("parity harness", () => {
         },
       ],
     });
-    const options = { pythonExecutable: process.env.PYTHON ?? "python3" };
-    const first = runScenario(manifest, options);
-    const second = runScenario(manifest, options);
+    const first = runScenario(manifest);
+    const second = runScenario(manifest);
 
     expect(first.verdict).toBe("match");
     expect(first.runs.oracle.process.stdout).not.toBe(first.runs.candidate.process.stdout);
@@ -226,7 +222,7 @@ describe("parity harness", () => {
         fixtures: [],
         runners: {
           oracle: {
-            adapter: "python",
+            adapter: "typescript",
             executable: "node",
             prefixArgs: [
               "--input-type=module",
@@ -254,9 +250,7 @@ describe("parity harness", () => {
         expectations: [],
         normalizations: [],
       });
-      const evidence = runScenario(manifest, {
-        pythonExecutable: process.env.PYTHON ?? "python3",
-      });
+      const evidence = runScenario(manifest);
       expect(Buffer.from(evidence.runs.oracle.process.stdout, "base64").toString("utf8")).toBe(
         "undefined",
       );
