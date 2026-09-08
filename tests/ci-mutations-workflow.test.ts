@@ -148,6 +148,24 @@ describe("mutations.yml — forma do workflow", () => {
     expect(yaml).toContain("path: .mutation-evidence/");
   });
 
+  it("o step do plan não engole o exit code do script (sem pipe; set +e / exit $status)", () => {
+    const step = yaml
+      .slice(yaml.indexOf("fatias que o diff exige"), yaml.indexOf("  mutate:"))
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("#"))
+      .join("\n");
+    expect(step).not.toMatch(/\|\s*tee/);
+    expect(step).toContain("set +e");
+    expect(step).toContain("status=$?");
+    expect(step).toMatch(/exit \$status\s*$/m);
+    expect(step).toContain("echo '```json'");
+  });
+
+  it("permissões mínimas e fail-fast desligado na matriz", () => {
+    expect(yaml).toMatch(/^permissions:\n {2}contents: read\n/m);
+    expect(yaml).toContain("fail-fast: false");
+  });
+
   it("concurrency cancela run anterior da mesma ref", () => {
     expect(yaml).toContain("group: mutations-${{ github.ref }}");
     expect(yaml).toContain("cancel-in-progress: true");

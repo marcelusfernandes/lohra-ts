@@ -35,11 +35,22 @@ jobs:
       - run: npm ci
       - name: fatias que o diff exige
         id: matrix
+        # Sem pipe: o shell default do Actions não tem pipefail e `| tee`
+        # engoliria o exit code do script (mesmo idioma de ci.yml/provenance).
         run: |
+          set +e
           npx tsx scripts/github/mutations-matrix.ts \
             --base "${{ github.event.pull_request.base.sha }}" \
-            --head "${{ github.event.pull_request.head.sha }}" \
-            | tee -a "$GITHUB_STEP_SUMMARY"
+            --head "${{ github.event.pull_request.head.sha }}" > matrix.json
+          status=$?
+          {
+            echo '## mutations — fatias que o diff exige'
+            echo '```json'
+            cat matrix.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat matrix.json
+          exit $status
 
   mutate:
     needs: plan
