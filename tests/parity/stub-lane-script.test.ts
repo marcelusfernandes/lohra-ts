@@ -5,8 +5,8 @@ import { join } from "node:path";
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
-import { awaitLatch, startStub } from "../../scripts/parity/stub/server.js";
-import type { StubRuntime } from "../../scripts/parity/stub/types.js";
+import { awaitLatch, startStub } from "../../scripts/stub/server.js";
+import type { StubRuntime } from "../../scripts/stub/types.js";
 import type { StubLaneStep } from "../support/parity/types.js";
 
 // One server for the whole file, reconfigured per test by mutating the
