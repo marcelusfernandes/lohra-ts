@@ -15,9 +15,9 @@ import { join } from "node:path";
 
 import { expect, it } from "vitest";
 
-import { completion } from "../../scripts/parity/stub/server.js";
+import { completion } from "../../scripts/stub/server.js";
 
-const driver = new URL("../../scripts/parity/stub/driver.ts", import.meta.url);
+const driver = new URL("../../scripts/stub/driver.ts", import.meta.url);
 const tsxLoader = import.meta.resolve("tsx");
 
 it("keeps usage in default completions and omits it only when requested", () => {

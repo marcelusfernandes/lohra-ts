@@ -4,8 +4,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-import { startStub } from "./parity/stub/server.js";
-import type { StubRuntime } from "./parity/stub/types.js";
+import { startStub } from "./stub/server.js";
+import type { StubRuntime } from "./stub/types.js";
 import { prepareOfflineTarballConsumer } from "./offline-tarball-install.js";
 
 function command(

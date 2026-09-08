@@ -1,5 +1,6 @@
-// Issue #167 (épico #8): apaga `scripts/parity/` inteiro — a classe A que
-// #166 deixou para trás (o próprio harness de paridade, sem nenhum
+// Issue #167 (épico #8): apaga o diretório histórico de paridade inteiro
+// (NEEDLE abaixo) — a classe A que #166 deixou para trás (o próprio harness
+// de paridade, sem nenhum
 // consumidor em `tests/` além dele mesmo). Este arquivo nasceu em #166 como
 // o pino de que `tests/` não cita mais o diretório histórico fora de uma
 // whitelist de classe A; com o diretório inteiro apagado aqui, a whitelist
@@ -35,8 +36,9 @@ const NEEDLE = ["scripts", "parity"].join("/");
 // Classe A do harness (bounds/capture/cli/guard/harness/preconditions/
 // process/scrub e os dois testes do stub) saiu com o diretório inteiro:
 // os oito primeiros foram apagados (sujeito sumiu) e os dois do stub
-// seguiram `scripts/parity/stub/**` para `scripts/stub/` sem precisar mais
-// citar o caminho histórico. Nenhum arquivo de `tests/` cita mais o
+// seguiram o stub do diretório histórico (subpasta `stub/**`, NEEDLE acima)
+// para `scripts/stub/` sem precisar mais citar o caminho antigo. Nenhum
+// arquivo de `tests/` cita mais o
 // diretório — a whitelist fica vazia de propósito (não é um placeholder:
 // o teste abaixo prende que ela continua vazia).
 const CLASSE_A_ALLOWLIST: readonly string[] = [];

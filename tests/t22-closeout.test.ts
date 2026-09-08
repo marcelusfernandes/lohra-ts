@@ -16,16 +16,6 @@ const root = resolve(import.meta.dirname, "..");
 const source = (path: string): string => readFileSync(resolve(root, path), "utf8");
 
 describe("T22 closeout invariants", () => {
-  it("budgets the complete nested T10 regression chain independently", () => {
-    const gates = source("scripts/parity/orchestration/run-gates.ts");
-    expect(gates, "MUTATION_CAUSE:T22-t13-nested-t10-timeout").toContain(
-      "const NESTED_T10_TIMEOUT_MS = 900_000;",
-    );
-    expect(gates, "MUTATION_CAUSE:T22-t13-nested-t10-timeout-wiring").toContain(
-      'command(["run", "parity:t10:gates"], {}, NESTED_T10_TIMEOUT_MS)',
-    );
-  });
-
   it("detects a candidate boot line when stderr lines share one chunk", () => {
     expect(
       parseCandidateBootPort(
@@ -99,25 +89,12 @@ describe("T22 closeout invariants", () => {
     );
   });
 
-  it("uses node-pty and ephemeral closeout ports", () => {
+  it("uses node-pty instead of node:child_process for terminal execution", () => {
     const terminal = source("src/tools/terminal.ts");
     expect(terminal, "MUTATION_CAUSE:T22-native-pty").toContain(
       'import { spawn as spawnPty } from "node-pty"',
     );
     expect(terminal).not.toContain('from "node:child_process"');
-    const composition = source("scripts/parity/closeout/composition.ts");
-    expect(composition, "MUTATION_CAUSE:T22-fixed-port").toContain(
-      'upstream.listen(0, "127.0.0.1"',
-    );
-    expect(composition).not.toContain("11434");
-    const concurrency = source("scripts/parity/closeout/concurrency.ts");
-    expect(concurrency, "MUTATION_CAUSE:T22-real-concurrent-parity-gates").not.toContain(
-      '"--stub-port"',
-    );
-    expect(concurrency).toContain('scripts", "parity", "cli.ts');
-    expect(source("scripts/parity/cli.ts"), "MUTATION_CAUSE:T22-fixed-port").toContain(
-      'manifest.stub !== undefined &&\n      manifest.stub.state !== "down" &&\n      manifest.argv.includes("--provider")\n        ? 0\n        : undefined',
-    );
   });
 
   it("keeps the native SQLite dependency compatible with the declared Node 20 floor", () => {
@@ -131,37 +108,6 @@ describe("T22 closeout invariants", () => {
       "MUTATION_CAUSE:T22-node20-sqlite-dependency",
     ).toBe("11.10.0");
     expect(source("scripts/pack-check.ts")).toContain("prepareOfflineTarballConsumer");
-    expect(source("scripts/parity/closeout/no-python.ts")).toContain(
-      "prepareOfflineTarballConsumer",
-    );
-    expect(source("scripts/parity/provider-transports/pack-smoke.mjs")).toContain(
-      "offline-tarball-install-cli.ts",
-    );
-  });
-
-  it("keeps successful T19 test diagnostics inside the normalized Vitest stream", () => {
-    const wrapper = source("scripts/parity/mcp/run-regression-gates-locked.sh");
-    expect(wrapper, "MUTATION_CAUSE:T22-t19-test-stream-order").toMatch(/npm test\b[^\n]*2>&1/u);
-    expect(wrapper, "MUTATION_CAUSE:T22-t19-serial-test-suite").toContain(
-      "--no-file-parallelism --maxWorkers=1",
-    );
-    expect(wrapper, "MUTATION_CAUSE:T22-t19-dashboard-port-isolation").toContain(
-      "for port in 11434 8000; do",
-    );
-  });
-
-  it("does not reserve the user dashboard port for the non-network T17 harness", () => {
-    const support = source("scripts/parity/workflow-audit-live/support.ts");
-    expect(support, "MUTATION_CAUSE:T22-t17-dashboard-port-isolation").toContain(
-      "for (const port of [11434, 8000])",
-    );
-  });
-
-  it("does not reject T19 scenarios solely because the user dashboard is running", () => {
-    const harness = source("scripts/parity/mcp/harness.ts");
-    expect(harness, "MUTATION_CAUSE:T22-t19-scenario-dashboard-port-isolation").toContain(
-      "const FORBIDDEN_PORTS = [11434, 8000] as const;",
-    );
   });
 
   it("normalizes reporter telemetry without masking semantic fields", () => {
