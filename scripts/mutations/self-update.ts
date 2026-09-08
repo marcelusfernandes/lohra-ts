@@ -18,6 +18,7 @@ import {
   assertBaselineGreen,
   assertRestoreGreen,
   classify,
+  ehEntryPoint,
   prepareArchiveSandbox,
   restoreAll,
   runFocusedVitest,
@@ -105,7 +106,7 @@ function buildReport(
   };
 }
 
-function main(): MutationReport {
+export function main(): MutationReport {
   const candidateSha = resolveCandidateSha();
   const sandbox = prepareArchiveSandbox(root, candidateSha);
   try {
@@ -118,15 +119,17 @@ function main(): MutationReport {
   }
 }
 
-try {
-  const report = main();
-  if (report.survivors.length > 0 || !report.restoreGreen) {
-    console.error(JSON.stringify(report));
+if (ehEntryPoint(import.meta.url)) {
+  try {
+    const report = main();
+    if (report.survivors.length > 0 || !report.restoreGreen) {
+      console.error(JSON.stringify(report));
+      process.exitCode = 1;
+    } else {
+      console.log(JSON.stringify(report));
+    }
+  } catch (cause) {
+    console.error(cause instanceof Error ? (cause.stack ?? cause.message) : String(cause));
     process.exitCode = 1;
-  } else {
-    console.log(JSON.stringify(report));
   }
-} catch (cause) {
-  console.error(cause instanceof Error ? (cause.stack ?? cause.message) : String(cause));
-  process.exitCode = 1;
 }

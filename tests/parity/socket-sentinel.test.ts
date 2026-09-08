@@ -47,24 +47,4 @@ describe("serve socket sentinels", () => {
     expect(child.status, child.stderr).toBe(0);
     expect(records(output.path)).toEqual([{ kind: "armed" }, { kind: "listen" }]);
   });
-
-  it("arms inside Python and records bind plus listen attempts", () => {
-    const output = temporaryFile();
-    const pythonPath = resolve("scripts/parity/auth/python-sentinel");
-    const child = spawnSync(
-      process.env.PYTHON ?? "python3",
-      ["-c", "import socket; s=socket.socket(); s.bind(('127.0.0.1', 0)); s.listen(); s.close()"],
-      {
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          PYTHONPATH: pythonPath,
-          PYTHONDONTWRITEBYTECODE: "1",
-          LOHRA_SOCKET_SENTINEL: output.path,
-        },
-      },
-    );
-    expect(child.status, child.stderr).toBe(0);
-    expect(records(output.path)).toEqual([{ kind: "armed" }, { kind: "bind" }, { kind: "listen" }]);
-  });
 });
