@@ -74,7 +74,8 @@ describe("runDashboard: refuses an empty session token on the network (issue #22
     expect(code).toBe(2);
     const stderr = options.stderrLines.join("");
     expect(stderr).toContain("usage: lohra dashboard");
-    expect(stderr).toContain("LOHRA_DASHBOARD_SESSION_TOKEN");
+    expect(stderr).toContain("LOHRA_DASHBOARD_SESSION_TOKEN vazio");
+    expect(stderr).toContain("gere um token");
     expect(options.stderrLines.some((line) => line.startsWith("Lohra dashboard:"))).toBe(false);
   });
 
@@ -86,7 +87,8 @@ describe("runDashboard: refuses an empty session token on the network (issue #22
     expect(code).toBe(2);
     const stderr = options.stderrLines.join("");
     expect(stderr).toContain("usage: lohra dashboard");
-    expect(stderr).toContain("LOHRA_DASHBOARD_SESSION_TOKEN");
+    expect(stderr).toContain("LOHRA_DASHBOARD_SESSION_TOKEN vazio");
+    expect(stderr).toContain("gere um token");
     expect(options.stderrLines.some((line) => line.startsWith("Lohra dashboard:"))).toBe(false);
   });
 
