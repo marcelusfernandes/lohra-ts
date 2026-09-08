@@ -86,6 +86,16 @@ autenticação; a superfície de ataque via `sub_id` descrita acima permanece
 sem mudança, porque continua exigindo um cliente já autenticado no
 WebSocket.
 
+**Lacuna descoberta na revisão da PR #220 — issue #221 (2026-09-08).** "O
+token já cobre o caso" acima assumia um token não-vazio. Com
+`LOHRA_DASHBOARD_SESSION_TOKEN=""`, `expectedToken` ficava vazio e
+`timingSafeTokenEqual("", "")` devolvia `true` — qualquer cliente sem token
+autenticava, e com `--host` não-loopback isso é alcançável pela rede.
+Fechada em `runDashboard`: token vazio ou só espaços é recusado antes de
+qualquer bind, exit 2, mesmo formato de erro da recusa acima; em defesa de
+profundidade, `timingSafeTokenEqual` (`src/gateway/auth.ts`) devolve `false`
+para um `expected` vazio mesmo contra um candidato igualmente vazio.
+
 **2. Allow-list fechada de tools do subagente — hardening mantido, com
 reavaliação marcada no T19.**
 É estritamente mais restritiva que a deny-list do oracle, com prova estrutural

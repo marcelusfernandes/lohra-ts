@@ -11,6 +11,11 @@ export function generateSessionToken(): string {
 // bytes. The parser (request-parser.ts) is responsible for the h11-style
 // leading-OWS-only trim; this function performs no trimming of its own.
 export function timingSafeTokenEqual(candidate: string, expected: string): boolean {
+  // Issue #221: an empty `expected` never authenticates, even against an
+  // equally empty candidate. dashboard.ts refuses an empty
+  // LOHRA_DASHBOARD_SESSION_TOKEN before this is ever reached, but this is
+  // defense in depth for any other caller.
+  if (expected.length === 0) return false;
   const candidateBuffer = Buffer.from(candidate, "utf8");
   const expectedBuffer = Buffer.from(expected, "utf8");
   if (candidateBuffer.length !== expectedBuffer.length) {

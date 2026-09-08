@@ -221,7 +221,9 @@ flag existe para a invocação do app desktop não morrer em argumento não
 reconhecido). Um `--host` fora de loopback (`127.0.0.1`, `localhost`, `::1`)
 combinado com `--insecure` é recusado antes de qualquer bind — sem
 `--insecure` o token de sessão já é exigido por padrão, então nada muda
-nesse caso (análise em `docs/gate-decision.md`).
+nesse caso (análise em `docs/gate-decision.md`). Um
+`LOHRA_DASHBOARD_SESSION_TOKEN` vazio ou só espaços também é recusado antes
+de qualquer bind, em vez de valer como token válido.
 
 Um run de `run_workflow` sobrevive ao processo que o lançou: `chat`/
 `dashboard` gravam cada nó concluído (`workflow_node_cache`), o estado do run
