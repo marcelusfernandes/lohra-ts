@@ -18,10 +18,10 @@ import process from "node:process";
 
 import { writeEvidence } from "../evidence.js";
 import { runScenario } from "../harness.js";
-import { parseScenarioManifest } from "../manifest.js";
+import { parseScenarioManifest } from "../../../tests/support/parity/manifest.js";
 
 const root = resolve(import.meta.dirname, "../../..");
-const manifests = resolve(root, "scripts/parity/manifests/t20");
+const manifests = resolve(root, "tests/fixtures/parity/manifests/t20");
 const evidenceDirectory = resolve(root, ".parity-evidence/t20");
 rmSync(resolve(evidenceDirectory, "unused-placeholder"), { force: true });
 

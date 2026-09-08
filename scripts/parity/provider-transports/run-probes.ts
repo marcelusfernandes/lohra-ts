@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { canonicalJson } from "../canonical.js";
+import { canonicalJson } from "../../../tests/support/parity/canonical.js";
 
 const root = resolve(import.meta.dirname, "../../..");
 const oraclePython =

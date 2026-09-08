@@ -22,7 +22,7 @@ import process from "node:process";
 import type { ModelRequest, ModelTransport } from "../../../src/conversation/types.js";
 import type { ImageGenerationPort, ImageGenerationRequest } from "../../../src/media/types.js";
 import type { NormalizedResponse } from "../../../src/transports/index.js";
-import { canonicalJson } from "../canonical.js";
+import { canonicalJson } from "../../../tests/support/parity/canonical.js";
 import { compareMediaRows, type DivergenceSpec, type MediaRow } from "./comparator.js";
 import { installNetworkSentinel } from "./network-sentinel.mjs";
 

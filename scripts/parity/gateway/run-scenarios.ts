@@ -25,14 +25,18 @@ import { startFakeUpstream, type FakeUpstream } from "./fake-upstream.js";
 import {
   launchCandidateFakeUpstreamDashboard,
   type LaunchedGatewayProcess as LaunchedCandidateProcess,
-} from "./launch-candidate-fake.js";
+} from "../../../tests/support/parity/gateway/launch-candidate-fake.js";
 import {
   launchOracleDashboard,
   type LaunchedOracleProcess,
   verifyOracleGuard,
 } from "./launch-oracle.js";
-import { sendRawHttpRequest } from "./raw-http-client.js";
-import { connectRawWs, decodeCloseFrame, WS_OPCODE } from "./raw-ws-client.js";
+import { sendRawHttpRequest } from "../../../tests/support/parity/gateway/raw-http-client.js";
+import {
+  connectRawWs,
+  decodeCloseFrame,
+  WS_OPCODE,
+} from "../../../tests/support/parity/gateway/raw-ws-client.js";
 import {
   compareMasked,
   createSessionBoth,

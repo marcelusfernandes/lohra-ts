@@ -3,11 +3,14 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
 
-import { ChatCompletionsModel, ConversationRuntime } from "../../../dist/conversation/index.js";
-import { ChatCompletionsClient, ChatCompletionsTransport } from "../../../dist/transports/index.js";
-import { composeDispatch, RegistryToolDispatcher } from "../../../dist/tools/index.js";
-import { buildSystemPrompt } from "../../../dist/context/index.js";
-import { WorkflowService, workflowToolHandlers } from "../../../dist/workflow/index.js";
+import { ChatCompletionsModel, ConversationRuntime } from "../../../../dist/conversation/index.js";
+import {
+  ChatCompletionsClient,
+  ChatCompletionsTransport,
+} from "../../../../dist/transports/index.js";
+import { composeDispatch, RegistryToolDispatcher } from "../../../../dist/tools/index.js";
+import { buildSystemPrompt } from "../../../../dist/context/index.js";
+import { WorkflowService, workflowToolHandlers } from "../../../../dist/workflow/index.js";
 
 class Repository {
   sessions = new Map();

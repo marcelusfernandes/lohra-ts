@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 
 import Database from "better-sqlite3";
-import { canonicalJson } from "../canonical.js";
+import { canonicalJson } from "../../../tests/support/parity/canonical.js";
 
 type Manifest = {
   readonly schemaVersion: 1;

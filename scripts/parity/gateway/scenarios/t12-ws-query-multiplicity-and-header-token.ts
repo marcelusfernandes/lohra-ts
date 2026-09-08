@@ -4,7 +4,11 @@
 // SECURE_PHASE_DASHBOARD_TOKEN) so the "duplicate good-then-bad" /
 // "duplicate bad-then-good" cases actually exercise which occurrence wins,
 // rather than every combination just closing 4401 regardless.
-import { connectRawWs, decodeCloseFrame, WS_OPCODE } from "../raw-ws-client.js";
+import {
+  connectRawWs,
+  decodeCloseFrame,
+  WS_OPCODE,
+} from "../../../../tests/support/parity/gateway/raw-ws-client.js";
 import { divergent, match, type NamedScenario } from "../scenario-helpers.js";
 
 const TOKEN_HEADER = "X-Lohra-Session-Token";

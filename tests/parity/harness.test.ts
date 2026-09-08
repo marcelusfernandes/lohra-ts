@@ -3,7 +3,7 @@ import process from "node:process";
 import { describe, expect, it } from "vitest";
 
 import { runScenario } from "../../scripts/parity/harness.js";
-import { parseScenarioManifest } from "../../scripts/parity/manifest.js";
+import { parseScenarioManifest } from "../support/parity/manifest.js";
 
 describe("parity harness", () => {
   it("produces identical evidence for repeated deterministic runs", () => {

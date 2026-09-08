@@ -7,7 +7,10 @@
 // parsed, not compared as raw text; the L8 golden scenario already covers
 // the string-serialization property on its own).
 import { TOOL_CALL_TRIGGERS } from "../fake-upstream.js";
-import { connectRawWs, type RawWsClient } from "../raw-ws-client.js";
+import {
+  connectRawWs,
+  type RawWsClient,
+} from "../../../../tests/support/parity/gateway/raw-ws-client.js";
 import {
   compareMasked,
   createSessionBoth,

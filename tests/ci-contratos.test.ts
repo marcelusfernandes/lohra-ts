@@ -20,7 +20,7 @@ const runScript = resolve(root, "scripts/ci/contratos/run.ts");
 // da pasta de dependências, que é um symlink pra ele) — o handshake de sinal
 // do wrapper (~30ms + 30ms ack, depois SIGKILL) é suspeito de custo e de
 // flake sob carga (#128/#131). `--import` com o loader do `tsx` lança um
-// único processo real (molde: `scripts/parity/gateway/launch-candidate.ts`,
+// único processo real (molde: `tests/support/parity/gateway/launch-candidate.ts`,
 // issue #132).
 const tsxLoader = import.meta.resolve("tsx");
 
@@ -104,7 +104,7 @@ describe("regra import-proibido", () => {
 
   it("dispara para um require de python-repr em scripts/** (fora de scripts/ci/**)", () => {
     const conteudo = 'const { pythonRepr } = require("../src/serialization/python-repr");\n';
-    const violacao = regra("import-proibido").avalia("scripts/parity/algo.ts", conteudo);
+    const violacao = regra("import-proibido").avalia("scripts/qualquer/algo.ts", conteudo);
     expect(violacao?.id).toBe("import-proibido");
   });
 

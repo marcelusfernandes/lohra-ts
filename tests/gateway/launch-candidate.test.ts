@@ -8,9 +8,9 @@ import {
   candidateDashboardPortFromStderr,
   launchCandidateDashboard,
   type LaunchedGatewayProcess,
-} from "../../scripts/parity/gateway/launch-candidate.js";
-import { sendRawHttpRequest } from "../../scripts/parity/gateway/raw-http-client.js";
-import { connectRawWs, WS_OPCODE } from "../../scripts/parity/gateway/raw-ws-client.js";
+} from "../support/parity/gateway/launch-candidate.js";
+import { sendRawHttpRequest } from "../support/parity/gateway/raw-http-client.js";
+import { connectRawWs, WS_OPCODE } from "../support/parity/gateway/raw-ws-client.js";
 
 // This is the first genuinely [processo-ts] + [socket-bilateral]-shaped
 // test in this session: a real, separately spawned `lohra dashboard`

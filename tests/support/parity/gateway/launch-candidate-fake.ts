@@ -8,8 +8,11 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 
-const projectRoot = resolve(import.meta.dirname, "../../..");
-const LAUNCHER_SCRIPT = resolve(projectRoot, "scripts/parity/gateway/candidate-dash-launcher.ts");
+const projectRoot = resolve(import.meta.dirname, "../../../..");
+const LAUNCHER_SCRIPT = resolve(
+  projectRoot,
+  "tests/support/parity/gateway/candidate-dash-launcher.ts",
+);
 const TSX_CLI = resolve(projectRoot, "node_modules/tsx/dist/cli.mjs");
 
 export interface LaunchedGatewayProcess {

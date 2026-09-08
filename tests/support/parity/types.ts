@@ -152,8 +152,9 @@ export interface StubToolStep {
  * One scripted response for one lane under the "chat-lane-script" fixture
  * (T13: multi-conversation orchestration scenarios — a parent turn and one
  * or more concurrently-running children on the same stub). Lanes are
- * discriminated purely from what the product already emits (see
- * scripts/parity/stub/server.ts's laneOf/isChildRequest): a "SCEN:<name>"
+ * discriminated purely from what the product already emits (see the stub
+ * server's laneOf/isChildRequest, still under the historical harness
+ * directory pending its own removal in a follow-up issue): a "SCEN:<name>"
  * token the test author put in whatever prompt text reaches that
  * conversation, forwarded unmodified by the product like any other prompt —
  * never a header, field, or param the candidate has to emit specially.

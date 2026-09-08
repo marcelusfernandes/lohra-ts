@@ -6,7 +6,7 @@ import {
   type Server,
 } from "node:http";
 
-import type { StubLaneStep } from "../types.js";
+import type { StubLaneStep } from "../../../tests/support/parity/types.js";
 import type { StubRuntime } from "./types.js";
 
 const model = "stub-coder:1b";

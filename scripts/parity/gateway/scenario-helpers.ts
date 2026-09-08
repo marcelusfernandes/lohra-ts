@@ -4,8 +4,14 @@
 // same bilateral-comparison machinery the original 11 scenarios already
 // use and the Evaluator has already audited, without duplicating it.
 import type { FakeUpstream } from "./fake-upstream.js";
-import { sendRawHttpRequest, type RawHttpResponse } from "./raw-http-client.js";
-import { WS_OPCODE, type RawWsClient } from "./raw-ws-client.js";
+import {
+  sendRawHttpRequest,
+  type RawHttpResponse,
+} from "../../../tests/support/parity/gateway/raw-http-client.js";
+import {
+  WS_OPCODE,
+  type RawWsClient,
+} from "../../../tests/support/parity/gateway/raw-ws-client.js";
 
 // Pinned via LOHRA_DASHBOARD_SESSION_TOKEN on both the oracle and candidate
 // (see launch-oracle.ts's/launch-candidate-fake.ts's dashboardToken option)

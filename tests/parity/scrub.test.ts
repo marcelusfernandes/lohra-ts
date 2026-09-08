@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { assertCredentialClean } from "../../scripts/parity/scrub.js";
-import type { EvidenceRecord, FixtureSpec } from "../../scripts/parity/types.js";
+import type { EvidenceRecord, FixtureSpec } from "../support/parity/types.js";
 
 const roots: string[] = [];
 

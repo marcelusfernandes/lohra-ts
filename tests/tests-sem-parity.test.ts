@@ -8,8 +8,22 @@
 //
 // A whitelist abaixo é a classe A inteira, hoje: cada um desses arquivos
 // continua importando, do diretório histórico, um módulo que NÃO se move
-// nesta issue (o sujeito do teste é o próprio harness), e será apagado
-// junto com ele em #167. Tabela módulo -> teste no corpo da PR #166.
+// nesta issue (o sujeito do teste é o próprio harness ou, no caso do stub e
+// do t22-closeout, um módulo com um segundo consumidor fora do escopo desta
+// PR -- `scripts/pack-check.ts`/scripts que ficam -- que impede a
+// migração), e será apagado junto com o diretório em #167. Tabela
+// módulo -> decisão no corpo da PR #166.
+//
+// `tests/fixtures/**` fica fora desta varredura: os manifestos JSON
+// migrados (`scenarios/*.json`, `manifests/t15,t20/**`) são dados puros --
+// `scenarios.test.ts` só confere a FORMA deles (ids, comparisons,
+// preconditions via `parseScenarioManifest`), nunca spawna o script que um
+// campo `prefixArgs` nomeia. Vários desses campos apontam, de propósito,
+// para o lado oráculo/candidato do harness antigo (`oracle_driver.py`,
+// `event-fixture.mjs`, etc.) que NENHUM teste executa -- só o runner real
+// (`npm run parity:*`) o faria, e esse runner é classe A: fica no diretório
+// histórico até #167 apagar tudo de uma vez, dado e script juntos.
+// Reescrever esses literais aqui seria dado morto sem consumidor.
 //
 // `tests/mutations-harness.test.ts` PRECISA checar, em runtime, que outros
 // arquivos não citam o caminho — mas constrói o literal via `join("/")`
@@ -35,7 +49,9 @@ const CLASSE_A_ALLOWLIST: readonly string[] = [
   "tests/parity/preconditions.test.ts",
   "tests/parity/process.test.ts",
   "tests/parity/scrub.test.ts",
-  "tests/parity/t22-harness-pins.test.ts",
+  "tests/parity/stub-driver.test.ts",
+  "tests/parity/stub-lane-script.test.ts",
+  "tests/t22-closeout.test.ts",
 ];
 
 function listAllFiles(directory: string): string[] {
@@ -66,8 +82,12 @@ describe(`tests/ sem citações a ${NEEDLE} fora da classe A`, () => {
     expect(files.length).toBeGreaterThan(150);
   });
 
-  it("nenhum arquivo fora da classe A cita scripts/parity", () => {
+  it(`nenhum arquivo de código fora da classe A cita ${NEEDLE}`, () => {
+    // tests/fixtures/** é dado puro, coberto pelo comentário do arquivo
+    // (campos como prefixArgs nomeiam scripts do harness antigo que ficam
+    // classe A -- nenhum teste os executa).
     const offenders = files
+      .filter((relPath) => !relPath.startsWith("tests/fixtures/"))
       .filter((relPath) => !CLASSE_A_ALLOWLIST.includes(relPath))
       .filter((relPath) => readFileSync(resolve(testsRoot, "..", relPath), "utf8").includes(NEEDLE))
       .sort();

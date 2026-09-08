@@ -4,7 +4,7 @@
 // content-triggered failure injection (UPSTREAM_FAILURE_NONCE) already
 // built for the T11+T12 joint gate.
 import { UPSTREAM_FAILURE_NONCE } from "../fake-upstream.js";
-import { connectRawWs } from "../raw-ws-client.js";
+import { connectRawWs } from "../../../../tests/support/parity/gateway/raw-ws-client.js";
 import {
   compareMasked,
   createSessionBoth,

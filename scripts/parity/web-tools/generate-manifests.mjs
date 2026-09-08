@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const oracleDriver = "scripts/parity/web-tools/oracle_driver.py";
 const candidateDriver = "scripts/parity/web-tools/candidate-driver.mjs";
-const manifestDirectory = resolve(root, "scripts/parity/manifests/t20");
+const manifestDirectory = resolve(root, "tests/fixtures/parity/manifests/t20");
 mkdirSync(manifestDirectory, { recursive: true });
 
 function oraclePython() {

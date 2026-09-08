@@ -1,4 +1,10 @@
-import type { StubFixture, StubLaneStep, StubSpec, StubState, StubToolStep } from "../types.js";
+import type {
+  StubFixture,
+  StubLaneStep,
+  StubSpec,
+  StubState,
+  StubToolStep,
+} from "../../../tests/support/parity/types.js";
 
 export interface StubDriverConfig {
   readonly scenario: string;

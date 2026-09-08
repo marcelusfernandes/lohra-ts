@@ -7,8 +7,8 @@
 // and the REST route, in insecure mode (no token threading needed --
 // --insecure makes every /api route respond without one, per L4).
 import { TOOL_CALL_TRIGGERS } from "../fake-upstream.js";
-import { sendRawHttpRequest } from "../raw-http-client.js";
-import { connectRawWs } from "../raw-ws-client.js";
+import { sendRawHttpRequest } from "../../../../tests/support/parity/gateway/raw-http-client.js";
+import { connectRawWs } from "../../../../tests/support/parity/gateway/raw-ws-client.js";
 import {
   compareMasked,
   createSessionBoth,

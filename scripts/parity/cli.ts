@@ -4,9 +4,9 @@ import { resolve } from "node:path";
 import process from "node:process";
 
 import { writeEvidence } from "./evidence.js";
-import { errorMessage, HarnessError } from "./errors.js";
+import { errorMessage, HarnessError } from "../../tests/support/parity/errors.js";
 import { runScenario } from "./harness.js";
-import { parseScenarioManifest } from "./manifest.js";
+import { parseScenarioManifest } from "../../tests/support/parity/manifest.js";
 
 interface CliOptions {
   readonly manifestPath: string;

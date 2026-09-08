@@ -2,10 +2,10 @@ import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import process from "node:process";
 
-import { canonicalJson } from "./canonical.js";
-import { HarnessError } from "./errors.js";
+import { canonicalJson } from "../../tests/support/parity/canonical.js";
+import { HarnessError } from "../../tests/support/parity/errors.js";
 import { assertCredentialClean } from "./scrub.js";
-import type { EvidenceRecord, ScenarioManifest } from "./types.js";
+import type { EvidenceRecord, ScenarioManifest } from "../../tests/support/parity/types.js";
 
 export function writeEvidence(
   path: string,

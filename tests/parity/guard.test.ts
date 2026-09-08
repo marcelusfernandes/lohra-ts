@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { assertGuardAfter, assertGuardBefore } from "../../scripts/parity/guard.js";
 import { runScenario } from "../../scripts/parity/harness.js";
-import { parseScenarioManifest } from "../../scripts/parity/manifest.js";
+import { parseScenarioManifest } from "../support/parity/manifest.js";
 
 const expected = {
   expectedCommit: "16b4785d803ad0ca364a8a67346a04f949fbf592",

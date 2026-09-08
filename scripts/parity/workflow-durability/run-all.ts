@@ -9,7 +9,7 @@ import { mkdirSync, readFileSync, rmdirSync, writeFileSync, mkdtempSync, rmSync 
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-import { canonicalJson } from "../canonical.js";
+import { canonicalJson } from "../../../tests/support/parity/canonical.js";
 import { runCli } from "../cli.js";
 import { resolveExecutable, resolveOracleWorkspace } from "../resolve.js";
 import { EVIDENCE_NORMALIZATIONS, normalizeEvidence } from "./workers/normalize-evidence.mjs";

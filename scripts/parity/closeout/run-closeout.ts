@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 
-import { normalizeCloseoutOutput } from "./normalization.js";
+import { normalizeCloseoutOutput } from "../../../tests/support/parity/closeout/normalization.js";
 import { resolveOracleWorkspace } from "../resolve.js";
 
 interface InventoryRow {

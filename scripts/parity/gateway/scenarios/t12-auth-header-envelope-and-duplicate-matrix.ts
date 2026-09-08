@@ -4,7 +4,10 @@
 // previously proven only by TDD-tier unit tests (tests/gateway/auth.test.ts).
 // Purely bilateral: no literal status is hard-coded, since the point is
 // whatever the oracle's own OWS/case/duplicate handling actually is.
-import { sendRawHttpRequest, type RawHttpResponse } from "../raw-http-client.js";
+import {
+  sendRawHttpRequest,
+  type RawHttpResponse,
+} from "../../../../tests/support/parity/gateway/raw-http-client.js";
 import {
   divergent,
   jsonBody,

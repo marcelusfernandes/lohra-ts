@@ -4,10 +4,10 @@ import { dirname, join, resolve, sep } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { canonicalJson, sha256 } from "./canonical.js";
+import { canonicalJson, sha256 } from "../../tests/support/parity/canonical.js";
 import { captureObservables } from "./capture.js";
-import { compareRuns, readRunField } from "./compare.js";
-import { errorMessage, HarnessError } from "./errors.js";
+import { compareRuns, readRunField } from "../../tests/support/parity/compare.js";
+import { errorMessage, HarnessError } from "../../tests/support/parity/errors.js";
 import {
   assertGuardAfter,
   assertGuardBefore,
@@ -30,7 +30,7 @@ import type {
   RunnerSpec,
   RuntimePaths,
   ScenarioManifest,
-} from "./types.js";
+} from "../../tests/support/parity/types.js";
 
 const stubDriver = fileURLToPath(new URL("./stub/driver.ts", import.meta.url));
 const tsxLoader = import.meta.resolve("tsx");

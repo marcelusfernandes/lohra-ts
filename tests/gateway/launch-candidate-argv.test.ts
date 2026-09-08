@@ -34,7 +34,7 @@ afterEach(() => {
 
 it("launches the candidate via --import tsx, never through tsx's cli.mjs wrapper", async () => {
   const { launchCandidateDashboard } =
-    await import("../../scripts/parity/gateway/launch-candidate.js");
+    await import("../support/parity/gateway/launch-candidate.js");
 
   const fakeChild = new FakeChildProcess();
   spawnMock.mockReturnValue(fakeChild);

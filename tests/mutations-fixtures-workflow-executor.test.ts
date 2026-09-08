@@ -3,8 +3,9 @@
 // (`scripts/mutations/workflow-executor-mutants.ts`, extraído do runner na
 // issue #186) editam fixtures que não são `src/**`
 // (`t15-chat-workflow.json`, `candidate-chat.mjs`),
-// realocadas para `scripts/mutations/fixtures/` para não depender de
-// `scripts/parity/**` (que o #8 vai apagar). O runner original reprovava
+// realocadas para `scripts/mutations/fixtures/` para não depender do
+// diretório histórico de paridade (que o #8 vai apagar). O runner original
+// reprovava
 // esses três mutantes através das mesmas asserções que
 // `tests/parity/scenarios.test.ts` já faz contra os arquivos ORIGINAIS —
 // arquivo que este teste deliberadamente não toca (também usado por t20,

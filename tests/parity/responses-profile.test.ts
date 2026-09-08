@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { getProviderProfile } from "../../src/providers/index.js";
-import { resolveResponsesProfile } from "../../scripts/parity/provider-transports/responses-profile.js";
+import { resolveResponsesProfile } from "../support/parity/provider-transports/responses-profile.js";
 
 // live-smoke.mjs's smokeResponses() must resolve the codex provider from
 // resolveResponsesProfile(), not by looking it up in the registry — a

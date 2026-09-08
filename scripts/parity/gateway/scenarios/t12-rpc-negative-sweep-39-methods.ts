@@ -9,7 +9,7 @@
 // 39 documented-and-absent RPC methods, sent over a real raw WS
 // connection, checked bilaterally against the oracle.
 import { DOCUMENTED_AND_ABSENT_RPC_METHODS } from "../../../../src/gateway/rpc/dispatch.js";
-import { connectRawWs } from "../raw-ws-client.js";
+import { connectRawWs } from "../../../../tests/support/parity/gateway/raw-ws-client.js";
 import { divergent, match, type NamedScenario } from "../scenario-helpers.js";
 
 export const RPC_NEGATIVE_SWEEP_SCENARIOS: readonly NamedScenario[] = [

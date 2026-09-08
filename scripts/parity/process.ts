@@ -1,8 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { HarnessError } from "./errors.js";
-import type { ProcessRecord } from "./types.js";
+import { HarnessError } from "../../tests/support/parity/errors.js";
+import type { ProcessRecord } from "../../tests/support/parity/types.js";
 
 export interface ProcessRequest {
   readonly executable: string;

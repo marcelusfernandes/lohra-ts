@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { canonicalJson } from "../canonical.js";
+import { canonicalJson } from "../../../tests/support/parity/canonical.js";
 import { runCli } from "../cli.js";
 
 const root = resolve(import.meta.dirname, "../../..");
@@ -99,7 +99,7 @@ try {
     const evidencePath = resolve(evidenceDirectory, evidenceFileName);
     const exitCode = runCli([
       "--manifest",
-      resolve(root, "scripts/parity/manifests/t15/t15-chat-workflow.json"),
+      resolve(root, "tests/fixtures/parity/manifests/t15/t15-chat-workflow.json"),
       "--evidence",
       evidencePath,
     ]);

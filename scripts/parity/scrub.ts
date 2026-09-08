@@ -2,8 +2,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { userInfo } from "node:os";
 import { resolve } from "node:path";
 
-import { HarnessError } from "./errors.js";
-import type { EvidenceRecord, FixtureSpec, ScrubSpec } from "./types.js";
+import { HarnessError } from "../../tests/support/parity/errors.js";
+import type { EvidenceRecord, FixtureSpec, ScrubSpec } from "../../tests/support/parity/types.js";
 
 const MAX_CREDENTIAL_BYTES = 1_000_000;
 const operatorFiles = [".codex/auth.json", ".lohra/auth.json", ".lohra/oauth.json"] as const;

@@ -1,26 +1,29 @@
 // Pino de diretório para os literais de paridade/oráculo em
 // `scripts/mutations/**` (issue #178, follow-up da rodada 2 da PR #174).
 //
-// AC 1 dos passos 0c/0e do épico #13: `grep -rn
-// "16b4785d\|/usr/bin/\|scripts/parity\|^#!" scripts/mutations/` tem que
-// ficar vazio para o DIRETÓRIO INTEIRO, não só para os arquivos que cada PR
-// de migração tocou. Cada PR (#149, #150, #151, #152) fechou o AC 1 só nos
-// próprios arquivos; a rodada 2 do revisor na PR #174 contou 12 linhas
-// residuais no diretório inteiro, vindas de PRs já mergeadas: o shebang
-// herdado de `web-tools.ts` (arquivo modo 100644, invocado só por `tsx` —
-// nunca executado como binário) e prosa citando `scripts/parity` em
-// `web-tools.ts`/`web-tools-mutants.ts`. Este teste prende o diretório
-// inteiro, não um runner por vez.
+// AC 1 dos passos 0c/0e do épico #13: um grep por
+// "16b4785d\|/usr/bin/\|<diretório histórico de paridade>\|^#!" sobre
+// `scripts/mutations/` tem que ficar vazio para o DIRETÓRIO INTEIRO, não só
+// para os arquivos que cada PR de migração tocou (o diretório literal —
+// `scripts` + `/` + `parity` — não aparece contíguo neste comentário de
+// propósito: a issue #166 usa o mesmo grep para provar `tests/` limpo dele,
+// e este arquivo precisa continuar fora dessa varredura). Cada PR (#149,
+// #150, #151, #152) fechou o AC 1 só nos próprios arquivos; a rodada 2 do
+// revisor na PR #174 contou 12 linhas residuais no diretório inteiro, vindas
+// de PRs já mergeadas: o shebang herdado de `web-tools.ts` (arquivo modo
+// 100644, invocado só por `tsx` — nunca executado como binário) e prosa
+// citando o diretório histórico em `web-tools.ts`/`web-tools-mutants.ts`.
+// Este teste prende o diretório inteiro, não um runner por vez.
 //
 // Varre todo `.ts`/`.mts`/`.mjs`/`.json` sob `scripts/mutations/`
 // recursivamente (inclusive `fixtures/`).
 //
 // Hoje não há nenhuma exceção: `fixtures/t15-chat-workflow.json` tinha um
 // bloco `oracleGuard.expectedCommit` com o SHA do oráculo Python, mas essa
-// CÓPIA nunca é lida por `scripts/parity/guard.ts`/`manifest.ts` — só o
-// manifesto original em `scripts/parity/manifests/t15/t15-chat-workflow
-// .json` passa por esse harness (`scripts/parity/workflow-executor/run-all
-// .ts:102`). Os únicos leitores desta cópia são
+// CÓPIA nunca era lida por `guard.ts`/`manifest.ts` do harness histórico —
+// só o manifesto original em `manifests/t15/t15-chat-workflow.json` passava
+// por esse harness (via `workflow-executor/run-all.ts:102`, também
+// histórico). Os únicos leitores desta cópia são
 // `scripts/mutations/workflow-executor-mutants.ts` (dois mutantes que
 // editam só as chaves `normalizations`/`comparisons`; catálogo extraído do
 // runner na issue #186 — antes era `workflow-executor.ts:514,531`) e
@@ -80,7 +83,7 @@ function toRepoRelative(file: string): string {
   return relative(repoRoot, file).split(sep).join("/");
 }
 
-describe("pino de diretório: scripts/mutations/** sem literais de paridade/oráculo", () => {
+describe("pino de diretório: scripts/mutations/** sem literais de paridade/oráculo herdados", () => {
   const files = listScannedFiles(mutationsRoot);
 
   it("a varredura acha os arquivos conhecidos (regressão do glob)", () => {
@@ -90,7 +93,7 @@ describe("pino de diretório: scripts/mutations/** sem literais de paridade/orá
     expect(files.length).toBeGreaterThan(15);
   });
 
-  it("nenhum arquivo cita o SHA do oráculo, /usr/bin/, scripts/parity ou tem shebang, fora do allowlist", () => {
+  it("nenhum arquivo cita o SHA do oráculo, /usr/bin/, o diretório histórico de paridade ou tem shebang, fora do allowlist", () => {
     const violations: string[] = [];
     for (const file of files) {
       const relPath = toRepoRelative(file);
