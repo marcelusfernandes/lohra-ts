@@ -13,6 +13,8 @@ import { describe, expect, it } from "vitest";
 import { validarDeclaracao } from "../scripts/prova/run.js";
 
 const ROOT = resolve(__dirname, "..");
+// Mesmo padrão de `scripts/prova/run.ts:33` (`SLUG_RE`, não exportado —
+// "Fora de escopo" da issue #214 proíbe editar `scripts/prova/**`).
 const SLUG_RE = /^[a-z0-9-]+$/;
 
 /**
@@ -69,6 +71,13 @@ describe("prova-declaracoes", () => {
     const caminhoFixture = "tests/fixtures/prova-declaracoes/quebrada.ts";
     await expect(verificarDeclaracao(caminhoFixture)).rejects.toThrow(
       /quebrada[\s\S]*tests\/fixtures\/prova-declaracoes\/caminho-inexistente\.test\.ts/,
+    );
+  });
+
+  it("reprova uma declaração cujo unit existe mas não está sob tests/ ou não termina em .test.ts", async () => {
+    const caminhoFixture = "tests/fixtures/prova-declaracoes/fora-de-tests.ts";
+    await expect(verificarDeclaracao(caminhoFixture)).rejects.toThrow(
+      /fora-de-tests[\s\S]*precisa estar sob tests\/ e terminar em \.test\.ts/,
     );
   });
 });
