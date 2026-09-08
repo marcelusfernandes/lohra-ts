@@ -1,7 +1,8 @@
 // Ordem dos steps do job `checks` em `.github/workflows/ci.yml` (issue #6 AC 4, sub-issue #108):
 // `test` roda ANTES de `build`, provando a cada run que a suíte não depende de
-// `dist/` (#2); `build` precede `typecheck` e `lint`, que precisam de `dist/`
-// (scripts de paridade no `include` do tsconfig). Parser mínimo: linhas
+// `dist/` (#2); `build` precede `typecheck` e `lint` — ordem mantida: a razão
+// original (scripts de paridade no `include` do tsconfig importando de `dist/`)
+// saiu em #167, e nada no `include` importa de `dist/` hoje. Parser mínimo: linhas
 // `- name: <x>` dentro do job `checks`, na ordem em que aparecem.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -34,7 +35,7 @@ describe("ci.yml — ordem dos steps do job checks", () => {
     expect(pos("test")).toBeLessThan(pos("build"));
   });
 
-  it("build precede typecheck e lint (ambos exigem dist/)", () => {
+  it("build precede typecheck e lint (ordem mantida)", () => {
     expect(pos("build")).toBeLessThan(pos("typecheck"));
     expect(pos("build")).toBeLessThan(pos("lint"));
   });
