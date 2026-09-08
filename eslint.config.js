@@ -8,7 +8,6 @@ export default tseslint.config(
       "node_modules/",
       "coverage/",
       "docs/",
-      ".probe-evidence/",
       "lohra/",
       ".claude/worktrees/",
       ".prova/",
