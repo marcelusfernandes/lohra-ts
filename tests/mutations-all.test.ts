@@ -219,6 +219,23 @@ describe("evaluateRun", () => {
     );
   });
 
+  // issue #196, rodada 2 (revisão da PR #200): `npm run <script>` sempre
+  // passa por um shell entre `spawnSync` e o script; no Linux da CI, esse
+  // shell converte morte por sinal em `status` 128+n em vez de propagar
+  // `signal` (137 = 128+SIGKILL, 143 = 128+SIGTERM) — no macOS o sinal chega
+  // direto. `evaluateRun` trata os dois caminhos como o mesmo fault.
+  it("lança MUTATION_ALL_KILLED:SIGKILL quando status é 137 (128+SIGKILL) sem signal", () => {
+    expect(() => evaluateRun(exitRun(137), "ctx")).toThrow(/^MUTATION_ALL_KILLED:ctx:SIGKILL$/);
+  });
+
+  it("lança MUTATION_ALL_KILLED:SIGTERM quando status é 143 (128+SIGTERM) sem signal", () => {
+    expect(() => evaluateRun(exitRun(143), "ctx")).toThrow(/^MUTATION_ALL_KILLED:ctx:SIGTERM$/);
+  });
+
+  it("cai para o literal 128+n quando o código >= 128 não mapeia para nenhum sinal conhecido", () => {
+    expect(() => evaluateRun(exitRun(200), "ctx")).toThrow(/^MUTATION_ALL_KILLED:ctx:128\+72$/);
+  });
+
   // issue #196, achado 2 do revisor da PR #194: relatório limpo não é
   // suficiente — status != 0 é fault, mesmo com report parseável.
   it("lança MUTATION_ALL_EXIT nomeando a fatia e o status quando o relatório sai limpo mas o processo sai != 0", () => {
@@ -346,14 +363,21 @@ describe("realExecute", () => {
     expect((run.error as NodeJS.ErrnoException | undefined)?.code).toBe("ETIMEDOUT");
   }, 10_000);
 
-  it("marca o sinal quando o script se mata sozinho, sem error", () => {
+  // issue #196, rodada 2 (revisão da PR #200): `npm run <script>` sempre
+  // passa por um shell entre `spawnSync` e o script. No Linux da CI, esse
+  // shell converte SIGKILL em `status` 137 (`signal: null`); no macOS o
+  // sinal chega direto (`status: null`, `signal: "SIGKILL"`). Sem nenhum
+  // `process.platform` aqui: os dois caminhos possíveis convergem para a
+  // mesma causa em `evaluateRun` (ver testes dedicados a cada caminho, com
+  // subprocesso real, no describe abaixo), e é isso que se prova aqui —
+  // qualquer forma bruta que `realExecute` devolva vira o mesmo fault.
+  it("morte por sinal do script (direta ou convertida em 128+n pelo shell) vira MUTATION_ALL_KILLED:SIGKILL", () => {
     const dir = fakeProjectDir({
       killself: `${process.execPath} -e "process.kill(process.pid, 'SIGKILL')"`,
     });
     const run = realExecute("killself", { cwd: dir, timeoutMs: 5000 });
-    expect(run.status).toBeNull();
-    expect(run.signal).toBe("SIGKILL");
     expect(run.error).toBeUndefined();
+    expect(() => evaluateRun(run, "ctx")).toThrow(/^MUTATION_ALL_KILLED:ctx:SIGKILL$/);
   });
 
   it("devolve status != 0 (sem lançar) quando o script imprime relatório limpo e sai 3", () => {
@@ -365,6 +389,53 @@ describe("realExecute", () => {
     expect(run.signal).toBeNull();
     expect(run.error).toBeUndefined();
     expect(extractJsonLine(run.stdout, "ctx")).toContain('"suite":"x"');
+  });
+});
+
+/** Um `RunResult` mínimo a partir de um `spawnSync` real — só os quatro
+ * campos que `evaluateRun` lê. */
+function toRunResult(raw: { status: number | null; signal: NodeJS.Signals | null }): RunResult {
+  return { status: raw.status, signal: raw.signal, stdout: "", stderr: "" };
+}
+
+// issue #196, rodada 2 (revisão da PR #200): os dois caminhos possíveis de
+// morte por sinal, cada um reproduzido com subprocesso real e sem nenhum
+// `process.platform` — o comportamento de cada construção (com ou sem shell
+// no meio) é determinístico em qualquer POSIX, então os dois testes passam
+// tanto no Linux da CI quanto no macOS de desenvolvimento.
+describe("evaluateRun (sinal de subprocesso real)", () => {
+  it("sinal direto, sem intermediário: spawnSync devolve status null, signal SIGKILL", () => {
+    const raw = spawnSync(process.execPath, ["-e", "process.kill(process.pid, 'SIGKILL')"], {
+      timeout: 5000,
+    });
+    expect(raw.status).toBeNull();
+    expect(raw.signal).toBe("SIGKILL");
+    expect(() => evaluateRun(toRunResult(raw), "ctx")).toThrow(/^MUTATION_ALL_KILLED:ctx:SIGKILL$/);
+  });
+
+  it("sinal convertido em 128+n pelo shell intermediário (sh -c): status 137, signal null", () => {
+    // `; exit $?` força o `sh` a aguardar o filho (em vez de substituir o
+    // próprio processo por ele) e a propagar o `$?` observado — no POSIX,
+    // um filho morto pelo sinal N sai com status 128+N.
+    const raw = spawnSync(
+      "sh",
+      ["-c", `${process.execPath} -e "process.kill(process.pid, 'SIGKILL')"; exit $?`],
+      { timeout: 5000 },
+    );
+    expect(raw.status).toBe(137);
+    expect(raw.signal).toBeNull();
+    expect(() => evaluateRun(toRunResult(raw), "ctx")).toThrow(/^MUTATION_ALL_KILLED:ctx:SIGKILL$/);
+  });
+
+  it("SIGTERM convertido em 128+n pelo shell intermediário: status 143, signal null", () => {
+    const raw = spawnSync(
+      "sh",
+      ["-c", `${process.execPath} -e "process.kill(process.pid, 'SIGTERM')"; exit $?`],
+      { timeout: 5000 },
+    );
+    expect(raw.status).toBe(143);
+    expect(raw.signal).toBeNull();
+    expect(() => evaluateRun(toRunResult(raw), "ctx")).toThrow(/^MUTATION_ALL_KILLED:ctx:SIGTERM$/);
   });
 });
 

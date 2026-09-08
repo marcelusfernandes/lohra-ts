@@ -32,8 +32,19 @@
 // subprocesso usa para apontar `mutations:all` para uma fatia falsa sem
 // tocar `package.json` nem `scripts/mutations/slices.json` de verdade.
 //
+// Rodada 2 (revisão da PR #200): `npm run <script>` sempre passa por um
+// shell (`sh -c`) entre `spawnSync` e o script de verdade. No Linux da CI,
+// esse shell converte morte por sinal em `status` 128+n (137 = 128+SIGKILL,
+// 143 = 128+SIGTERM) em vez de propagar `signal`; no macOS o sinal chega
+// direto a `spawnSync` (`signal !== null`, `status === null`). `evaluateRun`
+// trata os dois caminhos como o mesmo fault: `status >= 128` sem `signal`
+// vira `MUTATION_ALL_KILLED:<fatia>:<nome-do-sinal>` via
+// `os.constants.signals` (128+n sem sinal conhecido cai para o literal
+// `128+n`) — sem nenhum `process.platform` no runtime nem nos testes.
+//
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { constants as osConstants } from "node:os";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
@@ -171,6 +182,20 @@ function isTimeoutError(error: Error | undefined): boolean {
   return error !== undefined && isErrnoException(error) && error.code === "ETIMEDOUT";
 }
 
+/** `128 + <número do sinal>` → nome do sinal (`137` → `"SIGKILL"`, `143` →
+ * `"SIGTERM"`), derivado de `os.constants.signals` — não hardcoded, então
+ * qualquer sinal nomeado pelo Node na plataforma atual é reconhecido.
+ * Código sem sinal conhecido cai para o literal `128+<n>` (rodada 2 da PR
+ * #200: o shell que `npm run` interpõe converte morte por sinal nisso, e
+ * `evaluateRun` sempre precisa nomear alguma coisa). */
+const SIGNAL_NAME_BY_EXIT_CODE: ReadonlyMap<number, string> = new Map(
+  Object.entries(osConstants.signals).map(([name, code]) => [128 + code, name]),
+);
+
+function signalNameForExitCode(status: number): string {
+  return SIGNAL_NAME_BY_EXIT_CODE.get(status) ?? `128+${String(status - 128)}`;
+}
+
 /** Reduz uma corrida bruta ao relatório interpretado e ao digest
  * determinístico (sha256 da linha JSON bruta — não uma reserialização, para
  * que reordenar chaves no runner nunca esconda não-determinismo real).
@@ -178,8 +203,11 @@ function isTimeoutError(error: Error | undefined): boolean {
  * para o sintoma errado: timeout do `spawnSync` vira
  * `MUTATION_ALL_TIMEOUT:<fatia>`; qualquer outro erro do próprio `spawnSync`
  * (ex.: `ENOENT`) propaga como está; sinal sem `error` (morte externa, sem
- * timeout) vira `MUTATION_ALL_KILLED:<fatia>:<sinal>`; e um relatório que
- * sai limpo mas cujo processo termina com `status !== 0` — runner que
+ * timeout) vira `MUTATION_ALL_KILLED:<fatia>:<sinal>` — e, como `npm run`
+ * sempre passa por um shell, `status >= 128` sem `signal` (o shell converteu
+ * a morte por sinal num código de saída — comum no Linux, raro no macOS)
+ * vira a mesma causa, nomeada via `signalNameForExitCode`; e um relatório
+ * que sai limpo mas cujo processo termina com `status !== 0` — runner que
  * imprime e morre depois, no `finally` ou por unhandled rejection — vira
  * `MUTATION_ALL_EXIT:<fatia>:<status>` em vez de passar como verde (achado 2
  * do revisor, PR #194). */
@@ -190,6 +218,9 @@ export function evaluateRun(
   if (isTimeoutError(run.error)) throw new Error(`MUTATION_ALL_TIMEOUT:${context}`);
   if (run.error !== undefined) throw run.error;
   if (run.signal !== null) throw new Error(`MUTATION_ALL_KILLED:${context}:${run.signal}`);
+  if (run.status !== null && run.status >= 128) {
+    throw new Error(`MUTATION_ALL_KILLED:${context}:${signalNameForExitCode(run.status)}`);
+  }
   const line = extractJsonLine(`${run.stdout}\n${run.stderr}`, context);
   const report = parseSliceReport(line, context);
   if (run.status !== 0) throw new Error(`MUTATION_ALL_EXIT:${context}:${String(run.status)}`);
