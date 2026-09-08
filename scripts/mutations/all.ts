@@ -15,6 +15,24 @@
 // `--t22-only`. `scripts/mutations/**` não referencia o diretório histórico
 // de paridade por literal (`tests/mutations-directory-pin.test.ts`, #178).
 //
+// Diagnóstico do subprocesso (issue #196, achados 1-3 do revisor da PR #194):
+// `realExecute` nunca lança — devolve sempre `{status, signal, stdout,
+// stderr, error?}`, e é `evaluateRun` quem nomeia a causa: timeout do
+// `spawnSync` (`error.code === "ETIMEDOUT"`) vira `MUTATION_ALL_TIMEOUT:<fatia>`;
+// processo morto por sinal sem timeout (`signal !== null`, sem `error`) vira
+// `MUTATION_ALL_KILLED:<fatia>:<sinal>`; e um relatório que sai limpo mas cujo
+// processo termina com `status !== 0` (runner que imprime e morre depois,
+// `finally`/unhandled rejection) vira `MUTATION_ALL_EXIT:<fatia>:<status>` em
+// vez de passar como verde. `realExecute` aceita `{cwd, timeoutMs}` opcionais
+// só para teste (`tests/mutations-all.test.ts` spawna scripts falsos num
+// diretório temporário com timeout curto); em produção usam sempre `ROOT` e
+// `RUN_TIMEOUT_MS`. O caminho de `scripts/mutations/slices.json` também pode
+// ser trocado por teste via a variável de ambiente `MUTATIONS_ALL_SLICES_PATH`
+// (relativa a `ROOT` ou absoluta) — é o que o teste de entrypoint em
+// subprocesso usa para apontar `mutations:all` para uma fatia falsa sem
+// tocar `package.json` nem `scripts/mutations/slices.json` de verdade.
+//
+import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
@@ -38,8 +56,7 @@ export interface SliceConfig {
  * interpretação. `signal` é `null` quando o processo saiu por conta própria
  * (mesmo que com `status !== 0`); `error` só existe quando o próprio
  * `spawnSync` falhou em rodar ou aguardar o processo (timeout incluso —
- * `error.code === "ETIMEDOUT"`; issue #196, ainda não interpretado por
- * `evaluateRun` abaixo). */
+ * `error.code === "ETIMEDOUT"`, ver `evaluateRun`). */
 export interface RunResult {
   readonly status: number | null;
   readonly signal: NodeJS.Signals | null;
@@ -142,19 +159,41 @@ export function parseSliceReport(line: string, context: string): ParsedSliceRepo
   return { suite, candidateSha, killed, total, survivors, restoreGreen };
 }
 
+function isErrnoException(error: Error): error is NodeJS.ErrnoException {
+  return "code" in error;
+}
+
+/** `true` só quando o próprio `spawnSync` matou o processo por ter estourado
+ * `timeout` — a causa que o comentário histórico de `evaluateRun` (issue
+ * #155) dizia cobrir mas que `realExecute` interceptava antes, lançando sem
+ * nomear a fatia (achado 1 do revisor, PR #194). */
+function isTimeoutError(error: Error | undefined): boolean {
+  return error !== undefined && isErrnoException(error) && error.code === "ETIMEDOUT";
+}
+
 /** Reduz uma corrida bruta ao relatório interpretado e ao digest
  * determinístico (sha256 da linha JSON bruta — não uma reserialização, para
  * que reordenar chaves no runner nunca esconda não-determinismo real).
- * `status === null` (processo morto por sinal — timeout do `spawnSync`
- * inclusive) lança uma causa nomeada em vez de deixar `extractJsonLine`
- * relatar "sem relatório" para o sintoma errado. */
+ * Nomeia a causa em vez de deixar `extractJsonLine` relatar "sem relatório"
+ * para o sintoma errado: timeout do `spawnSync` vira
+ * `MUTATION_ALL_TIMEOUT:<fatia>`; qualquer outro erro do próprio `spawnSync`
+ * (ex.: `ENOENT`) propaga como está; sinal sem `error` (morte externa, sem
+ * timeout) vira `MUTATION_ALL_KILLED:<fatia>:<sinal>`; e um relatório que
+ * sai limpo mas cujo processo termina com `status !== 0` — runner que
+ * imprime e morre depois, no `finally` ou por unhandled rejection — vira
+ * `MUTATION_ALL_EXIT:<fatia>:<status>` em vez de passar como verde (achado 2
+ * do revisor, PR #194). */
 export function evaluateRun(
   run: RunResult,
   context: string,
 ): { readonly report: ParsedSliceReport; readonly digest: string } {
-  if (run.status === null) throw new Error(`MUTATION_ALL_KILLED:${context}`);
+  if (isTimeoutError(run.error)) throw new Error(`MUTATION_ALL_TIMEOUT:${context}`);
+  if (run.error !== undefined) throw run.error;
+  if (run.signal !== null) throw new Error(`MUTATION_ALL_KILLED:${context}:${run.signal}`);
   const line = extractJsonLine(`${run.stdout}\n${run.stderr}`, context);
-  return { report: parseSliceReport(line, context), digest: sha256(line) };
+  const report = parseSliceReport(line, context);
+  if (run.status !== 0) throw new Error(`MUTATION_ALL_EXIT:${context}:${String(run.status)}`);
+  return { report, digest: sha256(line) };
 }
 
 /** Lança se `report` tem sobrevivente ou se `restoreGreen` veio `false` —
@@ -229,11 +268,23 @@ export interface RealExecuteOptions {
   readonly timeoutMs?: number;
 }
 
-// TODO(#196): stub — falta devolver {status, signal, stdout, stderr, error}
-// sem lançar (achado 1/3 do revisor da PR #194).
+/** Roda `npm run <script>` de verdade. Nunca lança — toda interpretação de
+ * `status`/`signal`/`error` é de `evaluateRun`. */
 export function realExecute(script: string, options: RealExecuteOptions = {}): RunResult {
   const { cwd = ROOT, timeoutMs = RUN_TIMEOUT_MS } = options;
-  throw new Error(`not implemented: realExecute(${script}, ${cwd}, ${String(timeoutMs)})`);
+  const result = spawnSync("npm", ["run", script], {
+    cwd,
+    encoding: "utf8",
+    timeout: timeoutMs,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  return {
+    status: result.status,
+    signal: result.signal,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    ...(result.error !== undefined ? { error: result.error } : {}),
+  };
 }
 
 function main(): AllMutationsReport {
