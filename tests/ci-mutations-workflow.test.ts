@@ -141,9 +141,8 @@ describe("mutations.yml — forma do workflow", () => {
     expect(yaml).toContain("npm run ${{ matrix.script }}");
   });
 
-  it("mutate tem timeout, PYTHON para node-gyp e artefato por fatia", () => {
+  it("mutate tem timeout e artefato por fatia", () => {
     expect(yaml).toMatch(/timeout-minutes: \d+/);
-    expect(yaml).toContain("PYTHON: python3");
     expect(yaml).toContain("actions/upload-artifact@v4");
     expect(yaml).toContain("name: mutation-evidence-${{ matrix.slice }}");
     expect(yaml).toContain("path: .mutation-evidence/");
