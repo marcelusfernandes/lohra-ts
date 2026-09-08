@@ -61,9 +61,7 @@ function tempHome(): string {
   return root;
 }
 
-function baseOptions(
-  overrides: Partial<DashboardCommandOptions> = {},
-): DashboardCommandOptions & { readonly stderrLines: string[] } {
+function baseOptions(overrides: Partial<DashboardCommandOptions> = {}) {
   const home = tempHome();
   const stderrLines: string[] = [];
   return {
