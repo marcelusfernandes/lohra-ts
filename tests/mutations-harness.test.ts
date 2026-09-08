@@ -411,6 +411,7 @@ describe("scripts/mutations não depende de scripts/parity", () => {
     "workflow-durability-guard.ts",
     "workflow-durability-named.ts",
     "workflow-executor.ts",
+    "workflow-executor-mutants.ts",
   ];
 
   it("nenhum arquivo da #149 em scripts/mutations/ menciona scripts/parity, nem em comentário (AC 1)", () => {

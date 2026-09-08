@@ -2,7 +2,9 @@
 // numa PR, filtrada por path. A seleção de fatias é de
 // `scripts/github/mutations-matrix.ts`: lê `scripts/mutations/slices.json` e o
 // diff `base...head`, e emite a matriz. Fail-closed: glob fora da forma
-// `src/<dir>/**` lança; mudança em `scripts/mutations/**` seleciona todas.
+// `src/<dir>/**` OU `src/<arquivo>.ts` (arquivo de topo, issue #195: fecha o
+// buraco de `src/cli.ts`, que nenhum `src/<dir>/**` cobre) lança; mudança em
+// `scripts/mutations/**` seleciona todas.
 // O YAML é pinado por leitura textual (mesmo idioma de ci-workflow-order):
 // sem parser de YAML nas dependências.
 import { spawnSync } from "node:child_process";
@@ -63,6 +65,16 @@ describe("mutations-matrix — seleção de fatias", () => {
     expect(() => selectSlices(ruim, ["src/a.ts"])).toThrow(/src\/<dir>\/\*\*/);
   });
 
+  it("aceita a forma literal src/<arquivo>.ts (arquivo de topo) e casa só esse arquivo (issue #195, pino 1)", () => {
+    const comArquivoDeTopo: readonly SliceEntry[] = [
+      { slice: "alfa", script: "mutations:alfa", srcGlobs: ["src/a/**", "src/cli.ts"] },
+      { slice: "beta", script: "mutations:beta", srcGlobs: ["src/b/**"] },
+    ];
+    expect(slicesOf(["src/cli.ts"], comArquivoDeTopo)).toEqual(["alfa"]);
+    expect(slicesOf(["src/cli/arg-spec.ts"], comArquivoDeTopo)).toEqual([]);
+    expect(slicesOf(["src/a/x.ts"], comArquivoDeTopo)).toEqual(["alfa"]);
+  });
+
   it("contra o slices.json real: src/workflow/service.ts dispara as três fatias de workflow e nenhuma outra", () => {
     const real = readSlices(SLICES);
     expect(slicesOf(["src/workflow/service.ts"], real)).toEqual([
@@ -71,6 +83,11 @@ describe("mutations-matrix — seleção de fatias", () => {
       "workflow-audit-live",
     ]);
     expect(slicesOf(["docs/adr/0003.md"], real)).toEqual([]);
+  });
+
+  it("contra o slices.json real: src/cli.ts (arquivo de topo) seleciona workflow-audit-live (issue #195, pino 1)", () => {
+    const real = readSlices(SLICES);
+    expect(slicesOf(["src/cli.ts"], real)).toEqual(["workflow-audit-live"]);
   });
 
   it("readSlices rejeita JSON sem a forma esperada", () => {
