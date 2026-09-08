@@ -86,7 +86,11 @@ export default { unit: ["tests/x.test.ts", "tests/y.test.ts"] } satisfies Declar
 
 `unit` lista os arquivos de teste que a issue cobre (caminhos relativos à
 raiz; precisam existir). `check` (opcional, default `false`) também roda
-`npm run typecheck` antes do vitest.
+`npm run typecheck` antes do vitest. `tests/prova-declaracoes.test.ts` varre
+todas as `prova/*.ts` a cada `npm test` e reprova, citando slug e caminho, se
+alguma delas declarar em `unit` um arquivo inexistente, fora de `tests/` ou
+sem sufixo `.test.ts` — apagar ou mover um teste declarado por uma prova
+antiga não passa em silêncio.
 
 ```bash
 npm run prova -- <slug>

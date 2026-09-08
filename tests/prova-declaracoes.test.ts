@@ -5,9 +5,12 @@
 // aquele slug específico roda — nenhum check varria as outras declarações,
 // então apagar um teste referenciado por uma prova antiga passava em
 // silêncio (CLAUDE.md, invariante 2).
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { basename, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
+
+import { validarDeclaracao } from "../scripts/prova/run.js";
 
 const ROOT = resolve(__dirname, "..");
 const SLUG_RE = /^[a-z0-9-]+$/;
@@ -23,8 +26,24 @@ const SLUG_RE = /^[a-z0-9-]+$/;
  * problemático.
  */
 export async function verificarDeclaracao(caminhoRelativo: string): Promise<void> {
-  await Promise.resolve();
-  throw new Error(`not implemented: verificarDeclaracao(${caminhoRelativo})`);
+  const slug = basename(caminhoRelativo, ".ts");
+  const caminhoAbsoluto = resolve(ROOT, caminhoRelativo);
+  const modulo: unknown = await import(pathToFileURL(caminhoAbsoluto).href);
+  const default_ = (modulo as { default?: unknown }).default;
+  const declaracao = validarDeclaracao(default_, caminhoRelativo);
+
+  for (const caminhoUnit of declaracao.unit) {
+    if (!existsSync(resolve(ROOT, caminhoUnit))) {
+      throw new Error(
+        `prova-declaracoes: slug "${slug}" declara um arquivo de teste que não existe: ${caminhoUnit}`,
+      );
+    }
+    if (!caminhoUnit.startsWith("tests/") || !caminhoUnit.endsWith(".test.ts")) {
+      throw new Error(
+        `prova-declaracoes: slug "${slug}" declara "${caminhoUnit}", que precisa estar sob tests/ e terminar em .test.ts`,
+      );
+    }
+  }
 }
 
 describe("prova-declaracoes", () => {
