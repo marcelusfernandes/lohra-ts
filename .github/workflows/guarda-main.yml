@@ -6,6 +6,13 @@
 # Action pega o que escapar (ruleset desligado, admin, bootstrap não declarado).
 #
 # Exceção declarada: commit cuja mensagem contenha "[permite-push-main]".
+#
+# A associação commit→PR (`commits/<sha>/pulls`) é indexada de forma assíncrona
+# depois do merge: uma consulta única logo após o push devolveu 0 para o merge
+# commit legítimo da PR #206 e abriu a issue #207 (falso positivo). Por isso
+# (#209): primeiro a evidência direta — mensagem "Merge pull request #N" cujo
+# `mergeCommit.oid` na PR N é este SHA —, depois até três consultas ao índice
+# com espera; só sem PR nas três é que a issue abre, com as tentativas no corpo.
 
 name: guarda-main
 
@@ -32,12 +39,29 @@ jobs:
         run: |
           set -euo pipefail
           case "$MSG" in *"[permite-push-main]"*) echo "bootstrap declarado; ok"; exit 0;; esac
-          n="$(gh api "repos/$REPO/commits/$SHA/pulls" --jq 'length')"
-          if [ "$n" -gt 0 ]; then echo "commit $SHA pertence a $n PR(s); ok"; exit 0; fi
+
+          # Evidência direta, sem depender do índice: merge commit de PR.
+          numero="$(printf '%s\n' "$MSG" | sed -n 's/^Merge pull request #\([0-9]\{1,\}\) .*/\1/p' | head -n 1)"
+          if [ -n "$numero" ]; then
+            oid="$(gh pr view "$numero" --repo "$REPO" --json mergeCommit --jq '.mergeCommit.oid // ""')"
+            if [ "$oid" = "$SHA" ]; then echo "commit $SHA é o merge commit da PR #$numero; ok"; exit 0; fi
+            echo "mensagem cita a PR #$numero mas mergeCommit.oid=${oid:-vazio} != $SHA; consultando o índice"
+          fi
+
+          # Índice commit→PR, com espera entre tentativas (0 s, 20 s, 40 s).
+          tentativas=""
+          for tentativa in 1 2 3; do
+            [ "$tentativa" -gt 1 ] && sleep $(( (tentativa - 1) * 20 ))
+            n="$(gh api "repos/$REPO/commits/$SHA/pulls" --jq 'length')"
+            agora="$(date -u +%H:%M:%SZ)"
+            tentativas="${tentativas}- tentativa $tentativa ($agora): $n PR(s)\n"
+            if [ "$n" -gt 0 ]; then echo "commit $SHA pertence a $n PR(s) (tentativa $tentativa); ok"; exit 0; fi
+          done
+
           titulo="Push direto em main sem PR ($ATOR, ${SHA:0:7})"
           existe="$(gh issue list --repo "$REPO" --search "\"$titulo\" in:title" --state open --json number --jq 'length')"
           if [ "$existe" = "0" ]; then
-            gh issue create --repo "$REPO" --title "$titulo" --label human \
-              --body "O commit \`$SHA\` chegou em \`main\` sem passar por PR (ator: $ATOR). Ver docs/adr/0004-trabalho-autonomo.md item 9 e .claude/hooks/README.md. Conferir o que entrou e, se preciso, reverter por PR."
+            corpo="$(printf 'O commit `%s` chegou em `main` sem passar por PR (ator: %s). Ver docs/adr/0004-trabalho-autonomo.md item 9 e .claude/hooks/README.md. Conferir o que entrou e, se preciso, reverter por PR.\n\nTentativas de `commits/<sha>/pulls` (#209):\n%b' "$SHA" "$ATOR" "$tentativas")"
+            gh issue create --repo "$REPO" --title "$titulo" --label human --body "$corpo"
           fi
           echo "::error::push direto em main sem PR ($SHA)"; exit 1
