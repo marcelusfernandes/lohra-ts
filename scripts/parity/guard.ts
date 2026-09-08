@@ -3,10 +3,10 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import process from "node:process";
 
-import { HarnessError } from "./errors.js";
+import { HarnessError } from "../../tests/support/parity/errors.js";
 import { runTypeScriptProcess } from "./process.js";
 import type { OracleWorkspace } from "./resolve.js";
-import type { OracleGuardSpec } from "./types.js";
+import type { OracleGuardSpec } from "../../tests/support/parity/types.js";
 
 export interface GuardSnapshot {
   readonly commit: string;

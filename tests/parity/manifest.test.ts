@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseScenarioManifest } from "../../scripts/parity/manifest.js";
+import { parseScenarioManifest } from "../support/parity/manifest.js";
 
 const validManifest = {
   schemaVersion: 1,

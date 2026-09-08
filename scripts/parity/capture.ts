@@ -4,7 +4,7 @@ import { join, relative, sep } from "node:path";
 
 import Database from "better-sqlite3";
 
-import { HarnessError } from "./errors.js";
+import { HarnessError } from "../../tests/support/parity/errors.js";
 import type {
   CaptureRoot,
   CaptureSpec,
@@ -16,7 +16,7 @@ import type {
   SqliteRecord,
   SqliteValue,
   TreeEntry,
-} from "./types.js";
+} from "../../tests/support/parity/types.js";
 
 function rootPath(paths: RuntimePaths, root: CaptureRoot): string {
   return paths[root];

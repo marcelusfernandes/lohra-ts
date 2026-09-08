@@ -609,7 +609,7 @@ describe("controle-negativo/run.ts (subprocesso, repositório git descartável)"
 // Issue #137: os três helpers que ainda lançavam `tsx` pelo wrapper
 // `tsx/dist/cli.mjs` (direto ou via o shim `node_modules/.bin/tsx`, que é um
 // symlink para o mesmo `cli.mjs`) precisam trocar para `node --import <tsx
-// loader>`, igual a `scripts/parity/gateway/launch-candidate.ts` (issue
+// loader>`, igual a `tests/support/parity/gateway/launch-candidate.ts` (issue
 // #132) — um processo real, sem o handshake de sinal do wrapper. Escaneia o
 // texto-fonte dos arquivos-alvo (os `ci-*.test.ts` que fazem `spawnSync`
 // direto, o helper compartilhado do controle-negativo, e — issue #142,

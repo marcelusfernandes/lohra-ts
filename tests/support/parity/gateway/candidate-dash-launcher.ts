@@ -4,8 +4,8 @@
 // the public CLI entry point. Zero product code is touched -- registry.ts
 // already exports registerProvider() as a first-class extension point,
 // the same shape as the oracle's own register_provider().
-import { registerProvider } from "../../../src/providers/registry.js";
-import { runCli } from "../../../src/cli.js";
+import { registerProvider } from "../../../../src/providers/registry.js";
+import { runCli } from "../../../../src/cli.js";
 
 registerProvider({
   name: "fakeprov",

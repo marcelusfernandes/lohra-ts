@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { awaitLatch, startStub } from "../../scripts/parity/stub/server.js";
 import type { StubRuntime } from "../../scripts/parity/stub/types.js";
-import type { StubLaneStep } from "../../scripts/parity/types.js";
+import type { StubLaneStep } from "../support/parity/types.js";
 
 // One server for the whole file, reconfigured per test by mutating the
 // shared runtime object in place — avoids the repeated bind/unbind-the-

@@ -3,10 +3,10 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { canonicalJson } from "../../scripts/parity/canonical.js";
-import { compareRuns } from "../../scripts/parity/compare.js";
-import { parseScenarioManifest } from "../../scripts/parity/manifest.js";
-import type { RunRecord } from "../../scripts/parity/types.js";
+import { canonicalJson } from "../support/parity/canonical.js";
+import { compareRuns } from "../support/parity/compare.js";
+import { parseScenarioManifest } from "../support/parity/manifest.js";
+import type { RunRecord } from "../support/parity/types.js";
 
 const scenarios = [
   "oracle-version",
@@ -58,7 +58,7 @@ const sprint03Scenarios = [
 
 describe("versioned scenarios", () => {
   it.each(scenarios)("parses %s without an author-local absolute path", (name) => {
-    const path = resolve(`scripts/parity/scenarios/${name}.json`);
+    const path = resolve(`tests/fixtures/parity/scenarios/${name}.json`);
     const source = readFileSync(path, "utf8");
     expect(source).not.toContain("/Users/");
     expect(source).not.toContain(".oracle-venv/bin/lohra");
@@ -67,13 +67,13 @@ describe("versioned scenarios", () => {
 
   it("declares the volatile SQLite shm exclusion only in workflow capture policy", () => {
     const source = JSON.parse(
-      readFileSync(resolve("scripts/parity/scenarios/oracle-workflow-list.json"), "utf8"),
+      readFileSync(resolve("tests/fixtures/parity/scenarios/oracle-workflow-list.json"), "utf8"),
     ) as { capture: { tree: { exclude: string[] } } };
     expect(source.capture.tree.exclude).toEqual([".lohra/state.db-shm"]);
   });
 
   it.each(sprint02Scenarios)("parses Sprint 02 scenario %s portably", (name) => {
-    const path = resolve(`scripts/parity/scenarios/${name}.json`);
+    const path = resolve(`tests/fixtures/parity/scenarios/${name}.json`);
     const source = readFileSync(path, "utf8");
     expect(source).not.toContain("/Users/");
     expect(parseScenarioManifest(JSON.parse(source) as unknown).id).toBe(name);
@@ -81,7 +81,7 @@ describe("versioned scenarios", () => {
 
   it.each(sprint02Scenarios)("fixes COLUMNS=80 in Sprint 02 scenario %s", (name) => {
     const source = JSON.parse(
-      readFileSync(resolve(`scripts/parity/scenarios/${name}.json`), "utf8"),
+      readFileSync(resolve(`tests/fixtures/parity/scenarios/${name}.json`), "utf8"),
     ) as { environment: { set: Record<string, string> } };
     expect(source.environment.set.COLUMNS).toBe("80");
   });
@@ -89,7 +89,7 @@ describe("versioned scenarios", () => {
   it("declares the stub-down port precondition on every doctor scenario", () => {
     for (const name of sprint02Scenarios.filter((scenario) => scenario.includes("doctor"))) {
       const source = JSON.parse(
-        readFileSync(resolve(`scripts/parity/scenarios/${name}.json`), "utf8"),
+        readFileSync(resolve(`tests/fixtures/parity/scenarios/${name}.json`), "utf8"),
       ) as { preconditions: unknown[] };
       expect(source.preconditions).toEqual([
         { kind: "tcp-port-closed", host: "127.0.0.1", port: 11434 },
@@ -99,11 +99,14 @@ describe("versioned scenarios", () => {
 
   it("exercises both formerly unit-only normalizers in versioned scenarios", () => {
     const text = JSON.parse(
-      readFileSync(resolve("scripts/parity/scenarios/normalization-replace-text.json"), "utf8"),
+      readFileSync(
+        resolve("tests/fixtures/parity/scenarios/normalization-replace-text.json"),
+        "utf8",
+      ),
     ) as { normalizations: Array<{ kind: string }> };
     const pointer = JSON.parse(
       readFileSync(
-        resolve("scripts/parity/scenarios/normalization-replace-json-pointer.json"),
+        resolve("tests/fixtures/parity/scenarios/normalization-replace-json-pointer.json"),
         "utf8",
       ),
     ) as { normalizations: Array<{ kind: string }> };
@@ -113,7 +116,7 @@ describe("versioned scenarios", () => {
   });
 
   it.each(sprint03Scenarios)("parses Sprint 03 scenario %s with explicit stub policy", (name) => {
-    const path = resolve(`scripts/parity/scenarios/${name}.json`);
+    const path = resolve(`tests/fixtures/parity/scenarios/${name}.json`);
     const source = readFileSync(path, "utf8");
     const manifest = parseScenarioManifest(JSON.parse(source) as unknown);
 
@@ -130,7 +133,7 @@ describe("versioned scenarios", () => {
 });
 
 describe("t15 chat evidence reproducibility", () => {
-  const t15ManifestPath = "scripts/parity/manifests/t15/t15-chat-workflow.json";
+  const t15ManifestPath = "tests/fixtures/parity/manifests/t15/t15-chat-workflow.json";
 
   interface T15Policy {
     readonly comparisons: readonly { readonly class: string; readonly field: string }[];
@@ -267,7 +270,7 @@ describe("t15 chat evidence reproducibility", () => {
 
   it("composes the candidate chat system prompt with the real product builder", () => {
     const source = readFileSync(
-      resolve("scripts/parity/workflow-executor/candidate-chat.mjs"),
+      resolve("tests/support/parity/workflow-executor/candidate-chat.mjs"),
       "utf8",
     );
 
@@ -304,7 +307,7 @@ const expectedDivergentT20 = new Set([
   "t20-ddg-byte-cap",
 ]);
 
-const t20Scenarios = readdirSync(resolve("scripts/parity/manifests/t20"))
+const t20Scenarios = readdirSync(resolve("tests/fixtures/parity/manifests/t20"))
   .filter((name) => name.startsWith("t20-") && name.endsWith(".json"))
   .map((name) => name.slice(0, -5))
   .sort();
@@ -324,7 +327,7 @@ describe("sprint 05 T20 web tools matrix", () => {
   });
 
   it.each(t20Scenarios)("parses %s portably with the pinned oracle guard", (id) => {
-    const path = resolve(`scripts/parity/manifests/t20/${id}.json`);
+    const path = resolve(`tests/fixtures/parity/manifests/t20/${id}.json`);
     const source = readFileSync(path, "utf8");
     expect(source).not.toContain("/Users/");
     const manifest = parseScenarioManifest(JSON.parse(source) as unknown);
@@ -340,7 +343,7 @@ describe("sprint 05 T20 web tools matrix", () => {
     "pins %s as an expected divergence on both sides",
     (id) => {
       const source = JSON.parse(
-        readFileSync(resolve(`scripts/parity/manifests/t20/${id}.json`), "utf8"),
+        readFileSync(resolve(`tests/fixtures/parity/manifests/t20/${id}.json`), "utf8"),
       ) as {
         expectations: Array<{ side: string; field: string }>;
         comparisons: Array<{ field: string }>;
@@ -355,7 +358,7 @@ describe("sprint 05 T20 web tools matrix", () => {
   it("poisons proxy environment on every T20 scenario", () => {
     for (const id of t20Scenarios) {
       const source = JSON.parse(
-        readFileSync(resolve(`scripts/parity/manifests/t20/${id}.json`), "utf8"),
+        readFileSync(resolve(`tests/fixtures/parity/manifests/t20/${id}.json`), "utf8"),
       ) as { environment: { set: Record<string, string> } };
       expect(source.environment.set.HTTP_PROXY).toContain("127.0.0.1:1");
       expect(source.environment.set.HTTPS_PROXY).toContain("127.0.0.1:1");

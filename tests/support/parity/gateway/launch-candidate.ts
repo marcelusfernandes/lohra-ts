@@ -17,7 +17,7 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 
-const projectRoot = resolve(import.meta.dirname, "../../..");
+const projectRoot = resolve(import.meta.dirname, "../../../..");
 const cliEntry = resolve(projectRoot, "src/cli.ts");
 const tsxLoader = import.meta.resolve("tsx");
 

@@ -9,12 +9,12 @@ import { GatewaySessionRegistry } from "../../src/gateway/session-service.js";
 import { createGatewayUpgradeHandler } from "../../src/gateway/ws/connection.js";
 import { startGatewayHttpServer, type GatewayHttpServer } from "../../src/gateway/http/server.js";
 import { routeGatewayRequest, type RouteContext } from "../../src/gateway/http/routes.js";
-import { sendRawHttpRequest } from "../../scripts/parity/gateway/raw-http-client.js";
+import { sendRawHttpRequest } from "../support/parity/gateway/raw-http-client.js";
 import {
   connectRawWs,
   decodeCloseFrame,
   WS_OPCODE,
-} from "../../scripts/parity/gateway/raw-ws-client.js";
+} from "../support/parity/gateway/raw-ws-client.js";
 
 // Self-validation of the harness's own raw-socket primitives (the ones the
 // Evaluator-facing scenario harness will use as principal evidence)

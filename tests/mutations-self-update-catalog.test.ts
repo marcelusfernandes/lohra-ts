@@ -1,5 +1,5 @@
-// Teste-pino do catálogo de mutantes de `src/` que sobrevivem à triagem de
-// `scripts/parity/closeout/run-closeout-mutations.ts` (issue #153, passo 0f
+// Teste-pino do catálogo de mutantes de `src/` que sobrevivem à triagem do
+// agregador de closeout do diretório histórico de paridade (issue #153, passo 0f
 // do épico #13): trava as 8 entradas migradas (`self-update/service.ts` x3,
 // `self-update/repo.ts`, `tools/terminal.ts`, `mcp/manager.ts`,
 // `gateway/session-service.ts`, `commands/session-tools.ts`), o foco por
@@ -96,7 +96,7 @@ describe("catálogo de mutação self-update", () => {
     "scripts/mutations/self-update.ts",
   ] as const;
 
-  it("nenhum arquivo do runner referencia binários absolutos ou scripts/parity", () => {
+  it("nenhum arquivo do runner referencia binários absolutos ou o diretório histórico de paridade", () => {
     for (const file of runnerFiles) {
       const source = readFileSync(resolve(repoRoot, file), "utf8");
       expect(source, file).not.toMatch(/\/usr\/bin\//);

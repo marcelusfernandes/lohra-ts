@@ -1,6 +1,6 @@
 // Teste-pino do catálogo de mutantes de `src/workflow/audit-*` (issue #150,
-// passo 13-S3 do épico #13): trava as 32 entradas migradas de
-// `scripts/parity/workflow-audit-live/run-mutations.ts`, o foco por
+// passo 13-S3 do épico #13): trava as 32 entradas migradas do runner
+// histórico de paridade do workflow-audit-live, o foco por
 // `{file, test}` (não por título solto — renomear um teste sem atualizar o
 // catálogo tem que quebrar aqui) e a ausência do SHA hardcoded do Python.
 import { existsSync, readFileSync } from "node:fs";
@@ -80,12 +80,12 @@ describe("catálogo de mutação workflow-audit-live (t17)", () => {
   });
 
   // As duas checagens abaixo cobrem os dois arquivos do runner (catálogo +
-  // orquestração), não só o catálogo: `git grep -n
-  // "16b4785d\|/usr/bin/\|scripts/parity"` roda sobre `scripts/mutations/
-  // workflow-audit-live*.ts` inteiro (achado da rodada 1 da PR #174: um
-  // shebang `#!/usr/bin/env node` herdado do runner antigo e comentários
-  // citando os literais em `workflow-audit-live.ts` escaparam de um teste
-  // que só olhava o catálogo).
+  // orquestração), não só o catálogo: um grep pelo SHA do oráculo, por
+  // binário absoluto e pelo diretório histórico de paridade roda sobre
+  // `scripts/mutations/workflow-audit-live*.ts` inteiro (achado da rodada 1
+  // da PR #174: um shebang `#!/usr/bin/env node` herdado do runner antigo e
+  // comentários citando os literais em `workflow-audit-live.ts` escaparam
+  // de um teste que só olhava o catálogo).
   const runnerFiles = [
     "scripts/mutations/workflow-audit-live-mutants.ts",
     "scripts/mutations/workflow-audit-live.ts",
@@ -98,7 +98,7 @@ describe("catálogo de mutação workflow-audit-live (t17)", () => {
     }
   });
 
-  it("nenhum arquivo do runner referencia binários absolutos ou scripts/parity", () => {
+  it("nenhum arquivo do runner referencia binários absolutos ou o diretório histórico de paridade", () => {
     for (const file of runnerFiles) {
       const source = readFileSync(resolve(repoRoot, file), "utf8");
       expect(source, file).not.toMatch(/\/usr\/bin\//);

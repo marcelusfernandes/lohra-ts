@@ -20,7 +20,7 @@ import {
   safeAuditMetadata,
 } from "../../../src/workflow/audit-model.js";
 import type { ChildRuntime } from "../../../src/workflow/runtime.js";
-import { canonicalJson } from "../canonical.js";
+import { canonicalJson } from "../../../tests/support/parity/canonical.js";
 import { resolveExecutable, resolveOracleWorkspace } from "../resolve.js";
 import { acquireLock, guardCandidate, git, releaseLock } from "./support.js";
 

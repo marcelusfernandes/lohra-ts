@@ -9,7 +9,7 @@ import { orchestrationMutants } from "../scripts/mutations/orchestration.js";
 // (`config.wrapDispatch === undefined ? childDispatch :
 // config.wrapDispatch(childDispatch)`) is the ONLY production site that
 // applies the leaf sandbox wrap on top of the child allow-list dispatch,
-// and until now `scripts/parity/workflow-durability`'s catalog had no
+// and until now the historical parity directory's workflow-durability catalog had no
 // entry watching it — a regression that silently dropped the wrap
 // survived `mutations:t16` (96/96 killed, none of them here).
 //

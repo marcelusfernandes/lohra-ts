@@ -1,8 +1,8 @@
 import process from "node:process";
 
-import { HarnessError } from "./errors.js";
+import { HarnessError } from "../../tests/support/parity/errors.js";
 import { runTypeScriptProcess } from "./process.js";
-import type { PreconditionRecord, PreconditionSpec } from "./types.js";
+import type { PreconditionRecord, PreconditionSpec } from "../../tests/support/parity/types.js";
 
 interface Limits {
   readonly timeoutMs: number;

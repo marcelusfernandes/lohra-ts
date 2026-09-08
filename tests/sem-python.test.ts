@@ -30,7 +30,7 @@ import { describe, expect, it } from "vitest";
 // `adapter: "python"` sozinho fica fora da varredura: `manifest.test.ts` usa
 // o valor só para provar o *schema* do manifesto (`parseScenarioManifest`),
 // nunca chama `runScenario` — não spawna nada. O que de fato aciona o lado
-// Python do harness (`scripts/parity/harness.ts:194-197`) é passar
+// Python do harness histórico de paridade (`harness.ts:194-197`) é passar
 // `pythonExecutable` (ou deixar `runScenario` resolver um workspace Python),
 // e isso os padrões abaixo cobrem.
 //

@@ -8,9 +8,9 @@ import {
   componentTargetMatches,
   concurrencyEvidenceMatches,
   gatesEvidenceMatches,
-} from "../scripts/parity/closeout/evidence-validation.js";
-import { normalizeCloseoutOutput } from "../scripts/parity/closeout/normalization.js";
-import { parseCandidateBootPort } from "../scripts/parity/gateway/launch-candidate-fake.js";
+} from "./support/parity/closeout/evidence-validation.js";
+import { normalizeCloseoutOutput } from "./support/parity/closeout/normalization.js";
+import { parseCandidateBootPort } from "./support/parity/gateway/launch-candidate-fake.js";
 
 const root = resolve(import.meta.dirname, "..");
 const source = (path: string): string => readFileSync(resolve(root, path), "utf8");
@@ -38,7 +38,7 @@ describe("T22 closeout invariants", () => {
   });
 
   it("pins all approved ancestors and refuses platform spoofing", () => {
-    const verifier = source("scripts/parity/closeout/verify-evidence.ts");
+    const verifier = source("tests/support/parity/closeout/verify-evidence.ts");
     // Desde a issue #158, os 22 SHAs aprovados não são mais uma lista literal
     // em verify-evidence.ts — vêm de docs/provenance.json via
     // scripts/provenance/extract.ts. O que fica pinado aqui é que o
@@ -48,7 +48,7 @@ describe("T22 closeout invariants", () => {
     // `inheritedFromApprovedHeads` (verificação de herança do .gitignore),
     // que é uma lista independente e não migrou nesta issue.
     expect(verifier, "MUTATION_CAUSE:T22-ancestor-source").toContain(
-      'import { approvedHeadPairs } from "../../provenance/extract.js"',
+      'import { approvedHeadPairs } from "../../../../scripts/provenance/extract.js"',
     );
     expect(verifier, "MUTATION_CAUSE:T22-ancestor-source-wired").toContain(
       "const approved = approvedHeadPairs();",
@@ -81,7 +81,7 @@ describe("T22 closeout invariants", () => {
     // aqui rodaria o closeout inteiro. A guarda em si (acréscimo do veredito
     // da PR #171, #158) é pinada por texto-fonte, como o resto deste
     // arquivo faz para verify-evidence.ts.
-    const verifier = source("scripts/parity/closeout/verify-evidence.ts");
+    const verifier = source("tests/support/parity/closeout/verify-evidence.ts");
     expect(verifier, "MUTATION_CAUSE:T22-provenance-empty").toContain(
       'if (approved.length === 0) throw new Error("PROVENANCE_EMPTY");',
     );
@@ -266,7 +266,7 @@ describe("T22 closeout invariants", () => {
   });
 
   it("requires exact-SHA aggregate evidence before marking the closeout complete", () => {
-    const verifier = source("scripts/parity/closeout/verify-evidence.ts");
+    const verifier = source("tests/support/parity/closeout/verify-evidence.ts");
     expect(verifier, "MUTATION_CAUSE:T22-aggregate-evidence").toContain(
       "const aggregatesPass = parityAggregatePass && mutationAggregatePass;",
     );
@@ -275,7 +275,7 @@ describe("T22 closeout invariants", () => {
   });
 
   it("binds every component and owner ruling before evidence integrity passes", () => {
-    const verifier = source("scripts/parity/closeout/verify-evidence.ts");
+    const verifier = source("tests/support/parity/closeout/verify-evidence.ts");
     expect(
       componentTargetMatches({ targetSha: "stale" }, "current"),
       "MUTATION_CAUSE:T22-component-sha-binding",

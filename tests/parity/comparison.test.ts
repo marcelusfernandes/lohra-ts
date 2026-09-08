@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { compareRuns } from "../../scripts/parity/compare.js";
-import type { RunRecord } from "../../scripts/parity/types.js";
+import { compareRuns } from "../support/parity/compare.js";
+import type { RunRecord } from "../support/parity/types.js";
 
 function record(
   stdout: string,

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { runCli } from "../../scripts/parity/cli.js";
 import { writeEvidence } from "../../scripts/parity/evidence.js";
-import type { EvidenceRecord } from "../../scripts/parity/types.js";
+import type { EvidenceRecord } from "../support/parity/types.js";
 
 const temporaryDirectories: string[] = [];
 

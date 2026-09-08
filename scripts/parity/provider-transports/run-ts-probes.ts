@@ -17,8 +17,8 @@ import {
   type NormalizedResponse,
 } from "../../../src/transports/index.js";
 import { assertCredentialClean } from "../scrub.js";
-import type { EvidenceRecord } from "../types.js";
-import { canonicalJson } from "../canonical.js";
+import type { EvidenceRecord } from "../../../tests/support/parity/types.js";
+import { canonicalJson } from "../../../tests/support/parity/canonical.js";
 
 const root = resolve(import.meta.dirname, "../../..");
 const evidenceRoot = resolve(root, ".probe-evidence/t10");

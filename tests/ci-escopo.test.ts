@@ -26,7 +26,7 @@ const runScript = resolve(root, "scripts/ci/escopo/run.ts");
 // da pasta de dependências, que é um symlink pra ele) — o handshake de sinal
 // do wrapper (~30ms + 30ms ack, depois SIGKILL) é suspeito de custo e de
 // flake sob carga (#128/#131). `--import` com o loader do `tsx` lança um
-// único processo real (molde: `scripts/parity/gateway/launch-candidate.ts`,
+// único processo real (molde: `tests/support/parity/gateway/launch-candidate.ts`,
 // issue #132).
 const tsxLoader = import.meta.resolve("tsx");
 

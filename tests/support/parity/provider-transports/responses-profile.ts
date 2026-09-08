@@ -1,5 +1,5 @@
-import { CODEX_PROVIDER } from "../../../src/providers/index.js";
-import type { ProviderProfile } from "../../../src/providers/types.js";
+import { CODEX_PROVIDER } from "../../../../src/providers/index.js";
+import type { ProviderProfile } from "../../../../src/providers/types.js";
 
 // Gêmeo, consumido só por `tests/parity/responses-profile.test.ts`, de
 // `responses-profile.mjs` (issue #2). O `.mjs` importa de `dist/` de

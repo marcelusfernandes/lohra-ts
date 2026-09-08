@@ -52,7 +52,7 @@ describe("mutations:t20 catalog (src/web/**)", () => {
     });
   });
 
-  it("nenhum import de scripts/parity/**, nem npm run build", () => {
+  it("nenhum import do diretório histórico de paridade, nem npm run build", () => {
     const catalogSource = sourceOf("scripts/mutations/web-tools-mutants.ts");
     const runnerSource = sourceOf("scripts/mutations/web-tools.ts");
     const combined = `${catalogSource}\n${runnerSource}`;

@@ -28,7 +28,7 @@ afterEach(() => {
 describe("serve socket sentinels", () => {
   it("arms inside Node and records a listen attempt", () => {
     const output = temporaryFile();
-    const sentinel = resolve("scripts/parity/auth/socket-sentinel.cjs");
+    const sentinel = resolve("tests/support/parity/auth/socket-sentinel.cjs");
     const child = spawnSync(
       process.execPath,
       [

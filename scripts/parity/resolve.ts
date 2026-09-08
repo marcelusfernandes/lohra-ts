@@ -2,7 +2,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, parse, resolve, sep } from "node:path";
 import process from "node:process";
 
-import { HarnessError } from "./errors.js";
+import { HarnessError } from "../../tests/support/parity/errors.js";
 import { runTypeScriptProcess } from "./process.js";
 
 export interface OracleWorkspace {

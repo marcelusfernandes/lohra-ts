@@ -11,7 +11,7 @@ import { openStateDatabase } from "../../../src/state/connection.js";
 import type { Ownership } from "../../../src/state/workflow-repository.js";
 import { AuditTrail } from "../../../src/workflow/audit-trail.js";
 import { safeAuditMetadata, type AuditInput } from "../../../src/workflow/audit-model.js";
-import { canonicalJson } from "../canonical.js";
+import { canonicalJson } from "../../../tests/support/parity/canonical.js";
 import { acquireLock, guardCandidate, releaseLock } from "./support.js";
 
 const root = resolve(import.meta.dirname, "../../..");

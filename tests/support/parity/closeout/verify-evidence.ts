@@ -10,9 +10,9 @@ import {
   concurrencyEvidenceMatches,
   gatesEvidenceMatches,
 } from "./evidence-validation.js";
-import { approvedHeadPairs } from "../../provenance/extract.js";
+import { approvedHeadPairs } from "../../../../scripts/provenance/extract.js";
 
-const project = resolve(import.meta.dirname, "../../..");
+const project = resolve(import.meta.dirname, "../../../..");
 const evidenceDirectory = join(project, ".parity-evidence", "t22");
 const artifactRoot = resolve(
   process.env.LOHRA_T22_ARTIFACT_ROOT ??

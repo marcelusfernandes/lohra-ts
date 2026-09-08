@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { HarnessError } from "../../scripts/parity/errors.js";
+import { HarnessError } from "../support/parity/errors.js";
 import { assertPreconditions } from "../../scripts/parity/preconditions.js";
 
 describe("parity preconditions", () => {

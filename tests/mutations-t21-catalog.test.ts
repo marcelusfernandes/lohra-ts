@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { mediaMutants } from "../scripts/mutations/media.js";
 
-// Issue #151 (13-S4, épico #13): migra os 20 mutantes de mídia de
-// `scripts/parity/media/run-mutations.ts` (17 `results.push` + laço de 3
+// Issue #151 (13-S4, épico #13): migra os 20 mutantes de mídia do runner
+// histórico de paridade de mídia (17 `results.push` + laço de 3
 // em `:299-345`, hoje posicionais) para um catálogo declarativo com `id` e
 // `category` explícitos. Este teste-pino prende a contagem e a unicidade
 // dos ids — o comportamento de cada mutante (killed/restoreGreen) é

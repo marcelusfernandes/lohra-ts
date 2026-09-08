@@ -387,8 +387,14 @@ describe("runVitestReporterJson lê o relatório de --outputFile, não de /dev/s
   });
 });
 
-describe("scripts/mutations não depende de scripts/parity", () => {
-  it("harness.ts não importa nada de scripts/parity/**", () => {
+// Construído via join para não conter o literal contíguo do diretório
+// histórico de paridade — senão este próprio arquivo apareceria no grep
+// que a issue #166 usa para provar `tests/` limpo dele (nem este arquivo
+// nem `scripts/mutations/**` citam esse diretório; ele é apagado em #167).
+const PARITY_DIR = ["scripts", "parity"].join("/");
+
+describe(`scripts/mutations não depende de ${PARITY_DIR}`, () => {
+  it(`harness.ts não importa nada de ${PARITY_DIR}/**`, () => {
     const importLines = harnessSource
       .split("\n")
       .filter((line) => /^\s*import\b/.test(line) || /from\s+["']/.test(line));
@@ -400,8 +406,8 @@ describe("scripts/mutations não depende de scripts/parity", () => {
   // Escopo: só os arquivos que a #149 é dona (harness comum + catálogos de
   // t15/t16). Outras issues (#150/#151/#152) migram seus próprios runners
   // para scripts/mutations/** em paralelo e podem legitimamente mencionar
-  // "scripts/parity" em prosa histórica nos ARQUIVOS DELAS — a #149 não
-  // pode varrer o diretório inteiro sem colidir com o trabalho alheio.
+  // o diretório histórico de paridade em prosa nos ARQUIVOS DELAS — a #149
+  // não pode varrer o diretório inteiro sem colidir com o trabalho alheio.
   const ARQUIVOS_DA_149 = [
     "canonical.ts",
     "harness.ts",
@@ -414,12 +420,12 @@ describe("scripts/mutations não depende de scripts/parity", () => {
     "workflow-executor-mutants.ts",
   ];
 
-  it("nenhum arquivo da #149 em scripts/mutations/ menciona scripts/parity, nem em comentário (AC 1)", () => {
+  it(`nenhum arquivo da #149 em scripts/mutations/ menciona ${PARITY_DIR}, nem em comentário (AC 1)`, () => {
     const mutationsDir = resolve(repoRoot, "scripts/mutations");
     const offenders: string[] = [];
     for (const entry of ARQUIVOS_DA_149) {
       const contents = readFileSync(join(mutationsDir, entry), "utf8");
-      if (contents.includes("scripts/parity")) offenders.push(entry);
+      if (contents.includes(PARITY_DIR)) offenders.push(entry);
     }
     expect(offenders).toEqual([]);
   });

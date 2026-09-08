@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { decodeHtmlEntities, htmlToText } from "../src/web/index.js";
 
-/* The matrix below is pinned from the oracle's html.unescape
- * (Python 3.12.10): scripts/parity/web-tools/html-matrix-oracle.py */
+/* The matrix below is pinned from the oracle's html.unescape (Python
+ * 3.12.10): web-tools/html-matrix-oracle.py, under the historical parity
+ * directory. */
 const MATRIX: readonly (readonly [string, string])[] = [
   ["A &NotEqualTilde; B", "A \u2242\u0338 B"],
   ["A &#128; B", "A \u20ac B"],

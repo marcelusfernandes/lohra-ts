@@ -29,7 +29,7 @@
     "candidate": {
       "adapter": "typescript",
       "executable": "node",
-      "prefixArgs": ["{{projectRoot}}/scripts/parity/workflow-executor/candidate-chat.mjs"],
+      "prefixArgs": ["{{projectRoot}}/tests/support/parity/workflow-executor/candidate-chat.mjs"],
       "cwd": "profile"
     }
   },
