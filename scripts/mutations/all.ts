@@ -15,7 +15,6 @@
 // `--t22-only`. `scripts/mutations/**` não referencia o diretório histórico
 // de paridade por literal (`tests/mutations-directory-pin.test.ts`, #178).
 //
-import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
@@ -36,11 +35,17 @@ export interface SliceConfig {
 }
 
 /** Uma corrida de subprocesso (`npm run <script>`), antes de qualquer
- * interpretação. */
+ * interpretação. `signal` é `null` quando o processo saiu por conta própria
+ * (mesmo que com `status !== 0`); `error` só existe quando o próprio
+ * `spawnSync` falhou em rodar ou aguardar o processo (timeout incluso —
+ * `error.code === "ETIMEDOUT"`; issue #196, ainda não interpretado por
+ * `evaluateRun` abaixo). */
 export interface RunResult {
   readonly status: number | null;
+  readonly signal: NodeJS.Signals | null;
   readonly stdout: string;
   readonly stderr: string;
+  readonly error?: Error;
 }
 
 /** O mínimo comum de `MutationReport` (`types.ts`) que os seis runners já
@@ -71,13 +76,23 @@ export interface AllMutationsReport {
 }
 
 const ROOT = resolve(import.meta.dirname, "../..");
-const SLICES_PATH = resolve(ROOT, "scripts/mutations/slices.json");
+const SLICES_PATH_DEFAULT = resolve(ROOT, "scripts/mutations/slices.json");
 const EVIDENCE_PATH = resolve(ROOT, ".mutation-evidence/all.json");
 const RUN_TIMEOUT_MS = 20 * 60_000;
 
+/** `scripts/mutations/slices.json`, ou o override de
+ * `MUTATIONS_ALL_SLICES_PATH` (relativo a `ROOT`, ou absoluto) — só para o
+ * teste do entrypoint em subprocesso (issue #196); `main()` não recebe outro
+ * caminho. */
+function resolveSlicesPath(): string {
+  const override = process.env["MUTATIONS_ALL_SLICES_PATH"];
+  if (override === undefined || override === "") return SLICES_PATH_DEFAULT;
+  return resolve(ROOT, override);
+}
+
 /** Lê e valida `scripts/mutations/slices.json` (ou `path`, para teste),
  * extraindo só `slice`/`script`. */
-export function readSliceConfigs(path: string = SLICES_PATH): readonly SliceConfig[] {
+export function readSliceConfigs(path: string = resolveSlicesPath()): readonly SliceConfig[] {
   const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
   if (!Array.isArray(parsed)) throw new Error(`${path}: esperava um array no topo`);
   return parsed.map((entry, index) => {
@@ -207,15 +222,18 @@ export function writeAllEvidence(report: AllMutationsReport, path: string = EVID
   writeFileSync(path, canonicalJson(report), "utf8");
 }
 
-function realExecute(script: string): RunResult {
-  const result = spawnSync("npm", ["run", script], {
-    cwd: ROOT,
-    encoding: "utf8",
-    timeout: RUN_TIMEOUT_MS,
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  if (result.error !== undefined) throw result.error;
-  return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+/** Só `cwd`/`timeoutMs` são para teste (issue #196); `main()` chama
+ * `realExecute` sem overrides, sempre `ROOT` e `RUN_TIMEOUT_MS`. */
+export interface RealExecuteOptions {
+  readonly cwd?: string;
+  readonly timeoutMs?: number;
+}
+
+// TODO(#196): stub — falta devolver {status, signal, stdout, stderr, error}
+// sem lançar (achado 1/3 do revisor da PR #194).
+export function realExecute(script: string, options: RealExecuteOptions = {}): RunResult {
+  const { cwd = ROOT, timeoutMs = RUN_TIMEOUT_MS } = options;
+  throw new Error(`not implemented: realExecute(${script}, ${cwd}, ${String(timeoutMs)})`);
 }
 
 function main(): AllMutationsReport {
