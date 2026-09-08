@@ -27,9 +27,8 @@ jobs:
     # - node-pty@1.1.0 não traz prebuild linux-*; `npm ci` compila via node-gyp
     #   e precisa de python3, make e g++ (todos presentes no runner).
     # - better-sqlite3 baixa prebuild linux-x64.
-    # - Seis arquivos de teste ainda spawnam python3 como oráculo de stdlib
-    #   (tests/python-json, python-repr, parity/{socket-sentinel,harness,bounds,process}).
-    #   Somem em #17; até lá, PYTHON aponta para o python3 do runner.
+    # Nenhum teste spawna python3 (#165, tests/sem-python.test.ts prende);
+    # PYTHON existe só para o node-gyp do node-pty.
     env:
       PYTHON: python3
     steps:

@@ -1,6 +1,8 @@
 // Issue #149 (migração de mutations:t15 para scripts/mutations/): três dos
-// 44 mutantes de `scripts/mutations/workflow-executor.ts` editam fixtures
-// que não são `src/**` (`t15-chat-workflow.json`, `candidate-chat.mjs`),
+// 44 mutantes do catálogo de `mutations:t15`
+// (`scripts/mutations/workflow-executor-mutants.ts`, extraído do runner na
+// issue #186) editam fixtures que não são `src/**`
+// (`t15-chat-workflow.json`, `candidate-chat.mjs`),
 // realocadas para `scripts/mutations/fixtures/` para não depender de
 // `scripts/parity/**` (que o #8 vai apagar). O runner original reprovava
 // esses três mutantes através das mesmas asserções que

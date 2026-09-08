@@ -2,7 +2,7 @@
   {
     "slice": "workflow-executor",
     "script": "mutations:t15",
-    "catalog": ["scripts/mutations/workflow-executor.ts"],
+    "catalog": ["scripts/mutations/workflow-executor-mutants.ts"],
     "srcGlobs": ["src/workflow/**"],
     "focusFiles": [
       "tests/workflow-executor.test.ts",

@@ -23,6 +23,7 @@ import process from "node:process";
 import {
   applyEditExactlyOnce,
   classify,
+  ehEntryPoint,
   prepareArchiveSandbox,
   restoreAll,
   runFocusedVitest,
@@ -65,7 +66,7 @@ function assertBaselineGreen(directory: string, focus: Focus): void {
   }
 }
 
-function main(): void {
+export function main(): void {
   const candidateSha = headSha();
   const sandbox = prepareArchiveSandbox(root, candidateSha);
   try {
@@ -147,4 +148,4 @@ function main(): void {
   }
 }
 
-main();
+if (ehEntryPoint(import.meta.url)) main();

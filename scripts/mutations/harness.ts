@@ -14,9 +14,28 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import process from "node:process";
+import { pathToFileURL } from "node:url";
 
 import { canonicalJson } from "./canonical.js";
 import type { Edit, Focus, MutationReport } from "./types.js";
+
+/**
+ * Guarda de entry-point compartilhada pelos seis runners de
+ * `scripts/mutations/`: `if (ehEntryPoint(import.meta.url)) main();`. Molde
+ * de `scripts/provenance/check-ancestry.ts` `ehEntryPoint()`, mas parametrizada
+ * pela URL do MÓDULO CHAMADOR — um helper aqui em `harness.ts` não pode
+ * comparar a própria `import.meta.url` (a de `harness.ts`) contra
+ * `process.argv[1]`; só o módulo importador sabe qual é a sua própria URL.
+ * Devolve `true` só quando o processo foi invocado com este módulo como
+ * script de entrada (`tsx scripts/mutations/<runner>.ts`), nunca quando o
+ * módulo foi importado por outro (teste, outro runner) — issue #186.
+ */
+export function ehEntryPoint(moduleUrl: string): boolean {
+  const invocado = process.argv[1];
+  if (invocado === undefined) return false;
+  return moduleUrl === pathToFileURL(resolve(invocado)).href;
+}
 
 export interface RunOutcome {
   readonly exitCode: number | null;
@@ -144,19 +163,47 @@ export function parseVitestOutcome(
   };
 }
 
+/** Monta os args de `vitest run` com `--reporter=json` e `--outputFile`
+ * apontando para `outputFile`, um caminho real em disco (issue #191: no
+ * runner ubuntu do Actions, o dispositivo especial de saída padrão do
+ * processo filho é um socket que `open()` recusa com `ENXIO`). Função
+ * pura — não toca disco nem spawna. */
+export function vitestArgs(args: readonly string[], outputFile: string): readonly string[] {
+  return ["run", ...args, "--reporter=json", `--outputFile=${outputFile}`];
+}
+
+/** Lança `vitest run` com `--outputFile` apontando para um `mkdtemp`
+ * descartável, lê o relatório do arquivo depois do `spawnSync` (nunca da
+ * saída padrão capturada — issue #191) e remove o diretório temporário
+ * sempre, com ou sem erro. Arquivo ausente (vitest falhou antes de
+ * escrevê-lo) vira relatório vazio para `parseVitestOutcome`, que lança o
+ * mesmo `vitest produced no JSON report` de sempre, com o `stderr` do
+ * subprocesso. */
 function runVitestReporterJson(directory: string, args: readonly string[]): RunOutcome {
-  const result = spawnSync(
-    join(directory, "node_modules/.bin/vitest"),
-    ["run", ...args, "--reporter=json", "--outputFile=/dev/stdout"],
-    {
-      cwd: directory,
-      encoding: "utf8",
-      env: { ...process.env, NO_COLOR: "1" },
-      maxBuffer: 32 * 1024 * 1024,
-    },
-  );
-  if (result.error !== undefined) throw result.error;
-  return parseVitestOutcome(result.stdout, result.status, result.stderr);
+  const scratch = mkdtempSync(join(tmpdir(), "lohra-vitest-out-"));
+  const outputFile = join(scratch, "vitest.json");
+  try {
+    const result = spawnSync(
+      join(directory, "node_modules/.bin/vitest"),
+      vitestArgs(args, outputFile),
+      {
+        cwd: directory,
+        encoding: "utf8",
+        env: { ...process.env, NO_COLOR: "1" },
+        maxBuffer: 32 * 1024 * 1024,
+      },
+    );
+    if (result.error !== undefined) throw result.error;
+    let report = "";
+    try {
+      report = readFileSync(outputFile, "utf8");
+    } catch {
+      report = "";
+    }
+    return parseVitestOutcome(report, result.status, result.stderr);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 }
 
 /** Roda `vitest run <focus.file> -t <focus.test>` dentro de `directory`. */
