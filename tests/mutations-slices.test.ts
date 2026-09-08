@@ -38,10 +38,12 @@
 //      `edits[].file` (normalizado para caminho relativo à raiz do repo)
 //      dos catálogos de cada fatia sob `src/` -- `src/<dir>/**` casa por
 //      prefixo, `src/<arquivo>.ts` casa só esse arquivo de topo (mesma
-//      forma aceita por `scripts/github/mutations-matrix.ts`). Arquivos
-//      fora de `src/` (ex.: fixtures de `scripts/mutations/`) não entram
-//      nesta checagem -- mudar `scripts/mutations/**` já seleciona toda
-//      fatia (`mutations-matrix.ts`), então não há buraco a fechar aqui.
+//      forma aceita por `scripts/github/mutations-matrix.ts`). Um
+//      `edits[].file` normalizado que não está sob `src/` precisa estar no
+//      allowlist explícito `FORA_DE_SRC` (fixtures de `scripts/mutations/`,
+//      que não precisam de `srcGlobs` -- mudar `scripts/mutations/**` já
+//      seleciona toda fatia) ou o teste lança -- fail-closed: nenhum
+//      `edits[].file` sai da checagem por um filtro silencioso.
 //   9. descoberta de catálogo por CONTEÚDO (`export const ...Mutants`), não
 //      por nome de arquivo -- um catálogo com naming fora do padrão antigo
 //      (`orchestration.ts`, `workflow-durability-guard.ts`) ou um catálogo
@@ -127,6 +129,16 @@ function discoverCatalogNames(
     .filter((file) => !NAO_CATALOGO.has(file.name))
     .filter((file) => CATALOG_EXPORT_PATTERN.test(file.contents))
     .map((file) => file.name);
+}
+
+/** Os catálogos descobertos por conteúdo que NÃO estão em `declared` --
+ * vazio quando tudo bate. A mesma checagem roda contra o disco real e
+ * contra um catálogo fabricado só na memória (issue #195, AC 2). */
+function catalogosSemFatia(
+  files: readonly { readonly name: string; readonly contents: string }[],
+  declared: ReadonlySet<string>,
+): readonly string[] {
+  return discoverCatalogNames(files).filter((name) => !declared.has(`scripts/mutations/${name}`));
 }
 
 /** Um mutante genérico o bastante para cobrir `Mutant` (tem `focus`) e
@@ -277,6 +289,18 @@ function normalizeEditFile(file: string): string {
   throw new Error(`edits[].file não existe em disco: "${file}" (nem "${guess}")`);
 }
 
+/** `edits[].file` (já normalizado) fora de `src/` que legitimamente não
+ * precisa de `srcGlobs` -- mudar `scripts/mutations/**` já roda a fatia
+ * inteira (`mutations-matrix.ts`), então esses arquivos não têm buraco a
+ * fechar. Allowlist explícito (não um filtro silencioso por prefixo): um
+ * `edits[].file` fora de `src/` e fora daqui reprova em vez de sumir sem
+ * aviso (issue #195, achado do revisor -- "falha nunca é silenciosa"). */
+const FORA_DE_SRC = new Set([
+  "scripts/mutations/fixtures/normalize-evidence.mjs",
+  "scripts/mutations/fixtures/t15-chat-workflow.json",
+  "scripts/mutations/fixtures/candidate-chat.mjs",
+]);
+
 describe("scripts/mutations/slices.json", () => {
   it("existe", () => {
     expect(existsSync(slicesPath)).toBe(true);
@@ -305,29 +329,28 @@ describe("scripts/mutations/slices.json", () => {
         name: entry.name,
         contents: readFileSync(resolve(mutationsDir, entry.name), "utf8"),
       }));
-    const discovered = discoverCatalogNames(arquivos);
-    expect(discovered.length).toBeGreaterThan(0);
-    for (const name of discovered) {
-      const relPath = `scripts/mutations/${name}`;
-      expect(declared.has(relPath), `${relPath} não está em nenhum "catalog" de slices.json`).toBe(
-        true,
-      );
-    }
+    expect(discoverCatalogNames(arquivos).length).toBeGreaterThan(0);
+    expect(catalogosSemFatia(arquivos, declared)).toEqual([]);
   });
 
-  it("catálogo novo fabricado só na memória (mutação manual colada) é descoberto sem entrada no repo (AC 2)", () => {
+  it("catálogo novo fabricado só na memória (mutação manual colada) reprova a descoberta (AC 2)", () => {
     const slices = readSlices();
     const declared = new Set(slices.flatMap((entry) => entry.catalog));
+    const arquivosReais = readdirSync(mutationsDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+      .map((entry) => ({
+        name: entry.name,
+        contents: readFileSync(resolve(mutationsDir, entry.name), "utf8"),
+      }));
     const fabricado = {
       name: "foo.ts",
       contents: "export const fooMutants: readonly unknown[] = [];\n",
     };
-    const discovered = discoverCatalogNames([fabricado]);
-    expect(discovered).toEqual(["foo.ts"]);
-    expect(
-      declared.has(`scripts/mutations/${fabricado.name}`),
-      "o catálogo fabricado não deveria existir em slices.json (é só do teste)",
-    ).toBe(false);
+    // A mesma checagem do teste acima, contra o disco real (sem o catálogo
+    // fabricado), continua vazia -- o que muda de vermelho pra verde abaixo
+    // é só a adição do "foo.ts" na memória, nunca commitado ao repo.
+    expect(catalogosSemFatia(arquivosReais, declared)).toEqual([]);
+    expect(catalogosSemFatia([...arquivosReais, fabricado], declared)).toEqual(["foo.ts"]);
   });
 
   it("todo script existe em package.json#scripts", () => {
@@ -429,14 +452,20 @@ describe("scripts/mutations/slices.json", () => {
         if (found === undefined) throw new Error(`catálogo não importado: ${path}`);
         return found;
       });
-      const editedFiles = new Set(
+      const normalizedFiles = new Set(
         catalogs
           .flatMap((mutants) => mutants.flatMap((m) => m.edits.map((edit) => edit.file)))
-          .map((file) => normalizeEditFile(file))
-          // Fora de src/ (ex.: fixtures de scripts/mutations/) não precisa de
-          // srcGlobs -- mudar scripts/mutations/** já roda a fatia inteira.
-          .filter((file) => file.startsWith("src/")),
+          .map((file) => normalizeEditFile(file)),
       );
+      for (const file of normalizedFiles) {
+        if (!file.startsWith("src/") && !FORA_DE_SRC.has(file)) {
+          throw new Error(
+            `edits[].file "${file}" (fatia ${entry.slice}) não está sob src/ nem em FORA_DE_SRC -- ` +
+              "declare-o lá se legitimamente não precisa de srcGlobs",
+          );
+        }
+      }
+      const editedFiles = [...normalizedFiles].filter((file) => file.startsWith("src/"));
       for (const file of editedFiles) {
         const covered = entry.srcGlobs.some((glob) => matchesSrcGlob(file, glob));
         expect(
@@ -463,7 +492,10 @@ describe("scripts/mutations/slices.json", () => {
     // Números literais, não derivados de CATALOGOS -- se fossem derivados
     // (`CATALOGOS.get(path).length`), uma troca compensatória entre dois
     // catálogos (um ganha o que o outro perde, soma preservada) passaria
-    // despercebida. Ver PR #195 para a contagem por `id: "` em cada arquivo.
+    // despercebida. Contagem = `mutants.length` de cada catálogo importado
+    // (não `grep -c 'id: "'`, que conta objetos internos como os
+    // `CONJUNCTS` de `workflow-durability-guard.ts` e sobre-conta) -- ver
+    // PR #206 (issue #195) para a corrida que produziu estes números.
     const CONTAGEM_POR_CATALOGO: Readonly<Record<string, number>> = {
       "scripts/mutations/workflow-durability-guard.ts": 14,
       "scripts/mutations/workflow-durability-named.ts": 38,
