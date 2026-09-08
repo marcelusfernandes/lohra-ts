@@ -70,6 +70,22 @@ logada com causa em arquivo/sink (nunca stdout/stderr), e **reavaliação
 obrigatória quando TUI/GUI expuserem o gateway além do loopback** — nesse
 momento o cálculo muda.
 
+**Reavaliação do gatilho — issue #4 (2026-09-08).** O app desktop
+(`lohra/desktop/`) precisa subir o `lohra-ts` com `--host` explícito para
+funcionar empacotado; o gatilho acima se materializa. Aceitar `--host` não
+expõe nada por si só — o que expõe é bindar fora de loopback **sem** token.
+O runtime já exige o token por padrão; a única lacuna era `--insecure`
+poder ser combinado com um `--host` não-loopback, removendo a única defesa
+que resta quando o bind deixa de ser local. Fechada em `runDashboard`
+(`src/commands/dashboard.ts`): `--host` fora de `127.0.0.1`/`localhost`/`::1`
+com `--insecure` é recusado antes de qualquer bind, exit 2, sem abrir
+socket. Sem `--insecure`, um `--host` não-loopback é aceito normalmente — o
+token já cobre o caso. Isso não fecha a exposição em si (um cliente na rede
+ainda pode tentar se conectar), só garante que ela nunca acontece sem
+autenticação; a superfície de ataque via `sub_id` descrita acima permanece
+sem mudança, porque continua exigindo um cliente já autenticado no
+WebSocket.
+
 **2. Allow-list fechada de tools do subagente — hardening mantido, com
 reavaliação marcada no T19.**
 É estritamente mais restritiva que a deny-list do oracle, com prova estrutural

@@ -202,6 +202,7 @@ Exemplos:
 ```bash
 lohra chat "Resuma este projeto" --json
 lohra dashboard --insecure --port 8000
+lohra dashboard --no-open --host 127.0.0.1 --port 9130
 lohra cron list
 lohra workflow list
 lohra workflow watch RUN_ID
@@ -212,6 +213,15 @@ lohra update --check
 `workflow` possui somente `list`, `watch` e `audit`; não existe
 `workflow run`. Chat e dashboard compartilham a mesma composition root para
 workflow/audit, orquestração, cron, MCP, web e mídia.
+
+`dashboard` aceita `--host` (default `127.0.0.1`, encaminhado ao bind real do
+servidor HTTP/WS — mesmo precedente de forma do `--host` de `serve`) e
+`--no-open` (aceito; no-op, já que este dashboard nunca abre browser — o
+flag existe para a invocação do app desktop não morrer em argumento não
+reconhecido). Um `--host` fora de loopback (`127.0.0.1`, `localhost`, `::1`)
+combinado com `--insecure` é recusado antes de qualquer bind — sem
+`--insecure` o token de sessão já é exigido por padrão, então nada muda
+nesse caso (análise em `docs/gate-decision.md`).
 
 Um run de `run_workflow` sobrevive ao processo que o lançou: `chat`/
 `dashboard` gravam cada nó concluído (`workflow_node_cache`), o estado do run
