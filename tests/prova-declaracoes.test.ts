@@ -1,0 +1,55 @@
+// Pino: toda `prova/<slug>.ts` só declara arquivos de teste que existem,
+// moram sob `tests/` e terminam em `.test.ts`; o nome do arquivo (slug) casa
+// `^[a-z0-9-]+$`. Descoberto na revisão da PR #212 (#167): `scripts/prova/
+// run.ts` só falha fechado (`prova: arquivo declarado não existe`) quando
+// aquele slug específico roda — nenhum check varria as outras declarações,
+// então apagar um teste referenciado por uma prova antiga passava em
+// silêncio (CLAUDE.md, invariante 2).
+import { readdirSync } from "node:fs";
+import { basename, resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+
+const ROOT = resolve(__dirname, "..");
+const SLUG_RE = /^[a-z0-9-]+$/;
+
+/**
+ * Importa a declaração em `caminhoRelativo` (relativo à raiz do repo),
+ * valida a forma com `validarDeclaracao` — o mesmo parser de
+ * `scripts/prova/run.ts` — e assevera que todo caminho em `unit`:
+ *  - existe;
+ *  - mora sob `tests/`;
+ *  - termina em `.test.ts`.
+ * Lança um erro citando o slug (nome do arquivo, sem `.ts`) e o caminho
+ * problemático.
+ */
+export async function verificarDeclaracao(caminhoRelativo: string): Promise<void> {
+  await Promise.resolve();
+  throw new Error(`not implemented: verificarDeclaracao(${caminhoRelativo})`);
+}
+
+describe("prova-declaracoes", () => {
+  const provaDir = resolve(ROOT, "prova");
+  const arquivos = readdirSync(provaDir)
+    .filter((nome) => nome.endsWith(".ts"))
+    .sort();
+
+  it("encontra pelo menos uma declaração em prova/", () => {
+    expect(arquivos.length).toBeGreaterThan(0);
+  });
+
+  it.each(arquivos)('o slug de "%s" casa /^[a-z0-9-]+$/', (nome) => {
+    const slug = basename(nome, ".ts");
+    expect(slug).toMatch(SLUG_RE);
+  });
+
+  it.each(arquivos)("prova/%s só declara arquivos de teste existentes sob tests/", async (nome) => {
+    await expect(verificarDeclaracao(`prova/${nome}`)).resolves.toBeUndefined();
+  });
+
+  it("reprova uma declaração cujo unit aponta para um caminho inexistente, citando slug e caminho", async () => {
+    const caminhoFixture = "tests/fixtures/prova-declaracoes/quebrada.ts";
+    await expect(verificarDeclaracao(caminhoFixture)).rejects.toThrow(
+      /quebrada[\s\S]*tests\/fixtures\/prova-declaracoes\/caminho-inexistente\.test\.ts/,
+    );
+  });
+});
