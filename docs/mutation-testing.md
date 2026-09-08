@@ -18,14 +18,26 @@ para `harness.ts` (issue #148):
    `edit.before` por `edit.after` via `replaceExactlyOnce` (lança se a âncora
    não ocorrer exatamente uma vez: nem zero, nem duas) e escreve de volta.
 3. `runFocusedVitest(directory, focus)` roda `vitest run <focus.file> -t
-<focus.test> --reporter=json`; `runVitestFiles(directory, files)` roda uma
-   lista de arquivos inteira sem afunilar por `-t` (o que `workflow-executor`
-   usa: os 44 mutantes rodam a mesma bateria de `focalTests` completa a cada
-   vez, em vez de um teste único por mutante).
-4. `parseVitestOutcome(stdout, exitCode, stderr)` interpreta o JSON do vitest
-   num `RunOutcome` determinístico (sem timestamp/duração). Lança se não
-   achar um objeto JSON balanceado no stdout — falha do harness, não um
-   veredito `killed: true` fabricado (veredito da PR #170).
+<focus.test>`; `runVitestFiles(directory, files)` roda uma lista de arquivos
+   inteira sem afunilar por `-t` (o que `workflow-executor` usa: os 44
+   mutantes rodam a mesma bateria de `focalTests` completa a cada vez, em vez
+   de um teste único por mutante). As duas delegam a `runVitestReporterJson`
+   (`harness.ts:182-207`, issue #191): monta os args com `vitestArgs`
+   (`--reporter=json --outputFile=<arquivo>`, `harness.ts:171-173`), aponta o
+   `outputFile` para dentro de um `mkdtemp` descartável
+   (`lohra-vitest-out-`), roda o `spawnSync` e só então lê o relatório do
+   arquivo — nunca do stdout capturado (no runner ubuntu do Actions, o
+   dispositivo de saída padrão do processo filho é um socket que `open()`
+   recusa com `ENXIO`) — removendo o diretório temporário no `finally`, com
+   ou sem erro. Arquivo ausente (o vitest falhou antes de escrevê-lo) vira
+   relatório vazio (`""`) passado a `parseVitestOutcome`.
+4. `parseVitestOutcome(stdout, exitCode, stderr)` interpreta o conteúdo do
+   relatório (lido do arquivo pelo chamador, apesar do nome do parâmetro) num
+   `RunOutcome` determinístico (sem timestamp/duração). Lança se não achar um
+   objeto JSON balanceado — falha do harness, não um veredito `killed: true`
+   fabricado (veredito da PR #170) — com a mensagem
+   `vitest produced no JSON report (exitCode=<code>): <stderr>`
+   (`harness.ts:148`).
 5. `classify(exitCode, failedTests)` — um mutante só é `killed` quando o
    processo saiu com código diferente de zero **e** pelo menos um teste
    falhou nesse foco. As duas condições precisam valer juntas: um exit
@@ -149,14 +161,48 @@ dispararia a corrida errada) até duas vezes — a segunda corrida só acontece
 se a primeira não reprovar (sobrevivente ou `restoreGreen: false`), para não
 gastar até 20 minutos de novo numa fatia já reprovada.
 
-Falha (`process.exitCode = 1`), com o motivo no stderr:
+Falha (`process.exitCode = 1`), com o motivo no stderr (cabeçalho de
+diagnóstico em `all.ts:18-43`; `evaluateRun`, `all.ts:214-228`, nomeia a
+causa a partir do `RunResult` bruto do subprocesso):
 
-- `MUTATION_SURVIVOR:<fatia>:<id>` — sobrevivente numa das corridas.
-- `MUTATION_RESTORE_NOT_GREEN:<fatia>` — `restoreGreen: false`.
+- `MUTATION_SURVIVOR:<fatia>:<id>` — sobrevivente numa das corridas
+  (`assertRunClean`, `all.ts:232-238`).
+- `MUTATION_RESTORE_NOT_GREEN:<fatia>` — `restoreGreen: false` (mesma
+  função).
 - `MUTATION_NONDETERMINISTIC:<fatia>` — os digests (`sha256` da linha JSON
-  bruta) das duas corridas da mesma fatia divergem.
-- `MUTATION_ALL_KILLED:<fatia>` — o subprocesso morreu por sinal (inclusive
-  timeout do `spawnSync`) antes de produzir relatório.
+  bruta) das duas corridas da mesma fatia divergem (`runSliceTwice`,
+  `all.ts:255`).
+- `MUTATION_ALL_TIMEOUT:<fatia>` — o próprio `spawnSync` matou o processo por
+  estourar `timeout` (`error.code === "ETIMEDOUT"`, `isTimeoutError`,
+  `all.ts:181-183`) — a causa que o comentário histórico dizia cobrir mas que
+  antes era interceptada sem nomear a fatia.
+- `MUTATION_ALL_KILLED:<fatia>:<SIGKILL|SIGTERM|128+n>` — morte por sinal.
+  Dois caminhos viram a mesma causa (`evaluateRun`, `all.ts:220-223`): sinal
+  reportado direto pelo `spawnSync` (`run.signal !== null`, comum no macOS)
+  ou `status >= 128` sem `signal`. O segundo caminho existe porque
+  `npm run <script>` sempre passa por um shell (`sh -c`) entre o `spawnSync`
+  e o script de verdade, e no Linux da CI esse shell converte morte por
+  sinal num código de saída 128+n (137 = 128+SIGKILL, 143 = 128+SIGTERM) em
+  vez de propagar `signal`. O nome vem de `signalNameForExitCode` (`all.ts:195-197`),
+  derivado de `os.constants.signals` — sem nenhum `process.platform` no
+  runtime; um código sem sinal conhecido cai para o literal `128+<n>`.
+- `MUTATION_ALL_EXIT:<fatia>:<status>` — o relatório saiu limpo (JSON válido,
+  sem sobrevivente) mas o processo terminou com `status !== 0` — runner que
+  imprime e morre depois, no `finally` ou por unhandled rejection
+  (`all.ts:226`). Sem essa checagem esse caso passaria como verde.
+- `MUTATION_ALL_NO_REPORT:<fatia>` — nenhuma linha de `stdout+stderr` parece
+  um objeto JSON completo (`extractJsonLine`, `all.ts:150`).
+- `MUTATION_ALL_BAD_REPORT:<fatia>[:<campo>]` — a linha achada não tem o
+  shape mínimo de `ParsedSliceReport` (`parseSliceReport`, `all.ts:156-171`).
+
+`scripts/mutations/slices.json` pode ser trocado pela variável de ambiente
+`MUTATIONS_ALL_SLICES_PATH` (relativa à raiz do repo, ou absoluta;
+`resolveSlicesPath`, `all.ts:115-119`) — só para o teste do entrypoint em
+subprocesso; `main()` não recebe outro caminho.
+
+Nota: o `qa` roda os `mutations:*` de um merge de risco no worktree isolado
+da própria PR (`isolation: worktree`, `.claude/agents/qa.md:5,12`), nunca no
+checkout `main` compartilhado (issue #197).
 
 Política: **qualquer sobrevivente bloqueia** — não há limiar. Sucesso escreve
 `.mutation-evidence/all.json` (`{candidateSha, slices: [{slice, script,
@@ -223,11 +269,22 @@ catálogo de mutantes ainda". Os onze diretórios cobertos hoje: `workflow`,
 `media`, também em `self-update`); `web` (fatia `web-tools`); `self-update`,
 `mcp`, `gateway` (fatia `self-update`).
 
-## CI e o que ainda não está em `main`
+## CI (`mutations.yml`, issue #156)
 
-`mutations.yml` — o workflow que roda a fatia certa por path em cada PR,
-usando `srcGlobs` de `slices.json` para decidir quais fatias rodar (issue
-#156) — está na PR #188, ainda não mergeada. O harness rodando dentro do
-Actions (em vez de só localmente) é a issue #191. Até essas duas fecharem, o
-gate de mutação (`npm run mutations:all`) roda localmente, e o passo 11 de
-`orquestracao.md` (QA em merge de risco) é quem o exercita.
+`.github/workflows/mutations.yml` está em `main` desde a PR #188: dispara em
+`pull_request` quando o diff toca `src/**`, `scripts/mutations/**` ou o
+próprio workflow — uma PR só de docs não dispara nada. O job `plan`
+(`scripts/github/mutations-matrix.ts`) lê `slices.json#srcGlobs` e o diff
+`base...head` para decidir quais fatias rodam, e escreve a matriz num
+`GITHUB_STEP_SUMMARY`; `mutate` roda uma fatia por job da matriz (`npm run
+<script>`) e sobe `.mutation-evidence/` como artifact mesmo em falha (`if:
+always()`, `if-no-files-found: warn`).
+
+Não é required no ruleset — decisão do owner, pendente, depois de medir o
+tempo por fatia (comentário de topo de `mutations.yml`). Tempos medidos no
+Actions (run 34175933045): `workflow-executor` 1 min 28 s,
+`workflow-durability` 2 min 16 s, `workflow-audit-live` 2 min 15 s, em
+paralelo — parede (do início do `plan` ao fim do último `mutate`) ≈ 2 min 42
+s. Até o owner decidir tornar required, o gate de mutação completo (`npm run
+mutations:all`) roda localmente, e o passo 11 de `orquestracao.md` (QA em
+merge de risco) é quem o exercita.
