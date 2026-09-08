@@ -163,19 +163,47 @@ export function parseVitestOutcome(
   };
 }
 
+/** Monta os args de `vitest run` com `--reporter=json` e `--outputFile`
+ * apontando para `outputFile`, um caminho real em disco (issue #191: no
+ * runner ubuntu do Actions, o dispositivo especial de saída padrão do
+ * processo filho é um socket que `open()` recusa com `ENXIO`). Função
+ * pura — não toca disco nem spawna. */
+export function vitestArgs(args: readonly string[], outputFile: string): readonly string[] {
+  return ["run", ...args, "--reporter=json", `--outputFile=${outputFile}`];
+}
+
+/** Lança `vitest run` com `--outputFile` apontando para um `mkdtemp`
+ * descartável, lê o relatório do arquivo depois do `spawnSync` (nunca da
+ * saída padrão capturada — issue #191) e remove o diretório temporário
+ * sempre, com ou sem erro. Arquivo ausente (vitest falhou antes de
+ * escrevê-lo) vira relatório vazio para `parseVitestOutcome`, que lança o
+ * mesmo `vitest produced no JSON report` de sempre, com o `stderr` do
+ * subprocesso. */
 function runVitestReporterJson(directory: string, args: readonly string[]): RunOutcome {
-  const result = spawnSync(
-    join(directory, "node_modules/.bin/vitest"),
-    ["run", ...args, "--reporter=json", "--outputFile=/dev/stdout"],
-    {
-      cwd: directory,
-      encoding: "utf8",
-      env: { ...process.env, NO_COLOR: "1" },
-      maxBuffer: 32 * 1024 * 1024,
-    },
-  );
-  if (result.error !== undefined) throw result.error;
-  return parseVitestOutcome(result.stdout, result.status, result.stderr);
+  const scratch = mkdtempSync(join(tmpdir(), "lohra-vitest-out-"));
+  const outputFile = join(scratch, "vitest.json");
+  try {
+    const result = spawnSync(
+      join(directory, "node_modules/.bin/vitest"),
+      vitestArgs(args, outputFile),
+      {
+        cwd: directory,
+        encoding: "utf8",
+        env: { ...process.env, NO_COLOR: "1" },
+        maxBuffer: 32 * 1024 * 1024,
+      },
+    );
+    if (result.error !== undefined) throw result.error;
+    let report = "";
+    try {
+      report = readFileSync(outputFile, "utf8");
+    } catch {
+      report = "";
+    }
+    return parseVitestOutcome(report, result.status, result.stderr);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 }
 
 /** Roda `vitest run <focus.file> -t <focus.test>` dentro de `directory`. */
