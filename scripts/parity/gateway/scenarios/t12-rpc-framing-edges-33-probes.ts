@@ -5,11 +5,7 @@
 // body is sent verbatim to both sides and the response is classified by
 // shape, never by a hard-coded expected value, since the point is
 // agreement on framing edges, not a specific literal.
-import {
-  connectRawWs,
-  WS_OPCODE,
-  type RawWsClient,
-} from "../../../../tests/support/parity/gateway/raw-ws-client.js";
+import { connectRawWs, WS_OPCODE, type RawWsClient } from "../raw-ws-client.js";
 import { divergent, match, type NamedScenario } from "../scenario-helpers.js";
 
 async function classifyNext(ws: RawWsClient, timeoutMs = 2000): Promise<string> {

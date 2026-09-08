@@ -9,10 +9,7 @@
 // concurrently would race for that one slot and starve whichever side
 // asks second. Each side's race runs to completion, sequentially, before
 // the other starts.
-import {
-  connectRawWs,
-  type RawWsClient,
-} from "../../../../tests/support/parity/gateway/raw-ws-client.js";
+import { connectRawWs, type RawWsClient } from "../raw-ws-client.js";
 import {
   divergent,
   drainUntilComplete,

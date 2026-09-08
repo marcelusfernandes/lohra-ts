@@ -8,10 +8,7 @@
 // `closed` promise rather than close-frame decoding: the correct signal
 // is "connection died with nothing on the wire", not a close code (1006
 // is a client-side-only sentinel the RFC forbids ON the wire).
-import {
-  connectRawWs,
-  type RawWsClient,
-} from "../../../../tests/support/parity/gateway/raw-ws-client.js";
+import { connectRawWs, type RawWsClient } from "../raw-ws-client.js";
 import { divergent, match, probeBoth, type NamedScenario } from "../scenario-helpers.js";
 
 interface BinaryFrameOutcome {

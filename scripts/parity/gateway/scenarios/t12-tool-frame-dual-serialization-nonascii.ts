@@ -7,11 +7,7 @@
 // works off the RAW frame text, not drainUntilComplete's already-parsed
 // events.
 import { TOOL_CALL_TRIGGERS } from "../fake-upstream.js";
-import {
-  connectRawWs,
-  WS_OPCODE,
-  type RawWsClient,
-} from "../../../../tests/support/parity/gateway/raw-ws-client.js";
+import { connectRawWs, WS_OPCODE, type RawWsClient } from "../raw-ws-client.js";
 import { createSessionBoth, divergent, match, type NamedScenario } from "../scenario-helpers.js";
 
 const TRIGGER = "T12_TRIGGER_READ_FILE_NONASCII";

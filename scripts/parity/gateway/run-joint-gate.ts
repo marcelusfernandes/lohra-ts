@@ -34,15 +34,9 @@ import { startFakeUpstream, UPSTREAM_FAILURE_NONCE, type FakeUpstream } from "./
 import {
   launchCandidateFakeUpstreamDashboard,
   type LaunchedGatewayProcess,
-} from "../../../tests/support/parity/gateway/launch-candidate-fake.js";
-import {
-  sendRawHttpRequest,
-  type RawHttpResponse,
-} from "../../../tests/support/parity/gateway/raw-http-client.js";
-import {
-  connectRawWs,
-  type RawWsClient,
-} from "../../../tests/support/parity/gateway/raw-ws-client.js";
+} from "./launch-candidate-fake.js";
+import { sendRawHttpRequest, type RawHttpResponse } from "./raw-http-client.js";
+import { connectRawWs, type RawWsClient } from "./raw-ws-client.js";
 
 const projectRoot = resolve(import.meta.dirname, "../../..");
 const evidenceRoot = resolve(projectRoot, ".parity-evidence/t12-joint-gate");
