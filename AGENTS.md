@@ -26,8 +26,8 @@ Núcleo headless orientado a eventos → **TUI** (Ink) → **GUI Electron**
 
 ## Convenções
 
-- TDD: teste primeiro, cobertura alta. Mutation testing (`npm run mutations:*`,
-  agregado por `mutations:all`; mecânicas, catálogo e contagem em
+- TDD: teste primeiro, cobertura alta. Mutation testing (`npm run mutations:all`,
+  fatias em `scripts/mutations/slices.json`; mecânicas, catálogo e contagem em
   `docs/mutation-testing.md`) é a evidência de que os testes prendem
   comportamento.
 - TypeScript `strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`.
