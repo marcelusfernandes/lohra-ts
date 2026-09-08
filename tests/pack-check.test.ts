@@ -72,8 +72,13 @@ describe("extractLastToolResultContent", () => {
     expect(extractLastToolResultContent(log)).toBeNull();
   });
 
-  it("ignora linhas vazias e linhas que não são JSON válido", () => {
+  it("ignora linhas vazias, mas lança numa linha não vazia que não é JSON válido", () => {
+    // O log é escrito em processo por scripts/stub/server.ts via
+    // JSON.stringify; uma linha não vazia corrompida é o próprio stub
+    // quebrado, não uma entrada normal a pular em silêncio.
     const log = ["", "não é json", ""].join("\n");
-    expect(extractLastToolResultContent(log)).toBeNull();
+    expect(() => {
+      extractLastToolResultContent(log);
+    }).toThrow(/PACK_CHAT_MISMATCH.*projected_log/);
   });
 });

@@ -142,10 +142,14 @@ function messagesOf(logEntry: unknown): readonly unknown[] {
 /**
  * Lê o `projected` log (JSONL de `scripts/stub/server.ts`, uma linha por
  * requisição) e devolve o `content` da última mensagem `role: "tool"` vista
- * em qualquer requisição — ou `null` se nenhuma existir. Pura: recebe o
- * texto do log, não o caminho do arquivo, para o teste não depender de I/O
- * nem de rodar `npm pack`. Linha vazia ou JSON inválido é ignorada, não
- * lançada — o chamador decide o que fazer com `null`.
+ * em qualquer requisição — ou `null` se nenhuma requisição tiver mensagem
+ * `role: "tool"`. Pura: recebe o texto do log, não o caminho do arquivo,
+ * para o teste não depender de I/O nem de rodar `npm pack`. Linha vazia é
+ * ignorada (é só o `\n` final do arquivo); linha não vazia que não é JSON
+ * válido lança — o log é escrito em processo por `scripts/stub/server.ts`
+ * via `JSON.stringify`, então uma linha corrompida é o próprio stub
+ * quebrado, não uma entrada normal a pular em silêncio (CLAUDE.md,
+ * invariante 2).
  */
 export function extractLastToolResultContent(projectedLogJsonl: string): string | null {
   let last: string | null = null;
@@ -156,7 +160,7 @@ export function extractLastToolResultContent(projectedLogJsonl: string): string 
     try {
       entry = JSON.parse(trimmed);
     } catch {
-      continue;
+      throw new Error("PACK_CHAT_MISMATCH:projected_log.invalid_line");
     }
     for (const message of messagesOf(entry)) {
       const content = toolMessageContent(message);
