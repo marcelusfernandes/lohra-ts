@@ -1,4 +1,5 @@
 import { generateSessionToken } from "../gateway/auth.js";
+import { LEVELS } from "../cli/arg-validation.js";
 import { resolveAuthRoute, resolveCredentials } from "../auth/credentials.js";
 import { readCodexModel } from "../auth/codex.js";
 import {
@@ -52,6 +53,22 @@ import { RegistryToolDispatcher } from "../tools/index.js";
 
 const GATEWAY_VERSION = "0.0.11";
 const DEFAULT_PORT = 9119;
+const DEFAULT_HOST = "127.0.0.1";
+
+// `--host` fora deste conjunto expõe o gateway além do loopback, o gatilho
+// de reavaliação registrado em `docs/gate-decision.md` (L22). Nomes, não
+// endereços resolvidos por DNS: comparação literal, sem I/O de rede.
+const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["127.0.0.1", "localhost", "::1"]);
+
+function isLoopbackHost(host: string): boolean {
+  return LOOPBACK_HOSTS.has(host);
+}
+
+// IPv6 literals need brackets in a URL authority (`http://[::1]:9119`); an
+// IPv4 literal or hostname never contains ":", so this is a no-op for them.
+function formatHostForUrl(host: string): string {
+  return host.includes(":") ? `[${host}]` : host;
+}
 
 export interface DashboardCommandOptions {
   readonly argv: readonly string[];
@@ -85,6 +102,21 @@ function isAddressInUse(error: unknown): boolean {
 
 export async function runDashboard(options: DashboardCommandOptions): Promise<number> {
   const insecure = options.argv.includes("--insecure");
+  const host = option(options.argv, "--host") ?? DEFAULT_HOST;
+
+  // Concretiza a reavaliação do L22 (`docs/gate-decision.md`): um `--host`
+  // fora de loopback SEMPRE exige o token de sessão. Sem `--insecure` o
+  // token já é obrigatório por padrão (nada a fazer); com `--insecure`, a
+  // combinação é recusada aqui, antes de qualquer bind ou I/O de rede --
+  // erro no mesmo formato dos erros de arg-spec (banner + `lohra: error:`).
+  if (insecure && !isLoopbackHost(host)) {
+    options.stderr(
+      `${LEVELS.dashboard.banner}lohra: error: --insecure cannot be combined with --host ${host}: ` +
+        "binding outside loopback (127.0.0.1, localhost, ::1) requires the session token\n",
+    );
+    return 2;
+  }
+
   const route = resolveAuthRoute(options.home);
 
   let model: string;
@@ -335,12 +367,13 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
   // over argv when both are present.
   const argvPort = option(options.argv, "--port");
   const requestedPort = options.port ?? (argvPort === undefined ? DEFAULT_PORT : Number(argvPort));
+  const displayHost = formatHostForUrl(host);
   const printBootLines = (port: number): void => {
-    options.stderr(`Lohra dashboard: http://127.0.0.1:${String(port)}\n`);
+    options.stderr(`Lohra dashboard: http://${displayHost}:${String(port)}\n`);
     options.stderr(
       insecure
-        ? `WebSocket:       ws://127.0.0.1:${String(port)}/api/ws\n`
-        : `WebSocket:       ws://127.0.0.1:${String(port)}/api/ws?token=${token}\n`,
+        ? `WebSocket:       ws://${displayHost}:${String(port)}/api/ws\n`
+        : `WebSocket:       ws://${displayHost}:${String(port)}/api/ws?token=${token}\n`,
     );
   };
 
@@ -356,7 +389,7 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
   let server;
   try {
     server = await startGatewayHttpServer({
-      host: "127.0.0.1",
+      host,
       port: requestedPort,
       onRequest: (request) => Promise.resolve(routeGatewayRequest(request.head, routeContext)),
       onUpgrade,

@@ -67,8 +67,10 @@ export const DASHBOARD_SPEC = spec([
   ...COMMON_FLAGS,
   { name: "--model", takesValue: true },
   { name: "--provider", takesValue: true },
+  { name: "--host", takesValue: true },
   { name: "--port", takesValue: true, type: "int" },
   { name: "--insecure", takesValue: false },
+  { name: "--no-open", takesValue: false },
 ]);
 
 export const CRON_SPEC = spec(
@@ -202,6 +204,7 @@ export const FLAG_HELP: Readonly<Record<string, string>> = {
   "--name": "the job's display name",
   "--prompt": "the prompt the job sends",
   "--host": "address to bind",
+  "--no-open": "accepted for the desktop launcher; this dashboard never opens a browser (no-op)",
   "--tools": "comma-separated list of tools to enable",
   "--yes": "assume yes to any confirmation",
   "--to": "destination directory for the export",
