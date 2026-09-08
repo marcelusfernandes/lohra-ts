@@ -11,7 +11,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { connect } from "node:net";
+import { connect, createServer, type Server } from "node:net";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -194,5 +194,79 @@ describe("runDashboard: --no-open is accepted as a documented no-op (issue #4 AC
     shutdown?.();
     const code = await donePromise;
     expect(code).toBe(0);
+  });
+});
+
+// Issue #222: `parseCommand` (arg-validation.ts) accepts `--flag=value` and
+// unambiguous-prefix abbreviation, and `serve` already reads from
+// `parsed.options` -- but `runDashboard` used to read the raw `argv` with
+// its own `argv.indexOf(name)` helper, which never recognizes either form.
+// `--host=203.0.113.5 --insecure` used to pass through unrefused: `option()`
+// found no exact "--host" token, so `host` silently stayed the default
+// 127.0.0.1 (loopback) and the #4 guard below never fired -- not a bypass
+// (guard and bind read the same variable), but a command accepted with an
+// effect different from what the CLI parser had already validated.
+describe("runDashboard: --host=<v> and --port=<p> (equals form) and prefix abbreviation behave like the space form (issue #222)", () => {
+  it("--host=<v> combined with --insecure is refused, exactly like --host <v>", async () => {
+    const options = baseOptions({
+      argv: ["--provider", "anthropic", "--insecure", "--host=203.0.113.5"],
+    });
+    let shutdown: (() => void) | undefined;
+    options.registerShutdownTrigger = (handler: () => void) => {
+      shutdown = handler;
+    };
+    const donePromise = runDashboard(options);
+    await sleep(50);
+    shutdown?.();
+    const code = await donePromise;
+    expect(code).toBe(2);
+    const stderr = options.stderrLines.join("");
+    expect(stderr).toContain("usage: lohra dashboard");
+    expect(stderr).toContain("--host 203.0.113.5");
+  });
+
+  it("a unique prefix (--ho) for --host combined with --insecure is refused, too", async () => {
+    const options = baseOptions({
+      argv: ["--provider", "anthropic", "--insecure", "--ho", "203.0.113.5"],
+    });
+    let shutdown: (() => void) | undefined;
+    options.registerShutdownTrigger = (handler: () => void) => {
+      shutdown = handler;
+    };
+    const donePromise = runDashboard(options);
+    await sleep(50);
+    shutdown?.();
+    const code = await donePromise;
+    expect(code).toBe(2);
+    expect(options.stderrLines.join("")).toContain("--host 203.0.113.5");
+  });
+
+  it("--port=<p> (equals form) binds the requested port, mirroring --port <p>", async () => {
+    const probe: Server = createServer();
+    const freePort = await new Promise<number>((resolvePromise) => {
+      probe.listen(0, "127.0.0.1", () => {
+        const address = probe.address();
+        resolvePromise(typeof address === "object" && address !== null ? address.port : 0);
+      });
+    });
+    await new Promise<void>((resolvePromise) =>
+      probe.close(() => {
+        resolvePromise();
+      }),
+    );
+
+    const options = baseOptions({
+      argv: ["--provider", "anthropic", `--port=${String(freePort)}`],
+    });
+    delete (options as { port?: number }).port;
+    let shutdown: (() => void) | undefined;
+    options.registerShutdownTrigger = (handler: () => void) => {
+      shutdown = handler;
+    };
+    const donePromise = runDashboard(options);
+    await sleep(50);
+    expect(options.stderrLines[0]).toBe(`Lohra dashboard: http://127.0.0.1:${String(freePort)}\n`);
+    shutdown?.();
+    await donePromise;
   });
 });
