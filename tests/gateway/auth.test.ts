@@ -38,4 +38,13 @@ describe("timingSafeTokenEqual", () => {
     // timingSafeTokenEqual itself never trims anything.
     expect(timingSafeTokenEqual("abc", "abc")).toBe(true);
   });
+
+  // Issue #221: an empty LOHRA_DASHBOARD_SESSION_TOKEN must never
+  // authenticate, even against an equally empty candidate. dashboard.ts
+  // already refuses an empty token at boot (defense in depth here, in case
+  // some other caller ever reaches this function with an empty expected
+  // value).
+  it("returns false for an empty expected token, even against an empty candidate", () => {
+    expect(timingSafeTokenEqual("", "")).toBe(false);
+  });
 });
