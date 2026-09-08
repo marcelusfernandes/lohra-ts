@@ -2,6 +2,12 @@
 
 Data: 2026-09-03
 
+> **Histórico** — a fronteira "Semânticas continuam derivadas do Python
+> pinado" (linha 18) valeu até 2026-09-04, quando o owner encerrou a
+> obrigação de paridade (`CLAUDE.md`; `docs/adr/0003-native-wire-format.md`).
+> O restante deste registro (a decisão de mainline em si, evidência e
+> critérios de reavaliação) permanece válido.
+
 ## Decisão
 
 O `lohra-ts` passa a ser a linha principal do novo capítulo do produto

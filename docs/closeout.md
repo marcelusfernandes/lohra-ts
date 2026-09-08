@@ -82,12 +82,19 @@ depois que o commit é congelado.
 
 ## Interpretações do inventário fechado
 
-- `parity` é metadado porque requer `--manifest`; executá-lo sem fixture não é
-  um gate. `verify:t22:evidence` é o verificador pós-hoc e não roda
-  recursivamente dentro do aggregate.
-- `parity:t08` e `parity:t09` usam os respectivos runners `:all` como pais de
-  cobertura mais fortes para o mesmo CLI estrutural.
-- `parity:t22:update` e `probe:t22:update` compartilham um runner. O arquivo
-  `update.json` separa as matrizes de status e os efeitos de argv/árvore Git.
+> Registro histórico do inventário fechado em 2026-09-03: os scripts npm
+> citados abaixo (o próprio `parity`, `verify:t22:evidence`, os agregadores
+> dos tickets T08/T09 e o par update de T22) foram apagados em #167 (PR #212,
+> 2026-09-08) junto com `scripts/parity/`; nada aqui é executável hoje.
+
+- `parity` era metadado porque requeria `--manifest`; executá-lo sem fixture
+  não era um gate. `verify:t22:evidence` era o verificador pós-hoc e não
+  rodava recursivamente dentro do aggregate.
+- Os scripts de paridade dos tickets T08 e T09 usavam os respectivos runners
+  agregadores (sufixo `:all`) como pais de cobertura mais fortes para o
+  mesmo CLI estrutural.
+- Os scripts de paridade e de probe do update de T22 compartilhavam um
+  runner. O arquivo `update.json` separava as matrizes de status e os
+  efeitos de argv/árvore Git.
 - E22 é derivado de components vinculados ao SHA, rulings, provenance e
   aggregates; não é um PASS autoatribuído.

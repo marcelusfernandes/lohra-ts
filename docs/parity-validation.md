@@ -2,8 +2,12 @@
 
 > **HISTÓRICO** — procedimento válido de 2026-08-29 a 2026-09-04. Superado
 > pela decisão de desenvolvimento independente (ver `CLAUDE.md` e
-> `docs/adr/0003-native-wire-format.md`). Mantido como registro de como as
-> fixtures de paridade foram capturadas.
+> `docs/adr/0003-native-wire-format.md`). O harness que este documento
+> descreve (`scripts/parity/`, o checkout `lohra/` instalado no venv local, os
+> comandos abaixo) foi apagado em #167 (PR #212, 2026-09-08); nada aqui é
+> executável hoje. Mantido como registro de como as fixtures de paridade
+> foram capturadas — o corpus resultante está em
+> `tests/fixtures/parity/` e o inventário em `docs/regression-inventory.md`.
 
 Testes verdes são condição necessária, **nunca suficiente**, para aceitar uma
 fatia migrada. Toda entrega precisa de evidência de execução real nos dois

@@ -342,7 +342,7 @@ orientação de atualizar pelo npm.
 - O CI (`.github/workflows/ci.yml`) mede `ubuntu-latest` × Node 20/22 (Linux
   x64): build, typecheck, lint, format:check e test em todo push na `main` e
   toda PR, mais o job `provenance` que exige que cada SHA aprovado em
-  `docs/closeout.md` seja ancestral do HEAD (formato, script e flags em
+  `docs/provenance.json` seja ancestral do HEAD (formato, script e flags em
   [`docs/provenance.md`](docs/provenance.md)). Windows nativo e macOS Node 20
   permanecem `NOT_MEASURED`; spoof de plataforma não conta como evidência.
 
@@ -357,12 +357,11 @@ não-live duas vezes e recusava scripts ausentes, órfãos, skips, resultados n�
 determinísticos ou mutantes sobreviventes; evidence ficava em
 `.parity-evidence/` (gitignored). Desde essa data a validação contra o Python
 deixou de ser critério de aceite: as fixtures capturadas na fase de paridade
-são hoje o corpus de regressão do runtime, e a migração dos scripts
-`parity:*` para `regression:*` está rastreada em #8 e #19.
-
-```bash
-npm run verify:t22:evidence
-```
+são hoje o corpus de regressão do runtime (39 cenários e os manifests T15/T20
+em `tests/fixtures/parity/`, suporte em `tests/support/parity/`). O harness
+bilateral (`scripts/parity/`, 475 arquivos, 70 scripts npm com prefixo
+`parity`/`probe`) foi apagado em #167 (PR #212, 2026-09-08); o stub de
+servidor/driver que sobrou vive em `scripts/stub/{driver,server,types}.ts`.
 
 `mutations:closeout` foi retirado do `package.json` em #153: os 8 mutantes
 que miravam `src/` migraram para `mutations:self-update` (hoje agregado por
