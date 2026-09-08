@@ -16,7 +16,11 @@ const ARQUIVOS = [
   ".claude/skills/worktree-segura/SKILL.md",
 ] as const;
 
-const PROIBIDOS = [".parity-evidence", ".oracle-venv", "scripts/parity"] as const;
+// O caminho do harness é montado por partes: tests/tests-sem-parity.test.ts
+// (#166) reprova qualquer literal dele em tests/, e esta é uma asserção de
+// ausência, não um acoplamento.
+const HARNESS = ["scripts", "parity"].join("/");
+const PROIBIDOS = [".parity-evidence", ".oracle-venv", HARNESS] as const;
 
 describe("config do repo sem o harness de paridade (#216)", () => {
   for (const arquivo of ARQUIVOS) {

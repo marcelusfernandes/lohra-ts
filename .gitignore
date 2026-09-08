@@ -4,11 +4,9 @@ coverage/
 *.tsbuildinfo
 .env
 .DS_Store
-.parity-evidence/
 .mutation-evidence/
 .probe-evidence/
 .live-smoke-evidence/
-.oracle-venv/
 .lavish/
 lohra/
 .claude/settings.local.json
