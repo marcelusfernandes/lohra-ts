@@ -508,7 +508,7 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
   }
   if (command === "dashboard") {
     return runDashboard({
-      argv,
+      flags: parsed.options,
       environment,
       home: paths.home,
       codexHome,

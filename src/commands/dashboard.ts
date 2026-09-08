@@ -71,7 +71,14 @@ function formatHostForUrl(host: string): string {
 }
 
 export interface DashboardCommandOptions {
-  readonly argv: readonly string[];
+  // Already resolved by cli.ts's single parseCommand(DASHBOARD_SPEC, ...)
+  // call (issue #222) -- this function never re-scans argv itself, so it
+  // can't drift from what was actually validated the way its old
+  // standalone option() helper (argv.indexOf(name)) once did: that helper
+  // never recognized `--flag=value` nor unambiguous-prefix abbreviation,
+  // even though parseCommand already accepted both and serve already read
+  // from this same map.
+  readonly flags: ReadonlyMap<string, string | true>;
   readonly environment: Readonly<Record<string, string | undefined>>;
   readonly home: string;
   readonly codexHome: string;
@@ -87,9 +94,9 @@ export interface DashboardCommandOptions {
   readonly registerShutdownTrigger?: (handler: () => void) => void;
 }
 
-function option(argv: readonly string[], name: string): string | undefined {
-  const index = argv.indexOf(name);
-  return index < 0 ? undefined : argv[index + 1];
+function stringFlag(flags: ReadonlyMap<string, string | true>, name: string): string | undefined {
+  const value = flags.get(name);
+  return typeof value === "string" ? value : undefined;
 }
 
 function isAddressInUse(error: unknown): boolean {
@@ -101,8 +108,8 @@ function isAddressInUse(error: unknown): boolean {
 }
 
 export async function runDashboard(options: DashboardCommandOptions): Promise<number> {
-  const insecure = options.argv.includes("--insecure");
-  const host = option(options.argv, "--host") ?? DEFAULT_HOST;
+  const insecure = options.flags.has("--insecure");
+  const host = stringFlag(options.flags, "--host") ?? DEFAULT_HOST;
 
   // Concretiza a reavaliação do L22 (`docs/gate-decision.md`): um `--host`
   // fora de loopback SEMPRE exige o token de sessão. Sem `--insecure` o
@@ -155,7 +162,7 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
       options.stderr("subscription mode: not logged in\n");
       return 2;
     }
-    model = option(options.argv, "--model") ?? readCodexModel(options.codexHome) ?? "gpt-5.5";
+    model = stringFlag(options.flags, "--model") ?? readCodexModel(options.codexHome) ?? "gpt-5.5";
     providerName = "codex";
     profile = CODEX_PROVIDER;
     poolClient = createResponsesClient({
@@ -183,7 +190,7 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
         }),
       );
   } else {
-    const provider = option(options.argv, "--provider");
+    const provider = stringFlag(options.flags, "--provider");
     if (provider === undefined) {
       options.stderr(noProvider);
       return 2;
@@ -208,7 +215,7 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
       );
       return 2;
     }
-    model = option(options.argv, "--model") ?? profile.fallbackModels[0] ?? "unknown";
+    model = stringFlag(options.flags, "--model") ?? profile.fallbackModels[0] ?? "unknown";
     providerName = profile.name;
     const apiKey = key ?? (profile.name === "ollama" ? "lohra-local" : "");
     poolClient = buildClient(profile, apiKey);
@@ -381,9 +388,9 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
   // Mirrors the oracle's `dashboard --port <n>` flag (T12 baseline harness's
   // dash_launcher.py passes --port explicitly for hermetic testing).
   // options.port stays available for programmatic/test injection and wins
-  // over argv when both are present.
-  const argvPort = option(options.argv, "--port");
-  const requestedPort = options.port ?? (argvPort === undefined ? DEFAULT_PORT : Number(argvPort));
+  // over the parsed --port flag when both are present.
+  const flagPort = stringFlag(options.flags, "--port");
+  const requestedPort = options.port ?? (flagPort === undefined ? DEFAULT_PORT : Number(flagPort));
   const displayHost = formatHostForUrl(host);
   const printBootLines = (port: number): void => {
     options.stderr(`Lohra dashboard: http://${displayHost}:${String(port)}\n`);

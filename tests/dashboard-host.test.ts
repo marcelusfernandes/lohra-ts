@@ -61,18 +61,28 @@ function tempHome(): string {
   return root;
 }
 
-function baseOptions(overrides: Partial<DashboardCommandOptions> = {}) {
+// `argv` here is test-only shorthand: `baseOptions` runs it through the
+// real `parseCommand(DASHBOARD_SPEC, ...)` cli.ts itself uses, so `flags`
+// (what `runDashboard` actually reads, issue #222) is never hand-built out
+// of step with the parser -- an `it()` block just writes the argv shape a
+// user would type, same as before this file's own field rename.
+type BaseOptionsOverrides = Partial<DashboardCommandOptions> & {
+  readonly argv?: readonly string[];
+};
+
+function baseOptions(overrides: BaseOptionsOverrides = {}) {
+  const { argv = ["--provider", "anthropic"], ...rest } = overrides;
   const home = tempHome();
   const stderrLines: string[] = [];
   return {
-    argv: ["--provider", "anthropic"],
+    flags: parseCommand(DASHBOARD_SPEC, argv).options,
     environment: { ANTHROPIC_API_KEY: "sk-test-key" },
     home,
     codexHome: join(home, "codex"),
     cwd: tmpdir(),
     stderr: (text: string) => stderrLines.push(text),
     port: 0,
-    ...overrides,
+    ...rest,
     stderrLines,
   };
 }

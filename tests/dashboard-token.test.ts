@@ -11,6 +11,8 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { parseCommand } from "../src/cli/arg-validation.js";
+import { DASHBOARD_SPEC } from "../src/cli/arg-spec.js";
 import { runDashboard, type DashboardCommandOptions } from "../src/commands/dashboard.js";
 import { sendRawHttpRequest } from "./support/parity/gateway/raw-http-client.js";
 
@@ -30,18 +32,23 @@ function tempHome(): string {
   return root;
 }
 
-function baseOptions(overrides: Partial<DashboardCommandOptions> = {}) {
+type BaseOptionsOverrides = Partial<DashboardCommandOptions> & {
+  readonly argv?: readonly string[];
+};
+
+function baseOptions(overrides: BaseOptionsOverrides = {}) {
+  const { argv = ["--provider", "anthropic", "--host", "::1"], ...rest } = overrides;
   const home = tempHome();
   const stderrLines: string[] = [];
   return {
-    argv: ["--provider", "anthropic", "--host", "::1"],
+    flags: parseCommand(DASHBOARD_SPEC, argv).options,
     environment: { ANTHROPIC_API_KEY: "sk-test-key" },
     home,
     codexHome: join(home, "codex"),
     cwd: tmpdir(),
     stderr: (text: string) => stderrLines.push(text),
     port: 0,
-    ...overrides,
+    ...rest,
     stderrLines,
   };
 }

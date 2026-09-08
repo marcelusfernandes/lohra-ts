@@ -6,6 +6,8 @@ import { createServer, type Server } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 
+import { parseCommand } from "../../src/cli/arg-validation.js";
+import { DASHBOARD_SPEC } from "../../src/cli/arg-spec.js";
 import { runDashboard } from "../../src/commands/dashboard.js";
 
 const roots: string[] = [];
@@ -20,18 +22,23 @@ function tempHome(): string {
   return root;
 }
 
-function baseOptions(overrides: Partial<Parameters<typeof runDashboard>[0]> = {}) {
+type BaseOptionsOverrides = Partial<Parameters<typeof runDashboard>[0]> & {
+  readonly argv?: readonly string[];
+};
+
+function baseOptions(overrides: BaseOptionsOverrides = {}) {
+  const { argv = ["--provider", "anthropic"], ...rest } = overrides;
   const home = tempHome();
   const stderrLines: string[] = [];
   return {
-    argv: ["--provider", "anthropic"],
+    flags: parseCommand(DASHBOARD_SPEC, argv).options,
     environment: { ANTHROPIC_API_KEY: "sk-test-key" },
     home,
     codexHome: join(home, "codex"),
     cwd: tmpdir(),
     stderr: (text: string) => stderrLines.push(text),
     port: 0,
-    ...overrides,
+    ...rest,
     stderrLines,
   };
 }
@@ -56,7 +63,7 @@ describe("runDashboard: subscription mode without login (assertion 50)", () => {
     );
     const stderrLines: string[] = [];
     const code = await runDashboard({
-      argv: [],
+      flags: new Map(),
       environment: {},
       home,
       codexHome: join(home, "codex"),
@@ -77,7 +84,7 @@ describe("runDashboard: subscription mode without login (assertion 50)", () => {
     const stderrLines: string[] = [];
     let shutdown: (() => void) | undefined;
     const donePromise = runDashboard({
-      argv: ["--provider", "anthropic"],
+      flags: new Map([["--provider", "anthropic"]]),
       environment: { ANTHROPIC_API_KEY: "sk-test" },
       home,
       codexHome: join(home, "codex"),
@@ -107,7 +114,7 @@ describe("runDashboard: subscription mode without login (assertion 50)", () => {
     const stderrLines: string[] = [];
     let shutdown: (() => void) | undefined;
     const donePromise = runDashboard({
-      argv: ["--provider", "anthropic"],
+      flags: new Map([["--provider", "anthropic"]]),
       environment: { ANTHROPIC_API_KEY: "sk-test" },
       home,
       codexHome: join(home, "codex"),
