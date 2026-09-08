@@ -36,7 +36,7 @@
     "slice": "workflow-audit-live",
     "script": "mutations:t17",
     "catalog": ["scripts/mutations/workflow-audit-live-mutants.ts"],
-    "srcGlobs": ["src/workflow/**", "src/state/**", "src/cli/**", "src/commands/**"],
+    "srcGlobs": ["src/workflow/**", "src/state/**", "src/cli/**", "src/commands/**", "src/cli.ts"],
     "focusFiles": ["tests/workflow-audit-live.test.ts"]
   },
   {

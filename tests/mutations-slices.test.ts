@@ -3,9 +3,14 @@
 // de `orquestracao.md` hoje decide de cabeça. Este teste prova:
 //
 //   1. o schema básico de cada entrada;
-//   2. todo catálogo de dado puro (`*-mutants.ts`/`*catalog*.ts` sob
-//      `scripts/mutations/`) aparece em algum `catalog` do JSON — uma fatia
-//      nova nesse padrão sem entrada reprova aqui;
+//   2. todo catálogo de dado puro sob `scripts/mutations/` aparece em algum
+//      `catalog` do JSON — descoberta por CONTEÚDO (`export const
+//      ...Mutants`), não por nome de arquivo (issue #195: o padrão antigo
+//      `*-mutants.ts$`/`catalog.*\.ts$` não casava `orchestration.ts` nem
+//      `workflow-durability-{guard,named}.ts`), com um allowlist explícito
+//      dos RUNNERS que reexportam um `Mutants` agregado sem serem, eles
+//      mesmos, o catálogo — um catálogo novo, de qualquer nome, sem entrada
+//      em `slices.json` reprova aqui;
 //   3. os `catalog` do JSON batem, como conjunto, com os nove catálogos de
 //      dado puro importados abaixo — um `catalog` novo no JSON sem import
 //      correspondente aqui (ou vice-versa) reprova, o que impede o número
@@ -29,6 +34,25 @@
 //      `SEM_FATIA` (diretório apagado ou motivo vazio) também reprova
 //      (mesma convenção de "sem entrada morta" de
 //      `tests/mutations-directory-pin.test.ts`).
+//   8. (issue #195, achados das PRs #185/#193) `srcGlobs` cobre todo
+//      `edits[].file` (normalizado para caminho relativo à raiz do repo)
+//      dos catálogos de cada fatia sob `src/` -- `src/<dir>/**` casa por
+//      prefixo, `src/<arquivo>.ts` casa só esse arquivo de topo (mesma
+//      forma aceita por `scripts/github/mutations-matrix.ts`). Um
+//      `edits[].file` normalizado que não está sob `src/` precisa estar no
+//      allowlist explícito `FORA_DE_SRC` (fixtures de `scripts/mutations/`,
+//      que não precisam de `srcGlobs` -- mudar `scripts/mutations/**` já
+//      seleciona toda fatia) ou o teste lança -- fail-closed: nenhum
+//      `edits[].file` sai da checagem por um filtro silencioso.
+//   9. descoberta de catálogo por CONTEÚDO (`export const ...Mutants`), não
+//      por nome de arquivo -- um catálogo com naming fora do padrão antigo
+//      (`orchestration.ts`, `workflow-durability-guard.ts`) ou um catálogo
+//      novo qualquer sem entrada em `slices.json` reprova; os RUNNERS que
+//      reexportam um `Mutants` agregado (`media.ts`, `workflow-durability.ts`)
+//      são a única exceção explícita.
+//  10. contagem por catálogo (`CONTAGEM_POR_CATALOGO`) além da soma 170 --
+//      uma troca compensatória entre dois catálogos (um ganha o que o outro
+//      perde, soma preservada) reprova aqui mesmo sem mudar o total.
 //
 // Catálogos que são pura estrutura de dado (sem `main()` de topo) e por
 // isso seguros para `import` estático dentro deste arquivo de teste:
@@ -41,8 +65,12 @@
 // não entram neste arquivo de teste — desde a issue #186 todos exportam
 // `main` atrás de uma guarda de entry-point (`ehEntryPoint`,
 // `scripts/mutations/harness.ts`) e `tests/mutations-runner-guard.test.ts`
-// prova que importá-los nunca dispara `main()`, mas nenhum é catálogo (não
-// exportam mutantes), então não há razão para importá-los aqui.
+// prova que importá-los nunca dispara `main()`. Dois deles (`media.ts`,
+// `workflow-durability.ts`) exportam um `Mutants` AGREGADO (união dos
+// catálogos reais, só para o próprio runner rodar) — `NAO_CATALOGO` abaixo
+// é o que os exclui da descoberta por conteúdo (item 2 do cabeçalho), não a
+// ausência de um export `Mutants` (issue #195, achado da PR #193: nenhum
+// dos dois é, ele mesmo, um `catalog` de `slices.json`).
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -64,19 +92,69 @@ const repoRoot = resolve(import.meta.dirname, "..");
 const slicesPath = resolve(repoRoot, "scripts/mutations/slices.json");
 const mutationsDir = resolve(repoRoot, "scripts/mutations");
 
+/** Arquivos de `scripts/mutations/` que reexportam um `export const
+ * ...Mutants` AGREGADO (união de catálogos já declarados em `slices.json`,
+ * só para uso do próprio runner) ou são harness/tipo/auxiliar sem catálogo
+ * próprio -- não entram na descoberta por conteúdo do item 2 do cabeçalho
+ * (issue #195, pino 2). `media.ts` (`mediaMutants`) e
+ * `workflow-durability.ts` (`durabilityMutants`) são os dois casos reais de
+ * agregação; os demais não exportam nenhum `Mutants` (ver grep no PR). */
+const NAO_CATALOGO = new Set([
+  "all.ts",
+  "canonical.ts",
+  "harness.ts",
+  "types.ts",
+  "media.ts",
+  "media-comparator.ts",
+  "media-mutant.ts",
+  "self-update.ts",
+  "web-tools.ts",
+  "workflow-audit-live.ts",
+  "workflow-durability.ts",
+  "workflow-executor.ts",
+]);
+
+const CATALOG_EXPORT_PATTERN = /export const [A-Za-z_]*[Mm]utants\b/;
+
+/** Descobre, por CONTEÚDO (não por nome de arquivo), quais entradas de
+ * `scripts/mutations/` são catálogos de dado puro: um `.ts` de primeiro
+ * nível fora de `NAO_CATALOGO` que exporta `export const ...Mutants` (ou o
+ * `mutants` literal de `self-update-mutants.ts`/`workflow-audit-live-mutants.ts`).
+ * Pura -- não lê disco -- para caber num teste com um catálogo fabricado só
+ * na memória (issue #195, AC 2: "mutação manual colada"). */
+function discoverCatalogNames(
+  files: readonly { readonly name: string; readonly contents: string }[],
+): readonly string[] {
+  return files
+    .filter((file) => !NAO_CATALOGO.has(file.name))
+    .filter((file) => CATALOG_EXPORT_PATTERN.test(file.contents))
+    .map((file) => file.name);
+}
+
+/** Os catálogos descobertos por conteúdo que NÃO estão em `declared` --
+ * vazio quando tudo bate. A mesma checagem roda contra o disco real e
+ * contra um catálogo fabricado só na memória (issue #195, AC 2). */
+function catalogosSemFatia(
+  files: readonly { readonly name: string; readonly contents: string }[],
+  declared: ReadonlySet<string>,
+): readonly string[] {
+  return discoverCatalogNames(files).filter((name) => !declared.has(`scripts/mutations/${name}`));
+}
+
 /** Um mutante genérico o bastante para cobrir `Mutant` (tem `focus`) e
- * `MediaMutant` (não tem): só o que este teste precisa ler. */
+ * `MediaMutant` (não tem): só o que este teste precisa ler. `edits` é comum
+ * aos dois tipos (issue #195, pino 1: `srcGlobs` contra `edits[].file`). */
 interface CatalogEntry {
   readonly id: string;
   readonly focus?: { readonly file: string };
+  readonly edits: readonly { readonly file: string }[];
 }
 
-/** Os oito catálogos de dado puro, chave = caminho relativo à raiz do repo
+/** Os nove catálogos de dado puro, chave = caminho relativo à raiz do repo
  * igual ao que aparece em `slices.json#catalog` -- a checagem de item 3 do
  * cabeçalho acima compara as CHAVES deste mapa contra a união dos
- * `catalog` do JSON (menos `workflow-executor.ts`), então um `catalog`
- * novo no JSON sem entrada aqui (ou uma entrada aqui sem uso no JSON)
- * reprova antes mesmo de chegar na soma. */
+ * `catalog` do JSON, então um `catalog` novo no JSON sem entrada aqui (ou
+ * uma entrada aqui sem uso no JSON) reprova antes mesmo de chegar na soma. */
 function asCatalog(entries: readonly CatalogEntry[]): readonly CatalogEntry[] {
   return entries;
 }
@@ -169,18 +247,59 @@ const SEM_FATIA: ReadonlyMap<string, string> = new Map([
   ["transports", "sem catálogo de mutantes ainda"],
 ]);
 
-/** Extrai o nome do diretório de primeiro nível de um glob `src/<dir>/**`. */
-function globDirName(glob: string): string {
-  const match = /^src\/([^/]+)\/\*\*$/.exec(glob);
-  if (match === null) {
-    throw new Error(`srcGlobs: formato inesperado (esperava "src/<dir>/**"): ${glob}`);
-  }
-  const dir = match[1];
-  if (dir === undefined) {
-    throw new Error(`srcGlobs: não foi possível extrair o diretório de ${glob}`);
-  }
-  return dir;
+const DIR_GLOB = /^src\/([^/]+)\/\*\*$/;
+const FILE_GLOB = /^src\/[^/]+\.ts$/;
+
+/** Extrai o nome do diretório de primeiro nível de um glob `src/<dir>/**`;
+ * `null` para a forma literal de arquivo de topo `src/<arquivo>.ts` (issue
+ * #195, pino 1) -- um arquivo de topo não é, ele mesmo, um diretório de
+ * primeiro nível, então não entra em `coveredDirs` abaixo. Qualquer outra
+ * forma continua lançando (fail-closed, mesma regra de
+ * `scripts/github/mutations-matrix.ts`). */
+function globDirName(glob: string): string | null {
+  const match = DIR_GLOB.exec(glob);
+  const dir = match?.[1];
+  if (dir !== undefined) return dir;
+  if (FILE_GLOB.test(glob)) return null;
+  throw new Error(
+    `srcGlobs: formato inesperado (esperava "src/<dir>/**" ou "src/<arquivo>.ts"): ${glob}`,
+  );
 }
+
+/** Casa um `edits[].file` (relativo à raiz do repo) contra um `srcGlobs`:
+ * `src/<dir>/**` casa por prefixo, `src/<arquivo>.ts` casa só esse arquivo
+ * exato (issue #195, pino 1). */
+function matchesSrcGlob(file: string, glob: string): boolean {
+  const dir = DIR_GLOB.exec(glob)?.[1];
+  if (dir !== undefined) return file.startsWith(`src/${dir}/`);
+  if (FILE_GLOB.test(glob)) return file === glob;
+  throw new Error(
+    `srcGlobs: formato inesperado (esperava "src/<dir>/**" ou "src/<arquivo>.ts"): ${glob}`,
+  );
+}
+
+/** `edits[].file` de catálogos da mecânica B (mídia) é relativo à raiz de
+ * `src/`, não à raiz do repo (ex.: `media/source.ts` = `src/media/source.ts`)
+ * -- normaliza pela existência em disco, igual às checagens de
+ * `focusFiles`/`catalog` acima. Lança se nenhuma das duas formas existir. */
+function normalizeEditFile(file: string): string {
+  if (existsSync(resolve(repoRoot, file))) return file;
+  const guess = `src/${file}`;
+  if (existsSync(resolve(repoRoot, guess))) return guess;
+  throw new Error(`edits[].file não existe em disco: "${file}" (nem "${guess}")`);
+}
+
+/** `edits[].file` (já normalizado) fora de `src/` que legitimamente não
+ * precisa de `srcGlobs` -- mudar `scripts/mutations/**` já roda a fatia
+ * inteira (`mutations-matrix.ts`), então esses arquivos não têm buraco a
+ * fechar. Allowlist explícito (não um filtro silencioso por prefixo): um
+ * `edits[].file` fora de `src/` e fora daqui reprova em vez de sumir sem
+ * aviso (issue #195, achado do revisor -- "falha nunca é silenciosa"). */
+const FORA_DE_SRC = new Set([
+  "scripts/mutations/fixtures/normalize-evidence.mjs",
+  "scripts/mutations/fixtures/t15-chat-workflow.json",
+  "scripts/mutations/fixtures/candidate-chat.mjs",
+]);
 
 describe("scripts/mutations/slices.json", () => {
   it("existe", () => {
@@ -201,20 +320,37 @@ describe("scripts/mutations/slices.json", () => {
     );
   });
 
-  it("todo catálogo *-mutants.ts/*catalog*.ts de scripts/mutations/ está em algum slice", () => {
+  it("todo catálogo de dado puro (por conteúdo, não por nome) está em algum slice", () => {
     const slices = readSlices();
     const declared = new Set(slices.flatMap((entry) => entry.catalog));
-    const catalogPattern = /(-mutants\.ts$|catalog.*\.ts$)/;
-    const onDisk = readdirSync(mutationsDir).filter(
-      (name) => catalogPattern.test(name) && name.endsWith(".ts"),
-    );
-    expect(onDisk.length).toBeGreaterThan(0);
-    for (const name of onDisk) {
-      const relPath = `scripts/mutations/${name}`;
-      expect(declared.has(relPath), `${relPath} não está em nenhum "catalog" de slices.json`).toBe(
-        true,
-      );
-    }
+    const arquivos = readdirSync(mutationsDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+      .map((entry) => ({
+        name: entry.name,
+        contents: readFileSync(resolve(mutationsDir, entry.name), "utf8"),
+      }));
+    expect(discoverCatalogNames(arquivos).length).toBeGreaterThan(0);
+    expect(catalogosSemFatia(arquivos, declared)).toEqual([]);
+  });
+
+  it("catálogo novo fabricado só na memória (mutação manual colada) reprova a descoberta (AC 2)", () => {
+    const slices = readSlices();
+    const declared = new Set(slices.flatMap((entry) => entry.catalog));
+    const arquivosReais = readdirSync(mutationsDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+      .map((entry) => ({
+        name: entry.name,
+        contents: readFileSync(resolve(mutationsDir, entry.name), "utf8"),
+      }));
+    const fabricado = {
+      name: "foo.ts",
+      contents: "export const fooMutants: readonly unknown[] = [];\n",
+    };
+    // A mesma checagem do teste acima, contra o disco real (sem o catálogo
+    // fabricado), continua vazia -- o que muda de vermelho pra verde abaixo
+    // é só a adição do "foo.ts" na memória, nunca commitado ao repo.
+    expect(catalogosSemFatia(arquivosReais, declared)).toEqual([]);
+    expect(catalogosSemFatia([...arquivosReais, fabricado], declared)).toEqual(["foo.ts"]);
   });
 
   it("todo script existe em package.json#scripts", () => {
@@ -308,6 +444,38 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
+  it("srcGlobs cobre todo edits[].file dos catálogos da fatia, sob src/ (issue #195, pino 1)", () => {
+    const slices = readSlices();
+    for (const entry of slices) {
+      const catalogs = entry.catalog.map((path) => {
+        const found = CATALOGOS.get(path);
+        if (found === undefined) throw new Error(`catálogo não importado: ${path}`);
+        return found;
+      });
+      const normalizedFiles = new Set(
+        catalogs
+          .flatMap((mutants) => mutants.flatMap((m) => m.edits.map((edit) => edit.file)))
+          .map((file) => normalizeEditFile(file)),
+      );
+      for (const file of normalizedFiles) {
+        if (!file.startsWith("src/") && !FORA_DE_SRC.has(file)) {
+          throw new Error(
+            `edits[].file "${file}" (fatia ${entry.slice}) não está sob src/ nem em FORA_DE_SRC -- ` +
+              "declare-o lá se legitimamente não precisa de srcGlobs",
+          );
+        }
+      }
+      const editedFiles = [...normalizedFiles].filter((file) => file.startsWith("src/"));
+      for (const file of editedFiles) {
+        const covered = entry.srcGlobs.some((glob) => matchesSrcGlob(file, glob));
+        expect(
+          covered,
+          `slice ${entry.slice}: edits[].file "${file}" não casa nenhum srcGlobs`,
+        ).toBe(true);
+      }
+    }
+  });
+
   it("a contagem total de mutantes é 170 (soma dos nove catálogos importados)", () => {
     // Os nove catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
@@ -320,10 +488,40 @@ describe("scripts/mutations/slices.json", () => {
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
+  it("contagem por catálogo bate com uma tabela pinada (issue #195, pino 3: sem troca compensatória)", () => {
+    // Números literais, não derivados de CATALOGOS -- se fossem derivados
+    // (`CATALOGOS.get(path).length`), uma troca compensatória entre dois
+    // catálogos (um ganha o que o outro perde, soma preservada) passaria
+    // despercebida. Contagem = `mutants.length` de cada catálogo importado
+    // (não `grep -c 'id: "'`, que conta objetos internos como os
+    // `CONJUNCTS` de `workflow-durability-guard.ts` e sobre-conta) -- ver
+    // PR #206 (issue #195) para a corrida que produziu estes números.
+    const CONTAGEM_POR_CATALOGO: Readonly<Record<string, number>> = {
+      "scripts/mutations/workflow-durability-guard.ts": 14,
+      "scripts/mutations/workflow-durability-named.ts": 38,
+      "scripts/mutations/orchestration.ts": 5,
+      "scripts/mutations/workflow-audit-live-mutants.ts": 32,
+      "scripts/mutations/web-tools-mutants.ts": 9,
+      "scripts/mutations/media-catalog-other.ts": 7,
+      "scripts/mutations/media-catalog-persistence.ts": 13,
+      "scripts/mutations/self-update-mutants.ts": 8,
+      "scripts/mutations/workflow-executor-mutants.ts": 44,
+    };
+    expect(new Set(Object.keys(CONTAGEM_POR_CATALOGO))).toEqual(new Set(CATALOGOS.keys()));
+    for (const [path, mutants] of CATALOGOS) {
+      expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
+    }
+    const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
+    expect(somaTabela).toBe(170);
+  });
+
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {
     const slices = readSlices();
     const coveredDirs = new Set(
-      slices.flatMap((entry) => entry.srcGlobs).map((glob) => globDirName(glob)),
+      slices
+        .flatMap((entry) => entry.srcGlobs)
+        .map((glob) => globDirName(glob))
+        .filter((dir): dir is string => dir !== null),
     );
 
     const overlap = [...coveredDirs].filter((dir) => SEM_FATIA.has(dir));

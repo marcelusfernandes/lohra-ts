@@ -3,10 +3,14 @@
 // PR precisa rodar e emite a matriz para o job `mutate`.
 //
 // Regras (fail-closed):
-//   - todo `srcGlobs` tem a forma `src/<dir>/**` (a mesma que
-//     tests/mutations-slices.test.ts prende); qualquer outra forma lança.
+//   - todo `srcGlobs` tem a forma `src/<dir>/**` OU a forma literal
+//     `src/<arquivo>.ts` (arquivo de topo -- issue #195: sem ela, um
+//     catálogo que edita um arquivo de topo como `src/cli.ts` não tem como
+//     disparar a fatia certa); qualquer outra forma lança. Mesmas duas
+//     formas que `tests/mutations-slices.test.ts` prende.
 //   - arquivo sob `src/<dir>/` seleciona toda fatia cujo `srcGlobs` cita
-//     esse `<dir>`; arquivo de topo em `src/` não casa nenhuma.
+//     esse `<dir>`; arquivo de topo em `src/` só casa a fatia cujo
+//     `srcGlobs` cita esse arquivo exato pela forma literal.
 //   - mudança em `scripts/mutations/**` (harness ou catálogo) seleciona
 //     TODAS as fatias — o custo de rodar tudo é menor que o de um harness
 //     quebrado passar despercebido.
@@ -38,17 +42,24 @@ export interface Matrix {
 }
 
 const HARNESS_PREFIX = "scripts/mutations/";
-const GLOB_FORM = /^src\/([^/]+)\/\*\*$/;
+const DIR_GLOB_FORM = /^src\/([^/]+)\/\*\*$/;
+const FILE_GLOB_FORM = /^src\/[^/]+\.ts$/;
 const DEFAULT_SLICES = "scripts/mutations/slices.json";
 
-/** `src/<dir>/**` → `<dir>`; qualquer outra forma lança. */
-export function globDir(glob: string): string {
-  const match = GLOB_FORM.exec(glob);
-  const dir = match?.[1];
-  if (dir === undefined) {
-    throw new Error(`srcGlobs: formato inesperado (esperava "src/<dir>/**"): ${glob}`);
-  }
-  return dir;
+/** Um `srcGlobs` já resolvido: prefixo de diretório (`src/<dir>/**`) ou
+ * arquivo de topo literal (`src/<arquivo>.ts`, issue #195). */
+export type SrcTarget =
+  { readonly kind: "dir"; readonly dir: string } | { readonly kind: "file"; readonly file: string };
+
+/** `src/<dir>/**` → `{ kind: "dir", dir }`; `src/<arquivo>.ts` (arquivo de
+ * topo) → `{ kind: "file", file: glob }`; qualquer outra forma lança. */
+export function globDir(glob: string): SrcTarget {
+  const dir = DIR_GLOB_FORM.exec(glob)?.[1];
+  if (dir !== undefined) return { kind: "dir", dir };
+  if (FILE_GLOB_FORM.test(glob)) return { kind: "file", file: glob };
+  throw new Error(
+    `srcGlobs: formato inesperado (esperava "src/<dir>/**" ou "src/<arquivo>.ts"): ${glob}`,
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -81,8 +92,9 @@ export function readSlices(path: string): readonly SliceEntry[] {
   return parsed.map((entry, index) => asSliceEntry(entry, path, index));
 }
 
-function touchesDir(files: readonly string[], dir: string): boolean {
-  const prefix = `src/${dir}/`;
+function touchesDir(files: readonly string[], target: SrcTarget): boolean {
+  if (target.kind === "file") return files.includes(target.file);
+  const prefix = `src/${target.dir}/`;
   return files.some((file) => file.startsWith(prefix));
 }
 
@@ -91,13 +103,15 @@ export function selectSlices(
   slices: readonly SliceEntry[],
   changedFiles: readonly string[],
 ): Matrix {
-  const dirsBySlice = slices.map((entry) => ({
+  const targetsBySlice = slices.map((entry) => ({
     entry,
-    dirs: entry.srcGlobs.map((glob) => globDir(glob)),
+    targets: entry.srcGlobs.map((glob) => globDir(glob)),
   }));
   const harnessChanged = changedFiles.some((file) => file.startsWith(HARNESS_PREFIX));
-  const selected = dirsBySlice
-    .filter(({ dirs }) => harnessChanged || dirs.some((dir) => touchesDir(changedFiles, dir)))
+  const selected = targetsBySlice
+    .filter(
+      ({ targets }) => harnessChanged || targets.some((target) => touchesDir(changedFiles, target)),
+    )
     .map(({ entry }) => ({ slice: entry.slice, script: entry.script }));
   return {
     count: selected.length,
