@@ -113,6 +113,27 @@ describe("T22 public documentation", () => {
     expect(closeout).not.toContain("Gate arquitetural pendente");
   });
 
+  // Issue #197: o comando único de mutação é `mutations:all`; o passo 11 de
+  // `orquestracao.md`, o agente `qa` e as Convenções (CLAUDE.md ≡ AGENTS.md)
+  // citam ele e a regra de pular fatias já cobertas por `mutations.yml`.
+  it("process docs cite mutations:all and mutations.yml, never the mutations:* wildcard", () => {
+    const files = [
+      ".claude/rules/orquestracao.md",
+      ".claude/agents/qa.md",
+      "CLAUDE.md",
+      "AGENTS.md",
+    ];
+    for (const file of files) {
+      const text = read(file);
+      expect(text, `${file} ainda cita mutations:*`).not.toMatch(/mutations:\*/u);
+      expect(text, `${file} não cita mutations:all`).toContain("mutations:all");
+    }
+    for (const file of [".claude/rules/orquestracao.md", ".claude/agents/qa.md"]) {
+      expect(read(file), `${file} não cita mutations.yml`).toContain("mutations.yml");
+    }
+    expect(read("CLAUDE.md")).toBe(read("AGENTS.md"));
+  });
+
   it("has no broken relative Markdown links in public docs", () => {
     for (const path of ["README.md", "docs/closeout.md"]) {
       const text = read(path);
