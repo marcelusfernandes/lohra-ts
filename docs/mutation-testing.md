@@ -226,19 +226,45 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
 4. Rodar o script da fatia (`npm run <script>` de `slices.json`) e conferir
    que o novo mutante aparece `killed: true` e que `restoreGreen` continua
    `true`.
-5. `npm test` roda `tests/mutations-slices.test.ts`, que reprova se a
-   contagem total (170 + o novo) não bater com a soma dos catálogos
-   importados — o teste precisa de uma atualização do literal `170` junto
-   com o mutante novo.
+5. `npm test` roda `tests/mutations-slices.test.ts`, que reprova de duas
+   formas se a contagem não for atualizada junto com o mutante novo: a soma
+   total (170 + o novo) contra os nove catálogos importados, e a linha do
+   catálogo tocado em `CONTAGEM_POR_CATALOGO`
+   (`tests/mutations-slices.test.ts:491-517`), uma tabela pinada por número
+   literal — não derivada de `CATALOGOS.get(path).length` — para que uma
+   troca compensatória entre dois catálogos (um ganha o que o outro perde,
+   soma preservada) não passe despercebida. As duas contagens (o literal
+   `170` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
+   atualização junto com o mutante novo.
 
 ## Como adicionar uma fatia
 
-1. Criar o(s) arquivo(s) de catálogo de dado puro em `scripts/mutations/`
-   (padrão `*-mutants.ts` ou `*catalog*.ts`) e o runner que os consome sobre
-   `harness.ts` (mecânica A) ou seguindo `media.ts` (mecânica B).
+1. Criar o(s) arquivo(s) de catálogo de dado puro em `scripts/mutations/` e o
+   runner que os consome sobre `harness.ts` (mecânica A) ou seguindo
+   `media.ts` (mecânica B). A descoberta de catálogo não é por nome de
+   arquivo: é por conteúdo — um `.ts` de primeiro nível de `scripts/mutations/`
+   fora da allowlist `NAO_CATALOGO` que casa `CATALOG_EXPORT_PATTERN`
+   (`export const <x>Mutants`, `tests/mutations-slices.test.ts:117`) conta
+   como catálogo. `NAO_CATALOGO` (`tests/mutations-slices.test.ts:102-116`)
+   lista os módulos de `scripts/mutations/` que não são catálogo próprio —
+   harness, tipos, agregadores (`media.ts`, `workflow-durability.ts`) e os
+   runners que embutem o array (`self-update.ts`, `web-tools.ts`,
+   `workflow-audit-live.ts`, `workflow-executor.ts`). Um arquivo novo sem
+   `export const ...Mutants` e sem entrada em `NAO_CATALOGO` não é achado
+   pelo teste.
 2. Adicionar a entrada em `scripts/mutations/slices.json`: `slice`, `script`,
-   `catalog`, `srcGlobs` (um glob `src/<dir>/**` por diretório de primeiro
-   nível de `src/` que a fatia cobre), `focusFiles`.
+   `catalog`, `srcGlobs`, `focusFiles`. `srcGlobs` aceita duas formas
+   (`scripts/github/mutations-matrix.ts:45-58,96-99`, fail-closed — qualquer
+   outra forma lança): `src/<dir>/**` por diretório de primeiro nível de
+   `src/` que a fatia cobre, ou o literal `src/<arquivo>.ts` para um arquivo
+   de topo (ex.: `"src/cli.ts"` em `workflow-audit-live`,
+   `scripts/mutations/slices.json:39`). `tests/mutations-slices.test.ts:447-478`
+   assevera que todo `edits[].file` de cada catálogo da fatia (normalizado
+   para sob `src/`) casa algum `srcGlobs` dessa fatia — exceto os
+   `edits[].file` fora de `src/` que estão na allowlist explícita
+   `FORA_DE_SRC` (`tests/mutations-slices.test.ts:298-302`, hoje só os três
+   arquivos de fixture em `scripts/mutations/fixtures/**`); qualquer outro
+   `edits[].file` fora de `src/` e fora de `FORA_DE_SRC` reprova o teste.
 3. Adicionar o script em `package.json#scripts` com o mesmo nome de
    `slices.json#script`.
 4. Importar o(s) catálogo(s) novo(s) em `tests/mutations-slices.test.ts`
@@ -246,15 +272,22 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
    `SEM_FATIA` desse mesmo arquivo.
 
 `tests/mutations-slices.test.ts` prova, a cada corrida: o schema básico de
-cada entrada de `slices.json`; que todo catálogo em disco
-(`*-mutants.ts`/`*catalog*.ts`) aparece em algum `catalog`; que os `catalog`
-do JSON batem, como conjunto, com os nove catálogos importados em
+cada entrada de `slices.json`; que todo catálogo descoberto por conteúdo em
+`scripts/mutations/` (item 1 acima) aparece em algum `catalog`; que os
+`catalog` do JSON batem, como conjunto, com os nove catálogos importados em
 `CATALOGOS`; que todo `script` existe em `package.json#scripts`; que todo
 `focusFiles`/`catalog` existe em disco; que `focusFiles` bate com a união de
-`focus.file` dos catálogos da fatia (exceto `media`/`workflow-executor`); a
-soma de 170; e que todo diretório de primeiro nível de `src/` está coberto
-por algum `srcGlobs` ou está em `SEM_FATIA` com um motivo não vazio — nunca
-os dois, nunca nenhum dos dois.
+`focus.file` dos catálogos da fatia (exceto `media`/`workflow-executor`); que
+`srcGlobs` cobre todo `edits[].file` dos catálogos da fatia (item 2 acima); a
+contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
+(`tests/mutations-slices.test.ts:491-517` — hoje `workflow-durability-guard`
+14, `workflow-durability-named` 38, `orchestration` 5,
+`workflow-audit-live-mutants` 32, `web-tools-mutants` 9,
+`media-catalog-other` 7, `media-catalog-persistence` 13,
+`self-update-mutants` 8, `workflow-executor-mutants` 44, soma 170) e a soma
+de 170 contra os nove catálogos importados; e que todo diretório de primeiro
+nível de `src/` está coberto por algum `srcGlobs` ou está em `SEM_FATIA` com
+um motivo não vazio — nunca os dois, nunca nenhum dos dois.
 
 ## Diretórios de `src/` sem fatia hoje
 
