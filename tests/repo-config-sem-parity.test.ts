@@ -1,6 +1,6 @@
 // Issue #216: depois da remoção do harness de paridade (#167), a config do
 // topo do repo e a skill `worktree-segura` não citam mais `.parity-evidence`,
-// `.oracle-venv` nem `scripts/parity`. `lohra/` (checkout opcional do Python,
+// `.oracle-venv` nem o diretório do harness (montado por partes abaixo). `lohra/` (checkout opcional do Python,
 // só no disco do owner) e `.mutation-evidence/` continuam ignorados.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
