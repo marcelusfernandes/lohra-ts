@@ -117,6 +117,23 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     return 2;
   }
 
+  // Issue #221: LOHRA_DASHBOARD_SESSION_TOKEN="" (or whitespace-only) used
+  // to fall through to `?? generateSessionToken()` untouched -- undefined is
+  // "not set", but an empty string IS set, so the fallback never ran, and
+  // the gateway ended up with an empty expectedToken. Combined with #4's
+  // non-loopback --host, that opened the gateway on the network with no
+  // real authentication (timingSafeTokenEqual("", "") used to be true).
+  // Refused here, before route/credential resolution or any bind, same
+  // CLI-shaped error as the --insecure refusal above.
+  const rawToken = options.environment.LOHRA_DASHBOARD_SESSION_TOKEN;
+  if (rawToken !== undefined && rawToken.trim() === "") {
+    options.stderr(
+      `${LEVELS.dashboard.banner}lohra: error: LOHRA_DASHBOARD_SESSION_TOKEN vazio; ` +
+        "gere um token ou não defina a variável\n",
+    );
+    return 2;
+  }
+
   const route = resolveAuthRoute(options.home);
 
   let model: string;
@@ -210,7 +227,7 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     };
   }
 
-  const token = options.environment.LOHRA_DASHBOARD_SESSION_TOKEN ?? generateSessionToken();
+  const token = rawToken ?? generateSessionToken();
   const context = loadProjectContext(options.cwd);
   const systemPrompt = buildSystemPrompt({
     contextFiles: context.instructions,
