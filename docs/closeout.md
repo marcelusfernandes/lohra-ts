@@ -82,6 +82,11 @@ depois que o commit é congelado.
 
 ## Interpretações do inventário fechado
 
+> Registro histórico do inventário fechado em 2026-09-03: os scripts npm
+> citados abaixo (o próprio `parity`, `verify:t22:evidence`, os agregadores
+> dos tickets T08/T09 e o par update de T22) foram apagados em #167 (PR #212,
+> 2026-09-08) junto com `scripts/parity/`; nada aqui é executável hoje.
+
 - `parity` é metadado porque requer `--manifest`; executá-lo sem fixture não é
   um gate. `verify:t22:evidence` é o verificador pós-hoc e não roda
   recursivamente dentro do aggregate.

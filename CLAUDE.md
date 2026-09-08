@@ -40,8 +40,9 @@ Núcleo headless orientado a eventos → **TUI** (Ink) → **GUI Electron**
 - Gates (lista canônica; os outros documentos citam esta): `npm run build` →
   `typecheck` → `lint` → `format:check` → `test`, e `npm run prova -- <slug>`
   na branch de uma issue. O CI (`.github/workflows/ci.yml`) roda os mesmos em
-  Node 20/22, verifica que todo SHA aprovado em `docs/closeout.md` é ancestral
-  do HEAD e, em PR, roda `escopo`, `contratos` e `controle-negativo`.
+  Node 20/22, verifica que todo SHA aprovado em `docs/provenance.json` é
+  ancestral do HEAD (formato e script em `docs/provenance.md`) e, em PR, roda
+  `escopo`, `contratos` e `controle-negativo`.
 - Em sessões de Claude Code, `.claude/settings.json` formata e aplica
   `eslint --fix` a cada arquivo editado.
 - Fluxo de git (issue-first, branch por issue, PR para `main`, sem
@@ -66,12 +67,17 @@ falha explícita — independentes de qualquer outra implementação:
 
 ## Artefatos históricos
 
-Existem porque o repositório nasceu como port com paridade obrigatória. Nenhum
-deles é requisito hoje:
+Existem porque o repositório nasceu como port com paridade obrigatória. O
+harness bilateral (`scripts/parity/`, 475 arquivos, 70 scripts npm com
+prefixo `parity`/`probe`) foi apagado em #167 (PR #212, 2026-09-08);
+inventário completo da perda em `docs/regression-inventory.md`. Nenhum
+artefato listado abaixo é requisito hoje:
 
-- `lohra/` e `.oracle-venv/` — checkout e venv do Python pinado; gitignorados,
-  opcionais.
-- `docs/reference/` e `docs/parity-validation.md` — documentação e procedimento
-  bilateral de aceite; históricos.
-- Scripts `parity:*`/`probe:*` e as fixtures capturadas — hoje a definição
-  executável do comportamento; a migração para `regression:*` é issue própria.
+- `lohra/` e o venv do Python pinado associado — gitignorados, opcionais,
+  somente leitura no disco de quem trabalha; nome e procedimento (histórico)
+  em `docs/parity-validation.md`.
+- `docs/reference/` e `docs/parity-validation.md` — documentação e
+  procedimento bilateral de aceite; históricos.
+
+A definição executável do comportamento hoje é `tests/**` e
+`tests/fixtures/**`.

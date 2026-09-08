@@ -10,6 +10,30 @@ migraram para `scripts/mutations/self-update.ts` (`npm run
 mutations:self-update`); os outros 27 são aposentados aqui, com id, alvo e
 motivo, para que apagar o diretório não perca rastro de mutante nenhum.
 
+## Perda registrada com #167
+
+#167 (PR #212, merge `c0ddfc4`, 2026-09-08) apagou `scripts/parity/` inteiro:
+475 arquivos (`git diff --name-only --diff-filter=D 2c7ad47 c0ddfc4 | grep -c
+'^scripts/parity/'`) e 70 scripts npm (`git diff 2c7ad47 c0ddfc4 --
+package.json | grep -c '^-\s*"'`). O que saiu junto e não tem substituto:
+
+- O driver Python ponta a ponta — spawn do intérprete, protocolo JSON sobre
+  stdin/stdout e scrubbing de variáveis de ambiente antes de repassar ao
+  processo filho (`scripts/parity/process.ts`, `scripts/parity/harness.ts`,
+  ambos apagados).
+- 8 testes do harness: `tests/parity/{bounds,capture,cli,guard,harness,
+preconditions,process,scrub}.test.ts`.
+
+O que ficou como corpus de regressão: 39 cenários e os manifests dos tickets
+T15/T20 em `tests/fixtures/parity/`, suporte compartilhado em
+`tests/support/parity/`, e o stub (sem Python nem rede) em
+`scripts/stub/{driver,server,types}.ts` (usado por `scripts/pack-check.ts` e
+`tests/parity/stub-*.test.ts`).
+
+Resíduo aceito, inerte: `src/mcp/session.ts:19-20,25,48,67` ainda comenta o
+comportamento do oráculo Python de referência (nenhuma dependência de
+execução — é só prosa de comentário).
+
 ## Mutantes aposentados com #8
 
 Nenhum destes mira `src/`: todos miram um artefato exclusivo do próprio
