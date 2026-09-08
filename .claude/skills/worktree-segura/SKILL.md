@@ -13,11 +13,10 @@ turbulência vem de vários escritores numa árvore só; isolar primeiro resolve
 1. **`node_modules` e `dist/` existem?** Worktree nasce só com arquivos versionados.
    `.claude/settings.json` declara `worktree.symlinkDirectories: ["node_modules"]`, então o
    Claude Code linka o do checkout principal; se `test -d node_modules` falhar, `npm ci`
-   (compila `node-pty`; ~1 min). Depois **`npm run build`**: o dogfooding (item 4)
-   usa `dist/cli.js` pelo shim `lohra-ts`, e as fatias de mutação spawnam
-   `scripts/mutations/fixtures/candidate-chat.mjs`, que importa de `dist/` em
-   runtime — sem `dist/`, `mutations:*` e o shim falham. (A razão antiga —
-   `no-unsafe-*` em scripts de paridade, PR #40 — saiu com eles em #167.)
+   (compila `node-pty`; ~1 min). Depois **`npm run build`**: é o gate nº 1 da lista
+   canônica do CLAUDE.md, e o dogfooding do código **deste** worktree é
+   `node dist/cli.js` depois de buildar aqui (item 4); o shim `lohra-ts` exercita
+   o `dist/` do checkout principal, não o seu.
 2. **A base é a certa?** `git fetch origin && git merge-base --is-ancestor origin/main HEAD`.
    Se a issue depende de outra, `grep -rn "<símbolo do pré-requisito>" src` tem de achar —
    worktree velho não vê o que a outra issue entregou.
