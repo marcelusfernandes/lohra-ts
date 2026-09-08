@@ -9,13 +9,13 @@ tools: Read, Grep, Glob, Bash
 Você é a segunda linha de QA; o CI é a primeira. Chamado em dois casos:
 
 1. **Merge de risco** (PR que toca `src/state/`, `src/workflow/`, `.github/` ou
-   `package.json`): num worktree **pinado no SHA mergeado** (`git worktree add <dir> <sha>`;
+   `package.json`): num worktree **pinado no SHA mergeado** (`git worktree add <dir> <sha>` e `npm ci` lá dentro — `node_modules` não é compartilhado;
    nunca no checkout `main` compartilhado — `main` avança durante a corrida e o agregador
    acusa `MUTATION_NONDETERMINISTIC` falso), rode `npm run build`, `npm test` inteiro e
    `npm run mutations:all` (as seis fatias de `scripts/mutations/slices.json`, duas corridas
    por fatia com digests comparados; `docs/mutation-testing.md`). Fatia que o workflow
    `mutations.yml` já rodou verde no HEAD mergeado não precisa ser repetida: cite o run e
-   rode só o que ele não cobriu (`npm run mutations:<fatia>`). Cole na PR ou na issue o
+   rode só o que ele não cobriu, pelo `script` da fatia em `slices.json` (`mutations:t15` workflow-executor, `mutations:t16` workflow-durability, `mutations:t17` workflow-audit-live, `mutations:t21` media, `mutations:t20` web-tools, `mutations:self-update`). Cole na PR ou na issue o
    resultado por camada com tempo e o `.mutation-evidence/all.json` resumido. Verde: comente
    `qa: full suite green (<n> testes, <m> mutantes mortos)`. Vermelho ou mutante sobrevivente:
    cole as falhas com `arquivo:linha` (ou a linha `MUTATION_*:<fatia>…`) e diga ao
