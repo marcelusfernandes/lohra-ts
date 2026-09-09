@@ -131,6 +131,7 @@ describe("catalog fixtures", () => {
       source: "live",
       total: 2,
       models: ["b", "a"],
+      windows: { b: null, a: null },
       detail: "first page only (2 ids) — the provider has more",
     });
     expect((await fetchModels(openaiProfile, "x", response({}, 200))).detail).toBe(
@@ -143,6 +144,26 @@ describe("catalog fixtures", () => {
     expect((await fetchModels(openaiProfile, "x", tooLarge)).detail).toContain(
       "response too large",
     );
+  });
+  it("fetchModels carries windows from an OpenRouter-shaped live payload through to toJSON", async () => {
+    const openrouterProfile = profile("openrouter");
+    const live = await fetchModels(
+      openrouterProfile,
+      "secret",
+      response(OPENROUTER_MODELS_FIXTURE),
+    );
+    expect(live.toJSON()).toEqual({
+      provider: "openrouter",
+      source: "live",
+      total: 2,
+      models: ["anthropic/claude-3.5-sonnet", "openai/gpt-4o-mini"],
+      windows: { "anthropic/claude-3.5-sonnet": 200000, "openai/gpt-4o-mini": 128000 },
+    });
+  });
+  it("fetchModels reports null windows for a provider whose payload omits the field", async () => {
+    const openaiProfile = profile("openai");
+    const live = await fetchModels(openaiProfile, "secret", response(OPENAI_MODELS_FIXTURE));
+    expect(live.windows).toEqual({ "gpt-4o-mini": null, "gpt-4o": null });
   });
   it("derives auth headers from API mode and omits auth for an empty key", () => {
     expect(authHeaders(profile("anthropic"), "x")).toEqual({
