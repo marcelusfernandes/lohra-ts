@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -297,12 +297,40 @@ describe("model context window cache (issue #249)", () => {
     expect(result.warning).toMatch(/refetch|invalid|corrupt/iu);
   });
 
-  it("refetches with a warning instead of crashing on a malformed shape", () => {
+  it("refetches with a warning instead of crashing on a malformed shape inside a valid envelope", () => {
     const path = cachePath();
-    writeFileSync(path, JSON.stringify({ openrouter: { m: "not-a-number-or-null" } }));
+    writeFileSync(
+      path,
+      JSON.stringify({
+        schema_version: 1,
+        updated_at: "2026-09-09T00:00:00.000Z",
+        providers: { openrouter: { m: "not-a-number-or-null" } },
+      }),
+    );
     const result = loadWindowsCache(path);
     expect(result.data).toEqual({});
     expect(result.warning).not.toBeNull();
+  });
+
+  // Colisão de arquivo: o lohra Python já escreve `~/.lohra/model_windows.json`
+  // num formato plano sem versão. Sem `schema_version`, esse arquivo é
+  // "formato desconhecido" — nunca é lido como se fosse deste runtime,
+  // mesmo sendo JSON válido com uma forma parecida.
+  it("never trusts a pre-existing flat model_windows.json written by the lohra Python runtime", () => {
+    const path = cachePath();
+    writeFileSync(path, JSON.stringify({ openrouter: { "claude-3.5-sonnet": 200000 } }));
+    const result = loadWindowsCache(path);
+    expect(result.data).toEqual({});
+    expect(result.warning).toMatch(/schema_version|format|version/iu);
+  });
+
+  it("writes the versioned envelope, not the Python's flat shape, on save", () => {
+    const path = cachePath();
+    saveWindowsCache(path, {}, { openrouter: { m: 1000 } });
+    const onDisk = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    expect(onDisk.schema_version).toBe(1);
+    expect(typeof onDisk.updated_at).toBe("string");
+    expect(onDisk.providers).toEqual({ openrouter: { m: 1000 } });
   });
 
   it("refetches with a warning instead of crashing on an oversized file", () => {
