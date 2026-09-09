@@ -18,6 +18,24 @@ const record = (value: unknown): Record<string, unknown> | null =>
     ? (value as Record<string, unknown>)
     : null;
 
+/**
+ * Resolve `fields.schema` the same way `schema_ref` resolves a name: an
+ * inline object wins as-is; a string looks itself up in `schemas`; anything
+ * else (including an unknown name) is not a schema. Used by the engine's
+ * `schemaOf` (`engine.ts`) so `agent`, `gate`, `judge_panel.synthesize` and
+ * `loop_until_dry.body` all resolve a named schema the same way (#231) —
+ * mirrors, but does not replace, the `schema_type` check on `node.fields.schema`
+ * below (key presence in `schemas`, not the same shape check).
+ */
+export function resolveInlineSchema(
+  value: unknown,
+  schemas: Readonly<Record<string, unknown>>,
+): Record<string, unknown> | null {
+  const inline = record(value);
+  if (inline !== null) return inline;
+  return typeof value === "string" ? record(schemas[value]) : null;
+}
+
 const allowedExample = (fields: readonly string[]): string =>
   `allowed: [${[...fields]
     .sort()
