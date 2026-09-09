@@ -132,16 +132,23 @@ describe("mutations-matrix — CLI", () => {
 describe("mutations.yml — forma do workflow", () => {
   const yaml = existsSync(WORKFLOW) ? readFileSync(WORKFLOW, "utf8") : "";
 
-  it("existe e dispara em pull_request com paths de src/, scripts/mutations/ e do próprio workflow", () => {
+  it("existe e dispara em toda pull_request, sem filtro de paths (#225: check required)", () => {
     expect(existsSync(WORKFLOW), "mutations.yml ausente").toBe(true);
     expect(yaml).toMatch(/^on:\n\s+pull_request:/m);
-    for (const path of [
-      '"src/**"',
-      '"scripts/mutations/**"',
-      '".github/workflows/mutations.yml"',
-    ]) {
-      expect(yaml, `paths sem ${path}`).toContain(`- ${path}`);
-    }
+    // Sem `paths:`: um check required precisa reportar em toda PR; para diff
+    // sem src/ o `plan` devolve count 0 e o job-resumo passa em segundos.
+    expect(yaml).not.toMatch(/^\s+paths:/m);
+  });
+
+  it("job-resumo mutations (nome fixo para o ruleset) depende de plan e mutate, roda sempre e falha só em mutate failure/cancelled ou plan não-success", () => {
+    const resumo = yaml.slice(yaml.indexOf("\n  mutations:"));
+    expect(yaml, "job mutations ausente").toMatch(/^ {2}mutations:/m);
+    expect(resumo).toMatch(/needs: \[plan, mutate\]/);
+    expect(resumo).toMatch(/if: always\(\)/);
+    expect(resumo).toContain("needs.plan.result");
+    expect(resumo).toContain("needs.mutate.result");
+    expect(resumo).toMatch(/skipped/);
+    expect(resumo).toMatch(/exit 1/);
   });
 
   it("job plan usa fetch-depth 0 e o script mutations-matrix", () => {
