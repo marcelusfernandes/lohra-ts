@@ -205,6 +205,26 @@ describe("validateSpec", () => {
     ]);
   });
 
+  it("accepts a named 'schema' string that matches a top-level schemas entry", () => {
+    const result = validateSpec({
+      meta: { name: "x" },
+      schemas: { FINDING: { type: "object" } },
+      nodes: [agent({ schema: "FINDING" })],
+    });
+    expect(isValidationError(result)).toBe(false);
+  });
+
+  it("rejects a named 'schema' string with no matching entry in schemas, same as schema_ref", () => {
+    const result = validateSpec({
+      meta: { name: "x" },
+      schemas: { FINDING: { type: "object" } },
+      nodes: [agent({ schema: "MISSING" })],
+    });
+    expect(isValidationError(result)).toBe(true);
+    if (!isValidationError(result)) throw new Error("expected validation error");
+    expect(result.issues[0]).toMatchObject({ rule: "schema_type", field: "schema" });
+  });
+
   it("keeps duplicate and invalid-node cascades observable", () => {
     const result = validateSpec(
       {

@@ -219,6 +219,45 @@ describe("remaining workflow node strategies", () => {
     expect(runtime.requests).toHaveLength(2);
   });
 
+  it("resolves a named schema string on 'schema' the same way schema_ref does, faulting once retries are exhausted", async () => {
+    const runtime = new QueueChildren([[ok('{"wrong":1}'), ok('{"wrong":2}'), ok('{"wrong":3}')]]);
+    const result = await new WorkflowEngine({ runtime }).run(
+      spec({
+        meta: { name: "named-schema" },
+        schemas: { FINDING: { type: "object", required: ["value"] } },
+        nodes: [{ id: "scan", type: "agent", prompt: "x", schema: "FINDING" }],
+      }),
+    );
+    expect(runtime.steered).toHaveLength(2);
+    expect(result.outputs.scan).toBeNull();
+    expect(
+      result.faults.some((fault) => fault.includes("schema not satisfied after retries")),
+    ).toBe(true);
+  });
+
+  it("resolves a named schema string on loop_until_dry's body the same way", async () => {
+    const runtime = new QueueChildren([[ok('{"wrong":1}'), ok('{"wrong":2}'), ok('{"wrong":3}')]]);
+    const result = await new WorkflowEngine({ runtime }).run(
+      spec({
+        meta: { name: "named-schema-loop" },
+        schemas: { FINDING: { type: "object", required: ["value"] } },
+        nodes: [
+          {
+            id: "l",
+            type: "loop_until_dry",
+            body: { prompt: "round ${round}", schema: "FINDING" },
+            stop_after_k_empty: 1,
+            max_rounds: 1,
+          },
+        ],
+      }),
+    );
+    expect(runtime.steered).toHaveLength(2);
+    expect(
+      result.faults.some((fault) => fault.includes("schema not satisfied after retries")),
+    ).toBe(true);
+  });
+
   it("gate skips reviewer for an empty draft", async () => {
     const runtime = new QueueChildren([[ok("")], [ok("draft")], [ok({ ok: true, feedback: "" })]]);
     const result = await new WorkflowEngine({ runtime }).run(
