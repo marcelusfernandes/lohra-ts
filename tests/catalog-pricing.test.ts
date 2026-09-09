@@ -295,7 +295,7 @@ describe("model context window cache (issue #249)", () => {
   it("caps a provider at MAX_MODELS_PER_PROVIDER entries when saving", () => {
     const path = cachePath();
     const many: Record<string, number | null> = {};
-    for (let i = 0; i < MAX_MODELS_PER_PROVIDER + 10; i++) many[`m${String(i)}`] = i;
+    for (let i = 0; i < MAX_MODELS_PER_PROVIDER + 10; i++) many[`m${String(i)}`] = i + 1;
     expect(saveWindowsCache(path, {}, { openrouter: many })).toBeNull();
     const { data } = loadWindowsCache(path);
     expect(Object.keys(data.openrouter ?? {})).toHaveLength(MAX_MODELS_PER_PROVIDER);

@@ -16,6 +16,57 @@ export interface ExtractedModels {
   readonly windows: Readonly<Record<string, number | null>>;
 }
 
-export function extractModels(_payload: unknown): ExtractedModels | null {
-  throw new Error("not implemented: extractModels");
+const WINDOW_FIELDS = ["context_length", "max_input_tokens", "context_window"] as const;
+
+function isValidWindow(value: unknown): value is number {
+  return (
+    typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value > 0
+  );
+}
+
+function windowFromItem(item: unknown): number | null {
+  if (typeof item !== "object" || item === null) return null;
+  const record = item as Record<string, unknown>;
+  for (const field of WINDOW_FIELDS) {
+    const value = record[field];
+    if (isValidWindow(value)) return value;
+  }
+  return null;
+}
+
+function idFromItem(item: unknown): string | null {
+  if (typeof item === "string") return item;
+  if (typeof item !== "object" || item === null) return null;
+  const record = item as { readonly id?: unknown; readonly name?: unknown };
+  if (typeof record.id === "string") return record.id;
+  if (typeof record.name === "string") return record.name;
+  return null;
+}
+
+function itemsFromPayload(payload: unknown): readonly unknown[] | null {
+  if (Array.isArray(payload)) return payload as readonly unknown[];
+  if (
+    typeof payload === "object" &&
+    payload !== null &&
+    Array.isArray((payload as { readonly data?: unknown }).data)
+  ) {
+    return (payload as { readonly data: readonly unknown[] }).data;
+  }
+  return null;
+}
+
+export function extractModels(payload: unknown): ExtractedModels | null {
+  const items = itemsFromPayload(payload);
+  if (items === null) return null;
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  const windows: Record<string, number | null> = {};
+  for (const item of items) {
+    const id = idFromItem(item);
+    if (id === null || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+    windows[id] = windowFromItem(item);
+  }
+  return { ids, windows: Object.freeze(windows) };
 }
