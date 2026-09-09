@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -92,6 +92,31 @@ describe("readTiers — fail-closed", () => {
     const path = tiersPath(root());
     writeFileSync(path, JSON.stringify({ small: "" }));
     expect(readTiers(path)).toBeInstanceOf(TiersError);
+  });
+
+  it("returns a TiersError for a known tier object with no usable field", () => {
+    const path = tiersPath(root());
+    writeFileSync(path, JSON.stringify({ small: {} }));
+    const result = readTiers(path);
+    expect(result).toBeInstanceOf(TiersError);
+    expect((result as TiersError).message).toContain("no usable field");
+  });
+
+  it("returns a TiersError for a known tier that is null", () => {
+    const path = tiersPath(root());
+    writeFileSync(path, JSON.stringify({ small: null }));
+    const result = readTiers(path);
+    expect(result).toBeInstanceOf(TiersError);
+    expect((result as TiersError).message).toContain("null");
+  });
+
+  it("returns a TiersError when the path cannot be read for a reason other than absence", () => {
+    const home = root();
+    const path = tiersPath(home);
+    mkdirSync(path);
+    const result = readTiers(path);
+    expect(result).toBeInstanceOf(TiersError);
+    expect((result as TiersError).message).toContain("could not be read");
   });
 
   it("tolerates an unrelated top-level key next to a valid tier", () => {
