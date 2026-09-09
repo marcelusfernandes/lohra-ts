@@ -229,6 +229,7 @@ describe("remaining workflow node strategies", () => {
       }),
     );
     expect(runtime.steered).toHaveLength(2);
+    expect(result.validationRetries).toBe(2);
     expect(result.outputs.scan).toBeNull();
     expect(
       result.faults.some((fault) => fault.includes("schema not satisfied after retries")),
@@ -253,6 +254,37 @@ describe("remaining workflow node strategies", () => {
       }),
     );
     expect(runtime.steered).toHaveLength(2);
+    expect(result.validationRetries).toBe(2);
+    expect(
+      result.faults.some((fault) => fault.includes("schema not satisfied after retries")),
+    ).toBe(true);
+  });
+
+  it("resolves a named schema string on judge_panel's synthesize the same way", async () => {
+    const invalid = ok('{"wrong":1}');
+    const runtime = new QueueChildren([
+      [ok("draft")],
+      [ok({ score: 9 })],
+      [invalid, invalid, invalid],
+    ]);
+    const result = await new WorkflowEngine({ runtime }).run(
+      spec({
+        meta: { name: "named-schema-synthesize" },
+        schemas: { FINDING: { type: "object", required: ["value"] } },
+        nodes: [
+          {
+            id: "j",
+            type: "judge_panel",
+            attempts: ["draft prompt"],
+            judges: 1,
+            synthesize: { prompt: "polish ${winner}", schema: "FINDING" },
+          },
+        ],
+      }),
+    );
+    expect(runtime.steered).toHaveLength(2);
+    expect(result.validationRetries).toBe(2);
+    expect(result.outputs.j).toBeNull();
     expect(
       result.faults.some((fault) => fault.includes("schema not satisfied after retries")),
     ).toBe(true);
