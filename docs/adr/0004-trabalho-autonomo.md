@@ -85,14 +85,15 @@ origin/main` only before the first push; after the branch is published,
    the merge condition itself must pass the reviewer it is changing (owner
    decision, 2026-09-05, issue #31).
 
-   > **Emenda 2026-09-09 (owner):** `process` é `.claude/**`, `.github/**` e
-   > `scripts/github/**` — os arquivos que definem quem mergeia e sob qual
-   > condição, mais a automação do próprio GitHub. `scripts/**` (harness de
-   > mutação, prova, CI), `package.json` e o lockfile são classe
-   > `feature`/`fix`/`refactor`/`test`: qualquer implementador abre, CI +
-   > revisor, dogfooding obrigatório quando `package.json`/lockfile mudam
-   > (git-workflow.md passo 4). É a definição que
-   > `scripts/ci/controle-negativo/lib.ts` já aplica e a prática desde #100.
+   > **Amendment 2026-09-09 (owner):** `process` is `.claude/**`,
+   > `.github/**` and `scripts/github/**` — the files that define who merges
+   > and under which condition, plus GitHub's own automation. `scripts/**`
+   > (the mutation, proof and CI harness), `package.json` and the lockfile
+   > are `feature`/`fix`/`refactor`/`test` class: any implementer opens it,
+   > CI + reviewer, dogfooding required when `package.json`/the lockfile
+   > change (`git-workflow.md` step 4). This is the definition
+   > `scripts/ci/controle-negativo/lib.ts` already applies and the practice
+   > since #100.
 
 8. **Reconciliation before work.** At the start of a session the orchestrator
    re-reads GitHub — open PRs, `state:*` labels, linked branches — and never
@@ -151,10 +152,10 @@ it.
   and the worktree checklist of #35 must prove it is reachable before the
   first line.
 
-  > **Emenda 2026-09-09 (owner):** resolvido por #35 — implementadores rodam
-  > em worktree (`Agent(isolation: worktree)`, skill `worktree-segura`); o
-  > dogfooding lê `~/.lohra/.env` (`LOHRA_HOME`), fora do repo, e
-  > `.worktreeinclude` não é necessário.
+  > **Amendment 2026-09-09 (owner):** resolved by #35 — implementers run in
+  > a worktree (`Agent(isolation: worktree)`, skill `worktree-segura`);
+  > dogfooding reads `~/.lohra/.env` (`LOHRA_HOME`), outside the repo, and
+  > `.worktreeinclude` is not needed.
 
 ## Evidence required to retain this decision
 
