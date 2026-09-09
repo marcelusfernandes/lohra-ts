@@ -301,7 +301,10 @@ describe("dashboard.ts composition root (issue #101, AC 4): run_workflow via run
       const stderrLines: string[] = [];
       let shutdown: (() => void) | undefined;
       const options: DashboardCommandOptions = {
-        argv: ["--provider", provider, "--model", "t101-durable-dashboard-model"],
+        flags: new Map([
+          ["--provider", provider],
+          ["--model", "t101-durable-dashboard-model"],
+        ]),
         environment: { HOME: root, PATH: process.env.PATH ?? "" },
         home: join(root, ".lohra"),
         codexHome: join(root, ".codex"),
@@ -411,7 +414,10 @@ describe("dashboard.ts composition root (issue #129): shutdown() releases a stil
       const stderrLines: string[] = [];
       let shutdown: (() => void) | undefined;
       const options: DashboardCommandOptions = {
-        argv: ["--provider", provider, "--model", "t129-shutdown-dashboard-model"],
+        flags: new Map([
+          ["--provider", provider],
+          ["--model", "t129-shutdown-dashboard-model"],
+        ]),
         environment: { HOME: root, PATH: process.env.PATH ?? "" },
         home: join(root, ".lohra"),
         codexHome: join(root, ".codex"),

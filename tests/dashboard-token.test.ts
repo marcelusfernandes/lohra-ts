@@ -11,7 +11,10 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { parseCommand } from "../src/cli/arg-validation.js";
+import { DASHBOARD_SPEC } from "../src/cli/arg-spec.js";
 import { runDashboard, type DashboardCommandOptions } from "../src/commands/dashboard.js";
+import { sendRawHttpRequest } from "./support/parity/gateway/raw-http-client.js";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
@@ -29,18 +32,23 @@ function tempHome(): string {
   return root;
 }
 
-function baseOptions(overrides: Partial<DashboardCommandOptions> = {}) {
+type BaseOptionsOverrides = Partial<DashboardCommandOptions> & {
+  readonly argv?: readonly string[];
+};
+
+function baseOptions(overrides: BaseOptionsOverrides = {}) {
+  const { argv = ["--provider", "anthropic", "--host", "::1"], ...rest } = overrides;
   const home = tempHome();
   const stderrLines: string[] = [];
   return {
-    argv: ["--provider", "anthropic", "--host", "::1"],
+    flags: parseCommand(DASHBOARD_SPEC, argv).options,
     environment: { ANTHROPIC_API_KEY: "sk-test-key" },
     home,
     codexHome: join(home, "codex"),
     cwd: tmpdir(),
     stderr: (text: string) => stderrLines.push(text),
     port: 0,
-    ...overrides,
+    ...rest,
     stderrLines,
   };
 }
@@ -109,5 +117,62 @@ describe("runDashboard: refuses an empty session token on the network (issue #22
     const { code } = await runToCompletion(options);
     expect(code).toBe(0);
     expect(options.stderrLines.some((line) => line.includes("lohra: error:"))).toBe(false);
+  });
+});
+
+// Follow-up from the #223 review: every test above only proves the CLI
+// refuses a bad/empty *env var*, never that the token it ends up enforcing
+// IS that env var's value -- a mutant that dropped `rawToken` and always
+// called `generateSessionToken()` on its own would still pass all of them
+// (a token is still generated, still non-empty, dashboard still boots).
+// This proves identity: boot with a known `LOHRA_DASHBOARD_SESSION_TOKEN`,
+// then show over a real socket that exactly that value authenticates
+// `/api/status` and a different value does not.
+describe("runDashboard: LOHRA_DASHBOARD_SESSION_TOKEN is the token actually enforced (issue #222 follow-up)", () => {
+  it("the printed WS line carries the exact configured token, and only that token authenticates /api/status", async () => {
+    const knownToken = "known-fixed-token-222";
+    const options = baseOptions({
+      argv: ["--provider", "anthropic", "--host", "127.0.0.1"],
+      environment: {
+        ANTHROPIC_API_KEY: "sk-test-key",
+        LOHRA_DASHBOARD_SESSION_TOKEN: knownToken,
+      },
+    });
+    let shutdown: (() => void) | undefined;
+    options.registerShutdownTrigger = (handler: () => void) => {
+      shutdown = handler;
+    };
+    const donePromise = runDashboard(options);
+    await sleep(150);
+
+    const boundLine = options.stderrLines.find((line) => line.startsWith("Lohra dashboard:"));
+    const port = Number(boundLine?.match(/:(\d+)\n$/)?.[1]);
+    const wsLine = options.stderrLines.find((line) => line.startsWith("WebSocket:"));
+    expect(wsLine).toContain(`token=${knownToken}`);
+
+    const good = await sendRawHttpRequest("127.0.0.1", port, {
+      method: "GET",
+      path: "/api/status",
+      headers: [
+        ["Host", "127.0.0.1"],
+        ["X-Lohra-Session-Token", knownToken],
+        ["Connection", "close"],
+      ],
+    });
+    expect(good.status).toBe(200);
+
+    const bad = await sendRawHttpRequest("127.0.0.1", port, {
+      method: "GET",
+      path: "/api/status",
+      headers: [
+        ["Host", "127.0.0.1"],
+        ["X-Lohra-Session-Token", "not-the-configured-token"],
+        ["Connection", "close"],
+      ],
+    });
+    expect(bad.status).toBe(401);
+
+    shutdown?.();
+    await donePromise;
   });
 });
