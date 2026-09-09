@@ -39,7 +39,8 @@ BODY=$(cat <<'JSON'
           { "context": "provenance" },
           { "context": "escopo" },
           { "context": "contratos" },
-          { "context": "controle-negativo" } ] } }
+          { "context": "controle-negativo" },
+          { "context": "mutations" } ] } }
   ]
 }
 JSON
