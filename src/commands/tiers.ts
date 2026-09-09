@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { buildCatalog } from "../catalog/catalog.js";
 import type { OllamaStatus } from "../doctor/model.js";
-import { loadTiers, MODEL_TIERS } from "../workflow/tiers.js";
+import { MODEL_TIERS, readTiers, TiersError } from "../workflow/tiers.js";
 
 export async function runTiers(options: {
   readonly action: string;
@@ -12,7 +12,10 @@ export async function runTiers(options: {
 }): Promise<{ readonly code: number; readonly stdout: string; readonly stderr: string }> {
   const path = `${options.home}/workflow_tiers.json`;
   if (options.action === "list") {
-    const tiers = loadTiers(path);
+    const tiers = readTiers(path);
+    if (tiers instanceof TiersError) {
+      return { code: 1, stdout: "", stderr: `${tiers.message}\n` };
+    }
     if (Object.keys(tiers).length === 0) {
       return existsSync(path)
         ? {

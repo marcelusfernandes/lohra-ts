@@ -24,6 +24,7 @@ import {
   type ToolDispatchLike,
   type SandboxPolicy,
 } from "./sandbox.js";
+import { OPERATOR_TIERS_FILE, readTiers, TiersError, type TierMap } from "./tiers.js";
 import type { LockRepository } from "../state/locks.js";
 import type { AuditTrail } from "./audit-trail.js";
 import { auditEnabled } from "./audit-model.js";
@@ -36,15 +37,12 @@ export const FENCE_MEMORY = 1024;
 /** shutdown() never waits past this for a live run to settle (invariant 3). */
 export const SHUTDOWN_SETTLE_TIMEOUT_MS = 5_000;
 
-/** The token an evicted run presents: never a number, so a forgotten fence can
- * never be guessed into a write. Mirrors the oracle's EVICTED sentinel. */
+/** The token an evicted run presents: never a number, so a forgotten fence
+ * can never be guessed into a write. */
 export const EVICTED = Symbol.for("lohra.workflow.fence.evicted");
 
-/**
- * Bounded memory of the fence each run acquired, oldest evicted first at
- * FENCE_MEMORY entries. An evicted run has no honest token left, so its owned
- * writes are refused fail-closed rather than presented with a guess.
- */
+/** Bounded memory of the fence each run acquired, oldest evicted first at
+ * FENCE_MEMORY entries; an evicted run's writes are refused fail-closed. */
 export class FenceMemory {
   private readonly fences = new Map<string, number>();
 
@@ -261,11 +259,8 @@ export interface LeafSandboxUnavailable {
   readonly run_id: string;
 }
 
-/**
- * A durable run whose runtime cannot install the leaf sandbox does not start.
- * Running leaves with the operator policy unenforced is the failure this whole
- * capability exists to prevent, so the launch fails closed BEFORE any spawn.
- */
+/** A durable run whose runtime cannot install the leaf sandbox does not
+ * start: it fails closed BEFORE any spawn rather than run leaves unpoliced. */
 export function leafSandboxUnavailable(runId: string): LeafSandboxUnavailable {
   return Object.freeze({
     error: "workflow leaf sandbox unavailable" as const,
@@ -373,6 +368,7 @@ export class WorkflowService {
   private readonly cacheFactory: ((runId: string) => WorkflowCache) | undefined;
   private readonly heartbeat: LeaseHeartbeat | undefined;
   private readonly policyLoader: (() => SandboxPolicy) | undefined;
+  private readonly tiersLoader: () => TierMap | TiersError;
   private readonly taintTracker: TaintTracker;
   private readonly autoResume: AutoResumeScheduler | undefined;
   private readonly homeRoot: string;
@@ -397,8 +393,9 @@ export class WorkflowService {
     readonly environment?: Readonly<Record<string, string | undefined>>;
     readonly store?: OwnershipStore;
     readonly cacheFactory?: (runId: string) => WorkflowCache;
-    /** Production wiring: read the operator capability policy per launch. */
+    /** Production wiring: read the operator capability policy/tiers per launch. */
     readonly policyPath?: string;
+    readonly tiersPath?: string;
     readonly taintTracker?: TaintTracker;
     /** Operator home root: `<home>/runs/<run_id>/work-<fence>` scratch. */
     readonly homeRoot?: string;
@@ -433,11 +430,12 @@ export class WorkflowService {
       () => Date.now() / 1_000,
       this.warn,
     );
-    // Criterion 40: the operator capability policy is a FILE in the operator
-    // home (`workflow_policy.json`), read per launch. An explicit path wins;
-    // an absent file is deny-all, never a widening.
+    // Criterion 40: operator policy/tiers are FILES in the operator home, read
+    // per launch; absent is legitimate, present-but-broken is not (#234).
     const policyPath = options.policyPath ?? join(this.homeRoot, OPERATOR_POLICY_FILE);
     this.policyLoader = () => loadPolicy(policyPath);
+    const tiersPath = options.tiersPath ?? join(this.homeRoot, OPERATOR_TIERS_FILE);
+    this.tiersLoader = () => readTiers(tiersPath);
     const store = options.store;
     if (store !== undefined) {
       const timerFactory = this.timerFactory;
@@ -602,6 +600,8 @@ export class WorkflowService {
       readonly resumeRunId?: string;
     } = {},
   ): WorkflowStartResult | WorkflowServiceError {
+    const tiers = this.tiersLoader();
+    if (tiers instanceof TiersError) return Object.freeze({ error: tiers.message });
     const resumeRunId = options.resumeRunId;
     const explicitSpec = rawSpec !== undefined && rawSpec !== null;
     const prior = resumeRunId === undefined ? null : this.durableOf(resumeRunId);
