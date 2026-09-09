@@ -1,9 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { Catalog, ProviderModels } from "../src/catalog/types.js";
 import { MemoryStore } from "../src/memory/index.js";
 import { SkillStore } from "../src/skills/index.js";
 import {
@@ -84,6 +85,62 @@ describe("stateful tool handlers", () => {
     expect(await tool.handle({ provider: "no_such_provider" })).toBe(
       '{"error":"unknown provider \\"no_such_provider\\" — call list_models with no \'provider\' to see the ones this install knows about"}',
     );
+  });
+
+  it("shows context_window per model from a live catalog fetch (issue #249)", async () => {
+    const builder = () =>
+      Promise.resolve(
+        new Catalog([
+          new ProviderModels("openrouter", "live", ["a/b", "c/d"], 2, "", {
+            "a/b": 200000,
+            "c/d": null,
+          }),
+        ]),
+      );
+    const tool = new ListModelsTool(root(), {}, builder);
+    const result = JSON.parse(await tool.handle({})) as {
+      readonly providers: readonly { readonly context_window?: Record<string, number | null> }[];
+    };
+    expect(result.providers[0]?.context_window).toEqual({ "a/b": 200000, "c/d": null });
+  });
+
+  it("persists windows to ~/.lohra/model_windows.json and falls back to them across a restart", async () => {
+    const home = root();
+    const liveBuilder = () =>
+      Promise.resolve(
+        new Catalog([new ProviderModels("openrouter", "live", ["a/b"], 1, "", { "a/b": 200000 })]),
+      );
+    const first = new ListModelsTool(home, {}, liveBuilder);
+    await first.handle({});
+    const onDisk = JSON.parse(readFileSync(join(home, "model_windows.json"), "utf8")) as {
+      readonly schema_version: number;
+      readonly providers: Record<string, Record<string, number | null>>;
+    };
+    expect(onDisk.schema_version).toBe(1);
+    expect(onDisk.providers.openrouter).toEqual({ "a/b": 200000 });
+
+    // A "reinício": um builder que não trouxe nada ao vivo desta vez (erro),
+    // mas o modelo já é conhecido pela última busca — a segunda instância
+    // simula um processo novo lendo o mesmo home.
+    const errorBuilder = () =>
+      Promise.resolve(
+        new Catalog([new ProviderModels("openrouter", "error", ["a/b"], 1, "timeout")]),
+      );
+    const second = new ListModelsTool(home, {}, errorBuilder);
+    const result = JSON.parse(await second.handle({})) as {
+      readonly providers: readonly { readonly context_window?: Record<string, number | null> }[];
+    };
+    expect(result.providers[0]?.context_window).toEqual({ "a/b": 200000 });
+  });
+
+  it("surfaces a cache corruption warning instead of crashing (issue #249)", async () => {
+    const home = root();
+    writeFileSync(join(home, "model_windows.json"), "{not json");
+    const tool = new ListModelsTool(home, {}, () =>
+      Promise.resolve(new Catalog([new ProviderModels("anthropic", "skipped", [], 0, "no key")])),
+    );
+    const result = JSON.parse(await tool.handle({})) as { readonly note?: string };
+    expect(result.note).toMatch(/refetch/iu);
   });
 });
 
