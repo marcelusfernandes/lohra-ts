@@ -84,6 +84,17 @@ origin/main` only before the first push; after the branch is published,
    `process`. Nothing under `.claude/` is ever exempt from review: a change to
    the merge condition itself must pass the reviewer it is changing (owner
    decision, 2026-09-05, issue #31).
+
+   > **Amendment 2026-09-09 (owner):** `process` is `.claude/**`,
+   > `.github/**` and `scripts/github/**` — the files that define who merges
+   > and under which condition, plus GitHub's own automation. `scripts/**`
+   > (the mutation, proof and CI harness), `package.json` and the lockfile
+   > are `feature`/`fix`/`refactor`/`test` class: any implementer opens it,
+   > CI + reviewer, dogfooding required when `package.json`/the lockfile
+   > change (`git-workflow.md` step 4). This is the definition
+   > `scripts/ci/controle-negativo/lib.ts` already applies and the practice
+   > since #100.
+
 8. **Reconciliation before work.** At the start of a session the orchestrator
    re-reads GitHub — open PRs, `state:*` labels, linked branches — and never
    trusts its memory. An `in-progress` issue with no open PR and no recent
@@ -140,6 +151,11 @@ it.
   the `.env` under `LOHRA_HOME` (not in the repo) is what dogfooding needs,
   and the worktree checklist of #35 must prove it is reachable before the
   first line.
+
+  > **Amendment 2026-09-09 (owner):** resolved by #35 — implementers run in
+  > a worktree (`Agent(isolation: worktree)`, skill `worktree-segura`);
+  > dogfooding reads `~/.lohra/.env` (`LOHRA_HOME`), outside the repo, and
+  > `.worktreeinclude` is not needed.
 
 ## Evidence required to retain this decision
 
