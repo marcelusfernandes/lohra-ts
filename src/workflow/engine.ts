@@ -45,7 +45,7 @@ import {
 import { ProgressTracker, type ProgressSnapshot } from "./progress.js";
 import { BoundedPool } from "./pool.js";
 import type { CausalContext, ChildResult, ChildRuntime } from "./runtime.js";
-import { validateSpec } from "./schema.js";
+import { resolveInlineSchema, validateSpec } from "./schema.js";
 import type { TierMap } from "./tiers.js";
 import { Node, ValidationError, type WorkflowSpec } from "./types.js";
 export class WorkflowEngine {
@@ -348,7 +348,7 @@ export class WorkflowEngine {
     node: Node | Readonly<Record<string, unknown>>,
   ): Readonly<Record<string, unknown>> | null {
     const fields = node instanceof Node ? node.fields : node;
-    const inline = asRecord(fields.schema);
+    const inline = resolveInlineSchema(fields.schema, this.schemas);
     if (inline !== null) return inline;
     const reference = fields.schema_ref;
     return typeof reference === "string" ? asRecord(this.schemas[reference]) : null;

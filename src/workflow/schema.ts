@@ -18,6 +18,23 @@ const record = (value: unknown): Record<string, unknown> | null =>
     ? (value as Record<string, unknown>)
     : null;
 
+/**
+ * Resolve `fields.schema` the same way `schema_ref` resolves a name: an
+ * inline object wins as-is; a string looks itself up in `schemas`; anything
+ * else (including an unknown name) is not a schema. Used both by
+ * `validateSpec` (schema_type below) and by the engine's `schemaOf`
+ * (`engine.ts`) so a nested `body`/`synthesize` object gets the identical
+ * treatment as a top-level node (#231).
+ */
+export function resolveInlineSchema(
+  value: unknown,
+  schemas: Readonly<Record<string, unknown>>,
+): Record<string, unknown> | null {
+  const inline = record(value);
+  if (inline !== null) return inline;
+  return typeof value === "string" ? record(schemas[value]) : null;
+}
+
 const allowedExample = (fields: readonly string[]): string =>
   `allowed: [${[...fields]
     .sort()
