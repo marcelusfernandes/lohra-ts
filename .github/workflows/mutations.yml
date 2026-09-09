@@ -1,15 +1,12 @@
 name: mutations
 
-# Mutation testing por fatia, filtrado por path (issue #156, épico #13).
+# Mutation testing por fatia (issue #156, épico #13; required desde #225).
 # `plan` lê scripts/mutations/slices.json e o diff base...head e escolhe as
-# fatias; `mutate` roda uma por job. Não é required no ruleset (decisão do
-# owner depois de medir o tempo por fatia). PR só de docs não dispara nada.
+# fatias; `mutate` roda uma por job; `mutations` (nome fixo) resume e é o
+# check que o ruleset exige. Sem filtro de paths: em PR sem src/ o `plan`
+# devolve count 0, `mutate` é pulado e o resumo passa em segundos.
 on:
   pull_request:
-    paths:
-      - "src/**"
-      - "scripts/mutations/**"
-      - ".github/workflows/mutations.yml"
 
 permissions:
   contents: read
@@ -82,3 +79,23 @@ jobs:
           name: mutation-evidence-${{ matrix.slice }}
           path: .mutation-evidence/
           if-no-files-found: warn
+
+  # Job-resumo de nome fixo (#225): é ele que o ruleset exige. Roda sempre;
+  # verde quando `mutate` passou ou foi pulado (count 0), vermelho quando
+  # `plan` não terminou em success ou alguma fatia falhou/foi cancelada.
+  mutations:
+    needs: [plan, mutate]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: veredito das fatias
+        env:
+          PLAN: ${{ needs.plan.result }}
+          MUTATE: ${{ needs.mutate.result }}
+        run: |
+          echo "plan=$PLAN mutate=$MUTATE"
+          if [ "$PLAN" != "success" ]; then echo "::error::plan terminou em $PLAN"; exit 1; fi
+          case "$MUTATE" in
+            success|skipped) echo "mutations: ok ($MUTATE)"; exit 0;;
+            *) echo "::error::mutate terminou em $MUTATE"; exit 1;;
+          esac
