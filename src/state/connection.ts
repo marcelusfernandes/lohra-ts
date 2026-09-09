@@ -16,6 +16,7 @@ import {
 export interface StateConnectionOptions {
   readonly ftsAvailable?: boolean;
   readonly journalMode?: (database: Database.Database, mode: "WAL" | "DELETE") => unknown;
+  readonly environment?: Readonly<Record<string, string | undefined>>;
 }
 
 export interface StateConnection {
@@ -89,6 +90,22 @@ function setupFts(database: Database.Database, enabled: boolean): boolean {
   return true;
 }
 
+const DEFAULT_BUSY_TIMEOUT_MS = 5000;
+const NON_NEGATIVE_INTEGER = /^\d+$/;
+
+function resolveBusyTimeoutMs(environment: Readonly<Record<string, string | undefined>>): number {
+  const raw = environment.LOHRA_SQLITE_BUSY_TIMEOUT_MS;
+  if (raw === undefined) return DEFAULT_BUSY_TIMEOUT_MS;
+  if (NON_NEGATIVE_INTEGER.test(raw)) {
+    const parsed = Number(raw);
+    if (Number.isSafeInteger(parsed)) return parsed;
+  }
+  throw new StateError(
+    "SQLITE_BUSY_TIMEOUT_INVALID",
+    `invalid LOHRA_SQLITE_BUSY_TIMEOUT_MS='${raw}': expected an integer >= 0`,
+  );
+}
+
 export function stateDatabasePath(
   environment: Readonly<Record<string, string | undefined>>,
 ): string {
@@ -99,11 +116,12 @@ export function openStateDatabase(
   path: string,
   options: StateConnectionOptions = {},
 ): StateConnection {
+  const busyTimeoutMs = resolveBusyTimeoutMs(options.environment ?? process.env);
   mkdirSync(dirname(path), { recursive: true });
   const database = new Database(path);
   database.defaultSafeIntegers(true);
   try {
-    database.pragma("busy_timeout = 5000");
+    database.pragma(`busy_timeout = ${String(busyTimeoutMs)}`);
     database.pragma("foreign_keys = OFF");
     const journal = configureJournal(database, options.journalMode);
     database.exec(applicationSchema);
@@ -129,5 +147,8 @@ export function openStateForEnvironment(
   environment: Readonly<Record<string, string | undefined>>,
   options: StateConnectionOptions = {},
 ): StateConnection {
-  return openStateDatabase(stateDatabasePath(environment), options);
+  return openStateDatabase(stateDatabasePath(environment), {
+    ...options,
+    environment: options.environment ?? environment,
+  });
 }

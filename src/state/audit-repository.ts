@@ -133,8 +133,18 @@ function countStates(value: unknown, counts: Map<string, number>): void {
   for (const item of Object.values(record)) countStates(item, counts);
 }
 
+// Códigos que o better-sqlite3 anexa a `error.code` quando o driver bloqueia
+// por contenção (SQLite mapeia os três a partir de SQLITE_BUSY=5, ver
+// deps/sqlite3/sqlite3.h em node_modules/better-sqlite3). Um `code` presente
+// mas fora deste conjunto decide sozinho (falso) — o texto só é fallback
+// quando não há `code` nenhum, para não mascarar um código estranho.
+const BUSY_ERROR_CODES = new Set(["SQLITE_BUSY", "SQLITE_BUSY_RECOVERY", "SQLITE_BUSY_SNAPSHOT"]);
+
 function isBusy(error: unknown): boolean {
-  return error instanceof Error && /database is (?:locked|busy)/i.test(error.message);
+  if (!(error instanceof Error)) return false;
+  const code = (error as Readonly<{ code?: unknown }>).code;
+  if (typeof code === "string") return BUSY_ERROR_CODES.has(code);
+  return /database is (?:locked|busy)/i.test(error.message);
 }
 
 export class AuditRepository {

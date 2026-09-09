@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { StateError } from "../src/state/errors.js";
 import { openStateDatabase, stateDatabasePath } from "../src/state/index.js";
 
 const roots: string[] = [];
@@ -115,4 +116,43 @@ describe("state schema and connection", () => {
       stateDatabasePath({ HOME: "/tmp/u", LOHRA_HOME: "/tmp/base", LOHRA_PROFILE: "p1" }),
     ).toBe("/tmp/base/profiles/p1/state.db");
   });
+
+  it("pins busy_timeout to 5000ms by default, hermetic to the host environment", () => {
+    const connection = openStateDatabase(temporaryPath(), { environment: {} });
+    expect(connection.database.pragma("busy_timeout", { simple: true })).toBe(5000n);
+    connection.close();
+  });
+
+  it("honors LOHRA_SQLITE_BUSY_TIMEOUT_MS as a non-negative integer override", () => {
+    const withOverride = openStateDatabase(temporaryPath(), {
+      environment: { LOHRA_SQLITE_BUSY_TIMEOUT_MS: "250" },
+    });
+    expect(withOverride.database.pragma("busy_timeout", { simple: true })).toBe(250n);
+    withOverride.close();
+
+    const zero = openStateDatabase(temporaryPath(), {
+      environment: { LOHRA_SQLITE_BUSY_TIMEOUT_MS: "0" },
+    });
+    expect(zero.database.pragma("busy_timeout", { simple: true })).toBe(0n);
+    zero.close();
+  });
+
+  it.each(["-1", "abc", "1.5", " ", "1e3", ""])(
+    "rejects LOHRA_SQLITE_BUSY_TIMEOUT_MS=%s with a named StateError at connection open",
+    (raw) => {
+      expect(() =>
+        openStateDatabase(temporaryPath(), {
+          environment: { LOHRA_SQLITE_BUSY_TIMEOUT_MS: raw },
+        }),
+      ).toThrow(StateError);
+      try {
+        openStateDatabase(temporaryPath(), {
+          environment: { LOHRA_SQLITE_BUSY_TIMEOUT_MS: raw },
+        });
+      } catch (error) {
+        expect(error).toBeInstanceOf(StateError);
+        expect((error as StateError).code).toBe("SQLITE_BUSY_TIMEOUT_INVALID");
+      }
+    },
+  );
 });
