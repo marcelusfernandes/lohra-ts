@@ -38,6 +38,12 @@ The runtime itself never executes Python in production; the mimicry is a pure
 TypeScript reimplementation. The problem is the shape of the surface and the
 test dependency it drags along.
 
+> **Note 2026-09-09:** the context above describes the state as of 2026-09-04.
+> The `repr()`, `argparse` and FastAPI/Pydantic emulation was removed by #17,
+> #18 and epic #16; the files named above (`python-repr.ts`,
+> `request-validation.ts` in FastAPI shape) no longer exist. The decision
+> stands.
+
 ## Decision
 
 The lohra-ts public surface adopts its own wire format. Compatibility with
