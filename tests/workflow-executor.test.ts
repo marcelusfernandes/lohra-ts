@@ -140,6 +140,23 @@ describe("workflow budget and cache", () => {
     expect(budget.affordableLeaves()).toBe(4);
   });
 
+  it("affordableLeaves(measuredOnly) is null until a leaf has actually reported usage (#236)", () => {
+    const budget = new Budget({ tokenBudget: 10 });
+    // Unmeasured: the plain call still falls back to the default estimate
+    // (0 affordable on a 10-token budget) — measuredOnly=true is the one
+    // that must treat "nothing measured yet" like "no budget at all".
+    expect(budget.affordableLeaves()).toBe(0);
+    expect(budget.affordableLeaves(true)).toBeNull();
+    budget.chargeTokens(2, 3);
+    expect(budget.affordableLeaves(true)).toBe(1);
+  });
+
+  it("exhaustionPayload reports remaining and estimated_leaf_cost (#236)", () => {
+    const budget = new Budget({ tokenBudget: 15 });
+    budget.chargeTokens(7, 5);
+    expect(budget.exhaustionPayload()).toEqual({ remaining: 3, estimated_leaf_cost: 12 });
+  });
+
   it("debits an uncertain leaf's tokens into tokensSpent but keeps them out of the average's numerator (#232)", () => {
     // Invariant 3 (budget never unbounded): the uncertain leaf's tokens
     // still count against the run's own ceiling — only the AVERAGE, used to
@@ -283,7 +300,7 @@ describe("workflow engine", () => {
     expect((logged[0] as unknown[] | undefined)?.[1]).toBeInstanceOf(Error);
   });
 
-  it("pauses before the next spawn after a soft token overrun", async () => {
+  it("stops before the leaf that doesn't fit — an already-blown budget (#236)", async () => {
     const runtime = new FakeRuntime([[complete("one", 7, 5)]]);
     const spec = parsed({
       meta: { name: "budget" },
@@ -300,6 +317,60 @@ describe("workflow engine", () => {
     expect(result.status).toBe("paused");
     expect(result.pauseReason).toBe("token_budget_exhausted");
     expect(result.capTrips).toBe(0);
+  });
+
+  it("stops a single leaf before the spawn it can't afford, from the measured estimate alone (#236)", async () => {
+    // node "a" measures 12 tokens/leaf; the 3 left over after it don't cover
+    // node "b" (estimate 12) even though the run hasn't technically
+    // overspent yet (12 < 15) — this is the NEW proactive gate, distinct
+    // from the reactive one above that only fires after tokensExhausted.
+    const runtime = new FakeRuntime([[complete("one", 7, 5)]]);
+    const spec = parsed({
+      meta: { name: "budget-proactive" },
+      nodes: [
+        { id: "a", type: "agent", prompt: "a" },
+        { id: "b", type: "agent", prompt: "b" },
+      ],
+    });
+    const budget = new Budget({ tokenBudget: 15 });
+    const result = await new WorkflowEngine({ runtime, budget }).run(spec);
+    expect(budget.tokensExhausted).toBe(false);
+    expect(runtime.spawned).toHaveLength(1);
+    expect(result.status).toBe("paused");
+    expect(result.pauseReason).toBe("token_budget_exhausted");
+    expect(result.checkpoint).toEqual({ remaining: 3, estimated_leaf_cost: 12 });
+  });
+
+  it("dispatches the first leaf even when the unmeasured default estimate wouldn't fit (#236)", async () => {
+    // Nothing has been measured yet, so estimatedLeafCost falls back to
+    // ESTIMATED_TOKENS_PER_LEAF (2000) — far more than this 10-token budget.
+    // The new gate must not use that unmeasured default against a leaf it
+    // has never seen spend anything: dispatch is the current behaviour, same
+    // as before this leaf was ever gated on affordability.
+    const runtime = new FakeRuntime([[complete("one", 3, 2)]]);
+    const spec = parsed({
+      meta: { name: "budget-no-measurement-yet" },
+      nodes: [{ id: "a", type: "agent", prompt: "a" }],
+    });
+    const budget = new Budget({ tokenBudget: 10 });
+    expect(budget.affordableLeaves(true)).toBeNull();
+    const result = await new WorkflowEngine({ runtime, budget }).run(spec);
+    expect(runtime.spawned).toHaveLength(1);
+    expect(result.status).toBe("complete");
+  });
+
+  it("never gates a single leaf when no token_budget was set (#236)", async () => {
+    const runtime = new FakeRuntime([[complete("one", 7, 5)], [complete("two", 7, 5)]]);
+    const spec = parsed({
+      meta: { name: "budget-unset" },
+      nodes: [
+        { id: "a", type: "agent", prompt: "a" },
+        { id: "b", type: "agent", prompt: "b" },
+      ],
+    });
+    const result = await new WorkflowEngine({ runtime, budget: new Budget() }).run(spec);
+    expect(runtime.spawned).toHaveLength(2);
+    expect(result.status).toBe("complete");
   });
 
   it("charges engine budget from input and output but never reasoning", async () => {
