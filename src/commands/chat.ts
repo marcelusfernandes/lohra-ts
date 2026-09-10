@@ -18,6 +18,7 @@ import {
   SqliteConversationRepository,
   successEnvelope,
 } from "../conversation/index.js";
+import type { ConversationRuntimeEvent } from "../conversation/index.js";
 import { OpenAIImagesAdapter } from "../media/index.js";
 import { registerConfiguredMcpServers } from "../mcp/index.js";
 import type { MCPManager } from "../mcp/index.js";
@@ -317,10 +318,31 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     imageModel: model,
     supportsVision: profile.supportsVision,
   });
+  // Issue #287: nothing that constructs a ConversationRuntime in production
+  // wired `eventSink` before this -- "session.compacted"/
+  // "compaction.unsupported" only ever reached a test's own fake sink.
+  // successEnvelope already surfaces the fold summary via `compaction`
+  // (issue #252) when `--json` is set, but that key is silent about WHY a
+  // turn's output looks shorter/different for a non-`--json` run, and about
+  // `compaction.unsupported` at all (the fail-open path never touches the
+  // envelope). Collected here (not written directly to `options` -- there
+  // is no live stream to write to, this command answers once) and appended
+  // to `stderr` below, next to the existing warnings/session-resume line.
+  const compactionEvents: string[] = [];
   const runtime = new ConversationRuntime({
     repository,
     transport: modelTransport,
     promptSnapshot: snapshot,
+    environment: options.environment,
+    eventSink: (event: ConversationRuntimeEvent) => {
+      if (event.type === "session.compacted" && event.compaction !== undefined) {
+        compactionEvents.push(
+          `event: session.compacted summarized=${String(event.compaction.summarizedCount)} kept=${String(event.compaction.keptCount)}\n`,
+        );
+      } else if (event.type === "compaction.unsupported") {
+        compactionEvents.push("event: compaction.unsupported\n");
+      }
+    },
     ...(useTools
       ? {
           toolDefinitions: tools.toolDefinitions,
@@ -348,7 +370,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       stdout: options.flags.has("--json")
         ? successEnvelope(result)
         : `${result.response.content ?? ""}\n`,
-      stderr: `${warningLines}${subscriptionNote}session: ${result.sessionId}  (resume with --session ${result.sessionId})\n`,
+      stderr: `${warningLines}${subscriptionNote}${compactionEvents.join("")}session: ${result.sessionId}  (resume with --session ${result.sessionId})\n`,
     };
   } catch (error) {
     const message = formatProviderFailureMessage(error);
@@ -378,7 +400,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
                 : { stopReason: bounded.stopReason, toolCalls: bounded.toolCalls }),
             }),
       }),
-      stderr: `${warningLines}${sessionId ? `session: ${sessionId}  (resume with --session ${sessionId})\n` : ""}error: ${message}\n`,
+      stderr: `${warningLines}${compactionEvents.join("")}${sessionId ? `session: ${sessionId}  (resume with --session ${sessionId})\n` : ""}error: ${message}\n`,
     };
   } finally {
     approval.setCallback(null);
