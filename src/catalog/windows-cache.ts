@@ -19,7 +19,7 @@
 // versão futura deste schema que este runtime ainda não lê), não mais para
 // o Python especificamente.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 
 import { atomicWrite0600 } from "../auth/json-file.js";
 
@@ -47,12 +47,14 @@ export interface LoadedWindowsCache {
 }
 
 export interface WindowsCacheIO {
+  readonly stat: (path: string) => { readonly size: number };
   readonly read: (path: string) => string;
   readonly write: (path: string, data: string) => void;
   readonly now: () => string;
 }
 
 export const defaultWindowsCacheIO: WindowsCacheIO = {
+  stat: (path) => statSync(path),
   read: (path) => readFileSync(path, "utf8"),
   write: (path, data) => {
     atomicWrite0600(path, data);
@@ -164,7 +166,11 @@ export function saveWindowsCache(
   previous: WindowsCache,
   fresh: WindowsCache,
   io: WindowsCacheIO = defaultWindowsCacheIO,
-): string | null {
+): LoadedWindowsCache {
+  // TODO(#264): funde por modelo (número novo sempre vence; null novo nunca
+  // apaga um número já conhecido). Por ora ainda substitui o provedor
+  // inteiro — mantém o vermelho do commit test(red) por comportamento, não
+  // por tipo.
   const merged: Record<string, Readonly<Record<string, number | null>>> = { ...previous };
   for (const [provider, windows] of Object.entries(fresh)) {
     if (Object.keys(windows).length === 0) continue;
@@ -177,13 +183,19 @@ export function saveWindowsCache(
   };
   const serialized = JSON.stringify(envelope);
   if (Buffer.byteLength(serialized, "utf8") > MAX_CACHE_BYTES) {
-    return `context window cache would exceed ${String(MAX_CACHE_BYTES)} bytes — not written`;
+    return {
+      data: previous,
+      warning: `context window cache would exceed ${String(MAX_CACHE_BYTES)} bytes — not written`,
+    };
   }
   try {
     io.write(path, serialized);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    return `could not write context window cache at ${path} (${detail})`;
+    return {
+      data: previous,
+      warning: `could not write context window cache at ${path} (${detail})`,
+    };
   }
-  return null;
+  return { data: merged, warning: null };
 }

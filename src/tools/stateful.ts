@@ -234,9 +234,14 @@ export class ListModelsTool {
     const loaded = loadWindowsCache(cachePath);
     if (loaded.warning !== null) cacheWarnings.push(loaded.warning);
     const fresh = freshWindowsByProvider(catalog);
+    // Depois de fundir, `windows` é a fonte que a resposta usa — nunca o
+    // cache pré-save: um fetch com `null` sobre um número já conhecido não
+    // pode fazer esta chamada mostrar o número e gravar o `null` (#264).
+    let windows = loaded.data;
     if (Object.keys(fresh).length > 0) {
-      const saveWarning = saveWindowsCache(cachePath, loaded.data, fresh);
-      if (saveWarning !== null) cacheWarnings.push(saveWarning);
+      const saved = saveWindowsCache(cachePath, loaded.data, fresh);
+      if (saved.warning !== null) cacheWarnings.push(saved.warning);
+      windows = saved.data;
     }
     const renderedTiers: Record<string, unknown> = {};
     for (const name of MODEL_TIERS) renderedTiers[name] = tiers[name] ?? null;
@@ -246,7 +251,7 @@ export class ListModelsTool {
     ];
     return toolResult(undefined, {
       providers: catalog.entries.map((entry) =>
-        renderProvider(entry, query, limit.value, loaded.data[entry.provider] ?? {}),
+        renderProvider(entry, query, limit.value, windows[entry.provider] ?? {}),
       ),
       tiers: renderedTiers,
       ...(noteParts.length > 0 ? { note: noteParts.join("; ") } : {}),
