@@ -440,10 +440,8 @@ export class WorkflowEngine {
     const retries = clampInteger(node.fields.retries, 1, MAX_NODE_RETRIES);
     for (let attempt = 0; attempt <= retries; attempt += 1) {
       if (attempt > 0) this.result.leafRespawns += 1;
-      const attemptPrompt =
-        attempt === 0
-          ? renderValue(prompt)
-          : `${renderValue(prompt)}\n\n${EMPTY_OUTPUT_CORRECTION}`;
+      const rendered = renderValue(prompt);
+      const attemptPrompt = attempt === 0 ? rendered : `${rendered}\n\n${EMPTY_OUTPUT_CORRECTION}`;
       const leaf = await this.collectLeaf(node, attemptPrompt, schema, {
         role: "agent",
         cellId: hash,
@@ -879,6 +877,7 @@ export class WorkflowEngine {
     this.result.capTrips += result.capTrips;
     this.result.engineFaults += result.engineFaults;
     this.result.forcingFallbacks += result.forcingFallbacks;
+    this.result.leafRespawns += result.leafRespawns;
     return Object.freeze({ ...result.outputs });
   }
 

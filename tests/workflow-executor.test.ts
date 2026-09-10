@@ -361,6 +361,24 @@ describe("workflow engine", () => {
     expect((result as unknown as Record<string, unknown>).leafRespawns).toBe(1);
   });
 
+  it("folds a nested workflow's leaf respawns into the parent rollup (#247)", async () => {
+    const runtime = new FakeRuntime([[complete("")], [complete("inner")]]);
+    const engine = new WorkflowEngine({
+      runtime,
+      loader: () => ({
+        meta: { name: "child" },
+        nodes: [{ id: "leaf", type: "agent", prompt: "x" }],
+      }),
+    });
+    const spec = parsed({
+      meta: { name: "outer-respawn" },
+      nodes: [{ id: "sub", type: "workflow", ref: "child" }],
+    });
+    const result = await engine.run(spec);
+    expect((result.outputs.sub as Record<string, unknown>).leaf).toBe("inner");
+    expect((result as unknown as Record<string, unknown>).leafRespawns).toBe(1);
+  });
+
   it("reexecutes an empty scalar instead of caching it", async () => {
     const cache = new MemoryWorkflowCache();
     const runtime = new FakeRuntime([[complete("")], [complete("fresh")]]);
@@ -633,6 +651,11 @@ describe("workflow service status", () => {
     if ("error" in resumed) throw new Error(resumed.error);
     const finished = (await coldService.status(started.run_id, true)) as Record<string, unknown>;
     expect(finished.status).toBe("complete");
+    // The live view (resultView) reports the CURRENT stretch only — this
+    // resume respawned nothing, so it reads 0 even though the run's total
+    // (below, via the durable/cold path) is 1. Same key, different scope:
+    // same split as faults (per stretch) vs faults_total (cumulative).
+    expect(finished.leaf_respawns).toBe(0);
 
     const secondColdService = new WorkflowService({ runtime: new FakeRuntime([]), store });
     const durable = (await secondColdService.status(started.run_id)) as Record<string, unknown>;
