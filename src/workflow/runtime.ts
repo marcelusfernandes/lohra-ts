@@ -40,6 +40,11 @@ export interface ChildResult {
    * happened (child died before reporting, provider/resolution error) —
    * never true for a turn that genuinely spent zero tokens (#232). */
   readonly usageUncertain?: boolean;
+  /** How many of this leaf's own tool calls the sandbox denied before they
+   * ever reached the real dispatch — the runtime's side channel populates
+   * this (OrchestrationChildRuntime, orchestration-runtime.ts), never the
+   * leaf itself. Absent/0 means no denial; never negative (#246). */
+  readonly sandboxRefusals?: number;
 }
 
 export type Awaitable<T> = T | Promise<T>;

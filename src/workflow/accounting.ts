@@ -50,6 +50,15 @@ export class RunResult {
   cacheWriteTokens = 0;
   reasoningTokens = 0;
   usageUncertainLeaves = 0;
+  /** Total tool calls the sandbox denied across every leaf of this run (or
+   * this stretch, before service.ts folds in a prior stretch's total on
+   * resume — #246). Advisory: never read by `deriveStatus`. */
+  sandboxRefusals = 0;
+  /** `"<nodeId>: sandbox refused N tool call(s)"` per leaf that had any —
+   * kept OUT of `faults` on purpose so a refusal alone never flips `status`
+   * (#246); `resultView` (service-rollup.ts) folds both lists together for
+   * display, `deriveStatus` below reads only `faults`. */
+  readonly sandboxFaults: string[] = [];
   readonly nodeCosts: Record<string, NodeCost> = {};
   forcingFallbacks = 0;
   status: RunStatus = "complete";
