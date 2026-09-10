@@ -12,6 +12,7 @@ import {
   CompactionFailedError,
   CompactionUnsupportedError,
   CompressionLockBusyError,
+  ConversationError,
 } from "../src/conversation/errors.js";
 import { estimateRequestTokens, estimateTokens } from "../src/context/token-estimate.js";
 import type { CompactionResult, ConversationRepository } from "../src/conversation/types.js";
@@ -292,6 +293,41 @@ describe("attemptCompaction", () => {
         minKeepMessages: 4,
       }),
     ).rejects.toBeInstanceOf(CompactionFailedError);
+    expect(release).toHaveBeenCalledWith("s", "h");
+  });
+
+  // Issue #287 (revisor round 2 of PR #284): SessionRepository.compactHistory
+  // throws a raw `new Error("COMPRESSION_LOCK_NOT_HELD:...")` when the lock
+  // expired/moved between acquire and use (a real TOCTOU window: the two
+  // calls are a few lines apart in attemptCompaction, not atomic with each
+  // other). That raw Error used to escape all the way out of runTurn as a
+  // generic "TURN_FAILED" (`error instanceof ConversationError ? error.code
+  // : "TURN_FAILED"`, src/conversation/runtime.ts) instead of a named,
+  // taxonomy-aware error a caller can branch on.
+  it("wraps a raw COMPRESSION_LOCK_NOT_HELD throw from compactHistory as a named ConversationError, and still releases the lock", async () => {
+    const release = vi.fn(() => true);
+    const history = [...turn(1), ...turn(2), ...turn(3), ...turn(4), ...turn(5)];
+    const attempt = attemptCompaction({
+      repository: fakeRepository({
+        acquireCompressionLock: () => true,
+        releaseCompressionLock: release,
+        compactHistory: () => {
+          throw new Error("COMPRESSION_LOCK_NOT_HELD:s");
+        },
+        loadMessages: () => history,
+      }),
+      summarize: () => Promise.resolve("recap"),
+      sessionId: "s",
+      holder: "h",
+      now: 1,
+      lockTtlSeconds: 30,
+      lockRetries: 3,
+      lockRetryDelayMs: 0,
+      sleep,
+      minKeepMessages: 4,
+    });
+    await expect(attempt).rejects.toBeInstanceOf(ConversationError);
+    await expect(attempt).rejects.toMatchObject({ code: "COMPRESSION_LOCK_NOT_HELD" });
     expect(release).toHaveBeenCalledWith("s", "h");
   });
 
