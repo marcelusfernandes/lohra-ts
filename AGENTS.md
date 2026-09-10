@@ -22,6 +22,9 @@ Núcleo headless orientado a eventos → **TUI** (Ink) → **GUI Electron**
 - `docs/gate-decision-t22.md` — lohra-ts é a mainline (2026-09-03).
 - `docs/adr/` — decisões arquiteturais; a 0003 define o wire-format próprio,
   a 0004 o trabalho autônomo (orquestrador mergeia com CI + revisor).
+- `docs/decisions/` — notas de decisão datadas (doutrina, comportamento
+  observado; sem gate humano, ao contrário de uma ADR); formato e diferença
+  em `docs/decisions/README.md`.
 - Issues e milestones no GitHub registram o trabalho em andamento.
 
 ## Convenções
