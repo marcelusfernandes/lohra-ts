@@ -50,7 +50,7 @@
 //      novo qualquer sem entrada em `slices.json` reprova; os RUNNERS que
 //      reexportam um `Mutants` agregado (`media.ts`, `workflow-durability.ts`)
 //      são a única exceção explícita.
-//  10. contagem por catálogo (`CONTAGEM_POR_CATALOGO`) além da soma 172 --
+//  10. contagem por catálogo (`CONTAGEM_POR_CATALOGO`) além da soma 173 --
 //      uma troca compensatória entre dois catálogos (um ganha o que o outro
 //      perde, soma preservada) reprova aqui mesmo sem mudar o total.
 //
@@ -476,7 +476,7 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 172 (soma dos nove catálogos importados)", () => {
+  it("a contagem total de mutantes é 173 (soma dos nove catálogos importados)", () => {
     // Os nove catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
@@ -484,7 +484,7 @@ describe("scripts/mutations/slices.json", () => {
     // vivia dentro do runner (que chama `main()` incondicionalmente), então
     // a contagem era lida do texto fonte por regex em vez de importada.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 172;
+    const TOTAL_MUTANTS = 173;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -498,7 +498,7 @@ describe("scripts/mutations/slices.json", () => {
     // PR #206 (issue #195) para a corrida que produziu estes números.
     const CONTAGEM_POR_CATALOGO: Readonly<Record<string, number>> = {
       "scripts/mutations/workflow-durability-guard.ts": 14,
-      "scripts/mutations/workflow-durability-named.ts": 40,
+      "scripts/mutations/workflow-durability-named.ts": 41,
       "scripts/mutations/orchestration.ts": 5,
       "scripts/mutations/workflow-audit-live-mutants.ts": 32,
       "scripts/mutations/web-tools-mutants.ts": 9,
@@ -512,7 +512,7 @@ describe("scripts/mutations/slices.json", () => {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(172);
+    expect(somaTabela).toBe(173);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {

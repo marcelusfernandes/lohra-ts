@@ -1,13 +1,18 @@
-// Issue #149 (passo 0b do épico #13): a parte "nomeada" (a-z, aa-ao, p, q, o)
+// Issue #149 (passo 0b do épico #13): a parte "nomeada" (a-z, aa-ap, p, q, o)
 // do catálogo de mutantes de `mutations:t16`, migrada do runner legado de
 // paridade sem mudar id/mechanism/edits — só o caminho e o tipo importado
 // mudam. Separado de `workflow-durability.ts` só para caber no limite de
-// 800 linhas por arquivo (`arquivo-grande`): 40 mutantes, cada um escorado
+// 800 linhas por arquivo (`arquivo-grande`): 41 mutantes, cada um escorado
 // num único foco (`{file, test}`) em vez da bateria inteira.
 //
 // `an`/`ao` (issue #269): a fiação do mapa de tiers do operador até o
 // `WorkflowEngine`, dos dois lados que #258 corrigiu (`engineBaseOptions` em
 // `engine-options.ts` e o call site de `launchDurable` em `service.ts`).
+//
+// `ap` (issue #283): a fronteira da sugestão de nome de tier que #276 pinou
+// em `tests/workflow-tiers.test.ts` (distância 2 sugere, distância 3 não) —
+// nenhum mutante mirava `closestTierName` antes; sem ele o teste de fronteira
+// não era comprovadamente discriminante.
 //
 // Each focus is run GREEN at baseline before it is run under its mutant, so a
 // filter that matches no test can never be mistaken for a kill.
@@ -21,6 +26,7 @@ const sandbox = "src/workflow/sandbox.ts";
 const sqliteCache = "src/workflow/sqlite-cache.ts";
 const engine = "src/workflow/engine.ts";
 const engineOptions = "src/workflow/engine-options.ts";
+const tiers = "src/workflow/tiers.ts";
 const normalizer = "scripts/mutations/fixtures/normalize-evidence.mjs";
 
 const repositoryTests = "tests/state-workflow-repository.test.ts";
@@ -636,6 +642,25 @@ export const namedMutants: readonly Mutant[] = [
         before:
           "      ...engineBaseOptions(this.runtime, runId, options.tiers, this.loader, answers),",
         after: "      ...engineBaseOptions(this.runtime, runId, {}, this.loader, answers),",
+      },
+    ],
+  },
+  {
+    id: "ap/tier-suggestion-drops-the-boundary-distance",
+    category: "tiers",
+    mechanism:
+      "closestTierName demands an edit distance strictly less than SUGGESTION_MAX_DISTANCE, so a typo exactly at the boundary (distance 2, e.g. 'sml') is rejected bare instead of getting its 'did you mean' suggestion (#276, #283)",
+    focus: {
+      file: tiersTests,
+      test: "at edit distance exactly 2 and still suggests the closest tier",
+    },
+    edits: [
+      {
+        file: tiers,
+        before:
+          "  return best !== undefined && best.distance <= SUGGESTION_MAX_DISTANCE ? best.name : undefined;",
+        after:
+          "  return best !== undefined && best.distance < SUGGESTION_MAX_DISTANCE ? best.name : undefined;",
       },
     ],
   },
