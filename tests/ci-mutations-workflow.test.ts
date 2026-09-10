@@ -173,10 +173,14 @@ describe("mutations.yml — forma do workflow", () => {
   });
 
   it("o step mutate liga pipefail antes do tee e grava o log da fatia (issue #325)", () => {
-    const step = yaml.slice(
-      yaml.indexOf("- name: ${{ matrix.slice }}"),
-      yaml.indexOf("- uses: actions/upload-artifact"),
-    );
+    const step = yaml
+      .slice(
+        yaml.indexOf("- name: ${{ matrix.slice }}"),
+        yaml.indexOf("- uses: actions/upload-artifact"),
+      )
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("#"))
+      .join("\n");
     const indicePipefail = step.indexOf("set -o pipefail");
     const indiceTee = step.indexOf("| tee");
     expect(indicePipefail, "set -o pipefail ausente no step mutate").toBeGreaterThanOrEqual(0);
