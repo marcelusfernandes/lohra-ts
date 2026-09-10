@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { usage } from "../pricing/usage.js";
 import type { Usage } from "../pricing/types.js";
-import { addUsageToResult, deriveStatus, RunResult } from "./accounting.js";
+import { accountLeaf, deriveStatus, RunResult, addUsageToResult } from "./accounting.js";
 import { Budget, FanoutRejected, TokenBudgetExhausted } from "./budget.js";
 import { contentHash, MemoryWorkflowCache, type WorkflowCache } from "./cache.js";
 import {
@@ -333,14 +333,7 @@ export class WorkflowEngine {
     const next = resultUsage(collected);
     const uncertain = collected.usageUncertain === true;
     this.leafCosts.set(id, next);
-    addUsageToResult(
-      this.result,
-      nodeId,
-      next,
-      collected.provider ?? null,
-      collected.model ?? null,
-      uncertain,
-    );
+    accountLeaf(this.result, nodeId, collected, next, uncertain);
     this.budget.chargeTokens(next.inputTokens, next.outputTokens, uncertain);
   }
 

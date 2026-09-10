@@ -49,9 +49,16 @@ function readPending(value: string): Promise<string> | undefined {
  * returns recognizes that token and awaits the real promise; anything else
  * `wrap` returns is a synchronous DENIAL that never called `base` at all —
  * per contract, a denial never reaches (and never needs to unwrap) a token.
+ *
+ * `refusals` (#246) is THIS leaf's own counting side channel: every synchronous
+ * denial (never a `PendingDispatch`) increments it. A real tool call — even one
+ * that later reports its OWN failure — always produced a token first, so it is
+ * never counted here; only a call the wrap itself turned away before `base` ran
+ * is a sandbox refusal.
  */
 function adaptSandboxWrap(
   wrap: (base: LeafToolDispatch) => LeafToolDispatch,
+  refusals: { count: number },
 ): (base: ChildToolDispatch) => ChildToolDispatch {
   return (base) => {
     const syncBase: LeafToolDispatch = (name, args) => pendingToken(base(name, args));
@@ -59,7 +66,9 @@ function adaptSandboxWrap(
     return async (name, args) => {
       const out = wrapped(name, args);
       const pending = readPending(out);
-      return pending === undefined ? out : await pending;
+      if (pending !== undefined) return await pending;
+      refusals.count += 1;
+      return out;
     };
   };
 }
@@ -102,6 +111,14 @@ const denyAllDispatch: ChildToolDispatch = (name) =>
  */
 export class OrchestrationChildRuntime implements ChildRuntime {
   private readonly installations = new Map<string, LeafSandboxInstallation>();
+  /** Per-leaf refusal counters (#246), keyed by the leaf's own subId so
+   * `collect` can read them back. `runId` rides along so `installLeafSandbox`'s
+   * `dispose()` can sweep only the entries its OWN acquisition created —
+   * bounded by one stretch's leaves, same lifetime as `installations`. */
+  private readonly refusalCounts = new Map<
+    string,
+    { readonly runId: string; readonly box: { count: number } }
+  >();
 
   public constructor(private readonly core: OrchestrationCore) {}
 
@@ -112,25 +129,37 @@ export class OrchestrationChildRuntime implements ChildRuntime {
         const current = this.installations.get(installation.runId);
         if (current !== undefined && current.fence === installation.fence) {
           this.installations.delete(installation.runId);
+          for (const [subId, entry] of this.refusalCounts) {
+            if (entry.runId === installation.runId) this.refusalCounts.delete(subId);
+          }
         }
       },
     };
   }
 
-  private wrapDispatchFor(runId: string): (base: ChildToolDispatch) => ChildToolDispatch {
+  private wrapDispatchFor(
+    runId: string,
+    refusals: { count: number },
+  ): (base: ChildToolDispatch) => ChildToolDispatch {
     const installation = this.installations.get(runId);
-    return installation === undefined ? () => denyAllDispatch : adaptSandboxWrap(installation.wrap);
+    return installation === undefined
+      ? () => denyAllDispatch
+      : adaptSandboxWrap(installation.wrap, refusals);
   }
 
   public spawn(request: ChildSpawnRequest): string {
-    return this.core.spawn({
+    const runId = request.causalContext.runId;
+    const box = { count: 0 };
+    const subId = this.core.spawn({
       prompt: request.prompt,
       ...(request.provider === undefined ? {} : { provider: request.provider }),
       ...(request.model === undefined ? {} : { model: request.model }),
       ...(request.effort === undefined ? {} : { effort: request.effort }),
       ...(request.maxIterations === undefined ? {} : { maxIterations: request.maxIterations }),
-      wrapDispatch: this.wrapDispatchFor(request.causalContext.runId),
+      wrapDispatch: this.wrapDispatchFor(runId, box),
     }).subId;
+    this.refusalCounts.set(subId, { runId, box });
+    return subId;
   }
 
   public async collect(id: string, options: ChildCollectOptions): Promise<ChildResult> {
@@ -162,6 +191,7 @@ export class OrchestrationChildRuntime implements ChildRuntime {
       retryAfter: result.retryAfter,
       errorKind: result.errorKind,
       usageUncertain: result.usageUncertain === true,
+      sandboxRefusals: this.refusalCounts.get(id)?.box.count ?? 0,
     };
   }
 
