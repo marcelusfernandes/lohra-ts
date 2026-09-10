@@ -2,13 +2,14 @@ import { combineUsage, usage } from "../pricing/usage.js";
 import type { Usage } from "../pricing/types.js";
 import { addUsageToResult, type RunResult } from "./accounting.js";
 import { contentHash, type WorkflowCache } from "./cache.js";
-import type { LeafExecution } from "./engine-contract.js";
+import type { LeafExecution, WorkflowLoader } from "./engine-contract.js";
 import { MAX_NODE_RETRIES } from "./nodes.js";
 import { isEmptyOutput } from "./output-validation.js";
 import { resolveValue } from "./refs.js";
 import type { ChildResult } from "./runtime.js";
+import { validateSpec } from "./schema.js";
 import type { TierMap } from "./tiers.js";
-import { Node } from "./types.js";
+import { Node, ValidationError } from "./types.js";
 
 export interface Routing {
   readonly provider?: string;
@@ -301,15 +302,77 @@ export function scopedCheckpointId(nodeScope: readonly string[], id: string): st
  * replaced by `CHECKPOINT_AMBIGUOUS`. The nested checkpoint can then tell
  * "answered under my key" apart from "this raw key means the PARENT's
  * checkpoint" and refuse the latter instead of silently answering both
- * from one flat `{confirm: "..."}`. */
+ * from one flat `{confirm: "..."}`. #319: `ambiguousIds` is no longer only
+ * the root's own ids — `siblingAnswers` below folds in any id shared by two
+ * or more SIBLING `workflow` nodes too, so this function itself needs no
+ * change to cover that case; it only ever sees the final set. */
 export function nestedCheckpointAnswers(
   answers: Readonly<Record<string, unknown>>,
-  rootCheckpointIds: ReadonlySet<string>,
+  ambiguousIds: ReadonlySet<string>,
 ): Readonly<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(answers))
-    out[key] = rootCheckpointIds.has(key) ? CHECKPOINT_AMBIGUOUS : value;
+    out[key] = ambiguousIds.has(key) ? CHECKPOINT_AMBIGUOUS : value;
   return Object.freeze(out);
+}
+
+/** #319: `nestedCheckpointAnswers` above only ever refused a raw key that
+ * named a checkpoint at the ROOT scope — two SIBLING `workflow` nodes whose
+ * own children happen to reuse the same checkpoint id (root silent about
+ * it) still both consumed one flat raw answer. `MAX_WORKFLOW_DEPTH = 1`
+ * bounds nesting to exactly one level, so every checkpoint id a NESTED
+ * engine's answers could ever need to refuse is either a root checkpoint's
+ * own id or one of the CURRENT spec's `workflow` nodes' nested checkpoint
+ * ids — this runs ONCE, in `run()`, before any node executes, folding both
+ * into the one ambiguous-id set `nestedCheckpointAnswers` already knows how
+ * to apply. Collecting incrementally as each sibling actually RAN would let
+ * whichever sibling runs FIRST through unrefused, since its OWN sibling's
+ * ids are still unknown at that point — the root loop is sequential, one
+ * node at a time — so this has to happen up front, over ALL of them, not
+ * just the ones already executed.
+ *
+ * A `ref` that only resolves once an EARLIER node's own output exists (a
+ * template naming `${someNode.field}`) can't be resolved here — this pass
+ * only has `{ args }`, no node outputs yet — so that sibling's own ids stay
+ * silently absent from the set; a collision reached only through such a
+ * dynamic ref is a known, DOCUMENTED gap (not a silent failure of the
+ * checkpoint itself: once actually reached, it still resolves — correctly
+ * when unique, incorrectly shared when colliding, exactly the pre-#319
+ * behavior). A `ref` that fails to load or fails `validateSpec` here is
+ * skipped, not swallowed:
+ * `runNested` loads the very same ref again when the node actually runs
+ * and records its own named fault there — this pass defers to that path
+ * rather than duplicating it. */
+export async function siblingAnswers(
+  answers: Readonly<Record<string, unknown>>,
+  ordered: readonly Node[],
+  args: Readonly<Record<string, unknown>>,
+  loader: WorkflowLoader | undefined,
+): Promise<Readonly<Record<string, unknown>>> {
+  const ambiguous = new Set(
+    ordered.filter((node) => node.type === "checkpoint").map((node) => node.id),
+  );
+  if (loader !== undefined) {
+    const context = Object.freeze({ args: Object.freeze({ ...args }) });
+    const seenOnce = new Set<string>();
+    for (const node of ordered) {
+      if (node.type !== "workflow") continue;
+      const reference = strictResolve(node.fields.ref, context);
+      if (typeof reference !== "string") continue;
+      try {
+        const parsed = validateSpec(await loader(reference));
+        if (parsed instanceof ValidationError) continue;
+        for (const child of parsed.nodes)
+          if (child.type === "checkpoint") {
+            if (seenOnce.has(child.id)) ambiguous.add(child.id);
+            seenOnce.add(child.id);
+          }
+      } catch {
+        continue;
+      }
+    }
+  }
+  return nestedCheckpointAnswers(answers, ambiguous);
 }
 
 export interface CheckpointResolution {
@@ -320,6 +383,14 @@ export interface CheckpointResolution {
    * collision (invariant 2: never silent) or, absent one, the plain
    * unanswered-checkpoint text. Unused when `matched`. */
   readonly message: string;
+  /** #330: which branch below produced `message` — "none" when `matched` or
+   * plain-unanswered. "raw" means the SCOPED id (`scoped`) still resolves it
+   * on the next resume, exactly as `message` already says. "scoped" means
+   * `scoped` itself is the dead end — it collides with a ROOT checkpoint's
+   * own literal id, an author-time rename, not a different resume answer —
+   * so `checkpointPausePayload` must not let its `node_id` look like an
+   * ordinary resumable key. */
+  readonly collision: "none" | "raw" | "scoped";
 }
 
 /** Scoped key wins; the raw id is the pre-#243 compat fallback, refused —
@@ -340,7 +411,7 @@ export function resolveCheckpoint(
   if (Object.hasOwn(answers, scoped)) {
     const scopedAnswer = answers[scoped];
     if (scopedAnswer !== CHECKPOINT_AMBIGUOUS)
-      return { scoped, matched: true, answer: scopedAnswer, message: "" };
+      return { scoped, matched: true, answer: scopedAnswer, message: "", collision: "none" };
     // Unlike the raw branch below, there is no MORE-scoped key to fall back
     // to — `scoped` already IS the scoped form, and it collides with a ROOT
     // checkpoint's own literal id (a root id spelled with the same dots,
@@ -349,21 +420,27 @@ export function resolveCheckpoint(
     const message =
       `${nodeId}: scoped checkpoint id '${scoped}' collides with a ROOT checkpoint's own ` +
       `literal id — rename one of the two checkpoint ids to remove the collision`;
-    return { scoped, matched: false, answer: null, message };
+    return { scoped, matched: false, answer: null, message, collision: "scoped" };
   }
   if (Object.hasOwn(answers, nodeId)) {
     const raw = answers[nodeId];
-    if (raw !== CHECKPOINT_AMBIGUOUS) return { scoped, matched: true, answer: raw, message: "" };
+    if (raw !== CHECKPOINT_AMBIGUOUS)
+      return { scoped, matched: true, answer: raw, message: "", collision: "none" };
+    // #319: the raw id can now collide with the ROOT's own checkpoint OR
+    // with a SIBLING nested workflow's own checkpoint of the same id —
+    // `nestedCheckpointAnswers`/`siblingAnswers` mark both the same way, so
+    // this branch no longer knows (and doesn't need to) which one it was.
     const message =
-      `${nodeId}: checkpoint id '${nodeId}' collides with the parent's — ` +
-      `answer with the scoped id '${scoped}'`;
-    return { scoped, matched: false, answer: null, message };
+      `${nodeId}: checkpoint id '${nodeId}' collides with another checkpoint at a ` +
+      `different scope — answer with the scoped id '${scoped}'`;
+    return { scoped, matched: false, answer: null, message, collision: "raw" };
   }
   return {
     scoped,
     matched: false,
     answer: null,
     message: `${nodeId}: checkpoint waiting for answer`,
+    collision: "none",
   };
 }
 
@@ -381,7 +458,15 @@ export function applyCheckpointAnswer(
 }
 
 /** The pause payload for an unanswered checkpoint — `node_id` is the
- * SCOPED form (#243), so a resume answers the right occurrence. */
+ * SCOPED form (#243), so a resume answers the right occurrence. #330: when
+ * `collision === "scoped"`, that SCOPED form is itself the dead end (it
+ * collides with a ROOT checkpoint's own literal id — `resolveCheckpoint`'s
+ * comment on that branch) — resuming with THIS `node_id` unchanged repauses
+ * forever, since the answer would land under the same colliding key again.
+ * `rename_hint` says so instead of letting the payload look like an
+ * ordinary resumable checkpoint. The "raw" collision needs no such hint:
+ * `resolved.scoped` there is a genuinely different, working key — the one
+ * `resolved.message` already tells the caller to use. */
 export function checkpointPausePayload(
   node: Node,
   resolved: CheckpointResolution,
@@ -391,5 +476,12 @@ export function checkpointPausePayload(
     node_id: resolved.scoped,
     prompt,
     ...(Object.hasOwn(node.fields, "default") ? { default: node.fields.default } : {}),
+    ...(resolved.collision === "scoped"
+      ? {
+          rename_hint:
+            `resuming with node_id '${resolved.scoped}' will collide again — it is a ROOT ` +
+            `checkpoint's own literal id; rename one of the two checkpoint ids in the spec`,
+        }
+      : {}),
   });
 }

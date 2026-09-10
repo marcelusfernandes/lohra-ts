@@ -7,6 +7,15 @@
 // checkpoint at the root scope. `MAX_WORKFLOW_DEPTH = 1` bounds the
 // collision to parent<->child direct nesting, so a root spec's own
 // checkpoint ids are the only ones a nested checkpoint can collide with.
+//
+// Issue #319: the same template reused by TWO SIBLING `workflow` nodes
+// (neither the parent, both children) shares a raw id the same way — the
+// root doesn't even own the id, so the pre-#319 check (root's own ids only)
+// never saw the collision. `siblingAnswers` (engine-utils.ts) now collects
+// every `workflow` node's own nested checkpoint ids ONCE, in `run()`,
+// before any node executes — an id shared by two or more siblings is
+// refused as ambiguous exactly like a root collision, and each sibling's
+// SCOPED key keeps working.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -128,6 +137,12 @@ describe("checkpoint id scoping in a nested workflow — engine (#243)", () => {
     expect(result.pauseReason).toBe("checkpoint");
     expect(result.checkpoint).toMatchObject({ node_id: "sub.confirm", prompt: "child?" });
 
+    // #330: `node_id` here is the exact key that JUST got refused — resuming
+    // with it unchanged repauses forever (it collides with the ROOT's own
+    // literal id every time). `rename_hint` says so instead of letting the
+    // payload look like an ordinary resumable checkpoint.
+    expect((result.checkpoint as Record<string, unknown>).rename_hint).toContain("sub.confirm");
+
     // invariant 2: a NAMED fault, not a silent miss.
     expect(
       result.faults.some((fault) => fault.includes("collides") && fault.includes("sub.confirm")),
@@ -158,6 +173,49 @@ describe("checkpoint id scoping in a nested workflow — engine (#243)", () => {
     );
     expect(result.status).toBe("complete");
     expect(result.outputs.sub).toEqual({ confirm: "x" });
+  });
+});
+
+// #319: neither sibling is the "parent" — the root has no checkpoint of its
+// own at all — so the pre-#319 check (root's own ids only) never saw this
+// collision. Both `sub1` and `sub2` load the SAME `inner` template (the
+// User Story's "reuse the same template twice"), each with its own
+// `confirm` checkpoint.
+const siblingOuterNodes = [
+  { id: "sub1", type: "workflow", ref: "inner" },
+  // `depends_on` makes the root's sequential loop reach `sub1` before
+  // `sub2` deterministic — `sub1`'s raw-answer refusal (and the pause that
+  // follows) must not depend on `sub2` having run, or even having loaded,
+  // yet: `siblingAnswers` collects both UP FRONT, before either runs.
+  { id: "sub2", type: "workflow", ref: "inner", depends_on: ["sub1"] },
+];
+
+describe("checkpoint id scoping across SIBLING nested workflows — engine (#319)", () => {
+  it("a raw id shared by two SIBLINGS is refused for both, never silently applied to either", async () => {
+    const result = await new WorkflowEngine({
+      runtime: new QueueChildren(),
+      loader: () => innerSpec,
+      checkpointAnswers: { confirm: "sim" },
+    }).run(spec({ meta: { name: "outer-siblings" }, nodes: siblingOuterNodes }));
+    // `sub1` runs first, refuses the raw id, and pauses — the root loop
+    // breaks on pause, so `sub2` never even starts.
+    expect(result.status).toBe("paused");
+    expect(result.pauseReason).toBe("checkpoint");
+    expect(result.checkpoint).toMatchObject({ node_id: "sub1.confirm", prompt: "child?" });
+    expect(
+      result.faults.some((fault) => fault.includes("collides") && fault.includes("sub1.confirm")),
+    ).toBe(true);
+  });
+
+  it("each sibling's own SCOPED key resolves it independently — no cross-talk", async () => {
+    const result = await new WorkflowEngine({
+      runtime: new QueueChildren(),
+      loader: () => innerSpec,
+      checkpointAnswers: { "sub1.confirm": "a", "sub2.confirm": "b" },
+    }).run(spec({ meta: { name: "outer-siblings" }, nodes: siblingOuterNodes }));
+    expect(result.status).toBe("complete");
+    expect(result.outputs.sub1).toEqual({ confirm: "a" });
+    expect(result.outputs.sub2).toEqual({ confirm: "b" });
   });
 });
 
