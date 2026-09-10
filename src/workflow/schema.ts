@@ -1,3 +1,4 @@
+import type { WorkflowLoader } from "./engine-contract.js";
 import {
   MAX_GATE_ATTEMPTS,
   MAX_NODE_MAX_ITERATIONS,
@@ -552,4 +553,32 @@ export function validateSpec(
     issue(issues, "cycle", `dependency cycle: ${cycle.join(" -> ")}`, cycle[0] ?? null);
   if (issues.length > 0) return new ValidationError(issues);
   return new WorkflowSpec({ meta, inputs, schemas, nodes });
+}
+
+/**
+ * Resolves every `workflow` node's `ref` through `loader` and validates the
+ * result with `validateSpec`, so a nested template that is wrong fails the
+ * LAUNCH (issue #244) instead of surfacing only when that node executes
+ * (the pre-existing backstop in `engine.ts`'s `runNested`, which stays —
+ * `loader` can answer differently between this call and execution).
+ *
+ * Only checkable here: a literal `ref` string (one with no `${...}`
+ * expression — those need the run's context, which does not exist yet at
+ * launch) and a `loader` that answers synchronously (a Promise is left
+ * entirely to the runtime backstop, its rejection swallowed on purpose so
+ * an async loader never turns an unrelated launch into an unhandled
+ * rejection). `depth` mirrors the engine's own `MAX_WORKFLOW_DEPTH` cap: at
+ * that depth the engine throws before it ever calls `loader` again, so this
+ * stops recursing there too instead of reporting a ref issue that was never
+ * the engine's to raise.
+ */
+export function validateNestedRefs(
+  spec: WorkflowSpec,
+  loader: WorkflowLoader | undefined,
+  depth = 0,
+): ValidationError | null {
+  void spec;
+  void loader;
+  void depth;
+  throw new Error("not implemented: validateNestedRefs");
 }
