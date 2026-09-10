@@ -15,7 +15,7 @@ A issue deixava a escolha em aberto: (i) reescrever o histórico da sessão
 **no lugar**, com um marcador durável, ou (ii) encerrar a sessão com
 `end_reason=compression` e abrir uma continuação (o gateway já tem
 mecanismo de "ressuscitar" uma sessão assim — `GatewaySessionRegistry`,
-`docs.../session-service.ts`, ADR-T12-04).
+`src/gateway/session-service.ts`, ADR-T12-04).
 
 Este runtime escolheu **(i)**. Dois fatos decidiram:
 

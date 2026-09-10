@@ -24,6 +24,7 @@ import {
   type ContextWindowSource,
 } from "../providers/index.js";
 import type { ProviderProfile } from "../providers/index.js";
+import { SUMMARY_LEAD_TEXT } from "../state/index.js";
 import {
   CompactionFailedError,
   CompactionUnsupportedError,
@@ -142,22 +143,17 @@ export function resolveTurnContextWindow(input: {
   });
 }
 
-/** Leads every compacted history: a synthetic `user` turn asking for the
- * recap, so the inserted summary always has a real question to answer to
- * and the compacted history always opens on `role: "user"`, never
- * `"assistant"`. Anthropic's Messages API rejects a request whose first
- * message is not `role: "user"` (400) -- opening on the summary itself
- * (bare `assistant`, no `user` before it) would break every Anthropic-route
- * turn the very first time a session compacts. Session-repository.ts keeps
- * its own copy of this string (state/ doesn't import conversation/) --
- * keep the two in sync by hand if this ever changes. */
-export const SUMMARY_LEAD_CONTENT = "(resumo da conversa anterior a seguir)";
-
 /** The two messages a compaction inserts in place of the folded history:
- * a `user` lead (see `SUMMARY_LEAD_CONTENT`) followed by the `assistant`
- * summary itself. Never a bare `role: "system"` message either: the
- * Anthropic and Responses transports strip/merge a `role: "system"`
- * message found inside `messages` into the top-level system field
+ * a synthetic `user` lead (`SUMMARY_LEAD_TEXT`, single source of truth in
+ * `src/state/session-repository.ts` -- `compactHistory` writes the exact
+ * same pair this function describes) followed by the `assistant` summary
+ * itself. The compacted history always opens on `role: "user"`, never
+ * `"assistant"`: Anthropic's Messages API rejects a request whose first
+ * message is not `role: "user"` (400) -- opening on the summary itself
+ * would break every Anthropic-route turn the very first time a session
+ * compacts. Never a bare `role: "system"` message either: the Anthropic
+ * and Responses transports strip/merge a `role: "system"` message found
+ * inside `messages` into the top-level system field
  * (`src/transports/anthropic-messages.ts:93`, `src/transports/responses.ts:37`)
  * -- that would fold the summary into the frozen system prompt, breaking
  * invariant 1 ("a compactação mexe no histórico, não no prompt"). This
@@ -168,7 +164,7 @@ export function buildSummaryMessages(
   summary: string,
 ): readonly [Readonly<Record<string, unknown>>, Readonly<Record<string, unknown>>] {
   return [
-    Object.freeze({ role: "user", content: SUMMARY_LEAD_CONTENT }),
+    Object.freeze({ role: "user", content: SUMMARY_LEAD_TEXT }),
     Object.freeze({ role: "assistant", content: summary, finish_reason: "stop" }),
   ];
 }

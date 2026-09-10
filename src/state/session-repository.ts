@@ -9,10 +9,11 @@ export interface CompactionResult {
   readonly keptCount: number;
 }
 
-/** Must match `SUMMARY_LEAD_CONTENT` in `src/conversation/compaction.ts`
- * exactly -- see `compactHistory` below for why this leads every compacted
- * history. */
-const SUMMARY_LEAD_TEXT = "(resumo da conversa anterior a seguir)";
+/** The synthetic "user" message every compaction leads with, before the
+ * "assistant" summary itself -- see `compactHistory` below for why. Single
+ * source of truth: `src/conversation/compaction.ts`'s `buildSummaryMessages`
+ * imports this instead of keeping its own copy. */
+export const SUMMARY_LEAD_TEXT = "(resumo da conversa anterior a seguir)";
 
 export interface CreateSessionInput {
   readonly id: string;
@@ -287,13 +288,12 @@ export class SessionRepository {
         .run(...rows.map((row) => row.id as SqliteInteger));
 
       // Shape matches src/conversation/compaction.ts's buildSummaryMessages:
-      // a synthetic "user" lead (SUMMARY_LEAD_TEXT below -- keep in sync
-      // with that module's SUMMARY_LEAD_CONTENT by hand, state/ doesn't
-      // import conversation/) followed by the "assistant" summary itself,
-      // never a bare "assistant" message first. Anthropic's Messages API
-      // rejects a request whose first message isn't role "user" (400) --
-      // this is what keeps every Anthropic-route turn working the first
-      // time a session compacts.
+      // a synthetic "user" lead (SUMMARY_LEAD_TEXT above -- the single
+      // source of truth compaction.ts imports from here) followed by the
+      // "assistant" summary itself, never a bare "assistant" message
+      // first. Anthropic's Messages API rejects a request whose first
+      // message isn't role "user" (400) -- this is what keeps every
+      // Anthropic-route turn working the first time a session compacts.
       this.insertMessage(sessionId, { role: "user", content: SUMMARY_LEAD_TEXT, createdAt: now });
       this.insertMessage(sessionId, {
         role: "assistant",
@@ -306,9 +306,17 @@ export class SessionRepository {
         this.insertMessageRow(sessionId, row);
         inserted += 1;
       }
+      // message_count tracks the ACTIVE row count, not a lifetime insert
+      // counter -- every other writer here (recordTurn, recordMessages,
+      // appendMessage) only ever adds because nothing before compaction
+      // ever deactivated a row, so "+= inserted" alone happened to be
+      // correct by coincidence. Deactivating `rows.length` rows above
+      // means this write has to net both sides, or listSessions()/the
+      // gateway's session list would report more messages than are
+      // actually active after every compaction.
       this.database
-        .prepare("UPDATE sessions SET message_count = message_count + ? WHERE id = ?")
-        .run(inserted, sessionId);
+        .prepare("UPDATE sessions SET message_count = message_count - ? + ? WHERE id = ?")
+        .run(rows.length, inserted, sessionId);
       return { summarizedCount, keptCount: toKeep.length };
     });
     return transaction();

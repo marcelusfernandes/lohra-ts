@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { buildSummaryMessages } from "../src/conversation/compaction.js";
 import {
   LockRepository,
   openStateDatabase,
@@ -103,23 +104,22 @@ describe("SessionRepository.compactHistory", () => {
     const history = repo.loadMessages("s");
     // A synthetic "user" lead precedes the "assistant" summary (issue #252
     // fixup: Anthropic's Messages API rejects a request whose first
-    // message isn't role "user") -- 2 lead+summary + 4 kept.
+    // message isn't role "user") -- 2 lead+summary + 4 kept. Pinned against
+    // buildSummaryMessages itself (src/conversation/compaction.ts), not a
+    // hand-copied literal -- the two implementations can't drift apart
+    // without this test noticing.
     expect(history).toHaveLength(6);
-    expect(history[0]).toMatchObject({
-      role: "user",
-      content: "(resumo da conversa anterior a seguir)",
-    });
-    expect(history[1]).toMatchObject({
-      role: "assistant",
-      content: "recap",
-      finish_reason: "stop",
-    });
+    expect(history.slice(0, 2)).toEqual(buildSummaryMessages("recap"));
     expect(history.slice(2)).toEqual([
       { role: "user", content: "q4" },
       { role: "assistant", content: "a4", finish_reason: "stop" },
       { role: "user", content: "q5" },
       { role: "assistant", content: "a5", finish_reason: "stop" },
     ]);
+    // message_count tracks the ACTIVE row count (issue #252 fixup): 10
+    // messages went in, 4 stayed untouched, 6 more got deactivated and
+    // replaced by 2 (lead+summary) -- net 6 active, never 16.
+    expect(Number(repo.getSession("s")?.message_count)).toBe(6);
     close();
   });
 
