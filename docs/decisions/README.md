@@ -53,3 +53,6 @@ abaixo.
   compartilhado](2026-09-10-fanout-fs-compartilhado.md) — um working root por
   run, não por branch; duas folhas escrevendo o mesmo arquivo, a última
   escrita vence silenciosamente; doutrina de um arquivo por folha.
+- [2026-09-10 — Skills nos harnesses: instalar no `init`, atualizar no
+  `update`](2026-09-10-skills-harness.md) — relatório de exploração; decisão
+  do owner pendente.
