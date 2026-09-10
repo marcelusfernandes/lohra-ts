@@ -23,13 +23,17 @@ import {
   VERIFY_SCHEMA,
 } from "./engine-contract.js";
 import {
+  applyCheckpointAnswer,
   asRecord,
+  checkpointPausePayload,
   clampInteger,
   collectBranchWithRetries,
   combine,
+  nestedCheckpointAnswers,
   nonEmpty,
   recordGroupReplayCost,
   renderValue,
+  resolveCheckpoint,
   resultUsage,
   routingIdentity,
   routingOf,
@@ -72,6 +76,7 @@ export class WorkflowEngine {
   private schemas: Readonly<Record<string, unknown>> = {};
   private currentNode = "?";
   private specIdentity: readonly unknown[] = ["workflow", null];
+  private checkpointIds: ReadonlySet<string> = new Set();
   private readonly activeLeaves = new Set<string>();
   private accounted = new Set<string>();
   private leafCosts = new Map<string, Usage>();
@@ -378,6 +383,7 @@ export class WorkflowEngine {
     this.schemas = spec.schemas;
     this.specIdentity = Object.freeze([spec.name, spec.meta.version ?? null]);
     const ordered = topologicalOrder(spec);
+    this.checkpointIds = new Set(ordered.filter((n) => n.type === "checkpoint").map((n) => n.id));
     this.result.nodesTotal = ordered.length;
     this.progressTracker.reset(ordered.map((node) => node.id));
     for (const node of ordered) {
@@ -860,7 +866,7 @@ export class WorkflowEngine {
       segmentId: this.segmentId,
       depth: this.depth + 1,
       nodeScope: [...this.nodeScope, node.id],
-      checkpointAnswers: this.checkpointAnswers,
+      checkpointAnswers: nestedCheckpointAnswers(this.checkpointAnswers, this.checkpointIds),
       pipelineTimeoutSeconds: this.pipelineTimeoutSeconds,
       ...(this.onEvent === undefined ? {} : { onEvent: this.onEvent }),
       logError: this.logError,
@@ -978,17 +984,10 @@ export class WorkflowEngine {
     const hash = this.cell([node.id, "checkpoint", prompt]);
     const cached = this.cacheGet(hash);
     if (cached !== CACHE_MISS) return cached;
-    if (Object.hasOwn(this.checkpointAnswers, node.id)) {
-      const answer = this.checkpointAnswers[node.id];
-      this.cache.put(this.runId, hash, node.id, answer, null);
-      return answer;
-    }
-    const payload = Object.freeze({
-      node_id: node.id,
-      prompt,
-      ...(Object.hasOwn(node.fields, "default") ? { default: node.fields.default } : {}),
-    });
-    this.pause("checkpoint", `${node.id}: checkpoint waiting for answer`, payload);
+    const resolved = resolveCheckpoint(this.checkpointAnswers, this.nodeScope, node.id);
+    if (resolved.matched)
+      return applyCheckpointAnswer(this.cache, this.runId, hash, node.id, resolved.answer);
+    this.pause("checkpoint", resolved.message, checkpointPausePayload(node, resolved, prompt));
     return null;
   }
 }
