@@ -54,6 +54,55 @@ function spec(): Record<string, unknown> {
   return { meta: { name: "shutdown" }, nodes: [{ id: "a", type: "agent", prompt: "do it" }] };
 }
 
+/** N leaves, each gated on its OWN promise — the window `cancel()` needs to
+ * prove it waits for every one of them, not just the first (issue #233). */
+function multiGatedRuntime(): ChildRuntime & { release(id: string): void; spawned: string[] } {
+  const open = new Map<string, () => void>();
+  const gate = new Map<string, Promise<void>>();
+  const spawned: string[] = [];
+  return {
+    spawn: (): string => {
+      const id = `leaf-${String(spawned.length + 1)}`;
+      spawned.push(id);
+      gate.set(
+        id,
+        new Promise((resolveGate) => {
+          open.set(id, resolveGate);
+        }),
+      );
+      return id;
+    },
+    collect: async (id: string): Promise<ChildResult> => {
+      await gate.get(id);
+      return {
+        status: "complete",
+        output: { answer: "ok" },
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          reasoningTokens: 0,
+        },
+      };
+    },
+    steer: (): void => undefined,
+    cancel: (): void => undefined,
+    installLeafSandbox: () => ({ dispose: (): void => undefined }),
+    release: (id: string): void => {
+      open.get(id)?.();
+    },
+    spawned,
+  };
+}
+
+function parallelSpec(): Record<string, unknown> {
+  return {
+    meta: { name: "cancel-quiescente" },
+    nodes: [{ id: "p", type: "parallel", branches: ["one", "two"] }],
+  };
+}
+
 /** Real sqlite-backed store, plus a `timerFactory` that hands every armed
  * timer back so a test can fire one by hand. */
 function harness(runtime: ChildRuntime) {
@@ -311,6 +360,81 @@ describe("WorkflowService.shutdown()", () => {
       ),
     ).toBe(true);
     runtime.release(); // let the still-in-flight leaf settle before the test ends
+  });
+});
+
+// Issue #233: cancel() used to answer 'cancelled' the instant it was called,
+// while leaves already in flight kept spending tokens until their OWN
+// timeout — engine.cancel() now signals them (like noteQuotaExhausted) and
+// service.cancel() waits for quiescence with shutdown()'s own ceiling.
+describe("WorkflowService.cancel() waits for quiescence (#233)", () => {
+  it("parallel with leaves in flight: cancel() only resolves once every leaf settles, and spawns no more", async () => {
+    const runtime = multiGatedRuntime();
+    const service = new WorkflowService({
+      runtime,
+      environment: { VITEST: "true" },
+      idSource: () => "cancel-parallel",
+    });
+    const started = service.start(parallelSpec());
+    if ("error" in started) throw new Error(started.error);
+    // Let both branches actually spawn and block on their own gate before cancelling.
+    await new Promise((resolveTick) => setTimeout(resolveTick, 20));
+    expect(runtime.spawned).toEqual(["leaf-1", "leaf-2"]);
+    let settled = false;
+    const done = Promise.resolve(service.cancel(started.run_id)).then((out) => {
+      settled = true;
+      return out;
+    });
+    await new Promise((resolveTick) => setTimeout(resolveTick, 20));
+    expect(settled).toBe(false); // both leaves are still gated — cancel() must still be waiting
+    runtime.release("leaf-1");
+    runtime.release("leaf-2");
+    const out = await done;
+    expect(out).toMatchObject({ run_id: started.run_id, status: "cancelled" });
+    expect(runtime.spawned).toEqual(["leaf-1", "leaf-2"]); // no leaf spawned after cancel
+  });
+
+  it("a leaf that ignores cancel: reports 'cancelling' with leaves_in_flight; 'cancelled' lands only once it later settles", async () => {
+    const timers: { delay: number; fire(): void; cancelled: boolean }[] = [];
+    const timerFactory = (delay: number, fire: () => void): Timer => {
+      const timer = { delay, fire, cancelled: false };
+      timers.push(timer);
+      return {
+        cancel: () => {
+          timer.cancelled = true;
+        },
+      };
+    };
+    const warnings: string[] = [];
+    const runtime = gatedRuntime(); // its cancel() is a no-op: the leaf ignores the signal
+    const service = new WorkflowService({
+      runtime,
+      timerFactory,
+      onWarning: (message) => warnings.push(message),
+      environment: { VITEST: "true" },
+      idSource: () => "cancel-ignoring",
+    });
+    const started = service.start(spec());
+    if ("error" in started) throw new Error(started.error);
+    // Let the leaf actually spawn and block on its own gate before cancelling.
+    await new Promise((resolveTick) => setTimeout(resolveTick, 20));
+    const done = Promise.resolve(service.cancel(started.run_id));
+    expect(timers.length).toBe(1); // the settle ceiling, armed synchronously
+    timers[0]?.fire(); // 5s elapse; the leaf is still gated
+    const out = await done;
+    expect(out).toMatchObject({
+      run_id: started.run_id,
+      status: "cancelling",
+      leaves_in_flight: 1,
+    });
+    expect(
+      warnings.some((message) => message.includes("cancel of run") && message.includes("1 run")),
+    ).toBe(true);
+    const stillRunning = await service.status(started.run_id, false);
+    expect(stillRunning).not.toMatchObject({ status: "cancelled" });
+    runtime.release();
+    const settledStatus = await service.status(started.run_id, true);
+    expect(settledStatus).toMatchObject({ status: "cancelled" });
   });
 });
 
