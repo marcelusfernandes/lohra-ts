@@ -210,32 +210,45 @@ describe("runDashboard: SIGINT-equivalent shutdown (assertion 54)", () => {
 });
 
 describe("runDashboard: --port CLI flag (mirrors the oracle's dashboard --port, needed by the parity harness to launch the real candidate binary)", () => {
-  it("binds the port given via --port in argv, not just the programmatic port option", async () => {
-    const probe: Server = createServer();
-    const freePort = await new Promise<number>((resolvePromise) => {
-      probe.listen(0, "127.0.0.1", () => {
-        const address = probe.address();
+  it("reaches the real bind attempt with the port given via --port in argv, not just the programmatic port option", async () => {
+    // Issue #302 named this exact listen/close/reuse TOCTOU window in the
+    // sibling tests/dashboard-host.test.ts (`:257`, fixed by #303, 75664a09):
+    // a free port is discovered, released, and reused for `--port` a moment
+    // later -- another process can grab it first, exactly the risk the
+    // orchestrator's amendment to issue #304 named for this file. Keeping
+    // the probe bound instead of closing it removes the window: passing its
+    // own already-occupied port straight into `--port <p>` still proves the
+    // argv value (not the deleted `options.port`) reaches `runDashboard`'s
+    // real bind, since an EADDRINUSE refusal only happens if it does.
+    // `dashboard.ts` prints the boot banner (including this port)
+    // synchronously before the async `listen()` whenever a concrete port is
+    // requested, so `await runDashboard(options)` alone -- no `sleep(50)`,
+    // no `registerShutdownTrigger` -- already resolves after the outcome is
+    // settled; the refusal path never reaches the trigger registration.
+    const occupying: Server = createServer();
+    const occupiedPort = await new Promise<number>((resolvePromise, reject) => {
+      occupying.once("error", reject);
+      occupying.listen(0, "127.0.0.1", () => {
+        const address = occupying.address();
         resolvePromise(typeof address === "object" && address !== null ? address.port : 0);
       });
     });
+
+    const options = baseOptions({
+      argv: ["--provider", "anthropic", "--port", String(occupiedPort)],
+    });
+    delete (options as { port?: number }).port;
+    const code = await runDashboard(options);
+    expect(code).toBe(3);
+    expect(options.stderrLines[0]).toBe(
+      `Lohra dashboard: http://127.0.0.1:${String(occupiedPort)}\n`,
+    );
+
     await new Promise<void>((resolvePromise) =>
-      probe.close(() => {
+      occupying.close(() => {
         resolvePromise();
       }),
     );
-
-    const options = baseOptions({ argv: ["--provider", "anthropic", "--port", String(freePort)] });
-    delete (options as { port?: number }).port;
-    let shutdown: (() => void) | undefined;
-    options.registerShutdownTrigger = (handler: () => void) => {
-      shutdown = handler;
-    };
-    const donePromise = runDashboard(options);
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
-    expect(options.stderrLines[0]).toBe(`Lohra dashboard: http://127.0.0.1:${String(freePort)}\n`);
-
-    shutdown?.();
-    await donePromise;
   });
 });
 
