@@ -262,6 +262,25 @@ describe("runWorkflowCommand (issue #103)", () => {
       }
     });
 
+    it("list shows no overage suffix when spent tokens equal the token budget exactly", async () => {
+      // Pins strict `>` (AC: "gasto > token_budget"): a `>=` mutant would
+      // also show "over" here, at the boundary.
+      const connection = tmpDatabase();
+      try {
+        insertRun(connection, "run", "running", 1, { tokenBudget: 1_000 });
+        insertSpend(connection, "run", 600, 400);
+        const result = await run({
+          action: "list",
+          databasePath: connection.databasePath,
+          args: {},
+        });
+        expect(result.stdout).toContain("1000/1000 tok");
+        expect(result.stdout).not.toContain("over");
+      } finally {
+        connection.close();
+      }
+    });
+
     it("list shows no overage suffix when spent tokens are within budget", async () => {
       const connection = tmpDatabase();
       try {
