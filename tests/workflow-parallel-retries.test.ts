@@ -135,4 +135,42 @@ describe("parallel.retries (#242)", () => {
     expect(result.status).toBe("paused");
     expect(result.pauseReason).toBe("token_budget_exhausted");
   });
+
+  it("bounds a sibling's phantom respawns when the run pauses mid fan-out", async () => {
+    // `collectLeaf` returns a null leaf with NO spawn, NO fault and NO
+    // charge once `this.control.paused` is set (engine.ts:235-236) —
+    // indistinguishable from a fresh death by `output === null` alone.
+    // Two branches that both die expensively: whichever retry loses the
+    // race pauses the run via `gateTokens()`; the guard stops the OTHER
+    // branch's loop once `result.pauseFault` is visible — bounding the
+    // damage to at most one wasted attempt per branch (2). Without the
+    // guard, the base measured 4: the losing branch takes 1 respawn
+    // before `gateTokens()` throws and pauses; the other, unaware,
+    // spins through all 3 of its own `retries` hitting the paused
+    // shortcut each time (1 + 3 = 4) — never a full 6 (3 retries x 2
+    // branches), since the losing branch's own throw cuts its loop
+    // short too.
+    const expensive: ChildResult = {
+      status: "failed",
+      output: "boom",
+      usage: {
+        inputTokens: 2000,
+        outputTokens: 1,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningTokens: 0,
+      },
+    };
+    const runtime = new ScriptedRuntime([[expensive], [expensive]]);
+    const spec = parsed({
+      meta: { name: "retry-pause-race" },
+      nodes: [{ id: "p", type: "parallel", branches: ["a", "b"], retries: 3 }],
+    });
+    const budget = new Budget({ tokenBudget: 4000 });
+    const result = await new WorkflowEngine({ runtime, budget }).run(spec);
+    const respawns = (result as unknown as { leafRespawns: number }).leafRespawns;
+    expect(respawns).toBeLessThanOrEqual(2); // base measured 4 (1 + 3), not 6
+    expect(result.status).toBe("paused");
+    expect(result.pauseReason).toBe("token_budget_exhausted");
+  });
 });
