@@ -466,6 +466,51 @@ describe("workflow cache manifests", () => {
   });
 });
 
+// Shared by the two describes below (#240, #239): both exercise the real
+// durable run/resume path through `WorkflowService` over a temp SQLite home,
+// so they share the temp-root bookkeeping and the service factory.
+const workflowResumeRoots: string[] = [];
+
+afterEach(() => {
+  while (workflowResumeRoots.length > 0)
+    rmSync(workflowResumeRoots.pop() as string, { recursive: true, force: true });
+});
+
+function workflowResumeRoot(prefix: string): string {
+  const path = mkdtempSync(join(tmpdir(), prefix));
+  workflowResumeRoots.push(path);
+  return path;
+}
+
+function durableWorkflowService(
+  home: string,
+  runtime: ChildRuntime,
+  extra: { readonly policyPath?: string; readonly tiersPath?: string } = {},
+): { readonly service: WorkflowService; readonly close: () => void } {
+  const connection = openStateDatabase(join(home, "state.db"));
+  const repository = new WorkflowRepository(connection.database);
+  const locks = new LockRepository(connection.database);
+  const service = new WorkflowService({
+    runtime,
+    homeRoot: home,
+    ...extra,
+    store: {
+      repository,
+      locks,
+      holder: "test",
+      ttl: 900,
+      ownershipOf: () => ({ fence: 0, holder: "test", now: 1000 }),
+      database: connection.database,
+    },
+  });
+  return {
+    service,
+    close: () => {
+      connection.close();
+    },
+  };
+}
+
 // Issue #240: the cell key is `runId + contentHash(spec.name, meta.version,
 // ...parts)` (`src/workflow/cache.ts:66-67`, `src/workflow/engine.ts:357-359`,
 // `:379`). The operator policy lives on the stretch (`src/workflow/
@@ -475,18 +520,6 @@ describe("workflow cache manifests", () => {
 // and the cache meet): a checkpoint separates a node that already ran from
 // one that hasn't, so "zero re-spawn" and "re-spawn" are both observable.
 describe("workflow policy vs tier map — cache invalidation contract (#240)", () => {
-  const roots: string[] = [];
-
-  afterEach(() => {
-    while (roots.length > 0) rmSync(roots.pop() as string, { recursive: true, force: true });
-  });
-
-  function root(): string {
-    const path = mkdtempSync(join(tmpdir(), "lohra-hardening-policy-"));
-    roots.push(path);
-    return path;
-  }
-
   function recordingRuntime(): ChildRuntime & { readonly requests: ChildSpawnRequest[] } {
     const requests: ChildSpawnRequest[] = [];
     return {
@@ -516,37 +549,8 @@ describe("workflow policy vs tier map — cache invalidation contract (#240)", (
     };
   }
 
-  function durableService(
-    home: string,
-    runtime: ChildRuntime,
-    extra: { readonly policyPath?: string; readonly tiersPath?: string } = {},
-  ): { readonly service: WorkflowService; readonly close: () => void } {
-    const connection = openStateDatabase(join(home, "state.db"));
-    const repository = new WorkflowRepository(connection.database);
-    const locks = new LockRepository(connection.database);
-    const service = new WorkflowService({
-      runtime,
-      homeRoot: home,
-      ...extra,
-      store: {
-        repository,
-        locks,
-        holder: "test",
-        ttl: 900,
-        ownershipOf: () => ({ fence: 0, holder: "test", now: 1000 }),
-        database: connection.database,
-      },
-    });
-    return {
-      service,
-      close: () => {
-        connection.close();
-      },
-    };
-  }
-
   it("changing the operator policy between run and resume never re-spawns the intact cell (#240)", async () => {
-    const home = root();
+    const home = workflowResumeRoot("lohra-hardening-policy-");
     const policyPath = join(home, "workflow_policy.json");
     const dirA = join(home, "allow-a");
     const dirB = join(home, "allow-b");
@@ -554,7 +558,7 @@ describe("workflow policy vs tier map — cache invalidation contract (#240)", (
     mkdirSync(dirB, { recursive: true });
     writeFileSync(policyPath, JSON.stringify({ fs_allow: [dirA], egress_allow: [] }));
     const runtime = recordingRuntime();
-    const { service, close } = durableService(home, runtime, { policyPath });
+    const { service, close } = durableWorkflowService(home, runtime, { policyPath });
     try {
       const started = service.start(twoStageSpec());
       if ("error" in started) throw new Error(started.error);
@@ -599,11 +603,11 @@ describe("workflow policy vs tier map — cache invalidation contract (#240)", (
   });
 
   it("changing the tier map for a node's tier between run and resume DOES invalidate the cell — routingIdentity resolves into the hash, correct behavior (#240, #258)", async () => {
-    const home = root();
+    const home = workflowResumeRoot("lohra-hardening-policy-");
     const tiersPath = join(home, "workflow_tiers.json");
     writeTiers(tiersPath, { big: { model: "model-v1" } });
     const runtime = recordingRuntime();
-    const { service, close } = durableService(home, runtime, { tiersPath });
+    const { service, close } = durableWorkflowService(home, runtime, { tiersPath });
     try {
       const started = service.start(twoStageSpec());
       if ("error" in started) throw new Error(started.error);
@@ -624,6 +628,171 @@ describe("workflow policy vs tier map — cache invalidation contract (#240)", (
       expect(runtime.requests[1]?.prompt).toBe("first");
       expect(runtime.requests[1]?.model).toBe("model-v2");
       expect(runtime.requests[2]?.prompt).toBe("second");
+    } finally {
+      close();
+    }
+  });
+});
+
+// Issue #239: `completeness_check` and `checkpoint` are cached cells
+// (`src/workflow/engine.ts:942-994`) — determinism across a resume is a
+// CONSEQUENCE of the run-scoped cache, not a guard of its own. These tests
+// pin that consequence through the real durable `WorkflowService` path (the
+// same store/cache pairing #240 exercises above), so a change that breaks
+// the cache contract for these two node types is caught here even though
+// nothing about them is special-cased.
+describe("checkpoint/resume verdict parity (#239)", () => {
+  // Records every spawn and scripts a DIFFERENT output the second time the
+  // SAME cell (by causalContext.cellId) is spawned — so a wrongful re-spawn
+  // on resume is observable both as an extra request AND as a changed value
+  // downstream, not just as a request-count coincidence.
+  function verdictRuntime(): ChildRuntime & { readonly requests: ChildSpawnRequest[] } {
+    const requests: ChildSpawnRequest[] = [];
+    const seenCount = new Map<string, number>();
+    const scripted = new Map<string, unknown>();
+    return {
+      requests,
+      spawn(request: ChildSpawnRequest): string {
+        requests.push(request);
+        const id = `leaf-${String(requests.length)}`;
+        const cellId = request.causalContext.cellId;
+        const count = (seenCount.get(cellId) ?? 0) + 1;
+        seenCount.set(cellId, count);
+        scripted.set(
+          id,
+          count === 1 ? { complete: false, missing: ["docs"] } : { complete: true, missing: [] },
+        );
+        return id;
+      },
+      collect: (id: string): ChildResult => complete(scripted.get(id) ?? "ok"),
+      steer: (): void => undefined,
+      cancel: (): void => undefined,
+      installLeafSandbox: (): LeafSandboxHandle => ({ dispose: (): void => undefined }),
+    };
+  }
+
+  function completenessSpec(): Record<string, unknown> {
+    return {
+      meta: { name: "completeness-resume" },
+      nodes: [
+        { id: "c", type: "completeness_check", task: "ship", results: ["code"] },
+        { id: "cp", type: "checkpoint", prompt: "continue?", default: "yes", depends_on: ["c"] },
+        { id: "b", type: "agent", prompt: "second: ${c.complete}", depends_on: ["cp"] },
+      ],
+    };
+  }
+
+  it("completeness_check verdict survives a resume with no new spawn of that cell (#239 AC a)", async () => {
+    const home = workflowResumeRoot("lohra-hardening-checkpoint-");
+    const runtime = verdictRuntime();
+    const { service, close } = durableWorkflowService(home, runtime);
+    try {
+      const started = service.start(completenessSpec());
+      if ("error" in started) throw new Error(started.error);
+      const paused = (await service.status(started.run_id, true)) as Record<string, unknown>;
+      expect(paused.status).toBe("paused");
+      expect(paused.pause_reason).toBe("checkpoint");
+      expect(runtime.requests).toHaveLength(1);
+      // resume takes the checkpoint's default — no checkpoint_answers passed.
+      const resumed = service.start(null, {}, { resumeRunId: started.run_id });
+      if ("error" in resumed) throw new Error(resumed.error);
+      const final = (await service.status(started.run_id, true)) as Record<string, unknown>;
+      expect(final.status).toBe("complete");
+      // "c" is NOT re-spawned: two requests total (c, then b). Three would
+      // mean the resume re-ran the completeness cell from scratch.
+      expect(runtime.requests).toHaveLength(2);
+      // "b" observes the verdict "c" resolved with BEFORE the pause (false),
+      // never the scripted second-spawn value (true) a re-spawn would leak.
+      expect(runtime.requests[1]?.prompt).toBe("second: false");
+    } finally {
+      close();
+    }
+  });
+
+  function checkpointDurabilitySpec(): Record<string, unknown> {
+    return {
+      meta: { name: "checkpoint-answer-durable" },
+      nodes: [
+        { id: "a", type: "agent", prompt: "alpha" },
+        { id: "cp1", type: "checkpoint", prompt: "first?", depends_on: ["a"] },
+        { id: "b", type: "agent", prompt: "beta", depends_on: ["cp1"] },
+        { id: "cp2", type: "checkpoint", prompt: "second?", depends_on: ["b"] },
+        { id: "final", type: "agent", prompt: "gamma: ${cp1} then ${cp2}", depends_on: ["cp2"] },
+      ],
+    };
+  }
+
+  it("a checkpoint's recorded answer survives a LATER resume that omits it (#239 AC b)", async () => {
+    const home = workflowResumeRoot("lohra-hardening-checkpoint-");
+    const runtime = verdictRuntime();
+    const { service, close } = durableWorkflowService(home, runtime);
+    try {
+      const started = service.start(checkpointDurabilitySpec());
+      if ("error" in started) throw new Error(started.error);
+      const firstPause = (await service.status(started.run_id, true)) as Record<string, unknown>;
+      expect(firstPause.status).toBe("paused");
+      expect(runtime.requests).toHaveLength(1); // only "a"
+
+      const resume1 = service.start(
+        null,
+        {},
+        {
+          resumeRunId: started.run_id,
+          checkpointAnswers: { cp1: "go1" },
+        },
+      );
+      if ("error" in resume1) throw new Error(resume1.error);
+      const secondPause = (await service.status(started.run_id, true)) as Record<string, unknown>;
+      expect(secondPause.status).toBe("paused");
+      expect(runtime.requests).toHaveLength(2); // "a" cached, "b" fresh
+
+      // resume #2 answers ONLY cp2 — cp1's answer is not repeated here, yet
+      // the durable cell recorded for cp1 in resume #1 must still resolve.
+      const resume2 = service.start(
+        null,
+        {},
+        {
+          resumeRunId: started.run_id,
+          checkpointAnswers: { cp2: "go2" },
+        },
+      );
+      if ("error" in resume2) throw new Error(resume2.error);
+      const final = (await service.status(started.run_id, true)) as Record<string, unknown>;
+      expect(final.status).toBe("complete");
+      expect(runtime.requests).toHaveLength(3); // a, b, final — no re-spawn
+      expect(runtime.requests[2]?.prompt).toBe("gamma: go1 then go2");
+    } finally {
+      close();
+    }
+  });
+
+  function undefaultedCheckpointSpec(): Record<string, unknown> {
+    return {
+      meta: { name: "checkpoint-no-default" },
+      nodes: [{ id: "cp", type: "checkpoint", prompt: "answer me" }],
+    };
+  }
+
+  it("a resume without an answer and without a default stays paused, unmodified (#239 AC c)", async () => {
+    const home = workflowResumeRoot("lohra-hardening-checkpoint-");
+    const runtime = verdictRuntime();
+    const { service, close } = durableWorkflowService(home, runtime);
+    try {
+      const started = service.start(undefaultedCheckpointSpec());
+      if ("error" in started) throw new Error(started.error);
+      const paused = (await service.status(started.run_id, true)) as Record<string, unknown>;
+      expect(paused.status).toBe("paused");
+      expect(paused.pause_reason).toBe("checkpoint");
+
+      const resumed = service.start(null, {}, { resumeRunId: started.run_id });
+      expect("error" in resumed).toBe(true);
+      if ("error" in resumed) expect(resumed.error).toContain("waiting for an answer");
+
+      // the refused resume never touched the run: still paused, same reason.
+      const still = (await service.status(started.run_id, true)) as Record<string, unknown>;
+      expect(still.status).toBe("paused");
+      expect(still.pause_reason).toBe("checkpoint");
+      expect(runtime.requests).toHaveLength(0);
     } finally {
       close();
     }
