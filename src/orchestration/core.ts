@@ -17,6 +17,12 @@ export interface CollectResult {
   readonly forcedFallback: boolean;
   readonly errorKind: string | null;
   readonly retryAfter: number | null;
+  /** True when this turn never measured real usage — the leaf died before
+   * reporting (cancelled), the provider call itself failed, or resolving
+   * the provider/model never reached a call at all. Contadores acima ficam
+   * em zero nesses casos, mas MARCADOS: nunca confundidos com um turno que
+   * genuinely spent zero tokens (issue #232). */
+  readonly usageUncertain?: boolean;
 }
 
 /** A child's async tool dispatch: `(name, args) => Promise<string>`, the
