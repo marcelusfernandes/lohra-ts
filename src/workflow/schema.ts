@@ -1,4 +1,4 @@
-import type { WorkflowLoader } from "./engine-contract.js";
+import { MAX_WORKFLOW_DEPTH, type WorkflowLoader } from "./engine-contract.js";
 import {
   MAX_GATE_ATTEMPTS,
   MAX_NODE_MAX_ITERATIONS,
@@ -572,13 +572,56 @@ export function validateSpec(
  * stops recursing there too instead of reporting a ref issue that was never
  * the engine's to raise.
  */
+function looksLikePromise(value: unknown): boolean {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    typeof (value as { then?: unknown }).then === "function"
+  );
+}
+
+function nestedRefIssue(issues: SpecIssue[], node: Node, ref: string, detail: string): void {
+  issue(
+    issues,
+    "nested_ref",
+    `nested workflow '${ref}' is invalid: ${detail} (see issue #244)`,
+    node.id,
+    "ref",
+  );
+}
+
 export function validateNestedRefs(
   spec: WorkflowSpec,
   loader: WorkflowLoader | undefined,
   depth = 0,
 ): ValidationError | null {
-  void spec;
-  void loader;
-  void depth;
-  throw new Error("not implemented: validateNestedRefs");
+  if (loader === undefined || depth >= MAX_WORKFLOW_DEPTH) return null;
+  const issues: SpecIssue[] = [];
+  for (const node of spec.nodes) {
+    if (node.type !== "workflow") continue;
+    const ref = node.fields.ref;
+    if (typeof ref !== "string" || findRefs(ref).length > 0) continue;
+    let raw: unknown;
+    try {
+      raw = loader(ref);
+    } catch (error) {
+      nestedRefIssue(issues, node, ref, error instanceof Error ? error.message : String(error));
+      continue;
+    }
+    if (looksLikePromise(raw)) {
+      // Async loader: unresolvable synchronously at launch. Never leave the
+      // Promise dangling — its rejection is entirely the runtime backstop's
+      // concern (engine.ts's runNested awaits the same loader again).
+      void (raw as Promise<unknown>).catch(() => undefined);
+      continue;
+    }
+    const parsed = validateSpec(raw);
+    if (parsed instanceof ValidationError) {
+      nestedRefIssue(issues, node, ref, parsed.message);
+      continue;
+    }
+    const nested = validateNestedRefs(parsed, loader, depth + 1);
+    if (nested !== null) issues.push(...nested.issues);
+  }
+  return issues.length > 0 ? new ValidationError(issues) : null;
 }
