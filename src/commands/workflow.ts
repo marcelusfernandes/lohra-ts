@@ -5,6 +5,14 @@ import { openStateDatabase } from "../state/connection.js";
 import { WorkflowRepository } from "../state/workflow-repository.js";
 import { parseAuditQuery } from "../workflow/audit-query.js";
 import { productionWarningSink } from "../workflow/ownership-store.js";
+import {
+  CHECKPOINT_HINT,
+  CHECKPOINT_PAUSE,
+  TOKEN_BUDGET_HINT,
+  TOKEN_BUDGET_PAUSE,
+  USER_PAUSE,
+  USER_PAUSE_HINT,
+} from "../workflow/service.js";
 
 export interface WorkflowCommandOptions {
   readonly action: "list" | "watch" | "audit";
@@ -49,6 +57,16 @@ function isStale(
   );
 }
 
+/** The retry hint for a `pause_reason` (`src/workflow/service.ts`, the same
+ * text `run_workflow`'s tool surface returns). `quota_exhausted` has none —
+ * it auto-resumes; there's nothing for the operator to do. */
+function pauseHint(pauseReason: string): string | null {
+  if (pauseReason === CHECKPOINT_PAUSE) return CHECKPOINT_HINT;
+  if (pauseReason === TOKEN_BUDGET_PAUSE) return TOKEN_BUDGET_HINT;
+  if (pauseReason === USER_PAUSE) return USER_PAUSE_HINT;
+  return null;
+}
+
 function render(
   database: Database.Database,
   repository: WorkflowRepository,
@@ -56,15 +74,21 @@ function render(
   now: number,
 ): string {
   const runId = String(row.run_id);
+  const status = text(row.status);
   const state = progress(row);
   const spend = repository.getRunSpend(runId);
   const tokens = Number(spend?.tokens_in ?? 0) + Number(spend?.tokens_out ?? 0);
-  const budget =
+  const budgetValue =
     typeof row.token_budget === "bigint" || typeof row.token_budget === "number"
-      ? `/${String(row.token_budget)}`
-      : "";
+      ? Number(row.token_budget)
+      : null;
+  const budget = budgetValue === null ? "" : `/${String(budgetValue)}`;
+  const over =
+    budgetValue !== null && tokens > budgetValue ? ` (+${String(tokens - budgetValue)} over)` : "";
   const stale = isStale(database, row, now) ? " (stale)" : "";
-  return `${runId.slice(0, 8)}  ${text(row.status)}${stale}  ${String(state.done)}/${String(state.total)} nodes  ${String(tokens)}${budget} tok  ${text(row.name)}`.trimEnd();
+  const pauseReason = status === "paused" ? text(row.pause_reason) : "";
+  const pauseSuffix = pauseReason !== "" ? ` (${pauseReason})` : "";
+  return `${runId.slice(0, 8)}  ${status}${stale}${pauseSuffix}  ${String(state.done)}/${String(state.total)} nodes  ${String(tokens)}${budget} tok${over}  ${text(row.name)}`.trimEnd();
 }
 
 export async function runWorkflowCommand(options: WorkflowCommandOptions): Promise<number> {
@@ -129,7 +153,13 @@ export async function runWorkflowCommand(options: WorkflowCommandOptions): Promi
         options.stdout(`${line}\n`);
         previous = line;
       }
-      if (TERMINAL.has(String(row.status))) return 0;
+      if (TERMINAL.has(String(row.status))) {
+        if (String(row.status) === "paused") {
+          const hint = pauseHint(text(row.pause_reason));
+          if (hint !== null) options.stderr(`${hint}\n`);
+        }
+        return 0;
+      }
       if (isStale(connection.database, row, now())) {
         options.stderr(`${STALE_HINT}\n`);
         return 0;

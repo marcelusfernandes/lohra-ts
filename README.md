@@ -239,6 +239,15 @@ retoma o run reaproveitando o cache: os nós já concluídos não são
 reexecutados, só o trabalho que ainda faltava quando o processo anterior
 parou (issue #103, `tests/workflow-cross-process.test.ts`).
 
+`list` e `watch` mostram por que um run pausou: a linha de status ganha um
+sufixo `(<pause_reason>)` — `checkpoint`, `token_budget_exhausted`,
+`user_requested` ou `quota_exhausted` — e, quando o gasto de tokens excede
+`token_budget`, o campo de tokens ganha `(+N over)` (`1100/1000 tok (+100
+over)`). `watch` ainda escreve no stderr a dica de retomada certa (a mesma
+que `run_workflow` devolve como `hint`) assim que o run termina pausado;
+`quota_exhausted` não tem dica porque retoma sozinho, sem ação do operador
+(issue #245, `tests/workflow-command.test.ts`).
+
 A tool `list_models` reporta `context_window` por modelo — a janela de
 contexto que o próprio provedor expõe em `/models` (`context_length` no
 OpenRouter; `max_input_tokens`/`context_window` em outros; `null`, nunca

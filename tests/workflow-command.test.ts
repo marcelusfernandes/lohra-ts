@@ -232,7 +232,9 @@ describe("runWorkflowCommand (issue #103)", () => {
     it("list does not show a pause suffix for a run that is not paused", async () => {
       const connection = tmpDatabase();
       try {
-        insertRun(connection, "run", "running", 1);
+        // "complete", not "running": a running row with no lock is (stale)
+        // (unrelated to #245), which would also match `toContain("(")`.
+        insertRun(connection, "run", "complete", 1);
         const result = await run({
           action: "list",
           databasePath: connection.databasePath,
