@@ -23,7 +23,8 @@ O lohra Python mediu esse cenário no experimento #62
 referência histórica, não oracle — ADR 0003): dois escritores no mesmo
 arquivo, no mesmo diretório compartilhado, perdem uma das duas escritas em
 24 de 25 rodadas. Um arquivo por folha — cada branch escrevendo um caminho
-próprio dentro do working root — não exibiu essa perda em nenhuma rodada.
+próprio dentro do working root — é seguro (a origem cita esse desenho como
+seguro, sem detalhar contagem de rodadas para ele, só para o de colisão).
 Uma terceira opção, ordenar as escritas por recurso dentro do nó (serializar
 o fan-out sempre que duas folhas tocam o mesmo caminho), foi cogitada e
 descartada: equivale a serializar o fan-out, contra o próprio motivo de
