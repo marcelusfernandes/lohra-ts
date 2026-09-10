@@ -172,6 +172,29 @@ describe("mutations.yml — forma do workflow", () => {
     expect(yaml).toContain("path: .mutation-evidence/");
   });
 
+  it("o step mutate liga pipefail antes do tee e grava o log da fatia (issue #325)", () => {
+    const step = yaml.slice(
+      yaml.indexOf("- name: ${{ matrix.slice }}"),
+      yaml.indexOf("- uses: actions/upload-artifact"),
+    );
+    const indicePipefail = step.indexOf("set -o pipefail");
+    const indiceTee = step.indexOf("| tee");
+    expect(indicePipefail, "set -o pipefail ausente no step mutate").toBeGreaterThanOrEqual(0);
+    expect(indiceTee, "| tee ausente no step mutate").toBeGreaterThanOrEqual(0);
+    expect(indicePipefail).toBeLessThan(indiceTee);
+    expect(step).toContain("mkdir -p .mutation-evidence");
+    expect(step).toContain(
+      'npm run ${{ matrix.script }} 2>&1 | tee ".mutation-evidence/${{ matrix.slice }}.log"',
+    );
+  });
+
+  it("o upload-artifact do mutate roda sempre e aponta para .mutation-evidence/ (issue #325)", () => {
+    const uploadInicio = yaml.indexOf("- uses: actions/upload-artifact");
+    const upload = yaml.slice(uploadInicio, yaml.indexOf("mutations:", uploadInicio));
+    expect(upload).toContain("if: always()");
+    expect(upload).toContain("path: .mutation-evidence/");
+  });
+
   it("o step do plan não engole o exit code do script (sem pipe; set +e / exit $status)", () => {
     const step = yaml
       .slice(yaml.indexOf("fatias que o diff exige"), yaml.indexOf("  mutate:"))
