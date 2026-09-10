@@ -264,8 +264,7 @@ export interface LeafSandboxUnavailable {
   readonly run_id: string;
 }
 
-/** A durable run whose runtime cannot install the leaf sandbox does not
- * start: it fails closed BEFORE any spawn rather than run leaves unpoliced. */
+/** A durable run whose runtime cannot install the leaf sandbox fails closed BEFORE any spawn rather than run leaves unpoliced. */
 export function leafSandboxUnavailable(runId: string): LeafSandboxUnavailable {
   return Object.freeze({
     error: "workflow leaf sandbox unavailable" as const,
@@ -334,6 +333,7 @@ function resultView(
     checkpoint: result.checkpoint,
     token_budget: budget.snapshot(),
     null_rate: result.nullRate,
+    usage_uncertain_leaves: result.usageUncertainLeaves,
   });
 }
 

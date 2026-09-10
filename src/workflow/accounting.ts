@@ -38,6 +38,7 @@ export class RunResult {
   cacheReadTokens = 0;
   cacheWriteTokens = 0;
   reasoningTokens = 0;
+  usageUncertainLeaves = 0;
   readonly nodeCosts: Record<string, NodeCost> = {};
   forcingFallbacks = 0;
   status: RunStatus = "complete";
@@ -63,12 +64,14 @@ export function addUsageToResult(
   next: Usage,
   provider: string | null,
   model: string | null,
+  usageUncertain = false,
 ): void {
   result.tokensIn += next.inputTokens;
   result.tokensOut += next.outputTokens;
   result.cacheReadTokens += next.cacheReadTokens;
   result.cacheWriteTokens += next.cacheWriteTokens;
   result.reasoningTokens += next.reasoningTokens;
+  if (usageUncertain) result.usageUncertainLeaves += 1;
   result.nodeCosts[nodeId] = (result.nodeCosts[nodeId] ?? new NodeCost()).merge(
     next,
     provider,

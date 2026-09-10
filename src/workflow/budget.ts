@@ -73,12 +73,15 @@ export class Budget {
     this.spawned += Math.max(0, Math.trunc(count));
   }
 
-  chargeTokens(inputTokens: number, outputTokens: number): void {
+  chargeTokens(inputTokens: number, outputTokens: number, usageUncertain = false): void {
     const input = Math.max(0, Math.trunc(inputTokens));
     const output = Math.max(0, Math.trunc(outputTokens));
     this.input += input;
     this.output += output;
-    if (input > 0 || output > 0) this.measuredLeaves += 1;
+    // #232: a leaf whose usage was never measured never counts toward the
+    // average, even if a future caller passes nonzero tokens for it —
+    // never let an unmeasured leaf pull estimatedLeafCost down.
+    if (!usageUncertain && (input > 0 || output > 0)) this.measuredLeaves += 1;
   }
 
   get tokensIn(): number {
