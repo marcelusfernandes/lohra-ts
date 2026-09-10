@@ -6,8 +6,28 @@
 // `LOHRA_CONTEXT_WINDOW` inválido nunca é ignorado — é um erro nomeado, para
 // nunca rodar silenciosamente com uma janela errada.
 
+const positiveIntegerPattern = /^\d+$/;
+
+/**
+ * Lê `LOHRA_CONTEXT_WINDOW`: ausente ou em branco devolve `null` (nenhum
+ * override); qualquer outra coisa precisa ser um inteiro positivo em
+ * dígitos decimais (sem sinal, sem separador, sem casas decimais) ou lança
+ * `LOHRA_CONTEXT_WINDOW_INVALID:<valor bruto>` — nunca cai de volta para um
+ * default silenciosamente.
+ */
 export function resolveContextWindowOverride(
-  _environment: Readonly<Record<string, string | undefined>>,
+  environment: Readonly<Record<string, string | undefined>>,
 ): number | null {
-  throw new Error("not implemented: resolveContextWindowOverride");
+  const raw = environment.LOHRA_CONTEXT_WINDOW;
+  if (raw === undefined) return null;
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+  if (!positiveIntegerPattern.test(trimmed)) {
+    throw new Error(`LOHRA_CONTEXT_WINDOW_INVALID:${raw}`);
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`LOHRA_CONTEXT_WINDOW_INVALID:${raw}`);
+  }
+  return parsed;
 }

@@ -47,6 +47,55 @@ export interface ResolveContextWindowInput {
   readonly profile: ProviderProfile;
 }
 
-export function resolveContextWindow(_input: ResolveContextWindowInput): never {
-  throw new Error("not implemented: resolveContextWindow");
+function isValidWindow(value: unknown): value is number {
+  return (
+    typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value > 0
+  );
+}
+
+/** Prefixo mais longo de `model` presente em `table` vence — um id datado
+ * como "gpt-4o-2024-08-06" casa com a entrada "gpt-4o" e, se "gpt-4o-mini"
+ * também estiver na tabela, um id "gpt-4o-mini-2024-07-18" casa com ela em
+ * vez de com a entrada mais curta. */
+function longestPrefixMatch(
+  model: string,
+  table: Readonly<Record<string, number>> | undefined,
+): number | null {
+  if (table === undefined) return null;
+  let bestKey = "";
+  let bestValue: number | null = null;
+  for (const [key, value] of Object.entries(table)) {
+    if (model.startsWith(key) && key.length >= bestKey.length) {
+      bestKey = key;
+      bestValue = value;
+    }
+  }
+  return bestValue;
+}
+
+export function resolveContextWindow(input: ResolveContextWindowInput): ContextWindowResolution {
+  const { provider, model, override, catalog, profile } = input;
+
+  if (override !== undefined && override !== null) {
+    if (!isValidWindow(override)) {
+      throw new Error(`CONTEXT_WINDOW_INVALID_OVERRIDE:${String(override)}`);
+    }
+    return { tokens: override, source: "override" };
+  }
+
+  const cached = catalog?.[provider]?.[model];
+  if (isValidWindow(cached)) {
+    return { tokens: cached, source: "catalog" };
+  }
+
+  const tabled = longestPrefixMatch(model, profile.modelWindows);
+  if (tabled !== null) {
+    return { tokens: tabled, source: "table" };
+  }
+
+  if (isValidWindow(profile.defaultContextWindow)) {
+    return { tokens: profile.defaultContextWindow, source: "provider" };
+  }
+
+  return { tokens: DEFAULT_CONTEXT_WINDOW, source: "default" };
 }
