@@ -3,6 +3,7 @@ import type { Usage } from "../pricing/types.js";
 import { addUsageToResult, type RunResult } from "./accounting.js";
 import { contentHash, type WorkflowCache } from "./cache.js";
 import type { LeafExecution } from "./engine-contract.js";
+import { MAX_NODE_RETRIES } from "./nodes.js";
 import { isEmptyOutput } from "./output-validation.js";
 import { resolveValue } from "./refs.js";
 import type { ChildResult } from "./runtime.js";
@@ -120,7 +121,12 @@ export interface ParallelBranchDeps {
     node: Node,
     prompt: string,
     schema: Readonly<Record<string, unknown>> | null,
-    options: { readonly role: string; readonly cellId: string; readonly itemIndex: number },
+    options: {
+      readonly role: string;
+      readonly cellId: string;
+      readonly itemIndex: number;
+      readonly attempt?: number;
+    },
   ) => Promise<LeafExecution>;
 }
 
@@ -135,6 +141,7 @@ export async function replayOrCollectBranch(
   node: Node,
   index: number,
   prompt: string,
+  attempt = 0,
 ): Promise<LeafExecution> {
   const routing = routingIdentity(node, deps.tiers);
   const branchHash = contentHash(...deps.spec, node.id, "parallel", index, prompt, ...routing);
@@ -147,9 +154,35 @@ export async function replayOrCollectBranch(
     role: "parallel.branch",
     cellId: branchHash,
     itemIndex: index,
+    attempt,
   });
   if (nonEmpty(leaf.output))
     deps.cache.put(deps.runId, branchHash, node.id, leaf.output, leaf.usage);
+  return leaf;
+}
+
+/** Issue #242: a branch that comes back DEAD (`output === null` — timed
+ * out, cancelled, or the runtime reported a failure) gets refed up to
+ * `node.fields.retries` (0-3, default 0 — absent means today's behavior).
+ * A branch with a legitimate EMPTY output (no schema, so "" or [] is real
+ * data, not a failure) is never retried — only `=== null` triggers a
+ * respawn, same distinction `nonEmpty` draws for caching. Each retry reuses
+ * `deps.collectLeaf`, which already runs `gateTokens`/`gateFanout(1, true)`
+ * and already records a fault with cause on every dead leaf — so the
+ * budget stop-line and the fault trail both come from the existing path;
+ * this only owns the loop and `leafRespawns`. */
+export async function collectBranchWithRetries(
+  deps: ParallelBranchDeps,
+  node: Node,
+  index: number,
+  prompt: string,
+): Promise<LeafExecution> {
+  const retries = clampInteger(node.fields.retries, 0, MAX_NODE_RETRIES);
+  let leaf = await replayOrCollectBranch(deps, node, index, prompt, 0);
+  for (let attempt = 1; attempt <= retries && leaf.output === null; attempt += 1) {
+    deps.result.leafRespawns += 1;
+    leaf = await replayOrCollectBranch(deps, node, index, prompt, attempt);
+  }
   return leaf;
 }
 

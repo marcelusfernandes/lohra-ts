@@ -23,7 +23,7 @@ export const NODE_SPECS: Readonly<Record<string, NodeSpec>> = Object.freeze({
     ["prompt"],
     true,
   ),
-  parallel: spec(["branches"], ["branches"]),
+  parallel: spec(["branches", "retries"], ["branches"]),
   pipeline: spec(["items", "stages", "min_success_ratio"], ["items", "stages"]),
   loop_until_dry: spec(
     ["body", "stop_after_k_empty", "max_rounds", "budget"],
