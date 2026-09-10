@@ -4,10 +4,11 @@
 sub-issue do épico #230 — "Janela de contexto: compactar antes de estourar")
 estima quantos tokens de input um histórico de mensagens vai consumir, sem
 chamar o provedor e sem embutir um tokenizer real. É o insumo que o
-preflight de compactação (issue #252, `estimateRequestTokens` em
-`src/conversation/compaction.ts`; detalhes em `docs/context-compaction.md`)
-usa para decidir se compacta antes de chamar o modelo, comparando contra a
-janela efetiva do turno resolvida por `resolveTurnContextWindow`.
+preflight de compactação (issue #252) usa para decidir se compacta antes de
+chamar o modelo: `estimateRequestTokens` em `src/context/token-estimate.ts`,
+chamado pelo preflight em `src/conversation/runtime.ts`, compara o
+resultado contra a janela efetiva do turno resolvida por
+`resolveTurnContextWindow` (detalhes em `docs/context-compaction.md`).
 
 ## Por que heurística e não um tokenizer real
 

@@ -38,7 +38,11 @@ resolveContextWindow({
 2. **`catalog`** — o cache do catálogo do provedor (`loadWindowsCache`,
    issue #249, `src/catalog/windows-cache.ts`), por modelo exato. Um modelo
    ausente do cache ou com janela `null` (provedor não relatou) cai para o
-   próximo nível.
+   próximo nível. O único chamador vivo hoje, o preflight de compactação
+   (`resolveTurnContextWindow`, `src/conversation/compaction.ts:141`), passa
+   `catalog: undefined` de propósito — decisão registrada em
+   `docs/context-compaction.md`, "Fora de escopo desta issue" — então esse
+   nível nunca decide nesse caminho; cai direto para `table`.
 3. **`table`** — `ProviderProfile.modelWindows`
    (`src/providers/registry.ts`), por **prefixo mais longo** do id do
    modelo: um id datado como `gpt-4o-mini-2024-07-18` casa com a entrada
