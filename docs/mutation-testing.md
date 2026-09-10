@@ -136,20 +136,20 @@ inteira de `focalTests` em vez de um foco por mutante):
 | fatia                 | script                  | mutantes | catálogo(s)                                                                                                           |
 | --------------------- | ----------------------- | -------: | --------------------------------------------------------------------------------------------------------------------- |
 | `workflow-executor`   | `mutations:t15`         |       44 | `workflow-executor-mutants.ts`                                                                                        |
-| `workflow-durability` | `mutations:t16`         |       57 | `workflow-durability-guard.ts` (12 guard + 2 combined) + `workflow-durability-named.ts` (38) + `orchestration.ts` (5) |
+| `workflow-durability` | `mutations:t16`         |       59 | `workflow-durability-guard.ts` (12 guard + 2 combined) + `workflow-durability-named.ts` (40) + `orchestration.ts` (5) |
 | `workflow-audit-live` | `mutations:t17`         |       32 | `workflow-audit-live-mutants.ts`                                                                                      |
 | `media`               | `mutations:t21`         |       20 | `media-catalog-persistence.ts` (13) + `media-catalog-other.ts` (7)                                                    |
 | `web-tools`           | `mutations:t20`         |        9 | `web-tools-mutants.ts`                                                                                                |
 | `self-update`         | `mutations:self-update` |        8 | `self-update-mutants.ts`                                                                                              |
 
-Total: 170. Os 12 mutantes de `workflow-durability-guard.ts` são
+Total: 172. Os 12 mutantes de `workflow-durability-guard.ts` são
 combinatórios: três conjuntos do guard de escrita possuída (`fence`,
 `holder`, `lease-validity`) × quatro categorias (`state`, `cache`,
 `node-cost`, `spend`) — um mutante por combinação, cada um escorado só no
 teste focal da sua categoria, mais os 2 mutantes do INSERT combinado
 cache+custo (`combined-cell-guard-removed`,
 `combined-cost-escapes-refusal`). `tests/mutations-slices.test.ts` importa os
-nove catálogos de dado puro estaticamente e prova essa soma (170) a cada
+nove catálogos de dado puro estaticamente e prova essa soma (172) a cada
 corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
 
 ## `npm run mutations:all` — o agregador (issue #155)
@@ -228,13 +228,13 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
    `true`.
 5. `npm test` roda `tests/mutations-slices.test.ts`, que reprova de duas
    formas se a contagem não for atualizada junto com o mutante novo: a soma
-   total (170 + o novo) contra os nove catálogos importados, e a linha do
+   total (172 + o novo) contra os nove catálogos importados, e a linha do
    catálogo tocado em `CONTAGEM_POR_CATALOGO`
    (`tests/mutations-slices.test.ts:491-517`), uma tabela pinada por número
    literal — não derivada de `CATALOGOS.get(path).length` — para que uma
    troca compensatória entre dois catálogos (um ganha o que o outro perde,
    soma preservada) não passe despercebida. As duas contagens (o literal
-   `170` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
+   `172` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
    atualização junto com o mutante novo.
 
 ## Como adicionar uma fatia
@@ -258,7 +258,7 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
    outra forma lança): `src/<dir>/**` por diretório de primeiro nível de
    `src/` que a fatia cobre, ou o literal `src/<arquivo>.ts` para um arquivo
    de topo (ex.: `"src/cli.ts"` em `workflow-audit-live`,
-   `scripts/mutations/slices.json:39`). `tests/mutations-slices.test.ts:447-478`
+   `scripts/mutations/slices.json:40`). `tests/mutations-slices.test.ts:447-478`
    assevera que todo `edits[].file` de cada catálogo da fatia (normalizado
    para sob `src/`) casa algum `srcGlobs` dessa fatia — exceto os
    `edits[].file` fora de `src/` que estão na allowlist explícita
@@ -281,11 +281,11 @@ cada entrada de `slices.json`; que todo catálogo descoberto por conteúdo em
 `srcGlobs` cobre todo `edits[].file` dos catálogos da fatia (item 2 acima); a
 contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
 (`tests/mutations-slices.test.ts:491-517` — hoje `workflow-durability-guard`
-14, `workflow-durability-named` 38, `orchestration` 5,
+14, `workflow-durability-named` 40, `orchestration` 5,
 `workflow-audit-live-mutants` 32, `web-tools-mutants` 9,
 `media-catalog-other` 7, `media-catalog-persistence` 13,
-`self-update-mutants` 8, `workflow-executor-mutants` 44, soma 170) e a soma
-de 170 contra os nove catálogos importados; e que todo diretório de primeiro
+`self-update-mutants` 8, `workflow-executor-mutants` 44, soma 172) e a soma
+de 172 contra os nove catálogos importados; e que todo diretório de primeiro
 nível de `src/` está coberto por algum `srcGlobs` ou está em `SEM_FATIA` com
 um motivo não vazio — nunca os dois, nunca nenhum dos dois.
 
