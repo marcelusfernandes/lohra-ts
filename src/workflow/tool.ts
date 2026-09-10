@@ -79,9 +79,9 @@ export class WorkflowTool {
     return "error" in out ? toolError(String(out.error)) : toolResult(undefined, out);
   }
 
-  cancel(args: ToolArguments): string {
+  async cancel(args: ToolArguments): Promise<string> {
     if (typeof args.run_id !== "string") return toolError("workflow_cancel requires 'run_id'");
-    const out = this.service.cancel(args.run_id);
+    const out = await this.service.cancel(args.run_id);
     return "error" in out ? toolError(String(out.error)) : toolResult(undefined, out);
   }
 

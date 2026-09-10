@@ -128,7 +128,10 @@ export class WorkflowEngine {
 
   cancel(): void {
     this.control.cancelled = true;
+    this.cancelActiveLeaves();
   }
+
+  readonly activeLeafCount = (): number => this.activeLeaves.size;
 
   requestPause(): void {
     this.pause("user_requested", "run paused at the operator's request");
@@ -146,14 +149,11 @@ export class WorkflowEngine {
       `quota exhausted at '${nodeId}' (retry_after=${hint})`,
       retryAfter === null ? null : { retry_after: retryAfter },
     );
-    for (const id of [...this.activeLeaves]) {
-      try {
-        void this.runtime.cancel(id);
-      } catch {
-        // cleanup must never mask the pause itself
-      }
-    }
-    this.activeLeaves.clear();
+    this.cancelActiveLeaves();
+  }
+
+  private cancelActiveLeaves(): void {
+    for (const id of this.activeLeaves) void Promise.resolve().then(() => this.runtime.cancel(id));
   }
 
   private emit(event: WorkflowEvent): void {

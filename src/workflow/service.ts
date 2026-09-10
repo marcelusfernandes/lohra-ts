@@ -1287,9 +1287,6 @@ export class WorkflowService {
 
   // --- shutdown --------------------------------------------------------------
 
-  /** Idempotent: stops heartbeat/auto-resume, cancels + awaits (bounded) every
-   * live run so ITS OWN completion handler releases its lease before
-   * `connection.close()` runs, then flushes the audit trail (invariant 4). */
   public shutdown(): Promise<void> {
     return (this.shuttingDown ??= this.runShutdown());
   }
@@ -1298,6 +1295,13 @@ export class WorkflowService {
     this.autoResume?.shutdown();
     this.heartbeat?.shutdown();
     const live = [...this.runs.values()].filter((record) => !record.settled);
+    await this.cancelAndSettle("shutdown", live);
+    this.autoResume?.shutdown(); // also cancels a resume schedule()d mid-wait
+    const auditOk = this.auditTrail === undefined || (await this.auditTrail.shutdown());
+    if (!auditOk) this.warn("workflow: shutdown's audit trail flush failed");
+  }
+
+  private async cancelAndSettle(what: string, live: readonly RunRecord[]): Promise<boolean> {
     for (const record of live) record.engine.cancel();
     let timer: Timer | undefined;
     const expired = new Promise<boolean>((resolve) => {
@@ -1308,22 +1312,18 @@ export class WorkflowService {
     const settled = Promise.all(live.map((record) => record.promise)).then(() => true);
     const ok = await Promise.race([settled, expired]);
     timer?.cancel();
-    if (!ok) {
-      this.warn(
-        `workflow: shutdown timed out waiting for ${String(live.length)} run(s) to settle; ` +
-          "their lease is left to expire on the TTL (heartbeat already stopped)",
-      );
-    }
-    this.autoResume?.shutdown(); // also cancels a resume schedule()d mid-wait
-    const auditOk = this.auditTrail === undefined || (await this.auditTrail.shutdown());
-    if (!auditOk) this.warn("workflow: shutdown's audit trail flush failed");
+    if (!ok)
+      this.warn(`workflow: ${what} timed out waiting for ${String(live.length)} run(s) to settle`);
+    return ok;
   }
 
-  cancel(runId: string): WorkflowServiceError | Readonly<Record<string, unknown>> {
+  async cancel(runId: string): Promise<WorkflowServiceError | Readonly<Record<string, unknown>>> {
     const record = this.runs.get(runId);
     if (record !== undefined) {
-      record.engine.cancel();
-      return Object.freeze({ run_id: runId, status: "cancelled" });
+      const ok = await this.cancelAndSettle(`cancel of run '${runId}'`, [record]);
+      if (ok) return Object.freeze({ run_id: runId, status: "cancelled" });
+      const leaves = record.engine.activeLeafCount();
+      return Object.freeze({ run_id: runId, status: "cancelling", leaves_in_flight: leaves });
     }
     const store = this.store;
     if (store === undefined) return Object.freeze({ error: `unknown workflow run '${runId}'` });
