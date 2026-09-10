@@ -36,6 +36,98 @@ export function resolveInlineSchema(
   return typeof value === "string" ? record(schemas[value]) : null;
 }
 
+function checkSchemaXor(issues: SpecIssue[], nodeId: string | null, field: string): void {
+  issue(issues, "schema_xor", "use either 'schema' or 'schema_ref', not both", nodeId, field);
+}
+
+/**
+ * Checks a `schema_ref`/`schema` pair against `schemas:` with the same rule
+ * and message text everywhere it appears: the top-level node fields (called
+ * from `validateSpec`'s per-node loop with `fieldPrefix: ""`) and the
+ * agent-shaped sub-objects scanned by `schemaBearingSubObjects` below
+ * (`body`, `synthesize`, `stages[*]`, each with their own `fieldPrefix`).
+ */
+function checkNamedSchema(
+  fields: Readonly<Record<string, unknown>>,
+  nodeId: string | null,
+  fieldPrefix: string,
+  schemas: Readonly<Record<string, unknown>>,
+  issues: SpecIssue[],
+): void {
+  const schemaRef = fields.schema_ref;
+  if (typeof schemaRef === "string" && !(schemaRef in schemas)) {
+    issue(
+      issues,
+      "schema_ref",
+      `schema_ref '${schemaRef}' has no matching entry in schemas:`,
+      nodeId,
+      `${fieldPrefix}schema_ref`,
+    );
+  }
+  const inlineSchema = fields.schema;
+  if (
+    inlineSchema !== undefined &&
+    inlineSchema !== null &&
+    record(inlineSchema) === null &&
+    !(typeof inlineSchema === "string" && inlineSchema in schemas)
+  ) {
+    issue(
+      issues,
+      "schema_type",
+      "'schema' must be a JSON-Schema object; to reference a named schema use 'schema_ref'",
+      nodeId,
+      `${fieldPrefix}schema`,
+      "schema_ref: my_schema",
+    );
+  }
+}
+
+interface SchemaSubObject {
+  readonly fieldPrefix: string;
+  readonly fields: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Agent-shaped sub-objects where `schema`/`schema_ref` are meaningful
+ * because the engine's `schemaOf` (`engine.ts:347-355`) reads them off this
+ * same object at runtime: `loop_until_dry.body`, `gate.body`,
+ * `judge_panel.synthesize` and each `pipeline.stages[*]`. #238 (unknown
+ * fields in sub-objects) can reuse this same scan point for its own rule.
+ */
+function schemaBearingSubObjects(node: Node): readonly SchemaSubObject[] {
+  const targets: SchemaSubObject[] = [];
+  if (node.type === "gate" || node.type === "loop_until_dry") {
+    const body = record(node.fields.body);
+    if (body !== null) targets.push({ fieldPrefix: "body.", fields: body });
+  }
+  if (node.type === "judge_panel") {
+    const synthesize = record(node.fields.synthesize);
+    if (synthesize !== null) targets.push({ fieldPrefix: "synthesize.", fields: synthesize });
+  }
+  if (node.type === "pipeline" && Array.isArray(node.fields.stages)) {
+    node.fields.stages.forEach((stage, index) => {
+      const stageRecord = record(stage);
+      if (stageRecord !== null) {
+        targets.push({ fieldPrefix: `stages[${String(index)}].`, fields: stageRecord });
+      }
+    });
+  }
+  return targets;
+}
+
+function validateSubObjectSchemas(
+  node: Node,
+  schemas: Readonly<Record<string, unknown>>,
+  issues: SpecIssue[],
+): void {
+  for (const target of schemaBearingSubObjects(node)) {
+    if ("schema" in target.fields && "schema_ref" in target.fields) {
+      checkSchemaXor(issues, node.id, `${target.fieldPrefix}schema_ref`);
+    }
+    checkNamedSchema(target.fields, node.id, target.fieldPrefix, schemas, issues);
+  }
+}
+
 const allowedExample = (fields: readonly string[]): string =>
   `allowed: [${[...fields]
     .sort()
@@ -170,7 +262,7 @@ function validateShape(
     }
   }
   if (nodeType === "agent" && "schema" in raw && "schema_ref" in raw) {
-    issue(issues, "schema_xor", "use either 'schema' or 'schema_ref', not both", id, "schema_ref");
+    checkSchemaXor(issues, id, "schema_ref");
   }
   const fields = Object.fromEntries(
     Object.entries(raw).filter(([key]) => key !== "id" && key !== "type"),
@@ -440,32 +532,10 @@ export function validateSpec(
         );
       }
     }
-    const schemaRef = node.fields.schema_ref;
-    if (typeof schemaRef === "string" && !(schemaRef in schemas)) {
-      issue(
-        issues,
-        "schema_ref",
-        `schema_ref '${schemaRef}' has no matching entry in schemas:`,
-        node.id,
-        "schema_ref",
-      );
-    }
-    const inlineSchema = node.fields.schema;
-    if (
-      inlineSchema !== undefined &&
-      inlineSchema !== null &&
-      record(inlineSchema) === null &&
-      !(typeof inlineSchema === "string" && inlineSchema in schemas)
-    ) {
-      issue(
-        issues,
-        "schema_type",
-        "'schema' must be a JSON-Schema object; to reference a named schema use 'schema_ref'",
-        node.id,
-        "schema",
-        "schema_ref: my_schema",
-      );
-    }
+    checkNamedSchema(node.fields, node.id, "", schemas, issues);
+    // #238 (unknown fields in sub-objects) reuses this same scan point —
+    // schemaBearingSubObjects above already enumerates body/synthesize/stages.
+    validateSubObjectSchemas(node, schemas, issues);
     const count = staticFanout(node);
     if (count !== null && count > MAX_STATIC_FANOUT) {
       issue(

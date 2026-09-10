@@ -3,7 +3,7 @@ import type { CatalogHttpClient } from "../catalog/catalog.js";
 import type { OllamaStatus } from "../doctor/model.js";
 import { getProviderProfile } from "../providers/registry.js";
 import { stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
-import { loadTiers, MODEL_TIERS } from "../workflow/tiers.js";
+import { MODEL_TIERS, readTiers, TiersError } from "../workflow/tiers.js";
 
 export interface ModelsOptions {
   readonly json: boolean;
@@ -29,6 +29,16 @@ export async function runModels(
         }
       : { code: 2, stdout: "", stderr: `error: ${message}\n` };
   }
+  const tiers = readTiers(`${options.home}/workflow_tiers.json`);
+  if (tiers instanceof TiersError) {
+    return options.json
+      ? {
+          code: 1,
+          stdout: `${stringifyJsonPreservingNumbers({ error: tiers.message, providers: [], tiers: {} })}\n`,
+          stderr: "",
+        }
+      : { code: 1, stdout: "", stderr: `${tiers.message}\n` };
+  }
   const catalog = await buildCatalog({
     environment: options.environment,
     providers: wanted ? [wanted] : undefined,
@@ -41,7 +51,6 @@ export async function runModels(
       ? {}
       : { subscriptionModel: options.subscriptionModel }),
   });
-  const tiers = loadTiers(`${options.home}/workflow_tiers.json`);
   if (options.json) {
     const tierPayload: Record<string, unknown> = {};
     for (const name of MODEL_TIERS) {
