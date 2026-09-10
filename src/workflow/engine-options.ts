@@ -29,16 +29,19 @@ export interface WorkflowLaunchOptionsWithTiers extends WorkflowLaunchOptions {
  * OMITTED rather than set to `undefined`. Each site still supplies its own
  * `budget`, `cache` and `onEvent` — those genuinely diverge (in-memory vs
  * SQLite-backed cache; forwarding vs lease-renewing `onEvent`).
- *
- * Not yet wired into `WorkflowService` (#258 red state) — stub throws so a
- * caller that reaches it fails loudly instead of silently.
  */
 export function engineBaseOptions(
-  _runtime: ChildRuntime,
-  _runId: string,
-  _tiers: TierMap,
-  _loader: WorkflowLoader | undefined,
-  _checkpointAnswers: Readonly<Record<string, unknown>>,
+  runtime: ChildRuntime,
+  runId: string,
+  tiers: TierMap,
+  loader: WorkflowLoader | undefined,
+  checkpointAnswers: Readonly<Record<string, unknown>>,
 ): Pick<WorkflowEngineOptions, "runtime" | "runId" | "tiers" | "loader" | "checkpointAnswers"> {
-  throw new Error("not implemented: engineBaseOptions");
+  return {
+    runtime,
+    runId,
+    tiers,
+    ...(loader === undefined ? {} : { loader }),
+    ...(Object.keys(checkpointAnswers).length > 0 ? { checkpointAnswers } : {}),
+  };
 }
