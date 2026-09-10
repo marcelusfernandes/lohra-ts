@@ -456,6 +456,12 @@ export class SessionRepository {
     return chain.reverse();
   }
 
+  // `messages_fts_ai` (src/state/schema.ts) inserts on every message INSERT
+  // and never deletes -- a compaction's UPDATE ... SET active = 0 (above)
+  // deactivates the folded rows but leaves their FTS entries in place
+  // forever. Without `m.active = 1` here, a compacted session's search
+  // results included the same hit twice: once from the still-indexed
+  // deactivated row, once from whatever replaced it (issue #287).
   public searchMessages(query: string, limit = 10): readonly Row[] {
     if (!this.ftsEnabled || query.trim().length === 0) return [];
     try {
@@ -466,7 +472,7 @@ export class SessionRepository {
                   m.role AS role,
                   snippet(messages_fts, 0, '[', ']', '…', 12) AS snippet
            FROM messages_fts JOIN messages m ON m.id = messages_fts.message_id
-           WHERE messages_fts MATCH ?
+           WHERE messages_fts MATCH ? AND m.active = 1
            ORDER BY bm25(messages_fts)
            LIMIT ?`,
         )
