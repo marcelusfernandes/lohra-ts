@@ -13,7 +13,7 @@ import {
 import { WorkflowEngine } from "./engine.js";
 import { AutoResumeScheduler, LeaseHeartbeat, type Timer } from "./durability.js";
 import type { ChildRuntime, LeafSandboxHandle, LeafToolDispatch } from "./runtime.js";
-import { validateSpec } from "./schema.js";
+import { validateNestedRefs, validateSpec } from "./schema.js";
 import { ValidationError, type WorkflowSpec } from "./types.js";
 import type { RunResult } from "./accounting.js";
 import type { ProgressSnapshot } from "./progress.js";
@@ -631,6 +631,8 @@ export class WorkflowService {
     if (parsed instanceof ValidationError) {
       return Object.freeze({ error: parsed.message, invalid_spec: true });
     }
+    const nested = validateNestedRefs(parsed, this.loader);
+    if (nested !== null) return Object.freeze({ error: nested.message, invalid_spec: true });
     const budget = options.tokenBudget;
     if (
       budget !== undefined &&
@@ -1223,9 +1225,7 @@ export class WorkflowService {
     const started = this.start(spec, args, options);
     if ("error" in started) return started;
     const target = this.runs.get(started.run_id);
-    if (target === undefined) {
-      return await this.status(started.run_id, false);
-    }
+    if (target === undefined) return await this.status(started.run_id, false);
     return target.promise;
   }
 

@@ -656,4 +656,73 @@ describe("public workflow tool path", () => {
       "invalid workflow spec",
     );
   });
+
+  it("refuses launch when a nested workflow ref is invalid, without spawning a leaf (#244)", () => {
+    const runtime = new QueueChildren([]);
+    const service = new WorkflowService({
+      runtime,
+      idSource: () => "run-invalid-ref",
+      loader: () => ({
+        meta: { name: "inner" },
+        nodes: [{ id: "a", type: "agent", prompt: "x", unknown_field: true }],
+      }),
+    });
+    const out = service.start(
+      { meta: { name: "outer" }, nodes: [{ id: "nested", type: "workflow", ref: "inner" }] },
+      {},
+    );
+    expect("error" in out).toBe(true);
+    if (!("error" in out)) throw new Error("expected refusal");
+    expect(out.invalid_spec).toBe(true);
+    expect(out.error).toContain("nested");
+    expect(out.error).toContain("inner");
+    expect(out.error).toContain("#244");
+    expect(runtime.requests).toHaveLength(0);
+  });
+
+  it("launches normally when the nested ref is valid (no regression of depth)", () => {
+    const service = new WorkflowService({
+      runtime: new QueueChildren([[ok("inner-output")]]),
+      idSource: () => "run-valid-ref",
+      loader: () => ({
+        meta: { name: "inner" },
+        nodes: [{ id: "a", type: "agent", prompt: "x" }],
+      }),
+    });
+    const out = service.start(
+      { meta: { name: "outer" }, nodes: [{ id: "nested", type: "workflow", ref: "inner" }] },
+      {},
+    );
+    expect(out).toEqual({ run_id: "run-valid-ref", status: "started" });
+  });
+
+  it("backstop: a loader that turns invalid between launch and execution still faults the run", async () => {
+    let calls = 0;
+    const runtime = new QueueChildren([]);
+    const service = new WorkflowService({
+      runtime,
+      idSource: () => "run-drifted-ref",
+      loader: () => {
+        calls += 1;
+        return calls === 1
+          ? { meta: { name: "inner" }, nodes: [{ id: "a", type: "agent", prompt: "x" }] }
+          : {
+              meta: { name: "inner" },
+              nodes: [{ id: "a", type: "agent", prompt: "x", unknown_field: true }],
+            };
+      },
+    });
+    const started = service.start(
+      { meta: { name: "outer" }, nodes: [{ id: "nested", type: "workflow", ref: "inner" }] },
+      {},
+    );
+    expect(started).toEqual({ run_id: "run-drifted-ref", status: "started" });
+    const settled = await service.status("run-drifted-ref", true);
+    if ("error" in settled) throw new Error("expected a settled result");
+    expect(settled.faults as string[]).toEqual(
+      expect.arrayContaining([expect.stringContaining("invalid nested workflow")]),
+    );
+    expect((settled.outputs as Record<string, unknown>).nested).toBeNull();
+    expect(runtime.requests).toHaveLength(0);
+  });
 });

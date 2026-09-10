@@ -1,3 +1,4 @@
+import { MAX_WORKFLOW_DEPTH, type WorkflowLoader } from "./engine-contract.js";
 import {
   MAX_GATE_ATTEMPTS,
   MAX_NODE_MAX_ITERATIONS,
@@ -552,4 +553,75 @@ export function validateSpec(
     issue(issues, "cycle", `dependency cycle: ${cycle.join(" -> ")}`, cycle[0] ?? null);
   if (issues.length > 0) return new ValidationError(issues);
   return new WorkflowSpec({ meta, inputs, schemas, nodes });
+}
+
+/**
+ * Resolves every `workflow` node's `ref` through `loader` and validates the
+ * result with `validateSpec`, so a nested template that is wrong fails the
+ * LAUNCH (issue #244) instead of surfacing only when that node executes
+ * (the pre-existing backstop in `engine.ts`'s `runNested`, which stays —
+ * `loader` can answer differently between this call and execution).
+ *
+ * Only checkable here: a literal `ref` string (one with no `${...}`
+ * expression — those need the run's context, which does not exist yet at
+ * launch) and a `loader` that answers synchronously (a Promise is left
+ * entirely to the runtime backstop, its rejection swallowed on purpose so
+ * an async loader never turns an unrelated launch into an unhandled
+ * rejection). `depth` mirrors the engine's own `MAX_WORKFLOW_DEPTH` cap: at
+ * that depth the engine throws before it ever calls `loader` again, so this
+ * stops recursing there too instead of reporting a ref issue that was never
+ * the engine's to raise.
+ */
+function looksLikePromise(value: unknown): boolean {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    typeof (value as { then?: unknown }).then === "function"
+  );
+}
+
+function nestedRefIssue(issues: SpecIssue[], node: Node, ref: string, detail: string): void {
+  issue(
+    issues,
+    "nested_ref",
+    `nested workflow '${ref}' is invalid: ${detail} (see issue #244)`,
+    node.id,
+    "ref",
+  );
+}
+
+export function validateNestedRefs(
+  spec: WorkflowSpec,
+  loader: WorkflowLoader | undefined,
+  depth = 0,
+): ValidationError | null {
+  if (loader === undefined || depth >= MAX_WORKFLOW_DEPTH) return null;
+  const issues: SpecIssue[] = [];
+  for (const node of spec.nodes) {
+    if (node.type !== "workflow") continue;
+    const ref = node.fields.ref;
+    if (typeof ref !== "string" || findRefs(ref).length > 0) continue;
+    let raw: unknown;
+    try {
+      raw = loader(ref);
+    } catch (error) {
+      nestedRefIssue(issues, node, ref, error instanceof Error ? error.message : String(error));
+      continue;
+    }
+    if (looksLikePromise(raw)) {
+      // Async loader: unresolvable synchronously at launch. Never leave the
+      // Promise dangling — its rejection is entirely the runtime backstop's
+      // concern (engine.ts's runNested awaits the same loader again).
+      void (raw as Promise<unknown>).catch(() => undefined);
+      continue;
+    }
+    const parsed = validateSpec(raw);
+    if (parsed instanceof ValidationError) {
+      nestedRefIssue(issues, node, ref, parsed.message);
+      continue;
+    }
+    const nested = validateNestedRefs(parsed, loader, depth + 1);
+    if (nested !== null) issues.push(...nested.issues);
+  }
+  return issues.length > 0 ? new ValidationError(issues) : null;
 }

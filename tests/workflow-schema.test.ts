@@ -9,6 +9,7 @@ import {
   NODE_TYPES,
   ValidationError,
   isValidationError,
+  validateNestedRefs,
   validateSpec,
 } from "../src/workflow/index.js";
 
@@ -387,5 +388,83 @@ describe("validateSpec", () => {
       "unsupported_type",
       "ref_target",
     ]);
+  });
+});
+
+function parsed(raw: unknown) {
+  const result = validateSpec(raw);
+  if (isValidationError(result)) throw new Error(result.message);
+  return result;
+}
+
+const outerWithRef = (ref: unknown = "inner") =>
+  parsed({
+    meta: { name: "outer" },
+    nodes: [{ id: "nested", type: "workflow", ref, args: {} }],
+  });
+
+describe("validateNestedRefs (#244 — resolve a nested template on the parent's launch)", () => {
+  it("passes a valid nested template through", () => {
+    const loader = () => ({
+      meta: { name: "inner" },
+      nodes: [{ id: "a", type: "agent", prompt: "x" }],
+    });
+    expect(validateNestedRefs(outerWithRef(), loader)).toBeNull();
+  });
+
+  it("refuses an invalid nested template, citing the node, the ref and #244", () => {
+    const loader = () => ({
+      meta: { name: "inner" },
+      nodes: [{ id: "a", type: "agent", prompt: "x", unknown_field: true }],
+    });
+    const result = validateNestedRefs(outerWithRef(), loader);
+    expect(isValidationError(result)).toBe(true);
+    if (!isValidationError(result)) throw new Error("expected validation error");
+    expect(result.issues[0]?.nodeId).toBe("nested");
+    expect(result.issues[0]?.field).toBe("ref");
+    expect(result.message).toContain("inner");
+    expect(result.message).toContain("#244");
+  });
+
+  it("skips a ref built from a ${} expression — unresolvable before the run has context", () => {
+    let calls = 0;
+    const loader = () => {
+      calls += 1;
+      return { meta: { name: "inner" }, nodes: [] };
+    };
+    expect(validateNestedRefs(outerWithRef("${args.template}"), loader)).toBeNull();
+    expect(calls).toBe(0);
+  });
+
+  it("skips a loader that answers asynchronously — the runtime backstop owns that path", async () => {
+    const loader = () => Promise.resolve({ meta: { name: "inner" }, nodes: [] });
+    expect(validateNestedRefs(outerWithRef(), loader)).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  it("carries a loader failure into the launch refusal", () => {
+    const loader = (): never => {
+      throw new Error("disk unavailable");
+    };
+    const result = validateNestedRefs(outerWithRef(), loader);
+    expect(isValidationError(result)).toBe(true);
+    if (!isValidationError(result)) throw new Error("expected validation error");
+    expect(result.message).toContain("disk unavailable");
+  });
+
+  it("stops at MAX_WORKFLOW_DEPTH without a second loader call — mirrors the engine's own cap", () => {
+    const calls: string[] = [];
+    const loader = (reference: string) => {
+      calls.push(reference);
+      return reference === "middle"
+        ? { meta: { name: "middle" }, nodes: [{ id: "too-deep", type: "workflow", ref: "inner" }] }
+        : { meta: { name: "inner" }, nodes: [] };
+    };
+    expect(validateNestedRefs(outerWithRef("middle"), loader)).toBeNull();
+    expect(calls).toEqual(["middle"]);
+  });
+
+  it("does nothing without a loader", () => {
+    expect(validateNestedRefs(outerWithRef(), undefined)).toBeNull();
   });
 });
