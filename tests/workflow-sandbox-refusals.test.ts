@@ -229,8 +229,12 @@ function checkpointSpec(): Record<string, unknown> {
   };
 }
 
-/** A durable-shaped runtime: node "a"'s one leaf reports 2 sandbox refusals;
- * checkpoint spawns no leaf, so this is never called again on resume. */
+/** A durable-shaped runtime: every one of node "a"'s leaves reports 2
+ * sandbox refusals (checkpoint spawns no leaf of its own). "a" re-spawns on
+ * the resume stretch too (no schema, so nothing makes it cache-replay) —
+ * that is what makes the final total (stretch 1's 2 + stretch 2's 2 = 4)
+ * prove the COUNT survived the resume, not merely that a single stretch's
+ * own number reached the rollup. */
 function durableRuntimeStub(): ChildRuntime {
   let seq = 0;
   return {
@@ -319,9 +323,9 @@ describe("sandbox refusal — survives resume (#246 AC3)", () => {
       unknown
     >;
     expect(resumed.status).toBe("complete");
-    // node "a" replays from cache on resume (no new leaf, no new refusal) —
-    // the total carried from the paused stretch is what survives.
-    expect(resumed.sandbox_refusals).toBe(2);
+    // 2 (stretch 1, persisted at the pause) + 2 (stretch 2's own "a" leaf) —
+    // the prior stretch's count survived the resume instead of resetting.
+    expect(resumed.sandbox_refusals).toBe(4);
     close();
   });
 });
