@@ -187,12 +187,12 @@ export class WorkflowEngine {
     throw new TokenBudgetExhausted(message);
   }
 
-  private gateFanout(width: number): void {
+  private gateFanout(width: number, measuredOnly = false): void {
     this.budget.checkFanout(width);
-    const affordable = this.budget.affordableLeaves();
+    const affordable = this.budget.affordableLeaves(measuredOnly);
     if (affordable === null || width <= affordable) return;
     const message = `${this.currentNode}: fan-out of ${String(width)} exceeds affordable leaves ${String(affordable)} — token budget exhausted`;
-    this.pause("token_budget_exhausted", message);
+    this.pause("token_budget_exhausted", message, this.budget.exhaustionPayload());
     throw new TokenBudgetExhausted(message);
   }
 
@@ -233,7 +233,7 @@ export class WorkflowEngine {
       if (options.aborted?.() === true || this.control.cancelled || this.control.paused)
         return { output: null, usage: usage(), complete: false };
       this.gateTokens();
-      this.budget.checkFanout(1);
+      this.gateFanout(1, true);
       const routing = routingOf(node, this.tiers);
       const maxIterations = Object.hasOwn(node.fields, "max_iterations")
         ? Math.min(Number(node.fields.max_iterations), MAX_NODE_MAX_ITERATIONS)
