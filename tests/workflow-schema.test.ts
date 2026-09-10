@@ -225,6 +225,125 @@ describe("validateSpec", () => {
     expect(result.issues[0]).toMatchObject({ rule: "schema_type", field: "schema" });
   });
 
+  it("rejects a 'schema_ref' with no matching entry inside body/synthesize/stages sub-objects", () => {
+    const result = validateSpec({
+      meta: { name: "x" },
+      schemas: { FINDING: { type: "object" } },
+      nodes: [
+        {
+          id: "loop",
+          type: "loop_until_dry",
+          body: { prompt: "x", schema_ref: "TYPO" },
+          stop_after_k_empty: 1,
+          max_rounds: 3,
+        },
+        {
+          id: "gate",
+          type: "gate",
+          body: { prompt: "x", schema_ref: "TYPO" },
+          validator: "review",
+        },
+        {
+          id: "panel",
+          type: "judge_panel",
+          attempts: 1,
+          judges: ["a"],
+          synthesize: { prompt: "x", schema_ref: "TYPO" },
+        },
+        {
+          id: "pipe",
+          type: "pipeline",
+          items: ["x"],
+          stages: [{ prompt: "x", schema_ref: "TYPO" }],
+        },
+      ],
+    });
+    expect(isValidationError(result)).toBe(true);
+    if (!isValidationError(result)) throw new Error("expected validation error");
+    expect(result.issues.map((issue) => [issue.rule, issue.nodeId, issue.field])).toEqual([
+      ["schema_ref", "loop", "body.schema_ref"],
+      ["schema_ref", "gate", "body.schema_ref"],
+      ["schema_ref", "panel", "synthesize.schema_ref"],
+      ["schema_ref", "pipe", "stages[0].schema_ref"],
+    ]);
+  });
+
+  it("rejects a 'schema' string with no matching entry inside a sub-object, same rule as schema_ref", () => {
+    const result = validateSpec({
+      meta: { name: "x" },
+      schemas: { FINDING: { type: "object" } },
+      nodes: [
+        {
+          id: "loop",
+          type: "loop_until_dry",
+          body: { prompt: "x", schema: "TYPO" },
+          stop_after_k_empty: 1,
+          max_rounds: 3,
+        },
+      ],
+    });
+    expect(isValidationError(result)).toBe(true);
+    if (!isValidationError(result)) throw new Error("expected validation error");
+    expect(result.issues[0]).toMatchObject({
+      rule: "schema_type",
+      nodeId: "loop",
+      field: "body.schema",
+    });
+  });
+
+  it("rejects 'schema' and 'schema_ref' together in the same sub-object as schema_xor", () => {
+    const result = validateSpec({
+      meta: { name: "x" },
+      schemas: { FINDING: { type: "object" } },
+      nodes: [
+        {
+          id: "loop",
+          type: "loop_until_dry",
+          body: { prompt: "x", schema: { type: "object" }, schema_ref: "FINDING" },
+          stop_after_k_empty: 1,
+          max_rounds: 3,
+        },
+      ],
+    });
+    expect(isValidationError(result)).toBe(true);
+    if (!isValidationError(result)) throw new Error("expected validation error");
+    expect(result.issues[0]).toMatchObject({
+      rule: "schema_xor",
+      nodeId: "loop",
+      field: "body.schema_ref",
+    });
+  });
+
+  it("accepts a valid named schema_ref in a sub-object (body, synthesize, and a pipeline stage)", () => {
+    const result = validateSpec({
+      meta: { name: "x" },
+      schemas: { FINDING: { type: "object" } },
+      nodes: [
+        {
+          id: "loop",
+          type: "loop_until_dry",
+          body: { prompt: "x", schema_ref: "FINDING" },
+          stop_after_k_empty: 1,
+          max_rounds: 3,
+        },
+        {
+          id: "panel",
+          type: "judge_panel",
+          attempts: 1,
+          judges: ["a"],
+          synthesize: { prompt: "x", schema: "FINDING" },
+        },
+        {
+          id: "pipe",
+          type: "pipeline",
+          items: ["x"],
+          stages: [{ prompt: "x", schema_ref: "FINDING" }],
+        },
+      ],
+    });
+    expect(isValidationError(result)).toBe(false);
+  });
+
   it("keeps duplicate and invalid-node cascades observable", () => {
     const result = validateSpec(
       {
