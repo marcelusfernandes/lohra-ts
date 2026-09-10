@@ -111,12 +111,37 @@ cada iteração do turno, antes de montar a chamada ao provedor:
 um payload `{ summarizedCount, keptCount, estimateBefore, estimateAfter }`
 (`src/conversation/types.ts`) — mesma forma espelhada em
 `SessionCompacted`/`ChatEvents["compacted"]` (`src/events/protocol.ts`),
-o protocolo de eventos que uma TUI/GUI futura consome (ainda sem emissor
-ligado, como o resto desse protocolo hoje). `ConversationTurnResult.compaction`
+o protocolo de eventos que uma TUI/GUI futura consome. `ConversationTurnResult.compaction`
 carrega o mesmo resumo quando uma compactação rodou no turno; `successEnvelope`
 inclui a chave `compaction` só nesse caso (ausente, nunca `null`, quando não
 rodou — as fixtures de `tests/conversation-envelope.test.ts` que nunca
 passam esse campo mantêm a mesma contagem de chaves).
+
+Até a issue #287, nenhum chamador de produção ligava `eventSink` — o
+evento só chegava a um sink fake de teste. Agora `commands/chat.ts` e o
+gateway ws (`src/gateway/ws/connection.ts`) ligam: `chat.ts` acumula uma
+linha `event: session.compacted summarized=<N> kept=<M>` (ou `event:
+compaction.unsupported`) e a imprime em `stderr`, ao lado do aviso de
+sessão de sempre — o `--json` da mesma chamada continua reportando o fold
+por `compaction` no envelope, como já fazia; o `stderr` é o que torna o
+evento em si observável fora dele. O gateway ws encaminha os dois tipos
+como frames `event` no socket (mesmo shape de `encodeGatewayEventFrame`,
+`src/gateway/rpc/frame.ts`, mas montado localmente em `connection.ts` —
+`GatewayEventName` ali é uma união fechada essa issue não alarga), ao
+lado dos já existentes `message.*`/`tool.*`. `commands/dashboard.ts`'s
+cron job runtime continua sem `eventSink` — fora do escopo da #287.
+
+Na mesma revisão: `SessionRepository.searchMessages`
+(`src/state/session-repository.ts`) passou a exigir `active = 1` — o
+trigger `messages_fts_ai` (`src/state/schema.ts`) nunca remove uma linha
+do índice FTS quando uma compactação a desativa, então a busca podia
+devolver a mesma mensagem duas vezes (a linha antiga e a que a
+substituiu). E `attemptCompaction` (`src/conversation/compaction.ts`)
+embrulha o `Error("COMPRESSION_LOCK_NOT_HELD:...")` cru que
+`compactHistory` lança (quando o holder perde a trava entre o acquire e o
+uso — uma janela real, não hipotética) em `CompressionLockNotHeldError`
+(`src/conversation/errors.ts`, código `COMPRESSION_LOCK_NOT_HELD`), então
+`runTurn` reporta esse código em vez do genérico `TURN_FAILED`.
 
 ## Fora de escopo desta issue
 
