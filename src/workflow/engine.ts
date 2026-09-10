@@ -27,6 +27,7 @@ import {
   clampInteger,
   combine,
   nonEmpty,
+  recordGroupReplayCost,
   renderValue,
   replayOrCollectBranch,
   resultUsage,
@@ -466,16 +467,15 @@ export class WorkflowEngine {
     if (!Array.isArray(resolved)) return null;
     const hash = this.cell([node.id, "parallel", resolved, ...routingIdentity(node, this.tiers)]);
     const cached = this.cacheGet(hash);
-    if (cached !== CACHE_MISS) return cached;
     const { runId, cache, result, specIdentity: spec, tiers } = this;
     const deps = { runId, cache, result, spec, tiers, collectLeaf: this.collectLeaf.bind(this) };
+    if (cached !== CACHE_MISS) return recordGroupReplayCost(deps, node, resolved, cached);
     this.gateFanout(resolved.length);
     const leaves = await Promise.all(
       resolved.map((p, i) => replayOrCollectBranch(deps, node, i, renderValue(p))),
     );
     const outputs = leaves.map((leaf) => leaf.output);
-    const total = leaves.reduce((sum, leaf) => combine(sum, leaf.usage), usage());
-    if (outputs.every(nonEmpty)) this.cachePut(hash, node.id, outputs, total);
+    if (outputs.every(nonEmpty)) this.cache.put(this.runId, hash, node.id, outputs, null);
     if (outputs.length === 0 || this.control.cancelled || this.control.paused) return outputs;
     if (outputs.every((output) => output === null))
       this.recordFault(`${node.id}: all ${String(outputs.length)} branches failed`);

@@ -416,8 +416,8 @@ describe("workflow cache manifests", () => {
     expect(scalar.requests).toHaveLength(2);
     expect(refusing.totalSplit("same").inputTokens).toBe(0);
 
-    // #241: one dead branch of three — resume respawns only that one, and
-    // its real cost is what a later full-group cache hit replays (run 3).
+    // #241: 1 of 3 branches dead — resume respawns only that one; its real
+    // cost is what a later full-group cache hit replays (run 3), once (#305).
     const cache = new MemoryWorkflowCache();
     const fanout = new ScriptRuntime([
       [complete("a")],
@@ -436,9 +436,11 @@ describe("workflow cache manifests", () => {
     const run2 = await new WorkflowEngine({ runtime: fanout, cache, runId: "same" }).run(parallel);
     expect(fanout.requests).toHaveLength(4);
     expect(run2.nodeCosts.p?.usage.inputTokens).toBe(3);
+    expect(cache.totalSplit("same").inputTokens).toBe(3); // not 6 — no double-record
     const run3 = await new WorkflowEngine({ runtime: fanout, cache, runId: "same" }).run(parallel);
     expect(fanout.requests).toHaveLength(4);
     expect(run3.nodeCosts.p?.usage.inputTokens).toBe(3);
+    expect(cache.totalSplit("same").inputTokens).toBe(3);
   });
 
   it("keeps absent max_iterations out of the legacy agent cell hash", async () => {
@@ -475,8 +477,7 @@ describe("workflow cache manifests", () => {
   });
 });
 
-// Shared below (#240, #239, #241): durable run/resume through `WorkflowService`
-// over a temp SQLite home — same temp-root bookkeeping and service factory.
+// Shared below (#240, #239, #241): durable run/resume via `WorkflowService`.
 const workflowResumeRoots: string[] = [];
 
 afterEach(() => {
@@ -519,10 +520,8 @@ function durableWorkflowService(
   };
 }
 
-// Issue #240: the cell key is `runId + contentHash(spec.name, meta.version,
-// ...parts)`; operator policy never enters `parts` (only the tier map does,
-// via `routingIdentity`). The pair below exercises the real durable
-// run/resume path through `WorkflowService`, the only place they meet.
+// Issue #240: the cell key never includes operator policy, only the tier
+// map (via `routingIdentity`) — exercised through the real durable path.
 describe("workflow policy vs tier map — cache invalidation contract (#240)", () => {
   function recordingRuntime(): ChildRuntime & { readonly requests: ChildSpawnRequest[] } {
     const requests: ChildSpawnRequest[] = [];

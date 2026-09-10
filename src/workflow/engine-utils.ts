@@ -152,3 +152,26 @@ export async function replayOrCollectBranch(
     deps.cache.put(deps.runId, branchHash, node.id, leaf.output, leaf.usage);
   return leaf;
 }
+
+/** PR #305 round 2: the group cell writes NULL cost — each branch cell
+ * already recorded its own real cost once (`replayOrCollectBranch` above),
+ * so writing the group's own total too double-counts every token in
+ * `workflow_node_cost` (`WorkflowService.seedSpend` sums cost rows per run
+ * and can inflate `tokens_spent` to 2x on resume). A group cache HIT has no
+ * branch spawn to carry the cost, so this re-sums each branch's OWN cell —
+ * cheap reads, never a spawn — and records that as the node's cost: the
+ * real total, from the one place it's still recorded. */
+export function recordGroupReplayCost(
+  deps: ParallelBranchDeps,
+  node: Node,
+  resolved: readonly unknown[],
+  cached: unknown,
+): unknown {
+  const routing = routingIdentity(node, deps.tiers);
+  const total = resolved.reduce((sum: Usage, p, i) => {
+    const hash = contentHash(...deps.spec, node.id, "parallel", i, renderValue(p), ...routing);
+    return combine(sum, deps.cache.get(deps.runId, hash).cost ?? usage());
+  }, usage());
+  addUsageToResult(deps.result, node.id, total, null, null);
+  return cached;
+}
