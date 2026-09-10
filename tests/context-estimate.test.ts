@@ -17,7 +17,10 @@ interface CapturedFixture {
 function loadFixtures(): readonly [string, CapturedFixture][] {
   return readdirSync(FIXTURES_DIR)
     .filter((name) => name.endsWith(".json"))
-    .map((name) => [name, JSON.parse(readFileSync(resolve(FIXTURES_DIR, name), "utf8")) as CapturedFixture]);
+    .map((name) => [
+      name,
+      JSON.parse(readFileSync(resolve(FIXTURES_DIR, name), "utf8")) as CapturedFixture,
+    ]);
 }
 
 const fixtures = loadFixtures();
@@ -35,11 +38,14 @@ describe("estimateTokens — fixtures reais (issue #251)", () => {
     expect(estimate.tokens).toBeGreaterThanOrEqual(fixture.usage.inputTokens);
   });
 
-  it.each(fixtures)("%s: estimate stays within 2x the real usage.inputTokens (relative error)", (_name, fixture) => {
-    const estimate = estimateTokens(fixture.messages);
-    const ratio = estimate.tokens / fixture.usage.inputTokens;
-    expect(ratio).toBeLessThanOrEqual(2);
-  });
+  it.each(fixtures)(
+    "%s: estimate stays within 2x the real usage.inputTokens (relative error)",
+    (_name, fixture) => {
+      const estimate = estimateTokens(fixture.messages);
+      const ratio = estimate.tokens / fixture.usage.inputTokens;
+      expect(ratio).toBeLessThanOrEqual(2);
+    },
+  );
 
   it("does not mutate the messages array it receives", () => {
     for (const [, fixture] of fixtures) {
@@ -89,14 +95,20 @@ describe("estimateTokens — unidade", () => {
   it("charges reasoning text on the message and on provider_data.thinking_blocks", () => {
     const plain = estimateTokens([{ role: "assistant", content: "resposta" }]);
     const withReasoning = estimateTokens([
-      { role: "assistant", content: "resposta", reasoning: "pensando passo a passo sobre o pedido" },
+      {
+        role: "assistant",
+        content: "resposta",
+        reasoning: "pensando passo a passo sobre o pedido",
+      },
     ]);
     const withThinkingBlocks = estimateTokens([
       {
         role: "assistant",
         content: "resposta",
         provider_data: {
-          thinking_blocks: [{ type: "thinking", thinking: "considerando as opções disponíveis", signature: "s" }],
+          thinking_blocks: [
+            { type: "thinking", thinking: "considerando as opções disponíveis", signature: "s" },
+          ],
         },
       },
     ]);
@@ -111,20 +123,28 @@ describe("estimateTokens — unidade", () => {
     expect(withText.tokens).toBeGreaterThan(0);
 
     const withUnknown = estimateTokens([
-      { role: "assistant", content: [{ type: "some_future_block", payload: { a: 1, b: "x".repeat(50) } }] },
+      {
+        role: "assistant",
+        content: [{ type: "some_future_block", payload: { a: 1, b: "x".repeat(50) } }],
+      },
     ]);
     expect(withUnknown.tokens).toBeGreaterThan(0);
   });
 
   it("throws (never returns a silent zero) when messages is not an array", () => {
-    expect(() => estimateTokens(null as unknown as readonly Readonly<Record<string, unknown>>[])).toThrow();
+    expect(() =>
+      estimateTokens(null as unknown as readonly Readonly<Record<string, unknown>>[]),
+    ).toThrow();
     expect(() =>
       estimateTokens({ role: "user" } as unknown as readonly Readonly<Record<string, unknown>>[]),
     ).toThrow();
   });
 
   it("never makes a network call (module has no fetch/http import)", () => {
-    const source = readFileSync(resolve(import.meta.dirname, "../src/context/token-estimate.ts"), "utf8");
+    const source = readFileSync(
+      resolve(import.meta.dirname, "../src/context/token-estimate.ts"),
+      "utf8",
+    );
     expect(/\bfetch\s*\(|node:https?|require\(["']https?["']\)/u.test(source)).toBe(false);
   });
 });
