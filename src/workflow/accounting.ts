@@ -30,6 +30,10 @@ export class RunResult {
   readonly faults: string[] = [];
   nullCount = 0;
   validationRetries = 0;
+  /** Leaves re-spawned after attempt 0 — empty-output retries in runAgent
+   * and pipeline stage retries (empty output or failed schema validation,
+   * both re-invoke collectLeaf — issue #247). */
+  leafRespawns = 0;
   capTrips = 0;
   engineFaults = 0;
   nodesTotal = 0;

@@ -50,6 +50,10 @@ class FakeRuntime implements ChildRuntime {
   cancel(id: string): void {
     this.cancelled.push(id);
   }
+
+  installLeafSandbox(): { dispose: () => void } {
+    return { dispose: (): void => undefined };
+  }
 }
 
 class PoolRuntime implements ChildRuntime {
@@ -325,6 +329,38 @@ describe("workflow engine", () => {
     expect(runtime.spawned).toHaveLength(1);
   });
 
+  it("counts an empty-output agent retry as a leaf respawn (#247)", async () => {
+    const runtime = new FakeRuntime([[complete("")], [complete("recovered")]]);
+    const spec = parsed({
+      meta: { name: "respawn-agent" },
+      nodes: [{ id: "a", type: "agent", prompt: "x" }],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(result.outputs.a).toBe("recovered");
+    expect((result as unknown as Record<string, unknown>).leafRespawns).toBe(1);
+  });
+
+  it("counts no leaf respawns when the first agent attempt succeeds (#247)", async () => {
+    const runtime = new FakeRuntime([[complete("ok")]]);
+    const spec = parsed({
+      meta: { name: "no-respawn-agent" },
+      nodes: [{ id: "a", type: "agent", prompt: "x" }],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect((result as unknown as Record<string, unknown>).leafRespawns).toBe(0);
+  });
+
+  it("counts an empty-output pipeline stage retry as a leaf respawn (#247)", async () => {
+    const runtime = new FakeRuntime([[complete("")], [complete("done")]]);
+    const spec = parsed({
+      meta: { name: "respawn-pipeline" },
+      nodes: [{ id: "p", type: "pipeline", items: ["a"], stages: [{ prompt: "${item}" }] }],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(result.outputs.p).toEqual(["done"]);
+    expect((result as unknown as Record<string, unknown>).leafRespawns).toBe(1);
+  });
+
   it("reexecutes an empty scalar instead of caching it", async () => {
     const cache = new MemoryWorkflowCache();
     const runtime = new FakeRuntime([[complete("")], [complete("fresh")]]);
@@ -541,6 +577,66 @@ describe("workflow service status", () => {
     const final = (await service.status(started.run_id, true)) as Record<string, unknown>;
     expect(final.status).toBe("complete");
     expect(final.usage_uncertain_leaves).toBe(1);
+    connection.close();
+  });
+
+  // #247: leaf_respawns must survive a checkpoint pause into the DURABLE
+  // rollup — a cold reader (no live record) reads it back via
+  // durableRollup, not resultView, and a resume that respawns nothing
+  // keeps the prior count instead of resetting it.
+  it("persists leaf_respawns in the durable rollup, cumulative across a resume", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-workflow-service-leaf-respawns-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    const repository = new WorkflowRepository(connection.database);
+    const locks = new LockRepository(connection.database);
+    const ownership = { fence: 0 as number, holder: "test", now: 1000 };
+    const store = {
+      repository,
+      locks,
+      holder: "test",
+      ttl: 900,
+      ownershipOf: () => ownership,
+      database: connection.database,
+    };
+    const runtime = new FakeRuntime([[complete("")], [complete("recovered")]]);
+    const service = new WorkflowService({ runtime, store });
+    const started = service.start(
+      {
+        meta: { name: "leaf-respawns-durable" },
+        nodes: [
+          { id: "a", type: "agent", prompt: "x" },
+          { id: "cp", type: "checkpoint", prompt: "stop here" },
+        ],
+      },
+      {},
+    );
+    if ("error" in started) throw new Error(started.error);
+    const paused = (await service.status(started.run_id, true)) as Record<string, unknown>;
+    expect(paused.status).toBe("paused");
+    expect(paused.leaf_respawns).toBe(1);
+
+    // A fresh service instance never called start() for this run — its
+    // in-memory registry is empty, so status() must fall to durableRollup.
+    const coldService = new WorkflowService({ runtime: new FakeRuntime([]), store });
+    const cold = (await coldService.status(started.run_id)) as Record<string, unknown>;
+    expect(cold.leaf_respawns).toBe(1);
+
+    const resumed = coldService.start(
+      null,
+      {},
+      {
+        resumeRunId: started.run_id,
+        checkpointAnswers: { cp: "go" },
+      },
+    );
+    if ("error" in resumed) throw new Error(resumed.error);
+    const finished = (await coldService.status(started.run_id, true)) as Record<string, unknown>;
+    expect(finished.status).toBe("complete");
+
+    const secondColdService = new WorkflowService({ runtime: new FakeRuntime([]), store });
+    const durable = (await secondColdService.status(started.run_id)) as Record<string, unknown>;
+    expect(durable.leaf_respawns).toBe(1);
     connection.close();
   });
 });
