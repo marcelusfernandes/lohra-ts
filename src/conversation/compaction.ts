@@ -29,7 +29,7 @@ import {
   CompactionUnsupportedError,
   CompressionLockBusyError,
 } from "./errors.js";
-import type { ConversationRepository, ModelRequest, ModelTransport } from "./types.js";
+import type { ConversationRepository, ModelRequest } from "./types.js";
 
 /** Trailing messages a compaction never touches (issue #252 AC: "mantendo
  * as N últimas mensagens intactas"). Turn-aligned (see
@@ -299,12 +299,4 @@ export function buildSummaryRequest(input: {
     tools: [],
     signal: input.signal,
   };
-}
-
-export async function defaultSummarize(
-  transport: ModelTransport,
-  request: ModelRequest,
-): Promise<{ readonly content: string; readonly usage: unknown }> {
-  const response = await transport.complete(request);
-  return { content: (response.content ?? "").trim(), usage: response.usage };
 }

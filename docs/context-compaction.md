@@ -130,3 +130,17 @@ passam esse campo mantêm a mesma contagem de chaves).
   de propósito, então a resolução aqui nunca sobe além de `table`/`provider`/
   `default`/`override`; ligar o catálogo é trabalho futuro, não regressão
   desta issue.
+- `attemptCompaction` relê o histórico sob o lock antes de resumir (outro
+  processo pode já ter compactado), mas não recompara essa releitura contra
+  o limiar antes de seguir — se o histórico já estiver dentro do limiar
+  nesse ponto, ainda assim compacta de novo (resumo-de-resumo). Barato
+  (nunca incorreto: a trava impede colisão de escrita, e o resultado
+  continua consistente), mas redundante nesse caso raro; recomparar
+  exigiria levar o limiar/estimativa para dentro de `attemptCompaction`,
+  fora do escopo M desta issue.
+- `buildTranscript` manda o trecho inteiro a resumir para o summarizer, sem
+  truncar. Uma sessão muito acima da janela (por exemplo depois de um
+  `LOHRA_CONTEXT_WINDOW` bem menor que o histórico real acumulado) pode
+  fazer a própria chamada de resumo estourar a janela do provedor —
+  `CompactionFailedError` cobre esse caso (fault nomeado, nunca silencioso,
+  invariante 2), mas não tenta truncar o trecho para caber.
