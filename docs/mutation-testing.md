@@ -57,19 +57,19 @@ ranTests: 0}` e nunca provaria nada.
    (`canonical.ts`: chaves ordenadas, termina em newline).
 
 Todo runner de verdade (`workflow-executor.ts`, `workflow-durability.ts`,
-`workflow-audit-live.ts`, `web-tools.ts`, `self-update.ts`, e `media.ts` por
-consistência de estilo) usa a mesma guarda de entry-point,
-`ehEntryPoint(import.meta.url)` (issue #186): compara a URL do módulo
-chamador com `process.argv[1]`, então `main()` só dispara quando o processo
-foi invocado com aquele arquivo como script de entrada (`tsx
+`workflow-audit-live.ts`, `web-tools.ts`, `self-update.ts`, `media.ts` por
+consistência de estilo, e `context-window.ts`) usa a mesma guarda de
+entry-point, `ehEntryPoint(import.meta.url)` (issue #186): compara a URL do
+módulo chamador com `process.argv[1]`, então `main()` só dispara quando o
+processo foi invocado com aquele arquivo como script de entrada (`tsx
 scripts/mutations/<runner>.ts`) — nunca quando um teste ou outro runner
 importa o módulo. `tests/mutations-runner-guard.test.ts` prova isso por
-subprocesso isolado para esses seis; `context-window.ts` (issue #293) usa a
-mesma guarda mas não está na allowlist `RUNNERS` desse teste (arquivo fora
-do `Files` da issue) — `tests/mutations-t23-catalog.test.ts` e
-`tests/mutations-slices.test.ts`, que importam `contextWindowMutants`
-estaticamente a cada `npm test`, são a prova indireta de que a guarda
-funciona (um `main()` disparado no import travaria a suíte inteira).
+subprocesso isolado para os sete; `context-window.ts` (issue #293) entrou na
+allowlist `RUNNERS` desse teste na issue #297 — antes disso ficava fora
+(arquivo fora do `Files` da issue #293) e a prova era só indireta, via
+`tests/mutations-t23-catalog.test.ts` e `tests/mutations-slices.test.ts`
+importando `contextWindowMutants` estaticamente a cada `npm test` (um
+`main()` disparado no import travaria a suíte inteira).
 
 ## Mecânica B — `media.ts`, em processo
 
@@ -137,6 +137,21 @@ Sete fatias, cada uma com `slice`, `script` (chave de `package.json#scripts`),
 essa fatia cobre) e `focusFiles` (união dos `focus.file` dos mutantes, exceto
 `media`, que não tem `focus`, e `workflow-executor`, que usa a bateria
 inteira de `focalTests` em vez de um foco por mutante):
+
+### Forma dos `srcGlobs`
+
+`srcGlobs` só aceita duas formas (`scripts/github/mutations-matrix.ts:44-62`,
+`DIR_GLOB_FORM`/`FILE_GLOB_FORM`, fail-closed): `src/<dir>/**` — um
+diretório de primeiro nível de `src/`, inteiro — ou o literal
+`src/<arquivo>.ts` — um arquivo de topo, direto em `src/`. Não existe uma
+terceira forma para arquivo em subdiretório: `src/conversation/compaction.ts`
+não é um `srcGlobs` válido, só `src/conversation/**` (o diretório inteiro)
+cobre esse arquivo. Qualquer outra forma faz `globDir` lançar
+`srcGlobs: formato inesperado (esperava "src/<dir>/**" ou
+"src/<arquivo>.ts")`. Foi o que a issue #293 tropeçou ao propor um glob por
+arquivo para `compaction.ts`; a fatia `context-window` acabou com cinco
+`srcGlobs` de diretório inteiro (ver a tabela abaixo) — o passo 2 de "Como
+adicionar uma fatia" cita a mesma restrição.
 
 | fatia                 | script                  | mutantes | catálogo(s)                                                                                                           |
 | --------------------- | ----------------------- | -------: | --------------------------------------------------------------------------------------------------------------------- |
@@ -277,9 +292,10 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
 2. Adicionar a entrada em `scripts/mutations/slices.json`: `slice`, `script`,
    `catalog`, `srcGlobs`, `focusFiles`. `srcGlobs` aceita duas formas
    (`scripts/github/mutations-matrix.ts:45-58,96-99`, fail-closed — qualquer
-   outra forma lança): `src/<dir>/**` por diretório de primeiro nível de
-   `src/` que a fatia cobre, ou o literal `src/<arquivo>.ts` para um arquivo
-   de topo (ex.: `"src/cli.ts"` em `workflow-audit-live`,
+   outra forma lança; forma detalhada em "Forma dos `srcGlobs`", acima):
+   `src/<dir>/**` por diretório de primeiro nível de `src/` que a fatia
+   cobre, ou o literal `src/<arquivo>.ts` para um arquivo de topo (ex.:
+   `"src/cli.ts"` em `workflow-audit-live`,
    `scripts/mutations/slices.json:40`). `tests/mutations-slices.test.ts:447-478`
    assevera que todo `edits[].file` de cada catálogo da fatia (normalizado
    para sob `src/`) casa algum `srcGlobs` dessa fatia — exceto os
@@ -326,6 +342,18 @@ motivo "sem catálogo de mutantes ainda". Os quinze diretórios cobertos hoje:
 `context`, `providers`, `catalog` (fatia `context-window`, issue #293 —
 `state` também está em `srcGlobs` dessa fatia, já coberto por
 `workflow-durability`).
+
+"Coberto" aqui quer dizer que `srcGlobs` cita o diretório inteiro
+(`src/<dir>/**`, forma acima) — a fatia **dispara** para qualquer mudança
+nesse diretório — não que todo arquivo dele tem mutante. Nos quatro
+diretórios que a fatia `context-window` acrescentou, a cobertura por
+mutante é parcial hoje: `conversation` (2 de 9 arquivos mutados —
+`compaction.ts`, `runtime.ts`), `context` (1 de 4 — `token-estimate.ts`),
+`providers` (1 de 5 — `context-window.ts`) e `catalog` (1 de 5 —
+`windows-cache.ts`). `state` (1 arquivo mutado por essa fatia,
+`session-repository.ts`) já estava coberto por `srcGlobs` da fatia
+`workflow-durability` antes de `context-window` existir, então não conta
+como cobertura nova.
 
 ## CI (`mutations.yml`, issue #156)
 
