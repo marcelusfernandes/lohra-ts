@@ -1,4 +1,4 @@
-// Cache em disco de `ProviderModelsValue.windows`, `~/.lohra/model_windows.json`
+// Cache em disco de `ProviderModelsValue.windows`, `~/.lohra/context-windows.json`
 // (issue #249). Escrita atômica (tmp + rename, via `atomicWrite0600`),
 // teto por provedor e por bytes, corrupção vira refetch com aviso — nunca
 // crash (invariante 2 do CLAUDE.md: falha nunca silenciosa, fault com
@@ -6,19 +6,25 @@
 // engolida). Pura o suficiente para testar sem rede: o I/O de disco é
 // injetável por `WindowsCacheIO`.
 //
-// O mesmo caminho (`~/.lohra`) pode já ter um `model_windows.json` escrito
-// pelo lohra Python, num formato plano sem versão:
-// `{"<provedor>": {"<modelo>": <número>, ...}}`. Esse formato não tem
-// `schema_version` — um arquivo sem essa chave (ou com uma versão que este
-// runtime não reconhece) é tratado como "formato desconhecido", igual a
-// qualquer outra corrupção: os dados de outro programa nunca são lidos
-// silenciosamente, o retorno é `{}` com `warning`, e a próxima escrita
-// grava por cima no formato novo (envelope versionado).
+// Nome de arquivo próprio, deliberado: o lohra Python guarda o mesmo tipo
+// de dado em `~/.lohra/model_windows.json` (formato plano sem versão,
+// `{"<provedor>": {"<modelo>": <número>, ...}}`) e `_clean`/`_clean_provider`
+// no código dele descartam qualquer coisa que não seja exatamente esse
+// formato — inclusive o envelope deste runtime — regravando o arquivo dele
+// no formato plano. Se os dois runtimes dividissem o mesmo caminho, cada um
+// invalidaria o cache do outro a cada uso (dois programas, dois donos,
+// mesmo arquivo). `context-windows.json` evita esse ping-pong; a tolerância
+// a formato desconhecido abaixo continua existindo para qualquer outro
+// arquivo estranho que apareça nesse caminho (JSON de outra ferramenta, uma
+// versão futura deste schema que este runtime ainda não lê), não mais para
+// o Python especificamente.
 
 import { readFileSync } from "node:fs";
 
 import { atomicWrite0600 } from "../auth/json-file.js";
 
+/** Nome do arquivo de cache dentro de `~/.lohra` — próprio deste runtime, nunca `model_windows.json` do lohra Python. */
+export const CONTEXT_WINDOWS_FILENAME = "context-windows.json";
 /** Teto de modelos guardados por provedor — não é um limite de exibição. */
 export const MAX_MODELS_PER_PROVIDER = 2000;
 /** Teto de bytes do arquivo de cache serializado (o envelope inteiro). */
@@ -28,7 +34,7 @@ export const CACHE_SCHEMA_VERSION = 1;
 
 export type WindowsCache = Readonly<Record<string, Readonly<Record<string, number | null>>>>;
 
-/** Forma persistida em disco — autodescritiva, nunca confundível com o `model_windows.json` do Python. */
+/** Forma persistida em disco — autodescritiva, num arquivo próprio (nunca `model_windows.json`, do lohra Python). */
 export interface WindowsCacheEnvelope {
   readonly schema_version: number;
   readonly updated_at: string;
@@ -87,8 +93,10 @@ function isValidWindowsShape(value: unknown): value is WindowsCache {
 
 /**
  * `false` para qualquer coisa que não seja exatamente o envelope deste
- * runtime — inclui o formato plano do lohra Python (sem `schema_version`)
- * e uma versão futura que este runtime ainda não sabe ler.
+ * runtime — um arquivo sem `schema_version` (formato plano de outro
+ * programa, como o `model_windows.json` do lohra Python, se algum dia
+ * aparecesse neste caminho) ou uma versão futura que este runtime ainda
+ * não sabe ler.
  */
 function isValidEnvelope(value: unknown): value is WindowsCacheEnvelope {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -110,13 +118,13 @@ export function loadWindowsCache(
     const detail = error instanceof Error ? error.message : String(error);
     return {
       data: {},
-      warning: `model window cache unreadable at ${path} (${detail}) — refetching`,
+      warning: `context window cache unreadable at ${path} (${detail}) — refetching`,
     };
   }
   if (Buffer.byteLength(raw, "utf8") > MAX_CACHE_BYTES) {
     return {
       data: {},
-      warning: `model window cache at ${path} exceeds ${String(MAX_CACHE_BYTES)} bytes — refetching`,
+      warning: `context window cache at ${path} exceeds ${String(MAX_CACHE_BYTES)} bytes — refetching`,
     };
   }
   let parsed: unknown;
@@ -125,13 +133,13 @@ export function loadWindowsCache(
   } catch {
     return {
       data: {},
-      warning: `model window cache at ${path} is not valid JSON — refetching`,
+      warning: `context window cache at ${path} is not valid JSON — refetching`,
     };
   }
   if (!isValidEnvelope(parsed)) {
     return {
       data: {},
-      warning: `model window cache at ${path} is not in the expected schema_version ${String(CACHE_SCHEMA_VERSION)} envelope (unknown format, maybe written by another program) — refetching`,
+      warning: `context window cache at ${path} is not in the expected schema_version ${String(CACHE_SCHEMA_VERSION)} envelope (unknown format — maybe a stray file, not this runtime's cache) — refetching`,
     };
   }
   return { data: parsed.providers, warning: null };
@@ -169,13 +177,13 @@ export function saveWindowsCache(
   };
   const serialized = JSON.stringify(envelope);
   if (Buffer.byteLength(serialized, "utf8") > MAX_CACHE_BYTES) {
-    return `model window cache would exceed ${String(MAX_CACHE_BYTES)} bytes — not written`;
+    return `context window cache would exceed ${String(MAX_CACHE_BYTES)} bytes — not written`;
   }
   try {
     io.write(path, serialized);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    return `could not write model window cache at ${path} (${detail})`;
+    return `could not write context window cache at ${path} (${detail})`;
   }
   return null;
 }

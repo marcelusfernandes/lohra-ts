@@ -12,6 +12,7 @@ import {
 } from "../src/catalog/catalog.js";
 import { extractModels } from "../src/catalog/windows.js";
 import {
+  CONTEXT_WINDOWS_FILENAME,
   loadWindowsCache,
   saveWindowsCache,
   MAX_CACHE_BYTES,
@@ -261,7 +262,7 @@ describe("model context window cache (issue #249)", () => {
   const cachePath = (): string => {
     const dir = mkdtempSync(join(tmpdir(), "lohra-t249-windows-cache-"));
     roots.push(dir);
-    return join(dir, "model_windows.json");
+    return join(dir, CONTEXT_WINDOWS_FILENAME);
   };
   afterEach(() => {
     for (const dir of roots.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -312,11 +313,13 @@ describe("model context window cache (issue #249)", () => {
     expect(result.warning).not.toBeNull();
   });
 
-  // Colisão de arquivo: o lohra Python já escreve `~/.lohra/model_windows.json`
-  // num formato plano sem versão. Sem `schema_version`, esse arquivo é
-  // "formato desconhecido" — nunca é lido como se fosse deste runtime,
-  // mesmo sendo JSON válido com uma forma parecida.
-  it("never trusts a pre-existing flat model_windows.json written by the lohra Python runtime", () => {
+  // context-windows.json tem nome próprio justamente para nunca colidir com
+  // o model_windows.json do lohra Python — mas se algo estranho aparecer no
+  // nosso caminho mesmo assim (um formato plano igual ao dele, por engano
+  // ou por uma versão futura deste runtime), sem `schema_version` ele é
+  // "formato desconhecido" — nunca lido como se fosse nosso, mesmo sendo
+  // JSON válido com uma forma parecida.
+  it("never trusts a pre-existing flat file at its own cache path (shaped like the lohra Python model_windows.json)", () => {
     const path = cachePath();
     writeFileSync(path, JSON.stringify({ openrouter: { "claude-3.5-sonnet": 200000 } }));
     const result = loadWindowsCache(path);
@@ -324,7 +327,7 @@ describe("model context window cache (issue #249)", () => {
     expect(result.warning).toMatch(/schema_version|format|version/iu);
   });
 
-  it("writes the versioned envelope, not the Python's flat shape, on save", () => {
+  it("writes the versioned envelope, not a flat shape, on save", () => {
     const path = cachePath();
     saveWindowsCache(path, {}, { openrouter: { m: 1000 } });
     const onDisk = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;

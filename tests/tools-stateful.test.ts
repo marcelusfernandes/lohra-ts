@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { Catalog, ProviderModels } from "../src/catalog/types.js";
+import { CONTEXT_WINDOWS_FILENAME } from "../src/catalog/windows-cache.js";
 import { MemoryStore } from "../src/memory/index.js";
 import { SkillStore } from "../src/skills/index.js";
 import {
@@ -104,7 +105,7 @@ describe("stateful tool handlers", () => {
     expect(result.providers[0]?.context_window).toEqual({ "a/b": 200000, "c/d": null });
   });
 
-  it("persists windows to ~/.lohra/model_windows.json and falls back to them across a restart", async () => {
+  it("persists windows to ~/.lohra/context-windows.json and falls back to them across a restart", async () => {
     const home = root();
     const liveBuilder = () =>
       Promise.resolve(
@@ -112,7 +113,7 @@ describe("stateful tool handlers", () => {
       );
     const first = new ListModelsTool(home, {}, liveBuilder);
     await first.handle({});
-    const onDisk = JSON.parse(readFileSync(join(home, "model_windows.json"), "utf8")) as {
+    const onDisk = JSON.parse(readFileSync(join(home, CONTEXT_WINDOWS_FILENAME), "utf8")) as {
       readonly schema_version: number;
       readonly providers: Record<string, Record<string, number | null>>;
     };
@@ -135,7 +136,7 @@ describe("stateful tool handlers", () => {
 
   it("surfaces a cache corruption warning instead of crashing (issue #249)", async () => {
     const home = root();
-    writeFileSync(join(home, "model_windows.json"), "{not json");
+    writeFileSync(join(home, CONTEXT_WINDOWS_FILENAME), "{not json");
     const tool = new ListModelsTool(home, {}, () =>
       Promise.resolve(new Catalog([new ProviderModels("anthropic", "skipped", [], 0, "no key")])),
     );

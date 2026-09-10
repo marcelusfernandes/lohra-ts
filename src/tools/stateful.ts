@@ -2,7 +2,12 @@ import { join } from "node:path";
 
 import { buildCatalog } from "../catalog/catalog.js";
 import type { Catalog, ProviderModels } from "../catalog/types.js";
-import { loadWindowsCache, saveWindowsCache, type WindowsCache } from "../catalog/windows-cache.js";
+import {
+  CONTEXT_WINDOWS_FILENAME,
+  loadWindowsCache,
+  saveWindowsCache,
+  type WindowsCache,
+} from "../catalog/windows-cache.js";
 import { MemoryStore } from "../memory/store.js";
 import { SkillStore } from "../skills/store.js";
 import { loadTiers, MODEL_TIERS, type TierMap } from "../workflow/tiers.js";
@@ -222,7 +227,7 @@ export class ListModelsTool {
         `unknown provider ${JSON.stringify(provider)} \u2014 call list_models with no 'provider' to see the ones this install knows about`,
       );
     }
-    const cachePath = join(this.home, "model_windows.json");
+    const cachePath = join(this.home, CONTEXT_WINDOWS_FILENAME);
     const cacheWarnings: string[] = [];
     const loaded = loadWindowsCache(cachePath);
     if (loaded.warning !== null) cacheWarnings.push(loaded.warning);
