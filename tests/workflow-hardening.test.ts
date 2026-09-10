@@ -416,20 +416,31 @@ describe("workflow cache manifests", () => {
     expect(scalar.requests).toHaveLength(2);
     expect(refusing.totalSplit("same").inputTokens).toBe(0);
 
+    // #241: 1 of 3 branches dead — resume respawns only that one; its real
+    // cost is what a later full-group cache hit replays (run 3), once (#305).
     const cache = new MemoryWorkflowCache();
     const fanout = new ScriptRuntime([
       [complete("a")],
       [{ status: "failed", output: "dead" }],
-      [complete("a2")],
+      [complete("c")],
       [complete("b2")],
     ]);
     const parallel = parsed({
       meta: { name: "partial" },
-      nodes: [{ id: "p", type: "parallel", branches: ["a", "b"] }],
+      nodes: [{ id: "p", type: "parallel", branches: ["a", "b", "c"] }],
     });
-    await new WorkflowEngine({ runtime: fanout, cache, runId: "same" }).run(parallel);
-    await new WorkflowEngine({ runtime: fanout, cache, runId: "same" }).run(parallel);
+    const run1 = await new WorkflowEngine({ runtime: fanout, cache, runId: "same" }).run(parallel);
+    expect(fanout.requests).toHaveLength(3);
+    expect(run1.nodeCosts.p?.usage.inputTokens).toBe(2);
+    expect(cache.totalSplit("same").inputTokens).toBe(2);
+    const run2 = await new WorkflowEngine({ runtime: fanout, cache, runId: "same" }).run(parallel);
     expect(fanout.requests).toHaveLength(4);
+    expect(run2.nodeCosts.p?.usage.inputTokens).toBe(3);
+    expect(cache.totalSplit("same").inputTokens).toBe(3); // not 6 — no double-record
+    const run3 = await new WorkflowEngine({ runtime: fanout, cache, runId: "same" }).run(parallel);
+    expect(fanout.requests).toHaveLength(4);
+    expect(run3.nodeCosts.p?.usage.inputTokens).toBe(3);
+    expect(cache.totalSplit("same").inputTokens).toBe(3);
   });
 
   it("keeps absent max_iterations out of the legacy agent cell hash", async () => {
@@ -466,9 +477,7 @@ describe("workflow cache manifests", () => {
   });
 });
 
-// Shared by the two describes below (#240, #239): both exercise the real
-// durable run/resume path through `WorkflowService` over a temp SQLite home,
-// so they share the temp-root bookkeeping and the service factory.
+// Shared below (#240, #239, #241): durable run/resume via `WorkflowService`.
 const workflowResumeRoots: string[] = [];
 
 afterEach(() => {
@@ -511,14 +520,8 @@ function durableWorkflowService(
   };
 }
 
-// Issue #240: the cell key is `runId + contentHash(spec.name, meta.version,
-// ...parts)` (`src/workflow/cache.ts:66-67`, `src/workflow/engine.ts:357-359`,
-// `:379`). The operator policy lives on the stretch (`src/workflow/
-// service.ts:586,675,822`) and never enters `parts` — only the tier map does,
-// resolved through `routingIdentity`. The pair below exercises the real
-// durable run/resume path through `WorkflowService` (the only place policy
-// and the cache meet): a checkpoint separates a node that already ran from
-// one that hasn't, so "zero re-spawn" and "re-spawn" are both observable.
+// Issue #240: the cell key never includes operator policy, only the tier
+// map (via `routingIdentity`) — exercised through the real durable path.
 describe("workflow policy vs tier map — cache invalidation contract (#240)", () => {
   function recordingRuntime(): ChildRuntime & { readonly requests: ChildSpawnRequest[] } {
     const requests: ChildSpawnRequest[] = [];
@@ -634,13 +637,9 @@ describe("workflow policy vs tier map — cache invalidation contract (#240)", (
   });
 });
 
-// Issue #239: `completeness_check` and `checkpoint` are cached cells
-// (`src/workflow/engine.ts:942-994`) — determinism across a resume is a
-// CONSEQUENCE of the run-scoped cache, not a guard of its own. These tests
-// pin that consequence through the real durable `WorkflowService` path (the
-// same store/cache pairing #240 exercises above), so a change that breaks
-// the cache contract for these two node types is caught here even though
-// nothing about them is special-cased.
+// Issue #239: `completeness_check`/`checkpoint` are cached cells —
+// determinism across a resume is a CONSEQUENCE of the run-scoped cache, not
+// a guard of its own. Pinned through the same durable `WorkflowService` path.
 describe("checkpoint/resume verdict parity (#239)", () => {
   // Records every spawn and scripts a DIFFERENT output the second time the
   // SAME cell (by causalContext.cellId) is spawned — so a wrongful re-spawn

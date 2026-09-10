@@ -1,5 +1,8 @@
 import { combineUsage, usage } from "../pricing/usage.js";
 import type { Usage } from "../pricing/types.js";
+import { addUsageToResult, type RunResult } from "./accounting.js";
+import { contentHash, type WorkflowCache } from "./cache.js";
+import type { LeafExecution } from "./engine-contract.js";
 import { isEmptyOutput } from "./output-validation.js";
 import { resolveValue } from "./refs.js";
 import type { ChildResult } from "./runtime.js";
@@ -99,4 +102,76 @@ export function routingIdentity(node: Node, tiers: TierMap): readonly unknown[] 
     return [];
   const resolved = routingOf(node, tiers);
   return [resolved.model ?? null, resolved.effort ?? null, resolved.provider ?? null];
+}
+
+/** What `runParallel` hands `replayOrCollectBranch` — engine data fields
+ * (no binding needed) plus the one engine method (`collectLeaf`) the helper
+ * can't reimplement, bound by the caller so `this` stays correct. `spec` is
+ * `WorkflowEngine.specIdentity`; `cell`/`cachePut`'s bodies are reproduced
+ * here from `contentHash`/`cache.put` (both already engine-utils imports or
+ * exports) rather than bound, so the helper needs no engine method for them. */
+export interface ParallelBranchDeps {
+  readonly runId: string;
+  readonly cache: WorkflowCache;
+  readonly result: RunResult;
+  readonly spec: readonly unknown[];
+  readonly tiers: TierMap;
+  readonly collectLeaf: (
+    node: Node,
+    prompt: string,
+    schema: Readonly<Record<string, unknown>> | null,
+    options: { readonly role: string; readonly cellId: string; readonly itemIndex: number },
+  ) => Promise<LeafExecution>;
+}
+
+/** Issue #241: a branch with its own cached success replays it (no spawn);
+ * a fresh spawn's cache write lets a LATER resume replay it too. The real
+ * cost lands on `deps.result` either way, so a full-group cache hit that
+ * later replays the group's own recorded total is replaying the right sum.
+ * `node.id` is the cost's owner — `runParallel` set it as the current node
+ * before spawning any branch, so it's the same value either way. */
+export async function replayOrCollectBranch(
+  deps: ParallelBranchDeps,
+  node: Node,
+  index: number,
+  prompt: string,
+): Promise<LeafExecution> {
+  const routing = routingIdentity(node, deps.tiers);
+  const branchHash = contentHash(...deps.spec, node.id, "parallel", index, prompt, ...routing);
+  const found = deps.cache.get(deps.runId, branchHash);
+  if (found.hit) {
+    if (found.cost !== null) addUsageToResult(deps.result, node.id, found.cost, null, null);
+    return { output: found.output, usage: found.cost ?? usage(), complete: true };
+  }
+  const leaf = await deps.collectLeaf(node, prompt, null, {
+    role: "parallel.branch",
+    cellId: branchHash,
+    itemIndex: index,
+  });
+  if (nonEmpty(leaf.output))
+    deps.cache.put(deps.runId, branchHash, node.id, leaf.output, leaf.usage);
+  return leaf;
+}
+
+/** PR #305 round 2: the group cell writes NULL cost — each branch cell
+ * already recorded its own real cost once (`replayOrCollectBranch` above),
+ * so writing the group's own total too double-counts every token in
+ * `workflow_node_cost` (`WorkflowService.seedSpend` sums cost rows per run
+ * and can inflate `tokens_spent` to 2x on resume). A group cache HIT has no
+ * branch spawn to carry the cost, so this re-sums each branch's OWN cell —
+ * cheap reads, never a spawn — and records that as the node's cost: the
+ * real total, from the one place it's still recorded. */
+export function recordGroupReplayCost(
+  deps: ParallelBranchDeps,
+  node: Node,
+  resolved: readonly unknown[],
+  cached: unknown,
+): unknown {
+  const routing = routingIdentity(node, deps.tiers);
+  const total = resolved.reduce((sum: Usage, p, i) => {
+    const hash = contentHash(...deps.spec, node.id, "parallel", i, renderValue(p), ...routing);
+    return combine(sum, deps.cache.get(deps.runId, hash).cost ?? usage());
+  }, usage());
+  addUsageToResult(deps.result, node.id, total, null, null);
+  return cached;
 }
