@@ -24,6 +24,11 @@ import {
   type ContextWindowSource,
 } from "../providers/index.js";
 import type { ProviderProfile } from "../providers/index.js";
+import {
+  CompactionFailedError,
+  CompactionUnsupportedError,
+  CompressionLockBusyError,
+} from "./errors.js";
 import type { ConversationRepository, ModelRequest, ModelTransport } from "./types.js";
 
 /** Trailing messages a compaction never touches (issue #252 AC: "mantendo
@@ -149,9 +154,18 @@ export function buildSummaryMessage(summary: string): Readonly<Record<string, un
   return Object.freeze({ role: "assistant", content: summary, finish_reason: "stop" });
 }
 
-// buildTranscript (folds messages into the text sent to summarize()) lands
-// with attemptCompaction's real body in the very next commit -- this
-// test(red) stub doesn't need it yet.
+function buildTranscript(messages: readonly Readonly<Record<string, unknown>>[]): string {
+  return messages
+    .map((message) => {
+      const role = typeof message.role === "string" ? message.role : "unknown";
+      const content =
+        typeof message.content === "string" && message.content.length > 0
+          ? message.content
+          : JSON.stringify(message.content ?? message.tool_calls ?? message);
+      return `${role}: ${content}`;
+    })
+    .join("\n\n");
+}
 
 export interface CompactionAttemptInput {
   readonly repository: ConversationRepository;
@@ -187,12 +201,63 @@ export interface CompactionAttemptResult {
 export async function attemptCompaction(
   input: CompactionAttemptInput,
 ): Promise<CompactionAttemptResult> {
-  // Red stub for issue #252's test(red) commit -- the real body lands in
-  // the very next commit. Stays `async` with a real `await` (and reads
-  // `input.sessionId`, never discarding the parameter) so callers using
-  // `.rejects` see a genuinely rejected promise, not a synchronous throw.
-  await input.sleep(0);
-  throw new Error(`not implemented: attemptCompaction (session ${input.sessionId})`);
+  const repository = input.repository;
+  if (
+    repository.acquireCompressionLock === undefined ||
+    repository.releaseCompressionLock === undefined ||
+    repository.compactHistory === undefined
+  ) {
+    throw new CompactionUnsupportedError(input.sessionId);
+  }
+
+  let acquired = false;
+  for (let attempt = 0; attempt < input.lockRetries; attempt += 1) {
+    acquired = repository.acquireCompressionLock(
+      input.sessionId,
+      input.holder,
+      input.now,
+      input.lockTtlSeconds,
+    );
+    if (acquired) break;
+    if (attempt < input.lockRetries - 1) await input.sleep(input.lockRetryDelayMs);
+  }
+  if (!acquired) throw new CompressionLockBusyError(input.sessionId);
+
+  try {
+    const freshHistory = repository.loadMessages(input.sessionId);
+    const keepTailCount = turnAlignedTailCount(freshHistory, input.minKeepMessages);
+    const summarizedCount = freshHistory.length - keepTailCount;
+    if (summarizedCount <= 0) {
+      return {
+        compacted: false,
+        summarizedCount: 0,
+        keptCount: freshHistory.length,
+        history: freshHistory,
+      };
+    }
+
+    const transcript = buildTranscript(freshHistory.slice(0, summarizedCount));
+    let summary: string;
+    try {
+      summary = await input.summarize(transcript);
+    } catch (error) {
+      throw new CompactionFailedError(input.sessionId, error);
+    }
+
+    const result = repository.compactHistory(input.sessionId, input.holder, input.now, {
+      keepTailCount,
+      summary,
+    });
+    const history = repository.loadMessages(input.sessionId);
+    return {
+      compacted: true,
+      summarizedCount: result.summarizedCount,
+      keptCount: result.keptCount,
+      history,
+    };
+  } finally {
+    repository.releaseCompressionLock(input.sessionId, input.holder);
+  }
 }
 
 /** Builds the request a default (no-op-injected) summarizer sends to the
