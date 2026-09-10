@@ -81,5 +81,25 @@
       "tests/session-tools.test.ts",
       "tests/tools-local.test.ts"
     ]
+  },
+  {
+    "slice": "context-window",
+    "script": "mutations:t23",
+    "catalog": ["scripts/mutations/context-window.ts"],
+    "srcGlobs": [
+      "src/conversation/**",
+      "src/context/**",
+      "src/providers/**",
+      "src/catalog/**",
+      "src/state/**"
+    ],
+    "focusFiles": [
+      "tests/conversation-compaction.test.ts",
+      "tests/conversation-runtime.test.ts",
+      "tests/context-estimate.test.ts",
+      "tests/providers-context-window.test.ts",
+      "tests/catalog-pricing.test.ts",
+      "tests/state-locks.test.ts"
+    ]
   }
 ]
