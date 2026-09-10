@@ -143,8 +143,13 @@ describe("parallel.retries (#242)", () => {
     // Two branches that both die expensively: whichever retry loses the
     // race pauses the run via `gateTokens()`; the guard stops the OTHER
     // branch's loop once `result.pauseFault` is visible — bounding the
-    // damage to at most one wasted attempt per branch (2), never a full
-    // spin through `retries` per stuck branch (which would be 6 here).
+    // damage to at most one wasted attempt per branch (2). Without the
+    // guard, the base measured 4: the losing branch takes 1 respawn
+    // before `gateTokens()` throws and pauses; the other, unaware,
+    // spins through all 3 of its own `retries` hitting the paused
+    // shortcut each time (1 + 3 = 4) — never a full 6 (3 retries x 2
+    // branches), since the losing branch's own throw cuts its loop
+    // short too.
     const expensive: ChildResult = {
       status: "failed",
       output: "boom",
@@ -164,7 +169,7 @@ describe("parallel.retries (#242)", () => {
     const budget = new Budget({ tokenBudget: 4000 });
     const result = await new WorkflowEngine({ runtime, budget }).run(spec);
     const respawns = (result as unknown as { leafRespawns: number }).leafRespawns;
-    expect(respawns).toBeLessThanOrEqual(2); // never 6 (3 retries x 2 branches)
+    expect(respawns).toBeLessThanOrEqual(2); // base measured 4 (1 + 3), not 6
     expect(result.status).toBe("paused");
     expect(result.pauseReason).toBe("token_budget_exhausted");
   });
