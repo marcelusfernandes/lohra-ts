@@ -29,7 +29,9 @@ diretório compartilhado `~/.agents/skills/`. Só o Claude Code não lê (ele l�
 ser um **symlink**. Então a instalação inteira é: uma cópia real em
 `~/.agents/skills/use-lohra-ts/`, e um symlink `~/.claude/skills/use-lohra-ts →`
 essa cópia. Duas escritas cobrem os quatro harnesses, e uma atualização atualiza
-todos de uma vez.
+todos de uma vez — **com uma ressalva**: o Codex instalado nesta máquina usa
+`~/.codex/skills`, que a documentação atual da OpenAI não menciona (ver "O
+conflito do Codex, declarado", em H2).
 
 **Isso muda o pedido do multi-select.** "Escolher em quais harnesses instalar"
 não é oferecível como quatro caixas independentes: instalar "só no Codex"
@@ -130,10 +132,12 @@ cobre OpenCode e Pi) e apenas **reportar** `~/.codex/skills` se existir. O
   **Pi** (dir global documentado).
 - `~/.claude/skills/use-lohra-ts` — **symlink** para a cópia acima. O Claude Code
   documenta symlink de diretório de skill e diz que carrega a skill uma vez só
-  quando vários locais apontam para o mesmo alvo — o que também neutraliza a
-  duplicata que apareceria no OpenCode (que lê `~/.claude/skills` _e_
-  `~/.agents/skills`). Em Windows, onde symlink de diretório exige privilégio,
-  o fallback é cópia.
+  quando vários locais apontam para o mesmo alvo. O OpenCode lê os dois
+  diretórios (`~/.claude/skills` _e_ `~/.agents/skills`); com o symlink, os dois
+  caminhos resolvem para o mesmo diretório, mas **se o OpenCode deduplica por
+  caminho resolvido não está documentado** (ver inconclusivo 2) — a garantia de
+  carga única vale para o Claude Code, não para o OpenCode. Em Windows, onde
+  symlink de diretório exige privilégio, o fallback é cópia.
 
 ---
 
@@ -364,8 +368,10 @@ possui, nunca para `assets/skills` do checkout.**
   lohra-ts trocaria em silêncio a skill que o harness carrega.
 - **Symlink para `~/.agents/skills/use-lohra-ts`: adotado** para o Claude Code.
   É documentado (<https://code.claude.com/docs/en/skills>), o alvo é do Lohra e
-  estável, e resolve de graça a duplicata no OpenCode. Fallback para cópia em
-  Windows, onde symlink de diretório exige privilégio ou Developer Mode.
+  estável, e faz os dois caminhos que o OpenCode lê resolverem para o mesmo
+  diretório (dedup por caminho resolvido não é documentada nele — inconclusivo
+  2). Fallback para cópia em Windows, onde symlink de diretório exige privilégio
+  ou Developer Mode.
 - Sondagem local que sustenta a viabilidade: `~/.claude/skills/` tem oito
   entradas que são symlink (`computer-use`, `find-skills`, `lavish`, `orca-cli`
   para `~/.agents/skills/…`; quatro `paperclip*` para um checkout) e
@@ -409,18 +415,18 @@ check barato e read-only, e é o que dá valor a A mesmo para quem nunca rodar
 
 A ordem é dependência, não preferência. Nenhum é **L**.
 
-| #   | título                                                                                                            | tamanho | depende de  |
-| --- | ----------------------------------------------------------------------------------------------------------------- | ------- | ----------- |
-| E0  | decisão do owner: nome do comando, coexistência com o Python, `--provider` fixo (as três perguntas acima)         | —       | gate humano |
-| E1  | fix: shipar `use-lohra-ts` e parar de exportar a skill do runtime Python                                          | **S**   | E0          |
-| E2  | feat: entregar o comando que a skill exportada invoca (bin ou wrapper), conforme E0                               | **S**   | E0          |
-| E3  | feat: detecção de harness cobre opencode e pi, e o destino compartilhado `~/.agents/skills` (doctor + onboarding) | **S**   | —           |
-| E4  | refactor: `src/skills/install.ts` — destino, cópia vs. symlink, hash, escrita, num módulo só                      | **M**   | E1, E3      |
-| E5  | feat: manifesto `~/.lohra/skills-install.json` e regra de sobrescrita                                             | **M**   | E4          |
-| E6  | feat: `lohra init` com escolha de destino (lista numerada, `--harness`, `--no-harness`)                           | **M**   | E4          |
-| E7  | feat: `lohra update` atualiza as skills instaladas e respeita edição do usuário                                   | **M**   | E5          |
-| E8  | feat: `lohra doctor` reporta skill instalada desatualizada, ausente ou editada                                    | **S**   | E5          |
-| E9  | feat (oportunista): declarar o lohra-ts como pacote Pi (chave `pi` no `package.json`)                             | **S**   | E1          |
+| #   | título                                                                                                                                                                           | tamanho | depende de  |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ----------- |
+| E0  | decisão do owner: nome do comando, coexistência com o Python, `--provider` fixo (as três perguntas acima)                                                                        | —       | gate humano |
+| E1  | fix: shipar `use-lohra-ts` e parar de exportar a skill do runtime Python                                                                                                         | **S**   | E0          |
+| E2  | feat: entregar o comando que a skill exportada invoca (bin ou wrapper), conforme E0                                                                                              | **S**   | E0          |
+| E3  | feat: detecção de harness cobre opencode e pi e o destino compartilhado `~/.agents/skills` (doctor + onboarding); começa verificando de qual diretório o Codex instalado carrega | **S**   | —           |
+| E4  | refactor: `src/skills/install.ts` — destino, cópia vs. symlink, hash, escrita, num módulo só                                                                                     | **M**   | E1, E3      |
+| E5  | feat: manifesto `~/.lohra/skills-install.json` e regra de sobrescrita                                                                                                            | **M**   | E4          |
+| E6  | feat: `lohra init` com escolha de destino (lista numerada, `--harness`, `--no-harness`)                                                                                          | **M**   | E4          |
+| E7  | feat: `lohra update` atualiza as skills instaladas e respeita edição do usuário                                                                                                  | **M**   | E5          |
+| E8  | feat: `lohra doctor` reporta skill instalada desatualizada, ausente ou editada                                                                                                   | **S**   | E5          |
+| E9  | feat (oportunista): declarar o lohra-ts como pacote Pi (chave `pi` no `package.json`)                                                                                            | **S**   | E1          |
 
 E1 e E2 valem a milestone sozinhos mesmo que o owner recuse o resto: sem eles, a
 funcionalidade que já existe é ativamente prejudicial.
@@ -431,9 +437,13 @@ funcionalidade que já existe é ativamente prejudicial.
 
 1. **Codex: doc × binário.** A documentação atual não menciona `~/.codex/skills`,
    mas o Codex instalado nesta máquina o usa e traz builtins em
-   `~/.codex/skills/.system/`. Não apuramos a versão do Codex desta máquina nem
-   se versões atuais ainda varrem esse caminho. A proposta contorna escrevendo em
-   `~/.agents/skills` e só reportando o outro.
+   `~/.codex/skills/.system/`. A máquina roda `codex-cli 0.153.4`; **não
+   apuramos se essa versão ainda varre `~/.codex/skills`, se varre também
+   `~/.agents/skills`, ou nenhum dos dois** — isso exigiria executar o Codex e
+   observar quais skills ele carrega, o que não foi feito. Enquanto não for, a
+   proposta pode não alcançar o Codex desta máquina: contorna escrevendo em
+   `~/.agents/skills` e só reportando o outro, e a verificação é a primeira
+   tarefa de E3.
 2. **Duplicata no OpenCode.** O OpenCode lê `~/.claude/skills` **e**
    `~/.agents/skills`. Se a mesma skill estiver nos dois como arquivo real, não
    sabemos se ele deduplica ou lista duas vezes — não está documentado. É a
@@ -445,9 +455,10 @@ funcionalidade que já existe é ativamente prejudicial.
    de desenho, não medição — e a meta de produto inclui GUI Electron em Windows.
 5. **`~/.pi/agent/skills/orchestration/` é um diretório sem `SKILL.md`.** Se o Pi
    ignora ou reclama, não sabemos.
-6. **Versões dos harnesses não foram registradas.** A matriz mistura documentação
-   de hoje com o disco de hoje; um harness desatualizado na máquina do usuário
-   pode divergir.
+6. **Comportamento real não foi observado em nenhum harness.** A matriz cruza a
+   documentação de hoje com o disco de hoje; nenhum harness foi executado para
+   confirmar de onde carrega. As versões desta máquina, para quem for repetir:
+   `claude` 2.1.267, `codex-cli` 0.153.4, `opencode` 1.17.18, `pi` 0.84.3.
 7. **`src/skills/store.ts:53-70` escreve `version:` e `platforms:` como chaves de
    topo**, que não existem na spec (`name`, `description`, `license`,
    `compatibility`, `metadata`, `allowed-tools`). Sem impacto enquanto essas
@@ -477,6 +488,7 @@ ls -la ~/.claude/skills ~/.config/opencode/skills | grep '^l'
 
 # o comando que a skill validada invoca
 which -a lohra lohra-ts
+codex --version && opencode --version && pi --version && claude --version
 cat ~/.local/bin/lohra-ts
 grep -n '"bin"' -A 4 package.json
 ```
