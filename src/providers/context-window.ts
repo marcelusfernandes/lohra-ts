@@ -53,10 +53,18 @@ function isValidWindow(value: unknown): value is number {
   );
 }
 
+/** Depois do prefixo casado, só um separador (ou o fim do id) fecha o
+ * casamento — mesma regra de `priceKey`/`lookup` em
+ * `src/pricing/estimate.ts:48-51`. Sem isso "gpt-4" casaria com um futuro
+ * "gpt-45", que não é a mesma família de modelo. */
+const PREFIX_BOUNDARY_CHARS = new Set(["-", ".", ":", "/", "@"]);
+
 /** Prefixo mais longo de `model` presente em `table` vence — um id datado
  * como "gpt-4o-2024-08-06" casa com a entrada "gpt-4o" e, se "gpt-4o-mini"
  * também estiver na tabela, um id "gpt-4o-mini-2024-07-18" casa com ela em
- * vez de com a entrada mais curta. */
+ * vez de com a entrada mais curta. Um valor inválido na tabela (número não
+ * inteiro, `<= 0`) nunca vence — cai para o próximo nível como se a entrada
+ * não existisse. */
 function longestPrefixMatch(
   model: string,
   table: Readonly<Record<string, number>> | undefined,
@@ -65,10 +73,13 @@ function longestPrefixMatch(
   let bestKey = "";
   let bestValue: number | null = null;
   for (const [key, value] of Object.entries(table)) {
-    if (model.startsWith(key) && key.length >= bestKey.length) {
-      bestKey = key;
-      bestValue = value;
-    }
+    if (!model.startsWith(key)) continue;
+    const rest = model.slice(key.length);
+    if (rest && !PREFIX_BOUNDARY_CHARS.has(rest.charAt(0))) continue;
+    if (key.length <= bestKey.length) continue;
+    if (!isValidWindow(value)) continue;
+    bestKey = key;
+    bestValue = value;
   }
   return bestValue;
 }

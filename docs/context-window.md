@@ -41,7 +41,12 @@ resolveContextWindow({
    (`src/providers/registry.ts`), por **prefixo mais longo** do id do
    modelo: um id datado como `gpt-4o-mini-2024-07-18` casa com a entrada
    `gpt-4o-mini`, não com `gpt-4o`, porque `gpt-4o-mini` é o prefixo mais
-   longo presente na tabela que ainda é prefixo do id.
+   longo presente na tabela que ainda é prefixo do id. Depois do prefixo
+   casado, só um separador (`-`, `.`, `:`, `/`, `@`) ou o fim do id fecha o
+   casamento — mesma regra de `priceKey`/`lookup` em
+   `src/pricing/estimate.ts:48-51` — então `gpt-4` nunca casa com um futuro
+   `gpt-45`. Uma entrada com valor inválido (não inteiro, `<= 0`) nunca
+   vence, mesmo sendo o prefixo mais longo.
 4. **`provider`** — `ProviderProfile.defaultContextWindow`, o piso do
    provedor, usado quando o modelo não está em nenhuma tabela.
 5. **`default`** — `200000`, quando nada acima resolveu (provedor sem piso
@@ -52,22 +57,29 @@ resolveContextWindow({
 
 Pequena e datada de propósito: só os modelos que este runtime usa hoje
 (`fallbackModels` e `defaultAuxModel` de cada perfil,
-`src/providers/registry.ts:1-292`), cada linha com um comentário `// fonte:
+`src/providers/registry.ts:1-317`), cada linha com um comentário `// fonte:
 <url>, 2026-09`. Nunca inventada — um modelo sem fonte verificável fica fora
 da tabela e cai no piso do provedor (nível 4) ou no default global (nível 5),
 nunca num número chutado.
 
 Modelos com nome de versão futura e sem fonte pública verificável hoje
-(`claude-opus-4-8`, `claude-sonnet-4-6`, `claude-haiku-4-5`, `gpt-5.5` —
-inclusive o modelo de subscription do Codex —, `grok-4.6`, `grok-4.3`,
-`glm-5.3`, `glm-5.3-flash`, `kimi-k3`, `kimi-k2.6`, `deepseek-chat`,
-`deepseek-reasoner`) ficam **de fora** da tabela por esse motivo. Anthropic,
-OpenAI e o perfil separado do Codex (`CODEX_PROVIDER`, que resolve o
-caminho de subscription — não o mesmo objeto do perfil `openai`) têm piso de
-provedor (`defaultContextWindow`) porque o padrão da família (200k para
-Claude, 128k para GPT-4, inclusive via Codex) é estável há várias gerações,
-independente do nome de versão específico — os outros provedores sem piso
-caem direto no default de 200000.
+(`claude-opus-4-8`, `claude-sonnet-4-6`, `claude-haiku-4-5`, `grok-4.6`,
+`grok-4.3`, `glm-5.3`, `glm-5.3-flash`, `kimi-k3`, `kimi-k2.6`,
+`deepseek-chat`, `deepseek-reasoner`) ficam **de fora** da tabela por esse
+motivo. `gpt-5.5` é exceção: tem fonte verificada
+(https://developers.openai.com/api/docs/models/gpt-5.5, 2026-09-10 —
+"1,050,000 context window") e entra na tabela do perfil separado do Codex
+(`CODEX_PROVIDER`, que resolve o caminho de subscription — não o mesmo
+objeto do perfil `openai`, cujo `modelWindows` não lista `gpt-5.5` porque
+esse perfil só serve `gpt-4o`/`gpt-4o-mini`). Anthropic, OpenAI e
+`CODEX_PROVIDER` têm piso de provedor (`defaultContextWindow`): 200k para
+Claude (padrão estável da família há várias gerações), 128k para OpenAI
+(idem, família GPT-4) e **1.050.000 para `CODEX_PROVIDER`** — a mesma
+janela de `gpt-5.5`, o único modelo da família GPT-5.x que esse perfil
+serve hoje, não os "128,000 max output tokens" da mesma página (métrica
+diferente de janela de contexto). Um modelo de subscription do Codex
+futuro, ainda sem entrada na tabela, cai nesse piso — não no default
+global de 200000. Os outros provedores sem piso caem direto no default de 200000.
 
 ## Override por config: `LOHRA_CONTEXT_WINDOW`
 
