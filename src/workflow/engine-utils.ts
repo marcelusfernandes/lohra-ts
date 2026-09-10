@@ -161,6 +161,24 @@ export async function replayOrCollectBranch(
   return leaf;
 }
 
+/** `output === null` from `collectLeaf` also covers a run that's already
+ * PAUSED (token budget/quota exhausted by a SIBLING branch, or the
+ * operator) — `collectLeaf` short-circuits to a null leaf with no spawn,
+ * no fault, no charge (engine.ts:235-236) once `this.control.paused` is
+ * set. A sibling's retry loop must not mistake that for a fresh death and
+ * keep spinning through its own `retries` cap doing nothing: `pause()`
+ * (engine.ts:172-183) always writes `result.pauseFault` first, so checking
+ * it stops the loop once the pause is KNOWN. Two branches that both start
+ * a retry in the same tick can still race past this check before either
+ * has set `pauseFault` — bounded to at most one wasted attempt per branch
+ * (the guard catches it on the NEXT iteration), never a full spin through
+ * `retries` per stuck branch; still finite (invariant 3), not silent
+ * (whichever branch actually exhausts the budget still faults via
+ * `pause()`). */
+function stillDying(leaf: LeafExecution, deps: ParallelBranchDeps): boolean {
+  return leaf.output === null && deps.result.pauseFault === null;
+}
+
 /** Issue #242: a branch that comes back DEAD (`output === null` — timed
  * out, cancelled, or the runtime reported a failure) gets refed up to
  * `node.fields.retries` (0-3, default 0 — absent means today's behavior).
@@ -170,7 +188,7 @@ export async function replayOrCollectBranch(
  * `deps.collectLeaf`, which already runs `gateTokens`/`gateFanout(1, true)`
  * and already records a fault with cause on every dead leaf — so the
  * budget stop-line and the fault trail both come from the existing path;
- * this only owns the loop and `leafRespawns`. */
+ * this only owns the loop, `leafRespawns`, and the `stillDying` guard. */
 export async function collectBranchWithRetries(
   deps: ParallelBranchDeps,
   node: Node,
@@ -179,7 +197,7 @@ export async function collectBranchWithRetries(
 ): Promise<LeafExecution> {
   const retries = clampInteger(node.fields.retries, 0, MAX_NODE_RETRIES);
   let leaf = await replayOrCollectBranch(deps, node, index, prompt, 0);
-  for (let attempt = 1; attempt <= retries && leaf.output === null; attempt += 1) {
+  for (let attempt = 1; attempt <= retries && stillDying(leaf, deps); attempt += 1) {
     deps.result.leafRespawns += 1;
     leaf = await replayOrCollectBranch(deps, node, index, prompt, attempt);
   }
