@@ -83,11 +83,17 @@ export interface ConversationRepository {
   commitTurn(commit: TurnCommit): void;
   commitUsage(commit: UsageCommit): void;
   summary(id: string): SessionSummary | null;
-  // Optional compaction capability (issue #252). Absent on a repository
-  // means compaction is impossible for it -- ConversationRuntime treats
-  // that as a fault, never as "never needed" (invariant 2: fail loud, not
-  // silent). All three are present together or not at all in practice
-  // (SqliteConversationRepository implements every one of them).
+  // Optional compaction capability (issue #252). SqliteConversationRepository
+  // and ChildConversationRepository (src/orchestration/child-repository.ts)
+  // implement all three -- both back onto a real, lockable SessionRepository.
+  // A repository with nothing to persist past the call (RequestRepository,
+  // src/server/service.ts -- a fresh instance per stateless HTTP request,
+  // no session row, nothing to lock or rewrite) legitimately implements
+  // none of the three: ConversationRuntime's preflight fails OPEN for it
+  // (warns via `"compaction.unsupported"`, sends the request as it would
+  // have before #252 existed) rather than faulting invariant 2 the other
+  // way -- a repository that never claimed this capability isn't a silent
+  // failure to compact, it's simply out of scope for it.
   acquireCompressionLock?(
     sessionId: string,
     holder: string,
@@ -110,7 +116,14 @@ export type ConversationRuntimeEvent = Readonly<{
     | "model.request.completed"
     | "turn.completed"
     | "turn.failed"
-    | "session.compacted";
+    | "session.compacted"
+    /** Preflight found the estimate over threshold but `repository` has
+     * none of the three compaction members -- fail-open (issue #252 round
+     * 2): the turn proceeds with the oversized request exactly like it
+     * would have before #252 existed, `code` is always
+     * `"COMPACTION_UNSUPPORTED"`. Never a fault -- see the comment on
+     * `ConversationRepository`'s compaction members above. */
+    | "compaction.unsupported";
   sessionId: string;
   code?: string;
   /** Present only on `session.compacted` events (issue #252). */

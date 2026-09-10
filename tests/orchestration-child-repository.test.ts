@@ -91,6 +91,39 @@ describe("ChildConversationRepository", () => {
     expect(repo.summary("child-1")?.apiCallCount).toBe(1);
     close();
   });
+
+  // Issue #252 round 2 (revisor rejection on PR #284): before this fix,
+  // ChildConversationRepository implemented ConversationRepository without
+  // acquireCompressionLock/releaseCompressionLock/compactHistory --
+  // attemptCompaction (src/conversation/compaction.ts) throws
+  // CompactionUnsupportedError when any of the three is missing, so every
+  // subagent turn (spawn_session/delegate_task, child-runner.ts) whose
+  // history overflowed the window would fault where the parent's own
+  // chat.ts route compacts and continues. See the describe block below for
+  // the end-to-end regression test through a real ConversationRuntime.
+  it("delegates acquireCompressionLock/releaseCompressionLock/compactHistory to the same underlying behavior as SqliteConversationRepository", () => {
+    const { sessions, close } = setup();
+    sessions.createSession({ id: "parent-1", source: "gateway" });
+    const repo = new ChildConversationRepository(sessions, "parent-1");
+    repo.createSession({ id: "child-1", systemPrompt: "SYS", model: "m", cwd: "/tmp" });
+    repo.commitTurn({
+      sessionId: "child-1",
+      user: { role: "user", content: "q" },
+      assistant: { role: "assistant", content: "a", finish_reason: "stop" },
+      usage: null,
+      cost: null,
+      apiCalls: 1,
+    });
+
+    expect(repo.acquireCompressionLock("child-1", "h", 100, 30)).toBe(true);
+    const result = repo.compactHistory("child-1", "h", 100, {
+      keepTailCount: 0,
+      summary: "recap",
+    });
+    expect(result.summarizedCount).toBe(2);
+    expect(repo.releaseCompressionLock("child-1", "h")).toBe(true);
+    close();
+  });
 });
 
 function turn(id: number): Readonly<Record<string, unknown>>[] {

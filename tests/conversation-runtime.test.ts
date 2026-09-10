@@ -636,4 +636,50 @@ describe("ConversationRuntime — compaction preflight (issue #252)", () => {
     // never attempted again.
     expect(repository.compactCalls).toHaveLength(1);
   });
+
+  // Issue #252 round 2 (revisor rejection on PR #284, reasons list): a
+  // repository with no compaction capability -- RequestRepository
+  // (src/server/service.ts, a fresh stateless instance per HTTP request,
+  // nothing to lock or rewrite) is the real example -- must never fault.
+  // Fails OPEN: warns via "compaction.unsupported" and sends the oversized
+  // request exactly like it would have before #252 existed. MemoryRepository
+  // (this file's plain fake, used by every other test above) never
+  // implemented the three compaction members either, which is exactly the
+  // shape this proves against.
+  it("fails open (warns, never faults) when the repository has no compaction capability at all", async () => {
+    const repository = new MemoryRepository();
+    const seeded = Array.from({ length: 10 }, (_, i) => longTurn(i)).flat();
+    repository.messages.set("s", seeded);
+    repository.sessions.set("s", { systemPrompt: "system prompt", model: "m", cwd: "/tmp" });
+
+    const transport = new QueueTransport([response({ content: "final answer" })]);
+    const events: ConversationRuntimeEvent[] = [];
+    const runtime = new ConversationRuntime({
+      repository,
+      transport,
+      promptSnapshot: () => "system prompt",
+      eventSink: (event) => events.push(event),
+      idSource: () => "s",
+      clock: () => 1000,
+      environment: { LOHRA_CONTEXT_WINDOW: "2000" },
+    });
+
+    const result = await runtime.runTurn({
+      input: "next question",
+      provider: "ollama",
+      model: "m",
+      cwd: "/tmp",
+      sessionId: "s",
+    });
+
+    expect(result.response.content).toBe("final answer");
+    expect(result.compaction).toBeNull();
+    // The request that reached the transport still carries the full,
+    // uncompacted history -- proof it was sent as before, not silently
+    // shrunk some other way.
+    const sentRequest = transport.requests.at(-1);
+    expect(sentRequest?.messages.length).toBe(seeded.length + 1);
+    const unsupportedEvent = events.find((event) => event.type === "compaction.unsupported");
+    expect(unsupportedEvent).toMatchObject({ code: "COMPACTION_UNSUPPORTED" });
+  });
 });

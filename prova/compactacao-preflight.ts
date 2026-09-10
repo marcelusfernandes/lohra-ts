@@ -10,5 +10,6 @@ export default {
     "tests/conversation-envelope.test.ts",
     "tests/state-locks.test.ts",
     "tests/gateway-compaction.test.ts",
+    "tests/orchestration-child-repository.test.ts",
   ],
 } satisfies Declaracao;

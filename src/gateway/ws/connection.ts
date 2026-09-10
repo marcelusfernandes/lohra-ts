@@ -5,6 +5,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 
 import { ConversationRuntime } from "../../conversation/index.js";
 import type { ConversationRepository, ModelTransport } from "../../conversation/types.js";
+import { getProviderProfile } from "../../providers/index.js";
 import type { ToolDefinition } from "../../tools/types.js";
 import { timingSafeTokenEqual } from "../auth.js";
 import { logGatewayFailure } from "../failure-log.js";
@@ -188,6 +189,16 @@ async function handlePromptSubmit(
         ws.send(encodeGatewayEventFrame("tool.complete", sessionId, payload));
       },
     });
+    // maxTokens reserves the compaction preflight's output budget (issue
+    // #252, compactionThreshold, src/conversation/compaction.ts) --
+    // without it (absent here before this fix, unlike commands/chat.ts and
+    // commands/dashboard.ts's own cron job runtime, both of which already
+    // pass profile.defaultMaxTokens) the preflight let a request through
+    // with zero room reserved for the response. getProviderProfile(name)
+    // is null-safe: an unregistered provider name (defensive only -- every
+    // real GatewayWsDeps.provider names a provider dashboard.ts already
+    // resolved to build deps.createModelTransport()) just leaves the
+    // reserve at ConversationRuntime's own default (0), same as before.
     const runtime = new ConversationRuntime({
       repository: deps.createConversationRepository(),
       transport: deps.createModelTransport(),
@@ -196,6 +207,7 @@ async function handlePromptSubmit(
       toolDefinitions: deps.toolDefinitions,
       idSource: () => sessionId,
       clock: () => Date.now() / 1000,
+      maxTokens: getProviderProfile(deps.provider)?.defaultMaxTokens ?? null,
     });
 
     const outcome = await driveGatewayTurn({

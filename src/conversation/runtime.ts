@@ -151,11 +151,19 @@ export class ConversationRuntime {
    * working array, never shared state.
    *
    * Returns `null` when the current estimate already fits (the fast path:
-   * no lock, no I/O). Throws `ContextWindowExceededError` — the latch —
-   * when: the turn already compacted once and still doesn't fit; nothing
-   * was left in the persisted history to fold (compaction would be
-   * futile); or a compaction just ran and the *new* estimate still doesn't
-   * fit. There is never a second compaction attempt within one turn.
+   * no lock, no I/O) OR when `repository` has no compaction capability at
+   * all (fail-open, issue #252 round 2 — see the comment on
+   * `ConversationRepository`'s compaction members, `src/conversation/types.ts`
+   * — emits `"compaction.unsupported"` first so the miss is observable,
+   * then sends the oversized request exactly like before #252 existed;
+   * `RequestRepository`, `src/server/service.ts`, is the real caller this
+   * protects — a fresh stateless instance per HTTP request has no session
+   * to lock or rewrite). Throws `ContextWindowExceededError` — the latch —
+   * when `repository` DOES support compaction and: the turn already
+   * compacted once and still doesn't fit; nothing was left in the
+   * persisted history to fold (compaction would be futile); or a
+   * compaction just ran and the *new* estimate still doesn't fit. There is
+   * never a second compaction attempt within one turn.
    */
   private async preflightCompact(context: {
     readonly sessionId: string;
@@ -166,6 +174,11 @@ export class ConversationRuntime {
     readonly historyBoundary: number;
     readonly compactedThisTurn: boolean;
     readonly summarize: (transcript: string) => Promise<string>;
+    readonly emit: (
+      type: ConversationRuntimeEvent["type"],
+      code?: string,
+      compaction?: ConversationRuntimeEvent["compaction"],
+    ) => void;
   }): Promise<{ readonly newHistoryBoundary: number; readonly summary: CompactionSummary } | null> {
     const environment = this.options.environment ?? process.env;
     const tools = (this.options.toolDefinitions ?? []) as readonly Readonly<
@@ -187,6 +200,16 @@ export class ConversationRuntime {
       tools,
     }).tokens;
     if (estimateBefore <= threshold) return null;
+
+    const repository = this.options.repository;
+    if (
+      repository.acquireCompressionLock === undefined ||
+      repository.releaseCompressionLock === undefined ||
+      repository.compactHistory === undefined
+    ) {
+      context.emit("compaction.unsupported", "COMPACTION_UNSUPPORTED");
+      return null;
+    }
 
     if (context.compactedThisTurn) {
       throw new ContextWindowExceededError(
@@ -369,6 +392,7 @@ export class ConversationRuntime {
           historyBoundary,
           compactedThisTurn,
           summarize,
+          emit,
         });
         if (compaction !== null) {
           historyBoundary = compaction.newHistoryBoundary;
