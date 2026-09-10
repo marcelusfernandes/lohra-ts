@@ -4,9 +4,10 @@
 // leitor fail-closed nos dois pontos restantes, a remoção de `loadTiers`
 // (sem callers) e o ramo de `commands/tiers.ts` reescrito para stderr.
 //
-// AC 2 (chave de topo desconhecida vira aviso ou erro, com sugestão) ficou
-// bloqueado — ver comentário na issue: a decisão "recusar" quebra uma
-// asserção de `tests/providers.test.ts`, fora dos `Files` desta issue.
+// AC 2 (chave de topo desconhecida vira aviso ou erro, com sugestão) foi
+// entregue na rodada 2 da PR #268: `closestTierName` (tiers.ts) sugere o
+// nome mais próximo por distância de edição, e os testes de
+// `workflow-tiers.test.ts` (#261, #276) cobrem a sugestão e a fronteira.
 import type { Declaracao } from "../scripts/prova/tipos.js";
 
 export default {
