@@ -195,8 +195,8 @@ describe("public provider commands", () => {
       join(base, "workflow_tiers.json"),
       JSON.stringify({ custom: { model: "ignored" }, small: "shorthand-model" }),
     );
-    expect((await invoke(["tiers", "list"], { HOME: home })).stdout).toBe(
-      "small: shorthand-model\n",
-    );
+    const rejected = await invoke(["tiers", "list"], { HOME: home });
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain("custom");
   });
 });

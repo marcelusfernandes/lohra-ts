@@ -126,16 +126,39 @@ describe("readTiers — fail-closed", () => {
     expect((result as TiersError).message).toContain("could not be read");
   });
 
-  it("tolerates an unrelated top-level key next to a valid tier", () => {
+  it("rejects an unknown top-level key even beside a valid tier (fail-closed decision, #261)", () => {
     const path = tiersPath(root());
     writeFileSync(path, JSON.stringify({ custom: { model: "ignored" }, small: "shorthand-model" }));
-    expect(readTiers(path)).toEqual({ small: { model: "shorthand-model" } });
+    const result = readTiers(path);
+    expect(result).toBeInstanceOf(TiersError);
+    expect((result as TiersError).message).toContain("custom");
   });
 
-  it("returns {} when only unrelated top-level keys are present", () => {
+  it("rejects a lone unknown top-level key and suggests the closest tier name (smal → small, #261)", () => {
     const path = tiersPath(root());
-    writeFileSync(path, JSON.stringify({ custom: { model: "m" } }));
-    expect(readTiers(path)).toEqual({});
+    writeFileSync(path, JSON.stringify({ smal: { model: "m" } }));
+    const result = readTiers(path);
+    expect(result).toBeInstanceOf(TiersError);
+    expect((result as TiersError).message).toContain("smal");
+    expect((result as TiersError).message).toContain("did you mean 'small'");
+  });
+
+  it("rejects an unknown top-level key with no close match, without a false suggestion (#261)", () => {
+    const path = tiersPath(root());
+    writeFileSync(path, JSON.stringify({ foo: { model: "m" } }));
+    const result = readTiers(path);
+    expect(result).toBeInstanceOf(TiersError);
+    expect((result as TiersError).message).toContain("foo");
+    expect((result as TiersError).message).not.toContain("did you mean");
+  });
+
+  it("rejects an unknown key before validating a known tier's fields (precedence, #261)", () => {
+    const path = tiersPath(root());
+    writeFileSync(path, JSON.stringify({ smal: {} }));
+    const result = readTiers(path);
+    expect(result).toBeInstanceOf(TiersError);
+    expect((result as TiersError).message).toContain("did you mean 'small'");
+    expect((result as TiersError).message).not.toContain("no usable field");
   });
 
   it("accepts a fully-formed valid tier map", () => {
