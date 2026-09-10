@@ -463,12 +463,25 @@ export class WorkflowEngine {
   ): Promise<unknown> {
     const resolved = strictResolve(node.fields.branches, context);
     if (!Array.isArray(resolved)) return null;
-    const hash = this.cell([node.id, "parallel", resolved, ...routingIdentity(node, this.tiers)]);
+    const routing = routingIdentity(node, this.tiers);
+    const hash = this.cell([node.id, "parallel", resolved, ...routing]);
     const cached = this.cacheGet(hash);
     if (cached !== CACHE_MISS) return cached;
     this.gateFanout(resolved.length);
     const leaves = await Promise.all(
-      resolved.map((p, i) => this.collectLeaf(node, renderValue(p), null, branchOpts(hash, i))),
+      resolved.map(async (p, i) => {
+        const prompt = renderValue(p);
+        const branchHash = this.cell([node.id, "parallel", i, prompt, ...routing]);
+        const found = this.cache.get(this.runId, branchHash);
+        if (found.hit) {
+          if (found.cost !== null)
+            addUsageToResult(this.result, this.currentNode, found.cost, null, null);
+          return { output: found.output, usage: found.cost ?? usage(), complete: true };
+        }
+        const leaf = await this.collectLeaf(node, prompt, null, branchOpts(branchHash, i));
+        this.cachePut(branchHash, node.id, leaf.output, leaf.usage);
+        return leaf;
+      }),
     );
     const outputs = leaves.map((leaf) => leaf.output);
     const total = leaves.reduce((sum, leaf) => combine(sum, leaf.usage), usage());
