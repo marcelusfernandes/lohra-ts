@@ -144,7 +144,10 @@ describe("runDashboard: --host refuses to combine with --insecure off loopback (
     });
     const { ready, shutdown } = waitUntilBound(options);
     const donePromise = runDashboard(options);
-    await ready;
+    // Race against donePromise too: if runDashboard rejects or resolves
+    // before ever calling registerShutdownTrigger, this fails fast with the
+    // real error instead of hanging until vitest's own timeout.
+    await Promise.race([ready, donePromise]);
     expect(options.stderrLines.some((line) => line.startsWith("Lohra dashboard:"))).toBe(true);
     shutdown();
     const code = await donePromise;
@@ -179,7 +182,7 @@ describe("runDashboard: --host changes the actual bind address (issue #4 AC)", (
     const options = baseOptions({ argv: ["--provider", "anthropic", "--host", "::1"] });
     const { ready, shutdown } = waitUntilBound(options);
     const donePromise = runDashboard(options);
-    await ready;
+    await Promise.race([ready, donePromise]);
     const boundLine = options.stderrLines.find((line) => line.startsWith("Lohra dashboard:"));
     expect(boundLine).toMatch(/^Lohra dashboard: http:\/\/\[::1\]:\d+\n$/);
     const port = Number(boundLine?.match(/:(\d+)\n$/)?.[1]);
@@ -203,7 +206,7 @@ describe("runDashboard: --host changes the actual bind address (issue #4 AC)", (
     const options = baseOptions();
     const { ready, shutdown } = waitUntilBound(options);
     const donePromise = runDashboard(options);
-    await ready;
+    await Promise.race([ready, donePromise]);
     const boundLine = options.stderrLines.find((line) => line.startsWith("Lohra dashboard:"));
     expect(boundLine).toMatch(/^Lohra dashboard: http:\/\/127\.0\.0\.1:\d+\n$/);
     shutdown();
@@ -216,7 +219,7 @@ describe("runDashboard: --no-open is accepted as a documented no-op (issue #4 AC
     const options = baseOptions({ argv: ["--provider", "anthropic", "--no-open"] });
     const { ready, shutdown } = waitUntilBound(options);
     const donePromise = runDashboard(options);
-    await ready;
+    await Promise.race([ready, donePromise]);
     expect(options.stderrLines.some((line) => line.startsWith("Lohra dashboard:"))).toBe(true);
     shutdown();
     const code = await donePromise;
