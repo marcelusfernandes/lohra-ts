@@ -61,9 +61,11 @@ Modelos com nome de versão futura e sem fonte pública verificável hoje
 (`claude-opus-4-8`, `claude-sonnet-4-6`, `claude-haiku-4-5`, `gpt-5.5` —
 inclusive o modelo de subscription do Codex —, `grok-4.6`, `grok-4.3`,
 `glm-5.3`, `glm-5.3-flash`, `kimi-k3`, `kimi-k2.6`, `deepseek-chat`,
-`deepseek-reasoner`) ficam **de fora** da tabela por esse motivo. Anthropic e
-OpenAI têm piso de provedor (`defaultContextWindow`) porque o padrão da
-família (200k para Claude, 128k para GPT-4) é estável há várias gerações,
+`deepseek-reasoner`) ficam **de fora** da tabela por esse motivo. Anthropic,
+OpenAI e o perfil separado do Codex (`CODEX_PROVIDER`, que resolve o
+caminho de subscription — não o mesmo objeto do perfil `openai`) têm piso de
+provedor (`defaultContextWindow`) porque o padrão da família (200k para
+Claude, 128k para GPT-4, inclusive via Codex) é estável há várias gerações,
 independente do nome de versão específico — os outros provedores sem piso
 caem direto no default de 200000.
 

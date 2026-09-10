@@ -46,8 +46,10 @@ const builtinProfiles: readonly ProviderProfile[] = Object.freeze(
           "gpt-4o-mini": 128_000,
         },
         // piso do provedor — mesma fonte acima; 128k é o padrão estável da
-        // família GPT-4; "gpt-5.5" (subscription do Codex) é futuro e sem
-        // fonte verificável própria, então cai neste piso (issue #250).
+        // família GPT-4. "gpt-5.5" só resolve por este perfil quando
+        // acessado via OPENAI_API_KEY; o caminho de subscription do Codex
+        // usa o perfil separado `CODEX_PROVIDER` (abaixo), que tem o mesmo
+        // piso pela mesma razão (issue #250).
         defaultContextWindow: 128_000,
       },
       {
@@ -286,6 +288,12 @@ export const CODEX_PROVIDER: ProviderProfile = Object.freeze({
   fallbackModels: Object.freeze(["gpt-5.5"]),
   defaultMaxTokens: 16000,
   defaultAuxModel: "",
+  // piso do provedor — fonte: https://platform.openai.com/docs/models,
+  // 2026-09; mesma razão do perfil "openai" acima (128k é o padrão estável
+  // da família GPT-4). "gpt-5.5" é futuro e sem fonte verificável própria,
+  // então cai neste piso quando resolvido pelo caminho de subscription do
+  // Codex (issue #250).
+  defaultContextWindow: 128_000,
   authType: "oauth_external",
   defaultHeaders: Object.freeze({}),
   fixedTemperature: null,

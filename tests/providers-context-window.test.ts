@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { resolveContextWindow } from "../src/providers/context-window.js";
-import { getProviderProfile } from "../src/providers/registry.js";
+import { CODEX_PROVIDER, getProviderProfile } from "../src/providers/registry.js";
 import type { ProviderProfile } from "../src/providers/types.js";
 
 function fakeProfile(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
@@ -174,5 +174,15 @@ describe("resolveContextWindow — perfis reais do registry (issue #250)", () =>
         profile,
       }),
     ).toEqual({ tokens: 200_000, source: "default" });
+  });
+
+  it("codex: gpt-5.5 via subscription cai no piso do provedor, não no default global", () => {
+    expect(
+      resolveContextWindow({
+        provider: "openai-codex",
+        model: "gpt-5.5",
+        profile: CODEX_PROVIDER,
+      }),
+    ).toEqual({ tokens: 128_000, source: "provider" });
   });
 });
