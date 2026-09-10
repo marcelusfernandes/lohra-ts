@@ -4,8 +4,10 @@ Como o runtime decide "quantos tokens cabem nesta chamada" quando não há
 metadado explícito vindo do provedor — pré-requisito da compactação (milestone
 "Janela de contexto: compactar antes de estourar", issue #250, sub-issue do
 épico #230). Este documento descreve a precedência hoje; a estimativa de
-tokens do histórico (#251) e a compactação de verdade (#252) são issues
-separadas que consomem esta resolução, ainda não fiadas a ela.
+tokens do histórico (#251) e a compactação de verdade (#252) consomem esta
+resolução — `resolveTurnContextWindow` (`src/conversation/compaction.ts`)
+chama `resolveContextWindow` a cada turno, dentro do preflight de
+compactação (`docs/context-compaction.md`).
 
 ## A função
 
@@ -92,11 +94,8 @@ avisar nada, porque não configurar não é um erro).
 
 ## Fora de escopo desta issue
 
-- Ninguém ainda chama `resolveContextWindow` do caminho de chat/aux — a
-  fiação com o estimador de tokens (#251) e a compactação (#252) são issues
-  separadas. **Atualização (#252):** a fiação aconteceu —
-  `resolveTurnContextWindow` (`src/conversation/compaction.ts`) chama esta
-  função a cada turno, dentro do preflight de compactação. Detalhes em
-  `docs/context-compaction.md`.
+- Esta função por si só não decide _quando_ compactar; quem decide é o
+  preflight de compactação (#252, `docs/context-compaction.md`), que a
+  chama através de `resolveTurnContextWindow`.
 - Modelos futuros sem fonte verificável (lista acima) não entram na tabela
   agora; entram quando houver uma fonte real a citar.

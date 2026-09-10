@@ -5,8 +5,8 @@
 // site de `launchDurable` (service.ts). O que prende os mutantes em CI
 // normal (sem rodar `npm run mutations:t16`, que é externo ao vitest -- ver
 // `docs/mutation-testing.md`) é o pino de contagem: `tests/mutations-slices.test.ts`
-// reprova se `workflow-durability-named.ts` não tiver 40 mutantes, se a soma
-// total não bater 172, ou se `focusFiles` da fatia `workflow-durability` não
+// reprova se `workflow-durability-named.ts` não tiver 41 mutantes, se a soma
+// total não bater 173, ou se `focusFiles` da fatia `workflow-durability` não
 // incluir `tests/workflow-tiers.test.ts` -- as três a mesma linha de defesa
 // que fez esta issue existir (nenhum catálogo mirava essa fiação antes).
 //
