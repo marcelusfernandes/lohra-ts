@@ -208,3 +208,95 @@ export function recordGroupReplayCost(
   addUsageToResult(deps.result, node.id, total, null, null);
   return cached;
 }
+
+/** #243: a raw answers value substituted for a checkpoint id that the
+ * PARENT also owns — `resolveCheckpoint` treats presence of this sentinel
+ * as "claimed by someone else's checkpoint", never as a real answer. */
+export const CHECKPOINT_AMBIGUOUS: unique symbol = Symbol("checkpoint-ambiguous");
+
+/** The dotted answer key a checkpoint listens on: the raw id at the root
+ * (`nodeScope` empty — unchanged, so every existing flat answer keeps
+ * working), the ancestor chain joined by `.` once nested (`sub.confirm`). */
+export function scopedCheckpointId(nodeScope: readonly string[], id: string): string {
+  return nodeScope.length === 0 ? id : [...nodeScope, id].join(".");
+}
+
+/** #243: what a NESTED engine receives as `checkpointAnswers` — a copy
+ * where every raw key that also names a checkpoint at the ROOT scope is
+ * replaced by `CHECKPOINT_AMBIGUOUS`. The nested checkpoint can then tell
+ * "answered under my key" apart from "this raw key means the PARENT's
+ * checkpoint" and refuse the latter instead of silently answering both
+ * from one flat `{confirm: "..."}`. */
+export function nestedCheckpointAnswers(
+  answers: Readonly<Record<string, unknown>>,
+  rootCheckpointIds: ReadonlySet<string>,
+): Readonly<Record<string, unknown>> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(answers))
+    out[key] = rootCheckpointIds.has(key) ? CHECKPOINT_AMBIGUOUS : value;
+  return Object.freeze(out);
+}
+
+export interface CheckpointResolution {
+  readonly scoped: string;
+  readonly matched: boolean;
+  readonly answer: unknown;
+  /** What `runCheckpoint` should pause with when NOT matched — names the
+   * collision (invariant 2: never silent) or, absent one, the plain
+   * unanswered-checkpoint text. Unused when `matched`. */
+  readonly message: string;
+}
+
+/** Scoped key wins; the raw id is the pre-#243 compat fallback, refused —
+ * `matched: false` with a named `message`, never silently applied — when it
+ * carries `CHECKPOINT_AMBIGUOUS`. */
+export function resolveCheckpoint(
+  answers: Readonly<Record<string, unknown>>,
+  nodeScope: readonly string[],
+  nodeId: string,
+): CheckpointResolution {
+  const scoped = scopedCheckpointId(nodeScope, nodeId);
+  if (Object.hasOwn(answers, scoped))
+    return { scoped, matched: true, answer: answers[scoped], message: "" };
+  if (Object.hasOwn(answers, nodeId)) {
+    const raw = answers[nodeId];
+    if (raw !== CHECKPOINT_AMBIGUOUS) return { scoped, matched: true, answer: raw, message: "" };
+    const message =
+      `${nodeId}: checkpoint id '${nodeId}' collides with the parent's — ` +
+      `answer with the scoped id '${scoped}'`;
+    return { scoped, matched: false, answer: null, message };
+  }
+  return {
+    scoped,
+    matched: false,
+    answer: null,
+    message: `${nodeId}: checkpoint waiting for answer`,
+  };
+}
+
+/** Applies a resolved checkpoint answer: caches it under the node's cell (so
+ * a replay never re-consults `checkpointAnswers`) and returns it. */
+export function applyCheckpointAnswer(
+  cache: WorkflowCache,
+  runId: string,
+  hash: string,
+  nodeId: string,
+  answer: unknown,
+): unknown {
+  cache.put(runId, hash, nodeId, answer, null);
+  return answer;
+}
+
+/** The pause payload for an unanswered checkpoint — `node_id` is the
+ * SCOPED form (#243), so a resume answers the right occurrence. */
+export function checkpointPausePayload(
+  node: Node,
+  resolved: CheckpointResolution,
+  prompt: unknown,
+): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    node_id: resolved.scoped,
+    prompt,
+    ...(Object.hasOwn(node.fields, "default") ? { default: node.fields.default } : {}),
+  });
+}
