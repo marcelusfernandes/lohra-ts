@@ -530,7 +530,8 @@ export const BUILTIN_DEFINITIONS = [
   {
     type: "function",
     function: {
-      description: "Cancel a running workflow by its run_id.",
+      description:
+        "Cancel a running workflow by its run_id — waits (up to the same ceiling shutdown() uses) for every leaf already in flight to actually stop, so status 'cancelled' means nothing is still spending tokens. A leaf that ignores the cancel signal past that ceiling returns status 'cancelling' with 'leaves_in_flight' (still running, not thrown away); call workflow_cancel again or workflow_status to see it finally settle.",
       parameters: {
         type: "object",
         properties: {

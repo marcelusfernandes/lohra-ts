@@ -633,7 +633,7 @@ describe("workflow service durability", () => {
     }
   });
 
-  it("cancel busy is decided by the write's own statement (write attempted and refused)", () => {
+  it("cancel busy is decided by the write's own statement (write attempted and refused)", async () => {
     const { repository, locks, close } = harness();
     // foreign lease live
     locks.acquireRunLease("cancel-busy", "foreign", 1000, 900);
@@ -678,7 +678,7 @@ describe("workflow service durability", () => {
         database: undefined as unknown as import("better-sqlite3").Database,
       },
     });
-    const out = cancelling.cancel("cancel-busy");
+    const out = await Promise.resolve(cancelling.cancel("cancel-busy"));
     expect(out).toMatchObject({ error: "busy", run_id: "cancel-busy" });
     expect(writeAttempts).toBe(1);
     close();
