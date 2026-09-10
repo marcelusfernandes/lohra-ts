@@ -646,10 +646,10 @@ export const namedMutants: readonly Mutant[] = [
     ],
   },
   {
-    id: "ap/tier-suggestion-boundary-widens-by-one",
+    id: "ap/tier-suggestion-drops-the-boundary-distance",
     category: "tiers",
     mechanism:
-      "closestTierName accepts an edit distance one past SUGGESTION_MAX_DISTANCE, so a typo three edits from any tier name still gets a suggestion instead of being rejected bare (#276, #283)",
+      "closestTierName demands an edit distance strictly less than SUGGESTION_MAX_DISTANCE, so a typo exactly at the boundary (distance 2, e.g. 'sml') is rejected bare instead of getting its 'did you mean' suggestion (#276, #283)",
     focus: {
       file: tiersTests,
       test: "at edit distance exactly 2 and still suggests the closest tier",
