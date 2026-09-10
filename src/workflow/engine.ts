@@ -332,7 +332,6 @@ export class WorkflowEngine {
       release();
     }
   }
-
   private account(nodeId: string, id: string, collected: ChildResult): void {
     if (this.accounted.has(id)) return;
     this.accounted.add(id);
