@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   Budget,
@@ -12,6 +16,8 @@ import {
   type ChildRuntime,
   type ChildSpawnRequest,
 } from "../src/workflow/index.js";
+import { WorkflowService } from "../src/workflow/service.js";
+import { LockRepository, openStateDatabase, WorkflowRepository } from "../src/state/index.js";
 
 class FakeRuntime implements ChildRuntime {
   readonly spawned: ChildSpawnRequest[] = [];
@@ -461,5 +467,54 @@ describe("workflow engine", () => {
     expect(runtime.spawned).toHaveLength(0);
     expect(result.outputs.approve).toBe(false);
     expect(result.status).toBe("complete");
+  });
+});
+
+describe("workflow service status", () => {
+  const roots: string[] = [];
+  afterEach(() => {
+    while (roots.length > 0) rmSync(roots.pop() as string, { recursive: true, force: true });
+  });
+
+  // #232: a leaf that never measured usage surfaces on workflow_status as
+  // usage_uncertain_leaves — not silently folded into a zero-cost average.
+  it("exposes usage_uncertain_leaves on workflow_status when a leaf never measured usage", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-workflow-service-uncertain-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    const repository = new WorkflowRepository(connection.database);
+    const locks = new LockRepository(connection.database);
+    const ownership = { fence: 0 as number, holder: "test", now: 1000 };
+    const uncertainRuntime: ChildRuntime = {
+      spawn: (): string => "leaf-1",
+      collect: (): ChildResult => ({
+        status: "complete",
+        output: { answer: "ok" },
+        usageUncertain: true,
+      }),
+      steer: (): void => undefined,
+      cancel: (): void => undefined,
+      installLeafSandbox: () => ({ dispose: (): void => undefined }),
+    };
+    const service = new WorkflowService({
+      runtime: uncertainRuntime,
+      store: {
+        repository,
+        locks,
+        holder: "test",
+        ttl: 900,
+        ownershipOf: () => ownership,
+        database: connection.database,
+      },
+    });
+    const started = service.start(
+      { meta: { name: "uncertain-status" }, nodes: [{ id: "a", type: "agent", prompt: "x" }] },
+      {},
+    );
+    if ("error" in started) throw new Error(started.error);
+    const final = (await service.status(started.run_id, true)) as Record<string, unknown>;
+    expect(final.status).toBe("complete");
+    expect(final.usage_uncertain_leaves).toBe(1);
+    connection.close();
   });
 });

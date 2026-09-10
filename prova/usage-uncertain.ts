@@ -11,10 +11,12 @@
 // o caso de controle, uma folha medida). orchestration-tools.test.ts repina
 // o envelope de collect_session para 14 chaves. workflow-executor.test.ts
 // prova Budget.estimatedLeafCost e RunResult.usageUncertainLeaves de ponta a
-// ponta pelo WorkflowEngine. workflow-service-durability.test.ts prova
-// usage_uncertain_leaves em workflow_status (service.ts's resultView).
-// orchestration-core-delegate.test.ts continua verde, sem regressão no
-// batch de delegate_task.
+// ponta pelo WorkflowEngine, e usage_uncertain_leaves em workflow_status
+// (service.ts's resultView) — não em workflow-service-durability.test.ts:
+// esse arquivo já passa de 800 linhas na base, então o teste novo de
+// WorkflowService foi para cá (ambos em `Files`), sem crescer um arquivo já
+// no teto. orchestration-core-delegate.test.ts continua verde, sem
+// regressão no batch de delegate_task.
 import type { Declaracao } from "../scripts/prova/tipos.js";
 
 export default {
@@ -22,7 +24,6 @@ export default {
     "tests/orchestration-child-runner.test.ts",
     "tests/orchestration-tools.test.ts",
     "tests/workflow-executor.test.ts",
-    "tests/workflow-service-durability.test.ts",
     "tests/orchestration-core-delegate.test.ts",
   ],
 } satisfies Declaracao;

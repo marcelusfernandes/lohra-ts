@@ -249,44 +249,6 @@ describe("workflow service durability", () => {
     close();
   });
 
-  // #232: a leaf that never measured usage surfaces on workflow_status as
-  // usage_uncertain_leaves — not silently folded into a zero-cost average.
-  it("exposes usage_uncertain_leaves on workflow_status when a leaf never measured usage", async () => {
-    const root = mkdtempSync(join(tmpdir(), "lohra-service-durability-uncertain-"));
-    roots.push(root);
-    const connection = openStateDatabase(join(root, "state.db"));
-    const repository = new WorkflowRepository(connection.database);
-    const locks = new LockRepository(connection.database);
-    const ownership = { fence: 0 as number, holder: "test", now: 1000 };
-    const uncertainRuntime = withLeafSandbox({
-      spawn: (): string => "leaf-1",
-      collect: (): ChildResult => ({
-        status: "complete",
-        output: { answer: "ok" },
-        usageUncertain: true,
-      }),
-      steer: (): void => undefined,
-      cancel: (): void => undefined,
-    });
-    const service = new WorkflowService({
-      runtime: uncertainRuntime,
-      store: {
-        repository,
-        locks,
-        holder: "test",
-        ttl: 900,
-        ownershipOf: () => ownership,
-        database: connection.database,
-      },
-    });
-    const started = service.start(spec(), {});
-    if ("error" in started) throw new Error(started.error);
-    const final = (await service.status(started.run_id, true)) as Record<string, unknown>;
-    expect(final.status).toBe("complete");
-    expect(final.usage_uncertain_leaves).toBe(1);
-    connection.close();
-  });
-
   it("rejects a second acquire on a live run with the exact busy error", () => {
     const { service, locks, close } = harness();
     // foreign process holds the lease
