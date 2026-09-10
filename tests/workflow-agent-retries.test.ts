@@ -55,6 +55,41 @@ class PauseOnFirstCollectRuntime implements ChildRuntime {
   }
 }
 
+/** Same shape as `workflow-parallel-retries.test.ts`'s `ScriptedRuntime` —
+ * scripted per-spawn results, one script consumed per leaf. Used below to
+ * pin the two behaviors OUTSIDE a pause that this fix must never touch:
+ * empty output retries up to the cap, a dead (null) leaf never retries. */
+class ScriptedRuntime implements ChildRuntime {
+  readonly spawned: ChildSpawnRequest[] = [];
+  private readonly scripts: ChildResult[][];
+  private readonly byId = new Map<string, ChildResult[]>();
+
+  constructor(scripts: ChildResult[][]) {
+    this.scripts = scripts.map((script) => [...script]);
+  }
+
+  spawn(request: ChildSpawnRequest): string {
+    const id = `leaf-${String(this.spawned.length + 1)}`;
+    this.spawned.push(request);
+    this.byId.set(id, this.scripts.shift() ?? []);
+    return id;
+  }
+
+  collect(id: string, _options: ChildCollectOptions): ChildResult {
+    const script = this.byId.get(id) ?? [];
+    return script.shift() ?? { status: "failed", output: "script exhausted" };
+  }
+
+  steer(): void {}
+  cancel(): void {}
+  installLeafSandbox(): { dispose: () => void } {
+    return { dispose: (): void => undefined };
+  }
+}
+
+const empty: ChildResult = { status: "complete", output: "" };
+const dead: ChildResult = { status: "failed", output: "boom" };
+
 function parsed(raw: unknown) {
   const result = validateSpec(raw);
   if ("issues" in result) throw new Error(result.message);
@@ -74,6 +109,31 @@ describe("agent retries never spin past a pause (#321)", () => {
     expect(runtime.spawned).toHaveLength(1);
     expect(result.outputs.a).toBeNull();
     expect(result.status).toBe("paused");
+    expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(0);
+  });
+
+  it("still retries an agent up to the cap on repeated empty output, outside any pause", async () => {
+    const runtime = new ScriptedRuntime([[empty], [empty], [empty]]);
+    const spec = parsed({
+      meta: { name: "agent-empty-until-cap" },
+      nodes: [{ id: "a", type: "agent", prompt: "x", retries: 2 }],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(runtime.spawned).toHaveLength(3);
+    expect(result.outputs.a).toBeNull();
+    expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(2);
+    expect(result.faults).toContain("a: empty output after retry");
+  });
+
+  it("still never retries a dead (null) agent leaf, outside any pause", async () => {
+    const runtime = new ScriptedRuntime([[dead]]);
+    const spec = parsed({
+      meta: { name: "agent-dead-no-retry" },
+      nodes: [{ id: "a", type: "agent", prompt: "x", retries: 1 }],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(runtime.spawned).toHaveLength(1);
+    expect(result.outputs.a).toBeNull();
     expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(0);
   });
 });
