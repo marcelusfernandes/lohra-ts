@@ -29,7 +29,6 @@ import {
   clampInteger,
   collectBranchWithRetries,
   combine,
-  nestedCheckpointAnswers,
   nonEmpty,
   recordGroupReplayCost,
   renderValue,
@@ -37,6 +36,7 @@ import {
   resultUsage,
   routingIdentity,
   routingOf,
+  siblingAnswers,
   strictResolve,
   timeoutLeafResult,
   verifyPrompt,
@@ -77,7 +77,7 @@ export class WorkflowEngine {
   private schemas: Readonly<Record<string, unknown>> = {};
   private currentNode = "?";
   private specIdentity: readonly unknown[] = ["workflow", null];
-  private checkpointIds: ReadonlySet<string> = new Set();
+  private nestedAnswers: Readonly<Record<string, unknown>> = Object.freeze({});
   private readonly activeLeaves = new Set<string>();
   private accounted = new Set<string>();
   private leafCosts = new Map<string, Usage>();
@@ -383,7 +383,7 @@ export class WorkflowEngine {
     this.schemas = spec.schemas;
     this.specIdentity = Object.freeze([spec.name, spec.meta.version ?? null]);
     const ordered = topologicalOrder(spec);
-    this.checkpointIds = new Set(ordered.filter((n) => n.type === "checkpoint").map((n) => n.id));
+    this.nestedAnswers = await siblingAnswers(this.checkpointAnswers, ordered, args, this.loader);
     this.result.nodesTotal = ordered.length;
     this.progressTracker.reset(ordered.map((node) => node.id));
     for (const node of ordered) {
@@ -866,7 +866,7 @@ export class WorkflowEngine {
       segmentId: this.segmentId,
       depth: this.depth + 1,
       nodeScope: [...this.nodeScope, node.id],
-      checkpointAnswers: nestedCheckpointAnswers(this.checkpointAnswers, this.checkpointIds),
+      checkpointAnswers: this.nestedAnswers,
       pipelineTimeoutSeconds: this.pipelineTimeoutSeconds,
       ...(this.onEvent === undefined ? {} : { onEvent: this.onEvent }),
       logError: this.logError,
@@ -981,7 +981,7 @@ export class WorkflowEngine {
   private runCheckpoint(node: Node, context: Readonly<Record<string, unknown>>): unknown {
     const prompt = strictResolve(node.fields.prompt, context);
     if (prompt === null) return null;
-    const hash = this.cell([node.id, "checkpoint", prompt]);
+    const hash = this.cell([...this.nodeScope, node.id, "checkpoint", prompt]);
     const cached = this.cacheGet(hash);
     if (cached !== CACHE_MISS) return cached;
     const resolved = resolveCheckpoint(this.checkpointAnswers, this.nodeScope, node.id);
