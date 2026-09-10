@@ -51,6 +51,15 @@ function spec(raw: unknown) {
   return parsed;
 }
 
+// A leaked CHECKPOINT_AMBIGUOUS sentinel is a Symbol at ANY depth of the
+// outputs tree (a raw value, or nested inside a `workflow` node's own
+// output object) — recurse instead of only checking the top level.
+function containsSymbol(value: unknown): boolean {
+  if (typeof value === "symbol") return true;
+  if (value === null || typeof value !== "object") return false;
+  return Object.values(value as Record<string, unknown>).some(containsSymbol);
+}
+
 // Both levels name their checkpoint "confirm" — the exact shape #243 guards.
 const innerSpec = {
   meta: { name: "inner" },
@@ -91,6 +100,49 @@ describe("checkpoint id scoping in a nested workflow — engine (#243)", () => {
     expect(
       result.faults.some((fault) => fault.includes("collides") && fault.includes("sub.confirm")),
     ).toBe(true);
+  });
+
+  it("#318: a DOTTED root checkpoint id colliding with a nested SCOPED key is refused too — never leaks the ambiguity sentinel as an output", async () => {
+    // The root's OWN checkpoint id is literally "sub.confirm" — the exact
+    // string the nested "sub" node's "confirm" checkpoint is scoped to.
+    // `nestedCheckpointAnswers` marks ANY answers key matching a root
+    // checkpoint id with the sentinel, dotted or not, so the nested engine
+    // sees `{"sub.confirm": CHECKPOINT_AMBIGUOUS}` here too — the SCOPED
+    // branch of `resolveCheckpoint` must refuse it exactly like the raw
+    // branch does, never return it as a matched answer.
+    const dottedOuterNodes = [
+      { id: "sub.confirm", type: "checkpoint", prompt: "root dotted?" },
+      // depends_on takes plain ids, never a "${...}" template, so the dot in
+      // "sub.confirm" never has to survive `strictResolve`'s path-splitting.
+      { id: "sub", type: "workflow", ref: "inner", depends_on: ["sub.confirm"] },
+    ];
+    const result = await new WorkflowEngine({
+      runtime: new QueueChildren(),
+      loader: () => innerSpec,
+      checkpointAnswers: { "sub.confirm": "x" },
+    }).run(spec({ meta: { name: "outer-dotted" }, nodes: dottedOuterNodes }));
+
+    // Must never silently "complete" with the sentinel dropped by
+    // `JSON.stringify` — it pauses at the nested checkpoint instead.
+    expect(result.status).toBe("paused");
+    expect(result.pauseReason).toBe("checkpoint");
+    expect(result.checkpoint).toMatchObject({ node_id: "sub.confirm", prompt: "child?" });
+
+    // invariant 2: a NAMED fault, not a silent miss.
+    expect(
+      result.faults.some((fault) => fault.includes("collides") && fault.includes("sub.confirm")),
+    ).toBe(true);
+
+    // The root's OWN dotted checkpoint still resolves normally — colliding
+    // with the CHILD's scoped form is what's refused, not the root's raw
+    // answer to its own literal id.
+    expect(result.outputs["sub.confirm"]).toBe("x");
+
+    // No path anywhere emits the ambiguity sentinel itself as an output — a
+    // Symbol would vanish silently through JSON instead of failing loudly.
+    expect(containsSymbol(result.outputs)).toBe(false);
+    const roundTripped = JSON.parse(JSON.stringify(result.outputs)) as Record<string, unknown>;
+    expect(Object.keys(roundTripped).sort()).toEqual(Object.keys(result.outputs).sort());
   });
 
   it("a raw id with NO collision keeps working — pre-#243 compat", async () => {
