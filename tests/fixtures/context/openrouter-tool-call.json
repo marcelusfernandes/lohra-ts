@@ -1,0 +1,45 @@
+{
+  "provider": "openrouter",
+  "model": "openai/gpt-4o-mini",
+  "capturedAt": "2026-09-10T03:48:19.507Z",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Você é um assistente de suporte técnico em português do Brasil. Responda de forma objetiva, cite o número do chamado quando disponível e nunca invente informação que não esteja no histórico da conversa. Se precisar de uma ferramenta, use exatamente o nome fornecido e explique o resultado ao usuário em uma frase curta antes de prosseguir com o restante da resposta. Mantenha o tom cordial, evite jargão desnecessário e, quando o problema envolver custos, sempre informe o valor em reais (BRL) com duas casas decimais."
+    },
+    {
+      "role": "user",
+      "content": "Cliente relatou que o pedido #48213 não chegou. Confira o status de entrega da transportadora ExpressLog e me diga o que houve, incluindo a previsão de entrega revisada."
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_1",
+          "type": "function",
+          "function": {
+            "name": "consultar_status_entrega",
+            "arguments": "{\"pedido\":\"48213\",\"transportadora\":\"ExpressLog\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "{\"pedido\":\"48213\",\"status\":\"em_transito\",\"ultima_localizacao\":\"Centro de distribuição, Campinas/SP\",\"previsao_entrega\":\"2026-09-12\",\"ocorrencias\":[{\"data\":\"2026-09-08\",\"descricao\":\"Coleta realizada no centro de origem\"},{\"data\":\"2026-09-09\",\"descricao\":\"Chegada ao centro de triagem de Campinas\"}]}"
+    },
+    {
+      "role": "user",
+      "content": "Perfeito, obrigado. Pode confirmar também se o endereço de entrega cadastrado está correto para São Paulo, capital, CEP 01310-100?"
+    }
+  ],
+  "usage": {
+    "inputTokens": 311,
+    "outputTokens": 54,
+    "cacheReadTokens": 0,
+    "cacheWriteTokens": 0,
+    "reasoningTokens": 0
+  }
+}
