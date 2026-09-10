@@ -30,6 +30,17 @@ export class RunResult {
   readonly faults: string[] = [];
   nullCount = 0;
   validationRetries = 0;
+  /** Leaves re-spawned after attempt 0 — every case where a retry
+   * re-invokes collectLeaf (a NEW leaf), never one that steers the same
+   * leaf in place (issue #247). runAgent's empty-output retry and
+   * runPipeline's per-stage retry (empty output OR failed schema
+   * validation — same loop, same re-spawn) both count. A schema mismatch
+   * on an `agent` node does NOT: collectLeaf's own validation loop steers
+   * the SAME leaf (counted in validationRetries instead) — runAgent passes
+   * its schema straight into collectLeaf, runPipeline passes null and
+   * re-validates the settled output itself, outside collectLeaf, which is
+   * why only the pipeline path re-spawns. */
+  leafRespawns = 0;
   capTrips = 0;
   engineFaults = 0;
   nodesTotal = 0;

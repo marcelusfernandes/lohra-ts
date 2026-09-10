@@ -137,13 +137,11 @@ export class WorkflowEngine {
     this.pause("user_requested", "run paused at the operator's request");
   }
 
-  /** A leaf died because the provider is out of quota (WF-1): latch once, one
-   * fault with retry_after, and cancel the leaves still in flight. */
+  /** A leaf died because the provider is out of quota (WF-1): latch once, one fault with retry_after, and cancel the leaves still in flight. */
   noteQuotaExhausted(nodeId: string, retryAfter: number | null): void {
     if (this.control.paused || this.control.cancelled) return;
     const hint = retryAfter !== null ? `${String(Math.trunc(retryAfter))}s` : "none";
-    // The payload rides INTO pause (assign then call, not the reverse) — the
-    // reverse order overwrote it with null and every quota pause silently fell back to the backoff curve.
+    // The payload rides INTO pause (assign then call, not the reverse) — the reverse order overwrote it with null and every quota pause silently fell back to the backoff curve.
     this.pause(
       "quota_exhausted",
       `quota exhausted at '${nodeId}' (retry_after=${hint})`,
@@ -441,10 +439,9 @@ export class WorkflowEngine {
     if (cached !== CACHE_MISS) return cached;
     const retries = clampInteger(node.fields.retries, 1, MAX_NODE_RETRIES);
     for (let attempt = 0; attempt <= retries; attempt += 1) {
-      const attemptPrompt =
-        attempt === 0
-          ? renderValue(prompt)
-          : `${renderValue(prompt)}\n\n${EMPTY_OUTPUT_CORRECTION}`;
+      if (attempt > 0) this.result.leafRespawns += 1;
+      const rendered = renderValue(prompt);
+      const attemptPrompt = attempt === 0 ? rendered : `${rendered}\n\n${EMPTY_OUTPUT_CORRECTION}`;
       const leaf = await this.collectLeaf(node, attemptPrompt, schema, {
         role: "agent",
         cellId: hash,
@@ -536,6 +533,7 @@ export class WorkflowEngine {
           let winningCost = usage();
           let correction = "";
           for (let attempt = 0; attempt <= retries; attempt += 1) {
+            if (attempt > 0) this.result.leafRespawns += 1;
             const leaf = await this.collectLeaf(
               stageNode,
               correction === "" ? renderValue(prompt) : `${renderValue(prompt)}\n\n${correction}`,
@@ -879,6 +877,7 @@ export class WorkflowEngine {
     this.result.capTrips += result.capTrips;
     this.result.engineFaults += result.engineFaults;
     this.result.forcingFallbacks += result.forcingFallbacks;
+    this.result.leafRespawns += result.leafRespawns;
     return Object.freeze({ ...result.outputs });
   }
 

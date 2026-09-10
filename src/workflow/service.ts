@@ -42,12 +42,10 @@ export const FENCE_MEMORY = 1024;
 /** shutdown() never waits past this for a live run to settle (invariant 3). */
 export const SHUTDOWN_SETTLE_TIMEOUT_MS = 5_000;
 
-/** The token an evicted run presents: never a number, so a forgotten fence
- * can never be guessed into a write. */
+/** The token an evicted run presents: never a number, so a forgotten fence can never be guessed into a write. */
 export const EVICTED = Symbol.for("lohra.workflow.fence.evicted");
 
-/** Bounded memory of the fence each run acquired, oldest evicted first at
- * FENCE_MEMORY entries; an evicted run's writes are refused fail-closed. */
+/** Bounded memory of the fence each run acquired, oldest evicted first at FENCE_MEMORY entries; an evicted run's writes are refused fail-closed. */
 export class FenceMemory {
   private readonly fences = new Map<string, number>();
 
@@ -109,6 +107,7 @@ export interface DurableRunView {
   readonly checkpoint: Record<string, unknown> | null;
   readonly resume_at: number | null;
   readonly attempts: number;
+  readonly leaf_respawns: number;
   readonly prior_faults: readonly string[];
   readonly prior_degraded: boolean;
   readonly tainted: boolean;
@@ -148,6 +147,7 @@ export function durableFromRow(row: Readonly<Record<string, unknown>>): DurableR
         : null,
     resume_at: typeof payload.resume_at === "number" ? payload.resume_at : null,
     attempts: Number(payload.attempts ?? 0),
+    leaf_respawns: Number(payload.leaf_respawns ?? 0),
     prior_faults: Array.isArray(faults) ? faults.map((fault) => String(fault)) : [],
     prior_degraded: payload.prior_degraded === true,
     tainted: Number(row.tainted ?? 0) === 1,
@@ -194,6 +194,7 @@ export function durableRollup(
   const pause = pauseFields(view);
   if (pause !== null) Object.assign(out, pause);
   out.tokens_spent_total = spentTotal;
+  out.leaf_respawns = view.leaf_respawns;
   if (view.progress !== null && Number(view.progress.total ?? 0) > 0) out.progress = view.progress;
   if (view.prior_faults.length > 0) out.faults_total = [...view.prior_faults];
   if (view.name !== "") out.name = view.name;
@@ -295,12 +296,9 @@ interface RunRecord {
   readonly engine: WorkflowEngine;
   readonly promise: Promise<Readonly<Record<string, unknown>>>;
   result: RunResult | null;
-  /**
-   * What this run PUBLISHES once it settles — the single terminal answer
+  /** What this run PUBLISHES once it settles — the single terminal answer
    * every channel reads (fail-closed: one published value, not one per
-   * channel — `result` alone let a refused terminal write still report
-   * "complete").
-   */
+   * channel — `result` alone let a refused terminal write still report "complete"). */
   published: Readonly<Record<string, unknown>> | null;
   readonly resolve: (value: Readonly<Record<string, unknown>>) => void;
   settled: boolean;
@@ -319,6 +317,7 @@ function resultView(
     outputs: structuredClone(result.outputs),
     faults: Object.freeze([...result.faults]),
     null_count: result.nullCount,
+    leaf_respawns: result.leafRespawns,
     validation_retries: result.validationRetries,
     cap_trips: result.capTrips,
     engine_faults: result.engineFaults,
@@ -551,11 +550,9 @@ export class WorkflowService {
     );
   }
 
-  /**
-   * The composition handed to the runtime, pinned to ONE acquisition. Once a
+  /** The composition handed to the runtime, pinned to ONE acquisition. Once a
    * newer stretch owns the run, the older stretch's wrapper stops granting
-   * anything: its working root and its taint are no longer the run's.
-   */
+   * anything: its working root and its taint are no longer the run's. */
   private stretchToolDispatch(
     runId: string,
     stretchId: number,
@@ -1038,6 +1035,7 @@ export class WorkflowService {
             checkpoint,
             resume_at: resumeAt,
             attempts: (priorView?.attempts ?? 0) + 1,
+            leaf_respawns: (priorView?.leaf_respawns ?? 0) + result.leafRespawns,
             prior_faults: faults,
             prior_degraded: degraded,
           });
@@ -1076,6 +1074,8 @@ export class WorkflowService {
         finishStretch();
         record.settled = true;
         if (owned) {
+          // pausePayload above already persisted the stretch-only count; fold the prior total in now, after, so the live view (here and the next status() read of this `result`) matches the durable rollup (#247 round 2).
+          result.leafRespawns += priorView?.leaf_respawns ?? 0;
           record.published = resultView(runId, parsed.name, result, engine.budget);
           record.resolve(record.published);
         } else {
@@ -1127,8 +1127,7 @@ export class WorkflowService {
     );
   }
 
-  /** One scratch directory per ACQUISITION, named by the fence, so a stale
-   * owner's leaves write harmlessly into their own obsolete root. */
+  /** One scratch directory per ACQUISITION, named by the fence, so a stale owner's leaves write harmlessly into their own obsolete root. */
   private workingRootOf(runId: string, fence: number): string {
     return join(this.homeRoot, "runs", runId, `work-${String(fence)}`);
   }
