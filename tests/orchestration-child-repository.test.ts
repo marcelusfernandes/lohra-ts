@@ -4,7 +4,14 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import {
+  ConversationRuntime,
+  type ConversationRuntimeEvent,
+  type ModelRequest,
+  type ModelTransport,
+} from "../src/conversation/index.js";
 import { openStateDatabase, SessionRepository } from "../src/state/index.js";
+import type { NormalizedResponse } from "../src/transports/index.js";
 import { ChildConversationRepository } from "../src/orchestration/child-repository.js";
 
 const roots: string[] = [];
@@ -82,6 +89,104 @@ describe("ChildConversationRepository", () => {
 
     expect(repo.loadMessages("child-1")).toHaveLength(2);
     expect(repo.summary("child-1")?.apiCallCount).toBe(1);
+    close();
+  });
+});
+
+function turn(id: number): Readonly<Record<string, unknown>>[] {
+  return [
+    { role: "user", content: `question ${String(id)} ${"x".repeat(2000)}` },
+    {
+      role: "assistant",
+      content: `answer ${String(id)} ${"y".repeat(2000)}`,
+      finish_reason: "stop",
+    },
+  ];
+}
+
+class QueueTransport implements ModelTransport {
+  readonly requests: ModelRequest[] = [];
+
+  constructor(private readonly responses: readonly NormalizedResponse[]) {}
+
+  complete(request: ModelRequest): Promise<NormalizedResponse> {
+    this.requests.push(structuredClone(request));
+    const response = this.responses[this.requests.length - 1];
+    if (response === undefined) throw new Error("TEST_RESPONSE_MISSING");
+    return Promise.resolve(response);
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+const usage = {
+  inputTokens: 11,
+  outputTokens: 7,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  reasoningTokens: 0,
+} as const;
+
+describe("a real child turn through ConversationRuntime (issue #252 round 2)", () => {
+  it("compacts an overflowing child history before the call, instead of faulting with CompactionUnsupportedError", async () => {
+    const { sessions, close } = setup();
+    sessions.createSession({ id: "parent-1", source: "gateway" });
+    const repo = new ChildConversationRepository(sessions, "parent-1");
+    repo.createSession({ id: "child-1", systemPrompt: "SUBAGENT_SYSTEM", model: "m", cwd: "/tmp" });
+    for (let i = 0; i < 5; i += 1) {
+      sessions.recordMessages("child-1", [
+        { role: "user", content: (turn(i)[0] as { content: string }).content },
+        {
+          role: "assistant",
+          content: (turn(i)[1] as { content: string }).content,
+          finishReason: "stop",
+        },
+      ]);
+    }
+
+    const transport = new QueueTransport([
+      {
+        content: "recap",
+        finishReason: "stop",
+        toolCalls: [],
+        reasoning: null,
+        usage,
+        providerData: null,
+      },
+      {
+        content: "child turn done",
+        finishReason: "stop",
+        toolCalls: [],
+        reasoning: null,
+        usage,
+        providerData: null,
+      },
+    ]);
+    const events: ConversationRuntimeEvent[] = [];
+    const runtime = new ConversationRuntime({
+      repository: repo,
+      transport,
+      promptSnapshot: () => "SUBAGENT_SYSTEM",
+      eventSink: (event) => events.push(event),
+      idSource: () => "child-1",
+      clock: () => 1000,
+      environment: { LOHRA_CONTEXT_WINDOW: "2000" },
+      minKeepMessages: 2,
+    });
+
+    const result = await runtime.runTurn({
+      input: "overflow trigger",
+      provider: "ollama",
+      model: "m",
+      cwd: "/tmp",
+      sessionId: "child-1",
+    });
+
+    expect(result.response.content).toBe("child turn done");
+    expect(result.compaction).not.toBeNull();
+    expect(events.map((event) => event.type)).toContain("session.compacted");
     close();
   });
 });
