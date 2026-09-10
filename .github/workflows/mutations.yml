@@ -72,7 +72,12 @@ jobs:
           cache: npm
       - run: npm ci
       - name: ${{ matrix.slice }}
-        run: npm run ${{ matrix.script }}
+        # O runner imprime o JSON da fatia no stdout; `tee` guarda uma cópia
+        # para o artifact abaixo (#323). `pipefail` preserva o exit code.
+        run: |
+          set -o pipefail
+          mkdir -p .mutation-evidence
+          npm run ${{ matrix.script }} | tee ".mutation-evidence/${{ matrix.slice }}.log"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
