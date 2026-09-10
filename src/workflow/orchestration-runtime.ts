@@ -161,6 +161,7 @@ export class OrchestrationChildRuntime implements ChildRuntime {
       forcedFallback: result.forcedFallback,
       retryAfter: result.retryAfter,
       errorKind: result.errorKind,
+      usageUncertain: result.usageUncertain === true,
     };
   }
 
