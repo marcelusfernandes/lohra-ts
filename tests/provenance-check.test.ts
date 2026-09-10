@@ -249,6 +249,17 @@ describe("validateDocument (guarda fail-closed: pelo menos uma entrada approved)
   });
 });
 
+// Issue #307: caracterizado sob carga real (dois `npm test` inteiros em
+// paralelo, cinco rodadas) sem nenhuma falha reproduzida — mas o
+// `spawnSync` abaixo não declarava `timeout`, e nenhum `it()` do bloco
+// abaixo declarava um timeout de teste próprio, deixando o default do
+// vitest (5s, `vitest.config.ts` não o define) livre para expirar antes do
+// subprocesso terminar sob contenção pesada. Mesmo raciocínio e mesmo nome
+// de constante de `tests/prova-run.test.ts:1-23` (issue #111): o timeout do
+// TESTE nunca pode ser menor que o do `spawnSync` que ele espera, senão o
+// relógio mais apertado corre por cima do subprocesso.
+const SPAWN_TIMEOUT_MS = 30_000;
+
 describe("provenance:check CLI (ponta a ponta, repositório git temporário)", () => {
   // Issue #137: nunca pelo wrapper CLI do `tsx` — `--import` com o loader
   // direto evita o handshake de sinal do wrapper (molde: tests/ci-escopo.test.ts).
@@ -259,6 +270,7 @@ describe("provenance:check CLI (ponta a ponta, repositório git temporário)", (
     return spawnSync(process.execPath, ["--import", tsxLoader, script, ...args], {
       cwd: dir,
       encoding: "utf8",
+      timeout: SPAWN_TIMEOUT_MS,
     });
   }
 
@@ -268,73 +280,89 @@ describe("provenance:check CLI (ponta a ponta, repositório git temporário)", (
     return path;
   }
 
-  it("passa e emite --json contra um repositório de verdade, sem depender da profundidade do clone", () => {
-    const dir = novoRepo();
-    writeFileSync(join(dir, "a.txt"), "a\n");
-    const sha1 = commitTudo(dir, "feat: primeiro commit");
-    writeFileSync(join(dir, "b.txt"), "b\n");
-    const sha2 = commitTudo(dir, "feat: segundo commit");
-    const provenancePath = escreverProvenance(dir, [
-      { ticket: "T00", sha: sha1, result: "integrado", status: "approved" },
-      { ticket: "T01", sha: sha2, result: "integrado", status: "approved" },
-      { ticket: "T99", sha: "PLACEHOLDER", result: "pendente", status: "pending" },
-    ]);
+  it(
+    "passa e emite --json contra um repositório de verdade, sem depender da profundidade do clone",
+    () => {
+      const dir = novoRepo();
+      writeFileSync(join(dir, "a.txt"), "a\n");
+      const sha1 = commitTudo(dir, "feat: primeiro commit");
+      writeFileSync(join(dir, "b.txt"), "b\n");
+      const sha2 = commitTudo(dir, "feat: segundo commit");
+      const provenancePath = escreverProvenance(dir, [
+        { ticket: "T00", sha: sha1, result: "integrado", status: "approved" },
+        { ticket: "T01", sha: sha2, result: "integrado", status: "approved" },
+        { ticket: "T99", sha: "PLACEHOLDER", result: "pendente", status: "pending" },
+      ]);
 
-    const textResult = run(dir, ["--provenance", provenancePath]);
-    expect(textResult.status).toBe(0);
-    expect(textResult.stdout).toBe("provenance: 2/2 approved heads are ancestors of HEAD\n");
-    expect(textResult.stderr).toContain("T99 skipped — not a full SHA: PLACEHOLDER");
+      const textResult = run(dir, ["--provenance", provenancePath]);
+      expect(textResult.status).toBe(0);
+      expect(textResult.stdout).toBe("provenance: 2/2 approved heads are ancestors of HEAD\n");
+      expect(textResult.stderr).toContain("T99 skipped — not a full SHA: PLACEHOLDER");
 
-    const jsonResult = run(dir, ["--provenance", provenancePath, "--json"]);
-    expect(jsonResult.status).toBe(0);
-    expect(JSON.parse(jsonResult.stdout)).toEqual({
-      checked: 2,
-      ok: true,
-      failures: [],
-      skipped: 1,
-      tolerated: 0,
-    });
-  });
+      const jsonResult = run(dir, ["--provenance", provenancePath, "--json"]);
+      expect(jsonResult.status).toBe(0);
+      expect(JSON.parse(jsonResult.stdout)).toEqual({
+        checked: 2,
+        ok: true,
+        failures: [],
+        skipped: 1,
+        tolerated: 0,
+      });
+    },
+    SPAWN_TIMEOUT_MS,
+  );
 
-  it("reporta SHA_UNKNOWN — não SHALLOW_CLONE — para um SHA inexistente num repositório não raso", () => {
-    const dir = novoRepo();
-    const sha1 = commitTudo(dir, "feat: único commit");
-    const shaInexistente = "a".repeat(40);
-    const provenancePath = escreverProvenance(dir, [
-      { ticket: "T00", sha: sha1, result: "integrado", status: "approved" },
-      { ticket: "T01", sha: shaInexistente, result: "integrado", status: "approved" },
-    ]);
+  it(
+    "reporta SHA_UNKNOWN — não SHALLOW_CLONE — para um SHA inexistente num repositório não raso",
+    () => {
+      const dir = novoRepo();
+      const sha1 = commitTudo(dir, "feat: único commit");
+      const shaInexistente = "a".repeat(40);
+      const provenancePath = escreverProvenance(dir, [
+        { ticket: "T00", sha: sha1, result: "integrado", status: "approved" },
+        { ticket: "T01", sha: shaInexistente, result: "integrado", status: "approved" },
+      ]);
 
-    const result = run(dir, ["--provenance", provenancePath, "--json"]);
-    expect(result.status).toBe(1);
-    expect(JSON.parse(result.stdout)).toEqual({
-      checked: 2,
-      ok: false,
-      failures: [{ ticket: "T01", sha: shaInexistente, cause: "SHA_UNKNOWN" }],
-      skipped: 0,
-      tolerated: 0,
-    });
-  });
+      const result = run(dir, ["--provenance", provenancePath, "--json"]);
+      expect(result.status).toBe(1);
+      expect(JSON.parse(result.stdout)).toEqual({
+        checked: 2,
+        ok: false,
+        failures: [{ ticket: "T01", sha: shaInexistente, cause: "SHA_UNKNOWN" }],
+        skipped: 0,
+        tolerated: 0,
+      });
+    },
+    SPAWN_TIMEOUT_MS,
+  );
 
-  it("PROVENANCE_EMPTY (exit 2) quando não há nenhuma entrada approved — guarda restaurada", () => {
-    const dir = novoRepo();
-    commitTudo(dir, "feat: único commit");
-    const provenancePath = escreverProvenance(dir, [
-      { ticket: "T99", sha: "PLACEHOLDER", result: "pendente", status: "pending" },
-    ]);
+  it(
+    "PROVENANCE_EMPTY (exit 2) quando não há nenhuma entrada approved — guarda restaurada",
+    () => {
+      const dir = novoRepo();
+      commitTudo(dir, "feat: único commit");
+      const provenancePath = escreverProvenance(dir, [
+        { ticket: "T99", sha: "PLACEHOLDER", result: "pendente", status: "pending" },
+      ]);
 
-    const result = run(dir, ["--provenance", provenancePath]);
-    expect(result.status).toBe(2);
-    expect(result.stderr).toContain("PROVENANCE_EMPTY");
-  });
+      const result = run(dir, ["--provenance", provenancePath]);
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("PROVENANCE_EMPTY");
+    },
+    SPAWN_TIMEOUT_MS,
+  );
 
-  it("PROVENANCE_EMPTY também para uma lista de entradas totalmente vazia", () => {
-    const dir = novoRepo();
-    commitTudo(dir, "feat: único commit");
-    const provenancePath = escreverProvenance(dir, []);
+  it(
+    "PROVENANCE_EMPTY também para uma lista de entradas totalmente vazia",
+    () => {
+      const dir = novoRepo();
+      commitTudo(dir, "feat: único commit");
+      const provenancePath = escreverProvenance(dir, []);
 
-    const result = run(dir, ["--provenance", provenancePath]);
-    expect(result.status).toBe(2);
-    expect(result.stderr).toContain("PROVENANCE_EMPTY");
-  });
+      const result = run(dir, ["--provenance", provenancePath]);
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("PROVENANCE_EMPTY");
+    },
+    SPAWN_TIMEOUT_MS,
+  );
 });
