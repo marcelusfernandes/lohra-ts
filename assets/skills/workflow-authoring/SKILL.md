@@ -437,6 +437,12 @@ the answer becomes that node's output and is cached, so a later resume never
 asks again. Nothing auto-resumes it — a `default` is what lets an unattended
 resume carry on instead of stalling.
 
+Inside a nested `workflow` node, the bare checkpoint id still works — unless it
+collides with a checkpoint at the root. On collision, only the SCOPED form
+`<sub_node_id>.<checkpoint_id>` (e.g. `sub.confirm`) is accepted; the bare id
+is refused as ambiguous instead of silently answering the wrong node. `node_id`
+in the pause reply already carries whichever form the answer must use.
+
 Put a checkpoint before the irreversible step, never after it, and keep the
 `prompt` self-contained: the human reads the question, not the run.
 

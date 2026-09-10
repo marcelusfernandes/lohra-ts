@@ -324,15 +324,33 @@ export interface CheckpointResolution {
 
 /** Scoped key wins; the raw id is the pre-#243 compat fallback, refused —
  * `matched: false` with a named `message`, never silently applied — when it
- * carries `CHECKPOINT_AMBIGUOUS`. */
+ * carries `CHECKPOINT_AMBIGUOUS`. #318: the sentinel can ALSO land under the
+ * scoped key itself — `nestedCheckpointAnswers` (above) replaces any answers
+ * key that names a ROOT checkpoint, dotted or not, so a root checkpoint id
+ * that happens to equal a child's own SCOPED form (e.g. a root id literally
+ * "sub.confirm" beside node "sub"'s child checkpoint "confirm") plants the
+ * sentinel there too. Both branches refuse it the same way: named fault,
+ * never a matched answer. */
 export function resolveCheckpoint(
   answers: Readonly<Record<string, unknown>>,
   nodeScope: readonly string[],
   nodeId: string,
 ): CheckpointResolution {
   const scoped = scopedCheckpointId(nodeScope, nodeId);
-  if (Object.hasOwn(answers, scoped))
-    return { scoped, matched: true, answer: answers[scoped], message: "" };
+  if (Object.hasOwn(answers, scoped)) {
+    const scopedAnswer = answers[scoped];
+    if (scopedAnswer !== CHECKPOINT_AMBIGUOUS)
+      return { scoped, matched: true, answer: scopedAnswer, message: "" };
+    // Unlike the raw branch below, there is no MORE-scoped key to fall back
+    // to — `scoped` already IS the scoped form, and it collides with a ROOT
+    // checkpoint's own literal id (a root id spelled with the same dots,
+    // e.g. "sub.confirm"). The fix is at author time: rename one of the two
+    // checkpoint ids so they stop sharing a key.
+    const message =
+      `${nodeId}: scoped checkpoint id '${scoped}' collides with a ROOT checkpoint's own ` +
+      `literal id — rename one of the two checkpoint ids to remove the collision`;
+    return { scoped, matched: false, answer: null, message };
+  }
   if (Object.hasOwn(answers, nodeId)) {
     const raw = answers[nodeId];
     if (raw !== CHECKPOINT_AMBIGUOUS) return { scoped, matched: true, answer: raw, message: "" };
