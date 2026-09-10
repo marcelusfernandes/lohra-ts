@@ -32,6 +32,7 @@ import { openStateDatabase, WorkflowRepository, LockRepository } from "../src/st
 import { SqliteWorkflowCache } from "../src/workflow/sqlite-cache.js";
 import { OrchestrationChildRuntime } from "../src/workflow/orchestration-runtime.js";
 import { WorkflowService } from "../src/workflow/service.js";
+import { resultView } from "../src/workflow/service-rollup.js";
 import {
   WorkflowEngine,
   validateSpec,
@@ -122,6 +123,52 @@ describe("sandbox refusal — engine (#246 AC1/AC2)", () => {
     expect(result.sandboxRefusals).toBe(0);
     expect(result.sandboxFaults).toEqual([]);
     expect(result.faults).toEqual([]);
+  });
+});
+
+// Round 2 of the review (PR #316): `runNested` folds eleven counters from a
+// nested `type: workflow` sub-run into the parent (leafRespawns et al.,
+// engine.ts:862-876) but was missing sandboxRefusals/sandboxFaults — the
+// exact gap #247/PR #299 (409b6727) closed for leafRespawns. A refusal
+// inside a nested workflow's leaf used to vanish from the PARENT's rollup
+// entirely (still counted in the nested engine's own RunResult, just never
+// folded up), even though the same refusal inside a plain leaf was already
+// fixed by the rest of this PR.
+describe("sandbox refusal — nested workflow folds into the parent (#246 round 2)", () => {
+  it("a refusal inside a nested type:workflow node's leaf folds into the parent's RunResult and rollup", async () => {
+    const runtime = new FakeRuntime([
+      [
+        {
+          status: "complete",
+          output: "inner",
+          usage: { ...usage, reasoningTokens: 0 },
+          sandboxRefusals: 2,
+        },
+      ],
+    ]);
+    const engine = new WorkflowEngine({
+      runtime,
+      loader: () => ({
+        meta: { name: "child" },
+        nodes: [{ id: "leaf", type: "agent", prompt: "x" }],
+      }),
+    });
+    const spec = parsed({
+      meta: { name: "outer-refusal" },
+      nodes: [{ id: "sub", type: "workflow", ref: "child" }],
+    });
+    const result = await engine.run(spec);
+    expect(result.status).toBe("complete");
+    expect(result.sandboxRefusals).toBe(2);
+    // Prefixed with `sub[<ref>]:`, the same convention `faults` already uses
+    // for a nested fault (engine.ts:871).
+    expect(result.sandboxFaults).toEqual(["sub[child]: leaf: sandbox refused 2 tool call(s)"]);
+
+    // The rollup a real caller reads (resultView, service-rollup.ts) — not
+    // just the raw RunResult — carries the folded total and fault text too.
+    const view = resultView("outer-refusal-run", "outer-refusal", result, engine.budget);
+    expect(view.sandbox_refusals).toBe(2);
+    expect(view.faults as unknown[]).toContain("sub[child]: leaf: sandbox refused 2 tool call(s)");
   });
 });
 
