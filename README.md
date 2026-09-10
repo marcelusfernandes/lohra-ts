@@ -253,16 +253,23 @@ contexto que o próprio provedor expõe em `/models` (`context_length` no
 OpenRouter; `max_input_tokens`/`context_window` em outros; `null`, nunca
 inventado, quando o provedor não informa nada). O resultado de cada busca
 ao vivo é guardado em `~/.lohra/context-windows.json`, um envelope
-versionado (`{"schema_version":1,"updated_at":...,"providers":{...}}`,
-teto de 2000 modelos por provedor e 8 MB no arquivo inteiro) que sobrevive
-a um reinício e serve de fallback quando um provedor não responde na
-busca seguinte. O nome é próprio deste runtime, não `model_windows.json`
-— o lohra Python já usa esse caminho num formato plano sem versão e
-descarta qualquer coisa que fuja dele, então dividir o arquivo faria os
-dois runtimes invalidarem o cache um do outro a cada uso. Um arquivo
-estranho no caminho deste runtime (sem `schema_version`, JSON inválido,
-maior que o teto) é tratado como formato desconhecido — nunca lido,
-refeito na próxima busca ao vivo (issue #249).
+versionado (`{"schema_version":1,"updated_at":...,"providers":{...}}`) que
+sobrevive a um reinício e serve de fallback quando um provedor não responde
+na busca seguinte — a tool não é read-only por causa disso. A escrita funde
+por modelo, não substitui o provedor inteiro: um `null` desta busca nunca
+apaga um número já conhecido daquele modelo, mas um número novo sempre
+vence, mesmo sobre um número antigo diferente. O teto de 2000 modelos por
+provedor e 8 MB no arquivo inteiro vale nos dois sentidos — na escrita e na
+leitura —, então um arquivo que ficou acima do teto (versão anterior,
+edição manual) é aparado de volta, não fica preso acima do teto para
+sempre. O nome é próprio deste runtime, não `model_windows.json` — o lohra
+Python já usa esse caminho num formato plano sem versão e descarta
+qualquer coisa que fuja dele, então dividir o arquivo faria os dois
+runtimes invalidarem o cache um do outro a cada uso. Um arquivo estranho no
+caminho deste runtime (sem `schema_version`, JSON inválido, maior que o
+teto) é tratado como formato desconhecido — nunca lido, refeito na próxima
+busca ao vivo (issue #249; fusão por modelo, teto simétrico e leitura
+congelada, issue #264).
 
 ### Erros e `--help`
 

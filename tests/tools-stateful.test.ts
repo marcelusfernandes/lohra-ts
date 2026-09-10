@@ -134,6 +134,31 @@ describe("stateful tool handlers", () => {
     expect(result.providers[0]?.context_window).toEqual({ "a/b": 200000 });
   });
 
+  it("keeps a known window when a live refetch reports null for the same model, both in the response and on disk (issue #264)", async () => {
+    const home = root();
+    const firstBuilder = () =>
+      Promise.resolve(
+        new Catalog([new ProviderModels("openrouter", "live", ["a/b"], 1, "", { "a/b": 200000 })]),
+      );
+    const first = new ListModelsTool(home, {}, firstBuilder);
+    await first.handle({});
+
+    const nullBuilder = () =>
+      Promise.resolve(
+        new Catalog([new ProviderModels("openrouter", "live", ["a/b"], 1, "", { "a/b": null })]),
+      );
+    const second = new ListModelsTool(home, {}, nullBuilder);
+    const result = JSON.parse(await second.handle({})) as {
+      readonly providers: readonly { readonly context_window?: Record<string, number | null> }[];
+    };
+    expect(result.providers[0]?.context_window).toEqual({ "a/b": 200000 });
+
+    const onDisk = JSON.parse(readFileSync(join(home, CONTEXT_WINDOWS_FILENAME), "utf8")) as {
+      readonly providers: Record<string, Record<string, number | null>>;
+    };
+    expect(onDisk.providers.openrouter).toEqual({ "a/b": 200000 });
+  });
+
   it("surfaces a cache corruption warning instead of crashing (issue #249)", async () => {
     const home = root();
     writeFileSync(join(home, CONTEXT_WINDOWS_FILENAME), "{not json");
@@ -185,6 +210,15 @@ describe("builtin registry", () => {
       "workflow_audit",
       "list_models",
     ]);
+  });
+
+  it("documents that list_models writes context-windows.json, not read-only (issue #264)", () => {
+    const registry = createBuiltinRegistry();
+    const definition = registry
+      .getDefinitions()
+      .find((candidate) => candidate.function.name === "list_models");
+    expect(definition?.function.description).toContain("context-windows.json");
+    expect(definition?.function.description).not.toMatch(/read-only/iu);
   });
 
   it("keeps distinct fail-safe literals for every intercepted family", async () => {

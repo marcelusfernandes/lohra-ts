@@ -18,6 +18,7 @@ import {
   MAX_CACHE_BYTES,
   MAX_MODELS_PER_PROVIDER,
   type WindowsCache,
+  type WindowsCacheIO,
 } from "../src/catalog/windows-cache.js";
 import { getProviderProfile } from "../src/providers/registry.js";
 import { estimateCost, priceKey } from "../src/pricing/estimate.js";
@@ -275,7 +276,7 @@ describe("model context window cache (issue #249)", () => {
   it("round-trips windows through save then load, surviving a fresh instance", () => {
     const path = cachePath();
     const fresh: WindowsCache = { openrouter: { "a/b": 128000, "c/d": null } };
-    expect(saveWindowsCache(path, {}, fresh)).toBeNull();
+    expect(saveWindowsCache(path, {}, fresh).warning).toBeNull();
     expect(loadWindowsCache(path)).toEqual({ data: fresh, warning: null });
   });
 
@@ -283,11 +284,21 @@ describe("model context window cache (issue #249)", () => {
     const path = cachePath();
     saveWindowsCache(path, {}, { openrouter: { m: 1000 } });
     const { data: afterFirst } = loadWindowsCache(path);
-    expect(saveWindowsCache(path, afterFirst, { openai: { n: 2000 } })).toBeNull();
+    expect(saveWindowsCache(path, afterFirst, { openai: { n: 2000 } }).warning).toBeNull();
     expect(loadWindowsCache(path)).toEqual({
       data: { openrouter: { m: 1000 }, openai: { n: 2000 } },
       warning: null,
     });
+  });
+
+  it("merges by model: a fresh null never overwrites a known number, a fresh number always wins (issue #264)", () => {
+    const path = cachePath();
+    saveWindowsCache(path, {}, { openrouter: { a: 200000, b: 500 } });
+    const { data: afterFirst } = loadWindowsCache(path);
+    const saved = saveWindowsCache(path, afterFirst, { openrouter: { a: null, b: 999, c: 42 } });
+    expect(saved.warning).toBeNull();
+    expect(saved.data.openrouter).toEqual({ a: 200000, b: 999, c: 42 });
+    expect(loadWindowsCache(path).data.openrouter).toEqual({ a: 200000, b: 999, c: 42 });
   });
 
   it("refetches with a warning instead of crashing on invalid JSON", () => {
@@ -344,13 +355,56 @@ describe("model context window cache (issue #249)", () => {
     expect(result.warning).not.toBeNull();
   });
 
+  it("checks the byte cap via stat before reading the file, and never reads an oversized file (issue #264)", () => {
+    const path = cachePath();
+    let readCalled = false;
+    const io: WindowsCacheIO = {
+      stat: () => ({ size: MAX_CACHE_BYTES + 1 }),
+      read: () => {
+        readCalled = true;
+        throw new Error("read should not be called once stat reports an oversized file");
+      },
+      write: () => undefined,
+      now: () => "2026-09-10T00:00:00.000Z",
+    };
+    const result = loadWindowsCache(path, io);
+    expect(result.data).toEqual({});
+    expect(result.warning).toMatch(/exceeds/iu);
+    expect(readCalled).toBe(false);
+  });
+
   it("caps a provider at MAX_MODELS_PER_PROVIDER entries when saving", () => {
     const path = cachePath();
     const many: Record<string, number | null> = {};
     for (let i = 0; i < MAX_MODELS_PER_PROVIDER + 10; i++) many[`m${String(i)}`] = i + 1;
-    expect(saveWindowsCache(path, {}, { openrouter: many })).toBeNull();
+    expect(saveWindowsCache(path, {}, { openrouter: many }).warning).toBeNull();
     const { data } = loadWindowsCache(path);
     expect(Object.keys(data.openrouter ?? {})).toHaveLength(MAX_MODELS_PER_PROVIDER);
+  });
+
+  it("caps a provider at MAX_MODELS_PER_PROVIDER entries when loading too, even if the file on disk has more (issue #264)", () => {
+    const path = cachePath();
+    const many: Record<string, number | null> = {};
+    for (let i = 0; i < MAX_MODELS_PER_PROVIDER + 10; i++) many[`m${String(i)}`] = i + 1;
+    writeFileSync(
+      path,
+      JSON.stringify({
+        schema_version: 1,
+        updated_at: "2026-09-10T00:00:00.000Z",
+        providers: { openrouter: many },
+      }),
+    );
+    const result = loadWindowsCache(path);
+    expect(Object.keys(result.data.openrouter ?? {})).toHaveLength(MAX_MODELS_PER_PROVIDER);
+    expect(result.warning).toMatch(/exceed|discard/iu);
+  });
+
+  it("returns a frozen structure, frozen per provider too (issue #264)", () => {
+    const path = cachePath();
+    saveWindowsCache(path, {}, { openrouter: { a: 1 } });
+    const { data } = loadWindowsCache(path);
+    expect(Object.isFrozen(data)).toBe(true);
+    expect(Object.isFrozen(data.openrouter)).toBe(true);
   });
 
   it("warns and skips the write instead of crashing when a capped provider still exceeds the byte cap", () => {
@@ -358,8 +412,8 @@ describe("model context window cache (issue #249)", () => {
     const huge: Record<string, number | null> = {};
     const longId = "m".repeat(5000);
     for (let i = 0; i < MAX_MODELS_PER_PROVIDER + 50; i++) huge[`${longId}-${String(i)}`] = i;
-    const warning = saveWindowsCache(path, {}, { openrouter: huge });
-    expect(warning).not.toBeNull();
+    const saved = saveWindowsCache(path, {}, { openrouter: huge });
+    expect(saved.warning).not.toBeNull();
   });
 });
 describe("usage and pricing", () => {
