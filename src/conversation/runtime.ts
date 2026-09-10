@@ -1,23 +1,56 @@
+import { randomUUID } from "node:crypto";
+
 import { estimateCost, type CostEstimate } from "../pricing/index.js";
+import { estimateRequestTokens } from "../context/token-estimate.js";
 import type { NormalizedResponse, ToolCall, Usage } from "../transports/index.js";
 import { runBounded } from "../tools/dispatch.js";
+import {
+  attemptCompaction,
+  buildSummaryRequest,
+  compactionThreshold,
+  resolveTurnContextWindow,
+  DEFAULT_LOCK_RETRIES,
+  DEFAULT_LOCK_RETRY_DELAY_MS,
+  DEFAULT_LOCK_TTL_SECONDS,
+  DEFAULT_MIN_KEEP_MESSAGES,
+} from "./compaction.js";
 import {
   ConversationCancelledError,
   ConversationError,
   ConversationTurnFailedError,
+  ContextWindowExceededError,
   IncompleteToolCallError,
   MaxIterationsError,
   MessageInjectionError,
   UnexpectedToolCallError,
 } from "./errors.js";
 import type {
+  CompactionSummary,
   ConversationRepository,
   ConversationRuntimeEvent,
   ConversationTurnResult,
   ModelRequest,
   ModelTransport,
+  StoredSession,
   ToolDispatcher,
 } from "./types.js";
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+// Reading `.aborted` through a call, rather than as a bare property access,
+// keeps TS's control-flow narrowing from folding a SECOND check in the same
+// iteration to a static `false` (it cannot see that an external
+// `controller.abort()` can flip the getter between the two checks, across
+// the `await this.preflightCompact(...)` gap issue #252 introduced) —
+// without this, `@typescript-eslint/no-unnecessary-condition` flags the
+// second check as dead code, which it is not.
+function signalAborted(signal: AbortSignal): boolean {
+  return signal.aborted;
+}
 
 export interface ConversationRuntimeOptions {
   readonly repository: ConversationRepository;
@@ -31,6 +64,20 @@ export interface ConversationRuntimeOptions {
   readonly maxIterations?: number;
   readonly maxTokens?: number | null;
   readonly pricingOverrides?: Parameters<typeof estimateCost>[1]["overrides"];
+  /** Compaction preflight (issue #252). Every field below has a default
+   * that makes compaction work out of the box for any caller that already
+   * constructs a ConversationRuntime — none of them need to change to get
+   * it (`commands/chat.ts` in particular; see `src/conversation/compaction.ts`). */
+  readonly environment?: Readonly<Record<string, string | undefined>>;
+  /** Overrides the default summarizer (a call to this runtime's own
+   * `transport` with `SUMMARY_SYSTEM`, `src/agent/aux.ts`). Injection point
+   * for a future `AuxClient.summarizer()` wiring — see `compaction.ts`. */
+  readonly summarize?: (transcript: string) => Promise<string>;
+  readonly compactionHolder?: string;
+  readonly minKeepMessages?: number;
+  readonly lockTtlSeconds?: number;
+  readonly lockRetries?: number;
+  readonly lockRetryDelayMs?: number;
 }
 
 function immutableMessages(
@@ -63,14 +110,165 @@ function addUsage(total: Usage | null, next: Usage | null): Usage | null {
 export class ConversationRuntime {
   private readonly maxIterations: number;
   private prompt: string | undefined;
+  // Identifies THIS runtime instance as a compression_locks holder (issue
+  // #252) — stable for the lifetime of the instance, so a retry against the
+  // same lock row after a transient failure is recognizable as the same
+  // owner. One per process in every real caller (chat.ts constructs one
+  // ConversationRuntime per invocation), which is exactly what invariant 4
+  // (cross-process writes under lease/fence) needs.
+  private readonly compactionHolder: string;
+  private readonly minKeepMessages: number;
+  private readonly lockTtlSeconds: number;
+  private readonly lockRetries: number;
+  private readonly lockRetryDelayMs: number;
 
   public constructor(private readonly options: ConversationRuntimeOptions) {
     this.maxIterations = Math.max(1, options.maxIterations ?? 128);
+    this.compactionHolder = options.compactionHolder ?? randomUUID();
+    this.minKeepMessages = Math.max(0, options.minKeepMessages ?? DEFAULT_MIN_KEEP_MESSAGES);
+    this.lockTtlSeconds = Math.max(1, options.lockTtlSeconds ?? DEFAULT_LOCK_TTL_SECONDS);
+    this.lockRetries = Math.max(1, options.lockRetries ?? DEFAULT_LOCK_RETRIES);
+    this.lockRetryDelayMs = Math.max(0, options.lockRetryDelayMs ?? DEFAULT_LOCK_RETRY_DELAY_MS);
   }
 
   private promptSnapshot(): string {
     this.prompt ??= this.options.promptSnapshot();
     return this.prompt;
+  }
+
+  /**
+   * Preflight compaction (issue #252): estimates what the next model call
+   * would cost in tokens (history + this turn so far + system + tools —
+   * the reviewer notes on PR #267/#270 are why system/tools are included
+   * here even though `estimateTokens` alone only sees `messages`) and, if
+   * it would overflow the resolved context window, compacts the
+   * *persisted* history under the session's `compression_locks` row.
+   *
+   * Mutates `messages` in place (splices the old history prefix for a
+   * fresh, shorter one) when it compacts — same imperative-accumulator
+   * style `runTurn` already uses for `messages`/`turnMessages` elsewhere in
+   * this file, not a broken immutability rule: this is a turn-scoped
+   * working array, never shared state.
+   *
+   * Returns `null` when the current estimate already fits (the fast path:
+   * no lock, no I/O) OR when `repository` has no compaction capability at
+   * all (fail-open, issue #252 round 2 — see the comment on
+   * `ConversationRepository`'s compaction members, `src/conversation/types.ts`
+   * — emits `"compaction.unsupported"` first so the miss is observable,
+   * then sends the oversized request exactly like before #252 existed;
+   * `RequestRepository`, `src/server/service.ts`, is the real caller this
+   * protects — a fresh stateless instance per HTTP request has no session
+   * to lock or rewrite). Throws `ContextWindowExceededError` — the latch —
+   * when `repository` DOES support compaction and: the turn already
+   * compacted once and still doesn't fit; nothing was left in the
+   * persisted history to fold (compaction would be futile); or a
+   * compaction just ran and the *new* estimate still doesn't fit. There is
+   * never a second compaction attempt within one turn.
+   */
+  private async preflightCompact(context: {
+    readonly sessionId: string;
+    readonly session: StoredSession;
+    readonly provider: string;
+    readonly model: string;
+    readonly messages: Readonly<Record<string, unknown>>[];
+    readonly historyBoundary: number;
+    readonly compactedThisTurn: boolean;
+    readonly summarize: (transcript: string) => Promise<string>;
+    readonly emit: (
+      type: ConversationRuntimeEvent["type"],
+      code?: string,
+      compaction?: ConversationRuntimeEvent["compaction"],
+    ) => void;
+  }): Promise<{ readonly newHistoryBoundary: number; readonly summary: CompactionSummary } | null> {
+    const environment = this.options.environment ?? process.env;
+    const tools = (this.options.toolDefinitions ?? []) as readonly Readonly<
+      Record<string, unknown>
+    >[];
+    const resolution = resolveTurnContextWindow({
+      provider: context.provider,
+      model: context.model,
+      environment,
+    });
+    const threshold = compactionThreshold({
+      window: resolution.tokens,
+      source: resolution.source,
+      maxTokens: this.options.maxTokens ?? 0,
+    });
+    const estimateBefore = estimateRequestTokens({
+      system: context.session.systemPrompt,
+      messages: context.messages,
+      tools,
+    }).tokens;
+    if (estimateBefore <= threshold) return null;
+
+    const repository = this.options.repository;
+    if (
+      repository.acquireCompressionLock === undefined ||
+      repository.releaseCompressionLock === undefined ||
+      repository.compactHistory === undefined
+    ) {
+      context.emit("compaction.unsupported", "COMPACTION_UNSUPPORTED");
+      return null;
+    }
+
+    if (context.compactedThisTurn) {
+      throw new ContextWindowExceededError(
+        context.sessionId,
+        estimateBefore,
+        resolution.tokens,
+        resolution.source,
+        true,
+      );
+    }
+
+    const outcome = await attemptCompaction({
+      repository: this.options.repository,
+      summarize: context.summarize,
+      sessionId: context.sessionId,
+      holder: this.compactionHolder,
+      now: this.options.clock(),
+      lockTtlSeconds: this.lockTtlSeconds,
+      lockRetries: this.lockRetries,
+      lockRetryDelayMs: this.lockRetryDelayMs,
+      sleep,
+      minKeepMessages: this.minKeepMessages,
+    });
+
+    if (!outcome.compacted) {
+      throw new ContextWindowExceededError(
+        context.sessionId,
+        estimateBefore,
+        resolution.tokens,
+        resolution.source,
+        false,
+      );
+    }
+
+    context.messages.splice(0, context.historyBoundary, ...outcome.history);
+    const estimateAfter = estimateRequestTokens({
+      system: context.session.systemPrompt,
+      messages: context.messages,
+      tools,
+    }).tokens;
+    if (estimateAfter > threshold) {
+      throw new ContextWindowExceededError(
+        context.sessionId,
+        estimateAfter,
+        resolution.tokens,
+        resolution.source,
+        true,
+      );
+    }
+
+    return {
+      newHistoryBoundary: outcome.history.length,
+      summary: {
+        summarizedCount: outcome.summarizedCount,
+        keptCount: outcome.keptCount,
+        estimateBefore,
+        estimateAfter,
+      },
+    };
   }
 
   public async runTurn(input: {
@@ -135,18 +333,44 @@ export class ConversationRuntime {
       arguments: string;
       result: string;
     }[] = [];
-    const emit = (type: ConversationRuntimeEvent["type"], code?: string): void => {
+    const emit = (
+      type: ConversationRuntimeEvent["type"],
+      code?: string,
+      compaction?: ConversationRuntimeEvent["compaction"],
+    ): void => {
       this.options.eventSink?.(
-        Object.freeze({ type, sessionId, ...(code === undefined ? {} : { code }) }),
+        Object.freeze({
+          type,
+          sessionId,
+          ...(code === undefined ? {} : { code }),
+          ...(compaction === undefined ? {} : { compaction }),
+        }),
       );
     };
     emit("turn.started");
     let apiCalls = 0;
     let usageTotal: Usage | null = null;
     let reasoningTotal = "";
+    let historyBoundary = history.length;
+    let compactedThisTurn = false;
+    let compactionSummary: CompactionSummary | null = null;
+    // Default summarizer: this runtime's own transport/model, with
+    // SUMMARY_SYSTEM (see buildSummaryRequest, src/conversation/compaction.ts)
+    // -- counted as real spend against this turn's apiCalls/usageTotal, same
+    // as any other provider call the turn makes.
+    const summarize =
+      this.options.summarize ??
+      (async (transcript: string): Promise<string> => {
+        const summaryResponse = await this.options.transport.complete(
+          buildSummaryRequest({ transcript, model: input.model, signal }),
+        );
+        apiCalls += 1;
+        usageTotal = addUsage(usageTotal, summaryResponse.usage);
+        return (summaryResponse.content ?? "").trim();
+      });
     try {
       for (let iteration = 1; iteration <= this.maxIterations; iteration += 1) {
-        if (signal.aborted) throw new ConversationCancelledError(sessionId, signal.reason);
+        if (signalAborted(signal)) throw new ConversationCancelledError(sessionId, signal.reason);
         if (input.drainMessages !== undefined) {
           let injected: readonly Readonly<Record<string, unknown>>[];
           try {
@@ -159,6 +383,30 @@ export class ConversationRuntime {
             turnMessages.push(injectedMessage);
           }
         }
+        const compaction = await this.preflightCompact({
+          sessionId,
+          session,
+          provider: input.provider,
+          model: input.model,
+          messages,
+          historyBoundary,
+          compactedThisTurn,
+          summarize,
+          emit,
+        });
+        if (compaction !== null) {
+          historyBoundary = compaction.newHistoryBoundary;
+          compactedThisTurn = true;
+          compactionSummary = compaction.summary;
+          emit("session.compacted", undefined, compaction.summary);
+        }
+        // preflightCompact's own await(s) open a gap this loop didn't have
+        // before issue #252: re-check right before the call is issued so an
+        // abort racing in during that gap is still caught pre-issuance
+        // (never a hang waiting on a listener attached after the abort
+        // event already fired) — same classification as the top-of-loop
+        // check just above, just covering the newly-async preflight step.
+        if (signalAborted(signal)) throw new ConversationCancelledError(sessionId, signal.reason);
         const request: ModelRequest = {
           system: session.systemPrompt,
           messages: immutableMessages(messages),
@@ -352,6 +600,7 @@ export class ConversationRuntime {
           cost,
           apiCalls,
           sessionSummary: usageTotal === null ? null : this.options.repository.summary(sessionId),
+          compaction: compactionSummary,
         };
       }
       throw new MaxIterationsError(sessionId, this.maxIterations);

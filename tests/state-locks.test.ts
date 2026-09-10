@@ -4,7 +4,13 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { LockRepository, openStateDatabase, type StateWarning } from "../src/state/index.js";
+import { buildSummaryMessages } from "../src/conversation/compaction.js";
+import {
+  LockRepository,
+  openStateDatabase,
+  SessionRepository,
+  type StateWarning,
+} from "../src/state/index.js";
 
 const roots: string[] = [];
 
@@ -62,5 +68,138 @@ describe("state locks and fencing", () => {
     expect(repo.releaseRunLease("run", "p3")).toBe(true);
     expect(repo.runFenceOf("run")).toBe(3);
     close();
+  });
+});
+
+// Issue #252: SessionRepository owns its own LockRepository over the same
+// connection, so compactHistory can refuse to write without the lock in one
+// atomic check (invariant 4), and two independent connections against the
+// SAME file stand in for two OS processes racing the same session's lock.
+function sessionRepo(path: string) {
+  const connection = openStateDatabase(path);
+  return {
+    repo: new SessionRepository(connection.database, undefined, connection.ftsEnabled),
+    close: () => {
+      connection.close();
+    },
+  };
+}
+
+describe("SessionRepository.compactHistory", () => {
+  it("rewrites the active history: summary first, kept tail after it, in order", () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-compact-"));
+    roots.push(root);
+    const { repo, close } = sessionRepo(join(root, "state.db"));
+    repo.createSession({ id: "s", systemPrompt: "sys" });
+    for (let turn = 1; turn <= 5; turn += 1) {
+      repo.recordTurn("s", {
+        user: { role: "user", content: `q${String(turn)}` },
+        assistant: { role: "assistant", content: `a${String(turn)}`, finishReason: "stop" },
+      });
+    }
+    expect(repo.acquireCompressionLock("s", "h", 100, 30)).toBe(true);
+    const result = repo.compactHistory("s", "h", 100, { keepTailCount: 4, summary: "recap" });
+    expect(result).toEqual({ summarizedCount: 6, keptCount: 4 });
+
+    const history = repo.loadMessages("s");
+    // A synthetic "user" lead precedes the "assistant" summary (issue #252
+    // fixup: Anthropic's Messages API rejects a request whose first
+    // message isn't role "user") -- 2 lead+summary + 4 kept. Pinned against
+    // buildSummaryMessages itself (src/conversation/compaction.ts), not a
+    // hand-copied literal -- the two implementations can't drift apart
+    // without this test noticing.
+    expect(history).toHaveLength(6);
+    expect(history.slice(0, 2)).toEqual(buildSummaryMessages("recap"));
+    expect(history.slice(2)).toEqual([
+      { role: "user", content: "q4" },
+      { role: "assistant", content: "a4", finish_reason: "stop" },
+      { role: "user", content: "q5" },
+      { role: "assistant", content: "a5", finish_reason: "stop" },
+    ]);
+    // message_count tracks the ACTIVE row count (issue #252 fixup): 10
+    // messages went in, 4 stayed untouched, 6 more got deactivated and
+    // replaced by 2 (lead+summary) -- net 6 active, never 16.
+    expect(Number(repo.getSession("s")?.message_count)).toBe(6);
+    close();
+  });
+
+  it("refuses to write when the caller doesn't currently hold the lock", () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-compact-"));
+    roots.push(root);
+    const { repo, close } = sessionRepo(join(root, "state.db"));
+    repo.createSession({ id: "s", systemPrompt: "sys" });
+    repo.recordTurn("s", {
+      user: { role: "user", content: "q" },
+      assistant: { role: "assistant", content: "a" },
+    });
+    expect(() =>
+      repo.compactHistory("s", "nobody-acquired-for-this-holder", 100, {
+        keepTailCount: 0,
+        summary: "recap",
+      }),
+    ).toThrow(/COMPRESSION_LOCK_NOT_HELD/);
+    expect(repo.loadMessages("s")).toHaveLength(2); // untouched
+    close();
+  });
+
+  it("is a no-op (summarizedCount: 0) when the kept tail already covers the whole history", () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-compact-"));
+    roots.push(root);
+    const { repo, close } = sessionRepo(join(root, "state.db"));
+    repo.createSession({ id: "s", systemPrompt: "sys" });
+    repo.recordTurn("s", {
+      user: { role: "user", content: "q" },
+      assistant: { role: "assistant", content: "a" },
+    });
+    expect(repo.acquireCompressionLock("s", "h", 100, 30)).toBe(true);
+    const result = repo.compactHistory("s", "h", 100, { keepTailCount: 50, summary: "recap" });
+    expect(result).toEqual({ summarizedCount: 0, keptCount: 2 });
+    expect(repo.loadMessages("s")).toEqual([
+      { role: "user", content: "q" },
+      { role: "assistant", content: "a", finish_reason: null },
+    ]);
+    close();
+  });
+});
+
+describe("compression lock across processes", () => {
+  it("blocks a second connection until the holder releases or the TTL expires", () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-compact-cross-"));
+    roots.push(root);
+    const path = join(root, "state.db");
+    const a = sessionRepo(path);
+    const b = sessionRepo(path);
+    try {
+      expect(a.repo.acquireCompressionLock("s", "procA", 100, 30)).toBe(true);
+      expect(b.repo.acquireCompressionLock("s", "procB", 105, 30)).toBe(false);
+      expect(() =>
+        b.repo.compactHistory("s", "procB", 105, { keepTailCount: 0, summary: "x" }),
+      ).toThrow(/COMPRESSION_LOCK_NOT_HELD/);
+
+      expect(a.repo.releaseCompressionLock("s", "procA")).toBe(true);
+      expect(b.repo.acquireCompressionLock("s", "procB", 106, 30)).toBe(true);
+
+      // procA's own release is a no-op now -- procB already holds the row.
+      expect(a.repo.releaseCompressionLock("s", "procA")).toBe(false);
+    } finally {
+      a.close();
+      b.close();
+    }
+  });
+
+  it("recovers a lock abandoned past its TTL without a manual release", () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-compact-cross-"));
+    roots.push(root);
+    const path = join(root, "state.db");
+    const a = sessionRepo(path);
+    const b = sessionRepo(path);
+    try {
+      expect(a.repo.acquireCompressionLock("s", "procA", 100, 5)).toBe(true);
+      expect(b.repo.acquireCompressionLock("s", "procB", 104, 30)).toBe(false); // still live
+      expect(b.repo.acquireCompressionLock("s", "procB", 106, 30)).toBe(true); // expired at 105
+    } finally {
+      a.close();
+      b.close();
+    }
   });
 });

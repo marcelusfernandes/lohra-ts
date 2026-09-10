@@ -271,6 +271,17 @@ teto) é tratado como formato desconhecido — nunca lido, refeito na próxima
 busca ao vivo (issue #249; fusão por modelo, teto simétrico e leitura
 congelada, issue #264).
 
+Antes de cada chamada ao modelo, `chat` estima quantos tokens o histórico
+mais o prompt de sistema e as definições de tool vão consumir e compara
+contra a janela efetiva do modelo (mesma resolução acima). Se estourar,
+compacta: resume as mensagens mais antigas com o próprio modelo da conversa
+e reescreve o histórico da sessão no lugar, mantendo as últimas mensagens
+intactas — o prompt de sistema nunca muda. Se, mesmo depois de compactar, o
+turno ainda não couber, ou se um turno já compactou uma vez e estoura de
+novo, o turno falha com um erro nomeado (`CONTEXT_WINDOW_EXCEEDED`) em vez
+de tentar compactar de novo — nunca um laço. Detalhes e a decisão de design
+em `docs/context-compaction.md` (issue #252).
+
 ### Erros e `--help`
 
 O texto de erro e de ajuda da CLI é próprio deste produto — não é um

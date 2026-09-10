@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  ContextWindowExceededError,
   ConversationCancelledError,
   ConversationRuntime,
   ConversationTurnFailedError,
   IncompleteToolCallError,
   MaxIterationsError,
   UnexpectedToolCallError,
+  type CompactionResult,
   type ConversationRepository,
   type ConversationRuntimeEvent,
   type ModelRequest,
@@ -76,6 +78,69 @@ class MemoryRepository implements ConversationRepository {
       actualCostUsd: commits.reduce((total, entry) => total + (entry.cost?.usd ?? 0), 0),
       estimatedCostUsd: commits.reduce((total, entry) => total + (entry.cost?.grossUsd ?? 0), 0),
     };
+  }
+}
+
+// Issue #252: an in-memory stand-in for the three optional compaction
+// members of ConversationRepository, backed by a single-holder lock map
+// (good enough for single-process tests -- cross-process locking is
+// covered against the real SessionRepository in tests/state-locks.test.ts).
+class CompactingMemoryRepository extends MemoryRepository {
+  private readonly locks = new Map<
+    string,
+    { readonly holder: string; readonly expiresAt: number }
+  >();
+  readonly compactCalls: {
+    readonly sessionId: string;
+    readonly keepTailCount: number;
+    readonly summary: string;
+  }[] = [];
+
+  acquireCompressionLock(
+    sessionId: string,
+    holder: string,
+    now: number,
+    ttlSeconds: number,
+  ): boolean {
+    const existing = this.locks.get(sessionId);
+    if (existing !== undefined && existing.expiresAt > now && existing.holder !== holder) {
+      return false;
+    }
+    this.locks.set(sessionId, { holder, expiresAt: now + ttlSeconds });
+    return true;
+  }
+
+  releaseCompressionLock(sessionId: string, holder: string): boolean {
+    const existing = this.locks.get(sessionId);
+    if (existing?.holder !== holder) return false;
+    this.locks.delete(sessionId);
+    return true;
+  }
+
+  compactHistory(
+    sessionId: string,
+    _holder: string,
+    _now: number,
+    input: { readonly keepTailCount: number; readonly summary: string },
+  ): CompactionResult {
+    this.compactCalls.push({
+      sessionId,
+      keepTailCount: input.keepTailCount,
+      summary: input.summary,
+    });
+    const current = this.messages.get(sessionId) ?? [];
+    const keepCount = Math.min(Math.max(0, input.keepTailCount), current.length);
+    const summarizedCount = current.length - keepCount;
+    if (summarizedCount <= 0) return { summarizedCount: 0, keptCount: current.length };
+    const kept = current.slice(summarizedCount);
+    // Mirrors the real SessionRepository.compactHistory shape (issue #252
+    // fixup): a synthetic user lead before the assistant summary, never a
+    // bare assistant message first (Anthropic rejects that as the first
+    // message of a request).
+    const leadMessage = { role: "user", content: "(resumo da conversa anterior a seguir)" };
+    const summaryMessage = { role: "assistant", content: input.summary, finish_reason: "stop" };
+    this.messages.set(sessionId, [leadMessage, summaryMessage, ...kept]);
+    return { summarizedCount, keptCount: kept.length };
   }
 }
 
@@ -348,6 +413,17 @@ describe("ConversationRuntime", () => {
     const repository = new MemoryRepository();
     let observed = false;
     let closes = 0;
+    // Issue #252's preflight compaction check adds an `await` before the
+    // call is issued, so aborting synchronously right after runTurn() is
+    // invoked (the old shape of this test) now races in during that gap
+    // and is legitimately classified as pre-issuance cancellation instead
+    // -- this deferred signals the abort only once the call has actually
+    // been issued and the listener attached, which is what this test means
+    // to pin regardless of how many microtask ticks preflight takes.
+    let signalStarted: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      signalStarted = resolve;
+    });
     const transport: ModelTransport = {
       complete: ({ signal }) =>
         new Promise((_, reject) => {
@@ -361,6 +437,7 @@ describe("ConversationRuntime", () => {
             },
             { once: true },
           );
+          signalStarted();
         }),
       close: () => {
         closes += 1;
@@ -382,6 +459,7 @@ describe("ConversationRuntime", () => {
       cwd: "/tmp",
       signal: controller.signal,
     });
+    await started;
     controller.abort();
     await expect(turn).rejects.toBeInstanceOf(ConversationTurnFailedError);
     await expect(turn).rejects.toThrow(/aborted/);
@@ -460,5 +538,148 @@ describe("ConversationRuntime", () => {
     } satisfies Partial<IncompleteToolCallError>);
     expect(repository.commits).toEqual([]);
     expect(repository.usageCommits).toHaveLength(1);
+  });
+});
+
+describe("ConversationRuntime — compaction preflight (issue #252)", () => {
+  function longTurn(id: number): Readonly<Record<string, unknown>>[] {
+    return [
+      { role: "user", content: `q${String(id)} ${"x".repeat(2000)}` },
+      { role: "assistant", content: `a${String(id)} ${"y".repeat(2000)}`, finish_reason: "stop" },
+    ];
+  }
+
+  it("compacts the overflowing history before the call, and the call goes through", async () => {
+    const repository = new CompactingMemoryRepository();
+    repository.createSession({ id: "s", systemPrompt: "sys", model: "m", cwd: "/tmp" });
+    const seeded = Array.from({ length: 10 }, (_, i) => longTurn(i)).flat();
+    repository.messages.set("s", seeded);
+
+    const summaryText = "recap of earlier turns";
+    const transport = new QueueTransport([
+      response({ content: summaryText }), // the internal summarize call
+      response({ content: "final answer" }), // the turn's own call
+    ]);
+    const events: ConversationRuntimeEvent[] = [];
+    const runtime = new ConversationRuntime({
+      repository,
+      transport,
+      promptSnapshot: () => "system prompt",
+      eventSink: (event) => events.push(event),
+      idSource: () => "s",
+      clock: () => 1000,
+      environment: { LOHRA_CONTEXT_WINDOW: "2000" },
+      minKeepMessages: 2,
+    });
+
+    const result = await runtime.runTurn({
+      input: "next question",
+      provider: "ollama",
+      model: "m",
+      cwd: "/tmp",
+      sessionId: "s",
+    });
+
+    expect(result.response.content).toBe("final answer");
+    expect(result.compaction).toMatchObject({ summarizedCount: 18, keptCount: 2 });
+    expect(repository.compactCalls).toHaveLength(1);
+    expect(repository.compactCalls[0]?.summary).toBe(summaryText);
+    // The request that actually reached the transport is far shorter than
+    // the seeded history -- proof the compaction ran before the call, not
+    // just that the repository's bookkeeping says it did.
+    const finalRequest = transport.requests.at(-1);
+    expect(finalRequest?.messages.length).toBeLessThan(seeded.length);
+    expect(events.map((event) => event.type)).toContain("session.compacted");
+    const compactedEvent = events.find((event) => event.type === "session.compacted");
+    expect(compactedEvent?.compaction).toMatchObject({ summarizedCount: 18, keptCount: 2 });
+  });
+
+  it("never compacts twice in the same turn — a second overflow is refused with a named fault", async () => {
+    const repository = new CompactingMemoryRepository();
+    repository.createSession({ id: "s", systemPrompt: "sys", model: "m", cwd: "/tmp" });
+    repository.messages.set("s", Array.from({ length: 10 }, (_, i) => longTurn(i)).flat());
+
+    const transport = new QueueTransport([
+      response({ content: "recap" }), // summarize call
+      response({
+        content: null,
+        finishReason: "tool_calls",
+        toolCalls: [{ id: "c1", name: "noop", arguments: "{}", providerData: null }],
+      }), // the turn's first call, after compaction #1
+    ]);
+    const dispatch = vi.fn(() =>
+      // A giant tool result blows the (still tiny, forced) window right
+      // back open on the very next iteration.
+      Promise.resolve({ role: "tool", tool_call_id: "c1", content: "z".repeat(50_000) }),
+    );
+    const runtime = new ConversationRuntime({
+      repository,
+      transport,
+      toolDispatcher: { dispatch },
+      promptSnapshot: () => "system prompt",
+      idSource: () => "s",
+      clock: () => 1000,
+      environment: { LOHRA_CONTEXT_WINDOW: "2000" },
+      minKeepMessages: 2,
+    });
+
+    await expect(
+      runtime.runTurn({
+        input: "next question",
+        provider: "ollama",
+        model: "m",
+        cwd: "/tmp",
+        sessionId: "s",
+      }),
+    ).rejects.toBeInstanceOf(ContextWindowExceededError);
+    // Exactly one compaction happened -- the second overflow was refused,
+    // never attempted again.
+    expect(repository.compactCalls).toHaveLength(1);
+  });
+
+  // Issue #252 round 2 (revisor rejection on PR #284, reasons list): a
+  // repository with no compaction capability -- RequestRepository
+  // (src/server/service.ts, a fresh stateless instance per HTTP request,
+  // nothing to lock or rewrite) is the real example -- must never fault.
+  // Fails OPEN: warns via "compaction.unsupported" and sends the oversized
+  // request exactly like it would have before #252 existed. MemoryRepository
+  // (this file's plain fake, used by every other test above) never
+  // implemented the three compaction members either, which is exactly the
+  // shape this proves against.
+  it("fails open (warns, never faults) when the repository has no compaction capability at all", async () => {
+    const repository = new MemoryRepository();
+    const seeded = Array.from({ length: 10 }, (_, i) => longTurn(i)).flat();
+    repository.messages.set("s", seeded);
+    repository.sessions.set("s", { systemPrompt: "system prompt", model: "m", cwd: "/tmp" });
+
+    const transport = new QueueTransport([response({ content: "final answer" })]);
+    const events: ConversationRuntimeEvent[] = [];
+    const runtime = new ConversationRuntime({
+      repository,
+      transport,
+      promptSnapshot: () => "system prompt",
+      eventSink: (event) => events.push(event),
+      idSource: () => "s",
+      clock: () => 1000,
+      environment: { LOHRA_CONTEXT_WINDOW: "2000" },
+    });
+
+    const result = await runtime.runTurn({
+      input: "next question",
+      provider: "ollama",
+      model: "m",
+      cwd: "/tmp",
+      sessionId: "s",
+    });
+
+    expect(result.response.content).toBe("final answer");
+    expect(result.compaction).toBeNull();
+    // The request that reached the transport still carries the full,
+    // uncompacted history -- proof it was sent as before, not silently
+    // shrunk some other way.
+    const sentRequest = transport.requests.at(-1);
+    expect(sentRequest?.messages.length).toBe(seeded.length + 1);
+    const unsupportedEvent = events.find((event) => event.type === "compaction.unsupported");
+    expect(unsupportedEvent).toMatchObject({ code: "COMPACTION_UNSUPPORTED" });
   });
 });
