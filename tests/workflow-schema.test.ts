@@ -344,6 +344,28 @@ describe("validateSpec", () => {
     expect(isValidationError(result)).toBe(false);
   });
 
+  it("skips the sub-object schema scan (no throw, no schema_* issue) when body/synthesize/a stage is not a record", () => {
+    const result = validateSpec({
+      meta: { name: "x" },
+      nodes: [
+        { id: "loop", type: "loop_until_dry", body: "not an object", max_rounds: 3 },
+        {
+          id: "panel",
+          type: "judge_panel",
+          attempts: 1,
+          judges: ["a"],
+          synthesize: null,
+        },
+        { id: "pipe", type: "pipeline", items: ["x"], stages: ["not an object"] },
+      ],
+    });
+    expect(isValidationError(result)).toBe(true);
+    if (!isValidationError(result)) throw new Error("expected validation error");
+    expect(result.issues.map((issue) => issue.rule)).not.toContain("schema_ref");
+    expect(result.issues.map((issue) => issue.rule)).not.toContain("schema_type");
+    expect(result.issues.map((issue) => issue.rule)).not.toContain("schema_xor");
+  });
+
   it("keeps duplicate and invalid-node cascades observable", () => {
     const result = validateSpec(
       {
