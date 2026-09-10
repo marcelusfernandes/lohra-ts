@@ -341,9 +341,14 @@ export function resolveCheckpoint(
     const scopedAnswer = answers[scoped];
     if (scopedAnswer !== CHECKPOINT_AMBIGUOUS)
       return { scoped, matched: true, answer: scopedAnswer, message: "" };
+    // Unlike the raw branch below, there is no MORE-scoped key to fall back
+    // to — `scoped` already IS the scoped form, and it collides with a ROOT
+    // checkpoint's own literal id (a root id spelled with the same dots,
+    // e.g. "sub.confirm"). The fix is at author time: rename one of the two
+    // checkpoint ids so they stop sharing a key.
     const message =
-      `${nodeId}: checkpoint id '${scoped}' collides with the parent's — ` +
-      `answer with the scoped id '${scoped}'`;
+      `${nodeId}: scoped checkpoint id '${scoped}' collides with a ROOT checkpoint's own ` +
+      `literal id — rename one of the two checkpoint ids to remove the collision`;
     return { scoped, matched: false, answer: null, message };
   }
   if (Object.hasOwn(answers, nodeId)) {
