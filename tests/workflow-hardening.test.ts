@@ -5,6 +5,7 @@ import {
   contentHash,
   MemoryWorkflowCache,
   parseAndValidate,
+  QUOTA_EXHAUSTED,
   WorkflowEngine,
   validateSpec,
   type ChildCollectOptions,
@@ -224,6 +225,38 @@ describe("workflow parallel null aggregation", () => {
     const result = await new WorkflowEngine({ runtime }).run(workflow);
     expect(result.outputs.p).toHaveLength(3);
     expect(result.outputs.p).toEqual([null, "b", null]);
+  });
+
+  it("keeps an empty branch group as [] without a fault (every() is vacuously true)", async () => {
+    const runtime = new ScriptRuntime([]);
+    const workflow = parsed({
+      meta: { name: "empty-group" },
+      nodes: [{ id: "p", type: "parallel", branches: [] }],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(workflow);
+    expect(result.outputs.p).toEqual([]);
+    expect(result.nullCount).toBe(0);
+    expect(result.faults).toEqual([]);
+    expect(result.status).toBe("complete");
+  });
+
+  it("does not fault a fully-null group caused by run-level pause/cancellation", async () => {
+    const runtime = new ScriptRuntime([
+      [{ status: "failed", output: "quota", errorKind: QUOTA_EXHAUSTED }],
+      [complete("unreachable")],
+    ]);
+    const workflow = parsed({
+      meta: { name: "paused-mid-parallel" },
+      nodes: [{ id: "p", type: "parallel", branches: ["a", "b"] }],
+    });
+    const result = await new WorkflowEngine({
+      runtime,
+      budget: new Budget({ poolWidth: 1 }),
+    }).run(workflow);
+    expect(result.outputs.p).toEqual([null, null]);
+    expect(result.faults).not.toContain("p: all 2 branches failed");
+    expect(result.status).toBe("paused");
+    expect(runtime.requests).toHaveLength(1);
   });
 });
 

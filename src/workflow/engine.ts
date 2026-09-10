@@ -470,19 +470,16 @@ export class WorkflowEngine {
     const cached = this.cacheGet(hash);
     if (cached !== CACHE_MISS) return cached;
     this.gateFanout(resolved.length);
-    const spawnBranch = (prompt: unknown, index: number) =>
-      this.collectLeaf(node, renderValue(prompt), null, {
-        role: "parallel.branch",
-        cellId: hash,
-        itemIndex: index,
-      });
-    const leaves = await Promise.all(resolved.map(spawnBranch));
+    const leaves = await Promise.all(
+      resolved.map((p, i) => this.collectLeaf(node, renderValue(p), null, branchOpts(hash, i))),
+    );
     const outputs = leaves.map((leaf) => leaf.output);
     const total = leaves.reduce((sum, leaf) => combine(sum, leaf.usage), usage());
     if (outputs.every(nonEmpty)) this.cachePut(hash, node.id, outputs, total);
-    const allDead = outputs.every((output) => output === null);
-    if (allDead) this.recordFault(`${node.id}: all ${String(outputs.length)} branches failed`);
-    return allDead ? null : outputs;
+    if (outputs.length === 0 || this.control.cancelled || this.control.paused) return outputs;
+    if (outputs.every((output) => output === null))
+      this.recordFault(`${node.id}: all ${String(outputs.length)} branches failed`);
+    return outputs.every((output) => output === null) ? null : outputs;
   }
 
   private async runPipeline(
@@ -995,3 +992,6 @@ export class WorkflowEngine {
 }
 
 const CACHE_MISS = Symbol("cache-miss");
+function branchOpts(cellId: string, itemIndex: number) {
+  return { role: "parallel.branch", cellId, itemIndex };
+}
