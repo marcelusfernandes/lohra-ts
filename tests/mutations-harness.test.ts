@@ -284,16 +284,43 @@ describe("prepareArchiveSandbox", () => {
     expect(readlinkSync(linkPath)).toBe(resolve(dir, "node_modules"));
   });
 
+  // Issue #304: esta asserção lista `os.tmpdir()`, um diretório do SO
+  // compartilhado por TODOS os processos da máquina — inclusive outra
+  // rodada inteira de `npm test` concorrente. `prepareArchiveSandbox` é
+  // inteiramente síncrona (`spawnSync` ×3, `mkdtempSync`, `rmSync` só no
+  // `catch`); não há limpeza assíncrona para esperar. Reproduzido 3/10 sob
+  // carga dupla (dois `npm test` completos simultâneos, 5 rodadas, método
+  // de #302): mensagem exata —
+  // `AssertionError: expected [] to deeply equal ['lohra-mutations-REhee3']`.
+  // O `before`/`after` deste teste capturou o `lohra-mutations-*` de um
+  // sandbox *legítimo* criado por um teste irmão ("arquiva exatamente a SHA
+  // pedida" ou "cria o sandbox com symlink") rodando na OUTRA invocação de
+  // `npm test`, removido pelo `afterEach` daquele processo bem na janela
+  // entre as duas leituras — nada órfão, nenhuma corrida dentro da própria
+  // função. Isolar `TMPDIR` para este teste (Node relê `os.tmpdir()` a cada
+  // chamada) remove o compartilhamento entre processos na raiz, em vez de
+  // adivinhar um prefixo único ou serializar o `describe`.
   it("não deixa sandbox órfão quando a SHA não existe", () => {
-    const dir = novoRepoGit();
-    writeFileSync(join(dir, "a.txt"), "a\n");
-    git(dir, ["add", "-A"]);
-    git(dir, ["commit", "-q", "-m", "inicial"]);
+    const isolatedTmp = mkdtempSync(join(tmpdir(), "mutations-harness-isolated-tmp-"));
+    workdirs.push(isolatedTmp);
+    const originalTmpdir = process.env.TMPDIR;
+    process.env.TMPDIR = isolatedTmp;
+    try {
+      const dir = novoRepoGit();
+      writeFileSync(join(dir, "a.txt"), "a\n");
+      git(dir, ["add", "-A"]);
+      git(dir, ["commit", "-q", "-m", "inicial"]);
 
-    const before = readdirSync(tmpdir()).filter((name) => name.startsWith("lohra-mutations-"));
-    expect(() => prepareArchiveSandbox(dir, "0000000000000000000000000000000000000000")).toThrow();
-    const after = readdirSync(tmpdir()).filter((name) => name.startsWith("lohra-mutations-"));
-    expect(after).toEqual(before);
+      const before = readdirSync(isolatedTmp).filter((name) => name.startsWith("lohra-mutations-"));
+      expect(() =>
+        prepareArchiveSandbox(dir, "0000000000000000000000000000000000000000"),
+      ).toThrow();
+      const after = readdirSync(isolatedTmp).filter((name) => name.startsWith("lohra-mutations-"));
+      expect(after).toEqual(before);
+    } finally {
+      if (originalTmpdir === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = originalTmpdir;
+    }
   });
 
   it("a mensagem de erro carrega o stderr do subprocesso (#170, reason 4)", () => {
