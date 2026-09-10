@@ -25,11 +25,11 @@ import {
 import {
   asRecord,
   clampInteger,
+  collectBranchWithRetries,
   combine,
   nonEmpty,
   recordGroupReplayCost,
   renderValue,
-  replayOrCollectBranch,
   resultUsage,
   routingIdentity,
   routingOf,
@@ -472,7 +472,7 @@ export class WorkflowEngine {
     if (cached !== CACHE_MISS) return recordGroupReplayCost(deps, node, resolved, cached);
     this.gateFanout(resolved.length);
     const leaves = await Promise.all(
-      resolved.map((p, i) => replayOrCollectBranch(deps, node, i, renderValue(p))),
+      resolved.map((p, i) => collectBranchWithRetries(deps, node, i, renderValue(p))),
     );
     const outputs = leaves.map((leaf) => leaf.output);
     if (outputs.every(nonEmpty)) this.cache.put(this.runId, hash, node.id, outputs, null);
