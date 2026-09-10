@@ -874,6 +874,10 @@ export class WorkflowEngine {
     this.result.engineFaults += result.engineFaults;
     this.result.forcingFallbacks += result.forcingFallbacks;
     this.result.leafRespawns += result.leafRespawns;
+    this.result.sandboxRefusals += result.sandboxRefusals;
+    this.result.sandboxFaults.push(
+      ...result.sandboxFaults.map((fault) => `sub[${reference}]: ${fault}`),
+    );
     return Object.freeze({ ...result.outputs });
   }
 
