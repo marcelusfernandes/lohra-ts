@@ -106,6 +106,16 @@ describe("workflow budget and cache", () => {
     expect(budget.affordableLeaves()).toBe(99);
   });
 
+  it("excludes an uncertain leaf's charge from the measured average (#232)", () => {
+    const budget = new Budget({ tokenBudget: 10_000 });
+    budget.chargeTokens(200, 0);
+    budget.chargeTokens(0, 0, true);
+    // Only the first, measured charge counts: 200/1, not 200/2 — an
+    // unmeasured leaf must never pull the average (and affordableLeaves)
+    // down, even though its own tokens are zero either way.
+    expect(budget.estimatedLeafCost).toBe(200);
+  });
+
   it("rejects fanout before charging lifetime", () => {
     const budget = new Budget({ maxFanout: 2, lifetime: 3 });
     expect(() => {
@@ -159,6 +169,27 @@ describe("workflow engine", () => {
     expect(result.tokensOut).toBe(10);
     expect(result.cacheReadTokens).toBe(14);
     expect(result.reasoningTokens).toBe(26);
+  });
+
+  it("counts a leaf that never reported usage as uncertain, not as a zero-cost measurement (#232)", async () => {
+    const runtime = new FakeRuntime([
+      [complete("measured", 100, 100)],
+      [{ status: "complete", output: "unsure", usageUncertain: true }],
+    ]);
+    const spec = parsed({
+      meta: { name: "uncertain" },
+      nodes: [
+        { id: "measured", type: "agent", prompt: "a" },
+        { id: "unsure", type: "agent", prompt: "b" },
+      ],
+    });
+    const budget = new Budget();
+    const result = await new WorkflowEngine({ runtime, budget }).run(spec);
+    expect(result.usageUncertainLeaves).toBe(1);
+    expect(result.tokensIn).toBe(100);
+    // If the uncertain leaf's zero counted toward the average, this would be
+    // (100+100+0+0)/2 = 100 instead of (100+100)/1 = 200.
+    expect(budget.estimatedLeafCost).toBe(200);
   });
 
   it("isolates an engine fault and keeps the next node running", async () => {

@@ -188,7 +188,9 @@ describe("steerSessionTool", () => {
 });
 
 describe("collectSessionTool", () => {
-  it("returns the byte-exact 13-key success envelope in the contract's exact key order", async () => {
+  // Repinned for #232 (ADR 0003 licenses the format): usage_uncertain is a
+  // new 14th key, added last, so the original 13 stay in their exact order.
+  it("returns the byte-exact 14-key success envelope in the contract's exact key order", async () => {
     const core = makeCore(() =>
       Promise.resolve(
         okResult({
@@ -214,8 +216,18 @@ describe("collectSessionTool", () => {
         forced_fallback: false,
         error_kind: null,
         retry_after: null,
+        usage_uncertain: false,
       }),
     );
+  });
+
+  it("marks usage_uncertain:true when the collected result never measured usage (#232)", async () => {
+    const core = makeCore(() =>
+      Promise.resolve(okResult({ output: "…", tokensIn: 0, tokensOut: 0, usageUncertain: true })),
+    );
+    await spawnSessionTool(core, allowAllProviders, { prompt: "x" });
+    const envelope = await collectSessionTool(core, { sub_id: "aaaa", wait: true });
+    expect(JSON.parse(envelope)).toMatchObject({ usage_uncertain: true });
   });
 
   it("keeps ok:true alongside status:error when the child failed (L14)", async () => {

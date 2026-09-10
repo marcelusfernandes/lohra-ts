@@ -55,6 +55,12 @@ function assistantStream(text: string, promptTokens = 11, completionTokens = 4):
   ]);
 }
 
+// #232, path 1/3 ("sem usage"): no usage frame at all — a real provider
+// response the streaming parser accepts fine, just without token counts.
+function assistantStreamNoUsage(text: string): HttpResponseData {
+  return sseResponse([{ choices: [{ delta: { content: text }, finish_reason: "stop" }] }]);
+}
+
 function toolCallStream(name: string, args: string, callId: string): HttpResponseData {
   return sseResponse([
     {
@@ -164,6 +170,8 @@ describe("createChildRunner", () => {
     expect(result.model).toBe("fake-model-a");
     expect(result.tokensIn).toBe(11);
     expect(result.tokensOut).toBe(4);
+    // A genuinely measured turn is never uncertain (#232 control case).
+    expect(result.usageUncertain).toBe(false);
 
     expect(port.requests).toHaveLength(1);
     const body = JSON.parse(port.requests[0]?.body ?? "null") as {
@@ -176,6 +184,27 @@ describe("createChildRunner", () => {
     const row = sessions.getSession("child-1") as Readonly<Record<string, unknown>>;
     expect(row.source).toBe("orchestration");
     expect(row.parent_session_id).toBe("parent-1");
+    close();
+  });
+
+  it("marks usage uncertain when the provider completes without reporting usage (#232, path 1/3)", async () => {
+    const { sessions, close } = setup();
+    sessions.createSession({ id: "parent-1", source: "gateway" });
+    const parentProfile = getProviderProfile("openai");
+    if (parentProfile === null) throw new Error("openai profile missing");
+    const { client } = fakeClient([assistantStreamNoUsage("hi, no usage reported")]);
+    const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
+    const runner = makeRunner(sessions, pool);
+
+    const result = await runner("child-no-usage", { prompt: "hi" }, "SYS", () => [], noSignal);
+
+    expect(result.status).toBe("complete");
+    expect(result.output).toBe("hi, no usage reported");
+    // Zero counters here are a stand-in for "never measured", not a real
+    // zero-token turn — the whole point of #232.
+    expect(result.tokensIn).toBe(0);
+    expect(result.tokensOut).toBe(0);
+    expect(result.usageUncertain).toBe(true);
     close();
   });
 
@@ -296,6 +325,9 @@ describe("createChildRunner", () => {
     // bilateral divergence (t13-delegate-batch-isolated-failure-order-
     // preserved), not a cosmetic nicety.
     expect(result.output).toBe('Error code: 500 - {"error":"boom"}');
+    // #232, path 2/3 ("erro de provedor"): no call ever measured usage, so
+    // the zero counters above are a stand-in, never a genuine zero spend.
+    expect(result.usageUncertain).toBe(true);
     close();
   });
 
@@ -359,6 +391,9 @@ describe("createChildRunner", () => {
     expect(result.provider).toBe("zz-does-not-exist");
     // zero upstream requests — the failure happened before any client call
     expect(port.requests).toHaveLength(0);
+    // #232, path 3/3 ("erro de resolução"): provider/model never resolved,
+    // so no call was ever attempted — the zero counters are unmeasured.
+    expect(result.usageUncertain).toBe(true);
     close();
   });
 
