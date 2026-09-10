@@ -38,6 +38,7 @@ import {
   routingIdentity,
   routingOf,
   strictResolve,
+  timeoutLeafResult,
   verifyPrompt,
 } from "./engine-utils.js";
 import { topologicalOrder } from "./graph.js";
@@ -264,7 +265,7 @@ export class WorkflowEngine {
         this.recordFault(
           `${node.id}: leaf timeout after ${String(Math.trunc(timeout))}s (cancelled)`,
         );
-        return { output: null, usage: usage(), complete: false };
+        return timeoutLeafResult(this.account.bind(this), node.id, id, collected);
       }
       let total = resultUsage(collected);
       if (collected.status !== "complete") {
@@ -331,7 +332,6 @@ export class WorkflowEngine {
       release();
     }
   }
-
   private account(nodeId: string, id: string, collected: ChildResult): void {
     if (this.accounted.has(id)) return;
     this.accounted.add(id);

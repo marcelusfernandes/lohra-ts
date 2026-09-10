@@ -204,6 +204,30 @@ export async function collectBranchWithRetries(
   return leaf;
 }
 
+/** Issue #313: a leaf that dies by TIMEOUT still spent real tokens up to the
+ * moment `runtime.cancel` tore it down — `collect()`'s "running" `ChildResult`
+ * is the only place that spend could ever show up, and only some runtimes
+ * populate `usage` on it (the production orchestration-runtime timeout path
+ * currently never does, always returning `{ status: "running", output: null
+ * }`). When it IS present, debit it through the exact same `account()` a
+ * completed leaf uses — idempotent by leaf id, so a retry's own NEW id is a
+ * fresh, separate charge, never a double one on THIS id. When it's absent,
+ * the debit must never be a silent zero: `usageUncertain` (#232) makes the
+ * gap visible in the rollup instead of pretending the attempt cost nothing. */
+export function timeoutLeafResult(
+  account: (nodeId: string, id: string, collected: ChildResult) => void,
+  nodeId: string,
+  id: string,
+  collected: ChildResult,
+): LeafExecution {
+  const measured = collected.usage;
+  const uncertain =
+    measured === null || measured === undefined || collected.usageUncertain === true;
+  const debited = measured ?? usage();
+  account(nodeId, id, { ...collected, usage: debited, usageUncertain: uncertain });
+  return { output: null, usage: debited, complete: false };
+}
+
 function isZeroUsage(value: Usage): boolean {
   return (
     value.inputTokens === 0 &&

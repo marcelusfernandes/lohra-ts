@@ -174,3 +174,76 @@ describe("parallel.retries (#242)", () => {
     expect(result.pauseReason).toBe("token_budget_exhausted");
   });
 });
+
+// Issue #313: a leaf that dies by TIMEOUT (collect() returns "running" —
+// runtime.cancel then tears it down) still spent real tokens up to that
+// point. `collectLeaf` used to return a bare zero `usage()` for that
+// attempt without ever calling `account()` — the run's own `budget.charge()`
+// still counted the leaf against `affordableLeaves`, but the tokens
+// themselves vanished from `tokensIn`/`tokensOut` and `gateTokens` never saw
+// them. `retries: 1` here is the same "second collectLeaf call hits
+// gateTokens() before spawning" pattern the retry-budget test above uses —
+// the only way to observe a debit from OUTSIDE the engine without a spy.
+describe("timeout cost enters the budget (#313)", () => {
+  it("debits a timed-out leaf's measured usage — the next spawn's gateTokens sees it and pauses", async () => {
+    const timedOut: ChildResult = {
+      status: "running",
+      output: null,
+      usage: {
+        inputTokens: 2000,
+        outputTokens: 1,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningTokens: 0,
+      },
+    };
+    const runtime = new ScriptedRuntime([[timedOut]]);
+    const spec = parsed({
+      meta: { name: "timeout-budget" },
+      nodes: [{ id: "p", type: "parallel", branches: ["a"], retries: 1 }],
+    });
+    const budget = new Budget({ tokenBudget: 2000 });
+    const result = await new WorkflowEngine({ runtime, budget }).run(spec);
+    // The retry's own gateTokens() throws before a second leaf spawns —
+    // proof the FIRST (timed-out) attempt's usage was actually debited.
+    expect(runtime.spawned).toHaveLength(1);
+    expect(result.status).toBe("paused");
+    expect(result.pauseReason).toBe("token_budget_exhausted");
+  });
+
+  it("charges a timed-out leaf's usage exactly once, never doubled", async () => {
+    const timedOut: ChildResult = {
+      status: "running",
+      output: null,
+      usage: {
+        inputTokens: 500,
+        outputTokens: 25,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningTokens: 0,
+      },
+    };
+    const runtime = new ScriptedRuntime([[timedOut]]);
+    const spec = parsed({
+      meta: { name: "timeout-single-charge" },
+      nodes: [{ id: "p", type: "parallel", branches: ["a"], retries: 0 }],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(result.tokensIn).toBe(500);
+    expect(result.tokensOut).toBe(25);
+  });
+
+  it("marks usageUncertain instead of a silent zero when the runtime reports no usage on timeout", async () => {
+    const timedOut: ChildResult = { status: "running", output: null };
+    const runtime = new ScriptedRuntime([[timedOut]]);
+    const spec = parsed({
+      meta: { name: "timeout-uncertain" },
+      nodes: [{ id: "p", type: "parallel", branches: ["a"], retries: 0 }],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(result.outputs.p).toBeNull();
+    expect(result.usageUncertainLeaves).toBe(1);
+    expect(result.tokensIn).toBe(0);
+    expect(result.tokensOut).toBe(0);
+  });
+});
