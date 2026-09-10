@@ -177,6 +177,56 @@ describe("workflow authored boundaries", () => {
   });
 });
 
+describe("workflow parallel null aggregation", () => {
+  it("keeps a dead branch's null in position and exposes it to a downstream ${p} ref", async () => {
+    const runtime = new ScriptRuntime([
+      [complete("a")],
+      [{ status: "failed", output: "dead" }],
+      [complete("done")],
+    ]);
+    const workflow = parsed({
+      meta: { name: "positional-null" },
+      nodes: [
+        { id: "p", type: "parallel", branches: ["a", "b"] },
+        { id: "consumer", type: "agent", prompt: "${p}", retries: 0 },
+      ],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(workflow);
+    expect(result.outputs.p).toEqual(["a", null]);
+    expect(runtime.requests[2]?.prompt).toBe(JSON.stringify(["a", null]));
+  });
+
+  it("counts a fully dead branch group as one null node with a named fault", async () => {
+    const runtime = new ScriptRuntime([
+      [{ status: "failed", output: "dead-a" }],
+      [{ status: "failed", output: "dead-b" }],
+    ]);
+    const workflow = parsed({
+      meta: { name: "all-dead" },
+      nodes: [{ id: "p", type: "parallel", branches: ["a", "b"] }],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(workflow);
+    expect(result.outputs.p).toBeNull();
+    expect(result.nullCount).toBe(1);
+    expect(result.faults).toContain("p: all 2 branches failed");
+  });
+
+  it("never filters nulls out of the parallel output array", async () => {
+    const runtime = new ScriptRuntime([
+      [{ status: "failed", output: "dead" }],
+      [complete("b")],
+      [{ status: "failed", output: "dead" }],
+    ]);
+    const workflow = parsed({
+      meta: { name: "no-filtering" },
+      nodes: [{ id: "p", type: "parallel", branches: ["a", "b", "c"] }],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(workflow);
+    expect(result.outputs.p).toHaveLength(3);
+    expect(result.outputs.p).toEqual([null, "b", null]);
+  });
+});
+
 describe("workflow Draft 2020-12 output validation", () => {
   const rejected: readonly [unknown, Readonly<Record<string, unknown>>][] = [
     [1, { type: "number", minimum: 10 }],
