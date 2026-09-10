@@ -45,13 +45,46 @@ function isEnoent(error: unknown): boolean {
   );
 }
 
+const SUGGESTION_MAX_DISTANCE = 2;
+
+/** Levenshtein edit distance, plain two-row dynamic programming. */
+function editDistance(a: string, b: string): number {
+  let previous: number[] = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current: number[] = [i];
+    for (let j = 1; j <= b.length; j += 1) {
+      const substitutionCost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const deletion = (previous[j] ?? 0) + 1;
+      const insertion = (current[j - 1] ?? 0) + 1;
+      const substitution = (previous[j - 1] ?? 0) + substitutionCost;
+      current.push(Math.min(deletion, insertion, substitution));
+    }
+    previous = current;
+  }
+  return previous[b.length] ?? Math.max(a.length, b.length);
+}
+
+/** The closest `MODEL_TIERS` name to an unrecognized top-level key, if close
+ * enough to be worth suggesting (e.g. `smal` → `small`, #261). */
+function closestTierName(key: string): ModelTierName | undefined {
+  const lowered = key.toLowerCase();
+  let best: { readonly name: ModelTierName; readonly distance: number } | undefined;
+  for (const name of MODEL_TIERS) {
+    const distance = editDistance(lowered, name);
+    if (best === undefined || distance < best.distance) best = { name, distance };
+  }
+  return best !== undefined && best.distance <= SUGGESTION_MAX_DISTANCE ? best.name : undefined;
+}
+
 /**
  * Fail-closed reader for `workflow_tiers.json`: distinguishes an absent file
  * (legitimate, `{}`) from one that exists but cannot be trusted — bad JSON, a
- * non-object root, or a known tier (`small`/`medium`/`big`) with an
- * unrecognized field or a wrong-typed value. Every caller of the operator
- * tier map (`lohra tiers`, `lohra models`, `list_models`, `WorkflowService`)
- * goes through this function — there is no fail-open sibling left (#261).
+ * non-object root, an unrecognized top-level key (typo of `small`/`medium`/
+ * `big`; rejected with a closest-name suggestion when the edit distance is
+ * small, e.g. `smal` → `small`), or a known tier with an unrecognized field
+ * or a wrong-typed value. Every caller of the operator tier map (`lohra
+ * tiers`, `lohra models`, `list_models`, `WorkflowService`) goes through this
+ * function — there is no fail-open sibling left (#261).
  */
 export function readTiers(path: string): TierMap | TiersError {
   let content: string;
@@ -68,6 +101,16 @@ export function readTiers(path: string): TierMap | TiersError {
   }
   const root = object(parsed);
   if (root === null) return new TiersError(path, `root must be an object, got ${typeName(parsed)}`);
+  for (const key of Object.keys(root)) {
+    if ((MODEL_TIERS as readonly string[]).includes(key)) continue;
+    const suggestion = closestTierName(key);
+    return new TiersError(
+      path,
+      suggestion === undefined
+        ? `unknown top-level key '${key}' (expected one of: ${MODEL_TIERS.join(", ")})`
+        : `unknown top-level key '${key}' — did you mean '${suggestion}'?`,
+    );
+  }
   const result: Partial<Record<ModelTierName, Tier>> = {};
   for (const name of MODEL_TIERS) {
     if (!(name in root)) continue;
