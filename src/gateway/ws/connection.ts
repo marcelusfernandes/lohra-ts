@@ -4,8 +4,12 @@ import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import { ConversationRuntime } from "../../conversation/index.js";
-import type { ConversationRepository, ModelTransport } from "../../conversation/types.js";
-import { getProviderProfile } from "../../providers/index.js";
+import type {
+  ConversationRepository,
+  ConversationRuntimeEvent,
+  ModelTransport,
+} from "../../conversation/types.js";
+import { getProviderProfileIncludingCodex } from "../../providers/index.js";
 import type { ToolDefinition } from "../../tools/types.js";
 import { timingSafeTokenEqual } from "../auth.js";
 import { logGatewayFailure } from "../failure-log.js";
@@ -52,17 +56,38 @@ function write403(socket: Socket): void {
   socket.end("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
 }
 
-// Issue #287 (revisor round 2 of PR #284): `getProviderProfile(deps.provider)`
-// below used to return null for the Codex subscription route (`dashboard.ts`
-// passed the string literal "codex", which is not a registered provider
-// alias, and even the real name "openai-codex" isn't registered either --
-// CODEX_PROVIDER is deliberately absent from the registry, see its own
-// comment in src/providers/registry.ts) -- `maxTokens` silently fell back to
-// `null`/0 and the compaction preflight's reserved-output budget for the
-// Codex route was wrong. Exported (not just inlined) so this resolution can
-// be pinned directly, without a full subscription-mode dashboard harness.
-export function resolveGatewayMaxTokens(_provider: string): number | null {
-  throw new Error("not implemented: resolveGatewayMaxTokens");
+// Issue #287 (revisor round 2 of PR #284): a bare `getProviderProfile
+// (deps.provider)` used to return null for the Codex subscription route
+// (`dashboard.ts` passed the string literal "codex", which is not a
+// registered provider alias, and even the real name "openai-codex" isn't
+// registered either -- CODEX_PROVIDER is deliberately absent from the
+// registry, see its own comment in src/providers/registry.ts) --
+// `maxTokens` silently fell back to `null`/0 and the compaction preflight's
+// reserved-output budget for the Codex route was wrong.
+// `getProviderProfileIncludingCodex` resolves it by its real name. Exported
+// (not just inlined) so this resolution can be pinned directly, without a
+// full subscription-mode dashboard harness.
+export function resolveGatewayMaxTokens(provider: string): number | null {
+  return getProviderProfileIncludingCodex(provider)?.defaultMaxTokens ?? null;
+}
+
+// Mirrors encodeGatewayEventFrame's exact wire shape (../rpc/frame.ts) for
+// the two compaction event types ConversationRuntimeEvent emits (issue
+// #287) that a production caller never forwarded before. `GatewayEventName`
+// there is a closed string-literal union `frame.ts` isn't in this issue's
+// `Files` to widen -- this is the minimal way to reach the identical frame
+// shape without touching a caller that has no reason to know these two
+// event types exist.
+function encodeCompactionEventFrame(
+  type: "session.compacted" | "compaction.unsupported",
+  sessionId: string,
+  payload: object,
+): string {
+  return encodeJsonRpcFrame({
+    jsonrpc: "2.0",
+    method: "event",
+    params: { type, session_id: sessionId, payload },
+  });
 }
 
 export interface GatewayAuthConfig {
@@ -207,11 +232,13 @@ async function handlePromptSubmit(
     // without it (absent here before this fix, unlike commands/chat.ts and
     // commands/dashboard.ts's own cron job runtime, both of which already
     // pass profile.defaultMaxTokens) the preflight let a request through
-    // with zero room reserved for the response. getProviderProfile(name)
-    // is null-safe: an unregistered provider name (defensive only -- every
+    // with zero room reserved for the response. resolveGatewayMaxTokens is
+    // null-safe: an unregistered provider name (defensive only -- every
     // real GatewayWsDeps.provider names a provider dashboard.ts already
     // resolved to build deps.createModelTransport()) just leaves the
-    // reserve at ConversationRuntime's own default (0), same as before.
+    // reserve at ConversationRuntime's own default (0), same as before --
+    // but the Codex subscription route ("openai-codex") now resolves to
+    // its real profile instead of silently falling through (issue #287).
     const runtime = new ConversationRuntime({
       repository: deps.createConversationRepository(),
       transport: deps.createModelTransport(),
@@ -220,7 +247,27 @@ async function handlePromptSubmit(
       toolDefinitions: deps.toolDefinitions,
       idSource: () => sessionId,
       clock: () => Date.now() / 1000,
-      maxTokens: getProviderProfile(deps.provider)?.defaultMaxTokens ?? null,
+      maxTokens: resolveGatewayMaxTokens(deps.provider),
+      // Issue #287: forwards the two compaction events onto the socket as
+      // `event` frames (encodeCompactionEventFrame above) -- before this,
+      // `session.compacted`/`compaction.unsupported` only ever reached a
+      // test's own fake sink, never a real gateway ws client. Every other
+      // ConversationRuntimeEvent type is ignored here on purpose: this
+      // socket already has its own dedicated frames for turn/model
+      // progress (message.start/delta/complete, tool.start/complete).
+      eventSink: (event: ConversationRuntimeEvent) => {
+        if (event.type === "session.compacted") {
+          ws.send(
+            encodeCompactionEventFrame(
+              "session.compacted",
+              event.sessionId,
+              event.compaction ?? {},
+            ),
+          );
+        } else if (event.type === "compaction.unsupported") {
+          ws.send(encodeCompactionEventFrame("compaction.unsupported", event.sessionId, {}));
+        }
+      },
     });
 
     const outcome = await driveGatewayTurn({

@@ -163,7 +163,13 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
       return 2;
     }
     model = stringFlag(options.flags, "--model") ?? readCodexModel(options.codexHome) ?? "gpt-5.5";
-    providerName = "codex";
+    // The real profile name ("openai-codex"), never the string literal
+    // "codex" -- that alias was never registered on purpose (see
+    // getProviderProfileIncludingCodex, src/providers/registry.ts), so it
+    // used to make the gateway ws's own getProviderProfile(deps.provider)
+    // resolve to null downstream: maxTokens fell back to 0 and the context
+    // window resolution missed the Codex floor entirely (issue #287).
+    providerName = CODEX_PROVIDER.name;
     profile = CODEX_PROVIDER;
     poolClient = createResponsesClient({
       baseUrl: credentials.baseUrl,
