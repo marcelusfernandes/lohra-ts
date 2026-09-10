@@ -135,4 +135,37 @@ describe("parallel.retries (#242)", () => {
     expect(result.status).toBe("paused");
     expect(result.pauseReason).toBe("token_budget_exhausted");
   });
+
+  it("bounds a sibling's phantom respawns when the run pauses mid fan-out", async () => {
+    // `collectLeaf` returns a null leaf with NO spawn, NO fault and NO
+    // charge once `this.control.paused` is set (engine.ts:235-236) —
+    // indistinguishable from a fresh death by `output === null` alone.
+    // Two branches that both die expensively: whichever retry loses the
+    // race pauses the run via `gateTokens()`; the guard stops the OTHER
+    // branch's loop once `result.pauseFault` is visible — bounding the
+    // damage to at most one wasted attempt per branch (2), never a full
+    // spin through `retries` per stuck branch (which would be 6 here).
+    const expensive: ChildResult = {
+      status: "failed",
+      output: "boom",
+      usage: {
+        inputTokens: 2000,
+        outputTokens: 1,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningTokens: 0,
+      },
+    };
+    const runtime = new ScriptedRuntime([[expensive], [expensive]]);
+    const spec = parsed({
+      meta: { name: "retry-pause-race" },
+      nodes: [{ id: "p", type: "parallel", branches: ["a", "b"], retries: 3 }],
+    });
+    const budget = new Budget({ tokenBudget: 4000 });
+    const result = await new WorkflowEngine({ runtime, budget }).run(spec);
+    const respawns = (result as unknown as { leafRespawns: number }).leafRespawns;
+    expect(respawns).toBeLessThanOrEqual(2); // never 6 (3 retries x 2 branches)
+    expect(result.status).toBe("paused");
+    expect(result.pauseReason).toBe("token_budget_exhausted");
+  });
 });
