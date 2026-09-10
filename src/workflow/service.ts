@@ -87,15 +87,15 @@ const STALE_HINT =
   "the process that was running this workflow was lost before it finished; the " +
   "cells it completed are kept — run_workflow(resume_run_id=...) continues it";
 const BUSY_HINT = "another process is running this workflow right now";
-const TOKEN_BUDGET_HINT =
+export const TOKEN_BUDGET_HINT =
   "the run spent its token budget; nothing will resume it on its own — " +
   "run_workflow(resume_run_id=..., token_budget=<more than 'spent'>)";
-const CHECKPOINT_HINT =
+export const CHECKPOINT_HINT =
   "this run is paused at a checkpoint waiting for your answer — " +
   'run_workflow(resume_run_id=..., checkpoint_answers={"<node_id>": ' +
   "<answer>}); a checkpoint that declared a 'default' takes it if " +
   "you resume without one";
-const USER_PAUSE_HINT =
+export const USER_PAUSE_HINT =
   "you paused this run; nothing will resume it on its own — its " +
   "finished nodes are kept, so run_workflow(resume_run_id=...) " +
   "continues it whenever you want (no budget raise needed)";
