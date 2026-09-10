@@ -29,7 +29,8 @@
       "tests/orchestration-child-runner.test.ts",
       "tests/workflow-shutdown.test.ts",
       "tests/workflow-progress-cobertura.test.ts",
-      "tests/workflow-durable-roots.test.ts"
+      "tests/workflow-durable-roots.test.ts",
+      "tests/workflow-tiers.test.ts"
     ]
   },
   {
