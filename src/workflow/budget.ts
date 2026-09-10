@@ -124,10 +124,24 @@ export class Budget {
     );
   }
 
-  affordableLeaves(): number | null {
-    return this.tokenBudget === null
-      ? null
-      : Math.trunc(this.tokensRemaining / this.estimatedLeafCost);
+  // measuredOnly: skip the gate entirely (null, same as no budget) until at
+  // least one leaf has actually reported usage — the default estimate alone
+  // (ESTIMATED_TOKENS_PER_LEAF) is too conservative to block a spawn nothing
+  // has been measured against yet (#236, a single leaf gated the same way a
+  // fan-out group already was would otherwise block on turn one whenever
+  // tokenBudget < ESTIMATED_TOKENS_PER_LEAF).
+  affordableLeaves(measuredOnly = false): number | null {
+    if (this.tokenBudget === null) return null;
+    if (measuredOnly && this.measuredLeaves === 0) return null;
+    return Math.trunc(this.tokensRemaining / this.estimatedLeafCost);
+  }
+
+  /** The `token_budget_exhausted` pause payload — what a leaf that couldn't fit needs to size a resume. */
+  exhaustionPayload(): Readonly<{ remaining: number; estimated_leaf_cost: number }> {
+    return Object.freeze({
+      remaining: this.tokensRemaining,
+      estimated_leaf_cost: this.estimatedLeafCost,
+    });
   }
 
   snapshot(): Readonly<{ total: number; spent: number; remaining: number }> | null {
