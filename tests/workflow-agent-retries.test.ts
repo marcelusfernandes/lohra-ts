@@ -137,3 +137,58 @@ describe("agent retries never spin past a pause (#321)", () => {
     expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(0);
   });
 });
+
+// Issue #334: the same phantom-respawn shape as #321, but in `runPipeline`'s
+// per-stage retry loop (engine.ts:~545) instead of `runAgent`'s. It credits
+// `leafRespawns` for the retry attempt BEFORE knowing `collectLeaf` will hit
+// the already-paused short-circuit (engine.ts:235-236) and return a null
+// leaf with NO spawn. Flagged by the implementer of PR #333 while fixing
+// #321; the guard is the same one already applied to `runAgent`
+// (`&& this.result.pauseFault === null` on the increment).
+describe("pipeline stage retries never spin past a pause (#334)", () => {
+  it("does not credit a respawn when the run pauses between stage attempts", async () => {
+    const runtime = new PauseOnFirstCollectRuntime();
+    const engine = new WorkflowEngine({ runtime });
+    runtime.setEngine(engine);
+    const spec = parsed({
+      meta: { name: "pipeline-pause-between-attempts" },
+      nodes: [
+        { id: "p", type: "pipeline", items: ["a"], stages: [{ prompt: "${item}", retries: 1 }] },
+      ],
+    });
+    const result = await engine.run(spec);
+    expect(runtime.spawned).toHaveLength(1);
+    expect(result.outputs.p).toEqual([null]);
+    expect(result.status).toBe("paused");
+    expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(0);
+  });
+
+  it("still retries a pipeline stage up to the cap on repeated empty output, outside any pause", async () => {
+    const runtime = new ScriptedRuntime([[empty], [empty], [empty]]);
+    const spec = parsed({
+      meta: { name: "pipeline-empty-until-cap" },
+      nodes: [
+        { id: "p", type: "pipeline", items: ["a"], stages: [{ prompt: "${item}", retries: 2 }] },
+      ],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(runtime.spawned).toHaveLength(3);
+    expect(result.outputs.p).toEqual([null]);
+    expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(2);
+    expect(result.faults).toContain("p: empty output after retry");
+  });
+
+  it("still never retries a dead (null) pipeline stage leaf, outside any pause", async () => {
+    const runtime = new ScriptedRuntime([[dead]]);
+    const spec = parsed({
+      meta: { name: "pipeline-dead-no-retry" },
+      nodes: [
+        { id: "p", type: "pipeline", items: ["a"], stages: [{ prompt: "${item}", retries: 1 }] },
+      ],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(runtime.spawned).toHaveLength(1);
+    expect(result.outputs.p).toEqual([null]);
+    expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(0);
+  });
+});
