@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
+import { afterEach, describe, expect, it } from "vitest";
+
+import { LockRepository, openStateDatabase, WorkflowRepository } from "../src/state/index.js";
 import {
   Budget,
   contentHash,
@@ -7,11 +12,14 @@ import {
   parseAndValidate,
   QUOTA_EXHAUSTED,
   WorkflowEngine,
+  WorkflowService,
   validateSpec,
+  writeTiers,
   type ChildCollectOptions,
   type ChildResult,
   type ChildRuntime,
   type ChildSpawnRequest,
+  type LeafSandboxHandle,
 } from "../src/workflow/index.js";
 
 const meters = (inputTokens: number, outputTokens: number) => ({
@@ -455,5 +463,169 @@ describe("workflow cache manifests", () => {
     await engine.run(outer);
     await engine.run(outer);
     expect(runtime.requests).toHaveLength(1);
+  });
+});
+
+// Issue #240: the cell key is `runId + contentHash(spec.name, meta.version,
+// ...parts)` (`src/workflow/cache.ts:66-67`, `src/workflow/engine.ts:357-359`,
+// `:379`). The operator policy lives on the stretch (`src/workflow/
+// service.ts:586,675,822`) and never enters `parts` — only the tier map does,
+// resolved through `routingIdentity`. The pair below exercises the real
+// durable run/resume path through `WorkflowService` (the only place policy
+// and the cache meet): a checkpoint separates a node that already ran from
+// one that hasn't, so "zero re-spawn" and "re-spawn" are both observable.
+describe("workflow policy vs tier map — cache invalidation contract (#240)", () => {
+  const roots: string[] = [];
+
+  afterEach(() => {
+    while (roots.length > 0) rmSync(roots.pop() as string, { recursive: true, force: true });
+  });
+
+  function root(): string {
+    const path = mkdtempSync(join(tmpdir(), "lohra-hardening-policy-"));
+    roots.push(path);
+    return path;
+  }
+
+  function recordingRuntime(): ChildRuntime & { readonly requests: ChildSpawnRequest[] } {
+    const requests: ChildSpawnRequest[] = [];
+    return {
+      requests,
+      spawn(request: ChildSpawnRequest): string {
+        requests.push(request);
+        return `leaf-${String(requests.length)}`;
+      },
+      collect: (): ChildResult => complete("ok"),
+      steer: (): void => undefined,
+      cancel: (): void => undefined,
+      installLeafSandbox: (): LeafSandboxHandle => ({ dispose: (): void => undefined }),
+    };
+  }
+
+  // node "a" runs BEFORE the checkpoint (so it is already cached when the
+  // operator edits config and resumes); node "b" only runs AFTER — proving
+  // which cell survives and which one was ever supposed to be fresh.
+  function twoStageSpec(): Record<string, unknown> {
+    return {
+      meta: { name: "policy-vs-tiers" },
+      nodes: [
+        { id: "a", type: "agent", prompt: "first", tier: "big" },
+        { id: "cp", type: "checkpoint", prompt: "continue?", default: "yes" },
+        { id: "b", type: "agent", prompt: "second" },
+      ],
+    };
+  }
+
+  function durableService(
+    home: string,
+    runtime: ChildRuntime,
+    extra: { readonly policyPath?: string; readonly tiersPath?: string } = {},
+  ): { readonly service: WorkflowService; readonly close: () => void } {
+    const connection = openStateDatabase(join(home, "state.db"));
+    const repository = new WorkflowRepository(connection.database);
+    const locks = new LockRepository(connection.database);
+    const service = new WorkflowService({
+      runtime,
+      homeRoot: home,
+      ...extra,
+      store: {
+        repository,
+        locks,
+        holder: "test",
+        ttl: 900,
+        ownershipOf: () => ({ fence: 0, holder: "test", now: 1000 }),
+        database: connection.database,
+      },
+    });
+    return {
+      service,
+      close: () => {
+        connection.close();
+      },
+    };
+  }
+
+  it("changing the operator policy between run and resume never re-spawns the intact cell (#240)", async () => {
+    const home = root();
+    const policyPath = join(home, "workflow_policy.json");
+    const dirA = join(home, "allow-a");
+    const dirB = join(home, "allow-b");
+    mkdirSync(dirA, { recursive: true });
+    mkdirSync(dirB, { recursive: true });
+    writeFileSync(policyPath, JSON.stringify({ fs_allow: [dirA], egress_allow: [] }));
+    const runtime = recordingRuntime();
+    const { service, close } = durableService(home, runtime, { policyPath });
+    try {
+      const started = service.start(twoStageSpec());
+      if ("error" in started) throw new Error(started.error);
+      const paused = (await service.status(started.run_id, true)) as Record<string, unknown>;
+      expect(paused.status).toBe("paused");
+      expect(runtime.requests).toHaveLength(1);
+      // policy A is live on THIS stretch: dirA allowed, dirB denied.
+      const dispatchBeforeResume = service.leafToolDispatch(
+        started.run_id,
+        (name) => `allowed:${name}`,
+      );
+      expect(dispatchBeforeResume("read_file", { path: join(dirA, "x.txt") })).toBe(
+        "allowed:read_file",
+      );
+      expect(dispatchBeforeResume("read_file", { path: join(dirB, "x.txt") })).toBe(
+        "ERROR: path is outside the workflow working scope (sandbox denied)",
+      );
+      // the operator swaps the allowlist — same PATH, entirely different content
+      writeFileSync(policyPath, JSON.stringify({ fs_allow: [dirB], egress_allow: [] }));
+      const resumed = service.start(null, {}, { resumeRunId: started.run_id });
+      if ("error" in resumed) throw new Error(resumed.error);
+      const final = (await service.status(started.run_id, true)) as Record<string, unknown>;
+      expect(final.status).toBe("complete");
+      // policy B is live on the NEW stretch: inverted from before.
+      const dispatchAfterResume = service.leafToolDispatch(
+        started.run_id,
+        (name) => `allowed:${name}`,
+      );
+      expect(dispatchAfterResume("read_file", { path: join(dirB, "x.txt") })).toBe(
+        "allowed:read_file",
+      );
+      expect(dispatchAfterResume("read_file", { path: join(dirA, "x.txt") })).toBe(
+        "ERROR: path is outside the workflow working scope (sandbox denied)",
+      );
+      // yet "a" was never re-spawned: exactly two requests total (a, then b).
+      expect(runtime.requests).toHaveLength(2);
+      expect(runtime.requests[0]?.prompt).toBe("first");
+      expect(runtime.requests[1]?.prompt).toBe("second");
+    } finally {
+      close();
+    }
+  });
+
+  it("changing the tier map for a node's tier between run and resume DOES invalidate the cell — routingIdentity resolves into the hash, correct behavior (#240, #258)", async () => {
+    const home = root();
+    const tiersPath = join(home, "workflow_tiers.json");
+    writeTiers(tiersPath, { big: { model: "model-v1" } });
+    const runtime = recordingRuntime();
+    const { service, close } = durableService(home, runtime, { tiersPath });
+    try {
+      const started = service.start(twoStageSpec());
+      if ("error" in started) throw new Error(started.error);
+      const paused = (await service.status(started.run_id, true)) as Record<string, unknown>;
+      expect(paused.status).toBe("paused");
+      expect(runtime.requests).toHaveLength(1);
+      expect(runtime.requests[0]?.model).toBe("model-v1");
+      // the operator remaps the SAME tier name to a different model
+      writeTiers(tiersPath, { big: { model: "model-v2" } });
+      const resumed = service.start(null, {}, { resumeRunId: started.run_id });
+      if ("error" in resumed) throw new Error(resumed.error);
+      const final = (await service.status(started.run_id, true)) as Record<string, unknown>;
+      expect(final.status).toBe("complete");
+      // "a" IS re-spawned under the new mapping: three requests total.
+      expect(runtime.requests).toHaveLength(3);
+      expect(runtime.requests[0]?.prompt).toBe("first");
+      expect(runtime.requests[0]?.model).toBe("model-v1");
+      expect(runtime.requests[1]?.prompt).toBe("first");
+      expect(runtime.requests[1]?.model).toBe("model-v2");
+      expect(runtime.requests[2]?.prompt).toBe("second");
+    } finally {
+      close();
+    }
   });
 });
