@@ -304,11 +304,18 @@ describe("sandbox refusal — survives resume (#246 AC3)", () => {
     if ("error" in started) throw new Error(started.error);
     const paused = (await service.status(started.run_id, true)) as Record<string, unknown>;
     expect(paused.status).toBe("paused");
+    // The advisory fault text reaches the live rollup's `faults` too, not
+    // just the count — resultView folds `sandboxFaults` into `faults`.
+    expect(paused.faults as unknown[]).toContain("a: sandbox refused 2 tool call(s)");
     const line = repository.getRunState(started.run_id) as Record<string, unknown>;
     const payload = JSON.parse(String(line.pause_payload_json)) as {
       sandbox_refusals: number;
+      prior_degraded: boolean;
     };
     expect(payload.sandbox_refusals).toBe(2);
+    // An advisory fault never flips `prior_degraded` — only a REAL fault does
+    // (service.ts computes it from `result.faults`, never `sandboxFaults`).
+    expect(payload.prior_degraded).toBe(false);
 
     // A genuinely cross-process, not-live read (fresh WorkflowService, same
     // store, no in-memory record for this run_id) goes through
@@ -317,6 +324,7 @@ describe("sandbox refusal — survives resume (#246 AC3)", () => {
     const coldService = new WorkflowService({ runtime: durableRuntimeStub(), store, cacheFactory });
     const dormantView = (await coldService.status(started.run_id)) as Record<string, unknown>;
     expect(dormantView.sandbox_refusals).toBe(2);
+    expect(dormantView.faults_total as unknown[]).toContain("a: sandbox refused 2 tool call(s)");
 
     const resumed = (await service.runAndWait(null, {}, { resumeRunId: started.run_id })) as Record<
       string,
@@ -326,6 +334,9 @@ describe("sandbox refusal — survives resume (#246 AC3)", () => {
     // 2 (stretch 1, persisted at the pause) + 2 (stretch 2's own "a" leaf) —
     // the prior stretch's count survived the resume instead of resetting.
     expect(resumed.sandbox_refusals).toBe(4);
+    // Stretch 2's OWN advisory fault (the live `faults` here is
+    // current-stretch-only, same pre-existing shape as `faults` always had).
+    expect(resumed.faults as unknown[]).toContain("a: sandbox refused 2 tool call(s)");
     close();
   });
 });
