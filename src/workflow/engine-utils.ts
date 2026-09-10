@@ -204,6 +204,16 @@ export async function collectBranchWithRetries(
   return leaf;
 }
 
+function isZeroUsage(value: Usage): boolean {
+  return (
+    value.inputTokens === 0 &&
+    value.outputTokens === 0 &&
+    value.cacheReadTokens === 0 &&
+    value.cacheWriteTokens === 0 &&
+    value.reasoningTokens === 0
+  );
+}
+
 /** PR #305 round 2: the group cell writes NULL cost — each branch cell
  * already recorded its own real cost once (`replayOrCollectBranch` above),
  * so writing the group's own total too double-counts every token in
@@ -211,17 +221,40 @@ export async function collectBranchWithRetries(
  * and can inflate `tokens_spent` to 2x on resume). A group cache HIT has no
  * branch spawn to carry the cost, so this re-sums each branch's OWN cell —
  * cheap reads, never a spawn — and records that as the node's cost: the
- * real total, from the one place it's still recorded. */
+ * real total, from the one place it's still recorded.
+ *
+ * Issue #308: a per-branch cell can go missing (e.g. `putCacheCellWithCost`
+ * refused by `database is locked` for one branch write) while the group
+ * cell still lands — the old `?? usage()` fallback made that indistinguishable
+ * from a branch that legitimately cost zero, silently under-reporting
+ * `nodeCosts`. `deps.cache.get` for the group's OWN cell tells the two
+ * databases apart: this version always writes the group cell with `cost:
+ * null`, which every `WorkflowCache` stores back as an all-zero `Usage`
+ * (never a literal `null` on a hit) — so a non-zero group cost can only be
+ * an OLD database's direct total, written before per-branch cells existed
+ * at all, and `deps.cache`'s caller (`cacheGet` in engine.ts) already added
+ * that real total to `deps.result` before this ran; resumming zero branch
+ * cells here would only double it. Only the all-zero (this-version) case
+ * re-sums branches and only THAT case can tell a missing cell apart from a
+ * database with no branch cells to begin with — so only that case faults. */
 export function recordGroupReplayCost(
   deps: ParallelBranchDeps,
   node: Node,
   resolved: readonly unknown[],
   cached: unknown,
+  groupHash: string,
 ): unknown {
+  const groupCost = deps.cache.get(deps.runId, groupHash).cost;
+  if (groupCost !== null && !isZeroUsage(groupCost)) return cached;
   const routing = routingIdentity(node, deps.tiers);
   const total = resolved.reduce((sum: Usage, p, i) => {
     const hash = contentHash(...deps.spec, node.id, "parallel", i, renderValue(p), ...routing);
-    return combine(sum, deps.cache.get(deps.runId, hash).cost ?? usage());
+    const found = deps.cache.get(deps.runId, hash);
+    if (!found.hit) {
+      deps.result.faults.push(`group replay: per-branch cell missing for ${hash}`);
+      return sum;
+    }
+    return combine(sum, found.cost ?? usage());
   }, usage());
   addUsageToResult(deps.result, node.id, total, null, null);
   return cached;

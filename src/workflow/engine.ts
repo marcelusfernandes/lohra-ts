@@ -475,7 +475,7 @@ export class WorkflowEngine {
     const cached = this.cacheGet(hash);
     const { runId, cache, result, specIdentity: spec, tiers } = this;
     const deps = { runId, cache, result, spec, tiers, collectLeaf: this.collectLeaf.bind(this) };
-    if (cached !== CACHE_MISS) return recordGroupReplayCost(deps, node, resolved, cached);
+    if (cached !== CACHE_MISS) return recordGroupReplayCost(deps, node, resolved, cached, hash);
     this.gateFanout(resolved.length);
     const leaves = await Promise.all(
       resolved.map((p, i) => collectBranchWithRetries(deps, node, i, renderValue(p))),
