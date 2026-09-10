@@ -119,6 +119,28 @@ export class CompressionLockBusyError extends ConversationError {
   }
 }
 
+// SessionRepository.compactHistory (src/state/session-repository.ts) checks
+// the lock inside its own write transaction and throws a raw
+// `Error("COMPRESSION_LOCK_NOT_HELD:...")` when `holder` doesn't hold it
+// anymore -- a real TOCTOU window: attemptCompaction's own acquire and this
+// use are a few lines apart, never atomic with each other, so the lock can
+// legitimately expire or move to another process in between. Distinct from
+// CompressionLockBusyError (never acquired the lock at all, after bounded
+// retries): this is losing a lock already held. attemptCompaction
+// (src/conversation/compaction.ts) wraps the raw throw into this so it
+// carries a real `code` instead of falling through runTurn's `error
+// instanceof ConversationError ? error.code : "TURN_FAILED"` as a generic
+// failure (issue #287).
+export class CompressionLockNotHeldError extends ConversationError {
+  override readonly name = "CompressionLockNotHeldError";
+  public constructor(sessionId: string, cause: unknown) {
+    super("COMPRESSION_LOCK_NOT_HELD", "compression lock not held by this holder", {
+      sessionId,
+      cause,
+    });
+  }
+}
+
 export class CompactionFailedError extends ConversationError {
   override readonly name = "CompactionFailedError";
   public constructor(sessionId: string, cause: unknown) {

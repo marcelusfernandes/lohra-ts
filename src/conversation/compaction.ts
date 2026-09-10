@@ -17,8 +17,7 @@
 import { SUMMARY_SYSTEM } from "../agent/aux.js";
 import { resolveContextWindowOverride } from "../config/context-window-env.js";
 import {
-  CODEX_PROVIDER,
-  getProviderProfile,
+  getProviderProfileIncludingCodex,
   resolveContextWindow,
   type ContextWindowResolution,
   type ContextWindowSource,
@@ -29,8 +28,9 @@ import {
   CompactionFailedError,
   CompactionUnsupportedError,
   CompressionLockBusyError,
+  CompressionLockNotHeldError,
 } from "./errors.js";
-import type { ConversationRepository, ModelRequest } from "./types.js";
+import type { CompactionResult, ConversationRepository, ModelRequest } from "./types.js";
 
 /** Trailing messages a compaction never touches (issue #252 AC: "mantendo
  * as N últimas mensagens intactas"). Turn-aligned (see
@@ -117,14 +117,16 @@ function unknownProviderProfile(name: string): ProviderProfile {
 /** `CODEX_PROVIDER` (the subscription route's profile, `commands/chat.ts`
  * sets `profile = CODEX_PROVIDER` directly) is deliberately never
  * registered in the provider registry `getProviderProfile` reads
- * (`src/providers/registry.ts:243-260`) -- it isn't selectable by name via
+ * (`src/providers/registry.ts`) -- it isn't selectable by name via
  * `--provider`. `runTurn` still passes `input.provider = profile.name` for
- * it ("openai-codex") like every other route, so this module has to know
- * about it by name to resolve its 1,050,000-token floor instead of silently
- * falling through to the unrelated 200000 global default. */
+ * it ("openai-codex") like every other route, so this module needs to
+ * resolve it by name too, to get its 1,050,000-token floor instead of
+ * silently falling through to the unrelated 200000 global default.
+ * `getProviderProfileIncludingCodex` (`src/providers/registry.ts`) is the
+ * shared helper for that -- issue #287's gateway ws maxTokens fix needs the
+ * exact same resolution, so it isn't duplicated here anymore. */
 function knownProviderProfile(name: string): ProviderProfile {
-  if (name === CODEX_PROVIDER.name) return CODEX_PROVIDER;
-  return getProviderProfile(name) ?? unknownProviderProfile(name);
+  return getProviderProfileIncludingCodex(name) ?? unknownProviderProfile(name);
 }
 
 export function resolveTurnContextWindow(input: {
@@ -259,10 +261,28 @@ export async function attemptCompaction(
       throw new CompactionFailedError(input.sessionId, error);
     }
 
-    const result = repository.compactHistory(input.sessionId, input.holder, input.now, {
-      keepTailCount,
-      summary,
-    });
+    // repository.compactHistory checks the lock inside its own write
+    // transaction and can legitimately lose the race between this
+    // function's own acquire (above) and this call -- a raw
+    // `Error("COMPRESSION_LOCK_NOT_HELD:...")`, never a ConversationError
+    // (SessionRepository, src/state/session-repository.ts, has no
+    // dependency on this module's error taxonomy). Wrapped here, the one
+    // place both sides meet, so it reaches runTurn with a real `code`
+    // instead of falling through as a generic "TURN_FAILED" (issue #287).
+    let result: CompactionResult;
+    try {
+      // The top-of-function capability check already refused (threw
+      // CompactionUnsupportedError) if this were absent -- non-null here.
+      result = repository.compactHistory(input.sessionId, input.holder, input.now, {
+        keepTailCount,
+        summary,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("COMPRESSION_LOCK_NOT_HELD:")) {
+        throw new CompressionLockNotHeldError(input.sessionId, error);
+      }
+      throw error;
+    }
     const history = repository.loadMessages(input.sessionId);
     return {
       compacted: true,
