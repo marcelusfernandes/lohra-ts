@@ -87,6 +87,35 @@ function baseOptions(overrides: BaseOptionsOverrides = {}) {
   };
 }
 
+// Issue #302: `await sleep(50)` used to be how a handful of tests below
+// waited for `runDashboard` to finish binding before reading `stderrLines`.
+// That races the real boot work between argv parsing and the bind
+// (credential resolution, SQLite open, MCP registration -- dashboard.ts's
+// own `runDashboard` body) whenever the event loop is busy with other test
+// files: reproduced with two full `npm test` runs at once (2/5 rounds),
+// `AssertionError: expected false to be true` at this file's "does NOT
+// refuse --insecure with an explicit loopback --host (localhost)" -- the
+// banner had not reached `stderrLines` yet 50ms in. Never reproduced in 10
+// sequential full-suite runs nor 15-30 isolated reruns of this file alone,
+// consistent with a starved-event-loop race rather than port or IPv6
+// state. `registerShutdownTrigger` is only invoked (dashboard.ts, right
+// after the real bind and banner print) once boot has actually finished,
+// so it doubles as a ready signal: awaiting it removes the wall-clock race
+// instead of guessing a longer delay.
+function waitUntilBound(options: { registerShutdownTrigger?: (handler: () => void) => void }): {
+  readonly ready: Promise<void>;
+  readonly shutdown: () => void;
+} {
+  let handler: (() => void) | undefined;
+  const ready = new Promise<void>((resolveReady) => {
+    options.registerShutdownTrigger = (trigger: () => void) => {
+      handler = trigger;
+      resolveReady();
+    };
+  });
+  return { ready, shutdown: () => handler?.() };
+}
+
 describe("runDashboard: --host refuses to combine with --insecure off loopback (issue #4 AC)", () => {
   it("exits 2 with a CLI-shaped error, never opening a socket", async () => {
     const options = baseOptions({
@@ -113,14 +142,14 @@ describe("runDashboard: --host refuses to combine with --insecure off loopback (
     const options = baseOptions({
       argv: ["--provider", "anthropic", "--insecure", "--host", "localhost"],
     });
-    let shutdown: (() => void) | undefined;
-    options.registerShutdownTrigger = (handler: () => void) => {
-      shutdown = handler;
-    };
+    const { ready, shutdown } = waitUntilBound(options);
     const donePromise = runDashboard(options);
-    await sleep(50);
+    // Race against donePromise too: if runDashboard rejects or resolves
+    // before ever calling registerShutdownTrigger, this fails fast with the
+    // real error instead of hanging until vitest's own timeout.
+    await Promise.race([ready, donePromise]);
     expect(options.stderrLines.some((line) => line.startsWith("Lohra dashboard:"))).toBe(true);
-    shutdown?.();
+    shutdown();
     const code = await donePromise;
     expect(code).toBe(0);
   });
@@ -151,12 +180,9 @@ describe("runDashboard: --host refuses to combine with --insecure off loopback (
 describe("runDashboard: --host changes the actual bind address (issue #4 AC)", () => {
   it("binds ::1 when given, and the printed banner reflects it", async () => {
     const options = baseOptions({ argv: ["--provider", "anthropic", "--host", "::1"] });
-    let shutdown: (() => void) | undefined;
-    options.registerShutdownTrigger = (handler: () => void) => {
-      shutdown = handler;
-    };
+    const { ready, shutdown } = waitUntilBound(options);
     const donePromise = runDashboard(options);
-    await sleep(50);
+    await Promise.race([ready, donePromise]);
     const boundLine = options.stderrLines.find((line) => line.startsWith("Lohra dashboard:"));
     expect(boundLine).toMatch(/^Lohra dashboard: http:\/\/\[::1\]:\d+\n$/);
     const port = Number(boundLine?.match(/:(\d+)\n$/)?.[1]);
@@ -171,22 +197,19 @@ describe("runDashboard: --host changes the actual bind address (issue #4 AC)", (
       socket.once("error", reject);
     });
 
-    shutdown?.();
+    shutdown();
     const code = await donePromise;
     expect(code).toBe(0);
   });
 
   it("without --host, the default stays 127.0.0.1", async () => {
     const options = baseOptions();
-    let shutdown: (() => void) | undefined;
-    options.registerShutdownTrigger = (handler: () => void) => {
-      shutdown = handler;
-    };
+    const { ready, shutdown } = waitUntilBound(options);
     const donePromise = runDashboard(options);
-    await sleep(50);
+    await Promise.race([ready, donePromise]);
     const boundLine = options.stderrLines.find((line) => line.startsWith("Lohra dashboard:"));
     expect(boundLine).toMatch(/^Lohra dashboard: http:\/\/127\.0\.0\.1:\d+\n$/);
-    shutdown?.();
+    shutdown();
     await donePromise;
   });
 });
@@ -194,14 +217,11 @@ describe("runDashboard: --host changes the actual bind address (issue #4 AC)", (
 describe("runDashboard: --no-open is accepted as a documented no-op (issue #4 AC)", () => {
   it("boots successfully with --no-open present, exactly as without it", async () => {
     const options = baseOptions({ argv: ["--provider", "anthropic", "--no-open"] });
-    let shutdown: (() => void) | undefined;
-    options.registerShutdownTrigger = (handler: () => void) => {
-      shutdown = handler;
-    };
+    const { ready, shutdown } = waitUntilBound(options);
     const donePromise = runDashboard(options);
-    await sleep(50);
+    await Promise.race([ready, donePromise]);
     expect(options.stderrLines.some((line) => line.startsWith("Lohra dashboard:"))).toBe(true);
-    shutdown?.();
+    shutdown();
     const code = await donePromise;
     expect(code).toBe(0);
   });
@@ -221,14 +241,11 @@ describe("runDashboard: --host=<v> and --port=<p> (equals form) and prefix abbre
     const options = baseOptions({
       argv: ["--provider", "anthropic", "--insecure", "--host=203.0.113.5"],
     });
-    let shutdown: (() => void) | undefined;
-    options.registerShutdownTrigger = (handler: () => void) => {
-      shutdown = handler;
-    };
-    const donePromise = runDashboard(options);
-    await sleep(50);
-    shutdown?.();
-    const code = await donePromise;
+    // The --insecure/non-loopback refusal returns synchronously, before any
+    // await or socket (dashboard.ts's own `runDashboard`, first check in the
+    // body) -- no registerShutdownTrigger/sleep race to wait out here, same
+    // as the two equivalent space-form tests above this file's #222 block.
+    const code = await runDashboard(options);
     expect(code).toBe(2);
     const stderr = options.stderrLines.join("");
     expect(stderr).toContain("usage: lohra dashboard");
@@ -239,44 +256,47 @@ describe("runDashboard: --host=<v> and --port=<p> (equals form) and prefix abbre
     const options = baseOptions({
       argv: ["--provider", "anthropic", "--insecure", "--ho", "203.0.113.5"],
     });
-    let shutdown: (() => void) | undefined;
-    options.registerShutdownTrigger = (handler: () => void) => {
-      shutdown = handler;
-    };
-    const donePromise = runDashboard(options);
-    await sleep(50);
-    shutdown?.();
-    const code = await donePromise;
+    const code = await runDashboard(options);
     expect(code).toBe(2);
     expect(options.stderrLines.join("")).toContain("--host 203.0.113.5");
   });
 
-  it("--port=<p> (equals form) binds the requested port, mirroring --port <p>", async () => {
-    const probe: Server = createServer();
-    const freePort = await new Promise<number>((resolvePromise) => {
-      probe.listen(0, "127.0.0.1", () => {
-        const address = probe.address();
+  it("--port=<p> (equals form) reaches the real bind attempt, mirroring --port <p>", async () => {
+    // Issue #302 named this line as a network-state risk point during the
+    // flaky-test characterization: the previous version found a free port
+    // by listening on 0, reading the assigned port, and closing that probe
+    // -- then reused the bare number for `--port=<p>`, a listen/close/reuse
+    // TOCTOU window where another process could grab the same port first.
+    // Kept the probe listening instead: passing its own already-bound port
+    // straight into `--port=<p>` still proves the equals-form value reaches
+    // `runDashboard`'s real bind (an EADDRINUSE refusal only happens if it
+    // does), with no window where the port could be free-then-taken. The
+    // refusal path returns before any await past the print (dashboard.ts),
+    // so this needs no sleep/ready wait either -- `runDashboard` only
+    // resolves once the outcome is settled.
+    const occupying: Server = createServer();
+    const occupiedPort = await new Promise<number>((resolvePromise, reject) => {
+      occupying.once("error", reject);
+      occupying.listen(0, "127.0.0.1", () => {
+        const address = occupying.address();
         resolvePromise(typeof address === "object" && address !== null ? address.port : 0);
       });
     });
+
+    const options = baseOptions({
+      argv: ["--provider", "anthropic", `--port=${String(occupiedPort)}`],
+    });
+    delete (options as { port?: number }).port;
+    const code = await runDashboard(options);
+    expect(code).toBe(3);
+    expect(options.stderrLines[0]).toBe(
+      `Lohra dashboard: http://127.0.0.1:${String(occupiedPort)}\n`,
+    );
+
     await new Promise<void>((resolvePromise) =>
-      probe.close(() => {
+      occupying.close(() => {
         resolvePromise();
       }),
     );
-
-    const options = baseOptions({
-      argv: ["--provider", "anthropic", `--port=${String(freePort)}`],
-    });
-    delete (options as { port?: number }).port;
-    let shutdown: (() => void) | undefined;
-    options.registerShutdownTrigger = (handler: () => void) => {
-      shutdown = handler;
-    };
-    const donePromise = runDashboard(options);
-    await sleep(50);
-    expect(options.stderrLines[0]).toBe(`Lohra dashboard: http://127.0.0.1:${String(freePort)}\n`);
-    shutdown?.();
-    await donePromise;
   });
 });
