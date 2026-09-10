@@ -1231,8 +1231,7 @@ export class WorkflowService {
     const entries: Record<string, unknown>[] = [];
     for (const record of this.runs.values()) {
       const progress = record.engine.progress();
-      // A settled run reports what it PUBLISHED — a stretch that lost ownership
-      // published an error envelope; `list` must say so, not the engine's own outcome.
+      // Reports what it PUBLISHED, not the engine's outcome (lost ownership -> error envelope).
       const publishedStatus =
         record.published !== null && typeof record.published.status === "string"
           ? record.published.status
@@ -1331,7 +1330,8 @@ export class WorkflowService {
     // Ownerless cancel (run known only from its line): UNLEASED rides in the write's statement.
     const view = this.durableOf(runId);
     if (view === null) return Object.freeze({ error: `unknown workflow run '${runId}'` });
-    // BUSY rides in the write's own statement (requireUnleased): no read-before-write window.
+    // The BUSY decision rides in the write's own statement (requireUnleased):
+    // no read-before-write window in which an owner could acquire.
     const written = store.repository.putRunState(runId, {
       name: view.name,
       owner: view.owner,
