@@ -7,18 +7,29 @@
 // `tests/provenance-check.test.ts` e `tests/media-normalization.test.ts`,
 // apontados como "novos" pelo revisor da PR #306 com caracterização fraca.
 //
-// A caracterização real (corpo da PR) não confirmou a causa especulada
+// A caracterização real (corpo da PR #309) não confirmou a causa especulada
 // (git temporário + `spawnSync`): `provenance-check.test.ts` ficou 5/5 limpo
-// sob carga; `media-normalization.test.ts` capturou, direto no log de um dos
-// dois `npm test` de fundo, `Error: Test timed out in 5000ms` no teste
-// "covers legal encoded and decoded 20 MiB boundaries" — trabalho síncrono
-// de verdade (múltiplas conversões base64 de ~20 MiB) que passou de 5s sob
-// contenção de CPU, sem nenhum `spawnSync`/`git` envolvido nesse arquivo.
-// Corrigidos: timeout de teste explícito nesse `it()` (20 MiB, mesmo padrão
-// já usado no arquivo para o caso de 1 MiB) e `timeout` explícito no
-// `spawnSync` de `provenance-check.test.ts` (mais o timeout de teste
-// correspondente nos quatro `it()` que o chamam), como proteção mínima
-// justificada mesmo sem falha reproduzida nesse arquivo.
+// sob carga (ganhou proteção preventiva mesmo assim, já que seu `spawnSync`
+// não tinha timeout algum); `media-normalization.test.ts` capturou, direto
+// no log dos dois `npm test` de fundo, duas falhas reais em rodadas
+// diferentes, nenhuma envolvendo `spawnSync`/`git`:
+//   1. `Error: Test timed out in 5000ms` (5119ms observados) em "covers
+//      legal encoded and decoded 20 MiB boundaries" — trabalho síncrono de
+//      verdade (quatro conversões/validações base64 de ~20 MiB) que passou
+//      de 5s sob contenção de CPU. Corrigido com timeout de teste explícito
+//      (30s) nesse `it()` — o trabalho é genuíno, sem atalho mais barato.
+//   2. `Error: Test timed out in 15000ms` (16626ms observados, mesmo já com
+//      um timeout inflado desde antes desta issue) em "absorbs a
+//      trusted-root alias and accepts the measured large oracle fixture"
+//      (~1 MiB) — mesmo antipadrão já corrigido em
+//      `tests/media-persistence.test.ts` (issue #128): `expect(...).toEqual(bytes)`
+//      paga o comparador profundo elemento a elemento do vitest num Buffer
+//      grande. Corrigido trocando por `Buffer.prototype.equals` (memcmp
+//      nativo, O(n)), que remove a causa raiz em vez de só esconder atrás
+//      de um timeout maior — o timeout explícito desse teste voltou ao
+//      default do vitest depois da correção.
+// `provenance-check.test.ts` ganhou `timeout` explícito no `spawnSync` da
+// CLI e o timeout de teste correspondente nos quatro `it()` que o chamam.
 import type { Declaracao } from "../scripts/prova/tipos.js";
 
 export default {

@@ -9,6 +9,7 @@ import { WebSocket } from "ws";
 import { parseCommand } from "../../src/cli/arg-validation.js";
 import { DASHBOARD_SPEC } from "../../src/cli/arg-spec.js";
 import { runDashboard } from "../../src/commands/dashboard.js";
+import { waitUntilBound } from "../helpers/wait-until-bound.js";
 
 const roots: string[] = [];
 
@@ -41,26 +42,6 @@ function baseOptions(overrides: BaseOptionsOverrides = {}) {
     ...rest,
     stderrLines,
   };
-}
-
-// Issue #302 (see tests/dashboard-host.test.ts:90-117 for the full context):
-// `await sleep(50)` races the real boot work whenever the event loop is busy
-// with other test files (two full `npm test` runs at once). This file had
-// five leftover instances of the same wall-clock wait (issue #307).
-// `registerShutdownTrigger` only fires once `runDashboard` has actually
-// bound the port, so it doubles as a ready signal.
-function waitUntilBound(options: { registerShutdownTrigger?: (handler: () => void) => void }): {
-  readonly ready: Promise<void>;
-  readonly shutdown: () => void;
-} {
-  let handler: (() => void) | undefined;
-  const ready = new Promise<void>((resolveReady) => {
-    options.registerShutdownTrigger = (trigger: () => void) => {
-      handler = trigger;
-      resolveReady();
-    };
-  });
-  return { ready, shutdown: () => handler?.() };
 }
 
 describe("runDashboard: no provider configured (assertion 56)", () => {

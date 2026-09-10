@@ -266,9 +266,12 @@ describe("remote vision validation", () => {
   // base64 de ~20 MiB cada), não por nenhum estado compartilhado. É
   // trabalho síncrono, então o relógio do vitest só pode expirar depois que
   // o corpo devolve o controle ao event loop — sob contenção de CPU o
-  // próprio trabalho ultrapassa o default de 5s. Mesmo padrão já usado
-  // acima (linha ~124, 15_000ms para 1 MiB): o timeout do TESTE sobe para
-  // casar com o tamanho real do trabalho, a fixture não encolhe.
+  // próprio trabalho ultrapassa o default de 5s: o timeout do TESTE sobe
+  // para casar com o tamanho real do trabalho, a fixture não encolhe. O
+  // caso de 1 MiB acima ("absorbs a trusted-root alias and accepts the
+  // measured large oracle fixture") tomou o caminho oposto: não tinha
+  // trabalho genuíno atrás do timeout inflado, só um `expect(...).toEqual`
+  // caro — trocado por `Buffer.prototype.equals`, o timeout explícito saiu.
   it("covers legal encoded and decoded 20 MiB boundaries", () => {
     const lower = "A".repeat(MAX_DATA_URI_BASE64_CHARS - 4);
     expect(validateRemoteImage(`data:image/png;base64,${lower}`).length).toBe(
