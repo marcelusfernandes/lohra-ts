@@ -10,6 +10,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  Budget,
   WorkflowEngine,
   validateSpec,
   type ChildCollectOptions,
@@ -80,17 +81,17 @@ describe("parallel.retries (#242)", () => {
     expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(0);
   });
 
-  it("exhausts the cap, returns null positionally, and leaves a fault", async () => {
-    const runtime = new ScriptedRuntime([[dead], [dead]]);
+  it("exhausts the cap on one branch: null POSITIONALLY beside a live sibling, a fault per dead attempt", async () => {
+    const runtime = new ScriptedRuntime([[ok("A")], [dead], [dead]]);
     const spec = parsed({
       meta: { name: "retry-exhausted" },
-      nodes: [{ id: "p", type: "parallel", branches: ["a"], retries: 1 }],
+      nodes: [{ id: "p", type: "parallel", branches: ["a", "b"], retries: 1 }],
     });
     const result = await new WorkflowEngine({ runtime }).run(spec);
-    expect(result.outputs.p).toBeNull();
-    expect(runtime.spawned).toHaveLength(2);
+    expect(result.outputs.p).toEqual(["A", null]);
+    expect(runtime.spawned).toHaveLength(3);
     expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(1);
-    expect(result.faults.some((fault) => fault.includes("leaf failed"))).toBe(true);
+    expect(result.faults.filter((fault) => fault.includes("leaf failed"))).toHaveLength(2);
   });
 
   it("defaults to zero retries when 'retries' is absent", async () => {
@@ -103,5 +104,35 @@ describe("parallel.retries (#242)", () => {
     expect(result.outputs.p).toBeNull();
     expect(runtime.spawned).toHaveLength(1);
     expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(0);
+  });
+
+  it("a retry passes through the budget stop-line, same as any other leaf spawn", async () => {
+    const expensive: ChildResult = {
+      status: "failed",
+      output: "boom",
+      usage: {
+        inputTokens: 1000,
+        outputTokens: 1001,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningTokens: 0,
+      },
+    };
+    const runtime = new ScriptedRuntime([[expensive]]);
+    const spec = parsed({
+      meta: { name: "retry-budget" },
+      nodes: [{ id: "p", type: "parallel", branches: ["a"], retries: 1 }],
+    });
+    // 2000 (the default per-leaf estimate) clears the pre-flight
+    // `gateFanout(resolved.length)` in `runParallel` for one branch; the
+    // first attempt's real 2001-token cost then exhausts the budget.
+    const budget = new Budget({ tokenBudget: 2000 });
+    const result = await new WorkflowEngine({ runtime, budget }).run(spec);
+    // The retry's own `collectLeaf` call hits `gateTokens()` before
+    // spawning a second leaf — same stop-line every other leaf (agent,
+    // pipeline stage) already goes through.
+    expect(runtime.spawned).toHaveLength(1);
+    expect(result.status).toBe("paused");
+    expect(result.pauseReason).toBe("token_budget_exhausted");
   });
 });
