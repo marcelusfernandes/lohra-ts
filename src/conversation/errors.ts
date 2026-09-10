@@ -89,6 +89,52 @@ export class MessageInjectionError extends ConversationError {
     });
   }
 }
+
+// Compaction preflight (issue #252, epic #230). The latch: a turn attempts
+// compaction at most once. `afterCompaction === true` means the estimate
+// still exceeds the window right after a compaction just ran (compaction
+// was futile) OR a second overflow was detected later in the same turn
+// (the latch refuses to compact again) -- either way, no second attempt.
+export class ContextWindowExceededError extends ConversationError {
+  override readonly name = "ContextWindowExceededError";
+  public constructor(
+    sessionId: string,
+    public readonly estimatedTokens: number,
+    public readonly windowTokens: number,
+    public readonly windowSource: string,
+    public readonly afterCompaction: boolean,
+  ) {
+    super(
+      "CONTEXT_WINDOW_EXCEEDED",
+      `estimated ${String(estimatedTokens)} tokens ${afterCompaction ? "still " : ""}exceed the ${String(windowTokens)}-token window (source: ${windowSource})`,
+      { sessionId },
+    );
+  }
+}
+
+export class CompressionLockBusyError extends ConversationError {
+  override readonly name = "CompressionLockBusyError";
+  public constructor(sessionId: string) {
+    super("COMPRESSION_LOCK_BUSY", "compression lock held by another process", { sessionId });
+  }
+}
+
+export class CompactionFailedError extends ConversationError {
+  override readonly name = "CompactionFailedError";
+  public constructor(sessionId: string, cause: unknown) {
+    super("COMPACTION_FAILED", "summarizing the history for compaction failed", {
+      sessionId,
+      cause,
+    });
+  }
+}
+
+export class CompactionUnsupportedError extends ConversationError {
+  override readonly name = "CompactionUnsupportedError";
+  public constructor(sessionId: string) {
+    super("COMPACTION_UNSUPPORTED", "this repository does not support compaction", { sessionId });
+  }
+}
 import type { CostEstimate } from "../pricing/index.js";
 import type { Usage } from "../transports/index.js";
 import type { SessionSummary } from "./types.js";

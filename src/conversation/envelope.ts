@@ -1,7 +1,26 @@
 import { jsonFloat, stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
 import type { CostEstimate } from "../pricing/index.js";
 import type { ToolCall, Usage } from "../transports/index.js";
-import type { ConversationTurnResult, ExecutedToolCall, SessionSummary } from "./types.js";
+import type {
+  CompactionSummary,
+  ConversationTurnResult,
+  ExecutedToolCall,
+  SessionSummary,
+} from "./types.js";
+
+// Issue #252: only present when a compaction actually ran this turn --
+// absent (never a `null` key) otherwise, so every existing envelope
+// fixture that never passes `compaction` keeps its exact key count
+// (tests/conversation-envelope.test.ts's Object.keys(...).toHaveLength
+// assertions stay unchanged).
+function compaction(value: CompactionSummary): Readonly<Record<string, unknown>> {
+  return {
+    summarized_count: value.summarizedCount,
+    kept_count: value.keptCount,
+    estimate_before: value.estimateBefore,
+    estimate_after: value.estimateAfter,
+  };
+}
 
 function usage(value: Usage | null): Readonly<Record<string, unknown>> | null {
   if (value === null) return null;
@@ -89,6 +108,9 @@ export function successEnvelope(result: ConversationTurnResult): string {
     api_calls: result.apiCalls,
   };
   if (result.sessionSummary !== null) value.session = session(result.sessionSummary);
+  if (result.compaction !== undefined && result.compaction !== null) {
+    value.compaction = compaction(result.compaction);
+  }
   return `${stringifyJsonPreservingNumbers(value, 2)}\n`;
 }
 

@@ -94,6 +94,9 @@ avisar nada, porque não configurar não é um erro).
 
 - Ninguém ainda chama `resolveContextWindow` do caminho de chat/aux — a
   fiação com o estimador de tokens (#251) e a compactação (#252) são issues
-  separadas.
+  separadas. **Atualização (#252):** a fiação aconteceu —
+  `resolveTurnContextWindow` (`src/conversation/compaction.ts`) chama esta
+  função a cada turno, dentro do preflight de compactação. Detalhes em
+  `docs/context-compaction.md`.
 - Modelos futuros sem fonte verificável (lista acima) não entram na tabela
   agora; entram quando houver uma fonte real a citar.

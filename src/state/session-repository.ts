@@ -1,7 +1,13 @@
 import type Database from "better-sqlite3";
 
+import { LockRepository } from "./locks.js";
 import { stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
 import { nullableInteger, safeInteger } from "./values.js";
+
+export interface CompactionResult {
+  readonly summarizedCount: number;
+  readonly keptCount: number;
+}
 
 export interface CreateSessionInput {
   readonly id: string;
@@ -106,11 +112,19 @@ function reconstructMessage(row: Row): Readonly<Record<string, unknown>> {
 }
 
 export class SessionRepository {
+  // Owns its own LockRepository over the SAME connection (issue #252): both
+  // read/write the same `database` handle passed in below, so every caller
+  // that already constructs a SessionRepository (chat.ts, the gateway) gets
+  // compaction locking for free, with zero changes at those call sites.
+  private readonly locks: LockRepository;
+
   public constructor(
     private readonly database: Database.Database,
     private readonly now: () => number = () => Date.now() / 1000,
     private readonly ftsEnabled = true,
-  ) {}
+  ) {
+    this.locks = new LockRepository(database);
+  }
 
   public createSession(input: CreateSessionInput): void {
     this.database
@@ -179,6 +193,114 @@ export class SessionRepository {
         jsonText(message.providerData),
       );
     return safeInteger(result.lastInsertRowid, "messages.id");
+  }
+
+  // Raw copy of a previously-stored row into a fresh row (issue #252,
+  // compaction's "reinsert the kept tail" step) -- unlike insertMessage,
+  // takes already-serialized column values verbatim instead of running them
+  // back through jsonText()/meaningful(), so a value that survived one
+  // round-trip through the DB can never come out reformatted or truncated
+  // by a second one.
+  private insertMessageRow(sessionId: string, row: Row): number {
+    const result = this.database
+      .prepare(
+        `INSERT INTO messages
+           (session_id, role, content, tool_call_id, tool_calls, tool_name,
+            timestamp, finish_reason, reasoning, reasoning_details, active)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      )
+      .run(
+        sessionId,
+        row.role,
+        row.content,
+        row.tool_call_id,
+        row.tool_calls,
+        row.tool_name,
+        row.timestamp,
+        row.finish_reason,
+        row.reasoning,
+        row.reasoning_details,
+      );
+    return safeInteger(result.lastInsertRowid, "messages.id");
+  }
+
+  public acquireCompressionLock(
+    sessionId: string,
+    holder: string,
+    now: number,
+    ttlSeconds: number,
+  ): boolean {
+    return this.locks.acquireCompressionLock(sessionId, holder, now, ttlSeconds);
+  }
+
+  public releaseCompressionLock(sessionId: string, holder: string): boolean {
+    return this.locks.releaseCompressionLock(sessionId, holder);
+  }
+
+  /**
+   * Atomically rewrites `sessionId`'s active history (issue #252): every
+   * currently-active row is deactivated, `input.summary` is inserted as a
+   * fresh assistant message, and the trailing `input.keepTailCount` rows
+   * (the ones the caller decided must survive untouched) are reinserted
+   * verbatim right after it. Reinserting the kept tail — instead of leaving
+   * its original rows alone — is deliberate: `loadMessages` orders by `id`,
+   * and the summary's own row always gets a HIGHER id than rows already in
+   * the table, so leaving the kept tail's original (lower) ids in place
+   * would put the summary AFTER the tail it's supposed to precede.
+   * Refuses to write (throws) unless `holder` currently holds the
+   * compression lock for `sessionId` — invariant 4, checked inside the same
+   * transaction as the write, never as a separate racy step. Returns
+   * `{ summarizedCount: 0, keptCount }` without writing anything when there
+   * is nothing left to fold (the caller's futile-compaction signal).
+   */
+  public compactHistory(
+    sessionId: string,
+    holder: string,
+    now: number,
+    input: { readonly keepTailCount: number; readonly summary: string },
+  ): CompactionResult {
+    const transaction = this.database.transaction(() => {
+      const heldLock = this.database
+        .prepare(
+          "SELECT 1 FROM compression_locks WHERE session_id = ? AND holder = ? AND expires_at > ?",
+        )
+        .get(sessionId, holder, now);
+      if (heldLock === undefined) {
+        throw new Error(`COMPRESSION_LOCK_NOT_HELD:${sessionId}`);
+      }
+      const rows = this.database
+        .prepare("SELECT * FROM messages WHERE session_id = ? AND active = 1 ORDER BY id")
+        .all(sessionId) as Row[];
+      const keepCount = Math.min(Math.max(0, Math.trunc(input.keepTailCount)), rows.length);
+      const summarizedCount = rows.length - keepCount;
+      if (summarizedCount <= 0) return { summarizedCount: 0, keptCount: rows.length };
+
+      const toKeep = rows.slice(summarizedCount);
+      const placeholders = rows.map(() => "?").join(",");
+      this.database
+        .prepare(`UPDATE messages SET active = 0 WHERE id IN (${placeholders})`)
+        .run(...rows.map((row) => row.id as SqliteInteger));
+
+      // Shape matches src/conversation/compaction.ts's buildSummaryMessage:
+      // role "assistant" (never "system" -- see that module's comment on
+      // why), finish_reason "stop" like any other completed reply.
+      this.insertMessage(sessionId, {
+        role: "assistant",
+        content: input.summary,
+        createdAt: now,
+        finishReason: "stop",
+      });
+      let inserted = 1;
+      for (const row of toKeep) {
+        this.insertMessageRow(sessionId, row);
+        inserted += 1;
+      }
+      this.database
+        .prepare("UPDATE sessions SET message_count = message_count + ? WHERE id = ?")
+        .run(inserted, sessionId);
+      return { summarizedCount, keptCount: toKeep.length };
+    });
+    return transaction();
   }
 
   public appendMessage(sessionId: string, message: MessageInput): number {

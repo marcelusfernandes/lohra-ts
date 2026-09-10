@@ -72,6 +72,66 @@ describe("conversation envelopes", () => {
     });
   });
 
+  // Issue #252: compaction is opt-in on the wire -- only present when it
+  // actually ran (asserted here), absent (never a null key) otherwise (the
+  // test above never passes it, and its key count stays fixed).
+  it("includes compaction details only when a compaction ran this turn", () => {
+    const withoutCompaction = parseObject(
+      successEnvelope({
+        sessionId: "s",
+        model: "m",
+        temperature: null,
+        input: "hi",
+        response: {
+          content: "ok",
+          finishReason: "stop",
+          toolCalls: [],
+          reasoning: null,
+          usage,
+          providerData: null,
+        },
+        usageTotal: usage,
+        cost: zeroCost,
+        apiCalls: 1,
+        sessionSummary: summary,
+      }),
+    );
+    expect(withoutCompaction).not.toHaveProperty("compaction");
+
+    const withCompaction = parseObject(
+      successEnvelope({
+        sessionId: "s",
+        model: "m",
+        temperature: null,
+        input: "hi",
+        response: {
+          content: "ok",
+          finishReason: "stop",
+          toolCalls: [],
+          reasoning: null,
+          usage,
+          providerData: null,
+        },
+        usageTotal: usage,
+        cost: zeroCost,
+        apiCalls: 1,
+        sessionSummary: summary,
+        compaction: {
+          summarizedCount: 6,
+          keptCount: 4,
+          estimateBefore: 5000,
+          estimateAfter: 800,
+        },
+      }),
+    );
+    expect(withCompaction.compaction).toEqual({
+      summarized_count: 6,
+      kept_count: 4,
+      estimate_before: 5000,
+      estimate_after: 800,
+    });
+  });
+
   it("omits session for pre-response errors and includes it for incomplete responses", () => {
     const early = parseObject(
       errorEnvelope({ sessionId: "s", model: "m", prompt: "x", error: "failure", apiCalls: 1 }),

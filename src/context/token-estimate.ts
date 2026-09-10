@@ -153,3 +153,38 @@ export function estimateTokens(
   const tokens = messages.reduce((sum: number, message) => sum + messageTokens(message), 0);
   return Object.freeze({ tokens, method: "heuristic" as const });
 }
+
+/** Minimum tokens attributed to a single tool definition even when its
+ * serialized form comes back implausibly small (reviewer note on PR #267:
+ * malformed/circular content falls back to `String(value)`, which is never
+ * a conservative estimate) -- a real function schema is always bigger than
+ * this in practice, so the floor only ever bites the malformed case. */
+const MIN_TOOL_DEFINITION_TOKENS = 20;
+
+export interface RequestTokenEstimateInput {
+  readonly system: string;
+  readonly messages: readonly Readonly<Record<string, unknown>>[];
+  readonly tools: readonly Readonly<Record<string, unknown>>[];
+}
+
+/**
+ * Estimates the full input a provider call actually bills for (issue #252):
+ * `estimateTokens` alone only sees `messages` -- the system prompt and tool
+ * definitions are passed to the provider outside that array and are never
+ * counted otherwise (reviewer note on PR #267/#270). Pure, no I/O.
+ */
+export function estimateRequestTokens(input: RequestTokenEstimateInput): TokenEstimate {
+  const messagesTokens = estimateTokens(input.messages).tokens;
+  const systemTokens = charsToTokens(input.system.length, TEXT_CHARS_PER_TOKEN);
+  const toolsTokens =
+    input.tools.length === 0
+      ? 0
+      : Math.max(
+          charsToTokens(jsonLength(input.tools), JSON_CHARS_PER_TOKEN),
+          input.tools.length * MIN_TOOL_DEFINITION_TOKENS,
+        );
+  return Object.freeze({
+    tokens: messagesTokens + systemTokens + toolsTokens,
+    method: "heuristic" as const,
+  });
+}

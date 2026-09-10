@@ -98,6 +98,9 @@ produção.
 ## Fora do escopo desta issue
 
 - Resolver a janela efetiva do modelo (sub-issue anterior do épico).
-- Decidir _quando_ compactar a partir da estimativa (próxima sub-issue:
-  compactação preflight sob trava, com latch anti-fútil).
+- Decidir _quando_ compactar a partir da estimativa (issue #252: compactação
+  preflight sob trava, com latch anti-fútil — `docs/context-compaction.md`).
+  `estimateRequestTokens` (a mesma issue, mesmo arquivo) é quem soma o
+  prompt de sistema e as definições de tool a esta estimativa antes de
+  comparar contra a janela — esta função aqui nunca vê os dois.
 - Qualquer chamada de rede ou tokenizer externo.

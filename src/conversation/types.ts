@@ -62,6 +62,15 @@ export interface SessionSummary {
   readonly estimatedCostUsd: number | null;
 }
 
+/** Result of a compaction rewrite (issue #252): how many of the active
+ * messages read before the rewrite were folded into the summary versus
+ * kept verbatim. `summarizedCount === 0` means there was nothing left to
+ * fold (the futile case a caller must treat as "compaction can't help"). */
+export interface CompactionResult {
+  readonly summarizedCount: number;
+  readonly keptCount: number;
+}
+
 export interface ConversationRepository {
   createSession(input: {
     readonly id: string;
@@ -74,6 +83,24 @@ export interface ConversationRepository {
   commitTurn(commit: TurnCommit): void;
   commitUsage(commit: UsageCommit): void;
   summary(id: string): SessionSummary | null;
+  // Optional compaction capability (issue #252). Absent on a repository
+  // means compaction is impossible for it -- ConversationRuntime treats
+  // that as a fault, never as "never needed" (invariant 2: fail loud, not
+  // silent). All three are present together or not at all in practice
+  // (SqliteConversationRepository implements every one of them).
+  acquireCompressionLock?(
+    sessionId: string,
+    holder: string,
+    now: number,
+    ttlSeconds: number,
+  ): boolean;
+  releaseCompressionLock?(sessionId: string, holder: string): boolean;
+  compactHistory?(
+    sessionId: string,
+    holder: string,
+    now: number,
+    input: { readonly keepTailCount: number; readonly summary: string },
+  ): CompactionResult;
 }
 
 export type ConversationRuntimeEvent = Readonly<{
@@ -82,10 +109,30 @@ export type ConversationRuntimeEvent = Readonly<{
     | "model.request.started"
     | "model.request.completed"
     | "turn.completed"
-    | "turn.failed";
+    | "turn.failed"
+    | "session.compacted";
   sessionId: string;
   code?: string;
+  /** Present only on `session.compacted` events (issue #252). */
+  compaction?: Readonly<{
+    summarizedCount: number;
+    keptCount: number;
+    estimateBefore: number;
+    estimateAfter: number;
+  }>;
 }>;
+
+/** Surfaced on `ConversationTurnResult` (and, through it, `successEnvelope`)
+ * only when a compaction actually ran during the turn; `null`/absent
+ * otherwise -- existing envelope fixtures that never pass this field keep
+ * their exact key count (issue #252, keeps `tests/conversation-envelope.test.ts`
+ * unchanged). */
+export interface CompactionSummary {
+  readonly summarizedCount: number;
+  readonly keptCount: number;
+  readonly estimateBefore: number;
+  readonly estimateAfter: number;
+}
 
 export interface ConversationTurnResult {
   readonly sessionId: string;
@@ -98,6 +145,7 @@ export interface ConversationTurnResult {
   readonly cost: CostEstimate | null;
   readonly apiCalls: number;
   readonly sessionSummary: SessionSummary | null;
+  readonly compaction?: CompactionSummary | null;
 }
 
 export interface ExecutedToolCall {

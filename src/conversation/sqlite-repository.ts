@@ -2,6 +2,7 @@ import type { CostEstimate } from "../pricing/index.js";
 import { SessionRepository } from "../state/index.js";
 import type { Usage } from "../transports/index.js";
 import type {
+  CompactionResult,
   ConversationRepository,
   SessionSummary,
   StoredSession,
@@ -105,5 +106,31 @@ export class SqliteConversationRepository implements ConversationRepository {
 
   public summary(id: string): SessionSummary | null {
     return this.sessions.usage(id);
+  }
+
+  // Issue #252: delegates straight to SessionRepository, which owns its own
+  // LockRepository over the same connection -- every caller that already
+  // constructs a SqliteConversationRepository gets compaction for free,
+  // with no change at those call sites.
+  public acquireCompressionLock(
+    sessionId: string,
+    holder: string,
+    now: number,
+    ttlSeconds: number,
+  ): boolean {
+    return this.sessions.acquireCompressionLock(sessionId, holder, now, ttlSeconds);
+  }
+
+  public releaseCompressionLock(sessionId: string, holder: string): boolean {
+    return this.sessions.releaseCompressionLock(sessionId, holder);
+  }
+
+  public compactHistory(
+    sessionId: string,
+    holder: string,
+    now: number,
+    input: { readonly keepTailCount: number; readonly summary: string },
+  ): CompactionResult {
+    return this.sessions.compactHistory(sessionId, holder, now, input);
   }
 }
