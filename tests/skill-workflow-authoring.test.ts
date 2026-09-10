@@ -15,10 +15,13 @@ const skill = readFileSync(skillPath, "utf8");
 // deriva futura.
 describe("workflow-authoring skill: doutrina de schema", () => {
   it("descreve `schema` como objeto inline OU nome de `schemas`, igual a resolveInlineSchema", () => {
-    const sentence = skill.match(/Give a leaf `schema`[\s\S]*?matters downstream\*\*\./u)?.[0];
+    const sentence = skill.match(/Give a leaf `schema`[\s\S]*?matters\s+downstream\*\*\./u)?.[0];
     expect(sentence, "SKILL.md deve conter a frase sobre `schema`/`schema_ref`").toBeDefined();
 
-    const text = sentence ?? "";
+    // Prosa em markdown pode quebrar linha em qualquer ponto (não é prensada
+    // byte a byte, seguindo o precedente de tests/t22-docs.test.ts); colapsa
+    // o whitespace antes de comparar contra as frases-chave.
+    const text = (sentence ?? "").replace(/\s+/gu, " ");
 
     // Continua descrevendo o objeto inline — não é para sumir, é para
     // ganhar a alternativa.
