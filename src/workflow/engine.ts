@@ -447,7 +447,7 @@ export class WorkflowEngine {
     if (cached !== CACHE_MISS) return cached;
     const retries = clampInteger(node.fields.retries, 1, MAX_NODE_RETRIES);
     for (let attempt = 0; attempt <= retries; attempt += 1) {
-      if (attempt > 0) this.result.leafRespawns += 1;
+      if (attempt > 0 && this.result.pauseFault === null) this.result.leafRespawns += 1;
       const rendered = renderValue(prompt);
       const attemptPrompt = attempt === 0 ? rendered : `${rendered}\n\n${EMPTY_OUTPUT_CORRECTION}`;
       const leaf = await this.collectLeaf(node, attemptPrompt, schema, {
