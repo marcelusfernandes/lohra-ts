@@ -146,6 +146,33 @@ describe("session repository", () => {
     close();
   });
 
+  // Issue #287 (revisor round 2 of PR #284): a compaction deactivates the
+  // original rows (active = 0) but the FTS index -- messages_fts_ai,
+  // src/state/schema.ts -- never removes them, so searchMessages used to
+  // keep returning the now-dead rows right alongside the still-active
+  // summary/kept-tail ones. Both original rows here match "duplicate
+  // marker"; the compaction summary text deliberately does NOT contain that
+  // phrase, so any hit at all after compacting can only be one of the
+  // deactivated rows leaking back through.
+  it("excludes deactivated rows from search after a compaction", () => {
+    const { repo, close } = repository();
+    repo.createSession({ id: "s-search", startedAt: 1 });
+    repo.recordTurn("s-search", {
+      user: { role: "user", content: "duplicate marker alpha" },
+      assistant: { role: "assistant", content: "duplicate marker beta", finishReason: "stop" },
+    });
+    expect(repo.searchMessages("duplicate marker")).toHaveLength(2);
+
+    expect(repo.acquireCompressionLock("s-search", "h", 100, 30)).toBe(true);
+    repo.compactHistory("s-search", "h", 100, {
+      keepTailCount: 0,
+      summary: "recap without the phrase",
+    });
+
+    expect(repo.searchMessages("duplicate marker")).toEqual([]);
+    close();
+  });
+
   it("fails closed when an INTEGER cannot be represented safely", () => {
     const { repo, database, close } = repository();
     repo.createSession({ id: "unsafe", startedAt: 1 });

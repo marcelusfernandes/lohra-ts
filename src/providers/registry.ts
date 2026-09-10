@@ -315,3 +315,23 @@ export const CODEX_PROVIDER: ProviderProfile = Object.freeze({
   defaultHeaders: Object.freeze({}),
   fixedTemperature: null,
 });
+
+/**
+ * `getProviderProfile` on its own, plus `CODEX_PROVIDER` resolved by its
+ * real name ("openai-codex") -- `CODEX_PROVIDER` is deliberately absent
+ * from `aliases`/`registry` above (the subscription route isn't selectable
+ * via `--provider`), so a bare `getProviderProfile("openai-codex")` returns
+ * null on purpose. For a caller that already resolved the ACTUAL provider a
+ * turn is running under (`ConversationRuntime.runTurn`'s own `provider`
+ * argument, never a raw `--provider`/gateway-deps string a user typed),
+ * that null is a bug, not a feature: `src/conversation/compaction.ts`'s
+ * window resolution and the gateway ws's `maxTokens` resolution
+ * (`src/gateway/ws/connection.ts`) both need the Codex profile here (issue
+ * #287). `"codex"` itself still resolves to null -- the alias was
+ * deliberately never added, so `--provider codex` keeps failing exactly
+ * like before.
+ */
+export function getProviderProfileIncludingCodex(name: string): ProviderProfile | null {
+  if (name === CODEX_PROVIDER.name) return CODEX_PROVIDER;
+  return getProviderProfile(name);
+}
