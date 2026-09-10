@@ -82,10 +82,11 @@ export function steerSessionTool(core: OrchestrationCore, args: ToolArguments): 
 }
 
 /** Maps the registry's CollectResult (camelCase) to the wire's snake_case
- * envelope, in the contract's exact 13-key order (assertion 14). retry_after
- * is positive seconds, else null (L15/assertion 39) — a Python float, so a
- * whole-number value like 1 renders as "1.0", never the bare "1" a plain JS
- * number would produce. */
+ * envelope, in the contract's 14-key order (assertion 14, repinned for
+ * #232 — ADR 0003 licenses the format; usage_uncertain is new, added last).
+ * retry_after is positive seconds, else null (L15/assertion 39) — a Python
+ * float, so a whole-number value like 1 renders as "1.0", never the bare
+ * "1" a plain JS number would produce. */
 function collectEnvelope(result: CollectResult): string {
   return toolResult(undefined, {
     status: result.status,
@@ -100,6 +101,7 @@ function collectEnvelope(result: CollectResult): string {
     forced_fallback: result.forcedFallback,
     error_kind: result.errorKind,
     retry_after: result.retryAfter === null ? null : jsonFloat(result.retryAfter),
+    usage_uncertain: result.usageUncertain === true,
   });
 }
 
@@ -132,6 +134,7 @@ export async function collectSessionTool(
     forced_fallback: false,
     error_kind: null,
     retry_after: null,
+    usage_uncertain: false,
   });
 }
 

@@ -92,6 +92,12 @@ function zeroResult(
     forcedFallback: false,
     errorKind,
     retryAfter,
+    // #232: a turn with no usage object never measured anything — not a
+    // turn that genuinely spent zero tokens. Covers "sem usage" (the
+    // complete path when the provider reported none), "a folha morreu
+    // antes de reportar" (ConversationCancelledError, always null) and
+    // MaxIterationsError's own null case.
+    usageUncertain: usage === null,
   };
 }
 
@@ -230,6 +236,9 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
         forcedFallback: false,
         errorKind: null,
         retryAfter: null,
+        // "erro de resolução" (#232) — provider/model never resolved, so no
+        // call was ever attempted; the zero counters above are unmeasured.
+        usageUncertain: true,
       };
     }
   };

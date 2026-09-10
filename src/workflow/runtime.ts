@@ -36,6 +36,10 @@ export interface ChildResult {
   readonly retryAfter?: number | null;
   readonly errorKind?: string | null;
   readonly toolCalls?: readonly Readonly<Record<string, unknown>>[];
+  /** True when `usage` above is a stand-in for a measurement that never
+   * happened (child died before reporting, provider/resolution error) —
+   * never true for a turn that genuinely spent zero tokens (#232). */
+  readonly usageUncertain?: boolean;
 }
 
 export type Awaitable<T> = T | Promise<T>;

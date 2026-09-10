@@ -1,7 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   Budget,
+  ESTIMATED_TOKENS_PER_LEAF,
   FanoutRejected,
   MemoryWorkflowCache,
   WorkflowEngine,
@@ -12,6 +17,8 @@ import {
   type ChildRuntime,
   type ChildSpawnRequest,
 } from "../src/workflow/index.js";
+import { WorkflowService } from "../src/workflow/service.js";
+import { LockRepository, openStateDatabase, WorkflowRepository } from "../src/state/index.js";
 
 class FakeRuntime implements ChildRuntime {
   readonly spawned: ChildSpawnRequest[] = [];
@@ -106,6 +113,41 @@ describe("workflow budget and cache", () => {
     expect(budget.affordableLeaves()).toBe(99);
   });
 
+  it("excludes an uncertain leaf's charge from the measured average (#232)", () => {
+    const budget = new Budget({ tokenBudget: 10_000 });
+    budget.chargeTokens(200, 0);
+    budget.chargeTokens(0, 0, true);
+    // Only the first, measured charge counts: 200/1, not 200/2 — an
+    // unmeasured leaf must never pull the average (and affordableLeaves)
+    // down, even though its own tokens are zero either way.
+    expect(budget.estimatedLeafCost).toBe(200);
+  });
+
+  it("never counts an uncertain leaf toward the average even with real, nonzero tokens (#232)", () => {
+    // The previous test's uncertain leaf carried zero tokens, so
+    // `(input > 0 || output > 0)` alone already excluded it — this pins the
+    // `usageUncertain` guard itself, with a leaf that WOULD have qualified
+    // on token count alone.
+    const budget = new Budget({ tokenBudget: 10_000 });
+    budget.chargeTokens(500, 0, true);
+    expect(budget.estimatedLeafCost).toBe(ESTIMATED_TOKENS_PER_LEAF);
+    // (10_000 - 500 already spent) / default 2000 — never / 500, which
+    // would happen if the uncertain leaf's tokens leaked into the average.
+    expect(budget.affordableLeaves()).toBe(4);
+  });
+
+  it("debits an uncertain leaf's tokens into tokensSpent but keeps them out of the average's numerator (#232)", () => {
+    // Invariant 3 (budget never unbounded): the uncertain leaf's tokens
+    // still count against the run's own ceiling — only the AVERAGE, used to
+    // project affordableLeaves, must never be inflated by a leaf that was
+    // never actually measured.
+    const budget = new Budget({ tokenBudget: 10_000 });
+    budget.chargeTokens(200, 0); // measured
+    budget.chargeTokens(500, 0, true); // uncertain, real tokens
+    expect(budget.tokensSpent).toBe(700);
+    expect(budget.estimatedLeafCost).toBe(200); // 200/1, never (200+500)/1 or /2
+  });
+
   it("rejects fanout before charging lifetime", () => {
     const budget = new Budget({ maxFanout: 2, lifetime: 3 });
     expect(() => {
@@ -159,6 +201,27 @@ describe("workflow engine", () => {
     expect(result.tokensOut).toBe(10);
     expect(result.cacheReadTokens).toBe(14);
     expect(result.reasoningTokens).toBe(26);
+  });
+
+  it("counts a leaf that never reported usage as uncertain, not as a zero-cost measurement (#232)", async () => {
+    const runtime = new FakeRuntime([
+      [complete("measured", 100, 100)],
+      [{ status: "complete", output: "unsure", usageUncertain: true }],
+    ]);
+    const spec = parsed({
+      meta: { name: "uncertain" },
+      nodes: [
+        { id: "measured", type: "agent", prompt: "a" },
+        { id: "unsure", type: "agent", prompt: "b" },
+      ],
+    });
+    const budget = new Budget();
+    const result = await new WorkflowEngine({ runtime, budget }).run(spec);
+    expect(result.usageUncertainLeaves).toBe(1);
+    expect(result.tokensIn).toBe(100);
+    // If the uncertain leaf's zero counted toward the average, this would be
+    // (100+100+0+0)/2 = 100 instead of (100+100)/1 = 200.
+    expect(budget.estimatedLeafCost).toBe(200);
   });
 
   it("isolates an engine fault and keeps the next node running", async () => {
@@ -430,5 +493,54 @@ describe("workflow engine", () => {
     expect(runtime.spawned).toHaveLength(0);
     expect(result.outputs.approve).toBe(false);
     expect(result.status).toBe("complete");
+  });
+});
+
+describe("workflow service status", () => {
+  const roots: string[] = [];
+  afterEach(() => {
+    while (roots.length > 0) rmSync(roots.pop() as string, { recursive: true, force: true });
+  });
+
+  // #232: a leaf that never measured usage surfaces on workflow_status as
+  // usage_uncertain_leaves — not silently folded into a zero-cost average.
+  it("exposes usage_uncertain_leaves on workflow_status when a leaf never measured usage", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-workflow-service-uncertain-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    const repository = new WorkflowRepository(connection.database);
+    const locks = new LockRepository(connection.database);
+    const ownership = { fence: 0 as number, holder: "test", now: 1000 };
+    const uncertainRuntime: ChildRuntime = {
+      spawn: (): string => "leaf-1",
+      collect: (): ChildResult => ({
+        status: "complete",
+        output: { answer: "ok" },
+        usageUncertain: true,
+      }),
+      steer: (): void => undefined,
+      cancel: (): void => undefined,
+      installLeafSandbox: () => ({ dispose: (): void => undefined }),
+    };
+    const service = new WorkflowService({
+      runtime: uncertainRuntime,
+      store: {
+        repository,
+        locks,
+        holder: "test",
+        ttl: 900,
+        ownershipOf: () => ownership,
+        database: connection.database,
+      },
+    });
+    const started = service.start(
+      { meta: { name: "uncertain-status" }, nodes: [{ id: "a", type: "agent", prompt: "x" }] },
+      {},
+    );
+    if ("error" in started) throw new Error(started.error);
+    const final = (await service.status(started.run_id, true)) as Record<string, unknown>;
+    expect(final.status).toBe("complete");
+    expect(final.usage_uncertain_leaves).toBe(1);
+    connection.close();
   });
 });

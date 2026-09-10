@@ -139,9 +139,8 @@ export class WorkflowEngine {
   noteQuotaExhausted(nodeId: string, retryAfter: number | null): void {
     if (this.control.paused || this.control.cancelled) return;
     const hint = retryAfter !== null ? `${String(Math.trunc(retryAfter))}s` : "none";
-    // The payload rides INTO pause: assigning it first and calling pause after
-    // overwrote it with null, so the provider's retry_after never reached the
-    // service and every quota pause silently fell back to the backoff curve.
+    // The payload rides INTO pause (assign then call, not the reverse) — the
+    // reverse order overwrote it with null and every quota pause silently fell back to the backoff curve.
     this.pause(
       "quota_exhausted",
       `quota exhausted at '${nodeId}' (retry_after=${hint})`,
@@ -307,8 +306,7 @@ export class WorkflowEngine {
             this.causal(options.role, options.cellId, { ...options, attempt: attempt + 1 }),
           );
           collected = await this.runtime.collect(id, { wait: true, timeoutSeconds: timeout });
-          // collect() reports the sub-session's aggregate usage; only the terminal
-          // snapshot is charged, so steer turns are never double-counted.
+          // collect() reports the aggregate usage; only the terminal snapshot is charged.
           total = resultUsage(collected);
           if (collected.status !== "complete") {
             this.account(node.id, id, { ...collected, usage: total });
@@ -333,6 +331,7 @@ export class WorkflowEngine {
     if (this.accounted.has(id)) return;
     this.accounted.add(id);
     const next = resultUsage(collected);
+    const uncertain = collected.usageUncertain === true;
     this.leafCosts.set(id, next);
     addUsageToResult(
       this.result,
@@ -340,8 +339,9 @@ export class WorkflowEngine {
       next,
       collected.provider ?? null,
       collected.model ?? null,
+      uncertain,
     );
-    this.budget.chargeTokens(next.inputTokens, next.outputTokens);
+    this.budget.chargeTokens(next.inputTokens, next.outputTokens, uncertain);
   }
 
   private schemaOf(

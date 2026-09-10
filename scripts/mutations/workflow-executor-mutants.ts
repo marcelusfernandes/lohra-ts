@@ -47,8 +47,8 @@ export const executorMutants: readonly ExecutorMutant[] = [
     edits: [
       {
         file: engine,
-        before: "this.budget.chargeTokens(next.inputTokens, next.outputTokens);",
-        after: "this.budget.chargeTokens(0, next.outputTokens);",
+        before: "this.budget.chargeTokens(next.inputTokens, next.outputTokens, uncertain);",
+        after: "this.budget.chargeTokens(0, next.outputTokens, uncertain);",
       },
     ],
   },
@@ -58,9 +58,9 @@ export const executorMutants: readonly ExecutorMutant[] = [
     edits: [
       {
         file: engine,
-        before: "this.budget.chargeTokens(next.inputTokens, next.outputTokens);",
+        before: "this.budget.chargeTokens(next.inputTokens, next.outputTokens, uncertain);",
         after:
-          "this.budget.chargeTokens(next.inputTokens, next.outputTokens + next.reasoningTokens);",
+          "this.budget.chargeTokens(next.inputTokens, next.outputTokens + next.reasoningTokens, uncertain);",
       },
     ],
   },
