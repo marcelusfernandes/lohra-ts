@@ -52,6 +52,19 @@ function write403(socket: Socket): void {
   socket.end("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
 }
 
+// Issue #287 (revisor round 2 of PR #284): `getProviderProfile(deps.provider)`
+// below used to return null for the Codex subscription route (`dashboard.ts`
+// passed the string literal "codex", which is not a registered provider
+// alias, and even the real name "openai-codex" isn't registered either --
+// CODEX_PROVIDER is deliberately absent from the registry, see its own
+// comment in src/providers/registry.ts) -- `maxTokens` silently fell back to
+// `null`/0 and the compaction preflight's reserved-output budget for the
+// Codex route was wrong. Exported (not just inlined) so this resolution can
+// be pinned directly, without a full subscription-mode dashboard harness.
+export function resolveGatewayMaxTokens(_provider: string): number | null {
+  throw new Error("not implemented: resolveGatewayMaxTokens");
+}
+
 export interface GatewayAuthConfig {
   readonly authRequired: boolean;
   readonly expectedToken: string;
