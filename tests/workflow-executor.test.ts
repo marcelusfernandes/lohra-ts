@@ -544,3 +544,26 @@ describe("workflow service status", () => {
     connection.close();
   });
 });
+
+describe("budget average after a seeded resume (#285)", () => {
+  // #280/#232 changed estimatedLeafCost from tokensSpent/measuredLeaves to
+  // (measuredInput + measuredOutput)/measuredLeaves. tokensSpent (the hard
+  // ceiling) includes the constructor seed (tokensIn/tokensOut — how the
+  // durable resume in service.ts replays prior spend); the average's own
+  // accumulators do not. This pins that as the intended behavior: the
+  // seed counts toward the ceiling, never toward the per-leaf average.
+  it("keeps the seeded spend out of the average but in the ceiling once a leaf is measured", () => {
+    const budget = new Budget({ tokenBudget: 10_000, tokensIn: 5000, tokensOut: 1000 });
+    budget.chargeTokens(200, 0);
+    expect(budget.estimatedLeafCost).toBe(200);
+    expect(budget.tokensSpent).toBe(6200);
+    expect(budget.affordableLeaves()).toBe(Math.trunc((10_000 - 6200) / 200));
+  });
+
+  it("falls back to the default estimate when no leaf was measured, even with a seed", () => {
+    const budget = new Budget({ tokenBudget: 10_000, tokensIn: 5000, tokensOut: 1000 });
+    expect(budget.estimatedLeafCost).toBe(ESTIMATED_TOKENS_PER_LEAF);
+    expect(budget.tokensSpent).toBe(6000);
+    expect(budget.affordableLeaves()).toBe(Math.trunc((10_000 - 6000) / ESTIMATED_TOKENS_PER_LEAF));
+  });
+});
