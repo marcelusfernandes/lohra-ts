@@ -464,7 +464,7 @@ export const BUILTIN_DEFINITIONS = [
           checkpoint_answers: {
             type: "object",
             description:
-              "Answers for the 'checkpoint' nodes a previous stretch of this run paused on, keyed by node id: {\"approve\": \"yes\"}. Each answer becomes that node's output and is cached, so the same question is never asked twice. A checkpoint inside a nested 'workflow' node reports a SCOPED node_id ('<sub_node_id>.<checkpoint_id>', e.g. \"sub.confirm\") — use that exact key, never the bare checkpoint id, or the answer is refused as ambiguous instead of silently going to the wrong node.",
+              "Answers for the 'checkpoint' nodes a previous stretch of this run paused on, keyed by node id: {\"approve\": \"yes\"}. Each answer becomes that node's output and is cached, so the same question is never asked twice. A checkpoint inside a nested 'workflow' node reports a SCOPED node_id ('<sub_node_id>.<checkpoint_id>', e.g. \"sub.confirm\") — the bare checkpoint id is still accepted as long as it doesn't collide with a checkpoint at the root; once it does, only that exact scoped key is accepted and the bare id is refused as ambiguous instead of silently going to the wrong node.",
           },
           token_budget: {
             type: "integer",
