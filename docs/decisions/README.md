@@ -15,8 +15,11 @@ humano de aceitar ADR — OK explícito do owner; silêncio não é aprovação
 Uma nota de decisão é para **doutrina e comportamento**: um fato sobre como o
 runtime já se comporta (medido, não hipotético), a decisão de manter esse
 comportamento como contrato em vez de tratá-lo como bug, e a orientação que
-disso decorre para quem escreve spec ou código. Não tem gate humano — é
-classe `docs` (ADR 0004, item 7): CI basta, sem revisor.
+disso decorre para quem escreve spec ou código. Não aciona o gate humano de
+aceitar ADR; uma PR que só toca a nota é classe `docs` (ADR 0004, item 7):
+CI basta, sem revisor — uma PR que também toca código (como a #271, que
+adicionou o teste de contenção junto da nota) segue a classe do resto do
+diff.
 
 Na dúvida: se a nota descreve uma escolha de estrutura ou uma promessa nova
 para quem usa o sistema, é ADR. Se descreve o que o código já faz e formaliza
@@ -33,11 +36,11 @@ Seções, modeladas na nota existente
   avaliação que motivou a nota).
 - `## Contexto` — o comportamento medido, com `arquivo:linha` real.
 - `## Decisão` — o que fica valendo, em bullets verificáveis.
-- Uma seção de justificativa (por exemplo `### Por que isso não viola os
-invariantes do runtime`) quando a decisão precisa se explicar contra algo
-  já documentado.
-- `## Doutrina para autores de spec` — quando a decisão muda como alguém
-  deveria desenhar algo, não só o que o runtime faz. Omitida quando não há
+- Uma seção de justificativa (por exemplo um `### Por que …` contra um
+  invariante já documentado) quando a decisão precisa se explicar contra
+  algo existente.
+- `## Doutrina para autores de spec` — quando a decisão orienta como se
+  desenha algo, não só o que o runtime faz. Omitida quando não há
   orientação prática a dar.
 - `## Evidência` — o teste ou a execução que prende o comportamento descrito.
 
