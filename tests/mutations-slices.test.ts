@@ -475,7 +475,7 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 187 (soma dos dez catálogos importados)", () => {
+  it("a contagem total de mutantes é 188 (soma dos dez catálogos importados)", () => {
     // Os dez catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
@@ -486,7 +486,7 @@ describe("scripts/mutations/slices.json", () => {
     // mesmo arquivo (atrás da mesma guarda de entry-point), porque o `Files`
     // da issue só autoriza um script novo.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 187;
+    const TOTAL_MUTANTS = 188;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -508,14 +508,14 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/media-catalog-persistence.ts": 13,
       "scripts/mutations/self-update-mutants.ts": 8,
       "scripts/mutations/workflow-executor-mutants.ts": 44,
-      "scripts/mutations/context-window.ts": 14,
+      "scripts/mutations/context-window.ts": 15,
     };
     expect(new Set(Object.keys(CONTAGEM_POR_CATALOGO))).toEqual(new Set(CATALOGOS.keys()));
     for (const [path, mutants] of CATALOGOS) {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(187);
+    expect(somaTabela).toBe(188);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {

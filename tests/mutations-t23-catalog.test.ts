@@ -8,7 +8,7 @@
 // (`tests/mutations-runner-guard.test.ts` prova a guarda para os seis
 // runners; este módulo segue o mesmo padrão). Este teste confere, num
 // `npm test` normal e rápido, o que só apareceria em `npm run mutations:t23`
-// (bem mais lento): os 14 mutantes existem, cada um mira um teste que já
+// (bem mais lento): os 15 mutantes existem, cada um mira um teste que já
 // existe de fato, e cada `before` ocorre exatamente uma vez, ao pé da letra,
 // no arquivo de `src/` mirado — mesmo padrão de
 // `tests/mutations-t20-catalog.test.ts` (#152).
@@ -30,8 +30,8 @@ function sourceOf(relativePath: string): string {
 }
 
 describe("mutations:t23 catalog (compaction, estimator, context window)", () => {
-  it("declara exatamente 14 mutantes", () => {
-    expect(contextWindowMutants).toHaveLength(14);
+  it("declara exatamente 15 mutantes", () => {
+    expect(contextWindowMutants).toHaveLength(15);
   });
 
   it("cada id de mutante é único", () => {
@@ -39,7 +39,7 @@ describe("mutations:t23 catalog (compaction, estimator, context window)", () => 
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("mira apenas compaction.ts (×4), runtime.ts (×2), token-estimate.ts (×2), context-window.ts (×2), windows-cache.ts (×2), session-repository.ts (×2)", () => {
+  it("mira apenas compaction.ts (×4), runtime.ts (×2), token-estimate.ts (×2), context-window.ts (×2), windows-cache.ts (×2), session-repository.ts (×3)", () => {
     // Conta MUTANTES por arquivo (não edits) -- cada mutante deste catálogo
     // tem um único edit, então as duas contagens coincidem aqui, mas o
     // padrão (Set por mutante) segue mutations-t20-catalog.test.ts, que
@@ -56,7 +56,7 @@ describe("mutations:t23 catalog (compaction, estimator, context window)", () => 
       "src/context/token-estimate.ts": 2,
       "src/providers/context-window.ts": 2,
       "src/catalog/windows-cache.ts": 2,
-      "src/state/session-repository.ts": 2,
+      "src/state/session-repository.ts": 3,
     });
   });
 

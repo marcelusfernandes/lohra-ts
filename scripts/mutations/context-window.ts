@@ -9,7 +9,7 @@
 //
 // Um único arquivo (não runner + catálogo separados como `web-tools.ts` /
 // `web-tools-mutants.ts`) porque o `Files` da issue #293 só autoriza
-// `scripts/mutations/context-window.ts` como script novo — os 14 mutantes
+// `scripts/mutations/context-window.ts` como script novo — os 15 mutantes
 // são dado puro (`export const contextWindowMutants`, descoberto por
 // conteúdo por `tests/mutations-slices.test.ts`) e o runner abaixo mora no
 // mesmo módulo, atrás da mesma guarda de entry-point que os outros seis
@@ -285,6 +285,23 @@ export const contextWindowMutants: readonly Mutant[] = [
           '        .prepare("UPDATE sessions SET message_count = message_count - ? + ? WHERE id = ?")\n        .run(rows.length, inserted, sessionId);\n',
         after:
           '        .prepare("UPDATE sessions SET message_count = message_count + ? WHERE id = ?")\n        .run(inserted, sessionId);\n',
+      },
+    ],
+  },
+  {
+    id: "o-load-messages-active-filter-dropped",
+    category: "session-repository",
+    mechanism:
+      "loadMessages passa a listar mensagens desativadas por padrão (activeOnly = false) — depois de uma compactação, o histórico visto pelo chamador volta a incluir as linhas que compactHistory desativou",
+    focus: {
+      file: stateLocksTests,
+      test: "rewrites the active history: summary first, kept tail after it, in order",
+    },
+    edits: [
+      {
+        file: sessionRepository,
+        before: "    activeOnly = true,\n",
+        after: "    activeOnly = false,\n",
       },
     ],
   },

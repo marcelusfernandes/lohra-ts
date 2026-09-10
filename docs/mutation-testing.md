@@ -6,7 +6,7 @@ sobre o que deveria existir.
 
 ## Mecânica A — harness comum (`scripts/mutations/harness.ts`)
 
-Cinco das seis fatias (todas menos `media`) seguem a mesma mecânica, extraída
+Seis das sete fatias (todas menos `media`) seguem a mesma mecânica, extraída
 para `harness.ts` (issue #148):
 
 1. `prepareArchiveSandbox(root, candidateSha)` — recusa se
@@ -63,8 +63,13 @@ consistência de estilo) usa a mesma guarda de entry-point,
 chamador com `process.argv[1]`, então `main()` só dispara quando o processo
 foi invocado com aquele arquivo como script de entrada (`tsx
 scripts/mutations/<runner>.ts`) — nunca quando um teste ou outro runner
-importa o módulo. `tests/mutations-runner-guard.test.ts` prova isso para os
-seis.
+importa o módulo. `tests/mutations-runner-guard.test.ts` prova isso por
+subprocesso isolado para esses seis; `context-window.ts` (issue #293) usa a
+mesma guarda mas não está na allowlist `RUNNERS` desse teste (arquivo fora
+do `Files` da issue) — `tests/mutations-t23-catalog.test.ts` e
+`tests/mutations-slices.test.ts`, que importam `contextWindowMutants`
+estaticamente a cada `npm test`, são a prova indireta de que a guarda
+funciona (um `main()` disparado no import travaria a suíte inteira).
 
 ## Mecânica B — `media.ts`, em processo
 
@@ -141,20 +146,20 @@ inteira de `focalTests` em vez de um foco por mutante):
 | `media`               | `mutations:t21`         |       20 | `media-catalog-persistence.ts` (13) + `media-catalog-other.ts` (7)                                                    |
 | `web-tools`           | `mutations:t20`         |        9 | `web-tools-mutants.ts`                                                                                                |
 | `self-update`         | `mutations:self-update` |        8 | `self-update-mutants.ts`                                                                                              |
-| `context-window`      | `mutations:t23`         |       14 | `context-window.ts`                                                                                                   |
+| `context-window`      | `mutations:t23`         |       15 | `context-window.ts`                                                                                                   |
 
-Total: 187. Os 12 mutantes de `workflow-durability-guard.ts` são
+Total: 188. Os 12 mutantes de `workflow-durability-guard.ts` são
 combinatórios: três conjuntos do guard de escrita possuída (`fence`,
 `holder`, `lease-validity`) × quatro categorias (`state`, `cache`,
 `node-cost`, `spend`) — um mutante por combinação, cada um escorado só no
 teste focal da sua categoria, mais os 2 mutantes do INSERT combinado
 cache+custo (`combined-cell-guard-removed`,
 `combined-cost-escapes-refusal`). `tests/mutations-slices.test.ts` importa os
-dez catálogos de dado puro estaticamente e prova essa soma (187) a cada
+dez catálogos de dado puro estaticamente e prova essa soma (188) a cada
 corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
 
 `context-window.ts` (issue #293) é o único catálogo que também é o próprio
-runner — o `Files` da issue só autoriza um script novo, então os 14 mutantes
+runner — o `Files` da issue só autoriza um script novo, então os 15 mutantes
 (`export const contextWindowMutants`) e a corrida (`main()`, atrás da mesma
 guarda de entry-point dos outros seis) moram no mesmo arquivo, ao contrário
 de `web-tools.ts`/`web-tools-mutants.ts` (runner e catálogo separados). Cobre
@@ -166,8 +171,8 @@ compactável (`src/conversation/runtime.ts`), o estimador de tokens ignorando
 precedência de `resolveContextWindow` e o separador do prefixo
 (`src/providers/context-window.ts`), a fusão por modelo e o teto na leitura
 do cache de janelas (`src/catalog/windows-cache.ts`) e o `compactHistory` da
-issue #252 — lock checado na transação, `message_count` líquido
-(`src/state/session-repository.ts`).
+issue #252 — lock checado na transação, `message_count` líquido e o filtro
+`active` de `loadMessages` (`src/state/session-repository.ts`).
 
 ## `npm run mutations:all` — o agregador (issue #155)
 
@@ -245,13 +250,13 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
    `true`.
 5. `npm test` roda `tests/mutations-slices.test.ts`, que reprova de duas
    formas se a contagem não for atualizada junto com o mutante novo: a soma
-   total (187 + o novo) contra os dez catálogos importados, e a linha do
+   total (188 + o novo) contra os dez catálogos importados, e a linha do
    catálogo tocado em `CONTAGEM_POR_CATALOGO`
    (`tests/mutations-slices.test.ts:491-517`), uma tabela pinada por número
    literal — não derivada de `CATALOGOS.get(path).length` — para que uma
    troca compensatória entre dois catálogos (um ganha o que o outro perde,
    soma preservada) não passe despercebida. As duas contagens (o literal
-   `187` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
+   `188` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
    atualização junto com o mutante novo.
 
 ## Como adicionar uma fatia
@@ -301,8 +306,8 @@ contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
 14, `workflow-durability-named` 41, `orchestration` 5,
 `workflow-audit-live-mutants` 32, `web-tools-mutants` 9,
 `media-catalog-other` 7, `media-catalog-persistence` 13,
-`self-update-mutants` 8, `workflow-executor-mutants` 44, `context-window` 14,
-soma 187) e a soma de 187 contra os dez catálogos importados; e que todo
+`self-update-mutants` 8, `workflow-executor-mutants` 44, `context-window` 15,
+soma 188) e a soma de 188 contra os dez catálogos importados; e que todo
 diretório de primeiro nível de `src/` está coberto por algum `srcGlobs` ou
 está em `SEM_FATIA` com um motivo não vazio — nunca os dois, nunca nenhum
 dos dois.
