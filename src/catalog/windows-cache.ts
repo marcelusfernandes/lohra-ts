@@ -34,6 +34,9 @@ export const CACHE_SCHEMA_VERSION = 1;
 
 export type WindowsCache = Readonly<Record<string, Readonly<Record<string, number | null>>>>;
 
+/** `{}` congelado, reutilizado em todo retorno vazio para nunca alocar um objeto mutável à toa. */
+const EMPTY_WINDOWS_CACHE: WindowsCache = Object.freeze({});
+
 /** Forma persistida em disco — autodescritiva, num arquivo próprio (nunca `model_windows.json`, do lohra Python). */
 export interface WindowsCacheEnvelope {
   readonly schema_version: number;
@@ -114,19 +117,24 @@ export function loadWindowsCache(
 ): LoadedWindowsCache {
   let raw: string;
   try {
+    // O teto de bytes é checado por `stat`, antes de `read` — nunca lemos o
+    // arquivo inteiro para descobrir que ele é grande demais (#264). ENOENT
+    // de qualquer um dos dois cai no mesmo caminho silencioso de "sem cache
+    // ainda".
+    const stats = io.stat(path);
+    if (stats.size > MAX_CACHE_BYTES) {
+      return {
+        data: EMPTY_WINDOWS_CACHE,
+        warning: `context window cache at ${path} exceeds ${String(MAX_CACHE_BYTES)} bytes — refetching`,
+      };
+    }
     raw = io.read(path);
   } catch (error) {
-    if (isEnoent(error)) return { data: {}, warning: null };
+    if (isEnoent(error)) return { data: EMPTY_WINDOWS_CACHE, warning: null };
     const detail = error instanceof Error ? error.message : String(error);
     return {
-      data: {},
+      data: EMPTY_WINDOWS_CACHE,
       warning: `context window cache unreadable at ${path} (${detail}) — refetching`,
-    };
-  }
-  if (Buffer.byteLength(raw, "utf8") > MAX_CACHE_BYTES) {
-    return {
-      data: {},
-      warning: `context window cache at ${path} exceeds ${String(MAX_CACHE_BYTES)} bytes — refetching`,
     };
   }
   let parsed: unknown;
@@ -134,17 +142,17 @@ export function loadWindowsCache(
     parsed = JSON.parse(raw);
   } catch {
     return {
-      data: {},
+      data: EMPTY_WINDOWS_CACHE,
       warning: `context window cache at ${path} is not valid JSON — refetching`,
     };
   }
   if (!isValidEnvelope(parsed)) {
     return {
-      data: {},
+      data: EMPTY_WINDOWS_CACHE,
       warning: `context window cache at ${path} is not in the expected schema_version ${String(CACHE_SCHEMA_VERSION)} envelope (unknown format — maybe a stray file, not this runtime's cache) — refetching`,
     };
   }
-  return { data: parsed.providers, warning: null };
+  return capAndFreezeAllProviders(parsed.providers);
 }
 
 function capProvider(
@@ -155,11 +163,60 @@ function capProvider(
 }
 
 /**
+ * Capa cada provedor a `MAX_MODELS_PER_PROVIDER` e congela o resultado
+ * (outer e cada provedor) — usado na leitura, para o mesmo teto que a
+ * escrita já aplicava valer nos dois sentidos (#264): um provedor que ficou
+ * acima do teto por um arquivo escrito por outra versão, ou editado à mão,
+ * não fica preso acima do teto para sempre só porque nunca mais é
+ * re-escrito.
+ */
+function capAndFreezeAllProviders(providers: WindowsCache): LoadedWindowsCache {
+  const overCapped: string[] = [];
+  const result: Record<string, Readonly<Record<string, number | null>>> = {};
+  for (const [provider, windows] of Object.entries(providers)) {
+    if (Object.keys(windows).length > MAX_MODELS_PER_PROVIDER) overCapped.push(provider);
+    result[provider] = capProvider(windows);
+  }
+  const warning =
+    overCapped.length > 0
+      ? `context window cache provider(s) ${overCapped.join(", ")} exceed ${String(MAX_MODELS_PER_PROVIDER)} models — discarding the rest`
+      : null;
+  return { data: Object.freeze(result), warning };
+}
+
+/**
+ * Funde as janelas de um provedor por modelo: um valor novo `null` nunca
+ * apaga um número já conhecido (fica o número antigo); um valor novo número
+ * sempre vence, mesmo sobre um número antigo diferente. Modelos que só
+ * existem em `previous` (o provedor não respondeu por eles nesta busca)
+ * sobrevivem — a fusão nunca é um replace por provedor (#264). As chaves de
+ * `fresh` vêm primeiro no resultado, para que o teto de `capProvider`
+ * descarte modelos obsoletos antes dos que acabaram de ser vistos ao vivo.
+ */
+function mergeProviderWindows(
+  previous: Readonly<Record<string, number | null>> | undefined,
+  fresh: Readonly<Record<string, number | null>>,
+): Record<string, number | null> {
+  const previousWindows = previous ?? {};
+  const merged: Record<string, number | null> = {};
+  for (const [model, freshValue] of Object.entries(fresh)) {
+    const previousValue = previousWindows[model];
+    merged[model] = freshValue !== null ? freshValue : (previousValue ?? null);
+  }
+  for (const [model, previousValue] of Object.entries(previousWindows)) {
+    if (!(model in merged)) merged[model] = previousValue;
+  }
+  return merged;
+}
+
+/**
  * Funde `fresh` (janelas recém-buscadas, por provedor) sobre o que já
- * estava em `previous`, capa cada provedor a `MAX_MODELS_PER_PROVIDER` e
- * escreve atomicamente, dentro do envelope versionado, se o resultado
+ * estava em `previous` — por modelo dentro de cada provedor, não por
+ * provedor inteiro (#264) — capa cada provedor a `MAX_MODELS_PER_PROVIDER`
+ * e escreve atomicamente, dentro do envelope versionado, se o resultado
  * couber em `MAX_CACHE_BYTES`. Nunca lança: erro de escrita (disco cheio,
- * permissão) vira `warning`.
+ * permissão) vira `warning`, e `data` continua sendo `previous` — nada foi
+ * persistido, então nada mudou.
  */
 export function saveWindowsCache(
   path: string,
@@ -167,19 +224,16 @@ export function saveWindowsCache(
   fresh: WindowsCache,
   io: WindowsCacheIO = defaultWindowsCacheIO,
 ): LoadedWindowsCache {
-  // TODO(#264): funde por modelo (número novo sempre vence; null novo nunca
-  // apaga um número já conhecido). Por ora ainda substitui o provedor
-  // inteiro — mantém o vermelho do commit test(red) por comportamento, não
-  // por tipo.
   const merged: Record<string, Readonly<Record<string, number | null>>> = { ...previous };
   for (const [provider, windows] of Object.entries(fresh)) {
     if (Object.keys(windows).length === 0) continue;
-    merged[provider] = capProvider(windows);
+    merged[provider] = capProvider(mergeProviderWindows(previous[provider], windows));
   }
+  const frozenMerged: WindowsCache = Object.freeze(merged);
   const envelope: WindowsCacheEnvelope = {
     schema_version: CACHE_SCHEMA_VERSION,
     updated_at: io.now(),
-    providers: merged,
+    providers: frozenMerged,
   };
   const serialized = JSON.stringify(envelope);
   if (Buffer.byteLength(serialized, "utf8") > MAX_CACHE_BYTES) {
@@ -197,5 +251,5 @@ export function saveWindowsCache(
       warning: `could not write context window cache at ${path} (${detail})`,
     };
   }
-  return { data: merged, warning: null };
+  return { data: frozenMerged, warning: null };
 }
