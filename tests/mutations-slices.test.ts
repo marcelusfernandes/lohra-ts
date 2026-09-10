@@ -11,7 +11,7 @@
 //      dos RUNNERS que reexportam um `Mutants` agregado sem serem, eles
 //      mesmos, o catálogo — um catálogo novo, de qualquer nome, sem entrada
 //      em `slices.json` reprova aqui;
-//   3. os `catalog` do JSON batem, como conjunto, com os nove catálogos de
+//   3. os `catalog` do JSON batem, como conjunto, com os dez catálogos de
 //      dado puro importados abaixo — um `catalog` novo no JSON sem import
 //      correspondente aqui (ou vice-versa) reprova, o que impede o número
 //      da contagem de driftar silenciosamente do JSON;
@@ -21,7 +21,7 @@
 //      bateria inteira para cada mutante em vez de afunilar por `focus`)
 //      bate exatamente com a união dos `focus.file` dos mutantes do(s)
 //      catálogo(s) da fatia;
-//   6. a contagem total de mutantes é a soma exata dos catálogos — os nove
+//   6. a contagem total de mutantes é a soma exata dos catálogos — os dez
 //      arquivos de dado puro (issue #186: `workflow-executor-mutants.ts`
 //      entrou nessa lista, extraído do runner que antes embutia o
 //      catálogo) são importados de verdade (`import` estático, sem efeito
@@ -76,6 +76,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { combinedMutants, guardMutants } from "../scripts/mutations/workflow-durability-guard.js";
+import { contextWindowMutants } from "../scripts/mutations/context-window.js";
 import { otherMediaMutants } from "../scripts/mutations/media-catalog-other.js";
 import { persistenceMutants } from "../scripts/mutations/media-catalog-persistence.js";
 import { orchestrationMutants } from "../scripts/mutations/orchestration.js";
@@ -150,7 +151,7 @@ interface CatalogEntry {
   readonly edits: readonly { readonly file: string }[];
 }
 
-/** Os nove catálogos de dado puro, chave = caminho relativo à raiz do repo
+/** Os dez catálogos de dado puro, chave = caminho relativo à raiz do repo
  * igual ao que aparece em `slices.json#catalog` -- a checagem de item 3 do
  * cabeçalho acima compara as CHAVES deste mapa contra a união dos
  * `catalog` do JSON, então um `catalog` novo no JSON sem entrada aqui (ou
@@ -175,6 +176,7 @@ const CATALOGOS: ReadonlyMap<string, readonly CatalogEntry[]> = new Map<
   ["scripts/mutations/media-catalog-persistence.ts", asCatalog(persistenceMutants)],
   ["scripts/mutations/self-update-mutants.ts", asCatalog(selfUpdateMutants)],
   ["scripts/mutations/workflow-executor-mutants.ts", asCatalog(executorMutants)],
+  ["scripts/mutations/context-window.ts", asCatalog(contextWindowMutants)],
 ]);
 
 interface Slice {
@@ -229,10 +231,7 @@ function readSlices(): readonly Slice[] {
 const SEM_FATIA: ReadonlyMap<string, string> = new Map([
   ["agent", "sem catálogo de mutantes ainda"],
   ["auth", "sem catálogo de mutantes ainda"],
-  ["catalog", "sem catálogo de mutantes ainda"],
   ["config", "sem catálogo de mutantes ainda"],
-  ["context", "sem catálogo de mutantes ainda"],
-  ["conversation", "sem catálogo de mutantes ainda"],
   ["core", "sem catálogo de mutantes ainda"],
   ["cron", "sem catálogo de mutantes ainda"],
   ["doctor", "sem catálogo de mutantes ainda"],
@@ -240,7 +239,6 @@ const SEM_FATIA: ReadonlyMap<string, string> = new Map([
   ["memory", "sem catálogo de mutantes ainda"],
   ["onboarding", "sem catálogo de mutantes ainda"],
   ["pricing", "sem catálogo de mutantes ainda"],
-  ["providers", "sem catálogo de mutantes ainda"],
   ["serialization", "sem catálogo de mutantes ainda"],
   ["server", "sem catálogo de mutantes ainda"],
   ["skills", "sem catálogo de mutantes ainda"],
@@ -306,10 +304,11 @@ describe("scripts/mutations/slices.json", () => {
     expect(existsSync(slicesPath)).toBe(true);
   });
 
-  it("tem as seis fatias, cada uma com o schema esperado", () => {
+  it("tem as sete fatias, cada uma com o schema esperado", () => {
     const slices = readSlices();
     expect(slices.map((entry) => entry.slice).sort()).toEqual(
       [
+        "context-window",
         "media",
         "self-update",
         "web-tools",
@@ -476,15 +475,18 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 173 (soma dos nove catálogos importados)", () => {
-    // Os nove catálogos de dado puro, importados de verdade via CATALOGOS:
+  it("a contagem total de mutantes é 187 (soma dos dez catálogos importados)", () => {
+    // Os dez catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
-    // `probe`). `workflow-executor-mutants.ts` (issue #186) é o nono: antes
+    // `probe`). `workflow-executor-mutants.ts` (issue #186) foi o nono: antes
     // vivia dentro do runner (que chama `main()` incondicionalmente), então
     // a contagem era lida do texto fonte por regex em vez de importada.
+    // `context-window.ts` (issue #293) é o décimo: catálogo e runner no
+    // mesmo arquivo (atrás da mesma guarda de entry-point), porque o `Files`
+    // da issue só autoriza um script novo.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 173;
+    const TOTAL_MUTANTS = 187;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -506,13 +508,14 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/media-catalog-persistence.ts": 13,
       "scripts/mutations/self-update-mutants.ts": 8,
       "scripts/mutations/workflow-executor-mutants.ts": 44,
+      "scripts/mutations/context-window.ts": 14,
     };
     expect(new Set(Object.keys(CONTAGEM_POR_CATALOGO))).toEqual(new Set(CATALOGOS.keys()));
     for (const [path, mutants] of CATALOGOS) {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(173);
+    expect(somaTabela).toBe(187);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {
