@@ -359,6 +359,10 @@ describe("WorkflowService.shutdown()", () => {
         (message) => message.includes("shutdown timed out") && message.includes("1 run"),
       ),
     ).toBe(true);
+    // Issue #275: PR #289 dropped this half of the warning while sharing the
+    // settle-wait with cancel() — restored, self-contained (not a dangling
+    // pronoun off the first warning).
+    expect(warnings.some((message) => message.includes("heartbeat already stopped"))).toBe(true);
     runtime.release(); // let the still-in-flight leaf settle before the test ends
   });
 });
@@ -435,6 +439,29 @@ describe("WorkflowService.cancel() waits for quiescence (#233)", () => {
     runtime.release();
     const settledStatus = await service.status(started.run_id, true);
     expect(settledStatus).toMatchObject({ status: "cancelled" });
+  });
+
+  // Issue #275: cancel() used to answer 'cancelled' whenever cancelAndSettle
+  // settled in time, even for a run this call found ALREADY published under
+  // a different terminal status — the zero-width edge of the settle window,
+  // deterministic here because the ephemeral (storeless) path never deletes
+  // a settled record from `this.runs`.
+  it("cancel() on an already-settled run reports what it actually published, not a hardcoded 'cancelled'", async () => {
+    const service = new WorkflowService({
+      runtime: {
+        spawn: () => "leaf",
+        collect: () => ({ status: "complete", output: "ok" }),
+        steer: () => undefined,
+        cancel: () => undefined,
+      },
+      environment: { VITEST: "true" },
+      idSource: () => "cancel-already-settled",
+    });
+    const started = service.start(spec());
+    if ("error" in started) throw new Error(started.error);
+    await service.status(started.run_id, true); // wait for it to settle to "complete"
+    const out = await service.cancel(started.run_id);
+    expect(out).toMatchObject({ run_id: started.run_id, status: "complete" });
   });
 });
 

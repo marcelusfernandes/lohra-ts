@@ -8,6 +8,7 @@ import { productionWarningSink } from "../workflow/ownership-store.js";
 import {
   CHECKPOINT_HINT,
   CHECKPOINT_PAUSE,
+  STALE_HINT,
   TOKEN_BUDGET_HINT,
   TOKEN_BUDGET_PAUSE,
   USER_PAUSE,
@@ -25,8 +26,6 @@ export interface WorkflowCommandOptions {
 }
 
 const TERMINAL = new Set(["complete", "completed", "failed", "cancelled", "paused", "degraded"]);
-const STALE_HINT =
-  "the process running this workflow is gone; resume it with run_workflow(resume_run_id=...)";
 
 function text(value: unknown): string {
   return typeof value === "string" ? value : "";

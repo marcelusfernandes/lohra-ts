@@ -81,7 +81,7 @@ export const QUOTA_PAUSE = "quota_exhausted";
 export const TOKEN_BUDGET_PAUSE = "token_budget_exhausted";
 export const USER_PAUSE = "user_requested";
 
-const STALE_HINT =
+export const STALE_HINT =
   "the process that was running this workflow was lost before it finished; the " +
   "cells it completed are kept — run_workflow(resume_run_id=...) continues it";
 const BUSY_HINT = "another process is running this workflow right now";
@@ -296,9 +296,8 @@ interface RunRecord {
   readonly engine: WorkflowEngine;
   readonly promise: Promise<Readonly<Record<string, unknown>>>;
   result: RunResult | null;
-  /** What this run PUBLISHES once it settles — the single terminal answer
-   * every channel reads (fail-closed: one published value, not one per
-   * channel — `result` alone let a refused terminal write still report "complete"). */
+  /** What this run PUBLISHES once it settles — the one terminal answer every
+   * channel reads (fail-closed: `result` alone let a refused write say "complete"). */
   published: Readonly<Record<string, unknown>> | null;
   readonly resolve: (value: Readonly<Record<string, unknown>>) => void;
   settled: boolean;
@@ -1232,9 +1231,7 @@ export class WorkflowService {
     const entries: Record<string, unknown>[] = [];
     for (const record of this.runs.values()) {
       const progress = record.engine.progress();
-      // A settled run reports what it PUBLISHED. A stretch that lost ownership
-      // published an error envelope, and `list` must say so rather than read
-      // the engine's own (successful) outcome behind it.
+      // Reports what it PUBLISHED, not the engine's outcome (lost ownership -> error envelope).
       const publishedStatus =
         record.published !== null && typeof record.published.status === "string"
           ? record.published.status
@@ -1286,6 +1283,8 @@ export class WorkflowService {
 
   // --- shutdown --------------------------------------------------------------
 
+  /** Cancels + awaits every live run so its own completion handler releases
+   * the lease before `connection.close()` runs (invariant 4). */
   public shutdown(): Promise<void> {
     return (this.shuttingDown ??= this.runShutdown());
   }
@@ -1294,7 +1293,8 @@ export class WorkflowService {
     this.autoResume?.shutdown();
     this.heartbeat?.shutdown();
     const live = [...this.runs.values()].filter((record) => !record.settled);
-    await this.cancelAndSettle("shutdown", live);
+    if (!(await this.cancelAndSettle("shutdown", live)))
+      this.warn("workflow: shutdown's lease(s) expire on the TTL (heartbeat already stopped)");
     this.autoResume?.shutdown(); // also cancels a resume schedule()d mid-wait
     const auditOk = this.auditTrail === undefined || (await this.auditTrail.shutdown());
     if (!auditOk) this.warn("workflow: shutdown's audit trail flush failed");
@@ -1320,14 +1320,14 @@ export class WorkflowService {
     const record = this.runs.get(runId);
     if (record !== undefined) {
       const ok = await this.cancelAndSettle(`cancel of run '${runId}'`, [record]);
-      if (ok) return Object.freeze({ run_id: runId, status: "cancelled" });
+      const status = record.published?.status ?? "cancelled";
+      if (ok) return Object.freeze({ run_id: runId, status });
       const leaves = record.engine.activeLeafCount();
       return Object.freeze({ run_id: runId, status: "cancelling", leaves_in_flight: leaves });
     }
     const store = this.store;
     if (store === undefined) return Object.freeze({ error: `unknown workflow run '${runId}'` });
-    // Ownerless cancel of a run only known from its line — UNLEASED condition
-    // rides in the write's own statement.
+    // Ownerless cancel (run known only from its line): UNLEASED rides in the write's statement.
     const view = this.durableOf(runId);
     if (view === null) return Object.freeze({ error: `unknown workflow run '${runId}'` });
     // The BUSY decision rides in the write's own statement (requireUnleased):

@@ -23,7 +23,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { runWorkflowCommand } from "../src/commands/workflow.js";
 import { openStateDatabase } from "../src/state/connection.js";
-import { RUN_LEASE_TTL } from "../src/workflow/service.js";
+import { RUN_LEASE_TTL, STALE_HINT } from "../src/workflow/service.js";
 
 const workersDir = resolve(import.meta.dirname, "workers");
 const launchWorker = join(workersDir, "workflow-launch-worker.ts");
@@ -201,9 +201,10 @@ describe("cross-process durability: list/watch/audit/resume see a run across a k
       });
       expect(watched.code).toBe(0);
       expect(watched.stdout).toContain("(stale)");
-      expect(watched.stderr).toContain(
-        "the process running this workflow is gone; resume it with run_workflow(resume_run_id=...)",
-      );
+      // Issue #275: the command used to keep its own (drifted) copy of this
+      // hint's text — asserted here against service.ts's STALE_HINT, the
+      // single source now.
+      expect(watched.stderr).toContain(STALE_HINT);
 
       // --- audit: events recorded before the kill, and the CLI filters ---
       const auditAll = await runCommand({
