@@ -23,6 +23,7 @@ import {
   CHECKPOINT_HINT,
   CHECKPOINT_PAUSE,
   QUOTA_PAUSE,
+  STALE_HINT,
   TOKEN_BUDGET_HINT,
   TOKEN_BUDGET_PAUSE,
   USER_PAUSE,
@@ -359,5 +360,24 @@ describe("runWorkflowCommand (issue #103)", () => {
         connection.close();
       }
     });
+  });
+
+  // Issue #275: the command used to keep its own copy of this hint's text,
+  // drifted from service.ts's STALE_HINT (same idea a stale run's caller
+  // sees from `run_workflow`). One constant, one wording.
+  it("watch prints service.ts's STALE_HINT on stderr for a stale run, not a local copy", async () => {
+    const connection = tmpDatabase();
+    try {
+      insertRun(connection, "run", "running", 1);
+      const result = await run({
+        action: "watch",
+        databasePath: connection.databasePath,
+        args: { run_id: "run" },
+      });
+      expect(result.code).toBe(0);
+      expect(result.stderr).toBe(`${String(STALE_HINT)}\n`);
+    } finally {
+      connection.close();
+    }
   });
 });
