@@ -90,7 +90,7 @@ export function compactionThreshold(input: {
   return input.window - Math.max(0, input.maxTokens) - margin;
 }
 
-/** Minimal `ProviderProfile` for a provider name `getProviderProfile`
+/** Minimal `ProviderProfile` for a provider name `getProviderProfileIncludingCodex`
  * doesn't recognize -- `resolveContextWindow` then falls through to the
  * global `default` (200000) instead of throwing on a missing profile.
  * Defensive only: `runTurn`'s own provider is already known-good by the

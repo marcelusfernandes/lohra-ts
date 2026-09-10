@@ -111,7 +111,10 @@ cada iteração do turno, antes de montar a chamada ao provedor:
 um payload `{ summarizedCount, keptCount, estimateBefore, estimateAfter }`
 (`src/conversation/types.ts`) — mesma forma espelhada em
 `SessionCompacted`/`ChatEvents["compacted"]` (`src/events/protocol.ts`),
-o protocolo de eventos que uma TUI/GUI futura consome. `ConversationTurnResult.compaction`
+o protocolo de eventos que uma TUI/GUI futura consome (esse tipo
+`ChatEvents` em si continua sem emissor — a #287 liga `eventSink` do
+`ConversationRuntime`, não `protocol.ts`; o frame que o gateway ws manda é
+JSON-RPC cru, não o `ChatEvents` tipado). `ConversationTurnResult.compaction`
 carrega o mesmo resumo quando uma compactação rodou no turno; `successEnvelope`
 inclui a chave `compaction` só nesse caso (ausente, nunca `null`, quando não
 rodou — as fixtures de `tests/conversation-envelope.test.ts` que nunca
