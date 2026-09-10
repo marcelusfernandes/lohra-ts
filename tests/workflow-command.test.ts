@@ -6,6 +6,11 @@
 // `limit` clamp (`workflow.ts:83`). No worker, no killed process — plain
 // `WorkflowRepository` rows written directly (`requireUnleased: true`, no
 // lock/fence machinery needed for a read-only command under test).
+//
+// Issue #245: `render` shows the pause reason and `watch` prints the
+// matching retry hint on stderr when it ends on `paused` — the reason and
+// hint constants both live in `src/workflow/service.ts` (durable-run
+// surface); this file only asserts the CLI wiring.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +19,15 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { runWorkflowCommand } from "../src/commands/workflow.js";
 import { openStateDatabase, WorkflowRepository, type StateConnection } from "../src/state/index.js";
+import {
+  CHECKPOINT_HINT,
+  CHECKPOINT_PAUSE,
+  QUOTA_PAUSE,
+  TOKEN_BUDGET_HINT,
+  TOKEN_BUDGET_PAUSE,
+  USER_PAUSE,
+  USER_PAUSE_HINT,
+} from "../src/workflow/service.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -32,16 +46,17 @@ function insertRun(
   runId: string,
   status: string,
   updatedAt = 0,
+  options: { readonly pauseReason?: string | null; readonly tokenBudget?: number | null } = {},
 ): void {
   new WorkflowRepository(connection.database).putRunState(runId, {
     name: `run-${runId}`,
     owner: null,
     status,
-    pauseReason: null,
+    pauseReason: options.pauseReason ?? null,
     pausePayloadJson: null,
     specJson: null,
     argsJson: null,
-    tokenBudget: null,
+    tokenBudget: options.tokenBudget ?? null,
     tainted: false,
     progressJson: null,
     auditSegmentId: null,
@@ -51,6 +66,24 @@ function insertRun(
     now: updatedAt,
     requireUnleased: true,
   });
+}
+
+// Direct SQL, not `putRunSpend`: that write requires a lease/fence this
+// read-only command's tests never take (#245).
+function insertSpend(
+  connection: StateConnection,
+  runId: string,
+  tokensIn: number,
+  tokensOut: number,
+): void {
+  connection.database
+    .prepare(
+      `INSERT INTO workflow_run_spend
+       (run_id, token_budget, tokens_in, tokens_out, cache_read_tokens,
+        cache_write_tokens, reasoning_tokens, updated_at)
+       VALUES (?, NULL, ?, ?, 0, 0, 0, 0)`,
+    )
+    .run(runId, tokensIn, tokensOut);
 }
 
 interface Captured {
@@ -174,5 +207,136 @@ describe("runWorkflowCommand (issue #103)", () => {
     } finally {
       connection.close();
     }
+  });
+
+  describe("pause reason and resume hint (#245)", () => {
+    it.each([[CHECKPOINT_PAUSE], [TOKEN_BUDGET_PAUSE], [USER_PAUSE], [QUOTA_PAUSE]])(
+      "list shows '(%s)' for a run paused with that reason",
+      async (pauseReason) => {
+        const connection = tmpDatabase();
+        try {
+          insertRun(connection, "run", "paused", 1, { pauseReason });
+          const result = await run({
+            action: "list",
+            databasePath: connection.databasePath,
+            args: {},
+          });
+          expect(result.code).toBe(0);
+          expect(result.stdout).toContain(`paused (${pauseReason})`);
+        } finally {
+          connection.close();
+        }
+      },
+    );
+
+    it("list does not show a pause suffix for a run that is not paused", async () => {
+      const connection = tmpDatabase();
+      try {
+        insertRun(connection, "run", "running", 1);
+        const result = await run({
+          action: "list",
+          databasePath: connection.databasePath,
+          args: {},
+        });
+        expect(result.stdout).not.toContain("(");
+      } finally {
+        connection.close();
+      }
+    });
+
+    it("list shows '+N over' when spent tokens exceed the token budget", async () => {
+      const connection = tmpDatabase();
+      try {
+        insertRun(connection, "run", "running", 1, { tokenBudget: 1_000 });
+        insertSpend(connection, "run", 700, 400);
+        const result = await run({
+          action: "list",
+          databasePath: connection.databasePath,
+          args: {},
+        });
+        expect(result.stdout).toContain("1100/1000 tok (+100 over)");
+      } finally {
+        connection.close();
+      }
+    });
+
+    it("list shows no overage suffix when spent tokens are within budget", async () => {
+      const connection = tmpDatabase();
+      try {
+        insertRun(connection, "run", "running", 1, { tokenBudget: 1_000 });
+        insertSpend(connection, "run", 300, 200);
+        const result = await run({
+          action: "list",
+          databasePath: connection.databasePath,
+          args: {},
+        });
+        expect(result.stdout).toContain("500/1000 tok");
+        expect(result.stdout).not.toContain("over");
+      } finally {
+        connection.close();
+      }
+    });
+
+    it("watch prints the checkpoint hint on stderr when it ends paused at a checkpoint", async () => {
+      const connection = tmpDatabase();
+      try {
+        insertRun(connection, "run", "paused", 1, { pauseReason: CHECKPOINT_PAUSE });
+        const result = await run({
+          action: "watch",
+          databasePath: connection.databasePath,
+          args: { run_id: "run" },
+        });
+        expect(result.code).toBe(0);
+        expect(result.stderr).toBe(`${CHECKPOINT_HINT}\n`);
+      } finally {
+        connection.close();
+      }
+    });
+
+    it("watch prints the token-budget hint on stderr when it ends paused for budget", async () => {
+      const connection = tmpDatabase();
+      try {
+        insertRun(connection, "run", "paused", 1, { pauseReason: TOKEN_BUDGET_PAUSE });
+        const result = await run({
+          action: "watch",
+          databasePath: connection.databasePath,
+          args: { run_id: "run" },
+        });
+        expect(result.stderr).toBe(`${TOKEN_BUDGET_HINT}\n`);
+      } finally {
+        connection.close();
+      }
+    });
+
+    it("watch prints the user-pause hint on stderr when it ends paused by request", async () => {
+      const connection = tmpDatabase();
+      try {
+        insertRun(connection, "run", "paused", 1, { pauseReason: USER_PAUSE });
+        const result = await run({
+          action: "watch",
+          databasePath: connection.databasePath,
+          args: { run_id: "run" },
+        });
+        expect(result.stderr).toBe(`${USER_PAUSE_HINT}\n`);
+      } finally {
+        connection.close();
+      }
+    });
+
+    it("watch prints nothing on stderr when it ends paused for quota (auto-resume, no hint)", async () => {
+      const connection = tmpDatabase();
+      try {
+        insertRun(connection, "run", "paused", 1, { pauseReason: QUOTA_PAUSE });
+        const result = await run({
+          action: "watch",
+          databasePath: connection.databasePath,
+          args: { run_id: "run" },
+        });
+        expect(result.code).toBe(0);
+        expect(result.stderr).toBe("");
+      } finally {
+        connection.close();
+      }
+    });
   });
 });
