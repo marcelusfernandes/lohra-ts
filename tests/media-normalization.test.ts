@@ -268,7 +268,8 @@ describe("remote vision validation", () => {
   // o corpo devolve o controle ao event loop — sob contenção de CPU o
   // próprio trabalho ultrapassa o default de 5s: o timeout do TESTE sobe
   // para casar com o tamanho real do trabalho, a fixture não encolhe. O
-  // caso de 1 MiB acima (linha ~123) tomou o caminho oposto: não tinha
+  // caso de 1 MiB acima ("absorbs a trusted-root alias and accepts the
+  // measured large oracle fixture") tomou o caminho oposto: não tinha
   // trabalho genuíno atrás do timeout inflado, só um `expect(...).toEqual`
   // caro — trocado por `Buffer.prototype.equals`, o timeout explícito saiu.
   it("covers legal encoded and decoded 20 MiB boundaries", () => {
