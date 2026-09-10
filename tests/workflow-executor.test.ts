@@ -557,13 +557,16 @@ describe("budget average after a seeded resume (#285)", () => {
     budget.chargeTokens(200, 0);
     expect(budget.estimatedLeafCost).toBe(200);
     expect(budget.tokensSpent).toBe(6200);
-    expect(budget.affordableLeaves()).toBe(Math.trunc((10_000 - 6200) / 200));
+    // remaining 3800 / cost 200 — never remaining / measuredLeaves (which
+    // would give 0, the pre-#232 behavior with the old formula's average).
+    expect(budget.affordableLeaves()).toBe(19);
   });
 
   it("falls back to the default estimate when no leaf was measured, even with a seed", () => {
     const budget = new Budget({ tokenBudget: 10_000, tokensIn: 5000, tokensOut: 1000 });
     expect(budget.estimatedLeafCost).toBe(ESTIMATED_TOKENS_PER_LEAF);
     expect(budget.tokensSpent).toBe(6000);
-    expect(budget.affordableLeaves()).toBe(Math.trunc((10_000 - 6000) / ESTIMATED_TOKENS_PER_LEAF));
+    // remaining 4000 / default cost 2000.
+    expect(budget.affordableLeaves()).toBe(2);
   });
 });
