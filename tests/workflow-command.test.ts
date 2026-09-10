@@ -375,7 +375,7 @@ describe("runWorkflowCommand (issue #103)", () => {
         args: { run_id: "run" },
       });
       expect(result.code).toBe(0);
-      expect(result.stderr).toBe(`${String(STALE_HINT)}\n`);
+      expect(result.stderr).toBe(`${STALE_HINT}\n`);
     } finally {
       connection.close();
     }
