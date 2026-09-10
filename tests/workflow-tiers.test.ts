@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { openStateDatabase, WorkflowRepository, LockRepository } from "../src/state/index.js";
 import { runTiers } from "../src/commands/tiers.js";
-import { loadTiers, readTiers, TiersError, writeTiers } from "../src/workflow/tiers.js";
+import * as tiersModule from "../src/workflow/tiers.js";
+import { readTiers, TiersError, writeTiers } from "../src/workflow/tiers.js";
 import { WorkflowService } from "../src/workflow/service.js";
 import type {
   ChildResult,
@@ -125,16 +126,39 @@ describe("readTiers — fail-closed", () => {
     expect((result as TiersError).message).toContain("could not be read");
   });
 
-  it("tolerates an unrelated top-level key next to a valid tier", () => {
+  it("rejects an unknown top-level key even beside a valid tier (fail-closed decision, #261)", () => {
     const path = tiersPath(root());
     writeFileSync(path, JSON.stringify({ custom: { model: "ignored" }, small: "shorthand-model" }));
-    expect(readTiers(path)).toEqual({ small: { model: "shorthand-model" } });
+    const result = readTiers(path);
+    expect(result).toBeInstanceOf(TiersError);
+    expect((result as TiersError).message).toContain("custom");
   });
 
-  it("returns {} when only unrelated top-level keys are present", () => {
+  it("rejects a lone unknown top-level key and suggests the closest tier name (smal → small, #261)", () => {
     const path = tiersPath(root());
-    writeFileSync(path, JSON.stringify({ custom: { model: "m" } }));
-    expect(readTiers(path)).toEqual({});
+    writeFileSync(path, JSON.stringify({ smal: { model: "m" } }));
+    const result = readTiers(path);
+    expect(result).toBeInstanceOf(TiersError);
+    expect((result as TiersError).message).toContain("smal");
+    expect((result as TiersError).message).toContain("did you mean 'small'");
+  });
+
+  it("rejects an unknown top-level key with no close match, without a false suggestion (#261)", () => {
+    const path = tiersPath(root());
+    writeFileSync(path, JSON.stringify({ foo: { model: "m" } }));
+    const result = readTiers(path);
+    expect(result).toBeInstanceOf(TiersError);
+    expect((result as TiersError).message).toContain("foo");
+    expect((result as TiersError).message).not.toContain("did you mean");
+  });
+
+  it("rejects an unknown key before validating a known tier's fields (precedence, #261)", () => {
+    const path = tiersPath(root());
+    writeFileSync(path, JSON.stringify({ smal: {} }));
+    const result = readTiers(path);
+    expect(result).toBeInstanceOf(TiersError);
+    expect((result as TiersError).message).toContain("did you mean 'small'");
+    expect((result as TiersError).message).not.toContain("no usable field");
   });
 
   it("accepts a fully-formed valid tier map", () => {
@@ -153,17 +177,9 @@ describe("readTiers — fail-closed", () => {
   });
 });
 
-describe("loadTiers — unchanged tolerant behaviour for existing callers", () => {
-  it("still swallows a malformed field down to {} (models/list_models compatibility)", () => {
-    const path = tiersPath(root());
-    writeFileSync(path, JSON.stringify({ small: { model: 123 } }));
-    expect(loadTiers(path)).toEqual({});
-  });
-
-  it("still returns {} for invalid JSON", () => {
-    const path = tiersPath(root());
-    writeFileSync(path, "[");
-    expect(loadTiers(path)).toEqual({});
+describe("loadTiers — removed, no fail-open export left (#261)", () => {
+  it("is no longer exported by workflow/tiers.js", () => {
+    expect("loadTiers" in tiersModule).toBe(false);
   });
 });
 
@@ -318,5 +334,21 @@ describe("lohra tiers — fail-closed CLI", () => {
     });
     expect(result.code).toBe(0);
     expect(result.stderr).toBe("");
+  });
+
+  it("exits 1 on stderr — not stdout — when the file exists but has no known tier (#261)", async () => {
+    const home = root();
+    writeFileSync(tiersPath(home), "{}");
+    const result = await runTiers({
+      action: "list",
+      noInput: true,
+      home,
+      environment: {},
+      probeOllama: () => Promise.reject(new Error("must not be called")),
+    });
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain(tiersPath(home));
+    expect(result.stderr).not.toContain("broken JSON");
   });
 });

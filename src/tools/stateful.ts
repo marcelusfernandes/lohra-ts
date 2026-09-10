@@ -10,7 +10,7 @@ import {
 } from "../catalog/windows-cache.js";
 import { MemoryStore } from "../memory/store.js";
 import { SkillStore } from "../skills/store.js";
-import { loadTiers, MODEL_TIERS, type TierMap } from "../workflow/tiers.js";
+import { MODEL_TIERS, readTiers, TiersError, type TierMap } from "../workflow/tiers.js";
 import { toolError, toolResult } from "./envelope.js";
 import type { ToolArguments } from "./types.js";
 
@@ -138,7 +138,7 @@ export class SessionSearchTool {
 }
 
 type CatalogBuilder = typeof buildCatalog;
-type TierLoader = (path: string) => TierMap;
+type TierLoader = (path: string) => TierMap | TiersError;
 
 function coerceLimit(raw: unknown): { readonly value: number; readonly note: string | null } {
   if (raw === undefined || raw === null) return { value: 25, note: null };
@@ -205,13 +205,15 @@ export class ListModelsTool {
     private readonly home: string,
     private readonly environment: Readonly<Record<string, string | undefined>>,
     private readonly builder: CatalogBuilder = buildCatalog,
-    private readonly tierLoader: TierLoader = loadTiers,
+    private readonly tierLoader: TierLoader = readTiers,
   ) {}
 
   async handle(args: ToolArguments): Promise<string> {
     const provider = (text(args.provider) ?? "").trim();
     const query = (text(args.query) ?? "").trim().toLowerCase();
     const limit = coerceLimit(args.limit);
+    const tiers = this.tierLoader(join(this.home, "workflow_tiers.json"));
+    if (tiers instanceof TiersError) return toolError(tiers.message);
     let catalog: Catalog;
     try {
       catalog = await this.builder({
@@ -236,7 +238,6 @@ export class ListModelsTool {
       const saveWarning = saveWindowsCache(cachePath, loaded.data, fresh);
       if (saveWarning !== null) cacheWarnings.push(saveWarning);
     }
-    const tiers = this.tierLoader(join(this.home, "workflow_tiers.json"));
     const renderedTiers: Record<string, unknown> = {};
     for (const name of MODEL_TIERS) renderedTiers[name] = tiers[name] ?? null;
     const noteParts = [

@@ -143,6 +143,16 @@ describe("stateful tool handlers", () => {
     const result = JSON.parse(await tool.handle({})) as { readonly note?: string };
     expect(result.note).toMatch(/refetch/iu);
   });
+
+  it("returns a named tool_error, not an empty tier map, for a broken workflow_tiers.json (#261)", async () => {
+    const home = root();
+    writeFileSync(join(home, "workflow_tiers.json"), "[");
+    const tool = new ListModelsTool(home, {}, () =>
+      Promise.resolve(new Catalog([new ProviderModels("anthropic", "skipped", [], 0, "no key")])),
+    );
+    const result = JSON.parse(await tool.handle({})) as { readonly error?: string };
+    expect(result.error).toContain(join(home, "workflow_tiers.json"));
+  });
 });
 
 describe("builtin registry", () => {
