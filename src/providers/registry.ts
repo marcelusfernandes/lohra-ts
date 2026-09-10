@@ -18,6 +18,11 @@ const builtinProfiles: readonly ProviderProfile[] = Object.freeze(
         fallbackModels: ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"],
         defaultMaxTokens: 16000,
         defaultAuxModel: "claude-haiku-4-5",
+        // piso do provedor — fonte: https://docs.anthropic.com/en/docs/about-claude/models,
+        // 200k tokens é o padrão estável da família Claude há várias
+        // gerações; os nomes acima ("claude-opus-4-8" etc.) são futuros e
+        // sem fonte verificável própria, então caem neste piso (issue #250).
+        defaultContextWindow: 200_000,
       },
       {
         name: "openai",
@@ -34,6 +39,20 @@ const builtinProfiles: readonly ProviderProfile[] = Object.freeze(
         fallbackModels: ["gpt-4o", "gpt-4o-mini"],
         defaultMaxTokens: 16000,
         defaultAuxModel: "gpt-4o-mini",
+        modelWindows: {
+          // fonte: https://platform.openai.com/docs/models, 2026-09
+          "gpt-4o": 128_000,
+          // fonte: https://platform.openai.com/docs/models, 2026-09
+          "gpt-4o-mini": 128_000,
+        },
+        // piso do provedor — mesma fonte acima; 128k é o padrão estável da
+        // família GPT-4, os únicos modelos que este perfil serve hoje
+        // (fallbackModels acima). "gpt-5.5" só resolve por este perfil
+        // quando acessado via OPENAI_API_KEY (fora de fallbackModels, cai
+        // aqui); o caminho de subscription do Codex usa o perfil separado
+        // `CODEX_PROVIDER` (abaixo), com sua própria tabela e piso para a
+        // família GPT-5.x (issue #250).
+        defaultContextWindow: 128_000,
       },
       {
         name: "openrouter",
@@ -50,6 +69,11 @@ const builtinProfiles: readonly ProviderProfile[] = Object.freeze(
         fallbackModels: ["openai/gpt-4o-mini"],
         defaultMaxTokens: 8192,
         defaultAuxModel: "",
+        modelWindows: {
+          // fonte: https://openrouter.ai/openai/gpt-4o-mini (mesmo modelo
+          // da OpenAI, atrás do endpoint da OpenRouter), 2026-09
+          "openai/gpt-4o-mini": 128_000,
+        },
       },
       {
         name: "deepseek",
@@ -82,6 +106,11 @@ const builtinProfiles: readonly ProviderProfile[] = Object.freeze(
         fallbackModels: ["llama-3.3-70b-versatile"],
         defaultMaxTokens: 8192,
         defaultAuxModel: "",
+        modelWindows: {
+          // fonte: https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct
+          // (janela nativa do modelo, 128k tokens), 2026-09
+          "llama-3.3-70b-versatile": 131_072,
+        },
       },
       {
         name: "together",
@@ -98,6 +127,12 @@ const builtinProfiles: readonly ProviderProfile[] = Object.freeze(
         fallbackModels: ["meta-llama/Llama-3.3-70B-Instruct-Turbo"],
         defaultMaxTokens: 8192,
         defaultAuxModel: "",
+        modelWindows: {
+          // fonte: https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct
+          // (janela nativa do modelo, 128k tokens; Together preserva o
+          // valor original), 2026-09
+          "meta-llama/Llama-3.3-70B-Instruct-Turbo": 131_072,
+        },
       },
       {
         name: "gemini",
@@ -114,6 +149,12 @@ const builtinProfiles: readonly ProviderProfile[] = Object.freeze(
         fallbackModels: ["gemini-2.0-flash", "gemini-1.5-pro"],
         defaultMaxTokens: 8192,
         defaultAuxModel: "",
+        modelWindows: {
+          // fonte: https://ai.google.dev/gemini-api/docs/models, 2026-09
+          "gemini-2.0-flash": 1_048_576,
+          // fonte: https://ai.google.dev/gemini-api/docs/models, 2026-09
+          "gemini-1.5-pro": 2_097_152,
+        },
       },
       {
         name: "xai",
@@ -189,6 +230,12 @@ const builtinProfiles: readonly ProviderProfile[] = Object.freeze(
       aliases: Object.freeze([...profile.aliases]),
       envVars: Object.freeze([...profile.envVars]),
       fallbackModels: Object.freeze([...profile.fallbackModels]),
+      // exactOptionalPropertyTypes: só reintroduz a chave quando havia
+      // valor — um `modelWindows: undefined` explícito violaria o tipo
+      // opcional de `ProviderProfile.modelWindows`.
+      ...(profile.modelWindows === undefined
+        ? {}
+        : { modelWindows: Object.freeze({ ...profile.modelWindows }) }),
     }),
   ),
 );
@@ -249,6 +296,21 @@ export const CODEX_PROVIDER: ProviderProfile = Object.freeze({
   fallbackModels: Object.freeze(["gpt-5.5"]),
   defaultMaxTokens: 16000,
   defaultAuxModel: "",
+  modelWindows: Object.freeze({
+    // fonte: https://developers.openai.com/api/docs/models/gpt-5.5,
+    // 2026-09-10 — "1,050,000 context window"; a mesma página lista
+    // "128,000 max output tokens" e um preço diferente acima de 272K de
+    // entrada, mas nenhum dos dois é a janela de contexto (issue #250).
+    "gpt-5.5": 1_050_000,
+  }),
+  // piso do provedor — mesma fonte de modelWindows acima
+  // (developers.openai.com/api/docs/models/gpt-5.5, 2026-09-10). "gpt-5.5"
+  // é o único modelo da família GPT-5.x que este perfil serve hoje
+  // (fallbackModels acima), então a janela dele é o piso da família: um
+  // modelo de subscription do Codex futuro, ainda sem entrada própria na
+  // tabela, cai aqui — não em "128,000 max output tokens" (métrica
+  // diferente de janela de contexto) nem no default global de 200000.
+  defaultContextWindow: 1_050_000,
   authType: "oauth_external",
   defaultHeaders: Object.freeze({}),
   fixedTemperature: null,
