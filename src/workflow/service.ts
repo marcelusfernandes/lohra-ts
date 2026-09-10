@@ -5,6 +5,11 @@ import { Budget } from "./budget.js";
 import { MemoryWorkflowCache, type WorkflowCache } from "./cache.js";
 import { SqliteWorkflowCache } from "./sqlite-cache.js";
 import type { WorkflowEvent, WorkflowLoader } from "./engine-contract.js";
+import {
+  engineBaseOptions,
+  type WorkflowLaunchOptions,
+  type WorkflowLaunchOptionsWithTiers,
+} from "./engine-options.js";
 import { WorkflowEngine } from "./engine.js";
 import { AutoResumeScheduler, LeaseHeartbeat, type Timer } from "./durability.js";
 import type { ChildRuntime, LeafSandboxHandle, LeafToolDispatch } from "./runtime.js";
@@ -430,10 +435,14 @@ export class WorkflowService {
       () => Date.now() / 1_000,
       this.warn,
     );
-    // Criterion 40: operator policy/tiers are FILES in the operator home, read
-    // per launch; absent is legitimate, present-but-broken is not (#234).
+    // Criterion 40: the operator capability policy is a FILE in the operator
+    // home (`workflow_policy.json`), read per launch. An explicit path wins;
+    // an absent file is deny-all, never a widening.
     const policyPath = options.policyPath ?? join(this.homeRoot, OPERATOR_POLICY_FILE);
     this.policyLoader = () => loadPolicy(policyPath);
+    // The tier map is a separate FILE, read the same way: absent is
+    // legitimate (no remapping configured); present-but-broken still
+    // refuses the launch (#234).
     const tiersPath = options.tiersPath ?? join(this.homeRoot, OPERATOR_TIERS_FILE);
     this.tiersLoader = () => readTiers(tiersPath);
     const store = options.store;
@@ -594,14 +603,13 @@ export class WorkflowService {
   start(
     rawSpec: unknown,
     args: Readonly<Record<string, unknown>> = {},
-    options: {
-      readonly checkpointAnswers?: Readonly<Record<string, unknown>>;
-      readonly tokenBudget?: number | null;
-      readonly resumeRunId?: string;
-    } = {},
+    callerOptions: WorkflowLaunchOptions = {},
   ): WorkflowStartResult | WorkflowServiceError {
     const tiers = this.tiersLoader();
     if (tiers instanceof TiersError) return Object.freeze({ error: tiers.message });
+    // Resolved once per call and carried on `options` so both launch paths
+    // below (fresh, durable) reach the same map without reloading it (#258).
+    const options: WorkflowLaunchOptionsWithTiers = { ...callerOptions, tiers };
     const resumeRunId = options.resumeRunId;
     const explicitSpec = rawSpec !== undefined && rawSpec !== null;
     const prior = resumeRunId === undefined ? null : this.durableOf(resumeRunId);
@@ -647,7 +655,7 @@ export class WorkflowService {
             "environment — runs launched here are in-memory only and never survive the process",
         );
       }
-      return this.launch(parsed, runId, runArgs, options.checkpointAnswers ?? {}, budget ?? null);
+      return this.launch(parsed, runId, runArgs, options);
     }
     return this.launchDurable(this.store, parsed, runId, runArgs, options, explicitSpec, prior);
   }
@@ -656,8 +664,7 @@ export class WorkflowService {
     parsed: WorkflowSpec,
     runId: string,
     args: Readonly<Record<string, unknown>>,
-    checkpointAnswers: Readonly<Record<string, unknown>>,
-    tokenBudget: number | null,
+    options: WorkflowLaunchOptionsWithTiers,
   ): WorkflowStartResult {
     // Even without a durable store, leaves are sandboxed: operator policy,
     // a run-scoped working root, and whatever taint the session already has.
@@ -669,12 +676,15 @@ export class WorkflowService {
       tainted: this.taintTracker.tainted,
     });
     const engine = new WorkflowEngine({
-      runtime: this.runtime,
+      ...engineBaseOptions(
+        this.runtime,
+        runId,
+        options.tiers,
+        this.loader,
+        options.checkpointAnswers ?? {},
+      ),
       cache: this.cache,
-      budget: new Budget({ tokenBudget }),
-      runId,
-      ...(this.loader === undefined ? {} : { loader: this.loader }),
-      ...(Object.keys(checkpointAnswers).length > 0 ? { checkpointAnswers } : {}),
+      budget: new Budget({ tokenBudget: options.tokenBudget ?? null }),
       onEvent: (event) => {
         this.forwardEvent(runId, event);
       },
@@ -711,11 +721,7 @@ export class WorkflowService {
     parsed: WorkflowSpec,
     runId: string,
     args: Readonly<Record<string, unknown>>,
-    options: {
-      readonly checkpointAnswers?: Readonly<Record<string, unknown>>;
-      readonly tokenBudget?: number | null;
-      readonly resumeRunId?: string;
-    },
+    options: WorkflowLaunchOptionsWithTiers,
     explicitSpec: boolean,
     priorView: DurableRunView | null,
   ): WorkflowStartResult | WorkflowServiceError {
@@ -848,15 +854,12 @@ export class WorkflowService {
       return leafSandboxUnavailable(runId);
     }
     const engine = new WorkflowEngine({
-      runtime: this.runtime,
+      ...engineBaseOptions(this.runtime, runId, options.tiers, this.loader, answers),
       budget: new Budget({
         tokenBudget: effectiveBudget,
         tokensIn: seeded.tokensIn,
         tokensOut: seeded.tokensOut,
       }),
-      runId,
-      ...(this.loader === undefined ? {} : { loader: this.loader }),
-      ...(Object.keys(answers).length > 0 ? { checkpointAnswers: answers } : {}),
       onEvent: (event) => {
         const ownership = stretchOwnership();
         this.forwardEvent(runId, event, ownership ?? undefined);
@@ -1212,10 +1215,7 @@ export class WorkflowService {
   async runAndWait(
     spec: unknown,
     args: Readonly<Record<string, unknown>> = {},
-    options: {
-      readonly tokenBudget?: number | null;
-      readonly resumeRunId?: string;
-    } = {},
+    options: WorkflowLaunchOptions = {},
   ): Promise<Readonly<Record<string, unknown>> | WorkflowServiceError> {
     // Take the record AFTER `start`: capturing it before meant a resume waited
     // on the PREVIOUS stretch's promise, which had already settled `paused`,

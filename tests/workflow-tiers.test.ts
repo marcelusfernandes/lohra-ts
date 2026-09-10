@@ -4,10 +4,16 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { openStateDatabase, WorkflowRepository, LockRepository } from "../src/state/index.js";
 import { runTiers } from "../src/commands/tiers.js";
-import { loadTiers, readTiers, TiersError } from "../src/workflow/tiers.js";
+import { loadTiers, readTiers, TiersError, writeTiers } from "../src/workflow/tiers.js";
 import { WorkflowService } from "../src/workflow/service.js";
-import type { ChildResult, ChildRuntime } from "../src/workflow/runtime.js";
+import type {
+  ChildResult,
+  ChildRuntime,
+  ChildSpawnRequest,
+  LeafSandboxHandle,
+} from "../src/workflow/runtime.js";
 
 const roots: string[] = [];
 function root(): string {
@@ -194,6 +200,94 @@ describe("WorkflowService.start — refuses a broken tier map", () => {
     const service = new WorkflowService({ runtime, homeRoot: home });
     const result = service.start(validSpec());
     expect(result).toHaveProperty("run_id");
+  });
+});
+
+function recordingRuntime(): ChildRuntime & { readonly requests: ChildSpawnRequest[] } {
+  const requests: ChildSpawnRequest[] = [];
+  return {
+    requests,
+    spawn(request: ChildSpawnRequest): string {
+      requests.push(request);
+      return `leaf-${String(requests.length)}`;
+    },
+    collect: (): ChildResult => ({
+      status: "complete",
+      output: { answer: "ok" },
+      usage: {
+        inputTokens: 1,
+        outputTokens: 1,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningTokens: 0,
+      },
+    }),
+    steer: (): void => undefined,
+    cancel: (): void => undefined,
+    installLeafSandbox: (): LeafSandboxHandle => ({ dispose: (): void => undefined }),
+  };
+}
+
+describe("WorkflowService — the operator tier map reaches the WorkflowEngine (#258)", () => {
+  it("start(): a fresh, non-durable run resolves the node's tier to the mapped model", async () => {
+    const home = root();
+    writeTiers(tiersPath(home), { big: { model: "x-big" } });
+    const runtime = recordingRuntime();
+    const service = new WorkflowService({ runtime, homeRoot: home });
+    const started = service.start({
+      meta: { name: "tiers" },
+      nodes: [{ id: "a", type: "agent", prompt: "do it", tier: "big" }],
+    });
+    if ("error" in started) throw new Error(started.error);
+    const final = (await service.status(started.run_id, true)) as Record<string, unknown>;
+    expect(final.status).toBe("complete");
+    expect(runtime.requests).toHaveLength(1);
+    expect(runtime.requests[0]?.model).toBe("x-big");
+  });
+
+  it("resume(): the node's tier still resolves to the mapped model after a checkpoint pause", async () => {
+    const home = root();
+    writeTiers(tiersPath(home), { big: { model: "x-big" } });
+    const runtime = recordingRuntime();
+    const connection = openStateDatabase(join(home, "state.db"));
+    try {
+      const repository = new WorkflowRepository(connection.database);
+      const locks = new LockRepository(connection.database);
+      const service = new WorkflowService({
+        runtime,
+        homeRoot: home,
+        store: {
+          repository,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ({ fence: 0, holder: "test", now: 1000 }),
+          database: connection.database,
+        },
+      });
+      const started = service.start({
+        meta: { name: "tiers-resume" },
+        nodes: [
+          { id: "cp1", type: "checkpoint", prompt: "answer?", default: "yes" },
+          { id: "b", type: "agent", prompt: "go", tier: "big" },
+        ],
+      });
+      if ("error" in started) throw new Error(started.error);
+      const paused = (await service.status(started.run_id, true)) as Record<string, unknown>;
+      expect(paused.status).toBe("paused");
+      // The checkpoint never spawns a leaf: the first (and only) request is
+      // the agent node reached AFTER resume, through `launchDurable`'s
+      // WorkflowEngine construction (service.ts, second call site).
+      expect(runtime.requests).toHaveLength(0);
+      const resumed = service.start(null, {}, { resumeRunId: started.run_id });
+      if ("error" in resumed) throw new Error(resumed.error);
+      const final = (await service.status(started.run_id, true)) as Record<string, unknown>;
+      expect(final.status).toBe("complete");
+      expect(runtime.requests).toHaveLength(1);
+      expect(runtime.requests[0]?.model).toBe("x-big");
+    } finally {
+      connection.close();
+    }
   });
 });
 
