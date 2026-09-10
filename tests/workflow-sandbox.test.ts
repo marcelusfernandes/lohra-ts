@@ -1,9 +1,18 @@
-import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { BUILTIN_DEFINITIONS } from "../src/tools/builtin-definitions.js";
+import { writeFileTool } from "../src/tools/filesystem.js";
 import {
   isTaintingTool,
   loadPolicy,
@@ -205,5 +214,62 @@ describe("taint", () => {
     expect(dispatch("web_search", { query: "x" })).toBe(
       "ERROR: tainted run: web egress is disabled for leaves",
     );
+  });
+});
+
+// Issue #248: branches of one run share ONE working root, fenced per
+// acquisition (`src/workflow/service.ts`), not per branch. Two leaves that
+// write the SAME file race at the filesystem, not inside the sandbox — this
+// pins the observed behavior (last writer wins, silently) as the contract,
+// not a bug to fix here (Fora de escopo: `write_file(mode="append")`).
+describe("sandboxDispatch — fan-out over a shared working root (#248)", () => {
+  it("two branches writing the SAME file: both succeed, last writer wins, silently", () => {
+    const root = workspace();
+    const fsBase: ToolDispatchLike = (_name, args) => writeFileTool(args);
+    const dispatch = sandboxDispatch(fsBase, {
+      workingRoot: root,
+      policy: { fsAllow: [{ path: root, writable: true }], egressAllow: [] },
+      tainted: false,
+    });
+    const shared = join(root, "shared.txt");
+
+    const resultA = dispatch("write_file", { path: shared, content: "from-branch-a" });
+    const resultB = dispatch("write_file", { path: shared, content: "from-branch-b" });
+
+    expect(resultA).not.toContain("ERROR");
+    expect(resultB).not.toContain("ERROR");
+    expect(readFileSync(shared, "utf8")).toBe("from-branch-b");
+  });
+
+  it("two branches writing DIFFERENT files under the same root: both survive intact", () => {
+    const root = workspace();
+    const fsBase: ToolDispatchLike = (_name, args) => writeFileTool(args);
+    const dispatch = sandboxDispatch(fsBase, {
+      workingRoot: root,
+      policy: { fsAllow: [{ path: root, writable: true }], egressAllow: [] },
+      tainted: false,
+    });
+    const fileA = join(root, "branch-a.txt");
+    const fileB = join(root, "branch-b.txt");
+
+    const resultA = dispatch("write_file", { path: fileA, content: "a" });
+    const resultB = dispatch("write_file", { path: fileB, content: "b" });
+
+    expect(resultA).not.toContain("ERROR");
+    expect(resultB).not.toContain("ERROR");
+    expect(readFileSync(fileA, "utf8")).toBe("a");
+    expect(readFileSync(fileB, "utf8")).toBe("b");
+  });
+});
+
+describe("run_workflow tool description — fan-out doctrine (#248)", () => {
+  it("names the shared-filesystem doctrine: one file per leaf, aggregate downstream", () => {
+    const runWorkflow = BUILTIN_DEFINITIONS.find(
+      (definition) => definition.function.name === "run_workflow",
+    );
+    expect(runWorkflow).toBeDefined();
+    const description = runWorkflow?.function.description ?? "";
+    expect(description).toContain("Branches in the same run share ONE working filesystem root");
+    expect(description).toContain("one file per leaf");
   });
 });
