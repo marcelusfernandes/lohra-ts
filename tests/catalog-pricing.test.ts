@@ -1,7 +1,7 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   authHeaders,
   buildCatalog,
@@ -10,11 +10,53 @@ import {
   MAX_RESPONSE_BYTES,
   type CatalogHttpClient,
 } from "../src/catalog/catalog.js";
+import { extractModels } from "../src/catalog/windows.js";
+import {
+  CONTEXT_WINDOWS_FILENAME,
+  loadWindowsCache,
+  saveWindowsCache,
+  MAX_CACHE_BYTES,
+  MAX_MODELS_PER_PROVIDER,
+  type WindowsCache,
+} from "../src/catalog/windows-cache.js";
 import { getProviderProfile } from "../src/providers/registry.js";
 import { estimateCost, priceKey } from "../src/pricing/estimate.js";
 import { loadPriceOverrides } from "../src/pricing/overrides.js";
 import { combineUsage, usage } from "../src/pricing/usage.js";
 import { jsonFloat, stringifyJsonPreservingNumbers } from "../src/serialization/json-numbers.js";
+
+// Recorte real de `GET https://openrouter.ai/api/v1/models` (2026-09),
+// reduzido a dois modelos e aos campos que o extrator lê ou ignora de
+// propósito — `context_length` é a janela; `pricing`/`architecture` ficam
+// só para provar que o extrator não se distrai com o resto do payload.
+const OPENROUTER_MODELS_FIXTURE = {
+  data: [
+    {
+      id: "anthropic/claude-3.5-sonnet",
+      name: "Anthropic: Claude 3.5 Sonnet",
+      context_length: 200000,
+      pricing: { prompt: "0.000003", completion: "0.000015" },
+      top_provider: { context_length: 200000, max_completion_tokens: 8192 },
+    },
+    {
+      id: "openai/gpt-4o-mini",
+      name: "OpenAI: GPT-4o mini",
+      context_length: 128000,
+      pricing: { prompt: "0.00000015", completion: "0.0000006" },
+    },
+  ],
+};
+
+// Recorte real de `GET https://api.openai.com/v1/models` — a OpenAI não
+// expõe janela nenhuma nessa lista; o único jeito de saber é a
+// documentação, fora deste payload.
+const OPENAI_MODELS_FIXTURE = {
+  object: "list",
+  data: [
+    { id: "gpt-4o-mini", object: "model", created: 1721172741, owned_by: "system" },
+    { id: "gpt-4o", object: "model", created: 1715367049, owned_by: "system" },
+  ],
+};
 
 const response = (payload: unknown, status = 200): CatalogHttpClient => ({
   get: () => Promise.resolve({ status, body: new TextEncoder().encode(JSON.stringify(payload)) }),
@@ -90,6 +132,7 @@ describe("catalog fixtures", () => {
       source: "live",
       total: 2,
       models: ["b", "a"],
+      windows: { b: null, a: null },
       detail: "first page only (2 ids) — the provider has more",
     });
     expect((await fetchModels(openaiProfile, "x", response({}, 200))).detail).toBe(
@@ -102,6 +145,26 @@ describe("catalog fixtures", () => {
     expect((await fetchModels(openaiProfile, "x", tooLarge)).detail).toContain(
       "response too large",
     );
+  });
+  it("fetchModels carries windows from an OpenRouter-shaped live payload through to toJSON", async () => {
+    const openrouterProfile = profile("openrouter");
+    const live = await fetchModels(
+      openrouterProfile,
+      "secret",
+      response(OPENROUTER_MODELS_FIXTURE),
+    );
+    expect(live.toJSON()).toEqual({
+      provider: "openrouter",
+      source: "live",
+      total: 2,
+      models: ["anthropic/claude-3.5-sonnet", "openai/gpt-4o-mini"],
+      windows: { "anthropic/claude-3.5-sonnet": 200000, "openai/gpt-4o-mini": 128000 },
+    });
+  });
+  it("fetchModels reports null windows for a provider whose payload omits the field", async () => {
+    const openaiProfile = profile("openai");
+    const live = await fetchModels(openaiProfile, "secret", response(OPENAI_MODELS_FIXTURE));
+    expect(live.windows).toEqual({ "gpt-4o-mini": null, "gpt-4o": null });
   });
   it("derives auth headers from API mode and omits auth for an empty key", () => {
     expect(authHeaders(profile("anthropic"), "x")).toEqual({
@@ -116,6 +179,187 @@ describe("catalog fixtures", () => {
     expect(authHeaders(profile("openai"), "")).toEqual({
       "Accept-Encoding": "identity",
     });
+  });
+});
+describe("model context windows (extraction, issue #249)", () => {
+  it("reads context_length off an OpenRouter-shaped payload", () => {
+    expect(extractModels(OPENROUTER_MODELS_FIXTURE)).toEqual({
+      ids: ["anthropic/claude-3.5-sonnet", "openai/gpt-4o-mini"],
+      windows: {
+        "anthropic/claude-3.5-sonnet": 200000,
+        "openai/gpt-4o-mini": 128000,
+      },
+    });
+  });
+  it("is null, never invented, for a provider whose payload has no window field", () => {
+    expect(extractModels(OPENAI_MODELS_FIXTURE)).toEqual({
+      ids: ["gpt-4o-mini", "gpt-4o"],
+      windows: { "gpt-4o-mini": null, "gpt-4o": null },
+    });
+  });
+  it("falls back from context_length to max_input_tokens to context_window, in that order", () => {
+    expect(
+      extractModels({
+        data: [
+          { id: "a", context_length: 1000 },
+          { id: "b", max_input_tokens: 2000 },
+          { id: "c", context_window: 3000 },
+          { id: "b2", max_input_tokens: 2000, context_window: 9999 },
+        ],
+      }),
+    ).toEqual({
+      ids: ["a", "b", "c", "b2"],
+      windows: { a: 1000, b: 2000, c: 3000, b2: 2000 },
+    });
+  });
+  it("never invents a window from a non-positive, non-integer or non-numeric field", () => {
+    expect(
+      extractModels({
+        data: [
+          { id: "zero", context_length: 0 },
+          { id: "negative", context_length: -5 },
+          { id: "float", context_length: 12.5 },
+          { id: "string", context_length: "128000" },
+          { id: "infinite", context_length: Infinity },
+          { id: "nan", context_length: Number.NaN },
+        ],
+      }),
+    ).toEqual({
+      ids: ["zero", "negative", "float", "string", "infinite", "nan"],
+      windows: {
+        zero: null,
+        negative: null,
+        float: null,
+        string: null,
+        infinite: null,
+        nan: null,
+      },
+    });
+  });
+  it("dedups by id keeping the first occurrence's window, matching modelIds", () => {
+    expect(
+      extractModels({
+        data: [
+          { id: "dup", context_length: 111 },
+          { id: "dup", context_length: 222 },
+        ],
+      }),
+    ).toEqual({ ids: ["dup"], windows: { dup: 111 } });
+  });
+  it("is null for a string-only id (no metadata to read a window from)", () => {
+    expect(extractModels(["plain-id"])).toEqual({
+      ids: ["plain-id"],
+      windows: { "plain-id": null },
+    });
+  });
+  it("returns null for an unrecognized payload shape, same as modelIds", () => {
+    expect(extractModels({})).toBeNull();
+    expect(extractModels(null)).toBeNull();
+  });
+});
+describe("model context window cache (issue #249)", () => {
+  const roots: string[] = [];
+  const cachePath = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), "lohra-t249-windows-cache-"));
+    roots.push(dir);
+    return join(dir, CONTEXT_WINDOWS_FILENAME);
+  };
+  afterEach(() => {
+    for (const dir of roots.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("loads {} silently when the cache file does not exist yet", () => {
+    expect(loadWindowsCache(cachePath())).toEqual({ data: {}, warning: null });
+  });
+
+  it("round-trips windows through save then load, surviving a fresh instance", () => {
+    const path = cachePath();
+    const fresh: WindowsCache = { openrouter: { "a/b": 128000, "c/d": null } };
+    expect(saveWindowsCache(path, {}, fresh)).toBeNull();
+    expect(loadWindowsCache(path)).toEqual({ data: fresh, warning: null });
+  });
+
+  it("merges a fresh provider into what was already cached, leaving other providers alone", () => {
+    const path = cachePath();
+    saveWindowsCache(path, {}, { openrouter: { m: 1000 } });
+    const { data: afterFirst } = loadWindowsCache(path);
+    expect(saveWindowsCache(path, afterFirst, { openai: { n: 2000 } })).toBeNull();
+    expect(loadWindowsCache(path)).toEqual({
+      data: { openrouter: { m: 1000 }, openai: { n: 2000 } },
+      warning: null,
+    });
+  });
+
+  it("refetches with a warning instead of crashing on invalid JSON", () => {
+    const path = cachePath();
+    writeFileSync(path, "{not json");
+    const result = loadWindowsCache(path);
+    expect(result.data).toEqual({});
+    expect(result.warning).toMatch(/refetch|invalid|corrupt/iu);
+  });
+
+  it("refetches with a warning instead of crashing on a malformed shape inside a valid envelope", () => {
+    const path = cachePath();
+    writeFileSync(
+      path,
+      JSON.stringify({
+        schema_version: 1,
+        updated_at: "2026-09-09T00:00:00.000Z",
+        providers: { openrouter: { m: "not-a-number-or-null" } },
+      }),
+    );
+    const result = loadWindowsCache(path);
+    expect(result.data).toEqual({});
+    expect(result.warning).not.toBeNull();
+  });
+
+  // context-windows.json tem nome próprio justamente para nunca colidir com
+  // o model_windows.json do lohra Python — mas se algo estranho aparecer no
+  // nosso caminho mesmo assim (um formato plano igual ao dele, por engano
+  // ou por uma versão futura deste runtime), sem `schema_version` ele é
+  // "formato desconhecido" — nunca lido como se fosse nosso, mesmo sendo
+  // JSON válido com uma forma parecida.
+  it("never trusts a pre-existing flat file at its own cache path (shaped like the lohra Python model_windows.json)", () => {
+    const path = cachePath();
+    writeFileSync(path, JSON.stringify({ openrouter: { "claude-3.5-sonnet": 200000 } }));
+    const result = loadWindowsCache(path);
+    expect(result.data).toEqual({});
+    expect(result.warning).toMatch(/schema_version|format|version/iu);
+  });
+
+  it("writes the versioned envelope, not a flat shape, on save", () => {
+    const path = cachePath();
+    saveWindowsCache(path, {}, { openrouter: { m: 1000 } });
+    const onDisk = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    expect(onDisk.schema_version).toBe(1);
+    expect(typeof onDisk.updated_at).toBe("string");
+    expect(onDisk.providers).toEqual({ openrouter: { m: 1000 } });
+  });
+
+  it("refetches with a warning instead of crashing on an oversized file", () => {
+    const path = cachePath();
+    writeFileSync(path, JSON.stringify({ openrouter: { m: 1 } }) + " ".repeat(MAX_CACHE_BYTES + 1));
+    const result = loadWindowsCache(path);
+    expect(result.data).toEqual({});
+    expect(result.warning).not.toBeNull();
+  });
+
+  it("caps a provider at MAX_MODELS_PER_PROVIDER entries when saving", () => {
+    const path = cachePath();
+    const many: Record<string, number | null> = {};
+    for (let i = 0; i < MAX_MODELS_PER_PROVIDER + 10; i++) many[`m${String(i)}`] = i + 1;
+    expect(saveWindowsCache(path, {}, { openrouter: many })).toBeNull();
+    const { data } = loadWindowsCache(path);
+    expect(Object.keys(data.openrouter ?? {})).toHaveLength(MAX_MODELS_PER_PROVIDER);
+  });
+
+  it("warns and skips the write instead of crashing when a capped provider still exceeds the byte cap", () => {
+    const path = cachePath();
+    const huge: Record<string, number | null> = {};
+    const longId = "m".repeat(5000);
+    for (let i = 0; i < MAX_MODELS_PER_PROVIDER + 50; i++) huge[`${longId}-${String(i)}`] = i;
+    const warning = saveWindowsCache(path, {}, { openrouter: huge });
+    expect(warning).not.toBeNull();
   });
 });
 describe("usage and pricing", () => {

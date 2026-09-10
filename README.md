@@ -239,6 +239,22 @@ retoma o run reaproveitando o cache: os nós já concluídos não são
 reexecutados, só o trabalho que ainda faltava quando o processo anterior
 parou (issue #103, `tests/workflow-cross-process.test.ts`).
 
+A tool `list_models` reporta `context_window` por modelo — a janela de
+contexto que o próprio provedor expõe em `/models` (`context_length` no
+OpenRouter; `max_input_tokens`/`context_window` em outros; `null`, nunca
+inventado, quando o provedor não informa nada). O resultado de cada busca
+ao vivo é guardado em `~/.lohra/context-windows.json`, um envelope
+versionado (`{"schema_version":1,"updated_at":...,"providers":{...}}`,
+teto de 2000 modelos por provedor e 8 MB no arquivo inteiro) que sobrevive
+a um reinício e serve de fallback quando um provedor não responde na
+busca seguinte. O nome é próprio deste runtime, não `model_windows.json`
+— o lohra Python já usa esse caminho num formato plano sem versão e
+descarta qualquer coisa que fuja dele, então dividir o arquivo faria os
+dois runtimes invalidarem o cache um do outro a cada uso. Um arquivo
+estranho no caminho deste runtime (sem `schema_version`, JSON inválido,
+maior que o teto) é tratado como formato desconhecido — nunca lido,
+refeito na próxima busca ao vivo (issue #249).
+
 ### Erros e `--help`
 
 O texto de erro e de ajuda da CLI é próprio deste produto — não é um

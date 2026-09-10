@@ -2,6 +2,7 @@ import { probeOllamaDown } from "../doctor/snapshot.js";
 import { getProviderProfile, listProviders, resolveApiKey } from "../providers/index.js";
 import type { ProviderProfile } from "../providers/types.js";
 import { Catalog, ProviderModels } from "./types.js";
+import { extractModels } from "./windows.js";
 
 export const MAX_RESPONSE_BYTES = 4_000_000;
 export const DEFAULT_TIMEOUT_MS = 3000;
@@ -88,36 +89,6 @@ export function authHeaders(
   return { Authorization: `Bearer ${key}`, "Accept-Encoding": "identity" };
 }
 
-function modelIds(payload: unknown): readonly string[] | null {
-  const source = Array.isArray(payload)
-    ? payload
-    : typeof payload === "object" &&
-        payload !== null &&
-        Array.isArray((payload as { data?: unknown }).data)
-      ? (payload as { data: unknown[] }).data
-      : null;
-  if (source === null) return null;
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const item of source) {
-    const value =
-      typeof item === "string"
-        ? item
-        : typeof item === "object" && item !== null
-          ? typeof (item as { id?: unknown }).id === "string"
-            ? (item as { id: string }).id
-            : typeof (item as { name?: unknown }).name === "string"
-              ? (item as { name: string }).name
-              : null
-          : null;
-    if (value !== null && !seen.has(value)) {
-      seen.add(value);
-      result.push(value);
-    }
-  }
-  return result;
-}
-
 export async function fetchModels(
   profile: ProviderProfile,
   key: string,
@@ -145,9 +116,10 @@ export async function fetchModels(
     } catch {
       return new ProviderModels(profile.name, "error", [], 0, "invalid JSON");
     }
-    const ids = modelIds(payload);
-    if (ids === null)
+    const extracted = extractModels(payload);
+    if (extracted === null)
       return new ProviderModels(profile.name, "error", [], 0, "unexpected response shape");
+    const { ids, windows } = extracted;
     if (ids.length === 0)
       return new ProviderModels(profile.name, "live", [], 0, "reachable, no models listed");
     const hasMore =
@@ -160,6 +132,7 @@ export async function fetchModels(
       ids,
       ids.length,
       hasMore ? `first page only (${String(ids.length)} ids) — the provider has more` : "",
+      windows,
     );
   } catch (error) {
     const detail =

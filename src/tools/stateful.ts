@@ -2,6 +2,12 @@ import { join } from "node:path";
 
 import { buildCatalog } from "../catalog/catalog.js";
 import type { Catalog, ProviderModels } from "../catalog/types.js";
+import {
+  CONTEXT_WINDOWS_FILENAME,
+  loadWindowsCache,
+  saveWindowsCache,
+  type WindowsCache,
+} from "../catalog/windows-cache.js";
 import { MemoryStore } from "../memory/store.js";
 import { SkillStore } from "../skills/store.js";
 import { loadTiers, MODEL_TIERS, type TierMap } from "../workflow/tiers.js";
@@ -149,19 +155,28 @@ function renderProvider(
   entry: ProviderModels,
   query: string,
   limit: number,
+  cachedWindows: Readonly<Record<string, number | null>>,
 ): Record<string, unknown> {
   const scanned = entry.total;
   const models = query
     ? entry.models.filter((model) => model.toLowerCase().includes(query))
     : entry.models;
   const total = query ? models.length : entry.total;
+  const shown = models.slice(0, limit);
   const payload: Record<string, unknown> = {
     provider: entry.provider,
     source: entry.source,
     total,
-    models: models.slice(0, limit),
-    ...(entry.detail ? { detail: entry.detail } : {}),
+    models: shown,
   };
+  if (shown.length > 0) {
+    const contextWindow: Record<string, number | null> = {};
+    for (const model of shown) {
+      contextWindow[model] = entry.windows[model] ?? cachedWindows[model] ?? null;
+    }
+    payload.context_window = contextWindow;
+  }
+  if (entry.detail) payload.detail = entry.detail;
   const notes: string[] = [];
   if (query && scanned)
     notes.push(`${String(total)} of ${String(scanned)} matched ${JSON.stringify(query)}`);
@@ -172,6 +187,17 @@ function renderProvider(
   }
   if (notes.length > 0) payload.note = `${entry.provider}: ${notes.join("; ")}`;
   return payload;
+}
+
+/** `entry.provider -> { modelId -> window }` para os provedores que voltaram ao vivo com ao menos um modelo. */
+function freshWindowsByProvider(catalog: Catalog): WindowsCache {
+  const fresh: Record<string, Readonly<Record<string, number | null>>> = {};
+  for (const entry of catalog.entries) {
+    if (entry.source === "live" && Object.keys(entry.windows).length > 0) {
+      fresh[entry.provider] = entry.windows;
+    }
+  }
+  return fresh;
 }
 
 export class ListModelsTool {
@@ -201,13 +227,28 @@ export class ListModelsTool {
         `unknown provider ${JSON.stringify(provider)} \u2014 call list_models with no 'provider' to see the ones this install knows about`,
       );
     }
+    const cachePath = join(this.home, CONTEXT_WINDOWS_FILENAME);
+    const cacheWarnings: string[] = [];
+    const loaded = loadWindowsCache(cachePath);
+    if (loaded.warning !== null) cacheWarnings.push(loaded.warning);
+    const fresh = freshWindowsByProvider(catalog);
+    if (Object.keys(fresh).length > 0) {
+      const saveWarning = saveWindowsCache(cachePath, loaded.data, fresh);
+      if (saveWarning !== null) cacheWarnings.push(saveWarning);
+    }
     const tiers = this.tierLoader(join(this.home, "workflow_tiers.json"));
     const renderedTiers: Record<string, unknown> = {};
     for (const name of MODEL_TIERS) renderedTiers[name] = tiers[name] ?? null;
+    const noteParts = [
+      ...(limit.note === null ? [] : [limit.note]),
+      ...(cacheWarnings.length > 0 ? [cacheWarnings.join("; ")] : []),
+    ];
     return toolResult(undefined, {
-      providers: catalog.entries.map((entry) => renderProvider(entry, query, limit.value)),
+      providers: catalog.entries.map((entry) =>
+        renderProvider(entry, query, limit.value, loaded.data[entry.provider] ?? {}),
+      ),
       tiers: renderedTiers,
-      ...(limit.note === null ? {} : { note: limit.note }),
+      ...(noteParts.length > 0 ? { note: noteParts.join("; ") } : {}),
     });
   }
 }
