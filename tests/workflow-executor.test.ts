@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   Budget,
+  ESTIMATED_TOKENS_PER_LEAF,
   FanoutRejected,
   MemoryWorkflowCache,
   WorkflowEngine,
@@ -120,6 +121,31 @@ describe("workflow budget and cache", () => {
     // unmeasured leaf must never pull the average (and affordableLeaves)
     // down, even though its own tokens are zero either way.
     expect(budget.estimatedLeafCost).toBe(200);
+  });
+
+  it("never counts an uncertain leaf toward the average even with real, nonzero tokens (#232)", () => {
+    // The previous test's uncertain leaf carried zero tokens, so
+    // `(input > 0 || output > 0)` alone already excluded it — this pins the
+    // `usageUncertain` guard itself, with a leaf that WOULD have qualified
+    // on token count alone.
+    const budget = new Budget({ tokenBudget: 10_000 });
+    budget.chargeTokens(500, 0, true);
+    expect(budget.estimatedLeafCost).toBe(ESTIMATED_TOKENS_PER_LEAF);
+    // (10_000 - 500 already spent) / default 2000 — never / 500, which
+    // would happen if the uncertain leaf's tokens leaked into the average.
+    expect(budget.affordableLeaves()).toBe(4);
+  });
+
+  it("debits an uncertain leaf's tokens into tokensSpent but keeps them out of the average's numerator (#232)", () => {
+    // Invariant 3 (budget never unbounded): the uncertain leaf's tokens
+    // still count against the run's own ceiling — only the AVERAGE, used to
+    // project affordableLeaves, must never be inflated by a leaf that was
+    // never actually measured.
+    const budget = new Budget({ tokenBudget: 10_000 });
+    budget.chargeTokens(200, 0); // measured
+    budget.chargeTokens(500, 0, true); // uncertain, real tokens
+    expect(budget.tokensSpent).toBe(700);
+    expect(budget.estimatedLeafCost).toBe(200); // 200/1, never (200+500)/1 or /2
   });
 
   it("rejects fanout before charging lifetime", () => {

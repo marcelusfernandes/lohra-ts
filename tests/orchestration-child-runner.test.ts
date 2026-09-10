@@ -208,6 +208,27 @@ describe("createChildRunner", () => {
     close();
   });
 
+  it("keeps usage certain when the provider reports a real usage object with every field zero (#232)", async () => {
+    // Distinct from "no usage frame at all" above: here the provider DID
+    // report usage — it just happened to be all zeros. usage !== null, so
+    // this is a genuinely measured (if cheap) turn, never uncertain.
+    const { sessions, close } = setup();
+    sessions.createSession({ id: "parent-1", source: "gateway" });
+    const parentProfile = getProviderProfile("openai");
+    if (parentProfile === null) throw new Error("openai profile missing");
+    const { client } = fakeClient([assistantStream("hi, zero usage reported", 0, 0)]);
+    const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
+    const runner = makeRunner(sessions, pool);
+
+    const result = await runner("child-zero-usage", { prompt: "hi" }, "SYS", () => [], noSignal);
+
+    expect(result.status).toBe("complete");
+    expect(result.tokensIn).toBe(0);
+    expect(result.tokensOut).toBe(0);
+    expect(result.usageUncertain).toBe(false);
+    close();
+  });
+
   it("resolves an overridden provider/model via ClientPool, leaving the parent client untouched (L1)", async () => {
     const { sessions, close } = setup();
     sessions.createSession({ id: "parent-1", source: "gateway" });

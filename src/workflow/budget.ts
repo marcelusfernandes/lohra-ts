@@ -35,6 +35,10 @@ export class Budget {
   private input = 0;
   private output = 0;
   private measuredLeaves = 0;
+  // #232: the average's own numerator, separate from the run's total spend
+  // (this.input/this.output) — see chargeTokens.
+  private measuredInput = 0;
+  private measuredOutput = 0;
 
   constructor(
     options: {
@@ -78,10 +82,18 @@ export class Budget {
     const output = Math.max(0, Math.trunc(outputTokens));
     this.input += input;
     this.output += output;
-    // #232: a leaf whose usage was never measured never counts toward the
-    // average, even if a future caller passes nonzero tokens for it —
-    // never let an unmeasured leaf pull estimatedLeafCost down.
-    if (!usageUncertain && (input > 0 || output > 0)) this.measuredLeaves += 1;
+    // #232: the run's own debit above always includes an uncertain leaf's
+    // tokens (invariant 3 — nothing disappears from the budget just because
+    // it was never measured), but the AVERAGE sums only what was actually
+    // measured, in its own accumulator — an uncertain leaf with real,
+    // nonzero tokens must never pull estimatedLeafCost down by inflating a
+    // shared total while skipping the leaf count.
+    if (usageUncertain) return;
+    if (input > 0 || output > 0) {
+      this.measuredLeaves += 1;
+      this.measuredInput += input;
+      this.measuredOutput += output;
+    }
   }
 
   get tokensIn(): number {
@@ -106,7 +118,10 @@ export class Budget {
 
   get estimatedLeafCost(): number {
     if (this.measuredLeaves === 0) return ESTIMATED_TOKENS_PER_LEAF;
-    return Math.max(1, Math.trunc(this.tokensSpent / this.measuredLeaves));
+    return Math.max(
+      1,
+      Math.trunc((this.measuredInput + this.measuredOutput) / this.measuredLeaves),
+    );
   }
 
   affordableLeaves(): number | null {
