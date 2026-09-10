@@ -72,12 +72,14 @@ jobs:
           cache: npm
       - run: npm ci
       - name: ${{ matrix.slice }}
-        # O runner imprime o JSON da fatia no stdout; `tee` guarda uma cópia
-        # para o artifact abaixo (#323). `pipefail` preserva o exit code.
+        # O runner imprime o JSON da fatia no stdout (duas fatias mandam o caso
+        # vermelho para stderr, por isso `2>&1`); `tee` guarda uma cópia para o
+        # artifact abaixo (#323). Aqui o pipe é seguro porque `pipefail` está
+        # ligado — ao contrário do passo `plan`, que evita o pipe de propósito.
         run: |
           set -o pipefail
           mkdir -p .mutation-evidence
-          npm run ${{ matrix.script }} | tee ".mutation-evidence/${{ matrix.slice }}.log"
+          npm run ${{ matrix.script }} 2>&1 | tee ".mutation-evidence/${{ matrix.slice }}.log"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
