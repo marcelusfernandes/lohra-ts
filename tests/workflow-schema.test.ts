@@ -206,6 +206,24 @@ describe("validateSpec", () => {
     ]);
   });
 
+  it("validates and accepts 'retries' on a parallel node (#242)", () => {
+    const bad = validateSpec({
+      meta: { name: "x" },
+      nodes: [{ id: "p", type: "parallel", branches: ["a"], retries: 4 }],
+    });
+    expect(isValidationError(bad)).toBe(true);
+    if (!isValidationError(bad)) throw new Error("expected validation error");
+    expect(bad.issues.map((issue) => [issue.rule, issue.field])).toEqual([
+      ["field_value", "retries"],
+    ]);
+
+    const good = validateSpec({
+      meta: { name: "x" },
+      nodes: [{ id: "p", type: "parallel", branches: ["a"], retries: 2 }],
+    });
+    expect(isValidationError(good)).toBe(false);
+  });
+
   it("accepts a named 'schema' string that matches a top-level schemas entry", () => {
     const result = validateSpec({
       meta: { name: "x" },
