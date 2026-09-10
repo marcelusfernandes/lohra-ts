@@ -20,8 +20,8 @@ export async function runTiers(options: {
       return existsSync(path)
         ? {
             code: 1,
-            stdout: `${path} — exists but no usable tier was loaded (broken JSON or unknown keys)\ninspect it with a JSON validator, e.g. jq . ${path}\n`,
-            stderr: "",
+            stdout: "",
+            stderr: `${path} — exists but no tier (small/medium/big) is configured\n`,
           }
         : {
             code: 0,

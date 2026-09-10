@@ -46,11 +46,12 @@ function isEnoent(error: unknown): boolean {
 }
 
 /**
- * Fail-closed sibling of `loadTiers`: distinguishes an absent file (legitimate,
- * `{}`) from one that exists but cannot be trusted — bad JSON, a non-object
- * root, or a known tier (`small`/`medium`/`big`) with an unrecognized field or
- * a wrong-typed value. An unrelated top-level key is tolerated; only the
- * known tier keys are validated strictly.
+ * Fail-closed reader for `workflow_tiers.json`: distinguishes an absent file
+ * (legitimate, `{}`) from one that exists but cannot be trusted — bad JSON, a
+ * non-object root, or a known tier (`small`/`medium`/`big`) with an
+ * unrecognized field or a wrong-typed value. Every caller of the operator
+ * tier map (`lohra tiers`, `lohra models`, `list_models`, `WorkflowService`)
+ * goes through this function — there is no fail-open sibling left (#261).
  */
 export function readTiers(path: string): TierMap | TiersError {
   let content: string;
@@ -103,34 +104,6 @@ export function readTiers(path: string): TierMap | TiersError {
   return result;
 }
 
-export function loadTiers(path: string): TierMap {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
-  } catch {
-    return {};
-  }
-  const root = object(parsed);
-  if (root === null) return {};
-  const result: Partial<Record<ModelTierName, Tier>> = {};
-  for (const name of MODEL_TIERS) {
-    const authored = root[name];
-    if (typeof authored === "string") {
-      const model = text(authored);
-      if (model !== undefined) result[name] = { model };
-      continue;
-    }
-    const raw = object(authored);
-    if (raw === null) continue;
-    const tier: Record<string, string> = {};
-    for (const key of ["model", "provider", "effort"] as const) {
-      const value = text(raw[key]);
-      if (value !== undefined) tier[key] = value;
-    }
-    if (Object.keys(tier).length > 0) result[name] = tier;
-  }
-  return result;
-}
 export function writeTiers(path: string, tiers: TierMap): void {
   writeFileSync(path, `${JSON.stringify(tiers, null, 2)}\n`, "utf8");
 }
