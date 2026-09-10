@@ -1,9 +1,13 @@
-// Issue #149 (passo 0b do épico #13): a parte "nomeada" (a-z, aa-am, p, q, o)
+// Issue #149 (passo 0b do épico #13): a parte "nomeada" (a-z, aa-ao, p, q, o)
 // do catálogo de mutantes de `mutations:t16`, migrada do runner legado de
 // paridade sem mudar id/mechanism/edits — só o caminho e o tipo importado
 // mudam. Separado de `workflow-durability.ts` só para caber no limite de
-// 800 linhas por arquivo (`arquivo-grande`): 38 mutantes, cada um escorado
+// 800 linhas por arquivo (`arquivo-grande`): 40 mutantes, cada um escorado
 // num único foco (`{file, test}`) em vez da bateria inteira.
+//
+// `an`/`ao` (issue #269): a fiação do mapa de tiers do operador até o
+// `WorkflowEngine`, dos dois lados que #258 corrigiu (`engineBaseOptions` em
+// `engine-options.ts` e o call site de `launchDurable` em `service.ts`).
 //
 // Each focus is run GREEN at baseline before it is run under its mutant, so a
 // filter that matches no test can never be mistaken for a kill.
@@ -16,12 +20,14 @@ const service = "src/workflow/service.ts";
 const sandbox = "src/workflow/sandbox.ts";
 const sqliteCache = "src/workflow/sqlite-cache.ts";
 const engine = "src/workflow/engine.ts";
+const engineOptions = "src/workflow/engine-options.ts";
 const normalizer = "scripts/mutations/fixtures/normalize-evidence.mjs";
 
 const repositoryTests = "tests/state-workflow-repository.test.ts";
 const serviceTests = "tests/workflow-service-durability.test.ts";
 const durabilityTests = "tests/workflow-durability.test.ts";
 const sandboxTests = "tests/workflow-sandbox.test.ts";
+const tiersTests = "tests/workflow-tiers.test.ts";
 
 export const namedMutants: readonly Mutant[] = [
   {
@@ -595,6 +601,41 @@ export const namedMutants: readonly Mutant[] = [
         file: normalizer,
         before: "  normalizeSystemPromptToday(parsed);",
         after: '  return runIdsNormalized.replaceAll(TODAY, "$1<date>");',
+      },
+    ],
+  },
+  {
+    id: "an/engine-options-drops-the-tier-map",
+    category: "tiers",
+    mechanism:
+      "engineBaseOptions discards the resolved tier map, so every construction site builds its WorkflowEngine with no tiers at all (#258)",
+    focus: {
+      file: tiersTests,
+      test: "a fresh, non-durable run resolves the node's tier to the mapped model",
+    },
+    edits: [
+      {
+        file: engineOptions,
+        before: "  return {\n    runtime,\n    runId,\n    tiers,",
+        after: "  return {\n    runtime,\n    runId,\n    tiers: {},",
+      },
+    ],
+  },
+  {
+    id: "ao/durable-launch-site-forgets-the-tier-map",
+    category: "tiers",
+    mechanism:
+      "the launchDurable construction site passes an empty tier map instead of the one threaded through options, so a resumed run loses tier resolution (#258)",
+    focus: {
+      file: tiersTests,
+      test: "tier still resolves to the mapped model after a checkpoint pause",
+    },
+    edits: [
+      {
+        file: service,
+        before:
+          "      ...engineBaseOptions(this.runtime, runId, options.tiers, this.loader, answers),",
+        after: "      ...engineBaseOptions(this.runtime, runId, {}, this.loader, answers),",
       },
     ],
   },
