@@ -152,6 +152,24 @@ describe("readTiers — fail-closed", () => {
     expect((result as TiersError).message).not.toContain("did you mean");
   });
 
+  it("rejects an unknown top-level key at edit distance exactly 2 and still suggests the closest tier (boundary, #276)", () => {
+    const path = tiersPath(root());
+    writeFileSync(path, JSON.stringify({ sml: { model: "m" } }));
+    const result = readTiers(path);
+    expect(result).toBeInstanceOf(TiersError);
+    expect((result as TiersError).message).toContain("sml");
+    expect((result as TiersError).message).toContain("did you mean 'small'");
+  });
+
+  it("rejects an unknown top-level key one edit past the boundary (distance 3), without a suggestion (#276)", () => {
+    const path = tiersPath(root());
+    writeFileSync(path, JSON.stringify({ med: { model: "m" } }));
+    const result = readTiers(path);
+    expect(result).toBeInstanceOf(TiersError);
+    expect((result as TiersError).message).toContain("med");
+    expect((result as TiersError).message).not.toContain("did you mean");
+  });
+
   it("rejects an unknown key before validating a known tier's fields (precedence, #261)", () => {
     const path = tiersPath(root());
     writeFileSync(path, JSON.stringify({ smal: {} }));

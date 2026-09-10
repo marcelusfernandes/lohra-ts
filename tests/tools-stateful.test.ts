@@ -144,12 +144,12 @@ describe("stateful tool handlers", () => {
     expect(result.note).toMatch(/refetch/iu);
   });
 
-  it("returns a named tool_error, not an empty tier map, for a broken workflow_tiers.json (#261)", async () => {
+  it("returns a named tool_error, not an empty tier map, for a broken workflow_tiers.json, and never reaches the catalog builder (error-before-network, #276)", async () => {
     const home = root();
     writeFileSync(join(home, "workflow_tiers.json"), "[");
-    const tool = new ListModelsTool(home, {}, () =>
-      Promise.resolve(new Catalog([new ProviderModels("anthropic", "skipped", [], 0, "no key")])),
-    );
+    const neverBuilder = () =>
+      Promise.reject(new Error("catalog builder must not be reached when tiers are invalid"));
+    const tool = new ListModelsTool(home, {}, neverBuilder);
     const result = JSON.parse(await tool.handle({})) as { readonly error?: string };
     expect(result.error).toContain(join(home, "workflow_tiers.json"));
   });
