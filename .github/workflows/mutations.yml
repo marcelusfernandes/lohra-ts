@@ -85,6 +85,9 @@ jobs:
         with:
           name: mutation-evidence-${{ matrix.slice }}
           path: .mutation-evidence/
+          # Diretório-ponto: sem isto o upload-artifact@v4 o trata como oculto
+          # e avisa "No files were found" mesmo com o .log escrito (#323).
+          include-hidden-files: true
           if-no-files-found: warn
 
   # Job-resumo de nome fixo (#225): é ele que o ruleset exige. Roda sempre;
