@@ -550,11 +550,9 @@ export class WorkflowService {
     );
   }
 
-  /**
-   * The composition handed to the runtime, pinned to ONE acquisition. Once a
+  /** The composition handed to the runtime, pinned to ONE acquisition. Once a
    * newer stretch owns the run, the older stretch's wrapper stops granting
-   * anything: its working root and its taint are no longer the run's.
-   */
+   * anything: its working root and its taint are no longer the run's. */
   private stretchToolDispatch(
     runId: string,
     stretchId: number,
@@ -1076,6 +1074,8 @@ export class WorkflowService {
         finishStretch();
         record.settled = true;
         if (owned) {
+          // pausePayload above already persisted the stretch-only count; fold the prior total in now, after, so the live view (here and the next status() read of this `result`) matches the durable rollup (#247 round 2).
+          result.leafRespawns += priorView?.leaf_respawns ?? 0;
           record.published = resultView(runId, parsed.name, result, engine.budget);
           record.resolve(record.published);
         } else {
@@ -1127,8 +1127,7 @@ export class WorkflowService {
     );
   }
 
-  /** One scratch directory per ACQUISITION, named by the fence, so a stale
-   * owner's leaves write harmlessly into their own obsolete root. */
+  /** One scratch directory per ACQUISITION, named by the fence, so a stale owner's leaves write harmlessly into their own obsolete root. */
   private workingRootOf(runId: string, fence: number): string {
     return join(this.homeRoot, "runs", runId, `work-${String(fence)}`);
   }

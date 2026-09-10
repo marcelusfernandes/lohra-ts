@@ -598,11 +598,12 @@ describe("workflow service status", () => {
     connection.close();
   });
 
-  // #247: leaf_respawns must survive a checkpoint pause into the DURABLE
-  // rollup — a cold reader (no live record) reads it back via
-  // durableRollup, not resultView, and a resume that respawns nothing
-  // keeps the prior count instead of resetting it.
-  it("persists leaf_respawns in the durable rollup, cumulative across a resume", async () => {
+  // #247 (round 2): leaf_respawns is ONE key with ONE meaning everywhere —
+  // the run's total, not the current stretch's. A cold reader (no live
+  // record) gets it from durableRollup; the live view after a resume gets
+  // it from resultView, which folds the prior total in too. Both must
+  // read the same number for the same run.
+  it("persists leaf_respawns as the run's cumulative total, live and durable, across a resume", async () => {
     const root = mkdtempSync(join(tmpdir(), "lohra-workflow-service-leaf-respawns-"));
     roots.push(root);
     const connection = openStateDatabase(join(root, "state.db"));
@@ -651,11 +652,10 @@ describe("workflow service status", () => {
     if ("error" in resumed) throw new Error(resumed.error);
     const finished = (await coldService.status(started.run_id, true)) as Record<string, unknown>;
     expect(finished.status).toBe("complete");
-    // The live view (resultView) reports the CURRENT stretch only — this
-    // resume respawned nothing, so it reads 0 even though the run's total
-    // (below, via the durable/cold path) is 1. Same key, different scope:
-    // same split as faults (per stretch) vs faults_total (cumulative).
-    expect(finished.leaf_respawns).toBe(0);
+    // This resume's own stretch respawned nothing, but the LIVE view still
+    // reports 1 — the run's total, folded in from the prior stretch, same
+    // as the durable/cold view below. One key, one meaning.
+    expect(finished.leaf_respawns).toBe(1);
 
     const secondColdService = new WorkflowService({ runtime: new FakeRuntime([]), store });
     const durable = (await secondColdService.status(started.run_id)) as Record<string, unknown>;
