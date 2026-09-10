@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { resolveContextWindow } from "../src/providers/context-window.js";
+import { getProviderProfile } from "../src/providers/registry.js";
 import type { ProviderProfile } from "../src/providers/types.js";
 
 function fakeProfile(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
@@ -135,5 +136,43 @@ describe("resolveContextWindow — cinco níveis pinados (issue #250)", () => {
     expect(
       resolveContextWindow({ provider: "fake", model: "m", override: undefined, profile }),
     ).toEqual({ tokens: 64_000, source: "provider" });
+  });
+});
+
+describe("resolveContextWindow — perfis reais do registry (issue #250)", () => {
+  it("openai: um id datado de gpt-4o-mini casa com a entrada mais específica da tabela", () => {
+    const profile = getProviderProfile("openai");
+    if (profile === null) throw new Error("expected openai profile");
+    expect(
+      resolveContextWindow({
+        provider: "openai",
+        model: "gpt-4o-mini-2024-07-18",
+        profile,
+      }),
+    ).toEqual({ tokens: 128_000, source: "table" });
+  });
+
+  it("anthropic: um modelo fora da tabela cai no piso do provedor, não no default global", () => {
+    const profile = getProviderProfile("anthropic");
+    if (profile === null) throw new Error("expected anthropic profile");
+    expect(
+      resolveContextWindow({
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        profile,
+      }),
+    ).toEqual({ tokens: 200_000, source: "provider" });
+  });
+
+  it("ollama: sem tabela nem piso, cai no default global de 200000", () => {
+    const profile = getProviderProfile("ollama");
+    if (profile === null) throw new Error("expected ollama profile");
+    expect(
+      resolveContextWindow({
+        provider: "ollama",
+        model: "qualquer-modelo-local",
+        profile,
+      }),
+    ).toEqual({ tokens: 200_000, source: "default" });
   });
 });
