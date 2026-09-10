@@ -43,6 +43,26 @@ function baseOptions(overrides: BaseOptionsOverrides = {}) {
   };
 }
 
+// Issue #302 (see tests/dashboard-host.test.ts:90-117 for the full context):
+// `await sleep(50)` races the real boot work whenever the event loop is busy
+// with other test files (two full `npm test` runs at once). This file had
+// five leftover instances of the same wall-clock wait (issue #307).
+// `registerShutdownTrigger` only fires once `runDashboard` has actually
+// bound the port, so it doubles as a ready signal.
+function waitUntilBound(options: { registerShutdownTrigger?: (handler: () => void) => void }): {
+  readonly ready: Promise<void>;
+  readonly shutdown: () => void;
+} {
+  let handler: (() => void) | undefined;
+  const ready = new Promise<void>((resolveReady) => {
+    options.registerShutdownTrigger = (trigger: () => void) => {
+      handler = trigger;
+      resolveReady();
+    };
+  });
+  return { ready, shutdown: () => handler?.() };
+}
+
 describe("runDashboard: no provider configured (assertion 56)", () => {
   it("exits 2 with the exact didactic no-provider text, matching chat's boundary", async () => {
     const options = baseOptions({ argv: [] });
@@ -82,23 +102,20 @@ describe("runDashboard: subscription mode without login (assertion 50)", () => {
       JSON.stringify({ openai: { auth_mode: "subscription", acknowledged_tos_risk: false } }),
     );
     const stderrLines: string[] = [];
-    let shutdown: (() => void) | undefined;
-    const donePromise = runDashboard({
+    const options: Parameters<typeof runDashboard>[0] = {
       flags: new Map([["--provider", "anthropic"]]),
       environment: { ANTHROPIC_API_KEY: "sk-test" },
       home,
       codexHome: join(home, "codex"),
       cwd: tmpdir(),
-      stderr: (text) => stderrLines.push(text),
+      stderr: (text: string) => stderrLines.push(text),
       port: 0,
-      registerShutdownTrigger: (handler) => {
-        shutdown = handler;
-      },
-    });
-    // Wait for the server to actually start (stderr lines appear once bound).
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+    };
+    const { ready, shutdown } = waitUntilBound(options);
+    const donePromise = runDashboard(options);
+    await Promise.race([ready, donePromise]);
     expect(stderrLines.some((line) => line.startsWith("Lohra dashboard: http://"))).toBe(true);
-    shutdown?.();
+    shutdown();
     const code = await donePromise;
     expect(code).toBe(0);
   });
@@ -112,24 +129,22 @@ describe("runDashboard: subscription mode without login (assertion 50)", () => {
       }),
     );
     const stderrLines: string[] = [];
-    let shutdown: (() => void) | undefined;
-    const donePromise = runDashboard({
+    const options: Parameters<typeof runDashboard>[0] = {
       flags: new Map([["--provider", "anthropic"]]),
       environment: { ANTHROPIC_API_KEY: "sk-test" },
       home,
       codexHome: join(home, "codex"),
       cwd: tmpdir(),
-      stderr: (text) => stderrLines.push(text),
+      stderr: (text: string) => stderrLines.push(text),
       port: 0,
-      registerShutdownTrigger: (handler) => {
-        shutdown = handler;
-      },
-    });
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+    };
+    const { ready, shutdown } = waitUntilBound(options);
+    const donePromise = runDashboard(options);
+    await Promise.race([ready, donePromise]);
     expect(stderrLines.join("")).toContain(
       "note: your OpenAI/Codex subscription is active, but preference=api_key",
     );
-    shutdown?.();
+    shutdown();
     await donePromise;
   });
 });
@@ -161,18 +176,15 @@ describe("runDashboard: port already bound (assertion 55)", () => {
 describe("runDashboard: --insecure boots and serves without a token, stderr has zero warning lines", () => {
   it("stderr is exactly the two boot lines, no token in the WS URL", async () => {
     const options = baseOptions({ argv: ["--provider", "anthropic", "--insecure"] });
-    let shutdown: (() => void) | undefined;
-    options.registerShutdownTrigger = (handler: () => void) => {
-      shutdown = handler;
-    };
+    const { ready, shutdown } = waitUntilBound(options);
     const donePromise = runDashboard(options);
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+    await Promise.race([ready, donePromise]);
 
     expect(options.stderrLines).toHaveLength(2);
     expect(options.stderrLines[0]).toMatch(/^Lohra dashboard: http:\/\/127\.0\.0\.1:\d+\n$/);
     expect(options.stderrLines[1]).toMatch(/^WebSocket: {7}ws:\/\/127\.0\.0\.1:\d+\/api\/ws\n$/);
 
-    shutdown?.();
+    shutdown();
     const code = await donePromise;
     expect(code).toBe(0);
   });
@@ -181,16 +193,13 @@ describe("runDashboard: --insecure boots and serves without a token, stderr has 
 describe("runDashboard: SIGINT-equivalent shutdown (assertion 54)", () => {
   it("exits 0 and the port is free again for an immediate rebind", async () => {
     const options = baseOptions();
-    let shutdown: (() => void) | undefined;
-    options.registerShutdownTrigger = (handler: () => void) => {
-      shutdown = handler;
-    };
+    const { ready, shutdown } = waitUntilBound(options);
     const donePromise = runDashboard(options);
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+    await Promise.race([ready, donePromise]);
     const boundLine = options.stderrLines.find((line) => line.startsWith("Lohra dashboard:"));
     const port = Number(boundLine?.match(/:(\d+)\n$/)?.[1]);
 
-    shutdown?.();
+    shutdown();
     const code = await donePromise;
     expect(code).toBe(0);
 
@@ -255,12 +264,9 @@ describe("runDashboard: --port CLI flag (mirrors the oracle's dashboard --port, 
 describe("runDashboard: end-to-end real socket round trip", () => {
   it("boots, serves an authenticated /api/status, and accepts a real WS connection", async () => {
     const options = baseOptions();
-    let shutdown: (() => void) | undefined;
-    options.registerShutdownTrigger = (handler: () => void) => {
-      shutdown = handler;
-    };
+    const { ready, shutdown } = waitUntilBound(options);
     const donePromise = runDashboard(options);
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+    await Promise.race([ready, donePromise]);
     const boundLine = options.stderrLines.find((line) => line.startsWith("Lohra dashboard:"));
     const port = Number(boundLine?.match(/:(\d+)\n$/)?.[1]);
     const wsLine = options.stderrLines.find((line) => line.startsWith("WebSocket:"));
@@ -268,16 +274,16 @@ describe("runDashboard: end-to-end real socket round trip", () => {
     expect(token).toBeDefined();
 
     const ws = new WebSocket(`ws://127.0.0.1:${String(port)}/api/ws?token=${String(token)}`);
-    const ready = await new Promise<string>((resolvePromise) => {
+    const readyMessage = await new Promise<string>((resolvePromise) => {
       ws.once("message", (data) => {
         resolvePromise(Buffer.from(data as Buffer).toString("utf8"));
       });
     });
-    const readyFrame = JSON.parse(ready) as { params: { type: string } };
+    const readyFrame = JSON.parse(readyMessage) as { params: { type: string } };
     expect(readyFrame.params.type).toBe("gateway.ready");
     ws.close();
 
-    shutdown?.();
+    shutdown();
     await donePromise;
   });
 });

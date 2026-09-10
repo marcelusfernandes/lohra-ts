@@ -110,6 +110,16 @@ describe("vision image parts", () => {
     );
   });
 
+  // Issue #307: caracterizado sob carga real (três suítes concorrentes —
+  // este arquivo mais dois `npm test` inteiros) — falhou com `Error: Test
+  // timed out in 15000ms` depois de 16626ms, mesmo já tendo o timeout
+  // inflado desde antes desta issue. Mesma causa já documentada para
+  // `tests/media-persistence.test.ts:114-125` (issue #128): o custo real
+  // não é o trabalho (`buildImagePart`, ~1 MiB), é `expect(...).toEqual(bytes)`
+  // — o comparador profundo (`iterableEquality`) percorre um Buffer
+  // elemento a elemento. Trocado por `Buffer.prototype.equals` (memcmp
+  // nativo, O(n), mesma garantia byte-a-byte); o timeout inflado deixa de
+  // ser necessário para compensar a comparação, não para o trabalho em si.
   it("absorbs a trusted-root alias and accepts the measured large oracle fixture", async () => {
     const parent = root();
     const actual = join(parent, "actual");
@@ -120,8 +130,8 @@ describe("vision image parts", () => {
     symlinkSync(actual, alias);
     const part = await buildImagePart({ path: join(alias, "large.png"), localRoot: alias });
     const encoded = part.image_url.url.slice(part.image_url.url.indexOf(",") + 1);
-    expect(Buffer.from(encoded, "base64")).toEqual(bytes);
-  }, 15_000);
+    expect(Buffer.from(encoded, "base64").equals(bytes)).toBe(true);
+  });
 
   it("revalidates after the observable input preflight hook", async () => {
     const directory = root();
@@ -250,6 +260,15 @@ describe("remote vision validation", () => {
     expect(decode).not.toHaveBeenCalled();
   });
 
+  // Issue #307: caracterizado sob carga real (dois `npm test` inteiros em
+  // paralelo) — falhou com `Error: Test timed out in 5000ms` depois de
+  // 5119ms de trabalho síncrono de verdade (quatro alocações/conversões
+  // base64 de ~20 MiB cada), não por nenhum estado compartilhado. É
+  // trabalho síncrono, então o relógio do vitest só pode expirar depois que
+  // o corpo devolve o controle ao event loop — sob contenção de CPU o
+  // próprio trabalho ultrapassa o default de 5s. Mesmo padrão já usado
+  // acima (linha ~124, 15_000ms para 1 MiB): o timeout do TESTE sobe para
+  // casar com o tamanho real do trabalho, a fixture não encolhe.
   it("covers legal encoded and decoded 20 MiB boundaries", () => {
     const lower = "A".repeat(MAX_DATA_URI_BASE64_CHARS - 4);
     expect(validateRemoteImage(`data:image/png;base64,${lower}`).length).toBe(
@@ -267,5 +286,5 @@ describe("remote vision validation", () => {
     const decodedOverflow = Buffer.alloc(MAX_VISION_IMAGE_BYTES + 1).toString("base64");
     expect(decodedOverflow).toHaveLength(MAX_DATA_URI_BASE64_CHARS);
     expect(() => validateRemoteImage(`data:image/png;base64,${decodedOverflow}`)).toThrow("20 MiB");
-  });
+  }, 30_000);
 });
