@@ -9,6 +9,11 @@ export interface CompactionResult {
   readonly keptCount: number;
 }
 
+/** Must match `SUMMARY_LEAD_CONTENT` in `src/conversation/compaction.ts`
+ * exactly -- see `compactHistory` below for why this leads every compacted
+ * history. */
+const SUMMARY_LEAD_TEXT = "(resumo da conversa anterior a seguir)";
+
 export interface CreateSessionInput {
   readonly id: string;
   readonly source?: string;
@@ -281,16 +286,22 @@ export class SessionRepository {
         .prepare(`UPDATE messages SET active = 0 WHERE id IN (${placeholders})`)
         .run(...rows.map((row) => row.id as SqliteInteger));
 
-      // Shape matches src/conversation/compaction.ts's buildSummaryMessage:
-      // role "assistant" (never "system" -- see that module's comment on
-      // why), finish_reason "stop" like any other completed reply.
+      // Shape matches src/conversation/compaction.ts's buildSummaryMessages:
+      // a synthetic "user" lead (SUMMARY_LEAD_TEXT below -- keep in sync
+      // with that module's SUMMARY_LEAD_CONTENT by hand, state/ doesn't
+      // import conversation/) followed by the "assistant" summary itself,
+      // never a bare "assistant" message first. Anthropic's Messages API
+      // rejects a request whose first message isn't role "user" (400) --
+      // this is what keeps every Anthropic-route turn working the first
+      // time a session compacts.
+      this.insertMessage(sessionId, { role: "user", content: SUMMARY_LEAD_TEXT, createdAt: now });
       this.insertMessage(sessionId, {
         role: "assistant",
         content: input.summary,
         createdAt: now,
         finishReason: "stop",
       });
-      let inserted = 1;
+      let inserted = 2;
       for (const row of toKeep) {
         this.insertMessageRow(sessionId, row);
         inserted += 1;

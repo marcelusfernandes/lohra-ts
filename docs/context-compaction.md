@@ -34,7 +34,7 @@ Este runtime escolheu **(i)**. Dois fatos decidiram:
 
 Resultado: `SessionRepository.compactHistory` (`src/state/session-repository.ts`)
 nunca chama `endSession`, e uma sessão compactada continua exatamente tão
-submissível no gateway quanto antes (`tests/gateway/session-service.test.ts`,
+submissível no gateway quanto antes (`tests/gateway-compaction.test.ts`,
 descrição "stays submittable across a compaction"). `end_reason=compression`
 continua servindo só ao mecanismo de resurrection pré-existente
 (ADR-T12-04) — as duas coisas nunca se cruzam.
@@ -79,8 +79,8 @@ cada iteração do turno, antes de montar a chamada ao provedor:
      configurado (`minKeepMessages`, default 8) até achar a mensagem
      `role: "user"` mais próxima — todo turno começa com `user`, então
      parar aí garante que uma mensagem `tool_calls` nunca fica separada do
-     seu resultado, e que o resumo (inserido como `assistant`) é sempre
-     seguido por `user`.
+     seu resultado, e que o par resumo (inserido como `user`+`assistant`,
+     veja abaixo) é sempre seguido por `user`.
    - Se não sobrar nada para resumir, devolve "nada compactado" (o caso
      fútil).
    - Caso contrário, resume o trecho antigo com o **transporte do próprio
@@ -88,10 +88,17 @@ cada iteração do turno, antes de montar a chamada ao provedor:
      `options.summarize` pode injetar outro summarizer, por exemplo um
      `AuxClient.summarizer()` futuro) e chama
      `SessionRepository.compactHistory`, que reescreve tudo numa transação:
-     desativa as mensagens antigas, insere o resumo, e **reinsere** as
-     mensagens preservadas com ids novos — preservar os ids antigos faria o
-     resumo (id mais alto, por ser o mais recente) ficar **depois** delas
-     em `loadMessages` (que ordena por `id`), invertendo a ordem.
+     desativa as mensagens antigas, insere **duas** mensagens novas —
+     `buildSummaryMessages` (`src/conversation/compaction.ts`): uma
+     mensagem `user` sintética ("(resumo da conversa anterior a seguir)")
+     seguida da mensagem `assistant` com o resumo em si, nunca só a
+     `assistant` sozinha. A API de Messages da Anthropic recusa (400)
+     qualquer requisição cuja primeira mensagem não seja `role: "user"` —
+     sem esse lead, todo turno pela rota Anthropic quebraria na primeira
+     compactação da sessão. Depois das duas, **reinsere** as mensagens
+     preservadas com ids novos — preservar os ids antigos faria o par
+     resumo (ids mais altos, por serem os mais recentes) ficar **depois**
+     delas em `loadMessages` (que ordena por `id`), invertendo a ordem.
    - Libera o lock sempre, em `finally`.
 6. **Latch**: se depois de compactar a nova estimativa ainda não couber, ou
    se o turno já tinha compactado uma vez e estoura de novo, o turno falha

@@ -8,8 +8,7 @@ export default {
     "tests/conversation-compaction.test.ts",
     "tests/conversation-runtime.test.ts",
     "tests/conversation-envelope.test.ts",
-    "tests/context-estimate.test.ts",
     "tests/state-locks.test.ts",
-    "tests/gateway/session-service.test.ts",
+    "tests/gateway-compaction.test.ts",
   ],
 } satisfies Declaracao;

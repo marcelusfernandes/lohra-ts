@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { estimateRequestTokens, estimateTokens } from "../src/context/token-estimate.js";
+import { estimateTokens } from "../src/context/token-estimate.js";
 
 const FIXTURES_DIR = resolve(import.meta.dirname, "fixtures/context");
 
@@ -188,63 +188,5 @@ describe("estimateTokens — unidade", () => {
       "utf8",
     );
     expect(/\bfetch\s*\(|node:https?|require\(["']https?["']\)/u.test(source)).toBe(false);
-  });
-});
-
-// Issue #252: notes from the #267 reviewer say tools/system passed outside
-// the `messages` array still count as provider input, and the estimator
-// must not treat them as conservative when malformed.
-describe("estimateRequestTokens — issue #252", () => {
-  const messages = [{ role: "user", content: "oi" }];
-
-  it("adds the system prompt's own tokens on top of the messages estimate", () => {
-    const withoutSystem = estimateRequestTokens({ system: "", messages, tools: [] });
-    const withSystem = estimateRequestTokens({
-      system: "you are a careful assistant that always double-checks its work",
-      messages,
-      tools: [],
-    });
-    expect(withSystem.tokens).toBeGreaterThan(withoutSystem.tokens);
-    expect(withoutSystem.tokens).toBe(estimateTokens(messages).tokens);
-  });
-
-  it("adds tool definition tokens on top of the messages+system estimate", () => {
-    const withoutTools = estimateRequestTokens({ system: "s", messages, tools: [] });
-    const withTools = estimateRequestTokens({
-      system: "s",
-      messages,
-      tools: [
-        {
-          type: "function",
-          function: {
-            name: "read_file",
-            description: "reads a file from disk",
-            parameters: { type: "object", properties: { path: { type: "string" } } },
-          },
-        },
-      ],
-    });
-    expect(withTools.tokens).toBeGreaterThan(withoutTools.tokens);
-  });
-
-  it("never trusts an implausibly small serialization for a non-empty tools array", () => {
-    const circular: Record<string, unknown> = { type: "function" };
-    circular.self = circular;
-    const estimate = estimateRequestTokens({ system: "", messages: [], tools: [circular] });
-    // A malformed/circular tool definition still charges at least the
-    // conservative per-tool floor -- never near-zero just because
-    // JSON.stringify failed and fell back to a short string.
-    expect(estimate.tokens).toBeGreaterThanOrEqual(20);
-  });
-
-  it("is pure (never mutates its inputs)", () => {
-    const input = {
-      system: "s",
-      messages: [{ role: "user", content: "oi" }],
-      tools: [{ type: "function", function: { name: "f" } }],
-    };
-    const before = structuredClone(input);
-    estimateRequestTokens(input);
-    expect(input).toEqual(before);
   });
 });

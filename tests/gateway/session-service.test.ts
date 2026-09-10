@@ -175,32 +175,6 @@ describe("GatewaySessionRegistry.canSubmitPrompt (L18/ADR-T12-04)", () => {
       false,
     );
   });
-
-  // Issue #252: compaction preflight rewrites history IN PLACE
-  // (SessionRepository.compactHistory) instead of the alternative this
-  // module's end_reason=compression resurrection path was built for
-  // (closing the session and opening a continuation) -- decision (i) in
-  // docs/context-compaction.md, chosen specifically because it needs none
-  // of this file's machinery. A compacted session is never ended: it stays
-  // submittable exactly like any other live session throughout, and
-  // end_reason stays untouched (null), never becoming "compression".
-  it("stays submittable across a compaction -- end_reason is never touched by it", () => {
-    const { registry, sessions } = setup();
-    sessions.createSession({ id: "s", model: "m", startedAt: 10 });
-    sessions.recordTurn("s", {
-      user: { role: "user", content: "q" },
-      assistant: { role: "assistant", content: "a" },
-    });
-    expect(registry.canSubmitPrompt("s")).toBe(true);
-
-    expect(sessions.acquireCompressionLock("s", "holder", 100, 30)).toBe(true);
-    sessions.compactHistory("s", "holder", 100, { keepTailCount: 0, summary: "recap" });
-    sessions.releaseCompressionLock("s", "holder");
-
-    expect(sessions.getSession("s")?.end_reason).toBeNull();
-    expect(registry.canSubmitPrompt("s")).toBe(true);
-    expect(registry.promptSubmissionRejection("s")).toBeNull();
-  });
 });
 
 describe("GatewaySessionRegistry.interrupt", () => {

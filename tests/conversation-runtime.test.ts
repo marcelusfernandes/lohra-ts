@@ -133,8 +133,13 @@ class CompactingMemoryRepository extends MemoryRepository {
     const summarizedCount = current.length - keepCount;
     if (summarizedCount <= 0) return { summarizedCount: 0, keptCount: current.length };
     const kept = current.slice(summarizedCount);
+    // Mirrors the real SessionRepository.compactHistory shape (issue #252
+    // fixup): a synthetic user lead before the assistant summary, never a
+    // bare assistant message first (Anthropic rejects that as the first
+    // message of a request).
+    const leadMessage = { role: "user", content: "(resumo da conversa anterior a seguir)" };
     const summaryMessage = { role: "assistant", content: input.summary, finish_reason: "stop" };
-    this.messages.set(sessionId, [summaryMessage, ...kept]);
+    this.messages.set(sessionId, [leadMessage, summaryMessage, ...kept]);
     return { summarizedCount, keptCount: kept.length };
   }
 }

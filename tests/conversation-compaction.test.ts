@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   attemptCompaction,
-  buildSummaryMessage,
+  buildSummaryMessages,
   compactionThreshold,
   resolveTurnContextWindow,
   turnAlignedTailCount,
@@ -13,6 +13,7 @@ import {
   CompactionUnsupportedError,
   CompressionLockBusyError,
 } from "../src/conversation/errors.js";
+import { estimateRequestTokens, estimateTokens } from "../src/context/token-estimate.js";
 import type { CompactionResult, ConversationRepository } from "../src/conversation/types.js";
 
 function turn(id: number): Readonly<Record<string, unknown>>[] {
@@ -112,12 +113,80 @@ describe("resolveTurnContextWindow", () => {
   });
 });
 
-describe("buildSummaryMessage", () => {
-  it("is an assistant message, never a system message", () => {
-    // Anthropic/Responses transports fold role:"system" inside `messages`
-    // into the top-level system field -- that would corrupt the frozen
-    // system prompt (invariant 1). Assistant survives every transport.
-    expect(buildSummaryMessage("recap").role).toBe("assistant");
+// Issue #252: notes from the #267 reviewer say tools/system passed outside
+// the `messages` array still count as provider input, and the estimator
+// must not treat them as conservative when malformed. Lives here (not in
+// tests/context-estimate.test.ts, #251's file) because this is #252's own
+// estimator on top of #251's -- and the issue's `Files` glob for tests only
+// covers `tests/conversation*.test.ts`, `tests/state-locks.test.ts` and
+// `tests/gateway*.test.ts`.
+describe("estimateRequestTokens — issue #252", () => {
+  const messages = [{ role: "user", content: "oi" }];
+
+  it("adds the system prompt's own tokens on top of the messages estimate", () => {
+    const withoutSystem = estimateRequestTokens({ system: "", messages, tools: [] });
+    const withSystem = estimateRequestTokens({
+      system: "you are a careful assistant that always double-checks its work",
+      messages,
+      tools: [],
+    });
+    expect(withSystem.tokens).toBeGreaterThan(withoutSystem.tokens);
+    expect(withoutSystem.tokens).toBe(estimateTokens(messages).tokens);
+  });
+
+  it("adds tool definition tokens on top of the messages+system estimate", () => {
+    const withoutTools = estimateRequestTokens({ system: "s", messages, tools: [] });
+    const withTools = estimateRequestTokens({
+      system: "s",
+      messages,
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "read_file",
+            description: "reads a file from disk",
+            parameters: { type: "object", properties: { path: { type: "string" } } },
+          },
+        },
+      ],
+    });
+    expect(withTools.tokens).toBeGreaterThan(withoutTools.tokens);
+  });
+
+  it("never trusts an implausibly small serialization for a non-empty tools array", () => {
+    const circular: Record<string, unknown> = { type: "function" };
+    circular.self = circular;
+    const estimate = estimateRequestTokens({ system: "", messages: [], tools: [circular] });
+    // A malformed/circular tool definition still charges at least the
+    // conservative per-tool floor -- never near-zero just because
+    // JSON.stringify failed and fell back to a short string.
+    expect(estimate.tokens).toBeGreaterThanOrEqual(20);
+  });
+
+  it("is pure (never mutates its inputs)", () => {
+    const input = {
+      system: "s",
+      messages: [{ role: "user", content: "oi" }],
+      tools: [{ type: "function", function: { name: "f" } }],
+    };
+    const before = structuredClone(input);
+    estimateRequestTokens(input);
+    expect(input).toEqual(before);
+  });
+});
+
+describe("buildSummaryMessages", () => {
+  it("opens on a user lead, never bare system or bare assistant", () => {
+    // Anthropic rejects a request whose first message isn't role "user"
+    // (400) -- opening on the summary itself (bare assistant) would break
+    // every Anthropic-route turn the first time a session compacts.
+    // role:"system" is ruled out too: the Anthropic/Responses transports
+    // fold a role:"system" message inside `messages` into the top-level
+    // system field, corrupting the frozen system prompt (invariant 1).
+    const [lead, summaryMessage] = buildSummaryMessages("recap");
+    expect(lead.role).toBe("user");
+    expect(summaryMessage.role).toBe("assistant");
+    expect(summaryMessage.content).toBe("recap");
   });
 });
 
@@ -228,7 +297,7 @@ describe("attemptCompaction", () => {
 
   it("summarizes the folded prefix, rewrites, and returns the fresh history", async () => {
     const history = [...turn(1), ...turn(2), ...turn(3), ...turn(4), ...turn(5)];
-    const compactedHistory = [buildSummaryMessage("recap"), ...turn(4), ...turn(5)];
+    const compactedHistory = [...buildSummaryMessages("recap"), ...turn(4), ...turn(5)];
     const summarize = vi.fn((transcript: string) => Promise.resolve(`recap of: ${transcript}`));
     const compactHistory = vi.fn(
       () => ({ summarizedCount: 6, keptCount: 4 }) satisfies CompactionResult,

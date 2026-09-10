@@ -101,13 +101,20 @@ describe("SessionRepository.compactHistory", () => {
     expect(result).toEqual({ summarizedCount: 6, keptCount: 4 });
 
     const history = repo.loadMessages("s");
-    expect(history).toHaveLength(5); // 1 summary + 4 kept
+    // A synthetic "user" lead precedes the "assistant" summary (issue #252
+    // fixup: Anthropic's Messages API rejects a request whose first
+    // message isn't role "user") -- 2 lead+summary + 4 kept.
+    expect(history).toHaveLength(6);
     expect(history[0]).toMatchObject({
+      role: "user",
+      content: "(resumo da conversa anterior a seguir)",
+    });
+    expect(history[1]).toMatchObject({
       role: "assistant",
       content: "recap",
       finish_reason: "stop",
     });
-    expect(history.slice(1)).toEqual([
+    expect(history.slice(2)).toEqual([
       { role: "user", content: "q4" },
       { role: "assistant", content: "a4", finish_reason: "stop" },
       { role: "user", content: "q5" },
