@@ -67,6 +67,48 @@ describe("estimateTokens — unidade", () => {
     expect(long.tokens).toBeGreaterThan(short.tokens);
   });
 
+  // Valores exatos (não só "> 0"/"maior que"): pinam MESSAGE_OVERHEAD_TOKENS,
+  // TEXT_CHARS_PER_TOKEN, JSON_CHARS_PER_TOKEN e TOOL_CALL_OVERHEAD_TOKENS —
+  // um mutante que zere o overhead ou afrouxe um fator sobrevive aos testes
+  // de "> 0" acima, mas não a estes (issue #251, evidência de que o teste
+  // prende comportamento, não só existência de contagem).
+  it("pins the exact token count for a short user message (message overhead + text factor)", () => {
+    // MESSAGE_OVERHEAD_TOKENS (6) + ceil("oi".length / TEXT_CHARS_PER_TOKEN=2.9) = 6 + 1
+    expect(estimateTokens([{ role: "user", content: "oi" }])).toEqual({
+      tokens: 7,
+      method: "heuristic",
+    });
+  });
+
+  it("pins the exact token count for a tool result (message overhead + JSON factor)", () => {
+    // 6 + ceil('{"a":1}'.length=7 / JSON_CHARS_PER_TOKEN=2.4) = 6 + 3
+    expect(estimateTokens([{ role: "tool", tool_call_id: "c1", content: '{"a":1}' }])).toEqual({
+      tokens: 9,
+      method: "heuristic",
+    });
+  });
+
+  it("pins the exact token count for a tool call (JSON factor + tool call overhead)", () => {
+    // 6 (message) + ceil(("f".length=1 + "{}".length=2) / 2.4 = 2) + TOOL_CALL_OVERHEAD_TOKENS (4)
+    expect(
+      estimateTokens([
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [{ id: "c1", type: "function", function: { name: "f", arguments: "{}" } }],
+        },
+      ]),
+    ).toEqual({ tokens: 12, method: "heuristic" });
+  });
+
+  it("pins the exact token count for a reasoning-only message (JSON factor)", () => {
+    // 6 + ceil("ab".length=2 / JSON_CHARS_PER_TOKEN=2.4) = 6 + 1
+    expect(estimateTokens([{ role: "assistant", content: null, reasoning: "ab" }])).toEqual({
+      tokens: 7,
+      method: "heuristic",
+    });
+  });
+
   it("charges tool_calls arguments separately from message content", () => {
     const withoutCall = estimateTokens([{ role: "assistant", content: "ok" }]);
     const withCall = estimateTokens([
