@@ -127,9 +127,8 @@ inlining a huge literal list, and prefer a `pipeline` over items to a giant
 Give a leaf `schema` (an inline JSON-Schema object, or a name string that must
 match a key in `schemas` — the same lookup as `schema_ref`) or `schema_ref` (a
 name from the spec's `schemas:` block) **whenever its shape matters
-downstream**. Without
-one the leaf returns prose and the next node has to re-parse it in natural
-language — that is where null rates come from.
+downstream**. Without one the leaf returns prose and the next node has to
+re-parse it in natural language — that is where null rates come from.
 
 - Use `schema_ref` for a shape used more than once; inline `schema` for one-offs.
 - Never set both on one node — the validator rejects it.
