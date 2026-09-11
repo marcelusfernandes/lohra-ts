@@ -22,6 +22,7 @@ export {
   RateLimitError,
   retryAfterSeconds,
 } from "./errors.js";
+export { ERROR_KINDS, ERROR_KIND_SET, isErrorKind, type ErrorKind } from "./error-kinds.js";
 export {
   createChatCompletionsClient,
   createResponsesClient,

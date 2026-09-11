@@ -318,7 +318,7 @@ describe("createChildRunner", () => {
     close();
   });
 
-  it("maps a 500 upstream failure to error_kind:null (L15 boundary), formatting output the same way the oracle's own SDK does", async () => {
+  it("maps a 500 upstream failure to error_kind:route_fault (L15 boundary, #397), formatting output the same way the oracle's own SDK does", async () => {
     const { sessions, close } = setup();
     sessions.createSession({ id: "parent-1", source: "gateway" });
     const parentProfile = getProviderProfile("openai");
@@ -338,7 +338,10 @@ describe("createChildRunner", () => {
     const result = await runner("child-5", { prompt: "hi" }, "SYS", () => [], noSignal);
 
     expect(result.status).toBe("error");
-    expect(result.errorKind).toBeNull();
+    // #397 (M8-1): classifyProviderError agora mapeia 5xx a route_fault —
+    // era null antes desta issue (emenda do orquestrador ao `## Files` de
+    // #397, 2026-09-12, opção (a)).
+    expect(result.errorKind).toBe("route_fault");
     expect(result.retryAfter).toBeNull();
     // "Error code: N - {payload as JSON}" — the SDK-style causal-canary
     // format. A delegate_task batch surfaces this verbatim in a failed

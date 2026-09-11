@@ -15,7 +15,11 @@ describe("provider error taxonomy", () => {
     [Object.assign(new Error("x"), { code: "quota_exceeded" }), "quota_exhausted"],
     [Object.assign(new Error("429 rate limit exceeded"), { status: "429" }), null],
     [Object.assign(new Error("x"), { code: 429 }), null],
-    [new ProviderCallFailed("x", { statusCode: 500 }), null],
+    // #397 (M8-1): 5xx passou a se classificar como route_fault; o pino
+    // "500 -> null" mudou de valor por emenda do orquestrador ao `## Files`
+    // (2026-09-12, opção (a)) — não é o único bloqueado por este teste,
+    // ver tests/orchestration-child-runner.test.ts também.
+    [new ProviderCallFailed("x", { statusCode: 500 }), "route_fault"],
   ])("classifies structurally", (error, expected) => {
     expect(classifyProviderError(error)).toBe(expected);
   });
