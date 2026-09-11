@@ -694,4 +694,32 @@ export const BUILTIN_DEFINITIONS = [
       name: "list_models",
     },
   },
+  {
+    type: "function",
+    function: {
+      description:
+        "Read the turns a still-running orchestration leaf has already committed — while it keeps working. 'Committed' means assented turns only: the turn currently in flight is never included (it isn't durable yet). Unlike workflow_audit, this is NOT metadata-only: a 'tool' turn's content is the raw, unredacted tool output the leaf actually saw. sub_id must be a leaf that belongs to run_id, verified via that run's audit ledger (a leaf.started event for this sub_id) — if the audit trail is disabled, its queue dropped the event, or retention already pruned the run, this returns the same named error as a genuinely unrelated sub_id, fail-closed rather than trusting an unverifiable claim. content is truncated to a shared max_chars budget across all returned turns (default 4096, max 32768; truncated reports whether anything was cut). Only the MOST RECENT 200 turns are ever returned; truncated_turns reports whether older ones were dropped.",
+      parameters: {
+        type: "object",
+        properties: {
+          run_id: {
+            type: "string",
+            description: "The run this leaf was spawned from.",
+          },
+          sub_id: {
+            type: "string",
+            description: "The leaf's own session id (from workflow_audit's leaf.started events).",
+          },
+          max_chars: {
+            type: "integer",
+            minimum: 1,
+            description:
+              "Shared content budget across every turn (default 4096, clamped to 32768).",
+          },
+        },
+        required: ["run_id", "sub_id"],
+      },
+      name: "workflow_leaf_read",
+    },
+  },
 ] as const satisfies readonly ToolDefinition[];

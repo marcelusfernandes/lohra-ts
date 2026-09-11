@@ -28,6 +28,9 @@ import { createNoticesSink, type NoticesSink } from "../workflow/notices-sink.js
 // Issue #402: same convention — `workflowNoticesHandler`/`workflowNoticesAckHandler`
 // live in their own module (`notices-tool.ts`, not `tool.ts`), not re-exported.
 import { workflowNoticesAckHandler, workflowNoticesHandler } from "../workflow/notices-tool.js";
+// Issue #425: same convention — `workflowLeafReadHandler` lives in its own
+// module (`leaf-read-tool.ts`, not `tool.ts`), not re-exported.
+import { workflowLeafReadHandler } from "../workflow/leaf-read-tool.js";
 
 export interface SessionToolBase {
   readonly registry: ToolRegistry;
@@ -89,6 +92,7 @@ export function createSessionToolBase(
     workflow_audit: workflowAuditHandler(auditRepository),
     workflow_notices: workflowNoticesHandler(noticesRepository),
     workflow_notices_ack: workflowNoticesAckHandler(noticesRepository),
+    workflow_leaf_read: workflowLeafReadHandler(database, auditRepository),
   });
   return Object.freeze({ registry, auditRepository, noticesSink });
 }
