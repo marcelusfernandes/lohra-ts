@@ -25,6 +25,9 @@ import { workflowAuditHandler, workflowToolHandlers } from "../workflow/index.js
 // Issue #401: not re-exported by `../workflow/index.js` — same convention
 // `chat.ts` already follows for `WorkflowLiveTail` (`live-tail.ts`).
 import { createNoticesSink, type NoticesSink } from "../workflow/notices-sink.js";
+// Issue #402: same convention — `workflowNoticesHandler`/`workflowNoticesAckHandler`
+// live in their own module (`notices-tool.ts`, not `tool.ts`), not re-exported.
+import { workflowNoticesAckHandler, workflowNoticesHandler } from "../workflow/notices-tool.js";
 
 export interface SessionToolBase {
   readonly registry: ToolRegistry;
@@ -84,6 +87,8 @@ export function createSessionToolBase(
   });
   const registry = createBuiltinRegistry({
     workflow_audit: workflowAuditHandler(auditRepository),
+    workflow_notices: workflowNoticesHandler(noticesRepository),
+    workflow_notices_ack: workflowNoticesAckHandler(noticesRepository),
   });
   return Object.freeze({ registry, auditRepository, noticesSink });
 }

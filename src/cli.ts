@@ -50,6 +50,7 @@ import {
   UPDATE_SPEC,
   WORKFLOW_AUDIT_SPEC,
   WORKFLOW_LIST_SPEC,
+  WORKFLOW_NOTICES_SPEC,
   WORKFLOW_SPEC,
   WORKFLOW_WATCH_SPEC,
   type CommandSpec,
@@ -66,6 +67,11 @@ import {
   type Level,
   type ParseResult,
 } from "./cli/arg-validation.js";
+
+// Issue #402: `workflow notices` has no entry in `arg-validation.ts`'s
+// `LEVELS` (outside this issue's Files) — same `Level` shape, declared
+// locally instead of growing that file's own record.
+const WORKFLOW_NOTICES_LEVEL: Level = { banner: "usage: lohra workflow notices [options]\n" };
 
 const version = "0.0.11";
 const commands = [
@@ -211,8 +217,13 @@ function help(): string {
 function resolveParse(io: CliIo, command: string, rest: readonly string[]): ParseResult | null {
   if (command === "workflow") {
     const action = rest[0];
+    // `actions` itself stays byte-identical to keep
+    // `scripts/mutations/workflow-audit-live-mutants.ts`'s
+    // `M9-workflow-run-accepted` anchor intact (issue #402's Files never
+    // include `scripts/`); `knownActions` is the actual (wider) check.
     const actions = ["list", "watch", "audit"] as const;
-    if (!(actions as readonly string[]).includes(action ?? "")) {
+    const knownActions: readonly string[] = [...actions, "notices"];
+    if (!knownActions.includes(action ?? "")) {
       const outer = parseCommand(WORKFLOW_SPEC, rest);
       io.stderr(
         renderError(
@@ -227,13 +238,20 @@ function resolveParse(io: CliIo, command: string, rest: readonly string[]): Pars
         ? WORKFLOW_LIST_SPEC
         : action === "watch"
           ? WORKFLOW_WATCH_SPEC
-          : WORKFLOW_AUDIT_SPEC;
+          : action === "notices"
+            ? WORKFLOW_NOTICES_SPEC
+            : WORKFLOW_AUDIT_SPEC;
+    // Issue #402: `workflow notices` isn't in `arg-validation.ts`'s `LEVELS`
+    // (outside this issue's Files) — a plain `Level` literal here, same
+    // shape (`{banner}`), is enough for `renderError`/`renderHelp`.
     const level =
       action === "list"
         ? LEVELS.workflowList
         : action === "watch"
           ? LEVELS.workflowWatch
-          : LEVELS.workflowAudit;
+          : action === "notices"
+            ? WORKFLOW_NOTICES_LEVEL
+            : LEVELS.workflowAudit;
     const inner = parseCommand(childSpec, rest.slice(1));
     if (inner.error !== null) {
       io.stderr(renderError(inner.error, level));
@@ -380,7 +398,7 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
       : value;
   };
   if (command === "workflow") {
-    const action = argv[1] as "list" | "watch" | "audit";
+    const action = argv[1] as "list" | "watch" | "audit" | "notices";
     const option = (name: string): unknown => parsed.options.get(name);
     return runWorkflowCommand({
       action,
@@ -391,6 +409,8 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
         ...(parsed.positionals[0] === undefined ? {} : { run_id: parsed.positionals[0] }),
         ...(parsed.options.has("--last") ? { last: true } : {}),
         ...(parsed.options.has("--events") ? { events: true } : {}),
+        ...(parsed.options.has("--all") ? { all: true } : {}),
+        ...(parsed.options.has("--json") ? { json: true } : {}),
         ...(option("--poll") === undefined ? {} : { poll: option("--poll") }),
         ...(option("--limit") === undefined ? {} : { limit: option("--limit") }),
         ...(option("--node") === undefined ? {} : { node_id: option("--node") }),
@@ -402,6 +422,7 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
         ...(option("--snapshot-seq") === undefined
           ? {}
           : { snapshot_seq: option("--snapshot-seq") }),
+        ...(option("--ack") === undefined ? {} : { ack: option("--ack") }),
       },
     });
   }

@@ -71,7 +71,7 @@ describe("child tool hardening", () => {
         toolError(`the '${name}' tool is not available to subagents`),
       );
     }
-    expect(CHILD_EXCLUDED_TOOLS).toHaveLength(19);
+    expect(CHILD_EXCLUDED_TOOLS).toHaveLength(21);
     expect(base).not.toHaveBeenCalled();
   });
 

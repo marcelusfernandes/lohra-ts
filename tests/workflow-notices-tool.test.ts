@@ -45,7 +45,7 @@ interface NoticesListEnvelope {
 
 interface AckEnvelope {
   readonly ok: boolean;
-  readonly data: { readonly acked: boolean };
+  readonly acked: boolean;
 }
 
 describe("workflow_notices / workflow_notices_ack tools (#402)", () => {
@@ -76,7 +76,7 @@ describe("workflow_notices / workflow_notices_ack tools (#402)", () => {
         await base.registry.dispatch("workflow_notices_ack", { id: noticeId }),
       ) as AckEnvelope;
       expect(acked.ok).toBe(true);
-      expect(acked.data.acked).toBe(true);
+      expect(acked.acked).toBe(true);
 
       const afterAck = JSON.parse(
         await base.registry.dispatch("workflow_notices", {}),
@@ -114,7 +114,7 @@ describe("workflow_notices / workflow_notices_ack tools (#402)", () => {
         await base.registry.dispatch("workflow_notices_ack", { id: 999_999 }),
       ) as AckEnvelope;
       expect(out.ok).toBe(true);
-      expect(out.data.acked).toBe(false);
+      expect(out.acked).toBe(false);
     } finally {
       connection.close();
     }

@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 
 import { AuditRepository } from "../state/audit-repository.js";
 import { openStateDatabase } from "../state/connection.js";
+import { NoticesRepository, type PublicNotice } from "../state/notices-repository.js";
 import { WorkflowRepository } from "../state/workflow-repository.js";
 import { parseAuditQuery } from "../workflow/audit-query.js";
 import type { PublicAuditEvent } from "../workflow/audit-model.js";
@@ -17,7 +18,7 @@ import {
 } from "../workflow/service.js";
 
 export interface WorkflowCommandOptions {
-  readonly action: "list" | "watch" | "audit";
+  readonly action: "list" | "watch" | "audit" | "notices";
   readonly databasePath: string;
   readonly args: Readonly<Record<string, unknown>>;
   readonly stdout: (value: string) => void;
@@ -76,6 +77,13 @@ function renderAuditLine(event: PublicAuditEvent): string {
   const segmentId =
     typeof identity.segment_id === "string" ? ` ${identity.segment_id.slice(0, 8)}` : "";
   return `${String(event.seq)}  ${event.event_type}  ${nodePath}${subId}${segmentId}`.trimEnd();
+}
+
+/** `id  scope  kind  [acked]  message` — one line per notice, for the text
+ * (non-`--json`) rendering of `lohra workflow notices` (issue #402). */
+function renderNoticeLine(notice: PublicNotice): string {
+  const acked = notice.acked_at !== null ? " (acked)" : "";
+  return `${String(notice.id)}  ${notice.scope}  ${notice.kind}${acked}  ${notice.message}`;
 }
 
 /** Drains every not-yet-shown event from `after_seq` on, printing each one
@@ -147,6 +155,41 @@ export async function runWorkflowCommand(options: WorkflowCommandOptions): Promi
       }
       const page = new AuditRepository(connection.database).query(parsed.query);
       options.stdout(`${JSON.stringify(page, null, 2)}\n`);
+      return 0;
+    }
+    if (options.action === "notices") {
+      const notices = new NoticesRepository(connection.database);
+      const json = options.args.json === true;
+      const ackRaw = options.args.ack;
+      if (ackRaw !== undefined) {
+        const id = typeof ackRaw === "number" ? ackRaw : Number(ackRaw);
+        if (!Number.isInteger(id) || id <= 0) {
+          options.stderr("--ack requires a positive integer id\n");
+          return 2;
+        }
+        const acked = notices.ack(id, "cli", now());
+        if (json) options.stdout(`${JSON.stringify({ acked }, null, 2)}\n`);
+        else options.stdout(acked ? `acked ${String(id)}\n` : `no notice ${String(id)} to ack\n`);
+        return 0;
+      }
+      const runId =
+        typeof options.args.run_id === "string" && options.args.run_id !== ""
+          ? options.args.run_id
+          : undefined;
+      const afterSeq =
+        typeof options.args.after_seq === "number" ? options.args.after_seq : undefined;
+      const page = notices.list({
+        ...(runId === undefined ? {} : { scope: `run:${runId}` }),
+        includeAcked: options.args.all === true,
+        ...(afterSeq === undefined ? {} : { afterSeq }),
+      });
+      if (json) {
+        options.stdout(`${JSON.stringify(page, null, 2)}\n`);
+      } else if (page.notices.length === 0) {
+        options.stdout("no notices\n");
+      } else {
+        for (const notice of page.notices) options.stdout(`${renderNoticeLine(notice)}\n`);
+      }
       return 0;
     }
     const limit = Math.min(100, Math.max(0, Number(options.args.limit ?? 20)));
