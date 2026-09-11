@@ -347,6 +347,30 @@ describe("ehArquivoDocsOuProcess / deveSerIgnorado", () => {
     expect(ehArquivoDocsOuProcess("scripts/ci/controle-negativo/lib.ts")).toBe(false);
   });
 
+  it("classifica markdown de skill sob assets/skills/** — doutrina, não comportamento (issue #345)", () => {
+    expect(ehArquivoDocsOuProcess("assets/skills/x/SKILL.md")).toBe(true);
+    expect(ehArquivoDocsOuProcess("assets/skills/workflow-authoring/references/campos.md")).toBe(
+      true,
+    );
+  });
+
+  it("não classifica assets/skills/** fora de markdown — continua feature (issue #345)", () => {
+    expect(ehArquivoDocsOuProcess("assets/skills/x/index.ts")).toBe(false);
+  });
+
+  it("não classifica assets/** fora de assets/skills/ — só o prefixo de skill conta (issue #345)", () => {
+    expect(ehArquivoDocsOuProcess("assets/other/README.md")).toBe(false);
+  });
+
+  it("não classifica assets/skills/ fora da raiz nem markdown fora da extensão exata (issue #345)", () => {
+    expect(ehArquivoDocsOuProcess("src/assets/skills/x/SKILL.md")).toBe(false);
+    expect(ehArquivoDocsOuProcess("assets/skills/x/SKILL.mdx")).toBe(false);
+  });
+
+  it("SKIP quando o diff é só markdown de skill (issue #345)", () => {
+    expect(deveSerIgnorado(["assets/skills/a/SKILL.md"])).toBe(true);
+  });
+
   it("SKIP quando todo o diff cai nas classes docs/process", () => {
     expect(deveSerIgnorado(["docs/a.md", "README.md", ".github/workflows/ci.yml"])).toBe(true);
   });
