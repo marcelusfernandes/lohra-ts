@@ -36,8 +36,8 @@ describe("state schema and connection", () => {
       .pluck()
       .all() as string[];
 
-    expect(tables).toHaveLength(21);
-    expect(indices).toHaveLength(19);
+    expect(tables).toHaveLength(23);
+    expect(indices).toHaveLength(21);
     expect(indices.filter((name) => !name.startsWith("sqlite_autoindex_"))).toEqual([
       "idx_messages_session",
       "idx_sessions_parent",
