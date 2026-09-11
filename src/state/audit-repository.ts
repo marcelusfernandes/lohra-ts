@@ -160,6 +160,15 @@ export class AuditRepository {
   // only, never persisted: a per-run count of refusals since this instance
   // started, surfaced by `query()`'s `integrity` envelope, alongside the
   // named `warning` every refusal already gets below.
+  //
+  // Issue #380: unlike `workflow_audit_state`, a run whose every write is
+  // refused NEVER gets a state row — `pruneRuns()`/`compact()` only walk
+  // that table, so hooking eviction to either of them would leave exactly
+  // the pathological case (a run that only ever produced refusals)
+  // unbounded. Capped here instead, LRU by touch: `append()` re-inserts the
+  // key on every refusal (moving it to the end) and evicts the oldest key
+  // once size exceeds `maxRuns` — never the key just written, since a
+  // re-insert always lands last.
   private readonly refusals = new Map<string, number>();
 
   public constructor(
@@ -189,14 +198,12 @@ export class AuditRepository {
            WHERE f.run_id = ? AND f.fence = ? AND l.holder = ? AND l.expires_at > ?`,
             )
             .get(runId, ownership.fence, ownership.holder, ownership.now);
-          if (owned === undefined) {
-            this.refusals.set(auditRunId, (this.refusals.get(auditRunId) ?? 0) + 1);
-            this.warning(
-              `workflow: audit event refused for run ${auditRunId} — fence lost ` +
-                `(segment ${input.segment_id ?? "none"}, ${input.event_type})`,
-            );
-            return null;
-          }
+          // Issue #380: counting and warning move to the single point right
+          // after `.immediate()` below — an in-memory Map write has nothing
+          // to roll back, and consolidating avoids the double log a
+          // transaction-scoped AND a post-transaction call used to produce
+          // for the very same refusal.
+          if (owned === undefined) return null;
         }
         this.compact(now);
         const prior = this.database
@@ -272,7 +279,20 @@ export class AuditRepository {
       })
       .immediate();
     if (transact === null && ownership !== undefined) {
-      this.warning(`STALE_FENCE_WRITE audit run=${auditRunId} fence=${String(ownership.fence)}`);
+      // LRU touch: dropping then re-setting moves this run to the most
+      // recently refused end of the Map, so the eviction just below never
+      // removes the key this call just wrote.
+      const priorRefusals = this.refusals.get(auditRunId) ?? 0;
+      this.refusals.delete(auditRunId);
+      this.refusals.set(auditRunId, priorRefusals + 1);
+      if (this.refusals.size > this.maxRuns) {
+        const oldest = this.refusals.keys().next().value;
+        if (oldest !== undefined) this.refusals.delete(oldest);
+      }
+      this.warning(
+        `workflow: audit event refused for run ${auditRunId} — fence lost ` +
+          `(segment ${input.segment_id ?? "none"}, ${input.event_type})`,
+      );
     }
     return transact;
   }
