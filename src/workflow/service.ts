@@ -36,7 +36,7 @@ import type { LockRepository } from "../state/locks.js";
 import type { AuditTrail } from "./audit-trail.js";
 import { auditEnabled } from "./audit-model.js";
 import { WorkflowLiveEvents, type WorkflowLiveEvent } from "./live-events.js";
-import { isErrorKind } from "../transports/error-kinds.js";
+import { isErrorKind, type ErrorKind } from "../transports/error-kinds.js";
 export const RUN_LEASE_TTL = 900;
 /** The operator capability policy, read from the operator home per launch. */
 export const OPERATOR_POLICY_FILE = "workflow_policy.json";
@@ -112,7 +112,7 @@ export interface DurableRunView {
   readonly leaf_respawns: number;
   readonly sandbox_refusals: number;
   readonly prior_faults: readonly string[];
-  readonly prior_fault_kinds: readonly string[];
+  readonly prior_fault_kinds: readonly ErrorKind[];
   readonly prior_degraded: boolean;
   readonly tainted: boolean;
   readonly spec: Record<string, unknown> | null;
