@@ -438,9 +438,8 @@ export class WorkflowService {
     // an absent file is deny-all, never a widening.
     const policyPath = options.policyPath ?? join(this.homeRoot, OPERATOR_POLICY_FILE);
     this.policyLoader = () => loadPolicy(policyPath);
-    // The tier map is a separate FILE, read the same way: absent is
-    // legitimate (no remapping configured); present-but-broken still
-    // refuses the launch (#234).
+    // The tier map is a separate FILE, read the same way: absent is legitimate (no remapping
+    // configured); present-but-broken still refuses the launch (#234).
     const tiersPath = options.tiersPath ?? join(this.homeRoot, OPERATOR_TIERS_FILE);
     this.tiersLoader = () => readTiers(tiersPath);
     const store = options.store;
@@ -882,16 +881,11 @@ export class WorkflowService {
           });
     const record = this.makeRecord(runId, parsed.name, engine);
     /**
-     * Hand this acquisition back: exactly once, and never by throwing.
-     *
-     * Every step is independent — a step that fails must not skip the ones
-     * after it, and none of them may stop the run from publishing a bounded
-     * result (a disposer that threw used to leave the waiter hanging).
-     *
-     * The heartbeat stops FIRST: a tick that outlived the release would put the
-     * lease back and leave the run looking alive with nobody in it. The release
-     * itself is conditioned on this acquisition's fence INSIDE its own
-     * statement, so a takeover by the same holder cannot be deleted by it.
+     * Hand this acquisition back exactly once, never by throwing: each step below is independent,
+     * so one that fails cannot skip the ones after it or stop the run from publishing a bounded
+     * result. The heartbeat stops FIRST — a tick that outlived the release would put the lease back
+     * and leave the run looking alive with nobody in it — and the release itself is conditioned on
+     * THIS acquisition's fence, so a takeover by the same holder cannot be deleted by it.
      */
     let finished = false;
     const finishStretch = (): void => {
@@ -931,10 +925,9 @@ export class WorkflowService {
     const priorFaults = carriedFaults;
     const priorDegraded = priorView?.prior_degraded === true;
     this.runs.set(runId, record);
-    // The launch line and the ledger seed are this stretch's FIRST owned
-    // writes, and their answer is authoritative: a refusal here means
-    // ownership changed hands while we were getting here (the installer can
-    // block the event loop past the TTL) and must end the stretch BEFORE
+    // The launch line and the ledger seed are this stretch's FIRST owned writes, and their answer
+    // is authoritative: a refusal here means ownership changed hands while we were getting here
+    // (the installer can block the event loop past the TTL) and must end the stretch BEFORE
     // anything runs, not surface only at the terminal write.
     const registered = persistLine("running", null, null, tainted, {
       fence,
@@ -1003,10 +996,9 @@ export class WorkflowService {
           pausePayload(result.status === "paused" ? result.checkpoint : null, null),
         );
         this.persistSpend(store, runId, effectiveBudget, seeded, engine, stretchOwnership());
-        // A quota pause is the one failure that fixes itself given time: arm
-        // the retry here (bounded, capped); token-budget and checkpoint pauses
-        // arm nothing — waiting does not refill a budget, only an ANSWER moves
-        // a checkpoint.
+        // A quota pause is the one failure that fixes itself given time: arm the retry here
+        // (bounded, capped); token-budget and checkpoint pauses arm nothing — waiting does not
+        // refill a budget, only an ANSWER moves a checkpoint.
         let resumeAt: number | null = null;
         if (owned && result.status === "paused" && result.pauseReason === QUOTA_PAUSE) {
           const retryAfter =
@@ -1240,6 +1232,14 @@ export class WorkflowService {
    * the lease before `connection.close()` runs (invariant 4). */
   public shutdown(): Promise<void> {
     return (this.shuttingDown ??= this.runShutdown());
+  }
+
+  /** Issue #373: `workflow_audit` in the same turn as `run_workflow` waits
+   * this long for the trail to drain, then reports a named pending count
+   * instead of a silent `events: []`. */
+  public async auditPendingAfterFlush(timeoutMs: number): Promise<number> {
+    if (this.auditTrail === undefined) return 0;
+    return (await this.auditTrail.flush(timeoutMs)) ? 0 : this.auditTrail.pendingCount();
   }
 
   private async runShutdown(): Promise<void> {
