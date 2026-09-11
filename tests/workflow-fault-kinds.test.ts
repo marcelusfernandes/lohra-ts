@@ -191,7 +191,7 @@ describe("fault_kinds — durable compatibility (#399 AC3)", () => {
     expect(view.prior_fault_kinds).toEqual([]);
   });
 
-  it("test(red): a pause_payload_json line adulterated with a non-vocabulary fault kind is filtered by isErrorKind", () => {
+  it("a pause_payload_json line adulterated with a non-vocabulary fault kind is filtered from fault_kinds_total", () => {
     const view = durableFromRow({
       run_id: "adulterated-row",
       name: "adulterated",
