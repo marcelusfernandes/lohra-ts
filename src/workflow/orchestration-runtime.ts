@@ -34,6 +34,13 @@ function readPending(value: string): Promise<string> | undefined {
   return candidate instanceof PendingDispatch ? candidate.promise : undefined;
 }
 
+/** Parses `onToolSettled`'s `ok` from the tool envelope's own leading
+ * `{"ok":...` (never the rest of the payload) — real envelopes come from
+ * `toolResult`/`toolError`, src/tools/envelope.ts. */
+function okFromEnvelope(result: string): boolean {
+  return result.startsWith('{"ok":true');
+}
+
 /**
  * Bridges the sandbox's synchronous `LeafToolDispatch` contract
  * (runtime.ts:44, `LeafSandboxInstallation.wrap`) to the child pool's real,
@@ -57,12 +64,8 @@ function readPending(value: string): Promise<string> | undefined {
  * `installation.wrap`. After the real dispatch settles (never for a sync
  * denial — that path returns before `pending` exists), `onToolSettled` fires
  * with `ok` parsed from the tool envelope's own leading `{"ok":...` (never
- * the rest of the payload).
+ * the rest of the payload) — see `okFromEnvelope` above.
  */
-function okFromEnvelope(result: string): boolean {
-  return result.startsWith('{"ok":true');
-}
-
 function adaptSandboxWrap(
   installation: LeafSandboxInstallation,
 ): (base: ChildToolDispatch, subId: string) => ChildToolDispatch {

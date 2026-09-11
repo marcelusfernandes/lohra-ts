@@ -151,10 +151,18 @@ const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object
     "queue_overflow",
     "quota_exhausted",
     "retention_limit",
-    // Issue #367: the sandbox denied a leaf's tool call — sync policy
-    // refusal (fs/egress/taint/retired-stretch) or a run with no live
-    // installation at all (`denyAllDispatch`, orchestration-runtime.ts).
+    // Issue #367: the sandbox synchronously denied a leaf's tool call
+    // (fs/egress/taint/retired-stretch) INSIDE the audited wrap
+    // (`auditedToolDispatch`, audit-runtime.ts) — the only place this reason
+    // is ever emitted. `denyAllDispatch` (orchestration-runtime.ts, a run
+    // with no live installation at all) is NOT this path: it short-circuits
+    // BEFORE `auditedChildRuntime`'s wrap ever runs, so that denial produces
+    // no `tool.*` event at all, not even this one (#378).
     "sandbox_denied",
+    // Issue #378: a dispatch still open when its leaf closes (cancel,
+    // shutdown, or an engine-driven timeout) — `close()` (audit-runtime.ts)
+    // flushes it as `tool.completed {status: "error", reason: "cancelled"}`
+    // so the pair is never left orphaned.
     "sink_failure",
     "store_failed",
     "timeout",

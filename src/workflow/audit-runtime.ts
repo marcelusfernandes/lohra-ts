@@ -17,6 +17,15 @@
 // emenda (2026-09-11) put `audit-producers.ts` in this issue's `Files`
 // specifically to export it as `recordAuditEvent`, so it is imported here,
 // not repeated a second time.
+//
+// Issue #378: a leaf can close (cancel, shutdown-driven cancel, or the
+// engine's own timeout) while one of its tool dispatches is still in
+// flight — `tool.started` reached the ledger, but nothing ever calls
+// `onToolSettled` for it (the real dispatch never gets to finish). `close()`
+// below now flushes every such orphan as `tool.completed {status: "error",
+// reason: "cancelled"}` before the leaf's own terminal event, so a `tool.*`
+// pair is NEVER left incomplete — the same "exactly one terminal event"
+// invariant `leaf.*` already gets, extended to `tool.*`.
 import type { AuditInput } from "./audit-model.js";
 import { recordAuditEvent, type AuditFailClosedDeps } from "./audit-producers.js";
 import type { AuditTrail } from "./audit-trail.js";
@@ -36,7 +45,14 @@ import { BUILTIN_DEFINITIONS } from "../tools/builtin-definitions.js";
 
 export type AuditedChildRuntimeDeps = AuditFailClosedDeps;
 
-type OpenLeaf = Readonly<{ runId: string; causal: CausalContext }>;
+// `pending` is a mutable counter, same pattern as `auditedToolDispatch`'s own
+// local `state: { reached }` below — how many of THIS leaf's tool dispatches
+// have a `tool.started` on the ledger with no `tool.completed` yet (in
+// flight through the real async dispatch, never a sync denial: that path
+// closes its own pair before returning). `close()` reads it to flush any
+// leftover as `tool.completed {reason: "cancelled"}` before the leaf's own
+// terminal event (#378).
+type OpenLeaf = Readonly<{ runId: string; causal: CausalContext; pending: { count: number } }>;
 
 function usagePayload(result: ChildResult): Readonly<Record<string, number>> | undefined {
   const usage = result.usage;
@@ -48,6 +64,13 @@ function usagePayload(result: ChildResult): Readonly<Record<string, number>> | u
 // call — `tool_name_state` classifies it, never leaks it (`name` stays a
 // RAW_FIELD, audit-model.ts:52). Built once, not per call: the catalog is a
 // module-level constant.
+//
+// Issue #378: an MCP tool's real name (`mcp_{server}_{tool}`, mcp/tools.ts)
+// is registered into a per-RUN `ToolRegistry` at launch time — this
+// decorator is built once, independent of any run's registry, and has no
+// seam to reach it. Every `mcp_*` call is therefore classified
+// `unknown_tool` here, legitimate or not; `tests/workflow-audit-tool.test.ts`
+// pins that as the documented behavior, not a bug to fix in this issue.
 const KNOWN_TOOL_NAMES = new Set<string>(
   BUILTIN_DEFINITIONS.map((definition) => definition.function.name),
 );
@@ -112,6 +135,11 @@ function auditedToolDispatch(
         fields: Object.keys(args).length,
       },
     });
+    // #378: counted from `tool.started` until this dispatch's own
+    // `tool.completed` — a sync denial below closes its pair immediately; an
+    // async one closes it from `onToolSettled` (installLeafSandbox below),
+    // or, if the leaf closes first, from `close()`'s flush.
+    openLeaf.pending.count += 1;
     const out = dispatchAfterPolicy(name, args);
     if (!wasReached()) {
       recordAuditEvent(deps, openLeaf.runId, {
@@ -119,6 +147,7 @@ function auditedToolDispatch(
         ...identity,
         payload: { status: "error", reason: "sandbox_denied" },
       });
+      openLeaf.pending.count -= 1;
     }
     return out;
   };
@@ -132,6 +161,13 @@ function auditedToolDispatch(
  * decorator) at the FIRST terminal outcome, so the engine's post-steer
  * re-`collect` on the same id (schema retry) and its post-timeout `cancel`
  * never produce a second one.
+ *
+ * Issue #378: the same "exactly one terminal" guarantee now extends to
+ * `tool.*` — `close()` flushes any of THIS leaf's still-open tool dispatches
+ * (`tool.started` with no `tool.completed` yet: cancel, shutdown-driven
+ * cancel, or the engine's own timeout, all reach `close()`) as
+ * `tool.completed {status: "error", reason: "cancelled"}`, ordered before
+ * the leaf's own terminal event, so a `tool.*` pair is never left orphaned.
  */
 export function auditedChildRuntime(
   inner: ChildRuntime,
@@ -152,6 +188,16 @@ export function auditedChildRuntime(
     if (leaf === undefined) return;
     open.delete(id);
     const cc = leaf.causal;
+    for (let index = 0; index < leaf.pending.count; index += 1) {
+      record(leaf.runId, {
+        event_type: "tool.completed",
+        segment_id: cc.segmentId,
+        node_id: cc.nodePath.at(-1) ?? null,
+        sub_id: id,
+        attempt: cc.attempt,
+        payload: { status: "error", reason: "cancelled" },
+      });
+    }
     record(leaf.runId, {
       event_type: eventType,
       segment_id: cc.segmentId,
@@ -166,7 +212,7 @@ export function auditedChildRuntime(
     async spawn(request: ChildSpawnRequest): Promise<string> {
       const id = await inner.spawn(request);
       const cc = request.causalContext;
-      open.set(id, { runId: cc.runId, causal: cc });
+      open.set(id, { runId: cc.runId, causal: cc, pending: { count: 0 } });
       record(cc.runId, {
         event_type: "leaf.started",
         segment_id: cc.segmentId,
@@ -272,6 +318,10 @@ export function auditedChildRuntime(
                     attempt: cc.attempt,
                     payload: { status: ok ? "success" : "error" },
                   });
+                  // #378: this dispatch's own settle — never reached if the
+                  // leaf already closed (`openLeaf` would be `undefined`
+                  // above; `close()` already flushed it as cancelled).
+                  openLeaf.pending.count = Math.max(0, openLeaf.pending.count - 1);
                 }
                 installation.onToolSettled?.(leaf, ok);
               },
