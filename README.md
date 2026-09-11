@@ -222,7 +222,8 @@ workflow/audit, orquestração, cron, MCP, web e mídia. `notices` lê
 `operator_notices` — os avisos duráveis do canal (issue #400/#401), nunca só
 em memória — como tool (`workflow_notices`/`workflow_notices_ack`) e como
 CLI; `--ack <id>` reconhece um aviso e `--all` também mostra os já
-reconhecidos.
+reconhecidos. Vocabulário de avisos, sink por processo, escopo e retenção em
+[docs/operator-notices.md](docs/operator-notices.md).
 
 `dashboard` aceita `--host` (default `127.0.0.1`, encaminhado ao bind real do
 servidor HTTP/WS — mesmo precedente de forma do `--host` de `serve`) e

@@ -97,7 +97,7 @@ allow-list em #386 — o ciclo de vida de um nó continua observável só por
 | `audit.unavailable` | leitura (`parseEvent`/`query`, `audit-repository.ts`)                                                                                                                                                      | `event_type` fora da allow-list, payload corrompido no disco, ou run tombado/nunca gravado                                                                                                                                                                                                                                          |
 | `leaf.started`      | `auditedChildRuntime.spawn` (`audit-runtime.ts:217`)                                                                                                                                                       | um `ChildRuntime.spawn` bem-sucedido                                                                                                                                                                                                                                                                                                |
 | `leaf.completed`    | `close()`, chamado de `collect()` (`audit-runtime.ts:182-209,234-273`)                                                                                                                                     | `collect` volta `status: "complete"`                                                                                                                                                                                                                                                                                                |
-| `leaf.failed`       | `close()`, chamado de `collect()`/`cancel()` (`audit-runtime.ts:234-280`)                                                                                                                                  | `collect` falha/cancela/estoura timeout, ou `cancel()` — sempre exatamente um evento terminal por `sub_id`                                                                                                                                                                                                                          |
+| `leaf.failed`       | `close()`, chamado de `collect()`/`cancel()` (`audit-runtime.ts:234-280`)                                                                                                                                  | `collect` falha/cancela/estoura timeout, ou `cancel()` — sempre exatamente um evento terminal por `sub_id`; carrega `payload.error_kind` (vocabulário em "Vocabulário de falhas" abaixo) quando `collected.errorKind` não é `null`/`undefined`                                                                                      |
 | `tool.started`      | `auditedToolDispatch` (`audit-runtime.ts:131`)                                                                                                                                                             | toda chamada de tool feita por um leaf                                                                                                                                                                                                                                                                                              |
 | `tool.completed`    | `auditedToolDispatch` (recusa síncrona, `audit-runtime.ts:146`) · `close()` (dispatch ainda aberto ao fechar o leaf, `audit-runtime.ts:193`) · `onToolSettled` (assentamento real, `audit-runtime.ts:314`) | `{status:"error", reason:"sandbox_denied"}` — recusa síncrona do sandbox; `{status:"error", reason:"cancelled"}` — o leaf fechou (cancel, shutdown ou timeout) com esse dispatch ainda em voo, emitido por `close()` **antes** do evento terminal do leaf; `{status:"success"}`/`{status:"error"}` sem `reason` — assentamento real |
 | `cache.replayed`    | `auditedWorkflowCache.get` (`audit-cache.ts:51`)                                                                                                                                                           | hit de cache                                                                                                                                                                                                                                                                                                                        |
@@ -115,6 +115,74 @@ catálogo builtin (`KNOWN_TOOL_NAMES`, construído uma vez de
 (`mcp_{server}_{tool}`, registrada por run num `ToolRegistry` fora do
 alcance deste decorador) reporta `unknown_tool` mesmo sendo uma chamada
 legítima — fixado por `tests/workflow-audit-tool.test.ts`, não um bug.
+
+## Vocabulário de falhas (`error_kind`)
+
+Épico #396 (M8), issues #397-#399: `ErrorKind` (`src/transports/error-kinds.ts`)
+é o vocabulário fechado de nove valores que toda camada — folha, run,
+rollup e auditoria — usa para falar de uma falha de provedor, em vez de
+`string | null` livre. `classifyProviderError` (`src/transports/errors.ts:66-83`)
+é o único produtor:
+
+| `error_kind`      | gatilho                                                                                                                    |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `quota_exhausted` | `RateLimitError`, `statusCode`/`status` 429, ou `code` num conjunto conhecido de quota (`insufficient_quota` e afins)      |
+| `auth_failed`     | `statusCode` 401 ou 403                                                                                                    |
+| `model_not_found` | `statusCode` 404 **e** indício de modelo (`code`/`payload.error.code`/`.type`/mensagem citam "model", `errors.ts:58-64`)   |
+| `route_fault`     | `code` num conjunto de falha de rede (`ECONNREFUSED`, `ENOTFOUND`, `ETIMEDOUT`, `ECONNRESET`) ou `statusCode` 5xx          |
+| `unknown`         | qualquer outro `ProviderCallFailed` sem mapeamento fino — nunca `null` para um erro de provedor (invariante 2)             |
+| (nenhum — `null`) | erro que não é `ProviderCallFailed` — o resto da cadeia (`child-runner.ts`) já trata `null` como "não é falha de provedor" |
+
+`sandbox_denied`, `timeout`, `cancelled` e `context_length` completam os
+nove — reservados para reuso futuro sem produtor em `classifyProviderError`
+hoje: `timeout`/`cancelled` para a folha, `context_length` para o
+classificador de janela, e `sandbox_denied` nomeado assim (não
+`sandbox_refused`) por decisão do épico #396. `sandbox_denied` também
+nomeia o campo `reason` de `tool.completed` na tabela acima — outra
+allow-list fechada, `SAFE_STRING_VALUES.reason` (`audit-model.ts`), não a
+mesma lista de `error_kind`; mesma palavra, dois campos distintos.
+
+`ERROR_KIND_SET` é a allow-list de `error_kind` na sanitização do payload
+(`audit-model.ts:184`) — um valor fora do vocabulário vira `{state:
+"excluded_by_policy"}`, o mesmo marcador que `forced_fallback` recebe
+abaixo, nunca gravado cru.
+
+`quota_exhausted` nunca chega a `leaf.failed`/`RunResult.faultKinds`: a
+guarda de `debitLeaf` (`engine-utils.ts:490`) o exclui explicitamente antes
+de `recordFaultKind` — uma quota estourada vira pausa do run
+(`pause_reason: "quota_exhausted"`), nunca uma falha de leaf contabilizada.
+Detalhe de `RunResult`/`workflow_status` (não deste ledger): `fault_kinds`
+no rollup vivo (`service-rollup.ts:47`) é só do stretch atual, em memória;
+`fault_kinds_total` no payload durável (`service.ts:158,207-208`) acumula
+entre stretches, e a releitura filtra por `isErrorKind` — um kind
+corrompido no disco é descartado em silêncio dessa lista (nunca vira
+`unknown`), diferente de `prior_faults`, que preserva o texto cru; a
+próxima escrita terminal reescreve `prior_fault_kinds` a partir dessa
+MESMA view filtrada (`service.ts:960`), então o kind corrompido também
+some do payload durável a partir daí, não só da leitura que o filtrou.
+
+### `forced_fallback` (removido) e `forcing_fallbacks`
+
+`ChildResult.forcedFallback` — e o campo `forced_fallback` que
+`leaf.completed` carregava — saiu da camada de workflow inteira em #403
+(PR #417, rodada 2): o único gatilho que a rodada 1 usou (`provider`
+nomeado sem `model`) é o caminho normal de deixar o provedor escolher seu
+modelo padrão, não um sinal real de fallback forçado — nada no runtime
+percorre uma cadeia de fallback de verdade. Uma linha de ledger gravada
+antes de #403 com `forced_fallback: true`/`false` no payload continua no
+disco, mas a releitura hoje sanitiza esse campo como qualquer chave fora do
+allow-list: `audit-model.ts`'s `BOOLEAN_FIELDS` não lista mais
+`forced_fallback`, então uma consulta a um evento antigo devolve
+`{state: "excluded_by_policy"}` para ele — um marcador nomeado, nunca um
+apagamento silencioso.
+
+`forcing_fallbacks` (`RunResult.forcingFallbacks`, `workflow_status`)
+continua a existir, mas conta só uma coisa: o ENGINE caindo para o texto
+cru de um leaf quando o nó pediu `schema`/`schema_ref` **e** `tool_less:
+true` e o leaf completou sem emitir a tool call `StructuredOutput`
+(`resolveLeafRequestOptions`/`extractForcedOutput`, `engine-utils.ts:198,
+240-250`; incrementado em `engine.ts:332`). Nunca conta uma escolha de
+roteamento (`provider`/`model`/`tier`) feita de propósito.
 
 ## Ciclo de um segmento
 
@@ -354,5 +422,11 @@ com 25, issues #370 e #383) cobre a identidade causal, a regra fail-closed, o
 único por `sub_id` — inclusive o `tool.completed {reason:"cancelled"}` do
 `close()` —, a classificação de uma recusa de sandbox, hit/miss de cache
 relatados errado, e os tetos/cursor do live tail. Catálogo completo,
-contagem (226 no total, entre as oito fatias) e o que ficou deliberadamente
-fora em `docs/mutation-testing.md`.
+contagem (227 no total, entre as oito fatias — t15 45, issue #418) e o que
+ficou deliberadamente fora em `docs/mutation-testing.md`.
+
+## Ver também
+
+`docs/operator-notices.md` — o canal de avisos duráveis ao operador
+(`operator_notices`), irmão deste ledger mas para "isto aconteceu e alguém
+precisa ver", não para a trilha de execução por nó.
