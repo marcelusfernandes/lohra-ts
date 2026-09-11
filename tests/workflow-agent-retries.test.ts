@@ -55,6 +55,68 @@ class PauseOnFirstCollectRuntime implements ChildRuntime {
   }
 }
 
+/** Same shape as `PauseOnFirstCollectRuntime`, but the first attempt's
+ * `collect()` calls `cancel()` instead of `requestPause()`. `cancel()`
+ * (engine.ts:138-141) never routes through `pause()` — it flips
+ * `control.cancelled` directly and never touches `result.pauseFault` — so a
+ * guard that only reads `pauseFault` (pre-#336) cannot see this stop at
+ * all, on either `runAgent` or `runPipeline`. */
+class CancelOnFirstCollectRuntime implements ChildRuntime {
+  readonly spawned: ChildSpawnRequest[] = [];
+  private engine: WorkflowEngine | null = null;
+
+  setEngine(engine: WorkflowEngine): void {
+    this.engine = engine;
+  }
+
+  spawn(request: ChildSpawnRequest): string {
+    const id = `leaf-${String(this.spawned.length + 1)}`;
+    this.spawned.push(request);
+    return id;
+  }
+
+  collect(_id: string, _options: ChildCollectOptions): ChildResult {
+    this.engine?.cancel();
+    return { status: "complete", output: "" };
+  }
+
+  steer(): void {}
+  cancel(): void {}
+  installLeafSandbox(): { dispose: () => void } {
+    return { dispose: (): void => undefined };
+  }
+}
+
+/** First `collect()` outlasts a tiny `pipelineTimeoutSeconds` deadline —
+ * `runPipeline`'s own race (engine.ts:~596-604) fires first, sets
+ * `expired = true` and cancels active leaves, WHILE this attempt is still
+ * in flight. Only once it finally resolves (late, with an EMPTY — not
+ * null — output) does the stage's retry loop reach `attempt > 0` for a
+ * second try: `expired` is already true by then, so the guard must see it
+ * through the SAME `aborted` callback `collectLeaf` itself already checks
+ * (engine.ts:~555), or it credits a respawn `collectLeaf`'s own aborted
+ * short-circuit refuses to spawn. */
+class ExpiresOnFirstCollectRuntime implements ChildRuntime {
+  readonly spawned: ChildSpawnRequest[] = [];
+
+  spawn(request: ChildSpawnRequest): string {
+    const id = `leaf-${String(this.spawned.length + 1)}`;
+    this.spawned.push(request);
+    return id;
+  }
+
+  async collect(_id: string, _options: ChildCollectOptions): Promise<ChildResult> {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    return { status: "complete", output: "" };
+  }
+
+  steer(): void {}
+  cancel(): void {}
+  installLeafSandbox(): { dispose: () => void } {
+    return { dispose: (): void => undefined };
+  }
+}
+
 /** Same shape as `workflow-parallel-retries.test.ts`'s `ScriptedRuntime` —
  * scripted per-spawn results, one script consumed per leaf. Used below to
  * pin the two behaviors OUTSIDE a pause that this fix must never touch:
@@ -136,6 +198,51 @@ describe("agent retries never spin past a pause (#321)", () => {
     expect(result.outputs.a).toBeNull();
     expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(0);
   });
+
+  it("does not credit a respawn when cancel() fires between attempts (#336)", async () => {
+    const runtime = new CancelOnFirstCollectRuntime();
+    const engine = new WorkflowEngine({ runtime });
+    runtime.setEngine(engine);
+    const spec = parsed({
+      meta: { name: "agent-cancel-between-attempts" },
+      nodes: [{ id: "a", type: "agent", prompt: "x", retries: 1 }],
+    });
+    const result = await engine.run(spec);
+    expect(runtime.spawned).toHaveLength(1);
+    expect(result.outputs.a).toBeNull();
+    expect(result.status).toBe("cancelled");
+    expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(0);
+  });
+});
+
+// Issue #336: `runNested` (engine.ts:~857-873) gives the child engine its
+// OWN `RunResult`, but shares the PARENT's `control` object by reference —
+// a `requestPause()` on the PARENT flips `control.paused` on the very same
+// object the CHILD's `runAgent` reads, yet the child's own
+// `result.pauseFault` (pre-#336's only signal) stays null the whole time.
+// A retry guard reading only `pauseFault` credits a phantom respawn to the
+// NESTED run for every in-flight `agent` node once the operator pauses from
+// outside it — the parent's own `runNested` then folds that count back into
+// its own `result.leafRespawns` (engine.ts:889), so the corruption surfaces
+// at the root too.
+describe("nested workflow respawn guard covers a PARENT pause (#336)", () => {
+  it("does not credit a respawn in a nested agent when the PARENT pauses between attempts", async () => {
+    const innerSpec = {
+      meta: { name: "inner" },
+      nodes: [{ id: "a", type: "agent", prompt: "x", retries: 1 }],
+    };
+    const runtime = new PauseOnFirstCollectRuntime();
+    const engine = new WorkflowEngine({ runtime, loader: () => innerSpec });
+    runtime.setEngine(engine);
+    const spec = parsed({
+      meta: { name: "outer-nested-pause" },
+      nodes: [{ id: "sub", type: "workflow", ref: "inner" }],
+    });
+    const result = await engine.run(spec);
+    expect(runtime.spawned).toHaveLength(1);
+    expect(result.status).toBe("paused");
+    expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(0);
+  });
 });
 
 // Issue #334: the same phantom-respawn shape as #321, but in `runPipeline`'s
@@ -191,4 +298,40 @@ describe("pipeline stage retries never spin past a pause (#334)", () => {
     expect(result.outputs.p).toEqual([null]);
     expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(0);
   });
+
+  it("does not credit a respawn when cancel() fires between stage attempts (#336)", async () => {
+    const runtime = new CancelOnFirstCollectRuntime();
+    const engine = new WorkflowEngine({ runtime });
+    runtime.setEngine(engine);
+    const spec = parsed({
+      meta: { name: "pipeline-cancel-between-attempts" },
+      nodes: [
+        { id: "p", type: "pipeline", items: ["a"], stages: [{ prompt: "${item}", retries: 1 }] },
+      ],
+    });
+    const result = await engine.run(spec);
+    expect(runtime.spawned).toHaveLength(1);
+    expect(result.outputs.p).toEqual([null]);
+    expect(result.status).toBe("cancelled");
+    expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(0);
+  });
+
+  it("does not credit a respawn when the pipeline deadline expires between stage attempts (#336)", async () => {
+    const runtime = new ExpiresOnFirstCollectRuntime();
+    const spec = parsed({
+      meta: { name: "pipeline-expired-between-attempts" },
+      nodes: [
+        { id: "p", type: "pipeline", items: ["a"], stages: [{ prompt: "${item}", retries: 1 }] },
+      ],
+    });
+    const result = await new WorkflowEngine({ runtime, pipelineTimeoutSeconds: 0.02 }).run(spec);
+    // `runPipeline` already returned (the deadline race won) by the time
+    // the FIRST attempt's slow `collect()` resolves late and empty — wait
+    // for that background retry attempt to fully settle before asserting.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(runtime.spawned).toHaveLength(1);
+    expect(result.outputs.p).toEqual([null]);
+    expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(0);
+    expect(result.faults.some((fault) => fault.includes("pipeline timeout"))).toBe(true);
+  }, 1000);
 });
