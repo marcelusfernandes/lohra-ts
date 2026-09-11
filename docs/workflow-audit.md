@@ -124,14 +124,15 @@ rollup e auditoria — usa para falar de uma falha de provedor, em vez de
 `string | null` livre. `classifyProviderError` (`src/transports/errors.ts:66-83`)
 é o único produtor:
 
-| `error_kind`      | gatilho                                                                                                                    |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `quota_exhausted` | `RateLimitError`, `statusCode`/`status` 429, ou `code` num conjunto conhecido de quota (`insufficient_quota` e afins)      |
-| `auth_failed`     | `statusCode` 401 ou 403                                                                                                    |
-| `model_not_found` | `statusCode` 404 **e** indício de modelo (`code`/`payload.error.code`/`.type`/mensagem citam "model", `errors.ts:58-64`)   |
-| `route_fault`     | `code` num conjunto de falha de rede (`ECONNREFUSED`, `ENOTFOUND`, `ETIMEDOUT`, `ECONNRESET`) ou `statusCode` 5xx          |
-| `unknown`         | qualquer outro `ProviderCallFailed` sem mapeamento fino — nunca `null` para um erro de provedor (invariante 2)             |
-| (nenhum — `null`) | erro que não é `ProviderCallFailed` — o resto da cadeia (`child-runner.ts`) já trata `null` como "não é falha de provedor" |
+| `error_kind`      | gatilho                                                                                                                                                             |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `quota_exhausted` | `RateLimitError`, `statusCode`/`status` 429, ou `code` num conjunto conhecido de quota (`insufficient_quota` e afins)                                               |
+| `auth_failed`     | `statusCode` 401 ou 403                                                                                                                                             |
+| `model_not_found` | `statusCode` 404 **e** indício de modelo (`code`/`payload.error.code`/`.type`/mensagem citam "model", `errors.ts:58-64`)                                            |
+| `route_fault`     | `code` num conjunto de falha de rede (`ECONNREFUSED`, `ENOTFOUND`, `ETIMEDOUT`, `ECONNRESET`) ou `statusCode` 5xx                                                   |
+| `unknown`         | qualquer outro `ProviderCallFailed` sem mapeamento fino — nunca `null` para um erro de provedor (invariante 2)                                                      |
+| `dead_turn`       | turno final com `content` vazio (após trim) e sem tool calls — produzido em `child-runner.ts`, não por `classifyProviderError`; `status` continua `complete` (#429) |
+| (nenhum — `null`) | erro que não é `ProviderCallFailed` — o resto da cadeia (`child-runner.ts`) já trata `null` como "não é falha de provedor"                                          |
 
 `sandbox_denied`, `timeout`, `cancelled` e `context_length` completam os
 nove — reservados para reuso futuro sem produtor em `classifyProviderError`
