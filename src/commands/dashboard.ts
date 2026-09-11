@@ -43,7 +43,6 @@ import {
   AuditTrail,
   OrchestrationChildRuntime,
   productionOwnershipStore,
-  productionWarningSink,
   workflowStatusHandler,
   WorkflowService,
 } from "../workflow/index.js";
@@ -254,16 +253,19 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
   const connection = openStateForEnvironment(options.environment);
   const sessions = new SessionRepository(connection.database, undefined, connection.ftsEnabled);
   const registry = new GatewaySessionRegistry(sessions);
-  // Issue #380: the same sink the ownership store (`productionWarningSink`
-  // below) and `WorkflowService` itself already print refusals through — a
-  // fence refusal on the AUDIT trail (`AuditRepository`/`AuditTrail`) used
-  // to reach only the default `() => undefined`, so it was unobservable in
-  // this binary even though the concurrent-write case it names is real.
-  const auditWarning = (message: string): void => {
-    console.warn(message);
-  };
+  // Issue #401: the ownership store is built AFTER `toolBase` (it needs
+  // `toolBase.noticesSink.warnState`, below) but the sink's `ownership`
+  // resolver needs the store — a mutable one-field box breaks the cycle:
+  // `ownership` only ever READS `ownershipRef.store` once a run is live,
+  // long after it is assigned, never before.
+  const ownershipRef: { store?: ReturnType<typeof productionOwnershipStore> } = {};
   const toolBase = createSessionToolBase(connection.database, options.environment, {
-    warning: auditWarning,
+    ownership: (runId) => {
+      const store = ownershipRef.store;
+      if (store === undefined) return null;
+      const fence = store.locks.runFenceOf(runId);
+      return fence === null ? null : { fence, holder: store.holder, now: store.ownershipOf().now };
+    },
   });
   let mcpManager: MCPManager | null = null;
   try {
@@ -293,22 +295,32 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
   });
   // Issue #369: the ring buffer is per-process, per-service; `push` never
   // throws (a bad event never aborts the run it watches), so wiring it
-  // straight into `onLiveEvent` is safe unconditionally.
-  const liveTail = new WorkflowLiveTail((message) => {
-    console.warn(message);
+  // straight into `onLiveEvent` is safe unconditionally. Issue #401: the
+  // ONE sink `toolBase` built, not a fresh `console.warn` closure.
+  const liveTail = new WorkflowLiveTail(toolBase.noticesSink.warn);
+  // Durable by default: the store is built over THIS root's own
+  // connection.database (#101), never a second one, and the leaf sandbox
+  // OrchestrationChildRuntime now installs (#107) is what lets its runs
+  // actually spawn tool-using leaves instead of denying them fail-closed.
+  // Issue #401: `warning` routes a `StateWarning` straight into
+  // `toolBase.noticesSink.warnState` — still prints to stderr via the
+  // sink's own fallback (a refused owned write never disappears in
+  // silence, #135) AND records the same warning in `operator_notices`.
+  const store = productionOwnershipStore(connection.database, {
+    warning: toolBase.noticesSink.warnState,
   });
+  ownershipRef.store = store;
   const workflowService = new WorkflowService({
     runtime: new OrchestrationChildRuntime(orchestrationCore),
     environment: options.environment,
     homeRoot: options.home,
-    // Durable by default: the store is built over THIS root's own
-    // connection.database (#101), never a second one, and the leaf sandbox
-    // OrchestrationChildRuntime now installs (#107) is what lets its runs
-    // actually spawn tool-using leaves instead of denying them fail-closed.
-    // The warning sink (#135) prints a refused owned write to stderr — a
-    // concurrent resume or a late heartbeat never disappears in silence.
-    store: productionOwnershipStore(connection.database, { warning: productionWarningSink() }),
-    auditTrail: new AuditTrail(toolBase.auditRepository, { warning: auditWarning }),
+    store,
+    auditTrail: new AuditTrail(toolBase.auditRepository, {
+      warning: toolBase.noticesSink.warn,
+    }),
+    // Issue #401: unifies this process's `WorkflowService`-level warnings
+    // (`this.warn` inside `service.ts`) into the same sink.
+    onWarning: toolBase.noticesSink.warn,
     onLiveEvent: (event) => {
       liveTail.push(event);
     },

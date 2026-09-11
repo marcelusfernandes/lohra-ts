@@ -7,28 +7,22 @@
 // LRU por escopo, `next_seq` por escopo em tabela irmã, retenção limitada.
 import type Database from "better-sqlite3";
 
+import { ERROR_KINDS } from "../transports/error-kinds.js";
 import { StateError } from "./errors.js";
 import type { Ownership } from "./workflow-repository.js";
 
-// Vocabulário local: os 9 kinds da issue #397 (`ERROR_KINDS`, ainda não
-// mergeada) mais os 4 kinds específicos de estado/durabilidade que esta
-// issue introduz. Unificar com `src/transports/error-kinds.ts` quando #397
-// mergear (M8-5).
-export const NOTICE_KINDS = [
-  "quota_exhausted",
-  "auth_failed",
-  "model_not_found",
-  "route_fault",
-  "sandbox_denied",
-  "timeout",
-  "cancelled",
-  "context_length",
-  "unknown",
+// Vocabulário unificado (issue #401, M8-5): os 9 kinds de provedor
+// (`ERROR_KINDS`, `src/transports/error-kinds.ts`) mais os 4 kinds
+// específicos de estado/durabilidade que esta tabela introduz — um único
+// lugar em vez de duas listas que podiam divergir.
+const STATE_NOTICE_KINDS = [
   "stale_fence_write",
   "audit_sink_failure",
   "resume_attempts_exhausted",
   "queue_overflow",
 ] as const;
+
+export const NOTICE_KINDS = [...ERROR_KINDS, ...STATE_NOTICE_KINDS] as const;
 
 export type NoticeKind = (typeof NOTICE_KINDS)[number];
 
