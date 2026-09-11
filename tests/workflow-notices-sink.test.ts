@@ -183,9 +183,31 @@ describe("createNoticesSink — warnState(warning)", () => {
         expect(page.notices[0]?.kind).toBe("stale_fence_write");
         expect(page.notices[0]?.fence).toBe(Number(currentFence));
         expect(sink.stats().dropped).toBe(0);
+        expect(sink.stats().fallback_global).toBe(0);
       } finally {
         connection.close();
       }
+    },
+  );
+
+  it(
+    "a run-scoped append that is refused by an EXPIRED lease still falls back to " +
+      "global, but a repository that ALSO refuses the global append is dropped, " +
+      "never fallback_global",
+    () => {
+      const refusingEverywhere: NoticesSinkRepository = { append: () => null };
+      const fallbackCalls: string[] = [];
+      const sink = createNoticesSink({
+        repository: refusingEverywhere,
+        fallback: (message) => {
+          fallbackCalls.push(message);
+        },
+        ownership: () => ({ fence: 1, holder: "holder-a", now: 0 }),
+      });
+      sink.warnState({ cause: "STALE_FENCE_WRITE", runId: "run-both-refused", fence: 0 });
+      expect(fallbackCalls).toHaveLength(1);
+      expect(sink.stats().fallback_global).toBe(0);
+      expect(sink.stats().dropped).toBe(1);
     },
   );
 
@@ -286,7 +308,14 @@ describe("createNoticesSink — warnState(warning)", () => {
         expect(fallbackCalls).toHaveLength(1);
         expect(sinkA.stats().dropped).toBe(0);
         expect(sinkA.stats().fallback_global).toBe(1);
-        expect(repositoryA.list({ scope: "run:run-10" }).notices).toHaveLength(0);
+        const runScopedPage = repositoryA.list({ scope: "run:run-10" });
+        expect(runScopedPage.notices).toHaveLength(0);
+        // Discriminates a real fence/holder refusal (this test's claim)
+        // from `ownership()` simply returning `null` — `refused_writes` is
+        // only ever incremented inside `NoticesRepository.append`'s own
+        // fence guard (`notices-repository.ts`'s `owned === undefined`
+        // branch), never on a missing `ownership` argument.
+        expect(runScopedPage.refused_writes).toBe(1);
 
         // Read back through B's OWN connection — the durable trail survives
         // the takeover even though A no longer owns the run.
