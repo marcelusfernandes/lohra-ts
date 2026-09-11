@@ -65,8 +65,8 @@ export class RunResult {
    * `faults` entries (timeout, empty output, schema mismatch, engine fault,
    * nested `sub[ref]:` ones, the advisory sandbox refusals `resultView`
    * folds in) carry no `errorKind` at all. Never gains a `quota_exhausted`
-   * entry either: that leaf status never reaches `faults`
-   * (`nonCompleteFirstCollectResult`, engine-utils.ts). */
+   * entry either: `debitLeaf`'s quota guard (engine-utils.ts) excludes it
+   * before `recordFaultKind` is ever called. */
   readonly faultKinds: ErrorKind[] = [];
   readonly nodeCosts: Record<string, NodeCost> = {};
   forcingFallbacks = 0;

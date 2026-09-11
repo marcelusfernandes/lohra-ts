@@ -36,6 +36,7 @@ import type { LockRepository } from "../state/locks.js";
 import type { AuditTrail } from "./audit-trail.js";
 import { auditEnabled } from "./audit-model.js";
 import { WorkflowLiveEvents, type WorkflowLiveEvent } from "./live-events.js";
+import { isErrorKind } from "../transports/error-kinds.js";
 export const RUN_LEASE_TTL = 900;
 /** The operator capability policy, read from the operator home per launch. */
 export const OPERATOR_POLICY_FILE = "workflow_policy.json";
@@ -154,7 +155,7 @@ export function durableFromRow(row: Readonly<Record<string, unknown>>): DurableR
     leaf_respawns: Number(payload.leaf_respawns ?? 0),
     sandbox_refusals: Number(payload.sandbox_refusals ?? 0),
     prior_faults: Array.isArray(faults) ? faults.map((fault) => String(fault)) : [],
-    prior_fault_kinds: Array.isArray(faultKinds) ? faultKinds.map((kind) => String(kind)) : [],
+    prior_fault_kinds: Array.isArray(faultKinds) ? faultKinds.map(String).filter(isErrorKind) : [],
     prior_degraded: payload.prior_degraded === true,
     tainted: Number(row.tainted ?? 0) === 1,
     spec: spec !== null && typeof spec === "object" ? (spec as Record<string, unknown>) : null,
@@ -1202,8 +1203,7 @@ export class WorkflowService {
 
   // --- shutdown --------------------------------------------------------------
 
-  /** Cancels + awaits every live run so its own completion handler releases
-   * the lease before `connection.close()` runs (invariant 4). */
+  /** Cancels + awaits every live run so its own completion handler releases the lease before `connection.close()` runs (invariant 4). */
   public shutdown(): Promise<void> {
     return (this.shuttingDown ??= this.runShutdown());
   }

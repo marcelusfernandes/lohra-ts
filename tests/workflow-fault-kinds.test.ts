@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { openStateDatabase, WorkflowRepository, LockRepository } from "../src/state/index.js";
 import { SqliteWorkflowCache } from "../src/workflow/sqlite-cache.js";
-import { durableFromRow, WorkflowService } from "../src/workflow/service.js";
+import { durableFromRow, durableRollup, WorkflowService } from "../src/workflow/service.js";
 import {
   WorkflowEngine,
   validateSpec,
@@ -102,6 +102,40 @@ describe("fault_kinds — engine (#399 AC1/AC2)", () => {
   });
 });
 
+describe("fault_kinds — quota guard never enters (issue #412, engine-utils.ts:490)", () => {
+  it("a leaf that fails with quota_exhausted never enters faultKinds; the run pauses by quota", async () => {
+    const runtime = new FakeRuntime([
+      [{ status: "failed", output: "429", errorKind: "quota_exhausted", retryAfter: null }],
+    ]);
+    const spec = parsed({
+      meta: { name: "quota-only" },
+      nodes: [{ id: "a", type: "agent", prompt: "x", retries: 0 }],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(result.faultKinds).toEqual([]);
+    expect(result.status).toBe("paused");
+    expect(result.pauseReason).toBe("quota_exhausted");
+  });
+
+  it("a quota leaf alongside an auth_failed leaf keeps only auth_failed in faultKinds", async () => {
+    const runtime = new FakeRuntime([
+      [{ status: "failed", output: "401", errorKind: "auth_failed", retryAfter: null }],
+      [{ status: "failed", output: "429", errorKind: "quota_exhausted", retryAfter: null }],
+    ]);
+    const spec = parsed({
+      meta: { name: "quota-and-auth" },
+      nodes: [
+        { id: "a", type: "agent", prompt: "x", retries: 0 },
+        { id: "b", type: "agent", prompt: "y", retries: 0 },
+      ],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(result.faultKinds).toEqual(["auth_failed"]);
+    expect(result.status).toBe("paused");
+    expect(result.pauseReason).toBe("quota_exhausted");
+  });
+});
+
 describe("fault_kinds — nested workflow folds into the parent (#399 AC4)", () => {
   it("a sub-workflow leaf failing with auth_failed folds its kind into the parent's RunResult", async () => {
     const runtime = new FakeRuntime([
@@ -155,6 +189,25 @@ describe("fault_kinds — durable compatibility (#399 AC3)", () => {
       updated_at: 0,
     });
     expect(view.prior_fault_kinds).toEqual([]);
+  });
+
+  it("a pause_payload_json line adulterated with a non-vocabulary fault kind is filtered from fault_kinds_total", () => {
+    const view = durableFromRow({
+      run_id: "adulterated-row",
+      name: "adulterated",
+      status: "paused",
+      pause_reason: "checkpoint",
+      pause_payload_json: JSON.stringify({
+        checkpoint: {},
+        attempts: 1,
+        prior_faults: ["a: leaf failed: boom", "b: leaf failed: boom"],
+        prior_fault_kinds: ["auth_failed", "garbage"],
+        prior_degraded: true,
+      }),
+      updated_at: 0,
+    });
+    const rollup = durableRollup(view, 0, false);
+    expect(rollup.fault_kinds_total).toEqual(["auth_failed"]);
   });
 });
 
