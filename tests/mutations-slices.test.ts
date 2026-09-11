@@ -480,7 +480,7 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 214 (soma dos doze catálogos importados)", () => {
+  it("a contagem total de mutantes é 221 (soma dos doze catálogos importados)", () => {
     // Os doze catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
@@ -492,9 +492,11 @@ describe("scripts/mutations/slices.json", () => {
     // da issue só autoriza um script novo. `auth-mutants.ts` (issue #354) é
     // o décimo primeiro: 188 + 8 = 196. `workflow-audit-producers-mutants.ts`
     // (issue #370) é o décimo segundo, estendendo a fatia
-    // `workflow-audit-live` aos produtores do M7: 196 + 18 = 214.
+    // `workflow-audit-live` aos produtores do M7: 196 + 18 = 214. A mesma
+    // issue #370 deixou quatro lacunas de oráculo/mutante que #383 fecha (7
+    // mutantes: R6, L4, W1, M1, W2, T3, PD): 214 + 7 = 221.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 214;
+    const TOTAL_MUTANTS = 221;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -511,7 +513,7 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/workflow-durability-named.ts": 41,
       "scripts/mutations/orchestration.ts": 5,
       "scripts/mutations/workflow-audit-live-mutants.ts": 32,
-      "scripts/mutations/workflow-audit-producers-mutants.ts": 18,
+      "scripts/mutations/workflow-audit-producers-mutants.ts": 25,
       "scripts/mutations/web-tools-mutants.ts": 9,
       "scripts/mutations/media-catalog-other.ts": 7,
       "scripts/mutations/media-catalog-persistence.ts": 13,
@@ -525,7 +527,7 @@ describe("scripts/mutations/slices.json", () => {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(214);
+    expect(somaTabela).toBe(221);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {
