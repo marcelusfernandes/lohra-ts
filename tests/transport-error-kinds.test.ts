@@ -16,6 +16,8 @@ import type { ErrorKind } from "../src/transports/index.js";
 // `undefined` na base vira uma asserção reprovada — não uma falha de
 // coleta. `classifyProviderError`/`ProviderCallFailed` já existiam antes
 // de #397, então o import nomeado deles é seguro na base.
+// #429 (M10-S8): `dead_turn` acrescentado no fim — 9 → 10 kinds, precedente
+// #232 (acrescentar no fim é aditivo, não um ADR novo).
 const EXPECTED_KINDS = [
   "quota_exhausted",
   "auth_failed",
@@ -26,6 +28,7 @@ const EXPECTED_KINDS = [
   "cancelled",
   "context_length",
   "unknown",
+  "dead_turn",
 ] as const;
 
 describe("ERROR_KINDS vocabulary (#397)", () => {
