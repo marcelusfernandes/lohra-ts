@@ -33,6 +33,7 @@ import {
   startDeviceLogin,
   status,
   tokenPath,
+  waitForFileLease,
   writeConfig,
   writeTokens,
 } from "../src/auth/index.js";
@@ -550,5 +551,120 @@ describe("lease fail-closed com lock ilegível (#356)", () => {
     expect(result.accessToken).toBe("fresh-access");
     expect(readTokens(home)?.accessToken).toBe("fresh-access");
     expect(existsSync(`${tokenPath(home)}.lock`)).toBe(false);
+  });
+});
+
+// issue #356: três ramos de parada citados no veredito da PR #355 e sem
+// teste nem mutante próprio até aqui.
+describe("ramos de parada sem teste (#356)", () => {
+  it("waitForFileLease respeita o deadline mesmo se a lease nunca aparecer livre (perdedor)", async () => {
+    vi.useFakeTimers();
+    try {
+      const home = root();
+      const lockPath = join(home, "oauth.json.lock");
+      // now=0 e um TTL enorme: a lease nunca expira do ponto de vista do
+      // relógio injetado — só o `maxWaitMs`/deadline pode terminar a espera.
+      expect(acquireFileLease(lockPath, "holder-a", 1_000_000, 0)).toBe(true);
+      const sleep = vi.fn((ms: number) => {
+        vi.advanceTimersByTime(ms);
+        return Promise.resolve();
+      });
+      await waitForFileLease(lockPath, {
+        maxWaitMs: 100,
+        pollMs: 10,
+        now: () => 0,
+        sleep,
+      });
+      // 100ms / 10ms de poll: exatamente 10 sondagens antes do deadline
+      // bater — nem uma a mais (a espera não é indefinida, invariante 3),
+      // nem uma a menos (não desiste antes da hora).
+      expect(sleep).toHaveBeenCalledTimes(10);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("lança RefreshFailedError 'lost the renewal lease' quando as duas tentativas esgotam a espera", async () => {
+    vi.useFakeTimers();
+    try {
+      const home = root();
+      enable(home);
+      writeTokens(home, {
+        accessToken: "old-access",
+        refreshToken: "old-refresh",
+        accountId: "acct-t356-lost-lease",
+        expiresAt: 900,
+      });
+      const lockPath = `${tokenPath(home)}.lock`;
+      // Um dono alheio segura a lease por bem mais que as duas janelas de
+      // espera (2 x REFRESH_LEASE_TTL_SECONDS) desta chamada — nunca libera,
+      // nunca expira dentro do tempo que a chamada está disposta a esperar.
+      expect(acquireFileLease(lockPath, "someone-else", 60)).toBe(true);
+      let calls = 0;
+      const oauthPost: OAuthPost = () => {
+        calls += 1;
+        return Promise.resolve([
+          200,
+          { access_token: "unused", refresh_token: "unused", expires_in: 3600 },
+        ]);
+      };
+      const promise = resolveCredentials(home, {
+        now: Date.now() / 1000,
+        codexHome: join(home, "codex"),
+        oauthPost,
+      });
+      const assertion = expect(promise).rejects.toThrow("lost the renewal lease");
+      // 2 tentativas x 10s (REFRESH_LEASE_TTL_SECONDS) de espera cada.
+      await vi.advanceTimersByTimeAsync(20_000);
+      await assertion;
+      let caught: unknown;
+      try {
+        await promise;
+      } catch (error) {
+        caught = error;
+      }
+      expect((caught as Error).name).toBe("RefreshFailedError");
+      expect(calls).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("acquireFileLease lançando (não EEXIST) vira TokenPersistError, não RefreshFailedError", async () => {
+    const home = root();
+    enable(home);
+    writeTokens(home, {
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      accountId: "acct-t356-lease-throws",
+      expiresAt: 900,
+    });
+    // `home` sem permissão de escrita: `mkdirSync` recursivo num diretório
+    // que já existe não precisa escrever e passa, mas `openSync(lockPath,
+    // "wx")` dentro de `createLeaseFile` falha com EACCES -- um erro que
+    // não é EEXIST, então `acquireFileLease` propaga em vez de devolver
+    // `false`.
+    chmodSync(home, 0o500);
+    let caught: unknown;
+    try {
+      await resolveCredentials(home, {
+        now: 1_000,
+        codexHome: join(home, "codex"),
+        oauthPost: () =>
+          Promise.resolve([
+            200,
+            { access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 },
+          ]),
+      });
+    } catch (error) {
+      caught = error;
+    } finally {
+      chmodSync(home, 0o700);
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const error = caught as Error;
+    expect(error.name).toBe("TokenPersistError");
+    expect(error.name).not.toBe("RefreshFailedError");
+    expect(error.message).not.toContain("old-access");
   });
 });
