@@ -565,7 +565,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Read the durable metadata-only audit trail for one workflow run. This is a local SQLite query: it creates no provider client and spends no model tokens. Events are chronological and paginated by durable seq. Reuse the returned snapshot_seq for stable pagination; omit it with after_seq to follow a live tail. Filters affect event rows, never integrity notices.",
+        "Read the durable metadata-only audit trail for one workflow run. This is a local SQLite query: it creates no provider client and spends no model tokens. Events are chronological and paginated by durable seq. Reuse the returned snapshot_seq for stable pagination; omit it with after_seq to follow a live tail. Filters affect event rows, never integrity notices. leaf.started/leaf.completed/leaf.failed cover one spawned leaf each (role, node_path, usage); tool.started/tool.completed cover one tool call made INSIDE a leaf (tool_name_state, arg count, success/error/sandbox_denied) — both carry identity.sub_id, so filtering by sub_id returns a leaf together with every tool it called. Never a tool's name, arguments, or output in clear text.",
       parameters: {
         type: "object",
         properties: {

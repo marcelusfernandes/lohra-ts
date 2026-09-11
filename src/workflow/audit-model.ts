@@ -144,6 +144,10 @@ const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object
     "process_crash",
     "queue_overflow",
     "retention_limit",
+    // Issue #367: the sandbox denied a leaf's tool call — sync policy
+    // refusal (fs/egress/taint/retired-stretch) or a run with no live
+    // installation at all (`denyAllDispatch`, orchestration-runtime.ts).
+    "sandbox_denied",
     "sink_failure",
     "store_failed",
     "timeout",

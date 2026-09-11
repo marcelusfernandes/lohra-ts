@@ -44,29 +44,57 @@ export interface WorkflowAuditProducers {
   readonly announceDone: (status: string) => void;
 }
 
+/** The subset of `WorkflowAuditProducersDeps` the fail-closed rule below
+ * needs — issue #367 also reuses it from `audit-runtime.ts`'s `tool.*`/
+ * `leaf.*` producer, which has no `live`/`segmentId`/`onEvent` of its own. */
+export interface AuditFailClosedDeps {
+  readonly trail: AuditTrail | undefined;
+  /** `stretchOwnership` in the durable path; `() => null` outside it — read
+   * FRESH on every call, never captured once at construction time. */
+  readonly ownershipOf: () => Ownership | null;
+  /** `true` only for the durable path: the fail-closed drop below only
+   * applies where a fence exists to lose in the first place. */
+  readonly durable: boolean;
+  readonly warn: (message: string) => void;
+}
+
 /**
- * Builds the three producers for ONE acquisition. Fail-closed (invariant 4,
- * CLAUDE.md): `AuditRepository.append` skips its own fence check whenever
- * `ownership` is `undefined` — passing `ownershipOf() ?? undefined` straight
- * through (what `service.ts:861-862` did on main) let a stretch that had
- * lost ownership keep writing to the ledger with no fence at all. Here, a
- * durable stretch whose `ownershipOf()` returns `null` never reaches
- * `trail.record` — the event is dropped, named, via `warn` — instead of
- * being written unfenced.
+ * The fail-closed rule every audit producer in this codebase shares
+ * (invariant 4, CLAUDE.md): `AuditRepository.append` skips its own fence
+ * check whenever `ownership` is `undefined` — passing `ownershipOf() ??
+ * undefined` straight through (what `service.ts:861-862` did on main, #365)
+ * let a stretch that had lost ownership keep writing to the ledger with no
+ * fence at all. Here, a durable stretch whose `ownershipOf()` returns `null`
+ * never reaches `trail.record` — the event is dropped, named, via `warn` —
+ * instead of being written unfenced.
  */
+export function recordAuditEvent(
+  deps: AuditFailClosedDeps,
+  runId: string,
+  input: AuditInput,
+): void {
+  const { trail, ownershipOf, durable, warn } = deps;
+  if (trail === undefined) return;
+  const ownership = ownershipOf();
+  if (durable && ownership === null) {
+    warn(`workflow: audit event dropped for run ${runId} — ownership lost (${input.event_type})`);
+    return;
+  }
+  trail.record(runId, input, ownership ?? undefined);
+}
+
+/** Builds the three `workflow.*` producers for ONE acquisition — see
+ * `recordAuditEvent` above for the fail-closed rule they share. */
 export function createWorkflowAuditProducers(
   deps: WorkflowAuditProducersDeps,
 ): WorkflowAuditProducers {
   const { trail, live, runId, segmentId, ownershipOf, durable, warn, onEvent } = deps;
 
   function record(input: Omit<AuditInput, "segment_id">): void {
-    if (trail === undefined) return;
-    const ownership = ownershipOf();
-    if (durable && ownership === null) {
-      warn(`workflow: audit event dropped for run ${runId} — ownership lost (${input.event_type})`);
-      return;
-    }
-    trail.record(runId, { ...input, segment_id: segmentId }, ownership ?? undefined);
+    recordAuditEvent({ trail, ownershipOf, durable, warn }, runId, {
+      ...input,
+      segment_id: segmentId,
+    });
   }
 
   function forwardEvent(event: WorkflowEvent): void {
