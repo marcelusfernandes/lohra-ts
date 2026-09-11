@@ -380,7 +380,7 @@ export class WorkflowEngine {
     this.accounted = new Set();
     this.leafCosts = new Map();
     this.schemas = spec.schemas;
-    this.specIdentity = Object.freeze([spec.name, spec.meta.version ?? null]);
+    this.specIdentity = Object.freeze([spec.name, spec.meta.version ?? null, ...this.nodeScope]);
     const ordered = topologicalOrder(spec);
     this.nestedAnswers = await siblingAnswers(this.checkpointAnswers, ordered, args, this.loader);
     this.result.nodesTotal = ordered.length;
@@ -974,7 +974,7 @@ export class WorkflowEngine {
   private runCheckpoint(node: Node, context: Readonly<Record<string, unknown>>): unknown {
     const prompt = strictResolve(node.fields.prompt, context);
     if (prompt === null) return null;
-    const hash = this.cell([...this.nodeScope, node.id, "checkpoint", prompt]);
+    const hash = this.cell([node.id, "checkpoint", prompt]);
     const cached = this.cacheGet(hash);
     if (cached !== CACHE_MISS) return cached;
     const resolved = resolveCheckpoint(this.checkpointAnswers, this.nodeScope, node.id);
