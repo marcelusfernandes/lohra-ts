@@ -29,6 +29,7 @@ import {
   collectBranchWithRetries,
   combine,
   extractForcedOutput,
+  isDryRound,
   nonCompleteFirstCollectResult,
   nonEmpty,
   recollectLeafTimeout,
@@ -39,7 +40,9 @@ import {
   resolveNodeSchema,
   resultUsage,
   routingIdentity,
+  sealPipelineRatio,
   siblingAnswers,
+  stopForBudget,
   stoppedByControl,
   strictResolve,
   timeoutLeafResult,
@@ -416,7 +419,7 @@ export class WorkflowEngine {
       this.result.status = "paused";
       this.result.pauseReason = this.control.pauseReason;
       this.result.checkpoint = this.control.pausePayload;
-    } else this.result.status = deriveStatus(this.result);
+    } else if (this.result.status !== "failed") this.result.status = deriveStatus(this.result);
     return this.result;
   }
 
@@ -600,6 +603,8 @@ export class WorkflowEngine {
     }, this.pipelineTimeoutSeconds * 1000);
     const outcome = await Promise.race([work.then(() => "complete" as const), deadline]);
     clearTimeout(timer);
+    if (sealPipelineRatio(this.recordFault.bind(this), node, done, itemValues.length))
+      this.result.status = "failed";
     if (outcome === "complete") return outputs;
     expired = true;
     const active = [...this.activeLeaves];
@@ -817,18 +822,13 @@ export class WorkflowEngine {
       if (leaf.output === null) {
         intact = false;
         this.recordFault(`${node.id}: round ${String(round)} dead`);
-        continue;
-      }
-      if (
-        isEmptyOutput(leaf.output) ||
-        (Array.isArray(leaf.output) && leaf.output.length === 0) ||
-        (asRecord(leaf.output) !== null && Object.keys(asRecord(leaf.output) ?? {}).length === 0)
-      )
+      } else if (isDryRound(leaf.output)) {
         empty += 1;
-      else {
+      } else {
         collected.push(leaf.output);
         empty = 0;
       }
+      if (stopForBudget(this.recordFault.bind(this), node, total)) break;
     }
     const output = collected;
     if (intact) this.cachePut(hash, node.id, output, total);

@@ -6,6 +6,7 @@ import {
   MAX_STATIC_FANOUT,
   NODE_SPECS,
   NODE_TYPES,
+  SUB_OBJECT_FIELDS,
 } from "./nodes.js";
 import { findRefs, invalidRefs, isValidRef } from "./refs.js";
 import { Node, SpecIssue, ValidationError, WorkflowSpec } from "./types.js";
@@ -92,8 +93,12 @@ interface SchemaSubObject {
  * Agent-shaped sub-objects where `schema`/`schema_ref` are meaningful
  * because the engine's `schemaOf` (`engine.ts:347-355`) reads them off this
  * same object at runtime: `loop_until_dry.body`, `gate.body`,
- * `judge_panel.synthesize` and each `pipeline.stages[*]`. #238 (unknown
- * fields in sub-objects) can reuse this same scan point for its own rule.
+ * `judge_panel.synthesize` and each `pipeline.stages[*]`. A `parallel`
+ * branch that is itself an object is scanned too (#238) — the engine still
+ * renders it wholesale into the leaf prompt (`renderValue` in `engine.ts`'s
+ * `runParallel`), unchanged by this scan; a string/ref branch, the common
+ * case, has no fields to check and is skipped. #238 (unknown fields in
+ * sub-objects, `validateSubObjectFields` below) reuses this same scan point.
  */
 function schemaBearingSubObjects(node: Node): readonly SchemaSubObject[] {
   const targets: SchemaSubObject[] = [];
@@ -113,6 +118,14 @@ function schemaBearingSubObjects(node: Node): readonly SchemaSubObject[] {
       }
     });
   }
+  if (node.type === "parallel" && Array.isArray(node.fields.branches)) {
+    node.fields.branches.forEach((branch, index) => {
+      const branchRecord = record(branch);
+      if (branchRecord !== null) {
+        targets.push({ fieldPrefix: `branches[${String(index)}].`, fields: branchRecord });
+      }
+    });
+  }
   return targets;
 }
 
@@ -128,6 +141,62 @@ function validateSubObjectSchemas(
     checkNamedSchema(target.fields, node.id, target.fieldPrefix, schemas, issues);
   }
 }
+
+/**
+ * Every schema-bearing sub-object accepts only the agent-shaped fields in
+ * `SUB_OBJECT_FIELDS` (#238) — a routing knob (`model`/`tier`/`effort`/
+ * `provider`) one level down has no reader (the engine reads routing off
+ * the NODE, `engine.ts`'s `routingIdentity`/`resolveLeafRequestOptions`) and
+ * is now refused instead of silently costing the session's own model.
+ */
+function validateSubObjectFields(node: Node, issues: SpecIssue[]): void {
+  for (const target of schemaBearingSubObjects(node)) {
+    for (const key of Object.keys(target.fields)) {
+      if (!SUB_OBJECT_FIELDS.includes(key as (typeof SUB_OBJECT_FIELDS)[number])) {
+        issue(
+          issues,
+          "unknown_field",
+          `'${target.fieldPrefix}${key}' has no effect here — routing knobs go on the node`,
+          node.id,
+          `${target.fieldPrefix}${key}`,
+          allowedExample(SUB_OBJECT_FIELDS),
+        );
+      }
+    }
+  }
+}
+
+/** PR #262: a non-object `pipeline.stages[*]` entry is invalid input, not a
+ * silently skipped one — before this, `runPipeline` (`engine.ts:508-509`)
+ * quietly returned `null` for the item and the run never faulted. */
+function validatePipelineStageShapes(node: Node, issues: SpecIssue[]): void {
+  if (node.type !== "pipeline" || !Array.isArray(node.fields.stages)) return;
+  node.fields.stages.forEach((stage, index) => {
+    if (record(stage) === null) {
+      issue(
+        issues,
+        "field_value",
+        `stages[${String(index)}] must be an agent-shaped object, not ${JSON.stringify(stage)}`,
+        node.id,
+        `stages[${String(index)}]`,
+        "stages:\n  - prompt: ${item}",
+      );
+    }
+  });
+}
+
+/**
+ * #238: `label` and `phase` used to be accepted (`Node.label`/`Node.phase`
+ * getters in `types.ts`, now removed) but nothing in `src/` ever read the
+ * value back — a spec author had no way to know the field did nothing. Both
+ * are refused now, with a message that names the field instead of the
+ * generic "has no field" wording (and no allow-list example: naming every
+ * OTHER field would suggest one of them is a replacement, and none is).
+ */
+const REMOVED_FIELDS: Readonly<Record<string, string>> = Object.freeze({
+  label: "'label' was removed; had no effect",
+  phase: "'phase' was removed; had no effect",
+});
 
 const allowedExample = (fields: readonly string[]): string =>
   `allowed: [${[...fields]
@@ -246,16 +315,16 @@ function validateShape(
   if (nodeSpec === undefined) return { node: null, duplicateCandidate: id };
   const allowed = new Set(["id", "type", ...nodeSpec.fields]);
   for (const key of Object.keys(raw)) {
-    if (!allowed.has(key)) {
-      issue(
-        issues,
-        "unknown_field",
-        `'${nodeType}' has no field '${key}'`,
-        id,
-        key,
-        allowedExample(nodeSpec.fields),
-      );
-    }
+    if (allowed.has(key)) continue;
+    const removedMessage = REMOVED_FIELDS[key];
+    issue(
+      issues,
+      "unknown_field",
+      removedMessage ?? `'${nodeType}' has no field '${key}'`,
+      id,
+      key,
+      removedMessage === undefined ? allowedExample(nodeSpec.fields) : null,
+    );
   }
   for (const required of nodeSpec.required) {
     if (!(required in raw)) {
@@ -342,6 +411,42 @@ function validateLifecycle(node: Node, issues: SpecIssue[]): void {
         );
       }
     });
+  }
+}
+
+/** #238: below this ratio `runPipeline` (`engine.ts`) seals the run `failed`
+ * with a fault citing measured vs. required — a floor of 0 or a ceiling
+ * above 1 could never be breached, so both are refused up front. */
+function validateMinSuccessRatio(node: Node, issues: SpecIssue[]): void {
+  if (node.type !== "pipeline" || node.fields.min_success_ratio === undefined) return;
+  const ratio = node.fields.min_success_ratio;
+  if (typeof ratio !== "number" || !Number.isFinite(ratio) || ratio <= 0 || ratio > 1) {
+    issue(
+      issues,
+      "field_value",
+      "'min_success_ratio' must be a number greater than 0 and at most 1",
+      node.id,
+      "min_success_ratio",
+      "min_success_ratio: 0.6",
+    );
+  }
+}
+
+/** #238: a real per-node token cap for `loop_until_dry` — `runLoop`
+ * (`engine.ts`) stops the round loop once spent tokens reach it. A
+ * non-positive or fractional budget could never be a real ceiling. */
+function validateLoopBudget(node: Node, issues: SpecIssue[]): void {
+  if (node.type !== "loop_until_dry" || node.fields.budget === undefined) return;
+  const budget = node.fields.budget;
+  if (typeof budget !== "number" || !Number.isInteger(budget) || budget <= 0) {
+    issue(
+      issues,
+      "field_value",
+      "'budget' must be a positive whole number of tokens",
+      node.id,
+      "budget",
+      "budget: 20000",
+    );
   }
 }
 
@@ -505,6 +610,9 @@ export function validateSpec(
     validateLifecycle(node, issues);
     validateTier(node, issues);
     validateGate(node, issues);
+    validateMinSuccessRatio(node, issues);
+    validateLoopBudget(node, issues);
+    validatePipelineStageShapes(node, issues);
     for (const bad of invalidRefs(node.fields)) {
       issue(
         issues,
@@ -537,6 +645,7 @@ export function validateSpec(
     // #238 (unknown fields in sub-objects) reuses this same scan point —
     // schemaBearingSubObjects above already enumerates body/synthesize/stages.
     validateSubObjectSchemas(node, schemas, issues);
+    validateSubObjectFields(node, issues);
     const count = staticFanout(node);
     if (count !== null && count > MAX_STATIC_FANOUT) {
       issue(
@@ -553,6 +662,29 @@ export function validateSpec(
     issue(issues, "cycle", `dependency cycle: ${cycle.join(" -> ")}`, cycle[0] ?? null);
   if (issues.length > 0) return new ValidationError(issues);
   return new WorkflowSpec({ meta, inputs, schemas, nodes });
+}
+
+/** PR #295: checks both `.then` and `.catch` — `validateNestedRefs` below
+ * calls `.catch` on whatever this returns `true` for (line ~724), so a
+ * thenable without a `.catch` (a custom, non-native Promise-like) would
+ * throw there instead of being left to the runtime backstop. */
+function looksLikePromise(value: unknown): boolean {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    typeof (value as { then?: unknown }).then === "function" &&
+    typeof (value as { catch?: unknown }).catch === "function"
+  );
+}
+
+function nestedRefIssue(issues: SpecIssue[], node: Node, ref: string, detail: string): void {
+  issue(
+    issues,
+    "nested_ref",
+    `nested workflow '${ref}' is invalid: ${detail} (see issue #244)`,
+    node.id,
+    "ref",
+  );
 }
 
 /**
@@ -572,24 +704,6 @@ export function validateSpec(
  * stops recursing there too instead of reporting a ref issue that was never
  * the engine's to raise.
  */
-function looksLikePromise(value: unknown): boolean {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    typeof (value as { then?: unknown }).then === "function"
-  );
-}
-
-function nestedRefIssue(issues: SpecIssue[], node: Node, ref: string, detail: string): void {
-  issue(
-    issues,
-    "nested_ref",
-    `nested workflow '${ref}' is invalid: ${detail} (see issue #244)`,
-    node.id,
-    "ref",
-  );
-}
-
 export function validateNestedRefs(
   spec: WorkflowSpec,
   loader: WorkflowLoader | undefined,

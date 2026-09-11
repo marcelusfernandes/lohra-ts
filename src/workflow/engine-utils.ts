@@ -79,6 +79,64 @@ export function combine(total: Usage, next: Usage): Usage {
   return combineUsage(total, next) ?? usage();
 }
 
+/**
+ * #238: below `pipeline.min_success_ratio`, the run seals `failed` with a
+ * fault citing measured vs. required — a floor `runPipeline` (`engine.ts`)
+ * checks once per call, win or timeout. Returns `true` (having already
+ * recorded the fault) on a breach, so the call site stays one line; `false`
+ * (no field, or `total` is 0 and a ratio can't be measured) leaves the
+ * caller's status alone.
+ */
+export function sealPipelineRatio(
+  recordFault: (message: string) => void,
+  node: Node,
+  completed: number,
+  total: number,
+): boolean {
+  const ratio = node.fields.min_success_ratio;
+  if (typeof ratio !== "number" || total === 0) return false;
+  const measured = completed / total;
+  if (measured >= ratio) return false;
+  const pct = (value: number): string => `${(value * 100).toFixed(1)}%`;
+  recordFault(
+    `${node.id}: min_success_ratio breach — ${String(completed)}/${String(total)} items ` +
+      `completed (${pct(measured)}), required ${pct(ratio)}`,
+  );
+  return true;
+}
+
+/**
+ * #238: `loop_until_dry.budget` is a real per-node token ceiling —
+ * `runLoop` (`engine.ts`) calls this once per round, after charging that
+ * round's usage. Returns `true` (having already recorded the fault) once
+ * spend reaches the budget, so the round loop can `break` in one line.
+ */
+export function stopForBudget(
+  recordFault: (message: string) => void,
+  node: Node,
+  spent: Usage,
+): boolean {
+  const budget = node.fields.budget;
+  if (typeof budget !== "number") return false;
+  const total = spent.inputTokens + spent.outputTokens;
+  if (total < budget) return false;
+  recordFault(
+    `${node.id}: node budget exhausted after ${String(total)} of ${String(budget)} tokens; loop stopped`,
+  );
+  return true;
+}
+
+/** Extracted so `runLoop`'s round predicate ("came back empty") reads as one
+ * line at the call site — no behavior of its own beyond the OR the inline
+ * version already had. */
+export function isDryRound(output: unknown): boolean {
+  return (
+    isEmptyOutput(output) ||
+    (Array.isArray(output) && output.length === 0) ||
+    (asRecord(output) !== null && Object.keys(asRecord(output) ?? {}).length === 0)
+  );
+}
+
 export function resultUsage(result: ChildResult): Usage {
   return result.usage ?? usage();
 }

@@ -3,8 +3,26 @@ export const MAX_NODE_RETRIES = 3;
 export const MAX_GATE_ATTEMPTS = 3;
 export const MAX_NODE_MAX_ITERATIONS = 128;
 
-const COMMON = ["label", "phase", "required", "depends_on"] as const;
+const COMMON = ["required", "depends_on"] as const;
 const ROUTING = ["model", "tier", "effort", "provider"] as const;
+
+/**
+ * The agent-shaped field set every schema-bearing sub-object may carry
+ * (`gate.body`, `loop_until_dry.body`, `judge_panel.synthesize`,
+ * `pipeline.stages[*]`, `parallel.branches[*]` when a branch is an object) —
+ * shared by `schema.ts`'s `validateSubObjectFields` and the anti-drift test
+ * so the two never drift apart. A routing knob (`model`/`tier`/`effort`/
+ * `provider`) does not belong here: it goes on the node itself (#238).
+ */
+export const SUB_OBJECT_FIELDS = [
+  "prompt",
+  "schema",
+  "schema_ref",
+  "tool_less",
+  "timeout",
+  "retries",
+  "max_iterations",
+] as const;
 
 export interface NodeSpec {
   readonly fields: readonly string[];
