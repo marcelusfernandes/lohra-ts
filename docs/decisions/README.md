@@ -67,3 +67,9 @@ abaixo.
   idênticos, mesma direção que #319 tomou para checkpoint; registra a
   lacuna do `rename_hint` e a colisão de `sub[${reference}]:${nodeId}` como
   fora de escopo.
+- [2026-09-12 — Sinal no ledger: `reason: signal` distingue SIGTERM/SIGINT
+  de `workflow_cancel`](2026-09-12-sinal-no-ledger.md) —
+  `registerShutdownTrigger` cobre SIGTERM e SIGINT com um handler só;
+  `WorkflowService.shutdown("signal")` leva a causa até `segment.completed`
+  (`{status: "interrupted", reason: "signal"}`), enquanto `cancel(runId)`
+  passa a gravar `reason: "cancelled"` explícito, nunca `"signal"`.

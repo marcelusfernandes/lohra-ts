@@ -1,0 +1,65 @@
+# Sinal no ledger: `reason: signal` distingue SIGTERM/SIGINT de `workflow_cancel`
+
+- **Data:** 2026-09-12
+- **Origem:** issue #428 (M10-S7, épico #421 "Supervisão em voo"); decisão 5
+  do mapa do épico (`reason: signal` na allow-list, não um `event_type`
+  próprio).
+
+## Contexto
+
+Antes desta issue, um SIGTERM ou SIGINT e um `workflow_cancel` chegavam ao
+mesmo lugar: `WorkflowService.shutdown()` (`src/workflow/service.ts:1207` na
+base) e `cancel(runId)` convergiam em `cancelAndSettle` → `engine.cancel()` →
+status `"cancelled"` (`engine.ts:148,415`), e `announceStretchEnd` gravava
+`segment.completed {status: "cancelled", terminal: true}` sem nada que
+dissesse qual dos dois caminhos produziu o evento. Só SIGINT tinha handler —
+`src/commands/serve.ts:156` (o `off`, :135) e `src/commands/dashboard.ts:485`
+— SIGTERM (o sinal que um orquestrador ou gerenciador de processo manda
+primeiro) não tinha handler nenhum neste código.
+
+## Decisão
+
+- `src/cli/shutdown-trigger.ts` (novo): `registerShutdownTrigger(handler,
+target?)` registra o MESMO handler para `SIGTERM` e `SIGINT` via
+  `process.once` (nunca `process.on` — uma segunda entrega do mesmo sinal
+  cai no comportamento padrão do Node, não dispara duas vezes) e devolve
+  `unregister`. `serve.ts` e `dashboard.ts` passam a usá-lo; `dashboard.ts`
+  mantém `options.registerShutdownTrigger` injetável para teste, agora
+  cobrindo os dois sinais também no caminho real (o default deixou de ser
+  só `process.once("SIGINT", handler)`).
+- `WorkflowService.shutdown(reason: "signal" | "operator" = "operator")` —
+  a causa atravessa `runShutdown` → `cancelAndSettle` (que marca
+  `RunRecord.interruptCause = "signal"` em cada run vivo antes de
+  cancelá-lo) → `announceStretchEnd` → `announceSegmentCompleted`
+  (`audit-producers.ts`). Um shutdown por sinal grava `segment.completed
+{status: "interrupted", reason: "signal"}` — o `status` que o motor
+  publica em outros lugares (`resultView`, `service.ts`) continua
+  `"cancelled"` sem mudança; só o LEDGER ganha a distinção.
+- `cancel(runId)` (a tool `workflow_cancel`) e um `shutdown()` sem sinal
+  continuam publicando `status: "cancelled"`, agora com `reason: "cancelled"`
+  explícito no payload de `segment.completed` — nunca `reason: "signal"`.
+  Antes desta issue esse payload não tinha `reason` nenhum; o valor
+  explícito existe para que quem lê o ledger nunca precise inferir "não foi
+  sinal" a partir de um campo ausente.
+- `"signal"` entra na allow-list `reason` de `audit-model.ts` (`SAFE_STRING_VALUES.reason`).
+
+## Doutrina para autores de spec
+
+Um resume que decide se deve reagir a um run pausado por "abandono do
+operador" ou por "ambiente interrompeu o processo" lê `segment.completed`
+com `runId`+`segmentId` mais recente do run: `reason: "signal"` é o
+processo, não alguém cancelando; `reason: "cancelled"` (com `status:
+"cancelled"`) é `workflow_cancel`. Nenhuma outra combinação de
+`status`/`reason` distingue os dois caminhos.
+
+## Evidência
+
+- `tests/workflow-shutdown-signal.test.ts`: `shutdown("signal")` com um run
+  vivo grava `segment.completed {status: "interrupted", reason: "signal"}`;
+  `shutdown()` sem razão e `cancel(runId)` gravam `{status: "cancelled",
+reason: "cancelled"}`, nunca `reason: "signal"`; `registerShutdownTrigger`
+  com um `process`-fake prova o registro dos dois sinais e o `unregister`,
+  sem nunca sinalizar o processo real do vitest.
+- `npm run mutations:t16` (60/60) e `npm run mutations:t17` (57/57)
+  continuam verdes — nenhum mutante existente foi afetado pela extração de
+  `cause`/`interruptCause`.
