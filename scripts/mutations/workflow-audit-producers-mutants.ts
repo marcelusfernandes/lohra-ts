@@ -239,18 +239,19 @@ export const auditProducersMutants: readonly Mutant[] = [
     ],
   },
   {
-    id: "R2-drop-newest",
-    category: "drop-newest",
+    id: "R2-byte-trim-disabled",
+    category: "byte-trim-disabled",
     mechanism: "family-a",
     focus: {
       file: liveTailFocus,
-      test: "snapshot(runId, afterIndex) returns only events after the cursor, with no duplicate and no gap across drops",
+      test: "evicts by serialized bytes before the event count ever reaches the cap",
     },
     edits: [
       {
         file: liveTail,
-        before: "      const removed = ring.events.shift();",
-        after: "      const removed = ring.events.pop();",
+        before:
+          "(ring.events.length >= LIVE_TAIL_EVENTS || ring.totalBytes + bytes > LIVE_TAIL_BYTES)",
+        after: "(ring.events.length >= LIVE_TAIL_EVENTS || false)",
       },
     ],
   },
