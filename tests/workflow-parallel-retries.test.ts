@@ -21,6 +21,7 @@ import {
 
 class ScriptedRuntime implements ChildRuntime {
   readonly spawned: ChildSpawnRequest[] = [];
+  readonly cancelled: string[] = [];
   private readonly scripts: ChildResult[][];
   private readonly byId = new Map<string, ChildResult[]>();
 
@@ -41,7 +42,9 @@ class ScriptedRuntime implements ChildRuntime {
   }
 
   steer(): void {}
-  cancel(): void {}
+  cancel(id: string): void {
+    this.cancelled.push(id);
+  }
   installLeafSandbox(): { dispose: () => void } {
     return { dispose: (): void => undefined };
   }
@@ -242,6 +245,37 @@ describe("timeout cost enters the budget (#313)", () => {
     });
     const result = await new WorkflowEngine({ runtime }).run(spec);
     expect(result.outputs.p).toBeNull();
+    expect(result.usageUncertainLeaves).toBe(1);
+    expect(result.tokensIn).toBe(0);
+    expect(result.tokensOut).toBe(0);
+  });
+});
+
+// Issue #329: `collectLeaf`'s SECOND `collect()` — the re-collect after
+// `runtime.steer()` in the schema-validation retry loop — used to treat a
+// `status: "running"` (timeout) result like any other non-complete status:
+// `account()` the usage but never `runtime.cancel(id)` nor a timeout-named
+// fault, unlike the FIRST `collect()`'s timeout path (#313). That left the
+// leaf alive in the runtime (an orphan) while usage was folded in as if the
+// attempt had simply failed — never marked `usageUncertain`. The first
+// `complete()` response here is JSON that FAILS the schema (forcing the
+// steer + re-collect loop); the second `collect()` for that same leaf id
+// then reports `running`, exactly like a timeout during re-collection.
+describe("timeout during the schema re-collect loop (#329)", () => {
+  it("cancels the leaf, faults with a timeout cause, and marks usageUncertain", async () => {
+    const runtime = new ScriptedRuntime([
+      [ok('{"wrong":true}'), { status: "running", output: null }],
+    ]);
+    const spec = parsed({
+      meta: { name: "timeout-recollect" },
+      nodes: [
+        { id: "a", type: "agent", prompt: "x", schema: { type: "object", required: ["value"] } },
+      ],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(runtime.cancelled).toEqual(["leaf-1"]);
+    expect(result.outputs.a).toBeNull();
+    expect(result.faults.some((fault) => fault.includes("timeout"))).toBe(true);
     expect(result.usageUncertainLeaves).toBe(1);
     expect(result.tokensIn).toBe(0);
     expect(result.tokensOut).toBe(0);

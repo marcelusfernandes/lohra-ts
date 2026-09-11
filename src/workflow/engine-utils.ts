@@ -2,11 +2,16 @@ import { combineUsage, usage } from "../pricing/usage.js";
 import type { Usage } from "../pricing/types.js";
 import { addUsageToResult, type RunResult } from "./accounting.js";
 import { contentHash, type WorkflowCache } from "./cache.js";
-import type { LeafExecution, WorkflowLoader } from "./engine-contract.js";
-import { MAX_NODE_RETRIES } from "./nodes.js";
+import {
+  DEFAULT_LEAF_MAX_ITERATIONS,
+  QUOTA_EXHAUSTED,
+  type LeafExecution,
+  type WorkflowLoader,
+} from "./engine-contract.js";
+import { MAX_NODE_MAX_ITERATIONS, MAX_NODE_RETRIES } from "./nodes.js";
 import { isEmptyOutput } from "./output-validation.js";
 import { resolveValue } from "./refs.js";
-import type { ChildResult } from "./runtime.js";
+import type { Awaitable, ChildResult } from "./runtime.js";
 import { validateSpec } from "./schema.js";
 import type { TierMap } from "./tiers.js";
 import { Node, ValidationError } from "./types.js";
@@ -97,6 +102,82 @@ export function routingOf(node: Node, tiers: TierMap): Routing {
         ? {}
         : { effort: tier.effort }),
   };
+}
+
+/** Issue #329: `collectLeaf`'s per-request setup (routing, iteration cap,
+ * whether the schema is force-called as a tool) is pure given `node`,
+ * `tiers` and the resolved `schema` — pulling it out of `engine.ts` keeps
+ * that file from growing when the second `collect()`'s timeout path grows
+ * a branch to match the first one's. */
+export interface LeafRequestOptions {
+  readonly routing: Routing;
+  readonly maxIterations: number;
+  readonly forced: boolean;
+}
+
+export function resolveLeafRequestOptions(
+  node: Node,
+  tiers: TierMap,
+  schema: Readonly<Record<string, unknown>> | null,
+): LeafRequestOptions {
+  return {
+    routing: routingOf(node, tiers),
+    maxIterations: Object.hasOwn(node.fields, "max_iterations")
+      ? Math.min(Number(node.fields.max_iterations), MAX_NODE_MAX_ITERATIONS)
+      : DEFAULT_LEAF_MAX_ITERATIONS,
+    forced: schema !== null && node.fields.tool_less === true,
+  };
+}
+
+/** Issue #329: the FIRST `collect()`'s non-"running" failure path — debit
+ * whatever usage `collected` carries, then either flag the whole run as out
+ * of quota (no fault: not this leaf's own doing) or record a fault named
+ * after the leaf's own status. Pure given its callbacks, so it moves out of
+ * `engine.ts` to make room for the timeout branch the SECOND `collect()`
+ * gains alongside it (#313's `timeoutLeafResult` already lives here for the
+ * same reason). The schema re-collect loop's OWN non-complete branch stays
+ * inline in `engine.ts` — it never checks quota exhaustion, a pre-existing
+ * difference out of this issue's scope. */
+export function nonCompleteFirstCollectResult(
+  noteQuotaExhausted: (nodeId: string, retryAfter: number | null) => void,
+  recordFault: (message: string) => void,
+  account: (nodeId: string, id: string, collected: ChildResult) => void,
+  nodeId: string,
+  id: string,
+  collected: ChildResult,
+  total: Usage,
+): LeafExecution {
+  account(nodeId, id, collected);
+  if (collected.errorKind === QUOTA_EXHAUSTED) {
+    // Not this leaf's own failure — the whole run is out of quota.
+    noteQuotaExhausted(nodeId, collected.retryAfter ?? null);
+    return { output: null, usage: total, complete: false };
+  }
+  const kind =
+    collected.errorKind === null || collected.errorKind === undefined
+      ? ""
+      : ` (${collected.errorKind})`;
+  recordFault(
+    `${nodeId}: leaf ${collected.status}${kind}: ${renderValue(collected.output ?? "no detail").slice(0, 200)}`,
+  );
+  return { output: null, usage: total, complete: false };
+}
+
+/** Issue #329: pulls the `StructuredOutput` tool call's arguments out of a
+ * completed leaf when the schema was forced as a tool — pure given
+ * `collected` and `forced`, so it moves out of `engine.ts` alongside
+ * `resolveLeafRequestOptions` for the same reason. */
+export function extractForcedOutput(
+  collected: ChildResult,
+  forced: boolean,
+): Readonly<{ output: unknown; usedFallback: boolean }> {
+  if (!forced) return { output: collected.output, usedFallback: false };
+  const call = collected.toolCalls
+    ?.map(asRecord)
+    .find((candidate) => candidate?.name === "StructuredOutput");
+  return call !== undefined && call !== null
+    ? { output: call.arguments ?? call.args ?? null, usedFallback: false }
+    : { output: collected.output, usedFallback: true };
 }
 
 export function routingIdentity(node: Node, tiers: TierMap): readonly unknown[] {
@@ -227,6 +308,32 @@ export function timeoutLeafResult(
   const debited = measured ?? usage();
   account(nodeId, id, { ...collected, usage: debited, usageUncertain: uncertain });
   return { output: null, usage: debited, complete: false };
+}
+
+/** Issue #329: `collectLeaf`'s SECOND `collect()` — the re-collect after
+ * `runtime.steer()` in the schema-validation retry loop — can time out
+ * (`status: "running"`) exactly like the first one, but used to fall
+ * through to the generic non-complete branch: `account()` only, no
+ * `runtime.cancel(id)`, no timeout-named fault. That left the leaf alive
+ * in the runtime and the usage gap invisible instead of `usageUncertain`.
+ * `cancel`/`recordFault` are plain callbacks (not bound to `this`) on
+ * purpose: the FIRST `collect()`'s inline `await this.runtime.cancel(id);
+ * / this.recordFault(...)` is the anchor for the `timeout-no-cooperative-
+ * cancel` mutant (`scripts/mutations/workflow-executor-mutants.ts`) and
+ * stays untouched in `engine.ts` — this only backs the SECOND site, which
+ * calls it instead of duplicating that inline block. */
+export async function recollectLeafTimeout(
+  cancel: (id: string) => Awaitable<void>,
+  recordFault: (message: string) => void,
+  account: (nodeId: string, id: string, collected: ChildResult) => void,
+  nodeId: string,
+  id: string,
+  timeout: number,
+  collected: ChildResult,
+): Promise<LeafExecution> {
+  await cancel(id);
+  recordFault(`${nodeId}: leaf timeout after ${String(Math.trunc(timeout))}s (cancelled)`);
+  return timeoutLeafResult(account, nodeId, id, collected);
 }
 
 function isZeroUsage(value: Usage): boolean {
