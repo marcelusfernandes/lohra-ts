@@ -116,23 +116,16 @@ describe("workflow authored boundaries", () => {
     expect(validateSpec(gate(4))).toHaveProperty("issues");
   });
 
-  it("accepts pipeline stage retries=4 but clamps to three extras", async () => {
-    const runtime = new ScriptRuntime([
-      [complete("")],
-      [complete("")],
-      [complete("")],
-      [complete("")],
-      [complete("must-not-spawn")],
-    ]);
-    const workflow = parsed({
+  // Issue #360 inverteu este contrato: 'retries' fora do intervalo num
+  // stage de pipeline não clampa mais em execução (era o caso aqui) — é
+  // recusado NA CARGA, mesma regra 0-3 do nó (tests/workflow-schema.test.ts
+  // prova a mensagem e o campo qualificado).
+  it("rejects an out-of-range pipeline stage 'retries' at validation, not a runtime clamp", () => {
+    const bad = validateSpec({
       meta: { name: "pipeline-retries" },
-      nodes: [
-        { id: "p", type: "pipeline", items: ["x"], stages: [{ prompt: "${item}", retries: 4 }] },
-      ],
+      nodes: [{ id: "p", type: "pipeline", items: ["x"], stages: [{ prompt: "x", retries: 4 }] }],
     });
-    const result = await new WorkflowEngine({ runtime }).run(workflow);
-    expect(runtime.requests).toHaveLength(4);
-    expect(result.outputs.p).toEqual([null]);
+    expect(bad).toHaveProperty("issues");
   });
 
   it("rejects dynamic fanout before spawning and records one cap trip", async () => {

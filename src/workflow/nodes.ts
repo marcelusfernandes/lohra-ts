@@ -10,12 +10,17 @@ export const ROUTING_FIELDS = ["model", "tier", "effort", "provider"] as const;
  * The agent-shaped field set every schema-bearing sub-object may carry
  * (`gate.body`, `loop_until_dry.body`, `judge_panel.synthesize`,
  * `parallel.branches[*]` when a branch is an object) — shared by
- * `schema.ts`'s `validateSubObjectFields` and the anti-drift test so the two
- * never drift apart. A routing knob (`model`/`tier`/`effort`/`provider`)
- * does not belong here: those sub-objects spawn with the OUTER node
- * (`engine.ts`'s `runGate`/`runLoop`/`runJudgePanel`/`runParallel` all pass
- * `node`, never the sub-object, to `collectLeaf`), so routing on them would
- * be exactly the dead field this issue closes (#238).
+ * `schema.ts`'s `validateSubObjectFields`/`validateSubObjectValues` and the
+ * anti-drift test so the two never drift apart. A routing knob
+ * (`model`/`tier`/`effort`/`provider`) does not belong here — but the reason
+ * is no longer uniform since #342: `runGate`/`runLoop` (`engine.ts`) now
+ * merge `body` onto the node before spawning (`mergeBodyIntoNode`,
+ * `leaf-options.ts`), so a routing knob in `body` would actually be read if
+ * this list allowed it — refusing it is a spec-design decision (only a
+ * `stages[*]` entry gets its own routing), not a mechanical dead field.
+ * `judge_panel.synthesize` and `parallel.branches[*]` still spawn with the
+ * OUTER node unmodified (`runJudgePanel`/`runParallel` pass `node`, never the
+ * sub-object, to `collectLeaf`), so routing there really has no reader.
  */
 export const SUB_OBJECT_FIELDS = [
   "prompt",

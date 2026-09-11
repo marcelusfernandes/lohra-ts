@@ -394,6 +394,175 @@ describe("validateSpec", () => {
     expect(isValidationError(good)).toBe(false);
   });
 
+  // Issue #360 (PR #358 review, #342): `validateSubObjectFields` only checked
+  // NAMES — a sub-object's `retries`/`timeout`/`max_iterations`/`tool_less`
+  // reached the leaf with no value check, so an out-of-range value clamped
+  // or defaulted silently at runtime instead of failing at launch, the same
+  // way an out-of-range value on the NODE already does.
+  it("rejects an out-of-range 'retries' inside gate.body, same rule and message as the node", () => {
+    const bad = validateSpec({
+      meta: { name: "x" },
+      nodes: [{ id: "g", type: "gate", body: { prompt: "x", retries: 9 }, validator: "review" }],
+    });
+    expect(isValidationError(bad)).toBe(true);
+    if (!isValidationError(bad)) throw new Error("expected validation error");
+    expect(bad.issues).toHaveLength(1);
+    expect(bad.issues[0]).toMatchObject({
+      rule: "field_value",
+      nodeId: "g",
+      field: "body.retries",
+      message: "'retries' must be a whole number between 0 and 3",
+    });
+  });
+
+  it("rejects a non-numeric 'timeout' inside loop_until_dry.body, same rule as the node", () => {
+    const bad = validateSpec({
+      meta: { name: "x" },
+      nodes: [
+        {
+          id: "loop",
+          type: "loop_until_dry",
+          body: { prompt: "x", timeout: "300" },
+          stop_after_k_empty: 1,
+          max_rounds: 3,
+        },
+      ],
+    });
+    expect(isValidationError(bad)).toBe(true);
+    if (!isValidationError(bad)) throw new Error("expected validation error");
+    expect(bad.issues).toHaveLength(1);
+    expect(bad.issues[0]).toMatchObject({
+      rule: "field_value",
+      nodeId: "loop",
+      field: "body.timeout",
+      message: "'timeout' must be a positive number of seconds",
+    });
+  });
+
+  it("rejects a non-integer 'max_iterations' inside a pipeline stage, same rule as the node", () => {
+    const bad = validateSpec({
+      meta: { name: "x" },
+      nodes: [
+        {
+          id: "pipe",
+          type: "pipeline",
+          items: ["x"],
+          stages: [{ prompt: "x", max_iterations: "x" }],
+        },
+      ],
+    });
+    expect(isValidationError(bad)).toBe(true);
+    if (!isValidationError(bad)) throw new Error("expected validation error");
+    expect(bad.issues).toHaveLength(1);
+    expect(bad.issues[0]).toMatchObject({
+      rule: "field_value",
+      nodeId: "pipe",
+      field: "stages[0].max_iterations",
+      message: "'max_iterations' must be a whole number between 1 and 128",
+    });
+  });
+
+  it("rejects a non-boolean 'tool_less' inside judge_panel.synthesize", () => {
+    const bad = validateSpec({
+      meta: { name: "x" },
+      nodes: [
+        {
+          id: "panel",
+          type: "judge_panel",
+          attempts: 1,
+          judges: ["a"],
+          synthesize: { prompt: "x", tool_less: "yes" },
+        },
+      ],
+    });
+    expect(isValidationError(bad)).toBe(true);
+    if (!isValidationError(bad)) throw new Error("expected validation error");
+    expect(bad.issues).toHaveLength(1);
+    expect(bad.issues[0]).toMatchObject({
+      rule: "field_value",
+      nodeId: "panel",
+      field: "synthesize.tool_less",
+      message: "'tool_less' must be true or false",
+    });
+  });
+
+  it("rejects an out-of-range 'retries' inside an object parallel branch, and leaves a string branch untouched", () => {
+    const bad = validateSpec({
+      meta: { name: "x" },
+      nodes: [
+        {
+          id: "p",
+          type: "parallel",
+          branches: [{ prompt: "x", retries: -1 }, "plain string"],
+        },
+      ],
+    });
+    expect(isValidationError(bad)).toBe(true);
+    if (!isValidationError(bad)) throw new Error("expected validation error");
+    expect(bad.issues).toHaveLength(1);
+    expect(bad.issues[0]).toMatchObject({
+      rule: "field_value",
+      nodeId: "p",
+      field: "branches[0].retries",
+      message: "'retries' must be a whole number between 0 and 3",
+    });
+  });
+
+  it("rejects a non-boolean node-level 'tool_less', the same rule sub-objects now share", () => {
+    const bad = validateSpec({ meta: { name: "x" }, nodes: [agent({ tool_less: "yes" })] });
+    expect(isValidationError(bad)).toBe(true);
+    if (!isValidationError(bad)) throw new Error("expected validation error");
+    expect(bad.issues).toHaveLength(1);
+    expect(bad.issues[0]).toMatchObject({
+      rule: "field_value",
+      nodeId: "a",
+      field: "tool_less",
+      message: "'tool_less' must be true or false",
+    });
+  });
+
+  it("accepts valid knob values in every agent-shaped sub-object at once", () => {
+    const good = validateSpec({
+      meta: { name: "x" },
+      nodes: [
+        {
+          id: "g",
+          type: "gate",
+          body: { prompt: "x", retries: 2, timeout: 30, max_iterations: 5, tool_less: true },
+          validator: "review",
+        },
+        {
+          id: "loop",
+          type: "loop_until_dry",
+          body: { prompt: "x", retries: 0, timeout: 1, max_iterations: 1, tool_less: false },
+          stop_after_k_empty: 1,
+          max_rounds: 3,
+        },
+        {
+          id: "panel",
+          type: "judge_panel",
+          attempts: 1,
+          judges: ["a"],
+          synthesize: {
+            prompt: "x",
+            retries: 3,
+            timeout: 600,
+            max_iterations: 128,
+            tool_less: true,
+          },
+        },
+        {
+          id: "p",
+          type: "parallel",
+          branches: [
+            { prompt: "x", retries: 1, timeout: 10, max_iterations: 10, tool_less: false },
+          ],
+        },
+      ],
+    });
+    expect(isValidationError(good)).toBe(false);
+  });
+
   it("skips the sub-object schema scan (no throw, no schema_* issue) when body/synthesize/a stage is not a record", () => {
     const result = validateSpec({
       meta: { name: "x" },
