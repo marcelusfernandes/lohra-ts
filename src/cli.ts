@@ -390,6 +390,7 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
       args: {
         ...(parsed.positionals[0] === undefined ? {} : { run_id: parsed.positionals[0] }),
         ...(parsed.options.has("--last") ? { last: true } : {}),
+        ...(parsed.options.has("--events") ? { events: true } : {}),
         ...(option("--poll") === undefined ? {} : { poll: option("--poll") }),
         ...(option("--limit") === undefined ? {} : { limit: option("--limit") }),
         ...(option("--node") === undefined ? {} : { node_id: option("--node") }),
