@@ -66,14 +66,13 @@ aparece só dentro do `data.node_path` de `leaf.started` — não em
 
 ## Tabela de eventos
 
-Vinte e um tipos formam a allow-list (`SAFE_EVENT_TYPES`,
-`audit-model.ts:104-129`); um `event_type` fora dela vira
-`audit.unavailable` na gravação. Quatro — `node.completed`, `node.failed`,
-`node.output`, `node.started` — estão na allow-list mas **nenhum produtor
-deste código os emite hoje**; o ciclo de vida de um nó é observado por
-`workflow.node` (abaixo), que já existia antes deste épico e a decisão de
-#368 foi mantê-lo em vez de duplicá-lo ou substituí-lo por uma família
-`node.*`. O único membro novo da família `node.*` é `node.paused`.
+Vinte tipos formam a allow-list (`SAFE_EVENT_TYPES`,
+`audit-model.ts:104-127`); um `event_type` fora dela vira
+`audit.unavailable` na gravação. `node.completed`, `node.failed`,
+`node.output` e `node.started` nunca tiveram produtor e saíram da
+allow-list em #386 — o ciclo de vida de um nó continua observável só por
+`workflow.node` (abaixo), que já existia antes deste épico, e por
+`node.paused`, o único membro da família `node.*` que #368 decidiu manter.
 
 | `event_type`        | produtor                                                                                | quando                                                                                                                                                                     |
 | ------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

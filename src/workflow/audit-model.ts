@@ -112,11 +112,9 @@ const SAFE_EVENT_TYPES = new Set([
   "leaf.completed",
   "leaf.failed",
   "leaf.started",
-  "node.completed",
-  "node.failed",
-  "node.output",
+  // node state/failure live in `workflow.node`/`workflow.fault`; pause is
+  // the only per-node event this engine emits (decision #368).
   "node.paused",
-  "node.started",
   "segment.completed",
   "segment.started",
   "tool.completed",
@@ -137,6 +135,10 @@ const SAFE_PROVENANCE = new Set([
 ]);
 const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
   reason: new Set([
+    // Issue #378: a dispatch still open when its leaf closes (cancel,
+    // shutdown, or an engine-driven timeout) — `close()` (audit-runtime.ts)
+    // flushes it as `tool.completed {status: "error", reason: "cancelled"}`
+    // so the pair is never left orphaned.
     "cancelled",
     // Issue #368: the four `pauseReason` values `WorkflowEngine.pause`
     // (engine.ts:155,163,204,213,981) ever sets — `node.paused`'s own
@@ -159,10 +161,6 @@ const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object
     // BEFORE `auditedChildRuntime`'s wrap ever runs, so that denial produces
     // no `tool.*` event at all, not even this one (#378).
     "sandbox_denied",
-    // Issue #378: a dispatch still open when its leaf closes (cancel,
-    // shutdown, or an engine-driven timeout) — `close()` (audit-runtime.ts)
-    // flushes it as `tool.completed {status: "error", reason: "cancelled"}`
-    // so the pair is never left orphaned.
     "sink_failure",
     "store_failed",
     "timeout",
