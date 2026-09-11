@@ -261,7 +261,9 @@ de outro processo — nunca carrega `live_tail`. Fora do processo,
 (`workflow_audit`) por cursor: a cada iteração do polling já existente,
 imprime uma linha por evento novo (`seq  event_type  node_path  sub_id?
 segment_id`) além da linha de status, sem repetir o que já mostrou; sem
-`--events` o comportamento é o de sempre (issue #369).
+`--events` o comportamento é o de sempre (issue #369). Tabela completa de
+eventos, identidade causal, ciclo de segmento e fail-closed em
+`docs/workflow-audit.md`.
 
 A tool `list_models` reporta `context_window` por modelo — a janela de
 contexto que o próprio provedor expõe em `/models` (`context_length` no
