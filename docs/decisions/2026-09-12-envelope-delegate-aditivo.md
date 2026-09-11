@@ -61,8 +61,16 @@ sem ADR. Remover ou reordenar uma chave do envelope de `delegate_task`
   `sub_id` só para isso.
 - `error_kind: "dead_turn"` nunca significa que o turno falhou no sentido de
   "provedor recusou" — `status` permanece `complete`. É o mesmo sinal que já
-  disparava um respawn silencioso; agora tem nome e aparece em
-  `fault_kinds`/auditoria como qualquer outro `error_kind`.
+  disparava um respawn silencioso; agora tem nome e chega a
+  `RunResult.faultKinds` (`accounting.ts`'s `recordFaultKind`, via
+  `orchestration-runtime.ts:256` → `engine-utils.ts`'s `debitLeaf`) como
+  qualquer outro `error_kind` de uma folha do workflow — **não** na
+  trilha de auditoria por evento: `leaf.completed` (`audit-runtime.ts:242-251`,
+  o branch `status: "complete"`) nunca carrega `error_kind`; só
+  `leaf.failed` (`status: "failed" | "cancelled"`) carrega, e `dead_turn`
+  nunca tem esses status. Quem lê `error_kind` de um turno morto lê
+  `fault_kinds`/`workflow.done` ou o próprio envelope de
+  `delegate_task`/`collect_session`, nunca um evento `leaf.*`.
 - Um novo campo em `delegate_task`/`collect_session` entra sempre no fim do
   objeto — nunca antes de um campo existente, nunca substituindo um.
 
@@ -74,6 +82,11 @@ sem ADR. Remover ou reordenar uma chave do envelope de `delegate_task`
   envelope de `delegate_task` (batch e resume) repinados 3 → 8 chaves.
 - `tests/orchestration-delegate-envelope.test.ts` (novo): as 8 chaves nas
   posições certas com valores de um `CollectResult` fake; `dead_turn` via
-  `createChildRunner` real com HTTP fake devolvendo `content` vazio, nunca
-  `unknown`; um turno com texto real continua com `error_kind: null`;
-  `dead_turn` aceito pela allow-list de auditoria (`publicAuditEvent`).
+  `createChildRunner` real com HTTP fake devolvendo `content` vazio (e,
+  separadamente, só espaço em branco), nunca `unknown`; um turno com texto
+  real, e um turno com `content` final vazio mas que já executou uma tool
+  call, continuam com `error_kind: null` (o guard exige as duas metades:
+  sem texto **e** sem tool call); `dead_turn` aceito pelo MECANISMO da
+  allow-list de auditoria (`ERROR_KIND_SET`, via `publicAuditEvent`) — não
+  uma prova de que produção emite `leaf.failed` com `dead_turn` (nunca
+  emite, ver acima).

@@ -119,10 +119,11 @@ legítima — fixado por `tests/workflow-audit-tool.test.ts`, não um bug.
 ## Vocabulário de falhas (`error_kind`)
 
 Épico #396 (M8), issues #397-#399: `ErrorKind` (`src/transports/error-kinds.ts`)
-é o vocabulário fechado de nove valores que toda camada — folha, run,
+é o vocabulário fechado de dez valores que toda camada — folha, run,
 rollup e auditoria — usa para falar de uma falha de provedor, em vez de
 `string | null` livre. `classifyProviderError` (`src/transports/errors.ts:66-83`)
-é o único produtor:
+produz nove deles; o décimo (`dead_turn`, #429) tem produtor próprio,
+descrito abaixo:
 
 | `error_kind`      | gatilho                                                                                                                                                             |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -135,7 +136,7 @@ rollup e auditoria — usa para falar de uma falha de provedor, em vez de
 | (nenhum — `null`) | erro que não é `ProviderCallFailed` — o resto da cadeia (`child-runner.ts`) já trata `null` como "não é falha de provedor"                                          |
 
 `sandbox_denied`, `timeout`, `cancelled` e `context_length` completam os
-nove — reservados para reuso futuro sem produtor em `classifyProviderError`
+nove de `classifyProviderError` — reservados para reuso futuro sem produtor
 hoje: `timeout`/`cancelled` para a folha, `context_length` para o
 classificador de janela, e `sandbox_denied` nomeado assim (não
 `sandbox_refused`) por decisão do épico #396. `sandbox_denied` também
