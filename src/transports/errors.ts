@@ -74,6 +74,14 @@ export function classifyProviderError(error: unknown): ErrorKind | null {
   if (value.statusCode === 401 || value.statusCode === 403) return "auth_failed";
   if (value.statusCode === 404 && looksLikeModelNotFound(value)) return "model_not_found";
   if (typeof value.code === "string" && networkFaultCodes.has(value.code)) return "route_fault";
+  if (typeof value.statusCode === "number" && value.statusCode >= 500 && value.statusCode < 600)
+    return "route_fault";
+  // Qualquer outro ProviderCallFailed é um erro de provedor sem
+  // mapeamento fino — nomeado como "unknown", nunca engolido como `null`
+  // (invariante 2, issue #397). Um erro que não é de provedor (não
+  // embrulhado em ProviderCallFailed) continua null: o resto da cadeia
+  // (child-runner.ts) já trata `null` como "não é uma falha de provedor".
+  if (error instanceof ProviderCallFailed) return "unknown";
   return null;
 }
 
