@@ -195,6 +195,14 @@ export function contemStubQueLanca(diffTexto: string): boolean {
 const DOCS_TOPO = new Set(["README.md", "CLAUDE.md", "AGENTS.md", ".worktreeinclude"]);
 const DOCS_OU_PROCESS_PREFIXOS = ["docs/", ".claude/", ".github/", "scripts/github/"];
 
+// Acréscimo da issue #345: markdown de skill sob `assets/skills/**` é
+// doutrina — mesmo status de `docs/**` para este check —, não comportamento
+// a controlar. Só o `.md` conta: um `assets/skills/x/index.ts` ou qualquer
+// outro arquivo não-markdown ali continua sendo o artefato exportado ao
+// produto (classe `feature`, fora desta exceção); `assets/**` fora de
+// `assets/skills/` não é tocado por esta regra.
+const ASSETS_SKILLS_MARKDOWN_RE = /^assets\/skills\/.+\.md$/;
+
 /** Classes `docs` e `process` da ADR 0004 item 7 — nada que este check
  * precise controlar (uma PR só de documentação ou de configuração de CI
  * não declara `prova/<slug>.ts`, e não deveria precisar). Note que
@@ -203,6 +211,7 @@ const DOCS_OU_PROCESS_PREFIXOS = ["docs/", ".claude/", ".github/", "scripts/gith
  * `scripts/prova/**`) que este check existe para controlar. */
 export function ehArquivoDocsOuProcess(arquivo: string): boolean {
   if (DOCS_TOPO.has(arquivo)) return true;
+  if (ASSETS_SKILLS_MARKDOWN_RE.test(arquivo)) return true;
   return DOCS_OU_PROCESS_PREFIXOS.some((prefixo) => arquivo.startsWith(prefixo));
 }
 

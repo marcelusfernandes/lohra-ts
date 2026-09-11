@@ -56,3 +56,8 @@ abaixo.
 - [2026-09-10 — Skills nos harnesses: instalar no `init`, atualizar no
   `update`](2026-09-10-skills-harness.md) — relatório de exploração; decisão
   do owner pendente.
+- [2026-09-10 — Markdown de skill é doutrina — classe `docs` no
+  `controle-negativo`](2026-09-10-skill-markdown-classe-docs.md) —
+  `assets/skills/**/*.md` conta como classe docs/process; `assets/**`
+  não-markdown continua feature; refinamento da ADR 0004 item 7, revisor
+  continua obrigatório pelo hook.
