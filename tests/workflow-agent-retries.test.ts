@@ -12,7 +12,7 @@
 // elsewhere in the graph) fired synchronously while the first attempt's
 // (empty) result is being collected — before `runAgent`'s loop reaches its
 // `attempt > 0` check for the retry that will never spawn.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   WorkflowEngine,
@@ -90,14 +90,29 @@ class CancelOnFirstCollectRuntime implements ChildRuntime {
 /** First `collect()` outlasts a tiny `pipelineTimeoutSeconds` deadline —
  * `runPipeline`'s own race (engine.ts:~596-604) fires first, sets
  * `expired = true` and cancels active leaves, WHILE this attempt is still
- * in flight. Only once it finally resolves (late, with an EMPTY — not
- * null — output) does the stage's retry loop reach `attempt > 0` for a
- * second try: `expired` is already true by then, so the guard must see it
- * through the SAME `aborted` callback `collectLeaf` itself already checks
- * (engine.ts:~555), or it credits a respawn `collectLeaf`'s own aborted
- * short-circuit refuses to spawn. */
+ * in flight. Only once the test explicitly releases it (late, with an
+ * EMPTY — not null — output) does the stage's retry loop reach
+ * `attempt > 0` for a second try: `expired` is already true by then, so the
+ * guard must see it through the SAME `aborted` callback `collectLeaf` itself
+ * already checks (engine.ts:~555), or it credits a respawn `collectLeaf`'s
+ * own aborted short-circuit refuses to spawn.
+ *
+ * No real clock: `collect()` returns a promise that stays pending until the
+ * test calls `releaseFirstCollect()`. The test awaits `collectStarted` to
+ * know the attempt is in flight before advancing fake timers past the
+ * pipeline deadline — the race is driven by explicit signals, not by
+ * outrunning a fixed wall-clock margin. */
 class ExpiresOnFirstCollectRuntime implements ChildRuntime {
   readonly spawned: ChildSpawnRequest[] = [];
+  readonly collectStarted: Promise<void>;
+  private notifyStarted: (() => void) | null = null;
+  private resolveCollect: ((result: ChildResult) => void) | null = null;
+
+  constructor() {
+    this.collectStarted = new Promise((resolve) => {
+      this.notifyStarted = resolve;
+    });
+  }
 
   spawn(request: ChildSpawnRequest): string {
     const id = `leaf-${String(this.spawned.length + 1)}`;
@@ -105,15 +120,33 @@ class ExpiresOnFirstCollectRuntime implements ChildRuntime {
     return id;
   }
 
-  async collect(_id: string, _options: ChildCollectOptions): Promise<ChildResult> {
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    return { status: "complete", output: "" };
+  collect(_id: string, _options: ChildCollectOptions): Promise<ChildResult> {
+    return new Promise((resolve) => {
+      this.resolveCollect = resolve;
+      this.notifyStarted?.();
+    });
+  }
+
+  /** Resolves the in-flight first `collect()` late, empty — after the test
+   * has already forced the pipeline deadline to expire. */
+  releaseFirstCollect(): void {
+    this.resolveCollect?.({ status: "complete", output: "" });
+    this.resolveCollect = null;
   }
 
   steer(): void {}
   cancel(): void {}
   installLeafSandbox(): { dispose: () => void } {
     return { dispose: (): void => undefined };
+  }
+}
+
+/** Settles every currently-queued microtask, as many times as there are
+ * chained `await` hops in the engine's background continuation — no real
+ * clock involved, just draining the microtask queue deterministically. */
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 25; i += 1) {
+    await Promise.resolve();
   }
 }
 
@@ -317,21 +350,43 @@ describe("pipeline stage retries never spin past a pause (#334)", () => {
   });
 
   it("does not credit a respawn when the pipeline deadline expires between stage attempts (#336)", async () => {
-    const runtime = new ExpiresOnFirstCollectRuntime();
-    const spec = parsed({
-      meta: { name: "pipeline-expired-between-attempts" },
-      nodes: [
-        { id: "p", type: "pipeline", items: ["a"], stages: [{ prompt: "${item}", retries: 1 }] },
-      ],
-    });
-    const result = await new WorkflowEngine({ runtime, pipelineTimeoutSeconds: 0.02 }).run(spec);
-    // `runPipeline` already returned (the deadline race won) by the time
-    // the FIRST attempt's slow `collect()` resolves late and empty — wait
-    // for that background retry attempt to fully settle before asserting.
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(runtime.spawned).toHaveLength(1);
-    expect(result.outputs.p).toEqual([null]);
-    expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(0);
-    expect(result.faults.some((fault) => fault.includes("pipeline timeout"))).toBe(true);
-  }, 1000);
+    vi.useFakeTimers();
+    try {
+      const runtime = new ExpiresOnFirstCollectRuntime();
+      const spec = parsed({
+        meta: { name: "pipeline-expired-between-attempts" },
+        nodes: [
+          { id: "p", type: "pipeline", items: ["a"], stages: [{ prompt: "${item}", retries: 1 }] },
+        ],
+      });
+      const runPromise = new WorkflowEngine({ runtime, pipelineTimeoutSeconds: 0.02 }).run(spec);
+      // Wait for attempt 0's `collect()` to actually be in flight before
+      // forcing the deadline — the bug this guards against only exists
+      // while the first attempt is still pending, not before.
+      await runtime.collectStarted;
+      // Fires the pipeline's own deadline race deterministically — no
+      // waiting on the runtime's slow `collect()` to lose a real race.
+      await vi.advanceTimersByTimeAsync(20);
+      const result = await runPromise;
+      expect(result.outputs.p).toEqual([null]);
+      expect(result.faults.some((fault) => fault.includes("pipeline timeout"))).toBe(true);
+      // `runPipeline` already returned (the deadline race won). Now let the
+      // FIRST attempt's `collect()` resolve late and empty, which drives the
+      // background retry attempt (`attempt > 0`) that must see `expired`
+      // and refuse to spawn or credit a respawn.
+      runtime.releaseFirstCollect();
+      await flushMicrotasks();
+      // Asserted here, AFTER the background retry has settled — not right
+      // after `runPromise` resolves, where a second spawn is impossible by
+      // construction (attempt 1 hasn't even been reached yet). This is what
+      // keeps the guard's OWN check (`collectLeaf`'s `stoppedByControl` at
+      // engine.ts:242, via `options.aborted`) covered: without it, the
+      // late-settling attempt 0 would let a second leaf spawn here while
+      // `leafRespawns` stays 0 below.
+      expect(runtime.spawned).toHaveLength(1);
+      expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
