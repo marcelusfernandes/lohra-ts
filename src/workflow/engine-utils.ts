@@ -336,7 +336,11 @@ export function loopCellParts(
  * can't reimplement, bound by the caller so `this` stays correct. `spec` is
  * `WorkflowEngine.specIdentity`; `cell`/`cachePut`'s bodies are reproduced
  * here from `contentHash`/`cache.put` (both already engine-utils imports or
- * exports) rather than bound, so the helper needs no engine method for them. */
+ * exports) rather than bound, so the helper needs no engine method for them.
+ * #332: `specIdentity` now folds in `nodeScope` (`engine.ts`'s `run()`), so
+ * every per-branch cell built from `deps.spec` here is scope-qualified for
+ * free — two SIBLING `workflow` nodes reusing the same nested template with
+ * identical branches no longer share one sibling's branch cells. */
 export interface ParallelBranchDeps {
   readonly runId: string;
   readonly cache: WorkflowCache;
