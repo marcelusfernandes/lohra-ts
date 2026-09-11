@@ -19,11 +19,19 @@
 // write that raised it failed exactly because the row's real fence had
 // already moved past it) — never valid to re-use for a write of our own.
 // `ownership(runId)` lets the caller resolve the CURRENT fence instead
-// (`LockRepository.runFenceOf`, `src/state/locks.ts:178`); a caller unable
-// to resolve it (no store wired yet, or this process no longer holds the
-// run's lease) returns `null` and the notice is dropped — counted, never
-// thrown, this is the sink of last resort (`repository.append` itself
-// never propagates a failure here either).
+// (`LockRepository.runFenceOf`, `src/state/locks.ts:178`).
+//
+// Issue #410 (M8-8): run-scope exige dono; sem dono, o aviso sobrevive em
+// global. This process no longer holding the run's lease — `ownership()`
+// returns `null` — or having a stale idea of who holds it — the run-scoped
+// `append` below is refused by `NoticesRepository`'s own JOIN over
+// `workflow_run_fence`/`workflow_run_locks` and returns `null` — are the
+// SAME situation from this sink's point of view: no valid ownership to
+// write `run:<id>` under. `global` never requires ownership, so the exact
+// same notice (message unchanged, carries the `run_id` in its text) is
+// written there instead of being lost — counted in `stats().fallback_global`,
+// never `dropped`. `dropped` is reserved for the rarer case where even the
+// `global` append itself fails or throws.
 import { productionWarningSink } from "./ownership-store.js";
 import type {
   NoticeInput,
@@ -44,6 +52,11 @@ export interface NoticesSinkRepository {
 
 export interface NoticesSinkStats {
   readonly dropped: number;
+  /** Issue #410: `warnState` writes that landed in `scope: "global"`
+   * because this process had no valid ownership of the run (no lease, or
+   * a lease another process has since taken over) — never `dropped`,
+   * since the notice itself was NOT lost. */
+  readonly fallback_global: number;
 }
 
 export interface NoticesSink {
@@ -69,6 +82,17 @@ const KIND_MARKERS: ReadonlyArray<readonly [marker: string, kind: NoticeKind]> =
   // failure (the mutant W2 anchor test, tests/chat-audit-trail-wiring.ts,
   // matches this exact producer text through chat.ts's AuditTrail sink).
   ["audit append failed for run", "audit_sink_failure"],
+  // src/workflow/audit-trail.ts:180,213 — the writer gave up permanently
+  // after a "saved" retry of its own gap event also failed (issue #410,
+  // M8-8: the gravest failure this sink classifies — the trail stops
+  // accepting new events for good).
+  ["audit sink failed permanently for run", "audit_sink_failure"],
+  // src/workflow/audit-trail.ts:61 — `record()` called after `shutdown()`
+  // set `closing`/`stopped`; same family as the two above (issue #410).
+  ["audit unavailable for run", "audit_sink_failure"],
+  // src/workflow/audit-trail.ts:79 — `safeAuditMetadata`/the freeze in
+  // `record()` threw on the given payload; same family (issue #410).
+  ["audit sanitizer failed for run", "audit_sink_failure"],
   // src/workflow/audit-trail.ts:103 — the trail's bounded in-memory queue
   // overflowed and dropped an event.
   ["audit queue overflow for run", "queue_overflow"],
@@ -89,14 +113,25 @@ function classify(message: string): NoticeKind {
 export function createNoticesSink(options: NoticesSinkOptions): NoticesSink {
   const { repository, ownership, fallback } = options;
   let dropped = 0;
+  let fallbackGlobal = 0;
+
+  /** Never throws, never counts — the caller decides what a `null` means
+   * for the scope it just tried. */
+  function appendSafe(
+    scope: string,
+    kind: NoticeKind,
+    message: string,
+    owner?: Ownership,
+  ): PublicNotice | null {
+    try {
+      return repository.append(scope, { kind, message }, owner);
+    } catch {
+      return null;
+    }
+  }
 
   function record(scope: string, kind: NoticeKind, message: string, owner?: Ownership): void {
-    try {
-      const result = repository.append(scope, { kind, message }, owner);
-      if (result === null) dropped += 1;
-    } catch {
-      dropped += 1;
-    }
+    if (appendSafe(scope, kind, message, owner) === null) dropped += 1;
   }
 
   function warn(message: string): void {
@@ -109,23 +144,31 @@ export function createNoticesSink(options: NoticesSinkOptions): NoticesSink {
     // duplicating the `workflow: <cause> run=<runId> fence=<fence>`
     // string literal — the two can never drift apart, and the fallback
     // still sees exactly the format `tests/workflow-durable-roots.test.ts`
-    // pins.
+    // pins. `formatted` already carries the run id (`run=<runId>`), so the
+    // global fallback below never needs to build a second message.
     let formatted = "";
     productionWarningSink((message) => {
       formatted = message;
       fallback(message);
     })(warning);
     const owner = ownership?.(warning.runId) ?? null;
-    if (owner === null) {
-      dropped += 1;
-      return;
-    }
-    record(`run:${warning.runId}`, "stale_fence_write", formatted, owner);
+    const runScoped =
+      owner === null
+        ? null
+        : appendSafe(`run:${warning.runId}`, "stale_fence_write", formatted, owner);
+    if (runScoped !== null) return;
+    // Issue #410: no resolvable owner, OR `NoticesRepository` refused the
+    // run-scoped write above (another process holds the lease now) — the
+    // exact cross-process STALE_FENCE_WRITE this sink exists for. `global`
+    // never requires ownership, so the same notice still lands durably
+    // instead of being silently lost.
+    if (appendSafe(GLOBAL_SCOPE, "stale_fence_write", formatted) === null) dropped += 1;
+    else fallbackGlobal += 1;
   }
 
   return Object.freeze({
     warn,
     warnState,
-    stats: (): NoticesSinkStats => Object.freeze({ dropped }),
+    stats: (): NoticesSinkStats => Object.freeze({ dropped, fallback_global: fallbackGlobal }),
   });
 }
