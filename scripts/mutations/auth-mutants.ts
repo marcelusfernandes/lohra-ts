@@ -92,9 +92,9 @@ export const mutants: readonly Mutant[] = [
       {
         file: credentials,
         before:
-          "  try {\n    writeTokens(home, updated);\n  } catch (error) {\n    throw new TokenPersistError(",
+          "    throw new TokenPersistError(\n      `the login refresh succeeded but saving it to ${tokenPath(home)} failed",
         after:
-          "  try {\n    writeTokens(home, updated);\n  } catch (error) {\n    throw new RefreshFailedError(",
+          "    throw new RefreshFailedError(\n      `the login refresh succeeded but saving it to ${tokenPath(home)} failed",
       },
     ],
   },
