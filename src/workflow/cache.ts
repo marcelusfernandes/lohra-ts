@@ -36,7 +36,13 @@ export interface WorkflowCacheOwnership {
 }
 
 export interface WorkflowCache {
-  get(runId: string, hash: string): CacheLookup;
+  /** `nodeId` (issue #368) is the SCOPED checkpoint id of the caller — it
+   * never affects the lookup key (a cell is keyed by `hash` alone), only the
+   * identity a decorator (`auditedWorkflowCache`, audit-cache.ts) attaches
+   * to the `cache.replayed`/`cache.missed` event it produces around this
+   * call. Optional and unused by the two concrete caches below: a cache the
+   * decorator does not wrap is free to ignore it. */
+  get(runId: string, hash: string, nodeId?: string): CacheLookup;
   put(
     runId: string,
     hash: string,

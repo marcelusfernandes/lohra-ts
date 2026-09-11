@@ -16,7 +16,6 @@ import type { Awaitable, CausalContext, ChildResult } from "./runtime.js";
 import { resolveInlineSchema, validateSpec } from "./schema.js";
 import type { TierMap } from "./tiers.js";
 import { Node, ValidationError } from "./types.js";
-
 export interface Routing {
   readonly provider?: string;
   readonly model?: string;
@@ -383,9 +382,9 @@ export async function replayOrCollectBranch(
 ): Promise<LeafExecution> {
   const routing = routingIdentity(node, deps.tiers);
   const branchHash = contentHash(...deps.spec, node.id, "parallel", index, prompt, ...routing);
-  const found = deps.cache.get(deps.runId, branchHash);
+  const owner = scopedCheckpointId(deps.nodeScope, node.id);
+  const found = deps.cache.get(deps.runId, branchHash, owner);
   if (found.hit) {
-    const owner = scopedCheckpointId(deps.nodeScope, node.id);
     if (found.cost !== null) addUsageToResult(deps.result, owner, found.cost, null, null);
     return { output: found.output, usage: found.cost ?? usage(), complete: true };
   }
@@ -578,19 +577,20 @@ export function recordGroupReplayCost(
   cached: unknown,
   groupHash: string,
 ): unknown {
-  const groupCost = deps.cache.get(deps.runId, groupHash).cost;
+  const owner = scopedCheckpointId(deps.nodeScope, node.id);
+  const groupCost = deps.cache.get(deps.runId, groupHash, owner).cost;
   if (groupCost !== null && !isZeroUsage(groupCost)) return cached;
   const routing = routingIdentity(node, deps.tiers);
   const total = resolved.reduce((sum: Usage, p, i) => {
     const hash = contentHash(...deps.spec, node.id, "parallel", i, renderValue(p), ...routing);
-    const found = deps.cache.get(deps.runId, hash);
+    const found = deps.cache.get(deps.runId, hash, owner);
     if (!found.hit) {
       deps.result.faults.push(`group replay: per-branch cell missing for ${hash}`);
       return sum;
     }
     return combine(sum, found.cost ?? usage());
   }, usage());
-  addUsageToResult(deps.result, scopedCheckpointId(deps.nodeScope, node.id), total, null, null);
+  addUsageToResult(deps.result, owner, total, null, null);
   return cached;
 }
 

@@ -10,8 +10,10 @@
 // each mint a fresh one via `idSource()`, the same source `runId` uses), so
 // a resume's stretch and the stretch before it never share an identity —
 // `AuditRepository.query({runId, segmentId})` can always separate them.
+import { auditedWorkflowCache } from "./audit-cache.js";
 import type { AuditInput } from "./audit-model.js";
 import type { AuditTrail } from "./audit-trail.js";
+import type { WorkflowCache } from "./cache.js";
 import type { WorkflowEvent } from "./engine-contract.js";
 import { type WorkflowLiveEvent, type WorkflowLiveEvents } from "./live-events.js";
 import type { WorkflowSpec } from "./types.js";
@@ -42,6 +44,56 @@ export interface WorkflowAuditProducers {
     budget: Readonly<{ total: number; spent: number; remaining: number }> | null,
   ) => void;
   readonly announceDone: (status: string) => void;
+  /** Issue #368: the FIRST event of a stretch, before `workflow.plan` —
+   * `attempt` is 1 on a fresh `launch`, `(priorView.attempts ?? 0) + 1` on a
+   * durable resume (the same count `pausePayload`'s own `attempts` field
+   * already uses, service.ts). */
+  readonly announceSegmentStarted: (attempt: number) => void;
+  /** The LAST event of a stretch, before `workflow.done` — `status` is
+   * whatever `announceDone` is about to publish (`"complete"`, `"paused"`,
+   * `"cancelled"`, or `"failed"` from the `.catch` path). */
+  readonly announceSegmentCompleted: (status: string) => void;
+  /** Issue #368: a dead-owner resume (`orphaned`, service.ts) closes the
+   * PRIOR segment as `interrupted`/`process_crash` — under THIS stretch's
+   * new fence, naming the OLD segment by id (or none, for a run durable
+   * before the identity issue ever stamped one) — and follows it with an
+   * `audit.gap` naming the same reason. Distinguishes "the process died"
+   * from `sink_failure` (audit-trail.ts), the only other producer of
+   * `audit.gap` today. */
+  readonly announceProcessCrash: (priorSegmentId: string | null) => void;
+  /** One `node.paused` per pause, `reason` mirroring `result.pauseReason`
+   * (`CHECKPOINT_PAUSE`/`QUOTA_PAUSE`/`TOKEN_BUDGET_PAUSE`/`USER_PAUSE`,
+   * service.ts:80-83). `checkpoint` is `result.checkpoint`: for a checkpoint
+   * pause it already carries `node_id` (`checkpointPausePayload`,
+   * engine-utils.ts); every other reason falls back to the last node this
+   * factory saw `workflow.node{state:"running"}` for for — `workflow.node`/
+   * `workflow.fault` themselves are UNCHANGED (decision of the
+   * orchestrator, issue #368: never duplicated, never replaced). A `null`
+   * `reason` is a no-op — the terminal write always calls this, whether the
+   * run paused or not. */
+  readonly announceNodePaused: (reason: string | null, checkpoint: unknown) => void;
+  /** `service.ts`'s ONE call per acquisition, replacing a bare
+   * `announcePlan` — `announceSegmentStarted` then `announcePlan`, in that
+   * order (segment.started is the FIRST event of the stretch). */
+  readonly announceStretchStart: (
+    attempt: number,
+    spec: WorkflowSpec,
+    budget: Readonly<{ total: number; spent: number; remaining: number }> | null,
+  ) => void;
+  /** `service.ts`'s ONE call per terminal write, replacing a bare
+   * `announceDone` — `announceNodePaused` (a no-op unless `status ===
+   * "paused"`), then `announceSegmentCompleted`, then `announceDone`, in
+   * that order (segment.completed is the LAST event before workflow.done). */
+  readonly announceStretchEnd: (
+    status: string,
+    pauseReason: string | null,
+    checkpoint: unknown,
+  ) => void;
+  /** `service.ts`'s ONE call at the cache-construction site — decorates
+   * `inner` with THIS stretch's own identity (`audit-cache.ts`, #368), so a
+   * cell recomputed or replayed anywhere the engine reads/writes this cache
+   * (including a nested workflow's inherited `this.cache`) is auditable. */
+  readonly wrapCache: (inner: WorkflowCache) => WorkflowCache;
 }
 
 /** The subset of `WorkflowAuditProducersDeps` the fail-closed rule below
@@ -89,9 +141,14 @@ export function createWorkflowAuditProducers(
   deps: WorkflowAuditProducersDeps,
 ): WorkflowAuditProducers {
   const { trail, live, runId, segmentId, ownershipOf, durable, warn, onEvent } = deps;
+  const failClosed: AuditFailClosedDeps = { trail, ownershipOf, durable, warn };
+  // `announceNodePaused`'s fallback identity (quota/budget/user_requested —
+  // never the checkpoint reason, which carries its own `node_id`): the last
+  // node this factory saw `workflow.node{state:"running"}` for.
+  let lastRunningNode: string | null = null;
 
   function record(input: Omit<AuditInput, "segment_id">): void {
-    recordAuditEvent({ trail, ownershipOf, durable, warn }, runId, {
+    recordAuditEvent(failClosed, runId, {
       ...input,
       segment_id: segmentId,
     });
@@ -100,6 +157,7 @@ export function createWorkflowAuditProducers(
   function forwardEvent(event: WorkflowEvent): void {
     onEvent?.(Object.freeze({ ...event }));
     const nodeId = event.nodeId;
+    if (event.kind === "node" && event.state === "running") lastRunningNode = nodeId;
     const liveEvent: WorkflowLiveEvent =
       event.kind === "fault"
         ? Object.freeze({
@@ -158,5 +216,74 @@ export function createWorkflowAuditProducers(
     record({ event_type: "workflow.done", payload: { status, terminal: true } });
   }
 
-  return { forwardEvent, announcePlan, announceDone };
+  function announceSegmentStarted(attempt: number): void {
+    record({ event_type: "segment.started", payload: { attempt, status: "running" } });
+  }
+
+  function announceSegmentCompleted(status: string): void {
+    record({ event_type: "segment.completed", payload: { status, terminal: true } });
+  }
+
+  // Bypasses `record` on purpose: BOTH events below name the segment THIS
+  // stretch is superseding, never `segmentId` (this stretch's own, which
+  // `announceSegmentStarted` already stamped). `recordAuditEvent` still
+  // presents `ownershipOf()` — THIS stretch's fence, the new one — so a
+  // dead owner's abandoned segment is closed under a fence it never held.
+  function announceProcessCrash(priorSegmentId: string | null): void {
+    recordAuditEvent(failClosed, runId, {
+      event_type: "segment.completed",
+      ...(priorSegmentId === null ? {} : { segment_id: priorSegmentId }),
+      payload: { status: "interrupted", reason: "process_crash" },
+    });
+    recordAuditEvent(failClosed, runId, {
+      event_type: "audit.gap",
+      payload: { reason: "process_crash", count_state: "unavailable" },
+    });
+  }
+
+  function announceNodePaused(reason: string | null, checkpoint: unknown): void {
+    if (reason === null) return;
+    const fromCheckpoint =
+      checkpoint !== null && typeof checkpoint === "object" && "node_id" in checkpoint
+        ? (checkpoint as Readonly<Record<string, unknown>>).node_id
+        : undefined;
+    const nodeId = typeof fromCheckpoint === "string" ? fromCheckpoint : lastRunningNode;
+    record({ event_type: "node.paused", node_id: nodeId, payload: { reason } });
+  }
+
+  function announceStretchStart(
+    attempt: number,
+    spec: WorkflowSpec,
+    budget: Readonly<{ total: number; spent: number; remaining: number }> | null,
+  ): void {
+    announceSegmentStarted(attempt);
+    announcePlan(spec, budget);
+  }
+
+  function announceStretchEnd(
+    status: string,
+    pauseReason: string | null,
+    checkpoint: unknown,
+  ): void {
+    announceNodePaused(pauseReason, checkpoint);
+    announceSegmentCompleted(status);
+    announceDone(status);
+  }
+
+  function wrapCache(inner: WorkflowCache): WorkflowCache {
+    return auditedWorkflowCache(inner, { trail, ownershipOf, durable, warn, segmentId });
+  }
+
+  return {
+    forwardEvent,
+    announcePlan,
+    announceDone,
+    announceSegmentStarted,
+    announceSegmentCompleted,
+    announceProcessCrash,
+    announceNodePaused,
+    announceStretchStart,
+    announceStretchEnd,
+    wrapCache,
+  };
 }

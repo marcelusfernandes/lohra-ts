@@ -138,11 +138,18 @@ const SAFE_PROVENANCE = new Set([
 const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
   reason: new Set([
     "cancelled",
+    // Issue #368: the four `pauseReason` values `WorkflowEngine.pause`
+    // (engine.ts:155,163,204,213,981) ever sets — `node.paused`'s own
+    // reason, not a NEW private string (checked against
+    // `CHECKPOINT_PAUSE`/`QUOTA_PAUSE`/`TOKEN_BUDGET_PAUSE`/`USER_PAUSE` in
+    // service.ts:80-83, so a fifth value would be a bug, not a leak).
+    "checkpoint",
     "corrupt_payload",
     "drop_bucket_overflow",
     "lookup_failed",
     "process_crash",
     "queue_overflow",
+    "quota_exhausted",
     "retention_limit",
     // Issue #367: the sandbox denied a leaf's tool call — sync policy
     // refusal (fs/egress/taint/retired-stretch) or a run with no live
@@ -151,8 +158,10 @@ const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object
     "sink_failure",
     "store_failed",
     "timeout",
+    "token_budget_exhausted",
     "tombstone_compaction",
     "unavailable",
+    "user_requested",
   ]),
   // Issue #366: the eleven roles a leaf's `causalContext.role` ever carries
   // (`engine.ts:456,555,649,702,723,767,812,911,924,966`;
@@ -183,6 +192,9 @@ const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object
     "failed",
     "interrupted",
     "paused",
+    // Issue #368: `segment.started`'s own payload — "running", never a leak
+    // (the stretch itself, not a leaf/tool's private state).
+    "running",
     "success",
     "unavailable",
   ]),

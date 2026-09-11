@@ -624,20 +624,20 @@ export class WorkflowService {
         producers.forwardEvent(event);
       },
     });
-    producers.announcePlan(parsed, engine.budget.snapshot());
+    producers.announceStretchStart(1, parsed, engine.budget.snapshot());
     const record = this.makeRecord(runId, parsed.name, engine);
     this.runs.set(runId, record);
     void engine
       .run(parsed, args)
       .then((result) => {
         record.result = result;
-        producers.announceDone(result.status);
+        producers.announceStretchEnd(result.status, result.pauseReason, result.checkpoint);
         record.settled = true;
         record.published = resultView(runId, parsed.name, result, engine.budget);
         record.resolve(record.published);
       })
       .catch(() => {
-        producers.announceDone("failed");
+        producers.announceStretchEnd("failed", null, null);
         record.settled = true;
         record.published = Object.freeze({
           run_id: runId,
@@ -665,6 +665,7 @@ export class WorkflowService {
     // (`start()`, service.ts:417): a resume always mints a fresh one, so the
     // stretch before it and this one never share an identity in the ledger.
     const segmentId = this.idSource();
+    const attempt = (priorView?.attempts ?? 0) + 1; // shared below and by pausePayload
     const now = store.ownershipOf().now;
     const answers: Record<string, unknown> = { ...(options.checkpointAnswers ?? {}) };
     if (
@@ -821,11 +822,11 @@ export class WorkflowService {
       },
       // Durable default: the FENCED SQLite node cache over the shared
       // connection. An explicit cache/cacheFactory still wins.
-      ...(this.cacheFactory !== undefined
-        ? { cache: this.cacheFactory(runId) }
-        : this.cache instanceof MemoryWorkflowCache
-          ? {
-              cache: new SqliteWorkflowCache(
+      cache: producers.wrapCache(
+        this.cacheFactory !== undefined
+          ? this.cacheFactory(runId)
+          : this.cache instanceof MemoryWorkflowCache
+            ? new SqliteWorkflowCache(
                 store.database,
                 runId,
                 () =>
@@ -849,9 +850,9 @@ export class WorkflowService {
                     );
                   },
                 },
-              ),
-            }
-          : { cache: this.cache }),
+              )
+            : this.cache,
+      ),
     });
     // One shape for the run line: registration, progress (#125), terminal.
     const persistLine = (
@@ -926,6 +927,7 @@ export class WorkflowService {
       carriedFaults.push(
         `${runId}: ${RECOVERED_FAULT} — the process running it stopped before it finished; completed cells replayed, work in flight was lost`,
       );
+      producers.announceProcessCrash(priorView.audit_segment_id);
     }
     const priorFaults = carriedFaults;
     const priorDegraded = priorView?.prior_degraded === true;
@@ -967,7 +969,7 @@ export class WorkflowService {
         fence: lost.fence,
       });
     }
-    producers.announcePlan(parsed, engine.budget.snapshot());
+    producers.announceStretchStart(attempt, parsed, engine.budget.snapshot());
     void engine
       .run(parsed, args)
       .then((result) => {
@@ -986,7 +988,7 @@ export class WorkflowService {
           JSON.stringify({
             checkpoint,
             resume_at: resumeAt,
-            attempts: (priorView?.attempts ?? 0) + 1,
+            attempts: attempt,
             leaf_respawns: (priorView?.leaf_respawns ?? 0) + result.leafRespawns,
             prior_faults: faults,
             prior_degraded: degraded,
@@ -1013,16 +1015,13 @@ export class WorkflowService {
             typeof (result.checkpoint as Record<string, unknown>).retry_after === "number"
               ? ((result.checkpoint as Record<string, unknown>).retry_after as number)
               : null;
-          resumeAt =
-            this.autoResume?.schedule(runId, {
-              attempts: (priorView?.attempts ?? 0) + 1,
-              retryAfter,
-            }) ?? null;
+          resumeAt = this.autoResume?.schedule(runId, { attempts: attempt, retryAfter }) ?? null;
         }
         if (resumeAt !== null) {
           persistTerminal("paused", QUOTA_PAUSE, pausePayload(null, resumeAt));
         }
-        if (owned && terminal !== null) producers.announceDone(result.status);
+        if (owned && terminal !== null)
+          producers.announceStretchEnd(result.status, result.pauseReason, result.checkpoint);
         finishStretch();
         record.settled = true;
         if (owned) {
@@ -1042,7 +1041,7 @@ export class WorkflowService {
       })
       .catch((error: unknown) => {
         const terminal = stretchOwnership();
-        if (terminal !== null) producers.announceDone("failed");
+        if (terminal !== null) producers.announceStretchEnd("failed", null, null);
         finishStretch();
         record.settled = true;
         record.published = Object.freeze({
