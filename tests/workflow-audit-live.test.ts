@@ -1123,6 +1123,8 @@ describe("T17 live events and sink failures", () => {
       expect(page.events.map((event) => event.event_type)).toEqual([
         "workflow.plan",
         "workflow.node",
+        "leaf.started",
+        "leaf.completed",
         "workflow.node",
         "workflow.done",
       ]);
