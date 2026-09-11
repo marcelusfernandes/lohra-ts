@@ -20,10 +20,24 @@
 // `created_at` anyway (`reconstructMessage` reshapes each row without it).
 // The CHEAP membership test (chosen over replaying the whole engine/spawn
 // graph) is: does a `leaf.started` event for this `sub_id` exist anywhere in
-// `run_id`'s audit ledger? `leaf.started` is written once, synchronously, at
-// spawn (`audit-runtime.ts:211-228`), strictly before the leaf can ever
-// commit a turn, so it is always present for a real leaf of that run and
-// never for a `sub_id` that belongs to a different run (or none).
+// `run_id`'s audit ledger?
+//
+// IMPORTANT (round 2 correction): `leaf.started` is NOT a guaranteed,
+// synchronous write. `audit-runtime.ts:216-233` calls `AuditTrail.record`
+// (`audit-producers.ts`'s `recordAuditEvent`), which only ENQUEUES the event
+// — a background loop flushes it to sqlite later (`audit-trail.ts:59+`).
+// The event can be missing for a REAL leaf of a REAL run for reasons that
+// have nothing to do with `sub_id`/`run_id` being wrong: the audit trail can
+// be entirely absent (`trail === undefined`, e.g. `LOHRA_AUDIT` off —
+// `recordAuditEvent` returns immediately), the in-memory queue can be full
+// and drop it, the writer can already be closing/stopped, or
+// `AuditRepository`'s own retention/eviction (`AUDIT_RUN_CAP`, tombstones)
+// can have pruned the run's ledger by the time this tool reads it. This
+// tool stays FAIL-CLOSED on every one of those: it never falls back to
+// "the session row alone proves it", so a dropped/pruned/disabled ledger
+// makes a real leaf read back as "does not belong to run" instead of
+// silently trusting an unverifiable claim (invariant 2) — a known,
+// documented cost of the cheap check, not a bug.
 import type Database from "better-sqlite3";
 
 import type { AuditRepository } from "../state/index.js";
@@ -32,7 +46,17 @@ import type { ToolArguments, ToolHandler } from "../tools/types.js";
 
 const DEFAULT_MAX_CHARS = 4096;
 const MAX_MAX_CHARS = 32768;
-const NOTE = "turnos assentados; o turno em voo não está gravado";
+// Named, bounded read (invariant 3 — budget/fan-out never unbounded): a live
+// leaf's `messages` table has no cap of its own, so this tool never fetches
+// more than the MOST RECENT `MAX_TURNS` rows — the ones a supervising
+// operator actually cares about. `workflow_audit`'s own page limit (100,
+// `AuditQuery.limit`) bounds a DIFFERENT thing (one page of the event log,
+// with a cursor to page further) — this tool has no cursor, so 200 is a
+// looser but still-named ceiling for the whole conversation window, not a
+// page size.
+const MAX_TURNS = 200;
+const NOTE =
+  "turnos assentados; o turno em voo não está gravado. role 'tool' vem com a saída bruta, sem redigir (diferente de workflow_audit). A checagem de posse depende de leaf.started ainda estar na auditoria — auditoria desligada ou evento podado/despejado nega em vez de fingir sucesso.";
 
 /** Same idiom as `notices-tool.ts`'s `integer()`: accepts a JSON number OR a
  * numeric string (a strict-schema caller sometimes stringifies), never
@@ -91,6 +115,11 @@ function truncateTurns(
   let truncated = false;
   const turns = rows.map((row): LeafTurn => {
     if (row.content === null) return { role: row.role, content: null, created_at: row.timestamp };
+    // An already-empty turn is never a cut — even with the budget already at
+    // zero, there is nothing to slice, so this must NOT flip `truncated`
+    // (round 2 fix: the old order checked `budget <= 0` first and reported a
+    // false positive for a turn that was empty all along).
+    if (row.content.length === 0) return { role: row.role, content: "", created_at: row.timestamp };
     if (budget <= 0) {
       truncated = true;
       return { role: row.role, content: "", created_at: row.timestamp };
@@ -135,11 +164,19 @@ export function workflowLeafReadHandler(
     if (membership.events.length === 0)
       return toolError(`workflow_leaf_read: sub_id '${subId}' does not belong to run '${runId}'`);
 
-    const rows = database
+    // Fetch the MOST RECENT `MAX_TURNS + 1` rows (DESC) — the `+1` is only
+    // to detect "there is at least one more beyond the cap" without a
+    // separate COUNT query — then drop the extra (oldest of the fetched
+    // batch) and restore ascending order for the reply.
+    const fetchedDesc = database
       .prepare(
-        "SELECT role, content, timestamp FROM messages WHERE session_id = ? AND active = 1 ORDER BY id",
+        `SELECT role, content, timestamp FROM messages
+         WHERE session_id = ? AND active = 1
+         ORDER BY id DESC LIMIT ?`,
       )
-      .all(subId) as readonly MessageTurnRow[];
+      .all(subId, MAX_TURNS + 1) as readonly MessageTurnRow[];
+    const truncatedTurns = fetchedDesc.length > MAX_TURNS;
+    const rows = [...(truncatedTurns ? fetchedDesc.slice(0, MAX_TURNS) : fetchedDesc)].reverse();
     const { turns, truncated } = truncateTurns(rows, maxChars);
 
     return toolResult(undefined, {
@@ -147,6 +184,7 @@ export function workflowLeafReadHandler(
       run_id: runId,
       turns,
       truncated,
+      truncated_turns: truncatedTurns,
       note: NOTE,
     });
   };
