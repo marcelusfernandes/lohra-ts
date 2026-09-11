@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { LockRepository, openStateDatabase, WorkflowRepository } from "../src/state/index.js";
+import { BUILTIN_DEFINITIONS } from "../src/tools/builtin-definitions.js";
 import {
   CHECKPOINT_HINT,
   validateSpec,
@@ -222,6 +223,27 @@ describe("checkpoint id scoping across SIBLING nested workflows — engine (#319
 describe("CHECKPOINT_HINT names the scoped form (#243)", () => {
   it("mentions the dotted scoped id, not just the bare node id", () => {
     expect(CHECKPOINT_HINT).toContain("sub.confirm");
+  });
+
+  // #349: `checkpointPausePayload` (engine-utils.ts) adds `rename_hint` to
+  // the pause payload only when `collision === "scoped"` — the hint text
+  // itself is untouched by this issue (out of scope). What was missing is
+  // the operator-facing DOCUMENTATION of the key: `CHECKPOINT_HINT` told the
+  // operator how to resume a checkpoint but never mentioned that a
+  // `rename_hint` in the payload means resuming with the same node_id just
+  // pauses again.
+  it("#349: mentions rename_hint, so a colliding scoped id doesn't look like an ordinary resumable key", () => {
+    expect(CHECKPOINT_HINT).toContain("rename_hint");
+  });
+});
+
+describe("workflow_status description documents rename_hint (#349)", () => {
+  it("cites rename_hint alongside the checkpoint pause payload shape", () => {
+    const workflowStatus = BUILTIN_DEFINITIONS.find(
+      (definition) => definition.function.name === "workflow_status",
+    );
+    if (workflowStatus === undefined) throw new Error("workflow_status tool definition missing");
+    expect(workflowStatus.function.description).toContain("rename_hint");
   });
 });
 
