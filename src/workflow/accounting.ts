@@ -60,10 +60,13 @@ export class RunResult {
    * (#246); `resultView` (service-rollup.ts) folds both lists together for
    * display, `deriveStatus` below reads only `faults`. */
   readonly sandboxFaults: string[] = [];
-  /** The `ErrorKind` behind each leaf failure counted in `faults` — same
-   * events, typed instead of parsed out of the message text (#399). Never
-   * gains a `quota_exhausted` entry: that leaf status never reaches
-   * `faults` either (`nonCompleteFirstCollectResult`, engine-utils.ts). */
+  /** The `ErrorKind` of each provider-classified leaf failure — a typed
+   * subset of `faults` (#399), never parsed out of its message text: many
+   * `faults` entries (timeout, empty output, schema mismatch, engine fault,
+   * nested `sub[ref]:` ones, the advisory sandbox refusals `resultView`
+   * folds in) carry no `errorKind` at all. Never gains a `quota_exhausted`
+   * entry either: that leaf status never reaches `faults`
+   * (`nonCompleteFirstCollectResult`, engine-utils.ts). */
   readonly faultKinds: ErrorKind[] = [];
   readonly nodeCosts: Record<string, NodeCost> = {};
   forcingFallbacks = 0;

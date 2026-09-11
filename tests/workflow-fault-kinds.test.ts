@@ -3,11 +3,13 @@
 // para fora do texto da mensagem. Este arquivo pina `RunResult.faultKinds`
 // (accounting.ts), `fault_kinds` no rollup vivo (service-rollup.ts),
 // `prior_fault_kinds`/`fault_kinds_total` no durável (service.ts) — sempre
-// ADITIVO: `faults`/mensagens continuam byte-idênticos (ver
-// `tests/workflow-sandbox-refusals.test.ts`, `workflow-parallel-retries.test.ts`,
-// `workflow-executor.test.ts`, `workflow-service-durability.test.ts`, onde
-// os `toEqual` de forma exata do rollup/RunResult foram só reajustados, sem
-// teste novo lá — a issue #399 restringe todo teste NOVO a este arquivo).
+// ADITIVO: `faults`/mensagens continuam byte-idênticos (os quatro arquivos
+// de pino da issue #399 — `tests/workflow-sandbox-refusals.test.ts`,
+// `workflow-parallel-retries.test.ts`, `workflow-executor.test.ts`,
+// `workflow-service-durability.test.ts` — não precisaram de ajuste: nenhum
+// `toEqual` de forma quebrou; só o stub de `workflow-service-durability.test.ts`
+// teve o TIPO do parâmetro `errorKind` estreitado, sem teste novo lá — a
+// issue #399 restringe todo teste NOVO a este arquivo).
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
