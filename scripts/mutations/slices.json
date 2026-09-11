@@ -48,7 +48,10 @@
       "tests/workflow-audit-tool.test.ts",
       "tests/workflow-audit-cache.test.ts",
       "tests/workflow-audit-segment.test.ts",
-      "tests/workflow-live-tail.test.ts"
+      "tests/workflow-live-tail.test.ts",
+      "tests/workflow-watch-events.test.ts",
+      "tests/workflow-audit-allow-list.test.ts",
+      "tests/chat-audit-trail-wiring.test.ts"
     ]
   },
   {

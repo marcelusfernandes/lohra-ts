@@ -1,8 +1,10 @@
 // Issue #370: teste de FORMA do catálogo novo
 // `scripts/mutations/workflow-audit-producers-mutants.ts` — no molde de
 // `tests/mutations-fixtures-workflow-executor.test.ts`, mas mais amplo:
-// aqui não há uma fixture única para pinar, e sim 18 mutantes espalhados por
-// quatro módulos novos do M7 (`audit-producers.ts`, `audit-runtime.ts`,
+// aqui não há uma fixture única para pinar, e sim 25 mutantes espalhados por
+// oito módulos (issue #383 acrescenta `audit-model.ts`,
+// `src/commands/workflow.ts`, `src/commands/chat.ts` e `src/workflow/tool.ts`
+// aos quatro do M7 — `audit-producers.ts`, `audit-runtime.ts`,
 // `audit-cache.ts`, `live-tail.ts`). Duas propriedades, cada uma independente
 // de rodar o harness de mutação de verdade (`npm run mutations:t17`, minutos
 // de `git archive` + vitest em subprocesso):
@@ -80,7 +82,7 @@ describe("scripts/mutations/workflow-audit-producers-mutants.ts", () => {
     }
   });
 
-  it("focus.file é um dos seis arquivos novos de teste do M7 (identity/leaf/tool/cache/segment/live-tail)", () => {
+  it("focus.file é um dos nove arquivos de teste do M7 (identity/leaf/tool/cache/segment/live-tail) + #383 (watch-events/allow-list/chat-audit-wiring)", () => {
     const expected = new Set([
       "tests/workflow-audit-identity.test.ts",
       "tests/workflow-audit-leaf.test.ts",
@@ -88,6 +90,9 @@ describe("scripts/mutations/workflow-audit-producers-mutants.ts", () => {
       "tests/workflow-audit-cache.test.ts",
       "tests/workflow-audit-segment.test.ts",
       "tests/workflow-live-tail.test.ts",
+      "tests/workflow-watch-events.test.ts",
+      "tests/workflow-audit-allow-list.test.ts",
+      "tests/chat-audit-trail-wiring.test.ts",
     ]);
     const used = new Set(auditProducersMutants.map((mutant) => mutant.focus.file));
     for (const file of used) {
@@ -95,12 +100,16 @@ describe("scripts/mutations/workflow-audit-producers-mutants.ts", () => {
     }
   });
 
-  it("edits[].file mira só os módulos novos do M7 (audit-producers/audit-runtime/audit-cache/live-tail)", () => {
+  it("edits[].file mira só os módulos do M7 (audit-producers/audit-runtime/audit-cache/live-tail) + #383 (audit-model/workflow.ts/chat.ts/tool.ts)", () => {
     const allowed = new Set([
       "src/workflow/audit-producers.ts",
       "src/workflow/audit-runtime.ts",
       "src/workflow/audit-cache.ts",
       "src/workflow/live-tail.ts",
+      "src/workflow/audit-model.ts",
+      "src/commands/workflow.ts",
+      "src/commands/chat.ts",
+      "src/workflow/tool.ts",
     ]);
     for (const mutant of auditProducersMutants) {
       for (const edit of mutant.edits) {
