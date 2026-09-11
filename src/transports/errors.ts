@@ -1,9 +1,19 @@
+import type { ErrorKind } from "./error-kinds.js";
+
 const quotaCodes = new Set([
   "insufficient_quota",
   "quota_exceeded",
   "rate_limit_exceeded",
   "usage_limit_reached",
 ]);
+
+// Códigos de erro Node (ErrnoException) de falha de conexão — chegam como
+// `Error` crua, nunca embrulhados em `ProviderCallFailed`
+// (`client.ts` rethrows uma instância de `Error` como está; só um valor
+// não-`Error` vira `ProviderCallFailed`). A checagem é estrutural
+// (`.code`), igual ao gatilho de quota já existente, não presa a
+// `instanceof ProviderCallFailed`.
+const networkFaultCodes = new Set(["ECONNREFUSED", "ENOTFOUND", "ETIMEDOUT", "ECONNRESET"]);
 
 export class RateLimitError extends Error {
   override readonly name = "RateLimitError";
@@ -40,11 +50,31 @@ function object(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }
 
-export function classifyProviderError(error: unknown): "quota_exhausted" | null {
+/** `code`/`payload.error.code`/`payload.error.type`/mensagem citam "model"
+ * — o indício de modelo que separa um 404 de rota genérico
+ * (`model_not_found` da issue #397) de qualquer outro 404. Estrutural,
+ * igual ao resto do classificador — não depende do shape exato de nenhum
+ * provedor específico. */
+function looksLikeModelNotFound(value: Readonly<Record<string, unknown>>): boolean {
+  if (typeof value.code === "string" && /model/iu.test(value.code)) return true;
+  const payloadError = object(object(value.payload).error);
+  if (typeof payloadError.code === "string" && /model/iu.test(payloadError.code)) return true;
+  if (typeof payloadError.type === "string" && /model/iu.test(payloadError.type)) return true;
+  return typeof value.message === "string" && /model/iu.test(value.message);
+}
+
+// Códigos de erro Node (ErrnoException) de falha de conexão — ver
+// `networkFaultCodes` acima; a checagem correspondente não exige
+// `instanceof ProviderCallFailed` pelo mesmo motivo.
+export function classifyProviderError(error: unknown): ErrorKind | null {
   if (error instanceof RateLimitError) return "quota_exhausted";
   const value = object(error);
   if (value.statusCode === 429 || value.status === 429) return "quota_exhausted";
-  return typeof value.code === "string" && quotaCodes.has(value.code) ? "quota_exhausted" : null;
+  if (typeof value.code === "string" && quotaCodes.has(value.code)) return "quota_exhausted";
+  if (value.statusCode === 401 || value.statusCode === 403) return "auth_failed";
+  if (value.statusCode === 404 && looksLikeModelNotFound(value)) return "model_not_found";
+  if (typeof value.code === "string" && networkFaultCodes.has(value.code)) return "route_fault";
+  return null;
 }
 
 function positiveSeconds(value: unknown): number | null {
