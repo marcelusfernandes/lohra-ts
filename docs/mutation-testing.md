@@ -163,33 +163,36 @@ adicionar uma fatia" cita a mesma restrição.
 | `web-tools`           | `mutations:t20`         |        9 | `web-tools-mutants.ts`                                                                                                |
 | `self-update`         | `mutations:self-update` |        8 | `self-update-mutants.ts`                                                                                              |
 | `context-window`      | `mutations:t23`         |       15 | `context-window.ts`                                                                                                   |
-| `auth`                | `mutations:auth`        |       12 | `auth-mutants.ts`                                                                                                     |
+| `auth`                | `mutations:auth`        |       13 | `auth-mutants.ts`                                                                                                     |
 
-Total: 200. Os 12 mutantes de `workflow-durability-guard.ts` são
+Total: 201. Os 12 mutantes de `workflow-durability-guard.ts` são
 combinatórios: três conjuntos do guard de escrita possuída (`fence`,
 `holder`, `lease-validity`) × quatro categorias (`state`, `cache`,
 `node-cost`, `spend`) — um mutante por combinação, cada um escorado só no
 teste focal da sua categoria, mais os 2 mutantes do INSERT combinado
 cache+custo (`combined-cell-guard-removed`,
 `combined-cost-escapes-refusal`). `tests/mutations-slices.test.ts` importa os
-onze catálogos de dado puro estaticamente e prova essa soma (200) a cada
+onze catálogos de dado puro estaticamente e prova essa soma (201) a cada
 corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
 
-`auth-mutants.ts` (issue #354, +4 na issue #356) cobre a lease de arquivo
-sobre a renovação do token OAuth (`src/auth/lease.ts`: TTL zerado, lease
-órfã não tomada de volta, release sem checar o dono) e a coordenação em
-`src/auth/credentials.ts` (janela de "ainda expirando" zerada, o ramo que
-adota o token que outro processo já escreveu, a identidade de
-`RefreshFailedError` quando o refresh falha de verdade, e a identidade de
-`TokenPersistError` quando o refresh funciona mas a escrita em disco
-falha — issue #354, achado 2 da PR #352: essa escrita vive fora do `try` do
-POST). Os 4 mutantes da issue #356 cobrem o fail-closed de `isLeaseAlive`
-para um lock ilegível (fallback por `mtime + ttlSeconds` desativado), o
-dono pulando a releitura sob a lease antes de repetir o refresh, o deadline
-do perdedor em `waitForFileLease` (`>=` virando `>`), e a identidade de
+`auth-mutants.ts` (issue #354, +4 na rodada 1 e +1 na rodada 2 da issue
+#356) cobre a lease de arquivo sobre a renovação do token OAuth
+(`src/auth/lease.ts`: TTL zerado, lease órfã não tomada de volta, release
+sem checar o dono) e a coordenação em `src/auth/credentials.ts` (janela de
+"ainda expirando" zerada, o ramo que adota o token que outro processo já
+escreveu, a identidade de `RefreshFailedError` quando o refresh falha de
+verdade, e a identidade de `TokenPersistError` quando o refresh funciona
+mas a escrita em disco falha — issue #354, achado 2 da PR #352: essa
+escrita vive fora do `try` do POST). Os 4 mutantes da rodada 1 da issue
+#356 cobrem o fail-closed de `isLeaseAlive` para um lock ilegível
+(fallback por `mtime + ttlSeconds` desativado), o dono pulando a releitura
+sob a lease antes de repetir o refresh, o deadline do perdedor em
+`waitForFileLease` (`>=` virando `>`), e a identidade de
 `TokenPersistError` quando `acquireFileLease` propaga um erro real (não
-`EEXIST`) em vez de `RefreshFailedError`. Todos os 12 mutantes têm foco em
-`tests/auth-core.test.ts`.
+`EEXIST`) em vez de `RefreshFailedError`. O mutante da rodada 2 cobre
+`waitForFileLease` deixando de usar `isLeaseAlive` para um lock ilegível
+persistente (os dois leitores da lease voltando a discordar sobre o que é
+"viva"). Todos os 13 mutantes têm foco em `tests/auth-core.test.ts`.
 
 `context-window.ts` (issue #293) é o único catálogo que também é o próprio
 runner — o `Files` da issue só autoriza um script novo, então os 15 mutantes
@@ -283,13 +286,13 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
    `true`.
 5. `npm test` roda `tests/mutations-slices.test.ts`, que reprova de duas
    formas se a contagem não for atualizada junto com o mutante novo: a soma
-   total (200 + o novo) contra os onze catálogos importados, e a linha do
+   total (201 + o novo) contra os onze catálogos importados, e a linha do
    catálogo tocado em `CONTAGEM_POR_CATALOGO`
-   (`tests/mutations-slices.test.ts:507-525`), uma tabela pinada por número
+   (`tests/mutations-slices.test.ts:509-527`), uma tabela pinada por número
    literal — não derivada de `CATALOGOS.get(path).length` — para que uma
    troca compensatória entre dois catálogos (um ganha o que o outro perde,
    soma preservada) não passe despercebida. As duas contagens (o literal
-   `200` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
+   `201` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
    atualização junto com o mutante novo.
 
 ## Como adicionar uma fatia
@@ -336,12 +339,12 @@ cada entrada de `slices.json`; que todo catálogo descoberto por conteúdo em
 `focus.file` dos catálogos da fatia (exceto `media`/`workflow-executor`); que
 `srcGlobs` cobre todo `edits[].file` dos catálogos da fatia (item 2 acima); a
 contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
-(`tests/mutations-slices.test.ts:507-525` — hoje `workflow-durability-guard`
+(`tests/mutations-slices.test.ts:509-527` — hoje `workflow-durability-guard`
 14, `workflow-durability-named` 41, `orchestration` 5,
 `workflow-audit-live-mutants` 32, `web-tools-mutants` 9,
 `media-catalog-other` 7, `media-catalog-persistence` 13,
 `self-update-mutants` 8, `workflow-executor-mutants` 44, `context-window` 15,
-`auth-mutants` 12, soma 200) e a soma de 200 contra os onze catálogos
+`auth-mutants` 13, soma 201) e a soma de 201 contra os onze catálogos
 importados; e que todo diretório de primeiro nível de `src/` está coberto
 por algum `srcGlobs` ou está em `SEM_FATIA` com um motivo não vazio — nunca
 os dois, nunca nenhum dos dois.

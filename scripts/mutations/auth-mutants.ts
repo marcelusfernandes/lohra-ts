@@ -213,4 +213,20 @@ export const mutants: readonly Mutant[] = [
       },
     ],
   },
+  {
+    id: "T356-waiter-disagrees-on-illegible",
+    category: "waiter-fail-closed-agreement",
+    mechanism: "family-a",
+    focus: {
+      file: authFocus,
+      test: "com lock ilegível persistente, o perdedor espera o TTL do mtime em vez de voltar imediatamente",
+    },
+    edits: [
+      {
+        file: lease,
+        before: "    if (!isLeaseAlive(path, options.ttlSeconds, now())) return;",
+        after: "    if (false) return;",
+      },
+    ],
+  },
 ];

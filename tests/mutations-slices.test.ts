@@ -478,7 +478,7 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 200 (soma dos onze catálogos importados)", () => {
+  it("a contagem total de mutantes é 201 (soma dos onze catálogos importados)", () => {
     // Os onze catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
@@ -490,9 +490,11 @@ describe("scripts/mutations/slices.json", () => {
     // da issue só autoriza um script novo. `auth-mutants.ts` (issue #354) é
     // o décimo primeiro: 188 + 8 = 196; a issue #356 (fail-closed do lock
     // ilegível, releitura do dono sob a lease, deadline do perdedor) somou
-    // mais 4: 196 + 4 = 200.
+    // mais 4 na rodada 1: 196 + 4 = 200; a rodada 2 (`waitForFileLease`
+    // desacordando de `acquireFileLease` sobre lock ilegível) somou mais 1:
+    // 200 + 1 = 201.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 200;
+    const TOTAL_MUTANTS = 201;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -515,14 +517,14 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/self-update-mutants.ts": 8,
       "scripts/mutations/workflow-executor-mutants.ts": 44,
       "scripts/mutations/context-window.ts": 15,
-      "scripts/mutations/auth-mutants.ts": 12,
+      "scripts/mutations/auth-mutants.ts": 13,
     };
     expect(new Set(Object.keys(CONTAGEM_POR_CATALOGO))).toEqual(new Set(CATALOGOS.keys()));
     for (const [path, mutants] of CATALOGOS) {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(200);
+    expect(somaTabela).toBe(201);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {
