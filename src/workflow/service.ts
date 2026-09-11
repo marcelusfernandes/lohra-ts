@@ -422,7 +422,7 @@ export class WorkflowService {
       const timerFactory = this.timerFactory;
       this.autoResume = new AutoResumeScheduler(
         (runId) => this.start(null, {}, { resumeRunId: runId }),
-        { timerFactory },
+        { timerFactory, logWarning: this.warn },
       );
       // Production heartbeat: a REAL repeating timer renews the lease every
       // TTL/3; tests inject their own factory, the default is the live clock, not a no-op.
