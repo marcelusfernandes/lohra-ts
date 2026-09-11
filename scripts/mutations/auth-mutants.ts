@@ -109,10 +109,8 @@ export const mutants: readonly Mutant[] = [
     edits: [
       {
         file: lease,
-        before:
-          '  if (existing !== null && existing.expiresAt > now) return false;\n  unlinkIfExists(path);\n  try {\n    createLeaseFile(path, { holder, expiresAt: now + ttlSeconds });\n    return true;\n  } catch (error) {\n    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;\n    throw error;\n  }\n}',
-        after:
-          '  if (existing !== null && existing.expiresAt > now) return true;\n  unlinkIfExists(path);\n  try {\n    createLeaseFile(path, { holder, expiresAt: now + ttlSeconds });\n    return true;\n  } catch (error) {\n    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;\n    throw error;\n  }\n}',
+        before: "  if (isLeaseAlive(path, ttlSeconds, now)) return false;",
+        after: "  if (isLeaseAlive(path, ttlSeconds, now)) return true;",
       },
     ],
   },
@@ -127,8 +125,8 @@ export const mutants: readonly Mutant[] = [
     edits: [
       {
         file: lease,
-        before: "  if (existing !== null && existing.expiresAt > now) return false;",
-        after: "  if (existing !== null) return false;",
+        before: "  if (existing !== null) return existing.expiresAt > now;",
+        after: "  if (existing !== null) return true;",
       },
     ],
   },
@@ -145,6 +143,73 @@ export const mutants: readonly Mutant[] = [
         file: lease,
         before: "  if (existing === null || existing.holder !== holder) return;",
         after: "  if (existing === null) return;",
+      },
+    ],
+  },
+  {
+    id: "T356-illegible-lock-fail-open",
+    category: "lease-fail-closed",
+    mechanism: "family-a",
+    focus: {
+      file: authFocus,
+      test: "um lock vazio recém-criado não é tomado antes do TTL (fail-closed)",
+    },
+    edits: [
+      {
+        file: lease,
+        before: "  return mtimeMs / 1000 + ttlSeconds > now;",
+        after: "  return false;",
+      },
+    ],
+  },
+  {
+    id: "T356-owner-skips-reread",
+    category: "owner-reread-under-lease",
+    mechanism: "family-a",
+    focus: {
+      file: authFocus,
+      test: "dono relê sob a lease: token já renovado por outro não gera segundo POST",
+    },
+    edits: [
+      {
+        file: credentials,
+        before: "if (underLease !== null && !isExpiringSoon(underLease, now)) return underLease;",
+        after:
+          "if (false && underLease !== null && !isExpiringSoon(underLease, now)) return underLease;",
+      },
+    ],
+  },
+  {
+    id: "T356-loser-deadline-boundary",
+    category: "loser-deadline-boundary",
+    mechanism: "family-a",
+    focus: {
+      file: authFocus,
+      test: "waitForFileLease respeita o deadline mesmo se a lease nunca aparecer livre (perdedor)",
+    },
+    edits: [
+      {
+        file: lease,
+        before: "    if (Date.now() >= deadline) return;",
+        after: "    if (Date.now() > deadline) return;",
+      },
+    ],
+  },
+  {
+    id: "T356-lease-throw-identity",
+    category: "lease-throw-error-identity",
+    mechanism: "family-a",
+    focus: {
+      file: authFocus,
+      test: "acquireFileLease lançando (não EEXIST) vira TokenPersistError, não RefreshFailedError",
+    },
+    edits: [
+      {
+        file: credentials,
+        before:
+          "      throw new TokenPersistError(\n        `could not create the refresh lease at ${lockPath}",
+        after:
+          "      throw new RefreshFailedError(\n        `could not create the refresh lease at ${lockPath}",
       },
     ],
   },
