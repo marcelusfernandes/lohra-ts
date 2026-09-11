@@ -81,7 +81,9 @@ describe("fault_kinds — engine (#399 AC1/AC2)", () => {
     });
     const result = await new WorkflowEngine({ runtime }).run(spec);
     expect(result.faultKinds).toEqual(["auth_failed"]);
-    expect(result.status).toBe("degraded");
+    // The single node's failure zeroes its own output — deriveStatus reads
+    // `nullCount >= nodesTotal` before `faults.length > 0` (accounting.ts).
+    expect(result.status).toBe("failed");
     expect(result.faults).toEqual(["a: leaf failed (auth_failed): 401"]);
   });
 
@@ -251,10 +253,25 @@ describe("fault_kinds — survives resume, cross-process (#399 AC3)", () => {
       string,
       unknown
     >;
-    expect(resumed.status).toBe("complete");
-    // stretch 1's carried-forward kind + stretch 2's own — order of
-    // occurrence, no dedupe (issue #399's explicit rollup contract).
-    expect(resumed.fault_kinds).toEqual(["auth_failed", "auth_failed"]);
+    // "cp1" resolves this stretch, but "a" fails again — degraded, not
+    // complete (both nodes reached a terminal state, deriveStatus reads
+    // `faults.length > 0` since `nullCount < nodesTotal` this time).
+    expect(resumed.status).toBe("degraded");
+    // The live view is current-stretch-only, same pre-existing shape as
+    // `faults` always had (service.ts never folds `prior_faults` into it
+    // either) — stretch 2's OWN leaf failure, not stretch 1's too.
+    expect(resumed.fault_kinds).toEqual(["auth_failed"]);
+
+    // The DURABLE total is what actually accumulates across stretches —
+    // order of occurrence, no dedupe (issue #399's explicit rollup
+    // contract): stretch 1's carried-forward kind + stretch 2's own.
+    const afterResume = new WorkflowService({
+      runtime: durableAuthFailRuntimeStub(),
+      store,
+      cacheFactory,
+    });
+    const finalView = (await afterResume.status(started.run_id)) as Record<string, unknown>;
+    expect(finalView.fault_kinds_total).toEqual(["auth_failed", "auth_failed"]);
     close();
   });
 });
