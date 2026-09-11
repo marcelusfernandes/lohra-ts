@@ -63,6 +63,7 @@ import {
 } from "../src/orchestration/core.js";
 import { OrchestrationChildRuntime } from "../src/workflow/orchestration-runtime.js";
 import { toolError as envelopeToolError, toolResult } from "../src/tools/envelope.js";
+import { workflowToolHandlers } from "../src/workflow/tool.js";
 
 const roots: string[] = [];
 
@@ -677,5 +678,98 @@ describe("adaptSandboxWrap — settle real (#378, orchestration-runtime.ts:63-79
       { subId: id, ok: true },
       { subId: id, ok: false },
     ]);
+  });
+});
+
+// Issue #373: `workflow_audit` in the SAME turn as `run_workflow` used to be
+// able to race the trail's async drain and read back `events: []` — remeasured
+// on main `9a966934` (already carrying #379's flush-before-release fix,
+// #368) and the FIRST scenario below was already green: `flushBeforeRelease`
+// runs before `finishStretch()` releases the lease, so by the time
+// `workflow_status(wait:true)` resolves the run's own events are already
+// durable. What was still silent was a drain that never finishes at all (a
+// permanently-busy sink) — the SECOND scenario, through the actual
+// `workflow_audit` TOOL handler (`workflowToolHandlers`, not `audit.query`
+// directly), which is what this issue's `pending` field closes.
+describe("workflow audit — same-turn read after run_workflow (#373)", () => {
+  it("run_workflow → workflow_status(wait) → workflow_audit in the same turn returns the run's own events, never events: [] (already true on main since #379)", async () => {
+    const { service, audit, close } = harness(() => ({
+      spawn: (): string => "leaf-1",
+      collect: (): ChildResult => ({
+        status: "complete",
+        output: { ok: true },
+        usage: USAGE,
+      }),
+      steer: () => undefined,
+      cancel: () => undefined,
+      installLeafSandbox: (): LeafSandboxHandle => ({ dispose: () => undefined }),
+    }));
+    try {
+      const handlers = workflowToolHandlers(service, audit);
+      const runOut = await handlers.run_workflow?.({ spec: spec() });
+      const runJson = JSON.parse((runOut ?? "").replace(/^ERROR: /, "")) as { run_id: string };
+      await handlers.workflow_status?.({ run_id: runJson.run_id, wait: true });
+      const auditOut = await handlers.workflow_audit?.({ run_id: runJson.run_id, limit: 50 });
+      const parsed = JSON.parse(auditOut ?? "{}") as {
+        events: readonly unknown[];
+        integrity?: { pending?: number };
+      };
+      expect(parsed.events.length).toBeGreaterThan(0);
+      expect(parsed.integrity?.pending ?? 0).toBe(0);
+    } finally {
+      close();
+    }
+  });
+
+  it("a drain stuck on a permanently-busy sink reports integrity.pending instead of a silent events: []", async () => {
+    let attempts = 0;
+    const stuckRepository = {
+      append: (): never => {
+        attempts += 1;
+        throw new Error("database is locked");
+      },
+      isBusyError: () => true,
+    } as unknown as AuditRepository;
+    const trail = new AuditTrail(stuckRepository, {
+      retryLimit: 5,
+      retryDelayMs: 0,
+      // never resolves: the stuck drain this test is about — a real busy
+      // sink that never clears, not merely a bounded number of retries.
+      sleep: () => new Promise<void>(() => undefined),
+    });
+    trail.record("stuck-run", { event_type: "node.started" });
+    trail.record("stuck-run", { event_type: "node.started" });
+    trail.record("stuck-run", { event_type: "node.started" });
+
+    const root = mkdtempSync(join(tmpdir(), "lohra-audit-tool-pending-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      const readableAudit = new AuditRepository(connection.database);
+      const service = new WorkflowService({
+        runtime: {
+          spawn: (): string => "unused",
+          collect: (): ChildResult => ({
+            status: "complete",
+            output: null,
+            usage: USAGE,
+          }),
+          steer: () => undefined,
+          cancel: () => undefined,
+        },
+        auditTrail: trail,
+      });
+      const handlers = workflowToolHandlers(service, readableAudit);
+      const out = await handlers.workflow_audit?.({ run_id: "stuck-run", limit: 50 });
+      const parsed = JSON.parse(out ?? "{}") as {
+        events: readonly unknown[];
+        integrity: { pending?: number };
+      };
+      expect(parsed.events).toEqual([]);
+      expect(parsed.integrity.pending).toBeGreaterThan(0);
+      expect(attempts).toBeGreaterThan(0);
+    } finally {
+      connection.close();
+    }
   });
 });
