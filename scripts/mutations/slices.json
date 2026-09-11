@@ -101,5 +101,12 @@
       "tests/catalog-pricing.test.ts",
       "tests/state-locks.test.ts"
     ]
+  },
+  {
+    "slice": "auth",
+    "script": "mutations:auth",
+    "catalog": ["scripts/mutations/auth-mutants.ts"],
+    "srcGlobs": ["src/auth/**"],
+    "focusFiles": ["tests/auth-core.test.ts"]
   }
 ]
