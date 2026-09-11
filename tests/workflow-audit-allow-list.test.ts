@@ -40,6 +40,20 @@ describe("T17 metadata-only audit — allow-list sem produtor", () => {
     expect(event.data.error_kind).toEqual({ state: "excluded_by_policy", characters: 8 });
   });
 
+  // Issue #426 (M10-S5): route_fault é o 5º valor de node.paused's reason
+  // (checkpoint/quota_exhausted/token_budget_exhausted/user_requested); sem
+  // este `it`, a entrada nova em SAFE_STRING_VALUES.reason não tinha oráculo
+  // — o revisor pediu na 3ª emenda.
+  it("preserves node.paused reason 'route_fault' — never excluded_by_policy", () => {
+    const event = publicAuditEvent(
+      "r",
+      1,
+      { event_type: "node.paused", payload: { reason: "route_fault" } },
+      1,
+    );
+    expect(event.data.reason).toBe("route_fault");
+  });
+
   it("accepts exactly the ErrorKind vocabulary for error_kind", () => {
     for (const kind of transports.ERROR_KINDS) {
       const event = publicAuditEvent(

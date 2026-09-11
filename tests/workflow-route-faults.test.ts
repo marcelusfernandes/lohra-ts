@@ -13,8 +13,16 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { openStateDatabase, WorkflowRepository, LockRepository } from "../src/state/index.js";
+import {
+  openStateDatabase,
+  WorkflowRepository,
+  LockRepository,
+  NoticesRepository,
+} from "../src/state/index.js";
 import type { PublicNotice } from "../src/state/index.js";
+import { createSessionToolBase } from "../src/commands/session-tools.js";
+import type { SessionToolBase } from "../src/commands/session-tools.js";
+import { productionOwnershipStore } from "../src/workflow/ownership-store.js";
 import { SqliteWorkflowCache } from "../src/workflow/sqlite-cache.js";
 import { durableFromRow, durableRollup, WorkflowService } from "../src/workflow/service.js";
 import {
@@ -252,6 +260,73 @@ describe("route faults — durable workflow_status exposes pause_reason and less
     expect(notices[0]?.scope).toBe(`run:${started.run_id}`);
     expect(notices[0]?.kind).toBe("auth_failed");
     close();
+  });
+
+  // 3ª emenda (2026-09-12, rodada 2): o AC de notice não pode depender de um
+  // store montado à mão — o mesmo caminho que chat.ts/dashboard.ts usam em
+  // produção (`productionOwnershipStore(db, { notices })`) precisa deixar o
+  // notice em `run:<runId>`, lido de volta por um `NoticesRepository.list`
+  // de verdade (não pelo array espião do `harness()` acima).
+  it("productionOwnershipStore(db, { notices }) — the real production wiring — leaves a durable notice at run:<runId>", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-route-faults-prod-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    const notices = new NoticesRepository(connection.database);
+    // Cast, not a bare object literal: `notices` isn't in
+    // `productionOwnershipStore`'s options type on the base commit this
+    // test(red) targets — kept a runtime/assertion red, never a tsc error
+    // (`.claude/rules/git-workflow.md` #7).
+    const store = productionOwnershipStore(connection.database, { notices } as Parameters<
+      typeof productionOwnershipStore
+    >[1]);
+    const runtime: ChildRuntime = {
+      spawn(): string {
+        return "leaf-1";
+      },
+      collect(): ChildResult {
+        return { status: "failed", output: "401", errorKind: "auth_failed", retryAfter: null };
+      },
+      steer(): void {},
+      cancel(): void {},
+      installLeafSandbox(): { dispose: () => void } {
+        return { dispose: (): void => undefined };
+      },
+    };
+    const service = new WorkflowService({ runtime, store });
+    const started = service.start({
+      meta: { name: "route-notice-production" },
+      nodes: [{ id: "a", type: "agent", prompt: "x", retries: 0 }],
+    });
+    if ("error" in started) throw new Error(started.error);
+    await service.status(started.run_id, true);
+    const page = notices.list({ scope: `run:${started.run_id}` });
+    expect(page.notices).toHaveLength(1);
+    expect(page.notices[0]?.kind).toBe("auth_failed");
+    connection.close();
+  });
+
+  it("createSessionToolBase exposes noticesRepository — the SAME repository workflow_notices reads (issue #426, 3ª emenda)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-route-faults-sessiontools-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    // Cast, not a plain property read: `noticesRepository` isn't on
+    // `SessionToolBase` on the base commit this test(red) targets — kept a
+    // runtime/assertion red (throws on `.append` of `undefined`), never a
+    // tsc error.
+    const base = createSessionToolBase(connection.database, {}) as SessionToolBase & {
+      readonly noticesRepository: NoticesRepository;
+    };
+    const written = base.noticesRepository.append("global", {
+      kind: "audit_sink_failure",
+      message: "wired-from-elsewhere-426",
+    });
+    expect(written).not.toBeNull();
+    const raw = await base.registry.dispatch("workflow_notices", {});
+    const parsed = JSON.parse(raw) as { readonly notices: ReadonlyArray<{ message: string }> };
+    expect(parsed.notices.some((notice) => notice.message === "wired-from-elsewhere-426")).toBe(
+      true,
+    );
+    connection.close();
   });
 
   it("falls back to the plain warn sink when no notices repository was wired (never silent)", async () => {
