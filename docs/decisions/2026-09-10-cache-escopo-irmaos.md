@@ -161,3 +161,62 @@ unchanged by the #332 scope fix — compat`: o hash de uma célula `agent`
 - As descrições dos testes de `parallel` já existentes neste arquivo (grupo
   e por-branch, ambos calculando o hash de raiz diretamente) não mudaram e
   continuam verdes — compat adicional para o caso `parallel` na raiz.
+
+## Apêndice (2026-09-11, #348): a lacuna de `sub[${reference}]:${nodeId}` fechada
+
+A lacuna registrada acima ("`sub[${reference}]:${nodeId}` colide entre
+irmãos que reusam o mesmo `ref`") está fechada. `reference` (o `ref` bruto
+do template) e o bloco que soma faults/contadores ao `RunResult` do pai
+continuam a âncora `nested-fold-removed` byte a byte — inclusive a
+mensagem de fault (`sub[${reference}]: ...`), que não muda. O que mudou é
+o que `nodeId` já carrega quando o fold roda: cada `WorkflowEngine`
+aninhado agora grava seu PRÓPRIO `nodeCosts` com a chave já qualificada
+por `nodeScope` — a mesma função `scopedCheckpointId` que `resolveCheckpoint`
+já aplica a checkpoint ids (#319), reusada aqui para custo. Três caminhos de
+custo escopados na origem: `account` (spawn fresco, via `debitLeaf`,
+extraído para `engine-utils.ts` para caber no teto de `engine.ts`),
+`cacheGet` (cache hit direto) e `replayOrCollectBranch`/
+`recordGroupReplayCost` (replay de `parallel` aninhado, via
+`ParallelBranchDeps.nodeScope`, novo).
+
+Forma escolhida: `sub[<ref>]:<nodeScope>.<innerId>` — por exemplo
+`sub[inner-agent]:sub1.a` para `sub1`/`sub2` (mesmo `ref: "inner-agent"`),
+em vez de `sub[<callerId>:<ref>]:<innerId>` (a outra opção que a issue
+oferecia). `<nodeScope>.<innerId>` é literalmente `scopedCheckpointId`
+aplicado ao id interno — coerente com o `node_id` escopado de checkpoint
+(`<sub_node_id>.<checkpoint_id>`, já documentado em
+`run_workflow`/`workflow_status`, `src/tools/builtin-definitions.ts`) em
+vez de inventar uma segunda convenção de escopo para custo.
+`nodeCosts` não é exposto por `workflow_status` nem por nenhuma outra tool
+(só por testes e pelo `RunResult` interno), então `builtin-definitions.ts`
+não precisou mudar.
+
+Compatibilidade: raiz inalterada (`nodeScope` vazio é no-op nos três
+caminhos, igual ao resto desta nota). Nó aninhado único (não irmão) muda:
+`sub[inner]:leaf` → `sub[inner]:sub.leaf` (pino atualizado em
+`tests/workflow-nodes-tool.test.ts`) — mudança de contrato da chave, não
+uma regressão; o nó aninhado colidia com QUALQUER outro nó aninhado que
+usasse o mesmo `ref` e o mesmo id interno antes desta correção, mesmo sem
+ser irmão direto (dois pontos distintos do DAG carregando o mesmo template
+por caminhos diferentes). Multi-nível (workflow dentro de workflow)
+acumula redundância aceita: a chave final repete o `nodeScope` completo
+dentro do `nodeId` de cada nível do fold (ex.:
+`sub[mid]:sub[inner]:sub1.sub2.leaf`) — verboso, mas nunca colide, e
+corrigir a redundância exigiria tocar a âncora, fora do alcance desta
+issue.
+
+### Evidência (#348)
+
+- `tests/workflow-parallel-cells.test.ts`, describe `nested siblings
+reusing an identical template — cell scope (#332)`: a assinatura `agent`
+  ganha `Object.keys(result.nodeCosts)` de tamanho 2 (`sub1.a`/`sub2.a`,
+  não uma chave colidida) e um teste novo, "a replay's group AND branch
+  cost land on the sibling's own scoped key", cobre o caminho de replay do
+  `parallel` aninhado (`cacheGet` + `recordGroupReplayCost`), não só o
+  spawn fresco.
+- `tests/workflow-nodes-tool.test.ts`, "folds nested faults, node counts
+  and all five cost meters": pino atualizado para `sub[inner]:sub.leaf`;
+  `result.faults[0]` continua contendo `sub[inner]` — prova de que
+  `reference` (e portanto a mensagem de fault) não mudou.
+- `npm run mutations:t15` — 44/44 mortos; a âncora `nested-fold-removed`
+  segue casando byte a byte.
