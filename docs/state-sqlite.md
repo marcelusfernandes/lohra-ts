@@ -79,6 +79,12 @@ de `workflow_audit_state`.
   mesma decisão da #380 para `AuditRepository`). `scope = "global"` grava
   sem `ownership` (avisos de processo, sem run associado) — `fence` fica
   `null` na linha.
+- **Fallback sem dono** (issue #410/M8-8): `createNoticesSink.warnState`
+  (`src/workflow/notices-sink.ts`) nunca descarta um `STALE_FENCE_WRITE` só
+  porque este processo não tem `ownership` válida do run — sem lease, ou
+  lease que outro processo já tomou — grava a mesma notice em `scope:
+"global"` em vez de perder o aviso; `dropped` fica reservado para uma
+  escrita em `global` que falhe por si.
 - **`message`** truncada em 2 KiB (`Buffer.byteLength` em UTF-8, nunca corta
   no meio de um caractere multi-byte) com o marcador `…[truncated]`.
 - **`list({scope?, afterSeq?, includeAcked?, limit?})`** → `{notices,
