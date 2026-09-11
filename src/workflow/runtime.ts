@@ -1,4 +1,5 @@
 import type { Usage } from "../pricing/types.js";
+import type { ErrorKind } from "../transports/error-kinds.js";
 
 export interface CausalContext {
   readonly runId: string;
@@ -34,7 +35,7 @@ export interface ChildResult {
   readonly model?: string | null;
   readonly forcedFallback?: boolean;
   readonly retryAfter?: number | null;
-  readonly errorKind?: string | null;
+  readonly errorKind?: ErrorKind | null;
   readonly toolCalls?: readonly Readonly<Record<string, unknown>>[];
   /** True when `usage` above is a stand-in for a measurement that never
    * happened (child died before reporting, provider/resolution error) —
