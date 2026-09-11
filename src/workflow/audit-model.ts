@@ -77,8 +77,18 @@ const NUMBER_FIELDS = new Set([
   "token_budget",
   "tokens_in",
   "tokens_out",
+  "item_index",
+  "stage_index",
+  "max_iterations",
+  "timeout_seconds",
 ]);
-const BOOLEAN_FIELDS = new Set(["tainted", "stale", "terminal"]);
+const BOOLEAN_FIELDS = new Set([
+  "tainted",
+  "stale",
+  "terminal",
+  "usage_uncertain",
+  "forced_fallback",
+]);
 const PATH_FIELDS = new Set(["node_path", "branch_path"]);
 const CONTAINER_FIELDS = new Set(["payload", "metadata", "budget", "usage", "progress"]);
 const SAFE_MARKER_STATES = new Set([
@@ -127,6 +137,7 @@ const SAFE_PROVENANCE = new Set([
 ]);
 const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
   reason: new Set([
+    "cancelled",
     "corrupt_payload",
     "drop_bucket_overflow",
     "lookup_failed",
@@ -135,9 +146,30 @@ const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object
     "retention_limit",
     "sink_failure",
     "store_failed",
+    "timeout",
     "tombstone_compaction",
     "unavailable",
   ]),
+  // Issue #366: the eleven roles a leaf's `causalContext.role` ever carries
+  // (`engine.ts:456,555,649,702,723,767,812,911,924,966`;
+  // `engine-utils.ts:393` for `parallel.branch`) — closed, so a role outside
+  // this list is a bug, not a private string, and stays safe by construction.
+  role: new Set([
+    "agent",
+    "completeness",
+    "gate.body",
+    "gate.reviewer",
+    "judge.attempt",
+    "judge.review",
+    "judge.synthesis",
+    "loop.round",
+    "parallel.branch",
+    "pipeline.stage",
+    "verify.skeptic",
+  ]),
+  // `classifyProviderError` (`src/transports/errors.ts:43-48`) only ever
+  // returns `"quota_exhausted"` today; a taxonomy beyond that is M8.
+  error_kind: new Set(["quota_exhausted"]),
   state: new Set([...SAFE_MARKER_STATES, "complete", "fault", "null", "pending", "running"]),
   status: new Set([
     "cancelled",
