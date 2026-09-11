@@ -70,6 +70,14 @@ async function performRefresh(
  * Exportada (issue #356) só para o teste chamá-la direto: `own` é um
  * parâmetro explícito, então um teste pode fabricar um `own` propositalmente
  * atrasado sem precisar de uma corrida de verdade entre dois `resolveCredentials`.
+ *
+ * Quem ADQUIRE também relê antes de chamar `performRefresh` (issue #356):
+ * `own` é o snapshot que o CHAMADOR leu antes até de tentar a lease — se
+ * outro processo já tiver renovado e liberado a lease bem a tempo, gravar
+ * `own` de novo seria um POST redundante com um `refreshToken`
+ * potencialmente já rotacionado. A releitura mora DENTRO do `try`, então o
+ * `finally` sempre libera a lease, tenha ela sido usada para um refresh de
+ * verdade ou não.
  */
 export async function refreshUnderLease(
   home: string,
@@ -97,6 +105,8 @@ export async function refreshUnderLease(
     }
     if (acquired) {
       try {
+        const underLease = readTokens(home);
+        if (underLease !== null && !isExpiringSoon(underLease, now)) return underLease;
         return await performRefresh(home, own, oauthPost);
       } finally {
         try {
