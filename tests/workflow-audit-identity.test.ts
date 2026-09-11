@@ -225,6 +225,107 @@ describe("workflow audit — causal identity (#365)", () => {
     }
   });
 
+  // Issue #368 (emenda 2026-09-11): pre-existing bug found while implementing
+  // #368, NOT a regression of it — confirmed on unmodified main: a durable
+  // run's terminal producer call (`announceDone` on main; `announceStretchEnd`
+  // here) queues its event and returns; `finishStretch()` (the very next
+  // statement) deletes `workflow_run_locks` SYNCHRONOUSLY, before the
+  // `AuditTrail` queue's own microtask ever gets to drain it — so
+  // `AuditRepository.append`'s fence JOIN finds nothing and refuses the write,
+  // silently (no gap, no warning, pre-fix). `workflow.done` NEVER reached the
+  // ledger for ANY durable run. Fixed by draining the trail UNDER the live
+  // fence, inside `finishStretch`, before it releases the lease
+  // (`producers.flushBeforeRelease()`, audit-producers.ts).
+  it("a durable run's terminal write (workflow.done, segment.completed) actually reaches the ledger", async () => {
+    const { service, repository, audit, close } = harness();
+    try {
+      const started = service.start(spec());
+      if ("error" in started) throw new Error(started.error);
+      await service.status(started.run_id, true);
+      const segmentId = segmentIdOf(repository, started.run_id);
+      const page = audit.query({ runId: started.run_id, limit: 50 });
+      const types = page.events.map((event) => event.event_type);
+      expect(types).toContain("workflow.done");
+      expect(types).toContain("segment.completed");
+      const done = page.events.find((event) => event.event_type === "workflow.done");
+      expect(done?.identity.segment_id).toBe(segmentId);
+      const segmentDone = page.events.find((event) => event.event_type === "segment.completed");
+      expect(segmentDone?.identity.segment_id).toBe(segmentId);
+      expect(page.integrity.refused_writes).toBe(0);
+    } finally {
+      close();
+    }
+  });
+
+  it("a dead-owner resume closes the PRIOR segment as interrupted/process_crash and records an audit.gap, under the NEW fence — a paused (checkpoint) resume records neither", async () => {
+    const { service, repository, locks, audit, close } = harness();
+    try {
+      const priorFence = locks.acquireRunLease("orphan-run", "dead-process", 1000, 900);
+      if (priorFence === null) throw new Error("expected lease");
+      const priorSegmentId = "prior-segment-from-a-dead-process";
+      repository.putRunState("orphan-run", {
+        name: "audit-identity",
+        owner: "dead-process",
+        status: "running",
+        pauseReason: null,
+        pausePayloadJson: null,
+        specJson: JSON.stringify(spec()),
+        argsJson: "{}",
+        tokenBudget: null,
+        tainted: false,
+        progressJson: null,
+        auditSegmentId: priorSegmentId,
+        updatedAt: 1000,
+        fence: priorFence,
+        holder: "dead-process",
+        now: 1000,
+      });
+      locks.releaseRunLease("orphan-run", "dead-process"); // simulates a lease that expired
+      const resumed = service.start(null, {}, { resumeRunId: "orphan-run" });
+      if ("error" in resumed) throw new Error(resumed.error);
+      await service.status("orphan-run", true);
+      const newSegmentId = segmentIdOf(repository, "orphan-run");
+      expect(newSegmentId).not.toBe(priorSegmentId);
+      const page = audit.query({ runId: "orphan-run", limit: 50 });
+      const crashClose = page.events.find(
+        (event) =>
+          event.event_type === "segment.completed" && event.identity.segment_id === priorSegmentId,
+      );
+      expect(crashClose).toBeDefined();
+      expect(crashClose?.data).toMatchObject({ status: "interrupted", reason: "process_crash" });
+      const gap = page.events.find(
+        (event) => event.event_type === "audit.gap" && event.data.reason === "process_crash",
+      );
+      expect(gap).toBeDefined();
+      expect(gap?.data).toMatchObject({ reason: "process_crash", count_state: "unavailable" });
+      // both land BEFORE the new segment's own segment.started.
+      const newStart = page.events.find(
+        (event) =>
+          event.event_type === "segment.started" && event.identity.segment_id === newSegmentId,
+      );
+      expect(newStart).toBeDefined();
+      expect((crashClose?.seq as number) < (newStart?.seq as number)).toBe(true);
+      expect((gap?.seq as number) < (newStart?.seq as number)).toBe(true);
+
+      // A clean (paused-at-checkpoint) resume is NOT a dead-owner resume —
+      // never records process_crash.
+      const paused = service.start(checkpointSpec());
+      if ("error" in paused) throw new Error(paused.error);
+      await service.status(paused.run_id, true);
+      const cleanResume = service.start(
+        null,
+        {},
+        { resumeRunId: paused.run_id, checkpointAnswers: { gate: "yes" } },
+      );
+      if ("error" in cleanResume) throw new Error(cleanResume.error);
+      await service.status(paused.run_id, true);
+      const cleanPage = audit.query({ runId: paused.run_id, limit: 50 });
+      expect(cleanPage.events.some((event) => event.data.reason === "process_crash")).toBe(false);
+    } finally {
+      close();
+    }
+  });
+
   it("the non-durable path (no store) also publishes segment_id", async () => {
     const root = mkdtempSync(join(tmpdir(), "lohra-audit-identity-ephemeral-"));
     roots.push(root);

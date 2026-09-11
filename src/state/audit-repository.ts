@@ -153,6 +153,14 @@ export class AuditRepository {
   private readonly maxTombstones: number;
   private readonly retention: number;
   private readonly warning: (message: string) => void;
+  // Issue #368 (emenda 2026-09-11): a refusal by stale fence is legitimate
+  // (a superseded stretch presenting an old token) and was already silent
+  // by design (`AuditTrail`'s M11 test pins that it must not poison the
+  // shared writer) — but silent should not mean UNOBSERVABLE. In-process
+  // only, never persisted: a per-run count of refusals since this instance
+  // started, surfaced by `query()`'s `integrity` envelope, alongside the
+  // named `warning` every refusal already gets below.
+  private readonly refusals = new Map<string, number>();
 
   public constructor(
     private readonly database: Database.Database,
@@ -181,7 +189,14 @@ export class AuditRepository {
            WHERE f.run_id = ? AND f.fence = ? AND l.holder = ? AND l.expires_at > ?`,
             )
             .get(runId, ownership.fence, ownership.holder, ownership.now);
-          if (owned === undefined) return null;
+          if (owned === undefined) {
+            this.refusals.set(auditRunId, (this.refusals.get(auditRunId) ?? 0) + 1);
+            this.warning(
+              `workflow: audit event refused for run ${auditRunId} — fence lost ` +
+                `(segment ${input.segment_id ?? "none"}, ${input.event_type})`,
+            );
+            return null;
+          }
         }
         this.compact(now);
         const prior = this.database
@@ -340,6 +355,7 @@ export class AuditRepository {
           scope: "retained_snapshot",
           event_markers: Object.freeze({ gaps: 0, truncated: 0, unavailable: 1 }),
           field_markers: fieldMarkerCounts(new Map()),
+          refused_writes: this.refusals.get(auditRunId) ?? 0,
           pagination_truncated: false,
           notices: Object.freeze([
             Object.freeze({
@@ -421,6 +437,7 @@ export class AuditRepository {
           unavailable: eventCounts.get("audit.unavailable") ?? 0,
         }),
         field_markers: fieldMarkerCounts(fieldCounts),
+        refused_writes: this.refusals.get(auditRunId) ?? 0,
         pagination_truncated: eligible.length > limit,
         notices: Object.freeze(returnedNotices),
         notices_total: notices.length,

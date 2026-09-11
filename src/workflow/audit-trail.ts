@@ -147,6 +147,17 @@ export class AuditTrail {
       if (next === undefined) return;
       this.queue.shift();
       const saved = await this.append(next.runId, next.input, next.ownership);
+      // Issue #368 (emenda 2026-09-11): a "refused" write is a graceful,
+      // BY-DESIGN outcome (a superseded stretch's stale token, or — before
+      // the flush-before-release fix in service.ts — a terminal event that
+      // lost the race) — never a sink failure, never a gap (that would
+      // poison the writer M11 pins against). Named here too, not only in
+      // `AuditRepository.append`, so a caller wiring a test double straight
+      // into this class still gets an observable trail, not a silent drop.
+      if (saved === "refused")
+        this.warning(
+          `audit event refused for run ${next.runId} — fence lost (${next.input.event_type})`,
+        );
       if (saved === "failed") {
         const gap: AuditInput = Object.freeze({
           event_type: "audit.gap",

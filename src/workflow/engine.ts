@@ -360,16 +360,10 @@ export class WorkflowEngine {
   }
 
   private cacheGet(hash: string): unknown {
-    const found = this.cache.get(this.runId, hash);
+    const owner = scopedCheckpointId(this.nodeScope, this.currentNode);
+    const found = this.cache.get(this.runId, hash, owner);
     if (!found.hit) return CACHE_MISS;
-    if (found.cost !== null)
-      addUsageToResult(
-        this.result,
-        scopedCheckpointId(this.nodeScope, this.currentNode),
-        found.cost,
-        null,
-        null,
-      );
+    if (found.cost !== null) addUsageToResult(this.result, owner, found.cost, null, null);
     return found.output;
   }
 

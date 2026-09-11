@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
-
 import { runCli, type CliIo } from "../src/cli.js";
 import { createChatSessionRegistry, runChat } from "../src/commands/chat.js";
 import { registerProvider } from "../src/providers/registry.js";
@@ -22,19 +21,16 @@ import { WorkflowLiveEvents } from "../src/workflow/live-events.js";
 import { WorkflowService } from "../src/workflow/service.js";
 import type { ChildRuntime } from "../src/workflow/runtime.js";
 import { WorkflowTool } from "../src/workflow/tool.js";
-
 const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
-
 function database(options: ConstructorParameters<typeof AuditRepository>[1] = {}) {
   const root = mkdtempSync(join(tmpdir(), "lohra-t17-"));
   roots.push(root);
   const connection = openStateDatabase(join(root, "state.db"));
   return { root, connection, audit: new AuditRepository(connection.database, options) };
 }
-
 function closeServer(server: Server): Promise<void> {
   return new Promise((resolve, reject) => {
     server.close((error) => {
@@ -43,7 +39,6 @@ function closeServer(server: Server): Promise<void> {
     });
   });
 }
-
 describe("T17 metadata-only audit", () => {
   it("installs workflow_audit in the same session registry used by public chat", async () => {
     const { connection, audit } = database();
@@ -414,7 +409,6 @@ describe("T17 metadata-only audit", () => {
     }
   });
 });
-
 describe("T17 SQLite audit read model", () => {
   it("bounds every persisted identity column before the SQLite boundary", () => {
     const { connection, audit } = database();
@@ -597,7 +591,6 @@ describe("T17 SQLite audit read model", () => {
     }
   });
 });
-
 describe("T17 live events and sink failures", () => {
   it("turns sanitizer exceptions into a corrupt-payload gap before enqueue", async () => {
     const { connection, audit } = database();
@@ -1120,10 +1113,18 @@ describe("T17 live events and sink failures", () => {
       expect(live[0]).toBe("plan");
       expect(live.at(-1)).toBe("done");
       const page = audit.query({ runId: "run-live", limit: 100 });
-      // Only the workflow.* order is pinned here (leaf.* has its own
+      // Only workflow.*/segment.* order is pinned here (leaf.* has its own
       // producer-level coverage in workflow-audit-leaf.test.ts, #366).
-      const types = page.events.map((e) => e.event_type).filter((t) => t.startsWith("workflow."));
-      expect(types).toEqual(["workflow.plan", "workflow.node", "workflow.node", "workflow.done"]);
+      const prefixed = /^(workflow|segment)\./;
+      const types = page.events.map((e) => e.event_type).filter((t) => prefixed.test(t));
+      expect(types).toEqual([
+        "segment.started",
+        "workflow.plan",
+        "workflow.node",
+        "workflow.node",
+        "segment.completed",
+        "workflow.done",
+      ]);
       expect(JSON.stringify(page)).not.toContain("PRIVATE-PROMPT");
       expect(JSON.stringify(page)).not.toContain("PRIVATE-OUTPUT");
     } finally {
@@ -1158,7 +1159,6 @@ describe("T17 live events and sink failures", () => {
     }
   });
 });
-
 describe("T17 workflow CLI", () => {
   function io(root: string) {
     const stdout: string[] = [];
