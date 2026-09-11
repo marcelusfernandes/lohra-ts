@@ -21,7 +21,6 @@ import {
 } from "../src/state/index.js";
 import type { PublicNotice } from "../src/state/index.js";
 import { createSessionToolBase } from "../src/commands/session-tools.js";
-import type { SessionToolBase } from "../src/commands/session-tools.js";
 import { productionOwnershipStore } from "../src/workflow/ownership-store.js";
 import { SqliteWorkflowCache } from "../src/workflow/sqlite-cache.js";
 import { durableFromRow, durableRollup, WorkflowService } from "../src/workflow/service.js";
@@ -272,13 +271,7 @@ describe("route faults — durable workflow_status exposes pause_reason and less
     roots.push(root);
     const connection = openStateDatabase(join(root, "state.db"));
     const notices = new NoticesRepository(connection.database);
-    // Cast, not a bare object literal: `notices` isn't in
-    // `productionOwnershipStore`'s options type on the base commit this
-    // test(red) targets — kept a runtime/assertion red, never a tsc error
-    // (`.claude/rules/git-workflow.md` #7).
-    const store = productionOwnershipStore(connection.database, { notices } as Parameters<
-      typeof productionOwnershipStore
-    >[1]);
+    const store = productionOwnershipStore(connection.database, { notices });
     const runtime: ChildRuntime = {
       spawn(): string {
         return "leaf-1";
@@ -309,13 +302,7 @@ describe("route faults — durable workflow_status exposes pause_reason and less
     const root = mkdtempSync(join(tmpdir(), "lohra-route-faults-sessiontools-"));
     roots.push(root);
     const connection = openStateDatabase(join(root, "state.db"));
-    // Cast, not a plain property read: `noticesRepository` isn't on
-    // `SessionToolBase` on the base commit this test(red) targets — kept a
-    // runtime/assertion red (throws on `.append` of `undefined`), never a
-    // tsc error.
-    const base = createSessionToolBase(connection.database, {}) as SessionToolBase & {
-      readonly noticesRepository: NoticesRepository;
-    };
+    const base = createSessionToolBase(connection.database, {});
     const written = base.noticesRepository.append("global", {
       kind: "audit_sink_failure",
       message: "wired-from-elsewhere-426",

@@ -83,7 +83,45 @@ export function routeFaultNotice(lesson: RouteLesson): Readonly<{ kind: string; 
   });
 }
 
-/** Issue #426: writes a route fault's lesson as a durable notice at `run:<runId>` — `kind` is the vocabulary value itself, never reclassified. Falls back to `warn` (never silent, invariant 2) when no repository is wired yet or the write itself is refused. */
+/** Narrows `result.checkpoint` (typed `unknown` on `RunResult`, shared by
+ * every pause reason) to a `RouteLesson` — the shape `routeLesson()` above
+ * always freezes it into, never trusted by cast alone (issue #426, 3ª
+ * emenda: the revisor flagged `as unknown as RouteLesson` as a checkpoint
+ * from some OTHER pause reason would throw inside `service.ts`'s terminal
+ * `.then`, never reaching this function at all in practice — this guard
+ * is the belt for that suspenders). */
+export function isRouteLesson(value: unknown): value is RouteLesson {
+  if (value === null || typeof value !== "object") return false;
+  const candidate = value as Readonly<Record<string, unknown>>;
+  return (
+    typeof candidate.error_kind === "string" &&
+    isRouteFault(candidate.error_kind as ErrorKind) &&
+    typeof candidate.node_id === "string" &&
+    (candidate.provider === null || typeof candidate.provider === "string") &&
+    (candidate.model === null || typeof candidate.model === "string") &&
+    candidate.suggested_route === null
+  );
+}
+
+/** Never throws — `.append` itself refusing (returns `null`) and `.append`
+ * THROWING (an unexpected repository failure) collapse to the same "not
+ * recorded" outcome for the caller below, which runs inside `service.ts`'s
+ * terminal `.then` (an uncaught throw there would be a silent-crash
+ * surface, not a fault). */
+function appendSafe(
+  repository: NoticesSinkRepository | undefined,
+  runId: string,
+  notice: Readonly<{ kind: string; message: string }>,
+  ownership: Ownership | null,
+): boolean {
+  try {
+    return (repository?.append(`run:${runId}`, notice, ownership ?? undefined) ?? null) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** Issue #426: writes a route fault's lesson as a durable notice at `run:<runId>` — `kind` is the vocabulary value itself, never reclassified. Falls back to `warn` (never silent, invariant 2) when no repository is wired yet, the checkpoint isn't actually a lesson, or `appendSafe` above reports the write didn't land. */
 export function recordRouteFaultNotice(
   repository: NoticesSinkRepository | undefined,
   runId: string,
@@ -91,9 +129,12 @@ export function recordRouteFaultNotice(
   ownership: Ownership | null,
   warn: (message: string) => void,
 ): void {
-  const notice = routeFaultNotice(checkpoint as unknown as RouteLesson);
-  const wrote = repository?.append(`run:${runId}`, notice, ownership ?? undefined) ?? null;
-  if (wrote === null)
+  if (!isRouteLesson(checkpoint)) {
+    warn(`workflow: route fault notice for run ${runId} had no lesson to record`);
+    return;
+  }
+  const notice = routeFaultNotice(checkpoint);
+  if (!appendSafe(repository, runId, notice, ownership))
     warn(`workflow: route fault notice for run ${runId} could not be recorded durably`);
 }
 

@@ -40,6 +40,11 @@ export interface SessionToolBase {
    * `WorkflowLiveTail`, the ownership store's `StateWarning` sink) reuses
    * THIS instance, never a second one. */
   readonly noticesSink: NoticesSink;
+  /** Issue #426 (3ª emenda): the SAME repository `noticesSink` and
+   * `workflow_notices` already read/write — exposed so the caller can also
+   * hand it to `productionOwnershipStore(db, { notices })`, the one seam a
+   * route fault's durable notice needs and this process had never wired. */
+  readonly noticesRepository: NoticesRepository;
 }
 
 export interface SessionToolComposition {
@@ -94,7 +99,7 @@ export function createSessionToolBase(
     workflow_notices_ack: workflowNoticesAckHandler(noticesRepository),
     workflow_leaf_read: workflowLeafReadHandler(database, auditRepository),
   });
-  return Object.freeze({ registry, auditRepository, noticesSink });
+  return Object.freeze({ registry, auditRepository, noticesSink, noticesRepository });
 }
 
 export function composeSessionTools(options: {
