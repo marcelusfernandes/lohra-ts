@@ -42,6 +42,13 @@ target?)` registra o MESMO handler para `SIGTERM` e `SIGINT` via
   explícito existe para que quem lê o ledger nunca precise inferir "não foi
   sinal" a partir de um campo ausente.
 - `"signal"` entra na allow-list `reason` de `audit-model.ts` (`SAFE_STRING_VALUES.reason`).
+- Issue #434 (follow-up do veredito da PR #433): `announceSegmentCompleted`
+  só aplica `cause: "signal"` quando `status` já é `"cancelled"`/`"interrupted"`
+  — um run cuja própria `engine.run()` resolveu durante a janela do
+  shutdown (a corrida entre `runShutdown` e o `.then()` de `service.ts:609`)
+  nunca grava `reason: "signal"` — e `registerShutdownTrigger` desarma o
+  OUTRO sinal antes de invocar o handler, então SIGTERM seguido de SIGINT
+  dispara o fechamento uma única vez por registro.
 
 ## Doutrina para autores de spec
 
