@@ -164,22 +164,38 @@ adicionar uma fatia" cita a mesma restrição.
 | --------------------- | ----------------------- | -------: | --------------------------------------------------------------------------------------------------------------------- |
 | `workflow-executor`   | `mutations:t15`         |       44 | `workflow-executor-mutants.ts`                                                                                        |
 | `workflow-durability` | `mutations:t16`         |       60 | `workflow-durability-guard.ts` (12 guard + 2 combined) + `workflow-durability-named.ts` (41) + `orchestration.ts` (5) |
-| `workflow-audit-live` | `mutations:t17`         |       32 | `workflow-audit-live-mutants.ts`                                                                                      |
+| `workflow-audit-live` | `mutations:t17`         |       48 | `workflow-audit-live-mutants.ts` (32) + `workflow-audit-producers-mutants.ts` (16)                                    |
 | `media`               | `mutations:t21`         |       20 | `media-catalog-persistence.ts` (13) + `media-catalog-other.ts` (7)                                                    |
 | `web-tools`           | `mutations:t20`         |        9 | `web-tools-mutants.ts`                                                                                                |
 | `self-update`         | `mutations:self-update` |        8 | `self-update-mutants.ts`                                                                                              |
 | `context-window`      | `mutations:t23`         |       15 | `context-window.ts`                                                                                                   |
 | `auth`                | `mutations:auth`        |        8 | `auth-mutants.ts`                                                                                                     |
 
-Total: 196. Os 12 mutantes de `workflow-durability-guard.ts` são
+Total: 212. Os 12 mutantes de `workflow-durability-guard.ts` são
 combinatórios: três conjuntos do guard de escrita possuída (`fence`,
 `holder`, `lease-validity`) × quatro categorias (`state`, `cache`,
 `node-cost`, `spend`) — um mutante por combinação, cada um escorado só no
 teste focal da sua categoria, mais os 2 mutantes do INSERT combinado
 cache+custo (`combined-cell-guard-removed`,
 `combined-cost-escapes-refusal`). `tests/mutations-slices.test.ts` importa os
-onze catálogos de dado puro estaticamente e prova essa soma (196) a cada
+doze catálogos de dado puro estaticamente e prova essa soma (212) a cada
 corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
+
+`workflow-audit-producers-mutants.ts` (issue #370) estende `workflow-audit-live`
+aos produtores novos do M7 que os 32 mutantes originais não cobriam:
+`segment_id` omitido e a regra fail-closed desligada
+(`audit-producers.ts`, identidade causal #365), a ordem `segment.started`/
+`workflow.plan` e o `process_crash` de uma retomada de dono morto
+(`audit-producers.ts`, #368), o terminal único por `sub_id`, o timeout como
+`cancelled` e o `node_path` achatado numa folha aninhada
+(`audit-runtime.ts`, folhas #366), a identidade e a classificação de uma
+recusa síncrona do sandbox (`audit-runtime.ts`, ferramentas #367), um hit de
+cache relatado como miss e uma escrita recusada relatada como armazenada
+(`audit-cache.ts`, #368), e o teto de bytes, a ordem de descarte, a
+contagem de `dropped` e o teto de runs conhecidos evictando um run vivo
+(`live-tail.ts`, #369). Os 16 mutantes têm foco nos seis arquivos de teste
+novos do M7 (`workflow-audit-identity`, `-leaf`, `-tool`, `-cache`,
+`-segment`, `workflow-live-tail`).
 
 `auth-mutants.ts` (issue #354) cobre a lease de arquivo sobre a renovação do
 token OAuth (`src/auth/lease.ts`: TTL zerado, lease órfã não tomada de
@@ -283,13 +299,13 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
    `true`.
 5. `npm test` roda `tests/mutations-slices.test.ts`, que reprova de duas
    formas se a contagem não for atualizada junto com o mutante novo: a soma
-   total (196 + o novo) contra os onze catálogos importados, e a linha do
+   total (212 + o novo) contra os doze catálogos importados, e a linha do
    catálogo tocado em `CONTAGEM_POR_CATALOGO`
    (`tests/mutations-slices.test.ts:491-517`), uma tabela pinada por número
    literal — não derivada de `CATALOGOS.get(path).length` — para que uma
    troca compensatória entre dois catálogos (um ganha o que o outro perde,
    soma preservada) não passe despercebida. As duas contagens (o literal
-   `196` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
+   `212` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
    atualização junto com o mutante novo.
 
 ## Como adicionar uma fatia
@@ -330,7 +346,7 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
 `tests/mutations-slices.test.ts` prova, a cada corrida: o schema básico de
 cada entrada de `slices.json`; que todo catálogo descoberto por conteúdo em
 `scripts/mutations/` (item 1 acima) aparece em algum `catalog`; que os
-`catalog` do JSON batem, como conjunto, com os onze catálogos importados em
+`catalog` do JSON batem, como conjunto, com os doze catálogos importados em
 `CATALOGOS`; que todo `script` existe em `package.json#scripts`; que todo
 `focusFiles`/`catalog` existe em disco; que `focusFiles` bate com a união de
 `focus.file` dos catálogos da fatia (exceto `media`/`workflow-executor`); que
@@ -338,13 +354,13 @@ cada entrada de `slices.json`; que todo catálogo descoberto por conteúdo em
 contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
 (`tests/mutations-slices.test.ts:491-517` — hoje `workflow-durability-guard`
 14, `workflow-durability-named` 41, `orchestration` 5,
-`workflow-audit-live-mutants` 32, `web-tools-mutants` 9,
-`media-catalog-other` 7, `media-catalog-persistence` 13,
-`self-update-mutants` 8, `workflow-executor-mutants` 44, `context-window` 15,
-`auth-mutants` 8, soma 196) e a soma de 196 contra os onze catálogos
-importados; e que todo diretório de primeiro nível de `src/` está coberto
-por algum `srcGlobs` ou está em `SEM_FATIA` com um motivo não vazio — nunca
-os dois, nunca nenhum dos dois.
+`workflow-audit-live-mutants` 32, `workflow-audit-producers-mutants` 16,
+`web-tools-mutants` 9, `media-catalog-other` 7, `media-catalog-persistence`
+13, `self-update-mutants` 8, `workflow-executor-mutants` 44,
+`context-window` 15, `auth-mutants` 8, soma 212) e a soma de 212 contra os
+doze catálogos importados; e que todo diretório de primeiro nível de `src/`
+está coberto por algum `srcGlobs` ou está em `SEM_FATIA` com um motivo não
+vazio — nunca os dois, nunca nenhum dos dois.
 
 ## Diretórios de `src/` sem fatia hoje
 
