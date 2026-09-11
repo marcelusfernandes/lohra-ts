@@ -23,10 +23,12 @@ primeiro) não tinha handler nenhum neste código.
 target?)` registra o MESMO handler para `SIGTERM` e `SIGINT` via
   `process.once` (nunca `process.on` — uma segunda entrega do mesmo sinal
   cai no comportamento padrão do Node, não dispara duas vezes) e devolve
-  `unregister`. `serve.ts` e `dashboard.ts` passam a usá-lo; `dashboard.ts`
-  mantém `options.registerShutdownTrigger` injetável para teste, agora
-  cobrindo os dois sinais também no caminho real (o default deixou de ser
-  só `process.once("SIGINT", handler)`).
+  `unregister`. Desde a issue #434, esse handler também desarma o OUTRO
+  sinal antes de rodar, então uma segunda entrega — do mesmo sinal OU do
+  outro — nunca dispara `handler` duas vezes. `serve.ts` e `dashboard.ts`
+  passam a usá-lo; `dashboard.ts` mantém `options.registerShutdownTrigger`
+  injetável para teste, agora cobrindo os dois sinais também no caminho
+  real (o default deixou de ser só `process.once("SIGINT", handler)`).
 - `WorkflowService.shutdown(reason: "signal" | "operator" = "operator")` —
   a causa atravessa `runShutdown` → `cancelAndSettle` (que marca
   `RunRecord.interruptCause = "signal"` em cada run vivo antes de
@@ -70,3 +72,8 @@ reason: "cancelled"}`, nunca `reason: "signal"`; `registerShutdownTrigger`
 - `npm run mutations:t16` (60/60) e `npm run mutations:t17` (57/57)
   continuam verdes — nenhum mutante existente foi afetado pela extração de
   `cause`/`interruptCause`.
+- Issue #434: `announceStretchEnd("complete", null, null, "signal")`,
+  exercitado direto pelos produtores (`createWorkflowAuditProducers`), grava
+  `segment.completed {status: "complete"}` sem `reason`; um alvo `SignalTarget`
+  fake recebendo SIGTERM e depois SIGINT, sem `unregister()` explícito entre
+  os dois, dispara o handler injetado exatamente uma vez.

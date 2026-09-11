@@ -167,7 +167,7 @@ describe("WorkflowService.shutdown('signal') vs cancel() (#428)", () => {
   // with `status: "complete"`, never `"cancelled"`/`"interrupted"` — the
   // guard below is exercised directly through the producers (more honest
   // than reproducing the exact microtask ordering through `WorkflowService`,
-  // per the issue): `announceStretchEnd` still receives `cause: "signal""`
+  // per the issue): `announceStretchEnd` still receives `cause: "signal"`
   // for such a run, and must ignore it.
   it("announceStretchEnd(status: complete, cause: signal) never grants reason: signal — only cancelled/interrupted do", async () => {
     const root = mkdtempSync(join(tmpdir(), "lohra-workflow-shutdown-signal-race-"));
