@@ -28,6 +28,7 @@ import {
   clampInteger,
   collectBranchWithRetries,
   combine,
+  debitLeaf,
   extractForcedOutput,
   isDryRound,
   loopCellParts,
@@ -41,6 +42,7 @@ import {
   resolveNodeSchema,
   resultUsage,
   routingIdentity,
+  scopedCheckpointId,
   sealPipelineRatio,
   siblingAnswers,
   stopForBudget,
@@ -338,17 +340,8 @@ export class WorkflowEngine {
   private account(nodeId: string, id: string, collected: ChildResult): void {
     if (this.accounted.has(id)) return;
     this.accounted.add(id);
-    const next = resultUsage(collected);
     const uncertain = collected.usageUncertain === true;
-    this.leafCosts.set(id, next);
-    addUsageToResult(
-      this.result,
-      nodeId,
-      next,
-      collected.provider ?? null,
-      collected.model ?? null,
-      uncertain,
-    );
+    const next = debitLeaf(this.result, this.leafCosts, this.nodeScope, nodeId, id, collected);
     this.budget.chargeTokens(next.inputTokens, next.outputTokens, uncertain);
   }
 
@@ -366,7 +359,13 @@ export class WorkflowEngine {
     const found = this.cache.get(this.runId, hash);
     if (!found.hit) return CACHE_MISS;
     if (found.cost !== null)
-      addUsageToResult(this.result, this.currentNode, found.cost, null, null);
+      addUsageToResult(
+        this.result,
+        scopedCheckpointId(this.nodeScope, this.currentNode),
+        found.cost,
+        null,
+        null,
+      );
     return found.output;
   }
 
@@ -472,9 +471,9 @@ export class WorkflowEngine {
     if (!Array.isArray(resolved)) return null;
     const hash = this.cell([node.id, "parallel", resolved, ...routingIdentity(node, this.tiers)]);
     const cached = this.cacheGet(hash);
-    const { runId, cache, result, specIdentity: spec, tiers, control } = this;
+    const { runId, cache, result, specIdentity: spec, tiers, control, nodeScope } = this;
     const collectLeaf = this.collectLeaf.bind(this);
-    const deps = { runId, cache, result, spec, tiers, control, collectLeaf };
+    const deps = { runId, cache, result, spec, tiers, control, collectLeaf, nodeScope };
     if (cached !== CACHE_MISS) return recordGroupReplayCost(deps, node, resolved, cached, hash);
     this.gateFanout(resolved.length);
     const leaves = await Promise.all(
