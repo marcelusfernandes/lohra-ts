@@ -464,7 +464,7 @@ describe("workflow service durability", () => {
             cacheWriteTokens: number;
             reasoningTokens: number;
           };
-          errorKind: string;
+          errorKind: "quota_exhausted";
           retryAfter: number;
         } {
           return {

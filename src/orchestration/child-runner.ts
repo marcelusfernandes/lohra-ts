@@ -23,6 +23,7 @@ import {
   AnthropicMessagesClient,
   ChatCompletionsClient,
   classifyProviderError,
+  type ErrorKind,
   ResponsesClient,
   retryAfterSeconds,
 } from "../transports/index.js";
@@ -76,7 +77,7 @@ function zeroResult(
     readonly cacheWriteTokens: number;
     readonly reasoningTokens: number;
   } | null,
-  errorKind: string | null,
+  errorKind: ErrorKind | null,
   retryAfter: number | null,
 ): CollectResult {
   return {

@@ -111,6 +111,7 @@ export interface DurableRunView {
   readonly leaf_respawns: number;
   readonly sandbox_refusals: number;
   readonly prior_faults: readonly string[];
+  readonly prior_fault_kinds: readonly string[];
   readonly prior_degraded: boolean;
   readonly tainted: boolean;
   readonly spec: Record<string, unknown> | null;
@@ -133,6 +134,7 @@ function loads(raw: unknown, fallback: unknown): unknown {
 export function durableFromRow(row: Readonly<Record<string, unknown>>): DurableRunView {
   const payload = loads(row.pause_payload_json, {}) as Record<string, unknown>;
   const faults = payload.prior_faults;
+  const faultKinds = payload.prior_fault_kinds;
   const checkpoint = payload.checkpoint;
   const progress = loads(row.progress_json, null);
   const spec = loads(row.spec_json, null);
@@ -152,6 +154,7 @@ export function durableFromRow(row: Readonly<Record<string, unknown>>): DurableR
     leaf_respawns: Number(payload.leaf_respawns ?? 0),
     sandbox_refusals: Number(payload.sandbox_refusals ?? 0),
     prior_faults: Array.isArray(faults) ? faults.map((fault) => String(fault)) : [],
+    prior_fault_kinds: Array.isArray(faultKinds) ? faultKinds.map((kind) => String(kind)) : [],
     prior_degraded: payload.prior_degraded === true,
     tainted: Number(row.tainted ?? 0) === 1,
     spec: spec !== null && typeof spec === "object" ? (spec as Record<string, unknown>) : null,
@@ -201,6 +204,7 @@ export function durableRollup(
   out.sandbox_refusals = view.sandbox_refusals;
   if (view.progress !== null && Number(view.progress.total ?? 0) > 0) out.progress = view.progress;
   if (view.prior_faults.length > 0) out.faults_total = [...view.prior_faults];
+  if (view.prior_fault_kinds.length > 0) out.fault_kinds_total = [...view.prior_fault_kinds];
   if (view.name !== "") out.name = view.name;
   if (view.status === "running") {
     out.stale = stale;
@@ -406,8 +410,7 @@ export class WorkflowService {
       this.warn,
     );
     // Criterion 40: the operator capability policy is a FILE in the operator
-    // home (`workflow_policy.json`), read per launch. An explicit path wins;
-    // an absent file is deny-all, never a widening.
+    // home (`workflow_policy.json`) — an explicit path wins; an absent file is deny-all.
     const policyPath = options.policyPath ?? join(this.homeRoot, OPERATOR_POLICY_FILE);
     this.policyLoader = () => loadPolicy(policyPath);
     // The tier map is a separate FILE, read the same way: absent is legitimate (no remapping
@@ -421,9 +424,8 @@ export class WorkflowService {
         (runId) => this.start(null, {}, { resumeRunId: runId }),
         { timerFactory },
       );
-      // Production heartbeat: a REAL repeating timer (setTimeout) renews the
-      // lease every TTL/3 while the run holds it. Tests inject their own
-      // timer factory; the service default is the live clock, not a no-op.
+      // Production heartbeat: a REAL repeating timer renews the lease every
+      // TTL/3; tests inject their own factory, the default is the live clock, not a no-op.
       this.heartbeat = new LeaseHeartbeat(
         (runId) =>
           store.locks.renewRunLease(runId, store.holder, store.ownershipOf().now, store.ttl),
@@ -665,8 +667,7 @@ export class WorkflowService {
     const tainted = priorView?.tainted === true || this.taintTracker.tainted;
     const liveHere = this.runs.get(runId);
     // Criterion 25 — the REGISTRY guard, before anything is acquired: a second
-    // engine on a run that has not stopped would share this one's node cache
-    // and working root. Refuse, take no lease, touch no ledger.
+    // engine on this run refuses, taking no lease and touching no ledger.
     if (isLive(liveHere)) {
       return Object.freeze({
         error:
@@ -807,9 +808,8 @@ export class WorkflowService {
                   },
                 {
                   repository: store.repository,
-                  // Cheap top-up (criterion 39): each cell that lands renews the
-                  // lease, so one long node cannot let it lapse between beats.
-                  // The heartbeat stays the guarantor; this is not a substitute.
+                  // Cheap top-up (criterion 39): each landed cell renews the lease too,
+                  // so one long node can't lapse it — the heartbeat stays the guarantor.
                   onWrite: () => {
                     if (!isCurrentStretch()) return;
                     store.locks.renewRunLease(
@@ -956,6 +956,7 @@ export class WorkflowService {
             leaf_respawns: (priorView?.leaf_respawns ?? 0) + result.leafRespawns,
             sandbox_refusals: (priorView?.sandbox_refusals ?? 0) + result.sandboxRefusals,
             prior_faults: faults,
+            prior_fault_kinds: [...(priorView?.prior_fault_kinds ?? []), ...result.faultKinds],
             prior_degraded: degraded,
           });
         const persistTerminal = (
@@ -1137,8 +1138,7 @@ export class WorkflowService {
     options: WorkflowLaunchOptions = {},
   ): Promise<Readonly<Record<string, unknown>> | WorkflowServiceError> {
     // Take the record AFTER `start`: capturing it before meant a resume waited
-    // on the PREVIOUS stretch's promise, which had already settled `paused`,
-    // while the new stretch went on to complete the run.
+    // on the PREVIOUS stretch's already-`paused` promise, not the new one completing.
     const started = this.start(spec, args, options);
     if ("error" in started) return started;
     const target = this.runs.get(started.run_id);

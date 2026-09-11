@@ -1,6 +1,7 @@
 import { ConcurrencyGate } from "./concurrency-gate.js";
 import { logOrchestrationFailure } from "./failure-log.js";
 import { wrapSteerInbox } from "./steer-inbox.js";
+import type { ErrorKind } from "../transports/error-kinds.js";
 
 export type SubSessionStatus = "running" | "complete" | "error" | "interrupted";
 
@@ -15,7 +16,7 @@ export interface CollectResult {
   readonly provider: string;
   readonly model: string;
   readonly forcedFallback: boolean;
-  readonly errorKind: string | null;
+  readonly errorKind: ErrorKind | null;
   readonly retryAfter: number | null;
   /** True when this turn never measured real usage — the leaf died before
    * reporting (cancelled), the provider call itself failed, or resolving
