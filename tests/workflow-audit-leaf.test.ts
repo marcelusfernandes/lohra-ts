@@ -267,6 +267,24 @@ describe("workflow audit — leaf producers (#366)", () => {
     }
   });
 
+  it("a leaf that fails carries status:failed and usage_uncertain:true when the ChildResult marks it", async () => {
+    const runtime = scriptedRuntime([
+      [{ status: "failed", output: "dead", usage: USAGE, usageUncertain: true }],
+    ]);
+    const { service, audit, close } = harness({ runtime });
+    try {
+      const started = service.start(spec());
+      if ("error" in started) throw new Error(started.error);
+      await service.status(started.run_id, true);
+      const page = audit.query({ runId: started.run_id, limit: 50 });
+      const leaves = page.events.filter((event) => event.event_type.startsWith("leaf."));
+      expect(leaves.map((event) => event.event_type)).toEqual(["leaf.started", "leaf.failed"]);
+      expect(leaves[1]?.data).toMatchObject({ status: "failed", usage_uncertain: true });
+    } finally {
+      close();
+    }
+  });
+
   it("schema retry (steer + second collect on the SAME id) produces only ONE started and ONE terminal", async () => {
     const runtime = scriptedRuntime([
       [
@@ -469,16 +487,89 @@ describe("workflow audit — leaf producers (#366)", () => {
       const seqs = page.events.map((event) => event.seq);
       expect(seqs).toEqual([...seqs].sort((left, right) => left - right)); // never out of order
       const notices = page.integrity.notices as readonly Readonly<Record<string, unknown>>[];
+      const retentionGap = notices.find(
+        (notice) =>
+          notice.event_type === "audit.gap" &&
+          (notice.data as Readonly<Record<string, unknown>> | undefined)?.reason ===
+            "retention_limit",
+      );
+      expect(retentionGap).toBeDefined();
+      const droppedCount = (retentionGap?.data as Readonly<Record<string, unknown>> | undefined)
+        ?.dropped_count;
+      expect(typeof droppedCount).toBe("number");
+      // Discriminates against a run with NO leaf.* events at all: without
+      // them, nothing retained after pruning could start with "leaf.".
+      expect(page.events.some((event) => event.event_type.startsWith("leaf."))).toBe(true);
+    } finally {
+      close();
+    }
+  });
+
+  it("fail-closed: a leaf.completed produced after this stretch is EVICTED from the bounded fence memory never reaches the ledger — leaf.started (recorded before the eviction) does, and a warn names the drop", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-audit-leaf-eviction-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      const repository = new WorkflowRepository(connection.database);
+      const locks = new LockRepository(connection.database);
+      const audit = new AuditRepository(connection.database);
+      const trail = new AuditTrail(audit);
+      const ownership = { fence: 0 as number, holder: "test", now: 1000 };
+      const warnings: string[] = [];
+      const running: { service: WorkflowService | null } = { service: null };
+      let evicted = false;
+      const runtime: ChildRuntime = withMinimalLeafSandbox({
+        spawn: (): string => "leaf-1",
+        // Eviction fires INSIDE collect() — after spawn() already recorded
+        // leaf.started under this stretch's still-valid fence, and before
+        // collect()'s own leaf.completed gets a chance to record under it.
+        collect: (): ChildResult => {
+          const owner = running.service;
+          if (!evicted && owner !== null) {
+            evicted = true;
+            const second = owner.start(spec());
+            if ("error" in second) throw new Error(second.error);
+          }
+          return { status: "complete", output: { ok: true }, usage: USAGE };
+        },
+        steer: () => undefined,
+        cancel: () => undefined,
+      });
+      let n = 0;
+      const service = new WorkflowService({
+        runtime,
+        auditTrail: trail,
+        idSource: () => {
+          n += 1;
+          return `run-${String(n)}`;
+        },
+        fenceMemory: 1,
+        onWarning: (message) => warnings.push(message),
+        store: {
+          repository,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
+      });
+      running.service = service;
+      const first = service.start(spec());
+      if ("error" in first) throw new Error(first.error);
+      await service.status(first.run_id, true);
+      expect(evicted).toBe(true);
+      await trail.flush();
+      const page = audit.query({ runId: first.run_id, limit: 50 });
+      const leaves = page.events.filter((event) => event.event_type.startsWith("leaf."));
+      expect(leaves.map((event) => event.event_type)).toEqual(["leaf.started"]);
       expect(
-        notices.some(
-          (notice) =>
-            notice.event_type === "audit.gap" &&
-            (notice.data as Readonly<Record<string, unknown>> | undefined)?.reason ===
-              "retention_limit",
+        warnings.some(
+          (message) => message.includes("ownership lost") && message.includes("leaf.completed"),
         ),
       ).toBe(true);
     } finally {
-      close();
+      connection.close();
     }
   });
 });
