@@ -95,7 +95,18 @@ async function refreshUnderLease(
       try {
         return await performRefresh(home, own, oauthPost);
       } finally {
-        releaseFileLease(lockPath, holder);
+        try {
+          releaseFileLease(lockPath, holder);
+        } catch {
+          // Best-effort cleanup (same stance as the tmp-file unlink in
+          // json-file.ts:55-59): a lock that can't be unlinked expires via
+          // its own TTL and is stolen by the next `acquireFileLease`. A
+          // cleanup failure here must neither mask the fault
+          // `performRefresh` just raised nor turn a *successful* refresh
+          // into one — home turning unwritable between acquiring the
+          // lease and releasing it (ex.: the same disk failure that made
+          // `writeTokens` throw `TokenPersistError`) is exactly that case.
+        }
       }
     }
     await waitForFileLease(lockPath, { maxWaitMs: REFRESH_LEASE_TTL_SECONDS * 1000 });

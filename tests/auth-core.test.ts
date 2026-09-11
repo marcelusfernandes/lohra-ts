@@ -361,17 +361,25 @@ describe("oauth and credentials", () => {
       accountId: "acct-t354-write",
       expiresAt: 1_300,
     });
-    chmodSync(home, 0o500);
     let caught: unknown;
     try {
       await resolveCredentials(home, {
         now: 1_000,
         codexHome: join(home, "codex"),
-        oauthPost: () =>
-          Promise.resolve([
+        oauthPost: () => {
+          // The lock file (`oauth.json.lock`) and the token file
+          // (`oauth.json`) live in the same directory — chmod'ing `home`
+          // BEFORE the call would also block acquiring the lease, never
+          // reaching `writeTokens` at all. Flipping it here, inside the
+          // POST, isolates the write failure: the lease is already held
+          // (created while `home` was still writable) by the time this
+          // runs, and the refresh response itself is fine.
+          chmodSync(home, 0o500);
+          return Promise.resolve([
             200,
             { access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 },
-          ]),
+          ]);
+        },
       });
     } catch (error) {
       caught = error;
