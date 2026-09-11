@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-
+import { createWorkflowAuditProducers } from "./audit-producers.js";
+import { auditInstall, auditedRuntimeFor } from "./audit-runtime.js";
 import { Budget } from "./budget.js";
 import { MemoryWorkflowCache, type WorkflowCache } from "./cache.js";
 import { SqliteWorkflowCache } from "./sqlite-cache.js";
@@ -35,7 +36,6 @@ import type { LockRepository } from "../state/locks.js";
 import type { AuditTrail } from "./audit-trail.js";
 import { auditEnabled } from "./audit-model.js";
 import { WorkflowLiveEvents, type WorkflowLiveEvent } from "./live-events.js";
-
 export const RUN_LEASE_TTL = 900;
 /** The operator capability policy, read from the operator home per launch. */
 export const OPERATOR_POLICY_FILE = "workflow_policy.json";
@@ -92,8 +92,8 @@ export const TOKEN_BUDGET_HINT =
 export const CHECKPOINT_HINT =
   "this run is paused at a checkpoint waiting for your answer — " +
   'run_workflow(resume_run_id=..., checkpoint_answers={"<node_id>": ' +
-  "<answer>}); a checkpoint that declared a 'default' takes it if " +
-  "you resume without one";
+  '<answer>}) — a nested checkpoint\'s node_id is scoped (e.g. "sub.confirm"); ' +
+  "a checkpoint that declared a 'default' takes it if you resume without one — if the payload carries 'rename_hint', resuming with the SAME node_id only pauses again — rename one of the two checkpoint ids in the spec instead";
 export const USER_PAUSE_HINT =
   "you paused this run; nothing will resume it on its own — its " +
   "finished nodes are kept, so run_workflow(resume_run_id=...) " +
@@ -410,9 +410,8 @@ export class WorkflowService {
     // an absent file is deny-all, never a widening.
     const policyPath = options.policyPath ?? join(this.homeRoot, OPERATOR_POLICY_FILE);
     this.policyLoader = () => loadPolicy(policyPath);
-    // The tier map is a separate FILE, read the same way: absent is
-    // legitimate (no remapping configured); present-but-broken still
-    // refuses the launch (#234).
+    // The tier map is a separate FILE, read the same way: absent is legitimate (no remapping
+    // configured); present-but-broken still refuses the launch (#234).
     const tiersPath = options.tiersPath ?? join(this.homeRoot, OPERATOR_TIERS_FILE);
     this.tiersLoader = () => readTiers(tiersPath);
     const store = options.store;
@@ -440,85 +439,6 @@ export class WorkflowService {
         (runId) => this.durableOf(runId)?.attempts ?? 0,
       );
     }
-  }
-
-  private forwardEvent(runId: string, event: WorkflowEvent, ownership?: Ownership): void {
-    this.onEvent?.(Object.freeze({ ...event }));
-    const nodeId = event.nodeId;
-    const live: WorkflowLiveEvent =
-      event.kind === "fault"
-        ? Object.freeze({
-            kind: "fault",
-            run_id: runId,
-            node_id: nodeId,
-            fault: event.text ?? "workflow fault",
-          })
-        : event.kind === "items"
-          ? Object.freeze({
-              kind: "items",
-              run_id: runId,
-              node_id: nodeId,
-              ...(event.done === undefined ? {} : { done: event.done }),
-              ...(event.total === undefined ? {} : { total: event.total }),
-            })
-          : Object.freeze({
-              kind: "node",
-              run_id: runId,
-              node_id: nodeId,
-              ...(event.state === undefined ? {} : { state: event.state }),
-            });
-    this.liveEvents.emit(live);
-    this.auditTrail?.record(
-      runId,
-      {
-        event_type: `workflow.${live.kind}`,
-        node_id: nodeId,
-        payload:
-          event.kind === "fault"
-            ? { state: "fault", content: event.text ?? "" }
-            : { state: event.state ?? "observed", done: event.done, total: event.total },
-      },
-      ownership,
-    );
-  }
-
-  private announcePlan(
-    runId: string,
-    spec: WorkflowSpec,
-    engine: WorkflowEngine,
-    ownership?: Ownership,
-  ): void {
-    const nodes = spec.nodes.map((node) => node.id);
-    const budget = engine.budget.snapshot();
-    this.liveEvents.emit(
-      Object.freeze({
-        kind: "plan",
-        run_id: runId,
-        name: spec.name,
-        nodes,
-        ...(budget === null ? {} : { budget }),
-      }),
-    );
-    this.auditTrail?.record(
-      runId,
-      {
-        event_type: "workflow.plan",
-        payload: { name: spec.name, budget: engine.budget.snapshot(), node_path: nodes },
-      },
-      ownership,
-    );
-  }
-
-  private announceDone(runId: string, status: string, ownership?: Ownership): void {
-    this.liveEvents.emit(Object.freeze({ kind: "done", run_id: runId, state: status }));
-    this.auditTrail?.record(
-      runId,
-      {
-        event_type: "workflow.done",
-        payload: { status, terminal: true },
-      },
-      ownership,
-    );
   }
 
   /** The composition handed to the runtime, pinned to ONE acquisition. Once a
@@ -645,34 +565,49 @@ export class WorkflowService {
       policy: this.policyLoader?.() ?? DENY_ALL_POLICY,
       tainted: this.taintTracker.tainted,
     });
+    // One segment_id per ACQUISITION, from the same source runId uses: the
+    // non-durable path has no fence to lose, so ownership is always null and
+    // the fail-closed drop below never applies (`durable: false`).
+    const segmentId = this.idSource();
+    const producers = createWorkflowAuditProducers({
+      trail: this.auditTrail,
+      live: this.liveEvents,
+      runId,
+      segmentId,
+      ownershipOf: () => null,
+      durable: false,
+      warn: this.warn,
+      onEvent: this.onEvent,
+    });
     const engine = new WorkflowEngine({
       ...engineBaseOptions(
-        this.runtime,
+        auditedRuntimeFor(this.runtime, this.auditTrail, () => null, false, this.warn),
         runId,
         options.tiers,
         this.loader,
         options.checkpointAnswers ?? {},
       ),
+      segmentId,
       cache: this.cache,
       budget: new Budget({ tokenBudget: options.tokenBudget ?? null }),
       onEvent: (event) => {
-        this.forwardEvent(runId, event);
+        producers.forwardEvent(event);
       },
     });
-    this.announcePlan(runId, parsed, engine);
+    producers.announceStretchStart(1, parsed, engine.budget.snapshot());
     const record = this.makeRecord(runId, parsed.name, engine);
     this.runs.set(runId, record);
     void engine
       .run(parsed, args)
       .then((result) => {
         record.result = result;
-        this.announceDone(runId, result.status);
+        producers.announceStretchEnd(result.status, result.pauseReason, result.checkpoint);
         record.settled = true;
         record.published = resultView(runId, parsed.name, result, engine.budget);
         record.resolve(record.published);
       })
       .catch(() => {
-        this.announceDone(runId, "failed");
+        producers.announceStretchEnd("failed", null, null);
         record.settled = true;
         record.published = Object.freeze({
           run_id: runId,
@@ -696,6 +631,11 @@ export class WorkflowService {
     priorView: DurableRunView | null,
   ): WorkflowStartResult | WorkflowServiceError {
     const resumeRunId = options.resumeRunId;
+    // One segment_id per ACQUISITION, from the same source runId uses
+    // (`start()`, service.ts:417): a resume always mints a fresh one, so the
+    // stretch before it and this one never share an identity in the ledger.
+    const segmentId = this.idSource();
+    const attempt = (priorView?.attempts ?? 0) + 1; // shared below and by pausePayload
     const now = store.ownershipOf().now;
     const answers: Record<string, unknown> = { ...(options.checkpointAnswers ?? {}) };
     if (
@@ -786,6 +726,16 @@ export class WorkflowService {
       if (token === EVICTED) return null;
       return { fence: token, holder: store.holder, now: store.ownershipOf().now };
     };
+    const producers = createWorkflowAuditProducers({
+      trail: this.auditTrail,
+      live: this.liveEvents,
+      runId,
+      segmentId,
+      ownershipOf: stretchOwnership,
+      durable: true,
+      warn: this.warn,
+      onEvent: this.onEvent,
+    });
     // The operator capability policy is loaded per launch from operator
     // config, never from the spec. The leaves of this stretch reach it through
     // `leafToolDispatch`, which reads this record live.
@@ -796,7 +746,7 @@ export class WorkflowService {
     // can spawn, and the run refuses to start if the runtime cannot take it.
     // The wrapper is pinned to this stretch: once a newer acquisition exists,
     // this one's wrapper denies everything rather than serving stale capability.
-    const install = this.runtime.installLeafSandbox?.bind(this.runtime);
+    const [rt, install] = auditInstall(this.runtime, this.auditTrail, stretchOwnership, this.warn);
     // A launch that dies between taking the lease and handing the run over
     // must give BOTH back (a lease nobody renews locks every resume out until
     // the TTL); an installer that THROWS is the same failure as one missing.
@@ -825,6 +775,8 @@ export class WorkflowService {
     }
     const engine = new WorkflowEngine({
       ...engineBaseOptions(this.runtime, runId, options.tiers, this.loader, answers),
+      runtime: rt,
+      segmentId,
       budget: new Budget({
         tokenBudget: effectiveBudget,
         tokensIn: seeded.tokensIn,
@@ -832,7 +784,7 @@ export class WorkflowService {
       }),
       onEvent: (event) => {
         const ownership = stretchOwnership();
-        this.forwardEvent(runId, event, ownership ?? undefined);
+        producers.forwardEvent(event);
         // Progress per completed node (#125), fenced same as any owned write.
         if (event.kind === "node" && event.state !== "running") {
           persistLine("running", null, null, tainted || this.taintTracker.tainted, ownership);
@@ -840,11 +792,11 @@ export class WorkflowService {
       },
       // Durable default: the FENCED SQLite node cache over the shared
       // connection. An explicit cache/cacheFactory still wins.
-      ...(this.cacheFactory !== undefined
-        ? { cache: this.cacheFactory(runId) }
-        : this.cache instanceof MemoryWorkflowCache
-          ? {
-              cache: new SqliteWorkflowCache(
+      cache: producers.wrapCache(
+        this.cacheFactory !== undefined
+          ? this.cacheFactory(runId)
+          : this.cache instanceof MemoryWorkflowCache
+            ? new SqliteWorkflowCache(
                 store.database,
                 runId,
                 () =>
@@ -868,9 +820,9 @@ export class WorkflowService {
                     );
                   },
                 },
-              ),
-            }
-          : { cache: this.cache }),
+              )
+            : this.cache,
+      ),
     });
     // One shape for the run line: registration, progress (#125), terminal.
     const persistLine = (
@@ -893,7 +845,7 @@ export class WorkflowService {
             tokenBudget: effectiveBudget,
             tainted: taintedFlag,
             progressJson: progressJsonOf(engine.progress()),
-            auditSegmentId: null,
+            auditSegmentId: segmentId,
             updatedAt: ownership.now,
             fence: ownership.fence,
             holder: ownership.holder,
@@ -901,16 +853,11 @@ export class WorkflowService {
           });
     const record = this.makeRecord(runId, parsed.name, engine);
     /**
-     * Hand this acquisition back: exactly once, and never by throwing.
-     *
-     * Every step is independent — a step that fails must not skip the ones
-     * after it, and none of them may stop the run from publishing a bounded
-     * result (a disposer that threw used to leave the waiter hanging).
-     *
-     * The heartbeat stops FIRST: a tick that outlived the release would put the
-     * lease back and leave the run looking alive with nobody in it. The release
-     * itself is conditioned on this acquisition's fence INSIDE its own
-     * statement, so a takeover by the same holder cannot be deleted by it.
+     * Hand this acquisition back exactly once, never by throwing: each step below is independent,
+     * so one that fails cannot skip the ones after it or stop the run from publishing a bounded
+     * result. The heartbeat stops FIRST — a tick that outlived the release would put the lease back
+     * and leave the run looking alive with nobody in it — and the release itself is conditioned on
+     * THIS acquisition's fence, so a takeover by the same holder cannot be deleted by it.
      */
     let finished = false;
     const finishStretch = (): void => {
@@ -945,14 +892,14 @@ export class WorkflowService {
       carriedFaults.push(
         `${runId}: ${RECOVERED_FAULT} — the process running it stopped before it finished; completed cells replayed, work in flight was lost`,
       );
+      producers.announceProcessCrash(priorView.audit_segment_id);
     }
     const priorFaults = carriedFaults;
     const priorDegraded = priorView?.prior_degraded === true;
     this.runs.set(runId, record);
-    // The launch line and the ledger seed are this stretch's FIRST owned
-    // writes, and their answer is authoritative: a refusal here means
-    // ownership changed hands while we were getting here (the installer can
-    // block the event loop past the TTL) and must end the stretch BEFORE
+    // The launch line and the ledger seed are this stretch's FIRST owned writes, and their answer
+    // is authoritative: a refusal here means ownership changed hands while we were getting here
+    // (the installer can block the event loop past the TTL) and must end the stretch BEFORE
     // anything runs, not surface only at the terminal write.
     const registered = persistLine("running", null, null, tainted, {
       fence,
@@ -986,10 +933,10 @@ export class WorkflowService {
         fence: lost.fence,
       });
     }
-    this.announcePlan(runId, parsed, engine, stretchOwnership() ?? undefined);
+    producers.announceStretchStart(attempt, parsed, engine.budget.snapshot());
     void engine
       .run(parsed, args)
-      .then((result) => {
+      .then(async (result) => {
         record.result = result;
         const faults = [...priorFaults, ...result.faults, ...result.sandboxFaults];
         const degraded =
@@ -1005,7 +952,7 @@ export class WorkflowService {
           JSON.stringify({
             checkpoint,
             resume_at: resumeAt,
-            attempts: (priorView?.attempts ?? 0) + 1,
+            attempts: attempt,
             leaf_respawns: (priorView?.leaf_respawns ?? 0) + result.leafRespawns,
             sandbox_refusals: (priorView?.sandbox_refusals ?? 0) + result.sandboxRefusals,
             prior_faults: faults,
@@ -1022,10 +969,9 @@ export class WorkflowService {
           pausePayload(result.status === "paused" ? result.checkpoint : null, null),
         );
         this.persistSpend(store, runId, effectiveBudget, seeded, engine, stretchOwnership());
-        // A quota pause is the one failure that fixes itself given time: arm
-        // the retry here (bounded, capped); token-budget and checkpoint pauses
-        // arm nothing — waiting does not refill a budget, only an ANSWER moves
-        // a checkpoint.
+        // A quota pause is the one failure that fixes itself given time: arm the retry here
+        // (bounded, capped); token-budget and checkpoint pauses arm nothing — waiting does not
+        // refill a budget, only an ANSWER moves a checkpoint.
         let resumeAt: number | null = null;
         if (owned && result.status === "paused" && result.pauseReason === QUOTA_PAUSE) {
           const retryAfter =
@@ -1033,16 +979,14 @@ export class WorkflowService {
             typeof (result.checkpoint as Record<string, unknown>).retry_after === "number"
               ? ((result.checkpoint as Record<string, unknown>).retry_after as number)
               : null;
-          resumeAt =
-            this.autoResume?.schedule(runId, {
-              attempts: (priorView?.attempts ?? 0) + 1,
-              retryAfter,
-            }) ?? null;
+          resumeAt = this.autoResume?.schedule(runId, { attempts: attempt, retryAfter }) ?? null;
         }
         if (resumeAt !== null) {
           persistTerminal("paused", QUOTA_PAUSE, pausePayload(null, resumeAt));
         }
-        if (owned && terminal !== null) this.announceDone(runId, result.status, terminal);
+        if (owned && terminal !== null)
+          producers.announceStretchEnd(result.status, result.pauseReason, result.checkpoint);
+        await producers.flushBeforeRelease();
         finishStretch();
         record.settled = true;
         if (owned) {
@@ -1061,9 +1005,10 @@ export class WorkflowService {
           record.resolve(record.published);
         }
       })
-      .catch((error: unknown) => {
+      .catch(async (error: unknown) => {
         const terminal = stretchOwnership();
-        if (terminal !== null) this.announceDone(runId, "failed", terminal);
+        if (terminal !== null) producers.announceStretchEnd("failed", null, null);
+        await producers.flushBeforeRelease();
         finishStretch();
         record.settled = true;
         record.published = Object.freeze({
@@ -1263,6 +1208,14 @@ export class WorkflowService {
     return (this.shuttingDown ??= this.runShutdown());
   }
 
+  /** Issue #373: `workflow_audit` in the same turn as `run_workflow` waits
+   * this long for the trail to drain, then reports a named pending count
+   * instead of a silent `events: []`. */
+  public async auditPendingAfterFlush(timeoutMs: number): Promise<number> {
+    if (this.auditTrail === undefined) return 0;
+    return (await this.auditTrail.flush(timeoutMs)) ? 0 : this.auditTrail.pendingCount();
+  }
+
   private async runShutdown(): Promise<void> {
     this.autoResume?.shutdown();
     this.heartbeat?.shutdown();
@@ -1337,7 +1290,6 @@ function rawSpecOf(parsed: WorkflowSpec): Record<string, unknown> {
     nodes: parsed.nodes.map((node) => ({ id: node.id, type: node.type, ...node.fields })),
   };
 }
-
 /** The oracle's None-when-empty rule: a run with no nodes persists no progress. */
 function progressJsonOf(progress: ProgressSnapshot): string | null {
   return progress.total > 0 ? JSON.stringify(progress) : null;

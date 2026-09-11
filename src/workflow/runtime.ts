@@ -58,15 +58,32 @@ export type LeafToolDispatch = (name: string, args: Readonly<Record<string, unkn
  * a runtime keys installations by it, so an older stretch can neither overwrite
  * nor uninstall a newer acquisition's dispatch.
  */
+/** The leaf a tool call belongs to — issue #367: just enough for a wrap to
+ * key audit identity or policy by, never a place to smuggle prompt/output
+ * text through. */
+export type LeafIdentity = Readonly<{ subId: string }>;
+
 export interface LeafSandboxInstallation {
   readonly runId: string;
   readonly fence: number;
   /**
    * Exactly the service's composition: operator policy + this acquisition's
    * working root + live taint. The runtime must route every leaf tool call
-   * through the returned dispatch.
+   * through the returned dispatch. `leaf` (issue #367) is the calling leaf's
+   * identity — OPTIONAL so callers that build a `LeafSandboxInstallation`
+   * directly (tests predating this issue) keep compiling unchanged; every
+   * PRODUCTION caller (`adaptSandboxWrap`, orchestration-runtime.ts) always
+   * supplies it.
    */
-  readonly wrap: (base: LeafToolDispatch) => LeafToolDispatch;
+  readonly wrap: (base: LeafToolDispatch, leaf?: LeafIdentity) => LeafToolDispatch;
+  /**
+   * Fires once per tool call, after the REAL async dispatch settles — never
+   * for a synchronous denial (that never reaches the async leg at all; see
+   * `adaptSandboxWrap`, orchestration-runtime.ts). `ok` mirrors the tool
+   * envelope's own `ok` field (`src/tools/envelope.ts`), not exceptions: a
+   * tool that resolves with an error string still settles, `ok: false`.
+   */
+  readonly onToolSettled?: (leaf: LeafIdentity, ok: boolean) => void;
 }
 
 /** Removes ONLY the installation it came from. */

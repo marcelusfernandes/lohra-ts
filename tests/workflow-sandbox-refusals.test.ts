@@ -228,11 +228,12 @@ describe("sandbox refusal — runtime side channel (#246)", () => {
       if (name === "denied") return "ERROR: sandbox denied";
       return base(name, args);
     };
-    let dispatch: ((base: ChildToolDispatch) => ChildToolDispatch) | undefined;
-    const runChild: ChildRunner = async (_subId, config) => {
+    // Issue #367: `subId` is the SECOND argument (core.ts's `SpawnConfig.wrapDispatch`).
+    let dispatch: ((base: ChildToolDispatch, subId: string) => ChildToolDispatch) | undefined;
+    const runChild: ChildRunner = async (subId, config) => {
       const base: ChildToolDispatch = (name) => Promise.resolve(`allowed:${name}`);
       dispatch = config.wrapDispatch;
-      const wrapped = config.wrapDispatch === undefined ? base : config.wrapDispatch(base);
+      const wrapped = config.wrapDispatch === undefined ? base : config.wrapDispatch(base, subId);
       await wrapped("denied", {});
       await wrapped("denied", {});
       await wrapped("read_file", {});
@@ -248,9 +249,9 @@ describe("sandbox refusal — runtime side channel (#246)", () => {
 
   it("a leaf with zero denials reports sandboxRefusals 0", async () => {
     const allowAll: (base: LeafToolDispatch) => LeafToolDispatch = (base) => base;
-    const runChild: ChildRunner = async (_subId, config) => {
+    const runChild: ChildRunner = async (subId, config) => {
       const base: ChildToolDispatch2 = (name) => Promise.resolve(`allowed:${name}`);
-      const wrapped = config.wrapDispatch === undefined ? base : config.wrapDispatch(base);
+      const wrapped = config.wrapDispatch === undefined ? base : config.wrapDispatch(base, subId);
       await wrapped("read_file", {});
       return ok("done");
     };

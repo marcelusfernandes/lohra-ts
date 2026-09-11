@@ -1,6 +1,5 @@
 import { combineUsage, usage } from "../pricing/usage.js";
 import type { Usage } from "../pricing/types.js";
-import type { ChildResult } from "./runtime.js";
 
 export type RunStatus = "complete" | "degraded" | "failed" | "cancelled" | "paused";
 
@@ -102,30 +101,28 @@ export function addUsageToResult(
 
 /** Advisory only (#246): never touches `faults`/`status` — a leaf whose
  * every tool call the sandbox denied is still a `complete` leaf, because the
- * refusal may be the policy working as intended, not the leaf failing. */
+ * refusal may be the policy working as intended, not the leaf failing.
+ * Called from `debitLeaf` (engine-utils.ts, #348) — that function already
+ * scopes `nodeId` (`scopedCheckpointId`) for `nodeCosts`, and this reuses the
+ * same scoped id, so engine.ts's `account()` needs no separate call site of
+ * its own (`arquivo-grande` zero-growth budget). */
 export function recordSandboxRefusals(result: RunResult, nodeId: string, refusals: number): void {
   if (refusals <= 0) return;
   result.sandboxRefusals += refusals;
   result.sandboxFaults.push(`${nodeId}: sandbox refused ${String(refusals)} tool call(s)`);
 }
 
-/** What `WorkflowEngine.account` calls once per leaf id — usage accounting
- * plus the (possibly zero) sandbox-refusal advisory, together, so engine.ts
- * only ever needs the one call site (`arquivo-grande` zero-growth budget). */
-export function accountLeaf(
-  result: RunResult,
-  nodeId: string,
-  collected: ChildResult,
-  next: Usage,
-  usageUncertain: boolean,
-): void {
-  addUsageToResult(
-    result,
-    nodeId,
-    next,
-    collected.provider ?? null,
-    collected.model ?? null,
-    usageUncertain,
-  );
-  recordSandboxRefusals(result, nodeId, collected.sandboxRefusals ?? 0);
+/** `runNested` (engine.ts) calls this in place of its own former
+ * `this.result.leafRespawns += result.leafRespawns;` line (never part of
+ * the `nested-fold-removed` mutation anchor, workflow-executor-mutants.ts —
+ * that anchor's `before` ends at `forcingFallbacks`, the statement just
+ * above) — folding `leafRespawns` here too, alongside the two new fields,
+ * keeps this a SWAP, not an addition: engine.ts's own line count for the
+ * nested-workflow fold stays exactly what it was before PR #316 round 2 (a
+ * nested sub-run's refusals were folding into eleven OTHER parent counters
+ * already but never into these two). */
+export function foldNestedCounters(result: RunResult, nested: RunResult, reference: string): void {
+  result.leafRespawns += nested.leafRespawns;
+  result.sandboxRefusals += nested.sandboxRefusals;
+  result.sandboxFaults.push(...nested.sandboxFaults.map((fault) => `sub[${reference}]: ${fault}`));
 }

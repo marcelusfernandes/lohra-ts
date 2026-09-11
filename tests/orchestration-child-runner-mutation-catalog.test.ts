@@ -5,13 +5,14 @@ import { describe, expect, it } from "vitest";
 
 import { orchestrationMutants } from "../scripts/mutations/orchestration.js";
 
-// Issue #112 — the `qa` follow-up to PR #110: `child-runner.ts:169-170`
+// Issue #112 — the `qa` follow-up to PR #110: `child-runner.ts:176-178`
 // (`config.wrapDispatch === undefined ? childDispatch :
-// config.wrapDispatch(childDispatch)`) is the ONLY production site that
-// applies the leaf sandbox wrap on top of the child allow-list dispatch,
-// and until now the historical parity directory's workflow-durability catalog had no
-// entry watching it — a regression that silently dropped the wrap
-// survived `mutations:t16` (96/96 killed, none of them here).
+// config.wrapDispatch(childDispatch, subId)`, `subId` added by #367) is the
+// ONLY production site that applies the leaf sandbox wrap on top of the
+// child allow-list dispatch, and until now the historical parity
+// directory's workflow-durability catalog had no entry watching it — a
+// regression that silently dropped the wrap survived `mutations:t16`
+// (96/96 killed, none of them here).
 //
 // `mutants-orchestration.ts` (a plain data module, no top-level side
 // effects — unlike `run-mutations.ts` itself, which runs the actual T16

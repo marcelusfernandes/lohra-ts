@@ -36,9 +36,20 @@
   {
     "slice": "workflow-audit-live",
     "script": "mutations:t17",
-    "catalog": ["scripts/mutations/workflow-audit-live-mutants.ts"],
+    "catalog": [
+      "scripts/mutations/workflow-audit-live-mutants.ts",
+      "scripts/mutations/workflow-audit-producers-mutants.ts"
+    ],
     "srcGlobs": ["src/workflow/**", "src/state/**", "src/cli/**", "src/commands/**", "src/cli.ts"],
-    "focusFiles": ["tests/workflow-audit-live.test.ts"]
+    "focusFiles": [
+      "tests/workflow-audit-live.test.ts",
+      "tests/workflow-audit-identity.test.ts",
+      "tests/workflow-audit-leaf.test.ts",
+      "tests/workflow-audit-tool.test.ts",
+      "tests/workflow-audit-cache.test.ts",
+      "tests/workflow-audit-segment.test.ts",
+      "tests/workflow-live-tail.test.ts"
+    ]
   },
   {
     "slice": "media",
@@ -101,5 +112,12 @@
       "tests/catalog-pricing.test.ts",
       "tests/state-locks.test.ts"
     ]
+  },
+  {
+    "slice": "auth",
+    "script": "mutations:auth",
+    "catalog": ["scripts/mutations/auth-mutants.ts"],
+    "srcGlobs": ["src/auth/**"],
+    "focusFiles": ["tests/auth-core.test.ts"]
   }
 ]

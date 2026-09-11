@@ -145,9 +145,11 @@ re-parse it in natural language — that is where null rates come from.
   (visible as `forcing_fallbacks` in the rollup).
 - `verify` and `judge_panel` already force their own internal verdict/score
   schemas. Do not try to attach one to them.
-- **Pipeline stages** honour `prompt`, `schema`/`schema_ref`, `retries` and
-  `max_iterations` — and nothing else. `model`, `effort`, `provider`, `timeout`
-  and `tool_less` are `agent`-node knobs; putting them on a stage does nothing.
+- **Pipeline stages** honour the full agent-shaped set — `prompt`,
+  `schema`/`schema_ref`, `tool_less`, `timeout`, `retries`, `max_iterations` —
+  **plus** `model`, `tier`, `effort` and `provider`. A stage is the one
+  schema-bearing sub-object that spawns its own leaf, so its routing knobs are
+  real: they override the node's for that stage only (see §7).
 
 ---
 
@@ -184,7 +186,7 @@ re-parse it in natural language — that is where null rates come from.
 | --- | --- | --- |
 | `complete` | Every node produced output, zero faults | Trust it |
 | `degraded` | At least one node nulled, or at least one fault | **Read `faults` before using `outputs`** |
-| `failed` | Every node nulled — the run produced nothing | Re-author; don't paper over it |
+| `failed` | Every node nulled, **or** a `pipeline` fell under its `min_success_ratio` — the run produced nothing usable | Re-author; don't paper over it |
 | `cancelled` | Someone stopped it | Partial outputs are real but incomplete |
 | `paused` | Stopped resumably — provider quota, the run's `token_budget`, or you | See below |
 
@@ -310,13 +312,31 @@ of polling on their behalf.
   reviewer that judges it. Different models per *group* inside one node (cheap
   judges over an expensive attempt) is NOT supported — split it into separate
   nodes. Put the knobs on the NODE itself: written one level down — inside
-  `body`, `synthesize`, `branches` or `stages` — a routing knob is
-  **silently ignored**. Not an error, not a warning, not a fault: those leaves
-  just run on the session's own model at full price while the run still reports
-  `complete`, so the only symptom is the bill. `parallel` and pipeline `stages`
-  are the two fan-outs that take no routing at all and have no routable node
-  around them — split that work into `agent` nodes when a branch or a stage
-  needs its own model.
+  `body`, `synthesize` or `branches[*]` — a routing knob (`model`, `tier`,
+  `effort` or `provider`) is **refused at validation** as an unknown field,
+  before anything spawns. Those sub-objects accept only the agent-shaped set
+  (`prompt`, `schema`/`schema_ref`, `tool_less`, `timeout`, `retries`,
+  `max_iterations`) and always spawn with the outer node's own resolved
+  routing. **`pipeline.stages[*]` is the one exception** (see §4): a stage
+  spawns its own leaf, so it may carry its own `model`/`tier`/`effort`/
+  `provider`, overriding the node's for that stage's leaf only. `parallel`
+  itself takes no node-level routing at all — split branch-specific routing
+  into separate `agent` nodes when one branch needs a different model than
+  its siblings.
+- **`parallel.retries`** — bounded re-spawns of a branch that comes back
+  **dead** (timed out, cancelled, or the runtime failed it). `0`–`3`, default
+  **0**. This is the mirror of `agent.retries`, not the same rule: a branch
+  that returns a legitimate **empty** value (branches carry no schema, so an
+  empty string or list is real data) is never retried. Counts toward the
+  run's `leaf_respawns`.
+- **`min_success_ratio`** (`pipeline` only) — a number greater than 0 and at
+  most 1. If fewer than that fraction of items complete, the node seals the
+  **whole run `failed`** with a fault naming the measured ratio, rather than
+  letting a mostly-failed pipeline read back as `degraded`.
+- **`budget`** (`loop_until_dry` only) — a positive whole number of tokens, a
+  real per-node ceiling. The round loop stops with a fault once that node's
+  own spend reaches it, independent of — and checked separately from — the
+  run's overall `token_budget`.
 - Pipeline stages get their own `retries` (default 2, same cap of 3) and their
   own `max_iterations`; the whole pipeline node is bounded by a 30-minute barrier.
 
@@ -437,14 +457,25 @@ the answer becomes that node's output and is cached, so a later resume never
 asks again. Nothing auto-resumes it — a `default` is what lets an unattended
 resume carry on instead of stalling.
 
+Inside a nested `workflow` node, the bare checkpoint id still works — unless it
+collides with a checkpoint at the root **or at a sibling nested `workflow`**.
+On collision, only the SCOPED form `<sub_node_id>.<checkpoint_id>` (e.g.
+`sub.confirm`) is accepted; the bare id is refused as ambiguous instead of
+silently answering the wrong node. `node_id` in the pause reply already
+carries whichever form the answer must use.
+
 Put a checkpoint before the irreversible step, never after it, and keep the
 `prompt` self-contained: the human reads the question, not the run.
 
-### Fields that validate but do nothing (yet)
+### Removed fields, and one that still does nothing
 
-`label`, `phase`, `required` (on any node), `budget` (on `loop_until_dry`) and
-`min_success_ratio` (on `pipeline`) are accepted by the validator but the engine
-does not act on them today. Do not build a plan that depends on them.
+`label` and `phase` are not merely inert — the validator now **refuses** them
+outright (`'label' was removed; had no effect`, and likewise for `phase`), so
+a spec written for an older doctrine fails at authoring time, not silently.
+Drop them.
+
+`required` (on any node) is still accepted by the validator but the engine
+does not act on it today. Do not build a plan that depends on it.
 
 ### What a leaf can and cannot do
 

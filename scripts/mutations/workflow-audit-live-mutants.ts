@@ -21,7 +21,7 @@ const repository = "src/state/audit-repository.ts";
 const live = "src/workflow/live-events.ts";
 const argSpec = "src/cli/arg-spec.ts";
 const cli = "src/cli.ts";
-const service = "src/workflow/service.ts";
+const auditProducers = "src/workflow/audit-producers.ts";
 const chat = "src/commands/chat.ts";
 const focusFile = "tests/workflow-audit-live.test.ts";
 
@@ -191,9 +191,9 @@ export const mutants: readonly Mutant[] = [
     },
     edits: [
       {
-        file: service,
-        before: "    this.liveEvents.emit(live);\n    this.auditTrail?.record(",
-        after: "    if (!this.liveEvents.emit(live)) return;\n    this.auditTrail?.record(",
+        file: auditProducers,
+        before: "    live.emit(liveEvent);\n    record({",
+        after: "    if (!live.emit(liveEvent)) return;\n    record({",
       },
     ],
   },

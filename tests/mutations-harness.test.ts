@@ -31,10 +31,12 @@ import {
   assertBaselineGreen,
   assertRestoreGreen,
   classify,
+  escapeFocusTest,
   parseVitestOutcome,
   prepareArchiveSandbox,
   replaceExactlyOnce,
   restoreAll,
+  runFocusedVitest,
   runVitestFiles,
   snapshotFiles,
   vitestArgs,
@@ -411,6 +413,71 @@ describe("runVitestReporterJson lê o relatório de --outputFile, não de /dev/s
     expect(() => runVitestFiles(dir, ["tests/a.test.ts"])).toThrow(
       /vitest produced no json report/i,
     );
+  });
+});
+
+describe("escapeFocusTest (#362)", () => {
+  it("escapa metacaracteres para que o título case literalmente contra si mesmo", () => {
+    const titulo = "lease (mtime antigo) é tomada, v1.2";
+    // Hoje: o título cru, interpretado como regex, não casa nem consigo
+    // mesmo — "(mtime antigo)" vira grupo (some com os parênteses literais)
+    // e "." vira curinga; a demonstração de #362.
+    expect(new RegExp(titulo).test(titulo)).toBe(false);
+    expect(new RegExp(escapeFocusTest(titulo)).test(titulo)).toBe(true);
+  });
+
+  it("título sem metacaracteres continua casando igual (não regride catálogo existente)", () => {
+    const titulo = "guard combined";
+    expect(escapeFocusTest(titulo)).toBe(titulo);
+  });
+});
+
+// Vitest falso que simula o casamento real do `-t`: interpreta o padrão
+// recebido como `new RegExp(padrao)` contra o título do teste focal (via
+// `FAKE_VITEST_TITLE`, para não precisar embutir o título — com parênteses e
+// aspas — no texto do script) e escreve `passed`/`skipped` de acordo. Um fake
+// que sempre respondesse `passed` provaria só que o harness roda algo, não
+// que o `-t` chega escapado a ponto de casar um título com metacaracteres.
+function fakeVitestQueSimulaFiltroDeTitulo(): string {
+  return [
+    "#!/usr/bin/env node",
+    "const fs = require('node:fs');",
+    "const args = process.argv.slice(2);",
+    "const tIndex = args.indexOf('-t');",
+    "const pattern = args[tIndex + 1];",
+    "const outArg = args.find((a) => a.startsWith('--outputFile='));",
+    "const outputFile = outArg.slice('--outputFile='.length);",
+    "const title = process.env.FAKE_VITEST_TITLE ?? '';",
+    "let matched = false;",
+    "try { matched = new RegExp(pattern).test(title); } catch { matched = false; }",
+    "const status = matched ? 'passed' : 'skipped';",
+    "const report = { testResults: [{ assertionResults: [{ status, fullName: `grupo ${title}` }] }] };",
+    "fs.writeFileSync(outputFile, JSON.stringify(report));",
+  ].join("\n");
+}
+
+describe("runFocusedVitest escapa focus.test antes do -t (#362)", () => {
+  it("um título com ( e . casa literalmente, não como regex crua", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mutations-harness-focus-literal-"));
+    workdirs.push(dir);
+    mkdirSync(join(dir, "node_modules/.bin"), { recursive: true });
+    writeFileSync(join(dir, "node_modules/.bin/vitest"), fakeVitestQueSimulaFiltroDeTitulo(), {
+      mode: 0o755,
+    });
+
+    const titulo = "lease (mtime antigo) é tomada, v1.2";
+    const originalEnv = process.env.FAKE_VITEST_TITLE;
+    process.env.FAKE_VITEST_TITLE = titulo;
+    try {
+      const outcome = runFocusedVitest(dir, { file: "tests/x.test.ts", test: titulo });
+      // Hoje `runFocusedVitest` passa `focus.test` cru: o fake não acha
+      // casamento, sai `ranTests: 0` — vermelho por asserção, não por erro
+      // estrutural (#362).
+      expect(outcome).toEqual({ exitCode: 0, failedTests: [], ranTests: 1 });
+    } finally {
+      if (originalEnv === undefined) delete process.env.FAKE_VITEST_TITLE;
+      else process.env.FAKE_VITEST_TITLE = originalEnv;
+    }
   });
 });
 

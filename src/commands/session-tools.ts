@@ -38,8 +38,21 @@ export interface SessionToolComposition {
 export function createSessionToolBase(
   database: Database.Database,
   environment: Readonly<Record<string, string | undefined>>,
+  // Issue #380: production roots (chat.ts, dashboard.ts) pass the same
+  // sink WorkflowService itself falls back to (console.warn) so a fence
+  // refusal on the audit trail is exactly as observable as one on the
+  // ownership store — the prior default here was `() => undefined`, and
+  // "recusa nunca silenciosa" (#368) only held for tests with a sink
+  // injected. Defaults to console.warn too, so a caller that forgets to
+  // pass `warning` still gets a real sink, not the old silent one.
+  options: { readonly warning?: (message: string) => void } = {},
 ): SessionToolBase {
-  const auditRepository = new AuditRepository(database, { environment });
+  const warning =
+    options.warning ??
+    ((message: string): void => {
+      console.warn(message);
+    });
+  const auditRepository = new AuditRepository(database, { environment, warning });
   const registry = createBuiltinRegistry({
     workflow_audit: workflowAuditHandler(auditRepository),
   });

@@ -72,12 +72,22 @@ jobs:
           cache: npm
       - run: npm ci
       - name: ${{ matrix.slice }}
-        run: npm run ${{ matrix.script }}
+        # O runner imprime o JSON da fatia no stdout (duas fatias mandam o caso
+        # vermelho para stderr, por isso `2>&1`); `tee` guarda uma cópia para o
+        # artifact abaixo (#323). Aqui o pipe é seguro porque `pipefail` está
+        # ligado — ao contrário do passo `plan`, que evita o pipe de propósito.
+        run: |
+          set -o pipefail
+          mkdir -p .mutation-evidence
+          npm run ${{ matrix.script }} 2>&1 | tee ".mutation-evidence/${{ matrix.slice }}.log"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: mutation-evidence-${{ matrix.slice }}
           path: .mutation-evidence/
+          # Diretório-ponto: sem isto o upload-artifact@v4 o trata como oculto
+          # e avisa "No files were found" mesmo com o .log escrito (#323).
+          include-hidden-files: true
           if-no-files-found: warn
 
   # Job-resumo de nome fixo (#225): é ele que o ruleset exige. Roda sempre;

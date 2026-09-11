@@ -3,6 +3,7 @@ export * from "./credentials.js";
 export * from "./errors.js";
 export * from "./jwt.js";
 export * from "./json-file.js";
+export * from "./lease.js";
 export * from "./manage.js";
 export * from "./oauth.js";
 export * from "./refresh.js";

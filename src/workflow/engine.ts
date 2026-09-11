@@ -2,18 +2,16 @@ import { randomUUID } from "node:crypto";
 
 import { usage } from "../pricing/usage.js";
 import type { Usage } from "../pricing/types.js";
-import { accountLeaf, deriveStatus, RunResult, addUsageToResult } from "./accounting.js";
+import { deriveStatus, foldNestedCounters, RunResult, addUsageToResult } from "./accounting.js";
 import { Budget, FanoutRejected, TokenBudgetExhausted } from "./budget.js";
 import { contentHash, MemoryWorkflowCache, type WorkflowCache } from "./cache.js";
 import {
-  DEFAULT_LEAF_MAX_ITERATIONS,
   EMPTY_OUTPUT_CORRECTION,
   GATE_VERDICT_SCHEMA,
   JUDGE_SCORE_SCHEMA,
   LEAF_TIMEOUT_SECONDS,
   MAX_WORKFLOW_DEPTH,
   PIPELINE_TIMEOUT_SECONDS,
-  QUOTA_EXHAUSTED,
   type LeafExecution,
   type RunControl,
   type Strategy,
@@ -23,21 +21,38 @@ import {
   VERIFY_SCHEMA,
 } from "./engine-contract.js";
 import {
+  applyCheckpointAnswer,
   asRecord,
+  buildCausalContext,
+  checkpointPausePayload,
   clampInteger,
   collectBranchWithRetries,
   combine,
+  debitLeaf,
+  extractForcedOutput,
+  isDryRound,
+  nonCompleteFirstCollectResult,
   nonEmpty,
+  recollectLeafTimeout,
   recordGroupReplayCost,
   renderValue,
+  resolveCheckpoint,
+  resolveLeafRequestOptions,
+  resolveNodeSchema,
   resultUsage,
   routingIdentity,
-  routingOf,
+  scopedCheckpointId,
+  sealPipelineRatio,
+  siblingAnswers,
+  stopForBudget,
+  stoppedByControl,
   strictResolve,
+  timeoutLeafResult,
   verifyPrompt,
 } from "./engine-utils.js";
 import { topologicalOrder } from "./graph.js";
-import { MAX_GATE_ATTEMPTS, MAX_NODE_MAX_ITERATIONS, MAX_NODE_RETRIES } from "./nodes.js";
+import { gateCellParts, loopBodyCellParts, makeBodyLeafRunner } from "./leaf-options.js";
+import { MAX_GATE_ATTEMPTS, MAX_NODE_RETRIES } from "./nodes.js";
 import {
   correctionPrompt,
   isEmptyOutput,
@@ -47,7 +62,7 @@ import {
 import { ProgressTracker, type ProgressSnapshot } from "./progress.js";
 import { BoundedPool } from "./pool.js";
 import type { CausalContext, ChildResult, ChildRuntime } from "./runtime.js";
-import { resolveInlineSchema, validateSpec } from "./schema.js";
+import { validateSpec } from "./schema.js";
 import type { TierMap } from "./tiers.js";
 import { Node, ValidationError, type WorkflowSpec } from "./types.js";
 export class WorkflowEngine {
@@ -72,6 +87,7 @@ export class WorkflowEngine {
   private schemas: Readonly<Record<string, unknown>> = {};
   private currentNode = "?";
   private specIdentity: readonly unknown[] = ["workflow", null];
+  private nestedAnswers: Readonly<Record<string, unknown>> = Object.freeze({});
   private readonly activeLeaves = new Set<string>();
   private accounted = new Set<string>();
   private leafCosts = new Map<string, Usage>();
@@ -203,17 +219,14 @@ export class WorkflowEngine {
     cellId: string,
     extra: { itemIndex?: number; stageIndex?: number; attempt?: number } = {},
   ): CausalContext {
-    return Object.freeze({
-      runId: this.runId,
-      segmentId: this.segmentId,
-      nodePath: Object.freeze([...this.nodeScope, this.currentNode]),
+    return buildCausalContext(
+      this.runId,
+      this.segmentId,
+      [...this.nodeScope, this.currentNode],
       cellId,
       role,
-      attempt: extra.attempt ?? 0,
-      turn: 0,
-      ...(extra.itemIndex === undefined ? {} : { itemIndex: extra.itemIndex }),
-      ...(extra.stageIndex === undefined ? {} : { stageIndex: extra.stageIndex }),
-    });
+      extra,
+    );
   }
 
   private async collectLeaf(
@@ -232,15 +245,15 @@ export class WorkflowEngine {
     const release = await this.pool.acquire();
     let id: string | null = null;
     try {
-      if (options.aborted?.() === true || this.control.cancelled || this.control.paused)
+      if (stoppedByControl(this.control, options.aborted))
         return { output: null, usage: usage(), complete: false };
       this.gateTokens();
       this.gateFanout(1, true);
-      const routing = routingOf(node, this.tiers);
-      const maxIterations = Object.hasOwn(node.fields, "max_iterations")
-        ? Math.min(Number(node.fields.max_iterations), MAX_NODE_MAX_ITERATIONS)
-        : DEFAULT_LEAF_MAX_ITERATIONS;
-      const forced = schema !== null && node.fields.tool_less === true;
+      const { routing, maxIterations, forced } = resolveLeafRequestOptions(
+        node,
+        this.tiers,
+        schema,
+      );
       const request = {
         prompt,
         causalContext: this.causal(options.role, options.cellId, options),
@@ -259,34 +272,22 @@ export class WorkflowEngine {
         this.recordFault(
           `${node.id}: leaf timeout after ${String(Math.trunc(timeout))}s (cancelled)`,
         );
-        return { output: null, usage: usage(), complete: false };
+        return timeoutLeafResult(this.account.bind(this), node.id, id, collected);
       }
       let total = resultUsage(collected);
       if (collected.status !== "complete") {
-        this.account(node.id, id, collected);
-        if (collected.errorKind === QUOTA_EXHAUSTED) {
-          // Not this leaf's own failure — the whole run is out of quota.
-          this.noteQuotaExhausted(node.id, collected.retryAfter ?? null);
-          return { output: null, usage: total, complete: false };
-        }
-        const kind =
-          collected.errorKind === null || collected.errorKind === undefined
-            ? ""
-            : ` (${collected.errorKind})`;
-        this.recordFault(
-          `${node.id}: leaf ${collected.status}${kind}: ${renderValue(collected.output ?? "no detail").slice(0, 200)}`,
+        return nonCompleteFirstCollectResult(
+          this.noteQuotaExhausted.bind(this),
+          this.recordFault.bind(this),
+          this.account.bind(this),
+          node.id,
+          id,
+          collected,
+          total,
         );
-        return { output: null, usage: total, complete: false };
       }
-      let output = collected.output;
-      let usedFallback = false;
-      if (forced) {
-        const call = collected.toolCalls
-          ?.map(asRecord)
-          .find((candidate) => candidate?.name === "StructuredOutput");
-        if (call !== undefined && call !== null) output = call.arguments ?? call.args ?? null;
-        else usedFallback = true;
-      }
+      const { output: forcedOutput, usedFallback } = extractForcedOutput(collected, forced);
+      let output = forcedOutput;
       if (schema !== null && output !== null) {
         for (let attempt = 0; attempt <= MAX_VALIDATION_RETRIES; attempt += 1) {
           const parsed = parseAndValidate(output, schema);
@@ -308,6 +309,16 @@ export class WorkflowEngine {
           collected = await this.runtime.collect(id, { wait: true, timeoutSeconds: timeout });
           // collect() reports the aggregate usage; only the terminal snapshot is charged.
           total = resultUsage(collected);
+          if (collected.status === "running")
+            return await recollectLeafTimeout(
+              this.runtime.cancel.bind(this.runtime),
+              this.recordFault.bind(this),
+              this.account.bind(this),
+              node.id,
+              id,
+              timeout,
+              collected,
+            );
           if (collected.status !== "complete") {
             this.account(node.id, id, { ...collected, usage: total });
             this.recordFault(
@@ -326,36 +337,33 @@ export class WorkflowEngine {
       release();
     }
   }
-
   private account(nodeId: string, id: string, collected: ChildResult): void {
     if (this.accounted.has(id)) return;
     this.accounted.add(id);
-    const next = resultUsage(collected);
     const uncertain = collected.usageUncertain === true;
-    this.leafCosts.set(id, next);
-    accountLeaf(this.result, nodeId, collected, next, uncertain);
+    const next = debitLeaf(this.result, this.leafCosts, this.nodeScope, nodeId, id, collected);
     this.budget.chargeTokens(next.inputTokens, next.outputTokens, uncertain);
   }
 
   private schemaOf(
     node: Node | Readonly<Record<string, unknown>>,
   ): Readonly<Record<string, unknown>> | null {
-    const fields = node instanceof Node ? node.fields : node;
-    const inline = resolveInlineSchema(fields.schema, this.schemas);
-    if (inline !== null) return inline;
-    const reference = fields.schema_ref;
-    return typeof reference === "string" ? asRecord(this.schemas[reference]) : null;
+    return resolveNodeSchema(node, this.schemas);
   }
 
   private cell(parts: readonly unknown[]): string {
     return contentHash(...this.specIdentity, ...parts);
   }
 
+  private bodyDeps() {
+    return { control: this.control, result: this.result, collectLeaf: this.collectLeaf.bind(this) };
+  }
+
   private cacheGet(hash: string): unknown {
-    const found = this.cache.get(this.runId, hash);
+    const owner = scopedCheckpointId(this.nodeScope, this.currentNode);
+    const found = this.cache.get(this.runId, hash, owner);
     if (!found.hit) return CACHE_MISS;
-    if (found.cost !== null)
-      addUsageToResult(this.result, this.currentNode, found.cost, null, null);
+    if (found.cost !== null) addUsageToResult(this.result, owner, found.cost, null, null);
     return found.output;
   }
 
@@ -369,8 +377,9 @@ export class WorkflowEngine {
     this.accounted = new Set();
     this.leafCosts = new Map();
     this.schemas = spec.schemas;
-    this.specIdentity = Object.freeze([spec.name, spec.meta.version ?? null]);
+    this.specIdentity = Object.freeze([spec.name, spec.meta.version ?? null, ...this.nodeScope]);
     const ordered = topologicalOrder(spec);
+    this.nestedAnswers = await siblingAnswers(this.checkpointAnswers, ordered, args, this.loader);
     this.result.nodesTotal = ordered.length;
     this.progressTracker.reset(ordered.map((node) => node.id));
     for (const node of ordered) {
@@ -408,7 +417,7 @@ export class WorkflowEngine {
       this.result.status = "paused";
       this.result.pauseReason = this.control.pauseReason;
       this.result.checkpoint = this.control.pausePayload;
-    } else this.result.status = deriveStatus(this.result);
+    } else if (this.result.status !== "failed") this.result.status = deriveStatus(this.result);
     return this.result;
   }
 
@@ -434,7 +443,7 @@ export class WorkflowEngine {
     if (cached !== CACHE_MISS) return cached;
     const retries = clampInteger(node.fields.retries, 1, MAX_NODE_RETRIES);
     for (let attempt = 0; attempt <= retries; attempt += 1) {
-      if (attempt > 0) this.result.leafRespawns += 1;
+      if (attempt > 0 && !stoppedByControl(this.control)) this.result.leafRespawns += 1;
       const rendered = renderValue(prompt);
       const attemptPrompt = attempt === 0 ? rendered : `${rendered}\n\n${EMPTY_OUTPUT_CORRECTION}`;
       const leaf = await this.collectLeaf(node, attemptPrompt, schema, {
@@ -460,9 +469,10 @@ export class WorkflowEngine {
     if (!Array.isArray(resolved)) return null;
     const hash = this.cell([node.id, "parallel", resolved, ...routingIdentity(node, this.tiers)]);
     const cached = this.cacheGet(hash);
-    const { runId, cache, result, specIdentity: spec, tiers } = this;
-    const deps = { runId, cache, result, spec, tiers, collectLeaf: this.collectLeaf.bind(this) };
-    if (cached !== CACHE_MISS) return recordGroupReplayCost(deps, node, resolved, cached);
+    const { runId, cache, result, specIdentity: spec, tiers, control, nodeScope } = this;
+    const collectLeaf = this.collectLeaf.bind(this);
+    const deps = { runId, cache, result, spec, tiers, control, collectLeaf, nodeScope };
+    if (cached !== CACHE_MISS) return recordGroupReplayCost(deps, node, resolved, cached, hash);
     this.gateFanout(resolved.length);
     const leaves = await Promise.all(
       resolved.map((p, i) => collectBranchWithRetries(deps, node, i, renderValue(p))),
@@ -529,7 +539,8 @@ export class WorkflowEngine {
           let winningCost = usage();
           let correction = "";
           for (let attempt = 0; attempt <= retries; attempt += 1) {
-            if (attempt > 0) this.result.leafRespawns += 1;
+            if (attempt > 0 && !stoppedByControl(this.control, () => expired))
+              this.result.leafRespawns += 1;
             const leaf = await this.collectLeaf(
               stageNode,
               correction === "" ? renderValue(prompt) : `${renderValue(prompt)}\n\n${correction}`,
@@ -590,6 +601,8 @@ export class WorkflowEngine {
     }, this.pipelineTimeoutSeconds * 1000);
     const outcome = await Promise.race([work.then(() => "complete" as const), deadline]);
     clearTimeout(timer);
+    if (sealPipelineRatio(this.recordFault.bind(this), node, done, itemValues.length))
+      this.result.status = "failed";
     if (outcome === "complete") return outputs;
     expired = true;
     const active = [...this.activeLeaves];
@@ -771,17 +784,12 @@ export class WorkflowEngine {
     );
     if (firstPrompt === null) return null;
     const bodySchema = this.schemaOf(body);
-    const hash = this.cell([
-      node.id,
-      "loop_until_dry",
-      firstPrompt,
-      bodySchema,
-      stopAfter,
-      rounds,
-      ...routingIdentity(node, this.tiers),
-    ]);
+    const hash = this.cell(
+      loopBodyCellParts(node, this.tiers, firstPrompt, bodySchema, stopAfter, rounds, body),
+    );
     const cached = this.cacheGet(hash);
     if (cached !== CACHE_MISS) return cached;
+    const runBody = makeBodyLeafRunner(this.bodyDeps(), node, body);
     const collected: unknown[] = [];
     let empty = 0;
     let intact = true;
@@ -794,7 +802,7 @@ export class WorkflowEngine {
       if (prompt === null) return null;
       let leaf: LeafExecution;
       try {
-        leaf = await this.collectLeaf(node, renderValue(prompt), bodySchema, {
+        leaf = await runBody(renderValue(prompt), bodySchema, {
           role: "loop.round",
           cellId: hash,
           attempt: round,
@@ -807,18 +815,14 @@ export class WorkflowEngine {
       if (leaf.output === null) {
         intact = false;
         this.recordFault(`${node.id}: round ${String(round)} dead`);
-        continue;
-      }
-      if (
-        isEmptyOutput(leaf.output) ||
-        (Array.isArray(leaf.output) && leaf.output.length === 0) ||
-        (asRecord(leaf.output) !== null && Object.keys(asRecord(leaf.output) ?? {}).length === 0)
-      )
+      } else if (isDryRound(leaf.output)) {
         empty += 1;
-      else {
+      } else {
         collected.push(leaf.output);
         empty = 0;
       }
+      if (stopForBudget(this.recordFault.bind(this), node, total, round, rounds, empty, stopAfter))
+        break;
     }
     const output = collected;
     if (intact) this.cachePut(hash, node.id, output, total);
@@ -853,7 +857,7 @@ export class WorkflowEngine {
       segmentId: this.segmentId,
       depth: this.depth + 1,
       nodeScope: [...this.nodeScope, node.id],
-      checkpointAnswers: this.checkpointAnswers,
+      checkpointAnswers: this.nestedAnswers,
       pipelineTimeoutSeconds: this.pipelineTimeoutSeconds,
       ...(this.onEvent === undefined ? {} : { onEvent: this.onEvent }),
       logError: this.logError,
@@ -873,11 +877,7 @@ export class WorkflowEngine {
     this.result.capTrips += result.capTrips;
     this.result.engineFaults += result.engineFaults;
     this.result.forcingFallbacks += result.forcingFallbacks;
-    this.result.leafRespawns += result.leafRespawns;
-    this.result.sandboxRefusals += result.sandboxRefusals;
-    this.result.sandboxFaults.push(
-      ...result.sandboxFaults.map((fault) => `sub[${reference}]: ${fault}`),
-    );
+    foldNestedCounters(this.result, result, reference);
     return Object.freeze({ ...result.outputs });
   }
 
@@ -892,26 +892,20 @@ export class WorkflowEngine {
     this.budget.checkFanout(attempts * 2);
     const prompt = strictResolve(body.prompt, context);
     if (prompt === null) return null;
-    const hash = this.cell([
-      node.id,
-      "gate",
-      prompt,
-      this.schemaOf(body),
-      validator,
-      attempts,
-      ...routingIdentity(node, this.tiers),
-    ]);
+    const hash = this.cell(
+      gateCellParts(node, this.tiers, prompt, this.schemaOf(body), validator, attempts, body),
+    );
     const cached = this.cacheGet(hash);
     if (cached !== CACHE_MISS) return cached;
+    const runBody = makeBodyLeafRunner(this.bodyDeps(), node, body);
     let feedback = "";
     let total = usage();
     for (let attempt = 0; attempt < attempts; attempt += 1) {
-      const draft = await this.collectLeaf(
-        node,
-        `${renderValue(prompt)}${feedback}`,
-        this.schemaOf(body),
-        { role: "gate.body", cellId: hash, attempt },
-      );
+      const draft = await runBody(`${renderValue(prompt)}${feedback}`, this.schemaOf(body), {
+        role: "gate.body",
+        cellId: hash,
+        attempt,
+      });
       total = combine(total, draft.usage);
       if (!nonEmpty(draft.output)) {
         feedback = "\n\nPrevious draft was empty; produce a complete draft.";
@@ -975,17 +969,10 @@ export class WorkflowEngine {
     const hash = this.cell([node.id, "checkpoint", prompt]);
     const cached = this.cacheGet(hash);
     if (cached !== CACHE_MISS) return cached;
-    if (Object.hasOwn(this.checkpointAnswers, node.id)) {
-      const answer = this.checkpointAnswers[node.id];
-      this.cache.put(this.runId, hash, node.id, answer, null);
-      return answer;
-    }
-    const payload = Object.freeze({
-      node_id: node.id,
-      prompt,
-      ...(Object.hasOwn(node.fields, "default") ? { default: node.fields.default } : {}),
-    });
-    this.pause("checkpoint", `${node.id}: checkpoint waiting for answer`, payload);
+    const resolved = resolveCheckpoint(this.checkpointAnswers, this.nodeScope, node.id);
+    if (resolved.matched)
+      return applyCheckpointAnswer(this.cache, this.runId, hash, node.id, resolved.answer);
+    this.pause("checkpoint", resolved.message, checkpointPausePayload(node, resolved, prompt));
     return null;
   }
 }

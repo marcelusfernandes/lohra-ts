@@ -1,7 +1,8 @@
 // Issue #112 — the `qa` follow-up to PR #110's review: `child-runner.ts`'s
 // leaf sandbox wiring (`config.wrapDispatch === undefined ? childDispatch :
-// config.wrapDispatch(childDispatch)`, #101/#107) had no `mutations:t16`
-// entry watching it, so a regression that dropped the wrap survived
+// config.wrapDispatch(childDispatch, subId)`, #101/#107, `subId` added by
+// #367) had no `mutations:t16` entry watching it, so a regression that
+// dropped the wrap survived
 // (96/96 killed, none of them here). This module carries that one entry —
 // split out of the t16 runner (contract `arquivo-grande`, #93/#112: that
 // file was already over the 800-line limit and could not grow) — and is a
@@ -55,8 +56,10 @@ export const orchestrationMutants: readonly Mutant[] = [
     edits: [
       {
         file: childRunner,
-        before:
-          "      const dispatch =\n        config.wrapDispatch === undefined ? childDispatch : config.wrapDispatch(childDispatch);",
+        before: `      const dispatch =
+        config.wrapDispatch === undefined
+          ? childDispatch
+          : config.wrapDispatch(childDispatch, subId);`,
         after: "      const dispatch = childDispatch;",
       },
     ],

@@ -47,9 +47,13 @@ export interface SpawnConfig {
    * child allow-list exclusions (child.ts:57-78) still run first. Carried
    * verbatim through steer()'s idle/terminal resurrection via
    * `entry.originalConfig` (no change needed there: the spread already
-   * includes whatever this field holds).
+   * includes whatever this field holds). Issue #367: carries `subId` too —
+   * `OrchestrationChildRuntime.spawn` cannot know it in advance (it is what
+   * `core.spawn` is about to mint), so the wrap it returns reads `subId` from
+   * this SECOND argument instead, supplied by `createChildRunner` once the id
+   * is already in scope.
    */
-  readonly wrapDispatch?: (base: ChildToolDispatch) => ChildToolDispatch;
+  readonly wrapDispatch?: (base: ChildToolDispatch, subId: string) => ChildToolDispatch;
 }
 
 /**

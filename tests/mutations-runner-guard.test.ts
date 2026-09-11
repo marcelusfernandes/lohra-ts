@@ -42,6 +42,7 @@ const RUNNERS = [
   "scripts/mutations/media.ts",
   "scripts/mutations/self-update.ts",
   "scripts/mutations/context-window.ts",
+  "scripts/mutations/auth.ts",
 ] as const;
 
 const GIT_SHIM = "#!/bin/sh\nprintf 'invoked\\n' >> \"$GIT_MARKER\"\nexit 1\n";

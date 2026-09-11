@@ -21,6 +21,7 @@ import {
 
 class ScriptedRuntime implements ChildRuntime {
   readonly spawned: ChildSpawnRequest[] = [];
+  readonly cancelled: string[] = [];
   private readonly scripts: ChildResult[][];
   private readonly byId = new Map<string, ChildResult[]>();
 
@@ -38,6 +39,41 @@ class ScriptedRuntime implements ChildRuntime {
   collect(id: string, _options: ChildCollectOptions): ChildResult {
     const script = this.byId.get(id) ?? [];
     return script.shift() ?? { status: "failed", output: "script exhausted" };
+  }
+
+  steer(): void {}
+  cancel(id: string): void {
+    this.cancelled.push(id);
+  }
+  installLeafSandbox(): { dispose: () => void } {
+    return { dispose: (): void => undefined };
+  }
+}
+
+/** Issue #336: the first branch attempt comes back DEAD and, in the SAME
+ * `collect()`, calls `cancel()` on the engine — `cancel()` (engine.ts:
+ * 138-141) never routes through `pause()`, so it never touches
+ * `result.pauseFault`. `stillDying` (engine-utils.ts) pre-#336 only read
+ * `pauseFault`, so it could not see this stop at all: the retry loop would
+ * credit a phantom `leafRespawns` for the attempt `collectLeaf`'s own
+ * entry check (already reading `control.cancelled`) refuses to spawn. */
+class CancelOnFirstCollectRuntime implements ChildRuntime {
+  readonly spawned: ChildSpawnRequest[] = [];
+  private engine: WorkflowEngine | null = null;
+
+  setEngine(engine: WorkflowEngine): void {
+    this.engine = engine;
+  }
+
+  spawn(request: ChildSpawnRequest): string {
+    const id = `leaf-${String(this.spawned.length + 1)}`;
+    this.spawned.push(request);
+    return id;
+  }
+
+  collect(_id: string, _options: ChildCollectOptions): ChildResult {
+    this.engine?.cancel();
+    return { status: "failed", output: "boom" };
   }
 
   steer(): void {}
@@ -134,5 +170,161 @@ describe("parallel.retries (#242)", () => {
     expect(runtime.spawned).toHaveLength(1);
     expect(result.status).toBe("paused");
     expect(result.pauseReason).toBe("token_budget_exhausted");
+  });
+
+  it("bounds a sibling's phantom respawns when the run pauses mid fan-out", async () => {
+    // `collectLeaf` returns a null leaf with NO spawn, NO fault and NO
+    // charge once `this.control.paused` is set (engine.ts:235-236) —
+    // indistinguishable from a fresh death by `output === null` alone.
+    // Two branches that both die expensively: whichever retry loses the
+    // race pauses the run via `gateTokens()`; the guard stops the OTHER
+    // branch's loop once `result.pauseFault` is visible — bounding the
+    // damage to at most one wasted attempt per branch (2). Without the
+    // guard, the base measured 4: the losing branch takes 1 respawn
+    // before `gateTokens()` throws and pauses; the other, unaware,
+    // spins through all 3 of its own `retries` hitting the paused
+    // shortcut each time (1 + 3 = 4) — never a full 6 (3 retries x 2
+    // branches), since the losing branch's own throw cuts its loop
+    // short too.
+    const expensive: ChildResult = {
+      status: "failed",
+      output: "boom",
+      usage: {
+        inputTokens: 2000,
+        outputTokens: 1,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningTokens: 0,
+      },
+    };
+    const runtime = new ScriptedRuntime([[expensive], [expensive]]);
+    const spec = parsed({
+      meta: { name: "retry-pause-race" },
+      nodes: [{ id: "p", type: "parallel", branches: ["a", "b"], retries: 3 }],
+    });
+    const budget = new Budget({ tokenBudget: 4000 });
+    const result = await new WorkflowEngine({ runtime, budget }).run(spec);
+    const respawns = (result as unknown as { leafRespawns: number }).leafRespawns;
+    expect(respawns).toBeLessThanOrEqual(2); // base measured 4 (1 + 3), not 6
+    expect(result.status).toBe("paused");
+    expect(result.pauseReason).toBe("token_budget_exhausted");
+  });
+
+  it("does not credit a respawn when cancel() fires between branch attempts (#336)", async () => {
+    const runtime = new CancelOnFirstCollectRuntime();
+    const engine = new WorkflowEngine({ runtime });
+    runtime.setEngine(engine);
+    const spec = parsed({
+      meta: { name: "retry-cancel-between-attempts" },
+      nodes: [{ id: "p", type: "parallel", branches: ["a"], retries: 1 }],
+    });
+    const result = await engine.run(spec);
+    expect(runtime.spawned).toHaveLength(1);
+    expect(result.status).toBe("cancelled");
+    expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(0);
+  });
+});
+
+// Issue #313: a leaf that dies by TIMEOUT (collect() returns "running" —
+// runtime.cancel then tears it down) still spent real tokens up to that
+// point. `collectLeaf` used to return a bare zero `usage()` for that
+// attempt without ever calling `account()` — the run's own `budget.charge()`
+// still counted the leaf against `affordableLeaves`, but the tokens
+// themselves vanished from `tokensIn`/`tokensOut` and `gateTokens` never saw
+// them. `retries: 1` here is the same "second collectLeaf call hits
+// gateTokens() before spawning" pattern the retry-budget test above uses —
+// the only way to observe a debit from OUTSIDE the engine without a spy.
+describe("timeout cost enters the budget (#313)", () => {
+  it("debits a timed-out leaf's measured usage — the next spawn's gateTokens sees it and pauses", async () => {
+    const timedOut: ChildResult = {
+      status: "running",
+      output: null,
+      usage: {
+        inputTokens: 2000,
+        outputTokens: 1,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningTokens: 0,
+      },
+    };
+    const runtime = new ScriptedRuntime([[timedOut]]);
+    const spec = parsed({
+      meta: { name: "timeout-budget" },
+      nodes: [{ id: "p", type: "parallel", branches: ["a"], retries: 1 }],
+    });
+    const budget = new Budget({ tokenBudget: 2000 });
+    const result = await new WorkflowEngine({ runtime, budget }).run(spec);
+    // The retry's own gateTokens() throws before a second leaf spawns —
+    // proof the FIRST (timed-out) attempt's usage was actually debited.
+    expect(runtime.spawned).toHaveLength(1);
+    expect(result.status).toBe("paused");
+    expect(result.pauseReason).toBe("token_budget_exhausted");
+  });
+
+  it("charges a timed-out leaf's usage exactly once, never doubled", async () => {
+    const timedOut: ChildResult = {
+      status: "running",
+      output: null,
+      usage: {
+        inputTokens: 500,
+        outputTokens: 25,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningTokens: 0,
+      },
+    };
+    const runtime = new ScriptedRuntime([[timedOut]]);
+    const spec = parsed({
+      meta: { name: "timeout-single-charge" },
+      nodes: [{ id: "p", type: "parallel", branches: ["a"], retries: 0 }],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(result.tokensIn).toBe(500);
+    expect(result.tokensOut).toBe(25);
+  });
+
+  it("marks usageUncertain instead of a silent zero when the runtime reports no usage on timeout", async () => {
+    const timedOut: ChildResult = { status: "running", output: null };
+    const runtime = new ScriptedRuntime([[timedOut]]);
+    const spec = parsed({
+      meta: { name: "timeout-uncertain" },
+      nodes: [{ id: "p", type: "parallel", branches: ["a"], retries: 0 }],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(result.outputs.p).toBeNull();
+    expect(result.usageUncertainLeaves).toBe(1);
+    expect(result.tokensIn).toBe(0);
+    expect(result.tokensOut).toBe(0);
+  });
+});
+
+// Issue #329: `collectLeaf`'s SECOND `collect()` — the re-collect after
+// `runtime.steer()` in the schema-validation retry loop — used to treat a
+// `status: "running"` (timeout) result like any other non-complete status:
+// `account()` the usage but never `runtime.cancel(id)` nor a timeout-named
+// fault, unlike the FIRST `collect()`'s timeout path (#313). That left the
+// leaf alive in the runtime (an orphan) while usage was folded in as if the
+// attempt had simply failed — never marked `usageUncertain`. The first
+// `complete()` response here is JSON that FAILS the schema (forcing the
+// steer + re-collect loop); the second `collect()` for that same leaf id
+// then reports `running`, exactly like a timeout during re-collection.
+describe("timeout during the schema re-collect loop (#329)", () => {
+  it("cancels the leaf, faults with a timeout cause, and marks usageUncertain", async () => {
+    const runtime = new ScriptedRuntime([
+      [ok('{"wrong":true}'), { status: "running", output: null }],
+    ]);
+    const spec = parsed({
+      meta: { name: "timeout-recollect" },
+      nodes: [
+        { id: "a", type: "agent", prompt: "x", schema: { type: "object", required: ["value"] } },
+      ],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(runtime.cancelled).toEqual(["leaf-1"]);
+    expect(result.outputs.a).toBeNull();
+    expect(result.faults.some((fault) => fault.includes("timeout"))).toBe(true);
+    expect(result.usageUncertainLeaves).toBe(1);
+    expect(result.tokensIn).toBe(0);
+    expect(result.tokensOut).toBe(0);
   });
 });

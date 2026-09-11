@@ -75,6 +75,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { mutants as authMutants } from "../scripts/mutations/auth-mutants.js";
 import { combinedMutants, guardMutants } from "../scripts/mutations/workflow-durability-guard.js";
 import { contextWindowMutants } from "../scripts/mutations/context-window.js";
 import { otherMediaMutants } from "../scripts/mutations/media-catalog-other.js";
@@ -82,6 +83,7 @@ import { persistenceMutants } from "../scripts/mutations/media-catalog-persisten
 import { orchestrationMutants } from "../scripts/mutations/orchestration.js";
 import { mutants as selfUpdateMutants } from "../scripts/mutations/self-update-mutants.js";
 import { mutants as auditLiveMutants } from "../scripts/mutations/workflow-audit-live-mutants.js";
+import { auditProducersMutants } from "../scripts/mutations/workflow-audit-producers-mutants.js";
 import { namedMutants } from "../scripts/mutations/workflow-durability-named.js";
 import { webToolsMutants } from "../scripts/mutations/web-tools-mutants.js";
 import {
@@ -113,6 +115,7 @@ const NAO_CATALOGO = new Set([
   "workflow-audit-live.ts",
   "workflow-durability.ts",
   "workflow-executor.ts",
+  "auth.ts",
 ]);
 
 const CATALOG_EXPORT_PATTERN = /export const [A-Za-z_]*[Mm]utants\b/;
@@ -151,7 +154,7 @@ interface CatalogEntry {
   readonly edits: readonly { readonly file: string }[];
 }
 
-/** Os dez catálogos de dado puro, chave = caminho relativo à raiz do repo
+/** Os doze catálogos de dado puro, chave = caminho relativo à raiz do repo
  * igual ao que aparece em `slices.json#catalog` -- a checagem de item 3 do
  * cabeçalho acima compara as CHAVES deste mapa contra a união dos
  * `catalog` do JSON, então um `catalog` novo no JSON sem entrada aqui (ou
@@ -171,12 +174,14 @@ const CATALOGOS: ReadonlyMap<string, readonly CatalogEntry[]> = new Map<
   ["scripts/mutations/workflow-durability-named.ts", asCatalog(namedMutants)],
   ["scripts/mutations/orchestration.ts", asCatalog(orchestrationMutants)],
   ["scripts/mutations/workflow-audit-live-mutants.ts", asCatalog(auditLiveMutants)],
+  ["scripts/mutations/workflow-audit-producers-mutants.ts", asCatalog(auditProducersMutants)],
   ["scripts/mutations/web-tools-mutants.ts", asCatalog(webToolsMutants)],
   ["scripts/mutations/media-catalog-other.ts", asCatalog(otherMediaMutants)],
   ["scripts/mutations/media-catalog-persistence.ts", asCatalog(persistenceMutants)],
   ["scripts/mutations/self-update-mutants.ts", asCatalog(selfUpdateMutants)],
   ["scripts/mutations/workflow-executor-mutants.ts", asCatalog(executorMutants)],
   ["scripts/mutations/context-window.ts", asCatalog(contextWindowMutants)],
+  ["scripts/mutations/auth-mutants.ts", asCatalog(authMutants)],
 ]);
 
 interface Slice {
@@ -230,7 +235,6 @@ function readSlices(): readonly Slice[] {
  * `srcGlobs`; o teste abaixo reprova se as duas listas se sobrepõem. */
 const SEM_FATIA: ReadonlyMap<string, string> = new Map([
   ["agent", "sem catálogo de mutantes ainda"],
-  ["auth", "sem catálogo de mutantes ainda"],
   ["config", "sem catálogo de mutantes ainda"],
   ["core", "sem catálogo de mutantes ainda"],
   ["cron", "sem catálogo de mutantes ainda"],
@@ -304,10 +308,11 @@ describe("scripts/mutations/slices.json", () => {
     expect(existsSync(slicesPath)).toBe(true);
   });
 
-  it("tem as sete fatias, cada uma com o schema esperado", () => {
+  it("tem as oito fatias, cada uma com o schema esperado", () => {
     const slices = readSlices();
     expect(slices.map((entry) => entry.slice).sort()).toEqual(
       [
+        "auth",
         "context-window",
         "media",
         "self-update",
@@ -475,8 +480,8 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 188 (soma dos dez catálogos importados)", () => {
-    // Os dez catálogos de dado puro, importados de verdade via CATALOGOS:
+  it("a contagem total de mutantes é 214 (soma dos doze catálogos importados)", () => {
+    // Os doze catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
     // `probe`). `workflow-executor-mutants.ts` (issue #186) foi o nono: antes
@@ -484,9 +489,12 @@ describe("scripts/mutations/slices.json", () => {
     // a contagem era lida do texto fonte por regex em vez de importada.
     // `context-window.ts` (issue #293) é o décimo: catálogo e runner no
     // mesmo arquivo (atrás da mesma guarda de entry-point), porque o `Files`
-    // da issue só autoriza um script novo.
+    // da issue só autoriza um script novo. `auth-mutants.ts` (issue #354) é
+    // o décimo primeiro: 188 + 8 = 196. `workflow-audit-producers-mutants.ts`
+    // (issue #370) é o décimo segundo, estendendo a fatia
+    // `workflow-audit-live` aos produtores do M7: 196 + 18 = 214.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 188;
+    const TOTAL_MUTANTS = 214;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -503,19 +511,21 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/workflow-durability-named.ts": 41,
       "scripts/mutations/orchestration.ts": 5,
       "scripts/mutations/workflow-audit-live-mutants.ts": 32,
+      "scripts/mutations/workflow-audit-producers-mutants.ts": 18,
       "scripts/mutations/web-tools-mutants.ts": 9,
       "scripts/mutations/media-catalog-other.ts": 7,
       "scripts/mutations/media-catalog-persistence.ts": 13,
       "scripts/mutations/self-update-mutants.ts": 8,
       "scripts/mutations/workflow-executor-mutants.ts": 44,
       "scripts/mutations/context-window.ts": 15,
+      "scripts/mutations/auth-mutants.ts": 8,
     };
     expect(new Set(Object.keys(CONTAGEM_POR_CATALOGO))).toEqual(new Set(CATALOGOS.keys()));
     for (const [path, mutants] of CATALOGOS) {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(188);
+    expect(somaTabela).toBe(214);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {

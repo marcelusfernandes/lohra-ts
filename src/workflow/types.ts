@@ -67,16 +67,6 @@ export class Node {
     Object.freeze(this);
   }
 
-  get label(): string {
-    const value = this.fields.label;
-    return typeof value === "string" ? value : this.id;
-  }
-
-  get phase(): string | null {
-    const value = this.fields.phase;
-    return typeof value === "string" ? value : null;
-  }
-
   get required(): boolean {
     return Boolean(this.fields.required);
   }

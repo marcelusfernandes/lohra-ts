@@ -5,6 +5,7 @@ import type {
   ChildResult,
   ChildRuntime,
   ChildSpawnRequest,
+  LeafIdentity,
   LeafSandboxHandle,
   LeafSandboxInstallation,
   LeafToolDispatch,
@@ -33,6 +34,13 @@ function readPending(value: string): Promise<string> | undefined {
   return candidate instanceof PendingDispatch ? candidate.promise : undefined;
 }
 
+/** Parses `onToolSettled`'s `ok` from the tool envelope's own leading
+ * `{"ok":...` (never the rest of the payload) — real envelopes come from
+ * `toolResult`/`toolError`, src/tools/envelope.ts. */
+function okFromEnvelope(result: string): boolean {
+  return result.startsWith('{"ok":true');
+}
+
 /**
  * Bridges the sandbox's synchronous `LeafToolDispatch` contract
  * (runtime.ts:44, `LeafSandboxInstallation.wrap`) to the child pool's real,
@@ -50,25 +58,38 @@ function readPending(value: string): Promise<string> | undefined {
  * `wrap` returns is a synchronous DENIAL that never called `base` at all —
  * per contract, a denial never reaches (and never needs to unwrap) a token.
  *
- * `refusals` (#246) is THIS leaf's own counting side channel: every synchronous
- * denial (never a `PendingDispatch`) increments it. A real tool call — even one
- * that later reports its OWN failure — always produced a token first, so it is
- * never counted here; only a call the wrap itself turned away before `base` ran
- * is a sandbox refusal.
+ * Issue #367: `subId` — unknown to `wrapDispatchFor` at RESOLVE time, since
+ * `core.spawn` mints it — arrives here as a second argument instead, read by
+ * `createChildRunner` once it is in scope and threaded straight through to
+ * `installation.wrap`. After the real dispatch settles (never for a sync
+ * denial — that path returns before `pending` exists), `onToolSettled` fires
+ * with `ok` parsed from the tool envelope's own leading `{"ok":...` (never
+ * the rest of the payload) — see `okFromEnvelope` above.
+ *
+ * `onRefusal` (#246) is THIS leaf's own counting side channel: every
+ * synchronous denial (never a `PendingDispatch`) fires it, keyed by `subId`.
+ * A real tool call — even one that later reports its OWN failure — always
+ * produced a token first, so it is never counted here; only a call the wrap
+ * itself turned away before `base` ran is a sandbox refusal.
  */
 function adaptSandboxWrap(
-  wrap: (base: LeafToolDispatch) => LeafToolDispatch,
-  refusals: { count: number },
-): (base: ChildToolDispatch) => ChildToolDispatch {
-  return (base) => {
+  installation: LeafSandboxInstallation,
+  onRefusal: (subId: string) => void,
+): (base: ChildToolDispatch, subId: string) => ChildToolDispatch {
+  return (base, subId) => {
+    const leaf: LeafIdentity = Object.freeze({ subId });
     const syncBase: LeafToolDispatch = (name, args) => pendingToken(base(name, args));
-    const wrapped = wrap(syncBase);
+    const wrapped = installation.wrap(syncBase, leaf);
     return async (name, args) => {
       const out = wrapped(name, args);
       const pending = readPending(out);
-      if (pending !== undefined) return await pending;
-      refusals.count += 1;
-      return out;
+      if (pending === undefined) {
+        onRefusal(subId);
+        return out;
+      }
+      const result = await pending;
+      installation.onToolSettled?.(leaf, okFromEnvelope(result));
+      return result;
     };
   };
 }
@@ -139,27 +160,39 @@ export class OrchestrationChildRuntime implements ChildRuntime {
 
   private wrapDispatchFor(
     runId: string,
-    refusals: { count: number },
-  ): (base: ChildToolDispatch) => ChildToolDispatch {
+  ): (base: ChildToolDispatch, subId: string) => ChildToolDispatch {
     const installation = this.installations.get(runId);
     return installation === undefined
       ? () => denyAllDispatch
-      : adaptSandboxWrap(installation.wrap, refusals);
+      : adaptSandboxWrap(installation, (subId) => {
+          this.recordRefusal(runId, subId);
+        });
+  }
+
+  /** Lazily creates this leaf's counter on its FIRST refusal — `subId` is
+   * only known once `core.spawn` mints it and hands it to the dispatcher
+   * (issue #367), so there is no earlier point to pre-create the box. A
+   * leaf with zero refusals never gets an entry; `collect` below defaults
+   * an absent entry to 0, so that is indistinguishable from "not counted
+   * yet" and both read 0. */
+  private recordRefusal(runId: string, subId: string): void {
+    let entry = this.refusalCounts.get(subId);
+    if (entry === undefined) {
+      entry = { runId, box: { count: 0 } };
+      this.refusalCounts.set(subId, entry);
+    }
+    entry.box.count += 1;
   }
 
   public spawn(request: ChildSpawnRequest): string {
-    const runId = request.causalContext.runId;
-    const box = { count: 0 };
-    const subId = this.core.spawn({
+    return this.core.spawn({
       prompt: request.prompt,
       ...(request.provider === undefined ? {} : { provider: request.provider }),
       ...(request.model === undefined ? {} : { model: request.model }),
       ...(request.effort === undefined ? {} : { effort: request.effort }),
       ...(request.maxIterations === undefined ? {} : { maxIterations: request.maxIterations }),
-      wrapDispatch: this.wrapDispatchFor(runId, box),
+      wrapDispatch: this.wrapDispatchFor(request.causalContext.runId),
     }).subId;
-    this.refusalCounts.set(subId, { runId, box });
-    return subId;
   }
 
   public async collect(id: string, options: ChildCollectOptions): Promise<ChildResult> {
