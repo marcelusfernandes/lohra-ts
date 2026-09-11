@@ -105,7 +105,7 @@ interface Edit {
 
 interface Focus {
   file: string; // arquivo de teste onde o oráculo mora
-  test: string; // padrão `vitest -t` do teste que precisa matar o mutante
+  test: string; // título literal do teste que precisa matar o mutante (escapado antes do -t, #362)
 }
 
 interface Mutant {
