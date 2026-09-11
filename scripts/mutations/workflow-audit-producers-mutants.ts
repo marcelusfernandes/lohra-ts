@@ -1,4 +1,4 @@
-// Catálogo de 18 mutantes dos produtores novos do M7 (issue #370): identidade
+// Catálogo de 25 mutantes dos produtores novos do M7 (issue #370, 18): identidade
 // causal (`audit-producers.ts`, #365), segmento/pausa/process_crash
 // (`audit-producers.ts`, #368), folha e ferramenta (`audit-runtime.ts`,
 // #366/#367), cache (`audit-cache.ts`, #368) e o ring do live tail
@@ -11,12 +11,24 @@
 // `category` deriva do `id` sem o prefixo `<letra><n>-`, mesma convenção do
 // catálogo original. `focus.test` é o título literal do `it` (substring do
 // `fullName`, veredito da PR #371/#362) — nunca um padrão de regex.
+//
+// Issue #383 (7 mutantes, 18 → 25): lacunas de oráculo o veredito da PR #382
+// registrou (R6, L4, W1, M1) mais três emendas do orquestrador — a fiação do
+// `AuditTrail` em `chat.ts` (W2, veredito da PR #384/#380), a allow-list de
+// `event_type` ancorada na CHECAGEM, não no conteúdo (M1, #386), e o laço de
+// flush do `close()` (T3, veredito da PR #385). Dois itens dessa mesma
+// emenda (settle tardio, `pending.count` por `sub_id`) são só teste — sem
+// mutante novo, pinados em `tests/workflow-audit-tool-cancel.test.ts`.
 import type { Mutant } from "./types.js";
 
 const auditProducers = "src/workflow/audit-producers.ts";
 const auditRuntime = "src/workflow/audit-runtime.ts";
 const auditCache = "src/workflow/audit-cache.ts";
 const liveTail = "src/workflow/live-tail.ts";
+const auditModel = "src/workflow/audit-model.ts";
+const workflowCommand = "src/commands/workflow.ts";
+const workflowTool = "src/workflow/tool.ts";
+const chatCommand = "src/commands/chat.ts";
 
 const identityFocus = "tests/workflow-audit-identity.test.ts";
 const segmentFocus = "tests/workflow-audit-segment.test.ts";
@@ -24,6 +36,9 @@ const leafFocus = "tests/workflow-audit-leaf.test.ts";
 const toolFocus = "tests/workflow-audit-tool.test.ts";
 const cacheFocus = "tests/workflow-audit-cache.test.ts";
 const liveTailFocus = "tests/workflow-live-tail.test.ts";
+const watchEventsFocus = "tests/workflow-watch-events.test.ts";
+const allowListFocus = "tests/workflow-audit-allow-list.test.ts";
+const chatAuditWiringFocus = "tests/chat-audit-trail-wiring.test.ts";
 
 export const auditProducersMutants: readonly Mutant[] = [
   {
@@ -318,6 +333,145 @@ export const auditProducersMutants: readonly Mutant[] = [
         file: liveTail,
         before: "    this.rings.delete(runId);",
         after: "    this.rings.delete(runId);\n    this.runs.delete(runId);",
+      },
+    ],
+  },
+  // Issue #383, item 1 (veredito da PR #382): the ring's evict-oldest
+  // guarantee (FIFO) had no test — `R2-drop-newest` (`shift()` → `pop()`)
+  // survived the first real corridor and was swapped for `R2-byte-trim-
+  // disabled`. A dedicated FIFO test closes that gap.
+  {
+    id: "R6-drop-newest",
+    category: "drop-newest",
+    mechanism: "family-a",
+    focus: {
+      file: liveTailFocus,
+      test: "evicts the OLDEST event first (FIFO) — the first surviving event is exactly the k-th pushed",
+    },
+    edits: [
+      {
+        file: liveTail,
+        before: "      const removed = ring.events.shift();",
+        after: "      const removed = ring.events.pop();",
+      },
+    ],
+  },
+  // Issue #383, item 2 (veredito da PR #382): `collect()`'s `wait:false`
+  // branch (a non-terminal ChildResult with the caller NOT waiting) had no
+  // test — a mutant that always closes the leaf regardless of `wait` would
+  // have survived.
+  {
+    id: "L4-wait-false-closes",
+    category: "wait-false-closes",
+    mechanism: "family-a",
+    focus: {
+      file: leafFocus,
+      test: "collect wait:false returning running emits no terminal — only a later done/cancel closes the leaf",
+    },
+    edits: [
+      {
+        file: auditRuntime,
+        before: "      } else if (options.wait) {",
+        after: "      } else if (true) {",
+      },
+    ],
+  },
+  // Issue #383, item 3 (veredito da PR #382): `watch --events`'s cursor had
+  // no mutant — killed by the EXISTING poll test
+  // (`tests/workflow-watch-events.test.ts:113`), added to this slice's
+  // `focusFiles` for the first time here.
+  {
+    id: "W1-watch-events-repeat",
+    category: "watch-events-repeat",
+    mechanism: "family-a",
+    focus: {
+      file: watchEventsFocus,
+      test: "advances the cursor across polls without re-showing an already-printed event",
+    },
+    edits: [
+      {
+        file: workflowCommand,
+        before: "    if (page.page.has_more !== true) return after;",
+        after: "    if (page.page.has_more !== true) return cursor;",
+      },
+    ],
+  },
+  // Issue #383, item 4 (veredito da PR #382, emenda #386): the allow-list
+  // CHECK itself (never the `SAFE_EVENT_TYPES` set's contents, #386's own
+  // concern) had no mutant — killed by the existing #386 regression test.
+  {
+    id: "M1-allowlist-free-string",
+    category: "allowlist-free-string",
+    mechanism: "family-a",
+    focus: {
+      file: allowListFocus,
+      test: "treats a removed node.* type as unknown, not as a valid event_type",
+    },
+    edits: [
+      {
+        file: auditModel,
+        before:
+          'const eventType = SAFE_EVENT_TYPES.has(input.event_type) ? input.event_type : "audit.unavailable";',
+        after: "const eventType = input.event_type;",
+      },
+    ],
+  },
+  // Issue #383, item 5 (emenda do orquestrador, veredito da PR #384/#380):
+  // `chat.ts`'s own `AuditTrail` — a sink_failure on its very first audit
+  // write, if the `{ warning: auditWarning }` wiring were ever dropped,
+  // would silently vanish instead of reaching `console.warn`.
+  {
+    id: "W2-audit-trail-warning-unwired",
+    category: "audit-trail-warning-unwired",
+    mechanism: "family-a",
+    focus: {
+      file: chatAuditWiringFocus,
+      test: "a sink_failure on the run's first audit write reaches console.warn via chat.ts's AuditTrail sink",
+    },
+    edits: [
+      {
+        file: chatCommand,
+        before:
+          "auditTrail: new AuditTrail(sessionToolBase.auditRepository, { warning: auditWarning }),",
+        after: "auditTrail: new AuditTrail(sessionToolBase.auditRepository),",
+      },
+    ],
+  },
+  // Issue #383, item 8 (emenda do orquestrador, veredito da PR #385):
+  // `close()`'s flush loop for a leaf's still-open tool dispatches — killed
+  // by the existing "cancel with a dispatch still pending" test (#378/#385).
+  {
+    id: "T3-cancel-flush-skipped",
+    category: "cancel-flush-skipped",
+    mechanism: "family-a",
+    focus: {
+      file: toolFocus,
+      test: 'cancel with a dispatch still pending: tool.completed{status:"error",reason:"cancelled"} closes the orphan BEFORE leaf.failed',
+    },
+    edits: [
+      {
+        file: auditRuntime,
+        before: "    for (let index = 0; index < leaf.pending.count; index += 1) {",
+        after: "    for (let index = 0; index < 0; index += 1) {",
+      },
+    ],
+  },
+  // Issue #383, item 9 (emenda do orquestrador): `workflow_audit`'s own
+  // `pending` report (issue #373, PR #389) — killed by the existing stuck-
+  // sink test.
+  {
+    id: "PD-pending-never-reported",
+    category: "pending-never-reported",
+    mechanism: "family-a",
+    focus: {
+      file: toolFocus,
+      test: "a drain stuck on a permanently-busy sink reports integrity.pending instead of a silent events: []",
+    },
+    edits: [
+      {
+        file: workflowTool,
+        before: "  if (pending <= 0) return toolResult(undefined, page);",
+        after: "  if (true) return toolResult(undefined, page);",
       },
     ],
   },
