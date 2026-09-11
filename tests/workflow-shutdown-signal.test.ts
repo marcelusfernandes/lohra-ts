@@ -25,6 +25,8 @@ import {
   WorkflowRepository,
 } from "../src/state/index.js";
 import { AuditTrail } from "../src/workflow/audit-trail.js";
+import { createWorkflowAuditProducers } from "../src/workflow/audit-producers.js";
+import { WorkflowLiveEvents } from "../src/workflow/live-events.js";
 import { WorkflowService, type OwnershipStore } from "../src/workflow/service.js";
 import type { ChildResult, ChildRuntime, LeafSandboxHandle } from "../src/workflow/runtime.js";
 import { registerShutdownTrigger, type SignalTarget } from "../src/cli/shutdown-trigger.js";
@@ -156,9 +158,47 @@ describe("WorkflowService.shutdown('signal') vs cancel() (#428)", () => {
       close();
     }
   });
+
+  // Issue #434: `runShutdown` (service.ts:1218-1222) stamps
+  // `record.interruptCause = "signal"` on every run still `!settled` at the
+  // moment `shutdown("signal")` is called — but a run whose OWN
+  // `engine.run()` had already resolved is only marked `settled` inside its
+  // `.then()` (:609), a MICROTASK away. A run that wins that race settles
+  // with `status: "complete"`, never `"cancelled"`/`"interrupted"` — the
+  // guard below is exercised directly through the producers (more honest
+  // than reproducing the exact microtask ordering through `WorkflowService`,
+  // per the issue): `announceStretchEnd` still receives `cause: "signal"`
+  // for such a run, and must ignore it.
+  it("announceStretchEnd(status: complete, cause: signal) never grants reason: signal — only cancelled/interrupted do", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-workflow-shutdown-signal-race-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    const audit = new AuditRepository(connection.database);
+    const trail = new AuditTrail(audit);
+    try {
+      const producers = createWorkflowAuditProducers({
+        trail,
+        live: new WorkflowLiveEvents(),
+        runId: "run-race",
+        segmentId: "segment-race",
+        ownershipOf: () => null,
+        durable: false,
+        warn: () => undefined,
+        onEvent: undefined,
+      });
+      producers.announceStretchEnd("complete", null, null, "signal");
+      await trail.flush();
+      const page = audit.query({ runId: "run-race", limit: 10 });
+      const segmentDone = page.events.find((event) => event.event_type === "segment.completed");
+      expect(segmentDone?.data).toMatchObject({ status: "complete" });
+      expect(segmentDone?.data.reason).toBeUndefined();
+    } finally {
+      connection.close();
+    }
+  });
 });
 
-describe("registerShutdownTrigger (#428)", () => {
+describe("registerShutdownTrigger (#428, #434)", () => {
   function fakeProcess(): SignalTarget & {
     readonly listeners: Map<string, Set<() => void>>;
     emit(event: "SIGTERM" | "SIGINT"): void;
@@ -182,12 +222,19 @@ describe("registerShutdownTrigger (#428)", () => {
     };
   }
 
-  it("registers the SAME handler for both SIGTERM and SIGINT on a fake target — never the real vitest process", () => {
+  // Issue #434: the entry `registerShutdownTrigger` attaches to the target
+  // wraps the caller's `handler` (to disarm the other signal on first fire,
+  // below) — the SAME wrapper for both events, never the bare `handler`
+  // itself, is what this test proves.
+  it("registers the SAME (wrapped) entry for both SIGTERM and SIGINT on a fake target — never the real vitest process", () => {
     const target = fakeProcess();
     const handler = (): void => undefined;
     registerShutdownTrigger(handler, target);
-    expect(target.listeners.get("SIGTERM")?.has(handler)).toBe(true);
-    expect(target.listeners.get("SIGINT")?.has(handler)).toBe(true);
+    const sigterm = [...(target.listeners.get("SIGTERM") ?? [])];
+    const sigint = [...(target.listeners.get("SIGINT") ?? [])];
+    expect(sigterm).toHaveLength(1);
+    expect(sigint).toHaveLength(1);
+    expect(sigterm[0]).toBe(sigint[0]);
   });
 
   it("fires the injected handler on a fake SIGTERM delivery", () => {
@@ -212,5 +259,20 @@ describe("registerShutdownTrigger (#428)", () => {
     expect(fired).toBe(0);
     expect(target.listeners.get("SIGTERM")?.size).toBe(0);
     expect(target.listeners.get("SIGINT")?.size).toBe(0);
+  });
+
+  // Issue #434: a fake target's `once` (unlike Node's real one) never
+  // auto-removes after firing — exactly what makes it catch a handler that
+  // fails to disarm the OTHER signal on its own. SIGTERM then SIGINT, with
+  // no explicit `unregister()` call in between, must still fire only once.
+  it("fires only ONCE total when the fake target delivers SIGTERM then SIGINT, with no unregister() call in between", () => {
+    const target = fakeProcess();
+    let fired = 0;
+    registerShutdownTrigger(() => {
+      fired += 1;
+    }, target);
+    target.emit("SIGTERM");
+    target.emit("SIGINT");
+    expect(fired).toBe(1);
   });
 });

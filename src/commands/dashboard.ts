@@ -93,8 +93,8 @@ export interface DashboardCommandOptions {
   // to announce in advance; omit to use the real default 9119.
   readonly port?: number;
   // Injectable for tests: registers the shutdown trigger instead of a real
-  // OS SIGINT, so a test can drive shutdown without signaling the whole
-  // test process. Defaults to process.once("SIGINT", handler).
+  // OS signal, so a test can drive shutdown without signaling the whole
+  // test process. Defaults to registerShutdownTrigger (SIGTERM+SIGINT).
   readonly registerShutdownTrigger?: (handler: () => void) => void;
 }
 

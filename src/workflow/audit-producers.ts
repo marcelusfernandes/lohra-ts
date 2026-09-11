@@ -58,7 +58,10 @@ export interface WorkflowAuditProducers {
    * only the LEDGER tells the two apart. A `cancel(runId)` with no signal
    * cause still names itself: `status === "cancelled"` without `cause` gets
    * `reason: "cancelled"` in the payload, so a ledger reader never has to
-   * infer "not signal" from an absent field. */
+   * infer "not signal" from an absent field. `cause: "signal"` only applies
+   * when `status` is already `"cancelled"`/`"interrupted"` (issue #434) — a
+   * run whose OWN `engine.run()` settled during the shutdown window (the
+   * `runShutdown`/`.then()` race, service.ts) is treated as `cause: null`. */
   readonly announceSegmentCompleted: (status: string, cause?: "signal" | null) => void;
   /** Issue #368: a dead-owner resume (`orphaned`, service.ts) closes the
    * PRIOR segment as `interrupted`/`process_crash` — under THIS stretch's
@@ -244,7 +247,7 @@ export function createWorkflowAuditProducers(
   }
 
   function announceSegmentCompleted(status: string, cause?: "signal" | null): void {
-    if (cause === "signal") {
+    if (cause === "signal" && (status === "cancelled" || status === "interrupted")) {
       record({
         event_type: "segment.completed",
         payload: { status: "interrupted", reason: "signal", terminal: true },
