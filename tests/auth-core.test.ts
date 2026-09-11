@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -6,9 +6,11 @@ import { rmSync } from "node:fs";
 
 import {
   type AtomicWriteOperations,
+  type OAuthPost,
   OAuthError,
   SubscriptionError,
   accountIdFromToken,
+  acquireFileLease,
   atomicWrite0600,
   enable,
   isExpired,
@@ -16,6 +18,7 @@ import {
   pollForTokens,
   readConfig,
   readTokens,
+  releaseFileLease,
   resolveCredentials,
   routeFor,
   setPreference,
@@ -305,5 +308,108 @@ describe("oauth and credentials", () => {
     await expect(startDeviceLogin(() => Promise.resolve([500, {}]))).rejects.toBeInstanceOf(
       OAuthError,
     );
+  });
+
+  // issue #354: `src/auth/credentials.ts:66-67` (base) relia o token no
+  // catch de falha de refresh, mas nunca coordenava duas renovações
+  // concorrentes — cada `resolveCredentials` batia no `oauthPost` na sua
+  // própria vez. Este teste prova a coordenação: dois refreshes ao mesmo
+  // tempo, um só POST.
+  it("renews under a lease so two concurrent refreshes only hit oauthPost once (#354)", async () => {
+    const home = root();
+    enable(home);
+    writeTokens(home, {
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      accountId: "acct-t354-race",
+      expiresAt: 1_300,
+    });
+    let calls = 0;
+    const oauthPost: OAuthPost = () => {
+      calls += 1;
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          resolve([
+            200,
+            { access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 },
+          ]);
+        }, 20);
+      });
+    };
+    const [a, b] = await Promise.all([
+      resolveCredentials(home, { now: 1_000, codexHome: join(home, "codex"), oauthPost }),
+      resolveCredentials(home, { now: 1_000, codexHome: join(home, "codex"), oauthPost }),
+    ]);
+    expect(calls).toBe(1);
+    expect(a?.token).toBe("new-access");
+    expect(b?.token).toBe("new-access");
+    expect(readTokens(home)?.refreshToken).toBe("new-refresh");
+  });
+
+  // issue #354: `writeTokens` vivia dentro do `try` do POST
+  // (`credentials.ts:63`) — refresh ok + escrita falhando caía no mesmo
+  // `catch` que produz `RefreshFailedError`, mascarando uma falha de disco
+  // como "o login falhou". Nome distinto (sem conteúdo de token na
+  // mensagem) por asserção — sem importar o símbolo novo, para o commit
+  // vermelho compilar contra a base.
+  it("names a write failure after a successful refresh differently from RefreshFailedError (#354)", async () => {
+    const home = root();
+    enable(home);
+    writeTokens(home, {
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      accountId: "acct-t354-write",
+      expiresAt: 1_300,
+    });
+    chmodSync(home, 0o500);
+    let caught: unknown;
+    try {
+      await resolveCredentials(home, {
+        now: 1_000,
+        codexHome: join(home, "codex"),
+        oauthPost: () =>
+          Promise.resolve([
+            200,
+            { access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 },
+          ]),
+      });
+    } catch (error) {
+      caught = error;
+    } finally {
+      chmodSync(home, 0o700);
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const error = caught as Error;
+    expect(error.name).toBe("TokenPersistError");
+    expect(error.name).not.toBe("RefreshFailedError");
+    expect(error.message).not.toContain("old-access");
+    expect(error.message).not.toContain("new-access");
+    expect(error.message).not.toContain("new-refresh");
+  });
+});
+
+describe("token refresh lease (#354)", () => {
+  it("blocks a second holder while held, and lets a new holder steal an orphaned (expired) one", () => {
+    const home = root();
+    const lockPath = join(home, "oauth.json.lock");
+    expect(acquireFileLease(lockPath, "holder-a", 10, 1_000)).toBe(true);
+    // same instant, a second holder cannot acquire the still-live lease
+    expect(acquireFileLease(lockPath, "holder-b", 10, 1_000)).toBe(false);
+    // holder-a "dies" without releasing; once its TTL is past, a third
+    // holder can steal the orphaned lease
+    expect(acquireFileLease(lockPath, "holder-c", 10, 1_011)).toBe(true);
+  });
+
+  it("release is a no-op for a holder that no longer owns the lease", () => {
+    const home = root();
+    const lockPath = join(home, "oauth.json.lock");
+    acquireFileLease(lockPath, "holder-a", 10, 1_000);
+    // holder-a's lease expires and holder-b takes over before holder-a's
+    // (late) release runs
+    acquireFileLease(lockPath, "holder-b", 10, 1_011);
+    releaseFileLease(lockPath, "holder-a");
+    expect(existsSync(lockPath)).toBe(true);
+    releaseFileLease(lockPath, "holder-b");
+    expect(existsSync(lockPath)).toBe(false);
   });
 });
