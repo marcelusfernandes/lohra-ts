@@ -160,8 +160,18 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     let credentials;
     try {
       credentials = await resolveCredentials(options.home, { codexHome: options.codexHome });
-    } catch {
-      return runChatBoundary({ home: options.home, codexHome: options.codexHome, input });
+    } catch (error) {
+      // Was `catch {}` falling through to runChatBoundary, which re-ran
+      // resolveCredentials from scratch — a second refresh attempt whose
+      // outcome could differ from this one, and whose generic "subscription
+      // transport is not available" message hid the real SubscriptionError
+      // (issue #351, invariant 2: nothing silent). Surface it directly, the
+      // same shape dashboard.ts/client-pool.ts already use for this error.
+      return initializationError(
+        input,
+        null,
+        error instanceof Error ? error.message : String(error),
+      );
     }
     if (credentials === null)
       return runChatBoundary({ home: options.home, codexHome: options.codexHome, input });
