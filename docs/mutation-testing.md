@@ -6,7 +6,7 @@ sobre o que deveria existir.
 
 ## Mecânica A — harness comum (`scripts/mutations/harness.ts`)
 
-Seis das sete fatias (todas menos `media`) seguem a mesma mecânica, extraída
+Sete das oito fatias (todas menos `media`) seguem a mesma mecânica, extraída
 para `harness.ts` (issue #148):
 
 1. `prepareArchiveSandbox(root, candidateSha)` — recusa se
@@ -58,18 +58,19 @@ ranTests: 0}` e nunca provaria nada.
 
 Todo runner de verdade (`workflow-executor.ts`, `workflow-durability.ts`,
 `workflow-audit-live.ts`, `web-tools.ts`, `self-update.ts`, `media.ts` por
-consistência de estilo, e `context-window.ts`) usa a mesma guarda de
-entry-point, `ehEntryPoint(import.meta.url)` (issue #186): compara a URL do
-módulo chamador com `process.argv[1]`, então `main()` só dispara quando o
+consistência de estilo, `context-window.ts` e `auth.ts`) usa a mesma guarda
+de entry-point, `ehEntryPoint(import.meta.url)` (issue #186): compara a URL
+do módulo chamador com `process.argv[1]`, então `main()` só dispara quando o
 processo foi invocado com aquele arquivo como script de entrada (`tsx
 scripts/mutations/<runner>.ts`) — nunca quando um teste ou outro runner
 importa o módulo. `tests/mutations-runner-guard.test.ts` prova isso por
-subprocesso isolado para os sete; `context-window.ts` (issue #293) entrou na
+subprocesso isolado para os oito; `context-window.ts` (issue #293) entrou na
 allowlist `RUNNERS` desse teste na issue #297 — antes disso ficava fora
 (arquivo fora do `Files` da issue #293) e a prova era só indireta, via
 `tests/mutations-t23-catalog.test.ts` e `tests/mutations-slices.test.ts`
 importando `contextWindowMutants` estaticamente a cada `npm test` (um
-`main()` disparado no import travaria a suíte inteira).
+`main()` disparado no import travaria a suíte inteira). `auth.ts` (issue
+#354) entrou na mesma allowlist desde o início.
 
 ## Mecânica B — `media.ts`, em processo
 
@@ -132,7 +133,7 @@ interface MutationReport {
 
 ## `scripts/mutations/slices.json` e a contagem real por fatia
 
-Sete fatias, cada uma com `slice`, `script` (chave de `package.json#scripts`),
+Oito fatias, cada uma com `slice`, `script` (chave de `package.json#scripts`),
 `catalog` (arquivos de dado puro que a compõem), `srcGlobs` (o que em `src/`
 essa fatia cobre) e `focusFiles` (união dos `focus.file` dos mutantes, exceto
 `media`, que não tem `focus`, e `workflow-executor`, que usa a bateria
@@ -162,16 +163,27 @@ adicionar uma fatia" cita a mesma restrição.
 | `web-tools`           | `mutations:t20`         |        9 | `web-tools-mutants.ts`                                                                                                |
 | `self-update`         | `mutations:self-update` |        8 | `self-update-mutants.ts`                                                                                              |
 | `context-window`      | `mutations:t23`         |       15 | `context-window.ts`                                                                                                   |
+| `auth`                | `mutations:auth`        |        8 | `auth-mutants.ts`                                                                                                     |
 
-Total: 188. Os 12 mutantes de `workflow-durability-guard.ts` são
+Total: 196. Os 12 mutantes de `workflow-durability-guard.ts` são
 combinatórios: três conjuntos do guard de escrita possuída (`fence`,
 `holder`, `lease-validity`) × quatro categorias (`state`, `cache`,
 `node-cost`, `spend`) — um mutante por combinação, cada um escorado só no
 teste focal da sua categoria, mais os 2 mutantes do INSERT combinado
 cache+custo (`combined-cell-guard-removed`,
 `combined-cost-escapes-refusal`). `tests/mutations-slices.test.ts` importa os
-dez catálogos de dado puro estaticamente e prova essa soma (188) a cada
+onze catálogos de dado puro estaticamente e prova essa soma (196) a cada
 corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
+
+`auth-mutants.ts` (issue #354) cobre a lease de arquivo sobre a renovação do
+token OAuth (`src/auth/lease.ts`: TTL zerado, lease órfã não tomada de
+volta, release sem checar o dono) e a coordenação em
+`src/auth/credentials.ts` (janela de "ainda expirando" zerada, o ramo que
+adota o token que outro processo já escreveu, a identidade de
+`RefreshFailedError` quando o refresh falha de verdade, e a identidade de
+`TokenPersistError` quando o refresh funciona mas a escrita em disco
+falha — issue #354, achado 2 da PR #352: essa escrita vive fora do `try` do
+POST). Todos os 8 mutantes têm foco em `tests/auth-core.test.ts`.
 
 `context-window.ts` (issue #293) é o único catálogo que também é o próprio
 runner — o `Files` da issue só autoriza um script novo, então os 15 mutantes
@@ -265,13 +277,13 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
    `true`.
 5. `npm test` roda `tests/mutations-slices.test.ts`, que reprova de duas
    formas se a contagem não for atualizada junto com o mutante novo: a soma
-   total (188 + o novo) contra os dez catálogos importados, e a linha do
+   total (196 + o novo) contra os onze catálogos importados, e a linha do
    catálogo tocado em `CONTAGEM_POR_CATALOGO`
    (`tests/mutations-slices.test.ts:491-517`), uma tabela pinada por número
    literal — não derivada de `CATALOGOS.get(path).length` — para que uma
    troca compensatória entre dois catálogos (um ganha o que o outro perde,
    soma preservada) não passe despercebida. As duas contagens (o literal
-   `188` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
+   `196` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
    atualização junto com o mutante novo.
 
 ## Como adicionar uma fatia
@@ -312,7 +324,7 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
 `tests/mutations-slices.test.ts` prova, a cada corrida: o schema básico de
 cada entrada de `slices.json`; que todo catálogo descoberto por conteúdo em
 `scripts/mutations/` (item 1 acima) aparece em algum `catalog`; que os
-`catalog` do JSON batem, como conjunto, com os dez catálogos importados em
+`catalog` do JSON batem, como conjunto, com os onze catálogos importados em
 `CATALOGOS`; que todo `script` existe em `package.json#scripts`; que todo
 `focusFiles`/`catalog` existe em disco; que `focusFiles` bate com a união de
 `focus.file` dos catálogos da fatia (exceto `media`/`workflow-executor`); que
@@ -323,25 +335,25 @@ contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
 `workflow-audit-live-mutants` 32, `web-tools-mutants` 9,
 `media-catalog-other` 7, `media-catalog-persistence` 13,
 `self-update-mutants` 8, `workflow-executor-mutants` 44, `context-window` 15,
-soma 188) e a soma de 188 contra os dez catálogos importados; e que todo
-diretório de primeiro nível de `src/` está coberto por algum `srcGlobs` ou
-está em `SEM_FATIA` com um motivo não vazio — nunca os dois, nunca nenhum
-dos dois.
+`auth-mutants` 8, soma 196) e a soma de 196 contra os onze catálogos
+importados; e que todo diretório de primeiro nível de `src/` está coberto
+por algum `srcGlobs` ou está em `SEM_FATIA` com um motivo não vazio — nunca
+os dois, nunca nenhum dos dois.
 
 ## Diretórios de `src/` sem fatia hoje
 
-Quatorze diretórios de primeiro nível de `src/` não têm catálogo de mutação:
-`agent`, `auth`, `config`, `core`, `cron`, `doctor`, `events`, `memory`,
+Treze diretórios de primeiro nível de `src/` não têm catálogo de mutação:
+`agent`, `config`, `core`, `cron`, `doctor`, `events`, `memory`,
 `onboarding`, `pricing`, `serialization`, `server`, `skills`, `transports` —
 listados em `tests/mutations-slices.test.ts` (`SEM_FATIA`), cada um com o
-motivo "sem catálogo de mutantes ainda". Os quinze diretórios cobertos hoje:
-`workflow`, `state`, `orchestration` (fatia `workflow-durability`); `cli`,
-`commands` (também em `workflow-audit-live` e `self-update`); `media`,
+motivo "sem catálogo de mutantes ainda". Os dezesseis diretórios cobertos
+hoje: `workflow`, `state`, `orchestration` (fatia `workflow-durability`);
+`cli`, `commands` (também em `workflow-audit-live` e `self-update`); `media`,
 `tools` (fatia `media`, também em `self-update`); `web` (fatia `web-tools`);
 `self-update`, `mcp`, `gateway` (fatia `self-update`); `conversation`,
 `context`, `providers`, `catalog` (fatia `context-window`, issue #293 —
 `state` também está em `srcGlobs` dessa fatia, já coberto por
-`workflow-durability`).
+`workflow-durability`); `auth` (fatia `auth`, issue #354).
 
 "Coberto" aqui quer dizer que `srcGlobs` cita o diretório inteiro
 (`src/<dir>/**`, forma acima) — a fatia **dispara** para qualquer mudança

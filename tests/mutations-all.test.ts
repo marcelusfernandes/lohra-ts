@@ -1,5 +1,5 @@
 // Testes de `scripts/mutations/all.ts` (issue #155, passo 11 de
-// `orquestracao.md`). Nunca roda as sete fatias reais (lento — cada corrida
+// `orquestracao.md`). Nunca roda as oito fatias reais (lento — cada corrida
 // pode levar até 20 minutos, `RUN_TIMEOUT_MS`); todo cenário aqui injeta um
 // `execute` falso, no espírito de `tests/mutations-harness.test.ts` (#148/
 // #149), que testa o harness comum sem rodar mutação de verdade.
@@ -112,9 +112,9 @@ describe("readSliceConfigs", () => {
     ]);
   });
 
-  it("lê o scripts/mutations/slices.json de verdade (sete fatias, script não-vazio)", () => {
+  it("lê o scripts/mutations/slices.json de verdade (oito fatias, script não-vazio)", () => {
     const configs = readSliceConfigs();
-    expect(configs).toHaveLength(7);
+    expect(configs).toHaveLength(8);
     for (const config of configs) {
       expect(config.slice.length).toBeGreaterThan(0);
       expect(config.script.length).toBeGreaterThan(0);
