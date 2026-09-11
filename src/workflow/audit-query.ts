@@ -29,12 +29,22 @@ export function parseAuditQuery(args: ToolArguments): AuditQueryResult {
   for (const key of ["node_id", "event_type", "sub_id", "segment_id"] as const)
     if (args[key] !== undefined && typeof args[key] !== "string")
       return Object.freeze({ error: `audit ${key} must be a string` });
-  // Um attempt real (o que o ledger grava) começa em 1 — 0 nunca bate contra
-  // nenhum evento. Um chamador com schema estrito (Codex `strict: true`)
-  // preenche todo o schema em vez de omitir campos opcionais, então 0 chega
-  // como "não tenho filtro", não como "filtre por attempt zero" (#390).
-  // Tratamos como ausência em vez de rejeitar: rejeitar quebraria esse
-  // chamador para uma query que devia simplesmente ignorar o filtro.
+  // `identity.attempt` É 0-based nos eventos leaf.*/tool.* — a PRIMEIRA
+  // tentativa grava `attempt: 0` (`CausalContext.attempt`, default
+  // `extra.attempt ?? 0` em `engine-utils.ts:289`; um re-collect grava
+  // `attempt + 1`, `engine.ts:307`; `audit-runtime.ts:128,197,206,221`
+  // copiam `cc.attempt` direto para o evento). Só o payload de
+  // `segment.started` é 1-based (`audit-producers.ts:48`) — não é o mesmo
+  // `attempt` deste filtro. Ou seja: `attempt: 0` NÃO é um valor impossível
+  // — é exatamente a primeira tentativa de uma leaf, um filtro real.
+  // Mesmo assim, tratamos `attempt: 0` como ausência de filtro: um chamador
+  // com schema estrito (Codex `strict: true`) preenche todo o schema em vez
+  // de omitir campos opcionais, então 0 chega como "não tenho filtro" na
+  // prática (#390, dogfooding real) — e essa leitura é o comportamento útil
+  // na esmagadora maioria das chamadas. O custo, declarado aqui: esta
+  // superfície (a tool `workflow_audit` e `lohra workflow audit --attempt`)
+  // perde a capacidade de filtrar SÓ a primeira tentativa por `attempt`; uma
+  // consulta sem filtro de attempt já inclui esses eventos, só não isolados.
   const attempt = attemptRaw === 0 ? undefined : attemptRaw;
   // snapshot_seq é o high-water mark que a página um devolveu — nunca 0 para
   // um run com eventos (o primeiro seq gravado é 1). Sem essa correção,
