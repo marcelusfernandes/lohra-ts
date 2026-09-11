@@ -11,20 +11,51 @@ function integer(value: unknown): number | undefined {
       : undefined;
 }
 
+function hasText(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
+}
+
 export function parseAuditQuery(args: ToolArguments): AuditQueryResult {
   if (typeof args.run_id !== "string" || args.run_id === "")
     return Object.freeze({ error: "workflow_audit requires 'run_id'" });
   const after = args.after_seq === undefined ? 0 : integer(args.after_seq);
-  const snapshot = args.snapshot_seq === undefined ? undefined : integer(args.snapshot_seq);
-  const attempt = args.attempt === undefined ? undefined : integer(args.attempt);
+  const snapshotRaw = args.snapshot_seq === undefined ? undefined : integer(args.snapshot_seq);
+  const attemptRaw = args.attempt === undefined ? undefined : integer(args.attempt);
   const limit = args.limit === undefined ? 50 : integer(args.limit);
-  if (after === undefined || after < 0 || (snapshot !== undefined && snapshot < 0))
+  if (after === undefined || after < 0 || (snapshotRaw !== undefined && snapshotRaw < 0))
     return Object.freeze({ error: "audit cursors must be >= 0" });
-  if (limit === undefined || limit < 1 || (attempt !== undefined && attempt < 0))
+  if (limit === undefined || limit < 1 || (attemptRaw !== undefined && attemptRaw < 0))
     return Object.freeze({ error: "audit limit must be >= 1 and attempt >= 0" });
   for (const key of ["node_id", "event_type", "sub_id", "segment_id"] as const)
     if (args[key] !== undefined && typeof args[key] !== "string")
       return Object.freeze({ error: `audit ${key} must be a string` });
+  // `identity.attempt` É 0-based nos eventos leaf.*/tool.* — a PRIMEIRA
+  // tentativa grava `attempt: 0` (`CausalContext.attempt`, default
+  // `extra.attempt ?? 0` em `engine-utils.ts:289`; um re-collect grava
+  // `attempt + 1`, `engine.ts:307`; `audit-runtime.ts:128,197,206,221`
+  // copiam `cc.attempt` direto para o evento). Só o payload de
+  // `segment.started` é 1-based (`audit-producers.ts:48`) — não é o mesmo
+  // `attempt` deste filtro. Ou seja: `attempt: 0` NÃO é um valor impossível
+  // — é exatamente a primeira tentativa de uma leaf, um filtro real.
+  // Mesmo assim, tratamos `attempt: 0` como ausência de filtro: um chamador
+  // com schema estrito (Codex `strict: true`) preenche todo o schema em vez
+  // de omitir campos opcionais, então 0 chega como "não tenho filtro" na
+  // prática (#390, dogfooding real) — e essa leitura é o comportamento útil
+  // na esmagadora maioria das chamadas. O custo, declarado aqui: esta
+  // superfície (a tool `workflow_audit` e `lohra workflow audit --attempt`)
+  // perde a capacidade de filtrar SÓ a primeira tentativa por `attempt`; uma
+  // consulta sem filtro de attempt já inclui esses eventos, só não isolados.
+  const attempt = attemptRaw === 0 ? undefined : attemptRaw;
+  // snapshot_seq é o high-water mark que a página um devolveu — nunca 0 para
+  // um run com eventos (o primeiro seq gravado é 1). Sem essa correção,
+  // `snapshot_seq: 0` do mesmo chamador estrito passava direto para
+  // `AuditRepository.query`, que trava o scan em `Math.max(0, snapshotSeq ??
+  // currentHigh)` (audit-repository.ts:344) — 0 explícito nunca cai no
+  // fallback `?? currentHigh`, então a leitura via um leitor estrito
+  // devolvia `events: []` mesmo sem nenhum filtro de conteúdo ativo (#390,
+  // dogfooding real). Um run de fato sem eventos ainda devolve `events: []`
+  // tratando 0 como ausente — não há regressão observável para esse caso.
+  const snapshot = snapshotRaw === 0 ? undefined : snapshotRaw;
   return Object.freeze({
     query: Object.freeze({
       runId: args.run_id,
@@ -32,10 +63,10 @@ export function parseAuditQuery(args: ToolArguments): AuditQueryResult {
       limit,
       ...(snapshot === undefined ? {} : { snapshotSeq: snapshot }),
       ...(attempt === undefined ? {} : { attempt }),
-      ...(typeof args.node_id === "string" ? { nodeId: args.node_id } : {}),
-      ...(typeof args.event_type === "string" ? { eventType: args.event_type } : {}),
-      ...(typeof args.sub_id === "string" ? { subId: args.sub_id } : {}),
-      ...(typeof args.segment_id === "string" ? { segmentId: args.segment_id } : {}),
+      ...(hasText(args.node_id) ? { nodeId: args.node_id } : {}),
+      ...(hasText(args.event_type) ? { eventType: args.event_type } : {}),
+      ...(hasText(args.sub_id) ? { subId: args.sub_id } : {}),
+      ...(hasText(args.segment_id) ? { segmentId: args.segment_id } : {}),
     }),
   });
 }
