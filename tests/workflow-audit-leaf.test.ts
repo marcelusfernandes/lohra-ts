@@ -302,7 +302,13 @@ describe("workflow audit — leaf producers (#366)", () => {
       expect(runtime.steered.map((call) => call.id)).toEqual(["leaf-1"]);
       const page = audit.query({ runId: started.run_id, limit: 50 });
       const leaves = page.events.filter((event) => event.event_type.startsWith("leaf."));
-      expect(leaves.map((event) => event.event_type)).toEqual(["leaf.started", "leaf.completed"]);
+      // #423: leaf.steered (post-terminal — see audit-runtime.ts) joins the
+      // list; still only ONE leaf.completed, the invariant this title names.
+      expect(leaves.map((event) => event.event_type)).toEqual([
+        "leaf.started",
+        "leaf.completed",
+        "leaf.steered",
+      ]);
       expect(runtime.spawned).toHaveLength(1); // steer() reuses the SAME leaf, no respawn
     } finally {
       close();
