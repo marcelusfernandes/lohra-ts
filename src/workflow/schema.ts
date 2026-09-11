@@ -477,21 +477,51 @@ function validateLoopBudget(node: Node, issues: SpecIssue[]): void {
   }
 }
 
-function validateTier(node: Node, issues: SpecIssue[]): void {
-  const tier = node.fields.tier;
-  if (
-    tier !== undefined &&
-    (typeof tier !== "string" || !["small", "medium", "big"].includes(tier))
-  ) {
+const TIER_VALUES = ["small", "medium", "big"] as const;
+const TIER_MESSAGE =
+  "'tier' must be one of ['small', 'medium', 'big'] (the operator maps each one to a " +
+  "real model in ~/.lohra/workflow_tiers.json)";
+
+function isValidTier(value: unknown): boolean {
+  return typeof value === "string" && (TIER_VALUES as readonly string[]).includes(value);
+}
+
+/**
+ * #342: `stages[*].tier` used to accept anything a stage's own `STAGE_FIELDS`
+ * allow-list lets through (`nodes.ts`) with no enum check of its own —
+ * `stages: [{prompt: "x", tier: "huge"}]` validated clean and then fell
+ * back to the session's own model at runtime, silently: `runPipeline`
+ * (`engine.ts`) merges the stage onto the node before `routingIdentity`
+ * reads `tier`, and an unrecognized tier there resolves to `undefined`
+ * routing, not a fault. Reviewer's finding on PR #341's round 2 (issue
+ * body). Only `tier` gets this treatment — `model`/`effort`/`provider` are
+ * free fields nothing validates anywhere, node-level or stage-level
+ * (`builtin-definitions.ts`'s own tool description says so), so there is no
+ * enum to check for them.
+ */
+function validateStageTiers(node: Node, issues: SpecIssue[]): void {
+  if (node.type !== "pipeline" || !Array.isArray(node.fields.stages)) return;
+  node.fields.stages.forEach((stage, index) => {
+    const stageRecord = record(stage);
+    if (stageRecord === null || !("tier" in stageRecord)) return;
+    if (isValidTier(stageRecord.tier)) return;
     issue(
       issues,
       "field_value",
-      "'tier' must be one of ['small', 'medium', 'big'] (the operator maps each one to a real model in ~/.lohra/workflow_tiers.json)",
+      TIER_MESSAGE,
       node.id,
-      "tier",
+      `stages[${String(index)}].tier`,
       "tier: big",
     );
+  });
+}
+
+function validateTier(node: Node, issues: SpecIssue[]): void {
+  const tier = node.fields.tier;
+  if (tier !== undefined && !isValidTier(tier)) {
+    issue(issues, "field_value", TIER_MESSAGE, node.id, "tier", "tier: big");
   }
+  validateStageTiers(node, issues);
 }
 
 function validateGate(node: Node, issues: SpecIssue[]): void {
