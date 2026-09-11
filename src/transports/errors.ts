@@ -63,9 +63,6 @@ function looksLikeModelNotFound(value: Readonly<Record<string, unknown>>): boole
   return typeof value.message === "string" && /model/iu.test(value.message);
 }
 
-// Códigos de erro Node (ErrnoException) de falha de conexão — ver
-// `networkFaultCodes` acima; a checagem correspondente não exige
-// `instanceof ProviderCallFailed` pelo mesmo motivo.
 export function classifyProviderError(error: unknown): ErrorKind | null {
   if (error instanceof RateLimitError) return "quota_exhausted";
   const value = object(error);
