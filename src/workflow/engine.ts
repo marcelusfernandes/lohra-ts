@@ -23,6 +23,7 @@ import {
 import {
   applyCheckpointAnswer,
   asRecord,
+  buildCausalContext,
   checkpointPausePayload,
   clampInteger,
   collectBranchWithRetries,
@@ -35,9 +36,11 @@ import {
   renderValue,
   resolveCheckpoint,
   resolveLeafRequestOptions,
+  resolveNodeSchema,
   resultUsage,
   routingIdentity,
   siblingAnswers,
+  stoppedByControl,
   strictResolve,
   timeoutLeafResult,
   verifyPrompt,
@@ -53,7 +56,7 @@ import {
 import { ProgressTracker, type ProgressSnapshot } from "./progress.js";
 import { BoundedPool } from "./pool.js";
 import type { CausalContext, ChildResult, ChildRuntime } from "./runtime.js";
-import { resolveInlineSchema, validateSpec } from "./schema.js";
+import { validateSpec } from "./schema.js";
 import type { TierMap } from "./tiers.js";
 import { Node, ValidationError, type WorkflowSpec } from "./types.js";
 export class WorkflowEngine {
@@ -210,17 +213,14 @@ export class WorkflowEngine {
     cellId: string,
     extra: { itemIndex?: number; stageIndex?: number; attempt?: number } = {},
   ): CausalContext {
-    return Object.freeze({
-      runId: this.runId,
-      segmentId: this.segmentId,
-      nodePath: Object.freeze([...this.nodeScope, this.currentNode]),
+    return buildCausalContext(
+      this.runId,
+      this.segmentId,
+      [...this.nodeScope, this.currentNode],
       cellId,
       role,
-      attempt: extra.attempt ?? 0,
-      turn: 0,
-      ...(extra.itemIndex === undefined ? {} : { itemIndex: extra.itemIndex }),
-      ...(extra.stageIndex === undefined ? {} : { stageIndex: extra.stageIndex }),
-    });
+      extra,
+    );
   }
 
   private async collectLeaf(
@@ -239,7 +239,7 @@ export class WorkflowEngine {
     const release = await this.pool.acquire();
     let id: string | null = null;
     try {
-      if (options.aborted?.() === true || this.control.cancelled || this.control.paused)
+      if (stoppedByControl(this.control, options.aborted))
         return { output: null, usage: usage(), complete: false };
       this.gateTokens();
       this.gateFanout(1, true);
@@ -351,11 +351,7 @@ export class WorkflowEngine {
   private schemaOf(
     node: Node | Readonly<Record<string, unknown>>,
   ): Readonly<Record<string, unknown>> | null {
-    const fields = node instanceof Node ? node.fields : node;
-    const inline = resolveInlineSchema(fields.schema, this.schemas);
-    if (inline !== null) return inline;
-    const reference = fields.schema_ref;
-    return typeof reference === "string" ? asRecord(this.schemas[reference]) : null;
+    return resolveNodeSchema(node, this.schemas);
   }
 
   private cell(parts: readonly unknown[]): string {
@@ -446,7 +442,7 @@ export class WorkflowEngine {
     if (cached !== CACHE_MISS) return cached;
     const retries = clampInteger(node.fields.retries, 1, MAX_NODE_RETRIES);
     for (let attempt = 0; attempt <= retries; attempt += 1) {
-      if (attempt > 0 && this.result.pauseFault === null) this.result.leafRespawns += 1;
+      if (attempt > 0 && !stoppedByControl(this.control)) this.result.leafRespawns += 1;
       const rendered = renderValue(prompt);
       const attemptPrompt = attempt === 0 ? rendered : `${rendered}\n\n${EMPTY_OUTPUT_CORRECTION}`;
       const leaf = await this.collectLeaf(node, attemptPrompt, schema, {
@@ -472,8 +468,9 @@ export class WorkflowEngine {
     if (!Array.isArray(resolved)) return null;
     const hash = this.cell([node.id, "parallel", resolved, ...routingIdentity(node, this.tiers)]);
     const cached = this.cacheGet(hash);
-    const { runId, cache, result, specIdentity: spec, tiers } = this;
-    const deps = { runId, cache, result, spec, tiers, collectLeaf: this.collectLeaf.bind(this) };
+    const { runId, cache, result, specIdentity: spec, tiers, control } = this;
+    const collectLeaf = this.collectLeaf.bind(this);
+    const deps = { runId, cache, result, spec, tiers, control, collectLeaf };
     if (cached !== CACHE_MISS) return recordGroupReplayCost(deps, node, resolved, cached, hash);
     this.gateFanout(resolved.length);
     const leaves = await Promise.all(
@@ -541,7 +538,8 @@ export class WorkflowEngine {
           let winningCost = usage();
           let correction = "";
           for (let attempt = 0; attempt <= retries; attempt += 1) {
-            if (attempt > 0 && this.result.pauseFault === null) this.result.leafRespawns += 1;
+            if (attempt > 0 && !stoppedByControl(this.control, () => expired))
+              this.result.leafRespawns += 1;
             const leaf = await this.collectLeaf(
               stageNode,
               correction === "" ? renderValue(prompt) : `${renderValue(prompt)}\n\n${correction}`,

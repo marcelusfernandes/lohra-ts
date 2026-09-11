@@ -50,6 +50,39 @@ class ScriptedRuntime implements ChildRuntime {
   }
 }
 
+/** Issue #336: the first branch attempt comes back DEAD and, in the SAME
+ * `collect()`, calls `cancel()` on the engine — `cancel()` (engine.ts:
+ * 138-141) never routes through `pause()`, so it never touches
+ * `result.pauseFault`. `stillDying` (engine-utils.ts) pre-#336 only read
+ * `pauseFault`, so it could not see this stop at all: the retry loop would
+ * credit a phantom `leafRespawns` for the attempt `collectLeaf`'s own
+ * entry check (already reading `control.cancelled`) refuses to spawn. */
+class CancelOnFirstCollectRuntime implements ChildRuntime {
+  readonly spawned: ChildSpawnRequest[] = [];
+  private engine: WorkflowEngine | null = null;
+
+  setEngine(engine: WorkflowEngine): void {
+    this.engine = engine;
+  }
+
+  spawn(request: ChildSpawnRequest): string {
+    const id = `leaf-${String(this.spawned.length + 1)}`;
+    this.spawned.push(request);
+    return id;
+  }
+
+  collect(_id: string, _options: ChildCollectOptions): ChildResult {
+    this.engine?.cancel();
+    return { status: "failed", output: "boom" };
+  }
+
+  steer(): void {}
+  cancel(): void {}
+  installLeafSandbox(): { dispose: () => void } {
+    return { dispose: (): void => undefined };
+  }
+}
+
 const dead: ChildResult = { status: "failed", output: "boom" };
 const ok = (output: unknown): ChildResult => ({ status: "complete", output });
 
@@ -175,6 +208,20 @@ describe("parallel.retries (#242)", () => {
     expect(respawns).toBeLessThanOrEqual(2); // base measured 4 (1 + 3), not 6
     expect(result.status).toBe("paused");
     expect(result.pauseReason).toBe("token_budget_exhausted");
+  });
+
+  it("does not credit a respawn when cancel() fires between branch attempts (#336)", async () => {
+    const runtime = new CancelOnFirstCollectRuntime();
+    const engine = new WorkflowEngine({ runtime });
+    runtime.setEngine(engine);
+    const spec = parsed({
+      meta: { name: "retry-cancel-between-attempts" },
+      nodes: [{ id: "p", type: "parallel", branches: ["a"], retries: 1 }],
+    });
+    const result = await engine.run(spec);
+    expect(runtime.spawned).toHaveLength(1);
+    expect(result.status).toBe("cancelled");
+    expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(0);
   });
 });
 
