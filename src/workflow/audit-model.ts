@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { ERROR_KIND_SET } from "../transports/error-kinds.js";
 
 export const AUDIT_MODE = "metadata_only" as const;
 export const AUDIT_QUEUE_CAPACITY = 256;
@@ -186,9 +187,7 @@ const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object
     "pipeline.stage",
     "verify.skeptic",
   ]),
-  // `classifyProviderError` (`src/transports/errors.ts:43-48`) only ever
-  // returns `"quota_exhausted"` today; a taxonomy beyond that is M8.
-  error_kind: new Set(["quota_exhausted"]),
+  error_kind: ERROR_KIND_SET,
   state: new Set([...SAFE_MARKER_STATES, "complete", "fault", "null", "pending", "running"]),
   status: new Set([
     "cancelled",

@@ -6,6 +6,7 @@
 // linhas na base crescer (regra `arquivo-grande` do check `contratos`).
 import { describe, expect, it } from "vitest";
 import { publicAuditEvent } from "../src/workflow/audit-model.js";
+import * as transports from "../src/transports/index.js";
 
 describe("T17 metadata-only audit — allow-list sem produtor", () => {
   it("treats a removed node.* type as unknown, not as a valid event_type", () => {
@@ -14,5 +15,40 @@ describe("T17 metadata-only audit — allow-list sem produtor", () => {
     // qualquer outra string desconhecida, nunca aceitá-los como estão.
     const event = publicAuditEvent("r", 1, { event_type: "node.started" }, 1);
     expect(event.event_type).toBe("audit.unavailable");
+  });
+
+  // Issue #398 (M8-3, épico #396): error_kind alinhado a ERROR_KIND_SET
+  // (`src/transports/error-kinds.ts`, #397) — um valor do vocabulário
+  // preserva; string livre continua marcador de exclusão.
+  it("preserves a leaf.failed error_kind from the ErrorKind vocabulary", () => {
+    const event = publicAuditEvent(
+      "r",
+      1,
+      { event_type: "leaf.failed", payload: { status: "failed", error_kind: "auth_failed" } },
+      1,
+    );
+    expect(event.data.error_kind).toBe("auth_failed");
+  });
+
+  it("redacts a leaf.failed error_kind outside the ErrorKind vocabulary", () => {
+    const event = publicAuditEvent(
+      "r",
+      1,
+      { event_type: "leaf.failed", payload: { status: "failed", error_kind: "qualquer" } },
+      1,
+    );
+    expect(event.data.error_kind).toEqual({ state: "excluded_by_policy", characters: 8 });
+  });
+
+  it("accepts exactly the ErrorKind vocabulary for error_kind", () => {
+    for (const kind of transports.ERROR_KINDS) {
+      const event = publicAuditEvent(
+        "r",
+        1,
+        { event_type: "leaf.failed", payload: { status: "failed", error_kind: kind } },
+        1,
+      );
+      expect(event.data.error_kind).toBe(kind);
+    }
   });
 });
