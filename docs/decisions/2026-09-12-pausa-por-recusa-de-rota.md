@@ -52,12 +52,18 @@ provider, model, suggested_route}` (`src/workflow/route-faults.ts`,
   (`recordRouteFaultNotice`, `route-faults.ts`) via um repositório de
   notices opcional (`OwnershipStore.notices`, `service.ts`) — sem
   reclassificação pelo `classify()` por substring de `notices-sink.ts`
-  (fora dos `Files` desta issue). Sem repositório configurado, ou se a
-  escrita for recusada, cai em `this.warn` — nunca silencioso (invariante
-  2). **A composição em produção (`src/commands/session-tools.ts` passando
-  `noticesSink`/`NoticesRepository` como `store.notices`) fica para uma
-  issue de wiring** — o seletor e o teste provam o comportamento; nada
-  ainda liga essa opção no processo real.
+  (fora dos `Files` desta issue). Sem repositório configurado, o checkpoint
+  não é uma lição válida (`isRouteLesson`), ou a escrita for recusada ou
+  lançar, cai em `this.warn` (via `appendSafe`) — nunca silencioso
+  (invariante 2). **Rodada 2 (3ª emenda, PR #439 reprovada):** o revisor
+  apontou que `productionOwnershipStore` — a única fábrica usada por
+  `chat.ts`/`dashboard.ts` — não setava `notices`, então o AC nunca
+  acontecia fora do harness de teste. Ligado pelo caminho de M8:
+  `createSessionToolBase` expõe `noticesRepository` (a MESMA instância que
+  `noticesSink`/`workflow_notices` já compartilham); `productionOwnershipStore`
+  aceita `notices` como 7ª chave; `chat.ts`/`dashboard.ts` passam
+  `notices: <toolBase>.noticesRepository`. Nenhuma issue de follow-up
+  necessária — o notice agora acontece no processo real.
 
 ### O que esta pausa NÃO faz
 
@@ -99,3 +105,10 @@ route_fault` e para `faultKinds: []`.
 - `npm run mutations:t15` (45/45): o mutante `Q1-quota-guard-removed`
   (`scripts/mutations/workflow-executor-mutants.ts`) foi re-ancorado na
   guarda generalizada (`!pausesRun(...)`), mesmo id, mesma fatia.
+- Rodada 2: `productionOwnershipStore(db, { notices })` — o caminho real,
+  não um store montado à mão — deixa o notice em `run:<runId>`, lido de
+  volta por um `NoticesRepository.list` de verdade;
+  `createSessionToolBase().noticesRepository` é o mesmo repositório que a
+  tool `workflow_notices` lê (grava por ele, lê pela tool);
+  `tests/workflow-audit-allow-list.test.ts` ganhou o oráculo que faltava
+  para `route_fault` em `SAFE_STRING_VALUES.reason`.
