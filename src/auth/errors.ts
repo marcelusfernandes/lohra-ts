@@ -26,3 +26,17 @@ export class OAuthError extends Error {
     this.name = "OAuthError";
   }
 }
+
+// Distinct from RefreshFailedError (issue #354): the refresh POST itself
+// succeeded — the provider handed back a rotated (and possibly one-time)
+// refresh_token — but persisting it to disk failed. Folding that into
+// RefreshFailedError (as the pre-#354 code did, by construction: the write
+// lived inside the same `try`) reads as "the login failed" when the login
+// actually worked and only the local save didn't; the caller needs to
+// retry the save, not `lohra auth login` again.
+export class TokenPersistError extends SubscriptionError {
+  constructor(message: string) {
+    super(message);
+    this.name = "TokenPersistError";
+  }
+}
