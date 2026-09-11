@@ -151,8 +151,21 @@ export const SKILL_EXPORT_SPEC = spec(
   [{ name: "name", required: true }],
 );
 
+// `"notices"` is APPENDED last, never inserted earlier: the invalid-choice
+// error text is built by joining this array (`arg-validation.ts`'s
+// `invalidChoice` case), and `tests/workflow-audit-live.test.ts`'s
+// `toContain('...choose from list, watch, audit')` is a prefix-substring
+// check that only survives with this exact order. `.concat(...)` (never a
+// 4th literal inside the array below) also keeps
+// `scripts/mutations/workflow-audit-live-mutants.ts`'s
+// `M9-workflow-run-accepted` byte-exact anchor on the array literal itself
+// intact — issue #402's Files never include `scripts/`.
 export const WORKFLOW_SPEC = spec(COMMON_FLAGS, [
-  { name: "workflow_cmd", required: true, choices: ["list", "watch", "audit"] },
+  {
+    name: "workflow_cmd",
+    required: true,
+    choices: ["list", "watch", "audit"].concat("notices"),
+  },
 ]);
 export const WORKFLOW_LIST_SPEC = spec([{ name: "--limit", takesValue: true, type: "int" }]);
 export const WORKFLOW_WATCH_SPEC = spec(
@@ -175,6 +188,15 @@ export const WORKFLOW_AUDIT_SPEC = spec(
     { name: "--limit", takesValue: true, type: "int" },
   ],
   [{ name: "run_id", required: true }],
+);
+export const WORKFLOW_NOTICES_SPEC = spec(
+  [
+    { name: "--ack", takesValue: true },
+    { name: "--all", takesValue: false },
+    { name: "--after-seq", takesValue: true, type: "int" },
+    { name: "--json", takesValue: false },
+  ],
+  [{ name: "run_id", required: false }],
 );
 
 export const UPDATE_SPEC = spec([
@@ -220,6 +242,8 @@ export const FLAG_HELP: Readonly<Record<string, string>> = {
   "--attempt": "filter by attempt number",
   "--after-seq": "only events after this sequence number",
   "--snapshot-seq": "only the snapshot at this sequence number",
+  "--ack": "acknowledge a notice by its id",
+  "--all": "also show already-acknowledged notices",
   "--check": "fetch and report without moving HEAD",
   "--reinstall": "run npm install when dependency files changed",
 };
@@ -259,6 +283,7 @@ export const SUBCOMMAND_HELP = {
     list: "list workflow runs",
     watch: "follow a running workflow",
     audit: "inspect the event log of one run",
+    notices: "list or acknowledge durable operator notices",
   },
   tiers: {
     list: "list configured tiers",

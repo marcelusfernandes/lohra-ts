@@ -211,12 +211,18 @@ lohra workflow list
 lohra workflow watch RUN_ID
 lohra workflow watch RUN_ID --events
 lohra workflow audit RUN_ID
+lohra workflow notices RUN_ID --json
+lohra workflow notices --ack ID
 lohra update --check
 ```
 
-`workflow` possui somente `list`, `watch` e `audit`; não existe
+`workflow` possui somente `list`, `watch`, `audit` e `notices`; não existe
 `workflow run`. Chat e dashboard compartilham a mesma composition root para
-workflow/audit, orquestração, cron, MCP, web e mídia.
+workflow/audit, orquestração, cron, MCP, web e mídia. `notices` lê
+`operator_notices` — os avisos duráveis do canal (issue #400/#401), nunca só
+em memória — como tool (`workflow_notices`/`workflow_notices_ack`) e como
+CLI; `--ack <id>` reconhece um aviso e `--all` também mostra os já
+reconhecidos.
 
 `dashboard` aceita `--host` (default `127.0.0.1`, encaminhado ao bind real do
 servidor HTTP/WS — mesmo precedente de forma do `--host` de `serve`) e

@@ -623,6 +623,55 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
+        "List durable operator notices — warnings recorded to disk (workflow faults, sink refusals, stale fence writes), never in-memory only, so a notice a killed process left behind is still visible from a fresh one. Unacknowledged by default; include_acked also returns the ones already handled. Omitting run_id lists every scope (every run plus global); given, it scopes to that run only. An empty string or 0 in an optional filter (run_id/limit) means no filter, not a literal value.",
+      parameters: {
+        type: "object",
+        properties: {
+          run_id: {
+            type: "string",
+            description: "Only this run's notices (omit for every run and global).",
+          },
+          after_seq: {
+            type: "integer",
+            minimum: 0,
+            description: "Exclusive durable cursor (default 0; only meaningful with run_id).",
+          },
+          include_acked: {
+            type: "boolean",
+            description: "Also return already-acknowledged notices (default false).",
+          },
+          limit: {
+            type: "integer",
+            minimum: 1,
+            description: "Rows to return (default 50, clamped to 200).",
+          },
+        },
+      },
+      name: "workflow_notices",
+    },
+  },
+  {
+    type: "function",
+    function: {
+      description:
+        "Acknowledge one durable operator notice by its id (from workflow_notices) — an acked notice stops showing up in workflow_notices unless include_acked is set. Acking an unknown or already-acked id is not an error: it reports acked:false.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: {
+            type: "integer",
+            description: "The notice's id, from workflow_notices.",
+          },
+        },
+        required: ["id"],
+      },
+      name: "workflow_notices_ack",
+    },
+  },
+  {
+    type: "function",
+    function: {
+      description:
         "List the models reachable right now, per provider: live from each provider whose API key is configured, from the local Ollama daemon, and the subscription model when subscription mode is on. Providers without a key come back as 'skipped' naming the variable to set. Each provider entry also carries 'context_window' \u2014 the token window per listed model, straight from the provider when it reports one (OpenRouter's context_length, or max_input_tokens/context_window elsewhere) or from the last successful fetch cached on disk; a model whose window is unknown reports null, never a guess. Also returns the operator's tier map (small|medium|big) \u2014 prefer naming a TIER over a hard-coded slug. It starts no session and spends no tokens, but it does write: each live fetch is merged into ~/.lohra/context-windows.json so a later call can fall back to it.",
       parameters: {
         type: "object",
