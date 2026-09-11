@@ -3,8 +3,39 @@ export const MAX_NODE_RETRIES = 3;
 export const MAX_GATE_ATTEMPTS = 3;
 export const MAX_NODE_MAX_ITERATIONS = 128;
 
-const COMMON = ["label", "phase", "required", "depends_on"] as const;
-const ROUTING = ["model", "tier", "effort", "provider"] as const;
+const COMMON = ["required", "depends_on"] as const;
+export const ROUTING_FIELDS = ["model", "tier", "effort", "provider"] as const;
+
+/**
+ * The agent-shaped field set every schema-bearing sub-object may carry
+ * (`gate.body`, `loop_until_dry.body`, `judge_panel.synthesize`,
+ * `parallel.branches[*]` when a branch is an object) — shared by
+ * `schema.ts`'s `validateSubObjectFields` and the anti-drift test so the two
+ * never drift apart. A routing knob (`model`/`tier`/`effort`/`provider`)
+ * does not belong here: those sub-objects spawn with the OUTER node
+ * (`engine.ts`'s `runGate`/`runLoop`/`runJudgePanel`/`runParallel` all pass
+ * `node`, never the sub-object, to `collectLeaf`), so routing on them would
+ * be exactly the dead field this issue closes (#238).
+ */
+export const SUB_OBJECT_FIELDS = [
+  "prompt",
+  "schema",
+  "schema_ref",
+  "tool_less",
+  "timeout",
+  "retries",
+  "max_iterations",
+] as const;
+
+/**
+ * `pipeline.stages[*]` is the one schema-bearing sub-object that DOES spawn
+ * its own leaf: `runPipeline` (`engine.ts`) merges the stage onto the node
+ * (`new Node(node.id, node.type, { ...node.fields, ...stage })`) before
+ * `routingIdentity`/`collectLeaf`, so a stage's own `model`/`tier`/`effort`/
+ * `provider` is read and overrides the node's for that stage's leaf — round
+ * 1 of #238 refused it as dead, which was wrong (PR #341 review).
+ */
+export const STAGE_FIELDS = [...SUB_OBJECT_FIELDS, ...ROUTING_FIELDS] as const;
 
 export interface NodeSpec {
   readonly fields: readonly string[];
@@ -13,7 +44,7 @@ export interface NodeSpec {
 
 const spec = (fields: readonly string[], required: readonly string[], routing = false): NodeSpec =>
   Object.freeze({
-    fields: Object.freeze([...COMMON, ...(routing ? ROUTING : []), ...fields]),
+    fields: Object.freeze([...COMMON, ...(routing ? ROUTING_FIELDS : []), ...fields]),
     required: Object.freeze([...required]),
   });
 

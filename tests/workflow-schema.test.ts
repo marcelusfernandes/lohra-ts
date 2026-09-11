@@ -163,7 +163,7 @@ describe("validateSpec", () => {
     if (!isValidationError(invalid)) throw new Error("expected validation error");
     expect(invalid.message).toBe(
       "[unknown_field] a .bogus: 'agent' has no field 'bogus'\n" +
-        "    e.g. allowed: ['depends_on', 'effort', 'label', 'max_iterations', 'model', 'phase', 'prompt', 'provider', 'required', 'retries', 'schema', 'schema_ref', 'tier', 'timeout', 'tool_less']",
+        "    e.g. allowed: ['depends_on', 'effort', 'max_iterations', 'model', 'prompt', 'provider', 'required', 'retries', 'schema', 'schema_ref', 'tier', 'timeout', 'tool_less']",
     );
   });
 
