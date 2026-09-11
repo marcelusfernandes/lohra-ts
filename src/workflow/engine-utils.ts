@@ -6,13 +6,14 @@ import {
   DEFAULT_LEAF_MAX_ITERATIONS,
   QUOTA_EXHAUSTED,
   type LeafExecution,
+  type RunControl,
   type WorkflowLoader,
 } from "./engine-contract.js";
 import { MAX_NODE_MAX_ITERATIONS, MAX_NODE_RETRIES } from "./nodes.js";
 import { isEmptyOutput } from "./output-validation.js";
 import { resolveValue } from "./refs.js";
 import type { Awaitable, ChildResult } from "./runtime.js";
-import { validateSpec } from "./schema.js";
+import { resolveInlineSchema, validateSpec } from "./schema.js";
 import type { TierMap } from "./tiers.js";
 import { Node, ValidationError } from "./types.js";
 
@@ -180,6 +181,23 @@ export function extractForcedOutput(
     : { output: collected.output, usedFallback: true };
 }
 
+/** Issue #336: pulled out of `engine.ts`'s `schemaOf` method to make room
+ * for the new `stoppedByControl` predicate (below) without growing the
+ * file — pure given `node` and `schemas` (an inline schema on the node
+ * itself wins; a `schema_ref` name falls back to the run's own schema
+ * table), so it moves the same way `resolveLeafRequestOptions` (#329)
+ * already did for the same reason. */
+export function resolveNodeSchema(
+  node: Node | Readonly<Record<string, unknown>>,
+  schemas: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> | null {
+  const fields = node instanceof Node ? node.fields : node;
+  const inline = resolveInlineSchema(fields.schema, schemas);
+  if (inline !== null) return inline;
+  const reference = fields.schema_ref;
+  return typeof reference === "string" ? asRecord(schemas[reference]) : null;
+}
+
 export function routingIdentity(node: Node, tiers: TierMap): readonly unknown[] {
   if (!["model", "tier", "effort", "provider"].some((field) => Object.hasOwn(node.fields, field)))
     return [];
@@ -241,6 +259,28 @@ export async function replayOrCollectBranch(
   if (nonEmpty(leaf.output))
     deps.cache.put(deps.runId, branchHash, node.id, leaf.output, leaf.usage);
   return leaf;
+}
+
+/** Issue #336: the SAME stop condition `collectLeaf`'s own pre-spawn check
+ * enforces (engine.ts, right after `pool.acquire()`) — shared by every
+ * retry-loop's counting guard (`runAgent`, `runPipeline`) so none of them
+ * can credit a respawn that `collectLeaf` itself is about to refuse to
+ * spawn. `control` is shared by REFERENCE with a PARENT engine (`runNested`
+ * passes the very same object down, never a copy) — a `requestPause()` on
+ * the parent flips `paused` on the object a NESTED engine's own
+ * `collectLeaf` reads too, even though the nested engine's own
+ * `result.pauseFault` (a separate `RunResult` per engine) stays null.
+ * `cancel()` (engine.ts) never routes through `pause()`, so it never
+ * touches `pauseFault` at all — `control.cancelled` is the only place that
+ * shows up. `aborted` is the one stop signal with no home on `control`:
+ * `runPipeline`'s own per-item deadline flag, threaded in only by the call
+ * sites that have one. `stillDying` below stays on its own `result.
+ * pauseFault` check (`ParallelBranchDeps` has no `control` field) — adding
+ * one would grow `engine.ts`'s `runParallel` deps literal past its line
+ * ceiling for no behavior change worth that cost; out of this issue's
+ * scope. */
+export function stoppedByControl(control: RunControl, aborted?: () => boolean): boolean {
+  return control.paused || control.cancelled || (aborted?.() ?? false);
 }
 
 /** `output === null` from `collectLeaf` also covers a run that's already
