@@ -201,7 +201,7 @@ export function resolveLeafRequestOptions(
   };
 }
 
-/** Issue #329 (extended #426): the FIRST `collect()`'s non-"running" failure path — debit usage, then branch by kind: quota pauses the run (no fault), a route kind (`route-faults.ts`) pauses with a lesson the same way, anything else records a plain fault. Pure given `engine`'s three methods and the `account` callback, so it stays out of `engine.ts` (#313's timeout branch lives here for the same reason). */
+/** Issue #329 (extended #426): the FIRST `collect()`'s non-"running" failure path — debit usage, then branch by kind: quota pauses the run (no fault), a route kind (`route-faults.ts`) pauses with a lesson the same way, anything else records a plain fault. Pure given `engine`'s three methods and the `account` callback, so it stays out of `engine.ts` (#313's timeout branch lives here for the same reason). The schema re-collect loop's OWN non-complete branch (`engine.ts:326-330`) stays inline and never checks the kind at all — a quota or route kind hit there neither pauses the run nor is excluded from `fault_kinds` (it never reaches `recordFaultKind` in the first place), a pre-existing asymmetry out of this issue's scope. */
 export function nonCompleteFirstCollectResult(
   engine: Pick<WorkflowEngine, "noteQuotaExhausted" | "noteRouteFault" | "recordFault">,
   account: (nodeId: string, id: string, collected: ChildResult) => void,
