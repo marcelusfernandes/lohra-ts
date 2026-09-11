@@ -92,7 +92,7 @@ export const CHECKPOINT_HINT =
   "this run is paused at a checkpoint waiting for your answer — " +
   'run_workflow(resume_run_id=..., checkpoint_answers={"<node_id>": ' +
   '<answer>}) — a nested checkpoint\'s node_id is scoped (e.g. "sub.confirm"); ' +
-  "a checkpoint that declared a 'default' takes it if you resume without one";
+  "a checkpoint that declared a 'default' takes it if you resume without one — if the payload carries 'rename_hint', resuming with the SAME node_id only pauses again — rename one of the two checkpoint ids in the spec instead";
 export const USER_PAUSE_HINT =
   "you paused this run; nothing will resume it on its own — its " +
   "finished nodes are kept, so run_workflow(resume_run_id=...) " +
