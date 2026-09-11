@@ -18,7 +18,13 @@ para `harness.ts` (issue #148):
    `edit.before` por `edit.after` via `replaceExactlyOnce` (lança se a âncora
    não ocorrer exatamente uma vez: nem zero, nem duas) e escreve de volta.
 3. `runFocusedVitest(directory, focus)` roda `vitest run <focus.file> -t
-<focus.test>`; `runVitestFiles(directory, files)` roda uma lista de arquivos
+<focus.test>`. `focus.test` é o título **literal** do teste, não um padrão
+   de regex: `escapeFocusTest` (issue #362) escapa os metacaracteres antes do
+   `-t`, sem ancorar em `^…$` — o vitest casa `-t` contra o `fullName`
+   (`ancestorTitles` do `describe` + título do `it`), e os catálogos hoje
+   passam só o título do `it`, sem o prefixo do `describe`; ancorar quebraria
+   esse casamento por sufixo. `runVitestFiles(directory, files)` roda uma
+   lista de arquivos
    inteira sem afunilar por `-t` (o que `workflow-executor` usa: os 44
    mutantes rodam a mesma bateria de `focalTests` completa a cada vez, em vez
    de um teste único por mutante). As duas delegam a `runVitestReporterJson`

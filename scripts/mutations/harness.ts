@@ -206,17 +206,27 @@ function runVitestReporterJson(directory: string, args: readonly string[]): RunO
   }
 }
 
-/** STUB (issue #362): escapa metacaracteres de regex em `literal` antes de
- * passá-lo como `-t` ao vitest — `focus.test` é o título literal do teste,
- * não um padrão. Lança até ser implementado, para o vermelho ser de runtime,
- * não de compilação. */
-export function escapeFocusTest(_literal: string): string {
-  throw new Error("not implemented: escapeFocusTest");
+/** Escapa metacaracteres de regex em `literal` antes de passá-lo como `-t`
+ * ao vitest (issue #362): `focus.test` é o título literal do teste, não um
+ * padrão — um título com `(`, `.` ou `[` sem escape é interpretado como
+ * grupo/curinga/classe e o foco não bate (confirmado com o vitest instalado,
+ * 4.1.11: `-t` cru de "lease (mtime antigo) é tomada" sai `ranTests: 0`).
+ * Mesma lista de metacaracteres de `tests/mcp-config.test.ts` e
+ * `tests/support/parity/compare.ts`. */
+export function escapeFocusTest(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Roda `vitest run <focus.file> -t <focus.test>` dentro de `directory`. */
+/** Roda `vitest run <focus.file> -t <focus.test>` dentro de `directory`.
+ * `focus.test` é escapado antes do `-t` (issue #362) — sem âncora `^…$`:
+ * o vitest casa `-t` contra o `fullName` (`ancestorTitles` do `describe` +
+ * título do `it`), e todo catálogo hoje passa só o título do `it`, sem o
+ * prefixo do `describe`. Confirmado manualmente contra o vitest instalado:
+ * um `-t` ancorado com o título de `subtracts maxTokens beyond the margin`
+ * (`describe("compactionThreshold")`) sai `ranTests: 0` — ancorar quebraria
+ * esse casamento por sufixo que os catálogos existentes já dependem dele. */
 export function runFocusedVitest(directory: string, focus: Focus): RunOutcome {
-  return runVitestReporterJson(directory, [focus.file, "-t", focus.test]);
+  return runVitestReporterJson(directory, [focus.file, "-t", escapeFocusTest(focus.test)]);
 }
 
 /** Lança se `outcome` não é um baseline verde: precisa exitCode 0 E ter
