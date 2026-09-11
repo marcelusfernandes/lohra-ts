@@ -20,7 +20,7 @@ export const mutants: readonly Mutant[] = [
     mechanism: "family-a",
     focus: {
       file: authFocus,
-      test: "renews under a lease so two concurrent refreshes only hit oauthPost once (#354)",
+      test: "renews under a lease so two concurrent refreshes only hit oauthPost once, issue 354",
     },
     edits: [
       {
@@ -52,7 +52,7 @@ export const mutants: readonly Mutant[] = [
     mechanism: "family-a",
     focus: {
       file: authFocus,
-      test: "adopts a token another process already wrote when this refresh attempt itself fails (#351 mitigation)",
+      test: "adopts a token another process already wrote when this refresh attempt itself fails",
     },
     edits: [
       {
@@ -68,7 +68,7 @@ export const mutants: readonly Mutant[] = [
     mechanism: "family-a",
     focus: {
       file: authFocus,
-      test: "throws RefreshFailedError when the refresh POST fails and nothing newer was saved (#354)",
+      test: "throws RefreshFailedError when the refresh POST fails and nothing newer was saved",
     },
     edits: [
       {
@@ -86,7 +86,7 @@ export const mutants: readonly Mutant[] = [
     mechanism: "family-a",
     focus: {
       file: authFocus,
-      test: "names a write failure after a successful refresh differently from RefreshFailedError (#354)",
+      test: "names a write failure after a successful refresh differently from RefreshFailedError, issue 354",
     },
     edits: [
       {
@@ -104,7 +104,7 @@ export const mutants: readonly Mutant[] = [
     mechanism: "family-a",
     focus: {
       file: authFocus,
-      test: "renews under a lease so two concurrent refreshes only hit oauthPost once (#354)",
+      test: "renews under a lease so two concurrent refreshes only hit oauthPost once, issue 354",
     },
     edits: [
       {
@@ -122,7 +122,7 @@ export const mutants: readonly Mutant[] = [
     mechanism: "family-a",
     focus: {
       file: authFocus,
-      test: "blocks a second holder while held, and lets a new holder steal an orphaned (expired) one",
+      test: "blocks a second holder while held, and lets a new holder steal an orphaned expired one",
     },
     edits: [
       {

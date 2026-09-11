@@ -315,7 +315,7 @@ describe("oauth and credentials", () => {
   // concorrentes — cada `resolveCredentials` batia no `oauthPost` na sua
   // própria vez. Este teste prova a coordenação: dois refreshes ao mesmo
   // tempo, um só POST.
-  it("renews under a lease so two concurrent refreshes only hit oauthPost once (#354)", async () => {
+  it("renews under a lease so two concurrent refreshes only hit oauthPost once, issue 354", async () => {
     const home = root();
     enable(home);
     writeTokens(home, {
@@ -352,7 +352,7 @@ describe("oauth and credentials", () => {
   // como "o login falhou". Nome distinto (sem conteúdo de token na
   // mensagem) por asserção — sem importar o símbolo novo, para o commit
   // vermelho compilar contra a base.
-  it("names a write failure after a successful refresh differently from RefreshFailedError (#354)", async () => {
+  it("names a write failure after a successful refresh differently from RefreshFailedError, issue 354", async () => {
     const home = root();
     enable(home);
     writeTokens(home, {
@@ -393,7 +393,7 @@ describe("oauth and credentials", () => {
   // lançar `RefreshFailedError` — sem essa checagem, o processo que perdeu
   // a corrida do OS (não da lease: aqui é o mesmo processo, POST simulado)
   // voltaria a um erro mesmo com um token bom já salvo.
-  it("adopts a token another process already wrote when this refresh attempt itself fails (#351 mitigation)", async () => {
+  it("adopts a token another process already wrote when this refresh attempt itself fails", async () => {
     const home = root();
     enable(home);
     writeTokens(home, {
@@ -420,7 +420,7 @@ describe("oauth and credentials", () => {
     expect(creds?.token).toBe("other-process-access");
   });
 
-  it("throws RefreshFailedError when the refresh POST fails and nothing newer was saved (#354)", async () => {
+  it("throws RefreshFailedError when the refresh POST fails and nothing newer was saved", async () => {
     const home = root();
     enable(home);
     writeTokens(home, {
@@ -440,7 +440,7 @@ describe("oauth and credentials", () => {
 });
 
 describe("token refresh lease (#354)", () => {
-  it("blocks a second holder while held, and lets a new holder steal an orphaned (expired) one", () => {
+  it("blocks a second holder while held, and lets a new holder steal an orphaned expired one", () => {
     const home = root();
     const lockPath = join(home, "oauth.json.lock");
     expect(acquireFileLease(lockPath, "holder-a", 10, 1_000)).toBe(true);
