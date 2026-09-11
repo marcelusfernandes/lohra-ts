@@ -4,6 +4,7 @@ import { AuditRepository } from "../state/audit-repository.js";
 import { openStateDatabase } from "../state/connection.js";
 import { WorkflowRepository } from "../state/workflow-repository.js";
 import { parseAuditQuery } from "../workflow/audit-query.js";
+import type { PublicAuditEvent } from "../workflow/audit-model.js";
 import { productionWarningSink } from "../workflow/ownership-store.js";
 import {
   CHECKPOINT_HINT,
@@ -64,6 +65,40 @@ function pauseHint(pauseReason: string): string | null {
   if (pauseReason === TOKEN_BUDGET_PAUSE) return TOKEN_BUDGET_HINT;
   if (pauseReason === USER_PAUSE) return USER_PAUSE_HINT;
   return null;
+}
+
+/** `seq  event_type  node_path  sub_id?  segment_id[:8]` — one line per
+ * ledger event, for `--events` (issue #369). */
+function renderAuditLine(event: PublicAuditEvent): string {
+  const identity = event.identity;
+  const nodePath = Array.isArray(identity.node_path) ? identity.node_path.join(".") : "";
+  const subId = typeof identity.sub_id === "string" ? ` ${identity.sub_id}` : "";
+  const segmentId =
+    typeof identity.segment_id === "string" ? ` ${identity.segment_id.slice(0, 8)}` : "";
+  return `${String(event.seq)}  ${event.event_type}  ${nodePath}${subId}${segmentId}`.trimEnd();
+}
+
+/** Drains every not-yet-shown event from `after_seq` on, printing each one
+ * exactly once and advancing the cursor past it — the durable ledger
+ * (`AuditRepository`), because `watch` runs in a different process than
+ * whatever launched the run and never sees `onLiveEvent` (that live surface
+ * is `workflow_status.live_tail`, in-process only). Never re-reads what it
+ * already printed, even across many `has_more` pages in one poll. */
+function drainAuditEvents(
+  audit: AuditRepository,
+  runId: string,
+  cursor: number,
+  stdout: (value: string) => void,
+): number {
+  let after = cursor;
+  for (;;) {
+    const page = audit.query({ runId, afterSeq: after, limit: 100 });
+    for (const event of page.events) stdout(`${renderAuditLine(event)}\n`);
+    const next = typeof page.page.next_after_seq === "number" ? page.page.next_after_seq : after;
+    if (page.events.length === 0 || next === after) return next;
+    after = next;
+    if (page.page.has_more !== true) return after;
+  }
 }
 
 function render(
@@ -141,12 +176,17 @@ export async function runWorkflowCommand(options: WorkflowCommandOptions): Promi
       options.sleep ??
       ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
     const poll = Math.max(0, Number(options.args.poll ?? 2) * 1_000);
+    const showEvents = options.args.events === true;
+    const audit = showEvents ? new AuditRepository(connection.database) : undefined;
+    let eventsCursor = 0;
     for (;;) {
       row = repository.getRunState(runId);
       if (row === null) {
         options.stderr(`workflow run '${runId}' is gone\n`);
         return 1;
       }
+      if (audit !== undefined)
+        eventsCursor = drainAuditEvents(audit, runId, eventsCursor, options.stdout);
       const line = render(connection.database, repository, row, now());
       if (line !== previous) {
         options.stdout(`${line}\n`);

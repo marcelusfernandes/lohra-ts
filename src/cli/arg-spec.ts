@@ -159,6 +159,7 @@ export const WORKFLOW_WATCH_SPEC = spec(
   [
     { name: "--last", takesValue: false },
     { name: "--poll", takesValue: true, type: "finiteFloat" },
+    { name: "--events", takesValue: false },
   ],
   [{ name: "run_id", required: false }],
 );
@@ -211,6 +212,7 @@ export const FLAG_HELP: Readonly<Record<string, string>> = {
   "--limit": "maximum number of rows to show",
   "--last": "watch the most recent run",
   "--poll": "seconds between polls",
+  "--events": "also follow the run's audit ledger, one line per event",
   "--node": "filter by node id",
   "--event": "filter by event type",
   "--sub-id": "filter by sub-run id",

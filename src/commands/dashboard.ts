@@ -44,8 +44,12 @@ import {
   OrchestrationChildRuntime,
   productionOwnershipStore,
   productionWarningSink,
+  workflowStatusHandler,
   WorkflowService,
 } from "../workflow/index.js";
+// Issue #369: not re-exported by `../workflow/index.js` — Files omits
+// `src/workflow/index.ts`, so this imports the module directly.
+import { WorkflowLiveTail } from "../workflow/live-tail.js";
 import { composeSessionTools, createSessionToolBase } from "./session-tools.js";
 import { CronStore } from "../cron/store.js";
 import { runSchedulerLoop } from "../cron/scheduler.js";
@@ -277,6 +281,12 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     cwd: options.cwd,
     pricingOverrides,
   });
+  // Issue #369: the ring buffer is per-process, per-service; `push` never
+  // throws (a bad event never aborts the run it watches), so wiring it
+  // straight into `onLiveEvent` is safe unconditionally.
+  const liveTail = new WorkflowLiveTail((message) => {
+    console.warn(message);
+  });
   const workflowService = new WorkflowService({
     runtime: new OrchestrationChildRuntime(orchestrationCore),
     environment: options.environment,
@@ -289,6 +299,9 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     // concurrent resume or a late heartbeat never disappears in silence.
     store: productionOwnershipStore(connection.database, { warning: productionWarningSink() }),
     auditTrail: new AuditTrail(toolBase.auditRepository),
+    onLiveEvent: (event) => {
+      liveTail.push(event);
+    },
   });
   const visionRunner = createModelTransport();
   const sessionTools = composeSessionTools({
@@ -304,6 +317,13 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     visionModel: model,
     imageModel: model,
     supportsVision: profile.supportsVision,
+  });
+  // `composeSessionTools` (`session-tools.ts:93`, outside this issue's
+  // Files) wires `workflow_status` tail-less — this second, narrower
+  // override is the one call that actually threads `liveTail` into the
+  // tool surface, same registry, same generation bump.
+  sessionTools.registry.overrideHandlers({
+    workflow_status: workflowStatusHandler(workflowService, liveTail),
   });
   const toolRuntime = createGatewayToolRuntime(options.home, sessionTools.registry);
   const cronStore = new CronStore(options.home);

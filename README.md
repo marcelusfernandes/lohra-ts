@@ -209,6 +209,7 @@ lohra dashboard --no-open --host 127.0.0.1 --port 9130
 lohra cron list
 lohra workflow list
 lohra workflow watch RUN_ID
+lohra workflow watch RUN_ID --events
 lohra workflow audit RUN_ID
 lohra update --check
 ```
@@ -247,6 +248,20 @@ over)`). `watch` ainda escreve no stderr a dica de retomada certa (a mesma
 que `run_workflow` devolve como `hint`) assim que o run termina pausado;
 `quota_exhausted` não tem dica porque retoma sozinho, sem ação do operador
 (issue #245, `tests/workflow-command.test.ts`).
+
+Um run em voo tem duas caudas independentes. Em processo — o mesmo que
+lançou ou retomou o run —, `workflow_status` devolve `live_tail`
+(`{events, next_cursor, dropped}`): os últimos eventos que esse processo
+observou, limitados por memória (no máximo 256 eventos ou 64 KiB
+serializados, o que vier primeiro; `dropped` conta quantos caíram do
+ring quando o teto foi cruzado). Passe o `next_cursor` da resposta anterior
+como `after_index` para pedir só o que é novo; um run só durável — visto
+de outro processo — nunca carrega `live_tail`. Fora do processo,
+`lohra workflow watch RUN_ID --events` segue o ledger durável
+(`workflow_audit`) por cursor: a cada iteração do polling já existente,
+imprime uma linha por evento novo (`seq  event_type  node_path  sub_id?
+segment_id`) além da linha de status, sem repetir o que já mostrou; sem
+`--events` o comportamento é o de sempre (issue #369).
 
 A tool `list_models` reporta `context_window` por modelo — a janela de
 contexto que o próprio provedor expõe em `/models` (`context_length` no

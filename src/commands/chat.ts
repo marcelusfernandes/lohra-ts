@@ -55,8 +55,12 @@ import {
   OrchestrationChildRuntime,
   productionOwnershipStore,
   productionWarningSink,
+  workflowStatusHandler,
   WorkflowService,
 } from "../workflow/index.js";
+// Issue #369: not re-exported by `../workflow/index.js` — Files omits
+// `src/workflow/index.ts`, so this imports the module directly.
+import { WorkflowLiveTail } from "../workflow/live-tail.js";
 
 export interface ChatCommandOptions {
   // Both already resolved by cli.ts's single parseCommand(CHAT_SPEC, ...)
@@ -318,6 +322,12 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     cwd: options.cwd,
     pricingOverrides,
   });
+  // Issue #369: the ring buffer is per-process, per-service; `push` never
+  // throws (a bad event never aborts the run it watches), so wiring it
+  // straight into `onLiveEvent` is safe unconditionally.
+  const liveTail = new WorkflowLiveTail((message) => {
+    console.warn(message);
+  });
   const workflowService = new WorkflowService({
     runtime: new OrchestrationChildRuntime(orchestrationCore),
     environment: options.environment,
@@ -330,6 +340,9 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     // concurrent resume or a late heartbeat never disappears in silence.
     store: productionOwnershipStore(connection.database, { warning: productionWarningSink() }),
     auditTrail: new AuditTrail(sessionToolBase.auditRepository),
+    onLiveEvent: (event) => {
+      liveTail.push(event);
+    },
   });
   const tools = composeSessionTools({
     base: sessionToolBase,
@@ -344,6 +357,13 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     visionModel: model,
     imageModel: model,
     supportsVision: profile.supportsVision,
+  });
+  // `composeSessionTools` (`session-tools.ts:93`, outside this issue's
+  // Files) wires `workflow_status` tail-less — this second, narrower
+  // override is the one call that actually threads `liveTail` into the
+  // tool surface, same registry, same generation bump.
+  tools.registry.overrideHandlers({
+    workflow_status: workflowStatusHandler(workflowService, liveTail),
   });
   // Issue #287: nothing that constructs a ConversationRuntime in production
   // wired `eventSink` before this -- "session.compacted"/
