@@ -117,6 +117,14 @@ export class AuditTrail {
     return true;
   }
 
+  /** Issue #373: events still not durably written — queued plus (if a drain
+   * is in flight) the one it is currently retrying — so a caller that gave
+   * up waiting on `flush()` can report a named count instead of pretending
+   * the buffer was empty. */
+  public pendingCount(): number {
+    return this.queue.length + (this.running === null ? 0 : 1);
+  }
+
   public async flush(timeoutMs = 5_000): Promise<boolean> {
     const deadline = Date.now() + Math.max(0, timeoutMs);
     while (this.running !== null || this.queue.length > 0 || this.dropped.length > 0) {
@@ -147,6 +155,19 @@ export class AuditTrail {
       if (next === undefined) return;
       this.queue.shift();
       const saved = await this.append(next.runId, next.input, next.ownership);
+      // Issue #368 (emenda 2026-09-11): a "refused" write is a graceful,
+      // BY-DESIGN outcome (a superseded stretch's stale token, or — before
+      // the flush-before-release fix in service.ts — a terminal event that
+      // lost the race) — never a sink failure, never a gap (that would
+      // poison the writer M11 pins against).
+      //
+      // Issue #380: no warning is emitted here anymore — `AuditRepository
+      // .append` (the only implementation `append()` below ever calls with
+      // ownership set in `src/`) already names every refusal once. A second
+      // line here, for the very same refusal, was the duplicate the issue
+      // fixed; a test double standing in for the repository in a unit test
+      // is expected to assert its own inputs/outputs directly, not rely on
+      // this class's warning text.
       if (saved === "failed") {
         const gap: AuditInput = Object.freeze({
           event_type: "audit.gap",

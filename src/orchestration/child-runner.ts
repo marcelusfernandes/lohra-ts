@@ -173,7 +173,9 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
       // exclusions in child.ts:57-78 still run first, and only what they let
       // through ever reaches the sandbox's fs/egress/taint checks.
       const dispatch =
-        config.wrapDispatch === undefined ? childDispatch : config.wrapDispatch(childDispatch);
+        config.wrapDispatch === undefined
+          ? childDispatch
+          : config.wrapDispatch(childDispatch, subId);
       const runtime = new ConversationRuntime({
         repository,
         transport: new NonClosingTransport(buildTransport(client, true)),

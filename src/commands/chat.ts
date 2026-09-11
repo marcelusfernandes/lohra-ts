@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { loadProjectContext, buildSystemPrompt } from "../context/index.js";
 import { readCodexModel } from "../auth/codex.js";
 import { resolveAuthRoute, resolveCredentials } from "../auth/credentials.js";
-import { RefreshFailedError } from "../auth/errors.js";
+import { RefreshFailedError, TokenPersistError } from "../auth/errors.js";
 import { ClientPool } from "../agent/client-pool.js";
 import {
   AnthropicMessagesModel,
@@ -55,8 +55,12 @@ import {
   OrchestrationChildRuntime,
   productionOwnershipStore,
   productionWarningSink,
+  workflowStatusHandler,
   WorkflowService,
 } from "../workflow/index.js";
+// Issue #369: not re-exported by `../workflow/index.js` — Files omits
+// `src/workflow/index.ts`, so this imports the module directly.
+import { WorkflowLiveTail } from "../workflow/live-tail.js";
 
 export interface ChatCommandOptions {
   // Both already resolved by cli.ts's single parseCommand(CHAT_SPEC, ...)
@@ -175,7 +179,18 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       // Codex token) never touches the network, so re-resolving through
       // runChatBoundary is harmless and stays byte-identical to before
       // (tests/auth-cli.test.ts pins that shape).
-      if (error instanceof RefreshFailedError)
+      //
+      // `TokenPersistError` (issue #354: the refresh POST itself succeeded,
+      // only the disk write failed) needs the same direct treatment for a
+      // different reason (issue #357): the refresh_token the provider
+      // handed back has already been rotated, so a second attempt through
+      // runChatBoundary re-reads the OLD token still on disk and retries
+      // the refresh with a value the provider already invalidated — not
+      // recoverable by retrying, only by fixing the disk and rerunning.
+      // `TokenPersistError.message` already names the path and cause
+      // without echoing any token value (`credentials.ts`), so it is safe
+      // to surface as-is.
+      if (error instanceof RefreshFailedError || error instanceof TokenPersistError)
         return initializationError(input, null, error.message);
       return runChatBoundary({ home: options.home, codexHome: options.codexHome, input });
     }
@@ -248,7 +263,17 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   const warningLines = fanout.warnings.map((warning) => `${warning}\n`).join("");
   const connection = openStateForEnvironment(options.environment);
   const sessions = new SessionRepository(connection.database, undefined, connection.ftsEnabled);
-  const sessionToolBase = createSessionToolBase(connection.database, options.environment);
+  // Issue #380: the same sink the ownership store (`productionWarningSink`
+  // below) and `WorkflowService` itself already print refusals through — a
+  // fence refusal on the AUDIT trail (`AuditRepository`/`AuditTrail`) used
+  // to reach only the default `() => undefined`, so it was unobservable in
+  // this binary even though the concurrent-write case it names is real.
+  const auditWarning = (message: string): void => {
+    console.warn(message);
+  };
+  const sessionToolBase = createSessionToolBase(connection.database, options.environment, {
+    warning: auditWarning,
+  });
   const sessionRegistry = sessionToolBase.registry;
   const repository = new SqliteConversationRepository(sessions);
   const useTools = !options.flags.has("--no-tools");
@@ -307,6 +332,12 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     cwd: options.cwd,
     pricingOverrides,
   });
+  // Issue #369: the ring buffer is per-process, per-service; `push` never
+  // throws (a bad event never aborts the run it watches), so wiring it
+  // straight into `onLiveEvent` is safe unconditionally.
+  const liveTail = new WorkflowLiveTail((message) => {
+    console.warn(message);
+  });
   const workflowService = new WorkflowService({
     runtime: new OrchestrationChildRuntime(orchestrationCore),
     environment: options.environment,
@@ -318,7 +349,10 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     // The warning sink (#135) prints a refused owned write to stderr — a
     // concurrent resume or a late heartbeat never disappears in silence.
     store: productionOwnershipStore(connection.database, { warning: productionWarningSink() }),
-    auditTrail: new AuditTrail(sessionToolBase.auditRepository),
+    auditTrail: new AuditTrail(sessionToolBase.auditRepository, { warning: auditWarning }),
+    onLiveEvent: (event) => {
+      liveTail.push(event);
+    },
   });
   const tools = composeSessionTools({
     base: sessionToolBase,
@@ -333,6 +367,13 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     visionModel: model,
     imageModel: model,
     supportsVision: profile.supportsVision,
+  });
+  // `composeSessionTools` (`session-tools.ts:93`, outside this issue's
+  // Files) wires `workflow_status` tail-less — this second, narrower
+  // override is the one call that actually threads `liveTail` into the
+  // tool surface, same registry, same generation bump.
+  tools.registry.overrideHandlers({
+    workflow_status: workflowStatusHandler(workflowService, liveTail),
   });
   // Issue #287: nothing that constructs a ConversationRuntime in production
   // wired `eventSink` before this -- "session.compacted"/

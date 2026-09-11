@@ -19,10 +19,30 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { enable, writeTokens } from "../src/auth/index.js";
 import { runChat } from "../src/commands/chat.js";
 
+// Issue #357: lets `writeTokens` fail on demand without touching real
+// filesystem permission bits. A chmod-based simulation was tried first and
+// rejected: the refresh lease file (`credentials.ts`) lives in the same
+// directory as the token file, so making that directory unwritable also
+// blocks the lease's own release/reacquire and masks the actual double-POST
+// bug behind an unrelated ~10s lease-contention wait. `active` starts
+// `false` so the initial-token setup call below goes through untouched.
+const writeFailure = vi.hoisted(() => ({ active: false }));
+vi.mock("../src/auth/store.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/auth/store.js")>();
+  return {
+    ...actual,
+    writeTokens: (...args: Parameters<typeof actual.writeTokens>) => {
+      if (writeFailure.active) throw new Error("EROFS: read-only file system, open");
+      actual.writeTokens(...args);
+    },
+  };
+});
+
 const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   vi.unstubAllGlobals();
+  writeFailure.active = false;
 });
 
 function root(): string {
@@ -68,5 +88,72 @@ describe("runChat surfaces a failed OAuth refresh instead of swallowing it (issu
     expect(envelope.model).toBeNull();
     expect(envelope.error).not.toContain("no OAuth post configured");
     expect(envelope.error).not.toContain("subscription transport is not available");
+  });
+});
+
+// Issue #357: `chat.ts:~178` only intercepted `RefreshFailedError`. A
+// `TokenPersistError` (issue #354: the refresh POST itself succeeded, only
+// the disk write failed) fell through to `runChatBoundary`, which called
+// `resolveCredentials` a SECOND time from scratch — reading the OLD token
+// still on disk (the write never landed) and retrying the refresh with a
+// refresh_token the provider already rotated on the first, successful,
+// attempt. As with #351, the number of `oauthPost` attempts is the
+// assertion that discriminates base from fixed: base makes two POSTs (this
+// attempt's success, discarded, then chat-boundary's retry, whose own write
+// also fails since `writeFailure.active` stays on), the fix makes exactly
+// one.
+describe("runChat treats a successful refresh whose disk write fails as terminal (issue #357)", () => {
+  it("returns an actionable error, a non-zero exit, and exactly one refresh POST", async () => {
+    const base = root();
+    const home = join(base, ".lohra");
+    const codexHome = join(base, ".codex");
+    enable(home);
+    writeTokens(home, {
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      accountId: "acct-t357-dummy",
+      expiresAt: Date.now() / 1000 + 100, // <300s away: triggers the refresh branch
+    });
+    writeFailure.active = true;
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            access_token: "new-access",
+            refresh_token: "new-refresh",
+            expires_in: 3600,
+          }),
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await runChat({
+      input: "oi",
+      flags: new Map<string, string | true>([["--json", true]]),
+      environment: {},
+      home,
+      codexHome,
+      cwd: base,
+    });
+
+    expect(result.code).not.toBe(0);
+    const envelope = JSON.parse(result.stdout) as { error: string | null; model: string | null };
+    expect(envelope.error).not.toBeNull();
+    // Discriminator: exactly one refresh attempt (see comment above).
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // chat-boundary hardcodes `model: "gpt-5.5"` in its envelope; reaching
+    // this codepath directly (not through the boundary) keeps it null.
+    expect(envelope.model).toBeNull();
+    expect(envelope.error).toContain("check permissions/disk space");
+    // chat-boundary's own catch prefixes with "subscription mode: " —
+    // absence of that prefix confirms this went through the direct
+    // interception, not a second round-trip through the boundary.
+    expect(envelope.error).not.toContain("subscription mode:");
+    // Never leak either token value into the surfaced message.
+    expect(envelope.error).not.toContain("new-access");
+    expect(envelope.error).not.toContain("new-refresh");
+    expect(envelope.error).not.toContain("old-access");
+    expect(envelope.error).not.toContain("old-refresh");
   });
 });

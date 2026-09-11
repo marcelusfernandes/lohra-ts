@@ -83,6 +83,7 @@ import { persistenceMutants } from "../scripts/mutations/media-catalog-persisten
 import { orchestrationMutants } from "../scripts/mutations/orchestration.js";
 import { mutants as selfUpdateMutants } from "../scripts/mutations/self-update-mutants.js";
 import { mutants as auditLiveMutants } from "../scripts/mutations/workflow-audit-live-mutants.js";
+import { auditProducersMutants } from "../scripts/mutations/workflow-audit-producers-mutants.js";
 import { namedMutants } from "../scripts/mutations/workflow-durability-named.js";
 import { webToolsMutants } from "../scripts/mutations/web-tools-mutants.js";
 import {
@@ -153,7 +154,7 @@ interface CatalogEntry {
   readonly edits: readonly { readonly file: string }[];
 }
 
-/** Os onze catálogos de dado puro, chave = caminho relativo à raiz do repo
+/** Os doze catálogos de dado puro, chave = caminho relativo à raiz do repo
  * igual ao que aparece em `slices.json#catalog` -- a checagem de item 3 do
  * cabeçalho acima compara as CHAVES deste mapa contra a união dos
  * `catalog` do JSON, então um `catalog` novo no JSON sem entrada aqui (ou
@@ -173,6 +174,7 @@ const CATALOGOS: ReadonlyMap<string, readonly CatalogEntry[]> = new Map<
   ["scripts/mutations/workflow-durability-named.ts", asCatalog(namedMutants)],
   ["scripts/mutations/orchestration.ts", asCatalog(orchestrationMutants)],
   ["scripts/mutations/workflow-audit-live-mutants.ts", asCatalog(auditLiveMutants)],
+  ["scripts/mutations/workflow-audit-producers-mutants.ts", asCatalog(auditProducersMutants)],
   ["scripts/mutations/web-tools-mutants.ts", asCatalog(webToolsMutants)],
   ["scripts/mutations/media-catalog-other.ts", asCatalog(otherMediaMutants)],
   ["scripts/mutations/media-catalog-persistence.ts", asCatalog(persistenceMutants)],
@@ -478,8 +480,8 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 201 (soma dos onze catálogos importados)", () => {
-    // Os onze catálogos de dado puro, importados de verdade via CATALOGOS:
+  it("a contagem total de mutantes é 219 (soma dos doze catálogos importados)", () => {
+    // Os doze catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
     // `probe`). `workflow-executor-mutants.ts` (issue #186) foi o nono: antes
@@ -488,13 +490,15 @@ describe("scripts/mutations/slices.json", () => {
     // `context-window.ts` (issue #293) é o décimo: catálogo e runner no
     // mesmo arquivo (atrás da mesma guarda de entry-point), porque o `Files`
     // da issue só autoriza um script novo. `auth-mutants.ts` (issue #354) é
-    // o décimo primeiro: 188 + 8 = 196; a issue #356 (fail-closed do lock
-    // ilegível, releitura do dono sob a lease, deadline do perdedor) somou
-    // mais 4 na rodada 1: 196 + 4 = 200; a rodada 2 (`waitForFileLease`
-    // desacordando de `acquireFileLease` sobre lock ilegível) somou mais 1:
-    // 200 + 1 = 201.
+    // o décimo primeiro: 188 + 8 = 196. `workflow-audit-producers-mutants.ts`
+    // (issue #370) é o décimo segundo, estendendo a fatia
+    // `workflow-audit-live` aos produtores do M7: 196 + 18 = 214. A issue
+    // #356 (fail-closed do lock ilegível, releitura do dono sob a lease,
+    // deadline do perdedor, rodada 1; `waitForFileLease` concordando com
+    // `acquireFileLease` sobre lock ilegível, rodada 2) estendeu
+    // `auth-mutants.ts` de 8 para 13, +5: 214 + 5 = 219.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 201;
+    const TOTAL_MUTANTS = 219;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -511,6 +515,7 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/workflow-durability-named.ts": 41,
       "scripts/mutations/orchestration.ts": 5,
       "scripts/mutations/workflow-audit-live-mutants.ts": 32,
+      "scripts/mutations/workflow-audit-producers-mutants.ts": 18,
       "scripts/mutations/web-tools-mutants.ts": 9,
       "scripts/mutations/media-catalog-other.ts": 7,
       "scripts/mutations/media-catalog-persistence.ts": 13,
@@ -524,7 +529,7 @@ describe("scripts/mutations/slices.json", () => {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(201);
+    expect(somaTabela).toBe(219);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {

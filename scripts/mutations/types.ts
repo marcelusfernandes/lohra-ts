@@ -19,7 +19,13 @@ export interface Edit {
 export interface Focus {
   /** O arquivo de teste onde o oráculo deste mutante mora. */
   readonly file: string;
-  /** Padrão `vitest -t` que nomeia o teste exato que precisa matar o mutante. */
+  /** Título LITERAL do `it()` que precisa matar o mutante — não um padrão
+   * de regex. `runFocusedVitest` (`harness.ts`) escapa os metacaracteres
+   * antes de passar para `vitest -t`, e o vitest casa `-t` por SUBSTRING
+   * contra o `fullName` (`ancestorTitles` do `describe` + título do `it`) —
+   * então `test` também casa como substring: um título que é substring de
+   * outro título focaliza os dois (veredito da PR #371/#362; hoje nenhum
+   * título de teste é substring de outro). */
   readonly test: string;
 }
 

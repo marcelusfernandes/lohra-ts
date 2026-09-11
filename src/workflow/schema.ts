@@ -88,9 +88,12 @@ function checkNamedSchema(
 interface SchemaSubObject {
   readonly fieldPrefix: string;
   readonly fields: Readonly<Record<string, unknown>>;
-  /** Only `pipeline.stages[*]` spawns its own leaf (`runPipeline` merges the
-   * stage onto the node before `collectLeaf`) — everywhere else the routing
-   * fields are dead, so only a stage's `unknown_field` scan allows them. */
+  /** Only `pipeline.stages[*]` gets its own ROUTING knobs validated here —
+   * `runPipeline` merges the stage onto the node before spawning its own
+   * leaf. Since #342 `gate.body`/`loop_until_dry.body` merge too
+   * (`mergeBodyIntoNode`, `leaf-options.ts`), so refusing a routing knob
+   * there is a decision, not a mechanical dead field — `synthesize`/
+   * `branches[*]` still spawn with the node unmodified, truly no reader. */
   readonly routingAllowed: boolean;
 }
 
@@ -159,14 +162,13 @@ function validateSubObjectSchemas(
 
 /**
  * Every schema-bearing sub-object accepts the agent-shaped fields in
- * `SUB_OBJECT_FIELDS` (#238); a `pipeline` stage additionally accepts the
- * routing fields in `ROUTING_FIELDS` (`STAGE_FIELDS`) because it spawns its
- * own leaf and its own `model`/`tier`/`effort`/`provider` really is read
- * (PR #341 review, round 1 got this wrong for stages). Everywhere else a
- * routing knob one level down has no reader (`gate.body`, `loop_until_dry
- * .body`, `judge_panel.synthesize` and `parallel.branches[*]` all spawn
- * with the OUTER node) and is refused instead of silently costing the
- * session's own model.
+ * `SUB_OBJECT_FIELDS` (#238); a `pipeline` stage additionally accepts
+ * `ROUTING_FIELDS` (`STAGE_FIELDS`) because it spawns its own leaf and its
+ * own `model`/`tier`/`effort`/`provider` really is read (PR #341 review,
+ * round 1 got this wrong for stages). Everywhere else a routing knob is
+ * refused as a spec-design decision (see `SchemaSubObject.routingAllowed`
+ * above for which ones would now actually be read since #342, and which
+ * still have no reader at all).
  */
 function validateSubObjectFields(node: Node, issues: SpecIssue[]): void {
   for (const target of schemaBearingSubObjects(node)) {
@@ -367,77 +369,76 @@ function validateShape(
   return { node: new Node(id, nodeType, fields), duplicateCandidate: id };
 }
 
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
+const isWholeNumberIn = (value: unknown, min: number, max: number): boolean =>
+  isFiniteNumber(value) && Number.isInteger(value) && value >= min && value <= max;
+
+interface KnobRule {
+  readonly key: string;
+  readonly ok: (value: unknown) => boolean;
+  readonly message: string;
+  readonly example: string;
+}
+
+/** #360: one rule per knob, shared by the node (`fieldPrefix: ""`) and every
+ * agent-shaped sub-object (`stages[0].`, `body.`, ...), so the same value and
+ * error text apply wherever the knob has a reader. `tool_less` had no
+ * node-level check before this issue; adding it here makes the two levels
+ * identical. */
+const KNOB_RULES: readonly KnobRule[] = [
+  {
+    key: "timeout",
+    ok: (value) => isFiniteNumber(value) && value > 0,
+    message: "'timeout' must be a positive number of seconds",
+    example: "timeout: 120",
+  },
+  {
+    key: "retries",
+    ok: (value) => isWholeNumberIn(value, 0, MAX_NODE_RETRIES),
+    message: "'retries' must be a whole number between 0 and 3",
+    example: "retries: 1",
+  },
+  {
+    key: "max_iterations",
+    ok: (value) => isWholeNumberIn(value, 1, MAX_NODE_MAX_ITERATIONS),
+    message: "'max_iterations' must be a whole number between 1 and 128",
+    example: "max_iterations: 24",
+  },
+  {
+    key: "tool_less",
+    ok: (value) => typeof value === "boolean",
+    message: "'tool_less' must be true or false",
+    example: "tool_less: true",
+  },
+];
+
+function validateKnobValues(
+  fields: Readonly<Record<string, unknown>>,
+  nodeId: string | null,
+  fieldPrefix: string,
+  issues: SpecIssue[],
+): void {
+  for (const rule of KNOB_RULES) {
+    const value = fields[rule.key];
+    if (value !== undefined && !rule.ok(value)) {
+      issue(issues, "field_value", rule.message, nodeId, `${fieldPrefix}${rule.key}`, rule.example);
+    }
+  }
+}
+
 function validateLifecycle(node: Node, issues: SpecIssue[]): void {
-  const timeout = node.fields.timeout;
-  if (
-    timeout !== undefined &&
-    (typeof timeout !== "number" || !Number.isFinite(timeout) || timeout <= 0)
-  ) {
-    issue(
-      issues,
-      "field_value",
-      "'timeout' must be a positive number of seconds",
-      node.id,
-      "timeout",
-      "timeout: 120",
-    );
-  }
-  const retries = node.fields.retries;
-  if (
-    retries !== undefined &&
-    (!Number.isInteger(retries) ||
-      typeof retries !== "number" ||
-      retries < 0 ||
-      retries > MAX_NODE_RETRIES)
-  ) {
-    issue(
-      issues,
-      "field_value",
-      "'retries' must be a whole number between 0 and 3",
-      node.id,
-      "retries",
-      "retries: 1",
-    );
-  }
-  const iterations = node.fields.max_iterations;
-  if (
-    iterations !== undefined &&
-    (!Number.isInteger(iterations) ||
-      typeof iterations !== "number" ||
-      iterations < 1 ||
-      iterations > MAX_NODE_MAX_ITERATIONS)
-  ) {
-    issue(
-      issues,
-      "field_value",
-      "'max_iterations' must be a whole number between 1 and 128",
-      node.id,
-      "max_iterations",
-      "max_iterations: 24",
-    );
-  }
-  if (node.type === "pipeline" && Array.isArray(node.fields.stages)) {
-    node.fields.stages.forEach((stage, index) => {
-      const stageRecord = record(stage);
-      if (stageRecord === null || !("max_iterations" in stageRecord)) return;
-      const value = stageRecord.max_iterations;
-      if (
-        typeof value !== "number" ||
-        !Number.isInteger(value) ||
-        typeof value === "boolean" ||
-        value < 1 ||
-        value > MAX_NODE_MAX_ITERATIONS
-      ) {
-        issue(
-          issues,
-          "field_value",
-          "'max_iterations' must be a whole number between 1 and 128",
-          node.id,
-          `stages[${String(index)}].max_iterations`,
-          "max_iterations: 24",
-        );
-      }
-    });
+  validateKnobValues(node.fields, node.id, "", issues);
+}
+
+/** #360: `validateSubObjectFields` above only checks NAMES; this applies the
+ * same VALUE rule with the sub-object's own qualified field
+ * (`stages[0].retries`, `body.timeout`) instead of clamping or defaulting
+ * silently at runtime. */
+function validateSubObjectValues(node: Node, issues: SpecIssue[]): void {
+  for (const target of schemaBearingSubObjects(node)) {
+    validateKnobValues(target.fields, node.id, target.fieldPrefix, issues);
   }
 }
 
@@ -477,21 +478,51 @@ function validateLoopBudget(node: Node, issues: SpecIssue[]): void {
   }
 }
 
-function validateTier(node: Node, issues: SpecIssue[]): void {
-  const tier = node.fields.tier;
-  if (
-    tier !== undefined &&
-    (typeof tier !== "string" || !["small", "medium", "big"].includes(tier))
-  ) {
+const TIER_VALUES = ["small", "medium", "big"] as const;
+const TIER_MESSAGE =
+  "'tier' must be one of ['small', 'medium', 'big'] (the operator maps each one to a " +
+  "real model in ~/.lohra/workflow_tiers.json)";
+
+function isValidTier(value: unknown): boolean {
+  return typeof value === "string" && (TIER_VALUES as readonly string[]).includes(value);
+}
+
+/**
+ * #342: `stages[*].tier` used to accept anything a stage's own `STAGE_FIELDS`
+ * allow-list lets through (`nodes.ts`) with no enum check of its own —
+ * `stages: [{prompt: "x", tier: "huge"}]` validated clean and then fell
+ * back to the session's own model at runtime, silently: `runPipeline`
+ * (`engine.ts`) merges the stage onto the node before `routingIdentity`
+ * reads `tier`, and an unrecognized tier there resolves to `undefined`
+ * routing, not a fault. Reviewer's finding on PR #341's round 2 (issue
+ * body). Only `tier` gets this treatment — `model`/`effort`/`provider` are
+ * free fields nothing validates anywhere, node-level or stage-level
+ * (`builtin-definitions.ts`'s own tool description says so), so there is no
+ * enum to check for them.
+ */
+function validateStageTiers(node: Node, issues: SpecIssue[]): void {
+  if (node.type !== "pipeline" || !Array.isArray(node.fields.stages)) return;
+  node.fields.stages.forEach((stage, index) => {
+    const stageRecord = record(stage);
+    if (stageRecord === null || !("tier" in stageRecord)) return;
+    if (isValidTier(stageRecord.tier)) return;
     issue(
       issues,
       "field_value",
-      "'tier' must be one of ['small', 'medium', 'big'] (the operator maps each one to a real model in ~/.lohra/workflow_tiers.json)",
+      TIER_MESSAGE,
       node.id,
-      "tier",
+      `stages[${String(index)}].tier`,
       "tier: big",
     );
+  });
+}
+
+function validateTier(node: Node, issues: SpecIssue[]): void {
+  const tier = node.fields.tier;
+  if (tier !== undefined && !isValidTier(tier)) {
+    issue(issues, "field_value", TIER_MESSAGE, node.id, "tier", "tier: big");
   }
+  validateStageTiers(node, issues);
 }
 
 function validateGate(node: Node, issues: SpecIssue[]): void {
@@ -673,6 +704,7 @@ export function validateSpec(
     // schemaBearingSubObjects above already enumerates body/synthesize/stages.
     validateSubObjectSchemas(node, schemas, issues);
     validateSubObjectFields(node, issues);
+    validateSubObjectValues(node, issues);
     const count = staticFanout(node);
     if (count !== null && count > MAX_STATIC_FANOUT) {
       issue(

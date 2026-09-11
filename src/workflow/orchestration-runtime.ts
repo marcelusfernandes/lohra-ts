@@ -5,6 +5,7 @@ import type {
   ChildResult,
   ChildRuntime,
   ChildSpawnRequest,
+  LeafIdentity,
   LeafSandboxHandle,
   LeafSandboxInstallation,
   LeafToolDispatch,
@@ -33,6 +34,13 @@ function readPending(value: string): Promise<string> | undefined {
   return candidate instanceof PendingDispatch ? candidate.promise : undefined;
 }
 
+/** Parses `onToolSettled`'s `ok` from the tool envelope's own leading
+ * `{"ok":...` (never the rest of the payload) — real envelopes come from
+ * `toolResult`/`toolError`, src/tools/envelope.ts. */
+function okFromEnvelope(result: string): boolean {
+  return result.startsWith('{"ok":true');
+}
+
 /**
  * Bridges the sandbox's synchronous `LeafToolDispatch` contract
  * (runtime.ts:44, `LeafSandboxInstallation.wrap`) to the child pool's real,
@@ -49,17 +57,29 @@ function readPending(value: string): Promise<string> | undefined {
  * returns recognizes that token and awaits the real promise; anything else
  * `wrap` returns is a synchronous DENIAL that never called `base` at all —
  * per contract, a denial never reaches (and never needs to unwrap) a token.
+ *
+ * Issue #367: `subId` — unknown to `wrapDispatchFor` at RESOLVE time, since
+ * `core.spawn` mints it — arrives here as a second argument instead, read by
+ * `createChildRunner` once it is in scope and threaded straight through to
+ * `installation.wrap`. After the real dispatch settles (never for a sync
+ * denial — that path returns before `pending` exists), `onToolSettled` fires
+ * with `ok` parsed from the tool envelope's own leading `{"ok":...` (never
+ * the rest of the payload) — see `okFromEnvelope` above.
  */
 function adaptSandboxWrap(
-  wrap: (base: LeafToolDispatch) => LeafToolDispatch,
-): (base: ChildToolDispatch) => ChildToolDispatch {
-  return (base) => {
+  installation: LeafSandboxInstallation,
+): (base: ChildToolDispatch, subId: string) => ChildToolDispatch {
+  return (base, subId) => {
+    const leaf: LeafIdentity = Object.freeze({ subId });
     const syncBase: LeafToolDispatch = (name, args) => pendingToken(base(name, args));
-    const wrapped = wrap(syncBase);
+    const wrapped = installation.wrap(syncBase, leaf);
     return async (name, args) => {
       const out = wrapped(name, args);
       const pending = readPending(out);
-      return pending === undefined ? out : await pending;
+      if (pending === undefined) return out;
+      const result = await pending;
+      installation.onToolSettled?.(leaf, okFromEnvelope(result));
+      return result;
     };
   };
 }
@@ -117,9 +137,11 @@ export class OrchestrationChildRuntime implements ChildRuntime {
     };
   }
 
-  private wrapDispatchFor(runId: string): (base: ChildToolDispatch) => ChildToolDispatch {
+  private wrapDispatchFor(
+    runId: string,
+  ): (base: ChildToolDispatch, subId: string) => ChildToolDispatch {
     const installation = this.installations.get(runId);
-    return installation === undefined ? () => denyAllDispatch : adaptSandboxWrap(installation.wrap);
+    return installation === undefined ? () => denyAllDispatch : adaptSandboxWrap(installation);
   }
 
   public spawn(request: ChildSpawnRequest): string {
