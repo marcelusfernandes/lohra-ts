@@ -1,11 +1,17 @@
 // Runner de mutação de `src/workflow/audit-*` e vizinhos (issue #150, passo
 // 13-S3 do épico #13). Substitui o antigo runner de mutação de
 // workflow-audit-live no diretório histórico de paridade: um único sandbox
-// de `git archive` (via `prepareArchiveSandbox` do harness comum), 32
+// de `git archive` (via `prepareArchiveSandbox` do harness comum), os
 // mutantes aplicados um de cada vez com `applyEditExactlyOnce`/`restoreAll`,
 // classificados com `classify`, relatados com `writeReport`. Sem o SHA do
 // oracle Python hardcoded, sem os binários de sistema absolutos nem a
 // dependência do diretório histórico de paridade que o runner antigo tinha.
+//
+// Issue #370: `mutants` concatena os 32 originais
+// (`workflow-audit-live-mutants.ts`) com os 18 novos dos produtores do M7
+// (`workflow-audit-producers-mutants.ts`) — um único catálogo combinado para
+// o runner, dois arquivos de dado puro separados para `slices.json#catalog`
+// (cada um descoberto por conteúdo em `tests/mutations-slices.test.ts`).
 //
 // Dois helpers locais que ainda não existem em `scripts/mutations/harness.ts`
 // (issue #149 está adicionando esses mesmos helpers ao harness comum —
@@ -39,8 +45,11 @@ import {
   writeReport,
   type RunOutcome,
 } from "./harness.js";
-import type { Focus, MutationReport } from "./types.js";
-import { mutants } from "./workflow-audit-live-mutants.js";
+import type { Focus, Mutant, MutationReport } from "./types.js";
+import { auditProducersMutants } from "./workflow-audit-producers-mutants.js";
+import { mutants as auditLiveMutants } from "./workflow-audit-live-mutants.js";
+
+const mutants: readonly Mutant[] = [...auditLiveMutants, ...auditProducersMutants];
 
 const root = resolve(fileURLToPath(import.meta.url), "../../..");
 const evidenceDir = resolve(root, ".mutation-evidence/t17");
