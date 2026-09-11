@@ -246,12 +246,14 @@ Se o dreno não terminar no prazo, o envelope traz `integrity.pending: <n>`
 
 `<n>` é `AuditTrail.pendingCount()` (`audit-trail.ts:124-126`): a fila mais,
 se houver, a escrita em voo — do `AuditTrail` **inteiro do processo**, não
-filtrado por `run_id`. A descrição da própria tool
-(`builtin-definitions.ts:573`, `"some of this run's own events"`) fala em
-eventos deste run; o código não distingue — um processo atendendo vários
-runs com a mesma `WorkflowService` reporta o `pending` de todos juntos, não
-importa qual `run_id` a consulta pediu. Uma leitura de outro processo nunca
-seta `pending` — não há fila deste processo para drenar ali.
+filtrado por `run_id`. A descrição da própria tool (`builtin-definitions.ts:573`)
+diz isso mesmo: conta eventos ainda em buffer neste processo para qualquer
+run, não filtrado por `run_id`, então pode vir maior que zero mesmo quando
+este run não tem nada pendente; uma leitura posterior pode mostrar mais
+eventos deste run. Descrição e código concordam — um processo atendendo
+vários runs com a mesma `WorkflowService` reporta o `pending` de todos
+juntos, não importa qual `run_id` a consulta pediu. Uma leitura de outro
+processo nunca seta `pending` — não há fila deste processo para drenar ali.
 
 Janela conhecida: um `AuditTrail` já `stopped` (falha permanente do sink,
 "Fail-closed" acima) com a fila já vazia faz `flush()` devolver `false` sem
