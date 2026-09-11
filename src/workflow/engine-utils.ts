@@ -1,6 +1,6 @@
 import { combineUsage, usage } from "../pricing/usage.js";
 import type { Usage } from "../pricing/types.js";
-import { addUsageToResult, type RunResult } from "./accounting.js";
+import { addUsageToResult, recordSandboxRefusals, type RunResult } from "./accounting.js";
 import { contentHash, type WorkflowCache } from "./cache.js";
 import {
   DEFAULT_LEAF_MAX_ITERATIONS,
@@ -475,15 +475,19 @@ export function debitLeaf(
 ): Usage {
   const next = resultUsage(collected);
   const uncertain = collected.usageUncertain === true;
+  const owner = scopedCheckpointId(nodeScope, nodeId);
   leafCosts.set(id, next);
   addUsageToResult(
     result,
-    scopedCheckpointId(nodeScope, nodeId),
+    owner,
     next,
     collected.provider ?? null,
     collected.model ?? null,
     uncertain,
   );
+  // Plain `nodeId` (never `owner`) — reads like a `faults` entry, never
+  // double-scoped by both this and the outer nested fold.
+  recordSandboxRefusals(result, nodeId, collected.sandboxRefusals ?? 0);
   return next;
 }
 

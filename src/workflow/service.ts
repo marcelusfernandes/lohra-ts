@@ -13,6 +13,7 @@ import {
 } from "./engine-options.js";
 import { WorkflowEngine } from "./engine.js";
 import { AutoResumeScheduler, LeaseHeartbeat, type Timer } from "./durability.js";
+import { resultView } from "./service-rollup.js";
 import type { ChildRuntime, LeafSandboxHandle, LeafToolDispatch } from "./runtime.js";
 import { validateNestedRefs, validateSpec } from "./schema.js";
 import { ValidationError, type WorkflowSpec } from "./types.js";
@@ -108,6 +109,7 @@ export interface DurableRunView {
   readonly resume_at: number | null;
   readonly attempts: number;
   readonly leaf_respawns: number;
+  readonly sandbox_refusals: number;
   readonly prior_faults: readonly string[];
   readonly prior_degraded: boolean;
   readonly tainted: boolean;
@@ -148,6 +150,7 @@ export function durableFromRow(row: Readonly<Record<string, unknown>>): DurableR
     resume_at: typeof payload.resume_at === "number" ? payload.resume_at : null,
     attempts: Number(payload.attempts ?? 0),
     leaf_respawns: Number(payload.leaf_respawns ?? 0),
+    sandbox_refusals: Number(payload.sandbox_refusals ?? 0),
     prior_faults: Array.isArray(faults) ? faults.map((fault) => String(fault)) : [],
     prior_degraded: payload.prior_degraded === true,
     tainted: Number(row.tainted ?? 0) === 1,
@@ -195,6 +198,7 @@ export function durableRollup(
   if (pause !== null) Object.assign(out, pause);
   out.tokens_spent_total = spentTotal;
   out.leaf_respawns = view.leaf_respawns;
+  out.sandbox_refusals = view.sandbox_refusals;
   if (view.progress !== null && Number(view.progress.total ?? 0) > 0) out.progress = view.progress;
   if (view.prior_faults.length > 0) out.faults_total = [...view.prior_faults];
   if (view.name !== "") out.name = view.name;
@@ -301,38 +305,6 @@ interface RunRecord {
   published: Readonly<Record<string, unknown>> | null;
   readonly resolve: (value: Readonly<Record<string, unknown>>) => void;
   settled: boolean;
-}
-
-function resultView(
-  runId: string,
-  name: string,
-  result: RunResult,
-  budget: Budget,
-): Readonly<Record<string, unknown>> {
-  return Object.freeze({
-    run_id: runId,
-    name,
-    status: result.status,
-    outputs: structuredClone(result.outputs),
-    faults: Object.freeze([...result.faults]),
-    null_count: result.nullCount,
-    leaf_respawns: result.leafRespawns,
-    validation_retries: result.validationRetries,
-    cap_trips: result.capTrips,
-    engine_faults: result.engineFaults,
-    nodes_total: result.nodesTotal,
-    tokens_in: result.tokensIn,
-    tokens_out: result.tokensOut,
-    cache_read_tokens: result.cacheReadTokens,
-    cache_write_tokens: result.cacheWriteTokens,
-    reasoning_tokens: result.reasoningTokens,
-    forcing_fallbacks: result.forcingFallbacks,
-    pause_reason: result.pauseReason,
-    checkpoint: result.checkpoint,
-    token_budget: budget.snapshot(),
-    null_rate: result.nullRate,
-    usage_uncertain_leaves: result.usageUncertainLeaves,
-  });
 }
 
 function defaultServiceTimer(delay: number, fire: () => void): Timer {
@@ -966,7 +938,7 @@ export class WorkflowService {
       .run(parsed, args)
       .then(async (result) => {
         record.result = result;
-        const faults = [...priorFaults, ...result.faults];
+        const faults = [...priorFaults, ...result.faults, ...result.sandboxFaults];
         const degraded =
           priorDegraded || result.faults.some((fault) => fault !== result.pauseFault);
         const terminal = stretchOwnership();
@@ -982,6 +954,7 @@ export class WorkflowService {
             resume_at: resumeAt,
             attempts: attempt,
             leaf_respawns: (priorView?.leaf_respawns ?? 0) + result.leafRespawns,
+            sandbox_refusals: (priorView?.sandbox_refusals ?? 0) + result.sandboxRefusals,
             prior_faults: faults,
             prior_degraded: degraded,
           });
@@ -1019,6 +992,7 @@ export class WorkflowService {
         if (owned) {
           // pausePayload above already persisted the stretch-only count; fold the prior total in now, after, so the live view (here and the next status() read of this `result`) matches the durable rollup (#247 round 2).
           result.leafRespawns += priorView?.leaf_respawns ?? 0;
+          result.sandboxRefusals += priorView?.sandbox_refusals ?? 0;
           record.published = resultView(runId, parsed.name, result, engine.budget);
           record.resolve(record.published);
         } else {

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { usage } from "../pricing/usage.js";
 import type { Usage } from "../pricing/types.js";
-import { addUsageToResult, deriveStatus, RunResult } from "./accounting.js";
+import { deriveStatus, foldNestedCounters, RunResult, addUsageToResult } from "./accounting.js";
 import { Budget, FanoutRejected, TokenBudgetExhausted } from "./budget.js";
 import { contentHash, MemoryWorkflowCache, type WorkflowCache } from "./cache.js";
 import {
@@ -877,7 +877,7 @@ export class WorkflowEngine {
     this.result.capTrips += result.capTrips;
     this.result.engineFaults += result.engineFaults;
     this.result.forcingFallbacks += result.forcingFallbacks;
-    this.result.leafRespawns += result.leafRespawns;
+    foldNestedCounters(this.result, result, reference);
     return Object.freeze({ ...result.outputs });
   }
 

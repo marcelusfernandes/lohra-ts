@@ -65,9 +65,16 @@ function okFromEnvelope(result: string): boolean {
  * denial — that path returns before `pending` exists), `onToolSettled` fires
  * with `ok` parsed from the tool envelope's own leading `{"ok":...` (never
  * the rest of the payload) — see `okFromEnvelope` above.
+ *
+ * `onRefusal` (#246) is THIS leaf's own counting side channel: every
+ * synchronous denial (never a `PendingDispatch`) fires it, keyed by `subId`.
+ * A real tool call — even one that later reports its OWN failure — always
+ * produced a token first, so it is never counted here; only a call the wrap
+ * itself turned away before `base` ran is a sandbox refusal.
  */
 function adaptSandboxWrap(
   installation: LeafSandboxInstallation,
+  onRefusal: (subId: string) => void,
 ): (base: ChildToolDispatch, subId: string) => ChildToolDispatch {
   return (base, subId) => {
     const leaf: LeafIdentity = Object.freeze({ subId });
@@ -76,7 +83,10 @@ function adaptSandboxWrap(
     return async (name, args) => {
       const out = wrapped(name, args);
       const pending = readPending(out);
-      if (pending === undefined) return out;
+      if (pending === undefined) {
+        onRefusal(subId);
+        return out;
+      }
       const result = await pending;
       installation.onToolSettled?.(leaf, okFromEnvelope(result));
       return result;
@@ -122,6 +132,14 @@ const denyAllDispatch: ChildToolDispatch = (name) =>
  */
 export class OrchestrationChildRuntime implements ChildRuntime {
   private readonly installations = new Map<string, LeafSandboxInstallation>();
+  /** Per-leaf refusal counters (#246), keyed by the leaf's own subId so
+   * `collect` can read them back. `runId` rides along so `installLeafSandbox`'s
+   * `dispose()` can sweep only the entries its OWN acquisition created —
+   * bounded by one stretch's leaves, same lifetime as `installations`. */
+  private readonly refusalCounts = new Map<
+    string,
+    { readonly runId: string; readonly box: { count: number } }
+  >();
 
   public constructor(private readonly core: OrchestrationCore) {}
 
@@ -132,6 +150,9 @@ export class OrchestrationChildRuntime implements ChildRuntime {
         const current = this.installations.get(installation.runId);
         if (current !== undefined && current.fence === installation.fence) {
           this.installations.delete(installation.runId);
+          for (const [subId, entry] of this.refusalCounts) {
+            if (entry.runId === installation.runId) this.refusalCounts.delete(subId);
+          }
         }
       },
     };
@@ -141,7 +162,26 @@ export class OrchestrationChildRuntime implements ChildRuntime {
     runId: string,
   ): (base: ChildToolDispatch, subId: string) => ChildToolDispatch {
     const installation = this.installations.get(runId);
-    return installation === undefined ? () => denyAllDispatch : adaptSandboxWrap(installation);
+    return installation === undefined
+      ? () => denyAllDispatch
+      : adaptSandboxWrap(installation, (subId) => {
+          this.recordRefusal(runId, subId);
+        });
+  }
+
+  /** Lazily creates this leaf's counter on its FIRST refusal — `subId` is
+   * only known once `core.spawn` mints it and hands it to the dispatcher
+   * (issue #367), so there is no earlier point to pre-create the box. A
+   * leaf with zero refusals never gets an entry; `collect` below defaults
+   * an absent entry to 0, so that is indistinguishable from "not counted
+   * yet" and both read 0. */
+  private recordRefusal(runId: string, subId: string): void {
+    let entry = this.refusalCounts.get(subId);
+    if (entry === undefined) {
+      entry = { runId, box: { count: 0 } };
+      this.refusalCounts.set(subId, entry);
+    }
+    entry.box.count += 1;
   }
 
   public spawn(request: ChildSpawnRequest): string {
@@ -184,6 +224,7 @@ export class OrchestrationChildRuntime implements ChildRuntime {
       retryAfter: result.retryAfter,
       errorKind: result.errorKind,
       usageUncertain: result.usageUncertain === true,
+      sandboxRefusals: this.refusalCounts.get(id)?.box.count ?? 0,
     };
   }
 
