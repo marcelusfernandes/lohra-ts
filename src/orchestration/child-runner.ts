@@ -79,6 +79,13 @@ function zeroResult(
   } | null,
   errorKind: ErrorKind | null,
   retryAfter: number | null,
+  // #403: true only when THIS turn's model came from configureFor()'s own
+  // `pair[0].fallbackModels[0] ?? null` (client-pool.ts) — a provider
+  // override with no explicit model, so resolution had to pick the
+  // provider's own default instead of the model the caller asked for.
+  // Never set by the engine's own forced-schema fallback (that one is
+  // `usedFallback`, local to engine.ts's extractForcedOutput).
+  forcedFallback: boolean,
 ): CollectResult {
   return {
     status,
@@ -90,7 +97,7 @@ function zeroResult(
     reasoningTokens: usage?.reasoningTokens ?? 0,
     provider: profile.name,
     model,
-    forcedFallback: false,
+    forcedFallback,
     errorKind,
     retryAfter,
     // #232: a turn with no usage object never measured anything — not a
@@ -153,6 +160,11 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
           : await options.clientPool.get(null);
       const model =
         (configured?.["model"] as string | undefined) ?? modelOverride ?? options.defaultModel;
+      // configureFor() only fills `configured.model` from fallbackModels[0]
+      // (client-pool.ts:146) when the caller gave a provider but no model —
+      // an explicit modelOverride always wins there, so this is a real
+      // "resolution fell back" signal, decidable from the inputs alone.
+      const forcedFallback = providerOverride !== null && modelOverride === null;
       const effort = nonEmpty(config.effort);
       const maxIterations = config.maxIterations ?? options.childMaxIterations;
 
@@ -209,19 +221,38 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
           result.usageTotal,
           null,
           null,
+          forcedFallback,
         );
       } catch (error) {
         if (error instanceof ConversationCancelledError) {
-          return zeroResult("interrupted", "", profile, model, null, null, null);
+          return zeroResult("interrupted", "", profile, model, null, null, null, forcedFallback);
         }
         if (error instanceof MaxIterationsError) {
-          return zeroResult("error", error.message, profile, model, error.usage, null, null);
+          return zeroResult(
+            "error",
+            error.message,
+            profile,
+            model,
+            error.usage,
+            null,
+            null,
+            forcedFallback,
+          );
         }
         const cause = error instanceof Error ? error.cause : undefined;
         const errorKind = classifyProviderError(cause);
         const retryAfter = errorKind === "quota_exhausted" ? retryAfterSeconds(cause) : null;
         const message = formatProviderFailureMessage(error);
-        return zeroResult("error", message, profile, model, null, errorKind, retryAfter);
+        return zeroResult(
+          "error",
+          message,
+          profile,
+          model,
+          null,
+          errorKind,
+          retryAfter,
+          forcedFallback,
+        );
       }
     } catch (resolutionError) {
       const message =
@@ -236,6 +267,10 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
         reasoningTokens: 0,
         provider: fallbackProvider,
         model: fallbackModel,
+        // Resolution itself never completed here — configureFor()/get()
+        // threw before any model was actually chosen, so there is nothing
+        // to report as "fell back to" (#403's `forcedFallback` above is
+        // resolution succeeding via the provider's own default).
         forcedFallback: false,
         errorKind: null,
         retryAfter: null,
