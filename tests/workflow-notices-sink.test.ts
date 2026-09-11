@@ -95,6 +95,12 @@ describe("createNoticesSink — warn(message)", () => {
         "resume it manually with run_workflow(resume_run_id=...)",
       "resume_attempts_exhausted",
     ],
+    // Issue #410 (M8-8): the three `audit-trail.ts` producers the previous
+    // mapa left as `unknown` — byte-for-byte prefixes of :180/:213, :61,
+    // :79, matched by substring before the run id/details that follow.
+    ["audit sink failed permanently for run r-5", "audit_sink_failure"],
+    ["audit unavailable for run r-6: writer is closed", "audit_sink_failure"],
+    ["audit sanitizer failed for run r-7: boom", "audit_sink_failure"],
   ];
 
   it.each(MARKER_CASES)("classifies %s as %s", (message, kind) => {
@@ -183,28 +189,37 @@ describe("createNoticesSink — warnState(warning)", () => {
     },
   );
 
-  it("drops the notice (counted, fallback still fires) when `ownership` cannot resolve the run", () => {
-    const connection = openStateDatabase(tempDbPath());
-    try {
-      const repository = new NoticesRepository(connection.database);
-      const fallbackCalls: string[] = [];
-      const sink = createNoticesSink({
-        repository,
-        fallback: (message) => {
-          fallbackCalls.push(message);
-        },
-        ownership: () => null,
-      });
-      sink.warnState({ cause: "STALE_FENCE_WRITE", runId: "run-nobody-owns", fence: 3 });
-      expect(fallbackCalls).toHaveLength(1);
-      expect(sink.stats().dropped).toBe(1);
-      expect(repository.list({ scope: "run:run-nobody-owns" }).notices).toHaveLength(0);
-    } finally {
-      connection.close();
-    }
-  });
+  it(
+    "falls back to scope:global (never dropped) when `ownership` cannot resolve the run " +
+      "— issue #410: the notice survives without a dono instead of being lost",
+    () => {
+      const connection = openStateDatabase(tempDbPath());
+      try {
+        const repository = new NoticesRepository(connection.database);
+        const fallbackCalls: string[] = [];
+        const sink = createNoticesSink({
+          repository,
+          fallback: (message) => {
+            fallbackCalls.push(message);
+          },
+          ownership: () => null,
+        });
+        sink.warnState({ cause: "STALE_FENCE_WRITE", runId: "run-nobody-owns", fence: 3 });
+        expect(fallbackCalls).toHaveLength(1);
+        expect(sink.stats().dropped).toBe(0);
+        expect(sink.stats().fallback_global).toBe(1);
+        expect(repository.list({ scope: "run:run-nobody-owns" }).notices).toHaveLength(0);
+        const globalPage = repository.list({ scope: "global" });
+        expect(globalPage.notices).toHaveLength(1);
+        expect(globalPage.notices[0]?.kind).toBe("stale_fence_write");
+        expect(globalPage.notices[0]?.message).toContain("run-nobody-owns");
+      } finally {
+        connection.close();
+      }
+    },
+  );
 
-  it("drops the notice (counted, fallback still fires) when no `ownership` resolver was given at all", () => {
+  it("falls back to scope:global (never dropped) when no `ownership` resolver was given at all", () => {
     const connection = openStateDatabase(tempDbPath());
     try {
       const repository = new NoticesRepository(connection.database);
@@ -217,11 +232,75 @@ describe("createNoticesSink — warnState(warning)", () => {
       });
       sink.warnState({ cause: "STALE_FENCE_WRITE", runId: "run-none", fence: 1 });
       expect(fallbackCalls).toHaveLength(1);
-      expect(sink.stats().dropped).toBe(1);
+      expect(sink.stats().dropped).toBe(0);
+      expect(sink.stats().fallback_global).toBe(1);
+      const globalPage = repository.list({ scope: "global" });
+      expect(globalPage.notices).toHaveLength(1);
+      expect(globalPage.notices[0]?.message).toContain("run-none");
     } finally {
       connection.close();
     }
   });
+
+  it(
+    "a real cross-process takeover — process B acquires the lease `acquireRunLease` gave " +
+      "up on process A — refuses A's run-scoped append, and A's sink falls back to " +
+      "scope:global where B reads it back with the run_id in the message",
+    () => {
+      const dbPath = tempDbPath();
+      const connectionA = openStateDatabase(dbPath);
+      const connectionB = openStateDatabase(dbPath);
+      try {
+        const locksA = new LockRepository(connectionA.database);
+        const locksB = new LockRepository(connectionB.database);
+        const repositoryA = new NoticesRepository(connectionA.database);
+        const repositoryB = new NoticesRepository(connectionB.database);
+
+        const fenceA = locksA.acquireRunLease("run-10", "holder-a", 1_000, 100);
+        if (fenceA === null) throw new Error("expected process A to get the lease first");
+        // Process A's lease expires at 1_100; B acquires well past that —
+        // `acquireRunLease` deletes A's expired row and takes over with its
+        // own holder, bumping the shared fence.
+        const fenceB = locksB.acquireRunLease("run-10", "holder-b", 2_000, 100);
+        if (fenceB === null) throw new Error("expected process B to take the lease over");
+        expect(Number(fenceB)).toBeGreaterThan(Number(fenceA));
+
+        const fallbackCalls: string[] = [];
+        const sinkA = createNoticesSink({
+          repository: repositoryA,
+          fallback: (message) => {
+            fallbackCalls.push(message);
+          },
+          // Mirrors the production resolver shape (`chat.ts:274-279`,
+          // `dashboard.ts:265-270`): it resolves the CURRENT fence but
+          // always assumes THIS process's own holder id — it never asks
+          // "who holds it now". After B's takeover the fence moved but the
+          // holder reported here is still "holder-a", so `NoticesRepository`
+          // refuses the run-scoped append below (real STALE_FENCE_WRITE).
+          ownership: (runId) => {
+            const fence = locksA.runFenceOf(runId);
+            return fence === null ? null : { fence: Number(fence), holder: "holder-a", now: 2_000 };
+          },
+        });
+        sinkA.warnState({ cause: "STALE_FENCE_WRITE", runId: "run-10", fence: Number(fenceA) });
+        expect(fallbackCalls).toHaveLength(1);
+        expect(sinkA.stats().dropped).toBe(0);
+        expect(sinkA.stats().fallback_global).toBe(1);
+        expect(repositoryA.list({ scope: "run:run-10" }).notices).toHaveLength(0);
+
+        // Read back through B's OWN connection — the durable trail survives
+        // the takeover even though A no longer owns the run.
+        const page = repositoryB.list({ scope: "global" });
+        expect(page.notices).toHaveLength(1);
+        expect(page.notices[0]?.kind).toBe("stale_fence_write");
+        expect(page.notices[0]?.scope).toBe("global");
+        expect(page.notices[0]?.message).toContain("run-10");
+      } finally {
+        connectionA.close();
+        connectionB.close();
+      }
+    },
+  );
 });
 
 function closeServer(server: Server): Promise<void> {
