@@ -542,7 +542,7 @@ export class WorkflowEngine {
           let winningCost = usage();
           let correction = "";
           for (let attempt = 0; attempt <= retries; attempt += 1) {
-            if (attempt > 0) this.result.leafRespawns += 1;
+            if (attempt > 0 && this.result.pauseFault === null) this.result.leafRespawns += 1;
             const leaf = await this.collectLeaf(
               stageNode,
               correction === "" ? renderValue(prompt) : `${renderValue(prompt)}\n\n${correction}`,
