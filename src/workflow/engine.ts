@@ -31,7 +31,6 @@ import {
   debitLeaf,
   extractForcedOutput,
   isDryRound,
-  loopCellParts,
   nonCompleteFirstCollectResult,
   nonEmpty,
   recollectLeafTimeout,
@@ -52,6 +51,7 @@ import {
   verifyPrompt,
 } from "./engine-utils.js";
 import { topologicalOrder } from "./graph.js";
+import { gateCellParts, loopBodyCellParts, makeBodyLeafRunner } from "./leaf-options.js";
 import { MAX_GATE_ATTEMPTS, MAX_NODE_RETRIES } from "./nodes.js";
 import {
   correctionPrompt,
@@ -353,6 +353,10 @@ export class WorkflowEngine {
 
   private cell(parts: readonly unknown[]): string {
     return contentHash(...this.specIdentity, ...parts);
+  }
+
+  private bodyDeps() {
+    return { control: this.control, result: this.result, collectLeaf: this.collectLeaf.bind(this) };
   }
 
   private cacheGet(hash: string): unknown {
@@ -787,10 +791,11 @@ export class WorkflowEngine {
     if (firstPrompt === null) return null;
     const bodySchema = this.schemaOf(body);
     const hash = this.cell(
-      loopCellParts(node, this.tiers, firstPrompt, bodySchema, stopAfter, rounds),
+      loopBodyCellParts(node, this.tiers, firstPrompt, bodySchema, stopAfter, rounds, body),
     );
     const cached = this.cacheGet(hash);
     if (cached !== CACHE_MISS) return cached;
+    const runBody = makeBodyLeafRunner(this.bodyDeps(), node, body);
     const collected: unknown[] = [];
     let empty = 0;
     let intact = true;
@@ -803,7 +808,7 @@ export class WorkflowEngine {
       if (prompt === null) return null;
       let leaf: LeafExecution;
       try {
-        leaf = await this.collectLeaf(node, renderValue(prompt), bodySchema, {
+        leaf = await runBody(renderValue(prompt), bodySchema, {
           role: "loop.round",
           cellId: hash,
           attempt: round,
@@ -893,26 +898,20 @@ export class WorkflowEngine {
     this.budget.checkFanout(attempts * 2);
     const prompt = strictResolve(body.prompt, context);
     if (prompt === null) return null;
-    const hash = this.cell([
-      node.id,
-      "gate",
-      prompt,
-      this.schemaOf(body),
-      validator,
-      attempts,
-      ...routingIdentity(node, this.tiers),
-    ]);
+    const hash = this.cell(
+      gateCellParts(node, this.tiers, prompt, this.schemaOf(body), validator, attempts, body),
+    );
     const cached = this.cacheGet(hash);
     if (cached !== CACHE_MISS) return cached;
+    const runBody = makeBodyLeafRunner(this.bodyDeps(), node, body);
     let feedback = "";
     let total = usage();
     for (let attempt = 0; attempt < attempts; attempt += 1) {
-      const draft = await this.collectLeaf(
-        node,
-        `${renderValue(prompt)}${feedback}`,
-        this.schemaOf(body),
-        { role: "gate.body", cellId: hash, attempt },
-      );
+      const draft = await runBody(`${renderValue(prompt)}${feedback}`, this.schemaOf(body), {
+        role: "gate.body",
+        cellId: hash,
+        attempt,
+      });
       total = combine(total, draft.usage);
       if (!nonEmpty(draft.output)) {
         feedback = "\n\nPrevious draft was empty; produce a complete draft.";
