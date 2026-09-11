@@ -49,17 +49,25 @@ function rodar(root: string, command: string, env: Record<string, string>): Hook
 }
 
 // Issue #375: sem `LOHRA_BENCH`, o hook não lê nenhuma seam e chama o `gh`
-// real — um caso (linha ~257) passa `--repo o/r`, então a chamada é uma
-// consulta de rede de verdade a um repositório inexistente. Autenticada em
-// CI (`GH_TOKEN: ${{ github.token }}`), ela às vezes não voltava a tempo do
-// timeout default do vitest sob carga do runner (job 103194419974, PR #374:
-// "Test timed out in 5000ms"). Molde de tests/mutations-runner-guard.test.ts
-// (`GIT_SHIM`/`importInSandbox`): um `gh` FAKE no PATH do subprocesso grava
-// um marcador e sai 1, removendo a dependência de rede sem mudar o que o
-// caso afirma (ele já não olhava para o status do hook, só para o arquivo de
-// ARGS_OUT). O marcador prova que o hook realmente foi ao binário — se a
-// pluming do PATH regredir e a chamada real voltar a acontecer, o marcador
-// não existe e o teste falha alto, em vez de voltar a ser flake silencioso.
+// real — dois casos fazem isso (linhas ~278 e ~291 abaixo). No job `checks`
+// do CI (`.github/workflows/ci.yml:19-58`, matriz 20/22) o ambiente do passo
+// `test` só define a variável usada pelo node-gyp do node-pty (ci.yml:29);
+// NÃO há `GH_TOKEN`/`GITHUB_TOKEN` ali (esse token
+// existe só no job `escopo`, `ci.yml:97-116`, um job diferente). Sem
+// credencial, `gh` recusa antes de qualquer rede ("Please run: gh auth
+// login", exit 4, ~29ms medido) — os dois casos são só exec do binário, sem
+// I/O de rede, em CI e localmente. A falha registrada (job 103194419974, PR
+// #374: "Test timed out in 5000ms" no caso de ~278) é compatível com o custo
+// de UM exec de ~50MB sob contenção de I/O do runner (7630ms no attempt que
+// falhou vs 1656ms no rerun, para o arquivo inteiro) caindo sobre o primeiro
+// caso da suíte que roda `gh` de verdade — hipótese, não confirmada; nenhuma
+// medição isolou o custo do exec em si. Por isso os DOIS casos usam o mesmo
+// `gh` FAKE no PATH do subprocesso (molde de
+// tests/mutations-runner-guard.test.ts — `GIT_SHIM`/`importInSandbox`): um
+// marcador em arquivo prova que o hook foi ao binário, sem executar o `gh`
+// real em lugar nenhum do arquivo. Se a plumbing do PATH regredir e a
+// chamada real voltar a acontecer, o marcador não existe e o teste falha
+// alto, em vez de virar flake silencioso de novo.
 const GH_SHIM = "#!/bin/sh\nprintf 'invoked\\n' >> \"$GH_MARKER\"\nexit 1\n";
 
 function stubGh(root: string): { readonly shimDir: string; readonly marker: string } {
@@ -288,11 +296,15 @@ describe("protege-main.sh", () => {
     });
   });
 
-  it("sem LOHRA_BENCH, nenhuma seam é lida: fora de um repo, o gh real falha e o hook nega", () => {
+  it("sem LOHRA_BENCH, nenhuma seam é lida: gh falha (stub) e o hook nega", () => {
+    const { shimDir, marker } = stubGh(root);
     const r = rodar(root, "gh pr merge 5 --merge", {
       LOHRA_PM_CHECKS_JSON: CHECKS_VERDES,
       LOHRA_PM_VIEW_JSON: view(["review:approved"], ["src/x.ts"]),
+      PATH: `${shimDir}:${process.env.PATH ?? ""}`,
+      GH_MARKER: marker,
     });
+    expect(existsSync(marker)).toBe(true);
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/não consegui ler|nenhum check/u);
   });
