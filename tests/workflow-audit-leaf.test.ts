@@ -21,8 +21,10 @@ import {
   WorkflowRepository,
 } from "../src/state/index.js";
 import { AuditTrail } from "../src/workflow/audit-trail.js";
+import { auditedRuntimeFor } from "../src/workflow/audit-runtime.js";
 import { WorkflowService, type OwnershipStore } from "../src/workflow/service.js";
 import type {
+  CausalContext,
   ChildResult,
   ChildRuntime,
   ChildSpawnRequest,
@@ -321,6 +323,69 @@ describe("workflow audit — leaf producers (#366)", () => {
       expect(leaves[1]?.data).toMatchObject({ status: "interrupted", reason: "timeout" });
     } finally {
       close();
+    }
+  });
+
+  // Issue #383, item 2 (veredito da PR #382): `audit-runtime.ts`'s collect()
+  // decorator has TWO branches for a non-terminal ChildResult — `wait:true`
+  // returning "running" closes the leaf as an interrupted/timeout (tested
+  // just above); `wait:false` returning "running" must NOT close anything,
+  // since nothing terminal happened yet (a caller that polls without
+  // waiting expects to poll again later). No production caller sets
+  // `wait:false` today — `engine.ts`'s two `collect()` call sites both
+  // hardcode `wait:true` — so this branch is only reachable by driving the
+  // decorator directly, the same "one exception to never audit-runtime.ts's
+  // internals" `tests/workflow-audit-tool.test.ts` already takes for its
+  // (c) scenario (issue #378) when a WorkflowService turn cannot reach the
+  // seam under test.
+  it("collect wait:false returning running emits no terminal — only a later done/cancel closes the leaf", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-audit-leaf-waitfalse-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      const audit = new AuditRepository(connection.database);
+      const trail = new AuditTrail(audit);
+      let scripted: ChildResult = { status: "running", output: null };
+      const causalContext: CausalContext = {
+        runId: "run-waitfalse",
+        segmentId: "seg-waitfalse",
+        nodePath: ["a"],
+        cellId: "a",
+        role: "agent",
+        attempt: 0,
+        turn: 0,
+      };
+      const runtime = auditedRuntimeFor(
+        withMinimalLeafSandbox({
+          spawn: (): string => "leaf-1",
+          collect: (): ChildResult => scripted,
+          steer: () => undefined,
+          cancel: (): void => undefined,
+        }),
+        trail,
+        () => null,
+        false,
+        () => undefined,
+      );
+      const id = await runtime.spawn({ prompt: "one", causalContext });
+      const collected = await runtime.collect(id, { wait: false, timeoutSeconds: 1 });
+      expect(collected.status).toBe("running");
+      await trail.flush();
+      const midway = audit.query({ runId: "run-waitfalse", limit: 50 });
+      const leavesMidway = midway.events.filter((event) => event.event_type.startsWith("leaf."));
+      expect(leavesMidway.map((event) => event.event_type)).toEqual(["leaf.started"]);
+
+      scripted = { status: "complete", output: { ok: true }, usage: USAGE };
+      await runtime.collect(id, { wait: true, timeoutSeconds: 1 });
+      await trail.flush();
+      const after = audit.query({ runId: "run-waitfalse", limit: 50 });
+      const leavesAfter = after.events.filter((event) => event.event_type.startsWith("leaf."));
+      expect(leavesAfter.map((event) => event.event_type)).toEqual([
+        "leaf.started",
+        "leaf.completed",
+      ]);
+    } finally {
+      connection.close();
     }
   });
 
