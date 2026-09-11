@@ -498,9 +498,12 @@ describe("scripts/mutations/slices.json", () => {
     // (fail-closed do lock ilegível, releitura do dono sob a lease, deadline
     // do perdedor, rodada 1; `waitForFileLease` concordando com
     // `acquireFileLease` sobre lock ilegível, rodada 2) estendeu
-    // `auth-mutants.ts` de 8 para 13, +5: 221 + 5 = 226.
+    // `auth-mutants.ts` de 8 para 13, +5: 221 + 5 = 226. A issue #418
+    // acrescenta `Q1-quota-guard-removed` a `workflow-executor-mutants.ts`
+    // (a guarda de quota de `fault_kinds`, `engine-utils.ts:490`): 226 + 1 =
+    // 227.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 226;
+    const TOTAL_MUTANTS = 227;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -522,7 +525,7 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/media-catalog-other.ts": 7,
       "scripts/mutations/media-catalog-persistence.ts": 13,
       "scripts/mutations/self-update-mutants.ts": 8,
-      "scripts/mutations/workflow-executor-mutants.ts": 44,
+      "scripts/mutations/workflow-executor-mutants.ts": 45,
       "scripts/mutations/context-window.ts": 15,
       "scripts/mutations/auth-mutants.ts": 13,
     };
@@ -531,7 +534,7 @@ describe("scripts/mutations/slices.json", () => {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(226);
+    expect(somaTabela).toBe(227);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {

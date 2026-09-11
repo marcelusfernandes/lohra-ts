@@ -27,7 +27,7 @@ para `harness.ts` (issue #148):
    substring de outro título de foco focalizaria os dois ao mesmo tempo —
    hoje nenhum dos títulos de foco em uso é substring de outro).
    `runVitestFiles(directory, files)` roda uma lista de arquivos
-   inteira sem afunilar por `-t` (o que `workflow-executor` usa: os 44
+   inteira sem afunilar por `-t` (o que `workflow-executor` usa: os 45
    mutantes rodam a mesma bateria de `focalTests` completa a cada vez, em vez
    de um teste único por mutante). As duas delegam a `runVitestReporterJson`
    (`harness.ts:182-207`, issue #191): monta os args com `vitestArgs`
@@ -164,7 +164,7 @@ adicionar uma fatia" cita a mesma restrição.
 
 | fatia                 | script                  | mutantes | catálogo(s)                                                                                                           |
 | --------------------- | ----------------------- | -------: | --------------------------------------------------------------------------------------------------------------------- |
-| `workflow-executor`   | `mutations:t15`         |       44 | `workflow-executor-mutants.ts`                                                                                        |
+| `workflow-executor`   | `mutations:t15`         |       45 | `workflow-executor-mutants.ts`                                                                                        |
 | `workflow-durability` | `mutations:t16`         |       60 | `workflow-durability-guard.ts` (12 guard + 2 combined) + `workflow-durability-named.ts` (41) + `orchestration.ts` (5) |
 | `workflow-audit-live` | `mutations:t17`         |       57 | `workflow-audit-live-mutants.ts` (32) + `workflow-audit-producers-mutants.ts` (25)                                    |
 | `media`               | `mutations:t21`         |       20 | `media-catalog-persistence.ts` (13) + `media-catalog-other.ts` (7)                                                    |
@@ -173,15 +173,21 @@ adicionar uma fatia" cita a mesma restrição.
 | `context-window`      | `mutations:t23`         |       15 | `context-window.ts`                                                                                                   |
 | `auth`                | `mutations:auth`        |       13 | `auth-mutants.ts`                                                                                                     |
 
-Total: 226. Os 12 mutantes de `workflow-durability-guard.ts` são
+Total: 227. Os 12 mutantes de `workflow-durability-guard.ts` são
 combinatórios: três conjuntos do guard de escrita possuída (`fence`,
 `holder`, `lease-validity`) × quatro categorias (`state`, `cache`,
 `node-cost`, `spend`) — um mutante por combinação, cada um escorado só no
 teste focal da sua categoria, mais os 2 mutantes do INSERT combinado
 cache+custo (`combined-cell-guard-removed`,
 `combined-cost-escapes-refusal`). `tests/mutations-slices.test.ts` importa os
-doze catálogos de dado puro estaticamente e prova essa soma (226) a cada
+doze catálogos de dado puro estaticamente e prova essa soma (227) a cada
 corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
+
+`workflow-executor-mutants.ts` (issue #418) acrescentou
+`Q1-quota-guard-removed`: a guarda que impede `quota_exhausted` de entrar em
+`fault_kinds` (`engine-utils.ts:490`), morta por
+`tests/workflow-fault-kinds.test.ts` (issue #412) — o sexto arquivo de
+`focalTests`/`focusFiles` da fatia (44 → 45).
 
 `workflow-audit-producers-mutants.ts` (issue #370) estende `workflow-audit-live`
 aos produtores novos do M7 que os 32 mutantes originais não cobriam:
@@ -340,13 +346,13 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
    `true`.
 5. `npm test` roda `tests/mutations-slices.test.ts`, que reprova de duas
    formas se a contagem não for atualizada junto com o mutante novo: a soma
-   total (226 + o novo) contra os doze catálogos importados, e a linha do
+   total (227 + o novo) contra os doze catálogos importados, e a linha do
    catálogo tocado em `CONTAGEM_POR_CATALOGO`
    (`tests/mutations-slices.test.ts:515-534`), uma tabela pinada por número
    literal — não derivada de `CATALOGOS.get(path).length` — para que uma
    troca compensatória entre dois catálogos (um ganha o que o outro perde,
    soma preservada) não passe despercebida. As duas contagens (o literal
-   `226` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
+   `227` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
    atualização junto com o mutante novo.
 
 ## Como adicionar uma fatia
@@ -397,8 +403,8 @@ contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
 14, `workflow-durability-named` 41, `orchestration` 5,
 `workflow-audit-live-mutants` 32, `workflow-audit-producers-mutants` 25,
 `web-tools-mutants` 9, `media-catalog-other` 7, `media-catalog-persistence`
-13, `self-update-mutants` 8, `workflow-executor-mutants` 44,
-`context-window` 15, `auth-mutants` 13, soma 226) e a soma de 226 contra os
+13, `self-update-mutants` 8, `workflow-executor-mutants` 45,
+`context-window` 15, `auth-mutants` 13, soma 227) e a soma de 227 contra os
 doze catálogos importados; e que todo diretório de primeiro nível de `src/`
 está coberto por algum `srcGlobs` ou está em `SEM_FATIA` com um motivo não
 vazio — nunca os dois, nunca nenhum dos dois.

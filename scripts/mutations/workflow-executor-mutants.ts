@@ -19,6 +19,7 @@ export const focalTests = [
   "tests/workflow-hardening.test.ts",
   "tests/parity/scenarios.test.ts",
   "tests/mutations-fixtures-workflow-executor.test.ts",
+  "tests/workflow-fault-kinds.test.ts",
 ] as const;
 
 export interface ExecutorMutant {
@@ -560,6 +561,18 @@ export const executorMutants: readonly ExecutorMutant[] = [
         file: "scripts/mutations/fixtures/candidate-chat.mjs",
         before: `promptSnapshot: () => buildSystemPrompt({ systemMessage: "T15 canned workflow chat" }).text,`,
         after: `promptSnapshot: () => "T15 canned workflow chat",`,
+      },
+    ],
+  },
+  {
+    id: "Q1-quota-guard-removed",
+    mechanism: "the quota_exhausted guard is removed; a paused leaf's kind leaks into faultKinds",
+    edits: [
+      {
+        file: "src/workflow/engine-utils.ts",
+        before:
+          "  if (collected.errorKind !== QUOTA_EXHAUSTED) recordFaultKind(result, collected.errorKind ?? null);",
+        after: "  recordFaultKind(result, collected.errorKind ?? null);",
       },
     ],
   },

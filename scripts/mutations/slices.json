@@ -9,7 +9,8 @@
       "tests/workflow-nodes-tool.test.ts",
       "tests/workflow-hardening.test.ts",
       "tests/parity/scenarios.test.ts",
-      "tests/mutations-fixtures-workflow-executor.test.ts"
+      "tests/mutations-fixtures-workflow-executor.test.ts",
+      "tests/workflow-fault-kinds.test.ts"
     ]
   },
   {
