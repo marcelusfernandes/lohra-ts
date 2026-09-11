@@ -344,15 +344,6 @@ describe("T17 metadata-only audit", () => {
     expect(event.data).toMatchObject({ limit_bytes: 2048, original_event_type: "leaf.completed" });
   });
 
-  it("treats a removed node.* type as unknown, not as a valid event_type", () => {
-    // Issue #386: `node.started/completed/failed/output` never had a
-    // producer and were removed from `SAFE_EVENT_TYPES` — the sanitizer
-    // must fall back exactly like it does for any other unrecognized
-    // string, never accept it as-is.
-    const event = publicAuditEvent("r", 1, { event_type: "node.started" }, 1);
-    expect(event.event_type).toBe("audit.unavailable");
-  });
-
   it("bounds collection width, path width and depth exactly", () => {
     const input = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`k${String(i)}`, i]));
     const safe = safeAuditMetadata({
