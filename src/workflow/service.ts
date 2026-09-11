@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
+import { createWorkflowAuditProducers } from "./audit-producers.js";
 import { Budget } from "./budget.js";
 import { MemoryWorkflowCache, type WorkflowCache } from "./cache.js";
 import { SqliteWorkflowCache } from "./sqlite-cache.js";
@@ -470,85 +471,6 @@ export class WorkflowService {
     }
   }
 
-  private forwardEvent(runId: string, event: WorkflowEvent, ownership?: Ownership): void {
-    this.onEvent?.(Object.freeze({ ...event }));
-    const nodeId = event.nodeId;
-    const live: WorkflowLiveEvent =
-      event.kind === "fault"
-        ? Object.freeze({
-            kind: "fault",
-            run_id: runId,
-            node_id: nodeId,
-            fault: event.text ?? "workflow fault",
-          })
-        : event.kind === "items"
-          ? Object.freeze({
-              kind: "items",
-              run_id: runId,
-              node_id: nodeId,
-              ...(event.done === undefined ? {} : { done: event.done }),
-              ...(event.total === undefined ? {} : { total: event.total }),
-            })
-          : Object.freeze({
-              kind: "node",
-              run_id: runId,
-              node_id: nodeId,
-              ...(event.state === undefined ? {} : { state: event.state }),
-            });
-    this.liveEvents.emit(live);
-    this.auditTrail?.record(
-      runId,
-      {
-        event_type: `workflow.${live.kind}`,
-        node_id: nodeId,
-        payload:
-          event.kind === "fault"
-            ? { state: "fault", content: event.text ?? "" }
-            : { state: event.state ?? "observed", done: event.done, total: event.total },
-      },
-      ownership,
-    );
-  }
-
-  private announcePlan(
-    runId: string,
-    spec: WorkflowSpec,
-    engine: WorkflowEngine,
-    ownership?: Ownership,
-  ): void {
-    const nodes = spec.nodes.map((node) => node.id);
-    const budget = engine.budget.snapshot();
-    this.liveEvents.emit(
-      Object.freeze({
-        kind: "plan",
-        run_id: runId,
-        name: spec.name,
-        nodes,
-        ...(budget === null ? {} : { budget }),
-      }),
-    );
-    this.auditTrail?.record(
-      runId,
-      {
-        event_type: "workflow.plan",
-        payload: { name: spec.name, budget: engine.budget.snapshot(), node_path: nodes },
-      },
-      ownership,
-    );
-  }
-
-  private announceDone(runId: string, status: string, ownership?: Ownership): void {
-    this.liveEvents.emit(Object.freeze({ kind: "done", run_id: runId, state: status }));
-    this.auditTrail?.record(
-      runId,
-      {
-        event_type: "workflow.done",
-        payload: { status, terminal: true },
-      },
-      ownership,
-    );
-  }
-
   /** The composition handed to the runtime, pinned to ONE acquisition. Once a
    * newer stretch owns the run, the older stretch's wrapper stops granting
    * anything: its working root and its taint are no longer the run's. */
@@ -673,6 +595,20 @@ export class WorkflowService {
       policy: this.policyLoader?.() ?? DENY_ALL_POLICY,
       tainted: this.taintTracker.tainted,
     });
+    // One segment_id per ACQUISITION, from the same source runId uses: the
+    // non-durable path has no fence to lose, so ownership is always null and
+    // the fail-closed drop below never applies (`durable: false`).
+    const segmentId = this.idSource();
+    const producers = createWorkflowAuditProducers({
+      trail: this.auditTrail,
+      live: this.liveEvents,
+      runId,
+      segmentId,
+      ownershipOf: () => null,
+      durable: false,
+      warn: this.warn,
+      onEvent: this.onEvent,
+    });
     const engine = new WorkflowEngine({
       ...engineBaseOptions(
         this.runtime,
@@ -681,26 +617,27 @@ export class WorkflowService {
         this.loader,
         options.checkpointAnswers ?? {},
       ),
+      segmentId,
       cache: this.cache,
       budget: new Budget({ tokenBudget: options.tokenBudget ?? null }),
       onEvent: (event) => {
-        this.forwardEvent(runId, event);
+        producers.forwardEvent(event);
       },
     });
-    this.announcePlan(runId, parsed, engine);
+    producers.announcePlan(parsed, engine.budget.snapshot());
     const record = this.makeRecord(runId, parsed.name, engine);
     this.runs.set(runId, record);
     void engine
       .run(parsed, args)
       .then((result) => {
         record.result = result;
-        this.announceDone(runId, result.status);
+        producers.announceDone(result.status);
         record.settled = true;
         record.published = resultView(runId, parsed.name, result, engine.budget);
         record.resolve(record.published);
       })
       .catch(() => {
-        this.announceDone(runId, "failed");
+        producers.announceDone("failed");
         record.settled = true;
         record.published = Object.freeze({
           run_id: runId,
@@ -724,6 +661,10 @@ export class WorkflowService {
     priorView: DurableRunView | null,
   ): WorkflowStartResult | WorkflowServiceError {
     const resumeRunId = options.resumeRunId;
+    // One segment_id per ACQUISITION, from the same source runId uses
+    // (`start()`, service.ts:417): a resume always mints a fresh one, so the
+    // stretch before it and this one never share an identity in the ledger.
+    const segmentId = this.idSource();
     const now = store.ownershipOf().now;
     const answers: Record<string, unknown> = { ...(options.checkpointAnswers ?? {}) };
     if (
@@ -814,6 +755,16 @@ export class WorkflowService {
       if (token === EVICTED) return null;
       return { fence: token, holder: store.holder, now: store.ownershipOf().now };
     };
+    const producers = createWorkflowAuditProducers({
+      trail: this.auditTrail,
+      live: this.liveEvents,
+      runId,
+      segmentId,
+      ownershipOf: stretchOwnership,
+      durable: true,
+      warn: this.warn,
+      onEvent: this.onEvent,
+    });
     // The operator capability policy is loaded per launch from operator
     // config, never from the spec. The leaves of this stretch reach it through
     // `leafToolDispatch`, which reads this record live.
@@ -853,6 +804,7 @@ export class WorkflowService {
     }
     const engine = new WorkflowEngine({
       ...engineBaseOptions(this.runtime, runId, options.tiers, this.loader, answers),
+      segmentId,
       budget: new Budget({
         tokenBudget: effectiveBudget,
         tokensIn: seeded.tokensIn,
@@ -860,7 +812,7 @@ export class WorkflowService {
       }),
       onEvent: (event) => {
         const ownership = stretchOwnership();
-        this.forwardEvent(runId, event, ownership ?? undefined);
+        producers.forwardEvent(event);
         // Progress per completed node (#125), fenced same as any owned write.
         if (event.kind === "node" && event.state !== "running") {
           persistLine("running", null, null, tainted || this.taintTracker.tainted, ownership);
@@ -921,7 +873,7 @@ export class WorkflowService {
             tokenBudget: effectiveBudget,
             tainted: taintedFlag,
             progressJson: progressJsonOf(engine.progress()),
-            auditSegmentId: null,
+            auditSegmentId: segmentId,
             updatedAt: ownership.now,
             fence: ownership.fence,
             holder: ownership.holder,
@@ -1014,7 +966,7 @@ export class WorkflowService {
         fence: lost.fence,
       });
     }
-    this.announcePlan(runId, parsed, engine, stretchOwnership() ?? undefined);
+    producers.announcePlan(parsed, engine.budget.snapshot());
     void engine
       .run(parsed, args)
       .then((result) => {
@@ -1069,7 +1021,7 @@ export class WorkflowService {
         if (resumeAt !== null) {
           persistTerminal("paused", QUOTA_PAUSE, pausePayload(null, resumeAt));
         }
-        if (owned && terminal !== null) this.announceDone(runId, result.status, terminal);
+        if (owned && terminal !== null) producers.announceDone(result.status);
         finishStretch();
         record.settled = true;
         if (owned) {
@@ -1089,7 +1041,7 @@ export class WorkflowService {
       })
       .catch((error: unknown) => {
         const terminal = stretchOwnership();
-        if (terminal !== null) this.announceDone(runId, "failed", terminal);
+        if (terminal !== null) producers.announceDone("failed");
         finishStretch();
         record.settled = true;
         record.published = Object.freeze({
