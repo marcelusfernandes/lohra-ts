@@ -48,8 +48,62 @@ pena tentar de novo. A checagem prioriza o código que o driver
    o texto histórico, `/database is (?:locked|busy)/i` contra
    `error.message`.
 
+## `operator_notices`
+
+Avisos ao operador com escopo (`run:<run_id>` ou `global`), dono e ack —
+irmão de `workflow_audit_events`/`AuditRepository`, mas para "isto aconteceu
+e alguém precisa ver", não para a trilha de execução (issue #400/M8-4).
+
+Duas tabelas: `operator_notices` (`id` autoincrement, `scope`, `seq`
+monotônico por escopo, `kind`, `message`, `created_at`, `acked_at`/
+`acked_by` nulos até o ack, `fence` — nulo para `global`; `UNIQUE(scope,
+seq)`) e `operator_notices_state` (`scope` como chave, `next_seq`,
+`retention_dropped`, `dropped_before_seq`, `updated_at`) — o mesmo desenho
+de `workflow_audit_state`.
+
+`src/state/notices-repository.ts` (`NoticesRepository`):
+
+- **`kind`** é validado contra `NOTICE_KINDS`, vocabulário FECHADO local (os
+  9 kinds da issue #397 mais `stale_fence_write`, `audit_sink_failure`,
+  `resume_attempts_exhausted`, `queue_overflow`; a unificação com
+  `src/transports/error-kinds.ts` é a issue #401/M8-5). Fora do vocabulário
+  → recusa nomeada via `warning`, `append` devolve `null`, nunca grava, nunca
+  lança.
+- **Fence**: `append(scope, {kind, message}, ownership?)` com `scope =
+"run:<id>"` exige `ownership` e aplica o MESMO predicado de dono de
+  `audit-repository.ts:196-200` (JOIN `workflow_run_fence`/
+  `workflow_run_locks` por `fence`/`holder`/`expires_at`) — sem `ownership`
+  nesse escopo, recusa. Fence velho ou dono errado → `append` devolve
+  `null`, um `refused_writes` a mais (contado por escopo, LRU até
+  `maxScopes`) e um único `warning` (nunca dois logs pela mesma recusa,
+  mesma decisão da #380 para `AuditRepository`). `scope = "global"` grava
+  sem `ownership` (avisos de processo, sem run associado) — `fence` fica
+  `null` na linha.
+- **`message`** truncada em 2 KiB (`Buffer.byteLength` em UTF-8, nunca corta
+  no meio de um caractere multi-byte) com o marcador `…[truncated]`.
+- **`list({scope?, after_seq?, include_acked?, limit?})`** → `{notices,
+next_after_seq, has_more, refused_writes, dropped_before_seq?}`. Por
+  padrão omite reconhecidos; `include_acked: true` os mostra, com
+  `acked_at`/`acked_by`. `after_seq`/`next_after_seq` só fazem sentido POR
+  ESCOPO (`seq` é monotônico por `scope`, não global) — sem `scope`, a
+  listagem cruza escopos ordenada por `id`, `next_after_seq` vem `0` e
+  `dropped_before_seq` fica ausente (a retenção é por escopo).
+  `refused_writes` sem `scope` soma todos os escopos conhecidos.
+- **`ack(id, actor, now?)`** é idempotente: `true` na primeira vez, `false`
+  se já reconhecido ou se `id` não existe — nunca lança.
+- **Retenção** (`maxPerScope`, padrão `NOTICES_SCOPE_CAP = 256`): acima do
+  teto, os avisos RECONHECIDOS caem primeiro (mais antigos entre eles
+  primeiro); um não-reconhecido só cai quando não sobra nenhum reconhecido
+  para cair no lugar — `ORDER BY (acked_at IS NULL) ASC, seq ASC` no
+  `DELETE`. `dropped_before_seq` registra o maior `seq` já descartado
+  daquele escopo (avisos com `seq` menor ou igual podem estar faltando).
+
+Fora de escopo aqui: ligar os sinks de produção (`src/workflow/*`) a esta
+tabela e as tools/CLI de leitura — issues #401 e #402 (M8-5/M8-6).
+
 ## Referências
 
 - `src/state/connection.ts:93-154`
 - `src/state/audit-repository.ts:136-148`
 - `src/workflow/audit-trail.ts:252-273`
+- `src/state/notices-repository.ts`

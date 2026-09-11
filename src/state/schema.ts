@@ -110,6 +110,25 @@ CREATE TABLE IF NOT EXISTS workflow_audit_events (
 CREATE INDEX IF NOT EXISTS idx_was_updated ON workflow_audit_state(updated_at);
 DROP INDEX IF EXISTS idx_wae_run_node;
 DROP INDEX IF EXISTS idx_wae_run_sub;
+CREATE TABLE IF NOT EXISTS operator_notices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    message TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    acked_at REAL,
+    acked_by TEXT,
+    fence INTEGER,
+    UNIQUE (scope, seq)
+);
+CREATE TABLE IF NOT EXISTS operator_notices_state (
+    scope TEXT PRIMARY KEY,
+    next_seq INTEGER NOT NULL DEFAULT 1,
+    retention_dropped INTEGER NOT NULL DEFAULT 0,
+    dropped_before_seq INTEGER,
+    updated_at REAL NOT NULL
+);
 `;
 
 export const addedColumns = [
