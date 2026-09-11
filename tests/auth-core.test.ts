@@ -270,7 +270,7 @@ describe("oauth and credentials", () => {
       accountId: "acct-t351-dummy",
       expiresAt: 1_300,
     });
-    const fetchMock = vi.fn(() =>
+    const fetchMock = vi.fn((_url: string, _init: { readonly body: unknown }) =>
       Promise.resolve({
         status: 200,
         json: () =>
@@ -288,7 +288,7 @@ describe("oauth and credentials", () => {
     expect(creds?.token).toBe("new-access");
     expect(readTokens(home)?.refreshToken).toBe("new-refresh");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, { readonly body: unknown }];
+    const [url, init] = fetchMock.mock.calls[0] ?? ["", { body: undefined }];
     expect(url).toBe("https://auth.openai.com/oauth/token");
     expect(String(init.body)).toContain("grant_type=refresh_token");
   });

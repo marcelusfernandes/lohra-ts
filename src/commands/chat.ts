@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { loadProjectContext, buildSystemPrompt } from "../context/index.js";
 import { readCodexModel } from "../auth/codex.js";
 import { resolveAuthRoute, resolveCredentials } from "../auth/credentials.js";
+import { RefreshFailedError } from "../auth/errors.js";
 import { ClientPool } from "../agent/client-pool.js";
 import {
   AnthropicMessagesModel,
@@ -161,17 +162,22 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     try {
       credentials = await resolveCredentials(options.home, { codexHome: options.codexHome });
     } catch (error) {
-      // Was `catch {}` falling through to runChatBoundary, which re-ran
-      // resolveCredentials from scratch — a second refresh attempt whose
-      // outcome could differ from this one, and whose generic "subscription
-      // transport is not available" message hid the real SubscriptionError
-      // (issue #351, invariant 2: nothing silent). Surface it directly, the
-      // same shape dashboard.ts/client-pool.ts already use for this error.
-      return initializationError(
-        input,
-        null,
-        error instanceof Error ? error.message : String(error),
-      );
+      // Was `catch {}` swallowing every error and falling through to
+      // runChatBoundary unconditionally (issue #351, invariant 2: nothing
+      // silent). A refresh-attempt failure specifically has a second bug on
+      // top of the swallow: runChatBoundary calls resolveCredentials again
+      // from scratch, a second OAuth refresh POST whose outcome can differ
+      // from this one, formatted behind a generic "subscription transport
+      // is not available" message that hides which attempt actually failed
+      // and why. Surface that case directly instead — same shape
+      // dashboard.ts/client-pool.ts already use for this error. Every other
+      // SubscriptionError (not logged in, ToS not acknowledged, expired
+      // Codex token) never touches the network, so re-resolving through
+      // runChatBoundary is harmless and stays byte-identical to before
+      // (tests/auth-cli.test.ts pins that shape).
+      if (error instanceof RefreshFailedError)
+        return initializationError(input, null, error.message);
+      return runChatBoundary({ home: options.home, codexHome: options.codexHome, input });
     }
     if (credentials === null)
       return runChatBoundary({ home: options.home, codexHome: options.codexHome, input });

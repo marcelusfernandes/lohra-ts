@@ -1,5 +1,5 @@
 import { readCodexTokens } from "./codex.js";
-import { SubscriptionError } from "./errors.js";
+import { RefreshFailedError, SubscriptionError } from "./errors.js";
 import { isExpired } from "./jwt.js";
 import { defaultOAuthPost, oauthRefreshTokens, type OAuthPost } from "./oauth.js";
 import { readConfig, readTokens, writeTokens } from "./store.js";
@@ -65,7 +65,7 @@ export async function resolveCredentials(
         const latest = readTokens(home);
         if (latest !== null && latest.accessToken !== own.accessToken) own = latest;
         else
-          throw new SubscriptionError(
+          throw new RefreshFailedError(
             `could not refresh the login (${error instanceof Error ? error.message : String(error)}) — run \`lohra auth login\` again`,
           );
       }
