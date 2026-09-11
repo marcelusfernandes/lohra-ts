@@ -3,6 +3,14 @@
 // (#402): a real durable store, the handler dispatched directly, built off
 // `createSessionToolBase` (`src/commands/session-tools.ts`) for the
 // `AuditRepository` this tool shares with `workflow_audit`.
+//
+// Round 2 (revisor #432): the first pass proved the CLAMP behaviour was
+// correct by hand (999999 -> 32768, ""/0 -> 4096, "abc" -> error, -5 -> 1)
+// but only ever exercised `max_chars: 12` in the suite — three mutants that
+// removed the clamp/""/0-default branches still passed. This file now
+// covers every branch of `parseMaxChars` directly, plus the two behaviour
+// fixes from the same round: no false `truncated` for an already-empty
+// turn, and the named `MAX_TURNS` cap with `truncated_turns`.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -64,6 +72,7 @@ interface LeafReadEnvelope {
   readonly sub_id?: string;
   readonly run_id?: string;
   readonly truncated?: boolean;
+  readonly truncated_turns?: boolean;
   readonly note?: string;
   readonly turns?: readonly {
     readonly role: string;
@@ -89,7 +98,8 @@ describe("workflow_leaf_read tool (#425)", () => {
     expect(parsed.sub_id).toBe("leaf-1");
     expect(parsed.run_id).toBe("run-1");
     expect(parsed.truncated).toBe(false);
-    expect(parsed.note).toBe("turnos assentados; o turno em voo não está gravado");
+    expect(parsed.truncated_turns).toBe(false);
+    expect(parsed.note).toContain("turnos assentados");
     expect(parsed.turns).toHaveLength(2);
     expect(parsed.turns?.[0]).toMatchObject({
       role: "user",
@@ -119,6 +129,123 @@ describe("workflow_leaf_read tool (#425)", () => {
     const combined = (parsed.turns ?? []).map((turn) => turn.content ?? "").join("");
     expect(combined).toHaveLength(12);
     expect(combined).toBe("0123456789ab");
+  });
+
+  it("clamps an oversized max_chars to 32768 (kills the removed-clamp mutant)", async () => {
+    const target = harness();
+    plantLeaf(target, { subId: "leaf-clamp-high", parentId: "parent-1", runId: "run-clamp-high" });
+    target.sessions.recordTurn("leaf-clamp-high", {
+      user: { role: "user", content: "u".repeat(20000) },
+      assistant: { role: "assistant", content: "a".repeat(20000) },
+    });
+
+    const parsed = JSON.parse(
+      await handlerFor(target)({
+        run_id: "run-clamp-high",
+        sub_id: "leaf-clamp-high",
+        max_chars: 999999,
+      }),
+    ) as LeafReadEnvelope;
+
+    expect(parsed.ok).toBe(true);
+    expect(parsed.truncated).toBe(true);
+    const combined = (parsed.turns ?? []).map((turn) => turn.content ?? "").join("");
+    expect(combined).toHaveLength(32768);
+  });
+
+  it.each([["", "empty string"] as const, [0, "zero"] as const])(
+    "treats max_chars %j (%s) as the 4096 default (kills the removed-default mutant)",
+    async (maxChars, _label) => {
+      const target = harness();
+      const subId = `leaf-default-${String(maxChars)}`;
+      plantLeaf(target, { subId, parentId: "parent-1", runId: `run-default-${String(maxChars)}` });
+      target.sessions.recordTurn(subId, {
+        user: { role: "user", content: "u".repeat(3000) },
+        assistant: { role: "assistant", content: "a".repeat(3000) },
+      });
+
+      const parsed = JSON.parse(
+        await handlerFor(target)({
+          run_id: `run-default-${String(maxChars)}`,
+          sub_id: subId,
+          max_chars: maxChars,
+        }),
+      ) as LeafReadEnvelope;
+
+      expect(parsed.ok).toBe(true);
+      expect(parsed.truncated).toBe(true);
+      const combined = (parsed.turns ?? []).map((turn) => turn.content ?? "").join("");
+      expect(combined).toHaveLength(4096);
+    },
+  );
+
+  it("names the error for a non-integer max_chars instead of silently defaulting", async () => {
+    const target = harness();
+    plantLeaf(target, { subId: "leaf-bad-max-chars", parentId: "parent-1", runId: "run-bad" });
+    target.sessions.recordTurn("leaf-bad-max-chars", {
+      user: { role: "user", content: "hi" },
+      assistant: { role: "assistant", content: "hi back" },
+    });
+
+    const parsed = JSON.parse(
+      await handlerFor(target)({
+        run_id: "run-bad",
+        sub_id: "leaf-bad-max-chars",
+        max_chars: "abc",
+      }),
+    ) as LeafReadEnvelope;
+
+    expect(parsed.ok).toBeUndefined();
+    expect(parsed.error).toContain("max_chars must be an integer");
+  });
+
+  it("clamps a negative max_chars up to 1 (kills a removed-lower-clamp mutant)", async () => {
+    const target = harness();
+    plantLeaf(target, { subId: "leaf-clamp-low", parentId: "parent-1", runId: "run-clamp-low" });
+    target.sessions.recordTurn("leaf-clamp-low", {
+      user: { role: "user", content: "hello" },
+      assistant: { role: "assistant", content: "world" },
+    });
+
+    const parsed = JSON.parse(
+      await handlerFor(target)({
+        run_id: "run-clamp-low",
+        sub_id: "leaf-clamp-low",
+        max_chars: -5,
+      }),
+    ) as LeafReadEnvelope;
+
+    expect(parsed.ok).toBe(true);
+    expect(parsed.truncated).toBe(true);
+    const combined = (parsed.turns ?? []).map((turn) => turn.content ?? "").join("");
+    expect(combined).toBe("h");
+  });
+
+  it("does not report truncated:true for a turn that was already empty", async () => {
+    const target = harness();
+    plantLeaf(target, { subId: "leaf-empty-tail", parentId: "parent-1", runId: "run-empty-tail" });
+    // The user turn exactly consumes the budget (10 chars, max_chars:10) —
+    // nothing is actually cut anywhere. The assistant turn is legitimately
+    // empty (e.g. a tool-calling turn with no prose). Before the fix, the
+    // handler flipped `truncated` to true here purely because the budget
+    // had already reached zero, even though the empty turn had nothing to
+    // slice.
+    target.sessions.recordTurn("leaf-empty-tail", {
+      user: { role: "user", content: "0123456789" },
+      assistant: { role: "assistant", content: "" },
+    });
+
+    const parsed = JSON.parse(
+      await handlerFor(target)({
+        run_id: "run-empty-tail",
+        sub_id: "leaf-empty-tail",
+        max_chars: 10,
+      }),
+    ) as LeafReadEnvelope;
+
+    expect(parsed.ok).toBe(true);
+    expect(parsed.truncated).toBe(false);
+    expect(parsed.turns?.[1]?.content).toBe("");
   });
 
   it("names the error for a sub_id that belongs to a different run", async () => {
@@ -151,6 +278,32 @@ describe("workflow_leaf_read tool (#425)", () => {
       await handlerFor(target)({ run_id: "run-5", sub_id: "ghost" }),
     ) as LeafReadEnvelope;
     expect(parsed.error).toBeTruthy();
+  });
+
+  it("caps the turns returned at MAX_TURNS (200), keeping the MOST RECENT ones", async () => {
+    const target = harness();
+    plantLeaf(target, { subId: "leaf-many", parentId: "parent-1", runId: "run-many" });
+    // 110 turns x 2 rows (user+assistant) = 220 rows, over the 200-row cap —
+    // this is an addition beyond the issue's original AC (invariant 3: no
+    // unbounded read of a live leaf's history), called out in the PR body.
+    for (let i = 0; i < 110; i += 1) {
+      target.sessions.recordTurn("leaf-many", {
+        user: { role: "user", content: `user-${String(i)}` },
+        assistant: { role: "assistant", content: `assistant-${String(i)}` },
+      });
+    }
+
+    const parsed = JSON.parse(
+      await handlerFor(target)({ run_id: "run-many", sub_id: "leaf-many", max_chars: 32768 }),
+    ) as LeafReadEnvelope;
+
+    expect(parsed.ok).toBe(true);
+    expect(parsed.truncated_turns).toBe(true);
+    expect(parsed.turns).toHaveLength(200);
+    // The oldest 10 turns (i = 0..9, 20 rows) were dropped; the 200 kept
+    // start at i = 10 and end at the very last one written, i = 109.
+    expect(parsed.turns?.[0]).toMatchObject({ role: "user", content: "user-10" });
+    expect(parsed.turns?.at(-1)).toMatchObject({ role: "assistant", content: "assistant-109" });
   });
 
   it("is excluded from subagents (CHILD_EXCLUDED_TOOLS + createChildDispatch)", async () => {
