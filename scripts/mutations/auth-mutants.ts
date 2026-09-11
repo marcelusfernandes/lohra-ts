@@ -152,7 +152,7 @@ export const mutants: readonly Mutant[] = [
     mechanism: "family-a",
     focus: {
       file: authFocus,
-      test: "um lock vazio recém-criado não é tomado antes do TTL (fail-closed)",
+      test: "um lock vazio recém-criado não é tomado antes do TTL, fail-closed",
     },
     edits: [
       {
@@ -185,7 +185,7 @@ export const mutants: readonly Mutant[] = [
     mechanism: "family-a",
     focus: {
       file: authFocus,
-      test: "waitForFileLease respeita o deadline mesmo se a lease nunca aparecer livre (perdedor)",
+      test: "waitForFileLease respeita o deadline mesmo se a lease nunca aparecer livre, perdedor desiste",
     },
     edits: [
       {
@@ -201,7 +201,7 @@ export const mutants: readonly Mutant[] = [
     mechanism: "family-a",
     focus: {
       file: authFocus,
-      test: "acquireFileLease lançando (não EEXIST) vira TokenPersistError, não RefreshFailedError",
+      test: "acquireFileLease lançando um erro que não é EEXIST vira TokenPersistError, não RefreshFailedError",
     },
     edits: [
       {

@@ -491,7 +491,7 @@ describe("token refresh lease (#354)", () => {
 // como "sem lease viva", apagava o lock recém-criado e tomava a lease de
 // volta antes do tempo — fail-open na primitiva que devia ser exclusiva.
 describe("lease fail-closed com lock ilegível (#356)", () => {
-  it("um lock vazio recém-criado não é tomado antes do TTL (fail-closed)", () => {
+  it("um lock vazio recém-criado não é tomado antes do TTL, fail-closed", () => {
     const home = root();
     const lockPath = join(home, "oauth.json.lock");
     // Simula a janela: o arquivo existe (como logo depois do `open("wx")`),
@@ -557,7 +557,7 @@ describe("lease fail-closed com lock ilegível (#356)", () => {
 // issue #356: três ramos de parada citados no veredito da PR #355 e sem
 // teste nem mutante próprio até aqui.
 describe("ramos de parada sem teste (#356)", () => {
-  it("waitForFileLease respeita o deadline mesmo se a lease nunca aparecer livre (perdedor)", async () => {
+  it("waitForFileLease respeita o deadline mesmo se a lease nunca aparecer livre, perdedor desiste", async () => {
     vi.useFakeTimers();
     try {
       const home = root();
@@ -630,7 +630,7 @@ describe("ramos de parada sem teste (#356)", () => {
     }
   });
 
-  it("acquireFileLease lançando (não EEXIST) vira TokenPersistError, não RefreshFailedError", async () => {
+  it("acquireFileLease lançando um erro que não é EEXIST vira TokenPersistError, não RefreshFailedError", async () => {
     const home = root();
     enable(home);
     writeTokens(home, {
