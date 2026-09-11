@@ -8,6 +8,7 @@
 
 import { randomBytes } from "node:crypto";
 
+import { registerShutdownTrigger } from "../cli/shutdown-trigger.js";
 import { buildSystemPrompt } from "../context/index.js";
 import {
   AGENTIC_MAX_ITERATIONS,
@@ -129,10 +130,11 @@ export async function runServe(options: ServeCommandOptions): Promise<number> {
 
   return await new Promise<number>((resolve) => {
     let settled = false;
+    let unregister: () => void = () => undefined;
     const finish = (code: number): void => {
       if (settled) return;
       settled = true;
-      process.off("SIGINT", onSigint);
+      unregister();
       resolve(code);
     };
     server.once("error", (error: NodeJS.ErrnoException) => {
@@ -145,7 +147,8 @@ export async function runServe(options: ServeCommandOptions): Promise<number> {
         finish(2);
       });
     });
-    const onSigint = (): void => {
+    // Issue #428: SIGTERM never had a handler here — only SIGINT did.
+    const onShutdown = (): void => {
       server.closeAllConnections();
       server.close(() => {
         void client.close().finally(() => {
@@ -153,7 +156,7 @@ export async function runServe(options: ServeCommandOptions): Promise<number> {
         });
       });
     };
-    process.once("SIGINT", onSigint);
+    unregister = registerShutdownTrigger(onShutdown);
     server.listen(port, host, () => {
       options.stderr(`Lohra OpenAI server: http://${host}:${String(port)}/v1\n`);
       if (apiKey !== null) options.stderr(`API key: ${apiKey}\n`);

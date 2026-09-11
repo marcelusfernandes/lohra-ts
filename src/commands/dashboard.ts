@@ -1,5 +1,6 @@
 import { generateSessionToken } from "../gateway/auth.js";
 import { LEVELS } from "../cli/arg-validation.js";
+import { registerShutdownTrigger } from "../cli/shutdown-trigger.js";
 import { resolveAuthRoute, resolveCredentials } from "../auth/credentials.js";
 import { readCodexModel } from "../auth/codex.js";
 import {
@@ -393,7 +394,10 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     },
   });
 
-  const closeResources = async (): Promise<void> => {
+  // Issue #428: `reason` defaults to "operator" (the bind-failure path
+  // below never signals) — the shutdown-trigger path is the only caller
+  // that passes "signal", so `segment.completed` can tell the two apart.
+  const closeResources = async (reason: "signal" | "operator" = "operator"): Promise<void> => {
     schedulerStopped = true;
     wakeScheduler?.();
     await schedulerLoop;
@@ -405,7 +409,7 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     // run's own completion handler releases its lease and writes its
     // terminal line while the connection is still open, instead of racing
     // this close and failing later against a closed one.
-    await workflowService.shutdown();
+    await workflowService.shutdown(reason);
     connection.close();
   };
 
@@ -477,11 +481,13 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
   return new Promise<number>((resolvePromise) => {
     const shutdown = (): void => {
       void server.close().finally(() => {
-        void closeResources().finally(() => {
+        void closeResources("signal").finally(() => {
           resolvePromise(0);
         });
       });
     };
-    (options.registerShutdownTrigger ?? ((handler) => process.once("SIGINT", handler)))(shutdown);
+    // Issue #428: the real (non-injected) default now covers SIGTERM too,
+    // not just SIGINT — `registerShutdownTrigger` (`src/cli/`).
+    (options.registerShutdownTrigger ?? registerShutdownTrigger)(shutdown);
   });
 }

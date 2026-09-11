@@ -305,11 +305,11 @@ interface RunRecord {
   readonly engine: WorkflowEngine;
   readonly promise: Promise<Readonly<Record<string, unknown>>>;
   result: RunResult | null;
-  /** What this run PUBLISHES once it settles — the one terminal answer every
-   * channel reads (fail-closed: `result` alone let a refused write say "complete"). */
+  /** What this run PUBLISHES once it settles — the one terminal answer every channel reads (fail-closed: `result` alone let a refused write say "complete"). */
   published: Readonly<Record<string, unknown>> | null;
   readonly resolve: (value: Readonly<Record<string, unknown>>) => void;
   settled: boolean;
+  interruptCause: "signal" | null; // set by runShutdown before cancelling a live record (#428) — announceStretchEnd tells segment.completed apart from a plain cancel
 }
 
 function defaultServiceTimer(delay: number, fire: () => void): Timer {
@@ -410,12 +410,10 @@ export class WorkflowService {
       () => Date.now() / 1_000,
       this.warn,
     );
-    // Criterion 40: the operator capability policy is a FILE in the operator
-    // home (`workflow_policy.json`) — an explicit path wins; an absent file is deny-all.
+    // Criterion 40: the operator capability policy is a FILE in the operator home (`workflow_policy.json`) — an explicit path wins; an absent file is deny-all.
     const policyPath = options.policyPath ?? join(this.homeRoot, OPERATOR_POLICY_FILE);
     this.policyLoader = () => loadPolicy(policyPath);
-    // The tier map is a separate FILE, read the same way: absent is legitimate (no remapping
-    // configured); present-but-broken still refuses the launch (#234).
+    // The tier map is a separate FILE, read the same way: absent is legitimate (no remapping configured); present-but-broken still refuses the launch (#234).
     const tiersPath = options.tiersPath ?? join(this.homeRoot, OPERATOR_TIERS_FILE);
     this.tiersLoader = () => readTiers(tiersPath);
     const store = options.store;
@@ -444,9 +442,7 @@ export class WorkflowService {
     }
   }
 
-  /** The composition handed to the runtime, pinned to ONE acquisition. Once a
-   * newer stretch owns the run, the older stretch's wrapper stops granting
-   * anything: its working root and its taint are no longer the run's. */
+  /** The composition handed to the runtime, pinned to ONE acquisition. Once a newer stretch owns the run, the older stretch's wrapper stops granting anything: its working root and its taint are no longer the run's. */
   private stretchToolDispatch(
     runId: string,
     stretchId: number,
@@ -604,7 +600,12 @@ export class WorkflowService {
       .run(parsed, args)
       .then((result) => {
         record.result = result;
-        producers.announceStretchEnd(result.status, result.pauseReason, result.checkpoint);
+        producers.announceStretchEnd(
+          result.status,
+          result.pauseReason,
+          result.checkpoint,
+          record.interruptCause,
+        );
         record.settled = true;
         record.published = resultView(runId, parsed.name, result, engine.budget);
         record.resolve(record.published);
@@ -853,13 +854,7 @@ export class WorkflowService {
             now: ownership.now,
           });
     const record = this.makeRecord(runId, parsed.name, engine);
-    /**
-     * Hand this acquisition back exactly once, never by throwing: each step below is independent,
-     * so one that fails cannot skip the ones after it or stop the run from publishing a bounded
-     * result. The heartbeat stops FIRST — a tick that outlived the release would put the lease back
-     * and leave the run looking alive with nobody in it — and the release itself is conditioned on
-     * THIS acquisition's fence, so a takeover by the same holder cannot be deleted by it.
-     */
+    // Hand this acquisition back exactly once, never by throwing: each step below is independent, so one that fails cannot skip the ones after it or stop the run from publishing a bounded result. The heartbeat stops FIRST — a tick that outlived the release would put the lease back and leave the run looking alive with nobody in it — and the release itself is conditioned on THIS acquisition's fence, so a takeover by the same holder cannot be deleted by it.
     let finished = false;
     const finishStretch = (): void => {
       if (finished) return;
@@ -987,7 +982,12 @@ export class WorkflowService {
           persistTerminal("paused", QUOTA_PAUSE, pausePayload(null, resumeAt));
         }
         if (owned && terminal !== null)
-          producers.announceStretchEnd(result.status, result.pauseReason, result.checkpoint);
+          producers.announceStretchEnd(
+            result.status,
+            result.pauseReason,
+            result.checkpoint,
+            record.interruptCause,
+          );
         await producers.flushBeforeRelease();
         finishStretch();
         record.settled = true;
@@ -1096,6 +1096,7 @@ export class WorkflowService {
       published: null,
       resolve,
       settled: false,
+      interruptCause: null,
     };
   }
 
@@ -1203,23 +1204,22 @@ export class WorkflowService {
 
   // --- shutdown --------------------------------------------------------------
 
-  /** Cancels + awaits every live run so its own completion handler releases the lease before `connection.close()` runs (invariant 4). */
-  public shutdown(): Promise<void> {
-    return (this.shuttingDown ??= this.runShutdown());
+  /** Cancels + awaits every live run so its own completion handler releases the lease before `connection.close()` runs (invariant 4). `reason` ("signal" for SIGTERM/SIGINT via `registerShutdownTrigger`, "operator" otherwise, #428) only matters on the FIRST call — `shuttingDown` memoizes the one run. */
+  public shutdown(reason: "signal" | "operator" = "operator"): Promise<void> {
+    return (this.shuttingDown ??= this.runShutdown(reason));
   }
 
-  /** Issue #373: `workflow_audit` in the same turn as `run_workflow` waits
-   * this long for the trail to drain, then reports a named pending count
-   * instead of a silent `events: []`. */
+  /** Issue #373: `workflow_audit` in the same turn as `run_workflow` waits this long for the trail to drain, then reports a named pending count instead of a silent `events: []`. */
   public async auditPendingAfterFlush(timeoutMs: number): Promise<number> {
     if (this.auditTrail === undefined) return 0;
     return (await this.auditTrail.flush(timeoutMs)) ? 0 : this.auditTrail.pendingCount();
   }
 
-  private async runShutdown(): Promise<void> {
+  private async runShutdown(reason: "signal" | "operator"): Promise<void> {
     this.autoResume?.shutdown();
     this.heartbeat?.shutdown();
     const live = [...this.runs.values()].filter((record) => !record.settled);
+    if (reason === "signal") for (const record of live) record.interruptCause = "signal";
     if (!(await this.cancelAndSettle("shutdown", live)))
       this.warn("workflow: shutdown's lease(s) expire on the TTL (heartbeat already stopped)");
     this.autoResume?.shutdown(); // also cancels a resume schedule()d mid-wait
