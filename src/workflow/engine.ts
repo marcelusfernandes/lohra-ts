@@ -23,6 +23,7 @@ import {
 import {
   applyCheckpointAnswer,
   asRecord,
+  buildCausalContext,
   checkpointPausePayload,
   clampInteger,
   collectBranchWithRetries,
@@ -212,17 +213,14 @@ export class WorkflowEngine {
     cellId: string,
     extra: { itemIndex?: number; stageIndex?: number; attempt?: number } = {},
   ): CausalContext {
-    return Object.freeze({
-      runId: this.runId,
-      segmentId: this.segmentId,
-      nodePath: Object.freeze([...this.nodeScope, this.currentNode]),
+    return buildCausalContext(
+      this.runId,
+      this.segmentId,
+      [...this.nodeScope, this.currentNode],
       cellId,
       role,
-      attempt: extra.attempt ?? 0,
-      turn: 0,
-      ...(extra.itemIndex === undefined ? {} : { itemIndex: extra.itemIndex }),
-      ...(extra.stageIndex === undefined ? {} : { stageIndex: extra.stageIndex }),
-    });
+      extra,
+    );
   }
 
   private async collectLeaf(
@@ -470,8 +468,9 @@ export class WorkflowEngine {
     if (!Array.isArray(resolved)) return null;
     const hash = this.cell([node.id, "parallel", resolved, ...routingIdentity(node, this.tiers)]);
     const cached = this.cacheGet(hash);
-    const { runId, cache, result, specIdentity: spec, tiers } = this;
-    const deps = { runId, cache, result, spec, tiers, collectLeaf: this.collectLeaf.bind(this) };
+    const { runId, cache, result, specIdentity: spec, tiers, control } = this;
+    const collectLeaf = this.collectLeaf.bind(this);
+    const deps = { runId, cache, result, spec, tiers, control, collectLeaf };
     if (cached !== CACHE_MISS) return recordGroupReplayCost(deps, node, resolved, cached, hash);
     this.gateFanout(resolved.length);
     const leaves = await Promise.all(

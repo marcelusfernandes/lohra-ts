@@ -12,7 +12,7 @@ import {
 import { MAX_NODE_MAX_ITERATIONS, MAX_NODE_RETRIES } from "./nodes.js";
 import { isEmptyOutput } from "./output-validation.js";
 import { resolveValue } from "./refs.js";
-import type { Awaitable, ChildResult } from "./runtime.js";
+import type { Awaitable, CausalContext, ChildResult } from "./runtime.js";
 import { resolveInlineSchema, validateSpec } from "./schema.js";
 import type { TierMap } from "./tiers.js";
 import { Node, ValidationError } from "./types.js";
@@ -198,6 +198,33 @@ export function resolveNodeSchema(
   return typeof reference === "string" ? asRecord(schemas[reference]) : null;
 }
 
+/** Issue #336: pulled out of `engine.ts`'s `causal` method — same reason as
+ * `resolveNodeSchema` above — to make room for `ParallelBranchDeps` growing
+ * a `control` field (below) without growing the file. Pure given the
+ * engine's own identity fields and the per-call `role`/`cellId`/`extra`;
+ * `nodePath` is already `[...nodeScope, currentNode]` by the time it gets
+ * here, so this never touches `nodeScope` itself. */
+export function buildCausalContext(
+  runId: string,
+  segmentId: string,
+  nodePath: readonly string[],
+  cellId: string,
+  role: string,
+  extra: { itemIndex?: number; stageIndex?: number; attempt?: number } = {},
+): CausalContext {
+  return Object.freeze({
+    runId,
+    segmentId,
+    nodePath: Object.freeze([...nodePath]),
+    cellId,
+    role,
+    attempt: extra.attempt ?? 0,
+    turn: 0,
+    ...(extra.itemIndex === undefined ? {} : { itemIndex: extra.itemIndex }),
+    ...(extra.stageIndex === undefined ? {} : { stageIndex: extra.stageIndex }),
+  });
+}
+
 export function routingIdentity(node: Node, tiers: TierMap): readonly unknown[] {
   if (!["model", "tier", "effort", "provider"].some((field) => Object.hasOwn(node.fields, field)))
     return [];
@@ -217,6 +244,10 @@ export interface ParallelBranchDeps {
   readonly result: RunResult;
   readonly spec: readonly unknown[];
   readonly tiers: TierMap;
+  /** Issue #336: `stillDying` below needs it, not just `result`, to see a
+   * PARENT's `requestPause()` (shared by reference, `runNested`) or a
+   * `cancel()` that never mirrors into `result.pauseFault`. */
+  readonly control: RunControl;
   readonly collectLeaf: (
     node: Node,
     prompt: string,
@@ -263,42 +294,38 @@ export async function replayOrCollectBranch(
 
 /** Issue #336: the SAME stop condition `collectLeaf`'s own pre-spawn check
  * enforces (engine.ts, right after `pool.acquire()`) — shared by every
- * retry-loop's counting guard (`runAgent`, `runPipeline`) so none of them
- * can credit a respawn that `collectLeaf` itself is about to refuse to
- * spawn. `control` is shared by REFERENCE with a PARENT engine (`runNested`
- * passes the very same object down, never a copy) — a `requestPause()` on
- * the parent flips `paused` on the object a NESTED engine's own
- * `collectLeaf` reads too, even though the nested engine's own
+ * retry-loop's counting guard (`runAgent`, `runPipeline`, and `stillDying`
+ * below) so none of them can credit a respawn that `collectLeaf` itself is
+ * about to refuse to spawn. `control` is shared by REFERENCE with a PARENT
+ * engine (`runNested` passes the very same object down, never a copy) — a
+ * `requestPause()` on the parent flips `paused` on the object a NESTED
+ * engine's own `collectLeaf` reads too, even though the nested engine's own
  * `result.pauseFault` (a separate `RunResult` per engine) stays null.
  * `cancel()` (engine.ts) never routes through `pause()`, so it never
  * touches `pauseFault` at all — `control.cancelled` is the only place that
  * shows up. `aborted` is the one stop signal with no home on `control`:
  * `runPipeline`'s own per-item deadline flag, threaded in only by the call
- * sites that have one. `stillDying` below stays on its own `result.
- * pauseFault` check (`ParallelBranchDeps` has no `control` field) — adding
- * one would grow `engine.ts`'s `runParallel` deps literal past its line
- * ceiling for no behavior change worth that cost; out of this issue's
- * scope. */
+ * sites that have one. */
 export function stoppedByControl(control: RunControl, aborted?: () => boolean): boolean {
   return control.paused || control.cancelled || (aborted?.() ?? false);
 }
 
 /** `output === null` from `collectLeaf` also covers a run that's already
- * PAUSED (token budget/quota exhausted by a SIBLING branch, or the
- * operator) — `collectLeaf` short-circuits to a null leaf with no spawn,
- * no fault, no charge (engine.ts:235-236) once `this.control.paused` is
- * set. A sibling's retry loop must not mistake that for a fresh death and
- * keep spinning through its own `retries` cap doing nothing: `pause()`
- * (engine.ts:172-183) always writes `result.pauseFault` first, so checking
- * it stops the loop once the pause is KNOWN. Two branches that both start
- * a retry in the same tick can still race past this check before either
- * has set `pauseFault` — bounded to at most one wasted attempt per branch
- * (the guard catches it on the NEXT iteration), never a full spin through
- * `retries` per stuck branch; still finite (invariant 3), not silent
- * (whichever branch actually exhausts the budget still faults via
+ * stopped (token budget/quota exhausted by a SIBLING branch, the operator,
+ * a `cancel()`, or — once nested — a PARENT's `requestPause()`) —
+ * `collectLeaf` short-circuits to a null leaf with no spawn, no fault, no
+ * charge (engine.ts, right after `pool.acquire()`) once `stoppedByControl`
+ * is true. A sibling's retry loop must not mistake that for a fresh death
+ * and keep spinning through its own `retries` cap doing nothing: checking
+ * the SAME predicate stops the loop once the stop is KNOWN. Two branches
+ * that both start a retry in the same tick can still race past this check
+ * before either has set it — bounded to at most one wasted attempt per
+ * branch (the guard catches it on the NEXT iteration), never a full spin
+ * through `retries` per stuck branch; still finite (invariant 3), not
+ * silent (whichever branch actually exhausts the budget still faults via
  * `pause()`). */
 function stillDying(leaf: LeafExecution, deps: ParallelBranchDeps): boolean {
-  return leaf.output === null && deps.result.pauseFault === null;
+  return leaf.output === null && !stoppedByControl(deps.control);
 }
 
 /** Issue #242: a branch that comes back DEAD (`output === null` — timed
