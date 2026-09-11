@@ -565,13 +565,19 @@ export const executorMutants: readonly ExecutorMutant[] = [
     ],
   },
   {
+    // Issue #426 (M10-S5) generalized the guard from `!== QUOTA_EXHAUSTED`
+    // to `!pausesRun(...)` (route kinds pause the run too, engine-utils.ts:487)
+    // — same mutant id (kept for `docs/mutation-testing.md`/
+    // `prova/mutante-guarda-quota.ts`, out of this issue's Files), new
+    // predicate; still killed by the same `quota_exhausted` case in
+    // `tests/workflow-fault-kinds.test.ts`.
     id: "Q1-quota-guard-removed",
-    mechanism: "the quota_exhausted guard is removed; a paused leaf's kind leaks into faultKinds",
+    mechanism: "the pauses-run guard is removed; a paused leaf's kind leaks into faultKinds",
     edits: [
       {
         file: "src/workflow/engine-utils.ts",
         before:
-          "  if (collected.errorKind !== QUOTA_EXHAUSTED) recordFaultKind(result, collected.errorKind ?? null);",
+          "  if (!pausesRun(collected.errorKind)) recordFaultKind(result, collected.errorKind ?? null);",
         after: "  recordFaultKind(result, collected.errorKind ?? null);",
       },
     ],

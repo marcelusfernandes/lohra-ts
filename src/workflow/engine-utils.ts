@@ -3,6 +3,8 @@ import type { Usage } from "../pricing/types.js";
 import { addUsageToResult, recordFaultKind, recordSandboxRefusals } from "./accounting.js";
 import type { RunResult } from "./accounting.js";
 import { contentHash, type WorkflowCache } from "./cache.js";
+import type { WorkflowEngine } from "./engine.js";
+import { isRouteFault, pausesRun, routeLesson } from "./route-faults.js";
 import {
   DEFAULT_LEAF_MAX_ITERATIONS,
   QUOTA_EXHAUSTED,
@@ -199,20 +201,12 @@ export function resolveLeafRequestOptions(
   };
 }
 
-/** Issue #329: the FIRST `collect()`'s non-"running" failure path — debit
- * whatever usage `collected` carries, then either flag the whole run as out
- * of quota (no fault: not this leaf's own doing) or record a fault named
- * after the leaf's own status. Pure given its callbacks, so it moves out of
- * `engine.ts` to make room for the timeout branch the SECOND `collect()`
- * gains alongside it (#313's `timeoutLeafResult` already lives here for the
- * same reason). The schema re-collect loop's OWN non-complete branch stays
- * inline in `engine.ts` — it never checks quota exhaustion, a pre-existing
- * difference out of this issue's scope. */
+/** Issue #329 (extended #426): the FIRST `collect()`'s non-"running" failure path — debit usage, then branch by kind: quota pauses the run (no fault), a route kind (`route-faults.ts`) pauses with a lesson the same way, anything else records a plain fault. Pure given its callbacks, so it stays out of `engine.ts` (#313's timeout branch lives here for the same reason). */
 export function nonCompleteFirstCollectResult(
-  noteQuotaExhausted: (nodeId: string, retryAfter: number | null) => void,
-  recordFault: (message: string) => void,
+  engine: Pick<WorkflowEngine, "noteQuotaExhausted" | "noteRouteFault" | "recordFault">,
   account: (nodeId: string, id: string, collected: ChildResult) => void,
   nodeId: string,
+  routing: Routing,
   id: string,
   collected: ChildResult,
   total: Usage,
@@ -220,16 +214,18 @@ export function nonCompleteFirstCollectResult(
   account(nodeId, id, collected);
   if (collected.errorKind === QUOTA_EXHAUSTED) {
     // Not this leaf's own failure — the whole run is out of quota.
-    noteQuotaExhausted(nodeId, collected.retryAfter ?? null);
-    return { output: null, usage: total, complete: false };
+    engine.noteQuotaExhausted(nodeId, collected.retryAfter ?? null);
+  } else if (isRouteFault(collected.errorKind)) {
+    engine.noteRouteFault(nodeId, routeLesson(collected, nodeId, routing));
+  } else {
+    const kind =
+      collected.errorKind === null || collected.errorKind === undefined
+        ? ""
+        : ` (${collected.errorKind})`;
+    engine.recordFault(
+      `${nodeId}: leaf ${collected.status}${kind}: ${renderValue(collected.output ?? "no detail").slice(0, 200)}`,
+    );
   }
-  const kind =
-    collected.errorKind === null || collected.errorKind === undefined
-      ? ""
-      : ` (${collected.errorKind})`;
-  recordFault(
-    `${nodeId}: leaf ${collected.status}${kind}: ${renderValue(collected.output ?? "no detail").slice(0, 200)}`,
-  );
   return { output: null, usage: total, complete: false };
 }
 
@@ -487,7 +483,8 @@ export function debitLeaf(
   );
   // Plain `nodeId` (never `owner`) reads like a `faults` entry, never double-scoped.
   recordSandboxRefusals(result, nodeId, collected.sandboxRefusals ?? 0);
-  if (collected.errorKind !== QUOTA_EXHAUSTED) recordFaultKind(result, collected.errorKind ?? null);
+  // #426: generalized from `!== QUOTA_EXHAUSTED` — any kind that pauses the run gets re-run on resume, so it must never leak into `faultKinds` (double-counts otherwise).
+  if (!pausesRun(collected.errorKind)) recordFaultKind(result, collected.errorKind ?? null);
   return next;
 }
 

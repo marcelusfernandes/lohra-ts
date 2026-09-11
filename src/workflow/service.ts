@@ -14,13 +14,13 @@ import {
 import { WorkflowEngine } from "./engine.js";
 import { AutoResumeScheduler, LeaseHeartbeat, type Timer } from "./durability.js";
 import { resultView } from "./service-rollup.js";
+import { recordRouteFaultNotice, ROUTE_FAULT_REASON } from "./route-faults.js";
 import type { ChildRuntime, LeafSandboxHandle, LeafToolDispatch } from "./runtime.js";
 import { validateNestedRefs, validateSpec } from "./schema.js";
 import { ValidationError, type WorkflowSpec } from "./types.js";
 import type { RunResult } from "./accounting.js";
 import type { ProgressSnapshot } from "./progress.js";
-import type { Ownership } from "../state/workflow-repository.js";
-import { WorkflowRepository } from "../state/workflow-repository.js";
+import { WorkflowRepository, type Ownership } from "../state/workflow-repository.js";
 import {
   DENY_ALL_POLICY,
   loadPolicy,
@@ -82,7 +82,6 @@ export const CHECKPOINT_PAUSE = "checkpoint";
 export const QUOTA_PAUSE = "quota_exhausted";
 export const TOKEN_BUDGET_PAUSE = "token_budget_exhausted";
 export const USER_PAUSE = "user_requested";
-
 export const STALE_HINT =
   "the process that was running this workflow was lost before it finished; the " +
   "cells it completed are kept — run_workflow(resume_run_id=...) continues it";
@@ -188,7 +187,7 @@ export function pauseFields(view: DurableRunView): Readonly<Record<string, unkno
     fields.hint = CHECKPOINT_HINT;
   } else if (view.pause_reason === USER_PAUSE) {
     fields.hint = USER_PAUSE_HINT;
-  }
+  } else if (view.pause_reason === ROUTE_FAULT_REASON) fields.lesson = view.checkpoint;
   return Object.freeze(fields);
 }
 
@@ -244,13 +243,12 @@ export interface OwnershipStore {
   readonly ownershipOf: () => Ownership;
   /** The shared connection, for the default fenced SQLite node cache. */
   readonly database: import("better-sqlite3").Database;
+  readonly notices?: Parameters<typeof recordRouteFaultNotice>[0]; // #426: route fault notice; absent falls back to warn
 }
-
 export interface WorkflowStartResult {
   readonly run_id: string;
   readonly status: "started";
 }
-
 export interface WorkflowServiceError {
   readonly error: string;
   readonly invalid_spec?: boolean;
@@ -981,6 +979,8 @@ export class WorkflowService {
         if (resumeAt !== null) {
           persistTerminal("paused", QUOTA_PAUSE, pausePayload(null, resumeAt));
         }
+        if (owned && result.status === "paused" && result.pauseReason === ROUTE_FAULT_REASON)
+          recordRouteFaultNotice(store.notices, runId, result.checkpoint, terminal, this.warn);
         if (owned && terminal !== null)
           producers.announceStretchEnd(
             result.status,

@@ -73,7 +73,13 @@ class FakeRuntime implements ChildRuntime {
 }
 
 describe("fault_kinds — engine (#399 AC1/AC2)", () => {
-  it("a leaf that fails with auth_failed populates faultKinds; faults/status unchanged", async () => {
+  // Emenda do orquestrador 2026-09-12 (issue #426): `auth_failed` é um dos
+  // três kinds de rota (#426 AC1) — o leaf isolado agora PAUSA o run com
+  // `pause_reason: route_fault` em vez de só registrar um fault por kind, e
+  // um kind que pausa o run nunca entra em `faultKinds` (mesma regra que
+  // `quota_exhausted` já tinha). A mensagem em `faults` é a de `pause()`
+  // (`engine.ts`'s `noteRouteFault`), não mais a antiga por-kind.
+  it("a leaf that fails with auth_failed pauses the run with route_fault, never faultKinds", async () => {
     const runtime = new FakeRuntime([
       [{ status: "failed", output: "401", errorKind: "auth_failed", retryAfter: null }],
     ]);
@@ -82,11 +88,10 @@ describe("fault_kinds — engine (#399 AC1/AC2)", () => {
       nodes: [{ id: "a", type: "agent", prompt: "x" }],
     });
     const result = await new WorkflowEngine({ runtime }).run(spec);
-    expect(result.faultKinds).toEqual(["auth_failed"]);
-    // The single node's failure zeroes its own output — deriveStatus reads
-    // `nullCount >= nodesTotal` before `faults.length > 0` (accounting.ts).
-    expect(result.status).toBe("failed");
-    expect(result.faults).toEqual(["a: leaf failed (auth_failed): 401"]);
+    expect(result.faultKinds).toEqual([]);
+    expect(result.status).toBe("paused");
+    expect(result.pauseReason).toBe("route_fault");
+    expect(result.faults).toEqual(["route fault 'a' (auth_failed)"]);
   });
 
   it("a leaf that completes cleanly never adds a fault kind", async () => {
@@ -117,7 +122,13 @@ describe("fault_kinds — quota guard never enters (issue #412, engine-utils.ts:
     expect(result.pauseReason).toBe("quota_exhausted");
   });
 
-  it("a quota leaf alongside an auth_failed leaf keeps only auth_failed in faultKinds", async () => {
+  // Emenda 2026-09-12 (#426): sem prioridade entre razões de pausa — o
+  // PRIMEIRO nó que pausa vence (engine.ts's `pause()` latches once). Nó
+  // "a" (auth_failed, um kind de rota) roda/pausa antes do nó "b"
+  // (quota_exhausted) nesta ordem determinística do FakeRuntime, então o
+  // run pausa `route_fault`, não `quota_exhausted` — e nenhum dos dois
+  // kinds entra em `faultKinds` (ambos pausam o run).
+  it("a route fault alongside a quota leaf pauses route_fault first — never faultKinds", async () => {
     const runtime = new FakeRuntime([
       [{ status: "failed", output: "401", errorKind: "auth_failed", retryAfter: null }],
       [{ status: "failed", output: "429", errorKind: "quota_exhausted", retryAfter: null }],
@@ -130,16 +141,21 @@ describe("fault_kinds — quota guard never enters (issue #412, engine-utils.ts:
       ],
     });
     const result = await new WorkflowEngine({ runtime }).run(spec);
-    expect(result.faultKinds).toEqual(["auth_failed"]);
+    expect(result.faultKinds).toEqual([]);
     expect(result.status).toBe("paused");
-    expect(result.pauseReason).toBe("quota_exhausted");
+    expect(result.pauseReason).toBe("route_fault");
   });
 });
 
 describe("fault_kinds — nested workflow folds into the parent (#399 AC4)", () => {
-  it("a sub-workflow leaf failing with auth_failed folds its kind into the parent's RunResult", async () => {
+  // Emenda do orquestrador 2026-09-12 (issue #426, 2ª emenda): `auth_failed`
+  // era só uma fixture genérica de fault não-quota aqui, não um teste de
+  // comportamento de rota — trocada por `unknown` (um kind que continua só
+  // em `faultKinds`, nunca pausa) para preservar a intenção original do
+  // teste sem depender de um kind que agora pausa o run (#426 AC1).
+  it("a sub-workflow leaf failing with unknown folds its kind into the parent's RunResult", async () => {
     const runtime = new FakeRuntime([
-      [{ status: "failed", output: "401", errorKind: "auth_failed", retryAfter: null }],
+      [{ status: "failed", output: "401", errorKind: "unknown", retryAfter: null }],
     ]);
     const engine = new WorkflowEngine({
       runtime,
@@ -153,14 +169,14 @@ describe("fault_kinds — nested workflow folds into the parent (#399 AC4)", () 
       nodes: [{ id: "sub", type: "workflow", ref: "child" }],
     });
     const result = await engine.run(spec);
-    expect(result.faultKinds).toEqual(["auth_failed"]);
+    expect(result.faultKinds).toEqual(["unknown"]);
   });
 });
 
 describe("fault_kinds — WorkflowService rollup (#399 AC2)", () => {
   it("workflow_status carries fault_kinds for a real caller", async () => {
     const runtime = new FakeRuntime([
-      [{ status: "failed", output: "401", errorKind: "auth_failed", retryAfter: null }],
+      [{ status: "failed", output: "401", errorKind: "unknown", retryAfter: null }],
     ]);
     const service = new WorkflowService({ runtime });
     const started = service.start({
@@ -169,7 +185,7 @@ describe("fault_kinds — WorkflowService rollup (#399 AC2)", () => {
     });
     if ("error" in started) throw new Error(started.error);
     const view = (await service.status(started.run_id, true)) as Record<string, unknown>;
-    expect(view.fault_kinds).toEqual(["auth_failed"]);
+    expect(view.fault_kinds).toEqual(["unknown"]);
   });
 });
 
@@ -221,12 +237,14 @@ function checkpointSpec(): Record<string, unknown> {
   };
 }
 
-/** Every leaf of node "a" fails with `auth_failed` — one on each stretch,
+/** Every leaf of node "a" fails with `unknown` — one on each stretch,
  * mirroring `tests/workflow-sandbox-refusals.test.ts`'s `durableRuntimeStub`
  * (the checkpoint pauses stretch 1; "a" re-spawns on the resume stretch,
  * proving accumulation survives the resume, not just one stretch's own
- * number). */
-function durableAuthFailRuntimeStub(): ChildRuntime {
+ * number). Emenda 2026-09-12 (#426, 2ª emenda): renomeado de
+ * `durableAuthFailRuntimeStub` — `unknown` is a plain fault kind that
+ * never pauses the run, unlike `auth_failed` since #426 AC1. */
+function durableUnknownFailRuntimeStub(): ChildRuntime {
   let seq = 0;
   return {
     spawn(): string {
@@ -234,7 +252,7 @@ function durableAuthFailRuntimeStub(): ChildRuntime {
       return `leaf-${String(seq)}`;
     },
     collect(): ChildResult {
-      return { status: "failed", output: "401", errorKind: "auth_failed", retryAfter: null };
+      return { status: "failed", output: "401", errorKind: "unknown", retryAfter: null };
     },
     steer(): void {},
     cancel(): void {},
@@ -266,7 +284,7 @@ function harness() {
       now: ownership.now,
     }));
   const service = new WorkflowService({
-    runtime: durableAuthFailRuntimeStub(),
+    runtime: durableUnknownFailRuntimeStub(),
     store,
     cacheFactory,
   });
@@ -288,21 +306,21 @@ describe("fault_kinds — survives resume, cross-process (#399 AC3)", () => {
     if ("error" in started) throw new Error(started.error);
     const paused = (await service.status(started.run_id, true)) as Record<string, unknown>;
     expect(paused.status).toBe("paused");
-    expect(paused.fault_kinds).toEqual(["auth_failed"]);
+    expect(paused.fault_kinds).toEqual(["unknown"]);
 
     const line = repository.getRunState(started.run_id) as Record<string, unknown>;
     const payload = JSON.parse(String(line.pause_payload_json)) as {
       prior_fault_kinds: string[];
     };
-    expect(payload.prior_fault_kinds).toEqual(["auth_failed"]);
+    expect(payload.prior_fault_kinds).toEqual(["unknown"]);
 
     const coldService = new WorkflowService({
-      runtime: durableAuthFailRuntimeStub(),
+      runtime: durableUnknownFailRuntimeStub(),
       store,
       cacheFactory,
     });
     const dormantView = (await coldService.status(started.run_id)) as Record<string, unknown>;
-    expect(dormantView.fault_kinds_total).toEqual(["auth_failed"]);
+    expect(dormantView.fault_kinds_total).toEqual(["unknown"]);
 
     const resumed = (await service.runAndWait(null, {}, { resumeRunId: started.run_id })) as Record<
       string,
@@ -315,18 +333,18 @@ describe("fault_kinds — survives resume, cross-process (#399 AC3)", () => {
     // The live view is current-stretch-only, same pre-existing shape as
     // `faults` always had (service.ts never folds `prior_faults` into it
     // either) — stretch 2's OWN leaf failure, not stretch 1's too.
-    expect(resumed.fault_kinds).toEqual(["auth_failed"]);
+    expect(resumed.fault_kinds).toEqual(["unknown"]);
 
     // The DURABLE total is what actually accumulates across stretches —
     // order of occurrence, no dedupe (issue #399's explicit rollup
     // contract): stretch 1's carried-forward kind + stretch 2's own.
     const afterResume = new WorkflowService({
-      runtime: durableAuthFailRuntimeStub(),
+      runtime: durableUnknownFailRuntimeStub(),
       store,
       cacheFactory,
     });
     const finalView = (await afterResume.status(started.run_id)) as Record<string, unknown>;
-    expect(finalView.fault_kinds_total).toEqual(["auth_failed", "auth_failed"]);
+    expect(finalView.fault_kinds_total).toEqual(["unknown", "unknown"]);
     close();
   });
 });

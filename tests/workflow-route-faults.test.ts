@@ -175,6 +175,7 @@ describe("route faults — durable workflow_status exposes pause_reason and less
       ttl: 900,
       ownershipOf: () => ownership,
       database: connection.database,
+      ...(noticesRepository === undefined ? {} : { notices: noticesRepository }),
     };
     const cacheFactory = (runId: string): SqliteWorkflowCache =>
       new SqliteWorkflowCache(connection.database, runId, () => ({
@@ -195,12 +196,7 @@ describe("route faults — durable workflow_status exposes pause_reason and less
         return { dispose: (): void => undefined };
       },
     };
-    const service = new WorkflowService({
-      runtime,
-      store,
-      cacheFactory,
-      ...(noticesRepository === undefined ? {} : { noticesRepository }),
-    });
+    const service = new WorkflowService({ runtime, store, cacheFactory });
     return {
       service,
       repository,
@@ -210,13 +206,14 @@ describe("route faults — durable workflow_status exposes pause_reason and less
     };
   }
 
-  it("workflow_status durable rollup exposes pause_reason: route_fault and the lesson", () => {
+  it("workflow_status durable rollup exposes pause_reason: route_fault and the lesson", async () => {
     const { service, repository, close } = harness();
     const started = service.start({
       meta: { name: "route-durable" },
       nodes: [{ id: "a", type: "agent", prompt: "x", retries: 0 }],
     });
     if ("error" in started) throw new Error(started.error);
+    await service.status(started.run_id, true);
     const line = repository.getRunState(started.run_id) as Record<string, unknown>;
     const view = durableFromRow(line);
     expect(view.pause_reason).toBe("route_fault");
@@ -232,7 +229,7 @@ describe("route faults — durable workflow_status exposes pause_reason and less
     close();
   });
 
-  it("records a durable notice with kind = error_kind, scoped to the run", () => {
+  it("records a durable notice with kind = error_kind, scoped to the run", async () => {
     const notices: Array<{ scope: string; kind: string; message: string }> = [];
     const { service, close } = harness({
       append: (scope, input) => {
@@ -250,13 +247,14 @@ describe("route faults — durable workflow_status exposes pause_reason and less
       nodes: [{ id: "a", type: "agent", prompt: "x", retries: 0 }],
     });
     if ("error" in started) throw new Error(started.error);
+    await service.status(started.run_id, true);
     expect(notices).toHaveLength(1);
     expect(notices[0]?.scope).toBe(`run:${started.run_id}`);
     expect(notices[0]?.kind).toBe("auth_failed");
     close();
   });
 
-  it("falls back to the plain warn sink when no notices repository was wired (never silent)", () => {
+  it("falls back to the plain warn sink when no notices repository was wired (never silent)", async () => {
     const warnings: string[] = [];
     const root = mkdtempSync(join(tmpdir(), "lohra-route-faults-warn-"));
     roots.push(root);
@@ -302,6 +300,7 @@ describe("route faults — durable workflow_status exposes pause_reason and less
       nodes: [{ id: "a", type: "agent", prompt: "x", retries: 0 }],
     });
     if ("error" in started) throw new Error(started.error);
+    await service.status(started.run_id, true);
     expect(warnings.some((message) => message.includes("route fault"))).toBe(true);
     connection.close();
   });
