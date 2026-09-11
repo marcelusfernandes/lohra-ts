@@ -33,7 +33,6 @@ export interface ChildResult {
   readonly usage?: Usage | null;
   readonly provider?: string | null;
   readonly model?: string | null;
-  readonly forcedFallback?: boolean;
   readonly retryAfter?: number | null;
   readonly errorKind?: ErrorKind | null;
   readonly toolCalls?: readonly Readonly<Record<string, unknown>>[];

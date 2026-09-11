@@ -220,7 +220,6 @@ export class OrchestrationChildRuntime implements ChildRuntime {
       },
       provider: result.provider,
       model: result.model,
-      forcedFallback: result.forcedFallback,
       retryAfter: result.retryAfter,
       errorKind: result.errorKind,
       usageUncertain: result.usageUncertain === true,
