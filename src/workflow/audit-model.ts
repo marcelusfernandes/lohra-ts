@@ -133,7 +133,9 @@ const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object
     // Issue #378: a dispatch still open when its leaf closes (cancel,
     // shutdown, or an engine-driven timeout) — `close()` (audit-runtime.ts)
     // flushes it as `tool.completed {status: "error", reason: "cancelled"}`
-    // so the pair is never left orphaned.
+    // so the pair is never left orphaned. Issue #428: `segment.completed`
+    // itself now carries the same value for a plain `cancel(runId)` — see
+    // "signal" below for the shutdown-by-signal counterpart.
     "cancelled",
     // Issue #368: the four `pauseReason` values `WorkflowEngine.pause`
     // (engine.ts:155,163,204,213,981) ever sets — `node.paused`'s own
@@ -156,6 +158,13 @@ const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object
     // BEFORE `auditedChildRuntime`'s wrap ever runs, so that denial produces
     // no `tool.*` event at all, not even this one (#378).
     "sandbox_denied",
+    // Issue #428: SIGTERM/SIGINT via `registerShutdownTrigger` (`serve.ts`,
+    // `dashboard.ts`) — `WorkflowService.shutdown("signal")` threads this
+    // through `runShutdown` → `cancelAndSettle` → `announceStretchEnd`, so
+    // `segment.completed {status: "interrupted", reason: "signal"}` tells a
+    // resume the run was cut by the environment, not by `workflow_cancel`
+    // (which keeps writing `reason: "cancelled"`).
+    "signal",
     "sink_failure",
     "store_failed",
     "timeout",

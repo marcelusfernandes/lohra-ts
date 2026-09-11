@@ -51,8 +51,15 @@ export interface WorkflowAuditProducers {
   readonly announceSegmentStarted: (attempt: number) => void;
   /** The LAST event of a stretch, before `workflow.done` — `status` is
    * whatever `announceDone` is about to publish (`"complete"`, `"paused"`,
-   * `"cancelled"`, or `"failed"` from the `.catch` path). */
-  readonly announceSegmentCompleted: (status: string) => void;
+   * `"cancelled"`, or `"failed"` from the `.catch` path). `cause: "signal"`
+   * (issue #428, a SIGTERM/SIGINT shutdown, never a plain `cancel(runId)`)
+   * overrides the payload to `{status: "interrupted", reason: "signal"}` —
+   * the engine's own `status` stays `"cancelled"` either way (service.ts),
+   * only the LEDGER tells the two apart. A `cancel(runId)` with no signal
+   * cause still names itself: `status === "cancelled"` without `cause` gets
+   * `reason: "cancelled"` in the payload, so a ledger reader never has to
+   * infer "not signal" from an absent field. */
+  readonly announceSegmentCompleted: (status: string, cause?: "signal" | null) => void;
   /** Issue #368: a dead-owner resume (`orphaned`, service.ts) closes the
    * PRIOR segment as `interrupted`/`process_crash` — under THIS stretch's
    * new fence, naming the OLD segment by id (or none, for a run durable
@@ -83,11 +90,16 @@ export interface WorkflowAuditProducers {
   /** `service.ts`'s ONE call per terminal write, replacing a bare
    * `announceDone` — `announceNodePaused` (a no-op unless `status ===
    * "paused"`), then `announceSegmentCompleted`, then `announceDone`, in
-   * that order (segment.completed is the LAST event before workflow.done). */
+   * that order (segment.completed is the LAST event before workflow.done).
+   * `cause` is `record.interruptCause` (service.ts, #428): `"signal"` for a
+   * run cancelled by `runShutdown("signal")`, `null` for everything else
+   * (a plain `cancel(runId)`, a non-signal `shutdown()`, or a run that
+   * simply finished). */
   readonly announceStretchEnd: (
     status: string,
     pauseReason: string | null,
     checkpoint: unknown,
+    cause?: "signal" | null,
   ) => void;
   /** `service.ts`'s ONE call at the cache-construction site — decorates
    * `inner` with THIS stretch's own identity (`audit-cache.ts`, #368), so a
@@ -231,8 +243,16 @@ export function createWorkflowAuditProducers(
     record({ event_type: "segment.started", payload: { attempt, status: "running" } });
   }
 
-  function announceSegmentCompleted(status: string): void {
-    record({ event_type: "segment.completed", payload: { status, terminal: true } });
+  function announceSegmentCompleted(status: string, cause?: "signal" | null): void {
+    if (cause === "signal") {
+      record({
+        event_type: "segment.completed",
+        payload: { status: "interrupted", reason: "signal", terminal: true },
+      });
+      return;
+    }
+    const reason = status === "cancelled" ? { reason: "cancelled" } : {};
+    record({ event_type: "segment.completed", payload: { status, ...reason, terminal: true } });
   }
 
   // Bypasses `record` on purpose: BOTH events below name the segment THIS
@@ -275,9 +295,10 @@ export function createWorkflowAuditProducers(
     status: string,
     pauseReason: string | null,
     checkpoint: unknown,
+    cause?: "signal" | null,
   ): void {
     announceNodePaused(pauseReason, checkpoint);
-    announceSegmentCompleted(status);
+    announceSegmentCompleted(status, cause);
     announceDone(status);
   }
 
