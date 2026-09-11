@@ -1,6 +1,7 @@
 import type { ChildToolDispatch, OrchestrationCore } from "../orchestration/core.js";
 import { toolError } from "./sandbox.js";
 import type {
+  CausalContext,
   ChildCollectOptions,
   ChildResult,
   ChildRuntime,
@@ -10,6 +11,13 @@ import type {
   LeafSandboxInstallation,
   LeafToolDispatch,
 } from "./runtime.js";
+
+/** A frozen, independent copy of `causal` — never the caller's own object
+ * reference, and never mutable after this returns (issue #422: `causalSnapshot`
+ * must hand back a snapshot, not a handle the caller could go on mutating). */
+function freezeCausalContext(causal: CausalContext): CausalContext {
+  return Object.freeze({ ...causal, nodePath: Object.freeze([...causal.nodePath]) });
+}
 
 /**
  * Carries the real, async dispatch call a sandbox `wrap` (runtime.ts:52-61)
@@ -140,6 +148,17 @@ export class OrchestrationChildRuntime implements ChildRuntime {
     string,
     { readonly runId: string; readonly box: { count: number } }
   >();
+  /** Live leaves' causal identity (issue #422), keyed by subId — read back
+   * by `causalSnapshot` so a supervision tool can resolve `node_id ->
+   * sub_id` (S3). Populated EAGERLY at spawn (every leaf gets an entry, not
+   * just ones that ever get steered/refused) and swept by the SAME `dispose`
+   * that clears `refusalCounts` above, so its lifetime matches: bounded by
+   * one stretch's leaves under a durable install, but — like
+   * `refusalCounts` — never swept at all for a run that never had a leaf
+   * sandbox installed (the ephemeral, no-store path, #101). That leaf pool
+   * is itself bounded by `OrchestrationCore`'s own `maxSubsessions`
+   * eviction, so this never grows past what the registry already allows. */
+  private readonly causalContexts = new Map<string, CausalContext>();
 
   public constructor(private readonly core: OrchestrationCore) {}
 
@@ -152,6 +171,9 @@ export class OrchestrationChildRuntime implements ChildRuntime {
           this.installations.delete(installation.runId);
           for (const [subId, entry] of this.refusalCounts) {
             if (entry.runId === installation.runId) this.refusalCounts.delete(subId);
+          }
+          for (const [subId, causal] of this.causalContexts) {
+            if (causal.runId === installation.runId) this.causalContexts.delete(subId);
           }
         }
       },
@@ -185,7 +207,7 @@ export class OrchestrationChildRuntime implements ChildRuntime {
   }
 
   public spawn(request: ChildSpawnRequest): string {
-    return this.core.spawn({
+    const subId = this.core.spawn({
       prompt: request.prompt,
       ...(request.provider === undefined ? {} : { provider: request.provider }),
       ...(request.model === undefined ? {} : { model: request.model }),
@@ -193,6 +215,16 @@ export class OrchestrationChildRuntime implements ChildRuntime {
       ...(request.maxIterations === undefined ? {} : { maxIterations: request.maxIterations }),
       wrapDispatch: this.wrapDispatchFor(request.causalContext.runId),
     }).subId;
+    this.causalContexts.set(subId, freezeCausalContext(request.causalContext));
+    return subId;
+  }
+
+  /** A frozen copy of the leaf's causal identity, or null once it is
+   * unknown (never spawned here, or already swept by `dispose`) — issue
+   * #422. Never the object `spawn` was originally called with (see
+   * `freezeCausalContext`). */
+  public causalSnapshot(id: string): CausalContext | null {
+    return this.causalContexts.get(id) ?? null;
   }
 
   public async collect(id: string, options: ChildCollectOptions): Promise<ChildResult> {
@@ -227,8 +259,16 @@ export class OrchestrationChildRuntime implements ChildRuntime {
     };
   }
 
-  public steer(id: string, prompt: string): void {
-    this.core.steer(id, prompt);
+  /**
+   * Forwards `causal` straight to `core.steer` (issue #422 — previously
+   * dropped here). `core.steer`'s own per-leaf cap (`MAX_STEERS_PER_LEAF`)
+   * can refuse the call (`refused: "steer_cap"`); this port's `steer`
+   * returns `void` (`ChildRuntime.steer`, runtime.ts), so that refusal is
+   * not yet observable through this method — S2's `leaf.steered` audit
+   * event (issue #423) is where it becomes visible, not here.
+   */
+  public steer(id: string, prompt: string, causal?: CausalContext): void {
+    this.core.steer(id, prompt, causal);
   }
 
   public cancel(id: string): void {

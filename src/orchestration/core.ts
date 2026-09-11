@@ -2,8 +2,28 @@ import { ConcurrencyGate } from "./concurrency-gate.js";
 import { logOrchestrationFailure } from "./failure-log.js";
 import { wrapSteerInbox } from "./steer-inbox.js";
 import type { ErrorKind } from "../transports/error-kinds.js";
+// Type-only: erased at emit, so this never creates a RUNTIME import cycle
+// even though `workflow/orchestration-runtime.ts` imports the other way
+// (`../orchestration/core.js`). `core.ts` only needs the shape to store it
+// on a `SubSessionEntry` for S2's `leaf.steered` audit event (issue #423)
+// — it never reads a field off it itself.
+import type { CausalContext } from "../workflow/runtime.js";
 
 export type SubSessionStatus = "running" | "complete" | "error" | "interrupted";
+
+/** Ceiling on a single leaf's PENDING inbox (issue #422, invariant 3:
+ * budget/fan-out never unbounded) — this bounds `entry.inbox.length` at the
+ * instant of a `steer()` call while the leaf is busy, never a lifetime
+ * total: `drainInboxFor` (the runner's own per-iteration hook) frees a slot
+ * every time it runs, and a steer-driven RESURRECTION (idle/terminal leaf)
+ * never touches the inbox at all, so it can never be capped by this either.
+ * PR #431 round 2 (revisor, reproduced): an earlier lifetime-counter version
+ * of this cap made `delegate_task`'s resume-loop die permanently on its
+ * 11th turn even though each turn drained cleanly — the gap the map (§8)
+ * actually names is the unbounded INBOX, not a cap on how many times a leaf
+ * may ever be steered. Named so a mutant that inlines a different number is
+ * visible in a diff/review, not just in test output. */
+export const MAX_PENDING_STEERS_PER_LEAF = 10;
 
 export interface CollectResult {
   readonly status: SubSessionStatus;
@@ -162,6 +182,12 @@ interface SubSessionEntry {
    * drained by the runner's own iteration loop while this child is busy or
    * queued-in-pool (contract L6). */
   readonly inbox: string[];
+  /** The causal identity attached to the MOST RECENT accepted steer() call,
+   * if any — stored for S2's `leaf.steered` audit event (issue #423); never
+   * consulted by steer()/collect() themselves. A refused call never
+   * overwrites this, so it always reflects the last steer that actually
+   * took effect. */
+  causal?: CausalContext;
 }
 
 /**
@@ -253,17 +279,44 @@ export class OrchestrationCore {
    * as busy; a resurrected child mid-second-turn is ALSO inFlight even
    * though its `result` is still the stale first-turn value (L7) — steering
    * it again must queue, not start a redundant third turn.
+   *
+   * `causal` (issue #422) is optional and carried straight from the caller
+   * (`OrchestrationChildRuntime.steer`, `ChildRuntime.steer`'s 3rd
+   * argument) — stored on the entry for S2's audit event, never consulted
+   * here.
+   *
+   * Above `MAX_PENDING_STEERS_PER_LEAF` texts already sitting in `inbox`
+   * (busy path only — a resurrection never touches the inbox, so it is
+   * never capped by this), this refuses instead of queuing: never throws (a
+   * fault here would abort whatever caller triggered it — the schema-retry
+   * loop, an operator tool, or `delegate_task`'s resume path — none of
+   * which should crash over a fan-out limit) and never silently drops the
+   * text either — the caller gets `refused: "steer_cap"` back to act on.
+   * Production callers (`orchestration/tools.ts`) turn this into a named
+   * `toolError` instead of the byte-identical success envelope a bare
+   * `{queued: false}` would otherwise produce (PR #431 round 2).
    */
-  public steer(subId: string, text: string): { readonly queued: boolean } | null {
+  public steer(
+    subId: string,
+    text: string,
+    causal?: CausalContext,
+  ): { readonly queued: boolean; readonly refused?: "steer_cap" } | null {
     const entry = this.entries.get(subId);
     if (entry === undefined) return null;
     if (entry.inFlight) {
+      if (entry.inbox.length >= MAX_PENDING_STEERS_PER_LEAF) {
+        return { queued: false, refused: "steer_cap" };
+      }
+      if (causal !== undefined) entry.causal = causal;
       entry.inbox.push(text);
       return { queued: true };
     }
+    if (causal !== undefined) entry.causal = causal;
     // Idle/terminal: resurrect. status/result are left untouched here on
     // purpose — L7/ADR-T13-05 requires collect(wait:false) to keep
     // returning the stale prior result until the new turn actually settles.
+    // Never capped: a resurrection starts a fresh turn, it does not grow
+    // the pending inbox.
     entry.inFlight = true;
     const { promise, abortController } = this.runAndTrack(
       subId,

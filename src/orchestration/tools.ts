@@ -3,6 +3,7 @@ import { jsonFloat } from "../serialization/json-numbers.js";
 import { toolError, toolResult } from "../tools/envelope.js";
 import type { ToolArguments } from "../tools/types.js";
 import {
+  MAX_PENDING_STEERS_PER_LEAF,
   summarizeCollectResult,
   type CollectResult,
   type OrchestrationCore,
@@ -26,6 +27,18 @@ import {
  * diverges for an unusual value. */
 function noSubSession(subId: string): string {
   return toolError(`no sub-session ${JSON.stringify(subId)}`);
+}
+
+/** PR #431 round 2: `core.steer`'s `refused: "steer_cap"` must never reach
+ * either production caller as a bare `{queued: false}` — that is
+ * byte-identical to a successful resurrection (`steerSessionTool`'s own
+ * pinned success envelope) or, worse, lets `delegateTaskTool`'s resume path
+ * fall through to `collect()` and report the PREVIOUS turn's summary as if
+ * it were the answer to the new one. Both callers below check
+ * `outcome.refused` and return this named error instead, before ever
+ * touching `collect`. */
+function steerCapMessage(subId: string): string {
+  return `steer refused: steer_cap (${String(MAX_PENDING_STEERS_PER_LEAF)} pending steers on ${subId})`;
 }
 
 function overridesFromArgs(args: ToolArguments): Omit<SpawnConfig, "prompt"> {
@@ -78,6 +91,7 @@ export function steerSessionTool(core: OrchestrationCore, args: ToolArguments): 
   const subId = args.sub_id as string;
   const outcome = core.steer(subId, args.text as string);
   if (outcome === null) return noSubSession(subId);
+  if (outcome.refused !== undefined) return toolError(steerCapMessage(subId));
   return toolResult(undefined, { queued: outcome.queued });
 }
 
@@ -154,6 +168,7 @@ export async function delegateTaskTool(
     const subId = String(resumeId);
     const steerOutcome = core.steer(subId, followUp);
     if (steerOutcome === null) return noSubSession(subId);
+    if (steerOutcome.refused !== undefined) return toolError(steerCapMessage(subId));
     const collectOutcome = await core.collect(subId, true);
     if (collectOutcome.kind !== "settled") return noSubSession(subId);
     const { result } = collectOutcome;
