@@ -16,7 +16,12 @@ import { contentHash, MemoryWorkflowCache } from "../src/workflow/cache.js";
 import { WorkflowEngine } from "../src/workflow/engine.js";
 import { validateSpec } from "../src/workflow/schema.js";
 import { WorkflowService } from "../src/workflow/service.js";
-import type { ChildResult, ChildRuntime, LeafSandboxHandle } from "../src/workflow/runtime.js";
+import type {
+  ChildResult,
+  ChildRuntime,
+  ChildSpawnRequest,
+  LeafSandboxHandle,
+} from "../src/workflow/runtime.js";
 
 function parsed(raw: unknown) {
   const result = validateSpec(raw);
@@ -159,5 +164,103 @@ describe("workflow parallel per-branch cells — group replay miss (#308)", () =
     expect(result.faults).toEqual([]);
     expect(result.nodeCosts.p?.usage.inputTokens).toBe(5);
     expect(result.nodeCosts.p?.usage.outputTokens).toBe(3);
+  });
+});
+
+// #332: a nested `workflow` node's cell (agent, parallel, ...) keyed only on
+// `specIdentity` + its own parts, with no `nodeScope` at all — unlike
+// `runCheckpoint` (#319), which already folds `nodeScope` in. Two SIBLING
+// `workflow` nodes reusing the SAME template with identical inputs (the
+// User Story's exact shape: `sub1`/`sub2` both `ref: "inner"`) then share
+// one cell: `sub2` replays `sub1`'s output with zero spawns and zero cost of
+// its own, instead of running — and being charged for — its own real work.
+class LabeledRuntime implements ChildRuntime {
+  readonly requests: ChildSpawnRequest[] = [];
+
+  spawn(request: ChildSpawnRequest): string {
+    this.requests.push(request);
+    return `leaf-${String(this.requests.length)}`;
+  }
+
+  collect(id: string): ChildResult {
+    const index = Number(id.split("-")[1]);
+    return {
+      status: "complete",
+      output: `out-${String(index)}`,
+      usage: usage({ inputTokens: 4, outputTokens: 4 }),
+    };
+  }
+
+  steer(): void {}
+  cancel(): void {}
+  installLeafSandbox(): LeafSandboxHandle {
+    return { dispose: (): void => undefined };
+  }
+}
+
+describe("nested siblings reusing an identical template — cell scope (#332)", () => {
+  const innerAgentSpec = {
+    meta: { name: "inner-agent" },
+    nodes: [{ id: "a", type: "agent", prompt: "do the thing" }],
+  };
+  const innerParallelSpec = {
+    meta: { name: "inner-parallel" },
+    nodes: [{ id: "p", type: "parallel", branches: ["x", "y"] }],
+  };
+  // `depends_on` makes the root's sequential loop reach `sub1` before
+  // `sub2` deterministic — same convention as the sibling checkpoint tests
+  // in `tests/workflow-checkpoint-aninhado.test.ts` (#319).
+  const siblings = (ref: string) => [
+    { id: "sub1", type: "workflow", ref },
+    { id: "sub2", type: "workflow", ref, depends_on: ["sub1"] },
+  ];
+
+  it("agent: each sibling spawns its OWN leaf and keeps its OWN output", async () => {
+    const runtime = new LabeledRuntime();
+    const result = await new WorkflowEngine({
+      runtime,
+      cache: new MemoryWorkflowCache(),
+      runId: "same",
+      loader: () => innerAgentSpec,
+    }).run(parsed({ meta: { name: "outer-agent-siblings" }, nodes: siblings("inner-agent") }));
+    expect(result.status).toBe("complete");
+    expect(runtime.requests).toHaveLength(2); // one leaf per sibling, not one shared cell
+    expect(result.outputs.sub1).toEqual({ a: "out-1" });
+    expect(result.outputs.sub2).toEqual({ a: "out-2" }); // not sub1's "out-1"
+    expect(result.tokensIn).toBe(8); // 2 real leaves x 4 tokens, not 4 (one leaf reused)
+  });
+
+  it("parallel: each sibling's group AND per-branch cells are scope-qualified", async () => {
+    const runtime = new LabeledRuntime();
+    const result = await new WorkflowEngine({
+      runtime,
+      cache: new MemoryWorkflowCache(),
+      runId: "same",
+      loader: () => innerParallelSpec,
+    }).run(
+      parsed({ meta: { name: "outer-parallel-siblings" }, nodes: siblings("inner-parallel") }),
+    );
+    expect(result.status).toBe("complete");
+    expect(runtime.requests).toHaveLength(4); // 2 branches x 2 siblings, not 2 (branches replayed)
+    expect(result.outputs.sub1).toEqual({ p: ["out-1", "out-2"] });
+    expect(result.outputs.sub2).toEqual({ p: ["out-3", "out-4"] });
+  });
+});
+
+describe("root cell identity is unchanged by the #332 scope fix — compat", () => {
+  it("an agent's root cell hash matches the pre-#332 formula exactly", async () => {
+    const cache = new MemoryWorkflowCache();
+    const name = "root-agent-compat";
+    // The same parts `runAgent` (engine.ts) always hashed at the root, before
+    // and after #332: `nodeScope` is `[]` there, so folding it into
+    // `specIdentity` contributes nothing — this is the hash a durable
+    // database already holds for every existing root-level agent cell.
+    const hash = contentHash(name, null, "a", "agent", "x", null, null, null);
+    cache.put("same", hash, "a", "cached-output", null);
+    const engine = new WorkflowEngine({ runtime: noRuntime(), cache, runId: "same" });
+    const result = await engine.run(
+      parsed({ meta: { name }, nodes: [{ id: "a", type: "agent", prompt: "x" }] }),
+    );
+    expect(result.outputs.a).toBe("cached-output"); // HIT — noRuntime() throws on spawn
   });
 });
