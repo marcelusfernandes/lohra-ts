@@ -73,3 +73,9 @@ abaixo.
   `WorkflowService.shutdown("signal")` leva a causa até `segment.completed`
   (`{status: "interrupted", reason: "signal"}`), enquanto `cancel(runId)`
   passa a gravar `reason: "cancelled"` explícito, nunca `"signal"`.
+- [2026-09-12 — Envelope de `delegate_task` cresce no fim; `dead_turn` é
+  kind próprio](2026-09-12-envelope-delegate-aditivo.md) — `ERROR_KINDS`
+  9 → 10 (`dead_turn`, produzido em `child-runner.ts`, nunca `unknown`);
+  `results[i]` de `delegate_task` ganha `error_kind, tokens_in, tokens_out,
+provider, model` no fim (precedente #232); remover/reordenar continua
+  #419.

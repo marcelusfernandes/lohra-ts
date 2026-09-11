@@ -4,7 +4,12 @@
  * `sandbox_denied` e não `sandbox_refused`: decisão do épico #396.
  * `timeout`/`cancelled` reservados para reuso pela folha; `context_length`
  * reservado para o classificador de janela; `unknown` nomeia um
- * `ProviderCallFailed` sem mapeamento — nunca silêncio (invariante 2). */
+ * `ProviderCallFailed` sem mapeamento — nunca silêncio (invariante 2).
+ * `dead_turn` (issue #429, M10-S8): 10º kind, acrescentado no fim
+ * (precedente #232) — nomeia um turno `status: complete` cujo `content`
+ * final veio vazio (após trim) e sem tool calls; produzido em
+ * `child-runner.ts`, nunca por `classifyProviderError`, e nunca `unknown`
+ * (reservado a `ProviderCallFailed`). */
 export const ERROR_KINDS = [
   "quota_exhausted",
   "auth_failed",
@@ -15,6 +20,7 @@ export const ERROR_KINDS = [
   "cancelled",
   "context_length",
   "unknown",
+  "dead_turn",
 ] as const;
 
 export type ErrorKind = (typeof ERROR_KINDS)[number];

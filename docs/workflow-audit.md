@@ -120,22 +120,24 @@ legítima — fixado por `tests/workflow-audit-tool.test.ts`, não um bug.
 ## Vocabulário de falhas (`error_kind`)
 
 Épico #396 (M8), issues #397-#399: `ErrorKind` (`src/transports/error-kinds.ts`)
-é o vocabulário fechado de nove valores que toda camada — folha, run,
+é o vocabulário fechado de dez valores que toda camada — folha, run,
 rollup e auditoria — usa para falar de uma falha de provedor, em vez de
 `string | null` livre. `classifyProviderError` (`src/transports/errors.ts:66-83`)
-é o único produtor:
+produz nove deles; o décimo (`dead_turn`, #429) tem produtor próprio,
+descrito abaixo:
 
-| `error_kind`      | gatilho                                                                                                                    |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `quota_exhausted` | `RateLimitError`, `statusCode`/`status` 429, ou `code` num conjunto conhecido de quota (`insufficient_quota` e afins)      |
-| `auth_failed`     | `statusCode` 401 ou 403                                                                                                    |
-| `model_not_found` | `statusCode` 404 **e** indício de modelo (`code`/`payload.error.code`/`.type`/mensagem citam "model", `errors.ts:58-64`)   |
-| `route_fault`     | `code` num conjunto de falha de rede (`ECONNREFUSED`, `ENOTFOUND`, `ETIMEDOUT`, `ECONNRESET`) ou `statusCode` 5xx          |
-| `unknown`         | qualquer outro `ProviderCallFailed` sem mapeamento fino — nunca `null` para um erro de provedor (invariante 2)             |
-| (nenhum — `null`) | erro que não é `ProviderCallFailed` — o resto da cadeia (`child-runner.ts`) já trata `null` como "não é falha de provedor" |
+| `error_kind`      | gatilho                                                                                                                                                             |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `quota_exhausted` | `RateLimitError`, `statusCode`/`status` 429, ou `code` num conjunto conhecido de quota (`insufficient_quota` e afins)                                               |
+| `auth_failed`     | `statusCode` 401 ou 403                                                                                                                                             |
+| `model_not_found` | `statusCode` 404 **e** indício de modelo (`code`/`payload.error.code`/`.type`/mensagem citam "model", `errors.ts:58-64`)                                            |
+| `route_fault`     | `code` num conjunto de falha de rede (`ECONNREFUSED`, `ENOTFOUND`, `ETIMEDOUT`, `ECONNRESET`) ou `statusCode` 5xx                                                   |
+| `unknown`         | qualquer outro `ProviderCallFailed` sem mapeamento fino — nunca `null` para um erro de provedor (invariante 2)                                                      |
+| `dead_turn`       | turno final com `content` vazio (após trim) e sem tool calls — produzido em `child-runner.ts`, não por `classifyProviderError`; `status` continua `complete` (#429) |
+| (nenhum — `null`) | erro que não é `ProviderCallFailed` — o resto da cadeia (`child-runner.ts`) já trata `null` como "não é falha de provedor"                                          |
 
 `sandbox_denied`, `timeout`, `cancelled` e `context_length` completam os
-nove — reservados para reuso futuro sem produtor em `classifyProviderError`
+nove de `classifyProviderError` — reservados para reuso futuro sem produtor
 hoje: `timeout`/`cancelled` para a folha, `context_length` para o
 classificador de janela, e `sandbox_denied` nomeado assim (não
 `sandbox_refused`) por decisão do épico #396. `sandbox_denied` também

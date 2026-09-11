@@ -228,7 +228,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Delegate one or more self-contained subtasks to fresh, isolated subagents and wait for their results. Each subagent starts with no knowledge of this conversation, so every task string must be fully self-contained. Each result carries a 'sub_id' \u2014 to continue that subagent later (it keeps its own history), call delegate_task again with 'resume_id' set to that sub_id and a single follow-up instruction in 'tasks'.",
+        "Delegate one or more self-contained subtasks to fresh, isolated subagents and wait for their results. Each subagent starts with no knowledge of this conversation, so every task string must be fully self-contained. Each result carries a 'sub_id' \u2014 to continue that subagent later (it keeps its own history), call delegate_task again with 'resume_id' set to that sub_id and a single follow-up instruction in 'tasks' \u2014 plus 'error_kind' (null on success; 'dead_turn' for a subagent that produced no final text and called no tool), 'tokens_in', 'tokens_out', 'provider' and 'model' for that task's turn, so you can decide the next step without calling collect_session.",
       parameters: {
         type: "object",
         properties: {

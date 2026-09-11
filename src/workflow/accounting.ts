@@ -121,12 +121,16 @@ export function recordSandboxRefusals(result: RunResult, nodeId: string, refusal
   result.sandboxFaults.push(`${nodeId}: sandbox refused ${String(refusals)} tool call(s)`);
 }
 
-/** Molde `recordSandboxRefusals`: a no-op on `null` keeps every complete
- * leaf's call (`errorKind` always `null` there) a cheap early return. Called
- * from `debitLeaf` (engine-utils.ts, #399) — the same function
- * `recordSandboxRefusals` above already reaches for every accounted leaf,
- * quota-excluded the same way `nonCompleteFirstCollectResult` excludes it
- * from `faults`, so `faultKinds` never outpaces the events it types. */
+/** Molde `recordSandboxRefusals`: a no-op on `null` keeps the common case (a
+ * complete leaf with nothing to name) a cheap early return — but a
+ * `complete` leaf is NOT guaranteed `errorKind === null`: a dead turn
+ * (`dead_turn`, #429, `child-runner.ts`) is `status: complete` with a
+ * non-null `errorKind`, and it lands in `faultKinds` here exactly like any
+ * other kind. Called from `debitLeaf` (engine-utils.ts, #399) — the same
+ * function `recordSandboxRefusals` above already reaches for every
+ * accounted leaf, quota-excluded the same way `nonCompleteFirstCollectResult`
+ * excludes it from `faults`, so `faultKinds` never outpaces the events it
+ * types. */
 export function recordFaultKind(result: RunResult, kind: ErrorKind | null): void {
   if (kind === null) return;
   result.faultKinds.push(kind);
