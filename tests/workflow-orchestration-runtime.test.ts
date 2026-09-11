@@ -28,7 +28,8 @@ afterEach(() => {
 /** Mirrors `ChildToolDispatch` from core.ts structurally, so these tests
  * never need to import the internal type. */
 type ChildToolDispatch = (name: string, args: Readonly<Record<string, unknown>>) => Promise<string>;
-type WrapDispatch = (base: ChildToolDispatch) => ChildToolDispatch;
+// Issue #367: `subId` is the SECOND argument now (core.ts's `SpawnConfig.wrapDispatch`).
+type WrapDispatch = (base: ChildToolDispatch, subId: string) => ChildToolDispatch;
 
 function ok(output: string): CollectResult {
   return {
@@ -111,7 +112,7 @@ describe("OrchestrationChildRuntime — leaf sandbox installation", () => {
     const wrapDispatch = captured[0];
     if (wrapDispatch === undefined) throw new Error("wrapDispatch missing");
     const base: ChildToolDispatch = (name) => Promise.resolve(`base:${name}`);
-    await expect(wrapDispatch(base)("read_file", {})).resolves.toBe("base:read_file");
+    await expect(wrapDispatch(base, id1)("read_file", {})).resolves.toBe("base:read_file");
     // fence 2 (B), not fence 1 (A), ran — dispose(fence 1) was a no-op
     expect(tagCalls).toEqual(["B:read_file"]);
 
@@ -126,7 +127,7 @@ describe("OrchestrationChildRuntime — leaf sandbox installation", () => {
       secondBaseCalls.push(name);
       return Promise.resolve(`base:${name}`);
     };
-    const out = await secondWrapDispatch(secondBase)("read_file", {});
+    const out = await secondWrapDispatch(secondBase, id2)("read_file", {});
     expect(out).toMatch(/^ERROR: /);
     expect(secondBaseCalls).toEqual([]);
   });
@@ -150,7 +151,13 @@ describe("OrchestrationChildRuntime — fail-closed without a live installation"
       baseCalls.push(name);
       return Promise.resolve(`should-not-happen:${name}`);
     };
-    const out = await captured(base)("write_file", { path: "/tmp/x" });
+    // AC #367: a caller that never passes subId at all (an older fake, or a
+    // core that predates this issue) never throws — `denyAllDispatch` never
+    // reads its second argument, so this is the SAME deny-all string with or
+    // without one. Cast, not a real 1-arg call: production always passes it
+    // (child-runner.ts:176); this proves the RUNTIME tolerates its absence.
+    const legacyCall = captured as unknown as (b: ChildToolDispatch) => ChildToolDispatch;
+    const out = await legacyCall(base)("write_file", { path: "/tmp/x" });
     expect(out).toMatch(/^ERROR: /);
     expect(baseCalls).toEqual([]);
   });
@@ -159,12 +166,12 @@ describe("OrchestrationChildRuntime — fail-closed without a live installation"
 describe("OrchestrationChildRuntime — steer keeps the original wrap", () => {
   it("a steer-driven resurrection dispatches through the SAME wrap installed at spawn time", async () => {
     const seen: string[] = [];
-    const runChild: ChildRunner = async (_subId, config) => {
+    const runChild: ChildRunner = async (subId, config) => {
       const base: ChildToolDispatch = (name) => {
         seen.push(name);
         return Promise.resolve(`allowed:${name}`);
       };
-      const dispatch = config.wrapDispatch === undefined ? base : config.wrapDispatch(base);
+      const dispatch = config.wrapDispatch === undefined ? base : config.wrapDispatch(base, subId);
       const out = await dispatch("read_file", {});
       seen.push(out);
       return ok(out);
@@ -244,7 +251,7 @@ describe("OrchestrationChildRuntime — end to end with a real WorkflowService",
         openSecondLeaf = resolveGate;
       });
 
-      const runChild: ChildRunner = async (_subId, config) => {
+      const runChild: ChildRunner = async (subId, config) => {
         spawns += 1;
         const index = spawns;
         if (index === 1) {
@@ -253,7 +260,8 @@ describe("OrchestrationChildRuntime — end to end with a real WorkflowService",
             leaf1BaseCalls.push(name);
             return Promise.resolve(`allowed:${name}`);
           };
-          const dispatch = config.wrapDispatch === undefined ? base : config.wrapDispatch(base);
+          const dispatch =
+            config.wrapDispatch === undefined ? base : config.wrapDispatch(base, subId);
           const workingRoot = workingRoot1;
           mkdirSync(workingRoot, { recursive: true });
           const step = async (
@@ -349,7 +357,7 @@ describe("OrchestrationChildRuntime — end to end with a real WorkflowService",
         retiredBaseCalls.push(name);
         return Promise.resolve(`should-not-happen:${name}`);
       };
-      const retiredOut = await firstWrapDispatch(retiredBase)("write_file", {
+      const retiredOut = await firstWrapDispatch(retiredBase, "retired-leaf")("write_file", {
         path: join(root, "runs", runId1, "work-1", "again.txt"),
       });
       expect(retiredOut).toBe("ERROR: workflow stretch is no longer current (sandbox denied)");
@@ -377,13 +385,13 @@ describe("OrchestrationChildRuntime — ephemeral launch: leaves deny-all until 
     // call came back denied with exactly this message.
     let capturedWrapDispatch: WrapDispatch | undefined;
     const baseCalls: string[] = [];
-    const runChild: ChildRunner = async (_subId, config) => {
+    const runChild: ChildRunner = async (subId, config) => {
       capturedWrapDispatch = config.wrapDispatch;
       const base: ChildToolDispatch = (name) => {
         baseCalls.push(name);
         return Promise.resolve(`allowed:${name}`);
       };
-      const dispatch = config.wrapDispatch === undefined ? base : config.wrapDispatch(base);
+      const dispatch = config.wrapDispatch === undefined ? base : config.wrapDispatch(base, subId);
       const out = await dispatch("read_file", { path: "/tmp/whatever" });
       return ok(out);
     };

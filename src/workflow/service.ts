@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createWorkflowAuditProducers } from "./audit-producers.js";
-import { auditedRuntimeFor } from "./audit-runtime.js";
+import { auditInstall, auditedRuntimeFor } from "./audit-runtime.js";
 import { Budget } from "./budget.js";
 import { MemoryWorkflowCache, type WorkflowCache } from "./cache.js";
 import { SqliteWorkflowCache } from "./sqlite-cache.js";
@@ -775,7 +775,7 @@ export class WorkflowService {
     // can spawn, and the run refuses to start if the runtime cannot take it.
     // The wrapper is pinned to this stretch: once a newer acquisition exists,
     // this one's wrapper denies everything rather than serving stale capability.
-    const install = this.runtime.installLeafSandbox?.bind(this.runtime);
+    const [rt, install] = auditInstall(this.runtime, this.auditTrail, stretchOwnership, this.warn);
     // A launch that dies between taking the lease and handing the run over
     // must give BOTH back (a lease nobody renews locks every resume out until
     // the TTL); an installer that THROWS is the same failure as one missing.
@@ -804,7 +804,7 @@ export class WorkflowService {
     }
     const engine = new WorkflowEngine({
       ...engineBaseOptions(this.runtime, runId, options.tiers, this.loader, answers),
-      runtime: auditedRuntimeFor(this.runtime, this.auditTrail, stretchOwnership, true, this.warn),
+      runtime: rt,
       segmentId,
       budget: new Budget({
         tokenBudget: effectiveBudget,

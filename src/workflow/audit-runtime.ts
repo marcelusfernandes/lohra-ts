@@ -4,14 +4,21 @@
 // spawn (`CausalContext`: segment_id, node_path, attempt) plus the `sub_id`
 // the spawn call itself returns.
 //
-// The fail-closed drop this applies — a durable stretch whose `ownershipOf()`
-// returns `null` never reaches the ledger, a named `warn` instead — is the
-// SAME rule `createWorkflowAuditProducers` (`audit-producers.ts`, #365)
-// applies to `workflow.*` events. That closure is private to its own factory
-// and `audit-producers.ts` is not a file this issue may touch (`service.ts`
-// is already at its own zero-growth ceiling there), so the two-line check is
-// repeated here rather than imported.
+// Issue #367 adds `tool.*`: `installLeafSandbox` hands `inner` a WRAPPED
+// installation whose `wrap` produces `tool.started`/`tool.completed` for
+// every tool call a leaf makes, keyed by the SAME `open` map below (get by
+// `leaf.subId`, same identity `leaf.*` already uses) — never a second
+// tracking structure.
+//
+// The fail-closed drop both appliers use — a durable stretch whose
+// `ownershipOf()` returns `null` never reaches the ledger, a named `warn`
+// instead — is the SAME rule `createWorkflowAuditProducers`
+// (`audit-producers.ts`, #365) applies to `workflow.*` events; `#367`'s
+// emenda (2026-09-11) put `audit-producers.ts` in this issue's `Files`
+// specifically to export it as `recordAuditEvent`, so it is imported here,
+// not repeated a second time.
 import type { AuditInput } from "./audit-model.js";
+import { recordAuditEvent, type AuditFailClosedDeps } from "./audit-producers.js";
 import type { AuditTrail } from "./audit-trail.js";
 import type {
   CausalContext,
@@ -19,21 +26,15 @@ import type {
   ChildResult,
   ChildRuntime,
   ChildSpawnRequest,
+  LeafIdentity,
   LeafSandboxHandle,
   LeafSandboxInstallation,
+  LeafToolDispatch,
 } from "./runtime.js";
 import type { Ownership } from "../state/workflow-repository.js";
+import { BUILTIN_DEFINITIONS } from "../tools/builtin-definitions.js";
 
-export interface AuditedChildRuntimeDeps {
-  readonly trail: AuditTrail | undefined;
-  /** `stretchOwnership` in the durable path; `() => null` outside it — read
-   * FRESH on every call, never captured once. */
-  readonly ownershipOf: () => Ownership | null;
-  /** `true` only for the durable path: the fail-closed drop below only
-   * applies where a fence exists to lose in the first place. */
-  readonly durable: boolean;
-  readonly warn: (message: string) => void;
-}
+export type AuditedChildRuntimeDeps = AuditFailClosedDeps;
 
 type OpenLeaf = Readonly<{ runId: string; causal: CausalContext }>;
 
@@ -41,6 +42,86 @@ function usagePayload(result: ChildResult): Readonly<Record<string, number>> | u
   const usage = result.usage;
   if (usage === undefined || usage === null) return undefined;
   return { tokens_in: usage.inputTokens, tokens_out: usage.outputTokens };
+}
+
+// Issue #367: any tool name outside the builtin catalog is a hallucinated
+// call — `tool_name_state` classifies it, never leaks it (`name` stays a
+// RAW_FIELD, audit-model.ts:52). Built once, not per call: the catalog is a
+// module-level constant.
+const KNOWN_TOOL_NAMES = new Set<string>(
+  BUILTIN_DEFINITIONS.map((definition) => definition.function.name),
+);
+
+/**
+ * Wraps ONE acquisition's real policy wrap (`policyWrap`, e.g. service.ts's
+ * `stretchToolDispatch`) so every tool call a leaf makes produces
+ * `tool.started` and, for a SYNC denial only, an immediate `tool.completed
+ * {reason: "sandbox_denied"}` — settlement for a call that actually reached
+ * the real dispatch comes later, from `onToolSettled` (installLeafSandbox
+ * below), never from here.
+ *
+ * Calls `policyWrap` exactly ONCE, same as `adaptSandboxWrap`
+ * (orchestration-runtime.ts) calls the wrap THIS function returns exactly
+ * once — `reached` is reset per call, not per installation, so it never
+ * confuses one tool call's denial with another's.
+ *
+ * `reached` — not a token/type check on the return value — is how a sync
+ * denial is told apart from a real dispatch in flight: `spiedBase` only
+ * flips it when the policy wrap actually calls all the way through to the
+ * real base dispatch, which is exactly the contract `adaptSandboxWrap`'s own
+ * docstring states ("a denial never called `base` at all"). This keeps this
+ * module ignorant of `adaptSandboxWrap`'s internal pending-token shim.
+ */
+function auditedToolDispatch(
+  base: LeafToolDispatch,
+  policyWrap: (base: LeafToolDispatch, leaf?: LeafIdentity) => LeafToolDispatch,
+  leaf: LeafIdentity,
+  open: ReadonlyMap<string, OpenLeaf>,
+  deps: AuditedChildRuntimeDeps,
+): LeafToolDispatch {
+  // `no-unnecessary-condition`'s flow analysis does not see `spiedBase`
+  // (created once, below) run through the opaque `dispatchAfterPolicy` on
+  // every call, so a plain field read narrows straight back to the literal
+  // it was just assigned a few lines up. Reading it back through a function
+  // call — not a property access — is what actually defeats that false
+  // narrowing (a call's return value is never assumed pinned to a prior
+  // assignment the way a bare property read is).
+  const state: { reached: boolean } = { reached: false };
+  const wasReached = (): boolean => state.reached;
+  const spiedBase: LeafToolDispatch = (name, args) => {
+    state.reached = true;
+    return base(name, args);
+  };
+  const dispatchAfterPolicy = policyWrap(spiedBase, leaf);
+  return (name, args) => {
+    state.reached = false;
+    const openLeaf = open.get(leaf.subId);
+    if (openLeaf === undefined) return dispatchAfterPolicy(name, args);
+    const cc = openLeaf.causal;
+    const identity = {
+      segment_id: cc.segmentId,
+      node_id: cc.nodePath.at(-1) ?? null,
+      sub_id: leaf.subId,
+      attempt: cc.attempt,
+    };
+    recordAuditEvent(deps, openLeaf.runId, {
+      event_type: "tool.started",
+      ...identity,
+      payload: {
+        tool_name_state: KNOWN_TOOL_NAMES.has(name) ? "known_tool" : "unknown_tool",
+        fields: Object.keys(args).length,
+      },
+    });
+    const out = dispatchAfterPolicy(name, args);
+    if (!wasReached()) {
+      recordAuditEvent(deps, openLeaf.runId, {
+        event_type: "tool.completed",
+        ...identity,
+        payload: { status: "error", reason: "sandbox_denied" },
+      });
+    }
+    return out;
+  };
 }
 
 /**
@@ -56,19 +137,10 @@ export function auditedChildRuntime(
   inner: ChildRuntime,
   deps: AuditedChildRuntimeDeps,
 ): ChildRuntime {
-  const { trail, ownershipOf, durable, warn } = deps;
   const open = new Map<string, OpenLeaf>();
 
   function record(runId: string, input: AuditInput): void {
-    if (trail === undefined) return;
-    const ownership = ownershipOf();
-    if (durable && ownership === null) {
-      warn(
-        `workflow: audit leaf event dropped for run ${runId} — ownership lost (${input.event_type})`,
-      );
-      return;
-    }
-    trail.record(runId, input, ownership ?? undefined);
+    recordAuditEvent(deps, runId, input);
   }
 
   function close(
@@ -162,23 +234,48 @@ export function auditedChildRuntime(
     },
     steer: (id: string, prompt: string, causalContext?: CausalContext) =>
       inner.steer(id, prompt, causalContext),
-    // `causalSnapshot`/`installLeafSandbox` only delegate — the audited wrap
-    // of leaf TOOL dispatch is the `tool.*` sub-issue (#367), not this one.
-    // `exactOptionalPropertyTypes` requires these be OMITTED, not assigned
-    // `undefined`, when `inner` does not have one.
+    // `causalSnapshot` only delegates. `exactOptionalPropertyTypes` requires
+    // these be OMITTED, not assigned `undefined`, when `inner` does not have
+    // one.
     ...(inner.causalSnapshot === undefined
       ? {}
       : {
           causalSnapshot: (id: string): ReturnType<NonNullable<ChildRuntime["causalSnapshot"]>> =>
             (inner.causalSnapshot as NonNullable<ChildRuntime["causalSnapshot"]>)(id),
         }),
+    // Issue #367: `installLeafSandbox` hands `inner` a WRAPPED installation —
+    // `wrap` produces `tool.*` around whatever the caller's OWN policy wrap
+    // (e.g. service.ts's `stretchToolDispatch`) decides, keyed by `open` (the
+    // SAME map `spawn`/`close` above populate, so `tool.*` and `leaf.*` share
+    // one identity source). A `leaf` the caller never supplies (a test
+    // predating this issue) skips the audit wrap entirely rather than guess
+    // an identity — `installation.wrap(base, leaf)` still runs unaudited.
     ...(inner.installLeafSandbox === undefined
       ? {}
       : {
           installLeafSandbox: (installation: LeafSandboxInstallation): LeafSandboxHandle =>
-            (inner.installLeafSandbox as NonNullable<ChildRuntime["installLeafSandbox"]>)(
-              installation,
-            ),
+            (inner.installLeafSandbox as NonNullable<ChildRuntime["installLeafSandbox"]>)({
+              ...installation,
+              wrap: (base, leaf) =>
+                leaf === undefined
+                  ? installation.wrap(base, leaf)
+                  : auditedToolDispatch(base, installation.wrap, leaf, open, deps),
+              onToolSettled: (leaf, ok) => {
+                const openLeaf = open.get(leaf.subId);
+                if (openLeaf !== undefined) {
+                  const cc = openLeaf.causal;
+                  record(openLeaf.runId, {
+                    event_type: "tool.completed",
+                    segment_id: cc.segmentId,
+                    node_id: cc.nodePath.at(-1) ?? null,
+                    sub_id: leaf.subId,
+                    attempt: cc.attempt,
+                    payload: { status: ok ? "success" : "error" },
+                  });
+                }
+                installation.onToolSettled?.(leaf, ok);
+              },
+            }),
         }),
   };
   return runtime;
@@ -196,4 +293,26 @@ export function auditedRuntimeFor(
   warn: (message: string) => void,
 ): ChildRuntime {
   return auditedChildRuntime(runtime, { trail, ownershipOf, durable, warn });
+}
+
+/**
+ * `service.ts`'s durable launch needs BOTH the audited runtime (handed to
+ * the engine as `spawn`/`collect`/`cancel`) AND its `installLeafSandbox`,
+ * bound to the SAME decorator instance — issue #367, emenda 2026-09-11.
+ * Two SEPARATE `auditedRuntimeFor(...)` calls would each mint their own
+ * `open` map (audit-runtime.ts's per-leaf identity table); installing
+ * through one and spawning through the other would leave `tool.*`'s lookup
+ * always empty, silently never firing. One call, one instance, both uses.
+ */
+export function auditInstall(
+  runtime: ChildRuntime,
+  trail: AuditTrail | undefined,
+  ownershipOf: () => Ownership | null,
+  warn: (message: string) => void,
+): readonly [
+  ChildRuntime,
+  ((installation: LeafSandboxInstallation) => LeafSandboxHandle) | undefined,
+] {
+  const rt = auditedRuntimeFor(runtime, trail, ownershipOf, true, warn);
+  return [rt, rt.installLeafSandbox?.bind(rt)];
 }

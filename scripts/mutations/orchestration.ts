@@ -55,8 +55,10 @@ export const orchestrationMutants: readonly Mutant[] = [
     edits: [
       {
         file: childRunner,
-        before:
-          "      const dispatch =\n        config.wrapDispatch === undefined ? childDispatch : config.wrapDispatch(childDispatch);",
+        before: `      const dispatch =
+        config.wrapDispatch === undefined
+          ? childDispatch
+          : config.wrapDispatch(childDispatch, subId);`,
         after: "      const dispatch = childDispatch;",
       },
     ],
