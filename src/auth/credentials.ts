@@ -1,7 +1,7 @@
 import { readCodexTokens } from "./codex.js";
 import { SubscriptionError } from "./errors.js";
 import { isExpired } from "./jwt.js";
-import { oauthRefreshTokens, type OAuthPost } from "./oauth.js";
+import { defaultOAuthPost, oauthRefreshTokens, type OAuthPost } from "./oauth.js";
 import { readConfig, readTokens, writeTokens } from "./store.js";
 import { OAuthTokens, SubscriptionCredentials, type AuthRoute } from "./types.js";
 
@@ -45,12 +45,15 @@ export async function resolveCredentials(
   let own = readTokens(home);
   if (own !== null) {
     if (now >= own.expiresAt - 300) {
-      if (options.oauthPost === undefined)
-        throw new SubscriptionError(
-          "could not refresh the login (no OAuth post configured) — run `lohra auth login` again",
-        );
+      // No caller wires a real `oauthPost` in production (issue #351) — the
+      // 4 CLI entry points (chat, dashboard, chat-boundary, client-pool) all
+      // omit it, so this branch used to throw unconditionally instead of
+      // ever refreshing. Defaulting here, once, covers all of them without
+      // touching each call site; only tests still override it, to mock the
+      // network instead of hitting auth.openai.com.
+      const oauthPost = options.oauthPost ?? defaultOAuthPost;
       try {
-        const fresh = await oauthRefreshTokens(own.refreshToken, options.oauthPost);
+        const fresh = await oauthRefreshTokens(own.refreshToken, oauthPost);
         own = new OAuthTokens(
           fresh.accessToken,
           fresh.refreshToken,
