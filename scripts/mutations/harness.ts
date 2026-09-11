@@ -206,6 +206,14 @@ function runVitestReporterJson(directory: string, args: readonly string[]): RunO
   }
 }
 
+/** STUB (issue #362): escapa metacaracteres de regex em `literal` antes de
+ * passá-lo como `-t` ao vitest — `focus.test` é o título literal do teste,
+ * não um padrão. Lança até ser implementado, para o vermelho ser de runtime,
+ * não de compilação. */
+export function escapeFocusTest(_literal: string): string {
+  throw new Error("not implemented: escapeFocusTest");
+}
+
 /** Roda `vitest run <focus.file> -t <focus.test>` dentro de `directory`. */
 export function runFocusedVitest(directory: string, focus: Focus): RunOutcome {
   return runVitestReporterJson(directory, [focus.file, "-t", focus.test]);
