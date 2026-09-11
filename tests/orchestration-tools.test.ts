@@ -315,11 +315,31 @@ describe("delegateTaskTool", () => {
       },
     );
     const envelope = await delegateTaskTool(core, { tasks: ["a", "b"] });
+    // #429 (M10-S8): 3 → 8 keys, the 5 new ones appended at the end
+    // (precedente #232) — the 3 original keys stay first, byte-exact.
     expect(envelope).toBe(
       toolResult(undefined, {
         results: [
-          { sub_id: "kid-1", status: "complete", summary: "a-OUT" },
-          { sub_id: "kid-2", status: "complete", summary: "b-OUT" },
+          {
+            sub_id: "kid-1",
+            status: "complete",
+            summary: "a-OUT",
+            error_kind: null,
+            tokens_in: 11,
+            tokens_out: 7,
+            provider: "fakeprov",
+            model: "fake-model-a",
+          },
+          {
+            sub_id: "kid-2",
+            status: "complete",
+            summary: "b-OUT",
+            error_kind: null,
+            tokens_in: 11,
+            tokens_out: 7,
+            provider: "fakeprov",
+            model: "fake-model-a",
+          },
         ],
       }),
     );
@@ -351,9 +371,25 @@ describe("delegateTaskTool", () => {
     // the resume path.
     expect(runChildCalls).toBe(2);
     expect(core.size).toBe(1);
+    // #429 (M10-S8): 3 → 8 keys, same order/appended shape as the batch path.
+    // tokens_in/out are 22/14 (11+11, 7+7), not the single-turn 11/7 —
+    // runAndTrack accumulates usage across a steer-driven resurrection
+    // (core.ts, pre-existing behavior, unrelated to this issue): the resume
+    // path's own turn is the SECOND runChild call for the same sub_id.
     expect(envelope).toBe(
       toolResult(undefined, {
-        results: [{ sub_id: "aaaa", status: "complete", summary: "OUTPUT-FOR-follow-up" }],
+        results: [
+          {
+            sub_id: "aaaa",
+            status: "complete",
+            summary: "OUTPUT-FOR-follow-up",
+            error_kind: null,
+            tokens_in: 22,
+            tokens_out: 14,
+            provider: "fakeprov",
+            model: "fake-model-a",
+          },
+        ],
       }),
     );
   });

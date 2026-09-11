@@ -201,13 +201,21 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
           effort,
           signal,
         });
+        const content = result.response.content ?? "";
+        // #429 (M10-S8): a turn that finishes with no final text AND no tool
+        // calls executed anywhere in it is DEAD — the engine already treats
+        // empty output as needing a respawn (isEmptyOutput, engine.ts); this
+        // only gives that case a name instead of leaving errorKind null.
+        // status/output are untouched (still "complete"/content) — the kind
+        // only names, per the issue's decision 3 (aditivo, precedente #232).
+        const isDeadTurn = content.trim() === "" && (result.toolCalls?.length ?? 0) === 0;
         return zeroResult(
           "complete",
-          result.response.content ?? "",
+          content,
           profile,
           model,
           result.usageTotal,
-          null,
+          isDeadTurn ? "dead_turn" : null,
           null,
         );
       } catch (error) {

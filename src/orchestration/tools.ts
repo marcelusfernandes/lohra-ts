@@ -178,6 +178,11 @@ export async function delegateTaskTool(
           sub_id: subId,
           status: result.status,
           summary: summarizeCollectResult(result),
+          error_kind: result.errorKind,
+          tokens_in: result.tokensIn,
+          tokens_out: result.tokensOut,
+          provider: result.provider,
+          model: result.model,
         },
       ],
     });
@@ -194,6 +199,11 @@ export async function delegateTaskTool(
       sub_id: outcome.subId,
       status: outcome.status,
       summary: outcome.summary,
+      error_kind: outcome.errorKind,
+      tokens_in: outcome.tokensIn,
+      tokens_out: outcome.tokensOut,
+      provider: outcome.provider,
+      model: outcome.model,
     })),
   });
 }
