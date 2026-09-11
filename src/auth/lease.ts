@@ -67,11 +67,15 @@ function unlinkIfExists(path: string): void {
  * já criou o arquivo, é a exclusão mútua) e a escrita do conteúdo terminar.
  * Um registro válido decide pelo próprio `expiresAt`. Um registro ilegível
  * é tratado como lease viva até `ttlSeconds` depois do `mtime` do arquivo
- * (o único relógio disponível quando o conteúdo não diz `expiresAt`) — o
- * mesmo `ttlSeconds` e o mesmo `now` que decidiriam uma lease legível,
- * nunca `Date.now()` direto, para não introduzir um segundo relógio nesta
- * função. Arquivo ausente (`ENOENT`, a lease já foi liberada e removida) é
- * a única leitura que continua "sem lease viva conhecida".
+ * (o único relógio disponível quando o conteúdo não diz `expiresAt`). O
+ * ramo do `mtime` pressupõe `now` de parede: `mtimeMs` vem do relógio do
+ * sistema de arquivos (`statSync`), não do `now` injetado pelo chamador —
+ * então só é comparável a um `now` de verdade (`Date.now() / 1000`). A
+ * costura de `now` injetado só é coerente para um registro LEGÍVEL, cujo
+ * `expiresAt` foi calculado pelo próprio chamador a partir desse mesmo
+ * `now` — não há como injetar o relógio do sistema de arquivos. Arquivo
+ * ausente (`ENOENT`, a lease já foi liberada e removida) é a única leitura
+ * que continua "sem lease viva conhecida".
  */
 function isLeaseAlive(path: string, ttlSeconds: number, now: number): boolean {
   const existing = readLeaseRecord(path);
@@ -140,9 +144,15 @@ export function releaseFileLease(path: string, holder: string): void {
 
 /**
  * Espera até a lease em `path` sumir (liberada por quem a detinha) ou até
- * o próprio TTL registrado nela vencer, sondando a cada `pollMs`
- * (5 ms por padrão). Bounded por `maxWaitMs`: desiste sem lançar se a
- * lease nunca aparecer livre — o dono pode ter morrido sem nunca chegar a
+ * o próprio TTL vencer — o `expiresAt` do registro se legível, ou
+ * `mtime + ttlSeconds` do arquivo se não (`isLeaseAlive`, issue #356: os
+ * dois leitores da lease — este e `acquireFileLease` — precisam concordar
+ * sobre o que é "viva"; antes desta issue, um lock ilegível persistente
+ * fazia este loop tratar `readLeaseRecord === null` como "sumiu" e voltar
+ * na primeira sondagem, enquanto `acquireFileLease` corretamente recusava
+ * tomá-lo — os dois discordavam). Sondagem a cada `pollMs` (5 ms por
+ * padrão), bounded por `maxWaitMs`: desiste sem lançar se a lease nunca
+ * aparecer livre — o dono pode ter morrido sem nunca chegar a
  * `releaseFileLease` E sem que ninguém ainda tenha tomado a lease de volta
  * (isso só acontece na próxima `acquireFileLease`). Quem chama sempre relê
  * o arquivo protegido depois de esperar, então uma desistência aqui não
@@ -152,6 +162,7 @@ export async function waitForFileLease(
   path: string,
   options: {
     readonly maxWaitMs: number;
+    readonly ttlSeconds: number;
     readonly pollMs?: number;
     readonly now?: () => number;
     readonly sleep?: (ms: number) => Promise<void>;
@@ -167,8 +178,7 @@ export async function waitForFileLease(
       }));
   const deadline = Date.now() + options.maxWaitMs;
   for (;;) {
-    const existing = readLeaseRecord(path);
-    if (existing === null || existing.expiresAt <= now()) return;
+    if (!isLeaseAlive(path, options.ttlSeconds, now())) return;
     if (Date.now() >= deadline) return;
     await sleep(pollMs);
   }

@@ -583,6 +583,7 @@ describe("ramos de parada sem teste (#356)", () => {
       });
       await waitForFileLease(lockPath, {
         maxWaitMs: 100,
+        ttlSeconds: 1_000_000,
         pollMs: 10,
         now: () => 0,
         sleep,
@@ -591,6 +592,43 @@ describe("ramos de parada sem teste (#356)", () => {
       // bater — nem uma a mais (a espera não é indefinida, invariante 3),
       // nem uma a menos (não desiste antes da hora).
       expect(sleep).toHaveBeenCalledTimes(10);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Veredito da rodada 1 da PR #361 (#356): `waitForFileLease` ainda lia
+  // `readLeaseRecord` direto e tratava `null` como "lease sumiu" -- os dois
+  // leitores da lease discordavam sobre o que é viva (`acquireFileLease` já
+  // usava `isLeaseAlive`, issue #356). Com um lock ilegível persistente, o
+  // perdedor voltava imediatamente na primeira sondagem em vez de esperar o
+  // TTL por `mtime` -- exatamente o fail-open que o fail-closed do
+  // `acquireFileLease` fecha do outro lado.
+  it("com lock ilegível persistente, o perdedor espera o TTL do mtime em vez de voltar imediatamente", async () => {
+    vi.useFakeTimers();
+    try {
+      const home = root();
+      const lockPath = join(home, "oauth.json.lock");
+      // Lock vazio/ilegível: mtime = "agora" no relógio falso (useFakeTimers
+      // preserva a hora real como ponto de partida).
+      writeFileSync(lockPath, "");
+      const sleep = vi.fn((ms: number) => {
+        vi.advanceTimersByTime(ms);
+        return Promise.resolve();
+      });
+      await waitForFileLease(lockPath, {
+        maxWaitMs: 5_000,
+        ttlSeconds: 1,
+        pollMs: 100,
+        sleep,
+      });
+      // TTL de 1s / poll de 100ms: não volta na primeira sondagem (o lock
+      // ainda está "vivo" pelo mtime) -- só depois de ~10, quando
+      // mtime + ttlSeconds passa do relógio avançado. Bem antes do
+      // `maxWaitMs` de 5s (50 sondagens) -- prova que foi o TTL do mtime
+      // que decidiu, não o deadline.
+      expect(sleep.mock.calls.length).toBeGreaterThan(5);
+      expect(sleep.mock.calls.length).toBeLessThan(15);
     } finally {
       vi.useRealTimers();
     }

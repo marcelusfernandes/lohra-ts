@@ -129,7 +129,10 @@ export async function refreshUnderLease(
         }
       }
     }
-    await waitForFileLease(lockPath, { maxWaitMs: REFRESH_LEASE_TTL_SECONDS * 1000 });
+    await waitForFileLease(lockPath, {
+      maxWaitMs: REFRESH_LEASE_TTL_SECONDS * 1000,
+      ttlSeconds: REFRESH_LEASE_TTL_SECONDS,
+    });
     const latest = readTokens(home);
     if (latest !== null && !isExpiringSoon(latest, now)) return latest;
   }
