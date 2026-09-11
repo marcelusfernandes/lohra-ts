@@ -56,3 +56,9 @@ abaixo.
 - [2026-09-10 — Skills nos harnesses: instalar no `init`, atualizar no
   `update`](2026-09-10-skills-harness.md) — relatório de exploração; decisão
   do owner pendente.
+- [2026-09-10 — Escopo na identidade da célula de cache — irmãos aninhados
+  idênticos](2026-09-10-cache-escopo-irmaos.md) — `nodeScope` dobrado em
+  `specIdentity` (não uma função por call site); sem dedupe entre irmãos
+  idênticos, mesma direção que #319 tomou para checkpoint; registra a
+  lacuna do `rename_hint` e a colisão de `sub[${reference}]:${nodeId}` como
+  fora de escopo.
