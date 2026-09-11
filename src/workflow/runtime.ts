@@ -33,12 +33,6 @@ export interface ChildResult {
   readonly usage?: Usage | null;
   readonly provider?: string | null;
   readonly model?: string | null;
-  /** True when the leaf's own provider/model resolution had to fall back to
-   * the provider's default model (client-pool.ts's `configureFor`, a
-   * provider override with no explicit model) — the only real producer is
-   * `child-runner.ts` (#403). Distinct from the engine's own forced-schema
-   * fallback (`usedFallback`, engine-utils.ts), which never sets this. */
-  readonly forcedFallback?: boolean;
   readonly retryAfter?: number | null;
   readonly errorKind?: ErrorKind | null;
   readonly toolCalls?: readonly Readonly<Record<string, unknown>>[];

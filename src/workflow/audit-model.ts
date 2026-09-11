@@ -83,13 +83,7 @@ const NUMBER_FIELDS = new Set([
   "max_iterations",
   "timeout_seconds",
 ]);
-const BOOLEAN_FIELDS = new Set([
-  "tainted",
-  "stale",
-  "terminal",
-  "usage_uncertain",
-  "forced_fallback",
-]);
+const BOOLEAN_FIELDS = new Set(["tainted", "stale", "terminal", "usage_uncertain"]);
 const PATH_FIELDS = new Set(["node_path", "branch_path"]);
 const CONTAINER_FIELDS = new Set(["payload", "metadata", "budget", "usage", "progress"]);
 const SAFE_MARKER_STATES = new Set([

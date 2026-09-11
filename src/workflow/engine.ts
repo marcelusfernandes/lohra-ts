@@ -329,7 +329,7 @@ export class WorkflowEngine {
           output = collected.output;
         }
       }
-      if (usedFallback || collected.forcedFallback === true) this.result.forcingFallbacks += 1;
+      if (usedFallback) this.result.forcingFallbacks += 1;
       this.account(node.id, id, { ...collected, usage: total });
       return { output, usage: total, complete: true };
     } finally {

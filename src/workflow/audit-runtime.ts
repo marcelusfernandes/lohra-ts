@@ -248,7 +248,6 @@ export function auditedChildRuntime(
             ? {}
             : { provider: result.provider }),
           usage_uncertain: result.usageUncertain === true,
-          forced_fallback: result.forcedFallback === true,
         });
       } else if (result.status === "failed" || result.status === "cancelled") {
         close(id, "leaf.failed", {
