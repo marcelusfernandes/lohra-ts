@@ -19,10 +19,10 @@ export function parseAuditQuery(args: ToolArguments): AuditQueryResult {
   if (typeof args.run_id !== "string" || args.run_id === "")
     return Object.freeze({ error: "workflow_audit requires 'run_id'" });
   const after = args.after_seq === undefined ? 0 : integer(args.after_seq);
-  const snapshot = args.snapshot_seq === undefined ? undefined : integer(args.snapshot_seq);
+  const snapshotRaw = args.snapshot_seq === undefined ? undefined : integer(args.snapshot_seq);
   const attemptRaw = args.attempt === undefined ? undefined : integer(args.attempt);
   const limit = args.limit === undefined ? 50 : integer(args.limit);
-  if (after === undefined || after < 0 || (snapshot !== undefined && snapshot < 0))
+  if (after === undefined || after < 0 || (snapshotRaw !== undefined && snapshotRaw < 0))
     return Object.freeze({ error: "audit cursors must be >= 0" });
   if (limit === undefined || limit < 1 || (attemptRaw !== undefined && attemptRaw < 0))
     return Object.freeze({ error: "audit limit must be >= 1 and attempt >= 0" });
@@ -36,6 +36,16 @@ export function parseAuditQuery(args: ToolArguments): AuditQueryResult {
   // Tratamos como ausência em vez de rejeitar: rejeitar quebraria esse
   // chamador para uma query que devia simplesmente ignorar o filtro.
   const attempt = attemptRaw === 0 ? undefined : attemptRaw;
+  // snapshot_seq é o high-water mark que a página um devolveu — nunca 0 para
+  // um run com eventos (o primeiro seq gravado é 1). Sem essa correção,
+  // `snapshot_seq: 0` do mesmo chamador estrito passava direto para
+  // `AuditRepository.query`, que trava o scan em `Math.max(0, snapshotSeq ??
+  // currentHigh)` (audit-repository.ts:344) — 0 explícito nunca cai no
+  // fallback `?? currentHigh`, então a leitura via um leitor estrito
+  // devolvia `events: []` mesmo sem nenhum filtro de conteúdo ativo (#390,
+  // dogfooding real). Um run de fato sem eventos ainda devolve `events: []`
+  // tratando 0 como ausente — não há regressão observável para esse caso.
+  const snapshot = snapshotRaw === 0 ? undefined : snapshotRaw;
   return Object.freeze({
     query: Object.freeze({
       runId: args.run_id,
