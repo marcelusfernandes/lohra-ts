@@ -162,17 +162,39 @@ describe("NoticesRepository", () => {
     }
   });
 
-  it("truncates a message over 2 KiB with a marker, on a UTF-8 boundary", () => {
+  it("truncates a message over 2 KiB with a marker, on a UTF-8 boundary (2-byte char)", () => {
     const path = tempDbPath();
     const connection = openStateDatabase(path);
     try {
       const notices = new NoticesRepository(connection.database);
-      const huge = "é".repeat(2000); // multi-byte char, forces a boundary decision
+      const huge = "é".repeat(2000); // 2-byte char, forces a 1-byte boundary decision
       const written = notices.append("global", { kind: "unknown", message: huge });
       expect(written).not.toBeNull();
       const message = (written as PublicNotice).message;
       expect(Buffer.byteLength(message, "utf8")).toBeLessThanOrEqual(2048);
       expect(message.endsWith("…[truncated]")).toBe(true);
+      // No U+FFFD (replacement char): the cut never split a multi-byte
+      // sequence, or `Buffer#toString("utf8")` would have introduced one.
+      expect(message).not.toContain("�");
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("truncates a message over 2 KiB with a marker, on a UTF-8 boundary (4-byte emoji)", () => {
+    const path = tempDbPath();
+    const connection = openStateDatabase(path);
+    try {
+      const notices = new NoticesRepository(connection.database);
+      // A 4-byte codepoint needs up to 3 continuation-byte backoffs — the
+      // 2-byte case above only ever needs at most 1.
+      const huge = "😀".repeat(1000);
+      const written = notices.append("global", { kind: "unknown", message: huge });
+      expect(written).not.toBeNull();
+      const message = (written as PublicNotice).message;
+      expect(Buffer.byteLength(message, "utf8")).toBeLessThanOrEqual(2048);
+      expect(message.endsWith("…[truncated]")).toBe(true);
+      expect(message).not.toContain("�");
     } finally {
       connection.close();
     }
@@ -211,22 +233,58 @@ describe("NoticesRepository", () => {
     }
   });
 
-  it("retention: acked notices fall first; an unacked notice never falls while an acked one can", () => {
+  // Issue #400, rodada 2 de review da PR #406: a versão anterior deste
+  // teste ackava #1 e #2 DEPOIS dos quatro `append`s — a poda dispara
+  // DENTRO do quarto `append` (`pruneScope`, chamado antes de qualquer
+  // `ack` do teste rodar), então no instante do corte as 4 linhas ainda
+  // estavam não-reconhecidas. `(acked_at IS NULL)` empatava para as
+  // quatro e `seq ASC` decidia sozinho — o teste passava com a cláusula
+  // de prioridade a reconhecidos REMOVIDA, e até com ela INVERTIDA
+  // (`DESC`), porque a eviction do seq mais antigo (#1) é exatamente o
+  // que "seq ASC" sozinho já produz. Os dois `ack()` incidiam sobre uma
+  // linha já podada (`#1`), devolviam `false`, e nada asseria isso.
+  //
+  // Para ser discriminante, o `ack` PRECISA acontecer ANTES do `append`
+  // que dispara a poda, com um reconhecido e um não-reconhecido MAIS
+  // ANTIGOS os dois presentes no corte — só assim "acked cai primeiro"
+  // discorda de "seq mais antigo cai primeiro" sobre QUAL linha cai.
+  it("retention: an acked notice falls before an older unacked one", () => {
     const path = tempDbPath();
     const connection = openStateDatabase(path);
     try {
       const notices = new NoticesRepository(connection.database, { maxPerScope: 3 });
-      // 4 notices: #1 and #2 acked, #3 and #4 unacked. Cap 3 → 1 must fall,
-      // and it must be an acked one (the oldest acked), never #3/#4.
       const first = notices.append("global", { kind: "unknown", message: "1" });
-      const secondNotice = notices.append("global", { kind: "unknown", message: "2" });
+      const second = notices.append("global", { kind: "unknown", message: "2" });
       notices.append("global", { kind: "unknown", message: "3" });
+      // Ack #2 while the scope still fits under the cap (3 rows) — the
+      // eviction below has to choose between #1 (older, unacked) and #2
+      // (newer, acked). "acked falls first" says #2; "oldest falls first"
+      // (what `seq ASC` alone would pick) says #1 — the two disagree here.
+      expect(notices.ack((second as PublicNotice).id, "op")).toBe(true);
+      // The 4th append is what pushes the scope over the cap (3) and
+      // triggers `pruneScope` — WITH #2 already acked at that instant.
       notices.append("global", { kind: "unknown", message: "4" });
-      notices.ack((first as PublicNotice).id, "op");
-      notices.ack((secondNotice as PublicNotice).id, "op");
 
       const page = notices.list({ scope: "global", includeAcked: true });
-      expect(page.notices).toHaveLength(3);
+      expect(page.notices.map((n) => n.message)).toEqual(["1", "3", "4"]);
+      expect(page.dropped_before_seq).toBe((second as PublicNotice).seq);
+      expect(page.dropped_before_seq).toBe((first as PublicNotice).seq + 1);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("retention: with nothing acked, the oldest notice falls", () => {
+    const path = tempDbPath();
+    const connection = openStateDatabase(path);
+    try {
+      const notices = new NoticesRepository(connection.database, { maxPerScope: 3 });
+      notices.append("global", { kind: "unknown", message: "1" });
+      notices.append("global", { kind: "unknown", message: "2" });
+      notices.append("global", { kind: "unknown", message: "3" });
+      notices.append("global", { kind: "unknown", message: "4" });
+
+      const page = notices.list({ scope: "global", includeAcked: true });
       expect(page.notices.map((n) => n.message)).toEqual(["2", "3", "4"]);
       expect(page.dropped_before_seq).toBe(1);
     } finally {
