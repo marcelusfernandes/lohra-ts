@@ -1,12 +1,18 @@
 # Auditoria por nó: o ledger de eventos do workflow
 
 Comportamento de `src/workflow/audit-model.ts`, `audit-producers.ts`,
-`audit-runtime.ts`, `audit-cache.ts`, `audit-trail.ts`, `live-tail.ts` e
-`src/state/audit-repository.ts` — épico #364, seis issues mergeadas
-(#365 identidade causal, #366 `leaf.*`, #367 `tool.*`, #368 `cache.*`/
-`segment.*`/`node.paused`/`audit.gap {process_crash}`, #369 live tail +
-`watch --events` + `workflow_status.live_tail`, #380 sink de aviso em
-produção).
+`audit-runtime.ts`, `audit-cache.ts`, `audit-trail.ts`, `audit-query.ts`,
+`live-tail.ts` e `src/state/audit-repository.ts` — épico #364, doze issues
+mergeadas: #365 identidade causal, #366 `leaf.*`, #367 `tool.*`, #368
+`cache.*`/`segment.*`/`node.paused`/`audit.gap {process_crash}`, #369 live
+tail + `watch --events` + `workflow_status.live_tail`, #370 fatia de
+mutação estendida aos produtores e ao live tail, #373 `workflow_audit`
+drena o `AuditTrail` no mesmo turno ou reporta `integrity.pending`, #378
+`tool.completed {reason:"cancelled"}` ao fechar um leaf com dispatch ainda
+em voo, #380 sink de aviso em produção, #383 lacunas de mutação do
+veredito da PR #382, #386 allow-list sem entradas sem produtor (remoção de
+`node.started`/`node.completed`/`node.failed`/`node.output`), #390 filtros
+vazios (`""`/`0`) tratados como ausência.
 
 ## O que é e por que
 
@@ -50,19 +56,21 @@ mantém o padrão (2048).
 
 ## Identidade causal
 
-Toda gravação carrega `publicAuditIdentity` (`audit-model.ts:389-408`):
+Toda gravação carrega `publicAuditIdentity` (`audit-model.ts:395-414`):
 
-| campo        | o que é                                                                                             |
-| ------------ | --------------------------------------------------------------------------------------------------- |
-| `run_id`     | sempre presente; acima de 128 caracteres vira `<95 chars>~<sha256[:32]>`                            |
-| `segment_id` | a aquisição (stretch) que produziu o evento                                                         |
-| `node_path`  | **um único elemento** — o nó imediato do evento, clipado a 64 chars; não é a cadeia causal completa |
-| `sub_id`     | a sessão do leaf spawnado, quando o evento é sobre um leaf/tool call                                |
-| `attempt`    | o número da tentativa do segmento                                                                   |
+| campo        | o que é                                                                                                                                                                                                         |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run_id`     | sempre presente; acima de 128 caracteres vira `<95 chars>~<sha256[:32]>`                                                                                                                                        |
+| `segment_id` | a aquisição (stretch) que produziu o evento                                                                                                                                                                     |
+| `node_path`  | **um único elemento** — o nó imediato do evento, clipado a 64 chars; não é a cadeia causal completa                                                                                                             |
+| `sub_id`     | a sessão do leaf spawnado, quando o evento é sobre um leaf/tool call                                                                                                                                            |
+| `attempt`    | 0-based nos eventos `leaf.*`/`tool.*` — **não** é o `attempt` 1-based do payload de `segment.started`; detalhe e custo de tratar `attempt: 0` como filtro ausente em "Consulta e o envelope `integrity`" abaixo |
 
-A cadeia causal inteira (até 8 ancestrais, cada um clipado a 64 chars)
-aparece só dentro do `data.node_path` de `leaf.started` — não em
-`identity` (`audit-runtime.ts:178`, `audit-model.ts:293-294`).
+A cadeia causal inteira (até 8 ancestrais, cada um clipado a 64 chars —
+`PATH_FIELDS`/`node_path` em `safeValue`, `audit-model.ts:299-300`) aparece
+só dentro do `data.node_path` de `leaf.started` (`payload.node_path:
+cc.nodePath`, `audit-runtime.ts:224`) — não em `identity`, que guarda só o
+último elemento (`audit-model.ts:404-406`).
 
 ## Tabela de eventos
 
@@ -74,32 +82,39 @@ allow-list em #386 — o ciclo de vida de um nó continua observável só por
 `workflow.node` (abaixo), que já existia antes deste épico, e por
 `node.paused`, o único membro da família `node.*` que #368 decidiu manter.
 
-| `event_type`        | produtor                                                                                | quando                                                                                                                                                                     |
-| ------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `segment.started`   | `announceSegmentStarted` (`audit-producers.ts:230`)                                     | primeiro evento de uma aquisição, antes de `workflow.plan`                                                                                                                 |
-| `workflow.plan`     | `announcePlan` (`audit-producers.ts:205`)                                               | logo após `segment.started`; `data.node_path` lista todos os nós do spec                                                                                                   |
-| `workflow.node`     | `forwardEvent` (`audit-producers.ts:168`)                                               | a cada evento `node` do engine (running/complete/failed/…)                                                                                                                 |
-| `workflow.items`    | `forwardEvent`                                                                          | progresso item-a-item de um `pipeline`                                                                                                                                     |
-| `workflow.fault`    | `forwardEvent`                                                                          | um fault do engine                                                                                                                                                         |
-| `node.paused`       | `announceNodePaused` (`audit-producers.ts:255`)                                         | run pausado; `payload.reason` ∈ `checkpoint`, `quota_exhausted`, `token_budget_exhausted`, `user_requested` — nunca duplica nem substitui `workflow.node`/`workflow.fault` |
-| `segment.completed` | `announceSegmentCompleted`, ou `announceProcessCrash` para a segmento anterior          | fim normal (`status` = `complete`/`paused`/`cancelled`/`failed`) ou, sob retomada de dono morto, o segmento antigo fechado como `interrupted`/`process_crash`              |
-| `workflow.done`     | `announceDone` (`audit-producers.ts:225`)                                               | último evento do segmento                                                                                                                                                  |
-| `audit.gap`         | vários (ver "Fail-closed" abaixo)                                                       | toda perda nomeada                                                                                                                                                         |
-| `audit.truncated`   | `publicAuditEvent` (`audit-model.ts:353-387`)                                           | evento serializado > 2048 bytes (`AUDIT_EVENT_BYTES`)                                                                                                                      |
-| `audit.unavailable` | leitura (`parseEvent`/`query`, `audit-repository.ts`)                                   | `event_type` fora da allow-list, payload corrompido no disco, ou run tombado/nunca gravado                                                                                 |
-| `leaf.started`      | `auditedChildRuntime.spawn` (`audit-runtime.ts:166`)                                    | um `ChildRuntime.spawn` bem-sucedido                                                                                                                                       |
-| `leaf.completed`    | `close()` em `collect()` (`audit-runtime.ts:146,196`)                                   | `collect` volta `status: "complete"`                                                                                                                                       |
-| `leaf.failed`       | `close()`                                                                               | `collect` falha/cancela/estoura timeout, ou `cancel()` — sempre exatamente um evento terminal por `sub_id`                                                                 |
-| `tool.started`      | `auditedToolDispatch` (`audit-runtime.ts:107`)                                          | toda chamada de tool feita por um leaf                                                                                                                                     |
-| `tool.completed`    | `auditedToolDispatch` (recusa síncrona) ou `onToolSettled` (`audit-runtime.ts:117,263`) | `{status:"error", reason:"sandbox_denied"}` para uma recusa síncrona do sandbox; `{status:"success"}`/`{status:"error"}` sem `reason`, do assentamento real                |
-| `cache.replayed`    | `auditedWorkflowCache.get` (`audit-cache.ts:51`)                                        | hit de cache                                                                                                                                                               |
-| `cache.missed`      | `auditedWorkflowCache.get`                                                              | miss de cache                                                                                                                                                              |
-| `cache.stored`      | `auditedWorkflowCache.put` (`audit-cache.ts:61`)                                        | escrita de cache bem-sucedida                                                                                                                                              |
-| `cache.unavailable` | `auditedWorkflowCache.put`                                                              | escrita de cache recusada (`payload.reason: "store_failed"`)                                                                                                               |
+| `event_type`        | produtor                                                                                                                                                                                                   | quando                                                                                                                                                                                                                                                                                                                              |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `segment.started`   | `announceSegmentStarted` (`audit-producers.ts:230`)                                                                                                                                                        | primeiro evento de uma aquisição, antes de `workflow.plan`                                                                                                                                                                                                                                                                          |
+| `workflow.plan`     | `announcePlan` (`audit-producers.ts:205`)                                                                                                                                                                  | logo após `segment.started`; `data.node_path` lista todos os nós do spec                                                                                                                                                                                                                                                            |
+| `workflow.node`     | `forwardEvent` (`audit-producers.ts:168`)                                                                                                                                                                  | a cada evento `node` do engine (running/complete/failed/…)                                                                                                                                                                                                                                                                          |
+| `workflow.items`    | `forwardEvent`                                                                                                                                                                                             | progresso item-a-item de um `pipeline`                                                                                                                                                                                                                                                                                              |
+| `workflow.fault`    | `forwardEvent`                                                                                                                                                                                             | um fault do engine                                                                                                                                                                                                                                                                                                                  |
+| `node.paused`       | `announceNodePaused` (`audit-producers.ts:255`)                                                                                                                                                            | run pausado; `payload.reason` ∈ `checkpoint`, `quota_exhausted`, `token_budget_exhausted`, `user_requested` — nunca duplica nem substitui `workflow.node`/`workflow.fault`                                                                                                                                                          |
+| `segment.completed` | `announceSegmentCompleted`, ou `announceProcessCrash` para a segmento anterior                                                                                                                             | fim normal (`status` = `complete`/`paused`/`cancelled`/`failed`) ou, sob retomada de dono morto, o segmento antigo fechado como `interrupted`/`process_crash`                                                                                                                                                                       |
+| `workflow.done`     | `announceDone` (`audit-producers.ts:225`)                                                                                                                                                                  | último evento do segmento                                                                                                                                                                                                                                                                                                           |
+| `audit.gap`         | vários (ver "Fail-closed" abaixo)                                                                                                                                                                          | toda perda nomeada                                                                                                                                                                                                                                                                                                                  |
+| `audit.truncated`   | `publicAuditEvent` (`audit-model.ts:359-393`)                                                                                                                                                              | evento serializado > 2048 bytes (`AUDIT_EVENT_BYTES`)                                                                                                                                                                                                                                                                               |
+| `audit.unavailable` | leitura (`parseEvent`/`query`, `audit-repository.ts`)                                                                                                                                                      | `event_type` fora da allow-list, payload corrompido no disco, ou run tombado/nunca gravado                                                                                                                                                                                                                                          |
+| `leaf.started`      | `auditedChildRuntime.spawn` (`audit-runtime.ts:217`)                                                                                                                                                       | um `ChildRuntime.spawn` bem-sucedido                                                                                                                                                                                                                                                                                                |
+| `leaf.completed`    | `close()`, chamado de `collect()` (`audit-runtime.ts:182-209,234-273`)                                                                                                                                     | `collect` volta `status: "complete"`                                                                                                                                                                                                                                                                                                |
+| `leaf.failed`       | `close()`, chamado de `collect()`/`cancel()` (`audit-runtime.ts:234-280`)                                                                                                                                  | `collect` falha/cancela/estoura timeout, ou `cancel()` — sempre exatamente um evento terminal por `sub_id`                                                                                                                                                                                                                          |
+| `tool.started`      | `auditedToolDispatch` (`audit-runtime.ts:131`)                                                                                                                                                             | toda chamada de tool feita por um leaf                                                                                                                                                                                                                                                                                              |
+| `tool.completed`    | `auditedToolDispatch` (recusa síncrona, `audit-runtime.ts:146`) · `close()` (dispatch ainda aberto ao fechar o leaf, `audit-runtime.ts:193`) · `onToolSettled` (assentamento real, `audit-runtime.ts:314`) | `{status:"error", reason:"sandbox_denied"}` — recusa síncrona do sandbox; `{status:"error", reason:"cancelled"}` — o leaf fechou (cancel, shutdown ou timeout) com esse dispatch ainda em voo, emitido por `close()` **antes** do evento terminal do leaf; `{status:"success"}`/`{status:"error"}` sem `reason` — assentamento real |
+| `cache.replayed`    | `auditedWorkflowCache.get` (`audit-cache.ts:51`)                                                                                                                                                           | hit de cache                                                                                                                                                                                                                                                                                                                        |
+| `cache.missed`      | `auditedWorkflowCache.get`                                                                                                                                                                                 | miss de cache                                                                                                                                                                                                                                                                                                                       |
+| `cache.stored`      | `auditedWorkflowCache.put` (`audit-cache.ts:61`)                                                                                                                                                           | escrita de cache bem-sucedida                                                                                                                                                                                                                                                                                                       |
+| `cache.unavailable` | `auditedWorkflowCache.put`                                                                                                                                                                                 | escrita de cache recusada (`payload.reason: "store_failed"`)                                                                                                                                                                                                                                                                        |
 
 `tool.started`/`tool.completed` e `leaf.*` compartilham a mesma identidade
 (mesmo mapa `open` em `audit-runtime.ts`) — filtrar por `sub_id` devolve um
 leaf junto com toda tool que ele chamou.
+
+`payload.tool_name_state` de `tool.started` é `known_tool` só para nomes no
+catálogo builtin (`KNOWN_TOOL_NAMES`, construído uma vez de
+`BUILTIN_DEFINITIONS`, `audit-runtime.ts:74-76`); toda tool MCP
+(`mcp_{server}_{tool}`, registrada por run num `ToolRegistry` fora do
+alcance deste decorador) reporta `unknown_tool` mesmo sendo uma chamada
+legítima — fixado por `tests/workflow-audit-tool.test.ts`, não um bug.
 
 ## Ciclo de um segmento
 
@@ -207,6 +222,48 @@ Um run sem `workflow_audit_state` e sem tombstone devolve
 `availability:"unavailable"` com um único `notice` `audit.unavailable
 {reason:"not_recorded"}`.
 
+### `integrity.pending`
+
+`pending` não é campo de `AuditPage.integrity` (`audit-repository.ts`) — é
+acrescentado por cima, só quando `workflow_audit` é servido por
+`WorkflowTool.auditWithFlush` (`tool.ts:135-139`), o mapeamento que
+`workflowToolHandlers` usa depois que uma sessão tem uma `WorkflowService`
+viva (`composeSessionTools`, `session-tools.ts:106`). Nunca aparece numa
+leitura crua: `AuditRepository.query` direto (`lohra workflow audit`,
+`commands/workflow.ts:145`) ou `WorkflowTool.audit()`/`workflowAuditHandler`
+(`tool.ts:40-42,124-127`) — usado como placeholder do registro antes de
+`composeSessionTools` rodar (`createSessionToolBase`,
+`session-tools.ts:55-58`) e como o handler de `workflow_audit` da
+composição separada de `chat-tools.ts:20-23`, sem `auditWithFlush`.
+
+`auditWithFlush` espera até `AUDIT_READ_FLUSH_TIMEOUT_MS` (250 ms,
+`tool.ts:21`) o dreno do `AuditTrail` do processo
+(`WorkflowService.auditPendingAfterFlush`, que chama `AuditTrail.flush`,
+`service.ts:1240-1243`) antes de consultar, para que uma leitura no mesmo
+turno de um `run_workflow` não veja `events: []` por eventos ainda na fila.
+Se o dreno não terminar no prazo, o envelope traz `integrity.pending: <n>`
+— só quando `n > 0` (`auditResult`, `tool.ts:29-37`).
+
+`<n>` é `AuditTrail.pendingCount()` (`audit-trail.ts:124-126`): a fila mais,
+se houver, a escrita em voo — do `AuditTrail` **inteiro do processo**, não
+filtrado por `run_id`. A descrição da própria tool
+(`builtin-definitions.ts:573`, `"some of this run's own events"`) fala em
+eventos deste run; o código não distingue — um processo atendendo vários
+runs com a mesma `WorkflowService` reporta o `pending` de todos juntos, não
+importa qual `run_id` a consulta pediu. Uma leitura de outro processo nunca
+seta `pending` — não há fila deste processo para drenar ali.
+
+Janela conhecida: um `AuditTrail` já `stopped` (falha permanente do sink,
+"Fail-closed" acima) com a fila já vazia faz `flush()` devolver `false` sem
+nada para drenar (`audit-trail.ts:128-137`) — `auditPendingAfterFlush` lê
+`pendingCount()` como `0`, e o envelope sai **sem** `pending`, mesmo que o
+sink não grave mais nada dali em diante. `record()`, no writer parado,
+recusa com um `warn` nomeado antes de sequer enfileirar
+(`audit-trail.ts:60-63`, já citado em "Fail-closed" acima) — mas essa
+recusa nunca passa por `AuditRepository.append`, então não incrementa
+`refused_writes`: não há marcador de página para essa perda específica, só
+o `warn` no momento em que aconteceu.
+
 ## Live tail (por processo — não é o ledger)
 
 `WorkflowLiveTail` (`src/workflow/live-tail.ts`) é um anel em memória, um
@@ -222,7 +279,7 @@ armazenado, nunca ocupa um cursor). **`leaf.*`, `tool.*`, `cache.*` e
 `workflow_status`, quando lido no mesmo processo que lançou ou retomou o
 run (`WorkflowLiveTail.isKnown`, verdadeiro só se este `tail` já observou
 um evento ao vivo desse run — nunca por saber o run só de forma durável),
-devolve `live_tail: {events, next_cursor, dropped}` (`tool.ts:96`).
+devolve `live_tail: {events, next_cursor, dropped}` (`tool.ts:104`).
 `next_cursor` é monotônico pela vida inteira do run **neste processo** —
 nunca regride, nem numa pausa seguida de auto-retomada no mesmo processo;
 `dropped` conta quanto caiu do anel ao cruzar o teto — nunca silencioso. Um
@@ -262,27 +319,38 @@ tombstones (`maxTombstones`), 30 dias / 2 592 000 s (`retentionSeconds`).
 
 ## O que NÃO é garantido
 
-- Uma tool call que assenta **depois** do evento terminal do seu leaf (o
-  `close()` já removeu a entrada de `open`) não produz `tool.completed`
-  nenhum — `auditedToolDispatch`/`onToolSettled` procuram por `sub_id` num
-  mapa que já não o tem (`audit-runtime.ts:99,264-265`). Território de
-  #378 (testes de `tool.*`, e possivelmente `tool.completed
-{reason:"cancelled"}` no `close()` de `cancel()`).
+- Uma tool call cujo assentamento real (`onToolSettled`) chega **depois**
+  do evento terminal do seu leaf não grava o desfecho real
+  (`success`/`error`): `close()` já removeu a entrada de `open` e já
+  fechou o par como `tool.completed {status:"error", reason:"cancelled"}`
+  antes do terminal do leaf (`audit-runtime.ts:182-209`, #378);
+  `onToolSettled`, ao rodar depois, encontra `open.get(leaf.subId)`
+  `undefined` e não grava nada — nem decrementa nada
+  (`audit-runtime.ts:309-326`). O par nunca fica órfão (sempre há um
+  `tool.completed` para todo `tool.started`), mas o resultado real de uma
+  tool que só assenta depois do cancelamento do seu leaf não chega ao
+  ledger.
 - `workflow_audit` só lê linhas já commitadas; `AuditTrail.record` apenas
-  enfileira (`audit-trail.ts:59-118`) — uma consulta no mesmo turno em que
-  um evento acabou de ser produzido pode não vê-lo ainda, sem drenagem
-  síncrona. Território de #373 (drenagem in-turn).
+  enfileira (`audit-trail.ts:59-118`). A tool que o agente chama espera até
+  `AUDIT_READ_FLUSH_TIMEOUT_MS` (250 ms) o dreno antes de ler e nomeia o
+  que sobrou em `integrity.pending` (#373; ver "`integrity.pending`"
+  acima) — mas o prazo é curto de propósito (invariante 3, nunca espera
+  sem teto) e uma leitura ainda pode voltar sem alguns eventos recém
+  produzidos, só que agora nomeados em vez de silenciosos. Um `AuditTrail`
+  já `stopped` com a fila vazia não seta `pending` nenhum, mesmo perdendo
+  eventos dali em diante.
 - `refused_writes` é por instância de `AuditRepository`, em memória — não
   sobrevive a um reinício do processo, e um run evictado do LRU volta a
   zero na consulta seguinte.
-- A tabela de mutantes desta fatia pode crescer — #383 é o rastro.
 
 ## Mutação
 
-A fatia `workflow-audit-live` (`npm run mutations:t17`, 50 mutantes:
+A fatia `workflow-audit-live` (`npm run mutations:t17`, 57 mutantes:
 `workflow-audit-live-mutants.ts` com 32 + `workflow-audit-producers-mutants.ts`
-com 18, issue #370) cobre a identidade causal, a regra fail-closed, o
+com 25, issues #370 e #383) cobre a identidade causal, a regra fail-closed, o
 `flush` antes da liberação do lease, o ciclo de segmento/crash, o terminal
-único por `sub_id`, a classificação de uma recusa de sandbox, hit/miss de
-cache relatados errado, e os tetos/cursor do live tail. Catálogo completo,
-contagem e o que ficou deliberadamente fora em `docs/mutation-testing.md`.
+único por `sub_id` — inclusive o `tool.completed {reason:"cancelled"}` do
+`close()` —, a classificação de uma recusa de sandbox, hit/miss de cache
+relatados errado, e os tetos/cursor do live tail. Catálogo completo,
+contagem (226 no total, entre as oito fatias) e o que ficou deliberadamente
+fora em `docs/mutation-testing.md`.
