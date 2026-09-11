@@ -44,5 +44,6 @@ export function resultView(
     null_rate: result.nullRate,
     usage_uncertain_leaves: result.usageUncertainLeaves,
     sandbox_refusals: result.sandboxRefusals,
+    fault_kinds: [...result.faultKinds],
   });
 }
