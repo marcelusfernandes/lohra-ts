@@ -416,10 +416,15 @@ export const auditProducersMutants: readonly Mutant[] = [
       },
     ],
   },
-  // Issue #383, item 5 (emenda do orquestrador, veredito da PR #384/#380):
-  // `chat.ts`'s own `AuditTrail` — a sink_failure on its very first audit
-  // write, if the `{ warning: auditWarning }` wiring were ever dropped,
-  // would silently vanish instead of reaching `console.warn`.
+  // Issue #383, item 5 (emenda do orquestrador, veredito da PR #384/#380);
+  // re-ancorado na issue #401 (M8-5): `chat.ts`'s own `AuditTrail` — a
+  // sink_failure on its very first audit write, if the
+  // `{ warning: sessionToolBase.noticesSink.warn }` wiring were ever
+  // dropped, would silently vanish instead of reaching `console.warn`.
+  // #401 unified the old ad hoc `auditWarning` closure into the ONE
+  // notices sink `createSessionToolBase` builds — `noticesSink.warn`
+  // still calls `console.warn` as its fallback (never a second line on
+  // stderr), so this mutant's kill signal is unchanged.
   {
     id: "W2-audit-trail-warning-unwired",
     category: "audit-trail-warning-unwired",
@@ -432,7 +437,9 @@ export const auditProducersMutants: readonly Mutant[] = [
       {
         file: chatCommand,
         before:
-          "auditTrail: new AuditTrail(sessionToolBase.auditRepository, { warning: auditWarning }),",
+          "auditTrail: new AuditTrail(sessionToolBase.auditRepository, {\n" +
+          "      warning: sessionToolBase.noticesSink.warn,\n" +
+          "    }),",
         after: "auditTrail: new AuditTrail(sessionToolBase.auditRepository),",
       },
     ],

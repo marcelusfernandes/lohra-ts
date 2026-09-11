@@ -7,8 +7,8 @@ import { CronStore } from "../cron/store.js";
 import { CronTool } from "../cron/tool.js";
 import { createMediaBindings, type ImageGenerationPort } from "../media/index.js";
 import { MemoryStore } from "../memory/index.js";
-import type { SessionRepository } from "../state/index.js";
-import { AuditRepository } from "../state/index.js";
+import type { Ownership, SessionRepository } from "../state/index.js";
+import { AuditRepository, NoticesRepository } from "../state/index.js";
 import { SkillStore } from "../skills/index.js";
 import {
   createBuiltinRegistry,
@@ -22,10 +22,18 @@ import {
 } from "../tools/index.js";
 import type { WorkflowService } from "../workflow/index.js";
 import { workflowAuditHandler, workflowToolHandlers } from "../workflow/index.js";
+// Issue #401: not re-exported by `../workflow/index.js` — same convention
+// `chat.ts` already follows for `WorkflowLiveTail` (`live-tail.ts`).
+import { createNoticesSink, type NoticesSink } from "../workflow/notices-sink.js";
 
 export interface SessionToolBase {
   readonly registry: ToolRegistry;
   readonly auditRepository: AuditRepository;
+  /** The ONE notices sink this process builds (issue #401) — every other
+   * composition-root wiring (`WorkflowService.onWarning`, `AuditTrail`,
+   * `WorkflowLiveTail`, the ownership store's `StateWarning` sink) reuses
+   * THIS instance, never a second one. */
+  readonly noticesSink: NoticesSink;
 }
 
 export interface SessionToolComposition {
@@ -38,25 +46,46 @@ export interface SessionToolComposition {
 export function createSessionToolBase(
   database: Database.Database,
   environment: Readonly<Record<string, string | undefined>>,
-  // Issue #380: production roots (chat.ts, dashboard.ts) pass the same
-  // sink WorkflowService itself falls back to (console.warn) so a fence
-  // refusal on the audit trail is exactly as observable as one on the
-  // ownership store — the prior default here was `() => undefined`, and
-  // "recusa nunca silenciosa" (#368) only held for tests with a sink
-  // injected. Defaults to console.warn too, so a caller that forgets to
-  // pass `warning` still gets a real sink, not the old silent one.
-  options: { readonly warning?: (message: string) => void } = {},
+  options: {
+    // Issue #401: resolves the CURRENT ownership for a `StateWarning`'s
+    // run — the caller (chat.ts, dashboard.ts) is the one that ends up
+    // holding the ownership store, built AFTER this factory returns, so
+    // this is a lazy forward-reference, not a value.
+    readonly ownership?: (runId: string) => Ownership | null;
+  } = {},
 ): SessionToolBase {
-  const warning =
-    options.warning ??
-    ((message: string): void => {
+  // Issue #400/#401: its OWN `warning` stays the default no-op — wiring it
+  // to `noticesSink.warn` would recurse (a refused notice would warn,
+  // which would append, which would refuse, …); wiring it to
+  // `console.warn` directly would add a stderr line this sink's own
+  // `warn()` already prints once, doubling it and breaking the
+  // byte-fixed assertion (`src/gateway/failure-log.ts:4-10`). `dropped`
+  // in `stats()` is the observability for an append this repository
+  // itself refuses.
+  const noticesRepository = new NoticesRepository(database);
+  const noticesSink = createNoticesSink({
+    repository: noticesRepository,
+    ...(options.ownership === undefined ? {} : { ownership: options.ownership }),
+    fallback: (message: string): void => {
       console.warn(message);
-    });
-  const auditRepository = new AuditRepository(database, { environment, warning });
+    },
+  });
+  // Issue #380: production roots (chat.ts, dashboard.ts) pass the same
+  // sink WorkflowService itself falls back to, so a fence refusal on the
+  // audit trail is exactly as observable as one on the ownership store —
+  // the prior default here was `() => undefined`, and "recusa nunca
+  // silenciosa" (#368) only held for tests with a sink injected. Issue
+  // #401 unifies that sink into `noticesSink.warn`: still calls
+  // `console.warn` (via `noticesSink`'s own fallback) exactly once per
+  // warning, now ALSO recorded durably.
+  const auditRepository = new AuditRepository(database, {
+    environment,
+    warning: noticesSink.warn,
+  });
   const registry = createBuiltinRegistry({
     workflow_audit: workflowAuditHandler(auditRepository),
   });
-  return Object.freeze({ registry, auditRepository });
+  return Object.freeze({ registry, auditRepository, noticesSink });
 }
 
 export function composeSessionTools(options: {
