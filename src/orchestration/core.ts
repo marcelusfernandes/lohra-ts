@@ -2,8 +2,21 @@ import { ConcurrencyGate } from "./concurrency-gate.js";
 import { logOrchestrationFailure } from "./failure-log.js";
 import { wrapSteerInbox } from "./steer-inbox.js";
 import type { ErrorKind } from "../transports/error-kinds.js";
+// Type-only: erased at emit, so this never creates a RUNTIME import cycle
+// even though `workflow/orchestration-runtime.ts` imports the other way
+// (`../orchestration/core.js`). `core.ts` only needs the shape to store it
+// on a `SubSessionEntry` for S2's `leaf.steered` audit event (issue #423)
+// — it never reads a field off it itself.
+import type { CausalContext } from "../workflow/runtime.js";
 
 export type SubSessionStatus = "running" | "complete" | "error" | "interrupted";
+
+/** Per-leaf ceiling on accepted `steer()` calls (issue #422, invariant 3:
+ * budget/fan-out never unbounded) — a lifetime cap on the SUB_SESSION, not
+ * per turn: it never resets across a steer-driven resurrection. Named so a
+ * mutant that inlines a different number is visible in a diff/review, not
+ * just in test output. */
+export const MAX_STEERS_PER_LEAF = 10;
 
 export interface CollectResult {
   readonly status: SubSessionStatus;
@@ -162,6 +175,17 @@ interface SubSessionEntry {
    * drained by the runner's own iteration loop while this child is busy or
    * queued-in-pool (contract L6). */
   readonly inbox: string[];
+  /** Total ACCEPTED `steer()` calls this leaf has ever received (queued or
+   * resurrecting) — never reset across a resurrection, so `MAX_STEERS_
+   * PER_LEAF` bounds the whole leaf's lifetime, not just one turn. A
+   * refused call (already at the cap) does not increment this. */
+  steerCount: number;
+  /** The causal identity attached to the MOST RECENT accepted steer() call,
+   * if any — stored for S2's `leaf.steered` audit event (issue #423); never
+   * consulted by steer()/collect() themselves. A refused call never
+   * overwrites this, so it always reflects the last steer that actually
+   * took effect. */
+  causal?: CausalContext;
 }
 
 /**
@@ -208,6 +232,7 @@ export class OrchestrationCore {
       promise,
       abortController,
       inbox: [],
+      steerCount: 0,
     });
     this.insertionOrder.push(subId);
     return { subId };
@@ -253,10 +278,29 @@ export class OrchestrationCore {
    * as busy; a resurrected child mid-second-turn is ALSO inFlight even
    * though its `result` is still the stale first-turn value (L7) — steering
    * it again must queue, not start a redundant third turn.
+   *
+   * `causal` (issue #422) is optional and carried straight from the caller
+   * (`OrchestrationChildRuntime.steer`, `ChildRuntime.steer`'s 3rd
+   * argument) — stored on the entry for S2's audit event, never consulted
+   * here. Above `MAX_STEERS_PER_LEAF` accepted calls, this refuses instead
+   * of queuing or resurrecting: never throws (a fault here would abort
+   * whatever caller triggered it — the schema-retry loop, an operator tool,
+   * or `delegate_task`'s resume path — none of which should crash over a
+   * fan-out limit) and never silently drops the text either — the caller
+   * gets `refused: "steer_cap"` back to act on.
    */
-  public steer(subId: string, text: string): { readonly queued: boolean } | null {
+  public steer(
+    subId: string,
+    text: string,
+    causal?: CausalContext,
+  ): { readonly queued: boolean; readonly refused?: "steer_cap" } | null {
     const entry = this.entries.get(subId);
     if (entry === undefined) return null;
+    if (entry.steerCount >= MAX_STEERS_PER_LEAF) {
+      return { queued: false, refused: "steer_cap" };
+    }
+    entry.steerCount += 1;
+    if (causal !== undefined) entry.causal = causal;
     if (entry.inFlight) {
       entry.inbox.push(text);
       return { queued: true };
