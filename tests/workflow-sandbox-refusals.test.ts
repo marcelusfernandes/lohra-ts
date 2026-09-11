@@ -32,7 +32,6 @@ import { openStateDatabase, WorkflowRepository, LockRepository } from "../src/st
 import { SqliteWorkflowCache } from "../src/workflow/sqlite-cache.js";
 import { OrchestrationChildRuntime } from "../src/workflow/orchestration-runtime.js";
 import { WorkflowService } from "../src/workflow/service.js";
-import { resultView } from "../src/workflow/service-rollup.js";
 import {
   WorkflowEngine,
   validateSpec,
@@ -163,10 +162,36 @@ describe("sandbox refusal — nested workflow folds into the parent (#246 round 
     // Prefixed with `sub[<ref>]:`, the same convention `faults` already uses
     // for a nested fault (engine.ts:871).
     expect(result.sandboxFaults).toEqual(["sub[child]: leaf: sandbox refused 2 tool call(s)"]);
+  });
 
-    // The rollup a real caller reads (resultView, service-rollup.ts) — not
-    // just the raw RunResult — carries the folded total and fault text too.
-    const view = resultView("outer-refusal-run", "outer-refusal", result, engine.budget);
+  it("the same refusal reaches the rollup a real caller reads (WorkflowService.status)", async () => {
+    // Exercises the PUBLIC rollup path (WorkflowService, not a direct
+    // service-rollup.ts import) — an ephemeral (no store) launch is enough,
+    // since resultView's shape is what this pins, not durability.
+    const runtime = new FakeRuntime([
+      [
+        {
+          status: "complete",
+          output: "inner",
+          usage: { ...usage, reasoningTokens: 0 },
+          sandboxRefusals: 2,
+        },
+      ],
+    ]);
+    const service = new WorkflowService({
+      runtime,
+      loader: () => ({
+        meta: { name: "child" },
+        nodes: [{ id: "leaf", type: "agent", prompt: "x" }],
+      }),
+    });
+    const started = service.start({
+      meta: { name: "outer-refusal" },
+      nodes: [{ id: "sub", type: "workflow", ref: "child" }],
+    });
+    if ("error" in started) throw new Error(started.error);
+    const view = (await service.status(started.run_id, true)) as Record<string, unknown>;
+    expect(view.status).toBe("complete");
     expect(view.sandbox_refusals).toBe(2);
     expect(view.faults as unknown[]).toContain("sub[child]: leaf: sandbox refused 2 tool call(s)");
   });

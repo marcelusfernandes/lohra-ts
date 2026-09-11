@@ -485,7 +485,9 @@ export function debitLeaf(
     collected.model ?? null,
     uncertain,
   );
-  recordSandboxRefusals(result, owner, collected.sandboxRefusals ?? 0);
+  // Plain `nodeId` (never `owner`) — reads like a `faults` entry, never
+  // double-scoped by both this and the outer nested fold.
+  recordSandboxRefusals(result, nodeId, collected.sandboxRefusals ?? 0);
   return next;
 }
 
