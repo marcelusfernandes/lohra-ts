@@ -35,7 +35,6 @@ import type { LockRepository } from "../state/locks.js";
 import type { AuditTrail } from "./audit-trail.js";
 import { auditEnabled } from "./audit-model.js";
 import { WorkflowLiveEvents, type WorkflowLiveEvent } from "./live-events.js";
-
 export const RUN_LEASE_TTL = 900;
 /** The operator capability policy, read from the operator home per launch. */
 export const OPERATOR_POLICY_FILE = "workflow_policy.json";
@@ -972,7 +971,7 @@ export class WorkflowService {
     producers.announceStretchStart(attempt, parsed, engine.budget.snapshot());
     void engine
       .run(parsed, args)
-      .then((result) => {
+      .then(async (result) => {
         record.result = result;
         const faults = [...priorFaults, ...result.faults];
         const degraded =
@@ -1022,6 +1021,7 @@ export class WorkflowService {
         }
         if (owned && terminal !== null)
           producers.announceStretchEnd(result.status, result.pauseReason, result.checkpoint);
+        await producers.flushBeforeRelease();
         finishStretch();
         record.settled = true;
         if (owned) {
@@ -1039,9 +1039,10 @@ export class WorkflowService {
           record.resolve(record.published);
         }
       })
-      .catch((error: unknown) => {
+      .catch(async (error: unknown) => {
         const terminal = stretchOwnership();
         if (terminal !== null) producers.announceStretchEnd("failed", null, null);
+        await producers.flushBeforeRelease();
         finishStretch();
         record.settled = true;
         record.published = Object.freeze({

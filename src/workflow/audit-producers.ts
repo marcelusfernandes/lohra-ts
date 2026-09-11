@@ -94,6 +94,17 @@ export interface WorkflowAuditProducers {
    * cell recomputed or replayed anywhere the engine reads/writes this cache
    * (including a nested workflow's inherited `this.cache`) is auditable. */
   readonly wrapCache: (inner: WorkflowCache) => WorkflowCache;
+  /** `service.ts`'s `finishStretch`, called BEFORE it releases this
+   * stretch's lease — issue #368 emenda (2026-09-11): `AuditTrail.record`
+   * only enqueues; the terminal events `announceStretchEnd` just queued
+   * (segment.completed, node.paused, workflow.done) would otherwise still
+   * be sitting there when the lease disappears, and `AuditRepository.append`
+   * refuses them under a fence that is no longer current — silently, before
+   * this fix. Draining HERE, still under the live fence, closes that race.
+   * A flush that fails or times out is named via `warn`, never swallowed —
+   * the caller still releases the lease either way (a stuck sink must not
+   * pin it forever, invariant 3). */
+  readonly flushBeforeRelease: () => Promise<void>;
 }
 
 /** The subset of `WorkflowAuditProducersDeps` the fail-closed rule below
@@ -274,6 +285,12 @@ export function createWorkflowAuditProducers(
     return auditedWorkflowCache(inner, { trail, ownershipOf, durable, warn, segmentId });
   }
 
+  async function flushBeforeRelease(): Promise<void> {
+    if (trail === undefined) return;
+    const ok = await trail.flush();
+    if (!ok) warn(`workflow: audit flush before lease release failed for run ${runId}`);
+  }
+
   return {
     forwardEvent,
     announcePlan,
@@ -285,5 +302,6 @@ export function createWorkflowAuditProducers(
     announceStretchStart,
     announceStretchEnd,
     wrapCache,
+    flushBeforeRelease,
   };
 }
