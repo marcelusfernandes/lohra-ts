@@ -194,7 +194,9 @@ como `stopped` — toda gravação seguinte, do run inteiro compartilhando esse
   sintetizado (abaixo), capados em 20 (`notices_returned`); `notices_total`
   e `notices_truncated` dizem se sobrou algo fora da página. Filtros
   (`node_id`, `event_type`, `sub_id`, `segment_id`, `attempt`) afetam só
-  `events`, nunca `notices`.
+  `events`, nunca `notices`. `""` (nos quatro campos de string, após trim)
+  e `attempt: 0` significam filtro AUSENTE, não um valor a bater — a mesma
+  query que omitir o campo (`parseAuditQuery`, `audit-query.ts`, #390).
 
 Um run sem `workflow_audit_state` e sem tombstone devolve
 `availability:"unavailable"` com um único `notice` `audit.unavailable
