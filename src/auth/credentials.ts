@@ -51,8 +51,14 @@ async function performRefresh(
   try {
     writeTokens(home, updated);
   } catch (error) {
+    // "retry the command" (pre-#356 message) was false on the `chat` path:
+    // the process exits right after this throw (#357 made it terminal),
+    // so the rotated refresh token in `updated` is gone with it, not "not
+    // lost until the process exits". The only thing that survives is what
+    // made it to disk — the caller's actual recovery is `auth login`, not
+    // a retry of the same command.
     throw new TokenPersistError(
-      `the login refresh itself succeeded, but saving it to disk failed (${error instanceof Error ? error.message : String(error)}) — retry the command; the refresh token in memory is not lost until the process exits, but nothing else will see it until the save works`,
+      `the login refresh succeeded but saving it to ${tokenPath(home)} failed (${error instanceof Error ? error.message : String(error)}) — check permissions/disk space and run \`lohra auth login\` again if the previous refresh token was already rotated`,
     );
   }
   return updated;

@@ -403,6 +403,18 @@ describe("oauth and credentials", () => {
     expect(error.message).not.toContain("old-access");
     expect(error.message).not.toContain("new-access");
     expect(error.message).not.toContain("new-refresh");
+    // Veredito da PR #359 (#357) e da rodada 1 da PR #361 (#356): a
+    // mensagem antiga terminava em "retry the command; the refresh token
+    // in memory is not lost until the process exits" -- falso no caminho
+    // do `chat`, onde o processo sai logo depois deste throw (#357 tornou
+    // o erro terminal) e o refresh_token rotacionado em memória se perde
+    // com ele. A recuperação de verdade é `auth login`, não repetir o
+    // comando.
+    expect(error.message).toContain(tokenPath(home));
+    expect(error.message).toContain("check permissions/disk space");
+    expect(error.message).toContain("run `lohra auth login` again");
+    expect(error.message).not.toContain("retry the command");
+    expect(error.message).not.toContain("not lost until the process exits");
   });
 
   // Cobre a mitigação de #351 (`credentials.ts`, catch de `performRefresh`):
