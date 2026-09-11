@@ -1,7 +1,7 @@
 // Issue #370: teste de FORMA do catálogo novo
 // `scripts/mutations/workflow-audit-producers-mutants.ts` — no molde de
 // `tests/mutations-fixtures-workflow-executor.test.ts`, mas mais amplo:
-// aqui não há uma fixture única para pinar, e sim 16 mutantes espalhados por
+// aqui não há uma fixture única para pinar, e sim 18 mutantes espalhados por
 // quatro módulos novos do M7 (`audit-producers.ts`, `audit-runtime.ts`,
 // `audit-cache.ts`, `live-tail.ts`). Duas propriedades, cada uma independente
 // de rodar o harness de mutação de verdade (`npm run mutations:t17`, minutos

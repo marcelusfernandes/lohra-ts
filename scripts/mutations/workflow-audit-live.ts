@@ -8,7 +8,7 @@
 // dependência do diretório histórico de paridade que o runner antigo tinha.
 //
 // Issue #370: `mutants` concatena os 32 originais
-// (`workflow-audit-live-mutants.ts`) com os 16 novos dos produtores do M7
+// (`workflow-audit-live-mutants.ts`) com os 18 novos dos produtores do M7
 // (`workflow-audit-producers-mutants.ts`) — um único catálogo combinado para
 // o runner, dois arquivos de dado puro separados para `slices.json#catalog`
 // (cada um descoberto por conteúdo em `tests/mutations-slices.test.ts`).

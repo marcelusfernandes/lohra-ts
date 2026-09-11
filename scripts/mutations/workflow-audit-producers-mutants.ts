@@ -1,4 +1,4 @@
-// Catálogo de mutantes dos produtores novos do M7 (issue #370): identidade
+// Catálogo de 18 mutantes dos produtores novos do M7 (issue #370): identidade
 // causal (`audit-producers.ts`, #365), segmento/pausa/process_crash
 // (`audit-producers.ts`, #368), folha e ferramenta (`audit-runtime.ts`,
 // #366/#367), cache (`audit-cache.ts`, #368) e o ring do live tail
@@ -105,6 +105,22 @@ export const auditProducersMutants: readonly Mutant[] = [
           '    recordAuditEvent(failClosed, runId, {\n      event_type: "segment.completed",\n      ...(priorSegmentId === null ? {} : { segment_id: priorSegmentId }),\n      payload: { status: "interrupted", reason: "process_crash" },\n    });\n    recordAuditEvent(failClosed, runId, {\n      event_type: "audit.gap",\n      payload: { reason: "process_crash", count_state: "unavailable" },\n    });',
         after:
           '    recordAuditEvent(failClosed, runId, {\n      event_type: "audit.gap",\n      payload: { reason: "process_crash", count_state: "unavailable" },\n    });\n    recordAuditEvent(failClosed, runId, {\n      event_type: "segment.completed",\n      ...(priorSegmentId === null ? {} : { segment_id: priorSegmentId }),\n      payload: { status: "interrupted", reason: "process_crash" },\n    });',
+      },
+    ],
+  },
+  {
+    id: "P6-flush-before-release-skipped",
+    category: "flush-before-release-skipped",
+    mechanism: "family-a",
+    focus: {
+      file: identityFocus,
+      test: "a durable run's terminal write (workflow.done, segment.completed) actually reaches the ledger",
+    },
+    edits: [
+      {
+        file: auditProducers,
+        before: "    const ok = await trail.flush();",
+        after: "    const ok = true;",
       },
     ],
   },
@@ -286,6 +302,22 @@ export const auditProducersMutants: readonly Mutant[] = [
         file: liveTail,
         before: "      if (!this.rings.has(id)) {",
         after: "      if (true) {",
+      },
+    ],
+  },
+  {
+    id: "R5-forget-regresses-cursor",
+    category: "forget-regresses-cursor",
+    mechanism: "family-a",
+    focus: {
+      file: liveTailFocus,
+      test: "forget(runId) clears a ring directly, but leaves next/dropped intact",
+    },
+    edits: [
+      {
+        file: liveTail,
+        before: "    this.rings.delete(runId);",
+        after: "    this.rings.delete(runId);\n    this.runs.delete(runId);",
       },
     ],
   },
