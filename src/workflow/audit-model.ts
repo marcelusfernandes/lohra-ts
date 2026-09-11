@@ -82,6 +82,9 @@ const NUMBER_FIELDS = new Set([
   "stage_index",
   "max_iterations",
   "timeout_seconds",
+  // Issue #423: `leaf.steered`'s ONLY metadata about the steer text itself
+  // — never the text, just its length.
+  "message_chars",
 ]);
 const BOOLEAN_FIELDS = new Set(["tainted", "stale", "terminal", "usage_uncertain"]);
 const PATH_FIELDS = new Set(["node_path", "branch_path"]);
@@ -107,6 +110,10 @@ const SAFE_EVENT_TYPES = new Set([
   "leaf.completed",
   "leaf.failed",
   "leaf.started",
+  // Issue #423 (M10-S2): the decorator's `steer` emits this for EVERY
+  // steer that reaches an identified leaf — `source` (below) tells an
+  // engine-driven schema retry apart from an operator's own steer.
+  "leaf.steered",
   // node state/failure live in `workflow.node`/`workflow.fault`; pause is
   // the only per-node event this engine emits (decision #368).
   "node.paused",
@@ -210,7 +217,10 @@ const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object
   count_state: new Set(["unavailable"]),
   private_state: new Set(["excluded_private_state", "not_observed"]),
   run_attribution: new Set(["unavailable"]),
-  source: new Set(["gateway", "harness", "human_checkpoint"]),
+  // Issue #423: "engine"/"operator" are `leaf.steered`'s own `source` —
+  // never confused with the other three, which are `human_checkpoint`'s and
+  // the gateway/harness handshake's (#365/#368, unrelated event families).
+  source: new Set(["engine", "gateway", "harness", "human_checkpoint", "operator"]),
   tool_name_state: new Set(["known_tool", "unknown_tool"]),
   unit: new Set(["bytes", "characters", "items", "top_level_items"]),
   original_event_type: SAFE_EVENT_TYPES,
