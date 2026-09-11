@@ -43,7 +43,7 @@ describe("T17 metadata-only audit", () => {
   it("installs workflow_audit in the same session registry used by public chat", async () => {
     const { connection, audit } = database();
     try {
-      audit.append("public-audit", { event_type: "node.started", created_at: 1 });
+      audit.append("public-audit", { event_type: "leaf.started", created_at: 1 });
       const registry = createChatSessionRegistry(connection.database, {});
       const output = JSON.parse(
         await registry.dispatch("workflow_audit", { run_id: "public-audit" }),
@@ -52,7 +52,7 @@ describe("T17 metadata-only audit", () => {
         readonly events: readonly { readonly event_type: string }[];
       };
       expect(output.ok, "MUTATION_CAUSE:M12-public-audit-wiring").toBe(true);
-      expect(output.events.map((event) => event.event_type)).toEqual(["node.started"]);
+      expect(output.events.map((event) => event.event_type)).toEqual(["leaf.started"]);
     } finally {
       connection.close();
     }
@@ -63,7 +63,7 @@ describe("T17 metadata-only audit", () => {
     roots.push(root);
     const state = openStateDatabase(join(root, ".lohra", "state.db"));
     new AuditRepository(state.database).append("public-audit", {
-      event_type: "node.started",
+      event_type: "leaf.started",
       created_at: 1,
     });
     state.close();
@@ -156,7 +156,7 @@ describe("T17 metadata-only audit", () => {
         readonly events: readonly { readonly event_type: string }[];
       };
       expect(toolResult.ok, "MUTATION_CAUSE:M22-run-chat-public-audit-wiring").toBe(true);
-      expect(toolResult.events.map((event) => event.event_type)).toEqual(["node.started"]);
+      expect(toolResult.events.map((event) => event.event_type)).toEqual(["leaf.started"]);
     } finally {
       await closeServer(server);
     }
@@ -164,7 +164,7 @@ describe("T17 metadata-only audit", () => {
 
   it("serializes fractional audit timestamps through the public workflow tool", () => {
     const { connection, audit } = database();
-    audit.append("fractional", { event_type: "node.started", created_at: 1.25 });
+    audit.append("fractional", { event_type: "leaf.started", created_at: 1.25 });
     const runtime = {
       spawn: () => "unused",
       collect: () => ({ status: "complete", output: null, usage: null }),
@@ -275,7 +275,7 @@ describe("T17 metadata-only audit", () => {
     const { connection, audit } = database();
     try {
       audit.append("binary", {
-        event_type: "node.completed",
+        event_type: "leaf.completed",
         payload: { result: new Uint8Array(1_000) },
         created_at: 1,
       });
@@ -311,8 +311,8 @@ describe("T17 metadata-only audit", () => {
   it("persists attempt and paginates only matching audit events", () => {
     const { connection, audit } = database();
     try {
-      audit.append("attempts", { event_type: "node.started", attempt: 1 });
-      audit.append("attempts", { event_type: "node.started", attempt: 2 });
+      audit.append("attempts", { event_type: "leaf.started", attempt: 1 });
+      audit.append("attempts", { event_type: "leaf.started", attempt: 2 });
       audit.append("attempts", { event_type: "done", attempt: 1 });
       const page = audit.query({ runId: "attempts", attempt: 1, limit: 2 });
       expect(page.events.map((event) => [event.seq, event.identity.attempt])).toEqual([
@@ -330,7 +330,7 @@ describe("T17 metadata-only audit", () => {
       "r",
       1,
       {
-        event_type: "node.output",
+        event_type: "leaf.completed",
         payload: {
           provider: "😀".repeat(128),
           model: "😀".repeat(128),
@@ -341,7 +341,7 @@ describe("T17 metadata-only audit", () => {
     );
     expect(Buffer.byteLength(JSON.stringify(event), "utf8")).toBeLessThanOrEqual(AUDIT_EVENT_BYTES);
     expect(event.event_type, "MUTATION_CAUSE:M2-character-cap").toBe("audit.truncated");
-    expect(event.data).toMatchObject({ limit_bytes: 2048, original_event_type: "node.output" });
+    expect(event.data).toMatchObject({ limit_bytes: 2048, original_event_type: "leaf.completed" });
   });
 
   it("bounds collection width, path width and depth exactly", () => {
@@ -400,9 +400,9 @@ describe("T17 metadata-only audit", () => {
   it("applies the operator max-events environment at the SQLite boundary", () => {
     const { connection, audit } = database({ environment: { LOHRA_AUDIT_MAX_EVENTS: "2" } });
     try {
-      audit.append("env-cap", { event_type: "node.started", created_at: 1 });
-      audit.append("env-cap", { event_type: "node.started", created_at: 2 });
-      audit.append("env-cap", { event_type: "node.started", created_at: 3 });
+      audit.append("env-cap", { event_type: "leaf.started", created_at: 1 });
+      audit.append("env-cap", { event_type: "leaf.started", created_at: 2 });
+      audit.append("env-cap", { event_type: "leaf.started", created_at: 3 });
       expect(audit.query({ runId: "env-cap" }).events.map((event) => event.seq)).toEqual([2, 3]);
     } finally {
       connection.close();
@@ -415,7 +415,7 @@ describe("T17 SQLite audit read model", () => {
     try {
       const runId = `run-${"r".repeat(204)}`;
       audit.append(runId, {
-        event_type: "node.started",
+        event_type: "leaf.started",
         segment_id: `segment-${"s".repeat(156)}`,
         node_id: `node-${"n".repeat(104)}`,
         sub_id: `sub-${"u".repeat(156)}`,
@@ -445,7 +445,7 @@ describe("T17 SQLite audit read model", () => {
       const shared = "r".repeat(160);
       const left = `${shared}-left`;
       const right = `${shared}-right`;
-      audit.append(left, { event_type: "node.started", created_at: 1 });
+      audit.append(left, { event_type: "leaf.started", created_at: 1 });
       audit.append(right, { event_type: "leaf.failed", created_at: 2 });
       const stored = connection.database
         .prepare("SELECT run_id FROM workflow_audit_state ORDER BY run_id")
@@ -454,7 +454,7 @@ describe("T17 SQLite audit read model", () => {
       expect(stored[0]?.run_id).not.toBe(stored[1]?.run_id);
       expect(stored.every((row) => Array.from(row.run_id).length === 128)).toBe(true);
       expect(audit.query({ runId: left }).events.map((event) => event.event_type)).toEqual([
-        "node.started",
+        "leaf.started",
       ]);
       expect(audit.query({ runId: right }).events.map((event) => event.event_type)).toEqual([
         "leaf.failed",
@@ -470,7 +470,7 @@ describe("T17 SQLite audit read model", () => {
       for (let index = 1; index <= 5; index += 1)
         expect(
           audit.append("run", {
-            event_type: "node.started",
+            event_type: "leaf.started",
             node_id: index % 2 ? "a" : "b",
             payload: { done: index },
             created_at: index,
@@ -497,15 +497,15 @@ describe("T17 SQLite audit read model", () => {
   it("resumes a tombstoned run monotonically and compacts expired identity", () => {
     const { connection, audit } = database({ maxRuns: 1, maxTombstones: 1, retentionSeconds: 10 });
     try {
-      audit.append("r1", { event_type: "node.started", created_at: 1 });
-      audit.append("r2", { event_type: "node.started", created_at: 2 });
-      expect(audit.append("r1", { event_type: "node.started", created_at: 3 })?.seq).toBe(2);
+      audit.append("r1", { event_type: "leaf.started", created_at: 1 });
+      audit.append("r2", { event_type: "leaf.started", created_at: 2 });
+      expect(audit.append("r1", { event_type: "leaf.started", created_at: 3 })?.seq).toBe(2);
       expect(
         (audit.query({ runId: "r1" }).integrity.notices as readonly unknown[])[0],
       ).toMatchObject({ event_type: "audit.gap" });
-      audit.append("fresh", { event_type: "node.started", created_at: 100 });
-      audit.append("newer", { event_type: "node.started", created_at: 200 });
-      expect(audit.append("r1", { event_type: "node.started", created_at: 200 })?.seq).toBe(1);
+      audit.append("fresh", { event_type: "leaf.started", created_at: 100 });
+      audit.append("newer", { event_type: "leaf.started", created_at: 200 });
+      expect(audit.append("r1", { event_type: "leaf.started", created_at: 200 })?.seq).toBe(1);
     } finally {
       connection.close();
     }
@@ -525,7 +525,7 @@ describe("T17 SQLite audit read model", () => {
       expect(
         audit.append(
           "run",
-          { event_type: "node.started", created_at: 2 },
+          { event_type: "leaf.started", created_at: 2 },
           { fence: 1, holder: "owner", now: 2 },
         ),
         "MUTATION_CAUSE:M6-fence-ignored",
@@ -536,7 +536,7 @@ describe("T17 SQLite audit read model", () => {
       expect(
         audit.append(
           "run",
-          { event_type: "node.started", created_at: 2 },
+          { event_type: "leaf.started", created_at: 2 },
           { fence: 2, holder: "owner", now: 2 },
         )?.seq,
       ).toBe(1);
@@ -551,12 +551,12 @@ describe("T17 SQLite audit read model", () => {
       connection.database.exec(
         "CREATE TRIGGER fail_audit BEFORE INSERT ON workflow_audit_events BEGIN SELECT RAISE(ABORT, 'planted failure'); END",
       );
-      expect(() => audit.append("rollback", { event_type: "node.started", created_at: 1 })).toThrow(
+      expect(() => audit.append("rollback", { event_type: "leaf.started", created_at: 1 })).toThrow(
         "planted failure",
       );
       connection.database.exec("DROP TRIGGER fail_audit");
       expect(
-        audit.append("rollback", { event_type: "node.started", created_at: 2 })?.seq,
+        audit.append("rollback", { event_type: "leaf.started", created_at: 2 })?.seq,
         "MUTATION_CAUSE:M5-nontransactional-seq",
       ).toBe(1);
     } finally {
@@ -567,7 +567,7 @@ describe("T17 SQLite audit read model", () => {
   it("re-sanitizes tampered rows and exposes corruption without leaking bytes", () => {
     const { connection, audit } = database();
     try {
-      audit.append("tampered", { event_type: "node.started", created_at: 1 });
+      audit.append("tampered", { event_type: "leaf.started", created_at: 1 });
       connection.database
         .prepare("UPDATE workflow_audit_events SET payload_json=? WHERE run_id='tampered'")
         .run('{"data":{"prompt":"PRIVATE-TAMPER"}}');
@@ -604,7 +604,7 @@ describe("T17 live events and sink failures", () => {
           },
         },
       );
-      expect(trail.record("corrupt", { event_type: "node.started", payload: hostile })).toBe(false);
+      expect(trail.record("corrupt", { event_type: "leaf.started", payload: hostile })).toBe(false);
       expect(await trail.flush()).toBe(true);
       expect(audit.query({ runId: "corrupt" }).events[0]).toMatchObject({
         event_type: "audit.gap",
@@ -672,7 +672,7 @@ describe("T17 live events and sink failures", () => {
       isBusyError: (error: unknown) => error instanceof Error && /locked/.test(error.message),
     } as unknown as AuditRepository;
     const trail = new AuditTrail(repo, { retryDelayMs: 0, sleep: () => Promise.resolve() });
-    expect(trail.record("r", { event_type: "node.started" })).toBe(true);
+    expect(trail.record("r", { event_type: "leaf.started" })).toBe(true);
     expect(await trail.flush()).toBe(true);
     expect(attempts).toBe(3);
 
@@ -688,7 +688,7 @@ describe("T17 live events and sink failures", () => {
       sleep: () => Promise.resolve(),
       warning: (message) => warnings.push(message),
     });
-    failed.record("r", { event_type: "node.started" });
+    failed.record("r", { event_type: "leaf.started" });
     expect(await failed.shutdown(100)).toBe(false);
     expect(warnings.join(" ")).toContain("failed");
   });
@@ -713,7 +713,7 @@ describe("T17 live events and sink failures", () => {
       sleep: () => gate,
       warning: (message) => warnings.push(message),
     });
-    expect(trail.record("shutdown", { event_type: "node.started" })).toBe(true);
+    expect(trail.record("shutdown", { event_type: "leaf.started" })).toBe(true);
     await Promise.resolve();
     expect(attempts).toBe(1);
     expect(await trail.shutdown(1)).toBe(false);
@@ -736,14 +736,14 @@ describe("T17 live events and sink failures", () => {
     const warnings: string[] = [];
     const trail = new AuditTrail(repo, { warning: (message) => warnings.push(message) });
     expect(
-      trail.record("stale", { event_type: "node.started" }, { fence: 1, holder: "old", now: 2 }),
+      trail.record("stale", { event_type: "leaf.started" }, { fence: 1, holder: "old", now: 2 }),
     ).toBe(true);
     expect(await trail.flush(), "MUTATION_CAUSE:M11-stale-refusal-poisons-writer").toBe(true);
-    expect(trail.record("healthy", { event_type: "node.started" })).toBe(true);
+    expect(trail.record("healthy", { event_type: "leaf.started" })).toBe(true);
     expect(await trail.shutdown()).toBe(true);
     expect(calls, "MUTATION_CAUSE:M11-stale-refusal-poisons-writer").toEqual([
-      "stale:node.started",
-      "healthy:node.started",
+      "stale:leaf.started",
+      "healthy:leaf.started",
     ]);
     expect(warnings.join(" ")).not.toContain("failed permanently");
   });
@@ -804,9 +804,9 @@ describe("T17 live events and sink failures", () => {
       isBusyError: () => false,
     } as unknown as AuditRepository;
     const trail = new AuditTrail(repo, { capacity: 1 });
-    expect(trail.record("seed", { event_type: "node.started" })).toBe(true);
+    expect(trail.record("seed", { event_type: "leaf.started" })).toBe(true);
     for (let index = 0; index < 2_000; index += 1)
-      expect(trail.record(`overflow-${String(index)}`, { event_type: "node.started" })).toBe(false);
+      expect(trail.record(`overflow-${String(index)}`, { event_type: "leaf.started" })).toBe(false);
     const internal = trail as unknown as {
       readonly dropped: readonly { count: number; reason: string; runId: string }[];
     };
@@ -846,16 +846,16 @@ describe("T17 live events and sink failures", () => {
         if (count > 0) specificRows.push({ runId, count });
         if (!specificReentered && runId === "specific" && input.event_type === "audit.gap") {
           specificReentered = true;
-          specificRecord("accepted", "node.completed");
-          specificRecord("specific", "node.started");
+          specificRecord("accepted", "leaf.completed");
+          specificRecord("specific", "leaf.started");
         }
         return {} as never;
       },
       isBusyError: () => false,
     } as unknown as AuditRepository;
     const specificTrail = new AuditTrail(specificRepo, { capacity: 1 });
-    specificRecord("base", "node.started");
-    specificRecord("specific", "node.started");
+    specificRecord("base", "leaf.started");
+    specificRecord("specific", "leaf.started");
     expect(await specificTrail.flush()).toBe(true);
     expect(specificRejected).toBe(2);
     expect(
@@ -877,21 +877,21 @@ describe("T17 live events and sink failures", () => {
         const reason = input.payload?.reason;
         if (phase === 0 && runId === "r1" && reason === "queue_overflow") {
           phase = 1;
-          aggregateRecord("accepted", "node.completed");
-          aggregateRecord("overflow-during-specific", "node.started");
+          aggregateRecord("accepted", "leaf.completed");
+          aggregateRecord("overflow-during-specific", "leaf.started");
         } else if (phase === 1 && runId === "$audit" && reason === "drop_bucket_overflow") {
           phase = 2;
           for (let index = 1; index <= 255; index += 1)
-            aggregateRecord(`overflow-during-aggregate-${String(index)}`, "node.started");
+            aggregateRecord(`overflow-during-aggregate-${String(index)}`, "leaf.started");
         }
         return {} as never;
       },
       isBusyError: () => false,
     } as unknown as AuditRepository;
     const aggregateTrail = new AuditTrail(aggregateRepo, { capacity: 1 });
-    aggregateRecord("base", "node.started");
+    aggregateRecord("base", "leaf.started");
     for (let index = 1; index <= 256; index += 1)
-      aggregateRecord(`r${String(index)}`, "node.started");
+      aggregateRecord(`r${String(index)}`, "leaf.started");
     expect(await aggregateTrail.flush()).toBe(true);
     expect(aggregateRejected).toBe(512);
     expect(
@@ -914,13 +914,13 @@ describe("T17 live events and sink failures", () => {
       isBusyError: () => false,
     } as unknown as AuditRepository;
     const trail = new AuditTrail(repo, { capacity: 1 });
-    expect(trail.record("seed", { event_type: "node.started" })).toBe(true);
+    expect(trail.record("seed", { event_type: "leaf.started" })).toBe(true);
     const hostile = new Proxy(Object.create(null) as Record<string, unknown>, {
       ownKeys: () => {
         throw new Error("hostile ownKeys");
       },
     });
-    expect(trail.record("corrupt", { event_type: "node.started", payload: hostile })).toBe(false);
+    expect(trail.record("corrupt", { event_type: "leaf.started", payload: hostile })).toBe(false);
     expect(await trail.flush()).toBe(true);
     expect(gaps, "MUTATION_CAUSE:M27-corrupt-payload-cause").toEqual(["corrupt_payload"]);
   });
@@ -944,15 +944,15 @@ describe("T17 live events and sink failures", () => {
       isBusyError: (error: unknown) => error instanceof Error && /locked/.test(error.message),
     } as unknown as AuditRepository;
     const trail = new AuditTrail(repo, { capacity: 1, retryDelayMs: 0, sleep: () => gate });
-    expect(trail.record("causal", { event_type: "node.started" })).toBe(true);
+    expect(trail.record("causal", { event_type: "leaf.started" })).toBe(true);
     await Promise.resolve();
-    expect(trail.record("causal", { event_type: "node.completed" })).toBe(true);
-    expect(trail.record("causal", { event_type: "node.failed" })).toBe(false);
+    expect(trail.record("causal", { event_type: "leaf.completed" })).toBe(true);
+    expect(trail.record("causal", { event_type: "leaf.failed" })).toBe(false);
     release();
     expect(await trail.flush()).toBe(true);
     expect(events, "MUTATION_CAUSE:M15-gap-before-accepted-event").toEqual([
-      "node.started",
-      "node.completed",
+      "leaf.started",
+      "leaf.completed",
       "audit.gap",
     ]);
   });
@@ -973,7 +973,7 @@ describe("T17 live events and sink failures", () => {
           throw new Error("database is locked");
         }
         events.push(input.event_type);
-        if (input.event_type === "node.completed" && !reentered) {
+        if (input.event_type === "leaf.completed" && !reentered) {
           reentered = true;
           enqueueEpoch();
         }
@@ -991,15 +991,15 @@ describe("T17 live events and sink failures", () => {
       expect(trail.record("epochs", { event_type: "leaf.failed" })).toBe(false);
     };
 
-    expect(trail.record("epochs", { event_type: "node.started" })).toBe(true);
+    expect(trail.record("epochs", { event_type: "leaf.started" })).toBe(true);
     await Promise.resolve();
-    expect(trail.record("epochs", { event_type: "node.completed" })).toBe(true);
-    expect(trail.record("epochs", { event_type: "node.failed" })).toBe(false);
+    expect(trail.record("epochs", { event_type: "leaf.completed" })).toBe(true);
+    expect(trail.record("epochs", { event_type: "leaf.failed" })).toBe(false);
     release();
     expect(await trail.flush()).toBe(true);
     expect(events, "MUTATION_CAUSE:M17-overflow-epochs").toEqual([
-      "node.started",
-      "node.completed",
+      "leaf.started",
+      "leaf.completed",
       "audit.gap",
       "leaf.started",
       "audit.gap",
@@ -1028,12 +1028,12 @@ describe("T17 live events and sink failures", () => {
     } as unknown as AuditRepository;
     const trail = new AuditTrail(repo);
     enqueueReentrant = () => {
-      expect(trail.record("reentrant", { event_type: "node.completed" })).toBe(true);
+      expect(trail.record("reentrant", { event_type: "leaf.completed" })).toBe(true);
     };
-    expect(trail.record("reentrant", { event_type: "node.started" })).toBe(true);
+    expect(trail.record("reentrant", { event_type: "leaf.started" })).toBe(true);
     expect(await trail.flush()).toBe(true);
     expect(maximumActive, "MUTATION_CAUSE:M19-reentrant-drain").toBe(1);
-    expect(events).toEqual(["node.started", "node.completed"]);
+    expect(events).toEqual(["leaf.started", "leaf.completed"]);
   });
 
   it("releases accepted-order bookkeeping after runs become idle", async () => {
@@ -1043,7 +1043,7 @@ describe("T17 live events and sink failures", () => {
     } as unknown as AuditRepository;
     const trail = new AuditTrail(repo, { capacity: 5_001 });
     for (let index = 0; index < 5_000; index += 1)
-      expect(trail.record(`idle-${String(index)}`, { event_type: "node.started" })).toBe(true);
+      expect(trail.record(`idle-${String(index)}`, { event_type: "leaf.started" })).toBe(true);
     expect(await trail.flush()).toBe(true);
     const internal = trail as unknown as {
       readonly lastAcceptedOrder: ReadonlyMap<string, number>;

@@ -525,7 +525,7 @@ describe("audit warning sink (#380)", () => {
         const base = createSessionToolBase(database, {});
         const refused = base.auditRepository.append(
           "orphan-run",
-          { event_type: "node.started" },
+          { event_type: "leaf.started" },
           staleOwnership,
         );
         expect(refused).toBeNull();
@@ -554,7 +554,7 @@ describe("audit warning sink (#380)", () => {
       // (covered separately above).
       const repository = new AuditRepository(database, { warning: auditWarning });
       const trail = new AuditTrail(repository, { warning: auditWarning });
-      expect(trail.record("orphan-run", { event_type: "node.started" }, staleOwnership)).toBe(true); // accepted onto the queue; the refusal happens on drain.
+      expect(trail.record("orphan-run", { event_type: "leaf.started" }, staleOwnership)).toBe(true); // accepted onto the queue; the refusal happens on drain.
       expect(await trail.flush()).toBe(true);
       expect(warnings).toHaveLength(1);
       expect(warnings[0]).toContain("fence lost");
@@ -569,7 +569,7 @@ describe("audit warning sink (#380)", () => {
     try {
       const repo = new AuditRepository(database, { maxRuns: 2 });
       const refuse = (runId: string): void => {
-        expect(repo.append(runId, { event_type: "node.started" }, staleOwnership)).toBeNull();
+        expect(repo.append(runId, { event_type: "leaf.started" }, staleOwnership)).toBeNull();
       };
       refuse("run-a");
       refuse("run-b");
