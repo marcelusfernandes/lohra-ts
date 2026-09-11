@@ -7,7 +7,7 @@
 
 ## Contexto
 
-`scripts/ci/controle-negativo/lib.ts:189-235` define a classe `docs`/`process`
+`scripts/ci/controle-negativo/lib.ts:189-215` define a classe `docs`/`process`
 da ADR 0004 item 7 — arquivos que este check não precisa controlar, porque uma
 PR só de documentação ou de configuração de CI não tem como declarar
 `prova/<slug>.ts` (não há comportamento novo para provar vermelho). Antes
@@ -36,9 +36,10 @@ editando só esse markdown.
 - `assets/**` fora de `assets/skills/`, e qualquer arquivo não-markdown
   dentro de `assets/skills/` (por exemplo `index.ts`), continuam fora da
   classe — feature de verdade, controle normal.
-- O hook `protege-main.sh` continua exigindo revisor: esta nota refina só a
-  classificação do `controle-negativo` (CI), não a ADR 0004 nem a exigência
-  de revisão humana/de agente sobre mudanças em `.claude/**`.
+- O hook `protege-main.sh` tem sua própria noção de classe docs e não inclui
+  `assets/skills/**/*.md` — esta nota refina só a classificação do
+  `controle-negativo` (CI); uma PR só de markdown de skill continua exigindo
+  revisor normalmente.
 
 ### Por que isso é refinamento, não mudança de ADR
 
@@ -49,7 +50,7 @@ de arquivo (prosa/doutrina, não comportamento) só que fora do prefixo
 sem revisor, e o critério ("PR de doutrina não precisa de teste vermelho")
 continua idêntico.
 
-## Doutrina para autores de spec/skill
+## Doutrina para autores de spec
 
 Uma skill nova ou editada cujo diff toca só `SKILL.md`/`references/*.md` (sob
 `assets/skills/`) não precisa de `prova/<slug>.ts` nem de `test(red):` — o
@@ -64,5 +65,6 @@ que mistura as duas classes segue a mais estrita (a que exige controle).
 deveSerIgnorado`: `assets/skills/x/SKILL.md` → docs;
   `assets/skills/workflow-authoring/references/campos.md` → docs;
   `assets/skills/x/index.ts` → não-docs; `assets/other/README.md` → não-docs
-  (só `assets/skills/` conta); `deveSerIgnorado(["assets/skills/a/SKILL.md"])`
-  → SKIP.
+  (só `assets/skills/` conta); `src/assets/skills/x/SKILL.md` (fora da raiz
+  do repo) e `assets/skills/x/SKILL.mdx` (extensão errada) → não-docs;
+  `deveSerIgnorado(["assets/skills/a/SKILL.md"])` → SKIP.

@@ -362,6 +362,11 @@ describe("ehArquivoDocsOuProcess / deveSerIgnorado", () => {
     expect(ehArquivoDocsOuProcess("assets/other/README.md")).toBe(false);
   });
 
+  it("não classifica assets/skills/ fora da raiz nem markdown fora da extensão exata (issue #345)", () => {
+    expect(ehArquivoDocsOuProcess("src/assets/skills/x/SKILL.md")).toBe(false);
+    expect(ehArquivoDocsOuProcess("assets/skills/x/SKILL.mdx")).toBe(false);
+  });
+
   it("SKIP quando o diff é só markdown de skill (issue #345)", () => {
     expect(deveSerIgnorado(["assets/skills/a/SKILL.md"])).toBe(true);
   });
