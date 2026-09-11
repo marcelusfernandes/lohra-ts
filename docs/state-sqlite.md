@@ -81,10 +81,10 @@ de `workflow_audit_state`.
   `null` na linha.
 - **`message`** truncada em 2 KiB (`Buffer.byteLength` em UTF-8, nunca corta
   no meio de um caractere multi-byte) com o marcador `…[truncated]`.
-- **`list({scope?, after_seq?, include_acked?, limit?})`** → `{notices,
+- **`list({scope?, afterSeq?, includeAcked?, limit?})`** → `{notices,
 next_after_seq, has_more, refused_writes, dropped_before_seq?}`. Por
-  padrão omite reconhecidos; `include_acked: true` os mostra, com
-  `acked_at`/`acked_by`. `after_seq`/`next_after_seq` só fazem sentido POR
+  padrão omite reconhecidos; `includeAcked: true` os mostra, com
+  `acked_at`/`acked_by`. `afterSeq`/`next_after_seq` só fazem sentido POR
   ESCOPO (`seq` é monotônico por `scope`, não global) — sem `scope`, a
   listagem cruza escopos ordenada por `id`, `next_after_seq` vem `0` e
   `dropped_before_seq` fica ausente (a retenção é por escopo).

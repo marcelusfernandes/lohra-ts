@@ -7,6 +7,7 @@
 // LRU por escopo, `next_seq` por escopo em tabela irmã, retenção limitada.
 import type Database from "better-sqlite3";
 
+import { StateError } from "./errors.js";
 import type { Ownership } from "./workflow-repository.js";
 
 // Vocabulário local: os 9 kinds da issue #397 (`ERROR_KINDS`, ainda não
@@ -281,9 +282,20 @@ export class NoticesRepository {
   }
 
   private readNotice(id: number): PublicNotice {
-    const row = this.database
-      .prepare("SELECT * FROM operator_notices WHERE id = ?")
-      .get(id) as Readonly<Record<string, unknown>>;
+    const row = this.database.prepare("SELECT * FROM operator_notices WHERE id = ?").get(id) as
+      Readonly<Record<string, unknown>> | undefined;
+    // Only called right after this class's own INSERT, inside the same
+    // transaction, with the id that INSERT just produced — `undefined`
+    // here means the invariant this method relies on broke (a concurrent
+    // delete inside our own transaction, or a caller error), never a
+    // reachable "notice not found yet" state. Fail-closed (CLAUDE.md
+    // invariant 2): name it instead of casting past it.
+    if (row === undefined) {
+      throw new StateError(
+        "NOTICES_ROW_MISSING",
+        `operator_notices: row ${String(id)} not found right after insert`,
+      );
+    }
     return parseNoticeRow(row);
   }
 
