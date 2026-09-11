@@ -6,14 +6,12 @@ import { addUsageToResult, deriveStatus, RunResult } from "./accounting.js";
 import { Budget, FanoutRejected, TokenBudgetExhausted } from "./budget.js";
 import { contentHash, MemoryWorkflowCache, type WorkflowCache } from "./cache.js";
 import {
-  DEFAULT_LEAF_MAX_ITERATIONS,
   EMPTY_OUTPUT_CORRECTION,
   GATE_VERDICT_SCHEMA,
   JUDGE_SCORE_SCHEMA,
   LEAF_TIMEOUT_SECONDS,
   MAX_WORKFLOW_DEPTH,
   PIPELINE_TIMEOUT_SECONDS,
-  QUOTA_EXHAUSTED,
   type LeafExecution,
   type RunControl,
   type Strategy,
@@ -29,20 +27,23 @@ import {
   clampInteger,
   collectBranchWithRetries,
   combine,
+  extractForcedOutput,
+  nonCompleteFirstCollectResult,
   nonEmpty,
+  recollectLeafTimeout,
   recordGroupReplayCost,
   renderValue,
   resolveCheckpoint,
+  resolveLeafRequestOptions,
   resultUsage,
   routingIdentity,
-  routingOf,
   siblingAnswers,
   strictResolve,
   timeoutLeafResult,
   verifyPrompt,
 } from "./engine-utils.js";
 import { topologicalOrder } from "./graph.js";
-import { MAX_GATE_ATTEMPTS, MAX_NODE_MAX_ITERATIONS, MAX_NODE_RETRIES } from "./nodes.js";
+import { MAX_GATE_ATTEMPTS, MAX_NODE_RETRIES } from "./nodes.js";
 import {
   correctionPrompt,
   isEmptyOutput,
@@ -242,11 +243,11 @@ export class WorkflowEngine {
         return { output: null, usage: usage(), complete: false };
       this.gateTokens();
       this.gateFanout(1, true);
-      const routing = routingOf(node, this.tiers);
-      const maxIterations = Object.hasOwn(node.fields, "max_iterations")
-        ? Math.min(Number(node.fields.max_iterations), MAX_NODE_MAX_ITERATIONS)
-        : DEFAULT_LEAF_MAX_ITERATIONS;
-      const forced = schema !== null && node.fields.tool_less === true;
+      const { routing, maxIterations, forced } = resolveLeafRequestOptions(
+        node,
+        this.tiers,
+        schema,
+      );
       const request = {
         prompt,
         causalContext: this.causal(options.role, options.cellId, options),
@@ -269,30 +270,18 @@ export class WorkflowEngine {
       }
       let total = resultUsage(collected);
       if (collected.status !== "complete") {
-        this.account(node.id, id, collected);
-        if (collected.errorKind === QUOTA_EXHAUSTED) {
-          // Not this leaf's own failure — the whole run is out of quota.
-          this.noteQuotaExhausted(node.id, collected.retryAfter ?? null);
-          return { output: null, usage: total, complete: false };
-        }
-        const kind =
-          collected.errorKind === null || collected.errorKind === undefined
-            ? ""
-            : ` (${collected.errorKind})`;
-        this.recordFault(
-          `${node.id}: leaf ${collected.status}${kind}: ${renderValue(collected.output ?? "no detail").slice(0, 200)}`,
+        return nonCompleteFirstCollectResult(
+          this.noteQuotaExhausted.bind(this),
+          this.recordFault.bind(this),
+          this.account.bind(this),
+          node.id,
+          id,
+          collected,
+          total,
         );
-        return { output: null, usage: total, complete: false };
       }
-      let output = collected.output;
-      let usedFallback = false;
-      if (forced) {
-        const call = collected.toolCalls
-          ?.map(asRecord)
-          .find((candidate) => candidate?.name === "StructuredOutput");
-        if (call !== undefined && call !== null) output = call.arguments ?? call.args ?? null;
-        else usedFallback = true;
-      }
+      const { output: forcedOutput, usedFallback } = extractForcedOutput(collected, forced);
+      let output = forcedOutput;
       if (schema !== null && output !== null) {
         for (let attempt = 0; attempt <= MAX_VALIDATION_RETRIES; attempt += 1) {
           const parsed = parseAndValidate(output, schema);
@@ -314,6 +303,16 @@ export class WorkflowEngine {
           collected = await this.runtime.collect(id, { wait: true, timeoutSeconds: timeout });
           // collect() reports the aggregate usage; only the terminal snapshot is charged.
           total = resultUsage(collected);
+          if (collected.status === "running")
+            return await recollectLeafTimeout(
+              this.runtime.cancel.bind(this.runtime),
+              this.recordFault.bind(this),
+              this.account.bind(this),
+              node.id,
+              id,
+              timeout,
+              collected,
+            );
           if (collected.status !== "complete") {
             this.account(node.id, id, { ...collected, usage: total });
             this.recordFault(
