@@ -4,6 +4,9 @@
 > oracle/paridade descrita abaixo foi superada pela decisão de desenvolvimento
 > independente (ver `CLAUDE.md` e `docs/adr/0003-native-wire-format.md`). A
 > escolha de mainline TypeScript permanece; ver `docs/gate-decision-t22.md`.
+> A contagem "24 tools" citada abaixo também é daquela data — o catálogo
+> builtin (`BUILTIN_DEFINITIONS`, `src/tools/builtin-definitions.ts`) tem
+> 26 hoje, desde `workflow_notices`/`workflow_notices_ack` (issue #402).
 
 - **Status:** accepted
 - **Date:** 2026-08-29
