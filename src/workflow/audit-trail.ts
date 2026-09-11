@@ -117,6 +117,14 @@ export class AuditTrail {
     return true;
   }
 
+  /** Issue #373: events still not durably written — queued plus (if a drain
+   * is in flight) the one it is currently retrying — so a caller that gave
+   * up waiting on `flush()` can report a named count instead of pretending
+   * the buffer was empty. */
+  public pendingCount(): number {
+    return this.queue.length + (this.running === null ? 0 : 1);
+  }
+
   public async flush(timeoutMs = 5_000): Promise<boolean> {
     const deadline = Date.now() + Math.max(0, timeoutMs);
     while (this.running !== null || this.queue.length > 0 || this.dropped.length > 0) {

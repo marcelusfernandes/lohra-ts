@@ -14,19 +14,27 @@ import { parseAuditQuery } from "./audit-query.js";
 // THIS tail has itself observed a live event for.
 import type { WorkflowLiveTail } from "./live-tail.js";
 
+// Issue #373: `workflow_audit` in the same turn as `run_workflow` waits this
+// long for `WorkflowService.auditPendingAfterFlush` to drain the trail —
+// short, and named, so the wait is bounded (invariant 3) rather than
+// blocking the tool call indefinitely.
+export const AUDIT_READ_FLUSH_TIMEOUT_MS = 250;
+
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Readonly<Record<string, unknown>>)
     : null;
 }
 
-function auditResult(repository: AuditRepository, args: ToolArguments): string {
+function auditResult(repository: AuditRepository, args: ToolArguments, pending = 0): string {
   const parsed = parseAuditQuery(args);
   if ("error" in parsed) return toolError(parsed.error);
   const page = parseJsonPreservingNumbers(
     JSON.stringify(repository.query(parsed.query)),
   ) as Readonly<Record<string, unknown>>;
-  return toolResult(undefined, page);
+  if (pending <= 0) return toolResult(undefined, page);
+  const integrity = record(page.integrity) ?? {};
+  return toolResult(undefined, { ...page, integrity: { ...integrity, pending } });
 }
 
 export function workflowAuditHandler(repository: AuditRepository): ToolHandler {
@@ -117,6 +125,18 @@ export class WorkflowTool {
     if (this.auditRepository === undefined) return toolError("workflow audit store is unavailable");
     return auditResult(this.auditRepository, args);
   }
+
+  /** Issue #373: the `workflow_audit` TOOL surface (`workflowToolHandlers`
+   * below) — unlike `audit()` above, which a durable-only caller with no
+   * live `WorkflowService` trail still uses synchronously — drains the
+   * trail (bounded by `AUDIT_READ_FLUSH_TIMEOUT_MS`) before it reads, so a
+   * query in the same turn as `run_workflow` never reports a silent
+   * `events: []` for events still sitting in the buffer. */
+  async auditWithFlush(args: ToolArguments): Promise<string> {
+    if (this.auditRepository === undefined) return toolError("workflow audit store is unavailable");
+    const pending = await this.service.auditPendingAfterFlush(AUDIT_READ_FLUSH_TIMEOUT_MS);
+    return auditResult(this.auditRepository, args, pending);
+  }
 }
 
 export function workflowToolHandlers(
@@ -131,7 +151,7 @@ export function workflowToolHandlers(
     workflow_list: () => tool.list(),
     workflow_pause: (args) => tool.pause(args),
     workflow_cancel: (args) => tool.cancel(args),
-    workflow_audit: (args) => tool.audit(args),
+    workflow_audit: (args) => tool.auditWithFlush(args),
   });
 }
 
