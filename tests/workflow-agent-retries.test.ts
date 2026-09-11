@@ -368,7 +368,6 @@ describe("pipeline stage retries never spin past a pause (#334)", () => {
       // waiting on the runtime's slow `collect()` to lose a real race.
       await vi.advanceTimersByTimeAsync(20);
       const result = await runPromise;
-      expect(runtime.spawned).toHaveLength(1);
       expect(result.outputs.p).toEqual([null]);
       expect(result.faults.some((fault) => fault.includes("pipeline timeout"))).toBe(true);
       // `runPipeline` already returned (the deadline race won). Now let the
@@ -377,6 +376,14 @@ describe("pipeline stage retries never spin past a pause (#334)", () => {
       // and refuse to spawn or credit a respawn.
       runtime.releaseFirstCollect();
       await flushMicrotasks();
+      // Asserted here, AFTER the background retry has settled — not right
+      // after `runPromise` resolves, where a second spawn is impossible by
+      // construction (attempt 1 hasn't even been reached yet). This is what
+      // keeps the guard's OWN check (`collectLeaf`'s `stoppedByControl` at
+      // engine.ts:242, via `options.aborted`) covered: without it, the
+      // late-settling attempt 0 would let a second leaf spawn here while
+      // `leafRespawns` stays 0 below.
+      expect(runtime.spawned).toHaveLength(1);
       expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(0);
     } finally {
       vi.useRealTimers();
