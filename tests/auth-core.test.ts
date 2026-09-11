@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { rmSync } from "node:fs";
 
 import {
@@ -34,6 +34,7 @@ const root = (): string => {
 
 afterEach(() => {
   for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true });
+  vi.unstubAllGlobals();
 });
 
 const jwt = (payload: object): string => {
@@ -252,6 +253,44 @@ describe("oauth and credentials", () => {
     });
     expect(creds?.token).toBe("new-access");
     expect(readTokens(home)?.refreshToken).toBe("new-refresh");
+  });
+
+  it("refreshes with the real default OAuth post when no caller configures one (#351)", async () => {
+    // Every production CLI entry point (chat, dashboard, chat-boundary,
+    // client-pool) calls resolveCredentials without an `oauthPost` — on the
+    // pre-fix code that made refresh impossible by construction, throwing
+    // "no OAuth post configured" instead of ever reaching the network. This
+    // pins that a real fetch-based post (the one `oauthRefreshTokens` also
+    // uses for login) is wired in by default.
+    const home = root();
+    enable(home);
+    writeTokens(home, {
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      accountId: "acct-t351-dummy",
+      expiresAt: 1_300,
+    });
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            access_token: "new-access",
+            refresh_token: "new-refresh",
+            expires_in: 3600,
+          }),
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const creds = await resolveCredentials(home, { now: 1_000, codexHome: join(home, "codex") });
+
+    expect(creds?.token).toBe("new-access");
+    expect(readTokens(home)?.refreshToken).toBe("new-refresh");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, { readonly body: unknown }];
+    expect(url).toBe("https://auth.openai.com/oauth/token");
+    expect(String(init.body)).toContain("grant_type=refresh_token");
   });
 
   it("fails token-free when subscription is unusable", async () => {
