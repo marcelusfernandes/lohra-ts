@@ -44,13 +44,10 @@ describe("ERROR_KINDS vocabulary (#397)", () => {
 // `classifyProviderError` continua devolvendo `ErrorKind | null`: os
 // gatilhos de quota (RateLimitError, 429, quotaCodes) ficam inalterados
 // (tests/transports-errors.test.ts cobre esses casos e não pode regredir).
-// Aqui cobrimos só os kinds novos que #397 acrescenta ao classificador,
-// sem tocar em statusCode 5xx nem no fallthrough genérico
-// `ProviderCallFailed → "unknown"` — ambos colidem com um teste pinado fora
-// do escopo desta issue (`tests/orchestration-child-runner.test.ts:341`,
-// "maps a 500 upstream failure to error_kind:null (L15 boundary)", e
-// `tests/transports-errors.test.ts:18`, `statusCode: 500 → null`); a issue
-// #397 registra a colisão para o orquestrador decidir.
+// A colisão original com tests/transports-errors.test.ts:18 e
+// tests/orchestration-child-runner.test.ts (statusCode 500 -> null) foi
+// resolvida pelo orquestrador emendando o `## Files` da issue #397
+// (2026-09-12, opção (a)): os dois pinos agora esperam `route_fault`.
 describe("classifyProviderError: novos kinds (#397)", () => {
   it("statusCode 401 -> auth_failed", () => {
     const error = new ProviderCallFailed("unauthorized", { statusCode: 401 });
@@ -93,6 +90,28 @@ describe("classifyProviderError: novos kinds (#397)", () => {
 
   it("erro que não é de provedor continua null", () => {
     expect(classifyProviderError(new Error("plain"))).toBeNull();
+  });
+
+  it("statusCode 500 -> route_fault", () => {
+    const error = new ProviderCallFailed("boom", {
+      statusCode: 500,
+      payload: { error: "boom" },
+    });
+    expect(classifyProviderError(error)).toBe("route_fault");
+  });
+
+  it.each([500, 502, 503, 599])("statusCode 5xx (%d) -> route_fault", (statusCode) => {
+    const error = new ProviderCallFailed("boom", { statusCode });
+    expect(classifyProviderError(error)).toBe("route_fault");
+  });
+
+  it("ProviderCallFailed sem mapeamento (400) -> unknown, nunca null", () => {
+    const error = new ProviderCallFailed("bad request", { statusCode: 400 });
+    expect(classifyProviderError(error)).toBe("unknown");
+  });
+
+  it("ProviderCallFailed sem statusCode nenhum -> unknown, nunca null", () => {
+    expect(classifyProviderError(new ProviderCallFailed("mystery"))).toBe("unknown");
   });
 
   it("o tipo devolvido é atribuível a ErrorKind | null", () => {
