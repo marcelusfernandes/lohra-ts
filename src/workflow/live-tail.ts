@@ -16,8 +16,9 @@ export const LIVE_TAIL_BYTES = 64 * 1024;
 // process's lifetime is the same shape of growth `WorkflowService`'s own
 // `this.runs` map already accepts (never trimmed either) — bounded here
 // anyway, since this module is free to be stricter. Evicts the oldest run
-// whose ring is already empty (a `done` run with nothing left to serve);
-// only reaches for an active one if every tracked run is still active.
+// whose ring is already empty (a `done` run with nothing left to serve),
+// EXCLUDING the run the current push just touched — never the run just
+// created, and never a still-live one (see `capRuns`, PR #381 round 3).
 const KNOWN_RUNS_CAP = 1024;
 
 export interface WorkflowLiveTailSnapshot {
@@ -93,6 +94,12 @@ export class WorkflowLiveTail {
       // see) and it is never itself stored, so it never needs draining.
       this.ensureRun(runId);
       this.forget(runId);
+      // Runs AFTER `forget()`, same as every other call site (PR #381
+      // round 3) — `capRuns` always excludes `runId` from eviction, so the
+      // ordering does not matter for THIS run, but keeping the cap check
+      // in one consistent place (the end of `push`) is what makes that
+      // exclusion easy to reason about.
+      this.capRuns(runId);
       return true;
     }
     let json: string;
@@ -114,6 +121,7 @@ export class WorkflowLiveTail {
       // minor a): evicting everything to make room for an event that can
       // never fit anyway would just be a second, needless loss.
       counters.dropped += 1;
+      this.capRuns(runId);
       return true;
     }
     let ring = this.rings.get(runId);
@@ -133,6 +141,14 @@ export class WorkflowLiveTail {
     }
     ring.events.push({ cursor: counters.cursor, event: freezeLiveEvent(event), bytes });
     ring.totalBytes += bytes;
+    // Runs AFTER this push's own ring is fully settled (PR #381 round 3):
+    // capping BEFORE the current run had a ring made it look "done" (no
+    // ring yet) and evict ITSELF, then a duplicate-cursor re-registration
+    // on the next push for the same run — the same silent-loss shape as
+    // round 2's finding, just behind the cap. `runId` is excluded from
+    // eviction candidates below regardless of ring state, so this call's
+    // position is belt-and-suspenders, not the only thing preventing it.
+    this.capRuns(runId);
     return true;
   }
 
@@ -167,25 +183,35 @@ export class WorkflowLiveTail {
     if (existing !== undefined) return existing;
     const counters: RunCounters = { cursor: 0, dropped: 0 };
     this.runs.set(runId, counters);
-    this.capRuns();
     return counters;
   }
 
-  private capRuns(): void {
+  /**
+   * PR #381 round 3: the ONLY correct time to look for an evictable run is
+   * after the CURRENT push has finished touching `runId`'s own counters
+   * and ring — and `runId` itself is NEVER a candidate, no matter its ring
+   * state at that moment (a `done` push just forgot its own ring; an
+   * oversized-event push never created one). The earlier version ran
+   * before the new run's ring existed and did not exclude it, so with
+   * every OTHER tracked run still live, the brand-new run — the only one
+   * that looked "done" — evicted ITSELF, and a duplicate-cursor
+   * re-registration on its next push reproduced round 2's exact bug behind
+   * the cap.
+   *
+   * Only a run with an EMPTY ring (one whose `done` already ran) is ever
+   * evicted, oldest first. If every OTHER tracked run is still live, this
+   * does nothing — the map is left to grow rather than resetting a live
+   * run's `cursor`/`dropped` out from under it. Same precedent as
+   * `WorkflowService.runs`, which never trims either.
+   */
+  private capRuns(runId: string): void {
     if (this.runs.size <= KNOWN_RUNS_CAP) return;
     for (const id of this.runs.keys()) {
+      if (id === runId) continue;
       if (!this.rings.has(id)) {
         this.runs.delete(id);
         return;
       }
-    }
-    // Pathological: every tracked run still has a live ring. Evict the
-    // oldest anyway — invariant 3 (never unbounded) outranks perfect
-    // bookkeeping for a run this process would otherwise track forever.
-    const oldest = this.runs.keys().next().value;
-    if (oldest !== undefined) {
-      this.runs.delete(oldest);
-      this.rings.delete(oldest);
     }
   }
 }

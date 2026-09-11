@@ -253,7 +253,38 @@ describe("WorkflowLiveTail ring (issue #369)", () => {
     for (let i = 0; i < 1024; i += 1)
       tail.push(event(`run-fill-${String(i)}`, "node", { node_id: "a" }));
     expect(tail.isKnown("run-oldest")).toBe(false);
+    // The run that TRIGGERED the cap (the very last one pushed) must never
+    // evict itself, and must never end up with a duplicate-cursor ring
+    // from a re-registration (PR #381 round 3's exact reproduction).
+    const triggering = tail.snapshot("run-fill-1023");
+    expect(triggering.next).toBe(1);
+    expect(triggering.events).toHaveLength(1);
     expect(tail.isKnown("run-fill-1023")).toBe(true);
+  });
+
+  // PR #381 round 3: the discriminating case the previous cap test could
+  // not catch — with NO done run anywhere to evict, the cap must leave
+  // every live run's counters untouched (map grows instead), never evict
+  // the run just pushed to, and never duplicate a cursor.
+  it("never evicts a live run to make room — with every tracked run still live, the map is left to grow", () => {
+    const tail = new WorkflowLiveTail();
+    for (let i = 0; i < 1024; i += 1)
+      tail.push(event(`run-live-${String(i)}`, "node", { node_id: "a" }));
+    expect(tail.push(event("run-live-new", "node", { node_id: "a" }))).toBe(true);
+
+    expect(tail.isKnown("run-live-new")).toBe(true);
+    const newSnap = tail.snapshot("run-live-new");
+    expect(newSnap.events).toHaveLength(1);
+    expect(newSnap.next).toBe(1);
+    expect(newSnap.dropped).toBe(0);
+
+    for (let i = 0; i < 1024; i += 1) {
+      expect(tail.isKnown(`run-live-${String(i)}`)).toBe(true);
+      const snap = tail.snapshot(`run-live-${String(i)}`);
+      expect(snap.next).toBe(1);
+      expect(snap.dropped).toBe(0);
+      expect(snap.events).toHaveLength(1);
+    }
   });
 });
 
