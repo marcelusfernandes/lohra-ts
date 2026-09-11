@@ -151,13 +151,15 @@ export class AuditTrail {
       // BY-DESIGN outcome (a superseded stretch's stale token, or — before
       // the flush-before-release fix in service.ts — a terminal event that
       // lost the race) — never a sink failure, never a gap (that would
-      // poison the writer M11 pins against). Named here too, not only in
-      // `AuditRepository.append`, so a caller wiring a test double straight
-      // into this class still gets an observable trail, not a silent drop.
-      if (saved === "refused")
-        this.warning(
-          `audit event refused for run ${next.runId} — fence lost (${next.input.event_type})`,
-        );
+      // poison the writer M11 pins against).
+      //
+      // Issue #380: no warning is emitted here anymore — `AuditRepository
+      // .append` (the only implementation `append()` below ever calls with
+      // ownership set in `src/`) already names every refusal once. A second
+      // line here, for the very same refusal, was the duplicate the issue
+      // fixed; a test double standing in for the repository in a unit test
+      // is expected to assert its own inputs/outputs directly, not rely on
+      // this class's warning text.
       if (saved === "failed") {
         const gap: AuditInput = Object.freeze({
           event_type: "audit.gap",

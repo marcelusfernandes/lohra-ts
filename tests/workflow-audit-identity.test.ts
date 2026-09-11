@@ -13,7 +13,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   AuditRepository,
@@ -21,6 +21,7 @@ import {
   openStateDatabase,
   WorkflowRepository,
 } from "../src/state/index.js";
+import { createSessionToolBase } from "../src/commands/session-tools.js";
 import { AuditTrail } from "../src/workflow/audit-trail.js";
 import { WorkflowService, type OwnershipStore } from "../src/workflow/service.js";
 import type {
@@ -482,6 +483,102 @@ describe("workflow audit — causal identity (#365)", () => {
       for (const event of page.events) expect(event.identity.segment_id).toBe(segmentId);
     } finally {
       connection.close();
+    }
+  });
+});
+
+// Issue #380: the audit trail's own warning sink used to reach only the
+// default `() => undefined` in every production composition root —
+// `chat.ts`/`dashboard.ts` built `AuditRepository`/`AuditTrail` with no
+// `warning` option at all, so a fence refusal (already NAMED since #368)
+// never left the process. These tests exercise `createSessionToolBase`
+// (`session-tools.ts`) exactly as `chat.ts`/`dashboard.ts` call it — the
+// shared factory both composition roots build their `SessionToolBase` from.
+describe("audit warning sink (#380)", () => {
+  function openDb(): {
+    database: ReturnType<typeof openStateDatabase>["database"];
+    close: () => void;
+  } {
+    const root = mkdtempSync(join(tmpdir(), "lohra-audit-warning-sink-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    return {
+      database: connection.database,
+      close: () => {
+        connection.close();
+      },
+    };
+  }
+
+  // No fence/lock row exists for this run id at all, so
+  // `AuditRepository.append`'s ownership JOIN finds nothing and refuses —
+  // exactly the "concurrent resume, late heartbeat" case #368 named.
+  const staleOwnership = Object.freeze({ fence: 1, holder: "nobody", now: 1_000 });
+
+  it("createSessionToolBase no longer defaults the audit warning sink to silence", () => {
+    const { database, close } = openDb();
+    try {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        // Exactly the 2-arg call `session-tools.test.ts` already makes —
+        // no explicit `warning` passed, so this exercises the DEFAULT.
+        const base = createSessionToolBase(database, {});
+        const refused = base.auditRepository.append(
+          "orphan-run",
+          { event_type: "node.started" },
+          staleOwnership,
+        );
+        expect(refused).toBeNull();
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(String(warnSpy.mock.calls[0]?.[0])).toContain("fence lost");
+      } finally {
+        warnSpy.mockRestore();
+      }
+    } finally {
+      close();
+    }
+  });
+
+  it("a fence refusal reaches an injected sink through AuditRepository AND AuditTrail together — exactly once, not two or three times", async () => {
+    const { database, close } = openDb();
+    try {
+      const warnings: string[] = [];
+      const auditWarning = (message: string): void => {
+        warnings.push(message);
+      };
+      // Not via the factory: constructs `AuditRepository`/`AuditTrail`
+      // directly, the same SAME sink passed to BOTH — exactly the shape
+      // `chat.ts`/`dashboard.ts` wire (`createSessionToolBase`'s
+      // `auditRepository` and the `AuditTrail` wrapping it), isolated from
+      // that factory so this test pins the dedup itself, not the plumbing
+      // (covered separately above).
+      const repository = new AuditRepository(database, { warning: auditWarning });
+      const trail = new AuditTrail(repository, { warning: auditWarning });
+      expect(trail.record("orphan-run", { event_type: "node.started" }, staleOwnership)).toBe(true); // accepted onto the queue; the refusal happens on drain.
+      expect(await trail.flush()).toBe(true);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("fence lost");
+      expect(warnings[0]).toContain("orphan-run");
+    } finally {
+      close();
+    }
+  });
+
+  it("AuditRepository.refusals is bounded — the oldest run's count is evicted, not kept forever", () => {
+    const { database, close } = openDb();
+    try {
+      const repo = new AuditRepository(database, { maxRuns: 2 });
+      const refuse = (runId: string): void => {
+        expect(repo.append(runId, { event_type: "node.started" }, staleOwnership)).toBeNull();
+      };
+      refuse("run-a");
+      refuse("run-b");
+      refuse("run-c"); // pushes the map past maxRuns=2 — "run-a" is the oldest.
+      expect(repo.query({ runId: "run-a" }).integrity.refused_writes).toBe(0);
+      expect(repo.query({ runId: "run-b" }).integrity.refused_writes).toBe(1);
+      expect(repo.query({ runId: "run-c" }).integrity.refused_writes).toBe(1);
+    } finally {
+      close();
     }
   });
 });

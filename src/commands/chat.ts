@@ -263,7 +263,17 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   const warningLines = fanout.warnings.map((warning) => `${warning}\n`).join("");
   const connection = openStateForEnvironment(options.environment);
   const sessions = new SessionRepository(connection.database, undefined, connection.ftsEnabled);
-  const sessionToolBase = createSessionToolBase(connection.database, options.environment);
+  // Issue #380: the same sink the ownership store (`productionWarningSink`
+  // below) and `WorkflowService` itself already print refusals through — a
+  // fence refusal on the AUDIT trail (`AuditRepository`/`AuditTrail`) used
+  // to reach only the default `() => undefined`, so it was unobservable in
+  // this binary even though the concurrent-write case it names is real.
+  const auditWarning = (message: string): void => {
+    console.warn(message);
+  };
+  const sessionToolBase = createSessionToolBase(connection.database, options.environment, {
+    warning: auditWarning,
+  });
   const sessionRegistry = sessionToolBase.registry;
   const repository = new SqliteConversationRepository(sessions);
   const useTools = !options.flags.has("--no-tools");
@@ -339,7 +349,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     // The warning sink (#135) prints a refused owned write to stderr — a
     // concurrent resume or a late heartbeat never disappears in silence.
     store: productionOwnershipStore(connection.database, { warning: productionWarningSink() }),
-    auditTrail: new AuditTrail(sessionToolBase.auditRepository),
+    auditTrail: new AuditTrail(sessionToolBase.auditRepository, { warning: auditWarning }),
     onLiveEvent: (event) => {
       liveTail.push(event);
     },
