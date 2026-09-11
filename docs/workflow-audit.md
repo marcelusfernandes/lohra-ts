@@ -194,7 +194,14 @@ como `stopped` — toda gravação seguinte, do run inteiro compartilhando esse
   sintetizado (abaixo), capados em 20 (`notices_returned`); `notices_total`
   e `notices_truncated` dizem se sobrou algo fora da página. Filtros
   (`node_id`, `event_type`, `sub_id`, `segment_id`, `attempt`) afetam só
-  `events`, nunca `notices`.
+  `events`, nunca `notices`. `""` (nos quatro campos de string, após trim),
+  `attempt: 0` e `snapshot_seq: 0` significam filtro/cursor AUSENTE, não um
+  valor a bater ou uma página travada no seq 0 — a mesma query que omitir o
+  campo (`parseAuditQuery`, `audit-query.ts`, #390). `identity.attempt` é
+  0-based nos eventos `leaf.*`/`tool.*` (a primeira tentativa grava
+  `attempt: 0`, `engine-utils.ts:289`) — tratar `attempt: 0` como ausência
+  custa a capacidade de filtrar SÓ a primeira tentativa por essa superfície;
+  uma consulta sem esse filtro já inclui esses eventos, só não isolados.
 
 Um run sem `workflow_audit_state` e sem tombstone devolve
 `availability:"unavailable"` com um único `notice` `audit.unavailable
@@ -231,7 +238,8 @@ truncado a 8 caracteres, `renderAuditLine`, `workflow.ts:78`), nunca repete
 o que já mostrou. `lohra workflow audit RUN_ID [--node/--event/--sub-id/
 --segment-id/--attempt/--after-seq/--snapshot-seq/--limit]` imprime a
 página `AuditPage` inteira em JSON — a mesma tool `workflow_audit` que o
-agente usa.
+agente usa, com a mesma semântica de "sem filtro": `--attempt 0` e
+`--snapshot-seq 0` passam como ausentes, não como o filtro literal.
 
 ## Retenção
 

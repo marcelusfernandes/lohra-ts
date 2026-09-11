@@ -92,6 +92,27 @@ describe("WorkflowLiveTail ring (issue #369)", () => {
     expect(other.events).toHaveLength(1);
   });
 
+  // Issue #383, item 1 (veredito da PR #382): the mutant `R2-drop-newest`
+  // (`ring.events.shift()` → `pop()`) SURVIVED the first real corridor —
+  // nothing above pins that the ring evicts the OLDEST event first (FIFO),
+  // only that it evicts SOMETHING and stops growing past the cap. `pop()`
+  // instead evicts the newest entry already in the ring each time, so the
+  // final snapshot after `LIVE_TAIL_EVENTS + k` pushes would keep the
+  // WRONG k events (a mix of the earliest ones plus the very last push) —
+  // the first survivor's `node_id` is the one assertion `pop()` cannot
+  // satisfy: FIFO's first survivor is always exactly the k-th pushed event.
+  it("evicts the OLDEST event first (FIFO) — the first surviving event is exactly the k-th pushed", () => {
+    const tail = new WorkflowLiveTail();
+    const k = 7;
+    for (let i = 0; i < LIVE_TAIL_EVENTS + k; i += 1)
+      tail.push(event("run-fifo", "node", { node_id: `n${String(i)}` }));
+    const snap = tail.snapshot("run-fifo");
+    expect(snap.events).toHaveLength(LIVE_TAIL_EVENTS);
+    expect(snap.dropped).toBe(k);
+    expect(snap.events[0]?.node_id).toBe(`n${String(k)}`);
+    expect(snap.events.at(-1)?.node_id).toBe(`n${String(LIVE_TAIL_EVENTS + k - 1)}`);
+  });
+
   it("evicts by serialized bytes before the event count ever reaches the cap", () => {
     const tail = new WorkflowLiveTail();
     const bigNodes = Array.from({ length: 200 }, (_ignored, i) => `node-${String(i)}`);
