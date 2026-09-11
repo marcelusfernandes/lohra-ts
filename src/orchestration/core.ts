@@ -137,6 +137,18 @@ export interface DelegateOutcome {
   readonly subId: string;
   readonly status: SubSessionStatus;
   readonly summary: string;
+  /** #429 (M10-S8): copied straight from the `CollectResult` `collect()`
+   * already had and used to discard — acrescentados no fim (precedente
+   * #232), nunca antes das 3 chaves originais. `null` is the settled-with-no-result
+   * fallback (`outcome.kind !== "settled"`, unreachable with `collect(subId,
+   * true)` in practice but typed defensively), mirroring `collect_session`'s
+   * own pending envelope rather than inventing an empty string/zero that
+   * would look measured. */
+  readonly errorKind: ErrorKind | null;
+  readonly tokensIn: number;
+  readonly tokensOut: number;
+  readonly provider: string | null;
+  readonly model: string | null;
 }
 
 /** "(subagent produced no output)" for an empty-output success, textually
@@ -263,6 +275,11 @@ export class OrchestrationCore {
           subId,
           status: result?.status ?? "error",
           summary: summarizeCollectResult(result),
+          errorKind: result?.errorKind ?? null,
+          tokensIn: result?.tokensIn ?? 0,
+          tokensOut: result?.tokensOut ?? 0,
+          provider: result?.provider ?? null,
+          model: result?.model ?? null,
         };
       }),
     );
