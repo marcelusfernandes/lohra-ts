@@ -386,6 +386,57 @@ describe("oauth and credentials", () => {
     expect(error.message).not.toContain("new-access");
     expect(error.message).not.toContain("new-refresh");
   });
+
+  // Cobre a mitigação de #351 (`credentials.ts`, catch de `performRefresh`):
+  // se o POST desta chamada falhar mas OUTRO processo já tiver escrito um
+  // token mais novo enquanto isso, adota o que está em disco em vez de
+  // lançar `RefreshFailedError` — sem essa checagem, o processo que perdeu
+  // a corrida do OS (não da lease: aqui é o mesmo processo, POST simulado)
+  // voltaria a um erro mesmo com um token bom já salvo.
+  it("adopts a token another process already wrote when this refresh attempt itself fails (#351 mitigation)", async () => {
+    const home = root();
+    enable(home);
+    writeTokens(home, {
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      accountId: "acct-t354-adopt",
+      expiresAt: 1_300,
+    });
+    const creds = await resolveCredentials(home, {
+      now: 1_000,
+      codexHome: join(home, "codex"),
+      oauthPost: () => {
+        // A second process wins the race and writes fresh tokens to disk
+        // right before this attempt's own POST fails.
+        writeTokens(home, {
+          accessToken: "other-process-access",
+          refreshToken: "other-process-refresh",
+          accountId: "acct-t354-adopt",
+          expiresAt: 9_999,
+        });
+        return Promise.resolve([500, {}]);
+      },
+    });
+    expect(creds?.token).toBe("other-process-access");
+  });
+
+  it("throws RefreshFailedError when the refresh POST fails and nothing newer was saved (#354)", async () => {
+    const home = root();
+    enable(home);
+    writeTokens(home, {
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      accountId: "acct-t354-genuine-failure",
+      expiresAt: 1_300,
+    });
+    await expect(
+      resolveCredentials(home, {
+        now: 1_000,
+        codexHome: join(home, "codex"),
+        oauthPost: () => Promise.resolve([500, {}]),
+      }),
+    ).rejects.toMatchObject({ name: "RefreshFailedError" });
+  });
 });
 
 describe("token refresh lease (#354)", () => {
