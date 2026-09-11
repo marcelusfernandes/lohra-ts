@@ -12,10 +12,21 @@ import type { WorkflowLiveEvent } from "./live-events.js";
 export const LIVE_TAIL_EVENTS = 256;
 export const LIVE_TAIL_BYTES = 64 * 1024;
 
+// PR #381 round 2: an unbounded number of DISTINCT runs across a long
+// process's lifetime is the same shape of growth `WorkflowService`'s own
+// `this.runs` map already accepts (never trimmed either) — bounded here
+// anyway, since this module is free to be stricter. Evicts the oldest run
+// whose ring is already empty (a `done` run with nothing left to serve);
+// only reaches for an active one if every tracked run is still active.
+const KNOWN_RUNS_CAP = 1024;
+
 export interface WorkflowLiveTailSnapshot {
   readonly events: readonly WorkflowLiveEvent[];
-  /** Monotonic cursor: the caller's next `afterIndex`. Survives drops —
-   * never an array index. */
+  /** Monotonic cursor: the caller's next `afterIndex`. Survives drops AND
+   * survives `done`/`forget` — a run known this process never regresses
+   * `next`/`dropped`, even across a same-process pause→auto-resume (PR
+   * #381 round 2: `next_cursor` going backward after a `done{paused}` was
+   * the exact silent-loss bug this counter design fixes). */
   readonly next: number;
   readonly dropped: number;
 }
@@ -26,11 +37,18 @@ interface RingEntry {
   readonly bytes: number;
 }
 
+/** Event STORAGE only — cleared by `forget()`/`done`. */
 interface Ring {
   readonly events: RingEntry[];
   totalBytes: number;
-  dropped: number;
+}
+
+/** Bookkeeping that OUTLIVES `forget()` — a run's cursor and drop count are
+ * true for the run's whole life in this process, not just since its ring
+ * was last cleared. */
+interface RunCounters {
   cursor: number;
+  dropped: number;
 }
 
 function freezeLiveEvent(event: WorkflowLiveEvent): WorkflowLiveEvent {
@@ -52,41 +70,57 @@ export class WorkflowLiveTail {
   // Issue #369 AC 5: `workflow_status.live_tail` must appear ONLY for a run
   // this exact tail has actually observed a live event for — never for a
   // run known only durably (a different process's run, read back through
-  // the SAME store). `forget()` clears the RING (bounded memory of the
-  // events themselves) but never this set: a run this process finished
-  // stays "known" here for the rest of the process's life, same as
-  // `WorkflowService`'s own `this.runs` map never drops a settled record.
-  private readonly knownRuns = new Set<string>();
+  // the SAME store). Registered only AFTER a successful serialize (PR #381
+  // round 2, minor c): a run whose every event so far failed to serialize
+  // is not "known" yet — `push` still returns `false` and warns for each
+  // one, so the failure is never silent, just not yet counted as presence.
+  private readonly runs = new Map<string, RunCounters>();
 
   public constructor(private readonly warn: (message: string) => void = () => undefined) {}
 
   /** Whether THIS tail has ever pushed an event for `runId` — the signal
    * `workflow_status` uses to decide whether `live_tail` means anything. */
   public isKnown(runId: string): boolean {
-    return this.knownRuns.has(runId);
+    return this.runs.has(runId);
   }
 
   public push(event: WorkflowLiveEvent): boolean {
-    this.knownRuns.add(event.run_id);
+    const runId = event.run_id;
+    if (event.kind === "done") {
+      // `done` is a forget SIGNAL, not tail content: it never occupies a
+      // cursor slot (PR #381 round 2 — counting it made a same-process
+      // pause→resume's `next_cursor` overshoot what the caller could ever
+      // see) and it is never itself stored, so it never needs draining.
+      this.ensureRun(runId);
+      this.forget(runId);
+      return true;
+    }
     let json: string;
     try {
       json = JSON.stringify(event);
     } catch (error) {
       this.warn(
         `workflow: live tail failed to serialize a '${event.kind}' event for run ` +
-          `${event.run_id}: ${error instanceof Error ? error.message : String(error)}`,
+          `${runId}: ${error instanceof Error ? error.message : String(error)}`,
       );
       return false;
     }
     const bytes = Buffer.byteLength(json, "utf8");
-    const ring = this.rings.get(event.run_id) ?? {
-      events: [],
-      totalBytes: 0,
-      dropped: 0,
-      cursor: 0,
-    };
-    if (!this.rings.has(event.run_id)) this.rings.set(event.run_id, ring);
-    ring.cursor += 1;
+    const counters = this.ensureRun(runId);
+    counters.cursor += 1;
+    if (bytes > LIVE_TAIL_BYTES) {
+      // Cannot ever fit alongside the cap on its own — counted, never
+      // stored, and the EXISTING ring is left alone (PR #381 round 2,
+      // minor a): evicting everything to make room for an event that can
+      // never fit anyway would just be a second, needless loss.
+      counters.dropped += 1;
+      return true;
+    }
+    let ring = this.rings.get(runId);
+    if (ring === undefined) {
+      ring = { events: [], totalBytes: 0 };
+      this.rings.set(runId, ring);
+    }
     while (
       ring.events.length > 0 &&
       (ring.events.length >= LIVE_TAIL_EVENTS || ring.totalBytes + bytes > LIVE_TAIL_BYTES)
@@ -94,35 +128,64 @@ export class WorkflowLiveTail {
       const removed = ring.events.shift();
       if (removed !== undefined) {
         ring.totalBytes -= removed.bytes;
-        ring.dropped += 1;
+        counters.dropped += 1;
       }
     }
-    if (bytes > LIVE_TAIL_BYTES) {
-      // Cannot ever fit alongside the cap on its own — counted, never
-      // stored, the snapshot invariant (<= LIVE_TAIL_BYTES) still holds.
-      ring.dropped += 1;
-    } else {
-      ring.events.push({ cursor: ring.cursor, event: freezeLiveEvent(event), bytes });
-      ring.totalBytes += bytes;
-    }
-    if (event.kind === "done") this.forget(event.run_id);
+    ring.events.push({ cursor: counters.cursor, event: freezeLiveEvent(event), bytes });
+    ring.totalBytes += bytes;
     return true;
   }
 
   public snapshot(runId: string, afterIndex = 0): WorkflowLiveTailSnapshot {
+    const counters = this.runs.get(runId);
+    if (counters === undefined) return EMPTY_SNAPSHOT;
     const ring = this.rings.get(runId);
-    if (ring === undefined) return EMPTY_SNAPSHOT;
-    const events = ring.events
-      .filter((entry) => entry.cursor > afterIndex)
-      .map((entry) => entry.event);
+    // A cursor pointing past what the (possibly forgotten/reset) ring still
+    // holds returns whatever survives after it — never throws, never lies
+    // about `next`/`dropped`.
+    const events =
+      ring === undefined
+        ? []
+        : ring.events.filter((entry) => entry.cursor > afterIndex).map((entry) => entry.event);
     return Object.freeze({
       events: Object.freeze(events),
-      next: ring.cursor,
-      dropped: ring.dropped,
+      next: counters.cursor,
+      dropped: counters.dropped,
     });
   }
 
+  /** Releases a run's RING (the event bytes) — never its counters. A run
+   * this tail has ever known keeps an accurate `next`/`dropped` for the
+   * rest of the process's life (mirrors `WorkflowService`'s own `this.runs`
+   * never dropping a settled record). Called automatically on `done`. */
   public forget(runId: string): void {
     this.rings.delete(runId);
+  }
+
+  private ensureRun(runId: string): RunCounters {
+    const existing = this.runs.get(runId);
+    if (existing !== undefined) return existing;
+    const counters: RunCounters = { cursor: 0, dropped: 0 };
+    this.runs.set(runId, counters);
+    this.capRuns();
+    return counters;
+  }
+
+  private capRuns(): void {
+    if (this.runs.size <= KNOWN_RUNS_CAP) return;
+    for (const id of this.runs.keys()) {
+      if (!this.rings.has(id)) {
+        this.runs.delete(id);
+        return;
+      }
+    }
+    // Pathological: every tracked run still has a live ring. Evict the
+    // oldest anyway — invariant 3 (never unbounded) outranks perfect
+    // bookkeeping for a run this process would otherwise track forever.
+    const oldest = this.runs.keys().next().value;
+    if (oldest !== undefined) {
+      this.runs.delete(oldest);
+      this.rings.delete(oldest);
+    }
   }
 }

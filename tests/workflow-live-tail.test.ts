@@ -144,20 +144,77 @@ describe("WorkflowLiveTail ring (issue #369)", () => {
     expect(snap.dropped).toBe(1);
   });
 
-  it("forgets a run's ring on its own `done` event, same discipline as WorkflowLiveEvents", () => {
+  // PR #381 round 2, minor (a): an oversized single event must not sweep
+  // the ring trying (and failing) to make room for itself.
+  it("an oversized event drops only itself — small events already in the ring survive it", () => {
+    const tail = new WorkflowLiveTail();
+    tail.push(event("run-mixed", "node", { node_id: "a" }));
+    tail.push(event("run-mixed", "node", { node_id: "b" }));
+    const huge = Array.from({ length: 20_000 }, (_ignored, i) => `n${String(i)}`);
+    expect(tail.push(event("run-mixed", "plan", { name: "huge", nodes: huge }))).toBe(true);
+    const snap = tail.snapshot("run-mixed");
+    expect(snap.events.map((one) => one.node_id)).toEqual(["a", "b"]);
+    expect(snap.dropped).toBe(1);
+  });
+
+  // PR #381 round 2 finding: `done` fires on ANY stretch end, including
+  // `paused` (a quota pause auto-resumes in the SAME process) — so
+  // `forget()` clearing the counters too silently truncated a caller's
+  // `next_cursor` history. `done` no longer occupies a cursor slot itself
+  // (it is a forget signal, not tail content), and `next`/`dropped` must
+  // never regress while the run stays known.
+  it("forgets a run's ring on its own `done` event, but next/dropped never reset — same discipline as WorkflowLiveEvents for the ring, not the counters", () => {
     const tail = new WorkflowLiveTail();
     tail.push(event("run-done", "plan", { name: "x", nodes: ["a"] }));
     tail.push(event("run-done", "node", { node_id: "a", state: "running" }));
-    expect(tail.snapshot("run-done").events.length).toBeGreaterThan(0);
+    const before = tail.snapshot("run-done");
+    expect(before.events.length).toBeGreaterThan(0);
+    expect(before.next).toBe(2);
     tail.push(event("run-done", "done", { state: "complete" }));
-    expect(tail.snapshot("run-done")).toEqual({ events: [], next: 0, dropped: 0 });
+    const after = tail.snapshot("run-done");
+    expect(after.events).toHaveLength(0);
+    expect(after.next).toBe(2);
+    expect(after.dropped).toBe(0);
   });
 
-  it("forget(runId) clears a ring directly", () => {
+  it("forget(runId) clears a ring directly, but leaves next/dropped intact", () => {
     const tail = new WorkflowLiveTail();
     tail.push(event("run-forget", "node", { node_id: "a" }));
     tail.forget("run-forget");
-    expect(tail.snapshot("run-forget")).toEqual({ events: [], next: 0, dropped: 0 });
+    const snap = tail.snapshot("run-forget");
+    expect(snap.events).toHaveLength(0);
+    expect(snap.next).toBe(1);
+    expect(snap.dropped).toBe(0);
+  });
+
+  // The exact reproduction from PR #381 round 2's blocking finding: a
+  // same-process pause→auto-resume must never make a caller's
+  // `next_cursor` regress or silently lose the events pushed after it.
+  it("a same-process pause and resume never regresses next_cursor or silently drops the events after it", () => {
+    const tail = new WorkflowLiveTail();
+    tail.push(event("run-resume", "plan", { name: "x", nodes: ["a"] }));
+    tail.push(event("run-resume", "node", { node_id: "a", state: "running" }));
+    const beforePause = tail.snapshot("run-resume");
+    expect(beforePause.next).toBe(2);
+    tail.push(event("run-resume", "done", { state: "paused" }));
+    tail.push(event("run-resume", "plan", { name: "x", nodes: ["a"] }));
+    tail.push(event("run-resume", "node", { node_id: "a", state: "running" }));
+    const afterResume = tail.snapshot("run-resume", beforePause.next);
+    expect(afterResume.events).toHaveLength(2);
+    expect(afterResume.next).toBe(4);
+    expect(afterResume.dropped).toBe(0);
+  });
+
+  it("done{complete} after a full run does not regress next_cursor either", () => {
+    const tail = new WorkflowLiveTail();
+    tail.push(event("run-complete", "plan", { name: "x", nodes: ["a"] }));
+    tail.push(event("run-complete", "node", { node_id: "a", state: "running" }));
+    tail.push(event("run-complete", "node", { node_id: "a", state: "complete" }));
+    tail.push(event("run-complete", "done", { state: "complete" }));
+    const snap = tail.snapshot("run-complete");
+    expect(snap.events).toHaveLength(0);
+    expect(snap.next).toBe(3);
+    expect(snap.dropped).toBe(0);
   });
 
   it("isKnown stays true after `done` forgets the ring — a run this tail ran is known for the rest of the process", () => {
@@ -169,6 +226,34 @@ describe("WorkflowLiveTail ring (issue #369)", () => {
     expect(tail.snapshot("run-known").events).toHaveLength(0);
     expect(tail.isKnown("run-known")).toBe(true);
     expect(tail.isKnown("run-elsewhere")).toBe(false);
+  });
+
+  // PR #381 round 2, minor (c): a run whose only event so far failed to
+  // serialize is not "known" — `push` already warned and returned `false`,
+  // so the failure is loud; a later successful push still registers it.
+  it("isKnown stays false until the first successful serialize for that run", () => {
+    const tail = new WorkflowLiveTail();
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    expect(tail.push(event("run-late", "fault", { fault: "x", budget: cyclic }))).toBe(false);
+    expect(tail.isKnown("run-late")).toBe(false);
+    expect(tail.push(event("run-late", "node", { node_id: "a" }))).toBe(true);
+    expect(tail.isKnown("run-late")).toBe(true);
+  });
+
+  // PR #381 round 2, minor (b): a long-lived process launching more than
+  // KNOWN_RUNS_CAP distinct runs must not grow `runs` forever — the oldest
+  // run whose ring is already empty (its `done` already forgot it) is
+  // evicted first.
+  it("caps the number of distinct known runs, evicting the oldest already-done one first", () => {
+    const tail = new WorkflowLiveTail();
+    tail.push(event("run-oldest", "node", { node_id: "a" }));
+    tail.push(event("run-oldest", "done", { state: "complete" }));
+    expect(tail.isKnown("run-oldest")).toBe(true);
+    for (let i = 0; i < 1024; i += 1)
+      tail.push(event(`run-fill-${String(i)}`, "node", { node_id: "a" }));
+    expect(tail.isKnown("run-oldest")).toBe(false);
+    expect(tail.isKnown("run-fill-1023")).toBe(true);
   });
 });
 

@@ -154,6 +154,40 @@ describe("runWorkflowCommand watch --events (issue #369)", () => {
     }
   });
 
+  // PR #381 round 2, minor (d): `AuditRepository.query` clamps `limit` to
+  // 100 (`audit-repository.ts`), so `drainAuditEvents` must loop across
+  // `has_more` pages within ONE watch iteration — a run with more than 100
+  // events must still show every one, exactly once.
+  it("drains more than one ledger page in a single iteration, every event exactly once", async () => {
+    const connection = tmpDatabase();
+    try {
+      insertRun(connection, "run-many", "complete", 1);
+      const audit = new AuditRepository(connection.database);
+      const total = 150;
+      for (let i = 0; i < total; i += 1)
+        audit.append("run-many", {
+          event_type: "leaf.started",
+          node_id: `n${String(i)}`,
+          created_at: i,
+        });
+
+      const result = await run({
+        action: "watch",
+        databasePath: connection.databasePath,
+        args: { run_id: "run-many", events: true },
+      });
+      expect(result.code).toBe(0);
+      const eventLines = result.stdout.split("\n").filter((line) => line.includes("leaf.started"));
+      expect(eventLines).toHaveLength(total);
+      const nodeIds = eventLines.map((line) => line.trim().split(/\s+/).at(-1));
+      expect(new Set(nodeIds).size).toBe(total);
+      expect(nodeIds[0]).toBe("n0");
+      expect(nodeIds.at(-1)).toBe(`n${String(total - 1)}`);
+    } finally {
+      connection.close();
+    }
+  });
+
   it("without --events, stdout is byte-identical to a plain watch of the same run", async () => {
     const connection = tmpDatabase();
     try {
