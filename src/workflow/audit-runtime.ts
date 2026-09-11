@@ -30,6 +30,7 @@ import type { AuditInput } from "./audit-model.js";
 import { recordAuditEvent, type AuditFailClosedDeps } from "./audit-producers.js";
 import type { AuditTrail } from "./audit-trail.js";
 import type {
+  Awaitable,
   CausalContext,
   ChildCollectOptions,
   ChildResult,
@@ -44,6 +45,28 @@ import type { Ownership } from "../state/workflow-repository.js";
 import { BUILTIN_DEFINITIONS } from "../tools/builtin-definitions.js";
 
 export type AuditedChildRuntimeDeps = AuditFailClosedDeps;
+
+/**
+ * Issue #423 (M10-S2): `ChildRuntime.steer`'s port signature (`runtime.ts`,
+ * out of this issue's `Files`) has no source marker — the engine's own
+ * `causal` (engine.ts:304-308) never carries one. Rather than widen the
+ * port (which every OTHER `ChildRuntime` implementation would then have to
+ * satisfy), the decorator's OWN `steer` grows a 4th parameter, `source`,
+ * only visible through this wider type: any caller that holds the plain
+ * `ChildRuntime` the port declares keeps calling `steer` with 3 args and
+ * gets `"engine"` by default (what the engine's schema-retry steer already
+ * does); a caller that holds the concrete `AuditedChildRuntime` — the
+ * operator-steer tool of a later issue (S3) — can pass `"operator"`
+ * explicitly. `runtime.ts` stays untouched.
+ */
+export interface AuditedChildRuntime extends ChildRuntime {
+  readonly steer: (
+    id: string,
+    prompt: string,
+    causalContext?: CausalContext,
+    source?: "engine" | "operator",
+  ) => Awaitable<void>;
+}
 
 // `pending` is a mutable counter, same pattern as `auditedToolDispatch`'s own
 // local `state: { reached }` below — how many of THIS leaf's tool dispatches
@@ -172,8 +195,23 @@ function auditedToolDispatch(
 export function auditedChildRuntime(
   inner: ChildRuntime,
   deps: AuditedChildRuntimeDeps,
-): ChildRuntime {
+): AuditedChildRuntime {
   const open = new Map<string, OpenLeaf>();
+  // Issue #423: `steer()`'s identity source. NOT `open` — `close()` deletes
+  // a leaf's `open` entry at its FIRST terminal `collect()` (`status:
+  // "complete"`, unconditionally, before the engine ever checks a schema),
+  // so a schema-retry's `steer()` — called AFTER that terminal, on the SAME
+  // id — always finds `open.get(id) === undefined`. This registry is
+  // populated once, at `spawn()`, alongside `open`, and NEVER deleted by
+  // `close()`: bounded by the leaves ONE acquisition spawns (the same
+  // lifetime `open` has — a fresh decorator instance per `launch`/
+  // `launchDurable`, service.ts), never read once that stretch ends.
+  // Consequence: `leaf.steered.attempt` is always the SPAWN attempt (the
+  // same one `leaf.started`/`tool.*` for that `sub_id` carry), not a
+  // retry index the engine may have bumped for the `causalContext` argument
+  // `steer()` itself received (still passed through to `inner.steer`
+  // unchanged, just not used for this event's identity).
+  const identities = new Map<string, Readonly<{ runId: string; causal: CausalContext }>>();
 
   function record(runId: string, input: AuditInput): void {
     recordAuditEvent(deps, runId, input);
@@ -208,11 +246,12 @@ export function auditedChildRuntime(
     });
   }
 
-  const runtime: ChildRuntime = {
+  const runtime: AuditedChildRuntime = {
     async spawn(request: ChildSpawnRequest): Promise<string> {
       const id = await inner.spawn(request);
       const cc = request.causalContext;
       open.set(id, { runId: cc.runId, causal: cc, pending: { count: 0 } });
+      identities.set(id, { runId: cc.runId, causal: cc });
       record(cc.runId, {
         event_type: "leaf.started",
         segment_id: cc.segmentId,
@@ -277,8 +316,39 @@ export function auditedChildRuntime(
         close(id, "leaf.failed", { status: "cancelled", reason: "cancelled" });
       }
     },
-    steer: (id: string, prompt: string, causalContext?: CausalContext) =>
-      inner.steer(id, prompt, causalContext),
+    // Issue #423: `leaf.steered` is metadata-only — never the prompt text,
+    // only `message_chars` (same `Array.from(...).length` convention this
+    // file's own `clipped` helper — audit-model.ts — uses for unicode-safe
+    // counts). Identity comes from `identities.get(id).causal` (declared
+    // above, next to `open`) — a schema retry's `steer` (engine.ts:304-308)
+    // runs AFTER the leaf's `open` entry is already gone (its first
+    // `collect()` returned `status: "complete"`, closing it, BEFORE the
+    // engine's own schema check runs) — never the (possibly bumped-attempt)
+    // `causalContext` argument this call carries, which still passes
+    // through to `inner.steer` unchanged. A `steer` on an id this decorator
+    // never spawned still delegates, just without an audit event — same
+    // fail-open-to-the-port rule `auditedToolDispatch` follows when `open`
+    // has no entry.
+    steer: (
+      id: string,
+      prompt: string,
+      causalContext?: CausalContext,
+      source: "engine" | "operator" = "engine",
+    ) => {
+      const identity = identities.get(id);
+      if (identity !== undefined) {
+        const cc = identity.causal;
+        record(identity.runId, {
+          event_type: "leaf.steered",
+          segment_id: cc.segmentId,
+          node_id: cc.nodePath.at(-1) ?? null,
+          sub_id: id,
+          attempt: cc.attempt,
+          payload: { source, message_chars: Array.from(prompt).length },
+        });
+      }
+      return inner.steer(id, prompt, causalContext);
+    },
     // `causalSnapshot` only delegates. `exactOptionalPropertyTypes` requires
     // these be OMITTED, not assigned `undefined`, when `inner` does not have
     // one.
