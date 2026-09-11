@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { loadProjectContext, buildSystemPrompt } from "../context/index.js";
 import { readCodexModel } from "../auth/codex.js";
 import { resolveAuthRoute, resolveCredentials } from "../auth/credentials.js";
-import { RefreshFailedError } from "../auth/errors.js";
+import { RefreshFailedError, TokenPersistError } from "../auth/errors.js";
 import { ClientPool } from "../agent/client-pool.js";
 import {
   AnthropicMessagesModel,
@@ -175,7 +175,18 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       // Codex token) never touches the network, so re-resolving through
       // runChatBoundary is harmless and stays byte-identical to before
       // (tests/auth-cli.test.ts pins that shape).
-      if (error instanceof RefreshFailedError)
+      //
+      // `TokenPersistError` (issue #354: the refresh POST itself succeeded,
+      // only the disk write failed) needs the same direct treatment for a
+      // different reason (issue #357): the refresh_token the provider
+      // handed back has already been rotated, so a second attempt through
+      // runChatBoundary re-reads the OLD token still on disk and retries
+      // the refresh with a value the provider already invalidated — not
+      // recoverable by retrying, only by fixing the disk and rerunning.
+      // `TokenPersistError.message` already names the path and cause
+      // without echoing any token value (`credentials.ts`), so it is safe
+      // to surface as-is.
+      if (error instanceof RefreshFailedError || error instanceof TokenPersistError)
         return initializationError(input, null, error.message);
       return runChatBoundary({ home: options.home, codexHome: options.codexHome, input });
     }
