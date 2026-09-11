@@ -1,224 +1,263 @@
-// Issue #403 (M8-7, épico #396): `ChildResult.forcedFallback` (runtime.ts)
-// was transported end to end — `orchestration-runtime.ts:223` copies it,
-// `engine.ts:332` already checks `collected.forcedFallback === true` to
-// bump `forcingFallbacks` — but its only producer, `child-runner.ts`
-// (:92,:238 before this fix), hardcoded `false` in every branch, so the
-// field could never actually be true and the rollup's `forcing_fallbacks`
-// undercounted real model-level fallbacks.
+// Issue #403 (M8-7, épico #396), rodada 2 — o revisor reprovou a decisão
+// (a) da rodada 1: `providerOverride !== null && modelOverride === null` é
+// o caso NORMAL "nomeei provider e deixei o modelo por conta dele"
+// (`provider` é um ROUTING_FIELDS comum, `src/workflow/nodes.ts:7`), e
+// `pair[0].fallbackModels[0]` (client-pool.ts:149) é o DEFAULT do
+// provedor — usado por `chat.ts`, `wizard.ts` e `dashboard.ts` no caminho
+// feliz, não um sinal de fallback. Nada no código percorre
+// `fallbackModels[1..]`, e um modelo inexistente vira `model_not_found`
+// (transports/error-kinds.ts) sem retry — não existe um sinal real de "a
+// folha trocou de modelo porque o pedido falhou". Decisão corrigida: (b)
+// REMOVER `ChildResult.forcedFallback` (`runtime.ts`) e os três lugares que
+// só repassavam o valor sempre-false que os produtores nunca preenchiam de
+// verdade (`engine.ts:332`, `orchestration-runtime.ts:223`,
+// `audit-runtime.ts:251`) mais `"forced_fallback"` de `BOOLEAN_FIELDS`
+// (`audit-model.ts`, nenhum produtor restante). `forcing_fallbacks`
+// continua alimentado SÓ por `usedFallback` — o engine's próprio fallback
+// de schema forçado (`engine-utils.ts:249-250`: pediu `StructuredOutput` e
+// a folha não fez a chamada, então o texto cru é usado).
 //
-// Decision (measured, not assumed): `configureFor` (client-pool.ts:144-149)
-// already carries a genuine "the leaf's own resolution fell back" signal —
-// `model ??= pair[0].fallbackModels[0] ?? null` (client-pool.ts:146) fires
-// exactly when a spawn names a `provider` override with no explicit `model`
-// override, so resolution had to pick that provider's own default instead
-// of a model the caller actually asked for. That is decidable in
-// `child-runner.ts` from `SpawnConfig.provider`/`SpawnConfig.model` alone
-// (`providerOverride !== null && modelOverride === null`), so option (a) —
-// preencher `forcedFallback: true` in that case — applies; nothing is
-// removed. These tests exercise the REAL `createChildRunner`, the only
-// file that changed, via `ClientPool` + a fake HTTP transport (same molde
-// as `tests/orchestration-child-runner.test.ts`'s "resolves an overridden
-// provider/model" case, which already proves `result.model` becomes the
-// fallback model but never asserted `forcedFallback` before this issue).
+// `src/orchestration/core.ts` (`CollectResult.forcedFallback: boolean`) e
+// `src/orchestration/tools.ts` (o envelope `delegate_task`, 13 chaves
+// pinadas, ADR 0003) NÃO mudam — nunca foram o campo morto; o campo morto
+// era só o repasse em `orchestration-runtime.ts`.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ClientPool } from "../src/agent/client-pool.js";
-import { createChildRunner } from "../src/orchestration/child-runner.js";
-import type { SpawnConfig } from "../src/orchestration/core.js";
-import { getProviderProfile, registerProvider } from "../src/providers/index.js";
-import { openStateDatabase, SessionRepository } from "../src/state/index.js";
-import type { ToolDefinition } from "../src/tools/index.js";
 import {
-  ChatCompletionsClient,
-  ChatCompletionsTransport,
-  type ChatHttpPort,
-  type ChatHttpRequest,
-  type HttpResponseData,
-} from "../src/transports/index.js";
-
-const encoder = new TextEncoder();
-const noSignal = new AbortController().signal;
-
-// contract L2: children always stream (see orchestration-child-runner.test.ts).
-function sseResponse(frames: readonly unknown[]): HttpResponseData {
-  const body = frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join("");
-  return {
-    status: 200,
-    headers: new Headers({ "content-type": "text/event-stream" }),
-    body: encoder.encode(body),
-  };
-}
-
-function assistantStream(text: string): HttpResponseData {
-  return sseResponse([
-    { choices: [{ delta: { content: text }, finish_reason: "stop" }] },
-    { choices: [], usage: { prompt_tokens: 3, completion_tokens: 2 } },
-  ]);
-}
-
-class QueuePort implements ChatHttpPort {
-  constructor(private readonly queue: Array<HttpResponseData | Error>) {}
-  post(request: ChatHttpRequest): Promise<HttpResponseData> {
-    void request;
-    const value = this.queue.shift();
-    if (value instanceof Error) return Promise.reject(value);
-    if (value === undefined) return Promise.reject(new Error("queue exhausted"));
-    return Promise.resolve(value);
-  }
-}
-
-function fakeClient(queue: Array<HttpResponseData | Error>): ChatCompletionsClient {
-  return new ChatCompletionsClient({
-    baseUrl: "http://parent.invalid/v1",
-    apiKey: "lohra-local",
-    transport: new ChatCompletionsTransport(),
-    http: new QueuePort(queue),
-  });
-}
+  OrchestrationCore,
+  type ChildRunner,
+  type CollectResult,
+} from "../src/orchestration/core.js";
+import {
+  openStateDatabase,
+  WorkflowRepository,
+  LockRepository,
+  AuditRepository,
+} from "../src/state/index.js";
+import { AuditTrail } from "../src/workflow/audit-trail.js";
+import type {
+  CausalContext,
+  ChildResult,
+  ChildRuntime,
+  ChildSpawnRequest,
+  LeafSandboxHandle,
+} from "../src/workflow/runtime.js";
+import { WorkflowEngine, validateSpec } from "../src/workflow/index.js";
+import { OrchestrationChildRuntime } from "../src/workflow/orchestration-runtime.js";
+import { WorkflowService, type OwnershipStore } from "../src/workflow/service.js";
 
 const roots: string[] = [];
-
-function setup(): { readonly sessions: SessionRepository; readonly close: () => void } {
-  const root = mkdtempSync(join(tmpdir(), "lohra-forced-fallback-"));
-  roots.push(root);
-  const connection = openStateDatabase(join(root, "state.db"));
-  return {
-    sessions: new SessionRepository(connection.database, () => 1000, connection.ftsEnabled),
-    close: () => {
-      connection.close();
-    },
-  };
-}
 
 afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop() as string, { recursive: true, force: true });
 });
 
-const parentTools: readonly ToolDefinition[] = [
-  { type: "function", function: { name: "read_file", description: "", parameters: {} } },
-];
+function ok(output: string): CollectResult {
+  return {
+    status: "complete",
+    output,
+    tokensIn: 1,
+    tokensOut: 1,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    reasoningTokens: 0,
+    provider: "test",
+    model: "test-model",
+    forcedFallback: false,
+    errorKind: null,
+    retryAfter: null,
+  };
+}
 
-function makeRunner(sessions: SessionRepository, clientPool: ClientPool) {
-  return createChildRunner({
-    sessions,
-    parentSessionId: "parent-1",
-    clientPool,
-    baseDispatch: () => Promise.resolve("should not be called"),
-    parentToolDefinitions: parentTools,
-    defaultModel: "fake-model-a",
-    cwd: "/tmp",
-    idSource: () => "unused",
-    clock: () => 1000,
-    childMaxIterations: 50,
+function makeCore(runChild: ChildRunner): OrchestrationCore {
+  let n = 0;
+  return new OrchestrationCore({
+    runChild,
+    idSource: () => {
+      n += 1;
+      return `leaf-${String(n)}`;
+    },
+    maxSubsessions: 100,
+    maxParallel: 10,
+    buildSubagentPrompt: () => "SYS",
   });
 }
 
-describe("createChildRunner — forcedFallback (#403)", () => {
-  it("is true when a provider override carries no explicit model (client-pool falls back to the provider's own default)", async () => {
-    const { sessions, close } = setup();
-    sessions.createSession({ id: "parent-1", source: "gateway" });
-    const parentProfile = getProviderProfile("openai");
-    if (parentProfile === null) throw new Error("openai profile missing");
-    const parentClient = fakeClient([assistantStream("parent should not answer")]);
-    const altProfile = {
-      ...parentProfile,
-      name: "zforcedfallbackalt",
-      aliases: [],
-      fallbackModels: ["alt-fallback-model"],
-      requiresApiKey: false,
-    };
-    registerProvider(altProfile);
-    const altClient = fakeClient([assistantStream("hi from alt provider")]);
-    const pool = new ClientPool(parentProfile, parentClient, {
-      home: "/tmp",
-      environment: {},
-      build: () => altClient,
+function causal(runId: string): CausalContext {
+  return Object.freeze({
+    runId,
+    segmentId: "seg-1",
+    nodePath: Object.freeze(["a"]),
+    cellId: "a:0",
+    role: "leaf",
+    attempt: 0,
+    turn: 0,
+  });
+}
+
+function spawnRequest(runId: string): ChildSpawnRequest {
+  return { prompt: "do it", causalContext: causal(runId) };
+}
+
+describe("ChildResult never carries forcedFallback (#403, decisão b: removido)", () => {
+  it("OrchestrationChildRuntime.collect() never sets a forcedFallback key — the only real producer was the repass at orchestration-runtime.ts:223, now deleted", async () => {
+    const runChild: ChildRunner = () => Promise.resolve(ok("done"));
+    const runtime = new OrchestrationChildRuntime(makeCore(runChild));
+    const id = runtime.spawn(spawnRequest("run-1"));
+    const result = await runtime.collect(id, { wait: true, timeoutSeconds: 5 });
+
+    expect(result.status).toBe("complete");
+    // RED on base: orchestration-runtime.ts:223 wrote `forcedFallback:
+    // result.forcedFallback` unconditionally — even when the value is
+    // `false`, the KEY is present. After the fix the key does not exist at
+    // all: nothing computes a real value for it, so nothing should claim to.
+    expect(Object.hasOwn(result, "forcedFallback")).toBe(false);
+    // Sibling optional keys `collect()` DOES still compute are unaffected —
+    // proves this is a targeted deletion, not an accidental payload wipe.
+    expect(Object.hasOwn(result, "usageUncertain")).toBe(true);
+    expect(Object.hasOwn(result, "sandboxRefusals")).toBe(true);
+  });
+});
+
+describe("forcing_fallbacks only rises from the engine's own forced-schema fallback (#403)", () => {
+  /** One leaf per spawn, scripted `collect()` results in call order — same
+   * molde as `tests/workflow-fault-kinds.test.ts`'s `FakeRuntime`. The cast
+   * lets a script smuggle a stray `forcedFallback` property past the
+   * `ChildResult` type (which no longer declares it) — exactly what a
+   * misbehaving or stale producer might still send; the engine has to
+   * ignore it regardless of shape. */
+  class FakeRuntime implements ChildRuntime {
+    private readonly byId = new Map<string, ChildResult[]>();
+    private readonly scripts: ChildResult[][];
+
+    constructor(scripts: ChildResult[][]) {
+      this.scripts = scripts.map((script) => [...script]);
+    }
+
+    spawn(request: ChildSpawnRequest): string {
+      void request;
+      const id = `leaf-${String(this.byId.size + 1)}`;
+      this.byId.set(id, this.scripts.shift() ?? []);
+      return id;
+    }
+
+    collect(id: string): ChildResult {
+      const script = this.byId.get(id) ?? [];
+      return script.shift() ?? { status: "failed", output: "script exhausted" };
+    }
+
+    steer(): void {}
+    cancel(): void {}
+
+    installLeafSandbox(): LeafSandboxHandle {
+      return { dispose: (): void => undefined };
+    }
+  }
+
+  function parsedSpec(raw: unknown) {
+    const result = validateSpec(raw);
+    if ("issues" in result) throw new Error(result.message);
+    return result;
+  }
+
+  it("a leaf that reports a stray forcedFallback:true never increments forcing_fallbacks — only the engine's own StructuredOutput miss does", async () => {
+    const rogue = {
+      status: "complete",
+      output: "ignored, no schema on this node",
+      forcedFallback: true,
+    } as unknown as ChildResult;
+    const runtime = new FakeRuntime([[rogue]]);
+    const spec = parsedSpec({
+      meta: { name: "rogue-forced-fallback" },
+      nodes: [{ id: "a", type: "agent", prompt: "x" }],
     });
-    const runner = makeRunner(sessions, pool);
 
-    const config: SpawnConfig = { prompt: "do the thing", provider: "zforcedfallbackalt" };
-    const result = await runner("child-forced-1", config, "SYS", () => [], noSignal);
+    const result = await new WorkflowEngine({ runtime }).run(spec);
 
     expect(result.status).toBe("complete");
-    expect(result.provider).toBe("zforcedfallbackalt");
-    expect(result.model).toBe("alt-fallback-model");
-    // The bug: before #403's fix, this was hardcoded false in every branch
-    // of child-runner.ts's zeroResult, so forcing_fallbacks could never
-    // actually rise for a leaf that switched models on its own.
-    expect(result.forcedFallback).toBe(true);
-    close();
+    // RED on base: engine.ts:332 read `collected.forcedFallback === true`
+    // and bumped the counter to 1 regardless of `usedFallback`. After the
+    // fix, `forcingFallbacks` reads only `usedFallback` (engine's own
+    // forced-schema miss, engine-utils.ts's extractForcedOutput) — a leaf
+    // reporting an out-of-band `forcedFallback` never moves it.
+    expect(result.forcingFallbacks).toBe(0);
   });
+});
 
-  it("stays false when the provider override also names an explicit model — nothing was chosen FOR the leaf", async () => {
-    const { sessions, close } = setup();
-    sessions.createSession({ id: "parent-1", source: "gateway" });
-    const parentProfile = getProviderProfile("openai");
-    if (parentProfile === null) throw new Error("openai profile missing");
-    const parentClient = fakeClient([assistantStream("parent should not answer")]);
-    const altProfile = {
-      ...parentProfile,
-      name: "zforcedfallbackexplicit",
-      aliases: [],
-      fallbackModels: ["alt-fallback-model"],
-      requiresApiKey: false,
+describe("audit ledger + workflow_status: forced_fallback never appears, forcing_fallbacks unaffected (#403)", () => {
+  function harness() {
+    const root = mkdtempSync(join(tmpdir(), "lohra-forced-fallback-audit-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    const repository = new WorkflowRepository(connection.database);
+    const locks = new LockRepository(connection.database);
+    const audit = new AuditRepository(connection.database);
+    const trail = new AuditTrail(audit);
+    const ownership = { fence: 0, holder: "test", now: 1000 };
+    const store: OwnershipStore = {
+      repository,
+      locks,
+      holder: "test",
+      ttl: 900,
+      ownershipOf: () => ownership,
+      database: connection.database,
     };
-    registerProvider(altProfile);
-    const altClient = fakeClient([assistantStream("hi from alt provider, explicit model")]);
-    const pool = new ClientPool(parentProfile, parentClient, {
-      home: "/tmp",
-      environment: {},
-      build: () => altClient,
-    });
-    const runner = makeRunner(sessions, pool);
-
-    const config: SpawnConfig = {
-      prompt: "do the thing",
-      provider: "zforcedfallbackexplicit",
-      model: "requested-model",
+    const runtime: ChildRuntime = {
+      spawn: (() => {
+        let seq = 0;
+        return () => {
+          seq += 1;
+          return `leaf-${String(seq)}`;
+        };
+      })(),
+      collect: () => ({ status: "complete", output: "pong" }),
+      steer: () => undefined,
+      cancel: () => undefined,
+      installLeafSandbox: () => ({ dispose: (): void => undefined }),
     };
-    const result = await runner("child-forced-2", config, "SYS", () => [], noSignal);
+    const service = new WorkflowService({ runtime, auditTrail: trail, store });
+    return {
+      service,
+      audit,
+      close: (): void => {
+        connection.close();
+      },
+    };
+  }
 
-    expect(result.status).toBe("complete");
-    expect(result.model).toBe("requested-model");
-    expect(result.forcedFallback).toBe(false);
-    close();
-  });
+  it("leaf.completed's audit payload never carries forced_fallback, and workflow_status's forcing_fallbacks is unaffected", async () => {
+    const { service, audit, close } = harness();
+    try {
+      const started = service.start({
+        meta: { name: "audit-forced-fallback" },
+        nodes: [{ id: "a", type: "agent", prompt: "hi" }],
+      });
+      if ("error" in started) throw new Error(started.error);
+      const status = await service.status(started.run_id, true);
 
-  it("stays false with no provider override — the parent's own client/model path is untouched", async () => {
-    const { sessions, close } = setup();
-    sessions.createSession({ id: "parent-1", source: "gateway" });
-    const parentProfile = getProviderProfile("openai");
-    if (parentProfile === null) throw new Error("openai profile missing");
-    const parentClient = fakeClient([assistantStream("hi from the parent's own client")]);
-    const pool = new ClientPool(parentProfile, parentClient, { home: "/tmp", environment: {} });
-    const runner = makeRunner(sessions, pool);
+      const page = audit.query({ runId: started.run_id, limit: 50 });
+      const completed = page.events.find((event) => event.event_type === "leaf.completed");
+      if (completed === undefined) throw new Error("no leaf.completed event recorded");
 
-    const result = await runner("child-forced-3", { prompt: "hi" }, "SYS", () => [], noSignal);
+      // RED on base: audit-runtime.ts:251 always wrote `forced_fallback:
+      // result.forcedFallback === true` — present (as `false`) even though
+      // no producer ever made it true. After the fix the key is gone
+      // entirely, while its sibling `usage_uncertain` (a real, still-wired
+      // field) proves this isn't an accidental full-payload wipe.
+      expect(Object.hasOwn(completed.data, "forced_fallback")).toBe(false);
+      expect(Object.hasOwn(completed.data, "usage_uncertain")).toBe(true);
 
-    expect(result.status).toBe("complete");
-    expect(result.model).toBe("fake-model-a");
-    expect(result.forcedFallback).toBe(false);
-    close();
-  });
-
-  it("stays false when resolution itself fails (unknown provider) — nothing was actually resolved to fall back to", async () => {
-    const { sessions, close } = setup();
-    sessions.createSession({ id: "parent-1", source: "gateway" });
-    const parentProfile = getProviderProfile("openai");
-    if (parentProfile === null) throw new Error("openai profile missing");
-    const parentClient = fakeClient([assistantStream("unused")]);
-    const pool = new ClientPool(parentProfile, parentClient, { home: "/tmp", environment: {} });
-    const runner = makeRunner(sessions, pool);
-
-    const config: SpawnConfig = { prompt: "do the thing", provider: "z-unknown-provider" };
-    const result = await runner("child-forced-4", config, "SYS", () => [], noSignal);
-
-    expect(result.status).toBe("error");
-    expect(result.forcedFallback).toBe(false);
-    close();
+      // Propagation to workflow_status (service-rollup.ts's resultView,
+      // untouched by this fix): forcing_fallbacks stays wired to the
+      // engine's own counter, unaffected by removing the dead field.
+      expect(status).not.toBeNull();
+      expect((status as Readonly<Record<string, unknown>>).forcing_fallbacks).toBe(0);
+    } finally {
+      close();
+    }
   });
 });
