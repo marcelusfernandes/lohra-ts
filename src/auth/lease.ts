@@ -5,7 +5,15 @@
 // aqui acoplaria `src/auth/` a `src/state/` sem necessidade. A exclusão
 // mútua vem do próprio SO: `open(path, "wx")` falha com `EEXIST` se o
 // arquivo já existe, e essa falha É a lease ocupada.
-import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs";
+import {
+  closeSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeSync,
+} from "node:fs";
 import { dirname } from "node:path";
 
 interface LeaseRecord {
@@ -52,6 +60,33 @@ function unlinkIfExists(path: string): void {
 }
 
 /**
+ * Fail-closed para o registro em `path` (issue #356): um `readLeaseRecord`
+ * que devolve `null` não distingue "arquivo ausente" de "arquivo presente
+ * mas ilegível" (vazio, truncado, JSON quebrado) — o segundo caso é
+ * exatamente a janela de `createLeaseFile` entre o `open(path, "wx")` (que
+ * já criou o arquivo, é a exclusão mútua) e a escrita do conteúdo terminar.
+ * Um registro válido decide pelo próprio `expiresAt`. Um registro ilegível
+ * é tratado como lease viva até `ttlSeconds` depois do `mtime` do arquivo
+ * (o único relógio disponível quando o conteúdo não diz `expiresAt`) — o
+ * mesmo `ttlSeconds` e o mesmo `now` que decidiriam uma lease legível,
+ * nunca `Date.now()` direto, para não introduzir um segundo relógio nesta
+ * função. Arquivo ausente (`ENOENT`, a lease já foi liberada e removida) é
+ * a única leitura que continua "sem lease viva conhecida".
+ */
+function isLeaseAlive(path: string, ttlSeconds: number, now: number): boolean {
+  const existing = readLeaseRecord(path);
+  if (existing !== null) return existing.expiresAt > now;
+  let mtimeMs: number;
+  try {
+    mtimeMs = statSync(path).mtimeMs;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+  return mtimeMs / 1000 + ttlSeconds > now;
+}
+
+/**
  * Tenta adquirir a lease exclusiva de arquivo em `path` (ex.:
  * `<tokens>.lock`), por `holder`, válida por `ttlSeconds` a partir de `now`
  * (segundos, `Date.now() / 1000` por padrão). `open(path, "wx")` é a
@@ -59,10 +94,13 @@ function unlinkIfExists(path: string): void {
  * encontrada já expirada (processo dono morto sem passar pelo `finally` de
  * `releaseFileLease`) é removida e a criação é retentada exatamente uma
  * vez — nem essa segunda tentativa nem a leitura do registro existente
- * lançam por conta própria; qualquer falha de leitura (arquivo corrompido,
- * removido entre o `EEXIST` e o `readFileSync`) é tratada como "sem lease
- * viva conhecida", não como erro fatal, porque o próximo `open` decide o
- * resultado de qualquer forma.
+ * lançam por conta própria. Uma leitura que falha (`isLeaseAlive` acima)
+ * NÃO decide "sem lease viva": o `unlink` que viria a seguir apagaria o
+ * arquivo que outro processo acabou de criar com `open("wx")` mas ainda
+ * não terminou de escrever, e o próximo `open` desta função tomaria a
+ * lease dele antes do tempo — fail-open na janela que esta função existe
+ * para fechar. `isLeaseAlive` decide por `mtime + ttlSeconds` nesse caso;
+ * só ENOENT (arquivo já liberado) volta a significar "sem lease".
  */
 export function acquireFileLease(
   path: string,
@@ -76,8 +114,7 @@ export function acquireFileLease(
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   }
-  const existing = readLeaseRecord(path);
-  if (existing !== null && existing.expiresAt > now) return false;
+  if (isLeaseAlive(path, ttlSeconds, now)) return false;
   unlinkIfExists(path);
   try {
     createLeaseFile(path, { holder, expiresAt: now + ttlSeconds });
