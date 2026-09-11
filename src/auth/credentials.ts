@@ -51,8 +51,14 @@ async function performRefresh(
   try {
     writeTokens(home, updated);
   } catch (error) {
+    // "retry the command" (pre-#356 message) was false on the `chat` path:
+    // the process exits right after this throw (#357 made it terminal),
+    // so the rotated refresh token in `updated` is gone with it, not "not
+    // lost until the process exits". The only thing that survives is what
+    // made it to disk — the caller's actual recovery is `auth login`, not
+    // a retry of the same command.
     throw new TokenPersistError(
-      `the login refresh itself succeeded, but saving it to disk failed (${error instanceof Error ? error.message : String(error)}) — retry the command; the refresh token in memory is not lost until the process exits, but nothing else will see it until the save works`,
+      `the login refresh succeeded but saving it to ${tokenPath(home)} failed (${error instanceof Error ? error.message : String(error)}) — check permissions/disk space and run \`lohra auth login\` again if the previous refresh token was already rotated`,
     );
   }
   return updated;
@@ -66,8 +72,20 @@ async function performRefresh(
  * se a espera acabar e o token no disco ainda estiver expirando (o dono
  * pode ter morrido antes de escrever), esta chamada tenta adquirir a
  * lease ela mesma, agora livre para tomar a lease órfã de volta.
+ *
+ * Exportada (issue #356) só para o teste chamá-la direto: `own` é um
+ * parâmetro explícito, então um teste pode fabricar um `own` propositalmente
+ * atrasado sem precisar de uma corrida de verdade entre dois `resolveCredentials`.
+ *
+ * Quem ADQUIRE também relê antes de chamar `performRefresh` (issue #356):
+ * `own` é o snapshot que o CHAMADOR leu antes até de tentar a lease — se
+ * outro processo já tiver renovado e liberado a lease bem a tempo, gravar
+ * `own` de novo seria um POST redundante com um `refreshToken`
+ * potencialmente já rotacionado. A releitura mora DENTRO do `try`, então o
+ * `finally` sempre libera a lease, tenha ela sido usada para um refresh de
+ * verdade ou não.
  */
-async function refreshUnderLease(
+export async function refreshUnderLease(
   home: string,
   own: OAuthTokens,
   now: number,
@@ -93,6 +111,8 @@ async function refreshUnderLease(
     }
     if (acquired) {
       try {
+        const underLease = readTokens(home);
+        if (underLease !== null && !isExpiringSoon(underLease, now)) return underLease;
         return await performRefresh(home, own, oauthPost);
       } finally {
         try {
@@ -109,7 +129,10 @@ async function refreshUnderLease(
         }
       }
     }
-    await waitForFileLease(lockPath, { maxWaitMs: REFRESH_LEASE_TTL_SECONDS * 1000 });
+    await waitForFileLease(lockPath, {
+      maxWaitMs: REFRESH_LEASE_TTL_SECONDS * 1000,
+      ttlSeconds: REFRESH_LEASE_TTL_SECONDS,
+    });
     const latest = readTokens(home);
     if (latest !== null && !isExpiringSoon(latest, now)) return latest;
   }

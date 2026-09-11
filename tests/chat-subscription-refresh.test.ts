@@ -145,7 +145,7 @@ describe("runChat treats a successful refresh whose disk write fails as terminal
     // chat-boundary hardcodes `model: "gpt-5.5"` in its envelope; reaching
     // this codepath directly (not through the boundary) keeps it null.
     expect(envelope.model).toBeNull();
-    expect(envelope.error).toContain("saving it to disk failed");
+    expect(envelope.error).toContain("check permissions/disk space");
     // chat-boundary's own catch prefixes with "subscription mode: " —
     // absence of that prefix confirms this went through the direct
     // interception, not a second round-trip through the boundary.

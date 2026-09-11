@@ -1,4 +1,12 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -24,6 +32,8 @@ import {
   setPreference,
   startDeviceLogin,
   status,
+  tokenPath,
+  waitForFileLease,
   writeConfig,
   writeTokens,
 } from "../src/auth/index.js";
@@ -393,6 +403,18 @@ describe("oauth and credentials", () => {
     expect(error.message).not.toContain("old-access");
     expect(error.message).not.toContain("new-access");
     expect(error.message).not.toContain("new-refresh");
+    // Veredito da PR #359 (#357) e da rodada 1 da PR #361 (#356): a
+    // mensagem antiga terminava em "retry the command; the refresh token
+    // in memory is not lost until the process exits" -- falso no caminho
+    // do `chat`, onde o processo sai logo depois deste throw (#357 tornou
+    // o erro terminal) e o refresh_token rotacionado em memória se perde
+    // com ele. A recuperação de verdade é `auth login`, não repetir o
+    // comando.
+    expect(error.message).toContain(tokenPath(home));
+    expect(error.message).toContain("check permissions/disk space");
+    expect(error.message).toContain("run `lohra auth login` again");
+    expect(error.message).not.toContain("retry the command");
+    expect(error.message).not.toContain("not lost until the process exits");
   });
 
   // Cobre a mitigação de #351 (`credentials.ts`, catch de `performRefresh`):
@@ -470,5 +492,229 @@ describe("token refresh lease (#354)", () => {
     expect(existsSync(lockPath)).toBe(true);
     releaseFileLease(lockPath, "holder-b");
     expect(existsSync(lockPath)).toBe(false);
+  });
+});
+
+// issue #356: o revisor da PR #355 reproduziu, fora do repo, que
+// `readLeaseRecord` (lease.ts:29-30) devolve `null` para um lock ilegível
+// (vazio, truncado) — a mesma janela em que `createLeaseFile` já fez
+// `open(path, "wx")` (a exclusão mútua) mas ainda não terminou de escrever
+// o conteúdo. `acquireFileLease` (lease.ts:80-81, base) tratava esse `null`
+// como "sem lease viva", apagava o lock recém-criado e tomava a lease de
+// volta antes do tempo — fail-open na primitiva que devia ser exclusiva.
+describe("lease fail-closed com lock ilegível (#356)", () => {
+  it("um lock vazio recém-criado não é tomado antes do TTL, fail-closed", () => {
+    const home = root();
+    const lockPath = join(home, "oauth.json.lock");
+    // Simula a janela: o arquivo existe (como logo depois do `open("wx")`),
+    // mas o conteúdo ainda não foi escrito.
+    writeFileSync(lockPath, "");
+    expect(acquireFileLease(lockPath, "holder-b", 5)).toBe(false);
+    // Passado o TTL (recuando o mtime do próprio arquivo, não o relógio do
+    // teste — é o único relógio que um lock ilegível tem), a lease órfã
+    // volta a poder ser tomada: o fail-closed não é permanente.
+    const past = new Date(Date.now() - 6_000);
+    utimesSync(lockPath, past, past);
+    expect(acquireFileLease(lockPath, "holder-c", 5)).toBe(true);
+  });
+
+  // "Dono relê sob a lease" (AC #356): quem ADQUIRE a lease usava sempre o
+  // `own` que o CHAMADOR leu antes de sequer tentar a lease
+  // (`credentials.ts:96` na base), mesmo que o disco já tivesse um token
+  // mais novo por baixo. `refreshUnderLease` recebe `own` como parâmetro
+  // explícito, então o teste fabrica um `own` propositalmente atrasado sem
+  // precisar de uma corrida de verdade entre dois `resolveCredentials`.
+  // Import dinâmico (não estático): `refreshUnderLease` só passa a ser
+  // exportado por esta mesma issue, e um `import { refreshUnderLease }`
+  // estático quebraria a CARGA do arquivo de teste contra a base (#356
+  // exporta uma função que já existia, não introduz símbolo novo de
+  // comportamento) — o `typeof` abaixo falha por ASSERÇÃO contra a base,
+  // não por erro de carga.
+  it("dono relê sob a lease: token já renovado por outro não gera segundo POST", async () => {
+    const home = root();
+    writeTokens(home, {
+      accessToken: "stale-access",
+      refreshToken: "stale-refresh",
+      accountId: "acct-t356-reread",
+      expiresAt: 900,
+    });
+    const own = readTokens(home);
+    if (own === null) throw new Error("setup: expected tokens to exist");
+    // "outro processo" já renovou e gravou, entre a leitura acima e a
+    // lease que esta chamada está prestes a adquirir.
+    writeTokens(home, {
+      accessToken: "fresh-access",
+      refreshToken: "fresh-refresh",
+      accountId: "acct-t356-reread",
+      expiresAt: 9_999,
+    });
+    const credentialsModule = await import("../src/auth/credentials.js");
+    expect(typeof credentialsModule.refreshUnderLease).toBe("function");
+    let calls = 0;
+    const oauthPost: OAuthPost = () => {
+      calls += 1;
+      return Promise.resolve([
+        200,
+        { access_token: "post-access", refresh_token: "post-refresh", expires_in: 3600 },
+      ]);
+    };
+    const result = await credentialsModule.refreshUnderLease(home, own, 1_000, oauthPost);
+    expect(calls).toBe(0);
+    expect(result.accessToken).toBe("fresh-access");
+    expect(readTokens(home)?.accessToken).toBe("fresh-access");
+    expect(existsSync(`${tokenPath(home)}.lock`)).toBe(false);
+  });
+});
+
+// issue #356: três ramos de parada citados no veredito da PR #355 e sem
+// teste nem mutante próprio até aqui.
+describe("ramos de parada sem teste (#356)", () => {
+  it("waitForFileLease respeita o deadline mesmo se a lease nunca aparecer livre, perdedor desiste", async () => {
+    vi.useFakeTimers();
+    try {
+      const home = root();
+      const lockPath = join(home, "oauth.json.lock");
+      // now=0 e um TTL enorme: a lease nunca expira do ponto de vista do
+      // relógio injetado — só o `maxWaitMs`/deadline pode terminar a espera.
+      expect(acquireFileLease(lockPath, "holder-a", 1_000_000, 0)).toBe(true);
+      const sleep = vi.fn((ms: number) => {
+        vi.advanceTimersByTime(ms);
+        return Promise.resolve();
+      });
+      await waitForFileLease(lockPath, {
+        maxWaitMs: 100,
+        ttlSeconds: 1_000_000,
+        pollMs: 10,
+        now: () => 0,
+        sleep,
+      });
+      // 100ms / 10ms de poll: exatamente 10 sondagens antes do deadline
+      // bater — nem uma a mais (a espera não é indefinida, invariante 3),
+      // nem uma a menos (não desiste antes da hora).
+      expect(sleep).toHaveBeenCalledTimes(10);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Veredito da rodada 1 da PR #361 (#356): `waitForFileLease` ainda lia
+  // `readLeaseRecord` direto e tratava `null` como "lease sumiu" -- os dois
+  // leitores da lease discordavam sobre o que é viva (`acquireFileLease` já
+  // usava `isLeaseAlive`, issue #356). Com um lock ilegível persistente, o
+  // perdedor voltava imediatamente na primeira sondagem em vez de esperar o
+  // TTL por `mtime` -- exatamente o fail-open que o fail-closed do
+  // `acquireFileLease` fecha do outro lado.
+  it("com lock ilegível persistente, o perdedor espera o TTL do mtime em vez de voltar imediatamente", async () => {
+    vi.useFakeTimers();
+    try {
+      const home = root();
+      const lockPath = join(home, "oauth.json.lock");
+      // Lock vazio/ilegível: mtime = "agora" no relógio falso (useFakeTimers
+      // preserva a hora real como ponto de partida).
+      writeFileSync(lockPath, "");
+      const sleep = vi.fn((ms: number) => {
+        vi.advanceTimersByTime(ms);
+        return Promise.resolve();
+      });
+      await waitForFileLease(lockPath, {
+        maxWaitMs: 5_000,
+        ttlSeconds: 1,
+        pollMs: 100,
+        sleep,
+      });
+      // TTL de 1s / poll de 100ms: não volta na primeira sondagem (o lock
+      // ainda está "vivo" pelo mtime) -- só depois de ~10, quando
+      // mtime + ttlSeconds passa do relógio avançado. Bem antes do
+      // `maxWaitMs` de 5s (50 sondagens) -- prova que foi o TTL do mtime
+      // que decidiu, não o deadline.
+      expect(sleep.mock.calls.length).toBeGreaterThan(5);
+      expect(sleep.mock.calls.length).toBeLessThan(15);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("lança RefreshFailedError 'lost the renewal lease' quando as duas tentativas esgotam a espera", async () => {
+    vi.useFakeTimers();
+    try {
+      const home = root();
+      enable(home);
+      writeTokens(home, {
+        accessToken: "old-access",
+        refreshToken: "old-refresh",
+        accountId: "acct-t356-lost-lease",
+        expiresAt: 900,
+      });
+      const lockPath = `${tokenPath(home)}.lock`;
+      // Um dono alheio segura a lease por bem mais que as duas janelas de
+      // espera (2 x REFRESH_LEASE_TTL_SECONDS) desta chamada — nunca libera,
+      // nunca expira dentro do tempo que a chamada está disposta a esperar.
+      expect(acquireFileLease(lockPath, "someone-else", 60)).toBe(true);
+      let calls = 0;
+      const oauthPost: OAuthPost = () => {
+        calls += 1;
+        return Promise.resolve([
+          200,
+          { access_token: "unused", refresh_token: "unused", expires_in: 3600 },
+        ]);
+      };
+      const promise = resolveCredentials(home, {
+        now: Date.now() / 1000,
+        codexHome: join(home, "codex"),
+        oauthPost,
+      });
+      const assertion = expect(promise).rejects.toThrow("lost the renewal lease");
+      // 2 tentativas x 10s (REFRESH_LEASE_TTL_SECONDS) de espera cada.
+      await vi.advanceTimersByTimeAsync(20_000);
+      await assertion;
+      let caught: unknown;
+      try {
+        await promise;
+      } catch (error) {
+        caught = error;
+      }
+      expect((caught as Error).name).toBe("RefreshFailedError");
+      expect(calls).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("acquireFileLease lançando um erro que não é EEXIST vira TokenPersistError, não RefreshFailedError", async () => {
+    const home = root();
+    enable(home);
+    writeTokens(home, {
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      accountId: "acct-t356-lease-throws",
+      expiresAt: 900,
+    });
+    // `home` sem permissão de escrita: `mkdirSync` recursivo num diretório
+    // que já existe não precisa escrever e passa, mas `openSync(lockPath,
+    // "wx")` dentro de `createLeaseFile` falha com EACCES -- um erro que
+    // não é EEXIST, então `acquireFileLease` propaga em vez de devolver
+    // `false`.
+    chmodSync(home, 0o500);
+    let caught: unknown;
+    try {
+      await resolveCredentials(home, {
+        now: 1_000,
+        codexHome: join(home, "codex"),
+        oauthPost: () =>
+          Promise.resolve([
+            200,
+            { access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 },
+          ]),
+      });
+    } catch (error) {
+      caught = error;
+    } finally {
+      chmodSync(home, 0o700);
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const error = caught as Error;
+    expect(error.name).toBe("TokenPersistError");
+    expect(error.name).not.toBe("RefreshFailedError");
+    expect(error.message).not.toContain("old-access");
   });
 });

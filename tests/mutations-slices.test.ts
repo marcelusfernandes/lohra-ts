@@ -480,7 +480,7 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 221 (soma dos doze catálogos importados)", () => {
+  it("a contagem total de mutantes é 226 (soma dos doze catálogos importados)", () => {
     // Os doze catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
@@ -494,9 +494,13 @@ describe("scripts/mutations/slices.json", () => {
     // (issue #370) é o décimo segundo, estendendo a fatia
     // `workflow-audit-live` aos produtores do M7: 196 + 18 = 214. A mesma
     // issue #370 deixou quatro lacunas de oráculo/mutante que #383 fecha (7
-    // mutantes: R6, L4, W1, M1, W2, T3, PD): 214 + 7 = 221.
+    // mutantes: R6, L4, W1, M1, W2, T3, PD): 214 + 7 = 221. A issue #356
+    // (fail-closed do lock ilegível, releitura do dono sob a lease, deadline
+    // do perdedor, rodada 1; `waitForFileLease` concordando com
+    // `acquireFileLease` sobre lock ilegível, rodada 2) estendeu
+    // `auth-mutants.ts` de 8 para 13, +5: 221 + 5 = 226.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 221;
+    const TOTAL_MUTANTS = 226;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -520,14 +524,14 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/self-update-mutants.ts": 8,
       "scripts/mutations/workflow-executor-mutants.ts": 44,
       "scripts/mutations/context-window.ts": 15,
-      "scripts/mutations/auth-mutants.ts": 8,
+      "scripts/mutations/auth-mutants.ts": 13,
     };
     expect(new Set(Object.keys(CONTAGEM_POR_CATALOGO))).toEqual(new Set(CATALOGOS.keys()));
     for (const [path, mutants] of CATALOGOS) {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(221);
+    expect(somaTabela).toBe(226);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {
