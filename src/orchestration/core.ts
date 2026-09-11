@@ -11,12 +11,19 @@ import type { CausalContext } from "../workflow/runtime.js";
 
 export type SubSessionStatus = "running" | "complete" | "error" | "interrupted";
 
-/** Per-leaf ceiling on accepted `steer()` calls (issue #422, invariant 3:
- * budget/fan-out never unbounded) — a lifetime cap on the SUB_SESSION, not
- * per turn: it never resets across a steer-driven resurrection. Named so a
- * mutant that inlines a different number is visible in a diff/review, not
- * just in test output. */
-export const MAX_STEERS_PER_LEAF = 10;
+/** Ceiling on a single leaf's PENDING inbox (issue #422, invariant 3:
+ * budget/fan-out never unbounded) — this bounds `entry.inbox.length` at the
+ * instant of a `steer()` call while the leaf is busy, never a lifetime
+ * total: `drainInboxFor` (the runner's own per-iteration hook) frees a slot
+ * every time it runs, and a steer-driven RESURRECTION (idle/terminal leaf)
+ * never touches the inbox at all, so it can never be capped by this either.
+ * PR #431 round 2 (revisor, reproduced): an earlier lifetime-counter version
+ * of this cap made `delegate_task`'s resume-loop die permanently on its
+ * 11th turn even though each turn drained cleanly — the gap the map (§8)
+ * actually names is the unbounded INBOX, not a cap on how many times a leaf
+ * may ever be steered. Named so a mutant that inlines a different number is
+ * visible in a diff/review, not just in test output. */
+export const MAX_PENDING_STEERS_PER_LEAF = 10;
 
 export interface CollectResult {
   readonly status: SubSessionStatus;
@@ -175,11 +182,6 @@ interface SubSessionEntry {
    * drained by the runner's own iteration loop while this child is busy or
    * queued-in-pool (contract L6). */
   readonly inbox: string[];
-  /** Total ACCEPTED `steer()` calls this leaf has ever received (queued or
-   * resurrecting) — never reset across a resurrection, so `MAX_STEERS_
-   * PER_LEAF` bounds the whole leaf's lifetime, not just one turn. A
-   * refused call (already at the cap) does not increment this. */
-  steerCount: number;
   /** The causal identity attached to the MOST RECENT accepted steer() call,
    * if any — stored for S2's `leaf.steered` audit event (issue #423); never
    * consulted by steer()/collect() themselves. A refused call never
@@ -232,7 +234,6 @@ export class OrchestrationCore {
       promise,
       abortController,
       inbox: [],
-      steerCount: 0,
     });
     this.insertionOrder.push(subId);
     return { subId };
@@ -282,12 +283,18 @@ export class OrchestrationCore {
    * `causal` (issue #422) is optional and carried straight from the caller
    * (`OrchestrationChildRuntime.steer`, `ChildRuntime.steer`'s 3rd
    * argument) — stored on the entry for S2's audit event, never consulted
-   * here. Above `MAX_STEERS_PER_LEAF` accepted calls, this refuses instead
-   * of queuing or resurrecting: never throws (a fault here would abort
-   * whatever caller triggered it — the schema-retry loop, an operator tool,
-   * or `delegate_task`'s resume path — none of which should crash over a
-   * fan-out limit) and never silently drops the text either — the caller
-   * gets `refused: "steer_cap"` back to act on.
+   * here.
+   *
+   * Above `MAX_PENDING_STEERS_PER_LEAF` texts already sitting in `inbox`
+   * (busy path only — a resurrection never touches the inbox, so it is
+   * never capped by this), this refuses instead of queuing: never throws (a
+   * fault here would abort whatever caller triggered it — the schema-retry
+   * loop, an operator tool, or `delegate_task`'s resume path — none of
+   * which should crash over a fan-out limit) and never silently drops the
+   * text either — the caller gets `refused: "steer_cap"` back to act on.
+   * Production callers (`orchestration/tools.ts`) turn this into a named
+   * `toolError` instead of the byte-identical success envelope a bare
+   * `{queued: false}` would otherwise produce (PR #431 round 2).
    */
   public steer(
     subId: string,
@@ -296,18 +303,20 @@ export class OrchestrationCore {
   ): { readonly queued: boolean; readonly refused?: "steer_cap" } | null {
     const entry = this.entries.get(subId);
     if (entry === undefined) return null;
-    if (entry.steerCount >= MAX_STEERS_PER_LEAF) {
-      return { queued: false, refused: "steer_cap" };
-    }
-    entry.steerCount += 1;
-    if (causal !== undefined) entry.causal = causal;
     if (entry.inFlight) {
+      if (entry.inbox.length >= MAX_PENDING_STEERS_PER_LEAF) {
+        return { queued: false, refused: "steer_cap" };
+      }
+      if (causal !== undefined) entry.causal = causal;
       entry.inbox.push(text);
       return { queued: true };
     }
+    if (causal !== undefined) entry.causal = causal;
     // Idle/terminal: resurrect. status/result are left untouched here on
     // purpose — L7/ADR-T13-05 requires collect(wait:false) to keep
     // returning the stale prior result until the new turn actually settles.
+    // Never capped: a resurrection starts a fresh turn, it does not grow
+    // the pending inbox.
     entry.inFlight = true;
     const { promise, abortController } = this.runAndTrack(
       subId,

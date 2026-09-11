@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { ProviderError } from "../src/agent/client-pool.js";
 import { toolError, toolResult } from "../src/tools/envelope.js";
-import { OrchestrationCore, type CollectResult } from "../src/orchestration/core.js";
+import {
+  MAX_PENDING_STEERS_PER_LEAF,
+  OrchestrationCore,
+  type CollectResult,
+} from "../src/orchestration/core.js";
 import {
   collectSessionTool,
   delegateTaskTool,
@@ -185,6 +189,28 @@ describe("steerSessionTool", () => {
       toolError("steer_session requires 'sub_id' and a non-empty 'text'"),
     );
   });
+
+  // PR #431 round 2 (revisor, reproduced): `core.steer`'s `refused:
+  // "steer_cap"` used to reach this tool as a bare `{queued: false}` —
+  // byte-identical to the successful-resurrection envelope above, so an
+  // operator (or the schema-retry loop) could never tell a refusal from a
+  // real success. Red on `origin/main` (no cap at all): the 11th call there
+  // returns the ordinary `queued: true` envelope, never this named error.
+  it("returns a named toolError instead of a silent queued:false when the pending-steer cap is hit", async () => {
+    const core = makeCore(() => new Promise(() => undefined));
+    await spawnSessionTool(core, allowAllProviders, { prompt: "x" });
+    for (let i = 1; i <= 10; i += 1) {
+      expect(steerSessionTool(core, { sub_id: "aaaa", text: `STEER-${String(i)}` })).toBe(
+        toolResult(undefined, { queued: true }),
+      );
+    }
+    const eleventh = steerSessionTool(core, { sub_id: "aaaa", text: "STEER-11" });
+    expect(eleventh).toBe(
+      toolError(
+        `steer refused: steer_cap (${String(MAX_PENDING_STEERS_PER_LEAF)} pending steers on aaaa)`,
+      ),
+    );
+  });
 });
 
 describe("collectSessionTool", () => {
@@ -340,4 +366,37 @@ describe("delegateTaskTool", () => {
       await delegateTaskTool(core, { tasks: ["y"], resume_id: "aaaa", provider: "fakeprov" }),
     ).toBe(toolError("cannot switch provider when resuming a subagent"));
   });
+
+  // PR #431 round 2 (revisor, reproduced): this resume path used to follow
+  // a capped-and-refused `core.steer` straight into `collect(wait:true)`
+  // and report the PREVIOUS turn's summary as though it answered the NEW
+  // one — `ok:true` with stale data, never surfacing the refusal at all.
+  // The fix returns the named error BEFORE ever calling `collect`, so this
+  // never touches the child's own (here permanently unsettled) turn — a
+  // short per-test timeout keeps a regression that removes that early
+  // return (falls through to a `collect` that never settles on this fake
+  // runChild) failing fast on `origin/main` instead of waiting out
+  // vitest's default 5s.
+  it("returns a named toolError instead of a stale summary when the pending-steer cap is hit during resume", async () => {
+    const core = makeCore(() => new Promise(() => undefined));
+    await spawnSessionTool(core, allowAllProviders, { prompt: "first task" });
+    // Fill the pending queue directly via core.steer (bypassing this
+    // tool): a real resume loop would otherwise force a collect(wait:
+    // true) per call, which hangs forever against a runChild that never
+    // settles — the cap itself is what this test is proving, not the
+    // resume tool's own steer+collect plumbing (already covered above).
+    for (let i = 1; i <= MAX_PENDING_STEERS_PER_LEAF; i += 1) {
+      expect(core.steer("aaaa", `STEER-${String(i)}`)).toEqual({ queued: true });
+    }
+
+    const envelope = await delegateTaskTool(core, {
+      tasks: ["follow-up"],
+      resume_id: "aaaa",
+    });
+    expect(envelope).toBe(
+      toolError(
+        `steer refused: steer_cap (${String(MAX_PENDING_STEERS_PER_LEAF)} pending steers on aaaa)`,
+      ),
+    );
+  }, 1000);
 });
