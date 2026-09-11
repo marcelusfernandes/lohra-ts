@@ -160,6 +160,24 @@ function assistantStream(text: string, promptTokens = 5, completionTokens = 1): 
   ]);
 }
 
+// Molde `tests/orchestration-child-runner.test.ts:64` — a tool-call frame,
+// used below to prove the `dead_turn` guard checks BOTH halves of its
+// condition (empty content AND no tool calls), not just the content half.
+function toolCallStream(name: string, args: string, callId: string): HttpResponseData {
+  return sseResponse([
+    {
+      choices: [
+        {
+          delta: { tool_calls: [{ index: 0, id: callId, function: { name, arguments: args } }] },
+          finish_reason: null,
+        },
+      ],
+    },
+    { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+    { choices: [], usage: { prompt_tokens: 5, completion_tokens: 2 } },
+  ]);
+}
+
 class QueuePort implements ChatHttpPort {
   readonly requests: ChatHttpRequest[] = [];
   constructor(private readonly queue: Array<HttpResponseData | Error>) {}
@@ -261,10 +279,97 @@ describe("createChildRunner: dead_turn (#429)", () => {
     expect(result.errorKind).toBeNull();
     close();
   });
+
+  // Guard in child-runner.ts is `content.trim() === "" && toolCalls.length
+  // === 0` — BOTH halves have to hold. This proves the tool-calls half: an
+  // empty final content after a tool call ran earlier in the SAME turn is
+  // real work that produced no closing text, not a dead turn.
+  it("keeps errorKind null when the final content is empty but the turn already executed a tool call", async () => {
+    const { sessions, close } = setup();
+    sessions.createSession({ id: "parent-1", source: "gateway" });
+    const parentProfile = getProviderProfile("openai");
+    if (parentProfile === null) throw new Error("openai profile missing");
+    const client = fakeClient([
+      toolCallStream("read_file", '{"path":"x"}', "call_1"),
+      assistantStream(""),
+    ]);
+    const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
+    const runner = createChildRunner({
+      sessions,
+      parentSessionId: "parent-1",
+      clientPool: pool,
+      baseDispatch: () => Promise.resolve(JSON.stringify({ ok: true, result: "x" })),
+      parentToolDefinitions: parentTools,
+      defaultModel: "fake-model-a",
+      cwd: "/tmp",
+      idSource: () => "unused",
+      clock: () => 1000,
+      childMaxIterations: 50,
+    });
+
+    const result = await runner(
+      "child-tool-then-empty",
+      { prompt: "read x" },
+      "SYS",
+      () => [],
+      noSignal,
+    );
+
+    expect(result.status).toBe("complete");
+    expect(result.output).toBe("");
+    expect(result.errorKind).toBeNull();
+    close();
+  });
+
+  // Proves the content half of the guard uses `.trim()`, not a bare `===
+  // ""` — whitespace-only content with no tool calls is still dead.
+  it("names dead_turn when the final content is whitespace-only and no tool calls ran", async () => {
+    const { sessions, close } = setup();
+    sessions.createSession({ id: "parent-1", source: "gateway" });
+    const parentProfile = getProviderProfile("openai");
+    if (parentProfile === null) throw new Error("openai profile missing");
+    const client = fakeClient([assistantStream("   \n")]);
+    const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
+    const runner = createChildRunner({
+      sessions,
+      parentSessionId: "parent-1",
+      clientPool: pool,
+      baseDispatch: () => Promise.resolve("should not be called"),
+      parentToolDefinitions: parentTools,
+      defaultModel: "fake-model-a",
+      cwd: "/tmp",
+      idSource: () => "unused",
+      clock: () => 1000,
+      childMaxIterations: 50,
+    });
+
+    const result = await runner(
+      "child-whitespace",
+      { prompt: "do nothing" },
+      "SYS",
+      () => [],
+      noSignal,
+    );
+
+    expect(result.status).toBe("complete");
+    expect(result.output).toBe("   \n");
+    expect(result.errorKind).toBe("dead_turn");
+    close();
+  });
 });
 
-describe("dead_turn accepted by the audit allow-list (#429)", () => {
-  it("preserves a leaf.failed error_kind of dead_turn, same as any other ErrorKind vocabulary value", () => {
+// This proves only the ALLOW-LIST MECHANISM (ERROR_KIND_SET, `audit-model
+// .ts:184`), not a real production path: `dead_turn` always arrives with
+// `status: "complete"`, and `audit-runtime.ts`'s `leaf.completed` branch
+// (:242-251) never carries `error_kind` at all — only `leaf.failed`
+// (:253-259, `status: "failed" | "cancelled"`) does, a status `dead_turn`
+// never has. This just confirms the vocabulary check itself would not
+// single out `dead_turn` for exclusion if it ever reached this payload
+// shape — the real place `dead_turn` surfaces is `RunResult.faultKinds`
+// (`accounting.ts`'s `recordFaultKind`, via `debitLeaf`), not a `leaf.*`
+// audit event.
+describe("dead_turn accepted by the audit allow-list mechanism (#429)", () => {
+  it("the ERROR_KIND_SET allow-list would preserve a dead_turn error_kind, same as any other vocabulary value — not a claim that production ever emits leaf.failed with dead_turn", () => {
     const event = publicAuditEvent(
       "r",
       1,
