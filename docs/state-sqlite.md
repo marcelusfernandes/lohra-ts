@@ -63,12 +63,13 @@ de `workflow_audit_state`.
 
 `src/state/notices-repository.ts` (`NoticesRepository`):
 
-- **`kind`** é validado contra `NOTICE_KINDS`, vocabulário FECHADO local (os
-  9 kinds da issue #397 mais `stale_fence_write`, `audit_sink_failure`,
-  `resume_attempts_exhausted`, `queue_overflow`; a unificação com
-  `src/transports/error-kinds.ts` é a issue #401/M8-5). Fora do vocabulário
-  → recusa nomeada via `warning`, `append` devolve `null`, nunca grava, nunca
-  lança.
+- **`kind`** é validado contra `NOTICE_KINDS = [...ERROR_KINDS,
+...STATE_NOTICE_KINDS]` (`notices-repository.ts:18-25`, issue #401/M8-5):
+  os 9 `ErrorKind` de `src/transports/error-kinds.ts` (issue #397) mais
+  `stale_fence_write`, `audit_sink_failure`, `resume_attempts_exhausted`,
+  `queue_overflow` — um vocabulário único em vez de duas listas que podiam
+  divergir. Fora dele → recusa nomeada via `warning`, `append` devolve
+  `null`, nunca grava, nunca lança.
 - **Fence**: `append(scope, {kind, message}, ownership?)` com `scope =
 "run:<id>"` exige `ownership` e aplica o MESMO predicado de dono de
   `audit-repository.ts:196-200` (JOIN `workflow_run_fence`/
@@ -77,8 +78,10 @@ de `workflow_audit_state`.
   `null`, um `refused_writes` a mais (contado por escopo, LRU até
   `maxScopes`) e um único `warning` (nunca dois logs pela mesma recusa,
   mesma decisão da #380 para `AuditRepository`). `scope = "global"` grava
-  sem `ownership` (avisos de processo, sem run associado) — `fence` fica
-  `null` na linha.
+  sem `ownership` — usado tanto para avisos de processo sem run associado
+  quanto, desde #410 (bullet abaixo), como destino de fallback para um aviso
+  `run:<id>` sem dono válido (a mensagem carrega o `run_id` em texto mesmo
+  sob escopo `global`) — `fence` fica `null` na linha em ambos os casos.
 - **Fallback sem dono** (issue #410/M8-8): `createNoticesSink.warnState`
   (`src/workflow/notices-sink.ts`) nunca descarta um `STALE_FENCE_WRITE` só
   porque este processo não tem `ownership` válida do run — sem lease, ou
@@ -104,8 +107,11 @@ next_after_seq, has_more, refused_writes, dropped_before_seq?}`. Por
   `DELETE`. `dropped_before_seq` registra o maior `seq` já descartado
   daquele escopo (avisos com `seq` menor ou igual podem estar faltando).
 
-Fora de escopo aqui: ligar os sinks de produção (`src/workflow/*`) a esta
-tabela e as tools/CLI de leitura — issues #401 e #402 (M8-5/M8-6).
+Esta seção é só a tabela e o repositório (`NoticesRepository`). O sink de
+produção que grava aqui (`createNoticesSink`, um por processo), o mapa de
+`kind` por substring, as duas tools (`workflow_notices`/
+`workflow_notices_ack`) e `lohra workflow notices` — issues #401/#402
+(M8-5/M8-6) — estão em `docs/operator-notices.md`.
 
 ## Referências
 
