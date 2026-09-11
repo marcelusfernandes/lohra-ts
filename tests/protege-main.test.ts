@@ -9,7 +9,7 @@
 // hook executaria (prova que `--repo` e o número da PR são repassados). Sem
 // o portão nenhuma seam é lida e o hook consulta os binários de verdade.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,6 +46,27 @@ function rodar(root: string, command: string, env: Record<string, string>): Hook
     env: { ...limparAmbiente(), ...env },
   });
   return { status: r.status, stderr: r.stderr, stdout: r.stdout };
+}
+
+// Issue #375: sem `LOHRA_BENCH`, o hook não lê nenhuma seam e chama o `gh`
+// real — um caso (linha ~257) passa `--repo o/r`, então a chamada é uma
+// consulta de rede de verdade a um repositório inexistente. Autenticada em
+// CI (`GH_TOKEN: ${{ github.token }}`), ela às vezes não voltava a tempo do
+// timeout default do vitest sob carga do runner (job 103194419974, PR #374:
+// "Test timed out in 5000ms"). Molde de tests/mutations-runner-guard.test.ts
+// (`GIT_SHIM`/`importInSandbox`): um `gh` FAKE no PATH do subprocesso grava
+// um marcador e sai 1, removendo a dependência de rede sem mudar o que o
+// caso afirma (ele já não olhava para o status do hook, só para o arquivo de
+// ARGS_OUT). O marcador prova que o hook realmente foi ao binário — se a
+// pluming do PATH regredir e a chamada real voltar a acontecer, o marcador
+// não existe e o teste falha alto, em vez de voltar a ser flake silencioso.
+const GH_SHIM = "#!/bin/sh\nprintf 'invoked\\n' >> \"$GH_MARKER\"\nexit 1\n";
+
+function stubGh(root: string): { readonly shimDir: string; readonly marker: string } {
+  const shimDir = path.join(root, "gh-stub");
+  mkdirSync(shimDir);
+  writeFileSync(path.join(shimDir, "gh"), GH_SHIM, { mode: 0o755 });
+  return { shimDir, marker: path.join(root, "gh-invoked.marker") };
 }
 
 const CHECKS_VERDES = JSON.stringify([
@@ -256,7 +277,13 @@ describe("protege-main.sh", () => {
 
     it("LOHRA_PM_ARGS_OUT sem LOHRA_BENCH não é lido: nada é gravado", () => {
       const saida = path.join(root, "args-sem-bench.txt");
-      rodar(root, "gh pr merge 5 --repo o/r --merge", { LOHRA_PM_ARGS_OUT: saida });
+      const { shimDir, marker } = stubGh(root);
+      rodar(root, "gh pr merge 5 --repo o/r --merge", {
+        LOHRA_PM_ARGS_OUT: saida,
+        PATH: `${shimDir}:${process.env.PATH ?? ""}`,
+        GH_MARKER: marker,
+      });
+      expect(existsSync(marker)).toBe(true);
       expect(existsSync(saida)).toBe(false);
     });
   });
