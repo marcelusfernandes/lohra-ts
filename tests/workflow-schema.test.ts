@@ -363,6 +363,37 @@ describe("validateSpec", () => {
     expect(isValidationError(result)).toBe(false);
   });
 
+  // Issue #342 (PR #341 review, round 2): `validateTier` only ever read
+  // `node.fields.tier` — a pipeline stage's OWN `tier` (`STAGE_FIELDS`
+  // accepts it because a stage spawns its own leaf, `nodes.ts`) went
+  // straight through with no enum check, so a typo like 'huge' validated
+  // clean and silently fell back to the session's own model at runtime.
+  it("rejects an out-of-enum 'tier' inside a pipeline stage, same rule as the node-level field", () => {
+    const bad = validateSpec({
+      meta: { name: "x" },
+      nodes: [
+        { id: "pipe", type: "pipeline", items: ["x"], stages: [{ prompt: "x", tier: "huge" }] },
+      ],
+    });
+    expect(isValidationError(bad)).toBe(true);
+    if (!isValidationError(bad)) throw new Error("expected validation error");
+    expect(bad.issues[0]).toMatchObject({
+      rule: "field_value",
+      nodeId: "pipe",
+      field: "stages[0].tier",
+    });
+  });
+
+  it("accepts a valid enum 'tier' inside a pipeline stage", () => {
+    const good = validateSpec({
+      meta: { name: "x" },
+      nodes: [
+        { id: "pipe", type: "pipeline", items: ["x"], stages: [{ prompt: "x", tier: "big" }] },
+      ],
+    });
+    expect(isValidationError(good)).toBe(false);
+  });
+
   it("skips the sub-object schema scan (no throw, no schema_* issue) when body/synthesize/a stage is not a record", () => {
     const result = validateSpec({
       meta: { name: "x" },

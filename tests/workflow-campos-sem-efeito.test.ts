@@ -14,6 +14,7 @@ import {
   type ChildRuntime,
   type ChildSpawnRequest,
 } from "../src/workflow/index.js";
+import { contentHash } from "../src/workflow/cache.js";
 import { BUILTIN_DEFINITIONS } from "../src/tools/builtin-definitions.js";
 
 // Issue #238: four fields (`min_success_ratio`, `loop_until_dry.budget`,
@@ -393,6 +394,270 @@ describe("sub-object field validation (#238)", () => {
       rule: "field_value",
       field: "stages[0]",
     });
+  });
+});
+
+// Issue #342: `SUB_OBJECT_FIELDS` validates `tool_less`/`timeout`/`retries`/
+// `max_iterations` inside `gate.body`/`loop_until_dry.body`, but `runGate`/
+// `runLoop` (`engine.ts`) used to spawn every leaf with the OUTER node,
+// never `body` — so a validated knob one level down had no reader, same
+// defect as #238 one level up. This suite proves each knob now reaches the
+// leaf request (or the retry loop) it names.
+const dead: ChildResult = { status: "failed", output: "boom" };
+const hanging: ChildResult = { status: "running", output: null };
+
+describe("gate.body knobs have effect (#342)", () => {
+  it("retries respawns a dead draft leaf up to body.retries, crediting leafRespawns", async () => {
+    const runtime = new FakeRuntime([[dead], [complete("d")], [complete({ ok: true })]]);
+    const spec = parsed({
+      meta: { name: "gate-retries" },
+      nodes: [
+        {
+          id: "g",
+          type: "gate",
+          body: { prompt: "x", retries: 2 },
+          validator: "review",
+          attempts: 1,
+        },
+      ],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(runtime.spawned).toHaveLength(3);
+    expect(result.outputs.g).toBe("d");
+    expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(1);
+  });
+
+  it("without body.retries, a dead draft leaf is never respawned (today's behavior)", async () => {
+    const runtime = new FakeRuntime([[dead]]);
+    const spec = parsed({
+      meta: { name: "gate-no-retries" },
+      nodes: [{ id: "g", type: "gate", body: { prompt: "x" }, validator: "review", attempts: 1 }],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(runtime.spawned).toHaveLength(1);
+    expect(result.outputs.g).toBeNull();
+    expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(0);
+  });
+
+  it("tool_less reaches the draft leaf's request as a forced StructuredOutput tool call", async () => {
+    const runtime = new FakeRuntime([[complete({ ok: true })], [complete({ ok: true })]]);
+    const spec = parsed({
+      meta: { name: "gate-tool-less" },
+      nodes: [
+        {
+          id: "g",
+          type: "gate",
+          body: { prompt: "x", schema: { type: "object" }, tool_less: true },
+          validator: "review",
+          attempts: 1,
+        },
+      ],
+    });
+    await new WorkflowEngine({ runtime }).run(spec);
+    expect(runtime.spawned[0]?.forcedTool).toMatchObject({ name: "StructuredOutput" });
+  });
+
+  it("max_iterations reaches the draft leaf's request", async () => {
+    const runtime = new FakeRuntime([[complete("d")], [complete({ ok: true })]]);
+    const spec = parsed({
+      meta: { name: "gate-max-iterations" },
+      nodes: [
+        {
+          id: "g",
+          type: "gate",
+          body: { prompt: "x", max_iterations: 7 },
+          validator: "review",
+          attempts: 1,
+        },
+      ],
+    });
+    await new WorkflowEngine({ runtime }).run(spec);
+    expect(runtime.spawned[0]?.maxIterations).toBe(7);
+  });
+
+  it("timeout limits the draft leaf, naming body's own seconds in the fault", async () => {
+    const runtime = new FakeRuntime([[hanging]]);
+    const spec = parsed({
+      meta: { name: "gate-timeout" },
+      nodes: [
+        {
+          id: "g",
+          type: "gate",
+          body: { prompt: "x", timeout: 5 },
+          validator: "review",
+          attempts: 1,
+        },
+      ],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(result.faults.some((fault) => fault.includes("leaf timeout after 5s"))).toBe(true);
+  });
+});
+
+describe("loop_until_dry.body knobs have effect (#342)", () => {
+  it("retries respawns a dead round leaf up to body.retries, crediting leafRespawns", async () => {
+    const runtime = new FakeRuntime([[dead], [complete("r0")]]);
+    const spec = parsed({
+      meta: { name: "loop-retries" },
+      nodes: [
+        {
+          id: "l",
+          type: "loop_until_dry",
+          body: { prompt: "x", retries: 1 },
+          stop_after_k_empty: 1,
+          max_rounds: 1,
+        },
+      ],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(runtime.spawned).toHaveLength(2);
+    expect(result.outputs.l).toEqual(["r0"]);
+    expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(1);
+  });
+
+  it("without body.retries, a dead round leaf is never respawned (today's behavior)", async () => {
+    const runtime = new FakeRuntime([[dead]]);
+    const spec = parsed({
+      meta: { name: "loop-no-retries" },
+      nodes: [
+        {
+          id: "l",
+          type: "loop_until_dry",
+          body: { prompt: "x" },
+          stop_after_k_empty: 1,
+          max_rounds: 1,
+        },
+      ],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(runtime.spawned).toHaveLength(1);
+    expect(result.outputs.l).toEqual([]);
+    expect(result.faults).toContain("l: round 0 dead");
+    expect((result as unknown as { leafRespawns: number }).leafRespawns).toBe(0);
+  });
+
+  it("timeout limits the round leaf, naming body's own seconds in the fault", async () => {
+    const runtime = new FakeRuntime([[hanging]]);
+    const spec = parsed({
+      meta: { name: "loop-timeout" },
+      nodes: [
+        {
+          id: "l",
+          type: "loop_until_dry",
+          body: { prompt: "x", timeout: 5 },
+          stop_after_k_empty: 1,
+          max_rounds: 1,
+        },
+      ],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(result.faults.some((fault) => fault.includes("leaf timeout after 5s"))).toBe(true);
+  });
+});
+
+// PR #341 review (round 2, issue #342 body): the cell identity for
+// `gate`/`loop_until_dry` must fold in `body`'s own knobs — a different
+// knob is a different cell (never a stale HIT), and with NO knob beyond
+// `prompt` (today's only knob with a reader before this issue) the hash
+// must stay byte-identical to the formula the engine used before #342, so
+// an in-flight durable run resumes from the SAME cells it already wrote.
+describe("gate/loop body knob cell identity (#342)", () => {
+  it("gate: body with only prompt hashes byte-identical to the pre-#342 formula", async () => {
+    const cache = new MemoryWorkflowCache();
+    const runtime = new FakeRuntime([[complete("d")], [complete({ ok: true })]]);
+    const spec = parsed({
+      meta: { name: "gate-compat" },
+      nodes: [{ id: "g", type: "gate", body: { prompt: "x" }, validator: "review" }],
+    });
+    await new WorkflowEngine({ runtime, cache, runId: "r1" }).run(spec);
+    const preIssueHash = contentHash("gate-compat", null, "g", "gate", "x", null, "review", 2);
+    expect(cache.get("r1", preIssueHash).hit).toBe(true);
+  });
+
+  it("loop: body with only prompt hashes byte-identical to the pre-#342 formula", async () => {
+    const cache = new MemoryWorkflowCache();
+    const runtime = new FakeRuntime([[complete("")]]);
+    const spec = parsed({
+      meta: { name: "loop-compat" },
+      nodes: [
+        {
+          id: "l",
+          type: "loop_until_dry",
+          body: { prompt: "hello" },
+          stop_after_k_empty: 1,
+          max_rounds: 1,
+        },
+      ],
+    });
+    await new WorkflowEngine({ runtime, cache, runId: "r1" }).run(spec);
+    const preIssueHash = contentHash(
+      "loop-compat",
+      null,
+      "l",
+      "loop_until_dry",
+      "hello",
+      null,
+      1,
+      1,
+    );
+    expect(cache.get("r1", preIssueHash).hit).toBe(true);
+  });
+
+  it("gate: a different body.retries is a different cell (no stale HIT)", async () => {
+    const cache = new MemoryWorkflowCache();
+    const node = { id: "g", type: "gate", validator: "review", attempts: 1 };
+    const small = parsed({
+      meta: { name: "gate-cell" },
+      nodes: [{ ...node, body: { prompt: "x", retries: 1 } }],
+    });
+    await new WorkflowEngine({
+      runtime: new FakeRuntime([[complete("d")], [complete({ ok: true })]]),
+      cache,
+      runId: "same",
+    }).run(small);
+
+    const big = parsed({
+      meta: { name: "gate-cell" },
+      nodes: [{ ...node, body: { prompt: "x", retries: 2 } }],
+    });
+    const bigRuntime = new FakeRuntime([[complete("d2")], [complete({ ok: true })]]);
+    const resumed = await new WorkflowEngine({ runtime: bigRuntime, cache, runId: "same" }).run(
+      big,
+    );
+    // A stale cache hit would have replayed "d" with zero new leaves.
+    expect(bigRuntime.spawned.length).toBeGreaterThan(0);
+    expect(resumed.outputs.g).toBe("d2");
+  });
+
+  it("loop: a different body.retries is a different cell (no stale HIT)", async () => {
+    const cache = new MemoryWorkflowCache();
+    const node = {
+      id: "l",
+      type: "loop_until_dry",
+      stop_after_k_empty: 1,
+      max_rounds: 1,
+    };
+    const small = parsed({
+      meta: { name: "loop-cell" },
+      nodes: [{ ...node, body: { prompt: "x", retries: 1 } }],
+    });
+    await new WorkflowEngine({
+      runtime: new FakeRuntime([[complete("r0")]]),
+      cache,
+      runId: "same",
+    }).run(small);
+
+    const big = parsed({
+      meta: { name: "loop-cell" },
+      nodes: [{ ...node, body: { prompt: "x", retries: 2 } }],
+    });
+    const bigRuntime = new FakeRuntime([[complete("r1")]]);
+    const resumed = await new WorkflowEngine({ runtime: bigRuntime, cache, runId: "same" }).run(
+      big,
+    );
+    // A stale cache hit would have replayed ["r0"] with zero new leaves.
+    expect(bigRuntime.spawned.length).toBeGreaterThan(0);
+    expect(resumed.outputs.l).toEqual(["r1"]);
   });
 });
 
