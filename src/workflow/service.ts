@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-
 import { createWorkflowAuditProducers } from "./audit-producers.js";
-import { auditedChildRuntime } from "./audit-runtime.js";
+import { auditedRuntimeFor } from "./audit-runtime.js";
 import { Budget } from "./budget.js";
 import { MemoryWorkflowCache, type WorkflowCache } from "./cache.js";
 import { SqliteWorkflowCache } from "./sqlite-cache.js";
@@ -612,12 +611,7 @@ export class WorkflowService {
     });
     const engine = new WorkflowEngine({
       ...engineBaseOptions(
-        auditedChildRuntime(this.runtime, {
-          trail: this.auditTrail,
-          ownershipOf: () => null,
-          durable: false,
-          warn: this.warn,
-        }),
+        auditedRuntimeFor(this.runtime, this.auditTrail, () => null, false, this.warn),
         runId,
         options.tiers,
         this.loader,
@@ -810,16 +804,7 @@ export class WorkflowService {
     }
     const engine = new WorkflowEngine({
       ...engineBaseOptions(this.runtime, runId, options.tiers, this.loader, answers),
-      // ao/durable-launch-site-forgets-the-tier-map (`workflow-durability-
-      // named.ts`) anchors the line above byte for byte — the audited
-      // runtime overrides the spread's `runtime` key here instead of
-      // touching it, same reason `segmentId` right below does not either.
-      runtime: auditedChildRuntime(this.runtime, {
-        trail: this.auditTrail,
-        ownershipOf: stretchOwnership,
-        durable: true,
-        warn: this.warn,
-      }),
+      runtime: auditedRuntimeFor(this.runtime, this.auditTrail, stretchOwnership, true, this.warn),
       segmentId,
       budget: new Budget({
         tokenBudget: effectiveBudget,
@@ -1331,7 +1316,6 @@ function rawSpecOf(parsed: WorkflowSpec): Record<string, unknown> {
     nodes: parsed.nodes.map((node) => ({ id: node.id, type: node.type, ...node.fields })),
   };
 }
-
 /** The oracle's None-when-empty rule: a run with no nodes persists no progress. */
 function progressJsonOf(progress: ProgressSnapshot): string | null {
   return progress.total > 0 ? JSON.stringify(progress) : null;

@@ -183,3 +183,17 @@ export function auditedChildRuntime(
   };
   return runtime;
 }
+
+/** One-line call site for `WorkflowService`'s two engine constructions
+ * (`ao/durable-launch-site-forgets-the-tier-map` in
+ * `workflow-durability-named.ts` anchors the durable one's `engineBaseOptions`
+ * call byte for byte — this keeps that call site a single argument). */
+export function auditedRuntimeFor(
+  runtime: ChildRuntime,
+  trail: AuditTrail | undefined,
+  ownershipOf: () => Ownership | null,
+  durable: boolean,
+  warn: (message: string) => void,
+): ChildRuntime {
+  return auditedChildRuntime(runtime, { trail, ownershipOf, durable, warn });
+}

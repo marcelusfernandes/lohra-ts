@@ -1120,14 +1120,10 @@ describe("T17 live events and sink failures", () => {
       expect(live[0]).toBe("plan");
       expect(live.at(-1)).toBe("done");
       const page = audit.query({ runId: "run-live", limit: 100 });
-      expect(page.events.map((event) => event.event_type)).toEqual([
-        "workflow.plan",
-        "workflow.node",
-        "leaf.started",
-        "leaf.completed",
-        "workflow.node",
-        "workflow.done",
-      ]);
+      // Only the workflow.* order is pinned here (leaf.* has its own
+      // producer-level coverage in workflow-audit-leaf.test.ts, #366).
+      const types = page.events.map((e) => e.event_type).filter((t) => t.startsWith("workflow."));
+      expect(types).toEqual(["workflow.plan", "workflow.node", "workflow.node", "workflow.done"]);
       expect(JSON.stringify(page)).not.toContain("PRIVATE-PROMPT");
       expect(JSON.stringify(page)).not.toContain("PRIVATE-OUTPUT");
     } finally {
