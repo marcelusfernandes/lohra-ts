@@ -694,4 +694,32 @@ export const BUILTIN_DEFINITIONS = [
       name: "list_models",
     },
   },
+  {
+    type: "function",
+    function: {
+      description:
+        "Read the turns a still-running orchestration leaf has already committed — while it keeps working. 'Committed' means assented turns only: the turn currently in flight is never included (it isn't durable yet). sub_id must be a leaf that belongs to run_id, or this returns a named error. content is truncated to a shared max_chars budget across all returned turns (default 4096, max 32768); truncated reports whether anything was cut.",
+      parameters: {
+        type: "object",
+        properties: {
+          run_id: {
+            type: "string",
+            description: "The run this leaf was spawned from.",
+          },
+          sub_id: {
+            type: "string",
+            description: "The leaf's own session id (from workflow_audit's leaf.started events).",
+          },
+          max_chars: {
+            type: "integer",
+            minimum: 1,
+            description:
+              "Shared content budget across every turn (default 4096, clamped to 32768).",
+          },
+        },
+        required: ["run_id", "sub_id"],
+      },
+      name: "workflow_leaf_read",
+    },
+  },
 ] as const satisfies readonly ToolDefinition[];

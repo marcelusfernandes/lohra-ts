@@ -71,7 +71,7 @@ describe("createGatewayToolRuntime: memory reaches the handler, not auto-denied 
 });
 
 describe("createGatewayToolRuntime: registry order and no allow-list (assertion 41)", () => {
-  it("exposes all 26 tools in registry order", () => {
+  it("exposes all 27 tools in registry order", () => {
     const runtime = createGatewayToolRuntime(tempHome());
     expect(runtime.toolNames).toEqual([
       "read_file",
@@ -100,6 +100,7 @@ describe("createGatewayToolRuntime: registry order and no allow-list (assertion 
       "workflow_notices",
       "workflow_notices_ack",
       "list_models",
+      "workflow_leaf_read",
     ]);
   });
 });

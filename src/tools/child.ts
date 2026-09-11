@@ -19,6 +19,7 @@ export const CHILD_EXCLUDED_TOOLS = Object.freeze([
   "workflow_audit",
   "workflow_notices",
   "workflow_notices_ack",
+  "workflow_leaf_read",
   "workflow_list",
   "workflow_pause",
   "workflow_cancel",
