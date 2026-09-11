@@ -67,13 +67,29 @@ describe('parseAuditQuery — filtros opcionais ""/0 são ausência, não filtro
     expect("error" in out).toBe(true);
   });
 
-  it("filtros reais continuam ativos (node_id, attempt, snapshot_seq)", () => {
+  it("filtros reais continuam ativos (node_id, event_type, sub_id, segment_id, attempt, snapshot_seq)", () => {
     const query = unwrap(
-      parseAuditQuery({ run_id: "run-1", node_id: "n1", attempt: 2, snapshot_seq: 7 }),
+      parseAuditQuery({
+        run_id: "run-1",
+        node_id: "n1",
+        event_type: "leaf.started",
+        sub_id: "leaf-1",
+        segment_id: "seg-1",
+        attempt: 2,
+        snapshot_seq: 7,
+      }),
     );
     expect(query.nodeId).toBe("n1");
+    expect(query.eventType).toBe("leaf.started");
+    expect(query.subId).toBe("leaf-1");
+    expect(query.segmentId).toBe("seg-1");
     expect(query.attempt).toBe(2);
     expect(query.snapshotSeq).toBe(7);
+  });
+
+  it("node_id não-string é rejeitado (fronteira de tipo)", () => {
+    const out = parseAuditQuery({ run_id: "run-1", node_id: 42 });
+    expect("error" in out).toBe(true);
   });
 });
 
