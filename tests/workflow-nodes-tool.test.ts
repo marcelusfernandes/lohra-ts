@@ -417,7 +417,12 @@ describe("remaining workflow node strategies", () => {
     expect(result.nullCount).toBe(1);
     expect(result.tokensIn).toBe(2);
     expect(result.cacheReadTokens).toBe(5);
-    expect(result.nodeCosts["sub[inner]:leaf"]?.usage.reasoningTokens).toBe(11);
+    // #348: the sub-run's own nodeCosts keys are nodeScope-qualified before
+    // this fold ever runs (`debitLeaf`, engine-utils.ts) — sibling `workflow`
+    // nodes reusing the same `ref` ("sub" here) no longer collide on the
+    // bare inner id. `reference` (the fold's own untouched variable) still
+    // carries the bare ref name, so the fault prefix is unchanged.
+    expect(result.nodeCosts["sub[inner]:sub.leaf"]?.usage.reasoningTokens).toBe(11);
     expect(result.faults[0]).toContain("sub[inner]");
   });
 

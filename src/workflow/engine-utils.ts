@@ -351,6 +351,10 @@ export interface ParallelBranchDeps {
    * PARENT's `requestPause()` (shared by reference, `runNested`) or a
    * `cancel()` that never mirrors into `result.pauseFault`. */
   readonly control: RunControl;
+  /** #348: this engine's own `nodeScope`, so a nested engine's branch/group
+   * cost is `scopedCheckpointId`-qualified like `account`/`cacheGet` — root
+   * callers pass `[]` (no-op). */
+  readonly nodeScope: readonly string[];
   readonly collectLeaf: (
     node: Node,
     prompt: string,
@@ -381,7 +385,8 @@ export async function replayOrCollectBranch(
   const branchHash = contentHash(...deps.spec, node.id, "parallel", index, prompt, ...routing);
   const found = deps.cache.get(deps.runId, branchHash);
   if (found.hit) {
-    if (found.cost !== null) addUsageToResult(deps.result, node.id, found.cost, null, null);
+    const owner = scopedCheckpointId(deps.nodeScope, node.id);
+    if (found.cost !== null) addUsageToResult(deps.result, owner, found.cost, null, null);
     return { output: found.output, usage: found.cost ?? usage(), complete: true };
   }
   const leaf = await deps.collectLeaf(node, prompt, null, {
@@ -454,6 +459,33 @@ export async function collectBranchWithRetries(
     leaf = await replayOrCollectBranch(deps, node, index, prompt, attempt);
   }
   return leaf;
+}
+
+/** #348: pulled out of `engine.ts`'s `account` (room for the `nodeScope`
+ * qualifier). `scopedCheckpointId`-qualifies `nodeId` like checkpoint ids
+ * (#319): root's `nodeScope` is `[]` (no-op); a nested engine's `nodeCosts`
+ * land pre-scoped, so `runNested`'s untouched fold disambiguates siblings
+ * reusing one template. `budget.chargeTokens` stays in `account`. */
+export function debitLeaf(
+  result: RunResult,
+  leafCosts: Map<string, Usage>,
+  nodeScope: readonly string[],
+  nodeId: string,
+  id: string,
+  collected: ChildResult,
+): Usage {
+  const next = resultUsage(collected);
+  const uncertain = collected.usageUncertain === true;
+  leafCosts.set(id, next);
+  addUsageToResult(
+    result,
+    scopedCheckpointId(nodeScope, nodeId),
+    next,
+    collected.provider ?? null,
+    collected.model ?? null,
+    uncertain,
+  );
+  return next;
 }
 
 /** Issue #313: a leaf that dies by TIMEOUT still spent real tokens up to the
@@ -558,7 +590,7 @@ export function recordGroupReplayCost(
     }
     return combine(sum, found.cost ?? usage());
   }, usage());
-  addUsageToResult(deps.result, node.id, total, null, null);
+  addUsageToResult(deps.result, scopedCheckpointId(deps.nodeScope, node.id), total, null, null);
   return cached;
 }
 

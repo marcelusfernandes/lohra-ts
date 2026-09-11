@@ -228,6 +228,15 @@ describe("nested siblings reusing an identical template — cell scope (#332)", 
     expect(result.outputs.sub1).toEqual({ a: "out-1" });
     expect(result.outputs.sub2).toEqual({ a: "out-2" }); // not sub1's "out-1"
     expect(result.tokensIn).toBe(8); // 2 real leaves x 4 tokens, not 4 (one leaf reused)
+    // #348: `sub1`/`sub2` share `ref: "inner-agent"` — before the fix both
+    // sub-runs' leaf ("a") folded to the SAME `sub[inner-agent]:a` key and
+    // the second sibling silently overwrote the first's cost. Each nested
+    // engine's own `nodeCosts` is now nodeScope-qualified (`debitLeaf`,
+    // engine-utils.ts) before `runNested`'s untouched fold ever sees it, so
+    // the two land on distinct keys instead of colliding.
+    expect(Object.keys(result.nodeCosts)).toHaveLength(2);
+    expect(result.nodeCosts["sub[inner-agent]:sub1.a"]?.usage.inputTokens).toBe(4);
+    expect(result.nodeCosts["sub[inner-agent]:sub2.a"]?.usage.inputTokens).toBe(4);
   });
 
   it("parallel: each sibling's group AND per-branch cells are scope-qualified", async () => {
@@ -244,6 +253,34 @@ describe("nested siblings reusing an identical template — cell scope (#332)", 
     expect(runtime.requests).toHaveLength(4); // 2 branches x 2 siblings, not 2 (branches replayed)
     expect(result.outputs.sub1).toEqual({ p: ["out-1", "out-2"] });
     expect(result.outputs.sub2).toEqual({ p: ["out-3", "out-4"] });
+  });
+
+  // #348: a resume/replay of the SAME run hits the group cell (written with
+  // cost `null` — PR #305) instead of spawning, so the branch/group cost path
+  // is `recordGroupReplayCost`/`cacheGet` (engine-utils.ts), not `account`'s
+  // fresh-spawn path the two tests above exercise. Both need the same
+  // `nodeScope` qualifier or a replayed sibling's cost collides exactly like
+  // the fresh-spawn one did.
+  it("parallel: a replay's group AND branch cost land on the sibling's own scoped key", async () => {
+    const cache = new MemoryWorkflowCache();
+    const spec = () =>
+      parsed({ meta: { name: "outer-parallel-siblings" }, nodes: siblings("inner-parallel") });
+    const first = await new WorkflowEngine({
+      runtime: new LabeledRuntime(),
+      cache,
+      runId: "same",
+      loader: () => innerParallelSpec,
+    }).run(spec());
+    expect(first.status).toBe("complete");
+    const replay = await new WorkflowEngine({
+      runtime: noRuntime(), // replay must never spawn — every branch is a cache hit
+      cache,
+      runId: "same",
+      loader: () => innerParallelSpec,
+    }).run(spec());
+    expect(replay.status).toBe("complete");
+    expect(replay.nodeCosts["sub[inner-parallel]:sub1.p"]?.usage.inputTokens).toBe(8);
+    expect(replay.nodeCosts["sub[inner-parallel]:sub2.p"]?.usage.inputTokens).toBe(8);
   });
 });
 
