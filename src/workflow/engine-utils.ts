@@ -1,6 +1,7 @@
 import { combineUsage, usage } from "../pricing/usage.js";
 import type { Usage } from "../pricing/types.js";
-import { addUsageToResult, recordSandboxRefusals, type RunResult } from "./accounting.js";
+import { addUsageToResult, recordFaultKind, recordSandboxRefusals } from "./accounting.js";
+import type { RunResult } from "./accounting.js";
 import { contentHash, type WorkflowCache } from "./cache.js";
 import {
   DEFAULT_LEAF_MAX_ITERATIONS,
@@ -461,10 +462,9 @@ export async function collectBranchWithRetries(
 }
 
 /** #348: pulled out of `engine.ts`'s `account` (room for the `nodeScope`
- * qualifier). `scopedCheckpointId`-qualifies `nodeId` like checkpoint ids
- * (#319): root's `nodeScope` is `[]` (no-op); a nested engine's `nodeCosts`
- * land pre-scoped, so `runNested`'s untouched fold disambiguates siblings
- * reusing one template. `budget.chargeTokens` stays in `account`. */
+ * qualifier). `scopedCheckpointId` scopes `nodeId` like checkpoint ids
+ * (#319: root's `nodeScope` is `[]`), so `runNested`'s fold disambiguates
+ * siblings reusing one template; `budget.chargeTokens` stays in `account`. */
 export function debitLeaf(
   result: RunResult,
   leafCosts: Map<string, Usage>,
@@ -485,9 +485,9 @@ export function debitLeaf(
     collected.model ?? null,
     uncertain,
   );
-  // Plain `nodeId` (never `owner`) — reads like a `faults` entry, never
-  // double-scoped by both this and the outer nested fold.
+  // Plain `nodeId` (never `owner`) reads like a `faults` entry, never double-scoped.
   recordSandboxRefusals(result, nodeId, collected.sandboxRefusals ?? 0);
+  if (collected.errorKind !== QUOTA_EXHAUSTED) recordFaultKind(result, collected.errorKind ?? null);
   return next;
 }
 

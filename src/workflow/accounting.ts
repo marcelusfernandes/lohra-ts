@@ -1,5 +1,6 @@
 import { combineUsage, usage } from "../pricing/usage.js";
 import type { Usage } from "../pricing/types.js";
+import type { ErrorKind } from "../transports/error-kinds.js";
 
 export type RunStatus = "complete" | "degraded" | "failed" | "cancelled" | "paused";
 
@@ -59,6 +60,11 @@ export class RunResult {
    * (#246); `resultView` (service-rollup.ts) folds both lists together for
    * display, `deriveStatus` below reads only `faults`. */
   readonly sandboxFaults: string[] = [];
+  /** The `ErrorKind` behind each leaf failure counted in `faults` — same
+   * events, typed instead of parsed out of the message text (#399). Never
+   * gains a `quota_exhausted` entry: that leaf status never reaches
+   * `faults` either (`nonCompleteFirstCollectResult`, engine-utils.ts). */
+  readonly faultKinds: ErrorKind[] = [];
   readonly nodeCosts: Record<string, NodeCost> = {};
   forcingFallbacks = 0;
   status: RunStatus = "complete";
@@ -112,6 +118,17 @@ export function recordSandboxRefusals(result: RunResult, nodeId: string, refusal
   result.sandboxFaults.push(`${nodeId}: sandbox refused ${String(refusals)} tool call(s)`);
 }
 
+/** Molde `recordSandboxRefusals`: a no-op on `null` keeps every complete
+ * leaf's call (`errorKind` always `null` there) a cheap early return. Called
+ * from `debitLeaf` (engine-utils.ts, #399) — the same function
+ * `recordSandboxRefusals` above already reaches for every accounted leaf,
+ * quota-excluded the same way `nonCompleteFirstCollectResult` excludes it
+ * from `faults`, so `faultKinds` never outpaces the events it types. */
+export function recordFaultKind(result: RunResult, kind: ErrorKind | null): void {
+  if (kind === null) return;
+  result.faultKinds.push(kind);
+}
+
 /** `runNested` (engine.ts) calls this in place of its own former
  * `this.result.leafRespawns += result.leafRespawns;` line (never part of
  * the `nested-fold-removed` mutation anchor, workflow-executor-mutants.ts —
@@ -125,4 +142,8 @@ export function foldNestedCounters(result: RunResult, nested: RunResult, referen
   result.leafRespawns += nested.leafRespawns;
   result.sandboxRefusals += nested.sandboxRefusals;
   result.sandboxFaults.push(...nested.sandboxFaults.map((fault) => `sub[${reference}]: ${fault}`));
+  // Vocabulary, not text (#399) — never `sub[${reference}]:`-prefixed like
+  // `sandboxFaults`/`faults` above: a kind stays the SAME value regardless
+  // of which nested run raised it.
+  result.faultKinds.push(...nested.faultKinds);
 }
