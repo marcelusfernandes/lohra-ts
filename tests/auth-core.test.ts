@@ -1,4 +1,12 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -24,6 +32,7 @@ import {
   setPreference,
   startDeviceLogin,
   status,
+  tokenPath,
   writeConfig,
   writeTokens,
 } from "../src/auth/index.js";
@@ -470,5 +479,76 @@ describe("token refresh lease (#354)", () => {
     expect(existsSync(lockPath)).toBe(true);
     releaseFileLease(lockPath, "holder-b");
     expect(existsSync(lockPath)).toBe(false);
+  });
+});
+
+// issue #356: o revisor da PR #355 reproduziu, fora do repo, que
+// `readLeaseRecord` (lease.ts:29-30) devolve `null` para um lock ilegível
+// (vazio, truncado) — a mesma janela em que `createLeaseFile` já fez
+// `open(path, "wx")` (a exclusão mútua) mas ainda não terminou de escrever
+// o conteúdo. `acquireFileLease` (lease.ts:80-81, base) tratava esse `null`
+// como "sem lease viva", apagava o lock recém-criado e tomava a lease de
+// volta antes do tempo — fail-open na primitiva que devia ser exclusiva.
+describe("lease fail-closed com lock ilegível (#356)", () => {
+  it("um lock vazio recém-criado não é tomado antes do TTL (fail-closed)", () => {
+    const home = root();
+    const lockPath = join(home, "oauth.json.lock");
+    // Simula a janela: o arquivo existe (como logo depois do `open("wx")`),
+    // mas o conteúdo ainda não foi escrito.
+    writeFileSync(lockPath, "");
+    expect(acquireFileLease(lockPath, "holder-b", 5)).toBe(false);
+    // Passado o TTL (recuando o mtime do próprio arquivo, não o relógio do
+    // teste — é o único relógio que um lock ilegível tem), a lease órfã
+    // volta a poder ser tomada: o fail-closed não é permanente.
+    const past = new Date(Date.now() - 6_000);
+    utimesSync(lockPath, past, past);
+    expect(acquireFileLease(lockPath, "holder-c", 5)).toBe(true);
+  });
+
+  // "Dono relê sob a lease" (AC #356): quem ADQUIRE a lease usava sempre o
+  // `own` que o CHAMADOR leu antes de sequer tentar a lease
+  // (`credentials.ts:96` na base), mesmo que o disco já tivesse um token
+  // mais novo por baixo. `refreshUnderLease` recebe `own` como parâmetro
+  // explícito, então o teste fabrica um `own` propositalmente atrasado sem
+  // precisar de uma corrida de verdade entre dois `resolveCredentials`.
+  // Import dinâmico (não estático): `refreshUnderLease` só passa a ser
+  // exportado por esta mesma issue, e um `import { refreshUnderLease }`
+  // estático quebraria a CARGA do arquivo de teste contra a base (#356
+  // exporta uma função que já existia, não introduz símbolo novo de
+  // comportamento) — o `typeof` abaixo falha por ASSERÇÃO contra a base,
+  // não por erro de carga.
+  it("dono relê sob a lease: token já renovado por outro não gera segundo POST", async () => {
+    const home = root();
+    writeTokens(home, {
+      accessToken: "stale-access",
+      refreshToken: "stale-refresh",
+      accountId: "acct-t356-reread",
+      expiresAt: 900,
+    });
+    const own = readTokens(home);
+    if (own === null) throw new Error("setup: expected tokens to exist");
+    // "outro processo" já renovou e gravou, entre a leitura acima e a
+    // lease que esta chamada está prestes a adquirir.
+    writeTokens(home, {
+      accessToken: "fresh-access",
+      refreshToken: "fresh-refresh",
+      accountId: "acct-t356-reread",
+      expiresAt: 9_999,
+    });
+    const credentialsModule = await import("../src/auth/credentials.js");
+    expect(typeof credentialsModule.refreshUnderLease).toBe("function");
+    let calls = 0;
+    const oauthPost: OAuthPost = () => {
+      calls += 1;
+      return Promise.resolve([
+        200,
+        { access_token: "post-access", refresh_token: "post-refresh", expires_in: 3600 },
+      ]);
+    };
+    const result = await credentialsModule.refreshUnderLease(home, own, 1_000, oauthPost);
+    expect(calls).toBe(0);
+    expect(result.accessToken).toBe("fresh-access");
+    expect(readTokens(home)?.accessToken).toBe("fresh-access");
+    expect(existsSync(`${tokenPath(home)}.lock`)).toBe(false);
   });
 });

@@ -66,8 +66,12 @@ async function performRefresh(
  * se a espera acabar e o token no disco ainda estiver expirando (o dono
  * pode ter morrido antes de escrever), esta chamada tenta adquirir a
  * lease ela mesma, agora livre para tomar a lease órfã de volta.
+ *
+ * Exportada (issue #356) só para o teste chamá-la direto: `own` é um
+ * parâmetro explícito, então um teste pode fabricar um `own` propositalmente
+ * atrasado sem precisar de uma corrida de verdade entre dois `resolveCredentials`.
  */
-async function refreshUnderLease(
+export async function refreshUnderLease(
   home: string,
   own: OAuthTokens,
   now: number,
