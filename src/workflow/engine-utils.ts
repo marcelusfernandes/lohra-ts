@@ -110,12 +110,23 @@ export function sealPipelineRatio(
  * `runLoop` (`engine.ts`) calls this once per round, after charging that
  * round's usage. Returns `true` (having already recorded the fault) once
  * spend reaches the budget, so the round loop can `break` in one line.
+ * `round`/`rounds`/`empty`/`stopAfter` mirror the round loop's OWN
+ * continuation test (`round + 1 < rounds && empty < stopAfter`) — when that
+ * is already `false` (the loop was ending on its own, by `max_rounds` or
+ * `stop_after_k_empty`), reaching the budget stopped nothing real and would
+ * be a spurious fault on a run that otherwise completes cleanly (PR #341
+ * review, round 1).
  */
 export function stopForBudget(
   recordFault: (message: string) => void,
   node: Node,
   spent: Usage,
+  round: number,
+  rounds: number,
+  empty: number,
+  stopAfter: number,
 ): boolean {
+  if (round + 1 >= rounds || empty >= stopAfter) return false;
   const budget = node.fields.budget;
   if (typeof budget !== "number") return false;
   const total = spent.inputTokens + spent.outputTokens;
@@ -288,6 +299,36 @@ export function routingIdentity(node: Node, tiers: TierMap): readonly unknown[] 
     return [];
   const resolved = routingOf(node, tiers);
   return [resolved.model ?? null, resolved.effort ?? null, resolved.provider ?? null];
+}
+
+/**
+ * #238: `loop_until_dry`'s cell identity, with `budget` folded in ONLY when
+ * the spec sets it (`Object.hasOwn`, not a plain lookup — `undefined` would
+ * still add an array element and change the hash for every loop that has no
+ * `budget` at all). A different `budget` value now hashes to a different
+ * cell, so re-running with a bigger budget after an earlier truncated stop
+ * (`stopForBudget` in `engine.ts`) re-executes instead of replaying the
+ * truncated result (PR #341 review, round 1) — and with no `budget` set,
+ * this is byte-identical to the pre-#238 hash (durable resume compatible).
+ */
+export function loopCellParts(
+  node: Node,
+  tiers: TierMap,
+  firstPrompt: unknown,
+  bodySchema: unknown,
+  stopAfter: number,
+  rounds: number,
+): readonly unknown[] {
+  return [
+    node.id,
+    "loop_until_dry",
+    firstPrompt,
+    bodySchema,
+    stopAfter,
+    rounds,
+    ...routingIdentity(node, tiers),
+    ...(Object.hasOwn(node.fields, "budget") ? [node.fields.budget] : []),
+  ];
 }
 
 /** What `runParallel` hands `replayOrCollectBranch` — engine data fields

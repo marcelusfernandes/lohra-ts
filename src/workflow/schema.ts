@@ -6,6 +6,7 @@ import {
   MAX_STATIC_FANOUT,
   NODE_SPECS,
   NODE_TYPES,
+  STAGE_FIELDS,
   SUB_OBJECT_FIELDS,
 } from "./nodes.js";
 import { findRefs, invalidRefs, isValidRef } from "./refs.js";
@@ -87,6 +88,10 @@ function checkNamedSchema(
 interface SchemaSubObject {
   readonly fieldPrefix: string;
   readonly fields: Readonly<Record<string, unknown>>;
+  /** Only `pipeline.stages[*]` spawns its own leaf (`runPipeline` merges the
+   * stage onto the node before `collectLeaf`) — everywhere else the routing
+   * fields are dead, so only a stage's `unknown_field` scan allows them. */
+  readonly routingAllowed: boolean;
 }
 
 /**
@@ -104,17 +109,23 @@ function schemaBearingSubObjects(node: Node): readonly SchemaSubObject[] {
   const targets: SchemaSubObject[] = [];
   if (node.type === "gate" || node.type === "loop_until_dry") {
     const body = record(node.fields.body);
-    if (body !== null) targets.push({ fieldPrefix: "body.", fields: body });
+    if (body !== null) targets.push({ fieldPrefix: "body.", fields: body, routingAllowed: false });
   }
   if (node.type === "judge_panel") {
     const synthesize = record(node.fields.synthesize);
-    if (synthesize !== null) targets.push({ fieldPrefix: "synthesize.", fields: synthesize });
+    if (synthesize !== null) {
+      targets.push({ fieldPrefix: "synthesize.", fields: synthesize, routingAllowed: false });
+    }
   }
   if (node.type === "pipeline" && Array.isArray(node.fields.stages)) {
     node.fields.stages.forEach((stage, index) => {
       const stageRecord = record(stage);
       if (stageRecord !== null) {
-        targets.push({ fieldPrefix: `stages[${String(index)}].`, fields: stageRecord });
+        targets.push({
+          fieldPrefix: `stages[${String(index)}].`,
+          fields: stageRecord,
+          routingAllowed: true,
+        });
       }
     });
   }
@@ -122,7 +133,11 @@ function schemaBearingSubObjects(node: Node): readonly SchemaSubObject[] {
     node.fields.branches.forEach((branch, index) => {
       const branchRecord = record(branch);
       if (branchRecord !== null) {
-        targets.push({ fieldPrefix: `branches[${String(index)}].`, fields: branchRecord });
+        targets.push({
+          fieldPrefix: `branches[${String(index)}].`,
+          fields: branchRecord,
+          routingAllowed: false,
+        });
       }
     });
   }
@@ -143,23 +158,31 @@ function validateSubObjectSchemas(
 }
 
 /**
- * Every schema-bearing sub-object accepts only the agent-shaped fields in
- * `SUB_OBJECT_FIELDS` (#238) — a routing knob (`model`/`tier`/`effort`/
- * `provider`) one level down has no reader (the engine reads routing off
- * the NODE, `engine.ts`'s `routingIdentity`/`resolveLeafRequestOptions`) and
- * is now refused instead of silently costing the session's own model.
+ * Every schema-bearing sub-object accepts the agent-shaped fields in
+ * `SUB_OBJECT_FIELDS` (#238); a `pipeline` stage additionally accepts the
+ * routing fields in `ROUTING_FIELDS` (`STAGE_FIELDS`) because it spawns its
+ * own leaf and its own `model`/`tier`/`effort`/`provider` really is read
+ * (PR #341 review, round 1 got this wrong for stages). Everywhere else a
+ * routing knob one level down has no reader (`gate.body`, `loop_until_dry
+ * .body`, `judge_panel.synthesize` and `parallel.branches[*]` all spawn
+ * with the OUTER node) and is refused instead of silently costing the
+ * session's own model.
  */
 function validateSubObjectFields(node: Node, issues: SpecIssue[]): void {
   for (const target of schemaBearingSubObjects(node)) {
+    const allowed: readonly string[] = target.routingAllowed ? STAGE_FIELDS : SUB_OBJECT_FIELDS;
     for (const key of Object.keys(target.fields)) {
-      if (!SUB_OBJECT_FIELDS.includes(key as (typeof SUB_OBJECT_FIELDS)[number])) {
+      if (!allowed.includes(key)) {
+        const note = target.routingAllowed
+          ? "is not a recognized field here"
+          : "has no effect here — routing knobs go on the node";
         issue(
           issues,
           "unknown_field",
-          `'${target.fieldPrefix}${key}' has no effect here — routing knobs go on the node`,
+          `'${target.fieldPrefix}${key}' ${note}`,
           node.id,
           `${target.fieldPrefix}${key}`,
-          allowedExample(SUB_OBJECT_FIELDS),
+          allowedExample(allowed),
         );
       }
     }
@@ -316,7 +339,11 @@ function validateShape(
   const allowed = new Set(["id", "type", ...nodeSpec.fields]);
   for (const key of Object.keys(raw)) {
     if (allowed.has(key)) continue;
-    const removedMessage = REMOVED_FIELDS[key];
+    // Object.hasOwn, not `REMOVED_FIELDS[key]` alone: a key straight off
+    // parsed JSON can be 'constructor' or 'toString', which resolve through
+    // the prototype chain (Object.freeze does not remove it) to a function
+    // — never a string — and that function would end up as `message`.
+    const removedMessage = Object.hasOwn(REMOVED_FIELDS, key) ? REMOVED_FIELDS[key] : undefined;
     issue(
       issues,
       "unknown_field",

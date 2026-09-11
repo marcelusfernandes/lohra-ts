@@ -30,6 +30,7 @@ import {
   combine,
   extractForcedOutput,
   isDryRound,
+  loopCellParts,
   nonCompleteFirstCollectResult,
   nonEmpty,
   recollectLeafTimeout,
@@ -786,15 +787,9 @@ export class WorkflowEngine {
     );
     if (firstPrompt === null) return null;
     const bodySchema = this.schemaOf(body);
-    const hash = this.cell([
-      node.id,
-      "loop_until_dry",
-      firstPrompt,
-      bodySchema,
-      stopAfter,
-      rounds,
-      ...routingIdentity(node, this.tiers),
-    ]);
+    const hash = this.cell(
+      loopCellParts(node, this.tiers, firstPrompt, bodySchema, stopAfter, rounds),
+    );
     const cached = this.cacheGet(hash);
     if (cached !== CACHE_MISS) return cached;
     const collected: unknown[] = [];
@@ -828,7 +823,8 @@ export class WorkflowEngine {
         collected.push(leaf.output);
         empty = 0;
       }
-      if (stopForBudget(this.recordFault.bind(this), node, total)) break;
+      if (stopForBudget(this.recordFault.bind(this), node, total, round, rounds, empty, stopAfter))
+        break;
     }
     const output = collected;
     if (intact) this.cachePut(hash, node.id, output, total);
