@@ -5,6 +5,15 @@
 // campos opcionais chegam ""/0 em vez de omitidos, e a query resultante
 // filtrava por um valor que nunca bate contra o ledger — `events: []`
 // silencioso mesmo com o run cheio de eventos (dogfooding da PR #389/#373).
+//
+// Dogfooding NESTA issue (Codex real, mesmo turno) mostrou que o payload
+// estrito de verdade também inclui `after_seq: 0` e `snapshot_seq: 0` —
+// `snapshot_seq: 0` sozinho já reproduz `events: []` mesmo com os quatro
+// campos de string e `attempt` corrigidos, porque
+// `Math.max(0, snapshotSeq ?? currentHigh)` (audit-repository.ts:344) trava
+// o scan no seq 0 em vez de usar o high-water mark atual. Os testes abaixo
+// usam o payload completo que o Codex de fato envia.
+//
 // RED na base 4fbd65df: os testes (i) e (iv) abaixo falham — "" e 0 viram
 // filtro ativo; (ii)/(iii) já passam (fronteira pré-existente).
 //
@@ -38,7 +47,7 @@ function unwrap(result: AuditQueryResult): AuditQuery {
 }
 
 describe('parseAuditQuery — filtros opcionais ""/0 são ausência, não filtro (#390)', () => {
-  it('node_id/event_type/sub_id/segment_id "" e attempt 0 produzem a MESMA query que omitir os campos', () => {
+  it('node_id/event_type/sub_id/segment_id "" e attempt/after_seq/snapshot_seq 0 produzem a MESMA query que omitir os campos (payload real do Codex)', () => {
     const omitted = parseAuditQuery({ run_id: "run-1" });
     const filled = parseAuditQuery({
       run_id: "run-1",
@@ -47,6 +56,8 @@ describe('parseAuditQuery — filtros opcionais ""/0 são ausência, não filtro
       sub_id: "",
       segment_id: "",
       attempt: 0,
+      after_seq: 0,
+      snapshot_seq: 0,
     });
     expect(filled).toEqual(omitted);
   });
@@ -56,10 +67,13 @@ describe('parseAuditQuery — filtros opcionais ""/0 são ausência, não filtro
     expect("error" in out).toBe(true);
   });
 
-  it("filtros reais continuam ativos (node_id, attempt)", () => {
-    const query = unwrap(parseAuditQuery({ run_id: "run-1", node_id: "n1", attempt: 2 }));
+  it("filtros reais continuam ativos (node_id, attempt, snapshot_seq)", () => {
+    const query = unwrap(
+      parseAuditQuery({ run_id: "run-1", node_id: "n1", attempt: 2, snapshot_seq: 7 }),
+    );
     expect(query.nodeId).toBe("n1");
     expect(query.attempt).toBe(2);
+    expect(query.snapshotSeq).toBe(7);
   });
 });
 
@@ -130,7 +144,7 @@ function simpleRuntime(): ChildRuntime {
 }
 
 describe('workflow_audit (handler real) — opcionais ""/0 devolvem os eventos do run (#390)', () => {
-  it('run_workflow → workflow_status(wait) → workflow_audit com node_id/event_type/sub_id/segment_id "" e attempt 0 devolve events não-vazio', async () => {
+  it('run_workflow → workflow_status(wait) → workflow_audit com o payload REAL do Codex (node_id/event_type/sub_id/segment_id "", attempt/after_seq/snapshot_seq 0) devolve events não-vazio', async () => {
     const { service, audit, close } = harness(simpleRuntime());
     try {
       const handlers = workflowToolHandlers(service, audit);
@@ -144,6 +158,8 @@ describe('workflow_audit (handler real) — opcionais ""/0 devolvem os eventos d
         sub_id: "",
         segment_id: "",
         attempt: 0,
+        after_seq: 0,
+        snapshot_seq: 0,
         limit: 50,
       });
       const parsed = JSON.parse(auditOut ?? "{}") as { events: readonly unknown[] };
