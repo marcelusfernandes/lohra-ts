@@ -515,7 +515,11 @@ export const supervisionMutants: readonly Mutant[] = [
   // Rodada 2 (veredito da PR #497): o mutante que a issue #484 original
   // pedia e a rodada 1 tinha, incorretamente, descartado como "código
   // morto" — `runParallel` (engine.ts:480) chama `cache.put(...)` mesmo sem
-  // spawnar nenhum leaf quando `branches` resolve para `[]`.
+  // spawnar nenhum leaf quando `branches` resolve para `[]`. Há uma segunda
+  // barreira independente (`previewResume`'s `dummyOwnership` de
+  // `fence: -1`, recusada por `ownershipGuard`), por isso o oráculo em
+  // `tests/workflow-cache-preview-writes.test.ts` conta tentativas de
+  // `putCacheCellWithCost`, não só linhas de `workflow_node_cache`.
   {
     id: "P6-put-facade-delegates-to-real-cache",
     category: "put-facade-delegates-to-real-cache",

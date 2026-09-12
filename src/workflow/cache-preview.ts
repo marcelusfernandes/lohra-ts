@@ -20,10 +20,19 @@
 // `onWrite`) — NOT belt-and-suspenders, load-bearing: a `parallel` node
 // whose `branches` resolves to `[]` calls `cache.put(...)` unconditionally
 // (`engine.ts`'s `runParallel`, `[].every(nonEmpty)` is vacuously `true`)
-// without spawning a single leaf, dry or real. `put`'s own `return false`
-// is the ONLY thing stopping that write from reaching the real database
-// (P6, `supervision-mutants.ts`; oracle in
-// `tests/workflow-cache-preview-writes.test.ts`).
+// without spawning a single leaf, dry or real. TWO independent barriers
+// stop that call from landing a row: `put`'s own `return false` here, and
+// (below, `previewResume`) the guarded `SqliteWorkflowCache` it wraps is
+// built with a `dummyOwnership` of `fence: -1` — `workflow-repository.ts`'s
+// `ownershipGuard` requires an exact fence match, so even a mutated `put`
+// that DID delegate to the real cache would have its guarded `INSERT`
+// refused (`cell.changes === 0`) by that second barrier. P6
+// (`supervision-mutants.ts`) targets the FIRST barrier — a mutant that
+// removes it must still be observable, so its oracle
+// (`tests/workflow-cache-preview-writes.test.ts`) counts attempts at
+// `WorkflowRepository.putCacheCellWithCost` (the call the facade's `put`
+// would otherwise never make), not just the row count the fence guard
+// would zero out either way.
 //
 // Attribution: a cell's owner (the `nodeId` `cacheGet`/`cachePut` pass) and
 // a spawn's `causalContext.nodePath` are both scoped by `scopedCheckpointId`

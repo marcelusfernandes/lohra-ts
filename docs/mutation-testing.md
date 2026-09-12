@@ -229,19 +229,35 @@ mutante (O5, morto por `tests/workflow-route-override-nested.test.ts`): 246
   quando `outputs.every(nonEmpty)` — e `[].every(...)` é vacuamente `true`
   — então um `parallel` cujo `branches` resolve para `[]` chama `put()`
   sem nenhum leaf ter rodado, dry ou real (`schema.ts` valida
-  `branches: []`; `budget.ts`'s `checkFanout(0)` nunca lança). `put`'s
-  próprio `return false` é a ÚNICA barreira contra essa escrita alcançar
-  `workflow_node_cache` de verdade nesse caminho — não é um caminho morto,
-  é o único teste que faltava. Rodada 2 acrescenta P6 (`put()` passando a
-  delegar a `this.real.put(...)`), ancorado num `it` novo em
-  `tests/workflow-cache-preview-writes.test.ts` (arquivo novo — a suíte
-  principal, `tests/workflow-cache-preview.test.ts`, está no teto de 800
-  linhas) que roda um `parallel` de `branches: []` dependente de um
-  checkpoint sem resposta (nunca alcança `par` na execução real) e compara
-  o snapshot do banco antes/depois do preview: 255 + 1 = 256.
-  `slices.json#focusFiles` da fatia `supervision` ganha
-  `tests/workflow-cache-preview.test.ts`, `tests/workflow-templates.test.ts`
-  e `tests/workflow-cache-preview-writes.test.ts`.
+  `branches: []`; `budget.ts`'s `checkFanout(0)` nunca lança) — não é um
+  caminho morto, é o único teste que faltava.
+
+  O veredito também afirmou que `put`'s próprio `return false` era a
+  ÚNICA barreira contra essa escrita alcançar `workflow_node_cache` de
+  verdade. Essa segunda alegação também não se sustenta: `previewResume`
+  constrói o `SqliteWorkflowCache` real que a facade envolve com uma
+  `dummyOwnership` fixa (`fence: -1`, `holder: "preview"`) — e
+  `workflow-repository.ts`'s `ownershipGuard` exige `fence` exato e um
+  lock vivo do mesmo `holder` num `INNER JOIN` da `INSERT` guardada, então
+  QUALQUER escrita por esse caminho é recusada (`cell.changes === 0`),
+  delegando ou não. São duas barreiras independentes; um oráculo de
+  contagem de linhas sozinho não distingue as duas. Rodada 2 acrescenta P6
+  (`put()` passando a delegar a `this.real.put(...)`), ancorado num `it`
+  novo em `tests/workflow-cache-preview-writes.test.ts` (arquivo novo — a
+  suíte principal, `tests/workflow-cache-preview.test.ts`, está no teto de
+  800 linhas) que roda um `parallel` de `branches: []` dependente de um nó
+  `agent` fixado num provider inválido (`auth_failed` pausa a execução
+  REAL antes de `par`, mas o `DryRuntime` do preview nunca pausa nesse
+  fault genérico, então o preview alcança `par` de verdade) e afere DUAS
+  coisas: a contagem de linhas de `workflow_node_cache` (pina a barreira 2)
+  e as tentativas de `WorkflowRepository.putCacheCellWithCost` observadas
+  por um `WorkflowRepository` de contagem injetado pelo mesmo seam
+  (`deps.repository`) que `previewResume` já toma — essa segunda métrica é
+  o que de fato mata P6, porque a barreira 2 zeraria a contagem de linhas
+  de qualquer forma: 255 + 1 = 256. `slices.json#focusFiles` da fatia
+  `supervision` ganha `tests/workflow-cache-preview.test.ts`,
+  `tests/workflow-templates.test.ts` e
+  `tests/workflow-cache-preview-writes.test.ts`.
 
 `workflow-executor-mutants.ts` (issue #418) acrescentou
 `Q1-quota-guard-removed`: a guarda que impede `quota_exhausted` de entrar em
