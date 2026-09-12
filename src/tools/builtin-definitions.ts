@@ -474,7 +474,7 @@ export const BUILTIN_DEFINITIONS = [
           route: {
             type: "object",
             description:
-              "Only accepted together with 'resume_run_id': {provider?, model?} rewrites 'provider'/'model' on every node (and pipeline stage) in the run's OWN persisted spec that names a route — nodes that never named one are untouched and keep their cached cells; a pinned node re-spawns on the new route. Use it to resume a run paused with reason 'route_fault' on a route other than the one that just refused. Refused without 'resume_run_id', or once a run has already pivoted route 3 times.",
+              "Only accepted together with 'resume_run_id': {provider?, model?} rewrites 'provider'/'model' on every node (and pipeline stage) in the run's OWN persisted spec that names a route — nodes that never named one are untouched and keep their cached cells; a pinned node re-spawns on the new route. Use it to resume a run paused with reason 'route_fault' on a route other than the one that just refused. A given 'provider'/'model' must be non-empty after trimming whitespace — an empty or whitespace-only value is refused before the run is touched, never persisted as a route. Refused without 'resume_run_id', or once a run has already pivoted route 3 times.",
           },
         },
         required: [],

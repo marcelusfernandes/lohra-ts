@@ -79,6 +79,16 @@ export class WorkflowTool {
       (routeRecord.model === undefined || typeof routeRecord.model === "string");
     if (route !== undefined && !routeValid)
       return toolError("'route' must be an object with a string 'provider' and/or 'model'");
+    // Issue #447: an empty or whitespace-only 'provider'/'model' is a
+    // malformed route, checked here — before ever asking the run whether
+    // `resume_run_id` exists (the "only accepted together" check right
+    // below, or `service.start`'s own lookup) — so a typo is refused at
+    // the boundary instead of persisting an empty override onto the
+    // run's spec_json and burning a route pivot on a doomed spawn.
+    if (typeof routeRecord?.provider === "string" && routeRecord.provider.trim() === "")
+      return toolError("'route.provider' must be a non-empty string (not just whitespace)");
+    if (typeof routeRecord?.model === "string" && routeRecord.model.trim() === "")
+      return toolError("'route.model' must be a non-empty string (not just whitespace)");
     if (route !== undefined && resumeRunId === undefined)
       return toolError("'route' is only accepted together with 'resume_run_id'");
     const routeOverride: RouteOverride | undefined =
