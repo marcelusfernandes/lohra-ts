@@ -425,6 +425,11 @@ export function foldNestedCounters(result: RunResult, nested: RunResult, referen
   result.leafRespawns += nested.leafRespawns;
   result.partialLeaves += nested.partialLeaves;
   result.sandboxRefusals += nested.sandboxRefusals;
+  // #540: moved from engine.ts's own runNested (item 7) — the general
+  // `faults` array now goes through the SAME nestedScopePrefix every other
+  // fold below already used, instead of an inline literal only this one
+  // ever spelled.
+  result.faults.push(...nested.faults.map((fault) => `${nestedScopePrefix(reference)}${fault}`));
   result.sandboxFaults.push(
     ...nested.sandboxFaults.map((fault) => `${nestedScopePrefix(reference)}${fault}`),
   );
