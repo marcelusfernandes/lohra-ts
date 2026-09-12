@@ -200,6 +200,7 @@ export function durableRollup(
   if (view.prior_fault_kinds.length > 0) out.fault_kinds_total = [...view.prior_fault_kinds];
   if (view.pivots.length > 0) out.pivots = [...view.pivots];
   if (view.artifacts.length > 0) out.artifacts = [...view.artifacts];
+  if (view.artifact_faults.length > 0) out.artifact_faults = [...view.artifact_faults];
   if (view.name !== "") out.name = view.name;
   if (view.status === "running") {
     out.stale = stale;
@@ -994,10 +995,9 @@ export class WorkflowService {
           // pausePayload above already persisted the stretch-only count; fold the prior total in now, after, so the live view (here and the next status() read of this `result`) matches the durable rollup (#247 round 2).
           result.leafRespawns += priorView?.leaf_respawns ?? 0;
           result.sandboxRefusals += priorView?.sandbox_refusals ?? 0;
-          // Prepended (never appended): `result.artifacts` at this point only
-          // holds THIS stretch's own records, and `pausePayloadOf` above
-          // already wrote the prior-then-current order — this must match.
+          // #485: `artifactFaults` folds forward like `artifacts` (prior-then-current).
           if (priorView !== null) result.artifacts.unshift(...priorView.artifacts);
+          if (priorView !== null) result.artifactFaults.unshift(...priorView.artifact_faults);
           record.published = resultView(record, result);
           record.resolve(record.published);
         } else {

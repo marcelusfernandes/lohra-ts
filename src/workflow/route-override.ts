@@ -17,7 +17,11 @@
 // automatically: a node that never declared model/tier/effort/provider is
 // never touched here either.
 import { Node, WorkflowSpec } from "./types.js";
-import type { RunArtifact, RunResult } from "./accounting.js";
+import {
+  recordCrossStretchArtifactCollisions,
+  type RunArtifact,
+  type RunResult,
+} from "./accounting.js";
 import { routingOf } from "./engine-utils.js";
 import { isRouteLesson, ROUTE_FAULT_REASON } from "./route-faults.js";
 import type { TierMap } from "./tiers.js";
@@ -390,6 +394,11 @@ export function pausePayloadOf(
     priorView?.prior_degraded === true ||
     result.faults.some((fault) => fault !== result.pauseFault);
   const pivots = nextPivots(priorView?.pivots ?? [], options.routeOverride);
+  // #485: a stretch boundary is the one place `recordLeafSideChannels`
+  // (accounting.ts) never sees — its own `result.artifacts` starts empty on
+  // every resume — so the cross-stretch check runs here, once, before the
+  // fold below reads `result.artifactFaults`.
+  recordCrossStretchArtifactCollisions(result, priorView?.artifacts ?? []);
   const artifacts = [...(priorView?.artifacts ?? []), ...result.artifacts];
   const artifactFaults = [...(priorView?.artifact_faults ?? []), ...result.artifactFaults];
   return (checkpoint, resumeAt) =>
