@@ -483,7 +483,7 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 259 (soma dos treze catálogos importados)", () => {
+  it("a contagem total de mutantes é 260 (soma dos treze catálogos importados)", () => {
     // Os doze catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
@@ -530,9 +530,14 @@ describe("scripts/mutations/slices.json", () => {
     // nenhum: 256 + 2 = 258. A issue #503 (follow-up de #484 rodada 2, PR
     // #497 veredito non_blocking 4) acrescenta P9 — `classifyNode` caía em
     // `unknown` para um `parallel` de `branches: []` que rodou até o fim sem
-    // spawn e sem hit; agora `no_leaves`: 258 + 1 = 259.
+    // spawn e sem hit; agora `no_leaves`: 258 + 1 = 259. A issue #515
+    // (follow-up de #503, veredito da PR #510) acrescenta P10 — o guard de
+    // `no_leaves` continuava tautológico ao ponto de classificar `null`
+    // (branches nunca resolvidas para array, ou um fan-out cap trip) junto
+    // com `[]` de verdade; agora exige `Array.isArray(output) &&
+    // output.length === 0`: 259 + 1 = 260.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 259;
+    const TOTAL_MUTANTS = 260;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -557,14 +562,14 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/workflow-executor-mutants.ts": 45,
       "scripts/mutations/context-window.ts": 15,
       "scripts/mutations/auth-mutants.ts": 13,
-      "scripts/mutations/supervision-mutants.ts": 32,
+      "scripts/mutations/supervision-mutants.ts": 33,
     };
     expect(new Set(Object.keys(CONTAGEM_POR_CATALOGO))).toEqual(new Set(CATALOGOS.keys()));
     for (const [path, mutants] of CATALOGOS) {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(259);
+    expect(somaTabela).toBe(260);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {

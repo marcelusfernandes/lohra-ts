@@ -655,4 +655,31 @@ export const supervisionMutants: readonly Mutant[] = [
       },
     ],
   },
+  // Issue #515 (follow-up of #503, veredito da PR #510): `no_leaves`
+  // (P9 above) used to fire for ANY `parallel` with zero spawns/zero hits,
+  // conflating "branches resolved to `[]`, nothing to pay" with two
+  // genuinely blocked cases — `branches` that never resolved to an array at
+  // all (a template over a failed upstream) and a fan-out cap trip
+  // (`FanoutRejected`) — both leave `output === null`, never `[]`. This
+  // mutant drops the new `Array.isArray(output) && output.length === 0`
+  // guard, reverting to "any parallel that ran with nothing spawned/hit is
+  // no_leaves" — killed by the fan-out-cap `it` below, which needs
+  // `unknown`, not `no_leaves`, for exactly that `null` case.
+  {
+    id: "P10-no-leaves-guard-drops-empty-array-check",
+    category: "no-leaves-guard-drops-empty-array-check",
+    mechanism: "family-a",
+    focus: {
+      file: cachePreviewWritesFocus,
+      test: "a parallel node above the fan-out cap reports unknown, never no_leaves",
+    },
+    edits: [
+      {
+        file: cachePreview,
+        before:
+          '  if (\n    node.type === "parallel" &&\n    Object.hasOwn(outputs, node.id) &&\n    Array.isArray(output) &&\n    output.length === 0\n  ) {',
+        after: '  if (node.type === "parallel" && Object.hasOwn(outputs, node.id)) {',
+      },
+    ],
+  },
 ];

@@ -184,6 +184,21 @@ function firstSegment(scoped: string): string {
   return scoped.split(".")[0] ?? scoped;
 }
 
+/** True when some recorded fault is attributed to exactly this node id (its
+ * own `${nodeId}: ` prefix) — never a substring match against a different
+ * node's message. #515: every null-producing path in `runParallel`
+ * (engine.ts) except one records a fault under the node's own id — `all N
+ * branches failed`, a `FanoutRejected` cap trip (`exceeds max_fanout`/
+ * `exceeds lifetime remaining`), and a generic engine fault all do; only the
+ * silent `return null;` for `branches` not resolving to an array at all
+ * (`engine.ts:468`) does not. So `output === null && !hasNodeFault(...)` for
+ * a `parallel` node is exactly that silent path — the cap trip always
+ * leaves a fault behind, so it can never be mistaken for one. */
+function hasNodeFault(nodeId: string, faults: readonly string[]): boolean {
+  const prefix = `${nodeId}: `;
+  return faults.some((fault) => fault.startsWith(prefix));
+}
+
 /** Read-only over a real `SqliteWorkflowCache`: `get` is an honest pass-through
  * (recording the hit's owner for attribution, and — issue #484 — a MISS's
  * own `CacheLookup.miss` reason, straight from `SqliteWorkflowCache.lookup`
@@ -298,28 +313,46 @@ function classifyNode(node: Node, ctx: ClassifyContext): PreviewNodeOutcome {
     return { node_id: node.id, type: node.type, outcome: "checkpoint_pending" };
   }
   const output = outputs[node.id];
-  if (output === null && faults.includes(`${node.id}: upstream null`)) {
+  // #515: a `parallel` whose `branches` never resolved to an array (e.g. a
+  // template over a failed upstream) is checked HERE, ahead of
+  // `token_budget_exhausted` below — the same precedence `agent`'s own
+  // `upstream null` check already has — so it reports the SAME
+  // `upstream_missing` outcome `agent` gets for the analogous case, never
+  // `no_leaves` (that outcome is `[]`-only, below) and never masked by a
+  // LATER pause the run happens to hit on some other node.
+  if (
+    output === null &&
+    (faults.includes(`${node.id}: upstream null`) ||
+      (node.type === "parallel" && !hasNodeFault(node.id, faults)))
+  ) {
     return { node_id: node.id, type: node.type, outcome: "upstream_missing" };
   }
   if (pauseReason === TOKEN_BUDGET_PAUSE) {
     return { node_id: node.id, type: node.type, outcome: "token_budget_exhausted" };
   }
-  // #503: a `parallel` node whose `branches` resolves to `[]` (or to
-  // something that isn't an array at all) runs its dry run to completion —
-  // `Object.hasOwn(outputs, node.id)` is only true for a node the engine's
-  // main loop actually iterated (`engine.ts`'s `this.result.outputs[node.id]
-  // = output`, set unconditionally, even on a thrown/faulted node) — with
-  // neither a spawn nor a cache hit to show for it: nothing to replay,
-  // nothing to pay. `unknown` stays the catch-all for what the preview
-  // genuinely can't predict: a node the run never reached at all (paused
-  // upstream for a reason this function doesn't otherwise name) or any
-  // other node type this classification doesn't model (`verify`/
-  // `checkpoint`/`pipeline` — #503's `Fora de escopo`).
+  // #503/#515: a `parallel` node whose `branches` resolves to a genuinely
+  // EMPTY array runs its dry run to completion with neither a spawn nor a
+  // cache hit to show for it: nothing to replay, nothing to pay. Checking
+  // `spawns?.count === 0 && hits?.count === 0` again here would be
+  // tautological (veredito da PR #510) — the two returns above at :305/:309
+  // already guarantee both are zero by the time execution reaches this
+  // point — so the only question left is `output` itself: `[]` is
+  // "ran with nothing left to pay for", `null` is either the
+  // `upstream_missing` case already handled above or a fan-out cap trip
+  // (`FanoutRejected`, always leaves its own fault behind) that falls
+  // through to `unknown` below — the preview has no dedicated outcome for
+  // it (`engine.ts` is frozen at 978 lines; `capTrips` is a run-wide
+  // counter, not attributable to this one node without growing it).
+  // `unknown` stays the catch-all for what the preview genuinely can't
+  // predict: a node the run never reached at all (paused upstream for a
+  // reason this function doesn't otherwise name), the fan-out cap trip
+  // above, or any other node type this classification doesn't model
+  // (`verify`/`checkpoint`/`pipeline` — #503's `Fora de escopo`).
   if (
     node.type === "parallel" &&
-    (spawns?.count ?? 0) === 0 &&
-    (hits?.count ?? 0) === 0 &&
-    Object.hasOwn(outputs, node.id)
+    Object.hasOwn(outputs, node.id) &&
+    Array.isArray(output) &&
+    output.length === 0
   ) {
     return { node_id: node.id, type: node.type, outcome: "no_leaves" };
   }

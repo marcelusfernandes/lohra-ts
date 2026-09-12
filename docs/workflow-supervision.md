@@ -246,23 +246,25 @@ mapa do épico #458: leitura não viaja na tool de lançamento.
   que `chat.ts`/`dashboard.ts` já passam ao `WorkflowService` real (#464)
   direto para `workflowPreviewHandler` — um nó `{type: "workflow", ref}` que a preview
   atinge agora roda o engine aninhado de verdade e classifica como
-  `outcome: "nested"` (`classifyNode`, `cache-preview.ts:279-288`, dispara
+  `outcome: "nested"` (`classifyNode`, `cache-preview.ts:295-304`, dispara
   quando o nó é `workflow` e o preview registrou algum hit/spawn dentro
   dele), igual a um resume real; antes, sem `loader`, `runNested` lançava
   `"workflow loader unavailable"` e o nó caía em `outcome: "unknown"`
   com `engine_faults` incrementado.
-- **`outcome: "no_leaves"` (#503, follow-up de #484 rodada 2)**: um nó
-  `parallel` cujo `branches` resolve para `[]` RODA na preview (o mesmo
-  comportamento de produção, `engine.ts`'s `runParallel`, `[].every(...)`
-  é vacuamente `true`) sem spawnar nenhuma folha e sem bater no cache —
-  `classifyNode` (`cache-preview.ts`) agora nomeia esse caso `no_leaves`
-  em vez de misturá-lo com `unknown`: o nó genuinamente rodou (seu
-  `output` está em `RunResult.outputs`), só que não sobrou nada a
-  replayar nem a pagar. `unknown` continua reservado para um nó nunca
-  alcançado (pausado por outro motivo antes dele) ou para um tipo que
-  esta classificação deliberadamente não modela — `verify`/`checkpoint`/
-  `pipeline` na mesma forma (zero spawns, zero hits, executou) ainda saem
-  `unknown` (`tests/workflow-cache-preview-writes.test.ts`, describe de
+- **`outcome: "no_leaves"` (#503, follow-up de #484 rodada 2; estreitado
+  pelo #515, abaixo)**: um nó `parallel` cujo `branches` resolve para uma
+  array literalmente VAZIA (`[]`) RODA na preview (o mesmo comportamento de
+  produção, `engine.ts`'s `runParallel`, `[].every(...)` é vacuamente
+  `true`) sem spawnar nenhuma folha e sem bater no cache —
+  `classifyNode` (`cache-preview.ts`) nomeia esse caso `no_leaves` em vez
+  de misturá-lo com `unknown`: o nó genuinamente rodou (seu `output` está
+  em `RunResult.outputs`, e é um array), só que não sobrou nada a replayar
+  nem a pagar. `unknown` continua reservado para um nó nunca alcançado
+  (pausado por outro motivo antes dele), para um `parallel` que estourou o
+  cap de fan-out (#515, abaixo), ou para um tipo que esta classificação
+  deliberadamente não modela — `verify`/`checkpoint`/`pipeline` na mesma
+  forma (zero spawns, zero hits, executou) ainda saem `unknown`
+  (`tests/workflow-cache-preview-writes.test.ts`, describe de
   não-regressão). Esse caminho também alcança `PreviewCacheFacade.put()`
   — `cache.put(...)` é chamado incondicionalmente mesmo sem spawnar
   nenhuma folha — e por isso o `put` da fachada carrega DUAS barreiras
@@ -270,6 +272,26 @@ mapa do épico #458: leitura não viaja na tool de lançamento.
   método e, por trás dele, o `SqliteWorkflowCache` guardado com uma
   `dummyOwnership` de `fence: -1`, que `ownershipGuard` recusaria de
   qualquer forma (`cache-preview.ts:19-35`, cabeçalho do arquivo).
+- **`parallel` bloqueado, não sem folhas (#515, follow-up de #503, veredito
+  da PR #510)**: até aqui, `classifyNode` chegava a `no_leaves` checando
+  `spawns === 0 && hits === 0` — mas os dois retornos anteriores da função
+  (para `spawns > 0`/`hits > 0`) já garantem isso, sempre, nesse ponto: a
+  condição era tautológica e misturava `[]` de verdade com dois casos
+  bloqueados. Agora `no_leaves` exige também `Array.isArray(output) &&
+output.length === 0`; os dois casos que produzem `output === null` saem
+  diferente: (1) `branches` que nunca resolveu para array — um template
+  como `${bad.value}` sobre um upstream que falhou (`runParallel` faz
+  `return null;` em silêncio, `engine.ts:468`) — reporta `upstream_missing`,
+  o MESMO outcome que `agent` já recebe para um `${...}` não resolvido,
+  detectado por `output === null` sem NENHUM fault gravado com o prefixo
+  do próprio id do nó (todo outro caminho de `runParallel` que produz
+  `null` — `all N branches failed`, um cap de fan-out, um fault genérico —
+  grava um fault assim; só esse não); (2) um `parallel` que estourou o cap
+  de fan-out (`budget.ts`'s `checkFanout`, `FanoutRejected`, sempre deixa
+  um fault `exceeds max_fanout`/`exceeds lifetime remaining`) cai em
+  `unknown` — a preview não tem como atribuir `RunResult.capTrips` (uma
+  contagem do run inteiro) a este nó específico sem crescer `engine.ts`
+  (congelado em 978 linhas), então não ganhou um outcome dedicado.
 - Chamar ANTES de `run_workflow(resume_run_id=..., route=...)`, para saber
   o custo de uma rota candidata antes de gastar um dos 3 pivôs.
 
