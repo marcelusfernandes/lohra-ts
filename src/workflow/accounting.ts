@@ -14,6 +14,12 @@ function normalizedArtifactPath(raw: string): string {
   return posix.normalize(raw);
 }
 
+/** #501: the exact, fixed suffix BOTH `recordLeafSideChannels` and
+ * `recordCrossStretchArtifactCollisions` below build a collision advisory
+ * with (never free-form leaf/tool text) — one constant so the two producers
+ * and `collisionPathOf`'s parser below can never drift apart. */
+const COLLISION_FAULT_MARKER = ": artifact path written by 2 leaves: ";
+
 export type RunStatus = "complete" | "degraded" | "failed" | "cancelled" | "paused";
 
 /** One `write_file` a run's leaves produced (#463). Snake_case on purpose:
@@ -190,7 +196,7 @@ export function recordLeafSideChannels(
     otherOwners.delete(subId);
     if (otherOwners.size === 1 && !result.artifactCollisionPaths.has(key)) {
       result.artifactCollisionPaths.add(key);
-      result.artifactFaults.push(`${nodeId}: artifact path written by 2 leaves: ${artifact.path}`);
+      result.artifactFaults.push(`${nodeId}${COLLISION_FAULT_MARKER}${artifact.path}`);
     }
     result.artifacts.push({
       node_id: nodeId,
@@ -232,10 +238,53 @@ export function recordCrossStretchArtifactCollisions(
     const key = normalizedArtifactPath(artifact.path);
     if (!priorPaths.has(key) || result.artifactCollisionPaths.has(key)) continue;
     result.artifactCollisionPaths.add(key);
-    result.artifactFaults.push(
-      `${artifact.node_id}: artifact path written by 2 leaves: ${artifact.path}`,
-    );
+    result.artifactFaults.push(`${artifact.node_id}${COLLISION_FAULT_MARKER}${artifact.path}`);
   }
+}
+
+/** #501: neither `recordCrossStretchArtifactCollisions` above (a fresh
+ * `artifactCollisionPaths` per `RunResult`, blind to what a PRIOR stretch
+ * already reported) nor the persisted `pause_payload_json`
+ * (`pausePayloadOf`, route-override.ts — left byte-identical on purpose,
+ * #501) know a path a prior stretch already flagged is the SAME path a
+ * later stretch's own leaf just rewrote — so a resume's live view can carry
+ * two advisories for one path, with different `node_id`s. Every view that
+ * folds stretches together dedupes here instead, on the WHOLE merged list
+ * (never just the newest stretch's own faults), so a duplicate already
+ * baked into an older stretch's persisted payload is cleaned up on read
+ * too, not merely prevented from growing further. First occurrence of a
+ * path wins — the earliest stretch's own advisory and its `node_id`
+ * survive every fold after it; a non-collision message (the artifact-cap
+ * fault above) has no path and is always kept. */
+function collisionPathOf(fault: string): string | null {
+  const at = fault.indexOf(COLLISION_FAULT_MARKER);
+  if (at === -1) return null;
+  return normalizedArtifactPath(fault.slice(at + COLLISION_FAULT_MARKER.length));
+}
+
+export function dedupeArtifactFaultsByPath(faults: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (const fault of faults) {
+    const path = collisionPathOf(fault);
+    if (path !== null) {
+      if (seen.has(path)) continue;
+      seen.add(path);
+    }
+    kept.push(fault);
+  }
+  return kept;
+}
+
+/** Called once from service.ts's terminal fold, in place of the plain
+ * `result.artifactFaults.unshift(...priorView.artifact_faults)` swap
+ * `artifacts` (unrelated, never deduped — every write is a legitimate
+ * manifest entry) still does right above that call site — mutates
+ * `result.artifactFaults` in place so the call site keeps the exact same
+ * one-line shape service.ts had before #501 (its own zero-growth ceiling). */
+export function foldArtifactFaults(result: RunResult, priorFaults: readonly string[]): void {
+  const merged = dedupeArtifactFaultsByPath([...priorFaults, ...result.artifactFaults]);
+  result.artifactFaults.splice(0, result.artifactFaults.length, ...merged);
 }
 
 /** Molde `recordSandboxRefusals`: a no-op on `null` keeps the common case (a

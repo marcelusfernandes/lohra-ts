@@ -338,11 +338,11 @@ leaves: <path>"` em `artifactFaults` exatamente uma vez; nunca muda
 - **Dedup por caminho e colisão entre stretches** (fechados pelo #495,
   achados do veredito da PR #483/issue #485): um lote `[p, p]` de uma
   folha B, depois de A já ter escrito `p`, dispara o advisory só UMA vez —
-  `RunResult.artifactCollisionPaths` (`accounting.ts:104`), um `Set` de
+  `RunResult.artifactCollisionPaths` (`accounting.ts:110`), um `Set` de
   caminhos já reportados, dedupa dentro de `recordLeafSideChannels`
-  (`accounting.ts:176-208`). O mesmo `Set` cobre colisão ENTRE stretches:
+  (`accounting.ts:182-208`). O mesmo `Set` cobre colisão ENTRE stretches:
   `pausePayloadOf` (`route-override.ts:401`) chama
-  `recordCrossStretchArtifactCollisions` (`accounting.ts:223-239`) uma vez
+  `recordCrossStretchArtifactCollisions` (`accounting.ts:229-243`) uma vez
   por escrita terminal, comparando os artefatos DESTA stretch contra os
   acumulados de todas as anteriores (`priorView.artifacts`) — por caminho,
   nunca por `sub_id`: o limite entre stretches já prova que são duas
@@ -353,22 +353,43 @@ leaves: <path>"` em `artifactFaults` exatamente uma vez; nunca muda
   `RunArtifact.path` gravado continua a string crua. Nenhuma dessas
   mudanças toca `status` nem `RunResult.faults` — seguem gaps do próprio
   advisory, não do runtime.
+- **Um advisory por caminho, através de N resumes** (#501, follow-up do
+  veredito non_blocking 3/4 da PR #495): o `Set` acima nasce vazio a cada
+  `RunResult` novo — sem memória do que uma stretch ANTERIOR já reportou —
+  então um caminho já flagado (duas folhas na stretch 1) que uma folha
+  DIFERENTE reescreve na stretch 2 disparava um SEGUNDO advisory, com
+  `node_id` distinto: `service.ts:1000`'s dobra terminal antepunha
+  `priorView.artifact_faults` a `result.artifactFaults` sem checar se o
+  caminho já constava. `dedupeArtifactFaultsByPath` (`accounting.ts:265-277`)
+  e `foldArtifactFaults` (`accounting.ts:285-288`) fecham isso: mantêm a
+  PRIMEIRA ocorrência de cada caminho colidido na lista MESCLADA
+  (`[...prior, ...atual]`), nunca a mais recente — inclusive limpando uma
+  duplicata que já tivesse ficado gravada num `pause_payload_json` de antes
+  deste fix, já que a checagem
+  roda de novo a cada fold. `pausePayloadOf`/`route-override.ts` não muda:
+  o `pause_payload_json` persistido continua byte-idêntico (só a leitura AO
+  VIVO — `resultView`, via `result.artifactFaults` — dedupa); uma leitura
+  FRIA (`workflow_status` num run dormente, `durableRollup`,
+  `service.ts:203`) ainda expõe a duplicata que já estava persistida — não
+  coube trocar isso também sem passar do teto de 1284 linhas de
+  `service.ts`. As duas mensagens que geram o texto do advisory
+  (`recordLeafSideChannels`, `recordCrossStretchArtifactCollisions`)
+  compartilham `COLLISION_FAULT_MARKER` (`accounting.ts:21`) — o mesmo
+  texto de antes, byte a byte — para que o parser de caminho de
+  `dedupeArtifactFaultsByPath` nunca divirja do que as gera. Cenário "nó
+  DIFERENTE na stretch 2 colidindo com um caminho já flagado na stretch 1"
+  e "o MESMO caminho, já flagado, reescrito de novo numa stretch depois" —
+  ambos vermelhos por asserção na base — vivem em
+  `tests/workflow-artifacts-cross-stretch-dedup.test.ts`.
 - **Limitações que sobraram, sem issue aberta cobrindo nenhuma delas**:
-  (a) `RunResult.artifactCollisionPaths` nasce vazio a cada stretch nova
-  (é campo de instância de um `RunResult` novo por stretch) e nunca é
-  semeado a partir do que uma stretch anterior já flagou — um caminho já
-  reportado como colisão na stretch 2 pode ser reportado DE NOVO numa
-  stretch 3 que reescreva o mesmo caminho; (b) o cenário "um caminho que a
-  stretch 1 escreveu colide com um NÓ DIFERENTE na stretch 2" não tem
-  teste dedicado — a suíte em `tests/workflow-artifacts.test.ts:607-735`
-  cobre dedup dentro de um lote, `./x`/`x`, a sobrevivência da colisão da
-  stretch 1 através de um resume, e o MESMO nó reescrevendo na stretch 2 o
-  caminho que ele próprio escreveu na stretch 1 (linha 712) — não dois nós
-  distintos colidindo entre stretches; (c) o custo O(N²) de
+  (a) o custo O(N²) de
   `recordLeafSideChannels`/`recordCrossStretchArtifactCollisions` (um
   `.filter` por artefato já registrado) e o payload de `artifacts`/
   `artifact_faults` sem teto por run continuam sem solução — nenhum caso
-  de uso hoje aproxima o custo quadrático de um problema real.
+  de uso hoje aproxima o custo quadrático de um problema real; (b) uma
+  leitura FRIA de um run dormente (`workflow_status` sem processo vivo,
+  `durableRollup`) ainda pode expor uma duplicata de advisory já gravada
+  antes do #501 — só a leitura ao vivo dedupa (acima).
 - **Fora do escopo original, limitação registrada no próprio código**: um
   sub-workflow por `ref` nunca tem seus artefatos checados contra os do run
   pai — `foldNestedCounters` (`accounting.ts:265-285`) só concatena as

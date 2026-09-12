@@ -43,7 +43,7 @@ import { loadsOr } from "./jsonio.js";
 import type { ChildRuntime, LeafSandboxHandle, LeafToolDispatch } from "./runtime.js";
 import { validateNestedRefs, validateSpec } from "./schema.js";
 import { ValidationError, type WorkflowSpec } from "./types.js";
-import type { RunResult } from "./accounting.js";
+import { foldArtifactFaults, type RunResult } from "./accounting.js";
 import { WorkflowRepository, type Ownership } from "../state/workflow-repository.js";
 import {
   DENY_ALL_POLICY,
@@ -997,7 +997,7 @@ export class WorkflowService {
           result.sandboxRefusals += priorView?.sandbox_refusals ?? 0;
           // #485: `artifactFaults` folds forward like `artifacts` (prior-then-current).
           if (priorView !== null) result.artifacts.unshift(...priorView.artifacts);
-          if (priorView !== null) result.artifactFaults.unshift(...priorView.artifact_faults);
+          if (priorView !== null) foldArtifactFaults(result, priorView.artifact_faults);
           record.published = resultView(record, result);
           record.resolve(record.published);
         } else {
