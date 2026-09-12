@@ -186,14 +186,29 @@ function firstSegment(scoped: string): string {
 
 /** True when some recorded fault is attributed to exactly this node id (its
  * own `${nodeId}: ` prefix) — never a substring match against a different
- * node's message. #515: every null-producing path in `runParallel`
- * (engine.ts) except one records a fault under the node's own id — `all N
- * branches failed`, a `FanoutRejected` cap trip (`exceeds max_fanout`/
- * `exceeds lifetime remaining`), and a generic engine fault all do; only the
- * silent `return null;` for `branches` not resolving to an array at all
- * (`engine.ts:468`) does not. So `output === null && !hasNodeFault(...)` for
- * a `parallel` node is exactly that silent path — the cap trip always
- * leaves a fault behind, so it can never be mistaken for one. */
+ * node's message. #515/#540: `runParallel` (engine.ts) has SIX ways to end
+ * a `parallel` node with a `null`/falsy result, and only one leaves NO
+ * node-prefixed fault behind. (1) `branches` never resolving to an array —
+ * a silent `return null;`, no fault at all. (2) `gateFanout`'s affordability
+ * check — `pause()` with a `${this.currentNode}: fan-out of…` message,
+ * PREFIXED. (3) `gateFanout`'s hard `checkFanout` cap (`exceeds max_fanout`/
+ * `exceeds lifetime remaining`) — throws `FanoutRejected` without recording
+ * or pausing at all, but `run()`'s per-node catch prefixes it with
+ * `${node.id}:` before it ever reaches `faults`. (4) every branch failing —
+ * `all N branches failed`, PREFIXED. (5) an unexpected exception — a
+ * generic engine fault, PREFIXED. (6) a branch's own per-leaf `gateTokens()`
+ * — `pause()` with an UNPREFIXED `token budget exhausted: spent…` message
+ * (no node id at all) — but this one is UNREACHABLE for a `parallel` node:
+ * whenever the budget is (or becomes) exhausted, `tokensRemaining` floors
+ * at 0, so (2)'s affordability check already rejects ANY branch count ≥ 1
+ * first, before a single branch ever calls `collectLeaf`/`gateTokens`
+ * (verified empirically, `tests/workflow-cache-preview-budget.test.ts`).
+ * A SEVENTH case — `control.paused`/`control.cancelled` already true
+ * (e.g. a parent's pause) — returns the raw `outputs` array (e.g.
+ * `[null, null]`), never bare `null`, so it never reaches this function's
+ * caller's `output === null` check at all. So `output === null &&
+ * !hasNodeFault(...)` for a `parallel` node is exactly case (1), the only
+ * truly silent one. */
 function hasNodeFault(nodeId: string, faults: readonly string[]): boolean {
   const prefix = `${nodeId}: `;
   return faults.some((fault) => fault.startsWith(prefix));
@@ -334,26 +349,25 @@ function classifyNode(node: Node, ctx: ClassifyContext): PreviewNodeOutcome {
   // EMPTY array runs its dry run to completion with neither a spawn nor a
   // cache hit to show for it: nothing to replay, nothing to pay. Checking
   // `spawns?.count === 0 && hits?.count === 0` again here would be
-  // tautological (veredito da PR #510) — the two returns above at :305/:309
+  // tautological (veredito da PR #510) — the `spawns`/`hits` returns above
   // already guarantee both are zero by the time execution reaches this
   // point — so the only question left is `output` itself: `[]` is
   // "ran with nothing left to pay for", `null` is either the
   // `upstream_missing` case already handled above or a fan-out cap trip
   // (`FanoutRejected`, always leaves its own fault behind) that falls
   // through to `unknown` below — the preview has no dedicated outcome for
-  // it (`engine.ts` is frozen at 978 lines; `capTrips` is a run-wide
+  // it (`engine.ts` is frozen at 977 lines; `capTrips` is a run-wide
   // counter, not attributable to this one node without growing it).
   // `unknown` stays the catch-all for what the preview genuinely can't
   // predict: a node the run never reached at all (paused upstream for a
   // reason this function doesn't otherwise name), the fan-out cap trip
   // above, or any other node type this classification doesn't model
   // (`verify`/`checkpoint`/`pipeline` — #503's `Fora de escopo`).
-  if (
-    node.type === "parallel" &&
-    Object.hasOwn(outputs, node.id) &&
-    Array.isArray(output) &&
-    output.length === 0
-  ) {
+  // `Array.isArray(output)` alone already excludes a missing key —
+  // `outputs[node.id]` on an absent key is `undefined`, never an array —
+  // so the `Object.hasOwn(outputs, node.id)` this used to lead with was
+  // redundant.
+  if (node.type === "parallel" && Array.isArray(output) && output.length === 0) {
     return { node_id: node.id, type: node.type, outcome: "no_leaves" };
   }
   return { node_id: node.id, type: node.type, outcome: "unknown" };

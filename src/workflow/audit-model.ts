@@ -288,16 +288,21 @@ function boundedRunId(value: string): string {
 
 function rawMarker(value: unknown): AuditMarker {
   // Issue #511: a re-sanitization pass (`parseEvent` on read) hands a value
-  // already wrapped by a PREVIOUS `rawMarker` call back into this function —
-  // e.g. an unknown top-level key's marker, or a raw field's own marker that
-  // fell through the `preserved` check below. Recognizing that shape here
-  // (state `excluded_by_policy` specifically — never any other
-  // `SAFE_MARKER_STATES` member, which stays subject to the raw-field
-  // bypass check in `safeValue`) and returning it UNCHANGED is what makes
-  // `publicAuditEvent` idempotent in size: without it, an object marker like
-  // `{state, characters}` gets treated as an opaque object on the next pass
-  // and re-wrapped as `{state, fields: N}`, growing every re-sanitization.
-  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+  // already wrapped by a PREVIOUS `rawMarker` call back into this function
+  // via the UNKNOWN top-level key path (`safeValue`'s `rawMarker(child)`
+  // call below) — e.g. an unknown key's own marker from an earlier pass.
+  // NEVER via a RAW_FIELDS value's own marker: `safeValue`'s
+  // `RAW_FIELDS.has(key)` branch already returns THAT `preserved` directly
+  // when its state is `excluded_by_policy`, so a value in that state never
+  // reaches this function through the raw-field path at all. Recognizing
+  // the shape here (state `excluded_by_policy` specifically — never any
+  // other `SAFE_MARKER_STATES` member, which stays subject to the
+  // raw-field bypass check in `safeValue`) and returning it UNCHANGED is
+  // what makes `publicAuditEvent` idempotent in size: without it, an
+  // object marker like `{state, characters}` gets treated as an opaque
+  // object on the next pass and re-wrapped as `{state, fields: N}`,
+  // growing every re-sanitization.
+  if (value !== null && typeof value === "object") {
     const preserved = marker(value as Readonly<Record<string, unknown>>);
     if (preserved !== null && preserved.state === "excluded_by_policy") return preserved;
   }

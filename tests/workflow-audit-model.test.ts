@@ -90,6 +90,25 @@ describe("safeAuditMetadata — idempotência de tamanho e conteúdo (#511)", ()
   });
 });
 
+// #540 (non_blocking 1 do veredito da PR #527): canário para o comentário
+// de `rawMarker` — uma chave desconhecida cujo valor já É a forma
+// reconhecida (`{state: "excluded_by_policy", ...}`) de uma passada
+// anterior, mas com um campo EXTRA (`note`) que `marker()` não copia (não
+// está em nenhuma das listas fechadas — `characters`/`items`/`fields`/
+// `bytes`/`original_bytes`/`limit_bytes`/`side`/`original_event_type`).
+// Contra-asserção: verde por construção (o comportamento já é o correto
+// hoje); prende a regressão caso `marker()`/`rawMarker` um dia comecem a
+// copiar campos desconhecidos do marcador reconhecido.
+describe("safeAuditMetadata — canário: marcador reconhecido não vaza campo extra (#540)", () => {
+  it("uma chave desconhecida cujo valor já é {state: excluded_by_policy, note} perde 'note'", () => {
+    const input = { unknown_key: { state: "excluded_by_policy", note: "canário-#540" } };
+    const out = safeAuditMetadata(input);
+    const wrapped = out["unknown_key"] as Readonly<Record<string, unknown>>;
+    expect(wrapped).toEqual({ state: "excluded_by_policy" });
+    expect(wrapped["note"]).toBeUndefined();
+  });
+});
+
 describe("publicAuditEvent — reprodução do revisor: evento < 2048 bytes não re-deriva audit.truncated (#511)", () => {
   it("um leaf.started com muitas chaves desconhecidas, gravado abaixo do teto, permanece leaf.started na releitura", () => {
     // Construção calibrada (via experimentação local) para ficar

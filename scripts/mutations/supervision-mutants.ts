@@ -62,6 +62,10 @@ const abortInFlightFocus = "tests/transports-abort-in-flight.test.ts";
 const childRunnerAbortFocus = "tests/orchestration-child-runner-abort.test.ts";
 const workflowOrchestrationRuntimeTimeoutFocus =
   "tests/workflow-orchestration-runtime-timeout.test.ts";
+const validation = "src/orchestration/validation.ts";
+const orchestrationToolsFocus = "tests/orchestration-tools.test.ts";
+const accounting = "src/workflow/accounting.ts";
+const workflowNodesToolFocus = "tests/workflow-nodes-tool.test.ts";
 
 export const supervisionMutants: readonly Mutant[] = [
   // --- steer-tool.ts (#424, #445, #450) -----------------------------------
@@ -682,9 +686,8 @@ export const supervisionMutants: readonly Mutant[] = [
     edits: [
       {
         file: cachePreview,
-        before:
-          '  if (\n    node.type === "parallel" &&\n    Object.hasOwn(outputs, node.id) &&\n    Array.isArray(output) &&\n    output.length === 0\n  ) {',
-        after: '  if (node.type === "parallel" && Object.hasOwn(outputs, node.id)) {',
+        before: '  if (node.type === "parallel" && Array.isArray(output) && output.length === 0) {',
+        after: '  if (node.type === "parallel") {',
       },
     ],
   },
@@ -754,6 +757,41 @@ export const supervisionMutants: readonly Mutant[] = [
         file: orchestrationRuntime,
         before: "        ? Math.min(options.timeoutSeconds * 1000, 2_147_483_647)",
         after: "        ? Math.min(options.timeoutSeconds * 10_000, 2_147_483_647)",
+      },
+    ],
+  },
+  // #540 achado 5: normalizeResumeId sem mutante — off-by-one no trim (`0`->`1`).
+  {
+    id: "V1-normalize-resume-id-trim-off-by-one",
+    category: "normalize-resume-id-trim-off-by-one",
+    mechanism: "family-a",
+    focus: {
+      file: orchestrationToolsFocus,
+      test: 'drops the "resume_id" key entirely for empty, whitespace-only, null and undefined values',
+    },
+    edits: [
+      {
+        file: validation,
+        before: '    (typeof resume_id === "string" && resume_id.trim().length === 0);',
+        after: '    (typeof resume_id === "string" && resume_id.trim().length === 1);',
+      },
+    ],
+  },
+  // #540 achado 2b: fold de faults (foldNestedCounters) sem mutante.
+  {
+    id: "W1-nested-faults-fold-drops-prefix",
+    category: "nested-faults-fold-drops-prefix",
+    mechanism: "family-a",
+    focus: {
+      file: workflowNodesToolFocus,
+      test: "folds nested faults, node counts and all five cost meters",
+    },
+    edits: [
+      {
+        file: accounting,
+        before:
+          "  result.faults.push(...nested.faults.map((fault) => `${nestedScopePrefix(reference)}${fault}`));",
+        after: "  result.faults.push(...nested.faults);",
       },
     ],
   },

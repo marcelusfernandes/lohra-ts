@@ -870,7 +870,6 @@ export class WorkflowEngine {
     this.result.reasoningTokens += result.reasoningTokens;
     for (const [nodeId, cost] of Object.entries(result.nodeCosts))
       this.result.nodeCosts[`sub[${reference}]:${nodeId}`] = cost;
-    this.result.faults.push(...result.faults.map((fault) => `sub[${reference}]: ${fault}`));
     this.result.validationRetries += result.validationRetries;
     this.result.capTrips += result.capTrips;
     this.result.engineFaults += result.engineFaults;

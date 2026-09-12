@@ -17,7 +17,7 @@ function normalizedArtifactPath(raw: string): string {
 /** #501: the exact, fixed suffix BOTH `recordLeafSideChannels` and
  * `recordCrossStretchArtifactCollisions` below build a collision advisory
  * with (never free-form leaf/tool text) — one constant so the two producers
- * and `collisionPathOf`'s parser below can never drift apart. */
+ * and `collisionKeyOf`'s parser below can never drift apart. */
 const COLLISION_FAULT_MARKER = ": artifact path written by 2 leaves: ";
 
 export type RunStatus = "complete" | "degraded" | "failed" | "cancelled" | "paused";
@@ -347,13 +347,15 @@ export function dedupeArtifactFaultsByPath(faults: readonly string[]): string[] 
   return kept;
 }
 
-/** #539: the ONE place that spells the SPACED `sub[${reference}]: ` scope
- * prefix a fault string carries — `foldNestedCounters` below and
+/** #539/#540: the ONE place that spells the SPACED `sub[${reference}]: `
+ * scope prefix a fault string carries — `foldNestedCounters` below (its
+ * `faults`, `sandboxFaults` and `artifactFaults` folds) and
  * `faultPrefixFromNodeId` right below both call this instead of inlining
- * the template literal, so the two producers of a scoped fault string can
- * never drift out of the shape `NESTED_SCOPE_PREFIX_RE`/`collisionKeyOf`
- * above parse. Never used for `RunArtifact.node_id` itself — that stays the
- * UNSPACED `sub[${reference}]:${nodeId}` contract pinned by
+ * the template literal, so no producer of a scoped fault string can drift
+ * out of the shape `NESTED_SCOPE_PREFIX_RE`/`collisionKeyOf` above parse.
+ * Only ever called from within this module — never exported. Never used
+ * for `RunArtifact.node_id` itself — that stays the UNSPACED
+ * `sub[${reference}]:${nodeId}` contract pinned by
  * `tests/workflow-artifacts.test.ts:331`. */
 function nestedScopePrefix(reference: string): string {
   return `sub[${reference}]: `;
@@ -412,18 +414,30 @@ export function recordFaultKind(result: RunResult, kind: ErrorKind | null): void
 }
 
 /** `runNested` (engine.ts) calls this in place of its own former
- * `this.result.leafRespawns += result.leafRespawns;` line (never part of
- * the `nested-fold-removed` mutation anchor, workflow-executor-mutants.ts —
- * that anchor's `before` ends at `forcingFallbacks`, the statement just
- * above) — folding `leafRespawns` here too, alongside the two new fields,
- * keeps this a SWAP, not an addition: engine.ts's own line count for the
- * nested-workflow fold stays exactly what it was before PR #316 round 2 (a
- * nested sub-run's refusals were folding into eleven OTHER parent counters
- * already but never into these two). */
+ * `this.result.leafRespawns += result.leafRespawns;` line — folding
+ * `leafRespawns` here too, alongside the two new fields, kept that a SWAP,
+ * not an addition, at the time (PR #316 round 2: a nested sub-run's
+ * refusals were folding into eleven OTHER parent counters already but
+ * never into these two). #540 moved a SECOND former inline statement here
+ * too — the `faults` fold below, previously `runNested`'s own
+ * `this.result.faults.push(...)` — a net REDUCTION in `engine.ts`
+ * (978 → 977 lines), not just a swap: `engine.ts` is frozen at 800 lines
+ * project-wide and was already over it, so `contratos` refuses growth
+ * there, never here. The `nested-fold-removed` mutation anchor
+ * (`workflow-executor-mutants.ts`)'s `before` now ends at THIS function's
+ * own call site (`foldNestedCounters(this.result, result, reference);`),
+ * not at `forcingFallbacks` above it — under that mutant's `after`
+ * (`void reference;`), the call itself never happens, so NOTHING in this
+ * function runs, `leafRespawns` included. */
 export function foldNestedCounters(result: RunResult, nested: RunResult, reference: string): void {
   result.leafRespawns += nested.leafRespawns;
   result.partialLeaves += nested.partialLeaves;
   result.sandboxRefusals += nested.sandboxRefusals;
+  // #540: moved from engine.ts's own runNested (item 7) — the general
+  // `faults` array now goes through the SAME nestedScopePrefix every other
+  // fold below already used, instead of an inline literal only this one
+  // ever spelled.
+  result.faults.push(...nested.faults.map((fault) => `${nestedScopePrefix(reference)}${fault}`));
   result.sandboxFaults.push(
     ...nested.sandboxFaults.map((fault) => `${nestedScopePrefix(reference)}${fault}`),
   );
