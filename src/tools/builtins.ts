@@ -37,6 +37,7 @@ const FAIL_SAFE_HANDLERS: Readonly<Record<string, ToolHandler>> = {
   workflow_notices_ack: failSafe("workflow_notices_ack must be intercepted with a SessionDB"),
   workflow_leaf_read: failSafe("workflow_leaf_read must be intercepted with a SessionDB"),
   workflow_steer: failSafe("workflow tools must be intercepted with a session WorkflowService"),
+  workflow_preview: failSafe("workflow tools must be intercepted with a session WorkflowService"),
 };
 
 function toolset(name: string): string {
