@@ -19,6 +19,19 @@ import type {
  * and counted in `ChildResult.artifactsDropped`, never silently. */
 export const MAX_ARTIFACTS_PER_LEAF = 256;
 
+/** Issue #518 (M16-S3, ADR 0005): the ceiling `cancel()` below waits for the
+ * leaf's own settlement before giving up and returning anyway — strictly
+ * less than `SHUTDOWN_SETTLE_TIMEOUT_MS` (`workflow/service.ts`, 5_000): a
+ * single leaf's cancel is expected to settle far faster than a whole run's
+ * shutdown drain, and never wants to eat into that larger budget. */
+export const CANCEL_SETTLE_TIMEOUT_MS = 2_000;
+
+function settleCeiling(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 /** A frozen, independent copy of `causal` — never the caller's own object
  * reference, and never mutable after this returns (issue #422: `causalSnapshot`
  * must hand back a snapshot, not a handle the caller could go on mutating). */
@@ -327,6 +340,7 @@ export class OrchestrationChildRuntime implements ChildRuntime {
       retryAfter: result.retryAfter,
       errorKind: result.errorKind,
       usageUncertain: result.usageUncertain === true,
+      ...(result.partial === true ? { partial: true } : {}),
       sandboxRefusals: this.refusalCounts.get(id)?.box.count ?? 0,
       ...this.artifactFieldsOf(id),
     };
@@ -371,7 +385,20 @@ export class OrchestrationChildRuntime implements ChildRuntime {
     return this.core.steer(id, prompt, causal);
   }
 
-  public cancel(id: string): void {
+  /**
+   * Issue #518 (M16-S3, ADR 0005): aborts the leaf's own controller (never
+   * blocking on that call itself — `core.cancel` stays synchronous) and
+   * then WAITS for the leaf to actually settle, up to `CANCEL_SETTLE_TIMEOUT_MS`
+   * — so `AuditedChildRuntime.cancel` (audit-runtime.ts), which awaits this,
+   * can probe `collect(id, {wait:false, ...})` right after and find a real,
+   * settled `ChildResult` (partial usage included) instead of racing a leaf
+   * that is still tearing down. Never waits past the ceiling: a leaf that
+   * genuinely doesn't settle in time (a hung dispatch, not this issue's
+   * concern) still returns, same as before this issue — just with an upper
+   * bound on how long a caller waits for the (best-effort) settlement.
+   */
+  public async cancel(id: string): Promise<void> {
     this.core.cancel(id);
+    await Promise.race([this.core.collect(id, true), settleCeiling(CANCEL_SETTLE_TIMEOUT_MS)]);
   }
 }
