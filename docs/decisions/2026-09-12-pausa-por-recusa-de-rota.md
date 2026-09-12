@@ -112,3 +112,89 @@ route_fault` e para `faultKinds: []`.
   tool `workflow_notices` lê (grava por ele, lê pela tool);
   `tests/workflow-audit-allow-list.test.ts` ganhou o oráculo que faltava
   para `route_fault` em `SAFE_STRING_VALUES.reason`.
+
+## S6 (issue #427): override manual; chave conservadora
+
+`run_workflow(resume_run_id, route: {provider?, model?})` (M10-S6, épico
+#421) é o pivô manual que a seção anterior deixava para depois — o operador
+(ou o agente que leu a lição) decide a rota nova; nada aqui a sugere.
+
+- **A espec é reescrita ANTES do engine rodar**, não `routingOf`/
+  `routingIdentity` (`engine-utils.ts`) threadados por `route`:
+  `route-override.ts` (novo) reescreve `provider`/`model` em todo nó (e
+  stage de `pipeline`) que já declara `model`/`tier`/`effort`/`provider` —
+  o MESMO guard que `routingIdentity` usa para decidir se a rota entra no
+  hash da célula. Um nó que nunca declarou rota nenhuma nunca é tocado.
+  Consequência: **zero mudança** em `engine.ts`/`engine-utils.ts` (e no
+  âncora de mutação `hash-remove-routing`,
+  `scripts/mutations/workflow-executor-mutants.ts`) — cada função de
+  cache-identity (`routingIdentity`, `loopCellParts`,
+  `replayOrCollectBranch`, `recordGroupReplayCost`) re-keya sozinha, porque
+  o campo que ela lê (`node.fields.provider`/`model`) já mudou antes dela
+  rodar.
+- **Chave conservadora confirmada**: a rota continua entrando no hash só
+  dos nós que a declaram (decisão 2 do épico #421, S5) — resumir com outra
+  rota invalida a célula de um nó PINADO (ele re-executa na rota nova) e
+  preserva a célula de um nó sem pino (replay do cache, `cache.replayed`).
+  Nenhuma re-key global foi cogitada nesta issue; a alternativa do
+  enunciado da milestone (tirar a rota da chave) segue rejeitada.
+- **O pivô PERSISTE no `spec_json`**: `service.ts` grava a espec já
+  reescrita (`rawSpecOf(parsed)`) a cada escrita terminal — um resume
+  POSTERIOR sem `route` continua na rota nova, não volta para a original.
+  `pause_payload_json.pivots[]` é o único registro de que a rota mudou (e
+  de qual era antes); não há uma cópia da espec "como autorada" em lugar
+  nenhum.
+- **Teto de `MAX_ROUTE_PIVOTS_PER_RUN` (3) por run** (`pivotResume`,
+  route-override.ts): acima do teto, o resume é recusado com um erro
+  nomeado — um gate humano de facto, coerente com a decisão 4 do épico
+  #421 (pivô é sempre manual; `AutoResumeScheduler` continua rearmando só
+  quota, na mesma rota, sem tocar `route` nunca). `pivots` viaja dobrado
+  para frente em `pause_payload_json` a cada escrita terminal, exatamente
+  como `prior_faults`/`prior_fault_kinds` já viajavam — omitido (nunca uma
+  lista vazia) para um run que nunca pivotou, para que o payload de todo
+  run anterior a esta issue continue byte-idêntico. Exposto em
+  `workflow_status` via `durableRollup` quando não vazio (uma leitura
+  DURÁVEL — `resultView`, o envelope de um run ainda vivo NESTE processo,
+  não ganhou o campo; fora do escopo desta issue, `service-rollup.ts` não
+  está nos `Files`).
+- **`pipeline` stage**: uma `stage` que nomeia sua própria rota (a exceção
+  documentada em `run_workflow`) SOMBREIA o pivô do nó por inteiro —
+  `route-override.ts` reescreve a stage também, não só o nó, ou ela
+  continua recusando na rota velha.
+- **`engine.ts`/`engine-utils.ts` intocados; `service.ts` sem crescimento**
+  (teto de 1296 linhas, zero de folga): o fechamento `pause_payload_json`
+  que já existia em `launchDurable` (`priorFaults`/`priorDegraded` mais o
+  `JSON.stringify` inline) foi consolidado num só builder
+  (`pausePayloadOf`, route-override.ts) — abriu espaço para o campo
+  `pivots` novo sem crescer o arquivo (1296 → 1292 linhas).
+
+### O que esta issue NÃO faz
+
+- **Nenhuma rota pré-autorizada nem `node.rerouted`** — fora de escopo
+  (M11, conforme o épico).
+- **Nenhum pivô automático** — decisão 4 do épico continua valendo; só um
+  `run_workflow(resume_run_id, route: {...})` explícito pivota.
+- **Nenhuma tool `workflow resume` de CLI** — fora do escopo desta issue.
+
+### Evidência
+
+- `tests/workflow-route-override.test.ts`: nó sem pino replayado
+  (`cache.replayed`) e nó pinado recomputado (`cache.missed`/
+  `cache.stored`) na rota nova, num run durável de verdade; `route` sem
+  `resume_run_id` ou malformado recusado com erro nomeado; teto de 3
+  pivôs por run, com um 4º resume recusado citando o teto; `pivots`
+  exposto em `workflow_status`; os exports de `route-override.ts`
+  (`applyRouteOverride`, `overrideNode`, `pivotResume`, `nextPivots`,
+  `pivotsOf`) exercitados diretamente.
+- `npm run mutations:t15` (45/45), `t16` (60/60), `t17` (57/57) — nenhuma
+  fatia precisou de re-ancoragem (nem `engine.ts`, `engine-utils.ts` nem
+  `service.ts` mudaram de forma reconhecível pelos mutantes existentes).
+- Dogfooding real (`node dist/cli.js chat --json --yolo`, uma
+  `OPENROUTER_API_KEY` inválida escopada só a este processo — nunca lida
+  nem escrita em `~/.lohra/**`): um `run_workflow` roteado para
+  `provider: "openrouter"` com um modelo inexistente pausa
+  `route_fault`/`auth_failed`; o próprio agente chama `list_models`,
+  escolhe `provider: "anthropic"` com um modelo real, e
+  `run_workflow(resume_run_id=..., route={...})` completa o nó
+  (`outputs.a: "ok"`) na rota nova — `exit_code=0`, `error: null`,
+  `completed: true`, 9 `tool_calls`.

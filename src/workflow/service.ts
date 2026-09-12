@@ -15,6 +15,7 @@ import { WorkflowEngine } from "./engine.js";
 import { AutoResumeScheduler, LeaseHeartbeat, type Timer } from "./durability.js";
 import { resultView } from "./service-rollup.js";
 import { recordRouteFaultNotice, ROUTE_FAULT_REASON } from "./route-faults.js";
+import { pausePayloadOf, pivotResume, pivotsOf, type RouteOverride } from "./route-override.js";
 import type { ChildRuntime, LeafSandboxHandle, LeafToolDispatch } from "./runtime.js";
 import { validateNestedRefs, validateSpec } from "./schema.js";
 import { ValidationError, type WorkflowSpec } from "./types.js";
@@ -117,6 +118,9 @@ export interface DurableRunView {
   readonly spec: Record<string, unknown> | null;
   readonly args: Readonly<Record<string, unknown>>;
   readonly token_budget: number | null;
+  /** #427: past route pivots this run has already spent — folded forward
+   * on every terminal write (`pausePayloadOf`, route-override.ts). */
+  readonly pivots: readonly RouteOverride[];
   readonly progress: Record<string, unknown> | null;
   readonly audit_segment_id: string | null;
   readonly updated_at: number;
@@ -161,6 +165,7 @@ export function durableFromRow(row: Readonly<Record<string, unknown>>): DurableR
     args: args !== null && typeof args === "object" ? (args as Record<string, unknown>) : {},
     token_budget:
       row.token_budget === null || row.token_budget === undefined ? null : Number(row.token_budget),
+    pivots: pivotsOf(payload),
     progress:
       progress !== null && typeof progress === "object"
         ? (progress as Record<string, unknown>)
@@ -205,6 +210,7 @@ export function durableRollup(
   if (view.progress !== null && Number(view.progress.total ?? 0) > 0) out.progress = view.progress;
   if (view.prior_faults.length > 0) out.faults_total = [...view.prior_faults];
   if (view.prior_fault_kinds.length > 0) out.fault_kinds_total = [...view.prior_fault_kinds];
+  if (view.pivots.length > 0) out.pivots = [...view.pivots];
   if (view.name !== "") out.name = view.name;
   if (view.status === "running") {
     out.stale = stale;
@@ -512,12 +518,15 @@ export class WorkflowService {
       }
       specCandidate = prior.spec;
     }
-    const parsed = validateSpec(specCandidate);
+    let parsed = validateSpec(specCandidate);
     if (parsed instanceof ValidationError) {
       return Object.freeze({ error: parsed.message, invalid_spec: true });
     }
     const nested = validateNestedRefs(parsed, this.loader);
     if (nested !== null) return Object.freeze({ error: nested.message, invalid_spec: true });
+    const routed = pivotResume(parsed, options, prior?.pivots ?? []);
+    if (!routed.ok) return Object.freeze({ error: routed.error });
+    parsed = routed.spec;
     const budget = options.tokenBudget;
     if (
       budget !== undefined &&
@@ -888,8 +897,6 @@ export class WorkflowService {
       );
       producers.announceProcessCrash(priorView.audit_segment_id);
     }
-    const priorFaults = carriedFaults;
-    const priorDegraded = priorView?.prior_degraded === true;
     this.runs.set(runId, record);
     // The launch line and the ledger seed are this stretch's FIRST owned writes, and their answer
     // is authoritative: a refusal here means ownership changed hands while we were getting here
@@ -932,27 +939,16 @@ export class WorkflowService {
       .run(parsed, args)
       .then(async (result) => {
         record.result = result;
-        const faults = [...priorFaults, ...result.faults, ...result.sandboxFaults];
-        const degraded =
-          priorDegraded || result.faults.some((fault) => fault !== result.pauseFault);
         const terminal = stretchOwnership();
         // Taint acquired INSIDE this stretch counts: a leaf that ran an allowed
         // web_fetch marked the tracker, and the line this stretch writes must
         // carry that, not the value read before the engine started.
         const taintedNow = tainted || this.taintTracker.tainted;
         // Shared by both terminal writes below (they differ only in status/
-        // pauseReason/checkpoint/resume_at).
-        const pausePayload = (checkpoint: unknown, resumeAt: number | null): string =>
-          JSON.stringify({
-            checkpoint,
-            resume_at: resumeAt,
-            attempts: attempt,
-            leaf_respawns: (priorView?.leaf_respawns ?? 0) + result.leafRespawns,
-            sandbox_refusals: (priorView?.sandbox_refusals ?? 0) + result.sandboxRefusals,
-            prior_faults: faults,
-            prior_fault_kinds: [...(priorView?.prior_fault_kinds ?? []), ...result.faultKinds],
-            prior_degraded: degraded,
-          });
+        // pauseReason/checkpoint/resume_at) — #427: extracted to
+        // route-override.ts so this issue's `pivots` field fits inside
+        // service.ts's own zero-growth ceiling.
+        const pausePayload = pausePayloadOf(attempt, priorView, carriedFaults, result, options);
         const persistTerminal = (
           status: string,
           pauseReason: string | null,

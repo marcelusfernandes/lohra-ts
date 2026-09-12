@@ -1,5 +1,6 @@
 import type { WorkflowEngineOptions, WorkflowLoader } from "./engine-contract.js";
 import type { ChildRuntime } from "./runtime.js";
+import type { RouteOverride } from "./route-override.js";
 import type { TierMap } from "./tiers.js";
 
 /**
@@ -12,6 +13,9 @@ export interface WorkflowLaunchOptions {
   readonly checkpointAnswers?: Readonly<Record<string, unknown>>;
   readonly tokenBudget?: number | null;
   readonly resumeRunId?: string;
+  /** #427: only meaningful together with `resumeRunId` — `pivotResume`
+   * (route-override.ts) refuses it otherwise. */
+  readonly routeOverride?: RouteOverride;
 }
 
 /** `WorkflowLaunchOptions` plus the operator tier map resolved once per
