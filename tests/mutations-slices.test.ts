@@ -483,7 +483,7 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 267 (soma dos treze catálogos importados)", () => {
+  it("a contagem total de mutantes é 268 (soma dos treze catálogos importados)", () => {
     // Os doze catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
@@ -555,9 +555,14 @@ describe("scripts/mutations/slices.json", () => {
     // (`src/workflow/**`, `src/orchestration/**`, `src/transports/**`), por
     // isso foram para `context-window` (cujo `srcGlobs` cobre os dois),
     // NÃO `supervision-mutants.ts` como a issue original sugeria (âncoras a
-    // conferir no HEAD, #519): 265 + 2 = 267.
+    // conferir no HEAD, #519): 265 + 2 = 267. A issue #540 acrescenta V1
+    // (`validation.ts`'s `normalizeResumeId` — nenhum catálogo cobria o
+    // trim/absence check da função; morto pelo `it` já existente de
+    // `tests/orchestration-tools.test.ts`, "drops the 'resume_id' key
+    // entirely for empty, whitespace-only, null and undefined values"):
+    // 267 + 1 = 268.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 267;
+    const TOTAL_MUTANTS = 268;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -582,14 +587,14 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/workflow-executor-mutants.ts": 45,
       "scripts/mutations/context-window.ts": 17,
       "scripts/mutations/auth-mutants.ts": 13,
-      "scripts/mutations/supervision-mutants.ts": 36,
+      "scripts/mutations/supervision-mutants.ts": 37,
     };
     expect(new Set(Object.keys(CONTAGEM_POR_CATALOGO))).toEqual(new Set(CATALOGOS.keys()));
     for (const [path, mutants] of CATALOGOS) {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(267);
+    expect(somaTabela).toBe(268);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {
