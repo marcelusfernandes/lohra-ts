@@ -936,7 +936,7 @@ export class WorkflowService {
     void engine
       .run(parsed, args)
       .then(async (result) => {
-        record.result = withSuggestedRoute(result, options.routes, priorView?.pivots ?? []); // #459
+        record.result = withSuggestedRoute(result, options.routes, record.pivots ?? []); // #459
         const terminal = stretchOwnership();
         // Taint acquired INSIDE this stretch counts: a leaf that ran an allowed
         // web_fetch marked the tracker, and the line this stretch writes must
