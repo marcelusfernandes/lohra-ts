@@ -239,13 +239,30 @@ mapa do épico #458: leitura não viaja na tool de lançamento.
   `pivots_used` — os pivôs que este run JÁ GASTOU (`view.pivots.length`),
   **não afetado por esta chamada**: `workflow_preview` nunca consome um
   pivô, mesmo com `route` preenchido.
-- **Limitação conhecida**: `workflow_preview` ainda NÃO recebe o loader de
-  templates do operador — `session-tools.ts` registra `workflow_preview`
-  sem `loader` em `PreviewDeps` (ao contrário de `chat.ts`/`dashboard.ts`,
-  que passam `templateLoader(home)` para o `WorkflowService` real desde o
-  #464). Um nó `workflow` aninhado que dependa do loader aparece como
-  `outcome: "unknown"` com `engine_faults` incrementado, mesmo que o MESMO
-  resume real funcionasse — corrigir é o #484.
+- **`workflow_preview` usa o loader de produção desde o #484**:
+  `session-tools.ts:177-181` passa o MESMO `templateLoader(options.home)`
+  que `chat.ts`/`dashboard.ts` já passam ao `WorkflowService` real (#464)
+  direto para `workflowPreviewHandler` — um nó `{type: "workflow", ref}` que a preview
+  atinge agora roda o engine aninhado de verdade e classifica como
+  `outcome: "nested"` (`classifyNode`, `cache-preview.ts:279-288`, dispara
+  quando o nó é `workflow` e o preview registrou algum hit/spawn dentro
+  dele), igual a um resume real; antes, sem `loader`, `runNested` lançava
+  `"workflow loader unavailable"` e o nó caía em `outcome: "unknown"`
+  com `engine_faults` incrementado.
+- **Limitação nova**: um nó `parallel` cujo `branches` resolve para `[]`
+  RODA na preview (o mesmo comportamento de produção,
+  `engine.ts`'s `runParallel`, `[].every(...)` é vacuamente `true`) e ainda
+  assim sai classificado como `outcome: "unknown"` — nenhum spawn, nenhum
+  hit, então `classifyNode` não tem outra categoria para ele
+  (`tests/workflow-cache-preview-writes.test.ts:163-179`, comentário no
+  próprio teste: "documented gap, not this test's point"). Esse caminho
+  também alcança `PreviewCacheFacade.put()` — `cache.put(...)` é chamado
+  incondicionalmente mesmo sem spawnar nenhuma folha — e por isso o `put`
+  da fachada carrega DUAS barreiras independentes contra escrita, não uma:
+  o próprio `return false` do método e, por trás dele, o `SqliteWorkflowCache`
+  guardado com uma `dummyOwnership` de `fence: -1`, que `ownershipGuard`
+  recusaria de qualquer forma (`cache-preview.ts:19-35`, cabeçalho do
+  arquivo).
 - Chamar ANTES de `run_workflow(resume_run_id=..., route=...)`, para saber
   o custo de uma rota candidata antes de gastar um dos 3 pivôs.
 
@@ -275,8 +292,8 @@ loader unavailable"` em produção; o #244 já validava um `ref` na CARGA da
   validação, `schema.ts:771`). O critério de saída do milestone ("dois nós
   que chamam o mesmo template não colidem") só é verdade em produção a
   partir daqui.
-- **`workflow_preview` NÃO recebe este loader ainda** — ver a limitação
-  descrita na seção acima (#484).
+- **`workflow_preview` recebe este MESMO loader desde o #484** — ver a
+  seção acima (`session-tools.ts:177-181`).
 
 ## Manifesto de artefatos: `artifacts`/`artifact_faults` por run (#463, M11-S5)
 
@@ -298,26 +315,63 @@ dropped past the cap"`.
 - **Colisão de caminho é ADVISORY** (doutrina #248, decisão 6 do épico
   #458): duas folhas do MESMO run escrevendo o MESMO `path` — a segunda
   escritora distinta dispara `"<nodeId>: artifact path written by 2
-leaves: <path>"` em `artifactFaults` exatamente uma vez; nunca em
-  `faults`, nunca muda `status` — a escrita em si continua sem árbitro
-  nenhum (a última grava por cima, silenciosamente, no sistema de
-  arquivos), só a VISIBILIDADE da colisão é nova. Apêndice com o
-  comportamento medido em
+leaves: <path>"` em `artifactFaults` exatamente uma vez; nunca muda
+  `status` (`deriveStatus` lê só `RunResult.faults`, nunca
+  `artifactFaults`) — a escrita em si continua sem árbitro nenhum (a
+  última grava por cima, silenciosamente, no sistema de arquivos), só a
+  VISIBILIDADE da colisão é nova. Os dois canais de leitura expõem essa
+  lista de jeitos diferentes: **ao vivo**, `resultView` funde
+  `artifactFaults` dentro do array `faults` que ele devolve
+  (`service-rollup.ts:140-144`) — uma leitura de `workflow_status` no
+  mesmo processo VÊ a colisão em `faults`, mesmo ela nunca tendo entrado
+  no `RunResult.faults` que decide o `status`; **durável**, `durableRollup`
+  (`service.ts:187-207`) expõe a mesma lista sob a chave própria
+  `artifact_faults` (`:203`), nunca dobrada em `faults_total` —
+  `pausePayloadOf` (`route-override.ts:392`) monta `prior_faults`/
+  `faults_total` só de `carriedFaults`/`result.faults`/`sandboxFaults`,
+  nunca de `artifactFaults`. Depois de um resume, a stretch anterior dobra
+  em `result.artifacts` e `result.artifactFaults` (`service.ts:999-1000`)
+  antes de publicar — então o `faults` ao vivo da stretch nova também
+  carrega a colisão de uma stretch anterior, não só o `artifact_faults`
+  durável. Apêndice com o comportamento medido em
   [`docs/decisions/2026-09-10-fanout-fs-compartilhado.md`](decisions/2026-09-10-fanout-fs-compartilhado.md).
-- **Limitações conhecidas, achados do veredito da PR #483 (#485, ainda
-  aberta)**: (a) um lote `[p, p]` de uma folha B depois de A já ter
-  escrito `p` empurra o fault DUAS vezes, não uma; (b)
-  `DurableRunView.artifact_faults` é escrito mas nunca lido de volta —
-  `durableRollup` expõe só `artifacts`, então a colisão do stretch 1 some
-  dos `faults` vivos depois de um resume; (c) colisão ENTRE stretches não é
-  detectada (só compara contra os artefatos da stretch corrente); (d) o
-  caminho é comparado como string crua — `./x` e `x` não colidem; (e) custo
-  O(N²) da checagem de colisão e o payload sem teto por run. Nenhuma dessas
-  cinco muda `status` nem `faults` hoje — são gaps do próprio advisory, não
-  do runtime.
-- **Fora do escopo de #485, limitação registrada no próprio código**: um
+- **Dedup por caminho e colisão entre stretches** (fechados pelo #495,
+  achados do veredito da PR #483/issue #485): um lote `[p, p]` de uma
+  folha B, depois de A já ter escrito `p`, dispara o advisory só UMA vez —
+  `RunResult.artifactCollisionPaths` (`accounting.ts:104`), um `Set` de
+  caminhos já reportados, dedupa dentro de `recordLeafSideChannels`
+  (`accounting.ts:176-208`). O mesmo `Set` cobre colisão ENTRE stretches:
+  `pausePayloadOf` (`route-override.ts:401`) chama
+  `recordCrossStretchArtifactCollisions` (`accounting.ts:223-239`) uma vez
+  por escrita terminal, comparando os artefatos DESTA stretch contra os
+  acumulados de todas as anteriores (`priorView.artifacts`) — por caminho,
+  nunca por `sub_id`: o limite entre stretches já prova que são duas
+  execuções distintas, então até um nó `agent` simples reescrevendo seu
+  PRÓPRIO caminho de uma stretch anterior conta (doutrina #248). Caminho é
+  comparado via `normalizedArtifactPath` (`accounting.ts:13-15`,
+  `path.posix.normalize`, nunca `resolve`) — `./x` e `x` colidem;
+  `RunArtifact.path` gravado continua a string crua. Nenhuma dessas
+  mudanças toca `status` nem `RunResult.faults` — seguem gaps do próprio
+  advisory, não do runtime.
+- **Limitações que sobraram, sem issue aberta cobrindo nenhuma delas**:
+  (a) `RunResult.artifactCollisionPaths` nasce vazio a cada stretch nova
+  (é campo de instância de um `RunResult` novo por stretch) e nunca é
+  semeado a partir do que uma stretch anterior já flagou — um caminho já
+  reportado como colisão na stretch 2 pode ser reportado DE NOVO numa
+  stretch 3 que reescreva o mesmo caminho; (b) o cenário "um caminho que a
+  stretch 1 escreveu colide com um NÓ DIFERENTE na stretch 2" não tem
+  teste dedicado — a suíte em `tests/workflow-artifacts.test.ts:607-735`
+  cobre dedup dentro de um lote, `./x`/`x`, a sobrevivência da colisão da
+  stretch 1 através de um resume, e o MESMO nó reescrevendo na stretch 2 o
+  caminho que ele próprio escreveu na stretch 1 (linha 712) — não dois nós
+  distintos colidindo entre stretches; (c) o custo O(N²) de
+  `recordLeafSideChannels`/`recordCrossStretchArtifactCollisions` (um
+  `.filter` por artefato já registrado) e o payload de `artifacts`/
+  `artifact_faults` sem teto por run continuam sem solução — nenhum caso
+  de uso hoje aproxima o custo quadrático de um problema real.
+- **Fora do escopo original, limitação registrada no próprio código**: um
   sub-workflow por `ref` nunca tem seus artefatos checados contra os do run
-  pai — `foldNestedCounters` (`src/workflow/accounting.ts`) só concatena as
+  pai — `foldNestedCounters` (`accounting.ts:265-285`) só concatena as
   listas, sem re-checar colisão contra o `RunResult` do pai; o comentário
   da própria função nomeia isso.
 

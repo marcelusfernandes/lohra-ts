@@ -426,7 +426,7 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
    formas se a contagem não for atualizada junto com o mutante novo: a soma
    total (256 + o novo) contra os treze catálogos importados, e a linha do
    catálogo tocado em `CONTAGEM_POR_CATALOGO`
-   (`tests/mutations-slices.test.ts:515-534`), uma tabela pinada por número
+   (`tests/mutations-slices.test.ts:541-555`), uma tabela pinada por número
    literal — não derivada de `CATALOGOS.get(path).length` — para que uma
    troca compensatória entre dois catálogos (um ganha o que o outro perde,
    soma preservada) não passe despercebida. As duas contagens (o literal
@@ -440,8 +440,8 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
    `media.ts` (mecânica B). A descoberta de catálogo não é por nome de
    arquivo: é por conteúdo — um `.ts` de primeiro nível de `scripts/mutations/`
    fora da allowlist `NAO_CATALOGO` que casa `CATALOG_EXPORT_PATTERN`
-   (`export const <x>Mutants`, `tests/mutations-slices.test.ts:117`) conta
-   como catálogo. `NAO_CATALOGO` (`tests/mutations-slices.test.ts:102-116`)
+   (`export const <x>Mutants`, `tests/mutations-slices.test.ts:123`) conta
+   como catálogo. `NAO_CATALOGO` (`tests/mutations-slices.test.ts:106-121`)
    lista os módulos de `scripts/mutations/` que não são catálogo próprio —
    harness, tipos, agregadores (`media.ts`, `workflow-durability.ts`) e os
    runners que embutem o array (`self-update.ts`, `web-tools.ts`,
@@ -455,11 +455,11 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
    `src/<dir>/**` por diretório de primeiro nível de `src/` que a fatia
    cobre, ou o literal `src/<arquivo>.ts` para um arquivo de topo (ex.:
    `"src/cli.ts"` em `workflow-audit-live`,
-   `scripts/mutations/slices.json:40`). `tests/mutations-slices.test.ts:447-478`
+   `scripts/mutations/slices.json:40`). `tests/mutations-slices.test.ts:454-484`
    assevera que todo `edits[].file` de cada catálogo da fatia (normalizado
    para sob `src/`) casa algum `srcGlobs` dessa fatia — exceto os
    `edits[].file` fora de `src/` que estão na allowlist explícita
-   `FORA_DE_SRC` (`tests/mutations-slices.test.ts:298-302`, hoje só os três
+   `FORA_DE_SRC` (`tests/mutations-slices.test.ts:302-306`, hoje só os três
    arquivos de fixture em `scripts/mutations/fixtures/**`); qualquer outro
    `edits[].file` fora de `src/` e fora de `FORA_DE_SRC` reprova o teste.
 3. Adicionar o script em `package.json#scripts` com o mesmo nome de
@@ -477,7 +477,7 @@ cada entrada de `slices.json`; que todo catálogo descoberto por conteúdo em
 `focus.file` dos catálogos da fatia (exceto `media`/`workflow-executor`); que
 `srcGlobs` cobre todo `edits[].file` dos catálogos da fatia (item 2 acima); a
 contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
-(`tests/mutations-slices.test.ts:515-534` — hoje `workflow-durability-guard`
+(`tests/mutations-slices.test.ts:541-555` — hoje `workflow-durability-guard`
 14, `workflow-durability-named` 41, `orchestration` 5,
 `workflow-audit-live-mutants` 32, `workflow-audit-producers-mutants` 25,
 `web-tools-mutants` 9, `media-catalog-other` 7, `media-catalog-persistence`
