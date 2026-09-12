@@ -22,15 +22,11 @@ jobs:
       fail-fast: false
       matrix:
         node: ["20", "22"]
-    # Dependências de ambiente herdadas do ubuntu-latest, declaradas aqui de
-    # propósito em vez de por acidente:
-    # - node-pty@1.1.0 não traz prebuild linux-*; `npm ci` compila via node-gyp
-    #   e precisa de python3, make e g++ (todos presentes no runner).
-    # - better-sqlite3 baixa prebuild linux-x64.
-    # Nenhum teste spawna python3 (#165, tests/sem-python.test.ts prende);
-    # PYTHON existe só para o node-gyp do node-pty.
-    env:
-      PYTHON: python3
+    # Dependências nativas no runner (declaradas de propósito): node-pty traz
+    # prebuild linux-x64/arm64 embutido desde 1.2.0-beta.8 (D10, #549) e
+    # better-sqlite3 baixa o prebuild linux-x64 na instalação — nenhum dos dois
+    # compila via node-gyp; o job `pack-check` abaixo prende isso. Nenhum teste
+    # spawna python3 (#165, tests/sem-python.test.ts prende).
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -156,3 +152,30 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           HEAD_REF: ${{ github.head_ref }}
         run: npm run ci:controle-negativo -- --base "$BASE_SHA" --head "$HEAD_SHA" --branch "$HEAD_REF"
+
+  # Instalação por pacote (D3/#532, épico #529): empacota, instala o tarball num
+  # consumidor limpo e roda o CLI contra o stub — em Linux e macOS, Node 20/22 —
+  # e falha se better-sqlite3/node-pty tiverem compilado nativo em vez de usar
+  # prebuild (scripts/pack-check.ts, assertNoNativeCompileNeeded). O `npm ci`
+  # do projeto vem antes para primar ~/.npm/_prebuilds no mesmo HOME (o
+  # consumidor instala offline). Não é required no ruleset (gate humano).
+  pack-check:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: ["20", "22"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: install
+        run: npm ci
+      - name: build
+        run: npm run build
+      - name: pack:check
+        run: npm run pack:check
