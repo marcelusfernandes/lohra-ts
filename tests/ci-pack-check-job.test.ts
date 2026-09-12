@@ -36,9 +36,9 @@ describe("ci.yml — job pack-check (D3/#532)", () => {
     expect(job).toMatch(/timeout-minutes: \d+/);
   });
 
-  it("o job checks não declara mais PYTHON nem cita node-pty@1.1.0 sem prebuild", () => {
+  it("o job checks não tem mais bloco env (era só para o node-gyp) nem cita node-pty@1.1.0", () => {
     const checks = bloco(yaml, "checks");
-    expect(checks).not.toContain("PYTHON");
+    expect(checks).not.toMatch(/^ {4}env:\s*$/mu);
     expect(checks).not.toContain("node-pty@1.1.0");
   });
 });
