@@ -219,7 +219,20 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
         );
       } catch (error) {
         if (error instanceof ConversationCancelledError) {
-          return zeroResult("interrupted", "", profile, model, null, null, null);
+          // #518 (M16-S3, ADR 0005): a cancellation that caught a call
+          // aborted IN FLIGHT carries an estimated `partialUsage` (never a
+          // real measurement, hence the forced `usageUncertain: true` below
+          // regardless of what zeroResult's own null-check would have
+          // computed) — `partial` names that distinction for
+          // `RunResult.partialLeaves`/`leaf.failed` (#517) to pick up.
+          // `partialUsage === null` (pre-issuance cancel, or an abort that
+          // never went through StreamAbortedError) stays the plain #232
+          // "never measured" gap this already was before this issue.
+          return {
+            ...zeroResult("interrupted", "", profile, model, error.partialUsage, "cancelled", null),
+            usageUncertain: true,
+            partial: error.partialUsage !== null,
+          };
         }
         if (error instanceof MaxIterationsError) {
           return zeroResult("error", error.message, profile, model, error.usage, null, null);
