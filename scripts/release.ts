@@ -3,22 +3,30 @@
 // #531/D2). Sem rede: usa `git log --merges` deste repositório, nunca `gh`
 // nem `gh api` (contrato da issue). Fluxo completo em `docs/release.md`.
 //
-// Validações, nesta ordem, todas ANTES de qualquer escrita em disco ou no
-// git (fail-closed — nada muda se qualquer uma reprovar):
+// `runRelease` (via `planRelease`) faz TODAS as validações e leituras — a
+// fase de COMPUTE — antes de qualquer escrita em disco ou no git (fail-
+// closed: nada muda se qualquer uma reprovar):
 //   1. árvore de trabalho limpa (`git status --porcelain` vazio);
 //   2. argumento de versão válido (`patch`/`minor`/`major`/`x.y.z`);
-//   3. branch atual é exatamente `release/<versão-alvo>` — nunca `main`
+//   3. a versão-alvo é maior que a atual (`RELEASE_VERSION_NOT_GREATER` —
+//      só se aplica ao `x.y.z` explícito; bump sempre soma 1 em algum
+//      componente);
+//   4. branch atual é exatamente `release/<versão-alvo>` — nunca `main`
 //      (causa própria `RELEASE_BRANCH_MAIN`) nem qualquer outra branch
-//      (`RELEASE_BRANCH_MISMATCH`).
+//      (`RELEASE_BRANCH_MISMATCH`);
+//   5. `CHANGELOG.md` existente (se houver) começa exatamente por
+//      `# Changelog\n` — senão `RELEASE_CHANGELOG_HEADER_UNEXPECTED`, para
+//      nunca descartar conteúdo (achado do revisor na PR #546, rodada 1).
 //
-// Depois: bump em `package.json` e, se existir, `package-lock.json` (só as
-// duas ocorrências do pacote raiz — `version` de topo e
-// `packages[""].version` — nunca as `version` de dependências aninhadas);
-// gera a seção do `CHANGELOG.md` a partir dos merges `--first-parent` desde
-// a última tag `v*` (ou desde o início, se não houver tag nenhuma) e a
-// insere no topo do arquivo; commita tudo como `chore(release): v<versão>`.
-// NUNCA cria tag — isso é do owner ou do workflow de D7, sobre o merge
-// commit da PR de release (`docs/release.md`).
+// Só depois da fase de COMPUTE inteira ter sucesso é que a fase WRITE roda:
+// bump em `package.json` e, se existir, `package-lock.json` (só as duas
+// ocorrências do pacote raiz — `version` de topo e `packages[""].version`
+// — nunca as `version` de dependências aninhadas); a seção nova do
+// `CHANGELOG.md` (gerada a partir dos merges `--first-parent` desde a
+// última tag `v*`, ou desde o início se não houver tag nenhuma) entra no
+// topo do arquivo, acima do que já existia; tudo commitado como
+// `chore(release): v<versão>`. NUNCA cria tag — isso é do owner ou do
+// workflow de D7, sobre o merge commit da PR de release (`docs/release.md`).
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -57,21 +65,52 @@ export function parseVersionArg(arg: string | undefined): ParsedVersionArg {
   throw new Error(`RELEASE_INVALID_VERSION:${recebido} — use patch|minor|major ou x.y.z`);
 }
 
-export function computeNextVersion(currentVersion: string, parsed: ParsedVersionArg): string {
-  if (parsed.kind === "explicit") return parsed.version;
-  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(currentVersion);
+interface Semver {
+  readonly major: number;
+  readonly minor: number;
+  readonly patch: number;
+}
+
+function parseSemver(version: string): Semver | null {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
   const majorText = match?.[1];
   const minorText = match?.[2];
   const patchText = match?.[3];
-  if (majorText === undefined || minorText === undefined || patchText === undefined) {
-    throw new Error(`RELEASE_INVALID_CURRENT_VERSION:${currentVersion}`);
+  if (majorText === undefined || minorText === undefined || patchText === undefined) return null;
+  return { major: Number(majorText), minor: Number(minorText), patch: Number(patchText) };
+}
+
+export function computeNextVersion(currentVersion: string, parsed: ParsedVersionArg): string {
+  if (parsed.kind === "explicit") return parsed.version;
+  const current = parseSemver(currentVersion);
+  if (current === null) throw new Error(`RELEASE_INVALID_CURRENT_VERSION:${currentVersion}`);
+  if (parsed.bump === "major") return `${String(current.major + 1)}.0.0`;
+  if (parsed.bump === "minor") return `${String(current.major)}.${String(current.minor + 1)}.0`;
+  return `${String(current.major)}.${String(current.minor)}.${String(current.patch + 1)}`;
+}
+
+/**
+ * Recusa regressão de versão: `x.y.z` explícito ≤ à versão atual (bump
+ * `patch`/`minor`/`major` sempre soma 1 em algum componente e nunca cai
+ * aqui — a checagem só existe para o caso explícito). Achado do revisor na
+ * PR #546, rodada 1: `computeNextVersion("0.0.11", "0.0.1")` devolvia
+ * `"0.0.1"` sem recusa nenhuma; só o nome da branch (`release/0.0.1`, que o
+ * operador também controla) impedia a regressão de verdade.
+ */
+export function assertVersionIsGreater(currentVersion: string, targetVersion: string): void {
+  const current = parseSemver(currentVersion);
+  const target = parseSemver(targetVersion);
+  if (current === null) throw new Error(`RELEASE_INVALID_CURRENT_VERSION:${currentVersion}`);
+  if (target === null) throw new Error(`RELEASE_INVALID_CURRENT_VERSION:${targetVersion}`);
+  const isGreater =
+    target.major !== current.major
+      ? target.major > current.major
+      : target.minor !== current.minor
+        ? target.minor > current.minor
+        : target.patch > current.patch;
+  if (!isGreater) {
+    throw new Error(`RELEASE_VERSION_NOT_GREATER:${targetVersion}:current:${currentVersion}`);
   }
-  const major = Number(majorText);
-  const minor = Number(minorText);
-  const patch = Number(patchText);
-  if (parsed.bump === "major") return `${String(major + 1)}.0.0`;
-  if (parsed.bump === "minor") return `${String(major)}.${String(minor + 1)}.0`;
-  return `${String(major)}.${String(minor)}.${String(patch + 1)}`;
 }
 
 interface GitOutcome {
@@ -224,12 +263,28 @@ export function buildChangelogSection(
 
 const CHANGELOG_HEADER = "# Changelog\n";
 
-/** Insere `section` logo após o cabeçalho `# Changelog` — sempre a versão
- * mais recente no topo. Cria o cabeçalho se `existing` não tiver um. */
+/**
+ * Insere `section` logo após o cabeçalho `# Changelog` — sempre a versão
+ * mais recente no topo. `existing === ""` (arquivo ainda não existe) cria o
+ * cabeçalho. Fora isso, `existing` precisa começar EXATAMENTE por
+ * `# Changelog\n` — NUNCA descarta conteúdo: um `existing` não-vazio com
+ * cabeçalho diferente (título com sufixo, badge, CRLF) lança
+ * `RELEASE_CHANGELOG_HEADER_UNEXPECTED` em vez de devolver só o cabeçalho +
+ * a seção nova. Achado do revisor na PR #546, rodada 1: o ramo antigo
+ * jogava fora as ~250 entradas existentes sem log nem throw quando o
+ * cabeçalho não batia byte a byte (fail-closed — CLAUDE.md invariante 2).
+ * `runRelease` chama esta função ANTES de escrever `package.json`/
+ * `package-lock.json` — a recusa aqui não deixa nada parcialmente alterado.
+ */
 export function insertChangelogSection(existing: string, section: string): string {
   const trimmedSection = section.replace(/\n+$/, "\n");
-  if (!existing.startsWith(CHANGELOG_HEADER)) {
+  if (existing === "") {
     return `${CHANGELOG_HEADER}\n${trimmedSection}`;
+  }
+  if (!existing.startsWith(CHANGELOG_HEADER)) {
+    throw new Error(
+      'RELEASE_CHANGELOG_HEADER_UNEXPECTED:CHANGELOG.md não começa exatamente por "# Changelog\\n"',
+    );
   }
   const rest = existing.slice(CHANGELOG_HEADER.length).replace(/^\n+/, "");
   return rest === ""
@@ -276,9 +331,23 @@ function isoDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-export function runRelease(options: RunReleaseOptions): RunReleaseResult {
-  const { cwd, arg } = options;
+// Fase 1 (COMPUTE): validações + leituras + toda a construção de conteúdo
+// novo — nada escreve em disco nem no git aqui, e `insertChangelogSection`
+// pode lançar `RELEASE_CHANGELOG_HEADER_UNEXPECTED`. Fase 2 (WRITE), logo
+// abaixo em `runRelease`, só roda depois que a fase 1 inteira teve sucesso —
+// é o que garante que uma recusa (qualquer uma, inclusive a do cabeçalho do
+// CHANGELOG) nunca deixa `package.json`/`package-lock.json`/`CHANGELOG.md`
+// parcialmente alterados (achado do revisor na PR #546, rodada 1).
+interface ReleasePlan {
+  readonly targetVersion: string;
+  readonly currentVersion: string;
+  readonly packageJson: Record<string, unknown>;
+  readonly updatedLock: Record<string, unknown> | null;
+  readonly updatedChangelog: string;
+  readonly changelogSection: string;
+}
 
+function planRelease(cwd: string, arg: string | undefined, now: Date): ReleasePlan {
   if (!isTreeClean(cwd)) throw new Error("RELEASE_TREE_DIRTY:árvore de trabalho suja");
 
   const parsed = parseVersionArg(arg);
@@ -290,42 +359,59 @@ export function runRelease(options: RunReleaseOptions): RunReleaseResult {
     throw new Error('RELEASE_PACKAGE_JSON_VERSION_MISSING:package.json sem "version" string');
   }
   const targetVersion = computeNextVersion(currentVersion, parsed);
+  assertVersionIsGreater(currentVersion, targetVersion);
 
   validateReleaseBranch(currentBranch(cwd), targetVersion);
 
   const sinceTag = lastReleaseTag(cwd);
   const merges = mergesSince(cwd, sinceTag);
-  const changelogSection = buildChangelogSection(
-    targetVersion,
-    merges,
-    isoDate(options.now ?? new Date()),
-  );
-
-  writeJson(packageJsonPath, { ...packageJson, version: targetVersion });
+  const changelogSection = buildChangelogSection(targetVersion, merges, isoDate(now));
 
   const lockPath = join(cwd, "package-lock.json");
-  const touchedPaths = ["package.json", "CHANGELOG.md"];
-  if (existsSync(lockPath)) {
-    const lock = readJson(lockPath) as Record<string, unknown>;
-    writeJson(lockPath, bumpLockVersion(lock, targetVersion));
-    touchedPaths.push("package-lock.json");
-  }
+  const updatedLock = existsSync(lockPath)
+    ? bumpLockVersion(readJson(lockPath) as Record<string, unknown>, targetVersion)
+    : null;
 
   const changelogPath = join(cwd, "CHANGELOG.md");
-  const existingChangelog = existsSync(changelogPath)
-    ? readFileSync(changelogPath, "utf8")
-    : `${CHANGELOG_HEADER}\n`;
-  writeFileSync(changelogPath, insertChangelogSection(existingChangelog, changelogSection));
+  const existingChangelog = existsSync(changelogPath) ? readFileSync(changelogPath, "utf8") : "";
+  const updatedChangelog = insertChangelogSection(existingChangelog, changelogSection);
+
+  return {
+    targetVersion,
+    currentVersion,
+    packageJson,
+    updatedLock,
+    updatedChangelog,
+    changelogSection,
+  };
+}
+
+export function runRelease(options: RunReleaseOptions): RunReleaseResult {
+  const { cwd } = options;
+  const plan = planRelease(cwd, options.arg, options.now ?? new Date());
+
+  writeJson(join(cwd, "package.json"), { ...plan.packageJson, version: plan.targetVersion });
+
+  const touchedPaths = ["package.json", "CHANGELOG.md"];
+  if (plan.updatedLock !== null) {
+    writeJson(join(cwd, "package-lock.json"), plan.updatedLock);
+    touchedPaths.push("package-lock.json");
+  }
+  writeFileSync(join(cwd, "CHANGELOG.md"), plan.updatedChangelog);
 
   const addOutcome = runGit(cwd, ["add", ...touchedPaths]);
   if (addOutcome.status !== 0) throw new Error(`RELEASE_GIT_ADD_FAILED:${addOutcome.stderr}`);
 
-  const commitOutcome = runGit(cwd, ["commit", "-m", `chore(release): v${targetVersion}`]);
+  const commitOutcome = runGit(cwd, ["commit", "-m", `chore(release): v${plan.targetVersion}`]);
   if (commitOutcome.status !== 0) {
     throw new Error(`RELEASE_COMMIT_FAILED:${commitOutcome.stderr}`);
   }
 
-  return { version: targetVersion, previousVersion: currentVersion, changelogSection };
+  return {
+    version: plan.targetVersion,
+    previousVersion: plan.currentVersion,
+    changelogSection: plan.changelogSection,
+  };
 }
 
 function main(): void {
