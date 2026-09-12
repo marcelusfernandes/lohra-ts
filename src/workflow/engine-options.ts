@@ -40,22 +40,28 @@ export function engineBaseOptions(
   tiers: TierMap,
   loader: WorkflowLoader | undefined,
   checkpointAnswers: Readonly<Record<string, unknown>>,
-  /** #452: threaded so a resume's `route` reaches `runNested`'s freshly
-   * loaded template too — omitted here (as of this issue) at both
-   * `WorkflowService` construction sites, tracked on #452. */
-  routeOverride?: RouteOverride,
-): Pick<
-  WorkflowEngineOptions,
-  "runtime" | "runId" | "tiers" | "loader" | "checkpointAnswers" | "routeOverride"
-> {
+): Pick<WorkflowEngineOptions, "runtime" | "runId" | "tiers" | "loader" | "checkpointAnswers"> {
   return {
     runtime,
     runId,
     tiers,
     ...(loader === undefined ? {} : { loader }),
     ...(Object.keys(checkpointAnswers).length > 0 ? { checkpointAnswers } : {}),
-    ...(routeOverride === undefined ? {} : { routeOverride }),
   };
+}
+
+/** #452 (rodada 2, PR #472): a `routeOverride` spread, factored out so both
+ * `WorkflowEngine` construction sites in `service.ts` (`launch`,
+ * `launchDurable`) apply the SAME rule — NOT folded into
+ * `engineBaseOptions` itself, because the durable site's own
+ * `engineBaseOptions(...)` call is a mutation anchor
+ * (`scripts/mutations/workflow-durability-named.ts`, `ao/durable-…-tier-map`)
+ * whose literal text a 6th argument would change. `exactOptionalPropertyTypes`
+ * is why this can't be `{ routeOverride: routeOverride }` directly. */
+export function routeOverrideOption(
+  routeOverride: RouteOverride | undefined,
+): Pick<WorkflowEngineOptions, "routeOverride"> | Record<string, never> {
+  return routeOverride === undefined ? {} : { routeOverride };
 }
 
 /** #452: `WorkflowEngine`'s default `RunControl` (constructor, engine.ts) —
