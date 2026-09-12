@@ -17,6 +17,7 @@ import { createGatewayUpgradeHandler } from "../gateway/ws/connection.js";
 import { startGatewayHttpServer } from "../gateway/http/server.js";
 import { routeGatewayRequest, type RouteContext } from "../gateway/http/routes.js";
 import { noProvider } from "./chat-boundary.js";
+import { subscriptionProviderRefusal } from "./subscription-guard.js";
 import {
   AnthropicMessagesModel,
   ChatCompletionsModel,
@@ -146,6 +147,7 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
   }
 
   const route = resolveAuthRoute(options.home);
+  const provider = stringFlag(options.flags, "--provider");
 
   let model: string;
   let providerName: string;
@@ -154,6 +156,18 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
   let imageGenerator: OpenAIImagesAdapter | undefined;
   let createModelTransport: () => ModelTransport;
   if (route.mode === "subscription") {
+    // Issue #457 (dashboard mirror of #440/PR #455, chat.ts:172-179): an
+    // explicit --provider used to be discarded here in total silence (never
+    // even read) while --model still reached the Codex Responses transport
+    // -- a route mismatch the provider only caught with a 400. Refuse
+    // before any network call (ahead of resolveCredentials, so a
+    // near-expiring token never triggers a wasted refresh POST). --model
+    // alone (no --provider) is unaffected -- see subscription-guard.ts.
+    const refusal = subscriptionProviderRefusal(provider);
+    if (refusal !== null) {
+      options.stderr(`${refusal}\n`);
+      return 2;
+    }
     let credentials;
     try {
       credentials = await resolveCredentials(options.home, { codexHome: options.codexHome });
@@ -200,7 +214,6 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
         }),
       );
   } else {
-    const provider = stringFlag(options.flags, "--provider");
     if (provider === undefined) {
       options.stderr(noProvider);
       return 2;

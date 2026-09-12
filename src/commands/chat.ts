@@ -49,6 +49,7 @@ import type { ModelTransport } from "../conversation/index.js";
 import { formatProviderFailureMessage } from "../serialization/provider-error-message.js";
 import { runChatBoundary } from "./chat-boundary.js";
 import { CHAT_TOOL_REGISTRY_FACTORIES } from "./chat-tools.js";
+import { subscriptionProviderRefusal } from "./subscription-guard.js";
 import { composeSessionTools, createSessionToolBase } from "./session-tools.js";
 import {
   AuditTrail,
@@ -169,14 +170,8 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     // and the actionable fix is a preference switch, not a retry.
     // --model alone (no --provider) is unaffected — it is how an operator
     // picks the subscription's own model and must keep going to Codex.
-    if (provider !== undefined) {
-      return initializationError(
-        input,
-        null,
-        `--provider ${provider} cannot be honored while subscription mode is active — ` +
-          "run `lohra auth prefer api_key` to use API-key routes, or omit --provider.",
-      );
-    }
+    const refusal = subscriptionProviderRefusal(provider);
+    if (refusal !== null) return initializationError(input, null, refusal);
     let credentials;
     try {
       credentials = await resolveCredentials(options.home, { codexHome: options.codexHome });
