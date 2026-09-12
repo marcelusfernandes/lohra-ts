@@ -56,7 +56,9 @@ import {
   openStateDatabase,
   WorkflowRepository,
 } from "../src/state/index.js";
+import { OrchestrationCore, type CollectResult } from "../src/orchestration/core.js";
 import { AuditTrail } from "../src/workflow/audit-trail.js";
+import { OrchestrationChildRuntime } from "../src/workflow/orchestration-runtime.js";
 import { WorkflowService, type OwnershipStore } from "../src/workflow/service.js";
 import type {
   ChildResult,
@@ -107,12 +109,59 @@ function blockedLeafRuntime(): ChildRuntime & {
     },
     spawn: (_request: ChildSpawnRequest): string => "leaf-1",
     collect: (): Promise<ChildResult> => barrier.promise,
+    // Declared `void` (the port), but returns a real `core.steer`-shaped
+    // outcome at runtime — same "declared void, real value" posture
+    // `OrchestrationChildRuntime.steer` itself now uses (issue #424, 2ª
+    // emenda), so `workflow_steer`'s runtime shape check has something
+    // real to recover here too.
     steer: (id: string, prompt: string): void => {
       steered.push({ id, prompt });
+      return { queued: true } as unknown as undefined;
     },
     cancel: (): void => undefined,
   });
 }
+
+/** A REAL `OrchestrationCore`/`OrchestrationChildRuntime` (issue #424, 2ª
+ * emenda) — the ONLY thing that actually enforces `MAX_PENDING_STEERS_PER_
+ * LEAF` (core.ts) or reports `null` for an id it never spawned. The
+ * scripted `blockedLeafRuntime` above always answers `{queued: true}`,
+ * same as `tests/workflow-audit-steered.test.ts`'s own posture — it exists
+ * for the resolution/audit-event tests, not the cap. */
+function realCoreRuntime(): {
+  readonly runtime: ChildRuntime;
+  readonly release: (result: CollectResult) => void;
+} {
+  const barrier = deferred<CollectResult>();
+  const core = new OrchestrationCore({
+    runChild: () => barrier.promise,
+    idSource: () => "leaf-1",
+    maxSubsessions: 200,
+    maxParallel: 200,
+    buildSubagentPrompt: (): string => "SUBAGENT_SYSTEM_STUB",
+  });
+  return {
+    runtime: new OrchestrationChildRuntime(core),
+    release: (result: CollectResult): void => {
+      barrier.resolve(result);
+    },
+  };
+}
+
+const REAL_COLLECT_RESULT: CollectResult = {
+  status: "complete",
+  output: "done",
+  tokensIn: 1,
+  tokensOut: 1,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  reasoningTokens: 0,
+  provider: "test",
+  model: "test-model",
+  forcedFallback: false,
+  errorKind: null,
+  retryAfter: null,
+};
 
 function serviceHarness(runtime: ChildRuntime) {
   const root = mkdtempSync(join(tmpdir(), "lohra-steer-tool-svc-"));
@@ -343,6 +392,71 @@ describe("workflow_steer tool (#424)", () => {
         await handler({ run_id: "run-v", node_id: "a", message: "hi" }),
       ) as Envelope;
       expect(result.error).toBeDefined();
+    } finally {
+      close();
+    }
+  });
+
+  it("propagates S1's steer_cap refusal (11th pending steer on the SAME busy leaf) as a named error, never queued:true (2ª emenda, #424)", async () => {
+    const { runtime, release } = realCoreRuntime();
+    const { service, audit, trail, close } = serviceHarness(runtime);
+    try {
+      const started = service.start(spec());
+      if ("error" in started) throw new Error(started.error);
+      await flushMicrotasks();
+      await trail.flush();
+
+      const workflowSteerHandler = await loadHandler();
+      const handler = workflowSteerHandler(service, audit);
+
+      for (let i = 1; i <= 10; i += 1) {
+        const accepted = JSON.parse(
+          await handler({
+            run_id: started.run_id,
+            sub_id: "leaf-1",
+            message: `STEER-${String(i)}`,
+          }),
+        ) as Envelope;
+        expect(accepted.ok).toBe(true);
+        expect(accepted.queued).toBe(true);
+      }
+      const eleventh = JSON.parse(
+        await handler({ run_id: started.run_id, sub_id: "leaf-1", message: "STEER-11" }),
+      ) as Envelope;
+      expect(eleventh.ok).toBeUndefined();
+      expect(eleventh.error).toMatch(/steer_cap/);
+
+      release(REAL_COLLECT_RESULT);
+      await service.status(started.run_id, true);
+    } finally {
+      close();
+    }
+  });
+
+  it("a sub_id the ledger says is live but the real core never spawned (desync) is a named error, never queued:true (2ª emenda, #424)", async () => {
+    const { runtime, release } = realCoreRuntime();
+    const { service, audit, trail, close } = serviceHarness(runtime);
+    try {
+      const started = service.start(spec());
+      if ("error" in started) throw new Error(started.error);
+      await flushMicrotasks();
+      await trail.flush();
+      audit.append(started.run_id, {
+        event_type: "leaf.started",
+        sub_id: "ghost-leaf",
+        node_id: "a",
+      });
+
+      const workflowSteerHandler = await loadHandler();
+      const handler = workflowSteerHandler(service, audit);
+      const result = JSON.parse(
+        await handler({ run_id: started.run_id, sub_id: "ghost-leaf", message: "hi" }),
+      ) as Envelope;
+      expect(result.ok).toBeUndefined();
+      expect(result.error).toMatch(/terminal or unknown/);
+
+      release(REAL_COLLECT_RESULT);
+      await service.status(started.run_id, true);
     } finally {
       close();
     }
