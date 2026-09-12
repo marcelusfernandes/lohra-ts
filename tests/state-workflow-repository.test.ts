@@ -314,9 +314,13 @@ describe("workflow repository — owned writes demand live ownership", () => {
         reasoning: 4,
       }),
     ).toBe(true);
+    // Issue #461: no `identityVersion` was passed above — the column
+    // stays NULL (an "unstamped" cell, `SqliteWorkflowCache`'s own
+    // classification of it — see tests/workflow-cache-stamp.test.ts).
     expect(repository.getCacheCell("run", "h1")).toEqual({
       status: "complete",
       outputJson: '{"v":1}',
+      identityVersion: null,
     });
     expect(repository.getCacheCost("run", "h1")).toEqual({
       tokensIn: 5,
@@ -349,6 +353,59 @@ describe("workflow repository — owned writes demand live ownership", () => {
       }),
     ).toThrow();
     expect(repository.getCacheCell("run", "h3")).toBeNull();
+    close();
+  });
+
+  // Issue #461: `hasCellForNode` is the "did THIS node ever complete in
+  // this run" query `SqliteWorkflowCache.lookup` needs to tell a fresh
+  // node (`never_completed`) apart from one whose identity just changed
+  // (`identity_changed`) — keyed by (run_id, node_id), never by
+  // content_hash. `putCacheCellWithCost`'s new (optional) last argument
+  // stamps `identity_version` in the SAME transaction as the cell — cast
+  // through an explicit signature below since the base repository doesn't
+  // declare either yet (RED by assertion, not by compile error).
+  it("hasCellForNode sees a cell only by its (run, node) pair, and stamps identity_version in the same transaction (#461)", () => {
+    const { repository, locks, close } = repo();
+    const first = owned(locks.acquireRunLease("run", "p1", 1000, 50), "p1", 1000);
+    const hasCellForNode = (runId: string, nodeId: string): boolean | undefined =>
+      (
+        repository as unknown as {
+          readonly hasCellForNode?: (runId: string, nodeId: string) => boolean;
+        }
+      ).hasCellForNode?.(runId, nodeId);
+    type PutWithIdentity = (
+      runId: string,
+      hash: string,
+      nodeId: string,
+      outputJson: string | null,
+      status: string,
+      ownership: ReturnType<typeof owned>,
+      cost: null,
+      identityVersion?: string,
+    ) => boolean;
+    const putCacheCellWithCost: PutWithIdentity = repository.putCacheCellWithCost.bind(repository);
+    const putWithIdentity = (
+      hash: string,
+      nodeId: string,
+      ownership: ReturnType<typeof owned>,
+      identityVersion: string,
+    ): boolean =>
+      putCacheCellWithCost("run", hash, nodeId, "{}", "complete", ownership, null, identityVersion);
+
+    expect(hasCellForNode("run", "stamped-node")).toBeFalsy();
+    expect(putWithIdentity("h-stamp", "stamped-node", first, "1")).toBe(true);
+    expect(hasCellForNode("run", "stamped-node")).toBe(true);
+    expect(hasCellForNode("run", "other-node")).toBeFalsy();
+    const stamped = repository.getCacheCell("run", "h-stamp") as unknown as {
+      readonly identityVersion?: string | null;
+    } | null;
+    expect(stamped?.identityVersion).toBe("1");
+
+    // A refused write (stale fence) stamps nothing — hasCellForNode still
+    // sees only the PRIOR cell for this node, never the refused attempt.
+    const stale = { ...first, fence: first.fence - 1 };
+    expect(putWithIdentity("h-refused", "refused-node", stale, "1")).toBe(false);
+    expect(hasCellForNode("run", "refused-node")).toBeFalsy();
     close();
   });
 

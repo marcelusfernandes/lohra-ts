@@ -54,6 +54,53 @@ describe("T17 metadata-only audit — allow-list sem produtor", () => {
     expect(event.data.reason).toBe("route_fault");
   });
 
+  // Issue #461 (M11-S3, épico #458): `cache.missed` ganha dois valores novos
+  // de `reason` — o oráculo positivo (aceito) e negativo (fora do
+  // vocabulário continua marcador de exclusão) de cada um.
+  it("preserves cache.missed reason 'never_completed'", () => {
+    const event = publicAuditEvent(
+      "r",
+      1,
+      { event_type: "cache.missed", payload: { reason: "never_completed" } },
+      1,
+    );
+    expect(event.data.reason).toBe("never_completed");
+  });
+
+  it("preserves cache.missed reason 'identity_changed'", () => {
+    const event = publicAuditEvent(
+      "r",
+      1,
+      { event_type: "cache.missed", payload: { reason: "identity_changed" } },
+      1,
+    );
+    expect(event.data.reason).toBe("identity_changed");
+  });
+
+  // Issue #461: `cache.replayed`'s new `version_state` — closed vocabulary
+  // (`current`/`stale`/`unstamped`), same allow-list mechanism as `reason`.
+  it("preserves cache.replayed version_state across the whole vocabulary", () => {
+    for (const state of ["current", "stale", "unstamped"]) {
+      const event = publicAuditEvent(
+        "r",
+        1,
+        { event_type: "cache.replayed", payload: { version_state: state } },
+        1,
+      );
+      expect(event.data.version_state).toBe(state);
+    }
+  });
+
+  it("redacts a cache.replayed version_state outside the vocabulary", () => {
+    const event = publicAuditEvent(
+      "r",
+      1,
+      { event_type: "cache.replayed", payload: { version_state: "obsolete" } },
+      1,
+    );
+    expect(event.data.version_state).toEqual({ state: "excluded_by_policy", characters: 8 });
+  });
+
   it("accepts exactly the ErrorKind vocabulary for error_kind", () => {
     for (const kind of transports.ERROR_KINDS) {
       const event = publicAuditEvent(
