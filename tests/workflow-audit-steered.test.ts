@@ -382,6 +382,46 @@ describe("workflow audit — leaf.steered (#423)", () => {
       close();
     }
   });
+
+  // Issue #520 (M16-S5, épico #490, ADR 0005): a steer that also interrupted
+  // a call genuinely in flight (D2) marks `leaf.steered.data.interrupted`,
+  // and the leaf's own settled result — carrying `partial: true` once the
+  // turn absorbed at least one interrupted call and still completed (D3) —
+  // reaches `leaf.completed.data.partial` the same way S2 already wired for
+  // a failed/cancelled leaf. RED on main 167c2669: `SteerOutcome` has no
+  // `interrupted` key, and `BOOLEAN_FIELDS` (audit-model.ts) has no
+  // `interrupted` entry — the payload is dropped at read time even if a
+  // producer wrote it.
+  it("an interrupted operator steer marks leaf.steered.data.interrupted, and a partial-but-complete leaf marks leaf.completed.data.partial (#520)", async () => {
+    const { audit, trail, deps, close } = directHarness();
+    try {
+      const inner: ChildRuntime = withMinimalLeafSandbox({
+        spawn: (): string => "leaf-1",
+        collect: (): ChildResult => ({
+          status: "complete",
+          output: "done",
+          usage: USAGE,
+          partial: true,
+        }),
+        steer: (): void => undefined,
+        steerOutcome: () => ({ queued: true, interrupted: true }),
+        cancel: (): void => undefined,
+      });
+      const runtime = auditedChildRuntime(inner, deps);
+      await runtime.spawn({ prompt: "one", causalContext: CAUSAL });
+      const prompt = "please stop the current call and read this instead";
+      await runtime.steer("leaf-1", prompt, CAUSAL, "operator");
+      await runtime.collect("leaf-1", { wait: true, timeoutSeconds: 5 });
+      await trail.flush();
+      const page = audit.query({ runId: CAUSAL.runId, limit: 50 });
+      const steered = page.events.find((event) => event.event_type === "leaf.steered");
+      expect(steered?.data.interrupted).toBe(true);
+      const completed = page.events.find((event) => event.event_type === "leaf.completed");
+      expect(completed?.data.partial).toBe(true);
+    } finally {
+      close();
+    }
+  });
 });
 
 describe("audit-model allow-list — leaf.steered (#423)", () => {
