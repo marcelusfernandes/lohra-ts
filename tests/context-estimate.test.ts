@@ -3,7 +3,8 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { estimateTokens } from "../src/context/token-estimate.js";
+import { estimatePartialUsage, estimateTokens } from "../src/context/token-estimate.js";
+import type { PartialStream } from "../src/transports/index.js";
 
 const FIXTURES_DIR = resolve(import.meta.dirname, "fixtures/context");
 
@@ -188,5 +189,81 @@ describe("estimateTokens — unidade", () => {
       "utf8",
     );
     expect(/\bfetch\s*\(|node:https?|require\(["']https?["']\)/u.test(source)).toBe(false);
+  });
+});
+
+// Issue #518 (M16-S3, ADR 0005): RED on main (167c2669) — `estimatePartialUsage`
+// does not exist yet.
+describe("estimatePartialUsage — unidade (issue #518)", () => {
+  const emptyRequest = { system: "", messages: [], tools: [] };
+
+  function partial(overrides: Partial<PartialStream> = {}): PartialStream {
+    return { text: "", reasoningChars: 0, toolArgumentChars: 0, usage: null, ...overrides };
+  }
+
+  it("pins the exact output token count for 29 chars of partial text (29 / 2.9 = 10, no remainder)", () => {
+    const result = estimatePartialUsage(partial({ text: "x".repeat(29) }), emptyRequest);
+    expect(result).toEqual({
+      inputTokens: 0,
+      outputTokens: 10,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reasoningTokens: 0,
+    });
+  });
+
+  it("charges reasoningChars/toolArgumentChars at the denser JSON factor, summed with the text", () => {
+    // ceil(5/2.4) = 3
+    const result = estimatePartialUsage(partial({ reasoningChars: 5 }), emptyRequest);
+    expect(result.outputTokens).toBe(3);
+  });
+
+  it("uses partial.usage.inputTokens when present and nonzero, ignoring the request estimate", () => {
+    const measured = {
+      inputTokens: 42,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reasoningTokens: 0,
+    };
+    const result = estimatePartialUsage(partial({ usage: measured }), {
+      system: "a very long system prompt that would estimate to far more than 42",
+      messages: [],
+      tools: [],
+    });
+    expect(result.inputTokens).toBe(42);
+  });
+
+  // Round-1 review note (S1): `anthropicPartialUsage` (transports/errors.ts)
+  // returns a Usage with `inputTokens: 0` whenever `message_start` arrived
+  // with no `usage` field at all — indistinguishable here from "genuinely
+  // free", which never happens for a real request. Treated as NOT measured.
+  it("falls back to the request estimate when partial.usage is present but inputTokens is 0 (never measured, not genuinely free)", () => {
+    const zeroed = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reasoningTokens: 0,
+    };
+    const result = estimatePartialUsage(partial({ usage: zeroed }), {
+      system: "abc",
+      messages: [],
+      tools: [],
+    });
+    // ceil(3/2.9) = 2 -- estimateRequestTokens's own conservative estimate.
+    expect(result.inputTokens).toBe(2);
+  });
+
+  it("falls back to the request estimate when partial.usage is null", () => {
+    const result = estimatePartialUsage(partial(), { system: "abc", messages: [], tools: [] });
+    expect(result.inputTokens).toBe(2);
+  });
+
+  it("never returns a negative or NaN token count for an empty partial", () => {
+    const result = estimatePartialUsage(partial(), emptyRequest);
+    expect(result.outputTokens).toBe(0);
+    expect(result.inputTokens).toBe(0);
+    expect(Number.isFinite(result.outputTokens)).toBe(true);
   });
 });

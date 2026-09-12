@@ -394,22 +394,15 @@ describe("ConversationRuntime", () => {
     ).toBe(true);
   });
 
-  // The loop classifies a failure ENTIRELY by the error the call itself
-  // raised — it never asks "was the signal aborted?" here, matching the
-  // oracle's own loop.py (interrupt is checked only before issuing the next
-  // call; the except block around the provider call classifies purely by
-  // the caught exception). This matters specifically for a transport that
-  // consumes the signal for real mid-flight cancellation (the non-streaming
-  // path): the resulting error is a genuine abort, but it is still just
-  // ANOTHER turn failure here — never reclassified into
-  // ConversationCancelledError after the fact. Cancellation is exclusively
-  // a pre-iteration, call-never-issued signal (see the next test); a call
-  // that was already issued and then failed — for any reason, including a
-  // real abort a consuming transport honored — is a turn failure. Getting
-  // this wrong previously meant every child failure during orchestration
-  // teardown (which unconditionally aborts every child before awaiting any
-  // of them) silently lost its real cause and reported as "interrupted".
-  it("classifies a mid-flight failure from an abort-consuming transport as a turn failure, not a cancellation, and always closes transport", async () => {
+  // Issue #518 (M16-S3, ADR 0005): a call already issued that the transport
+  // itself tears down when the signal fires — a raw `AbortError`, here —
+  // is now a cancellation, not a generic turn failure: `isAbortOf`
+  // (runtime.ts) recognizes it (name === "AbortError", signal aborted) and
+  // reclassifies it as `ConversationCancelledError`. RED on main
+  // (167c2669): before this issue, EVERY failure while the signal was
+  // aborted still surfaced as `ConversationTurnFailedError` regardless of
+  // its shape — this is the exact behavior this issue replaces.
+  it("classifies a mid-flight abort from an abort-consuming transport as ConversationCancelledError, with no partialUsage (no StreamAbortedError involved), and always closes transport", async () => {
     const repository = new MemoryRepository();
     let observed = false;
     let closes = 0;
@@ -424,6 +417,7 @@ describe("ConversationRuntime", () => {
     const started = new Promise<void>((resolve) => {
       signalStarted = resolve;
     });
+    const events: ConversationRuntimeEvent[] = [];
     const transport: ModelTransport = {
       complete: ({ signal }) =>
         new Promise((_, reject) => {
@@ -450,6 +444,7 @@ describe("ConversationRuntime", () => {
       promptSnapshot: () => "p",
       idSource: () => "s",
       clock: () => 1,
+      eventSink: (event) => events.push(event),
     });
     const controller = new AbortController();
     const turn = runtime.runTurn({
@@ -460,12 +455,63 @@ describe("ConversationRuntime", () => {
       signal: controller.signal,
     });
     await started;
-    controller.abort();
-    await expect(turn).rejects.toBeInstanceOf(ConversationTurnFailedError);
-    await expect(turn).rejects.toThrow(/aborted/);
+    controller.abort("USER_CANCELLED");
+    await expect(turn).rejects.toBeInstanceOf(ConversationCancelledError);
+    const rejected = (await turn.catch((caught: unknown) => caught)) as ConversationCancelledError;
+    expect(rejected.partialUsage).toBeNull();
     expect(observed).toBe(true);
     expect(repository.commits).toEqual([]);
     expect(closes).toBe(1);
+    expect(events.some((event) => event.type === "turn.completed")).toBe(false);
+  });
+
+  // Contra-assertion (issue #518): a genuine provider failure that happens
+  // to arrive AFTER the signal was already aborted is never reclassified
+  // into a cancellation — `isAbortOf` only recognizes the specific shapes an
+  // in-flight abort can throw (StreamAbortedError, name==="AbortError", or
+  // `.cause === signal.reason`), never "any failure while aborted".
+  it("keeps a real 5xx that arrives after the signal aborted as a route_fault turn failure, never a cancellation", async () => {
+    const repository = new MemoryRepository();
+    const { ProviderCallFailed, classifyProviderError } =
+      await import("../src/transports/index.js");
+    let signalStarted: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      signalStarted = resolve;
+    });
+    const transport: ModelTransport = {
+      complete: ({ signal }) =>
+        new Promise((_, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              reject(new ProviderCallFailed("service unavailable", { statusCode: 503 }));
+            },
+            { once: true },
+          );
+          signalStarted();
+        }),
+      close: () => Promise.resolve(),
+    };
+    const runtime = new ConversationRuntime({
+      repository,
+      transport,
+      promptSnapshot: () => "p",
+      idSource: () => "s",
+      clock: () => 1,
+    });
+    const controller = new AbortController();
+    const turn = runtime.runTurn({
+      input: "x",
+      provider: "ollama",
+      model: "m",
+      cwd: "/tmp",
+      signal: controller.signal,
+    });
+    await started;
+    controller.abort("USER_CANCELLED");
+    await expect(turn).rejects.toBeInstanceOf(ConversationTurnFailedError);
+    const rejected = (await turn.catch((caught: unknown) => caught)) as ConversationTurnFailedError;
+    expect(classifyProviderError(rejected.cause)).toBe("route_fault");
   });
 
   it("throws ConversationCancelledError before issuing the next call when the signal is already aborted — the call is never made", async () => {
