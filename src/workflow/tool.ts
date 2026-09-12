@@ -1,6 +1,7 @@
 import { toolError, toolResult } from "../tools/envelope.js";
 import type { ToolArguments, ToolHandler } from "../tools/types.js";
 import type { WorkflowService } from "./service.js";
+import type { RouteOverride } from "./route-override.js";
 import type { AuditRepository } from "../state/audit-repository.js";
 import { parseJsonPreservingNumbers } from "../serialization/json-numbers.js";
 import { parseAuditQuery } from "./audit-query.js";
@@ -69,10 +70,29 @@ export class WorkflowTool {
       (typeof tokenBudget !== "number" || !Number.isInteger(tokenBudget) || tokenBudget <= 0)
     )
       return toolError("'token_budget' must be a positive integer");
+    const route = args.route;
+    const routeRecord = route === undefined ? null : record(route);
+    const routeValid =
+      routeRecord !== null &&
+      (routeRecord.provider !== undefined || routeRecord.model !== undefined) &&
+      (routeRecord.provider === undefined || typeof routeRecord.provider === "string") &&
+      (routeRecord.model === undefined || typeof routeRecord.model === "string");
+    if (route !== undefined && !routeValid)
+      return toolError("'route' must be an object with a string 'provider' and/or 'model'");
+    if (route !== undefined && resumeRunId === undefined)
+      return toolError("'route' is only accepted together with 'resume_run_id'");
+    const routeOverride: RouteOverride | undefined =
+      routeRecord === null
+        ? undefined
+        : {
+            ...(typeof routeRecord.provider === "string" ? { provider: routeRecord.provider } : {}),
+            ...(typeof routeRecord.model === "string" ? { model: routeRecord.model } : {}),
+          };
     const out = this.service.start(spec === undefined ? null : spec, record(runArgs) ?? {}, {
       ...(answers === undefined ? {} : { checkpointAnswers: record(answers) ?? {} }),
       ...(tokenBudget === undefined ? {} : { tokenBudget }),
       ...(resumeRunId === undefined ? {} : { resumeRunId }),
+      ...(routeOverride === undefined ? {} : { routeOverride }),
     });
     if ("error" in out)
       return out.invalid_spec === true
