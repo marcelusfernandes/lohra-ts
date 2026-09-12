@@ -29,6 +29,17 @@
 // `put()` delegates through, independent of whether the guarded `INSERT`
 // then succeeds. The row-count assertion stays too: it pins barrier (2) on
 // its own.
+//
+// Issue #503 (follow-up of #484 rodada 2, PR #497 veredito non_blocking 4):
+// this exact node used to classify `unknown` — `classifyNode`
+// (`cache-preview.ts`) had no category for "ran to completion, zero spawns,
+// zero hits" other than the catch-all. It now reports `outcome: "no_leaves"`
+// — a `parallel` node whose dry run genuinely executed (its output is in
+// `RunResult.outputs`) but recorded neither a spawn nor a cache hit.
+// `unknown` stays reserved for what the preview truly can't predict (a node
+// never reached, or an engine fault) — see the second describe block below
+// for the non-regression case (a `verify` node, a type this issue's `Files`
+// deliberately does NOT model).
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -173,10 +184,10 @@ describe("previewResume — PreviewCacheFacade.put() (#484 rodada 2, veredito PR
       const result = await preview({ tiers: {}, runId: started.run_id, now: 1000 });
       if ("error" in result) throw new Error(result.error);
       // `par` never spawns (no branches) and never hits (never cached), so
-      // it classifies `unknown` — a documented gap, not this test's point.
-      // What matters: `runParallel` still RAN for it (a genuine cache
-      // miss), reaching `cache.put([])`.
-      expect(result.nodes.find((entry) => entry.node_id === "par")?.outcome).toBe("unknown");
+      // it classifies `no_leaves` (#503) — a genuine "ran with nothing left
+      // to pay for", not `unknown` anymore. What matters here: `runParallel`
+      // still RAN for it (a genuine cache miss), reaching `cache.put([])`.
+      expect(result.nodes.find((entry) => entry.node_id === "par")?.outcome).toBe("no_leaves");
 
       // Barrier (1): the facade's `put()` never calls through to the real
       // repository at all — this is what P6 mutates.
@@ -186,6 +197,74 @@ describe("previewResume — PreviewCacheFacade.put() (#484 rodada 2, veredito PR
       // way — pinned here so a future change to the fence doesn't silently
       // widen what this oracle can no longer tell apart.
       expect(rowCount(database, "workflow_node_cache")).toBe(before);
+    } finally {
+      close();
+    }
+  });
+
+  it("a parallel node with empty branches classifies as no_leaves, not unknown", async () => {
+    const { service, preview, close } = harness();
+    try {
+      const spec = {
+        meta: { name: "par-empty-branches-classify" },
+        nodes: [
+          { id: "bad", type: "agent", prompt: "pinned", provider: "bad-provider" },
+          { id: "par", type: "parallel", branches: [], depends_on: ["bad"] },
+        ],
+      };
+      const started = service.start(spec);
+      if ("error" in started) throw new Error(started.error);
+      await service.status(started.run_id, true);
+
+      const result = await preview({ tiers: {}, runId: started.run_id, now: 1000 });
+      if ("error" in result) throw new Error(result.error);
+      const par = result.nodes.find((entry) => entry.node_id === "par");
+      expect(par?.outcome).toBe("no_leaves");
+      expect(par?.type).toBe("parallel");
+    } finally {
+      close();
+    }
+  });
+});
+
+// Issue #503: `unknown` stays reserved for a type this classification does
+// NOT model — a `verify` node whose `finding` resolves to `null` (an
+// unresolved `${...}` reference, `strictResolve`, `engine-utils.ts`) runs to
+// completion (`runVerify` returns `null` immediately, `engine.ts:623-624`)
+// with zero spawns and zero hits, EXACTLY the same shape as the `parallel`
+// case above — yet it must still classify `unknown`, because `classifyNode`
+// (`cache-preview.ts`) only special-cases `node.type === "parallel"` (the
+// one case #503's `Fora de escopo` proves; `verify`/`checkpoint`/`pipeline`
+// are deliberately left unmodeled beyond it). `bad` (pinned, `auth_failed`)
+// pauses the REAL run before `v`, the same device the `parallel` tests above
+// use, so `v` is reached by the PREVIEW's dry run (which never pauses on a
+// plain failure) with a genuine cache MISS, never by the real launch.
+describe("previewResume — unknown stays reserved for an unmodeled type (#503 non-regression)", () => {
+  it("a verify node whose finding resolves to null still classifies as unknown", async () => {
+    const { service, preview, close } = harness();
+    try {
+      const spec = {
+        meta: { name: "verify-unresolved-finding" },
+        nodes: [
+          { id: "bad", type: "agent", prompt: "pinned", provider: "bad-provider" },
+          {
+            id: "v",
+            type: "verify",
+            finding: "${bad.value}",
+            skeptics: 1,
+            depends_on: ["bad"],
+          },
+        ],
+      };
+      const started = service.start(spec);
+      if ("error" in started) throw new Error(started.error);
+      await service.status(started.run_id, true);
+
+      const result = await preview({ tiers: {}, runId: started.run_id, now: 1000 });
+      if ("error" in result) throw new Error(result.error);
+      const v = result.nodes.find((entry) => entry.node_id === "v");
+      expect(v?.outcome).toBe("unknown");
+      expect(v?.type).toBe("verify");
     } finally {
       close();
     }
