@@ -147,8 +147,8 @@ export function recordRouteFaultNotice(
   const notice = routeFaultNotice(checkpoint);
   const outcome = appendSafe(repository, runId, notice, ownership);
   if (!outcome.recorded) {
-    const suffix = outcome.cause === null ? "" : ` (${outcome.cause})`;
-    warn(`workflow: route fault notice for run ${runId} could not be recorded durably${suffix}`);
+    const detail = outcome.cause === null ? "the write was refused" : `it threw: ${outcome.cause}`;
+    warn(`workflow: route fault notice for run ${runId} could not be recorded durably (${detail})`);
   }
 }
 

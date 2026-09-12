@@ -495,10 +495,10 @@ describe("recordRouteFaultNotice — the two unexercised guards (#449)", () => {
     }).not.toThrow();
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("run-2");
-    expect(warnings[0]).toContain("Error: sqlite: disk I/O error");
+    expect(warnings[0]).toContain("it threw: Error: sqlite: disk I/O error");
   });
 
-  it("a repository that plainly refuses (append returns null) still warns, without a cause", async () => {
+  it("a repository that plainly refuses (append returns null) still warns, distinguished from a throw", async () => {
     const { recordRouteFaultNotice } = await import("../src/workflow/route-faults.js");
     const warnings: string[] = [];
     const repository = {
@@ -514,6 +514,7 @@ describe("recordRouteFaultNotice — the two unexercised guards (#449)", () => {
     recordRouteFaultNotice(repository, "run-3", lesson, null, (message) => warnings.push(message));
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("run-3");
-    expect(warnings[0]).not.toContain("Error:");
+    expect(warnings[0]).toContain("the write was refused");
+    expect(warnings[0]).not.toContain("threw");
   });
 });
