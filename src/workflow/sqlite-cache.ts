@@ -4,7 +4,12 @@ import type { Usage } from "../pricing/types.js";
 import { usage } from "../pricing/usage.js";
 import type { StateWarning } from "../state/locks.js";
 import { WorkflowRepository } from "../state/workflow-repository.js";
-import type { CacheLookup, WorkflowCache, WorkflowCacheOwnership } from "./cache.js";
+import {
+  CELL_IDENTITY_VERSION,
+  type CacheLookup,
+  type WorkflowCache,
+  type WorkflowCacheOwnership,
+} from "./cache.js";
 
 /**
  * Run-scoped SQLite NodeCache under the live-ownership guard: every put
@@ -36,16 +41,30 @@ export class SqliteWorkflowCache implements WorkflowCache {
     this.repository = options.repository ?? new WorkflowRepository(database, options.warning);
   }
 
-  public get(runId: string, hash: string): CacheLookup {
-    return this.lookup(runId, hash);
+  public get(runId: string, hash: string, nodeId?: string): CacheLookup {
+    return this.lookup(runId, hash, nodeId);
   }
 
-  private lookup(runId: string, hash: string): CacheLookup {
+  private lookup(runId: string, hash: string, nodeId?: string): CacheLookup {
     const cell = this.database
       .prepare(
-        "SELECT status, output_json FROM workflow_node_cache WHERE run_id = ? AND content_hash = ?",
+        `SELECT status, output_json, identity_version
+         FROM workflow_node_cache WHERE run_id = ? AND content_hash = ?`,
       )
-      .get(runId, hash) as { status: string; output_json: string | null } | undefined;
+      .get(runId, hash) as
+      { status: string; output_json: string | null; identity_version: string | null } | undefined;
+    // Issue #461: "did (run_id, nodeId) ever land a cell, under ANY hash?"
+    // tells a node that never ran apart from one whose identity just moved
+    // (route pivot, prompt edit, a bumped CELL_IDENTITY_VERSION...) since
+    // the cell this miss didn't find. Kept as its OWN early branch, ahead
+    // of the plain undefined-cell return below (workflow-durability-named.ts
+    // :117 anchors that exact line byte-for-byte).
+    if (cell === undefined && nodeId !== undefined) {
+      const miss = this.repository.hasCellForNode(runId, nodeId)
+        ? "identity_changed"
+        : "never_completed";
+      return Object.freeze({ hit: false, output: null, cost: null, miss });
+    }
     if (cell === undefined) return Object.freeze({ hit: false, output: null, cost: null });
     const output = cell.output_json === null ? null : (JSON.parse(cell.output_json) as unknown);
     const costRow = this.database
@@ -69,7 +88,16 @@ export class SqliteWorkflowCache implements WorkflowCache {
       cacheWriteTokens: Number(costRow?.cache_write_tokens ?? 0),
       reasoningTokens: Number(costRow?.reasoning_tokens ?? 0),
     });
-    return Object.freeze({ hit: true, output, cost });
+    // Marked, never invalidated (decision 3, épico #458): the replay above
+    // happens the same in all three cases — only the classification here
+    // changes.
+    const versionState =
+      cell.identity_version === CELL_IDENTITY_VERSION
+        ? "current"
+        : cell.identity_version === null
+          ? "unstamped"
+          : "stale";
+    return Object.freeze({ hit: true, output, cost, versionState });
   }
 
   public put(
@@ -107,6 +135,7 @@ export class SqliteWorkflowCache implements WorkflowCache {
             reasoning: cost.reasoningTokens,
           }
         : null,
+      CELL_IDENTITY_VERSION,
     );
     if (ok) this.onWrite?.();
     return ok;

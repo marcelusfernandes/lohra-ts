@@ -15,8 +15,10 @@ import {
 import { WorkflowEngine } from "./engine.js";
 import { AutoResumeScheduler, LeaseHeartbeat, type Timer } from "./durability.js";
 import { liveRuntimeOf, nextPivots, resultView, runningView } from "./service-rollup.js";
-import { recordRouteFaultNotice, ROUTE_FAULT_REASON } from "./route-faults.js";
+import { recordRouteFaultNotice, ROUTE_FAULT_REASON, withSuggestedRoute } from "./route-faults.js";
 import { pausePayloadOf, pivotResume, pivotsOf, registrationPayload } from "./route-override.js";
+import { OPERATOR_ROUTES_FILE, readRoutes, RoutesError, type RouteEnvelope } from "./routes.js";
+import { loadsOr } from "./jsonio.js";
 import type { ChildRuntime, LeafSandboxHandle, LeafToolDispatch } from "./runtime.js";
 import { validateNestedRefs, validateSpec } from "./schema.js";
 import { ValidationError, type WorkflowSpec } from "./types.js";
@@ -127,23 +129,14 @@ export interface DurableRunView {
   readonly updated_at: number;
 }
 
-function loads(raw: unknown, fallback: unknown): unknown {
-  if (typeof raw !== "string" || raw === "") return fallback;
-  try {
-    return JSON.parse(raw) as unknown;
-  } catch {
-    return fallback;
-  }
-}
-
 export function durableFromRow(row: Readonly<Record<string, unknown>>): DurableRunView {
-  const payload = loads(row.pause_payload_json, {}) as Record<string, unknown>;
+  const payload = loadsOr(row.pause_payload_json, {}) as Record<string, unknown>;
   const faults = payload.prior_faults;
   const faultKinds = payload.prior_fault_kinds;
   const checkpoint = payload.checkpoint;
-  const progress = loads(row.progress_json, null);
-  const spec = loads(row.spec_json, null);
-  const args = loads(row.args_json, {});
+  const progress = loadsOr(row.progress_json, null);
+  const spec = loadsOr(row.spec_json, null);
+  const args = loadsOr(row.args_json, {});
   return {
     run_id: String(row.run_id),
     name: typeof row.name === "string" ? row.name : "",
@@ -356,6 +349,7 @@ export class WorkflowService {
   private readonly heartbeat: LeaseHeartbeat | undefined;
   private readonly policyLoader: (() => SandboxPolicy) | undefined;
   private readonly tiersLoader: () => TierMap | TiersError;
+  private readonly routesLoader: () => RouteEnvelope | RoutesError;
   private readonly taintTracker: TaintTracker;
   private readonly autoResume: AutoResumeScheduler | undefined;
   private readonly homeRoot: string;
@@ -383,6 +377,7 @@ export class WorkflowService {
     /** Production wiring: read the operator capability policy/tiers per launch. */
     readonly policyPath?: string;
     readonly tiersPath?: string;
+    readonly routesPath?: string;
     readonly taintTracker?: TaintTracker;
     /** Operator home root: `<home>/runs/<run_id>/work-<fence>` scratch. */
     readonly homeRoot?: string;
@@ -419,6 +414,9 @@ export class WorkflowService {
     // The tier map is a separate FILE, read the same way: absent is legitimate (no remapping configured); present-but-broken still refuses the launch (#234).
     const tiersPath = options.tiersPath ?? join(this.homeRoot, OPERATOR_TIERS_FILE);
     this.tiersLoader = () => readTiers(tiersPath);
+    // Operator-authorized route fallbacks, same fail-closed shape as tiers above (#459).
+    const routesPath = options.routesPath ?? join(this.homeRoot, OPERATOR_ROUTES_FILE);
+    this.routesLoader = () => readRoutes(routesPath);
     const store = options.store;
     if (store !== undefined) {
       const timerFactory = this.timerFactory;
@@ -497,9 +495,11 @@ export class WorkflowService {
   ): WorkflowStartResult | WorkflowServiceError {
     const tiers = this.tiersLoader();
     if (tiers instanceof TiersError) return Object.freeze({ error: tiers.message });
+    const routes = this.routesLoader();
+    if (routes instanceof RoutesError) return Object.freeze({ error: routes.message });
     // Resolved once per call and carried on `options` so both launch paths
     // below (fresh, durable) reach the same map without reloading it (#258).
-    const options: WorkflowLaunchOptionsWithTiers = { ...callerOptions, tiers };
+    const options: WorkflowLaunchOptionsWithTiers = { ...callerOptions, tiers, routes };
     const resumeRunId = options.resumeRunId;
     const explicitSpec = rawSpec !== undefined && rawSpec !== null;
     const prior = resumeRunId === undefined ? null : this.durableOf(resumeRunId);
@@ -602,7 +602,7 @@ export class WorkflowService {
     void engine
       .run(parsed, args)
       .then((result) => {
-        record.result = result;
+        record.result = withSuggestedRoute(result, options.routes, record.pivots ?? []);
         producers.announceStretchEnd(
           result.status,
           result.pauseReason,
@@ -936,7 +936,7 @@ export class WorkflowService {
     void engine
       .run(parsed, args)
       .then(async (result) => {
-        record.result = result;
+        record.result = withSuggestedRoute(result, options.routes, record.pivots ?? []); // #459
         const terminal = stretchOwnership();
         // Taint acquired INSIDE this stretch counts: a leaf that ran an allowed
         // web_fetch marked the tracker, and the line this stretch writes must

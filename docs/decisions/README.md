@@ -92,3 +92,10 @@ suggested_route: null}`; kind que pausa nunca entra em `faultKinds`;
   `initializationError` citando `lohra auth prefer api_key`, antes de
   qualquer rede; `--model` sozinho continua indo ao Codex; override por
   invocação (opção B) fica como possível issue futura.
+- [2026-09-13 — Envelope de rotas do operador: `suggested_route` deixa de
+  ser sempre `null`](2026-09-13-envelope-de-rotas.md) — `workflow_routes.json`
+  fail-closed (molde `readTiers`); `suggestRoute` pura escolhe o primeiro
+  fallback não tentado neste run; `withSuggestedRoute` enriquece a lição no
+  terminal do service antes de todo leitor; só um HINT — aplicar a
+  sugestão automaticamente no resume é S2 (#460); sem
+  `max_fallbacks_per_run`, o teto continua `MAX_ROUTE_PIVOTS_PER_RUN`.

@@ -29,13 +29,34 @@ function usagePayload(cost: Usage | null): Readonly<Record<string, unknown>> {
     : { usage: { tokens_in: cost.inputTokens, tokens_out: cost.outputTokens } };
 }
 
+/** Issue #461: `cache.missed`'s own `reason` — omitted (not `null`) when
+ * `lookup.miss` is undefined, which happens exactly when the caller never
+ * named a `nodeId` (cache.ts) for `get` to classify the miss with. */
+function missPayload(miss: CacheLookup["miss"]): Readonly<Record<string, unknown>> {
+  return miss === undefined ? {} : { reason: miss };
+}
+
+/** Issue #461: `cache.replayed`'s `usage` (unchanged) plus `version_state`
+ * — omitted only for a cache that never classifies hits at all (a custom
+ * `WorkflowCache` the decorator wraps that predates #461). */
+function replayedPayload(
+  cost: Usage | null,
+  versionState: CacheLookup["versionState"],
+): Readonly<Record<string, unknown>> {
+  return {
+    ...usagePayload(cost),
+    ...(versionState === undefined ? {} : { version_state: versionState }),
+  };
+}
+
 /**
  * Decorates `inner`: `get`/`put` delegate AND produce a `cache.*` event
  * around the same call; `totalCost`/`totalSplit` delegate with no event (an
  * aggregate read, not an individual cell's fate). `get`'s optional `nodeId`
- * (cache.ts:39) is never forwarded to `inner` for the lookup itself — it
- * only names the event's `node_id`, exactly like `identity.sub_id` never
- * changes what `leaf.*` looks up (audit-runtime.ts, #366).
+ * (cache.ts:39) is forwarded to `inner` now (#461, `hasCellForNode`
+ * classification), unlike before #461 when it only named the event's
+ * `node_id` — `identity.sub_id` still never changes what `leaf.*` looks up
+ * (audit-runtime.ts, #366), but a cache's own `get` genuinely uses this one.
  */
 export function auditedWorkflowCache(inner: WorkflowCache, deps: AuditedCacheDeps): WorkflowCache {
   function record(runId: string, eventType: string, nodeId: string | null, payload: unknown): void {
@@ -54,7 +75,7 @@ export function auditedWorkflowCache(inner: WorkflowCache, deps: AuditedCacheDep
         runId,
         lookup.hit ? "cache.replayed" : "cache.missed",
         nodeId ?? null,
-        lookup.hit ? usagePayload(lookup.cost) : {},
+        lookup.hit ? replayedPayload(lookup.cost, lookup.versionState) : missPayload(lookup.miss),
       );
       return lookup;
     },

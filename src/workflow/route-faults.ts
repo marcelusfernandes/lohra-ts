@@ -11,9 +11,11 @@
 //
 // Decision 4 (épico #421, comment on issue #421): pivoting to a different
 // route is a MANUAL resume (`run_workflow(resume_run_id, route: {...})`,
-// S6) — `suggested_route` is always `null` here; no billing-route resolver
-// is wired into the engine by this issue, so "unknown route" and "pivot
-// requires a human" are the same state.
+// S6) — this issue (#426) never fills `suggested_route` itself; that is
+// issue #459 (M11-S1, épico #458), whose `withSuggestedRoute` below
+// enriches the lesson at `service.ts`'s terminal from the operator's
+// `workflow_routes.json`. A suggestion NEVER auto-applies — decision 4
+// still holds, a resume always needs an explicit `route`.
 import { deriveStatus, type RunResult } from "./accounting.js";
 import { QUOTA_EXHAUSTED, type RunControl } from "./engine-contract.js";
 import type { NoticesSinkRepository } from "./notices-sink.js";
@@ -21,6 +23,8 @@ import type { ChildResult } from "./runtime.js";
 import type { Routing } from "./engine-utils.js";
 import type { ErrorKind } from "../transports/error-kinds.js";
 import type { Ownership } from "../state/workflow-repository.js";
+import { suggestRoute, type Route, type RouteEnvelope } from "./routes.js";
+import type { RouteOverride } from "./route-override.js";
 
 /** `WorkflowEngine.pause`'s 5th reason (`audit-model.ts`'s `reason`
  * allow-list tracked "exactly four" before this — `checkpoint`,
@@ -50,13 +54,19 @@ export function pausesRun(kind: ErrorKind | null | undefined): boolean {
 }
 
 /** The structured lesson `pause_payload_json` carries for a route fault
- * (issue #426 AC1) — `suggested_route` stays `null` (decision 4 above). */
+ * (issue #426 AC1). `suggested_route` starts `null` at creation time
+ * (`routeLesson` below has no envelope to consult) — issue #459's
+ * `withSuggestedRoute` is what fills it, at `service.ts`'s terminal, from
+ * the operator's `workflow_routes.json` (`routes.ts`), never a route this
+ * run already tried (`pivots`). Decision 4 (épico #421) still holds:
+ * NOTHING resumes automatically on a suggestion — a resume still needs an
+ * explicit `route` (S2, out of scope here). */
 export interface RouteLesson {
   readonly error_kind: ErrorKind;
   readonly node_id: string;
   readonly provider: string | null;
   readonly model: string | null;
-  readonly suggested_route: null;
+  readonly suggested_route: Route | null;
 }
 
 export function routeLesson(collected: ChildResult, nodeId: string, routing: Routing): RouteLesson {
@@ -74,12 +84,17 @@ export function routeLesson(collected: ChildResult, nodeId: string, routing: Rou
  * itself (already in `NOTICE_KINDS`, `src/state/notices-repository.ts`),
  * never reclassified through `notices-sink.ts`'s substring `classify()`. */
 export function routeFaultNotice(lesson: RouteLesson): Readonly<{ kind: string; message: string }> {
+  const suggested =
+    lesson.suggested_route === null
+      ? "none"
+      : `${lesson.suggested_route.provider}/${lesson.suggested_route.model}`;
   return Object.freeze({
     kind: lesson.error_kind,
     message:
       `${lesson.node_id}: route fault (${lesson.error_kind}) — ` +
       `provider=${lesson.provider ?? "unknown"} model=${lesson.model ?? "unknown"}; ` +
-      `resume with run_workflow(resume_run_id=..., route={...}) once you pick a different one`,
+      `resume with run_workflow(resume_run_id=..., route={...}) once you pick a different one; ` +
+      `suggested=${suggested}`,
   });
 }
 
@@ -90,6 +105,14 @@ export function routeFaultNotice(lesson: RouteLesson): Readonly<{ kind: string; 
  * from some OTHER pause reason would throw inside `service.ts`'s terminal
  * `.then`, never reaching this function at all in practice — this guard
  * is the belt for that suspenders). */
+/** #459: a `Route` object — the only non-`null` shape `suggested_route`
+ * takes — both fields required, unlike `RouteOverride`. */
+function isRoute(value: unknown): value is Route {
+  if (value === null || typeof value !== "object") return false;
+  const candidate = value as Readonly<Record<string, unknown>>;
+  return typeof candidate.provider === "string" && typeof candidate.model === "string";
+}
+
 export function isRouteLesson(value: unknown): value is RouteLesson {
   if (value === null || typeof value !== "object") return false;
   const candidate = value as Readonly<Record<string, unknown>>;
@@ -99,7 +122,7 @@ export function isRouteLesson(value: unknown): value is RouteLesson {
     typeof candidate.node_id === "string" &&
     (candidate.provider === null || typeof candidate.provider === "string") &&
     (candidate.model === null || typeof candidate.model === "string") &&
-    candidate.suggested_route === null
+    (candidate.suggested_route === null || isRoute(candidate.suggested_route))
   );
 }
 
@@ -150,6 +173,32 @@ export function recordRouteFaultNotice(
     const detail = outcome.cause === null ? "the write was refused" : `it threw: ${outcome.cause}`;
     warn(`workflow: route fault notice for run ${runId} could not be recorded durably (${detail})`);
   }
+}
+
+/** Issue #459 (M11-S1): `service.ts`'s terminal calls this right after
+ * `record.result = withSuggestedRoute(result, options.routes, record.pivots
+ * ?? [])` — `record.pivots`, never `priorView.pivots`, because `record.pivots`
+ * already folds THIS resume's own override in (`nextPivots`, same value
+ * `pausePayloadOf` persists as `pivots[]`); using the pre-stretch list let a
+ * later fault suggest the route this very resume just pivoted to (PR #479
+ * rodada 1 finding). Mutates `result.checkpoint` in place (same pattern
+ * `sealRunStatus` above already uses) with a fresh, frozen lesson whose
+ * `suggested_route` is the first fallback `envelope` authorizes for the dead
+ * route that isn't in `tried` yet. A result that isn't a paused route fault
+ * (or whose checkpoint isn't a `RouteLesson`) is returned UNTOUCHED, by
+ * reference — never a copy — so a plain resume or any other pause reason
+ * costs nothing. */
+export function withSuggestedRoute(
+  result: RunResult,
+  envelope: RouteEnvelope | undefined,
+  tried: readonly RouteOverride[],
+): RunResult {
+  if (result.pauseReason !== ROUTE_FAULT_REASON) return result;
+  const checkpoint = result.checkpoint;
+  if (!isRouteLesson(checkpoint)) return result;
+  const suggestion = envelope === undefined ? null : suggestRoute(checkpoint, envelope, tried);
+  result.checkpoint = Object.freeze({ ...checkpoint, suggested_route: suggestion });
+  return result;
 }
 
 /** Pulled out of `engine.ts`'s `run()` tail (#426, same "make room" move as #329/#336/#348 in `engine-utils.ts`) — seals `result.status`/`pauseReason`/`checkpoint` from `control` once every node has settled. `checkpoint` carries whatever payload `pause()` set — a `RouteLesson` for a route fault, same transport any other pause reason already uses. */

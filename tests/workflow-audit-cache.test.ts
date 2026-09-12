@@ -162,6 +162,8 @@ describe("workflow audit — cache producers (#368)", () => {
         expect(event.identity.segment_id).toBe(firstSegment);
         expect(event.identity.node_path).toEqual(["a"]);
       }
+      // Issue #461: a node that never ran before names WHY it missed.
+      expect(firstCache[0]?.data.reason).toBe("never_completed");
       expect(firstCache[1]?.data.usage).toEqual({ tokens_in: 7, tokens_out: 11 });
 
       const resumed = service.start(
@@ -185,6 +187,9 @@ describe("workflow audit — cache producers (#368)", () => {
       expect(secondCache.map((event) => event.event_type)).toEqual(["cache.replayed"]);
       expect(secondCache[0]?.identity.node_path).toEqual(["a"]);
       expect(secondCache[0]?.data.usage).toEqual({ tokens_in: 7, tokens_out: 11 });
+      // Issue #461: a cell written by THIS version's engine replays as
+      // "current" — the carimbo `identity_version` stamped alongside it.
+      expect(secondCache[0]?.data.version_state).toBe("current");
     } finally {
       close();
     }

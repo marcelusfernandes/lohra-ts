@@ -199,13 +199,32 @@ export class WorkflowRepository {
   public getCacheCell(
     runId: string,
     hash: string,
-  ): { status: string; outputJson: string | null } | null {
+  ): { status: string; outputJson: string | null; identityVersion: string | null } | null {
     const row = this.database
       .prepare(
-        "SELECT status, output_json FROM workflow_node_cache WHERE run_id = ? AND content_hash = ?",
+        `SELECT status, output_json, identity_version
+         FROM workflow_node_cache WHERE run_id = ? AND content_hash = ?`,
       )
-      .get(runId, hash) as { status: string; output_json: string | null } | undefined;
-    return row === undefined ? null : { status: row.status, outputJson: row.output_json };
+      .get(runId, hash) as
+      { status: string; output_json: string | null; identity_version: string | null } | undefined;
+    return row === undefined
+      ? null
+      : { status: row.status, outputJson: row.output_json, identityVersion: row.identity_version };
+  }
+
+  /**
+   * Issue #461: "did (run_id, node_id) ever land a cell, under ANY hash?" —
+   * the question `SqliteWorkflowCache.lookup` asks on a miss to tell a node
+   * that never ran (`never_completed`) apart from one whose cell identity
+   * just moved under it (`identity_changed`). Keyed by `node_id`, never by
+   * `content_hash` — the whole point is a hash the current lookup DIDN'T
+   * find.
+   */
+  public hasCellForNode(runId: string, nodeId: string): boolean {
+    const row = this.database
+      .prepare("SELECT 1 FROM workflow_node_cache WHERE run_id = ? AND node_id = ? LIMIT 1")
+      .get(runId, nodeId);
+    return row !== undefined;
   }
 
   public putCacheCell(
@@ -242,6 +261,7 @@ export class WorkflowRepository {
     status: string,
     ownership: Ownership,
     cost: CacheCostInput | null,
+    identityVersion?: string,
   ): boolean {
     const guard = ownershipGuard(runId, ownership);
     const cellSql = `INSERT OR REPLACE INTO workflow_node_cache
@@ -251,6 +271,18 @@ export class WorkflowRepository {
       const cell = this.database
         .prepare(`${cellSql}${guard.suffix}`)
         .run(hash, runId, nodeId, outputJson, status, ownership.now, ...guard.params);
+      // Issue #461: the identity_version carimbo, same transaction as the
+      // cell it stamps — `cell.changes !== 0` mirrors the refusal check two
+      // lines below without touching it (`combined-cell-guard-removed`/
+      // `combined-cost-escapes-refusal`, workflow-durability-guard.ts,
+      // anchor byte-for-byte on the guarded INSERT and the refusal branch).
+      if (cell.changes !== 0 && identityVersion !== undefined) {
+        this.database
+          .prepare(
+            "UPDATE workflow_node_cache SET identity_version = ? WHERE run_id = ? AND content_hash = ?",
+          )
+          .run(identityVersion, runId, hash);
+      }
       if (cell.changes === 0) return false;
       if (cost !== null) {
         this.database
