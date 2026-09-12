@@ -285,6 +285,232 @@ describe("run_workflow(resume_run_id, route) — pivot cap (#427 AC)", () => {
   });
 });
 
+// Issue #446 (M14, follow-up of #427/PR #442's review): the stretch's own
+// REGISTRATION write (and the per-node progress write, #125) used to
+// hardcode `pause_payload_json: null` — only the TERMINAL write folded
+// `pivots` in (`pausePayloadOf`). A process that crashed anywhere between
+// either of those `null` writes and the terminal one lost the whole pivot
+// history on the next read, silently resetting the de facto human gate of
+// `MAX_ROUTE_PIVOTS_PER_RUN`.
+//
+// `tests/workers/` (workflow-launch-worker.ts / workflow-resume-worker.ts,
+// spawned as real OS processes in workflow-cross-process.test.ts) cannot
+// exercise this: neither worker accepts a `route` override, and adding one
+// is out of this issue's `Files`. Instead this mirrors the established
+// in-repo technique for the SAME class of problem —
+// `workflow-service-durability.test.ts:786-852` ("two SERVICES, one
+// holder — the same shape as two processes"): two separate `WorkflowService`
+// instances sharing one physical `state.db`/lock table (never the same
+// in-memory `this.runs` registry), one of them holding a leaf's `collect()`
+// open forever so its stretch's `engine.run()` never settles and its
+// terminal write never lands — a crash in every way that matters to the
+// durable row this issue is about.
+describe("pivots survive a crash between a stretch's registration/progress writes and its terminal write (#446)", () => {
+  const USAGE = {
+    inputTokens: 1,
+    outputTokens: 1,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    reasoningTokens: 0,
+  };
+
+  /** Every leaf completes immediately — used to cheaply establish pivots
+   * BEFORE the crash (each override changes "pinned"'s cache identity, so
+   * every resume below is a real re-execution, not a cache replay). */
+  class AlwaysCompleteRuntime implements ChildRuntime {
+    private seq = 0;
+    spawn(): string {
+      this.seq += 1;
+      return `leaf-${String(this.seq)}`;
+    }
+    collect(): ChildResult {
+      return { status: "complete", output: { ok: true }, usage: USAGE };
+    }
+    steer(): void {}
+    cancel(): void {}
+    installLeafSandbox(): { dispose: () => void } {
+      return { dispose: (): void => undefined };
+    }
+  }
+
+  /** The crash: "pinned"'s `collect()` never resolves, so `engine.run()`
+   * never settles and the stretch's terminal write never lands. "free" has
+   * no route fields, so it never calls this runtime at all — it is already
+   * cached from the setup stretches above and just replays. */
+  class HangingPinnedRuntime implements ChildRuntime {
+    spawn(): string {
+      return "leaf-hanging";
+    }
+    collect(): Promise<ChildResult> {
+      return new Promise<ChildResult>(() => undefined);
+    }
+    steer(): void {}
+    cancel(): void {}
+    installLeafSandbox(): { dispose: () => void } {
+      return { dispose: (): void => undefined };
+    }
+  }
+
+  function twoNodeSpec(): Record<string, unknown> {
+    return {
+      meta: { name: "route-override-crash" },
+      nodes: [
+        { id: "free", type: "agent", prompt: "unpinned" },
+        { id: "pinned", type: "agent", prompt: "pinned", provider: "p0" },
+      ],
+    };
+  }
+
+  it("a crashed stretch's registration/progress writes carry 'pivots' forward — the 4th pivot stays refused after a fresh process resumes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-route-override-crash-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      const repository = new WorkflowRepository(connection.database);
+      const locks = new LockRepository(connection.database);
+      const audit = new AuditRepository(connection.database);
+      const trail = new AuditTrail(audit);
+      const clock = { now: 1000 };
+      const ttl = 10;
+      const store = () => ({
+        repository,
+        locks,
+        holder: "same-holder",
+        ttl,
+        ownershipOf: () => ({ fence: 0, holder: "same-holder", now: clock.now }),
+        database: connection.database,
+      });
+
+      // --- setup: 2 pivots, via real pause/resume cycles, before the crash ---
+      const initial = new WorkflowService({
+        runtime: new AlwaysCompleteRuntime(),
+        auditTrail: trail,
+        store: store(),
+      });
+      const started = initial.start(twoNodeSpec());
+      if ("error" in started) throw new Error(started.error);
+      await initial.status(started.run_id, true);
+      expect(
+        durableFromRow(repository.getRunState(started.run_id) as Record<string, unknown>).pivots,
+      ).toHaveLength(0);
+
+      for (const provider of ["v1", "v2"]) {
+        const resumeService = new WorkflowService({
+          runtime: new AlwaysCompleteRuntime(),
+          auditTrail: trail,
+          store: store(),
+        });
+        const resumed = resumeService.start(
+          null,
+          {},
+          {
+            resumeRunId: started.run_id,
+            routeOverride: { provider },
+          },
+        );
+        if ("error" in resumed) throw new Error(resumed.error);
+        await resumeService.status(started.run_id, true);
+      }
+      const beforeCrash = durableFromRow(
+        repository.getRunState(started.run_id) as Record<string, unknown>,
+      );
+      expect(beforeCrash.pivots).toEqual([{ provider: "v1" }, { provider: "v2" }]);
+      expect(beforeCrash.status).toBe("complete");
+
+      // --- the crash: a 3rd pivot's stretch registers, "free" replays and
+      // fires its own progress write (#125), then "pinned" hangs forever ---
+      let freeCompletedResolve: () => void = () => undefined;
+      const freeCompleted = new Promise<void>((resolve) => {
+        freeCompletedResolve = resolve;
+      });
+      const crashService = new WorkflowService({
+        runtime: new HangingPinnedRuntime(),
+        auditTrail: trail,
+        store: store(),
+        onEvent: (event) => {
+          if (event.kind === "node" && event.nodeId === "free" && event.state !== "running") {
+            freeCompletedResolve();
+          }
+        },
+      });
+      const crashed = crashService.start(
+        null,
+        {},
+        {
+          resumeRunId: started.run_id,
+          routeOverride: { provider: "v3" },
+        },
+      );
+      if ("error" in crashed) throw new Error(crashed.error);
+      // "free"'s own completion event (and the persist it triggers, #125)
+      // fires synchronously ahead of this promise's continuation — by the
+      // time `await` resumes, that write has already landed.
+      await freeCompleted;
+      const midCrashRow = repository.getRunState(started.run_id) as Record<string, unknown>;
+      expect(midCrashRow.status).toBe("running"); // never reached the terminal write
+      expect(JSON.parse(String(midCrashRow.pause_payload_json))).toEqual({
+        pivots: [{ provider: "v1" }, { provider: "v2" }, { provider: "v3" }],
+      });
+      // `crashService`'s own stretch is deliberately never awaited again:
+      // "pinned"'s `collect()` never resolves, so its terminal write never
+      // lands — this row is the crashed process's last word.
+
+      // --- a fresh process resumes once the lease looks expired ---
+      clock.now += ttl + 1;
+      const freshService = new WorkflowService({
+        runtime: new AlwaysCompleteRuntime(),
+        auditTrail: trail,
+        store: store(),
+      });
+      const priorView = durableFromRow(midCrashRow);
+      expect(priorView.pivots).toHaveLength(3); // <-- fails on the base: null payload reads back []
+      const fourthAttempt = freshService.start(
+        null,
+        {},
+        {
+          resumeRunId: started.run_id,
+          routeOverride: { provider: "v4" },
+        },
+      );
+      expect("error" in fourthAttempt).toBe(true);
+      if ("error" in fourthAttempt) expect(fourthAttempt.error).toContain("3");
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("a run that never pivoted keeps writing a literal null payload at registration — byte-identical to before #446", () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-route-override-no-pivot-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      const repository = new WorkflowRepository(connection.database);
+      const locks = new LockRepository(connection.database);
+      const audit = new AuditRepository(connection.database);
+      const trail = new AuditTrail(audit);
+      const ownership = { fence: 0, holder: "test", now: 1000 };
+      const service = new WorkflowService({
+        runtime: new AlwaysCompleteRuntime(),
+        auditTrail: trail,
+        store: {
+          repository,
+          locks,
+          holder: "test",
+          ttl: 900,
+          ownershipOf: () => ownership,
+          database: connection.database,
+        },
+      });
+      const started = service.start(twoNodeSpec());
+      if ("error" in started) throw new Error(started.error);
+      const row = repository.getRunState(started.run_id) as Record<string, unknown>;
+      expect(row.pause_payload_json).toBeNull();
+    } finally {
+      connection.close();
+    }
+  });
+});
+
 describe("route-override.ts — the module's own exports (#427)", () => {
   it("applyRouteOverride only replaces the fields the override actually names", async () => {
     const { applyRouteOverride } = await import("../src/workflow/route-override.js");

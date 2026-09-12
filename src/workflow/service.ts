@@ -15,7 +15,7 @@ import { WorkflowEngine } from "./engine.js";
 import { AutoResumeScheduler, LeaseHeartbeat, type Timer } from "./durability.js";
 import { liveRuntimeOf, resultView } from "./service-rollup.js";
 import { recordRouteFaultNotice, ROUTE_FAULT_REASON } from "./route-faults.js";
-import { pausePayloadOf, pivotResume, pivotsOf, type RouteOverride } from "./route-override.js";
+import { pausePayloadOf, pivotResume, pivotsOf, registrationPayload } from "./route-override.js";
 import type { ChildRuntime, LeafSandboxHandle, LeafToolDispatch } from "./runtime.js";
 import { validateNestedRefs, validateSpec } from "./schema.js";
 import { ValidationError, type WorkflowSpec } from "./types.js";
@@ -120,7 +120,7 @@ export interface DurableRunView {
   readonly token_budget: number | null;
   /** #427: past route pivots this run has already spent — folded forward
    * on every terminal write (`pausePayloadOf`, route-override.ts). */
-  readonly pivots: readonly RouteOverride[];
+  readonly pivots: readonly { provider?: string; model?: string }[]; // RouteOverride's shape, inlined (#446)
   readonly progress: Record<string, unknown> | null;
   readonly audit_segment_id: string | null;
   readonly updated_at: number;
@@ -844,7 +844,7 @@ export class WorkflowService {
             owner: store.holder,
             status,
             pauseReason,
-            pausePayloadJson,
+            pausePayloadJson: pausePayloadJson ?? registrationPayload(priorView, options), // #446
             specJson: JSON.stringify(rawSpecOf(parsed)),
             argsJson: JSON.stringify(args),
             tokenBudget: effectiveBudget,
