@@ -1,41 +1,41 @@
-// Issue #452 (M14, follow-up do épico #421, achado de revisão da PR #442):
-// `runNested` (`src/workflow/engine.ts:832+`) carrega o template de um nó
-// `workflow` por `ref` em runtime, via `this.loader(reference)` — DEPOIS que
-// `pivotResume` (`route-override.ts`, #427) já reescreveu a espec de NÍVEL
-// SUPERIOR de um resume. Um pivô de rota (`run_workflow(resume_run_id,
-// route)`) nunca alcançava a rota de um nó DENTRO desse template: a folha
-// aninhada pausada por `route_fault` pausava de novo, idêntica, consumindo
-// um dos 3 pivôs à toa.
+// Issue #452 (M14, follow-up do épico #421, achado de revisão da PR #442,
+// rodada 2 da PR #472): `runNested` (`src/workflow/engine.ts:832+`) carrega
+// o template de um nó `workflow` por `ref` em runtime, via
+// `this.loader(reference)` — DEPOIS que `pivotResume`
+// (`route-override.ts`, #427) já reescreveu a espec de NÍVEL SUPERIOR de um
+// resume. Um pivô de rota (`run_workflow(resume_run_id, route)`) nunca
+// alcançava a rota de um nó DENTRO desse template: a folha aninhada
+// pausada por `route_fault` pausava de novo, idêntica, consumindo um dos 3
+// pivôs à toa.
 //
-// Harness deliberadamente ao nível do `WorkflowEngine` — molde
-// `tests/workflow-parallel-cells.test.ts` (#332/#348: mesmo `runId` + cache
-// compartilhado entre duas construções simula um resume) — não via
-// `WorkflowService`: `service.ts` não está nos `Files` desta issue (a opção
-// (a) do despacho exige threading em `service.ts`/`engine-contract.ts` que
-// não foi incluído; comentário na issue #452 registra o gap). A cache é
-// REAL: `auditedWorkflowCache` (#368) sobre um `AuditRepository` SQLite de
-// verdade — molde `tests/workflow-route-override.test.ts` (#427) para o
-// ledger `cache.*`, construído aqui diretamente em vez de via
-// `producers.wrapCache` (implementação de `service.ts`).
-//
-// Na base (main), `WorkflowEngineOptions` não tem `routeOverride` — a
-// segunda construção do engine abaixo passa a opção, mas nada na base a lê
-// (JS não valida a forma em runtime; a propriedade extra é simplesmente
-// ignorada) — o template recarregado roda de nov na MESMA rota velha: o run
-// pausa de novo em vez de completar. RED por asserção (`second.status` fica
-// `"paused"`, nunca `"complete"`), não por erro estrutural.
+// Rodada 1 (commit 410a4a64) só provava a mecânica construindo o
+// `WorkflowEngine` à mão — `service.ts` (os dois pontos que constroem o
+// engine de verdade, `launch`/`launchDurable`) não passava
+// `options.routeOverride` a `engineBaseOptions`, então em produção o pivô
+// nunca alcançava o engine. O revisor reprovou por isso (veredito na PR
+// #472); 3ª emenda da issue #452 trouxe `service.ts` para os `Files` só
+// para esse threading. O teste principal abaixo agora sobe a cadeia real —
+// `WorkflowService.start`/`resume` — molde
+// `tests/workflow-route-override.test.ts` (#427), com `loader` injetado no
+// construtor do serviço (o loader real de `ref` em produção ainda não está
+// ligado — #464, M11 — mas o CAMINHO de threading do pivô é o mesmo).
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { AuditRepository, openStateDatabase } from "../src/state/index.js";
+import {
+  AuditRepository,
+  LockRepository,
+  openStateDatabase,
+  WorkflowRepository,
+} from "../src/state/index.js";
 import { auditedWorkflowCache } from "../src/workflow/audit-cache.js";
 import { AuditTrail } from "../src/workflow/audit-trail.js";
 import { MemoryWorkflowCache } from "../src/workflow/cache.js";
 import { WorkflowEngine } from "../src/workflow/engine.js";
-import { nextPivots } from "../src/workflow/route-override.js";
+import { durableFromRow, durableRollup, WorkflowService } from "../src/workflow/service.js";
 import { validateSpec } from "../src/workflow/schema.js";
 import type {
   ChildCollectOptions,
@@ -122,20 +122,57 @@ function childTemplate(): Record<string, unknown> {
   };
 }
 
-function parentSpec() {
-  return parsed({
+function parentSpecRaw(): Record<string, unknown> {
+  return {
     meta: { name: "nested-parent" },
     nodes: [{ id: "sub", type: "workflow", ref: "child" }],
-  });
+  };
 }
 
-/** Real cache-audit ledger (#368), built directly instead of through
- * `WorkflowService`'s `producers.wrapCache` — `cacheFor` decorates the SAME
- * underlying `MemoryWorkflowCache` with a DIFFERENT `segmentId` per engine
- * construction, so a query scoped to one segment sees only that
- * construction's own `cache.*` events (same segmentation
- * `tests/workflow-route-override.test.ts` gets for free from
- * `WorkflowService`'s per-acquisition segment id). */
+function parentSpec() {
+  return parsed(parentSpecRaw());
+}
+
+/** `WorkflowService` harness — molde `tests/workflow-route-override.test.ts`
+ * (#427), com `loader` injetado no construtor: o único jeito, hoje, de dar
+ * a um `workflow` node por `ref` um template SEM depender do loader real de
+ * produção (#464, M11, ainda não ligado). */
+function serviceHarness(runtime: ChildRuntime) {
+  const root = mkdtempSync(join(tmpdir(), "lohra-route-override-nested-service-"));
+  roots.push(root);
+  const connection = openStateDatabase(join(root, "state.db"));
+  const repository = new WorkflowRepository(connection.database);
+  const locks = new LockRepository(connection.database);
+  const audit = new AuditRepository(connection.database);
+  const trail = new AuditTrail(audit);
+  const ownership = { fence: 0 as number, holder: "test", now: 1000 };
+  const store = {
+    repository,
+    locks,
+    holder: "test",
+    ttl: 900,
+    ownershipOf: () => ownership,
+    database: connection.database,
+  };
+  const service = new WorkflowService({
+    runtime,
+    auditTrail: trail,
+    store,
+    loader: () => childTemplate(),
+  });
+  return {
+    service,
+    repository,
+    close: (): void => {
+      connection.close();
+    },
+  };
+}
+
+/** Engine-level harness for the contra-assertion below ONLY — the AC test
+ * above goes through `WorkflowService`. Same `runId` + shared cache between
+ * two `WorkflowEngine` constructions simulates a resume without a pivot
+ * (molde `tests/workflow-parallel-cells.test.ts`, #332/#348). */
 function harness() {
   const root = mkdtempSync(join(tmpdir(), "lohra-route-override-nested-"));
   roots.push(root);
@@ -144,8 +181,6 @@ function harness() {
   const trail = new AuditTrail(audit);
   const inner = new MemoryWorkflowCache();
   return {
-    audit,
-    trail,
     cacheFor: (segmentId: string) =>
       auditedWorkflowCache(inner, {
         trail,
@@ -160,54 +195,33 @@ function harness() {
   };
 }
 
-describe("a resume's route override reaches a sub-workflow by ref (#452 AC)", () => {
-  it("the nested leaf runs on the NEW route; unpinned replays, pinned recomputes, run completes", async () => {
-    const { audit, trail, cacheFor, close } = harness();
+describe("run_workflow(resume_run_id, route) reaches a sub-workflow by ref — cadeia real (#452 AC)", () => {
+  it("WorkflowService.start → pause por route_fault na folha aninhada → resume com route completa o run; pivots com 1 entrada", async () => {
+    const { service, repository, close } = serviceHarness(new RoutingFakeRuntime("bad-provider"));
     try {
-      const runtime = new RoutingFakeRuntime("bad-provider");
-      const runId = "nested-pivot-run";
-
-      const first = await new WorkflowEngine({
-        runtime,
-        cache: cacheFor("seg-1"),
-        runId,
-        loader: () => childTemplate(),
-      }).run(parentSpec());
-      expect(first.status).toBe("paused");
-      expect(first.pauseReason).toBe("route_fault");
+      const started = service.start(parentSpecRaw());
+      if ("error" in started) throw new Error(started.error);
+      await service.status(started.run_id, true);
+      const line = repository.getRunState(started.run_id) as Record<string, unknown>;
+      expect(durableFromRow(line).pause_reason).toBe("route_fault");
 
       const routeOverride = { provider: "good" };
-      const second = await new WorkflowEngine({
-        runtime,
-        cache: cacheFor("seg-2"),
-        runId,
-        loader: () => childTemplate(),
-        routeOverride,
-      }).run(parentSpec());
-      expect(second.status).toBe("complete");
-      expect(second.outputs.sub).toEqual({ free: { ok: true }, pinned: { ok: true } });
+      const resumed = service.start(null, {}, { resumeRunId: started.run_id, routeOverride });
+      if ("error" in resumed) throw new Error(resumed.error);
+      const live = await service.status(started.run_id, true);
+      if ("error" in live) throw new Error(String(live.error));
+      expect(live.status).toBe("complete");
+      expect(live.outputs).toEqual({ sub: { free: { ok: true }, pinned: { ok: true } } });
 
-      await trail.flush();
-      const page = audit.query({ runId, segmentId: "seg-2", limit: 50 });
-      // `cacheGet` (engine.ts) scopes `nodeId` with `scopedCheckpointId` —
-      // "sub.free"/"sub.pinned" — but every `cachePut` call site passes the
-      // bare `node.id` instead (pre-existing, out of #452's scope: neither
-      // `engine.ts:456` nor its siblings are touched here); `cache.stored`
-      // for a nested leaf lands on the UNSCOPED path. `matchesLeaf` reads
-      // through that quirk instead of hiding it.
-      const matchesLeaf = (nodePath: string | undefined, leafId: string): boolean =>
-        nodePath === leafId || nodePath === `sub.${leafId}`;
-      const eventTypesFor = (leafId: string): readonly string[] =>
-        page.events
-          .filter((event) =>
-            matchesLeaf((event.identity.node_path as readonly string[] | undefined)?.[0], leafId),
-          )
-          .map((event) => event.event_type)
-          .filter((type) => type.startsWith("cache."));
-      expect(eventTypesFor("free")).toEqual(["cache.replayed"]);
-      expect(eventTypesFor("pinned")).toEqual(["cache.missed", "cache.stored"]);
+      const resumedLine = repository.getRunState(started.run_id) as Record<string, unknown>;
+      const resumedView = durableFromRow(resumedLine);
+      expect(resumedView.status).toBe("complete");
 
-      expect(nextPivots([], routeOverride)).toEqual([routeOverride]);
+      // #427/#448: `pivots` accrues on the DURABLE row across the resume —
+      // proves the override actually reached `service.ts`'s bookkeeping,
+      // not just `engine.ts`'s own field.
+      const rollup = durableRollup(resumedView, 0, false);
+      expect(rollup.pivots).toEqual([routeOverride]);
     } finally {
       close();
     }
