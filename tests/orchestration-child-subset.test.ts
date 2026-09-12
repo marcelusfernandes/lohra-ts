@@ -52,8 +52,8 @@ const REAL_24_TOOL_NAMES: readonly string[] = [
 
 describe("child toolset subset relation (errata E2)", () => {
   it("uses the complete, unique 19-name oracle exclusion set", () => {
-    expect(CHILD_EXCLUDED_TOOLS).toHaveLength(22);
-    expect(new Set(CHILD_EXCLUDED_TOOLS).size).toBe(22);
+    expect(CHILD_EXCLUDED_TOOLS).toHaveLength(23);
+    expect(new Set(CHILD_EXCLUDED_TOOLS).size).toBe(23);
   });
 
   const catalogs: Record<string, readonly ToolDefinition[]> = {
