@@ -73,11 +73,11 @@ function steerCapMessage(subId: string): string {
 // fixes for the two different resolution shapes this tool has:
 //
 //   - `sub_id` given (`isLiveSubId`): `AuditQuery.subId` is an EXACT
-//     identity filter (`audit-repository.ts:118`, `matches()`), not a
-//     window — a query scoped to one `sub_id` only ever matches that
-//     leaf's own handful of events, so it is immune to the 100-event
-//     window regardless of how many OTHER leaves the run has spawned.
-//     Direct query, never a scan.
+//     identity filter — a `sub_id = ?` clause in SQL (`audit-repository.ts`,
+//     `filterClauses`), not a window — a query scoped to one `sub_id` only
+//     ever matches that leaf's own handful of events, so it is immune to
+//     the 100-event window regardless of how many OTHER leaves the run has
+//     spawned. Direct query, never a scan.
 //   - `node_id` given (`liveSubIdsAtNode`): resolving a bare `node_id`
 //     genuinely needs the FULL live set at that node (ambiguity is a
 //     count, not a membership check), so this one still has to read pages
