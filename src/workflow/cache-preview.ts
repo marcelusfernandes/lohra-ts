@@ -91,6 +91,7 @@ export type PreviewOutcome =
   | "upstream_missing"
   | "token_budget_exhausted"
   | "nested"
+  | "no_leaves"
   | "unknown";
 
 export interface PreviewNodeOutcome {
@@ -302,6 +303,25 @@ function classifyNode(node: Node, ctx: ClassifyContext): PreviewNodeOutcome {
   }
   if (pauseReason === TOKEN_BUDGET_PAUSE) {
     return { node_id: node.id, type: node.type, outcome: "token_budget_exhausted" };
+  }
+  // #503: a `parallel` node whose `branches` resolves to `[]` (or to
+  // something that isn't an array at all) runs its dry run to completion —
+  // `Object.hasOwn(outputs, node.id)` is only true for a node the engine's
+  // main loop actually iterated (`engine.ts`'s `this.result.outputs[node.id]
+  // = output`, set unconditionally, even on a thrown/faulted node) — with
+  // neither a spawn nor a cache hit to show for it: nothing to replay,
+  // nothing to pay. `unknown` stays the catch-all for what the preview
+  // genuinely can't predict: a node the run never reached at all (paused
+  // upstream for a reason this function doesn't otherwise name) or any
+  // other node type this classification doesn't model (`verify`/
+  // `checkpoint`/`pipeline` — #503's `Fora de escopo`).
+  if (
+    node.type === "parallel" &&
+    (spawns?.count ?? 0) === 0 &&
+    (hits?.count ?? 0) === 0 &&
+    Object.hasOwn(outputs, node.id)
+  ) {
+    return { node_id: node.id, type: node.type, outcome: "no_leaves" };
   }
   return { node_id: node.id, type: node.type, outcome: "unknown" };
 }
