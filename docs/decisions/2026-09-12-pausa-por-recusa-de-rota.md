@@ -144,23 +144,34 @@ route_fault` e para `faultKinds: []`.
   `pause_payload_json.pivots[]` é o único registro de que a rota mudou —
   cada entrada é o `RouteOverride` APLICADO (o `route` que o resume pediu,
   ex.: `{provider, model}`), nunca a rota que estava em vigor antes dele
-  (`nextPivots`, `route-override.ts:143-146`, só concatena o `override`
+  (`nextPivots`, `route-override.ts:162-167`, só concatena o `override`
   recebido ao array anterior); não há registro nenhum, em lugar algum, de
   qual era a rota antes de cada pivô, nem uma cópia da espec "como
   autorada".
 - **Teto de `MAX_ROUTE_PIVOTS_PER_RUN` (3) por run** (`pivotResume`,
-  route-override.ts): acima do teto, o resume é recusado com um erro
-  nomeado — um gate humano de facto, coerente com a decisão 4 do épico
+  `route-override.ts:177-197`): acima do teto, o resume é recusado com um
+  erro nomeado — um gate humano de facto, coerente com a decisão 4 do épico
   #421 (pivô é sempre manual; `AutoResumeScheduler` continua rearmando só
   quota, na mesma rota, sem tocar `route` nunca). `pivots` viaja dobrado
   para frente em `pause_payload_json` a cada escrita terminal, exatamente
   como `prior_faults`/`prior_fault_kinds` já viajavam — omitido (nunca uma
   lista vazia) para um run que nunca pivotou, para que o payload de todo
   run anterior a esta issue continue byte-idêntico. Exposto em
-  `workflow_status` via `durableRollup` quando não vazio (uma leitura
-  DURÁVEL — `resultView`, o envelope de um run ainda vivo NESTE processo,
-  não ganhou o campo; fora do escopo desta issue, `service-rollup.ts` não
-  está nos `Files`).
+  `workflow_status` via `durableRollup` quando não vazio — e, desde o #448,
+  também em `resultView`/`runningView` (`service-rollup.ts`'s `withPivots`,
+  mesma omissão da chave vazia) para o envelope de um run ainda vivo NESTE
+  processo; a frase "`service-rollup.ts` não está nos `Files`" valia só
+  para esta issue, não para o #448.
+- **O teto sobrevive a um crash do processo (#446).** `persistLine`
+  (`service.ts`) tinha DUAS chamadas que hardcodavam `pausePayloadJson:
+null` — a própria escrita de registro do stretch e a escrita de
+  progresso por nó (#125) — então um processo que morresse entre qualquer
+  uma delas e a escrita terminal perdia `pivots` na leitura seguinte, e o
+  teto de 3 virava contornável por um crash comum. `registrationPayload`
+  (`route-override.ts:222-235`) carrega `pivots` para as duas chamadas que
+  passavam `null`, computado do mesmo jeito que a escrita terminal já
+  dobrava (`nextPivots`) — um run que nunca pivotou continua escrevendo
+  `null` byte-idêntico a antes desta emenda.
 - **`pipeline` stage**: uma `stage` que nomeia sua própria rota (a exceção
   documentada em `run_workflow`) SOMBREIA o pivô do nó por inteiro —
   `route-override.ts` reescreve a stage também, não só o nó, ou ela
@@ -185,7 +196,13 @@ route_fault` e para `faultKinds: []`.
   (`launch`/`launchDurable`) não passava `options.routeOverride` adiante —
   rodada 2 fecha o threading (`routeOverrideOption`, `engine-options.ts`)
   nos dois pontos reais de construção, provado por um teste que sobe
-  `WorkflowService.start`/resume de ponta a ponta.
+  `WorkflowService.start`/resume de ponta a ponta. **Ressalva prática**: o
+  mecanismo é real, mas hoje só é alcançável com um `loader` injetado à
+  mão (como o teste acima) — nenhum composition root (`chat.ts`,
+  `dashboard.ts`) passa `loader` para `WorkflowService`, então `runNested`
+  ainda lança `"workflow loader unavailable"` (`engine.ts:837`) em
+  produção; ligar o loader do operador é o #464 (M11), pré-requisito
+  prático desta issue para deixar de ser só mecanismo testado.
 
 ### O que esta issue NÃO faz
 

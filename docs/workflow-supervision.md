@@ -16,21 +16,34 @@ EXATAMENTE UM de `node_id` (resolvido contra os leaves vivos do run agora —
 nunca um já terminado) ou `sub_id` (de um evento `leaf.started` em
 `workflow_audit`, para desambiguar um fan-out com mais de um leaf vivo no
 mesmo nó). `run_id` inexistente, `node_id` sem leaf vivo, `sub_id` que não é
-leaf vivo deste run, ou `node_id` ambíguo (mais de um leaf vivo no mesmo nó)
-voltam como erro nomeado, nunca um no-op silencioso
-(`src/workflow/steer-tool.ts:127-150`).
+leaf vivo deste run, `node_id` ambíguo (mais de um leaf vivo no mesmo nó),
+**janela de resolução truncada** (resolver um `node_id` pagina o ledger até
+`has_more: false`, com teto em `MAX_RESOLUTION_EVENTS = 2_000` — acima
+disso, erro nomeado "window truncated" em vez de um falso "sem leaf vivo";
+`sub_id` resolve por um filtro EXATO no ledger e nunca lê essa janela,
+imune ao teto; #445), ou **o runtime do run não expor `steerOutcome`**
+(todo `ChildRuntime` anterior a `AuditedChildRuntime`, ou um double de
+teste que só implementa `steer`; #450) voltam como erro nomeado, nunca um
+no-op silencioso (`src/workflow/steer-tool.ts:220-226,228-252,265-266,273,
+282-283`).
 
 - **Teto por leaf**: `MAX_PENDING_STEERS_PER_LEAF = 10`
   (`src/orchestration/core.ts:26`) — acima disso, `core.steer` recusa com
   `refused: "steer_cap"` em vez de enfileirar mais um texto que o leaf talvez
   nunca leia (`core.ts:320-326`); `workflow_steer` traduz isso num erro
-  nomeado citando o teto (`steer-tool.ts:56,192`).
+  nomeado citando o teto (`steer-tool.ts:56,288`).
 - **A mensagem nunca vai ao ledger** — só o tamanho: `leaf.steered`
   (`docs/workflow-audit.md`) carrega `payload.message_chars`, nunca o texto
-  (`audit-runtime.ts:363-369`). `payload.source` é `"operator"` para todo
-  steer que passa por esta tool (`steer-tool.ts:180`, 4º argumento do
-  decorador) — distinto de `"engine"`, o steer interno de retry de schema
-  (`engine.ts:309-313`).
+  (`audit-runtime.ts:344-353`, dentro de `deliverSteer`,
+  `audit-runtime.ts:332-356`). `payload.source` é `"operator"` para todo
+  steer que passa por esta tool (`steer-tool.ts:285`, 4º argumento de
+  `runtime.steerOutcome`) — distinto de `"engine"`, o steer interno de
+  retry de schema (`engine.ts:296-312`). **`leaf.steered` só é gravado
+  quando o core aceita o steer** (#444) — `queued: true` (enfileirado) ou
+  a ressurreição `{queued: false}` sem `refused` (novo turno, inclusive o
+  retry de schema pós-terminal acima); nunca para `refused: "steer_cap"`
+  nem para um `sub_id` terminal/desconhecido (`outcome === null`) —
+  `audit-runtime.ts:344` (`outcome.refused === undefined`) é a guarda.
 - Resolve a identidade causal do leaf com `runtime.causalSnapshot`
   (`orchestration-runtime.ts:226`, exposto por `AuditedChildRuntime` desde
   #422/M10-S1) — sem isso, não haveria como gravar `leaf.steered` com a
@@ -75,6 +88,10 @@ DIFERENTE:
 - `route` só é aceito junto de `resume_run_id`; reescreve `provider`/`model`
   em todo nó (e stage de `pipeline`) da espec PERSISTIDA do run que já
   declara uma rota — um nó que nunca declarou rota nenhuma nunca é tocado.
+  Um `provider`/`model` fornecido precisa ser não-vazio depois de `trim` —
+  string vazia ou só espaço é recusada com erro nomeado ANTES de tocar o
+  run (nenhuma escrita, nenhum pivô consumido; #447,
+  `src/workflow/tool.ts:88-91`).
 - **Chave de cache conservadora**: um nó PINADO (que declara rota) recomputa
   na rota nova; um nó sem pino continua replayando do cache
   (`cache.replayed`) — o pivô nunca invalida trabalho que não dependia de
@@ -82,13 +99,31 @@ DIFERENTE:
 - **O pivô PERSISTE**: a espec reescrita é gravada de volta no `spec_json`
   a cada escrita terminal — um resume posterior sem `route` continua na
   rota nova.
+- **`pivots` aparece nos dois envelopes** — no durável (`workflow_status`
+  via `durableRollup`) e, desde o #448, também em `resultView`/
+  `runningView` (`service-rollup.ts`, o run ainda vivo NESTE processo) —
+  chave omitida (nunca lista vazia) para um run que nunca pivotou, nos
+  dois caminhos.
 - **Teto de 3 pivôs por run** (`MAX_ROUTE_PIVOTS_PER_RUN`,
-  `src/workflow/route-override.ts:20`) — cada resume com `route` aceito
+  `src/workflow/route-override.ts:22`) — cada resume com `route` aceito
   consome um, mesmo que a folha se recuse de novo na rota nova; o 4º é
-  recusado com erro nomeado, um gate humano de facto.
-- **Sub-workflow por `ref` fica fora do pivô** — carregado em runtime por
-  `runNested` (`src/workflow/engine.ts:832-848`), nunca pela espec
-  reescrita do run pai.
+  recusado com erro nomeado, um gate humano de facto. O teto sobrevive a
+  um crash do processo (#446) — as duas escritas que antes zeravam
+  `pivots` num crash a meio do stretch agora carregam o valor prévio
+  adiante (`registrationPayload`, `route-override.ts:222-235`).
+- **Sub-workflow por `ref` também recebe o pivô, desde o #452.**
+  `runNested` (`src/workflow/engine.ts`) carrega o template do `ref` em
+  runtime, depois que `pivotResume` já reescreveu a espec do run pai;
+  `overrideNestedSpec` (`route-override.ts`) aplica o MESMO
+  `routeOverride` do run pai dentro de `runNested`, threadado por
+  `service.ts` (`launch`/`launchDurable`) via
+  `WorkflowEngineOptions.routeOverride`. Profundidade continua limitada a
+  `MAX_WORKFLOW_DEPTH = 1` — só o run pai carrega outro template.
+  **Ressalva prática**: o loader de templates do operador (`ref` → arquivo
+  em `~/.lohra/workflows/`) ainda não está ligado a `chat`/`dashboard` em
+  produção (#464, M11) — hoje o mecanismo só é alcançável com um `loader`
+  injetado à mão, como em teste; `runNested` lança `"workflow loader
+unavailable"` (`engine.ts:837`) fora desse caso.
 
 Detalhe completo (o que cada pivô registra, o que fica de fora, a decisão
 de não fazer re-key global) na nota de decisão linkada acima.
