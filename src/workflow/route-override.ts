@@ -17,7 +17,7 @@
 // automatically: a node that never declared model/tier/effort/provider is
 // never touched here either.
 import { Node, WorkflowSpec } from "./types.js";
-import type { RunResult } from "./accounting.js";
+import type { RunArtifact, RunResult } from "./accounting.js";
 
 export const MAX_ROUTE_PIVOTS_PER_RUN = 3;
 
@@ -159,6 +159,24 @@ export function pivotsOf(payload: Readonly<Record<string, unknown>>): readonly R
   return Array.isArray(payload.pivots) ? payload.pivots.filter(isRouteOverride) : [];
 }
 
+function isRunArtifact(value: unknown): value is RunArtifact {
+  if (value === null || typeof value !== "object") return false;
+  const record = value as Readonly<Record<string, unknown>>;
+  return (
+    typeof record.node_id === "string" &&
+    typeof record.sub_id === "string" &&
+    typeof record.path === "string" &&
+    typeof record.bytes === "number" &&
+    Number.isFinite(record.bytes)
+  );
+}
+
+/** `pause_payload_json.artifacts` (service.ts) round-trips through JSON on
+ * disk — validated defensively on the way back in, molde `pivotsOf` (#463). */
+export function artifactsOf(payload: Readonly<Record<string, unknown>>): readonly RunArtifact[] {
+  return Array.isArray(payload.artifacts) ? payload.artifacts.filter(isRunArtifact) : [];
+}
+
 export function nextPivots(
   priorPivots: readonly RouteOverride[],
   override: RouteOverride | undefined,
@@ -205,6 +223,10 @@ interface PriorPauseView {
   readonly prior_fault_kinds: readonly string[];
   readonly prior_degraded: boolean;
   readonly pivots: readonly RouteOverride[];
+  /** #463: past write-file manifest/collision faults, folded forward the
+   * same way `pivots` above is. */
+  readonly artifacts: readonly RunArtifact[];
+  readonly artifact_faults: readonly string[];
 }
 
 /** #446: `persistLine` (service.ts) has TWO callers that used to hardcode
@@ -246,6 +268,8 @@ export function pausePayloadOf(
     priorView?.prior_degraded === true ||
     result.faults.some((fault) => fault !== result.pauseFault);
   const pivots = nextPivots(priorView?.pivots ?? [], options.routeOverride);
+  const artifacts = [...(priorView?.artifacts ?? []), ...result.artifacts];
+  const artifactFaults = [...(priorView?.artifact_faults ?? []), ...result.artifactFaults];
   return (checkpoint, resumeAt) =>
     JSON.stringify({
       checkpoint,
@@ -257,5 +281,7 @@ export function pausePayloadOf(
       prior_fault_kinds: [...(priorView?.prior_fault_kinds ?? []), ...result.faultKinds],
       prior_degraded: degraded,
       ...(pivots.length === 0 ? {} : { pivots }),
+      ...(artifacts.length === 0 ? {} : { artifacts }),
+      ...(artifactFaults.length === 0 ? {} : { artifact_faults: artifactFaults }),
     });
 }
