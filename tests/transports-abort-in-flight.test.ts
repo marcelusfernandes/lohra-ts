@@ -415,4 +415,23 @@ describe("stream() without an abort stays byte-identical (contra-assertion)", ()
       client.stream({ model: "m", input: [] }, {}, controller.signal),
     ).resolves.toMatchObject({ finishReason: "stop" });
   });
+
+  it("a malformed SSE frame in a normal (never-aborted) 200 response still throws — fail-closed (CLAUDE.md invariante 2), never a silently truncated success (issue #567, rodada 2 do veredito da PR #572)", async () => {
+    // The tolerance parseSse gained for the ABORT path (issue #567) must
+    // NEVER leak into a normal response: a corrupted frame here is a real
+    // signal, and the valid frame right after it must not be silently
+    // dropped along with a swallowed error — the call has to throw.
+    const corrupted = encoder.encode("data: not-json\n\n");
+    const validAfterward = sse([
+      { choices: [{ index: 0, delta: { content: "valido" }, finish_reason: "stop" }] },
+    ]);
+    const body = concatBytes(corrupted, validAfterward);
+    const client = new ChatCompletionsClient({
+      baseUrl: "http://127.0.0.1:9",
+      apiKey: "k",
+      transport: new ChatCompletionsTransport(),
+      http: new QueueHttp(body),
+    });
+    await expect(client.stream({ model: "m", messages: [] })).rejects.toThrow();
+  });
 });
