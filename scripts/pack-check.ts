@@ -9,6 +9,23 @@ import { startStub } from "./stub/server.js";
 import type { StubRuntime } from "./stub/types.js";
 import { prepareOfflineTarballConsumer } from "./offline-tarball-install.js";
 
+/**
+ * Issue #532: verifica que a instalação do consumidor usou os binários
+ * nativos PREBUILT de `better-sqlite3`/`node-pty` — nunca compilou via
+ * `node-gyp` (o fallback dos dois quando não há prebuild para a
+ * plataforma/arquitetura, que exige compilador/Python na máquina do
+ * consumidor e contraria "instala sem toolchain nativo", a User Story da
+ * issue). Implementação real e o mecanismo escolhido em detalhe: abaixo do
+ * stub, quando o teste vermelho já provou o contrato.
+ */
+export function assertNoNativeCompileNeeded(_options: {
+  readonly consumerRoot: string;
+  readonly platform: string;
+  readonly arch: string;
+}): void {
+  throw new Error("not implemented: assertNoNativeCompileNeeded");
+}
+
 function command(
   executable: string,
   argv: readonly string[],
