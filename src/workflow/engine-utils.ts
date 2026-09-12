@@ -1,6 +1,6 @@
 import { combineUsage, usage } from "../pricing/usage.js";
 import type { Usage } from "../pricing/types.js";
-import { addUsageToResult, recordFaultKind, recordSandboxRefusals } from "./accounting.js";
+import { addUsageToResult, recordFaultKind, recordLeafSideChannels } from "./accounting.js";
 import type { RunResult } from "./accounting.js";
 import { contentHash, type WorkflowCache } from "./cache.js";
 import type { WorkflowEngine } from "./engine.js";
@@ -481,7 +481,7 @@ export function debitLeaf(
     uncertain,
   );
   // Plain `nodeId` (never `owner`) reads like a `faults` entry, never double-scoped.
-  recordSandboxRefusals(result, nodeId, collected.sandboxRefusals ?? 0);
+  recordLeafSideChannels(result, nodeId, id, collected);
   // #426: generalized from `!== QUOTA_EXHAUSTED` — any kind that pauses the run gets re-run on resume, so it must never leak into `faultKinds` (double-counts otherwise).
   if (!pausesRun(collected.errorKind)) recordFaultKind(result, collected.errorKind ?? null);
   return next;
