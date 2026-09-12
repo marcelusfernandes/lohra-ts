@@ -41,7 +41,7 @@ import {
   resolveNodeSchema,
   resultUsage,
   routingIdentity,
-  scopedCheckpointId,
+  scopedCheckpointId as scoped,
   sealPipelineRatio,
   siblingAnswers,
   stopForBudget,
@@ -364,7 +364,7 @@ export class WorkflowEngine {
   }
 
   private cacheGet(hash: string): unknown {
-    const owner = scopedCheckpointId(this.nodeScope, this.currentNode);
+    const owner = scoped(this.nodeScope, this.currentNode);
     const found = this.cache.get(this.runId, hash, owner);
     if (!found.hit) return CACHE_MISS;
     if (found.cost !== null) addUsageToResult(this.result, owner, found.cost, null, null);
@@ -373,7 +373,7 @@ export class WorkflowEngine {
 
   private cachePut(hash: string, nodeId: string, output: unknown, cost: Usage): void {
     if (!nonEmpty(output)) return;
-    this.cache.put(this.runId, hash, nodeId, output, cost);
+    this.cache.put(this.runId, hash, scoped(this.nodeScope, nodeId), output, cost);
   }
 
   async run(spec: WorkflowSpec, args: Readonly<Record<string, unknown>> = {}): Promise<RunResult> {
@@ -477,7 +477,7 @@ export class WorkflowEngine {
       resolved.map((p, i) => collectBranchWithRetries(deps, node, i, renderValue(p))),
     );
     const outputs = leaves.map((leaf) => leaf.output);
-    if (outputs.every(nonEmpty)) this.cache.put(this.runId, hash, node.id, outputs, null);
+    if (outputs.every(nonEmpty)) cache.put(runId, hash, scoped(nodeScope, node.id), outputs, null);
     if (outputs.length === 0 || this.control.cancelled || this.control.paused) return outputs;
     if (outputs.every((output) => output === null))
       this.recordFault(`${node.id}: all ${String(outputs.length)} branches failed`);
@@ -969,7 +969,7 @@ export class WorkflowEngine {
     if (cached !== CACHE_MISS) return cached;
     const resolved = resolveCheckpoint(this.checkpointAnswers, this.nodeScope, node.id);
     if (resolved.matched)
-      return applyCheckpointAnswer(this.cache, this.runId, hash, node.id, resolved.answer);
+      return applyCheckpointAnswer(this.cache, this.runId, hash, resolved.scoped, resolved.answer);
     this.pause("checkpoint", resolved.message, checkpointPausePayload(node, resolved, prompt));
     return null;
   }

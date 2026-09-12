@@ -153,7 +153,13 @@ const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object
     "checkpoint",
     "corrupt_payload",
     "drop_bucket_overflow",
+    // Issue #461 (M11-S3): `cache.missed`'s own reason — a miss with no
+    // prior cell for this node at all (`identity_changed` is the sibling
+    // value, below) — carried only when the caller named a `nodeId`
+    // (cache.ts).
+    "identity_changed",
     "lookup_failed",
+    "never_completed",
     "process_crash",
     "queue_overflow",
     "quota_exhausted",
@@ -219,6 +225,12 @@ const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object
   count_state: new Set(["unavailable"]),
   private_state: new Set(["excluded_private_state", "not_observed"]),
   run_attribution: new Set(["unavailable"]),
+  // Issue #461 (M11-S3): `cache.replayed`'s own classification of the cell
+  // it just replayed — "current" (this version's own stamp),
+  // "unstamped" (a pre-#461 database, no identity_version column value at
+  // all), or "stale" (a DIFFERENT, older stamp). Marked, never invalidated
+  // — decision 3, épico #458.
+  version_state: new Set(["current", "stale", "unstamped"]),
   // Issue #423: "engine"/"operator" are `leaf.steered`'s own `source` —
   // never confused with the other three, which are `human_checkpoint`'s and
   // the gateway/harness handshake's (#365/#368, unrelated event families).

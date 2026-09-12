@@ -142,6 +142,11 @@ export const addedColumns = [
   ["workflow_run_spend", "cache_read_tokens", "INTEGER DEFAULT 0"],
   ["workflow_run_spend", "cache_write_tokens", "INTEGER DEFAULT 0"],
   ["workflow_run_spend", "reasoning_tokens", "INTEGER DEFAULT 0"],
+  // Issue #461: the cell identity version a cache write was stamped with
+  // (`CELL_IDENTITY_VERSION`, cache.ts) — NULL for every row written before
+  // this column existed ("unstamped"). Never part of the lookup key
+  // (`content_hash`/`run_id`); marks a replay, never invalidates it.
+  ["workflow_node_cache", "identity_version", "TEXT"],
 ] as const;
 
 export const ftsSchema = `
