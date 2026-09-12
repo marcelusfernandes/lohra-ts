@@ -13,7 +13,7 @@ import {
 } from "./engine-options.js";
 import { WorkflowEngine } from "./engine.js";
 import { AutoResumeScheduler, LeaseHeartbeat, type Timer } from "./durability.js";
-import { liveRuntimeOf, resultView } from "./service-rollup.js";
+import { liveRuntimeOf, nextPivots, resultView, runningView } from "./service-rollup.js";
 import { recordRouteFaultNotice, ROUTE_FAULT_REASON } from "./route-faults.js";
 import { pausePayloadOf, pivotResume, pivotsOf, registrationPayload } from "./route-override.js";
 import type { ChildRuntime, LeafSandboxHandle, LeafToolDispatch } from "./runtime.js";
@@ -315,6 +315,7 @@ interface RunRecord {
   readonly resolve: (value: Readonly<Record<string, unknown>>) => void;
   settled: boolean;
   interruptCause: "signal" | null; // set by runShutdown before cancelling a live record (#428) — announceStretchEnd tells segment.completed apart from a plain cancel
+  pivots?: readonly { provider?: string; model?: string }[]; // #448: nextPivots(...) — set like `runtime` above
 }
 
 function defaultServiceTimer(delay: number, fire: () => void): Timer {
@@ -598,6 +599,7 @@ export class WorkflowService {
     });
     producers.announceStretchStart(1, parsed, engine.budget.snapshot());
     const record = Object.assign(this.makeRecord(runId, parsed.name, engine), { runtime: rt });
+    record.pivots = nextPivots([], options.routeOverride); // #448: no durable store here
     this.runs.set(runId, record);
     void engine
       .run(parsed, args)
@@ -610,7 +612,7 @@ export class WorkflowService {
           record.interruptCause,
         );
         record.settled = true;
-        record.published = resultView(runId, parsed.name, result, engine.budget);
+        record.published = resultView(record, result);
         record.resolve(record.published);
       })
       .catch(() => {
@@ -857,6 +859,7 @@ export class WorkflowService {
             now: ownership.now,
           });
     const record = Object.assign(this.makeRecord(runId, parsed.name, engine), { runtime: rt });
+    record.pivots = nextPivots(priorView?.pivots ?? [], options.routeOverride); // #448
     // Hand this acquisition back exactly once, never by throwing: each step below is independent, so one that fails cannot skip the ones after it or stop the run from publishing a bounded result. The heartbeat stops FIRST — a tick that outlived the release would put the lease back and leave the run looking alive with nobody in it — and the release itself is conditioned on THIS acquisition's fence, so a takeover by the same holder cannot be deleted by it.
     let finished = false;
     const finishStretch = (): void => {
@@ -987,7 +990,7 @@ export class WorkflowService {
           // pausePayload above already persisted the stretch-only count; fold the prior total in now, after, so the live view (here and the next status() read of this `result`) matches the durable rollup (#247 round 2).
           result.leafRespawns += priorView?.leaf_respawns ?? 0;
           result.sandboxRefusals += priorView?.sandbox_refusals ?? 0;
-          record.published = resultView(runId, parsed.name, result, engine.budget);
+          record.published = resultView(record, result);
           record.resolve(record.published);
         } else {
           // Fail-closed (errata E2): a stretch that lost ownership never
@@ -1110,15 +1113,9 @@ export class WorkflowService {
       }
       if (record.settled && record.published !== null) return record.published;
       if (record.result !== null && record.settled) {
-        return resultView(record.id, record.name, record.result, record.engine.budget);
+        return resultView(record, record.result);
       }
-      return Object.freeze({
-        run_id: record.id,
-        name: record.name,
-        status: "running",
-        progress: record.engine.progress(),
-        token_budget: record.engine.budget.snapshot(),
-      });
+      return runningView(record); // #448: still running — same 'pivots' as resultView
     }
     const view = this.durableOf(runId);
     if (view === null) return Object.freeze({ error: `unknown workflow run '${runId}'` });

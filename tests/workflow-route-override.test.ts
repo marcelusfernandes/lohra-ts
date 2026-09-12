@@ -679,3 +679,120 @@ describe("route-override.ts — the module's own exports (#427)", () => {
     expect(pivotsOf({})).toEqual([]);
   });
 });
+
+// Issue #448 (M14, achado de revisão do #442): #427 exposed 'pivots' on
+// `durableRollup` (durable read) but never on the LIVE envelope
+// (`resultView`/the still-running snapshot in `WorkflowService.status`) — a
+// supervisor reading `workflow_status` on a run answered by THIS process saw
+// no 'pivots' at all, and had to know which channel answered to interpret
+// the absence. These pin the SAME content on both channels for the SAME
+// run, and pin that a run which never pivoted OMITS the key on both —
+// matching `durableRollup`'s own existing behavior (never a bare `[]`).
+describe("workflow_status's live envelope carries 'pivots' too, not just the durable one (#448)", () => {
+  it("a settled run's live status (resultView) carries the same 'pivots' the durable rollup shows", async () => {
+    const { service, repository, close } = harness(new RoutingFakeRuntime("bad-provider"));
+    try {
+      const started = service.start(cacheSpec());
+      if ("error" in started) throw new Error(started.error);
+      await service.status(started.run_id, true);
+      const resumeOptions = { resumeRunId: started.run_id, routeOverride: { provider: "good" } };
+      const resumed = service.start(null, {}, resumeOptions);
+      if ("error" in resumed) throw new Error(resumed.error);
+      const live = (await service.status(started.run_id, true)) as Record<string, unknown>;
+      const line = repository.getRunState(started.run_id) as Record<string, unknown>;
+      const durable = durableRollup(durableFromRow(line), 0, false);
+      expect(live.pivots).toEqual([{ provider: "good" }]);
+      expect(live.pivots).toEqual(durable.pivots);
+    } finally {
+      close();
+    }
+  });
+
+  it("a run that never pivoted OMITS 'pivots' from the live envelope, matching the durable one", async () => {
+    const { service, repository, close } = harness(new RoutingFakeRuntime("bad-provider"));
+    try {
+      const spec = {
+        meta: { name: "no-pivot" },
+        nodes: [{ id: "a", type: "agent", prompt: "x" }],
+      };
+      const started = service.start(spec);
+      if ("error" in started) throw new Error(started.error);
+      const live = (await service.status(started.run_id, true)) as Record<string, unknown>;
+      const line = repository.getRunState(started.run_id) as Record<string, unknown>;
+      const durable = durableRollup(durableFromRow(line), 0, false);
+      expect(live).not.toHaveProperty("pivots");
+      expect(durable).not.toHaveProperty("pivots");
+    } finally {
+      close();
+    }
+  });
+
+  it("a run resumed with 'route' but stuck on a hanging leaf shows 'pivots' on the still-RUNNING live envelope", async () => {
+    const usage = {
+      inputTokens: 1,
+      outputTokens: 1,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reasoningTokens: 0,
+    };
+
+    /** "pinned" hangs forever once `hang` flips true, never before — one
+     * runtime/service pair for both stages (unlike #446's crash test, which
+     * needs two of each to model an actual process crash) is enough here:
+     * "free" is already cached by the time `hang` flips, so it never calls
+     * this runtime again, and `record.settled` simply never becomes true. */
+    class SwitchableRuntime implements ChildRuntime {
+      hang = false;
+      private seq = 0;
+      spawn(): string {
+        this.seq += 1;
+        return `leaf-${String(this.seq)}`;
+      }
+      collect(): ChildResult | Promise<ChildResult> {
+        return this.hang
+          ? new Promise<ChildResult>(() => undefined)
+          : { status: "complete", output: { ok: true }, usage };
+      }
+      steer(): void {}
+      cancel(): void {}
+      installLeafSandbox(): { dispose: () => void } {
+        return { dispose: (): void => undefined };
+      }
+    }
+
+    const runtime = new SwitchableRuntime();
+    const { service, repository, close } = harness(runtime);
+    try {
+      const spec = {
+        meta: { name: "route-override-live-running" },
+        nodes: [
+          { id: "free", type: "agent", prompt: "unpinned" },
+          { id: "pinned", type: "agent", prompt: "pinned", provider: "p0" },
+        ],
+      };
+      const started = service.start(spec);
+      if ("error" in started) throw new Error(started.error);
+      await service.status(started.run_id, true);
+
+      runtime.hang = true;
+      const resumed = service.start(
+        null,
+        {},
+        {
+          resumeRunId: started.run_id,
+          routeOverride: { provider: "v1" },
+        },
+      );
+      if ("error" in resumed) throw new Error(resumed.error);
+
+      const live = (await service.status(started.run_id)) as Record<string, unknown>;
+      expect(live.status).toBe("running");
+      const row = repository.getRunState(started.run_id) as Record<string, unknown>;
+      const durable = durableRollup(durableFromRow(row), 0, false);
+      expect(live.pivots).toEqual([{ provider: "v1" }]);
+      expect(live.pivots).toEqual(durable.pivots);
+    } finally {
+      close();
+    }
+  });
+});
