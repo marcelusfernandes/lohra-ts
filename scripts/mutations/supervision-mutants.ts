@@ -760,14 +760,7 @@ export const supervisionMutants: readonly Mutant[] = [
       },
     ],
   },
-  // --- validation.ts (#540, achado 5) -------------------------------------
-  // Issue #540: nenhum catálogo de mutação cobria `normalizeResumeId`
-  // (`src/orchestration/validation.ts`) — a única garantia era
-  // `tests/orchestration-tools.test.ts` (PR #523, QA de 87b9aeac). Off-by-one
-  // no comprimento aparado: `""` (0 chars) some do isAbsent check com o
-  // mutante (compara contra 1, nunca 0), então `resume_id` deixa de ser
-  // removido para uma string vazia/whitespace-only — morto pelo `it` que já
-  // prova exatamente essa forma.
+  // #540 achado 5: normalizeResumeId sem mutante — off-by-one no trim (`0`->`1`).
   {
     id: "V1-normalize-resume-id-trim-off-by-one",
     category: "normalize-resume-id-trim-off-by-one",
@@ -784,13 +777,7 @@ export const supervisionMutants: readonly Mutant[] = [
       },
     ],
   },
-  // --- accounting.ts (#540, achado 2b do veredito da PR #570) -------------
-  // #540 moveu o fold de `faults` aninhados de engine.ts's `runNested` para
-  // `foldNestedCounters` — nenhum catálogo cobria essa linha especificamente
-  // (P1-P10 cobrem `cache-preview.ts`; nenhum mira `accounting.ts`'s próprio
-  // fold de faults). Remove o prefixo `sub[${reference}]: ` desse push
-  // específico (falls back para o fault cru) — morto pelo `it` já existente
-  // que prova exatamente essa forma (`result.faults[0]).toContain("sub[inner]")`).
+  // #540 achado 2b: fold de faults (foldNestedCounters) sem mutante.
   {
     id: "W1-nested-faults-fold-drops-prefix",
     category: "nested-faults-fold-drops-prefix",
