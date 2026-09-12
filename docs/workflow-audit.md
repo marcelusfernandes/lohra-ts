@@ -57,7 +57,7 @@ ou a variável ausente/vazia) liga; um valor não reconhecido avisa e
 **permanece ligado** — nunca desliga por engano. `LOHRA_AUDIT_MAX_EVENTS`
 sobrepõe o teto de eventos retidos por run (`resolveAuditSettings`,
 `audit-model.ts:491-509`, lido no construtor de `AuditRepository`,
-`audit-repository.ts:179-180`); um valor não inteiro ou menor que 1 avisa e
+`audit-repository.ts:167-168`); um valor não inteiro ou menor que 1 avisa e
 mantém o padrão (2048).
 
 `LOHRA_AUDIT` desligado (`auditEnabled` acima) também torna `workflow_leaf_read`
@@ -277,7 +277,7 @@ aquisição durável cuja `ownershipOf()` já voltou `null`, o evento é
 **descartado** com um `warn` nomeado, sem sequer chegar ao `AuditTrail` —
 nunca gravado sem fence.
 
-`AuditRepository.append` (`audit-repository.ts:186-298`) confere a fence
+`AuditRepository.append` (`audit-repository.ts:174-286`) confere a fence
 dentro da mesma transação: quando `ownership` é passado mas
 `fence`/`holder`/`expiry` não batem mais com o dono atual do lease, devolve
 `null` (uma **recusa**, não uma falha — uma aquisição superada apresentando
@@ -420,14 +420,14 @@ Padrões (`audit-model.ts:4-8`, sobrepostos por `AuditRepositoryOptions`):
 2048 eventos por run (`LOHRA_AUDIT_MAX_EVENTS`), 64 runs (`maxRuns`), 64
 tombstones (`maxTombstones`), 30 dias / 2 592 000 s (`retentionSeconds`).
 
-- **Por run**, `pruneRun` (`audit-repository.ts:474-493`) apaga as linhas
+- **Por run**, `pruneRun` (`audit-repository.ts:511-530`) apaga as linhas
   mais antigas acima do teto e soma em `retention_dropped`/
   `dropped_before_seq` — `query()` sintetiza isso como um `notice`
   `audit.gap {reason:"retention_limit", dropped_count, before_seq}`; não é
   uma linha gravada, é derivado a cada leitura.
-- **Entre runs**, `pruneRuns` (`audit-repository.ts:495-516`) evicta o run
+- **Entre runs**, `pruneRuns` (`audit-repository.ts:532-553`) evicta o run
   menos recentemente tocado (`touch_order`) acima de `maxRuns`, e
-  `compact` (`audit-repository.ts:518-536`) evicta por tempo — os dois
+  `compact` (`audit-repository.ts:555-573`) evicta por tempo — os dois
   deixam um tombstone (`run_limit`/`retention_time`) em vez de apagar sem
   rastro; uma consulta a esse run devolve `audit.unavailable
 {reason:<motivo do tombstone>}`. Os próprios tombstones são capados em
@@ -470,7 +470,7 @@ com 25, issues #370 e #383) cobre a identidade causal, a regra fail-closed, o
 relatados errado, e os tetos/cursor do live tail — inalterada por #460/#461
 (M11): `node.rerouted` e o `reason`/`version_state` novos de `cache.*` são
 cobertos por `t15`/`t16` (`src/workflow/**`), não por esta fatia. Catálogo
-completo, contagem (247 no total, entre as nove fatias — t15 45, issue #418)
+completo, contagem (256 no total, entre as nove fatias — t15 45, issue #418)
 e o que ficou deliberadamente fora em `docs/mutation-testing.md`.
 
 ## Ver também
