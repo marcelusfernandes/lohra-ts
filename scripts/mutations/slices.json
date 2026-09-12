@@ -123,5 +123,19 @@
     "catalog": ["scripts/mutations/auth-mutants.ts"],
     "srcGlobs": ["src/auth/**"],
     "focusFiles": ["tests/auth-core.test.ts"]
+  },
+  {
+    "slice": "supervision",
+    "script": "mutations:supervision",
+    "catalog": ["scripts/mutations/supervision-mutants.ts"],
+    "srcGlobs": ["src/workflow/**", "src/orchestration/**", "src/transports/**"],
+    "focusFiles": [
+      "tests/workflow-steer-tool.test.ts",
+      "tests/workflow-leaf-read-tool.test.ts",
+      "tests/workflow-route-faults.test.ts",
+      "tests/workflow-route-override.test.ts",
+      "tests/orchestration-delegate-envelope.test.ts",
+      "tests/transport-error-kinds.test.ts"
+    ]
   }
 ]

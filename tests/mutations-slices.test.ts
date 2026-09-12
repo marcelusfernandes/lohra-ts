@@ -82,6 +82,7 @@ import { otherMediaMutants } from "../scripts/mutations/media-catalog-other.js";
 import { persistenceMutants } from "../scripts/mutations/media-catalog-persistence.js";
 import { orchestrationMutants } from "../scripts/mutations/orchestration.js";
 import { mutants as selfUpdateMutants } from "../scripts/mutations/self-update-mutants.js";
+import { supervisionMutants } from "../scripts/mutations/supervision-mutants.js";
 import { mutants as auditLiveMutants } from "../scripts/mutations/workflow-audit-live-mutants.js";
 import { auditProducersMutants } from "../scripts/mutations/workflow-audit-producers-mutants.js";
 import { namedMutants } from "../scripts/mutations/workflow-durability-named.js";
@@ -111,6 +112,7 @@ const NAO_CATALOGO = new Set([
   "media-comparator.ts",
   "media-mutant.ts",
   "self-update.ts",
+  "supervision.ts",
   "web-tools.ts",
   "workflow-audit-live.ts",
   "workflow-durability.ts",
@@ -182,6 +184,7 @@ const CATALOGOS: ReadonlyMap<string, readonly CatalogEntry[]> = new Map<
   ["scripts/mutations/workflow-executor-mutants.ts", asCatalog(executorMutants)],
   ["scripts/mutations/context-window.ts", asCatalog(contextWindowMutants)],
   ["scripts/mutations/auth-mutants.ts", asCatalog(authMutants)],
+  ["scripts/mutations/supervision-mutants.ts", asCatalog(supervisionMutants)],
 ]);
 
 interface Slice {

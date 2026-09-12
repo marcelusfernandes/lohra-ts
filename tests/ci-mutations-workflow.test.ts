@@ -75,12 +75,13 @@ describe("mutations-matrix — seleção de fatias", () => {
     expect(slicesOf(["src/a/x.ts"], comArquivoDeTopo)).toEqual(["alfa"]);
   });
 
-  it("contra o slices.json real: src/workflow/service.ts dispara as três fatias de workflow e nenhuma outra", () => {
+  it("contra o slices.json real: src/workflow/service.ts dispara as quatro fatias de workflow e nenhuma outra", () => {
     const real = readSlices(SLICES);
     expect(slicesOf(["src/workflow/service.ts"], real)).toEqual([
       "workflow-executor",
       "workflow-durability",
       "workflow-audit-live",
+      "supervision",
     ]);
     expect(slicesOf(["docs/adr/0003.md"], real)).toEqual([]);
   });
