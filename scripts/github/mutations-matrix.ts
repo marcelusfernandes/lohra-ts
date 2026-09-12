@@ -14,6 +14,13 @@
 //   - mudança em `scripts/mutations/**` (harness ou catálogo) seleciona
 //     TODAS as fatias — o custo de rodar tudo é menor que o de um harness
 //     quebrado passar despercebido.
+//   - arquivo do diff que aparece em `focusFiles` de uma fatia (issue #514)
+//     também seleciona essa fatia, mesmo sem casar `srcGlobs` — é o teste
+//     que mata os mutantes dessa fatia; um `it` afrouxado nele não tem por
+//     que passar batido pelo required check só porque o arquivo vive sob
+//     `tests/`. Quando a seleção depende só de `focusFiles` (nenhum
+//     `srcGlobs` casou e não é o caso de harness), `reason` é `"focus"` em
+//     vez de `"paths"`.
 //
 // Dois modos, como `scripts/ci/escopo/run.ts`: CI (`--base`/`--head`, faz o
 // diff com `git`) e dry-run (`--files-file`, sem `git`). Saída: JSON em
@@ -27,6 +34,10 @@ export interface SliceEntry {
   readonly slice: string;
   readonly script: string;
   readonly srcGlobs: readonly string[];
+  /** Arquivos de `tests/**` cuja edição sozinha já seleciona a fatia (issue
+   * #514). Opcional: `slices.json` traz `focusFiles` em toda entrada real,
+   * mas fixtures de teste que só exercitam `srcGlobs` podem omitir. */
+  readonly focusFiles?: readonly string[];
 }
 
 export interface MatrixEntry {
@@ -37,8 +48,9 @@ export interface MatrixEntry {
 export interface Matrix {
   readonly count: number;
   readonly include: readonly MatrixEntry[];
-  /** `harness` quando `scripts/mutations/**` mudou; senão `paths`. */
-  readonly reason: "harness" | "paths";
+  /** `harness` quando `scripts/mutations/**` mudou; `focus` quando a seleção
+   * depende de algum `focusFiles` (nenhum `srcGlobs` casou); senão `paths`. */
+  readonly reason: "harness" | "paths" | "focus";
 }
 
 const HARNESS_PREFIX = "scripts/mutations/";
@@ -81,7 +93,18 @@ function asSliceEntry(value: unknown, path: string, index: number): SliceEntry {
       `${path}: entrada ${String(index)} sem a forma {slice, script, srcGlobs[]} (slices.json malformado)`,
     );
   }
-  return { slice: value["slice"], script: value["script"], srcGlobs: value["srcGlobs"] };
+  const focusFilesRaw = value["focusFiles"];
+  if (focusFilesRaw !== undefined && !isStringArray(focusFilesRaw)) {
+    throw new Error(
+      `${path}: entrada ${String(index)} tem focusFiles fora da forma string[] (slices.json malformado)`,
+    );
+  }
+  return {
+    slice: value["slice"],
+    script: value["script"],
+    srcGlobs: value["srcGlobs"],
+    ...(focusFilesRaw !== undefined ? { focusFiles: focusFilesRaw } : {}),
+  };
 }
 
 /** Lê e valida `slices.json`; lança em JSON inválido ou forma inesperada. */
@@ -98,6 +121,12 @@ function touchesDir(files: readonly string[], target: SrcTarget): boolean {
   return files.some((file) => file.startsWith(prefix));
 }
 
+/** `true` quando algum arquivo do diff é um `focusFiles` da fatia (issue
+ * #514) — comparação exata de caminho, sem prefixo nem glob. */
+function touchesFocus(files: readonly string[], focusFiles: readonly string[]): boolean {
+  return files.some((file) => focusFiles.includes(file));
+}
+
 /** Seleciona as fatias que o diff exige. Puro: não lê disco nem `git`. */
 export function selectSlices(
   slices: readonly SliceEntry[],
@@ -106,17 +135,27 @@ export function selectSlices(
   const targetsBySlice = slices.map((entry) => ({
     entry,
     targets: entry.srcGlobs.map((glob) => globDir(glob)),
+    focusFiles: entry.focusFiles ?? [],
   }));
   const harnessChanged = changedFiles.some((file) => file.startsWith(HARNESS_PREFIX));
-  const selected = targetsBySlice
-    .filter(
-      ({ targets }) => harnessChanged || targets.some((target) => touchesDir(changedFiles, target)),
-    )
-    .map(({ entry }) => ({ slice: entry.slice, script: entry.script }));
+  const matched = targetsBySlice.map(({ entry, targets, focusFiles }) => ({
+    entry,
+    matchedByPath: targets.some((target) => touchesDir(changedFiles, target)),
+    matchedByFocus: touchesFocus(changedFiles, focusFiles),
+  }));
+  const selected = matched.filter(
+    ({ matchedByPath, matchedByFocus }) => harnessChanged || matchedByPath || matchedByFocus,
+  );
+  // "focus" só quando a seleção depende de algum focusFiles (nenhum arquivo
+  // dessa fatia bateu srcGlobs) e não é o caso de harness, que já tem seu
+  // próprio motivo.
+  const dependeDeFocus =
+    !harnessChanged &&
+    selected.some(({ matchedByPath, matchedByFocus }) => matchedByFocus && !matchedByPath);
   return {
     count: selected.length,
-    include: selected,
-    reason: harnessChanged ? "harness" : "paths",
+    include: selected.map(({ entry }) => ({ slice: entry.slice, script: entry.script })),
+    reason: harnessChanged ? "harness" : dependeDeFocus ? "focus" : "paths",
   };
 }
 
