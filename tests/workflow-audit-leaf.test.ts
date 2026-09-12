@@ -432,7 +432,14 @@ describe("workflow audit — leaf producers (#366)", () => {
       const page = audit.query({ runId: started.run_id, limit: 50 });
       const terminal = page.events.filter((event) => event.event_type === "leaf.failed");
       expect(terminal).toHaveLength(1);
-      expect(terminal[0]?.data).toMatchObject({ status: "cancelled", reason: "cancelled" });
+      // #517 (M16-S2, ADR 0005): cancel()'s own leaf.failed now also names
+      // error_kind:"cancelled" — the oracle the round-1 review flagged as
+      // missing (RED on the base 87b9aeac: this key isn't written there).
+      expect(terminal[0]?.data).toMatchObject({
+        status: "cancelled",
+        reason: "cancelled",
+        error_kind: "cancelled",
+      });
       runtime.release();
     } finally {
       close();
@@ -457,7 +464,13 @@ describe("workflow audit — leaf producers (#366)", () => {
       const page = audit.query({ runId: started.run_id, limit: 50 });
       const terminal = page.events.filter((event) => event.event_type === "leaf.failed");
       expect(terminal).toHaveLength(1);
-      expect(terminal[0]?.data).toMatchObject({ status: "cancelled", reason: "cancelled" });
+      // #517 (M16-S2, ADR 0005): same oracle as the cancel() test above —
+      // shutdown()'s own cancel path shares the SAME failedPayload().
+      expect(terminal[0]?.data).toMatchObject({
+        status: "cancelled",
+        reason: "cancelled",
+        error_kind: "cancelled",
+      });
     } finally {
       close();
     }
