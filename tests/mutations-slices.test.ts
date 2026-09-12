@@ -483,7 +483,7 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 268 (soma dos treze catálogos importados)", () => {
+  it("a contagem total de mutantes é 269 (soma dos treze catálogos importados)", () => {
     // Os doze catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
@@ -560,9 +560,15 @@ describe("scripts/mutations/slices.json", () => {
     // trim/absence check da função; morto pelo `it` já existente de
     // `tests/orchestration-tools.test.ts`, "drops the 'resume_id' key
     // entirely for empty, whitespace-only, null and undefined values"):
-    // 267 + 1 = 268.
+    // 267 + 1 = 268. Rodada 2 do veredito da PR #570 acrescenta W1
+    // (`accounting.ts`'s `foldNestedCounters` — o fold de `faults`
+    // aninhados que #540 moveu de `engine.ts` para lá não tinha mutante
+    // nenhum cobrindo especificamente a chamada a `nestedScopePrefix`
+    // nessa linha; morto pelo `it` já existente de
+    // `tests/workflow-nodes-tool.test.ts`, "folds nested faults, node
+    // counts and all five cost meters"): 268 + 1 = 269.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 268;
+    const TOTAL_MUTANTS = 269;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -587,14 +593,14 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/workflow-executor-mutants.ts": 45,
       "scripts/mutations/context-window.ts": 17,
       "scripts/mutations/auth-mutants.ts": 13,
-      "scripts/mutations/supervision-mutants.ts": 37,
+      "scripts/mutations/supervision-mutants.ts": 38,
     };
     expect(new Set(Object.keys(CONTAGEM_POR_CATALOGO))).toEqual(new Set(CATALOGOS.keys()));
     for (const [path, mutants] of CATALOGOS) {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(268);
+    expect(somaTabela).toBe(269);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {
