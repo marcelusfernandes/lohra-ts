@@ -17,6 +17,16 @@ function bloco(yaml: string, job: string): string {
   return proximo === -1 ? resto : resto.slice(0, proximo + 1);
 }
 
+const MUTATIONS = fileURLToPath(new URL("../.github/workflows/mutations.yml", import.meta.url));
+
+describe("mutations.yml — job mutate sem env do node-gyp (#562)", () => {
+  it("o job mutate não tem bloco env: nada compila via node-gyp desde D10 (#549)", () => {
+    const mutate = bloco(readFileSync(MUTATIONS, "utf8"), "mutate");
+    expect(mutate).not.toBe("");
+    expect(mutate).not.toMatch(/^ {4}env:\s*$/mu);
+  });
+});
+
 describe("ci.yml — job pack-check (D3/#532)", () => {
   const yaml = readFileSync(CI, "utf8");
   const job = bloco(yaml, "pack-check");
@@ -28,12 +38,22 @@ describe("ci.yml — job pack-check (D3/#532)", () => {
     expect(job).toContain("fail-fast: false");
   });
 
-  it("faz npm ci do projeto (prime do cache de prebuilds) antes de npm run pack:check, com teto de tempo", () => {
+  it("faz npm ci → npm run build → npm run pack:check nessa ordem, com teto de tempo", () => {
+    // `npm pack` roda com LOHRA_SKIP_PREPARE=1 (scripts/pack-check.ts), então o
+    // step `build` é o único produtor de `dist/` no tarball — sem ele o job
+    // quebra em silêncio (veredito da PR #560, issue #562).
     const ci = job.indexOf("run: npm ci");
+    const build = job.indexOf("run: npm run build");
     const pack = job.indexOf("run: npm run pack:check");
     expect(ci).toBeGreaterThan(-1);
-    expect(pack).toBeGreaterThan(ci);
+    expect(build).toBeGreaterThan(ci);
+    expect(pack).toBeGreaterThan(build);
     expect(job).toMatch(/timeout-minutes: \d+/);
+  });
+
+  it("o comentário do job cita os dois caches que o consumidor offline precisa", () => {
+    expect(job).toContain("_prebuilds");
+    expect(job).toContain("_cacache");
   });
 
   it("o job checks não tem mais bloco env (era só para o node-gyp) nem cita node-pty@1.1.0", () => {
