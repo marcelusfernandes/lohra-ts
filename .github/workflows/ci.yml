@@ -156,11 +156,17 @@ jobs:
   # Instalação por pacote (D3/#532, épico #529): empacota, instala o tarball num
   # consumidor limpo e roda o CLI contra o stub — em Linux e macOS, Node 20/22 —
   # e falha se better-sqlite3/node-pty tiverem compilado nativo em vez de usar
-  # prebuild (scripts/pack-check.ts, assertNoNativeCompileNeeded). O `npm ci`
-  # do projeto vem antes para primar ~/.npm/_prebuilds no mesmo HOME (o
-  # consumidor instala offline). Não é required no ruleset (gate humano).
+  # prebuild (scripts/pack-check.ts, assertNoNativeCompileNeeded). Não é
+  # required no ruleset (gate humano).
   pack-check:
     runs-on: ${{ matrix.os }}
+    # O `npm ci` do projeto vem antes para primar, no mesmo HOME, os dois
+    # caches de que o consumidor offline depende (scripts/pack-check.ts,
+    # `npm ci --offline` com proxy apontando para 127.0.0.1:9):
+    # ~/.npm/_prebuilds (binários de node-pty/better-sqlite3) e
+    # ~/.npm/_cacache (tarballs de registry das dependências). O step `build`
+    # é o único produtor de `dist/` no tarball — `npm pack` roda com
+    # LOHRA_SKIP_PREPARE=1 e o `prepare` só instala hooks de git.
     timeout-minutes: 20
     strategy:
       fail-fast: false
