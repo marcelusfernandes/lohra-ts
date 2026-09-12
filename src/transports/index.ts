@@ -18,9 +18,11 @@ export {
 } from "./client.js";
 export {
   classifyProviderError,
+  emptyPartialStream,
   ProviderCallFailed,
   RateLimitError,
   retryAfterSeconds,
+  StreamAbortedError,
 } from "./errors.js";
 export { ERROR_KINDS, ERROR_KIND_SET, isErrorKind, type ErrorKind } from "./error-kinds.js";
 export {
@@ -40,6 +42,7 @@ export type {
   FinishReason,
   HttpResponseData,
   NormalizedResponse,
+  PartialStream,
   StreamCallbacks,
   ToolCall,
   Usage,

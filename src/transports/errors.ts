@@ -1,4 +1,5 @@
 import type { ErrorKind } from "./error-kinds.js";
+import type { NormalizedResponse, PartialStream } from "./types.js";
 
 const quotaCodes = new Set([
   "insufficient_quota",
@@ -17,6 +18,61 @@ const networkFaultCodes = new Set(["ECONNREFUSED", "ENOTFOUND", "ETIMEDOUT", "EC
 
 export class RateLimitError extends Error {
   override readonly name = "RateLimitError";
+}
+
+/** ADR 0005: an in-flight stream torn down by an `AbortSignal` carries
+ * whatever the caller already saw through its callbacks (`partial`) instead
+ * of discarding it with the connection. `partialBody` is the raw bytes the
+ * transport captured before tear-down (native path only — the fetcher path
+ * also fills it via `readBounded`'s own capture); a caller that only cares
+ * about the replayed text/usage never needs to touch it. One class, one
+ * shape, for all three streaming clients (`client.ts`) and both
+ * `NativeChatHttpPort` code paths. */
+export class StreamAbortedError extends Error {
+  override readonly name = "StreamAbortedError";
+  readonly partialBody?: Uint8Array;
+  readonly partial: PartialStream;
+
+  constructor(
+    partial: PartialStream,
+    options: { readonly partialBody?: Uint8Array; readonly cause?: unknown } = {},
+  ) {
+    super(
+      "stream aborted in flight",
+      options.cause === undefined ? undefined : { cause: options.cause },
+    );
+    this.partial = partial;
+    if (options.partialBody !== undefined) this.partialBody = options.partialBody;
+  }
+}
+
+/** No bytes/text/usage captured yet — the abort happened before any partial
+ * data existed to replay (e.g. before headers, or before a native abort's
+ * response even started streaming a body). A single frozen instance: never
+ * mutated, safe to share across every call site that needs a placeholder. */
+export const emptyPartialStream: PartialStream = Object.freeze({
+  text: "",
+  reasoningChars: 0,
+  toolArgumentChars: 0,
+  usage: null,
+});
+
+/** Reduces whatever a streaming client already reconstructed from the
+ * partial SSE frames (via its own `NormalizedResponse` transport, which is
+ * always exception-safe on incomplete/empty input) into the smaller
+ * `PartialStream` shape a `StreamAbortedError` carries. `usage` is the
+ * caller's to decide (only Anthropic's `message_start` counts, per
+ * `PartialStream`'s contract) — this never guesses at it. */
+export function partialFromNormalized(
+  normalized: NormalizedResponse,
+  usage: PartialStream["usage"] = null,
+): PartialStream {
+  return {
+    text: normalized.content ?? "",
+    reasoningChars: normalized.reasoning?.length ?? 0,
+    toolArgumentChars: normalized.toolCalls.reduce((sum, call) => sum + call.arguments.length, 0),
+    usage,
+  };
 }
 
 export interface ProviderCallFailedOptions {
