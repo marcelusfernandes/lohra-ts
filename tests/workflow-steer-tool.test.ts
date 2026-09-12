@@ -627,6 +627,67 @@ describe("workflow_steer tool (#424)", () => {
     }
   }, 30_000);
 
+  it("a repository page reporting has_more with a non-advancing next_after_seq is a named 'window truncated' error, never a silently 'complete' window (#477)", async () => {
+    // #477 (found reviewing #466): the defensive "no forward progress"
+    // guard in `pagedSubIds` used to return `truncated: false` for exactly
+    // the page shape it exists to catch — a repository reporting an
+    // INCOMPLETE window (`has_more: true`) whose `next_after_seq` never
+    // advances past `after_seq`. Unreachable against the real
+    // `AuditRepository` today (its own `next_after_seq` always advances
+    // when `has_more` is true — proved by the equivalence tests in
+    // `tests/state-audit-repository.test.ts`), but a fake repository can
+    // still hand `workflow_steer` exactly this shape, and the tool must
+    // fail closed, never report a node's live set as complete.
+    const workflowSteerHandler = await loadHandler();
+    const stuckPage = {
+      run_id: "run-stuck",
+      availability: "available" as const,
+      filters: {},
+      events: [{ identity: { sub_id: "leaf-1" }, event_type: "leaf.started" }],
+      page: { after_seq: 0, next_after_seq: 0, snapshot_seq: 1, has_more: true },
+      policy: {},
+      integrity: {},
+    };
+    const stuckAudit = { query: () => stuckPage } as unknown as AuditRepository;
+    const handler = workflowSteerHandler(unreachableService, stuckAudit);
+    const result = JSON.parse(
+      await handler({ run_id: "run-stuck", node_id: "a", message: "hi" }),
+    ) as Envelope;
+    expect(result.error).toBeDefined();
+    expect(result.error).toMatch(/truncat/i);
+  });
+
+  it("resolves exactly 2000 leaf.started events without a false 'window truncated' when the shared budget lands exactly on the ceiling (#477)", async () => {
+    // #477: the old top-of-loop budget check (`if (budget.remaining <= 0)
+    // return truncated: true`) tripped on the FOLLOWING `pagedSubIds` call
+    // (`leaf.completed`) whenever `leaf.started` alone consumed the shared
+    // budget down to exactly zero — even though that next call has nothing
+    // to read (zero completions) and needs no budget at all. `resolveSubId`
+    // must still find the many live leaves this node genuinely has, not
+    // report a truncated window it never actually needed to keep reading.
+    const workflowSteerHandler = await loadHandler();
+    const { audit, close } = auditOnlyHarness();
+    try {
+      const total = 2_000;
+      for (let i = 1; i <= total; i += 1) {
+        audit.append("run-exact", {
+          event_type: "leaf.started",
+          sub_id: `leaf-${String(i)}`,
+          node_id: "b",
+        });
+      }
+      const handler = workflowSteerHandler(unreachableService, audit);
+      const result = JSON.parse(
+        await handler({ run_id: "run-exact", node_id: "b", message: "hi" }),
+      ) as Envelope;
+      expect(result.error).toBeDefined();
+      expect(result.error).toMatch(/ambiguous/);
+      expect(result.error).not.toMatch(/truncat/i);
+    } finally {
+      close();
+    }
+  }, 30_000);
+
   it("a sub_id the ledger says is live but the real core never spawned (desync) is a named error, never queued:true (2ª emenda, #424)", async () => {
     const { runtime, release } = realCoreRuntime();
     const { service, audit, trail, close } = serviceHarness(runtime);
