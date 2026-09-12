@@ -26,10 +26,26 @@ export const MAX_ARTIFACTS_PER_LEAF = 256;
  * shutdown drain, and never wants to eat into that larger budget. */
 export const CANCEL_SETTLE_TIMEOUT_MS = 2_000;
 
-function settleCeiling(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
+/** Returns both the timeout promise AND a way to clear it — `cancel()`
+ * below always clears it once `Promise.race` settles, win or lose, so a
+ * leaf that settles well under the ceiling (the common case) never leaves
+ * a live 2s timer behind (Node would otherwise hold the event loop open
+ * for it) — the same pattern `service.ts`'s own `cancelAndSettle` already
+ * uses for its `SHUTDOWN_SETTLE_TIMEOUT_MS` race. */
+function settleCeiling(ms: number): {
+  readonly promise: Promise<void>;
+  readonly clear: () => void;
+} {
+  let timer: ReturnType<typeof setTimeout>;
+  const promise = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, ms);
   });
+  return {
+    promise,
+    clear: () => {
+      clearTimeout(timer);
+    },
+  };
 }
 
 /** A frozen, independent copy of `causal` — never the caller's own object
@@ -399,6 +415,13 @@ export class OrchestrationChildRuntime implements ChildRuntime {
    */
   public async cancel(id: string): Promise<void> {
     this.core.cancel(id);
-    await Promise.race([this.core.collect(id, true), settleCeiling(CANCEL_SETTLE_TIMEOUT_MS)]);
+    const ceiling = settleCeiling(CANCEL_SETTLE_TIMEOUT_MS);
+    try {
+      await Promise.race([this.core.collect(id, true), ceiling.promise]);
+    } finally {
+      // Cleared whichever way the race settles — the common case (the leaf
+      // settles well under the ceiling) never leaves a live timer behind.
+      ceiling.clear();
+    }
   }
 }
