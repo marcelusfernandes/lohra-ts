@@ -25,6 +25,23 @@ function balanced(text: string, opener: "{" | "[", closer: "}" | "]"): string | 
   return null;
 }
 
+/** #459: pulled out of `service.ts` (`loads`, no mutation anchor on it) to
+ * make room for the `routesLoader` field inside that file's zero-growth
+ * ceiling — `durableFromRow` (service.ts) uses it to parse the three JSON
+ * columns a durable run row carries (`pause_payload_json`, `progress_json`,
+ * `spec_json`), falling back to `fallback` for an absent/empty/unparseable
+ * value rather than throwing. Renamed (not `loads`) so it reads standalone,
+ * away from `loadsLenient`'s very different (best-effort, multi-candidate)
+ * contract above. */
+export function loadsOr(raw: unknown, fallback: unknown): unknown {
+  if (typeof raw !== "string" || raw === "") return fallback;
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return fallback;
+  }
+}
+
 export function loadsLenient(text: string): unknown {
   const candidates: string[] = [text];
   const fencePattern = /```(?:json)?\s*([\s\S]*?)```/giu;
