@@ -64,6 +64,8 @@ const workflowOrchestrationRuntimeTimeoutFocus =
   "tests/workflow-orchestration-runtime-timeout.test.ts";
 const validation = "src/orchestration/validation.ts";
 const orchestrationToolsFocus = "tests/orchestration-tools.test.ts";
+const accounting = "src/workflow/accounting.ts";
+const workflowNodesToolFocus = "tests/workflow-nodes-tool.test.ts";
 
 export const supervisionMutants: readonly Mutant[] = [
   // --- steer-tool.ts (#424, #445, #450) -----------------------------------
@@ -779,6 +781,30 @@ export const supervisionMutants: readonly Mutant[] = [
         file: validation,
         before: '    (typeof resume_id === "string" && resume_id.trim().length === 0);',
         after: '    (typeof resume_id === "string" && resume_id.trim().length === 1);',
+      },
+    ],
+  },
+  // --- accounting.ts (#540, achado 2b do veredito da PR #570) -------------
+  // #540 moveu o fold de `faults` aninhados de engine.ts's `runNested` para
+  // `foldNestedCounters` — nenhum catálogo cobria essa linha especificamente
+  // (P1-P10 cobrem `cache-preview.ts`; nenhum mira `accounting.ts`'s próprio
+  // fold de faults). Remove o prefixo `sub[${reference}]: ` desse push
+  // específico (falls back para o fault cru) — morto pelo `it` já existente
+  // que prova exatamente essa forma (`result.faults[0]).toContain("sub[inner]")`).
+  {
+    id: "W1-nested-faults-fold-drops-prefix",
+    category: "nested-faults-fold-drops-prefix",
+    mechanism: "family-a",
+    focus: {
+      file: workflowNodesToolFocus,
+      test: "folds nested faults, node counts and all five cost meters",
+    },
+    edits: [
+      {
+        file: accounting,
+        before:
+          "  result.faults.push(...nested.faults.map((fault) => `${nestedScopePrefix(reference)}${fault}`));",
+        after: "  result.faults.push(...nested.faults);",
       },
     ],
   },

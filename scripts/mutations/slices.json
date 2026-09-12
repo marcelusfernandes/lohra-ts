@@ -144,7 +144,8 @@
       "tests/transports-abort-in-flight.test.ts",
       "tests/orchestration-child-runner-abort.test.ts",
       "tests/workflow-orchestration-runtime-timeout.test.ts",
-      "tests/orchestration-tools.test.ts"
+      "tests/orchestration-tools.test.ts",
+      "tests/workflow-nodes-tool.test.ts"
     ]
   }
 ]

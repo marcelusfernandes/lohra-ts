@@ -177,16 +177,16 @@ adicionar uma fatia" cita a mesma restrição.
 | `self-update`         | `mutations:self-update` |        8 | `self-update-mutants.ts`                                                                                              |
 | `context-window`      | `mutations:t23`         |       17 | `context-window.ts`                                                                                                   |
 | `auth`                | `mutations:auth`        |       13 | `auth-mutants.ts`                                                                                                     |
-| `supervision`         | `mutations:supervision` |       37 | `supervision-mutants.ts`                                                                                              |
+| `supervision`         | `mutations:supervision` |       38 | `supervision-mutants.ts`                                                                                              |
 
-Total: 268. Os 12 mutantes de `workflow-durability-guard.ts` são
+Total: 269. Os 12 mutantes de `workflow-durability-guard.ts` são
 combinatórios: três conjuntos do guard de escrita possuída (`fence`,
 `holder`, `lease-validity`) × quatro categorias (`state`, `cache`,
 `node-cost`, `spend`) — um mutante por combinação, cada um escorado só no
 teste focal da sua categoria, mais os 2 mutantes do INSERT combinado
 cache+custo (`combined-cell-guard-removed`,
 `combined-cost-escapes-refusal`). `tests/mutations-slices.test.ts` importa os
-treze catálogos de dado puro estaticamente e prova essa soma (268) a cada
+treze catálogos de dado puro estaticamente e prova essa soma (269) a cada
 corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
 
 `supervision-mutants.ts` (issue #451, milestone 14 — achado de QA/revisão de
@@ -356,6 +356,18 @@ pelo `it` que já prova exatamente essa forma (empty/whitespace-only/null/
 undefined → chave `resume_id` removida). `focusFiles` da fatia `supervision`
 ganha `tests/orchestration-tools.test.ts` — 267 + 1 = 268.
 
+Rodada 2 do veredito da PR #570 acrescenta `W1-nested-faults-fold-drops-prefix`:
+o próprio commit que moveu o fold de `faults` aninhados de `engine.ts`'s
+`runNested` para `foldNestedCounters` (`accounting.ts`, para não crescer
+`engine.ts` acima do teto de 800 linhas) não trouxe mutante nenhum cobrindo
+essa linha especificamente — nenhum catálogo mirava o `nestedScopePrefix`
+usado ali. W1 remove o prefixo desse push (`result.faults.push(...nested.faults)`,
+sem o `map`), morto pelo `it` já existente de `tests/workflow-nodes-tool.test.ts`,
+"folds nested faults, node counts and all five cost meters", cuja asserção
+`result.faults[0]).toContain("sub[inner]")` depende exatamente do prefixo.
+`focusFiles` da fatia `supervision` ganha `tests/workflow-nodes-tool.test.ts`
+— 268 + 1 = 269.
+
 `workflow-executor-mutants.ts` (issue #418) acrescentou
 `Q1-quota-guard-removed`: a guarda que impede `quota_exhausted` de entrar em
 `fault_kinds`, morta por `tests/workflow-fault-kinds.test.ts` (issue #412) —
@@ -521,13 +533,13 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
    `true`.
 5. `npm test` roda `tests/mutations-slices.test.ts`, que reprova de duas
    formas se a contagem não for atualizada junto com o mutante novo: a soma
-   total (268 + o novo) contra os treze catálogos importados, e a linha do
+   total (269 + o novo) contra os treze catálogos importados, e a linha do
    catálogo tocado em `CONTAGEM_POR_CATALOGO`
-   (`tests/mutations-slices.test.ts:577-590`), uma tabela pinada por número
+   (`tests/mutations-slices.test.ts:583-596`), uma tabela pinada por número
    literal — não derivada de `CATALOGOS.get(path).length` — para que uma
    troca compensatória entre dois catálogos (um ganha o que o outro perde,
    soma preservada) não passe despercebida. As duas contagens (o literal
-   `268` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
+   `269` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
    atualização junto com o mutante novo.
 
 ## Como adicionar uma fatia
@@ -574,13 +586,13 @@ cada entrada de `slices.json`; que todo catálogo descoberto por conteúdo em
 `focus.file` dos catálogos da fatia (exceto `media`/`workflow-executor`); que
 `srcGlobs` cobre todo `edits[].file` dos catálogos da fatia (item 2 acima); a
 contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
-(`tests/mutations-slices.test.ts:577-590` — hoje `workflow-durability-guard`
+(`tests/mutations-slices.test.ts:583-596` — hoje `workflow-durability-guard`
 14, `workflow-durability-named` 41, `orchestration` 5,
 `workflow-audit-live-mutants` 32, `workflow-audit-producers-mutants` 27,
 `web-tools-mutants` 9, `media-catalog-other` 7, `media-catalog-persistence`
 13, `self-update-mutants` 8, `workflow-executor-mutants` 45,
-`context-window` 17, `auth-mutants` 13, `supervision-mutants` 37, soma 268) e
-a soma de 268 contra os treze catálogos importados; e que todo diretório de
+`context-window` 17, `auth-mutants` 13, `supervision-mutants` 38, soma 269) e
+a soma de 269 contra os treze catálogos importados; e que todo diretório de
 primeiro nível de `src/` está coberto por algum `srcGlobs` ou está em
 `SEM_FATIA` com um motivo não vazio — nunca os dois, nunca nenhum dos dois.
 
