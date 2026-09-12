@@ -47,6 +47,15 @@ export interface ChildResult {
    * happened (child died before reporting, provider/resolution error) —
    * never true for a turn that genuinely spent zero tokens (#232). */
   readonly usageUncertain?: boolean;
+  /** True when `usage` above INCLUDES a portion ESTIMATED from a call
+   * aborted in flight (ADR 0005, #517/M16-S2) — always implies
+   * `usageUncertain: true` (an estimate is never a real measurement), but
+   * NOT the reverse: `usageUncertain` alone (no `partial`) still means the
+   * plain #232 "never measured" gap, zero tokens standing in for nothing.
+   * Absent/false = nothing estimated. This issue only carries the marker
+   * through to `RunResult.partialLeaves` (accounting.ts) and `leaf.failed`
+   * (audit-runtime.ts) — no runtime here ever sets it yet (S3). */
+  readonly partial?: boolean;
   /** How many of this leaf's own tool calls the sandbox denied before they
    * ever reached the real dispatch — the runtime's side channel populates
    * this (OrchestrationChildRuntime, orchestration-runtime.ts), never the

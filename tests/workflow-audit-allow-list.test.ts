@@ -184,4 +184,29 @@ describe("T17 metadata-only audit — allow-list sem produtor", () => {
       expect(event.data.error_kind).toBe(kind);
     }
   });
+
+  // Issue #517 (M16-S2, épico #490, ADR 0005): `partial` joins
+  // BOOLEAN_FIELDS — a leaf.failed whose usage carries an ESTIMATED spend
+  // from a call aborted in flight. RED on the base: BOOLEAN_FIELDS has no
+  // `partial` entry, so the sanitizer's boolean branch (`audit-model.ts:328`)
+  // drops the key entirely (`undefined`, never surfaced).
+  it("preserves a leaf.failed partial:true — never dropped by the sanitizer", () => {
+    const event = publicAuditEvent(
+      "r",
+      1,
+      { event_type: "leaf.failed", payload: { status: "cancelled", partial: true } },
+      1,
+    );
+    expect(event.data.partial).toBe(true);
+  });
+
+  it("redacts a leaf.failed partial outside the boolean vocabulary (a string, never coerced)", () => {
+    const event = publicAuditEvent(
+      "r",
+      1,
+      { event_type: "leaf.failed", payload: { status: "cancelled", partial: "true" } },
+      1,
+    );
+    expect(event.data.partial).toEqual({ state: "excluded_by_policy", characters: 4 });
+  });
 });
