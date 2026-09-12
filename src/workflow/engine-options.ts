@@ -1,4 +1,4 @@
-import type { WorkflowEngineOptions, WorkflowLoader } from "./engine-contract.js";
+import type { RunControl, WorkflowEngineOptions, WorkflowLoader } from "./engine-contract.js";
 import type { ChildRuntime } from "./runtime.js";
 import type { RouteOverride } from "./route-override.js";
 import type { TierMap } from "./tiers.js";
@@ -40,12 +40,27 @@ export function engineBaseOptions(
   tiers: TierMap,
   loader: WorkflowLoader | undefined,
   checkpointAnswers: Readonly<Record<string, unknown>>,
-): Pick<WorkflowEngineOptions, "runtime" | "runId" | "tiers" | "loader" | "checkpointAnswers"> {
+  /** #452: threaded so a resume's `route` reaches `runNested`'s freshly
+   * loaded template too — omitted here (as of this issue) at both
+   * `WorkflowService` construction sites, tracked on #452. */
+  routeOverride?: RouteOverride,
+): Pick<
+  WorkflowEngineOptions,
+  "runtime" | "runId" | "tiers" | "loader" | "checkpointAnswers" | "routeOverride"
+> {
   return {
     runtime,
     runId,
     tiers,
     ...(loader === undefined ? {} : { loader }),
     ...(Object.keys(checkpointAnswers).length > 0 ? { checkpointAnswers } : {}),
+    ...(routeOverride === undefined ? {} : { routeOverride }),
   };
+}
+
+/** #452: `WorkflowEngine`'s default `RunControl` (constructor, engine.ts) —
+ * pulled out so that zero-growth file keeps a one-line assignment instead of
+ * inlining the same idle shape at its one call site. */
+export function idleRunControl(): RunControl {
+  return { cancelled: false, paused: false, pauseReason: null, pausePayload: null };
 }
