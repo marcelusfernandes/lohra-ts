@@ -103,25 +103,36 @@ export function isRouteLesson(value: unknown): value is RouteLesson {
   );
 }
 
+/** `appendSafe`'s result — distinguishes the repository plainly REFUSING the
+ * write (`.append` returned `null`, `cause: null`) from `.append` itself
+ * THROWING (an unexpected repository failure, `cause: String(error)`), so
+ * `recordRouteFaultNotice` below can put the cause in the `warn` instead of
+ * discarding it (issue #449; the two used to collapse into one `boolean`,
+ * and a thrown repository error vanished from the diagnostic). */
+type AppendOutcome =
+  { readonly recorded: true } | { readonly recorded: false; readonly cause: string | null };
+
 /** Never throws — `.append` itself refusing (returns `null`) and `.append`
- * THROWING (an unexpected repository failure) collapse to the same "not
- * recorded" outcome for the caller below, which runs inside `service.ts`'s
- * terminal `.then` (an uncaught throw there would be a silent-crash
- * surface, not a fault). */
+ * THROWING (an unexpected repository failure) both resolve to a
+ * `recorded: false` outcome for the caller below, which runs inside
+ * `service.ts`'s terminal `.then` (an uncaught throw there would be a
+ * silent-crash surface, not a fault) — but the THROWN case carries its
+ * `cause` (issue #449) instead of discarding it like the refusal does. */
 function appendSafe(
   repository: NoticesSinkRepository | undefined,
   runId: string,
   notice: Readonly<{ kind: string; message: string }>,
   ownership: Ownership | null,
-): boolean {
+): AppendOutcome {
   try {
-    return (repository?.append(`run:${runId}`, notice, ownership ?? undefined) ?? null) !== null;
-  } catch {
-    return false;
+    const written = repository?.append(`run:${runId}`, notice, ownership ?? undefined) ?? null;
+    return written !== null ? { recorded: true } : { recorded: false, cause: null };
+  } catch (error) {
+    return { recorded: false, cause: String(error) };
   }
 }
 
-/** Issue #426: writes a route fault's lesson as a durable notice at `run:<runId>` — `kind` is the vocabulary value itself, never reclassified. Falls back to `warn` (never silent, invariant 2) when no repository is wired yet, the checkpoint isn't actually a lesson, or `appendSafe` above reports the write didn't land. */
+/** Issue #426: writes a route fault's lesson as a durable notice at `run:<runId>` — `kind` is the vocabulary value itself, never reclassified. Falls back to `warn` (never silent, invariant 2) when no repository is wired yet, the checkpoint isn't actually a lesson, or `appendSafe` above reports the write didn't land — carrying the cause (issue #449, `String(error)`) when it didn't land because `.append` THREW, as opposed to plainly refusing. */
 export function recordRouteFaultNotice(
   repository: NoticesSinkRepository | undefined,
   runId: string,
@@ -134,8 +145,11 @@ export function recordRouteFaultNotice(
     return;
   }
   const notice = routeFaultNotice(checkpoint);
-  if (!appendSafe(repository, runId, notice, ownership))
-    warn(`workflow: route fault notice for run ${runId} could not be recorded durably`);
+  const outcome = appendSafe(repository, runId, notice, ownership);
+  if (!outcome.recorded) {
+    const detail = outcome.cause === null ? "the write was refused" : `it threw: ${outcome.cause}`;
+    warn(`workflow: route fault notice for run ${runId} could not be recorded durably (${detail})`);
+  }
 }
 
 /** Pulled out of `engine.ts`'s `run()` tail (#426, same "make room" move as #329/#336/#348 in `engine-utils.ts`) — seals `result.status`/`pauseReason`/`checkpoint` from `control` once every node has settled. `checkpoint` carries whatever payload `pause()` set — a `RouteLesson` for a route fault, same transport any other pause reason already uses. */
