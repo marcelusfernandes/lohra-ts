@@ -138,13 +138,32 @@ export class NativeChatHttpPort implements ChatHttpPort {
       controller.abort(new Error("REQUEST_TIMEOUT"));
     }, request.timeoutMs);
     try {
-      const response = await this.fetcher(request.url, {
-        method: "POST",
-        headers: { ...request.headers },
-        body: request.body,
-        signal: controller.signal,
-        redirect: "error",
-      });
+      let response: Response;
+      try {
+        response = await this.fetcher(request.url, {
+          method: "POST",
+          headers: { ...request.headers },
+          body: request.body,
+          signal: controller.signal,
+          redirect: "error",
+        });
+      } catch (error) {
+        // ADR 0005 (issue #567): `fetch()` itself rejects synchronously
+        // when `controller.signal` is already aborted — before
+        // `readBounded` ever runs, so its own `StreamAbortedError` never
+        // gets a chance to fire. A CALLER abort (not the internal timeout,
+        // which uses `controller` directly, never `request.signal`) gets
+        // the same `StreamAbortedError` shape as every other abort exit —
+        // one class, one shape (errors.ts's own docblock on
+        // `StreamAbortedError`), regardless of what `fetch()` itself threw.
+        if (request.signal?.aborted === true) {
+          throw new StreamAbortedError(emptyPartialStream, {
+            partialBody: new Uint8Array(),
+            cause: request.signal.reason,
+          });
+        }
+        throw error;
+      }
       return {
         status: response.status,
         headers: response.headers,
@@ -295,6 +314,14 @@ function providerFailure(response: HttpResponseData): ProviderCallFailed {
   });
 }
 
+/** ADR 0005 amendment (issue #567): a stream aborted in flight can leave its
+ * LAST `data:` frame cut mid-JSON (`readBounded`/`postNative` capture
+ * whatever bytes already arrived, not a clean frame boundary). Before this,
+ * `parse(data)` throwing on that one truncated frame propagated out of the
+ * whole function, discarding every event already pushed to `chunks` along
+ * with it — `partial.text` came back empty even when several complete
+ * deltas preceded the cut. Now only the frame that fails to parse is
+ * dropped; whatever parsed cleanly before it is returned. */
 function parseSse(
   body: Uint8Array,
   parse: (value: string) => unknown = (value) => JSON.parse(value) as unknown,
@@ -309,7 +336,13 @@ function parseSse(
       .join("\n");
     if (!data) continue;
     if (data === "[DONE]") break;
-    chunks.push(parse(data));
+    try {
+      chunks.push(parse(data));
+    } catch {
+      // A truncated trailing frame — nothing after it could be valid
+      // either, so stop here instead of skipping ahead to the next block.
+      break;
+    }
   }
   return chunks;
 }

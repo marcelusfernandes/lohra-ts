@@ -135,8 +135,14 @@ export function rethrowAborted(
   try {
     partial = buildPartial(error.partialBody);
   } catch {
-    // A dangling/incomplete trailing frame in the partial buffer — whatever
-    // DID parse cleanly was already replayed through the callbacks above.
+    // Defensive fallback only: `parseSse` (client.ts) no longer throws for
+    // a truncated trailing SSE frame — it discards just that frame and
+    // returns whatever parsed before it (issue #567). Reaching here means
+    // `assembleStreamedResponse`/`anthropicStream`/`responsesStream`
+    // themselves threw partway through replaying events that DID parse;
+    // whatever they already sent through `tracked.callbacks` before the
+    // throw stays replayed — only the aggregated `partial` (text/usage)
+    // falls back to empty here.
   }
   if (error instanceof StreamAbortedError) {
     throw new StreamAbortedError(partial, { partialBody: error.partialBody, cause: error.cause });
@@ -165,12 +171,19 @@ export function replayAnthropicText(chunks: readonly unknown[], callbacks: Strea
 }
 
 /** `PartialStream`'s contract: usage only when a usage-bearing frame arrived
- * before the abort — today only Anthropic's `message_start`. */
+ * before the abort — today only Anthropic's `message_start`. A
+ * `message_start` that itself carries no `usage` object (issue #567 — e.g.
+ * one truncated by the same abort that stops the whole stream) returns
+ * `null` too, never a zeroed `Usage`: a zeroed object would be
+ * indistinguishable from "no message_start arrived at all" for a caller
+ * that only checks `partial.usage === null`. */
 export function anthropicPartialUsage(chunks: readonly unknown[]): Usage | null {
   for (const raw of chunks) {
     const event = record(raw);
     if (event.type !== "message_start") continue;
-    const usage = record(record(event.message).usage);
+    const message = record(event.message);
+    if (typeof message.usage !== "object" || message.usage === null) return null;
+    const usage = record(message.usage);
     return {
       inputTokens: toNumber(usage.input_tokens),
       outputTokens: toNumber(usage.output_tokens),
