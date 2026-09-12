@@ -171,6 +171,21 @@ route_fault` e para `faultKinds: []`.
   `JSON.stringify` inline) foi consolidado num só builder
   (`pausePayloadOf`, route-override.ts) — abriu espaço para o campo
   `pivots` novo sem crescer o arquivo (1296 → 1292 linhas).
+- **Sub-workflow por `ref` — fechado pelo #452.** Esta nota listava o gap
+  original ("O que esta issue NÃO faz"): `route-override.ts` só reescrevia a
+  espec de nível superior; `runNested` (`engine.ts`) carrega o template do
+  `ref` em runtime, depois de `pivotResume` já ter rodado, então o pivô do
+  run pai nunca alcançava a rota de um nó dentro do template referenciado.
+  O #452 fecha isso com `overrideNestedSpec` (`route-override.ts`),
+  aplicado dentro de `runNested` com o `routeOverride` do próprio engine
+  (novo campo em `WorkflowEngineOptions`) — profundidade continua limitada a
+  `MAX_WORKFLOW_DEPTH = 1`, então só o run pai (nunca um nested) carrega
+  outro template. Rodada 1 da PR #472 só provava essa mecânica com o
+  `WorkflowEngine` construído à mão; o revisor apontou que `service.ts`
+  (`launch`/`launchDurable`) não passava `options.routeOverride` adiante —
+  rodada 2 fecha o threading (`routeOverrideOption`, `engine-options.ts`)
+  nos dois pontos reais de construção, provado por um teste que sobe
+  `WorkflowService.start`/resume de ponta a ponta.
 
 ### O que esta issue NÃO faz
 
@@ -179,13 +194,6 @@ route_fault` e para `faultKinds: []`.
 - **Nenhum pivô automático** — decisão 4 do épico continua valendo; só um
   `run_workflow(resume_run_id, route: {...})` explícito pivota.
 - **Nenhuma tool `workflow resume` de CLI** — fora do escopo desta issue.
-- **Sub-workflow por `ref` fica fora do pivô.** `route-override.ts` reescreve
-  só a espec de NÍVEL SUPERIOR gravada em `spec_json`; um nó `workflow` que
-  aponta para um template externo por `ref` é carregado em runtime por
-  `runNested` (`engine.ts:832-848`, um `this.loader(reference)` novo a cada
-  execução) — a rota de um nó DENTRO desse template nunca passa por
-  `applyRouteOverrideToSpec`, então um pivô no run pai nunca alcança a rota
-  de um nó do sub-workflow referenciado.
 - **Cada resume com `route` consome um dos 3 pivôs, mesmo que não resolva o
   problema.** `nextPivots` empilha o `override` toda vez que `pivotResume`
   aceita um (`route-override.ts:143-146,158-177`) — se a folha se recusar de
