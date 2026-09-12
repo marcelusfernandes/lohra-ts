@@ -12,6 +12,7 @@ import {
 import {
   coercePrompt,
   coerceTasks,
+  normalizeResumeId,
   validateCollectSubId,
   validateDelegateTasks,
   validateMaxIterations,
@@ -154,8 +155,11 @@ export async function collectSessionTool(
 
 export async function delegateTaskTool(
   core: OrchestrationCore,
-  args: ToolArguments,
+  rawArgs: ToolArguments,
 ): Promise<string> {
+  // #500: normalize once, before either resume guard below inspects
+  // resume_id — an empty/whitespace-only value is not a resume request.
+  const args = normalizeResumeId(rawArgs);
   const resumeOverridesError = validateResumeOverrides(args);
   if (resumeOverridesError !== null) return resumeOverridesError;
 
