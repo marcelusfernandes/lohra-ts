@@ -17,9 +17,13 @@
 // `SqliteWorkflowCache`: `get` passes straight through (an honest lookup
 // against the real database) and records the hit's owner for attribution;
 // `put` is a hard no-op (`false`, never touches the database, never calls
-// `onWrite`) — belt and suspenders, since a dead dry leaf's output is never
-// `nonEmpty` in the first place, so the engine itself never even attempts a
-// write on this path.
+// `onWrite`) — NOT belt-and-suspenders, load-bearing: a `parallel` node
+// whose `branches` resolves to `[]` calls `cache.put(...)` unconditionally
+// (`engine.ts`'s `runParallel`, `[].every(nonEmpty)` is vacuously `true`)
+// without spawning a single leaf, dry or real. `put`'s own `return false`
+// is the ONLY thing stopping that write from reaching the real database
+// (P6, `supervision-mutants.ts`; oracle in
+// `tests/workflow-cache-preview-writes.test.ts`).
 //
 // Attribution: a cell's owner (the `nodeId` `cacheGet`/`cachePut` pass) and
 // a spawn's `causalContext.nodePath` are both scoped by `scopedCheckpointId`

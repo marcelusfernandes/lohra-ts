@@ -1,4 +1,4 @@
-// Catálogo de 28 mutantes da fatia `supervision` (issue #451, milestone 14 —
+// Catálogo de 29 mutantes da fatia `supervision` (issue #451, milestone 14 —
 // achado de QA/revisão de M10, épico #421): `npm run mutations:all` seguia
 // 227/227 apesar de ~1.000 linhas novas em `src/workflow/{steer-tool,
 // leaf-read-tool,route-faults,route-override}.ts`, no bloco de steer de
@@ -11,20 +11,23 @@
 // convenção de `workflow-audit-producers-mutants.ts`.
 //
 // Issue #484 (milestone 15, achado dos vereditos das PRs #478/#482)
-// acrescenta 8 mutantes: 5 para `src/workflow/cache-preview.ts` (#462) e 3
+// acrescenta 9 mutantes: 6 para `src/workflow/cache-preview.ts` (#462) e 3
 // para `src/workflow/templates.ts` (#464) — nenhum dos dois tinha mutante em
 // catálogo nenhum, apesar de `srcGlobs: ["src/workflow/**", ...]` já cobrir
-// os dois (não precisou de `srcGlobs` novo, só `focusFiles`). Um mutante
-// sugerido na issue original ("`put` da fachada do preview deixando de ser
-// no-op") NÃO entrou: `PreviewCacheFacade.put()` é código morto em toda
-// execução de preview hoje — todo `cache.put`/`cachePut` em `engine.ts`
-// (455, 480, 584, 663, 749, 771, 827, 921, 960) só dispara quando o leaf
-// COMPLETOU com saída não-vazia, e `DryRuntime.collect` (cache-preview.ts)
-// sempre devolve `status: "failed"` — `collectLeaf` (engine.ts:283-292)
-// devolve `output: null` para qualquer status que não seja `complete`, então
-// nenhum caminho de preview jamais alcança `put()`; um mutante ali sobrevive
-// a QUALQUER teste focal — mutante equivalente, não incluído (confirmado à
-// mão antes de descartar).
+// os dois (não precisou de `srcGlobs` novo, só `focusFiles`).
+//
+// Rodada 2 (veredito da PR #497, revisor): a rodada 1 desta issue tinha
+// deixado de fora o mutante de `put()` que a issue original pedia, com uma
+// justificativa FALSA ("código morto em toda execução de preview" — o
+// argumento de que `DryRuntime.collect` sempre falha, então
+// `collectLeaf`/`cachePut` nunca alcançam `put()`). O revisor reproduziu o
+// contrário: `engine.ts:480`'s `runParallel` chama `cache.put(...)`
+// INCONDICIONALMENTE quando `branches` resolve para `[]` — `[].every(nonEmpty)`
+// é vacuamente `true`, sem nenhum leaf spawnado, dry ou real (`schema.ts`
+// aceita `branches: []`; `budget.ts`'s `checkFanout(0)` nunca lança). P6
+// (abaixo) cobre esse caminho, ancorado em
+// `tests/workflow-cache-preview-writes.test.ts` (arquivo novo — a suíte
+// principal está no teto de 800 linhas; issue #484 emendada com esse glob).
 //
 // `category` deriva do `id` sem o prefixo `<letra><n>-`. `focus.test` é o
 // título literal do `it` (substring do `fullName`, veredito da PR #371/#362)
@@ -51,6 +54,7 @@ const transportErrorKindsFocus = "tests/transport-error-kinds.test.ts";
 const cachePreview = "src/workflow/cache-preview.ts";
 const templates = "src/workflow/templates.ts";
 const cachePreviewFocus = "tests/workflow-cache-preview.test.ts";
+const cachePreviewWritesFocus = "tests/workflow-cache-preview-writes.test.ts";
 const templatesFocus = "tests/workflow-templates.test.ts";
 
 export const supervisionMutants: readonly Mutant[] = [
@@ -505,6 +509,27 @@ export const supervisionMutants: readonly Mutant[] = [
         file: cachePreview,
         before: "  const leavesToSpawn = runtime.spawns.length;",
         after: "  const leavesToSpawn = spawnsByOwner.size;",
+      },
+    ],
+  },
+  // Rodada 2 (veredito da PR #497): o mutante que a issue #484 original
+  // pedia e a rodada 1 tinha, incorretamente, descartado como "código
+  // morto" — `runParallel` (engine.ts:480) chama `cache.put(...)` mesmo sem
+  // spawnar nenhum leaf quando `branches` resolve para `[]`.
+  {
+    id: "P6-put-facade-delegates-to-real-cache",
+    category: "put-facade-delegates-to-real-cache",
+    mechanism: "family-a",
+    focus: {
+      file: cachePreviewWritesFocus,
+      test: "a parallel node with empty branches writes nothing to workflow_node_cache during preview",
+    },
+    edits: [
+      {
+        file: cachePreview,
+        before: "  put(): boolean {\n    return false;\n  }",
+        after:
+          "  put(runId: string, hash: string, nodeId: string, output: unknown, cost: unknown): boolean {\n    return this.real.put(runId, hash, nodeId, output, cost as never);\n  }",
       },
     ],
   },

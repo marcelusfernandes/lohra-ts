@@ -138,7 +138,8 @@
       "tests/orchestration-delegate-envelope.test.ts",
       "tests/transport-error-kinds.test.ts",
       "tests/workflow-cache-preview.test.ts",
-      "tests/workflow-templates.test.ts"
+      "tests/workflow-templates.test.ts",
+      "tests/workflow-cache-preview-writes.test.ts"
     ]
   }
 ]
