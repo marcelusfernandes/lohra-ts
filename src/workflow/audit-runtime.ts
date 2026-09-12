@@ -29,6 +29,7 @@
 import type { AuditInput } from "./audit-model.js";
 import { recordAuditEvent, type AuditFailClosedDeps } from "./audit-producers.js";
 import type { AuditTrail } from "./audit-trail.js";
+import { OrchestrationChildRuntime } from "./orchestration-runtime.js";
 import type {
   Awaitable,
   CausalContext,
@@ -140,6 +141,43 @@ function failedPayload(
     ...(result.partial === true ? { partial: true } : {}),
     ...(reason === undefined ? {} : { reason }),
   };
+}
+
+/**
+ * Issue #518 (M16-S3, ADR 0005, veredito PR #524 r1 non_blocking 1): probes
+ * `inner` for the leaf's ACTUAL settled result right after `inner.cancel`
+ * resolves, so `cancel()` below can write the SAME real `partial`/`usage`
+ * data `collect()`'s own failed/cancelled branch would — instead of the bare
+ * `{cancelled}` placeholder `failedPayload(null, ...)` always wrote before
+ * this issue.
+ *
+ * Restricted to `OrchestrationChildRuntime` specifically (`instanceof`, not
+ * a duck-type check) — ~19 `ChildRuntime` test doubles across this suite
+ * model "still open" by blocking `collect()` on an unresolved gate
+ * REGARDLESS of `wait` (e.g. `gatedRuntime`, tests/workflow-audit-leaf.test.ts
+ * :129-146); probing THEM here would deadlock `cancel()` itself, which
+ * several existing tests depend on resolving once their own gate opens (or
+ * once the settle ceiling elapses). The real runtime's `collect(wait:false)`
+ * never blocks — it reads back whatever `OrchestrationCore.collect(id,
+ * false)` already has, synchronously pending or settled — so this is safe
+ * for exactly the ONE runtime it targets and inert for every other.
+ *
+ * A "running" result (the leaf's own settle ceiling elapsed before this
+ * probe ran — `OrchestrationChildRuntime.cancel`'s own
+ * `CANCEL_SETTLE_TIMEOUT_MS`) or any thrown error both fall back to `null` —
+ * the same placeholder `cancel()` always wrote before this issue.
+ */
+async function probeSettledAfterCancel(
+  inner: ChildRuntime,
+  id: string,
+): Promise<ChildResult | null> {
+  if (!(inner instanceof OrchestrationChildRuntime)) return null;
+  try {
+    const result = await inner.collect(id, { wait: false, timeoutSeconds: 0 });
+    return result.status === "running" ? null : result;
+  } catch {
+    return null;
+  }
 }
 
 // Issue #367: any tool name outside the builtin catalog is a hallucinated
@@ -453,18 +491,23 @@ export function auditedChildRuntime(
       return result;
     },
     async cancel(id: string): Promise<void> {
+      let settled: ChildResult | null = null;
       try {
         await inner.cancel(id);
+        // #518 (M16-S3): now that `inner.cancel` (the real
+        // `OrchestrationChildRuntime`) waits for the leaf's own settlement
+        // (up to its own ceiling) before resolving, probe it for the real
+        // result — see `probeSettledAfterCancel`'s own doc for why this is
+        // safe for every OTHER `ChildRuntime` too (a no-op there).
+        settled = await probeSettledAfterCancel(inner, id);
       } finally {
-        // #517: `settled` stays `null` in this issue — actually probing
-        // `inner` for a real result here is S3's job (`Fora de escopo`,
-        // #517): several `ChildRuntime` test doubles across the suite model
-        // "still open" by blocking `collect()` on an unresolved gate
-        // regardless of `wait`, which an extra `collect()` call here would
-        // deadlock on. `failedPayload(null, "cancelled")` is the exact
-        // payload `cancel()` wrote before this issue, plus `error_kind:
-        // "cancelled"` (#517 AC) — `reason: "cancelled"` unchanged.
-        close(id, "leaf.failed", failedPayload(null, "cancelled"));
+        // `failedPayload(null, "cancelled")` — settled still null (no probe
+        // ran, it timed out, or it errored) — is the exact payload
+        // `cancel()` wrote before #517/#518, plus `error_kind: "cancelled"`
+        // (#517 AC). A non-null `settled` carries the SAME real
+        // `partial`/`usage` shape `collect()`'s own failed/cancelled branch
+        // would have written, had it been the one to close this leaf first.
+        close(id, "leaf.failed", failedPayload(settled, "cancelled"));
       }
     },
     // Issue #450: `steer` delegates to `deliverSteer` (declared above,
