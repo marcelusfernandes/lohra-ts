@@ -122,3 +122,39 @@ sub-workflow por `ref` nunca tem seus artefatos checados contra os do run
 pai (`foldNestedCounters`, `accounting.ts` — a colisão só é checada dentro
 de um `RunResult` plano, antes do fold, e o comentário da própria função
 nomeia isso) — nenhuma issue aberta cobre esse gap especificamente.
+
+## Apêndice (2026-09-12): quatro dos cinco gaps fechados (#485)
+
+Issue #485 fechou os itens 1–4 do apêndice acima:
+
+1. **Dedup por caminho**: `RunResult.artifactCollisionPaths` (um `Set` de
+   caminhos normalizados já reportados, interno, nunca serializado) faz
+   `recordLeafSideChannels` (`accounting.ts`) disparar o advisory **uma vez**
+   por caminho colidido, mesmo quando o mesmo lote de uma folha nomeia o
+   caminho duas vezes depois de outra folha já tê-lo escrito.
+2. **`artifact_faults` durável exposto e dobrado**: `durableRollup`
+   (`service.ts`) agora expõe `artifact_faults` (omitido quando vazio, mesmo
+   idioma de `artifacts`/`pivots`), e a dobra terminal faz `unshift` de
+   `artifactFaults` simetricamente a `artifacts` — a colisão da stretch 1
+   sobrevive tanto na leitura ao vivo (`faults`) quanto na fria
+   (`durableRollup.artifact_faults`) depois de um resume.
+3. **Colisão entre stretches**: `recordCrossStretchArtifactCollisions`
+   (`accounting.ts`), chamada uma vez por `pausePayloadOf`
+   (`route-override.ts`) a cada escrita terminal, compara os artefatos desta
+   stretch contra os acumulados da(s) stretch(es) anterior(es)
+   (`priorView.artifacts`) — por CAMINHO apenas, nunca por `sub_id`: o
+   limite entre stretches já é prova de que são duas execuções distintas
+   (uma reexecução de um nó `agent` simples ainda sem célula cacheada antes
+   de um checkpoint, por exemplo, conta como uma folha diferente mesmo
+   reescrevendo o MESMO caminho que ela própria escreveu na stretch
+   anterior — o doutrina #248 trata isso como advisory-worthy do mesmo jeito
+   que duas folhas irmãs no mesmo `parallel`).
+4. **Caminho normalizado**: `normalizedArtifactPath` (`accounting.ts`,
+   `path.posix.normalize`, nunca `resolve` — o caminho é relativo ao working
+   root da folha) é usado em toda comparação de colisão; o `path` gravado em
+   `RunArtifact` continua cru, exatamente como a folha o escreveu.
+
+O item 5 (teto `MAX_ARTIFACTS_PER_RUN` e o custo O(N²) da checagem) fica
+**fora de escopo** de #485 — não coube sem crescer `service.ts` (orçamento de
+crescimento zero) e nenhum cenário de uso hoje aproxima o custo quadrático de
+um problema real; entra com issue própria se um caso concreto pedir.
