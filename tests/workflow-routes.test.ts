@@ -67,6 +67,39 @@ function neverRuntime(): ChildRuntime {
   };
 }
 
+/** One leaf per spawn, scripted collect() results, in call order — molde
+ * `FakeRuntime` (`tests/workflow-route-faults.test.ts`), needed here to
+ * script TWO stretches of the SAME run (a failing pivot, then a fresh
+ * fault) — a single-shot `collect()` can't tell those apart. */
+class ScriptedRuntime implements ChildRuntime {
+  private readonly byId = new Map<string, ChildResult[]>();
+  private readonly scripts: ChildResult[][];
+  private spawnCount = 0;
+
+  constructor(scripts: ChildResult[][]) {
+    this.scripts = scripts.map((script) => [...script]);
+  }
+
+  spawn(): string {
+    this.spawnCount += 1;
+    const id = `leaf-${String(this.spawnCount)}`;
+    this.byId.set(id, this.scripts.shift() ?? []);
+    return id;
+  }
+
+  collect(id: string): ChildResult {
+    const script = this.byId.get(id) ?? [];
+    return script.shift() ?? { status: "failed", output: "script exhausted" };
+  }
+
+  steer(): void {}
+  cancel(): void {}
+
+  installLeafSandbox(): { dispose: () => void } {
+    return { dispose: (): void => undefined };
+  }
+}
+
 describe("readRoutes — fail-closed (#459)", () => {
   it("returns {routes: {}} when the file is absent (legitimate)", async () => {
     const { readRoutes } = await import("../src/workflow/routes.js");
@@ -466,7 +499,12 @@ describe("WorkflowService end-to-end — suggested_route reaches workflow_status
       nodes: [{ id: "a", type: "agent", prompt: "x", retries: 0 }],
     });
     if ("error" in started) throw new Error(started.error);
-    await service.status(started.run_id, true);
+    const live = await service.status(started.run_id, true);
+    if ("error" in live) throw new Error(String(live.error));
+    expect((live.checkpoint as Record<string, unknown>).suggested_route).toEqual({
+      provider: "anthropic",
+      model: "y",
+    });
 
     const line = repository.getRunState(started.run_id) as Record<string, unknown>;
     const view = durableFromRow(line);
@@ -490,6 +528,140 @@ describe("WorkflowService end-to-end — suggested_route reaches workflow_status
     expect(page.notices).toHaveLength(1);
     expect(page.notices[0]?.message).toContain("suggested=anthropic/y");
 
+    connection.close();
+  });
+
+  it("WorkflowService WITHOUT a durable store also fills the live checkpoint (ephemeral terminal, service.ts's launch())", async () => {
+    const home = root();
+    writeFileSync(
+      routesPath(home),
+      JSON.stringify({ routes: { "openrouter/x": [{ provider: "anthropic", model: "y" }] } }),
+    );
+    const runtime: ChildRuntime = {
+      spawn(): string {
+        return "leaf-1";
+      },
+      collect(): ChildResult {
+        return {
+          status: "failed",
+          output: "401",
+          errorKind: "auth_failed",
+          retryAfter: null,
+          provider: "openrouter",
+          model: "x",
+        };
+      },
+      steer(): void {},
+      cancel(): void {},
+      installLeafSandbox(): { dispose: () => void } {
+        return { dispose: (): void => undefined };
+      },
+    };
+    // No `store` option: exercises `launch()` (service.ts's EPHEMERAL
+    // terminal, :605) — never `launchDurable()`.
+    const service = new WorkflowService({ runtime, homeRoot: home });
+    const started = service.start({
+      meta: { name: "route-envelope-ephemeral" },
+      nodes: [{ id: "a", type: "agent", prompt: "x", retries: 0 }],
+    });
+    if ("error" in started) throw new Error(started.error);
+    const live = await service.status(started.run_id, true);
+    if ("error" in live) throw new Error(String(live.error));
+    expect(live.pause_reason).toBe("route_fault");
+    expect(live.checkpoint).toEqual({
+      error_kind: "auth_failed",
+      node_id: "a",
+      provider: "openrouter",
+      model: "x",
+      suggested_route: { provider: "anthropic", model: "y" },
+    });
+  });
+
+  it("a resumed pivot never suggests the route THIS run just tried, even for a DIFFERENT node's fault (blocking finding, PR #479 rodada 1)", async () => {
+    const home = root();
+    writeFileSync(
+      routesPath(home),
+      JSON.stringify({
+        routes: {
+          "openrouter/x": [
+            { provider: "anthropic", model: "y" },
+            { provider: "anthropic", model: "z" },
+          ],
+          "openai/z": [
+            { provider: "anthropic", model: "y" },
+            { provider: "anthropic", model: "z" },
+          ],
+        },
+      }),
+    );
+    const connection = openStateDatabase(join(home, "state.db"));
+    const repository = new WorkflowRepository(connection.database);
+    const store = productionOwnershipStore(connection.database, {});
+    // Spawn order: a (stretch 1, fails on its declared route) -> a (resumed
+    // with the pivot, succeeds) -> b (no declared route, fails its own).
+    const runtime = new ScriptedRuntime([
+      [
+        {
+          status: "failed",
+          output: "401",
+          errorKind: "auth_failed",
+          retryAfter: null,
+          provider: "openrouter",
+          model: "x",
+        },
+      ],
+      [{ status: "complete", output: "ok" }],
+      [
+        {
+          status: "failed",
+          output: "401",
+          errorKind: "auth_failed",
+          retryAfter: null,
+          provider: "openai",
+          model: "z",
+        },
+      ],
+    ]);
+    const service = new WorkflowService({ runtime, store, homeRoot: home });
+    const started = service.start({
+      meta: { name: "route-pivot-tried" },
+      nodes: [
+        { id: "a", type: "agent", prompt: "x", provider: "openrouter", model: "x", retries: 0 },
+        { id: "b", type: "agent", prompt: "y", depends_on: ["a"], retries: 0 },
+      ],
+    });
+    if ("error" in started) throw new Error(started.error);
+    await service.status(started.run_id, true);
+    const stretch1 = durableFromRow(
+      repository.getRunState(started.run_id) as Record<string, unknown>,
+    );
+    expect(stretch1.pause_reason).toBe("route_fault");
+    expect((stretch1.checkpoint as Record<string, unknown>).node_id).toBe("a");
+    expect((stretch1.checkpoint as Record<string, unknown>).suggested_route).toEqual({
+      provider: "anthropic",
+      model: "y",
+    });
+
+    const resumed = service.start(
+      undefined,
+      {},
+      { resumeRunId: started.run_id, routeOverride: { provider: "anthropic", model: "y" } },
+    );
+    if ("error" in resumed) throw new Error(resumed.error);
+    await service.status(resumed.run_id, true);
+    const stretch2 = durableFromRow(
+      repository.getRunState(resumed.run_id) as Record<string, unknown>,
+    );
+    expect(stretch2.pause_reason).toBe("route_fault");
+    const lesson2 = stretch2.checkpoint as Record<string, unknown>;
+    expect(lesson2.node_id).toBe("b");
+    // The bug this test pins: the pivot to anthropic/y THIS RUN already
+    // spent must be excluded from ANY later suggestion, not just a's own —
+    // the next fallback (anthropic/z) is what's left, never anthropic/y.
+    expect(lesson2.suggested_route).toEqual({ provider: "anthropic", model: "z" });
+    expect(lesson2.suggested_route).not.toEqual({ provider: "anthropic", model: "y" });
+    // Same payload also carries the pivot that was actually applied.
+    expect(stretch2.pivots).toEqual([{ provider: "anthropic", model: "y" }]);
     connection.close();
   });
 
