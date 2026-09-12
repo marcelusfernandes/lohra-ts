@@ -307,7 +307,7 @@ describe("previewResume — a route pivot reveals a cell whose identity moved (#
         repository.getRunState(started.run_id) as Record<string, unknown>,
       );
       expect(after.status).toBe("complete");
-      expect(after.pivots).toEqual([{ provider: "p2" }]);
+      expect(after.pivots).toEqual([{ provider: "p2", channel: "operator" }]);
     } finally {
       close();
     }

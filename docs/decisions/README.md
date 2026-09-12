@@ -99,3 +99,12 @@ suggested_route: null}`; kind que pausa nunca entra em `faultKinds`;
   terminal do service antes de todo leitor; só um HINT — aplicar a
   sugestão automaticamente no resume é S2 (#460); sem
   `max_fallbacks_per_run`, o teto continua `MAX_ROUTE_PIVOTS_PER_RUN`.
+- [2026-09-13 — Canal do pivô de rota: `route_envelope` aplica sozinho,
+  `operator` sempre vence](2026-09-13-canal-route-envelope.md) — resume sem
+  `route` de um run pausado `route_fault` aplica `suggested_route`
+  automaticamente (canal `route_envelope`); `route` explícito continua
+  livre e sempre vence (canal `operator`); teto único de 3 pivôs
+  compartilhado pelos dois canais, assimétrico no teto (explícito recusado,
+  sem-rota fica parado); `node.rerouted` um por nó reescrito, `from`/`to`
+  aninhados em `CONTAINER_FIELDS`; `AutoResumeScheduler` não re-arma
+  `route_fault`.

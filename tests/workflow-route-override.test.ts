@@ -217,7 +217,7 @@ describe("run_workflow(resume_run_id, route) — cache real (#427 AC)", () => {
       const line = repository.getRunState(started.run_id) as Record<string, unknown>;
       const view = durableFromRow(line);
       const rollup = durableRollup(view, 0, false);
-      expect(rollup.pivots).toEqual([{ provider: "good" }]);
+      expect(rollup.pivots).toEqual([{ provider: "good", channel: "operator" }]);
     } finally {
       close();
     }
@@ -503,7 +503,8 @@ describe("pivots survive a crash between a stretch's registration/progress write
       const beforeCrash = durableFromRow(
         repository.getRunState(started.run_id) as Record<string, unknown>,
       );
-      expect(beforeCrash.pivots).toEqual([{ provider: "v1" }, { provider: "v2" }]);
+      const opv = (provider: string) => ({ provider, channel: "operator" });
+      expect(beforeCrash.pivots).toEqual([opv("v1"), opv("v2")]);
       expect(beforeCrash.status).toBe("complete");
 
       // --- the crash: a 3rd pivot's stretch registers, "free" replays and
@@ -538,7 +539,7 @@ describe("pivots survive a crash between a stretch's registration/progress write
       const midCrashRow = repository.getRunState(started.run_id) as Record<string, unknown>;
       expect(midCrashRow.status).toBe("running"); // never reached the terminal write
       expect(JSON.parse(String(midCrashRow.pause_payload_json))).toEqual({
-        pivots: [{ provider: "v1" }, { provider: "v2" }, { provider: "v3" }],
+        pivots: [opv("v1"), opv("v2"), opv("v3")],
       });
       // `crashService`'s own stretch is deliberately never awaited again:
       // "pinned"'s `collect()` never resolves, so its terminal write never
@@ -640,14 +641,14 @@ describe("route-override.ts — the module's own exports (#427)", () => {
   it("pivotResume passes a plain resume (no override) straight through", async () => {
     const { pivotResume } = await import("../src/workflow/route-override.js");
     const spec = parsed({ meta: { name: "x" }, nodes: [{ id: "a", type: "agent", prompt: "x" }] });
-    const result = pivotResume(spec, {}, []);
-    expect(result).toEqual({ ok: true, spec });
+    const result = pivotResume(spec, { tiers: {} }, null);
+    expect(result).toEqual({ ok: true, spec, rerouted: [] });
   });
 
   it("pivotResume refuses an override without a resume run id, named error", async () => {
     const { pivotResume } = await import("../src/workflow/route-override.js");
     const spec = parsed({ meta: { name: "x" }, nodes: [{ id: "a", type: "agent", prompt: "x" }] });
-    const result = pivotResume(spec, { routeOverride: { provider: "p" } }, []);
+    const result = pivotResume(spec, { tiers: {}, routeOverride: { provider: "p" } }, null);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("resume run id");
   });
@@ -659,8 +660,8 @@ describe("route-override.ts — the module's own exports (#427)", () => {
     const full = Array.from({ length: MAX_ROUTE_PIVOTS_PER_RUN }, () => ({ provider: "p" }));
     const result = pivotResume(
       spec,
-      { resumeRunId: "run-1", routeOverride: { provider: "new" } },
-      full,
+      { tiers: {}, resumeRunId: "run-1", routeOverride: { provider: "new" } },
+      { pivots: full, pauseReason: null, checkpoint: null },
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain(String(MAX_ROUTE_PIVOTS_PER_RUN));
@@ -701,7 +702,7 @@ describe("workflow_status's live envelope carries 'pivots' too, not just the dur
       const live = (await service.status(started.run_id, true)) as Record<string, unknown>;
       const line = repository.getRunState(started.run_id) as Record<string, unknown>;
       const durable = durableRollup(durableFromRow(line), 0, false);
-      expect(live.pivots).toEqual([{ provider: "good" }]);
+      expect(live.pivots).toEqual([{ provider: "good", channel: "operator" }]);
       expect(live.pivots).toEqual(durable.pivots);
     } finally {
       close();
@@ -789,7 +790,7 @@ describe("workflow_status's live envelope carries 'pivots' too, not just the dur
       expect(live.status).toBe("running");
       const row = repository.getRunState(started.run_id) as Record<string, unknown>;
       const durable = durableRollup(durableFromRow(row), 0, false);
-      expect(live.pivots).toEqual([{ provider: "v1" }]);
+      expect(live.pivots).toEqual([{ provider: "v1", channel: "operator" }]);
       expect(live.pivots).toEqual(durable.pivots);
     } finally {
       close();

@@ -101,6 +101,78 @@ describe("T17 metadata-only audit — allow-list sem produtor", () => {
     expect(event.data.version_state).toEqual({ state: "excluded_by_policy", characters: 8 });
   });
 
+  // Issue #460 (M11-S2, épico #458): `node.rerouted`'s own payload —
+  // `channel` (closed vocabulary), `pivot` (a number), and `from`/`to`
+  // (nested `{provider, model}` objects, #460 §Solução item 3 — CONTAINER_FIELDS,
+  // not a flattened `from_provider`/`from_model`).
+  it("accepts 'node.rerouted' as a valid event_type (not audit.unavailable)", () => {
+    const event = publicAuditEvent(
+      "r",
+      1,
+      {
+        event_type: "node.rerouted",
+        payload: {
+          channel: "route_envelope",
+          pivot: 1,
+          from: { provider: "openrouter", model: "x" },
+          to: { provider: "anthropic", model: "y" },
+        },
+      },
+      1,
+    );
+    expect(event.event_type).toBe("node.rerouted");
+  });
+
+  it("preserves node.rerouted channel across the whole vocabulary", () => {
+    for (const channel of ["operator", "route_envelope"]) {
+      const event = publicAuditEvent(
+        "r",
+        1,
+        { event_type: "node.rerouted", payload: { channel } },
+        1,
+      );
+      expect(event.data.channel).toBe(channel);
+    }
+  });
+
+  it("redacts a node.rerouted channel outside the vocabulary", () => {
+    const event = publicAuditEvent(
+      "r",
+      1,
+      { event_type: "node.rerouted", payload: { channel: "garbage" } },
+      1,
+    );
+    expect(event.data.channel).toEqual({ state: "excluded_by_policy", characters: 7 });
+  });
+
+  it("preserves node.rerouted's numeric pivot", () => {
+    const event = publicAuditEvent(
+      "r",
+      1,
+      { event_type: "node.rerouted", payload: { pivot: 2 } },
+      1,
+    );
+    expect(event.data.pivot).toBe(2);
+  });
+
+  it("preserves node.rerouted's from/to as nested {provider, model}, clipped at 128", () => {
+    const longModel = "m".repeat(200);
+    const event = publicAuditEvent(
+      "r",
+      1,
+      {
+        event_type: "node.rerouted",
+        payload: {
+          from: { provider: "openrouter", model: "x" },
+          to: { provider: "anthropic", model: longModel },
+        },
+      },
+      1,
+    );
+    expect(event.data.from).toEqual({ provider: "openrouter", model: "x" });
+    expect(event.data.to).toEqual({ provider: "anthropic", model: "m".repeat(128) });
+  });
+
   it("accepts exactly the ErrorKind vocabulary for error_kind", () => {
     for (const kind of transports.ERROR_KINDS) {
       const event = publicAuditEvent(

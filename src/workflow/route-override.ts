@@ -18,12 +18,24 @@
 // never touched here either.
 import { Node, WorkflowSpec } from "./types.js";
 import type { RunArtifact, RunResult } from "./accounting.js";
+import { routingOf } from "./engine-utils.js";
+import { isRouteLesson, ROUTE_FAULT_REASON } from "./route-faults.js";
+import type { TierMap } from "./tiers.js";
 
 export const MAX_ROUTE_PIVOTS_PER_RUN = 3;
+
+/** #460 (M11-S2, épico #458): `operator` for an explicit `route`
+ * (`run_workflow`'s own argument); `route_envelope` for the operator's own
+ * `workflow_routes.json` suggestion (`suggested_route`, #459) applied
+ * automatically on a route-less resume — decision 1(b), épico #458. */
+export type RouteChannel = "operator" | "route_envelope";
 
 export interface RouteOverride {
   readonly provider?: string;
   readonly model?: string;
+  /** Absent on a pivot recorded before this issue — round-trips through
+   * `pause_payload_json` like `provider`/`model` above (`pivotsOf`). */
+  readonly channel?: RouteChannel;
 }
 
 const ROUTE_FIELDS = ["model", "tier", "effort", "provider"] as const;
@@ -148,7 +160,10 @@ function isRouteOverride(value: unknown): value is RouteOverride {
   const record = value as Readonly<Record<string, unknown>>;
   return (
     (record.provider === undefined || typeof record.provider === "string") &&
-    (record.model === undefined || typeof record.model === "string")
+    (record.model === undefined || typeof record.model === "string") &&
+    (record.channel === undefined ||
+      record.channel === "operator" ||
+      record.channel === "route_envelope")
   );
 }
 
@@ -184,34 +199,141 @@ export function nextPivots(
   return override === undefined ? priorPivots : [...priorPivots, override];
 }
 
+/** #460 (M11-S2): one `node.rerouted` candidate — `node_id` is the node's
+ * own id (a pipeline stage's rewrite is attributed to its PARENT node, never
+ * a stage sub-id: `overrideNode` above rewrites the whole node when ANY
+ * stage declares a route); `from`/`to` are the node's own RESOLVED routing
+ * (`routingOf`, engine-utils.ts) before/after the rewrite, so a node that
+ * only names a `tier` still reports the actual provider/model it was going
+ * to run on, not just its raw fields. A pipeline node whose route lives only
+ * on a stage (never the node's own fields) still gets exactly one record
+ * here — `from`/`to` in that case mirror the node's OWN (stage-blind)
+ * routing, since the engine resolves each stage's routing independently at
+ * runtime (`runPipeline`, engine.ts) and this issue doesn't thread that far. */
+export interface RerouteRecord {
+  readonly node_id: string;
+  readonly from: Readonly<{ provider?: string; model?: string }>;
+  readonly to: Readonly<{ provider?: string; model?: string }>;
+}
+
+function routingPair(node: Node, tiers: TierMap): Readonly<{ provider?: string; model?: string }> {
+  const routing = routingOf(node, tiers);
+  return {
+    ...(routing.provider === undefined ? {} : { provider: routing.provider }),
+    ...(routing.model === undefined ? {} : { model: routing.model }),
+  };
+}
+
+/** One record per node `overrideNode` actually rewrote — reference
+ * inequality, the same signal `applyRouteOverrideToSpec`'s own per-node map
+ * already produces for free. `before`/`after` share the same node order (one
+ * spec rewritten from the other), so a plain index pairing is enough. */
+function rerouteRecords(
+  before: WorkflowSpec,
+  after: WorkflowSpec,
+  tiers: TierMap,
+): readonly RerouteRecord[] {
+  const records: RerouteRecord[] = [];
+  for (let index = 0; index < before.nodes.length; index += 1) {
+    const beforeNode = before.nodes[index];
+    const afterNode = after.nodes[index];
+    if (beforeNode === undefined || afterNode === undefined || beforeNode === afterNode) continue;
+    records.push({
+      node_id: beforeNode.id,
+      from: routingPair(beforeNode, tiers),
+      to: routingPair(afterNode, tiers),
+    });
+  }
+  return records;
+}
+
+/** #460: the prior stretch's own pause state — only what `pivotResume`
+ * needs to decide whether a route-less resume should apply the operator's
+ * route envelope (S1, `suggested_route`). `null` for a fresh launch, or any
+ * resume whose durable view this service never loaded. Structural, not
+ * `DurableRunView` (service.ts) itself — same reasoning as `PriorPauseView`
+ * below (importing that type here would make service.ts and
+ * route-override.ts import each other). */
+export interface PivotResumePrior {
+  readonly pivots: readonly RouteOverride[];
+  readonly pauseReason: string | null;
+  readonly checkpoint: unknown;
+}
+
+export type PivotResumeResult =
+  | {
+      readonly ok: true;
+      readonly spec: WorkflowSpec;
+      readonly override?: RouteOverride;
+      readonly rerouted: readonly RerouteRecord[];
+    }
+  | { readonly ok: false; readonly error: string };
+
 /** #427 AC: a run pivots route at most `MAX_ROUTE_PIVOTS_PER_RUN` times —
  * decision 4 of épico #421 (a pivot is always a MANUAL resume, never
  * automatic) makes this a de facto human gate past the cap: a named error
  * instead of silently trying yet another route. `options.resumeRunId`
  * absent with an override present is refused here too — tool.ts's own
  * `run_workflow` validation is the primary boundary, but `service.start`
- * is a boundary of its own (CLAUDE.md: validate at every boundary). A
- * plain resume with no `route` at all always passes through untouched. */
+ * is a boundary of its own (CLAUDE.md: validate at every boundary).
+ *
+ * #460 (M11-S2, épico #458, decision 1(b)): an explicit `route` always wins
+ * (channel `operator`) — unchanged from #427 above, just tagged. A
+ * route-less resume of a run paused `route_fault` (`prior.pauseReason`)
+ * whose lesson (`isRouteLesson`) carries a non-null `suggested_route`
+ * applies it automatically (channel `route_envelope`), subject to the SAME
+ * shared cap — but AT the cap, a route-less resume is never refused (the
+ * operator never asked for a pivot; refusing would block a legitimate plain
+ * resume): it just stays on the current route, spending no pivot and
+ * rewriting no node (`rerouted: []`). Only an EXPLICIT `route` at the cap is
+ * refused, same named error as before. */
 export function pivotResume(
   spec: WorkflowSpec,
-  options: Readonly<{ resumeRunId?: string; routeOverride?: RouteOverride }>,
-  priorPivots: readonly RouteOverride[],
-):
-  | { readonly ok: true; readonly spec: WorkflowSpec }
-  | { readonly ok: false; readonly error: string } {
-  const override = options.routeOverride;
-  if (override === undefined) return { ok: true, spec };
-  if (options.resumeRunId === undefined)
-    return { ok: false, error: "'route' is only accepted together with a resume run id" };
-  if (priorPivots.length >= MAX_ROUTE_PIVOTS_PER_RUN)
+  options: Readonly<{ resumeRunId?: string; routeOverride?: RouteOverride; tiers: TierMap }>,
+  prior: PivotResumePrior | null,
+): PivotResumeResult {
+  const priorPivots = prior?.pivots ?? [];
+  const explicit = options.routeOverride;
+  if (explicit !== undefined) {
+    if (options.resumeRunId === undefined)
+      return { ok: false, error: "'route' is only accepted together with a resume run id" };
+    if (priorPivots.length >= MAX_ROUTE_PIVOTS_PER_RUN)
+      return {
+        ok: false,
+        error:
+          `workflow run '${options.resumeRunId}' already pivoted route ` +
+          `${String(MAX_ROUTE_PIVOTS_PER_RUN)} times — resume without 'route', or fix the ` +
+          "underlying auth/model problem instead of trying yet another route",
+      };
+    const override: RouteOverride = { ...explicit, channel: "operator" };
+    const rewritten = applyRouteOverrideToSpec(spec, override);
     return {
-      ok: false,
-      error:
-        `workflow run '${options.resumeRunId}' already pivoted route ` +
-        `${String(MAX_ROUTE_PIVOTS_PER_RUN)} times — resume without 'route', or fix the ` +
-        "underlying auth/model problem instead of trying yet another route",
+      ok: true,
+      spec: rewritten,
+      override,
+      rerouted: rerouteRecords(spec, rewritten, options.tiers),
     };
-  return { ok: true, spec: applyRouteOverrideToSpec(spec, override) };
+  }
+  if (
+    prior !== null &&
+    prior.pauseReason === ROUTE_FAULT_REASON &&
+    isRouteLesson(prior.checkpoint) &&
+    prior.checkpoint.suggested_route !== null &&
+    priorPivots.length < MAX_ROUTE_PIVOTS_PER_RUN
+  ) {
+    const override: RouteOverride = {
+      ...prior.checkpoint.suggested_route,
+      channel: "route_envelope",
+    };
+    const rewritten = applyRouteOverrideToSpec(spec, override);
+    return {
+      ok: true,
+      spec: rewritten,
+      override,
+      rerouted: rerouteRecords(spec, rewritten, options.tiers),
+    };
+  }
+  return { ok: true, spec, rerouted: [] };
 }
 
 /** Structural, not `DurableRunView` (service.ts) itself — importing that
