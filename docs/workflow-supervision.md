@@ -367,8 +367,8 @@ leaves: <path>"` em `artifactFaults` exatamente uma vez; nunca muda
   DIFERENTE reescreve na stretch 2 disparava um SEGUNDO advisory, com
   `node_id` distinto: `service.ts:1000`'s dobra terminal antepunha
   `priorView.artifact_faults` a `result.artifactFaults` sem checar se o
-  caminho já constava. `dedupeArtifactFaultsByPath` (`accounting.ts:265-277`)
-  e `foldArtifactFaults` (`accounting.ts:285-288`) fecham isso: mantêm a
+  caminho já constava. `dedupeArtifactFaultsByPath` (`accounting.ts:305-323`)
+  e `foldArtifactFaults` (`accounting.ts:325-344`) fecham isso: mantêm a
   PRIMEIRA ocorrência de cada caminho colidido na lista MESCLADA
   (`[...prior, ...atual]`), nunca a mais recente — inclusive limpando uma
   duplicata que já tivesse ficado gravada num `pause_payload_json` de antes
@@ -388,18 +388,35 @@ leaves: <path>"` em `artifactFaults` exatamente uma vez; nunca muda
   e "o MESMO caminho, já flagado, reescrito de novo numa stretch depois" —
   ambos vermelhos por asserção na base — vivem em
   `tests/workflow-artifacts-cross-stretch-dedup.test.ts`.
-- **Limitações que sobraram, sem issue aberta cobrindo nenhuma delas**:
-  (a) o custo O(N²) de
+- **Limitação que sobrou, sem issue aberta cobrindo**: o custo O(N²) de
   `recordLeafSideChannels`/`recordCrossStretchArtifactCollisions` (um
   `.filter` por artefato já registrado) e o payload de `artifacts`/
   `artifact_faults` sem teto por run continuam sem solução — nenhum caso
-  de uso hoje aproxima o custo quadrático de um problema real; (b) uma
-  leitura FRIA de um run dormente (`workflow_status` sem processo vivo,
-  `durableRollup`) ainda pode expor uma duplicata de advisory já gravada
-  antes do #501 — só a leitura ao vivo dedupa (acima).
+  de uso hoje aproxima o custo quadrático de um problema real.
+- **Dedup também na ESCRITA, não só na leitura ao vivo** (#512, follow-up
+  do veredito non_blocking 1 da PR #508): o que este documento registrava
+  aqui como fechado — "uma leitura FRIA de um run dormente ainda pode expor
+  uma duplicata de advisory já gravada antes do #501" — estava errado: a
+  duplicata gravada não era "de antes do #501", continuava sendo produzida
+  DEPOIS dele também. O #501 corrigiu só a leitura AO VIVO
+  (`foldArtifactFaults`, dobra terminal de `service.ts`); `pausePayloadOf`
+  (`route-override.ts`) seguia montando o `artifact_faults` do payload
+  PERSISTIDO por concatenação simples
+  (`[...priorView.artifact_faults, ...result.artifactFaults]`), sem passar
+  por `dedupeArtifactFaultsByPath` — cada resume que revisitasse um caminho
+  já flagado gravava mais uma duplicata, permanentemente, para
+  `durableRollup` (leitura fria) expor. `pausePayloadOf` agora aplica o
+  mesmo dedup antes de persistir; leitura fria e leitura viva concordam,
+  em qualquer número de resumes. De quebra, `collisionPathOf` passou a
+  chavear por (escopo, caminho), não só caminho: um sub-workflow aninhado
+  prefixa seus próprios faults com `sub[${reference}]: `
+  (`foldNestedCounters` abaixo) — sem o escopo na chave, uma colisão DENTRO
+  do sub-run e uma colisão do PAI que por coincidência escreve a MESMA
+  string de caminho (working roots distintos) colapsavam na mesma
+  advisory, perdendo uma das duas.
 - **Fora do escopo original, limitação registrada no próprio código**: um
   sub-workflow por `ref` nunca tem seus artefatos checados contra os do run
-  pai — `foldNestedCounters` (`accounting.ts:265-285`) só concatena as
+  pai — `foldNestedCounters` (`accounting.ts:361-391`) só concatena as
   listas, sem re-checar colisão contra o `RunResult` do pai; o comentário
   da própria função nomeia isso.
 
