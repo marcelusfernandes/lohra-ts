@@ -16,6 +16,7 @@ import type { AuditTrail } from "./audit-trail.js";
 import type { WorkflowCache } from "./cache.js";
 import type { WorkflowEvent } from "./engine-contract.js";
 import { type WorkflowLiveEvent, type WorkflowLiveEvents } from "./live-events.js";
+import type { RerouteRecord, RouteChannel } from "./route-override.js";
 import type { WorkflowSpec } from "./types.js";
 import type { Ownership } from "../state/workflow-repository.js";
 
@@ -120,6 +121,16 @@ export interface WorkflowAuditProducers {
    * the caller still releases the lease either way (a stuck sink must not
    * pin it forever, invariant 3). */
   readonly flushBeforeRelease: () => Promise<void>;
+  /** #460 (M11-S2, épico #458): `service.ts`'s ONE call right after
+   * `announceStretchStart` (so `node.rerouted` lands AFTER `workflow.plan`,
+   * same segment) — one `node.rerouted` event per node `pivotResume`
+   * (route-override.ts) actually rewrote; a no-op when `rerouted` is empty,
+   * so the call site stays unconditional. */
+  readonly announceRerouted: (
+    rerouted: readonly RerouteRecord[],
+    channel: RouteChannel,
+    pivot: number,
+  ) => void;
 }
 
 /** The subset of `WorkflowAuditProducersDeps` the fail-closed rule below
@@ -315,6 +326,33 @@ export function createWorkflowAuditProducers(
     if (!ok) warn(`workflow: audit flush before lease release failed for run ${runId}`);
   }
 
+  function announceRerouted(
+    rerouted: readonly RerouteRecord[],
+    channel: RouteChannel,
+    pivot: number,
+  ): void {
+    for (const rec of rerouted) {
+      const from = rec.from;
+      const to = rec.to;
+      record({
+        event_type: "node.rerouted",
+        node_id: rec.node_id,
+        payload: {
+          channel,
+          pivot,
+          from: {
+            ...(from.provider === undefined ? {} : { provider: from.provider }),
+            ...(from.model === undefined ? {} : { model: from.model }),
+          },
+          to: {
+            ...(to.provider === undefined ? {} : { provider: to.provider }),
+            ...(to.model === undefined ? {} : { model: to.model }),
+          },
+        },
+      });
+    }
+  }
+
   return {
     forwardEvent,
     announcePlan,
@@ -327,5 +365,6 @@ export function createWorkflowAuditProducers(
     announceStretchEnd,
     wrapCache,
     flushBeforeRelease,
+    announceRerouted,
   };
 }

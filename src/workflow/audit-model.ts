@@ -85,10 +85,24 @@ const NUMBER_FIELDS = new Set([
   // Issue #423: `leaf.steered`'s ONLY metadata about the steer text itself
   // — never the text, just its length.
   "message_chars",
+  // Issue #460 (M11-S2): `node.rerouted`'s own pivot count so far.
+  "pivot",
 ]);
 const BOOLEAN_FIELDS = new Set(["tainted", "stale", "terminal", "usage_uncertain"]);
 const PATH_FIELDS = new Set(["node_path", "branch_path"]);
-const CONTAINER_FIELDS = new Set(["payload", "metadata", "budget", "usage", "progress"]);
+// Issue #460 (M11-S2, épico #458): `node.rerouted`'s `from`/`to` — nested
+// `{provider, model}` objects, not a flattened `from_provider`/`from_model`
+// (decision recorded in `docs/decisions/2026-09-13-canal-route-envelope.md`)
+// — `provider`/`model` inside pass through `IDENTITY_FIELDS` unchanged.
+const CONTAINER_FIELDS = new Set([
+  "payload",
+  "metadata",
+  "budget",
+  "usage",
+  "progress",
+  "from",
+  "to",
+]);
 const SAFE_MARKER_STATES = new Set([
   "excluded_by_policy",
   "excluded_private_state",
@@ -117,6 +131,9 @@ const SAFE_EVENT_TYPES = new Set([
   // node state/failure live in `workflow.node`/`workflow.fault`; pause is
   // the only per-node event this engine emits (decision #368).
   "node.paused",
+  // Issue #460 (M11-S2): one per node a route pivot actually rewrote —
+  // `channel`/`pivot`/`from`/`to` below.
+  "node.rerouted",
   "segment.completed",
   "segment.started",
   "tool.completed",
@@ -136,6 +153,11 @@ const SAFE_PROVENANCE = new Set([
   "unavailable",
 ]);
 const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
+  // Issue #460 (M11-S2, épico #458): `node.rerouted`'s own channel —
+  // `operator` for an explicit `route`, `route_envelope` for the operator's
+  // own `workflow_routes.json` suggestion applied automatically on resume
+  // (decision 1(b), épico #458).
+  channel: new Set(["operator", "route_envelope"]),
   reason: new Set([
     // Issue #378: a dispatch still open when its leaf closes (cancel,
     // shutdown, or an engine-driven timeout) — `close()` (audit-runtime.ts)

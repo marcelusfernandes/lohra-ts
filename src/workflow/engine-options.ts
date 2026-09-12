@@ -1,6 +1,6 @@
 import type { RunControl, WorkflowEngineOptions, WorkflowLoader } from "./engine-contract.js";
 import type { ChildRuntime } from "./runtime.js";
-import type { RouteOverride } from "./route-override.js";
+import type { RerouteRecord, RouteOverride } from "./route-override.js";
 import type { RouteEnvelope } from "./routes.js";
 import type { TierMap } from "./tiers.js";
 
@@ -28,6 +28,11 @@ export interface WorkflowLaunchOptions {
 export interface WorkflowLaunchOptionsWithTiers extends WorkflowLaunchOptions {
   readonly tiers: TierMap;
   readonly routes: RouteEnvelope;
+  /** #460 (M11-S2): the nodes `pivotResume` (route-override.ts) actually
+   * rewrote THIS call — never persisted (`pause_payload_json`'s own
+   * `pivots` already carries the applied override); `service.ts`'s
+   * `launchDurable` reads it once, to call `announceRerouted`. */
+  readonly rerouted?: readonly RerouteRecord[];
 }
 
 /**

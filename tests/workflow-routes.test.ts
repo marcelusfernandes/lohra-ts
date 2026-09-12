@@ -706,7 +706,7 @@ describe("WorkflowService end-to-end — suggested_route reaches workflow_status
     expect(lesson2.suggested_route).toEqual({ provider: "anthropic", model: "z" });
     expect(lesson2.suggested_route).not.toEqual({ provider: "anthropic", model: "y" });
     // Same payload also carries the pivot that was actually applied.
-    expect(stretch2.pivots).toEqual([{ provider: "anthropic", model: "y" }]);
+    expect(stretch2.pivots).toEqual([{ provider: "anthropic", model: "y", channel: "operator" }]);
     connection.close();
   });
 

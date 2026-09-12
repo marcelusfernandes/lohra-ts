@@ -22,6 +22,12 @@ const locks = "src/state/locks.ts";
 const repository = "src/state/workflow-repository.ts";
 const durability = "src/workflow/durability.ts";
 const service = "src/workflow/service.ts";
+// Issue #460 (M11-S2, épico #458): `progressJsonOf`'s body moved here from
+// `service.ts` (extraction the issue itself prescribes, to keep that
+// file's own zero-growth ceiling) — `aa/progress-never-persisted` below
+// re-anchors to where the literal line lives now, `before`/`after`
+// unchanged, same pattern as R3's re-anchor in #459/#463.
+const serviceRollup = "src/workflow/service-rollup.ts";
 const sandbox = "src/workflow/sandbox.ts";
 const sqliteCache = "src/workflow/sqlite-cache.ts";
 const engine = "src/workflow/engine.ts";
@@ -416,7 +422,7 @@ export const namedMutants: readonly Mutant[] = [
     focus: { file: serviceTests, test: "progress is persisted for a cold reader" },
     edits: [
       {
-        file: service,
+        file: serviceRollup,
         before: "  return progress.total > 0 ? JSON.stringify(progress) : null;",
         after: "  void progress;\n  return null;",
       },

@@ -69,7 +69,9 @@ class FailUntilGoodRuntime implements ChildRuntime {
 
   collect(id: string, _options: ChildCollectOptions): ChildResult {
     const provider = this.providerById.get(id) ?? null;
-    if (provider === this.goodProvider) {
+    // An UNPINNED leaf (no provider named at all) always succeeds — only a
+    // NAMED provider other than `goodProvider` is a route fault.
+    if (provider === null || provider === this.goodProvider) {
       return { status: "complete", output: { ok: true }, usage: USAGE, provider, model: "m-good" };
     }
     return {

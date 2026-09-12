@@ -221,7 +221,7 @@ describe("run_workflow(resume_run_id, route) reaches a sub-workflow by ref — c
       // proves the override actually reached `service.ts`'s bookkeeping,
       // not just `engine.ts`'s own field.
       const rollup = durableRollup(resumedView, 0, false);
-      expect(rollup.pivots).toEqual([routeOverride]);
+      expect(rollup.pivots).toEqual([{ ...routeOverride, channel: "operator" }]);
     } finally {
       close();
     }

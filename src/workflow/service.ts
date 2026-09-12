@@ -20,6 +20,8 @@ import {
   liveRuntimeOf,
   nextPivots,
   pauseFields,
+  progressJsonOf,
+  rawSpecOf,
   resultView,
   runningView,
 } from "./service-rollup.js";
@@ -42,7 +44,6 @@ import type { ChildRuntime, LeafSandboxHandle, LeafToolDispatch } from "./runtim
 import { validateNestedRefs, validateSpec } from "./schema.js";
 import { ValidationError, type WorkflowSpec } from "./types.js";
 import type { RunResult } from "./accounting.js";
-import type { ProgressSnapshot } from "./progress.js";
 import { WorkflowRepository, type Ownership } from "../state/workflow-repository.js";
 import {
   DENY_ALL_POLICY,
@@ -493,7 +494,7 @@ export class WorkflowService {
     if (routes instanceof RoutesError) return Object.freeze({ error: routes.message });
     // Resolved once per call and carried on `options` so both launch paths
     // below (fresh, durable) reach the same map without reloading it (#258).
-    const options: WorkflowLaunchOptionsWithTiers = { ...callerOptions, tiers, routes };
+    let options: WorkflowLaunchOptionsWithTiers = { ...callerOptions, tiers, routes };
     const resumeRunId = options.resumeRunId;
     const explicitSpec = rawSpec !== undefined && rawSpec !== null;
     const prior = resumeRunId === undefined ? null : this.durableOf(resumeRunId);
@@ -517,9 +518,14 @@ export class WorkflowService {
     }
     const nested = validateNestedRefs(parsed, this.loader);
     if (nested !== null) return Object.freeze({ error: nested.message, invalid_spec: true });
-    const routed = pivotResume(parsed, options, prior?.pivots ?? []);
+    const priorPivot =
+      prior === null
+        ? null
+        : { pivots: prior.pivots, pauseReason: prior.pause_reason, checkpoint: prior.checkpoint };
+    const routed = pivotResume(parsed, options, priorPivot);
     if (!routed.ok) return Object.freeze({ error: routed.error });
     parsed = routed.spec;
+    options = { ...options, ...routeOverrideOption(routed.override), rerouted: routed.rerouted };
     const budget = options.tokenBudget;
     if (
       budget !== undefined &&
@@ -927,6 +933,11 @@ export class WorkflowService {
       });
     }
     producers.announceStretchStart(attempt, parsed, engine.budget.snapshot());
+    producers.announceRerouted(
+      options.rerouted ?? [],
+      options.routeOverride?.channel ?? "operator",
+      record.pivots.length,
+    );
     void engine
       .run(parsed, args)
       .then(async (result) => {
@@ -1270,17 +1281,4 @@ export class WorkflowService {
     if (!written) return Object.freeze({ error: "busy", run_id: runId });
     return Object.freeze({ run_id: runId, status: "cancelled" });
   }
-}
-
-function rawSpecOf(parsed: WorkflowSpec): Record<string, unknown> {
-  return {
-    meta: { ...parsed.meta },
-    inputs: { ...parsed.inputs },
-    schemas: { ...parsed.schemas },
-    nodes: parsed.nodes.map((node) => ({ id: node.id, type: node.type, ...node.fields })),
-  };
-}
-/** The oracle's None-when-empty rule: a run with no nodes persists no progress. */
-function progressJsonOf(progress: ProgressSnapshot): string | null {
-  return progress.total > 0 ? JSON.stringify(progress) : null;
 }

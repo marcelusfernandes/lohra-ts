@@ -12,6 +12,7 @@ import type { AuditedChildRuntime } from "./audit-runtime.js";
 import type { ProgressSnapshot } from "./progress.js";
 import type { RouteOverride } from "./route-override.js";
 import { ROUTE_FAULT_REASON } from "./route-faults.js";
+import type { WorkflowSpec } from "./types.js";
 // Re-exported (not just imported) so service.ts's own import from THIS
 // module — already needed for `resultView`/`runningView` — can pull
 // `nextPivots`/`artifactsOf` in too, instead of wrapping a second import
@@ -166,6 +167,25 @@ export function resultView(
       result.artifacts,
     ),
   );
+}
+
+/** #460 (M11-S2, épico #458): moved here from `service.ts` (that file's own
+ * zero-growth ceiling has no room for this issue's `pivotResume`/
+ * `announceRerouted` threading) — a plain, dependency-free pair with nothing
+ * to gain from living inside the class file, same move as #246's own
+ * `resultView`/`runningView` above. */
+export function rawSpecOf(parsed: WorkflowSpec): Record<string, unknown> {
+  return {
+    meta: { ...parsed.meta },
+    inputs: { ...parsed.inputs },
+    schemas: { ...parsed.schemas },
+    nodes: parsed.nodes.map((node) => ({ id: node.id, type: node.type, ...node.fields })),
+  };
+}
+
+/** The oracle's None-when-empty rule: a run with no nodes persists no progress. */
+export function progressJsonOf(progress: ProgressSnapshot): string | null {
+  return progress.total > 0 ? JSON.stringify(progress) : null;
 }
 
 /** #448: the still-"running" snapshot `WorkflowService.status` answers for a
