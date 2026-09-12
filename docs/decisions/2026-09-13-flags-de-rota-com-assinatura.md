@@ -37,6 +37,11 @@ invocação — o orquestrador escolheu **(A)**:
 - `src/auth/manage.ts` não muda: `auth_preference` continua um estado
   persistido, resolvido uma vez por processo (`resolveAuthRoute`), não uma
   decisão por invocação de `chat`.
+- Issue #457: `src/commands/dashboard.ts` seguia o padrão antigo — pior,
+  descartava `--provider` em silêncio total, sem nem a nota que `chat`
+  tinha — e foi corrigido com a mesma guarda, extraída para
+  `src/commands/subscription-guard.ts` para a mensagem ficar byte-igual nos
+  dois comandos (`chat.ts` e `dashboard.ts`).
 
 ### Por que não (B)
 
@@ -66,6 +71,13 @@ nunca silenciar a flag e seguir com uma rota diferente da pedida.
   continua roteado ao transporte Responses (não-regressão).
 - `tests/chat-subscription-refresh.test.ts`: continua verde — o tratamento
   de falha de refresh que este fix não pode quebrar.
-- `npm run mutations:auth` (13/13), `npm run mutations:t17` (57/57) e
-  `npm run mutations:self-update` (8/8) — fatias cujo `srcGlobs` cobre
-  `src/commands/chat.ts` — sem sobreviventes.
+- `tests/dashboard-subscription-provider-flag.test.ts` (issue #457): mesma
+  recusa em `dashboard.ts`, com zero rede (stub de `fetch` e espião em
+  `NativeChatHttpPort.prototype.post`) e não-regressão de `--model` sozinho
+  provada por um turno real via WS até o transporte Responses.
+- `npm run mutations:t17` (fatia `workflow-audit-live`) e
+  `npm run mutations:self-update` — as duas fatias cujo `srcGlobs` cobre
+  `src/commands/**` (`scripts/mutations/slices.json`) — sem sobreviventes.
+  `npm run mutations:auth` cobre só `src/auth/**`; não exercita
+  `src/commands/chat.ts` nem `src/commands/dashboard.ts`, ao contrário do
+  que uma versão anterior desta nota afirmava.
