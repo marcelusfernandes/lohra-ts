@@ -89,7 +89,7 @@ describe("runChat refuses an explicit --provider in subscription mode before any
       const result = await runChat({
         input: "oi",
         flags: new Map<string, string | true>([...flags, ["--json", true]]),
-        environment: {},
+        environment: { HOME: base },
         home,
         codexHome,
         cwd: base,

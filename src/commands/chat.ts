@@ -173,8 +173,8 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       return initializationError(
         input,
         null,
-        `--provider ${provider} ignored is not an option: subscription mode is active — ` +
-          "run `lohra auth prefer api_key` or omit --provider.",
+        `--provider ${provider} cannot be honored while subscription mode is active — ` +
+          "run `lohra auth prefer api_key` to use API-key routes, or omit --provider.",
       );
     }
     let credentials;
