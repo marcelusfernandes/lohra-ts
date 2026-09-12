@@ -277,6 +277,20 @@ function boundedRunId(value: string): string {
 }
 
 function rawMarker(value: unknown): AuditMarker {
+  // Issue #511: a re-sanitization pass (`parseEvent` on read) hands a value
+  // already wrapped by a PREVIOUS `rawMarker` call back into this function —
+  // e.g. an unknown top-level key's marker, or a raw field's own marker that
+  // fell through the `preserved` check below. Recognizing that shape here
+  // (state `excluded_by_policy` specifically — never any other
+  // `SAFE_MARKER_STATES` member, which stays subject to the raw-field
+  // bypass check in `safeValue`) and returning it UNCHANGED is what makes
+  // `publicAuditEvent` idempotent in size: without it, an object marker like
+  // `{state, characters}` gets treated as an opaque object on the next pass
+  // and re-wrapped as `{state, fields: N}`, growing every re-sanitization.
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const preserved = marker(value as Readonly<Record<string, unknown>>);
+    if (preserved !== null && preserved.state === "excluded_by_policy") return preserved;
+  }
   if (typeof value === "string")
     return Object.freeze({
       state: "excluded_by_policy",
