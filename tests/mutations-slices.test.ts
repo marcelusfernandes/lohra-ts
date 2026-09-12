@@ -483,7 +483,7 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 260 (soma dos treze catálogos importados)", () => {
+  it("a contagem total de mutantes é 267 (soma dos treze catálogos importados)", () => {
     // Os doze catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
@@ -535,9 +535,29 @@ describe("scripts/mutations/slices.json", () => {
     // `no_leaves` continuava tautológico ao ponto de classificar `null`
     // (branches nunca resolvidas para array, ou um fan-out cap trip) junto
     // com `[]` de verdade; agora exige `Array.isArray(output) &&
-    // output.length === 0`: 259 + 1 = 260.
+    // output.length === 0`: 259 + 1 = 260. A issue #519 (M16-S4, épico #490,
+    // última sub-issue da milestone) ancora o caminho de abort em voo já
+    // mergeado (S1-S3/S5/S6) com 7 mutantes novos: `supervision-mutants.ts`
+    // ganha N1 (`client.ts`'s `AnthropicMessagesClient.stream` deixa de
+    // encaminhar `signal` para a request inicial), N2 (`child-runner.ts`
+    // troca `error.partialUsage` por `null` no `catch` de
+    // `ConversationCancelledError`) e N3 (`orchestration-runtime.ts`'s
+    // `CANCEL_SETTLE_TIMEOUT_MS` zerado) -- 260 + 3 = 263.
+    // `workflow-audit-producers-mutants.ts` ganha B1 (`audit-model.ts`
+    // remove `"partial"` de `BOOLEAN_FIELDS`) e B2 (`audit-runtime.ts`'s
+    // `failedPayload(null, ...)` deixa de nomear `error_kind: "cancelled"`)
+    // -- 263 + 2 = 265. `context-window.ts` ganha p (`token-estimate.ts`'s
+    // `estimatePartialUsage` cobra `partial.text` no fator JSON, mais denso,
+    // em vez do fator de prosa) e q (`provider-model.ts`'s
+    // `AnthropicMessagesModel.complete` deixa de encaminhar
+    // `request.signal` no ramo streaming) -- os dois mudam `src/conversation/`
+    // ou `src/context/`, fora do `srcGlobs` de `supervision`
+    // (`src/workflow/**`, `src/orchestration/**`, `src/transports/**`), por
+    // isso foram para `context-window` (cujo `srcGlobs` cobre os dois),
+    // NÃO `supervision-mutants.ts` como a issue original sugeria (âncoras a
+    // conferir no HEAD, #519): 265 + 2 = 267.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 260;
+    const TOTAL_MUTANTS = 267;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -554,22 +574,22 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/workflow-durability-named.ts": 41,
       "scripts/mutations/orchestration.ts": 5,
       "scripts/mutations/workflow-audit-live-mutants.ts": 32,
-      "scripts/mutations/workflow-audit-producers-mutants.ts": 25,
+      "scripts/mutations/workflow-audit-producers-mutants.ts": 27,
       "scripts/mutations/web-tools-mutants.ts": 9,
       "scripts/mutations/media-catalog-other.ts": 7,
       "scripts/mutations/media-catalog-persistence.ts": 13,
       "scripts/mutations/self-update-mutants.ts": 8,
       "scripts/mutations/workflow-executor-mutants.ts": 45,
-      "scripts/mutations/context-window.ts": 15,
+      "scripts/mutations/context-window.ts": 17,
       "scripts/mutations/auth-mutants.ts": 13,
-      "scripts/mutations/supervision-mutants.ts": 33,
+      "scripts/mutations/supervision-mutants.ts": 36,
     };
     expect(new Set(Object.keys(CONTAGEM_POR_CATALOGO))).toEqual(new Set(CATALOGOS.keys()));
     for (const [path, mutants] of CATALOGOS) {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(260);
+    expect(somaTabela).toBe(267);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {
