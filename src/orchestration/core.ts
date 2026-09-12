@@ -111,6 +111,16 @@ export interface SpawnConfig {
  * resolves as `interrupted`/`cancelled` with an estimated partial usage
  * instead of a generic provider failure. shutdown() is this signal's only
  * trigger today (contract L16).
+ *
+ * interrupts (issue #520, M16-S5, ADR 0005) is OPTIONAL — every runChild
+ * fake predating this issue (34 across tests/) keeps compiling and running
+ * unchanged, since a function value with fewer parameters than a type
+ * declares is assignable wherever that type is expected. A real runner
+ * (`createChildRunner`, child-runner.ts) threads it straight into the real
+ * turn loop's own `interruptSource` (`ConversationRuntime.runTurn`): armed
+ * once per provider call, it lets `core.steer` on a busy leaf tear down a
+ * call already in flight instead of only queuing into the inbox for the
+ * NEXT call.
  */
 export type ChildRunner = (
   subId: string,
@@ -118,6 +128,9 @@ export type ChildRunner = (
   systemPrompt: string,
   drainMessages: () => readonly Readonly<Record<string, unknown>>[],
   signal: AbortSignal,
+  interrupts?: {
+    readonly arm: (abort: () => void) => () => void;
+  },
 ) => Promise<CollectResult>;
 
 export interface OrchestrationCoreOptions {
@@ -204,6 +217,16 @@ interface SubSessionEntry {
    * drained by the runner's own iteration loop while this child is busy or
    * queued-in-pool (contract L6). */
   readonly inbox: string[];
+  /** Issue #520 (M16-S5, ADR 0005): the CURRENT provider call's abort
+   * trigger, armed by `runAndTrack`'s own `interrupts.arm` hook right
+   * before the turn loop issues that call (`ConversationRuntime.runTurn`'s
+   * `interruptSource`) and cleared back to `null` the moment that call
+   * settles, win or lose — never armed between calls (running a tool,
+   * between iterations). `null` means either no turn has started a call
+   * yet OR the leaf is between calls right now: `steer()`'s busy branch
+   * reads this to decide D2 (a steer on a busy leaf interrupts a call
+   * ACTUALLY in flight, never one that merely might start later). */
+  interrupt: (() => void) | null;
   /** The causal identity attached to the MOST RECENT accepted steer() call,
    * if any — stored for S2's `leaf.steered` audit event (issue #423); never
    * consulted by steer()/collect() themselves. A refused call never
@@ -256,6 +279,7 @@ export class OrchestrationCore {
       promise,
       abortController,
       inbox: [],
+      interrupt: null,
     });
     this.insertionOrder.push(subId);
     return { subId };
@@ -327,7 +351,11 @@ export class OrchestrationCore {
     subId: string,
     text: string,
     causal?: CausalContext,
-  ): { readonly queued: boolean; readonly refused?: "steer_cap" } | null {
+  ): {
+    readonly queued: boolean;
+    readonly refused?: "steer_cap";
+    readonly interrupted?: boolean;
+  } | null {
     const entry = this.entries.get(subId);
     if (entry === undefined) return null;
     if (entry.inFlight) {
@@ -336,6 +364,18 @@ export class OrchestrationCore {
       }
       if (causal !== undefined) entry.causal = causal;
       entry.inbox.push(text);
+      // Issue #520 (D2 adotado por default): EVERY steer on a busy leaf
+      // with a call actually in flight interrupts it — never opt-in, never
+      // restricted to a `source`. `entry.interrupt` is non-null ONLY while
+      // a provider call is genuinely in flight (see the field's own doc) —
+      // a leaf executing a tool between calls has it `null`, so this never
+      // fires there (contra-assertion, tests/orchestration-steer-interrupt.
+      // test.ts).
+      const interrupt = entry.interrupt;
+      if (interrupt !== null) {
+        interrupt();
+        return { queued: true, interrupted: true };
+      }
       return { queued: true };
     }
     if (causal !== undefined) entry.causal = causal;
@@ -447,9 +487,35 @@ export class OrchestrationCore {
     const abortController = new AbortController();
     const drainMessages = (): readonly Readonly<Record<string, unknown>>[] =>
       this.drainInboxFor(subId);
+    // Issue #520 (M16-S5, ADR 0005): looks the entry up by subId INSIDE
+    // `arm`/the returned disarm (never closes over it directly) — same
+    // reason the settlement callback below does, and the only way this
+    // works both before spawn() has inserted the entry yet and after a
+    // steer-driven resurrection replaces `promise`/`abortController` on the
+    // SAME entry object. `disarm` clears `entry.interrupt` back to `null`
+    // only when it is STILL the abort this particular `arm` call installed
+    // — a later call's own `arm` (the next iteration's provider call)
+    // always wins a race against an earlier call's `disarm` running late.
+    const interrupts = {
+      arm: (abort: () => void): (() => void) => {
+        const entry = this.entries.get(subId);
+        if (entry !== undefined) entry.interrupt = abort;
+        return () => {
+          const current = this.entries.get(subId);
+          if (current !== undefined && current.interrupt === abort) current.interrupt = null;
+        };
+      },
+    };
     const promise = this.gate
       .run(() =>
-        this.options.runChild(subId, config, systemPrompt, drainMessages, abortController.signal),
+        this.options.runChild(
+          subId,
+          config,
+          systemPrompt,
+          drainMessages,
+          abortController.signal,
+          interrupts,
+        ),
       )
       .then((result) => {
         const entry = this.entries.get(subId);

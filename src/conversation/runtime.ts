@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { estimateCost, type CostEstimate } from "../pricing/index.js";
 import { estimatePartialUsage, estimateRequestTokens } from "../context/token-estimate.js";
-import { StreamAbortedError } from "../transports/index.js";
+import { emptyPartialStream, StreamAbortedError } from "../transports/index.js";
 import type { NormalizedResponse, ToolCall, Usage } from "../transports/index.js";
 import { runBounded } from "../tools/dispatch.js";
 import {
@@ -76,6 +76,17 @@ function isAbortOf(error: unknown, signal: AbortSignal): boolean {
   if (error instanceof StreamAbortedError) return true;
   if (!(error instanceof Error)) return false;
   return error.name === "AbortError" || error.cause === signal.reason;
+}
+
+/** Issue #520 (M16-S5, ADR 0005): the abort REASON `interruptSource`'s armed
+ * hook passes to its own per-call `AbortController` — never thrown, never
+ * surfaced to a caller; only ever read back through `call.signal.aborted`
+ * below to tell a steer-driven interrupt apart from the outer `signal`'s
+ * own external cancel (which keeps taking precedence, S3). Named so a
+ * future debugging session reading a rejection's `.cause` chain sees WHY
+ * that particular call tore down, without this ever needing to be exported. */
+class SteerInterrupt extends Error {
+  override readonly name = "SteerInterrupt";
 }
 
 export interface ConversationRuntimeOptions {
@@ -333,6 +344,15 @@ export class ConversationRuntime {
      * propagated (never swallowed, never left silent); no request is built
      * for that iteration. */
     readonly drainMessages?: () => readonly Readonly<Record<string, unknown>>[];
+    /** Issue #520 (M16-S5, ADR 0005): armed fresh before EVERY provider call
+     * this turn issues (`interruptSource.arm(abort)`, disarmed in that
+     * call's own `finally`, never left armed between calls) — an
+     * orchestration adapter's `OrchestrationCore.steer` is the intended
+     * caller, arming this per-child so a busy leaf's steer can tear a call
+     * already in flight down instead of only queuing into the inbox for
+     * the NEXT one (D2). Absent means no seam at all, and the turn behaves
+     * exactly as it did before this option existed. */
+    readonly interruptSource?: { readonly arm: (abort: () => void) => () => void };
   }): Promise<ConversationTurnResult> {
     const sessionId = input.sessionId ?? this.options.idSource();
     let session = this.options.repository.session(sessionId);
@@ -385,6 +405,11 @@ export class ConversationRuntime {
     };
     emit("turn.started");
     let apiCalls = 0;
+    // Issue #520 (D3, M16-S5, ADR 0005): how many of THIS turn's own calls
+    // were torn down by a steer-driven interrupt and absorbed with
+    // `continue` — surfaced on the result only when > 0 (see
+    // `ConversationTurnResult.partialCalls`'s own doc).
+    let partialCalls = 0;
     let usageTotal: Usage | null = null;
     let reasoningTotal = "";
     let historyBoundary = history.length;
@@ -443,6 +468,20 @@ export class ConversationRuntime {
         // event already fired) — same classification as the top-of-loop
         // check just above, just covering the newly-async preflight step.
         if (signalAborted(signal)) throw new ConversationCancelledError(sessionId, signal.reason);
+        // Issue #520 (M16-S5, ADR 0005): a fresh AbortController PER CALL,
+        // armed only for the lifetime of this one `transport.complete` —
+        // `interruptSource` (an orchestration adapter's `OrchestrationCore`)
+        // can fire `call.abort` any time a busy leaf gets steered, but only
+        // while this call is actually the one in flight. The composite
+        // `AbortSignal.any` means either the outer `signal` (external
+        // cancel/shutdown, unchanged) or this call's own controller tears
+        // the request down; `disarm()` in `finally` always clears the hook
+        // back to `null` once this call settles, win or lose, so a steer
+        // arriving BETWEEN calls (a tool running) never sees a live hook.
+        const call = new AbortController();
+        const disarm = input.interruptSource?.arm(() => {
+          call.abort(new SteerInterrupt());
+        });
         const request: ModelRequest = {
           system: session.systemPrompt,
           messages: immutableMessages(messages),
@@ -453,7 +492,7 @@ export class ConversationRuntime {
           tools: immutableMessages(
             (this.options.toolDefinitions ?? []) as readonly Readonly<Record<string, unknown>>[],
           ),
-          signal,
+          signal: AbortSignal.any([signal, call.signal]),
           ...(input.onDelta ? { onText: input.onDelta } : {}),
         };
         emit("model.request.started");
@@ -461,6 +500,12 @@ export class ConversationRuntime {
         try {
           response = await this.options.transport.complete(request);
         } catch (error) {
+          // The outer `signal` (external cancel/shutdown, S3) always takes
+          // precedence: if IT is the one aborted, this is a cancellation
+          // regardless of whether the per-call `call` controller also
+          // fired in the same race — never reclassified into `continue`
+          // below (contra-assertion,
+          // tests/conversation-runtime-injection.test.ts).
           if (isAbortOf(error, signal)) {
             const partialUsage =
               error instanceof StreamAbortedError
@@ -475,7 +520,33 @@ export class ConversationRuntime {
               apiCalls: apiCalls + 1,
             });
           }
+          // Issue #520 (D2/D3): the outer `signal` never fired, but THIS
+          // call's own controller did — a steer-driven interrupt tore this
+          // call down mid-flight. Counted as spent (apiCalls, estimated
+          // usage), never as a free retry — the turn absorbs it with
+          // `continue`, discarding the partial response entirely (nothing
+          // pushed to `messages`/`turnMessages`) and lets the NEXT
+          // iteration's `drainMessages` inject whatever prompted the steer
+          // in the first place.
+          if (signalAborted(call.signal) && !signalAborted(signal)) {
+            const partial =
+              error instanceof StreamAbortedError ? error.partial : emptyPartialStream;
+            apiCalls += 1;
+            usageTotal = addUsage(
+              usageTotal,
+              estimatePartialUsage(partial, {
+                system: request.system,
+                messages: request.messages,
+                tools: request.tools,
+              }),
+            );
+            partialCalls += 1;
+            emit("model.request.interrupted");
+            continue;
+          }
           throw new ConversationTurnFailedError(sessionId, providerMessage(error), error);
+        } finally {
+          disarm?.();
         }
         apiCalls += 1;
         usageTotal = addUsage(usageTotal, response.usage);
@@ -651,6 +722,7 @@ export class ConversationRuntime {
           apiCalls,
           sessionSummary: usageTotal === null ? null : this.options.repository.summary(sessionId),
           compaction: compactionSummary,
+          ...(partialCalls > 0 ? { partialCalls } : {}),
         };
       }
       throw new MaxIterationsError(sessionId, this.maxIterations);
