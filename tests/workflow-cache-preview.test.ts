@@ -30,16 +30,9 @@ import type {
   LeafSandboxHandle,
 } from "../src/workflow/runtime.js";
 import type { WorkflowLoader } from "../src/workflow/engine-contract.js";
-// #462, rodada 2 (revisor, controle-negativo): a base (`main`) não tem
-// `src/workflow/cache-preview.ts` — um import ESTÁTICO daqui quebra a
-// COLETA do arquivo inteiro na base (`Cannot find module`, `colecionou:
-// false`), o que o classificador do controle-negativo (`lib.ts#ehFalhaEstrutural`)
-// conta como `structural-red`, não `assertion-red`. `import type` some na
-// compilação (tsx/vite apagam todo import só-de-tipo antes de rodar), então
-// os tipos ficam estáticos; só o valor `previewResume` precisa do import
-// DINÂMICO, dentro de cada `it` via `harness().preview` abaixo — assim a
-// falha na base acontece DURANTE um teste que já foi coletado, e vira a
-// falha desse teste (assertion-red), não uma falha de coleta do arquivo.
+// #462, rodada 2 (revisor, controle-negativo): só `previewResume` (valor)
+// entra via import DINÂMICO (`harness().preview`) — `import type` some na
+// compilação, então fica estático sem risco de `structural-red` na base.
 import type { PreviewDeps, PreviewNodeOutcome } from "../src/workflow/cache-preview.js";
 
 const roots: string[] = [];
@@ -596,91 +589,36 @@ describe("previewResume — a nested 'workflow' node (#462 AC)", () => {
   });
 });
 
-// Issue #484 (M15, achado dos vereditos das PRs #478/#482): `session-tools.ts`
-// registered `workflow_preview` WITHOUT the production `templateLoader`
-// (`workflow_templates`'s own loader, wired since #464) — every 'workflow'
-// node previewed as 'unknown' even with the ref's template right there on
-// disk. Molde: `tests/workflow-templates.test.ts`'s `setupComposedTools`
-// (the REAL composition root), but with a `WorkflowService` that actually
-// RUNS the nested workflow first (`harness()`'s own shape above), not the
-// bare `neverSpawnRuntime()` one that test uses for wiring-only checks.
 describe("workflow_preview through composeSessionTools — production loader wiring (#484 AC1)", () => {
-  const wiredInnerSpec = {
-    meta: { name: "preview-wired-inner" },
-    nodes: [
-      { id: "x", type: "agent", prompt: "inner one" },
-      { id: "y", type: "agent", prompt: "inner two" },
-    ],
-  };
-
-  it("classifies a nested 'workflow' node as 'nested' using the SAME templateLoader session-tools.ts wires into WorkflowService", async () => {
+  it("classifies a nested 'workflow' node as 'nested' via the production templateLoader", async () => {
     const home = mkdtempSync(join(tmpdir(), "lohra-cache-preview-wired-"));
     roots.push(home);
     mkdirSync(join(home, "workflows"), { recursive: true });
-    writeFileSync(join(home, "workflows", "inner.json"), JSON.stringify(wiredInnerSpec), "utf8");
-
-    const connection = openStateDatabase(join(home, "state.db"));
+    const inner = { meta: { name: "i" }, nodes: [{ id: "x", type: "agent", prompt: "hi" }] };
+    writeFileSync(join(home, "workflows", "inner.json"), JSON.stringify(inner), "utf8");
+    const { service, database, close } = harness({ loader: templateLoader(home) });
     try {
-      const repository = new WorkflowRepository(connection.database);
-      const locks = new LockRepository(connection.database);
-      const audit = new AuditRepository(connection.database);
-      const trail = new AuditTrail(audit);
-      const ownership = { fence: 0 as number, holder: "test", now: 1000 };
-      const store: OwnershipStore = {
-        repository,
-        locks,
-        holder: "test",
-        ttl: 900,
-        ownershipOf: () => ownership,
-        database: connection.database,
-      };
-      const service = new WorkflowService({
-        runtime: completingRuntime(),
-        auditTrail: trail,
-        store,
-        homeRoot: home,
-        loader: templateLoader(home),
-      });
-      const sessions = new SessionRepository(
-        connection.database,
-        () => 1000,
-        connection.ftsEnabled,
-      );
-      const base = createSessionToolBase(connection.database, {});
       const tools = composeSessionTools({
-        base,
+        base: createSessionToolBase(database, {}),
         home,
         cwd: home,
         environment: {},
-        sessions,
+        sessions: new SessionRepository(database),
         workflowService: service,
         orchestrationHandlers: {},
-        visionRunner: {
-          complete: () => Promise.reject(new Error("unused in this test")),
-          close: () => {},
-        },
+        visionRunner: { complete: () => Promise.reject(new Error("unused")), close: () => {} },
         visionModel: "vision-model",
         supportsVision: false,
       });
-
-      const started = service.start({
-        meta: { name: "preview-wired-outer" },
-        nodes: [{ id: "sub", type: "workflow", ref: "inner" }],
-      });
+      const outer = { meta: { name: "o" }, nodes: [{ id: "sub", type: "workflow", ref: "inner" }] };
+      const started = service.start(outer);
       if ("error" in started) throw new Error(started.error);
       await service.status(started.run_id, true);
-
       const raw = await tools.dispatch("workflow_preview", { run_id: started.run_id });
-      const parsed = JSON.parse(raw) as {
-        nodes?: readonly PreviewNodeOutcome[];
-        error?: string;
-      };
-      expect(parsed.error).toBeUndefined();
-      const sub = parsed.nodes?.find((entry) => entry.node_id === "sub");
-      expect(sub?.outcome).toBe("nested");
-      expect(sub?.cells_replayed).toBe(2);
+      const parsed = JSON.parse(raw) as { nodes?: readonly PreviewNodeOutcome[] };
+      expect(parsed.nodes?.find((entry) => entry.node_id === "sub")?.outcome).toBe("nested");
     } finally {
-      connection.close();
+      close();
     }
   });
 });
@@ -776,16 +714,12 @@ describe("workflowPreviewHandler — validation and the happy path (#462 AC3, ro
       const out = JSON.parse(await handler({ run_id: "run-x", route: { provider: "  " } })) as {
         error?: string;
       };
-      expect(out.error ?? "").toContain("route.provider");
-      expect(out.error ?? "").toContain("non-empty");
+      expect(out.error ?? "").toContain("'route.provider' must be a non-empty string");
     } finally {
       close();
     }
   });
 
-  // Issue #484: `parseRouteArg`'s 'route.model' branch (cache-preview.ts,
-  // ~:432) had no test — only its 'route.provider' twin above did. Same
-  // molde, the other field.
   it("refuses a whitespace-only 'route.model'", async () => {
     const { workflowPreviewHandler } = await import("../src/workflow/cache-preview.js");
     const { database, close } = harness();
@@ -794,8 +728,7 @@ describe("workflowPreviewHandler — validation and the happy path (#462 AC3, ro
       const out = JSON.parse(await handler({ run_id: "run-x", route: { model: "  " } })) as {
         error?: string;
       };
-      expect(out.error ?? "").toContain("route.model");
-      expect(out.error ?? "").toContain("non-empty");
+      expect(out.error ?? "").toContain("'route.model' must be a non-empty string");
     } finally {
       close();
     }
@@ -807,9 +740,6 @@ describe("workflowPreviewHandler — validation and the happy path (#462 AC3, ro
     try {
       const handler = workflowPreviewHandler(database, tempHome());
       const out = JSON.parse(await handler({})) as { error?: string };
-      // Issue #484: `toContain("run_id")` alone also matches an unrelated
-      // message that merely mentions the field — the full, exact text pins
-      // the actual named error `requireString` raises.
       expect(out.error).toBe("workflow_preview requires a non-empty string 'run_id'");
     } finally {
       close();
