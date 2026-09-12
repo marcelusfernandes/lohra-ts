@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -143,14 +143,22 @@ describe("vision_analyze handler", () => {
   });
 
   it("keeps path and cause in a read-failure envelope", async () => {
-    const directory = root();
+    const base = root();
+    // "sk123456" casa a regex SECRET de src/media/errors.ts:4 (case
+    // insensitive) de propósito — é o sufixo azarado que o mkdtemp às vezes
+    // sorteia (issue #558), só que determinístico: sem isso, o teste
+    // passaria mesmo com a regex ainda redigindo o caminho, o suficiente
+    // das vezes (~1 em cada 961: 6 chars, alfabeto de 62, "sk"/"sK"/"Sk"/
+    // "SK" seguido de 4+ chars) para 20 execuções verdes não provarem nada.
+    const directory = join(base, "sk123456", "fixture");
+    mkdirSync(directory, { recursive: true });
     const path = join(directory, "unreadable.png");
     writeFileSync(path, "bytes");
     const runner = new VisionStub(response("unused"));
     const handler = createVisionAnalyzeHandler({
       runner,
       model: "m",
-      localRoot: directory,
+      localRoot: base,
       readFile: () => {
         const error = new Error("EACCES: permission denied");
         Object.assign(error, { code: "EACCES" });
@@ -158,7 +166,13 @@ describe("vision_analyze handler", () => {
       },
     });
     const envelope = await handler({ path });
-    expect(envelope).toContain(`failed to read image ${path}: EACCES: permission denied`);
+    // Não afirma sobre o caminho absoluto inteiro: o segmento pai
+    // "sk123456" é redigido de propósito pela regex SECRET
+    // (src/media/errors.ts:4) — é exatamente o comportamento que causava o
+    // flake (#558). A cauda determinística (join("fixture",
+    // "unreadable.png")) nunca cai sob a regex, porque ela não casa "/".
+    expect(envelope).toContain("failed to read image ");
+    expect(envelope).toContain(`${join("fixture", "unreadable.png")}: EACCES: permission denied`);
     expect(envelope).not.toContain("at ");
     expect(runner.requests).toHaveLength(0);
   });
