@@ -3,6 +3,22 @@
   "version": "0.0.11",
   "description": "Headless TypeScript runtime for Lohra",
   "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marcelusfernandes/lohra-ts.git"
+  },
+  "homepage": "https://github.com/marcelusfernandes/lohra-ts#readme",
+  "bugs": {
+    "url": "https://github.com/marcelusfernandes/lohra-ts/issues"
+  },
+  "keywords": [
+    "agent",
+    "cli",
+    "terminal",
+    "workflow",
+    "runtime",
+    "mcp"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -27,6 +43,7 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "postinstall": "node scripts/postinstall.mjs",
+    "prepare": "node scripts/prepare.mjs",
     "doutor": "tsx scripts/doutor.ts",
     "mutations:t20": "tsx scripts/mutations/web-tools.ts",
     "format": "prettier --write .",
