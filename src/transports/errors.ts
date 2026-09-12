@@ -135,8 +135,20 @@ export function rethrowAborted(
   try {
     partial = buildPartial(error.partialBody);
   } catch {
-    // A dangling/incomplete trailing frame in the partial buffer — whatever
-    // DID parse cleanly was already replayed through the callbacks above.
+    // Defensive fallback only: `parseSse` (client.ts), called here with
+    // `tolerateTruncatedTail: true`, no longer throws for a truncated
+    // trailing SSE frame in THIS (abort) path — it discards just that
+    // frame and returns whatever parsed before it (issue #567; the normal,
+    // never-aborted path keeps throwing on any malformed frame, rodada 2
+    // do veredito da PR #572). Reaching here instead means something
+    // downstream of `parseSse` threw partway through: the per-client
+    // assembler (`assembleStreamedResponse`/`anthropicStream`/
+    // `responsesStream`), `replayAnthropicText`, `anthropicPartialUsage`,
+    // `this.options.transport.normalizeResponse`, or even the caller's own
+    // `onText` (reached through `tracked.callbacks`). Whatever any of
+    // those already sent through the callbacks before the throw stays
+    // replayed — only the aggregated `partial` (text/usage) falls back to
+    // empty here.
   }
   if (error instanceof StreamAbortedError) {
     throw new StreamAbortedError(partial, { partialBody: error.partialBody, cause: error.cause });
@@ -165,12 +177,19 @@ export function replayAnthropicText(chunks: readonly unknown[], callbacks: Strea
 }
 
 /** `PartialStream`'s contract: usage only when a usage-bearing frame arrived
- * before the abort — today only Anthropic's `message_start`. */
+ * before the abort — today only Anthropic's `message_start`. A
+ * `message_start` that itself carries no `usage` object (issue #567 — e.g.
+ * one truncated by the same abort that stops the whole stream) returns
+ * `null` too, never a zeroed `Usage`: a zeroed object would be
+ * indistinguishable from "no message_start arrived at all" for a caller
+ * that only checks `partial.usage === null`. */
 export function anthropicPartialUsage(chunks: readonly unknown[]): Usage | null {
   for (const raw of chunks) {
     const event = record(raw);
     if (event.type !== "message_start") continue;
-    const usage = record(record(event.message).usage);
+    const message = record(event.message);
+    if (typeof message.usage !== "object" || message.usage === null) return null;
+    const usage = record(message.usage);
     return {
       inputTokens: toNumber(usage.input_tokens),
       outputTokens: toNumber(usage.output_tokens),

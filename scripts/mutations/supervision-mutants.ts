@@ -16,16 +16,9 @@
 // catálogo nenhum, apesar de `srcGlobs: ["src/workflow/**", ...]` já cobrir
 // os dois (não precisou de `srcGlobs` novo, só `focusFiles`).
 //
-// Rodada 2 (veredito da PR #497, revisor): a rodada 1 desta issue tinha
-// deixado de fora o mutante de `put()` que a issue original pedia, com uma
-// justificativa FALSA ("código morto em toda execução de preview" — o
-// argumento de que `DryRuntime.collect` sempre falha, então
-// `collectLeaf`/`cachePut` nunca alcançam `put()`). O revisor reproduziu o
-// contrário: `engine.ts:480`'s `runParallel` chama `cache.put(...)`
-// INCONDICIONALMENTE quando `branches` resolve para `[]` — `[].every(nonEmpty)`
-// é vacuamente `true`, sem nenhum leaf spawnado, dry ou real (`schema.ts`
-// aceita `branches: []`; `budget.ts`'s `checkFanout(0)` nunca lança). P6
-// (abaixo) cobre esse caminho, ancorado em
+// Rodada 2 (veredito da PR #497, revisor): a rodada 1 tinha deixado de fora
+// o mutante de `put()` (P6, abaixo) com uma justificativa FALSA de "código
+// morto" — ver o comentário de P6 para a refutação. Ancorado em
 // `tests/workflow-cache-preview-writes.test.ts` (arquivo novo — a suíte
 // principal está no teto de 800 linhas; issue #484 emendada com esse glob).
 //
@@ -201,13 +194,10 @@ export const supervisionMutants: readonly Mutant[] = [
     },
     edits: [
       {
-        // Re-anchored by issue #459 (M11-S1, épico #458): the `before` below
-        // is `isRouteLesson`'s body AFTER #459 grew `suggested_route` from
-        // the literal `null` to `Route | null` — the last clause changed
-        // from `candidate.suggested_route === null` to accept the filled
-        // shape too (`isRoute(candidate.suggested_route)`). Amendment on
-        // issue #459 (2026-09-13) put this catalog in that issue's `Files`
-        // for exactly this re-anchor.
+        // Re-anchored by issue #459 (M11-S1, épico #458): `before` is
+        // `isRouteLesson`'s body after #459 grew `suggested_route` from
+        // literal `null` to `Route | null` (last clause now also accepts
+        // `isRoute(candidate.suggested_route)`).
         file: routeFaults,
         before:
           'export function isRouteLesson(value: unknown): value is RouteLesson {\n  if (value === null || typeof value !== "object") return false;\n  const candidate = value as Readonly<Record<string, unknown>>;\n  return (\n    typeof candidate.error_kind === "string" &&\n    isRouteFault(candidate.error_kind as ErrorKind) &&\n    typeof candidate.node_id === "string" &&\n    (candidate.provider === null || typeof candidate.provider === "string") &&\n    (candidate.model === null || typeof candidate.model === "string") &&\n    (candidate.suggested_route === null || isRoute(candidate.suggested_route))\n  );\n}',
@@ -522,14 +512,11 @@ export const supervisionMutants: readonly Mutant[] = [
       },
     ],
   },
-  // Rodada 2 (veredito da PR #497): o mutante que a issue #484 original
-  // pedia e a rodada 1 tinha, incorretamente, descartado como "código
-  // morto" — `runParallel` (engine.ts:480) chama `cache.put(...)` mesmo sem
-  // spawnar nenhum leaf quando `branches` resolve para `[]`. Há uma segunda
-  // barreira independente (`previewResume`'s `dummyOwnership` de
-  // `fence: -1`, recusada por `ownershipGuard`), por isso o oráculo em
-  // `tests/workflow-cache-preview-writes.test.ts` conta tentativas de
-  // `putCacheCellWithCost`, não só linhas de `workflow_node_cache`.
+  // Rodada 2 (veredito da PR #497): a rodada 1 tinha descartado este
+  // mutante como "código morto" — falso, `runParallel` (engine.ts:480)
+  // chama `cache.put(...)` mesmo sem spawnar leaf quando `branches: []`.
+  // O oráculo conta tentativas de `putCacheCellWithCost`, não linhas de
+  // `workflow_node_cache` (há uma segunda barreira independente).
   {
     id: "P6-put-facade-delegates-to-real-cache",
     category: "put-facade-delegates-to-real-cache",
@@ -665,16 +652,11 @@ export const supervisionMutants: readonly Mutant[] = [
       },
     ],
   },
-  // Issue #515 (follow-up of #503, veredito da PR #510): `no_leaves`
-  // (P9 above) used to fire for ANY `parallel` with zero spawns/zero hits,
-  // conflating "branches resolved to `[]`, nothing to pay" with two
-  // genuinely blocked cases — `branches` that never resolved to an array at
-  // all (a template over a failed upstream) and a fan-out cap trip
-  // (`FanoutRejected`) — both leave `output === null`, never `[]`. This
-  // mutant drops the new `Array.isArray(output) && output.length === 0`
-  // guard, reverting to "any parallel that ran with nothing spawned/hit is
-  // no_leaves" — killed by the fan-out-cap `it` below, which needs
-  // `unknown`, not `no_leaves`, for exactly that `null` case.
+  // Issue #515 (follow-up of #503, veredito da PR #510): `no_leaves` (P9)
+  // used to fire for ANY `parallel` with zero spawns/hits, conflating
+  // `branches: []` with `output === null` (unresolved branches or a
+  // fan-out cap trip). Drops the `Array.isArray(output) && length === 0`
+  // guard; killed by the fan-out-cap `it` below, which needs `unknown`.
   {
     id: "P10-no-leaves-guard-drops-empty-array-check",
     category: "no-leaves-guard-drops-empty-array-check",
@@ -709,9 +691,9 @@ export const supervisionMutants: readonly Mutant[] = [
       {
         file: transportsClient,
         before:
-          "    let response: HttpResponseData;\n    try {\n      response = await this.request({ ...kwargs, stream: true }, signal);\n    } catch (error) {\n      rethrowAborted(error, (partialBody) => {\n        const chunks = parseSse(partialBody, parseJsonPreservingNumbers);",
+          "    let response: HttpResponseData;\n    try {\n      response = await this.request({ ...kwargs, stream: true }, signal);\n    } catch (error) {\n      rethrowAborted(error, (partialBody) => {\n        const chunks = parseSse(partialBody, parseJsonPreservingNumbers, {",
         after:
-          "    let response: HttpResponseData;\n    try {\n      response = await this.request({ ...kwargs, stream: true });\n    } catch (error) {\n      rethrowAborted(error, (partialBody) => {\n        const chunks = parseSse(partialBody, parseJsonPreservingNumbers);",
+          "    let response: HttpResponseData;\n    try {\n      response = await this.request({ ...kwargs, stream: true });\n    } catch (error) {\n      rethrowAborted(error, (partialBody) => {\n        const chunks = parseSse(partialBody, parseJsonPreservingNumbers, {",
       },
     ],
   },
@@ -733,17 +715,12 @@ export const supervisionMutants: readonly Mutant[] = [
       },
     ],
   },
-  // N3 originally targeted `CANCEL_SETTLE_TIMEOUT_MS = 0` (issue #519's own
-  // suggestion) against `tests/workflow-abort-in-flight.test.ts`'s "resolves
-  // once the leaf actually settles" test — verified NOT to kill: that test's
-  // own settlement chain resolves entirely via microtasks (no real timer or
-  // I/O in between `core.cancel()` and the leaf's teardown), so Node drains
-  // it before ANY `setTimeout`, including one scheduled for 0ms, ever fires
-  // — the race never actually reaches the ceiling. Retargeted at #521
-  // (M16-S6)'s sibling ceiling in the SAME function family — `collect()`'s
-  // own `deadlineMs` — against a focus that uses a genuinely stuck leaf (a
-  // promise that never resolves at all), where the ceiling is the ONLY
-  // thing that can ever settle the race.
+  // N3 originally targeted `CANCEL_SETTLE_TIMEOUT_MS = 0` (#519's own
+  // suggestion): verified NOT to kill (that focus settles entirely via
+  // microtasks, no real timer, so a 0ms `setTimeout` never fires before the
+  // race resolves). Retargeted at #521's sibling ceiling, `collect()`'s own
+  // `deadlineMs`, against a focus with a leaf that never resolves — there
+  // the ceiling is the only thing that can ever settle the race.
   {
     id: "N3-collect-deadline-ceiling-widened",
     category: "collect-deadline-ceiling-widened",
@@ -757,6 +734,29 @@ export const supervisionMutants: readonly Mutant[] = [
         file: orchestrationRuntime,
         before: "        ? Math.min(options.timeoutSeconds * 1000, 2_147_483_647)",
         after: "        ? Math.min(options.timeoutSeconds * 10_000, 2_147_483_647)",
+      },
+    ],
+  },
+  // Issue #567 (PR #525; restrito à rodada 2 do veredito da PR #572):
+  // parseSse (client.ts) era atômico no abort — N4 reverte o
+  // `tolerateTruncatedTail` inteiro, voltando o caminho de abort a lançar
+  // sempre. O caminho normal (`response.body`, sem a opção) já lançava
+  // antes e depois desta issue; não precisa de mutante próprio.
+  {
+    id: "N4-parse-sse-truncated-frame-atomic",
+    category: "parse-sse-truncated-frame-atomic",
+    mechanism: "family-a",
+    focus: {
+      file: abortInFlightFocus,
+      test: "ChatCompletionsClient.stream replays the deltas already parsed when the trailing SSE frame is truncated mid-abort (issue #567)",
+    },
+    edits: [
+      {
+        file: transportsClient,
+        before:
+          '    if (!data) continue;\n    if (data === "[DONE]") break;\n    if (options.tolerateTruncatedTail !== true) {\n      chunks.push(parse(data));\n      continue;\n    }\n    try {\n      chunks.push(parse(data));\n    } catch {\n      // Abort path only (tolerateTruncatedTail): nothing after this block\n      // could be valid either, so stop here instead of skipping ahead.\n      break;\n    }',
+        after:
+          '    if (!data) continue;\n    if (data === "[DONE]") break;\n    chunks.push(parse(data));',
       },
     ],
   },

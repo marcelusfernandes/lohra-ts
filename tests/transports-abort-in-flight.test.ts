@@ -22,6 +22,12 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const sse = (frames: readonly unknown[]): Uint8Array =>
   encoder.encode(frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join(""));
+const concatBytes = (a: Uint8Array, b: Uint8Array): Uint8Array => {
+  const out = new Uint8Array(a.byteLength + b.byteLength);
+  out.set(a, 0);
+  out.set(b, a.byteLength);
+  return out;
+};
 
 /** A `ChatHttpPort` whose `post()` never settles on its own — it only
  * rejects once `request.signal` fires, with whatever error the caller
@@ -251,6 +257,94 @@ describe("stream() abort in flight (ADR 0005)", () => {
     await anthropicModel.complete(request).catch(() => undefined);
     expect(anthropicPort.requests[0]?.signal).toBe(controller.signal);
   });
+
+  it("ChatCompletionsClient.stream replays the deltas already parsed when the trailing SSE frame is truncated mid-abort (issue #567)", async () => {
+    const { StreamAbortedError } = await import("../src/transports/index.js");
+    const completeFrame = sse([
+      { choices: [{ index: 0, delta: { content: "completo" }, finish_reason: null }] },
+    ]);
+    // A `data:` line cut mid-JSON, no terminating `\n\n` — exactly what an
+    // abort mid-flight leaves behind in `readBounded`/`postNative`'s
+    // captured `partialBody`.
+    const truncatedTail = encoder.encode('data: {"choices":[{"index":0,"delta":{"content":"trunc');
+    const partialBody = concatBytes(completeFrame, truncatedTail);
+    const port = new AbortOnlyPort(
+      () =>
+        new StreamAbortedError(
+          { text: "", reasoningChars: 0, toolArgumentChars: 0, usage: null },
+          { partialBody },
+        ),
+    );
+    const client = new ChatCompletionsClient({
+      baseUrl: "http://127.0.0.1:9",
+      apiKey: "k",
+      transport: new ChatCompletionsTransport(),
+      http: port,
+    });
+    const controller = new AbortController();
+    const received: string[] = [];
+    const pending = client.stream(
+      { model: "m", messages: [] },
+      { onText: (text) => received.push(text) },
+      controller.signal,
+    );
+    controller.abort(new Error("USER_CANCELLED"));
+
+    const error = await pending.catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(StreamAbortedError);
+    // The completed delta stays — only the truncated trailing frame is
+    // discarded, not the whole partial buffer (ADR 0005 amendment #567).
+    expect(received.join("")).toBe("completo");
+    expect((error as InstanceType<typeof StreamAbortedError>).partial.text).toBe("completo");
+  });
+
+  it("NativeChatHttpPort(fetcher).post() rejects with StreamAbortedError, not the raw fetch error, when the signal is already aborted before fetch() is called (issue #567)", async () => {
+    const { StreamAbortedError } = await import("../src/transports/index.js");
+    const fetcher: typeof fetch = vi.fn((_input, init?: RequestInit) => {
+      if (init?.signal?.aborted === true) {
+        return Promise.reject(new DOMException("The operation was aborted.", "AbortError"));
+      }
+      return Promise.resolve(new Response(new Uint8Array(), { status: 200 }));
+    });
+    const port = new NativeChatHttpPort(fetcher);
+    const controller = new AbortController();
+    controller.abort(new Error("USER_CANCELLED"));
+
+    const error = await port
+      .post({
+        url: "http://127.0.0.1:9/x",
+        headers: {},
+        body: "{}",
+        timeoutMs: 5_000,
+        maxBytes: 4_000_000,
+        signal: controller.signal,
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(StreamAbortedError);
+    expect((error as InstanceType<typeof StreamAbortedError>).partialBody?.byteLength).toBe(0);
+  });
+
+  it("NativeChatHttpPort() (native path) .post() rejects with StreamAbortedError carrying an empty partialBody when the signal is already aborted before the request is sent (issue #567)", async () => {
+    const { StreamAbortedError } = await import("../src/transports/index.js");
+    const port = new NativeChatHttpPort();
+    const controller = new AbortController();
+    controller.abort(new Error("USER_CANCELLED"));
+
+    const error = await port
+      .post({
+        url: "http://127.0.0.1:9/x",
+        headers: {},
+        body: "{}",
+        timeoutMs: 5_000,
+        maxBytes: 4_000_000,
+        signal: controller.signal,
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(StreamAbortedError);
+    expect((error as InstanceType<typeof StreamAbortedError>).partialBody?.byteLength).toBe(0);
+  });
 });
 
 describe("stream() without an abort stays byte-identical (contra-assertion)", () => {
@@ -320,5 +414,24 @@ describe("stream() without an abort stays byte-identical (contra-assertion)", ()
     await expect(
       client.stream({ model: "m", input: [] }, {}, controller.signal),
     ).resolves.toMatchObject({ finishReason: "stop" });
+  });
+
+  it("a malformed SSE frame in a normal (never-aborted) 200 response still throws — fail-closed (CLAUDE.md invariante 2), never a silently truncated success (issue #567, rodada 2 do veredito da PR #572)", async () => {
+    // The tolerance parseSse gained for the ABORT path (issue #567) must
+    // NEVER leak into a normal response: a corrupted frame here is a real
+    // signal, and the valid frame right after it must not be silently
+    // dropped along with a swallowed error — the call has to throw.
+    const corrupted = encoder.encode("data: not-json\n\n");
+    const validAfterward = sse([
+      { choices: [{ index: 0, delta: { content: "valido" }, finish_reason: "stop" }] },
+    ]);
+    const body = concatBytes(corrupted, validAfterward);
+    const client = new ChatCompletionsClient({
+      baseUrl: "http://127.0.0.1:9",
+      apiKey: "k",
+      transport: new ChatCompletionsTransport(),
+      http: new QueueHttp(body),
+    });
+    await expect(client.stream({ model: "m", messages: [] })).rejects.toThrow();
   });
 });

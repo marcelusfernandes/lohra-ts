@@ -177,16 +177,16 @@ adicionar uma fatia" cita a mesma restrição.
 | `self-update`         | `mutations:self-update` |        8 | `self-update-mutants.ts`                                                                                              |
 | `context-window`      | `mutations:t23`         |       17 | `context-window.ts`                                                                                                   |
 | `auth`                | `mutations:auth`        |       13 | `auth-mutants.ts`                                                                                                     |
-| `supervision`         | `mutations:supervision` |       38 | `supervision-mutants.ts`                                                                                              |
+| `supervision`         | `mutations:supervision` |       39 | `supervision-mutants.ts`                                                                                              |
 
-Total: 269. Os 12 mutantes de `workflow-durability-guard.ts` são
+Total: 270. Os 12 mutantes de `workflow-durability-guard.ts` são
 combinatórios: três conjuntos do guard de escrita possuída (`fence`,
 `holder`, `lease-validity`) × quatro categorias (`state`, `cache`,
 `node-cost`, `spend`) — um mutante por combinação, cada um escorado só no
 teste focal da sua categoria, mais os 2 mutantes do INSERT combinado
 cache+custo (`combined-cell-guard-removed`,
 `combined-cost-escapes-refusal`). `tests/mutations-slices.test.ts` importa os
-treze catálogos de dado puro estaticamente e prova essa soma (269) a cada
+treze catálogos de dado puro estaticamente e prova essa soma (270) a cada
 corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
 
 `supervision-mutants.ts` (issue #451, milestone 14 — achado de QA/revisão de
@@ -367,6 +367,19 @@ sem o `map`), morto pelo `it` já existente de `tests/workflow-nodes-tool.test.t
 `result.faults[0]).toContain("sub[inner]")` depende exatamente do prefixo.
 `focusFiles` da fatia `supervision` ganha `tests/workflow-nodes-tool.test.ts`
 — 268 + 1 = 269.
+
+Issue #567 (veredito da PR #525, achado do "abort de stream em voo",
+ADR 0005) acrescenta `N4-parse-sse-truncated-frame-atomic`: `parseSse`
+(`client.ts`) era atômico — um `SyntaxError` no último `data:` truncado por
+um abort em voo propagava para fora da função e descartava também os
+eventos já parseados com sucesso, deixando `partial.text` vazio mesmo com
+deltas completos antes do corte. N4 reverte o `try`/`catch` que passou a
+descartar só o frame truncado, morto pelo `it` novo de
+`tests/transports-abort-in-flight.test.ts`, "ChatCompletionsClient.stream
+replays the deltas already parsed when the trailing SSE frame is truncated
+mid-abort (issue #567)" — 269 + 1 = 270. `focusFiles` da fatia
+`supervision` não muda (`tests/transports-abort-in-flight.test.ts` já
+estava lá, desde a issue #519).
 
 `workflow-executor-mutants.ts` (issue #418) acrescentou
 `Q1-quota-guard-removed`: a guarda que impede `quota_exhausted` de entrar em

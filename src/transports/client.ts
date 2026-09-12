@@ -138,13 +138,32 @@ export class NativeChatHttpPort implements ChatHttpPort {
       controller.abort(new Error("REQUEST_TIMEOUT"));
     }, request.timeoutMs);
     try {
-      const response = await this.fetcher(request.url, {
-        method: "POST",
-        headers: { ...request.headers },
-        body: request.body,
-        signal: controller.signal,
-        redirect: "error",
-      });
+      let response: Response;
+      try {
+        response = await this.fetcher(request.url, {
+          method: "POST",
+          headers: { ...request.headers },
+          body: request.body,
+          signal: controller.signal,
+          redirect: "error",
+        });
+      } catch (error) {
+        // ADR 0005 (issue #567): `fetch()` itself rejects synchronously
+        // when `controller.signal` is already aborted — before
+        // `readBounded` ever runs, so its own `StreamAbortedError` never
+        // gets a chance to fire. A CALLER abort (not the internal timeout,
+        // which uses `controller` directly, never `request.signal`) gets
+        // the same `StreamAbortedError` shape as every other abort exit —
+        // one class, one shape (errors.ts's own docblock on
+        // `StreamAbortedError`), regardless of what `fetch()` itself threw.
+        if (request.signal?.aborted === true) {
+          throw new StreamAbortedError(emptyPartialStream, {
+            partialBody: new Uint8Array(),
+            cause: request.signal.reason,
+          });
+        }
+        throw error;
+      }
       return {
         status: response.status,
         headers: response.headers,
@@ -295,9 +314,22 @@ function providerFailure(response: HttpResponseData): ProviderCallFailed {
   });
 }
 
+/** ADR 0005 amendment (issue #567, rodada 2 do veredito da PR #572): a
+ * stream aborted in flight can leave its LAST `data:` frame cut mid-JSON
+ * (`readBounded`/`postNative` capture whatever bytes already arrived, not a
+ * clean frame boundary) — `partial.text` should still carry whatever
+ * parsed cleanly before that cut. A malformed frame in a NORMAL (never
+ * aborted) response is a different thing entirely: fail-closed (CLAUDE.md
+ * invariante 2) demands it still throws, exactly like the base, instead of
+ * silently truncating a 200 response. `tolerateTruncatedTail` defaults to
+ * `false` so every ordinary `parseSse(response.body, ...)` call keeps
+ * throwing; only `rethrowAborted`'s `buildPartial` callbacks — the three
+ * call sites that parse `error.partialBody`, never `response.body` — opt
+ * in explicitly. */
 function parseSse(
   body: Uint8Array,
   parse: (value: string) => unknown = (value) => JSON.parse(value) as unknown,
+  options: { readonly tolerateTruncatedTail?: boolean } = {},
 ): unknown[] {
   const chunks: unknown[] = [];
   const blocks = new TextDecoder().decode(body).split(/\r?\n\r?\n/u);
@@ -309,7 +341,17 @@ function parseSse(
       .join("\n");
     if (!data) continue;
     if (data === "[DONE]") break;
-    chunks.push(parse(data));
+    if (options.tolerateTruncatedTail !== true) {
+      chunks.push(parse(data));
+      continue;
+    }
+    try {
+      chunks.push(parse(data));
+    } catch {
+      // Abort path only (tolerateTruncatedTail): nothing after this block
+      // could be valid either, so stop here instead of skipping ahead.
+      break;
+    }
   }
   return chunks;
 }
@@ -360,7 +402,10 @@ export class ChatCompletionsClient {
     } catch (error) {
       rethrowAborted(error, (partialBody) => {
         const tracked = withTextTracking(callbacks);
-        const raw = assembleStreamedResponse(parseSse(partialBody), tracked.callbacks);
+        const raw = assembleStreamedResponse(
+          parseSse(partialBody, undefined, { tolerateTruncatedTail: true }),
+          tracked.callbacks,
+        );
         return partialFromNormalized(this.options.transport.normalizeResponse(raw), {
           text: tracked.text(),
         });
@@ -526,7 +571,9 @@ export class AnthropicMessagesClient {
       response = await this.request({ ...kwargs, stream: true }, signal);
     } catch (error) {
       rethrowAborted(error, (partialBody) => {
-        const chunks = parseSse(partialBody, parseJsonPreservingNumbers);
+        const chunks = parseSse(partialBody, parseJsonPreservingNumbers, {
+          tolerateTruncatedTail: true,
+        });
         const tracked = withTextTracking(callbacks);
         replayAnthropicText(chunks, tracked.callbacks);
         return partialFromNormalized(
@@ -657,7 +704,10 @@ export class ResponsesClient {
     } catch (error) {
       rethrowAborted(error, (partialBody) => {
         const tracked = withTextTracking(callbacks);
-        const raw = responsesStream(parseSse(partialBody), tracked.callbacks);
+        const raw = responsesStream(
+          parseSse(partialBody, undefined, { tolerateTruncatedTail: true }),
+          tracked.callbacks,
+        );
         return partialFromNormalized(this.options.transport.normalizeResponse(raw), {
           text: tracked.text(),
         });
