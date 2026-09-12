@@ -65,6 +65,7 @@ import type {
   ChildRuntime,
   ChildSpawnRequest,
   LeafSandboxHandle,
+  SteerOutcome,
 } from "../src/workflow/runtime.js";
 
 const roots: string[] = [];
@@ -109,14 +110,37 @@ function blockedLeafRuntime(): ChildRuntime & {
     },
     spawn: (_request: ChildSpawnRequest): string => "leaf-1",
     collect: (): Promise<ChildResult> => barrier.promise,
-    // Declared `void` (the port), but returns a real `core.steer`-shaped
-    // outcome at runtime — same "declared void, real value" posture
-    // `OrchestrationChildRuntime.steer` itself now uses (issue #424, 2ª
-    // emenda), so `workflow_steer`'s runtime shape check has something
-    // real to recover here too.
+    // Issue #450: `steer` itself is real `void` now (the port's own
+    // declared type) — the outcome `workflow_steer` (steer-tool.ts) reads
+    // comes from the NEW, separate `steerOutcome` member below, never from
+    // `steer`'s return value.
+    steer: (): void => undefined,
+    steerOutcome: (id: string, prompt: string) => {
+      steered.push({ id, prompt });
+      return { queued: true };
+    },
+    cancel: (): void => undefined,
+  });
+}
+
+/** One spawn, one blocked `collect()` — `steer` delegates but the runtime
+ * reports NO outcome at all (no `steerOutcome` member), the shape every
+ * `ChildRuntime` besides `OrchestrationChildRuntime` has today. */
+function noOutcomeRuntime(): ChildRuntime & {
+  readonly steered: readonly Readonly<{ id: string; prompt: string }>[];
+  release(result: ChildResult): void;
+} {
+  const steered: Readonly<{ id: string; prompt: string }>[] = [];
+  const barrier = deferred<ChildResult>();
+  return withMinimalLeafSandbox({
+    steered,
+    release: (result: ChildResult): void => {
+      barrier.resolve(result);
+    },
+    spawn: (_request: ChildSpawnRequest): string => "leaf-1",
+    collect: (): Promise<ChildResult> => barrier.promise,
     steer: (id: string, prompt: string): void => {
       steered.push({ id, prompt });
-      return { queued: true } as unknown as undefined;
     },
     cancel: (): void => undefined,
   });
@@ -240,6 +264,23 @@ describe("workflow_steer registry wiring (#424)", () => {
     expect(names).toContain("workflow_steer");
     expect(CHILD_EXCLUDED_TOOLS).toContain("workflow_steer");
   });
+
+  // Issue #450 (PR #443 veredito, non_blocking a-1/a-2): type oracle, not an
+  // assertion — the point is that this file COMPILES. `steerOutcome` is a
+  // NEW, OPTIONAL member (`runtime.ts`), never a wider `steer`: the literal
+  // below satisfies `ChildRuntime` with `steer` still real `void` AND a
+  // `steerOutcome` that reports a real `SteerOutcome | null`, proving the
+  // two never had to merge into one wider return.
+  it("a ChildRuntime literal with steerOutcome satisfies the port without widening steer's void return", () => {
+    const sample = {
+      spawn: (): string => "leaf-1",
+      collect: (): ChildResult => ({ status: "complete", output: null }),
+      steer: (): void => undefined,
+      cancel: (): void => undefined,
+      steerOutcome: (): SteerOutcome | null => ({ queued: true }),
+    } satisfies ChildRuntime;
+    expect(typeof sample.steerOutcome).toBe("function");
+  });
 });
 
 describe("workflow_steer tool (#424)", () => {
@@ -271,6 +312,40 @@ describe("workflow_steer tool (#424)", () => {
       const steeredEvents = page.events.filter((event) => event.event_type === "leaf.steered");
       expect(steeredEvents).toHaveLength(1);
       expect(steeredEvents[0]?.data.source).toBe("operator");
+
+      runtime.release({ status: "complete", output: {}, usage: USAGE });
+      await service.status(started.run_id, true);
+    } finally {
+      close();
+    }
+  });
+
+  it("a runtime that reports no steerOutcome at all is a named fail-closed error, never queued:true (#450)", async () => {
+    const runtime = noOutcomeRuntime();
+    const { service, audit, trail, close } = serviceHarness(runtime);
+    try {
+      const started = service.start(spec());
+      if ("error" in started) throw new Error(started.error);
+      await flushMicrotasks();
+      await trail.flush();
+
+      const workflowSteerHandler = await loadHandler();
+      const handler = workflowSteerHandler(service, audit);
+      const raw = await handler({
+        run_id: started.run_id,
+        node_id: "a",
+        message: "please pause and hand back",
+      });
+      const result = JSON.parse(raw) as Envelope;
+      expect(result.ok).toBeUndefined();
+      expect(result.error).toMatch(/steerOutcome/);
+      // Fail-closed: never falls back to the plain `steer` and invents a
+      // `queued: true` this tool has no proof of.
+      expect(runtime.steered).toHaveLength(0);
+
+      await trail.flush();
+      const page = audit.query({ runId: started.run_id, limit: 50 });
+      expect(page.events.filter((event) => event.event_type === "leaf.steered")).toHaveLength(0);
 
       runtime.release({ status: "complete", output: {}, usage: USAGE });
       await service.status(started.run_id, true);

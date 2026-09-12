@@ -96,9 +96,16 @@ function scriptedRuntime(scripts: readonly (readonly ChildResult[])[]): ChildRun
     // (no `refused`) — a genuine delivery, not a refusal. This scripted mock
     // returns the SAME shape a real core would, so this test exercises the
     // #444 predicate honestly instead of masking it with `{queued: true}`.
-    steer(id: string, prompt: string): void {
+    //
+    // Issue #450: `steer` is real `void` now, never called by the decorator
+    // while `steerOutcome` (below) is present — the outcome it reads and
+    // records `steered` against comes from `steerOutcome` alone.
+    steer(): void {
+      throw new Error("scriptedRuntime.steer must not be called while steerOutcome is present");
+    },
+    steerOutcome(id: string, prompt: string) {
       steered.push({ id, prompt });
-      return { queued: false } as unknown as undefined;
+      return { queued: false };
     },
     cancel: (): void => undefined,
   });
@@ -221,10 +228,13 @@ describe("workflow audit — leaf.steered (#423)", () => {
       const inner: ChildRuntime = withMinimalLeafSandbox({
         spawn: (): string => "leaf-1",
         collect: (): ChildResult => ({ status: "running", output: null }),
-        // #444: a busy leaf's REAL `core.steer` (core.ts:323-329) pushes to
-        // the inbox and returns `{queued: true}` — the realistic outcome for
-        // an operator steer at a still-running leaf.
-        steer: (): void => ({ queued: true }) as unknown as undefined,
+        // #444/#450: a busy leaf's REAL `core.steer` (core.ts:323-329)
+        // pushes to the inbox and returns `{queued: true}` — the realistic
+        // outcome for an operator steer at a still-running leaf, now
+        // reported through the typed `steerOutcome` member, never `steer`'s
+        // (real `void`) return.
+        steer: (): void => undefined,
+        steerOutcome: () => ({ queued: true }),
         cancel: (): void => undefined,
       });
       const runtime = auditedChildRuntime(inner, deps);
@@ -281,7 +291,8 @@ describe("workflow audit — leaf.steered (#423)", () => {
       const inner: ChildRuntime = withMinimalLeafSandbox({
         spawn: (): string => "leaf-1",
         collect: (): ChildResult => ({ status: "running", output: null }),
-        steer: (): void => ({ queued: false, refused: "steer_cap" }) as unknown as undefined,
+        steer: (): void => undefined,
+        steerOutcome: () => ({ queued: false, refused: "steer_cap" as const }),
         cancel: (): void => undefined,
       });
       const runtime = auditedChildRuntime(inner, deps);
@@ -300,7 +311,8 @@ describe("workflow audit — leaf.steered (#423)", () => {
       const inner: ChildRuntime = withMinimalLeafSandbox({
         spawn: (): string => "leaf-1",
         collect: (): ChildResult => ({ status: "running", output: null }),
-        steer: (): void => null as unknown as undefined,
+        steer: (): void => undefined,
+        steerOutcome: () => null,
         cancel: (): void => undefined,
       });
       const runtime = auditedChildRuntime(inner, deps);

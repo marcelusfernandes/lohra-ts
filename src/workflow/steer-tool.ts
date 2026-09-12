@@ -273,24 +273,16 @@ export function workflowSteerHandler(
     if (runtime === undefined) return toolError(`workflow_steer: run '${runId}' is not live`);
 
     const causal = (await runtime.causalSnapshot?.(subId)) ?? undefined;
-    // `AuditedChildRuntime.steer` is declared `Awaitable<void>` (it must
-    // stay assignable to plain `ChildRuntime` — engine-options.ts,
-    // service.ts) but genuinely returns `core.steer`'s own outcome at
-    // runtime; the promise itself is retyped `Promise<unknown>` before
-    // awaiting (never the resolved value blindly cast) so the SAME shape
-    // check the decorator itself uses on `inner` can recover it here,
-    // never trusting the declared `void`.
-    const pending = runtime.steer(
-      subId,
-      message,
-      causal,
-      "operator",
-    ) as unknown as Promise<unknown>;
-    const raw: unknown = await pending;
-    const outcome =
-      raw !== null && typeof raw === "object"
-        ? (raw as { readonly queued: boolean; readonly refused?: "steer_cap" })
-        : null;
+    // Issue #450: `steerOutcome` is the typed member `AuditedChildRuntime`
+    // exposes ONLY when the underlying runtime reports a real outcome
+    // (`audit-runtime.ts`'s conditional spread) — `steer` itself stays
+    // real `void` (the port). Absent means this runtime never reports an
+    // outcome at all; fail-closed, a named error, never an invented
+    // `queued: true`.
+    if (runtime.steerOutcome === undefined) {
+      return toolError(`workflow_steer: runtime sem steerOutcome for sub_id '${subId}'`);
+    }
+    const outcome = await runtime.steerOutcome(subId, message, causal, "operator");
     if (outcome === null)
       return toolError(`workflow_steer: sub_id '${subId}' is terminal or unknown to the core`);
     if (outcome.refused === "steer_cap") return toolError(steerCapMessage(subId));
