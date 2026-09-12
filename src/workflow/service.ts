@@ -15,7 +15,8 @@ import { WorkflowEngine } from "./engine.js";
 import { AutoResumeScheduler, LeaseHeartbeat, type Timer } from "./durability.js";
 import { liveRuntimeOf, resultView } from "./service-rollup.js";
 import { recordRouteFaultNotice, ROUTE_FAULT_REASON } from "./route-faults.js";
-import { pausePayloadOf, pivotResume, pivotsOf, type RouteOverride } from "./route-override.js";
+import { pausePayloadOf, pivotResume, pivotsOf, registrationPayload } from "./route-override.js";
+import type { RouteOverride } from "./route-override.js";
 import type { ChildRuntime, LeafSandboxHandle, LeafToolDispatch } from "./runtime.js";
 import { validateNestedRefs, validateSpec } from "./schema.js";
 import { ValidationError, type WorkflowSpec } from "./types.js";
@@ -844,7 +845,7 @@ export class WorkflowService {
             owner: store.holder,
             status,
             pauseReason,
-            pausePayloadJson,
+            pausePayloadJson: pausePayloadJson ?? registrationPayload(priorView, options), // #446
             specJson: JSON.stringify(rawSpecOf(parsed)),
             argsJson: JSON.stringify(args),
             tokenBudget: effectiveBudget,

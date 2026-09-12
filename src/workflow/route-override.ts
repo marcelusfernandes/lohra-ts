@@ -188,6 +188,26 @@ interface PriorPauseView {
   readonly pivots: readonly RouteOverride[];
 }
 
+/** #446: `persistLine` (service.ts) has TWO callers that used to hardcode
+ * `pausePayloadJson: null` — the stretch's own registration write and the
+ * per-node progress write (#125) — so a process that crashed anywhere
+ * between either of those and the terminal write (`pausePayloadOf` below)
+ * reset `pivots` to empty on the next read: the de facto human gate of
+ * `MAX_ROUTE_PIVOTS_PER_RUN` was contournable by an ordinary crash. This
+ * carries `pivots` forward onto both `null` callers instead, computed the
+ * SAME way the terminal write folds it (`nextPivots`), and writes nothing
+ * else — `prior_*`/`checkpoint`/`resume_at` still only land at the
+ * terminal write. A run that never pivoted keeps writing a literal `null`
+ * (`nextPivots` returns the same empty array back), byte-identical to
+ * before this issue. */
+export function registrationPayload(
+  priorView: PriorPauseView | null,
+  options: Readonly<{ routeOverride?: RouteOverride }>,
+): string | null {
+  const pivots = nextPivots(priorView?.pivots ?? [], options.routeOverride);
+  return pivots.length === 0 ? null : JSON.stringify({ pivots });
+}
+
 /** #427: pulled the whole `pause_payload_json` JSON shape out of
  * `service.ts`'s `launchDurable` (it was `priorFaults`/`priorDegraded`
  * plus this closure, together bigger than the `pivots` field this issue
