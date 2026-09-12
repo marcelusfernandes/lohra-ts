@@ -632,4 +632,27 @@ export const supervisionMutants: readonly Mutant[] = [
       },
     ],
   },
+  // Issue #503 (follow-up of #484 rodada 2, PR #497 veredito non_blocking
+  // 4): `classifyNode` used to fall through to `unknown` for a `parallel`
+  // node whose dry run ran to completion with zero spawns and zero hits
+  // (`branches: []`, the exact case P6 above already proves reaches
+  // `cache.put(...)`) — mixing "not modeled" with "ran, nothing to pay".
+  // This mutant reverts the new `no_leaves` outcome back to `unknown`,
+  // killed by the same `tests/workflow-cache-preview-writes.test.ts` file.
+  {
+    id: "P9-no-leaves-mislabeled-unknown",
+    category: "no-leaves-mislabeled-unknown",
+    mechanism: "family-a",
+    focus: {
+      file: cachePreviewWritesFocus,
+      test: "a parallel node with empty branches classifies as no_leaves, not unknown",
+    },
+    edits: [
+      {
+        file: cachePreview,
+        before: '    return { node_id: node.id, type: node.type, outcome: "no_leaves" };',
+        after: '    return { node_id: node.id, type: node.type, outcome: "unknown" };',
+      },
+    ],
+  },
 ];
