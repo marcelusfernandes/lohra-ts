@@ -202,6 +202,7 @@ export const WORKFLOW_NOTICES_SPEC = spec(
 export const UPDATE_SPEC = spec([
   { name: "--check", takesValue: false },
   { name: "--reinstall", takesValue: false },
+  { name: "--yes", takesValue: false },
 ]);
 
 /** One phrase per declared flag, keyed by its `--name` — read by

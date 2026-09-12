@@ -14,17 +14,44 @@ histórico de paridade do repositório de desenvolvimento.
 
 ## Instalação
 
-Requer Node.js 20 ou 22 e npm. O terminal local usa o addon nativo `node-pty`,
-cujo prebuild pode perder o bit de execução na extração do tarball; a
-instalação executa o `postinstall` do pacote só para corrigir isso
-(`chmod` no `spawn-helper`) — nenhum outro script roda numa instalação de
-consumidor.
+Requer Node.js 20 ou 22, em macOS ou Linux — Windows está fora de suporte
+nesta milestone (épico #529). O pacote ainda não está publicado no npm (D8,
+gate do owner — `docs/adr/0004-trabalho-autonomo.md` item 9); hoje a
+instalação é por tarball, a partir de um checkout:
 
 ```bash
-npm install -g lohra-ts@0.0.11
+npm ci
+npm run build
+npm pack
+npm install -g ./lohra-ts-<versão>.tgz
 lohra --version
 lohra doctor --json
 ```
+
+Quando o workflow de publicação (D7, issue #536) anexar o `.tgz` a uma
+GitHub Release, essa também será uma forma de instalar — ainda não existe.
+Quando uma versão estiver no npm, instalar fica em `npm i -g lohra-ts`
+(sem `@<versão>` fixa) — frase condicionada: nenhuma versão está lá hoje.
+
+Em Linux, o addon nativo `node-pty` (terminal local) não tem prebuild —
+`node_modules/node-pty/prebuilds/` só traz `darwin-arm64`, `darwin-x64`,
+`win32-arm64` e `win32-x64` (issue #549, D10) — então `npm install` compila
+com `node-gyp`, exigindo toolchain nativo (`python3`, `make`, `g++`; ver
+"Desenvolvimento" abaixo). `better-sqlite3` baixa um binário pré-compilado
+na instalação (`prebuild-install`, `node_modules/better-sqlite3/package.json`
+script `install`) — precisa de rede no momento do `npm install`/`npm ci`.
+
+A instalação de um pacote de consumidor (tarball, GitHub Release ou npm)
+executa só o `postinstall` (`scripts/postinstall.mjs`): um `chmod` no
+`spawn-helper` do prebuild do `node-pty`, cujo bit de execução se perde na
+extração do tarball em alguns ambientes — nenhum outro script roda. O
+`prepare` (`scripts/prepare.mjs`) não faz parte do pacote publicado (não
+está em `files` do `package.json`) e só roda em checkout com `.git` — em
+`npm run build && npm pack` acima ele já rodou via `npm ci`.
+
+Atualizar uma instalação existente: `lohra update` (ver "Self-update"
+abaixo). Notas de cada versão: [`CHANGELOG.md`](CHANGELOG.md); como uma
+release é cortada: [`docs/release.md`](docs/release.md).
 
 Para desenvolver a partir do checkout:
 
@@ -440,10 +467,23 @@ Em um checkout Git, `lohra update --check` faz fetch e mede o upstream sem
 mover `HEAD`. `lohra update` recusa árvore suja, detached HEAD, upstream ausente
 e divergência; quando permitido, usa apenas fast-forward. Mudanças em manifests
 de dependências produzem uma recomendação de `npm install`; `--reinstall`
-executa npm por executable/argv, sem shell.
+executa npm por executable/argv, sem shell — só vale nesse caminho (checkout
+git); fora dele é ignorado, sem erro.
 
-Uma instalação por tarball/npm não contém `.git`, então o updater recusa com a
-orientação de atualizar pelo npm.
+Uma instalação por tarball/npm não contém `.git` — `lohra update` e
+`lohra update --check` consultam `registry.npmjs.org/lohra-ts/latest`
+(timeout de 5 s, sem retry) e comparam com a versão instalada
+(`src/commands/update-registry.ts`). Sem uma versão mais nova (`equal` ou
+`older`), os dois imprimem que já está atualizado e saem `0`. Com uma versão
+mais nova: `--check` imprime a versão disponível e o comando de instalação
+sem executar nada; `update` sem `--yes` imprime só
+`npm install -g lohra-ts@<versão>` e sai `0`; com `--yes` executa esse
+comando por executable/argv (sem shell). Qualquer falha de rede ou resposta
+inesperada do registry é fail-closed, nomeando a causa, e sai `1` (código
+diferente do caminho git, que usa `2` numa recusa). Hoje, antes de D8
+publicar uma versão, `registry.npmjs.org/lohra-ts/latest` responde 404 —
+`lohra update`/`--check` fora de um checkout imprime `could not check for
+updates: npm registry responded with status 404` em stderr e sai `1`.
 
 ## Limites e superfícies não medidas
 

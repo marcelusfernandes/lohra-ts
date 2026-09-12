@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { runUpdate } from "../src/commands/update.js";
+import type { RegistryFetch, RegistryFetchResponse } from "../src/commands/update-registry.js";
 import {
   checkUpdate,
   defaultCommandRunner,
@@ -192,12 +193,30 @@ describe("self-update state machine", () => {
 });
 
 describe("update command", () => {
-  it("gives an npm remedy outside a git checkout", () => {
+  it("consults the npm registry outside a git checkout instead of a fixed refusal", async () => {
     const stdout = vi.fn();
     const stderr = vi.fn();
-    expect(runUpdate({ check: false, reinstall: false, stdout, stderr, repo: null })).toBe(2);
-    expect(stderr).toHaveBeenCalledWith(expect.stringContaining("npm install -g lohra-ts@latest"));
-    expect(stdout).not.toHaveBeenCalled();
+    const fetchImpl: RegistryFetch = vi.fn((): Promise<RegistryFetchResponse> =>
+      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ version: "9.9.9" }) }),
+    );
+    // `Promise.resolve(...)` em vez de `await` direto: no commit test(red)
+    // desta rodada, `runUpdate` ainda devolve `number` puro (o dispatcher
+    // não foi religado) — `Promise.resolve` aceita qualquer um dos dois
+    // formatos sem o lint acusar `await` de um valor que não é thenable.
+    const code = await Promise.resolve(
+      runUpdate({
+        check: true,
+        reinstall: false,
+        stdout,
+        stderr,
+        repo: null,
+        currentVersion: "0.0.11",
+        fetchImpl,
+      }),
+    );
+    expect(code).toBe(0);
+    expect(stdout).toHaveBeenCalledWith(expect.stringContaining("9.9.9"));
+    expect(stderr).not.toHaveBeenCalled();
   });
 
   it("reinstalls with npm executable plus argv and no shell", () => {

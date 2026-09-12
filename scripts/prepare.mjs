@@ -10,6 +10,20 @@ import process from "node:process";
 // `npm install -g <pacote>` a partir do tarball/registry, e por isso não
 // entra em `files` (não é publicado).
 
+// Issue #544 (D9 do épico #529, follow-up de #530/PR #541): `npm pack`
+// roda este script mesmo com `--ignore-scripts` (comportamento do npm 10,
+// verificado na PR #541), então `scripts/pack-check.ts` e
+// `tests/package-manifest.test.ts` — que chamam `npm pack` para inspecionar
+// o tarball, não para instalar nada — instalavam os hooks de git no
+// checkout real a cada corrida. Os dois setam `LOHRA_SKIP_PREPARE=1` no
+// `env` do `npm pack` que executam; com a variável, este script não toca em
+// `.git/hooks` nem no lefthook e sai 0 — a falha nunca é silenciosa: avisa
+// no stderr que pulou, para quem olhar o log entender por quê.
+if (process.env.LOHRA_SKIP_PREPARE === "1") {
+  process.stderr.write("prepare: pulado (LOHRA_SKIP_PREPARE=1)\n");
+  process.exit(0);
+}
+
 // Camada 2 da proteção da main (.claude/hooks/README.md): instala o hook
 // pre-push nativo em checkouts git. Sem `.git`/`.claude` (não deveria
 // acontecer aqui, mas o script é defensivo) pula; o instalador é

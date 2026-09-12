@@ -35,7 +35,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { openStateDatabase, WorkflowRepository, LockRepository } from "../src/state/index.js";
 import { SqliteWorkflowCache } from "../src/workflow/sqlite-cache.js";
 import { WorkflowService } from "../src/workflow/service.js";
-import type { ChildResult, ChildRuntime } from "../src/workflow/index.js";
+import type { ChildResult, ChildRuntime, WorkflowLoader } from "../src/workflow/index.js";
 
 const roots: string[] = [];
 
@@ -128,7 +128,7 @@ function harness(runtime: ChildRuntime) {
  * stretch 1 actually satisfies `ownershipGuard` (workflow-repository.ts) and
  * lands, and a stretch-2 `cache.get` for the SAME cell is a genuine hit
  * (reads are unfenced regardless, but nothing to find without this). */
-function fenceCorrectHarness(runtime: ChildRuntime) {
+function fenceCorrectHarness(runtime: ChildRuntime, loader?: WorkflowLoader) {
   const root = mkdtempSync(join(tmpdir(), "lohra-artifacts-dedup-fenced-"));
   roots.push(root);
   const connection = openStateDatabase(join(root, "state.db"));
@@ -148,7 +148,12 @@ function fenceCorrectHarness(runtime: ChildRuntime) {
       holder: "test",
       now: 1000,
     }));
-  const service = new WorkflowService({ runtime, store, cacheFactory });
+  const service = new WorkflowService({
+    runtime,
+    store,
+    cacheFactory,
+    ...(loader === undefined ? {} : { loader }),
+  });
   return {
     service,
     store,
@@ -330,6 +335,134 @@ describe("write-file manifest — dedup applies BEFORE persisting, not just on l
     const dormantView = (await coldService.status(started.run_id)) as Record<string, unknown>;
     expect(dormantView.artifact_faults).toEqual([
       "b: artifact path written by 2 leaves: /shared.txt",
+    ]);
+    close();
+  });
+});
+
+// Issue #539 (follow-up of #512, veredito non_blocking 1 da PR #538):
+// `foldNestedCounters` writes a nested artifact's `node_id` UNSPACED
+// (`sub[${reference}]:${node_id}`, pinned by `tests/workflow-artifacts
+// .test.ts:331`), but every fault-string scope prefix elsewhere in this
+// module is SPACED (`sub[${reference}]: `). `recordCrossStretchArtifact
+// Collisions` used to cunhar its fault straight from that unspaced
+// `node_id` — the base `NESTED_SCOPE_PREFIX_RE` (space-only) then read the
+// unspaced chain as scope `""`, the SAME empty scope a genuinely unscoped
+// top-level fault gets. Both scenarios below need `fenceCorrectHarness`,
+// never the hardcoded-`fence: 0` `harness()`: a genuinely re-executed
+// top-level writer would re-flag its OWN in-stretch collision BEFORE the
+// cross-stretch check runs, populating `result.artifactCollisionPaths` and
+// silently suppressing the very fault these tests exist to catch.
+function nestedInternalCollisionThenCrossStretchSpec(): Record<string, unknown> {
+  return {
+    meta: { name: "nested-internal-collision-cross-stretch" },
+    nodes: [
+      { id: "sub1", type: "workflow", ref: "child" },
+      { id: "cp1", type: "checkpoint", prompt: "answer?", default: "yes" },
+      { id: "sub2", type: "workflow", ref: "child" },
+    ],
+  };
+}
+
+/** Both branches of the inner `parallel` node write the SAME path — an
+ * in-stretch collision entirely WITHIN whichever `type: "workflow"` node
+ * loads this as its child. */
+function childCollidingSpec(): Record<string, unknown> {
+  return {
+    meta: { name: "child" },
+    nodes: [{ id: "p", type: "parallel", branches: ["x", "y"] }],
+  };
+}
+
+function topLevelCollisionThenNestedCrossStretchSpec(): Record<string, unknown> {
+  return {
+    meta: { name: "top-level-collision-nested-cross-stretch" },
+    nodes: [
+      { id: "p", type: "parallel", branches: ["x", "y"] },
+      { id: "cp1", type: "checkpoint", prompt: "answer?", default: "yes" },
+      { id: "sub", type: "workflow", ref: "innerSingle" },
+    ],
+  };
+}
+
+/** A single leaf, no internal collision of its own — the ONLY fault this
+ * child can ever contribute is a cross-stretch one, attributed to ITS OWN
+ * (unspaced) `node_id`. */
+function childSingleLeafSpec(): Record<string, unknown> {
+  return {
+    meta: { name: "innerSingle" },
+    nodes: [{ id: "leaf", type: "agent", prompt: "x" }],
+  };
+}
+
+describe("write-file manifest — nested sub[ref] scope survives cross-stretch dedup (#539)", () => {
+  it("a nested sub-workflow's own internal collision and a LATER cross-stretch check on the SAME reference collapse to one advisory", async () => {
+    const { service, store, cacheFactory, close } = fenceCorrectHarness(
+      artifactRuntimeStub("/nested.txt"),
+      () => childCollidingSpec(),
+    );
+    const started = service.start(nestedInternalCollisionThenCrossStretchSpec());
+    if ("error" in started) throw new Error(started.error);
+    const paused = (await service.status(started.run_id, true)) as Record<string, unknown>;
+    expect(paused.status).toBe("paused");
+    expect(
+      (paused.faults as string[]).filter((fault) => fault.includes("artifact path written")),
+    ).toEqual(["sub[child]: p: artifact path written by 2 leaves: /nested.txt"]);
+
+    const resumeService = new WorkflowService({
+      runtime: artifactRuntimeStub("/nested.txt"),
+      store,
+      cacheFactory,
+      loader: () => childCollidingSpec(),
+    });
+    const resumed = (await resumeService.runAndWait(
+      null,
+      {},
+      { resumeRunId: started.run_id, checkpointAnswers: { cp1: "yes" } },
+    )) as Record<string, unknown>;
+    expect(resumed.status).toBe("complete");
+    // sub1's 2 branches (stretch 1) + sub2's 2 branches (stretch 2) — sub1's
+    // OWN rerun on resume hits cache (fence-valid replay of its inner "p"
+    // node) and contributes NOTHING new. 6 here would mean sub1 genuinely
+    // reran and wrote again.
+    expect(resumed.artifacts as unknown[]).toHaveLength(4);
+    expect(resumed.faults).toEqual([
+      "sub[child]: p: artifact path written by 2 leaves: /nested.txt",
+    ]);
+    close();
+  });
+
+  it("a cross-stretch collision from a NESTED sub-workflow never collapses with a top-level collision on the same path", async () => {
+    const { service, store, cacheFactory, close } = fenceCorrectHarness(
+      artifactRuntimeStub("/shared.txt"),
+      () => childSingleLeafSpec(),
+    );
+    const started = service.start(topLevelCollisionThenNestedCrossStretchSpec());
+    if ("error" in started) throw new Error(started.error);
+    const paused = (await service.status(started.run_id, true)) as Record<string, unknown>;
+    expect(paused.status).toBe("paused");
+    expect(
+      (paused.faults as string[]).filter((fault) => fault.includes("artifact path written")),
+    ).toEqual(["p: artifact path written by 2 leaves: /shared.txt"]);
+
+    const resumeService = new WorkflowService({
+      runtime: artifactRuntimeStub("/shared.txt"),
+      store,
+      cacheFactory,
+      loader: () => childSingleLeafSpec(),
+    });
+    const resumed = (await resumeService.runAndWait(
+      null,
+      {},
+      { resumeRunId: started.run_id, checkpointAnswers: { cp1: "yes" } },
+    )) as Record<string, unknown>;
+    expect(resumed.status).toBe("complete");
+    // "p"'s 2 branches (stretch 1, cached on resume, contributes nothing
+    // new) + "sub"'s single leaf (stretch 2) — 3 confirms "p" never reran.
+    expect(resumed.artifacts as unknown[]).toHaveLength(3);
+    expect(resumed.faults).toEqual([
+      "p: artifact path written by 2 leaves: /shared.txt",
+      "sub[innerSingle]: leaf: artifact path written by 2 leaves: /shared.txt",
     ]);
     close();
   });

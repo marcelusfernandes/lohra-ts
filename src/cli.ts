@@ -561,6 +561,7 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     return runUpdate({
       check: parsed.options.has("--check"),
       reinstall: parsed.options.has("--reinstall"),
+      yes: parsed.options.has("--yes"),
       stdout: io.stdout,
       stderr: io.stderr,
     });
