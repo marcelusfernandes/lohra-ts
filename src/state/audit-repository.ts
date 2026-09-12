@@ -341,12 +341,24 @@ export class AuditRepository {
     //     throws on one, same as `json_type`).
     //
     // Both queries read the SAME stored bytes `parseEvent` would have read,
-    // so for every row `append()` ever wrote (already sanitized by
-    // `safeAuditMetadata` at write time — idempotent, `tests/workflow-audit-
-    // live.test.ts`'s M16 pin) this is byte-identical to the old run-wide
-    // decode. Two narrower divergences than the one already documented
-    // below, both DB-level-tampering-only (never reachable through this
-    // repository's own writes):
+    // so for every row `append()` ever wrote this is byte-identical to the
+    // old run-wide decode — but that equivalence depends on
+    // `safeAuditMetadata` being idempotent in SIZE across the write pass
+    // (`append`) and the read pass (`parseEvent`), which it was NOT before
+    // issue #511: `rawMarker` treated an already-written marker
+    // (`{state: "excluded_by_policy", ...}`) as an opaque value on the
+    // second pass and re-wrapped it (`{state, fields: N}`), growing the
+    // event. A row written just under `AUDIT_EVENT_BYTES` could re-derive
+    // OVER the limit and `parseEvent` would decode it as `audit.truncated`
+    // — while its `event_type` COLUMN still read the original type (e.g.
+    // `leaf.started`), so `markerRows`'s `event_type IN (...)` predicate
+    // never selected it: the page showed a truncation `event_markers`/
+    // `notices` never counted (reproduced with a 40-unknown-key
+    // `leaf.started`, PR #507's veredito, closed by making `rawMarker`
+    // recognize and return that marker shape unchanged,
+    // `tests/workflow-audit-model.test.ts`'s idempotency pins). Two
+    // narrower divergences than that one, both DB-level-tampering-only
+    // (never reachable through this repository's own writes):
     //   - a row whose `event_type` column was tampered to a value outside
     //     `MARKER_TYPES` while its `payload_json` root is still a valid
     //     object would previously decode via `parseEvent`'s fallback to

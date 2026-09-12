@@ -121,6 +121,18 @@ allow-list em #386 — o ciclo de vida de um nó continua observável só por
 | `cache.stored`      | `auditedWorkflowCache.put` (`audit-cache.ts:82`)                                                                                                                                                                                                    | escrita de cache bem-sucedida                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `cache.unavailable` | `auditedWorkflowCache.put`                                                                                                                                                                                                                          | escrita de cache recusada (`payload.reason: "store_failed"`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
+`audit.truncated` só pode nascer da comparação `publicAuditEvent` faz contra
+`AUDIT_EVENT_BYTES` na ESCRITA (`append`) — a releitura (`parseEvent`)
+re-sanitiza o `data` já gravado, e essa segunda passada é idempotente em
+TAMANHO desde #511 (`rawMarker`/`safeValue`, `audit-model.ts`): um marcador
+já no formato `{state: "excluded_by_policy", ...}` volta inalterado em vez
+de ser reembrulhado (o que antes crescia a cada passada e podia empurrar um
+evento gravado abaixo do teto para cima dele só na releitura). Sem essa
+garantia, `event_type` na página e a coluna `event_type` gravada por
+`append` podiam discordar — a página mostrando `audit.truncated` para uma
+linha que `markerRows`/`event_markers`/`notices` (abaixo, filtro por
+COLUNA) nunca contavam como tal.
+
 `identity.node_path` de um evento `cache.*` já vinha do `nodeId` que o
 chamador passa a `get`/`put` (`WorkflowCache`, cache.ts) antes de #461 — o
 que mudou nessa issue é que o `nodeId` agora chega ESCOPADO
