@@ -523,8 +523,9 @@ describe("workflow_steer tool (#424)", () => {
     // 100 live leaves lost every `sub_id` past the 100th to that window,
     // reporting "no live leaf" for a leaf that genuinely exists. The fix
     // queries the ledger BY `sub_id` directly (`AuditQuery.subId` is an
-    // exact-identity filter, `audit-repository.ts:118`), which is immune to
-    // the window regardless of how many OTHER leaves the run has spawned.
+    // exact-identity filter — a `sub_id = ?` clause in SQL,
+    // `audit-repository.ts`'s `filterClauses`), which is immune to the
+    // window regardless of how many OTHER leaves the run has spawned.
     const workflowSteerHandler = await loadHandler();
     const { audit, close } = auditOnlyHarness();
     try {

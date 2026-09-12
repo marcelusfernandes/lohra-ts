@@ -90,6 +90,12 @@ function parseEvent(row: Readonly<Record<string, unknown>>): PublicAuditEvent {
 }
 
 const MARKER_TYPES = new Set(["audit.gap", "audit.truncated", "audit.unavailable"]);
+// Issue #498: same three values as `MARKER_TYPES`, as a bound-param list and
+// a matching `IN (?,?,?)` clause for `query()`'s `markerRows` SQL below —
+// kept in sync by deriving both from the one `Set` instead of hand-writing
+// the SQL literal twice.
+const MARKER_TYPE_LIST = Object.freeze([...MARKER_TYPES]);
+const MARKER_EVENT_TYPE_IN_CLAUSE = `event_type IN (${MARKER_TYPE_LIST.map(() => "?").join(",")})`;
 const FIELD_STATE_NAMES = Object.freeze([
   "redacted",
   "truncated",
@@ -97,7 +103,9 @@ const FIELD_STATE_NAMES = Object.freeze([
   "excluded_by_policy",
   "excluded_private_state",
 ] as const);
-const FIELD_STATES = new Set<string>(FIELD_STATE_NAMES);
+// Issue #498: `query()`'s `fieldMarkerRows` SQL binds `FIELD_STATE_NAMES` as
+// params for this `IN (...)` clause — same derivation reasoning as above.
+const FIELD_STATE_IN_CLAUSE = FIELD_STATE_NAMES.map(() => "?").join(",");
 
 function fieldMarkerCounts(counts: ReadonlyMap<string, number>): Readonly<Record<string, number>> {
   return Object.freeze(
@@ -107,18 +115,6 @@ function fieldMarkerCounts(counts: ReadonlyMap<string, number>): Readonly<Record
         .map((state) => [state, counts.get(state) ?? 0]),
     ),
   );
-}
-
-function countStates(value: unknown, counts: Map<string, number>): void {
-  if (Array.isArray(value)) {
-    for (const item of value) countStates(item, counts);
-    return;
-  }
-  if (value === null || typeof value !== "object") return;
-  const record = value as Readonly<Record<string, unknown>>;
-  if (typeof record.state === "string" && FIELD_STATES.has(record.state))
-    counts.set(record.state, (counts.get(record.state) ?? 0) + 1);
-  for (const item of Object.values(record)) countStates(item, counts);
 }
 
 // Códigos que o better-sqlite3 anexa a `error.code` quando o driver bloqueia
@@ -317,21 +313,61 @@ export class AuditRepository {
     // snapshot` and `ORDER BY seq LIMIT limit+1`, this turns a paginated
     // caller like `liveSubIdsAtNode` (steer-tool.ts) from "decode the WHOLE
     // run's rows on every one of its N pages" into "decode at most
-    // `limit+1` rows per page". `notices`/`field_markers`/`event_markers`
-    // below stay a RUN-WIDE computation by contract
-    // (`tests/workflow-audit-tool.test.ts`'s pins,
-    // `tests/workflow-audit-live.test.ts`'s tampered-row case) — they still
-    // decode every row up to `snapshot` (`snapshotRows`), the same cost as
-    // before this issue; only the page's own decode cost dropped.
+    // `limit+1` rows per page".
     //
-    // One known, narrow divergence: a row whose `payload_json` is corrupted
-    // (DB-level tampering, not reachable through this repository's own
-    // writes) decodes to `event_type: "audit.unavailable"`
-    // (`parseEvent`'s catch branch) regardless of what its `event_type`
-    // column still holds. A query that filters by `eventType` now matches
-    // on the COLUMN, so such a row could appear in `events` under its
-    // original type instead of being silently dropped. Left as-is
-    // (fail-closed still applies — the row is still marked
+    // Issue #498: `notices`/`event_markers`/`field_markers` are still
+    // RUN-WIDE by contract (`tests/workflow-audit-tool.test.ts`'s pins,
+    // `tests/workflow-audit-live.test.ts`'s tampered-row case), but no
+    // longer cost a JS `parseEvent`/`JSON.parse` per row of the run:
+    //   - `event_markers`/`notices` come from `markerRows` — a SQL WHERE
+    //     that keeps only rows whose `event_type` column already IS one of
+    //     `MARKER_TYPES`, OR whose `payload_json` is not a JSON object
+    //     (`json_valid`/`json_type`, guarded by `CASE WHEN` so an invalid
+    //     document never reaches `json_type`, which throws on one). Every
+    //     row this predicate keeps is guaranteed to `parseEvent` into a
+    //     `MARKER_TYPES` event (a genuine `audit.gap`/`audit.truncated`
+    //     column value decodes as itself; anything else decodes through the
+    //     catch branch into `audit.unavailable`) — so JS only ever decodes
+    //     candidates, never the run. A candidate that overlaps the page
+    //     (`pageEventBySeq`) reuses that decode instead of parsing twice —
+    //     AC 3 ("página parseada uma vez").
+    //   - `field_markers` comes from `fieldMarkerRows` — a SQL aggregate
+    //     over `json_tree(payload_json, '$.data')` (SQLite's own JSON1,
+    //     bundled in better-sqlite3), counting `state` keys whose value is
+    //     one of `FIELD_STATE_NAMES`, the same shape `countStates` (removed)
+    //     used to walk in JS. No JS decode at all for this one; the source
+    //     subquery filters to `json_valid AND json_type = 'object'` first,
+    //     so a malformed document never reaches `json_tree` either (it
+    //     throws on one, same as `json_type`).
+    //
+    // Both queries read the SAME stored bytes `parseEvent` would have read,
+    // so for every row `append()` ever wrote (already sanitized by
+    // `safeAuditMetadata` at write time — idempotent, `tests/workflow-audit-
+    // live.test.ts`'s M16 pin) this is byte-identical to the old run-wide
+    // decode. Two narrower divergences than the one already documented
+    // below, both DB-level-tampering-only (never reachable through this
+    // repository's own writes):
+    //   - a row whose `event_type` column was tampered to a value outside
+    //     `MARKER_TYPES` while its `payload_json` root is still a valid
+    //     object would previously decode via `parseEvent`'s fallback to
+    //     `audit.unavailable` (`publicAuditEvent`'s `SAFE_EVENT_TYPES`
+    //     check) and count; it is no longer a `markerRows` candidate, so it
+    //     does not.
+    //   - a row whose stored `data` field was tampered to something other
+    //     than a JSON object (a raw string, `null`, etc.) would previously
+    //     re-sanitize through `safeAuditMetadata` at read time into a
+    //     marker object and count in `field_markers`; `json_tree` walks the
+    //     stored bytes as-is and finds no `object` node to recurse into, so
+    //     it does not.
+    //
+    // One known, narrow divergence carried over from #477: a row whose
+    // `payload_json` is corrupted (DB-level tampering, not reachable
+    // through this repository's own writes) decodes to `event_type:
+    // "audit.unavailable"` (`parseEvent`'s catch branch) regardless of what
+    // its `event_type` column still holds. A query that filters by
+    // `eventType` now matches on the COLUMN, so such a row could appear in
+    // `events` under its original type instead of being silently dropped.
+    // Left as-is (fail-closed still applies — the row is still marked
     // `audit.unavailable` wherever it is decoded) rather than adding a JS
     // post-filter, which would desync `returned`/`has_more` from the SQL
     // `LIMIT` that produced them.
@@ -374,10 +410,40 @@ export class AuditRepository {
           .all(...filterParams, after, snapshot, limit + 1) as readonly Readonly<
           Record<string, unknown>
         >[];
-        const snapshotRows = this.database
-          .prepare("SELECT * FROM workflow_audit_events WHERE run_id = ? AND seq <= ? ORDER BY seq")
-          .all(auditRunId, snapshot) as readonly Readonly<Record<string, unknown>>[];
-        return Object.freeze({ state, tombstone, currentHigh, snapshot, pageRows, snapshotRows });
+        const markerRows = this.database
+          .prepare(
+            `SELECT * FROM workflow_audit_events
+             WHERE run_id = ? AND seq <= ?
+               AND (${MARKER_EVENT_TYPE_IN_CLAUSE}
+                    OR CASE WHEN json_valid(payload_json) THEN json_type(payload_json) <> 'object' ELSE 1 END)
+             ORDER BY seq`,
+          )
+          .all(auditRunId, snapshot, ...MARKER_TYPE_LIST) as readonly Readonly<
+          Record<string, unknown>
+        >[];
+        const fieldMarkerRows = this.database
+          .prepare(
+            `SELECT jt.value AS state, COUNT(*) AS n
+             FROM (
+               SELECT payload_json FROM workflow_audit_events
+               WHERE run_id = ? AND seq <= ? AND json_valid(payload_json) AND json_type(payload_json) = 'object'
+             ) candidates, json_tree(candidates.payload_json, '$.data') AS jt
+             WHERE jt.key = 'state' AND jt.type = 'text' AND jt.value IN (${FIELD_STATE_IN_CLAUSE})
+             GROUP BY jt.value`,
+          )
+          .all(auditRunId, snapshot, ...FIELD_STATE_NAMES) as readonly Readonly<{
+          state: string;
+          n: number | bigint;
+        }>[];
+        return Object.freeze({
+          state,
+          tombstone,
+          currentHigh,
+          snapshot,
+          pageRows,
+          markerRows,
+          fieldMarkerRows,
+        });
       })
       .deferred();
     const { state, tombstone, snapshot } = frozen;
@@ -431,9 +497,13 @@ export class AuditRepository {
     const pageEvents = frozen.pageRows.map(parseEvent);
     const hasMore = pageEvents.length > limit;
     const events = pageEvents.slice(0, limit);
-    const snapshotEvents = frozen.snapshotRows.map(parseEvent);
-    const notices: Readonly<Record<string, unknown>>[] = snapshotEvents.filter((event) =>
-      MARKER_TYPES.has(event.event_type),
+    // Issue #498: `markerRows` already guarantees every row it kept decodes
+    // to a `MARKER_TYPES` event (see the SQL comment above `pageRows`) — a
+    // row that also falls inside the page reuses that page's own decode
+    // (`pageEventBySeq`) instead of a second `parseEvent` call.
+    const pageEventBySeq = new Map(pageEvents.map((event) => [event.seq, event]));
+    const notices: Readonly<Record<string, unknown>>[] = frozen.markerRows.map(
+      (row) => pageEventBySeq.get(rowNumber(row.seq)) ?? parseEvent(row),
     );
     const dropped = rowNumber(state?.retention_dropped);
     if (dropped > 0)
@@ -458,15 +528,16 @@ export class AuditRepository {
           }),
         }),
       );
+    // Issue #498: `fieldMarkerRows` is a SQL aggregate (`json_tree` over the
+    // stored `$.data`, see the comment above `pageRows`) — no JS decode.
     const fieldCounts = new Map<string, number>();
+    for (const row of frozen.fieldMarkerRows) fieldCounts.set(row.state, rowNumber(row.n));
+    // `notices` already holds every marker event plus the two synthetic
+    // ones pushed above (`retention_limit`, tombstone) — one pass counts
+    // both kinds by `event_type` without re-deriving which is which.
     const eventCounts = new Map<string, number>();
-    for (const event of snapshotEvents) {
-      countStates(event, fieldCounts);
-      if (MARKER_TYPES.has(event.event_type))
-        eventCounts.set(event.event_type, (eventCounts.get(event.event_type) ?? 0) + 1);
-    }
     for (const notice of notices)
-      if (!("seq" in notice) && typeof notice.event_type === "string")
+      if (typeof notice.event_type === "string")
         eventCounts.set(notice.event_type, (eventCounts.get(notice.event_type) ?? 0) + 1);
     const next = events.at(-1)?.seq ?? after;
     const returnedNotices = notices.slice(0, 20);
