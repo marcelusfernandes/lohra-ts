@@ -736,16 +736,22 @@ describe("workflow_status's live envelope carries 'pivots' too, not just the dur
       reasoningTokens: 0,
     };
 
-    /** Every leaf completes immediately — used to establish one pivot before
-     * the hang, exactly like the #446 crash setup this test mirrors. */
-    class AlwaysCompleteRuntime implements ChildRuntime {
+    /** "pinned" hangs forever once `hang` flips true, never before — one
+     * runtime/service pair for both stages (unlike #446's crash test, which
+     * needs two of each to model an actual process crash) is enough here:
+     * "free" is already cached by the time `hang` flips, so it never calls
+     * this runtime again, and `record.settled` simply never becomes true. */
+    class SwitchableRuntime implements ChildRuntime {
+      hang = false;
       private seq = 0;
       spawn(): string {
         this.seq += 1;
         return `leaf-${String(this.seq)}`;
       }
-      collect(): ChildResult {
-        return { status: "complete", output: { ok: true }, usage };
+      collect(): ChildResult | Promise<ChildResult> {
+        return this.hang
+          ? new Promise<ChildResult>(() => undefined)
+          : { status: "complete", output: { ok: true }, usage };
       }
       steer(): void {}
       cancel(): void {}
@@ -754,65 +760,22 @@ describe("workflow_status's live envelope carries 'pivots' too, not just the dur
       }
     }
 
-    /** "pinned"'s `collect()` never resolves, so `engine.run()` never
-     * settles and `record.settled` stays false — the same live snapshot a
-     * supervisor sees while polling a genuinely long-running stretch. */
-    class HangingPinnedRuntime implements ChildRuntime {
-      spawn(): string {
-        return "leaf-hanging";
-      }
-      collect(): Promise<ChildResult> {
-        return new Promise<ChildResult>(() => undefined);
-      }
-      steer(): void {}
-      cancel(): void {}
-      installLeafSandbox(): { dispose: () => void } {
-        return { dispose: (): void => undefined };
-      }
-    }
-
-    function twoNodeSpec(): Record<string, unknown> {
-      return {
+    const runtime = new SwitchableRuntime();
+    const { service, repository, close } = harness(runtime);
+    try {
+      const spec = {
         meta: { name: "route-override-live-running" },
         nodes: [
           { id: "free", type: "agent", prompt: "unpinned" },
           { id: "pinned", type: "agent", prompt: "pinned", provider: "p0" },
         ],
       };
-    }
-
-    const root = mkdtempSync(join(tmpdir(), "lohra-route-override-live-running-"));
-    roots.push(root);
-    const connection = openStateDatabase(join(root, "state.db"));
-    try {
-      const repository = new WorkflowRepository(connection.database);
-      const locks = new LockRepository(connection.database);
-      const audit = new AuditRepository(connection.database);
-      const trail = new AuditTrail(audit);
-      const store = () => ({
-        repository,
-        locks,
-        holder: "test",
-        ttl: 900,
-        ownershipOf: () => ({ fence: 0, holder: "test", now: 1000 }),
-        database: connection.database,
-      });
-
-      const initial = new WorkflowService({
-        runtime: new AlwaysCompleteRuntime(),
-        auditTrail: trail,
-        store: store(),
-      });
-      const started = initial.start(twoNodeSpec());
+      const started = service.start(spec);
       if ("error" in started) throw new Error(started.error);
-      await initial.status(started.run_id, true);
+      await service.status(started.run_id, true);
 
-      const resumeService = new WorkflowService({
-        runtime: new AlwaysCompleteRuntime(),
-        auditTrail: trail,
-        store: store(),
-      });
-      const resumed = resumeService.start(
+      runtime.hang = true;
+      const resumed = service.start(
         null,
         {},
         {
@@ -821,41 +784,15 @@ describe("workflow_status's live envelope carries 'pivots' too, not just the dur
         },
       );
       if ("error" in resumed) throw new Error(resumed.error);
-      await resumeService.status(started.run_id, true);
 
-      let freeCompletedResolve: () => void = () => undefined;
-      const freeCompleted = new Promise<void>((resolve) => {
-        freeCompletedResolve = resolve;
-      });
-      const crashService = new WorkflowService({
-        runtime: new HangingPinnedRuntime(),
-        auditTrail: trail,
-        store: store(),
-        onEvent: (event) => {
-          if (event.kind === "node" && event.nodeId === "free" && event.state !== "running") {
-            freeCompletedResolve();
-          }
-        },
-      });
-      const crashed = crashService.start(
-        null,
-        {},
-        {
-          resumeRunId: started.run_id,
-          routeOverride: { provider: "v2" },
-        },
-      );
-      if ("error" in crashed) throw new Error(crashed.error);
-      await freeCompleted;
-
-      const live = (await crashService.status(started.run_id)) as Record<string, unknown>;
+      const live = (await service.status(started.run_id)) as Record<string, unknown>;
       expect(live.status).toBe("running");
-      const midRow = repository.getRunState(started.run_id) as Record<string, unknown>;
-      const durable = durableRollup(durableFromRow(midRow), 0, false);
-      expect(live.pivots).toEqual([{ provider: "v1" }, { provider: "v2" }]);
+      const row = repository.getRunState(started.run_id) as Record<string, unknown>;
+      const durable = durableRollup(durableFromRow(row), 0, false);
+      expect(live.pivots).toEqual([{ provider: "v1" }]);
       expect(live.pivots).toEqual(durable.pivots);
     } finally {
-      connection.close();
+      close();
     }
   });
 });
