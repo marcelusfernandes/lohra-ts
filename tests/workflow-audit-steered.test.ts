@@ -271,10 +271,18 @@ describe("workflow audit — leaf.steered (#423)", () => {
       const runtime = auditedChildRuntime(inner, deps);
       await runtime.steer("never-opened", "hello", CAUSAL, "operator");
       expect(delegated).toEqual(["never-opened", "hello"]);
-      // #502 (non_blocking 1, PR #488): flush BEFORE the query — without it
-      // this assertion would read zero rows even if the decorator recorded
-      // unconditionally on an id it never opened, the same gap #476 fixed
-      // for the steer_cap/null cases below.
+      // #502 (non_blocking 1, PR #488): flush BEFORE the query — same
+      // posture as #476's steer_cap/null cases below. Verified by hand: a
+      // planted regression that records unconditionally inside
+      // `deliverSteer`'s `innerSteerOutcome === undefined` branch (the path
+      // this `inner` actually takes — it has no `steerOutcome`) fails THIS
+      // assertion whether or not the flush is present, because `AuditTrail`
+      // schedules its drain on a bare `Promise.resolve().then(...)`
+      // microtask and the `await`s already unwound above happen to give it
+      // enough turns. The flush is not what makes this oracle fail — it
+      // makes the oracle's result independent of that drain-timing
+      // coincidence, so a future change to how many turns unwind before
+      // this line can't silently make the assertion pass vacuously again.
       await trail.flush();
       const page = audit.query({ runId: CAUSAL.runId, limit: 50 });
       expect(page.events.filter((event) => event.event_type === "leaf.steered")).toHaveLength(0);
@@ -363,9 +371,10 @@ describe("workflow audit — leaf.steered (#423)", () => {
       const runtime = auditedChildRuntime(inner, deps);
       await runtime.spawn({ prompt: "one", causalContext: CAUSAL });
       await runtime.steer("leaf-1", "hello", CAUSAL, "operator");
-      // #502 (non_blocking 1, PR #488): same flush-before-query fix as the
-      // two cases above — without it, an accidental unconditional record on
-      // this fallback would still read back as zero rows.
+      // #502 (non_blocking 1, PR #488): same flush-before-query posture as
+      // the two cases above — makes the oracle independent of
+      // `AuditTrail`'s drain-microtask timing rather than relying on it
+      // (see that comment for the mutation this was verified against).
       await trail.flush();
       const page = audit.query({ runId: CAUSAL.runId, limit: 50 });
       expect(page.events.filter((event) => event.event_type === "leaf.steered")).toHaveLength(0);
