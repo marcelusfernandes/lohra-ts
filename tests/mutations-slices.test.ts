@@ -566,9 +566,15 @@ describe("scripts/mutations/slices.json", () => {
     // nenhum cobrindo especificamente a chamada a `nestedScopePrefix`
     // nessa linha; morto pelo `it` já existente de
     // `tests/workflow-nodes-tool.test.ts`, "folds nested faults, node
-    // counts and all five cost meters"): 268 + 1 = 269.
+    // counts and all five cost meters"): 268 + 1 = 269. A issue #567
+    // (veredito da PR #525) acrescenta N4 (`client.ts`'s `parseSse` era
+    // atômico — um SyntaxError no último `data:` truncado por um abort em
+    // voo descartava também os eventos já parseados com sucesso; morto
+    // pelo `it` novo de `tests/transports-abort-in-flight.test.ts`, "ChatCompletionsClient.stream
+    // replays the deltas already parsed when the trailing SSE frame is
+    // truncated mid-abort (issue #567)"): 269 + 1 = 270.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 269;
+    const TOTAL_MUTANTS = 270;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -593,14 +599,14 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/workflow-executor-mutants.ts": 45,
       "scripts/mutations/context-window.ts": 17,
       "scripts/mutations/auth-mutants.ts": 13,
-      "scripts/mutations/supervision-mutants.ts": 38,
+      "scripts/mutations/supervision-mutants.ts": 39,
     };
     expect(new Set(Object.keys(CONTAGEM_POR_CATALOGO))).toEqual(new Set(CATALOGOS.keys()));
     for (const [path, mutants] of CATALOGOS) {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(269);
+    expect(somaTabela).toBe(270);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {
