@@ -108,3 +108,8 @@ suggested_route: null}`; kind que pausa nunca entra em `faultKinds`;
   sem-rota fica parado); `node.rerouted` um por nó reescrito, `from`/`to`
   aninhados em `CONTAINER_FIELDS`; `AutoResumeScheduler` não re-arma
   `route_fault`.
+- [2026-09-13 — `forced_fallback` sai do envelope de
+  `collect_session`](2026-09-13-envelope-forced-fallback.md) — owner OK
+  (issue #419) para a opção (a): `CollectResult.forcedFallback` removido
+  (nunca teve produtor real, sempre `false`); envelope de `collect_session`
+  repinado 13 → 12 chaves; `delegate_task` fica igual, nunca teve a chave.

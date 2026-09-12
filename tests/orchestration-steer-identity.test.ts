@@ -61,7 +61,6 @@ function okResult(overrides: Partial<CollectResult> = {}): CollectResult {
     reasoningTokens: 0,
     provider: "test",
     model: "test-model",
-    forcedFallback: false,
     errorKind: null,
     retryAfter: null,
     ...overrides,

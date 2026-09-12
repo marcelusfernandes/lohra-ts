@@ -98,7 +98,6 @@ function ok(output: string): CollectResult {
     reasoningTokens: 0,
     provider: "test",
     model: "test-model",
-    forcedFallback: false,
     errorKind: null,
     retryAfter: null,
   };

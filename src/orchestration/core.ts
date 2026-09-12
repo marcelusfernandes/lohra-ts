@@ -35,7 +35,6 @@ export interface CollectResult {
   readonly reasoningTokens: number;
   readonly provider: string;
   readonly model: string;
-  readonly forcedFallback: boolean;
   readonly errorKind: ErrorKind | null;
   readonly retryAfter: number | null;
   /** True when this turn never measured real usage — the leaf died before
@@ -444,7 +443,7 @@ export class OrchestrationCore {
         // (measured against the oracle's own _finalize, sub.tokens_in += ...,
         // never overwritten) — a resurrected child's collect reports the SUM
         // of every turn's usage, not just the latest one. Every other field
-        // (status/output/provider/model/forcedFallback/errorKind/retryAfter)
+        // (status/output/provider/model/errorKind/retryAfter)
         // reflects the LATEST turn only, same as before.
         const previous = entry.result;
         const accumulated: CollectResult =

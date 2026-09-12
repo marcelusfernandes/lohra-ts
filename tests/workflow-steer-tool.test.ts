@@ -182,7 +182,6 @@ const REAL_COLLECT_RESULT: CollectResult = {
   reasoningTokens: 0,
   provider: "test",
   model: "test-model",
-  forcedFallback: false,
   errorKind: null,
   retryAfter: null,
 };
