@@ -58,9 +58,9 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJson(needs.plan.outputs.matrix) }}
-    # node-pty compila via node-gyp em `npm ci` (mesma nota de ci.yml).
-    env:
-      PYTHON: python3
+    # Nada compila via node-gyp em `npm ci`: node-pty traz prebuild linux
+    # embutido desde 1.2.0-beta.8 (D10, #549) e better-sqlite3 baixa o seu —
+    # o job `pack-check` de ci.yml prende isso.
     steps:
       - uses: actions/checkout@v4
         with:
