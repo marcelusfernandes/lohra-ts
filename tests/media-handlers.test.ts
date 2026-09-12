@@ -164,7 +164,13 @@ describe("vision_analyze handler", () => {
       },
     });
     const envelope = await handler({ path });
-    expect(envelope).toContain(`failed to read image ${path}: EACCES: permission denied`);
+    // Não afirma sobre o caminho absoluto inteiro: o segmento pai
+    // "sk123456" é redigido de propósito pela regex SECRET
+    // (src/media/errors.ts:4) — é exatamente o comportamento que causava o
+    // flake (#558). A cauda determinística (join("fixture",
+    // "unreadable.png")) nunca cai sob a regex, porque ela não casa "/".
+    expect(envelope).toContain("failed to read image ");
+    expect(envelope).toContain(`${join("fixture", "unreadable.png")}: EACCES: permission denied`);
     expect(envelope).not.toContain("at ");
     expect(runner.requests).toHaveLength(0);
   });
