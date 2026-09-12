@@ -260,22 +260,38 @@ export class OrchestrationChildRuntime implements ChildRuntime {
   }
 
   /**
-   * Forwards `causal` straight to `core.steer` (issue #422 — previously
-   * dropped here). `core.steer`'s own per-leaf cap
-   * (`MAX_PENDING_STEERS_PER_LEAF`, core.ts) can refuse the call
-   * (`refused: "steer_cap"`); this port's `steer` returns `void`
-   * (`ChildRuntime.steer`, runtime.ts) and discards that return value —
-   * the refusal is already visible one layer up, as a named `toolError`,
-   * for the one caller that goes through `OrchestrationCore.steer`
-   * directly (`orchestration/tools.ts`'s `steerSessionTool`/
-   * `delegate_task`'s resume). It is NOT yet observable through THIS
-   * method — `workflow_steer` (issue #424, M10-S3) calls it through this
-   * port and cannot distinguish queued/resurrected/refused; a future issue
-   * widens this signature to return `core.steer`'s own outcome instead of
-   * `void` (comment in #424, 2026-09-12).
+   * Forwards `causal` straight to `core.steer` (issue #422), and now
+   * forwards `core.steer`'s own OUTCOME too (issue #424, 2ª emenda,
+   * 2026-09-12 — this comment's first version flagged the gap and left it
+   * open; the gap is what invariant 2, "falha nunca é silenciosa", forbids:
+   * a refused steer coming back as a nominal success).
+   *
+   * TS NOTE (round 2 correction — the emenda's own proposed signature,
+   * `{queued, refused?} | null` declared in place of `void`, does not
+   * compile: `ChildRuntime.steer` (runtime.ts, untouched — out of this
+   * issue's `Files`) returns `Awaitable<void>` = `void | Promise<void>`,
+   * and TypeScript's "a function returning a value satisfies a
+   * void-returning target" leniency does NOT extend to a union that merely
+   * CONTAINS `void` (only to a return position that IS `void` outright) —
+   * confirmed empirically; `null` is flatly rejected either way. Declaring
+   * the richer type here would break EVERY existing assignment of an
+   * `OrchestrationChildRuntime` to a `ChildRuntime` slot (`chat.ts`,
+   * `dashboard.ts`, `service.ts` — none in this issue's `Files`). The
+   * return statement below still forwards the REAL value at runtime — a
+   * TS return-type annotation is compile-time-only, it does not truncate
+   * what actually comes back from a function call — so
+   * `AuditedChildRuntime.steer` (audit-runtime.ts) can recover it with a
+   * runtime shape check on the awaited result, same posture as reading
+   * `unknown`. The `void` annotation here is therefore honest about the
+   * PORT this class satisfies, not about what this one concrete method
+   * hands back to a caller that already holds the decorator
+   * (`workflow_steer`, steer-tool.ts) — the same "wider type, same
+   * object, only visible through a narrower cast" shape
+   * `AuditedChildRuntime` itself already uses for its 4th `steer`
+   * parameter (comment above).
    */
   public steer(id: string, prompt: string, causal?: CausalContext): void {
-    this.core.steer(id, prompt, causal);
+    return this.core.steer(id, prompt, causal) as unknown as undefined;
   }
 
   public cancel(id: string): void {

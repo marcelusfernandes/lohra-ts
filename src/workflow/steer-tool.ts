@@ -32,18 +32,29 @@
 // message, causal, "operator")`'s 4th parameter is what makes S2's audit
 // event carry `source: "operator"` instead of the engine's own default.
 //
-// `queued: true` in the response is NOMINAL, not observed: S1's per-leaf
-// cap (`MAX_PENDING_STEERS_PER_LEAF`, core.ts) can still refuse the text
-// server-side, but `OrchestrationChildRuntime.steer` (orchestration-
-// runtime.ts:270-271) and `AuditedChildRuntime.steer` (audit-runtime.ts)
-// both discard `core.steer`'s own `{queued, refused?} | null` return value
-// today — documented on the PR (#424) and flagged on the issue
-// (2026-09-12) as a follow-up: widening those two `void` returns to forward
-// `core.steer`'s outcome is two lines, both out of this issue's `Files`.
+// S1's per-leaf cap (`MAX_PENDING_STEERS_PER_LEAF`, core.ts) IS observable
+// here (2ª emenda, 2026-09-12 — closes the gap the first version of this
+// file's comment left open, flagged on the issue and the PR): both
+// `OrchestrationChildRuntime.steer` (orchestration-runtime.ts) and
+// `AuditedChildRuntime.steer` (audit-runtime.ts) now forward `core.steer`'s
+// own `{queued, refused?} | null` instead of discarding it, so `refused:
+// "steer_cap"` and `null` (a terminal/unknown leaf at the core, distinct
+// from "no live leaf" per the ledger above — a genuine race, not this
+// tool's own resolution) both come back as a NAMED error, never `queued:
+// true` for a steer the core actually dropped (invariant 2: falha nunca é
+// silenciosa). `queued: true` in the response is now the core's own word,
+// not this tool's guess.
+import { MAX_PENDING_STEERS_PER_LEAF } from "../orchestration/core.js";
 import type { AuditRepository, AuditQuery } from "../state/index.js";
 import { toolError, toolResult } from "../tools/envelope.js";
 import type { ToolArguments, ToolHandler } from "../tools/types.js";
 import type { AuditedChildRuntime } from "./audit-runtime.js";
+
+/** Same wording family as `orchestration/tools.ts`'s own `steerCapMessage`
+ * (`steer_session`) — a different tool, same refusal, same shape. */
+function steerCapMessage(subId: string): string {
+  return `workflow_steer refused: steer_cap (${String(MAX_PENDING_STEERS_PER_LEAF)} pending steers on ${subId})`;
+}
 
 // Named, bounded read (invariant 3): one page of `leaf.started`/terminal
 // events per query, same ceiling `AuditRepository.query` itself clamps to —
@@ -158,12 +169,32 @@ export function workflowSteerHandler(
     if (runtime === undefined) return toolError(`workflow_steer: run '${runId}' is not live`);
 
     const causal = (await runtime.causalSnapshot?.(subId)) ?? undefined;
-    await runtime.steer(subId, message, causal, "operator");
+    // `AuditedChildRuntime.steer` is declared `Awaitable<void>` (it must
+    // stay assignable to plain `ChildRuntime` — engine-options.ts,
+    // service.ts) but genuinely returns `core.steer`'s own outcome at
+    // runtime; the promise itself is retyped `Promise<unknown>` before
+    // awaiting (never the resolved value blindly cast) so the SAME shape
+    // check the decorator itself uses on `inner` can recover it here,
+    // never trusting the declared `void`.
+    const pending = runtime.steer(
+      subId,
+      message,
+      causal,
+      "operator",
+    ) as unknown as Promise<unknown>;
+    const raw: unknown = await pending;
+    const outcome =
+      raw !== null && typeof raw === "object"
+        ? (raw as { readonly queued: boolean; readonly refused?: "steer_cap" })
+        : null;
+    if (outcome === null)
+      return toolError(`workflow_steer: sub_id '${subId}' is terminal or unknown to the core`);
+    if (outcome.refused === "steer_cap") return toolError(steerCapMessage(subId));
 
     return toolResult(undefined, {
       sub_id: subId,
       node_id: nodeId ?? nodeIdOfSubId(audit, runId, subId) ?? null,
-      queued: true,
+      queued: outcome.queued,
     });
   };
 }
