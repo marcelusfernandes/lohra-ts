@@ -410,7 +410,7 @@ export function auditedRuntimeFor(
   ownershipOf: () => Ownership | null,
   durable: boolean,
   warn: (message: string) => void,
-): ChildRuntime {
+): AuditedChildRuntime {
   return auditedChildRuntime(runtime, { trail, ownershipOf, durable, warn });
 }
 
@@ -429,7 +429,7 @@ export function auditInstall(
   ownershipOf: () => Ownership | null,
   warn: (message: string) => void,
 ): readonly [
-  ChildRuntime,
+  AuditedChildRuntime,
   ((installation: LeafSandboxInstallation) => LeafSandboxHandle) | undefined,
 ] {
   const rt = auditedRuntimeFor(runtime, trail, ownershipOf, true, warn);

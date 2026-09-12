@@ -261,11 +261,18 @@ export class OrchestrationChildRuntime implements ChildRuntime {
 
   /**
    * Forwards `causal` straight to `core.steer` (issue #422 — previously
-   * dropped here). `core.steer`'s own per-leaf cap (`MAX_STEERS_PER_LEAF`)
-   * can refuse the call (`refused: "steer_cap"`); this port's `steer`
-   * returns `void` (`ChildRuntime.steer`, runtime.ts), so that refusal is
-   * not yet observable through this method — S2's `leaf.steered` audit
-   * event (issue #423) is where it becomes visible, not here.
+   * dropped here). `core.steer`'s own per-leaf cap
+   * (`MAX_PENDING_STEERS_PER_LEAF`, core.ts) can refuse the call
+   * (`refused: "steer_cap"`); this port's `steer` returns `void`
+   * (`ChildRuntime.steer`, runtime.ts) and discards that return value —
+   * the refusal is already visible one layer up, as a named `toolError`,
+   * for the one caller that goes through `OrchestrationCore.steer`
+   * directly (`orchestration/tools.ts`'s `steerSessionTool`/
+   * `delegate_task`'s resume). It is NOT yet observable through THIS
+   * method — `workflow_steer` (issue #424, M10-S3) calls it through this
+   * port and cannot distinguish queued/resurrected/refused; a future issue
+   * widens this signature to return `core.steer`'s own outcome instead of
+   * `void` (comment in #424, 2026-09-12).
    */
   public steer(id: string, prompt: string, causal?: CausalContext): void {
     this.core.steer(id, prompt, causal);
