@@ -88,9 +88,15 @@ function scriptedRuntime(scripts: readonly (readonly ChildResult[])[]): ChildRun
     // (audit-runtime.ts) now needs that proof of delivery before it
     // records `leaf.steered` — a plain `void` return here would look
     // identical to a `ChildRuntime` that reports nothing at all.
-    steer(id: string, prompt: string): void {
+    //
+    // Issue #450: `steer` is real `void`, never called by the decorator
+    // while `steerOutcome` (below) is present.
+    steer(): void {
+      throw new Error("scriptedRuntime.steer must not be called while steerOutcome is present");
+    },
+    steerOutcome(id: string, prompt: string) {
       steered.push({ id, prompt });
-      return { queued: false } as unknown as undefined;
+      return { queued: false };
     },
     cancel(id: string): void {
       cancelled.push(id);
