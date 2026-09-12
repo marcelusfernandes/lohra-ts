@@ -7,6 +7,7 @@ import {
   OrchestrationCore,
   type CollectResult,
 } from "../src/orchestration/core.js";
+import { normalizeResumeId } from "../src/orchestration/validation.js";
 import {
   collectSessionTool,
   delegateTaskTool,
@@ -469,6 +470,65 @@ describe("delegateTaskTool", () => {
     expect(
       await delegateTaskTool(core, { tasks: ["y"], resume_id: "aaaa", max_iterations: 5 }),
     ).toBe(toolError("cannot change max_iterations when resuming a subagent"));
+  });
+
+  // #513: a model defaulting resume_id to `null` (rather than omitting the
+  // key or sending "") hit the SAME resume guard as #500 — `null !== undefined`
+  // escapes `normalizeResumeId`'s string-only check, so `args.resume_id !==
+  // undefined` in tools.ts still reads "this is a resume" and the
+  // max_iterations override guard fires with a misleading message instead of
+  // running the batch.
+  it("treats resume_id: null as absent — batch delegate runs instead of the resume guard rejecting max_iterations (#513)", async () => {
+    const core = makeCore(
+      (_subId, config) => Promise.resolve(okResult({ output: `${config.prompt}-OUT` })),
+      () => "kid-1",
+    );
+    expect(await delegateTaskTool(core, { tasks: ["a"], resume_id: null, max_iterations: 5 })).toBe(
+      toolResult(undefined, {
+        results: [
+          {
+            sub_id: "kid-1",
+            status: "complete",
+            summary: "a-OUT",
+            error_kind: null,
+            tokens_in: 11,
+            tokens_out: 7,
+            provider: "fakeprov",
+            model: "fake-model-a",
+          },
+        ],
+      }),
+    );
+  });
+
+  // #513: `normalizeResumeId` must drop the `resume_id` key entirely on
+  // absence, not just null it out — `{...args, resume_id: undefined}` still
+  // has the key, so a future `"resume_id" in args` guard would regress
+  // silently (PR #506 veredito, non_blocking 2).
+  it('drops the "resume_id" key entirely for empty, whitespace-only, null and undefined values', () => {
+    for (const resumeId of ["", "   ", null, undefined]) {
+      const normalized = normalizeResumeId({ tasks: ["a"], resume_id: resumeId });
+      expect("resume_id" in normalized).toBe(false);
+    }
+  });
+
+  it('resume_id: "abc" still rejects max_iterations override (non-regression, #513)', async () => {
+    const core = makeCore(
+      () => Promise.resolve(okResult()),
+      () => "abc",
+    );
+    await spawnSessionTool(core, allowAllProviders, { prompt: "x" });
+    await collectSessionTool(core, { sub_id: "abc", wait: true });
+    expect(
+      await delegateTaskTool(core, { tasks: ["y"], resume_id: "abc", max_iterations: 5 }),
+    ).toBe(toolError("cannot change max_iterations when resuming a subagent"));
+  });
+
+  it("resume_id: 42 still names the (non-existent) sub-session in the error — untouched by normalization (non-regression, #513)", async () => {
+    const core = makeCore(() => Promise.resolve(okResult()));
+    expect(await delegateTaskTool(core, { tasks: ["y"], resume_id: 42 })).toBe(
+      toolError('no sub-session "42"'),
+    );
   });
 
   it("resumes an existing sub-session via steer+collect instead of spawning when resume_id is present", async () => {
