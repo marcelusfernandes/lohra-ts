@@ -56,7 +56,7 @@ const MAX_MAX_CHARS = 32768;
 // page size.
 const MAX_TURNS = 200;
 const NOTE =
-  "turnos assentados; o turno em voo não está gravado. role 'tool' vem com a saída bruta, sem redigir (diferente de workflow_audit). A checagem de posse depende de leaf.started ainda estar na auditoria — auditoria desligada ou evento podado/despejado nega em vez de fingir sucesso.";
+  "turnos assentados; o turno em voo não está gravado. role 'tool' vem com a saída bruta, sem redigir (diferente de workflow_audit). O orçamento de max_chars é gasto do turno MAIS RECENTE para o mais antigo, então turns.at(-1) nunca volta cortado por causa de turnos antigos — quando o orçamento estoura, são os turnos mais antigos que voltam com content:''. A checagem de posse depende de leaf.started ainda estar na auditoria — auditoria desligada ou evento podado/despejado nega em vez de fingir sucesso.";
 
 /** Same idiom as `notices-tool.ts`'s `integer()`: accepts a JSON number OR a
  * numeric string (a strict-schema caller sometimes stringifies), never
@@ -107,18 +107,23 @@ interface LeafTurn {
   readonly created_at: number;
 }
 
+// #435: `rowsDesc` MUST already be ordered most-recent-first — the budget is
+// spent walking that order, so the MOST RECENT turn is always filled first
+// and, when the budget runs out, it is the OLDEST turns that come back
+// empty instead of the newest. The caller reverses the result back to
+// chronological order for the reply; this function never reorders.
 function truncateTurns(
-  rows: readonly MessageTurnRow[],
+  rowsDesc: readonly MessageTurnRow[],
   maxChars: number,
 ): { readonly turns: readonly LeafTurn[]; readonly truncated: boolean } {
   let budget = maxChars;
   let truncated = false;
-  const turns = rows.map((row): LeafTurn => {
+  const turns = rowsDesc.map((row): LeafTurn => {
     if (row.content === null) return { role: row.role, content: null, created_at: row.timestamp };
     // An already-empty turn is never a cut — even with the budget already at
     // zero, there is nothing to slice, so this must NOT flip `truncated`
-    // (round 2 fix: the old order checked `budget <= 0` first and reported a
-    // false positive for a turn that was empty all along).
+    // (round 2 fix, #432: the old order checked `budget <= 0` first and
+    // reported a false positive for a turn that was empty all along).
     if (row.content.length === 0) return { role: row.role, content: "", created_at: row.timestamp };
     if (budget <= 0) {
       truncated = true;
@@ -167,7 +172,10 @@ export function workflowLeafReadHandler(
     // Fetch the MOST RECENT `MAX_TURNS + 1` rows (DESC) — the `+1` is only
     // to detect "there is at least one more beyond the cap" without a
     // separate COUNT query — then drop the extra (oldest of the fetched
-    // batch) and restore ascending order for the reply.
+    // batch). The rows STAY in DESC (most-recent-first) order for
+    // `truncateTurns` (#435: the char budget must be spent from the most
+    // recent turn backward, so a busy conversation never comes back with an
+    // empty tail); only the OUTPUT is restored to chronological order.
     const fetchedDesc = database
       .prepare(
         `SELECT role, content, timestamp FROM messages
@@ -176,8 +184,9 @@ export function workflowLeafReadHandler(
       )
       .all(subId, MAX_TURNS + 1) as readonly MessageTurnRow[];
     const truncatedTurns = fetchedDesc.length > MAX_TURNS;
-    const rows = [...(truncatedTurns ? fetchedDesc.slice(0, MAX_TURNS) : fetchedDesc)].reverse();
-    const { turns, truncated } = truncateTurns(rows, maxChars);
+    const rowsDesc = truncatedTurns ? fetchedDesc.slice(0, MAX_TURNS) : fetchedDesc;
+    const { turns: turnsDesc, truncated } = truncateTurns(rowsDesc, maxChars);
+    const turns = Object.freeze([...turnsDesc].reverse());
 
     return toolResult(undefined, {
       sub_id: subId,
