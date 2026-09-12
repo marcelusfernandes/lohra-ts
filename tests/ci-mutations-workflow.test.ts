@@ -91,6 +91,22 @@ describe("mutations-matrix — seleção de fatias", () => {
     expect(slicesOf(["src/cli.ts"], real)).toEqual(["workflow-audit-live"]);
   });
 
+  it("arquivo do diff em focusFiles de uma fatia seleciona essa fatia, mesmo sem tocar src/ (issue #514)", () => {
+    const real = readSlices(SLICES);
+    const matrix = selectSlices(real, ["tests/workflow-durable-roots.test.ts"]);
+    expect(matrix.include.map((entry) => entry.slice)).toEqual(["workflow-durability"]);
+    expect(matrix.count).toBe(1);
+    expect(matrix.reason).toBe("focus");
+  });
+
+  it("arquivo de teste fora de qualquer focusFiles continua count 0, reason paths (issue #514)", () => {
+    const real = readSlices(SLICES);
+    const matrix = selectSlices(real, ["tests/nao-e-foco-de-nenhuma-fatia.test.ts"]);
+    expect(matrix.count).toBe(0);
+    expect(matrix.include).toEqual([]);
+    expect(matrix.reason).toBe("paths");
+  });
+
   it("readSlices rejeita JSON sem a forma esperada", () => {
     const dir = mkdtempSync(join(tmpdir(), "slices-"));
     const path = join(dir, "slices.json");
