@@ -55,6 +55,7 @@ import {
   AuditTrail,
   OrchestrationChildRuntime,
   productionOwnershipStore,
+  templateLoader,
   workflowStatusHandler,
   WorkflowService,
 } from "../workflow/index.js";
@@ -368,6 +369,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     runtime: new OrchestrationChildRuntime(orchestrationCore),
     environment: options.environment,
     homeRoot: options.home,
+    loader: templateLoader(options.home),
     store,
     auditTrail: new AuditTrail(sessionToolBase.auditRepository, {
       warning: sessionToolBase.noticesSink.warn,

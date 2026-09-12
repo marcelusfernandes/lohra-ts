@@ -24,6 +24,7 @@ export * from "./sandbox.js";
 export * from "./schema.js";
 export * from "./service.js";
 export * from "./sqlite-cache.js";
+export * from "./templates.js";
 export * from "./tiers.js";
 export * from "./tool.js";
 export * from "./types.js";

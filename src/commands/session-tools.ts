@@ -21,7 +21,11 @@ import {
   type ToolRegistry,
 } from "../tools/index.js";
 import type { WorkflowService } from "../workflow/index.js";
-import { workflowAuditHandler, workflowToolHandlers } from "../workflow/index.js";
+import {
+  workflowAuditHandler,
+  workflowTemplatesHandler,
+  workflowToolHandlers,
+} from "../workflow/index.js";
 // Issue #401: not re-exported by `../workflow/index.js` — same convention
 // `chat.ts` already follows for `WorkflowLiveTail` (`live-tail.ts`).
 import { createNoticesSink, type NoticesSink } from "../workflow/notices-sink.js";
@@ -162,11 +166,15 @@ export function composeSessionTools(options: {
     // this one is not.
     workflow_steer: workflowSteerHandler(options.workflowService, options.base.auditRepository),
     // Issue #462: needs `options.home` (the operator tier map) — only
-    // available here, unlike `workflow_leaf_read`. `loader` is threaded in
-    // once S6 (#464) wires one; until then every 'workflow' node previews
-    // as 'unknown', matching production today (no loader is wired anywhere
-    // in this composition root either).
+    // available here, unlike `workflow_leaf_read`. No `loader` passed here
+    // yet, so every 'workflow' node still previews as 'unknown' — S6 (#464)
+    // only wired `loader` into `WorkflowService` (`chat.ts`/`dashboard.ts`),
+    // not into this preview's own `PreviewDeps`; follow-up.
     workflow_preview: workflowPreviewHandler(options.base.database, options.home),
+    // Issue #464: needs `options.home` (the operator template library root)
+    // — same reason `workflow_preview` above is registered here rather than
+    // in `createSessionToolBase`.
+    workflow_templates: workflowTemplatesHandler(options.home),
     ...options.orchestrationHandlers,
     ...media.handlers,
   });

@@ -45,6 +45,7 @@ import {
   AuditTrail,
   OrchestrationChildRuntime,
   productionOwnershipStore,
+  templateLoader,
   workflowStatusHandler,
   WorkflowService,
 } from "../workflow/index.js";
@@ -332,6 +333,7 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     runtime: new OrchestrationChildRuntime(orchestrationCore),
     environment: options.environment,
     homeRoot: options.home,
+    loader: templateLoader(options.home),
     store,
     auditTrail: new AuditTrail(toolBase.auditRepository, {
       warning: toolBase.noticesSink.warn,
