@@ -285,6 +285,95 @@ describe("run_workflow(resume_run_id, route) — pivot cap (#427 AC)", () => {
   });
 });
 
+// Issue #447 (M14, follow-up of #442's review): on the base, `route`'s type
+// check only asks whether `provider`/`model` ARE strings, never whether
+// they're non-empty — `route: {provider: ""}` sails through, gets written
+// onto every node that declares a route (`applyRouteOverrideToSpec`), and
+// PERSISTS in `spec_json` before the doomed spawn even starts, burning one
+// of the run's 3 pivots on a typo. These tests check the boundary refuses
+// an empty/whitespace-only value BEFORE the run is ever touched — same
+// `cacheSpec()`/`RoutingFakeRuntime` harness as the pivot-cap block above,
+// paused on 'route_fault' first so there's a real, comparable "before"
+// state to assert stays byte-for-byte the same after the refusal.
+describe("run_workflow(resume_run_id, route) — provider/model must be non-empty (#447 AC)", () => {
+  async function pausedOnRouteFault() {
+    const harnessed = harness(new RoutingFakeRuntime("bad-provider"));
+    const started = harnessed.service.start(cacheSpec());
+    if ("error" in started) throw new Error(started.error);
+    await harnessed.service.status(started.run_id, true);
+    const before = harnessed.repository.getRunState(started.run_id) as Record<string, unknown>;
+    expect(durableFromRow(before).pause_reason).toBe("route_fault");
+    return { ...harnessed, runId: started.run_id, before };
+  }
+
+  it("refuses route.provider as an empty string, named error, without touching the run", async () => {
+    const { service, repository, runId, before, close } = await pausedOnRouteFault();
+    try {
+      const handlers = workflowToolHandlers(service);
+      const out = runWorkflowTool(handlers, {
+        resume_run_id: runId,
+        route: { provider: "" },
+      }) as { error?: string };
+      expect(out.error ?? "").toContain("route.provider");
+      expect(out.error ?? "").toContain("non-empty");
+      const after = repository.getRunState(runId) as Record<string, unknown>;
+      expect(after).toEqual(before);
+      expect(durableFromRow(after).pivots).toEqual([]);
+    } finally {
+      close();
+    }
+  });
+
+  it("refuses route.model as whitespace-only, named error, without touching the run", async () => {
+    const { service, repository, runId, before, close } = await pausedOnRouteFault();
+    try {
+      const handlers = workflowToolHandlers(service);
+      const out = runWorkflowTool(handlers, {
+        resume_run_id: runId,
+        route: { model: "   " },
+      }) as { error?: string };
+      expect(out.error ?? "").toContain("route.model");
+      expect(out.error ?? "").toContain("non-empty");
+      const after = repository.getRunState(runId) as Record<string, unknown>;
+      expect(after).toEqual(before);
+      expect(durableFromRow(after).pivots).toEqual([]);
+    } finally {
+      close();
+    }
+  });
+
+  it("refuses route.provider as an empty string even when route.model is set, named error", async () => {
+    const { service, repository, runId, before, close } = await pausedOnRouteFault();
+    try {
+      const handlers = workflowToolHandlers(service);
+      const out = runWorkflowTool(handlers, {
+        resume_run_id: runId,
+        route: { provider: "", model: "x" },
+      }) as { error?: string };
+      expect(out.error ?? "").toContain("route.provider");
+      const after = repository.getRunState(runId) as Record<string, unknown>;
+      expect(after).toEqual(before);
+      expect(durableFromRow(after).pivots).toEqual([]);
+    } finally {
+      close();
+    }
+  });
+
+  it("still accepts route.provider as a normal non-empty string (non-regression)", async () => {
+    const { service, runId, close } = await pausedOnRouteFault();
+    try {
+      const handlers = workflowToolHandlers(service);
+      const out = runWorkflowTool(handlers, {
+        resume_run_id: runId,
+        route: { provider: "good" },
+      }) as { error?: string };
+      expect(out.error).toBeUndefined();
+    } finally {
+      close();
+    }
+  });
+});
+
 // Issue #446 (M14, follow-up of #427/PR #442's review): the stretch's own
 // REGISTRATION write (and the per-node progress write, #125) used to
 // hardcode `pause_payload_json: null` — only the TERMINAL write folded
