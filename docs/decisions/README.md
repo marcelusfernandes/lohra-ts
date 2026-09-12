@@ -126,6 +126,6 @@ suggested_route}`; kind que pausa nunca entra em `faultKinds`; primeiro a
   aborta em voo (D2); acrescenta o hook de steer armado por chamada, nunca
   por leaf inteiro (D3, que não é item da ADR). O quarto item da ADR (quais
   clientes streaming precisam de plumbing nova) foi resolvido por S1 (#516,
-  PR #525): `error_kind`/`reason` uniforme para os três gatilhos
+  PR #525). `error_kind`/`reason` uniforme para os três gatilhos
   (cancel/steer/timeout) segue genuinamente aberto — o timeout de folha
   (S6/#521) ainda fecha sem `error_kind` nem `usage`.
