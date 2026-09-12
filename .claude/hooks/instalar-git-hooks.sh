@@ -2,8 +2,9 @@
 # Copia .claude/hooks/git-pre-push para o diretório de hooks do git deste clone
 # (funciona de dentro de um worktree: `git rev-parse --git-path hooks` resolve
 # para o diretório comum). .git/hooks não é versionado, então todo clone nasce
-# sem a trava; scripts/postinstall.mjs chama este script quando há um checkout
-# git (instalação por tarball, sem .git, pula em silêncio — não é um clone).
+# sem a trava; scripts/prepare.mjs (script `prepare`, só roda em checkout de
+# dev) chama este script quando há um checkout git; instalação por tarball não
+# executa `prepare` — o `postinstall` publicado faz só o chmod do node-pty.
 # Idempotente: compara bytes antes de copiar.
 set -eu
 raiz=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "instalar-git-hooks: fora de um checkout git; nada a instalar"; exit 0; }

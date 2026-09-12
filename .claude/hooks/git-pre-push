@@ -1,6 +1,7 @@
 #!/bin/sh
 # git-pre-push — hook pre-push nativo do git, instalado por
-# .claude/hooks/instalar-git-hooks.sh (chamado pelo postinstall em checkouts git).
+# .claude/hooks/instalar-git-hooks.sh (chamado por scripts/prepare.mjs, script
+# `prepare`, em checkouts git — nunca numa instalação por tarball/npm).
 #
 # Camada 2 da proteção da main (ADR 0004; .claude/hooks/README.md): vale para
 # QUALQUER `git push` desta máquina, dentro ou fora do Claude Code. Recusa:

@@ -1,6 +1,7 @@
 # lefthook.yml — pre-commit local (issue #63): prettier --check e eslint nos
-# arquivos staged. Instalado por `npm ci`/`npm install` via
-# `scripts/postinstall.mjs`, que chama `lefthook install pre-commit` — só
+# arquivos staged. Instalado por `npm ci`/`npm install` no checkout via
+# `scripts/prepare.mjs` (script `prepare`; pulado com `LOHRA_SKIP_PREPARE=1`,
+# que `npm pack`/testes usam), que chama `lefthook install pre-commit` — só
 # esse hook. `lefthook install` sem argumento instala todos os hooks deste
 # arquivo e faz backup dos existentes; usamos `install pre-commit` para que
 # o `pre-push` nativo continue sendo o de `.claude/hooks/git-pre-push`

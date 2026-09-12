@@ -48,18 +48,19 @@ criar novas nesse padrão.
 
 Slug em kebab-case, prefixo igual ao tipo do conventional commit:
 
-| Prefixo     | Uso                                 |
-| ----------- | ----------------------------------- |
-| `feat/`     | Funcionalidade nova                 |
-| `fix/`      | Correção de bug                     |
-| `refactor/` | Reestrutura sem mudar comportamento |
-| `perf/`     | Otimização                          |
-| `chore/`    | Deps, config, tooling               |
-| `docs/`     | Só documentação                     |
-| `test/`     | Só testes                           |
-| `ci/`       | CI, GitHub Actions, hooks           |
+| Prefixo     | Uso                                                                                                    |
+| ----------- | ------------------------------------------------------------------------------------------------------ |
+| `feat/`     | Funcionalidade nova                                                                                    |
+| `fix/`      | Correção de bug                                                                                        |
+| `refactor/` | Reestrutura sem mudar comportamento                                                                    |
+| `perf/`     | Otimização                                                                                             |
+| `chore/`    | Deps, config, tooling                                                                                  |
+| `docs/`     | Só documentação                                                                                        |
+| `test/`     | Só testes                                                                                              |
+| `ci/`       | CI, GitHub Actions, hooks                                                                              |
+| `release/`  | PR de release: `release/<versão>` (bump + CHANGELOG via `npm run release`; fluxo em `docs/release.md`) |
 
-Sempre `<type>/<n>-<slug>`, com `<n>` = número da issue. Exemplos:
+Sempre `<type>/<n>-<slug>`, com `<n>` = número da issue (exceção: `release/<versão>`, cuja issue de tracking `chore(release): v<versão>` vai no `Closes` da PR). Exemplos:
 `feat/12-workflow-store`, `fix/3-stub-driver-port`, `docs/31-adr-0004`.
 
 ## Fluxo de uma mudança
