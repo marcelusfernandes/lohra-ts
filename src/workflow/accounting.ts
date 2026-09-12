@@ -348,15 +348,18 @@ export function dedupeArtifactFaultsByPath(faults: readonly string[]): string[] 
 }
 
 /** #539/#540: the ONE place that spells the SPACED `sub[${reference}]: `
- * scope prefix a fault string carries — `foldNestedCounters` below,
- * `faultPrefixFromNodeId` right below, and `engine.ts`'s own
- * `runNested`(the `result.faults` fold) all call this instead of inlining
- * the template literal, so no producer of a scoped fault string can drift
- * out of the shape `NESTED_SCOPE_PREFIX_RE`/`collisionKeyOf` above parse.
- * Never used for `RunArtifact.node_id` itself — that stays the UNSPACED
+ * scope prefix a fault string carries — `foldNestedCounters` below (the
+ * `faults`/`sandboxFaults` folds) and `faultPrefixFromNodeId` right below
+ * both call this instead of inlining the template literal, so neither
+ * producer of a scoped fault string can drift out of the shape
+ * `NESTED_SCOPE_PREFIX_RE`/`collisionKeyOf` above parse. #540 moved the
+ * THIRD former inliner — `engine.ts`'s own `runNested` — into
+ * `foldNestedCounters`'s `faults` fold below, so this function has no
+ * caller outside this module anymore; never exported. Never used for
+ * `RunArtifact.node_id` itself — that stays the UNSPACED
  * `sub[${reference}]:${nodeId}` contract pinned by
  * `tests/workflow-artifacts.test.ts:331`. */
-export function nestedScopePrefix(reference: string): string {
+function nestedScopePrefix(reference: string): string {
   return `sub[${reference}]: `;
 }
 
@@ -417,10 +420,14 @@ export function recordFaultKind(result: RunResult, kind: ErrorKind | null): void
  * the `nested-fold-removed` mutation anchor, workflow-executor-mutants.ts —
  * that anchor's `before` ends at `forcingFallbacks`, the statement just
  * above) — folding `leafRespawns` here too, alongside the two new fields,
- * keeps this a SWAP, not an addition: engine.ts's own line count for the
- * nested-workflow fold stays exactly what it was before PR #316 round 2 (a
+ * kept that a SWAP, not an addition, at the time (PR #316 round 2: a
  * nested sub-run's refusals were folding into eleven OTHER parent counters
- * already but never into these two). */
+ * already but never into these two). #540 moved a SECOND former inline
+ * statement here too — the `faults` fold below, previously
+ * `runNested`'s own `this.result.faults.push(...)` — a net REDUCTION in
+ * `engine.ts` (978 → 977 lines) this time, not just a swap: `engine.ts` is
+ * frozen at 800 lines project-wide and was already over it, so `contratos`
+ * refuses growth there, never here. */
 export function foldNestedCounters(result: RunResult, nested: RunResult, reference: string): void {
   result.leafRespawns += nested.leafRespawns;
   result.partialLeaves += nested.partialLeaves;

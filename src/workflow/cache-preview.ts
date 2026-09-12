@@ -356,7 +356,7 @@ function classifyNode(node: Node, ctx: ClassifyContext): PreviewNodeOutcome {
   // `upstream_missing` case already handled above or a fan-out cap trip
   // (`FanoutRejected`, always leaves its own fault behind) that falls
   // through to `unknown` below — the preview has no dedicated outcome for
-  // it (`engine.ts` is frozen at 978 lines; `capTrips` is a run-wide
+  // it (`engine.ts` is frozen at 977 lines; `capTrips` is a run-wide
   // counter, not attributable to this one node without growing it).
   // `unknown` stays the catch-all for what the preview genuinely can't
   // predict: a node the run never reached at all (paused upstream for a

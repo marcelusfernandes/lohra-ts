@@ -307,7 +307,8 @@ failed`, `FanoutRejected`, um fault genérico do engine) grava um fault
 max_fanout`/`exceeds lifetime remaining`) cai no `unknown` do catch-all —
   a issue decidiu não criar um outcome dedicado para ele, porque
   `capTrips` (`RunResult`) é uma contagem do run inteiro, não atribuível a
-  este nó sem crescer `engine.ts` (congelado em 978 linhas). P10 mata a
+  este nó sem crescer `engine.ts` (congelado em 977 linhas — #540 reduziu
+  de 978, ver mais abaixo). P10 mata a
   remoção do novo guard `Array.isArray`, ancorado no `it` novo de fan-out
   cap em `tests/workflow-cache-preview-writes.test.ts`: 259 + 1 = 260.
 

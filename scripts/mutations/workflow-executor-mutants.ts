@@ -406,7 +406,7 @@ export const executorMutants: readonly ExecutorMutant[] = [
       {
         file: engine,
         before:
-          "    this.result.nullCount += result.nullCount;\n    this.result.nodesTotal += result.nodesTotal;\n    this.result.tokensIn += result.tokensIn;\n    this.result.tokensOut += result.tokensOut;\n    this.result.cacheReadTokens += result.cacheReadTokens;\n    this.result.cacheWriteTokens += result.cacheWriteTokens;\n    this.result.reasoningTokens += result.reasoningTokens;\n    for (const [nodeId, cost] of Object.entries(result.nodeCosts))\n      this.result.nodeCosts[`sub[${reference}]:${nodeId}`] = cost;\n    this.result.validationRetries += result.validationRetries;\n    this.result.capTrips += result.capTrips;\n    this.result.engineFaults += result.engineFaults;\n    this.result.forcingFallbacks += result.forcingFallbacks;",
+          "    this.result.nullCount += result.nullCount;\n    this.result.nodesTotal += result.nodesTotal;\n    this.result.tokensIn += result.tokensIn;\n    this.result.tokensOut += result.tokensOut;\n    this.result.cacheReadTokens += result.cacheReadTokens;\n    this.result.cacheWriteTokens += result.cacheWriteTokens;\n    this.result.reasoningTokens += result.reasoningTokens;\n    for (const [nodeId, cost] of Object.entries(result.nodeCosts))\n      this.result.nodeCosts[`sub[${reference}]:${nodeId}`] = cost;\n    this.result.validationRetries += result.validationRetries;\n    this.result.capTrips += result.capTrips;\n    this.result.engineFaults += result.engineFaults;\n    this.result.forcingFallbacks += result.forcingFallbacks;\n    foldNestedCounters(this.result, result, reference);",
         after: "    void reference;",
       },
     ],
