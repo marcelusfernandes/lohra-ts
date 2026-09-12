@@ -436,3 +436,84 @@ describe("route-faults.ts — the module's own exports (#426)", () => {
     expect(notice.message).toContain("a");
   });
 });
+
+// Issue #449 (M14, follow-up do épico #421, achado da PR #439 rodada 2):
+// `isRouteLesson` falso e `appendSafe`'s `catch` (route-faults.ts:93-102,
+// :112-122) não tinham oráculo — só o fallback "sem repositório" (linha
+// ~319 acima) era exercitado. Chama `recordRouteFaultNotice` direto, com um
+// repositório falso, em vez de montar um `WorkflowService` inteiro: o alvo
+// é o guard, não o caminho do engine.
+describe("recordRouteFaultNotice — the two unexercised guards (#449)", () => {
+  it("a checkpoint that isn't a RouteLesson never reaches the repository — warn says so", async () => {
+    const { recordRouteFaultNotice } = await import("../src/workflow/route-faults.js");
+    const malformedCheckpoints: ReadonlyArray<Readonly<Record<string, unknown>> | null> = [
+      null,
+      { foo: 1 },
+      // A lesson missing `error_kind` — every other field present and
+      // well-typed, so a cast-only guard (`isRouteLesson → () => true`)
+      // would wave it through.
+      { node_id: "a", provider: null, model: null, suggested_route: null },
+    ];
+    for (const checkpoint of malformedCheckpoints) {
+      const warnings: string[] = [];
+      let appendCalls = 0;
+      const repository = {
+        append: (): null => {
+          appendCalls += 1;
+          return null;
+        },
+      };
+      recordRouteFaultNotice(repository, "run-1", checkpoint, null, (message) =>
+        warnings.push(message),
+      );
+      expect(appendCalls).toBe(0);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("run-1");
+      expect(warnings[0]).toContain("had no lesson to record");
+    }
+  });
+
+  it("a repository whose append() throws never propagates — warn carries the cause", async () => {
+    const { recordRouteFaultNotice } = await import("../src/workflow/route-faults.js");
+    const warnings: string[] = [];
+    const repository = {
+      append: (): never => {
+        throw new Error("sqlite: disk I/O error");
+      },
+    };
+    const lesson = {
+      error_kind: "auth_failed",
+      node_id: "a",
+      provider: "codex",
+      model: "gpt-5",
+      suggested_route: null,
+    };
+    expect(() => {
+      recordRouteFaultNotice(repository, "run-2", lesson, null, (message) =>
+        warnings.push(message),
+      );
+    }).not.toThrow();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("run-2");
+    expect(warnings[0]).toContain("Error: sqlite: disk I/O error");
+  });
+
+  it("a repository that plainly refuses (append returns null) still warns, without a cause", async () => {
+    const { recordRouteFaultNotice } = await import("../src/workflow/route-faults.js");
+    const warnings: string[] = [];
+    const repository = {
+      append: (): null => null,
+    };
+    const lesson = {
+      error_kind: "route_fault",
+      node_id: "a",
+      provider: null,
+      model: null,
+      suggested_route: null,
+    };
+    recordRouteFaultNotice(repository, "run-3", lesson, null, (message) => warnings.push(message));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("run-3");
+    expect(warnings[0]).not.toContain("Error:");
+  });
+});
