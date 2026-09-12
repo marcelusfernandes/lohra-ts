@@ -284,9 +284,27 @@ output.length === 0`; os dois casos que produzem `output === null` saem
   `return null;` em silêncio, `engine.ts:468`) — reporta `upstream_missing`,
   o MESMO outcome que `agent` já recebe para um `${...}` não resolvido,
   detectado por `output === null` sem NENHUM fault gravado com o prefixo
-  do próprio id do nó (todo outro caminho de `runParallel` que produz
-  `null` — `all N branches failed`, um cap de fan-out, um fault genérico —
-  grava um fault assim; só esse não); (2) um `parallel` que estourou o cap
+  do próprio id do nó (a maioria dos outros caminhos de `runParallel` que
+  produz `null` — `all N branches failed`, um cap de fan-out, um fault
+  genérico — grava um fault ASSIM, com o prefixo). Uma segunda exceção,
+  alcançável e não coberta por este outcome: `gateTokens`
+  (`engine.ts:204-209`) chama `pause()` (`engine.ts:192-203`), que GRAVA um
+  fault (`token budget exhausted: spent X of Y tokens`) mas sem o prefixo
+  do nó — `hasNodeFault` não o vê — e então lança `TokenBudgetExhausted`;
+  o catch do laço principal (`engine.ts:401-402`) converte essa exceção em
+  `output = null` sem gravar mais nada. Não é inalcançável nesta preview: a
+  `Budget` do dry run é semeada com o gasto REAL do run (`seedSpend`,
+  `cache-preview.ts:254-266`, usado em `cache-preview.ts:411-415`), então um
+  run pausado por `token_budget_exhausted` já chega com `tokensSpent >=
+tokenBudget`; se o `parallel` classificado for o primeiro nó do spec a
+  tentar de fato spawnar uma folha (`collectLeaf` chama `gateTokens` em
+  `engine.ts:254`), o gate
+  dispara nele mesmo e ele sai `upstream_missing` por engano — indistinguível
+  do caso de `branches` não resolvida. Um nó ANTERIOR que dispare o gate
+  primeiro pausa o run ali (o laço principal quebra na pausa antes de chegar
+  ao `parallel`), e este sai `unknown` (nó nunca alcançado), não
+  `upstream_missing` — não há teste cobrindo o caso em que o próprio
+  `parallel` é o primeiro a tentar spawnar. (2) um `parallel` que estourou o cap
   de fan-out (`budget.ts`'s `checkFanout`, `FanoutRejected`, sempre deixa
   um fault `exceeds max_fanout`/`exceeds lifetime remaining`) cai em
   `unknown` — a preview não tem como atribuir `RunResult.capTrips` (uma
@@ -399,9 +417,10 @@ leaves: <path>"` em `artifactFaults` exatamente uma vez; nunca muda
   o `pause_payload_json` persistido continua byte-idêntico (só a leitura AO
   VIVO — `resultView`, via `result.artifactFaults` — dedupa); uma leitura
   FRIA (`workflow_status` num run dormente, `durableRollup`,
-  `service.ts:203`) ainda expõe a duplicata que já estava persistida — não
-  coube trocar isso também sem passar do teto de 1284 linhas de
-  `service.ts`. As duas mensagens que geram o texto do advisory
+  `service.ts:203`) ainda expõe a duplicata que já estava persistida — **até
+  o #512, abaixo**, que fechou exatamente essa lacuna em `pausePayloadOf`.
+  Na época deste fix (#501) não coube trocar isso também sem passar do teto
+  de 1284 linhas de `service.ts`. As duas mensagens que geram o texto do advisory
   (`recordLeafSideChannels`, `recordCrossStretchArtifactCollisions`)
   compartilham `COLLISION_FAULT_MARKER` (`accounting.ts:21`) — o mesmo
   texto de antes, byte a byte — para que o parser de caminho de
@@ -429,7 +448,8 @@ leaves: <path>"` em `artifactFaults` exatamente uma vez; nunca muda
   já flagado gravava mais uma duplicata, permanentemente, para
   `durableRollup` (leitura fria) expor. `pausePayloadOf` agora aplica o
   mesmo dedup antes de persistir; leitura fria e leitura viva concordam,
-  em qualquer número de resumes. De quebra, `collisionPathOf` passou a
+  em qualquer número de resumes. De quebra, `collisionKeyOf`
+  (`accounting.ts:297`, renomeada de `collisionPathOf`) passou a
   chavear por (escopo, caminho), não só caminho: um sub-workflow aninhado
   prefixa seus próprios faults com `sub[${reference}]: `
   (`foldNestedCounters` abaixo) — sem o escopo na chave, uma colisão DENTRO

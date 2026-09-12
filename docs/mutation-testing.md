@@ -478,7 +478,7 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
    formas se a contagem não for atualizada junto com o mutante novo: a soma
    total (260 + o novo) contra os treze catálogos importados, e a linha do
    catálogo tocado em `CONTAGEM_POR_CATALOGO`
-   (`tests/mutations-slices.test.ts:547-561`), uma tabela pinada por número
+   (`tests/mutations-slices.test.ts:552-566`), uma tabela pinada por número
    literal — não derivada de `CATALOGOS.get(path).length` — para que uma
    troca compensatória entre dois catálogos (um ganha o que o outro perde,
    soma preservada) não passe despercebida. As duas contagens (o literal
@@ -529,7 +529,7 @@ cada entrada de `slices.json`; que todo catálogo descoberto por conteúdo em
 `focus.file` dos catálogos da fatia (exceto `media`/`workflow-executor`); que
 `srcGlobs` cobre todo `edits[].file` dos catálogos da fatia (item 2 acima); a
 contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
-(`tests/mutations-slices.test.ts:547-561` — hoje `workflow-durability-guard`
+(`tests/mutations-slices.test.ts:552-566` — hoje `workflow-durability-guard`
 14, `workflow-durability-named` 41, `orchestration` 5,
 `workflow-audit-live-mutants` 32, `workflow-audit-producers-mutants` 25,
 `web-tools-mutants` 9, `media-catalog-other` 7, `media-catalog-persistence`
@@ -591,11 +591,14 @@ edita o teste que mata os mutantes de uma fatia (caso real: PR #504,
 devolvia `count: 0` e o required check passava por vacuidade. Um diff de
 teste fora de qualquer `focusFiles` continua `count: 0`/`reason: "paths"`.
 
-Não é required no ruleset — decisão do owner, pendente, depois de medir o
-tempo por fatia (comentário de topo de `mutations.yml`). Tempos medidos no
-Actions (run 34175933045): `workflow-executor` 1 min 28 s,
+É required no ruleset `protege-main` desde a PR #227 (issue #225) —
+`mutations` está em `required_status_checks` junto com `checks (20)`,
+`checks (22)`, `provenance`, `escopo`, `contratos` e `controle-negativo`
+(confirmado em `gh api repos/marcelusfernandes/lohra-ts/rulesets/22348036`;
+`.github/workflows/mutations.yml:3` registra "required desde #225"). Tempos
+medidos no Actions (run 34175933045): `workflow-executor` 1 min 28 s,
 `workflow-durability` 2 min 16 s, `workflow-audit-live` 2 min 15 s, em
 paralelo — parede (do início do `plan` ao fim do último `mutate`) ≈ 2 min 42
-s. Até o owner decidir tornar required, o gate de mutação completo (`npm run
-mutations:all`) roda localmente, e o passo 11 de `orquestracao.md` (QA em
-merge de risco) é quem o exercita.
+s. O gate de mutação completo (`npm run mutations:all`), além da(s) fatia(s)
+que o CI já rodou verde para o diff, roda localmente e é o que o passo 11 de
+`orquestracao.md` (QA em merge de risco) exercita.
