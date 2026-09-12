@@ -558,7 +558,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "List validated workflow templates (proven specs to adapt), or fetch one by 'name' to get its full spec. Prefer adapting a template over authoring fresh.",
+        "List validated workflow templates (proven specs to adapt), or fetch one by 'name' to get its full spec. Prefer adapting a template over authoring fresh. Templates come from `<home>/workflows/*.json` — one JSON spec per file, 'name'/'ref' is the filename without its extension; the same 'ref' a 'workflow' node in run_workflow's spec resolves through.",
       parameters: {
         type: "object",
         properties: {
