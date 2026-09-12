@@ -10,9 +10,10 @@
   `src/orchestration/core.ts:99-103` (the `ChildRunner` contract doc) and
   again at `src/orchestration/core.ts:381-390` (the `shutdown()` drain doc).
   Issues #465 and #490 cite this doctrine at `core.ts:68-71`; that line range
-  has since shifted (issue #367 added the `wrapDispatch` field to
-  `SpawnConfig`) and today holds unrelated documentation. The two ranges
-  above are where the doctrine text actually lives as of this ADR's baseline.
+  has shifted since those issues were written and today holds the
+  `SpawnConfig.wrapDispatch` doc (`core.ts:62-77`), not the doctrine text.
+  The two ranges above are where the doctrine text actually lives as of this
+  ADR's baseline.
 - Tracking: this decision is issue #465, milestone 11 ("Rotas, cache e
   artefatos: contratos do DAG" — exit criterion: "ADR do abort de stream
   aprovado ou recusado explicitamente"). Implementation is epic #490,
@@ -87,9 +88,18 @@ gate — silence is not approval).
 ## Decision
 
 **Accepted** (owner, 2026-09-13, issue #465). In-flight abort of a model
-stream is now permitted for the three triggers already wired to an
-`AbortSignal`: cancel, steer, and timeout. Rules, as stated in issue #465 and
-confirmed in the owner's comment on that issue:
+stream is now permitted for the three triggers the owner named: cancel,
+steer, and timeout. Today the signal is fired by `cancel()`
+(`src/orchestration/core.ts:377`, `entry.abortController.abort()`), which the
+engine's own leaf-timeout follow-up also reaches
+(`src/workflow/audit-runtime.ts:409-411`: a `wait: true` collect that comes
+back `"running"` is treated as a timeout and the engine calls `cancel(id)`),
+and by `shutdown()` (`core.ts:103`, "shutdown() is this signal's only trigger
+today"). Steer today is inbox delivery via `drainMessages`
+(`core.ts:14-26`, `conversation/runtime.ts:374-385`), not an abort signal;
+how steer becomes an in-flight abort trigger is a definir na decomposição do
+#490. Rules, as stated in issue #465 and confirmed in the owner's comment on
+that issue:
 
 1. A turn aborted while a provider call is in flight never becomes
    `turn.completed`.
@@ -121,7 +131,7 @@ this ADR:
   signal that just needs verifying: `ResponsesClient` already forwards a
   `signal` into the HTTP layer (`client.ts:571-575`); the Anthropic and Chat
   Completions clients currently do not, at any of the four call sites listed
-  in Contexto above. #490 names this as its own first sub-item (S1, a fake
+  in Context above. #490 names this as its own first sub-item (S1, a fake
   stream, no network).
 
 ## Consequences
@@ -174,5 +184,5 @@ mutation-testing slice over the abort path.
 
 This ADR's own PR is docs class (ADR 0004 item 7: every file under
 `docs/**`) and touches only this file. Any change to `src/` — including the
-`core.ts:99-103` / `:381-390` comment update named in Decisão item 4 — is out
+`core.ts:99-103` / `:381-390` comment update named in Decision item 4 — is out
 of scope here and belongs to #490.
