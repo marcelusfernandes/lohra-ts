@@ -40,6 +40,7 @@ import type {
   LeafSandboxHandle,
   LeafSandboxInstallation,
   LeafToolDispatch,
+  SteerOutcome,
 } from "./runtime.js";
 import type { Ownership } from "../state/workflow-repository.js";
 import { BUILTIN_DEFINITIONS } from "../tools/builtin-definitions.js";
@@ -51,31 +52,39 @@ export type AuditedChildRuntimeDeps = AuditFailClosedDeps;
  * out of this issue's `Files`) has no source marker — the engine's own
  * `causal` (engine.ts:304-308) never carries one. Rather than widen the
  * port (which every OTHER `ChildRuntime` implementation would then have to
- * satisfy), the decorator's OWN `steer` grows a 4th parameter, `source`,
- * only visible through this wider type: any caller that holds the plain
- * `ChildRuntime` the port declares keeps calling `steer` with 3 args and
- * gets `"engine"` by default (what the engine's schema-retry steer already
- * does); a caller that holds the concrete `AuditedChildRuntime` — the
- * operator-steer tool of a later issue (S3) — can pass `"operator"`
- * explicitly. `runtime.ts` stays untouched.
+ * satisfy), the decorator's OWN `steer`/`steerOutcome` (issue #450) grow a
+ * 4th parameter, `source`, only visible through this wider type: any caller
+ * that holds the plain `ChildRuntime` the port declares keeps calling
+ * `steer` with 3 args and gets `"engine"` by default (what the engine's
+ * schema-retry steer already does); a caller that holds the concrete
+ * `AuditedChildRuntime` — `workflow_steer` (steer-tool.ts) — can pass
+ * `"operator"` explicitly. `runtime.ts` stays untouched.
+ *
+ * `steer` itself stays real `void` (issue #450 — see `runtime.ts`'s
+ * `steerOutcome?` doc and `orchestration-runtime.ts`'s note on why a union
+ * containing `void` never gets TypeScript's void-return leniency).
+ * `steerOutcome` is the typed counterpart that actually reports the
+ * outcome — present on a given `AuditedChildRuntime` instance ONLY when
+ * `inner.steerOutcome` is (see `auditedChildRuntime` below, same
+ * conditional-spread pattern as `causalSnapshot`/`installLeafSandbox`
+ * further down this file). `workflow_steer` (steer-tool.ts) checks for its
+ * presence to decide between reading a real outcome and a named
+ * fail-closed error — never inventing a `queued: true` this decorator has
+ * no evidence for.
  */
 export interface AuditedChildRuntime extends ChildRuntime {
-  // Issue #424 (2ª emenda, 2026-09-12): the DECLARED type stays
-  // `Awaitable<void>` — `AuditedChildRuntime` still has to satisfy plain
-  // `ChildRuntime` wherever it flows into one (`engine-options.ts`,
-  // `service.ts` — neither in this issue's `Files`), and TypeScript's
-  // void-return leniency does not extend to a union containing `null`
-  // (confirmed empirically; see `orchestration-runtime.ts`'s longer note
-  // on the same constraint). The implementation below still returns the
-  // REAL `core.steer` outcome at runtime — `workflow_steer` (steer-tool.ts)
-  // recovers it with the SAME runtime shape check this decorator itself
-  // uses on `inner.steer`'s result, never trusting the declared `void`.
   readonly steer: (
     id: string,
     prompt: string,
     causalContext?: CausalContext,
     source?: "engine" | "operator",
   ) => Awaitable<void>;
+  readonly steerOutcome?: (
+    id: string,
+    prompt: string,
+    causalContext?: CausalContext,
+    source?: "engine" | "operator",
+  ) => Awaitable<SteerOutcome | null>;
 }
 
 // `pending` is a mutable counter, same pattern as `auditedToolDispatch`'s own
@@ -256,6 +265,96 @@ export function auditedChildRuntime(
     });
   }
 
+  // Issue #450: replaces the runtime shape check this function used to run
+  // on `inner.steer`'s awaited return (`typeof raw === "object"`) — `inner`
+  // now reports its outcome, if at all, through the separate, typed
+  // `steerOutcome` member (`runtime.ts`). `inner.steerOutcome` is captured
+  // ONCE here, not re-checked per call: a `ChildRuntime`'s shape does not
+  // change over the lifetime of one decorator instance (the same
+  // assumption `causalSnapshot`/`installLeafSandbox` below already make).
+  //
+  // Issue #423: `leaf.steered` is metadata-only — never the prompt text,
+  // only `message_chars` (same `Array.from(...).length` convention this
+  // file's own `clipped` helper — audit-model.ts — uses for unicode-safe
+  // counts). Identity comes from `identities.get(id).causal` (declared
+  // above, next to `open`) — a schema retry's `steer` (engine.ts:304-308)
+  // runs AFTER the leaf's `open` entry is already gone (its first
+  // `collect()` returned `status: "complete"`, closing it, BEFORE the
+  // engine's own schema check runs) — never the (possibly bumped-attempt)
+  // `causalContext` argument this call carries, which still passes
+  // through to `inner.steerOutcome`/`inner.steer` unchanged. A `steer` on
+  // an id this decorator never spawned still delegates, just without an
+  // audit event — same fail-open-to-the-port rule `auditedToolDispatch`
+  // follows when `open` has no entry.
+  //
+  // Issue #444: `record` used to run BEFORE `inner.steer` resolved —
+  // 11 `leaf.steered` for 10 actually-queued steers (S1's cap test), and
+  // a steer on an unrecognised/terminal id still wrote an event. The
+  // outcome is awaited FIRST now; `record` only runs when it is proof of
+  // a real delivery: `outcome !== null && outcome.refused === undefined`.
+  // That covers BOTH `{queued: true}` (busy leaf, pushed to the inbox,
+  // core.ts:328-329) AND `{queued: false}` with no `refused` — the
+  // idle/terminal "resurrect" branch (core.ts:331-345), which genuinely
+  // starts a new turn with the steer text. This matters: the engine's
+  // schema-retry `steer()` (engine.ts:274-314, #423's original motivating
+  // scenario) always calls `steer()` AFTER a `collect(wait: true)` that
+  // already returned "complete" — the entry is idle, not inFlight, by
+  // then, so `core.steer` ALWAYS takes the resurrection branch and
+  // returns `{queued: false}` there. Gating strictly on `queued === true`
+  // would silently drop that entire scenario from the ledger — a false
+  // negative of the exact kind (invariant 2, CLAUDE.md) this issue exists
+  // to remove a false positive of.
+  //
+  // `OrchestrationCore.steer`'s four real outcomes (core.ts:316-346),
+  // confirmed with the orchestrator (issue #444) as the full table this
+  // predicate has to cover:
+  //
+  //   outcome                          | delivered? | leaf.steered?
+  //   ----------------------------------|------------|---------------
+  //   {queued: true}                    | yes (inbox)| yes
+  //   {queued: false}  (no `refused`)   | yes (resurrect, new turn) | yes
+  //   {queued: false, refused:"steer_cap"} | no      | no (tool already
+  //     surfaces this as a named error, #424)
+  //   null (id never spawned / forgotten)  | no      | no
+  //
+  // Issue #450: a FIFTH row — `inner.steerOutcome` absent entirely (every
+  // `ChildRuntime` before `OrchestrationChildRuntime`, and any test double
+  // that only implements plain `steer`) — is not a real `core.steer`
+  // outcome either. `deliverSteer` below delegates straight to
+  // `inner.steer` in that case and returns `null`: no object, never
+  // invented into evidence of delivery this decorator does not have.
+  // `.bind(inner)` — `inner.steerOutcome` extracted as a bare reference
+  // would lose its `this` (e.g. `OrchestrationChildRuntime.steerOutcome`
+  // reads `this.core`); same reason `causalSnapshot`/`installLeafSandbox`
+  // below always call through `inner.<member>(...)` rather than capture a
+  // floating reference.
+  const innerSteerOutcome = inner.steerOutcome?.bind(inner);
+  async function deliverSteer(
+    id: string,
+    prompt: string,
+    causalContext: CausalContext | undefined,
+    source: "engine" | "operator",
+  ): Promise<SteerOutcome | null> {
+    if (innerSteerOutcome === undefined) {
+      await inner.steer(id, prompt, causalContext);
+      return null;
+    }
+    const outcome = await innerSteerOutcome(id, prompt, causalContext);
+    const identity = identities.get(id);
+    if (identity !== undefined && outcome !== null && outcome.refused === undefined) {
+      const cc = identity.causal;
+      record(identity.runId, {
+        event_type: "leaf.steered",
+        segment_id: cc.segmentId,
+        node_id: cc.nodePath.at(-1) ?? null,
+        sub_id: id,
+        attempt: cc.attempt,
+        payload: { source, message_chars: Array.from(prompt).length },
+      });
+    }
+    return outcome;
+  }
+
   const runtime: AuditedChildRuntime = {
     async spawn(request: ChildSpawnRequest): Promise<string> {
       const id = await inner.spawn(request);
@@ -326,100 +425,19 @@ export function auditedChildRuntime(
         close(id, "leaf.failed", { status: "cancelled", reason: "cancelled" });
       }
     },
-    // Issue #423: `leaf.steered` is metadata-only — never the prompt text,
-    // only `message_chars` (same `Array.from(...).length` convention this
-    // file's own `clipped` helper — audit-model.ts — uses for unicode-safe
-    // counts). Identity comes from `identities.get(id).causal` (declared
-    // above, next to `open`) — a schema retry's `steer` (engine.ts:304-308)
-    // runs AFTER the leaf's `open` entry is already gone (its first
-    // `collect()` returned `status: "complete"`, closing it, BEFORE the
-    // engine's own schema check runs) — never the (possibly bumped-attempt)
-    // `causalContext` argument this call carries, which still passes
-    // through to `inner.steer` unchanged. A `steer` on an id this decorator
-    // never spawned still delegates, just without an audit event — same
-    // fail-open-to-the-port rule `auditedToolDispatch` follows when `open`
-    // has no entry.
-    //
-    // Issue #424 (2ª emenda, 2026-09-12): `inner` is typed `ChildRuntime`
-    // (`steer` returns `Awaitable<void>`), so nothing here can ASSUME a
-    // shape from the type checker alone — a runtime shape check, never a
-    // blind cast, is what tells the concrete `OrchestrationChildRuntime`'s
-    // real `{queued, refused?} | null` (issue #424, orchestration-
-    // runtime.ts) apart from a `ChildRuntime` that genuinely returns
-    // nothing. `undefined` — every OTHER `ChildRuntime.steer` today, and
-    // the declared type of this very call — is treated the SAME as `null`
-    // (unrecognised/terminal id): never invented into a `{queued: true}`
-    // this decorator has no evidence for.
-    //
-    // Issue #444: `record` used to run BEFORE `inner.steer` resolved —
-    // 11 `leaf.steered` for 10 actually-queued steers (S1's cap test), and
-    // a steer on an unrecognised/terminal id still wrote an event. The
-    // outcome is awaited FIRST now; `record` only runs when it is proof of
-    // a real delivery: `outcome !== null && outcome.refused === undefined`.
-    // That covers BOTH `{queued: true}` (busy leaf, pushed to the inbox,
-    // core.ts:328-329) AND `{queued: false}` with no `refused` — the
-    // idle/terminal "resurrect" branch (core.ts:331-345), which genuinely
-    // starts a new turn with the steer text. This matters: the engine's
-    // schema-retry `steer()` (engine.ts:274-314, #423's original motivating
-    // scenario) always calls `steer()` AFTER a `collect(wait: true)` that
-    // already returned "complete" — the entry is idle, not inFlight, by
-    // then, so `core.steer` ALWAYS takes the resurrection branch and
-    // returns `{queued: false}` there. Gating strictly on `queued === true`
-    // would silently drop that entire scenario from the ledger — a false
-    // negative of the exact kind (invariant 2, CLAUDE.md) this issue exists
-    // to remove a false positive of.
-    //
-    // `OrchestrationCore.steer`'s four real outcomes (core.ts:316-346),
-    // confirmed with the orchestrator (issue #444) as the full table this
-    // predicate has to cover:
-    //
-    //   outcome                          | delivered? | leaf.steered?
-    //   ----------------------------------|------------|---------------
-    //   {queued: true}                    | yes (inbox)| yes
-    //   {queued: false}  (no `refused`)   | yes (resurrect, new turn) | yes
-    //   {queued: false, refused:"steer_cap"} | no      | no (tool already
-    //     surfaces this as a named error, #424)
-    //   null (id never spawned / forgotten)  | no      | no
-    //
-    // A fifth row, `undefined` — a `ChildRuntime` that reports nothing at
-    // all (every implementation before `OrchestrationChildRuntime`) — is
-    // not a real `core.steer` outcome, but reaches here the same way: no
-    // object, `outcome` normalises to `null` above, and is treated
-    // identically — never invented into evidence of delivery this decorator
-    // does not have.
+    // Issue #450: `steer` delegates to `deliverSteer` (declared above,
+    // outside this literal) and discards the outcome — see that function's
+    // doc for the full record-or-not table. A `steer` on an id this
+    // decorator never spawned (or one `inner` reports nothing for) still
+    // delegates, just without an audit event — same fail-open-to-the-port
+    // rule `auditedToolDispatch` follows when `open` has no entry.
     steer: async (
       id: string,
       prompt: string,
       causalContext?: CausalContext,
       source: "engine" | "operator" = "engine",
     ): Promise<void> => {
-      // `inner: ChildRuntime` declares `steer` as `Awaitable<void>` — the
-      // pending value itself is retyped `Promise<unknown>` before
-      // awaiting (never the resolved value blindly cast), same posture
-      // `workflow_steer` (steer-tool.ts) uses one layer up.
-      const pending = inner.steer(id, prompt, causalContext) as unknown as Promise<unknown>;
-      const raw: unknown = await pending;
-      const outcome =
-        raw !== null && typeof raw === "object"
-          ? (raw as { readonly queued: boolean; readonly refused?: "steer_cap" })
-          : null;
-      const identity = identities.get(id);
-      if (identity !== undefined && outcome !== null && outcome.refused === undefined) {
-        const cc = identity.causal;
-        record(identity.runId, {
-          event_type: "leaf.steered",
-          segment_id: cc.segmentId,
-          node_id: cc.nodePath.at(-1) ?? null,
-          sub_id: id,
-          attempt: cc.attempt,
-          payload: { source, message_chars: Array.from(prompt).length },
-        });
-      }
-      // Declared `Promise<void>` (see the interface comment above) — the
-      // REAL outcome still travels through the return, recovered by
-      // `workflow_steer` (steer-tool.ts) with this SAME `typeof === "object"`
-      // shape check, never trusted from the type alone.
-      return outcome as unknown as undefined;
+      await deliverSteer(id, prompt, causalContext, source);
     },
     // `causalSnapshot` only delegates. `exactOptionalPropertyTypes` requires
     // these be OMITTED, not assigned `undefined`, when `inner` does not have
@@ -429,6 +447,21 @@ export function auditedChildRuntime(
       : {
           causalSnapshot: (id: string): ReturnType<NonNullable<ChildRuntime["causalSnapshot"]>> =>
             (inner.causalSnapshot as NonNullable<ChildRuntime["causalSnapshot"]>)(id),
+        }),
+    // Issue #450: `steerOutcome` only exists on THIS instance when `inner`
+    // reports one — same conditional-spread posture as `causalSnapshot`
+    // above (`exactOptionalPropertyTypes`: omitted, never `undefined`).
+    // `workflow_steer` (steer-tool.ts) checks for its presence to choose
+    // between a real outcome and a named fail-closed error.
+    ...(innerSteerOutcome === undefined
+      ? {}
+      : {
+          steerOutcome: (
+            id: string,
+            prompt: string,
+            causalContext?: CausalContext,
+            source: "engine" | "operator" = "engine",
+          ): Promise<SteerOutcome | null> => deliverSteer(id, prompt, causalContext, source),
         }),
     // Issue #367: `installLeafSandbox` hands `inner` a WRAPPED installation —
     // `wrap` produces `tool.*` around whatever the caller's OWN policy wrap

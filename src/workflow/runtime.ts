@@ -91,6 +91,17 @@ export interface LeafSandboxHandle {
   dispose(): void;
 }
 
+/**
+ * `OrchestrationCore.steer`'s own return shape (`orchestration/core.ts`,
+ * out of this issue's `Files` — structural, not re-exported, so this type
+ * is declared once here and matched by shape): `queued: true` when a busy
+ * leaf's steer text was pushed to the core's own inbox, `queued: false` (no
+ * `refused`) when an idle/terminal leaf was resurrected with a fresh turn —
+ * both are genuine deliveries. `refused: "steer_cap"` is the only refusal
+ * shape today (issue #424 S1's per-leaf pending-steer cap).
+ */
+export type SteerOutcome = Readonly<{ queued: boolean; refused?: "steer_cap" }>;
+
 /** Provider-free port consumed by the workflow core. */
 export interface ChildRuntime {
   spawn(request: ChildSpawnRequest): Awaitable<string>;
@@ -98,6 +109,30 @@ export interface ChildRuntime {
   steer(id: string, prompt: string, causalContext?: CausalContext): Awaitable<void>;
   cancel(id: string): Awaitable<void>;
   causalSnapshot?(id: string): Awaitable<CausalContext | null>;
+  /**
+   * Issue #450 (PR #443 veredito, non_blocking a-1/a-2): the REAL outcome
+   * of a steer call, for a runtime that can report one. `steer` above stays
+   * `Awaitable<void>` — every existing `ChildRuntime` slot the port flows
+   * into (`chat.ts`, `dashboard.ts`, `service.ts`, none in this issue's
+   * `Files`) would otherwise have to satisfy a wider return, and a union
+   * that merely CONTAINS `void` does not get TypeScript's void-return
+   * leniency (confirmed empirically — the constraint that sank the
+   * original, simpler attempt at widening `steer` itself). This is
+   * therefore a NEW, OPTIONAL member, same shape as `causalSnapshot?`
+   * above, never a wider `steer`.
+   *
+   * `null` means the id is terminal/unknown to the runtime — a real
+   * answer, distinct from a refusal. A runtime that omits this member
+   * entirely (every `ChildRuntime` before `OrchestrationChildRuntime`)
+   * reports nothing at all; callers (`AuditedChildRuntime`, `workflow_steer`
+   * in `steer-tool.ts`) treat "absent" and "null" as the same fact — no
+   * proof of delivery — but never conflate "absent" with `refused`.
+   */
+  steerOutcome?(
+    id: string,
+    prompt: string,
+    causalContext?: CausalContext,
+  ): Awaitable<SteerOutcome | null>;
   /**
    * Install this acquisition's leaf sandbox.
    *

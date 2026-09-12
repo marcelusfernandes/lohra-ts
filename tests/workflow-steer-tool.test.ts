@@ -65,6 +65,7 @@ import type {
   ChildRuntime,
   ChildSpawnRequest,
   LeafSandboxHandle,
+  SteerOutcome,
 } from "../src/workflow/runtime.js";
 
 const roots: string[] = [];
@@ -262,6 +263,23 @@ describe("workflow_steer registry wiring (#424)", () => {
     const names = registry.getDefinitions().map((definition) => definition.function.name);
     expect(names).toContain("workflow_steer");
     expect(CHILD_EXCLUDED_TOOLS).toContain("workflow_steer");
+  });
+
+  // Issue #450 (PR #443 veredito, non_blocking a-1/a-2): type oracle, not an
+  // assertion — the point is that this file COMPILES. `steerOutcome` is a
+  // NEW, OPTIONAL member (`runtime.ts`), never a wider `steer`: the literal
+  // below satisfies `ChildRuntime` with `steer` still real `void` AND a
+  // `steerOutcome` that reports a real `SteerOutcome | null`, proving the
+  // two never had to merge into one wider return.
+  it("a ChildRuntime literal with steerOutcome satisfies the port without widening steer's void return", () => {
+    const sample = {
+      spawn: (): string => "leaf-1",
+      collect: (): ChildResult => ({ status: "complete", output: null }),
+      steer: (): void => undefined,
+      cancel: (): void => undefined,
+      steerOutcome: (): SteerOutcome | null => ({ queued: true }),
+    } satisfies ChildRuntime;
+    expect(typeof sample.steerOutcome).toBe("function");
   });
 });
 
