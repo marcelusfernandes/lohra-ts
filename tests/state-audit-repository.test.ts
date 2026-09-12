@@ -377,3 +377,40 @@ describe("AuditRepository.query — fieldMarkerRows / field_markers, oráculos d
     }
   });
 });
+
+// Issue #511 (follow-up de #498, PR #507, veredito non_blocking 1):
+// `markerRows` (acima) seleciona pela COLUNA `event_type` gravada por
+// `append()`, nunca pelo que `parseEvent` re-deriva — então uma linha
+// gravada como `leaf.started` nunca vira candidata a `event_markers`/
+// `notices`, mesmo que a re-sanitização em `parseEvent` (segunda passada de
+// `safeAuditMetadata`, não idempotente em tamanho antes desta issue) a
+// fizesse decodificar como `audit.truncated`. Este teste grava exatamente
+// essa forma (calibrada para caber abaixo de `AUDIT_EVENT_BYTES` na escrita)
+// e prova que a página devolve o MESMO `event_type` da coluna — página e
+// marcadores concordando.
+describe("AuditRepository.query — página e event_markers concordam após re-sanitização (#511)", () => {
+  it("um leaf.started com muitas chaves desconhecidas, gravado abaixo do teto, não decodifica como audit.truncated na página", () => {
+    const { connection, audit } = database();
+    try {
+      const payload: Record<string, unknown> = {};
+      for (let index = 0; index < 16; index += 1)
+        payload[`unknown_key_number_${String(index)}_${"k".repeat(30)}`] = true;
+      audit.append("run-511-idempotent", {
+        event_type: "leaf.started",
+        segment_id: "s".repeat(128),
+        node_id: "n".repeat(64),
+        sub_id: "u".repeat(128),
+        payload,
+      });
+      const page = audit.query({ runId: "run-511-idempotent" });
+      expect(page.events).toHaveLength(1);
+      expect(page.events[0]?.event_type, "MUTATION_CAUSE:M511-page-truncated-mismatch").toBe(
+        "leaf.started",
+      );
+      expect(page.integrity.event_markers).toEqual({ gaps: 0, truncated: 0, unavailable: 0 });
+      expect(page.integrity.notices).toEqual([]);
+    } finally {
+      connection.close();
+    }
+  });
+});
