@@ -4,7 +4,8 @@
 // diff `base...head`, e emite a matriz. Fail-closed: glob fora da forma
 // `src/<dir>/**` OU `src/<arquivo>.ts` (arquivo de topo, issue #195: fecha o
 // buraco de `src/cli.ts`, que nenhum `src/<dir>/**` cobre) lança; mudança em
-// `scripts/mutations/**` seleciona todas.
+// `scripts/mutations/**` seleciona todas; arquivo do diff em `focusFiles` de
+// uma fatia também a seleciona, mesmo sem tocar `src/` (issue #514).
 // O YAML é pinado por leitura textual (mesmo idioma de ci-workflow-order):
 // sem parser de YAML nas dependências.
 import { spawnSync } from "node:child_process";
@@ -89,6 +90,22 @@ describe("mutations-matrix — seleção de fatias", () => {
   it("contra o slices.json real: src/cli.ts (arquivo de topo) seleciona workflow-audit-live (issue #195, pino 1)", () => {
     const real = readSlices(SLICES);
     expect(slicesOf(["src/cli.ts"], real)).toEqual(["workflow-audit-live"]);
+  });
+
+  it("arquivo do diff em focusFiles de uma fatia seleciona essa fatia, mesmo sem tocar src/ (issue #514)", () => {
+    const real = readSlices(SLICES);
+    const matrix = selectSlices(real, ["tests/workflow-durable-roots.test.ts"]);
+    expect(matrix.include.map((entry) => entry.slice)).toEqual(["workflow-durability"]);
+    expect(matrix.count).toBe(1);
+    expect(matrix.reason).toBe("focus");
+  });
+
+  it("arquivo de teste fora de qualquer focusFiles continua count 0, reason paths (issue #514)", () => {
+    const real = readSlices(SLICES);
+    const matrix = selectSlices(real, ["tests/nao-e-foco-de-nenhuma-fatia.test.ts"]);
+    expect(matrix.count).toBe(0);
+    expect(matrix.include).toEqual([]);
+    expect(matrix.reason).toBe("paths");
   });
 
   it("readSlices rejeita JSON sem a forma esperada", () => {

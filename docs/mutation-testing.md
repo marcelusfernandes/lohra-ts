@@ -154,7 +154,7 @@ inteira de `focalTests` em vez de um foco por mutante):
 
 ### Forma dos `srcGlobs`
 
-`srcGlobs` só aceita duas formas (`scripts/github/mutations-matrix.ts:44-62`,
+`srcGlobs` só aceita duas formas (`scripts/github/mutations-matrix.ts:56-74`,
 `DIR_GLOB_FORM`/`FILE_GLOB_FORM`, fail-closed): `src/<dir>/**` — um
 diretório de primeiro nível de `src/`, inteiro — ou o literal
 `src/<arquivo>.ts` — um arquivo de topo, direto em `src/`. Não existe uma
@@ -473,7 +473,7 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
    pelo teste.
 2. Adicionar a entrada em `scripts/mutations/slices.json`: `slice`, `script`,
    `catalog`, `srcGlobs`, `focusFiles`. `srcGlobs` aceita duas formas
-   (`scripts/github/mutations-matrix.ts:45-58,96-99`, fail-closed — qualquer
+   (`scripts/github/mutations-matrix.ts:56-74,118-122`, fail-closed — qualquer
    outra forma lança; forma detalhada em "Forma dos `srcGlobs`", acima):
    `src/<dir>/**` por diretório de primeiro nível de `src/` que a fatia
    cobre, ou o literal `src/<arquivo>.ts` para um arquivo de topo (ex.:
@@ -542,13 +542,25 @@ como cobertura nova.
 ## CI (`mutations.yml`, issue #156)
 
 `.github/workflows/mutations.yml` está em `main` desde a PR #188: dispara em
-`pull_request` quando o diff toca `src/**`, `scripts/mutations/**` ou o
-próprio workflow — uma PR só de docs não dispara nada. O job `plan`
-(`scripts/github/mutations-matrix.ts`) lê `slices.json#srcGlobs` e o diff
+todo `pull_request`, sem filtro de `paths:` — uma PR sem `src/**` ainda
+precisa reportar o job-resumo `mutations`, só que com `count: 0`. O job `plan`
+(`scripts/github/mutations-matrix.ts`) lê `slices.json` e o diff
 `base...head` para decidir quais fatias rodam, e escreve a matriz num
 `GITHUB_STEP_SUMMARY`; `mutate` roda uma fatia por job da matriz (`npm run
 <script>`) e sobe `.mutation-evidence/` como artifact mesmo em falha (`if:
-always()`, `if-no-files-found: warn`).
+always()`, `if-no-files-found: warn`). Três regras de seleção, cada uma
+com seu `reason` (fail-closed, `scripts/github/mutations-matrix.ts:5-23`):
+arquivo sob `src/<dir>/**` ou o `src/<arquivo>.ts` exato de algum `srcGlobs`
+seleciona a(s) fatia(s) correspondente(s) (`reason: "paths"`); arquivo sob
+`scripts/mutations/**` (harness ou catálogo) seleciona TODAS as fatias
+(`reason: "harness"`) — o custo de rodar tudo é menor que o de um harness
+quebrado passar despercebido; e, desde a issue #514, arquivo do diff que
+aparece em `focusFiles` de uma fatia também a seleciona, mesmo sem tocar
+`src/` (`reason: "focus"`) — sem essa regra, uma PR só de `tests/**` que
+edita o teste que mata os mutantes de uma fatia (caso real: PR #504,
+`tests/workflow-durable-roots.test.ts`, foco de `workflow-durability`)
+devolvia `count: 0` e o required check passava por vacuidade. Um diff de
+teste fora de qualquer `focusFiles` continua `count: 0`/`reason: "paths"`.
 
 Não é required no ruleset — decisão do owner, pendente, depois de medir o
 tempo por fatia (comentário de topo de `mutations.yml`). Tempos medidos no
