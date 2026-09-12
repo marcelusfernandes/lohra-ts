@@ -88,7 +88,11 @@ const NUMBER_FIELDS = new Set([
   // Issue #460 (M11-S2): `node.rerouted`'s own pivot count so far.
   "pivot",
 ]);
-const BOOLEAN_FIELDS = new Set(["tainted", "stale", "terminal", "usage_uncertain"]);
+// Issue #517 (M16-S2, épico #490, ADR 0005): `leaf.failed`'s own marker for
+// a cancelled leaf whose `usage` already includes an ESTIMATED spend from a
+// call aborted in flight — never coerced from a string (audit-model's own
+// boolean branch, `:328`, only accepts an actual `boolean`).
+const BOOLEAN_FIELDS = new Set(["tainted", "stale", "terminal", "usage_uncertain", "partial"]);
 const PATH_FIELDS = new Set(["node_path", "branch_path"]);
 // Issue #460 (M11-S2, épico #458): `node.rerouted`'s `from`/`to` — nested
 // `{provider, model}` objects, not a flattened `from_provider`/`from_model`
