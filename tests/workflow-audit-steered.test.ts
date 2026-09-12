@@ -96,9 +96,9 @@ function scriptedRuntime(scripts: readonly (readonly ChildResult[])[]): ChildRun
     // (no `refused`) — a genuine delivery, not a refusal. This scripted mock
     // returns the SAME shape a real core would, so this test exercises the
     // #444 predicate honestly instead of masking it with `{queued: true}`.
-    steer(id: string, prompt: string): unknown {
+    steer(id: string, prompt: string): void {
       steered.push({ id, prompt });
-      return { queued: false };
+      return { queued: false } as unknown as undefined;
     },
     cancel: (): void => undefined,
   });
@@ -224,7 +224,7 @@ describe("workflow audit — leaf.steered (#423)", () => {
         // #444: a busy leaf's REAL `core.steer` (core.ts:323-329) pushes to
         // the inbox and returns `{queued: true}` — the realistic outcome for
         // an operator steer at a still-running leaf.
-        steer: (): unknown => ({ queued: true }),
+        steer: (): void => ({ queued: true }) as unknown as undefined,
         cancel: (): void => undefined,
       });
       const runtime = auditedChildRuntime(inner, deps);
@@ -281,7 +281,7 @@ describe("workflow audit — leaf.steered (#423)", () => {
       const inner: ChildRuntime = withMinimalLeafSandbox({
         spawn: (): string => "leaf-1",
         collect: (): ChildResult => ({ status: "running", output: null }),
-        steer: (): unknown => ({ queued: false, refused: "steer_cap" }),
+        steer: (): void => ({ queued: false, refused: "steer_cap" }) as unknown as undefined,
         cancel: (): void => undefined,
       });
       const runtime = auditedChildRuntime(inner, deps);
@@ -300,7 +300,7 @@ describe("workflow audit — leaf.steered (#423)", () => {
       const inner: ChildRuntime = withMinimalLeafSandbox({
         spawn: (): string => "leaf-1",
         collect: (): ChildResult => ({ status: "running", output: null }),
-        steer: (): unknown => null,
+        steer: (): void => null as unknown as undefined,
         cancel: (): void => undefined,
       });
       const runtime = auditedChildRuntime(inner, deps);
