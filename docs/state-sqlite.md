@@ -48,6 +48,31 @@ pena tentar de novo. A checagem prioriza o código que o driver
    o texto histórico, `/database is (?:locked|busy)/i` contra
    `error.message`.
 
+## Migrações aditivas (`addedColumns`)
+
+`src/state/schema.ts` mantém `addedColumns` — uma lista `[tabela, coluna,
+declaração]` aplicada por `addMissingColumns` (`src/state/connection.ts:68-76`)
+a cada abertura: um `ALTER TABLE <tabela> ADD COLUMN <coluna> <declaração>`
+por entrada, engolindo só o erro `duplicate column name` (banco que já tem a
+coluna — idempotente); qualquer outro erro de `ALTER TABLE` propaga
+(fail-closed), nunca é silenciado.
+
+Algumas entradas de `addedColumns` já estão embutidas em `applicationSchema`
+(a tabela nasce com a coluna desde a issue que a introduziu) — a entrada
+sobrevive só para migrar um banco criado ANTES disso. Outras nunca entraram
+na DDL crua e dependem só do `ALTER TABLE` para existir em qualquer banco.
+
+`tests/state-migrations.test.ts` (issue #481) é o contrato durável dessa
+migração: um `it` por entrada REAL de `addedColumns`, cada um abrindo um
+banco criado SEM aquela coluna (a DDL completa, com a coluna removida via
+`ALTER TABLE ... DROP COLUMN` quando ela já vier embutida) por
+`openStateDatabase` do HEAD e afirmando a coluna e o tipo declarado via
+`PRAGMA table_info` — nunca um banco que o próprio HEAD já cria completo, o
+que mascararia uma migração quebrada. Um caso adicional cobre o fail-closed:
+uma tabela substituída por uma view do mesmo nome faz o `ALTER TABLE` falhar
+com um erro que não é `duplicate column name`, e o teste confere que ele
+propaga em vez de ser engolido.
+
 ## `operator_notices`
 
 Avisos ao operador com escopo (`run:<run_id>` ou `global`), dono e ack —
@@ -119,3 +144,6 @@ produção que grava aqui (`createNoticesSink`, um por processo), o mapa de
 - `src/state/audit-repository.ts:136-148`
 - `src/workflow/audit-trail.ts:252-273`
 - `src/state/notices-repository.ts`
+- `src/state/schema.ts` (`addedColumns`), `src/state/connection.ts:68-76`
+  (`addMissingColumns`)
+- `tests/state-migrations.test.ts`
