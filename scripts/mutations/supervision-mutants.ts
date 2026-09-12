@@ -167,9 +167,16 @@ export const supervisionMutants: readonly Mutant[] = [
     },
     edits: [
       {
+        // Re-anchored by issue #459 (M11-S1, épico #458): the `before` below
+        // is `isRouteLesson`'s body AFTER #459 grew `suggested_route` from
+        // the literal `null` to `Route | null` — the last clause changed
+        // from `candidate.suggested_route === null` to accept the filled
+        // shape too (`isRoute(candidate.suggested_route)`). Amendment on
+        // issue #459 (2026-09-13) put this catalog in that issue's `Files`
+        // for exactly this re-anchor.
         file: routeFaults,
         before:
-          'export function isRouteLesson(value: unknown): value is RouteLesson {\n  if (value === null || typeof value !== "object") return false;\n  const candidate = value as Readonly<Record<string, unknown>>;\n  return (\n    typeof candidate.error_kind === "string" &&\n    isRouteFault(candidate.error_kind as ErrorKind) &&\n    typeof candidate.node_id === "string" &&\n    (candidate.provider === null || typeof candidate.provider === "string") &&\n    (candidate.model === null || typeof candidate.model === "string") &&\n    candidate.suggested_route === null\n  );\n}',
+          'export function isRouteLesson(value: unknown): value is RouteLesson {\n  if (value === null || typeof value !== "object") return false;\n  const candidate = value as Readonly<Record<string, unknown>>;\n  return (\n    typeof candidate.error_kind === "string" &&\n    isRouteFault(candidate.error_kind as ErrorKind) &&\n    typeof candidate.node_id === "string" &&\n    (candidate.provider === null || typeof candidate.provider === "string") &&\n    (candidate.model === null || typeof candidate.model === "string") &&\n    (candidate.suggested_route === null || isRoute(candidate.suggested_route))\n  );\n}',
         after:
           "export function isRouteLesson(value: unknown): value is RouteLesson {\n  void value;\n  return true;\n}",
       },

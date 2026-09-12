@@ -1,6 +1,7 @@
 import type { RunControl, WorkflowEngineOptions, WorkflowLoader } from "./engine-contract.js";
 import type { ChildRuntime } from "./runtime.js";
 import type { RouteOverride } from "./route-override.js";
+import type { RouteEnvelope } from "./routes.js";
 import type { TierMap } from "./tiers.js";
 
 /**
@@ -18,11 +19,15 @@ export interface WorkflowLaunchOptions {
   readonly routeOverride?: RouteOverride;
 }
 
-/** `WorkflowLaunchOptions` plus the operator tier map resolved once per
- * `start()` call, threaded to whichever launch path (fresh or durable)
- * actually constructs the `WorkflowEngine` (#258). */
+/** `WorkflowLaunchOptions` plus the operator tier map and the operator's
+ * route-fallback envelope (#459), both resolved once per `start()` call,
+ * threaded to whichever launch path (fresh or durable) actually constructs
+ * the `WorkflowEngine` (#258) — `routes` never reaches the engine itself
+ * (it isn't an `WorkflowEngineOptions` field); the terminal reads it
+ * straight off `options` to call `withSuggestedRoute`. */
 export interface WorkflowLaunchOptionsWithTiers extends WorkflowLaunchOptions {
   readonly tiers: TierMap;
+  readonly routes: RouteEnvelope;
 }
 
 /**
