@@ -18,7 +18,9 @@ tocado, nenhum commit criado):
 3. Lê `version` de `package.json`, computa a versão-alvo (bump ou o
    `x.y.z` explícito), e confirma que ela é estritamente maior que a atual
    — senão `RELEASE_VERSION_NOT_GREATER` (só se aplica ao `x.y.z`
-   explícito; um bump sempre soma 1 em algum componente).
+   explícito; um bump sempre soma 1 em algum componente). Se a versão atual
+   em `package.json` não casar `x.y.z` (ex.: `1.0.0-beta`), recusa com
+   `RELEASE_INVALID_CURRENT_VERSION` antes de comparar (`scripts/release.ts:86,103`).
 4. Valida a branch atual: precisa ser exatamente `release/<versão-alvo>`.
    `main` recusa com a causa própria `RELEASE_BRANCH_MAIN`; qualquer outra
    branch (inclusive `release/<versão errada>`) recusa com
@@ -82,12 +84,18 @@ owner/agente: gh issue develop <N> --base main --name release/0.0.12
 agente:       npm run release -- patch          # ou minor/major/x.y.z
 agente:       git push -u origin release/0.0.12
 agente:       abre PR (Closes #N, AC copiados) — skill pr, state:in-review
-CI:           checks + provenance + escopo + contratos + controle-negativo
-              (o diff é só package.json/package-lock.json/CHANGELOG.md —
-              contratos/controle-negativo não têm o que reprovar)
+CI:           checks + provenance + escopo + contratos + controle-negativo +
+              mutations (`.github/workflows/mutations.yml`, `on: pull_request`
+              sem filtro de paths — required desde #225; o diff é só
+              package.json/package-lock.json/CHANGELOG.md, então `plan`
+              decide count 0, `mutate` é pulado e o resumo passa em segundos;
+              contratos/controle-negativo também não têm o que reprovar)
 revisor:      avalia como qualquer PR — AC, escopo, invariantes
 orquestrador: merge commit só com checks verdes + review:approved
               (gh pr merge --merge; Closes #N fecha a issue de tracking)
+qa:           merge tocou package.json → merge de risco (orquestracao.md
+              passo 11): roda a suíte inteira + `npm run mutations:all` em
+              worktree pinado; só reporta, nunca corrige
 owner:        git tag -a v0.0.12 <merge-commit> && git push origin v0.0.12
 D7:           publica no npm a partir da tag (fora do escopo desta issue)
 ```
@@ -128,16 +136,25 @@ os merges novos.
 | `RELEASE_INVALID_VERSION`                        | COMPUTE | argumento não é `patch`/`minor`/`major` nem `x.y.z`                                  |
 | `RELEASE_PACKAGE_JSON_VERSION_MISSING`           | COMPUTE | `package.json` sem `version` string                                                  |
 | `RELEASE_VERSION_NOT_GREATER`                    | COMPUTE | `x.y.z` explícito ≤ à versão atual (regressão de versão)                             |
+| `RELEASE_INVALID_CURRENT_VERSION`                | COMPUTE | `version` de `package.json` é string mas não casa `x.y.z` (ex.: `1.0.0-beta`)        |
 | `RELEASE_BRANCH_MAIN`                            | COMPUTE | branch atual é `main`                                                                |
 | `RELEASE_BRANCH_MISMATCH`                        | COMPUTE | branch atual não é `release/<versão-alvo>`                                           |
 | `RELEASE_CHANGELOG_HEADER_UNEXPECTED`            | COMPUTE | `CHANGELOG.md` existe e não começa exatamente por `# Changelog\n`                    |
 | `RELEASE_GIT_ADD_FAILED`/`RELEASE_COMMIT_FAILED` | WRITE   | `git add`/`git commit` falharam (stderr no erro) — depois que os arquivos já mudaram |
 
-Toda causa de fase **COMPUTE** roda antes de qualquer escrita — uma recusa
-aqui nunca deixa `package.json`/`package-lock.json`/`CHANGELOG.md`
-alterados nem cria commit nenhum (os testes de `tests/release-script.test.ts`
-pinam isso: conferem que `package.json`/`CHANGELOG.md` ficam bit a bit como
-estavam e que `git status --porcelain` continua vazio depois da recusa).
+Toda causa de fase **COMPUTE** roda antes de qualquer escrita — a garantia
+vem da estrutura do script: `planRelease` (só leitura) termina inteiro antes
+de qualquer `writeJson`/`writeFileSync` (`scripts/release.ts:350-393`), então
+uma exceção em `planRelease` nunca deixa arquivo alterado nem commit criado.
+Os testes de `tests/release-script.test.ts` conferem essa garantia de forma
+desigual por causa: só o teste de `RELEASE_CHANGELOG_HEADER_UNEXPECTED`
+(`tests/release-script.test.ts:223-245`) checa as três coisas juntas —
+`package.json` e `CHANGELOG.md` bit a bit como estavam, `git status
+--porcelain` vazio e o `git log -1` inalterado; os testes de
+`RELEASE_BRANCH_MAIN` (:184-192), `RELEASE_INVALID_VERSION` (:209-218) e
+`RELEASE_VERSION_NOT_GREATER` (:266-275) checam só a `version` de
+`package.json`; os de `RELEASE_BRANCH_MISMATCH` e da versão-alvo explícita
+igual à atual checam só o `throw`.
 
 As duas causas de fase **WRITE** (`RELEASE_GIT_ADD_FAILED`,
 `RELEASE_COMMIT_FAILED`) são a exceção: nelas os arquivos JÁ foram escritos
@@ -151,13 +168,17 @@ anterior ficou modificado e sem commit. O operador inspeciona `git
 status`/`git diff` e decide:
 
 - se o conteúdo está correto (a causa mais provável é `git commit`
-  recusado por um hook local): termina o commit manualmente
-  (`git add -A && git commit -m "chore(release): v<versão>"`);
-- se não está (escrita parcial, disco cheio, etc.): descarta deliberada e
-  conscientemente as mudanças destas alterações específicas — nunca um
-  `checkout .`/`reset --hard` genérico que também apagaria qualquer outra
-  coisa não commitada que porventura exista na árvore — e roda `npm run
-release` de novo a partir de uma árvore limpa.
+  recusado por um hook local): termina o commit manualmente — só com os
+  arquivos que `touchedPaths` já lista (`scripts/release.ts:395-402`:
+  `package.json`, `CHANGELOG.md` e `package-lock.json` quando existir),
+  nunca `git add -A`, que também adicionaria ao stage qualquer outra coisa
+  não relacionada que porventura já esteja na árvore
+  (`git commit -m "chore(release): v<versão>"`);
+- se não está (escrita parcial, disco cheio, etc.): descarta só essas
+  mudanças com `git stash` — nunca `git checkout -- .`/`git reset --hard`,
+  que também apagariam qualquer outra coisa não commitada que porventura
+  exista na árvore — e roda `npm run release` de novo a partir de uma
+  árvore limpa.
 
 ## Referências
 
