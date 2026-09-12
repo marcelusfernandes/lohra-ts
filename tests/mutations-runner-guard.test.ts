@@ -43,6 +43,11 @@ const RUNNERS = [
   "scripts/mutations/self-update.ts",
   "scripts/mutations/context-window.ts",
   "scripts/mutations/auth.ts",
+  // #476 (achado da PR #474): `supervision.ts` tinha a MESMA guarda
+  // `ehEntryPoint` que todo runner acima, mas nenhuma prova por subprocesso
+  // de que importá-lo nunca dispara `main()` — a situação de
+  // `context-window.ts` antes de #297.
+  "scripts/mutations/supervision.ts",
 ] as const;
 
 const GIT_SHIM = "#!/bin/sh\nprintf 'invoked\\n' >> \"$GIT_MARKER\"\nexit 1\n";
