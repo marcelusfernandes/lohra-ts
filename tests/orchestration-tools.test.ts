@@ -214,9 +214,13 @@ describe("steerSessionTool", () => {
 });
 
 describe("collectSessionTool", () => {
-  // Repinned for #232 (ADR 0003 licenses the format): usage_uncertain is a
-  // new 14th key, added last, so the original 13 stay in their exact order.
-  it("returns the byte-exact 14-key success envelope in the contract's exact key order", async () => {
+  // Issue #419 (owner OK, ADR 0003): `forced_fallback` never had a real
+  // producer (always `false`) — removed from the envelope entirely, so the
+  // 13-key contract (repinned for #232's usage_uncertain) drops to 12. RED
+  // on base: `collectEnvelope` (tools.ts) still writes `forced_fallback`, so
+  // both the key-order list and the byte-exact envelope below disagree with
+  // what the unmodified source produces.
+  it("returns the byte-exact 12-key success envelope, with no forced_fallback key, in the contract's exact key order (#419)", async () => {
     const core = makeCore(() =>
       Promise.resolve(
         okResult({
@@ -228,6 +232,25 @@ describe("collectSessionTool", () => {
     );
     await spawnSessionTool(core, allowAllProviders, { prompt: "x" });
     const envelope = await collectSessionTool(core, { sub_id: "aaaa", wait: true });
+    const parsed = JSON.parse(envelope) as Readonly<Record<string, unknown>>;
+    // "ok" is the envelope wrapper (tools/envelope.ts's toolResult), not one
+    // of the 12 content keys the issue counts — kept here so the order
+    // assertion covers the whole byte-exact object, not just a subset.
+    expect(Object.keys(parsed)).toEqual([
+      "ok",
+      "status",
+      "output",
+      "tokens_in",
+      "tokens_out",
+      "cache_read_tokens",
+      "cache_write_tokens",
+      "reasoning_tokens",
+      "provider",
+      "model",
+      "error_kind",
+      "retry_after",
+      "usage_uncertain",
+    ]);
     expect(envelope).toBe(
       toolResult(undefined, {
         status: "complete",
@@ -239,7 +262,6 @@ describe("collectSessionTool", () => {
         reasoning_tokens: 0,
         provider: "fakeprov",
         model: "fake-model-a",
-        forced_fallback: false,
         error_kind: null,
         retry_after: null,
         usage_uncertain: false,
