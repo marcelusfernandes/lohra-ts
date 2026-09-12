@@ -231,11 +231,13 @@ describe("workflow_leaf_read tool (#425)", () => {
   it("spends the max_chars budget from the MOST RECENT turn backward, not the oldest (#435)", async () => {
     const target = harness();
     plantLeaf(target, { subId: "leaf-recent", parentId: "parent-1", runId: "run-recent" });
-    // 60 turns x 2 rows (user+assistant) = 120 rows of 100 chars each, under
-    // the default 4096-char budget. Oldest-first spend (the pre-#435 bug)
-    // fills the FIRST ~40 rows and leaves `turns.at(-1)` empty — exactly the
-    // failure the issue measured. Most-recent-first spend must fill the
-    // LAST ~40 rows instead, so the tail of the conversation is never empty.
+    // 60 turns x 2 rows (user+assistant) = 120 rows of 100 chars each,
+    // 12000 chars total — well OVER the default 4096-char budget, so the
+    // budget genuinely runs out partway through. Oldest-first spend (the
+    // pre-#435 bug) fills the FIRST ~40 rows and leaves `turns.at(-1)`
+    // empty — exactly the failure the issue measured. Most-recent-first
+    // spend must fill the LAST ~40 rows instead, so the tail of the
+    // conversation is never empty.
     for (let index = 0; index < 60; index += 1) {
       target.sessions.recordTurn("leaf-recent", {
         user: { role: "user", content: `u${String(index)}`.padEnd(100, "0") },
@@ -269,15 +271,20 @@ describe("workflow_leaf_read tool (#425)", () => {
   it("does not report truncated:true for a turn that was already empty", async () => {
     const target = harness();
     plantLeaf(target, { subId: "leaf-empty-tail", parentId: "parent-1", runId: "run-empty-tail" });
-    // The user turn exactly consumes the budget (10 chars, max_chars:10) —
-    // nothing is actually cut anywhere. The assistant turn is legitimately
-    // empty (e.g. a tool-calling turn with no prose). Before the fix, the
-    // handler flipped `truncated` to true here purely because the budget
-    // had already reached zero, even though the empty turn had nothing to
-    // slice.
+    // #435 round 2 (revisor): the empty turn must be among the OLDEST rows,
+    // because the budget is now spent MOST-RECENT-FIRST (rowsDesc). The
+    // user turn here is legitimately empty (e.g. a tool-calling turn with
+    // no prose) and is the OLDER of the two, so it is visited SECOND in
+    // rowsDesc order, by which point the assistant turn (the more recent
+    // one) has already exhausted the whole budget (10 chars exactly —
+    // nothing is actually cut anywhere). This is what makes the guard
+    // order in `truncateTurns` (the `content.length === 0` check BEFORE
+    // `budget <= 0`, #432 round 2) load-bearing again: swap the two `if`s
+    // and this empty, already-exhausted-budget turn wrongly flips
+    // `truncated` to true.
     target.sessions.recordTurn("leaf-empty-tail", {
-      user: { role: "user", content: "0123456789" },
-      assistant: { role: "assistant", content: "" },
+      user: { role: "user", content: "" },
+      assistant: { role: "assistant", content: "0123456789" },
     });
 
     const parsed = JSON.parse(
@@ -290,7 +297,8 @@ describe("workflow_leaf_read tool (#425)", () => {
 
     expect(parsed.ok).toBe(true);
     expect(parsed.truncated).toBe(false);
-    expect(parsed.turns?.[1]?.content).toBe("");
+    expect(parsed.turns?.[0]?.content).toBe("");
+    expect(parsed.turns?.[1]?.content).toBe("0123456789");
   });
 
   it("names the error for a sub_id that belongs to a different run", async () => {
