@@ -26,7 +26,7 @@ export class AnthropicMessagesModel implements ModelTransport {
       effort: request.effort,
     });
     return this.streaming
-      ? this.client.stream(kwargs, request.onText ? { onText: request.onText } : {})
+      ? this.client.stream(kwargs, request.onText ? { onText: request.onText } : {}, request.signal)
       : this.client.create(kwargs, request.signal);
   }
 
