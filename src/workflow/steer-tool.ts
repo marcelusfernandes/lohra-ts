@@ -48,7 +48,6 @@ import { MAX_PENDING_STEERS_PER_LEAF } from "../orchestration/core.js";
 import type { AuditRepository } from "../state/index.js";
 import { toolError, toolResult } from "../tools/envelope.js";
 import type { ToolArguments, ToolHandler } from "../tools/types.js";
-import type { PublicAuditEvent } from "./audit-model.js";
 import type { AuditedChildRuntime } from "./audit-runtime.js";
 
 /** Same wording family as `orchestration/tools.ts`'s own `steerCapMessage`
@@ -158,37 +157,64 @@ function nextAfterSeq(page: Readonly<Record<string, unknown>>, fallback: number)
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-/** Live `sub_id`s at one `node_id`, paginated with `afterSeq` until the
- * ledger says `has_more: false` — unlike `isLiveSubId`, resolving a bare
+/** A shared read budget across the (up to three) paginated queries
+ * `liveSubIdsAtNode` issues — decremented per event actually read, so the
+ * `MAX_RESOLUTION_EVENTS` ceiling counts real ledger reads, not query
+ * round-trips. */
+interface ReadBudget {
+  remaining: number;
+}
+
+/** `sub_id`s from every `eventType` event at `nodeId`, paginated with
+ * `afterSeq` until the ledger says `has_more: false` or `budget` runs out —
+ * scoped to ONE event type per call, same as the original (pre-#445)
+ * `scoped()` helper, so a busy leaf's OWN `tool.*`/`leaf.steered` traffic at
+ * that node never counts against the ceiling meant for "how many leaves has
+ * this node ever started/finished". */
+function pagedSubIds(
+  audit: AuditRepository,
+  runId: string,
+  nodeId: string,
+  eventType: string,
+  budget: ReadBudget,
+): { readonly ids: readonly string[]; readonly truncated: boolean } {
+  const ids: string[] = [];
+  let afterSeq = 0;
+  for (;;) {
+    if (budget.remaining <= 0) return { ids, truncated: true };
+    const page = audit.query({ runId, nodeId, eventType, afterSeq, limit: MAX_LEAVES });
+    for (const event of page.events) {
+      budget.remaining -= 1;
+      const id = stringField(event.identity, "sub_id");
+      if (id !== undefined) ids.push(id);
+    }
+    if (!hasMore(page.page)) return { ids, truncated: false };
+    const next = nextAfterSeq(page.page, afterSeq);
+    if (next <= afterSeq) return { ids, truncated: false }; // defensive: no forward progress
+    afterSeq = next;
+  }
+}
+
+/** Live `sub_id`s at one `node_id` — unlike `isLiveSubId`, resolving a bare
  * `node_id` genuinely needs the full live set (ambiguity is a count, not a
- * membership check), so this one still has to read the ledger page by page.
- * Bounded at `MAX_RESOLUTION_EVENTS` total events read (invariant 3):
- * `truncated: true` means the caller must not trust `liveSubIds` — it is
- * incomplete, not "empty". */
+ * membership check), so this one still has to read the ledger page by page,
+ * bounded at `MAX_RESOLUTION_EVENTS` total events read across all three
+ * queries (invariant 3): `truncated: true` means the caller must not trust
+ * `liveSubIds` — it is incomplete, not "empty". */
 function liveSubIdsAtNode(
   audit: AuditRepository,
   runId: string,
   nodeId: string,
 ): { readonly liveSubIds: readonly string[]; readonly truncated: boolean } {
-  const events: PublicAuditEvent[] = [];
-  let afterSeq = 0;
-  for (;;) {
-    const page = audit.query({ runId, nodeId, afterSeq, limit: MAX_LEAVES });
-    events.push(...page.events);
-    if (events.length > MAX_RESOLUTION_EVENTS) return { liveSubIds: [], truncated: true };
-    if (!hasMore(page.page)) break;
-    const next = nextAfterSeq(page.page, afterSeq);
-    if (next <= afterSeq) break; // defensive: no forward progress, stop rather than loop
-    afterSeq = next;
-  }
-  const idsOf = (eventType: string): readonly string[] =>
-    events
-      .filter((event) => event.event_type === eventType)
-      .map((event) => stringField(event.identity, "sub_id"))
-      .filter((id): id is string => id !== undefined);
-  const started = idsOf("leaf.started");
-  const terminal = new Set([...idsOf("leaf.completed"), ...idsOf("leaf.failed")]);
-  return { liveSubIds: started.filter((id) => !terminal.has(id)), truncated: false };
+  const budget: ReadBudget = { remaining: MAX_RESOLUTION_EVENTS };
+  const started = pagedSubIds(audit, runId, nodeId, "leaf.started", budget);
+  if (started.truncated) return { liveSubIds: [], truncated: true };
+  const completed = pagedSubIds(audit, runId, nodeId, "leaf.completed", budget);
+  if (completed.truncated) return { liveSubIds: [], truncated: true };
+  const failed = pagedSubIds(audit, runId, nodeId, "leaf.failed", budget);
+  if (failed.truncated) return { liveSubIds: [], truncated: true };
+  const terminal = new Set([...completed.ids, ...failed.ids]);
+  return { liveSubIds: started.ids.filter((id) => !terminal.has(id)), truncated: false };
 }
 
 function windowTruncatedError(runId: string, nodeId: string): { readonly error: string } {
