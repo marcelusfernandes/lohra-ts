@@ -309,7 +309,9 @@ tokenBudget`; se o `parallel` classificado for o primeiro nó do spec a
   um fault `exceeds max_fanout`/`exceeds lifetime remaining`) cai em
   `unknown` — a preview não tem como atribuir `RunResult.capTrips` (uma
   contagem do run inteiro) a este nó específico sem crescer `engine.ts`
-  (congelado em 978 linhas), então não ganhou um outcome dedicado.
+  (congelado em 977 linhas — #540 reduziu de 978 ao mover o fold de
+  `faults` aninhados de `runNested` para `foldNestedCounters`,
+  `src/workflow/accounting.ts:432`), então não ganhou um outcome dedicado.
 - Chamar ANTES de `run_workflow(resume_run_id=..., route=...)`, para saber
   o custo de uma rota candidata antes de gastar um dos 3 pivôs.
 

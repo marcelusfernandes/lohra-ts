@@ -220,3 +220,29 @@ reusing an identical template — cell scope (#332)`: a assinatura `agent`
   `reference` (e portanto a mensagem de fault) não mudou.
 - `npm run mutations:t15` — 44/44 mortos; a âncora `nested-fold-removed`
   segue casando byte a byte.
+
+## Atualização (2026-09-12, PR #570, #540)
+
+O bloco descrito acima como a âncora `nested-fold-removed` mudou de forma,
+não de comportamento. O `this.result.faults.push(...)` que somava faults
+aninhados ao `RunResult` do pai saiu de `runNested` (`src/workflow/engine.ts`)
+— não fica mais inline ali, nem em nenhum outro ponto de `engine.ts` — e
+passou para `foldNestedCounters` (`src/workflow/accounting.ts:432-460`), que
+já fazia o mesmo fold para `leafRespawns`/`partialLeaves`/`sandboxRefusals`/
+`sandboxFaults`/`artifactFaults`. A âncora `nested-fold-removed`
+(`scripts/mutations/workflow-executor-mutants.ts:403-414`) acompanhou a
+mudança: seu `before` agora termina na chamada `foldNestedCounters(this.result,
+result, reference);` (`engine.ts:877`), não mais no `push` inline; o `after`
+continua `void reference;`. A mensagem de fault continua byte a byte a mesma
+(`sub[${reference}]: `, com o espaço — `nestedScopePrefix`,
+`accounting.ts:360-362`): o texto não mudou, só o arquivo que o produz.
+
+A prefixação em si — a chamada a `nestedScopePrefix` dentro do `.push` movido
+— não tinha mutante em nenhum catálogo até a rodada 2 do veredito da PR #570:
+`W1-nested-faults-fold-drops-prefix` (`scripts/mutations/
+supervision-mutants.ts:781-796`) remove o `.map(...)` desse push
+(`result.faults.push(...nested.faults)`, sem prefixo), morto pelo `it` já
+existente "folds nested faults, node counts and all five cost meters"
+(`tests/workflow-nodes-tool.test.ts`). Detalhe em
+`docs/mutation-testing.md:359-366`; `engine.ts` caiu de 978 para 977 linhas
+com a remoção do inline (`docs/workflow-supervision.md:312`).
