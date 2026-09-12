@@ -4,7 +4,8 @@
 // diff `base...head`, e emite a matriz. Fail-closed: glob fora da forma
 // `src/<dir>/**` OU `src/<arquivo>.ts` (arquivo de topo, issue #195: fecha o
 // buraco de `src/cli.ts`, que nenhum `src/<dir>/**` cobre) lança; mudança em
-// `scripts/mutations/**` seleciona todas.
+// `scripts/mutations/**` seleciona todas; arquivo do diff em `focusFiles` de
+// uma fatia também a seleciona, mesmo sem tocar `src/` (issue #514).
 // O YAML é pinado por leitura textual (mesmo idioma de ci-workflow-order):
 // sem parser de YAML nas dependências.
 import { spawnSync } from "node:child_process";

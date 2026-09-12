@@ -18,9 +18,9 @@
 //     também seleciona essa fatia, mesmo sem casar `srcGlobs` — é o teste
 //     que mata os mutantes dessa fatia; um `it` afrouxado nele não tem por
 //     que passar batido pelo required check só porque o arquivo vive sob
-//     `tests/`. Quando a seleção depende só de `focusFiles` (nenhum
-//     `srcGlobs` casou e não é o caso de harness), `reason` é `"focus"` em
-//     vez de `"paths"`.
+//     `tests/`. Quando a fatia é selecionada só por `focusFiles` (nenhum
+//     `srcGlobs` dessa fatia casou e não é o caso de harness), `reason` é
+//     `"focus"` em vez de `"paths"`.
 //
 // Dois modos, como `scripts/ci/escopo/run.ts`: CI (`--base`/`--head`, faz o
 // diff com `git`) e dry-run (`--files-file`, sem `git`). Saída: JSON em

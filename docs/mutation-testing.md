@@ -154,7 +154,7 @@ inteira de `focalTests` em vez de um foco por mutante):
 
 ### Forma dos `srcGlobs`
 
-`srcGlobs` só aceita duas formas (`scripts/github/mutations-matrix.ts:44-62`,
+`srcGlobs` só aceita duas formas (`scripts/github/mutations-matrix.ts:56-74`,
 `DIR_GLOB_FORM`/`FILE_GLOB_FORM`, fail-closed): `src/<dir>/**` — um
 diretório de primeiro nível de `src/`, inteiro — ou o literal
 `src/<arquivo>.ts` — um arquivo de topo, direto em `src/`. Não existe uma
@@ -473,7 +473,7 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
    pelo teste.
 2. Adicionar a entrada em `scripts/mutations/slices.json`: `slice`, `script`,
    `catalog`, `srcGlobs`, `focusFiles`. `srcGlobs` aceita duas formas
-   (`scripts/github/mutations-matrix.ts:45-58,96-99`, fail-closed — qualquer
+   (`scripts/github/mutations-matrix.ts:56-74,118-122`, fail-closed — qualquer
    outra forma lança; forma detalhada em "Forma dos `srcGlobs`", acima):
    `src/<dir>/**` por diretório de primeiro nível de `src/` que a fatia
    cobre, ou o literal `src/<arquivo>.ts` para um arquivo de topo (ex.:
@@ -549,7 +549,7 @@ precisa reportar o job-resumo `mutations`, só que com `count: 0`. O job `plan`
 `GITHUB_STEP_SUMMARY`; `mutate` roda uma fatia por job da matriz (`npm run
 <script>`) e sobe `.mutation-evidence/` como artifact mesmo em falha (`if:
 always()`, `if-no-files-found: warn`). Três regras de seleção, cada uma
-com seu `reason` (fail-closed, `scripts/github/mutations-matrix.ts:5-21`):
+com seu `reason` (fail-closed, `scripts/github/mutations-matrix.ts:5-23`):
 arquivo sob `src/<dir>/**` ou o `src/<arquivo>.ts` exato de algum `srcGlobs`
 seleciona a(s) fatia(s) correspondente(s) (`reason: "paths"`); arquivo sob
 `scripts/mutations/**` (harness ou catálogo) seleciona TODAS as fatias
