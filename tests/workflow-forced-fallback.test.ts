@@ -17,10 +17,13 @@
 // de schema forçado (`engine-utils.ts:249-250`: pediu `StructuredOutput` e
 // a folha não fez a chamada, então o texto cru é usado).
 //
-// `src/orchestration/core.ts` (`CollectResult.forcedFallback: boolean`) e
-// `src/orchestration/tools.ts` (o envelope `delegate_task`, 13 chaves
-// pinadas, ADR 0003) NÃO mudam — nunca foram o campo morto; o campo morto
-// era só o repasse em `orchestration-runtime.ts`.
+// Na época desta rodada, `src/orchestration/core.ts`
+// (`CollectResult.forcedFallback: boolean`) e `src/orchestration/tools.ts`
+// (o envelope `collect_session`, 13 chaves pinadas, ADR 0003) NÃO mudavam —
+// o campo morto era só o repasse em `orchestration-runtime.ts`. Issue #419
+// (owner OK, 2026-09-13) revisita essa mesma decisão e remove o campo/chave
+// que aqui ficaram: `CollectResult` não tem mais `forcedFallback`, e o
+// envelope de `collect_session` cai para 12 chaves.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -67,7 +70,6 @@ function ok(output: string): CollectResult {
     reasoningTokens: 0,
     provider: "test",
     model: "test-model",
-    forcedFallback: false,
     errorKind: null,
     retryAfter: null,
   };

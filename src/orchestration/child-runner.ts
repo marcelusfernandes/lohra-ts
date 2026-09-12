@@ -90,7 +90,6 @@ function zeroResult(
     reasoningTokens: usage?.reasoningTokens ?? 0,
     provider: profile.name,
     model,
-    forcedFallback: false,
     errorKind,
     retryAfter,
     // #232: a turn with no usage object never measured anything — not a
@@ -244,7 +243,6 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
         reasoningTokens: 0,
         provider: fallbackProvider,
         model: fallbackModel,
-        forcedFallback: false,
         errorKind: null,
         retryAfter: null,
         // "erro de resolução" (#232) — provider/model never resolved, so no

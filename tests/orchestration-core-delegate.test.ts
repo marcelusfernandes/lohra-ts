@@ -20,7 +20,6 @@ const okResult = (overrides: Partial<CollectResult> = {}): CollectResult => ({
   reasoningTokens: 0,
   provider: "fakeprov",
   model: "fake-model-a",
-  forcedFallback: false,
   errorKind: null,
   retryAfter: null,
   ...overrides,

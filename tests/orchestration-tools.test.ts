@@ -31,7 +31,6 @@ const okResult = (overrides: Partial<CollectResult> = {}): CollectResult => ({
   reasoningTokens: 0,
   provider: "fakeprov",
   model: "fake-model-a",
-  forcedFallback: false,
   errorKind: null,
   retryAfter: null,
   ...overrides,
@@ -214,20 +213,53 @@ describe("steerSessionTool", () => {
 });
 
 describe("collectSessionTool", () => {
-  // Repinned for #232 (ADR 0003 licenses the format): usage_uncertain is a
-  // new 14th key, added last, so the original 13 stay in their exact order.
-  it("returns the byte-exact 14-key success envelope in the contract's exact key order", async () => {
+  // Issue #419 (owner OK, ADR 0003): `forced_fallback` never had a real
+  // producer (always `false`) — removed from the envelope entirely, so the
+  // 13-key contract (repinned for #232's usage_uncertain) drops to 12.
+  //
+  // `okResult` itself never sets `forcedFallback` (the field no longer
+  // exists on `CollectResult`) — a plain `undefined` there would be dropped
+  // by `JSON.stringify` on BOTH the unmodified `collectEnvelope` (which
+  // still reads `result.forcedFallback`) and the fixed one, making this
+  // assertion pass vacuously either way. Smuggling a concrete `true` past
+  // the type (same technique `tests/workflow-forced-fallback.test.ts` uses
+  // for `ChildResult` — "a script smuggle a stray property past the type")
+  // is what makes the pin actually discriminate: RED on base, because
+  // `collectEnvelope` there echoes the stray value as a real
+  // `forced_fallback: true` key; green once `collectEnvelope` no longer
+  // reads the field at all, regardless of what a rogue producer sends.
+  it("returns the byte-exact 12-key success envelope, with no forced_fallback key even from a stray producer, in the contract's exact key order (#419)", async () => {
     const core = makeCore(() =>
-      Promise.resolve(
-        okResult({
+      Promise.resolve({
+        ...okResult({
           output: "…",
           tokensIn: 11,
           tokensOut: 7,
         }),
-      ),
+        forcedFallback: true,
+      } as unknown as CollectResult),
     );
     await spawnSessionTool(core, allowAllProviders, { prompt: "x" });
     const envelope = await collectSessionTool(core, { sub_id: "aaaa", wait: true });
+    const parsed = JSON.parse(envelope) as Readonly<Record<string, unknown>>;
+    // "ok" is the envelope wrapper (tools/envelope.ts's toolResult), not one
+    // of the 12 content keys the issue counts — kept here so the order
+    // assertion covers the whole byte-exact object, not just a subset.
+    expect(Object.keys(parsed)).toEqual([
+      "ok",
+      "status",
+      "output",
+      "tokens_in",
+      "tokens_out",
+      "cache_read_tokens",
+      "cache_write_tokens",
+      "reasoning_tokens",
+      "provider",
+      "model",
+      "error_kind",
+      "retry_after",
+      "usage_uncertain",
+    ]);
     expect(envelope).toBe(
       toolResult(undefined, {
         status: "complete",
@@ -239,7 +271,6 @@ describe("collectSessionTool", () => {
         reasoning_tokens: 0,
         provider: "fakeprov",
         model: "fake-model-a",
-        forced_fallback: false,
         error_kind: null,
         retry_after: null,
         usage_uncertain: false,
