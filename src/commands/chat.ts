@@ -347,8 +347,12 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   // `sessionToolBase.noticesSink.warnState` — still prints to stderr via
   // the sink's own fallback (a refused owned write never disappears in
   // silence, #135) AND records the same warning in `operator_notices`.
+  // Issue #426 (3ª emenda): `notices` is the SAME repository
+  // `sessionToolBase.noticesRepository`/`workflow_notices` already share —
+  // a route fault's lesson lands as a durable notice, not just a `warn`.
   const store = productionOwnershipStore(connection.database, {
     warning: sessionToolBase.noticesSink.warnState,
+    notices: sessionToolBase.noticesRepository,
   });
   ownershipRef.store = store;
   const workflowService = new WorkflowService({

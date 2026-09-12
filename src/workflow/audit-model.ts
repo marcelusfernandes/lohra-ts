@@ -144,11 +144,12 @@ const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object
     // itself now carries the same value for a plain `cancel(runId)` — see
     // "signal" below for the shutdown-by-signal counterpart.
     "cancelled",
-    // Issue #368: the four `pauseReason` values `WorkflowEngine.pause`
+    // Issue #368: the `pauseReason` values `WorkflowEngine.pause`
     // (engine.ts:155,163,204,213,981) ever sets — `node.paused`'s own
     // reason, not a NEW private string (checked against
     // `CHECKPOINT_PAUSE`/`QUOTA_PAUSE`/`TOKEN_BUDGET_PAUSE`/`USER_PAUSE` in
-    // service.ts:80-83, so a fifth value would be a bug, not a leak).
+    // service.ts, so a sixth value would be a bug, not a leak). Issue #426
+    // (M10-S5) added the 5th, `route_fault` (below, alphabetical slot).
     "checkpoint",
     "corrupt_payload",
     "drop_bucket_overflow",
@@ -157,6 +158,7 @@ const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object
     "queue_overflow",
     "quota_exhausted",
     "retention_limit",
+    "route_fault",
     // Issue #367: the sandbox synchronously denied a leaf's tool call
     // (fs/egress/taint/retired-stretch) INSIDE the audited wrap
     // (`auditedToolDispatch`, audit-runtime.ts) — the only place this reason

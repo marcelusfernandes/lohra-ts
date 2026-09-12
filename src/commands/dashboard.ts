@@ -307,8 +307,12 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
   // `toolBase.noticesSink.warnState` — still prints to stderr via the
   // sink's own fallback (a refused owned write never disappears in
   // silence, #135) AND records the same warning in `operator_notices`.
+  // Issue #426 (3ª emenda): `notices` is the SAME repository
+  // `toolBase.noticesRepository`/`workflow_notices` already share — a route
+  // fault's lesson lands as a durable notice, not just a `warn`.
   const store = productionOwnershipStore(connection.database, {
     warning: toolBase.noticesSink.warnState,
+    notices: toolBase.noticesRepository,
   });
   ownershipRef.store = store;
   const workflowService = new WorkflowService({

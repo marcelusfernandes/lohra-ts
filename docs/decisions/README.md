@@ -79,3 +79,10 @@ abaixo.
   `results[i]` de `delegate_task` ganha `error_kind, tokens_in, tokens_out,
 provider, model` no fim (precedente #232); remover/reordenar continua
   #419.
+- [2026-09-12 — Pausa por recusa de rota: `route_fault` com lição
+  estruturada](2026-09-12-pausa-por-recusa-de-rota.md) —
+  `auth_failed`/`route_fault`/`model_not_found` pausam o run com o 5º
+  `pause_reason` e uma lição `{error_kind, node_id, provider, model,
+suggested_route: null}`; kind que pausa nunca entra em `faultKinds`;
+  primeiro a pausar vence entre rota e quota; sem pivô automático, sem
+  re-key de célula, sem override de rota no resume (S6).

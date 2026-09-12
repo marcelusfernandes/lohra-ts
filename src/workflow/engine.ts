@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { usage } from "../pricing/usage.js";
 import type { Usage } from "../pricing/types.js";
-import { deriveStatus, foldNestedCounters, RunResult, addUsageToResult } from "./accounting.js";
+import { foldNestedCounters, RunResult, addUsageToResult } from "./accounting.js";
 import { Budget, FanoutRejected, TokenBudgetExhausted } from "./budget.js";
 import { contentHash, MemoryWorkflowCache, type WorkflowCache } from "./cache.js";
 import {
@@ -51,6 +51,7 @@ import {
   verifyPrompt,
 } from "./engine-utils.js";
 import { topologicalOrder } from "./graph.js";
+import { ROUTE_FAULT_REASON, sealRunStatus, type RouteLesson } from "./route-faults.js";
 import { gateCellParts, loopBodyCellParts, makeBodyLeafRunner } from "./leaf-options.js";
 import { MAX_GATE_ATTEMPTS, MAX_NODE_RETRIES } from "./nodes.js";
 import {
@@ -154,7 +155,6 @@ export class WorkflowEngine {
   requestPause(): void {
     this.pause("user_requested", "run paused at the operator's request");
   }
-
   /** A leaf died because the provider is out of quota (WF-1): latch once, one fault with retry_after, and cancel the leaves still in flight. */
   noteQuotaExhausted(nodeId: string, retryAfter: number | null): void {
     if (this.control.paused || this.control.cancelled) return;
@@ -167,7 +167,12 @@ export class WorkflowEngine {
     );
     this.cancelActiveLeaves();
   }
-
+  /** Same latch-once-and-cancel mechanism as `noteQuotaExhausted`, for a leaf that refused the ROUTE itself (#426) — a structured lesson rides in instead of a retry hint. */
+  noteRouteFault(nodeId: string, lesson: RouteLesson): void {
+    if (this.control.paused || this.control.cancelled) return;
+    this.pause(ROUTE_FAULT_REASON, `route fault '${nodeId}' (${lesson.error_kind})`, { ...lesson });
+    this.cancelActiveLeaves();
+  }
   private cancelActiveLeaves(): void {
     for (const id of this.activeLeaves) void Promise.resolve().then(() => this.runtime.cancel(id));
   }
@@ -277,10 +282,10 @@ export class WorkflowEngine {
       let total = resultUsage(collected);
       if (collected.status !== "complete") {
         return nonCompleteFirstCollectResult(
-          this.noteQuotaExhausted.bind(this),
-          this.recordFault.bind(this),
+          this,
           this.account.bind(this),
           node.id,
+          routing,
           id,
           collected,
           total,
@@ -412,12 +417,7 @@ export class WorkflowEngine {
       this.emit({ kind: "node", nodeId: node.id, state: output === null ? "null" : "complete" });
       if (output === null) this.result.nullCount += 1;
     }
-    if (this.control.cancelled) this.result.status = "cancelled";
-    else if (this.control.paused) {
-      this.result.status = "paused";
-      this.result.pauseReason = this.control.pauseReason;
-      this.result.checkpoint = this.control.pausePayload;
-    } else if (this.result.status !== "failed") this.result.status = deriveStatus(this.result);
+    sealRunStatus(this.result, this.control);
     return this.result;
   }
 

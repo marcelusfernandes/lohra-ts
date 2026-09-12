@@ -185,9 +185,11 @@ corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
 
 `workflow-executor-mutants.ts` (issue #418) acrescentou
 `Q1-quota-guard-removed`: a guarda que impede `quota_exhausted` de entrar em
-`fault_kinds` (`engine-utils.ts:490`), morta por
-`tests/workflow-fault-kinds.test.ts` (issue #412) — o sexto arquivo de
-`focalTests`/`focusFiles` da fatia (44 → 45).
+`fault_kinds`, morta por `tests/workflow-fault-kinds.test.ts` (issue #412) —
+o sexto arquivo de `focalTests`/`focusFiles` da fatia (44 → 45). Issue #426
+generalizou a guarda de `!== QUOTA_EXHAUSTED` para `!pausesRun(...)`
+(`engine-utils.ts:487`, também cobre os três kinds de rota) — mesmo id de
+mutante, `before`/`after` re-ancorados na mesma PR.
 
 `workflow-audit-producers-mutants.ts` (issue #370) estende `workflow-audit-live`
 aos produtores novos do M7 que os 32 mutantes originais não cobriam:

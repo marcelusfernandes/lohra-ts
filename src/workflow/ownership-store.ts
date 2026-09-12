@@ -6,6 +6,7 @@ import { LockRepository } from "../state/locks.js";
 import type { StateWarning } from "../state/locks.js";
 import type { Ownership } from "../state/workflow-repository.js";
 import { WorkflowRepository } from "../state/workflow-repository.js";
+import type { NoticesSinkRepository } from "./notices-sink.js";
 import { RUN_LEASE_TTL, type OwnershipStore } from "./service.js";
 
 /**
@@ -46,7 +47,10 @@ export function productionWarningSink(
  * identity across the run of its runs. `warning` defaults to
  * `productionWarningSink()` and is threaded to BOTH the WorkflowRepository
  * and the LockRepository this store builds — one sink, one place a refusal
- * from either repository surfaces (issue #135).
+ * from either repository surfaces (issue #135). `notices` (issue #426, 3ª
+ * emenda) is the SAME repository `createSessionToolBase` exposes as
+ * `noticesRepository` — absent, a route fault's lesson falls back to `warn`
+ * instead of a durable notice; never a second repository instance.
  */
 export function productionOwnershipStore(
   database: Database.Database,
@@ -55,6 +59,7 @@ export function productionOwnershipStore(
     /** Injectable clock, seconds since epoch; defaults to the wall clock. */
     readonly now?: () => number;
     readonly warning?: (warning: StateWarning) => void;
+    readonly notices?: NoticesSinkRepository;
   } = {},
 ): OwnershipStore {
   const holder = options.holder ?? productionHolder();
@@ -67,5 +72,6 @@ export function productionOwnershipStore(
     ttl: RUN_LEASE_TTL,
     ownershipOf: (): Ownership => ({ fence: 0, holder, now: now() }),
     database,
+    ...(options.notices === undefined ? {} : { notices: options.notices }),
   });
 }
