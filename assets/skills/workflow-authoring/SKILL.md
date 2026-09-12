@@ -201,8 +201,8 @@ re-parse it in natural language — that is where null rates come from.
   `faults_total` — everything it has faulted on since it was launched, including
   what stopped the earlier stretch. When both are there, `faults_total` is the
   one to read before you trust the outputs.
-- **`paused` is not failure**, and `reason` tells you which of the three it is.
-  Either way the finished nodes are kept.
+- **`paused` is not failure**, and `reason` tells you which one it is. Either
+  way the finished nodes are kept.
   - **`quota_exhausted`** — the provider cut you off. The run **retries itself**
     (up to 5 attempts, waiting at least a minute and honouring the provider's own
     `retry-after`); `resume_at` and `attempts` say where it is up to. **Do not
@@ -273,6 +273,41 @@ every fault are printed to **stderr** as they happen, and `lohra workflow list` 
 `lohra workflow watch <run_id|--last>` read the same progress straight off disk
 from any shell — no tokens, no turn of yours. Point the operator at them instead
 of polling on their behalf.
+
+### Previewing a resume, route pivots, and the artifact manifest
+
+- **`workflow_preview {run_id, route?}`** dry-runs a resume before you commit
+  to one — no token spent, nothing written, and none of the run's route pivots
+  consumed. Per top-level node it reports one of several outcomes, among them
+  `replay` (a cached cell covers it) and `recompute {reason:
+  "never_completed" | "identity_changed"}`, plus totals including
+  `cells_replayed`, `tokens_saved`, `leaves_to_spawn`,
+  `estimated_tokens_to_repay`, and `pivots_used` — the pivots this run has
+  *already* spent, unaffected by the preview call itself. Call it before
+  `run_workflow(resume_run_id=..., route=...)` to see whether a candidate
+  route is worth spawning. A nested `workflow` node still previews as
+  `unknown` today regardless of the real resume's outcome — it does not yet
+  get the operator's template loader.
+- **Resuming a `route_fault` pause onto a different route** works two ways: an
+  explicit `route` (channel `operator`, always wins, even over the
+  suggestion), or — resuming with no `route` at all — the operator's own
+  `workflow_routes.json` (`<home>/workflow_routes.json`, an ordered
+  per-dead-route fallback list). When it names an untried fallback for this
+  exact dead route, `workflow_status`'s `lesson.suggested_route` carries it
+  and the resume applies it on your behalf (channel `route_envelope`); with no
+  matching entry, a route-less resume just stays on the current route. Both
+  channels draw on the **same cap: 3 route pivots per run, total** — a 4th
+  explicit `route` is refused. Every node a pivot actually rewrites is logged
+  in `workflow_audit` as `node.rerouted {channel, pivot, from, to}`.
+- **The `artifacts` manifest** records every `write_file` a leaf calls with
+  `ok: true` as `{node_id, sub_id, path, bytes}`, capped at 256 records per
+  leaf. Two leaves in the same run writing the same `path` are never
+  arbitrated — the last write wins on disk, silently — but the collision
+  surfaces as an advisory entry in `workflow_status`'s `faults` (`"<node>:
+  artifact path written by 2 leaves: <path>"`), never a `status` change. It is
+  only checked within the current stretch: a collision against an earlier
+  stretch, or against a parent run's artifacts from a nested `workflow` node,
+  is not detected yet.
 
 ---
 
@@ -491,12 +526,17 @@ matters yourself and put it in `args`.
 
 ## 8. Before you author: check the library
 
-Call **`workflow_templates`** first. It returns:
-
-- `templates` — specs from past runs that finished clean (low null rate). Adapt
-  one; a proven shape beats an invented one.
-- `insights` — priors distilled from past *problematic* runs: which shapes failed
-  and why. Read them before repeating one.
+Call **`workflow_templates`** first. Without `name` it lists every `.json`
+under the operator's `<home>/workflows/` directory:
+`{templates: [{ref, name?, nodes?, error?}]}`. `ref` is the filename without
+`.json` — the same `ref` a `{type: "workflow", ref}` node resolves through.
+An entry with `name` and `nodes` is a template the loader validated clean; an
+entry with `error` instead is a file the loader rejected (invalid `ref`
+format, invalid JSON, or a spec that fails validation) — it never drops
+silently from the list. Pass
+`name` to fetch one template's full, validated spec: `{ref, spec}`. There is
+no history of past runs and no priors distilled from anything — the library
+is exactly the operator's saved files, nothing more.
 
 Adapt, don't copy blindly: keep the shape, replace the prompts and schemas.
 
@@ -716,7 +756,8 @@ then put to a human. Nothing irreversible happens before the `checkpoint`.
 
 ## 10. Checklist before calling `run_workflow`
 
-1. Did I call `workflow_templates` and check the insights?
+1. Did I call `workflow_templates` and, if a `ref` fits, reference it with a
+   `workflow` node instead of copying its spec?
 2. Is the wide node a barrier (`parallel`) or per-item (`pipeline`)? Apply the smell test.
 3. Does every leaf whose shape matters downstream have a `schema` or `schema_ref`?
 4. Is the fan-out proportional to what the user actually asked for?
