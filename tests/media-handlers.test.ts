@@ -144,10 +144,12 @@ describe("vision_analyze handler", () => {
 
   it("keeps path and cause in a read-failure envelope", async () => {
     const base = root();
-    // "sk123456" casa a regex SECRET de src/media/errors.ts:4 de propósito —
-    // é o sufixo azarado que o mkdtemp às vezes sorteia (issue #558), só que
-    // determinístico: sem isso, o teste passaria mesmo com a regex ainda
-    // redigindo o caminho, ~1 em cada 3844 execuções.
+    // "sk123456" casa a regex SECRET de src/media/errors.ts:4 (case
+    // insensitive) de propósito — é o sufixo azarado que o mkdtemp às vezes
+    // sorteia (issue #558), só que determinístico: sem isso, o teste
+    // passaria mesmo com a regex ainda redigindo o caminho, o suficiente
+    // das vezes (~1 em cada 961: 6 chars, alfabeto de 62, "sk"/"sK"/"Sk"/
+    // "SK" seguido de 4+ chars) para 20 execuções verdes não provarem nada.
     const directory = join(base, "sk123456", "fixture");
     mkdirSync(directory, { recursive: true });
     const path = join(directory, "unreadable.png");
