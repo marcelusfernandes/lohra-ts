@@ -8,8 +8,10 @@ import { describe, expect, it } from "vitest";
 const CI = fileURLToPath(new URL("../.github/workflows/ci.yml", import.meta.url));
 
 function bloco(yaml: string, job: string): string {
+  // Job ausente → bloco vazio: as asserções abaixo falham por conteúdo (o
+  // controle negativo classifica como vermelho de asserção, não estrutural).
   const inicio = yaml.indexOf(`\n  ${job}:\n`);
-  if (inicio === -1) throw new Error(`job ${job} ausente em ci.yml`);
+  if (inicio === -1) return "";
   const resto = yaml.slice(inicio + 1);
   const proximo = resto.slice(1).search(/\n {2}[a-z-]+:\n/);
   return proximo === -1 ? resto : resto.slice(0, proximo + 1);
