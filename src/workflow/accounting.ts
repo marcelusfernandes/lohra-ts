@@ -17,7 +17,7 @@ function normalizedArtifactPath(raw: string): string {
 /** #501: the exact, fixed suffix BOTH `recordLeafSideChannels` and
  * `recordCrossStretchArtifactCollisions` below build a collision advisory
  * with (never free-form leaf/tool text) — one constant so the two producers
- * and `collisionPathOf`'s parser below can never drift apart. */
+ * and `collisionKeyOf`'s parser below can never drift apart. */
 const COLLISION_FAULT_MARKER = ": artifact path written by 2 leaves: ";
 
 export type RunStatus = "complete" | "degraded" | "failed" | "cancelled" | "paused";

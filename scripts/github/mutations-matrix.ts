@@ -48,8 +48,11 @@ export interface MatrixEntry {
 export interface Matrix {
   readonly count: number;
   readonly include: readonly MatrixEntry[];
-  /** `harness` quando `scripts/mutations/**` mudou; `focus` quando a seleção
-   * depende de algum `focusFiles` (nenhum `srcGlobs` casou); senão `paths`. */
+  /** `harness` quando `scripts/mutations/**` mudou; `focus` quando PELO MENOS
+   * UMA fatia selecionada bateu só por `focusFiles` — os `srcGlobs` DELA
+   * (não do lote inteiro) não casaram (avaliação por fatia, `:152-154`,
+   * agregada com `.some` para o campo único abaixo), mesmo que outra fatia
+   * do mesmo lote tenha batido por caminho; senão `paths`. */
   readonly reason: "harness" | "paths" | "focus";
 }
 
