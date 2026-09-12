@@ -1,4 +1,8 @@
-import type { ChildToolDispatch, OrchestrationCore } from "../orchestration/core.js";
+import type {
+  ChildToolDispatch,
+  CollectOutcome,
+  OrchestrationCore,
+} from "../orchestration/core.js";
 import { toolError } from "./sandbox.js";
 import type {
   ArtifactRecord,
@@ -26,12 +30,15 @@ export const MAX_ARTIFACTS_PER_LEAF = 256;
  * shutdown drain, and never wants to eat into that larger budget. */
 export const CANCEL_SETTLE_TIMEOUT_MS = 2_000;
 
-/** Returns both the timeout promise AND a way to clear it — `cancel()`
- * below always clears it once `Promise.race` settles, win or lose, so a
- * leaf that settles well under the ceiling (the common case) never leaves
- * a live 2s timer behind (Node would otherwise hold the event loop open
- * for it) — the same pattern `service.ts`'s own `cancelAndSettle` already
- * uses for its `SHUTDOWN_SETTLE_TIMEOUT_MS` race. */
+/** Returns both the timeout promise AND a way to clear it — `cancel()` and
+ * `collect()` (issue #521, M16-S6) below always clear it once `Promise.race`
+ * settles, win or lose, so a leaf that settles well under the ceiling (the
+ * common case) never leaves a live timer behind (Node would otherwise hold
+ * the event loop open for it) — the same pattern `service.ts`'s own
+ * `cancelAndSettle` already uses for its `SHUTDOWN_SETTLE_TIMEOUT_MS` race.
+ * `unref()`'d (guarded — some fake-timer environments don't implement it,
+ * mirroring `durability.ts`'s own `defaultTimer`) so a still-pending ceiling
+ * never keeps the process alive on its own. */
 function settleCeiling(ms: number): {
   readonly promise: Promise<void>;
   readonly clear: () => void;
@@ -39,6 +46,8 @@ function settleCeiling(ms: number): {
   let timer: ReturnType<typeof setTimeout>;
   const promise = new Promise<void>((resolve) => {
     timer = setTimeout(resolve, ms);
+    const unrefable = timer as unknown as { unref?: () => void };
+    if (typeof unrefable.unref === "function") unrefable.unref();
   });
   return {
     promise,
@@ -47,6 +56,11 @@ function settleCeiling(ms: number): {
     },
   };
 }
+
+/** Sentinel `collect()` below races the deadline against — never confused
+ * with a real `CollectOutcome` (that union's `kind` is always one of
+ * `"not-found"|"pending"|"settled"`, never this string). */
+const TIMED_OUT = "timed-out" as const;
 
 /** A frozen, independent copy of `causal` — never the caller's own object
  * reference, and never mutable after this returns (issue #422: `causalSnapshot`
@@ -328,8 +342,46 @@ export class OrchestrationChildRuntime implements ChildRuntime {
     return this.causalContexts.get(id) ?? null;
   }
 
+  /**
+   * Issue #521 (M16-S6, ADR 0005): a leaf stuck mid-stream past
+   * `options.timeoutSeconds` must come back as `{status: "running"}` — the
+   * exact shape `engine.ts:273` already treats as a timeout and reacts to
+   * by calling `cancel()` itself — WITHOUT this runtime cancelling anything
+   * on its own. `deadlineMs` is `undefined` (never starts a timer) for
+   * zero, negative, non-finite (a fake's `Infinity` would otherwise fire
+   * `setTimeout` on the very next tick — Node clamps delays past the int32
+   * range) or absent `timeoutSeconds` — every existing fake and `wait:
+   * false` caller races nothing and behaves byte-for-byte as before this
+   * issue.
+   */
   public async collect(id: string, options: ChildCollectOptions): Promise<ChildResult> {
-    const outcome = await this.core.collect(id, options.wait);
+    const deadlineMs =
+      Number.isFinite(options.timeoutSeconds) && options.timeoutSeconds > 0
+        ? Math.min(options.timeoutSeconds * 1000, 2_147_483_647)
+        : undefined;
+    if (deadlineMs === undefined) {
+      return this.resultFrom(id, await this.core.collect(id, options.wait));
+    }
+    const ceiling = settleCeiling(deadlineMs);
+    try {
+      const raced = await Promise.race([
+        this.core.collect(id, options.wait),
+        ceiling.promise.then((): typeof TIMED_OUT => TIMED_OUT),
+      ]);
+      return raced === TIMED_OUT ? { status: "running", output: null } : this.resultFrom(id, raced);
+    } finally {
+      // Cleared whichever way the race settles — a leaf that collects well
+      // under the deadline (the common case) never leaves a live timer
+      // behind.
+      ceiling.clear();
+    }
+  }
+
+  /** The real (non-timeout) `collect()` outcome, translated into a
+   * `ChildResult` — split out of `collect` above so the deadline race
+   * (issue #521) has one shared landing spot for BOTH of its winners: the
+   * real outcome and nothing else, never the timeout sentinel. */
+  private resultFrom(id: string, outcome: CollectOutcome): ChildResult {
     if (outcome.kind === "not-found") {
       return { status: "failed", output: "no such workflow child" };
     }
