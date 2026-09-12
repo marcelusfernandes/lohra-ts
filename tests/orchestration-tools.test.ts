@@ -215,19 +215,29 @@ describe("steerSessionTool", () => {
 describe("collectSessionTool", () => {
   // Issue #419 (owner OK, ADR 0003): `forced_fallback` never had a real
   // producer (always `false`) — removed from the envelope entirely, so the
-  // 13-key contract (repinned for #232's usage_uncertain) drops to 12. RED
-  // on base: `collectEnvelope` (tools.ts) still writes `forced_fallback`, so
-  // both the key-order list and the byte-exact envelope below disagree with
-  // what the unmodified source produces.
-  it("returns the byte-exact 12-key success envelope, with no forced_fallback key, in the contract's exact key order (#419)", async () => {
+  // 13-key contract (repinned for #232's usage_uncertain) drops to 12.
+  //
+  // `okResult` itself never sets `forcedFallback` (the field no longer
+  // exists on `CollectResult`) — a plain `undefined` there would be dropped
+  // by `JSON.stringify` on BOTH the unmodified `collectEnvelope` (which
+  // still reads `result.forcedFallback`) and the fixed one, making this
+  // assertion pass vacuously either way. Smuggling a concrete `true` past
+  // the type (same technique `tests/workflow-forced-fallback.test.ts` uses
+  // for `ChildResult` — "a script smuggle a stray property past the type")
+  // is what makes the pin actually discriminate: RED on base, because
+  // `collectEnvelope` there echoes the stray value as a real
+  // `forced_fallback: true` key; green once `collectEnvelope` no longer
+  // reads the field at all, regardless of what a rogue producer sends.
+  it("returns the byte-exact 12-key success envelope, with no forced_fallback key even from a stray producer, in the contract's exact key order (#419)", async () => {
     const core = makeCore(() =>
-      Promise.resolve(
-        okResult({
+      Promise.resolve({
+        ...okResult({
           output: "…",
           tokensIn: 11,
           tokensOut: 7,
         }),
-      ),
+        forcedFallback: true,
+      } as unknown as CollectResult),
     );
     await spawnSessionTool(core, allowAllProviders, { prompt: "x" });
     const envelope = await collectSessionTool(core, { sub_id: "aaaa", wait: true });
