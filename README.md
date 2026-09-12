@@ -15,7 +15,10 @@ histórico de paridade do repositório de desenvolvimento.
 ## Instalação
 
 Requer Node.js 20 ou 22 e npm. O terminal local usa o addon nativo `node-pty`,
-portanto a instalação executa o `postinstall` do pacote.
+cujo prebuild pode perder o bit de execução na extração do tarball; a
+instalação executa o `postinstall` do pacote só para corrigir isso
+(`chmod` no `spawn-helper`) — nenhum outro script roda numa instalação de
+consumidor.
 
 ```bash
 npm install -g lohra-ts@0.0.11
@@ -57,9 +60,9 @@ FALTA  gh — gh não encontrado no PATH
        resolve com: brew install gh && gh auth login
 ```
 
-`npm ci`/`npm install` (`scripts/postinstall.mjs`) instalam dois hooks
-nativos do git neste checkout, sempre que há um `.git` (instalação por
-tarball pula os dois em silêncio):
+`npm ci`/`npm install` (`scripts/prepare.mjs`, script `prepare` — roda só em
+checkout com `.git`, nunca em instalação de consumidor a partir do
+tarball/registry) instalam dois hooks nativos do git neste checkout:
 
 - `git-pre-push` — camada 2 da proteção da `main` (`.claude/hooks/README.md`):
   nega push direto em `main`/`master` e qualquer push não fast-forward.
