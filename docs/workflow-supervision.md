@@ -449,7 +449,7 @@ leaves: <path>"` em `artifactFaults` exatamente uma vez; nunca muda
   `durableRollup` (leitura fria) expor. `pausePayloadOf` agora aplica o
   mesmo dedup antes de persistir; leitura fria e leitura viva concordam,
   em qualquer número de resumes. De quebra, `collisionKeyOf`
-  (`accounting.ts:297`, renomeada de `collisionPathOf`) passou a
+  (`accounting.ts:318`, renomeada de `collisionPathOf`) passou a
   chavear por (escopo, caminho), não só caminho: um sub-workflow aninhado
   prefixa seus próprios faults com `sub[${reference}]: `
   (`foldNestedCounters` abaixo) — sem o escopo na chave, uma colisão DENTRO
@@ -474,7 +474,7 @@ leaves: <path>"` em `artifactFaults` exatamente uma vez; nunca muda
   persistido antes deste fix) e normalizam para a mesma chave.
 - **Fora do escopo original, limitação registrada no próprio código**: um
   sub-workflow por `ref` nunca tem seus artefatos checados contra os do run
-  pai — `foldNestedCounters` (`accounting.ts:361-391`) só concatena as
+  pai — `foldNestedCounters` (`accounting.ts:414-446`) só concatena as
   listas, sem re-checar colisão contra o `RunResult` do pai; o comentário
   da própria função nomeia isso.
 
