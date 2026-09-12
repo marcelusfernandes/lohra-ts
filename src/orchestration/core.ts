@@ -43,6 +43,14 @@ export interface CollectResult {
    * em zero nesses casos, mas MARCADOS: nunca confundidos com um turno que
    * genuinely spent zero tokens (issue #232). */
   readonly usageUncertain?: boolean;
+  /** True when `tokensIn`/`tokensOut` above INCLUDE a portion ESTIMATED from
+   * a call aborted in flight (ADR 0005, #518/M16-S3) — always implies
+   * `usageUncertain: true`, but not the reverse (#232's plain "never
+   * measured" gap has no partial to speak of). Absent/false = nothing
+   * estimated; carried verbatim through to `ChildResult.partial`
+   * (`orchestration-runtime.ts`) and from there to `RunResult.partialLeaves`
+   * / `leaf.failed` (#517). */
+  readonly partial?: boolean;
 }
 
 /** A child's async tool dispatch: `(name, args) => Promise<string>`, the
@@ -97,9 +105,12 @@ export interface SpawnConfig {
  *
  * signal must be threaded straight into the real turn loop's own cancellation
  * hook (ConversationRuntime's signal option) — the same cooperative,
- * checked-between-iterations mechanism as the parent's own Ctrl-C, never a
- * mid-flight abort of an upstream call in progress (contract assertion 40).
- * shutdown() is this signal's only trigger today (contract L16).
+ * checked-between-iterations mechanism as the parent's own Ctrl-C, AND (ADR
+ * 0005, issue #518) an abort of an upstream call already in progress: the
+ * turn loop's own `isAbortOf` recognizes a stream torn down mid-flight and
+ * resolves as `interrupted`/`cancelled` with an estimated partial usage
+ * instead of a generic provider failure. shutdown() is this signal's only
+ * trigger today (contract L16).
  */
 export type ChildRunner = (
   subId: string,
@@ -379,14 +390,16 @@ export class OrchestrationCore {
 
   /**
    * Cooperatively interrupts every tracked child (the same AbortSignal
-   * machinery as the parent's own Ctrl-C, checked between iterations —
-   * never a mid-flight abort of an upstream call already in progress, per
-   * contract assertion 40) and blocks until every one actually settles: a
-   * child stuck in an in-flight call finishes normally before this
-   * resolves (drains, never abandons), and a child that would need another
-   * iteration terminates "interrupted" instead of starting one. Mirrors the
-   * oracle's `shutdown(wait=True)` — `shutdown(wait=False)` has no public
-   * surface in this commit (T15, contract's own dívidas table).
+   * machinery as the parent's own Ctrl-C, checked between iterations AND —
+   * ADR 0005, issue #518 — an abort of an upstream call already in
+   * progress, torn down in flight rather than left to run to completion)
+   * and blocks until every one actually settles: a child mid-stream when
+   * `shutdown` fires settles quickly as `interrupted` with an estimated
+   * partial usage instead of running the call to term, and a child that
+   * would need another iteration terminates "interrupted" instead of
+   * starting one. Mirrors the oracle's `shutdown(wait=True)` —
+   * `shutdown(wait=False)` has no public surface in this commit (T15,
+   * contract's own dívidas table).
    *
    * Any child that settles "error" or "interrupted" during the drain has
    * its cause logged via logOrchestrationFailure(home, ...) — the one
@@ -421,9 +434,11 @@ export class OrchestrationCore {
    * is passed through. Looks the entry up by subId inside the settlement
    * callback (rather than closing over it directly) so it works both before
    * spawn() has inserted the entry yet and after steer() replaces it.
-   * Creates a fresh AbortController per turn — shutdown() is its only
-   * trigger today — and hands the caller both so it can store the
-   * controller on the entry alongside the promise it backs. */
+   * Creates a fresh AbortController per turn — cancel()/shutdown() are its
+   * only triggers today, and (ADR 0005, issue #518) both now tear down a
+   * call already in flight, not just the between-iterations check — and
+   * hands the caller both so it can store the controller on the entry
+   * alongside the promise it backs. */
   private runAndTrack(
     subId: string,
     config: SpawnConfig,

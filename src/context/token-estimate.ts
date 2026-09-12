@@ -11,6 +11,11 @@
  * provedor tokeniza de forma mais eficiente que o pior caso assumido aqui.
  */
 
+// Type-only: erased at emit, so this never creates a runtime import cycle —
+// `transports/types.ts` itself has zero imports. Backs estimatePartialUsage
+// (issue #518) below.
+import type { PartialStream, Usage } from "../transports/types.js";
+
 /** Caracteres por token para prosa solta (texto de usuário/assistente). */
 const TEXT_CHARS_PER_TOKEN = 2.9;
 
@@ -187,4 +192,50 @@ export function estimateRequestTokens(input: RequestTokenEstimateInput): TokenEs
     tokens: messagesTokens + systemTokens + toolsTokens,
     method: "heuristic" as const,
   });
+}
+
+/**
+ * Issue #518 (M16-S3, épico #490, ADR 0005): estimates what a stream aborted
+ * in flight (`StreamAbortedError.partial`, `src/transports/errors.ts`)
+ * already cost, from whatever it had already shown for itself before the
+ * tear-down — never a network call, never a real measurement. `outputTokens`
+ * charges `partial.text` at the prose factor and `reasoningChars` +
+ * `toolArgumentChars` (lengths only, never the raw text) at the denser JSON
+ * factor, same conservative split `blockTokens` above already uses per
+ * block type.
+ *
+ * `inputTokens` prefers `partial.usage.inputTokens` when the transport
+ * measured it (today only Anthropic's `message_start`, `PartialStream`'s own
+ * contract) — but `anthropicPartialUsage` (transports/errors.ts) returns a
+ * `Usage` with `inputTokens: 0` whenever `message_start` arrived with no
+ * `usage` field at all, which is indistinguishable here from "the call
+ * genuinely cost zero input tokens" (never true for a real request: the
+ * system prompt alone is never free). Treated as NOT measured, exactly like
+ * `partial.usage === null` — falls back to the conservative `request`
+ * estimate rather than under-counting to zero, keeping this function's own
+ * "never underestimates" contract from the module doc above.
+ *
+ * Always paired by the caller with `partial: true` and `usageUncertain:
+ * true` (conversation/runtime.ts, orchestration/child-runner.ts) — an
+ * estimate is never a real measurement, no matter how it was derived.
+ */
+export function estimatePartialUsage(
+  partial: PartialStream,
+  request: RequestTokenEstimateInput,
+): Usage {
+  const outputTokens =
+    charsToTokens(partial.text.length, TEXT_CHARS_PER_TOKEN) +
+    charsToTokens(partial.reasoningChars + partial.toolArgumentChars, JSON_CHARS_PER_TOKEN);
+  const measuredInput = partial.usage?.inputTokens;
+  const inputTokens =
+    measuredInput !== undefined && measuredInput > 0
+      ? measuredInput
+      : estimateRequestTokens(request).tokens;
+  return {
+    inputTokens,
+    outputTokens,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    reasoningTokens: 0,
+  };
 }

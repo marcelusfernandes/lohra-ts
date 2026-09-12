@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 import { estimateCost, type CostEstimate } from "../pricing/index.js";
-import { estimateRequestTokens } from "../context/token-estimate.js";
+import { estimatePartialUsage, estimateRequestTokens } from "../context/token-estimate.js";
+import { StreamAbortedError } from "../transports/index.js";
 import type { NormalizedResponse, ToolCall, Usage } from "../transports/index.js";
 import { runBounded } from "../tools/dispatch.js";
 import {
@@ -50,6 +51,31 @@ function sleep(ms: number): Promise<void> {
 // second check as dead code, which it is not.
 function signalAborted(signal: AbortSignal): boolean {
   return signal.aborted;
+}
+
+/**
+ * Issue #518 (M16-S3, ADR 0005): narrow, deliberately NOT "any failure while
+ * aborted" — a genuine 5xx/route fault that happens to arrive after the
+ * signal already fired is still a real provider failure (contra-assertion,
+ * `tests/conversation-runtime.test.ts`), never reclassified into a
+ * cancellation. Recognizes exactly the shapes an in-flight abort can throw
+ * (round-1 review on PR #524, S1): a genuine `StreamAbortedError` (the
+ * native `NativeChatHttpPort` path, always this shape); a raw `AbortError`
+ * (the fetcher path's `AbortController`-driven rejection, standard DOM
+ * naming); or an error whose own `.cause` IS the signal's abort reason
+ * (a caller-supplied reason surfacing crude through an intermediate wrapper
+ * before `StreamAbortedError` ever gets constructed — the fetcher path's
+ * OTHER shape, when the signal was already aborted before `post()` ran).
+ * `signalAborted(signal)` gates all three: none of these shapes proves an
+ * abort on their OWN (an "AbortError" name or a coincidental `.cause` could,
+ * in principle, come from somewhere else), the signal's own state is the
+ * one fact this function trusts.
+ */
+function isAbortOf(error: unknown, signal: AbortSignal): boolean {
+  if (!signalAborted(signal)) return false;
+  if (error instanceof StreamAbortedError) return true;
+  if (!(error instanceof Error)) return false;
+  return error.name === "AbortError" || error.cause === signal.reason;
 }
 
 export interface ConversationRuntimeOptions {
@@ -284,6 +310,16 @@ export class ConversationRuntime {
      * and nothing changes for the parent's own requests. */
     readonly effort?: string | null;
     readonly sessionId?: string;
+    /** Issue #518 (ADR 0005): checked cooperatively between iterations
+     * (`signalAborted`, before each provider call is even issued) AND
+     * consulted after a call already in flight rejects (`isAbortOf`, in the
+     * `catch` around `transport.complete`) — an abort the transport itself
+     * observed mid-stream now surfaces as `ConversationCancelledError` with
+     * whatever partial usage it could estimate, not as a generic turn
+     * failure. The default summarizer (compaction's own call,
+     * `buildSummaryRequest` above) forwards this SAME signal, so a
+     * compaction summary call in flight when the signal fires is abortable
+     * too — its own rejection reaches this turn's `catch` the same way. */
     readonly signal?: AbortSignal;
     /** Fires with each text delta across every provider call of this turn
      * (intermediate iterations included, tool calls excluded — mirrors the
@@ -425,6 +461,20 @@ export class ConversationRuntime {
         try {
           response = await this.options.transport.complete(request);
         } catch (error) {
+          if (isAbortOf(error, signal)) {
+            const partialUsage =
+              error instanceof StreamAbortedError
+                ? estimatePartialUsage(error.partial, {
+                    system: request.system,
+                    messages: request.messages,
+                    tools: request.tools,
+                  })
+                : null;
+            throw new ConversationCancelledError(sessionId, signal.reason, {
+              partialUsage,
+              apiCalls: apiCalls + 1,
+            });
+          }
           throw new ConversationTurnFailedError(sessionId, providerMessage(error), error);
         }
         apiCalls += 1;

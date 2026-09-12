@@ -68,8 +68,26 @@ export class MaxIterationsError extends ConversationError {
 
 export class ConversationCancelledError extends ConversationError {
   override readonly name = "ConversationCancelledError";
-  public constructor(sessionId: string, cause?: unknown) {
-    super("CONVERSATION_CANCELLED", "conversation cancelled", { sessionId, cause });
+  /** Issue #518 (M16-S3, ADR 0005): non-null only when the loop's own
+   * `isAbortOf` (`runtime.ts`) recognized a genuine in-flight stream abort
+   * (`StreamAbortedError`) — estimated from whatever partial text/usage the
+   * transport had already shown for itself (`estimatePartialUsage`,
+   * `context/token-estimate.ts`), never a real measurement. `null` for a
+   * pre-issuance cancellation (the call was never made) and for an abort
+   * that consumed the signal without going through `StreamAbortedError`
+   * (no partial to estimate from). */
+  public readonly partialUsage: Usage | null;
+  public constructor(
+    sessionId: string,
+    cause?: unknown,
+    options: { readonly partialUsage?: Usage | null; readonly apiCalls?: number } = {},
+  ) {
+    super("CONVERSATION_CANCELLED", "conversation cancelled", {
+      sessionId,
+      cause,
+      apiCalls: options.apiCalls ?? 0,
+    });
+    this.partialUsage = options.partialUsage ?? null;
   }
 }
 

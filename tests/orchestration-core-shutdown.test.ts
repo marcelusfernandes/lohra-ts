@@ -60,7 +60,14 @@ describe("OrchestrationCore.shutdown", () => {
     }
   }
 
-  it("aborts every tracked child's signal and does not resolve until its promise settles — drains, never abandons (assertion 40)", async () => {
+  // Issue #518 (M16-S3, ADR 0005): `shutdown` now aborts a call already in
+  // flight too (never just the between-iterations check assertion 40 named
+  // before this issue) — this test's own fake `runChild` never observes
+  // that abort (its `child.promise` only settles when the test resolves it
+  // by hand), so it still proves the OTHER half of the contract this issue
+  // leaves untouched: shutdown() drains until the child's promise actually
+  // settles, never abandons it early.
+  it("aborts every tracked child's signal and does not resolve until its promise settles — drains, never abandons", async () => {
     const child = deferred<CollectResult>();
     let observedSignal: AbortSignal | undefined;
     const core = new OrchestrationCore({
