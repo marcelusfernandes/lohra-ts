@@ -141,9 +141,13 @@ route_fault` e para `faultKinds: []`.
 - **O pivô PERSISTE no `spec_json`**: `service.ts` grava a espec já
   reescrita (`rawSpecOf(parsed)`) a cada escrita terminal — um resume
   POSTERIOR sem `route` continua na rota nova, não volta para a original.
-  `pause_payload_json.pivots[]` é o único registro de que a rota mudou (e
-  de qual era antes); não há uma cópia da espec "como autorada" em lugar
-  nenhum.
+  `pause_payload_json.pivots[]` é o único registro de que a rota mudou —
+  cada entrada é o `RouteOverride` APLICADO (o `route` que o resume pediu,
+  ex.: `{provider, model}`), nunca a rota que estava em vigor antes dele
+  (`nextPivots`, `route-override.ts:143-146`, só concatena o `override`
+  recebido ao array anterior); não há registro nenhum, em lugar algum, de
+  qual era a rota antes de cada pivô, nem uma cópia da espec "como
+  autorada".
 - **Teto de `MAX_ROUTE_PIVOTS_PER_RUN` (3) por run** (`pivotResume`,
   route-override.ts): acima do teto, o resume é recusado com um erro
   nomeado — um gate humano de facto, coerente com a decisão 4 do épico
@@ -175,6 +179,20 @@ route_fault` e para `faultKinds: []`.
 - **Nenhum pivô automático** — decisão 4 do épico continua valendo; só um
   `run_workflow(resume_run_id, route: {...})` explícito pivota.
 - **Nenhuma tool `workflow resume` de CLI** — fora do escopo desta issue.
+- **Sub-workflow por `ref` fica fora do pivô.** `route-override.ts` reescreve
+  só a espec de NÍVEL SUPERIOR gravada em `spec_json`; um nó `workflow` que
+  aponta para um template externo por `ref` é carregado em runtime por
+  `runNested` (`engine.ts:832-848`, um `this.loader(reference)` novo a cada
+  execução) — a rota de um nó DENTRO desse template nunca passa por
+  `applyRouteOverrideToSpec`, então um pivô no run pai nunca alcança a rota
+  de um nó do sub-workflow referenciado.
+- **Cada resume com `route` consome um dos 3 pivôs, mesmo que não resolva o
+  problema.** `nextPivots` empilha o `override` toda vez que `pivotResume`
+  aceita um (`route-override.ts:143-146,158-177`) — se a folha se recusar de
+  novo na rota nova (credencial ainda errada, modelo ainda inexistente), a
+  PRÓXIMA tentativa de pivô já é a 2ª de 3, não uma repetição da mesma
+  tentativa; só um resume RECUSADO por já ter atingido o teto (ou por faltar
+  `resume_run_id`) não consome pivô nenhum.
 
 ### Evidência
 
