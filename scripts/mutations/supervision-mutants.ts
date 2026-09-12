@@ -62,6 +62,8 @@ const abortInFlightFocus = "tests/transports-abort-in-flight.test.ts";
 const childRunnerAbortFocus = "tests/orchestration-child-runner-abort.test.ts";
 const workflowOrchestrationRuntimeTimeoutFocus =
   "tests/workflow-orchestration-runtime-timeout.test.ts";
+const validation = "src/orchestration/validation.ts";
+const orchestrationToolsFocus = "tests/orchestration-tools.test.ts";
 
 export const supervisionMutants: readonly Mutant[] = [
   // --- steer-tool.ts (#424, #445, #450) -----------------------------------
@@ -753,6 +755,30 @@ export const supervisionMutants: readonly Mutant[] = [
         file: orchestrationRuntime,
         before: "        ? Math.min(options.timeoutSeconds * 1000, 2_147_483_647)",
         after: "        ? Math.min(options.timeoutSeconds * 10_000, 2_147_483_647)",
+      },
+    ],
+  },
+  // --- validation.ts (#540, achado 5) -------------------------------------
+  // Issue #540: nenhum catálogo de mutação cobria `normalizeResumeId`
+  // (`src/orchestration/validation.ts`) — a única garantia era
+  // `tests/orchestration-tools.test.ts` (PR #523, QA de 87b9aeac). Off-by-one
+  // no comprimento aparado: `""` (0 chars) some do isAbsent check com o
+  // mutante (compara contra 1, nunca 0), então `resume_id` deixa de ser
+  // removido para uma string vazia/whitespace-only — morto pelo `it` que já
+  // prova exatamente essa forma.
+  {
+    id: "V1-normalize-resume-id-trim-off-by-one",
+    category: "normalize-resume-id-trim-off-by-one",
+    mechanism: "family-a",
+    focus: {
+      file: orchestrationToolsFocus,
+      test: 'drops the "resume_id" key entirely for empty, whitespace-only, null and undefined values',
+    },
+    edits: [
+      {
+        file: validation,
+        before: '    (typeof resume_id === "string" && resume_id.trim().length === 0);',
+        after: '    (typeof resume_id === "string" && resume_id.trim().length === 1);',
       },
     ],
   },
