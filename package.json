@@ -62,7 +62,8 @@
     "prova": "tsx scripts/prova/run.ts",
     "ci:contratos": "tsx scripts/ci/contratos/run.ts",
     "ci:controle-negativo": "tsx scripts/ci/controle-negativo/run.ts",
-    "ci:escopo": "tsx scripts/ci/escopo/run.ts"
+    "ci:escopo": "tsx scripts/ci/escopo/run.ts",
+    "release": "tsx scripts/release.ts"
   },
   "dependencies": {
     "better-sqlite3": "11.10.0",
