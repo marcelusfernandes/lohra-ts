@@ -63,6 +63,7 @@ import type {
   LeafSandboxHandle,
 } from "../src/workflow/runtime.js";
 import type { PreviewDeps } from "../src/workflow/cache-preview.js";
+import { DEFAULT_MAX_FANOUT } from "../src/workflow/budget.js";
 
 const roots: string[] = [];
 
@@ -220,6 +221,65 @@ describe("previewResume — PreviewCacheFacade.put() (#484 rodada 2, veredito PR
       if ("error" in result) throw new Error(result.error);
       const par = result.nodes.find((entry) => entry.node_id === "par");
       expect(par?.outcome).toBe("no_leaves");
+      expect(par?.type).toBe("parallel");
+    } finally {
+      close();
+    }
+  });
+});
+
+// Issue #515 (follow-up of #503, veredito da PR #510): the SAME shape the
+// `no_leaves` tests above exercise — zero spawns, zero hits, `par`'s dry run
+// genuinely ran (`Object.hasOwn(outputs, "par")`) — also covers TWO cases
+// that are NOT "nothing to pay": `branches` that never resolved to an array
+// at all (a template over a failed upstream, `outputs["par"] === null`, not
+// `[]`), and a `parallel` that tripped the fan-out cap (`FanoutRejected`,
+// also `null`). Both used to fall into the SAME tautological
+// `spawns === 0 && hits === 0` check `no_leaves` above relies on, and both
+// reported `no_leaves` — an operator who fixes the upstream, or shrinks the
+// fan-out, would pay leaves a "nothing to pay" preview never warned about.
+describe("previewResume — upstream_missing / unknown for a blocked parallel, not no_leaves (#515)", () => {
+  it("a parallel node whose branches template references a failed upstream reports upstream_missing", async () => {
+    const { service, preview, close } = harness();
+    try {
+      const spec = {
+        meta: { name: "par-branches-upstream-missing" },
+        nodes: [
+          { id: "bad", type: "agent", prompt: "pinned", provider: "bad-provider" },
+          { id: "par", type: "parallel", branches: "${bad.value}", depends_on: ["bad"] },
+        ],
+      };
+      const started = service.start(spec);
+      if ("error" in started) throw new Error(started.error);
+      await service.status(started.run_id, true);
+
+      const result = await preview({ tiers: {}, runId: started.run_id, now: 1000 });
+      if ("error" in result) throw new Error(result.error);
+      const par = result.nodes.find((entry) => entry.node_id === "par");
+      expect(par?.outcome).toBe("upstream_missing");
+      expect(par?.type).toBe("parallel");
+    } finally {
+      close();
+    }
+  });
+
+  it("a parallel node above the fan-out cap reports unknown, never no_leaves", async () => {
+    const { service, preview, close } = harness();
+    try {
+      const spec = {
+        meta: { name: "par-fanout-cap-tripped" },
+        nodes: [{ id: "par", type: "parallel", branches: "${args.branches}" }],
+      };
+      const branches = Array.from({ length: DEFAULT_MAX_FANOUT + 1 }, (_, i) => `b${String(i)}`);
+      const started = service.start(spec, { branches });
+      if ("error" in started) throw new Error(started.error);
+      await service.status(started.run_id, true);
+
+      const result = await preview({ tiers: {}, runId: started.run_id, now: 1000 });
+      if ("error" in result) throw new Error(result.error);
+      const par = result.nodes.find((entry) => entry.node_id === "par");
+      expect(par?.outcome).toBe("unknown");
+      expect(par?.outcome).not.toBe("no_leaves");
       expect(par?.type).toBe("parallel");
     } finally {
       close();
