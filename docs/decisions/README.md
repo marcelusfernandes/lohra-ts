@@ -83,9 +83,10 @@ provider, model` no fim (precedente #232); remover/reordenar continua
   estruturada](2026-09-12-pausa-por-recusa-de-rota.md) —
   `auth_failed`/`route_fault`/`model_not_found` pausam o run com o 5º
   `pause_reason` e uma lição `{error_kind, node_id, provider, model,
-suggested_route: null}`; kind que pausa nunca entra em `faultKinds`;
-  primeiro a pausar vence entre rota e quota; sem pivô automático, sem
-  re-key de célula, sem override de rota no resume (S6).
+suggested_route}`; kind que pausa nunca entra em `faultKinds`; primeiro a
+  pausar vence entre rota e quota; override de rota no resume (S6);
+  `suggested_route` deixou de ser sempre `null` desde #459/#460 (M11,
+  atualização datada na própria nota).
 - [2026-09-13 — Flags de rota com assinatura ativa: fail-fast, não override
   por invocação](2026-09-13-flags-de-rota-com-assinatura.md) — em modo
   `subscription`, `--provider` explícito (com ou sem `--model`) devolve
@@ -108,3 +109,8 @@ suggested_route: null}`; kind que pausa nunca entra em `faultKinds`;
   sem-rota fica parado); `node.rerouted` um por nó reescrito, `from`/`to`
   aninhados em `CONTAINER_FIELDS`; `AutoResumeScheduler` não re-arma
   `route_fault`.
+- [2026-09-13 — Carimbo da célula: `identity_version` marca, nunca
+  invalida](2026-09-13-carimbo-da-celula.md) — decisão 3 do épico #458:
+  carimbo ao lado da célula (nunca na chave); `version_state`
+  `current`/`stale`/`unstamped` em `cache.replayed`; "chave versionada" do
+  enunciado do milestone fica registrada como alternativa rejeitada.

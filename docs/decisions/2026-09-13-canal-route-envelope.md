@@ -97,20 +97,32 @@ canal) não deixava rastro no ledger — `pivots[]` guardava só
 - `tests/workflow-rerouted.test.ts` (novo): as quatro negações da conjunção
   isoladas; o caso positivo completo (tier → envelope → sucesso,
   `node.rerouted` só no nó pinado, round-trip de `channel` via `pivotsOf`);
-  `route` explícito vencendo a sugestão do envelope; teto compartilhado com
-  os dois canais e o comportamento assimétrico no teto (explícito recusado,
-  sem-rota parado); contra-asserção de payload byte-idêntico para um run
-  sem pivô.
+  `route` explícito vencendo a sugestão do envelope (`:281`, "negation: an
+  explicit 'route' wins over the envelope's own suggestion"); teto
+  compartilhado com os dois canais e o comportamento assimétrico no teto
+  (explícito recusado, sem-rota parado); contra-asserção de payload
+  byte-idêntico para um run sem pivô. **Lacuna**: o `route` explícito desse
+  teste é IGUAL ao único fallback que o envelope autoriza para a rota morta
+  — a afirmação "vence mesmo quando DIFERE da sugestão" (acima, e na
+  descrição de `run_workflow`/`workflow_status`,
+  `src/tools/builtin-definitions.ts`) não tem, hoje, um teste cujo `route`
+  explícito seja um valor DIFERENTE do que `suggestRoute` devolveria —
+  relacionado aos oráculos pendentes de M14 (#476), que não nomeia
+  especificamente este caso.
 - `tests/workflow-audit-allow-list.test.ts`: oráculo positivo/negativo de
   `channel`, `pivot`, `from`/`to` (clip 128), e `node.rerouted` como
   `event_type` válido.
 - `tests/workflow-route-override.test.ts`: pinos existentes (`pivots[]` sem
   `channel`) atualizados para incluir `channel: "operator"` num `route`
   explícito — comportamento aditivo, nunca removido.
-- `npm run mutations:t15`/`t16`/`t17`/`mutations:supervision` — pendentes
-  nesta rodada: três pinos fora dos `Files` desta issue
-  (`tests/workflow-cache-preview.test.ts:310`,
-  `tests/workflow-route-override-nested.test.ts:224`,
-  `tests/workflow-routes.test.ts:709`) quebram pela mesma razão aditiva
-  (`channel: "operator"` num `route` explícito) e bloqueiam o baseline das
-  fatias até a emenda do orquestrador incluí-los.
+- `npm run mutations:t15` 45/45, `t16` 60/60, `t17` 57/57,
+  `mutations:supervision` 20/20 — todas verdes no CI da PR #486 (HEAD
+  495e7eef). Os três pinos citados na rodada anterior
+  (`tests/workflow-cache-preview.test.ts`,
+  `tests/workflow-route-override-nested.test.ts`, `tests/workflow-routes.test.ts`)
+  ganharam `channel: "operator"` numa segunda emenda do orquestrador; uma
+  terceira re-ancorou o mutante `aa/progress-never-persisted`
+  (`scripts/mutations/workflow-durability-named.ts`) de `service.ts` para
+  `service-rollup.ts`, já que `progressJsonOf` mudou de arquivo nesta mesma
+  issue — `before`/`after` byte-idênticos, `focus.test` inalterado
+  (`docs/mutation-testing.md` não precisou de nenhuma contagem nova).
