@@ -14,14 +14,22 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { git, gitCapture, limparWorkdirs, novoRepo } from "./helpers/controle-negativo-repo.js";
+import {
+  commitTudo,
+  git,
+  gitCapture,
+  limparWorkdirs,
+  novoRepo,
+} from "./helpers/controle-negativo-repo.js";
 
 afterEach(limparWorkdirs);
 
 function criarRepoBase(version: string): string {
-  return novoRepo({
+  const dir = novoRepo({
     packageJsonText: `${JSON.stringify({ name: "fake-release", version, scripts: {} }, null, 2)}\n`,
   });
+  commitTudo(dir, "chore: estado inicial do repositório fake");
+  return dir;
 }
 
 /** Cria uma branch de feature, um commit nela, e mergeia de volta em `main`
@@ -130,6 +138,32 @@ describe("runRelease — bump de ponta a ponta", () => {
     expect(changelog.indexOf("### Added")).toBeGreaterThan(-1);
     expect(changelog.indexOf("### Fixed")).toBeGreaterThan(-1);
     expect(changelog.indexOf("### Added")).toBeLessThan(changelog.indexOf("feat(a): adiciona a"));
+  });
+
+  it("changelog ignora o bloco '# Conflicts:' que o git anexa a merges resolvidos manualmente", async () => {
+    const { runRelease } = await import("../scripts/release.js");
+    const dir = criarRepoBase("0.0.11");
+    git(dir, ["checkout", "-b", "feat/30-conflito"]);
+    writeFileSync(join(dir, "c.txt"), "conteudo\n");
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "feat: commit em feat/30-conflito"]);
+    git(dir, ["checkout", "main"]);
+    git(dir, [
+      "merge",
+      "--no-ff",
+      "-m",
+      "merge: integrate approved feat/30-conflito head (#30)",
+      "-m",
+      "# Conflicts:\n#\tc.txt",
+      "feat/30-conflito",
+    ]);
+    git(dir, ["checkout", "-b", "release/0.0.12"]);
+
+    runRelease({ cwd: dir, arg: "patch" });
+
+    const changelog = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
+    expect(changelog).toContain("merge: integrate approved feat/30-conflito head (#30)");
+    expect(changelog).not.toContain("# Conflicts:");
   });
 
   it("changelog considera só os merges depois da última tag v*", async () => {
