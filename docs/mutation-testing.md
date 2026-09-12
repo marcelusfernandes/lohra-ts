@@ -177,16 +177,16 @@ adicionar uma fatia" cita a mesma restrição.
 | `self-update`         | `mutations:self-update` |        8 | `self-update-mutants.ts`                                                                                              |
 | `context-window`      | `mutations:t23`         |       15 | `context-window.ts`                                                                                                   |
 | `auth`                | `mutations:auth`        |       13 | `auth-mutants.ts`                                                                                                     |
-| `supervision`         | `mutations:supervision` |       20 | `supervision-mutants.ts`                                                                                              |
+| `supervision`         | `mutations:supervision` |       28 | `supervision-mutants.ts`                                                                                              |
 
-Total: 247. Os 12 mutantes de `workflow-durability-guard.ts` são
+Total: 255. Os 12 mutantes de `workflow-durability-guard.ts` são
 combinatórios: três conjuntos do guard de escrita possuída (`fence`,
 `holder`, `lease-validity`) × quatro categorias (`state`, `cache`,
 `node-cost`, `spend`) — um mutante por combinação, cada um escorado só no
 teste focal da sua categoria, mais os 2 mutantes do INSERT combinado
 cache+custo (`combined-cell-guard-removed`,
 `combined-cost-escapes-refusal`). `tests/mutations-slices.test.ts` importa os
-treze catálogos de dado puro estaticamente e prova essa soma (247) a cada
+treze catálogos de dado puro estaticamente e prova essa soma (255) a cada
 corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
 
 `supervision-mutants.ts` (issue #451, milestone 14 — achado de QA/revisão de
@@ -207,7 +207,23 @@ mergeou em paralelo a esta issue e acrescentou `overrideNestedSpec`
 (route-override.ts) e sua chamada em `engine.ts`'s `runNested` — mais um
 mutante (O5, morto por `tests/workflow-route-override-nested.test.ts`): 246
 
-- 1 = 247.
+- 1 = 247. A issue #484 (milestone 15, achados dos vereditos das PRs
+  #478/#482) acrescenta 8 mutantes a `supervision-mutants.ts` para dois
+  módulos de `src/workflow/**` (já coberto por `srcGlobs`) sem mutante
+  nenhum: `cache-preview.ts` (#462, 5 mutantes — P1 `pivots_used` incrementado,
+  P2 `route_applied` invertido, P3 `recompute` rotulado `replay`, P4 a
+  classificação `nested` de um `workflow` node com guarda `&&` em vez de
+  `||`, P5 `leaves_to_spawn` contando donos em vez de spawns) e
+  `templates.ts` (#464, 3 mutantes — T1 `TEMPLATE_REF` aceitando `/`, T2
+  `listTemplates` descartando um arquivo quebrado, T3 `readTemplateFile`
+  engolindo `ENOENT` e devolvendo `{}`): 247 + 8 = 255. Um mutante sugerido
+  na issue original para `PreviewCacheFacade.put()` deixar de ser no-op NÃO
+  entrou — todo `cache.put`/`cachePut` de `engine.ts` só dispara com um leaf
+  COMPLETO de saída não vazia, e o `DryRuntime` do preview sempre devolve
+  `status: "failed"`, então `put()` é código morto em qualquer preview:
+  mutante equivalente, sobreviveria a qualquer foco (confirmado à mão antes
+  de descartar). `slices.json#focusFiles` da fatia `supervision` ganha
+  `tests/workflow-cache-preview.test.ts` e `tests/workflow-templates.test.ts`.
 
 `workflow-executor-mutants.ts` (issue #418) acrescentou
 `Q1-quota-guard-removed`: a guarda que impede `quota_exhausted` de entrar em
@@ -374,13 +390,13 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
    `true`.
 5. `npm test` roda `tests/mutations-slices.test.ts`, que reprova de duas
    formas se a contagem não for atualizada junto com o mutante novo: a soma
-   total (247 + o novo) contra os treze catálogos importados, e a linha do
+   total (255 + o novo) contra os treze catálogos importados, e a linha do
    catálogo tocado em `CONTAGEM_POR_CATALOGO`
    (`tests/mutations-slices.test.ts:515-534`), uma tabela pinada por número
    literal — não derivada de `CATALOGOS.get(path).length` — para que uma
    troca compensatória entre dois catálogos (um ganha o que o outro perde,
    soma preservada) não passe despercebida. As duas contagens (o literal
-   `247` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
+   `255` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
    atualização junto com o mutante novo.
 
 ## Como adicionar uma fatia
@@ -432,8 +448,8 @@ contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
 `workflow-audit-live-mutants` 32, `workflow-audit-producers-mutants` 25,
 `web-tools-mutants` 9, `media-catalog-other` 7, `media-catalog-persistence`
 13, `self-update-mutants` 8, `workflow-executor-mutants` 45,
-`context-window` 15, `auth-mutants` 13, `supervision-mutants` 20, soma 247) e
-a soma de 247 contra os treze catálogos importados; e que todo diretório de
+`context-window` 15, `auth-mutants` 13, `supervision-mutants` 28, soma 255) e
+a soma de 255 contra os treze catálogos importados; e que todo diretório de
 primeiro nível de `src/` está coberto por algum `srcGlobs` ou está em
 `SEM_FATIA` com um motivo não vazio — nunca os dois, nunca nenhum dos dois.
 
