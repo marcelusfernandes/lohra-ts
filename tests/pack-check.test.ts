@@ -12,7 +12,7 @@
 // é o que permite este arquivo provar o comportamento sem rodar o pipeline
 // caro (`npm run pack:check`, que continua sendo a prova de ponta a ponta,
 // colada manualmente no test plan da PR).
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -161,5 +161,28 @@ describe("assertNoNativeCompileNeeded", () => {
     expect(() => {
       assertNoNativeCompileNeeded({ consumerRoot: root as string, platform: "linux", arch: "x64" });
     }).not.toThrow();
+  });
+});
+
+// Issue #549: `node-pty@1.1.0` (o pin anterior) só publica prebuilds
+// `darwin-*`/`win32-*` — nunca `linux-x64`/`linux-arm64`, nem embutidos no
+// tarball nem via rede (`scripts/prebuild.js` do próprio pacote só confere
+// se `prebuilds/<platform>-<arch>` já existe localmente; nunca baixa nada).
+// Investigação (`npm pack node-pty@<v> --pack-destination <mkdtemp>` +
+// listagem de `prebuilds/` no tarball) mostrou que `linux-x64`/`linux-arm64`
+// só aparecem a partir de `1.2.0-beta.8` (nenhuma versão estável ≥1.1.0 os
+// publica) e continuam presentes em `1.2.0-beta.15`, a mais recente
+// disponível — daí o pin exato. A API usada por `src/tools/terminal.ts`
+// (`spawn`/`onData`/`onExit`/`kill`) é idêntica entre `1.1.0` e
+// `1.2.0-beta.15` (typings/node-pty.d.ts, comparação manual). Este teste
+// prende a versão pinada — não a resolução do npm — para uma reversão futura
+// para `1.1.0` (ou qualquer versão sem prebuild Linux) reprovar aqui antes de
+// `npm run pack:check` gastar tempo compilando.
+describe("pin de node-pty (prebuilds Linux)", () => {
+  it("dependencies.node-pty é 1.2.0-beta.15 — primeira versão com prebuilds linux-x64/linux-arm64", () => {
+    const manifest = JSON.parse(readFileSync("package.json", "utf8")) as {
+      dependencies?: Record<string, unknown>;
+    };
+    expect(manifest.dependencies?.["node-pty"]).toBe("1.2.0-beta.15");
   });
 });
