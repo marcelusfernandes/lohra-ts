@@ -679,3 +679,183 @@ describe("route-override.ts — the module's own exports (#427)", () => {
     expect(pivotsOf({})).toEqual([]);
   });
 });
+
+// Issue #448 (M14, achado de revisão do #442): #427 exposed 'pivots' on
+// `durableRollup` (durable read) but never on the LIVE envelope
+// (`resultView`/the still-running snapshot in `WorkflowService.status`) — a
+// supervisor reading `workflow_status` on a run answered by THIS process saw
+// no 'pivots' at all, and had to know which channel answered to interpret
+// the absence. These pin the SAME content on both channels for the SAME
+// run, and pin that a run which never pivoted OMITS the key on both —
+// matching `durableRollup`'s own existing behavior (never a bare `[]`).
+describe("workflow_status's live envelope carries 'pivots' too, not just the durable one (#448)", () => {
+  it("a settled run's live status (resultView) carries the same 'pivots' the durable rollup shows", async () => {
+    const { service, repository, close } = harness(new RoutingFakeRuntime("bad-provider"));
+    try {
+      const started = service.start(cacheSpec());
+      if ("error" in started) throw new Error(started.error);
+      await service.status(started.run_id, true);
+      const resumeOptions = { resumeRunId: started.run_id, routeOverride: { provider: "good" } };
+      const resumed = service.start(null, {}, resumeOptions);
+      if ("error" in resumed) throw new Error(resumed.error);
+      const live = (await service.status(started.run_id, true)) as Record<string, unknown>;
+      const line = repository.getRunState(started.run_id) as Record<string, unknown>;
+      const durable = durableRollup(durableFromRow(line), 0, false);
+      expect(live.pivots).toEqual([{ provider: "good" }]);
+      expect(live.pivots).toEqual(durable.pivots);
+    } finally {
+      close();
+    }
+  });
+
+  it("a run that never pivoted OMITS 'pivots' from the live envelope, matching the durable one", async () => {
+    const { service, repository, close } = harness(new RoutingFakeRuntime("bad-provider"));
+    try {
+      const spec = {
+        meta: { name: "no-pivot" },
+        nodes: [{ id: "a", type: "agent", prompt: "x" }],
+      };
+      const started = service.start(spec);
+      if ("error" in started) throw new Error(started.error);
+      const live = (await service.status(started.run_id, true)) as Record<string, unknown>;
+      const line = repository.getRunState(started.run_id) as Record<string, unknown>;
+      const durable = durableRollup(durableFromRow(line), 0, false);
+      expect(live).not.toHaveProperty("pivots");
+      expect(durable).not.toHaveProperty("pivots");
+    } finally {
+      close();
+    }
+  });
+
+  it("a run resumed with 'route' but stuck on a hanging leaf shows 'pivots' on the still-RUNNING live envelope", async () => {
+    const usage = {
+      inputTokens: 1,
+      outputTokens: 1,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reasoningTokens: 0,
+    };
+
+    /** Every leaf completes immediately — used to establish one pivot before
+     * the hang, exactly like the #446 crash setup this test mirrors. */
+    class AlwaysCompleteRuntime implements ChildRuntime {
+      private seq = 0;
+      spawn(): string {
+        this.seq += 1;
+        return `leaf-${String(this.seq)}`;
+      }
+      collect(): ChildResult {
+        return { status: "complete", output: { ok: true }, usage };
+      }
+      steer(): void {}
+      cancel(): void {}
+      installLeafSandbox(): { dispose: () => void } {
+        return { dispose: (): void => undefined };
+      }
+    }
+
+    /** "pinned"'s `collect()` never resolves, so `engine.run()` never
+     * settles and `record.settled` stays false — the same live snapshot a
+     * supervisor sees while polling a genuinely long-running stretch. */
+    class HangingPinnedRuntime implements ChildRuntime {
+      spawn(): string {
+        return "leaf-hanging";
+      }
+      collect(): Promise<ChildResult> {
+        return new Promise<ChildResult>(() => undefined);
+      }
+      steer(): void {}
+      cancel(): void {}
+      installLeafSandbox(): { dispose: () => void } {
+        return { dispose: (): void => undefined };
+      }
+    }
+
+    function twoNodeSpec(): Record<string, unknown> {
+      return {
+        meta: { name: "route-override-live-running" },
+        nodes: [
+          { id: "free", type: "agent", prompt: "unpinned" },
+          { id: "pinned", type: "agent", prompt: "pinned", provider: "p0" },
+        ],
+      };
+    }
+
+    const root = mkdtempSync(join(tmpdir(), "lohra-route-override-live-running-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      const repository = new WorkflowRepository(connection.database);
+      const locks = new LockRepository(connection.database);
+      const audit = new AuditRepository(connection.database);
+      const trail = new AuditTrail(audit);
+      const store = () => ({
+        repository,
+        locks,
+        holder: "test",
+        ttl: 900,
+        ownershipOf: () => ({ fence: 0, holder: "test", now: 1000 }),
+        database: connection.database,
+      });
+
+      const initial = new WorkflowService({
+        runtime: new AlwaysCompleteRuntime(),
+        auditTrail: trail,
+        store: store(),
+      });
+      const started = initial.start(twoNodeSpec());
+      if ("error" in started) throw new Error(started.error);
+      await initial.status(started.run_id, true);
+
+      const resumeService = new WorkflowService({
+        runtime: new AlwaysCompleteRuntime(),
+        auditTrail: trail,
+        store: store(),
+      });
+      const resumed = resumeService.start(
+        null,
+        {},
+        {
+          resumeRunId: started.run_id,
+          routeOverride: { provider: "v1" },
+        },
+      );
+      if ("error" in resumed) throw new Error(resumed.error);
+      await resumeService.status(started.run_id, true);
+
+      let freeCompletedResolve: () => void = () => undefined;
+      const freeCompleted = new Promise<void>((resolve) => {
+        freeCompletedResolve = resolve;
+      });
+      const crashService = new WorkflowService({
+        runtime: new HangingPinnedRuntime(),
+        auditTrail: trail,
+        store: store(),
+        onEvent: (event) => {
+          if (event.kind === "node" && event.nodeId === "free" && event.state !== "running") {
+            freeCompletedResolve();
+          }
+        },
+      });
+      const crashed = crashService.start(
+        null,
+        {},
+        {
+          resumeRunId: started.run_id,
+          routeOverride: { provider: "v2" },
+        },
+      );
+      if ("error" in crashed) throw new Error(crashed.error);
+      await freeCompleted;
+
+      const live = (await crashService.status(started.run_id)) as Record<string, unknown>;
+      expect(live.status).toBe("running");
+      const midRow = repository.getRunState(started.run_id) as Record<string, unknown>;
+      const durable = durableRollup(durableFromRow(midRow), 0, false);
+      expect(live.pivots).toEqual([{ provider: "v1" }, { provider: "v2" }]);
+      expect(live.pivots).toEqual(durable.pivots);
+    } finally {
+      connection.close();
+    }
+  });
+});
