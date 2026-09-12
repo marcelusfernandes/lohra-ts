@@ -384,6 +384,47 @@ describe("delegateTaskTool", () => {
     expect(core.size).toBe(0);
   });
 
+  // #500: Codex repeatedly sent delegate_task with resume_id:"" (never
+  // intending a resume) plus a default-filled max_iterations. Empty/
+  // whitespace-only resume_id must count as absent, normalized before EITHER
+  // guard sees it (tools.ts's own presence check and validation.ts's
+  // validateResumeOverrides) — the base rejects this with the max_iterations
+  // message instead of running the batch.
+  it("treats an empty or whitespace-only resume_id as absent — batch delegate runs instead of the resume guard rejecting max_iterations (#500)", async () => {
+    const expectedEnvelope = toolResult(undefined, {
+      results: [
+        {
+          sub_id: "kid-1",
+          status: "complete",
+          summary: "a-OUT",
+          error_kind: null,
+          tokens_in: 11,
+          tokens_out: 7,
+          provider: "fakeprov",
+          model: "fake-model-a",
+        },
+      ],
+    });
+    for (const resumeId of ["", "   "]) {
+      const core = makeCore(
+        (_subId, config) => Promise.resolve(okResult({ output: `${config.prompt}-OUT` })),
+        () => "kid-1",
+      );
+      expect(
+        await delegateTaskTool(core, { tasks: ["a"], resume_id: resumeId, max_iterations: 5 }),
+      ).toBe(expectedEnvelope);
+    }
+  });
+
+  it("still rejects max_iterations override when resume_id is a real, non-empty id (non-regression, #500)", async () => {
+    const core = makeCore(() => Promise.resolve(okResult()));
+    await spawnSessionTool(core, allowAllProviders, { prompt: "x" });
+    await collectSessionTool(core, { sub_id: "aaaa", wait: true });
+    expect(
+      await delegateTaskTool(core, { tasks: ["y"], resume_id: "aaaa", max_iterations: 5 }),
+    ).toBe(toolError("cannot change max_iterations when resuming a subagent"));
+  });
+
   it("resumes an existing sub-session via steer+collect instead of spawning when resume_id is present", async () => {
     let runChildCalls = 0;
     const core = makeCore((_subId, config) => {
