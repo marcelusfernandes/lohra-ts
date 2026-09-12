@@ -177,16 +177,16 @@ adicionar uma fatia" cita a mesma restrição.
 | `self-update`         | `mutations:self-update` |        8 | `self-update-mutants.ts`                                                                                              |
 | `context-window`      | `mutations:t23`         |       15 | `context-window.ts`                                                                                                   |
 | `auth`                | `mutations:auth`        |       13 | `auth-mutants.ts`                                                                                                     |
-| `supervision`         | `mutations:supervision` |       32 | `supervision-mutants.ts`                                                                                              |
+| `supervision`         | `mutations:supervision` |       33 | `supervision-mutants.ts`                                                                                              |
 
-Total: 259. Os 12 mutantes de `workflow-durability-guard.ts` são
+Total: 260. Os 12 mutantes de `workflow-durability-guard.ts` são
 combinatórios: três conjuntos do guard de escrita possuída (`fence`,
 `holder`, `lease-validity`) × quatro categorias (`state`, `cache`,
 `node-cost`, `spend`) — um mutante por combinação, cada um escorado só no
 teste focal da sua categoria, mais os 2 mutantes do INSERT combinado
 cache+custo (`combined-cell-guard-removed`,
 `combined-cost-escapes-refusal`). `tests/mutations-slices.test.ts` importa os
-treze catálogos de dado puro estaticamente e prova essa soma (259) a cada
+treze catálogos de dado puro estaticamente e prova essa soma (260) a cada
 corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
 
 `supervision-mutants.ts` (issue #451, milestone 14 — achado de QA/revisão de
@@ -281,6 +281,35 @@ mutante (O5, morto por `tests/workflow-route-override-nested.test.ts`): 246
   com um `verify` na mesma forma). P9 reverte a string para `unknown`,
   morto pelo `it` de classificação novo em
   `tests/workflow-cache-preview-writes.test.ts`: 258 + 1 = 259.
+
+  A issue #515 (follow-up de #503, veredito da PR #510, non_blocking 2 e 3)
+  achou que o guard de `no_leaves` continuava tautológico DEPOIS do #503: o
+  guard checava `spawns === 0 && hits === 0`, mas os dois já são
+  garantidamente zero naquele ponto da função (os dois `return`s
+  anteriores, para `spawns > 0`/`hits > 0`, já teriam saído antes) — a
+  condição nunca discriminava nada. Isso misturava `branches: []` (de
+  verdade "nada a pagar") com dois casos genuinamente bloqueados que também
+  chegam ali com zero spawns/zero hits: `branches` que nunca resolveu para
+  array (um template como `${bad.value}` sobre um upstream que falhou,
+  `outputs[node.id] === null`, não `[]`) e um `parallel` que estourou o cap
+  de fan-out (`FanoutRejected`, também `null`). O guard agora exige
+  `Array.isArray(output) && output.length === 0` — só `[]` de verdade
+  classifica `no_leaves`. O caso de `branches` não resolvida passa a
+  classificar `upstream_missing` (o MESMO outcome que `agent` já reporta
+  para um `${...}` não resolvido), checado com a MESMA precedência de
+  `agent` — antes de `token_budget_exhausted` — via `hasNodeFault`: todo
+  outro caminho de `runParallel` que produz `null` (`all N branches
+failed`, `FanoutRejected`, um fault genérico do engine) grava um fault
+  prefixado pelo próprio id do nó; só o `return null;` silencioso de
+  `branches` não-array não grava nada, então "`null` e nenhum fault com
+  esse prefixo" identifica exatamente esse caminho, sem precisar mexer em
+  `engine.ts`. O cap de fan-out (que SEMPRE deixa um fault, `exceeds
+max_fanout`/`exceeds lifetime remaining`) cai no `unknown` do catch-all —
+  a issue decidiu não criar um outcome dedicado para ele, porque
+  `capTrips` (`RunResult`) é uma contagem do run inteiro, não atribuível a
+  este nó sem crescer `engine.ts` (congelado em 978 linhas). P10 mata a
+  remoção do novo guard `Array.isArray`, ancorado no `it` novo de fan-out
+  cap em `tests/workflow-cache-preview-writes.test.ts`: 259 + 1 = 260.
 
 `workflow-executor-mutants.ts` (issue #418) acrescentou
 `Q1-quota-guard-removed`: a guarda que impede `quota_exhausted` de entrar em
@@ -447,13 +476,13 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
    `true`.
 5. `npm test` roda `tests/mutations-slices.test.ts`, que reprova de duas
    formas se a contagem não for atualizada junto com o mutante novo: a soma
-   total (259 + o novo) contra os treze catálogos importados, e a linha do
+   total (260 + o novo) contra os treze catálogos importados, e a linha do
    catálogo tocado em `CONTAGEM_POR_CATALOGO`
    (`tests/mutations-slices.test.ts:547-561`), uma tabela pinada por número
    literal — não derivada de `CATALOGOS.get(path).length` — para que uma
    troca compensatória entre dois catálogos (um ganha o que o outro perde,
    soma preservada) não passe despercebida. As duas contagens (o literal
-   `259` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
+   `260` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
    atualização junto com o mutante novo.
 
 ## Como adicionar uma fatia
@@ -505,8 +534,8 @@ contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
 `workflow-audit-live-mutants` 32, `workflow-audit-producers-mutants` 25,
 `web-tools-mutants` 9, `media-catalog-other` 7, `media-catalog-persistence`
 13, `self-update-mutants` 8, `workflow-executor-mutants` 45,
-`context-window` 15, `auth-mutants` 13, `supervision-mutants` 32, soma 259) e
-a soma de 259 contra os treze catálogos importados; e que todo diretório de
+`context-window` 15, `auth-mutants` 13, `supervision-mutants` 33, soma 260) e
+a soma de 260 contra os treze catálogos importados; e que todo diretório de
 primeiro nível de `src/` está coberto por algum `srcGlobs` ou está em
 `SEM_FATIA` com um motivo não vazio — nunca os dois, nunca nenhum dos dois.
 
