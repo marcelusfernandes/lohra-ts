@@ -34,6 +34,9 @@ import { workflowLeafReadHandler } from "../workflow/leaf-read-tool.js";
 // Issue #424: same convention — `workflowSteerHandler` lives in its own
 // module (`steer-tool.ts`, not `tool.ts`), not re-exported.
 import { workflowSteerHandler } from "../workflow/steer-tool.js";
+// Issue #462: same convention — `workflowPreviewHandler` lives in its own
+// module (`cache-preview.ts`, not `tool.ts`), not re-exported.
+import { workflowPreviewHandler } from "../workflow/cache-preview.js";
 
 export interface SessionToolBase {
   readonly registry: ToolRegistry;
@@ -48,6 +51,10 @@ export interface SessionToolBase {
    * hand it to `productionOwnershipStore(db, { notices })`, the one seam a
    * route fault's durable notice needs and this process had never wired. */
   readonly noticesRepository: NoticesRepository;
+  /** Issue #462: the SAME connection `createSessionToolBase` already holds
+   * — `composeSessionTools` needs it (plus `options.home`, already its own)
+   * to register `workflow_preview` without a second connection. */
+  readonly database: Database.Database;
 }
 
 export interface SessionToolComposition {
@@ -102,7 +109,7 @@ export function createSessionToolBase(
     workflow_notices_ack: workflowNoticesAckHandler(noticesRepository),
     workflow_leaf_read: workflowLeafReadHandler(database, auditRepository),
   });
-  return Object.freeze({ registry, auditRepository, noticesSink, noticesRepository });
+  return Object.freeze({ registry, auditRepository, noticesSink, noticesRepository, database });
 }
 
 export function composeSessionTools(options: {
@@ -154,6 +161,12 @@ export function composeSessionTools(options: {
     // built here — same reason `workflow_leaf_read` above is early but
     // this one is not.
     workflow_steer: workflowSteerHandler(options.workflowService, options.base.auditRepository),
+    // Issue #462: needs `options.home` (the operator tier map) — only
+    // available here, unlike `workflow_leaf_read`. `loader` is threaded in
+    // once S6 (#464) wires one; until then every 'workflow' node previews
+    // as 'unknown', matching production today (no loader is wired anywhere
+    // in this composition root either).
+    workflow_preview: workflowPreviewHandler(options.base.database, options.home),
     ...options.orchestrationHandlers,
     ...media.handlers,
   });

@@ -181,9 +181,9 @@ describe("stateful tool handlers", () => {
 });
 
 describe("builtin registry", () => {
-  it("registers the 24 Python schemas plus the 4 native ones (workflow_notices/_ack, #402; workflow_leaf_read, #425; workflow_steer, #424) in exact order", () => {
+  it("registers the 24 Python schemas plus the 5 native ones (workflow_notices/_ack, #402; workflow_leaf_read, #425; workflow_steer, #424; workflow_preview, #462) in exact order", () => {
     const registry = createBuiltinRegistry();
-    expect(registry.generation).toBe(28);
+    expect(registry.generation).toBe(29);
     expect(registry.getDefinitions().map((definition) => definition.function.name)).toEqual([
       "read_file",
       "write_file",
@@ -213,6 +213,7 @@ describe("builtin registry", () => {
       "list_models",
       "workflow_leaf_read",
       "workflow_steer",
+      "workflow_preview",
     ]);
   });
 
