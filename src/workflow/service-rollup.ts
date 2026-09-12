@@ -159,6 +159,10 @@ export function resultView(
           token_budget: record.engine.budget.snapshot(),
           null_rate: result.nullRate,
           usage_uncertain_leaves: result.usageUncertainLeaves,
+          // #517 (M16-S2, ADR 0005): always a SUBSET of `usage_uncertain_leaves`
+          // above — a leaf whose usage includes an ESTIMATED spend from a
+          // call aborted in flight.
+          partial_leaves: result.partialLeaves,
           sandbox_refusals: result.sandboxRefusals,
           fault_kinds: [...result.faultKinds],
         },

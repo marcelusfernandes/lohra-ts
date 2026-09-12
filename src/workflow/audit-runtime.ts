@@ -102,6 +102,46 @@ function usagePayload(result: ChildResult): Readonly<Record<string, number>> | u
   return { tokens_in: usage.inputTokens, tokens_out: usage.outputTokens };
 }
 
+/**
+ * #517 (M16-S2, épico #490, ADR 0005): the ONE `leaf.failed` payload
+ * constructor — `collect()`'s failed/cancelled branch below and `cancel()`
+ * both call this, so the SAME `ChildResult` produces the SAME shape either
+ * way. `result === null` is `cancel()`'s own case (this issue never settles
+ * a real result there — S3's job): the SAME payload `cancel()` wrote before
+ * this issue (`status: "cancelled"`, plus `reason` when the caller names
+ * one), now also naming `error_kind: "cancelled"` (#517 AC). `reason` is
+ * ONLY ever `"cancelled"`, and ONLY `cancel()` passes it — `collect()` below
+ * calls this with no second argument, so its own payload never gains a
+ * `reason` key here (keeps `:415`'s unrelated `reason: "timeout"` branch,
+ * a plain `wait: true` leaf timeout, the only `reason` `collect()` itself
+ * ever writes). `partial` is included only when `true`, never `false` —
+ * a plain failed/cancelled leaf with no estimated usage stays byte-identical
+ * to the payload this function replaces.
+ */
+function failedPayload(
+  result: ChildResult | null,
+  reason?: "cancelled",
+): Readonly<Record<string, unknown>> {
+  if (result === null) {
+    return {
+      status: "cancelled",
+      error_kind: "cancelled",
+      ...(reason === undefined ? {} : { reason }),
+    };
+  }
+  const usage = usagePayload(result);
+  return {
+    status: result.status,
+    ...(result.errorKind === undefined || result.errorKind === null
+      ? {}
+      : { error_kind: result.errorKind }),
+    ...(usage === undefined ? {} : { usage }),
+    usage_uncertain: result.usageUncertain === true,
+    ...(result.partial === true ? { partial: true } : {}),
+    ...(reason === undefined ? {} : { reason }),
+  };
+}
+
 // Issue #367: any tool name outside the builtin catalog is a hallucinated
 // call — `tool_name_state` classifies it, never leaks it (`name` stays a
 // RAW_FIELD, audit-model.ts:52). Built once, not per call: the catalog is a
@@ -398,13 +438,7 @@ export function auditedChildRuntime(
           usage_uncertain: result.usageUncertain === true,
         });
       } else if (result.status === "failed" || result.status === "cancelled") {
-        close(id, "leaf.failed", {
-          status: result.status,
-          ...(result.errorKind === undefined || result.errorKind === null
-            ? {}
-            : { error_kind: result.errorKind }),
-          usage_uncertain: result.usageUncertain === true,
-        });
+        close(id, "leaf.failed", failedPayload(result));
       } else if (options.wait) {
         // `result.status` here can only be "running": the engine treats a
         // `wait: true` collect that comes back "running" as a leaf timeout
@@ -422,7 +456,15 @@ export function auditedChildRuntime(
       try {
         await inner.cancel(id);
       } finally {
-        close(id, "leaf.failed", { status: "cancelled", reason: "cancelled" });
+        // #517: `settled` stays `null` in this issue — actually probing
+        // `inner` for a real result here is S3's job (`Fora de escopo`,
+        // #517): several `ChildRuntime` test doubles across the suite model
+        // "still open" by blocking `collect()` on an unresolved gate
+        // regardless of `wait`, which an extra `collect()` call here would
+        // deadlock on. `failedPayload(null, "cancelled")` is the exact
+        // payload `cancel()` wrote before this issue, plus `error_kind:
+        // "cancelled"` (#517 AC) — `reason: "cancelled"` unchanged.
+        close(id, "leaf.failed", failedPayload(null, "cancelled"));
       }
     },
     // Issue #450: `steer` delegates to `deliverSteer` (declared above,

@@ -83,6 +83,15 @@ export class RunResult {
   cacheWriteTokens = 0;
   reasoningTokens = 0;
   usageUncertainLeaves = 0;
+  /** Leaves whose `usage` above already includes a portion ESTIMATED from a
+   * call aborted in flight (`ChildResult.partial`, runtime.ts; ADR 0005,
+   * #517/M16-S2) — always a SUBSET of `usageUncertainLeaves` above (an
+   * estimate is never a real measurement), never the reverse: a leaf that
+   * merely never measured usage (#232) sets `usageUncertainLeaves` alone.
+   * Incremented in `recordLeafSideChannels` below; folded from a nested
+   * sub-run in `foldNestedCounters`, like every other per-leaf counter
+   * there. */
+  partialLeaves = 0;
   /** Total tool calls the sandbox denied across every leaf of this run (or
    * this stretch, before service.ts folds in a prior stretch's total on
    * resume — #246). Advisory: never read by `deriveStatus`. */
@@ -185,6 +194,10 @@ export function recordLeafSideChannels(
   subId: string,
   collected: ChildResult,
 ): void {
+  // #517: counted regardless of `collected.status` — same as every other
+  // side channel this function already reads off the raw `ChildResult`,
+  // never gated on "complete" vs "failed"/"cancelled".
+  if (collected.partial === true) result.partialLeaves += 1;
   recordSandboxRefusals(result, nodeId, collected.sandboxRefusals ?? 0);
   for (const artifact of collected.artifacts ?? []) {
     const key = normalizedArtifactPath(artifact.path);
@@ -313,6 +326,7 @@ export function recordFaultKind(result: RunResult, kind: ErrorKind | null): void
  * already but never into these two). */
 export function foldNestedCounters(result: RunResult, nested: RunResult, reference: string): void {
   result.leafRespawns += nested.leafRespawns;
+  result.partialLeaves += nested.partialLeaves;
   result.sandboxRefusals += nested.sandboxRefusals;
   result.sandboxFaults.push(...nested.sandboxFaults.map((fault) => `sub[${reference}]: ${fault}`));
   // Vocabulary, not text (#399) — never `sub[${reference}]:`-prefixed like
