@@ -216,4 +216,68 @@ describe("runRelease — bump de ponta a ponta", () => {
     };
     expect(pkg.version).toBe("0.0.11");
   });
+
+  // Rodada 2 (PR #546, veredito do revisor): insertChangelogSection
+  // descartava silenciosamente o CHANGELOG existente quando o cabeçalho não
+  // batia byte a byte — os três testes abaixo prendem a correção.
+  it("recusa quando o CHANGELOG.md existente não começa exatamente por '# Changelog\\n' — nada é escrito", async () => {
+    const { runRelease } = await import("../scripts/release.js");
+    const dir = criarRepoBase("0.0.11");
+    const changelogOriginal = "# Changelog (lohra-ts)\n\nconteúdo antigo que não pode sumir\n";
+    writeFileSync(join(dir, "CHANGELOG.md"), changelogOriginal);
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "chore: changelog com cabeçalho diferente"]);
+    git(dir, ["checkout", "-b", "release/0.0.12"]);
+
+    expect(() => runRelease({ cwd: dir, arg: "patch" })).toThrow(
+      /RELEASE_CHANGELOG_HEADER_UNEXPECTED/,
+    );
+
+    const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
+      version: string;
+    };
+    expect(pkg.version).toBe("0.0.11");
+    expect(readFileSync(join(dir, "CHANGELOG.md"), "utf8")).toBe(changelogOriginal);
+    expect(gitCapture(dir, ["status", "--porcelain"])).toBe("");
+    expect(gitCapture(dir, ["log", "-1", "--format=%s"])).toBe(
+      "chore: changelog com cabeçalho diferente",
+    );
+  });
+
+  it("preserva byte a byte o CHANGELOG existente e insere a seção nova acima dele", async () => {
+    const { runRelease } = await import("../scripts/release.js");
+    const dir = criarRepoBase("0.0.11");
+    const changelogAnterior =
+      "# Changelog\n\n## [0.0.11] - 2026-01-01\n\n### Added\n\n- feat: entrada antiga (#1)\n";
+    writeFileSync(join(dir, "CHANGELOG.md"), changelogAnterior);
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "chore: changelog inicial"]);
+    git(dir, ["checkout", "-b", "release/0.0.12"]);
+
+    runRelease({ cwd: dir, arg: "patch" });
+
+    const changelog = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
+    const rest = "## [0.0.11] - 2026-01-01\n\n### Added\n\n- feat: entrada antiga (#1)\n";
+    expect(changelog.endsWith(rest)).toBe(true);
+    expect(changelog.indexOf("## [0.0.12]")).toBeGreaterThan(-1);
+    expect(changelog.indexOf("## [0.0.12]")).toBeLessThan(changelog.indexOf("## [0.0.11]"));
+  });
+
+  it("recusa quando a versão-alvo não é maior que a atual (regressão de versão)", async () => {
+    const { runRelease } = await import("../scripts/release.js");
+    const dir = criarRepoBase("0.0.11");
+    git(dir, ["checkout", "-b", "release/0.0.1"]);
+    expect(() => runRelease({ cwd: dir, arg: "0.0.1" })).toThrow(/RELEASE_VERSION_NOT_GREATER/);
+    const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
+      version: string;
+    };
+    expect(pkg.version).toBe("0.0.11");
+  });
+
+  it("recusa quando a versão-alvo explícita é igual à atual", async () => {
+    const { runRelease } = await import("../scripts/release.js");
+    const dir = criarRepoBase("0.0.11");
+    git(dir, ["checkout", "-b", "release/0.0.11"]);
+    expect(() => runRelease({ cwd: dir, arg: "0.0.11" })).toThrow(/RELEASE_VERSION_NOT_GREATER/);
+  });
 });
