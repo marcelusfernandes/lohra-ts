@@ -391,8 +391,7 @@ export async function replayOrCollectBranch(
     itemIndex: index,
     attempt,
   });
-  if (nonEmpty(leaf.output))
-    deps.cache.put(deps.runId, branchHash, node.id, leaf.output, leaf.usage);
+  if (nonEmpty(leaf.output)) deps.cache.put(deps.runId, branchHash, owner, leaf.output, leaf.usage);
   return leaf;
 }
 
