@@ -189,10 +189,19 @@ export function contemStubQueLanca(diffTexto: string): boolean {
 // --- SKIP por classe (rodada 2 da PR #54, ADR 0004 item 7) ----------------
 // Acréscimo à issue #62 (bloqueava a #65): `scripts/github/**` é tooling de
 // GitHub (ruleset, labels) — processo, igual a `.claude/**`/`.github/**`,
-// nunca comportamento a controlar; `.worktreeinclude` é o único arquivo de
-// processo hoje no topo do repo além de `README.md`/`CLAUDE.md`/`AGENTS.md`
-// (`lefthook.yml` não existe neste repositório).
-const DOCS_TOPO = new Set(["README.md", "CLAUDE.md", "AGENTS.md", ".worktreeinclude"]);
+// nunca comportamento a controlar; `.worktreeinclude` é outro arquivo de
+// processo no topo do repo além de `README.md`/`CLAUDE.md`/`AGENTS.md`.
+// Acréscimo da issue #555: `lefthook.yml` (config do hook de pre-commit,
+// instalado por `scripts/prepare.mjs`, guard `LOHRA_SKIP_PREPARE=1`) é a
+// mesma natureza — configuração de processo, nunca comportamento do
+// runtime — e entra na mesma lista.
+const DOCS_TOPO = new Set([
+  "README.md",
+  "CLAUDE.md",
+  "AGENTS.md",
+  ".worktreeinclude",
+  "lefthook.yml",
+]);
 const DOCS_OU_PROCESS_PREFIXOS = ["docs/", ".claude/", ".github/", "scripts/github/"];
 
 // Acréscimo da issue #345: markdown de skill sob `assets/skills/**` é

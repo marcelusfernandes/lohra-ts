@@ -1,12 +1,14 @@
 # lefthook.yml — pre-commit local (issue #63): prettier --check e eslint nos
 # arquivos staged. Instalado por `npm ci`/`npm install` via
-# `scripts/postinstall.mjs`, que chama `lefthook install pre-commit` — só
-# esse hook. `lefthook install` sem argumento instala todos os hooks deste
-# arquivo e faz backup dos existentes; usamos `install pre-commit` para que
-# o `pre-push` nativo continue sendo o de `.claude/hooks/git-pre-push`
-# (camada 2 da proteção da main, instalado por
-# `.claude/hooks/instalar-git-hooks.sh`) — este arquivo por isso não declara
-# um bloco `pre-push`. Ver README "Desenvolvimento".
+# `scripts/prepare.mjs` (desde D1/#530 — split de `scripts/postinstall.mjs`;
+# guard `LOHRA_SKIP_PREPARE=1` pula a instalação, usado por `npm pack`/
+# `pack-check.ts` para não tocar `.git/hooks` a cada corrida, issue #544),
+# que chama `lefthook install pre-commit` — só esse hook. `lefthook install`
+# sem argumento instala todos os hooks deste arquivo e faz backup dos
+# existentes; usamos `install pre-commit` para que o `pre-push` nativo
+# continue sendo o de `.claude/hooks/git-pre-push` (camada 2 da proteção da
+# main, instalado por `.claude/hooks/instalar-git-hooks.sh`) — este arquivo
+# por isso não declara um bloco `pre-push`. Ver README "Desenvolvimento".
 pre-commit:
   parallel: true
   jobs:
