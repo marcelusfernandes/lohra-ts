@@ -92,7 +92,17 @@ const NUMBER_FIELDS = new Set([
 // a cancelled leaf whose `usage` already includes an ESTIMATED spend from a
 // call aborted in flight — never coerced from a string (audit-model's own
 // boolean branch, `:328`, only accepts an actual `boolean`).
-const BOOLEAN_FIELDS = new Set(["tainted", "stale", "terminal", "usage_uncertain", "partial"]);
+const BOOLEAN_FIELDS = new Set([
+  "tainted",
+  "stale",
+  "terminal",
+  "usage_uncertain",
+  "partial",
+  // Issue #520 (M16-S5, ADR 0005): `leaf.steered`'s own marker for a steer
+  // that also tore down a provider call the leaf had genuinely in flight
+  // (D2) — never coerced from a string, same posture as `partial` above.
+  "interrupted",
+]);
 const PATH_FIELDS = new Set(["node_path", "branch_path"]);
 // Issue #460 (M11-S2, épico #458): `node.rerouted`'s `from`/`to` — nested
 // `{provider, model}` objects, not a flattened `from_provider`/`from_model`

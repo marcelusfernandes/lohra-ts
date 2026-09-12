@@ -93,7 +93,14 @@ export function steerSessionTool(core: OrchestrationCore, args: ToolArguments): 
   const outcome = core.steer(subId, args.text as string);
   if (outcome === null) return noSubSession(subId);
   if (outcome.refused !== undefined) return toolError(steerCapMessage(subId));
-  return toolResult(undefined, { queued: outcome.queued });
+  // Issue #520 (M16-S5, ADR 0005): additive — `interrupted` only appears
+  // when `core.steer` reports it (a call genuinely in flight was torn
+  // down), never `false`, keeping every envelope from before this issue
+  // byte-identical.
+  return toolResult(undefined, {
+    queued: outcome.queued,
+    ...(outcome.interrupted === true ? { interrupted: true } : {}),
+  });
 }
 
 /** Maps the registry's CollectResult (camelCase) to the wire's snake_case

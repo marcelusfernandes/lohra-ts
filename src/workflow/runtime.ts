@@ -122,9 +122,19 @@ export interface LeafSandboxHandle {
  * leaf's steer text was pushed to the core's own inbox, `queued: false` (no
  * `refused`) when an idle/terminal leaf was resurrected with a fresh turn —
  * both are genuine deliveries. `refused: "steer_cap"` is the only refusal
- * shape today (issue #424 S1's per-leaf pending-steer cap).
+ * shape today (issue #424 S1's per-leaf pending-steer cap). `interrupted`
+ * (issue #520, M16-S5, ADR 0005) is present, always `true`, only when the
+ * steer also tore down a provider call the busy leaf had genuinely in
+ * flight (D2: every busy-leaf steer interrupts one if there is one to
+ * interrupt) — absent, never `false`, for every other outcome (queued
+ * behind a leaf between calls, a resurrection, or a refusal), keeping every
+ * `SteerOutcome` fixture from before this issue byte-identical.
  */
-export type SteerOutcome = Readonly<{ queued: boolean; refused?: "steer_cap" }>;
+export type SteerOutcome = Readonly<{
+  queued: boolean;
+  refused?: "steer_cap";
+  interrupted?: boolean;
+}>;
 
 /** Provider-free port consumed by the workflow core. */
 export interface ChildRuntime {

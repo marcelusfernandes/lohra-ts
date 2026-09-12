@@ -427,7 +427,15 @@ export function auditedChildRuntime(
         node_id: cc.nodePath.at(-1) ?? null,
         sub_id: id,
         attempt: cc.attempt,
-        payload: { source, message_chars: Array.from(prompt).length },
+        payload: {
+          source,
+          message_chars: Array.from(prompt).length,
+          // Issue #520 (M16-S5, ADR 0005): only ever `true`, never `false`
+          // — `outcome.interrupted` (`SteerOutcome`, runtime.ts) is itself
+          // absent for every non-interrupting delivery, so there is nothing
+          // to spread when it isn't `true`.
+          ...(outcome.interrupted === true ? { interrupted: true } : {}),
+        },
       });
     }
     return outcome;
@@ -474,6 +482,11 @@ export function auditedChildRuntime(
             ? {}
             : { provider: result.provider }),
           usage_uncertain: result.usageUncertain === true,
+          // Issue #520 (D3, M16-S5, ADR 0005): a turn that COMPLETED still
+          // absorbed at least one steer-driven interrupt mid-flight — same
+          // `partial` marker `failedPayload` already carries for a
+          // failed/cancelled leaf (S2), only ever `true`, never `false`.
+          ...(result.partial === true ? { partial: true } : {}),
         });
       } else if (result.status === "failed" || result.status === "cancelled") {
         close(id, "leaf.failed", failedPayload(result));

@@ -123,7 +123,14 @@ export type ConversationRuntimeEvent = Readonly<{
      * would have before #252 existed, `code` is always
      * `"COMPACTION_UNSUPPORTED"`. Never a fault -- see the comment on
      * `ConversationRepository`'s compaction members above. */
-    | "compaction.unsupported";
+    | "compaction.unsupported"
+    /** Issue #520 (M16-S5, ADR 0005): a call already in flight was torn
+     * down by a steer-driven interrupt (`interruptSource`, `runTurn`'s own
+     * option) rather than by `signal` itself -- the turn absorbs this with
+     * `continue`, never `turn.failed`, so this is the only per-call trace
+     * of an interrupted request that a completed turn leaves. Fires once
+     * per interrupted call, immediately before that iteration's `continue`. */
+    | "model.request.interrupted";
   sessionId: string;
   code?: string;
   /** Present only on `session.compacted` events (issue #252). */
@@ -159,6 +166,16 @@ export interface ConversationTurnResult {
   readonly apiCalls: number;
   readonly sessionSummary: SessionSummary | null;
   readonly compaction?: CompactionSummary | null;
+  /** Issue #520 (M16-S5, ADR 0005): how many of this turn's own provider
+   * calls were torn down by a steer-driven interrupt and absorbed with
+   * `continue` -- present only when at least one was (never `0`, keeping
+   * every `ConversationTurnResult` fixture from before this issue
+   * byte-identical). `usageTotal` above already includes each one's
+   * ESTIMATED partial spend (`estimatePartialUsage`); this is only the
+   * COUNT, for `createChildRunner` (D3) to mark the resulting
+   * `CollectResult` `partial`/`usageUncertain` even though the turn itself
+   * completed normally. */
+  readonly partialCalls?: number;
 }
 
 export interface ExecutedToolCall {

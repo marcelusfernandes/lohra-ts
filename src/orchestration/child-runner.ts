@@ -124,6 +124,11 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
     systemPrompt: string,
     drainMessages: () => readonly Readonly<Record<string, unknown>>[],
     signal: AbortSignal,
+    // Issue #520 (M16-S5, ADR 0005): OrchestrationCore's own per-call
+    // interrupt hook, forwarded verbatim to the real turn loop's
+    // `interruptSource` below — this function never calls `arm`/the
+    // returned disarm itself, only threads the object through.
+    interrupts?: { readonly arm: (abort: () => void) => () => void },
   ): Promise<CollectResult> => {
     // ChildRunner's contract (see core.ts) is to always RESOLVE, never
     // reject — OrchestrationCore.runAndTrack has no .catch, so a rejection
@@ -199,6 +204,7 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
           drainMessages,
           effort,
           signal,
+          ...(interrupts === undefined ? {} : { interruptSource: interrupts }),
         });
         const content = result.response.content ?? "";
         // #429 (M10-S8): a turn that finishes with no final text AND no tool
@@ -208,7 +214,7 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
         // status/output are untouched (still "complete"/content) — the kind
         // only names, per the issue's decision 3 (aditivo, precedente #232).
         const isDeadTurn = content.trim() === "" && (result.toolCalls?.length ?? 0) === 0;
-        return zeroResult(
+        const completeResult = zeroResult(
           "complete",
           content,
           profile,
@@ -217,6 +223,17 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
           isDeadTurn ? "dead_turn" : null,
           null,
         );
+        // Issue #520 (D3, M16-S5, ADR 0005): a turn that COMPLETED still
+        // spent part of its usage on a call abandoned mid-stream (a steer
+        // interrupt the loop absorbed with `continue`, never surfaced as a
+        // failure) — `usageTotal` above already includes that ESTIMATED
+        // portion (`ConversationRuntime.runTurn`'s own accounting), so the
+        // result carries the same `partial`/forced `usageUncertain` markers
+        // a cancelled turn with a partial gets, never a silent "fully
+        // measured" claim.
+        return result.partialCalls !== undefined && result.partialCalls > 0
+          ? { ...completeResult, partial: true, usageUncertain: true }
+          : completeResult;
       } catch (error) {
         if (error instanceof ConversationCancelledError) {
           // #518 (M16-S3, ADR 0005): a cancellation that caught a call

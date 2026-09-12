@@ -399,7 +399,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Inject an extra instruction into a running sub-session by its 'sub_id'. If the sub-session is busy the text is queued and read before its next step; if idle it starts a new turn.",
+        "Inject an extra instruction into a running sub-session by its 'sub_id'. If the sub-session is busy the text is queued and read before its next step; if idle it starts a new turn. If a provider call is genuinely in flight right now, that call is interrupted immediately instead of being left to finish first — the response's 'interrupted' flag reports this, and the spent tokens are still counted (estimated).",
       parameters: {
         type: "object",
         properties: {
@@ -732,7 +732,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Steer a live workflow leaf: deliver an operator message to the node's leaf right now, without waiting for it to fail or ask a question. Name the leaf with EXACTLY ONE of node_id or sub_id — node_id resolves through the run's currently live leaves (never a finished one), and refuses if that node has more than one live leaf right now (a fan-out mid-flight): use sub_id (from workflow_audit's leaf.started events) to disambiguate. An unknown run_id, a node_id with no live leaf, or a sub_id that isn't a live leaf of this run all come back as a named error rather than a silent no-op. The message itself is never written to the audit ledger (workflow_audit only ever shows leaf.steered{source:'operator', message_chars}) — only its length is.",
+        "Steer a live workflow leaf: deliver an operator message to the node's leaf right now, without waiting for it to fail or ask a question. If the leaf has a provider call genuinely in flight, it is interrupted immediately instead of being left to run to completion (workflow_audit's leaf.steered{interrupted:true} reports this; the spent tokens are still counted, estimated) — otherwise the message is queued for the leaf's next step. Name the leaf with EXACTLY ONE of node_id or sub_id — node_id resolves through the run's currently live leaves (never a finished one), and refuses if that node has more than one live leaf right now (a fan-out mid-flight): use sub_id (from workflow_audit's leaf.started events) to disambiguate. An unknown run_id, a node_id with no live leaf, or a sub_id that isn't a live leaf of this run all come back as a named error rather than a silent no-op. The message itself is never written to the audit ledger (workflow_audit only ever shows leaf.steered{source:'operator', message_chars}) — only its length is.",
       parameters: {
         type: "object",
         properties: {
