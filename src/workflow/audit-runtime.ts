@@ -492,9 +492,10 @@ export function auditedChildRuntime(
         close(id, "leaf.failed", failedPayload(result));
       } else if (options.wait) {
         // `result.status` here can only be "running": the engine treats a
-        // `wait: true` collect that comes back "running" as a leaf timeout
-        // (`engine.ts:270-274`) and follows up with its own `cancel(id)` —
-        // already closed here, so that cancel is a no-op below.
+        // `wait: true` collect that comes back "running" as a leaf timeout —
+        // `collectLeaf`'s own `if (collected.status === "running")` branch
+        // (`engine.ts`) calls its own `cancel(id)` first, then records the
+        // fault — already closed here, so that cancel is a no-op below.
         close(id, "leaf.failed", {
           status: "interrupted",
           reason: "timeout",
