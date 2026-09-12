@@ -50,8 +50,10 @@ import {
   timeoutLeafResult,
   verifyPrompt,
 } from "./engine-utils.js";
+import { idleRunControl } from "./engine-options.js";
 import { topologicalOrder } from "./graph.js";
 import { ROUTE_FAULT_REASON, sealRunStatus, type RouteLesson } from "./route-faults.js";
+import { overrideNestedSpec } from "./route-override.js";
 import { gateCellParts, loopBodyCellParts, makeBodyLeafRunner } from "./leaf-options.js";
 import { MAX_GATE_ATTEMPTS, MAX_NODE_RETRIES } from "./nodes.js";
 import {
@@ -82,6 +84,7 @@ export class WorkflowEngine {
   private readonly nodeScope: readonly string[];
   private readonly pipelineTimeoutSeconds: number;
   private readonly tiers: TierMap;
+  private readonly routeOverride: WorkflowEngineOptions["routeOverride"];
   private readonly strategies = new Map<string, Strategy>();
   private readonly progressTracker = new ProgressTracker();
   private result = new RunResult();
@@ -97,12 +100,7 @@ export class WorkflowEngine {
     this.runtime = options.runtime;
     this.budget = options.budget ?? new Budget();
     this.pool = options.pool ?? new BoundedPool(this.budget.poolWidth);
-    this.control = options.control ?? {
-      cancelled: false,
-      paused: false,
-      pauseReason: null,
-      pausePayload: null,
-    };
+    this.control = options.control ?? idleRunControl();
     this.cache = options.cache ?? new MemoryWorkflowCache();
     this.loader = options.loader;
     this.runId = options.runId ?? randomUUID().replaceAll("-", "");
@@ -112,6 +110,7 @@ export class WorkflowEngine {
     this.checkpointAnswers = Object.freeze({ ...(options.checkpointAnswers ?? {}) });
     this.pipelineTimeoutSeconds = options.pipelineTimeoutSeconds ?? PIPELINE_TIMEOUT_SECONDS;
     this.tiers = options.tiers ?? {};
+    this.routeOverride = options.routeOverride;
     this.onEvent = options.onEvent;
     this.logError = options.logError ?? console.error;
     this.installStrategies();
@@ -838,8 +837,7 @@ export class WorkflowEngine {
     if (this.loader === undefined) throw new Error("workflow loader unavailable");
     const reference = strictResolve(node.fields.ref, context);
     if (typeof reference !== "string") return null;
-    const raw = await this.loader(reference);
-    const parsed = validateSpec(raw);
+    const parsed = validateSpec(await this.loader(reference));
     if (parsed instanceof ValidationError) {
       this.recordFault(`${node.id}: invalid nested workflow: ${parsed.message}`);
       return null;
@@ -862,7 +860,7 @@ export class WorkflowEngine {
       ...(this.onEvent === undefined ? {} : { onEvent: this.onEvent }),
       logError: this.logError,
     });
-    const result = await nested.run(parsed, args);
+    const result = await nested.run(overrideNestedSpec(parsed, this.routeOverride), args);
     this.result.nullCount += result.nullCount;
     this.result.nodesTotal += result.nodesTotal;
     this.result.tokensIn += result.tokensIn;

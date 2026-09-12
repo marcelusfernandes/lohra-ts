@@ -1,4 +1,4 @@
-import type { WorkflowEngineOptions, WorkflowLoader } from "./engine-contract.js";
+import type { RunControl, WorkflowEngineOptions, WorkflowLoader } from "./engine-contract.js";
 import type { ChildRuntime } from "./runtime.js";
 import type { RouteOverride } from "./route-override.js";
 import type { TierMap } from "./tiers.js";
@@ -48,4 +48,25 @@ export function engineBaseOptions(
     ...(loader === undefined ? {} : { loader }),
     ...(Object.keys(checkpointAnswers).length > 0 ? { checkpointAnswers } : {}),
   };
+}
+
+/** #452 (rodada 2, PR #472): a `routeOverride` spread, factored out so both
+ * `WorkflowEngine` construction sites in `service.ts` (`launch`,
+ * `launchDurable`) apply the SAME rule — NOT folded into
+ * `engineBaseOptions` itself, because the durable site's own
+ * `engineBaseOptions(...)` call is a mutation anchor
+ * (`scripts/mutations/workflow-durability-named.ts`, `ao/durable-…-tier-map`)
+ * whose literal text a 6th argument would change. `exactOptionalPropertyTypes`
+ * is why this can't be `{ routeOverride: routeOverride }` directly. */
+export function routeOverrideOption(
+  routeOverride: RouteOverride | undefined,
+): Pick<WorkflowEngineOptions, "routeOverride"> | Record<string, never> {
+  return routeOverride === undefined ? {} : { routeOverride };
+}
+
+/** #452: `WorkflowEngine`'s default `RunControl` (constructor, engine.ts) —
+ * pulled out so that zero-growth file keeps a one-line assignment instead of
+ * inlining the same idle shape at its one call site. */
+export function idleRunControl(): RunControl {
+  return { cancelled: false, paused: false, pauseReason: null, pausePayload: null };
 }

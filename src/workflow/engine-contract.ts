@@ -3,6 +3,7 @@ import type { Budget } from "./budget.js";
 import type { WorkflowCache } from "./cache.js";
 import type { WorkflowEngine } from "./engine.js";
 import type { BoundedPool } from "./pool.js";
+import type { RouteOverride } from "./route-override.js";
 import type { Awaitable, ChildRuntime } from "./runtime.js";
 import type { TierMap } from "./tiers.js";
 import type { Node } from "./types.js";
@@ -84,4 +85,8 @@ export interface WorkflowEngineOptions {
   readonly logError?: (...args: unknown[]) => void;
   readonly pool?: BoundedPool;
   readonly control?: RunControl;
+  /** #452: a resume's route pivot, applied to `runNested`'s freshly loaded
+   * template — a fresh `WorkflowEngine` per construction site, never
+   * mutated after the fact (CLAUDE.md: immutability). */
+  readonly routeOverride?: RouteOverride;
 }

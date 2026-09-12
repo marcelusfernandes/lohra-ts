@@ -8,6 +8,7 @@ import { SqliteWorkflowCache } from "./sqlite-cache.js";
 import type { WorkflowEvent, WorkflowLoader } from "./engine-contract.js";
 import {
   engineBaseOptions,
+  routeOverrideOption,
   type WorkflowLaunchOptions,
   type WorkflowLaunchOptionsWithTiers,
 } from "./engine-options.js";
@@ -403,11 +404,7 @@ export class WorkflowService {
     this.taintTracker = options.taintTracker ?? new TaintTracker();
     this.homeRoot = options.homeRoot ?? ".";
     this.fenceMemory = new FenceMemory(options.fenceMemory ?? FENCE_MEMORY);
-    this.warn =
-      options.onWarning ??
-      ((message) => {
-        console.warn(message);
-      });
+    this.warn = options.onWarning ?? console.warn;
     this.timerFactory = options.timerFactory ?? defaultServiceTimer;
     this.environment = options.environment ?? process.env;
     this.auditTrail = auditEnabled(this.environment, this.warn) ? options.auditTrail : undefined;
@@ -590,6 +587,7 @@ export class WorkflowService {
     const rt = auditedRuntimeFor(this.runtime, this.auditTrail, () => null, false, this.warn);
     const engine = new WorkflowEngine({
       ...engineBaseOptions(rt, runId, options.tiers, this.loader, options.checkpointAnswers ?? {}),
+      ...routeOverrideOption(options.routeOverride),
       segmentId,
       cache: this.cache,
       budget: new Budget({ tokenBudget: options.tokenBudget ?? null }),
@@ -783,6 +781,7 @@ export class WorkflowService {
     }
     const engine = new WorkflowEngine({
       ...engineBaseOptions(this.runtime, runId, options.tiers, this.loader, answers),
+      ...routeOverrideOption(options.routeOverride),
       runtime: rt,
       segmentId,
       budget: new Budget({

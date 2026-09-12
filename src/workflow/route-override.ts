@@ -2,9 +2,11 @@
 // above a node's own resolved routing (`routingOf`, engine-utils.ts) — but
 // it's written onto the SPEC's node fields BEFORE the engine ever runs,
 // never threaded through `routingOf`/`routingIdentity`'s call sites in
-// `engine.ts`/`engine-utils.ts` (zero change to either file, and to the
-// `hash-remove-routing` mutation anchor in
-// scripts/mutations/workflow-executor-mutants.ts). `routingOf` already
+// `engine.ts`/`engine-utils.ts` (no change to `routingOf`/`routingIdentity`
+// themselves, nor to the `hash-remove-routing` mutation anchor in
+// scripts/mutations/workflow-executor-mutants.ts — #452's `overrideNestedSpec`
+// below reuses this same rewrite for a template `runNested` only sees at
+// runtime, and costs `engine.ts` one swapped call, net zero lines). `routingOf` already
 // gives an explicit node.fields.provider/model precedence over the tier
 // map — writing the override directly onto those same fields, for every
 // node that DECLARES a route (the same four fields `routingIdentity`
@@ -105,6 +107,23 @@ export function applyRouteOverrideToSpec(
     nodes: spec.nodes.map((node) => overrideNode(node, override)),
     warnings: spec.warnings,
   });
+}
+
+/** #452: `runNested` (engine.ts) only sees a `workflow` node's `ref`
+ * template AFTER `this.loader` resolves it at runtime — #427's
+ * `pivotResume` already ran (and can only run) on the OUTER spec, before
+ * the engine starts, so a resumed run's pivot never reached a template
+ * loaded by reference. Same rewrite as `applyRouteOverrideToSpec`, called
+ * from `runNested` with the root engine's OWN `routeOverride` instead —
+ * `undefined` (a plain resume, or depth already > 0 where nothing is
+ * threaded, since `MAX_WORKFLOW_DEPTH` never lets a nested engine load
+ * ANOTHER template of its own) returns `spec` unchanged, by reference, so a
+ * template that never declares a route is never rebuilt. */
+export function overrideNestedSpec(
+  spec: WorkflowSpec,
+  routeOverride: RouteOverride | undefined,
+): WorkflowSpec {
+  return routeOverride === undefined ? spec : applyRouteOverrideToSpec(spec, routeOverride);
 }
 
 /** Pure merge semantic over an ALREADY-RESOLVED routing triple (`routingOf`,
