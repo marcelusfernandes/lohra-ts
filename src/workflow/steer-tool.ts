@@ -28,8 +28,16 @@
 // `auditedRuntimeFor`/`auditInstall` call: a new decorator instance mints
 // an empty `identities` map, and its `steer` silently skips the
 // `leaf.steered` event (audit-runtime.ts's fail-open-to-the-port branch)
-// even though the underlying `core.steer` still runs. `runtime.steer(subId,
-// message, causal, "operator")`'s 4th parameter is what makes S2's audit
+// even though the underlying `core.steer` still runs. Issue #477 (rewrite:
+// #450 changed the mechanism below, #445's review flagged the comment as
+// stale): delivery itself is `runtime.steerOutcome(subId, message, causal,
+// "operator")`, not `runtime.steer(...)` — `steer` stays real `void` (the
+// port's own declared type) and this tool never reads its return value.
+// `steerOutcome` is the typed member `AuditedChildRuntime` exposes ONLY
+// when the underlying runtime reports a real outcome (audit-runtime.ts's
+// conditional spread); absent means this runtime never reports an outcome
+// at all, a fail-closed named error below, never an invented `queued:
+// true`. The 4th argument, `"operator"`, is still what makes S2's audit
 // event carry `source: "operator"` instead of the engine's own default.
 //
 // S1's per-leaf cap (`MAX_PENDING_STEERS_PER_LEAF`, core.ts) IS observable
@@ -170,7 +178,24 @@ interface ReadBudget {
  * scoped to ONE event type per call, same as the original (pre-#445)
  * `scoped()` helper, so a busy leaf's OWN `tool.*`/`leaf.steered` traffic at
  * that node never counts against the ceiling meant for "how many leaves has
- * this node ever started/finished". */
+ * this node ever started/finished".
+ *
+ * Issue #477 (found reviewing #466): the budget check used to sit at the TOP
+ * of the loop, before issuing the query — so it fired on the FOLLOWING call
+ * (e.g. `leaf.completed` right after `leaf.started` alone consumed the
+ * shared budget down to exactly zero) even when that call had nothing left
+ * to read and needed no budget at all, reporting a false "window truncated"
+ * for a node whose live set was, in fact, complete. The check now runs
+ * per-event, right before each event would consume budget — a page with
+ * zero events (nothing to spend) can never trip it. The "no forward
+ * progress" guard below is now `truncated: true`: a page the ledger itself
+ * declared `has_more: true` but whose `next_after_seq` never advances is
+ * the caller's cue that continuing would spin without making progress —
+ * fail-closed, not "the window is complete" (unreachable against the real
+ * `AuditRepository`, whose `next_after_seq` always advances when `has_more`
+ * is true, but a bug class this tool must never trust silently). The same
+ * posture covers a `has_more: true` page with zero events: no id was read,
+ * so no progress was made either. */
 function pagedSubIds(
   audit: AuditRepository,
   runId: string,
@@ -181,16 +206,16 @@ function pagedSubIds(
   const ids: string[] = [];
   let afterSeq = 0;
   for (;;) {
-    if (budget.remaining <= 0) return { ids, truncated: true };
     const page = audit.query({ runId, nodeId, eventType, afterSeq, limit: MAX_LEAVES });
     for (const event of page.events) {
+      if (budget.remaining <= 0) return { ids, truncated: true };
       budget.remaining -= 1;
       const id = stringField(event.identity, "sub_id");
       if (id !== undefined) ids.push(id);
     }
     if (!hasMore(page.page)) return { ids, truncated: false };
     const next = nextAfterSeq(page.page, afterSeq);
-    if (next <= afterSeq) return { ids, truncated: false }; // defensive: no forward progress
+    if (next <= afterSeq || page.events.length === 0) return { ids, truncated: true }; // fail-closed: no forward progress
     afterSeq = next;
   }
 }

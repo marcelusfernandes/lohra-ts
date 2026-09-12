@@ -109,18 +109,6 @@ function fieldMarkerCounts(counts: ReadonlyMap<string, number>): Readonly<Record
   );
 }
 
-function matches(event: PublicAuditEvent, query: AuditQuery): boolean {
-  const identity = event.identity;
-  const nodePath = Array.isArray(identity.node_path) ? identity.node_path : [];
-  return (
-    (query.nodeId === undefined || nodePath.includes(query.nodeId)) &&
-    (query.eventType === undefined || event.event_type === query.eventType) &&
-    (query.subId === undefined || identity.sub_id === query.subId) &&
-    (query.segmentId === undefined || identity.segment_id === query.segmentId) &&
-    (query.attempt === undefined || identity.attempt === query.attempt)
-  );
-}
-
 function countStates(value: unknown, counts: Map<string, number>): void {
   if (Array.isArray(value)) {
     for (const item of value) countStates(item, counts);
@@ -319,6 +307,47 @@ export class AuditRepository {
     const after = Math.max(0, Math.trunc(query.afterSeq ?? 0));
     const requestedLimit = Math.trunc(query.limit ?? 50);
     const limit = Math.min(100, Math.max(1, requestedLimit));
+    // Issue #477: `node_id`/`event_type`/`sub_id`/`segment_id`/`attempt` are
+    // plain columns written verbatim at `append()` time (never re-derived
+    // from `payload_json`), so filtering on them in SQL is byte-for-byte the
+    // same test the old in-memory `matches()` (removed) used to run AFTER
+    // decoding every row of the run — `node_path` never holds more than one
+    // entry (`audit-model.ts`'s `publicAuditIdentity`), so `nodePath.includes`
+    // and `node_id = ?` agree. Combined with `seq > afterSeq AND seq <=
+    // snapshot` and `ORDER BY seq LIMIT limit+1`, this turns a paginated
+    // caller like `liveSubIdsAtNode` (steer-tool.ts) from "decode the WHOLE
+    // run's rows on every one of its N pages" into "decode at most
+    // `limit+1` rows per page". `notices`/`field_markers`/`event_markers`
+    // below stay a RUN-WIDE computation by contract
+    // (`tests/workflow-audit-tool.test.ts`'s pins,
+    // `tests/workflow-audit-live.test.ts`'s tampered-row case) — they still
+    // decode every row up to `snapshot` (`snapshotRows`), the same cost as
+    // before this issue; only the page's own decode cost dropped.
+    //
+    // One known, narrow divergence: a row whose `payload_json` is corrupted
+    // (DB-level tampering, not reachable through this repository's own
+    // writes) decodes to `event_type: "audit.unavailable"`
+    // (`parseEvent`'s catch branch) regardless of what its `event_type`
+    // column still holds. A query that filters by `eventType` now matches
+    // on the COLUMN, so such a row could appear in `events` under its
+    // original type instead of being silently dropped. Left as-is
+    // (fail-closed still applies — the row is still marked
+    // `audit.unavailable` wherever it is decoded) rather than adding a JS
+    // post-filter, which would desync `returned`/`has_more` from the SQL
+    // `LIMIT` that produced them.
+    const filterClauses: string[] = ["run_id = ?"];
+    const filterParams: (string | number)[] = [auditRunId];
+    const addFilter = (column: string, value: string | number | undefined): void => {
+      if (value === undefined) return;
+      filterClauses.push(`${column} = ?`);
+      filterParams.push(value);
+    };
+    addFilter("node_id", normalizedQuery.nodeId);
+    addFilter("event_type", normalizedQuery.eventType);
+    addFilter("sub_id", normalizedQuery.subId);
+    addFilter("segment_id", normalizedQuery.segmentId);
+    addFilter("attempt", normalizedQuery.attempt);
+    const filterClause = filterClauses.join(" AND ");
     const frozen = this.database
       .transaction(() => {
         const state = this.database
@@ -330,19 +359,28 @@ export class AuditRepository {
                 .prepare("SELECT * FROM workflow_audit_tombstones WHERE run_id = ?")
                 .get(auditRunId) as Readonly<Record<string, unknown>> | undefined)
             : undefined;
-        const rows = this.database
-          .prepare("SELECT * FROM workflow_audit_events WHERE run_id=? ORDER BY seq")
-          .all(auditRunId) as readonly Readonly<Record<string, unknown>>[];
-        return Object.freeze({ state, tombstone, rows });
+        const maxRow = this.database
+          .prepare("SELECT MAX(seq) AS value FROM workflow_audit_events WHERE run_id = ?")
+          .get(auditRunId) as Readonly<{ value: number | bigint | null }>;
+        const currentHigh = rowNumber(maxRow.value ?? 0);
+        const snapshot = Math.min(
+          currentHigh,
+          Math.max(0, Math.trunc(query.snapshotSeq ?? currentHigh)),
+        );
+        const pageRows = this.database
+          .prepare(
+            `SELECT * FROM workflow_audit_events WHERE ${filterClause} AND seq > ? AND seq <= ? ORDER BY seq LIMIT ?`,
+          )
+          .all(...filterParams, after, snapshot, limit + 1) as readonly Readonly<
+          Record<string, unknown>
+        >[];
+        const snapshotRows = this.database
+          .prepare("SELECT * FROM workflow_audit_events WHERE run_id = ? AND seq <= ? ORDER BY seq")
+          .all(auditRunId, snapshot) as readonly Readonly<Record<string, unknown>>[];
+        return Object.freeze({ state, tombstone, currentHigh, snapshot, pageRows, snapshotRows });
       })
       .deferred();
-    const { state, tombstone } = frozen;
-    const decoded = frozen.rows.map(parseEvent);
-    const currentHigh = decoded.reduce((high, event) => Math.max(high, event.seq), 0);
-    const snapshot = Math.min(
-      currentHigh,
-      Math.max(0, Math.trunc(query.snapshotSeq ?? currentHigh)),
-    );
+    const { state, tombstone, snapshot } = frozen;
     const filtersEnvelope = Object.freeze(
       Object.fromEntries(
         [
@@ -390,11 +428,10 @@ export class AuditRepository {
         }),
       });
     }
-    const snapshotEvents = decoded.filter((event) => event.seq <= snapshot);
-    const eligible = snapshotEvents.filter(
-      (event) => event.seq > after && matches(event, normalizedQuery),
-    );
-    const events = eligible.slice(0, limit);
+    const pageEvents = frozen.pageRows.map(parseEvent);
+    const hasMore = pageEvents.length > limit;
+    const events = pageEvents.slice(0, limit);
+    const snapshotEvents = frozen.snapshotRows.map(parseEvent);
     const notices: Readonly<Record<string, unknown>>[] = snapshotEvents.filter((event) =>
       MARKER_TYPES.has(event.event_type),
     );
@@ -435,7 +472,7 @@ export class AuditRepository {
     const returnedNotices = notices.slice(0, 20);
     return Object.freeze({
       run_id: auditRunId,
-      availability: state !== undefined || decoded.length > 0 ? "available" : "unavailable",
+      availability: state !== undefined || frozen.currentHigh > 0 ? "available" : "unavailable",
       filters: filtersEnvelope,
       events: Object.freeze(events),
       page: Object.freeze({
@@ -446,7 +483,7 @@ export class AuditRepository {
         limit_effective: limit,
         limit_clamped: requestedLimit !== limit,
         returned: events.length,
-        has_more: eligible.length > limit,
+        has_more: hasMore,
       }),
       policy: AUDIT_POLICY,
       integrity: Object.freeze({
@@ -458,7 +495,7 @@ export class AuditRepository {
         }),
         field_markers: fieldMarkerCounts(fieldCounts),
         refused_writes: this.refusals.get(auditRunId) ?? 0,
-        pagination_truncated: eligible.length > limit,
+        pagination_truncated: hasMore,
         notices: Object.freeze(returnedNotices),
         notices_total: notices.length,
         notices_returned: returnedNotices.length,

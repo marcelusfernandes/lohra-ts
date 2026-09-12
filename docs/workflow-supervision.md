@@ -32,19 +32,22 @@ disso, erro nomeado "window truncated" em vez de um falso "sem leaf vivo";
 imune ao teto; #445), ou **o runtime do run não expor `steerOutcome`**
 (todo `ChildRuntime` anterior a `OrchestrationChildRuntime`, ou um double
 de teste que só implementa `steer`; #450) voltam como erro nomeado, nunca um
-no-op silencioso (`src/workflow/steer-tool.ts:220-226,228-252,265-266,273,
-282-283`).
+no-op silencioso (`src/workflow/steer-tool.ts:245-251,253-277,307-308,310`).
+A janela de resolução (`pagedSubIds`) também falha fechado quando o próprio
+repositório devolve uma página que se diz incompleta (`has_more: true`) mas
+não avança `next_after_seq` — `truncated: true`, nunca "sem leaf vivo" para
+uma leitura que não terminou (#477).
 
 - **Teto por leaf**: `MAX_PENDING_STEERS_PER_LEAF = 10`
   (`src/orchestration/core.ts:26`) — acima disso, `core.steer` recusa com
   `refused: "steer_cap"` em vez de enfileirar mais um texto que o leaf talvez
   nunca leia (`core.ts:320-326`); `workflow_steer` traduz isso num erro
-  nomeado citando o teto (`steer-tool.ts:56,288`).
+  nomeado citando o teto (`steer-tool.ts:63,313`).
 - **A mensagem nunca vai ao ledger** — só o tamanho: `leaf.steered`
   (`docs/workflow-audit.md`) carrega `payload.message_chars`, nunca o texto
   (`audit-runtime.ts:344-353`, dentro de `deliverSteer`,
   `audit-runtime.ts:332-356`). `payload.source` é `"operator"` para todo
-  steer que passa por esta tool (`steer-tool.ts:285`, 4º argumento de
+  steer que passa por esta tool (`steer-tool.ts:310`, 4º argumento de
   `runtime.steerOutcome`) — distinto de `"engine"`, o steer interno de
   retry de schema (`engine.ts:296-312`). **`leaf.steered` só é gravado
   quando o core aceita o steer** (#444) — `queued: true` (enfileirado) ou
