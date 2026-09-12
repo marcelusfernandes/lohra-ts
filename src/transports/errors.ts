@@ -1,5 +1,9 @@
 import type { ErrorKind } from "./error-kinds.js";
-import type { NormalizedResponse, PartialStream } from "./types.js";
+import type { NormalizedResponse, PartialStream, StreamCallbacks, Usage } from "./types.js";
+
+function record(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+}
 
 const quotaCodes = new Set([
   "insufficient_quota",
@@ -58,21 +62,124 @@ export const emptyPartialStream: PartialStream = Object.freeze({
 });
 
 /** Reduces whatever a streaming client already reconstructed from the
- * partial SSE frames (via its own `NormalizedResponse` transport, which is
- * always exception-safe on incomplete/empty input) into the smaller
- * `PartialStream` shape a `StreamAbortedError` carries. `usage` is the
- * caller's to decide (only Anthropic's `message_start` counts, per
- * `PartialStream`'s contract) — this never guesses at it. */
+ * partial SSE frames (`normalized.reasoning`/`.toolCalls`, always
+ * exception-safe on incomplete input) into the smaller `PartialStream`
+ * shape a `StreamAbortedError` carries. `text`/`usage` are the caller's to
+ * decide — `text` because a client's own reconstruction (e.g. Responses'
+ * `output`) can require a "done" frame that never arrives before an abort,
+ * even though the delta already reached `onText`; `usage` because only
+ * Anthropic's `message_start` counts, per `PartialStream`'s contract. */
 export function partialFromNormalized(
   normalized: NormalizedResponse,
-  usage: PartialStream["usage"] = null,
+  overrides: { readonly text: string; readonly usage?: PartialStream["usage"] },
 ): PartialStream {
   return {
-    text: normalized.content ?? "",
+    text: overrides.text,
     reasoningChars: normalized.reasoning?.length ?? 0,
     toolArgumentChars: normalized.toolCalls.reduce((sum, call) => sum + call.arguments.length, 0),
-    usage,
+    usage: overrides.usage ?? null,
   };
+}
+
+/** Wraps `callbacks.onText` so a caller can recover exactly the text a
+ * partial replay already sent through it (`PartialStream.text`'s contract)
+ * without re-deriving it from whatever structure the client reconstructs —
+ * the original `onText` still fires, unchanged, for the real caller. */
+export function withTextTracking(callbacks: StreamCallbacks): {
+  readonly callbacks: StreamCallbacks;
+  readonly text: () => string;
+} {
+  const received: string[] = [];
+  return {
+    callbacks: {
+      ...callbacks,
+      onText: (text) => {
+        received.push(text);
+        callbacks.onText?.(text);
+      },
+    },
+    text: () => received.join(""),
+  };
+}
+
+/** A stream-truncation error carries whatever bytes arrived before the
+ * connection reset, so a streaming caller can replay the already-received
+ * deltas through its callbacks (contract-t11 assertion 49: "quebra de
+ * transporte após delta parcial emite o delta e depois response.failed")
+ * instead of discarding them along with the failed read. */
+export interface StreamTruncationError extends Error {
+  readonly partialBody?: Uint8Array;
+}
+
+export function hasPartialBody(
+  error: unknown,
+): error is (StreamTruncationError | StreamAbortedError) & { partialBody: Uint8Array } {
+  return (
+    error instanceof Error &&
+    "partialBody" in error &&
+    (error as StreamTruncationError).partialBody !== undefined
+  );
+}
+
+/** ADR 0005: rethrows a failed streaming request, replaying any partial SSE
+ * frames it carries through the caller's callbacks first (`buildPartial`).
+ * A plain `StreamTruncationError` (non-abort reset) keeps its "incomplete
+ * chunked read" identity (assertion 49); only a genuine `StreamAbortedError`
+ * gets rethrown with `partial` filled in. */
+export function rethrowAborted(
+  error: unknown,
+  buildPartial: (partialBody: Uint8Array) => PartialStream,
+): never {
+  if (!hasPartialBody(error)) throw error;
+  let partial: PartialStream = emptyPartialStream;
+  try {
+    partial = buildPartial(error.partialBody);
+  } catch {
+    // A dangling/incomplete trailing frame in the partial buffer — whatever
+    // DID parse cleanly was already replayed through the callbacks above.
+  }
+  if (error instanceof StreamAbortedError) {
+    throw new StreamAbortedError(partial, { partialBody: error.partialBody, cause: error.cause });
+  }
+  throw error;
+}
+
+function toNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/** The success-path replay loop for Anthropic's `content_block_delta`
+ * text deltas, reused verbatim for the partial-on-abort replay
+ * (`client.ts`'s `AnthropicMessagesClient.stream`). */
+export function replayAnthropicText(chunks: readonly unknown[], callbacks: StreamCallbacks): void {
+  for (const raw of chunks) {
+    const event = record(raw);
+    const delta = record(event.delta);
+    if (
+      event.type === "content_block_delta" &&
+      delta.type === "text_delta" &&
+      typeof delta.text === "string"
+    )
+      callbacks.onText?.(delta.text);
+  }
+}
+
+/** `PartialStream`'s contract: usage only when a usage-bearing frame arrived
+ * before the abort — today only Anthropic's `message_start`. */
+export function anthropicPartialUsage(chunks: readonly unknown[]): Usage | null {
+  for (const raw of chunks) {
+    const event = record(raw);
+    if (event.type !== "message_start") continue;
+    const usage = record(record(event.message).usage);
+    return {
+      inputTokens: toNumber(usage.input_tokens),
+      outputTokens: toNumber(usage.output_tokens),
+      cacheReadTokens: toNumber(usage.cache_read_input_tokens),
+      cacheWriteTokens: toNumber(usage.cache_creation_input_tokens),
+      reasoningTokens: 0,
+    };
+  }
+  return null;
 }
 
 export interface ProviderCallFailedOptions {

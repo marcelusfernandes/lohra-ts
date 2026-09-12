@@ -1,11 +1,19 @@
 import { assembleStreamedResponse } from "./stream.js";
 import {
   ProviderCallFailed,
+  StreamAbortedError,
+  anthropicPartialUsage,
   anthropicRetryPolicy,
   calculateRetryDelayMs,
+  emptyPartialStream,
   openAiRetryPolicy,
+  partialFromNormalized,
+  replayAnthropicText,
+  rethrowAborted,
   shouldRetryStatus,
+  withTextTracking,
   type RetryPolicy,
+  type StreamTruncationError,
 } from "./errors.js";
 import {
   parseJsonPreservingNumbers,
@@ -27,25 +35,6 @@ import type {
 
 const defaultTimeoutMs = 30_000;
 const defaultMaxBytes = 4_000_000;
-
-/** A stream-truncation error carries whatever bytes arrived before the
- * connection reset, so a streaming caller can replay the already-received
- * deltas through its callbacks (contract-t11 assertion 49: "quebra de
- * transporte após delta parcial emite o delta e depois response.failed")
- * instead of discarding them along with the failed read. */
-export interface StreamTruncationError extends Error {
-  readonly partialBody?: Uint8Array;
-}
-
-function hasPartialBody(
-  error: unknown,
-): error is StreamTruncationError & { partialBody: Uint8Array } {
-  return (
-    error instanceof Error &&
-    "partialBody" in error &&
-    (error as StreamTruncationError).partialBody !== undefined
-  );
-}
 
 /** A chunked response whose connection resets mid-body (not a graceful close
  * after the terminating chunk) surfaces as a bare "aborted"/ECONNRESET from
@@ -79,17 +68,7 @@ function describeResponseStreamError(
   return truncationError;
 }
 
-async function readBounded(response: Response, maxBytes: number): Promise<Uint8Array> {
-  if (response.body === null) return new Uint8Array();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for await (const value of response.body as unknown as AsyncIterable<Uint8Array>) {
-    size += value.byteLength;
-    if (size > maxBytes) {
-      throw new Error("RESPONSE_TOO_LARGE");
-    }
-    chunks.push(value);
-  }
+function concatChunks(chunks: readonly Uint8Array[], size: number): Uint8Array {
   const body = new Uint8Array(size);
   let offset = 0;
   for (const chunk of chunks) {
@@ -97,6 +76,51 @@ async function readBounded(response: Response, maxBytes: number): Promise<Uint8A
     offset += chunk.byteLength;
   }
   return body;
+}
+
+/** ADR 0005: `signal` is the CALLER's signal, not `post()`'s internal
+ * timeout controller — a timeout keeps its own distinct error; only a real
+ * caller abort throws `StreamAbortedError`. Cancelling the reader can make
+ * the pending `read()` resolve `{done:true}` (spec) or reject (real fetch
+ * body erroring from the abort) — the `catch` and the post-loop check both
+ * cover it. */
+async function readBounded(
+  response: Response,
+  maxBytes: number,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
+  if (response.body === null) return new Uint8Array();
+  const reader = (response.body as unknown as ReadableStream<Uint8Array>).getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  const cancelForAbort = (): void => {
+    void reader.cancel(signal?.reason).catch(() => undefined);
+  };
+  if (signal?.aborted === true) cancelForAbort();
+  else signal?.addEventListener("abort", cancelForAbort, { once: true });
+  const aborted = (): Error =>
+    new StreamAbortedError(emptyPartialStream, {
+      partialBody: concatChunks(chunks, size),
+      cause: signal?.reason,
+    });
+  try {
+    for (;;) {
+      const result = await reader.read();
+      if (result.done) break;
+      size += result.value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel(new Error("RESPONSE_TOO_LARGE")).catch(() => undefined);
+        throw new Error("RESPONSE_TOO_LARGE");
+      }
+      chunks.push(result.value);
+    }
+  } catch (error) {
+    throw signal?.aborted === true ? aborted() : error;
+  } finally {
+    signal?.removeEventListener("abort", cancelForAbort);
+  }
+  if (signal?.aborted === true) throw aborted();
+  return concatChunks(chunks, size);
 }
 
 export class NativeChatHttpPort implements ChatHttpPort {
@@ -124,7 +148,7 @@ export class NativeChatHttpPort implements ChatHttpPort {
       return {
         status: response.status,
         headers: response.headers,
-        body: await readBounded(response, request.maxBytes),
+        body: await readBounded(response, request.maxBytes, request.signal),
       };
     } finally {
       clearTimeout(timeout);
@@ -132,12 +156,36 @@ export class NativeChatHttpPort implements ChatHttpPort {
     }
   }
 
+  /** ADR 0005: `abortedByCaller` (set only by the `request.signal` listener,
+   * never the timeout) is the single point of truth `fail()` checks for
+   * both error exits — `response.on("error")`/`child.on("error")` used to
+   * race two independent rejections; now both funnel through it. */
   private async postNative(request: ChatHttpRequest): Promise<HttpResponseData> {
     const url = new URL(request.url);
     if (url.protocol !== "http:" && url.protocol !== "https:")
       throw new Error(`UNSUPPORTED_PROTOCOL:${url.protocol}`);
     const send = url.protocol === "https:" ? httpsRequest : httpRequest;
     return await new Promise<HttpResponseData>((resolve, reject) => {
+      let abortedByCaller = false;
+      const chunks: Buffer[] = [];
+      const fail = (error: unknown, headers?: NodeJS.Dict<string | string[]>): void => {
+        if (abortedByCaller) {
+          reject(
+            new StreamAbortedError(emptyPartialStream, {
+              partialBody: new Uint8Array(Buffer.concat(chunks)),
+              cause: request.signal?.reason,
+            }),
+          );
+          return;
+        }
+        reject(
+          headers === undefined
+            ? error instanceof Error
+              ? error
+              : new Error(String(error))
+            : describeResponseStreamError(error, headers, Buffer.concat(chunks)),
+        );
+      };
       const child = send(
         url,
         {
@@ -150,7 +198,6 @@ export class NativeChatHttpPort implements ChatHttpPort {
             reject(new Error("REDIRECT_NOT_ALLOWED"));
             return;
           }
-          const chunks: Buffer[] = [];
           let size = 0;
           response.on("data", (chunk: Buffer) => {
             size += chunk.byteLength;
@@ -161,7 +208,7 @@ export class NativeChatHttpPort implements ChatHttpPort {
             chunks.push(chunk);
           });
           response.on("error", (error: unknown) => {
-            reject(describeResponseStreamError(error, response.headers, Buffer.concat(chunks)));
+            fail(error, response.headers);
           });
           response.on("end", () => {
             const headers = new Headers();
@@ -181,6 +228,7 @@ export class NativeChatHttpPort implements ChatHttpPort {
         child.destroy(new Error("REQUEST_TIMEOUT"));
       });
       const abort = (): void => {
+        abortedByCaller = true;
         const reason: unknown = request.signal?.reason;
         child.destroy(reason instanceof Error ? reason : new Error("ABORTED"));
       };
@@ -189,7 +237,9 @@ export class NativeChatHttpPort implements ChatHttpPort {
       child.once("close", () => {
         request.signal?.removeEventListener("abort", abort);
       });
-      child.on("error", reject);
+      child.on("error", (error: unknown) => {
+        fail(error);
+      });
       child.end(request.body);
     });
   }
@@ -293,31 +343,28 @@ export class ChatCompletionsClient {
     return this.options.transport.normalizeResponse(parseJson(response.body));
   }
 
-  async stream(kwargs: ChatKwargs, callbacks: StreamCallbacks = {}): Promise<NormalizedResponse> {
+  async stream(
+    kwargs: ChatKwargs,
+    callbacks: StreamCallbacks = {},
+    signal?: AbortSignal,
+  ): Promise<NormalizedResponse> {
     const first = { ...kwargs, stream: true, stream_options: { include_usage: true } };
     let response: HttpResponseData;
     try {
       try {
-        response = await this.request(first);
+        response = await this.request(first, signal);
       } catch (error) {
         if (!String(error).includes("stream_options")) throw error;
-        response = await this.request({ ...kwargs, stream: true });
+        response = await this.request({ ...kwargs, stream: true }, signal);
       }
     } catch (error) {
-      // Assertion 49: a connection reset mid-body still discards the final
-      // turn (the caller's error path builds response.failed/an SSE error
-      // frame with no output), but whatever complete deltas DID arrive
-      // before the break must reach the caller's callbacks first — they
-      // are not still sitting in some buffer the caller could read later.
-      if (hasPartialBody(error)) {
-        try {
-          assembleStreamedResponse(parseSse(error.partialBody), callbacks);
-        } catch {
-          // A dangling/incomplete trailing frame in the partial buffer —
-          // whatever DID parse cleanly was already replayed above.
-        }
-      }
-      throw error;
+      rethrowAborted(error, (partialBody) => {
+        const tracked = withTextTracking(callbacks);
+        const raw = assembleStreamedResponse(parseSse(partialBody), tracked.callbacks);
+        return partialFromNormalized(this.options.transport.normalizeResponse(raw), {
+          text: tracked.text(),
+        });
+      });
     }
     return this.options.transport.normalizeResponse(
       assembleStreamedResponse(parseSse(response.body), callbacks),
@@ -469,19 +516,30 @@ export class AnthropicMessagesClient {
     );
   }
 
-  async stream(kwargs: ChatKwargs, callbacks: StreamCallbacks = {}): Promise<NormalizedResponse> {
-    const response = await this.request({ ...kwargs, stream: true });
-    const chunks = parseSse(response.body, parseJsonPreservingNumbers);
-    for (const raw of chunks) {
-      const event = record(raw);
-      const delta = record(event.delta);
-      if (
-        event.type === "content_block_delta" &&
-        delta.type === "text_delta" &&
-        typeof delta.text === "string"
-      )
-        callbacks.onText?.(delta.text);
+  async stream(
+    kwargs: ChatKwargs,
+    callbacks: StreamCallbacks = {},
+    signal?: AbortSignal,
+  ): Promise<NormalizedResponse> {
+    let response: HttpResponseData;
+    try {
+      response = await this.request({ ...kwargs, stream: true }, signal);
+    } catch (error) {
+      rethrowAborted(error, (partialBody) => {
+        const chunks = parseSse(partialBody, parseJsonPreservingNumbers);
+        const tracked = withTextTracking(callbacks);
+        replayAnthropicText(chunks, tracked.callbacks);
+        return partialFromNormalized(
+          this.options.transport.normalizeResponse(anthropicStream(chunks)),
+          {
+            text: tracked.text(),
+            usage: anthropicPartialUsage(chunks),
+          },
+        );
+      });
     }
+    const chunks = parseSse(response.body, parseJsonPreservingNumbers);
+    replayAnthropicText(chunks, callbacks);
     return this.options.transport.normalizeResponse(anthropicStream(chunks));
   }
 
@@ -574,26 +632,37 @@ export class ResponsesClient {
     signal?: AbortSignal,
   ): Promise<NormalizedResponse> {
     if (this.closed) throw new Error("CLIENT_CLOSED");
-    const response = await providerPost(
-      this.http,
-      {
-        url: `${this.options.baseUrl.replace(/\/$/u, "")}/responses`,
-        headers: {
-          authorization: `Bearer ${this.options.token}`,
-          originator: "codex_cli_rs",
-          ...(this.options.accountId ? { "ChatGPT-Account-ID": this.options.accountId } : {}),
-          ...(this.options.headers ?? {}),
-          accept: "text/event-stream",
-          "content-type": "application/json",
+    let response: HttpResponseData;
+    try {
+      response = await providerPost(
+        this.http,
+        {
+          url: `${this.options.baseUrl.replace(/\/$/u, "")}/responses`,
+          headers: {
+            authorization: `Bearer ${this.options.token}`,
+            originator: "codex_cli_rs",
+            ...(this.options.accountId ? { "ChatGPT-Account-ID": this.options.accountId } : {}),
+            ...(this.options.headers ?? {}),
+            accept: "text/event-stream",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ ...kwargs, stream: true }),
+          timeoutMs: this.timeoutMs,
+          maxBytes: this.maxResponseBytes,
+          ...(signal === undefined ? {} : { signal }),
         },
-        body: JSON.stringify({ ...kwargs, stream: true }),
-        timeoutMs: this.timeoutMs,
-        maxBytes: this.maxResponseBytes,
-        ...(signal === undefined ? {} : { signal }),
-      },
-      this.maxRetries,
-      openAiRetryPolicy,
-    );
+        this.maxRetries,
+        openAiRetryPolicy,
+      );
+    } catch (error) {
+      rethrowAborted(error, (partialBody) => {
+        const tracked = withTextTracking(callbacks);
+        const raw = responsesStream(parseSse(partialBody), tracked.callbacks);
+        return partialFromNormalized(this.options.transport.normalizeResponse(raw), {
+          text: tracked.text(),
+        });
+      });
+    }
     return this.options.transport.normalizeResponse(
       responsesStream(parseSse(response.body), callbacks),
     );

@@ -20,8 +20,8 @@ import {
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-const sse = (lines: readonly string[]): Uint8Array =>
-  encoder.encode(lines.map((line) => `${line}\n\n`).join(""));
+const sse = (frames: readonly unknown[]): Uint8Array =>
+  encoder.encode(frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join(""));
 
 /** A `ChatHttpPort` whose `post()` never settles on its own — it only
  * rejects once `request.signal` fires, with whatever error the caller
@@ -48,9 +48,9 @@ describe("stream() abort in flight (ADR 0005)", () => {
   it("ChatCompletionsClient.stream forwards signal, rejects with StreamAbortedError, and replays the partial text first", async () => {
     const { StreamAbortedError } = await import("../src/transports/index.js");
     const partialBody = sse([
-      JSON.stringify({
+      {
         choices: [{ index: 0, delta: { content: "parcial" }, finish_reason: null }],
-      }),
+      },
     ]);
     const port = new AbortOnlyPort(
       () =>
@@ -84,17 +84,17 @@ describe("stream() abort in flight (ADR 0005)", () => {
   it("AnthropicMessagesClient.stream forwards signal, replays partial text, and fills partial.usage from message_start", async () => {
     const { StreamAbortedError } = await import("../src/transports/index.js");
     const partialBody = sse([
-      JSON.stringify({ type: "message_start", message: { usage: { input_tokens: 5 } } }),
-      JSON.stringify({
+      { type: "message_start", message: { usage: { input_tokens: 5 } } },
+      {
         type: "content_block_start",
         index: 0,
         content_block: { type: "text", text: "" },
-      }),
-      JSON.stringify({
+      },
+      {
         type: "content_block_delta",
         index: 0,
         delta: { type: "text_delta", text: "parcial" },
-      }),
+      },
     ]);
     const port = new AbortOnlyPort(
       () =>
@@ -129,9 +129,7 @@ describe("stream() abort in flight (ADR 0005)", () => {
 
   it("ResponsesClient.stream forwards signal, replays partial text, and keeps partial.usage null (no message_start frame exists)", async () => {
     const { StreamAbortedError } = await import("../src/transports/index.js");
-    const partialBody = sse([
-      JSON.stringify({ type: "response.output_text.delta", delta: "parcial" }),
-    ]);
+    const partialBody = sse([{ type: "response.output_text.delta", delta: "parcial" }]);
     const port = new AbortOnlyPort(
       () =>
         new StreamAbortedError(
@@ -266,9 +264,7 @@ describe("stream() without an abort stays byte-identical (contra-assertion)", ()
   }
 
   it("ChatCompletionsClient.stream(kwargs, callbacks) with 2 arguments still works and normalizes the same", async () => {
-    const body = sse([
-      JSON.stringify({ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }),
-    ]);
+    const body = sse([{ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }]);
     const client = new ChatCompletionsClient({
       baseUrl: "http://127.0.0.1:9",
       apiKey: "k",
@@ -283,12 +279,17 @@ describe("stream() without an abort stays byte-identical (contra-assertion)", ()
 
   it("AnthropicMessagesClient.stream with a never-aborted signal normalizes the same as no signal at all", async () => {
     const body = sse([
-      JSON.stringify({
+      {
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "text", text: "" },
+      },
+      {
         type: "content_block_delta",
         index: 0,
         delta: { type: "text_delta", text: "ok" },
-      }),
-      JSON.stringify({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: {} }),
+      },
+      { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: {} },
     ]);
     const client = new AnthropicMessagesClient({
       baseUrl: "http://127.0.0.1:9",
@@ -304,10 +305,10 @@ describe("stream() without an abort stays byte-identical (contra-assertion)", ()
 
   it("ResponsesClient.stream with a never-aborted signal normalizes the same as before", async () => {
     const body = sse([
-      JSON.stringify({
+      {
         type: "response.completed",
         response: { status: "completed", output: [], usage: {} },
-      }),
+      },
     ]);
     const client = new ResponsesClient({
       baseUrl: "http://127.0.0.1:9",
