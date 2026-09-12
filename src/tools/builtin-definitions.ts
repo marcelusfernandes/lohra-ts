@@ -242,7 +242,8 @@ export const BUILTIN_DEFINITIONS = [
           },
           resume_id: {
             type: "string",
-            description: "A sub_id from a prior delegate_task, to continue that subagent.",
+            description:
+              "A sub_id from a prior delegate_task, to continue that subagent. Omit it (or leave it empty) for a normal new-task batch — an empty string is treated the same as not passing it at all.",
           },
           model: {
             type: "string",

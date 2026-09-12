@@ -20,8 +20,9 @@ export function crossProcessSpec(): Record<string, unknown> {
   };
 }
 
-/** A `ChildRunner`-shaped `CollectResult` (`orchestration/core.ts`) for a
- * leaf that completes cleanly with a non-empty output — `cachePut` (engine.ts
+/** A `ChildRunner`-shaped `CollectResult` (`orchestration/core.ts`, 11
+ * required fields plus the optional `usageUncertain`) for a leaf that
+ * completes cleanly with a non-empty output — `cachePut` (engine.ts
  * `runAgent`) skips empty output, so this must never be `""`. */
 export function completeResult(output: string): {
   readonly status: "complete";
@@ -33,7 +34,6 @@ export function completeResult(output: string): {
   readonly reasoningTokens: number;
   readonly provider: string;
   readonly model: string;
-  readonly forcedFallback: false;
   readonly errorKind: null;
   readonly retryAfter: null;
 } {
@@ -47,7 +47,6 @@ export function completeResult(output: string): {
     reasoningTokens: 0,
     provider: "test",
     model: "test-model",
-    forcedFallback: false,
     errorKind: null,
     retryAfter: null,
   };

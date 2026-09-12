@@ -70,6 +70,23 @@ export function validateDelegateTasks(args: ToolArguments): DelegateTasks | stri
 }
 
 /**
+ * #500: an empty or whitespace-only `resume_id` is not a subagent id — it
+ * counts as absence, same "empty string = no filter" convention as
+ * `workflow_audit`. This is the single normalization point: both
+ * `delegateTaskTool`'s own `resume_id !== undefined` check (tools.ts) and
+ * `validateResumeOverrides`/`validateResumeTasks` below must see the SAME
+ * normalized args, so callers apply this once, before either guard, rather
+ * than each guard re-deriving "is this really a resume" on its own.
+ */
+export function normalizeResumeId(args: ToolArguments): ToolArguments {
+  const { resume_id } = args;
+  if (typeof resume_id === "string" && resume_id.trim().length === 0) {
+    return { ...args, resume_id: undefined };
+  }
+  return args;
+}
+
+/**
  * L18: three distinct semantics under resume_id, none derivable from the
  * others — provider recused by truthiness ("" escapes and passes),
  * max_iterations refused by key presence (null included), model/effort
