@@ -169,17 +169,20 @@ describe("assertNoNativeCompileNeeded", () => {
 // tarball nem via rede (`scripts/prebuild.js` do próprio pacote só confere
 // se `prebuilds/<platform>-<arch>` já existe localmente; nunca baixa nada).
 // Investigação (`npm pack node-pty@<v> --pack-destination <mkdtemp>` +
-// listagem de `prebuilds/` no tarball) mostrou que `linux-x64`/`linux-arm64`
-// só aparecem a partir de `1.2.0-beta.8` (nenhuma versão estável ≥1.1.0 os
-// publica) e continuam presentes em `1.2.0-beta.15`, a mais recente
-// disponível — daí o pin exato. A API usada por `src/tools/terminal.ts`
-// (`spawn`/`onData`/`onExit`/`kill`) é idêntica entre `1.1.0` e
-// `1.2.0-beta.15` (typings/node-pty.d.ts, comparação manual). Este teste
-// prende a versão pinada — não a resolução do npm — para uma reversão futura
-// para `1.1.0` (ou qualquer versão sem prebuild Linux) reprovar aqui antes de
-// `npm run pack:check` gastar tempo compilando.
+// listagem de `prebuilds/` no tarball, candidatas inspecionadas: `1.1.0`,
+// `1.2.0-beta.1`, `1.2.0-beta.8`, `1.2.0-beta.15`) mostrou
+// `linux-x64`/`linux-arm64` ausentes em `1.1.0` e `1.2.0-beta.1`, presentes
+// em `1.2.0-beta.8` e em `1.2.0-beta.15` — a mais recente disponível hoje e a
+// escolhida para o pin (nenhuma versão estável ≥1.1.0 publica prebuild
+// Linux; não houve bisseção entre `beta.2` e `beta.7`). A API usada por
+// `src/tools/terminal.ts` (`spawn`/`onData`/`onExit`/`kill`) é idêntica
+// entre `1.1.0` e `1.2.0-beta.15` (typings/node-pty.d.ts, comparação
+// manual). Este teste prende a versão pinada — não a resolução do npm —
+// para uma reversão futura para `1.1.0` (ou qualquer versão sem prebuild
+// Linux) reprovar aqui antes de `npm run pack:check` gastar tempo
+// compilando.
 describe("pin de node-pty (prebuilds Linux)", () => {
-  it("dependencies.node-pty é 1.2.0-beta.15 — primeira versão com prebuilds linux-x64/linux-arm64", () => {
+  it("dependencies.node-pty é 1.2.0-beta.15 (última candidata inspecionada com prebuilds linux-x64/linux-arm64)", () => {
     const manifest = JSON.parse(readFileSync("package.json", "utf8")) as {
       dependencies?: Record<string, unknown>;
     };

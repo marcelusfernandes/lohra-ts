@@ -1,12 +1,14 @@
 // Issue #549: decisão (a) — node-pty@1.1.0 (pin anterior) só publica
 // prebuilds darwin-*/win32-*, nunca linux-*; a instalação em Linux sempre
 // caía no fallback `node-gyp rebuild`. `npm view node-pty@<v> dist.tarball` +
-// `npm pack node-pty@<v> --pack-destination <mkdtemp>` (investigação na PR)
-// mostrou que `linux-x64`/`linux-arm64` só aparecem a partir de
-// `1.2.0-beta.8` — nenhuma versão estável ≥1.1.0 os publica — e continuam em
-// `1.2.0-beta.15`, a mais recente disponível, daí o pin exato. A API usada
-// por `src/tools/terminal.ts` (`spawn`/`onData`/`onExit`/`kill`) é idêntica
-// entre as duas versões (typings/node-pty.d.ts, comparação manual).
+// `npm pack node-pty@<v> --pack-destination <mkdtemp>` (investigação na PR;
+// candidatas inspecionadas: `1.1.0`, `1.2.0-beta.1`, `1.2.0-beta.8`,
+// `1.2.0-beta.15` — sem bisseção entre `beta.2` e `beta.7`) mostrou
+// `linux-x64`/`linux-arm64` ausentes em `1.1.0`/`1.2.0-beta.1` e presentes em
+// `1.2.0-beta.8`/`1.2.0-beta.15` — a mais recente disponível hoje, escolhida
+// para o pin. Nenhuma versão estável ≥1.1.0 publica prebuild Linux. A API
+// usada por `src/tools/terminal.ts` (`spawn`/`onData`/`onExit`/`kill`) é
+// idêntica entre as duas versões (typings/node-pty.d.ts, comparação manual).
 //
 // `tests/pack-check.test.ts` prende o pin exato (reversão futura para
 // qualquer versão sem prebuild Linux reprova aqui, sem gastar tempo com
