@@ -257,7 +257,7 @@ describe("workflow audit — leaf.steered (#423)", () => {
   });
 
   it("a steer on an id the decorator never opened still delegates, with no audit event", async () => {
-    const { audit, deps, close } = directHarness();
+    const { audit, trail, deps, close } = directHarness();
     try {
       let delegated: readonly [string, string] | null = null;
       const inner: ChildRuntime = withMinimalLeafSandbox({
@@ -271,6 +271,19 @@ describe("workflow audit — leaf.steered (#423)", () => {
       const runtime = auditedChildRuntime(inner, deps);
       await runtime.steer("never-opened", "hello", CAUSAL, "operator");
       expect(delegated).toEqual(["never-opened", "hello"]);
+      // #502 (non_blocking 1, PR #488): flush BEFORE the query — same
+      // posture as #476's steer_cap/null cases below. Verified by hand: a
+      // planted regression that records unconditionally inside
+      // `deliverSteer`'s `innerSteerOutcome === undefined` branch (the path
+      // this `inner` actually takes — it has no `steerOutcome`) fails THIS
+      // assertion whether or not the flush is present, because `AuditTrail`
+      // schedules its drain on a bare `Promise.resolve().then(...)`
+      // microtask and the `await`s already unwound above happen to give it
+      // enough turns. The flush is not what makes this oracle fail — it
+      // makes the oracle's result independent of that drain-timing
+      // coincidence, so a future change to how many turns unwind before
+      // this line can't silently make the assertion pass vacuously again.
+      await trail.flush();
       const page = audit.query({ runId: CAUSAL.runId, limit: 50 });
       expect(page.events.filter((event) => event.event_type === "leaf.steered")).toHaveLength(0);
     } finally {
@@ -347,7 +360,7 @@ describe("workflow audit — leaf.steered (#423)", () => {
     // invent a fact this decorator has no proof of; a caller with a real
     // outcome to report already returns an object (`{queued: ...}`), never
     // relies on this fallback.
-    const { audit, deps, close } = directHarness();
+    const { audit, trail, deps, close } = directHarness();
     try {
       const inner: ChildRuntime = withMinimalLeafSandbox({
         spawn: (): string => "leaf-1",
@@ -358,6 +371,11 @@ describe("workflow audit — leaf.steered (#423)", () => {
       const runtime = auditedChildRuntime(inner, deps);
       await runtime.spawn({ prompt: "one", causalContext: CAUSAL });
       await runtime.steer("leaf-1", "hello", CAUSAL, "operator");
+      // #502 (non_blocking 1, PR #488): same flush-before-query posture as
+      // the two cases above — makes the oracle independent of
+      // `AuditTrail`'s drain-microtask timing rather than relying on it
+      // (see that comment for the mutation this was verified against).
+      await trail.flush();
       const page = audit.query({ runId: CAUSAL.runId, limit: 50 });
       expect(page.events.filter((event) => event.event_type === "leaf.steered")).toHaveLength(0);
     } finally {

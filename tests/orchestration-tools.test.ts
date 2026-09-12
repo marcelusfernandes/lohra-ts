@@ -333,6 +333,52 @@ describe("collectSessionTool", () => {
       toolError("collect_session requires a 'sub_id'"),
     );
   });
+
+  // #502 (non_blocking 5, PR #496): the "pending" envelope (`wait:false`,
+  // never settled) at `tools.ts:140-153` had no pin at all — the comment
+  // right there says as much ("NOT measured anywhere in the baseline
+  // evidence"). This does not turn it into a verified oracle against the
+  // Python original (still not measured); it only prevents a REGRESSION on
+  // the shape this repository has already chosen: same 12-key order as the
+  // settled envelope, `status: "running"`, every numeric field `0`, every
+  // nullable field `null`, `usage_uncertain: false`.
+  it("returns a named 'running' placeholder envelope for a poll that has not settled yet (wait:false) — #502", async () => {
+    const core = makeCore(() => new Promise<CollectResult>(() => undefined));
+    await spawnSessionTool(core, allowAllProviders, { prompt: "x" });
+    const envelope = await collectSessionTool(core, { sub_id: "aaaa", wait: false });
+    const parsed = JSON.parse(envelope) as Readonly<Record<string, unknown>>;
+    expect(Object.keys(parsed)).toEqual([
+      "ok",
+      "status",
+      "output",
+      "tokens_in",
+      "tokens_out",
+      "cache_read_tokens",
+      "cache_write_tokens",
+      "reasoning_tokens",
+      "provider",
+      "model",
+      "error_kind",
+      "retry_after",
+      "usage_uncertain",
+    ]);
+    expect(envelope).toBe(
+      toolResult(undefined, {
+        status: "running",
+        output: "",
+        tokens_in: 0,
+        tokens_out: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        reasoning_tokens: 0,
+        provider: null,
+        model: null,
+        error_kind: null,
+        retry_after: null,
+        usage_uncertain: false,
+      }),
+    );
+  });
 });
 
 describe("delegateTaskTool", () => {
