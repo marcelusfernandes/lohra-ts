@@ -56,6 +56,11 @@ const templates = "src/workflow/templates.ts";
 const cachePreviewFocus = "tests/workflow-cache-preview.test.ts";
 const cachePreviewWritesFocus = "tests/workflow-cache-preview-writes.test.ts";
 const templatesFocus = "tests/workflow-templates.test.ts";
+const transportsClient = "src/transports/client.ts";
+const orchestrationRuntime = "src/workflow/orchestration-runtime.ts";
+const abortInFlightFocus = "tests/transports-abort-in-flight.test.ts";
+const childRunnerAbortFocus = "tests/orchestration-child-runner-abort.test.ts";
+const workflowAbortInFlightFocus = "tests/workflow-abort-in-flight.test.ts";
 
 export const supervisionMutants: readonly Mutant[] = [
   // --- steer-tool.ts (#424, #445, #450) -----------------------------------
@@ -679,6 +684,64 @@ export const supervisionMutants: readonly Mutant[] = [
         before:
           '  if (\n    node.type === "parallel" &&\n    Object.hasOwn(outputs, node.id) &&\n    Array.isArray(output) &&\n    output.length === 0\n  ) {',
         after: '  if (node.type === "parallel" && Object.hasOwn(outputs, node.id)) {',
+      },
+    ],
+  },
+  // --- abort em voo (M16, épico #490, issue #519) -------------------------
+  // Issue #519 (M16-S4, última sub-issue da milestone): S1-S3/S5/S6 já
+  // mergearam o caminho de abort em voo (ADR 0005) sem nenhum mutante
+  // cobrindo `stream()`'s própria propagação de `signal`, a reclassificação
+  // de `error.partialUsage` em `child-runner.ts`, e o teto de espera de
+  // `OrchestrationChildRuntime.cancel`.
+  {
+    id: "N1-anthropic-stream-signal-ignored",
+    category: "anthropic-stream-signal-ignored",
+    mechanism: "family-a",
+    focus: {
+      file: abortInFlightFocus,
+      test: "AnthropicMessagesClient.stream forwards signal, replays partial text, and fills partial.usage from message_start",
+    },
+    edits: [
+      {
+        file: transportsClient,
+        before:
+          "    let response: HttpResponseData;\n    try {\n      response = await this.request({ ...kwargs, stream: true }, signal);\n    } catch (error) {\n      rethrowAborted(error, (partialBody) => {\n        const chunks = parseSse(partialBody, parseJsonPreservingNumbers);",
+        after:
+          "    let response: HttpResponseData;\n    try {\n      response = await this.request({ ...kwargs, stream: true });\n    } catch (error) {\n      rethrowAborted(error, (partialBody) => {\n        const chunks = parseSse(partialBody, parseJsonPreservingNumbers);",
+      },
+    ],
+  },
+  {
+    id: "N2-cancelled-leaf-usage-dropped",
+    category: "cancelled-leaf-usage-dropped",
+    mechanism: "family-a",
+    focus: {
+      file: childRunnerAbortFocus,
+      test: "a stream torn down mid-flight resolves interrupted/cancelled with an estimated partial usage, never a bare zero",
+    },
+    edits: [
+      {
+        file: childRunner,
+        before:
+          '            ...zeroResult("interrupted", "", profile, model, error.partialUsage, "cancelled", null),',
+        after:
+          '            ...zeroResult("interrupted", "", profile, model, null, "cancelled", null),',
+      },
+    ],
+  },
+  {
+    id: "N3-cancel-settle-ceiling-zero",
+    category: "cancel-settle-ceiling-zero",
+    mechanism: "family-a",
+    focus: {
+      file: workflowAbortInFlightFocus,
+      test: "resolves once the leaf actually settles and writes the real partial usage, never the bare placeholder",
+    },
+    edits: [
+      {
+        file: orchestrationRuntime,
+        before: "export const CANCEL_SETTLE_TIMEOUT_MS = 2_000;",
+        after: "export const CANCEL_SETTLE_TIMEOUT_MS = 0;",
       },
     ],
   },

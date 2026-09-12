@@ -482,4 +482,41 @@ export const auditProducersMutants: readonly Mutant[] = [
       },
     ],
   },
+  // --- abort em voo (M16, épico #490, issue #519) -------------------------
+  // Issue #519 (M16-S4): #517/#518 gave `leaf.failed` its own `partial` and
+  // `error_kind: "cancelled"` markers — neither had a mutant covering the
+  // sanitizer that would silently drop them again.
+  {
+    id: "B1-partial-dropped-from-boolean-fields",
+    category: "partial-dropped-from-boolean-fields",
+    mechanism: "family-a",
+    focus: {
+      file: allowListFocus,
+      test: "preserves a leaf.failed partial:true — never dropped by the sanitizer",
+    },
+    edits: [
+      {
+        file: auditModel,
+        before: '  "usage_uncertain",\n  "partial",',
+        after: '  "usage_uncertain",',
+      },
+    ],
+  },
+  {
+    id: "B2-cancel-error-kind-dropped",
+    category: "cancel-error-kind-dropped",
+    mechanism: "family-a",
+    focus: {
+      file: leafFocus,
+      test: "cancel(): a leaf still open when the run is cancelled is recorded once as leaf.failed cancelled",
+    },
+    edits: [
+      {
+        file: auditRuntime,
+        before:
+          '      status: "cancelled",\n      error_kind: "cancelled",\n      ...(reason === undefined ? {} : { reason }),',
+        after: '      status: "cancelled",\n      ...(reason === undefined ? {} : { reason }),',
+      },
+    ],
+  },
 ];
