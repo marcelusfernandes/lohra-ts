@@ -136,7 +136,9 @@
       "tests/workflow-route-override.test.ts",
       "tests/workflow-route-override-nested.test.ts",
       "tests/orchestration-delegate-envelope.test.ts",
-      "tests/transport-error-kinds.test.ts"
+      "tests/transport-error-kinds.test.ts",
+      "tests/workflow-cache-preview.test.ts",
+      "tests/workflow-templates.test.ts"
     ]
   }
 ]
