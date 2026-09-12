@@ -343,6 +343,7 @@ describe("ehArquivoDocsOuProcess / deveSerIgnorado", () => {
   });
 
   it("SKIP quando o diff é só lefthook.yml (issue #555)", () => {
+    expect(deveSerIgnorado(["lefthook.yml"])).toBe(true);
     expect(deveSerIgnorado(["lefthook.yml", ".claude/x"])).toBe(true);
   });
 
