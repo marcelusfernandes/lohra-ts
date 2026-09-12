@@ -1,7 +1,18 @@
+import { posix } from "node:path";
 import { combineUsage, usage } from "../pricing/usage.js";
 import type { Usage } from "../pricing/types.js";
 import type { ErrorKind } from "../transports/error-kinds.js";
 import type { ChildResult } from "./runtime.js";
+
+/** #485: comparison-only normalization (never `resolve` — a leaf's `path` is
+ * relative to its own working root, an absolute-looking one is still just a
+ * string here) so `./x` and `x` are recognized as the same file. The
+ * RECORDED `path` (`RunArtifact.path` below) is always the raw string the
+ * tool call received — this function never touches storage, only the
+ * de-dup/collision comparisons that read it. */
+function normalizedArtifactPath(raw: string): string {
+  return posix.normalize(raw);
+}
 
 export type RunStatus = "complete" | "degraded" | "failed" | "cancelled" | "paused";
 
@@ -84,6 +95,13 @@ export class RunResult {
    * cap"` — molded on `sandboxFaults`: kept OUT of `faults` so a collision
    * alone never flips `status` (doctrine #248, decision 6 of épico #458). */
   readonly artifactFaults: string[] = [];
+  /** #485: normalized paths (`normalizedArtifactPath`) already reported as
+   * colliding — de-dup only, never serialized/exposed (not part of
+   * `pausePayloadOf`/`durableRollup`/any other payload). Keeps a repeated
+   * path — the same leaf's own batch, or a later stretch revisiting one a
+   * prior stretch already flagged — from pushing more than one advisory
+   * fault for it. */
+  readonly artifactCollisionPaths: Set<string> = new Set();
   /** The `ErrorKind` of each provider-classified leaf failure — a typed
    * subset of `faults` (#399), never parsed out of its message text: many
    * `faults` entries (timeout, empty output, schema mismatch, engine fault,
@@ -149,10 +167,12 @@ export function recordSandboxRefusals(result: RunResult, nodeId: string, refusal
  * `debitLeaf` call site `recordSandboxRefusals` above already occupies
  * (engine-utils.ts:485, a swap, not an add) — so every accounted leaf's
  * artifacts land here exactly once. A path already owned by a DIFFERENT
- * `subId` fires the collision fault exactly once (the second distinct
- * writer trips it; a third, or the SAME leaf writing the path again, never
- * adds another) — advisory only, `faults`/`status` never see it (doctrine
- * #248, decision 6 of épico #458). */
+ * `subId` fires the collision fault — de-duped by `artifactCollisionPaths`
+ * (#485) so the SAME leaf's own batch naming a path twice (after another
+ * leaf already owns it) never pushes a second advisory for it — advisory
+ * only, `faults`/`status` never see it (doctrine #248, decision 6 of épico
+ * #458). Paths compare `normalizedArtifactPath` (#485: `./x` and `x` are the
+ * same file), but `RunArtifact.path` always keeps the raw string. */
 export function recordLeafSideChannels(
   result: RunResult,
   nodeId: string,
@@ -161,11 +181,15 @@ export function recordLeafSideChannels(
 ): void {
   recordSandboxRefusals(result, nodeId, collected.sandboxRefusals ?? 0);
   for (const artifact of collected.artifacts ?? []) {
+    const key = normalizedArtifactPath(artifact.path);
     const otherOwners = new Set(
-      result.artifacts.filter((entry) => entry.path === artifact.path).map((entry) => entry.sub_id),
+      result.artifacts
+        .filter((entry) => normalizedArtifactPath(entry.path) === key)
+        .map((entry) => entry.sub_id),
     );
     otherOwners.delete(subId);
-    if (otherOwners.size === 1) {
+    if (otherOwners.size === 1 && !result.artifactCollisionPaths.has(key)) {
+      result.artifactCollisionPaths.add(key);
       result.artifactFaults.push(`${nodeId}: artifact path written by 2 leaves: ${artifact.path}`);
     }
     result.artifacts.push({
@@ -179,6 +203,37 @@ export function recordLeafSideChannels(
   if (dropped > 0) {
     result.artifactFaults.push(
       `${nodeId}: ${String(dropped)} artifact records dropped past the cap`,
+    );
+  }
+}
+
+/** #485: `recordLeafSideChannels` above only ever compares a leaf's own
+ * write against artifacts THIS stretch's own leaves already produced — a
+ * resume starts a brand-new `RunResult` with an empty `artifacts` list, so a
+ * stretch 2 leaf writing a path a stretch 1 leaf already owned went
+ * undetected. Called once, from `pausePayloadOf` (route-override.ts), right
+ * after a stretch's engine run settles, against the prior stretches' own
+ * accumulated `artifacts`. Never compares `sub_id`: unlike
+ * `recordLeafSideChannels` (where the SAME leaf naming a path twice must
+ * never collide with itself), the stretch boundary itself is proof these are
+ * two separate executions — even a plain, uncached node re-running on resume
+ * and rewriting its OWN prior path counts (#248 doctrine: any two distinct
+ * leaf executions racing the same path are advisory-worthy). Same de-dup set
+ * as `recordLeafSideChannels`, so a path already flagged never fires twice. */
+export function recordCrossStretchArtifactCollisions(
+  result: RunResult,
+  priorArtifacts: readonly RunArtifact[],
+): void {
+  if (priorArtifacts.length === 0) return;
+  const priorPaths = new Set(
+    priorArtifacts.map((artifact) => normalizedArtifactPath(artifact.path)),
+  );
+  for (const artifact of result.artifacts) {
+    const key = normalizedArtifactPath(artifact.path);
+    if (!priorPaths.has(key) || result.artifactCollisionPaths.has(key)) continue;
+    result.artifactCollisionPaths.add(key);
+    result.artifactFaults.push(
+      `${artifact.node_id}: artifact path written by 2 leaves: ${artifact.path}`,
     );
   }
 }

@@ -551,3 +551,188 @@ describe("write-file manifest — durable: survives resume (#463)", () => {
     close();
   });
 });
+
+// Issue #485 (M15, veredito da PR #483): four gaps `recordLeafSideChannels`
+// (accounting.ts) left open — a repeated path in a leaf's own batch double-
+// pushed the advisory, stretch 1's own collision vanished from BOTH the live
+// `faults` and `durableRollup.artifact_faults` once a resume built a fresh
+// `RunResult`, a stretch 2 leaf racing a stretch 1 leaf's path went
+// undetected (a fresh `RunResult` starts with an empty `artifacts` list),
+// and `./x`/`x` were treated as different files.
+
+/** A `parallel` node whose branches BOTH write the SAME path — one advisory
+ * collision, attributed to the node itself ("p"), same shape the base
+ * (#463) tests already exercise; a `cp1` checkpoint right after it lets the
+ * collision be inspected live, then durably, across a resume. */
+function collidingParallelCheckpointSpec(): Record<string, unknown> {
+  return {
+    meta: { name: "collide-cp" },
+    nodes: [
+      { id: "p", type: "parallel", branches: ["x", "y"] },
+      { id: "cp1", type: "checkpoint", prompt: "answer?", default: "yes" },
+    ],
+  };
+}
+
+/** A durable-shaped runtime whose leaves never write anything — any number
+ * of sequential spawns, molded on `cleanRuntimeStub` above but never
+ * hardcoding a single leaf id, so it also fits a `parallel` node's resume. */
+function cleanParallelRuntimeStub(): ChildRuntime {
+  let seq = 0;
+  return {
+    spawn(): string {
+      seq += 1;
+      return `leaf-${String(seq)}`;
+    },
+    collect(): ChildResult {
+      return {
+        status: "complete",
+        output: "ok",
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          reasoningTokens: 0,
+        },
+      };
+    },
+    steer(): void {},
+    cancel(): void {},
+    installLeafSandbox(): { dispose: () => void } {
+      return { dispose: (): void => undefined };
+    },
+  };
+}
+
+describe("write-file manifest — collision dedup, cross-stretch, normalized path (#485)", () => {
+  it("a leaf's own batch naming a path TWICE, after another leaf already owns it, pushes exactly one advisory fault", async () => {
+    const runtime = new FakeRuntime([
+      [
+        {
+          status: "complete",
+          output: "a",
+          usage: { ...usage, reasoningTokens: 0 },
+          artifacts: [{ path: "/dup.txt", bytes: 1 }],
+        },
+      ],
+      [
+        {
+          status: "complete",
+          output: "b",
+          usage: { ...usage, reasoningTokens: 0 },
+          // The SAME leaf's own batch names "/dup.txt" twice (two write_file
+          // calls to the same path inside one leaf) — the base recomputes
+          // `otherOwners` per record and pushes the advisory a second time.
+          artifacts: [
+            { path: "/dup.txt", bytes: 2 },
+            { path: "/dup.txt", bytes: 3 },
+          ],
+        },
+      ],
+    ]);
+    const spec = parsed({
+      meta: { name: "batch-dup" },
+      nodes: [{ id: "p", type: "parallel", branches: ["x", "y"] }],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(result.status).toBe("complete");
+    expect(result.artifacts).toHaveLength(3);
+    expect(result.artifactFaults).toEqual(["p: artifact path written by 2 leaves: /dup.txt"]);
+  });
+
+  it("'./x' and 'x' collide as the SAME path, but each RunArtifact keeps its own raw string", async () => {
+    const runtime = new FakeRuntime([
+      [
+        {
+          status: "complete",
+          output: "a",
+          usage: { ...usage, reasoningTokens: 0 },
+          artifacts: [{ path: "./dup.txt", bytes: 1 }],
+        },
+      ],
+      [
+        {
+          status: "complete",
+          output: "b",
+          usage: { ...usage, reasoningTokens: 0 },
+          artifacts: [{ path: "dup.txt", bytes: 2 }],
+        },
+      ],
+    ]);
+    const spec = parsed({
+      meta: { name: "normalized-collide" },
+      nodes: [{ id: "p", type: "parallel", branches: ["x", "y"] }],
+    });
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+    expect(result.status).toBe("complete");
+    expect(result.artifactFaults).toHaveLength(1);
+    // Raw, un-normalized strings — `path.posix.normalize` is comparison-only.
+    expect(result.artifacts.map((entry) => entry.path).sort()).toEqual(["./dup.txt", "dup.txt"]);
+  });
+
+  it("a collision recorded in stretch 1 survives the resume: live faults AND durableRollup.artifact_faults both still carry it", async () => {
+    const { service, store, cacheFactory, close } = harness(artifactRuntimeStub("/shared.txt"));
+    const started = service.start(collidingParallelCheckpointSpec());
+    if ("error" in started) throw new Error(started.error);
+    const paused = (await service.status(started.run_id, true)) as Record<string, unknown>;
+    expect(paused.status).toBe("paused");
+    expect(paused.faults as string[]).toContain(
+      "p: artifact path written by 2 leaves: /shared.txt",
+    );
+
+    // Stretch 2 writes nothing — the ONLY way this message can reach the
+    // resumed reply is `service.ts` folding stretch 1's `artifactFaults`
+    // forward, symmetrically with `artifacts` (#485).
+    const resumeService = new WorkflowService({
+      runtime: cleanParallelRuntimeStub(),
+      store,
+      cacheFactory,
+    });
+    const resumed = (await resumeService.runAndWait(
+      null,
+      {},
+      { resumeRunId: started.run_id, checkpointAnswers: { cp1: "yes" } },
+    )) as Record<string, unknown>;
+    expect(resumed.status).toBe("complete");
+    expect(resumed.faults).toEqual(["p: artifact path written by 2 leaves: /shared.txt"]);
+
+    // A genuinely cross-process, not-live read — durableFromRow/durableRollup.
+    const coldService = new WorkflowService({
+      runtime: cleanParallelRuntimeStub(),
+      store,
+      cacheFactory,
+    });
+    const dormantView = (await coldService.status(started.run_id)) as Record<string, unknown>;
+    expect(dormantView.artifact_faults).toEqual([
+      "p: artifact path written by 2 leaves: /shared.txt",
+    ]);
+    close();
+  });
+
+  it("a leaf in stretch 2 writing the SAME path a stretch-1 leaf already owned is flagged as a collision", async () => {
+    const { service, store, cacheFactory, close } = harness(artifactRuntimeStub("/shared.txt"));
+    const started = service.start(checkpointSpec());
+    if ("error" in started) throw new Error(started.error);
+    const paused = (await service.status(started.run_id, true)) as Record<string, unknown>;
+    expect(paused.status).toBe("paused");
+    // Only ONE leaf ever wrote "/shared.txt" so far — no collision yet.
+    expect(
+      (paused.faults as string[]).some((fault) => fault.includes("artifact path written")),
+    ).toBe(false);
+
+    const resumeService = new WorkflowService({
+      runtime: artifactRuntimeStub("/shared.txt"),
+      store,
+      cacheFactory,
+    });
+    const resumed = (await resumeService.runAndWait(
+      null,
+      {},
+      { resumeRunId: started.run_id, checkpointAnswers: { cp1: "yes" } },
+    )) as Record<string, unknown>;
+    expect(resumed.status).toBe("complete");
+    expect(resumed.faults).toEqual(["a: artifact path written by 2 leaves: /shared.txt"]);
+    close();
+  });
+});
