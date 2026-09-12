@@ -186,6 +186,27 @@ unavailable"` (`engine.ts:837`) quando o composition root de fato não
 Detalhe completo (o que cada pivô registra, o que fica de fora, a decisão
 de não fazer re-key global) na nota de decisão linkada acima.
 
+## `cache.missed`/`cache.replayed`: o que o operador lê num pivô (#461, M11-S3)
+
+Duas leituras que `workflow_audit`/`lohra workflow watch --events` já
+mostram e que um pivô de rota torna relevantes:
+
+- **`cache.missed {reason}`** — por que um nó recomputou em vez de
+  replayar: `never_completed` (este nó nunca teve célula, sob NENHUM hash —
+  primeira execução real) ou `identity_changed` (já teve, sob um hash
+  DIFERENTE — a identidade da célula mudou, tipicamente porque um pivô de
+  rota reescreveu o nó). Omitido (nunca `null`) quando o chamador não
+  nomeou um `nodeId`.
+- **`cache.replayed {version_state}`** — proveniência do HIT, nunca um
+  aviso de dado suspeito: `current` (o carimbo bate com a versão de hoje),
+  `stale` (carimbo presente mas de uma versão ANTERIOR — a mecânica de hash
+  mudou desde que a célula foi escrita) ou `unstamped` (célula de um banco
+  anterior à coluna `identity_version` existir). O replay em si acontece
+  IGUAL nos três casos — só a classificação muda; um `stale` depois de um
+  pivô de rota é o estado ESPERADO, não uma corrupção. Detalhe completo em
+  [`docs/decisions/2026-09-13-carimbo-da-celula.md`](decisions/2026-09-13-carimbo-da-celula.md)
+  e em [`docs/workflow-audit.md`](workflow-audit.md).
+
 ## `workflow_preview {run_id, route?}` — dry-run de um resume (#462, M11-S4)
 
 Responde "o que replayaria, o que recomputaria e por quê" de um resume
@@ -287,11 +308,15 @@ leaves: <path>"` em `artifactFaults` exatamente uma vez; nunca em
   `durableRollup` expõe só `artifacts`, então a colisão do stretch 1 some
   dos `faults` vivos depois de um resume; (c) colisão ENTRE stretches não é
   detectada (só compara contra os artefatos da stretch corrente); (d) o
-  caminho é comparado como string crua — `./x` e `x` não colidem; (e) um
-  sub-workflow por `ref` nunca tem seus artefatos checados contra os do
-  run pai (`foldNestedCounters`, só dentro de um `RunResult` plano). Nenhum
-  desses cinco muda `status` nem `faults` hoje — são gaps do próprio
-  advisory, não do runtime.
+  caminho é comparado como string crua — `./x` e `x` não colidem; (e) custo
+  O(N²) da checagem de colisão e o payload sem teto por run. Nenhuma dessas
+  cinco muda `status` nem `faults` hoje — são gaps do próprio advisory, não
+  do runtime.
+- **Fora do escopo de #485, limitação registrada no próprio código**: um
+  sub-workflow por `ref` nunca tem seus artefatos checados contra os do run
+  pai — `foldNestedCounters` (`src/workflow/accounting.ts`) só concatena as
+  listas, sem re-checar colisão contra o `RunResult` do pai; o comentário
+  da própria função nomeia isso.
 
 ## Sinal do processo e envelope de falha (contexto, não uma tool nova)
 

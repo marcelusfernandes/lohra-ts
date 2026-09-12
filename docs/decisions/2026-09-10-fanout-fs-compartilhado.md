@@ -108,12 +108,17 @@ aberta em `state:ready` — nenhuma das cinco resolvida neste registro)**:
    anterior já escreveu.
 4. O caminho é comparado como string crua (sem `path.posix.normalize`) —
    `./x` e `x` escapam da detecção mesmo apontando para o mesmo arquivo.
-5. Um sub-workflow por `ref` nunca tem seus artefatos checados contra os do
-   run pai (`foldNestedCounters`, `accounting.ts` — a colisão só é checada
-   dentro de um `RunResult` plano, antes do fold).
+5. Custo O(N²) da checagem de colisão e o payload de `artifacts` sem teto
+   por run.
 
 Nenhuma dessas cinco muda `status` nem `faults` hoje — são gaps do próprio
 mecanismo advisory, não uma regressão do invariante 2 (a escrita em si
 continua sem exceção nem causa a anexar, exatamente como a seção acima já
 descrevia). A doutrina — um arquivo por folha, nunca contar com a última
 escrita vencer por acaso — continua a mesma.
+
+**Fora do escopo de #485, limitação registrada no próprio código**: um
+sub-workflow por `ref` nunca tem seus artefatos checados contra os do run
+pai (`foldNestedCounters`, `accounting.ts` — a colisão só é checada dentro
+de um `RunResult` plano, antes do fold, e o comentário da própria função
+nomeia isso) — nenhuma issue aberta cobre esse gap especificamente.

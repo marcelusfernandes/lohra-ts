@@ -79,11 +79,22 @@ nunca dentro do `content_hash` que decide se uma célula é a mesma
 
 - `tests/workflow-cache-stamp.test.ts`: `CELL_IDENTITY_VERSION` e a fórmula
   do hash raiz pinados num único `it` (drift vira um teste vermelho, não
-  dois números divergentes em silêncio).
+  dois números divergentes em silêncio); os três valores de
+  `version_state` (`current`/`unstamped`/`stale`) e os dois de `reason`
+  (`never_completed`/`identity_changed`); o `node_id` da célula ESCOPADO —
+  não o id cru (describe `workflow_node_cache.node_id — dono ESCOPADO, não
+o id cru (#461, #475)`) — inclusive a limitação declarada de uma linha
+  pré-#461 sob o id cru não bater numa busca escopada (lê
+  `never_completed`); `cache.missed{reason}` no ledger de auditoria após um
+  pivô de rota que recomputa um nó já cacheado.
 - `tests/state-workflow-repository.test.ts`: o carimbo grava na MESMA
-  transação da célula; um `identityVersion` ausente não escreve a coluna.
-- `tests/workflow-audit-cache.test.ts`: `cache.replayed {version_state}`
-  nos três valores (`current`/`stale`/`unstamped`); `cache.missed {reason}`
-  nos dois valores (`never_completed`/`identity_changed`).
+  transação da célula; sem `identityVersion`, a coluna fica `NULL` (a
+  classificação `unstamped` de `SqliteWorkflowCache`, não uma coluna que
+  deixa de ser escrita).
+- `tests/workflow-audit-cache.test.ts`: um recorte menor do mesmo
+  vocabulário no decorador de auditoria — `cache.missed {reason:
+"never_completed"}` e `cache.replayed {version_state: "current"}` num
+  round-trip real de `WorkflowService`.
 - `tests/workflow-audit-allow-list.test.ts`: oráculo de `version_state` na
-  allow-list de `SAFE_STRING_VALUES` (`audit-model.ts`).
+  allow-list de `SAFE_STRING_VALUES` (`audit-model.ts`) — preserva os três
+  valores do vocabulário, redige qualquer um fora dele.
