@@ -4,7 +4,7 @@
 // a `run_workflow` flag). Molds `tests/workflow-route-override.test.ts`
 // (real `WorkflowService` + sqlite, real cache) for the harness and
 // `tests/workflow-audit-cache.test.ts` for the nested-workflow loader shape.
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
@@ -27,11 +27,17 @@ import type {
   LeafSandboxHandle,
 } from "../src/workflow/runtime.js";
 import type { WorkflowLoader } from "../src/workflow/engine-contract.js";
-import {
-  previewResume,
-  type PreviewDeps,
-  type PreviewNodeOutcome,
-} from "../src/workflow/cache-preview.js";
+// #462, rodada 2 (revisor, controle-negativo): a base (`main`) não tem
+// `src/workflow/cache-preview.ts` — um import ESTÁTICO daqui quebra a
+// COLETA do arquivo inteiro na base (`Cannot find module`, `colecionou:
+// false`), o que o classificador do controle-negativo (`lib.ts#ehFalhaEstrutural`)
+// conta como `structural-red`, não `assertion-red`. `import type` some na
+// compilação (tsx/vite apagam todo import só-de-tipo antes de rodar), então
+// os tipos ficam estáticos; só o valor `previewResume` precisa do import
+// DINÂMICO, dentro de cada `it` via `harness().preview` abaixo — assim a
+// falha na base acontece DURANTE um teste que já foi coletado, e vira a
+// falha desse teste (assertion-red), não uma falha de coleta do arquivo.
+import type { PreviewDeps, PreviewNodeOutcome } from "../src/workflow/cache-preview.js";
 
 const roots: string[] = [];
 
@@ -132,8 +138,10 @@ function harness(
     repository,
     locks,
     database: connection.database,
-    preview: (deps: Omit<PreviewDeps, "database" | "repository" | "locks">) =>
-      previewResume({ database: connection.database, repository, locks, ...deps }),
+    preview: async (deps: Omit<PreviewDeps, "database" | "repository" | "locks">) => {
+      const { previewResume } = await import("../src/workflow/cache-preview.js");
+      return previewResume({ database: connection.database, repository, locks, ...deps });
+    },
     close: (): void => {
       connection.close();
     },
@@ -151,6 +159,11 @@ function snapshot(database: Database.Database, runId: string) {
     node_cache: rowCount(database, "workflow_node_cache"),
     node_cost: rowCount(database, "workflow_node_cost"),
     audit_events: rowCount(database, "workflow_audit_events"),
+    // Rodada 2 (revisor, non-blocking #2): as duas outras superfícies
+    // duráveis do run — sem seam de escrita no preview, mas duas linhas a
+    // mais fecham a asserção "zero efeito colateral" com exaustão maior.
+    run_locks: rowCount(database, "workflow_run_locks"),
+    operator_notices: rowCount(database, "operator_notices"),
     row: database.prepare("SELECT * FROM workflow_run_state WHERE run_id = ?").get(runId),
   };
 }
@@ -275,6 +288,109 @@ describe("previewResume — a route pivot reveals a cell whose identity moved (#
       const b = nodeOf(result.nodes, "b");
       expect(b?.outcome).toBe("recompute");
       expect(b?.reason).toBe("identity_changed");
+      expect(result.pivots_used).toBe(0); // the preview itself never spends one
+
+      // Rodada 2 (revisor, non-blocking #3): the preview only PRICED the
+      // pivot — the REAL resume below is what actually spends it, exactly
+      // once, closing the pair "preview never consumes, resume always does".
+      const resumed = service.start(
+        null,
+        {},
+        {
+          resumeRunId: started.run_id,
+          routeOverride: { provider: "p2" },
+        },
+      );
+      if ("error" in resumed) throw new Error(resumed.error);
+      await service.status(started.run_id, true);
+      const after = durableFromRow(
+        repository.getRunState(started.run_id) as Record<string, unknown>,
+      );
+      expect(after.status).toBe("complete");
+      expect(after.pivots).toEqual([{ provider: "p2" }]);
+    } finally {
+      close();
+    }
+  });
+});
+
+// Rodada 2 (revisor, AC1): pins `leaves_to_spawn`'s two documented shapes —
+// "one per parallel branch" and "one per pipeline item, until that item's
+// first miss". `parallel` has no routing fields at all (`nodes.ts`'s
+// `NODE_SPECS.parallel` — no `routing: true`), so the route-pivot trick the
+// identity_changed test uses cannot apply to it; instead this primes a
+// durable run whose branches NEVER succeeded (a generic dead leaf, no
+// errorKind — never pauses the run) and lets the preview attempt them all
+// fresh, deterministically. `pipeline` DOES allow a per-stage route
+// (`STAGE_FIELDS`), so its own test still uses the pivot.
+describe("previewResume — leaves_to_spawn for parallel (N branches) and pipeline (items × first miss) (#462 AC1)", () => {
+  /** Every spawn dies with a plain, un-typed failure — never pauses the
+   * run (only `quota_exhausted`/a route-fault kind does), so the durable
+   * priming run settles "complete" (degraded, with faults) instead of
+   * pausing partway through. */
+  function alwaysDeadRuntime(): ChildRuntime {
+    return withSandbox({
+      spawn: (): string => "leaf-dead",
+      collect: (): ChildResult => ({ status: "failed", output: "boom" }),
+      steer: () => undefined,
+      cancel: () => undefined,
+    });
+  }
+
+  it("a parallel node with no successful branch re-spawns exactly one leaf per branch", async () => {
+    const { service, preview, close } = harness({ runtime: alwaysDeadRuntime() });
+    try {
+      const spec = {
+        meta: { name: "preview-parallel" },
+        nodes: [{ id: "par", type: "parallel", branches: ["b1", "b2", "b3"] }],
+      };
+      const started = service.start(spec);
+      if ("error" in started) throw new Error(started.error);
+      await service.status(started.run_id, true);
+
+      const result = await preview({ tiers: {}, runId: started.run_id, now: 1000 });
+      if ("error" in result) throw new Error(result.error);
+      const par = nodeOf(result.nodes, "par");
+      expect(par?.outcome).toBe("recompute");
+      expect(par?.reason).toBe("never_completed");
+      expect(result.leaves_to_spawn).toBe(3);
+    } finally {
+      close();
+    }
+  });
+
+  it("a pipeline node whose stage-2 route pivoted re-spawns exactly one leaf per item (stage 1 replays)", async () => {
+    const { service, preview, close } = harness({ runtime: completingRuntime() });
+    try {
+      const spec = {
+        meta: { name: "preview-pipeline" },
+        nodes: [
+          {
+            id: "pipe",
+            type: "pipeline",
+            items: ["i1", "i2"],
+            stages: [{ prompt: "s1" }, { prompt: "s2", provider: "p1" }],
+          },
+        ],
+      };
+      const started = service.start(spec);
+      if ("error" in started) throw new Error(started.error);
+      await service.status(started.run_id, true);
+
+      const result = await preview({
+        tiers: {},
+        runId: started.run_id,
+        route: { provider: "p2" },
+        now: 1000,
+      });
+      if ("error" in result) throw new Error(result.error);
+      const pipe = nodeOf(result.nodes, "pipe");
+      expect(pipe?.outcome).toBe("recompute");
+      expect(pipe?.reason).toBe("identity_changed"); // stage 1's cells still exist under "pipe"
+      // One spawn per item — stage 1 (unpinned) replays for both, stage 2
+      // (pinned) is each item's FIRST miss and its only spawn.
+      expect(result.leaves_to_spawn).toBe(2);
+      expect(result.cells_replayed).toBe(2); // stage 1 × 2 items
     } finally {
       close();
     }
@@ -309,6 +425,55 @@ describe("previewResume — a checkpoint pause (#462 AC)", () => {
       expect(result.cells_replayed).toBe(2);
       expect(result.leaves_to_spawn).toBe(0);
       expect(result.tokens_saved).toBeGreaterThan(0);
+    } finally {
+      close();
+    }
+  });
+});
+
+// Rodada 2 (revisor, non-blocking #4): the two outcomes the tool's own
+// description names but no test exercised yet.
+describe("previewResume — upstream_missing and token_budget_exhausted outcomes (#462 AC)", () => {
+  it("a node whose dependency never produced a value reports upstream_missing", async () => {
+    const { service, preview, close } = harness();
+    try {
+      const spec = {
+        meta: { name: "preview-upstream-missing" },
+        nodes: [
+          { id: "upstream", type: "agent", prompt: "${args.missing}" },
+          { id: "downstream", type: "agent", prompt: "use ${upstream.out}" },
+        ],
+      };
+      const started = service.start(spec);
+      if ("error" in started) throw new Error(started.error);
+      await service.status(started.run_id, true);
+
+      const result = await preview({ tiers: {}, runId: started.run_id, now: 1000 });
+      if ("error" in result) throw new Error(result.error);
+      expect(nodeOf(result.nodes, "downstream")?.outcome).toBe("upstream_missing");
+    } finally {
+      close();
+    }
+  });
+
+  it("a run already at/past its token budget reports the un-cached node as token_budget_exhausted", async () => {
+    const { service, preview, close } = harness({ runtime: completingRuntime() });
+    try {
+      const spec = {
+        meta: { name: "preview-budget" },
+        nodes: [
+          { id: "a", type: "agent", prompt: "one" },
+          { id: "b", type: "agent", prompt: "two" },
+        ],
+      };
+      const started = service.start(spec, {}, { tokenBudget: 1 });
+      if ("error" in started) throw new Error(started.error);
+      await service.status(started.run_id, true);
+
+      const result = await preview({ tiers: {}, runId: started.run_id, now: 1000 });
+      if ("error" in result) throw new Error(result.error);
+      expect(nodeOf(result.nodes, "a")?.outcome).toBe("replay"); // spent for real before the cap bit
+      expect(nodeOf(result.nodes, "b")?.outcome).toBe("token_budget_exhausted");
     } finally {
       close();
     }
@@ -451,5 +616,142 @@ describe("builtin registry — workflow_preview (#462 AC)", () => {
     expect(JSON.parse(out)).toEqual({
       error: "workflow tools must be intercepted with a session WorkflowService",
     });
+  });
+});
+
+// Rodada 2 (revisor, BLOCKING 2 / AC3): `workflowPreviewHandler` itself
+// (route/run_id validation, tiers loading, the happy-path envelope) had no
+// coverage — the "builtin registry" describe above only exercises the
+// FAIL-SAFE placeholder (builtins.ts), never the real handler. These call
+// `workflowPreviewHandler(database, home)` directly, the same shape
+// `composeSessionTools` wires (session-tools.ts). Oracle test (the handler
+// already exists on this branch, written green — no red step makes sense
+// for a validation boundary this small).
+describe("workflowPreviewHandler — validation and the happy path (#462 AC3, rodada 2)", () => {
+  function tempHome(): string {
+    const home = mkdtempSync(join(tmpdir(), "lohra-cache-preview-home-"));
+    roots.push(home);
+    return home;
+  }
+
+  it("refuses a non-object 'route' (a number)", async () => {
+    const { workflowPreviewHandler } = await import("../src/workflow/cache-preview.js");
+    const { database, close } = harness();
+    try {
+      const handler = workflowPreviewHandler(database, tempHome());
+      const out = JSON.parse(await handler({ run_id: "run-x", route: 42 })) as {
+        error?: string;
+      };
+      expect(out.error ?? "").toContain("'route' must be an object");
+    } finally {
+      close();
+    }
+  });
+
+  it("refuses an array 'route'", async () => {
+    const { workflowPreviewHandler } = await import("../src/workflow/cache-preview.js");
+    const { database, close } = harness();
+    try {
+      const handler = workflowPreviewHandler(database, tempHome());
+      const out = JSON.parse(await handler({ run_id: "run-x", route: [] })) as {
+        error?: string;
+      };
+      expect(out.error ?? "").toContain("'route' must be an object");
+    } finally {
+      close();
+    }
+  });
+
+  it("refuses a 'route' object naming neither 'provider' nor 'model'", async () => {
+    const { workflowPreviewHandler } = await import("../src/workflow/cache-preview.js");
+    const { database, close } = harness();
+    try {
+      const handler = workflowPreviewHandler(database, tempHome());
+      const out = JSON.parse(await handler({ run_id: "run-x", route: {} })) as {
+        error?: string;
+      };
+      expect(out.error ?? "").toContain("'route' must be an object");
+    } finally {
+      close();
+    }
+  });
+
+  it("refuses a whitespace-only 'route.provider'", async () => {
+    const { workflowPreviewHandler } = await import("../src/workflow/cache-preview.js");
+    const { database, close } = harness();
+    try {
+      const handler = workflowPreviewHandler(database, tempHome());
+      const out = JSON.parse(await handler({ run_id: "run-x", route: { provider: "  " } })) as {
+        error?: string;
+      };
+      expect(out.error ?? "").toContain("route.provider");
+      expect(out.error ?? "").toContain("non-empty");
+    } finally {
+      close();
+    }
+  });
+
+  it("refuses a missing 'run_id'", async () => {
+    const { workflowPreviewHandler } = await import("../src/workflow/cache-preview.js");
+    const { database, close } = harness();
+    try {
+      const handler = workflowPreviewHandler(database, tempHome());
+      const out = JSON.parse(await handler({})) as { error?: string };
+      expect(out.error ?? "").toContain("run_id");
+    } finally {
+      close();
+    }
+  });
+
+  it("refuses an empty-string 'run_id'", async () => {
+    const { workflowPreviewHandler } = await import("../src/workflow/cache-preview.js");
+    const { database, close } = harness();
+    try {
+      const handler = workflowPreviewHandler(database, tempHome());
+      const out = JSON.parse(await handler({ run_id: "" })) as { error?: string };
+      expect(out.error ?? "").toContain("run_id");
+    } finally {
+      close();
+    }
+  });
+
+  it("surfaces an invalid workflow_tiers.json as a named error (TiersError)", async () => {
+    const { workflowPreviewHandler } = await import("../src/workflow/cache-preview.js");
+    const { database, close } = harness();
+    try {
+      const home = tempHome();
+      writeFileSync(join(home, "workflow_tiers.json"), "not json");
+      const handler = workflowPreviewHandler(database, home);
+      const out = JSON.parse(await handler({ run_id: "does-not-exist" })) as {
+        error?: string;
+      };
+      expect(out.error ?? "").toContain("workflow_tiers.json");
+    } finally {
+      close();
+    }
+  });
+
+  it("happy path: returns the preview envelope via toolResult", async () => {
+    const { workflowPreviewHandler } = await import("../src/workflow/cache-preview.js");
+    const { service, database, close } = harness({ runtime: completingRuntime() });
+    try {
+      const spec = {
+        meta: { name: "preview-handler-happy" },
+        nodes: [{ id: "a", type: "agent", prompt: "x" }],
+      };
+      const started = service.start(spec);
+      if ("error" in started) throw new Error(started.error);
+      await service.status(started.run_id, true);
+
+      const handler = workflowPreviewHandler(database, tempHome());
+      const out = JSON.parse(await handler({ run_id: started.run_id })) as Record<string, unknown>;
+      expect(out.ok).toBe(true);
+      expect(out.run_id).toBe(started.run_id);
+      expect(out.route_applied).toBe(false);
+      expect(out.pivots_used).toBe(0);
+      expect(Array.isArray(out.nodes)).toBe(true);
+    } finally {
+      close();
+    }
   });
 });
