@@ -18,6 +18,7 @@
 // never touched here either.
 import { Node, WorkflowSpec } from "./types.js";
 import {
+  dedupeArtifactFaultsByPath,
   recordCrossStretchArtifactCollisions,
   type RunArtifact,
   type RunResult,
@@ -400,7 +401,16 @@ export function pausePayloadOf(
   // fold below reads `result.artifactFaults`.
   recordCrossStretchArtifactCollisions(result, priorView?.artifacts ?? []);
   const artifacts = [...(priorView?.artifacts ?? []), ...result.artifacts];
-  const artifactFaults = [...(priorView?.artifact_faults ?? []), ...result.artifactFaults];
+  // #512: deduped BEFORE persisting (not just on the live read,
+  // `foldArtifactFaults`/service.ts) — a path already flagged in an earlier
+  // stretch's own persisted `artifact_faults` never gets written twice into
+  // this stretch's terminal payload, so a cold read (`durableRollup`) of a
+  // dormant run agrees with the live one instead of accumulating one more
+  // duplicate advisory per resume.
+  const artifactFaults = dedupeArtifactFaultsByPath([
+    ...(priorView?.artifact_faults ?? []),
+    ...result.artifactFaults,
+  ]);
   return (checkpoint, resumeAt) =>
     JSON.stringify({
       checkpoint,

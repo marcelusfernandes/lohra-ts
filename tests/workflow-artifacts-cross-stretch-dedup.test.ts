@@ -240,3 +240,97 @@ describe("write-file manifest — one advisory per path across stretches (#501)"
     close();
   });
 });
+
+// Issue #512 (follow-up of #501, veredito non_blocking 1 da PR #508):
+// `foldArtifactFaults` (accounting.ts, called from service.ts's terminal
+// fold) dedupes the LIVE view, but `pausePayloadOf` (route-override.ts)
+// used to build the PERSISTED `pause_payload_json` by plainly concatenating
+// `priorView.artifact_faults` with `result.artifactFaults` — never through
+// `dedupeArtifactFaultsByPath`. Two resumes, each with a brand-new node
+// racing the SAME path a cached earlier node already owns (the
+// `fenceCorrectHarness` scenario above, repeated twice), used to leave TWO
+// duplicate advisories sitting in the durable row — a genuinely cold read
+// (`durableFromRow`/`durableRollup`, never the in-process `resultView`)
+// exposed both. Fixed: `pausePayloadOf` dedupes before persisting, so a
+// cold read agrees with the live one no matter how many resumes came
+// before it.
+function twoResumesSharedPathSpec(): Record<string, unknown> {
+  return {
+    meta: { name: "two-resumes-shared-path" },
+    nodes: [
+      { id: "a", type: "agent", prompt: "alpha" },
+      { id: "cp1", type: "checkpoint", prompt: "first?", default: "yes" },
+      { id: "b", type: "agent", prompt: "beta" },
+      { id: "cp2", type: "checkpoint", prompt: "second?", default: "yes" },
+      { id: "c", type: "agent", prompt: "gamma" },
+    ],
+  };
+}
+
+describe("write-file manifest — dedup applies BEFORE persisting, not just on live read (#512)", () => {
+  it("two resumes still leave durableRollup.artifact_faults, read cold, with exactly one advisory for the shared path", async () => {
+    const { service, store, cacheFactory, close } = fenceCorrectHarness(
+      artifactRuntimeStub("/shared.txt"),
+    );
+    const started = service.start(twoResumesSharedPathSpec());
+    if ("error" in started) throw new Error(started.error);
+    const paused = (await service.status(started.run_id, true)) as Record<string, unknown>;
+    expect(paused.status).toBe("paused");
+    // Only "a" has written so far — no collision yet.
+    expect(
+      (paused.faults as string[]).some((fault) => fault.includes("artifact path written")),
+    ).toBe(false);
+
+    const resume1Service = new WorkflowService({
+      runtime: artifactRuntimeStub("/shared.txt"),
+      store,
+      cacheFactory,
+    });
+    const pausedAgain = (await resume1Service.runAndWait(
+      null,
+      {},
+      { resumeRunId: started.run_id, checkpointAnswers: { cp1: "yes" } },
+    )) as Record<string, unknown>;
+    expect(pausedAgain.status).toBe("paused");
+    // "a" hit cache (fence-valid replay, never rewrote), "b" is the new
+    // writer racing "a"'s own path — the FIRST cross-stretch advisory,
+    // attributed to "b" (`cp2` itself also contributes its own "waiting for
+    // answer" fault — irrelevant to this issue, filtered out below).
+    expect(
+      (pausedAgain.faults as string[]).filter((fault) => fault.includes("artifact path written")),
+    ).toEqual(["b: artifact path written by 2 leaves: /shared.txt"]);
+
+    const resume2Service = new WorkflowService({
+      runtime: artifactRuntimeStub("/shared.txt"),
+      store,
+      cacheFactory,
+    });
+    const completed = (await resume2Service.runAndWait(
+      null,
+      {},
+      { resumeRunId: started.run_id, checkpointAnswers: { cp2: "yes" } },
+    )) as Record<string, unknown>;
+    expect(completed.status).toBe("complete");
+    // "a" and "b" both cached, "c" is a SECOND new writer racing the same
+    // path — its own fresh `RunResult` has no memory of "b"'s already-
+    // persisted advisory, so the live fold (#501) still keeps only the
+    // FIRST ("b"'s) advisory here too.
+    expect(completed.faults).toEqual(["b: artifact path written by 2 leaves: /shared.txt"]);
+
+    // A genuinely cross-process, not-live read — durableFromRow/
+    // durableRollup, never the in-process resultView (#501's own
+    // cold-service pattern, molded on #246 AC3). This is the field the
+    // BASE (pre-#512) duplicates: `pausePayloadOf` persisted "b"'s AND
+    // "c"'s advisory side by side, both for "/shared.txt".
+    const coldService = new WorkflowService({
+      runtime: artifactRuntimeStub("/unused.txt"),
+      store,
+      cacheFactory,
+    });
+    const dormantView = (await coldService.status(started.run_id)) as Record<string, unknown>;
+    expect(dormantView.artifact_faults).toEqual([
+      "b: artifact path written by 2 leaves: /shared.txt",
+    ]);
+    close();
+  });
+});
