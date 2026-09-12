@@ -616,7 +616,7 @@ describe("workflow_preview through composeSessionTools — production loader wir
       await service.status(started.run_id, true);
       const raw = await tools.dispatch("workflow_preview", { run_id: started.run_id });
       const parsed = JSON.parse(raw) as { nodes?: readonly PreviewNodeOutcome[] };
-      expect(parsed.nodes?.find((entry) => entry.node_id === "sub")?.outcome).toBe("nested");
+      expect(parsed.nodes?.[0]).toMatchObject({ outcome: "nested", cells_replayed: 1 });
     } finally {
       close();
     }
