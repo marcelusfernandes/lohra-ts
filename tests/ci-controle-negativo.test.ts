@@ -338,6 +338,19 @@ describe("ehArquivoDocsOuProcess / deveSerIgnorado", () => {
     expect(ehArquivoDocsOuProcess(".worktreeinclude")).toBe(true);
   });
 
+  it("classifica lefthook.yml no topo — configuração de hook de processo (issue #555)", () => {
+    expect(ehArquivoDocsOuProcess("lefthook.yml")).toBe(true);
+  });
+
+  it("SKIP quando o diff é só lefthook.yml (issue #555)", () => {
+    expect(deveSerIgnorado(["lefthook.yml"])).toBe(true);
+    expect(deveSerIgnorado(["lefthook.yml", ".claude/x"])).toBe(true);
+  });
+
+  it("não faz SKIP quando lefthook.yml vem misturado com src/ (issue #555)", () => {
+    expect(deveSerIgnorado(["lefthook.yml", "src/x.ts"])).toBe(false);
+  });
+
   it("não classifica scripts/** fora de scripts/github/ — continua exigindo controle", () => {
     expect(ehArquivoDocsOuProcess("scripts/ci/controle-negativo/lib.ts")).toBe(false);
     expect(ehArquivoDocsOuProcess("scripts/prova/run.ts")).toBe(false);

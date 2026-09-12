@@ -68,3 +68,26 @@ deveSerIgnorado`: `assets/skills/x/SKILL.md` → docs;
   (só `assets/skills/` conta); `src/assets/skills/x/SKILL.md` (fora da raiz
   do repo) e `assets/skills/x/SKILL.mdx` (extensão errada) → não-docs;
   `deveSerIgnorado(["assets/skills/a/SKILL.md"])` → SKIP.
+
+## Apêndice (2026-09-12): `lefthook.yml` na classe `process` (issue #555)
+
+- **Origem:** PR #554 (D9/#544, follow-up de #530) precisou tirar
+  `lefthook.yml` do diff porque a PR era só de prosa de processo (correção
+  do comentário do cabeçalho) e o `controle-negativo` reprovava por "PR sem
+  prova declarada" — o mesmo sintoma da PR #344 que originou esta nota, só
+  que para um arquivo de configuração de hook, não de doutrina de skill.
+- **Decisão:** `lefthook.yml` (config do pre-commit local, mesma natureza de
+  `.claude/hooks/*`) entra em `DOCS_TOPO` — a mesma lista de
+  `README.md`/`CLAUDE.md`/`AGENTS.md`/`.worktreeinclude` em
+  `ehArquivoDocsOuProcess` (`scripts/ci/controle-negativo/lib.ts`). É
+  configuração de processo de repositório, nunca comportamento do runtime a
+  controlar.
+- **Correção junto:** o cabeçalho de `lefthook.yml:1-9` dizia que os hooks
+  eram instalados por `scripts/postinstall.mjs` — desde D1/#530 é
+  `scripts/prepare.mjs`, com o guard `LOHRA_SKIP_PREPARE=1` (issue #544).
+  Prosa desatualizada corrigida junto.
+- **Evidência:** `tests/ci-controle-negativo.test.ts`,
+  `ehArquivoDocsOuProcess("lefthook.yml")` → `true`;
+  `deveSerIgnorado(["lefthook.yml", ".claude/x"])` → SKIP;
+  `deveSerIgnorado(["lefthook.yml", "src/x.ts"])` → controle normal (mistura
+  com produção não faz SKIP).
