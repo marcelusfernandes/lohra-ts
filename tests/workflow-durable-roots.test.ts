@@ -247,7 +247,6 @@ describe("OrchestrationChildRuntime + productionOwnershipStore: durable launch w
           reasoningTokens: 0,
           provider: "test",
           model: "test-model",
-          forcedFallback: false,
           errorKind: null,
           retryAfter: null,
         });
