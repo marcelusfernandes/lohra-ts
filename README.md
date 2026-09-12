@@ -216,6 +216,13 @@ lohra workflow notices --ack ID
 lohra update --check
 ```
 
+Com uma assinatura Codex ativa e `auth_preference: "auto"`, `chat` recusa um
+`--provider` explícito antes de qualquer rede (`initializationError` citando
+`lohra auth prefer api_key`) em vez de mandar o `--model` alheio ao
+transporte da assinatura; `--model` sozinho, sem `--provider`, continua
+escolhendo o modelo da própria assinatura sem mudança
+(`docs/decisions/2026-09-13-flags-de-rota-com-assinatura.md`).
+
 `workflow` possui somente `list`, `watch`, `audit` e `notices`; não existe
 `workflow run`. Chat e dashboard compartilham a mesma composition root para
 workflow/audit, orquestração, cron, MCP, web e mídia. `notices` lê

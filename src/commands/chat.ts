@@ -157,10 +157,26 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   let profile: ProviderProfile;
   let client: ChatCompletionsClient | AnthropicMessagesClient | ResponsesClient;
   let modelTransport: ModelTransport;
-  let subscriptionNote = "";
   let model: string | undefined;
   let imageGenerator: OpenAIImagesAdapter | undefined;
   if (route.mode === "subscription") {
+    // Issue #440 (option A, orchestrator decision): an explicit --provider
+    // in subscription mode used to be silently ignored (a stderr note) while
+    // --model still reached the Codex Responses transport — a route mismatch
+    // the provider only caught with a 400. Refuse before any network call
+    // (ahead of resolveCredentials, so a near-expiring token never triggers
+    // a wasted refresh POST): --provider names a route this mode can't take,
+    // and the actionable fix is a preference switch, not a retry.
+    // --model alone (no --provider) is unaffected — it is how an operator
+    // picks the subscription's own model and must keep going to Codex.
+    if (provider !== undefined) {
+      return initializationError(
+        input,
+        null,
+        `--provider ${provider} cannot be honored while subscription mode is active — ` +
+          "run `lohra auth prefer api_key` to use API-key routes, or omit --provider.",
+      );
+    }
     let credentials;
     try {
       credentials = await resolveCredentials(options.home, { codexHome: options.codexHome });
@@ -204,8 +220,6 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       headers: credentials.headers,
     });
     modelTransport = new ResponsesModel(client);
-    if (provider !== undefined)
-      subscriptionNote = `subscription mode active — ignoring --provider ${provider}.\n`;
   } else {
     const resolved = getProviderProfile(provider as string);
     if (resolved === null)
@@ -443,7 +457,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       stdout: options.flags.has("--json")
         ? successEnvelope(result)
         : `${result.response.content ?? ""}\n`,
-      stderr: `${warningLines}${subscriptionNote}${compactionEvents.join("")}session: ${result.sessionId}  (resume with --session ${result.sessionId})\n`,
+      stderr: `${warningLines}${compactionEvents.join("")}session: ${result.sessionId}  (resume with --session ${result.sessionId})\n`,
     };
   } catch (error) {
     const message = formatProviderFailureMessage(error);
