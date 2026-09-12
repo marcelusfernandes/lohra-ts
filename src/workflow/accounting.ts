@@ -251,7 +251,14 @@ export function recordCrossStretchArtifactCollisions(
     const key = normalizedArtifactPath(artifact.path);
     if (!priorPaths.has(key) || result.artifactCollisionPaths.has(key)) continue;
     result.artifactCollisionPaths.add(key);
-    result.artifactFaults.push(`${artifact.node_id}${COLLISION_FAULT_MARKER}${artifact.path}`);
+    // #539: `artifact.node_id` is the UNSPACED `sub[${reference}]:name`
+    // contract (`foldNestedCounters` below) for a nested artifact —
+    // `faultPrefixFromNodeId` rewrites that leading chain to the spaced
+    // form every OTHER fault-string producer in this module uses, so this
+    // fault's scope parses identically to theirs.
+    result.artifactFaults.push(
+      `${faultPrefixFromNodeId(artifact.node_id)}${COLLISION_FAULT_MARKER}${artifact.path}`,
+    );
   }
 }
 
@@ -284,10 +291,24 @@ export function recordCrossStretchArtifactCollisions(
  * DIFFERENT physical files (each scoped to its own working root) that
  * merely happen to share a path string; collapsing them into one advisory
  * would silently drop a real collision. `NESTED_SCOPE_PREFIX_RE` strips
- * only that leading `sub[...]: ` chain off the front of the fault string —
+ * only that leading `sub[...]:` chain off the front of the fault string —
  * never the node id right after it — so two faults share a key only when
- * they share BOTH the same nesting scope and the same normalized path. */
-const NESTED_SCOPE_PREFIX_RE = /^(?:sub\[[^\]]*\]: )*/;
+ * they share BOTH the same nesting scope and the same normalized path.
+ *
+ * #539: the SAME scope can show up in TWO literal shapes. `foldNestedCounters`
+ * spells a fault's scope prefix with a space (`sub[${reference}]: `, via
+ * `nestedScopePrefix` below) but `RunArtifact.node_id` is the UNSPACED
+ * `sub[${reference}]:${nodeId}` (a `node_id` contract, pinned by
+ * `tests/workflow-artifacts.test.ts:331` — never rewritten).
+ * `recordCrossStretchArtifactCollisions` below cunhas its fault from that
+ * `node_id` — `faultPrefixFromNodeId` rewrites the unspaced chain to the
+ * spaced form before building the fault text, so every FRESH fault this
+ * module writes is spaced from here on. This regex still accepts BOTH forms
+ * (space optional per level) — and `collisionKeyOf` below re-inserts any
+ * missing space before using the match as a key — so a fault string already
+ * persisted unspaced (written before this fix) still normalizes to the SAME
+ * scope key as its spaced counterpart. */
+const NESTED_SCOPE_PREFIX_RE = /^(?:sub\[[^\]]*\]: ?)*/;
 
 interface CollisionKey {
   readonly scope: string;
@@ -297,7 +318,11 @@ interface CollisionKey {
 function collisionKeyOf(fault: string): CollisionKey | null {
   const at = fault.indexOf(COLLISION_FAULT_MARKER);
   if (at === -1) return null;
-  const scope = NESTED_SCOPE_PREFIX_RE.exec(fault)?.[0] ?? "";
+  const rawScope = NESTED_SCOPE_PREFIX_RE.exec(fault)?.[0] ?? "";
+  // #539: `sub[ref]:` (no space — the unspaced, legacy/node_id-derived
+  // form) normalizes to `sub[ref]: ` so both forms of the SAME scope always
+  // produce the SAME key.
+  const scope = rawScope.replace(/\]:(?!\s)/g, "]: ");
   const path = normalizedArtifactPath(fault.slice(at + COLLISION_FAULT_MARKER.length));
   return { scope, path };
 }
@@ -320,6 +345,34 @@ export function dedupeArtifactFaultsByPath(faults: readonly string[]): string[] 
     kept.push(fault);
   }
   return kept;
+}
+
+/** #539: the ONE place that spells the SPACED `sub[${reference}]: ` scope
+ * prefix a fault string carries — `foldNestedCounters` below and
+ * `faultPrefixFromNodeId` right below both call this instead of inlining
+ * the template literal, so the two producers of a scoped fault string can
+ * never drift out of the shape `NESTED_SCOPE_PREFIX_RE`/`collisionKeyOf`
+ * above parse. Never used for `RunArtifact.node_id` itself — that stays the
+ * UNSPACED `sub[${reference}]:${nodeId}` contract pinned by
+ * `tests/workflow-artifacts.test.ts:331`. */
+function nestedScopePrefix(reference: string): string {
+  return `sub[${reference}]: `;
+}
+
+/** #539: `recordCrossStretchArtifactCollisions` above cunhas a NEW fault
+ * straight from an artifact's `node_id` — which, for a nested artifact
+ * `foldNestedCounters` folded in, is the UNSPACED `sub[${reference}]:name`
+ * chain (one segment per nesting level, e.g. `sub[a]:sub[b]:leaf`). Rewrites
+ * only the LEADING chain of `sub[...]:` segments into the SPACED
+ * `nestedScopePrefix` form every other fault-string producer in this module
+ * uses — a plain, unscoped `node_id` (no leading `sub[...]:` at all) comes
+ * back unchanged. */
+function faultPrefixFromNodeId(nodeId: string): string {
+  const chain = /^(?:sub\[[^\]]*\]:)*/.exec(nodeId)?.[0] ?? "";
+  if (chain === "") return nodeId;
+  const refs: string[] = [];
+  for (const match of chain.matchAll(/sub\[([^\]]*)\]:/g)) refs.push(match[1] ?? "");
+  return `${refs.map(nestedScopePrefix).join("")}${nodeId.slice(chain.length)}`;
 }
 
 /** Called once from service.ts's terminal fold, in place of the plain
@@ -371,7 +424,9 @@ export function foldNestedCounters(result: RunResult, nested: RunResult, referen
   result.leafRespawns += nested.leafRespawns;
   result.partialLeaves += nested.partialLeaves;
   result.sandboxRefusals += nested.sandboxRefusals;
-  result.sandboxFaults.push(...nested.sandboxFaults.map((fault) => `sub[${reference}]: ${fault}`));
+  result.sandboxFaults.push(
+    ...nested.sandboxFaults.map((fault) => `${nestedScopePrefix(reference)}${fault}`),
+  );
   // Vocabulary, not text (#399) — never `sub[${reference}]:`-prefixed like
   // `sandboxFaults`/`faults` above: a kind stays the SAME value regardless
   // of which nested run raised it.
@@ -386,6 +441,6 @@ export function foldNestedCounters(result: RunResult, nested: RunResult, referen
     })),
   );
   result.artifactFaults.push(
-    ...nested.artifactFaults.map((fault) => `sub[${reference}]: ${fault}`),
+    ...nested.artifactFaults.map((fault) => `${nestedScopePrefix(reference)}${fault}`),
   );
 }
