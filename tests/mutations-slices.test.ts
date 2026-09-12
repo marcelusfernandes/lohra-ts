@@ -483,7 +483,7 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 246 (soma dos treze catálogos importados)", () => {
+  it("a contagem total de mutantes é 247 (soma dos treze catálogos importados)", () => {
     // Os doze catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
@@ -510,9 +510,12 @@ describe("scripts/mutations/slices.json", () => {
     // (steer-tool, leaf-read-tool, route-faults, route-override,
     // MAX_PENDING_STEERS_PER_LEAF em core.ts, o guard de `dead_turn` em
     // child-runner.ts e o vocabulário em transports/error-kinds.ts): 227 + 19
-    // = 246.
+    // = 246. A issue #452 (pivô de rota em sub-workflow por ref) mergeou em
+    // paralelo (PR #472) e acrescentou `overrideNestedSpec` a
+    // route-override.ts/engine.ts — mais 1 mutante (O5, morto por
+    // tests/workflow-route-override-nested.test.ts): 246 + 1 = 247.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 246;
+    const TOTAL_MUTANTS = 247;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -537,14 +540,14 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/workflow-executor-mutants.ts": 45,
       "scripts/mutations/context-window.ts": 15,
       "scripts/mutations/auth-mutants.ts": 13,
-      "scripts/mutations/supervision-mutants.ts": 19,
+      "scripts/mutations/supervision-mutants.ts": 20,
     };
     expect(new Set(Object.keys(CONTAGEM_POR_CATALOGO))).toEqual(new Set(CATALOGOS.keys()));
     for (const [path, mutants] of CATALOGOS) {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(246);
+    expect(somaTabela).toBe(247);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {

@@ -1,4 +1,4 @@
-// Catálogo de 19 mutantes da fatia `supervision` (issue #451, milestone 14 —
+// Catálogo de 20 mutantes da fatia `supervision` (issue #451, milestone 14 —
 // achado de QA/revisão de M10, épico #421): `npm run mutations:all` seguia
 // 227/227 apesar de ~1.000 linhas novas em `src/workflow/{steer-tool,
 // leaf-read-tool,route-faults,route-override}.ts`, no bloco de steer de
@@ -19,6 +19,7 @@ const steerTool = "src/workflow/steer-tool.ts";
 const leafReadTool = "src/workflow/leaf-read-tool.ts";
 const routeFaults = "src/workflow/route-faults.ts";
 const routeOverride = "src/workflow/route-override.ts";
+const engine = "src/workflow/engine.ts";
 const auditRuntime = "src/workflow/audit-runtime.ts";
 const orchestrationCore = "src/orchestration/core.ts";
 const childRunner = "src/orchestration/child-runner.ts";
@@ -28,6 +29,7 @@ const steerToolFocus = "tests/workflow-steer-tool.test.ts";
 const leafReadFocus = "tests/workflow-leaf-read-tool.test.ts";
 const routeFaultsFocus = "tests/workflow-route-faults.test.ts";
 const routeOverrideFocus = "tests/workflow-route-override.test.ts";
+const routeOverrideNestedFocus = "tests/workflow-route-override-nested.test.ts";
 const delegateEnvelopeFocus = "tests/orchestration-delegate-envelope.test.ts";
 const transportErrorKindsFocus = "tests/transport-error-kinds.test.ts";
 
@@ -257,6 +259,28 @@ export const supervisionMutants: readonly Mutant[] = [
           "export function registrationPayload(\n  priorView: PriorPauseView | null,\n  options: Readonly<{ routeOverride?: RouteOverride }>,\n): string | null {\n  const pivots = nextPivots(priorView?.pivots ?? [], options.routeOverride);\n  return pivots.length === 0 ? null : JSON.stringify({ pivots });\n}",
         after:
           "export function registrationPayload(\n  priorView: PriorPauseView | null,\n  options: Readonly<{ routeOverride?: RouteOverride }>,\n): string | null {\n  void priorView;\n  void options;\n  return null;\n}",
+      },
+    ],
+  },
+  // #452 (M14, follow-up de #427 mergeado durante esta issue, PR #472):
+  // `overrideNestedSpec` (route-override.ts) só existe porque `runNested`
+  // (engine.ts) via um `ref` só resolvido em runtime, depois de #427's
+  // `pivotResume` já ter rodado na spec EXTERNA — sem esta chamada, um
+  // pivô de rota nunca alcança um template aninhado.
+  {
+    id: "O5-nested-route-override-not-applied",
+    category: "nested-route-override-not-applied",
+    mechanism: "family-a",
+    focus: {
+      file: routeOverrideNestedFocus,
+      test: "WorkflowService.start → pause por route_fault na folha aninhada → resume com route completa o run; pivots com 1 entrada",
+    },
+    edits: [
+      {
+        file: engine,
+        before:
+          "const result = await nested.run(overrideNestedSpec(parsed, this.routeOverride), args);",
+        after: "const result = await nested.run(parsed, args);",
       },
     ],
   },
