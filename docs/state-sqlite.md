@@ -138,6 +138,56 @@ produção que grava aqui (`createNoticesSink`, um por processo), o mapa de
 `workflow_notices_ack`) e `lohra workflow notices` — issues #401/#402
 (M8-5/M8-6) — estão em `docs/operator-notices.md`.
 
+## `workflow_node_cache.identity_version`: carimbo, nunca chave (#461, M11-S3)
+
+`identity_version` é uma coluna `TEXT` adicionada a `workflow_node_cache`
+por `addedColumns` (`src/state/schema.ts:149`, aplicada por
+`addMissingColumns` em toda abertura de conexão — um `ALTER TABLE ... ADD
+COLUMN` que ignora silenciosamente só o erro "duplicate column name",
+`src/state/connection.ts:68-75`) — o mesmo mecanismo que já adicionou as
+outras colunas da lista, nunca uma migração versionada à parte.
+
+- **Nunca faz parte da chave de lookup** (`content_hash`/`run_id`) —
+  `CELL_IDENTITY_VERSION` (`src/workflow/cache.ts:38`, hoje `"1"`) só
+  CARIMBA a célula na escrita, na MESMA transação do INSERT da célula
+  (`putCacheCellWithCost`, `src/state/workflow-repository.ts:256-319`,
+  o carimbo em si `:274-283`),
+  nunca entra no hash que decide se uma célula é a mesma.
+  `CELL_IDENTITY_VERSION` só sobe quando as PARTES que uma célula hasheia
+  mudam (`runAgent`/`runParallel`/... em `engine.ts`,
+  `loopCellParts`/`replayOrCollectBranch`/... em `engine-utils.ts`) — nunca
+  numa migração de schema nem num release de rotina; o bump vive na MESMA
+  PR que a mudança, pinado por `tests/workflow-cache-stamp.test.ts`.
+- **Marca, nunca invalida** — decisão 3 do épico #458 (comentário do
+  orquestrador na issue #458, 2026-09-12): a alternativa "chave versionada"
+  do enunciado do milestone (um bump invalidaria TODO cache durável) foi
+  registrada como rejeitada; o carimbo é coerente com "custo, não
+  corrupção" (`docs/decisions/2026-09-10-cache-escopo-irmaos.md`, seção
+  "Consequência para bancos existentes") e com o precedente do Python #75
+  ("marcar, nunca invalidar"), citados pelo próprio comentário da decisão.
+  Detalhe completo em
+  [`docs/decisions/2026-09-13-carimbo-da-celula.md`](decisions/2026-09-13-carimbo-da-celula.md).
+- **Leitura** (`SqliteWorkflowCache.lookup`, `src/workflow/sqlite-cache.ts:48-99`,
+  com `SELECT` próprio contra `workflow_node_cache`; a mesma coluna também
+  volta por `WorkflowRepository.getCacheCell`,
+  `src/state/workflow-repository.ts:199-212`, usado fora do caminho de
+  cache) classifica um HIT em `versionState`: `current` (carimbo bate com
+  `CELL_IDENTITY_VERSION`), `stale` (carimbo presente mas DIFERENTE — a
+  identidade da célula mudou desde que foi escrita, tipicamente um pivô de
+  rota) ou `unstamped` (`NULL` — célula gravada antes desta coluna
+  existir). O replay acontece EXATAMENTE igual nos três casos — só a
+  classificação muda; `version_state` chega ao ledger via
+  `cache.replayed` (`docs/workflow-audit.md`). `MemoryWorkflowCache`
+  (`src/workflow/cache.ts`) nunca reporta `unstamped` — só tem células da
+  vida do processo, todas carimbadas — só `current`/`stale`.
+- **`node_id` da célula passa a ESCOPADO** (`scopedCheckpointId`,
+  `<workflowNodeId>.<innerNodeId>` dentro de um nó `workflow` aninhado):
+  antes de #461 a coluna física guardava o id CRU do nó (`engine.ts`'s
+  `cachePut`), enquanto `cacheGet`/`nodeCosts` já usavam a forma escopada
+  desde #348 — a mesma inconsistência que fazia `hasCellForNode` (miss
+  classification) e a coluna da célula divergirem para um nó dentro de um
+  `workflow` aninhado. Hoje as duas leem/escrevem a MESMA forma escopada.
+
 ## Referências
 
 - `src/state/connection.ts:93-154`
