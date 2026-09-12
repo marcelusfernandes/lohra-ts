@@ -86,3 +86,9 @@ provider, model` no fim (precedente #232); remover/reordenar continua
 suggested_route: null}`; kind que pausa nunca entra em `faultKinds`;
   primeiro a pausar vence entre rota e quota; sem pivô automático, sem
   re-key de célula, sem override de rota no resume (S6).
+- [2026-09-13 — Flags de rota com assinatura ativa: fail-fast, não override
+  por invocação](2026-09-13-flags-de-rota-com-assinatura.md) — em modo
+  `subscription`, `--provider` explícito (com ou sem `--model`) devolve
+  `initializationError` citando `lohra auth prefer api_key`, antes de
+  qualquer rede; `--model` sozinho continua indo ao Codex; override por
+  invocação (opção B) fica como possível issue futura.
