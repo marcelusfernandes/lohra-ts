@@ -589,4 +589,47 @@ export const supervisionMutants: readonly Mutant[] = [
       },
     ],
   },
+  // Issue #502 (non_blocking 4, PR #497): `estimated_tokens_to_repay`/
+  // `estimate_basis` (`:388-390`) had no mutant at all in this catalog —
+  // P1-P6 above never touch this pair. Both anchored on the SAME new `it`
+  // in `tests/workflow-cache-preview-writes.test.ts`, which plants
+  // `workflow_node_cost` rows directly so the averaged value is fractional
+  // (30.5) — a dropped `Math.round` and a hardcoded `null` basis are two
+  // independent bugs a single scalar oracle on either field alone would not
+  // both catch.
+  {
+    id: "P7-estimated-tokens-to-repay-drops-rounding",
+    category: "estimated-tokens-to-repay-drops-rounding",
+    mechanism: "family-a",
+    focus: {
+      file: cachePreviewWritesFocus,
+      test: "averages workflow_node_cost across the run and rounds leavesToSpawn * average exactly",
+    },
+    edits: [
+      {
+        file: cachePreview,
+        before:
+          "  const estimatedTokensToRepay = average === null ? null : Math.round(leavesToSpawn * average);",
+        after:
+          "  const estimatedTokensToRepay = average === null ? null : leavesToSpawn * average;",
+      },
+    ],
+  },
+  {
+    id: "P8-estimate-basis-always-null",
+    category: "estimate-basis-always-null",
+    mechanism: "family-a",
+    focus: {
+      file: cachePreviewWritesFocus,
+      test: "averages workflow_node_cost across the run and rounds leavesToSpawn * average exactly",
+    },
+    edits: [
+      {
+        file: cachePreview,
+        before:
+          '  const estimateBasis: "measured_average" | null = average === null ? null : "measured_average";',
+        after: '  const estimateBasis: "measured_average" | null = null;',
+      },
+    ],
+  },
 ];
