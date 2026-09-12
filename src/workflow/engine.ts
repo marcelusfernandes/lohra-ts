@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 
 import { usage } from "../pricing/usage.js";
 import type { Usage } from "../pricing/types.js";
-import { foldNestedCounters, RunResult, addUsageToResult } from "./accounting.js";
+import {
+  foldNestedCounters,
+  nestedScopePrefix,
+  RunResult,
+  addUsageToResult,
+} from "./accounting.js";
 import { Budget, FanoutRejected, TokenBudgetExhausted } from "./budget.js";
 import { contentHash, MemoryWorkflowCache, type WorkflowCache } from "./cache.js";
 import {
@@ -870,7 +875,9 @@ export class WorkflowEngine {
     this.result.reasoningTokens += result.reasoningTokens;
     for (const [nodeId, cost] of Object.entries(result.nodeCosts))
       this.result.nodeCosts[`sub[${reference}]:${nodeId}`] = cost;
-    this.result.faults.push(...result.faults.map((fault) => `sub[${reference}]: ${fault}`));
+    this.result.faults.push(
+      ...result.faults.map((fault) => `${nestedScopePrefix(reference)}${fault}`),
+    );
     this.result.validationRetries += result.validationRetries;
     this.result.capTrips += result.capTrips;
     this.result.engineFaults += result.engineFaults;

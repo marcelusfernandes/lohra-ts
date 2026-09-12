@@ -347,15 +347,16 @@ export function dedupeArtifactFaultsByPath(faults: readonly string[]): string[] 
   return kept;
 }
 
-/** #539: the ONE place that spells the SPACED `sub[${reference}]: ` scope
- * prefix a fault string carries — `foldNestedCounters` below and
- * `faultPrefixFromNodeId` right below both call this instead of inlining
- * the template literal, so the two producers of a scoped fault string can
- * never drift out of the shape `NESTED_SCOPE_PREFIX_RE`/`collisionKeyOf`
- * above parse. Never used for `RunArtifact.node_id` itself — that stays the
- * UNSPACED `sub[${reference}]:${nodeId}` contract pinned by
+/** #539/#540: the ONE place that spells the SPACED `sub[${reference}]: `
+ * scope prefix a fault string carries — `foldNestedCounters` below,
+ * `faultPrefixFromNodeId` right below, and `engine.ts`'s own
+ * `runNested`(the `result.faults` fold) all call this instead of inlining
+ * the template literal, so no producer of a scoped fault string can drift
+ * out of the shape `NESTED_SCOPE_PREFIX_RE`/`collisionKeyOf` above parse.
+ * Never used for `RunArtifact.node_id` itself — that stays the UNSPACED
+ * `sub[${reference}]:${nodeId}` contract pinned by
  * `tests/workflow-artifacts.test.ts:331`. */
-function nestedScopePrefix(reference: string): string {
+export function nestedScopePrefix(reference: string): string {
   return `sub[${reference}]: `;
 }
 
