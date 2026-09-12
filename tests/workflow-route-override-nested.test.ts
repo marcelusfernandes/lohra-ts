@@ -169,6 +169,21 @@ function serviceHarness(runtime: ChildRuntime) {
   };
 }
 
+/** No-`store` harness — the LIVE site (`service.ts`'s `launch`, not
+ * `launchDurable`; `service.ts:544-553` picks it whenever `store` is
+ * `undefined`). #476 (achado da PR #472 veredito r2): every other test in
+ * this file, and in `tests/workflow-route-override.test.ts` (#427), builds
+ * `WorkflowService` WITH a `store` — none exercises `service.ts:~590`'s own
+ * `...routeOverrideOption(options.routeOverride)` spread, the copy that
+ * threads a pivot into a NESTED `ref` template on the ephemeral path. Same
+ * `loader` as `serviceHarness` above, no database — `this.cache` (a fresh
+ * `MemoryWorkflowCache`, `service.ts`'s own default) is what lets a second
+ * `start()` call on the SAME `run_id` replay the completed `free` leaf and
+ * retry only `pinned`. */
+function noStoreService(runtime: ChildRuntime) {
+  return new WorkflowService({ runtime, loader: () => childTemplate() });
+}
+
 /** Engine-level harness for the contra-assertion below ONLY — the AC test
  * above goes through `WorkflowService`. Same `runId` + shared cache between
  * two `WorkflowEngine` constructions simulates a resume without a pivot
@@ -241,6 +256,40 @@ describe("run_workflow(resume_run_id, route) reaches a sub-workflow by ref — c
     } finally {
       close();
     }
+  });
+});
+
+describe("run_workflow(route) reaches a sub-workflow by ref on the LIVE site (no store, #476)", () => {
+  it("WorkflowService WITHOUT a store threads routeOverride into a nested ref template on resume — pause por route_fault, resume com route completa o run", async () => {
+    const runtime = new RoutingFakeRuntime("bad-provider");
+    const service = noStoreService(runtime);
+    const started = service.start(parentSpecRaw());
+    if ("error" in started) throw new Error(started.error);
+    const paused = await service.status(started.run_id, true);
+    if ("error" in paused) throw new Error(String(paused.error));
+    expect(paused.status).toBe("paused");
+    expect(paused.pause_reason).toBe("route_fault");
+
+    // No durable store: `prior` is always null (`service.ts`'s `durableOf`
+    // returns null without one), so a route-less resume has no spec on
+    // file — this second call re-supplies the SAME spec explicitly while
+    // still naming `resumeRunId`, exactly what reaches `launch()` (never
+    // `launchDurable`) with `options.routeOverride` set.
+    const routeOverride = { provider: "good" };
+    const resumed = service.start(
+      parentSpecRaw(),
+      {},
+      {
+        resumeRunId: started.run_id,
+        routeOverride,
+      },
+    );
+    if ("error" in resumed) throw new Error(resumed.error);
+    const live = await service.status(started.run_id, true);
+    if ("error" in live) throw new Error(String(live.error));
+    expect(live.status).toBe("complete");
+    expect(live.outputs).toEqual({ sub: { free: { ok: true }, pinned: { ok: true } } });
+    expect(live.pivots).toEqual([{ ...routeOverride, channel: "operator" }]);
   });
 });
 

@@ -38,7 +38,18 @@ provider, model, suggested_route}` (`src/workflow/route-faults.ts`,
   S6 — fora desta issue). Nenhum resolvedor de "rota de cobrança" (`routeFor`,
   `src/auth/credentials.ts`) está ligado ao engine nesta issue — "rota
   desconhecida" e "precisa de um humano" são o mesmo estado, por construção,
-  não por omissão.
+  não por omissão. **Atualização (2026-09-13, issues #459/#460, M11-S1/S2)**:
+  esse "sempre" deixou de valer — o operador pode pré-autorizar fallbacks em
+  `workflow_routes.json`, e `withSuggestedRoute` (`route-faults.ts`) passou
+  a preencher `suggested_route` a partir dele; um resume SEM `route` pode
+  até aplicar essa sugestão sozinho (canal `route_envelope`), consumindo um
+  dos mesmos 3 pivôs. O que não mudou: pivotar continua exigindo um
+  `run_workflow(resume_run_id=...)` — automático só no CANAL, nunca no
+  DISPARO — e nenhum resolvedor de rota de cobrança foi ligado ao engine.
+  Detalhe em
+  [`docs/decisions/2026-09-13-envelope-de-rotas.md`](2026-09-13-envelope-de-rotas.md)
+  e
+  [`docs/decisions/2026-09-13-canal-route-envelope.md`](2026-09-13-canal-route-envelope.md).
 - **Um kind que pausa o run nunca entra em `faultKinds`/`fault_kinds_total`**
   (emenda 2026-09-12): a guarda que já excluía só `quota_exhausted`
   (`engine-utils.ts:487`, antes `:490`) foi generalizada para um predicado
@@ -196,13 +207,16 @@ null` — a própria escrita de registro do stretch e a escrita de
   (`launch`/`launchDurable`) não passava `options.routeOverride` adiante —
   rodada 2 fecha o threading (`routeOverrideOption`, `engine-options.ts`)
   nos dois pontos reais de construção, provado por um teste que sobe
-  `WorkflowService.start`/resume de ponta a ponta. **Ressalva prática**: o
-  mecanismo é real, mas hoje só é alcançável com um `loader` injetado à
-  mão (como o teste acima) — nenhum composition root (`chat.ts`,
-  `dashboard.ts`) passa `loader` para `WorkflowService`, então `runNested`
-  ainda lança `"workflow loader unavailable"` (`engine.ts:837`) em
-  produção; ligar o loader do operador é o #464 (M11), pré-requisito
-  prático desta issue para deixar de ser só mecanismo testado.
+  `WorkflowService.start`/resume de ponta a ponta. **Ressalva prática
+  (resolvida em 2026-09-13, #464/M11-S6)**: na época desta issue o
+  mecanismo era real mas só alcançável com um `loader` injetado à mão (como
+  o teste acima) — nenhum composition root passava `loader` para
+  `WorkflowService`. Desde o #464, `chat.ts`/`dashboard.ts` passam
+  `loader: templateLoader(options.home)`, então um nó `{type: "workflow",
+ref}` (e o pivô de rota que o alcança) funciona em produção; `runNested`
+  só lança `"workflow loader unavailable"` (`engine.ts:837`) quando um
+  composition root de fato não configura o loader — nunca mais o caso de
+  `chat`/`dashboard`.
 
 ### O que esta issue NÃO faz
 

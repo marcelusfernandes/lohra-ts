@@ -401,6 +401,67 @@ describe("resume sem 'route' aplica suggested_route do envelope — channel rout
     }
   });
 
+  it("negation: an explicit 'route' wins over a DIFFERENT envelope suggestion — pivots[0] is the explicit route (channel 'operator'), and node.rerouted.to reflects it too (#476, achado da PR #486)", async () => {
+    const home = tempHome();
+    writeTiersFile(home, { small: { provider: "bad-provider", model: "m-bad" } });
+    // Envelope suggests a THIRD provider for the dead route — neither the
+    // node's own original nor the explicit override below — so a
+    // precedence bug that swaps `pivotResume`'s two branches (envelope
+    // checked before explicit, `route-override.ts:290-336`) is observable:
+    // it would apply "other-provider/m-other" instead, and
+    // `FailUntilGoodRuntime` only succeeds for "good-provider".
+    writeRoutesFile(home, {
+      "bad-provider/m-bad": [{ provider: "other-provider", model: "m-other" }],
+    });
+    const { service, repository, audit, close } = harness(
+      new FailUntilGoodRuntime("good-provider"),
+      home,
+    );
+    try {
+      const started = service.start(tierSpec());
+      if ("error" in started) throw new Error(started.error);
+      await service.status(started.run_id, true);
+      const before = repository.getRunState(started.run_id) as Record<string, unknown>;
+      expect(durableFromRow(before).pause_reason).toBe("route_fault");
+      // The checkpoint DOES carry a non-null suggested_route — the branch a
+      // precedence bug would take instead of the explicit one below.
+      expect(durableFromRow(before).checkpoint?.suggested_route).toEqual({
+        provider: "other-provider",
+        model: "m-other",
+      });
+
+      const resumed = service.start(
+        null,
+        {},
+        {
+          resumeRunId: started.run_id,
+          routeOverride: { provider: "good-provider", model: "m-good" },
+        },
+      );
+      if ("error" in resumed) throw new Error(resumed.error);
+      await service.status(started.run_id, true);
+
+      const line = repository.getRunState(started.run_id) as Record<string, unknown>;
+      const view = durableFromRow(line);
+      expect(view.status).toBe("complete");
+      const pivots = pivotsOf({ pivots: view.pivots });
+      expect(pivots).toEqual([{ provider: "good-provider", model: "m-good", channel: "operator" }]);
+
+      const segmentId = segmentIdOf(repository, started.run_id);
+      const page = audit.query({ runId: started.run_id, segmentId, limit: 50 });
+      const rerouted = page.events.filter((event) => event.event_type === "node.rerouted");
+      expect(rerouted).toHaveLength(1);
+      expect(rerouted[0]?.data).toEqual({
+        channel: "operator",
+        pivot: 1,
+        from: { provider: "bad-provider", model: "m-bad" },
+        to: { provider: "good-provider", model: "m-good" },
+      });
+    } finally {
+      close();
+    }
+  });
+
   it("a run that never pivots keeps a pause_payload_json with no 'pivots' key at all (contra-asserção)", async () => {
     const { service, repository, close } = harness(new FailUntilGoodRuntime("good-provider"));
     try {

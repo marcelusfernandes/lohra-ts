@@ -262,11 +262,13 @@ quando o gasto de tokens excede `token_budget`, o campo de tokens ganha
 dica de retomada certa (a mesma que `run_workflow` devolve como `hint`)
 assim que o run termina pausado; `quota_exhausted` não tem dica porque
 retoma sozinho, sem ação do operador, e `route_fault` também não tem `hint`
-— em vez disso o run carrega `lesson` (o nó, o kind e a rota recusada), e a
-retomada certa é `run_workflow(resume_run_id=..., route={provider?,
-model?})` numa rota diferente (issue #245, `tests/workflow-command.test.ts`;
-`route_fault` e o pivô de rota em
-[`docs/workflow-supervision.md`](docs/workflow-supervision.md)).
+— em vez disso o run carrega `lesson` (o nó, o kind e a rota recusada, e,
+desde a milestone 11, uma `suggested_route` quando o operador pré-autorizou
+um fallback em `workflow_routes.json`), e a retomada certa é
+`run_workflow(resume_run_id=..., route={provider?, model?})` numa rota
+diferente — ou, sem `route`, aplicando a sugestão do envelope sozinha
+(issue #245, `tests/workflow-command.test.ts`; `route_fault`, o envelope e o
+pivô de rota em [`docs/workflow-supervision.md`](docs/workflow-supervision.md)).
 
 Um run em voo tem duas caudas independentes. Em processo — o mesmo que
 lançou ou retomou o run —, `workflow_status` devolve `live_tail`
@@ -290,7 +292,12 @@ Três tools deixam intervir num run em voo sem esperar ele pausar sozinho:
 vivo já assentou (conteúdo bruto, não redigido — diferente de
 `workflow_audit`); e um run pausado com `route_fault` retoma numa rota
 diferente com `run_workflow(resume_run_id=..., route={provider?, model?})`.
-Detalhes, tetos e o que cada um NÃO faz em
+`workflow_preview {run_id, route?}` faz o dry-run desse resume — o que
+replayaria, o que recomputaria e por quê — sem gastar token, sem escrever
+nada e sem consumir um dos 3 pivôs de rota do run; `workflow_templates`
+lista e carrega a biblioteca de specs do operador
+(`~/.lohra/workflows/<ref>.json`), a mesma que um nó `{type: "workflow",
+ref}` referencia. Detalhes, tetos e o que cada um NÃO faz em
 [`docs/workflow-supervision.md`](docs/workflow-supervision.md).
 
 A tool `list_models` reporta `context_window` por modelo — a janela de

@@ -286,7 +286,7 @@ describe("workflow audit — leaf.steered (#423)", () => {
   // outcome.refused === undefined` (covers `{queued:true}` and the
   // idle/terminal-resurrection `{queued:false}` above) still records.
   it("S1's steer_cap refusal ({queued:false, refused:'steer_cap'}) never reaches the ledger (#444)", async () => {
-    const { audit, deps, close } = directHarness();
+    const { audit, trail, deps, close } = directHarness();
     try {
       const inner: ChildRuntime = withMinimalLeafSandbox({
         spawn: (): string => "leaf-1",
@@ -298,6 +298,14 @@ describe("workflow audit — leaf.steered (#423)", () => {
       const runtime = auditedChildRuntime(inner, deps);
       await runtime.spawn({ prompt: "one", causalContext: CAUSAL });
       await runtime.steer("leaf-1", "eleventh steer", CAUSAL, "operator");
+      // #476: flush BEFORE the query — `AuditTrail.record` only buffers, so
+      // without a flush this assertion would read zero rows even if A1
+      // (`audit-runtime.ts:344`, `outcome.refused === undefined`) never ran
+      // at all — an absence the buffer manufactures, not one the guard
+      // proves (PR #474 veredito). Manual mutant check (test plan):
+      // reverting :344 to `outcome !== null` makes THIS assertion fail,
+      // exactly because the flush lets the wrongly-recorded row surface.
+      await trail.flush();
       const page = audit.query({ runId: CAUSAL.runId, limit: 50 });
       expect(page.events.filter((event) => event.event_type === "leaf.steered")).toHaveLength(0);
     } finally {
@@ -306,7 +314,7 @@ describe("workflow audit — leaf.steered (#423)", () => {
   });
 
   it("core.steer returning null (id unrecognised/terminal to the core) never reaches the ledger (#444)", async () => {
-    const { audit, deps, close } = directHarness();
+    const { audit, trail, deps, close } = directHarness();
     try {
       const inner: ChildRuntime = withMinimalLeafSandbox({
         spawn: (): string => "leaf-1",
@@ -318,6 +326,10 @@ describe("workflow audit — leaf.steered (#423)", () => {
       const runtime = auditedChildRuntime(inner, deps);
       await runtime.spawn({ prompt: "one", causalContext: CAUSAL });
       await runtime.steer("leaf-1", "hello", CAUSAL, "operator");
+      // #476: same reasoning as the `steer_cap` case above — flush before
+      // asserting absence, or the buffer (not the guard) is what the
+      // assertion actually tests.
+      await trail.flush();
       const page = audit.query({ runId: CAUSAL.runId, limit: 50 });
       expect(page.events.filter((event) => event.event_type === "leaf.steered")).toHaveLength(0);
     } finally {
