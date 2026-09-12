@@ -350,24 +350,49 @@ export function auditedChildRuntime(
     // the declared type of this very call — is treated the SAME as `null`
     // (unrecognised/terminal id): never invented into a `{queued: true}`
     // this decorator has no evidence for.
+    //
+    // Issue #444: `record` used to run BEFORE `inner.steer` resolved —
+    // 11 `leaf.steered` for 10 actually-queued steers (S1's cap test), and
+    // a steer on an unrecognised/terminal id still wrote an event. The
+    // outcome is awaited FIRST now; `record` only runs when it is proof of
+    // a real delivery: `outcome !== null && outcome.refused === undefined`.
+    // That covers BOTH `{queued: true}` (busy leaf, pushed to the inbox,
+    // core.ts:328-329) AND `{queued: false}` with no `refused` — the
+    // idle/terminal "resurrect" branch (core.ts:331-345), which genuinely
+    // starts a new turn with the steer text. This matters: the engine's
+    // schema-retry `steer()` (engine.ts:274-314, #423's original motivating
+    // scenario) always calls `steer()` AFTER a `collect(wait: true)` that
+    // already returned "complete" — the entry is idle, not inFlight, by
+    // then, so `core.steer` ALWAYS takes the resurrection branch and
+    // returns `{queued: false}` there. Gating strictly on `queued === true`
+    // would silently drop that entire scenario from the ledger — a false
+    // negative of the exact kind (invariant 2, CLAUDE.md) this issue exists
+    // to remove a false positive of.
+    //
+    // `OrchestrationCore.steer`'s four real outcomes (core.ts:316-346),
+    // confirmed with the orchestrator (issue #444) as the full table this
+    // predicate has to cover:
+    //
+    //   outcome                          | delivered? | leaf.steered?
+    //   ----------------------------------|------------|---------------
+    //   {queued: true}                    | yes (inbox)| yes
+    //   {queued: false}  (no `refused`)   | yes (resurrect, new turn) | yes
+    //   {queued: false, refused:"steer_cap"} | no      | no (tool already
+    //     surfaces this as a named error, #424)
+    //   null (id never spawned / forgotten)  | no      | no
+    //
+    // A fifth row, `undefined` — a `ChildRuntime` that reports nothing at
+    // all (every implementation before `OrchestrationChildRuntime`) — is
+    // not a real `core.steer` outcome, but reaches here the same way: no
+    // object, `outcome` normalises to `null` above, and is treated
+    // identically — never invented into evidence of delivery this decorator
+    // does not have.
     steer: async (
       id: string,
       prompt: string,
       causalContext?: CausalContext,
       source: "engine" | "operator" = "engine",
     ): Promise<void> => {
-      const identity = identities.get(id);
-      if (identity !== undefined) {
-        const cc = identity.causal;
-        record(identity.runId, {
-          event_type: "leaf.steered",
-          segment_id: cc.segmentId,
-          node_id: cc.nodePath.at(-1) ?? null,
-          sub_id: id,
-          attempt: cc.attempt,
-          payload: { source, message_chars: Array.from(prompt).length },
-        });
-      }
       // `inner: ChildRuntime` declares `steer` as `Awaitable<void>` — the
       // pending value itself is retyped `Promise<unknown>` before
       // awaiting (never the resolved value blindly cast), same posture
@@ -378,6 +403,18 @@ export function auditedChildRuntime(
         raw !== null && typeof raw === "object"
           ? (raw as { readonly queued: boolean; readonly refused?: "steer_cap" })
           : null;
+      const identity = identities.get(id);
+      if (identity !== undefined && outcome !== null && outcome.refused === undefined) {
+        const cc = identity.causal;
+        record(identity.runId, {
+          event_type: "leaf.steered",
+          segment_id: cc.segmentId,
+          node_id: cc.nodePath.at(-1) ?? null,
+          sub_id: id,
+          attempt: cc.attempt,
+          payload: { source, message_chars: Array.from(prompt).length },
+        });
+      }
       // Declared `Promise<void>` (see the interface comment above) — the
       // REAL outcome still travels through the return, recovered by
       // `workflow_steer` (steer-tool.ts) with this SAME `typeof === "object"`

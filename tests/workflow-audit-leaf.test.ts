@@ -79,8 +79,18 @@ function scriptedRuntime(scripts: readonly (readonly ChildResult[])[]): ChildRun
       const queue = byId.get(id) ?? [];
       return queue.shift() ?? { status: "failed", output: "script exhausted" };
     },
+    // #444: the schema-retry `steer()` this scriptedRuntime exists for
+    // always arrives AFTER the leaf's first `collect()` already returned
+    // "complete" (engine.ts:274-296) — the entry is idle, not inFlight, so
+    // the REAL `OrchestrationCore.steer` (core.ts:331-345) always takes the
+    // idle/terminal "resurrect" branch and returns `{queued: false}` (no
+    // `refused`), a genuine delivery. `auditedChildRuntime.steer`
+    // (audit-runtime.ts) now needs that proof of delivery before it
+    // records `leaf.steered` — a plain `void` return here would look
+    // identical to a `ChildRuntime` that reports nothing at all.
     steer(id: string, prompt: string): void {
       steered.push({ id, prompt });
+      return { queued: false } as unknown as undefined;
     },
     cancel(id: string): void {
       cancelled.push(id);

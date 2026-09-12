@@ -88,8 +88,17 @@ function scriptedRuntime(scripts: readonly (readonly ChildResult[])[]): ChildRun
       const queue = byId.get(id) ?? [];
       return queue.shift() ?? { status: "failed", output: "script exhausted" };
     },
+    // #444: the leaf's FIRST collect() already returned "complete" before the
+    // engine's schema check runs (engine.ts:274-296) — the entry is idle, not
+    // inFlight, when the schema-retry `steer()` arrives. The REAL
+    // `OrchestrationCore.steer` (core.ts:331-345) takes the idle/terminal
+    // "resurrect" branch in that exact shape and returns `{queued: false}`
+    // (no `refused`) — a genuine delivery, not a refusal. This scripted mock
+    // returns the SAME shape a real core would, so this test exercises the
+    // #444 predicate honestly instead of masking it with `{queued: true}`.
     steer(id: string, prompt: string): void {
       steered.push({ id, prompt });
+      return { queued: false } as unknown as undefined;
     },
     cancel: (): void => undefined,
   });
@@ -212,7 +221,10 @@ describe("workflow audit — leaf.steered (#423)", () => {
       const inner: ChildRuntime = withMinimalLeafSandbox({
         spawn: (): string => "leaf-1",
         collect: (): ChildResult => ({ status: "running", output: null }),
-        steer: (): void => undefined,
+        // #444: a busy leaf's REAL `core.steer` (core.ts:323-329) pushes to
+        // the inbox and returns `{queued: true}` — the realistic outcome for
+        // an operator steer at a still-running leaf.
+        steer: (): void => ({ queued: true }) as unknown as undefined,
         cancel: (): void => undefined,
       });
       const runtime = auditedChildRuntime(inner, deps);
@@ -249,6 +261,79 @@ describe("workflow audit — leaf.steered (#423)", () => {
       const runtime = auditedChildRuntime(inner, deps);
       await runtime.steer("never-opened", "hello", CAUSAL, "operator");
       expect(delegated).toEqual(["never-opened", "hello"]);
+      const page = audit.query({ runId: CAUSAL.runId, limit: 50 });
+      expect(page.events.filter((event) => event.event_type === "leaf.steered")).toHaveLength(0);
+    } finally {
+      close();
+    }
+  });
+
+  // #444: `leaf.steered` was recorded BEFORE `inner.steer` resolved — a
+  // refusal, an unrecognised/terminal id, or an old `ChildRuntime` that
+  // reports nothing at all (`void`, the port's own declared type) all wrote
+  // the SAME event a genuinely-delivered steer would. The three cases below
+  // pin the negative side of the fix: only `outcome !== null &&
+  // outcome.refused === undefined` (covers `{queued:true}` and the
+  // idle/terminal-resurrection `{queued:false}` above) still records.
+  it("S1's steer_cap refusal ({queued:false, refused:'steer_cap'}) never reaches the ledger (#444)", async () => {
+    const { audit, deps, close } = directHarness();
+    try {
+      const inner: ChildRuntime = withMinimalLeafSandbox({
+        spawn: (): string => "leaf-1",
+        collect: (): ChildResult => ({ status: "running", output: null }),
+        steer: (): void => ({ queued: false, refused: "steer_cap" }) as unknown as undefined,
+        cancel: (): void => undefined,
+      });
+      const runtime = auditedChildRuntime(inner, deps);
+      await runtime.spawn({ prompt: "one", causalContext: CAUSAL });
+      await runtime.steer("leaf-1", "eleventh steer", CAUSAL, "operator");
+      const page = audit.query({ runId: CAUSAL.runId, limit: 50 });
+      expect(page.events.filter((event) => event.event_type === "leaf.steered")).toHaveLength(0);
+    } finally {
+      close();
+    }
+  });
+
+  it("core.steer returning null (id unrecognised/terminal to the core) never reaches the ledger (#444)", async () => {
+    const { audit, deps, close } = directHarness();
+    try {
+      const inner: ChildRuntime = withMinimalLeafSandbox({
+        spawn: (): string => "leaf-1",
+        collect: (): ChildResult => ({ status: "running", output: null }),
+        steer: (): void => null as unknown as undefined,
+        cancel: (): void => undefined,
+      });
+      const runtime = auditedChildRuntime(inner, deps);
+      await runtime.spawn({ prompt: "one", causalContext: CAUSAL });
+      await runtime.steer("leaf-1", "hello", CAUSAL, "operator");
+      const page = audit.query({ runId: CAUSAL.runId, limit: 50 });
+      expect(page.events.filter((event) => event.event_type === "leaf.steered")).toHaveLength(0);
+    } finally {
+      close();
+    }
+  });
+
+  it("a ChildRuntime that reports nothing (`undefined`, the declared void return) is treated as unproven, not recorded (#444)", async () => {
+    // Decision (documented in #444's comment thread): NOT recording here is
+    // deliberate, not an oversight. `undefined` is what every OTHER
+    // `ChildRuntime.steer` implementation returns today (the port's own
+    // declared type, `runtime.ts`) — the only production implementation
+    // that reports an outcome at all is `OrchestrationChildRuntime`
+    // (#424). Treating `undefined` as evidence of a queued steer would
+    // invent a fact this decorator has no proof of; a caller with a real
+    // outcome to report already returns an object (`{queued: ...}`), never
+    // relies on this fallback.
+    const { audit, deps, close } = directHarness();
+    try {
+      const inner: ChildRuntime = withMinimalLeafSandbox({
+        spawn: (): string => "leaf-1",
+        collect: (): ChildResult => ({ status: "running", output: null }),
+        steer: (): void => undefined,
+        cancel: (): void => undefined,
+      });
+      const runtime = auditedChildRuntime(inner, deps);
+      await runtime.spawn({ prompt: "one", causalContext: CAUSAL });
+      await runtime.steer("leaf-1", "hello", CAUSAL, "operator");
       const page = audit.query({ runId: CAUSAL.runId, limit: 50 });
       expect(page.events.filter((event) => event.event_type === "leaf.steered")).toHaveLength(0);
     } finally {

@@ -426,6 +426,14 @@ describe("workflow_steer tool (#424)", () => {
       expect(eleventh.ok).toBeUndefined();
       expect(eleventh.error).toMatch(/steer_cap/);
 
+      // #444: `leaf.steered` used to be written BEFORE the core decided —
+      // 11 events for 10 actually-queued steers. The refused 11th must not
+      // reach the ledger at all.
+      await trail.flush();
+      const page = audit.query({ runId: started.run_id, limit: 50 });
+      const steeredEvents = page.events.filter((event) => event.event_type === "leaf.steered");
+      expect(steeredEvents).toHaveLength(10);
+
       release(REAL_COLLECT_RESULT);
       await service.status(started.run_id, true);
     } finally {
@@ -565,6 +573,15 @@ describe("workflow_steer tool (#424)", () => {
       ) as Envelope;
       expect(result.ok).toBeUndefined();
       expect(result.error).toMatch(/terminal or unknown/);
+
+      // #444: a steer on an id the core never spawned must leave no trace —
+      // this is the "id terminal" case the issue calls out (regression pin:
+      // already true on the base, since the decorator's `identities` map
+      // never learned this id — kept here so a future regression that
+      // records unconditionally on ANY resolved sub_id gets caught too).
+      await trail.flush();
+      const page = audit.query({ runId: started.run_id, limit: 50 });
+      expect(page.events.filter((event) => event.event_type === "leaf.steered")).toHaveLength(0);
 
       release(REAL_COLLECT_RESULT);
       await service.status(started.run_id, true);
