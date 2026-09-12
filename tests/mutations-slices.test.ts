@@ -524,9 +524,12 @@ describe("scripts/mutations/slices.json", () => {
     // `cache.put(...)` mesmo com `branches: []`, sem spawnar nenhum leaf)
     // acrescenta P6, ancorado em
     // `tests/workflow-cache-preview-writes.test.ts` (arquivo novo — a suíte
-    // principal está no teto de 800 linhas): 255 + 1 = 256.
+    // principal está no teto de 800 linhas): 255 + 1 = 256. A issue #502
+    // (non_blocking 4, veredito da PR #497) acrescenta P7/P8 —
+    // `estimated_tokens_to_repay`/`estimate_basis` não tinham mutante
+    // nenhum: 256 + 2 = 258.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 256;
+    const TOTAL_MUTANTS = 258;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -551,14 +554,14 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/workflow-executor-mutants.ts": 45,
       "scripts/mutations/context-window.ts": 15,
       "scripts/mutations/auth-mutants.ts": 13,
-      "scripts/mutations/supervision-mutants.ts": 29,
+      "scripts/mutations/supervision-mutants.ts": 31,
     };
     expect(new Set(Object.keys(CONTAGEM_POR_CATALOGO))).toEqual(new Set(CATALOGOS.keys()));
     for (const [path, mutants] of CATALOGOS) {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(256);
+    expect(somaTabela).toBe(258);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {

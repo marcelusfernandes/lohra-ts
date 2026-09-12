@@ -657,6 +657,56 @@ describe("workflow_steer tool (#424)", () => {
     expect(result.error).toMatch(/truncat/i);
   });
 
+  it("a repository page with zero events but next_after_seq genuinely advancing is STILL 'window truncated' — no id read means no progress either (#502)", async () => {
+    // #502 (non_blocking 5, PR #493): the `page.events.length === 0` half of
+    // `pagedSubIds`'s disjunct (steer-tool.ts:218) had no test that exercised
+    // it ALONE — every prior fixture either had `next <= afterSeq` too (the
+    // `stuckPage` case right above) or a non-empty page. This fake reports
+    // genuine forward progress (`next_after_seq: 5 > after_seq: 0`) on its
+    // FIRST call, with zero events: if the `|| page.events.length === 0`
+    // disjunct were removed (leaving only `next <= afterSeq`), the guard
+    // would treat this as adequate progress and loop again — the query stub
+    // below flips to `has_more: false` on any later call, so a removed
+    // disjunct would make this resolve as `truncated: false` (and then fail
+    // resolution some other way), never the named "window truncated" error
+    // this test expects; it does NOT hang, because the stub itself
+    // terminates the loop on the second call either way.
+    const workflowSteerHandler = await loadHandler();
+    let calls = 0;
+    const advancingEmptyAudit = {
+      query: () => {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            run_id: "run-advancing-empty",
+            availability: "available" as const,
+            filters: {},
+            events: [],
+            page: { after_seq: 0, next_after_seq: 5, snapshot_seq: 10, has_more: true },
+            policy: {},
+            integrity: {},
+          };
+        }
+        return {
+          run_id: "run-advancing-empty",
+          availability: "available" as const,
+          filters: {},
+          events: [],
+          page: { after_seq: 5, next_after_seq: 5, snapshot_seq: 10, has_more: false },
+          policy: {},
+          integrity: {},
+        };
+      },
+    } as unknown as AuditRepository;
+    const handler = workflowSteerHandler(unreachableService, advancingEmptyAudit);
+    const result = JSON.parse(
+      await handler({ run_id: "run-advancing-empty", node_id: "a", message: "hi" }),
+    ) as Envelope;
+    expect(result.error).toBeDefined();
+    expect(result.error).toMatch(/truncat/i);
+    expect(calls).toBe(1);
+  });
+
   it("resolves exactly 2000 leaf.started events without a false 'window truncated' when the shared budget lands exactly on the ceiling (#477)", async () => {
     // #477: the old top-of-loop budget check (`if (budget.remaining <= 0)
     // return truncated: true`) tripped on the FOLLOWING `pagedSubIds` call

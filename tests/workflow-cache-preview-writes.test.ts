@@ -191,3 +191,54 @@ describe("previewResume — PreviewCacheFacade.put() (#484 rodada 2, veredito PR
     }
   });
 });
+
+// Issue #502 (non_blocking 4, PR #497): `estimated_tokens_to_repay`/
+// `estimate_basis` (`cache-preview.ts:116-117`, computed at `:388-390`) had
+// no mutant in the `supervision` slice at all — P1-P6 above cover other
+// `PreviewResult` fields, never this pair. `workflow_node_cost` is planted
+// directly (same "insert the row the real write path would eventually
+// produce" posture `tests/state-audit-repository.test.ts` uses for
+// `fieldMarkerRows`) rather than driven through a full costed run — the
+// average's SOURCE rows are not this test's point, only that `query()`'s
+// arithmetic over them is exact.
+describe("previewResume — estimated_tokens_to_repay / estimate_basis (#502)", () => {
+  it("averages workflow_node_cost across the run and rounds leavesToSpawn * average exactly", async () => {
+    const { service, database, preview, close } = harness();
+    try {
+      const spec = {
+        meta: { name: "estimate-repay" },
+        nodes: [{ id: "bad", type: "agent", prompt: "pinned", provider: "bad-provider" }],
+      };
+      const started = service.start(spec);
+      if ("error" in started) throw new Error(started.error);
+      await service.status(started.run_id, true); // pauses on bad's auth_failed — never costed
+
+      // Two costed cells from some OTHER prior work on this run: average =
+      // (10+10 + 20+21) / 2 = 30.5 — a fractional average makes the
+      // rounding in `estimated_tokens_to_repay` observable (a dropped
+      // `Math.round` would leave `30.5`, not `31`).
+      database
+        .prepare(
+          `INSERT INTO workflow_node_cost (run_id, content_hash, tokens_in, tokens_out)
+           VALUES (?, ?, ?, ?)`,
+        )
+        .run(started.run_id, "hash-1", 10, 10);
+      database
+        .prepare(
+          `INSERT INTO workflow_node_cost (run_id, content_hash, tokens_in, tokens_out)
+           VALUES (?, ?, ?, ?)`,
+        )
+        .run(started.run_id, "hash-2", 20, 21);
+
+      const result = await preview({ tiers: {}, runId: started.run_id, now: 1000 });
+      if ("error" in result) throw new Error(result.error);
+      // `bad` never completed durably — the preview's dry run re-spawns it,
+      // exactly the one leaf this run has left to pay for.
+      expect(result.leaves_to_spawn).toBe(1);
+      expect(result.estimated_tokens_to_repay).toBe(31);
+      expect(result.estimate_basis).toBe("measured_average");
+    } finally {
+      close();
+    }
+  });
+});

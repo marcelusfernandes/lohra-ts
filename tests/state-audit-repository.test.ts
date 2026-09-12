@@ -228,3 +228,152 @@ describe("AuditRepository.query — custo por página, não por run (#498)", () 
     }
   });
 });
+
+// Issue #502 (non_blocking 6, PR #493): `subId`, a run never written, and
+// `pagination_truncated` were exercised only incidentally by other suites
+// (or not at all) — none of them had a value-level oracle in THIS file, the
+// one the #477/#498 SQL rewrite actually lives in.
+describe("AuditRepository.query — subId, run nunca escrito, pagination_truncated (#502)", () => {
+  it("filtra por sub_id em SQL e ecoa o filtro em filters.sub_id", () => {
+    const { connection, audit } = database();
+    try {
+      audit.append("run-sub", { event_type: "leaf.started", sub_id: "leaf-a" });
+      audit.append("run-sub", { event_type: "leaf.started", sub_id: "leaf-b" });
+      audit.append("run-sub", { event_type: "leaf.completed", sub_id: "leaf-a" });
+      const page = audit.query({ runId: "run-sub", subId: "leaf-a" });
+      expect(page.events).toHaveLength(2);
+      for (const event of page.events) expect(event.identity.sub_id).toBe("leaf-a");
+      expect(page.filters).toMatchObject({ sub_id: "leaf-a" });
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("um run_id nunca escrito devolve availability:unavailable com o envelope completo (zero eventos, um único aviso audit.unavailable)", () => {
+    const { connection, audit } = database();
+    try {
+      const page = audit.query({ runId: "never-written" });
+      expect(page.availability).toBe("unavailable");
+      expect(page.events).toEqual([]);
+      expect(page.page).toMatchObject({ returned: 0, has_more: false, next_after_seq: 0 });
+      expect(page.integrity).toMatchObject({
+        event_markers: { gaps: 0, truncated: 0, unavailable: 1 },
+        pagination_truncated: false,
+        notices_total: 1,
+        notices_returned: 1,
+        notices_truncated: false,
+      });
+      expect(page.integrity.notices).toEqual([
+        {
+          event_type: "audit.unavailable",
+          provenance: "unavailable",
+          data: { reason: "not_recorded" },
+        },
+      ]);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("pagination_truncated segue has_more — true numa página intermediária, false na última", () => {
+    const { connection, audit } = database();
+    try {
+      for (let i = 1; i <= 15; i += 1)
+        audit.append("run-trunc", { event_type: "leaf.started", sub_id: `leaf-${String(i)}` });
+      const first = audit.query({ runId: "run-trunc", limit: 10 });
+      expect(first.page.has_more).toBe(true);
+      expect(first.integrity.pagination_truncated).toBe(true);
+      const last = audit.query({
+        runId: "run-trunc",
+        afterSeq: first.page.next_after_seq as number,
+        limit: 10,
+      });
+      expect(last.page.has_more).toBe(false);
+      expect(last.integrity.pagination_truncated).toBe(false);
+    } finally {
+      connection.close();
+    }
+  });
+});
+
+// Issue #502 (emenda 2026-09-13, veredito PR #507, non_blocking 2): the
+// `fieldMarkerRows` aggregate (`json_tree(payload_json, '$.data')`,
+// `audit-repository.ts:424-437`) had exactly ONE value-level assertion in
+// the whole suite (`tests/workflow-audit-live.test.ts:305`, one state,
+// count 1). These four go straight at the raw stored bytes (same
+// tamper-the-row technique `workflow-audit-live.test.ts`'s "re-sanitizes
+// tampered rows" test uses) so each shape is exact, not whatever
+// `safeAuditMetadata` happens to produce for a real field name.
+describe("AuditRepository.query — fieldMarkerRows / field_markers, oráculos de valor (#502)", () => {
+  function plantPayload(
+    connection: ReturnType<typeof database>["connection"],
+    runId: string,
+    data: unknown,
+  ): void {
+    connection.database
+      .prepare("UPDATE workflow_audit_events SET payload_json=? WHERE run_id=?")
+      .run(JSON.stringify({ data }), runId);
+  }
+
+  it("estado aninhado 4 níveis (objeto > array > objeto > objeto) ainda é contado — json_tree recursa a árvore inteira", () => {
+    const { connection, audit } = database();
+    try {
+      audit.append("run-field-deep", { event_type: "leaf.started", created_at: 1 });
+      plantPayload(connection, "run-field-deep", {
+        a: { b: [{ c: { state: "redacted" } }] },
+      });
+      const page = audit.query({ runId: "run-field-deep" });
+      expect(page.integrity.field_markers).toMatchObject({ redacted: 1 });
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("dois estados distintos no mesmo documento são contados em grupos separados — GROUP BY nunca os colapsa num só", () => {
+    const { connection, audit } = database();
+    try {
+      audit.append("run-field-two", { event_type: "leaf.started", created_at: 1 });
+      plantPayload(connection, "run-field-two", {
+        x: { state: "unavailable" },
+        y: { state: "excluded_by_policy" },
+      });
+      const page = audit.query({ runId: "run-field-two" });
+      expect(page.integrity.field_markers).toMatchObject({
+        unavailable: 1,
+        excluded_by_policy: 1,
+      });
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("só os cinco FIELD_STATE_NAMES entram no agregado — um estado válido fora da lista, valores não-texto, e a mesma palavra sob a chave errada não contam", () => {
+    const { connection, audit } = database();
+    try {
+      audit.append("run-field-noise", { event_type: "leaf.started", created_at: 1 });
+      plantPayload(connection, "run-field-noise", {
+        // "observed" is a real SAFE_MARKER_STATES value elsewhere in this
+        // codebase, but it is not one of the five FIELD_STATE_NAMES this
+        // aggregate counts.
+        a: { state: "observed" },
+        b: { state: 123 },
+        c: { state: true },
+        d: { state: null },
+        e: { state: { nested: "x" } },
+        // right VALUE ("redacted"), wrong KEY — proves the aggregate keys
+        // off `jt.key = 'state'`, not off matching the word anywhere.
+        note: "redacted",
+      });
+      const page = audit.query({ runId: "run-field-noise" });
+      expect(page.integrity.field_markers).toEqual({
+        excluded_by_policy: 0,
+        excluded_private_state: 0,
+        redacted: 0,
+        truncated: 0,
+        unavailable: 0,
+      });
+    } finally {
+      connection.close();
+    }
+  });
+});

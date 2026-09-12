@@ -257,7 +257,7 @@ describe("workflow audit — leaf.steered (#423)", () => {
   });
 
   it("a steer on an id the decorator never opened still delegates, with no audit event", async () => {
-    const { audit, deps, close } = directHarness();
+    const { audit, trail, deps, close } = directHarness();
     try {
       let delegated: readonly [string, string] | null = null;
       const inner: ChildRuntime = withMinimalLeafSandbox({
@@ -271,6 +271,11 @@ describe("workflow audit — leaf.steered (#423)", () => {
       const runtime = auditedChildRuntime(inner, deps);
       await runtime.steer("never-opened", "hello", CAUSAL, "operator");
       expect(delegated).toEqual(["never-opened", "hello"]);
+      // #502 (non_blocking 1, PR #488): flush BEFORE the query — without it
+      // this assertion would read zero rows even if the decorator recorded
+      // unconditionally on an id it never opened, the same gap #476 fixed
+      // for the steer_cap/null cases below.
+      await trail.flush();
       const page = audit.query({ runId: CAUSAL.runId, limit: 50 });
       expect(page.events.filter((event) => event.event_type === "leaf.steered")).toHaveLength(0);
     } finally {
@@ -347,7 +352,7 @@ describe("workflow audit — leaf.steered (#423)", () => {
     // invent a fact this decorator has no proof of; a caller with a real
     // outcome to report already returns an object (`{queued: ...}`), never
     // relies on this fallback.
-    const { audit, deps, close } = directHarness();
+    const { audit, trail, deps, close } = directHarness();
     try {
       const inner: ChildRuntime = withMinimalLeafSandbox({
         spawn: (): string => "leaf-1",
@@ -358,6 +363,10 @@ describe("workflow audit — leaf.steered (#423)", () => {
       const runtime = auditedChildRuntime(inner, deps);
       await runtime.spawn({ prompt: "one", causalContext: CAUSAL });
       await runtime.steer("leaf-1", "hello", CAUSAL, "operator");
+      // #502 (non_blocking 1, PR #488): same flush-before-query fix as the
+      // two cases above — without it, an accidental unconditional record on
+      // this fallback would still read back as zero rows.
+      await trail.flush();
       const page = audit.query({ runId: CAUSAL.runId, limit: 50 });
       expect(page.events.filter((event) => event.event_type === "leaf.steered")).toHaveLength(0);
     } finally {
