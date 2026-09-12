@@ -180,7 +180,12 @@ route_fault` e para `faultKinds: []`.
   aplicado dentro de `runNested` com o `routeOverride` do próprio engine
   (novo campo em `WorkflowEngineOptions`) — profundidade continua limitada a
   `MAX_WORKFLOW_DEPTH = 1`, então só o run pai (nunca um nested) carrega
-  outro template.
+  outro template. Rodada 1 da PR #472 só provava essa mecânica com o
+  `WorkflowEngine` construído à mão; o revisor apontou que `service.ts`
+  (`launch`/`launchDurable`) não passava `options.routeOverride` adiante —
+  rodada 2 fecha o threading (`routeOverrideOption`, `engine-options.ts`)
+  nos dois pontos reais de construção, provado por um teste que sobe
+  `WorkflowService.start`/resume de ponta a ponta.
 
 ### O que esta issue NÃO faz
 
