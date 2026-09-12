@@ -15,15 +15,65 @@ import { prepareOfflineTarballConsumer } from "./offline-tarball-install.js";
  * `node-gyp` (o fallback dos dois quando não há prebuild para a
  * plataforma/arquitetura, que exige compilador/Python na máquina do
  * consumidor e contraria "instala sem toolchain nativo", a User Story da
- * issue). Implementação real e o mecanismo escolhido em detalhe: abaixo do
- * stub, quando o teste vermelho já provou o contrato.
+ * issue).
+ *
+ * Mecanismo escolhido — o mais simples que não depende de capturar
+ * stdout/stderr de um subprocesso nem de variáveis de ambiente que os dois
+ * pacotes talvez nem leiam: `node-gyp configure` sempre escreve
+ * `build/config.gypi` antes de compilar qualquer coisa — é o primeiro
+ * artefato que ele produz. Nem `prebuild-install` (usado por
+ * `better-sqlite3`) nem `node scripts/prebuild.js` (usado por `node-pty`,
+ * que só confere localmente se `prebuilds/<platform>-<arch>` existe — nunca
+ * baixa nada da rede nem toca em `build/`) escrevem esse arquivo. A
+ * presença de `config.gypi` é portanto prova de que o fallback nativo
+ * rodou, **independente** de a compilação ter terminado com sucesso — por
+ * isso ela é conferida ANTES do binário: um `.node` compilado com sucesso
+ * não deixa de ser "compilou nativo" só porque funciona.
+ *
+ * `platform`/`arch` são parâmetros (nunca lidos de `process.*` aqui dentro)
+ * para a função ser pura e testável para qualquer combinação a partir de
+ * qualquer máquina — quem chama em produção (`main`, abaixo) passa
+ * `process.platform`/`process.arch` de verdade.
  */
-export function assertNoNativeCompileNeeded(_options: {
+type NativeModuleCheck = {
+  readonly module: string;
+  readonly prebuiltBinary: (platform: string, arch: string) => string;
+  readonly compiledMarker: string;
+};
+
+const NATIVE_MODULE_CHECKS: readonly NativeModuleCheck[] = [
+  {
+    module: "better-sqlite3",
+    prebuiltBinary: () =>
+      join("node_modules", "better-sqlite3", "build", "Release", "better_sqlite3.node"),
+    compiledMarker: join("node_modules", "better-sqlite3", "build", "config.gypi"),
+  },
+  {
+    module: "node-pty",
+    prebuiltBinary: (platform, arch) =>
+      join("node_modules", "node-pty", "prebuilds", `${platform}-${arch}`, "pty.node"),
+    compiledMarker: join("node_modules", "node-pty", "build", "config.gypi"),
+  },
+];
+
+export function assertNoNativeCompileNeeded(options: {
   readonly consumerRoot: string;
   readonly platform: string;
   readonly arch: string;
 }): void {
-  throw new Error("not implemented: assertNoNativeCompileNeeded");
+  for (const check of NATIVE_MODULE_CHECKS) {
+    const compiledMarker = join(options.consumerRoot, check.compiledMarker);
+    if (existsSync(compiledMarker)) {
+      throw new Error(`PACK_NATIVE_COMPILED_FROM_SOURCE:${check.module}`);
+    }
+    const prebuiltBinary = join(
+      options.consumerRoot,
+      check.prebuiltBinary(options.platform, options.arch),
+    );
+    if (!existsSync(prebuiltBinary)) {
+      throw new Error(`PACK_NATIVE_PREBUILD_MISSING:${check.module}`);
+    }
+  }
 }
 
 function command(
