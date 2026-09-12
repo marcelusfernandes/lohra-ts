@@ -12,9 +12,17 @@
 // é o que permite este arquivo provar o comportamento sem rodar o pipeline
 // caro (`npm run pack:check`, que continua sendo a prova de ponta a ponta,
 // colada manualmente no test plan da PR).
-import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
-import { assertStructuralMatch, extractLastToolResultContent } from "../scripts/pack-check.js";
+import { afterEach, describe, expect, it } from "vitest";
+
+import {
+  assertNoNativeCompileNeeded,
+  assertStructuralMatch,
+  extractLastToolResultContent,
+} from "../scripts/pack-check.js";
 
 const COMPACT = '{"ok":true,"bytes_written":10,"path":"package-written/out.txt"}';
 // A forma exatamente como estava hardcoded na issue — com espaços — prova
@@ -80,5 +88,78 @@ describe("extractLastToolResultContent", () => {
     expect(() => {
       extractLastToolResultContent(log);
     }).toThrow(/PACK_CHAT_MISMATCH.*projected_log/);
+  });
+});
+
+// Issue #532: `assertNoNativeCompileNeeded` não roda `npm ci` nem toca rede
+// — recebe um `consumerRoot` fabricado com `mkdtempSync` e confere só a
+// árvore de arquivos, exatamente como um `node_modules` de consumidor real
+// ficaria depois da instalação (prebuilt ou compilado). `platform`/`arch`
+// são injetados (nunca lidos de `process.*` dentro da função) para o teste
+// rodar em qualquer máquina e ainda provar o caminho de outra plataforma
+// (ex.: `linux-x64` rodando em macOS) — é a própria alegação de
+// portabilidade em forma de teste.
+function writeFile(root: string, relativePath: string): void {
+  const absolute = join(root, relativePath);
+  mkdirSync(dirname(absolute), { recursive: true });
+  writeFileSync(absolute, "");
+}
+
+function betterSqlite3Binary(root: string): void {
+  writeFile(
+    root,
+    join("node_modules", "better-sqlite3", "build", "Release", "better_sqlite3.node"),
+  );
+}
+
+function nodePtyBinary(root: string, platform: string, arch: string): void {
+  writeFile(root, join("node_modules", "node-pty", "prebuilds", `${platform}-${arch}`, "pty.node"));
+}
+
+describe("assertNoNativeCompileNeeded", () => {
+  let root: string | undefined;
+
+  afterEach(() => {
+    if (root !== undefined) rmSync(root, { recursive: true, force: true });
+    root = undefined;
+  });
+
+  it("lança PACK_NATIVE_PREBUILD_MISSING nomeando better-sqlite3 quando o binário não existe no consumidor", () => {
+    root = mkdtempSync(join(tmpdir(), "lohra-pack-native-"));
+    nodePtyBinary(root, "linux", "x64");
+    expect(() => {
+      assertNoNativeCompileNeeded({ consumerRoot: root as string, platform: "linux", arch: "x64" });
+    }).toThrow(/PACK_NATIVE_PREBUILD_MISSING:better-sqlite3/);
+  });
+
+  it("lança PACK_NATIVE_PREBUILD_MISSING nomeando node-pty quando não há prebuild para a plataforma/arquitetura pedida", () => {
+    root = mkdtempSync(join(tmpdir(), "lohra-pack-native-"));
+    betterSqlite3Binary(root);
+    nodePtyBinary(root, "darwin", "arm64"); // existe, mas para outra plataforma
+    expect(() => {
+      assertNoNativeCompileNeeded({ consumerRoot: root as string, platform: "linux", arch: "x64" });
+    }).toThrow(/PACK_NATIVE_PREBUILD_MISSING:node-pty/);
+  });
+
+  it("lança PACK_NATIVE_COMPILED_FROM_SOURCE nomeando o módulo quando node-gyp gerou config.gypi", () => {
+    root = mkdtempSync(join(tmpdir(), "lohra-pack-native-"));
+    betterSqlite3Binary(root);
+    nodePtyBinary(root, "linux", "x64");
+    // node-gyp configure escreve build/config.gypi antes de compilar
+    // qualquer coisa — mesmo que o .node resultante exista, é sinal de que
+    // o fallback nativo rodou em vez do prebuild.
+    writeFile(root, join("node_modules", "better-sqlite3", "build", "config.gypi"));
+    expect(() => {
+      assertNoNativeCompileNeeded({ consumerRoot: root as string, platform: "linux", arch: "x64" });
+    }).toThrow(/PACK_NATIVE_COMPILED_FROM_SOURCE:better-sqlite3/);
+  });
+
+  it("não lança quando os dois prebuilds existem para a plataforma/arquitetura pedida e nenhum node-gyp rodou", () => {
+    root = mkdtempSync(join(tmpdir(), "lohra-pack-native-"));
+    betterSqlite3Binary(root);
+    nodePtyBinary(root, "linux", "x64");
+    expect(() => {
+      assertNoNativeCompileNeeded({ consumerRoot: root as string, platform: "linux", arch: "x64" });
+    }).not.toThrow();
   });
 });
