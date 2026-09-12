@@ -27,6 +27,13 @@ export interface ChildCollectOptions {
   readonly timeoutSeconds: number;
 }
 
+/** One `write_file` a leaf's tool call actually wrote — the sandbox side
+ * channel's own record (`OrchestrationChildRuntime`, orchestration-runtime.ts),
+ * never populated by the leaf itself. `path`/`bytes` mirror the tool's own
+ * envelope fields verbatim (`src/tools/filesystem.ts`), never re-derived
+ * (#463). */
+export type ArtifactRecord = Readonly<{ path: string; bytes: number }>;
+
 export interface ChildResult {
   readonly status: "running" | "complete" | "failed" | "cancelled";
   readonly output: unknown;
@@ -45,6 +52,14 @@ export interface ChildResult {
    * this (OrchestrationChildRuntime, orchestration-runtime.ts), never the
    * leaf itself. Absent/0 means no denial; never negative (#246). */
   readonly sandboxRefusals?: number;
+  /** Every `write_file` this leaf's own tool calls actually wrote, `ok:
+   * true` only — never a recusa síncrona nor `ok: false`. Absent means
+   * none, never `[]` (keeps fakes of tests predating #463 intact). */
+  readonly artifacts?: readonly ArtifactRecord[];
+  /** How many of this leaf's OWN `write_file` records were discarded past
+   * `MAX_ARTIFACTS_PER_LEAF` (orchestration-runtime.ts) — absent/0 means
+   * none dropped, never silent (#463). */
+  readonly artifactsDropped?: number;
 }
 
 export type Awaitable<T> = T | Promise<T>;

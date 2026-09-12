@@ -1,6 +1,7 @@
 import type { ChildToolDispatch, OrchestrationCore } from "../orchestration/core.js";
 import { toolError } from "./sandbox.js";
 import type {
+  ArtifactRecord,
   CausalContext,
   ChildCollectOptions,
   ChildResult,
@@ -12,6 +13,11 @@ import type {
   LeafToolDispatch,
   SteerOutcome,
 } from "./runtime.js";
+
+/** #463: a leaf's own write-file manifest is capped so a runaway leaf can
+ * never grow it unbounded (invariant 3) — past this, a record is dropped
+ * and counted in `ChildResult.artifactsDropped`, never silently. */
+export const MAX_ARTIFACTS_PER_LEAF = 256;
 
 /** A frozen, independent copy of `causal` — never the caller's own object
  * reference, and never mutable after this returns (issue #422: `causalSnapshot`
@@ -50,6 +56,30 @@ function okFromEnvelope(result: string): boolean {
   return result.startsWith('{"ok":true');
 }
 
+/** #463: the write-file manifest's own parse — only for `name ===
+ * "write_file"` (every other tool never pays this `JSON.parse`), and only
+ * an `ok: true` envelope whose `path`/`bytes_written` are a string and a
+ * finite number, exactly the shape `writeFileTool` produces
+ * (src/tools/filesystem.ts:52-71). Anything else (a refusal string, a
+ * malformed/`ok:false` envelope) is `null` — never thrown, never guessed. */
+function writeFileArtifactOf(result: string): ArtifactRecord | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== "object") return null;
+  const envelope = parsed as Readonly<Record<string, unknown>>;
+  if (envelope.ok !== true) return null;
+  const { path, bytes_written: bytesWritten } = envelope;
+  return typeof path === "string" &&
+    typeof bytesWritten === "number" &&
+    Number.isFinite(bytesWritten)
+    ? { path, bytes: bytesWritten }
+    : null;
+}
+
 /**
  * Bridges the sandbox's synchronous `LeafToolDispatch` contract
  * (runtime.ts:44, `LeafSandboxInstallation.wrap`) to the child pool's real,
@@ -80,10 +110,17 @@ function okFromEnvelope(result: string): boolean {
  * A real tool call — even one that later reports its OWN failure — always
  * produced a token first, so it is never counted here; only a call the wrap
  * itself turned away before `base` ran is a sandbox refusal.
+ *
+ * `onArtifact` (#463) is the write-file manifest's own side channel: fires
+ * AFTER the same real dispatch settles, only for `name === "write_file"`,
+ * only when `writeFileArtifactOf` recognizes an `ok: true` envelope — never
+ * for a synchronous denial (never reaches this leg at all) nor an `ok:
+ * false` write.
  */
 function adaptSandboxWrap(
   installation: LeafSandboxInstallation,
   onRefusal: (subId: string) => void,
+  onArtifact: (subId: string, record: ArtifactRecord) => void,
 ): (base: ChildToolDispatch, subId: string) => ChildToolDispatch {
   return (base, subId) => {
     const leaf: LeafIdentity = Object.freeze({ subId });
@@ -98,6 +135,10 @@ function adaptSandboxWrap(
       }
       const result = await pending;
       installation.onToolSettled?.(leaf, okFromEnvelope(result));
+      if (name === "write_file") {
+        const artifact = writeFileArtifactOf(result);
+        if (artifact !== null) onArtifact(subId, artifact);
+      }
       return result;
     };
   };
@@ -160,6 +201,13 @@ export class OrchestrationChildRuntime implements ChildRuntime {
    * is itself bounded by `OrchestrationCore`'s own `maxSubsessions`
    * eviction, so this never grows past what the registry already allows. */
   private readonly causalContexts = new Map<string, CausalContext>();
+  /** Per-leaf write-file manifest (#463), same lifetime and sweep as
+   * `refusalCounts` above — bounded by `MAX_ARTIFACTS_PER_LEAF` per leaf,
+   * itself bounded by `installations`' own one-stretch scope. */
+  private readonly artifactsBySub = new Map<
+    string,
+    { readonly runId: string; readonly list: ArtifactRecord[]; dropped: number }
+  >();
 
   public constructor(private readonly core: OrchestrationCore) {}
 
@@ -176,6 +224,9 @@ export class OrchestrationChildRuntime implements ChildRuntime {
           for (const [subId, causal] of this.causalContexts) {
             if (causal.runId === installation.runId) this.causalContexts.delete(subId);
           }
+          for (const [subId, entry] of this.artifactsBySub) {
+            if (entry.runId === installation.runId) this.artifactsBySub.delete(subId);
+          }
         }
       },
     };
@@ -187,9 +238,15 @@ export class OrchestrationChildRuntime implements ChildRuntime {
     const installation = this.installations.get(runId);
     return installation === undefined
       ? () => denyAllDispatch
-      : adaptSandboxWrap(installation, (subId) => {
-          this.recordRefusal(runId, subId);
-        });
+      : adaptSandboxWrap(
+          installation,
+          (subId) => {
+            this.recordRefusal(runId, subId);
+          },
+          (subId, record) => {
+            this.recordArtifact(runId, subId, record);
+          },
+        );
   }
 
   /** Lazily creates this leaf's counter on its FIRST refusal — `subId` is
@@ -205,6 +262,20 @@ export class OrchestrationChildRuntime implements ChildRuntime {
       this.refusalCounts.set(subId, entry);
     }
     entry.box.count += 1;
+  }
+
+  /** Lazily creates this leaf's manifest on its FIRST recorded write —
+   * molded on `recordRefusal` above. Past `MAX_ARTIFACTS_PER_LEAF`, the
+   * record is dropped and counted instead of growing the list unbounded
+   * (invariant 3, #463). */
+  private recordArtifact(runId: string, subId: string, record: ArtifactRecord): void {
+    let entry = this.artifactsBySub.get(subId);
+    if (entry === undefined) {
+      entry = { runId, list: [], dropped: 0 };
+      this.artifactsBySub.set(subId, entry);
+    }
+    if (entry.list.length >= MAX_ARTIFACTS_PER_LEAF) entry.dropped += 1;
+    else entry.list.push(record);
   }
 
   public spawn(request: ChildSpawnRequest): string {
@@ -257,6 +328,19 @@ export class OrchestrationChildRuntime implements ChildRuntime {
       errorKind: result.errorKind,
       usageUncertain: result.usageUncertain === true,
       sandboxRefusals: this.refusalCounts.get(id)?.box.count ?? 0,
+      ...this.artifactFieldsOf(id),
+    };
+  }
+
+  /** `artifacts`/`artifactsDropped` (#463) — both ABSENT (never `[]`/`0`)
+   * when this leaf never recorded a write, so a `ChildResult` fake from
+   * before this issue stays byte-identical to what `collect` returns here. */
+  private artifactFieldsOf(id: string): Pick<ChildResult, "artifacts" | "artifactsDropped"> {
+    const entry = this.artifactsBySub.get(id);
+    if (entry === undefined) return {};
+    return {
+      ...(entry.list.length === 0 ? {} : { artifacts: [...entry.list] }),
+      ...(entry.dropped === 0 ? {} : { artifactsDropped: entry.dropped }),
     };
   }
 

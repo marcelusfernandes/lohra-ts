@@ -14,7 +14,26 @@ import {
 } from "./engine-options.js";
 import { WorkflowEngine } from "./engine.js";
 import { AutoResumeScheduler, LeaseHeartbeat, type Timer } from "./durability.js";
-import { liveRuntimeOf, nextPivots, resultView, runningView } from "./service-rollup.js";
+import {
+  artifactsOf,
+  CHECKPOINT_PAUSE,
+  liveRuntimeOf,
+  nextPivots,
+  pauseFields,
+  resultView,
+  runningView,
+} from "./service-rollup.js";
+// Re-exported (not just imported) so commands/workflow.ts and existing tests
+// keep importing them from `service.js` unchanged after #463 moved their
+// declaration into service-rollup.ts (service.ts's own zero-growth ceiling).
+export {
+  CHECKPOINT_HINT,
+  CHECKPOINT_PAUSE,
+  TOKEN_BUDGET_HINT,
+  TOKEN_BUDGET_PAUSE,
+  USER_PAUSE,
+  USER_PAUSE_HINT,
+} from "./service-rollup.js";
 import { recordRouteFaultNotice, ROUTE_FAULT_REASON, withSuggestedRoute } from "./route-faults.js";
 import { pausePayloadOf, pivotResume, pivotsOf, registrationPayload } from "./route-override.js";
 import { OPERATOR_ROUTES_FILE, readRoutes, RoutesError, type RouteEnvelope } from "./routes.js";
@@ -82,26 +101,11 @@ export class FenceMemory {
 }
 
 export const RECOVERED_FAULT = "recovered after process loss";
-export const CHECKPOINT_PAUSE = "checkpoint";
 export const QUOTA_PAUSE = "quota_exhausted";
-export const TOKEN_BUDGET_PAUSE = "token_budget_exhausted";
-export const USER_PAUSE = "user_requested";
 export const STALE_HINT =
   "the process that was running this workflow was lost before it finished; the " +
   "cells it completed are kept — run_workflow(resume_run_id=...) continues it";
 const BUSY_HINT = "another process is running this workflow right now";
-export const TOKEN_BUDGET_HINT =
-  "the run spent its token budget; nothing will resume it on its own — " +
-  "run_workflow(resume_run_id=..., token_budget=<more than 'spent'>)";
-export const CHECKPOINT_HINT =
-  "this run is paused at a checkpoint waiting for your answer — " +
-  'run_workflow(resume_run_id=..., checkpoint_answers={"<node_id>": ' +
-  '<answer>}) — a nested checkpoint\'s node_id is scoped (e.g. "sub.confirm"); ' +
-  "a checkpoint that declared a 'default' takes it if you resume without one — if the payload carries 'rename_hint', resuming with the SAME node_id only pauses again — rename one of the two checkpoint ids in the spec instead";
-export const USER_PAUSE_HINT =
-  "you paused this run; nothing will resume it on its own — its " +
-  "finished nodes are kept, so run_workflow(resume_run_id=...) " +
-  "continues it whenever you want (no budget raise needed)";
 
 export interface DurableRunView {
   readonly run_id: string;
@@ -124,6 +128,10 @@ export interface DurableRunView {
   /** #427: past route pivots this run has already spent — folded forward
    * on every terminal write (`pausePayloadOf`, route-override.ts). */
   readonly pivots: readonly { provider?: string; model?: string }[]; // RouteOverride's shape, inlined (#446)
+  /** #463: the write-file manifest/collision faults folded forward the
+   * same way `pivots` above is (`pausePayloadOf`, route-override.ts). */
+  readonly artifacts: readonly { node_id: string; sub_id: string; path: string; bytes: number }[];
+  readonly artifact_faults: readonly string[];
   readonly progress: Record<string, unknown> | null;
   readonly audit_segment_id: string | null;
   readonly updated_at: number;
@@ -133,6 +141,7 @@ export function durableFromRow(row: Readonly<Record<string, unknown>>): DurableR
   const payload = loadsOr(row.pause_payload_json, {}) as Record<string, unknown>;
   const faults = payload.prior_faults;
   const faultKinds = payload.prior_fault_kinds;
+  const artifactFaults = payload.artifact_faults;
   const checkpoint = payload.checkpoint;
   const progress = loadsOr(row.progress_json, null);
   const spec = loadsOr(row.spec_json, null);
@@ -160,6 +169,8 @@ export function durableFromRow(row: Readonly<Record<string, unknown>>): DurableR
     token_budget:
       row.token_budget === null || row.token_budget === undefined ? null : Number(row.token_budget),
     pivots: pivotsOf(payload),
+    artifacts: artifactsOf(payload),
+    artifact_faults: Array.isArray(artifactFaults) ? artifactFaults.map(String) : [],
     progress:
       progress !== null && typeof progress === "object"
         ? (progress as Record<string, unknown>)
@@ -170,24 +181,6 @@ export function durableFromRow(row: Readonly<Record<string, unknown>>): DurableR
         : (row.audit_segment_id as string),
     updated_at: Number(row.updated_at ?? 0),
   };
-}
-
-export function pauseFields(view: DurableRunView): Readonly<Record<string, unknown>> | null {
-  if (view.status !== "paused") return null;
-  const fields: Record<string, unknown> = {
-    reason: view.pause_reason,
-    resume_at: view.resume_at,
-    attempts: view.attempts,
-  };
-  if (view.pause_reason === TOKEN_BUDGET_PAUSE) {
-    fields.hint = TOKEN_BUDGET_HINT;
-  } else if (view.pause_reason === CHECKPOINT_PAUSE) {
-    fields.checkpoint = view.checkpoint;
-    fields.hint = CHECKPOINT_HINT;
-  } else if (view.pause_reason === USER_PAUSE) {
-    fields.hint = USER_PAUSE_HINT;
-  } else if (view.pause_reason === ROUTE_FAULT_REASON) fields.lesson = view.checkpoint;
-  return Object.freeze(fields);
 }
 
 export function durableRollup(
@@ -205,6 +198,7 @@ export function durableRollup(
   if (view.prior_faults.length > 0) out.faults_total = [...view.prior_faults];
   if (view.prior_fault_kinds.length > 0) out.fault_kinds_total = [...view.prior_fault_kinds];
   if (view.pivots.length > 0) out.pivots = [...view.pivots];
+  if (view.artifacts.length > 0) out.artifacts = [...view.artifacts];
   if (view.name !== "") out.name = view.name;
   if (view.status === "running") {
     out.stale = stale;
@@ -989,6 +983,10 @@ export class WorkflowService {
           // pausePayload above already persisted the stretch-only count; fold the prior total in now, after, so the live view (here and the next status() read of this `result`) matches the durable rollup (#247 round 2).
           result.leafRespawns += priorView?.leaf_respawns ?? 0;
           result.sandboxRefusals += priorView?.sandbox_refusals ?? 0;
+          // Prepended (never appended): `result.artifacts` at this point only
+          // holds THIS stretch's own records, and `pausePayloadOf` above
+          // already wrote the prior-then-current order — this must match.
+          if (priorView !== null) result.artifacts.unshift(...priorView.artifacts);
           record.published = resultView(record, result);
           record.resolve(record.published);
         } else {

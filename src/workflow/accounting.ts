@@ -1,8 +1,23 @@
 import { combineUsage, usage } from "../pricing/usage.js";
 import type { Usage } from "../pricing/types.js";
 import type { ErrorKind } from "../transports/error-kinds.js";
+import type { ChildResult } from "./runtime.js";
 
 export type RunStatus = "complete" | "degraded" | "failed" | "cancelled" | "paused";
+
+/** One `write_file` a run's leaves produced (#463). Snake_case on purpose:
+ * this exact shape flows straight through `resultView`/`pausePayloadOf`/
+ * `durableRollup` with no remapping. `node_id` is the PLAIN node id when
+ * recorded here (never `scopedCheckpointId`-qualified, same rule
+ * `recordSandboxRefusals` already follows) — a nested sub-run's own
+ * artifacts get the `sub[${reference}]:` prefix only when `foldNestedCounters`
+ * folds them into the parent. `sub_id` is the writing leaf's own subId. */
+export interface RunArtifact {
+  readonly node_id: string;
+  readonly sub_id: string;
+  readonly path: string;
+  readonly bytes: number;
+}
 
 export class NodeCost {
   readonly usage: Usage;
@@ -60,6 +75,15 @@ export class RunResult {
    * (#246); `resultView` (service-rollup.ts) folds both lists together for
    * display, `deriveStatus` below reads only `faults`. */
   readonly sandboxFaults: string[] = [];
+  /** `write_file` manifest for this run (or this stretch, before service.ts
+   * folds a prior stretch's total in on resume — #463). Advisory: never
+   * read by `deriveStatus`. */
+  readonly artifacts: RunArtifact[] = [];
+  /** `"<nodeId>: artifact path written by 2 leaves: <path>"` (once per
+   * colliding path) and `"<nodeId>: N artifact records dropped past the
+   * cap"` — molded on `sandboxFaults`: kept OUT of `faults` so a collision
+   * alone never flips `status` (doctrine #248, decision 6 of épico #458). */
+  readonly artifactFaults: string[] = [];
   /** The `ErrorKind` of each provider-classified leaf failure — a typed
    * subset of `faults` (#399), never parsed out of its message text: many
    * `faults` entries (timeout, empty output, schema mismatch, engine fault,
@@ -121,6 +145,44 @@ export function recordSandboxRefusals(result: RunResult, nodeId: string, refusal
   result.sandboxFaults.push(`${nodeId}: sandbox refused ${String(refusals)} tool call(s)`);
 }
 
+/** #463: the write-file manifest's own side channel, called from the SAME
+ * `debitLeaf` call site `recordSandboxRefusals` above already occupies
+ * (engine-utils.ts:485, a swap, not an add) — so every accounted leaf's
+ * artifacts land here exactly once. A path already owned by a DIFFERENT
+ * `subId` fires the collision fault exactly once (the second distinct
+ * writer trips it; a third, or the SAME leaf writing the path again, never
+ * adds another) — advisory only, `faults`/`status` never see it (doctrine
+ * #248, decision 6 of épico #458). */
+export function recordLeafSideChannels(
+  result: RunResult,
+  nodeId: string,
+  subId: string,
+  collected: ChildResult,
+): void {
+  recordSandboxRefusals(result, nodeId, collected.sandboxRefusals ?? 0);
+  for (const artifact of collected.artifacts ?? []) {
+    const otherOwners = new Set(
+      result.artifacts.filter((entry) => entry.path === artifact.path).map((entry) => entry.sub_id),
+    );
+    otherOwners.delete(subId);
+    if (otherOwners.size === 1) {
+      result.artifactFaults.push(`${nodeId}: artifact path written by 2 leaves: ${artifact.path}`);
+    }
+    result.artifacts.push({
+      node_id: nodeId,
+      sub_id: subId,
+      path: artifact.path,
+      bytes: artifact.bytes,
+    });
+  }
+  const dropped = collected.artifactsDropped ?? 0;
+  if (dropped > 0) {
+    result.artifactFaults.push(
+      `${nodeId}: ${String(dropped)} artifact records dropped past the cap`,
+    );
+  }
+}
+
 /** Molde `recordSandboxRefusals`: a no-op on `null` keeps the common case (a
  * complete leaf with nothing to name) a cheap early return — but a
  * `complete` leaf is NOT guaranteed `errorKind === null`: a dead turn
@@ -153,4 +215,16 @@ export function foldNestedCounters(result: RunResult, nested: RunResult, referen
   // `sandboxFaults`/`faults` above: a kind stays the SAME value regardless
   // of which nested run raised it.
   result.faultKinds.push(...nested.faultKinds);
+  // #463: `node_id` gets the SAME `sub[${reference}]:` scope `nodeCosts`
+  // already uses (engine.ts) — never re-checked for collision against the
+  // parent's own artifacts, only within one flat RunResult's own leaves.
+  result.artifacts.push(
+    ...nested.artifacts.map((artifact) => ({
+      ...artifact,
+      node_id: `sub[${reference}]:${artifact.node_id}`,
+    })),
+  );
+  result.artifactFaults.push(
+    ...nested.artifactFaults.map((fault) => `sub[${reference}]: ${fault}`),
+  );
 }
