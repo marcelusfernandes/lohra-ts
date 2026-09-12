@@ -70,20 +70,30 @@ export function validateDelegateTasks(args: ToolArguments): DelegateTasks | stri
 }
 
 /**
- * #500: an empty or whitespace-only `resume_id` is not a subagent id — it
- * counts as absence, same "empty string = no filter" convention as
- * `workflow_audit`. This is the single normalization point: both
- * `delegateTaskTool`'s own `resume_id !== undefined` check (tools.ts) and
+ * #500/#513: an empty or whitespace-only `resume_id` is not a subagent id —
+ * it counts as absence, same "empty string = no filter" convention as
+ * `workflow_audit`. `null`/`undefined` count the same way (a model that
+ * defaults the field hits this before it ever becomes a string). This is
+ * the single normalization point: both `delegateTaskTool`'s own
+ * `resume_id !== undefined` check (tools.ts) and
  * `validateResumeOverrides`/`validateResumeTasks` below must see the SAME
  * normalized args, so callers apply this once, before either guard, rather
  * than each guard re-deriving "is this really a resume" on its own.
+ *
+ * On absence the `resume_id` key itself is dropped (a fresh copy without
+ * it), not just set to `undefined` — a future `"resume_id" in args` guard
+ * must not regress in silence just because the key is still present with an
+ * undefined value (PR #506 veredito, non_blocking 2). Any other non-string
+ * value (e.g. a number) is left untouched for the existing guards downstream
+ * to reject by name.
  */
 export function normalizeResumeId(args: ToolArguments): ToolArguments {
-  const { resume_id } = args;
-  if (typeof resume_id === "string" && resume_id.trim().length === 0) {
-    return { ...args, resume_id: undefined };
-  }
-  return args;
+  const { resume_id, ...rest } = args;
+  const isAbsent =
+    resume_id === undefined ||
+    resume_id === null ||
+    (typeof resume_id === "string" && resume_id.trim().length === 0);
+  return isAbsent ? rest : args;
 }
 
 /**
