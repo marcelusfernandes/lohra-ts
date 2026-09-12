@@ -38,6 +38,7 @@
     "mutations:self-update": "tsx scripts/mutations/self-update.ts",
     "mutations:t23": "tsx scripts/mutations/context-window.ts",
     "mutations:auth": "tsx scripts/mutations/auth.ts",
+    "mutations:supervision": "tsx scripts/mutations/supervision.ts",
     "mutations:all": "tsx scripts/mutations/all.ts",
     "pack:check": "tsx scripts/pack-check.ts",
     "provenance:check": "tsx scripts/provenance/check-ancestry.ts",

@@ -82,6 +82,7 @@ import { otherMediaMutants } from "../scripts/mutations/media-catalog-other.js";
 import { persistenceMutants } from "../scripts/mutations/media-catalog-persistence.js";
 import { orchestrationMutants } from "../scripts/mutations/orchestration.js";
 import { mutants as selfUpdateMutants } from "../scripts/mutations/self-update-mutants.js";
+import { supervisionMutants } from "../scripts/mutations/supervision-mutants.js";
 import { mutants as auditLiveMutants } from "../scripts/mutations/workflow-audit-live-mutants.js";
 import { auditProducersMutants } from "../scripts/mutations/workflow-audit-producers-mutants.js";
 import { namedMutants } from "../scripts/mutations/workflow-durability-named.js";
@@ -111,6 +112,7 @@ const NAO_CATALOGO = new Set([
   "media-comparator.ts",
   "media-mutant.ts",
   "self-update.ts",
+  "supervision.ts",
   "web-tools.ts",
   "workflow-audit-live.ts",
   "workflow-durability.ts",
@@ -182,6 +184,7 @@ const CATALOGOS: ReadonlyMap<string, readonly CatalogEntry[]> = new Map<
   ["scripts/mutations/workflow-executor-mutants.ts", asCatalog(executorMutants)],
   ["scripts/mutations/context-window.ts", asCatalog(contextWindowMutants)],
   ["scripts/mutations/auth-mutants.ts", asCatalog(authMutants)],
+  ["scripts/mutations/supervision-mutants.ts", asCatalog(supervisionMutants)],
 ]);
 
 interface Slice {
@@ -246,7 +249,6 @@ const SEM_FATIA: ReadonlyMap<string, string> = new Map([
   ["serialization", "sem catálogo de mutantes ainda"],
   ["server", "sem catálogo de mutantes ainda"],
   ["skills", "sem catálogo de mutantes ainda"],
-  ["transports", "sem catálogo de mutantes ainda"],
 ]);
 
 const DIR_GLOB = /^src\/([^/]+)\/\*\*$/;
@@ -308,7 +310,7 @@ describe("scripts/mutations/slices.json", () => {
     expect(existsSync(slicesPath)).toBe(true);
   });
 
-  it("tem as oito fatias, cada uma com o schema esperado", () => {
+  it("tem as nove fatias, cada uma com o schema esperado", () => {
     const slices = readSlices();
     expect(slices.map((entry) => entry.slice).sort()).toEqual(
       [
@@ -316,6 +318,7 @@ describe("scripts/mutations/slices.json", () => {
         "context-window",
         "media",
         "self-update",
+        "supervision",
         "web-tools",
         "workflow-audit-live",
         "workflow-durability",
@@ -480,7 +483,7 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 226 (soma dos doze catálogos importados)", () => {
+  it("a contagem total de mutantes é 247 (soma dos treze catálogos importados)", () => {
     // Os doze catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
@@ -501,9 +504,18 @@ describe("scripts/mutations/slices.json", () => {
     // `auth-mutants.ts` de 8 para 13, +5: 221 + 5 = 226. A issue #418
     // acrescenta `Q1-quota-guard-removed` a `workflow-executor-mutants.ts`
     // (a guarda de quota de `fault_kinds`, `engine-utils.ts:490`): 226 + 1 =
-    // 227.
+    // 227. A issue #451 (milestone 14, follow-up de M10/épico #421)
+    // acrescenta o décimo terceiro catálogo, `supervision-mutants.ts` (fatia
+    // nova `supervision`): 19 mutantes dedicados ao código novo de M10
+    // (steer-tool, leaf-read-tool, route-faults, route-override,
+    // MAX_PENDING_STEERS_PER_LEAF em core.ts, o guard de `dead_turn` em
+    // child-runner.ts e o vocabulário em transports/error-kinds.ts): 227 + 19
+    // = 246. A issue #452 (pivô de rota em sub-workflow por ref) mergeou em
+    // paralelo (PR #472) e acrescentou `overrideNestedSpec` a
+    // route-override.ts/engine.ts — mais 1 mutante (O5, morto por
+    // tests/workflow-route-override-nested.test.ts): 246 + 1 = 247.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 227;
+    const TOTAL_MUTANTS = 247;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -528,13 +540,14 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/workflow-executor-mutants.ts": 45,
       "scripts/mutations/context-window.ts": 15,
       "scripts/mutations/auth-mutants.ts": 13,
+      "scripts/mutations/supervision-mutants.ts": 20,
     };
     expect(new Set(Object.keys(CONTAGEM_POR_CATALOGO))).toEqual(new Set(CATALOGOS.keys()));
     for (const [path, mutants] of CATALOGOS) {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(227);
+    expect(somaTabela).toBe(247);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {
