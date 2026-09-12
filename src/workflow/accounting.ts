@@ -255,34 +255,67 @@ export function recordCrossStretchArtifactCollisions(
   }
 }
 
-/** #501: neither `recordCrossStretchArtifactCollisions` above (a fresh
+/** #501/#512: neither `recordCrossStretchArtifactCollisions` above (a fresh
  * `artifactCollisionPaths` per `RunResult`, blind to what a PRIOR stretch
- * already reported) nor the persisted `pause_payload_json`
- * (`pausePayloadOf`, route-override.ts — left byte-identical on purpose,
- * #501) know a path a prior stretch already flagged is the SAME path a
- * later stretch's own leaf just rewrote — so a resume's live view can carry
- * two advisories for one path, with different `node_id`s. Every view that
- * folds stretches together dedupes here instead, on the WHOLE merged list
- * (never just the newest stretch's own faults), so a duplicate already
- * baked into an older stretch's persisted payload is cleaned up on read
- * too, not merely prevented from growing further. First occurrence of a
- * path wins — the earliest stretch's own advisory and its `node_id`
- * survive every fold after it; a non-collision message (the artifact-cap
- * fault above) has no path and is always kept. */
-function collisionPathOf(fault: string): string | null {
+ * already reported) nor plainly concatenating a prior stretch's
+ * `artifact_faults` onto the current one's own notices that a path a prior
+ * stretch already flagged is the SAME path a later stretch's own leaf just
+ * rewrote — so both the live view (`foldArtifactFaults` below, folded by
+ * `service.ts`'s terminal write) and the PERSISTED `pause_payload_json`
+ * (`pausePayloadOf`, route-override.ts, which calls
+ * `dedupeArtifactFaultsByPath` directly since #512 — it no longer persists
+ * the raw concatenation the way it did before #512) can end up with two
+ * advisories for one path, with different `node_id`s. Both call sites
+ * dedupe through `dedupeArtifactFaultsByPath` below, on the WHOLE merged
+ * list (never just the newest stretch's own faults), so a duplicate already
+ * baked into an older stretch's persisted payload is cleaned up — and,
+ * since #512, never re-persisted either: a cold read (`durableRollup`) and
+ * a live one now always agree. First occurrence of a path wins — the
+ * earliest stretch's own advisory and its `node_id` survive every fold
+ * after it; a non-collision message (the artifact-cap fault above) has no
+ * path and is always kept.
+ *
+ * #512: the de-dup key is (scope, path), never path alone.
+ * `foldNestedCounters` below prefixes every one of a nested sub-run's OWN
+ * fault strings with `sub[${reference}]: ` (one prefix per nesting level,
+ * so a doubly-nested sub-run reads `sub[a]: sub[b]: ...`) — a nested
+ * sub-workflow's own collision (`sub[ref]: n: ...: /x`) and a top-level
+ * leaf's collision on the SAME literal path string (`m: ...: /x`) are two
+ * DIFFERENT physical files (each scoped to its own working root) that
+ * merely happen to share a path string; collapsing them into one advisory
+ * would silently drop a real collision. `NESTED_SCOPE_PREFIX_RE` strips
+ * only that leading `sub[...]: ` chain off the front of the fault string —
+ * never the node id right after it — so two faults share a key only when
+ * they share BOTH the same nesting scope and the same normalized path. */
+const NESTED_SCOPE_PREFIX_RE = /^(?:sub\[[^\]]*\]: )*/;
+
+interface CollisionKey {
+  readonly scope: string;
+  readonly path: string;
+}
+
+function collisionKeyOf(fault: string): CollisionKey | null {
   const at = fault.indexOf(COLLISION_FAULT_MARKER);
   if (at === -1) return null;
-  return normalizedArtifactPath(fault.slice(at + COLLISION_FAULT_MARKER.length));
+  const scope = NESTED_SCOPE_PREFIX_RE.exec(fault)?.[0] ?? "";
+  const path = normalizedArtifactPath(fault.slice(at + COLLISION_FAULT_MARKER.length));
+  return { scope, path };
 }
 
 export function dedupeArtifactFaultsByPath(faults: readonly string[]): string[] {
-  const seen = new Set<string>();
+  // scope -> paths already kept for that scope — a `Map` of `Set`s instead
+  // of one flat `Set<string>` so two DIFFERENT scopes sharing the same
+  // literal path text (#512) can never be confused by however scope and
+  // path happen to be joined into a single string.
+  const seenByScope = new Map<string, Set<string>>();
   const kept: string[] = [];
   for (const fault of faults) {
-    const path = collisionPathOf(fault);
-    if (path !== null) {
-      if (seen.has(path)) continue;
-      seen.add(path);
+    const key = collisionKeyOf(fault);
+    if (key !== null) {
+      const seen = seenByScope.get(key.scope) ?? new Set<string>();
+      if (seen.has(key.path)) continue;
+      seen.add(key.path);
+      seenByScope.set(key.scope, seen);
     }
     kept.push(fault);
   }
@@ -290,11 +323,21 @@ export function dedupeArtifactFaultsByPath(faults: readonly string[]): string[] 
 }
 
 /** Called once from service.ts's terminal fold, in place of the plain
- * `result.artifactFaults.unshift(...priorView.artifact_faults)` swap
- * `artifacts` (unrelated, never deduped — every write is a legitimate
- * manifest entry) still does right above that call site — mutates
- * `result.artifactFaults` in place so the call site keeps the exact same
- * one-line shape service.ts had before #501 (its own zero-growth ceiling). */
+ * `result.artifactFaults.unshift(...priorView.artifact_faults)` that call
+ * site used before #501. `artifacts` (unrelated, never deduped — every
+ * write is a legitimate manifest entry; only a COLLISION message needs a
+ * first-occurrence rule) still gets a plain `unshift` right above this
+ * call, unchanged. This function mutates `result.artifactFaults` IN PLACE,
+ * rather than returning a new array, so the call site keeps the exact
+ * one-line shape it had before #501 (service.ts's own zero-growth
+ * ceiling). `RunResult.artifactCollisionPaths` — the per-run de-dup Set —
+ * is NOT updated here on purpose: that Set only ever guards a SINGLE
+ * `RunResult`'s own live accounting (`recordLeafSideChannels`,
+ * `recordCrossStretchArtifactCollisions` above) against re-flagging a path
+ * it already saw. By the time this fold runs, a prior stretch's own
+ * `RunResult` no longer exists in memory — there is no live Set left to
+ * consult — so `dedupeArtifactFaultsByPath` re-derives the same
+ * first-occurrence rule straight from the persisted STRINGS instead. */
 export function foldArtifactFaults(result: RunResult, priorFaults: readonly string[]): void {
   const merged = dedupeArtifactFaultsByPath([...priorFaults, ...result.artifactFaults]);
   result.artifactFaults.splice(0, result.artifactFaults.length, ...merged);
