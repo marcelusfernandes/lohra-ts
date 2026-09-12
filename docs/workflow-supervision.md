@@ -3,7 +3,10 @@
 Épico #421 (M10 "Supervisão em voo"), dez sub-issues mergeadas em
 `main` — três ferramentas/capacidades que deixam um operador (ou o próprio
 agente que orquestra) intervir num `run_workflow` já em execução, sem
-esperar ele falhar ou pausar sozinho. Este documento é o resumo operacional;
+esperar ele falhar ou pausar sozinho. A M10 foi seguida pela milestone 14
+de consertos pós-revisão (#440, #444–#452, #457), que corrigiu achados dos
+revisores sem mudar a forma das três capacidades. Este documento é o resumo
+operacional;
 o comportamento medido e a doutrina de cada decisão estão nas notas em
 `docs/decisions/` linkadas abaixo, e o vocabulário do ledger (`leaf.steered`,
 o 5º `pause_reason`) está em [`docs/workflow-audit.md`](workflow-audit.md).
