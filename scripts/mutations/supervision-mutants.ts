@@ -682,9 +682,8 @@ export const supervisionMutants: readonly Mutant[] = [
     edits: [
       {
         file: cachePreview,
-        before:
-          '  if (\n    node.type === "parallel" &&\n    Object.hasOwn(outputs, node.id) &&\n    Array.isArray(output) &&\n    output.length === 0\n  ) {',
-        after: '  if (node.type === "parallel" && Object.hasOwn(outputs, node.id)) {',
+        before: '  if (node.type === "parallel" && Array.isArray(output) && output.length === 0) {',
+        after: '  if (node.type === "parallel") {',
       },
     ],
   },
