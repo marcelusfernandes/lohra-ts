@@ -251,7 +251,13 @@ async function main(): Promise<void> {
     mkdirSync(home, { recursive: true });
     mkdirSync(project, { recursive: true });
 
-    const packed = command("npm", ["pack", "--json", "--pack-destination", packDirectory]);
+    // Issue #544: `npm pack` roda o lifecycle `prepare` mesmo sem instalar
+    // nada — este `env` pula a instalação dos hooks de git/lefthook no
+    // checkout real (`scripts/prepare.mjs`), que só faz sentido em
+    // desenvolvimento, nunca ao empacotar.
+    const packed = command("npm", ["pack", "--json", "--pack-destination", packDirectory], {
+      env: { ...process.env, LOHRA_SKIP_PREPARE: "1" },
+    });
     const packResult = JSON.parse(packed.stdout) as readonly { filename: string }[];
     const filename = packResult[0]?.filename;
     if (filename === undefined) throw new Error("PACK_TARBALL_MISSING");

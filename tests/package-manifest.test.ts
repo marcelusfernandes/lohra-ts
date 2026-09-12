@@ -34,11 +34,13 @@ interface PackEntry {
 /**
  * `npm pack` roda o lifecycle `prepare` mesmo com `--ignore-scripts`
  * (comportamento do npm 10 — a flag não suprime `prepare` na hora de
- * empacotar); `scripts/prepare.mjs` usa `stdio: "inherit"`, então a saída
- * dos instaladores de hook (git-pre-push, lefthook) vai para o mesmo stdout
- * do `npm pack --json`, antes do array. O array de verdade é sempre o
- * último bloco impresso, começando numa linha própria só com `[` — extrai a
- * partir daí em vez de tentar `JSON.parse` no stdout inteiro.
+ * empacotar). Desde a issue #544, `npmPackDryRun` seta
+ * `LOHRA_SKIP_PREPARE=1` no `env` de `npm pack`, então `scripts/prepare.mjs`
+ * sai cedo e escreve só no stderr — o stdout do `npm pack --json` fica
+ * limpo. Esta extração continua defensiva (para qualquer saída extra que
+ * escape para o stdout, de `npm` ou de outra fonte): o array de verdade é
+ * sempre o último bloco impresso, começando numa linha própria só com `[` —
+ * extrai a partir daí em vez de tentar `JSON.parse` no stdout inteiro.
  */
 function extrairArrayJson(stdout: string): string {
   const indice = stdout.lastIndexOf("\n[");
@@ -48,9 +50,14 @@ function extrairArrayJson(stdout: string): string {
 }
 
 function npmPackDryRun(): PackEntry {
+  // Issue #544: `npm pack --dry-run --json` roda o lifecycle `prepare`
+  // mesmo assim — este `env` pula a instalação dos hooks de git/lefthook no
+  // checkout real (`scripts/prepare.mjs`), que este teste não deveria
+  // disparar como efeito colateral.
   const resultado = spawnSync("npm", ["pack", "--dry-run", "--json"], {
     cwd: RAIZ,
     encoding: "utf8",
+    env: { ...process.env, LOHRA_SKIP_PREPARE: "1" },
   });
   if (resultado.status !== 0) {
     throw new Error(
