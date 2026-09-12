@@ -168,7 +168,7 @@ null` — a própria escrita de registro do stretch e a escrita de
   progresso por nó (#125) — então um processo que morresse entre qualquer
   uma delas e a escrita terminal perdia `pivots` na leitura seguinte, e o
   teto de 3 virava contornável por um crash comum. `registrationPayload`
-  (`route-override.ts:222-235`) carrega `pivots` para as duas chamadas que
+  (`route-override.ts:222-228`) carrega `pivots` para as duas chamadas que
   passavam `null`, computado do mesmo jeito que a escrita terminal já
   dobrava (`nextPivots`) — um run que nunca pivotou continua escrevendo
   `null` byte-idêntico a antes desta emenda.

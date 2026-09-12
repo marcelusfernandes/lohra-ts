@@ -22,8 +22,8 @@ leaf vivo deste run, `node_id` ambíguo (mais de um leaf vivo no mesmo nó),
 disso, erro nomeado "window truncated" em vez de um falso "sem leaf vivo";
 `sub_id` resolve por um filtro EXATO no ledger e nunca lê essa janela,
 imune ao teto; #445), ou **o runtime do run não expor `steerOutcome`**
-(todo `ChildRuntime` anterior a `AuditedChildRuntime`, ou um double de
-teste que só implementa `steer`; #450) voltam como erro nomeado, nunca um
+(todo `ChildRuntime` anterior a `OrchestrationChildRuntime`, ou um double
+de teste que só implementa `steer`; #450) voltam como erro nomeado, nunca um
 no-op silencioso (`src/workflow/steer-tool.ts:220-226,228-252,265-266,273,
 282-283`).
 
@@ -110,7 +110,7 @@ DIFERENTE:
   recusado com erro nomeado, um gate humano de facto. O teto sobrevive a
   um crash do processo (#446) — as duas escritas que antes zeravam
   `pivots` num crash a meio do stretch agora carregam o valor prévio
-  adiante (`registrationPayload`, `route-override.ts:222-235`).
+  adiante (`registrationPayload`, `route-override.ts:222-228`).
 - **Sub-workflow por `ref` também recebe o pivô, desde o #452.**
   `runNested` (`src/workflow/engine.ts`) carrega o template do `ref` em
   runtime, depois que `pivotResume` já reescreveu a espec do run pai;
