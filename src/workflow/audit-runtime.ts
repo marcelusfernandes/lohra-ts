@@ -367,12 +367,26 @@ export function auditedChildRuntime(
     // returns `{queued: false}` there. Gating strictly on `queued === true`
     // would silently drop that entire scenario from the ledger — a false
     // negative of the exact kind (invariant 2, CLAUDE.md) this issue exists
-    // to remove a false positive of. Excluded: `{queued: false, refused:
-    // "steer_cap"}` (S1's refusal — the tool already surfaces this as a
-    // named error, #424), `null` (id the core never spawned or already
-    // forgot), and `undefined` (a `ChildRuntime` that reports nothing —
-    // every implementation before `OrchestrationChildRuntime`; treated the
-    // same as `null`, never invented into evidence of delivery).
+    // to remove a false positive of.
+    //
+    // `OrchestrationCore.steer`'s four real outcomes (core.ts:316-346),
+    // confirmed with the orchestrator (issue #444) as the full table this
+    // predicate has to cover:
+    //
+    //   outcome                          | delivered? | leaf.steered?
+    //   ----------------------------------|------------|---------------
+    //   {queued: true}                    | yes (inbox)| yes
+    //   {queued: false}  (no `refused`)   | yes (resurrect, new turn) | yes
+    //   {queued: false, refused:"steer_cap"} | no      | no (tool already
+    //     surfaces this as a named error, #424)
+    //   null (id never spawned / forgotten)  | no      | no
+    //
+    // A fifth row, `undefined` — a `ChildRuntime` that reports nothing at
+    // all (every implementation before `OrchestrationChildRuntime`) — is
+    // not a real `core.steer` outcome, but reaches here the same way: no
+    // object, `outcome` normalises to `null` above, and is treated
+    // identically — never invented into evidence of delivery this decorator
+    // does not have.
     steer: async (
       id: string,
       prompt: string,
