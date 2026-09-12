@@ -456,6 +456,22 @@ leaves: <path>"` em `artifactFaults` exatamente uma vez; nunca muda
   do sub-run e uma colisão do PAI que por coincidência escreve a MESMA
   string de caminho (working roots distintos) colapsavam na mesma
   advisory, perdendo uma das duas.
+- **Duas formas do mesmo prefixo de escopo, uma delas nunca reconhecida**
+  (#539, follow-up do veredito non_blocking 1 da PR #538): `foldNestedCounters`
+  grava o `node_id` de um artefato aninhado SEM espaço
+  (`sub[${reference}]:${node_id}`, contrato de `node_id` pinado por
+  `tests/workflow-artifacts.test.ts:331`) mas prefixa faults COM espaço
+  (`sub[${reference}]: `). `recordCrossStretchArtifactCollisions` cunhava seu
+  fault direto do `node_id` — carregando a forma sem espaço para dentro do
+  parser, que só reconhecia a forma com espaço e lia escopo `""`, o mesmo de
+  um fault genuinamente top-level. Uma colisão aninhada cross-stretch ora
+  colapsava com uma top-level do mesmo caminho (deveriam ficar separadas), ora
+  sobrevivia separada de uma colisão interna já persistida do MESMO escopo
+  (deveriam colapsar). `nestedScopePrefix` agora é a única função que escreve
+  a forma com espaço; `recordCrossStretchArtifactCollisions` reescreve o
+  prefixo do `node_id` para essa forma antes de cunhar o fault;
+  `NESTED_SCOPE_PREFIX_RE`/`collisionKeyOf` aceitam as duas formas (dado já
+  persistido antes deste fix) e normalizam para a mesma chave.
 - **Fora do escopo original, limitação registrada no próprio código**: um
   sub-workflow por `ref` nunca tem seus artefatos checados contra os do run
   pai — `foldNestedCounters` (`accounting.ts:361-391`) só concatena as
