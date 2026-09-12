@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createWorkflowAuditProducers } from "./audit-producers.js";
-import { auditInstall, auditedRuntimeFor } from "./audit-runtime.js";
+import { auditInstall, auditedRuntimeFor, type AuditedChildRuntime } from "./audit-runtime.js";
 import { Budget } from "./budget.js";
 import { MemoryWorkflowCache, type WorkflowCache } from "./cache.js";
 import { SqliteWorkflowCache } from "./sqlite-cache.js";
@@ -13,7 +13,7 @@ import {
 } from "./engine-options.js";
 import { WorkflowEngine } from "./engine.js";
 import { AutoResumeScheduler, LeaseHeartbeat, type Timer } from "./durability.js";
-import { resultView } from "./service-rollup.js";
+import { liveRuntimeOf, resultView } from "./service-rollup.js";
 import { recordRouteFaultNotice, ROUTE_FAULT_REASON } from "./route-faults.js";
 import { pausePayloadOf, pivotResume, pivotsOf, type RouteOverride } from "./route-override.js";
 import type { ChildRuntime, LeafSandboxHandle, LeafToolDispatch } from "./runtime.js";
@@ -307,6 +307,7 @@ interface RunRecord {
   readonly id: string;
   readonly name: string;
   readonly engine: WorkflowEngine;
+  runtime?: AuditedChildRuntime; // #424: set right after makeRecord returns — see steer-tool.ts
   readonly promise: Promise<Readonly<Record<string, unknown>>>;
   result: RunResult | null;
   /** What this run PUBLISHES once it settles — the one terminal answer every channel reads (fail-closed: `result` alone let a refused write say "complete"). */
@@ -585,14 +586,9 @@ export class WorkflowService {
       warn: this.warn,
       onEvent: this.onEvent,
     });
+    const rt = auditedRuntimeFor(this.runtime, this.auditTrail, () => null, false, this.warn);
     const engine = new WorkflowEngine({
-      ...engineBaseOptions(
-        auditedRuntimeFor(this.runtime, this.auditTrail, () => null, false, this.warn),
-        runId,
-        options.tiers,
-        this.loader,
-        options.checkpointAnswers ?? {},
-      ),
+      ...engineBaseOptions(rt, runId, options.tiers, this.loader, options.checkpointAnswers ?? {}),
       segmentId,
       cache: this.cache,
       budget: new Budget({ tokenBudget: options.tokenBudget ?? null }),
@@ -601,7 +597,7 @@ export class WorkflowService {
       },
     });
     producers.announceStretchStart(1, parsed, engine.budget.snapshot());
-    const record = this.makeRecord(runId, parsed.name, engine);
+    const record = Object.assign(this.makeRecord(runId, parsed.name, engine), { runtime: rt });
     this.runs.set(runId, record);
     void engine
       .run(parsed, args)
@@ -860,7 +856,7 @@ export class WorkflowService {
             holder: ownership.holder,
             now: ownership.now,
           });
-    const record = this.makeRecord(runId, parsed.name, engine);
+    const record = Object.assign(this.makeRecord(runId, parsed.name, engine), { runtime: rt });
     // Hand this acquisition back exactly once, never by throwing: each step below is independent, so one that fails cannot skip the ones after it or stop the run from publishing a bounded result. The heartbeat stops FIRST — a tick that outlived the release would put the lease back and leave the run looking alive with nobody in it — and the release itself is conditioned on THIS acquisition's fence, so a takeover by the same holder cannot be deleted by it.
     let finished = false;
     const finishStretch = (): void => {
@@ -1094,6 +1090,10 @@ export class WorkflowService {
       settled: false,
       interruptCause: null,
     };
+  }
+
+  liveRuntimeOf(runId: string): AuditedChildRuntime | undefined {
+    return liveRuntimeOf(this.runs, runId); // #424: workflow_steer's only way to reach a run's decorator
   }
 
   // --- reads: live + durable ---------------------------------------------------

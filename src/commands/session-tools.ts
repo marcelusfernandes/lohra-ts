@@ -31,6 +31,9 @@ import { workflowNoticesAckHandler, workflowNoticesHandler } from "../workflow/n
 // Issue #425: same convention — `workflowLeafReadHandler` lives in its own
 // module (`leaf-read-tool.ts`, not `tool.ts`), not re-exported.
 import { workflowLeafReadHandler } from "../workflow/leaf-read-tool.js";
+// Issue #424: same convention — `workflowSteerHandler` lives in its own
+// module (`steer-tool.ts`, not `tool.ts`), not re-exported.
+import { workflowSteerHandler } from "../workflow/steer-tool.js";
 
 export interface SessionToolBase {
   readonly registry: ToolRegistry;
@@ -147,6 +150,10 @@ export function composeSessionTools(options: {
     list_models: (args) => listModels.handle(args),
     cronjob: (args) => cronTool.handle(args),
     ...workflowToolHandlers(options.workflowService, options.base.auditRepository),
+    // Issue #424: needs the live `WorkflowService` (`liveRuntimeOf`), only
+    // built here — same reason `workflow_leaf_read` above is early but
+    // this one is not.
+    workflow_steer: workflowSteerHandler(options.workflowService, options.base.auditRepository),
     ...options.orchestrationHandlers,
     ...media.handlers,
   });

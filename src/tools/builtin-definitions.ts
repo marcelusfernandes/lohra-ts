@@ -727,4 +727,36 @@ export const BUILTIN_DEFINITIONS = [
       name: "workflow_leaf_read",
     },
   },
+  {
+    type: "function",
+    function: {
+      description:
+        "Steer a live workflow leaf: deliver an operator message to the node's leaf right now, without waiting for it to fail or ask a question. Name the leaf with EXACTLY ONE of node_id or sub_id — node_id resolves through the run's currently live leaves (never a finished one), and refuses if that node has more than one live leaf right now (a fan-out mid-flight): use sub_id (from workflow_audit's leaf.started events) to disambiguate. An unknown run_id, a node_id with no live leaf, or a sub_id that isn't a live leaf of this run all come back as a named error rather than a silent no-op. The message itself is never written to the audit ledger (workflow_audit only ever shows leaf.steered{source:'operator', message_chars}) — only its length is.",
+      parameters: {
+        type: "object",
+        properties: {
+          run_id: {
+            type: "string",
+            description: "The run whose live leaf gets steered.",
+          },
+          node_id: {
+            type: "string",
+            description:
+              "The node whose (single) live leaf to steer. Mutually exclusive with sub_id.",
+          },
+          sub_id: {
+            type: "string",
+            description:
+              "The leaf's own session id (from workflow_audit's leaf.started events), when node_id alone would be ambiguous. Mutually exclusive with node_id.",
+          },
+          message: {
+            type: "string",
+            description: "The operator message to deliver to the leaf's next turn.",
+          },
+        },
+        required: ["run_id", "message"],
+      },
+      name: "workflow_steer",
+    },
+  },
 ] as const satisfies readonly ToolDefinition[];

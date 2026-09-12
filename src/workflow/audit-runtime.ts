@@ -60,6 +60,16 @@ export type AuditedChildRuntimeDeps = AuditFailClosedDeps;
  * explicitly. `runtime.ts` stays untouched.
  */
 export interface AuditedChildRuntime extends ChildRuntime {
+  // Issue #424 (2ª emenda, 2026-09-12): the DECLARED type stays
+  // `Awaitable<void>` — `AuditedChildRuntime` still has to satisfy plain
+  // `ChildRuntime` wherever it flows into one (`engine-options.ts`,
+  // `service.ts` — neither in this issue's `Files`), and TypeScript's
+  // void-return leniency does not extend to a union containing `null`
+  // (confirmed empirically; see `orchestration-runtime.ts`'s longer note
+  // on the same constraint). The implementation below still returns the
+  // REAL `core.steer` outcome at runtime — `workflow_steer` (steer-tool.ts)
+  // recovers it with the SAME runtime shape check this decorator itself
+  // uses on `inner.steer`'s result, never trusting the declared `void`.
   readonly steer: (
     id: string,
     prompt: string,
@@ -329,12 +339,23 @@ export function auditedChildRuntime(
     // never spawned still delegates, just without an audit event — same
     // fail-open-to-the-port rule `auditedToolDispatch` follows when `open`
     // has no entry.
-    steer: (
+    //
+    // Issue #424 (2ª emenda, 2026-09-12): `inner` is typed `ChildRuntime`
+    // (`steer` returns `Awaitable<void>`), so nothing here can ASSUME a
+    // shape from the type checker alone — a runtime shape check, never a
+    // blind cast, is what tells the concrete `OrchestrationChildRuntime`'s
+    // real `{queued, refused?} | null` (issue #424, orchestration-
+    // runtime.ts) apart from a `ChildRuntime` that genuinely returns
+    // nothing. `undefined` — every OTHER `ChildRuntime.steer` today, and
+    // the declared type of this very call — is treated the SAME as `null`
+    // (unrecognised/terminal id): never invented into a `{queued: true}`
+    // this decorator has no evidence for.
+    steer: async (
       id: string,
       prompt: string,
       causalContext?: CausalContext,
       source: "engine" | "operator" = "engine",
-    ) => {
+    ): Promise<void> => {
       const identity = identities.get(id);
       if (identity !== undefined) {
         const cc = identity.causal;
@@ -347,7 +368,21 @@ export function auditedChildRuntime(
           payload: { source, message_chars: Array.from(prompt).length },
         });
       }
-      return inner.steer(id, prompt, causalContext);
+      // `inner: ChildRuntime` declares `steer` as `Awaitable<void>` — the
+      // pending value itself is retyped `Promise<unknown>` before
+      // awaiting (never the resolved value blindly cast), same posture
+      // `workflow_steer` (steer-tool.ts) uses one layer up.
+      const pending = inner.steer(id, prompt, causalContext) as unknown as Promise<unknown>;
+      const raw: unknown = await pending;
+      const outcome =
+        raw !== null && typeof raw === "object"
+          ? (raw as { readonly queued: boolean; readonly refused?: "steer_cap" })
+          : null;
+      // Declared `Promise<void>` (see the interface comment above) — the
+      // REAL outcome still travels through the return, recovered by
+      // `workflow_steer` (steer-tool.ts) with this SAME `typeof === "object"`
+      // shape check, never trusted from the type alone.
+      return outcome as unknown as undefined;
     },
     // `causalSnapshot` only delegates. `exactOptionalPropertyTypes` requires
     // these be OMITTED, not assigned `undefined`, when `inner` does not have
@@ -410,7 +445,7 @@ export function auditedRuntimeFor(
   ownershipOf: () => Ownership | null,
   durable: boolean,
   warn: (message: string) => void,
-): ChildRuntime {
+): AuditedChildRuntime {
   return auditedChildRuntime(runtime, { trail, ownershipOf, durable, warn });
 }
 
@@ -429,7 +464,7 @@ export function auditInstall(
   ownershipOf: () => Ownership | null,
   warn: (message: string) => void,
 ): readonly [
-  ChildRuntime,
+  AuditedChildRuntime,
   ((installation: LeafSandboxInstallation) => LeafSandboxHandle) | undefined,
 ] {
   const rt = auditedRuntimeFor(runtime, trail, ownershipOf, true, warn);

@@ -8,6 +8,22 @@
 // thin re-export behind.
 import type { Budget } from "./budget.js";
 import type { RunResult } from "./accounting.js";
+import type { AuditedChildRuntime } from "./audit-runtime.js";
+
+/** Issue #424 (M10-S3): `workflow_steer` needs the SAME per-stretch decorator
+ * `WorkflowService.launch`/`launchDurable` installed on a run's `RunRecord`
+ * (`record.runtime`, assigned right after `makeRecord` returns — never
+ * present in the object literal itself, which is why the field type below
+ * carries `| undefined`) — a fresh `auditedRuntimeFor`/`auditInstall` call
+ * would mint an empty `identities` map and silently drop `leaf.steered`
+ * (audit-runtime.ts's fail-open-to-the-port branch). `undefined` for an
+ * unknown OR already-settled run — a settled run's leaves are gone. */
+export function liveRuntimeOf<
+  T extends Readonly<{ settled: boolean; runtime?: AuditedChildRuntime }>,
+>(runs: ReadonlyMap<string, T>, runId: string): AuditedChildRuntime | undefined {
+  const record = runs.get(runId);
+  return record !== undefined && !record.settled ? record.runtime : undefined;
+}
 
 /** The one terminal/live view every read channel (`status()`, `runAndWait`,
  * the in-process settle path) converges on for a run whose `RunResult` is
