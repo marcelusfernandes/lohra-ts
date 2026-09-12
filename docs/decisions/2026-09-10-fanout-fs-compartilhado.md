@@ -81,3 +81,39 @@ over a shared working root (#248)`: duas branches escrevendo o mesmo
   arquivo (última vence, sem erro em nenhuma das duas chamadas) e duas
   branches escrevendo arquivos diferentes (ambos sobrevivem intactos),
   usando `writeFileTool` real como `base` de `sandboxDispatch`.
+
+## Apêndice (2026-09-13): colisão agora DETECTADA como advisory (#463)
+
+A escrita em si continua exatamente como descrito acima — sem lock, sem
+merge, a última vence silenciosamente no sistema de arquivos. O que mudou,
+issue #463 (M11-S5, épico #458), é que essa colisão deixou de ser invisível
+para quem lê o run: todo `write_file` com `ok: true` vira um registro em
+`RunResult.artifacts`, e uma segunda folha distinta escrevendo o MESMO
+`path` dispara `"<nodeId>: artifact path written by 2 leaves: <path>"` em
+`artifactFaults` — advisory, nunca em `faults`, nunca muda `status`
+(decisão 6 do épico #458, `docs/workflow-supervision.md`).
+
+**Limitações conhecidas, achados do veredito da PR #483 (issue #485, ainda
+aberta em `state:ready` — nenhuma das cinco resolvida neste registro)**:
+
+1. Um lote `[p, p]` de uma folha B, depois de A já ter escrito `p`, empurra
+   o fault DUAS vezes — `otherOwners` (`src/workflow/accounting.ts`) é
+   recomputado por registro, não deduplicado por caminho já reportado.
+2. `DurableRunView.artifact_faults` é escrito (`src/workflow/service.ts`)
+   mas nunca lido de volta — `durableRollup` expõe só `artifacts`, e a
+   dobra terminal só faz `unshift` de `artifacts`; a colisão do stretch 1
+   some dos `faults` vivos depois de um resume.
+3. Colisão ENTRE stretches não é detectada — a checagem só compara contra
+   `result.artifacts` da stretch CORRENTE, nunca contra o que uma stretch
+   anterior já escreveu.
+4. O caminho é comparado como string crua (sem `path.posix.normalize`) —
+   `./x` e `x` escapam da detecção mesmo apontando para o mesmo arquivo.
+5. Um sub-workflow por `ref` nunca tem seus artefatos checados contra os do
+   run pai (`foldNestedCounters`, `accounting.ts` — a colisão só é checada
+   dentro de um `RunResult` plano, antes do fold).
+
+Nenhuma dessas cinco muda `status` nem `faults` hoje — são gaps do próprio
+mecanismo advisory, não uma regressão do invariante 2 (a escrita em si
+continua sem exceção nem causa a anexar, exatamente como a seção acima já
+descrevia). A doutrina — um arquivo por folha, nunca contar com a última
+escrita vencer por acaso — continua a mesma.

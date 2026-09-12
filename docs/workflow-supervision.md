@@ -5,11 +5,16 @@
 agente que orquestra) intervir num `run_workflow` já em execução, sem
 esperar ele falhar ou pausar sozinho. A M10 foi seguida pela milestone 14
 de consertos pós-revisão (#440, #444–#452, #457), que corrigiu achados dos
-revisores sem mudar a forma das três capacidades. Este documento é o resumo
-operacional;
-o comportamento medido e a doutrina de cada decisão estão nas notas em
-`docs/decisions/` linkadas abaixo, e o vocabulário do ledger (`leaf.steered`,
-o 5º `pause_reason`) está em [`docs/workflow-audit.md`](workflow-audit.md).
+revisores sem mudar a forma das três capacidades, e pela milestone 11 "Rotas,
+cache e artefatos" (épico #458, #459-#464), que estendeu o pivô de rota com
+um envelope pré-autorizado pelo operador e um canal automático, acrescentou
+`workflow_preview` (dry-run de resume) e o manifesto de artefatos por run, e
+ligou em produção o loader de templates que o pivô de sub-workflow (S6 do
+M10) já preparava. Este documento é o resumo operacional; o comportamento
+medido e a doutrina de cada decisão estão nas notas em `docs/decisions/`
+linkadas abaixo, e o vocabulário do ledger (`leaf.steered`, o 5º
+`pause_reason`, `node.rerouted`, `cache.missed`/`cache.replayed`) está em
+[`docs/workflow-audit.md`](workflow-audit.md).
 
 ## `workflow_steer` — mensagem ao vivo para um leaf em execução (#424, M10-S3)
 
@@ -80,13 +85,14 @@ não redigida que o leaf realmente viu.
   **Consequência prática**: com a auditoria desligada, `workflow_leaf_read`
   fica inutilizável para qualquer leaf, mesmo real.
 
-## Pivô de rota: `run_workflow(resume_run_id=..., route={provider?, model?})` (#426/#427, M10-S5/S6)
+## Pivô de rota: `run_workflow(resume_run_id=..., route={provider?, model?})` (#426/#427, M10-S5/S6; #459/#460, M11-S1/S2)
 
 Um run pausado com `pause_reason: "route_fault"` (5º valor — auth/roteamento/
 modelo recusou um leaf, nunca quota; ver
 [`docs/decisions/2026-09-12-pausa-por-recusa-de-rota.md`](decisions/2026-09-12-pausa-por-recusa-de-rota.md))
 carrega uma lição estruturada (`lesson`) e pode ser retomado numa rota
-DIFERENTE:
+DIFERENTE — por um `route` explícito ou, desde a M11, pela sugestão do
+envelope do operador aplicada automaticamente:
 
 - `route` só é aceito junto de `resume_run_id`; reescreve `provider`/`model`
   em todo nó (e stage de `pipeline`) da espec PERSISTIDA do run que já
@@ -107,13 +113,61 @@ DIFERENTE:
   `runningView` (`service-rollup.ts`, o run ainda vivo NESTE processo) —
   chave omitida (nunca lista vazia) para um run que nunca pivotou, nos
   dois caminhos.
-- **Teto de 3 pivôs por run** (`MAX_ROUTE_PIVOTS_PER_RUN`,
-  `src/workflow/route-override.ts:22`) — cada resume com `route` aceito
-  consome um, mesmo que a folha se recuse de novo na rota nova; o 4º é
-  recusado com erro nomeado, um gate humano de facto. O teto sobrevive a
+- **Teto de 3 pivôs por run, COMPARTILHADO pelos dois canais** (abaixo)
+  (`MAX_ROUTE_PIVOTS_PER_RUN`, `src/workflow/route-override.ts:25`) — cada
+  resume que pivota, por qualquer canal, consome um, mesmo que a folha se
+  recuse de novo na rota nova; o 4º `route` explícito é recusado com erro
+  nomeado, um gate humano de facto — um resume SEM `route` no teto nunca é
+  recusado, só fica na rota atual sem consumir pivô. O teto sobrevive a
   um crash do processo (#446) — as duas escritas que antes zeravam
   `pivots` num crash a meio do stretch agora carregam o valor prévio
-  adiante (`registrationPayload`, `route-override.ts:222-228`).
+  adiante (`registrationPayload`, `route-override.ts:366-372`).
+
+### Envelope do operador: `workflow_routes.json` e o canal automático (#459/#460, M11-S1/S2)
+
+Antes da M11, `lesson.suggested_route` era sempre `null` — pivotar exigia um
+`route` explícito, sempre. Desde #459/#460, o operador pode PRÉ-AUTORIZAR
+fallbacks para uma rota morta específica, e um resume sem `route` os
+consome sozinho:
+
+- **`workflow_routes.json`** (`<home>/workflow_routes.json`, molde
+  `workflow_tiers.json`/`readTiers`, #234): `{"routes": {"<provider
+morta>/<model morto>": [{"provider", "model"}, ...]}}`, uma lista ORDENADA
+  de fallbacks por rota morta. `readRoutes` (`src/workflow/routes.ts`) é
+  **fail-closed** — arquivo ausente é `{routes: {}}` legítimo; JSON
+  inválido, raiz não-objeto, chave de topo diferente de `routes`, chave de
+  rota sem exatamente um `/`, fallback sem `provider`/`model` não vazios,
+  fallback com campo desconhecido, fallback igual à própria rota morta, ou
+  lista vazia são um `RoutesError` nomeado — `WorkflowService.start` recusa
+  o LANÇAMENTO nesse erro, exatamente como um `workflow_tiers.json`
+  quebrado (`service.ts:494`). Sem `max_fallbacks_per_run`: o único teto
+  continua o de 3 pivôs acima.
+- **`lesson.suggested_route`** deixa de ser sempre `null`: `withSuggestedRoute`
+  (`route-faults.ts`) preenche o primeiro fallback do envelope que este run
+  ainda não tentou (`suggestRoute`, `routes.ts`, pura — nunca lê disco nem
+  toca o engine), no `checkpoint`/`pause_payload_json.lesson` e na mensagem
+  do notice (`suggested=<provider>/<model>` ou `suggested=none`). Continua
+  um HINT, nunca uma escolha automática por si só — só preencher não pivota
+  nada (decisão 1(a) do mapa do épico #458).
+- **Canal automático**: um resume SEM `route` explícito de um run pausado
+  `route_fault`, com `suggested_route` não-nulo e o teto de 3 ainda não
+  atingido, aplica a sugestão sozinho — `pivots[i].channel: "route_envelope"`
+  (`pivotResume`, `route-override.ts`). Um `route` explícito continua
+  livre e **sempre vence**, mesmo quando difere da sugestão —
+  `channel: "operator"` — porque o envelope restringe o que o HARNESS
+  escolhe sozinho, nunca o que o operador (ou o agente por ele) pede
+  explicitamente. `AutoResumeScheduler` **não** re-arma `route_fault` por
+  nenhum canal — continua só para `quota_exhausted` (decisão 2 do épico
+  #421, intacta).
+- **`node.rerouted`** — um evento por nó que o pivô efetivamente reescreveu
+  (`channel`, `pivot`, `from`/`to`), no segmento novo, depois de
+  `workflow.plan`; vocabulário completo em
+  [`docs/workflow-audit.md`](workflow-audit.md).
+- Detalhe, doutrina e evidência em
+  [`docs/decisions/2026-09-13-envelope-de-rotas.md`](decisions/2026-09-13-envelope-de-rotas.md)
+  (S1) e
+  [`docs/decisions/2026-09-13-canal-route-envelope.md`](decisions/2026-09-13-canal-route-envelope.md)
+  (S2).
 - **Sub-workflow por `ref` também recebe o pivô, desde o #452.**
   `runNested` (`src/workflow/engine.ts`) carrega o template do `ref` em
   runtime, depois que `pivotResume` já reescreveu a espec do run pai;
@@ -121,15 +175,123 @@ DIFERENTE:
   `routeOverride` do run pai dentro de `runNested`, threadado por
   `service.ts` (`launch`/`launchDurable`) via
   `WorkflowEngineOptions.routeOverride`. Profundidade continua limitada a
-  `MAX_WORKFLOW_DEPTH = 1` — só o run pai carrega outro template.
-  **Ressalva prática**: o loader de templates do operador (`ref` → arquivo
-  em `~/.lohra/workflows/`) ainda não está ligado a `chat`/`dashboard` em
-  produção (#464, M11) — hoje o mecanismo só é alcançável com um `loader`
-  injetado à mão, como em teste; `runNested` lança `"workflow loader
-unavailable"` (`engine.ts:837`) fora desse caso.
+  `MAX_WORKFLOW_DEPTH = 1` — só o run pai carrega outro template. **Desde
+  o #464 (M11-S6), o mecanismo é alcançável em produção**: `chat.ts`/
+  `dashboard.ts` passam `loader: templateLoader(options.home)` a
+  `WorkflowService` — a ressalva que valia até aqui (loader só injetado à
+  mão em teste) não vale mais; `runNested` só lança `"workflow loader
+unavailable"` (`engine.ts:837`) quando o composition root de fato não
+  configurou um (nunca o caso de `chat`/`dashboard`).
 
 Detalhe completo (o que cada pivô registra, o que fica de fora, a decisão
 de não fazer re-key global) na nota de decisão linkada acima.
+
+## `workflow_preview {run_id, route?}` — dry-run de um resume (#462, M11-S4)
+
+Responde "o que replayaria, o que recomputaria e por quê" de um resume
+`run_workflow(resume_run_id=...)` (com ou sem `route`) SEM gastar um token,
+SEM escrever uma linha, e SEM consumir um dos 3 pivôs do run — decisão 5 do
+mapa do épico #458: leitura não viaja na tool de lançamento.
+
+- **Zero re-derivação de hash**: um `WorkflowEngine` real (`engine.ts`) roda
+  contra um `ChildRuntime` seco (toda folha reporta `"failed"` genérico,
+  nunca um `error_kind` de rota/quota — uma preview nunca pausa por um
+  fault que um resume de verdade ainda não bateu) e uma fachada só-leitura
+  sobre o cache SQLite real do run (`get` passa direto; `put` é um
+  no-op — nunca escreve, nunca chama `onWrite`).
+- **Por nó, no topo do spec** (`src/workflow/cache-preview.ts`):
+  `replay` (célula no cache), `recompute` com `reason` `never_completed`/
+  `identity_changed` (mesmo vocabulário de `cache.missed`, acima),
+  `checkpoint_pending`, `upstream_missing`, `token_budget_exhausted`,
+  `nested` (um nó `workflow` que rodou de verdade, agregado —
+  `cells_replayed`/`cells_to_recompute`/`leaves_to_spawn`, nunca os nós
+  internos) ou `unknown` (um fault do engine — nunca bloqueia a preview,
+  só conta em `engine_faults`).
+- **Totais**: `cells_replayed`, `tokens_saved`, `leaves_to_spawn`,
+  `estimated_tokens_to_repay` (`leaves_to_spawn` vezes a média medida de
+  tokens por célula custada DESTE run; `null` com `estimate_basis: null`
+  se o run nunca custou uma célula), `route_applied` (`true` só quando
+  `route` foi passado — não indica se algum nó de fato mudou), e
+  `pivots_used` — os pivôs que este run JÁ GASTOU (`view.pivots.length`),
+  **não afetado por esta chamada**: `workflow_preview` nunca consome um
+  pivô, mesmo com `route` preenchido.
+- **Limitação conhecida**: `workflow_preview` ainda NÃO recebe o loader de
+  templates do operador — `session-tools.ts` registra `workflow_preview`
+  sem `loader` em `PreviewDeps` (ao contrário de `chat.ts`/`dashboard.ts`,
+  que passam `templateLoader(home)` para o `WorkflowService` real desde o
+  #464). Um nó `workflow` aninhado que dependa do loader aparece como
+  `outcome: "unknown"` com `engine_faults` incrementado, mesmo que o MESMO
+  resume real funcionasse — corrigir é o #484.
+- Chamar ANTES de `run_workflow(resume_run_id=..., route=...)`, para saber
+  o custo de uma rota candidata antes de gastar um dos 3 pivôs.
+
+## `workflow_templates` e o loader do operador (#464, M11-S6)
+
+Biblioteca de specs do operador: um arquivo JSON por template, em
+`<home>/workflows/<ref>.json` (`OPERATOR_TEMPLATES_DIR`,
+`src/workflow/templates.ts`) — `ref` é o nome do arquivo sem `.json`,
+validado contra `TEMPLATE_REF` (`/^[a-z0-9][a-z0-9_-]{0,63}$/`, fail-closed:
+sem separador de caminho, sem `..`, nunca escapa do diretório).
+
+- **`workflow_templates` é real**, não mais o stub `failSafe` de antes do
+  #464: sem `name`, lista todo `.json` do diretório (`listTemplates`) —
+  cada entrada `{ref, name?, nodes?, error?}`, um arquivo quebrado ou cujo
+  nome de arquivo não é um `ref` válido vira `{ref, error}`, nunca cai
+  silenciosamente da lista; com `name`, carrega e VALIDA esse template
+  (`validateSpec`), citando os mesmos erros que `run_workflow` citaria.
+  Diretório ausente é uma biblioteca vazia legítima (molde `readTiers`,
+  #234), não um erro.
+- **O MESMO loader liga o nó `{type: "workflow", ref}`**: `templateLoader(home)`
+  (`templates.ts`) é passado a `WorkflowService` por `chat.ts`/
+  `dashboard.ts` desde este issue — antes, nenhum composition root
+  configurava `loader` nenhum, e `runNested` sempre lançava `"workflow
+loader unavailable"` em produção; o #244 já validava um `ref` na CARGA da
+  espec com um loader injetado à mão em teste, mas isso não mudava nada em
+  produção sem este fio (`loader === undefined` devolvia `null` na
+  validação, `schema.ts:771`). O critério de saída do milestone ("dois nós
+  que chamam o mesmo template não colidem") só é verdade em produção a
+  partir daqui.
+- **`workflow_preview` NÃO recebe este loader ainda** — ver a limitação
+  descrita na seção acima (#484).
+
+## Manifesto de artefatos: `artifacts`/`artifact_faults` por run (#463, M11-S5)
+
+Todo `write_file` que uma folha de qualquer nó do run realmente executa com
+`ok: true` vira um registro em `RunResult.artifacts` — nunca `terminal`,
+nunca uma tool MCP.
+
+- **Um registro por escrita**: `{node_id, sub_id, path, bytes}` — `path`
+  exatamente como a tool recebeu (nunca normalizado), `bytes` do próprio
+  envelope da tool. Vivo em `workflow_status`'s `resultView`/`runningView`
+  e durável em `pause_payload_json`/`durableRollup` — acumula através de um
+  resume (`priorView.artifacts` é prependido, nunca apendado, ao que a
+  stretch nova produziu).
+- **Teto de 256 por FOLHA** (`MAX_ARTIFACTS_PER_LEAF`,
+  `src/workflow/orchestration-runtime.ts:20`) — acima disso, o registro
+  CAI e é contado em vez de crescer sem limite (invariante 3); a contagem
+  vira uma entrada em `artifactFaults`: `"<nodeId>: N artifact records
+dropped past the cap"`.
+- **Colisão de caminho é ADVISORY** (doutrina #248, decisão 6 do épico
+  #458): duas folhas do MESMO run escrevendo o MESMO `path` — a segunda
+  escritora distinta dispara `"<nodeId>: artifact path written by 2
+leaves: <path>"` em `artifactFaults` exatamente uma vez; nunca em
+  `faults`, nunca muda `status` — a escrita em si continua sem árbitro
+  nenhum (a última grava por cima, silenciosamente, no sistema de
+  arquivos), só a VISIBILIDADE da colisão é nova. Apêndice com o
+  comportamento medido em
+  [`docs/decisions/2026-09-10-fanout-fs-compartilhado.md`](decisions/2026-09-10-fanout-fs-compartilhado.md).
+- **Limitações conhecidas, achados do veredito da PR #483 (#485, ainda
+  aberta)**: (a) um lote `[p, p]` de uma folha B depois de A já ter
+  escrito `p` empurra o fault DUAS vezes, não uma; (b)
+  `DurableRunView.artifact_faults` é escrito mas nunca lido de volta —
+  `durableRollup` expõe só `artifacts`, então a colisão do stretch 1 some
+  dos `faults` vivos depois de um resume; (c) colisão ENTRE stretches não é
+  detectada (só compara contra os artefatos da stretch corrente); (d) o
+  caminho é comparado como string crua — `./x` e `x` não colidem; (e) um
+  sub-workflow por `ref` nunca tem seus artefatos checados contra os do
+  run pai (`foldNestedCounters`, só dentro de um `RunResult` plano). Nenhum
+  desses cinco muda `status` nem `faults` hoje — são gaps do próprio
+  advisory, não do runtime.
 
 ## Sinal do processo e envelope de falha (contexto, não uma tool nova)
 
