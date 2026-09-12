@@ -691,9 +691,9 @@ export const supervisionMutants: readonly Mutant[] = [
       {
         file: transportsClient,
         before:
-          "    let response: HttpResponseData;\n    try {\n      response = await this.request({ ...kwargs, stream: true }, signal);\n    } catch (error) {\n      rethrowAborted(error, (partialBody) => {\n        const chunks = parseSse(partialBody, parseJsonPreservingNumbers);",
+          "    let response: HttpResponseData;\n    try {\n      response = await this.request({ ...kwargs, stream: true }, signal);\n    } catch (error) {\n      rethrowAborted(error, (partialBody) => {\n        const chunks = parseSse(partialBody, parseJsonPreservingNumbers, {",
         after:
-          "    let response: HttpResponseData;\n    try {\n      response = await this.request({ ...kwargs, stream: true });\n    } catch (error) {\n      rethrowAborted(error, (partialBody) => {\n        const chunks = parseSse(partialBody, parseJsonPreservingNumbers);",
+          "    let response: HttpResponseData;\n    try {\n      response = await this.request({ ...kwargs, stream: true });\n    } catch (error) {\n      rethrowAborted(error, (partialBody) => {\n        const chunks = parseSse(partialBody, parseJsonPreservingNumbers, {",
       },
     ],
   },
@@ -737,11 +737,11 @@ export const supervisionMutants: readonly Mutant[] = [
       },
     ],
   },
-  // Issue #567 (achado do veredito da PR #525): parseSse (client.ts) era
-  // atômico — um SyntaxError no último `data:` truncado por um abort em
-  // voo descartava também os eventos JÁ parseados com sucesso. N4 reverte
-  // o try/catch novo, matando o mutante via o `it` que prova os deltas
-  // completos sobrevivendo a um frame truncado no final.
+  // Issue #567 (PR #525; restrito à rodada 2 do veredito da PR #572):
+  // parseSse (client.ts) era atômico no abort — N4 reverte o
+  // `tolerateTruncatedTail` inteiro, voltando o caminho de abort a lançar
+  // sempre. O caminho normal (`response.body`, sem a opção) já lançava
+  // antes e depois desta issue; não precisa de mutante próprio.
   {
     id: "N4-parse-sse-truncated-frame-atomic",
     category: "parse-sse-truncated-frame-atomic",
@@ -754,7 +754,7 @@ export const supervisionMutants: readonly Mutant[] = [
       {
         file: transportsClient,
         before:
-          '    if (!data) continue;\n    if (data === "[DONE]") break;\n    try {\n      chunks.push(parse(data));\n    } catch {\n      // A truncated trailing frame — nothing after it could be valid\n      // either, so stop here instead of skipping ahead to the next block.\n      break;\n    }',
+          '    if (!data) continue;\n    if (data === "[DONE]") break;\n    if (options.tolerateTruncatedTail !== true) {\n      chunks.push(parse(data));\n      continue;\n    }\n    try {\n      chunks.push(parse(data));\n    } catch {\n      // Abort path only (tolerateTruncatedTail): nothing after this block\n      // could be valid either, so stop here instead of skipping ahead.\n      break;\n    }',
         after:
           '    if (!data) continue;\n    if (data === "[DONE]") break;\n    chunks.push(parse(data));',
       },

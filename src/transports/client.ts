@@ -314,17 +314,22 @@ function providerFailure(response: HttpResponseData): ProviderCallFailed {
   });
 }
 
-/** ADR 0005 amendment (issue #567): a stream aborted in flight can leave its
- * LAST `data:` frame cut mid-JSON (`readBounded`/`postNative` capture
- * whatever bytes already arrived, not a clean frame boundary). Before this,
- * `parse(data)` throwing on that one truncated frame propagated out of the
- * whole function, discarding every event already pushed to `chunks` along
- * with it — `partial.text` came back empty even when several complete
- * deltas preceded the cut. Now only the frame that fails to parse is
- * dropped; whatever parsed cleanly before it is returned. */
+/** ADR 0005 amendment (issue #567, rodada 2 do veredito da PR #572): a
+ * stream aborted in flight can leave its LAST `data:` frame cut mid-JSON
+ * (`readBounded`/`postNative` capture whatever bytes already arrived, not a
+ * clean frame boundary) — `partial.text` should still carry whatever
+ * parsed cleanly before that cut. A malformed frame in a NORMAL (never
+ * aborted) response is a different thing entirely: fail-closed (CLAUDE.md
+ * invariante 2) demands it still throws, exactly like the base, instead of
+ * silently truncating a 200 response. `tolerateTruncatedTail` defaults to
+ * `false` so every ordinary `parseSse(response.body, ...)` call keeps
+ * throwing; only `rethrowAborted`'s `buildPartial` callbacks — the three
+ * call sites that parse `error.partialBody`, never `response.body` — opt
+ * in explicitly. */
 function parseSse(
   body: Uint8Array,
   parse: (value: string) => unknown = (value) => JSON.parse(value) as unknown,
+  options: { readonly tolerateTruncatedTail?: boolean } = {},
 ): unknown[] {
   const chunks: unknown[] = [];
   const blocks = new TextDecoder().decode(body).split(/\r?\n\r?\n/u);
@@ -336,11 +341,15 @@ function parseSse(
       .join("\n");
     if (!data) continue;
     if (data === "[DONE]") break;
+    if (options.tolerateTruncatedTail !== true) {
+      chunks.push(parse(data));
+      continue;
+    }
     try {
       chunks.push(parse(data));
     } catch {
-      // A truncated trailing frame — nothing after it could be valid
-      // either, so stop here instead of skipping ahead to the next block.
+      // Abort path only (tolerateTruncatedTail): nothing after this block
+      // could be valid either, so stop here instead of skipping ahead.
       break;
     }
   }
@@ -393,7 +402,10 @@ export class ChatCompletionsClient {
     } catch (error) {
       rethrowAborted(error, (partialBody) => {
         const tracked = withTextTracking(callbacks);
-        const raw = assembleStreamedResponse(parseSse(partialBody), tracked.callbacks);
+        const raw = assembleStreamedResponse(
+          parseSse(partialBody, undefined, { tolerateTruncatedTail: true }),
+          tracked.callbacks,
+        );
         return partialFromNormalized(this.options.transport.normalizeResponse(raw), {
           text: tracked.text(),
         });
@@ -559,7 +571,9 @@ export class AnthropicMessagesClient {
       response = await this.request({ ...kwargs, stream: true }, signal);
     } catch (error) {
       rethrowAborted(error, (partialBody) => {
-        const chunks = parseSse(partialBody, parseJsonPreservingNumbers);
+        const chunks = parseSse(partialBody, parseJsonPreservingNumbers, {
+          tolerateTruncatedTail: true,
+        });
         const tracked = withTextTracking(callbacks);
         replayAnthropicText(chunks, tracked.callbacks);
         return partialFromNormalized(
@@ -690,7 +704,10 @@ export class ResponsesClient {
     } catch (error) {
       rethrowAborted(error, (partialBody) => {
         const tracked = withTextTracking(callbacks);
-        const raw = responsesStream(parseSse(partialBody), tracked.callbacks);
+        const raw = responsesStream(
+          parseSse(partialBody, undefined, { tolerateTruncatedTail: true }),
+          tracked.callbacks,
+        );
         return partialFromNormalized(this.options.transport.normalizeResponse(raw), {
           text: tracked.text(),
         });

@@ -135,14 +135,20 @@ export function rethrowAborted(
   try {
     partial = buildPartial(error.partialBody);
   } catch {
-    // Defensive fallback only: `parseSse` (client.ts) no longer throws for
-    // a truncated trailing SSE frame — it discards just that frame and
-    // returns whatever parsed before it (issue #567). Reaching here means
-    // `assembleStreamedResponse`/`anthropicStream`/`responsesStream`
-    // themselves threw partway through replaying events that DID parse;
-    // whatever they already sent through `tracked.callbacks` before the
-    // throw stays replayed — only the aggregated `partial` (text/usage)
-    // falls back to empty here.
+    // Defensive fallback only: `parseSse` (client.ts), called here with
+    // `tolerateTruncatedTail: true`, no longer throws for a truncated
+    // trailing SSE frame in THIS (abort) path — it discards just that
+    // frame and returns whatever parsed before it (issue #567; the normal,
+    // never-aborted path keeps throwing on any malformed frame, rodada 2
+    // do veredito da PR #572). Reaching here instead means something
+    // downstream of `parseSse` threw partway through: the per-client
+    // assembler (`assembleStreamedResponse`/`anthropicStream`/
+    // `responsesStream`), `replayAnthropicText`, `anthropicPartialUsage`,
+    // `this.options.transport.normalizeResponse`, or even the caller's own
+    // `onText` (reached through `tracked.callbacks`). Whatever any of
+    // those already sent through the callbacks before the throw stays
+    // replayed — only the aggregated `partial` (text/usage) falls back to
+    // empty here.
   }
   if (error instanceof StreamAbortedError) {
     throw new StreamAbortedError(partial, { partialBody: error.partialBody, cause: error.cause });
