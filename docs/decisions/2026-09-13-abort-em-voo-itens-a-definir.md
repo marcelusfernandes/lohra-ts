@@ -35,11 +35,13 @@ Anthropic preenche isso, via `message_start` (`anthropicPartialUsage`,
 (`src/orchestration/core.ts:451-467`) chama
 `entry.abortController.abort()` para TODO child rastreado (linha 453) ANTES
 de esperar qualquer um assentar — supera a doutrina "drains, never
-abandons" que a própria ADR 0005 cita como superseded
-(`core.ts:99-103`/`:381-390`, texto ainda não atualizado para citar a ADR —
-esse comentário é o item 4 da "Decision" da ADR, também pendente, fora do
-escopo desta nota). Um child mid-stream quando `shutdown()` dispara assenta
-como `interrupted` com uso estimado, igual a um `cancel()` de leaf único.
+abandons" que a ADR 0005 citava como superseded, nas linhas que a ADR
+apontava na SUA baseline (`core.ts:99-103`/`:381-390`, pré-implementação).
+O texto de produção já foi atualizado para citar a ADR — não é mais um item
+pendente: o próprio JSDoc de `shutdown()` (`core.ts:431-443`) e o contrato
+de `ChildRunner` (`core.ts:106-113`) já dizem "ADR 0005, issue #518" desde
+S3. Um child mid-stream quando `shutdown()` dispara assenta como
+`interrupted` com uso estimado, igual a um `cancel()` de leaf único.
 
 **D3 — steer interrompe via um hook armado por chamada, nunca por leaf
 inteiro.** `OrchestrationCore`'s `entry.interrupt: (() => void) | null`
@@ -67,7 +69,7 @@ desde antes desta milestone). O HEAD não implementa isso uniformemente:
   chamados só de `cancel()` (`audit-runtime.ts:506-525`).
 - **steer-interrupt (S5):** NUNCA fecha o leaf — a chamada interrompida é
   reclassificada e o turno pode continuar e completar
-  (`runtime.ts:502-519`, `child-runner.ts:234-236`). O único marcador é
+  (`runtime.ts:523-544`, `child-runner.ts:234-236`). O único marcador é
   `interrupted: true` em `leaf.steered` (`audit-runtime.ts:437`); não há
   `error_kind` nem `reason` porque não há `leaf.failed` nenhum nesse
   caminho quando o turno termina completando.
@@ -106,10 +108,22 @@ muito bem ter completado normalmente depois da chamada interrompida.
   estimativa de request.
 - `tests/orchestration-core-shutdown.test.ts` — `shutdown()` abortando um
   child mid-stream.
-- `tests/orchestration-steer-interrupt.test.ts` e
-  `tests/conversation-runtime-injection.test.ts` — o hook armado por
-  chamada, nunca por leaf inteiro, e a precedência do `signal` externo sobre
-  o `call` interno quando os dois disparam na mesma corrida.
+- `tests/orchestration-steer-interrupt.test.ts` — o hook armado por chamada,
+  nunca por leaf inteiro.
+- `tests/conversation-runtime-injection.test.ts:341-394` ("an external
+  cancel during the same call takes precedence over an armed interrupt")
+  — o `interruptSource.arm` deste teste é um fake cujo `abort()` devolvido é
+  um no-op (`() => undefined`, nunca chama `call.abort`): o teste prova que
+  um cancel EXTERNO sempre vira `ConversationCancelledError`, nunca
+  reclassificado como `continue` de steer-interrupt, mesmo com um
+  `interruptSource` presente (armado, mas nunca disparado) — não prova a
+  corrida "os dois sinais disparam ao mesmo tempo" (isso exigiria um fake
+  cujo `abort()` realmente chamasse `call.abort`; nenhum teste hoje exercita
+  esse caso). A precedência do `signal` externo sobre `call` NESSA corrida
+  específica é lida direto do código — a ordem de checagem do `catch`
+  (`isAbortOf(error, signal)`, `runtime.ts:509`, antes de
+  `signalAborted(call.signal)`, `runtime.ts:531`) — não confirmada por
+  teste.
 - `tests/workflow-audit-leaf.test.ts:334-349` — `a leaf timeout (wait:true
 collect returning running) closes ONCE as interrupted/timeout`: mostra o
   payload `{status: "interrupted", reason: "timeout"}` sem `error_kind`,
