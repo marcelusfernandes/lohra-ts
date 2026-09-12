@@ -56,6 +56,12 @@ const templates = "src/workflow/templates.ts";
 const cachePreviewFocus = "tests/workflow-cache-preview.test.ts";
 const cachePreviewWritesFocus = "tests/workflow-cache-preview-writes.test.ts";
 const templatesFocus = "tests/workflow-templates.test.ts";
+const transportsClient = "src/transports/client.ts";
+const orchestrationRuntime = "src/workflow/orchestration-runtime.ts";
+const abortInFlightFocus = "tests/transports-abort-in-flight.test.ts";
+const childRunnerAbortFocus = "tests/orchestration-child-runner-abort.test.ts";
+const workflowOrchestrationRuntimeTimeoutFocus =
+  "tests/workflow-orchestration-runtime-timeout.test.ts";
 
 export const supervisionMutants: readonly Mutant[] = [
   // --- steer-tool.ts (#424, #445, #450) -----------------------------------
@@ -679,6 +685,75 @@ export const supervisionMutants: readonly Mutant[] = [
         before:
           '  if (\n    node.type === "parallel" &&\n    Object.hasOwn(outputs, node.id) &&\n    Array.isArray(output) &&\n    output.length === 0\n  ) {',
         after: '  if (node.type === "parallel" && Object.hasOwn(outputs, node.id)) {',
+      },
+    ],
+  },
+  // --- abort em voo (M16, épico #490, issue #519) -------------------------
+  // Issue #519 (M16-S4, última sub-issue da milestone): S1-S3/S5/S6 já
+  // mergearam o caminho de abort em voo (ADR 0005) sem nenhum mutante
+  // cobrindo `stream()`'s própria propagação de `signal`, a reclassificação
+  // de `error.partialUsage` em `child-runner.ts`, e o teto de espera de
+  // `OrchestrationChildRuntime.cancel`.
+  {
+    id: "N1-anthropic-stream-signal-ignored",
+    category: "anthropic-stream-signal-ignored",
+    mechanism: "family-a",
+    focus: {
+      file: abortInFlightFocus,
+      test: "AnthropicMessagesClient.stream forwards signal, replays partial text, and fills partial.usage from message_start",
+    },
+    edits: [
+      {
+        file: transportsClient,
+        before:
+          "    let response: HttpResponseData;\n    try {\n      response = await this.request({ ...kwargs, stream: true }, signal);\n    } catch (error) {\n      rethrowAborted(error, (partialBody) => {\n        const chunks = parseSse(partialBody, parseJsonPreservingNumbers);",
+        after:
+          "    let response: HttpResponseData;\n    try {\n      response = await this.request({ ...kwargs, stream: true });\n    } catch (error) {\n      rethrowAborted(error, (partialBody) => {\n        const chunks = parseSse(partialBody, parseJsonPreservingNumbers);",
+      },
+    ],
+  },
+  {
+    id: "N2-cancelled-leaf-usage-dropped",
+    category: "cancelled-leaf-usage-dropped",
+    mechanism: "family-a",
+    focus: {
+      file: childRunnerAbortFocus,
+      test: "a stream torn down mid-flight resolves interrupted/cancelled with an estimated partial usage, never a bare zero",
+    },
+    edits: [
+      {
+        file: childRunner,
+        before:
+          '            ...zeroResult("interrupted", "", profile, model, error.partialUsage, "cancelled", null),',
+        after:
+          '            ...zeroResult("interrupted", "", profile, model, null, "cancelled", null),',
+      },
+    ],
+  },
+  // N3 originally targeted `CANCEL_SETTLE_TIMEOUT_MS = 0` (issue #519's own
+  // suggestion) against `tests/workflow-abort-in-flight.test.ts`'s "resolves
+  // once the leaf actually settles" test — verified NOT to kill: that test's
+  // own settlement chain resolves entirely via microtasks (no real timer or
+  // I/O in between `core.cancel()` and the leaf's teardown), so Node drains
+  // it before ANY `setTimeout`, including one scheduled for 0ms, ever fires
+  // — the race never actually reaches the ceiling. Retargeted at #521
+  // (M16-S6)'s sibling ceiling in the SAME function family — `collect()`'s
+  // own `deadlineMs` — against a focus that uses a genuinely stuck leaf (a
+  // promise that never resolves at all), where the ceiling is the ONLY
+  // thing that can ever settle the race.
+  {
+    id: "N3-collect-deadline-ceiling-widened",
+    category: "collect-deadline-ceiling-widened",
+    mechanism: "family-a",
+    focus: {
+      file: workflowOrchestrationRuntimeTimeoutFocus,
+      test: "a leaf stuck mid-stream comes back running within the deadline, without cancelling it",
+    },
+    edits: [
+      {
+        file: orchestrationRuntime,
+        before: "        ? Math.min(options.timeoutSeconds * 1000, 2_147_483_647)",
+        after: "        ? Math.min(options.timeoutSeconds * 10_000, 2_147_483_647)",
       },
     ],
   },

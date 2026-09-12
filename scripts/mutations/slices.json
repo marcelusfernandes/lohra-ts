@@ -114,7 +114,8 @@
       "tests/context-estimate.test.ts",
       "tests/providers-context-window.test.ts",
       "tests/catalog-pricing.test.ts",
-      "tests/state-locks.test.ts"
+      "tests/state-locks.test.ts",
+      "tests/transports-abort-in-flight.test.ts"
     ]
   },
   {
@@ -139,7 +140,10 @@
       "tests/transport-error-kinds.test.ts",
       "tests/workflow-cache-preview.test.ts",
       "tests/workflow-templates.test.ts",
-      "tests/workflow-cache-preview-writes.test.ts"
+      "tests/workflow-cache-preview-writes.test.ts",
+      "tests/transports-abort-in-flight.test.ts",
+      "tests/orchestration-child-runner-abort.test.ts",
+      "tests/workflow-orchestration-runtime-timeout.test.ts"
     ]
   }
 ]

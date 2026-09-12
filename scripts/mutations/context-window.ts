@@ -49,6 +49,8 @@ const tokenEstimateTests = "tests/context-estimate.test.ts";
 const contextWindowTests = "tests/providers-context-window.test.ts";
 const catalogPricingTests = "tests/catalog-pricing.test.ts";
 const stateLocksTests = "tests/state-locks.test.ts";
+const providerModel = "src/conversation/provider-model.ts";
+const abortInFlightTests = "tests/transports-abort-in-flight.test.ts";
 
 export const contextWindowMutants: readonly Mutant[] = [
   {
@@ -302,6 +304,48 @@ export const contextWindowMutants: readonly Mutant[] = [
         file: sessionRepository,
         before: "    activeOnly = true,\n",
         after: "    activeOnly = false,\n",
+      },
+    ],
+  },
+  // --- abort em voo (M16, épico #490, issue #519) -------------------------
+  // Issue #519 (M16-S4): S1-S3/S5/S6's own estimator/signal-forwarding code
+  // lives under `src/conversation/**`/`src/context/**`, this slice's own
+  // `srcGlobs` — never `supervision`'s (`src/workflow/**`,
+  // `src/orchestration/**`, `src/transports/**`), which the issue's original
+  // id assignment mistakenly targeted.
+  {
+    id: "p-partial-usage-text-factor-dense",
+    category: "partial-usage-text-factor-dense",
+    mechanism:
+      "estimatePartialUsage cobra partial.text no fator JSON (mais denso), em vez do fator de prosa — superestima o custo de texto parcial",
+    focus: {
+      file: tokenEstimateTests,
+      test: "pins the exact output token count for 29 chars of partial text (29 / 2.9 = 10, no remainder)",
+    },
+    edits: [
+      {
+        file: tokenEstimate,
+        before: "    charsToTokens(partial.text.length, TEXT_CHARS_PER_TOKEN) +",
+        after: "    charsToTokens(partial.text.length, JSON_CHARS_PER_TOKEN) +",
+      },
+    ],
+  },
+  {
+    id: "q-stream-signal-dropped-in-streaming-branch",
+    category: "stream-signal-dropped-in-streaming-branch",
+    mechanism:
+      "AnthropicMessagesModel.complete deixa de encaminhar request.signal ao chamar client.stream no ramo streaming — um abort do caller nunca alcança o transporte",
+    focus: {
+      file: abortInFlightTests,
+      test: "forwards ModelRequest.signal into the streaming branch of both model wrappers",
+    },
+    edits: [
+      {
+        file: providerModel,
+        before:
+          "      ? this.client.stream(kwargs, request.onText ? { onText: request.onText } : {}, request.signal)",
+        after:
+          "      ? this.client.stream(kwargs, request.onText ? { onText: request.onText } : {}, undefined)",
       },
     ],
   },

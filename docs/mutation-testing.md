@@ -171,22 +171,22 @@ adicionar uma fatia" cita a mesma restrição.
 | --------------------- | ----------------------- | -------: | --------------------------------------------------------------------------------------------------------------------- |
 | `workflow-executor`   | `mutations:t15`         |       45 | `workflow-executor-mutants.ts`                                                                                        |
 | `workflow-durability` | `mutations:t16`         |       60 | `workflow-durability-guard.ts` (12 guard + 2 combined) + `workflow-durability-named.ts` (41) + `orchestration.ts` (5) |
-| `workflow-audit-live` | `mutations:t17`         |       57 | `workflow-audit-live-mutants.ts` (32) + `workflow-audit-producers-mutants.ts` (25)                                    |
+| `workflow-audit-live` | `mutations:t17`         |       59 | `workflow-audit-live-mutants.ts` (32) + `workflow-audit-producers-mutants.ts` (27)                                    |
 | `media`               | `mutations:t21`         |       20 | `media-catalog-persistence.ts` (13) + `media-catalog-other.ts` (7)                                                    |
 | `web-tools`           | `mutations:t20`         |        9 | `web-tools-mutants.ts`                                                                                                |
 | `self-update`         | `mutations:self-update` |        8 | `self-update-mutants.ts`                                                                                              |
-| `context-window`      | `mutations:t23`         |       15 | `context-window.ts`                                                                                                   |
+| `context-window`      | `mutations:t23`         |       17 | `context-window.ts`                                                                                                   |
 | `auth`                | `mutations:auth`        |       13 | `auth-mutants.ts`                                                                                                     |
-| `supervision`         | `mutations:supervision` |       33 | `supervision-mutants.ts`                                                                                              |
+| `supervision`         | `mutations:supervision` |       36 | `supervision-mutants.ts`                                                                                              |
 
-Total: 260. Os 12 mutantes de `workflow-durability-guard.ts` são
+Total: 267. Os 12 mutantes de `workflow-durability-guard.ts` são
 combinatórios: três conjuntos do guard de escrita possuída (`fence`,
 `holder`, `lease-validity`) × quatro categorias (`state`, `cache`,
 `node-cost`, `spend`) — um mutante por combinação, cada um escorado só no
 teste focal da sua categoria, mais os 2 mutantes do INSERT combinado
 cache+custo (`combined-cell-guard-removed`,
 `combined-cost-escapes-refusal`). `tests/mutations-slices.test.ts` importa os
-treze catálogos de dado puro estaticamente e prova essa soma (260) a cada
+treze catálogos de dado puro estaticamente e prova essa soma (267) a cada
 corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
 
 `supervision-mutants.ts` (issue #451, milestone 14 — achado de QA/revisão de
@@ -310,6 +310,40 @@ max_fanout`/`exceeds lifetime remaining`) cai no `unknown` do catch-all —
   este nó sem crescer `engine.ts` (congelado em 978 linhas). P10 mata a
   remoção do novo guard `Array.isArray`, ancorado no `it` novo de fan-out
   cap em `tests/workflow-cache-preview-writes.test.ts`: 259 + 1 = 260.
+
+A issue #519 (M16-S4, épico #490, última sub-issue da milestone "Abort de
+stream em voo") acrescenta 7 mutantes ao caminho de abort em voo já
+mergeado (S1-S3/S5/S6). `supervision-mutants.ts` ganha três: N1
+(`client.ts`'s `AnthropicMessagesClient.stream` deixa de encaminhar
+`signal` na request inicial), N2 (`child-runner.ts` troca
+`error.partialUsage` por `null` no `catch` de `ConversationCancelledError`)
+e N3 (`orchestration-runtime.ts`'s teto de `collect()`'s `deadlineMs`
+alargado 10x) — 33 + 3 = 36. N3 originalmente mirava
+`CANCEL_SETTLE_TIMEOUT_MS = 0` (a sugestão da própria issue #519), verificado
+NÃO matar: o teste focal sugerido (`tests/workflow-abort-in-flight.test.ts`)
+resolve inteiramente via microtasks, sem timer real nem I/O entre
+`core.cancel()` e o assentamento — Node drena a fila de microtasks inteira
+antes de QUALQUER `setTimeout`, incluindo um de 0ms, então a corrida nunca
+alcança o teto não importa o valor. Retargetado no teto irmão da mesma
+família de função — `collect()`'s `deadlineMs` (#521, M16-S6) — contra
+`tests/workflow-orchestration-runtime-timeout.test.ts`, que usa uma
+promise que nunca resolve: aí o teto é a ÚNICA coisa que pode assentar a
+corrida, um kill determinístico de verdade.
+`workflow-audit-producers-mutants.ts` ganha dois: B1 (`audit-model.ts`
+remove `"partial"` de `BOOLEAN_FIELDS`, morto pelo `it` já existente de
+`tests/workflow-audit-allow-list.test.ts` — não um arquivo novo, que
+ficaria fora do allowlist fechado de
+`tests/mutations-fixtures-workflow-audit.test.ts`) e B2 (`audit-runtime.ts`'s
+`failedPayload(null, ...)` deixa de nomear `error_kind: "cancelled"`) — 25 +
+2 = 27. `context-window.ts` ganha dois: p (`token-estimate.ts`'s
+`estimatePartialUsage` cobra `partial.text` no fator JSON, mais denso, em
+vez do fator de prosa) e q (`provider-model.ts`'s
+`AnthropicMessagesModel.complete` deixa de encaminhar `request.signal` no
+ramo streaming) — os dois vivem sob `src/conversation/**`/`src/context/**`,
+cobertos pelo `srcGlobs` desta fatia, NÃO pelo de `supervision`
+(`src/workflow/**`, `src/orchestration/**`, `src/transports/**`) como a
+issue #519 sugeria (âncoras conferidas contra o HEAD, não contra o texto da
+issue) — 15 + 2 = 17. Total: 260 + 7 = 267.
 
 `workflow-executor-mutants.ts` (issue #418) acrescentou
 `Q1-quota-guard-removed`: a guarda que impede `quota_exhausted` de entrar em
@@ -476,13 +510,13 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
    `true`.
 5. `npm test` roda `tests/mutations-slices.test.ts`, que reprova de duas
    formas se a contagem não for atualizada junto com o mutante novo: a soma
-   total (260 + o novo) contra os treze catálogos importados, e a linha do
+   total (267 + o novo) contra os treze catálogos importados, e a linha do
    catálogo tocado em `CONTAGEM_POR_CATALOGO`
-   (`tests/mutations-slices.test.ts:552-566`), uma tabela pinada por número
+   (`tests/mutations-slices.test.ts:572-586`), uma tabela pinada por número
    literal — não derivada de `CATALOGOS.get(path).length` — para que uma
    troca compensatória entre dois catálogos (um ganha o que o outro perde,
    soma preservada) não passe despercebida. As duas contagens (o literal
-   `260` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
+   `267` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
    atualização junto com o mutante novo.
 
 ## Como adicionar uma fatia
@@ -529,13 +563,13 @@ cada entrada de `slices.json`; que todo catálogo descoberto por conteúdo em
 `focus.file` dos catálogos da fatia (exceto `media`/`workflow-executor`); que
 `srcGlobs` cobre todo `edits[].file` dos catálogos da fatia (item 2 acima); a
 contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
-(`tests/mutations-slices.test.ts:552-566` — hoje `workflow-durability-guard`
+(`tests/mutations-slices.test.ts:572-586` — hoje `workflow-durability-guard`
 14, `workflow-durability-named` 41, `orchestration` 5,
-`workflow-audit-live-mutants` 32, `workflow-audit-producers-mutants` 25,
+`workflow-audit-live-mutants` 32, `workflow-audit-producers-mutants` 27,
 `web-tools-mutants` 9, `media-catalog-other` 7, `media-catalog-persistence`
 13, `self-update-mutants` 8, `workflow-executor-mutants` 45,
-`context-window` 15, `auth-mutants` 13, `supervision-mutants` 33, soma 260) e
-a soma de 260 contra os treze catálogos importados; e que todo diretório de
+`context-window` 17, `auth-mutants` 13, `supervision-mutants` 36, soma 267) e
+a soma de 267 contra os treze catálogos importados; e que todo diretório de
 primeiro nível de `src/` está coberto por algum `srcGlobs` ou está em
 `SEM_FATIA` com um motivo não vazio — nunca os dois, nunca nenhum dos dois.
 
