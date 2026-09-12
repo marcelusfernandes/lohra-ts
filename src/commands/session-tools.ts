@@ -41,6 +41,9 @@ import { workflowSteerHandler } from "../workflow/steer-tool.js";
 // Issue #462: same convention — `workflowPreviewHandler` lives in its own
 // module (`cache-preview.ts`, not `tool.ts`), not re-exported.
 import { workflowPreviewHandler } from "../workflow/cache-preview.js";
+// Issue #464: `templateLoader` — same production loader `WorkflowService`
+// (`chat.ts`/`dashboard.ts`) resolves nested `workflow` nodes with.
+import { templateLoader } from "../workflow/templates.js";
 
 export interface SessionToolBase {
   readonly registry: ToolRegistry;
@@ -165,12 +168,17 @@ export function composeSessionTools(options: {
     // built here — same reason `workflow_leaf_read` above is early but
     // this one is not.
     workflow_steer: workflowSteerHandler(options.workflowService, options.base.auditRepository),
-    // Issue #462: needs `options.home` (the operator tier map) — only
-    // available here, unlike `workflow_leaf_read`. No `loader` passed here
-    // yet, so every 'workflow' node still previews as 'unknown' — S6 (#464)
-    // only wired `loader` into `WorkflowService` (`chat.ts`/`dashboard.ts`),
-    // not into this preview's own `PreviewDeps`; follow-up.
-    workflow_preview: workflowPreviewHandler(options.base.database, options.home),
+    // Issue #462/#484: needs `options.home` (the operator tier map) — only
+    // available here, unlike `workflow_leaf_read`. `loader` is the SAME
+    // `templateLoader(options.home)` #464 wired into `WorkflowService`
+    // (`chat.ts`/`dashboard.ts`) — a nested `workflow` node by `ref` now
+    // previews as `nested`, matching what a real resume would do, instead
+    // of `unknown`.
+    workflow_preview: workflowPreviewHandler(
+      options.base.database,
+      options.home,
+      templateLoader(options.home),
+    ),
     // Issue #464: needs `options.home` (the operator template library root)
     // — same reason `workflow_preview` above is registered here rather than
     // in `createSessionToolBase`.

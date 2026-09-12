@@ -17,9 +17,22 @@
 // `SqliteWorkflowCache`: `get` passes straight through (an honest lookup
 // against the real database) and records the hit's owner for attribution;
 // `put` is a hard no-op (`false`, never touches the database, never calls
-// `onWrite`) — belt and suspenders, since a dead dry leaf's output is never
-// `nonEmpty` in the first place, so the engine itself never even attempts a
-// write on this path.
+// `onWrite`) — NOT belt-and-suspenders, load-bearing: a `parallel` node
+// whose `branches` resolves to `[]` calls `cache.put(...)` unconditionally
+// (`engine.ts`'s `runParallel`, `[].every(nonEmpty)` is vacuously `true`)
+// without spawning a single leaf, dry or real. TWO independent barriers
+// stop that call from landing a row: `put`'s own `return false` here, and
+// (below, `previewResume`) the guarded `SqliteWorkflowCache` it wraps is
+// built with a `dummyOwnership` of `fence: -1` — `workflow-repository.ts`'s
+// `ownershipGuard` requires an exact fence match, so even a mutated `put`
+// that DID delegate to the real cache would have its guarded `INSERT`
+// refused (`cell.changes === 0`) by that second barrier. P6
+// (`supervision-mutants.ts`) targets the FIRST barrier — a mutant that
+// removes it must still be observable, so its oracle
+// (`tests/workflow-cache-preview-writes.test.ts`) counts attempts at
+// `WorkflowRepository.putCacheCellWithCost` (the call the facade's `put`
+// would otherwise never make), not just the row count the fence guard
+// would zero out either way.
 //
 // Attribution: a cell's owner (the `nodeId` `cacheGet`/`cachePut` pass) and
 // a spawn's `causalContext.nodePath` are both scoped by `scopedCheckpointId`
@@ -160,6 +173,8 @@ interface OwnerSpawns {
   readonly cellIds: Set<string>;
 }
 
+type MissReason = "never_completed" | "identity_changed";
+
 function tokensOf(cost: CacheLookup["cost"]): number {
   return cost === null ? 0 : cost.inputTokens + cost.outputTokens;
 }
@@ -169,13 +184,17 @@ function firstSegment(scoped: string): string {
 }
 
 /** Read-only over a real `SqliteWorkflowCache`: `get` is an honest pass-through
- * (recording the hit's owner for attribution), `put` never touches the
- * database — no `producers.wrapCache`, so this never emits a `cache.*`
- * ledger event either (the épico's own "zero escrita" requirement). */
+ * (recording the hit's owner for attribution, and — issue #484 — a MISS's
+ * own `CacheLookup.miss` reason, straight from `SqliteWorkflowCache.lookup`
+ * (#461): never a second, duplicated SQL query against
+ * `workflow_node_cache`), `put` never touches the database — no
+ * `producers.wrapCache`, so this never emits a `cache.*` ledger event
+ * either (the épico's own "zero escrita" requirement). */
 class PreviewCacheFacade implements WorkflowCache {
   totalHits = 0;
   totalTokensSaved = 0;
   readonly hitsByOwner = new Map<string, OwnerTotals>();
+  readonly missReasonByOwner = new Map<string, MissReason>();
 
   constructor(private readonly real: WorkflowCache) {}
 
@@ -192,6 +211,8 @@ class PreviewCacheFacade implements WorkflowCache {
         bucket.tokensSaved += tokens;
         this.hitsByOwner.set(owner, bucket);
       }
+    } else if (nodeId !== undefined && found.miss !== undefined) {
+      this.missReasonByOwner.set(firstSegment(nodeId), found.miss);
     }
     return found;
   }
@@ -228,22 +249,6 @@ function seedSpend(
     : { tokensIn: fromCells.tokensIn, tokensOut: fromCells.tokensOut };
 }
 
-/** Whether a cell for this (raw, unscoped) node id exists under ANY hash —
- * today's `workflow_node_cache.node_id` column stores the raw id
- * (`engine.ts`'s `cachePut(hash, node.id, ...)`), not the scoped form; #461
- * (S3) is expected to fix that, but has not merged as of this issue. A hit
- * here while the CURRENT hash still missed means the node's cache identity
- * moved since it last completed (a route pivot, typically) — never
- * "genuinely new". Known, documented limitation until S3: a raw node id can
- * be shared by nested siblings reusing one template, which would
- * over-report `identity_changed` for them; out of this issue's scope. */
-function hasCellForNode(database: Database.Database, runId: string, nodeId: string): boolean {
-  const row = database
-    .prepare("SELECT 1 FROM workflow_node_cache WHERE run_id = ? AND node_id = ? LIMIT 1")
-    .get(runId, nodeId);
-  return row !== undefined;
-}
-
 /** The run's own measured average tokens per COSTED cell (`workflow_node_cost`)
  * — `null` when the run has never costed a single cell (nothing to average),
  * distinct from "zero leaves to spawn" (a real, well-defined zero). */
@@ -265,12 +270,10 @@ interface ClassifyContext {
   readonly outputs: Readonly<Record<string, unknown>>;
   readonly faults: readonly string[];
   readonly pauseReason: string | null;
-  readonly database: Database.Database;
-  readonly runId: string;
 }
 
 function classifyNode(node: Node, ctx: ClassifyContext): PreviewNodeOutcome {
-  const { facade, spawnsByOwner, outputs, faults, pauseReason, database, runId } = ctx;
+  const { facade, spawnsByOwner, outputs, faults, pauseReason } = ctx;
   const hits = facade.hitsByOwner.get(node.id);
   const spawns = spawnsByOwner.get(node.id);
   if (node.type === "workflow" && ((hits?.count ?? 0) > 0 || (spawns?.count ?? 0) > 0)) {
@@ -284,9 +287,7 @@ function classifyNode(node: Node, ctx: ClassifyContext): PreviewNodeOutcome {
     };
   }
   if ((spawns?.count ?? 0) > 0) {
-    const reason = hasCellForNode(database, runId, node.id)
-      ? "identity_changed"
-      : "never_completed";
+    const reason = facade.missReasonByOwner.get(node.id) ?? "never_completed";
     return { node_id: node.id, type: node.type, outcome: "recompute", reason };
   }
   if ((hits?.count ?? 0) > 0) {
@@ -380,8 +381,6 @@ export async function previewResume(deps: PreviewDeps): Promise<PreviewResult | 
     outputs: result.outputs,
     faults: result.faults,
     pauseReason: control.pauseReason,
-    database: deps.database,
-    runId: deps.runId,
   };
   const nodes = topologicalOrder(spec).map((node) => classifyNode(node, classifyContext));
 
@@ -439,10 +438,13 @@ function parseRouteArg(value: unknown): RouteOverride | undefined | { readonly e
 /** `database`/`home` are enough — `home` resolves the operator tier map
  * (`workflow_tiers.json`, the SAME file `WorkflowService` reads per launch),
  * `database` builds a fresh `WorkflowRepository`/`LockRepository` (both
- * cheap, stateless wrappers — never a second connection). `loader` is
- * threaded in only once S6 (#464) wires one; until then every `workflow`
- * node previews as `unknown`, matching a production launch today
- * (`engine.ts:838`: "workflow loader unavailable"). */
+ * cheap, stateless wrappers — never a second connection). Issue #484:
+ * `session-tools.ts` now threads in the SAME `templateLoader(home)` #464
+ * wired into `WorkflowService` (`chat.ts`/`dashboard.ts`) — a `workflow`
+ * node previews `nested` whenever a real resume would run one. `loader`
+ * stays optional here only for callers with no operator template library
+ * at all (tests, or a `home` predating #464); missing it still previews
+ * `unknown`, matching `engine.ts:838`'s "workflow loader unavailable". */
 export function workflowPreviewHandler(
   database: Database.Database,
   home: string,

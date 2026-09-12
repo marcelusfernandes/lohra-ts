@@ -126,8 +126,16 @@ export function listTemplates(home: string): readonly TemplateListing[] {
 }
 
 /** `workflow_templates` tool: no `name` lists (`listTemplates`); `name`
- * loads and validates that one template — invalid cites the issues instead
- * of ever passing an unvalidated file through. */
+ * loads and VALIDATES that one template first — invalid cites the issues
+ * instead of ever returning a broken file. Issue #484: the envelope's own
+ * `spec` is still the file's raw JSON, not the normalized `WorkflowSpec`
+ * `validateSpec` returns — `WorkflowSpec` is an internal class (`nodes` as
+ * `Node` instances, `fields` nested one level down) the caller (typically
+ * the model, adapting a template to resubmit as `run_workflow`'s own
+ * `spec`) could never pass back as-is; `raw` is the one shape that
+ * round-trips. Validation still runs, and still refuses before either
+ * shape ever leaves this function — "validated" describes the CHECK, not
+ * the shape returned. */
 export function workflowTemplatesHandler(home: string): ToolHandler {
   return (args: ToolArguments): string => {
     const name = args.name;

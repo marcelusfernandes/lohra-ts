@@ -1,4 +1,4 @@
-// Catálogo de 20 mutantes da fatia `supervision` (issue #451, milestone 14 —
+// Catálogo de 29 mutantes da fatia `supervision` (issue #451, milestone 14 —
 // achado de QA/revisão de M10, épico #421): `npm run mutations:all` seguia
 // 227/227 apesar de ~1.000 linhas novas em `src/workflow/{steer-tool,
 // leaf-read-tool,route-faults,route-override}.ts`, no bloco de steer de
@@ -9,6 +9,25 @@
 // vitest focado) dos outros catálogos (`scripts/mutations/harness.ts`,
 // issue #148); `mechanism: "family-a"` é só rótulo descritivo, mesma
 // convenção de `workflow-audit-producers-mutants.ts`.
+//
+// Issue #484 (milestone 15, achado dos vereditos das PRs #478/#482)
+// acrescenta 9 mutantes: 6 para `src/workflow/cache-preview.ts` (#462) e 3
+// para `src/workflow/templates.ts` (#464) — nenhum dos dois tinha mutante em
+// catálogo nenhum, apesar de `srcGlobs: ["src/workflow/**", ...]` já cobrir
+// os dois (não precisou de `srcGlobs` novo, só `focusFiles`).
+//
+// Rodada 2 (veredito da PR #497, revisor): a rodada 1 desta issue tinha
+// deixado de fora o mutante de `put()` que a issue original pedia, com uma
+// justificativa FALSA ("código morto em toda execução de preview" — o
+// argumento de que `DryRuntime.collect` sempre falha, então
+// `collectLeaf`/`cachePut` nunca alcançam `put()`). O revisor reproduziu o
+// contrário: `engine.ts:480`'s `runParallel` chama `cache.put(...)`
+// INCONDICIONALMENTE quando `branches` resolve para `[]` — `[].every(nonEmpty)`
+// é vacuamente `true`, sem nenhum leaf spawnado, dry ou real (`schema.ts`
+// aceita `branches: []`; `budget.ts`'s `checkFanout(0)` nunca lança). P6
+// (abaixo) cobre esse caminho, ancorado em
+// `tests/workflow-cache-preview-writes.test.ts` (arquivo novo — a suíte
+// principal está no teto de 800 linhas; issue #484 emendada com esse glob).
 //
 // `category` deriva do `id` sem o prefixo `<letra><n>-`. `focus.test` é o
 // título literal do `it` (substring do `fullName`, veredito da PR #371/#362)
@@ -32,6 +51,11 @@ const routeOverrideFocus = "tests/workflow-route-override.test.ts";
 const routeOverrideNestedFocus = "tests/workflow-route-override-nested.test.ts";
 const delegateEnvelopeFocus = "tests/orchestration-delegate-envelope.test.ts";
 const transportErrorKindsFocus = "tests/transport-error-kinds.test.ts";
+const cachePreview = "src/workflow/cache-preview.ts";
+const templates = "src/workflow/templates.ts";
+const cachePreviewFocus = "tests/workflow-cache-preview.test.ts";
+const cachePreviewWritesFocus = "tests/workflow-cache-preview-writes.test.ts";
+const templatesFocus = "tests/workflow-templates.test.ts";
 
 export const supervisionMutants: readonly Mutant[] = [
   // --- steer-tool.ts (#424, #445, #450) -----------------------------------
@@ -402,6 +426,166 @@ export const supervisionMutants: readonly Mutant[] = [
         file: errorKinds,
         before: '  "context_length",\n  "unknown",\n  "dead_turn",\n] as const;',
         after: '  "context_length",\n  "unknown",\n] as const;',
+      },
+    ],
+  },
+  // --- cache-preview.ts (#462, issue #484) --------------------------------
+  {
+    id: "P1-pivots-used-off-by-one",
+    category: "pivots-used-off-by-one",
+    mechanism: "family-a",
+    focus: {
+      file: cachePreviewFocus,
+      test: "replays the unpinned cell, reports the pinned one as recompute/never_completed, and writes nothing",
+    },
+    edits: [
+      {
+        file: cachePreview,
+        before: "    pivots_used: view.pivots.length,",
+        after: "    pivots_used: view.pivots.length + 1,",
+      },
+    ],
+  },
+  {
+    id: "P2-route-applied-inverted",
+    category: "route-applied-inverted",
+    mechanism: "family-a",
+    focus: {
+      file: cachePreviewFocus,
+      test: "with 'route' applied, still writes nothing and does not consume a pivot",
+    },
+    edits: [
+      {
+        file: cachePreview,
+        before: "    route_applied: deps.route !== undefined,",
+        after: "    route_applied: deps.route === undefined,",
+      },
+    ],
+  },
+  {
+    id: "P3-recompute-mislabeled-replay",
+    category: "recompute-mislabeled-replay",
+    mechanism: "family-a",
+    focus: {
+      file: cachePreviewFocus,
+      test: "replays the unpinned cell, reports the pinned one as recompute/never_completed, and writes nothing",
+    },
+    edits: [
+      {
+        file: cachePreview,
+        before: '    return { node_id: node.id, type: node.type, outcome: "recompute", reason };',
+        after: '    return { node_id: node.id, type: node.type, outcome: "replay", reason };',
+      },
+    ],
+  },
+  {
+    id: "P4-nested-classification-guard-narrowed",
+    category: "nested-classification-guard-narrowed",
+    mechanism: "family-a",
+    focus: {
+      file: cachePreviewFocus,
+      test: "with a loader, aggregates the nested cells it already has as 'nested'",
+    },
+    edits: [
+      {
+        file: cachePreview,
+        before:
+          '  if (node.type === "workflow" && ((hits?.count ?? 0) > 0 || (spawns?.count ?? 0) > 0)) {',
+        after:
+          '  if (node.type === "workflow" && ((hits?.count ?? 0) > 0 && (spawns?.count ?? 0) > 0)) {',
+      },
+    ],
+  },
+  {
+    id: "P5-leaves-to-spawn-counts-owners-not-spawns",
+    category: "leaves-to-spawn-counts-owners-not-spawns",
+    mechanism: "family-a",
+    focus: {
+      file: cachePreviewFocus,
+      test: "a parallel node with no successful branch re-spawns exactly one leaf per branch",
+    },
+    edits: [
+      {
+        file: cachePreview,
+        before: "  const leavesToSpawn = runtime.spawns.length;",
+        after: "  const leavesToSpawn = spawnsByOwner.size;",
+      },
+    ],
+  },
+  // Rodada 2 (veredito da PR #497): o mutante que a issue #484 original
+  // pedia e a rodada 1 tinha, incorretamente, descartado como "código
+  // morto" — `runParallel` (engine.ts:480) chama `cache.put(...)` mesmo sem
+  // spawnar nenhum leaf quando `branches` resolve para `[]`. Há uma segunda
+  // barreira independente (`previewResume`'s `dummyOwnership` de
+  // `fence: -1`, recusada por `ownershipGuard`), por isso o oráculo em
+  // `tests/workflow-cache-preview-writes.test.ts` conta tentativas de
+  // `putCacheCellWithCost`, não só linhas de `workflow_node_cache`.
+  {
+    id: "P6-put-facade-delegates-to-real-cache",
+    category: "put-facade-delegates-to-real-cache",
+    mechanism: "family-a",
+    focus: {
+      file: cachePreviewWritesFocus,
+      test: "a parallel node with empty branches writes nothing to workflow_node_cache during preview",
+    },
+    edits: [
+      {
+        file: cachePreview,
+        before: "  put(): boolean {\n    return false;\n  }",
+        after:
+          "  put(runId: string, hash: string, nodeId: string, output: unknown, cost: unknown): boolean {\n    return this.real.put(runId, hash, nodeId, output, cost as never);\n  }",
+      },
+    ],
+  },
+  // --- templates.ts (#464, issue #484) ------------------------------------
+  {
+    id: "T1-template-ref-accepts-path-separator",
+    category: "template-ref-accepts-path-separator",
+    mechanism: "family-a",
+    focus: {
+      file: templatesFocus,
+      test: "refuses a ref with an internal path separator (a/b)",
+    },
+    edits: [
+      {
+        file: templates,
+        before: "export const TEMPLATE_REF = /^[a-z0-9][a-z0-9_-]{0,63}$/;",
+        after: "export const TEMPLATE_REF = /^[a-z0-9][a-z0-9_/-]{0,63}$/;",
+      },
+    ],
+  },
+  {
+    id: "T2-list-templates-drops-broken-file",
+    category: "list-templates-drops-broken-file",
+    mechanism: "family-a",
+    focus: {
+      file: templatesFocus,
+      test: "lists a valid template and never drops a broken one",
+    },
+    edits: [
+      {
+        file: templates,
+        before:
+          "    } catch (error) {\n      entries.push({ ref, error: error instanceof Error ? error.message : String(error) });\n    }",
+        after: "    } catch {\n      continue;\n    }",
+      },
+    ],
+  },
+  {
+    id: "T3-read-template-file-swallows-enoent",
+    category: "read-template-file-swallows-enoent",
+    mechanism: "family-a",
+    focus: {
+      file: templatesFocus,
+      test: "throws a named error citing the path for an absent ref",
+    },
+    edits: [
+      {
+        file: templates,
+        before:
+          '    content = readFileSync(path, "utf8");\n  } catch (error) {\n    throw new TemplateError(\n      ref,\n      isEnoent(error) ? `not found at ${path}` : `at ${path} could not be read`,\n      error,\n    );\n  }',
+        after:
+          '    content = readFileSync(path, "utf8");\n  } catch (error) {\n    if (isEnoent(error)) return {};\n    throw new TemplateError(ref, `at ${path} could not be read`, error);\n  }',
       },
     ],
   },

@@ -483,7 +483,7 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 247 (soma dos treze catálogos importados)", () => {
+  it("a contagem total de mutantes é 256 (soma dos treze catálogos importados)", () => {
     // Os doze catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
@@ -513,9 +513,20 @@ describe("scripts/mutations/slices.json", () => {
     // = 246. A issue #452 (pivô de rota em sub-workflow por ref) mergeou em
     // paralelo (PR #472) e acrescentou `overrideNestedSpec` a
     // route-override.ts/engine.ts — mais 1 mutante (O5, morto por
-    // tests/workflow-route-override-nested.test.ts): 246 + 1 = 247.
+    // tests/workflow-route-override-nested.test.ts): 246 + 1 = 247. A issue
+    // #484 (milestone 15, achado dos vereditos das PRs #478/#482) acrescenta
+    // mutantes a `supervision-mutants.ts` para dois módulos sem mutante
+    // nenhum até então. Rodada 1 (PR #497) trouxe 5 de
+    // `src/workflow/cache-preview.ts` (#462, P1-P5) e 3 de
+    // `src/workflow/templates.ts` (#464, T1-T3): 247 + 8 = 255. Rodada 2
+    // (veredito da PR #497: a justificativa de "código morto" para omitir o
+    // mutante de `put()` era falsa — `engine.ts:480`'s `runParallel` chama
+    // `cache.put(...)` mesmo com `branches: []`, sem spawnar nenhum leaf)
+    // acrescenta P6, ancorado em
+    // `tests/workflow-cache-preview-writes.test.ts` (arquivo novo — a suíte
+    // principal está no teto de 800 linhas): 255 + 1 = 256.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 247;
+    const TOTAL_MUTANTS = 256;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -540,14 +551,14 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/workflow-executor-mutants.ts": 45,
       "scripts/mutations/context-window.ts": 15,
       "scripts/mutations/auth-mutants.ts": 13,
-      "scripts/mutations/supervision-mutants.ts": 20,
+      "scripts/mutations/supervision-mutants.ts": 29,
     };
     expect(new Set(Object.keys(CONTAGEM_POR_CATALOGO))).toEqual(new Set(CATALOGOS.keys()));
     for (const [path, mutants] of CATALOGOS) {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(247);
+    expect(somaTabela).toBe(256);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {
