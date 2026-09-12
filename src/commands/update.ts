@@ -1,11 +1,15 @@
+import process from "node:process";
+
 import {
   checkUpdate,
+  defaultCommandRunner,
   performUpdate,
   reinstall,
   resolveInstalledRepo,
   type CommandRunner,
   type UpdateResult,
 } from "../self-update/index.js";
+import { readInstalledVersion, runRegistryUpdate, type RegistryFetch } from "./update-registry.js";
 
 export interface UpdateCommandOptions {
   readonly check: boolean;
@@ -14,6 +18,10 @@ export interface UpdateCommandOptions {
   readonly stderr: (value: string) => void;
   readonly repo?: string | null;
   readonly runner?: CommandRunner;
+  /** Só usados fora de um checkout git (`repo === null`) — issue #533. */
+  readonly yes?: boolean;
+  readonly fetchImpl?: RegistryFetch;
+  readonly currentVersion?: string;
 }
 
 function writeResult(value: UpdateResult, options: UpdateCommandOptions): number {
@@ -21,13 +29,36 @@ function writeResult(value: UpdateResult, options: UpdateCommandOptions): number
   return value.ok ? 0 : 2;
 }
 
-export function runUpdate(options: UpdateCommandOptions): number {
+/** Sem `.git`, não há repositório para consultar — o contrato vira o do
+ * registry npm (`update-registry.ts`, issue #533). `readInstalledVersion`
+ * pode lançar (package.json ausente ou sem `version`); fail-closed em vez de
+ * deixar a exceção escapar sem exit code. */
+function runOutsideGitCheckout(options: UpdateCommandOptions): Promise<number> {
+  let currentVersion: string;
+  try {
+    currentVersion = options.currentVersion ?? readInstalledVersion();
+  } catch (error) {
+    options.stderr(
+      `could not determine the installed lohra-ts version: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+    return Promise.resolve(1);
+  }
+  return runRegistryUpdate({
+    check: options.check,
+    yes: options.yes ?? false,
+    currentVersion,
+    fetchImpl: options.fetchImpl ?? fetch,
+    runner: options.runner ?? defaultCommandRunner,
+    cwd: process.cwd(),
+    stdout: options.stdout,
+    stderr: options.stderr,
+  });
+}
+
+export function runUpdate(options: UpdateCommandOptions): number | Promise<number> {
   const repo = options.repo === undefined ? resolveInstalledRepo() : options.repo;
   if (repo === null) {
-    options.stderr(
-      "Lohra is not installed from a git checkout — update with `npm install -g lohra-ts@latest`.\n",
-    );
-    return 2;
+    return runOutsideGitCheckout(options);
   }
   const runner = options.runner;
   const value = options.check ? checkUpdate(repo, runner) : performUpdate(repo, runner);
