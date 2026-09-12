@@ -2,9 +2,17 @@
 
 - **Data:** 2026-09-13
 - **Origem:** issue #519 (M16-S4, épico #490, última sub-issue da milestone
-  "Abort de stream em voo"); fecha os quatro itens que
+  "Abort de stream em voo"); fecha três dos quatro itens que
   `docs/adr/0005-abort-de-stream-em-voo.md` (seção "Decision", "A definir na
-  decomposição do #490") deixou para a implementação decidir.
+  decomposição do #490") deixou para a implementação decidir, e acrescenta o
+  hook de steer (D3, que não é item da ADR — ver "Decisão" abaixo). O quarto
+  item da ADR — quais clientes streaming precisam de plumbing nova — foi
+  resolvido por S1 (issue #516, PR #525, `67bc6e2a`): os três `stream()`
+  passam a aceitar e repassar `signal?: AbortSignal` —
+  `src/transports/client.ts:345-349` (`ChatCompletionsClient`),
+  `:518-522` (`AnthropicMessagesClient`) e `:629-633` (`ResponsesClient`) —
+  exercitado sem rede por `tests/transports-abort-in-flight.test.ts:26-30`
+  (`AbortOnlyPort`).
 
 ## Contexto
 
@@ -17,6 +25,12 @@ o comportamento observado hoje CONTRADIZ a leitura literal da regra do owner
 citada pela própria ADR.
 
 ## Decisão (D1-D3 — observado, não apenas prometido)
+
+Os rótulos D1–D3 abaixo são locais a esta nota. `workflow-supervision.md`
+(linhas 506 e 515) e `workflow-audit.md` (linhas 114 e 252), ambos em
+`docs/`, também usam D2/D3, mas para as opções da decisão da issue #520
+(`core.ts:367` "D2 adotado por default", `child-runner.ts:226` "D3") —
+numeração independente desta, não renumerada aqui.
 
 **D1 — fórmula de estimativa de tokens parciais.** `estimatePartialUsage`
 (`src/context/token-estimate.ts:222-238`) cobra `partial.text` no fator de
@@ -110,16 +124,20 @@ muito bem ter completado normalmente depois da chamada interrompida.
   child mid-stream.
 - `tests/orchestration-steer-interrupt.test.ts` — o hook armado por chamada,
   nunca por leaf inteiro.
-- `tests/conversation-runtime-injection.test.ts:341-394` ("an external
-  cancel during the same call takes precedence over an armed interrupt")
-  — o `interruptSource.arm` deste teste é um fake cujo `abort()` devolvido é
-  um no-op (`() => undefined`, nunca chama `call.abort`): o teste prova que
-  um cancel EXTERNO sempre vira `ConversationCancelledError`, nunca
-  reclassificado como `continue` de steer-interrupt, mesmo com um
-  `interruptSource` presente (armado, mas nunca disparado) — não prova a
-  corrida "os dois sinais disparam ao mesmo tempo" (isso exigiria um fake
-  cujo `abort()` realmente chamasse `call.abort`; nenhum teste hoje exercita
-  esse caso). A precedência do `signal` externo sobre `call` NESSA corrida
+- `tests/conversation-runtime-injection.test.ts:341-394` ("contra-assertion:
+  an external cancel during the same call takes precedence over an armed
+  interrupt — never `continue`") — o `interruptSource.arm` deste teste é um
+  fake que ignora o `_abort` recebido e devolve um disarm no-op (`() =>
+undefined`, `tests/conversation-runtime-injection.test.ts:343-347`), logo
+  nunca chama `call.abort` (o que `arm` de verdade devolve é o `disarm`,
+  `src/conversation/runtime.ts:482-484`): o teste prova que um cancel
+  EXTERNO sempre vira `ConversationCancelledError`, nunca reclassificado
+  como `continue` de steer-interrupt, mesmo com um `interruptSource`
+  presente (armado, mas nunca disparado) — não prova a corrida "os dois
+  sinais disparam ao mesmo tempo" (isso exigiria um fake cujo `arm`
+  realmente invocasse o callback que recebe — é esse callback que chama
+  `call.abort`, `runtime.ts:482-484`; nenhum teste hoje exercita esse
+  caso). A precedência do `signal` externo sobre `call` NESSA corrida
   específica é lida direto do código — a ordem de checagem do `catch`
   (`isAbortOf(error, signal)`, `runtime.ts:509`, antes de
   `signalAborted(call.signal)`, `runtime.ts:531`) — não confirmada por

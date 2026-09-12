@@ -120,10 +120,12 @@ suggested_route}`; kind que pausa nunca entra em `faultKinds`; primeiro a
   (nunca teve produtor real, sempre `false`); envelope de `collect_session`
   repinado 13 → 12 chaves; `delegate_task` fica igual, nunca teve a chave.
 - [2026-09-13 — Abort em voo: três itens resolvidos por observação, um ainda
-  aberto](2026-09-13-abort-em-voo-itens-a-definir.md) — fecha os quatro
-  itens que a ADR 0005 deixou para a decomposição do épico #490: fórmula
-  2.9/2.4 + `input_tokens` do `message_start` (D1), `shutdown()` aborta em
-  voo (D2), steer interrompe via hook armado por chamada, nunca por leaf
-  inteiro (D3); `error_kind`/`reason` uniforme para os três gatilhos
+  aberto](2026-09-13-abort-em-voo-itens-a-definir.md) — fecha três dos
+  quatro itens que a ADR 0005 deixou para a decomposição do épico #490:
+  fórmula 2.9/2.4 + `input_tokens` do `message_start` (D1), `shutdown()`
+  aborta em voo (D2); acrescenta o hook de steer armado por chamada, nunca
+  por leaf inteiro (D3, que não é item da ADR). O quarto item da ADR (quais
+  clientes streaming precisam de plumbing nova) foi resolvido por S1 (#516,
+  PR #525). `error_kind`/`reason` uniforme para os três gatilhos
   (cancel/steer/timeout) segue genuinamente aberto — o timeout de folha
   (S6/#521) ainda fecha sem `error_kind` nem `usage`.
