@@ -462,6 +462,83 @@ leaves: <path>"` em `artifactFaults` exatamente uma vez; nunca muda
   listas, sem re-checar colisão contra o `RunResult` do pai; o comentário
   da própria função nomeia isso.
 
+## Abort de stream em voo (M16, épico #490)
+
+ADR 0005 (`docs/adr/0005-abort-de-stream-em-voo.md`, aceita 2026-09-13):
+antes desta milestone, um cancel/steer/timeout que chegava enquanto um
+provedor estava respondendo esperava a resposta terminar, descartava o
+resultado e cobrava o run por todo token que o provedor gerou — os checks
+cooperativos (`signalAborted`, `runtime.ts:373,409`) só pegavam a folga
+ENTRE chamadas, nunca uma chamada já em voo. Seis sub-issues (S1-S6)
+fecharam essa lacuna para os três gatilhos que já tinham um `AbortSignal`
+próprio; a doutrina completa, com o que ainda ficou aberto, está em
+[`docs/decisions/2026-09-13-abort-em-voo-itens-a-definir.md`](decisions/2026-09-13-abort-em-voo-itens-a-definir.md).
+
+**Os três gatilhos:**
+
+- **cancel** (`workflow_cancel`, M16-S3/#518) — `OrchestrationChildRuntime.cancel`
+  (`orchestration-runtime.ts:468-479`) aborta o controller do leaf e ESPERA
+  o assentamento real, até `CANCEL_SETTLE_TIMEOUT_MS` (2 s,
+  `orchestration-runtime.ts:31`) — passado esse teto, devolve mesmo assim
+  (nunca trava o caller por um leaf que genuinamente não assenta a tempo).
+  `AuditedChildRuntime.cancel` (`audit-runtime.ts:506-525`) sonda o
+  resultado real logo depois; se a folha assentou dentro do teto, o
+  `leaf.failed` carrega o `partial`/`usage` estimados de verdade; se não
+  (sonda tarde demais, erro, ou nenhum `OrchestrationChildRuntime` de
+  verdade por trás), cai no placeholder `{status: "cancelled", error_kind:
+"cancelled"}` que `cancel()` sempre escreveu, sem `partial`.
+- **steer** (M16-S5/#520, decisão D2 adotada por default) — TODO `workflow_steer`
+  numa folha ocupada com uma chamada de provedor genuinamente em voo
+  interrompe essa chamada, nunca opt-in: `OrchestrationCore`'s
+  `entry.interrupt` (`core.ts:229`) é um hook armado só pela DURAÇÃO de
+  cada chamada (`core.ts:499-508`), nunca pelo leaf inteiro — um steer que
+  chega enquanto o leaf roda uma tool nunca vê hook vivo e só enfileira. A
+  chamada interrompida vira `SteerInterrupt` (`runtime.ts:481-484`), o loop
+  absorve com `continue` e tenta de novo com o texto do steer já injetado —
+  o turno pode terminar `complete` mesmo assim, carregando
+  `partial: true`/`usage_uncertain: true` (D2, `child-runner.ts:226-236`)
+  porque `usageTotal` já inclui a parcela estimada da chamada abortada.
+  `leaf.steered` ganha `interrupted: true` (`audit-runtime.ts:437`) — nunca
+  `error_kind`, porque não há `leaf.failed` nenhum nesse caminho quando o
+  turno completa.
+- **timeout** (M16-S6/#521) — `OrchestrationChildRuntime.collect` corre o
+  `ChildResult` real contra um teto próprio (`options.timeoutSeconds`,
+  `orchestration-runtime.ts:357-378`), nunca contra
+  `CANCEL_SETTLE_TIMEOUT_MS` (esse é só do `cancel()`); estourado o teto,
+  devolve `{status: "running", output: null}` — a MESMA forma que o engine
+  já tratava como timeout antes desta milestone
+  (`engine.ts:270-274`, segue chamando `cancel()` a seguir). **Limite
+  conhecido:** quando isso alcança `AuditedChildRuntime.collect` sob
+  `wait: true`, o leaf fecha DIRETO como `leaf.failed {reason: "timeout"}`
+  (`audit-runtime.ts:498-502`) — sem `error_kind`, sem `partial`, sem
+  `usage` — "running sem usage": tokens que a folha genuinamente gastou
+  antes do timeout não aparecem no ledger por este caminho, diferente de
+  cancel/steer. Registrado como item ainda aberto na nota de decisão acima.
+
+**`partial_leaves`** (`workflow_status`, `RunResult.partialLeaves`,
+`accounting.ts:94,200,372`) conta toda folha cujo `ChildResult.partial` é
+`true` — cancel/steer, nunca timeout (o gatilho acima que não marca
+`partial`) — incluindo o dobramento de sub-runs aninhados
+(`foldNestedCounters`). É o número que `workflow_status` expõe ao lado de
+`usage_uncertain_leaves`; o ledger por trás é o `leaf.failed`/`leaf.completed
+{partial: true}` de `docs/workflow-audit.md`.
+
+**O summarizer de compactação NÃO ganha o tratamento de abort em voo desta
+milestone.** `signal` chega até a chamada de resumo
+(`buildSummaryRequest`, `compaction.ts:303-318`, encaminhado por
+`runtime.ts:422-431`) — o pedido de rede É cancelado de verdade se o
+`signal` disparar durante ele — mas `compactHistoryIfNeeded`
+(`compaction.ts:259-261`) embrulha QUALQUER erro do `summarize()`, abort
+incluso, em `CompactionFailedError` — nunca em `ConversationCancelledError`
+com `partialUsage` estimado. Um cancel/steer/timeout durante a compactação
+vira uma falha de compactação genérica, não um turno parcial contabilizado.
+
+**`fault_kinds`** (`RunResult.faultKinds`, `service-rollup.ts`) passa a
+incluir `"cancelled"`: `pausesRun(kind)` (`route-faults.ts`) só exclui
+`quota_exhausted` e os três kinds de rota — um `ChildResult.errorKind ===
+"cancelled"` que alcança `recordFaultKind` (`engine-utils.ts:486`) é
+contado como qualquer outro fault, nunca pausa o run sozinho.
+
 ## Sinal do processo e envelope de falha (contexto, não uma tool nova)
 
 Duas peças menores do mesmo épico, sem superfície de tool própria:
