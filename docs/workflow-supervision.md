@@ -229,8 +229,10 @@ mapa do épico #458: leitura não viaja na tool de lançamento.
   `checkpoint_pending`, `upstream_missing`, `token_budget_exhausted`,
   `nested` (um nó `workflow` que rodou de verdade, agregado —
   `cells_replayed`/`cells_to_recompute`/`leaves_to_spawn`, nunca os nós
-  internos) ou `unknown` (um fault do engine — nunca bloqueia a preview,
-  só conta em `engine_faults`).
+  internos), `no_leaves` (#503, abaixo) ou `unknown` (um fault do engine, um
+  nó nunca alcançado, ou um tipo que esta classificação não modela — nunca
+  bloqueia a preview, só conta em `engine_faults` quando é de fato um
+  fault).
 - **Totais**: `cells_replayed`, `tokens_saved`, `leaves_to_spawn`,
   `estimated_tokens_to_repay` (`leaves_to_spawn` vezes a média medida de
   tokens por célula custada DESTE run; `null` com `estimate_basis: null`
@@ -249,20 +251,25 @@ mapa do épico #458: leitura não viaja na tool de lançamento.
   dele), igual a um resume real; antes, sem `loader`, `runNested` lançava
   `"workflow loader unavailable"` e o nó caía em `outcome: "unknown"`
   com `engine_faults` incrementado.
-- **Limitação nova**: um nó `parallel` cujo `branches` resolve para `[]`
-  RODA na preview (o mesmo comportamento de produção,
-  `engine.ts`'s `runParallel`, `[].every(...)` é vacuamente `true`) e ainda
-  assim sai classificado como `outcome: "unknown"` — nenhum spawn, nenhum
-  hit, então `classifyNode` não tem outra categoria para ele
-  (`tests/workflow-cache-preview-writes.test.ts:163-179`, comentário no
-  próprio teste: "documented gap, not this test's point"). Esse caminho
-  também alcança `PreviewCacheFacade.put()` — `cache.put(...)` é chamado
-  incondicionalmente mesmo sem spawnar nenhuma folha — e por isso o `put`
-  da fachada carrega DUAS barreiras independentes contra escrita, não uma:
-  o próprio `return false` do método e, por trás dele, o `SqliteWorkflowCache`
-  guardado com uma `dummyOwnership` de `fence: -1`, que `ownershipGuard`
-  recusaria de qualquer forma (`cache-preview.ts:19-35`, cabeçalho do
-  arquivo).
+- **`outcome: "no_leaves"` (#503, follow-up de #484 rodada 2)**: um nó
+  `parallel` cujo `branches` resolve para `[]` RODA na preview (o mesmo
+  comportamento de produção, `engine.ts`'s `runParallel`, `[].every(...)`
+  é vacuamente `true`) sem spawnar nenhuma folha e sem bater no cache —
+  `classifyNode` (`cache-preview.ts`) agora nomeia esse caso `no_leaves`
+  em vez de misturá-lo com `unknown`: o nó genuinamente rodou (seu
+  `output` está em `RunResult.outputs`), só que não sobrou nada a
+  replayar nem a pagar. `unknown` continua reservado para um nó nunca
+  alcançado (pausado por outro motivo antes dele) ou para um tipo que
+  esta classificação deliberadamente não modela — `verify`/`checkpoint`/
+  `pipeline` na mesma forma (zero spawns, zero hits, executou) ainda saem
+  `unknown` (`tests/workflow-cache-preview-writes.test.ts`, describe de
+  não-regressão). Esse caminho também alcança `PreviewCacheFacade.put()`
+  — `cache.put(...)` é chamado incondicionalmente mesmo sem spawnar
+  nenhuma folha — e por isso o `put` da fachada carrega DUAS barreiras
+  independentes contra escrita, não uma: o próprio `return false` do
+  método e, por trás dele, o `SqliteWorkflowCache` guardado com uma
+  `dummyOwnership` de `fence: -1`, que `ownershipGuard` recusaria de
+  qualquer forma (`cache-preview.ts:19-35`, cabeçalho do arquivo).
 - Chamar ANTES de `run_workflow(resume_run_id=..., route=...)`, para saber
   o custo de uma rota candidata antes de gastar um dos 3 pivôs.
 
