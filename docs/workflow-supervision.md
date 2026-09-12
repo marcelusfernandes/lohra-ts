@@ -286,14 +286,25 @@ output.length === 0`; os dois casos que produzem `output === null` saem
   detectado por `output === null` sem NENHUM fault gravado com o prefixo
   do próprio id do nó (a maioria dos outros caminhos de `runParallel` que
   produz `null` — `all N branches failed`, um cap de fan-out, um fault
-  genérico — grava um fault assim). Uma exceção não alcançável nesta
-  preview: `gateTokens` (`engine.ts:204-209`) lança `TokenBudgetExhausted`
-  sem gravar fault, e o catch do laço principal (`engine.ts:401-402`) só
-  converte essa exceção em `output = null`, também sem fault — mas a
-  `DryRuntime` da preview (`cache-preview.ts:141-165`) nunca reporta uso de
-  token, então `gateTokens` nunca dispara num dry run; a distinção
-  `branches` não resolvida × cap de fan-out continua exata para todo caminho
-  que a preview de fato exercita. (2) um `parallel` que estourou o cap
+  genérico — grava um fault ASSIM, com o prefixo). Uma segunda exceção,
+  alcançável e não coberta por este outcome: `gateTokens`
+  (`engine.ts:204-209`) chama `pause()` (`engine.ts:192-203`), que GRAVA um
+  fault (`token budget exhausted: spent X of Y tokens`) mas sem o prefixo
+  do nó — `hasNodeFault` não o vê — e então lança `TokenBudgetExhausted`;
+  o catch do laço principal (`engine.ts:401-402`) converte essa exceção em
+  `output = null` sem gravar mais nada. Não é inalcançável nesta preview: a
+  `Budget` do dry run é semeada com o gasto REAL do run (`seedSpend`,
+  `cache-preview.ts:254-266`, usado em `cache-preview.ts:411-415`), então um
+  run pausado por `token_budget_exhausted` já chega com `tokensSpent >=
+tokenBudget`; se o `parallel` classificado for o primeiro nó do spec a
+  tentar de fato spawnar uma folha (`collectLeaf` chama `gateTokens` em
+  `engine.ts:254`), o gate
+  dispara nele mesmo e ele sai `upstream_missing` por engano — indistinguível
+  do caso de `branches` não resolvida. Um nó ANTERIOR que dispare o gate
+  primeiro pausa o run ali (o laço principal quebra na pausa antes de chegar
+  ao `parallel`), e este sai `unknown` (nó nunca alcançado), não
+  `upstream_missing` — não há teste cobrindo o caso em que o próprio
+  `parallel` é o primeiro a tentar spawnar. (2) um `parallel` que estourou o cap
   de fan-out (`budget.ts`'s `checkFanout`, `FanoutRejected`, sempre deixa
   um fault `exceeds max_fanout`/`exceeds lifetime remaining`) cai em
   `unknown` — a preview não tem como atribuir `RunResult.capTrips` (uma
