@@ -5,7 +5,9 @@ import {
   ProviderCallFailed,
   RateLimitError,
   retryAfterSeconds,
+  withTextTracking,
 } from "../src/transports/index.js";
+import { anthropicPartialUsage } from "../src/transports/errors.js";
 
 describe("provider error taxonomy", () => {
   it.each([
@@ -41,4 +43,38 @@ describe("provider error taxonomy", () => {
       expect(retryAfterSeconds({ retryAfter: value })).toBeNull();
     },
   );
+});
+
+describe("anthropicPartialUsage (PartialStream's contract — issue #567)", () => {
+  it("is null when no message_start frame ever arrived", () => {
+    expect(
+      anthropicPartialUsage([
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "x" } },
+      ]),
+    ).toBeNull();
+  });
+
+  it("is null, not a zeroed Usage, when message_start arrived without its own usage object", () => {
+    // A zeroed `Usage` here would be indistinguishable from "no
+    // message_start at all" for a caller — both would read as "0 input
+    // tokens" instead of "we don't actually know".
+    expect(anthropicPartialUsage([{ type: "message_start", message: {} }])).toBeNull();
+  });
+
+  it("fills real counts when message_start carries a usage object", () => {
+    expect(
+      anthropicPartialUsage([{ type: "message_start", message: { usage: { input_tokens: 5 } } }]),
+    ).toMatchObject({ inputTokens: 5, outputTokens: 0 });
+  });
+});
+
+describe("withTextTracking (public export — issue #567)", () => {
+  it("recovers exactly the text forwarded through onText while still calling the original callback", () => {
+    const received: string[] = [];
+    const tracked = withTextTracking({ onText: (text) => received.push(text) });
+    tracked.callbacks.onText?.("ola ");
+    tracked.callbacks.onText?.("mundo");
+    expect(tracked.text()).toBe("ola mundo");
+    expect(received).toEqual(["ola ", "mundo"]);
+  });
 });
