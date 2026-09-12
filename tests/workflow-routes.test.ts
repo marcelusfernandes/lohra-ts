@@ -202,6 +202,51 @@ describe("readRoutes — fail-closed (#459)", () => {
     expect(readRoutes(path)).toBeInstanceOf(RoutesError);
   });
 
+  it("returns a RoutesError when 'routes' itself is an array, not an object", async () => {
+    const { readRoutes, RoutesError } = await import("../src/workflow/routes.js");
+    const path = routesPath(root());
+    writeFileSync(path, JSON.stringify({ routes: [] }));
+    const result = readRoutes(path);
+    expect(result).toBeInstanceOf(RoutesError);
+    expect((result as InstanceType<typeof RoutesError>).message).toContain("array");
+  });
+
+  it("returns a RoutesError when a fallback's 'provider' is whitespace-only", async () => {
+    const { readRoutes, RoutesError } = await import("../src/workflow/routes.js");
+    const path = routesPath(root());
+    writeFileSync(
+      path,
+      JSON.stringify({ routes: { "openrouter/x": [{ provider: "   ", model: "y" }] } }),
+    );
+    const result = readRoutes(path);
+    expect(result).toBeInstanceOf(RoutesError);
+    expect((result as InstanceType<typeof RoutesError>).message).toContain("provider");
+  });
+
+  it("returns a RoutesError when a fallback's 'model' is whitespace-only", async () => {
+    const { readRoutes, RoutesError } = await import("../src/workflow/routes.js");
+    const path = routesPath(root());
+    writeFileSync(
+      path,
+      JSON.stringify({ routes: { "openrouter/x": [{ provider: "anthropic", model: "\t\n " }] } }),
+    );
+    const result = readRoutes(path);
+    expect(result).toBeInstanceOf(RoutesError);
+    expect((result as InstanceType<typeof RoutesError>).message).toContain("model");
+  });
+
+  it("trims a fallback's provider/model before storing (never a padded value that can't ever match)", async () => {
+    const { readRoutes } = await import("../src/workflow/routes.js");
+    const path = routesPath(root());
+    writeFileSync(
+      path,
+      JSON.stringify({ routes: { "openrouter/x": [{ provider: " anthropic ", model: " y " }] } }),
+    );
+    expect(readRoutes(path)).toEqual({
+      routes: { "openrouter/x": [{ provider: "anthropic", model: "y" }] },
+    });
+  });
+
   it("returns a RoutesError when the path cannot be read for a reason other than absence", async () => {
     const { readRoutes, RoutesError } = await import("../src/workflow/routes.js");
     const home = root();

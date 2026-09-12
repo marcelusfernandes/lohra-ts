@@ -176,14 +176,18 @@ export function recordRouteFaultNotice(
 }
 
 /** Issue #459 (M11-S1): `service.ts`'s terminal calls this right after
- * `record.result = withSuggestedRoute(result, options.routes, priorView?.pivots
- * ?? [])` — mutates `result.checkpoint` in place (same pattern `sealRunStatus`
- * above already uses) with a fresh, frozen lesson whose `suggested_route` is
- * the first fallback `envelope` authorizes for the dead route that isn't in
- * `tried` yet. A result that isn't a paused route fault (or whose checkpoint
- * isn't a `RouteLesson`) is returned UNTOUCHED, by reference — never a copy —
- * so a plain resume or any other pause reason costs nothing. STUB — real
- * body lands with `routes.ts` in the next (green) commit. */
+ * `record.result = withSuggestedRoute(result, options.routes, record.pivots
+ * ?? [])` — `record.pivots`, never `priorView.pivots`, because `record.pivots`
+ * already folds THIS resume's own override in (`nextPivots`, same value
+ * `pausePayloadOf` persists as `pivots[]`); using the pre-stretch list let a
+ * later fault suggest the route this very resume just pivoted to (PR #479
+ * rodada 1 finding). Mutates `result.checkpoint` in place (same pattern
+ * `sealRunStatus` above already uses) with a fresh, frozen lesson whose
+ * `suggested_route` is the first fallback `envelope` authorizes for the dead
+ * route that isn't in `tried` yet. A result that isn't a paused route fault
+ * (or whose checkpoint isn't a `RouteLesson`) is returned UNTOUCHED, by
+ * reference — never a copy — so a plain resume or any other pause reason
+ * costs nothing. */
 export function withSuggestedRoute(
   result: RunResult,
   envelope: RouteEnvelope | undefined,

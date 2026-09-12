@@ -43,8 +43,14 @@ function object(value: unknown): Record<string, unknown> | null {
     ? (value as Record<string, unknown>)
     : null;
 }
+/** Molde `tool.ts`'s own "non-empty after trim" guard (#447) — returns the
+ * TRIMMED value, never the raw one: `" anthropic "` used to be accepted
+ * as-is and then never matched `suggestRoute`'s exact-string dead-route
+ * key (PR #479 rodada 1, non-blocking finding). */
 function nonEmptyText(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() !== "" ? value : undefined;
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed === "" ? undefined : trimmed;
 }
 function typeName(value: unknown): string {
   if (value === null) return "null";
