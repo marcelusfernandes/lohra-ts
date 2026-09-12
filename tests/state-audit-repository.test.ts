@@ -13,7 +13,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AuditRepository } from "../src/state/audit-repository.js";
 import { openStateDatabase } from "../src/state/connection.js";
@@ -190,6 +190,39 @@ describe("AuditRepository.query — paginação em SQL preserva o envelope (#477
       const byAttempt = audit.query({ runId: "run-seg", segmentId: "seg-1", attempt: 2 });
       expect(byAttempt.events).toHaveLength(1);
       expect(byAttempt.events[0]?.identity.attempt).toBe(2);
+    } finally {
+      connection.close();
+    }
+  });
+});
+
+describe("AuditRepository.query — custo por página, não por run (#498)", () => {
+  it("decodifica no máximo limit+1 linhas mais os marcadores, nunca o run inteiro", () => {
+    const { connection, audit } = database();
+    try {
+      const total = 300;
+      for (let i = 1; i <= total; i += 1)
+        audit.append("run-big", { event_type: "leaf.started", sub_id: `leaf-${String(i)}` });
+
+      const limit = 10;
+      const parseSpy = vi.spyOn(JSON, "parse");
+      try {
+        const page = audit.query({ runId: "run-big", limit });
+        expect(page.events).toHaveLength(limit);
+        const markers = page.integrity.event_markers as Readonly<Record<string, number>>;
+        const markerCount = Object.values(markers).reduce((sum, value) => sum + value, 0);
+        // #477 already made the page's own SQL proportional to `limit`; #498
+        // closes the remaining gap — before this issue, `snapshotRows`
+        // decoded EVERY row up to `snapshot` (all 300 here) to derive
+        // run-wide `notices`/`field_markers`/`event_markers`, so a page's
+        // decode count grew with the WHOLE run, not just its own window.
+        expect(
+          parseSpy.mock.calls.length,
+          "MUTATION_CAUSE:M498-full-run-decode",
+        ).toBeLessThanOrEqual(limit + 1 + markerCount);
+      } finally {
+        parseSpy.mockRestore();
+      }
     } finally {
       connection.close();
     }
