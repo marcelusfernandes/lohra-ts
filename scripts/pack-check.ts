@@ -2,7 +2,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { startStub } from "./stub/server.js";
@@ -80,12 +80,13 @@ function command(
   executable: string,
   argv: readonly string[],
   options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+  timeoutMs = 60_000,
 ) {
   const result = spawnSync(executable, [...argv], {
     cwd: options.cwd,
     env: options.env,
     encoding: "utf8",
-    timeout: 60_000,
+    timeout: timeoutMs,
     maxBuffer: 16 * 1024 * 1024,
   });
   if (result.status !== 0)
@@ -256,16 +257,36 @@ async function main(): Promise<void> {
     if (filename === undefined) throw new Error("PACK_TARBALL_MISSING");
     const tarball = join(packDirectory, filename);
     prepareOfflineTarballConsumer({ project: process.cwd(), consumer: installDirectory, tarball });
-    command("npm", ["ci", "--offline", "--no-audit", "--no-fund"], {
-      cwd: installDirectory,
-      env: {
-        ...process.env,
-        npm_config_offline: "true",
-        HTTP_PROXY: "http://127.0.0.1:9",
-        HTTPS_PROXY: "http://127.0.0.1:9",
-        ALL_PROXY: "http://127.0.0.1:9",
-        NO_PROXY: "",
+    command(
+      "npm",
+      ["ci", "--offline", "--no-audit", "--no-fund"],
+      {
+        cwd: installDirectory,
+        env: {
+          ...process.env,
+          npm_config_offline: "true",
+          // `false` explícito (não só a ausência da variável): documenta a
+          // intenção de nunca aceitar compilação nativa aqui — `node-pty`
+          // confere esta env var (`scripts/prebuild.js`) antes de decidir
+          // usar o prebuild bundled.
+          npm_config_build_from_source: "false",
+          HTTP_PROXY: "http://127.0.0.1:9",
+          HTTPS_PROXY: "http://127.0.0.1:9",
+          ALL_PROXY: "http://127.0.0.1:9",
+          NO_PROXY: "",
+        },
       },
+      // Instalar better-sqlite3/node-pty pode cair no fallback `node-gyp
+      // rebuild` (compilação real, minutos) antes de assertNoNativeCompileNeeded
+      // ter a chance de rodar e nomear o problema — sem folga aqui o
+      // subprocesso leva um SIGKILL e o erro vira `PACK_COMMAND_FAILED`
+      // genérico, escondendo o sinal que este check existe para dar.
+      300_000,
+    );
+    assertNoNativeCompileNeeded({
+      consumerRoot: installDirectory,
+      platform: process.platform,
+      arch: process.arch,
     });
 
     const projected = join(root, "requests.jsonl");
@@ -335,7 +356,7 @@ async function main(): Promise<void> {
     const bin = resolve(installDirectory, "node_modules/.bin/lohra");
     if (!existsSync(bin)) throw new Error("PACK_BIN_MISSING");
     const isolatedEnvironment: NodeJS.ProcessEnv = {
-      PATH: `${dirname(process.execPath)}:/bin`,
+      PATH: `${dirname(process.execPath)}${delimiter}/bin`,
       HOME: home,
       LOHRA_HOME: join(home, ".lohra"),
       CODEX_HOME: join(home, "codex"),
@@ -346,8 +367,12 @@ async function main(): Promise<void> {
       LOHRA_NO_WIZARD: "1",
       LOHRA_PROVIDER_BASE_URL: `http://127.0.0.1:${String(address.port)}/v1`,
     };
+    const manifest = JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf8")) as {
+      version?: unknown;
+    };
+    if (typeof manifest.version !== "string") throw new Error("PACK_MANIFEST_VERSION_MISSING");
     const version = command(bin, ["--version"], { cwd: project, env: isolatedEnvironment });
-    if (version.stdout !== "lohra 0.0.11\n") throw new Error("PACK_VERSION_MISMATCH");
+    if (version.stdout !== `lohra ${manifest.version}\n`) throw new Error("PACK_VERSION_MISMATCH");
     const turn = await commandAsync(
       bin,
       ["chat", "package smoke", "--json", "--provider", "ollama", "--model", "stub-coder:1b"],
