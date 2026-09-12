@@ -433,6 +433,72 @@ describe("workflow_steer tool (#424)", () => {
     }
   });
 
+  it("resolves by sub_id when the run has more than 100 live leaves — direct identity query, never the 100-event window (#445)", async () => {
+    // Regression for #445: `AuditRepository.query` clamps a page to 100
+    // events, oldest-seq-first (`src/state/audit-repository.ts:321`,`:395`).
+    // The OLD `resolveSubId` fetched a bare `leaf.started` window with NO
+    // `subId` filter and just checked membership — so a run with more than
+    // 100 live leaves lost every `sub_id` past the 100th to that window,
+    // reporting "no live leaf" for a leaf that genuinely exists. The fix
+    // queries the ledger BY `sub_id` directly (`AuditQuery.subId` is an
+    // exact-identity filter, `audit-repository.ts:118`), which is immune to
+    // the window regardless of how many OTHER leaves the run has spawned.
+    const workflowSteerHandler = await loadHandler();
+    const { audit, close } = auditOnlyHarness();
+    try {
+      for (let i = 1; i <= 120; i += 1) {
+        audit.append("run-big", {
+          event_type: "leaf.started",
+          sub_id: `leaf-${String(i)}`,
+          node_id: "a",
+        });
+      }
+      // `liveRuntimeOf` returning `undefined` proves this is a RESOLUTION
+      // test, not a delivery test: if resolution had failed, the handler
+      // would short-circuit on "no live leaf" and never reach this check.
+      const settledService = { liveRuntimeOf: (): undefined => undefined };
+      const handler = workflowSteerHandler(settledService, audit);
+      const result = JSON.parse(
+        await handler({ run_id: "run-big", sub_id: "leaf-120", message: "hi" }),
+      ) as Envelope;
+      expect(result.error).toBeDefined();
+      expect(result.error).not.toMatch(/no live leaf/);
+      expect(result.error).toMatch(/is not live/);
+    } finally {
+      close();
+    }
+  });
+
+  it("node_id resolution above the pagination ceiling is a named 'window truncated' error, distinct from 'no live leaf' (#445)", async () => {
+    // Complement to the direct-query fix above: `node_id` resolution still
+    // enumerates candidates (ambiguity needs the full live set, not just a
+    // membership check), so it paginates with `afterSeq` instead of reading
+    // one fixed window. Above `MAX_RESOLUTION_EVENTS` it must say so by name
+    // — never silently guess "no live leaf" for a node it never finished
+    // reading.
+    const workflowSteerHandler = await loadHandler();
+    const { audit, close } = auditOnlyHarness();
+    try {
+      const total = 2005;
+      for (let i = 1; i <= total; i += 1) {
+        audit.append("run-huge", {
+          event_type: "leaf.started",
+          sub_id: `leaf-${String(i)}`,
+          node_id: "b",
+        });
+      }
+      const handler = workflowSteerHandler(unreachableService, audit);
+      const result = JSON.parse(
+        await handler({ run_id: "run-huge", node_id: "b", message: "hi" }),
+      ) as Envelope;
+      expect(result.error).toBeDefined();
+      expect(result.error).toMatch(/truncat/i);
+      expect(result.error).not.toMatch(/no live leaf/);
+    } finally {
+      close();
+    }
+  }, 30_000);
+
   it("a sub_id the ledger says is live but the real core never spawned (desync) is a named error, never queued:true (2ª emenda, #424)", async () => {
     const { runtime, release } = realCoreRuntime();
     const { service, audit, trail, close } = serviceHarness(runtime);
