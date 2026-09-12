@@ -28,6 +28,33 @@ audit` (`src/commands/workflow.ts`) é só leitura e nunca detém uma
 gravar em `operator_notices`; e testes que constroem um `WorkflowService`
 sem `onWarning` caem no `console.warn` default sem sink nenhum.
 
+### `route_fault`: um segundo produtor, direto no repositório
+
+Issue #426 (M10-S5, épico #421) acrescentou um produtor que NÃO passa pelo
+`NoticesSink` por processo acima: `recordRouteFaultNotice`
+(`src/workflow/route-faults.ts:124-139`) grava direto num
+`NoticesSinkRepository` quando `auth_failed`/`route_fault`/`model_not_found`
+pausa um run durável — `scope = "run:<runId>"`, `kind = lesson.error_kind`
+(o próprio `ErrorKind` da rota recusada, nunca reclassificado por
+`notices-sink.ts`'s `classify()`). Sem repositório configurado, checkpoint
+que não é uma `RouteLesson` válida, ou uma escrita recusada/lançada,
+cai num `warn` — nunca silencioso (invariante 2), mas também nunca chega a
+`operator_notices` nesse caso.
+
+Ligação em produção (3ª emenda da PR #439, rodada 2): `createSessionToolBase`
+(`src/commands/session-tools.ts:79,105`) expõe `noticesRepository` — a MESMA
+instância que `workflow_notices`/`workflow_notices_ack` já leem — e
+`chat.ts`/`dashboard.ts` passam essa instância na chave opcional `notices`
+de `productionOwnershipStore` (`src/workflow/ownership-store.ts:55-76`,
+consumida em `src/commands/chat.ts:355`,
+`src/commands/dashboard.ts:315`) — o `OwnershipStore` que essa função monta
+sai com `notices` como sua 7ª propriedade quando presente. Honestamente: é
+o MESMO repositório que
+este documento descreve para o resto do canal, não um segundo armazenamento
+— um operador lendo `workflow_notices RUN_ID` vê o notice de rota junto com
+qualquer outro aviso daquele run, sem precisar saber que o produtor não
+passou pelo `NoticesSink`.
+
 ## Vocabulário (`NoticeKind`)
 
 `NOTICE_KINDS = [...ERROR_KINDS, ...STATE_NOTICE_KINDS]`

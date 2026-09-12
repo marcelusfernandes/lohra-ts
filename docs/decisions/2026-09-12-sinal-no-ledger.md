@@ -20,15 +20,17 @@ primeiro) não tinha handler nenhum neste código.
 ## Decisão
 
 - `src/cli/shutdown-trigger.ts` (novo): `registerShutdownTrigger(handler,
-target?)` registra o MESMO handler para `SIGTERM` e `SIGINT` via
-  `process.once` (nunca `process.on` — uma segunda entrega do mesmo sinal
-  cai no comportamento padrão do Node, não dispara duas vezes) e devolve
-  `unregister`. Desde a issue #434, esse handler também desarma o OUTRO
-  sinal antes de rodar, então uma segunda entrega — do mesmo sinal OU do
-  outro — nunca dispara `handler` duas vezes. `serve.ts` e `dashboard.ts`
-  passam a usá-lo; `dashboard.ts` mantém `options.registerShutdownTrigger`
-  injetável para teste, agora cobrindo os dois sinais também no caminho
-  real (o default deixou de ser só `process.once("SIGINT", handler)`).
+target?)` registra um wrapper interno, `wrapped` (`shutdown-trigger.ts:44-49`),
+  para `SIGTERM` e `SIGINT` via `process.once` (nunca `process.on` — uma
+  segunda entrega do MESMO sinal cai no comportamento padrão do Node,
+  não dispara duas vezes) e devolve `unregister`. Desde a issue #434,
+  `wrapped` chama `unregister()` — removendo os dois listeners — ANTES de
+  chamar o `handler` do caller, então uma segunda entrega — do mesmo sinal
+  OU do outro — nunca dispara `handler` duas vezes. `serve.ts` e
+  `dashboard.ts` passam a usá-lo; `dashboard.ts` mantém
+  `options.registerShutdownTrigger` injetável para teste, agora cobrindo os
+  dois sinais também no caminho real (o default deixou de ser só
+  `process.once("SIGINT", handler)`).
 - `WorkflowService.shutdown(reason: "signal" | "operator" = "operator")` —
   a causa atravessa `runShutdown` → `cancelAndSettle` (que marca
   `RunRecord.interruptCause = "signal"` em cada run vivo antes de
@@ -51,6 +53,26 @@ target?)` registra o MESMO handler para `SIGTERM` e `SIGINT` via
   nunca grava `reason: "signal"` — e `registerShutdownTrigger` desarma o
   OUTRO sinal antes de invocar o handler, então SIGTERM seguido de SIGINT
   dispara o fechamento uma única vez por registro.
+
+### Comportamento observado: o que a SEGUNDA entrega de sinal faz depois disso
+
+Esta nota não descreve (e a implementação não muda) o que acontece a um
+TERCEIRO sinal, ou a um segundo sinal que chega ENQUANTO `handler` ainda
+está rodando: `wrapped` já chamou `unregister()` antes de invocar
+`handler` (`shutdown-trigger.ts:44-49`), então nenhum dos dois sinais tem
+listener nenhum a partir daí — um SIGTERM/SIGINT adicional cai na
+disposição padrão do Node (o processo morre imediatamente), não em um
+handler nomeado. `handler` (`runShutdown` → `cancelAndSettle` →
+`announceStretchEnd`) é assíncrono e, no caminho durável, termina com
+`flushBeforeRelease()` antes de liberar o lease do run
+(`service.ts:983,1005`) dentro da janela de `SHUTDOWN_SETTLE_TIMEOUT_MS`
+(5 s, `service.ts:46`) — um sinal adicional que mata o processo dentro
+dessa janela corta esse flush e a liberação do lease no meio, e o lease
+some do jeito que já existia antes desta issue: por `RUN_LEASE_TTL` (900
+s, `service.ts:41`), não por uma liberação explícita. Não é uma regressão
+desta issue nem da emenda #434 — é o mesmo custo que qualquer `kill -9`
+já tinha, só que agora alcançável por um segundo `Ctrl-C`/SIGTERM comum
+durante o shutdown gracioso.
 
 ## Doutrina para autores de spec
 

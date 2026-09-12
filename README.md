@@ -249,12 +249,17 @@ parou (issue #103, `tests/workflow-cross-process.test.ts`).
 
 `list` e `watch` mostram por que um run pausou: a linha de status ganha um
 sufixo `(<pause_reason>)` — `checkpoint`, `token_budget_exhausted`,
-`user_requested` ou `quota_exhausted` — e, quando o gasto de tokens excede
-`token_budget`, o campo de tokens ganha `(+N over)` (`1100/1000 tok (+100
-over)`). `watch` ainda escreve no stderr a dica de retomada certa (a mesma
-que `run_workflow` devolve como `hint`) assim que o run termina pausado;
-`quota_exhausted` não tem dica porque retoma sozinho, sem ação do operador
-(issue #245, `tests/workflow-command.test.ts`).
+`user_requested`, `quota_exhausted` ou `route_fault` (5º valor, M10-S5) — e,
+quando o gasto de tokens excede `token_budget`, o campo de tokens ganha
+`(+N over)` (`1100/1000 tok (+100 over)`). `watch` ainda escreve no stderr a
+dica de retomada certa (a mesma que `run_workflow` devolve como `hint`)
+assim que o run termina pausado; `quota_exhausted` não tem dica porque
+retoma sozinho, sem ação do operador, e `route_fault` também não tem `hint`
+— em vez disso o run carrega `lesson` (o nó, o kind e a rota recusada), e a
+retomada certa é `run_workflow(resume_run_id=..., route={provider?,
+model?})` numa rota diferente (issue #245, `tests/workflow-command.test.ts`;
+`route_fault` e o pivô de rota em
+[`docs/workflow-supervision.md`](docs/workflow-supervision.md)).
 
 Um run em voo tem duas caudas independentes. Em processo — o mesmo que
 lançou ou retomou o run —, `workflow_status` devolve `live_tail`
@@ -271,6 +276,15 @@ segment_id`) além da linha de status, sem repetir o que já mostrou; sem
 `--events` o comportamento é o de sempre (issue #369). Tabela completa de
 eventos, identidade causal, ciclo de segmento e fail-closed em
 `docs/workflow-audit.md`.
+
+Três tools deixam intervir num run em voo sem esperar ele pausar sozinho:
+`workflow_steer` entrega uma mensagem ao próximo turno de um leaf vivo
+(por `node_id` ou `sub_id`); `workflow_leaf_read` lê os turnos que um leaf
+vivo já assentou (conteúdo bruto, não redigido — diferente de
+`workflow_audit`); e um run pausado com `route_fault` retoma numa rota
+diferente com `run_workflow(resume_run_id=..., route={provider?, model?})`.
+Detalhes, tetos e o que cada um NÃO faz em
+[`docs/workflow-supervision.md`](docs/workflow-supervision.md).
 
 A tool `list_models` reporta `context_window` por modelo — a janela de
 contexto que o próprio provedor expõe em `/models` (`context_length` no
