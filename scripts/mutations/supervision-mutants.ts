@@ -60,7 +60,8 @@ const transportsClient = "src/transports/client.ts";
 const orchestrationRuntime = "src/workflow/orchestration-runtime.ts";
 const abortInFlightFocus = "tests/transports-abort-in-flight.test.ts";
 const childRunnerAbortFocus = "tests/orchestration-child-runner-abort.test.ts";
-const workflowAbortInFlightFocus = "tests/workflow-abort-in-flight.test.ts";
+const workflowOrchestrationRuntimeTimeoutFocus =
+  "tests/workflow-orchestration-runtime-timeout.test.ts";
 
 export const supervisionMutants: readonly Mutant[] = [
   // --- steer-tool.ts (#424, #445, #450) -----------------------------------
@@ -729,19 +730,30 @@ export const supervisionMutants: readonly Mutant[] = [
       },
     ],
   },
+  // N3 originally targeted `CANCEL_SETTLE_TIMEOUT_MS = 0` (issue #519's own
+  // suggestion) against `tests/workflow-abort-in-flight.test.ts`'s "resolves
+  // once the leaf actually settles" test — verified NOT to kill: that test's
+  // own settlement chain resolves entirely via microtasks (no real timer or
+  // I/O in between `core.cancel()` and the leaf's teardown), so Node drains
+  // it before ANY `setTimeout`, including one scheduled for 0ms, ever fires
+  // — the race never actually reaches the ceiling. Retargeted at #521
+  // (M16-S6)'s sibling ceiling in the SAME function family — `collect()`'s
+  // own `deadlineMs` — against a focus that uses a genuinely stuck leaf (a
+  // promise that never resolves at all), where the ceiling is the ONLY
+  // thing that can ever settle the race.
   {
-    id: "N3-cancel-settle-ceiling-zero",
-    category: "cancel-settle-ceiling-zero",
+    id: "N3-collect-deadline-ceiling-widened",
+    category: "collect-deadline-ceiling-widened",
     mechanism: "family-a",
     focus: {
-      file: workflowAbortInFlightFocus,
-      test: "resolves once the leaf actually settles and writes the real partial usage, never the bare placeholder",
+      file: workflowOrchestrationRuntimeTimeoutFocus,
+      test: "a leaf stuck mid-stream comes back running within the deadline, without cancelling it",
     },
     edits: [
       {
         file: orchestrationRuntime,
-        before: "export const CANCEL_SETTLE_TIMEOUT_MS = 2_000;",
-        after: "export const CANCEL_SETTLE_TIMEOUT_MS = 0;",
+        before: "        ? Math.min(options.timeoutSeconds * 1000, 2_147_483_647)",
+        after: "        ? Math.min(options.timeoutSeconds * 10_000, 2_147_483_647)",
       },
     ],
   },
