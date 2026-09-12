@@ -4,16 +4,32 @@
 // module is a DYNAMIC `import()` INSIDE each `it` — the module does not
 // exist on `main` yet, and a static top-level import would fail vitest's
 // COLLECTION of this whole file (a structural red for every test here)
-// instead of a real assertion failure one test at a time (worktree-segura
-// §7; controle-negativo's assertion-red vs structural-red, #48/#54).
+// instead of a real assertion failure one test at a time
+// (controle-negativo's assertion-red vs structural-red, #48/#54).
+//
+// PR #482 rodada 1 (blocking): `composeSessionTools`'s own
+// `workflow_templates: workflowTemplatesHandler(options.home)` registration
+// (`session-tools.ts:177`) was never exercised through the composed
+// registry — every case above called the handler DIRECTLY, so deleting
+// that line kept this whole suite green while silently bringing back
+// `builtins.ts:34`'s `failSafe`. The two `composeSessionTools` cases below
+// (molde: `tests/session-tools.test.ts:40-63`) close that gap: they fail
+// by VALUE against `main` (the failSafe string, not `parsed.templates`),
+// not by a missing module.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { composeSessionTools, createSessionToolBase } from "../src/commands/session-tools.js";
 import { usage } from "../src/pricing/usage.js";
-import { LockRepository, openStateDatabase, WorkflowRepository } from "../src/state/index.js";
+import {
+  LockRepository,
+  openStateDatabase,
+  SessionRepository,
+  WorkflowRepository,
+} from "../src/state/index.js";
 import { WorkflowService } from "../src/workflow/service.js";
 import type {
   ChildResult,
@@ -81,6 +97,34 @@ function neverSpawnRuntime(): ChildRuntime {
     cancel: (): void => undefined,
     installLeafSandbox: (): LeafSandboxHandle => ({ dispose: (): void => undefined }),
   };
+}
+
+/** The REAL composition root's own `composeSessionTools`/`createSessionToolBase`
+ * (molde: `tests/session-tools.test.ts:40-63`) — exercises the composed
+ * registry `session-tools.ts:177` registers `workflow_templates` into,
+ * never the handler called direct (that only proves `templates.ts` itself,
+ * not the wiring). `workflowService` never spawns — `workflow_templates`
+ * doesn't run one, but `composeSessionTools` still needs a real instance. */
+function setupComposedTools(home: string): ReturnType<typeof composeSessionTools> {
+  const connection = openStateDatabase(join(home, "state.db"));
+  const sessions = new SessionRepository(connection.database, () => 1000, connection.ftsEnabled);
+  const base = createSessionToolBase(connection.database, {});
+  const workflowService = new WorkflowService({ runtime: neverSpawnRuntime() });
+  return composeSessionTools({
+    base,
+    home,
+    cwd: home,
+    environment: {},
+    sessions,
+    workflowService,
+    orchestrationHandlers: {},
+    visionRunner: {
+      complete: () => Promise.reject(new Error("unused in this test")),
+      close: () => {},
+    },
+    visionModel: "vision-model",
+    supportsVision: false,
+  });
 }
 
 /** Same shape as `LabeledRuntime` in `tests/workflow-parallel-cells.test.ts`
@@ -152,6 +196,24 @@ describe("templateLoader (#464)", () => {
     const ref = "a".repeat(65);
     expect(() => templateLoader(home)(ref)).toThrow(/invalid ref format/);
   });
+
+  it("refuses a ref with an internal path separator (a/b)", async () => {
+    const home = operatorHome("lohra-templates-slash-");
+    const { templateLoader } = await importTemplates();
+    expect(() => templateLoader(home)("a/b")).toThrow(/invalid ref format/);
+  });
+
+  it("refuses an empty ref", async () => {
+    const home = operatorHome("lohra-templates-empty-");
+    const { templateLoader } = await importTemplates();
+    expect(() => templateLoader(home)("")).toThrow(/invalid ref format/);
+  });
+
+  it("refuses a dotfile-shaped ref (.hidden)", async () => {
+    const home = operatorHome("lohra-templates-dotfile-");
+    const { templateLoader } = await importTemplates();
+    expect(() => templateLoader(home)(".hidden")).toThrow(/invalid ref format/);
+  });
 });
 
 describe("listTemplates (#464)", () => {
@@ -170,7 +232,7 @@ describe("listTemplates (#464)", () => {
     const listing = listTemplates(home);
     expect(listing).toContainEqual({ ref: "inner", name: "inner-agent", nodes: 1 });
     const broken = listing.find((entry) => entry.ref === "broken");
-    expect(broken?.error).toBeDefined();
+    expect(broken?.error).toContain("is not valid JSON");
   });
 });
 
@@ -278,6 +340,42 @@ describe("workflowTemplatesHandler (#464)", () => {
     const handler = workflowTemplatesHandler(home);
     const raw = await handler({ name: "broken-spec" });
     const parsed = JSON.parse(raw) as { error?: string };
-    expect(parsed.error).toBeDefined();
+    expect(parsed.error).toContain("invalid template 'broken-spec'");
+    expect(parsed.error).toContain("spec needs a non-empty 'nodes' list");
+  });
+});
+
+// PR #482 rodada 1 (blocking finding): through `composeSessionTools`'s
+// composed registry, not the handler called direct — proves the wiring at
+// `session-tools.ts:177`, not just `templates.ts` in isolation. Deleting
+// that registration line makes both cases below fail: `dispatch` would
+// fall through to the base registry's own `failSafe`
+// ("workflow tools must be intercepted with a session WorkflowService",
+// `builtins.ts:34`) instead of ever reaching `parsed.templates`/`parsed.spec`
+// — confirmed by hand while diagnosing this finding, restored before commit.
+describe("composeSessionTools wires workflow_templates (#464, PR #482 R1)", () => {
+  it("dispatch('workflow_templates', {}) lists through the composed registry, not the failSafe", async () => {
+    const home = operatorHome("lohra-templates-composed-list-");
+    writeTemplate(home, "inner", innerAgentSpec);
+    const tools = setupComposedTools(home);
+    const raw = await tools.dispatch("workflow_templates", {});
+    const parsed = JSON.parse(raw) as { templates?: readonly { ref: string }[]; error?: string };
+    // The failSafe this line replaces (`builtins.ts:34`) always answers
+    // with `{error: "workflow tools must be intercepted…"}`, never
+    // `templates` — asserting the field the failSafe can NEVER produce is
+    // what fails by VALUE if `session-tools.ts:177` is ever deleted.
+    expect(parsed.error).toBeUndefined();
+    expect(parsed.templates?.map((entry) => entry.ref)).toContain("inner");
+  });
+
+  it("dispatch('workflow_templates', {name}) returns the validated spec through the composed registry", async () => {
+    const home = operatorHome("lohra-templates-composed-get-");
+    writeTemplate(home, "inner", innerAgentSpec);
+    const tools = setupComposedTools(home);
+    const raw = await tools.dispatch("workflow_templates", { name: "inner" });
+    const parsed = JSON.parse(raw) as { ref?: string; spec?: unknown; error?: string };
+    expect(parsed.error).toBeUndefined();
+    expect(parsed.ref).toBe("inner");
+    expect(parsed.spec).toEqual(innerAgentSpec);
   });
 });
