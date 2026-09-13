@@ -79,12 +79,18 @@ interface ParsedScope {
   readonly runId: string | null;
 }
 
-/** `"global"` ou `"run:<id>"` com id não vazio; qualquer outra forma é inválida. */
+/** `"global"`, `"run:<id>"` (exige `ownership`, fence de workflow) ou
+ * `"session:<id>"` (issue #589: overlay de avisos por linhagem de sessão de
+ * chat — um namespace de id TOTALMENTE disjunto de `run:<id>`, que é sempre
+ * um `workflow_run_state.run_id`; nunca exige `ownership`, mesmo predicado
+ * de `global`, porque uma sessão de chat não tem fence/lock de run). Id
+ * vazio em qualquer prefixo é inválido. */
 function parseScope(scope: string): ParsedScope | null {
   if (scope === GLOBAL_SCOPE) return { runId: null };
   if (scope.startsWith("run:") && scope.length > "run:".length) {
     return { runId: scope.slice("run:".length) };
   }
+  if (scope.startsWith("session:") && scope.length > "session:".length) return { runId: null };
   return null;
 }
 
