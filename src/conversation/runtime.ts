@@ -493,6 +493,8 @@ export class ConversationRuntime {
           model: input.model,
           temperature: input.temperature ?? null,
           effort: input.effort ?? null,
+          // #578: forced only on iteration 1 — still callable, never forced, after.
+          toolChoice: iteration === 1 ? (input.toolChoice ?? null) : null,
           maxTokens: this.options.maxTokens ?? null,
           tools: immutableMessages(
             (this.options.toolDefinitions ?? []) as readonly Readonly<Record<string, unknown>>[],
