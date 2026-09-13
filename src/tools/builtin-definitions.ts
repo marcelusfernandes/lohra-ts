@@ -231,7 +231,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Delegate self-contained subtasks to fresh, isolated subagents and wait for results \u2014 no knowledge of this conversation, so each task string must stand alone. Each result carries 'sub_id' (continue with 'resume_id'), 'error_kind' (null, or 'dead_turn' if no text/tool call), and usage.",
+        "Delegate self-contained subtasks to fresh, isolated subagents and wait for results \u2014 no shared context; each stands alone. Each result has 'sub_id' (continue with 'resume_id'), 'error_kind' (null/'dead_turn' if no text/tool call), 'outcome' (result/failed/needs_input/null from its last line), usage.",
       parameters: {
         type: "object",
         properties: {
@@ -424,7 +424,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Read a sub-session's status and output by its 'sub_id'. 'wait' true blocks until the current turn finishes; false polls.",
+        "Read a sub-session's status and output by its 'sub_id'. 'wait' true blocks until the turn finishes; false polls. Carries 'outcome' (result/failed/needs_input/null) from its last line.",
       parameters: {
         type: "object",
         properties: {

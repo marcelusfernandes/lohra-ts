@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ProviderError } from "../src/agent/client-pool.js";
+import { BUILTIN_DEFINITIONS } from "../src/tools/builtin-definitions.js";
 import { toolError, toolResult } from "../src/tools/envelope.js";
 import {
   MAX_PENDING_STEERS_PER_LEAF,
@@ -666,4 +667,31 @@ describe("delegateTaskTool", () => {
       ),
     );
   }, 1000);
+});
+
+// Issue #583, AC 4: delegate_task/collect_session descriptions explain the
+// outcome field so the parent knows to read it, without the model having to
+// call collect_session again just to discover the key exists.
+describe("delegate_task/collect_session descriptions explain outcome (#583)", () => {
+  function descriptionOf(name: string): string {
+    const tool = BUILTIN_DEFINITIONS.find((definition) => definition.function.name === name);
+    if (tool === undefined) throw new Error(`tool '${name}' not found in BUILTIN_DEFINITIONS`);
+    return tool.function.description;
+  }
+
+  it("delegate_task names outcome and its possible values", () => {
+    const description = descriptionOf("delegate_task");
+    expect(description).toContain("outcome");
+    expect(description).toContain("result");
+    expect(description).toContain("failed");
+    expect(description).toContain("needs_input");
+  });
+
+  it("collect_session names outcome and its possible values", () => {
+    const description = descriptionOf("collect_session");
+    expect(description).toContain("outcome");
+    expect(description).toContain("result");
+    expect(description).toContain("failed");
+    expect(description).toContain("needs_input");
+  });
 });
