@@ -237,7 +237,6 @@ function readSlices(): readonly Slice[] {
  * épico #13). Uma entrada aqui precisa continuar SEM cobertura em
  * `srcGlobs`; o teste abaixo reprova se as duas listas se sobrepõem. */
 const SEM_FATIA: ReadonlyMap<string, string> = new Map([
-  ["agent", "sem catálogo de mutantes ainda"],
   ["config", "sem catálogo de mutantes ainda"],
   ["core", "sem catálogo de mutantes ainda"],
   ["cron", "sem catálogo de mutantes ainda"],
@@ -483,7 +482,7 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 269 (soma dos treze catálogos importados)", () => {
+  it("a contagem total de mutantes é 280 (soma dos treze catálogos importados)", () => {
     // Os doze catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
@@ -586,9 +585,20 @@ describe("scripts/mutations/slices.json", () => {
     // do fix de item 2 (disarm-on-fire em `OrchestrationCore.steer`), mas
     // nenhum focusFile de `supervision` cobre `tests/orchestration-steer-
     // interrupt.test.ts` e `slices.json` está fora do `Files` da issue, e
-    // `supervision-mutants.ts` segue no teto: 274 + 2 = 276.
+    // `supervision-mutants.ts` segue no teto: 274 + 2 = 276. A issue #587
+    // (P11, compactação/título pelo `AuxClient`) acrescenta quatro a
+    // `context-window.ts`: t (`headAlignedKeepCount`'s fix — o fallback
+    // seguro "manter nada" em vez do corte bruto por token que podia
+    // separar um `tool_calls` do seu `tool`), u (`runtime.ts`'s
+    // `maxTranscriptTokens` deixa de vir da janela real, voltando ao
+    // default inerte de `compaction.ts`), v (`summarizeWithFallback`,
+    // `src/agent/aux.ts`, perde o `catch` — uma falha do `AuxClient`
+    // derruba o turno em vez de cair para o summarizer padrão) e w
+    // (`auxTelemetry` para de contar chamadas bem-sucedidas) — `src/agent/**`
+    // junta-se ao `srcGlobs` desta fatia (achado da própria issue: `aux.ts`
+    // não tinha mutante em NENHUMA fatia): 276 + 4 = 280.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 276;
+    const TOTAL_MUTANTS = 280;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -611,7 +621,7 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/media-catalog-persistence.ts": 13,
       "scripts/mutations/self-update-mutants.ts": 8,
       "scripts/mutations/workflow-executor-mutants.ts": 45,
-      "scripts/mutations/context-window.ts": 19,
+      "scripts/mutations/context-window.ts": 23,
       "scripts/mutations/auth-mutants.ts": 13,
       "scripts/mutations/supervision-mutants.ts": 39,
     };
@@ -620,7 +630,7 @@ describe("scripts/mutations/slices.json", () => {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(276);
+    expect(somaTabela).toBe(280);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {

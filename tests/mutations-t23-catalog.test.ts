@@ -26,6 +26,13 @@
 // `runtime.ts`: r (o conjunto `&& !signalAborted(signal)` que decide se uma
 // chamada abortada é um steer-interrupt absorvível, removido) e s
 // (`disarm?.()` no `finally` de cada chamada, removido): 17 + 2 = 19.
+//
+// Issue #587 (P11, compactação/título pelo AuxClient) acrescenta mais 4:
+// t (`compaction.ts`'s `headAlignedKeepCount` perde o fallback seguro
+// "manter nada"), u (`runtime.ts` para de derivar `maxTranscriptTokens` da
+// janela real), v e w (`src/agent/aux.ts`'s `summarizeWithFallback` perde o
+// catch, `auxTelemetry` para de contar chamadas) — `aux.ts` entra no
+// `srcGlobs` desta fatia pela primeira vez: 19 + 4 = 23.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -44,8 +51,8 @@ function sourceOf(relativePath: string): string {
 }
 
 describe("mutations:t23 catalog (compaction, estimator, context window)", () => {
-  it("declara exatamente 19 mutantes", () => {
-    expect(contextWindowMutants).toHaveLength(19);
+  it("declara exatamente 23 mutantes", () => {
+    expect(contextWindowMutants).toHaveLength(23);
   });
 
   it("cada id de mutante é único", () => {
@@ -53,7 +60,7 @@ describe("mutations:t23 catalog (compaction, estimator, context window)", () => 
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("mira apenas compaction.ts (×4), runtime.ts (×4), token-estimate.ts (×3), context-window.ts (×2), windows-cache.ts (×2), session-repository.ts (×3), provider-model.ts (×1)", () => {
+  it("mira apenas compaction.ts (×5), runtime.ts (×5), token-estimate.ts (×3), context-window.ts (×2), windows-cache.ts (×2), session-repository.ts (×3), provider-model.ts (×1), aux.ts (×2)", () => {
     // Conta MUTANTES por arquivo (não edits) -- cada mutante deste catálogo
     // tem um único edit, então as duas contagens coincidem aqui, mas o
     // padrão (Set por mutante) segue mutations-t20-catalog.test.ts, que
@@ -65,13 +72,14 @@ describe("mutations:t23 catalog (compaction, estimator, context window)", () => 
       }
     }
     expect(counts).toEqual({
-      "src/conversation/compaction.ts": 4,
-      "src/conversation/runtime.ts": 4,
+      "src/conversation/compaction.ts": 5,
+      "src/conversation/runtime.ts": 5,
       "src/context/token-estimate.ts": 3,
       "src/providers/context-window.ts": 2,
       "src/catalog/windows-cache.ts": 2,
       "src/state/session-repository.ts": 3,
       "src/conversation/provider-model.ts": 1,
+      "src/agent/aux.ts": 2,
     });
   });
 

@@ -42,6 +42,11 @@ const tokenEstimate = "src/context/token-estimate.ts";
 const contextWindow = "src/providers/context-window.ts";
 const windowsCache = "src/catalog/windows-cache.ts";
 const sessionRepository = "src/state/session-repository.ts";
+// Issue #587 acréscimo item 5: `src/agent/aux.ts` had no mutant in ANY
+// slice -- `src/agent/**` joins this fatia's own `srcGlobs` (below) rather
+// than getting a new one, since compaction moved to the `AuxClient` this
+// module exports.
+const aux = "src/agent/aux.ts";
 
 const compactionTests = "tests/conversation-compaction.test.ts";
 const runtimeTests = "tests/conversation-runtime.test.ts";
@@ -51,6 +56,9 @@ const catalogPricingTests = "tests/catalog-pricing.test.ts";
 const stateLocksTests = "tests/state-locks.test.ts";
 const providerModel = "src/conversation/provider-model.ts";
 const abortInFlightTests = "tests/transports-abort-in-flight.test.ts";
+const compactionTranscriptTests = "tests/conversation-compaction-transcript.test.ts";
+const runtimeAuxTests = "tests/conversation-runtime-aux.test.ts";
+const auxTests = "tests/client-pool-aux.test.ts";
 
 export const contextWindowMutants: readonly Mutant[] = [
   {
@@ -381,6 +389,79 @@ export const contextWindowMutants: readonly Mutant[] = [
         file: runtime,
         before: "          disarm?.();\n",
         after: "          void disarm;\n",
+      },
+    ],
+  },
+  // --- issue #587 (compactação/título pelo AuxClient) --------------------
+  {
+    id: "t-head-aligned-keep-count-safe-fallback-removed",
+    category: "compaction",
+    mechanism:
+      "headAlignedKeepCount volta ao corte bruto por token (não examina o índice 0, cai em return candidate) em vez do fallback seguro 'manter nada' — pode manter um assistant com tool_calls sem manter seu próprio resultado tool",
+    focus: {
+      file: compactionTranscriptTests,
+      test: "never keeps an assistant tool-call message without its own tool result",
+    },
+    edits: [
+      {
+        file: compaction,
+        before:
+          '  for (let cut = candidate; cut >= 0; cut -= 1) {\n    if (cut === 0 || messages[cut]?.role === "user") return cut;\n  }\n  return 0;\n',
+        after:
+          '  for (let cut = candidate; cut > 0; cut -= 1) {\n    if (messages[cut]?.role === "user") return cut;\n  }\n  return candidate;\n',
+      },
+    ],
+  },
+  {
+    id: "u-max-transcript-tokens-real-window-dropped",
+    category: "runtime",
+    mechanism:
+      "preflightCompact para de passar maxTranscriptTokens derivado da janela real ao attemptCompaction — o orçamento de truncamento do transcript volta ao default inerte de compaction.ts (metade de 200000), nunca cortando sob uma janela pequena",
+    focus: {
+      file: runtimeAuxTests,
+      test: "derives maxTranscriptTokens from LOHRA_CONTEXT_WINDOW and emits compaction.transcript_truncated when it cuts",
+    },
+    edits: [
+      {
+        file: runtime,
+        before:
+          "      maxTranscriptTokens: Math.floor(resolution.tokens * TRANSCRIPT_WINDOW_FRACTION),\n",
+        after: "",
+      },
+    ],
+  },
+  {
+    id: "v-summarize-with-fallback-catch-removed",
+    category: "aux",
+    mechanism:
+      "summarizeWithFallback para de capturar a falha do summarizer primário — uma falha do AuxClient propaga e derruba o turno inteiro em vez de cair para o summarizer padrão com um evento nomeado",
+    focus: {
+      file: auxTests,
+      test: "falls open to the fallback and names the cause when the primary throws",
+    },
+    edits: [
+      {
+        file: aux,
+        before:
+          "    try {\n      return await primary(transcript);\n    } catch (error) {\n      onFallback(error);\n      return fallback(transcript);\n    }\n",
+        after: "    return primary(transcript);\n",
+      },
+    ],
+  },
+  {
+    id: "w-aux-telemetry-calls-never-incremented",
+    category: "aux",
+    mechanism:
+      "auxTelemetry para de contar as chamadas bem-sucedidas — aux_calls do envelope fica sempre 0/ausente mesmo quando o auxiliar foi de fato chamado",
+    focus: {
+      file: auxTests,
+      test: "auxTelemetry counts calls and sums usage across summarize and title",
+    },
+    edits: [
+      {
+        file: aux,
+        before: "      calls += 1;\n",
+        after: "      calls += 0;\n",
       },
     ],
   },

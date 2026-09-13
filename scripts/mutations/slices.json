@@ -108,7 +108,8 @@
       "src/context/**",
       "src/providers/**",
       "src/catalog/**",
-      "src/state/**"
+      "src/state/**",
+      "src/agent/**"
     ],
     "focusFiles": [
       "tests/conversation-compaction.test.ts",
@@ -117,7 +118,10 @@
       "tests/providers-context-window.test.ts",
       "tests/catalog-pricing.test.ts",
       "tests/state-locks.test.ts",
-      "tests/transports-abort-in-flight.test.ts"
+      "tests/transports-abort-in-flight.test.ts",
+      "tests/conversation-compaction-transcript.test.ts",
+      "tests/conversation-runtime-aux.test.ts",
+      "tests/client-pool-aux.test.ts"
     ]
   },
   {
