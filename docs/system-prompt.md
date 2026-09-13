@@ -251,9 +251,16 @@ suas instruções e…"). Duas camadas, complementares:
   não é ancestral do `project_root` que `findProjectRoot`
   (`src/context/discovery.ts`) resolve a partir do cwd real do processo — um
   arquivo dentro do projeto não carrega a chave, byte-compatível com quem não
-  a lê. `skill_view` ainda não marca o campo: o envelope é montado em
-  `SkillTool.view()` (`src/tools/stateful.ts`), fora dos `Files` da issue
-  #581 (comentário na issue, rodada 2 ou issue de acompanhamento decide).
+  a lê. `skill_view` (`SkillTool.view()`, `src/tools/stateful.ts`) usa o
+  mesmo critério (`isUntrustedPath`, exportada de `filesystem.ts`) sobre
+  `skill.path`: uma skill "home" ou builtin fora do repositório aberto ganha
+  `untrusted: true`, assim como o caso hipotético de `skill.path` vir
+  `undefined` (lado seguro — a doutrina promete menos sobre a origem, nunca
+  mais); uma skill dentro do `project_root` (ex.: uma skill builtin quando o
+  runtime roda de um checkout deste próprio repositório) não carrega a
+  chave. Rodada 1b da issue #581: `src/tools/stateful.ts` e
+  `tests/tools-stateful*.test.ts` entraram nos `Files` depois do comentário
+  original sobre esse arquivo estar fora de escopo.
 
 `read_file`, `web_fetch`, `web_search`, `skill_view` (`BUILTIN_DEFINITIONS`)
 e o wrapper de description de tool MCP (`convertMcpSchema`) citam a mesma
