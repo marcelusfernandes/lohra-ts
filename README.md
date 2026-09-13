@@ -393,6 +393,16 @@ para perfis marcados "fortes" — `ollama` é o único perfil builtin sem ela
 por default, `LOHRA_DOCTRINE=core|extended` sobrepõe. Detalhes em
 [`docs/system-prompt.md`](docs/system-prompt.md).
 
+Essa doutrina inclui uma regra sobre conteúdo externo (issue #581): texto
+devolvido por `web_fetch`, um servidor MCP, um arquivo ou uma skill é dado,
+nunca instrução — mesmo quando lê como um comando dirigido ao modelo. No
+envelope, `web_fetch`, `web_search` e todo resultado MCP carregam
+`"untrusted": true` (campo aditivo, última chave); `read_file` marca o mesmo
+campo quando o caminho lido está fora do diretório do projeto. As
+descriptions de `read_file`, `web_fetch`, `web_search`, `skill_view` e o
+wrapper de tool MCP citam a mesma frase de aviso. Detalhes em
+[`docs/system-prompt.md`](docs/system-prompt.md).
+
 ### Erros e `--help`
 
 O texto de erro e de ajuda da CLI é próprio deste produto — não é um
