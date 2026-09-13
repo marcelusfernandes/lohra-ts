@@ -14,7 +14,8 @@
     "task-does-not-need-workflow",
     "simple-text-reply-baseline",
     "terminal-safe-command-executes",
-    "read-file-missing-reports-error"
+    "read-file-missing-reports-error",
+    "skill-use-lohra-ts-one-leaf"
   ],
   "holdout": [
     "child-task-fails-silently-holdout",

@@ -1,0 +1,39 @@
+{
+  "input": "This is a self-contained, scoped task: implement it and validate it. It only needs a single subagent (one leaf) to finish — no durable workflow is needed. Report the session's tools used and the validation result when done.",
+  "stub_script": {
+    "default": [
+      {
+        "kind": "tool_calls",
+        "calls": [
+          {
+            "name": "delegate_task",
+            "argumentsRaw": "{\"tasks\":[\"SCEN:child implement the scoped task and validate it\"]}"
+          }
+        ]
+      },
+      {
+        "kind": "text",
+        "content": "Delegated to one subagent leaf via delegate_task; validation passed. Tools used: delegate_task."
+      }
+    ],
+    "child": [{ "kind": "text", "content": "Implemented and validated the scoped task." }]
+  },
+  "mechanism": [
+    { "kind": "request_count", "count": 3 },
+    {
+      "kind": "message_roles_at_request",
+      "request": 3,
+      "roles": ["system", "user", "assistant", "tool"]
+    },
+    { "kind": "tool_result_includes", "request": 3, "substring": "\"error_kind\":null" },
+    { "kind": "tools_include", "request": 1, "name": "delegate_task" },
+    { "kind": "envelope_pointer", "pointer": "/error", "value": null },
+    { "kind": "envelope_pointer", "pointer": "/completed", "value": true }
+  ],
+  "outcome": {
+    "question": "Does the final report say the task was delegated to a single subagent leaf and that validation passed?",
+    "expect": "one subagent leaf"
+  },
+  "budget_tokens": 3000,
+  "note": "Acréscimo do orquestrador (2026-09-13, vindo de #590): 'uma folha' da skill use-lohra-ts (assets/skills/use-lohra-ts/SKILL.md) — a skill é EXPORTADA para outro harness (Claude Code, Codex) invocar lohra-ts via CLI, `src/skills/export.ts`; não é builtin desta própria runtime (só workflow-authoring é, src/commands/chat.ts:295). Este caso mede o lado de DENTRO: uma tarefa autocontida e de escopo pequeno, do jeito que a skill instrui compor (outcome, scope, done), completa com UM delegate_task (uma folha/subagente) — o mesmo shape de 'delegated-task-with-scope' — e o envelope final atende os três critérios de 'Verify the delegation' da própria skill (exit 0 é o processo, aqui verificado via /error null e /completed true; pelo menos um tool_calls). request_count/message_roles_at_request travam a FORMA do script (um delegate_task, uma resposta), não uma prova mecânica de que skill_view('workflow-authoring') foi evitado — não existe hoje uma assertion de 'tool não chamado com este argumento' (só tools_include/_exclude, que mira o CATÁLOGO, não uma chamada específica); registrado aqui em vez de superestimar a cobertura."
+}
