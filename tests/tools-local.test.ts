@@ -76,7 +76,8 @@ describe("terminal tool", () => {
     const sentinel = join(directory, "sentinel");
     const command = `sudo touch ${sentinel}`;
     expect(await terminalTool({ command }, { approvalManager: new ApprovalManager() })).toBe(
-      `{"error":"command was not approved by the user","command":"${command}"}`,
+      `{"error":"command refused by the dangerous-command policy (elevated privileges (sudo))",` +
+        `"command":"${command}","refusal":"final"}`,
     );
     expect(() => readFileSync(sentinel)).toThrow();
   });

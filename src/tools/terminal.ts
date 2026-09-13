@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { spawn as spawnPty } from "node-pty";
 
-import { ApprovalManager, approval } from "./approval.js";
+import { ApprovalManager, approval, detectDangerousCommand } from "./approval.js";
 import { jsonNumberKind } from "./arguments.js";
 import { toolError, toolResult } from "./envelope.js";
 import type { ToolArguments } from "./types.js";
@@ -83,7 +83,22 @@ export async function terminalTool(
   }
   const approvalManager = options.approvalManager ?? approval;
   if (!approvalManager.require(command)) {
-    return toolError("command was not approved by the user", { command });
+    // No mode of this runtime prompts a human for approval (issue #577): the
+    // refusal below is the dangerous-command policy denying by itself, not a
+    // person who declined. It is final for this session -- report the
+    // blocker instead of rephrasing or retrying the same command.
+    // ApprovalManager.require() only returns false for a command
+    // detectDangerousCommand() itself flagged, so this call always finds one.
+    const dangerous = detectDangerousCommand(command);
+    if (dangerous === null) {
+      throw new Error(
+        `dangerous-command policy denied a command detectDangerousCommand() does not flag: ${command}`,
+      );
+    }
+    return toolError(`command refused by the dangerous-command policy (${dangerous.description})`, {
+      command,
+      refusal: "final",
+    });
   }
 
   const timeout = Object.hasOwn(args, "timeout") ? args.timeout : DEFAULT_TIMEOUT_SECONDS;
@@ -146,7 +161,10 @@ export async function terminalTool(
 
 export const TERMINAL_SCHEMA = {
   description:
-    "Run a shell command on the local machine and return stdout, stderr, and the exit code. Dangerous commands require user approval.",
+    "Run a shell command on the local machine and return stdout, stderr, and the exit code. " +
+    "Commands matching a fixed dangerous-pattern list (recursive delete, sudo, force push, " +
+    "raw disk writes, ...) are refused automatically. A refusal is final for this session: " +
+    "do not rephrase or retry the command; report the blocker.",
   parameters: {
     type: "object",
     properties: {

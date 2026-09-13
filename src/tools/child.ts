@@ -66,16 +66,24 @@ export function createChildDispatch(
     if (excluded.has(name)) {
       return toolError(`the '${name}' tool is not available to subagents`);
     }
+    // Argument-shape guard, not a dangerous-command refusal: a non-string
+    // `command` never reaches detectDangerousCommand() below (which expects
+    // a string to test its patterns against), so it gets its own
+    // argument-error message instead of the policy's vocabulary.
     if (name === "terminal" && typeof args.command !== "string") {
-      return toolError("command was not approved by the user", { command: args.command });
+      return toolError("'command' must be a string", { command: args.command });
     }
     if (name === "terminal") {
       const command = args.command as string;
       const dangerous = detectDangerousCommand(command);
       if (dangerous !== null) {
-        return toolError(`subagent auto-denied a dangerous command (${dangerous.description})`, {
-          command,
-        });
+        // Same vocabulary as terminal.ts's own refusal (issue #577), with a
+        // subagent prefix: no mode prompts a human, and the refusal is final
+        // for this session.
+        return toolError(
+          `subagent command refused by the dangerous-command policy (${dangerous.description})`,
+          { command, refusal: "final" },
+        );
       }
     }
     return await base(name, args);
