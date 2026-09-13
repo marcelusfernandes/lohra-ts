@@ -17,6 +17,7 @@ import {
   childToolDefinitions,
   createChildDispatch,
   RegistryToolDispatcher,
+  toolResult,
 } from "../tools/index.js";
 import type { RegistryDispatch, ToolDefinition } from "../tools/index.js";
 import {
@@ -63,6 +64,40 @@ function buildTransport(client: ClosableClient, streaming: boolean): ModelTransp
     return new AnthropicMessagesModel(client, streaming);
   if (client instanceof ResponsesClient) return new ResponsesModel(client);
   return new ChatCompletionsModel(client as ChatCompletionsClient, streaming);
+}
+
+/**
+ * Issue #578: turns `SpawnConfig.forcedTool` (`{name, schema}`, set by
+ * `WorkflowEngine.collectLeaf` for a `tool_less` schema node,
+ * `workflow/engine.ts:266`) into the synthetic tool definition this leaf's
+ * own turn appends to its `toolDefinitions`, and whose name becomes that
+ * turn's `toolChoice` (`ConversationRuntime.runTurn`'s own new option,
+ * threaded to `ModelRequest.toolChoice` and from there into each of the
+ * three transports' own `tool_choice` shape). `null` for a malformed
+ * `forcedTool` (no non-empty string `name`) — same fail-open the engine's
+ * own text fallback already covers (`extractForcedOutput`,
+ * `workflow/engine-utils.ts`): a workflow-authored shape this runner cannot
+ * make sense of never throws, it just runs the turn with no forcing at all.
+ */
+function forcedToolDefinition(
+  forcedTool: Readonly<Record<string, unknown>> | undefined,
+): ToolDefinition | null {
+  if (forcedTool === undefined) return null;
+  const name = forcedTool["name"];
+  if (typeof name !== "string" || name.length === 0) return null;
+  const schema = forcedTool["schema"];
+  const parameters =
+    schema !== null && typeof schema === "object" && !Array.isArray(schema)
+      ? (schema as Readonly<Record<string, unknown>>)
+      : { type: "object", properties: {} };
+  return {
+    type: "function",
+    function: {
+      name,
+      description: "Return the leaf's final answer as this call's structured arguments.",
+      parameters,
+    },
+  };
 }
 
 /** Structural twin of `Usage` (`transports/types.ts`) — `zeroResult`'s own
@@ -176,6 +211,7 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
       const configured = await configureFor(options.clientPool, {
         provider: providerOverride,
         model: modelOverride,
+        forcedTool: config.forcedTool ?? null,
       });
       const configuredProvider = configured?.["provider"] as ProviderProfile | undefined;
       const configuredClient = configured?.["client"] as ClosableClient | undefined;
@@ -187,6 +223,13 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
         (configured?.["model"] as string | undefined) ?? modelOverride ?? options.defaultModel;
       const effort = nonEmpty(config.effort);
       const maxIterations = config.maxIterations ?? options.childMaxIterations;
+      // Issue #578: `forcedDefinition` is `null` for the common case (no
+      // schema forced on this leaf) — `toolDefinitions`/`runTurn`'s own
+      // `toolChoice` below stay byte-identical to every call before this
+      // issue existed.
+      const forcedTool = configured?.["forcedTool"] as
+        Readonly<Record<string, unknown>> | undefined;
+      const forcedDefinition = forcedToolDefinition(forcedTool);
 
       // ConversationRuntime.runTurn() only creates a session when sessionId
       // is OMITTED (letting its own idSource() mint one); an explicit
@@ -209,12 +252,39 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
         config.wrapDispatch === undefined
           ? childDispatch
           : config.wrapDispatch(childDispatch, subId);
+      // Issue #578: the forced definition is APPENDED, never replaces the
+      // allow-listed set above — a leaf forced into `StructuredOutput`
+      // keeps every other tool it would otherwise have, exactly like a
+      // normal turn's `toolChoice: null` never removes tools either.
+      const baseToolDefinitions = childToolDefinitions(options.parentToolDefinitions);
+      const toolDefinitions =
+        forcedDefinition === null
+          ? baseToolDefinitions
+          : Object.freeze([...baseToolDefinitions, forcedDefinition]);
+      // Issue #578: the synthetic tool is intercepted BEFORE the sandbox
+      // wrap/real registry ever see it — it names no real capability
+      // (fs/egress/taint) and exists only to carry the leaf's structured
+      // answer back as this call's own arguments; routing it through
+      // `dispatch` would either hit the sandbox's fail-closed
+      // `denyAllDispatch` (counted as a spurious refusal, #246) or the real
+      // registry's "unknown tool" (never registered), stalling the schema
+      // instead of completing it. The acknowledgement's content is never
+      // read by anything — `extractForcedOutput`
+      // (`workflow/engine-utils.ts`) reads the CALL's own arguments off
+      // `ConversationTurnResult.toolCalls` below, not this result string.
+      const structuredOutputDispatch = (
+        name: string,
+        args: Readonly<Record<string, unknown>>,
+      ): Promise<string> =>
+        forcedDefinition !== null && name === forcedDefinition.function.name
+          ? Promise.resolve(toolResult({ received: true }))
+          : dispatch(name, args);
       const runtime = new ConversationRuntime({
         repository,
         transport: new NonClosingTransport(buildTransport(client, true)),
         promptSnapshot: () => systemPrompt,
-        toolDefinitions: childToolDefinitions(options.parentToolDefinitions),
-        toolDispatcher: new RegistryToolDispatcher(dispatch),
+        toolDefinitions,
+        toolDispatcher: new RegistryToolDispatcher(structuredOutputDispatch),
         idSource: options.idSource,
         clock: options.clock,
         maxTokens: profile.defaultMaxTokens,
@@ -231,6 +301,7 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
           sessionId: subId,
           drainMessages,
           effort,
+          ...(forcedDefinition === null ? {} : { toolChoice: forcedDefinition.function.name }),
           signal,
           ...(interrupts === undefined ? {} : { interruptSource: interrupts }),
         });
@@ -251,6 +322,16 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
           isDeadTurn ? "dead_turn" : null,
           null,
         );
+        // Issue #578: every tool call this turn actually executed (ANY
+        // iteration, not just the forced one) — `extractForcedOutput`
+        // (`workflow/engine-utils.ts`) is the only production reader,
+        // looking for `StructuredOutput` specifically; absent/empty stays
+        // absent so a `CollectResult` fixture from before this issue is
+        // untouched.
+        const toolCallsField =
+          result.toolCalls !== undefined && result.toolCalls.length > 0
+            ? { toolCalls: result.toolCalls.map((call) => ({ ...call })) }
+            : {};
         // Issue #520 (D3, M16-S5, ADR 0005): a turn that COMPLETED still
         // spent part of its usage on a call abandoned mid-stream (a steer
         // interrupt the loop absorbed with `continue`, never surfaced as a
@@ -260,8 +341,8 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
         // a cancelled turn with a partial gets, never a silent "fully
         // measured" claim.
         return result.partialCalls !== undefined && result.partialCalls > 0
-          ? { ...completeResult, partial: true, usageUncertain: true }
-          : completeResult;
+          ? { ...completeResult, ...toolCallsField, partial: true, usageUncertain: true }
+          : { ...completeResult, ...toolCallsField };
       } catch (error) {
         if (error instanceof ConversationCancelledError) {
           // #518 (M16-S3, ADR 0005) + #568 (r2, veredito da PR #573): the
