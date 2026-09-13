@@ -461,6 +461,36 @@ sempre aceitas por este servidor (`temperature`/`max_tokens` como string
 numérica, `stream` como `"true"`/`0`/`1`/…) continuam aceitas — só a forma do
 erro mudou.
 
+### Skills
+
+`lohra skill export <nome> --to <destino>` copia o `SKILL.md` de
+`assets/skills/<nome>` para `<destino>/<nome>/SKILL.md`. Duas skills vivem
+nesse diretório:
+
+- `use-lohra-ts` — a skill exportável deste runtime, escrita para um harness
+  externo (Claude Code, Codex) que vai delegar trabalho a `lohra chat`. Cita
+  só flags que existem em `src/cli/arg-spec.ts` (`tests/skills-builtin-contract.test.ts`
+  prende isso).
+- `workflow-authoring` — nunca exportada; é builtin **deste** próprio
+  runtime (`SkillStore` em `src/commands/chat.ts` e
+  `src/commands/session-tools.ts` a carregam como `builtinRoot`), porque
+  documenta `run_workflow`, uma tool que só existe dentro de uma sessão do
+  próprio `lohra chat`.
+
+A `description` de cada `SKILL.md` é o único gatilho que um harness vê antes
+de carregar o corpo inteiro no contexto — `use-lohra-ts` e
+`workflow-authoring` declaram gatilho e anti-gatilho ("Do NOT load...") na
+própria description. `use-lohra` (a skill do Lohra **Python**, mesmo
+diretório) segue exportável para quem delega àquele runtime, mas com
+description e um aviso no corpo marcando-a como legado para este —
+`docs/decisions/2026-09-10-skills-harness.md` registra a decisão e o que
+segue pendente (política de instalação/atualização, issue #255).
+
+O frontmatter de um `SKILL.md` aceita `name`, `description` e `version`; um
+`platforms:` legado (fora da spec do agentskills.io, nunca filtrado por
+nada neste runtime) ainda é tolerado ao ler — só não é mais escrito nem
+exposto por `parseSkillMd`.
+
 ## Self-update
 
 Em um checkout Git, `lohra update --check` faz fetch e mede o upstream sem
