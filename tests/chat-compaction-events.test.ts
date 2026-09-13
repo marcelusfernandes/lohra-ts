@@ -127,7 +127,11 @@ describe("runChat wires eventSink: compaction events reach stderr (issue #287)",
         environment: {
           HOME: root,
           PATH: process.env.PATH ?? "",
-          LOHRA_CONTEXT_WINDOW: "4000",
+          // Issue #580: absolute-token ceiling calibrated against a prompt
+          // every #575 sub-issue grows (doctrine, then the Harness block) —
+          // 4000 left near-zero headroom; 8000 still forces compaction with
+          // room to spare against the ~11k-token seeded history below.
+          LOHRA_CONTEXT_WINDOW: "8000",
         },
         home: join(root, ".lohra"),
         codexHome: join(root, ".codex"),
