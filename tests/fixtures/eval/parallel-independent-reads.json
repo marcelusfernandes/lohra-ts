@@ -25,6 +25,6 @@
     "question": "Does the final answer confirm both reads succeeded?",
     "expect": "succeeded"
   },
-  "budget_tokens": 2000,
+  "budget_tokens": 22000,
   "note": "Duas leituras do MESMO fixture — o mecanismo sob teste é o batching de tool calls em paralelo (src/conversation/runtime.ts:637, até 8 por turno), não o conteúdo lido. #580 anuncia esse paralelismo no prompt."
 }

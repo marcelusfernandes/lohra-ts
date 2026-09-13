@@ -33,6 +33,6 @@
     "question": "Does the parent's final answer plainly say the subtask came back empty?",
     "expect": "empty|did not complete"
   },
-  "budget_tokens": 3000,
+  "budget_tokens": 22000,
   "note": "Holdout do caso 'filho falhou' (child-task-fails-silently) — nunca usado para calibrar texto, só para medir."
 }

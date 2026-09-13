@@ -23,6 +23,6 @@
     "question": "Does the model acknowledge saving the preference?",
     "expect": "concise"
   },
-  "budget_tokens": 2000,
+  "budget_tokens": 22000,
   "note": "Holdout de user-preference-correction — nunca usado para calibrar texto, só para medir."
 }

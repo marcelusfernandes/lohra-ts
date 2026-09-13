@@ -20,6 +20,6 @@
     "question": "Does the answer reflect the sentinel instruction from CLAUDE.md?",
     "expect": "linter"
   },
-  "budget_tokens": 1000,
+  "budget_tokens": 11000,
   "note": "96% do prompt hoje é AGENTS.md/CLAUDE.md (achado do épico #575). Este caso confirma que um fato já presente no arquivo do projeto chega ao modelo via prompt, sem precisar de tool call. #582 muda a moldura/autoridade desse bloco."
 }

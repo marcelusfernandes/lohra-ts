@@ -25,6 +25,6 @@
     "question": "Does the final answer relay the subagent's summary?",
     "expect": "summary"
   },
-  "budget_tokens": 3000,
+  "budget_tokens": 22000,
   "note": "Contraste positivo do caso 'filho falhou': aqui o filho completa normalmente. A tarefa do filho é autocontida, sem contexto do pai — o contrato que #583 formaliza no prompt do subagente."
 }

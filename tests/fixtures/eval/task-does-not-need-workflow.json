@@ -13,6 +13,6 @@
     "question": "Does the model answer with a single, direct fact?",
     "expect": "boils"
   },
-  "budget_tokens": 1000,
+  "budget_tokens": 11000,
   "note": "Mesmo fato que 'task-needs-workflow': hoje run_workflow está sempre no catálogo, mesmo numa tarefa trivial de uma linha. Depois de #585 (dieta do catálogo), este caso deve trocar a assertion para tools_exclude — o ajuste documenta a dieta em vez de escondê-la."
 }

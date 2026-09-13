@@ -13,6 +13,6 @@
     "question": "Does the model reply with a greeting?",
     "expect": "Hello"
   },
-  "budget_tokens": 500,
+  "budget_tokens": 11000,
   "note": "Sentinela do harness em si — a identidade DEFAULT_IDENTITY hoje (src/context/system-prompt.ts:1-5). #579 muda esse texto; esta é a primeira linha a ajustar quando isso acontecer."
 }

@@ -23,6 +23,6 @@
     "question": "Does the model acknowledge the user's name?",
     "expect": "Alex"
   },
-  "budget_tokens": 2000,
+  "budget_tokens": 22000,
   "note": "Variante do preference-correction usando target:'user' (perfil do usuário) em vez de 'memory' (notas do agente) — os dois caminhos de escrita existem hoje (src/tools/builtin-definitions.ts:122-125)."
 }

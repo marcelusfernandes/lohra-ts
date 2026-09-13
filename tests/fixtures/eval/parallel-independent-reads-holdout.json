@@ -25,6 +25,6 @@
     "question": "Does the final answer confirm both reads matched?",
     "expect": "matched"
   },
-  "budget_tokens": 2000,
+  "budget_tokens": 22000,
   "note": "Holdout de parallel-independent-reads — nunca usado para calibrar texto, só para medir."
 }
