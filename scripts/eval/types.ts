@@ -166,9 +166,9 @@ export interface EvalSummary {
   readonly total: number;
   /** Só conta linhas com `mechanismOk === true` — nunca inclui "skipped". */
   readonly mechanismPassCount: number;
-  /** Linhas com `mechanismOk === "skipped"` (sempre 21/21 em modo provider
-   * hoje — o oráculo de mecanismo nunca roda sem o stub capturando as
-   * requisições cruas). */
+  /** Linhas com `mechanismOk === "skipped"` (sempre igual ao total de casos
+   * em modo provider — o oráculo de mecanismo nunca roda sem o stub
+   * capturando as requisições cruas). */
   readonly mechanismSkippedCount: number;
   readonly outcomePassCount: number;
   readonly cases: readonly EvalSummaryCase[];
