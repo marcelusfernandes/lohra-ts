@@ -600,17 +600,17 @@ describe("ConversationRuntime", () => {
   });
 });
 
-// Issue #569 (closes the race gap `docs/decisions/2026-09-13-abort-em-voo-
-// itens-a-definir.md` names): an unrecognized shape exercises `:551`.
 describe("ConversationRuntime — cancel × steer-interrupt precedence (issue #569)", () => {
   it("an error that isn't a recognized abort shape while both the external cancel and an armed steer-interrupt have fired surfaces as a genuine turn failure, never silently absorbed as a steer-continue", async () => {
     const repository = new MemoryRepository();
-    let armed: (() => void) | null = null;
-    const arm = (abort: () => void): (() => void) => {
-      armed = abort;
-      return () => undefined;
+    // Boxed: a bare `let` here narrows to literal `null` (TS4.9+ flow).
+    const hook: { armed: (() => void) | null } = { armed: null };
+    const interruptSource = {
+      arm: (abort: () => void): (() => void) => {
+        hook.armed = abort;
+        return () => undefined;
+      },
     };
-    const interruptSource = { arm };
     const opaqueFailure = new Error("socket torn down, cause unknown"); // not isAbortOf-shaped
     let signalStarted: () => void = () => undefined;
     const started = new Promise<void>((resolve) => (signalStarted = resolve));
@@ -646,7 +646,7 @@ describe("ConversationRuntime — cancel × steer-interrupt precedence (issue #5
     });
 
     await started;
-    armed?.(); // races the cancel below, same synchronous tick
+    hook.armed?.(); // races the cancel below, same synchronous tick
     controller.abort("USER_CANCELLED");
 
     const caught = await turn.catch((error: unknown) => error);
