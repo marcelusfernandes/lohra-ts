@@ -184,4 +184,46 @@ describe("OrchestrationCore.steer — interrupt hook (issue #520, D2)", () => {
 
     barrier.resolve(okResult());
   });
+
+  // Issue #569 (r2, veredito da PR #591, non-blocking): the identity-guarded
+  // `fire` (item 2's own fix) only ever clears `entry.interrupt` when it is
+  // STILL the hook it itself installed — a SECOND call's own `arm`, later in
+  // the SAME turn, must still work normally. Coverage gap the review named:
+  // nothing exercised a re-armed hook actually firing.
+  it("a hook re-armed for a later call in the same turn still fires — fire only ever clears its OWN identity", async () => {
+    const barrier = deferred<CollectResult>();
+    let abortCalls = 0;
+    const core = new OrchestrationCore({
+      runChild: (
+        _subId,
+        _config,
+        _systemPrompt,
+        _drainMessages,
+        _signal,
+        interrupts?: Interrupts,
+      ) => {
+        const disarmFirst = interrupts?.arm(() => {
+          abortCalls += 1;
+        });
+        disarmFirst?.(); // first call settled normally, disarmed as usual
+        interrupts?.arm(() => {
+          abortCalls += 1;
+        }); // second call now in flight
+        return barrier.promise;
+      },
+      idSource: () => "aaaa",
+      maxSubsessions: 200,
+      maxParallel: 200,
+      buildSubagentPrompt: stubPrompt,
+    });
+
+    const { subId } = core.spawn({ prompt: "task" });
+    await flushMicrotasks();
+
+    const outcome = core.steer(subId, "STEER-TEXT");
+    expect(outcome).toEqual({ queued: true, interrupted: true });
+    expect(abortCalls).toBe(1); // only the second call's own hook fired
+
+    barrier.resolve(okResult());
+  });
 });

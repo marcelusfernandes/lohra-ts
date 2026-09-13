@@ -410,7 +410,7 @@ linhas, e não `core.ts` diretamente — o fix do item 2, disarm-on-fire em
 `tests/orchestration-steer-interrupt.test.ts`, e `slices.json` está fora do
 `Files` da issue): `r-steer-interrupt-continue-ignores-outer-cancel` remove
 o conjunto `&& !signalAborted(signal)` do `catch` de `runTurn`
-(`runtime.ts:551`) que decide se uma chamada abortada é absorvível como
+(`runtime.ts:553`) que decide se uma chamada abortada é absorvível como
 steer-interrupt — morto pelo `it` novo de `tests/conversation-runtime.test.ts`
 que faz o `interruptSource` disparar `_abort` de verdade, correndo contra um
 cancel externo, com um erro fora das três formas que `isAbortOf` reconhece
