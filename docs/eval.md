@@ -122,12 +122,27 @@ Cada corrida grava em `docs/eval/<data>-<stub|provedor>/`:
 ## O que muda quando um sub-issue do épico mergeia
 
 Um `note` no próprio fixture aponta a linha que deve mudar (ex.:
-`dangerous-command-denied.json` casa `"command was not approved by the
-user"` até #577 mergear, quando `refusal: "final"` some no lugar — troca de
-uma substring). `task-does-not-need-workflow.json` documenta o oposto: hoje
-`tools_include: "run_workflow"` é verdade em qualquer tarefa (catálogo
-inteiro sempre enviado); depois de #585, essa mesma assertion deve virar
-`tools_exclude`.
+`dangerous-command-denied.json` já casa o envelope pós-#577, mergeado em
+f59e1885: `error` diz `"command refused by the dangerous-command policy
+(<descrição>)"` e um campo `refusal` diz `"final"` (`src/tools/terminal.ts:98-101`)
+— antes disso mergear, o mesmo caso casava `"command was not approved by
+the user"`; troca de uma substring). `task-does-not-need-workflow.json`
+documenta o oposto: hoje `tools_include: "run_workflow"` é verdade em
+qualquer tarefa (catálogo inteiro sempre enviado); depois de #585, essa
+mesma assertion deve virar `tools_exclude`.
+
+`skill-use-lohra-ts-one-leaf.json` cobre o acréscimo do orquestrador vindo
+de #590 (mergeado em 449a8a98): uma tarefa autocontida, do jeito que
+`assets/skills/use-lohra-ts/SKILL.md` instrui compor, completa com um único
+`delegate_task` (uma folha). `use-lohra-ts` é exportada para OUTRO harness
+invocar `lohra-ts` via CLI (`src/skills/export.ts`) — não é builtin desta
+runtime (só `workflow-authoring` é, `src/commands/chat.ts:295`) — então o
+mecanismo trava a forma do script (um `delegate_task`, uma resposta) e os
+três critérios de "Verify the delegation" da própria skill (`/error` nulo,
+`/completed` verdadeiro, pelo menos um `tool_calls`), não uma prova de que
+`skill_view("workflow-authoring")` foi evitado: não existe hoje uma
+assertion de "tool não chamado com este argumento" (só `tools_include`/
+`_exclude`, que mira o catálogo, não uma chamada específica).
 
 ## Fora de escopo (issue #576)
 

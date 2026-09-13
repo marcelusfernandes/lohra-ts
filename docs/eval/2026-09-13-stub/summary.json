@@ -1,9 +1,9 @@
 {
-  "generatedAt": "2026-09-13T16:04:01.487Z",
+  "generatedAt": "2026-09-13T16:22:10.000Z",
   "mode": "stub",
-  "total": 20,
-  "mechanismPassCount": 20,
-  "outcomePassCount": 20,
+  "total": 21,
+  "mechanismPassCount": 21,
+  "outcomePassCount": 21,
   "cases": [
     {
       "id": "child-task-fails-silently",
@@ -105,6 +105,13 @@
     },
     {
       "id": "read-file-missing-reports-error",
+      "mechanismOk": true,
+      "outcomeVerdict": "pass",
+      "totalTokens": 36,
+      "budgetExceeded": false
+    },
+    {
+      "id": "skill-use-lohra-ts-one-leaf",
       "mechanismOk": true,
       "outcomeVerdict": "pass",
       "totalTokens": 36,
