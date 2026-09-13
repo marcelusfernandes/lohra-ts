@@ -14,12 +14,16 @@
   },
   "mechanism": [
     { "kind": "request_count", "count": 1 },
-    { "kind": "system_prompt_includes", "substring": "SENTINEL_ALREADY_IN_REPO_XYZ" }
+    { "kind": "system_prompt_includes", "substring": "SENTINEL_ALREADY_IN_REPO_XYZ" },
+    {
+      "kind": "system_prompt_includes",
+      "substring": "Project instructions below override default behavior for work inside this project."
+    }
   ],
   "outcome": {
     "question": "Does the answer reflect the sentinel instruction from CLAUDE.md?",
     "expect": "linter"
   },
   "budget_tokens": 11000,
-  "note": "96% do prompt hoje é AGENTS.md/CLAUDE.md (achado do épico #575). Este caso confirma que um fato já presente no arquivo do projeto chega ao modelo via prompt, sem precisar de tool call. #582 muda a moldura/autoridade desse bloco."
+  "note": "96% do prompt hoje é AGENTS.md/CLAUDE.md (achado do épico #575). Este caso confirma que um fato já presente no arquivo do projeto chega ao modelo via prompt, sem precisar de tool call. #582 (mergeado nesta issue) prefixa o grupo de <context-file> com a frase de autoridade acima, antes do próprio SENTINEL — o segundo mechanism assertion prende essa moldura."
 }

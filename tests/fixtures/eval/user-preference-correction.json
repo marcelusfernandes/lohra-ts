@@ -17,12 +17,16 @@
   "mechanism": [
     { "kind": "request_count", "count": 2 },
     { "kind": "tool_result_includes", "request": 2, "substring": "\"ok\":true" },
-    { "kind": "tool_result_includes", "request": 2, "substring": "\"target\":\"memory\"" }
+    { "kind": "tool_result_includes", "request": 2, "substring": "\"target\":\"memory\"" },
+    {
+      "kind": "system_prompt_includes",
+      "substring": "Save a fact to memory only when it will still be true next session"
+    }
   ],
   "outcome": {
     "question": "Does the model acknowledge saving the preference?",
     "expect": "tabs"
   },
   "budget_tokens": 22000,
-  "note": "Achado do épico #575 (dogfooding): 'nenhum MEMORY.md é criado' na prática. Este caso baseline prova que o caminho de escrita funciona QUANDO o modelo decide chamar memory — #582 muda se o modelo pede por conta própria."
+  "note": "Achado do épico #575 (dogfooding): 'nenhum MEMORY.md é criado' na prática. Este caso baseline prova que o caminho de escrita funciona QUANDO o modelo decide chamar memory. #582 (mergeado nesta issue) acrescenta a regra de quando salvar (com a taxonomia agência x ambiente) ao DOCTRINE_CORE — o terceiro mechanism assertion prende essa frase chegando ao prompt; o oráculo de mecanismo continua sem medir se o modelo decide sozinho (stub scriptado)."
 }

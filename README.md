@@ -501,6 +501,37 @@ sempre aceitas por este servidor (`temperature`/`max_tokens` como string
 numérica, `stream` como `"true"`/`0`/`1`/…) continuam aceitas — só a forma do
 erro mudou.
 
+### Memória e perfil do usuário
+
+A tool `memory` grava fatos duráveis em dois arquivos por `LOHRA_HOME`
+(`~/.lohra/memories/MEMORY.md`, notas do agente; `USER.md`, perfil do
+usuário; `target: "user"` na chamada escreve no segundo). Cada chamada
+carrega em `buildSystemPrompt` como `<memory>`/`<user-profile>`, prefixados
+com uma frase que diz o que o bloco é e como usar (issue #582, épico #575,
+P6): a memória vem marcada como podendo ter envelhecido ("verify a file,
+flag, or command still exists before relying on it"), o perfil como "who
+the user is and how they prefer to work". Os dois somem do prompt quando o
+arquivo correspondente está vazio — nenhuma tag sem conteúdo.
+
+A regra de quando salvar vive em `DOCTRINE_CORE`
+(`src/context/doctrine.ts`), não só na description da tool `memory` (que
+some sob `--no-tools`): salvar uma correção do usuário, uma preferência ou
+uma convenção do projeto — nunca progresso de tarefa nem o que o
+repositório já registra. Antes de culpar uma falha no "ambiente" (uma
+quota, um timeout), o modelo precisa de evidência do próprio turno; sem
+ela, a causa é a própria escolha do modelo (**agência**, não
+**ambiente** — decision note #54). A mesma taxonomia está nas descriptions
+de `memory` e `skill_manage` (`src/tools/builtin-definitions.ts`) —
+`tests/tools-memory-guidance.test.ts` prende as duas contra o
+enquadramento "environment quirk" sem essa qualificação.
+
+`AGENTS.md` e `CLAUDE.md` byte-idênticos no mesmo diretório (comum: os dois
+existem para harnesses diferentes lerem as mesmas instruções) entram no
+prompt como um único `<context-file>`, com o label composto
+(`"AGENTS.md = CLAUDE.md"`) e um prefixo próprio ("Project instructions
+below override default behavior for work inside this project.") —
+`src/context/discovery.ts`'s `discoverInstructions`.
+
 ### Skills
 
 `lohra skill export <nome> --to <destino>` copia o `SKILL.md` de

@@ -275,6 +275,86 @@ resultado, contra um provedor real (o modelo não segue a instrução injetada
 e reporta o conteúdo como suspeito) — `docs/eval.md` explica a diferença
 entre os dois oráculos.
 
+## Moldura de memória, perfil e instruções do projeto (issue #582, P6)
+
+Antes desta issue, `buildSystemPrompt` (`src/context/system-prompt.ts`)
+injetava `<memory>…</memory>`, `<user-profile>…</user-profile>` e
+`<context-file name="…">…</context-file>` crus — nenhuma frase dizia o que
+cada bloco é, que autoridade tem, ou quando escrever nele. A doutrina de
+"quando salvar" vivia só na description da tool `memory`
+(`src/tools/builtin-definitions.ts`), que some sob `--no-tools`; em runs
+repetidos (#574, E2) nenhum `MEMORY.md` chegou a ser criado na prática.
+
+### Três prefixos, cada um ausente quando o bloco está ausente
+
+`buildSystemPrompt` agora prefixa cada bloco com uma frase — o mesmo
+`filter(Boolean)` que já governa o resto da função preserva byte-compat
+quando o insumo correspondente não é passado:
+
+| bloco                     | prefixo                                                                                                                                                             | faixa      |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| `<memory>`                | "Memory: durable facts you saved in earlier sessions; they reflect what was true when written — verify a file, flag, or command still exists before relying on it." | `volatile` |
+| `<user-profile>`          | "User profile: who the user is and how they prefer to work."                                                                                                        | `volatile` |
+| grupo de `<context-file>` | "Project instructions below override default behavior for work inside this project."                                                                                | `context`  |
+
+O prefixo de `<context-file>` entra uma única vez antes do GRUPO inteiro de
+arquivos (não repetido por arquivo) — `contextText` em
+`system-prompt.ts`. Memória e perfil não usam vocabulário de confiança
+("untrusted"): são fatos que o próprio runtime gravou, não conteúdo
+externo (#581) — a ressalva do prefixo de memória é de atualidade (pode
+ter envelhecido), nunca de proveniência.
+
+### A regra de quando salvar memória entra em `DOCTRINE_CORE`
+
+`DOCTRINE_CORE` (`src/context/doctrine.ts`) ganha um parágrafo final: salvar
+um fato durável (correção do usuário, preferência, convenção de projeto),
+nunca progresso de tarefa nem o que o repositório já registra; e, antes de
+culpar uma falha no "ambiente" (uma quota, um timeout), exigir evidência do
+próprio turno — sem ela, a causa é a própria escolha do modelo (**agência**,
+não **ambiente** — decision note #54, mesma taxonomia de
+`backend/lohra/memory/tool.py` no Python). O núcleo cresceu de ~400 para
+~610 tokens (2,9 chars/token) por isso — `tests/context-doctrine.test.ts`
+documenta o novo teto (1900 chars) e prende a taxonomia e a proibição do
+enquadramento "environment quirk" sem essa qualificação.
+
+As descriptions de `memory` e `skill_manage` (`BUILTIN_DEFINITIONS`) citam a
+mesma taxonomia (`tests/tools-memory-guidance.test.ts`, porta de
+`test_memory_guidance_taxonomy.py`) — o orçamento do catálogo (22.000
+chars) foi mantido encolhendo prosa sem AC em outras 16 descriptions
+(cronjob, vision_analyze, image_gen, spawn_session, steer_session,
+collect_session, workflow_list, workflow_pause, workflow_cancel,
+workflow_templates, workflow_notices, workflow_notices_ack,
+workflow_leaf_read, workflow_preview, session_search, delegate_task,
+list_models); schema, ordem e as demais descriptions pinadas por outras
+issues (`run_workflow`, `workflow_status`, `workflow_audit`, as sete tools
+básicas) ficaram intocados —
+`tests/builtin-definitions-budget.test.ts` (fora dos `Files` desta issue,
+regressão confirmada, não reescrita) segue verde.
+
+### Dedupe de instruções idênticas
+
+`discoverInstructions` (`src/context/discovery.ts`) agrupa arquivos de
+conteúdo byte-idêntico (o caso comum: `AGENTS.md` e `CLAUDE.md` no mesmo
+diretório, escritos para harnesses diferentes lerem a mesma coisa) num
+único `ContextFile`, com o label composto (`"AGENTS.md = CLAUDE.md"`,
+ordem de descoberta preservada) — este repositório media 96% de um prompt
+vindo dos dois arquivos duplicados (épico #575). Conteúdo diferente nunca é
+agrupado, mesmo vindo do mesmo diretório.
+
+### Eval
+
+`tests/fixtures/eval/user-preference-correction.json` e
+`info-already-in-repo.json` (`dev`, já existiam desde #576) ganham um
+`mechanism` a mais cada: o primeiro prende a frase da regra de memória
+chegando ao `system_prompt`; o segundo prende o prefixo de instruções do
+projeto chegando antes do sentinel do `CLAUDE.md`. Holdouts não foram
+tocados (nunca calibrados por texto). Dogfooding real (`--provider
+openrouter`, `LOHRA_HOME` descartável com `MEMORY.md`/`USER.md`
+pré-semeados): pedir para lembrar uma preferência gera um `memory add`
+espontâneo (`target: "user"`, sem o modelo ser instruído a chamar a tool
+por nome); perguntar pelo conteúdo do `CLAUDE.md`/`AGENTS.md` deduplicados
+responde certo sem nenhuma chamada de `memory`.
+
 ## O que este documento ainda não cobre
 
 Contrato de retorno do subagente, `prompt caching` — nenhum dos dois existe
