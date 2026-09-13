@@ -93,6 +93,58 @@ describe("OrchestrationCore.steer — interrupt hook (issue #520, D2)", () => {
     barrier.resolve(okResult());
   });
 
+  // Issue #569 (item 2): `entry.interrupt` used to stay set to the SAME
+  // callback until the runtime's own `finally` (`ConversationRuntime.
+  // runTurn`, `disarm?.()`) actually ran — which never happens before this
+  // fake `runChild` settles `barrier`. A second `steer()` on the same
+  // still-in-flight call, arriving in that window, re-read the stale
+  // non-null hook and reported `interrupted: true` a second time, even
+  // though nothing NEW was torn down (`call.abort()` on the runtime's own
+  // per-call controller is idempotent — the underlying abort only ever
+  // fires once). RED on main 00bd6d78: the second `steer()` call also
+  // returns `{queued: true, interrupted: true}` and `abortCalls` reaches 2.
+  it("a second steer while the first's interrupt is still in flight never re-reports interrupted, and the hook fires exactly once", async () => {
+    const barrier = deferred<CollectResult>();
+    let abortCalls = 0;
+    const core = new OrchestrationCore({
+      runChild: (
+        _subId,
+        _config,
+        _systemPrompt,
+        _drainMessages,
+        _signal,
+        interrupts?: Interrupts,
+      ) => {
+        interrupts?.arm(() => {
+          abortCalls += 1;
+        });
+        return barrier.promise;
+      },
+      idSource: () => "aaaa",
+      maxSubsessions: 200,
+      maxParallel: 200,
+      buildSubagentPrompt: stubPrompt,
+    });
+
+    const { subId } = core.spawn({ prompt: "task" });
+    await flushMicrotasks();
+
+    const first = core.steer(subId, "STEER-ONE");
+    const second = core.steer(subId, "STEER-TWO");
+
+    expect(first).toEqual({ queued: true, interrupted: true });
+    expect(second).toEqual({ queued: true });
+    expect(abortCalls).toBe(1);
+    expect(core.drainInboxFor(subId)).toEqual([
+      {
+        role: "user",
+        content: "<system-reminder>\nSTEER-ONE\nSTEER-TWO\n</system-reminder>",
+      },
+    ]);
+
+    barrier.resolve(okResult());
+  });
+
   it("contra-assertion: a busy leaf with NO call in flight (hook disarmed — e.g. running a tool between calls) queues without interrupted", async () => {
     const barrier = deferred<CollectResult>();
     // A boxed holder, not a bare `let` — see the sibling comment in
