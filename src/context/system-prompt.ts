@@ -23,6 +23,11 @@ export class SystemPromptSnapshot {
 
 export interface SystemPromptInputs {
   readonly identity?: string;
+  /** Issue #579 (épico #575, P3): a doutrina de comportamento
+   * (`src/context/doctrine.ts`'s `doctrineText`) — a faixa `stable`, depois
+   * da identidade e antes de `Environment`, omitida quando ausente (nenhuma
+   * superfície é obrigada a passar doutrina). */
+  readonly doctrine?: string;
   readonly environmentHints?: Readonly<Record<string, string>>;
   readonly systemMessage?: string;
   readonly contextFiles?: readonly (readonly [string, string])[];
@@ -62,6 +67,7 @@ export function buildSystemPrompt(inputs: SystemPromptInputs = {}): SystemPrompt
   const today = inputs.today ?? todayLocalIsoDate();
   const stable = [
     inputs.identity || DEFAULT_IDENTITY,
+    inputs.doctrine ?? "",
     environmentText(inputs.environmentHints ?? {}),
   ]
     .filter(Boolean)
