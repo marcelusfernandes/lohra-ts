@@ -19,6 +19,14 @@
       "kind": "message_roles_at_request",
       "request": 2,
       "roles": ["system", "user", "assistant", "tool", "tool"]
+    },
+    {
+      "kind": "system_prompt_includes",
+      "substring": "Independent tool calls can go in the same response"
+    },
+    {
+      "kind": "system_prompt_includes",
+      "substring": "nobody is watching it in real time"
     }
   ],
   "outcome": {
@@ -26,5 +34,5 @@
     "expect": "succeeded"
   },
   "budget_tokens": 22000,
-  "note": "Duas leituras do MESMO fixture — o mecanismo sob teste é o batching de tool calls em paralelo (src/conversation/runtime.ts:637, até 8 por turno), não o conteúdo lido. #580 anuncia esse paralelismo no prompt."
+  "note": "Duas leituras do MESMO fixture — o mecanismo sob teste é o batching de tool calls em paralelo (src/conversation/runtime.ts:637, até 8 por turno), não o conteúdo lido. #580 anuncia esse paralelismo no prompt: a segunda assertion prende o texto do bloco Harness (src/context/harness.ts's PARALLEL_LINE); a terceira prende que o CLI headless (--json/--no-input, o modo que scripts/eval/session.ts sempre usa) recebe a linha de presença do modo \"headless\"."
 }
