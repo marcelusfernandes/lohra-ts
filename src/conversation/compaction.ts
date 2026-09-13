@@ -224,7 +224,19 @@ function transcriptLine(message: Readonly<Record<string, unknown>>): string {
  * the head (the earliest requests and constraints) and cuts the tail (the
  * most recent of the folded messages, already closest to the untouched kept
  * tail `attemptCompaction` preserves outside the fold). Returns how many
- * leading messages to keep whole. Pure. */
+ * leading messages to keep whole. Pure.
+ *
+ * Issue #587 (acréscimo item 4) fix: the backward scan used to run
+ * `cut > 0`, never examining index 0, and fell through to `return candidate`
+ * -- the raw forward-walk cut -- whenever no `role: "user"` sat between
+ * indices 1 and `candidate`. That raw cut can itself land inside a
+ * `tool_calls`/`tool` pair (the exact split this function exists to avoid).
+ * `turnAlignedTailCount`'s own safe fallback is "give up and keep
+ * everything" (`messages.length`); the symmetric safe fallback for a
+ * HEAD-aligned cut is "give up and keep nothing" (`0`) -- never a partial
+ * head that could split a pair. `cut === 0` is reachable (the loop below
+ * always terminates there) and is itself always safe: keeping zero leading
+ * messages never separates anything. */
 function headAlignedKeepCount(
   messages: readonly Readonly<Record<string, unknown>>[],
   maxTokens: number,
@@ -239,10 +251,10 @@ function headAlignedKeepCount(
     candidate = index + 1;
   }
   if (candidate >= messages.length) return candidate;
-  for (let cut = candidate; cut > 0; cut -= 1) {
-    if (messages[cut]?.role === "user") return cut;
+  for (let cut = candidate; cut >= 0; cut -= 1) {
+    if (cut === 0 || messages[cut]?.role === "user") return cut;
   }
-  return candidate;
+  return 0;
 }
 
 export interface TranscriptResult {
@@ -265,8 +277,16 @@ export interface TranscriptResult {
  * Cuts from the tail, at the nearest turn boundary, when the estimate is
  * over budget -- the head (where an early request or prohibition lives) is
  * exactly what `SUMMARY_SYSTEM`'s new verbatim sections need intact most.
- * Pure except for the `console.warn` below (issue #584 AC: "evento/aviso
- * quando trunca") -- never mutates `messages`.
+ * Pure -- never mutates `messages`, never writes anywhere itself. Issue #587
+ * (acréscimo item 2): the old `console.warn` here (issue #584 AC:
+ * "evento/aviso quando trunca") was a hardcoded side-channel with no
+ * caller-controlled sink. `TranscriptResult.truncated` (returned below) is
+ * the aviso now -- `attemptCompaction`'s own caller, `ConversationRuntime.
+ * preflightCompact` (`src/conversation/runtime.ts`), reads it off
+ * `CompactionAttemptResult.transcriptTruncated` and emits
+ * `"compaction.transcript_truncated"` through the SAME injectable
+ * `eventSink` every other runtime event already goes through -- an
+ * observable, caller-chosen sink instead of a hardcoded global one.
  */
 export function buildTranscript(
   messages: readonly Readonly<Record<string, unknown>>[],
@@ -283,11 +303,6 @@ export function buildTranscript(
   const keepCount = headAlignedKeepCount(messages, maxTokens);
   const kept = messages.slice(0, keepCount);
   const droppedMessages = messages.length - kept.length;
-  console.warn(
-    `compaction: transcript sent to the summarizer was truncated -- dropped ` +
-      `${String(droppedMessages)} of ${String(messages.length)} folded message(s) ` +
-      `(estimated ~${String(fullTokens)} tokens, budget was ${String(maxTokens)})`,
-  );
   const lines = kept.map(transcriptLine);
   lines.push(
     `[... ${String(droppedMessages)} more recent folded message(s) omitted: transcript ` +
