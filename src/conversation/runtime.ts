@@ -62,14 +62,20 @@ function signalAborted(signal: AbortSignal): boolean {
  * (round-1 review on PR #524, S1): a genuine `StreamAbortedError` (the
  * native `NativeChatHttpPort` path, always this shape); a raw `AbortError`
  * (the fetcher path's `AbortController`-driven rejection, standard DOM
- * naming); or an error whose own `.cause` IS the signal's abort reason
- * (a caller-supplied reason surfacing crude through an intermediate wrapper
- * before `StreamAbortedError` ever gets constructed — the fetcher path's
- * OTHER shape, when the signal was already aborted before `post()` ran).
- * `signalAborted(signal)` gates all three: none of these shapes proves an
- * abort on their OWN (an "AbortError" name or a coincidental `.cause` could,
- * in principle, come from somewhere else), the signal's own state is the
- * one fact this function trusts.
+ * naming); or an error whose own `.cause` IS the signal's abort reason.
+ * That 3rd form has no LIVE producer left in this codebase as of #567
+ * (`src/transports/client.ts:150-165`): `NativeChatHttpPort.post` now wraps
+ * even a pre-`fetch()` caller abort into the SAME `StreamAbortedError`
+ * shape every other abort exit already used, so a raw `Error` whose
+ * `.cause` merely echoes `signal.reason` is no longer something any
+ * transport in this tree throws — kept here as defense in depth (an
+ * external `ModelTransport`, or a future one, is free to throw the plain
+ * shape instead), covered by `tests/conversation-runtime.test.ts` directly
+ * rather than through any transport. `signalAborted(signal)` gates all
+ * three: none of these shapes proves an abort on their OWN (an
+ * "AbortError" name or a coincidental `.cause` could, in principle, come
+ * from somewhere else), the signal's own state is the one fact this
+ * function trusts.
  */
 function isAbortOf(error: unknown, signal: AbortSignal): boolean {
   if (!signalAborted(signal)) return false;
@@ -507,7 +513,7 @@ export class ConversationRuntime {
           // below (contra-assertion,
           // tests/conversation-runtime-injection.test.ts).
           if (isAbortOf(error, signal)) {
-            const partialUsage =
+            const abortedCallUsage =
               error instanceof StreamAbortedError
                 ? estimatePartialUsage(error.partial, {
                     system: request.system,
@@ -515,8 +521,17 @@ export class ConversationRuntime {
                     tools: request.tools,
                   })
                 : null;
+            // Issue #568: only THIS call was torn down mid-flight — any
+            // earlier iteration of the SAME turn (a tool-call/pause loop)
+            // already completed for real and is sitting in `usageTotal`.
+            // Carrying it forward here (instead of `abortedCallUsage`
+            // alone) is what keeps a multi-iteration turn's cancelled
+            // usage from silently dropping back to zero real tokens the
+            // moment the LAST call happens to be the one aborted —
+            // `addUsage` is a no-op combine when either side is null, so a
+            // single-iteration turn (the common case) is unaffected.
             throw new ConversationCancelledError(sessionId, signal.reason, {
-              partialUsage,
+              partialUsage: addUsage(usageTotal, abortedCallUsage),
               apiCalls: apiCalls + 1,
             });
           }

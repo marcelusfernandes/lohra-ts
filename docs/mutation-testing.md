@@ -171,7 +171,7 @@ adicionar uma fatia" cita a mesma restrição.
 | --------------------- | ----------------------- | -------: | --------------------------------------------------------------------------------------------------------------------- |
 | `workflow-executor`   | `mutations:t15`         |       45 | `workflow-executor-mutants.ts`                                                                                        |
 | `workflow-durability` | `mutations:t16`         |       60 | `workflow-durability-guard.ts` (12 guard + 2 combined) + `workflow-durability-named.ts` (41) + `orchestration.ts` (5) |
-| `workflow-audit-live` | `mutations:t17`         |       59 | `workflow-audit-live-mutants.ts` (32) + `workflow-audit-producers-mutants.ts` (27)                                    |
+| `workflow-audit-live` | `mutations:t17`         |       63 | `workflow-audit-live-mutants.ts` (32) + `workflow-audit-producers-mutants.ts` (31)                                    |
 | `media`               | `mutations:t21`         |       20 | `media-catalog-persistence.ts` (13) + `media-catalog-other.ts` (7)                                                    |
 | `web-tools`           | `mutations:t20`         |        9 | `web-tools-mutants.ts`                                                                                                |
 | `self-update`         | `mutations:self-update` |        8 | `self-update-mutants.ts`                                                                                              |
@@ -179,14 +179,14 @@ adicionar uma fatia" cita a mesma restrição.
 | `auth`                | `mutations:auth`        |       13 | `auth-mutants.ts`                                                                                                     |
 | `supervision`         | `mutations:supervision` |       39 | `supervision-mutants.ts`                                                                                              |
 
-Total: 270. Os 12 mutantes de `workflow-durability-guard.ts` são
+Total: 274. Os 12 mutantes de `workflow-durability-guard.ts` são
 combinatórios: três conjuntos do guard de escrita possuída (`fence`,
 `holder`, `lease-validity`) × quatro categorias (`state`, `cache`,
 `node-cost`, `spend`) — um mutante por combinação, cada um escorado só no
 teste focal da sua categoria, mais os 2 mutantes do INSERT combinado
 cache+custo (`combined-cell-guard-removed`,
 `combined-cost-escapes-refusal`). `tests/mutations-slices.test.ts` importa os
-treze catálogos de dado puro estaticamente e prova essa soma (270) a cada
+treze catálogos de dado puro estaticamente e prova essa soma (274) a cada
 corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
 
 `supervision-mutants.ts` (issue #451, milestone 14 — achado de QA/revisão de
@@ -380,6 +380,23 @@ replays the deltas already parsed when the trailing SSE frame is truncated
 mid-abort (issue #567)" — 269 + 1 = 270. `focusFiles` da fatia
 `supervision` não muda (`tests/transports-abort-in-flight.test.ts` já
 estava lá, desde a issue #519).
+
+Issue #568 (M16 pós-revisão, épico #561, sub S3+S6; vereditos das PRs
+#528/#543, r2 de #556) acrescenta quatro a `workflow-audit-producers-mutants.ts`
+(NÃO `supervision-mutants.ts`, que já está no teto de 800 linhas):
+C1 (`orchestration-runtime.ts`'s `Promise.race` em `cancel()` vira um
+`await` direto de `this.core.collect(id, true)` — sem o teto, uma folha que
+nunca assenta trava `cancel()` para sempre) e C2 (o `ceiling.clear()` de
+`cancel()` removido — o timer do teto vaza quando a folha assenta antes
+dele) são mortos por `tests/orchestration-runtime-collect.test.ts` (arquivo
+novo, fake timers, molde de `tests/workflow-orchestration-runtime-timeout.test.ts`);
+C3 (o `catch (error)` de `probeSettledAfterCancel` que nomeia o erro via
+`warn` volta a ser um `catch {}` nu) e C4 (o filtro `result.status ===
+"running" ? null : result` da mesma função é removido, deixando um
+resultado "running" vazar como se tivesse assentado) são mortos por dois
+`it` novos de `tests/workflow-abort-in-flight.test.ts`, contra um
+`OrchestrationChildRuntime` de verdade (nenhum double). `focusFiles` da
+fatia `workflow-audit-live` ganha os dois arquivos: 270 + 4 = 274.
 
 `workflow-executor-mutants.ts` (issue #418) acrescentou
 `Q1-quota-guard-removed`: a guarda que impede `quota_exhausted` de entrar em
@@ -601,11 +618,11 @@ cada entrada de `slices.json`; que todo catálogo descoberto por conteúdo em
 contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
 (`tests/mutations-slices.test.ts:583-596` — hoje `workflow-durability-guard`
 14, `workflow-durability-named` 41, `orchestration` 5,
-`workflow-audit-live-mutants` 32, `workflow-audit-producers-mutants` 27,
+`workflow-audit-live-mutants` 32, `workflow-audit-producers-mutants` 31,
 `web-tools-mutants` 9, `media-catalog-other` 7, `media-catalog-persistence`
 13, `self-update-mutants` 8, `workflow-executor-mutants` 45,
-`context-window` 17, `auth-mutants` 13, `supervision-mutants` 38, soma 269) e
-a soma de 269 contra os treze catálogos importados; e que todo diretório de
+`context-window` 17, `auth-mutants` 13, `supervision-mutants` 39, soma 274) e
+a soma de 274 contra os treze catálogos importados; e que todo diretório de
 primeiro nível de `src/` está coberto por algum `srcGlobs` ou está em
 `SEM_FATIA` com um motivo não vazio — nunca os dois, nunca nenhum dos dois.
 

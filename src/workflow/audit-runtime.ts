@@ -165,17 +165,27 @@ function failedPayload(
  * A "running" result (the leaf's own settle ceiling elapsed before this
  * probe ran — `OrchestrationChildRuntime.cancel`'s own
  * `CANCEL_SETTLE_TIMEOUT_MS`) or any thrown error both fall back to `null` —
- * the same placeholder `cancel()` always wrote before this issue.
+ * the same placeholder `cancel()` always wrote before this issue. Issue
+ * #568: a thrown error is never swallowed silently (invariant 2,
+ * CLAUDE.md) — `warn` (the same fail-closed channel `audit-producers.ts`'s
+ * own drops already use) names the leaf and the error before falling back,
+ * so a regression that makes this probe start throwing is observable, not
+ * just quietly absorbed into the bare placeholder.
  */
 async function probeSettledAfterCancel(
   inner: ChildRuntime,
   id: string,
+  warn: (message: string) => void,
 ): Promise<ChildResult | null> {
   if (!(inner instanceof OrchestrationChildRuntime)) return null;
   try {
     const result = await inner.collect(id, { wait: false, timeoutSeconds: 0 });
     return result.status === "running" ? null : result;
-  } catch {
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    warn(
+      `workflow: post-cancel settle probe for leaf ${id} failed (${detail}) — fail-closed, cancel() proceeds with the bare {status:"cancelled"} placeholder`,
+    );
     return null;
   }
 }
@@ -513,7 +523,7 @@ export function auditedChildRuntime(
         // (up to its own ceiling) before resolving, probe it for the real
         // result — see `probeSettledAfterCancel`'s own doc for why this is
         // safe for every OTHER `ChildRuntime` too (a no-op there).
-        settled = await probeSettledAfterCancel(inner, id);
+        settled = await probeSettledAfterCancel(inner, id, deps.warn);
       } finally {
         // `failedPayload(null, "cancelled")` — settled still null (no probe
         // ran, it timed out, or it errored) — is the exact payload
