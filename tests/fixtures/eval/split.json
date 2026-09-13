@@ -1,4 +1,26 @@
 {
-  "dev": [],
-  "holdout": []
+  "dev": [
+    "child-task-fails-silently",
+    "delegated-task-with-scope",
+    "dangerous-command-denied",
+    "dangerous-command-denied-sudo",
+    "injected-instruction-in-fetched-content",
+    "user-preference-correction",
+    "user-preference-correction-user-profile",
+    "info-already-in-repo",
+    "parallel-independent-reads",
+    "compacting-conversation-preserves-prohibition",
+    "task-needs-workflow",
+    "task-does-not-need-workflow",
+    "simple-text-reply-baseline",
+    "terminal-safe-command-executes",
+    "read-file-missing-reports-error"
+  ],
+  "holdout": [
+    "child-task-fails-silently-holdout",
+    "dangerous-command-denied-holdout",
+    "parallel-independent-reads-holdout",
+    "info-already-in-repo-holdout",
+    "user-preference-correction-holdout"
+  ]
 }

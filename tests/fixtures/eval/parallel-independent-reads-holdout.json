@@ -1,0 +1,30 @@
+{
+  "input": "Read tool-target.txt twice to double check its contents match.",
+  "cwd_fixture": { "path": "tool-target.txt", "content": "STUB-TOOL-EVIDENCE v2\n" },
+  "stub_script": {
+    "default": [
+      {
+        "kind": "tool_calls",
+        "calls": [
+          { "name": "read_file", "argumentsRaw": "{\"path\":\"tool-target.txt\"}" },
+          { "name": "read_file", "argumentsRaw": "{\"path\":\"tool-target.txt\"}" }
+        ]
+      },
+      { "kind": "text", "content": "Both reads matched." }
+    ]
+  },
+  "mechanism": [
+    { "kind": "request_count", "count": 2 },
+    {
+      "kind": "message_roles_at_request",
+      "request": 2,
+      "roles": ["system", "user", "assistant", "tool", "tool"]
+    }
+  ],
+  "outcome": {
+    "question": "Does the final answer confirm both reads matched?",
+    "expect": "matched"
+  },
+  "budget_tokens": 2000,
+  "note": "Holdout de parallel-independent-reads — nunca usado para calibrar texto, só para medir."
+}

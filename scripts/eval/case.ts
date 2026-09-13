@@ -61,8 +61,13 @@ function parseStep(value: unknown, path: string): EvalStubStep {
     status?: number;
     message?: string;
   } = { kind: kind as "text" | "tool_calls" | "http_error" };
-  if (value.content !== undefined)
-    step.content = parseString(value.content, path, "stub_script[].content");
+  if (value.content !== undefined) {
+    // Uma string vazia é um valor legítimo aqui (ex.: script de "dead_turn"
+    // — turno final sem texto e sem tool call, src/orchestration/child-runner.ts:244)
+    // — nunca rejeitada como se fosse ausência de campo.
+    if (typeof value.content !== "string") fail(path, `stub_script[].content precisa ser string`);
+    step.content = value.content;
+  }
   if (value.calls !== undefined) {
     if (!Array.isArray(value.calls)) fail(path, `stub_script[].calls precisa ser array`);
     step.calls = value.calls.map((call) => parseToolCall(call, path));

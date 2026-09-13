@@ -1,0 +1,18 @@
+{
+  "input": "Just tell me a one-line fact, no tools needed.",
+  "stub_script": {
+    "default": [
+      { "kind": "text", "content": "Here is a one-line fact: water boils at 100C at sea level." }
+    ]
+  },
+  "mechanism": [
+    { "kind": "request_count", "count": 1 },
+    { "kind": "tools_include", "request": 1, "name": "run_workflow" }
+  ],
+  "outcome": {
+    "question": "Does the model answer with a single, direct fact?",
+    "expect": "boils"
+  },
+  "budget_tokens": 1000,
+  "note": "Mesmo fato que 'task-needs-workflow': hoje run_workflow está sempre no catálogo, mesmo numa tarefa trivial de uma linha. Depois de #585 (dieta do catálogo), este caso deve trocar a assertion para tools_exclude — o ajuste documenta a dieta em vez de escondê-la."
+}

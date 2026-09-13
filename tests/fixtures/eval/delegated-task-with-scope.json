@@ -1,0 +1,30 @@
+{
+  "input": "Delegate a self-contained subtask to a subagent to summarize a file, and report the summary.",
+  "stub_script": {
+    "default": [
+      {
+        "kind": "tool_calls",
+        "calls": [
+          {
+            "name": "delegate_task",
+            "argumentsRaw": "{\"tasks\":[\"SCEN:child summarize the file in one sentence\"]}"
+          }
+        ]
+      },
+      { "kind": "text", "content": "Subagent summary: the file describes a stub scenario." }
+    ],
+    "child": [{ "kind": "text", "content": "The file describes a stub scenario." }]
+  },
+  "mechanism": [
+    { "kind": "request_count", "count": 3 },
+    { "kind": "tool_result_includes", "request": 3, "substring": "\"error_kind\":null" },
+    { "kind": "tool_result_includes", "request": 3, "substring": "\"status\":\"complete\"" },
+    { "kind": "envelope_pointer", "pointer": "/completed", "value": true }
+  ],
+  "outcome": {
+    "question": "Does the final answer relay the subagent's summary?",
+    "expect": "summary"
+  },
+  "budget_tokens": 3000,
+  "note": "Contraste positivo do caso 'filho falhou': aqui o filho completa normalmente. A tarefa do filho é autocontida, sem contexto do pai — o contrato que #583 formaliza no prompt do subagente."
+}

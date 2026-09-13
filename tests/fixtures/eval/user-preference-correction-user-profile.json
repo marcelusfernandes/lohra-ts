@@ -1,0 +1,28 @@
+{
+  "input": "Just so you know, my name is Alex — remember that about me.",
+  "stub_script": {
+    "default": [
+      {
+        "kind": "tool_calls",
+        "calls": [
+          {
+            "name": "memory",
+            "argumentsRaw": "{\"action\":\"add\",\"target\":\"user\",\"text\":\"User's name is Alex\"}"
+          }
+        ]
+      },
+      { "kind": "text", "content": "Got it, Alex — I'll remember that." }
+    ]
+  },
+  "mechanism": [
+    { "kind": "request_count", "count": 2 },
+    { "kind": "tool_result_includes", "request": 2, "substring": "\"ok\":true" },
+    { "kind": "tool_result_includes", "request": 2, "substring": "\"target\":\"user\"" }
+  ],
+  "outcome": {
+    "question": "Does the model acknowledge the user's name?",
+    "expect": "Alex"
+  },
+  "budget_tokens": 2000,
+  "note": "Variante do preference-correction usando target:'user' (perfil do usuário) em vez de 'memory' (notas do agente) — os dois caminhos de escrita existem hoje (src/tools/builtin-definitions.ts:122-125)."
+}
