@@ -55,7 +55,7 @@ describe("child tool hardening", () => {
     const dispatch = createChildDispatch(base);
     await expect(dispatch("mcp-secret-exfil", {})).resolves.toBe(toolResult("base"));
     await expect(dispatch("terminal", { command: ["sudo", "x"] })).resolves.toBe(
-      toolError("command was not approved by the user", { command: ["sudo", "x"] }),
+      toolError("'command' must be a string", { command: ["sudo", "x"] }),
     );
     await expect(dispatch("read_file", { path: "x" })).resolves.toBe(toolResult("base"));
     await expect(dispatch("terminal", { command: "echo safe" })).resolves.toBe(toolResult("base"));
@@ -87,7 +87,10 @@ describe("child tool hardening", () => {
 
     for (const [command, description] of cases) {
       await expect(dispatch("terminal", { command })).resolves.toBe(
-        toolError(`subagent auto-denied a dangerous command (${description})`, { command }),
+        toolError(`subagent command refused by the dangerous-command policy (${description})`, {
+          command,
+          refusal: "final",
+        }),
       );
     }
     expect(base).not.toHaveBeenCalled();
@@ -105,8 +108,8 @@ describe("child tool hardening", () => {
     try {
       await expect(dispatch("terminal", { command })).resolves.toBe(
         toolError(
-          "subagent auto-denied a dangerous command (broad permission change (chmod ...7xx))",
-          { command },
+          "subagent command refused by the dangerous-command policy (broad permission change (chmod ...7xx))",
+          { command, refusal: "final" },
         ),
       );
       expect(statSync(target).mode & 0o777).toBe(0o600);
@@ -149,9 +152,13 @@ describe("child tool hardening", () => {
 
       expect(yolo).toBe(noYolo);
       expect(noYolo).toBe(
-        toolError("subagent auto-denied a dangerous command (recursive delete (rm -r))", {
-          command,
-        }),
+        toolError(
+          "subagent command refused by the dangerous-command policy (recursive delete (rm -r))",
+          {
+            command,
+            refusal: "final",
+          },
+        ),
       );
       expect(statSync(target).isFile()).toBe(true);
     } finally {

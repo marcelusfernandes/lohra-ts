@@ -36,14 +36,16 @@ describe("createGatewayToolRuntime: RCE proof and dangerous-command deny (assert
     const runtime = createGatewayToolRuntime(tempHome());
     const result = JSON.parse(
       await runtime.dispatch("terminal", JSON.stringify({ command: "rm -rf /tmp/whatever" })),
-    ) as { error: string; command: string };
+    ) as { error: string; command: string; refusal: string };
     expect(result).toEqual({
-      error: "command was not approved by the user",
+      error: "command refused by the dangerous-command policy (recursive delete (rm -r))",
       command: "rm -rf /tmp/whatever",
+      refusal: "final",
     });
-    // Structurally different from T11's "subagent auto-denied a dangerous
-    // command (recursive delete (rm -r))" -- the two must never converge.
-    expect(result.error).not.toContain("subagent auto-denied");
+    // Structurally different from T11's "subagent command refused by the
+    // dangerous-command policy (recursive delete (rm -r))" (#577) -- the two
+    // must never converge; only the subagent path carries the prefix.
+    expect(result.error).not.toContain("subagent ");
   });
 
   it("no approval callback is ever set -- deny is by fail-safe absence, not a policy the gateway authored", async () => {
