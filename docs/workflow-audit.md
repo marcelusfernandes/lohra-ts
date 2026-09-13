@@ -235,8 +235,12 @@ continua a existir, mas conta só uma coisa: o ENGINE caindo para o texto
 cru de um leaf quando o nó pediu `schema`/`schema_ref` **e** `tool_less:
 true` e o leaf completou sem emitir a tool call `StructuredOutput`
 (`resolveLeafRequestOptions`/`extractForcedOutput`, `engine-utils.ts:198,
-240-250`; incrementado em `engine.ts:332`). Nunca conta uma escolha de
-roteamento (`provider`/`model`/`tier`) feita de propósito.
+240-250`; incrementado em `engine.ts:336`). Desde #602, o re-collect de uma
+rodada de correção (steer) também passa pela mesma `extractForcedOutput` —
+antes lia a prosa crua da correção, contando como fallback (ou pior,
+travando a validação) mesmo quando o modelo já respondia pela tool. Nunca
+conta uma escolha de roteamento (`provider`/`model`/`tier`) feita de
+propósito.
 
 ### `partial`, `usage_uncertain` e `interrupted` (abort em voo, M16, épico #490)
 

@@ -608,3 +608,14 @@ o que faltava era `ModelRequest.toolChoice` chegar até eles, agora via
 `forcing_fallbacks` (descrito em [`docs/workflow-audit.md`](workflow-audit.md))
 passa a ser `0` sempre que a folha responde pela tool — só sobe quando o
 provedor de fato ignora a forçagem e a folha volta com texto cru.
+
+Issue #602 fechou uma lacuna que só se manifestava numa rodada de correção
+(`WorkflowEngine.collectLeaf`'s próprio retry de schema, `engine.ts:296-334`):
+o `steer()` que abre essa rodada resurrecta a folha com `entry.originalConfig`
+(`orchestration/core.ts`), `forcedTool` incluído — a rodada de correção
+também é forçada, mas o re-collect lia a prosa crua do turno em vez de
+repetir a extração da tool call. Uma folha que respondia certo na correção
+(schema válido, via `StructuredOutput`) ainda assim esgotava
+`MAX_VALIDATION_RETRIES`, porque o motor validava o texto, não o argumento
+da chamada. Agora o re-collect usa a mesma `extractForcedOutput` do primeiro
+collect.
