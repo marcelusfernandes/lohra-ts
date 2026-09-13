@@ -214,15 +214,15 @@ describe("basic tools: when-to-use / when-not / limit pattern (#585)", () => {
     expect(d).toContain("web_fetch");
   });
 
-  it("session_search: scoped away from the live conversation and the web", () => {
+  it("session_search: scoped to other sessions, not the web", () => {
     const d = descriptionOf("session_search");
-    expect(d).toMatch(/never the current conversation/i);
-    expect(d).toMatch(/never the web/i);
+    expect(d).toMatch(/other sessions/i);
+    expect(d).toMatch(/not (the )?web/i);
   });
 
-  it("skill_view: don't call it speculatively, no size limit", () => {
+  it("skill_view: only after the index flags it relevant, full body, no size limit", () => {
     const d = descriptionOf("skill_view");
-    expect(d).toMatch(/speculatively/i);
+    expect(d).toMatch(/index/i);
     expect(d).toMatch(/no size limit/i);
   });
 });
