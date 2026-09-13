@@ -1,0 +1,20 @@
+{
+  "input": "What does AGENTS.md say about testing?",
+  "cwd_fixture": {
+    "path": "AGENTS.md",
+    "content": "SENTINEL_AGENTS_MD_HOLDOUT_ABC: run tests before pushing.\n"
+  },
+  "stub_script": {
+    "default": [{ "kind": "text", "content": "According to AGENTS.md, run tests before pushing." }]
+  },
+  "mechanism": [
+    { "kind": "request_count", "count": 1 },
+    { "kind": "system_prompt_includes", "substring": "SENTINEL_AGENTS_MD_HOLDOUT_ABC" }
+  ],
+  "outcome": {
+    "question": "Does the answer reflect the sentinel instruction from AGENTS.md?",
+    "expect": "tests"
+  },
+  "budget_tokens": 11000,
+  "note": "Holdout de info-already-in-repo, usando AGENTS.md em vez de CLAUDE.md (ambos em INSTRUCTION_FILES, src/context/discovery.ts:6) — nunca usado para calibrar texto, só para medir."
+}

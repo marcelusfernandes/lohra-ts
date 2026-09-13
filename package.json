@@ -60,6 +60,7 @@
     "pack:check": "tsx scripts/pack-check.ts",
     "provenance:check": "tsx scripts/provenance/check-ancestry.ts",
     "prova": "tsx scripts/prova/run.ts",
+    "eval": "tsx scripts/eval/run.ts",
     "ci:contratos": "tsx scripts/ci/contratos/run.ts",
     "ci:controle-negativo": "tsx scripts/ci/controle-negativo/run.ts",
     "ci:escopo": "tsx scripts/ci/escopo/run.ts",

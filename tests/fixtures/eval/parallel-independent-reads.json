@@ -1,0 +1,30 @@
+{
+  "input": "Read tool-target.txt twice, independently, and confirm both reads succeeded.",
+  "cwd_fixture": { "path": "tool-target.txt", "content": "STUB-TOOL-EVIDENCE v1\n" },
+  "stub_script": {
+    "default": [
+      {
+        "kind": "tool_calls",
+        "calls": [
+          { "name": "read_file", "argumentsRaw": "{\"path\":\"tool-target.txt\"}" },
+          { "name": "read_file", "argumentsRaw": "{\"path\":\"tool-target.txt\"}" }
+        ]
+      },
+      { "kind": "text", "content": "Both reads succeeded." }
+    ]
+  },
+  "mechanism": [
+    { "kind": "request_count", "count": 2 },
+    {
+      "kind": "message_roles_at_request",
+      "request": 2,
+      "roles": ["system", "user", "assistant", "tool", "tool"]
+    }
+  ],
+  "outcome": {
+    "question": "Does the final answer confirm both reads succeeded?",
+    "expect": "succeeded"
+  },
+  "budget_tokens": 22000,
+  "note": "Duas leituras do MESMO fixture — o mecanismo sob teste é o batching de tool calls em paralelo (src/conversation/runtime.ts:637, até 8 por turno), não o conteúdo lido. #580 anuncia esse paralelismo no prompt."
+}

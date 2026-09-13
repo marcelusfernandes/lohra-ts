@@ -1,0 +1,25 @@
+{
+  "input": "What does the project's CLAUDE.md say to do first?",
+  "cwd_fixture": {
+    "path": "CLAUDE.md",
+    "content": "# Project notes\n\nSENTINEL_ALREADY_IN_REPO_XYZ: always run the linter before committing.\n"
+  },
+  "stub_script": {
+    "default": [
+      {
+        "kind": "text",
+        "content": "According to CLAUDE.md, you should always run the linter before committing."
+      }
+    ]
+  },
+  "mechanism": [
+    { "kind": "request_count", "count": 1 },
+    { "kind": "system_prompt_includes", "substring": "SENTINEL_ALREADY_IN_REPO_XYZ" }
+  ],
+  "outcome": {
+    "question": "Does the answer reflect the sentinel instruction from CLAUDE.md?",
+    "expect": "linter"
+  },
+  "budget_tokens": 11000,
+  "note": "96% do prompt hoje é AGENTS.md/CLAUDE.md (achado do épico #575). Este caso confirma que um fato já presente no arquivo do projeto chega ao modelo via prompt, sem precisar de tool call. #582 muda a moldura/autoridade desse bloco."
+}

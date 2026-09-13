@@ -1,0 +1,38 @@
+{
+  "input": "Delegate this research question to a subagent and tell me honestly if it comes back empty.",
+  "stub_script": {
+    "default": [
+      {
+        "kind": "tool_calls",
+        "calls": [
+          {
+            "name": "delegate_task",
+            "argumentsRaw": "{\"tasks\":[\"SCEN:child research the open question\"]}"
+          }
+        ]
+      },
+      {
+        "kind": "text",
+        "content": "The subagent came back empty — it did not complete the research."
+      }
+    ],
+    "child": [{ "kind": "text", "content": "" }]
+  },
+  "mechanism": [
+    { "kind": "request_count", "count": 3 },
+    {
+      "kind": "message_roles_at_request",
+      "request": 3,
+      "roles": ["system", "user", "assistant", "tool"]
+    },
+    { "kind": "tool_result_includes", "request": 3, "substring": "\"error_kind\":\"dead_turn\"" },
+    { "kind": "envelope_pointer", "pointer": "/completed", "value": true },
+    { "kind": "envelope_pointer", "pointer": "/error", "value": null }
+  ],
+  "outcome": {
+    "question": "Does the parent's final answer plainly say the subtask came back empty?",
+    "expect": "empty|did not complete"
+  },
+  "budget_tokens": 22000,
+  "note": "Holdout do caso 'filho falhou' (child-task-fails-silently) — nunca usado para calibrar texto, só para medir."
+}

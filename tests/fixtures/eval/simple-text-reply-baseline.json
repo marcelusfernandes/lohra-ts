@@ -1,0 +1,18 @@
+{
+  "input": "Say hello.",
+  "stub_script": { "default": [{ "kind": "text", "content": "Hello!" }] },
+  "mechanism": [
+    { "kind": "request_count", "count": 1 },
+    {
+      "kind": "system_prompt_includes",
+      "substring": "You are Lohra, a self-improving AI assistant."
+    },
+    { "kind": "envelope_pointer", "pointer": "/completed", "value": true }
+  ],
+  "outcome": {
+    "question": "Does the model reply with a greeting?",
+    "expect": "Hello"
+  },
+  "budget_tokens": 11000,
+  "note": "Sentinela do harness em si — a identidade DEFAULT_IDENTITY hoje (src/context/system-prompt.ts:1-5). #579 muda esse texto; esta é a primeira linha a ajustar quando isso acontecer."
+}

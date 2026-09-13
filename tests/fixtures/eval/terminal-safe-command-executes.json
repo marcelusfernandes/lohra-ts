@@ -1,0 +1,23 @@
+{
+  "input": "Run this command in the terminal: echo LOHRA_EVAL_OK",
+  "stub_script": {
+    "default": [
+      {
+        "kind": "tool_calls",
+        "calls": [{ "name": "terminal", "argumentsRaw": "{\"command\":\"echo LOHRA_EVAL_OK\"}" }]
+      },
+      { "kind": "text", "content": "The command ran and printed LOHRA_EVAL_OK." }
+    ]
+  },
+  "mechanism": [
+    { "kind": "request_count", "count": 2 },
+    { "kind": "tool_result_includes", "request": 2, "substring": "\"ok\":true" },
+    { "kind": "tool_result_includes", "request": 2, "substring": "LOHRA_EVAL_OK" }
+  ],
+  "outcome": {
+    "question": "Does the model report the command's real output?",
+    "expect": "LOHRA_EVAL_OK"
+  },
+  "budget_tokens": 22000,
+  "note": "Contraste positivo dos casos de negação: um comando seguro executa de verdade (gateway real, sem stub) e o stdout chega ao modelo como mensagem tool comum."
+}

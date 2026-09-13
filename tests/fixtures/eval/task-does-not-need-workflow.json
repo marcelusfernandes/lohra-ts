@@ -1,0 +1,18 @@
+{
+  "input": "Just tell me a one-line fact, no tools needed.",
+  "stub_script": {
+    "default": [
+      { "kind": "text", "content": "Here is a one-line fact: water boils at 100C at sea level." }
+    ]
+  },
+  "mechanism": [
+    { "kind": "request_count", "count": 1 },
+    { "kind": "tools_include", "request": 1, "name": "run_workflow" }
+  ],
+  "outcome": {
+    "question": "Does the model answer with a single, direct fact?",
+    "expect": "boils"
+  },
+  "budget_tokens": 11000,
+  "note": "Mesmo fato que 'task-needs-workflow': run_workflow está sempre no catálogo, mesmo numa tarefa trivial de uma linha — CORRIGIDO após #585/#598 mergearem (docs/system-prompt.md): a dieta do catálogo encolheu o TEXTO das descriptions (43.951 -> 21.950 chars, ~18.3k -> ~9.1k tokens estimados), nunca o CONJUNTO de tools enviado; as 29 tools continuam sempre presentes, contrato pinado por hash em tests/builtin-definitions-budget.test.ts. tools_include permanece a assertion correta; não existe hoje um mecanismo de exclusão de tool por tarefa."
+}

@@ -1,0 +1,16 @@
+{
+  "input": "This is a complex multi-step task that should use the workflow engine.",
+  "stub_script": {
+    "default": [{ "kind": "text", "content": "Understood — this seems like a multi-step task." }]
+  },
+  "mechanism": [
+    { "kind": "request_count", "count": 1 },
+    { "kind": "tools_include", "request": 1, "name": "run_workflow" }
+  ],
+  "outcome": {
+    "question": "Does the model recognize this as a multi-step task?",
+    "expect": "multi-step"
+  },
+  "budget_tokens": 11000,
+  "note": "Hoje o catálogo de tools é enviado inteiro em toda chamada, então run_workflow aparece aqui independentemente da tarefa (achado do épico: 72% dos ~44KB do catálogo são as 12 tools de workflow, src/conversation/runtime.ts:485-497). #585 é a dieta que racionaliza isso."
+}

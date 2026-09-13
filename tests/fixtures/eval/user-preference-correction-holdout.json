@@ -1,0 +1,28 @@
+{
+  "input": "I prefer concise answers — please remember that about me.",
+  "stub_script": {
+    "default": [
+      {
+        "kind": "tool_calls",
+        "calls": [
+          {
+            "name": "memory",
+            "argumentsRaw": "{\"action\":\"add\",\"text\":\"User prefers concise answers\"}"
+          }
+        ]
+      },
+      { "kind": "text", "content": "Noted — I will keep answers concise from now on." }
+    ]
+  },
+  "mechanism": [
+    { "kind": "request_count", "count": 2 },
+    { "kind": "tool_result_includes", "request": 2, "substring": "\"ok\":true" },
+    { "kind": "tool_result_includes", "request": 2, "substring": "\"target\":\"memory\"" }
+  ],
+  "outcome": {
+    "question": "Does the model acknowledge saving the preference?",
+    "expect": "concise"
+  },
+  "budget_tokens": 22000,
+  "note": "Holdout de user-preference-correction — nunca usado para calibrar texto, só para medir."
+}
