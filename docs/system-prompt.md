@@ -94,10 +94,69 @@ Com avisos pendentes, o que entra no turno:
 Wireado sobre o MESMO `noticesRepository` que `workflow_notices` já lê, em
 `chat.ts` e no `runJob` do `dashboard.ts` — nenhuma superfície nova.
 
+## Doutrina de comportamento (issue #579, P3)
+
+`src/context/doctrine.ts` — o que faltava além de `DEFAULT_IDENTITY`
+(`src/context/system-prompt.ts:1-5`): relatar o observado, tratar o escopo
+pedido como o entregável, agir em vez de narrar opções, e nunca terminar um
+turno em plano, pergunta ou promessa. Duas constantes, em inglês como o
+resto do prompt:
+
+- **`DOCTRINE_CORE`** (~400 tokens, 2,9 chars/token — a mesma regra de
+  conversão de `src/context/token-estimate.ts`) — enviado a TODO perfil de
+  provedor.
+- **`DOCTRINE_EXTENDED`** (~370 tokens adicionais) — forma e julgamento
+  (uma ideia por frase, diagnóstico ≠ conserto, reafirmação do usuário
+  encerra o debate, evidência antes de mudar estado). Só perfis "fortes".
+
+Nenhuma das duas descreve um mecanismo do harness que não existe (aprovação
+humana de comando, plan mode, canal de pergunta ao usuário, fallback de
+modelo) — isso é escopo do bloco Harness por superfície (#580, P4); a
+doutrina só referencia o comportamento esperado do MODELO.
+`tests/context-doctrine.test.ts` prende as duas coisas: frases de
+comportamento presentes, frases de mecanismo inexistente ausentes.
+
+`buildSystemPrompt` (`src/context/system-prompt.ts`) recebe `doctrine` como
+uma string já resolvida e a posiciona na faixa `stable`, depois da
+identidade e antes de `Environment` — ausente por default, byte-idêntico a
+antes de #579 quando nenhuma superfície passa doctrine.
+
+### Tier por perfil: `resolveDoctrineTier`
+
+`resolveDoctrineTier` (`src/context/doctrine.ts`) decide `"core"` ou
+`"extended"` por nome de provedor (`profile.name`), com
+`LOHRA_DOCTRINE=core|extended` sobrepondo o default — qualquer outro valor
+não vazio falha fechado (lança), nunca cai silenciosamente no default.
+`ollama` é o único perfil builtin em `"core"` por default: o próprio épico
+#575 cita "modelos pequenos via Ollama" como o caso que uma doutrina longa
+pode piorar. Todo outro nome (conhecido ou futuro, incluindo
+`"openai-codex"`) cai em `"extended"`.
+
+Deliberadamente **não** é um campo em `ProviderProfile`
+(`src/providers/types.ts`): esse arquivo ficou fora do escopo de arquivos
+desta issue. `resolveDoctrineTier` chaveia por `profile.name`, que já é
+público — uma extensão futura da interface (se um perfil precisar de mais
+que um nome para decidir a faixa) é decisão de outra issue.
+
+### Fiação por superfície
+
+`chat`, `dashboard` e `serve` resolvem a faixa uma vez (não a cada turno —
+invariante 1 do CLAUDE.md: o system prompt é construído uma vez por sessão
+e congelado) a partir do `profile` já escolhido, e passam o texto resolvido
+para `buildSystemPrompt`. `serve` deixava de mandar só identidade + data;
+agora manda a doutrina também.
+
+O subagente (`src/orchestration/subagent-prompt.ts`) recebe sempre
+`DOCTRINE_CORE`, nunca a extensão: o call site que o invoca
+(`src/orchestration/chat-wiring.ts`'s `buildSubagentPrompt`) não tem o
+perfil do provedor pai disponível para decidir a faixa, e essa fiação ficou
+fora do escopo de arquivos desta issue — #583 (P7, "prompt do subagente com
+ambiente, tools e contrato de retorno") é quem estende esse call site com
+mais contexto, e pode herdar a faixa do pai então.
+
 ## O que este documento ainda não cobre
 
-Faixas `stable/context/volatile` do prompt, doutrina de relato e escopo,
-bloco de harness por superfície, moldura de conteúdo externo, prompt do
-subagente, `prompt caching` — nenhum desses existe no runtime hoje. Cada
-sub-issue do épico #575 que os implementa atualiza este arquivo quando
-mergeia.
+Bloco de harness por superfície, moldura de conteúdo externo, contrato de
+retorno do subagente, `prompt caching` — nenhum desses existe no runtime
+hoje. Cada sub-issue do épico #575 que os implementa atualiza este arquivo
+quando mergeia.

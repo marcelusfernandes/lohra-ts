@@ -377,6 +377,16 @@ quando a tarefa nunca usa workflow. Um teste de orçamento
 do piso por chamada e das faixas do prompt em
 [`docs/system-prompt.md`](docs/system-prompt.md).
 
+O system prompt também carrega uma doutrina de comportamento própria
+(`src/context/doctrine.ts`, issue #579): relatar o observado (uma falha de
+subagente ou workflow é falha do próprio modelo a relatar), tratar o escopo
+pedido como o entregável, e nunca terminar um turno em plano, pergunta ou
+promessa. Um núcleo universal (~400 tokens) vai para todo perfil de
+provedor; uma extensão de forma e julgamento (~370 tokens adicionais) só
+para perfis marcados "fortes" — `ollama` é o único perfil builtin sem ela
+por default, `LOHRA_DOCTRINE=core|extended` sobrepõe. Detalhes em
+[`docs/system-prompt.md`](docs/system-prompt.md).
+
 ### Erros e `--help`
 
 O texto de erro e de ajuda da CLI é próprio deste produto — não é um
