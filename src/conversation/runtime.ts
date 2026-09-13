@@ -70,8 +70,8 @@ function signalAborted(signal: AbortSignal): boolean {
  * `.cause` merely echoes `signal.reason` is no longer something any
  * transport in this tree throws — kept here as defense in depth (an
  * external `ModelTransport`, or a future one, is free to throw the plain
- * shape instead), covered by `tests/conversation-runtime.test.ts` directly
- * rather than through any transport. `signalAborted(signal)` gates all
+ * shape instead), covered by `tests/conversation-runtime-abort-forms.test.ts`
+ * directly rather than through any transport. `signalAborted(signal)` gates all
  * three: none of these shapes proves an abort on their OWN (an
  * "AbortError" name or a coincidental `.cause` could, in principle, come
  * from somewhere else), the signal's own state is the one fact this
@@ -521,17 +521,19 @@ export class ConversationRuntime {
                     tools: request.tools,
                   })
                 : null;
-            // Issue #568: only THIS call was torn down mid-flight — any
-            // earlier iteration of the SAME turn (a tool-call/pause loop)
-            // already completed for real and is sitting in `usageTotal`.
-            // Carrying it forward here (instead of `abortedCallUsage`
-            // alone) is what keeps a multi-iteration turn's cancelled
-            // usage from silently dropping back to zero real tokens the
-            // moment the LAST call happens to be the one aborted —
-            // `addUsage` is a no-op combine when either side is null, so a
-            // single-iteration turn (the common case) is unaffected.
+            // Issue #568 (r2, veredito da PR #573): `partialUsage` stays
+            // ONLY this call's own estimate (the contract `errors.ts`
+            // documents) — any earlier iteration of the SAME turn (a
+            // tool-call/pause loop) already completed for real and is
+            // sitting in `usageTotal`; that rides along SEPARATELY as
+            // `measuredUsage`, never merged into `partialUsage` itself, so
+            // `child-runner.ts` can report the real total without also
+            // marking a leaf "partial" when nothing was ever estimated
+            // (isAbortOf's 2nd/3rd form, no `StreamAbortedError` to
+            // estimate from).
             throw new ConversationCancelledError(sessionId, signal.reason, {
-              partialUsage: addUsage(usageTotal, abortedCallUsage),
+              partialUsage: abortedCallUsage,
+              measuredUsage: usageTotal,
               apiCalls: apiCalls + 1,
             });
           }

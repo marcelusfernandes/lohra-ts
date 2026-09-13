@@ -75,12 +75,35 @@ export class ConversationCancelledError extends ConversationError {
    * `context/token-estimate.ts`), never a real measurement. `null` for a
    * pre-issuance cancellation (the call was never made) and for an abort
    * that consumed the signal without going through `StreamAbortedError`
-   * (no partial to estimate from). */
+   * (no partial to estimate from). Issue #568 (r2, veredito da PR #573):
+   * kept to EXACTLY this one call's own estimate, deliberately never
+   * combined with `measuredUsage` below — `child-runner.ts` derives
+   * `partial`/`partial_leaves` from `partialUsage !== null` alone
+   * (`core.ts`/`workflow/runtime.ts`/`builtin-definitions.ts`: a leaf only
+   * counts as partial when its usage includes an ESTIMATED portion), so
+   * merging real measurement in here would silently mark a leaf partial
+   * with zero tokens ever estimated. */
   public readonly partialUsage: Usage | null;
+  /** Issue #568 (r2, veredito da PR #573): the turn's own REAL usage
+   * (`usageTotal`, `runtime.ts`) — every iteration of a multi-iteration
+   * turn (a tool-call/pause loop) that completed for real, each with a
+   * genuine provider measurement, BEFORE the one call this error is about
+   * got torn down. `null` when no earlier iteration in this turn ever
+   * completed (the common, single-call case) — never zero-filled, same
+   * "never measured" convention `partialUsage`/`usageUncertain` already
+   * use. A SEPARATE field from `partialUsage` on purpose (see that field's
+   * own doc): `child-runner.ts` is the one reader, and combines the two
+   * into the leaf's reported `usage` while still deriving `partial` from
+   * `partialUsage` alone. */
+  public readonly measuredUsage: Usage | null;
   public constructor(
     sessionId: string,
     cause?: unknown,
-    options: { readonly partialUsage?: Usage | null; readonly apiCalls?: number } = {},
+    options: {
+      readonly partialUsage?: Usage | null;
+      readonly measuredUsage?: Usage | null;
+      readonly apiCalls?: number;
+    } = {},
   ) {
     super("CONVERSATION_CANCELLED", "conversation cancelled", {
       sessionId,
@@ -88,6 +111,7 @@ export class ConversationCancelledError extends ConversationError {
       apiCalls: options.apiCalls ?? 0,
     });
     this.partialUsage = options.partialUsage ?? null;
+    this.measuredUsage = options.measuredUsage ?? null;
   }
 }
 
