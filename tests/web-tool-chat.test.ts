@@ -89,13 +89,13 @@ describe("web tool envelopes and coercions", () => {
         },
       });
       expect(await webSearchHandler({ query: true })).toBe(
-        toolResult(undefined, { query: true, results: [] }),
+        toolResult(undefined, { query: true, results: [], untrusted: true }),
       );
       expect(await webSearchHandler({ query: 7 })).toBe(
-        toolResult(undefined, { query: 7, results: [] }),
+        toolResult(undefined, { query: 7, results: [], untrusted: true }),
       );
       expect(await webSearchHandler({ query: ["x"] })).toBe(
-        toolResult(undefined, { query: ["x"], results: [] }),
+        toolResult(undefined, { query: ["x"], results: [], untrusted: true }),
       );
       expect(received.map((call) => call.query)).toEqual(["true", "7", '["x"]']);
     });
@@ -260,6 +260,7 @@ describe("web tools through registry dispatch and a canned chat turn", () => {
         ok: true,
         url: "http://public.test/",
         text: "canned body",
+        untrusted: true,
       });
 
       const model = new QueueTransport([
@@ -333,6 +334,7 @@ describe("web tools through registry dispatch and a canned chat turn", () => {
         ok: true,
         url: "http://public.test/",
         text: "canned body",
+        untrusted: true,
       });
     });
   });

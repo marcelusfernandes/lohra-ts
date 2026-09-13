@@ -78,7 +78,7 @@ export async function webFetchHandler(args: Readonly<Record<string, unknown>>): 
   }
   try {
     const outcome = await fetchUrl(url, webTransport);
-    return toolResult(undefined, { url, text: htmlToText(outcome.text) });
+    return toolResult(undefined, { url, text: htmlToText(outcome.text), untrusted: true });
   } catch (error) {
     if (error instanceof WebError) return toolError(error.message, { url });
     if (error instanceof WebTransportError) {
@@ -104,6 +104,7 @@ export async function webSearchHandler(args: Readonly<Record<string, unknown>>):
         url: result.url,
         snippet: result.snippet,
       })),
+      untrusted: true,
     });
   } catch (error) {
     if (error instanceof SearchUnavailable) {
