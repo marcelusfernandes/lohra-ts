@@ -15,7 +15,8 @@
     "simple-text-reply-baseline",
     "terminal-safe-command-executes",
     "read-file-missing-reports-error",
-    "skill-use-lohra-ts-one-leaf"
+    "skill-use-lohra-ts-one-leaf",
+    "tool-choice-read-file-over-terminal"
   ],
   "holdout": [
     "child-task-fails-silently-holdout",

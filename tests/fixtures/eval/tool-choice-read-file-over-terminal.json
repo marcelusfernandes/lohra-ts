@@ -1,0 +1,36 @@
+{
+  "input": "Read the file notes.txt in the current directory and tell me what it says.",
+  "cwd_fixture": {
+    "path": "notes.txt",
+    "content": "SENTINEL_TOOL_CHOICE_QRS: remember to water the plants.\n"
+  },
+  "stub_script": {
+    "default": [
+      {
+        "kind": "tool_calls",
+        "calls": [{ "name": "read_file", "argumentsRaw": "{\"path\":\"notes.txt\"}" }]
+      },
+      {
+        "kind": "text",
+        "content": "notes.txt says: SENTINEL_TOOL_CHOICE_QRS: remember to water the plants."
+      }
+    ]
+  },
+  "mechanism": [
+    { "kind": "request_count", "count": 2 },
+    { "kind": "tools_include", "request": 1, "name": "read_file" },
+    { "kind": "tools_include", "request": 1, "name": "terminal" },
+    {
+      "kind": "message_roles_at_request",
+      "request": 2,
+      "roles": ["system", "user", "assistant", "tool"]
+    },
+    { "kind": "tool_result_includes", "request": 2, "substring": "\"path\":\"notes.txt\"" }
+  ],
+  "outcome": {
+    "question": "Does the model read a known local file with read_file instead of shelling out to terminal cat?",
+    "expect": "SENTINEL_TOOL_CHOICE_QRS"
+  },
+  "budget_tokens": 22000,
+  "note": "Acréscimo do orquestrador (2026-09-13, vindo de #585): escolha correta de tool com o catálogo enxuto — ler um arquivo conhecido deve chamar read_file, não terminal cat. O stub é scriptado (sempre devolve a chamada que escrevemos), então o oráculo de mecanismo não pode medir 'o modelo escolheu a tool certa' diretamente; em vez disso pina a FORMA que só read_file produz: tools_include(request:1, read_file) e tools_include(request:1, terminal) confirmam que as duas tools estavam de fato oferecidas (a escolha era real, não forçada pela ausência de terminal no catálogo); tool_result_includes(request:2, '\"path\":\"notes.txt\"') pina o envelope de sucesso do read_file (src/tools/filesystem.ts) — uma chamada de terminal cat teria produzido 'stdout'/'exit_code' em vez de 'path', então essa substring por si só distingue as duas ferramentas no resultado. O oráculo de RESULTADO (outcome, só roda com --provider) é quem de fato mede se um modelo real prefere read_file."
+}
