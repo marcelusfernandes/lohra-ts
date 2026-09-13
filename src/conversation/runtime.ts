@@ -526,7 +526,9 @@ export class ConversationRuntime {
             // documents) — any earlier iteration of the SAME turn (a
             // tool-call/pause loop) already completed — real, or a
             // steer-absorbed one folding in its own estimate (#520,
-            // `:555-561` below) — and is sitting in `usageTotal`; that
+            // `:555-561` below) — OR this same iteration's own preflight
+            // compaction summarize call (issue #569, `:429-437`, `addUsage`
+            // at `:435`) — and is sitting in `usageTotal`; that
             // rides along SEPARATELY as `measuredUsage` (see its own doc,
             // `errors.ts`, for exactly what it can carry), never merged
             // into `partialUsage` itself, so `child-runner.ts` can report

@@ -92,7 +92,13 @@ export class ConversationCancelledError extends ConversationError {
    * (#520) also folds its own ESTIMATE into this same `usageTotal` before
    * this cancel ever throws (`runtime.ts:555-561`, `estimatePartialUsage`)
    * — so this field is not exhaustively "real measurement" the moment a
-   * turn mixes both triggers. `partial` still derives from `partialUsage`
+   * turn mixes both triggers. A THIRD, real source (issue #569): this same
+   * iteration's own preflight compaction can already have summarized the
+   * history through its own provider call (`summarize`, `runtime.ts:429-
+   * 437`, `addUsage` at `:435`, reachable from iteration 1 via
+   * `preflightCompact` at `:453`) — BEFORE that iteration's own request is
+   * ever built, so `usageTotal` is not necessarily still whatever an
+   * earlier ITERATION alone would suggest. `partial` still derives from `partialUsage`
    * alone (see that field's own doc), never from whether THIS field
    * happens to include an estimated portion — carrying
    * `ConversationTurnResult.partialCalls` through this error too, to tell
@@ -106,7 +112,9 @@ export class ConversationCancelledError extends ConversationError {
    * with no `measuredUsage` option at all, REGARDLESS of whatever
    * `usageTotal` an earlier iteration of the SAME turn may already carry;
    * or a turn where no earlier iteration (real or steer-estimated) ever
-   * measured any usage at all. A SEPARATE field from `partialUsage` on
+   * measured any usage AND this iteration's own preflight compaction never
+   * ran either — a "single-call turn" is only guaranteed `null` here when
+   * BOTH are true. A SEPARATE field from `partialUsage` on
    * purpose (see that field's own doc): `child-runner.ts` is the one
    * reader, and combines the two into the leaf's reported `usage` while
    * still deriving `partial` from `partialUsage` alone. */

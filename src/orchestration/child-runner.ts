@@ -268,8 +268,9 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
           // leaf's reported `usage` is the SUM of whatever usage the
           // turn's earlier iterations already accumulated
           // (`error.measuredUsage` — real, EXCEPT a steer-absorbed
-          // iteration folds in its own estimate too, see that field's own
-          // doc, `errors.ts`) and this call's own ESTIMATE
+          // iteration folds in its own estimate too, and a preflight
+          // compaction summarize call is real too, see that field's own
+          // doc, `errors.ts`, issue #569) and this call's own ESTIMATE
           // (`error.partialUsage`) — `combineUsage` above, never merged
           // upstream. `usageUncertain` is forced `true` regardless of what
           // `zeroResult`'s own null-check would have computed: even a
@@ -289,7 +290,8 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
           // (whether `measuredUsage` does, from an EARLIER steer-absorbed
           // iteration, is #520's own concern, out of #568's scope).
           // `partialUsage === null` and `measuredUsage === null` together
-          // (pre-issuance cancel, or a single-call turn aborted by a
+          // (pre-issuance cancel, or a single-call turn — with no preflight
+          // compaction of its own either, issue #569 — aborted by a
           // non-StreamAbortedError form) stays the plain #232 "never
           // measured" gap this already was before #568.
           const usage = combineUsage(error.measuredUsage, error.partialUsage);
