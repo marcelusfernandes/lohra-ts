@@ -141,6 +141,31 @@ describe("system prompt renderer", () => {
     expect(prompt.stable).toBe("Soul");
   });
 
+  it("places harness in the stable band, after doctrine and before Environment (issue #580)", () => {
+    const prompt = buildSystemPrompt({
+      identity: "Soul",
+      doctrine: "DOCTRINE-TEXT",
+      harness: "HARNESS-TEXT",
+      environmentHints: { cwd: "/tmp" },
+      today: "2030-01-02",
+    });
+    const doctrineIndex = prompt.stable.indexOf("DOCTRINE-TEXT");
+    const harnessIndex = prompt.stable.indexOf("HARNESS-TEXT");
+    const environmentIndex = prompt.stable.indexOf("Environment:");
+    expect(doctrineIndex).toBeGreaterThanOrEqual(0);
+    expect(harnessIndex).toBeGreaterThan(doctrineIndex);
+    expect(environmentIndex).toBeGreaterThan(harnessIndex);
+  });
+
+  it("omits harness entirely when not provided — stable band unchanged from before #580", () => {
+    const prompt = buildSystemPrompt({
+      identity: "Soul",
+      doctrine: "DOCTRINE-TEXT",
+      today: "2030-01-02",
+    });
+    expect(prompt.stable).toBe("Soul\n\nDOCTRINE-TEXT");
+  });
+
   it("falls back to the LOCAL calendar date, not UTC, inside the daily window where they disagree", () => {
     // A same-day "today vs today" comparison passes 21 hours out of 24 and
     // proves nothing — the real regression only shows up inside the window

@@ -253,6 +253,12 @@ transporte da assinatura; `--model` sozinho, sem `--provider`, continua
 escolhendo o modelo da própria assinatura sem mudança
 (`docs/decisions/2026-09-13-flags-de-rota-com-assinatura.md`).
 
+`chat --no-tools` desliga o REGISTRO das tools (nenhuma chega ao catálogo
+enviado ao provedor) — não a memória, o perfil de usuário nem o índice de
+skills do prompt: esses três continuam entrando no system prompt mesmo sob
+`--no-tools` (issue #580), porque são conhecimento sobre a sessão e o
+operador, não uma capacidade de agir.
+
 `workflow` possui somente `list`, `watch`, `audit` e `notices`; não existe
 `workflow run`. Chat e dashboard compartilham a mesma composition root para
 workflow/audit, orquestração, cron, MCP, web e mídia. `notices` lê

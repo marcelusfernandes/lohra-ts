@@ -2,17 +2,23 @@ import { describe, expect, it } from "vitest";
 
 import { buildSystemPrompt } from "../src/context/index.js";
 import { DOCTRINE_CORE } from "../src/context/doctrine.js";
+import { harnessText } from "../src/context/harness.js";
 import { buildSubagentSystemPrompt } from "../src/orchestration/subagent-prompt.js";
 
 describe("buildSubagentSystemPrompt", () => {
-  it("matches the byte-measured oracle text, plus DOCTRINE_CORE added by issue #579", () => {
+  it("matches the byte-measured oracle text, plus DOCTRINE_CORE (#579) and the subagent Harness block (#580)", () => {
     // Fixed via buildSystemPrompt's own today override so this pins the
     // static three-paragraph structure without depending on the pending
     // T09 UTC-vs-local-date fix landing on this file first. #579 (épico
     // #575, P3) inserts DOCTRINE_CORE between the isolation paragraph and
     // the date — a subagent has no profile/provider threaded into this call
     // site (`orchestration/chat-wiring.ts` is outside this issue's Files),
-    // so it always gets the universal core, never the extension.
+    // so it always gets the universal core, never the extension. #580 (P4)
+    // adds the "subagent" mode Harness block right after DOCTRINE_CORE,
+    // still before the date — `yolo` stays absent/false here (see
+    // `src/context/harness.ts`'s own note on the process-global
+    // `approval.ts` singleton leaking a parent's `--yolo` into a child
+    // regardless of what this prompt says; #583 is where that gets fixed).
     const text = buildSubagentSystemPrompt({ today: "2026-08-30" });
     expect(text).toBe(
       "You are Lohra, a self-improving AI assistant. You are helpful, " +
@@ -25,6 +31,7 @@ describe("buildSubagentSystemPrompt", () => {
         "the task, then end with a concise summary of what you did and the " +
         "outcome.\n\n" +
         `${DOCTRINE_CORE}\n\n` +
+        `${harnessText({ mode: "subagent" })}\n\n` +
         "Today's date is 2026-08-30.",
     );
   });

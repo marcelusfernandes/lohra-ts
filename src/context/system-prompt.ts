@@ -28,6 +28,11 @@ export interface SystemPromptInputs {
    * da identidade e antes de `Environment`, omitida quando ausente (nenhuma
    * superfície é obrigada a passar doutrina). */
   readonly doctrine?: string;
+  /** Issue #580 (épico #575, P4): o bloco `Harness:` por superfície e modo
+   * de execução (`src/context/harness.ts`'s `harnessText`) — a faixa
+   * `stable`, depois da doutrina e antes de `Environment`, omitido quando
+   * ausente. */
+  readonly harness?: string;
   readonly environmentHints?: Readonly<Record<string, string>>;
   readonly systemMessage?: string;
   readonly contextFiles?: readonly (readonly [string, string])[];
@@ -68,6 +73,7 @@ export function buildSystemPrompt(inputs: SystemPromptInputs = {}): SystemPrompt
   const stable = [
     inputs.identity || DEFAULT_IDENTITY,
     inputs.doctrine ?? "",
+    inputs.harness ?? "",
     environmentText(inputs.environmentHints ?? {}),
   ]
     .filter(Boolean)

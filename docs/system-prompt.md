@@ -154,9 +154,85 @@ fora do escopo de arquivos desta issue — #583 (P7, "prompt do subagente com
 ambiente, tools e contrato de retorno") é quem estende esse call site com
 mais contexto, e pode herdar a faixa do pai então.
 
+## Modo por superfície (issue #580, P4)
+
+`src/context/harness.ts` — o bloco `Harness:` diz o que o harness faz
+sozinho e o que não faz, para o único componente que poderia usar essas
+capacidades e não sabia delas. Distinto da doutrina (#579): a doutrina fala
+do comportamento esperado do MODELO; o Harness fala do MECANISMO do
+runtime, e por isso vive num arquivo à parte —
+`tests/context-doctrine.test.ts` proíbe na doutrina justamente as palavras
+que o Harness precisa usar ("approval", "ask the user").
+
+`PromptMode = "headless" | "interactive" | "server" | "subagent"` — a porta
+de entrada do turno:
+
+| modo          | quem passa                             | quando                                               |
+| ------------- | -------------------------------------- | ---------------------------------------------------- |
+| `headless`    | `chat.ts`                              | `--json` ou `--no-input`                             |
+| `interactive` | `chat.ts`, `dashboard.ts`              | `chat` sem `--json`/`--no-input`; `dashboard` sempre |
+| `server`      | `serve.ts`                             | sempre (todo turno é uma requisição HTTP)            |
+| `subagent`    | `src/orchestration/subagent-prompt.ts` | sempre (filho isolado)                               |
+
+`harnessText({ mode, yolo? })` monta o bloco variando só as linhas que
+dependem do modo (ou de `yolo`) — todo o resto é byte-idêntico entre
+chamadas (`tests/context-harness-mode.test.ts` prende essa invariante
+diretamente). O que o bloco afirma, e onde isso é verdade no código:
+
+- **Nenhum modo tem canal de pergunta**: não há aprovação humana de comando
+  em modo nenhum (`src/tools/terminal.ts:86`; `chat.ts` força o callback de
+  aprovação para `() => "deny"` em headless e `null` em interactive, e
+  `ApprovalManager.require()` nega quando o callback é `null` —
+  `src/tools/approval.ts`). A única exceção real é `--yolo`
+  (`CHAT_SPEC`, só existe em `chat`) — `harnessText({ mode, yolo: true })`
+  troca a frase de negação pela frase de bypass.
+- **Paralelismo real**: até 8 tool calls independentes por turno, na ordem
+  de envio (`src/conversation/runtime.ts:637`, `runBounded`) — o mesmo
+  motor por trás de chat, dashboard, `serve` (`CompletionService`) e do
+  child-runner do subagente.
+- **Envelope JSON**: toda tool embutida devolve `{"ok":true,…}` ou
+  `{"error":…}` (`src/tools/envelope.ts`) — um `error` é informação, não
+  instrução de retentativa.
+- **Compactação transparente** — presente em `headless`, `interactive` e
+  `subagent`; ausente em `server`, porque `CompletionService`'s
+  `RequestRepository` (`src/server/request-repository.ts`) não implementa
+  `acquireCompressionLock`/`releaseCompressionLock`/`compactHistory`, e
+  `preflightCompact` (`src/conversation/runtime.ts`) segue sem compactar
+  (fail-open) quando o repositório não suporta os três.
+- **Proveniência de `<system-reminder>`**: só existe hoje em
+  `src/orchestration/steer-inbox.ts` (turno de um filho steerado); a frase
+  é condicional ("se você ver um bloco…") para continuar verdadeira mesmo
+  onde o mecanismo nunca dispara.
+
+Nunca mencionado: sandbox de sistema de arquivos ou de rede — não existe.
+`readFileTool`/`writeFileTool` (`src/tools/filesystem.ts`) resolvem
+qualquer caminho, sem raiz de confinamento, e `serve.ts` já avisa o
+operador em texto que as tools "are NOT sandboxed" quando expostas por
+HTTP.
+
+### `--no-tools` mantém memória, perfil e índice de skills (AC 2)
+
+Antes desta issue, `chat --no-tools` também apagava `<memory>`,
+`<user-profile>` e o índice de skills do prompt — a tool some, mas o
+conhecimento não devia ir junto. `chat.ts`'s `snapshot()` lê
+`memoryStore.snapshot()` e `skillStore.snapshot()` incondicionalmente
+agora; só o REGISTRO das tools (`memory`, `skill_view`, …) continua
+condicionado a `useTools`.
+
+### `dashboard` monta o prompt com os mesmos inputs de `chat` (AC 3)
+
+Antes desta issue, `dashboard.ts` só passava `doctrine`, `contextFiles` e
+`environmentHints` a `buildSystemPrompt` — nunca identidade (`loadSoul`),
+memória, perfil de usuário ou índice de skills, mesmo já tendo acesso a
+`options.home`/`options.cwd`. `dashboard.ts` agora carrega os mesmos
+quatro insumos que `chat.ts` carrega, sempre em modo `"interactive"` (não
+existe `--json`/`--no-input`/`--yolo` em `DASHBOARD_SPEC`).
+`tests/gateway/dashboard-prompt-contract.test.ts` prova isso contra um
+turno real (boot de `runDashboard`, WebSocket real, stub HTTP local
+capturando a requisição de verdade).
+
 ## O que este documento ainda não cobre
 
-Bloco de harness por superfície, moldura de conteúdo externo, contrato de
-retorno do subagente, `prompt caching` — nenhum desses existe no runtime
-hoje. Cada sub-issue do épico #575 que os implementa atualiza este arquivo
-quando mergeia.
+Moldura de conteúdo externo, contrato de retorno do subagente,
+`prompt caching` — nenhum desses existe no runtime hoje. Cada sub-issue do
+épico #575 que os implementa atualiza este arquivo quando mergeia.
