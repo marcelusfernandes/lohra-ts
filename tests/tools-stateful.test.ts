@@ -48,8 +48,11 @@ describe("stateful tool handlers", () => {
     expect(tool.manage({ action: "create", name: "one", body: "body" })).toBe(
       '{"ok":true,"action":"create","name":"one","scope":"home"}',
     );
+    // Issue #581 (épico #575, P5): `root()` vive sob os.tmpdir(), fora do
+    // project_root deste processo de teste — o mesmo critério de
+    // `readFileTool` marca a skill "untrusted".
     expect(tool.view({ name: "one" })).toBe(
-      '{"ok":true,"name":"one","version":"1.0.0","body":"body"}',
+      '{"ok":true,"name":"one","version":"1.0.0","body":"body","untrusted":true}',
     );
     expect(tool.manage({ action: "update", name: "one", description: "new" })).toBe(
       '{"ok":true,"action":"update","name":"one"}',
@@ -60,6 +63,26 @@ describe("stateful tool handlers", () => {
     expect(tool.manage({ name: "one" })).toBe(
       '{"error":"unknown action undefined (use create/update/delete)"}',
     );
+  });
+
+  // Issue #581 (épico #575, P5): mesmo critério de `readFileTool` — uma
+  // skill cujo arquivo está fora do project_root que `findProjectRoot`
+  // resolve a partir do cwd real do processo ganha "untrusted": true como
+  // última chave; uma skill dentro do projeto não carrega a chave.
+  it("marks untrusted a skill whose file lives outside project_root", () => {
+    const tool = new SkillTool(new SkillStore(root()));
+    tool.manage({ action: "create", name: "outside-one", body: "body" });
+    const result = JSON.parse(tool.view({ name: "outside-one" })) as { untrusted?: boolean };
+    expect(result.untrusted).toBe(true);
+  });
+
+  it("omits 'untrusted' entirely for a skill whose file lives inside project_root", () => {
+    const home = join(process.cwd(), `.lohra-skill-inproject-${String(Date.now())}`);
+    roots.push(home);
+    const tool = new SkillTool(new SkillStore(home));
+    tool.manage({ action: "create", name: "inside-one", body: "body" });
+    const result = JSON.parse(tool.view({ name: "inside-one" })) as Record<string, unknown>;
+    expect("untrusted" in result).toBe(false);
   });
 
   it("implements discovery, browse and read boundaries", () => {

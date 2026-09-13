@@ -7,16 +7,18 @@ import type { ToolArguments } from "./types.js";
 
 const MAX_READ_CODE_POINTS = 100_000;
 
-// Issue #581 (épico #575, P5): `readFileTool` não recebe `project_root` como
-// parâmetro (é registrado direto em `builtins.ts`, sem contexto de sessão —
-// fora dos `Files` desta issue) — resolve o dele mesmo, a partir do cwd real
-// do processo, como `loadProjectContext` já faz (`context/discovery.ts`).
-// Um caminho que não é ancestral do project_root é dado potencialmente de
-// terceiro (ex.: fora do repositório que o operador está de fato
-// trabalhando) e ganha `untrusted: true` no envelope — campo aditivo, ausente
-// no caso comum (arquivo dentro do projeto) para manter o envelope
-// byte-compatível com quem não lê o campo (ADR de wire format próprio).
-function isUntrustedPath(renderedPath: string): boolean {
+// Issue #581 (épico #575, P5): nem `readFileTool` nem `SkillTool.view`
+// (`src/tools/stateful.ts`) recebem `project_root` como parâmetro — nenhum
+// dos dois tem contexto de sessão disponível no call site — então esta
+// função resolve o dele mesmo, a partir do cwd real do processo, como
+// `loadProjectContext` já faz (`context/discovery.ts`). Um caminho que não é
+// ancestral do project_root é dado potencialmente de terceiro (ex.: fora do
+// repositório que o operador está de fato trabalhando, ou uma skill "home"/
+// builtin fora dele) e ganha `untrusted: true` no envelope — campo aditivo,
+// ausente no caso comum (arquivo ou skill dentro do projeto) para manter o
+// envelope byte-compatível com quem não lê o campo (ADR de wire format
+// próprio). Exportada porque `SkillTool.view` reusa o mesmo critério.
+export function isUntrustedPath(renderedPath: string): boolean {
   const root = findProjectRoot(process.cwd());
   const resolvedPath = resolve(renderedPath);
   const resolvedRoot = resolve(root);
