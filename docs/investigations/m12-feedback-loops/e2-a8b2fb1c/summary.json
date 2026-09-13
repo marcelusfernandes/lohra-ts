@@ -1,0 +1,106 @@
+{
+  "evidence": "<TMP>",
+  "provider": "local HTTP fixture; scripted model decisions; real installed CLI/transport/SQLite/tools",
+  "http400": {
+    "session_id": "<redacted>",
+    "run_id": "06987b455f724c548d02f88aeb50087c",
+    "status": "failed",
+    "pause_reason": null,
+    "lesson": null,
+    "fault_kinds": ["unknown"],
+    "notices": []
+  },
+  "http404": {
+    "session_id": "<redacted>",
+    "run_id": "70b50482b00f4749ad454bafb477d4fb",
+    "status": "paused",
+    "pause_reason": "route_fault",
+    "lesson": {
+      "error_kind": "model_not_found",
+      "node_id": "probe",
+      "provider": "openai",
+      "model": "m12-404",
+      "suggested_route": null
+    },
+    "fault_kinds": [],
+    "notices": [
+      {
+        "id": 1,
+        "scope": "run:70b50482b00f4749ad454bafb477d4fb",
+        "seq": 1,
+        "kind": "model_not_found",
+        "message": "probe: route fault (model_not_found) — provider=openai model=m12-404; resume with run_workflow(resume_run_id=..., route={...}) once you pick a different one; suggested=none",
+        "created_at": 1789317839,
+        "acked_at": null,
+        "acked_by": null,
+        "fence": 1
+      }
+    ]
+  },
+  "repeatedNewRun": {
+    "session_id": "<redacted>",
+    "run_id": "e3683a604e714a198d3da662a519b5ce",
+    "status": "paused",
+    "pause_reason": "route_fault",
+    "lesson": {
+      "error_kind": "model_not_found",
+      "node_id": "probe",
+      "provider": "openai",
+      "model": "m12-404",
+      "suggested_route": null
+    },
+    "fault_kinds": [],
+    "notices": [
+      {
+        "id": 2,
+        "scope": "run:e3683a604e714a198d3da662a519b5ce",
+        "seq": 1,
+        "kind": "model_not_found",
+        "message": "probe: route fault (model_not_found) — provider=openai model=m12-404; resume with run_workflow(resume_run_id=..., route={...}) once you pick a different one; suggested=none",
+        "created_at": 1789317839,
+        "acked_at": null,
+        "acked_by": null,
+        "fence": 1
+      }
+    ]
+  },
+  "ackAcrossProcesses": {
+    "before": 2,
+    "visibleAfter": 1,
+    "allAfter": 2
+  },
+  "recovery": {
+    "session_id": "<redacted>",
+    "run_id": "70b50482b00f4749ad454bafb477d4fb",
+    "status": "complete",
+    "pause_reason": null,
+    "lesson": null,
+    "fault_kinds": [],
+    "notices": [
+      {
+        "id": 1,
+        "scope": "run:70b50482b00f4749ad454bafb477d4fb",
+        "seq": 1,
+        "kind": "model_not_found",
+        "message": "probe: route fault (model_not_found) — provider=openai model=m12-404; resume with run_workflow(resume_run_id=..., route={...}) once you pick a different one; suggested=none",
+        "created_at": 1789317839,
+        "acked_at": 0,
+        "acked_by": "cli",
+        "fence": 1
+      }
+    ]
+  },
+  "taskScope": {
+    "sub_id": "269e1d71c27443ba929784dc0835d02a",
+    "status": "complete",
+    "summary": "{\"ok\":true,\"data\":\"M12_TASK_B_OUTSIDE_ASSIGNED_TASK\\n\",\"truncated\":false,\"path\":\"<TMP>/project/task-b.txt\"}",
+    "error_kind": null,
+    "tokens_in": 20,
+    "tokens_out": 10,
+    "provider": "openai",
+    "model": "m12-parent"
+  },
+  "rejectedRequests400": 1,
+  "rejectedRequests404": 2,
+  "memoryFilesCreated": false
+}

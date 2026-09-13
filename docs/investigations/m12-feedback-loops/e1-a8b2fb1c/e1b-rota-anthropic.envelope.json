@@ -1,0 +1,50 @@
+{
+  "session_id": "<redacted>",
+  "model": "claude-opus-4-8",
+  "temperature": null,
+  "input": "Execute exatamente esta sequencia, uma unica vez, sem improvisar:\n\n1. Chame run_workflow com EXATAMENTE esta spec, sem alterar nenhum campo:\n{\"meta\":{\"name\":\"m12-rota-invalida-live\"},\"nodes\":[{\"id\":\"probe\",\"type\":\"agent\",\"model\":\"lohra-m12-modelo-inexistente\",\"prompt\":\"Responda somente M12-LEAF-OK.\"}]}\n\n2. Chame workflow_status com {\"run_id\": <o run_id devolvido>, \"wait\": true}.\n\n3. Chame workflow_notices com {\"run_id\": <o mesmo run_id>, \"include_acked\": true}.\n\n4. Responda com o JSON bruto dos dois ultimos resultados, sem comentario.\n\nREGRAS: NAO troque o modelo \"lohra-m12-modelo-inexistente\" por outro. NAO retome o run. NAO tente de novo se falhar. NAO chame nenhuma outra ferramenta.",
+  "output": "```json\n{\"ok\":true,\"run_id\":\"c0db747dcb8f46c0ae8052dc5e49ad74\",\"name\":\"m12-rota-invalida-live\",\"status\":\"paused\",\"outputs\":{\"probe\":null},\"faults\":[\"route fault 'probe' (model_not_found)\"],\"null_count\":1,\"leaf_respawns\":0,\"validation_retries\":0,\"cap_trips\":0,\"engine_faults\":0,\"nodes_total\":1,\"tokens_in\":0,\"tokens_out\":0,\"cache_read_tokens\":0,\"cache_write_tokens\":0,\"reasoning_tokens\":0,\"forcing_fallbacks\":0,\"pause_reason\":\"route_fault\",\"checkpoint\":{\"error_kind\":\"model_not_found\",\"node_id\":\"probe\",\"provider\":\"anthropic\",\"model\":\"lohra-m12-modelo-inexistente\",\"suggested_route\":null},\"token_budget\":null,\"null_rate\":1,\"usage_uncertain_leaves\":1,\"partial_leaves\":0,\"sandbox_refusals\":0,\"fault_kinds\":[],\"live_tail\":{\"events\":[],\"next_cursor\":4,\"dropped\":0}}\n```\n\n```json\n{\"ok\":true,\"notices\":[{\"id\":1,\"scope\":\"run:c0db747dcb8f46c0ae8052dc5e49ad74\",\"seq\":1,\"kind\":\"model_not_found\",\"message\":\"probe: route fault (model_not_found) — provider=anthropic model=lohra-m12-modelo-inexistente; resume with run_workflow(resume_run_id=..., route={...}) once you pick a different one; suggested=none\",\"created_at\":1789318060,\"acked_at\":null,\"acked_by\":null,\"fence\":1}],\"next_after_seq\":1,\"has_more\":false,\"refused_writes\":0,\"integrity\":{\"refused_writes\":0}}\n```",
+  "reasoning": null,
+  "tool_calls": [
+    {
+      "id": "toolu_01DHCbfgf7wke8RWs92Zxagv",
+      "name": "run_workflow",
+      "arguments": "{\"spec\":{\"meta\":{\"name\":\"m12-rota-invalida-live\"},\"nodes\":[{\"id\":\"probe\",\"type\":\"agent\",\"model\":\"lohra-m12-modelo-inexistente\",\"prompt\":\"Responda somente M12-LEAF-OK.\"}]}}",
+      "result": "{\"ok\":true,\"run_id\":\"c0db747dcb8f46c0ae8052dc5e49ad74\",\"status\":\"started\"}"
+    },
+    {
+      "id": "toolu_01FuKqNPYcuh41hr9irFXNSm",
+      "name": "workflow_status",
+      "arguments": "{\"run_id\":\"c0db747dcb8f46c0ae8052dc5e49ad74\",\"wait\":true}",
+      "result": "{\"ok\":true,\"run_id\":\"c0db747dcb8f46c0ae8052dc5e49ad74\",\"name\":\"m12-rota-invalida-live\",\"status\":\"paused\",\"outputs\":{\"probe\":null},\"faults\":[\"route fault 'probe' (model_not_found)\"],\"null_count\":1,\"leaf_respawns\":0,\"validation_retries\":0,\"cap_trips\":0,\"engine_faults\":0,\"nodes_total\":1,\"tokens_in\":0,\"tokens_out\":0,\"cache_read_tokens\":0,\"cache_write_tokens\":0,\"reasoning_tokens\":0,\"forcing_fallbacks\":0,\"pause_reason\":\"route_fault\",\"checkpoint\":{\"error_kind\":\"model_not_found\",\"node_id\":\"probe\",\"provider\":\"anthropic\",\"model\":\"lohra-m12-modelo-inexistente\",\"suggested_route\":null},\"token_budget\":null,\"null_rate\":1,\"usage_uncertain_leaves\":1,\"partial_leaves\":0,\"sandbox_refusals\":0,\"fault_kinds\":[],\"live_tail\":{\"events\":[],\"next_cursor\":4,\"dropped\":0}}"
+    },
+    {
+      "id": "toolu_01CUb6UVXJtKCnQ6SCHroJc1",
+      "name": "workflow_notices",
+      "arguments": "{\"run_id\":\"c0db747dcb8f46c0ae8052dc5e49ad74\",\"include_acked\":true}",
+      "result": "{\"ok\":true,\"notices\":[{\"id\":1,\"scope\":\"run:c0db747dcb8f46c0ae8052dc5e49ad74\",\"seq\":1,\"kind\":\"model_not_found\",\"message\":\"probe: route fault (model_not_found) — provider=anthropic model=lohra-m12-modelo-inexistente; resume with run_workflow(resume_run_id=..., route={...}) once you pick a different one; suggested=none\",\"created_at\":1789318060,\"acked_at\":null,\"acked_by\":null,\"fence\":1}],\"next_after_seq\":1,\"has_more\":false,\"refused_writes\":0,\"integrity\":{\"refused_writes\":0}}"
+    }
+  ],
+  "usage": {
+    "input_tokens": 22502,
+    "output_tokens": 614
+  },
+  "usage_total": {
+    "input_tokens": 87868,
+    "output_tokens": 961
+  },
+  "cost": null,
+  "stop_reason": "stop",
+  "completed": true,
+  "error": null,
+  "api_calls": 4,
+  "session": {
+    "input_tokens": 87868,
+    "output_tokens": 961,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+    "reasoning_tokens": 0,
+    "api_call_count": 4,
+    "priced_call_count": 0
+  }
+}

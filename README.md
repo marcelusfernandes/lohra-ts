@@ -364,6 +364,19 @@ novo, o turno falha com um erro nomeado (`CONTEXT_WINDOW_EXCEEDED`) em vez
 de tentar compactar de novo — nunca um laço. Detalhes e a decisão de design
 em `docs/context-compaction.md` (issue #252).
 
+As 29 definições de tool (`src/tools/builtin-definitions.ts`) são reenviadas
+inteiras a cada iteração do turno. A issue #585 fez dieta nas descriptions
+— manual movido para a skill `workflow-authoring`, descriptions das tools
+básicas (`read_file`, `write_file`, `terminal`, `web_fetch`, `web_search`,
+`session_search`, `skill_view`) reescritas no padrão "quando usar / quando
+não / limite" — sem tocar schema, ordem ou nome de nenhuma tool: o catálogo
+caiu de 43.951 para menos de 22.000 chars de JSON (~18k para ~9k tokens pela
+regra de 2,4 chars/token deste runtime), piso pago em toda chamada mesmo
+quando a tarefa nunca usa workflow. Um teste de orçamento
+(`tests/builtin-definitions-budget.test.ts`) prende o teto em CI. Detalhes
+do piso por chamada e das faixas do prompt em
+[`docs/system-prompt.md`](docs/system-prompt.md).
+
 ### Erros e `--help`
 
 O texto de erro e de ajuda da CLI é próprio deste produto — não é um
