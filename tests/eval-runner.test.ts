@@ -9,9 +9,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { parseEvalCase } from "../scripts/eval/case.js";
+import { refuseNetworkInCi } from "../scripts/eval/ci-guard.js";
 import { evaluateMechanism, evaluateOutcome } from "../scripts/eval/oracles.js";
 import { appendResultLine, buildSummary, resetResultsFile } from "../scripts/eval/results.js";
-import { runBatch } from "../scripts/eval/run.js";
+import { parseArgs, runBatch } from "../scripts/eval/run.js";
 import { runCaseSafely, runCaseToResultLine } from "../scripts/eval/runner.js";
 import type { CapturedRequest, EvalCase, EvalResultLine } from "../scripts/eval/types.js";
 import type { EvalSessionResult } from "../scripts/eval/session.js";
@@ -209,6 +210,109 @@ describe("evaluateMechanism", () => {
     );
     expect(result?.passed).toBe(false);
   });
+
+  it("system_prompt_includes defaults to the first request when 'request' is omitted", () => {
+    const requests = [
+      request([{ role: "system", content: "first system prompt" }]),
+      request([{ role: "system", content: "second system prompt" }]),
+    ];
+    const [result] = evaluateMechanism(
+      [{ kind: "system_prompt_includes", substring: "first system prompt" }],
+      requests,
+      null,
+    );
+    expect(result?.passed).toBe(true);
+  });
+
+  it("system_prompt_includes targets an explicit later request, not just the first", () => {
+    const requests = [
+      request([{ role: "system", content: "SUMMARY_SYSTEM: compact this" }]),
+      request([{ role: "system", content: "You are Lohra, a self-improving AI assistant." }]),
+    ];
+    const [failsAtFirst] = evaluateMechanism(
+      [{ kind: "system_prompt_includes", substring: "self-improving", request: 1 }],
+      requests,
+      null,
+    );
+    expect(failsAtFirst?.passed).toBe(false);
+    const [passesAtSecond] = evaluateMechanism(
+      [{ kind: "system_prompt_includes", substring: "self-improving", request: 2 }],
+      requests,
+      null,
+    );
+    expect(passesAtSecond?.passed).toBe(true);
+  });
+
+  it("message_content_includes finds a substring in any message, not just the last tool result", () => {
+    const requests = [
+      request([
+        { role: "system", content: "identity" },
+        { role: "user", content: "(resumo da conversa anterior a seguir)" },
+        { role: "assistant", content: "Key Decisions: never use rm -rf." },
+        { role: "user", content: "continue" },
+      ]),
+    ];
+    const [result] = evaluateMechanism(
+      [{ kind: "message_content_includes", request: 1, substring: "never use rm -rf" }],
+      requests,
+      null,
+    );
+    expect(result?.passed).toBe(true);
+  });
+
+  it("message_content_includes fails when no message in the request carries the substring", () => {
+    const requests = [request([{ role: "user", content: "unrelated" }])];
+    const [result] = evaluateMechanism(
+      [{ kind: "message_content_includes", request: 1, substring: "never use rm -rf" }],
+      requests,
+      null,
+    );
+    expect(result?.passed).toBe(false);
+  });
+});
+
+describe("refuseNetworkInCi", () => {
+  it("does nothing without --provider, regardless of CI", () => {
+    expect(() => {
+      refuseNetworkInCi(undefined, { CI: "true" });
+    }).not.toThrow();
+  });
+
+  it("throws for CI='true' (GitHub Actions' own value) with --provider set", () => {
+    expect(() => {
+      refuseNetworkInCi("openrouter", { CI: "true" });
+    }).toThrow(/nunca roda em CI/);
+  });
+
+  it("throws for CI='1' (other CI providers' convention), not just the exact string 'true'", () => {
+    expect(() => {
+      refuseNetworkInCi("openrouter", { CI: "1" });
+    }).toThrow(/nunca roda em CI/);
+  });
+
+  it("throws for GITHUB_ACTIONS='true' even when CI is unset", () => {
+    expect(() => {
+      refuseNetworkInCi("openrouter", { GITHUB_ACTIONS: "true" });
+    }).toThrow(/nunca roda em CI/);
+  });
+
+  it("does not throw when CI is absent, empty, '0' or 'false'", () => {
+    expect(() => {
+      refuseNetworkInCi("openrouter", {});
+    }).not.toThrow();
+    expect(() => {
+      refuseNetworkInCi("openrouter", { CI: "" });
+    }).not.toThrow();
+    expect(() => {
+      refuseNetworkInCi("openrouter", { CI: "0" });
+    }).not.toThrow();
+    expect(() => {
+      refuseNetworkInCi("openrouter", { CI: "false" });
+    }).not.toThrow();
+    expect(() => {
+      refuseNetworkInCi("openrouter", { CI: "FALSE" });
+    }).not.toThrow();
+  });
 });
 
 describe("evaluateOutcome", () => {
@@ -330,7 +434,7 @@ describe("runCaseToResultLine", () => {
       () => Promise.resolve(fakeSessionResult({ requests: [] })),
     );
     expect(line.mechanism).toEqual([]);
-    expect(line.mechanismOk).toBe(true);
+    expect(line.mechanismOk).toBe("skipped");
     expect(line.mechanismSkippedReason).toMatch(/modo provider/);
     expect(line.mode).toBe("provider");
     expect(line.provider).toBe("openrouter");
@@ -361,6 +465,18 @@ describe("runCaseSafely", () => {
     });
     expect(line.error).toContain("boom: spawn failed");
     expect(line.mechanismOk).toBe(false);
+  });
+
+  it("marks mechanismOk 'skipped', never false, when a provider-mode session rejects", async () => {
+    const line = await runCaseSafely(
+      CASE_A,
+      { cliPath: "unused", timeoutMs: 1000, provider: "openrouter" },
+      () => {
+        throw new Error("boom: network unreachable");
+      },
+    );
+    expect(line.error).toContain("boom: network unreachable");
+    expect(line.mechanismOk).toBe("skipped");
   });
 });
 
@@ -413,7 +529,57 @@ describe("buildSummary", () => {
     const summary = buildSummary("stub", undefined, [lineA, lineB]);
     expect(summary.total).toBe(2);
     expect(summary.mechanismPassCount).toBe(1);
+    expect(summary.mechanismSkippedCount).toBe(0);
     expect(summary.outcomePassCount).toBe(1);
     expect(summary.cases.map((entry) => entry.totalTokens)).toEqual([15, 15]);
+  });
+
+  it("counts 'skipped' mechanism verdicts separately from passes — never as a pass", () => {
+    const lineA: EvalResultLine = {
+      id: "a",
+      mode: "provider",
+      provider: "openrouter",
+      exitCode: 0,
+      timedOut: false,
+      error: null,
+      apiCalls: 1,
+      usageTotal: null,
+      budgetTokens: 100,
+      budgetExceeded: false,
+      mechanism: [],
+      mechanismOk: "skipped",
+      outcome: { question: "q", verdict: "pass" },
+      elapsedMs: 1,
+    };
+    const summary = buildSummary("provider", "openrouter", [lineA]);
+    expect(summary.mechanismPassCount).toBe(0);
+    expect(summary.mechanismSkippedCount).toBe(1);
+  });
+});
+
+describe("parseArgs --tag", () => {
+  it("is absent by default", () => {
+    expect(parseArgs([]).tag).toBeUndefined();
+  });
+
+  it("parses a value and pairs freely with --provider/--set/--cli", () => {
+    const args = parseArgs([
+      "--provider",
+      "openrouter",
+      "--set",
+      "dev",
+      "--cli",
+      "dist/cli.js",
+      "--tag",
+      "antes-585",
+    ]);
+    expect(args.tag).toBe("antes-585");
+    expect(args.provider).toBe("openrouter");
+    expect(args.set).toBe("dev");
+    expect(args.cli).toBe("dist/cli.js");
+  });
+
+  it("throws without a value", () => {
+    expect(() => parseArgs(["--tag"])).toThrow(/--tag precisa de um valor/);
   });
 });

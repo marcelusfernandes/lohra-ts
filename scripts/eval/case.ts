@@ -5,6 +5,7 @@ import type {
   EvalCase,
   EvalCaseFixture,
   EvalOutcome,
+  EvalSeedTurn,
   EvalStubScript,
   EvalStubStep,
   EvalStubToolCall,
@@ -97,10 +98,17 @@ const MECHANISM_KINDS = new Set([
   "request_count",
   "message_roles_at_request",
   "tool_result_includes",
+  "message_content_includes",
   "envelope_pointer",
   "tools_include",
   "tools_exclude",
 ]);
+
+function parseOptionalRequestIndex(value: unknown, path: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number") fail(path, `mechanism[].request precisa ser number`);
+  return value;
+}
 
 function parseMechanismAssertion(value: unknown, path: string): MechanismAssertion {
   if (!isRecord(value)) fail(path, `assertion de "mechanism" precisa ser um objeto`);
@@ -110,8 +118,14 @@ function parseMechanismAssertion(value: unknown, path: string): MechanismAsserti
   }
   switch (kind) {
     case "system_prompt_includes":
-    case "system_prompt_excludes":
-      return { kind, substring: parseString(value.substring, path, "mechanism[].substring") };
+    case "system_prompt_excludes": {
+      const request = parseOptionalRequestIndex(value.request, path);
+      return {
+        kind,
+        substring: parseString(value.substring, path, "mechanism[].substring"),
+        ...(request === undefined ? {} : { request }),
+      };
+    }
     case "request_count": {
       if (typeof value.count !== "number") fail(path, `mechanism[].count precisa ser number`);
       return { kind: "request_count", count: value.count };
@@ -127,6 +141,14 @@ function parseMechanismAssertion(value: unknown, path: string): MechanismAsserti
       if (typeof value.request !== "number") fail(path, `mechanism[].request precisa ser number`);
       return {
         kind: "tool_result_includes",
+        request: value.request,
+        substring: parseString(value.substring, path, "mechanism[].substring"),
+      };
+    }
+    case "message_content_includes": {
+      if (typeof value.request !== "number") fail(path, `mechanism[].request precisa ser number`);
+      return {
+        kind: "message_content_includes",
         request: value.request,
         substring: parseString(value.substring, path, "mechanism[].substring"),
       };
@@ -150,6 +172,14 @@ function parseMechanismAssertion(value: unknown, path: string): MechanismAsserti
     default:
       fail(path, `mechanism[].kind desconhecido: ${JSON.stringify(kind)}`);
   }
+}
+
+function parseSeedTurn(value: unknown, path: string): EvalSeedTurn {
+  if (!isRecord(value)) fail(path, `session_seed[] precisa ser um objeto`);
+  return {
+    user: parseString(value.user, path, "session_seed[].user"),
+    assistant: parseString(value.assistant, path, "session_seed[].assistant"),
+  };
 }
 
 function parseOutcome(value: unknown, path: string): EvalOutcome {
@@ -179,9 +209,24 @@ export function parseEvalCase(value: unknown, path: string, id: string): EvalCas
   };
   const fixture = parseFixture(value.cwd_fixture, path);
   const note = value.note;
+  const sessionSeedRaw = value.session_seed;
+  if (sessionSeedRaw !== undefined && !Array.isArray(sessionSeedRaw)) {
+    fail(path, `"session_seed" precisa ser array`);
+  }
+  const sessionSeed = Array.isArray(sessionSeedRaw)
+    ? sessionSeedRaw.map((turn) => parseSeedTurn(turn, path))
+    : undefined;
+  const contextWindowOverrideRaw = value.context_window_override;
+  if (contextWindowOverrideRaw !== undefined && typeof contextWindowOverrideRaw !== "number") {
+    fail(path, `"context_window_override" precisa ser number`);
+  }
   return {
     ...result,
     ...(fixture === undefined ? {} : { cwdFixture: fixture }),
     ...(typeof note === "string" ? { note } : {}),
+    ...(sessionSeed === undefined ? {} : { sessionSeed }),
+    ...(typeof contextWindowOverrideRaw === "number"
+      ? { contextWindowOverride: contextWindowOverrideRaw }
+      : {}),
   };
 }

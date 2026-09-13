@@ -2,8 +2,11 @@
 // `EvalResultLine` por caso. O oráculo de mecanismo só roda em modo "stub"
 // — em modo "provider" não há stub local interceptando a chamada real, e
 // fingir um veredito de mecanismo contra dado que não existe seria uma
-// falha silenciosa (CLAUDE.md, invariante 2); por isso ele fica marcado
-// `mechanismSkippedReason` em vez de `passed: true`.
+// falha silenciosa (CLAUDE.md, invariante 2); por isso `mechanismOk` é o
+// literal `"skipped"` nesse modo (rodada 2: `true` fixo era exatamente essa
+// falha silenciosa — `mechanismPassCount`/`results.jsonl` afirmavam
+// mecanismo aprovado sem nenhuma assertion ter rodado), com
+// `mechanismSkippedReason` explicando por quê.
 import { evaluateMechanism, evaluateOutcome } from "./oracles.js";
 import type { runEvalCase as RunEvalCaseFn, EvalRunOptions } from "./session.js";
 import type { EvalCase, EvalResultLine } from "./types.js";
@@ -55,7 +58,9 @@ export async function runCaseToResultLine(
   const mechanism = isProviderMode
     ? []
     : evaluateMechanism(kase.mechanism, session.requests, session.envelope);
-  const mechanismOk = isProviderMode ? true : mechanism.every((result) => result.passed);
+  const mechanismOk: EvalResultLine["mechanismOk"] = isProviderMode
+    ? "skipped"
+    : mechanism.every((result) => result.passed);
   const outcome = evaluateOutcome(kase.outcome, readOutput(session.envelope));
   const usageTotal = readUsageTotal(session.envelope);
   const totalTokens = usageTotal === null ? null : usageTotal.inputTokens + usageTotal.outputTokens;
@@ -105,7 +110,11 @@ export async function runCaseSafely(
       budgetTokens: kase.budgetTokens,
       budgetExceeded: false,
       mechanism: [],
-      mechanismOk: false,
+      // Uma sessão que lança em modo provider nunca chegou nem perto de
+      // avaliar mecanismo (não havia stub para capturar) — "skipped" é o
+      // veredito honesto, igual ao caminho feliz do mesmo modo, nunca
+      // `false` (que implicaria uma assertion real ter rodado e falhado).
+      mechanismOk: options.provider === undefined ? false : "skipped",
       outcome: { question: kase.outcome.question, verdict: "no-signal" },
       elapsedMs: 0,
     };

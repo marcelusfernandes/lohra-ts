@@ -43,7 +43,11 @@ export function buildSummary(
     mode,
     ...(provider === undefined ? {} : { provider }),
     total: lines.length,
-    mechanismPassCount: lines.filter((line) => line.mechanismOk).length,
+    // `=== true`, nunca truthy solto: `"skipped"` também é truthy em JS e
+    // não pode contar como aprovado (era exatamente essa confusão, com
+    // `mechanismOk: true` fixo, que a rodada 2 corrigiu).
+    mechanismPassCount: lines.filter((line) => line.mechanismOk === true).length,
+    mechanismSkippedCount: lines.filter((line) => line.mechanismOk === "skipped").length,
     outcomePassCount: lines.filter((line) => line.outcome?.verdict === "pass").length,
     cases,
   };

@@ -18,10 +18,29 @@ function messageAt(
   return request?.body.messages?.[index];
 }
 
-function systemContent(requests: readonly CapturedRequest[]): string {
-  const first = chatCompletionRequests(requests)[0];
-  const system = messageAt(first, 0);
+/** `request` é 1-indexado e por padrão mira a primeira requisição (o
+ * comportamento histórico, preservado para todo fixture existente que não
+ * declara `request`) — mas uma requisição de resumo de compactação
+ * (`SUMMARY_SYSTEM`, `src/agent/aux.ts`) nunca é a primeira quando a
+ * própria sessão compacta antes do turno real, e seu próprio system
+ * prompt é o que precisa ser verificado nesse caso. */
+function systemContent(requests: readonly CapturedRequest[], request = 1): string {
+  const target = chatCompletionRequests(requests)[request - 1];
+  const system = messageAt(target, 0);
   return system?.role === "system" && typeof system.content === "string" ? system.content : "";
+}
+
+/** Substring em QUALQUER mensagem (qualquer role) da requisição — usado
+ * para conteúdo que sobrevive dentro de uma mensagem do MEIO do array
+ * (ex.: o resumo sintético que uma compactação insere), não só a última
+ * `tool` (`lastToolContent`) ou a primeira `system` (`systemContent`). */
+function anyMessageContentIncludes(
+  request: CapturedRequest | undefined,
+  substring: string,
+): boolean {
+  return (request?.body.messages ?? []).some(
+    (message) => typeof message.content === "string" && message.content.includes(substring),
+  );
 }
 
 function rolesOf(request: CapturedRequest | undefined): readonly string[] {
@@ -74,25 +93,25 @@ function evaluateOne(
 ): MechanismResult {
   switch (assertion.kind) {
     case "system_prompt_includes": {
-      const content = systemContent(requests);
+      const content = systemContent(requests, assertion.request);
       const passed = content.includes(assertion.substring);
       return {
         kind: assertion.kind,
         passed,
         detail: passed
           ? "substring presente no system prompt"
-          : `substring ausente: ${JSON.stringify(assertion.substring)}`,
+          : `substring ausente do system prompt (requisição ${String(assertion.request ?? 1)}): ${JSON.stringify(assertion.substring)}`,
       };
     }
     case "system_prompt_excludes": {
-      const content = systemContent(requests);
+      const content = systemContent(requests, assertion.request);
       const passed = !content.includes(assertion.substring);
       return {
         kind: assertion.kind,
         passed,
         detail: passed
           ? "substring ausente do system prompt, como esperado"
-          : `substring presente indevidamente: ${JSON.stringify(assertion.substring)}`,
+          : `substring presente indevidamente no system prompt (requisição ${String(assertion.request ?? 1)}): ${JSON.stringify(assertion.substring)}`,
       };
     }
     case "request_count": {
@@ -126,6 +145,17 @@ function evaluateOne(
         detail: passed
           ? "substring presente no resultado da tool"
           : `substring ausente do resultado da tool (requisição ${String(assertion.request)}): ${JSON.stringify(content)}`,
+      };
+    }
+    case "message_content_includes": {
+      const request = chatCompletionRequests(requests)[assertion.request - 1];
+      const passed = anyMessageContentIncludes(request, assertion.substring);
+      return {
+        kind: assertion.kind,
+        passed,
+        detail: passed
+          ? "substring presente em alguma mensagem da requisição"
+          : `substring ausente de toda mensagem da requisição ${String(assertion.request)}: ${JSON.stringify(assertion.substring)}`,
       };
     }
     case "envelope_pointer": {

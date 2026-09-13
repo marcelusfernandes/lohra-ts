@@ -36,8 +36,16 @@ export interface CapturedRequest {
 }
 
 export type MechanismAssertion =
-  | { readonly kind: "system_prompt_includes"; readonly substring: string }
-  | { readonly kind: "system_prompt_excludes"; readonly substring: string }
+  | {
+      readonly kind: "system_prompt_includes";
+      readonly substring: string;
+      readonly request?: number;
+    }
+  | {
+      readonly kind: "system_prompt_excludes";
+      readonly substring: string;
+      readonly request?: number;
+    }
   | { readonly kind: "request_count"; readonly count: number }
   | {
       readonly kind: "message_roles_at_request";
@@ -46,6 +54,11 @@ export type MechanismAssertion =
     }
   | {
       readonly kind: "tool_result_includes";
+      readonly request: number;
+      readonly substring: string;
+    }
+  | {
+      readonly kind: "message_content_includes";
       readonly request: number;
       readonly substring: string;
     }
@@ -63,6 +76,17 @@ export interface EvalOutcome {
   readonly expect: string;
 }
 
+/** Uma turno pré-persistido na sessão do caso, ANTES da CLI rodar — o
+ * mesmo padrão de `tests/chat-compaction-events.test.ts` (seed direto via
+ * `SessionRepository.recordTurn`), necessário porque `preflightCompact`
+ * (`src/conversation/runtime.ts`) só encontra histórico para dobrar quando
+ * já existem turnos PERSISTIDOS de uma sessão anterior — um turno único e
+ * novo nunca tem nada para compactar (ver nota em `session.ts`). */
+export interface EvalSeedTurn {
+  readonly user: string;
+  readonly assistant: string;
+}
+
 export interface EvalCase {
   readonly id: string;
   readonly input: string;
@@ -71,6 +95,14 @@ export interface EvalCase {
   readonly mechanism: readonly MechanismAssertion[];
   readonly outcome: EvalOutcome;
   readonly budgetTokens: number;
+  /** Turnos seedados numa sessão fixa (`--session <id>`) antes da chamada
+   * real — só faz sentido junto de `contextWindowOverride`, para forçar
+   * `preflightCompact` a compactar de verdade essa história seedada. */
+  readonly sessionSeed?: readonly EvalSeedTurn[];
+  /** Vira `LOHRA_CONTEXT_WINDOW` no ambiente da chamada — baixo o
+   * suficiente para que a história seedada estoure o orçamento e force uma
+   * compactação real. */
+  readonly contextWindowOverride?: number;
   /** Nota livre para coordenação entre sub-issues (ex.: qual linha deste
    * caso muda quando outra issue do épico mergear). Nunca lida pelo
    * runner — só documentação dentro do próprio fixture. */
@@ -92,6 +124,15 @@ export interface OutcomeResult {
 
 export type EvalMode = "stub" | "provider";
 
+/** Tri-estado, nunca um booleano fabricado: `true`/`false` só existem
+ * quando o oráculo de mecanismo REALMENTE rodou (modo stub, com o stub
+ * capturando as requisições cruas); `"skipped"` é honesto sobre modo
+ * "provider" nunca ter tido como avaliar mecanismo nenhum — não existe
+ * "provedor real, sem stub, mas mecanismoOk: true" (rodada 1 desta issue
+ * fazia exatamente isso, achado do revisor: uma falha silenciosa, CLAUDE.md
+ * invariante 2). */
+export type MechanismVerdict = boolean | "skipped";
+
 export interface EvalResultLine {
   readonly id: string;
   readonly mode: EvalMode;
@@ -104,7 +145,7 @@ export interface EvalResultLine {
   readonly budgetTokens: number;
   readonly budgetExceeded: boolean;
   readonly mechanism: readonly MechanismResult[];
-  readonly mechanismOk: boolean;
+  readonly mechanismOk: MechanismVerdict;
   readonly mechanismSkippedReason?: string;
   readonly outcome: OutcomeResult | null;
   readonly elapsedMs: number;
@@ -112,7 +153,7 @@ export interface EvalResultLine {
 
 export interface EvalSummaryCase {
   readonly id: string;
-  readonly mechanismOk: boolean;
+  readonly mechanismOk: MechanismVerdict;
   readonly outcomeVerdict: OutcomeVerdict | "n/a";
   readonly totalTokens: number | null;
   readonly budgetExceeded: boolean;
@@ -123,7 +164,12 @@ export interface EvalSummary {
   readonly mode: EvalMode;
   readonly provider?: string;
   readonly total: number;
+  /** Só conta linhas com `mechanismOk === true` — nunca inclui "skipped". */
   readonly mechanismPassCount: number;
+  /** Linhas com `mechanismOk === "skipped"` (sempre 21/21 em modo provider
+   * hoje — o oráculo de mecanismo nunca roda sem o stub capturando as
+   * requisições cruas). */
+  readonly mechanismSkippedCount: number;
   readonly outcomePassCount: number;
   readonly cases: readonly EvalSummaryCase[];
 }
