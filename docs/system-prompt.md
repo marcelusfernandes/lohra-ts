@@ -17,8 +17,8 @@ intocados (contrato pinado por hash SHA-256 em
 
 |                                    | antes da dieta (#585) | depois                             |
 | ---------------------------------- | --------------------- | ---------------------------------- |
-| chars de JSON do catálogo          | 43.951                | 21.950 (teto de CI: 22.000)        |
-| tokens estimados (2,4 chars/token) | ~18.313               | ~9.146                             |
+| chars de JSON do catálogo          | 43.951                | 21.916 (#582; teto de CI: 22.000)  |
+| tokens estimados (2,4 chars/token) | ~18.313               | ~9.132                             |
 | % em tools de `workflow_*`         | 72%                   | reduzido, mesma proporção de tools |
 
 A regra de conversão (2,4 chars/token) é a mesma que
@@ -103,8 +103,9 @@ turno em plano, pergunta ou promessa. Duas constantes, em inglês como o
 resto do prompt:
 
 - **`DOCTRINE_CORE`** (~400 tokens, 2,9 chars/token — a mesma regra de
-  conversão de `src/context/token-estimate.ts`) — enviado a TODO perfil de
-  provedor.
+  conversão de `src/context/token-estimate.ts`; cresceu para ~610 tokens na
+  issue #582, P6, com a regra de memória — ver seção própria abaixo) —
+  enviado a TODO perfil de provedor.
 - **`DOCTRINE_EXTENDED`** (~370 tokens adicionais) — forma e julgamento
   (uma ideia por frase, diagnóstico ≠ conserto, reafirmação do usuário
   encerra o debate, evidência antes de mudar estado). Só perfis "fortes".
@@ -320,7 +321,8 @@ enquadramento "environment quirk" sem essa qualificação.
 As descriptions de `memory` e `skill_manage` (`BUILTIN_DEFINITIONS`) citam a
 mesma taxonomia (`tests/tools-memory-guidance.test.ts`, porta de
 `test_memory_guidance_taxonomy.py`) — o orçamento do catálogo (22.000
-chars) foi mantido encolhendo prosa sem AC em outras 16 descriptions
+chars, hoje em 21.916) foi mantido encolhendo prosa sem AC em outras 17
+descriptions
 (cronjob, vision_analyze, image_gen, spawn_session, steer_session,
 collect_session, workflow_list, workflow_pause, workflow_cancel,
 workflow_templates, workflow_notices, workflow_notices_ack,
