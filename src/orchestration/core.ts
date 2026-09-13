@@ -498,11 +498,26 @@ export class OrchestrationCore {
     // always wins a race against an earlier call's `disarm` running late.
     const interrupts = {
       arm: (abort: () => void): (() => void) => {
+        // Issue #569 (item 2): `fire`, not `abort` itself, is what gets
+        // stored on the entry — nulling `entry.interrupt` BEFORE calling the
+        // real `abort()` means a second `steer()` racing in between this
+        // call firing and the runtime's own `finally` (`disarm`, below)
+        // actually running sees the hook already cleared, never re-reads
+        // the stale non-null reference and never reports `interrupted: true`
+        // for a call that was already being torn down. `runtime.ts`'s own
+        // `call.abort()` is idempotent (a second invocation is a no-op), so
+        // this only fixes the SIGNAL steer() reports back, never double-
+        // counts usage on the runtime side.
+        const fire = (): void => {
+          const current = this.entries.get(subId);
+          if (current !== undefined && current.interrupt === fire) current.interrupt = null;
+          abort();
+        };
         const entry = this.entries.get(subId);
-        if (entry !== undefined) entry.interrupt = abort;
+        if (entry !== undefined) entry.interrupt = fire;
         return () => {
           const current = this.entries.get(subId);
-          if (current !== undefined && current.interrupt === abort) current.interrupt = null;
+          if (current !== undefined && current.interrupt === fire) current.interrupt = null;
         };
       },
     };

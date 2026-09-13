@@ -455,7 +455,11 @@ describe("ConversationRuntime interruptSource — steer-driven interrupt (issue 
     // completed iteration would have left behind.
     const maxIterationsError = caught as MaxIterationsError;
     expect(maxIterationsError.usage).not.toBeNull();
-    expect(maxIterationsError.usage?.outputTokens ?? 0).toBeGreaterThan(0);
+    // `emptyPartialStream` (no text observed before the abort) still falls
+    // back to `estimateRequestTokens` for `inputTokens` — non-zero because
+    // the request itself is never empty, unlike `outputTokens`, which stays
+    // 0 with nothing to estimate from.
+    expect(maxIterationsError.usage?.inputTokens ?? 0).toBeGreaterThan(0);
     expect(maxIterationsError.stopReason).toBe("interrupted");
   });
 });
