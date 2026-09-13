@@ -349,6 +349,41 @@ export const contextWindowMutants: readonly Mutant[] = [
       },
     ],
   },
+  // --- steer-interrupt × cancel precedence (issue #569, épico #490) -------
+  {
+    id: "r-steer-interrupt-continue-ignores-outer-cancel",
+    category: "steer-interrupt-continue-ignores-outer-cancel",
+    mechanism:
+      "runTurn para de exigir que o signal externo esteja intacto para absorver um call.signal abortado como steer-interrupt — uma corrida onde os dois disparam juntos, com um erro fora das formas que isAbortOf reconhece, vira `continue` silencioso em vez de ConversationTurnFailedError",
+    focus: {
+      file: runtimeTests,
+      test: "an error that isn't a recognized abort shape while both the external cancel and an armed steer-interrupt have fired surfaces as a genuine turn failure, never silently absorbed as a steer-continue",
+    },
+    edits: [
+      {
+        file: runtime,
+        before: "          if (signalAborted(call.signal) && !signalAborted(signal)) {\n",
+        after: "          if (signalAborted(call.signal)) {\n",
+      },
+    ],
+  },
+  {
+    id: "s-per-call-interrupt-hook-never-disarmed",
+    category: "per-call-interrupt-hook-never-disarmed",
+    mechanism:
+      "runTurn para de chamar disarm() no finally de cada chamada — o hook de interrupt de uma chamada já assentada (com sucesso ou não) fica armado, visível a um steer() que chegue depois",
+    focus: {
+      file: runtimeTests,
+      test: "freezes the prompt once, resumes history, and commits complete turns",
+    },
+    edits: [
+      {
+        file: runtime,
+        before: "          disarm?.();\n",
+        after: "          void disarm;\n",
+      },
+    ],
+  },
 ];
 
 const root = resolve(import.meta.dirname, "../..");
