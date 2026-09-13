@@ -164,6 +164,15 @@ pela CLI: `RUN_ID` posicional escopa a `run:<id>`, omitido lista tudo;
 página crua do repositório, sem o envelope `integrity` (`refused_writes`
 vem no topo da página, não aninhado) — README documenta os dois comandos.
 
+`created_at` e `acked_at` são segundos desde a época Unix, fracionários
+(`Date.now() / 1_000`, a mesma unidade e precisão dos dois — coluna `REAL`
+nas duas, `src/state/schema.ts`). Issue #603: até essa correção, a leitura
+de `acked_at` passava pela conversão de coluna `INTEGER` (`rowNumber`),
+que zera qualquer valor com fração — um aviso reconhecido voltava com
+`acked_by` preenchido e `acked_at: 0` na tool e na CLI. `parseNoticeRow`
+(`src/state/notices-repository.ts`) hoje lê os dois campos com a mesma
+conversão (`Number(...)`, `null` preservado quando não reconhecido).
+
 ## Retenção
 
 256 avisos por escopo (`NOTICES_SCOPE_CAP`, `maxPerScope`): acima do teto,

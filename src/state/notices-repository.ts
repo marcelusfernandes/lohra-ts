@@ -106,6 +106,19 @@ function nullableRowNumber(value: unknown): number | null {
   return value === null || value === undefined ? null : rowNumber(value);
 }
 
+// Issue #603: `created_at`/`acked_at` são `REAL` (`schema.ts`) e `ack()`
+// grava `Date.now() / 1_000` — fracionário, quase sempre fora de
+// `Number.isSafeInteger` só por ter casas decimais. `rowNumber` existe para
+// colunas `INTEGER` (`id`, `seq`, `fence`, `next_seq`, `dropped_before_seq`)
+// onde um valor não inteiro É um dado corrompido e `0` é o fallback
+// correto; aplicado a um `REAL` fracionário legítimo, o mesmo fallback
+// destrói o instante do ack. `acked_at` precisa da MESMA conversão de
+// `created_at` (linha abaixo, `Number(row.created_at)`), só com `null`
+// preservado — nunca `rowNumber`.
+function nullableRowReal(value: unknown): number | null {
+  return value === null || value === undefined ? null : Number(value);
+}
+
 /**
  * Trunca `message` para caber em `MAX_MESSAGE_BYTES` bytes UTF-8, contando o
  * marcador. Corta por BYTE (não por char): uma mensagem com caracteres
@@ -135,7 +148,7 @@ function parseNoticeRow(row: Readonly<Record<string, unknown>>): PublicNotice {
     kind: String(row.kind) as NoticeKind,
     message: String(row.message),
     created_at: Number(row.created_at),
-    acked_at: nullableRowNumber(row.acked_at),
+    acked_at: nullableRowReal(row.acked_at),
     acked_by: typeof row.acked_by === "string" ? row.acked_by : null,
     fence: nullableRowNumber(row.fence),
   });
