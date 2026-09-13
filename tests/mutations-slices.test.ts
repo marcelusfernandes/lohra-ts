@@ -572,9 +572,16 @@ describe("scripts/mutations/slices.json", () => {
     // voo descartava também os eventos já parseados com sucesso; morto
     // pelo `it` novo de `tests/transports-abort-in-flight.test.ts`, "ChatCompletionsClient.stream
     // replays the deltas already parsed when the trailing SSE frame is
-    // truncated mid-abort (issue #567)"): 269 + 1 = 270.
+    // truncated mid-abort (issue #567)"): 269 + 1 = 270. Issue #568
+    // (vereditos das PRs #528/#543, r2 de #556) acrescenta quatro a
+    // `workflow-audit-producers-mutants.ts`: C1/C2 (o `Promise.race` e o
+    // `clear()` do teto de `OrchestrationChildRuntime.cancel`,
+    // orchestration-runtime.ts) e C3/C4 (o `catch` que não engole mais erro
+    // e o filtro "running" de `probeSettledAfterCancel`, audit-runtime.ts) —
+    // nenhum dos quatro tinha mutante, e `supervision-mutants.ts` (issue
+    // #451) já está no teto de 800 linhas: 270 + 4 = 274.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 270;
+    const TOTAL_MUTANTS = 274;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -591,7 +598,7 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/workflow-durability-named.ts": 41,
       "scripts/mutations/orchestration.ts": 5,
       "scripts/mutations/workflow-audit-live-mutants.ts": 32,
-      "scripts/mutations/workflow-audit-producers-mutants.ts": 27,
+      "scripts/mutations/workflow-audit-producers-mutants.ts": 31,
       "scripts/mutations/web-tools-mutants.ts": 9,
       "scripts/mutations/media-catalog-other.ts": 7,
       "scripts/mutations/media-catalog-persistence.ts": 13,
@@ -606,7 +613,7 @@ describe("scripts/mutations/slices.json", () => {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(270);
+    expect(somaTabela).toBe(274);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {

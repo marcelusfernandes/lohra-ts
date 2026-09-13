@@ -82,7 +82,7 @@ describe("scripts/mutations/workflow-audit-producers-mutants.ts", () => {
     }
   });
 
-  it("focus.file é um dos nove arquivos de teste do M7 (identity/leaf/tool/cache/segment/live-tail) + #383 (watch-events/allow-list/chat-audit-wiring)", () => {
+  it("focus.file é um dos nove arquivos de teste do M7 (identity/leaf/tool/cache/segment/live-tail) + #383 (watch-events/allow-list/chat-audit-wiring) + #568 (teto/sonda)", () => {
     const expected = new Set([
       "tests/workflow-audit-identity.test.ts",
       "tests/workflow-audit-leaf.test.ts",
@@ -93,6 +93,10 @@ describe("scripts/mutations/workflow-audit-producers-mutants.ts", () => {
       "tests/workflow-watch-events.test.ts",
       "tests/workflow-audit-allow-list.test.ts",
       "tests/chat-audit-trail-wiring.test.ts",
+      // Issue #568: teto de cancel() (orchestration-runtime.ts) e sonda
+      // pós-cancel (audit-runtime.ts) — C1-C4.
+      "tests/orchestration-runtime-collect.test.ts",
+      "tests/workflow-abort-in-flight.test.ts",
     ]);
     const used = new Set(auditProducersMutants.map((mutant) => mutant.focus.file));
     for (const file of used) {
@@ -100,7 +104,7 @@ describe("scripts/mutations/workflow-audit-producers-mutants.ts", () => {
     }
   });
 
-  it("edits[].file mira só os módulos do M7 (audit-producers/audit-runtime/audit-cache/live-tail) + #383 (audit-model/workflow.ts/chat.ts/tool.ts)", () => {
+  it("edits[].file mira só os módulos do M7 (audit-producers/audit-runtime/audit-cache/live-tail) + #383 (audit-model/workflow.ts/chat.ts/tool.ts) + #568 (orchestration-runtime.ts)", () => {
     const allowed = new Set([
       "src/workflow/audit-producers.ts",
       "src/workflow/audit-runtime.ts",
@@ -110,6 +114,8 @@ describe("scripts/mutations/workflow-audit-producers-mutants.ts", () => {
       "src/commands/workflow.ts",
       "src/commands/chat.ts",
       "src/workflow/tool.ts",
+      // Issue #568: o teto de `OrchestrationChildRuntime.cancel` (C1/C2).
+      "src/workflow/orchestration-runtime.ts",
     ]);
     for (const mutant of auditProducersMutants) {
       for (const edit of mutant.edits) {
