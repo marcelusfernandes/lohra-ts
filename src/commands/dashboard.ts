@@ -10,6 +10,7 @@ import {
   type ProviderProfile,
 } from "../providers/index.js";
 import { loadProjectContext, buildSystemPrompt } from "../context/index.js";
+import { createTurnNoticesPort } from "../context/notices-overlay.js";
 import { openStateForEnvironment, SessionRepository } from "../state/index.js";
 import { GatewaySessionRegistry } from "../gateway/session-service.js";
 import { createGatewayToolRuntime } from "../gateway/tools.js";
@@ -390,6 +391,13 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     runJob: async (job) => {
       const transport = createModelTransport();
       try {
+        // Issue #589: same repository `workflow_notices` reads — a job
+        // whose prior run left a pending notice overlays it here too.
+        const notices = createTurnNoticesPort({
+          repository: toolBase.noticesRepository,
+          sessions,
+          warning: toolBase.noticesSink.warn,
+        });
         const runtime = new ConversationRuntime({
           repository: new SqliteConversationRepository(sessions),
           transport,
@@ -400,6 +408,7 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
           clock: () => Date.now() / 1_000,
           maxTokens: profile.defaultMaxTokens,
           pricingOverrides,
+          notices,
         });
         await runtime.runTurn({
           input: job.prompt,
