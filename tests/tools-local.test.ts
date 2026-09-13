@@ -48,6 +48,29 @@ describe("filesystem tools", () => {
     expect(readFileTool({ path: binary })).toContain("file is not valid UTF-8 text:");
   });
 
+  // Issue #581 (épico #575, P5): um caminho fora do project_root (aqui, um
+  // diretório sob os.tmpdir(), sem `.git`/`package.json` acima dele até a
+  // raiz — nunca ancestral do cwd real do processo de teste, a raiz deste
+  // worktree) é dado potencialmente de terceiro — o envelope carrega
+  // `untrusted: true`, campo aditivo (ADR de wire format próprio, chave
+  // nunca presente para o caso comum de um caminho dentro do projeto).
+  it("marks untrusted a path outside project_root", () => {
+    const path = join(root(), "outside.txt");
+    writeFileSync(path, "conteúdo de fora");
+    const result = JSON.parse(readFileTool({ path })) as {
+      data: string;
+      untrusted?: boolean;
+    };
+    expect(result.data).toBe("conteúdo de fora");
+    expect(result.untrusted).toBe(true);
+  });
+
+  it("omits 'untrusted' entirely for a path inside project_root", () => {
+    const path = join(process.cwd(), "package.json");
+    const result = JSON.parse(readFileTool({ path })) as Record<string, unknown>;
+    expect("untrusted" in result).toBe(false);
+  });
+
   it("writes parent directories, UTF-8 bytes, and validates content", () => {
     const path = join(root(), "sub", "out.txt");
     expect(writeFileTool({ path, content: "café 😀" })).toBe(
