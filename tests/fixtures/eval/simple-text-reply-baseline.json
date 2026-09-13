@@ -14,5 +14,5 @@
     "expect": "Hello"
   },
   "budget_tokens": 11000,
-  "note": "Sentinela do harness em si — a identidade DEFAULT_IDENTITY hoje (src/context/system-prompt.ts:1-5). #579 muda esse texto; esta é a primeira linha a ajustar quando isso acontecer."
+  "note": "Sentinela do harness em si — a identidade DEFAULT_IDENTITY hoje (src/context/system-prompt.ts:1-5). #579 (mergeado) NÃO mudou esse texto — adicionou DOCTRINE_CORE/EXTENDED depois da identidade, na mesma faixa `stable` (src/context/doctrine.ts) — então esta assertion continua correta como está; ver final-answer-avoids-promise.json e child-task-fails-silently.json para os casos que exercitam a doutrina nova."
 }

@@ -1,0 +1,28 @@
+{
+  "input": "Run the failing test suite in this repo and fix whatever's broken. Report back when it's done.",
+  "stub_script": {
+    "default": [
+      {
+        "kind": "tool_calls",
+        "calls": [{ "name": "terminal", "argumentsRaw": "{\"command\":\"echo running tests\"}" }]
+      },
+      {
+        "kind": "text",
+        "content": "Fixed the null check in auth.ts that was failing; the suite passes now."
+      }
+    ]
+  },
+  "mechanism": [
+    { "kind": "request_count", "count": 2 },
+    {
+      "kind": "system_prompt_includes",
+      "substring": "do that work now, with tools, in this same turn"
+    }
+  ],
+  "outcome": {
+    "question": "Does the final answer report completed work instead of ending with a promise to do it in a later turn?",
+    "expect": "^(?![\\s\\S]*\\b(?:I will|I'll|I am going to|next I(?:'ll| will))\\b)[\\s\\S]*\\b(?:[Ff]ixed|passes|[Dd]one|completed)\\b"
+  },
+  "budget_tokens": 15000,
+  "note": "Issue #579 (épico #575, P3, doutrina): 'before you end a turn, read your own last paragraph — if it reads like a plan, a question, or a promise, do that work now'. Mecanismo prende que a doutrina chega ao request; o oráculo de resultado usa negative lookahead para reprovar um provedor real que termine em \"I will\"/\"next I'll\" em vez de reportar trabalho já concluído. No stub, o texto scriptado já cumpre a doutrina (trivial), como os demais casos de outcome — a variação real só aparece com --provider."
+}

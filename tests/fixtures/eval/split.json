@@ -16,7 +16,8 @@
     "terminal-safe-command-executes",
     "read-file-missing-reports-error",
     "skill-use-lohra-ts-one-leaf",
-    "tool-choice-read-file-over-terminal"
+    "tool-choice-read-file-over-terminal",
+    "final-answer-avoids-promise"
   ],
   "holdout": [
     "child-task-fails-silently-holdout",
