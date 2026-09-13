@@ -61,6 +61,39 @@ as sete no mesmo padrão: propósito, quando preferir a alternativa (`terminal`
 vs. `read_file`/`write_file`, `web_search` vs. `web_fetch`), e o limite
 numérico real do código (não um número inventado).
 
+## Overlay de avisos operacionais no turno (issue #589, P13)
+
+Distinto da dieta do catálogo acima (que corta o que é enviado sempre): o
+overlay de avisos ACRESCENTA conteúdo à mensagem do usuário, só quando há
+algo pendente. `ConversationRuntime.runTurn` recebe uma porta opcional
+`notices: TurnNoticesPort` (`src/context/notices-overlay.ts`); sem ela — ou
+sem nada pendente — o request é byte-idêntico a antes desta issue existir.
+
+Com avisos pendentes, o que entra no turno:
+
+- No início, um _claim_ lê os avisos não reconhecidos do escopo `global` mais
+  `session:<id>` para a sessão e cada ancestral
+  (`SessionRepository.lineageRootToTip`) — nunca `run:<id>` (workflow run e
+  sessão de chat são namespaces de id disjuntos; detalhe completo em
+  `docs/operator-notices.md#entrega-no-turno-sem-tool-call-issue-589`).
+- O bloco formatado tem teto de **4.096 chars** (cabeçalho
+  `OPERATOR NOTICES (not the user speaking):`, marcador de fim); o que não
+  coube fica de fora do texto e do que é reconhecido, pendente para o
+  próximo claim.
+- Anexado ao CONTEÚDO da mensagem do usuário do turno — nunca ao
+  `systemPrompt` (mesma doutrina de P3/P4: bloco do operador não é fala do
+  usuário; o cabeçalho reforça isso em texto).
+- **Ack só depois de `commitTurn`** gravar o turno; qualquer falha antes
+  disso pula para o `catch` de `runTurn`, que nunca confirma — o aviso
+  reaparece no claim do próximo turno exatamente como se este nunca tivesse
+  rodado.
+- Um turno morto publica seu próprio aviso (`session:<sessionId>`, `kind`
+  mapeado de `ConversationError.code`) para o PRÓXIMO turno da mesma sessão
+  ver, via claim.
+
+Wireado sobre o MESMO `noticesRepository` que `workflow_notices` já lê, em
+`chat.ts` e no `runJob` do `dashboard.ts` — nenhuma superfície nova.
+
 ## O que este documento ainda não cobre
 
 Faixas `stable/context/volatile` do prompt, doutrina de relato e escopo,
