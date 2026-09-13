@@ -290,7 +290,8 @@ export class WorkflowEngine {
           total,
         );
       }
-      let { output, usedFallback } = extractForcedOutput(collected, forced);
+      const { output: forcedOutput, usedFallback } = extractForcedOutput(collected, forced);
+      let output = forcedOutput;
       if (schema !== null && output !== null) {
         for (let attempt = 0; attempt <= MAX_VALIDATION_RETRIES; attempt += 1) {
           const parsed = parseAndValidate(output, schema);
@@ -329,8 +330,7 @@ export class WorkflowEngine {
             );
             return { output: null, usage: total, complete: false };
           }
-          // #602: steer's resurrection carries `forcedTool` again — same extraction as above.
-          ({ output, usedFallback } = extractForcedOutput(collected, forced));
+          output = extractForcedOutput(collected, forced).output; // #602: usedFallback keeps the 1st reading.
         }
       }
       if (usedFallback) this.result.forcingFallbacks += 1;
