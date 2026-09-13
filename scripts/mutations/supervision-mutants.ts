@@ -10,17 +10,15 @@
 // issue #148); `mechanism: "family-a"` é só rótulo descritivo, mesma
 // convenção de `workflow-audit-producers-mutants.ts`.
 //
-// Issue #484 (milestone 15, achado dos vereditos das PRs #478/#482)
-// acrescenta 9 mutantes: 6 para `src/workflow/cache-preview.ts` (#462) e 3
-// para `src/workflow/templates.ts` (#464) — nenhum dos dois tinha mutante em
-// catálogo nenhum, apesar de `srcGlobs: ["src/workflow/**", ...]` já cobrir
-// os dois (não precisou de `srcGlobs` novo, só `focusFiles`).
+// Issue #484 (milestone 15, PRs #478/#482) acrescenta 9 mutantes: 6 para
+// `cache-preview.ts` (#462) e 3 para `templates.ts` (#464) — nenhum tinha
+// mutante; `srcGlobs` já cobria os dois, só `focusFiles` mudou.
 //
-// Rodada 2 (veredito da PR #497, revisor): a rodada 1 tinha deixado de fora
-// o mutante de `put()` (P6, abaixo) com uma justificativa FALSA de "código
-// morto" — ver o comentário de P6 para a refutação. Ancorado em
-// `tests/workflow-cache-preview-writes.test.ts` (arquivo novo — a suíte
-// principal está no teto de 800 linhas; issue #484 emendada com esse glob).
+// Rodada 2 (veredito da PR #497): a rodada 1 tinha deixado de fora o
+// mutante de `put()` (P6, abaixo) com justificativa FALSA de "código
+// morto" — ver o comentário de P6. Ancorado em
+// `tests/workflow-cache-preview-writes.test.ts` (novo — a suíte principal
+// está no teto de 800 linhas; #484 emendada com esse glob).
 //
 // `category` deriva do `id` sem o prefixo `<letra><n>-`. `focus.test` é o
 // título literal do `it` (substring do `fullName`, veredito da PR #371/#362)
@@ -698,12 +696,8 @@ export const supervisionMutants: readonly Mutant[] = [
     ],
   },
   {
-    // Re-anchored by issue #568 (r2, veredito da PR #573): a leaf's usage
-    // on cancel is now `combineUsage(error.measuredUsage, error.partialUsage)`
-    // (`child-runner.ts`), not `error.partialUsage` alone — the ORIGINAL
-    // anchor (a single `zeroResult(...)` argument) no longer exists
-    // verbatim. Same mutation intent (drop the usage this leaf would
-    // otherwise report), moved one line up to the `usage` binding itself.
+    // Re-anchored (issue #568 r2): usage now flows through combineUsage()
+    // in child-runner.ts, not error.partialUsage alone — same intent.
     id: "N2-cancelled-leaf-usage-dropped",
     category: "cancelled-leaf-usage-dropped",
     mechanism: "family-a",
