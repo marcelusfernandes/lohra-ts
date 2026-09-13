@@ -9,6 +9,26 @@
 // módulo, decisão 3 da issue).
 export type SubagentOutcome = "result" | "failed" | "needs_input";
 
-export function parseOutcomeSentinel(_content: string): SubagentOutcome | null {
-  throw new Error("not implemented: parseOutcomeSentinel");
+const SENTINELS: ReadonlyArray<{ readonly pattern: RegExp; readonly outcome: SubagentOutcome }> = [
+  { pattern: /^result:\s?/iu, outcome: "result" },
+  { pattern: /^failed:\s?/iu, outcome: "failed" },
+  { pattern: /^needs input:\s?/iu, outcome: "needs_input" },
+];
+
+/** Last non-blank line of `content`, trimmed — `null` when every line is
+ * blank (including empty content). */
+function lastNonBlankLine(content: string): string | null {
+  const lines = content.split("\n");
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = (lines[index] ?? "").trim();
+    if (line.length > 0) return line;
+  }
+  return null;
+}
+
+export function parseOutcomeSentinel(content: string): SubagentOutcome | null {
+  const line = lastNonBlankLine(content);
+  if (line === null) return null;
+  const matched = SENTINELS.find(({ pattern }) => pattern.test(line));
+  return matched?.outcome ?? null;
 }
