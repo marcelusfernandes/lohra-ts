@@ -6,7 +6,9 @@ import {
   loadProjectContext,
   buildSystemPrompt,
   doctrineText,
+  harnessText,
   resolveDoctrineTier,
+  type PromptMode,
 } from "../context/index.js";
 import { createTurnNoticesPort } from "../context/notices-overlay.js";
 import { readCodexModel } from "../auth/codex.js";
@@ -312,18 +314,34 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   const doctrine = doctrineText(
     resolveDoctrineTier({ providerName: profile.name, environment: options.environment }),
   );
+  // Issue #580 (épico #575, P4): "headless" sob --json/--no-input (nenhum
+  // humano observando este turno em tempo real, sem stdin para retomar uma
+  // conversa) e "interactive" caso contrário — mesma regra que
+  // `chat.ts:332` já usa para decidir o callback de aprovação. `yolo` é
+  // exatamente a flag `--yolo` (`CHAT_SPEC`, `src/cli/arg-spec.ts:58`), a
+  // única exceção real à negação automática (`src/tools/approval.ts`).
+  // Resolvido uma vez aqui, como `doctrine` acima — nunca dentro de
+  // `snapshot`.
+  const mode: PromptMode =
+    options.flags.has("--json") || options.flags.has("--no-input") ? "headless" : "interactive";
+  const harness = harnessText({ mode, yolo: options.flags.has("--yolo") });
   const snapshot = (): string => {
     const context = loadProjectContext(options.cwd);
     const identity = loadSoul(options.home);
-    const memory = useTools ? memoryStore.snapshot() : null;
+    // Issue #580 AC 2: memória, perfil e índice de skills entram no prompt
+    // mesmo sob --no-tools — a tool `memory`/`skill_view` some (`useTools`
+    // ainda controla o registro das tools abaixo), mas o CONHECIMENTO não;
+    // só a leitura em disco é sempre feita, nunca condicionada a `useTools`.
+    const memory = memoryStore.snapshot();
     return buildSystemPrompt({
       ...(identity === undefined ? {} : { identity }),
       doctrine,
+      harness,
       contextFiles: context.instructions,
       environmentHints: context.hints,
-      ...(memory === null || !memory.memory ? {} : { memorySnapshot: memory.memory }),
-      ...(memory === null || !memory.user ? {} : { userProfile: memory.user }),
-      ...(useTools ? { skillsIndex: skillStore.snapshot() } : {}),
+      ...(memory.memory ? { memorySnapshot: memory.memory } : {}),
+      ...(memory.user ? { userProfile: memory.user } : {}),
+      skillsIndex: skillStore.snapshot(),
     }).text;
   };
   approval.reset();

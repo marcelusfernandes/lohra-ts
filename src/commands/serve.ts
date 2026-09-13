@@ -9,7 +9,12 @@
 import { randomBytes } from "node:crypto";
 
 import { registerShutdownTrigger } from "../cli/shutdown-trigger.js";
-import { buildSystemPrompt, doctrineText, resolveDoctrineTier } from "../context/index.js";
+import {
+  buildSystemPrompt,
+  doctrineText,
+  harnessText,
+  resolveDoctrineTier,
+} from "../context/index.js";
 import {
   AGENTIC_MAX_ITERATIONS,
   buildAllowedTools,
@@ -118,11 +123,19 @@ export async function runServe(options: ServeCommandOptions): Promise<number> {
   const doctrine = doctrineText(
     resolveDoctrineTier({ providerName: profile.name, environment: options.environment }),
   );
+  // Issue #580 (épico #575, P4): mode "server" — every turn is opened by an
+  // HTTP request to this gateway, and `CompletionService`'s
+  // `RequestRepository` (`src/server/request-repository.ts`) implements
+  // none of `acquireCompressionLock`/`releaseCompressionLock`/
+  // `compactHistory`, so `harnessText` omits the compaction line for this
+  // mode (`preflightCompact` would emit `compaction.unsupported` and move
+  // on without compacting). Resolved once here, same as `doctrine` above.
+  const harness = harnessText({ mode: "server" });
 
   const service = new CompletionService({
     transport: modelTransport,
     streamingTransport: streamingModelTransport,
-    systemPrompt: () => buildSystemPrompt({ doctrine }).text,
+    systemPrompt: () => buildSystemPrompt({ doctrine, harness }).text,
     provider: profile.name,
     maxIterations,
     defaultMaxTokens: profile.defaultMaxTokens,

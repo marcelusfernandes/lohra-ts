@@ -13,8 +13,11 @@ import {
   loadProjectContext,
   buildSystemPrompt,
   doctrineText,
+  harnessText,
   resolveDoctrineTier,
 } from "../context/index.js";
+import { loadSoul, MemoryStore } from "../memory/index.js";
+import { SkillStore } from "../skills/index.js";
 import { createTurnNoticesPort } from "../context/notices-overlay.js";
 import { openStateForEnvironment, SessionRepository } from "../state/index.js";
 import { GatewaySessionRegistry } from "../gateway/session-service.js";
@@ -45,7 +48,8 @@ import { resolveFanout } from "../orchestration/fanout-config.js";
 import { loadPriceOverrides } from "../pricing/index.js";
 import { OpenAIImagesAdapter } from "../media/index.js";
 import { registerConfiguredMcpServers, type MCPManager } from "../mcp/index.js";
-import { join } from "node:path";
+import { dirname, join, resolve as resolvePath } from "node:path";
+import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import {
   AuditTrail,
@@ -272,10 +276,35 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
   const doctrine = doctrineText(
     resolveDoctrineTier({ providerName: profile.name, environment: options.environment }),
   );
+  // Issue #580 (épico #575, P4): `dashboard` só tem o modo "interactive" —
+  // não existe `--json`/`--no-input` em `DASHBOARD_SPEC`
+  // (`src/cli/arg-spec.ts`) — e nunca chama `approval.setYolo`, então
+  // `yolo` fica no default `false` de `harnessText`.
+  const harness = harnessText({ mode: "interactive" });
+  // Issue #580 AC 3: dashboard monta o prompt com os MESMOS inputs de chat
+  // (`chat.ts`'s `snapshot()`) — identidade, memória, perfil e índice de
+  // skills, nunca só doutrina + Environment como antes desta issue.
+  const identity = loadSoul(options.home);
+  const memoryStore = new MemoryStore(options.home);
+  const memory = memoryStore.snapshot();
+  const builtinSkills = resolvePath(
+    dirname(fileURLToPath(import.meta.url)),
+    "../../assets/skills/workflow-authoring",
+  );
+  const skillStore = new SkillStore(
+    options.home,
+    [join(options.cwd, ".claude", "skills")],
+    [builtinSkills],
+  );
   const systemPrompt = buildSystemPrompt({
+    ...(identity === undefined ? {} : { identity }),
     doctrine,
+    harness,
     contextFiles: context.instructions,
     environmentHints: context.hints,
+    ...(memory.memory ? { memorySnapshot: memory.memory } : {}),
+    ...(memory.user ? { userProfile: memory.user } : {}),
+    skillsIndex: skillStore.snapshot(),
   }).text;
 
   const connection = openStateForEnvironment(options.environment);
