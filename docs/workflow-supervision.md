@@ -499,12 +499,16 @@ próprio; a doutrina completa, com o que ainda ficou aberto, está em
   o assentamento real, até `CANCEL_SETTLE_TIMEOUT_MS` (2 s,
   `orchestration-runtime.ts:31`) — passado esse teto, devolve mesmo assim
   (nunca trava o caller por um leaf que genuinamente não assenta a tempo).
-  `AuditedChildRuntime.cancel` (`audit-runtime.ts:506-525`) sonda o
+  `AuditedChildRuntime.cancel` (`audit-runtime.ts:517-535`) sonda o
   resultado real logo depois; se a folha assentou dentro do teto, o
   `leaf.failed` carrega o `partial`/`usage` estimados de verdade; se não
-  (sonda tarde demais, erro, ou nenhum `OrchestrationChildRuntime` de
-  verdade por trás), cai no placeholder `{status: "cancelled", error_kind:
-"cancelled"}` que `cancel()` sempre escreveu, sem `partial`.
+  (sonda tarde demais — o próprio `collect(wait:false)` ainda devolve
+  "running" —, ou nenhum `OrchestrationChildRuntime` de verdade por trás),
+  cai no placeholder `{status: "cancelled", error_kind: "cancelled"}` que
+  `cancel()` sempre escreveu, sem `partial`. Um erro real da sonda (issue
+  #568: antes um `catch {}` nu, silencioso) é nomeado via `warn` — o mesmo
+  canal fail-closed de `audit-producers.ts` — antes de cair no mesmo
+  placeholder; nunca propagado, nunca engolido sem rastro.
 - **steer** (M16-S5/#520, decisão D2 adotada por default) — TODO `workflow_steer`
   numa folha ocupada com uma chamada de provedor genuinamente em voo
   interrompe essa chamada, nunca opt-in: `OrchestrationCore`'s
