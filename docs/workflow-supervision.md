@@ -619,4 +619,6 @@ repetir a extração da tool call. Uma folha que respondia certo na correção
 (schema válido, via `StructuredOutput`) ainda assim esgotava
 `MAX_VALIDATION_RETRIES`, porque o motor validava o texto, não o argumento
 da chamada. Agora o re-collect usa a mesma `extractForcedOutput` do primeiro
-collect.
+collect — mas só para reler `output`: `usedFallback` continua pinado na
+leitura do primeiro collect, nunca recalculado (rodada 2 do veredito da PR
+#609; mudar o contrato de `forcing_fallbacks` está fora do escopo de #602).

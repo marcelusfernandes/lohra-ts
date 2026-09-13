@@ -236,14 +236,18 @@ cru de um leaf quando o nó pediu `schema`/`schema_ref` **e** `tool_less:
 true` e o leaf completou sem emitir a tool call `StructuredOutput`
 (`resolveLeafRequestOptions`/`extractForcedOutput`, `engine-utils.ts:190-202,
 236-247`; incrementado em `engine.ts:336`). Desde #602, o re-collect de uma
-rodada de correção (steer) também passa pela mesma `extractForcedOutput` —
-antes lia a prosa crua da correção, contando como fallback (ou pior,
-travando a validação) mesmo quando o modelo já respondia pela tool.
-`usedFallback` é recalculado a cada collect (a última leitura aceita vence);
-para um nó sem `forced`, o comportamento é byte-idêntico ao anterior
-(`extractForcedOutput` devolve `collected.output` direto). Nunca conta uma
-escolha de roteamento (`provider`/`model`/`tier`) feita de
-propósito.
+rodada de correção (steer) também passa pela mesma `extractForcedOutput`
+para reler `output` — antes lia a prosa crua do turno de correção, travando
+a validação (nunca contando como fallback: o nó faultava com "schema not
+satisfied after retries" antes de chegar perto do incremento de
+`forcing_fallbacks`, já que `parseAndValidate` nunca aceitava aquele texto
+como o objeto do schema). `usedFallback`, por outro lado, **nunca** é
+recalculado — fica pinado na leitura do PRIMEIRO collect, do jeito que
+`main` sempre fez (mudar esse contrato está fora do escopo de #602); só
+`output` é reextraído a cada re-collect. Para um nó sem `forced`, o
+comportamento é byte-idêntico ao anterior (`extractForcedOutput` devolve
+`collected.output` direto). Nunca conta uma escolha de roteamento
+(`provider`/`model`/`tier`) feita de propósito.
 
 ### `partial`, `usage_uncertain` e `interrupted` (abort em voo, M16, épico #490)
 
