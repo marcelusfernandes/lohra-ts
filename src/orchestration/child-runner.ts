@@ -15,6 +15,7 @@ import { formatProviderFailureMessage } from "../serialization/provider-error-me
 import type { SessionRepository } from "../state/index.js";
 import {
   childToolDefinitions,
+  composeDispatch,
   createChildDispatch,
   RegistryToolDispatcher,
   toolResult,
@@ -261,24 +262,27 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
         forcedDefinition === null
           ? baseToolDefinitions
           : Object.freeze([...baseToolDefinitions, forcedDefinition]);
-      // Issue #578: the synthetic tool is intercepted BEFORE the sandbox
-      // wrap/real registry ever see it — it names no real capability
-      // (fs/egress/taint) and exists only to carry the leaf's structured
-      // answer back as this call's own arguments; routing it through
-      // `dispatch` would either hit the sandbox's fail-closed
+      // Issue #578/#602: the synthetic tool is intercepted BEFORE the
+      // sandbox wrap/real registry ever see it — it names no real
+      // capability (fs/egress/taint) and exists only to carry the leaf's
+      // structured answer back as this call's own arguments; routing it
+      // through `dispatch` would either hit the sandbox's fail-closed
       // `denyAllDispatch` (counted as a spurious refusal, #246) or the real
       // registry's "unknown tool" (never registered), stalling the schema
       // instead of completing it. The acknowledgement's content is never
       // read by anything — `extractForcedOutput`
       // (`workflow/engine-utils.ts`) reads the CALL's own arguments off
       // `ConversationTurnResult.toolCalls` below, not this result string.
-      const structuredOutputDispatch = (
-        name: string,
-        args: Readonly<Record<string, unknown>>,
-      ): Promise<string> =>
-        forcedDefinition !== null && name === forcedDefinition.function.name
-          ? Promise.resolve(toolResult({ received: true }))
-          : dispatch(name, args);
+      // `composeDispatch` (`tools/dispatch.ts`) is the same by-name
+      // intercept-or-fallthrough `gateway/tools.ts`/`media/bindings.ts`
+      // already use — no reason for this leaf to hand-roll it.
+      const structuredOutputDispatch =
+        forcedDefinition === null
+          ? dispatch
+          : composeDispatch(dispatch, {
+              [forcedDefinition.function.name]: () =>
+                Promise.resolve(toolResult({ received: true })),
+            });
       const runtime = new ConversationRuntime({
         repository,
         transport: new NonClosingTransport(buildTransport(client, true)),
@@ -327,7 +331,13 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
         // (`workflow/engine-utils.ts`) is the only production reader,
         // looking for `StructuredOutput` specifically; absent/empty stays
         // absent so a `CollectResult` fixture from before this issue is
-        // untouched.
+        // untouched. Issue #602 (achado menor): kept UNFILTERED here on
+        // purpose rather than narrowed to `forcedDefinition`'s own name —
+        // `CollectResult.toolCalls`'s own doc (`orchestration/core.ts`)
+        // already commits to "forwarded verbatim", and narrowing it here
+        // would silently break that contract for any future reader without
+        // a compile-time signal (the field is a plain array, not tied to
+        // `forced`/`SpawnConfig` in its own type).
         const toolCallsField =
           result.toolCalls !== undefined && result.toolCalls.length > 0
             ? { toolCalls: result.toolCalls.map((call) => ({ ...call })) }
