@@ -22,6 +22,13 @@ const USER_PROFILE_PREFIX = "User profile: who the user is and how they prefer t
 const PROJECT_INSTRUCTIONS_PREFIX =
   "Project instructions below override default behavior for work inside this project.";
 
+/** Issue #588 (épico #575, P12): última linha do bloco `Environment:` —
+ * o snapshot (plataforma, shell, node, git) é tirado uma vez, no início da
+ * sessão (invariante 1), e nunca se atualiza durante a conversa mesmo que
+ * o estado real mude. Presente sempre que houver ao menos um hint. */
+const ENVIRONMENT_SNAPSHOT_NOTE =
+  "Snapshot taken at session start; it does not update during the conversation.";
+
 export class SystemPromptSnapshot {
   readonly stable: string;
   readonly context: string;
@@ -58,11 +65,23 @@ export interface SystemPromptInputs {
   readonly today?: string;
 }
 
+/** Issue #588: um valor multilinha (`git_status`, `git_recent`) quebraria a
+ * forma `- key: value` — em vez disso, a chave fica sozinha e cada linha do
+ * valor entra indentada duas colunas abaixo. */
+function renderHintLine(key: string, value: string): string {
+  if (!value.includes("\n")) return `- ${key}: ${value}`;
+  const indented = value
+    .split("\n")
+    .map((line) => `  ${line}`)
+    .join("\n");
+  return `- ${key}:\n${indented}`;
+}
+
 function environmentText(hints: Readonly<Record<string, string>>): string {
   const keys = Object.keys(hints).sort();
-  return keys.length === 0
-    ? ""
-    : `Environment:\n${keys.map((key) => `- ${key}: ${hints[key] ?? ""}`).join("\n")}`;
+  if (keys.length === 0) return "";
+  const lines = keys.map((key) => renderHintLine(key, hints[key] ?? ""));
+  return `Environment:\n${lines.join("\n")}\n${ENVIRONMENT_SNAPSHOT_NOTE}`;
 }
 
 function contextText(files: readonly (readonly [string, string])[]): string {

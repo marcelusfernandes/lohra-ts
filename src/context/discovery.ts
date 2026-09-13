@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { closeSync, existsSync, lstatSync, openSync, readSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
@@ -8,6 +9,13 @@ const PROJECT_SKILL_DIRS = [".claude/skills", ".lohra/skills"] as const;
 const MAX_CHARS = 32_000;
 const MAX_BYTES = 128_000;
 const MAX_WALK = 25;
+
+/** Issue #588 (épico #575, P12): timeout por comando git ao montar o
+ * snapshot de ambiente — nenhum comando pode travar a construção do system
+ * prompt (invariante 1, CLAUDE.md: construído uma vez por sessão). */
+const GIT_TIMEOUT_MS = 500;
+const GIT_STATUS_MAX_LINES = 20;
+const GIT_RECENT_COMMIT_COUNT = 5;
 
 export type PathResolver = (path: string) => string;
 
@@ -142,19 +150,110 @@ export interface ProjectContext {
   readonly hints: Readonly<Record<string, string>>;
 }
 
+/** Issue #588 (épico #575, P12): plataforma, shell e versão de node —
+ * nunca dependem de `cwd` nem de git, sempre presentes. `shell` espelha o
+ * fallback que `terminal.ts`'s `shellInvocation` já usa para decidir qual
+ * shell de fato roda um comando (`process.env.ComSpec`/`SHELL`), para o
+ * hint nunca prometer um shell diferente do que a tool `terminal` usaria. */
+function staticEnvironmentHints(): Readonly<Record<string, string>> {
+  const shell =
+    process.platform === "win32"
+      ? (process.env.ComSpec ?? "cmd.exe")
+      : (process.env.SHELL ?? "/bin/sh");
+  return { platform: process.platform, node: process.version, shell };
+}
+
+/** Roda um comando git local, fail-open: qualquer erro (não é repositório,
+ * `git` ausente, exit não-zero, timeout) devolve `undefined`, nunca lança.
+ * `gitBinary` é injetável só para teste (um executável falso que trava ou
+ * sai não-zero, sem depender de mutar `PATH`). Nunca acessa rede — só
+ * subcomandos que leem o estado local (`status`, `log`, `symbolic-ref`,
+ * `rev-parse`). */
+function tryGit(gitBinary: string, args: readonly string[], cwd: string): string | undefined {
+  try {
+    return execFileSync(gitBinary, args, {
+      cwd,
+      timeout: GIT_TIMEOUT_MS,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+function formatGitStatus(status: string): string {
+  if (status.length === 0) return "clean";
+  const lines = status.split("\n").filter((line) => line.length > 0);
+  if (lines.length <= GIT_STATUS_MAX_LINES) return lines.join("\n");
+  const shown = lines.slice(0, GIT_STATUS_MAX_LINES);
+  const hidden = lines.length - GIT_STATUS_MAX_LINES;
+  return `${shown.join("\n")}\n... (${String(hidden)} more, truncated)`;
+}
+
+/** `refs/remotes/origin/HEAD` só existe quando alguém já rodou
+ * `git remote set-head` (ou clonou com espelhamento) — nunca é resolvido
+ * por rede aqui; ausência é o caso comum e fail-open (chave omitida). */
+function gitDefaultBranch(gitBinary: string, cwd: string): string | undefined {
+  const ref = tryGit(gitBinary, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cwd);
+  if (ref === undefined || ref.length === 0) return undefined;
+  const slash = ref.indexOf("/");
+  const short = slash === -1 ? ref : ref.slice(slash + 1);
+  return short.length === 0 ? undefined : short;
+}
+
+/** Issue #588: snapshot de git — branch, branch default, status curto e
+ * commits recentes. Um único comando de porteiro (`rev-parse
+ * --show-toplevel`) decide se `cwd` está dentro de um repositório antes de
+ * tentar o resto: fora de um repositório (o caso comum), isso custa uma
+ * falha rápida em vez de quatro; um `git` falso que trava também só paga o
+ * timeout uma vez. Cada chave depois do porteiro ainda falha
+ * independentemente (fail-open por comando, nunca em bloco). */
+function gitSnapshot(cwd: string, gitBinary: string): Readonly<Record<string, string>> {
+  const hints: Record<string, string> = {};
+  if (tryGit(gitBinary, ["rev-parse", "--show-toplevel"], cwd) === undefined) return hints;
+
+  const branch =
+    tryGit(gitBinary, ["symbolic-ref", "--short", "HEAD"], cwd) ??
+    tryGit(gitBinary, ["rev-parse", "--short", "HEAD"], cwd);
+  if (branch !== undefined && branch.length > 0) hints.git_branch = branch;
+
+  const defaultBranch = gitDefaultBranch(gitBinary, cwd);
+  if (defaultBranch !== undefined) hints.git_default_branch = defaultBranch;
+
+  const status = tryGit(gitBinary, ["status", "--porcelain"], cwd);
+  if (status !== undefined) hints.git_status = formatGitStatus(status);
+
+  const recent = tryGit(
+    gitBinary,
+    ["log", `-${String(GIT_RECENT_COMMIT_COUNT)}`, "--oneline"],
+    cwd,
+  );
+  if (recent !== undefined && recent.length > 0) hints.git_recent = recent;
+
+  return hints;
+}
+
 export function loadProjectContext(
   cwd: string,
   resolver: PathResolver = resolveInput,
+  gitBinary = "git",
 ): ProjectContext {
+  const environment = staticEnvironmentHints();
   try {
     const root = findProjectRoot(cwd, resolver);
     const resolved = resolver(cwd);
     return {
       instructions: discoverInstructions(resolved, root, resolver),
-      hints: { cwd: resolved, project_root: resolver(root) },
+      hints: {
+        cwd: resolved,
+        project_root: resolver(root),
+        ...environment,
+        ...gitSnapshot(resolved, gitBinary),
+      },
     };
   } catch {
-    return { instructions: [], hints: { cwd } };
+    return { instructions: [], hints: { cwd, ...environment } };
   }
 }
 
