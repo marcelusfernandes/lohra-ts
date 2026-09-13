@@ -1,10 +1,13 @@
-import { buildSystemPrompt, DEFAULT_IDENTITY } from "../context/index.js";
+import { buildSystemPrompt, DEFAULT_IDENTITY, DOCTRINE_CORE } from "../context/index.js";
 
 /**
  * Byte-measured against evidence-s01-child-real.json's child_system_full
  * (and confirmed unchanged across an idle-steer resurrection by
- * evidence-s02-steer.json) — three static paragraphs, no memory/user-profile/
- * skills sections, since a subagent has no access to those stores.
+ * evidence-s02-steer.json) — no memory/user-profile/skills sections, since a
+ * subagent has no access to those stores. Issue #579 (épico #575, P3) added
+ * DOCTRINE_CORE as a fourth static paragraph between this one and the date;
+ * the byte-exact contract moved from a hardcoded literal to
+ * `tests/orchestration-subagent-prompt.test.ts` composing DOCTRINE_CORE in.
  */
 const SUBAGENT_ISOLATION =
   "You are an isolated subagent spawned to complete one specific task. You " +
@@ -25,6 +28,13 @@ const SUBAGENT_ISOLATION =
 export function buildSubagentSystemPrompt(overrides: { readonly today?: string } = {}): string {
   return buildSystemPrompt({
     identity: `${DEFAULT_IDENTITY}\n\n${SUBAGENT_ISOLATION}`,
+    // Issue #579 (épico #575, P3): sempre o núcleo universal, nunca a
+    // extensão — este call site (`orchestration/chat-wiring.ts`) não tem o
+    // perfil do provedor pai disponível para decidir a faixa
+    // (`resolveDoctrineTier`), e essa fiação está fora dos `Files` desta
+    // issue. #583 (P7, "prompt do subagente com ambiente, tools e contrato
+    // de retorno") é quem estende este call site com mais contexto.
+    doctrine: DOCTRINE_CORE,
     ...(overrides.today === undefined ? {} : { today: overrides.today }),
   }).text;
 }
