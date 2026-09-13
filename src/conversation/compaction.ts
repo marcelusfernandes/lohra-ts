@@ -56,8 +56,9 @@ export const SUMMARY_MAX_TOKENS_DIVISOR = 8;
 /**
  * `clamp(1024, ceil(foldedTokens / 8), 4096)` (issue #584 AC). Pure.
  */
-export function summaryMaxTokens(_foldedTokens: number): number {
-  throw new Error("not implemented: summaryMaxTokens");
+export function summaryMaxTokens(foldedTokens: number): number {
+  const proportional = Math.ceil(Math.max(0, foldedTokens) / SUMMARY_MAX_TOKENS_DIVISOR);
+  return Math.min(SUMMARY_MAX_TOKENS_CEILING, Math.max(SUMMARY_MAX_TOKENS_FLOOR, proportional));
 }
 
 /** Issue #584: fraction of the (best-guess) context window the transcript
@@ -208,6 +209,42 @@ export function buildSummaryMessages(
   ];
 }
 
+function transcriptLine(message: Readonly<Record<string, unknown>>): string {
+  const role = typeof message.role === "string" ? message.role : "unknown";
+  const content =
+    typeof message.content === "string" && message.content.length > 0
+      ? message.content
+      : JSON.stringify(message.content ?? message.tool_calls ?? message);
+  return `${role}: ${content}`;
+}
+
+/** Issue #584: mirrors `turnAlignedTailCount`'s own rule (never split a
+ * `tool_calls` message from its `tool` results) but walking FORWARD from the
+ * head instead of backward from the tail -- `buildTranscript` below keeps
+ * the head (the earliest requests and constraints) and cuts the tail (the
+ * most recent of the folded messages, already closest to the untouched kept
+ * tail `attemptCompaction` preserves outside the fold). Returns how many
+ * leading messages to keep whole. Pure. */
+function headAlignedKeepCount(
+  messages: readonly Readonly<Record<string, unknown>>[],
+  maxTokens: number,
+): number {
+  let tokens = 0;
+  let candidate = 0;
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    const messageTokens = message === undefined ? 0 : estimateTokens([message]).tokens;
+    if (tokens + messageTokens > maxTokens && candidate > 0) break;
+    tokens += messageTokens;
+    candidate = index + 1;
+  }
+  if (candidate >= messages.length) return candidate;
+  for (let cut = candidate; cut > 0; cut -= 1) {
+    if (messages[cut]?.role === "user") return cut;
+  }
+  return candidate;
+}
+
 export interface TranscriptResult {
   readonly transcript: string;
   readonly truncated: boolean;
@@ -232,10 +269,31 @@ export interface TranscriptResult {
  * quando trunca") -- never mutates `messages`.
  */
 export function buildTranscript(
-  _messages: readonly Readonly<Record<string, unknown>>[],
-  _maxTokens: number = DEFAULT_TRANSCRIPT_TOKEN_BUDGET,
+  messages: readonly Readonly<Record<string, unknown>>[],
+  maxTokens: number = DEFAULT_TRANSCRIPT_TOKEN_BUDGET,
 ): TranscriptResult {
-  throw new Error("not implemented: buildTranscript");
+  const fullTokens = estimateTokens(messages).tokens;
+  if (messages.length === 0 || fullTokens <= maxTokens) {
+    return {
+      transcript: messages.map(transcriptLine).join("\n\n"),
+      truncated: false,
+      droppedMessages: 0,
+    };
+  }
+  const keepCount = headAlignedKeepCount(messages, maxTokens);
+  const kept = messages.slice(0, keepCount);
+  const droppedMessages = messages.length - kept.length;
+  console.warn(
+    `compaction: transcript sent to the summarizer was truncated -- dropped ` +
+      `${String(droppedMessages)} of ${String(messages.length)} folded message(s) ` +
+      `(estimated ~${String(fullTokens)} tokens, budget was ${String(maxTokens)})`,
+  );
+  const lines = kept.map(transcriptLine);
+  lines.push(
+    `[... ${String(droppedMessages)} more recent folded message(s) omitted: transcript ` +
+      `exceeded the ${String(maxTokens)}-token budget for the summary call ...]`,
+  );
+  return { transcript: lines.join("\n\n"), truncated: true, droppedMessages };
 }
 
 export interface CompactionAttemptInput {

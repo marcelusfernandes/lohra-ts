@@ -166,9 +166,90 @@ uso — uma janela real, não hipotética) em `CompressionLockNotHeldError`
   continua consistente), mas redundante nesse caso raro; recomparar
   exigiria levar o limiar/estimativa para dentro de `attemptCompaction`,
   fora do escopo M desta issue.
-- `buildTranscript` manda o trecho inteiro a resumir para o summarizer, sem
-  truncar. Uma sessão muito acima da janela (por exemplo depois de um
-  `LOHRA_CONTEXT_WINDOW` bem menor que o histórico real acumulado) pode
-  fazer a própria chamada de resumo estourar a janela do provedor —
-  `CompactionFailedError` cobre esse caso (fault nomeado, nunca silencioso,
-  invariante 2), mas não tenta truncar o trecho para caber.
+- Um summarizer dedicado com modelo/preço próprios (`AuxClient`,
+  `src/agent/aux.ts`) continua fora de escopo (P11, issue #587, depende
+  desta) — o caminho default abaixo continua reaproveitando o transporte do
+  próprio turno. #587 também é quem deve levar o limiar/janela REAL do
+  turno (`resolveTurnContextWindow`, hoje só resolvido em
+  `src/conversation/runtime.ts`) para dentro de `attemptCompaction`; até lá,
+  o orçamento de truncamento do transcript (seção abaixo) usa um default
+  autocontido, não a janela real do provedor da chamada.
+
+## Compactação preserva pedidos e restrições verbatim (issue #584)
+
+Três ajustes, todos em `src/agent/aux.ts` e `src/conversation/compaction.ts`
+(`SessionRepository`, `src/state/session-repository.ts`, ganha só a troca de
+um texto). Motivação: com os oito headings originais, uma proibição dita no
+começo de uma sessão longa só sobrevivia à compactação se o modelo a
+julgasse "ainda relevante" e coubesse nos 1024 tokens fixos do resumo junto
+com todo o resto.
+
+1. **`SUMMARY_SYSTEM` ganha duas seções verbatim.** Além dos oito headings
+   originais (Active Task, Goal, ..., Remaining Work), agora pede `User
+Asks, Verbatim` (cada pedido distinto, citado exatamente, nunca
+   parafraseado) e `Constraints And Prohibitions, Verbatim` (cada restrição
+   ou proibição, citada exatamente, nunca descartada como "não mais
+   relevante"). Ganha também a regra de não-atribuição do `commands/compact.md`
+   do Claude Code: texto formatado como `user: ...` **dentro de uma mensagem
+   do assistente** é gerado pelo modelo, nunca deve ser atribuído ao usuário
+   nas seções verbatim. E fecha com "respond with text only" (o resumo é
+   sempre texto puro, nunca uma chamada de tool). O teste de contrato
+   (`tests/client-pool-aux.test.ts`) verifica o TEXTO da constante, não só a
+   referência — antes desta issue, um `expect.objectContaining({ content:
+SUMMARY_SYSTEM })` prendia a constante contra si mesma e nunca pegaria uma
+   regressão no próprio texto.
+
+2. **`buildSummaryRequest`'s `maxTokens` deixa de ser fixo em 1024.**
+   `summaryMaxTokens(foldedTokens)` calcula
+   `clamp(1024, ceil(foldedTokens / 8), 4096)` a partir de uma estimativa
+   (`estimateTokens`, `src/context/token-estimate.ts`) do próprio `transcript`
+   que `buildSummaryRequest` recebe — nunca menor que antes (o piso é o valor
+   antigo) e nunca maior que 4096 (o resumo é um meio de encolher o turno,
+   não um segundo transcript). Calculado dentro da própria função, e não
+   recebido como parâmetro externo, para que a assinatura de
+   `buildSummaryRequest` e o único chamador de produção hoje (o summarizer
+   default em `ConversationRuntime.runTurn`, `src/conversation/runtime.ts`,
+   fora do `Files` desta issue) continuem exatamente como estão.
+
+3. **`buildTranscript` corta pela cauda quando o trecho excede um orçamento.**
+   Um histórico dobrado muito acima da janela (por exemplo depois de um
+   `LOHRA_CONTEXT_WINDOW` bem menor que o histórico real acumulado, ou uma
+   sessão restaurada sob uma janela menor que a que a escreveu) fazia a
+   própria chamada de resumo correr o risco de estourar a janela do
+   provedor — a lacuna que a seção "Fora de escopo" acima documentava.
+   Agora, `buildTranscript(messages, maxTokens)` estima o trecho inteiro e,
+   se passar do orçamento, mantém a CABEÇA (onde vive um pedido ou proibição
+   antigos — exatamente o que as novas seções verbatim mais precisam manter
+   intacto) e corta a CAUDA (as mensagens mais recentes do trecho dobrado, já
+   as mais próximas da cauda intocada que `attemptCompaction` preserva fora
+   do fold) no limite de turno mais próximo (`headAlignedKeepCount`, o
+   espelho de `turnAlignedTailCount` andando para frente) — nunca separa um
+   pedido da própria resposta nem uma mensagem `tool_calls` dos seus
+   resultados. Emite um `console.warn` (o "aviso") e devolve
+   `{ transcript, truncated, droppedMessages }`; `attemptCompaction` repassa
+   `truncated` como `transcriptTruncated` no `CompactionAttemptResult` (o
+   "evento" — dado de máquina, não um novo tipo em
+   `ConversationRuntimeEvent`, que vive em `src/conversation/types.ts`, fora
+   do `Files` desta issue). O orçamento default
+   (`DEFAULT_TRANSCRIPT_TOKEN_BUDGET`, metade de `DEFAULT_CONTEXT_WINDOW`) é
+   autocontido — não é a janela real do turno (ver a nota na seção "Fora de
+   escopo" acima); um `maxTranscriptTokens` explícito em
+   `CompactionAttemptInput` permite a um chamador futuro (#587) passar a
+   janela real.
+
+`SUMMARY_LEAD_TEXT` (`src/state/session-repository.ts`) também muda de
+português ("(resumo da conversa anterior a seguir)") para inglês
+("(summary of the earlier conversation follows)"), para casar com o resto do
+prompt (inglês). É texto **persistido**: só sessões compactadas a partir
+deste commit ganham o lead novo — uma sessão já compactada antes continua
+com o texto antigo na própria linha de `messages`, e `loadMessages`/
+`reconstructMessage` nunca validam esse conteúdo contra a constante, então
+ela carrega de volta byte a byte, sem quebrar (teste em
+`tests/conversation-compaction-verbatim.test.ts`).
+
+Fora de escopo desta issue (ver `#576` e `#587` na tabela do épico #575): o
+caso de eval "proibição sobrevive à compactação" com os dois oráculos —
+`tests/fixtures/eval/**` e `scripts/eval/run.ts` ainda não existem em `main`
+(#576, harness de eval, ainda não mergeado); e ligar o `AuxClient` de verdade
+ao caminho de produção, incluindo levar a janela real do turno para dentro
+de `attemptCompaction` (#587, depende desta issue).
