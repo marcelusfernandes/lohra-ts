@@ -268,8 +268,9 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
           // leaf's reported `usage` is the SUM of whatever usage the
           // turn's earlier iterations already accumulated
           // (`error.measuredUsage` — real, EXCEPT a steer-absorbed
-          // iteration folds in its own estimate too, see that field's own
-          // doc, `errors.ts`) and this call's own ESTIMATE
+          // iteration folds in its own estimate too, and a preflight
+          // compaction summarize call is real too, see that field's own
+          // doc, `errors.ts`, issue #569) and this call's own ESTIMATE
           // (`error.partialUsage`) — `combineUsage` above, never merged
           // upstream. `usageUncertain` is forced `true` regardless of what
           // `zeroResult`'s own null-check would have computed: even a
@@ -289,7 +290,8 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
           // (whether `measuredUsage` does, from an EARLIER steer-absorbed
           // iteration, is #520's own concern, out of #568's scope).
           // `partialUsage === null` and `measuredUsage === null` together
-          // (pre-issuance cancel, or a single-call turn aborted by a
+          // (pre-issuance cancel, or a single-call turn — with no preflight
+          // compaction of its own either, issue #569 — aborted by a
           // non-StreamAbortedError form) stays the plain #232 "never
           // measured" gap this already was before #568.
           const usage = combineUsage(error.measuredUsage, error.partialUsage);
@@ -300,7 +302,25 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
           };
         }
         if (error instanceof MaxIterationsError) {
-          return zeroResult("error", error.message, profile, model, error.usage, null, null);
+          // Issue #569 (r2, veredito da PR #591): `stopReason === "interrupted"`
+          // (`runtime.ts`'s own bare-post-loop throw, reachable ONLY via the
+          // steer-interrupt `continue` eating the last allowed iteration —
+          // `stopReason` has no OTHER reader in this tree, this is the sole
+          // consumer) means `error.usage` includes at least one call's own
+          // ESTIMATE (`estimatePartialUsage`, folded in before the throw) —
+          // never a final, provider-confirmed total. Forcing `partial`/
+          // `usageUncertain` here mirrors the completed-turn branch above
+          // (`result.partialCalls > 0`) and the cancelled-turn branch below
+          // (`error.partialUsage !== null`): never a silent "fully measured"
+          // claim. A genuine cap-hit after real, completed iterations
+          // (`stopReason: "pause"`/`"tool_calls"`, unaffected) keeps
+          // reporting real usage exactly as before this issue
+          // (`tests/orchestration-child-runner.test.ts`, "maps
+          // MaxIterationsError to status:'error' with the child's own leash").
+          const base = zeroResult("error", error.message, profile, model, error.usage, null, null);
+          return error.stopReason === "interrupted"
+            ? { ...base, partial: true, usageUncertain: true }
+            : base;
         }
         const cause = error instanceof Error ? error.cause : undefined;
         const errorKind = classifyProviderError(cause);

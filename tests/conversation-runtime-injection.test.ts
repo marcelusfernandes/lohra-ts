@@ -326,6 +326,12 @@ describe("ConversationRuntime interruptSource — steer-driven interrupt (issue 
     expect(disarmed).toBe(true);
     expect(events.some((event) => event.type === "model.request.interrupted")).toBe(true);
     expect(events.some((event) => event.type === "turn.completed")).toBe(true);
+    // Issue #569 (item 4): the interrupted call's own error is never
+    // silently dropped — its constructor name rides along on the event as
+    // `code`, so a structured log consuming `eventSink` still learns WHAT
+    // tore this call down, not just that something did.
+    const interruptedEvent = events.find((event) => event.type === "model.request.interrupted");
+    expect(interruptedEvent?.code).toBe("StreamAbortedError");
     // The steer text queued for "the next iteration" reached the second
     // (successful) request's own messages.
     expect(requests[1]?.messages).toEqual([
@@ -429,15 +435,31 @@ describe("ConversationRuntime interruptSource — steer-driven interrupt (issue 
       maxIterations: 2,
     });
 
-    await expect(
-      runtime.runTurn({
+    const caught = await runtime
+      .runTurn({
         input: "hi",
         provider: "fakeprov",
         model: "fake-model",
         cwd: "/tmp",
         interruptSource,
-      }),
-    ).rejects.toBeInstanceOf(MaxIterationsError);
+      })
+      .catch((error: unknown) => error);
+    expect(caught).toBeInstanceOf(MaxIterationsError);
     expect(calls).toBe(2);
+    // Issue #569 (item 3): the loop's last iteration was absorbed as a
+    // steer-interrupt `continue`, never a completed response — the bare
+    // throw after the loop exhausts used to drop `usageTotal` entirely
+    // (never carried past this point), even though that absorption already
+    // folded a real estimate into it. `stopReason` names what actually
+    // happened, distinct from the "tool_calls"/"pause" default a genuinely
+    // completed iteration would have left behind.
+    const maxIterationsError = caught as MaxIterationsError;
+    expect(maxIterationsError.usage).not.toBeNull();
+    // `emptyPartialStream` (no text observed before the abort) still falls
+    // back to `estimateRequestTokens` for `inputTokens` — non-zero because
+    // the request itself is never empty, unlike `outputTokens`, which stays
+    // 0 with nothing to estimate from.
+    expect(maxIterationsError.usage?.inputTokens ?? 0).toBeGreaterThan(0);
+    expect(maxIterationsError.stopReason).toBe("interrupted");
   });
 });

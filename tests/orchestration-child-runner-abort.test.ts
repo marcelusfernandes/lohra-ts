@@ -101,7 +101,11 @@ const parentTools: readonly ToolDefinition[] = [
   { type: "function", function: { name: "read_file", description: "", parameters: {} } },
 ];
 
-function makeRunner(sessions: SessionRepository, clientPool: ClientPool) {
+function makeRunner(
+  sessions: SessionRepository,
+  clientPool: ClientPool,
+  overrides: { readonly childMaxIterations?: number } = {},
+) {
   return createChildRunner({
     sessions,
     parentSessionId: "parent-1",
@@ -112,7 +116,7 @@ function makeRunner(sessions: SessionRepository, clientPool: ClientPool) {
     cwd: "/tmp",
     idSource: () => "unused",
     clock: () => 1000,
-    childMaxIterations: 50,
+    childMaxIterations: overrides.childMaxIterations ?? 50,
   });
 }
 
@@ -205,6 +209,64 @@ describe("createChildRunner — abort in flight (issue #518)", () => {
 
     expect(result.status).toBe("complete");
     expect(Object.hasOwn(result, "partial")).toBe(false);
+    close();
+  });
+
+  // Issue #569 (r2, veredito da PR #591): `runtime.ts`'s post-loop
+  // `MaxIterationsError` is reachable ONLY via a steer-interrupt `continue`
+  // eating the last allowed iteration (`stopReason: "interrupted"`) — its
+  // `usage` therefore includes at least one call's own ESTIMATE, never a
+  // final measured total. RED on cc7d4796: `child-runner.ts`'s catch passed
+  // `error.usage` straight to `zeroResult` with no `partial`/forced
+  // `usageUncertain`, contradicting the identical-shaped branches above
+  // (`result.partialCalls > 0`) and in the `ConversationCancelledError`
+  // catch (`error.partialUsage !== null`).
+  it("a leash that runs out right after a steer-interrupt absorbed the only call reports partial/usageUncertain, never a silent fully-measured claim", async () => {
+    const { sessions, close } = setup();
+    sessions.createSession({ id: "parent-1", source: "gateway" });
+    const parentProfile = getProviderProfile("openai");
+    if (parentProfile === null) throw new Error("openai profile missing");
+    const { StreamAbortedError } = await import("../src/transports/index.js");
+    const { started, onStarted } = startedGate();
+    const port = new AbortOnlyPort(
+      () =>
+        new StreamAbortedError({ text: "", reasoningChars: 0, toolArgumentChars: 0, usage: null }),
+      onStarted,
+    );
+    const client = new ChatCompletionsClient({
+      baseUrl: "http://127.0.0.1:9",
+      apiKey: "k",
+      transport: new ChatCompletionsTransport(),
+      http: port,
+    });
+    const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
+    const runner = makeRunner(sessions, pool, { childMaxIterations: 1 });
+
+    // Boxed: a bare `let` read via `?.()` after only ever being assigned
+    // inside `interrupts.arm`'s own closure narrows to literal `null`.
+    const hook: { armed: (() => void) | null } = { armed: null };
+    const interrupts = {
+      arm: (abort: () => void): (() => void) => {
+        hook.armed = abort;
+        return () => undefined;
+      },
+    };
+    const pending = runner(
+      "child-exhausted",
+      { prompt: "do the thing" },
+      "SYS",
+      () => [],
+      new AbortController().signal,
+      interrupts,
+    );
+    await started;
+    hook.armed?.(); // steer-interrupt, never the outer signal
+    const result = await pending;
+
+    expect(result.status).toBe("error");
+    expect(result.usageUncertain).toBe(true);
+    expect(result.partial).toBe(true);
+    expect(result.tokensIn).toBeGreaterThan(0);
     close();
   });
 });

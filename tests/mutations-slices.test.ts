@@ -579,9 +579,16 @@ describe("scripts/mutations/slices.json", () => {
     // orchestration-runtime.ts) e C3/C4 (o `catch` que não engole mais erro
     // e o filtro "running" de `probeSettledAfterCancel`, audit-runtime.ts) —
     // nenhum dos quatro tinha mutante, e `supervision-mutants.ts` (issue
-    // #451) já está no teto de 800 linhas: 270 + 4 = 274.
+    // #451) já está no teto de 800 linhas: 270 + 4 = 274. Issue #569
+    // (M16, épico #490, S5) acrescenta r/s a `context-window.ts`
+    // (`runtime.ts`'s conjunto `&& !signalAborted(signal)` e `disarm?.()`
+    // no `finally`, respectivamente) — `core.ts` teria sido o lar natural
+    // do fix de item 2 (disarm-on-fire em `OrchestrationCore.steer`), mas
+    // nenhum focusFile de `supervision` cobre `tests/orchestration-steer-
+    // interrupt.test.ts` e `slices.json` está fora do `Files` da issue, e
+    // `supervision-mutants.ts` segue no teto: 274 + 2 = 276.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 274;
+    const TOTAL_MUTANTS = 276;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -604,7 +611,7 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/media-catalog-persistence.ts": 13,
       "scripts/mutations/self-update-mutants.ts": 8,
       "scripts/mutations/workflow-executor-mutants.ts": 45,
-      "scripts/mutations/context-window.ts": 17,
+      "scripts/mutations/context-window.ts": 19,
       "scripts/mutations/auth-mutants.ts": 13,
       "scripts/mutations/supervision-mutants.ts": 39,
     };
@@ -613,7 +620,7 @@ describe("scripts/mutations/slices.json", () => {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(274);
+    expect(somaTabela).toBe(276);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {
