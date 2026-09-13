@@ -36,7 +36,6 @@ export interface Skill {
   readonly version: string;
   readonly body: string;
   readonly path?: string;
-  readonly platforms: readonly string[];
 }
 
 function scalar(value: string): string {
@@ -55,17 +54,16 @@ export function renderSkillMd(
   description: string,
   body: string,
   version: string,
-  platforms: readonly string[] = [],
 ): string {
   const lines = [
     "---",
     `name: ${scalar(name)}`,
     `description: ${scalar(description)}`,
     `version: ${scalar(version)}`,
+    "---",
+    body.trim(),
+    "",
   ];
-  if (platforms.length > 0)
-    lines.push("platforms:", ...platforms.map((entry) => `- ${scalar(entry)}`));
-  lines.push("---", body.trim(), "");
   return lines.join("\n");
 }
 
@@ -90,20 +88,21 @@ export function parseSkillMd(content: string, path?: string): Skill {
     throw new SkillFormatError("SKILL.md must start with a YAML frontmatter block (--- ... ---)");
   }
   const meta = new Map<string, string>();
-  const platforms: string[] = [];
-  let list = false;
+  // `platforms` is off the agentskills.io spec and nothing in this runtime
+  // ever filtered by it (issue #590; docs/decisions/2026-09-10-skills-harness.md
+  // item 7) — dropped as a field, but a legacy `platforms:` list already on
+  // disk still parses instead of throwing: its continuation lines are
+  // skipped, never surfaced on the returned `Skill`.
+  let skippingList = false;
   for (const raw of (match[1] ?? "").split(/\r?\n/u)) {
     if (raw.trim() === "") continue;
-    if (list && /^\s*-\s+/u.test(raw)) {
-      platforms.push(unquote(raw.replace(/^\s*-\s+/u, "")));
-      continue;
-    }
+    if (skippingList && /^\s*-\s+/u.test(raw)) continue;
     const separator = raw.indexOf(":");
     if (separator <= 0) throw new SkillFormatError("invalid SKILL.md frontmatter: malformed line");
     const key = raw.slice(0, separator).trim();
     const value = raw.slice(separator + 1).trim();
-    list = key === "platforms" && value === "";
-    if (!list) meta.set(key, unquote(value));
+    skippingList = key === "platforms" && value === "";
+    if (!skippingList) meta.set(key, unquote(value));
   }
   const name = meta.get("name");
   if (name === undefined || name.length === 0) {
@@ -115,7 +114,6 @@ export function parseSkillMd(content: string, path?: string): Skill {
     version: meta.get("version") ?? "",
     body: (match[2] ?? "").trim(),
     ...(path === undefined ? {} : { path }),
-    platforms: Object.freeze([...platforms]),
   });
 }
 
@@ -290,7 +288,6 @@ export class SkillStore {
         description,
         update.body ?? existing.body,
         update.version ?? (existing.version || "1.0.0"),
-        existing.platforms,
       ),
       "utf8",
     );

@@ -526,7 +526,9 @@ export class ConversationRuntime {
             // documents) — any earlier iteration of the SAME turn (a
             // tool-call/pause loop) already completed — real, or a
             // steer-absorbed one folding in its own estimate (#520,
-            // `:555-561` below) — and is sitting in `usageTotal`; that
+            // `:555-561` below) — OR this same iteration's own preflight
+            // compaction summarize call (issue #569, `:429-437`, `addUsage`
+            // at `:435`) — and is sitting in `usageTotal`; that
             // rides along SEPARATELY as `measuredUsage` (see its own doc,
             // `errors.ts`, for exactly what it can carry), never merged
             // into `partialUsage` itself, so `child-runner.ts` can report
@@ -561,7 +563,16 @@ export class ConversationRuntime {
               }),
             );
             partialCalls += 1;
-            emit("model.request.interrupted");
+            // Issue #569 (item 4): the torn-down call's own error is never
+            // logged anywhere else on this path (the `catch` absorbs it and
+            // moves on) — its constructor name rides along as `code` so an
+            // `eventSink` that logs structurally still learns WHAT tore the
+            // call down, not just that something did (fail-closed: never a
+            // silent drop).
+            emit(
+              "model.request.interrupted",
+              error instanceof Error ? error.name : "UNKNOWN_CAUSE",
+            );
             continue;
           }
           throw new ConversationTurnFailedError(sessionId, providerMessage(error), error);
@@ -745,7 +756,39 @@ export class ConversationRuntime {
           ...(partialCalls > 0 ? { partialCalls } : {}),
         };
       }
-      throw new MaxIterationsError(sessionId, this.maxIterations);
+      // Issue #569 (item 3): the loop only reaches here via the steer-
+      // interrupt `continue` above eating the last allowed iteration — never
+      // a completed response, so `usageTotal` may already carry a real
+      // estimate from that absorbed call. A bare `MaxIterationsError` used to
+      // drop it entirely; committing it (mirroring the pause/tool_calls
+      // branches above) and naming `stopReason: "interrupted"` — distinct
+      // from their "pause"/"tool_calls" defaults — keeps that spend visible
+      // downstream instead of silently zeroed.
+      const interruptedCost = estimateCost(usageTotal, {
+        provider: input.provider,
+        model: input.model,
+        ...(this.options.pricingOverrides === undefined
+          ? {}
+          : { overrides: this.options.pricingOverrides }),
+      });
+      if (usageTotal !== null) {
+        this.options.repository.commitUsage({
+          sessionId,
+          usage: usageTotal,
+          cost: interruptedCost,
+          apiCalls,
+        });
+      }
+      throw new MaxIterationsError(
+        sessionId,
+        this.maxIterations,
+        usageTotal,
+        interruptedCost,
+        this.options.repository.summary(sessionId),
+        executedToolCalls,
+        null,
+        "interrupted",
+      );
     } catch (error) {
       emit("turn.failed", error instanceof ConversationError ? error.code : "TURN_FAILED");
       throw error;

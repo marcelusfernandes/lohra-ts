@@ -45,7 +45,10 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Run a shell command on the local machine and return stdout, stderr, and the exit code. Dangerous commands require user approval.",
+        "Run a shell command on the local machine and return stdout, stderr, and the exit code. " +
+        "Commands matching a fixed dangerous-pattern list (recursive delete, sudo, force push, " +
+        "raw disk writes, ...) are refused automatically. A refusal is final for this session: " +
+        "do not rephrase or retry the command; report the blocker.",
       parameters: {
         type: "object",
         properties: {

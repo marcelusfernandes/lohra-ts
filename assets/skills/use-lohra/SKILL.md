@@ -1,9 +1,16 @@
 ---
 name: use-lohra
-description: Delegate substantial, self-contained work to Lohra through its CLI. Use when the user asks Codex to use Lohra, needs a persistent sub-agent with memory or skills, or wants Lohra to inspect, implement, test, research, or run workflows in the current project.
+description: LEGACY — targets the Python Lohra runtime, not lohra-ts. Delegate substantial, self-contained work to Python Lohra through its CLI when the target project actually runs that runtime. Do NOT load this for lohra-ts; load `use-lohra-ts` instead.
 ---
 
-# Delegate work to Lohra
+# Delegate work to Lohra (Python runtime)
+
+> **Legacy skill.** Every command below is Python Lohra's own CLI. If the
+> project you are working in runs the TypeScript runtime instead — its
+> repository is `lohra-ts`, and `lohra doctor --json` there reports that
+> runtime's own profile and model catalog, not this one's — load the
+> `use-lohra-ts` skill instead; its flags, defaults and error text do not
+> match this one.
 
 Use Lohra as an independent sub-agent. Give it the outcome and boundaries; let it
 choose the relevant tools, implementation, and validation steps.

@@ -175,18 +175,18 @@ adicionar uma fatia" cita a mesma restrição.
 | `media`               | `mutations:t21`         |       20 | `media-catalog-persistence.ts` (13) + `media-catalog-other.ts` (7)                                                    |
 | `web-tools`           | `mutations:t20`         |        9 | `web-tools-mutants.ts`                                                                                                |
 | `self-update`         | `mutations:self-update` |        8 | `self-update-mutants.ts`                                                                                              |
-| `context-window`      | `mutations:t23`         |       17 | `context-window.ts`                                                                                                   |
+| `context-window`      | `mutations:t23`         |       19 | `context-window.ts`                                                                                                   |
 | `auth`                | `mutations:auth`        |       13 | `auth-mutants.ts`                                                                                                     |
 | `supervision`         | `mutations:supervision` |       39 | `supervision-mutants.ts`                                                                                              |
 
-Total: 274. Os 12 mutantes de `workflow-durability-guard.ts` são
+Total: 276. Os 12 mutantes de `workflow-durability-guard.ts` são
 combinatórios: três conjuntos do guard de escrita possuída (`fence`,
 `holder`, `lease-validity`) × quatro categorias (`state`, `cache`,
 `node-cost`, `spend`) — um mutante por combinação, cada um escorado só no
 teste focal da sua categoria, mais os 2 mutantes do INSERT combinado
 cache+custo (`combined-cell-guard-removed`,
 `combined-cost-escapes-refusal`). `tests/mutations-slices.test.ts` importa os
-treze catálogos de dado puro estaticamente e prova essa soma (274) a cada
+treze catálogos de dado puro estaticamente e prova essa soma (276) a cada
 corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
 
 `supervision-mutants.ts` (issue #451, milestone 14 — achado de QA/revisão de
@@ -402,6 +402,25 @@ resultado "running" vazar como se tivesse assentado) são mortos por dois
 `it` novos de `tests/workflow-abort-in-flight.test.ts`, contra um
 `OrchestrationChildRuntime` de verdade (nenhum double). `focusFiles` da
 fatia `workflow-audit-live` ganha os dois arquivos: 270 + 4 = 274.
+
+Issue #569 (M16 pós-revisão, épico #561, S5) acrescenta dois a
+`context-window.ts` (não `supervision-mutants.ts`, que segue no teto de 800
+linhas, e não `core.ts` diretamente — o fix do item 2, disarm-on-fire em
+`OrchestrationCore.steer`, não tem `focusFile` de `supervision` cobrindo
+`tests/orchestration-steer-interrupt.test.ts`, e `slices.json` está fora do
+`Files` da issue): `r-steer-interrupt-continue-ignores-outer-cancel` remove
+o conjunto `&& !signalAborted(signal)` do `catch` de `runTurn`
+(`runtime.ts:553`) que decide se uma chamada abortada é absorvível como
+steer-interrupt — morto pelo `it` novo de `tests/conversation-runtime.test.ts`
+que faz o `interruptSource` disparar `_abort` de verdade, correndo contra um
+cancel externo, com um erro fora das três formas que `isAbortOf` reconhece
+(a corrida com uma forma reconhecida resolve via `isAbortOf` primeiro,
+antes de alcançar esse conjunto — não mataria o mutante). `s-per-call-
+interrupt-hook-never-disarmed` remove o `disarm?.()` do `finally` de cada
+chamada — morto pelo `it` já existente "freezes the prompt once, resumes
+history, and commits complete turns", ao qual o mesmo `interruptSource`
+foi acrescentado para provar que uma chamada bem-sucedida desarma o hook
+também, não só uma abortada. 274 + 2 = 276.
 
 `workflow-executor-mutants.ts` (issue #418) acrescentou
 `Q1-quota-guard-removed`: a guarda que impede `quota_exhausted` de entrar em
@@ -626,8 +645,8 @@ contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
 `workflow-audit-live-mutants` 32, `workflow-audit-producers-mutants` 31,
 `web-tools-mutants` 9, `media-catalog-other` 7, `media-catalog-persistence`
 13, `self-update-mutants` 8, `workflow-executor-mutants` 45,
-`context-window` 17, `auth-mutants` 13, `supervision-mutants` 39, soma 274) e
-a soma de 274 contra os treze catálogos importados; e que todo diretório de
+`context-window` 19, `auth-mutants` 13, `supervision-mutants` 39, soma 276) e
+a soma de 276 contra os treze catálogos importados; e que todo diretório de
 primeiro nível de `src/` está coberto por algum `srcGlobs` ou está em
 `SEM_FATIA` com um motivo não vazio — nunca os dois, nunca nenhum dos dois.
 
