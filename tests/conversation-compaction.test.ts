@@ -377,6 +377,7 @@ describe("attemptCompaction", () => {
       summarizedCount: 6,
       keptCount: 4,
       history: compactedHistory,
+      transcriptTruncated: false,
     });
   });
 });

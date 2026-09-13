@@ -16,7 +16,9 @@
 // CLI envelope -- much more new surface for the same outcome.
 import { SUMMARY_SYSTEM } from "../agent/aux.js";
 import { resolveContextWindowOverride } from "../config/context-window-env.js";
+import { estimateTokens } from "../context/token-estimate.js";
 import {
+  DEFAULT_CONTEXT_WINDOW,
   getProviderProfileIncludingCodex,
   resolveContextWindow,
   type ContextWindowResolution,
@@ -40,6 +42,41 @@ export const DEFAULT_MIN_KEEP_MESSAGES = 8;
 export const DEFAULT_LOCK_TTL_SECONDS = 30;
 export const DEFAULT_LOCK_RETRIES = 3;
 export const DEFAULT_LOCK_RETRY_DELAY_MS = 25;
+
+/** Issue #584: a fixed `maxTokens: 1024` for the summary call fits a short
+ * folded prefix and starves a long one -- exactly the case that needs the
+ * two verbatim sections `SUMMARY_SYSTEM` now asks for the most. Proportional
+ * to the folded transcript's own size, with a floor (never smaller than the
+ * old fixed value, so a short history is no worse off) and a ceiling (the
+ * summary is a means to keep the turn small, not a second transcript). */
+export const SUMMARY_MAX_TOKENS_FLOOR = 1024;
+export const SUMMARY_MAX_TOKENS_CEILING = 4096;
+export const SUMMARY_MAX_TOKENS_DIVISOR = 8;
+
+/**
+ * `clamp(1024, ceil(foldedTokens / 8), 4096)` (issue #584 AC). Pure.
+ */
+export function summaryMaxTokens(_foldedTokens: number): number {
+  throw new Error("not implemented: summaryMaxTokens");
+}
+
+/** Issue #584: fraction of the (best-guess) context window the transcript
+ * handed to the summarizer may occupy before `buildTranscript` below starts
+ * cutting it. `attemptCompaction`'s caller (`ConversationRuntime`,
+ * `src/conversation/runtime.ts`, out of this issue's `Files`) already
+ * resolves the turn's REAL window before ever calling this module, but
+ * threading that resolved value through `attemptCompaction` is `Files`-out-
+ * of-scope wiring left to #587 (P11, "compactação... pelo AuxClient,
+ * transcript truncado", depends on #584). `DEFAULT_CONTEXT_WINDOW` (the same
+ * global floor `resolveContextWindow` itself falls back to for an
+ * unrecognized provider) keeps this module's own default self-contained and
+ * safe without that wiring -- half of it is generous enough not to trip on
+ * an ordinary session, conservative enough that the summary CALL itself
+ * never blows even the smallest realistic window on its own. */
+export const TRANSCRIPT_WINDOW_FRACTION = 0.5;
+export const DEFAULT_TRANSCRIPT_TOKEN_BUDGET = Math.floor(
+  DEFAULT_CONTEXT_WINDOW * TRANSCRIPT_WINDOW_FRACTION,
+);
 
 /** Reserve beyond `maxTokens` before a request is allowed through
  * (reviewer note on PR #270: "superestimar a janela é a direção insegura").
@@ -171,17 +208,34 @@ export function buildSummaryMessages(
   ];
 }
 
-function buildTranscript(messages: readonly Readonly<Record<string, unknown>>[]): string {
-  return messages
-    .map((message) => {
-      const role = typeof message.role === "string" ? message.role : "unknown";
-      const content =
-        typeof message.content === "string" && message.content.length > 0
-          ? message.content
-          : JSON.stringify(message.content ?? message.tool_calls ?? message);
-      return `${role}: ${content}`;
-    })
-    .join("\n\n");
+export interface TranscriptResult {
+  readonly transcript: string;
+  readonly truncated: boolean;
+  /** How many of the folded messages were cut from the tail. `0` when
+   * `truncated` is `false`. */
+  readonly droppedMessages: number;
+}
+
+/**
+ * Renders `messages` (the folded prefix `attemptCompaction` is about to
+ * summarize) as `role: content` lines, one call per message, joined by a
+ * blank line. Issue #584: a folded prefix that is itself bigger than
+ * `maxTokens` (a session accumulated far above a small
+ * `LOHRA_CONTEXT_WINDOW`, or restored under a smaller window than it was
+ * written under) would make the SUMMARY call itself blow the provider's
+ * window -- `CompactionFailedError` already covers that failure (fault
+ * nomeado, nunca silencioso, invariant 2), but never tried to avoid it.
+ * Cuts from the tail, at the nearest turn boundary, when the estimate is
+ * over budget -- the head (where an early request or prohibition lives) is
+ * exactly what `SUMMARY_SYSTEM`'s new verbatim sections need intact most.
+ * Pure except for the `console.warn` below (issue #584 AC: "evento/aviso
+ * quando trunca") -- never mutates `messages`.
+ */
+export function buildTranscript(
+  _messages: readonly Readonly<Record<string, unknown>>[],
+  _maxTokens: number = DEFAULT_TRANSCRIPT_TOKEN_BUDGET,
+): TranscriptResult {
+  throw new Error("not implemented: buildTranscript");
 }
 
 export interface CompactionAttemptInput {
@@ -195,6 +249,12 @@ export interface CompactionAttemptInput {
   readonly lockRetryDelayMs: number;
   readonly sleep: (ms: number) => Promise<void>;
   readonly minKeepMessages: number;
+  /** Issue #584: caps the transcript handed to `summarize` (see
+   * `buildTranscript`). Optional -- defaults to
+   * `DEFAULT_TRANSCRIPT_TOKEN_BUDGET` so an existing caller that never
+   * passes this keeps behaving as it does today unless its folded prefix
+   * happens to be genuinely huge. */
+  readonly maxTranscriptTokens?: number;
 }
 
 export interface CompactionAttemptResult {
@@ -205,6 +265,10 @@ export interface CompactionAttemptResult {
    * false, either because there was nothing left to fold or because another
    * process had already compacted it under the same lock). */
   readonly history: readonly Readonly<Record<string, unknown>>[];
+  /** Issue #584: `true` when `buildTranscript` had to cut the folded prefix
+   * to fit `maxTranscriptTokens` before summarizing it. Always `false` when
+   * `compacted` is `false` (nothing was summarized). */
+  readonly transcriptTruncated: boolean;
 }
 
 /**
@@ -250,10 +314,14 @@ export async function attemptCompaction(
         summarizedCount: 0,
         keptCount: freshHistory.length,
         history: freshHistory,
+        transcriptTruncated: false,
       };
     }
 
-    const transcript = buildTranscript(freshHistory.slice(0, summarizedCount));
+    const { transcript, truncated: transcriptTruncated } = buildTranscript(
+      freshHistory.slice(0, summarizedCount),
+      input.maxTranscriptTokens,
+    );
     let summary: string;
     try {
       summary = await input.summarize(transcript);
@@ -289,6 +357,7 @@ export async function attemptCompaction(
       summarizedCount: result.summarizedCount,
       keptCount: result.keptCount,
       history,
+      transcriptTruncated,
     };
   } finally {
     repository.releaseCompressionLock(input.sessionId, input.holder);
@@ -299,19 +368,28 @@ export async function attemptCompaction(
  * turn's own transport/model -- reuses `SUMMARY_SYSTEM`
  * (`src/agent/aux.ts`), the same prompt `AuxClient.summarize` uses, without
  * needing the raw provider client `AuxClient` itself requires (only
- * `commands/chat.ts` holds that today). */
+ * `commands/chat.ts` holds that today).
+ *
+ * Issue #584: `maxTokens` used to be a flat `1024` regardless of how big the
+ * folded transcript was -- too small to fit the two new verbatim sections
+ * (`SUMMARY_SYSTEM`) once a session has folded a lot of history. Computed
+ * here (`summaryMaxTokens`, from an estimate of `input.transcript` itself)
+ * rather than accepted as a parameter, so this function's own signature and
+ * every existing call site (`src/conversation/runtime.ts`, out of this
+ * issue's `Files`) stay unchanged. */
 export function buildSummaryRequest(input: {
   readonly transcript: string;
   readonly model: string;
   readonly signal: AbortSignal;
 }): ModelRequest {
+  const foldedTokens = estimateTokens([{ role: "user", content: input.transcript }]).tokens;
   return {
     system: SUMMARY_SYSTEM,
     messages: [{ role: "user", content: input.transcript }],
     model: input.model,
     temperature: null,
     effort: null,
-    maxTokens: 1024,
+    maxTokens: summaryMaxTokens(foldedTokens),
     tools: [],
     signal: input.signal,
   };

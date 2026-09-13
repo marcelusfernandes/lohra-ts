@@ -12,8 +12,17 @@ export interface CompactionResult {
 /** The synthetic "user" message every compaction leads with, before the
  * "assistant" summary itself -- see `compactHistory` below for why. Single
  * source of truth: `src/conversation/compaction.ts`'s `buildSummaryMessages`
- * imports this instead of keeping its own copy. */
-export const SUMMARY_LEAD_TEXT = "(resumo da conversa anterior a seguir)";
+ * imports this instead of keeping its own copy.
+ *
+ * Issue #584: this is persisted TEXT, written into new sessions from this
+ * commit forward -- it changed from Portuguese to English so the lead
+ * matches the rest of the (English) system/summary prompt it sits next to.
+ * A session compacted before this change still has the OLD string stored in
+ * its `messages` rows; `loadMessages`/`reconstructMessage` below never
+ * validate a `role: "user"` message's `content` against this constant, so
+ * an old lead loads back byte-for-byte, same as any other persisted
+ * message -- this rename never invalidates a session already on disk. */
+export const SUMMARY_LEAD_TEXT = "(summary of the earlier conversation follows)";
 
 export interface CreateSessionInput {
   readonly id: string;
