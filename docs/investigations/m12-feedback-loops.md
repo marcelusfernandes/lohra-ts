@@ -21,7 +21,7 @@
 ## 0. Como ler os rótulos
 
 Cada afirmação de comportamento neste conjunto de notas carrega um destes
-três rótulos, e nenhuma outra:
+quatro rótulos, e nenhum outro:
 
 - **observado ao vivo** — executado contra um provedor real, nesta máquina,
   em 2026-09-13; a evidência bruta está em `e1-a8b2fb1c/`.
@@ -29,6 +29,9 @@ três rótulos, e nenhuma outra:
   reais, mas com as decisões do modelo e as respostas HTTP programadas por um
   servidor local (`e2-a8b2fb1c/`). Mede mecânica, nunca frequência nem
   comportamento espontâneo de um LLM.
+- **determinístico** — código executado localmente, sem provedor e sem LLM
+  nenhum no caminho: a suíte de testes e a sonda do classificador sobre o
+  `dist/` buildado do HEAD.
 - **inferido** — lido do código no HEAD, com `arquivo:linha`, sem execução que
   o exercite de ponta a ponta nesta investigação.
 
@@ -42,7 +45,7 @@ Detalhe, comandos e arquivos em [`evidencias.md`](m12-feedback-loops/evidencias.
 | E1 — o 400 de E1 classifica como `unknown`                  | **simulado** + **determinístico**                    | Reproduzido em E2 (mesmo corpo, transporte Chat Completions) e por sonda direta em `classifyProviderError` sobre o `dist/` buildado do HEAD.                                                                 |
 | E1b — mesma spec numa rota disponível (Anthropic)           | **observado ao vivo** (evidência **nova**, não é E1) | `paused` / `pause_reason: route_fault`, lição estruturada e **um** aviso durável. O caminho feliz funciona ponta a ponta.                                                                                    |
 | E2 — os seis controles determinísticos                      | **simulado**                                         | Os seis reproduzem o baseline da issue, asserção por asserção, exit 0.                                                                                                                                       |
-| E3 — os três arquivos de teste                              | **observado**                                        | `Test Files 3 passed (3)`, `Tests 69 passed (69)` — idêntico ao baseline.                                                                                                                                    |
+| E3 — os três arquivos de teste                              | **determinístico**                                   | `Test Files 3 passed (3)`, `Tests 69 passed (69)` — idêntico ao baseline.                                                                                                                                    |
 
 **Divergências entre o baseline da issue e o HEAD:** apenas movimentos de
 linha. `classifyProviderError` está **byte-idêntico** ao SHA da captura (57
@@ -51,7 +54,7 @@ commits no intervalo; os que tocam `src/transports/errors.ts` mexem só em
 mudou de resultado.
 
 **Um achado novo, fora do baseline:** `acked_at` de um aviso reconhecido é
-lido como `0` em todas as superfícies, e não como o instante do `ack`
+lido como `0` nas duas superfícies observadas, e não como o instante do `ack`
 (§ 4.3 e `evidencias.md` § 5). Encaminhamento proposto: conserto nas
 fundações de M8, não trabalho de M12.
 
@@ -105,7 +108,7 @@ As colunas "capacidade existente" citam o que **já foi entregue** em M8
 
 | Campo                    | Conteúdo                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Evidência**            | E2 (**simulado**): nenhum `MEMORY.md` criado nos runs repetidos. **Inferido** do código: `CHILD_EXCLUDED_TOOLS` (`src/tools/child.ts:5-29`) exclui `memory`, `skill_view`, `workflow_notices`, `workflow_notices_ack`, `run_workflow` e `workflow_status` do subagente; `SUBAGENT_ISOLATION` (`src/orchestration/subagent-prompt.ts:10`) declara ausência de memória/skills; `ConversationRuntime.promptSnapshot` (`src/conversation/runtime.ts:177-178`) memoiza o prompt com `this.prompt ??= …`. |
+| **Evidência**            | E2 (**simulado**): nenhum `MEMORY.md` criado nos runs repetidos. **Inferido** do código: `CHILD_EXCLUDED_TOOLS` (`src/tools/child.ts:5-30`) exclui `memory`, `skill_view`, `workflow_notices`, `workflow_notices_ack`, `run_workflow` e `workflow_status` do subagente; `SUBAGENT_ISOLATION` (`src/orchestration/subagent-prompt.ts:10`) declara ausência de memória/skills; `ConversationRuntime.promptSnapshot` (`src/conversation/runtime.ts:177-178`) memoiza o prompt com `this.prompt ??= …`. |
 | **Capacidade existente** | Memória explícita por texto (`MemoryTool`, `src/tools/stateful.ts:21`), injetada no prompt como bloco `<memory>` (`src/context/system-prompt.ts:73`) **na construção**.                                                                                                                                                                                                                                                                                                                             |
 | **Lacuna (hipótese)**    | Hoje **só a string da tarefa** atravessa a delegação. Um filho não lê avisos, não escreve memória e não vê o histórico do pai. O ausente de E2 (`memoryFilesCreated: false`) descreve o caminho mecânico exercitado — **não prova** que um orquestrador real seja incapaz de ler avisos, adaptar o plano e registrar memória; nenhum LLM real foi exercitado nesse controle.                                                                                                                        |
 | **Experimento**          | Antes de qualquer canal novo: medir, no experimento de uso real, se um agente de verdade **já** usa `workflow_notices` e `memory` sem canal novo.                                                                                                                                                                                                                                                                                                                                                   |

@@ -4,7 +4,7 @@ Anexo de [`../m12-feedback-loops.md`](../m12-feedback-loops.md) (issue #574).
 
 - **HEAD:** `a8b2fb1c1a60cb982e39964f1ec45709f61281d3`, 2026-09-13.
 - **Base da captura da issue:** `1cdff10d7ac08fa684e1b2bc9ef85abcb1507e5c`.
-- **Máquina:** macOS (darwin), Node 20.x via `dist/` buildado neste worktree
+- **Máquina:** macOS (darwin), Node v22.22.3, via `dist/` buildado neste worktree
   (`npm run build` antes de tudo; todo comando `lohra` abaixo é
   `node dist/cli.js` **deste** worktree, nunca o shim do checkout principal).
 - **Sanitização:** caminhos de `$HOME` viram `<HOME>`, diretórios temporários

@@ -133,7 +133,8 @@ folha: `OrchestrationChildRuntime.spawn` o preenche com o sandbox instalado
 pela aquisição da **folha durável de workflow**; `delegate_task` e
 `spawn_session` (`src/orchestration/tools.ts`) **não** o setam. Os dois
 caminhos compartilham só a deny-list de `createChildDispatch`
-(`src/tools/child.ts:62-68`), que exclui 28 ferramentas —
+(`src/tools/child.ts:62-68`), que exclui 24 ferramentas
+(`CHILD_EXCLUDED_TOOLS`, `src/tools/child.ts:5-30`) —
 `delegate_task`, `memory`, `skill_view`, `session_search`, `run_workflow`,
 `workflow_status`, `workflow_notices`, `workflow_notices_ack`,
 `list_models`, entre outras. **`read_file` não está na lista.**
