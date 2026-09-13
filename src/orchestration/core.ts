@@ -51,6 +51,15 @@ export interface CollectResult {
    * (`orchestration-runtime.ts`) and from there to `RunResult.partialLeaves`
    * / `leaf.failed` (#517). */
   readonly partial?: boolean;
+  /** Issue #578: every tool call the leaf's OWN turn actually executed —
+   * `createChildRunner`'s own `ConversationTurnResult.toolCalls`, forwarded
+   * verbatim. The only production reader is a forced-schema leaf's
+   * `StructuredOutput` call (`workflow/engine-utils.ts`'s own
+   * `extractForcedOutput`, via `ChildResult.toolCalls`,
+   * `orchestration-runtime.ts`'s `resultFrom`) — absent/empty for every
+   * turn that never called a tool, keeping every `CollectResult` fixture
+   * from before this issue byte-identical. */
+  readonly toolCalls?: readonly Readonly<Record<string, unknown>>[];
 }
 
 /** A child's async tool dispatch: `(name, args) => Promise<string>`, the
@@ -66,6 +75,24 @@ export interface SpawnConfig {
   readonly provider?: string;
   readonly effort?: string;
   readonly maxIterations?: number;
+  /**
+   * Issue #578: the workflow engine's own forced-schema request
+   * (`{name: "StructuredOutput", schema}`, `WorkflowEngine.collectLeaf`,
+   * `workflow/engine.ts:266`, only for a `tool_less` schema node) — carried
+   * verbatim from `ChildSpawnRequest.forcedTool` (`workflow/runtime.ts`)
+   * through `OrchestrationChildRuntime.spawn` (`workflow/orchestration-
+   * runtime.ts`) to here. `createChildRunner` (`child-runner.ts`) is the
+   * only reader: it turns this into a synthetic tool definition appended to
+   * the leaf's own `toolDefinitions` and names it as that turn's
+   * `toolChoice`, so the three transports each force their own
+   * `tool_choice` shape (`chat-completions.ts`/`anthropic-messages.ts`/
+   * `responses.ts`). `spawn_session`/`delegate_task` (tools.ts) never set
+   * it, so their children are unaffected — same opt-in shape as
+   * `wrapDispatch` below. Carried through steer()'s idle/terminal
+   * resurrection the same way (`entry.originalConfig`'s spread already
+   * includes it).
+   */
+  readonly forcedTool?: Readonly<Record<string, unknown>>;
   /**
    * Opt-in per-leaf dispatch wrapper (workflow durable leaves, issue #107).
    * `OrchestrationChildRuntime.spawn` sets this from the acquisition's

@@ -9,6 +9,12 @@ export interface ModelRequest {
   readonly effort: string | null;
   readonly maxTokens: number | null;
   readonly tools: readonly Readonly<Record<string, unknown>>[];
+  /** Issue #578: forces the model to call the named tool — threaded
+   * straight into each adapter's own `BuildKwargsOptions.toolChoice`
+   * (`transports/types.ts`, already implemented per-provider:
+   * `chat-completions.ts`/`anthropic-messages.ts`/`responses.ts`). `null`/
+   * absent means no forcing, same as every request before this issue. */
+  readonly toolChoice?: string | null;
   readonly signal: AbortSignal;
   /** Per-call text-delta sink; present only when the caller wants streaming. */
   readonly onText?: (delta: string) => void;

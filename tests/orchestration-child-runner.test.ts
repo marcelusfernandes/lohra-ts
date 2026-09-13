@@ -467,4 +467,65 @@ describe("createChildRunner", () => {
     expect(toolMessage?.content).toBe('DENIED:read_file:{"path":"x"}');
     close();
   });
+
+  // Issue #578, AC 2/3: end-to-end — SpawnConfig.forcedTool reaches the
+  // WIRE as a real tool_choice, forced only on the leaf's first call, and
+  // the resulting CollectResult carries the StructuredOutput call back —
+  // never a FakeRuntime, the same real createChildRunner every other test
+  // in this file exercises.
+  it("forces StructuredOutput's tool_choice on the first call only, intercepts its dispatch, and reports the call on CollectResult.toolCalls", async () => {
+    const { sessions, close } = setup();
+    sessions.createSession({ id: "parent-1", source: "gateway" });
+    const parentProfile = getProviderProfile("openai");
+    if (parentProfile === null) throw new Error("openai profile missing");
+    const { client, port } = fakeClient([
+      toolCallStream("StructuredOutput", '{"value":3}', "call_1"),
+      assistantStream("done"),
+    ]);
+    const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
+    let baseDispatchCalls = 0;
+    const baseDispatch = (): Promise<string> => {
+      baseDispatchCalls += 1;
+      return Promise.resolve(JSON.stringify({ ok: true, result: "should not be reached" }));
+    };
+    const runner = makeRunner(sessions, pool, { baseDispatch });
+
+    const config: SpawnConfig = {
+      prompt: "answer as JSON",
+      forcedTool: Object.freeze({
+        name: "StructuredOutput",
+        schema: { type: "object", properties: { value: { type: "integer" } } },
+      }),
+    };
+    const result = await runner("child-forced-1", config, "SYS", () => [], noSignal);
+
+    expect(result.status).toBe("complete");
+    // RED on base: `forcedTool` had no consumer in child-runner.ts at all —
+    // `port.requests[0]` would carry neither the synthetic definition nor a
+    // `tool_choice`.
+    const firstBody = JSON.parse(port.requests[0]?.body ?? "null") as {
+      tools: readonly { function: { name: string } }[];
+      tool_choice?: { type: string; function: { name: string } };
+    };
+    expect(firstBody.tools.map((t) => t.function.name)).toContain("StructuredOutput");
+    expect(firstBody.tool_choice).toEqual({
+      type: "function",
+      function: { name: "StructuredOutput" },
+    });
+    // The SECOND call (after the forced tool already fired) is never forced
+    // again — the leaf stays free to answer in prose.
+    const secondBody = JSON.parse(port.requests[1]?.body ?? "null") as {
+      tool_choice?: unknown;
+    };
+    expect(secondBody).not.toHaveProperty("tool_choice");
+    // The synthetic tool never reaches the real dispatcher (sandbox/registry) —
+    // never the "should not be reached" stand-in a real dispatch would return.
+    expect(baseDispatchCalls).toBe(0);
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls?.[0]).toMatchObject({
+      name: "StructuredOutput",
+      arguments: '{"value":3}',
+    });
+    close();
+  });
 });

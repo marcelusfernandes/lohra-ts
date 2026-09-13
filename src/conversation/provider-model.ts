@@ -24,6 +24,7 @@ export class AnthropicMessagesModel implements ModelTransport {
       maxTokens: request.maxTokens,
       temperature: request.temperature,
       effort: request.effort,
+      toolChoice: request.toolChoice ?? null,
     });
     return this.streaming
       ? this.client.stream(kwargs, request.onText ? { onText: request.onText } : {}, request.signal)
@@ -50,6 +51,7 @@ export class ResponsesModel implements ModelTransport {
         maxTokens: request.maxTokens,
         temperature: request.temperature,
         effort: request.effort,
+        toolChoice: request.toolChoice ?? null,
       }),
       request.signal,
     );

@@ -74,8 +74,7 @@ function signalAborted(signal: AbortSignal): boolean {
  * directly rather than through any transport. `signalAborted(signal)` gates all
  * three: none of these shapes proves an abort on their OWN (an
  * "AbortError" name or a coincidental `.cause` could, in principle, come
- * from somewhere else), the signal's own state is the one fact this
- * function trusts.
+ * from somewhere else), the signal's own state is the one fact this function trusts.
  */
 function isAbortOf(error: unknown, signal: AbortSignal): boolean {
   if (!signalAborted(signal)) return false;
@@ -326,6 +325,7 @@ export class ConversationRuntime {
      * cli.py has no effort flag either), so this stays absent/null there
      * and nothing changes for the parent's own requests. */
     readonly effort?: string | null;
+    readonly toolChoice?: string | null;
     readonly sessionId?: string;
     /** Issue #518 (ADR 0005): checked cooperatively between iterations
      * (`signalAborted`, before each provider call is even issued) AND
@@ -347,8 +347,7 @@ export class ConversationRuntime {
      * an orchestration adapter's steer inbox is the intended caller. Absent
      * means no injection, and the turn behaves exactly as it did before this
      * option existed. A thrown error is wrapped in MessageInjectionError and
-     * propagated (never swallowed, never left silent); no request is built
-     * for that iteration. */
+     * propagated (never swallowed, never left silent); no request is built for that iteration. */
     readonly drainMessages?: () => readonly Readonly<Record<string, unknown>>[];
     /** Issue #520 (M16-S5, ADR 0005): armed fresh before EVERY provider call
      * this turn issues (`interruptSource.arm(abort)`, disarmed in that
@@ -494,6 +493,8 @@ export class ConversationRuntime {
           model: input.model,
           temperature: input.temperature ?? null,
           effort: input.effort ?? null,
+          // #578: forced only on iteration 1 — still callable, never forced, after.
+          toolChoice: iteration === 1 ? (input.toolChoice ?? null) : null,
           maxTokens: this.options.maxTokens ?? null,
           tools: immutableMessages(
             (this.options.toolDefinitions ?? []) as readonly Readonly<Record<string, unknown>>[],

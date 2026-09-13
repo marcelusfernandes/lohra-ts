@@ -328,6 +328,12 @@ export class OrchestrationChildRuntime implements ChildRuntime {
       ...(request.model === undefined ? {} : { model: request.model }),
       ...(request.effort === undefined ? {} : { effort: request.effort }),
       ...(request.maxIterations === undefined ? {} : { maxIterations: request.maxIterations }),
+      // Issue #578: the ONLY hop `forcedTool` was silently dropped at —
+      // `ChildSpawnRequest` already carried it (runtime.ts:20), and
+      // `child-runner.ts` already reads `SpawnConfig.forcedTool` once this
+      // spread includes it. Same optional-passthrough shape as every field
+      // above.
+      ...(request.forcedTool === undefined ? {} : { forcedTool: request.forcedTool }),
       wrapDispatch: this.wrapDispatchFor(request.causalContext.runId),
     }).subId;
     this.causalContexts.set(subId, freezeCausalContext(request.causalContext));
@@ -409,6 +415,13 @@ export class OrchestrationChildRuntime implements ChildRuntime {
       errorKind: result.errorKind,
       usageUncertain: result.usageUncertain === true,
       ...(result.partial === true ? { partial: true } : {}),
+      // Issue #578: absent/empty stays absent (never `[]`) — a leaf that
+      // never called a tool keeps every `ChildResult` fixture from before
+      // this issue byte-identical, matching `artifactFieldsOf`'s own
+      // absence convention just below.
+      ...(result.toolCalls !== undefined && result.toolCalls.length > 0
+        ? { toolCalls: result.toolCalls }
+        : {}),
       sandboxRefusals: this.refusalCounts.get(id)?.box.count ?? 0,
       ...this.artifactFieldsOf(id),
     };
