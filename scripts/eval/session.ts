@@ -1,12 +1,22 @@
 // Issue #576: roda UM caso de eval — inicia o stub em processo (modo
 // "stub"; `startStub` já é usado assim por
-// `tests/parity/stub-lane-script.test.ts`), sobe o CLI já buildado
-// (`dist/cli.js`) como processo filho apontado para o stub, e devolve o
+// `tests/parity/stub-lane-script.test.ts`), invoca o CLI e devolve o
 // envelope e as requisições cruas capturadas para os oráculos julgarem.
 //
-// Isolamento (AC "nunca faz rede sem --provider"): o ambiente do processo
-// filho em modo stub é uma allowlist literal, nunca `...process.env` — a
-// única forma de rede possível é para o stub local. Em modo "provider" o
+// Invocação do CLI (issue #576, rodada 1b): por padrão, `runCli` de
+// `src/cli.js` **in-process** — o mesmo padrão de `tests/local-cli.test.ts`
+// — porque `npm test` roda ANTES de `npm run build` no CI
+// (`tests/ci-workflow-order.test.ts`) e nenhum teste pode depender de
+// `dist/`. Passar `cliPath` (CLI, `--cli <path>`) troca para um processo
+// filho de verdade contra esse caminho — o modo do operador para validar o
+// `dist/cli.js` empacotado depois de `npm run build`; nunca o caminho que
+// `npm test`/`npm run prova` exercitam.
+//
+// Isolamento (AC "nunca faz rede sem --provider"): o ambiente em modo stub
+// é uma allowlist literal, nunca `...process.env` — a única forma de rede
+// possível é para o stub local, tanto in-process (a mesma regra vale para
+// `io.environment`, que é tudo que o código de `src/` lê — nunca
+// `process.env` diretamente) quanto via subprocesso. Em modo "provider" o
 // ambiente real É herdado de propósito (as credenciais vivem em
 // `~/.lohra/.env`, fora do repo) e isso só acontece quando quem chama
 // `runEvalCase` passou `--provider` explicitamente (`run.ts` recusa isso em
@@ -17,12 +27,16 @@ import { tmpdir } from "node:os";
 import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 
+import { runCli } from "../../src/cli.js";
+import { openStateForEnvironment, SessionRepository } from "../../src/state/index.js";
 import { startStub } from "../stub/server.js";
 import type { StubRuntime } from "../stub/types.js";
-import type { CapturedRequest, EvalCase } from "./types.js";
+import { refuseNetworkInCi } from "./ci-guard.js";
+import type { CapturedRequest, EvalCase, EvalSeedTurn } from "./types.js";
 
 export interface EvalRunOptions {
-  readonly cliPath: string;
+  /** Só em modo subprocesso (operador, `--cli <path>`); ausente == in-process. */
+  readonly cliPath?: string;
   readonly provider?: string;
   readonly timeoutMs: number;
 }
@@ -34,6 +48,13 @@ export interface EvalSessionResult {
   readonly envelopeParseError: string | null;
   readonly stderr: string;
   readonly requests: readonly CapturedRequest[];
+}
+
+interface CliRunResult {
+  readonly exitCode: number;
+  readonly timedOut: boolean;
+  readonly stdout: string;
+  readonly stderr: string;
 }
 
 const HEADER_ALLOWLIST_EXCLUDED = [
@@ -113,12 +134,7 @@ function spawnCli(
   environment: Readonly<Record<string, string>>,
   cwd: string,
   timeoutMs: number,
-): Promise<{
-  readonly exitCode: number;
-  readonly timedOut: boolean;
-  readonly stdout: string;
-  readonly stderr: string;
-}> {
+): Promise<CliRunResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cliPath, ...argv], {
       cwd,
@@ -149,6 +165,67 @@ function spawnCli(
   });
 }
 
+/** Chama `runCli` in-process — sem subprocesso, sem `dist/`. `runCli`
+ * resolve para o exit code (nunca lança para um turno que falhou; erros do
+ * próprio turno já viram `errorEnvelope` no stdout, como no CLI real). O
+ * `Promise.race` cobre o timeout do lado de fora: uma chamada real de
+ * provedor que trava não é matável in-process (não há processo para
+ * `SIGKILL`) — aceitável aqui porque o timeout (`run.ts`, 20s) é generoso e
+ * todo caso de stub é determinístico e rápido; `timedOut: true` ainda marca
+ * a linha de resultado corretamente mesmo que a chamada perdida siga
+ * rodando em segundo plano dentro do processo do runner.
+ *
+ * `process.chdir` para `cwd`: as tools de arquivo (`read_file`/`write_file`)
+ * e `terminal` resolvem caminho relativo contra o cwd REAL do processo do
+ * SO, nunca contra `CliIo.cwd` (que só alimenta `options.cwd` de
+ * `chat.ts` — descoberta de `AGENTS.md`/`CLAUDE.md`, escopo de skills de
+ * projeto). Em modo subprocesso isso saía de graça (o `spawn` já dá ao
+ * filho seu próprio cwd real); in-process, sem isso, um `cwd_fixture`
+ * relativo (`tool-target.txt`) nunca seria encontrado. Restaura o cwd
+ * anterior só quando a invocação de verdade se resolve — nunca no
+ * `Promise.race`, que pode vencer primeiro por timeout enquanto a chamada
+ * perdida segue lendo/escrevendo relativo ao `cwd` do caso. */
+async function runInProcess(
+  argv: readonly string[],
+  environment: Readonly<Record<string, string>>,
+  cwd: string,
+  timeoutMs: number,
+): Promise<CliRunResult> {
+  let stdout = "";
+  let stderr = "";
+  const previousCwd = process.cwd();
+  process.chdir(cwd);
+  const invocation = runCli(argv, {
+    environment: { ...environment },
+    cwd,
+    isTty: false,
+    probeOllama: () => Promise.resolve(false),
+    stdout: (value) => {
+      stdout += value;
+    },
+    stderr: (value) => {
+      stderr += value;
+    },
+  }).then(
+    (exitCode) => ({ exitCode, timedOut: false, stdout, stderr }),
+    (error: unknown) => ({
+      exitCode: 1,
+      timedOut: false,
+      stdout,
+      stderr: `${stderr}${String(error)}\n`,
+    }),
+  );
+  void invocation.finally(() => {
+    process.chdir(previousCwd);
+  });
+  const timeout = new Promise<CliRunResult>((resolve) => {
+    setTimeout(() => {
+      resolve({ exitCode: 124, timedOut: true, stdout, stderr });
+    }, timeoutMs);
+  });
+  return Promise.race([invocation, timeout]);
+}
+
 function definedEntries(environment: NodeJS.ProcessEnv): Readonly<Record<string, string>> {
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(environment)) {
@@ -172,6 +249,51 @@ function parseEnvelope(stdout: string): {
   }
 }
 
+function runCliOrSpawn(
+  options: EvalRunOptions,
+  argv: readonly string[],
+  environment: Readonly<Record<string, string>>,
+  cwd: string,
+): Promise<CliRunResult> {
+  return options.cliPath === undefined
+    ? runInProcess(argv, environment, cwd, options.timeoutMs)
+    : spawnCli(options.cliPath, argv, environment, cwd, options.timeoutMs);
+}
+
+/** Seed direto no `state.db` do caso — mesmo padrão de
+ * `tests/chat-compaction-events.test.ts` (`SessionRepository.recordTurn`)
+ * — necessário porque `preflightCompact` (`src/conversation/runtime.ts`)
+ * só encontra história para dobrar quando já existem turnos PERSISTIDOS de
+ * uma sessão anterior; um turno novo nunca tem nada próprio para
+ * compactar. `environment` precisa já trazer `LOHRA_PROFILE` (a mesma
+ * resolução de caminho que `resolvePaths` faz dentro do `runCli`/processo
+ * real, para o DB seedado aqui ser o MESMO que a chamada real abre). */
+function seedSession(
+  environment: Readonly<Record<string, string>>,
+  sessionId: string,
+  model: string,
+  turns: readonly EvalSeedTurn[],
+): void {
+  const connection = openStateForEnvironment(environment);
+  try {
+    const sessions = new SessionRepository(connection.database, undefined, connection.ftsEnabled);
+    sessions.createSession({
+      id: sessionId,
+      model,
+      systemPrompt: "eval-seed",
+      cwd: environment.HOME ?? null,
+    });
+    for (const turn of turns) {
+      sessions.recordTurn(sessionId, {
+        user: { role: "user", content: turn.user },
+        assistant: { role: "assistant", content: turn.assistant, finishReason: "stop" },
+      });
+    }
+  } finally {
+    connection.close();
+  }
+}
+
 /** Roda um caso contra o stub local (`options.provider` ausente) ou contra
  * um provedor real (`options.provider` presente) e devolve o envelope mais
  * as requisições capturadas — vazio em modo "provider", já que não há stub
@@ -181,6 +303,12 @@ export async function runEvalCase(
   kase: EvalCase,
   options: EvalRunOptions,
 ): Promise<EvalSessionResult> {
+  // Defesa em profundidade (rodada 2): `run.ts`'s `main()` já chama isso
+  // antes de montar o lote, mas um chamador direto de `runEvalCase` (outro
+  // script, um teste futuro) não passa por `main()` — a garantia "nunca
+  // --provider em CI" precisa valer aqui também, não só no caminho feliz
+  // do CLI.
+  refuseNetworkInCi(options.provider, process.env);
   const root = mkdtempSync(join(tmpdir(), `lohra-eval-${kase.id}-`));
   try {
     if (options.provider === undefined) {
@@ -197,11 +325,21 @@ export async function runEvalCase(
           PATH: process.env.PATH ?? "",
           HOME: home,
           LOHRA_HOME: home,
+          LOHRA_PROFILE: "eval",
           LOHRA_NO_WIZARD: "1",
           NO_COLOR: "1",
           LOHRA_PROVIDER_BASE_URL: `http://127.0.0.1:${String(stub.port)}/v1`,
           LOHRA_OLLAMA_CONNECT_URL: `http://127.0.0.1:${String(stub.port)}/api/tags`,
+          ...(kase.contextWindowOverride === undefined
+            ? {}
+            : { LOHRA_CONTEXT_WINDOW: String(kase.contextWindowOverride) }),
         };
+        const sessionArgs: string[] = [];
+        if (kase.sessionSeed !== undefined && kase.sessionSeed.length > 0) {
+          const sessionId = kase.id.replace(/[^a-z0-9-]/giu, "-");
+          seedSession(environment, sessionId, "stub-coder:1b", kase.sessionSeed);
+          sessionArgs.push("--session", sessionId);
+        }
         const argv = [
           "chat",
           "--json",
@@ -214,9 +352,10 @@ export async function runEvalCase(
           "eval",
           "--max-iterations",
           "10",
+          ...sessionArgs,
           kase.input,
         ];
-        const run = await spawnCli(options.cliPath, argv, environment, home, options.timeoutMs);
+        const run = await runCliOrSpawn(options, argv, environment, home);
         const { envelope, error } = parseEnvelope(run.stdout);
         return {
           exitCode: run.exitCode,
@@ -253,7 +392,7 @@ export async function runEvalCase(
       "10",
       kase.input,
     ];
-    const run = await spawnCli(options.cliPath, argv, environment, home, options.timeoutMs);
+    const run = await runCliOrSpawn(options, argv, environment, home);
     const { envelope, error } = parseEnvelope(run.stdout);
     return {
       exitCode: run.exitCode,

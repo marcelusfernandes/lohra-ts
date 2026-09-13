@@ -1,20 +1,30 @@
 #!/usr/bin/env node
-// Issue #576: `npm run eval [-- --provider <p>] [--set dev|holdout|all]` —
-// o CLI do harness. Sem `--provider`, roda contra o stub local (nunca faz
-// rede) e é o oráculo de mecanismo que `tests/eval-cases.test.ts` também
-// roda em `npm test`. Com `--provider <p>`, roda contra um provedor real —
-// e nunca em CI (`refuseNetworkInCi`), sempre gravando em
-// `docs/eval/<data>-<provedor|stub>/`.
+// Issue #576: `npm run eval [-- --provider <p>] [--set dev|holdout|all]
+// [--cli <path>]` — o CLI do harness. Sem `--provider`, roda contra o stub
+// local (nunca faz rede) e é o oráculo de mecanismo que
+// `tests/eval-cases.test.ts` também roda em `npm test`. Com `--provider
+// <p>`, roda contra um provedor real — e nunca em CI (`refuseNetworkInCi`),
+// sempre gravando em `docs/eval/<data>-<provedor|stub>/`.
+//
+// Rodada 1b: por padrão, o CLI é invocado **in-process** via `runCli`
+// (`scripts/eval/session.ts`) — não depende de `dist/`, porque `npm test`
+// roda ANTES de `npm run build` no CI (`tests/ci-workflow-order.test.ts`).
+// `--cli <path>` (ex.: `--cli dist/cli.js`, depois de `npm run build`) troca
+// para um subprocesso de verdade contra esse caminho — o modo do operador
+// para validar o pacote empacotado, nunca o caminho que os testes exercitam.
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
 import { parseEvalCase } from "./case.js";
+import { refuseNetworkInCi } from "./ci-guard.js";
 import { runCaseSafely } from "./runner.js";
 import { appendResultLine, buildSummary, resetResultsFile, writeSummary } from "./results.js";
 import { runEvalCase, type EvalRunOptions } from "./session.js";
 import type { EvalCase, EvalResultLine } from "./types.js";
+
+export { refuseNetworkInCi } from "./ci-guard.js";
 
 export const FIXTURES_DIR = "tests/fixtures/eval";
 
@@ -58,11 +68,22 @@ export type EvalCaseSet = "dev" | "holdout" | "all";
 export interface ParsedArgs {
   readonly provider?: string;
   readonly set: EvalCaseSet;
+  /** `--cli <path>`: opcional, subprocesso de verdade contra um CLI
+   * empacotado (ex.: `dist/cli.js`). Ausente == in-process (padrão, o modo
+   * que `npm test` também exercita, sem depender de `dist/`). */
+  readonly cli?: string;
+  /** `--tag <t>`: sufixo no diretório de saída (`docs/eval/<data>-<label>-<t>/`)
+   * — sem ele, duas corridas no mesmo dia (ex.: antes/depois de uma mudança
+   * de prompt) truncam a MESMA `results.jsonl` (`resetResultsFile`) e a
+   * comparação por SHA (`docs/eval.md`) fica impossível. */
+  readonly tag?: string;
 }
 
 export function parseArgs(argv: readonly string[]): ParsedArgs {
   let provider: string | undefined;
   let set: EvalCaseSet = "all";
+  let cli: string | undefined;
+  let tag: string | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     if (flag === "--provider") {
@@ -77,25 +98,24 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       }
       set = value;
       index += 1;
+    } else if (flag === "--cli") {
+      const value = argv[index + 1];
+      if (value === undefined) throw new Error("eval: --cli precisa de um caminho");
+      cli = value;
+      index += 1;
+    } else if (flag === "--tag") {
+      const value = argv[index + 1];
+      if (value === undefined) throw new Error("eval: --tag precisa de um valor");
+      tag = value;
+      index += 1;
     }
   }
-  return provider === undefined ? { set } : { provider, set };
-}
-
-/** AC "o eval nunca faz rede sem --provider; com --provider, nunca roda no
- * CI" — a segunda metade é este fault; a primeira é estrutural em
- * `session.ts` (o ambiente do processo filho em modo stub nunca inclui o
- * `process.env` real). */
-export function refuseNetworkInCi(
-  provider: string | undefined,
-  environment: NodeJS.ProcessEnv,
-): void {
-  if (provider === undefined) return;
-  if (environment.CI === "true" || environment.GITHUB_ACTIONS === "true") {
-    throw new Error(
-      "eval: --provider nunca roda em CI (CI=true ou GITHUB_ACTIONS=true) — rode localmente para gravar um baseline real",
-    );
-  }
+  return {
+    set,
+    ...(provider === undefined ? {} : { provider }),
+    ...(cli === undefined ? {} : { cli }),
+    ...(tag === undefined ? {} : { tag }),
+  };
 }
 
 export interface BatchOptions extends EvalRunOptions {
@@ -133,23 +153,27 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   refuseNetworkInCi(args.provider, process.env);
 
-  const cliPath = resolve(root, "dist/cli.js");
-  if (!existsSync(cliPath)) {
-    throw new Error(`eval: ${cliPath} não existe — rode "npm run build" antes`);
+  let cliPath: string | undefined;
+  if (args.cli !== undefined) {
+    cliPath = resolve(root, args.cli);
+    if (!existsSync(cliPath)) {
+      throw new Error(`eval: ${cliPath} não existe (--cli) — rode "npm run build" antes`);
+    }
   }
 
   const split = loadSplit(root);
   const cases = loadCases(root, idsFor(split, args.set));
   const label = args.provider ?? "stub";
   const date = new Date().toISOString().slice(0, 10);
-  const outDir = resolve(root, "docs/eval", `${date}-${label}`);
+  const dirName = args.tag === undefined ? `${date}-${label}` : `${date}-${label}-${args.tag}`;
+  const outDir = resolve(root, "docs/eval", dirName);
   const resultsPath = join(outDir, "results.jsonl");
   const summaryPath = join(outDir, "summary.json");
 
   const lines = await runBatch(cases, {
-    cliPath,
     timeoutMs: 20_000,
     resultsPath,
+    ...(cliPath === undefined ? {} : { cliPath }),
     ...(args.provider === undefined ? {} : { provider: args.provider }),
   });
   const summary = buildSummary(
@@ -160,7 +184,10 @@ async function main(): Promise<void> {
   writeSummary(summaryPath, summary);
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
 
-  const failedMechanism = lines.filter((line) => !line.mechanismOk);
+  // `=== false`, nunca `!line.mechanismOk`: `"skipped"` (modo provider) é
+  // falsy-looking em prosa mas não é uma falha de mecanismo — é a ausência
+  // honesta de uma avaliação que nunca rodou.
+  const failedMechanism = lines.filter((line) => line.mechanismOk === false);
   if (failedMechanism.length > 0) {
     process.stderr.write(
       `eval: ${String(failedMechanism.length)} caso(s) falharam o oráculo de mecanismo: ${failedMechanism

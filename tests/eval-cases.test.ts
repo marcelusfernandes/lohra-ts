@@ -2,10 +2,15 @@
 // oráculo de mecanismo rodando de verdade contra o stub — o "roda em `npm
 // test` como suíte normal" da issue. Nunca ajusta holdout para fazer um
 // caso passar; holdout só é lido aqui, nunca usado para calibrar texto.
+//
+// Rodada 1b: o CLI é invocado in-process (`runCli`, `scripts/eval/session.ts`)
+// — nunca `dist/cli.js` — porque `npm test` roda ANTES de `npm run build`
+// no CI (`tests/ci-workflow-order.test.ts`); um teste que exigisse `dist/`
+// reprovaria a coleta inteira nesse job.
 import { existsSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { loadCase, loadSplit, FIXTURES_DIR } from "../scripts/eval/run.js";
 import { runEvalCase } from "../scripts/eval/session.js";
@@ -13,18 +18,6 @@ import { runCaseToResultLine } from "../scripts/eval/runner.js";
 import type { MechanismResult } from "../scripts/eval/types.js";
 
 const root = resolve(import.meta.dirname, "..");
-const cliPath = resolve(root, "dist/cli.js");
-
-beforeAll(() => {
-  // Fail-closed (CLAUDE.md, invariante 2): rodar esta suíte num worktree
-  // sem build não pode silenciosamente "passar vazio" — tem que dizer por
-  // quê. O gate canônico já roda `npm run build` antes de `npm test`
-  // (CLAUDE.md, "Gates"); isto só torna o motivo explícito quando alguém
-  // roda o arquivo isolado.
-  if (!existsSync(cliPath)) {
-    throw new Error(`eval: ${cliPath} não existe — rode "npm run build" antes de "npm test"`);
-  }
-});
 
 function fixtureIds(): readonly string[] {
   return readdirSync(resolve(root, FIXTURES_DIR))
@@ -67,7 +60,7 @@ describe("mechanism oracle against the stub", () => {
     "case %s: every mechanism assertion passes against the stub",
     async (id) => {
       const kase = loadCase(root, id);
-      const line = await runCaseToResultLine(kase, { cliPath, timeoutMs: 20_000 }, runEvalCase);
+      const line = await runCaseToResultLine(kase, { timeoutMs: 20_000 }, runEvalCase);
       expect(line.mechanismOk, describeFailures(line.mechanism)).toBe(true);
       expect(line.timedOut).toBe(false);
     },
