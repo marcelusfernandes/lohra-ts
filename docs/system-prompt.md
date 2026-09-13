@@ -150,10 +150,9 @@ agora manda a doutrina também.
 O subagente (`src/orchestration/subagent-prompt.ts`) recebe sempre
 `DOCTRINE_CORE`, nunca a extensão: o call site que o invoca
 (`src/orchestration/chat-wiring.ts`'s `buildSubagentPrompt`) não tem o
-perfil do provedor pai disponível para decidir a faixa, e essa fiação ficou
-fora do escopo de arquivos desta issue — #583 (P7, "prompt do subagente com
-ambiente, tools e contrato de retorno") é quem estende esse call site com
-mais contexto, e pode herdar a faixa do pai então.
+perfil do provedor pai disponível para decidir a faixa — continua assim
+depois de #583 (P7) também; essa issue estendeu o mesmo call site com
+`cwd`/lista de tools, não com o perfil do provedor (seção própria abaixo).
 
 ## Modo por superfície (issue #580, P4)
 
@@ -357,8 +356,67 @@ espontâneo (`target: "user"`, sem o modelo ser instruído a chamar a tool
 por nome); perguntar pelo conteúdo do `CLAUDE.md`/`AGENTS.md` deduplicados
 responde certo sem nenhuma chamada de `memory`.
 
+## Ambiente, lista de tools e contrato de retorno do subagente (issue #583, P7)
+
+Antes desta issue, o prompt do filho (`src/orchestration/subagent-prompt.ts`)
+não dizia onde ele estava (`cwd`), não listava as tools que sobraram do
+allow-list do pai, e pedia só "end with a concise summary" — sem forma que
+um chamador pudesse ler de volta sem adivinhar pela prosa.
+
+### O que `buildSubagentSystemPrompt` ganhou
+
+- **`cwd`** vira o bloco `Environment:` já existente de `buildSystemPrompt`
+  (`environmentHints`) — o filho sabe seu diretório de trabalho sem chamar
+  `pwd`.
+- **`toolNames`** vira um parágrafo (via `systemMessage`, a faixa entre
+  `stable` e `volatile`) que lista as tools disponíveis, a fronteira da
+  tarefa ("stop and report" em vez de improvisar fora do escopo pedido), o
+  aviso de que o pai nunca vê o tool output cru (só o texto final do turno),
+  e a sentinela de retorno: `result: <summary>` | `failed: <why>` |
+  `needs input: <what>`, uma linha por vez, a última do texto.
+- Os dois blocos são omitidos (nunca o texto vazio) quando o insumo
+  correspondente está ausente — o mesmo `filter(Boolean)` que já governa o
+  resto de `buildSystemPrompt`.
+
+`chat-wiring.ts`'s `buildSubagentPrompt` deriva `toolNames` com o MESMO
+`childToolDefinitions(parentToolDefinitions)` que `child-runner.ts` usa para
+o `toolDefinitions` real do turno — o prompt e o catálogo de tools do turno
+nunca podem divergir, porque os dois vêm da mesma chamada. `cwd` vem do
+mesmo `options.cwd` que `child-runner.ts` já usava para o `cwd` real do
+turno. O teste de contrato (`tests/orchestration-subagent-prompt.test.ts`)
+substitui o antigo pino byte-exato: prende blocos presentes, ordem, e que a
+lista de tools vem de `childToolDefinitions`, nunca uma segunda cópia
+digitada à mão.
+
+`yolo` continua ausente/`false` no `Harness:` do subagente — mas não por
+subestimar um vazamento pendente: `child.ts`'s `createChildDispatch` recusa
+comando perigoso incondicionalmente, independente do singleton global de
+`src/tools/approval.ts` (`tests/tools-security-lifecycle.test.ts`, "keeps a
+dangerous child command denied when the parent approval is yolo") — não há
+vazamento de `--yolo` do pai para o filho via `terminal` para corrigir, e a
+frase "refused automatically and finally" já é verdadeira como está.
+
+### `outcome`: aditivo em `delegate_task`/`collect_session`
+
+`child-runner.ts` lê a última linha não-vazia do turno "complete"
+(`parseOutcomeSentinel`, `outcome-sentinel.ts`) e guarda em
+`CollectResult.outcome` (`"result" | "failed" | "needs_input" | null`) —
+puramente aditivo: nunca altera `status`/`error_kind`, mesmo quando o filho
+escreve `failed: …` no próprio texto (o turno ainda é `status: "complete"`
+se o modelo respondeu normalmente). O envelope de `collect_session` (13ª
+chave) e de `delegate_task` (9ª chave, batch e resume) carregam `outcome` no
+fim — chaves existentes intocadas na mesma ordem (precedente #232/#429).
+Sentinela ausente vira `outcome: null`, presente e nunca omitido. As
+descriptions de `delegate_task`/`collect_session` (`BUILTIN_DEFINITIONS`)
+citam o campo e seus três valores possíveis, para o pai saber que a chave
+existe sem precisar descobrir por tentativa.
+
+`tests/fixtures/eval/delegated-task-with-scope.json` tem os dois oráculos: o
+system prompt do filho (requisição 2) carrega `Environment:`/`Tools
+available to you:`/a sentinela; o envelope de `delegate_task` (requisição 3)
+carrega `"outcome":"result"` de volta ao pai.
+
 ## O que este documento ainda não cobre
 
-Contrato de retorno do subagente, `prompt caching` — nenhum dos dois existe
-no runtime hoje. Cada sub-issue do épico #575 que os implementa atualiza
-este arquivo quando mergeia.
+`prompt caching` — não existe no runtime hoje. Cada sub-issue do épico #575
+que o implementa atualiza este arquivo quando mergeia.
