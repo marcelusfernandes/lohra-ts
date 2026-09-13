@@ -283,6 +283,118 @@ describe("end-to-end: WorkflowEngine → OrchestrationChildRuntime → real Orch
   });
 });
 
+describe("end-to-end: WorkflowEngine → OrchestrationChildRuntime → real OrchestrationCore → createChildRunner (#602)", () => {
+  it("a steer-driven correction re-collect also reads the forced tool call, not the turn's prose — the node recovers with forcing_fallbacks: 0", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-forced-tool-recollect-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    const sessions = new SessionRepository(connection.database, () => 1000, connection.ftsEnabled);
+    sessions.createSession({ id: "parent-1", source: "gateway" });
+    const parentProfile = getProviderProfile("openai");
+    if (parentProfile === null) throw new Error("openai profile missing");
+    const port = new QueuePort([
+      // Turn 1 (original spawn): the forced call answers with an INVALID
+      // argument (a string where the schema wants an integer) — fails
+      // `parseAndValidate` in `WorkflowEngine.collectLeaf`, which then
+      // steers a correction into the same leaf.
+      toolCallStream("StructuredOutput", '{"value":"nope"}', "call_1"),
+      sseResponse([
+        { choices: [{ delta: { content: "ack" }, finish_reason: "stop" }] },
+        { choices: [], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+      ]),
+      // Turn 2 (steer resurrection, same session): `OrchestrationCore.steer`
+      // resurrects the idle leaf with `{...entry.originalConfig, prompt:
+      // text}` — `forcedTool` is part of `originalConfig`, so this turn's
+      // own first iteration is forced again, this time with a VALID
+      // argument.
+      toolCallStream("StructuredOutput", '{"value":3}', "call_2"),
+      sseResponse([
+        { choices: [{ delta: { content: "done" }, finish_reason: "stop" }] },
+        { choices: [], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+      ]),
+      // Turn 3: never reached once the fix lands (attempt 1's re-collect
+      // already validates via the tool call above and breaks the loop) —
+      // present only so a RE-BROKEN base reproduces the documented fault
+      // ("schema not satisfied after retries") instead of a queue
+      // exhaustion, since a base without the fix keeps reading each turn's
+      // own prose ("ack"/"done"/"done") and never validates, exhausting
+      // `MAX_VALIDATION_RETRIES`.
+      toolCallStream("StructuredOutput", '{"value":3}', "call_3"),
+      sseResponse([
+        { choices: [{ delta: { content: "done" }, finish_reason: "stop" }] },
+        { choices: [], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+      ]),
+    ]);
+    const client = new ChatCompletionsClient({
+      baseUrl: "http://parent.invalid/v1",
+      apiKey: "lohra-local",
+      transport: new ChatCompletionsTransport(),
+      http: port,
+    });
+    const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
+    const runChild = createChildRunner({
+      sessions,
+      parentSessionId: "parent-1",
+      clientPool: pool,
+      baseDispatch: () => Promise.resolve("should not be called"),
+      parentToolDefinitions: [],
+      defaultModel: "fake-model-a",
+      cwd: "/tmp",
+      idSource: (() => {
+        let n = 0;
+        return () => {
+          n += 1;
+          return `child-recollect-${String(n)}`;
+        };
+      })(),
+      clock: () => 1000,
+      childMaxIterations: 50,
+    });
+    const runtime = new OrchestrationChildRuntime(
+      new OrchestrationCore({
+        runChild,
+        idSource: (() => {
+          let n = 0;
+          return () => {
+            n += 1;
+            return `leaf-recollect-${String(n)}`;
+          };
+        })(),
+        maxSubsessions: 100,
+        maxParallel: 10,
+        buildSubagentPrompt: () => "SYS",
+      }),
+    );
+    const spec = validateSpec({
+      meta: { name: "forced-tool-recollect" },
+      nodes: [
+        {
+          id: "forced",
+          type: "agent",
+          prompt: "answer as JSON",
+          tool_less: true,
+          schema: { type: "object", properties: { value: { type: "integer" } } },
+        },
+      ],
+    });
+    if ("issues" in spec) throw new Error(spec.message);
+
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+
+    // RED on base: `engine.ts`'s re-collect after `runtime.steer()` reads
+    // `collected.output` verbatim (the correction turn's own prose, "done")
+    // instead of re-running `extractForcedOutput` — `parseAndValidate` never
+    // accepts that prose as the schema's object, so the node exhausts
+    // `MAX_VALIDATION_RETRIES` and faults instead of returning the corrected
+    // `{value: 3}` the leaf actually answered with, via the tool.
+    expect(result.status).toBe("complete");
+    expect(result.outputs.forced).toEqual({ value: 3 });
+    expect(result.forcingFallbacks).toBe(0);
+    expect(result.validationRetries).toBe(1);
+    connection.close();
+  });
+});
+
 describe("forcing_fallbacks only rises from the engine's own forced-schema fallback (#403)", () => {
   /** One leaf per spawn, scripted `collect()` results in call order — same
    * molde as `tests/workflow-fault-kinds.test.ts`'s `FakeRuntime`. The cast
@@ -345,6 +457,126 @@ describe("forcing_fallbacks only rises from the engine's own forced-schema fallb
     // forced-schema miss, engine-utils.ts's extractForcedOutput) — a leaf
     // reporting an out-of-band `forcedFallback` never moves it.
     expect(result.forcingFallbacks).toBe(0);
+  });
+});
+
+describe("usedFallback stays the 1st collect's own reading — a re-collect never recomputes it (#602 rodada 2)", () => {
+  // Same molde as the #403 FakeRuntime above (one leaf per spawn, scripted
+  // `collect()` results in call order) — local copy because that one is
+  // scoped to its own `describe`. The revisor's veredito on PR #609 named
+  // `forcing_fallbacks`'s contract explicitly out of #602's scope: a
+  // steer-driven re-collect must re-extract `output` (the actual fix) but
+  // never recompute `usedFallback` — main's own pre-#602 code always kept
+  // it pinned to the FIRST collect (the loop only ever reassigned `output`,
+  // straight off `collected.output`, never touching `usedFallback` again).
+  class FakeRuntime implements ChildRuntime {
+    private readonly byId = new Map<string, ChildResult[]>();
+    private readonly scripts: ChildResult[][];
+
+    constructor(scripts: ChildResult[][]) {
+      this.scripts = scripts.map((script) => [...script]);
+    }
+
+    spawn(request: ChildSpawnRequest): string {
+      void request;
+      const id = `leaf-${String(this.byId.size + 1)}`;
+      this.byId.set(id, this.scripts.shift() ?? []);
+      return id;
+    }
+
+    collect(id: string): ChildResult {
+      const script = this.byId.get(id) ?? [];
+      return script.shift() ?? { status: "failed", output: "script exhausted" };
+    }
+
+    steer(): void {}
+    cancel(): void {}
+
+    installLeafSandbox(): LeafSandboxHandle {
+      return { dispose: (): void => undefined };
+    }
+  }
+
+  function parsedSpec(raw: unknown) {
+    const result = validateSpec(raw);
+    if ("issues" in result) throw new Error(result.message);
+    return result;
+  }
+
+  const schema = Object.freeze({
+    type: "object",
+    properties: { value: { type: "integer" } },
+    required: ["value"],
+  });
+
+  it("(a) 1st reply via the tool (invalid) → correction in PROSE (valid) → completes with forcing_fallbacks: 0, same as main", async () => {
+    const runtime = new FakeRuntime([
+      [
+        // 1st collect: forced call fired, but the argument fails the
+        // schema (a string where `value` wants an integer) — `usedFallback`
+        // for THIS extraction is `false` (a StructuredOutput call WAS
+        // found), and that's the reading that stays pinned.
+        {
+          status: "complete",
+          output: "ignored — StructuredOutput's own arguments win",
+          toolCalls: [{ id: "c1", name: "StructuredOutput", arguments: '{"value":"nope"}' }],
+        },
+        // Re-collect after steer: the correction landed as plain prose
+        // (no tool call at all) — schema-valid JSON text. The FIX re-reads
+        // this collect's own `output` (this is what makes the node
+        // recover); `usedFallback` is never touched again.
+        { status: "complete", output: '{"value":5}' },
+      ],
+    ]);
+    const spec = parsedSpec({
+      meta: { name: "recollect-prose-after-tool" },
+      nodes: [{ id: "a", type: "agent", prompt: "x", tool_less: true, schema }],
+    });
+
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+
+    // RED on a version that recomputes `usedFallback` on every collect (the
+    // PR #609 r1 shape, `({ output, usedFallback } = extractForcedOutput(...))`):
+    // this re-collect finds no tool call, so THAT extraction's own
+    // `usedFallback` is `true` — overwriting the pinned `false` and bumping
+    // `forcingFallbacks` to 1, a contract change #602 explicitly rules out
+    // of scope.
+    expect(result.status).toBe("complete");
+    expect(result.outputs.a).toEqual({ value: 5 });
+    expect(result.validationRetries).toBe(1);
+    expect(result.forcingFallbacks).toBe(0);
+  });
+
+  it("(b) 1st reply in PROSE (invalid) → correction via the tool (valid) → completes with forcing_fallbacks: 1 — the 1st reading's fallback sticks", async () => {
+    const runtime = new FakeRuntime([
+      [
+        // 1st collect: no tool call at all (forced, but the leaf answered
+        // in prose) — invalid JSON, so validation fails and a correction is
+        // steered. `usedFallback` for THIS extraction is `true`; that's the
+        // pinned value the node keeps to the end.
+        { status: "complete", output: "not valid json at all" },
+        // Re-collect after steer: this time the leaf calls the tool with a
+        // valid argument — the fix's re-extraction picks this call's
+        // argument as `output`, letting the node recover, but the
+        // `usedFallback` pinned above is untouched.
+        {
+          status: "complete",
+          output: "ignored — StructuredOutput's own arguments win",
+          toolCalls: [{ id: "c2", name: "StructuredOutput", arguments: '{"value":5}' }],
+        },
+      ],
+    ]);
+    const spec = parsedSpec({
+      meta: { name: "recollect-tool-after-prose" },
+      nodes: [{ id: "a", type: "agent", prompt: "x", tool_less: true, schema }],
+    });
+
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+
+    expect(result.status).toBe("complete");
+    expect(result.outputs.a).toEqual({ value: 5 });
+    expect(result.validationRetries).toBe(1);
+    expect(result.forcingFallbacks).toBe(1);
   });
 });
 

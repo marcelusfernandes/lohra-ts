@@ -330,7 +330,7 @@ export class WorkflowEngine {
             );
             return { output: null, usage: total, complete: false };
           }
-          output = collected.output;
+          output = extractForcedOutput(collected, forced).output; // #602: usedFallback keeps the 1st reading.
         }
       }
       if (usedFallback) this.result.forcingFallbacks += 1;
