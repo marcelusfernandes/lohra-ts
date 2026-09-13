@@ -64,8 +64,24 @@ describe("DOCTRINE_CORE", () => {
     expect(DOCTRINE_CORE).toMatch(/continue the original task/);
   });
 
-  it("stays under a ~500-token budget (2.9 chars/token, this runtime's own conservative factor)", () => {
-    expect(DOCTRINE_CORE.length).toBeLessThanOrEqual(1500);
+  // Issue #582 (épico #575, P6): a regra de quando salvar memória vive no
+  // núcleo da doutrina, não só na description da tool `memory` (que some
+  // sob `--no-tools`) — taxonomia agência × ambiente do decision note #54.
+  it("tells the model when to save a memory and when not to", () => {
+    expect(DOCTRINE_CORE).toMatch(/Save a fact to memory only when it will still be true/);
+    expect(DOCTRINE_CORE).toContain("never task progress");
+    expect(DOCTRINE_CORE).toMatch(/the repository already records/);
+  });
+
+  it("classifies a memory-worthy failure as agency by default, environment only with evidence", () => {
+    expect(DOCTRINE_CORE).toContain("agency");
+    expect(DOCTRINE_CORE).toContain("environment");
+    expect(DOCTRINE_CORE).toMatch(/needs evidence from this turn/);
+    expect(DOCTRINE_CORE).not.toContain("environment quirk");
+  });
+
+  it("stays under a ~650-token budget (2.9 chars/token, this runtime's own conservative factor) — grew from ~500 in #582 (P6) for the memory rule", () => {
+    expect(DOCTRINE_CORE.length).toBeLessThanOrEqual(1900);
   });
 
   it("never mentions a harness mechanism this runtime does not have", () => {

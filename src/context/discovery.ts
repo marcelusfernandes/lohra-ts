@@ -90,6 +90,28 @@ function readInstruction(path: string): string | undefined {
 
 export type ContextFile = readonly [label: string, content: string];
 
+/** Issue #582 (épico #575, P6): `AGENTS.md` e `CLAUDE.md` no mesmo
+ * diretório costumam ter texto byte-idêntico (o épico mede 96% de um
+ * prompt deste próprio repositório vindo dos dois juntos) — entram como um
+ * `<context-file>` só, com o label composto (`"AGENTS.md = CLAUDE.md"`,
+ * ordem de descoberta preservada), em vez de repetir o mesmo conteúdo duas
+ * vezes no prompt. Conteúdo diferente nunca é agrupado, mesmo vindo do
+ * mesmo diretório. Nova lista, `found` nunca é mutada. */
+function dedupeIdenticalContent(files: readonly ContextFile[]): ContextFile[] {
+  const contentOrder: string[] = [];
+  const labelsByContent = new Map<string, string[]>();
+  for (const [label, content] of files) {
+    const labels = labelsByContent.get(content);
+    if (labels === undefined) {
+      labelsByContent.set(content, [label]);
+      contentOrder.push(content);
+    } else {
+      labels.push(label);
+    }
+  }
+  return contentOrder.map((content) => [(labelsByContent.get(content) ?? []).join(" = "), content]);
+}
+
 export function discoverInstructions(
   cwd: string,
   suppliedRoot?: string,
@@ -112,7 +134,7 @@ export function discoverInstructions(
     }
     if (directory === root) break;
   }
-  return found;
+  return dedupeIdenticalContent(found);
 }
 
 export interface ProjectContext {

@@ -40,6 +40,28 @@ describe("project discovery", () => {
     ]);
   });
 
+  // Issue #582 (épico #575, P6): AGENTS.md e CLAUDE.md byte-idênticos no
+  // mesmo diretório entram como um `<context-file>` só — a issue mede 96%
+  // de um prompt deste repositório vindo dos dois duplicados.
+  it("dedupes identical content into one entry with a composite label", () => {
+    const repo = root();
+    mkdirSync(join(repo, ".git"), { recursive: true });
+    writeFileSync(join(repo, "AGENTS.md"), "shared instructions");
+    writeFileSync(join(repo, "CLAUDE.md"), "shared instructions");
+    expect(discoverInstructions(repo)).toEqual([["AGENTS.md = CLAUDE.md", "shared instructions"]]);
+  });
+
+  it("keeps two entries when AGENTS.md and CLAUDE.md differ", () => {
+    const repo = root();
+    mkdirSync(join(repo, ".git"), { recursive: true });
+    writeFileSync(join(repo, "AGENTS.md"), "agents text");
+    writeFileSync(join(repo, "CLAUDE.md"), "claude text");
+    expect(discoverInstructions(repo)).toEqual([
+      ["AGENTS.md", "agents text"],
+      ["CLAUDE.md", "claude text"],
+    ]);
+  });
+
   it("treats .claude as a root marker and returns existing skill roots in order", () => {
     const repo = root();
     const nested = join(repo, "nested");
@@ -187,5 +209,56 @@ describe("system prompt renderer", () => {
       if (originalTz === undefined) delete process.env.TZ;
       else process.env.TZ = originalTz;
     }
+  });
+});
+
+// Issue #582 (épico #575, P6): moldura para memória, perfil e instruções
+// de projeto — uma frase de autoridade/uso antes de cada tag, ausente
+// quando o bloco correspondente está ausente.
+describe("prefix frames for memory, user profile, and project instructions (#582)", () => {
+  it("prefixes <memory> with what it is and that it may be stale", () => {
+    const prompt = buildSystemPrompt({ memorySnapshot: "remember this", today: "2030-01-02" });
+    expect(prompt.volatile).toMatch(
+      /durable facts you saved in earlier sessions[^]*\n\n<memory>\nremember this\n<\/memory>/,
+    );
+  });
+
+  it("omits the memory prefix when there is no memory snapshot", () => {
+    const prompt = buildSystemPrompt({ today: "2030-01-02" });
+    expect(prompt.volatile).not.toContain("durable facts you saved in earlier sessions");
+    expect(prompt.volatile).not.toContain("<memory>");
+  });
+
+  it("prefixes <user-profile> with who it describes", () => {
+    const prompt = buildSystemPrompt({ userProfile: "likes tabs", today: "2030-01-02" });
+    expect(prompt.volatile).toMatch(
+      /who the user is and how they prefer to work\.\n\n<user-profile>\nlikes tabs\n<\/user-profile>/,
+    );
+  });
+
+  it("omits the user-profile prefix when there is no user profile", () => {
+    const prompt = buildSystemPrompt({ today: "2030-01-02" });
+    expect(prompt.volatile).not.toContain("who the user is and how they prefer to work");
+    expect(prompt.volatile).not.toContain("<user-profile>");
+  });
+
+  it("prefixes the project instruction files once, before the whole group", () => {
+    const prompt = buildSystemPrompt({
+      contextFiles: [
+        ["AGENTS.md", "one"],
+        ["CLAUDE.md", "two"],
+      ],
+      today: "2030-01-02",
+    });
+    const prefixIndex = prompt.context.indexOf("override default behavior");
+    const firstFileIndex = prompt.context.indexOf('<context-file name="AGENTS.md">');
+    expect(prefixIndex).toBeGreaterThanOrEqual(0);
+    expect(firstFileIndex).toBeGreaterThan(prefixIndex);
+    expect(prompt.context.match(/override default behavior/gu)).toHaveLength(1);
+  });
+
+  it("omits the project-instructions prefix when there are no context files", () => {
+    const prompt = buildSystemPrompt({ systemMessage: "caller message", today: "2030-01-02" });
+    expect(prompt.context).not.toContain("override default behavior");
   });
 });
