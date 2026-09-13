@@ -13,12 +13,25 @@
       },
       { "kind": "text", "content": "Subagent summary: the file describes a stub scenario." }
     ],
-    "child": [{ "kind": "text", "content": "The file describes a stub scenario." }]
+    "child": [
+      {
+        "kind": "text",
+        "content": "The file describes a stub scenario.\n\nresult: file summarized"
+      }
+    ]
   },
   "mechanism": [
     { "kind": "request_count", "count": 3 },
     { "kind": "tool_result_includes", "request": 3, "substring": "\"error_kind\":null" },
     { "kind": "tool_result_includes", "request": 3, "substring": "\"status\":\"complete\"" },
+    { "kind": "tool_result_includes", "request": 3, "substring": "\"outcome\":\"result\"" },
+    { "kind": "system_prompt_includes", "request": 2, "substring": "Environment:" },
+    { "kind": "system_prompt_includes", "request": 2, "substring": "Tools available to you:" },
+    {
+      "kind": "system_prompt_includes",
+      "request": 2,
+      "substring": "End your final message with exactly one line"
+    },
     { "kind": "envelope_pointer", "pointer": "/completed", "value": true }
   ],
   "outcome": {
@@ -26,5 +39,5 @@
     "expect": "summary"
   },
   "budget_tokens": 22000,
-  "note": "Contraste positivo do caso 'filho falhou': aqui o filho completa normalmente. A tarefa do filho é autocontida, sem contexto do pai — o contrato que #583 formaliza no prompt do subagente."
+  "note": "Contraste positivo do caso 'filho falhou': aqui o filho completa normalmente. A tarefa do filho é autocontida, sem contexto do pai — o contrato que #583 formaliza no prompt do subagente. Issue #583: o child (requisição 2) recebe Environment/lista de tools/sentinela no próprio system prompt, e termina com 'result: ...' — o envelope de delegate_task (requisição 3) carrega 'outcome':'result' de volta para o pai, aditivo, sem mudar status/error_kind."
 }
