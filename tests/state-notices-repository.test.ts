@@ -222,6 +222,49 @@ describe("NoticesRepository", () => {
     }
   });
 
+  // Issue #603: `ack` grava `Date.now() / 1_000` (fracionário) numa coluna
+  // `REAL`, mas a leitura de `acked_at` passava por `rowNumber`
+  // (`Number.isSafeInteger` só), que zera qualquer valor com fração — o
+  // `UPDATE` rodava (`acked_by` provava), só a leitura destruía o instante.
+  // Escopo `run:<id>` com fence real também prova o AC5 (pino de forma):
+  // `id`/`seq`/`fence` continuam inteiros, `created_at` não muda de
+  // conversão.
+  it("acked_at survives a fractional now, unchanged by the read (issue #603)", () => {
+    const path = tempDbPath();
+    const connection = openStateDatabase(path);
+    try {
+      const locks = new LockRepository(connection.database);
+      const notices = new NoticesRepository(connection.database);
+      const fence = locks.acquireRunLease("run-603", "owner", 1000, 100);
+      const written = notices.append(
+        "run:run-603",
+        { kind: "unknown", message: "x" },
+        ownershipOf(fence, "owner", 1000),
+      );
+      const notice = written as PublicNotice;
+      expect(notice.created_at).toBe(1000);
+      expect(Number.isInteger(notice.id)).toBe(true);
+      expect(Number.isInteger(notice.seq)).toBe(true);
+      expect(notice.fence).toBe(fence);
+      expect(notice.acked_at).toBeNull();
+
+      const fractionalNow = 1_757_800_000.123;
+      expect(notices.ack(notice.id, "operator-603", fractionalNow)).toBe(true);
+
+      const page = notices.list({ scope: "run:run-603", includeAcked: true });
+      const acked = page.notices.find((candidate) => candidate.id === notice.id);
+      expect(acked?.acked_at).toBe(fractionalNow);
+      expect(acked?.acked_at).toBeGreaterThan(acked?.created_at as number);
+      // Forma inalterada pelo conserto: `created_at`, `fence`, `id`, `seq`.
+      expect(acked?.created_at).toBe(1000);
+      expect(acked?.fence).toBe(fence);
+      expect(acked?.id).toBe(notice.id);
+      expect(acked?.seq).toBe(notice.seq);
+    } finally {
+      connection.close();
+    }
+  });
+
   it("ack of an unknown id returns false, never throws", () => {
     const path = tempDbPath();
     const connection = openStateDatabase(path);

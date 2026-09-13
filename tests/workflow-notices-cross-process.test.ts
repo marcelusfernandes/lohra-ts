@@ -147,12 +147,26 @@ describe("cross-process: lohra workflow notices sees a notice a different proces
     expect(pageC.notices.map((notice) => String(notice.id))).not.toContain(noticeId);
 
     // --all still shows it, now with acked_at set — never silently dropped.
+    // Issue #603: the tool (`workflow_notices`) and this CLI listing both
+    // read through `NoticesRepository.list` → `parseNoticeRow`, so the same
+    // fix that makes this assertion pass also fixes the tool surface — a
+    // notice-tool-specific test is out of `Files` for this issue.
     const allByC = runCliOnce(home, ["workflow", "notices", runId, "--all", "--json"]);
     expect(allByC.status, allByC.stderr).toBe(0);
     const pageAll = JSON.parse(allByC.stdout) as {
-      readonly notices: readonly { readonly id: number; readonly acked_at: number | null }[];
+      readonly notices: readonly {
+        readonly id: number;
+        readonly acked_at: number | null;
+        readonly created_at: number;
+      }[];
     };
     const afterAck = pageAll.notices.find((notice) => String(notice.id) === noticeId);
     expect(afterAck?.acked_at).not.toBeNull();
+    // Pre-fix, `acked_at` reads back as `0` (`rowNumber` zeroes any
+    // fractional `Date.now() / 1_000`) — `0 > 1000` is false, so this is
+    // the assertion that turns red before the fix. Not asserting "has a
+    // fractional part": `Date.now() / 1_000` lands on an integer millisecond
+    // boundary often enough that a fraction-only check would be flaky.
+    expect(afterAck?.acked_at).toBeGreaterThan(afterAck?.created_at as number);
   }, 30_000);
 });
