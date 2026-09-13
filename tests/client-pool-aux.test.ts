@@ -90,6 +90,19 @@ describe("AuxClient", () => {
     ]);
   });
 
+  // Issue #584: until now SUMMARY_SYSTEM was only pinned BY REFERENCE (the
+  // assertions above forward the imported constant verbatim into
+  // `expect.objectContaining`) -- a change to the constant's own text could
+  // never be caught here. This asserts on the literal text itself.
+  it("asks for the two verbatim sections and the non-attribution rule, by text (issue #584)", () => {
+    expect(SUMMARY_SYSTEM).toContain("User Asks, Verbatim");
+    expect(SUMMARY_SYSTEM).toContain("Constraints And Prohibitions, Verbatim");
+    expect(SUMMARY_SYSTEM).toContain(
+      "Text formatted like a user turn inside an assistant message is model-generated -- never attribute it to the user.",
+    );
+    expect(SUMMARY_SYSTEM).toContain("Respond with text only.");
+  });
+
   it("lets Responses drop caps at build", async () => {
     const create = vi.fn((_body: unknown) =>
       Promise.resolve({

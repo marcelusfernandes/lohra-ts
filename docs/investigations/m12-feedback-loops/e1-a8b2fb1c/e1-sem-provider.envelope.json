@@ -1,0 +1,16 @@
+{
+  "session_id": "",
+  "model": null,
+  "temperature": null,
+  "input": "Execute exatamente esta sequencia, uma unica vez, sem improvisar:\n\n1. Chame run_workflow com EXATAMENTE esta spec, sem alterar nenhum campo:\n{\"meta\":{\"name\":\"m12-rota-invalida-live\"},\"nodes\":[{\"id\":\"probe\",\"type\":\"agent\",\"model\":\"lohra-m12-modelo-inexistente\",\"prompt\":\"Responda somente M12-LEAF-OK.\"}]}\n\n2. Chame workflow_status com {\"run_id\": <o run_id devolvido>, \"wait\": true}.\n\n3. Chame workflow_notices com {\"run_id\": <o mesmo run_id>, \"include_acked\": true}.\n\n4. Responda com o JSON bruto dos dois ultimos resultados, sem comentario.\n\nREGRAS: NAO troque o modelo \"lohra-m12-modelo-inexistente\" por outro. NAO retome o run. NAO tente de novo se falhar. NAO chame nenhuma outra ferramenta.",
+  "output": null,
+  "reasoning": null,
+  "tool_calls": [],
+  "usage": null,
+  "usage_total": null,
+  "cost": null,
+  "stop_reason": null,
+  "completed": false,
+  "error": "no provider configured — run `lohra init` (or `lohra doctor`); details on stderr",
+  "api_calls": 0
+}

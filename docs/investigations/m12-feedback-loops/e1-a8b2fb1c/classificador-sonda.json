@@ -1,0 +1,77 @@
+{
+  "sonda": "classifyProviderError no HEAD a8b2fb1c",
+  "fonte": "dist/transports/errors.js do worktree, apos npm run build",
+  "casos": [
+    {
+      "caso": "E1-como-o-transporte-monta",
+      "status": 400,
+      "message": "HTTP 400",
+      "payload": {
+        "detail": "The 'lohra-m12-modelo-inexistente' model is not supported when using Codex with a ChatGPT account."
+      },
+      "kind": "unknown"
+    },
+    {
+      "caso": "mesmo-corpo-com-status-404",
+      "status": 404,
+      "message": "HTTP 404",
+      "payload": {
+        "detail": "The 'lohra-m12-modelo-inexistente' model is not supported when using Codex with a ChatGPT account."
+      },
+      "kind": "unknown"
+    },
+    {
+      "caso": "mesmo-corpo-com-detail-na-message-404",
+      "status": 404,
+      "message": "The 'lohra-m12-modelo-inexistente' model is not supported when using Codex with a ChatGPT account.",
+      "payload": {
+        "detail": "The 'lohra-m12-modelo-inexistente' model is not supported when using Codex with a ChatGPT account."
+      },
+      "kind": "model_not_found"
+    },
+    {
+      "caso": "mesmo-corpo-com-detail-na-message-400",
+      "status": 400,
+      "message": "The 'lohra-m12-modelo-inexistente' model is not supported when using Codex with a ChatGPT account.",
+      "payload": {
+        "detail": "The 'lohra-m12-modelo-inexistente' model is not supported when using Codex with a ChatGPT account."
+      },
+      "kind": "unknown"
+    },
+    {
+      "caso": "400-com-error.code-model_not_found",
+      "status": 400,
+      "message": "x",
+      "payload": {
+        "error": {
+          "code": "model_not_found"
+        }
+      },
+      "kind": "unknown"
+    },
+    {
+      "caso": "404-forma-openai",
+      "status": 404,
+      "message": "The model x does not exist",
+      "payload": {
+        "error": {
+          "code": "model_not_found",
+          "type": "invalid_request_error"
+        }
+      },
+      "kind": "model_not_found"
+    },
+    {
+      "caso": "400-malformado-invalid_request_error",
+      "status": 400,
+      "message": "Invalid schema for tool",
+      "payload": {
+        "error": {
+          "type": "invalid_request_error",
+          "param": "tools[0]"
+        }
+      },
+      "kind": "unknown"
+    }
+  ]
+}

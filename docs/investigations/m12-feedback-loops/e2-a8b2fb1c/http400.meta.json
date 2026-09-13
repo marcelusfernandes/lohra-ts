@@ -1,0 +1,14 @@
+{
+  "code": 0,
+  "signal": null,
+  "elapsed_ms": 199,
+  "args": [
+    "chat",
+    "--provider",
+    "openai",
+    "--model",
+    "m12-parent",
+    "--json",
+    "{\"kind\":\"start\",\"name\":\"m12-http400\",\"model\":\"m12-400\"}"
+  ]
+}

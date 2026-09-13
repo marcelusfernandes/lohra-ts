@@ -276,38 +276,45 @@ of polling on their behalf.
 
 ### Previewing a resume, route pivots, and the artifact manifest
 
-- **`workflow_preview {run_id, route?}`** dry-runs a resume before you commit
-  to one — no token spent, nothing written, and none of the run's route pivots
-  consumed. Per top-level node it reports one of several outcomes, among them
-  `replay` (a cached cell covers it) and `recompute {reason:
-  "never_completed" | "identity_changed"}`, plus totals including
-  `cells_replayed`, `tokens_saved`, `leaves_to_spawn`,
-  `estimated_tokens_to_repay`, and `pivots_used` — the pivots this run has
-  *already* spent, unaffected by the preview call itself. Call it before
-  `run_workflow(resume_run_id=..., route=...)` to see whether a candidate
-  route is worth spawning. A nested `workflow` node still previews as
-  `unknown` today regardless of the real resume's outcome — it does not yet
-  get the operator's template loader.
-- **Resuming a `route_fault` pause onto a different route** works two ways: an
-  explicit `route` (channel `operator`, always wins, even over the
-  suggestion), or — resuming with no `route` at all — the operator's own
-  `workflow_routes.json` (`<home>/workflow_routes.json`, an ordered
-  per-dead-route fallback list). When it names an untried fallback for this
-  exact dead route, `workflow_status`'s `lesson.suggested_route` carries it
-  and the resume applies it on your behalf (channel `route_envelope`); with no
-  matching entry, a route-less resume just stays on the current route. Both
-  channels draw on the **same cap: 3 route pivots per run, total** — a 4th
-  explicit `route` is refused. Every node a pivot actually rewrites is logged
-  in `workflow_audit` as `node.rerouted {channel, pivot, from, to}`.
-- **The `artifacts` manifest** records every `write_file` a leaf calls with
-  `ok: true` as `{node_id, sub_id, path, bytes}`, capped at 256 records per
-  leaf. Two leaves in the same run writing the same `path` are never
-  arbitrated — the last write wins on disk, silently — but the collision
-  surfaces as an advisory entry in `workflow_status`'s `faults` (`"<node>:
-  artifact path written by 2 leaves: <path>"`), never a `status` change. It is
-  only checked within the current stretch: a collision against an earlier
-  stretch, or against a parent run's artifacts from a nested `workflow` node,
-  is not detected yet.
+- **`workflow_preview {run_id, route?}`** dry-runs a resume before you commit to one — no token spent, nothing written, and none of the run's route pivots consumed. Per top-level node it reports one of several outcomes, among them `replay` (a cached cell covers it) and `recompute {reason: "never_completed" | "identity_changed"}`, plus totals including `cells_replayed`, `tokens_saved`, `leaves_to_spawn`, `estimated_tokens_to_repay`, and `pivots_used` — the pivots this run has *already* spent, unaffected by the preview call itself. Call it before `run_workflow(resume_run_id=..., route=...)` to see whether a candidate route is worth spawning. A nested `workflow` node still previews as `unknown` today regardless of the real resume's outcome — it does not yet get the operator's template loader.
+- **Resuming a `route_fault` pause onto a different route** works two ways: an explicit `route` (channel `operator`, always wins, even over the suggestion), or — resuming with no `route` at all — the operator's own `workflow_routes.json` (`<home>/workflow_routes.json`, an ordered per-dead-route fallback list). When it names an untried fallback for this exact dead route, `workflow_status`'s `lesson.suggested_route` carries it and the resume applies it on your behalf (channel `route_envelope`); with no matching entry, a route-less resume just stays on the current route. Both channels draw on the **same cap: 3 route pivots per run, total** — a 4th explicit `route` is refused. Every node a pivot actually rewrites is logged in `workflow_audit` as `node.rerouted {channel, pivot, from, to}`.
+- **The `artifacts` manifest** records every `write_file` a leaf calls with `ok: true` as `{node_id, sub_id, path, bytes}`, capped at 256 records per leaf. Two leaves in the same run writing the same `path` are never arbitrated — the last write wins on disk, silently — but the collision surfaces as an advisory entry in `workflow_status`'s `faults` (`"<node>: artifact path written by 2 leaves: <path>"`), never a `status` change. It is only checked within the current stretch: a collision against an earlier stretch, or against a parent run's artifacts from a nested `workflow` node, is not detected yet.
+
+### Live tail, rename_hint, mid-flight leaf reads, and steering
+
+`run_workflow`'s and `workflow_status`'s own descriptions stay short — the
+detail lives here.
+
+- **`live_tail`** — while a run is known IN THIS PROCESS, `workflow_status`
+  also carries `live_tail: {events, next_cursor, dropped}` (bounded: ≤256
+  events or 64 KiB). Pass `next_cursor` back as `after_index` for only what's
+  new; it never goes backward, even across a same-process pause/resume. A
+  durable-only read from another process never carries it — use
+  `workflow_audit` instead.
+- **`rename_hint`** — a checkpoint pause's `node_id` is already scoped
+  (`<sub_node_id>.<checkpoint_id>`). The hint appears only when that scoped
+  id still collides with a ROOT checkpoint's literal id; resuming with the
+  same `node_id` just pauses again — rename one of the two ids instead.
+- **`workflow_leaf_read {run_id, sub_id, max_chars?}`** reads a still-running
+  leaf's committed turns (in-flight turn excluded). Unlike `workflow_audit`
+  this is NOT metadata-only — a `tool` turn's `content` is the raw output the
+  leaf saw. Capped by `max_chars` (default 4096, max 32768) from the most
+  recent turn backward; only the most recent 200 turns return.
+- **`workflow_steer {run_id, node_id? | sub_id?, message}`** delivers an
+  operator message to a live leaf now. A call in flight is interrupted
+  immediately (tokens still counted); otherwise it queues for the next step.
+  Name the leaf with EXACTLY ONE of `node_id` (refused if more than one live leaf) or `sub_id`. The message text itself is never in the audit ledger.
+- **`integrity.pending`** (`workflow_audit`) — called in the same turn as
+  `run_workflow`, it first waits up to 250ms for this process's trail to
+  drain; the count appears only if the drain isn't done, and covers ANY run
+  this process handles, not just this call's `run_id`. Event kinds worth
+  knowing: `leaf.*`, `tool.*` (per call inside a leaf), `cache.*`,
+  `segment.*` (bracket a dead-owner resume), `node.paused`, `node.rerouted`.
+- **`fault_kinds`** — a typed subset of `faults`, never parsed from its
+  text; `quota_exhausted` never appears here (it surfaces as pause reason
+  `quota_exhausted` instead). **`partial_leaves`** counts leaves whose usage
+  includes tokens ESTIMATED from a call aborted in flight (ADR 0005),
+  always also counted in **`usage_uncertain_leaves`**.
 
 ---
 
@@ -756,18 +763,13 @@ then put to a human. Nothing irreversible happens before the `checkpoint`.
 
 ## 10. Checklist before calling `run_workflow`
 
-1. Did I call `workflow_templates` and, if a `ref` fits, reference it with a
-   `workflow` node instead of copying its spec?
+1. Did I call `workflow_templates` and, if a `ref` fits, reference it with a `workflow` node instead of copying its spec?
 2. Is the wide node a barrier (`parallel`) or per-item (`pipeline`)? Apply the smell test.
 3. Does every leaf whose shape matters downstream have a `schema` or `schema_ref`?
 4. Is the fan-out proportional to what the user actually asked for?
 5. Does anything the user will act on go through `verify`?
 6. Does every `${ref}` point at a node id (or `args`/`item`/`stage`/`winner`/`round`/`so_far`) that exists?
 7. Is anything a leaf must read already in `args`, rather than assumed readable from disk?
-8. Does anything irreversible sit behind a `checkpoint`, and does every model
-   choice use a `tier` — or a slug I actually saw in `list_models` — rather than
-   a guessed one? If the user asked to confirm the routing, is it in a
-   `checkpoint` ahead of the expensive nodes?
-9. Is the spec itself lean enough to fit in one tool call (schemas hoisted into
-   `schemas:` and referenced by `schema_ref`)?
+8. Does anything irreversible sit behind a `checkpoint`, and does every model choice use a `tier` — or a slug I actually saw in `list_models` — rather than a guessed one? If the user asked to confirm the routing, is it in a `checkpoint` ahead of the expensive nodes?
+9. Is the spec itself lean enough to fit in one tool call (schemas hoisted into `schemas:` and referenced by `schema_ref`)?
 10. After it runs: did I read `status` and `faults` before believing `outputs`?

@@ -582,3 +582,29 @@ Duas peças menores do mesmo épico, sem superfície de tool própria:
 - **`dead_turn`**: o 10º `ErrorKind` — um turno final vazio e sem tool call
   — e o envelope aditivo de `delegate_task` em
   [`docs/decisions/2026-09-12-envelope-delegate-aditivo.md`](decisions/2026-09-12-envelope-delegate-aditivo.md).
+
+## `forcedTool` chega de fato à folha (#578)
+
+Um nó `tool_less: true` com `schema` monta `SpawnConfig.forcedTool =
+{name: "StructuredOutput", schema}` (`workflow/engine.ts`), mas até #578 o
+campo era descartado numa fronteira de spread em
+`OrchestrationChildRuntime.spawn` (`workflow/orchestration-runtime.ts`) —
+a folha nunca via a tool, e a saída estruturada dependia só de instrução
+textual corrigida a posteriori (`output-validation.ts`). Agora o campo
+atravessa as três camadas até o pedido real do provedor:
+`OrchestrationChildRuntime.spawn` repassa `forcedTool` a `SpawnConfig`
+(`orchestration/core.ts`); `createChildRunner`
+(`orchestration/child-runner.ts`) injeta a definição sintética da tool nas
+`toolDefinitions` da folha e passa seu nome como `toolChoice` de
+`ConversationRuntime.runTurn` — forçado só na PRIMEIRA chamada do turno
+(`iteration === 1`), nunca nas seguintes, para não obrigar o modelo a
+chamar a mesma tool de novo depois de já ter respondido por ela; o
+dispatch da tool sintética é interceptado antes do sandbox/registro real
+(nunca uma tool de verdade, nunca conta como recusa de sandbox). Os três
+transportes (`chat-completions.ts`/`anthropic-messages.ts`/`responses.ts`)
+já emitiam o `tool_choice` correto por provedor quando recebiam o campo —
+o que faltava era `ModelRequest.toolChoice` chegar até eles, agora via
+`ChatCompletionsModel`/`AnthropicMessagesModel`/`ResponsesModel`.
+`forcing_fallbacks` (descrito em [`docs/workflow-audit.md`](workflow-audit.md))
+passa a ser `0` sempre que a folha responde pela tool — só sobe quando o
+provedor de fato ignora a forçagem e a folha volta com texto cru.

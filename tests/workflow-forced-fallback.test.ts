@@ -30,17 +30,29 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { ClientPool } from "../src/agent/client-pool.js";
+import { createChildRunner } from "../src/orchestration/child-runner.js";
 import {
   OrchestrationCore,
   type ChildRunner,
   type CollectResult,
+  type SpawnConfig,
 } from "../src/orchestration/core.js";
+import { getProviderProfile } from "../src/providers/index.js";
 import {
   openStateDatabase,
+  SessionRepository,
   WorkflowRepository,
   LockRepository,
   AuditRepository,
 } from "../src/state/index.js";
+import {
+  ChatCompletionsClient,
+  ChatCompletionsTransport,
+  type ChatHttpPort,
+  type ChatHttpRequest,
+  type HttpResponseData,
+} from "../src/transports/index.js";
 import { AuditTrail } from "../src/workflow/audit-trail.js";
 import type {
   CausalContext,
@@ -122,6 +134,152 @@ describe("ChildResult never carries forcedFallback (#403, decisão b: removido)"
     // proves this is a targeted deletion, not an accidental payload wipe.
     expect(Object.hasOwn(result, "usageUncertain")).toBe(true);
     expect(Object.hasOwn(result, "sandboxRefusals")).toBe(true);
+  });
+});
+
+describe("SpawnConfig.forcedTool reaches a REAL OrchestrationCore (#578: dropped at OrchestrationChildRuntime.spawn's own spread)", () => {
+  it("OrchestrationChildRuntime.spawn repasses request.forcedTool through OrchestrationCore.spawn into the runChild callback — never a FakeRuntime", async () => {
+    const captured: SpawnConfig[] = [];
+    const runChild: ChildRunner = (_subId, config) => {
+      captured.push(config);
+      return Promise.resolve(ok("done"));
+    };
+    const runtime = new OrchestrationChildRuntime(makeCore(runChild));
+    const forcedTool = Object.freeze({ name: "StructuredOutput", schema: { type: "object" } });
+    const id = runtime.spawn({ ...spawnRequest("run-forced-tool"), forcedTool });
+    await runtime.collect(id, { wait: true, timeoutSeconds: 5 });
+
+    // RED on base: orchestration-runtime.ts's spawn() built the SpawnConfig
+    // literal without ever reading request.forcedTool — even though
+    // ChildSpawnRequest (workflow/runtime.ts) already carried the field.
+    // After the fix, the REAL core's own runChild callback receives it
+    // verbatim, proving the fronteira named in the issue is closed — not
+    // just a FakeRuntime's own `spawned[]` capture (tests/workflow-campos-
+    // sem-efeito.test.ts:457, unaffected by this test).
+    expect(captured[0]?.forcedTool).toEqual(forcedTool);
+  });
+});
+
+const encoder = new TextEncoder();
+
+function sseResponse(frames: readonly unknown[]): HttpResponseData {
+  const body = frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join("");
+  return {
+    status: 200,
+    headers: new Headers({ "content-type": "text/event-stream" }),
+    body: encoder.encode(body),
+  };
+}
+
+function toolCallStream(name: string, args: string, callId: string): HttpResponseData {
+  return sseResponse([
+    {
+      choices: [
+        {
+          delta: { tool_calls: [{ index: 0, id: callId, function: { name, arguments: args } }] },
+          finish_reason: null,
+        },
+      ],
+    },
+    { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+    { choices: [], usage: { prompt_tokens: 5, completion_tokens: 2 } },
+  ]);
+}
+
+class QueuePort implements ChatHttpPort {
+  readonly requests: ChatHttpRequest[] = [];
+  constructor(private readonly queue: Array<HttpResponseData | Error>) {}
+  post(request: ChatHttpRequest): Promise<HttpResponseData> {
+    this.requests.push(request);
+    const value = this.queue.shift();
+    if (value instanceof Error) return Promise.reject(value);
+    if (value === undefined) return Promise.reject(new Error("queue exhausted"));
+    return Promise.resolve(value);
+  }
+}
+
+describe("end-to-end: WorkflowEngine → OrchestrationChildRuntime → real OrchestrationCore → createChildRunner (#578, AC 3/4)", () => {
+  it("a tool_less schema node whose leaf answers via StructuredOutput completes with forcing_fallbacks: 0 — the full production stack, never a FakeRuntime nor FakeChildRunner", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-forced-tool-e2e-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    const sessions = new SessionRepository(connection.database, () => 1000, connection.ftsEnabled);
+    sessions.createSession({ id: "parent-1", source: "gateway" });
+    const parentProfile = getProviderProfile("openai");
+    if (parentProfile === null) throw new Error("openai profile missing");
+    const port = new QueuePort([
+      toolCallStream("StructuredOutput", '{"value":3}', "call_1"),
+      // Second call is unforced (iteration 2) — the leaf just confirms in
+      // prose; only the FIRST call's tool result feeds the schema.
+      sseResponse([
+        { choices: [{ delta: { content: "done" }, finish_reason: "stop" }] },
+        { choices: [], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+      ]),
+    ]);
+    const client = new ChatCompletionsClient({
+      baseUrl: "http://parent.invalid/v1",
+      apiKey: "lohra-local",
+      transport: new ChatCompletionsTransport(),
+      http: port,
+    });
+    const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
+    const runChild = createChildRunner({
+      sessions,
+      parentSessionId: "parent-1",
+      clientPool: pool,
+      baseDispatch: () => Promise.resolve("should not be called"),
+      parentToolDefinitions: [],
+      defaultModel: "fake-model-a",
+      cwd: "/tmp",
+      idSource: (() => {
+        let n = 0;
+        return () => {
+          n += 1;
+          return `child-${String(n)}`;
+        };
+      })(),
+      clock: () => 1000,
+      childMaxIterations: 50,
+    });
+    const runtime = new OrchestrationChildRuntime(
+      new OrchestrationCore({
+        runChild,
+        idSource: (() => {
+          let n = 0;
+          return () => {
+            n += 1;
+            return `leaf-e2e-${String(n)}`;
+          };
+        })(),
+        maxSubsessions: 100,
+        maxParallel: 10,
+        buildSubagentPrompt: () => "SYS",
+      }),
+    );
+    const spec = validateSpec({
+      meta: { name: "forced-tool-e2e" },
+      nodes: [
+        {
+          id: "forced",
+          type: "agent",
+          prompt: "answer as JSON",
+          tool_less: true,
+          schema: { type: "object", properties: { value: { type: "integer" } } },
+        },
+      ],
+    });
+    if ("issues" in spec) throw new Error(spec.message);
+
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+
+    // RED on base: `forcedTool` never reached `SpawnConfig` at all, so the
+    // leaf's own request never carried a `tool_choice` — the model would
+    // never be asked to call `StructuredOutput`, and this run would fall
+    // back to parsing the leaf's plain text, bumping `forcing_fallbacks`.
+    expect(result.status).toBe("complete");
+    expect(result.outputs.forced).toEqual({ value: 3 });
+    expect(result.forcingFallbacks).toBe(0);
+    connection.close();
   });
 });
 
