@@ -15,9 +15,10 @@ export interface GatewayToolRuntime {
 // registry tools are always available, in registry order (assertion 41).
 // The dangerous-command gate is left with NO approval callback set, so
 // ApprovalManager.require() denies by fail-safe absence of callback,
-// producing terminal.ts's exact "command was not approved by the user"
-// message -- deliberately different from T11's subagent auto-deny message,
-// per assertion 40.
+// producing terminal.ts's exact "command refused by the dangerous-command
+// policy (...)" envelope (issue #577) -- deliberately different from T11's
+// subagent auto-deny message (which carries a "subagent " prefix), per
+// assertion 40.
 export function createGatewayToolRuntime(
   home: string,
   sessionRegistry?: ToolRegistry,
