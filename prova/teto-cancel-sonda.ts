@@ -27,6 +27,11 @@
 // regressão — contagem inalterada), fora do harness de vitest desta
 // declaração — ver Test plan da PR. `tests/mutations-slices.test.ts` prende
 // os pinos de contagem.
+//
+// Rodada 1b (veredito da PR #573, check `contratos`): os dois testes do
+// item (3)/(4) saíram de `tests/conversation-runtime.test.ts` (que voltou a
+// ficar byte-idêntico à base) para `tests/conversation-runtime-abort-forms.test.ts`
+// — o arquivo original tinha estourado o teto de 800 linhas (731 -> 870).
 import type { Declaracao } from "../scripts/prova/tipos.js";
 
 export default {
@@ -34,7 +39,7 @@ export default {
     "tests/orchestration-runtime-collect.test.ts",
     "tests/workflow-abort-in-flight.test.ts",
     "tests/workflow-orchestration-runtime-timeout.test.ts",
-    "tests/conversation-runtime.test.ts",
+    "tests/conversation-runtime-abort-forms.test.ts",
     "tests/mutations-slices.test.ts",
   ],
 } satisfies Declaracao;
