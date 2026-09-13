@@ -161,10 +161,10 @@ export async function terminalTool(
 
 export const TERMINAL_SCHEMA = {
   description:
-    "Run a shell command on the local machine and return stdout, stderr, and the exit code. " +
-    "Commands matching a fixed dangerous-pattern list (recursive delete, sudo, force push, " +
-    "raw disk writes, ...) are refused automatically. A refusal is final for this session: " +
-    "do not rephrase or retry the command; report the blocker.",
+    "Run a shell command and return stdout, stderr, and the exit code. Prefer 'read_file' " +
+    "over 'cat' for a known file. Output truncated at 50,000 code points per stream. A " +
+    "fixed dangerous-pattern list (recursive delete, sudo, force push, ...) is refused " +
+    "automatically — final for this session: don't rephrase or retry, report the blocker.",
   parameters: {
     type: "object",
     properties: {
