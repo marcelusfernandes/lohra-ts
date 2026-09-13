@@ -283,6 +283,118 @@ describe("end-to-end: WorkflowEngine → OrchestrationChildRuntime → real Orch
   });
 });
 
+describe("end-to-end: WorkflowEngine → OrchestrationChildRuntime → real OrchestrationCore → createChildRunner (#602)", () => {
+  it("a steer-driven correction re-collect also reads the forced tool call, not the turn's prose — the node recovers with forcing_fallbacks: 0", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-forced-tool-recollect-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    const sessions = new SessionRepository(connection.database, () => 1000, connection.ftsEnabled);
+    sessions.createSession({ id: "parent-1", source: "gateway" });
+    const parentProfile = getProviderProfile("openai");
+    if (parentProfile === null) throw new Error("openai profile missing");
+    const port = new QueuePort([
+      // Turn 1 (original spawn): the forced call answers with an INVALID
+      // argument (a string where the schema wants an integer) — fails
+      // `parseAndValidate` in `WorkflowEngine.collectLeaf`, which then
+      // steers a correction into the same leaf.
+      toolCallStream("StructuredOutput", '{"value":"nope"}', "call_1"),
+      sseResponse([
+        { choices: [{ delta: { content: "ack" }, finish_reason: "stop" }] },
+        { choices: [], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+      ]),
+      // Turn 2 (steer resurrection, same session): `OrchestrationCore.steer`
+      // resurrects the idle leaf with `{...entry.originalConfig, prompt:
+      // text}` — `forcedTool` is part of `originalConfig`, so this turn's
+      // own first iteration is forced again, this time with a VALID
+      // argument.
+      toolCallStream("StructuredOutput", '{"value":3}', "call_2"),
+      sseResponse([
+        { choices: [{ delta: { content: "done" }, finish_reason: "stop" }] },
+        { choices: [], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+      ]),
+      // Turn 3: never reached once the fix lands (attempt 1's re-collect
+      // already validates via the tool call above and breaks the loop) —
+      // present only so a RE-BROKEN base reproduces the documented fault
+      // ("schema not satisfied after retries") instead of a queue
+      // exhaustion, since a base without the fix keeps reading each turn's
+      // own prose ("ack"/"done"/"done") and never validates, exhausting
+      // `MAX_VALIDATION_RETRIES`.
+      toolCallStream("StructuredOutput", '{"value":3}', "call_3"),
+      sseResponse([
+        { choices: [{ delta: { content: "done" }, finish_reason: "stop" }] },
+        { choices: [], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+      ]),
+    ]);
+    const client = new ChatCompletionsClient({
+      baseUrl: "http://parent.invalid/v1",
+      apiKey: "lohra-local",
+      transport: new ChatCompletionsTransport(),
+      http: port,
+    });
+    const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
+    const runChild = createChildRunner({
+      sessions,
+      parentSessionId: "parent-1",
+      clientPool: pool,
+      baseDispatch: () => Promise.resolve("should not be called"),
+      parentToolDefinitions: [],
+      defaultModel: "fake-model-a",
+      cwd: "/tmp",
+      idSource: (() => {
+        let n = 0;
+        return () => {
+          n += 1;
+          return `child-recollect-${String(n)}`;
+        };
+      })(),
+      clock: () => 1000,
+      childMaxIterations: 50,
+    });
+    const runtime = new OrchestrationChildRuntime(
+      new OrchestrationCore({
+        runChild,
+        idSource: (() => {
+          let n = 0;
+          return () => {
+            n += 1;
+            return `leaf-recollect-${String(n)}`;
+          };
+        })(),
+        maxSubsessions: 100,
+        maxParallel: 10,
+        buildSubagentPrompt: () => "SYS",
+      }),
+    );
+    const spec = validateSpec({
+      meta: { name: "forced-tool-recollect" },
+      nodes: [
+        {
+          id: "forced",
+          type: "agent",
+          prompt: "answer as JSON",
+          tool_less: true,
+          schema: { type: "object", properties: { value: { type: "integer" } } },
+        },
+      ],
+    });
+    if ("issues" in spec) throw new Error(spec.message);
+
+    const result = await new WorkflowEngine({ runtime }).run(spec);
+
+    // RED on base: `engine.ts`'s re-collect after `runtime.steer()` reads
+    // `collected.output` verbatim (the correction turn's own prose, "done")
+    // instead of re-running `extractForcedOutput` — `parseAndValidate` never
+    // accepts that prose as the schema's object, so the node exhausts
+    // `MAX_VALIDATION_RETRIES` and faults instead of returning the corrected
+    // `{value: 3}` the leaf actually answered with, via the tool.
+    expect(result.status).toBe("complete");
+    expect(result.outputs.forced).toEqual({ value: 3 });
+    expect(result.forcingFallbacks).toBe(0);
+    expect(result.validationRetries).toBe(1);
+    connection.close();
+  });
+});
+
 describe("forcing_fallbacks only rises from the engine's own forced-schema fallback (#403)", () => {
   /** One leaf per spawn, scripted `collect()` results in call order — same
    * molde as `tests/workflow-fault-kinds.test.ts`'s `FakeRuntime`. The cast
