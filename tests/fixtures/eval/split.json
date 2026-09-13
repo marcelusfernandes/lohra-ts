@@ -17,7 +17,8 @@
     "read-file-missing-reports-error",
     "skill-use-lohra-ts-one-leaf",
     "tool-choice-read-file-over-terminal",
-    "final-answer-avoids-promise"
+    "final-answer-avoids-promise",
+    "environment-hints-avoid-discovery"
   ],
   "holdout": [
     "child-task-fails-silently-holdout",
