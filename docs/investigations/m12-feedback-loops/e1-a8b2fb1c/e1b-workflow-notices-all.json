@@ -1,0 +1,18 @@
+{
+  "notices": [
+    {
+      "id": 1,
+      "scope": "run:c0db747dcb8f46c0ae8052dc5e49ad74",
+      "seq": 1,
+      "kind": "model_not_found",
+      "message": "probe: route fault (model_not_found) — provider=anthropic model=lohra-m12-modelo-inexistente; resume with run_workflow(resume_run_id=..., route={...}) once you pick a different one; suggested=none",
+      "created_at": 1789318060,
+      "acked_at": null,
+      "acked_by": null,
+      "fence": 1
+    }
+  ],
+  "next_after_seq": 1,
+  "has_more": false,
+  "refused_writes": 0
+}

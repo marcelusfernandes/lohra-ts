@@ -1,0 +1,18 @@
+{
+  "notices": [
+    {
+      "id": 2,
+      "scope": "run:e3683a604e714a198d3da662a519b5ce",
+      "seq": 1,
+      "kind": "model_not_found",
+      "message": "probe: route fault (model_not_found) — provider=openai model=m12-404; resume with run_workflow(resume_run_id=..., route={...}) once you pick a different one; suggested=none",
+      "created_at": 1789317839,
+      "acked_at": null,
+      "acked_by": null,
+      "fence": 1
+    }
+  ],
+  "next_after_seq": 0,
+  "has_more": false,
+  "refused_writes": 0
+}

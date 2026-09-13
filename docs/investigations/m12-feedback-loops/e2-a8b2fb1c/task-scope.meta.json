@@ -1,0 +1,14 @@
+{
+  "code": 0,
+  "signal": null,
+  "elapsed_ms": 186,
+  "args": [
+    "chat",
+    "--provider",
+    "openai",
+    "--model",
+    "m12-parent",
+    "--json",
+    "{\"kind\":\"scope\"}"
+  ]
+}
