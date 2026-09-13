@@ -9,7 +9,12 @@ import {
   resolveApiKey,
   type ProviderProfile,
 } from "../providers/index.js";
-import { loadProjectContext, buildSystemPrompt } from "../context/index.js";
+import {
+  loadProjectContext,
+  buildSystemPrompt,
+  doctrineText,
+  resolveDoctrineTier,
+} from "../context/index.js";
 import { createTurnNoticesPort } from "../context/notices-overlay.js";
 import { openStateForEnvironment, SessionRepository } from "../state/index.js";
 import { GatewaySessionRegistry } from "../gateway/session-service.js";
@@ -261,7 +266,14 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
 
   const token = rawToken ?? generateSessionToken();
   const context = loadProjectContext(options.cwd);
+  // Issue #579 (épico #575, P3): resolvido uma vez, aqui — `profile` já
+  // está fixo neste ponto (linhas 156-260 acima) — nunca dentro de um
+  // closure que roda a cada turno (invariante 1 do CLAUDE.md).
+  const doctrine = doctrineText(
+    resolveDoctrineTier({ providerName: profile.name, environment: options.environment }),
+  );
   const systemPrompt = buildSystemPrompt({
+    doctrine,
     contextFiles: context.instructions,
     environmentHints: context.hints,
   }).text;

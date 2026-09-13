@@ -9,7 +9,7 @@
 import { randomBytes } from "node:crypto";
 
 import { registerShutdownTrigger } from "../cli/shutdown-trigger.js";
-import { buildSystemPrompt } from "../context/index.js";
+import { buildSystemPrompt, doctrineText, resolveDoctrineTier } from "../context/index.js";
 import {
   AGENTIC_MAX_ITERATIONS,
   buildAllowedTools,
@@ -111,10 +111,18 @@ export async function runServe(options: ServeCommandOptions): Promise<number> {
       ? [new AnthropicMessagesModel(client, false), new AnthropicMessagesModel(client, true)]
       : [new ChatCompletionsModel(client, false), new ChatCompletionsModel(client, true)];
 
+  // Issue #579 (épico #575, P3): resolvido uma vez, no boot do processo —
+  // `serve` não tem sessão por turno, então "uma vez por sessão" (invariante
+  // 1 do CLAUDE.md) aqui é "uma vez pela vida do processo". Antes desta
+  // issue, `serve` mandava só identidade + data (`docs/system-prompt.md`).
+  const doctrine = doctrineText(
+    resolveDoctrineTier({ providerName: profile.name, environment: options.environment }),
+  );
+
   const service = new CompletionService({
     transport: modelTransport,
     streamingTransport: streamingModelTransport,
-    systemPrompt: () => buildSystemPrompt().text,
+    systemPrompt: () => buildSystemPrompt({ doctrine }).text,
     provider: profile.name,
     maxIterations,
     defaultMaxTokens: profile.defaultMaxTokens,

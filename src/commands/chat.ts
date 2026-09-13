@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { loadProjectContext, buildSystemPrompt } from "../context/index.js";
+import {
+  loadProjectContext,
+  buildSystemPrompt,
+  doctrineText,
+  resolveDoctrineTier,
+} from "../context/index.js";
 import { createTurnNoticesPort } from "../context/notices-overlay.js";
 import { readCodexModel } from "../auth/codex.js";
 import { resolveAuthRoute, resolveCredentials } from "../auth/credentials.js";
@@ -300,12 +305,20 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     [join(options.cwd, ".claude", "skills")],
     [builtinSkills],
   );
+  // Issue #579 (épico #575, P3): resolvido uma vez por sessão, aqui — nunca
+  // dentro de `snapshot` — porque o system prompt é construído uma vez por
+  // sessão e congelado (invariante 1 do CLAUDE.md); `profile` já está fixo
+  // neste ponto (linha 251 acima).
+  const doctrine = doctrineText(
+    resolveDoctrineTier({ providerName: profile.name, environment: options.environment }),
+  );
   const snapshot = (): string => {
     const context = loadProjectContext(options.cwd);
     const identity = loadSoul(options.home);
     const memory = useTools ? memoryStore.snapshot() : null;
     return buildSystemPrompt({
       ...(identity === undefined ? {} : { identity }),
+      doctrine,
       contextFiles: context.instructions,
       environmentHints: context.hints,
       ...(memory === null || !memory.memory ? {} : { memorySnapshot: memory.memory }),
