@@ -34,6 +34,7 @@ import type {
   ModelTransport,
   StoredSession,
   ToolDispatcher,
+  TurnNoticesPort,
 } from "./types.js";
 
 function sleep(ms: number): Promise<void> {
@@ -55,26 +56,14 @@ function signalAborted(signal: AbortSignal): boolean {
 
 /**
  * Issue #518 (M16-S3, ADR 0005): narrow, deliberately NOT "any failure while
- * aborted" — a genuine 5xx/route fault that happens to arrive after the
- * signal already fired is still a real provider failure (contra-assertion,
- * `tests/conversation-runtime.test.ts`), never reclassified into a
- * cancellation. Recognizes exactly the shapes an in-flight abort can throw
- * (round-1 review on PR #524, S1): a genuine `StreamAbortedError` (the
- * native `NativeChatHttpPort` path, always this shape); a raw `AbortError`
- * (the fetcher path's `AbortController`-driven rejection, standard DOM
- * naming); or an error whose own `.cause` IS the signal's abort reason.
- * That 3rd form has no LIVE producer left in this codebase as of #567
- * (`src/transports/client.ts:150-165`): `NativeChatHttpPort.post` now wraps
- * even a pre-`fetch()` caller abort into the SAME `StreamAbortedError`
- * shape every other abort exit already used, so a raw `Error` whose
- * `.cause` merely echoes `signal.reason` is no longer something any
- * transport in this tree throws — kept here as defense in depth (an
- * external `ModelTransport`, or a future one, is free to throw the plain
- * shape instead), covered by `tests/conversation-runtime-abort-forms.test.ts`
- * directly rather than through any transport. `signalAborted(signal)` gates all
- * three: none of these shapes proves an abort on their OWN (an
- * "AbortError" name or a coincidental `.cause` could, in principle, come
- * from somewhere else), the signal's own state is the one fact this function trusts.
+ * aborted" — a genuine provider failure that happens to arrive after the
+ * signal fired is still a real failure (contra-assertion, `conversation-
+ * runtime.test.ts`), never reclassified into a cancellation. Recognizes
+ * exactly the shapes an in-flight abort can throw: `StreamAbortedError`
+ * (native path), a raw `AbortError` (fetcher path), or `.cause === signal.
+ * reason` (defense in depth, no live producer as of #567; covered by
+ * `conversation-runtime-abort-forms.test.ts`). `signalAborted` gates all
+ * three — the signal's own state is the one fact this function trusts.
  */
 function isAbortOf(error: unknown, signal: AbortSignal): boolean {
   if (!signalAborted(signal)) return false;
@@ -87,9 +76,7 @@ function isAbortOf(error: unknown, signal: AbortSignal): boolean {
  * hook passes to its own per-call `AbortController` — never thrown, never
  * surfaced to a caller; only ever read back through `call.signal.aborted`
  * below to tell a steer-driven interrupt apart from the outer `signal`'s
- * own external cancel (which keeps taking precedence, S3). Named so a
- * future debugging session reading a rejection's `.cause` chain sees WHY
- * that particular call tore down, without this ever needing to be exported. */
+ * own external cancel (which keeps taking precedence, S3). */
 class SteerInterrupt extends Error {
   override readonly name = "SteerInterrupt";
 }
@@ -120,6 +107,8 @@ export interface ConversationRuntimeOptions {
   readonly lockTtlSeconds?: number;
   readonly lockRetries?: number;
   readonly lockRetryDelayMs?: number;
+  /** Issue #589: absent means byte-identical to every pre-#589 turn. */
+  readonly notices?: TurnNoticesPort;
 }
 
 function immutableMessages(
@@ -180,17 +169,12 @@ export class ConversationRuntime {
 
   /**
    * Preflight compaction (issue #252): estimates what the next model call
-   * would cost in tokens (history + this turn so far + system + tools —
-   * the reviewer notes on PR #267/#270 are why system/tools are included
-   * here even though `estimateTokens` alone only sees `messages`) and, if
-   * it would overflow the resolved context window, compacts the
-   * *persisted* history under the session's `compression_locks` row.
-   *
-   * Mutates `messages` in place (splices the old history prefix for a
-   * fresh, shorter one) when it compacts — same imperative-accumulator
-   * style `runTurn` already uses for `messages`/`turnMessages` elsewhere in
-   * this file, not a broken immutability rule: this is a turn-scoped
-   * working array, never shared state.
+   * would cost in tokens (history + this turn so far + system + tools — the
+   * reviewer notes on PR #267/#270 are why system/tools are included here
+   * even though `estimateTokens` alone only sees `messages`) and, if it
+   * would overflow the resolved context window, compacts the *persisted*
+   * history under the session's `compression_locks` row. Mutates `messages`
+   * in place (a turn-scoped working array, never shared state) when it compacts.
    *
    * Returns `null` when the current estimate already fits (the fast path:
    * no lock, no I/O) OR when `repository` has no compaction capability at
@@ -379,14 +363,20 @@ export class ConversationRuntime {
       session = { ...session, systemPrompt: this.promptSnapshot() };
     }
 
+    // Issue #589: claimed once, up front — never re-claimed mid-turn, so a
+    // notice that arrives while THIS turn is still running is left for the
+    // next one, same as any other pending notice this claim didn't reach.
+    const notices = this.options.notices?.claim(sessionId) ?? null;
+    const userContent =
+      notices?.overlay == null ? input.input : `${input.input}\n\n${notices.overlay}`;
     const signal = input.signal ?? new AbortController().signal;
     const history = immutableMessages(this.options.repository.loadMessages(sessionId));
     const messages: Readonly<Record<string, unknown>>[] = [
       ...history,
-      { role: "user", content: input.input },
+      { role: "user", content: userContent },
     ];
     const turnMessages: Readonly<Record<string, unknown>>[] = [
-      { role: "user", content: input.input },
+      { role: "user", content: userContent },
     ];
     const executedToolCalls: {
       id: string | null;
@@ -731,13 +721,18 @@ export class ConversationRuntime {
         turnMessages.push(finalAssistant);
         this.options.repository.commitTurn({
           sessionId,
-          user: { role: "user", content: input.input },
+          user: { role: "user", content: userContent },
           assistant: finalAssistant,
           messages: turnMessages,
           usage: usageTotal,
           cost,
           apiCalls,
         });
+        // Issue #589 AC3: only ever reached after the commit above lands —
+        // any throw earlier this turn skips straight to the outer `catch`
+        // below, which never acks, so a claimed-but-unacked notice reappears
+        // on the next claim exactly as if this turn had never run.
+        if (notices !== null) this.options.notices?.ack(notices.token);
         emit("turn.completed");
         return {
           sessionId,
@@ -791,7 +786,12 @@ export class ConversationRuntime {
         "interrupted",
       );
     } catch (error) {
-      emit("turn.failed", error instanceof ConversationError ? error.code : "TURN_FAILED");
+      const code = error instanceof ConversationError ? error.code : "TURN_FAILED";
+      emit("turn.failed", code);
+      // Issue #589 AC4: the dead turn publishes its own notice — the NEXT
+      // turn's own claim (this session's `session:<id>` scope) is what
+      // surfaces it, since this one never reaches the ack above.
+      this.options.notices?.publishFailure(sessionId, code, error);
       throw error;
     } finally {
       await this.options.transport.close();

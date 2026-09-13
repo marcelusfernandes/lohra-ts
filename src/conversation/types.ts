@@ -190,3 +190,20 @@ export interface ExecutedToolCall {
   readonly arguments: string;
   readonly result: string;
 }
+
+/** Issue #589: structural port `runTurn` calls at the start/end/failure of a
+ * turn to deliver pending `operator_notices` without a tool call. The real
+ * implementation (`createTurnNoticesPort`, `src/context/notices-overlay.ts`)
+ * fails open on every method — `runtime.ts` never faults a turn because the
+ * notices store had a problem. Absent (every caller before this issue, and
+ * most tests) means the turn is byte-identical to before #589 existed. */
+export interface TurnNoticesClaim {
+  readonly token: readonly number[];
+  readonly overlay: string | null;
+}
+
+export interface TurnNoticesPort {
+  claim(sessionId: string): TurnNoticesClaim;
+  ack(token: readonly number[]): void;
+  publishFailure(sessionId: string, code: string, cause: unknown): void;
+}

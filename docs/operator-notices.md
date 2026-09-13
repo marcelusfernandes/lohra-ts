@@ -98,6 +98,51 @@ comentário do mapa. Uma mensagem que não casa nenhum marcador cai em
   perder o aviso, a MESMA mensagem — que já carrega o `run_id` em texto —
   é gravada em `global`. Contado em `stats().fallback_global`, nunca em
   `dropped`: o aviso não se perdeu, só mudou de escopo.
+- `scope = "session:<id>"` (issue #589) nunca exige `ownership`, mesmo
+  predicado de `global` — uma sessão de chat não tem fence/lock de run, e
+  `run:<id>` é sempre um `workflow_run_state.run_id`, um namespace TOTALMENTE
+  disjunto do id de uma sessão de chat. Existe para o overlay de avisos no
+  turno (próxima seção), nunca para um workflow run.
+
+## Entrega no turno, sem tool call (issue #589)
+
+`ConversationRuntime.runTurn` (`src/conversation/runtime.ts`) opcionalmente
+recebe um `notices: TurnNoticesPort` (`src/context/notices-overlay.ts`,
+`createTurnNoticesPort`, wireado em `chat.ts`/`dashboard.ts` sobre o MESMO
+`noticesRepository` que `workflow_notices` já lê). Ausente, o turno é
+byte-idêntico a antes desta issue existir — todo teste anterior a #589
+nunca passa essa opção.
+
+Presente, em toda chamada a `runTurn`:
+
+1. **Claim** (`claimLineageNotices`), no início do turno: lê os avisos
+   PENDENTES (não reconhecidos) do escopo `global` mais `session:<id>` para
+   cada `id` que `SessionRepository.lineageRootToTip(sessionId)` devolve (a
+   própria sessão e cada ancestral, subagentes de `spawn_session`/
+   `delegate_task` incluídos). Nunca lê `run:<id>` — um workflow run pausado
+   por rota (`docs/workflow-audit.md#route_fault`) fica de fora do overlay
+   até existir um vínculo run→sessão; o caso de eval de pausa-por-rota do
+   épico #575 P13 depende desse vínculo, ainda não construído.
+2. **Format** (`formatNoticeOverlay`): até 4.096 chars, cabeçalho
+   `OPERATOR NOTICES (not the user speaking):` e marcador de fim; o que não
+   coube fica de fora — nem no texto anexado, nem no `token` de ack, então
+   permanece pendente para o próximo claim.
+3. O bloco é anexado ao CONTEÚDO da mensagem do usuário do turno (nunca ao
+   `systemPrompt` — a doutrina de P3/P4 já trata blocos do operador como não
+   sendo fala do usuário; aqui o cabeçalho reforça o mesmo texto).
+4. **Ack**, só depois de `commitTurn` gravar o turno: qualquer falha antes
+   disso pula direto para o `catch` de `runTurn`, que nunca chama `ack` — o
+   aviso claim(ado) e não confirmado reaparece no próximo claim exatamente
+   como se este turno nunca tivesse rodado (leitura sem lock: não há nada
+   para liberar explicitamente).
+5. Turno morto (`turn.failed`): `publishFailure` grava um aviso em
+   `session:<sessionId>` com `kind` mapeado do `code` do erro (vocabulário
+   `NoticeKind` congelado — um código sem mapeamento vira `unknown`, nunca
+   um kind novo). O PRÓXIMO turno da mesma sessão é quem o vê, via claim.
+
+Toda operação do `TurnNoticesPort` falha aberta: um repositório de avisos
+quebrado nunca falta um turno que não tinha nada a ver com ele — só emite um
+`warning` (nunca silencioso, invariante 2).
 
 ## Leitura: tool e CLI
 

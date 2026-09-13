@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadProjectContext, buildSystemPrompt } from "../context/index.js";
+import { createTurnNoticesPort } from "../context/notices-overlay.js";
 import { readCodexModel } from "../auth/codex.js";
 import { resolveAuthRoute, resolveCredentials } from "../auth/credentials.js";
 import { RefreshFailedError, TokenPersistError } from "../auth/errors.js";
@@ -413,11 +414,20 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   // is no live stream to write to, this command answers once) and appended
   // to `stderr` below, next to the existing warnings/session-resume line.
   const compactionEvents: string[] = [];
+  // Issue #589: the SAME `noticesRepository` `workflow_notices` already
+  // reads from — a pending notice this turn overlays is the one an
+  // operator would otherwise only see by calling that tool.
+  const notices = createTurnNoticesPort({
+    repository: sessionToolBase.noticesRepository,
+    sessions,
+    warning: sessionToolBase.noticesSink.warn,
+  });
   const runtime = new ConversationRuntime({
     repository,
     transport: modelTransport,
     promptSnapshot: snapshot,
     environment: options.environment,
+    notices,
     eventSink: (event: ConversationRuntimeEvent) => {
       if (event.type === "session.compacted" && event.compaction !== undefined) {
         compactionEvents.push(

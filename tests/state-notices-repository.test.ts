@@ -292,6 +292,33 @@ describe("NoticesRepository", () => {
     }
   });
 
+  it("accepts a session:<id> scope with no ownership required — a chat session has no run fence/lock (issue #589)", () => {
+    const path = tempDbPath();
+    const connection = openStateDatabase(path);
+    try {
+      const notices = new NoticesRepository(connection.database);
+      const written = notices.append("session:chat-1", { kind: "unknown", message: "turn died" });
+      expect(written).not.toBeNull();
+
+      const page = notices.list({ scope: "session:chat-1" });
+      expect(page.notices).toHaveLength(1);
+      expect(page.notices[0]?.message).toBe("turn died");
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("refuses session:<id> with an empty id, same rule as run:<id>", () => {
+    const path = tempDbPath();
+    const connection = openStateDatabase(path);
+    try {
+      const notices = new NoticesRepository(connection.database);
+      expect(notices.append("session:", { kind: "unknown", message: "x" })).toBeNull();
+    } finally {
+      connection.close();
+    }
+  });
+
   it("exports the closed vocabulary and the scope cap constant", () => {
     expect(NOTICE_KINDS).toContain("quota_exhausted");
     expect(NOTICE_KINDS).toContain("stale_fence_write");
