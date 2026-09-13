@@ -101,19 +101,22 @@ describe("delegate_task envelope (#429): 8 keys per task", () => {
       expect(Object.keys(item).slice(0, 3)).toEqual(["sub_id", "status", "summary"]);
       expect(item.sub_id).toBe(`kid-${String(index + 1)}`);
       expect(item.status).toBe("complete");
-      // The 5 new keys, appended at the end (precedente #232).
+      // The 5 new keys from #429, plus outcome from #583 — appended at the
+      // end (precedente #232).
       expect(Object.keys(item).slice(3)).toEqual([
         "error_kind",
         "tokens_in",
         "tokens_out",
         "provider",
         "model",
+        "outcome",
       ]);
       expect(item.error_kind).toBeNull();
       expect(item.tokens_in).toBe(21);
       expect(item.tokens_out).toBe(13);
       expect(item.provider).toBe("openai");
       expect(item.model).toBe("gpt-fake");
+      expect(item.outcome).toBeNull();
     }
   });
 

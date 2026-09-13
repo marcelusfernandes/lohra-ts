@@ -404,6 +404,17 @@ descriptions de `read_file`, `web_fetch`, `web_search`, `skill_view` e o
 wrapper de tool MCP citam a mesma frase de aviso. Detalhes em
 [`docs/system-prompt.md`](docs/system-prompt.md).
 
+O prompt do subagente (issue #583, spawnado por `delegate_task` ou
+`spawn_session`) carrega seu próprio `cwd` (bloco `Environment:`), a lista
+de tools que sobrou do allow-list do pai (`childToolDefinitions`, sempre a
+mesma lista que o turno realmente recebe) e um contrato de retorno: a
+última linha do turno deve ser `result: <summary>`, `failed: <why>` ou
+`needs input: <what>`. `delegate_task`/`collect_session` devolvem esse
+valor lido de volta ao pai no campo aditivo `outcome` (`"result" |
+"failed" | "needs_input" | null`, última chave do envelope) — `null` quando
+o filho não terminou com a sentinela, nunca um erro. Detalhes em
+[`docs/system-prompt.md`](docs/system-prompt.md).
+
 ### Erros e `--help`
 
 O texto de erro e de ajuda da CLI é próprio deste produto — não é um

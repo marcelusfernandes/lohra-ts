@@ -280,3 +280,44 @@ describe("buildOrchestrationCore — wiring-level regression for pricingOverride
     expect(usage?.estimatedCostUsd).toBeGreaterThan(0);
   });
 });
+
+describe("buildOrchestrationCore — wiring-level regression for the subagent prompt (#583)", () => {
+  it("threads the real cwd and the real, filtered child tool names into the spawned prompt", () => {
+    const sessions = setupSessions();
+    const parentCatalog: readonly ToolDefinition[] = [
+      { type: "function", function: { name: "read_file", description: "", parameters: {} } },
+      { type: "function", function: { name: "terminal", description: "", parameters: {} } },
+      { type: "function", function: { name: "delegate_task", description: "", parameters: {} } },
+      { type: "function", function: { name: "memory", description: "", parameters: {} } },
+    ];
+
+    const core = buildOrchestrationCore({
+      fanout: { maxParallel: 4, maxSubsessions: 200, parentMaxIterations: 90, warnings: [] },
+      sessions,
+      parentSessionId: "parent-1",
+      clientPool: { get: () => Promise.reject(new Error("unused")) } as never,
+      baseDispatch: () => Promise.resolve("unused"),
+      parentToolDefinitions: parentCatalog,
+      defaultModel: "fake-model-a",
+      cwd: "/work/real-project",
+    });
+
+    const { subId } = core.spawn({ prompt: "do the thing" });
+    const prompt = core.getSubagentPrompt(subId);
+
+    expect(prompt).toContain("/work/real-project");
+    const toolsLine = (prompt ?? "")
+      .split("\n\n")
+      .find((paragraph) => paragraph.startsWith("Tools available to you:"));
+    expect(toolsLine).toBeDefined();
+    expect(toolsLine).toContain("read_file");
+    expect(toolsLine).toContain("terminal");
+    // The excluded verbs must never leak into the child's own tools
+    // sentence — same deny-list childToolDefinitions already applies to the
+    // turn's real toolDefinitions (child-runner.ts). DOCTRINE_CORE mentions
+    // "memory" in prose elsewhere in the prompt, so this checks the tools
+    // sentence specifically, not the whole text.
+    expect(toolsLine).not.toContain("delegate_task");
+    expect(toolsLine).not.toContain("memory");
+  });
+});

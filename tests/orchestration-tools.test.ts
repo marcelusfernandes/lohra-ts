@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ProviderError } from "../src/agent/client-pool.js";
+import { BUILTIN_DEFINITIONS } from "../src/tools/builtin-definitions.js";
 import { toolError, toolResult } from "../src/tools/envelope.js";
 import {
   MAX_PENDING_STEERS_PER_LEAF,
@@ -260,6 +261,7 @@ describe("collectSessionTool", () => {
       "error_kind",
       "retry_after",
       "usage_uncertain",
+      "outcome",
     ]);
     expect(envelope).toBe(
       toolResult(undefined, {
@@ -275,6 +277,7 @@ describe("collectSessionTool", () => {
         error_kind: null,
         retry_after: null,
         usage_uncertain: false,
+        outcome: null,
       }),
     );
   });
@@ -286,6 +289,25 @@ describe("collectSessionTool", () => {
     await spawnSessionTool(core, allowAllProviders, { prompt: "x" });
     const envelope = await collectSessionTool(core, { sub_id: "aaaa", wait: true });
     expect(JSON.parse(envelope)).toMatchObject({ usage_uncertain: true });
+  });
+
+  // Issue #583: outcome is copied straight through from the CollectResult —
+  // additive, last key, present as null rather than omitted when the child
+  // never set one.
+  it("carries a non-null outcome through to the envelope (#583)", async () => {
+    const core = makeCore(() => Promise.resolve(okResult({ outcome: "result" })));
+    await spawnSessionTool(core, allowAllProviders, { prompt: "x" });
+    const envelope = await collectSessionTool(core, { sub_id: "aaaa", wait: true });
+    expect(JSON.parse(envelope)).toMatchObject({ outcome: "result" });
+  });
+
+  it("reports outcome:null, never an omitted key, when the child never set one (#583)", async () => {
+    const core = makeCore(() => Promise.resolve(okResult()));
+    await spawnSessionTool(core, allowAllProviders, { prompt: "x" });
+    const envelope = await collectSessionTool(core, { sub_id: "aaaa", wait: true });
+    const parsed = JSON.parse(envelope) as Readonly<Record<string, unknown>>;
+    expect("outcome" in parsed).toBe(true);
+    expect(parsed.outcome).toBeNull();
   });
 
   it("keeps ok:true alongside status:error when the child failed (L14)", async () => {
@@ -362,6 +384,7 @@ describe("collectSessionTool", () => {
       "error_kind",
       "retry_after",
       "usage_uncertain",
+      "outcome",
     ]);
     expect(envelope).toBe(
       toolResult(undefined, {
@@ -377,6 +400,7 @@ describe("collectSessionTool", () => {
         error_kind: null,
         retry_after: null,
         usage_uncertain: false,
+        outcome: null,
       }),
     );
   });
@@ -395,6 +419,7 @@ describe("delegateTaskTool", () => {
     const envelope = await delegateTaskTool(core, { tasks: ["a", "b"] });
     // #429 (M10-S8): 3 → 8 keys, the 5 new ones appended at the end
     // (precedente #232) — the 3 original keys stay first, byte-exact.
+    // #583: 8 → 9 keys, outcome appended last.
     expect(envelope).toBe(
       toolResult(undefined, {
         results: [
@@ -407,6 +432,7 @@ describe("delegateTaskTool", () => {
             tokens_out: 7,
             provider: "fakeprov",
             model: "fake-model-a",
+            outcome: null,
           },
           {
             sub_id: "kid-2",
@@ -417,10 +443,35 @@ describe("delegateTaskTool", () => {
             tokens_out: 7,
             provider: "fakeprov",
             model: "fake-model-a",
+            outcome: null,
           },
         ],
       }),
     );
+  });
+
+  // Issue #583: outcome flows through the batch path too, per task.
+  it("carries each task's own outcome through the batch envelope", async () => {
+    let n = 0;
+    const core = makeCore(
+      (_subId, config) =>
+        Promise.resolve(
+          okResult({
+            output: `${config.prompt}-OUT`,
+            outcome: config.prompt === "a" ? "result" : "needs_input",
+          }),
+        ),
+      () => {
+        n += 1;
+        return `kid-outcome-${String(n)}`;
+      },
+    );
+    const envelope = await delegateTaskTool(core, { tasks: ["a", "b"] });
+    const parsed = JSON.parse(envelope) as {
+      results: readonly { outcome: unknown }[];
+    };
+    expect(parsed.results[0]?.outcome).toBe("result");
+    expect(parsed.results[1]?.outcome).toBe("needs_input");
   });
 
   it("rejects an empty task list without spawning anything", async () => {
@@ -449,6 +500,7 @@ describe("delegateTaskTool", () => {
           tokens_out: 7,
           provider: "fakeprov",
           model: "fake-model-a",
+          outcome: null,
         },
       ],
     });
@@ -495,6 +547,7 @@ describe("delegateTaskTool", () => {
             tokens_out: 7,
             provider: "fakeprov",
             model: "fake-model-a",
+            outcome: null,
           },
         ],
       }),
@@ -566,6 +619,7 @@ describe("delegateTaskTool", () => {
             tokens_out: 14,
             provider: "fakeprov",
             model: "fake-model-a",
+            outcome: null,
           },
         ],
       }),
@@ -613,4 +667,31 @@ describe("delegateTaskTool", () => {
       ),
     );
   }, 1000);
+});
+
+// Issue #583, AC 4: delegate_task/collect_session descriptions explain the
+// outcome field so the parent knows to read it, without the model having to
+// call collect_session again just to discover the key exists.
+describe("delegate_task/collect_session descriptions explain outcome (#583)", () => {
+  function descriptionOf(name: string): string {
+    const tool = BUILTIN_DEFINITIONS.find((definition) => definition.function.name === name);
+    if (tool === undefined) throw new Error(`tool '${name}' not found in BUILTIN_DEFINITIONS`);
+    return tool.function.description;
+  }
+
+  it("delegate_task names outcome and its possible values", () => {
+    const description = descriptionOf("delegate_task");
+    expect(description).toContain("outcome");
+    expect(description).toContain("result");
+    expect(description).toContain("failed");
+    expect(description).toContain("needs_input");
+  });
+
+  it("collect_session names outcome and its possible values", () => {
+    const description = descriptionOf("collect_session");
+    expect(description).toContain("outcome");
+    expect(description).toContain("result");
+    expect(description).toContain("failed");
+    expect(description).toContain("needs_input");
+  });
 });

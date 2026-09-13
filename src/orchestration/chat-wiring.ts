@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { ClientPool } from "../agent/client-pool.js";
 import type { ConversationRuntimeOptions } from "../conversation/index.js";
 import type { SessionRepository } from "../state/index.js";
+import { childToolDefinitions } from "../tools/child.js";
 import type { RegistryDispatch, ToolDefinition, ToolHandler } from "../tools/types.js";
 import { createChildRunner } from "./child-runner.js";
 import { OrchestrationCore } from "./core.js";
@@ -78,6 +79,21 @@ export function buildOrchestrationCore(options: BuildOrchestrationCoreOptions): 
     idSource: () => randomUUID().replaceAll("-", ""),
     maxSubsessions: options.fanout.maxSubsessions,
     maxParallel: options.fanout.maxParallel,
-    buildSubagentPrompt: () => buildSubagentSystemPrompt(),
+    // Issue #583: the SAME filter over the SAME parent catalog that
+    // `createChildRunner` itself applies (`child-runner.ts`'s own
+    // `childToolDefinitions(options.parentToolDefinitions)`) — the prompt's
+    // tools list and the turn's actual `toolDefinitions` can never drift
+    // apart, since both derive from this one call. No filesystem I/O here
+    // (this closure runs on every `spawn()`, and the invariant is that
+    // spawning stays cheap/deterministic) — `options.cwd` and
+    // `options.parentToolDefinitions` are already resolved once by the
+    // caller (`commands/chat.ts`/`commands/dashboard.ts`).
+    buildSubagentPrompt: () =>
+      buildSubagentSystemPrompt({
+        cwd: options.cwd,
+        toolNames: childToolDefinitions(options.parentToolDefinitions).map(
+          (definition) => definition.function.name,
+        ),
+      }),
   });
 }

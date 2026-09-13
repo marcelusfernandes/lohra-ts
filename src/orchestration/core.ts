@@ -8,6 +8,7 @@ import type { ErrorKind } from "../transports/error-kinds.js";
 // on a `SubSessionEntry` for S2's `leaf.steered` audit event (issue #423)
 // — it never reads a field off it itself.
 import type { CausalContext } from "../workflow/runtime.js";
+import type { SubagentOutcome } from "./outcome-sentinel.js";
 
 export type SubSessionStatus = "running" | "complete" | "error" | "interrupted";
 
@@ -60,6 +61,17 @@ export interface CollectResult {
    * turn that never called a tool, keeping every `CollectResult` fixture
    * from before this issue byte-identical. */
   readonly toolCalls?: readonly Readonly<Record<string, unknown>>[];
+  /** Issue #583: the sentinel line the subagent's own final turn ended
+   * with (`result:`/`failed:`/`needs input:`, `outcome-sentinel.ts`),
+   * `null` when the turn's last line matched none of them. Set only on a
+   * "complete" turn that actually produced text (`child-runner.ts`) —
+   * absent on "error"/"interrupted"/resolution-failure paths, where there
+   * is no model text to read a sentinel from. Purely additive metadata:
+   * never changes `status`/`errorKind` — a leaf that writes `failed: …` in
+   * its own text still reports `status: "complete"` here, same as before
+   * this issue, so every `CollectResult` fixture predating it stays
+   * byte-identical. */
+  readonly outcome?: SubagentOutcome | null;
 }
 
 /** A child's async tool dispatch: `(name, args) => Promise<string>`, the
@@ -199,6 +211,11 @@ export interface DelegateOutcome {
   readonly tokensOut: number;
   readonly provider: string | null;
   readonly model: string | null;
+  /** Issue #583: copied straight from the `CollectResult` this outcome was
+   * built from, defaulting to `null` on the same settled-with-no-result
+   * fallback as `errorKind` above — never a claim that a turn without a
+   * sentinel "failed" to produce one. */
+  readonly outcome: SubagentOutcome | null;
 }
 
 /** "(subagent produced no output)" for an empty-output success, textually
@@ -341,6 +358,7 @@ export class OrchestrationCore {
           tokensOut: result?.tokensOut ?? 0,
           provider: result?.provider ?? null,
           model: result?.model ?? null,
+          outcome: result?.outcome ?? null,
         };
       }),
     );
