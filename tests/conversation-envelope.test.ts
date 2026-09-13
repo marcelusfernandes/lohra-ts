@@ -132,6 +132,57 @@ describe("conversation envelopes", () => {
     });
   });
 
+  // Issue #587 AC: aux_calls is additive at the very end, and its usage is
+  // folded into usage_total -- absent (never a 0/null key) when there were
+  // no auxiliary calls, so every existing fixture above keeps its exact key
+  // count and order.
+  it("adds aux_calls at the end and folds aux usage into usage_total only when there were aux calls", () => {
+    const base = {
+      sessionId: "s",
+      model: "m",
+      temperature: null,
+      input: "hi",
+      response: {
+        content: "ok",
+        finishReason: "stop" as const,
+        toolCalls: [],
+        reasoning: null,
+        usage,
+        providerData: null,
+      },
+      usageTotal: usage,
+      cost: zeroCost,
+      apiCalls: 1,
+      sessionSummary: summary,
+    };
+
+    const withoutAux = parseObject(successEnvelope(base));
+    expect(withoutAux).not.toHaveProperty("aux_calls");
+    expect(withoutAux.usage_total).toEqual({ input_tokens: 11, output_tokens: 7 });
+
+    const withZeroAux = parseObject(successEnvelope(base, { auxCalls: 0, auxUsage: null }));
+    expect(withZeroAux).not.toHaveProperty("aux_calls");
+
+    const bodyWithAux = successEnvelope(base, {
+      auxCalls: 1,
+      auxUsage: {
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningTokens: 0,
+      },
+    });
+    const withAux = parseObject(bodyWithAux);
+    expect(withAux.aux_calls).toBe(1);
+    expect(withAux.usage_total).toEqual({ input_tokens: 111, output_tokens: 27 });
+    // additive at the very end -- every key that existed before is still
+    // there, in the same order, with aux_calls strictly last.
+    const keys = Object.keys(withAux);
+    expect(keys.at(-1)).toBe("aux_calls");
+    expect(keys.slice(0, -1)).toEqual(Object.keys(withoutAux));
+  });
+
   it("omits session for pre-response errors and includes it for incomplete responses", () => {
     const early = parseObject(
       errorEnvelope({ sessionId: "s", model: "m", prompt: "x", error: "failure", apiCalls: 1 }),
