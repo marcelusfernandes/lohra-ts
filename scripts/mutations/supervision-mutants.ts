@@ -698,6 +698,12 @@ export const supervisionMutants: readonly Mutant[] = [
     ],
   },
   {
+    // Re-anchored by issue #568 (r2, veredito da PR #573): a leaf's usage
+    // on cancel is now `combineUsage(error.measuredUsage, error.partialUsage)`
+    // (`child-runner.ts`), not `error.partialUsage` alone — the ORIGINAL
+    // anchor (a single `zeroResult(...)` argument) no longer exists
+    // verbatim. Same mutation intent (drop the usage this leaf would
+    // otherwise report), moved one line up to the `usage` binding itself.
     id: "N2-cancelled-leaf-usage-dropped",
     category: "cancelled-leaf-usage-dropped",
     mechanism: "family-a",
@@ -708,10 +714,8 @@ export const supervisionMutants: readonly Mutant[] = [
     edits: [
       {
         file: childRunner,
-        before:
-          '            ...zeroResult("interrupted", "", profile, model, error.partialUsage, "cancelled", null),',
-        after:
-          '            ...zeroResult("interrupted", "", profile, model, null, "cancelled", null),',
+        before: "          const usage = combineUsage(error.measuredUsage, error.partialUsage);",
+        after: "          const usage = null;",
       },
     ],
   },
