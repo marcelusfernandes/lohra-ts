@@ -111,10 +111,19 @@ describe("skill store", () => {
   });
 
   it("round-trips the supported frontmatter fields in insertion order", () => {
-    const rendered = renderSkillMd("name", "description", " body ", "1.0.0", ["mac", "win"]);
-    expect(rendered).toBe(
-      "---\nname: name\ndescription: description\nversion: 1.0.0\nplatforms:\n- mac\n- win\n---\nbody\n",
-    );
-    expect(parseSkillMd(rendered).platforms).toEqual(["mac", "win"]);
+    const rendered = renderSkillMd("name", "description", " body ", "1.0.0");
+    expect(rendered).toBe("---\nname: name\ndescription: description\nversion: 1.0.0\n---\nbody\n");
+  });
+
+  // Issue #590: `platforms` is off the agentskills.io spec and nothing in
+  // this runtime ever filtered by it — dropped as a field, but a skill
+  // already on disk with a legacy `platforms:` list still parses instead of
+  // throwing (docs/decisions/2026-09-10-skills-harness.md item 7).
+  it("skips a legacy `platforms:` list instead of throwing or surfacing it", () => {
+    const legacy = "---\nname: legacy\ndescription: d\nplatforms:\n- mac\n- win\n---\nbody\n";
+    const parsed = parseSkillMd(legacy);
+    expect(parsed).not.toHaveProperty("platforms");
+    expect(parsed.name).toBe("legacy");
+    expect(parsed.description).toBe("d");
   });
 });

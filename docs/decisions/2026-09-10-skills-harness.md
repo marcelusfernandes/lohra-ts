@@ -8,6 +8,16 @@
 - Baseline: `1a4773b8` (`main` de 2026-09-10)
 - Escopo: só investigação. Nenhuma linha de `src/` mudou nesta PR.
 
+> **Nota (2026-09-13, issue #590):** o conteúdo apontado por E1 (H2, H5 —
+> `assets/skills/use-lohra` descrevendo o Python, `use-lohra-ts` inexistente)
+> foi corrigido: `assets/skills/use-lohra-ts/SKILL.md` existe, cita
+> `lohra-ts` e só flags reais (`src/cli/arg-spec.ts`), e `use-lohra` ganhou
+> description e banner de legado. A **política** de instalação/atualização
+> (E3–E9: destino compartilhado, manifesto, `init`/`update`, `src/skills/install.ts`)
+> segue pendente da decisão do owner registrada abaixo — #590 não a decide
+> nem toca `src/onboarding/wizard.ts`/`src/doctor/checks.ts`, que continuam
+> oferecendo `use-lohra` por default até essa decisão.
+
 ---
 
 ## Recomendação ao owner, em linguagem simples
