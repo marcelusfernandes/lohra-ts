@@ -179,6 +179,9 @@ describe("ConversationRuntime", () => {
     const transport = new QueueTransport([response(), response()]);
     const events: ConversationRuntimeEvent[] = [];
     let prompts = 0;
+    // Issue #569: a happy-path turn still has to disarm its per-call hook.
+    let armed = 0;
+    let disarmed = false;
     const runtime = new ConversationRuntime({
       repository,
       transport,
@@ -190,12 +193,19 @@ describe("ConversationRuntime", () => {
       idSource: () => "session-1",
       clock: () => 1000,
     });
+    const interruptSource = {
+      arm: (_abort: () => void): (() => void) => {
+        armed += 1;
+        return () => (disarmed = true);
+      },
+    };
 
     const first = await runtime.runTurn({
       input: "one",
       provider: "ollama",
       model: "m",
       cwd: "/tmp/project",
+      interruptSource,
     });
     const second = await runtime.runTurn({
       input: "two",
@@ -203,6 +213,7 @@ describe("ConversationRuntime", () => {
       model: "m",
       cwd: "/tmp/project",
       sessionId: first.sessionId,
+      interruptSource,
     });
 
     expect(prompts).toBe(1);
@@ -229,6 +240,8 @@ describe("ConversationRuntime", () => {
       "turn.completed",
     ]);
     expect(transport.closes).toBe(2);
+    expect(armed).toBe(2); // once per turn, each a normal, non-aborted call
+    expect(disarmed).toBe(true);
   });
 
   it("fails closed on unexpected tool calls without dispatch or persistence", async () => {
@@ -584,6 +597,62 @@ describe("ConversationRuntime", () => {
     } satisfies Partial<IncompleteToolCallError>);
     expect(repository.commits).toEqual([]);
     expect(repository.usageCommits).toHaveLength(1);
+  });
+});
+
+// Issue #569 (closes the race gap `docs/decisions/2026-09-13-abort-em-voo-
+// itens-a-definir.md` names): an unrecognized shape exercises `:551`.
+describe("ConversationRuntime — cancel × steer-interrupt precedence (issue #569)", () => {
+  it("an error that isn't a recognized abort shape while both the external cancel and an armed steer-interrupt have fired surfaces as a genuine turn failure, never silently absorbed as a steer-continue", async () => {
+    const repository = new MemoryRepository();
+    let armed: (() => void) | null = null;
+    const arm = (abort: () => void): (() => void) => {
+      armed = abort;
+      return () => undefined;
+    };
+    const interruptSource = { arm };
+    const opaqueFailure = new Error("socket torn down, cause unknown"); // not isAbortOf-shaped
+    let signalStarted: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => (signalStarted = resolve));
+    let calls = 0;
+    const transport: ModelTransport = {
+      complete: (request) =>
+        new Promise((_resolve, reject) => {
+          calls += 1;
+          const onAbort = (): void => {
+            reject(opaqueFailure);
+          };
+          request.signal.addEventListener("abort", onAbort, { once: true });
+          signalStarted();
+        }),
+      close: () => Promise.resolve(),
+    };
+    const runtime = new ConversationRuntime({
+      repository,
+      transport,
+      promptSnapshot: () => "p",
+      idSource: () => "s",
+      clock: () => 1,
+      maxIterations: 1,
+    });
+    const controller = new AbortController();
+    const turn = runtime.runTurn({
+      input: "x",
+      provider: "ollama",
+      model: "m",
+      cwd: "/tmp",
+      signal: controller.signal,
+      interruptSource,
+    });
+
+    await started;
+    armed?.(); // races the cancel below, same synchronous tick
+    controller.abort("USER_CANCELLED");
+
+    const caught = await turn.catch((error: unknown) => error);
+    expect(caught).toBeInstanceOf(ConversationTurnFailedError);
+    expect((caught as ConversationTurnFailedError).cause).toBe(opaqueFailure);
+    expect(calls).toBe(1); // never absorbed and retried past the leash
   });
 });
 
