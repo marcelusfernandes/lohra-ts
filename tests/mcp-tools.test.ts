@@ -5,6 +5,7 @@ import {
   deregisterServer,
   mcpToolName,
   registerServerTools,
+  UNTRUSTED_CONTENT_NOTICE,
   wrapCallResult,
 } from "../src/mcp/tools.js";
 import { toolError, toolResult } from "../src/tools/envelope.js";
@@ -29,7 +30,7 @@ describe("convertMcpSchema", () => {
         inputSchema: { type: "object", properties: { q: { type: "string" } }, required: ["q"] },
       }),
     ).toEqual({
-      description: "a good one",
+      description: `a good one ${UNTRUSTED_CONTENT_NOTICE}`,
       parameters: { type: "object", properties: { q: { type: "string" } }, required: ["q"] },
     });
   });
@@ -47,9 +48,9 @@ describe("convertMcpSchema", () => {
     });
   });
 
-  it("description null/absent -> empty string", () => {
-    expect(convertMcpSchema({ description: null }).description).toBe("");
-    expect(convertMcpSchema({}).description).toBe("");
+  it("description null/absent -> the untrusted-content notice alone (#581)", () => {
+    expect(convertMcpSchema({ description: null }).description).toBe(UNTRUSTED_CONTENT_NOTICE);
+    expect(convertMcpSchema({}).description).toBe(UNTRUSTED_CONTENT_NOTICE);
   });
 
   it("kills the silent-description-coercion mutant: truthy non-string descriptions stay raw", () => {
@@ -57,7 +58,7 @@ describe("convertMcpSchema", () => {
     expect(convertMcpSchema({ description: { source: "mcp" } }).description).toEqual({
       source: "mcp",
     });
-    expect(convertMcpSchema({ description: false }).description).toBe("");
+    expect(convertMcpSchema({ description: false }).description).toBe(UNTRUSTED_CONTENT_NOTICE);
   });
 
   it("key order is description, parameters", () => {
@@ -77,21 +78,21 @@ describe("wrapCallResult", () => {
           { type: "text", text: "part-two" },
         ],
       }),
-    ).toBe(toolResult(undefined, { content: "part-one part-two" }));
+    ).toBe(toolResult(undefined, { content: "part-one part-two", untrusted: true }));
   });
 
   it("non-text block -> [type block] placeholder", () => {
     expect(wrapCallResult({ content: [{ type: "image" }] })).toBe(
-      toolResult(undefined, { content: "[image block]" }),
+      toolResult(undefined, { content: "[image block]", untrusted: true }),
     );
   });
 
   it("renders a non-string, non-number type via JSON quoting", () => {
     expect(wrapCallResult({ content: [{ type: null }] })).toBe(
-      toolResult(undefined, { content: "[null block]" }),
+      toolResult(undefined, { content: "[null block]", untrusted: true }),
     );
     expect(wrapCallResult({ content: [{ type: true }, { type: false }] })).toBe(
-      toolResult(undefined, { content: "[true block][false block]" }),
+      toolResult(undefined, { content: "[true block][false block]", untrusted: true }),
     );
   });
 
@@ -100,10 +101,10 @@ describe("wrapCallResult", () => {
   // explicitly as the literal `undefined`, not fall through uncovered.
   it("cites a function or symbol type as the literal undefined", () => {
     expect(wrapCallResult({ content: [{ type: () => undefined }] })).toBe(
-      toolResult(undefined, { content: "[undefined block]" }),
+      toolResult(undefined, { content: "[undefined block]", untrusted: true }),
     );
     expect(wrapCallResult({ content: [{ type: Symbol("weird") }] })).toBe(
-      toolResult(undefined, { content: "[undefined block]" }),
+      toolResult(undefined, { content: "[undefined block]", untrusted: true }),
     );
   });
 
@@ -112,7 +113,7 @@ describe("wrapCallResult", () => {
       /must contain a string/u,
     );
     expect(wrapCallResult({ content: [{ type: "text", text: 0 }] })).toBe(
-      toolResult(undefined, { content: "" }),
+      toolResult(undefined, { content: "", untrusted: true }),
     );
   });
 
