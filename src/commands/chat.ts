@@ -14,6 +14,7 @@ import { createTurnNoticesPort } from "../context/notices-overlay.js";
 import { readCodexModel } from "../auth/codex.js";
 import { resolveAuthRoute, resolveCredentials } from "../auth/credentials.js";
 import { RefreshFailedError, TokenPersistError } from "../auth/errors.js";
+import { AuxClient } from "../agent/aux.js";
 import { ClientPool } from "../agent/client-pool.js";
 import {
   AnthropicMessagesModel,
@@ -51,6 +52,7 @@ import {
   buildClient,
   ChatCompletionsClient,
   createResponsesClient,
+  getTransport,
   ResponsesClient,
 } from "../transports/index.js";
 import type { ModelTransport } from "../conversation/index.js";
@@ -364,6 +366,22 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     codexHome: options.codexHome,
     environment: options.environment,
   });
+  // Issue #587 (AC1): same provider/client as the turn itself, `defaultAuxModel`
+  // when the profile has one — absent, `aux`/`auxTelemetry` stay undefined and
+  // this turn behaves exactly as it did before this issue (no `summarize`
+  // override, no title). `getTransport` never fails for a profile this route
+  // already validated (`profile.apiMode` is always registered).
+  const auxTransport = profile.defaultAuxModel ? getTransport(profile.apiMode) : null;
+  const aux =
+    auxTransport === null
+      ? null
+      : new AuxClient({
+          client,
+          transport: auxTransport,
+          chosenModel: model,
+          defaultAuxModel: profile.defaultAuxModel,
+        });
+  const auxTelemetry = aux?.auxTelemetry();
   const pricingOverrides = loadPriceOverrides(join(options.home, "pricing.json"));
   const orchestrationCore = buildOrchestrationCore({
     fanout,
@@ -466,8 +484,13 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
         );
       } else if (event.type === "compaction.unsupported") {
         compactionEvents.push("event: compaction.unsupported\n");
+      } else if (event.type === "compaction.transcript_truncated") {
+        compactionEvents.push("event: compaction.transcript_truncated\n");
+      } else if (event.type === "compaction.aux_fallback") {
+        compactionEvents.push(`event: compaction.aux_fallback code=${event.code ?? ""}\n`);
       }
     },
+    ...(auxTelemetry === undefined ? {} : { summarize: auxTelemetry.summarize }),
     ...(useTools
       ? {
           toolDefinitions: tools.toolDefinitions,
@@ -490,10 +513,28 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       cwd: options.cwd,
       ...(sessionId === undefined ? {} : { sessionId }),
     });
+    // Issue #587 AC ("ao criar a sessão... gerar e persistir title"): only
+    // for a session THIS call created (no --session given) and only when
+    // the profile has a defaultAuxModel — fail-open, never breaks the turn.
+    if (sessionId === undefined && auxTelemetry !== undefined) {
+      try {
+        const title = await auxTelemetry.title(result.input);
+        if (title) sessions.setTitle(result.sessionId, title);
+      } catch (error) {
+        compactionEvents.push(
+          `event: title.failed code=${error instanceof Error ? error.name : "UNKNOWN"}\n`,
+        );
+      }
+    }
     return {
       code: 0,
       stdout: options.flags.has("--json")
-        ? successEnvelope(result)
+        ? successEnvelope(
+            result,
+            auxTelemetry === undefined
+              ? undefined
+              : { auxCalls: auxTelemetry.calls(), auxUsage: auxTelemetry.usage() },
+          )
         : `${result.response.content ?? ""}\n`,
       stderr: `${warningLines}${compactionEvents.join("")}session: ${result.sessionId}  (resume with --session ${result.sessionId})\n`,
     };
