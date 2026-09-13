@@ -462,11 +462,13 @@ Claude Code dá sobre o próprio `gitStatus` da sessão. Um valor multilinha
 (`git_status`, `git_recent`) não quebra o formato `- key: value`: a chave
 fica sozinha numa linha e cada linha do valor entra indentada.
 
-Construído uma vez por sessão (invariante 1, CLAUDE.md): `chat.ts` e
-`dashboard.ts` chamam `loadProjectContext` uma única vez em `snapshot()`,
-antes do primeiro turno — o snapshot de git não se atualiza se o
-repositório mudar no meio da conversa, doutrina que a última linha do
-bloco torna explícita para o modelo.
+Construído uma vez por sessão (invariante 1, CLAUDE.md): `chat.ts` chama
+`loadProjectContext` dentro de `snapshot()` (linha 329), e `dashboard.ts`
+chama direto (linha 272) antes de montar `systemPrompt` — os dois só uma
+vez, antes do primeiro turno, nunca dentro de um closure que roda a cada
+turno. O snapshot de git não se atualiza se o repositório mudar no meio da
+conversa, doutrina que a última linha do bloco torna explícita para o
+modelo.
 
 ### O que o eval consegue medir, e o que não consegue
 
