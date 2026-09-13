@@ -6,6 +6,22 @@ export const DEFAULT_IDENTITY =
 
 const SEPARATOR = "\n\n";
 
+/** Issue #582 (épico #575, P6): moldura para os três blocos que hoje
+ * chegam crus (`<memory>`, `<user-profile>`, `<context-file>`) — uma frase
+ * antes de cada um dizendo o que é e como usar, ausente quando o bloco está
+ * ausente (mesmo `filter(Boolean)` que já governa o resto de
+ * `buildSystemPrompt`, byte-compat preservado). Memória e perfil não usam
+ * vocabulário de confiança ("untrusted") — são fatos que o próprio runtime
+ * gravou, não conteúdo externo (issue #581); a ressalva aqui é de
+ * atualidade (pode ter envelhecido), não de proveniência. */
+const MEMORY_PREFIX =
+  "Memory: durable facts you saved in earlier sessions; they reflect what " +
+  "was true when written — verify a file, flag, or command still exists " +
+  "before relying on it.";
+const USER_PROFILE_PREFIX = "User profile: who the user is and how they prefer to work.";
+const PROJECT_INSTRUCTIONS_PREFIX =
+  "Project instructions below override default behavior for work inside this project.";
+
 export class SystemPromptSnapshot {
   readonly stable: string;
   readonly context: string;
@@ -50,10 +66,11 @@ function environmentText(hints: Readonly<Record<string, string>>): string {
 }
 
 function contextText(files: readonly (readonly [string, string])[]): string {
-  return files
+  const rendered = files
     .filter(([, content]) => content.length > 0)
     .map(([name, content]) => `<context-file name="${name}">\n${content}\n</context-file>`)
     .join(SEPARATOR);
+  return rendered ? `${PROJECT_INSTRUCTIONS_PREFIX}${SEPARATOR}${rendered}` : "";
 }
 
 /** Mirrors the oracle's `datetime.date.today().isoformat()` — the SYSTEM's
@@ -82,8 +99,12 @@ export function buildSystemPrompt(inputs: SystemPromptInputs = {}): SystemPrompt
     .filter(Boolean)
     .join(SEPARATOR);
   const volatile = [
-    inputs.memorySnapshot ? `<memory>\n${inputs.memorySnapshot}\n</memory>` : "",
-    inputs.userProfile ? `<user-profile>\n${inputs.userProfile}\n</user-profile>` : "",
+    inputs.memorySnapshot
+      ? `${MEMORY_PREFIX}${SEPARATOR}<memory>\n${inputs.memorySnapshot}\n</memory>`
+      : "",
+    inputs.userProfile
+      ? `${USER_PROFILE_PREFIX}${SEPARATOR}<user-profile>\n${inputs.userProfile}\n</user-profile>`
+      : "",
     inputs.skillsIndex ?? "",
     `Today's date is ${today}.`,
   ]

@@ -113,7 +113,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Save durable facts that persist across sessions \u2014 when the user corrects you, shares a preference, or you learn a convention. Do NOT save task progress or TODOs (belongs in skills). Write declarative facts, not instructions to yourself.",
+        "Save durable facts that persist across sessions \u2014 when the user corrects you, shares a preference, or you learn a convention. A quirk is agency (e.g. a model that does not exist) unless you have evidence it is environment (a quota, a timeout) \u2014 no evidence means agency. Do NOT save task progress or TODOs (belongs in skills). Write declarative facts, not instructions to yourself.",
       parameters: {
         type: "object",
         properties: {
@@ -166,7 +166,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Skills are procedural memory. create one for a complex task (5+ steps) or a reusable workflow; update a stale one; delete removes one (home only). Use scope='project' for a project-specific skill.",
+        "Skills are procedural memory. create one for a complex task (5+ steps) or a reusable workflow. Before skilling a workaround, check agency (e.g. a model that does not exist — fix it, do not skill it) vs environment (a quota, a timeout) — no evidence means agency. update a stale one; delete removes one (home only). Use scope='project' for a project-specific skill.",
       parameters: {
         type: "object",
         properties: {
@@ -201,7 +201,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Search your other sessions (not this one, not the web) at zero token cost. mode='discovery' full-text searches all messages (FTS5 syntax: AND default, OR, NOT, \"phrases\", prefix*); mode='browse' lists recent sessions; mode='read' returns a whole session by id.",
+        "Search your other sessions (not this one, not the web) at zero token cost. mode='discovery' full-text searches all messages (FTS5 syntax: AND default, OR, NOT, \"phrases\", prefix*); 'browse' lists recent sessions; 'read' returns a whole session by id.",
       parameters: {
         type: "object",
         properties: {
@@ -231,7 +231,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Delegate self-contained subtasks to fresh, isolated subagents and wait for results \u2014 no knowledge of this conversation, so each task string must be self-contained. Each result carries 'sub_id' (continue with 'resume_id'), 'error_kind' (null, or 'dead_turn' if no text/tool call), and usage.",
+        "Delegate self-contained subtasks to fresh, isolated subagents and wait for results \u2014 no knowledge of this conversation, so each task string must stand alone. Each result carries 'sub_id' (continue with 'resume_id'), 'error_kind' (null, or 'dead_turn' if no text/tool call), and usage.",
       parameters: {
         type: "object",
         properties: {
@@ -277,7 +277,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Schedule prompts as autonomous agent turns \u2014 recurring or one-off automated work. 'interval'=minutes; 'once'=epoch timestamp; 'cron'=5-field expr. Each run is isolated \u2014 write a self-contained prompt.",
+        "Schedule prompts as autonomous agent turns \u2014 recurring or one-off. 'interval'=minutes; 'once'=epoch timestamp; 'cron'=5-field expr. Each run is isolated \u2014 write a self-contained prompt.",
       parameters: {
         type: "object",
         properties: {
@@ -314,7 +314,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Analyze an image and return a text description. Pass a local 'path' or a remote 'url', and an optional 'prompt' for what to look for. Use for screenshots, diagrams, or photos the conversation refers to.",
+        "Analyze an image and return a text description. Pass a local 'path' or a remote 'url', plus an optional 'prompt' for what to look for.",
       parameters: {
         type: "object",
         properties: {
@@ -339,7 +339,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Generate images from a text 'prompt' and save to disk; returns file paths. Optional 'size' and 'n' (1-10). Use for illustrations, mockups, or diagrams the user asks for.",
+        "Generate images from a text 'prompt' and save to disk; returns file paths. Optional 'size' and 'n' (1-10).",
       parameters: {
         type: "object",
         properties: {
@@ -366,7 +366,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Start a parallel sub-session (fresh, isolated agent) on a self-contained task without blocking you. Returns a 'sub_id' immediately. Use 'steer_session' to add instructions, 'collect_session' to read the result.",
+        "Start a parallel sub-session (fresh, isolated agent) on a self-contained task without blocking you. Returns a 'sub_id' — use 'steer_session' to add instructions, 'collect_session' to read the result.",
       parameters: {
         type: "object",
         properties: {
@@ -402,7 +402,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Inject an extra instruction into a running sub-session by 'sub_id'. Queued before the next step if busy; a new turn if idle. A call genuinely in flight is interrupted — the 'interrupted' flag reports this.",
+        "Inject an extra instruction into a running sub-session by 'sub_id'. Queued before the next step if busy, a new turn if idle. A call in flight is interrupted — see the 'interrupted' flag.",
       parameters: {
         type: "object",
         properties: {
@@ -424,7 +424,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Read a sub-session's status and output by its 'sub_id'. Set 'wait' true to block until its current turn finishes, or false to poll.",
+        "Read a sub-session's status and output by its 'sub_id'. 'wait' true blocks until the current turn finishes; false polls.",
       parameters: {
         type: "object",
         properties: {
@@ -516,7 +516,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "List the workflow runs this session knows (newest first): id, name, status, progress, tokens spent/budget. Find a run whose id you lost, or see what's in flight before starting another.",
+        "List the workflow runs this session knows (newest first): id, name, status, progress, tokens spent/budget. Find a lost run id, or see what is in flight.",
       parameters: {
         type: "object",
         properties: {},
@@ -528,7 +528,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Pause a running workflow \u2014 the resumable stop. Leaves in flight finish and are charged; finished nodes are kept. Continue with run_workflow(resume_run_id=...).",
+        "Pause a running workflow \u2014 the resumable stop. Leaves in flight finish and are charged; finished nodes are kept. Resume with run_workflow(resume_run_id=...).",
       parameters: {
         type: "object",
         properties: {
@@ -545,7 +545,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Cancel a running workflow — waits for every in-flight leaf to stop, so 'cancelled' means nothing is spending tokens. A leaf past that ceiling returns 'cancelling'; call again or poll workflow_status.",
+        "Cancel a running workflow — waits for every leaf to stop, so 'cancelled' means nothing spends tokens. A leaf past that ceiling returns 'cancelling'; call again or poll workflow_status.",
       parameters: {
         type: "object",
         properties: {
@@ -562,7 +562,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "List validated workflow templates, or fetch one by 'name' for its full spec. Prefer adapting one over authoring fresh. 'ref' is the filename without extension — the same 'ref' a 'workflow' node resolves through.",
+        "List validated workflow templates, or fetch one by 'name' for its full spec. Prefer adapting one over authoring fresh. 'ref' is the filename without extension.",
       parameters: {
         type: "object",
         properties: {
@@ -632,7 +632,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "List durable operator notices (workflow faults, sink refusals, stale fence writes), so one a killed process left behind is still visible. Unacknowledged by default; include_acked also returns handled ones. Omit run_id for every scope; give it to scope to one run.",
+        "List durable operator notices (workflow faults, sink refusals, stale fence writes), so one a killed process left behind is still visible. Unacknowledged by default; include_acked also returns handled ones. Omit run_id for every scope.",
       parameters: {
         type: "object",
         properties: {
@@ -663,7 +663,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Acknowledge one durable operator notice by its id (from workflow_notices) — stops showing up unless include_acked is set. An unknown or already-acked id is not an error: reports acked:false.",
+        "Acknowledge one durable operator notice by its id (from workflow_notices) — stops showing up unless include_acked is set. An unknown or already-acked id reports acked:false, not an error.",
       parameters: {
         type: "object",
         properties: {
@@ -681,7 +681,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "List models reachable right now, per configured provider, plus local Ollama and the subscription model when enabled. Also returns the operator's tier map \u2014 prefer a TIER over a hard-coded slug. Spends no tokens, but writes each live fetch into ~/.lohra/context-windows.json.",
+        "List models reachable now, per configured provider, plus local Ollama and the subscription model when enabled. Also returns the operator's tier map \u2014 prefer a TIER over a hard-coded slug. Spends no tokens, but writes each live fetch to ~/.lohra/context-windows.json.",
       parameters: {
         type: "object",
         properties: {
@@ -707,7 +707,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Read the turns a still-running leaf has committed (the in-flight turn is excluded). Unlike workflow_audit, NOT metadata-only: a 'tool' turn's content is the raw output the leaf saw. sub_id must belong to run_id. content is capped by max_chars (default 4096, max 32768).",
+        "Read the turns a still-running leaf has committed (in-flight turn excluded). Unlike workflow_audit, NOT metadata-only: a 'tool' turn's content is the raw output the leaf saw. sub_id must belong to run_id. Capped by max_chars (default 4096, max 32768).",
       parameters: {
         type: "object",
         properties: {
@@ -767,7 +767,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Dry-run a resume of a workflow run — no token spent, nothing written or consumed — reporting per node 'replay' or 'recompute', plus totals (cells_replayed, tokens_saved, leaves_to_spawn). 'route' prices a hypothetical pivot without applying it. Call BEFORE run_workflow(resume_run_id=..., route=...).",
+        "Dry-run a resume of a workflow run — no token spent, nothing written — reporting per node 'replay'/'recompute', plus totals (cells_replayed, tokens_saved, leaves_to_spawn). 'route' prices a hypothetical pivot without applying it. Call BEFORE run_workflow(resume_run_id=..., route=...).",
       parameters: {
         type: "object",
         properties: {
