@@ -1,0 +1,14 @@
+{
+  "code": 0,
+  "signal": null,
+  "elapsed_ms": 194,
+  "args": [
+    "chat",
+    "--provider",
+    "openai",
+    "--model",
+    "m12-parent",
+    "--json",
+    "{\"kind\":\"resume\",\"run_id\":\"70b50482b00f4749ad454bafb477d4fb\"}"
+  ]
+}

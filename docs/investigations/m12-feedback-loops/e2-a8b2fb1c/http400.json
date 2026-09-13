@@ -1,0 +1,50 @@
+{
+  "session_id": "<redacted>",
+  "model": "m12-parent",
+  "temperature": null,
+  "input": "{\"kind\":\"start\",\"name\":\"m12-http400\",\"model\":\"m12-400\"}",
+  "output": "{\"run\":{\"ok\":true,\"run_id\":\"06987b455f724c548d02f88aeb50087c\",\"name\":\"m12-http400\",\"status\":\"failed\",\"outputs\":{\"probe\":null},\"faults\":[\"probe: leaf failed (unknown): Error code: 400 - {\\\"detail\\\":\\\"The 'lohra-m12-modelo-inexistente' model is not supported when using Codex with a ChatGPT account.\\\"}\"],\"null_count\":1,\"leaf_respawns\":0,\"validation_retries\":0,\"cap_trips\":0,\"engine_faults\":0,\"nodes_total\":1,\"tokens_in\":0,\"tokens_out\":0,\"cache_read_tokens\":0,\"cache_write_tokens\":0,\"reasoning_tokens\":0,\"forcing_fallbacks\":0,\"pause_reason\":null,\"checkpoint\":null,\"token_budget\":null,\"null_rate\":1,\"usage_uncertain_leaves\":1,\"partial_leaves\":0,\"sandbox_refusals\":0,\"fault_kinds\":[\"unknown\"],\"live_tail\":{\"events\":[],\"next_cursor\":4,\"dropped\":0}},\"notices\":{\"ok\":true,\"notices\":[],\"next_after_seq\":0,\"has_more\":false,\"refused_writes\":0,\"integrity\":{\"refused_writes\":0}}}",
+  "reasoning": null,
+  "tool_calls": [
+    {
+      "id": "call-1",
+      "name": "run_workflow",
+      "arguments": "{\"spec\":{\"meta\":{\"name\":\"m12-http400\"},\"nodes\":[{\"id\":\"probe\",\"type\":\"agent\",\"model\":\"m12-400\",\"prompt\":\"M12_CHILD_PROBE\"}]}}",
+      "result": "{\"ok\":true,\"run_id\":\"06987b455f724c548d02f88aeb50087c\",\"status\":\"started\"}"
+    },
+    {
+      "id": "call-3",
+      "name": "workflow_status",
+      "arguments": "{\"run_id\":\"06987b455f724c548d02f88aeb50087c\",\"wait\":true}",
+      "result": "{\"ok\":true,\"run_id\":\"06987b455f724c548d02f88aeb50087c\",\"name\":\"m12-http400\",\"status\":\"failed\",\"outputs\":{\"probe\":null},\"faults\":[\"probe: leaf failed (unknown): Error code: 400 - {\\\"detail\\\":\\\"The 'lohra-m12-modelo-inexistente' model is not supported when using Codex with a ChatGPT account.\\\"}\"],\"null_count\":1,\"leaf_respawns\":0,\"validation_retries\":0,\"cap_trips\":0,\"engine_faults\":0,\"nodes_total\":1,\"tokens_in\":0,\"tokens_out\":0,\"cache_read_tokens\":0,\"cache_write_tokens\":0,\"reasoning_tokens\":0,\"forcing_fallbacks\":0,\"pause_reason\":null,\"checkpoint\":null,\"token_budget\":null,\"null_rate\":1,\"usage_uncertain_leaves\":1,\"partial_leaves\":0,\"sandbox_refusals\":0,\"fault_kinds\":[\"unknown\"],\"live_tail\":{\"events\":[],\"next_cursor\":4,\"dropped\":0}}"
+    },
+    {
+      "id": "call-5",
+      "name": "workflow_notices",
+      "arguments": "{\"run_id\":\"06987b455f724c548d02f88aeb50087c\",\"include_acked\":true}",
+      "result": "{\"ok\":true,\"notices\":[],\"next_after_seq\":0,\"has_more\":false,\"refused_writes\":0,\"integrity\":{\"refused_writes\":0}}"
+    }
+  ],
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5
+  },
+  "usage_total": {
+    "input_tokens": 40,
+    "output_tokens": 20
+  },
+  "cost": null,
+  "stop_reason": "stop",
+  "completed": true,
+  "error": null,
+  "api_calls": 4,
+  "session": {
+    "input_tokens": 40,
+    "output_tokens": 20,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+    "reasoning_tokens": 0,
+    "api_call_count": 4,
+    "priced_call_count": 0
+  }
+}

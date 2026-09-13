@@ -1,0 +1,50 @@
+{
+  "session_id": "<redacted>",
+  "model": "m12-parent",
+  "temperature": null,
+  "input": "{\"kind\":\"resume\",\"run_id\":\"70b50482b00f4749ad454bafb477d4fb\"}",
+  "output": "{\"run\":{\"ok\":true,\"run_id\":\"70b50482b00f4749ad454bafb477d4fb\",\"name\":\"m12-http404\",\"status\":\"complete\",\"outputs\":{\"probe\":\"M12_CHILD_OK\"},\"faults\":[],\"null_count\":0,\"leaf_respawns\":0,\"validation_retries\":0,\"cap_trips\":0,\"engine_faults\":0,\"nodes_total\":1,\"tokens_in\":10,\"tokens_out\":5,\"cache_read_tokens\":0,\"cache_write_tokens\":0,\"reasoning_tokens\":0,\"forcing_fallbacks\":0,\"pause_reason\":null,\"checkpoint\":null,\"token_budget\":null,\"null_rate\":0,\"usage_uncertain_leaves\":0,\"partial_leaves\":0,\"sandbox_refusals\":0,\"fault_kinds\":[],\"pivots\":[{\"model\":\"m12-good\",\"channel\":\"operator\"}],\"live_tail\":{\"events\":[],\"next_cursor\":3,\"dropped\":0}},\"notices\":{\"ok\":true,\"notices\":[{\"id\":1,\"scope\":\"run:70b50482b00f4749ad454bafb477d4fb\",\"seq\":1,\"kind\":\"model_not_found\",\"message\":\"probe: route fault (model_not_found) — provider=openai model=m12-404; resume with run_workflow(resume_run_id=..., route={...}) once you pick a different one; suggested=none\",\"created_at\":1789317839,\"acked_at\":0,\"acked_by\":\"cli\",\"fence\":1}],\"next_after_seq\":1,\"has_more\":false,\"refused_writes\":0,\"integrity\":{\"refused_writes\":0}}}",
+  "reasoning": null,
+  "tool_calls": [
+    {
+      "id": "call-22",
+      "name": "run_workflow",
+      "arguments": "{\"resume_run_id\":\"70b50482b00f4749ad454bafb477d4fb\",\"route\":{\"model\":\"m12-good\"}}",
+      "result": "{\"ok\":true,\"run_id\":\"70b50482b00f4749ad454bafb477d4fb\",\"status\":\"started\"}"
+    },
+    {
+      "id": "call-25",
+      "name": "workflow_status",
+      "arguments": "{\"run_id\":\"70b50482b00f4749ad454bafb477d4fb\",\"wait\":true}",
+      "result": "{\"ok\":true,\"run_id\":\"70b50482b00f4749ad454bafb477d4fb\",\"name\":\"m12-http404\",\"status\":\"complete\",\"outputs\":{\"probe\":\"M12_CHILD_OK\"},\"faults\":[],\"null_count\":0,\"leaf_respawns\":0,\"validation_retries\":0,\"cap_trips\":0,\"engine_faults\":0,\"nodes_total\":1,\"tokens_in\":10,\"tokens_out\":5,\"cache_read_tokens\":0,\"cache_write_tokens\":0,\"reasoning_tokens\":0,\"forcing_fallbacks\":0,\"pause_reason\":null,\"checkpoint\":null,\"token_budget\":null,\"null_rate\":0,\"usage_uncertain_leaves\":0,\"partial_leaves\":0,\"sandbox_refusals\":0,\"fault_kinds\":[],\"pivots\":[{\"model\":\"m12-good\",\"channel\":\"operator\"}],\"live_tail\":{\"events\":[],\"next_cursor\":3,\"dropped\":0}}"
+    },
+    {
+      "id": "call-27",
+      "name": "workflow_notices",
+      "arguments": "{\"run_id\":\"70b50482b00f4749ad454bafb477d4fb\",\"include_acked\":true}",
+      "result": "{\"ok\":true,\"notices\":[{\"id\":1,\"scope\":\"run:70b50482b00f4749ad454bafb477d4fb\",\"seq\":1,\"kind\":\"model_not_found\",\"message\":\"probe: route fault (model_not_found) — provider=openai model=m12-404; resume with run_workflow(resume_run_id=..., route={...}) once you pick a different one; suggested=none\",\"created_at\":1789317839,\"acked_at\":0,\"acked_by\":\"cli\",\"fence\":1}],\"next_after_seq\":1,\"has_more\":false,\"refused_writes\":0,\"integrity\":{\"refused_writes\":0}}"
+    }
+  ],
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5
+  },
+  "usage_total": {
+    "input_tokens": 40,
+    "output_tokens": 20
+  },
+  "cost": null,
+  "stop_reason": "stop",
+  "completed": true,
+  "error": null,
+  "api_calls": 4,
+  "session": {
+    "input_tokens": 40,
+    "output_tokens": 20,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+    "reasoning_tokens": 0,
+    "api_call_count": 4,
+    "priced_call_count": 0
+  }
+}
