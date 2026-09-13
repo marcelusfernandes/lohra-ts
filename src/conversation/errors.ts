@@ -75,12 +75,50 @@ export class ConversationCancelledError extends ConversationError {
    * `context/token-estimate.ts`), never a real measurement. `null` for a
    * pre-issuance cancellation (the call was never made) and for an abort
    * that consumed the signal without going through `StreamAbortedError`
-   * (no partial to estimate from). */
+   * (no partial to estimate from). Issue #568 (r2, veredito da PR #573):
+   * kept to EXACTLY this one call's own estimate, deliberately never
+   * combined with `measuredUsage` below — `child-runner.ts` derives
+   * `partial`/`partial_leaves` from `partialUsage !== null` alone
+   * (`core.ts`/`workflow/runtime.ts`/`builtin-definitions.ts`: a leaf only
+   * counts as partial when its usage includes an ESTIMATED portion), so
+   * merging real measurement in here would silently mark a leaf partial
+   * with zero tokens ever estimated. */
   public readonly partialUsage: Usage | null;
+  /** Issue #568 (r2, veredito da PR #573): the turn's usage (`usageTotal`,
+   * `runtime.ts`) accumulated BEFORE the one call this error is about got
+   * torn down — real, provider-measured usage from every earlier iteration
+   * of a multi-iteration turn (a tool-call/pause loop) that completed
+   * normally, EXCEPT that a steer-driven interrupt absorbed mid-turn
+   * (#520) also folds its own ESTIMATE into this same `usageTotal` before
+   * this cancel ever throws (`runtime.ts:555-561`, `estimatePartialUsage`)
+   * — so this field is not exhaustively "real measurement" the moment a
+   * turn mixes both triggers. `partial` still derives from `partialUsage`
+   * alone (see that field's own doc), never from whether THIS field
+   * happens to include an estimated portion — carrying
+   * `ConversationTurnResult.partialCalls` through this error too, to tell
+   * the two apart downstream, is out of #568's scope (steer interaction
+   * with cancel is a sibling concern, not this issue's).
+   *
+   * `null` in exactly two cases, never zero-filled (same "never measured"
+   * convention `partialUsage`/`usageUncertain` already use): a
+   * PRE-ISSUANCE cancel (the signal was already aborted before this call's
+   * own request was ever built, `runtime.ts:440`/`:476`) — constructed
+   * with no `measuredUsage` option at all, REGARDLESS of whatever
+   * `usageTotal` an earlier iteration of the SAME turn may already carry;
+   * or a turn where no earlier iteration (real or steer-estimated) ever
+   * measured any usage at all. A SEPARATE field from `partialUsage` on
+   * purpose (see that field's own doc): `child-runner.ts` is the one
+   * reader, and combines the two into the leaf's reported `usage` while
+   * still deriving `partial` from `partialUsage` alone. */
+  public readonly measuredUsage: Usage | null;
   public constructor(
     sessionId: string,
     cause?: unknown,
-    options: { readonly partialUsage?: Usage | null; readonly apiCalls?: number } = {},
+    options: {
+      readonly partialUsage?: Usage | null;
+      readonly measuredUsage?: Usage | null;
+      readonly apiCalls?: number;
+    } = {},
   ) {
     super("CONVERSATION_CANCELLED", "conversation cancelled", {
       sessionId,
@@ -88,6 +126,7 @@ export class ConversationCancelledError extends ConversationError {
       apiCalls: options.apiCalls ?? 0,
     });
     this.partialUsage = options.partialUsage ?? null;
+    this.measuredUsage = options.measuredUsage ?? null;
   }
 }
 

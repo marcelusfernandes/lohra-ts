@@ -19,6 +19,14 @@
 // flush do `close()` (T3, veredito da PR #385). Dois itens dessa mesma
 // emenda (settle tardio, `pending.count` por `sub_id`) são só teste — sem
 // mutante novo, pinados em `tests/workflow-audit-tool-cancel.test.ts`.
+//
+// Issue #568 (4 mutantes, 27 → 31): o teto de `OrchestrationChildRuntime.cancel`
+// (`orchestration-runtime.ts`, C1/C2) e o filtro/`catch` de
+// `probeSettledAfterCancel` (`audit-runtime.ts`, C3/C4) não tinham mutante
+// nenhum — vereditos das PRs #528/#543, r2 de #556. Entram aqui, não em
+// `supervision-mutants.ts` (issue #451), porque esse catálogo já está no
+// teto de 800 linhas (`docs/mutation-testing.md`); `srcGlobs` da fatia
+// `workflow-audit-live` (`src/workflow/**`) já cobre os dois arquivos.
 import type { Mutant } from "./types.js";
 
 const auditProducers = "src/workflow/audit-producers.ts";
@@ -29,6 +37,7 @@ const auditModel = "src/workflow/audit-model.ts";
 const workflowCommand = "src/commands/workflow.ts";
 const workflowTool = "src/workflow/tool.ts";
 const chatCommand = "src/commands/chat.ts";
+const orchestrationRuntime = "src/workflow/orchestration-runtime.ts";
 
 const identityFocus = "tests/workflow-audit-identity.test.ts";
 const segmentFocus = "tests/workflow-audit-segment.test.ts";
@@ -39,6 +48,8 @@ const liveTailFocus = "tests/workflow-live-tail.test.ts";
 const watchEventsFocus = "tests/workflow-watch-events.test.ts";
 const allowListFocus = "tests/workflow-audit-allow-list.test.ts";
 const chatAuditWiringFocus = "tests/chat-audit-trail-wiring.test.ts";
+const orchestrationRuntimeCollectFocus = "tests/orchestration-runtime-collect.test.ts";
+const abortInFlightLeafFocus = "tests/workflow-abort-in-flight.test.ts";
 
 export const auditProducersMutants: readonly Mutant[] = [
   {
@@ -516,6 +527,78 @@ export const auditProducersMutants: readonly Mutant[] = [
         before:
           '      status: "cancelled",\n      error_kind: "cancelled",\n      ...(reason === undefined ? {} : { reason }),',
         after: '      status: "cancelled",\n      ...(reason === undefined ? {} : { reason }),',
+      },
+    ],
+  },
+  // --- teto de cancel() e sonda pós-cancel (M16 pós-revisão, issue #568) --
+  // Issue #568 (vereditos das PRs #528/#543, r2 de #556): nem o teto de
+  // `cancel()` nem a sonda que o segue tinham mutante — `supervision-mutants.ts`
+  // já está no teto de 800 linhas (`docs/mutation-testing.md`), por isso os
+  // quatro entram aqui; `srcGlobs` da fatia `workflow-audit-live` já cobre
+  // `src/workflow/**`.
+  {
+    id: "C1-cancel-ceiling-race-removed",
+    category: "cancel-ceiling-race-removed",
+    mechanism: "family-a",
+    focus: {
+      file: orchestrationRuntimeCollectFocus,
+      test: "resolves at the ceiling for a leaf that never settles, aborting core.cancel exactly once",
+    },
+    edits: [
+      {
+        file: orchestrationRuntime,
+        before: "      await Promise.race([this.core.collect(id, true), ceiling.promise]);",
+        after: "      await this.core.collect(id, true);",
+      },
+    ],
+  },
+  {
+    id: "C2-cancel-ceiling-timer-leaks",
+    category: "cancel-ceiling-timer-leaks",
+    mechanism: "family-a",
+    focus: {
+      file: orchestrationRuntimeCollectFocus,
+      test: "clears its ceiling timer once the leaf settles well under it, leaving nothing pending",
+    },
+    edits: [
+      {
+        file: orchestrationRuntime,
+        before:
+          "      // settles well under the ceiling) never leaves a live timer behind.\n      ceiling.clear();",
+        after: "      // settles well under the ceiling) never leaves a live timer behind.",
+      },
+    ],
+  },
+  {
+    id: "C3-probe-error-swallowed-silently",
+    category: "probe-error-swallowed-silently",
+    mechanism: "family-a",
+    focus: {
+      file: abortInFlightLeafFocus,
+      test: "a probe that throws is named via warn, fail-closed, never swallowed — cancel() still resolves with the bare placeholder",
+    },
+    edits: [
+      {
+        file: auditRuntime,
+        before:
+          '  } catch (error) {\n    const detail = error instanceof Error ? error.message : String(error);\n    warn(\n      `workflow: post-cancel settle probe for leaf ${id} failed (${detail}) — fail-closed, cancel() proceeds with the bare {status:"cancelled"} placeholder`,\n    );\n    return null;\n  }',
+        after: "  } catch {\n    return null;\n  }",
+      },
+    ],
+  },
+  {
+    id: "C4-probe-running-filter-dropped",
+    category: "probe-running-filter-dropped",
+    mechanism: "family-a",
+    focus: {
+      file: abortInFlightLeafFocus,
+      test: "a probe that finds the leaf still running (ceiling elapsed before the poll) is filtered out — never reported as a settled result",
+    },
+    edits: [
+      {
+        file: auditRuntime,
+        before: '    return result.status === "running" ? null : result;',
+        after: "    return result;",
       },
     ],
   },

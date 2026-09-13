@@ -206,14 +206,18 @@ export function estimateRequestTokens(input: RequestTokenEstimateInput): TokenEs
  *
  * `inputTokens` prefers `partial.usage.inputTokens` when the transport
  * measured it (today only Anthropic's `message_start`, `PartialStream`'s own
- * contract) — but `anthropicPartialUsage` (transports/errors.ts) returns a
- * `Usage` with `inputTokens: 0` whenever `message_start` arrived with no
- * `usage` field at all, which is indistinguishable here from "the call
- * genuinely cost zero input tokens" (never true for a real request: the
- * system prompt alone is never free). Treated as NOT measured, exactly like
- * `partial.usage === null` — falls back to the conservative `request`
- * estimate rather than under-counting to zero, keeping this function's own
- * "never underestimates" contract from the module doc above.
+ * contract) — but `anthropicPartialUsage` (transports/errors.ts) returns
+ * `null` outright whenever `message_start` arrived with no `usage` field at
+ * all (issue #568: it used to return a `Usage` with `inputTokens: 0`,
+ * indistinguishable here from "the call genuinely cost zero input tokens" —
+ * never true for a real request, the system prompt alone is never free;
+ * `anthropicPartialUsage` itself was changed to return `null` for exactly
+ * this reason). Either that `null`, or a present `usage` object whose own
+ * `input_tokens` field is absent/non-numeric (`toNumber` in
+ * `transports/errors.ts` folds that to `0`), is treated as NOT measured
+ * here — falls back to the conservative `request` estimate rather than
+ * under-counting to zero, keeping this function's own "never underestimates"
+ * contract from the module doc above.
  *
  * Always paired by the caller with `partial: true` and `usageUncertain:
  * true` (conversation/runtime.ts, orchestration/child-runner.ts) — an

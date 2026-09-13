@@ -52,7 +52,9 @@
       "tests/workflow-live-tail.test.ts",
       "tests/workflow-watch-events.test.ts",
       "tests/workflow-audit-allow-list.test.ts",
-      "tests/chat-audit-trail-wiring.test.ts"
+      "tests/chat-audit-trail-wiring.test.ts",
+      "tests/orchestration-runtime-collect.test.ts",
+      "tests/workflow-abort-in-flight.test.ts"
     ]
   },
   {

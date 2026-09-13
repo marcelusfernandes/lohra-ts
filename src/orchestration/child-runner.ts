@@ -65,18 +65,46 @@ function buildTransport(client: ClosableClient, streaming: boolean): ModelTransp
   return new ChatCompletionsModel(client as ChatCompletionsClient, streaming);
 }
 
+/** Structural twin of `Usage` (`transports/types.ts`) — `zeroResult`'s own
+ * parameter shape since before this issue; named here so `combineUsage`
+ * below shares the exact same type instead of a second copy of the
+ * literal. */
+type LeafUsage = {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+  readonly reasoningTokens: number;
+} | null;
+
+/** Issue #568 (r2, veredito da PR #573): sums two usage readings —
+ * `ConversationCancelledError.measuredUsage` (the turn's earlier completed
+ * iterations; real, except one absorbed by a steer-driven interrupt folds
+ * in its OWN estimate too — see that field's own doc, `errors.ts`) and
+ * `.partialUsage` (this one call's own estimate, the call that got
+ * aborted) — into the single figure `zeroResult` reports as the leaf's own
+ * `usage`. A `null` side is a no-op (never zero-filled): `null, null`
+ * stays `null` (nothing measured at all, the plain #232 gap), and either
+ * side alone passes through unchanged (the common case — only one of the
+ * two is ever non-null outside a multi-iteration cancel). */
+function combineUsage(a: LeafUsage, b: LeafUsage): LeafUsage {
+  if (a === null) return b;
+  if (b === null) return a;
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
+    cacheWriteTokens: a.cacheWriteTokens + b.cacheWriteTokens,
+    reasoningTokens: a.reasoningTokens + b.reasoningTokens,
+  };
+}
+
 function zeroResult(
   status: CollectResult["status"],
   output: string,
   profile: ProviderProfile,
   model: string,
-  usage: {
-    readonly inputTokens: number;
-    readonly outputTokens: number;
-    readonly cacheReadTokens: number;
-    readonly cacheWriteTokens: number;
-    readonly reasoningTokens: number;
-  } | null,
+  usage: LeafUsage,
   errorKind: ErrorKind | null,
   retryAfter: number | null,
 ): CollectResult {
@@ -236,17 +264,37 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
           : completeResult;
       } catch (error) {
         if (error instanceof ConversationCancelledError) {
-          // #518 (M16-S3, ADR 0005): a cancellation that caught a call
-          // aborted IN FLIGHT carries an estimated `partialUsage` (never a
-          // real measurement, hence the forced `usageUncertain: true` below
-          // regardless of what zeroResult's own null-check would have
-          // computed) — `partial` names that distinction for
-          // `RunResult.partialLeaves`/`leaf.failed` (#517) to pick up.
-          // `partialUsage === null` (pre-issuance cancel, or an abort that
-          // never went through StreamAbortedError) stays the plain #232
-          // "never measured" gap this already was before this issue.
+          // #518 (M16-S3, ADR 0005) + #568 (r2, veredito da PR #573): the
+          // leaf's reported `usage` is the SUM of whatever usage the
+          // turn's earlier iterations already accumulated
+          // (`error.measuredUsage` — real, EXCEPT a steer-absorbed
+          // iteration folds in its own estimate too, see that field's own
+          // doc, `errors.ts`) and this call's own ESTIMATE
+          // (`error.partialUsage`) — `combineUsage` above, never merged
+          // upstream. `usageUncertain` is forced `true` regardless of what
+          // `zeroResult`'s own null-check would have computed: even a
+          // fully-real `measuredUsage` with no estimate at all is still
+          // "as of the cancel", never a final, provider-confirmed total
+          // the way a COMPLETED turn's usage is.
+          //
+          // `partial` stays derived from `partialUsage !== null` ALONE —
+          // never from the combined `usage` — matching
+          // `RunResult.partialLeaves`'s contract (`core.ts`,
+          // `workflow/runtime.ts`, `builtin-definitions.ts`: a leaf counts
+          // as partial only when its usage includes an ESTIMATED portion).
+          // A cancel via `isAbortOf`'s 2nd/3rd form (no `StreamAbortedError`
+          // to estimate from) after an earlier iteration already completed
+          // for real reports that real `measuredUsage` as `usage`, but is
+          // NOT partial — `partialUsage` itself has nothing estimated
+          // (whether `measuredUsage` does, from an EARLIER steer-absorbed
+          // iteration, is #520's own concern, out of #568's scope).
+          // `partialUsage === null` and `measuredUsage === null` together
+          // (pre-issuance cancel, or a single-call turn aborted by a
+          // non-StreamAbortedError form) stays the plain #232 "never
+          // measured" gap this already was before #568.
+          const usage = combineUsage(error.measuredUsage, error.partialUsage);
           return {
-            ...zeroResult("interrupted", "", profile, model, error.partialUsage, "cancelled", null),
+            ...zeroResult("interrupted", "", profile, model, usage, "cancelled", null),
             usageUncertain: true,
             partial: error.partialUsage !== null,
           };

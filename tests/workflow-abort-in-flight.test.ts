@@ -13,7 +13,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ClientPool } from "../src/agent/client-pool.js";
 import { getProviderProfile } from "../src/providers/index.js";
@@ -37,6 +37,7 @@ import { OrchestrationCore } from "../src/orchestration/core.js";
 import { AuditTrail } from "../src/workflow/audit-trail.js";
 import { auditedRuntimeFor } from "../src/workflow/audit-runtime.js";
 import { OrchestrationChildRuntime } from "../src/workflow/orchestration-runtime.js";
+import type { CausalContext } from "../src/workflow/runtime.js";
 import { WorkflowService, type OwnershipStore } from "../src/workflow/service.js";
 
 const encoder = new TextEncoder();
@@ -310,11 +311,149 @@ describe("AuditedChildRuntime.cancel — real OrchestrationChildRuntime probe (i
       expect(terminal[0]?.data).toMatchObject({
         status: "cancelled",
         error_kind: "cancelled",
+        // Issue #568: `cancel()` is the ONLY caller that ever names
+        // `reason: "cancelled"` (`failedPayload(settled, "cancelled")`,
+        // audit-runtime.ts) — pinned here, in the race between the sonda
+        // (this probe) and the leaf's own settlement, so a regression that
+        // drops the reason argument at that one call site (e.g.
+        // `failedPayload(settled)`) is caught.
+        reason: "cancelled",
         partial: true,
         usage_uncertain: true,
       });
       const usage = terminal[0]?.data.usage as { tokens_out: number } | undefined;
       expect(usage?.tokens_out).toBeGreaterThan(0);
+    } finally {
+      connection.close();
+    }
+  });
+});
+
+// Issue #568: `probeSettledAfterCancel` (audit-runtime.ts) — the sonda
+// `AuditedChildRuntime.cancel` runs right after `inner.cancel` resolves —
+// used to swallow any thrown error with a bare `catch {}`, and its
+// `result.status === "running"` filter (the ceiling-elapsed-before-the-poll
+// case) had no dedicated test with a REAL `OrchestrationChildRuntime`
+// driving it. Both use a lean `OrchestrationCore` (no HTTP port needed —
+// `probeSettledAfterCancel` only cares about `collect()`'s own outcome),
+// same construction as `tests/workflow-orchestration-runtime-timeout.test.ts`.
+describe("AuditedChildRuntime.cancel — probeSettledAfterCancel fail-closed (issue #568)", () => {
+  function leanCore(
+    runChild: import("../src/orchestration/core.js").ChildRunner,
+  ): OrchestrationCore {
+    let n = 0;
+    return new OrchestrationCore({
+      runChild,
+      idSource: () => {
+        n += 1;
+        return `leaf-${String(n)}`;
+      },
+      maxSubsessions: 10,
+      maxParallel: 4,
+      buildSubagentPrompt: () => "SYS",
+    });
+  }
+
+  function leanCausal(runId: string): CausalContext {
+    return Object.freeze({
+      runId,
+      segmentId: "seg-1",
+      nodePath: Object.freeze(["a"]),
+      cellId: "a:0",
+      role: "leaf" as const,
+      attempt: 0,
+      turn: 0,
+    });
+  }
+
+  const doneResult = {
+    status: "complete" as const,
+    output: "done",
+    tokensIn: 1,
+    tokensOut: 1,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    reasoningTokens: 0,
+    provider: "test",
+    model: "test-model",
+    errorKind: null,
+    retryAfter: null,
+  };
+
+  it("a probe that throws is named via warn, fail-closed, never swallowed — cancel() still resolves with the bare placeholder", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-abort-in-flight-probe-error-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      const core = leanCore(() => Promise.resolve(doneResult));
+      const runtime = new OrchestrationChildRuntime(core);
+      // The probe (`inner.collect`) throws exactly once — `inner.cancel`'s
+      // OWN race (`this.core.collect`, a different, private call) is
+      // unaffected, so the leaf still settles for real before this fires.
+      vi.spyOn(runtime, "collect").mockRejectedValueOnce(new Error("probe boom"));
+      const audit = new AuditRepository(connection.database);
+      const trail = new AuditTrail(audit);
+      const warnings: string[] = [];
+      const decorated = auditedRuntimeFor(
+        runtime,
+        trail,
+        () => null,
+        false,
+        (message) => {
+          warnings.push(message);
+        },
+      );
+      const id = await decorated.spawn({
+        prompt: "one",
+        causalContext: leanCausal("run-probe-error"),
+      });
+      await decorated.cancel(id);
+      await trail.flush();
+      const page = audit.query({ runId: "run-probe-error", limit: 50 });
+      const terminal = page.events.filter((event) => event.event_type === "leaf.failed");
+      expect(terminal).toHaveLength(1);
+      expect(terminal[0]?.data).toMatchObject({ status: "cancelled", error_kind: "cancelled" });
+      expect(terminal[0]?.data).not.toHaveProperty("partial");
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("probe boom");
+      expect(warnings[0]).toContain(id);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("a probe that finds the leaf still running (ceiling elapsed before the poll) is filtered out — never reported as a settled result", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-abort-in-flight-probe-running-"));
+    roots.push(root);
+    const connection = openStateDatabase(join(root, "state.db"));
+    try {
+      // Never resolves: the leaf's own settle ceiling elapses before the
+      // probe's own collect(wait:false) ever finds a real result.
+      const core = leanCore(() => new Promise(() => undefined));
+      const runtime = new OrchestrationChildRuntime(core);
+      const audit = new AuditRepository(connection.database);
+      const trail = new AuditTrail(audit);
+      const decorated = auditedRuntimeFor(
+        runtime,
+        trail,
+        () => null,
+        false,
+        () => undefined,
+      );
+      const id = await decorated.spawn({
+        prompt: "one",
+        causalContext: leanCausal("run-probe-running"),
+      });
+      const before = Date.now();
+      await decorated.cancel(id);
+      expect(Date.now() - before).toBeLessThan(4_000); // CANCEL_SETTLE_TIMEOUT_MS ceiling
+      await trail.flush();
+      const page = audit.query({ runId: "run-probe-running", limit: 50 });
+      const terminal = page.events.filter((event) => event.event_type === "leaf.failed");
+      expect(terminal).toHaveLength(1);
+      expect(terminal[0]?.data).toMatchObject({ status: "cancelled", error_kind: "cancelled" });
+      expect(terminal[0]?.data).not.toHaveProperty("partial");
+      expect(terminal[0]?.data).not.toHaveProperty("usage");
     } finally {
       connection.close();
     }

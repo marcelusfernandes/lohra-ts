@@ -62,14 +62,20 @@ function signalAborted(signal: AbortSignal): boolean {
  * (round-1 review on PR #524, S1): a genuine `StreamAbortedError` (the
  * native `NativeChatHttpPort` path, always this shape); a raw `AbortError`
  * (the fetcher path's `AbortController`-driven rejection, standard DOM
- * naming); or an error whose own `.cause` IS the signal's abort reason
- * (a caller-supplied reason surfacing crude through an intermediate wrapper
- * before `StreamAbortedError` ever gets constructed — the fetcher path's
- * OTHER shape, when the signal was already aborted before `post()` ran).
- * `signalAborted(signal)` gates all three: none of these shapes proves an
- * abort on their OWN (an "AbortError" name or a coincidental `.cause` could,
- * in principle, come from somewhere else), the signal's own state is the
- * one fact this function trusts.
+ * naming); or an error whose own `.cause` IS the signal's abort reason.
+ * That 3rd form has no LIVE producer left in this codebase as of #567
+ * (`src/transports/client.ts:150-165`): `NativeChatHttpPort.post` now wraps
+ * even a pre-`fetch()` caller abort into the SAME `StreamAbortedError`
+ * shape every other abort exit already used, so a raw `Error` whose
+ * `.cause` merely echoes `signal.reason` is no longer something any
+ * transport in this tree throws — kept here as defense in depth (an
+ * external `ModelTransport`, or a future one, is free to throw the plain
+ * shape instead), covered by `tests/conversation-runtime-abort-forms.test.ts`
+ * directly rather than through any transport. `signalAborted(signal)` gates all
+ * three: none of these shapes proves an abort on their OWN (an
+ * "AbortError" name or a coincidental `.cause` could, in principle, come
+ * from somewhere else), the signal's own state is the one fact this
+ * function trusts.
  */
 function isAbortOf(error: unknown, signal: AbortSignal): boolean {
   if (!signalAborted(signal)) return false;
@@ -507,7 +513,7 @@ export class ConversationRuntime {
           // below (contra-assertion,
           // tests/conversation-runtime-injection.test.ts).
           if (isAbortOf(error, signal)) {
-            const partialUsage =
+            const abortedCallUsage =
               error instanceof StreamAbortedError
                 ? estimatePartialUsage(error.partial, {
                     system: request.system,
@@ -515,8 +521,22 @@ export class ConversationRuntime {
                     tools: request.tools,
                   })
                 : null;
+            // Issue #568 (r2, veredito da PR #573): `partialUsage` stays
+            // ONLY this call's own estimate (the contract `errors.ts`
+            // documents) — any earlier iteration of the SAME turn (a
+            // tool-call/pause loop) already completed — real, or a
+            // steer-absorbed one folding in its own estimate (#520,
+            // `:555-561` below) — and is sitting in `usageTotal`; that
+            // rides along SEPARATELY as `measuredUsage` (see its own doc,
+            // `errors.ts`, for exactly what it can carry), never merged
+            // into `partialUsage` itself, so `child-runner.ts` can report
+            // the accumulated total without also marking a leaf "partial"
+            // for THIS call when nothing about it specifically was ever
+            // estimated (isAbortOf's 2nd/3rd form, no `StreamAbortedError`
+            // to estimate from).
             throw new ConversationCancelledError(sessionId, signal.reason, {
-              partialUsage,
+              partialUsage: abortedCallUsage,
+              measuredUsage: usageTotal,
               apiCalls: apiCalls + 1,
             });
           }
