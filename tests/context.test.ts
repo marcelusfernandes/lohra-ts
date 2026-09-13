@@ -112,13 +112,26 @@ describe("project discovery", () => {
     const success = loadProjectContext(missing);
     expect(success.instructions).toEqual([]);
     const resolvedMissing = join(realpathSync(dirname(missing)), basename(missing));
-    expect(success.hints).toEqual({ cwd: resolvedMissing, project_root: resolvedMissing });
+    // Issue #588 (épico #575, P12): `loadProjectContext` ganhou hints de
+    // ambiente sempre presentes (`platform`, `node`, `shell`) além de
+    // `cwd`/`project_root` — o snapshot de git é coberto à parte em
+    // `tests/context-discovery.test.ts` (precisa de um repositório real ou
+    // de um `git` falso, fora do escopo deste teste de resolução de path).
+    expect(success.hints.cwd).toBe(resolvedMissing);
+    expect(success.hints.project_root).toBe(resolvedMissing);
+    expect(success.hints.platform).toBe(process.platform);
+    expect(success.hints.node).toBe(process.version);
+    expect(success.hints).not.toHaveProperty("git_branch");
 
     const received = "x".repeat(1024);
     const failed = loadProjectContext(received, () => {
       throw Object.assign(new Error("name too long"), { code: "ENAMETOOLONG" });
     });
-    expect(failed).toEqual({ instructions: [], hints: { cwd: received } });
+    expect(failed.instructions).toEqual([]);
+    expect(failed.hints.cwd).toBe(received);
+    expect(failed.hints.platform).toBe(process.platform);
+    expect(failed.hints).not.toHaveProperty("project_root");
+    expect(failed.hints).not.toHaveProperty("git_branch");
   });
 });
 
@@ -186,6 +199,33 @@ describe("system prompt renderer", () => {
       today: "2030-01-02",
     });
     expect(prompt.stable).toBe("Soul\n\nDOCTRINE-TEXT");
+  });
+
+  // Issue #588 (épico #575, P12): a última linha do bloco `Environment:` é a
+  // nota de que o snapshot foi tirado no início da sessão e não se atualiza.
+  it("appends the snapshot note when at least one environment hint is present", () => {
+    const prompt = buildSystemPrompt({
+      environmentHints: { cwd: "/tmp" },
+      today: "2030-01-02",
+    });
+    expect(prompt.stable).toContain(
+      "Snapshot taken at session start; it does not update during the conversation.",
+    );
+    expect(prompt.stable.trimEnd().endsWith("does not update during the conversation.")).toBe(true);
+  });
+
+  it("omits the snapshot note entirely when there are no environment hints", () => {
+    const prompt = buildSystemPrompt({ identity: "Soul", today: "2030-01-02" });
+    expect(prompt.stable).not.toContain("Snapshot taken at session start");
+    expect(prompt.stable).toBe("Soul");
+  });
+
+  it("indents a multi-line hint value instead of breaking the '- key: value' shape", () => {
+    const prompt = buildSystemPrompt({
+      environmentHints: { cwd: "/tmp", git_status: "M a.txt\n?? b.txt" },
+      today: "2030-01-02",
+    });
+    expect(prompt.stable).toContain("- git_status:\n  M a.txt\n  ?? b.txt");
   });
 
   it("falls back to the LOCAL calendar date, not UTC, inside the daily window where they disagree", () => {

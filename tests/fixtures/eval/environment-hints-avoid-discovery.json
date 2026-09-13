@@ -1,0 +1,43 @@
+{
+  "input": "What platform and Node version is this environment running? Also read notes.txt in the current directory and tell me what it says.",
+  "cwd_fixture": {
+    "path": "notes.txt",
+    "content": "SENTINEL_ENV_HINTS_QRS: two lines of notes.\nsecond line here.\n"
+  },
+  "stub_script": {
+    "default": [
+      {
+        "kind": "tool_calls",
+        "calls": [{ "name": "read_file", "argumentsRaw": "{\"path\":\"notes.txt\"}" }]
+      },
+      {
+        "kind": "text",
+        "content": "This environment's platform and Node version are already in my system prompt. notes.txt says: SENTINEL_ENV_HINTS_QRS: two lines of notes."
+      }
+    ]
+  },
+  "mechanism": [
+    { "kind": "request_count", "count": 2 },
+    { "kind": "system_prompt_includes", "request": 1, "substring": "Environment:" },
+    { "kind": "system_prompt_includes", "request": 1, "substring": "- platform:" },
+    { "kind": "system_prompt_includes", "request": 1, "substring": "- node:" },
+    {
+      "kind": "system_prompt_includes",
+      "request": 1,
+      "substring": "Snapshot taken at session start; it does not update during the conversation."
+    },
+    { "kind": "tools_include", "request": 1, "name": "terminal" },
+    {
+      "kind": "message_roles_at_request",
+      "request": 2,
+      "roles": ["system", "user", "assistant", "tool"]
+    },
+    { "kind": "tool_result_includes", "request": 2, "substring": "\"path\":\"notes.txt\"" }
+  ],
+  "outcome": {
+    "question": "Does the model answer the platform/Node question from the Environment block already in its system prompt (never running uname/terminal to discover it) and read the file directly instead of shelling out?",
+    "expect": "SENTINEL_ENV_HINTS_QRS"
+  },
+  "budget_tokens": 22000,
+  "note": "Issue #588 (épico #575, P12): ambiente rico -- discoverInstructions/loadProjectContext (src/context/discovery.ts) agora sempre emite platform/node/shell, e git_branch/git_default_branch/git_status/git_recent quando cwd está dentro de um repositório git. `cwd_fixture` (docs/eval.md) só escreve UM arquivo -- não dá para semear um `.git/` funcional (precisaria de objects/ e refs/ além de HEAD) sem estender `scripts/eval/session.ts`, fora dos `Files` desta issue -- então este caso só pina platform/node/a nota de snapshot, sempre presentes mesmo no mkdtemp sem git do stub; a chave git_* fica fora do alcance do oráculo de mecanismo aqui. O oráculo de mecanismo (stub, determinístico) não pode medir 'o modelo escolheu não descobrir o ambiente' -- o script já é a resposta fixa que escrevemos (mesma limitação de tool-choice-read-file-over-terminal.json); ele só prova a FORMA que só essa resposta produz: tools_include(request:1, terminal) confirma que terminal estava de fato oferecido (a ausência de uma chamada de discovery não foi forçada pela ausência da tool no catálogo), e tool_result_includes(request:2, '\"path\":\"notes.txt\"') pina o envelope de read_file, não de terminal (que devolveria stdout/exit_code). O oráculo de RESULTADO mede, contra um provedor real (`npm run eval -- --provider <p>`), se o modelo de fato responde com o que já está no Environment block e lê o arquivo direto, sem terminal/uname/git status antes da primeira ação -- dogfooding real desta issue rodou em dois cwd (com e sem git) e registrou a ordem de tool_calls no test plan da PR."
+}

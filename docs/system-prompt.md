@@ -416,6 +416,77 @@ system prompt do filho (requisição 2) carrega `Environment:`/`Tools
 available to you:`/a sentinela; o envelope de `delegate_task` (requisição 3)
 carrega `"outcome":"result"` de volta ao pai.
 
+## Ambiente rico: platform, shell, node e snapshot de git (issue #588, P12)
+
+Antes desta issue, `loadProjectContext` (`src/context/discovery.ts`)
+produzia só `cwd` e `project_root` — o modelo gastava uma ou duas iterações
+por turno rodando `uname`, `git status` e `ls` para descobrir o que o
+processo já sabia.
+
+### Hints sempre presentes
+
+`platform` (`process.platform`), `node` (`process.version`) e `shell` —
+`shell` espelha o MESMO fallback que `shellInvocation`
+(`src/tools/terminal.ts`) já usa para decidir qual shell de fato roda um
+comando (`process.env.ComSpec` no Windows, `process.env.SHELL` senão, com
+o mesmo default `cmd.exe`/`/bin/sh`) — o hint nunca promete um shell
+diferente do que a tool `terminal` realmente invoca. Presentes mesmo fora
+de um repositório git e mesmo quando a resolução de `cwd` falha.
+
+### Snapshot de git, fail-open por chave
+
+Dentro de um repositório: `git_branch` (`symbolic-ref --short HEAD`, com
+fallback para o SHA curto de `rev-parse --short HEAD` em HEAD destacado),
+`git_default_branch` (só quando `refs/remotes/origin/HEAD` já existe
+localmente — nunca resolvido por rede; ausente é o caso comum),
+`git_status` (`status --porcelain`, até 20 linhas com um marcador de
+truncamento, `"clean"` quando não há nada pendente) e `git_recent` (5
+commits de `log --oneline`).
+
+Um comando de porteiro (`rev-parse --show-toplevel`) decide primeiro se
+`cwd` está num repositório: fora de um repositório — o caso comum — isso
+custa uma falha rápida em vez de quatro, e um `git` que trava só paga o
+timeout uma vez. Cada comando individual tem timeout de 500ms
+(`execFileSync`); qualquer falha (não é repositório, `git` ausente, exit
+não-zero, timeout) faz a CHAVE correspondente desaparecer — nunca lança,
+nunca aparece um valor inventado. Só subcomandos locais (`status`, `log`,
+`symbolic-ref`, `rev-parse`); nenhum acesso de rede, nenhuma URL de remote
+no prompt.
+
+### `Environment:` ganha uma nota de que o snapshot envelhece
+
+`environmentText` (`src/context/system-prompt.ts`) acrescenta, como última
+linha do bloco, sempre que há ao menos um hint: "Snapshot taken at session
+start; it does not update during the conversation." — o mesmo aviso que o
+Claude Code dá sobre o próprio `gitStatus` da sessão. Um valor multilinha
+(`git_status`, `git_recent`) não quebra o formato `- key: value`: a chave
+fica sozinha numa linha e cada linha do valor entra indentada.
+
+Construído uma vez por sessão (invariante 1, CLAUDE.md): `chat.ts` chama
+`loadProjectContext` dentro de `snapshot()` (linha 329), e `dashboard.ts`
+chama direto (linha 272) antes de montar `systemPrompt` — os dois só uma
+vez, antes do primeiro turno, nunca dentro de um closure que roda a cada
+turno. O snapshot de git não se atualiza se o repositório mudar no meio da
+conversa, doutrina que a última linha do bloco torna explícita para o
+modelo.
+
+### O que o eval consegue medir, e o que não consegue
+
+`tests/fixtures/eval/environment-hints-avoid-discovery.json` pina, contra o
+stub, que `platform`/`node`/a nota de snapshot chegam ao system prompt da
+primeira requisição, e que a resposta scriptada lê o arquivo pedido direto
+(`read_file`) em vez de abrir um `terminal` — a mesma limitação de
+`tool-choice-read-file-over-terminal.json`: o oráculo de MECANISMO não pode
+provar que um modelo real evitaria `uname`/`git status`, só que a forma
+certa (sem uma chamada de discovery) é a que o script produz. `cwd_fixture`
+(`docs/eval.md`) escreve só um arquivo — não dá para semear um `.git/`
+funcional (precisa de `objects/`/`refs/` além de `HEAD`) sem estender
+`scripts/eval/session.ts`, fora dos `Files` desta issue; o caso por isso
+não pina `git_branch`/`git_status` via mecanismo. Só o oráculo de
+RESULTADO, contra um provedor real (`npm run eval -- --provider <p>`), mede
+se o modelo de fato evita comandos de descoberta quando o ambiente já
+está no prompt.
+
 ## O que este documento ainda não cobre
 
 `prompt caching` — não existe no runtime hoje. Cada sub-issue do épico #575
