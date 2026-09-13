@@ -104,10 +104,11 @@ export function steerSessionTool(core: OrchestrationCore, args: ToolArguments): 
 }
 
 /** Maps the registry's CollectResult (camelCase) to the wire's snake_case
- * envelope, in the contract's 12-key order (assertion 14, repinned for #419
+ * envelope, in the contract's 13-key order (assertion 14, repinned for #419
  * — ADR 0003 licenses the format: `forced_fallback` never had a real
  * producer, always `false`, and is removed from the contract entirely;
- * repinned for #232 before that — usage_uncertain is new, added last).
+ * repinned for #232 before that — usage_uncertain is new, added last;
+ * repinned for #583 — outcome is new, added last after usage_uncertain).
  * retry_after is positive seconds, else null (L15/assertion 39) — a Python
  * float, so a whole-number value like 1 renders as "1.0", never the bare
  * "1" a plain JS number would produce. */
@@ -125,6 +126,7 @@ function collectEnvelope(result: CollectResult): string {
     error_kind: result.errorKind,
     retry_after: result.retryAfter === null ? null : jsonFloat(result.retryAfter),
     usage_uncertain: result.usageUncertain === true,
+    outcome: result.outcome ?? null,
   });
 }
 
@@ -157,6 +159,7 @@ export async function collectSessionTool(
     error_kind: null,
     retry_after: null,
     usage_uncertain: false,
+    outcome: null,
   });
 }
 
@@ -194,6 +197,7 @@ export async function delegateTaskTool(
           tokens_out: result.tokensOut,
           provider: result.provider,
           model: result.model,
+          outcome: result.outcome ?? null,
         },
       ],
     });
@@ -215,6 +219,7 @@ export async function delegateTaskTool(
       tokens_out: outcome.tokensOut,
       provider: outcome.provider,
       model: outcome.model,
+      outcome: outcome.outcome,
     })),
   });
 }

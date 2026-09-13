@@ -32,6 +32,7 @@ import {
 import { ChildConversationRepository } from "./child-repository.js";
 import type { ChildRunner, CollectResult, SpawnConfig } from "./core.js";
 import { NonClosingTransport } from "./non-closing-transport.js";
+import { parseOutcomeSentinel } from "./outcome-sentinel.js";
 
 export interface CreateChildRunnerOptions {
   readonly sessions: SessionRepository;
@@ -342,6 +343,13 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
           result.toolCalls !== undefined && result.toolCalls.length > 0
             ? { toolCalls: result.toolCalls.map((call) => ({ ...call })) }
             : {};
+        // Issue #583: the subagent's own return-contract sentinel (last
+        // non-blank line of `content`) — `null` when it never wrote one.
+        // Purely additive: never touches `status`/`errorKind` above, so a
+        // leaf that ends its text with `failed: …` still reports
+        // `status: "complete"`/`errorKind: null` (unless it's ALSO a dead
+        // turn, unrelated to this field) exactly as before this issue.
+        const outcome = parseOutcomeSentinel(content);
         // Issue #520 (D3, M16-S5, ADR 0005): a turn that COMPLETED still
         // spent part of its usage on a call abandoned mid-stream (a steer
         // interrupt the loop absorbed with `continue`, never surfaced as a
@@ -351,8 +359,8 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
         // a cancelled turn with a partial gets, never a silent "fully
         // measured" claim.
         return result.partialCalls !== undefined && result.partialCalls > 0
-          ? { ...completeResult, ...toolCallsField, partial: true, usageUncertain: true }
-          : { ...completeResult, ...toolCallsField };
+          ? { ...completeResult, ...toolCallsField, outcome, partial: true, usageUncertain: true }
+          : { ...completeResult, ...toolCallsField, outcome };
       } catch (error) {
         if (error instanceof ConversationCancelledError) {
           // #518 (M16-S3, ADR 0005) + #568 (r2, veredito da PR #573): the

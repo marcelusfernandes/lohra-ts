@@ -229,6 +229,97 @@ describe("createChildRunner", () => {
     close();
   });
 
+  // Issue #583: outcome is parsed from the leaf's own final line — purely
+  // additive metadata, never touching status/errorKind.
+  it("reads outcome:'result' from a trailing result: sentinel", async () => {
+    const { sessions, close } = setup();
+    sessions.createSession({ id: "parent-1", source: "gateway" });
+    const parentProfile = getProviderProfile("openai");
+    if (parentProfile === null) throw new Error("openai profile missing");
+    const { client } = fakeClient([assistantStream("did the thing.\n\nresult: all done")]);
+    const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
+    const runner = makeRunner(sessions, pool);
+
+    const result = await runner(
+      "child-outcome-result",
+      { prompt: "hi" },
+      "SYS",
+      () => [],
+      noSignal,
+    );
+
+    expect(result.status).toBe("complete");
+    expect(result.outcome).toBe("result");
+    close();
+  });
+
+  it("reads outcome:'failed' from a trailing failed: sentinel WITHOUT flipping status/errorKind", async () => {
+    const { sessions, close } = setup();
+    sessions.createSession({ id: "parent-1", source: "gateway" });
+    const parentProfile = getProviderProfile("openai");
+    if (parentProfile === null) throw new Error("openai profile missing");
+    const { client } = fakeClient([
+      assistantStream("tried the thing.\n\nfailed: permission denied"),
+    ]);
+    const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
+    const runner = makeRunner(sessions, pool);
+
+    const result = await runner(
+      "child-outcome-failed",
+      { prompt: "hi" },
+      "SYS",
+      () => [],
+      noSignal,
+    );
+
+    // Aditivo (decisão 3, #583): a text sentinel never changes the turn's
+    // own status/errorKind — those still read as a normal completion.
+    expect(result.status).toBe("complete");
+    expect(result.errorKind).toBeNull();
+    expect(result.outcome).toBe("failed");
+    close();
+  });
+
+  it("reads outcome:'needs_input' from a trailing needs input: sentinel", async () => {
+    const { sessions, close } = setup();
+    sessions.createSession({ id: "parent-1", source: "gateway" });
+    const parentProfile = getProviderProfile("openai");
+    if (parentProfile === null) throw new Error("openai profile missing");
+    const { client } = fakeClient([
+      assistantStream("partway there.\n\nneeds input: which branch?"),
+    ]);
+    const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
+    const runner = makeRunner(sessions, pool);
+
+    const result = await runner(
+      "child-outcome-needs-input",
+      { prompt: "hi" },
+      "SYS",
+      () => [],
+      noSignal,
+    );
+
+    expect(result.status).toBe("complete");
+    expect(result.outcome).toBe("needs_input");
+    close();
+  });
+
+  it("reports outcome:null (never absent, never an error) when the leaf's final text has no sentinel", async () => {
+    const { sessions, close } = setup();
+    sessions.createSession({ id: "parent-1", source: "gateway" });
+    const parentProfile = getProviderProfile("openai");
+    if (parentProfile === null) throw new Error("openai profile missing");
+    const { client } = fakeClient([assistantStream("just a plain summary, no sentinel")]);
+    const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
+    const runner = makeRunner(sessions, pool);
+
+    const result = await runner("child-outcome-none", { prompt: "hi" }, "SYS", () => [], noSignal);
+
+    expect(result.status).toBe("complete");
+    expect(result.outcome).toBeNull();
+    close();
+  });
+
   it("resolves an overridden provider/model via ClientPool, leaving the parent client untouched (L1)", async () => {
     const { sessions, close } = setup();
     sessions.createSession({ id: "parent-1", source: "gateway" });
