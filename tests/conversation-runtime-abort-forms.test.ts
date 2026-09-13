@@ -7,8 +7,13 @@
 // (mesma convenção de pequenos helpers duplicados por arquivo já usada em
 // `tests/workflow-orchestration-runtime-timeout.test.ts` vs.
 // `tests/orchestration-runtime-collect.test.ts`).
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
+import { afterEach, describe, expect, it } from "vitest";
+
+import { ClientPool } from "../src/agent/client-pool.js";
 import {
   ConversationCancelledError,
   ConversationRuntime,
@@ -17,7 +22,19 @@ import {
   type ModelTransport,
   type TurnCommit,
 } from "../src/conversation/index.js";
-import type { NormalizedResponse } from "../src/transports/index.js";
+import { createChildRunner } from "../src/orchestration/child-runner.js";
+import type { SpawnConfig } from "../src/orchestration/core.js";
+import { getProviderProfile } from "../src/providers/index.js";
+import { openStateDatabase, SessionRepository } from "../src/state/index.js";
+import type { ToolDefinition } from "../src/tools/index.js";
+import {
+  ChatCompletionsClient,
+  ChatCompletionsTransport,
+  type ChatHttpPort,
+  type ChatHttpRequest,
+  type HttpResponseData,
+  type NormalizedResponse,
+} from "../src/transports/index.js";
 
 const usage = {
   inputTokens: 11,
@@ -146,14 +163,16 @@ describe("ConversationRuntime — isAbortOf's 3rd form and multi-iteration usage
     expect(rejected.partialUsage).toBeNull();
   });
 
-  // Issue #568: a multi-iteration turn (tool-call/pause loop) whose earlier
-  // calls already completed for real, then has its LAST call torn down by
-  // the OUTER signal, must never drop the earlier real usage back to just
-  // the last call's own estimate — `partialUsage` is what `child-runner.ts`
-  // reports as the whole leaf's `usage` on cancel (`error.partialUsage`,
-  // the ONLY reader of this field), so silently dropping the completed
-  // iterations there would under-count a cancelled leaf's real spend.
-  it("a multi-iteration turn cancelled by the outer signal sums the EARLIER real usage with the aborted call's estimate, never just the estimate", async () => {
+  // Issue #568 (r2, veredito da PR #573): a multi-iteration turn (tool-call/
+  // pause loop) whose earlier calls already completed for real, then has
+  // its LAST call torn down by the OUTER signal via `StreamAbortedError`,
+  // must never drop the earlier real usage entirely — it rides along as
+  // `measuredUsage`, a field SEPARATE from `partialUsage` (this call's own
+  // estimate). Merging the two into `partialUsage` itself (r1's fix) broke
+  // the contract that field documents and made `child-runner.ts` mislabel
+  // a leaf `partial` even when nothing was ever estimated for a DIFFERENT
+  // isAbortOf form — see the child-runner-level tests below for that.
+  it("a multi-iteration turn cancelled by StreamAbortedError keeps the EARLIER real usage as measuredUsage, separate from the aborted call's own estimate", async () => {
     const repository = new MemoryRepository();
     const { StreamAbortedError } = await import("../src/transports/index.js");
     const { estimatePartialUsage } = await import("../src/context/token-estimate.js");
@@ -224,12 +243,209 @@ describe("ConversationRuntime — isAbortOf's 3rd form and multi-iteration usage
       messages: secondRequest.messages,
       tools: secondRequest.tools,
     });
-    expect(rejected.partialUsage).toEqual({
-      inputTokens: firstUsage.inputTokens + expectedEstimate.inputTokens,
-      outputTokens: firstUsage.outputTokens + expectedEstimate.outputTokens,
-      cacheReadTokens: firstUsage.cacheReadTokens,
-      cacheWriteTokens: firstUsage.cacheWriteTokens,
-      reasoningTokens: firstUsage.reasoningTokens,
+    // Issue #568 (r2, veredito da PR #573): the two are SEPARATE fields —
+    // `partialUsage` stays ONLY this call's own estimate (the contract
+    // `errors.ts` documents), `measuredUsage` carries the earlier real
+    // iteration's usage. `child-runner.ts` is the one that combines them;
+    // this test pins the split at the source.
+    expect(rejected.partialUsage).toEqual(expectedEstimate);
+    expect(rejected.measuredUsage).toEqual(firstUsage);
+  });
+});
+
+// Issue #568 (r2, veredito da PR #573): `child-runner.ts`'s catch branch
+// combines `measuredUsage`/`partialUsage` into the leaf's own `usage`, but
+// derives `partial` from `partialUsage` ALONE — this is the level where
+// that distinction is actually observable end to end, through a REAL
+// `createChildRunner` (`OrchestrationCore`+`ClientPool`, a fake
+// `ChatHttpPort` standing in for the socket, never a hand-rolled
+// `ConversationRuntime` double), molded on
+// `tests/orchestration-child-runner-abort.test.ts`.
+const encoder = new TextEncoder();
+
+function sseResponse(frames: readonly unknown[]): HttpResponseData {
+  const body = frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join("");
+  return {
+    status: 200,
+    headers: new Headers({ "content-type": "text/event-stream" }),
+    body: encoder.encode(body),
+  };
+}
+
+function toolCallStream(name: string, args: string, callId: string): HttpResponseData {
+  return sseResponse([
+    {
+      choices: [
+        {
+          delta: { tool_calls: [{ index: 0, id: callId, function: { name, arguments: args } }] },
+          finish_reason: null,
+        },
+      ],
+    },
+    { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+    { choices: [], usage: { prompt_tokens: 5, completion_tokens: 2 } },
+  ]);
+}
+
+/** First call resolves with `toolCallStream` (a real tool-call iteration,
+ * real usage); every call AFTER that hangs until `request.signal` fires,
+ * then rejects with whatever `buildAbortError` constructs — the caller
+ * decides the exact shape (a raw `AbortError`, isAbortOf's 2nd form, or a
+ * real `StreamAbortedError`, its 1st) so ONE port serves both scenarios
+ * below. */
+class ToolThenAbortPort implements ChatHttpPort {
+  private calls = 0;
+  constructor(
+    private readonly buildAbortError: () => Error,
+    private readonly onSecondStarted: () => void,
+  ) {}
+  post(request: ChatHttpRequest): Promise<HttpResponseData> {
+    this.calls += 1;
+    if (this.calls === 1) {
+      return Promise.resolve(toolCallStream("read_file", '{"path":"a"}', "c1"));
+    }
+    this.onSecondStarted();
+    return new Promise((_resolve, reject) => {
+      request.signal?.addEventListener(
+        "abort",
+        () => {
+          reject(this.buildAbortError());
+        },
+        { once: true },
+      );
     });
+  }
+}
+
+const roots: string[] = [];
+
+afterEach(() => {
+  while (roots.length > 0) rmSync(roots.pop() as string, { recursive: true, force: true });
+});
+
+const parentTools: readonly ToolDefinition[] = [
+  { type: "function", function: { name: "read_file", description: "", parameters: {} } },
+];
+
+function harness(buildAbortError: () => Error, onSecondStarted: () => void) {
+  const root = mkdtempSync(join(tmpdir(), "lohra-child-runner-cancel-usage-"));
+  roots.push(root);
+  const connection = openStateDatabase(join(root, "state.db"));
+  const sessions = new SessionRepository(connection.database, () => 1000, connection.ftsEnabled);
+  sessions.createSession({ id: "parent-1", source: "gateway" });
+  const parentProfile = getProviderProfile("openai");
+  if (parentProfile === null) throw new Error("openai profile missing");
+  const port = new ToolThenAbortPort(buildAbortError, onSecondStarted);
+  const client = new ChatCompletionsClient({
+    baseUrl: "http://127.0.0.1:9",
+    apiKey: "k",
+    transport: new ChatCompletionsTransport(),
+    http: port,
+  });
+  const pool = new ClientPool(parentProfile, client, { home: "/tmp", environment: {} });
+  const runner = createChildRunner({
+    sessions,
+    parentSessionId: "parent-1",
+    clientPool: pool,
+    baseDispatch: () => Promise.resolve('{"ok":true}'),
+    parentToolDefinitions: parentTools,
+    defaultModel: "fake-model-a",
+    cwd: "/tmp",
+    idSource: () => "unused",
+    clock: () => 1000,
+    childMaxIterations: 50,
+  });
+  return {
+    start: (): {
+      readonly pending: ReturnType<typeof runner>;
+      readonly abort: (reason: unknown) => void;
+    } => {
+      const controller = new AbortController();
+      const config: SpawnConfig = { prompt: "do the thing" };
+      const pending = runner("child-cancel-usage", config, "SYS", () => [], controller.signal);
+      return {
+        pending,
+        abort: (reason: unknown) => {
+          controller.abort(reason);
+        },
+      };
+    },
+    close: (): void => {
+      connection.close();
+    },
+  };
+}
+
+function startedGate(): { readonly started: Promise<void>; readonly onStarted: () => void } {
+  let onStarted: () => void = () => undefined;
+  const started = new Promise<void>((resolve) => {
+    onStarted = resolve;
+  });
+  return { started, onStarted };
+}
+
+describe("createChildRunner — cancel usage combines measuredUsage/partialUsage, partial follows partialUsage alone (issue #568 r2)", () => {
+  it("cancel via isAbortOf's 2nd form (raw AbortError) after a completed tool-call iteration: usage is the real measured usage, partial is false", async () => {
+    const { started, onStarted } = startedGate();
+    const { start, close } = harness(() => {
+      const abortError = new Error("The operation was aborted");
+      abortError.name = "AbortError";
+      return abortError;
+    }, onStarted);
+    try {
+      const { pending, abort } = start();
+      await started;
+      abort(new Error("USER_CANCELLED"));
+      const result = await pending;
+      expect(result.status).toBe("interrupted");
+      expect(result.errorKind).toBe("cancelled");
+      expect(result.usageUncertain).toBe(true);
+      // Nothing was ever ESTIMATED (no StreamAbortedError to estimate
+      // from) — only the earlier tool-call iteration's REAL usage — so
+      // this leaf is `partial: false` (this catch branch always sets the
+      // key, never omits it), matching `RunResult.partialLeaves`'s
+      // contract (a leaf counts as partial only when its usage includes an
+      // estimated portion).
+      expect(result.partial).toBe(false);
+      expect(result.tokensIn).toBe(5);
+      expect(result.tokensOut).toBe(2);
+    } finally {
+      close();
+    }
+  });
+
+  it("cancel via isAbortOf's 1st form (StreamAbortedError) after a completed tool-call iteration: usage is real + estimated, partial is true", async () => {
+    const { StreamAbortedError } = await import("../src/transports/index.js");
+    const { started, onStarted } = startedGate();
+    const partialBody = encoder.encode(
+      `data: ${JSON.stringify({
+        choices: [{ index: 0, delta: { content: "x".repeat(29) }, finish_reason: null }],
+      })}\n\n`,
+    );
+    const { start, close } = harness(
+      () =>
+        new StreamAbortedError(
+          { text: "", reasoningChars: 0, toolArgumentChars: 0, usage: null },
+          { partialBody },
+        ),
+      onStarted,
+    );
+    try {
+      const { pending, abort } = start();
+      await started;
+      abort(new Error("USER_CANCELLED"));
+      const result = await pending;
+      expect(result.status).toBe("interrupted");
+      expect(result.errorKind).toBe("cancelled");
+      expect(result.usageUncertain).toBe(true);
+      // The aborted call DID estimate something (a real StreamAbortedError,
+      // non-empty partial text) — combined with the earlier tool-call
+      // iteration's real usage, both riding on the same `usage`.
+      expect(result.partial).toBe(true);
+      expect(result.tokensIn).toBeGreaterThan(5);
+      expect(result.tokensOut).toBeGreaterThan(2);
+    } finally {
+      close();
+    }
   });
 });

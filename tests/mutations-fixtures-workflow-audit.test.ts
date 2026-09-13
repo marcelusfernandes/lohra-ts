@@ -82,7 +82,7 @@ describe("scripts/mutations/workflow-audit-producers-mutants.ts", () => {
     }
   });
 
-  it("focus.file é um dos nove arquivos de teste do M7 (identity/leaf/tool/cache/segment/live-tail) + #383 (watch-events/allow-list/chat-audit-wiring) + #568 (teto/sonda)", () => {
+  it("focus.file é um dos onze arquivos de teste do M7 (identity/leaf/tool/cache/segment/live-tail) + #383 (watch-events/allow-list/chat-audit-wiring) + #568 (teto/sonda)", () => {
     const expected = new Set([
       "tests/workflow-audit-identity.test.ts",
       "tests/workflow-audit-leaf.test.ts",
