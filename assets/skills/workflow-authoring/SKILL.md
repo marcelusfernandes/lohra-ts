@@ -276,38 +276,9 @@ of polling on their behalf.
 
 ### Previewing a resume, route pivots, and the artifact manifest
 
-- **`workflow_preview {run_id, route?}`** dry-runs a resume before you commit
-  to one — no token spent, nothing written, and none of the run's route pivots
-  consumed. Per top-level node it reports one of several outcomes, among them
-  `replay` (a cached cell covers it) and `recompute {reason:
-  "never_completed" | "identity_changed"}`, plus totals including
-  `cells_replayed`, `tokens_saved`, `leaves_to_spawn`,
-  `estimated_tokens_to_repay`, and `pivots_used` — the pivots this run has
-  *already* spent, unaffected by the preview call itself. Call it before
-  `run_workflow(resume_run_id=..., route=...)` to see whether a candidate
-  route is worth spawning. A nested `workflow` node still previews as
-  `unknown` today regardless of the real resume's outcome — it does not yet
-  get the operator's template loader.
-- **Resuming a `route_fault` pause onto a different route** works two ways: an
-  explicit `route` (channel `operator`, always wins, even over the
-  suggestion), or — resuming with no `route` at all — the operator's own
-  `workflow_routes.json` (`<home>/workflow_routes.json`, an ordered
-  per-dead-route fallback list). When it names an untried fallback for this
-  exact dead route, `workflow_status`'s `lesson.suggested_route` carries it
-  and the resume applies it on your behalf (channel `route_envelope`); with no
-  matching entry, a route-less resume just stays on the current route. Both
-  channels draw on the **same cap: 3 route pivots per run, total** — a 4th
-  explicit `route` is refused. Every node a pivot actually rewrites is logged
-  in `workflow_audit` as `node.rerouted {channel, pivot, from, to}`.
-- **The `artifacts` manifest** records every `write_file` a leaf calls with
-  `ok: true` as `{node_id, sub_id, path, bytes}`, capped at 256 records per
-  leaf. Two leaves in the same run writing the same `path` are never
-  arbitrated — the last write wins on disk, silently — but the collision
-  surfaces as an advisory entry in `workflow_status`'s `faults` (`"<node>:
-  artifact path written by 2 leaves: <path>"`), never a `status` change. It is
-  only checked within the current stretch: a collision against an earlier
-  stretch, or against a parent run's artifacts from a nested `workflow` node,
-  is not detected yet.
+- **`workflow_preview {run_id, route?}`** dry-runs a resume before you commit to one — no token spent, nothing written, and none of the run's route pivots consumed. Per top-level node it reports one of several outcomes, among them `replay` (a cached cell covers it) and `recompute {reason: "never_completed" | "identity_changed"}`, plus totals including `cells_replayed`, `tokens_saved`, `leaves_to_spawn`, `estimated_tokens_to_repay`, and `pivots_used` — the pivots this run has *already* spent, unaffected by the preview call itself. Call it before `run_workflow(resume_run_id=..., route=...)` to see whether a candidate route is worth spawning. A nested `workflow` node still previews as `unknown` today regardless of the real resume's outcome — it does not yet get the operator's template loader.
+- **Resuming a `route_fault` pause onto a different route** works two ways: an explicit `route` (channel `operator`, always wins, even over the suggestion), or — resuming with no `route` at all — the operator's own `workflow_routes.json` (`<home>/workflow_routes.json`, an ordered per-dead-route fallback list). When it names an untried fallback for this exact dead route, `workflow_status`'s `lesson.suggested_route` carries it and the resume applies it on your behalf (channel `route_envelope`); with no matching entry, a route-less resume just stays on the current route. Both channels draw on the **same cap: 3 route pivots per run, total** — a 4th explicit `route` is refused. Every node a pivot actually rewrites is logged in `workflow_audit` as `node.rerouted {channel, pivot, from, to}`.
+- **The `artifacts` manifest** records every `write_file` a leaf calls with `ok: true` as `{node_id, sub_id, path, bytes}`, capped at 256 records per leaf. Two leaves in the same run writing the same `path` are never arbitrated — the last write wins on disk, silently — but the collision surfaces as an advisory entry in `workflow_status`'s `faults` (`"<node>: artifact path written by 2 leaves: <path>"`), never a `status` change. It is only checked within the current stretch: a collision against an earlier stretch, or against a parent run's artifacts from a nested `workflow` node, is not detected yet.
 
 ### Live tail, rename_hint, mid-flight leaf reads, and steering
 
@@ -339,6 +310,11 @@ detail lives here.
   this process handles, not just this call's `run_id`. Event kinds worth
   knowing: `leaf.*`, `tool.*` (per call inside a leaf), `cache.*`,
   `segment.*` (bracket a dead-owner resume), `node.paused`, `node.rerouted`.
+- **`fault_kinds`** — a typed subset of `faults`, never parsed from its
+  text; `quota_exhausted` never appears here (it surfaces as pause reason
+  `quota_exhausted` instead). **`partial_leaves`** counts leaves whose usage
+  includes tokens ESTIMATED from a call aborted in flight (ADR 0005),
+  always also counted in **`usage_uncertain_leaves`**.
 
 ---
 

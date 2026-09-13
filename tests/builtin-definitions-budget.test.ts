@@ -181,6 +181,18 @@ describe("run_workflow: closed node list and skill pointer survive the diet (#58
   });
 });
 
+// Rodada 2 (revisor, PR #598): sandbox_refusals é regra de comportamento
+// (o modelo precisa saber que não flipa `status` sozinho), não manual — tem
+// que continuar na description, não só na skill.
+describe("workflow_status: sandbox_refusals advisory clause survives the diet (#585)", () => {
+  it("still says sandbox_refusals is advisory and never flips status from complete on its own", () => {
+    const d = descriptionOf("workflow_status");
+    expect(d).toContain("sandbox_refusals");
+    expect(d).toMatch(/ADVISORY|advisory/);
+    expect(d).toMatch(/never.*flips.*status/i);
+  });
+});
+
 describe("basic tools: when-to-use / when-not / limit pattern (#585)", () => {
   it("read_file: limit and preference over terminal", () => {
     const d = descriptionOf("read_file");
@@ -248,6 +260,17 @@ describe("workflow-authoring skill absorbed the manual moved out of descriptions
 
   it("documents the audit trail's integrity.pending scope (moved out of workflow_audit)", () => {
     expect(skill).toContain("integrity.pending");
+  });
+
+  // Rodada 2 (revisor, PR #598): sandbox_refusals/fault_kinds/partial_leaves/
+  // usage_uncertain_leaves saíram da description de workflow_status sem
+  // ganhar destino — nem na skill, nem em outra description. O modelo não lê
+  // docs, então "glossed in the workflow-authoring skill" só é verdade se a
+  // skill de fato contiver os quatro nomes.
+  it("documents fault_kinds, partial_leaves and usage_uncertain_leaves (moved out of workflow_status)", () => {
+    expect(skill).toContain("fault_kinds");
+    expect(skill).toContain("partial_leaves");
+    expect(skill).toContain("usage_uncertain_leaves");
   });
 
   it("stays within the repo's file-size convention (800 lines)", () => {

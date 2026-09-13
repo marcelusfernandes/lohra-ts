@@ -166,7 +166,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Skills are procedural memory. create one for a complex task (5+ steps) or a reusable workflow; update one that's stale; delete removes one (home only). Use scope='project' for a project-specific skill.",
+        "Skills are procedural memory. create one for a complex task (5+ steps) or a reusable workflow; update a stale one; delete removes one (home only). Use scope='project' for a project-specific skill.",
       parameters: {
         type: "object",
         properties: {
@@ -231,7 +231,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Delegate one or more self-contained subtasks to fresh, isolated subagents and wait for results \u2014 no knowledge of this conversation, so every task string must be self-contained. Each result carries 'sub_id' (continue with 'resume_id'), 'error_kind' (null, or 'dead_turn' if no text/tool call), and usage.",
+        "Delegate self-contained subtasks to fresh, isolated subagents and wait for results \u2014 no knowledge of this conversation, so each task string must be self-contained. Each result carries 'sub_id' (continue with 'resume_id'), 'error_kind' (null, or 'dead_turn' if no text/tool call), and usage.",
       parameters: {
         type: "object",
         properties: {
@@ -277,7 +277,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Schedule prompts as autonomous agent turns \u2014 recurring or one-off background work the user asked to automate. 'interval'=minutes; 'once'=epoch timestamp; 'cron'=5-field expression. Each run is isolated \u2014 write a self-contained prompt.",
+        "Schedule prompts as autonomous agent turns \u2014 recurring or one-off automated work. 'interval'=minutes; 'once'=epoch timestamp; 'cron'=5-field expr. Each run is isolated \u2014 write a self-contained prompt.",
       parameters: {
         type: "object",
         properties: {
@@ -314,7 +314,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Analyze an image and return a text description. Pass a local image 'path' or a remote 'url', and an optional 'prompt' for what to look for. Use for screenshots, diagrams, or photos the conversation refers to.",
+        "Analyze an image and return a text description. Pass a local 'path' or a remote 'url', and an optional 'prompt' for what to look for. Use for screenshots, diagrams, or photos the conversation refers to.",
       parameters: {
         type: "object",
         properties: {
@@ -339,7 +339,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Generate one or more images from a text 'prompt' and save to disk; returns file paths. Optional 'size' and 'n' (1-10). Use for illustrations, mockups, or diagrams the user asks for.",
+        "Generate images from a text 'prompt' and save to disk; returns file paths. Optional 'size' and 'n' (1-10). Use for illustrations, mockups, or diagrams the user asks for.",
       parameters: {
         type: "object",
         properties: {
@@ -490,7 +490,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Poll a workflow run's status/outputs by run_id. 'wait' blocks until done; 'progress' is live mid-run. 'paused' means stopped resumably \u2014 finished nodes are kept; resume with run_workflow(resume_run_id=...). A checkpoint pause carries {node_id, prompt, default?, rename_hint?}. Other rollup fields are glossed in the workflow-authoring skill.",
+        "Poll a workflow run's status/outputs by run_id. 'wait' blocks until done; 'progress' is live mid-run. 'paused' means stopped resumably \u2014 finished nodes kept; resume with run_workflow(resume_run_id=...). A checkpoint pause carries {node_id, prompt, default?, rename_hint?}. 'sandbox_refusals' is ADVISORY, never on its own flips 'status' from 'complete'. Other rollup fields (fault_kinds, partial_leaves, usage_uncertain_leaves) glossed in the workflow-authoring skill.",
       parameters: {
         type: "object",
         properties: {
@@ -545,7 +545,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Cancel a running workflow — waits for every in-flight leaf to stop, so 'cancelled' means nothing is still spending tokens. A leaf past that ceiling returns 'cancelling'; call again or poll workflow_status.",
+        "Cancel a running workflow — waits for every in-flight leaf to stop, so 'cancelled' means nothing is spending tokens. A leaf past that ceiling returns 'cancelling'; call again or poll workflow_status.",
       parameters: {
         type: "object",
         properties: {
@@ -562,7 +562,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "List validated workflow templates, or fetch one by 'name' for its full spec. Prefer adapting a template over authoring fresh. 'ref' is the filename without extension — the same 'ref' a 'workflow' node resolves through.",
+        "List validated workflow templates, or fetch one by 'name' for its full spec. Prefer adapting one over authoring fresh. 'ref' is the filename without extension — the same 'ref' a 'workflow' node resolves through.",
       parameters: {
         type: "object",
         properties: {
