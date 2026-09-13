@@ -2,10 +2,11 @@
 // que este slug prova (AC da issue): DOCTRINE_CORE trata conteúdo devolvido
 // por web/MCP/arquivo/skill como dado; web_fetch, web_search e todo
 // resultado MCP carregam "untrusted": true no envelope de sucesso, chaves
-// existentes intocadas; read_file marca o mesmo campo para um caminho fora
-// do project_root; as quatro descriptions embutidas e o wrapper MCP citam a
-// mesma frase de aviso; o caso de eval de injeção prende os dois oráculos
-// de mecanismo.
+// existentes intocadas; read_file e skill_view marcam o mesmo campo para um
+// caminho/skill fora do project_root (rodada 1b: SkillTool.view liberado em
+// src/tools/stateful.ts); as quatro descriptions embutidas e o wrapper MCP
+// citam a mesma frase de aviso; o caso de eval de injeção prende os dois
+// oráculos de mecanismo.
 //
 // A issue cita `tests/web-tool.test.ts`, que não existe neste repositório
 // — `webFetchHandler`/`webSearchHandler` (`src/web/tool.ts`) são testados em
@@ -18,6 +19,7 @@ export default {
     "tests/web-tool-chat.test.ts",
     "tests/mcp-tools.test.ts",
     "tests/tools-local.test.ts",
+    "tests/tools-stateful.test.ts",
     "tests/tools-untrusted-content-notice.test.ts",
     "tests/builtin-definitions-budget.test.ts",
     "tests/eval-cases.test.ts",

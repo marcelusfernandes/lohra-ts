@@ -9,9 +9,10 @@ import {
   type WindowsCache,
 } from "../catalog/windows-cache.js";
 import { MemoryStore } from "../memory/store.js";
-import { SkillStore } from "../skills/store.js";
+import { SkillStore, type Skill } from "../skills/store.js";
 import { MODEL_TIERS, readTiers, TiersError, type TierMap } from "../workflow/tiers.js";
 import { toolError, toolResult } from "./envelope.js";
+import { isUntrustedPath } from "./filesystem.js";
 import type { ToolArguments } from "./types.js";
 
 function text(value: unknown): string | null {
@@ -52,6 +53,20 @@ export class MemoryTool {
   }
 }
 
+// Issue #581 (épico #575, P5, rodada 1b): mesmo critério de `readFileTool`
+// (`src/tools/filesystem.ts`) — uma skill cujo arquivo (`skill.path`) não é
+// ancestral do project_root que `findProjectRoot` resolve a partir do cwd
+// real do processo é dado potencialmente de terceiro (skill "home"/builtin,
+// ou de um projeto diferente do que está aberto agora). `skill.path` é
+// sempre definido para uma skill vinda de `SkillStore.get()` (lida de disco
+// por `collectSkillFiles`/`parseSkillMd`) — o `undefined` só existe no tipo
+// `Skill` para permitir construção em memória fora do store; nesse caso
+// hipotético, marcar `untrusted` é o lado seguro (a doutrina promete menos
+// sobre a origem, nunca mais).
+function isUntrustedSkill(skill: Skill): boolean {
+  return skill.path === undefined || isUntrustedPath(skill.path);
+}
+
 export class SkillTool {
   constructor(private readonly store: SkillStore) {}
 
@@ -60,7 +75,12 @@ export class SkillTool {
     if (!name) return toolError("'skill_view' requires 'name'");
     const skill = this.store.get(name);
     if (skill === undefined) return toolError(`no skill named ${JSON.stringify(name)}`);
-    return toolResult(undefined, { name: skill.name, version: skill.version, body: skill.body });
+    return toolResult(undefined, {
+      name: skill.name,
+      version: skill.version,
+      body: skill.body,
+      ...(isUntrustedSkill(skill) ? { untrusted: true } : {}),
+    });
   }
 
   manage(args: ToolArguments): string {
