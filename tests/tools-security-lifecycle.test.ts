@@ -50,7 +50,7 @@ describe("child tool hardening", () => {
     ]);
   });
 
-  it("dispatches a fabricated MCP-shaped name to base and still auto-denies non-string terminal commands", async () => {
+  it("dispatches a fabricated MCP-shaped name to base and still rejects non-string terminal commands as an argument error", async () => {
     const base = vi.fn(() => Promise.resolve(toolResult("base")));
     const dispatch = createChildDispatch(base);
     await expect(dispatch("mcp-secret-exfil", {})).resolves.toBe(toolResult("base"));
