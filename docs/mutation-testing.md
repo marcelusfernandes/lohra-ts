@@ -316,9 +316,14 @@ A issue #519 (M16-S4, épico #490, última sub-issue da milestone "Abort de
 stream em voo") acrescenta 7 mutantes ao caminho de abort em voo já
 mergeado (S1-S3/S5/S6). `supervision-mutants.ts` ganha três: N1
 (`client.ts`'s `AnthropicMessagesClient.stream` deixa de encaminhar
-`signal` na request inicial), N2 (`child-runner.ts` troca
-`error.partialUsage` por `null` no `catch` de `ConversationCancelledError`)
-e N3 (`orchestration-runtime.ts`'s teto de `collect()`'s `deadlineMs`
+`signal` na request inicial), N2 (`child-runner.ts` troca o `usage` de uma
+folha cancelada por `null` no `catch` de `ConversationCancelledError` —
+reancorado pela issue #568 r2, veredito da PR #573: o anchor original
+mirava `error.partialUsage` direto num argumento de `zeroResult(...)`;
+hoje é `const usage = combineUsage(error.measuredUsage,
+error.partialUsage);` que vira `const usage = null;`,
+`supervision-mutants.ts:711-712`) e N3 (`orchestration-runtime.ts`'s teto
+de `collect()`'s `deadlineMs`
 alargado 10x) — 33 + 3 = 36. N3 originalmente mirava
 `CANCEL_SETTLE_TIMEOUT_MS = 0` (a sugestão da própria issue #519), verificado
 NÃO matar: o teste focal sugerido (`tests/workflow-abort-in-flight.test.ts`)

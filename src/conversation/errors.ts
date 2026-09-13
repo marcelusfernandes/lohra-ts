@@ -84,17 +84,32 @@ export class ConversationCancelledError extends ConversationError {
    * merging real measurement in here would silently mark a leaf partial
    * with zero tokens ever estimated. */
   public readonly partialUsage: Usage | null;
-  /** Issue #568 (r2, veredito da PR #573): the turn's own REAL usage
-   * (`usageTotal`, `runtime.ts`) — every iteration of a multi-iteration
-   * turn (a tool-call/pause loop) that completed for real, each with a
-   * genuine provider measurement, BEFORE the one call this error is about
-   * got torn down. `null` when no earlier iteration in this turn ever
-   * completed (the common, single-call case) — never zero-filled, same
-   * "never measured" convention `partialUsage`/`usageUncertain` already
-   * use. A SEPARATE field from `partialUsage` on purpose (see that field's
-   * own doc): `child-runner.ts` is the one reader, and combines the two
-   * into the leaf's reported `usage` while still deriving `partial` from
-   * `partialUsage` alone. */
+  /** Issue #568 (r2, veredito da PR #573): the turn's usage (`usageTotal`,
+   * `runtime.ts`) accumulated BEFORE the one call this error is about got
+   * torn down — real, provider-measured usage from every earlier iteration
+   * of a multi-iteration turn (a tool-call/pause loop) that completed
+   * normally, EXCEPT that a steer-driven interrupt absorbed mid-turn
+   * (#520) also folds its own ESTIMATE into this same `usageTotal` before
+   * this cancel ever throws (`runtime.ts:555-561`, `estimatePartialUsage`)
+   * — so this field is not exhaustively "real measurement" the moment a
+   * turn mixes both triggers. `partial` still derives from `partialUsage`
+   * alone (see that field's own doc), never from whether THIS field
+   * happens to include an estimated portion — carrying
+   * `ConversationTurnResult.partialCalls` through this error too, to tell
+   * the two apart downstream, is out of #568's scope (steer interaction
+   * with cancel is a sibling concern, not this issue's).
+   *
+   * `null` in exactly two cases, never zero-filled (same "never measured"
+   * convention `partialUsage`/`usageUncertain` already use): a
+   * PRE-ISSUANCE cancel (the signal was already aborted before this call's
+   * own request was ever built, `runtime.ts:440`/`:476`) — constructed
+   * with no `measuredUsage` option at all, REGARDLESS of whatever
+   * `usageTotal` an earlier iteration of the SAME turn may already carry;
+   * or a turn where no earlier iteration (real or steer-estimated) ever
+   * measured any usage at all. A SEPARATE field from `partialUsage` on
+   * purpose (see that field's own doc): `child-runner.ts` is the one
+   * reader, and combines the two into the leaf's reported `usage` while
+   * still deriving `partial` from `partialUsage` alone. */
   public readonly measuredUsage: Usage | null;
   public constructor(
     sessionId: string,

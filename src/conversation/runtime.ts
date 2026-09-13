@@ -524,13 +524,16 @@ export class ConversationRuntime {
             // Issue #568 (r2, veredito da PR #573): `partialUsage` stays
             // ONLY this call's own estimate (the contract `errors.ts`
             // documents) — any earlier iteration of the SAME turn (a
-            // tool-call/pause loop) already completed for real and is
-            // sitting in `usageTotal`; that rides along SEPARATELY as
-            // `measuredUsage`, never merged into `partialUsage` itself, so
-            // `child-runner.ts` can report the real total without also
-            // marking a leaf "partial" when nothing was ever estimated
-            // (isAbortOf's 2nd/3rd form, no `StreamAbortedError` to
-            // estimate from).
+            // tool-call/pause loop) already completed — real, or a
+            // steer-absorbed one folding in its own estimate (#520,
+            // `:555-561` below) — and is sitting in `usageTotal`; that
+            // rides along SEPARATELY as `measuredUsage` (see its own doc,
+            // `errors.ts`, for exactly what it can carry), never merged
+            // into `partialUsage` itself, so `child-runner.ts` can report
+            // the accumulated total without also marking a leaf "partial"
+            // for THIS call when nothing about it specifically was ever
+            // estimated (isAbortOf's 2nd/3rd form, no `StreamAbortedError`
+            // to estimate from).
             throw new ConversationCancelledError(sessionId, signal.reason, {
               partialUsage: abortedCallUsage,
               measuredUsage: usageTotal,

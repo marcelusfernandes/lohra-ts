@@ -77,12 +77,13 @@ type LeafUsage = {
   readonly reasoningTokens: number;
 } | null;
 
-/** Issue #568 (r2, veredito da PR #573): sums two usage readings that are
- * NEVER both real or both estimated by construction —
- * `ConversationCancelledError.measuredUsage` (real, the turn's earlier
- * completed iterations) and `.partialUsage` (estimated, the one call that
- * got aborted) — into the single figure `zeroResult` reports as the leaf's
- * own `usage`. A `null` side is a no-op (never zero-filled): `null, null`
+/** Issue #568 (r2, veredito da PR #573): sums two usage readings —
+ * `ConversationCancelledError.measuredUsage` (the turn's earlier completed
+ * iterations; real, except one absorbed by a steer-driven interrupt folds
+ * in its OWN estimate too — see that field's own doc, `errors.ts`) and
+ * `.partialUsage` (this one call's own estimate, the call that got
+ * aborted) — into the single figure `zeroResult` reports as the leaf's own
+ * `usage`. A `null` side is a no-op (never zero-filled): `null, null`
  * stays `null` (nothing measured at all, the plain #232 gap), and either
  * side alone passes through unchanged (the common case — only one of the
  * two is ever non-null outside a multi-iteration cancel). */
@@ -264,16 +265,17 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
       } catch (error) {
         if (error instanceof ConversationCancelledError) {
           // #518 (M16-S3, ADR 0005) + #568 (r2, veredito da PR #573): the
-          // leaf's reported `usage` is the SUM of whatever real usage the
-          // turn's earlier iterations already measured
-          // (`error.measuredUsage`) and this call's own ESTIMATE
+          // leaf's reported `usage` is the SUM of whatever usage the
+          // turn's earlier iterations already accumulated
+          // (`error.measuredUsage` — real, EXCEPT a steer-absorbed
+          // iteration folds in its own estimate too, see that field's own
+          // doc, `errors.ts`) and this call's own ESTIMATE
           // (`error.partialUsage`) — `combineUsage` above, never merged
-          // upstream (see both fields' own doc, `errors.ts`). `usageUncertain`
-          // is forced `true` regardless of what `zeroResult`'s own
-          // null-check would have computed: even a fully-real
-          // `measuredUsage` with no estimate at all is still "as of the
-          // cancel", never a final, provider-confirmed total the way a
-          // COMPLETED turn's usage is.
+          // upstream. `usageUncertain` is forced `true` regardless of what
+          // `zeroResult`'s own null-check would have computed: even a
+          // fully-real `measuredUsage` with no estimate at all is still
+          // "as of the cancel", never a final, provider-confirmed total
+          // the way a COMPLETED turn's usage is.
           //
           // `partial` stays derived from `partialUsage !== null` ALONE —
           // never from the combined `usage` — matching
@@ -283,11 +285,13 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
           // A cancel via `isAbortOf`'s 2nd/3rd form (no `StreamAbortedError`
           // to estimate from) after an earlier iteration already completed
           // for real reports that real `measuredUsage` as `usage`, but is
-          // NOT partial — nothing in it was ever estimated. `partialUsage
-          // === null` and `measuredUsage === null` together (pre-issuance
-          // cancel, or a single-call turn aborted by a non-StreamAbortedError
-          // form) stays the plain #232 "never measured" gap this already
-          // was before #568.
+          // NOT partial — `partialUsage` itself has nothing estimated
+          // (whether `measuredUsage` does, from an EARLIER steer-absorbed
+          // iteration, is #520's own concern, out of #568's scope).
+          // `partialUsage === null` and `measuredUsage === null` together
+          // (pre-issuance cancel, or a single-call turn aborted by a
+          // non-StreamAbortedError form) stays the plain #232 "never
+          // measured" gap this already was before #568.
           const usage = combineUsage(error.measuredUsage, error.partialUsage);
           return {
             ...zeroResult("interrupted", "", profile, model, usage, "cancelled", null),
