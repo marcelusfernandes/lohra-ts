@@ -328,13 +328,21 @@ async function submitAndCollectFrames(
   return { frames, completion };
 }
 
-// Issue #671 item 3: `defaultContextWindow` derived from the REAL tool
-// registry `dashboard.ts` always wires in (`createGatewayToolRuntime`,
-// `src/gateway/tools.ts`), not a literal guessed once against today's tool
-// descriptions. `estimateRequestTokens` is the SAME estimator
-// `ConversationRuntime.preflightCompact` calls (`src/conversation/
+// Issue #671 item 3: `defaultContextWindow` derived from the tool
+// registry's own DEFINITIONS (schemas), not a literal guessed once against
+// today's tool descriptions. `createGatewayToolRuntime(home)` here (no
+// session registry) falls through to `builtinRegistry.getDefinitions()`
+// (`src/gateway/tools.ts`) -- `dashboard.ts`'s real WS turn instead passes
+// `sessionTools.registry` (`composeSessionTools`, `src/commands/session-
+// tools.ts`), built from `createBuiltinRegistry` over the SAME
+// `BUILTIN_DEFINITIONS` and only ever `overrideHandlers`'d afterwards
+// ("Atomically replaces handlers without changing the public schemas or
+// ownership", `src/tools/registry.ts`) -- so the two registries' own
+// `getDefinitions()` are IDENTICAL in count and schema; this measures the
+// real thing, not a lower bound. `estimateRequestTokens` is the SAME
+// estimator `ConversationRuntime.preflightCompact` calls (`src/conversation/
 // runtime.ts`), so this stays accurate as the registry grows or shrinks.
-// `MARGIN_TOKENS` leaves room on both sides of the threshold
+// `CONTEXT_WINDOW_MARGIN_TOKENS` leaves room on both sides of the threshold
 // (`compactionThreshold`, `src/conversation/compaction.ts`) for the
 // 40-message seeded filler history below to land clearly OVER it, and the
 // compacted 8-message tail (`DEFAULT_MIN_KEEP_MESSAGES`) plus tools to land
