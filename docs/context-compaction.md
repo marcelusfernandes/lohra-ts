@@ -282,10 +282,14 @@ sobre a #584 (PR #597):
    soma `calls`/`usage` de `summarize` e `title` num único contador —
    `aux_calls` conta as DUAS chamadas, não só o resumo: numa sessão NOVA
    (sem `--session`) cujo turno compacta, `aux_calls` mostra `2` (resumo +
-   título); numa sessão RETOMADA (`--session` dado), só `1` (resumo — a
-   sessão já tem título ou nunca ganha um por essa via, já que
-   `AuxClient.title()` só roda para uma sessão que este `chat.ts` acabou de
-   criar). `chat.ts` lê isso após `runTurn` e passa a
+   título — só alcançável hoje por um turno com várias idas e vindas de tool
+   calls que juntas estouram a janela, já que a primeira sessão não tem
+   histórico próprio para compactar sozinha); numa sessão nova comum (sem
+   compactar), `aux_calls` mostra `1` (só o título, issue #623); numa sessão
+   RETOMADA (`--session` dado), só `1` quando compacta (resumo — a sessão já
+   tem título ou nunca ganha um por essa via, já que `AuxClient.title()` só
+   roda para uma sessão que este `chat.ts` acabou de criar). `chat.ts` lê
+   isso após `runTurn` (e, desde a #623, também antes — ver item 4) e passa a
    `successEnvelope(result, { auxCalls, auxUsage })` — `usage_total` soma o
    uso do auxiliar (`addUsage`, agora exportado de `runtime.ts`) e
    `aux_calls` só aparece quando > 0, sempre ao final, nunca mudando
@@ -295,7 +299,10 @@ sobre a #584 (PR #597):
    `AuxClient.title()` numa sessão nova (sem `--session`), fail-open com
    evento `title.failed` em stderr; `session_search` modo `browse` já
    devolve o título porque `SessionSearchTool` repassa
-   `SearchRepository.listSessions()` verbatim.
+   `SearchRepository.listSessions()` verbatim. Issue #623: o título é gerado
+   ANTES de `runtime.runTurn` (a partir do mesmo `input` que `result.input`
+   ecoaria) e persistido só depois de `result.sessionId` existir — ver a
+   seção seguinte para o porquê.
 5. **Acréscimo do orquestrador** (veredito da PR #597/#584):
    `maxTranscriptTokens` passado a `attemptCompaction` agora vem de
    `Math.floor(resolution.tokens * TRANSCRIPT_WINDOW_FRACTION)` — a janela
@@ -344,14 +351,47 @@ hardcoded (item 5 da seção anterior) sem repor o pino em si; e
 `tests/chat-compaction-events.test.ts` pina `aux_calls` ponta a ponta contra
 `chat.ts` (com um perfil de `defaultAuxModel` não vazio contra o mesmo
 servidor HTTP local, sem crédito real) para o caso de sessão RETOMADA
-(`--session` dado, `aux_calls: 1`). O caso de sessão NOVA (`aux_calls: 2`,
-resumo + título) fica documentado como bloqueado por um bug pré-existente e
-não corrigido por esta issue: `ConversationRuntime.runTurn`'s próprio
-`finally` fecha o `modelTransport` incondicionalmente
-(`src/conversation/runtime.ts:792`), o que fecha o `client` subjacente que
-`chat.ts` também passa ao `AuxClient`; `AuxClient.title()`
-(`src/commands/chat.ts:521`, só alcançado numa sessão nova) roda DEPOIS que
-`runTurn` retorna, contra um client já fechado, e sempre lança
-`CLIENT_CLOSED` — engolido pelo `catch` fail-open de `chat.ts` (evento
-`title.failed`). Discutido no comentário da issue #620; o conserto precisa
-tocar `chat.ts` ou `runtime.ts`, os dois fora do `Files` desta issue.
+(`--session` dado, `aux_calls: 1`). O caso de sessão NOVA ficou documentado
+como bloqueado por um bug pré-existente até a #623 (seção seguinte).
+
+## Título de sessão nova via AuxClient roda antes do transporte fechar (issue #623)
+
+`ConversationRuntime.runTurn`'s próprio `finally` fecha o `modelTransport`
+incondicionalmente (`src/conversation/runtime.ts:792`), o que fecha o
+`client` subjacente que `chat.ts` também passa ao `AuxClient`
+(`src/commands/chat.ts:371-390`). Antes desta issue, `AuxClient.title()`
+(alcançado só numa sessão nova, sem `--session`) rodava DEPOIS que `runTurn`
+retornava, contra um client já fechado, e sempre lançava `CLIENT_CLOSED` —
+engolido pelo `catch` fail-open de `chat.ts` (evento `title.failed`).
+Nenhuma sessão nova com `defaultAuxModel` configurado jamais ganhava título
+em produção; `aux_calls` nunca contava a chamada do título. Diagnosticado no
+comentário da issue #620.
+
+Correção: `chat.ts` gera o título ANTES de chamar `runtime.runTurn`, a
+partir do mesmo `input` que `result.input` ecoa (`runtime.ts:735` — os dois
+são sempre o mesmo texto) — o transporte ainda está aberto nesse ponto. A
+persistência (`sessions.setTitle`) continua só depois de `result.sessionId`
+existir (o id que `runTurn` acabou de criar via `idSource`/`createSession`),
+com seu próprio `try`/`catch` fail-open: uma falha de escrita no `state.db`
+não transforma um turno bem-sucedido numa resposta de erro. O caminho de
+falha real do auxiliar continua fail-open com o mesmo evento nomeado
+(`title.failed`) nos dois pontos (geração e persistência) — nunca deixando
+de terminar o turno.
+
+Tradeoff aceito: a chamada ao auxiliar agora roda sequencialmente ANTES do
+turno (não concorrente com ele) numa sessão nova com `defaultAuxModel` —
+mais uma ida-e-volta de rede antes do turno começar, perceptível no modo
+interativo. A alternativa (opção 2 do corpo da issue: envolver o
+`modelTransport` com um `NonClosingTransport` e fechar o `client`
+explicitamente no `finally` de `runChat`) exigiria provar que o client
+fecha exatamente uma vez em todo caminho (sucesso, erro, abort) sem tocar
+`runtime.ts` nem reabrir a questão de quem é dono do ciclo de vida do
+client compartilhado com o `ClientPool` — descartada em favor da correção
+mais simples.
+
+`tests/chat-compaction-events.test.ts` ganhou dois testes: o caminho feliz
+de sessão nova (`aux_calls: 1`, título persistido, sem `title.failed` no
+stderr) e o caminho de falha real do título (fixture que derruba só a
+chamada de 32 tokens do título — `AuxClient.title()` é a única chamada com
+esse `max_tokens` — mantendo o turno em `code: 0`, `aux_calls: 0`, título
+`null` e `title.failed` no stderr).
