@@ -26,6 +26,7 @@ import { createGatewayUpgradeHandler } from "../gateway/ws/connection.js";
 import { startGatewayHttpServer } from "../gateway/http/server.js";
 import { routeGatewayRequest, type RouteContext } from "../gateway/http/routes.js";
 import { noProvider } from "./chat-boundary.js";
+import { detectChatProvider, type ChatProviderDetection } from "./provider-detectado.js";
 import { subscriptionProviderRefusal } from "./subscription-guard.js";
 import {
   AnthropicMessagesModel,
@@ -227,13 +228,19 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
         }),
       );
   } else {
-    if (provider === undefined) {
-      options.stderr(noProvider);
+    // Issue #604: mesma regra de `chat.ts` -- sem `--provider`, usa o
+    // provedor que `doctor` reporta como `detected_provider` antes de cair
+    // na fronteira de sempre.
+    const detected = provider === undefined ? detectChatProvider(options.environment) : null;
+    if (detected?.provider === null) {
+      options.stderr(detected.detail !== null ? `${detected.detail}\n` : noProvider);
       return 2;
     }
-    const resolvedProfile = getProviderProfile(provider);
+    const resolvedProviderName = provider ?? (detected as ChatProviderDetection).provider;
+    if (resolvedProviderName === null) throw new Error("internal: no provider resolved (#604)");
+    const resolvedProfile = getProviderProfile(resolvedProviderName);
     if (resolvedProfile === null) {
-      options.stderr(`unknown provider '${provider.toLowerCase()}'\n`);
+      options.stderr(`unknown provider '${resolvedProviderName.toLowerCase()}'\n`);
       return 2;
     }
     profile =

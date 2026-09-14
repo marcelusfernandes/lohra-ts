@@ -46,12 +46,32 @@ function baseOptions(overrides: BaseOptionsOverrides = {}) {
 
 describe("runDashboard: no provider configured (assertion 56)", () => {
   it("exits 2 with the exact didactic no-provider text, matching chat's boundary", async () => {
-    const options = baseOptions({ argv: [] });
+    // Issue #604: `baseOptions()`'s default `environment` carries
+    // `ANTHROPIC_API_KEY` (needed by the OTHER describes below, which pass
+    // `--provider anthropic` explicitly) -- an empty one here is what keeps
+    // this a genuine "nothing configured" case now that a bare `--provider`less
+    // invocation with a real key no longer falls to this boundary.
+    const options = baseOptions({ argv: [], environment: {} });
     const code = await runDashboard(options);
     expect(code).toBe(2);
     expect(options.stderrLines.join("")).toContain(
       "no provider configured — there are three ways in:",
     );
+  });
+});
+
+describe("runDashboard: sem --provider usa o provedor detectado (issue #604)", () => {
+  it("boots successfully with ANTHROPIC_API_KEY set and no --provider flag", async () => {
+    const options = baseOptions({ argv: [] });
+    const { ready, shutdown } = waitUntilBound(options);
+    const donePromise = runDashboard(options);
+    await Promise.race([ready, donePromise]);
+    expect(options.stderrLines.some((line) => line.startsWith("Lohra dashboard: http://"))).toBe(
+      true,
+    );
+    shutdown();
+    const code = await donePromise;
+    expect(code).toBe(0);
   });
 });
 
