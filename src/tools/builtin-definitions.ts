@@ -277,7 +277,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Schedule prompts as autonomous agent turns \u2014 recurring or one-off. 'interval'=minutes; 'once'=epoch timestamp; 'cron'=5-field expr. Each run is isolated \u2014 write a self-contained prompt.",
+        "Schedule prompts as autonomous agent turns \u2014 recurring or one-off automated work the user asked for. 'interval'=minutes; 'once'=epoch timestamp; 'cron'=5-field expr. Each run is isolated \u2014 write a self-contained prompt.",
       parameters: {
         type: "object",
         properties: {
@@ -490,7 +490,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Poll a workflow run's status/outputs by run_id. 'wait' blocks until done; 'progress' is live mid-run. 'paused' means stopped resumably \u2014 finished nodes kept; resume with run_workflow(resume_run_id=...). A checkpoint pause carries {node_id, prompt, default?, rename_hint?}. 'sandbox_refusals' is ADVISORY, never on its own flips 'status' from 'complete'. Other rollup fields (fault_kinds, partial_leaves, usage_uncertain_leaves) glossed in the workflow-authoring skill.",
+        "Poll a workflow run's status/outputs by run_id. 'wait' blocks until done; 'progress' is live mid-run. 'paused' means stopped resumably \u2014 finished nodes kept; resume with run_workflow(resume_run_id=...). A checkpoint pause carries {node_id, prompt, default?, rename_hint?}. 'sandbox_refusals' is ADVISORY, never on its own flips 'status' from 'complete'. Other rollup fields glossed in the workflow-authoring skill.",
       parameters: {
         type: "object",
         properties: {
