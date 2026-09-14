@@ -353,3 +353,162 @@ describe("doctor × chat contract (issue #604): 'usable' significa a mesma coisa
     );
   });
 });
+
+describe("doctor × chat, só Ollama vivo (issue #631): usable diz sim, chat cai na fronteira", () => {
+  function closeServer(server: Server): Promise<void> {
+    return new Promise((resolvePromise, reject) => {
+      server.close((error) => {
+        if (error === undefined) resolvePromise();
+        else reject(error);
+      });
+    });
+  }
+
+  const aliveOllama = {
+    alive: true,
+    detail: "",
+    models: ["stub-coder:1b"],
+    url: "http://localhost:11434/api/tags",
+  };
+
+  it("doctor --json: usable true, detected_provider null, chat_default_provider null (asserção cruzada com chat)", async () => {
+    const env = environment();
+
+    const doctorStdout: string[] = [];
+    const doctorCode = await runCli(["doctor", "--json"], {
+      environment: env,
+      stdout: (value) => doctorStdout.push(value),
+      stderr: () => undefined,
+      probeOllama: () => Promise.resolve(aliveOllama),
+    });
+    expect(doctorCode).toBe(0);
+    const doctorReport = JSON.parse(doctorStdout.join("")) as {
+      environment: {
+        usable: boolean;
+        detected_provider: string | null;
+        chat_default_provider: string | null;
+      };
+    };
+    expect(doctorReport.environment.usable).toBe(true);
+    expect(doctorReport.environment.detected_provider).toBeNull();
+    expect(doctorReport.environment.chat_default_provider).toBeNull();
+
+    // Mesma home, mesmo ambiente: o que `chat` sem `--provider` de fato faz
+    // -- a asserção cruzada que prova que `chat_default_provider: null`
+    // significa exatamente "chat vai cair na fronteira", não uma promessa
+    // que o `chat` não cumpre.
+    const chatStdout: string[] = [];
+    const chatCode = await runCli(["chat", "--json", "--no-input", "oi"], {
+      environment: env,
+      stdout: (value) => chatStdout.push(value),
+      stderr: () => undefined,
+    });
+    expect(chatCode).toBe(2);
+    const envelope = JSON.parse(chatStdout.join("")) as { error: string | null };
+    expect(envelope.error).toBe(
+      "no provider configured — run `lohra init` (or `lohra doctor`); details on stderr",
+    );
+  });
+
+  it("doctor (texto): instrui --provider ollama / LOHRA_PROVIDER=ollama quando usable só vem do Ollama", async () => {
+    const stdout: string[] = [];
+    const code = await runCli(["doctor"], {
+      environment: environment(),
+      stdout: (value) => stdout.push(value),
+      stderr: () => undefined,
+      probeOllama: () => Promise.resolve(aliveOllama),
+    });
+    expect(code).toBe(0);
+    const report = stdout.join("");
+    expect(report).toContain("--provider ollama");
+    expect(report).toContain("LOHRA_PROVIDER=ollama");
+  });
+
+  it("home com chave: chat_default_provider concorda com detected_provider, e chat sem --provider não faz nenhuma requisição ao Ollama", async () => {
+    const chatServer = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        const text = JSON.stringify({
+          id: "msg_t631_doctor",
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "ok" }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 1, output_tokens: 1 },
+        });
+        response.writeHead(200, {
+          "content-type": "application/json",
+          "content-length": String(Buffer.byteLength(text)),
+        });
+        response.end(text);
+      });
+    });
+    let ollamaCalls = 0;
+    const ollamaServer = createServer((_request, response) => {
+      ollamaCalls += 1;
+      response.writeHead(500);
+      response.end("t631: chat with an API key must never probe Ollama");
+    });
+    await new Promise<void>((resolvePromise) => chatServer.listen(0, "127.0.0.1", resolvePromise));
+    await new Promise<void>((resolvePromise) =>
+      ollamaServer.listen(0, "127.0.0.1", resolvePromise),
+    );
+    const originalConnect = process.env.LOHRA_OLLAMA_CONNECT_URL;
+    try {
+      const chatAddress = chatServer.address();
+      const ollamaAddress = ollamaServer.address();
+      if (
+        chatAddress === null ||
+        typeof chatAddress === "string" ||
+        ollamaAddress === null ||
+        typeof ollamaAddress === "string"
+      )
+        throw new Error("missing test port");
+      process.env.LOHRA_OLLAMA_CONNECT_URL = `http://127.0.0.1:${String(ollamaAddress.port)}/api/tags`;
+      const env = {
+        ...environment(),
+        ANTHROPIC_API_KEY: "sk-t631-fake",
+        LOHRA_PROVIDER_BASE_URL: `http://127.0.0.1:${String(chatAddress.port)}`,
+      };
+
+      const doctorStdout: string[] = [];
+      // `probeOllama: false` isolates the doctor call itself from
+      // `ollamaCalls` -- doctor is SUPPOSED to probe Ollama (that is its
+      // job); the counter below exists to catch `chat`, which is not.
+      const doctorCode = await runCli(["doctor", "--json"], {
+        environment: env,
+        stdout: (value) => doctorStdout.push(value),
+        stderr: () => undefined,
+        probeOllama: () => Promise.resolve(false),
+      });
+      expect(doctorCode).toBe(0);
+      const doctorReport = JSON.parse(doctorStdout.join("")) as {
+        environment: { detected_provider: string | null; chat_default_provider: string | null };
+      };
+      expect(doctorReport.environment.detected_provider).toBe("anthropic");
+      expect(doctorReport.environment.chat_default_provider).toBe("anthropic");
+      expect(ollamaCalls).toBe(0);
+
+      // `chat` never calls `probeOllamaDown` (`detectChatProvider` only
+      // resolves against environment variables) -- `LOHRA_OLLAMA_CONNECT_URL`
+      // still points at the stub above, so any future probe added to the
+      // api_key/no-`--provider` path would move `ollamaCalls`.
+      const chatStdout: string[] = [];
+      const chatCode = await runCli(["chat", "--json", "--no-input", "--no-tools", "oi"], {
+        environment: env,
+        stdout: (value) => chatStdout.push(value),
+        stderr: () => undefined,
+      });
+      expect(chatCode).toBe(0);
+      const envelope = JSON.parse(chatStdout.join("")) as { error: string | null };
+      expect(envelope.error).toBeNull();
+      expect(ollamaCalls).toBe(0);
+    } finally {
+      if (originalConnect === undefined) delete process.env.LOHRA_OLLAMA_CONNECT_URL;
+      else process.env.LOHRA_OLLAMA_CONNECT_URL = originalConnect;
+      await closeServer(chatServer);
+      await closeServer(ollamaServer);
+    }
+  });
+});
