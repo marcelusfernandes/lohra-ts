@@ -512,6 +512,26 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   });
   try {
     const sessionId = stringFlag(options.flags, "--session");
+    // Issue #623: generated BEFORE runTurn, from the same `input` the user
+    // gave (byte-identical to `result.input`, `runtime.ts:735`, the value
+    // this used to read AFTER runTurn returned). `ConversationRuntime.
+    // runTurn`'s own `finally` unconditionally closes `modelTransport`
+    // (`runtime.ts:792`), which for this route forwards straight to the
+    // same underlying `client` the `AuxClient` above wraps (L371-390) — a
+    // title request issued after `runTurn` returns always hit an
+    // already-closed client (`CLIENT_CLOSED`, diagnosed on issue #620).
+    // Fail-open here exactly as before: a title failure never blocks the
+    // turn, only skips persistence below.
+    let title: string | null = null;
+    if (sessionId === undefined && auxTelemetry !== undefined) {
+      try {
+        title = (await auxTelemetry.title(input)) || null;
+      } catch (error) {
+        compactionEvents.push(
+          `event: title.failed code=${error instanceof Error ? error.name : "UNKNOWN"}\n`,
+        );
+      }
+    }
     const result = await runtime.runTurn({
       input,
       provider: profile.name,
@@ -520,13 +540,15 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       cwd: options.cwd,
       ...(sessionId === undefined ? {} : { sessionId }),
     });
-    // Issue #587 AC ("ao criar a sessão... gerar e persistir title"): only
-    // for a session THIS call created (no --session given) and only when
-    // the profile has a defaultAuxModel — fail-open, never breaks the turn.
-    if (sessionId === undefined && auxTelemetry !== undefined) {
+    // Issue #587 AC ("ao criar a sessão... gerar e persistir title"):
+    // persisted only once the session row is known to exist —
+    // `result.sessionId` is the id `runTurn` just created via
+    // `idSource`/`createSession`. Its own try/catch keeps a DB write
+    // failure from turning an otherwise successful turn into an error
+    // envelope (same fail-open contract as the title generation above).
+    if (title !== null) {
       try {
-        const title = await auxTelemetry.title(result.input);
-        if (title) sessions.setTitle(result.sessionId, title);
+        sessions.setTitle(result.sessionId, title);
       } catch (error) {
         compactionEvents.push(
           `event: title.failed code=${error instanceof Error ? error.name : "UNKNOWN"}\n`,
