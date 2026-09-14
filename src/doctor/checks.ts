@@ -76,6 +76,15 @@ function countNamed(value: unknown, key: string, noun: string): string {
   return count === null ? "valid JSON" : `${String(count)} ${noun}`;
 }
 
+// Issue #633 (test(red)): stub for the readiness function `providerCheck`
+// and the `ollama-sem-chave` Check will share -- kept unwired here so the
+// rest of `runChecks` keeps its base behavior (and every existing test
+// keeps passing) while `tests/doctor-checks-ollama.test.ts`'s direct calls
+// fail at runtime, not at compile time (controle-negativo).
+export function isOllamaReady(_ollama: DoctorEnvironment["ollama"]): never {
+  throw new Error("not implemented: isOllamaReady");
+}
+
 export function runChecks(environment: DoctorEnvironment): readonly Check[] {
   const provider = environment.providers.find(
     (entry) => entry.provider === environment.detected_provider,
