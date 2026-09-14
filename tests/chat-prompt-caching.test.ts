@@ -213,3 +213,105 @@ describe("chat.ts passes the full SystemPromptSnapshot to the Anthropic transpor
     }
   });
 });
+
+// Issue #649 (sub-issue B1 de #637, AC3): o request Anthropic da sessão
+// retomada tem de ser byte-idêntico ao gravado — não só ao nível de
+// `ConversationRuntime` (`tests/conversation-sqlite-prompt-caching.test.ts`),
+// mas pela wiring real de `chat.ts`: dois `runChat` inteiros, o segundo
+// retomando via `--session`, sobre o MESMO `home` (mesmo state.db). O
+// segundo processo resolve uma doutrina DIFERENTE do primeiro
+// (`LOHRA_DOCTRINE` muda entre as duas chamadas) — a única forma de provar
+// que o corpo enviado ao provedor vem do banco, não da closure deste
+// processo.
+describe("chat.ts resumed session sends the request Anthropic byte-identical to what was persisted (#649)", () => {
+  it("a second runChat --session reuses the FIRST call's system bands, never this process's own doctrine/date", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-t649-chat-resume-"));
+    roots.push(root);
+    const bodies: Readonly<Record<string, unknown>>[] = [];
+    const server = startServer((body) => {
+      bodies.push(body);
+    });
+    await new Promise<void>((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("missing test port");
+      const provider = "t649-chat-resume-anthropic-probe";
+      registerProvider({
+        name: provider,
+        apiMode: "anthropic_messages",
+        aliases: [],
+        displayName: "T649 chat resume Anthropic probe",
+        description: "Local stub for the Anthropic Messages wire (issue #649).",
+        signupUrl: "",
+        envVars: ["T649_CHAT_RESUME_KEY"],
+        baseUrl: `http://127.0.0.1:${String(address.port)}`,
+        modelsUrl: "",
+        requiresApiKey: true,
+        supportsVision: false,
+        fallbackModels: ["t649-chat-resume-model"],
+        defaultMaxTokens: 256,
+        defaultAuxModel: "",
+      });
+      const baseEnvironment = {
+        HOME: root,
+        PATH: process.env.PATH ?? "",
+        T649_CHAT_RESUME_KEY: "test-key",
+      };
+      const home = join(root, ".lohra");
+      const codexHome = join(root, ".codex");
+
+      const result1 = await runChat({
+        input: "say hi",
+        flags: new Map<string, string | true>([
+          ["--provider", provider],
+          ["--model", "t649-chat-resume-model"],
+          ["--json", true],
+          ["--no-input", true],
+          ["--no-tools", true],
+        ]),
+        environment: { ...baseEnvironment, LOHRA_DOCTRINE: "core" },
+        home,
+        codexHome,
+        cwd: root,
+      });
+      expect(result1.code).toBe(0);
+      const sessionId = (JSON.parse(result1.stdout) as { session_id?: string }).session_id;
+      expect(typeof sessionId).toBe("string");
+      expect(bodies).toHaveLength(1);
+
+      // A second PROCESS-EQUIVALENT call resuming the SAME session, with a
+      // DIFFERENT doctrine resolved for this process's own promptSnapshot()
+      // (never actually used, since the session is resumed, not created).
+      const result2 = await runChat({
+        input: "say hi again",
+        flags: new Map<string, string | true>([
+          ["--provider", provider],
+          ["--model", "t649-chat-resume-model"],
+          ["--json", true],
+          ["--no-input", true],
+          ["--no-tools", true],
+          ["--session", sessionId as string],
+        ]),
+        environment: { ...baseEnvironment, LOHRA_DOCTRINE: "extended" },
+        home,
+        codexHome,
+        cwd: root,
+      });
+      expect(result2.code).toBe(0);
+      expect(bodies).toHaveLength(2);
+
+      const system1 = JSON.stringify(bodies[0]?.system);
+      const system2 = JSON.stringify(bodies[1]?.system);
+      // Byte-identical: the second request's `system` is exactly what the
+      // first call persisted, never recomputed for this second call.
+      expect(system2).toBe(system1);
+      // Pin against a false positive where both happen to render the same
+      // text for unrelated reasons: `extended`-only doctrine text must be
+      // ABSENT from the resumed request, even though this second call's own
+      // promptSnapshot() would have included it had it been used.
+      expect(system2).not.toContain("Diagnosing a problem is not the same as fixing it");
+    } finally {
+      await closeServer(server);
+    }
+  });
+});

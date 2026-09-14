@@ -80,7 +80,8 @@ describe("resolveTurnSession (#649)", () => {
 
   it("throws SESSION_NOT_FOUND when an explicit sessionId doesn't resolve", () => {
     const repository = new MemoryRepository();
-    expect(() =>
+    let caught: unknown;
+    try {
       resolveTurnSession({
         repository,
         sessionId: "missing",
@@ -90,8 +91,13 @@ describe("resolveTurnSession (#649)", () => {
         promptSnapshot: () => bandsA,
         model: "m",
         cwd: "/tmp",
-      }),
-    ).toThrow(ConversationError);
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ConversationError);
+    expect((caught as ConversationError).code).toBe("SESSION_NOT_FOUND");
+    expect((caught as ConversationError).sessionId).toBe("missing");
     expect(repository.created).toEqual([]);
   });
 
