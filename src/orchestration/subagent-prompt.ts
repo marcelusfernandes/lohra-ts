@@ -26,14 +26,16 @@ const SUBAGENT_ISOLATION =
  * (`child-runner.ts`) always come from the SAME filter over the SAME parent
  * catalog, so the two can never name a different set of tools.
  *
- * Issue #641 (épico #637, grupo F, item 21): the caller (`chat-wiring.ts`)
- * only threads `toolNames` when it is non-empty — `buildSubagentSystemPrompt`
- * omits this whole block otherwise (see `toolNames.length === 0` below) —
- * so `toolNames` is always non-empty here; there is no `"none"` branch to
- * reach. The old text also promised "any other tool name is refused", which
- * `child-runner.ts:263-265` contradicts for a leaf forced into structured
- * output: `forcedDefinition` is appended to this same array without ever
- * being named in this sentence.
+ * Issue #641 (épico #637, grupo F, item 21; correção de atribuição na #670,
+ * veredito PR #644): `chat-wiring.ts` (`:91-96`) threads `toolNames` on
+ * EVERY spawn, unconditionally — it never omits the block. It's THIS
+ * function, `buildSubagentSystemPrompt`, that omits the whole block when
+ * `toolNames.length === 0` (below) — so `toolsLine` above is always called
+ * with a non-empty array in practice; there is no `"none"` branch to
+ * reach here either way. The old text also promised "any other tool name is
+ * refused", which `child-runner.ts:263-265` contradicts for a leaf forced
+ * into structured output: `forcedDefinition` is appended to this same array
+ * without ever being named in this sentence.
  */
 function toolsLine(toolNames: readonly string[]): string {
   const names = toolNames.join(", ");

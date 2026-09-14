@@ -38,9 +38,12 @@
 //   métodos ao repositório SQLite do pai, então o subagente compacta como
 //   chat/dashboard;
 // - um `<system-reminder>` literal só existe hoje em
-//   `src/orchestration/steer-inbox.ts:14` (`wrapSteerInbox`), drenado no
-//   turno de um FILHO steerado (`src/orchestration/core.ts:433`) — a frase
-//   abaixo é deliberadamente condicional ("se você ver um bloco…") para
+//   `src/orchestration/steer-inbox.ts:14` (`wrapSteerInbox`), drenado por
+//   `drainInboxFor` (`src/orchestration/core.ts:447-451`) — correção de
+//   atribuição na #670 (veredito PR #658): `core.ts:433` é
+//   `this.runAndTrack(` (ressurreição de um filho idle), não o dreno em si.
+//   A frase abaixo é deliberadamente condicional ("se você ver um bloco…")
+//   para
 //   continuar verdadeira em todo modo mesmo onde o mecanismo nunca dispara;
 //   ela também não afirma de onde TODA ocorrência da tag vem — nenhum
 //   filtro em server/gateway/conversation impede um turno de usuário de

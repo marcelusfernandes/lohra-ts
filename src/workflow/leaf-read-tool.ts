@@ -6,9 +6,10 @@
 // `src/commands/session-tools.ts`, not inside the class.
 //
 // "Partial" here means "turns already committed" — `conversation/runtime.ts`
-// only calls `commitTurn` at the END of a turn (:578-586), so the turn
-// currently in flight is never in `messages` and this tool can never surface
-// it (see the issue's "Fora de escopo": would require changing `CollectOutcome`).
+// only calls `commitTurn` at the END of a turn (:712-719, correção de
+// citação na #670/#669), so the turn currently in flight is never in
+// `messages` and this tool can never surface it (see the issue's "Fora de
+// escopo": would require changing `CollectOutcome`).
 //
 // Membership check: `sub_id` must (1) be a session with `source:'orchestration'`
 // (`child-repository.ts:38-51` stamps every leaf that way) and (2) belong to

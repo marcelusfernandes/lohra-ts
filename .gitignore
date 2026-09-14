@@ -12,3 +12,5 @@ lohra/
 .claude/settings.local.json
 .claude/worktrees/
 .prova/
+lohra-symlink-out-*/
+.lohra-skill-inproject-*/

@@ -1,4 +1,12 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -6,6 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   ApprovalManager,
+  isUntrustedPath,
   parseToolArguments,
   readFileTool,
   terminalTool,
@@ -97,6 +106,30 @@ describe("filesystem tools", () => {
     symlinkSync(join(process.cwd(), "package.json"), link);
     const result = JSON.parse(readFileTool({ path: link })) as Record<string, unknown>;
     expect("untrusted" in result).toBe(false);
+  });
+
+  // Issue #670 (residual F3, veredito PR #655 item 4): `realOrResolved`
+  // fail-OPEN em qualquer erro não-`ENOENT` (`realpathSync` lança, o
+  // `catch` devolve `resolve(path)` — que não segue symlink e não prova
+  // nada sobre a fronteira). Um ciclo de symlinks DENTRO do projeto faz
+  // `realpathSync` lançar `ELOOP`; o caminho real não pode ser
+  // estabelecido, então a fronteira tem que fechar (`untrusted: true`),
+  // nunca abrir por engano. `read_file` em si não prova isso: `readFileSync`
+  // lança ELOOP antes de `isUntrustedPath` rodar (a leitura em si já
+  // falha) — por isso o teste chama `isUntrustedPath` direto, como
+  // `readFileTool` chamaria internamente.
+  it("isUntrustedPath fails closed (untrusted) when the boundary can't be resolved (ELOOP cycle, #670)", () => {
+    // realpathSync on the root itself (macOS: os.tmpdir() often lives
+    // behind its own symlink, e.g. /var/folders/... -> /private/var/...) —
+    // otherwise the canonicalization gap between root and path alone would
+    // already read as "outside", true on both the old and the fixed code,
+    // proving nothing about the ELOOP fail-open/fail-closed distinction.
+    const dir = realpathSync(root());
+    const a = join(dir, "a");
+    const b = join(dir, "b");
+    symlinkSync(b, a);
+    symlinkSync(a, b);
+    expect(isUntrustedPath(a, dir)).toBe(true);
   });
 
   it("writes parent directories, UTF-8 bytes, and validates content", () => {

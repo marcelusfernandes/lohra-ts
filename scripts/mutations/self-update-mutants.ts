@@ -24,6 +24,12 @@
 // (`T22-dashboard-notices-dropped`) e `connection.ts` descartando
 // `deps.summarize` (`T22-connection-summarize-dropped`) — os dois campos
 // que #608/#587 deixaram sem caller de produção na WS.
+//
+// Issue #670 (residual F3, veredito PR #655 item 2) acrescenta a décima
+// segunda: `session-tools.ts:149` deixando de passar `{ projectRoot }` ao
+// `SkillTool` da sessão (`T22-session-tools-skill-project-root-dropped`) —
+// sem ele, a origem de uma skill seria julgada pela raiz do PROCESSO, não
+// da sessão.
 import type { Mutant } from "./types.js";
 
 const repo = "src/self-update/repo.ts";
@@ -190,6 +196,22 @@ export const mutants: readonly Mutant[] = [
         file: dashboard,
         before: "    notices,\n" + "    ...(aux === null ? {} : { summarize: aux.summarizer() }),",
         after: "    ...(aux === null ? {} : { summarize: aux.summarizer() }),",
+      },
+    ],
+  },
+  {
+    id: "T22-session-tools-skill-project-root-dropped",
+    category: "session-tools-skill-project-root-dropped",
+    mechanism: "family-a",
+    focus: {
+      file: "tests/session-tools.test.ts",
+      test: "wires skill_view's origin to the session's own cwd, not the process's (#670)",
+    },
+    edits: [
+      {
+        file: sessionTools,
+        before: "    { projectRoot: findProjectRoot(options.cwd) },",
+        after: "    {},",
       },
     ],
   },

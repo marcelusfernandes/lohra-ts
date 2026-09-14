@@ -293,9 +293,11 @@ function definedEntries(environment: NodeJS.ProcessEnv): Readonly<Record<string,
  * `~/.lohra` (o profile default do operador) e o baseline grava sessões no
  * MESMO `state.db` das sessões reais dele. `.env` independe de profile
  * (`envFile` é sempre `~/.lohra/.env`), então isolar o profile nunca esconde
- * as credenciais. Um `LOHRA_PROFILE` já exportado pelo operador vence — o
- * default é só para quem não escolheu nenhum, nunca uma imposição sobre uma
- * escolha explícita. */
+ * as credenciais. Um `LOHRA_PROFILE` não-vazio já exportado pelo operador
+ * vence — correção de atribuição na #670 (veredito PR #656): `""` exportada
+ * NÃO vence (o `||` logo abaixo cai no mesmo default de quem não escolheu
+ * nenhum) — o default nunca se impõe sobre uma escolha explícita e
+ * não-vazia. */
 export function buildProviderEnvironment(processEnv: NodeJS.ProcessEnv): Record<string, string> {
   return {
     ...definedEntries(processEnv),

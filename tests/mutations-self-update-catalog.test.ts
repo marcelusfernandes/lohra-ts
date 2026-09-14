@@ -12,7 +12,10 @@
 // doutrina, issue #579). Issue #651 (sub-issue C1 de #637) acrescenta a
 // décima e a décima primeira: `T22-dashboard-notices-dropped` e
 // `T22-connection-summarize-dropped` (fiação do overlay de avisos e do
-// `summarize` do `AuxClient` no turno WS do gateway).
+// `summarize` do `AuxClient` no turno WS do gateway). Issue #670 (residual
+// F3, veredito PR #655 item 2) acrescenta a décima segunda:
+// `T22-session-tools-skill-project-root-dropped` (`session-tools.ts:149`
+// deixa de passar `projectRoot` ao `SkillTool` da sessão).
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -37,8 +40,8 @@ function realTestTitles(testSource: string): ReadonlySet<string> {
 }
 
 describe("catálogo de mutação self-update", () => {
-  it("tem exatamente 11 mutantes", () => {
-    expect(mutants).toHaveLength(11);
+  it("tem exatamente 12 mutantes", () => {
+    expect(mutants).toHaveLength(12);
   });
 
   it("ids são únicos", () => {

@@ -139,17 +139,43 @@ function collectSkillFiles(root: string): string[] {
   return output.sort();
 }
 
+// Bare stderr line, no level prefix -- mesmo padrão de `src/mcp/manager.ts`'s
+// `warn`. `realOrResolved` não recebe (nem passa adiante) um callback de
+// `warning` injetável -- nenhum dos dois chamadores (`within` abaixo,
+// `isUntrustedPath` em `src/tools/filesystem.ts`) tem um canal desses hoje
+// -- então esta é a única saída disponível para nomear a causa (invariante
+// 2: falha nunca silenciosa) sem mudar a assinatura pura da função.
+function warn(message: string): void {
+  process.stderr.write(`${message}\n`);
+}
+
 // Issue #642: exportada para `src/tools/filesystem.ts` reusar a MESMA régua
 // tolerante a ENOENT (sem duplicar) — `isUntrustedPath` media a fronteira do
 // projeto com `resolve()`, que não segue symlink.
-export function realOrResolved(path: string): string {
+//
+// Issue #670 (residual F3, veredito PR #655 item 4): um erro NÃO-`ENOENT`
+// (ex.: `ELOOP` de um ciclo de symlinks, `EACCES` num diretório
+// intermediário) significa "o caminho real não pode ser estabelecido" —
+// antes disso, o `catch` devolvia `resolve(path)`, que não segue symlink e
+// não prova NADA sobre a fronteira: era o mesmo defeito de fail-open que a
+// #642 já tinha corrigido para o caso comum. `ENOENT` continua tolerante
+// (segue subindo até achar um ancestral que existe) — é o caso legítimo de
+// um caminho ainda não criado (`skill_manage create`). `null` é o sinal
+// público de "não estabelecido"; `warn` acima nomeia `path` e `code` no
+// stderr ANTES de devolver `null` — nunca um `catch` genérico engolindo o
+// `code` em silêncio.
+export function realOrResolved(path: string): string | null {
   const suffix: string[] = [];
   let current = path;
   for (;;) {
     try {
       return join(realpathSync(current), ...suffix);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return resolve(path);
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") {
+        warn(`realOrResolved: ${path} unresolved (${code ?? "unknown error"})`);
+        return null;
+      }
       const parent = dirname(current);
       if (parent === current) return resolve(path);
       suffix.unshift(basename(current));
@@ -158,8 +184,13 @@ export function realOrResolved(path: string): string {
   }
 }
 
+// Issue #670: `null` de qualquer lado (fronteira não estabelecida) fecha —
+// nunca "dentro" por padrão.
 function within(path: string, root: string): boolean {
-  const value = relative(realOrResolved(root), realOrResolved(path));
+  const resolvedRoot = realOrResolved(root);
+  const resolvedPath = realOrResolved(path);
+  if (resolvedRoot === null || resolvedPath === null) return false;
+  const value = relative(resolvedRoot, resolvedPath);
   return value === "" || (!value.startsWith("..") && !isAbsolute(value));
 }
 

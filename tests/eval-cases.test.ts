@@ -121,6 +121,21 @@ function isKnownSafeTerminalCommand(command: string): boolean {
   return SAFE_TERMINAL_COMMAND.test(command);
 }
 
+// Issue #670 (residual F3, item 7): laço único para os dois testes abaixo
+// que iteravam todo `command` de terminal de toda fixture, byte-quase-
+// idêntico — um recusado pela política (`detectDangerousCommand`) nunca
+// spawna de verdade, então fica fora do allowlist.
+function forEachSafeTerminalCommand(onSafeCommand: (id: string, command: string) => void): void {
+  for (const id of fixtureIds()) {
+    const path = resolve(root, FIXTURES_DIR, `${id}.json`);
+    const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
+    for (const command of terminalCommandsIn(raw)) {
+      if (detectDangerousCommand(command) !== null) continue;
+      onSafeCommand(id, command);
+    }
+  }
+}
+
 describe("terminal isolation pin (issue #607 item 1)", () => {
   // `terminal` in-process herda o ambiente real do operador que roda
   // `npm test`/`npm run eval` — nunca a allowlist isolada que o resto do
@@ -131,18 +146,13 @@ describe("terminal isolation pin (issue #607 item 1)", () => {
   // atrás de um pipe/substituição de comando) reprova aqui antes de fazer
   // rede de verdade em `npm test`.
   it("no fixture spawns a real, network-capable terminal command", () => {
-    for (const id of fixtureIds()) {
-      const path = resolve(root, FIXTURES_DIR, `${id}.json`);
-      const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
-      for (const command of terminalCommandsIn(raw)) {
-        if (detectDangerousCommand(command) !== null) continue;
-        expect(
-          isKnownSafeTerminalCommand(command),
-          `${id}: comando de terminal "${command}" executaria de verdade com o ambiente ` +
-            "real do operador (não está no allowlist seguro deste pino)",
-        ).toBe(true);
-      }
-    }
+    forEachSafeTerminalCommand((id, command) => {
+      expect(
+        isKnownSafeTerminalCommand(command),
+        `${id}: comando de terminal "${command}" executaria de verdade com o ambiente ` +
+          "real do operador (não está no allowlist seguro deste pino)",
+      ).toBe(true);
+    });
   });
 });
 
@@ -209,15 +219,10 @@ describe("terminal pin has no bypass by newline (issue #653 item 1)", () => {
 
   it("still accepts every terminal command already used by the fixtures on disk", () => {
     let checked = 0;
-    for (const id of fixtureIds()) {
-      const path = resolve(root, FIXTURES_DIR, `${id}.json`);
-      const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
-      for (const command of terminalCommandsIn(raw)) {
-        if (detectDangerousCommand(command) !== null) continue;
-        checked += 1;
-        expect(isKnownSafeTerminalCommand(command), `${id}: "${command}"`).toBe(true);
-      }
-    }
+    forEachSafeTerminalCommand((id, command) => {
+      checked += 1;
+      expect(isKnownSafeTerminalCommand(command), `${id}: "${command}"`).toBe(true);
+    });
     expect(checked).toBeGreaterThan(0);
   });
 });

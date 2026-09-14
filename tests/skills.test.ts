@@ -4,7 +4,13 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { SkillStore, parseSkillMd, renderSkillMd } from "../src/skills/index.js";
+import {
+  SkillStore,
+  SkillValidationError,
+  parseSkillMd,
+  realOrResolved,
+  renderSkillMd,
+} from "../src/skills/index.js";
 
 const roots: string[] = [];
 const root = (): string => {
@@ -125,5 +131,65 @@ describe("skill store", () => {
     expect(parsed).not.toHaveProperty("platforms");
     expect(parsed.name).toBe("legacy");
     expect(parsed.description).toBe("d");
+  });
+
+  // Issue #670 (residual F3, veredito PR #655 item 4): `realOrResolved`
+  // fail-OPEN on any non-ENOENT `realpathSync` error — the `catch` returned
+  // `resolve(path)`, which never proves the path is real. A symlink cycle
+  // (self-loop: a symlink pointing at itself) makes `realpathSync` throw
+  // `ELOOP` — the real path can't be established, so it has to read as
+  // "outside", never "inside".
+  it("realOrResolved returns null, not a fabricated path, when the real path can't be established (ELOOP cycle, #670)", () => {
+    const base = root();
+    const loop = join(base, "loop");
+    symlinkSync(loop, loop);
+    expect(realOrResolved(loop)).toBeNull();
+  });
+
+  // Issue #670 (residual F3): `null` alone isn't enough for invariant 2
+  // (fault nunca silencioso) — nada além do valor de retorno teria dito por
+  // quê. `realOrResolved` nomeia `path` e `code` numa linha de stderr
+  // (mesmo padrão bare de `src/mcp/manager.ts`'s `warn`), a única saída
+  // disponível: nenhum chamador (`within`, `isUntrustedPath`) tem um canal
+  // de `warning` injetável hoje.
+  it("names the path and the errno code on stderr before returning null (#670)", () => {
+    const base = root();
+    const loop = join(base, "loop");
+    symlinkSync(loop, loop);
+    const original = process.stderr.write.bind(process.stderr);
+    const lines: string[] = [];
+    process.stderr.write = (chunk: string) => {
+      lines.push(chunk);
+      return true;
+    };
+    try {
+      expect(realOrResolved(loop)).toBeNull();
+    } finally {
+      process.stderr.write = original;
+    }
+    expect(lines.some((line) => line.includes(loop) && line.includes("ELOOP"))).toBe(true);
+  });
+
+  // `within()` (private) is what `origin()`/`ensureWithinRoots()` build on
+  // top of `realOrResolved` — it isn't exported, and `SkillStore.scan()`
+  // never discovers a skill THROUGH a broken directory in the first place
+  // (`collectSkillFiles` skips symlink entries and swallows a `readdirSync`
+  // failure), so the flip can't be observed via a scanned skill's own
+  // `origin`. `create()` under a `project` root broken by a symlink cycle
+  // IS observable: `ensureWithinRoots` used to treat a root it couldn't
+  // resolve as a match anyway (fail-open — `within` said "inside" for a
+  // literal string match it never actually verified), letting `mkdirSync`
+  // reach the cyclic directory and blow up with a raw `ELOOP` fs error
+  // instead of the named `SkillValidationError` refusal.
+  it("refuses to create a skill under a project root broken by a symlink cycle, fail-closed (issue #670)", () => {
+    const home = root();
+    const base = root();
+    const loop = join(base, "loop");
+    symlinkSync(loop, loop);
+    const store = new SkillStore(home, [loop]);
+    expect(() => store.create("x", "d", "body", "1.0.0", "project")).toThrow(SkillValidationError);
+    expect(() => store.create("x", "d", "body", "1.0.0", "project")).toThrow(
+      /outside known skill roots/,
+    );
   });
 });
