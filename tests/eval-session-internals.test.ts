@@ -113,6 +113,11 @@ describe("buildProviderEnvironment (issue #607 item 2)", () => {
     expect(environment.LOHRA_PROFILE).toBe("personal-dev");
   });
 
+  it("treats an empty LOHRA_PROFILE the same as an absent one, never as an explicit choice (issue #653 item 2)", () => {
+    const environment = buildProviderEnvironment({ LOHRA_PROFILE: "" });
+    expect(environment.LOHRA_PROFILE).toBe("eval");
+  });
+
   it("still carries LOHRA_NO_WIZARD and NO_COLOR, same as before the profile default existed", () => {
     const environment = buildProviderEnvironment({});
     expect(environment.LOHRA_NO_WIZARD).toBe("1");

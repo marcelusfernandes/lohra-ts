@@ -33,6 +33,12 @@ describe("profile paths and env file", () => {
     }
   });
 
+  it("rejects an empty LOHRA_PROFILE instead of silently falling back to the default profile (issue #653 item 2)", () => {
+    expect(() => resolvePaths({ HOME: "/user", LOHRA_PROFILE: "" })).toThrow(
+      /invalid profile name ''/,
+    );
+  });
+
   it("parses the Python env-file subset and never overwrites a real variable", () => {
     expect(parseEnvText("# comment\nexport A='one'\nB=two=three\n\n")).toEqual({
       A: "one",
