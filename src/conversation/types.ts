@@ -168,7 +168,15 @@ export type ConversationRuntimeEvent = Readonly<{
      * option) rather than by `signal` itself -- the turn absorbs this with
      * `continue`, never `turn.failed`, so this is the only per-call trace
      * of an interrupted request that a completed turn leaves. Fires once
-     * per interrupted call, immediately before that iteration's `continue`. */
+     * per interrupted call, immediately before that iteration's `continue`.
+     * Issue #594 (achado 4): `code` here is the interrupting error's own
+     * constructor NAME (`error.name`, e.g. "StreamAbortedError" -- PascalCase,
+     * pinned by `tests/conversation-runtime-injection.test.ts`), the SAME
+     * convention `compaction.aux_fallback` above uses -- deliberately NOT the
+     * SCREAMING_SNAKE `ConversationError.code` convention `turn.failed`/
+     * `compaction.unsupported` use elsewhere on this same union. Two
+     * conventions coexist on `code` today; this field alone never
+     * disambiguates which one a given event uses. */
     | "model.request.interrupted";
   sessionId: string;
   code?: string;

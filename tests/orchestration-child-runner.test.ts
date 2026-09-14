@@ -377,6 +377,13 @@ describe("createChildRunner", () => {
     // the dedicated branch from falling through to the generic one.
     expect(result.tokensIn).toBe(10);
     expect(result.tokensOut).toBe(4);
+    // Issue #594 (achado 2, residual de M21): contra-caso — neither call was
+    // ever torn down by a steer-interrupt (`error.partialCalls === 0`), so
+    // this is a genuine cap-hit after real, completed iterations: never
+    // `usageUncertain`/`partial`. Pins the guard a mutant removing
+    // `error.partialCalls > 0` (or inlining `true`) would otherwise survive.
+    expect(result.usageUncertain).toBe(false);
+    expect(Object.hasOwn(result, "partial")).toBe(false);
     close();
   });
 

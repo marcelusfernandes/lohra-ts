@@ -178,16 +178,16 @@ fatia" cita a mesma restrição.
 | `self-update`         | `mutations:self-update` |        8 | `self-update-mutants.ts`                                                                                              |
 | `context-window`      | `mutations:t23`         |       24 | `context-window.ts`                                                                                                   |
 | `auth`                | `mutations:auth`        |       13 | `auth-mutants.ts`                                                                                                     |
-| `supervision`         | `mutations:supervision` |       39 | `supervision-mutants.ts`                                                                                              |
+| `supervision`         | `mutations:supervision` |       41 | `supervision-mutants.ts`                                                                                              |
 
-Total: 281. Os 12 mutantes de `workflow-durability-guard.ts` são
+Total: 283. Os 12 mutantes de `workflow-durability-guard.ts` são
 combinatórios: três conjuntos do guard de escrita possuída (`fence`,
 `holder`, `lease-validity`) × quatro categorias (`state`, `cache`,
 `node-cost`, `spend`) — um mutante por combinação, cada um escorado só no
 teste focal da sua categoria, mais os 2 mutantes do INSERT combinado
 cache+custo (`combined-cell-guard-removed`,
 `combined-cost-escapes-refusal`). `tests/mutations-slices.test.ts` importa os
-treze catálogos de dado puro estaticamente e prova essa soma (281) a cada
+treze catálogos de dado puro estaticamente e prova essa soma (283) a cada
 corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
 
 A issue #587 (P11, compactação/título pelo `AuxClient`) acrescenta 4 a
@@ -395,8 +395,12 @@ ADR 0005) acrescenta `N4-parse-sse-truncated-frame-atomic`: `parseSse`
 (`client.ts`) era atômico — um `SyntaxError` no último `data:` truncado por
 um abort em voo propagava para fora da função e descartava também os
 eventos já parseados com sucesso, deixando `partial.text` vazio mesmo com
-deltas completos antes do corte. N4 reverte o `try`/`catch` que passou a
-descartar só o frame truncado, morto pelo `it` novo de
+deltas completos antes do corte. N4 remove tanto o gate
+`options.tolerateTruncatedTail !== true` quanto o `try`/`catch` que passou a
+descartar só o frame truncado — não só o `try`/`catch` sozinho — voltando ao
+parse incondicional que lança para fora em qualquer frame malformado
+(caminho normal e caminho de abort tratados igual, como antes da issue
+#567); morto pelo `it` novo de
 `tests/transports-abort-in-flight.test.ts`, "ChatCompletionsClient.stream
 replays the deltas already parsed when the trailing SSE frame is truncated
 mid-abort (issue #567)" — 269 + 1 = 270. `focusFiles` da fatia
@@ -423,7 +427,7 @@ fatia `workflow-audit-live` ganha os dois arquivos: 270 + 4 = 274.
 Issue #569 (M16 pós-revisão, épico #561, S5) acrescenta dois a
 `context-window.ts` (não `supervision-mutants.ts`, que segue no teto de 800
 linhas, e não `core.ts` diretamente — o fix do item 2, disarm-on-fire em
-`OrchestrationCore.steer`, não tem `focusFile` de `supervision` cobrindo
+`OrchestrationCore.steer`, não tinha `focusFile` de `supervision` cobrindo
 `tests/orchestration-steer-interrupt.test.ts`, e `slices.json` está fora do
 `Files` da issue): `r-steer-interrupt-continue-ignores-outer-cancel` remove
 o conjunto `&& !signalAborted(signal)` do `catch` de `runTurn`
@@ -438,6 +442,22 @@ chamada — morto pelo `it` já existente "freezes the prompt once, resumes
 history, and commits complete turns", ao qual o mesmo `interruptSource`
 foi acrescentado para provar que uma chamada bem-sucedida desarma o hook
 também, não só uma abortada. 274 + 2 = 276.
+
+Issue #594 (residual de M21) fecha as duas lacunas que #569 (acima) tinha
+deixado documentadas. `focusFiles` de `supervision` ganha
+`tests/orchestration-steer-interrupt.test.ts` e
+`tests/orchestration-child-runner.test.ts`, e `supervision-mutants.ts`
+acrescenta dois (39 -> 41): `X1-max-iterations-partial-guard-removed`
+remove o guard `error.partialCalls > 0` de `child-runner.ts` (achado 2) —
+sem ele, TODO `MaxIterationsError` reportaria `partial`/`usageUncertain`,
+mesmo um cap-hit real sem chamada absorvida; morto pelo contra-caso
+pinado em `tests/orchestration-child-runner.test.ts` ("maps
+MaxIterationsError to status:'error' with the child's own leash"), não
+pelo `it` positivo (que continua vendo `partial: true` de qualquer jeito
+sob esse mutante). `Y1-steer-fire-not-idempotent` (achado 3) remove a
+nulificação de `entry.interrupt` DENTRO de `fire` (`core.ts`, "fire
+idempotente") antes de chamar `abort()` — morto pelo `it` já existente "a
+second steer while the first's interrupt is still in flight...".
 
 `workflow-executor-mutants.ts` (issue #418) acrescentou
 `Q1-quota-guard-removed`: a guarda que impede `quota_exhausted` de entrar em
@@ -662,8 +682,8 @@ contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
 `workflow-audit-live-mutants` 32, `workflow-audit-producers-mutants` 31,
 `web-tools-mutants` 9, `media-catalog-other` 7, `media-catalog-persistence`
 13, `self-update-mutants` 8, `workflow-executor-mutants` 45,
-`context-window` 24, `auth-mutants` 13, `supervision-mutants` 39, soma 281) e
-a soma de 281 contra os treze catálogos importados; e que todo diretório de
+`context-window` 24, `auth-mutants` 13, `supervision-mutants` 41, soma 283) e
+a soma de 283 contra os treze catálogos importados; e que todo diretório de
 primeiro nível de `src/` está coberto por algum `srcGlobs` ou está em
 `SEM_FATIA` com um motivo não vazio — nunca os dois, nunca nenhum dos dois.
 
