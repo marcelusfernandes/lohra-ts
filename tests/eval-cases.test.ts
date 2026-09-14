@@ -169,6 +169,19 @@ describe("final-answer-avoids-promise.json's outcome oracle (issue #648, #637 it
     return new RegExp(raw.outcome.expect, "su");
   }
 
+  // The AC's own literal strings: neither carries a positive term
+  // (`[Ff]ixed`/`corrected`/`[Cc]onfirmed`/`now reads`/`read it back`), so
+  // both were ALREADY rejected by the OLD regex too — not a red/green
+  // transition on their own, just the baseline the augmented pair below
+  // builds on.
+  it("rejects the bare 'Let me fix that next.'", () => {
+    expect(outcomeExpectPattern().test("Let me fix that next.")).toBe(false);
+  });
+
+  it("rejects the bare 'I plan to fix it.'", () => {
+    expect(outcomeExpectPattern().test("I plan to fix it.")).toBe(false);
+  });
+
   it("rejects a final answer deferring the fix with 'Let me ...' even though it echoes the task's own 'receive'", () => {
     expect(outcomeExpectPattern().test("Let me fix that next. The file should say receive.")).toBe(
       false,

@@ -1,14 +1,17 @@
 // Issue #648 (grupo A, item 7a de #637): `serve.ts:123-125` resolves the
 // doctrine tier once at process boot, but no test ever read the REAL
 // upstream request `serve` sends -- `tests/commands-serve.test.ts:45-91`
-// only boots `runServe` and probes the port/banner (`server-service.test.ts`
+// only boots `runServe` and probes the port/banner; `server-service.test.ts`
 // tests `CompletionService` in isolation, with an injected `systemPrompt: ()
-// => "system"`, never the real string). This is the new harness the issue
+// => "system"`, never the real string. This is the new harness the issue
 // asks for: `runServe` boots for real, a real HTTP POST hits its
 // OpenAI-compatible `/v1/chat/completions`, and the request `serve` forwards
-// upstream (to a local stub, via `LOHRA_PROVIDER_BASE_URL`... except
-// `serve.ts` never reads that var -- the provider's own registered
-// `baseUrl` is what routes upstream here) is captured and inspected.
+// upstream is captured and inspected. Unlike `chat.ts:252` (which honors
+// `LOHRA_PROVIDER_BASE_URL` as a runtime override), `serve.ts` has no such
+// override -- it resolves the provider via `LOHRA_PROVIDER` and always
+// routes upstream through that provider's own registered `baseUrl`, so the
+// stub server here is wired in through `registerProvider`'s `baseUrl`, not
+// an environment override.
 import { createServer, type Server } from "node:http";
 import net from "node:net";
 
