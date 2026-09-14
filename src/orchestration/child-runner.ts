@@ -284,6 +284,13 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
               [forcedDefinition.function.name]: () =>
                 Promise.resolve(toolResult({ received: true })),
             });
+      // Issue #594 (achado 4): no `eventSink` wired here on purpose — a
+      // leaf's own `model.request.interrupted`/`turn.*` events (`runtime.ts`)
+      // never reach the `workflow_steer` audit path (`workflow/steer-tool.ts`)
+      // this way. Documented, not fixed: wiring one is a real, separate
+      // change (what would consume it, `leaf.steered` already carries the
+      // `interrupted`/`partial` outcome via `CollectResult`) — out of this
+      // S-sized issue's scope (no contract change, `## Fora de escopo`).
       const runtime = new ConversationRuntime({
         repository,
         transport: new NonClosingTransport(buildTransport(client, true)),
@@ -401,25 +408,29 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
           };
         }
         if (error instanceof MaxIterationsError) {
-          // Issue #569 (r2, veredito da PR #591): `stopReason === "interrupted"`
-          // (`runtime.ts`'s own bare-post-loop throw, reachable ONLY via the
-          // steer-interrupt `continue` eating the last allowed iteration —
-          // `stopReason` has no OTHER reader in this tree, this is the sole
-          // consumer) means `error.usage` includes at least one call's own
-          // ESTIMATE (`estimatePartialUsage`, folded in before the throw) —
+          // Issue #594 (achado 1, residual de M21): `error.partialCalls > 0`
+          // (mirrors `ConversationTurnResult.partialCalls`, carried through
+          // `MaxIterationsError` for exactly this) means `error.usage`
+          // includes at least one call's own ESTIMATE (`estimatePartialUsage`,
+          // folded in per-call by `runtime.ts` before this ever throws) —
           // never a final, provider-confirmed total. Forcing `partial`/
           // `usageUncertain` here mirrors the completed-turn branch above
           // (`result.partialCalls > 0`) and the cancelled-turn branch below
           // (`error.partialUsage !== null`): never a silent "fully measured"
-          // claim. A genuine cap-hit after real, completed iterations
-          // (`stopReason: "pause"`/`"tool_calls"`, unaffected) keeps
+          // claim. A genuine cap-hit after real, completed iterations (every
+          // call this turn made settled for real, `partialCalls === 0`) keeps
           // reporting real usage exactly as before this issue
           // (`tests/orchestration-child-runner.test.ts`, "maps
-          // MaxIterationsError to status:'error' with the child's own leash").
+          // MaxIterationsError to status:'error' with the child's own
+          // leash"). Superseded `stopReason === "interrupted"` alone (PR
+          // #591, r2): a false negative when a steer absorbed on an EARLIER
+          // iteration has its cap hit by a LATER, normally-completed one
+          // (`stopReason: "pause"`/`"tool_calls"`) — `chat.ts` also reads
+          // `bounded.stopReason` (forwarded verbatim into the envelope's own
+          // `stop_reason`), so it was never this branch's sole reader either,
+          // though nothing else DISCRIMINATES on its value.
           const base = zeroResult("error", error.message, profile, model, error.usage, null, null);
-          return error.stopReason === "interrupted"
-            ? { ...base, partial: true, usageUncertain: true }
-            : base;
+          return error.partialCalls > 0 ? { ...base, partial: true, usageUncertain: true } : base;
         }
         const cause = error instanceof Error ? error.cause : undefined;
         const errorKind = classifyProviderError(cause);
