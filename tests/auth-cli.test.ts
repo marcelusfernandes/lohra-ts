@@ -142,7 +142,7 @@ describe("public auth surfaces", () => {
       auth_route: "subscription",
       usable: true,
     });
-    expect(payload.checks.slice(1, 4).map((check) => check.detail)).toEqual([
+    expect(payload.checks.slice(0, 3).map((check) => check.detail)).toEqual([
       "OpenAI/Codex subscription (opt-in, ToS-gray)",
       `active (OpenAI/Codex) — ${value.home}/auth.json`,
       "own OAuth token valid until 2033-05-18 03:33",
