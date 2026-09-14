@@ -53,15 +53,19 @@ export class SystemPromptSnapshot implements SystemBands {
   }
 }
 
-/** Issue #586 (épico #575): flattens a `ModelRequest.system`/
+/** Issue #586 (épico #575, 2ª rodada): flattens a `ModelRequest.system`/
  * `StoredSession.systemPrompt` value back to plain text for a consumer that
  * only ever bills/estimates a single string (`estimateRequestTokens`,
  * `estimatePartialUsage`, `src/context/token-estimate.ts` -- out of this
- * issue's `Files`). A bare string is returned as-is (every caller before
- * this issue, and every caller that hasn't been wired to pass bands yet --
- * `src/commands/chat.ts`/`dashboard.ts` included); bands flatten with the
- * exact same rule `SystemPromptSnapshot.text` uses, so a caller that DOES
- * pass the full snapshot estimates identically to one that pre-flattened it. */
+ * issue's `Files`), and also for `chat-completions.ts`/`responses.ts`
+ * (neither has a per-block `cache_control`, so both flatten before
+ * building their own kwargs). A bare string is returned as-is -- every
+ * caller before this issue, and still every caller that only ever produces
+ * a flattened prompt (e.g. the gateway WS session,
+ * `src/gateway/session-service.ts`'s `systemPrompt: string`); bands flatten
+ * with the exact same rule `SystemPromptSnapshot.text` uses, so a caller
+ * that DOES pass the full snapshot (`src/commands/chat.ts`/`dashboard.ts`,
+ * since the same issue) estimates identically to one that pre-flattened it. */
 export function systemPromptText(system: string | SystemBands): string {
   return typeof system === "string" ? system : joinBands(system);
 }

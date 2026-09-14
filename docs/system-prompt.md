@@ -567,7 +567,35 @@ dos `Files` desta issue) constrói sua própria `ConversationRuntime` por
 turno e recebe `sessionDefaults.systemPrompt` já achatado (`GatewaySessionRegistry`,
 `src/gateway/session-service.ts`, declara `systemPrompt: string` — alargar
 esse contrato é decisão de outra issue). Uma sessão de dashboard aberta pela
-UI web (não pelo cron) continua sem cache_control até essa issue acontecer.
+UI web (não pelo cron) **não fica sem cache_control**: uma string simples
+ainda vira um único bloco `system`, e a regra de migração do transporte
+Anthropic (`systemSegments`, `src/transports/anthropic-messages.ts:46-49`)
+trata essa string inteira como cacheável, então esse bloco único carrega
+`cache_control` igual a qualquer outro. O que essa sessão perde é o SPLIT
+em faixas: como não há `stable`/`context`/`volatile` separados, a data do
+dia (e memória/skills, quando presentes) ficam DENTRO do mesmo bloco
+cacheado — o cache inteiro invalida a cada dia (ou a cada memória nova),
+em vez de só a faixa `volatile`. É uma cache mais grossa, não ausente.
+
+**Limite conhecido, fora do escopo desta issue (`runtime.ts` não está nos
+`Files`)**: `ConversationRuntime.runTurn` (`src/conversation/runtime.ts:365`)
+descarta as faixas que `session()` restaurou do banco antes de montar a
+próxima requisição — troca `session.systemPrompt` por
+`this.promptSnapshot()`, chamado de novo, tanto para sessão nova quanto
+para sessão retomada. Isso significa que a persistência das três colunas
+(`system_prompt_stable`/`_context`/`_volatile`) não é hoje o que alimenta o
+cache de um turno seguinte: o cache real depende de `promptSnapshot()` —
+a closure que `chat.ts`/`dashboard.ts` passam — reconstruir exatamente o
+mesmo texto que a chamada anterior construiu. Dentro do MESMO processo
+(mesma sessão de `chat --session`, ou o mesmo processo de `dashboard`) isso
+vale: nada no runtime muda `identity`/`doctrine`/`harness`/contexto de
+projeto no meio de uma sessão. Entre processos diferentes falando da MESMA
+sessão persistida (reabrir com `chat --session <id>` num processo novo,
+ou um turno do WS gateway lendo a sessão que o cron do dashboard criou), o
+cache só sobrevive se as faixas restauradas do banco forem
+byte-idênticas ao que a nova closure de `promptSnapshot()` computa — hoje
+sem garantia formal disso; reaproveitar as faixas restauradas (em vez de
+recomputar) é a issue própria referenciada em `## Fora de escopo` de #624.
 
 ## O que este documento ainda não cobre
 

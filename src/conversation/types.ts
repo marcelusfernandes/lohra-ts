@@ -41,11 +41,19 @@ export interface ToolDispatcher {
 }
 
 export interface StoredSession {
-  /** Issue #586: widened the same way as `ModelRequest.system` above --
-   * `SqliteConversationRepository.session()` (out of this issue's `Files`)
-   * still only ever returns the flattened string it reads from the single
-   * `system_prompt` column, which stays a valid member of this union with
-   * no change there. */
+  /** Issue #586 (2ª rodada): widened the same way as `ModelRequest.system`
+   * above -- `SqliteConversationRepository.session()`
+   * (`src/conversation/sqlite-repository.ts`, out of this issue's `Files`)
+   * reads `systemPromptBands(id)` and returns `SystemBands` for every
+   * session (migration-tolerant: a row from before this issue, only
+   * `system_prompt`, comes back with the whole flattened text as
+   * `stable`, `context`/`volatile` empty -- never the plain-string member
+   * of this union). `ConversationRuntime.runTurn` (`runtime.ts:365`, out of
+   * this issue's `Files`) discards these restored bands before building
+   * the next request either way, replacing them with a fresh
+   * `this.promptSnapshot()` call -- the limit that leaves open,
+   * documented in `docs/system-prompt.md`, is that reuse across processes
+   * depends on `promptSnapshot()` reconstructing byte-identical text. */
   readonly systemPrompt: string | SystemBands;
   readonly model: string;
   readonly cwd: string;

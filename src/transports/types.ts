@@ -24,16 +24,18 @@ export interface NormalizedResponse {
   readonly providerData: Readonly<Record<string, unknown>> | null;
 }
 
-/** Issue #586 (épico #575): the three cacheable ranges `buildSystemPrompt`
- * (`src/context/system-prompt.ts`) already computes -- a transport that
- * understands this shape can mark a cache breakpoint after `stable`+
- * `context` and leave `volatile` (date, memory, skills -- changes every
- * call/session) uncached. A transport that doesn't (chat-completions,
- * responses) never receives this shape from any caller in this issue --
- * `BuildKwargsOptions.system` stays `string | null` for them in practice,
- * this union only widens the TYPE so every passthrough call site
- * (`conversation/provider-model.ts`, `conversation/chat-completions-model.ts`)
- * keeps compiling unchanged. */
+/** Issue #586 (épico #575, 2ª rodada): the three cacheable ranges
+ * `buildSystemPrompt` (`src/context/system-prompt.ts`) already computes --
+ * a transport that understands this shape (`anthropic-messages.ts`) can
+ * mark a cache breakpoint after `stable`+`context` and leave `volatile`
+ * (date, memory, skills -- changes every call/session) uncached. A
+ * transport that doesn't (`chat-completions.ts`, `responses.ts`) DOES
+ * receive this shape at runtime -- any caller that passes bands
+ * (`src/commands/chat.ts`/`dashboard.ts`) reaches every transport through
+ * the same passthrough call sites (`conversation/provider-model.ts`,
+ * `conversation/chat-completions-model.ts`) -- but both flatten it with
+ * `systemPromptText` before building their own kwargs, so neither ever
+ * emits the raw object as request content. */
 export interface SystemBands {
   readonly stable: string;
   readonly context: string;
