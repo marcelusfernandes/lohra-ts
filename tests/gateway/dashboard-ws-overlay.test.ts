@@ -22,6 +22,21 @@
 //    `defaultAuxModel`, a compactação ainda acontece (fallback ao
 //    transporte do próprio turno, comportamento pré-#587/#651), só que
 //    nenhum request carrega o modelo auxiliar.
+//
+// Issue #671 acrescenta três provas nesta mesma superfície:
+// 3. Quando o resumo do `AuxClient` falha, o frame `compaction.aux_fallback`
+//    (payload `{ code }`) chega ao socket -- antes desta issue, nenhum
+//    frame informava a degradação (invariante 2 cumprida só no stderr do
+//    CLI, `commands/chat.ts`).
+// 4. O teste do item 1 relê `SessionRepository.loadMessages` depois do
+//    turno e afirma que o histórico persistido nunca carrega o overlay
+//    `OPERATOR NOTICES` (só a mensagem crua do usuário é gravada,
+//    `docs/operator-notices.md`).
+// 5. `defaultContextWindow` deixa de ser o literal fixo `22000`: agora é
+//    medido a partir do registro REAL de tools (`createGatewayToolRuntime`,
+//    `estimateRequestTokens`) mais uma margem fixa -- não depende mais do
+//    tamanho das descrições das tools no momento em que este teste foi
+//    escrito.
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -31,6 +46,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 
 import { runDashboard, type DashboardCommandOptions } from "../../src/commands/dashboard.js";
+import { estimateRequestTokens } from "../../src/context/token-estimate.js";
+import { createGatewayToolRuntime } from "../../src/gateway/tools.js";
 import { registerProvider } from "../../src/providers/registry.js";
 import { openStateDatabase, NoticesRepository, SessionRepository } from "../../src/state/index.js";
 
@@ -85,6 +102,49 @@ function startCapturingServer(captured: CapturedRequest[]): Server {
     request.on("end", () => {
       const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as CapturedRequest;
       captured.push(body);
+      if (body.stream) {
+        const text = sseTextTurn("ok");
+        response.writeHead(200, {
+          "content-type": "text/event-stream",
+          "content-length": String(Buffer.byteLength(text)),
+        });
+        response.end(text);
+        return;
+      }
+      const text = jsonCompletionTurn("a summary");
+      response.writeHead(200, {
+        "content-type": "application/json",
+        "content-length": String(Buffer.byteLength(text)),
+      });
+      response.end(text);
+    });
+  });
+}
+
+// Issue #671: same shape as `startCapturingServer`, except every request
+// naming `auxModel` fails outright (400, `x-should-retry: false`, same
+// convention `tests/chat-compaction-events.test.ts`'s title-failure probe
+// uses) -- `AuxClient.summarize` is the ONLY caller that ever names
+// `auxModel` on this fixture server (dashboard.ts's WS turn wires
+// `summarize`, never `title`), so this distinguishes the aux summary call
+// from the turn's own model call without touching `src/agent/aux.ts`.
+function startAuxFailingServer(auxModel: string, captured: CapturedRequest[]): Server {
+  return createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as CapturedRequest;
+      captured.push(body);
+      if (body.model === auxModel) {
+        const text = JSON.stringify({ error: { message: "t671 aux summary probe failure" } });
+        response.writeHead(400, {
+          "content-type": "application/json",
+          "content-length": String(Buffer.byteLength(text)),
+          "x-should-retry": "false",
+        });
+        response.end(text);
+        return;
+      }
       if (body.stream) {
         const text = sseTextTurn("ok");
         response.writeHead(200, {
@@ -229,6 +289,83 @@ async function submitAndAwaitCompletion(
   return lastFrame;
 }
 
+interface GatewayEventFrame {
+  readonly params: { readonly type: string; readonly payload?: Readonly<Record<string, unknown>> };
+}
+
+// Issue #671: `submitAndAwaitCompletion` above only keeps the LAST frame
+// (`message.complete`) -- proving a `compaction.aux_fallback` frame reached
+// the socket needs every frame in between. A second function, not a change
+// to the one above: every existing call site keeps its exact return shape.
+async function submitAndCollectFrames(
+  ws: WebSocket,
+  sessionId: string,
+  text: string,
+): Promise<{
+  readonly frames: readonly GatewayEventFrame[];
+  readonly completion: Readonly<Record<string, unknown>>;
+}> {
+  ws.send(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "prompt.submit",
+      params: { session_id: sessionId, text },
+    }),
+  );
+  await nextMessage(ws); // rpc-ok
+  const frames: GatewayEventFrame[] = [];
+  let completion: Readonly<Record<string, unknown>> = {};
+  let complete = false;
+  while (!complete) {
+    const frame = JSON.parse(await nextMessage(ws)) as GatewayEventFrame;
+    frames.push(frame);
+    if (frame.params.type === "message.complete") {
+      complete = true;
+      completion = frame.params.payload ?? (frame as unknown as Readonly<Record<string, unknown>>);
+    }
+  }
+  return { frames, completion };
+}
+
+// Issue #671 item 3: `defaultContextWindow` derived from the tool
+// registry's own DEFINITIONS (schemas), not a literal guessed once against
+// today's tool descriptions. `createGatewayToolRuntime(home)` here (no
+// session registry) falls through to `builtinRegistry.getDefinitions()`
+// (`src/gateway/tools.ts`) -- `dashboard.ts`'s real WS turn instead passes
+// `sessionTools.registry` (`composeSessionTools`, `src/commands/session-
+// tools.ts`), built from `createBuiltinRegistry` over the SAME
+// `BUILTIN_DEFINITIONS` and only ever `overrideHandlers`'d afterwards
+// ("Atomically replaces handlers without changing the public schemas or
+// ownership", `src/tools/registry.ts`) -- so the two registries' own
+// `getDefinitions()` are IDENTICAL in count and schema; this measures the
+// real thing, not a lower bound. `estimateRequestTokens` is the SAME
+// estimator `ConversationRuntime.preflightCompact` calls (`src/conversation/
+// runtime.ts`), so this stays accurate as the registry grows or shrinks.
+// `CONTEXT_WINDOW_MARGIN_TOKENS` leaves room on both sides of the threshold
+// (`compactionThreshold`, `src/conversation/compaction.ts`) for the
+// 40-message seeded filler history below to land clearly OVER it, and the
+// compacted 8-message tail (`DEFAULT_MIN_KEEP_MESSAGES`) plus tools to land
+// clearly UNDER it -- measured empirically against this fixture's own tool
+// registry (~9000 tokens as of this issue; the derivation itself never
+// depends on that number staying put).
+const CONTEXT_WINDOW_MARGIN_TOKENS = 13000;
+
+function deriveDefaultContextWindow(home: string): number {
+  const toolDefinitions = createGatewayToolRuntime(home).toolDefinitions;
+  const toolsTokens = estimateRequestTokens({
+    system: "",
+    messages: [],
+    // Same intent as `ConversationRuntime.preflightCompact`'s own cast for
+    // this exact field (`src/conversation/runtime.ts`): `ToolDefinition`
+    // has no index signature, but `estimateRequestTokens` only ever reads
+    // it as a plain record (`jsonLength`, structural, never a specific
+    // tool shape).
+    tools: toolDefinitions as unknown as readonly Readonly<Record<string, unknown>>[],
+  }).tokens;
+  return toolsTokens + CONTEXT_WINDOW_MARGIN_TOKENS;
+}
+
 // 800 filler chars -> ~276 estimated text tokens per message
 // (src/context/token-estimate.ts's TEXT_CHARS_PER_TOKEN, same constant
 // tests/chat-compaction-events.test.ts's seedLongHistory relies on); 20
@@ -314,9 +451,27 @@ describe("dashboard.ts wires GatewayWsDeps.notices onto real WS turns (issue #60
       const afterConnection = openStateDatabase(join(home, "state.db"));
       const afterNotices = new NoticesRepository(afterConnection.database);
       const page = afterNotices.list({ scope: "global", includeAcked: true });
+      // Issue #671 item 2: `commitTurn` persists the RAW user input, never
+      // the overlay-appended text (`docs/operator-notices.md`, "O bloco é
+      // anexado ao CONTEÚDO da mensagem do usuário do turno... `commitTurn`
+      // persiste o `input` cru do usuário, sem o bloco") -- before this
+      // issue that claim was pinned only at the unit level
+      // (`tests/conversation-runtime-notices.test.ts`), never through a
+      // real WS turn's own persisted history.
+      const afterSessions = new SessionRepository(
+        afterConnection.database,
+        undefined,
+        afterConnection.ftsEnabled,
+      );
+      const persistedHistory = afterSessions.loadMessages(sessionId);
       afterConnection.close();
       const ackedRow = page.notices.find((row) => row.id === seededNotice.id);
       expect(ackedRow?.acked_at).not.toBeNull();
+      const overlayLeaked = persistedHistory.some(
+        (message) =>
+          typeof message.content === "string" && message.content.includes("OPERATOR NOTICES"),
+      );
+      expect(overlayLeaked).toBe(false);
     } finally {
       await closeServer(server);
     }
@@ -357,19 +512,17 @@ describe("dashboard.ts wires GatewayWsDeps.summarize onto real WS turns (issue #
         // -- no LOHRA_CONTEXT_WINDOW override needed (the WS path's
         // ConversationRuntime doesn't forward `environment` to
         // `preflightCompact`, so an env override wouldn't reach it here).
-        // 22000 straddles the real threshold for THIS turn's own request
-        // shape with margin on both sides: the seeded 40-message filler
-        // history alone exceeds it (forcing compaction), but the full
-        // session tool registry `dashboard.ts` always wires in
-        // (`toolDefinitions`, counted in every estimate, compaction never
-        // shrinks it -- ~9000 tokens measured against this fixture) plus
-        // the compacted 8-message tail still fit comfortably under it
-        // afterwards. A window in the low thousands never lets compaction
-        // "succeed" here (the tool registry alone already exceeds it); this
-        // margin (~4000 tokens either side of threshold, measured against
-        // the fixture as of this issue) tolerates the tool registry growing
-        // over time without flipping this test red on an unrelated PR.
-        defaultContextWindow: 22000,
+        // Issue #671 item 3: derived (`deriveDefaultContextWindow` above),
+        // not the literal `22000` this test used to hardcode -- straddles
+        // the real threshold for THIS turn's own request shape with margin
+        // on both sides: the seeded 40-message filler history alone
+        // exceeds it (forcing compaction), but the full session tool
+        // registry `dashboard.ts` always wires in (`toolDefinitions`,
+        // counted in every estimate, compaction never shrinks it) plus the
+        // compacted 8-message tail still fit comfortably under it
+        // afterwards, regardless of how large the tool registry's own
+        // descriptions grow over time.
+        defaultContextWindow: deriveDefaultContextWindow(home),
       });
 
       const sessionId = "t651-aux-seeded-session";
@@ -422,9 +575,9 @@ describe("dashboard.ts wires GatewayWsDeps.summarize onto real WS turns (issue #
         fallbackModels: [model],
         defaultMaxTokens: 256,
         defaultAuxModel: "",
-        // Same window as the sibling "with defaultAuxModel" test above --
-        // see its comment for the margin rationale.
-        defaultContextWindow: 22000,
+        // Same derivation as the sibling "with defaultAuxModel" test above
+        // (issue #671 item 3) -- see its comment for the rationale.
+        defaultContextWindow: deriveDefaultContextWindow(home),
       });
 
       const sessionId = "t651-noaux-seeded-session";
@@ -447,6 +600,83 @@ describe("dashboard.ts wires GatewayWsDeps.summarize onto real WS turns (issue #
       expect(outcome.status).toBe("complete");
       expect(captured.length).toBeGreaterThan(1);
       for (const request of captured) expect(request.model).toBe(model);
+    } finally {
+      await closeServer(server);
+    }
+  });
+});
+
+// Issue #671 (residual do grupo C de #637, vereditos das PRs #635/#665):
+// antes desta issue, uma falha do `AuxClient` durante um turno WS real caía
+// para o resumo do próprio turno em silêncio na UI -- `GatewayEventName`
+// (`src/gateway/rpc/frame.ts`) não tinha o evento, e o `eventSink` de
+// `src/gateway/ws/connection.ts` não o encaminhava. Prova aqui: com
+// `defaultAuxModel` configurado e o stub respondendo erro só ao request de
+// resumo (`startAuxFailingServer`), o turno completa (fail-open, nunca
+// derruba o turno inteiro) e um frame `compaction.aux_fallback` com `code`
+// chega ao socket.
+describe("dashboard.ts forwards compaction.aux_fallback onto a real WS turn when the aux summarizer fails (issue #671)", () => {
+  it("emits a compaction.aux_fallback event frame carrying the failure's code, and the turn still completes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-t671-aux-fallback-"));
+    roots.push(root);
+    const home = join(root, ".lohra");
+
+    const captured: CapturedRequest[] = [];
+    const provider = "t671-aux-fallback-probe";
+    const model = "t671-aux-fallback-main-model";
+    const auxModel = "t671-aux-fallback-summary-model";
+    const server = startAuxFailingServer(auxModel, captured);
+    await new Promise<void>((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("missing test port");
+      registerProvider({
+        name: provider,
+        apiMode: "chat_completions",
+        aliases: [],
+        displayName: "T671 aux fallback probe",
+        description: "Local in-memory composition-root probe (issue #671).",
+        signupUrl: "",
+        envVars: [],
+        baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
+        modelsUrl: "",
+        requiresApiKey: false,
+        supportsVision: false,
+        fallbackModels: [model],
+        defaultMaxTokens: 256,
+        defaultAuxModel: auxModel,
+        // Same derivation as the sibling summarize tests above (issue #671
+        // item 3) -- forces compaction (and, here, the aux summary call
+        // whose failure this test exists to observe).
+        defaultContextWindow: deriveDefaultContextWindow(home),
+      });
+
+      const sessionId = "t671-aux-fallback-session";
+      seedLongHistory(home, sessionId, model);
+
+      const dashboard = await bootDashboard(root, home, provider, model);
+      const ws = new WebSocket(dashboard.wsUrl);
+      await createSession(ws, sessionId);
+      const { frames, completion } = await submitAndCollectFrames(ws, sessionId, "continue");
+      ws.close();
+      dashboard.shutdown();
+      await dashboard.donePromise;
+
+      // Fail-open (issue #587's own invariant, unchanged by #671): the aux
+      // failure never derails the turn itself.
+      expect(completion.status).toBe("complete");
+
+      const fallbackFrame = frames.find((frame) => frame.params.type === "compaction.aux_fallback");
+      if (fallbackFrame === undefined) {
+        throw new Error("no compaction.aux_fallback frame observed on the socket");
+      }
+      expect(fallbackFrame.params.payload?.code).toBe("ProviderCallFailed");
+
+      // The aux summary call really was attempted (and really failed) --
+      // otherwise the frame above would be a false positive from some
+      // other code path.
+      const auxRequests = captured.filter((request) => request.model === auxModel);
+      expect(auxRequests.length).toBeGreaterThan(0);
     } finally {
       await closeServer(server);
     }
