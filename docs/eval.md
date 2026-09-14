@@ -160,22 +160,62 @@ Sem `--provider`, o ambiente do processo (herdado ou não, dependendo do modo)
 (defesa em profundidade) recusam rodar quando `CI`/`GITHUB_ACTIONS` estiver
 setado com qualquer valor truthy (`scripts/eval/ci-guard.ts`), e o oráculo de
 mecanismo é pulado — não há stub interceptando a chamada real para capturar
-as requisições cruas; só o oráculo de resultado roda nesse modo.
+as requisições cruas; só o oráculo de resultado roda nesse modo. O ambiente
+herdado do operador (`buildProviderEnvironment`) sempre isola o `state.db`
+num profile próprio — ver "Isolamento do estado" abaixo.
+
+### Limite conhecido: `terminal` in-process herda o ambiente real (issue #607 item 1)
+
+A allowlist acima cobre as variáveis que `src/` lê (`io.environment` —
+`resolvePaths`, `LOHRA_PROVIDER_BASE_URL`, etc.). `src/tools/terminal.ts`
+spawna com `env: process.env` diretamente (`terminal.ts:121`), não com essa
+allowlist — um passo `terminal` scriptado no eval roda com o ambiente/HOME
+REAIS do operador que executa `npm test`/`npm run eval`, in-process. Isso é
+inócuo hoje porque a política de comando perigoso (`src/tools/approval.ts`,
+`detectDangerousCommand`) recusa qualquer comando arriscado ANTES do spawn —
+nenhum fixture executa de verdade um comando de rede. `tests/eval-cases.test.ts`
+pina essa garantia: para todo comando `terminal` de todo fixture que a
+política não recusaria (logo, que executaria de verdade), o comando precisa
+estar num allowlist seguro conhecido (`echo`/`printf`) — um fixture novo com
+`terminal curl ...` reprova esse teste antes de fazer rede em `npm test`.
+
+### Isolamento do estado no modo `--provider` (issue #607 item 2)
+
+`buildProviderEnvironment` (`scripts/eval/session.ts`) sempre define
+`LOHRA_PROFILE=eval` por padrão (uma variável já exportada pelo operador
+vence) antes de rodar contra um provedor real. Sem isso, `resolvePaths`
+(`src/config/paths.ts:30-39`) resolveria `home` para `~/.lohra` — o profile
+default do operador — e um baseline `--provider` gravaria sessões no MESMO
+`state.db` das sessões reais dele. `.env` (`~/.lohra/.env`) independe de
+profile, então isolar o profile nunca esconde credenciais.
 
 ### `mechanismOk`: tri-estado, nunca um veredito fingido
 
 `mechanismOk` é `true` (todas as assertions passaram), `false` (pelo menos
 uma falhou) ou `"skipped"` (modo `--provider`: nenhuma assertion rodou,
 porque não existe stub capturando a requisição real para julgar). `"skipped"`
-nunca é tratado como passagem — `summary.json` conta os três estados
-separadamente (`mechanismPassCount`, `mechanismFailCount`,
-`mechanismSkippedCount`), e o filtro de falha do CLI usa `=== false`, nunca
+nunca é tratado como passagem — `summary.json` conta `mechanismPassCount` e
+`mechanismSkippedCount` separadamente (o total menos essas duas contagens são
+falhas reais — não existe um `mechanismFailCount` próprio em `EvalSummary`,
+`scripts/eval/types.ts`), e o filtro de falha do CLI usa `=== false`, nunca
 uma checagem de "falsy" que confundiria `"skipped"` com uma falha real. Uma
 corrida `--provider` legítima e saudável mostra `mechanismSkippedCount` igual
 ao total de casos e `mechanismPassCount: 0` — isso é o esperado, não um sinal
 de problema.
 
-Cada corrida grava em `docs/eval/<data>-<stub|provedor>[-<tag>]/`:
+### Onde cada corrida grava, e por que `--tag` importa (issue #607 item 6)
+
+Sem `--tag`, uma corrida grava em `.eval/<data>-<stub|provedor>/`
+(gitignorado, fora do controle de versão) — **nunca** em `docs/eval/`. Antes
+disso ser corrigido, `npm run eval` sem flags no mesmo dia de um baseline
+commitado manualmente gravava no MESMO `docs/eval/<data>-<label>/` e
+sobrescrevia `results.jsonl`/`summary.json` tracked (só `generatedAt`/
+`elapsedMs` mudavam, mas o diff era real). Com `--tag <t>`, a corrida grava
+em `docs/eval/<data>-<label>-<t>/` — um nome sempre distinto de qualquer
+baseline sem tag do mesmo dia — e é assim que se promove uma corrida a
+baseline commitado; sem `--tag`, nada em `docs/eval/` é tocado.
+
+Em ambos os casos:
 
 - `results.jsonl` — uma linha por caso, **anexada assim que o caso termina**
   (`appendResultLine`); um crash no meio do lote não perde as linhas já
@@ -186,12 +226,14 @@ Cada corrida grava em `docs/eval/<data>-<stub|provedor>[-<tag>]/`:
 
 ### Comparando duas corridas (antes/depois de uma mudança de prompt)
 
-Sem `--tag`, duas corridas no mesmo dia contra o mesmo alvo (`stub` ou o
-mesmo `--provider`) truncam o MESMO `docs/eval/<data>-<label>/results.jsonl`
-(`resetResultsFile` reseta o arquivo a cada corrida) — a segunda apaga a
-primeira. Para medir o efeito de uma mudança que afeta o prompt (system
-prompt, catálogo de tools, doutrina de compactação — ex.: a dieta de
-#585/PR #598) sobre os MESMOS casos:
+Duas corridas com o mesmo `--tag` (ou ambas sem `--tag`) no mesmo dia contra
+o mesmo alvo (`stub` ou o mesmo `--provider`) truncam o MESMO
+`results.jsonl` (`resetResultsFile` reseta o arquivo a cada corrida) — a
+segunda apaga a primeira. Para medir o efeito de uma mudança que afeta o
+prompt (system prompt, catálogo de tools, doutrina de compactação — ex.: a
+dieta de #585/PR #598) sobre os MESMOS casos, dê a cada lado um `--tag`
+diferente (isso também é o que promove as duas corridas a
+`docs/eval/`, tracked, para comparação futura):
 
 ```bash
 git checkout <SHA-antes> && npm run eval -- --tag antes-585
@@ -209,9 +251,12 @@ comentário — `summary.json` hoje não carrega o commit da corrida.
 
 ## Adicionando um caso
 
-1. Descubra o comportamento real primeiro (spawn manual do stub +
-   `dist/cli.js`, como os cases existentes documentam no `note`) — nunca
-   adivinhe a forma de uma requisição ou de um resultado de tool.
+1. Descubra o comportamento real primeiro — spawn manual do stub + `runCli`
+   in-process (o mesmo caminho que `npm test` exercita, sem pré-requisito
+   nenhum) ou, depois de `npm run build`, `node dist/cli.js` contra esse
+   stub (como alguns cases existentes documentam no `note`, de antes desta
+   nota existir) — nunca adivinhe a forma de uma requisição ou de um
+   resultado de tool.
 2. Escreva o fixture com o `stub_script` mínimo que produz esse
    comportamento e as assertions que ficariam vermelhas se ele regredisse.
 3. Acrescente o `id` a `dev` (ou `holdout`) em `split.json`.
