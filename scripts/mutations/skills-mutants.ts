@@ -45,8 +45,10 @@ export const skillsMutants: readonly Mutant[] = [
     edits: [
       {
         file: store,
-        before: '      if (code !== "ENOENT") {',
-        after: "      if (true) {",
+        before:
+          '      if (code !== "ENOENT") {\n        warn(`collectSkillFiles: ${directory} unreadable (${code ?? "unknown error"})`);\n      }\n      return;',
+        after:
+          '      warn(`collectSkillFiles: ${directory} unreadable (${code ?? "unknown error"})`);\n      return;',
       },
     ],
   },
