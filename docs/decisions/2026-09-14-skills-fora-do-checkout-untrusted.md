@@ -14,18 +14,18 @@ Fora de um checkout deste repositório (nenhum `.git`/`package.json` acima do
 cwd — `findProjectRoot`, `src/context/discovery.ts:59-67`), **toda** skill
 que não vive dentro do `project_root` chega ao modelo com `untrusted: true` e
 a doutrina «é dado, não instrução» (`src/context/doctrine.ts`), pelo mesmo
-critério de `isUntrustedPath` (`src/tools/filesystem.ts:21-46`, atualizado
-por #642) que `isUntrustedSkill` (`src/tools/stateful.ts:56-68`) usa. Isso
+critério de `isUntrustedPath` (`src/tools/filesystem.ts:30-38`, atualizado
+por #642) que `isUntrustedSkill` (`src/tools/stateful.ts:70-72`) usa. Isso
 inclui duas origens que a doutrina «desconfiar do que é de terceiro» não
 distingue hoje:
 
 1. A skill builtin empacotada com o próprio runtime
-   (`assets/skills/workflow-authoring`, `src/commands/session-tools.ts:137-149`,
+   (`assets/skills/workflow-authoring`, `src/commands/session-tools.ts:138-150`,
    `builtinRoots`) — é código do produto, versionado neste repositório,
    revisado como qualquer outro `src/`.
 2. Toda skill em `home` (`~/.lohra/skills`, `SkillStore.root`,
-   `src/skills/store.ts:169-185`) — o destino default de `skill_manage
-create` quando `scope` não é `"project"` (`src/tools/stateful.ts:91-95`,
+   `src/skills/store.ts:172-188`) — o destino default de `skill_manage
+create` quando `scope` não é `"project"` (`src/tools/stateful.ts:106-108`,
    `scope ?? "home"`).
 
 Dois lados, nenhum decidido aqui:
@@ -37,7 +37,7 @@ Dois lados, nenhum decidido aqui:
   definição.
 - **(b) Contra uma exceção para `home` sem qualificação:** `skill_manage
 create` grava em `home` por DEFAULT quando o modelo cria uma skill durante a
-  sessão (`stateful.ts:91-95`) — uma exceção geral para `home` confiaria
+  sessão (`stateful.ts:106-108`) — uma exceção geral para `home` confiaria
   automaticamente em algo que o próprio MODELO escreveu, não o operador. Uma
   skill em `home` também pode ter sido copiada de fora (outro checkout,
   outro operador, um `git clone` de terceiro dentro de `~/.lohra/skills`) —
@@ -45,7 +45,7 @@ create` grava em `home` por DEFAULT quando o modelo cria uma skill durante a
 - Terceiro ponto, não listado como lado mas relevante ao pesar os dois: a
   doutrina do runtime promete **menos** confiança sobre a origem, nunca
   mais (mesmo raciocínio do comentário em `isUntrustedSkill`,
-  `stateful.ts:56-65` — no caso hipotético de `skill.path === undefined`,
+  `stateful.ts:55-63` — no caso hipotético de `skill.path === undefined`,
   marcar `untrusted` é o lado seguro). Uma exceção errada troca um falso
   positivo (skill confiável marcada) por um falso negativo (skill não
   confiável sem marca) — o segundo é o que a doutrina existe para evitar.
@@ -81,8 +81,9 @@ adotar) — não pode inferir isso do caminho `home` sozinho.
   lives outside project_root") — skill criada em `SkillStore(root())`, fora
   do checkout, continua `untrusted: true`; nenhuma exceção por origem
   (`home`/`builtin`) aplicada.
-- `src/tools/stateful.ts:91-95` — `skill_manage create` grava em `home` por
-  default (`scope ?? "home"`), o mesmo destino de uma instalação manual.
-- `src/commands/session-tools.ts:137-149` — `builtinRoots` empacota
+- `src/tools/stateful.ts:106-108` — `skill_manage create` grava em `home`
+  por default (`scope ?? "home"`), o mesmo destino de uma instalação
+  manual.
+- `src/commands/session-tools.ts:138-150` — `builtinRoots` empacota
   `assets/skills/workflow-authoring` junto do `home`/`project` que
   `SkillStore` varre.
