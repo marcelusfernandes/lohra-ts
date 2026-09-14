@@ -1,7 +1,7 @@
 import { jsonFloat, stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
 import type { CostEstimate } from "../pricing/index.js";
 import type { ToolCall, Usage } from "../transports/index.js";
-import { addUsage } from "./runtime.js";
+import { addUsage } from "./usage.js";
 import type {
   CompactionSummary,
   ConversationTurnResult,
@@ -130,19 +130,27 @@ export function successEnvelope(result: ConversationTurnResult, extra?: AuxEnvel
   return `${stringifyJsonPreservingNumbers(value, 2)}\n`;
 }
 
-export function errorEnvelope(input: {
-  readonly sessionId: string;
-  readonly model: string | null;
-  readonly prompt: string;
-  readonly error: string;
-  readonly apiCalls: number;
-  readonly usage?: Usage | null;
-  readonly usageTotal?: Usage | null;
-  readonly cost?: CostEstimate | null;
-  readonly sessionSummary?: SessionSummary | null;
-  readonly stopReason?: string | null;
-  readonly toolCalls?: readonly ExecutedToolCall[];
-}): string {
+export function errorEnvelope(
+  input: {
+    readonly sessionId: string;
+    readonly model: string | null;
+    readonly prompt: string;
+    readonly error: string;
+    readonly apiCalls: number;
+    readonly usage?: Usage | null;
+    readonly usageTotal?: Usage | null;
+    readonly cost?: CostEstimate | null;
+    readonly sessionSummary?: SessionSummary | null;
+    readonly stopReason?: string | null;
+    readonly toolCalls?: readonly ExecutedToolCall[];
+  },
+  // RED (issue #650, AC3): aceito mas ainda IGNORADO neste commit — o fold
+  // aditivo (aux_calls/usage_total, mesma convenção de successEnvelope,
+  // issue #587) chega no commit verde seguinte, provado por
+  // tests/conversation-envelope.test.ts.
+  extra?: AuxEnvelopeExtra,
+): string {
+  void extra;
   const value: Record<string, unknown> = {
     session_id: input.sessionId,
     model: input.model,

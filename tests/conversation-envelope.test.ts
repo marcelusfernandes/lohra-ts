@@ -183,6 +183,43 @@ describe("conversation envelopes", () => {
     expect(keys.slice(0, -1)).toEqual(Object.keys(withoutAux));
   });
 
+  // Issue #650 AC3 (item 13, veredito da PR #625, non_blocking 2 "gasto
+  // órfão no caminho de erro"): errorEnvelope agora aceita o MESMO `extra`
+  // aditivo que successEnvelope já tinha (issue #587) -- aux_calls por
+  // último, usage_total somado -- byte-idêntico sem `extra` (mesma contagem
+  // de chaves de `early`/`incomplete` abaixo).
+  it("adds aux_calls at the end for errorEnvelope too, only when extra is given (issue #650)", () => {
+    const base = { sessionId: "s", model: "m", prompt: "x", error: "failure", apiCalls: 1 };
+
+    const noExtra = parseObject(errorEnvelope(base));
+    expect(noExtra).not.toHaveProperty("aux_calls");
+    expect(Object.keys(noExtra)).toHaveLength(14);
+
+    const withZeroAux = parseObject(errorEnvelope(base, { auxCalls: 0, auxUsage: null }));
+    expect(withZeroAux).not.toHaveProperty("aux_calls");
+    expect(withZeroAux).toEqual(noExtra);
+
+    const withAux = parseObject(
+      errorEnvelope(
+        { ...base, usage, usageTotal: usage },
+        {
+          auxCalls: 1,
+          auxUsage: {
+            inputTokens: 100,
+            outputTokens: 20,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            reasoningTokens: 0,
+          },
+        },
+      ),
+    );
+    expect(withAux.aux_calls).toBe(1);
+    expect(withAux.usage_total).toEqual({ input_tokens: 111, output_tokens: 27 });
+    const keys = Object.keys(withAux);
+    expect(keys.at(-1)).toBe("aux_calls");
+  });
+
   it("omits session for pre-response errors and includes it for incomplete responses", () => {
     const early = parseObject(
       errorEnvelope({ sessionId: "s", model: "m", prompt: "x", error: "failure", apiCalls: 1 }),

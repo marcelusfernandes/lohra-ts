@@ -106,25 +106,22 @@ export class ConversationCancelledError extends ConversationError {
    * of a multi-iteration turn (a tool-call/pause loop) that completed
    * normally, EXCEPT that a steer-driven interrupt absorbed mid-turn
    * (#520) also folds its own ESTIMATE into this same `usageTotal` before
-   * this cancel ever throws (`runtime.ts:555-561`, `estimatePartialUsage`)
+   * this cancel ever throws (`runtime.ts:541-547`, `estimatePartialUsage`)
    * — so this field is not exhaustively "real measurement" the moment a
    * turn mixes both triggers. A THIRD, real source (issue #569): this same
    * iteration's own preflight compaction can already have summarized the
-   * history through its own provider call (`summarize`, `runtime.ts:429-
-   * 437`, `addUsage` at `:435`, reachable from iteration 1 via
-   * `preflightCompact` at `:453`) — BEFORE that iteration's own request is
+   * history through its own provider call (`summarize`, `runtime.ts:406-
+   * 411`, `addUsage` at `:411`, reachable from iteration 1 via
+   * `preflightCompact` at `:436`) — BEFORE that iteration's own request is
    * ever built, so `usageTotal` is not necessarily still whatever an
    * earlier ITERATION alone would suggest. `partial` still derives from `partialUsage`
    * alone (see that field's own doc), never from whether THIS field
-   * happens to include an estimated portion — carrying
-   * `ConversationTurnResult.partialCalls` through this error too, to tell
-   * the two apart downstream, is out of #568's scope (steer interaction
-   * with cancel is a sibling concern, not this issue's).
+   * happens to include an estimated portion.
    *
    * `null` in exactly two cases, never zero-filled (same "never measured"
    * convention `partialUsage`/`usageUncertain` already use): a
    * PRE-ISSUANCE cancel (the signal was already aborted before this call's
-   * own request was ever built, `runtime.ts:440`/`:476`) — constructed
+   * own request was ever built, `runtime.ts:423`/`:459`) — constructed
    * with no `measuredUsage` option at all, REGARDLESS of whatever
    * `usageTotal` an earlier iteration of the SAME turn may already carry;
    * or a turn where no earlier iteration (real or steer-estimated) ever
@@ -135,6 +132,24 @@ export class ConversationCancelledError extends ConversationError {
    * reader, and combines the two into the leaf's reported `usage` while
    * still deriving `partial` from `partialUsage` alone. */
   public readonly measuredUsage: Usage | null;
+  /** Issue #650 (item 12, follow-up do veredito da PR #627): mirrors
+   * `MaxIterationsError.partialCalls` (issue #594) — how many of THIS
+   * turn's own calls were torn down by a steer-driven interrupt and
+   * absorbed with `continue` (`runtime.ts`'s own `partialCalls` counter)
+   * BEFORE this in-flight external cancel threw (`runtime.ts:513-527`,
+   * the only constructor call site that passes this option). The two
+   * pre-issuance throws (`runtime.ts:423`,`:459`) stay at the constructor
+   * default `0` on purpose — no call belonging to THIS iteration was ever
+   * issued at all, so nothing from it could have been absorbed. `0` also
+   * covers every turn that never had a steer absorbed at all — same
+   * "genuine, fully-accounted cancel" meaning `MaxIterationsError`'s own
+   * `partialCalls === 0` already carries. `child-runner.ts` is unchanged
+   * by this: `partial`/`usageUncertain` there still derive from
+   * `partialUsage !== null` alone (see that field's own doc) — this field
+   * is additional data for a caller that wants to tell "cancel after N
+   * real calls" apart from "cancel before the first", not a new input to
+   * that existing contract. */
+  public readonly partialCalls: number;
   public constructor(
     sessionId: string,
     cause?: unknown,
@@ -142,6 +157,7 @@ export class ConversationCancelledError extends ConversationError {
       readonly partialUsage?: Usage | null;
       readonly measuredUsage?: Usage | null;
       readonly apiCalls?: number;
+      readonly partialCalls?: number;
     } = {},
   ) {
     super("CONVERSATION_CANCELLED", "conversation cancelled", {
@@ -151,6 +167,7 @@ export class ConversationCancelledError extends ConversationError {
     });
     this.partialUsage = options.partialUsage ?? null;
     this.measuredUsage = options.measuredUsage ?? null;
+    this.partialCalls = options.partialCalls ?? 0;
   }
 }
 

@@ -26,9 +26,17 @@ import {
   type ChatHttpPort,
   type ChatHttpRequest,
   type HttpResponseData,
+  type NormalizedResponse,
 } from "../src/transports/index.js";
 import { createChildRunner } from "../src/orchestration/child-runner.js";
 import type { SpawnConfig } from "../src/orchestration/core.js";
+import {
+  ConversationCancelledError,
+  ConversationRuntime,
+  SqliteConversationRepository,
+  type ModelRequest,
+  type ModelTransport,
+} from "../src/conversation/index.js";
 
 const encoder = new TextEncoder();
 
@@ -367,5 +375,120 @@ describe("createChildRunner — abort in flight (issue #518)", () => {
     expect(result.usageUncertain).toBe(true);
     expect(result.partial).toBe(true);
     close();
+  });
+
+  // Issue #650 (item 12, follow-up do veredito da PR #627): a
+  // `ConversationRuntime` construída direto (não via `createChildRunner`,
+  // que dobra o erro num `CollectResult` sem `partialCalls`) para ler
+  // `error.partialCalls` de verdade. `tests/conversation-runtime.test.ts`
+  // já está no teto de 800 linhas (`contratos`) -- este arquivo, também no
+  // `Files` da issue, é o lar declarado pela própria issue para este teste.
+  describe("ConversationRuntime.runTurn — ConversationCancelledError.partialCalls (issue #650)", () => {
+    /** Hangs until `request.signal` (a composição de `signal`+`call.signal`
+     * de cada chamada, `runtime.ts`) dispara, então rejeita com um erro cuja
+     * classificação em `isAbortOf`/`signalAborted` depende só de QUAL dos
+     * dois sinais estava de fato abortado no momento -- nunca do shape do
+     * erro em si (mesmo `name: "AbortError"` nas duas chamadas). */
+    class HangingAbortTransport implements ModelTransport {
+      calls = 0;
+      constructor(private readonly onCall: (call: number) => void) {}
+      complete(request: ModelRequest): Promise<NormalizedResponse> {
+        this.calls += 1;
+        this.onCall(this.calls);
+        return new Promise((_resolve, reject) => {
+          request.signal.addEventListener(
+            "abort",
+            () => {
+              const error = new Error("aborted");
+              error.name = "AbortError";
+              reject(error);
+            },
+            { once: true },
+          );
+        });
+      }
+      close(): Promise<void> {
+        return Promise.resolve();
+      }
+    }
+
+    it("a cancel in flight after a steer-absorbed call on an earlier iteration carries the accumulated partialCalls", async () => {
+      const { sessions, close } = setup();
+      const repository = new SqliteConversationRepository(sessions);
+      const { started: firstStarted, onStarted: onFirstStarted } = startedGate();
+      const { started: secondStarted, onStarted: onSecondStarted } = startedGate();
+      const transport = new HangingAbortTransport((call) => {
+        if (call === 1) onFirstStarted();
+        if (call === 2) onSecondStarted();
+      });
+      const hook: { armed: (() => void) | null } = { armed: null };
+      const interruptSource = {
+        arm: (abort: () => void): (() => void) => {
+          hook.armed = abort;
+          return () => undefined;
+        },
+      };
+      const runtime = new ConversationRuntime({
+        repository,
+        transport,
+        promptSnapshot: () => "system prompt",
+        idSource: () => "t650-partial-calls",
+        clock: () => 1000,
+      });
+      const controller = new AbortController();
+
+      const turn = runtime.runTurn({
+        input: "loop forever",
+        provider: "ollama",
+        model: "m",
+        cwd: "/tmp",
+        signal: controller.signal,
+        interruptSource,
+      });
+
+      // Iteration 1: steer-interrupt tears the call down, absorbed with
+      // `continue` (never the outer signal) -- `partialCalls` becomes 1.
+      await firstStarted;
+      hook.armed?.();
+      // Iteration 2: the OUTER signal cancels the call actually in flight.
+      await secondStarted;
+      controller.abort("USER_CANCELLED");
+
+      const rejected = (await turn.catch(
+        (caught: unknown) => caught,
+      )) as ConversationCancelledError;
+      expect(rejected).toBeInstanceOf(ConversationCancelledError);
+      expect(rejected.partialCalls).toBe(1);
+      close();
+    });
+
+    it("a pre-issuance cancel (signal already aborted, no call ever made) carries partialCalls 0", async () => {
+      const { sessions, close } = setup();
+      const repository = new SqliteConversationRepository(sessions);
+      const transport = new HangingAbortTransport(() => undefined);
+      const runtime = new ConversationRuntime({
+        repository,
+        transport,
+        promptSnapshot: () => "system prompt",
+        idSource: () => "t650-partial-calls-pre-issuance",
+        clock: () => 1000,
+      });
+      const controller = new AbortController();
+      controller.abort("USER_CANCELLED");
+
+      const rejected = (await runtime
+        .runTurn({
+          input: "x",
+          provider: "ollama",
+          model: "m",
+          cwd: "/tmp",
+          signal: controller.signal,
+        })
+        .catch((caught: unknown) => caught)) as ConversationCancelledError;
+      expect(rejected).toBeInstanceOf(ConversationCancelledError);
+      expect(rejected.partialCalls).toBe(0);
+      expect(transport.calls).toBe(0);
+      close();
+    });
   });
 });
