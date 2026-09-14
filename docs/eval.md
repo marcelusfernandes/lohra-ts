@@ -183,8 +183,9 @@ estar num allowlist seguro conhecido (`echo`/`printf`) — um fixture novo com
 ### Isolamento do estado no modo `--provider` (issue #607 item 2)
 
 `buildProviderEnvironment` (`scripts/eval/session.ts`) sempre define
-`LOHRA_PROFILE=eval` por padrão (uma variável já exportada pelo operador
-vence) antes de rodar contra um provedor real. Sem isso, `resolvePaths`
+`LOHRA_PROFILE=eval` por padrão (`||`, não `??`: uma variável já exportada e
+NÃO vazia pelo operador vence; `LOHRA_PROFILE=""` cai no mesmo default —
+issue #653 item 2) antes de rodar contra um provedor real. Sem isso, `resolvePaths`
 (`src/config/paths.ts:30-39`) resolveria `home` para `~/.lohra` — o profile
 default do operador — e um baseline `--provider` gravaria sessões no MESMO
 `state.db` das sessões reais dele. `.env` (`~/.lohra/.env`) independe de

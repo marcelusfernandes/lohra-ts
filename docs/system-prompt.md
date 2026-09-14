@@ -541,8 +541,10 @@ junta de sempre. Regra de fronteira: `cache_control: {type: "ephemeral"}` no
 último bloco cacheável — a faixa `stable`, ou `context` quando presente,
 NUNCA `volatile` (data, memória, índice de skills: `promptSnapshot()`
 memoiza o resultado dentro de um processo, `??=` em
-`src/conversation/runtime.ts:167-170` — a faixa só muda entre processos ou
-sessões diferentes, nunca dentro da mesma) nem uma mensagem `role: "system"`
+`src/conversation/runtime.ts:155` — a faixa só muda entre sessões diferentes
+(uma sessão retomada reusa as três faixas persistidas — #649,
+`docs/decisions/2026-09-14-faixas-restauradas.md`), nunca dentro da mesma)
+nem uma mensagem `role: "system"`
 extra (dinâmica por request, ex.: o prompt do sumarizador de compactação). Um `system` que chega como STRING
 simples (o caso de todo caller de hoje) é tratado como a faixa `stable`
 inteira — a mesma regra de migração que `SessionRepository.systemPromptBands`
@@ -607,8 +609,10 @@ dia (e memória/skills, quando presentes) ficam DENTRO do mesmo bloco
 cacheado — o cache inteiro invalida a cada dia (ou a cada memória nova),
 em vez de só a faixa `volatile`. É uma cache mais grossa, não ausente.
 
-**Fechado pela issue #649** (sub-issue B1 de #637;
-`docs/decisions/2026-09-14-faixas-restauradas.md`): o limite acima —
+**Fechado pela issue #649: faixas descartadas na retomada** (sub-issue B1 de
+#637; `docs/decisions/2026-09-14-faixas-restauradas.md`) — não o gap do WS
+acima, que segue aberto (`src/gateway/ws/connection.ts:264`,
+`src/gateway/session-service.ts:11`): o limite que a #649 fechou era outro —
 `ConversationRuntime.runTurn` descartava as faixas que `session()` restaurou
 do banco antes de montar a próxima requisição de uma sessão RETOMADA — não
 existe mais. `resolveTurnSession` (`src/conversation/runtime-session.ts:58-87`,
