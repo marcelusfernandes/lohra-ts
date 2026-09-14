@@ -773,7 +773,7 @@ export const supervisionMutants: readonly Mutant[] = [
       {
         file: childRunner,
         before:
-          "          return error.partialCalls > 0\n            ? { ...base, partial: true, usageUncertain: true }\n            : base;",
+          "          return error.partialCalls > 0 ? { ...base, partial: true, usageUncertain: true } : base;",
         after: "          return base;",
       },
     ],
