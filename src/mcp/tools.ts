@@ -103,8 +103,11 @@ export function wrapCallResult(result: unknown): string {
     throw new TypeError(`MCP text block ${String(invalidIndex)} must contain a string`);
   }
   const text = parts.join("");
+  // Issue #642: o texto de um `CallToolResult` de erro vem do SERVIDOR MCP,
+  // exatamente como o de sucesso (linha abaixo) — a mesma marca de origem
+  // vale nos dois, campo aditivo, última chave, nunca `false`.
   if (field<unknown>(result, "isError", false)) {
-    return toolError(text || "MCP tool reported an error");
+    return toolError(text || "MCP tool reported an error", { untrusted: true });
   }
   return toolResult(undefined, { content: text, untrusted: true });
 }
