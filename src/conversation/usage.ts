@@ -9,10 +9,14 @@
 // (issue #620).
 import type { Usage } from "../transports/index.js";
 
-// RED (issue #650): stub que lança — o corpo real (idêntico ao que saiu de
-// `runtime.ts`/`aux.ts`) chega no commit verde seguinte, depois que
-// `tests/conversation-usage.test.ts` prova o vermelho por runtime, não por
-// erro de compilação (controle-negativo).
-export function addUsage(_total: Usage | null, _next: Usage | null): Usage | null {
-  throw new Error("not implemented: addUsage");
+export function addUsage(total: Usage | null, next: Usage | null): Usage | null {
+  if (next === null) return total;
+  if (total === null) return { ...next };
+  return {
+    inputTokens: total.inputTokens + next.inputTokens,
+    outputTokens: total.outputTokens + next.outputTokens,
+    cacheReadTokens: total.cacheReadTokens + next.cacheReadTokens,
+    cacheWriteTokens: total.cacheWriteTokens + next.cacheWriteTokens,
+    reasoningTokens: total.reasoningTokens + next.reasoningTokens,
+  };
 }
