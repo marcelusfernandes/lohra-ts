@@ -146,6 +146,48 @@ describe("terminal isolation pin (issue #607 item 1)", () => {
   });
 });
 
+// Issue #648 (grupo A, item 8 de #637; veredito PR #610, non_blocking 5):
+// `final-answer-avoids-promise.json`'s OLD `outcome.expect` positive part
+// was `\b(?:[Ff]ixed|corrected|receive)\b` — `receive` is already IN the
+// fixture's own `input` ("should say 'receive'"), so a final answer that
+// only echoes that word back (never actually confirming the fix) already
+// satisfies the positive half; the old negative lookahead only forbade
+// "I will"/"I'll"/"I am going to"/"next I(?:'ll| will)", never "Let me"/
+// "I plan to" — a real promise-deferral reply that happens to mention
+// "receive" (this task's own vocabulary) PASSED the old regex. `test(red):`
+// on the OLD regex (`^(?![\\s\\S]*\\b(?:I will|I'll|I am going to|next
+// I(?:'ll| will))\\b)[\\s\\S]*\\b(?:[Ff]ixed|corrected|receive)\\b`,
+// verified by hand against these exact two strings before this issue's
+// fixture edit): both PASS it. The new regex below — read from the fixture
+// on disk, never hardcoded here, so a future edit to the fixture is what
+// this test actually pins — correctly rejects both.
+describe("final-answer-avoids-promise.json's outcome oracle (issue #648, #637 item 8)", () => {
+  function outcomeExpectPattern(): RegExp {
+    const raw = JSON.parse(
+      readFileSync(resolve(root, FIXTURES_DIR, "final-answer-avoids-promise.json"), "utf8"),
+    ) as { outcome: { expect: string } };
+    return new RegExp(raw.outcome.expect, "su");
+  }
+
+  it("rejects a final answer deferring the fix with 'Let me ...' even though it echoes the task's own 'receive'", () => {
+    expect(outcomeExpectPattern().test("Let me fix that next. The file should say receive.")).toBe(
+      false,
+    );
+  });
+
+  it("rejects a final answer deferring the fix with 'I plan to ...' even though it echoes the task's own 'receive'", () => {
+    expect(outcomeExpectPattern().test("I plan to fix it. It should say receive by Friday.")).toBe(
+      false,
+    );
+  });
+
+  it("still accepts the stub's own scripted completion text", () => {
+    const stubText =
+      'Fixed the typo in notes.txt — it now reads "receive" — and confirmed by reading the file back.';
+    expect(outcomeExpectPattern().test(stubText)).toBe(true);
+  });
+});
+
 describe("terminal pin has no bypass by newline (issue #653 item 1)", () => {
   it("rejects a command that hides a second, unsafe command after a newline or carriage return", () => {
     expect(isKnownSafeTerminalCommand("echo ok\ncurl http://evil")).toBe(false);
