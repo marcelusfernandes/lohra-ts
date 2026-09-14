@@ -497,13 +497,14 @@ esta issue é a primeira a ter um CONSUMIDOR que lê algo além de `.text`.
 
 `ModelRequest.system`/`BuildKwargsOptions.system`/`StoredSession.systemPrompt`
 aceitam `string | { stable, context, volatile }` (`SystemBands`,
-`src/transports/types.ts`). Um caller que só tem a string achatada (todo
-caller real hoje — `chat.ts`/`dashboard.ts` continuam passando
-`buildSystemPrompt(...).text`) não muda de comportamento nenhum; um caller
-que passa a `SystemPromptSnapshot` inteira dá ao transporte Anthropic o
-suficiente para marcar um breakpoint de cache. Nada no TEXTO que o modelo lê
-muda por causa disso (invariante 1, CLAUDE.md) — só a FORMA que
-`anthropic-messages.ts` manda pela wire.
+`src/transports/types.ts`). `chat.ts`'s `snapshot()` e o `systemPromptSnapshot`
+que `dashboard.ts` usa no `runJob` do cron passam a `SystemPromptSnapshot`
+inteira (não mais só `.text`) — a rota Anthropic dos dois comandos ganha o
+breakpoint de cache de verdade. Nada no TEXTO que o modelo lê muda por causa
+disso (invariante 1, CLAUDE.md) — só a FORMA que `anthropic-messages.ts`
+manda pela wire; `chat-completions.ts`/`responses.ts` achatam de volta para
+uma string antes de montar o request próprio (nenhum dos dois muda de forma
+na saída, só aceitam as faixas na entrada sem quebrar).
 
 ### `anthropic-messages.ts`: blocos + `cache_control`
 
@@ -523,11 +524,18 @@ o `"\n\n"` que a junção antiga usava — concatenar todo `block.text` sem
 separador reproduz bit a bit o que ia no `system` string de antes desta
 issue (`tests/transport-anthropic-messages.test.ts` prende isso).
 
-`chat-completions.ts` fica sem mudança de forma (o prefixo do provedor já
-cacheia automaticamente, sem `cache_control` explícito) — só ganhou um
-teste de que a ordem das tools é idêntica entre chamadas, pré-condição do
-cache de prefixo funcionar. `responses.ts` idem: `instructions` continua a
-mesma string junta (a API Responses não tem `cache_control` por bloco).
+`chat-completions.ts` fica sem mudança de forma NA SAÍDA (o prefixo do
+provedor já cacheia automaticamente, sem `cache_control` explícito) — ganhou
+um teste de que a ordem das tools é idêntica entre chamadas, pré-condição do
+cache de prefixo funcionar, e passou a achatar `options.system` via
+`systemPromptText` antes de montar a mensagem `role: "system"` (sem isso,
+um caller que passa as faixas — qualquer sessão roteada por um provedor
+`chat_completions`, não só Anthropic — vazaria o objeto cru como `content`;
+achado pela suíte inteira, `tests/eval-cases.test.ts`, não previsto na
+primeira rodada desta issue). `responses.ts` idem: `instructions` continua a
+mesma string junta (a API Responses não tem `cache_control` por bloco), e
+ganhou o mesmo achatamento — sem ele, `typeof value === "string"` descartava
+o system prompt inteiro em silêncio para as faixas (invariante 2).
 
 ### Sessão: as três colunas novas, migração tolerante
 
@@ -541,15 +549,25 @@ restaura: linha com as colunas novas preenchidas devolve as três faixas;
 linha anterior a esta issue (só `system_prompt`) devolve o texto inteiro
 como `stable`, `context`/`volatile` vazios.
 
-Isso persiste a informação — mas `SqliteConversationRepository`
-(`src/conversation/sqlite-repository.ts`) e as duas superfícies que montam
-`ConversationRuntime` (`chat.ts`/`dashboard.ts`) ainda não foram fiadas para
-LER essas três colunas nem para passar `SystemPromptSnapshot` inteira a
-`promptSnapshot` (hoje passam `.text`) — ficou reportado na issue #586 como
-follow-up. Sem essa fiação, o benefício de cache observado hoje é
-INTRA-turno (a mesma chamada, iteração 2+, quando o `system` string simples
-vira um único bloco `stable` cacheável), não entre turnos/sessões
-diferentes.
+`SqliteConversationRepository` (`src/conversation/sqlite-repository.ts`,
+o wrapper que `chat.ts`/`dashboard.ts` constroem sobre um `SessionRepository`
+de verdade) lê `systemPromptBands(id)` em `session()` — toda sessão
+retomada volta com as três faixas, migração tolerante incluída
+(`tests/conversation-sqlite-prompt-caching.test.ts`). `chat.ts`'s `snapshot()`
+e o `runJob` do cron de `dashboard.ts` passam a `SystemPromptSnapshot`
+inteira a `ConversationRuntime.promptSnapshot` — as duas superfícies que
+montam `ConversationRuntime` diretamente ganham cache real, tanto numa
+sessão nova quanto numa retomada com `--session`
+(`tests/chat-prompt-caching.test.ts`/`tests/dashboard-prompt-caching.test.ts`,
+contra `runChat`/`runDashboard` reais com stub HTTP Anthropic).
+
+**Gap que permanece, documentado, não silencioso**: o path WS interativo do
+gateway (`createGatewayUpgradeHandler`, `src/gateway/ws/connection.ts`, fora
+dos `Files` desta issue) constrói sua própria `ConversationRuntime` por
+turno e recebe `sessionDefaults.systemPrompt` já achatado (`GatewaySessionRegistry`,
+`src/gateway/session-service.ts`, declara `systemPrompt: string` — alargar
+esse contrato é decisão de outra issue). Uma sessão de dashboard aberta pela
+UI web (não pelo cron) continua sem cache_control até essa issue acontecer.
 
 ## O que este documento ainda não cobre
 
