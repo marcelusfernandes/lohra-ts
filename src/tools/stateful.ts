@@ -68,7 +68,13 @@ function isUntrustedSkill(skill: Skill): boolean {
 }
 
 export class SkillTool {
-  constructor(private readonly store: SkillStore) {}
+  constructor(
+    private readonly store: SkillStore,
+    // Issue #642: assinatura chega antes do comportamento — `projectRoot`
+    // ainda não é lido por `view()` neste commit (vermelho: os testes que
+    // dependem dele continuam falhando por asserção, não por compilação).
+    private readonly options: { readonly projectRoot?: string } = {},
+  ) {}
 
   view(args: ToolArguments): string {
     const name = text(args.name);
