@@ -15,12 +15,14 @@
 // Isolamento (AC "nunca faz rede sem --provider"): o ambiente em modo stub
 // é uma allowlist literal, nunca `...process.env` — a única forma de rede
 // possível é para o stub local, tanto in-process (a mesma regra vale para
-// `io.environment`, que é tudo que o código de `src/` lê — nunca
-// `process.env` diretamente) quanto via subprocesso. Em modo "provider" o
-// ambiente real É herdado de propósito (as credenciais vivem em
-// `~/.lohra/.env`, fora do repo) e isso só acontece quando quem chama
-// `runEvalCase` passou `--provider` explicitamente (`run.ts` recusa isso em
-// CI antes de chegar aqui).
+// `io.environment`, que é tudo que o código de `src/` lê pelo
+// `CliIo.environment`; a tool `terminal` é a EXCEÇÃO documentada — spawna
+// com `env: process.env` real, não com essa allowlist, ver "Limite
+// conhecido" em `docs/eval.md`, issue #607 item 1) quanto via subprocesso.
+// Em modo "provider" o ambiente real É herdado de propósito (as
+// credenciais vivem em `~/.lohra/.env`, fora do repo) e isso só acontece
+// quando quem chama `runEvalCase` passou `--provider` explicitamente
+// (`run.ts` recusa isso em CI antes de chegar aqui).
 import { spawn } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -215,8 +217,9 @@ function spawnCli(
  * desde então. */
 const PROJECT_ROOT_CWD = process.cwd();
 
-/** Só para teste (issue #607 item 7): `runInProcess` recebe o `invoke` real
- * (`runCli`) por padrão — nenhum chamador de produção passa outro. */
+/** Só para teste (test-only, issue #607 item 7): `runInProcess` recebe o
+ * `invoke` real (`runCli`) por padrão — nenhum chamador de produção passa
+ * outro. */
 export type CliInvoker = typeof runCli;
 
 export async function runInProcess(
@@ -296,7 +299,11 @@ function definedEntries(environment: NodeJS.ProcessEnv): Readonly<Record<string,
 export function buildProviderEnvironment(processEnv: NodeJS.ProcessEnv): Record<string, string> {
   return {
     ...definedEntries(processEnv),
-    LOHRA_PROFILE: processEnv.LOHRA_PROFILE ?? "eval",
+    // `||`, não `??`: `LOHRA_PROFILE=""` exportada pelo operador não é uma
+    // escolha explícita de profile (`resolvePaths`, `src/config/paths.ts`,
+    // rejeita string vazia como configuração inválida) — cai no mesmo
+    // default que a ausência da variável (issue #653 item 2).
+    LOHRA_PROFILE: processEnv.LOHRA_PROFILE || "eval",
     LOHRA_NO_WIZARD: "1",
     NO_COLOR: "1",
   };
