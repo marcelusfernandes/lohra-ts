@@ -482,7 +482,7 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 281 (soma dos treze catálogos importados)", () => {
+  it("a contagem total de mutantes é 283 (soma dos treze catálogos importados)", () => {
     // Os doze catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
@@ -601,9 +601,11 @@ describe("scripts/mutations/slices.json", () => {
     // `aux.ts`'s `summaryBudgetFor` volta ao `maxTokens` fixo em 1024 em vez
     // de escalar com `summaryMaxTokens(estimateTokens(transcript))`, o mesmo
     // orçamento que `buildSummaryRequest` já usava desde a #584 -- 280 + 1 =
-    // 281.
+    // 281. Issue #594 (residual de M21) acrescenta 2 a `supervision-mutants.
+    // ts`: X1 (`child-runner.ts`'s guard `error.partialCalls > 0`, achado
+    // 1/2) e Y1 (`core.ts`'s `fire` idempotente, achado 3) -- 281 + 2 = 283.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 281;
+    const TOTAL_MUTANTS = 283;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -628,14 +630,14 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/workflow-executor-mutants.ts": 45,
       "scripts/mutations/context-window.ts": 24,
       "scripts/mutations/auth-mutants.ts": 13,
-      "scripts/mutations/supervision-mutants.ts": 39,
+      "scripts/mutations/supervision-mutants.ts": 41,
     };
     expect(new Set(Object.keys(CONTAGEM_POR_CATALOGO))).toEqual(new Set(CATALOGOS.keys()));
     for (const [path, mutants] of CATALOGOS) {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(281);
+    expect(somaTabela).toBe(283);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {

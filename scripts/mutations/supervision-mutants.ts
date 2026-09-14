@@ -4,21 +4,14 @@
 // leaf-read-tool,route-faults,route-override}.ts`, no bloco de steer de
 // `src/orchestration/core.ts`, no guard de `dead_turn` de
 // `src/orchestration/child-runner.ts` e no vocabulário de
-// `src/transports/error-kinds.ts` — nenhum `before:` ancorava ali e
-// `transports` nunca teve fatia nenhuma. Mesma mecânica A (git-archive +
-// vitest focado) dos outros catálogos (`scripts/mutations/harness.ts`,
-// issue #148); `mechanism: "family-a"` é só rótulo descritivo, mesma
-// convenção de `workflow-audit-producers-mutants.ts`.
+// `src/transports/error-kinds.ts`. Mesma mecânica A (git-archive + vitest
+// focado, `harness.ts`, issue #148); `mechanism: "family-a"` é só rótulo.
 //
-// Issue #484 (milestone 15, PRs #478/#482) acrescenta 9 mutantes: 6 para
-// `cache-preview.ts` (#462) e 3 para `templates.ts` (#464) — nenhum tinha
-// mutante; `srcGlobs` já cobria os dois, só `focusFiles` mudou.
-//
-// Rodada 2 (veredito da PR #497): a rodada 1 tinha deixado de fora o
-// mutante de `put()` (P6, abaixo) com justificativa FALSA de "código
-// morto" — ver o comentário de P6. Ancorado em
-// `tests/workflow-cache-preview-writes.test.ts` (novo — a suíte principal
-// está no teto de 800 linhas; #484 emendada com esse glob).
+// Issue #484 (milestone 15, PRs #478/#482) acrescenta 9: 6 para
+// `cache-preview.ts` (#462) e 3 para `templates.ts` (#464). Rodada 2
+// (veredito da PR #497) acrescenta o mutante de `put()` (P6, abaixo,
+// justificativa da rodada 1 era FALSA "código morto") ancorado em
+// `tests/workflow-cache-preview-writes.test.ts` (arquivo novo).
 //
 // `category` deriva do `id` sem o prefixo `<letra><n>-`. `focus.test` é o
 // título literal do `it` (substring do `fullName`, veredito da PR #371/#362)
@@ -57,6 +50,7 @@ const validation = "src/orchestration/validation.ts";
 const orchestrationToolsFocus = "tests/orchestration-tools.test.ts";
 const accounting = "src/workflow/accounting.ts";
 const workflowNodesToolFocus = "tests/workflow-nodes-tool.test.ts";
+const steerInterruptFocus = "tests/orchestration-steer-interrupt.test.ts";
 
 export const supervisionMutants: readonly Mutant[] = [
   // --- steer-tool.ts (#424, #445, #450) -----------------------------------
@@ -192,10 +186,8 @@ export const supervisionMutants: readonly Mutant[] = [
     },
     edits: [
       {
-        // Re-anchored by issue #459 (M11-S1, épico #458): `before` is
-        // `isRouteLesson`'s body after #459 grew `suggested_route` from
-        // literal `null` to `Route | null` (last clause now also accepts
-        // `isRoute(candidate.suggested_route)`).
+        // Re-anchored por #459: `before` é `isRouteLesson` após
+        // `suggested_route` virar `Route | null`.
         file: routeFaults,
         before:
           'export function isRouteLesson(value: unknown): value is RouteLesson {\n  if (value === null || typeof value !== "object") return false;\n  const candidate = value as Readonly<Record<string, unknown>>;\n  return (\n    typeof candidate.error_kind === "string" &&\n    isRouteFault(candidate.error_kind as ErrorKind) &&\n    typeof candidate.node_id === "string" &&\n    (candidate.provider === null || typeof candidate.provider === "string") &&\n    (candidate.model === null || typeof candidate.model === "string") &&\n    (candidate.suggested_route === null || isRoute(candidate.suggested_route))\n  );\n}',
@@ -291,11 +283,9 @@ export const supervisionMutants: readonly Mutant[] = [
       },
     ],
   },
-  // #452 (M14, follow-up de #427 mergeado durante esta issue, PR #472):
-  // `overrideNestedSpec` (route-override.ts) só existe porque `runNested`
-  // (engine.ts) via um `ref` só resolvido em runtime, depois de #427's
-  // `pivotResume` já ter rodado na spec EXTERNA — sem esta chamada, um
-  // pivô de rota nunca alcança um template aninhado.
+  // #452 (M14, follow-up de #427, PR #472): `overrideNestedSpec` existe
+  // porque `runNested` via um `ref` só resolvido em runtime, depois do
+  // `pivotResume` de #427 já ter rodado na spec EXTERNA.
   {
     id: "O5-nested-route-override-not-applied",
     category: "nested-route-override-not-applied",
@@ -336,16 +326,10 @@ export const supervisionMutants: readonly Mutant[] = [
     category: "leaf-steered-predicate-narrowed",
     mechanism: "family-a",
     // `tests/workflow-audit-steered.test.ts`'s own steer_cap/null negative
-    // tests never call `trail.flush()` before querying — the baseline
-    // passes them because the ORIGINAL guard skips `record()` entirely (no
-    // enqueue at all, so the missing flush never matters); under this
-    // mutation `record()` DOES enqueue, but the write is async
-    // (`AuditTrail.record` only enqueues — issue #423/#444's own doc
-    // comment) and never becomes visible without a flush, so those two
-    // tests still read back 0 events and the mutant would survive there.
-    // `tests/workflow-steer-tool.test.ts`'s real-core steer_cap test DOES
-    // flush before querying and is already a `focusFiles` entry of this
-    // slice — a real kill, confirmed by running the mutation by hand.
+    // tests never flush before querying — the mutant would survive there
+    // (async `record()` enqueue never becomes visible). The real-core
+    // steer_cap test in `steerToolFocus` DOES flush — a real kill, confirmed
+    // by running the mutation by hand.
     focus: {
       file: steerToolFocus,
       test: "propagates S1's steer_cap refusal (11th pending steer on the SAME busy leaf) as a named error, never queued:true (2ª emenda, #424)",
@@ -510,11 +494,8 @@ export const supervisionMutants: readonly Mutant[] = [
       },
     ],
   },
-  // Rodada 2 (veredito da PR #497): a rodada 1 tinha descartado este
-  // mutante como "código morto" — falso, `runParallel` (engine.ts:480)
-  // chama `cache.put(...)` mesmo sem spawnar leaf quando `branches: []`.
-  // O oráculo conta tentativas de `putCacheCellWithCost`, não linhas de
-  // `workflow_node_cache` (há uma segunda barreira independente).
+  // Rodada 2 (PR #497): descartado como "código morto" na rodada 1 — falso,
+  // `runParallel` chama `cache.put(...)` mesmo sem spawnar leaf (`branches: []`).
   {
     id: "P6-put-facade-delegates-to-real-cache",
     category: "put-facade-delegates-to-real-cache",
@@ -585,13 +566,8 @@ export const supervisionMutants: readonly Mutant[] = [
     ],
   },
   // Issue #502 (non_blocking 4, PR #497): `estimated_tokens_to_repay`/
-  // `estimate_basis` (`:388-390`) had no mutant at all in this catalog —
-  // P1-P6 above never touch this pair. Both anchored on the SAME new `it`
-  // in `tests/workflow-cache-preview-writes.test.ts`, which plants
-  // `workflow_node_cost` rows directly so the averaged value is fractional
-  // (30.5) — a dropped `Math.round` and a hardcoded `null` basis are two
-  // independent bugs a single scalar oracle on either field alone would not
-  // both catch.
+  // `estimate_basis` had no mutant. Both anchored on the SAME new `it`
+  // (fractional average, 30.5): dropped `Math.round` vs. hardcoded `null`.
   {
     id: "P7-estimated-tokens-to-repay-drops-rounding",
     category: "estimated-tokens-to-repay-drops-rounding",
@@ -627,13 +603,9 @@ export const supervisionMutants: readonly Mutant[] = [
       },
     ],
   },
-  // Issue #503 (follow-up of #484 rodada 2, PR #497 veredito non_blocking
-  // 4): `classifyNode` used to fall through to `unknown` for a `parallel`
-  // node whose dry run ran to completion with zero spawns and zero hits
-  // (`branches: []`, the exact case P6 above already proves reaches
-  // `cache.put(...)`) — mixing "not modeled" with "ran, nothing to pay".
-  // This mutant reverts the new `no_leaves` outcome back to `unknown`,
-  // killed by the same `tests/workflow-cache-preview-writes.test.ts` file.
+  // Issue #503 (follow-up de #484 r2): `classifyNode` caía em `unknown` para
+  // um `parallel` com zero spawns/hits — mistura "não modelado" com "rodou,
+  // nada a pagar". Reverte `no_leaves` para `unknown`.
   {
     id: "P9-no-leaves-mislabeled-unknown",
     category: "no-leaves-mislabeled-unknown",
@@ -672,9 +644,8 @@ export const supervisionMutants: readonly Mutant[] = [
     ],
   },
   // --- abort em voo (M16, épico #490, issue #519) -------------------------
-  // Issue #519 (M16-S4, última sub-issue da milestone): S1-S3/S5/S6 já
-  // mergearam o caminho de abort em voo (ADR 0005) sem nenhum mutante
-  // cobrindo `stream()`'s própria propagação de `signal`, a reclassificação
+  // S1-S3/S5/S6 já mergearam o caminho de abort em voo (ADR 0005) sem
+  // mutante cobrindo `stream()`'s propagação de `signal`, a reclassificação
   // de `error.partialUsage` em `child-runner.ts`, e o teto de espera de
   // `OrchestrationChildRuntime.cancel`.
   {
@@ -713,12 +684,9 @@ export const supervisionMutants: readonly Mutant[] = [
       },
     ],
   },
-  // N3 originally targeted `CANCEL_SETTLE_TIMEOUT_MS = 0` (#519's own
-  // suggestion): verified NOT to kill (that focus settles entirely via
-  // microtasks, no real timer, so a 0ms `setTimeout` never fires before the
-  // race resolves). Retargeted at #521's sibling ceiling, `collect()`'s own
-  // `deadlineMs`, against a focus with a leaf that never resolves — there
-  // the ceiling is the only thing that can ever settle the race.
+  // N3 originally targeted `CANCEL_SETTLE_TIMEOUT_MS = 0` (#519): verified
+  // NOT to kill (settles via microtasks, no real timer). Retargeted at
+  // #521's sibling ceiling, `collect()`'s own `deadlineMs`.
   {
     id: "N3-collect-deadline-ceiling-widened",
     category: "collect-deadline-ceiling-widened",
@@ -735,11 +703,9 @@ export const supervisionMutants: readonly Mutant[] = [
       },
     ],
   },
-  // Issue #567 (PR #525; restrito à rodada 2 do veredito da PR #572):
-  // parseSse (client.ts) era atômico no abort — N4 reverte o
-  // `tolerateTruncatedTail` inteiro, voltando o caminho de abort a lançar
-  // sempre. O caminho normal (`response.body`, sem a opção) já lançava
-  // antes e depois desta issue; não precisa de mutante próprio.
+  // Issue #567 (PR #525, r2 da PR #572): `parseSse` era atômico no abort —
+  // N4 reverte o `tolerateTruncatedTail` inteiro, voltando o caminho de
+  // abort a lançar sempre. O caminho normal já lançava antes e depois.
   {
     id: "N4-parse-sse-truncated-frame-atomic",
     category: "parse-sse-truncated-frame-atomic",
@@ -790,6 +756,44 @@ export const supervisionMutants: readonly Mutant[] = [
         before:
           "  result.faults.push(...nested.faults.map((fault) => `${nestedScopePrefix(reference)}${fault}`));",
         after: "  result.faults.push(...nested.faults);",
+      },
+    ],
+  },
+  // --- issue #594 (residual de M21) ---------------------------------------
+  // Achado 1/2: `MaxIterationsError.partialCalls` guard sem mutante.
+  {
+    id: "X1-max-iterations-partial-guard-removed",
+    category: "max-iterations-partial-guard-removed",
+    mechanism: "family-a",
+    focus: {
+      file: childRunnerAbortFocus,
+      test: "a steer absorbed on iteration 1 whose cap is hit by a normally-completed iteration 2 reports partial/usageUncertain on the CollectResult, never a silent fully-measured claim",
+    },
+    edits: [
+      {
+        file: childRunner,
+        before:
+          "          return error.partialCalls > 0\n            ? { ...base, partial: true, usageUncertain: true }\n            : base;",
+        after: "          return base;",
+      },
+    ],
+  },
+  // Achado 3: `arm`'s `fire` (disarm-on-fire) sem mutante — `focusFiles`
+  // não listava `orchestration-steer-interrupt.test.ts` (fix em `slices.json`).
+  {
+    id: "Y1-steer-fire-not-idempotent",
+    category: "steer-fire-not-idempotent",
+    mechanism: "family-a",
+    focus: {
+      file: steerInterruptFocus,
+      test: "a second steer while the first's interrupt is still in flight never re-reports interrupted, and the hook fires exactly once",
+    },
+    edits: [
+      {
+        file: orchestrationCore,
+        before:
+          "        const fire = (): void => {\n          const current = this.entries.get(subId);\n          if (current !== undefined && current.interrupt === fire) current.interrupt = null;\n          abort();\n        };",
+        after: "        const fire = (): void => {\n          abort();\n        };",
       },
     ],
   },
