@@ -20,6 +20,7 @@ export const focalTests = [
   "tests/parity/scenarios.test.ts",
   "tests/mutations-fixtures-workflow-executor.test.ts",
   "tests/workflow-fault-kinds.test.ts",
+  "tests/workflow-forced-fallback.test.ts",
 ] as const;
 
 export interface ExecutorMutant {
@@ -579,6 +580,27 @@ export const executorMutants: readonly ExecutorMutant[] = [
         before:
           "  if (!pausesRun(collected.errorKind)) recordFaultKind(result, collected.errorKind ?? null);",
         after: "  recordFaultKind(result, collected.errorKind ?? null);",
+      },
+    ],
+  },
+  {
+    // Issue #647 (grupo A de #637, item 1; follow-up do veredito da PR
+    // #609): the schema-validation retry loop re-extracts `output` on each
+    // re-collect but pins `usedFallback` to the FIRST reading (#602) — a
+    // node whose retry flips the tool-vs-prose split must not let the
+    // retry's own reading overwrite the metric. Killed only by a battery
+    // that forces `forced: true` with a toolCalls-bearing re-collect
+    // (`tests/workflow-forced-fallback.test.ts`, not in `focalTests` until
+    // this issue).
+    id: "R1-recollect-fallback-last-wins",
+    mechanism:
+      "the retry's own extraction overwrites usedFallback instead of keeping the 1st reading",
+    edits: [
+      {
+        file: engine,
+        before:
+          "          output = extractForcedOutput(collected, forced).output; // #602: usedFallback keeps the 1st reading.",
+        after: "          ({ output, usedFallback } = extractForcedOutput(collected, forced));",
       },
     ],
   },

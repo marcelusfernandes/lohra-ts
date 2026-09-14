@@ -10,7 +10,8 @@
       "tests/workflow-hardening.test.ts",
       "tests/parity/scenarios.test.ts",
       "tests/mutations-fixtures-workflow-executor.test.ts",
-      "tests/workflow-fault-kinds.test.ts"
+      "tests/workflow-fault-kinds.test.ts",
+      "tests/workflow-forced-fallback.test.ts"
     ]
   },
   {
@@ -146,7 +147,10 @@
   {
     "slice": "supervision",
     "script": "mutations:supervision",
-    "catalog": ["scripts/mutations/supervision-mutants.ts"],
+    "catalog": [
+      "scripts/mutations/supervision-mutants.ts",
+      "scripts/mutations/supervision-mutants-2.ts"
+    ],
     "srcGlobs": ["src/workflow/**", "src/orchestration/**", "src/transports/**"],
     "focusFiles": [
       "tests/workflow-steer-tool.test.ts",

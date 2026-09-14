@@ -27,7 +27,7 @@ para `harness.ts` (issue #148):
    substring de outro título de foco focalizaria os dois ao mesmo tempo —
    hoje nenhum dos títulos de foco em uso é substring de outro).
    `runVitestFiles(directory, files)` roda uma lista de arquivos
-   inteira sem afunilar por `-t` (o que `workflow-executor` usa: os 45
+   inteira sem afunilar por `-t` (o que `workflow-executor` usa: os 46
    mutantes rodam a mesma bateria de `focalTests` completa a cada vez, em vez
    de um teste único por mutante). As duas delegam a `runVitestReporterJson`
    (`harness.ts:182-207`, issue #191): monta os args com `vitestArgs`
@@ -169,7 +169,7 @@ fatia" cita a mesma restrição.
 
 | fatia                 | script                  | mutantes | catálogo(s)                                                                                                           |
 | --------------------- | ----------------------- | -------: | --------------------------------------------------------------------------------------------------------------------- |
-| `workflow-executor`   | `mutations:t15`         |       45 | `workflow-executor-mutants.ts`                                                                                        |
+| `workflow-executor`   | `mutations:t15`         |       46 | `workflow-executor-mutants.ts`                                                                                        |
 | `workflow-durability` | `mutations:t16`         |       61 | `workflow-durability-guard.ts` (12 guard + 2 combined) + `workflow-durability-named.ts` (41) + `orchestration.ts` (6) |
 | `workflow-audit-live` | `mutations:t17`         |       63 | `workflow-audit-live-mutants.ts` (32) + `workflow-audit-producers-mutants.ts` (31)                                    |
 | `media`               | `mutations:t21`         |       20 | `media-catalog-persistence.ts` (13) + `media-catalog-other.ts` (7)                                                    |
@@ -177,17 +177,17 @@ fatia" cita a mesma restrição.
 | `self-update`         | `mutations:self-update` |        9 | `self-update-mutants.ts`                                                                                              |
 | `context-window`      | `mutations:t23`         |       43 | `context-window.ts` (27) + `context-prompt-mutants.ts` (16)                                                           |
 | `auth`                | `mutations:auth`        |       13 | `auth-mutants.ts`                                                                                                     |
-| `supervision`         | `mutations:supervision` |       41 | `supervision-mutants.ts`                                                                                              |
+| `supervision`         | `mutations:supervision` |       41 | `supervision-mutants.ts` (33) + `supervision-mutants-2.ts` (8)                                                        |
 | `doctor`              | `mutations:doctor`      |       11 | `doctor-mutants.ts`                                                                                                   |
 
-Total: 315. Os 12 mutantes de `workflow-durability-guard.ts` são
+Total: 316. Os 12 mutantes de `workflow-durability-guard.ts` são
 combinatórios: três conjuntos do guard de escrita possuída (`fence`,
 `holder`, `lease-validity`) × quatro categorias (`state`, `cache`,
 `node-cost`, `spend`) — um mutante por combinação, cada um escorado só no
 teste focal da sua categoria, mais os 2 mutantes do INSERT combinado
 cache+custo (`combined-cell-guard-removed`,
 `combined-cost-escapes-refusal`). `tests/mutations-slices.test.ts` importa os
-quinze catálogos de dado puro estaticamente e prova essa soma (315) a cada
+dezesseis catálogos de dado puro estaticamente e prova essa soma (316) a cada
 corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
 
 A narrativa cronológica de cada mutante — o que cada issue mudou, por quê, e
@@ -270,7 +270,7 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
    `true`.
 5. `npm test` roda `tests/mutations-slices.test.ts`, que reprova de duas
    formas se a contagem não for atualizada junto com o mutante novo: a soma
-   total (hoje 315, contra os quinze catálogos importados), e a linha do
+   total (hoje 316, contra os dezesseis catálogos importados), e a linha do
    catálogo tocado em `CONTAGEM_POR_CATALOGO`, uma tabela pinada por número
    literal — não derivada de `CATALOGOS.get(path).length` — para que uma
    troca compensatória entre dois catálogos (um ganha o que o outro perde,
@@ -316,8 +316,8 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
 `tests/mutations-slices.test.ts` prova, a cada corrida: o schema básico de
 cada entrada de `slices.json`; que todo catálogo descoberto por conteúdo em
 `scripts/mutations/` (item 1 acima) aparece em algum `catalog`; que os
-`catalog` do JSON batem, como conjunto, com os quinze catálogos importados em
-`CATALOGOS`; que todo `script` existe em `package.json#scripts`; que todo
+`catalog` do JSON batem, como conjunto, com os dezesseis catálogos importados
+em `CATALOGOS`; que todo `script` existe em `package.json#scripts`; que todo
 `focusFiles`/`catalog` existe em disco; que `focusFiles` bate com a união de
 `focus.file` dos catálogos da fatia (exceto `media`/`workflow-executor`); que
 `srcGlobs` cobre todo `edits[].file` dos catálogos da fatia (item 2 acima); a
@@ -326,12 +326,13 @@ contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
 14, `workflow-durability-named` 41, `orchestration` 6,
 `workflow-audit-live-mutants` 32, `workflow-audit-producers-mutants` 31,
 `web-tools-mutants` 9, `media-catalog-other` 7, `media-catalog-persistence`
-13, `self-update-mutants` 9, `workflow-executor-mutants` 45,
+13, `self-update-mutants` 9, `workflow-executor-mutants` 46,
 `context-window` 27, `context-prompt-mutants` 16, `auth-mutants` 13,
-`supervision-mutants` 41, `doctor-mutants` 11, soma 315) e a soma de 315
-contra os quinze catálogos importados; e que todo diretório de primeiro
-nível de `src/` está coberto por algum `srcGlobs` ou está em `SEM_FATIA` com
-um motivo não vazio — nunca os dois, nunca nenhum dos dois.
+`supervision-mutants` 33, `supervision-mutants-2` 8, `doctor-mutants` 11,
+soma 316) e a soma de 316 contra os dezesseis catálogos importados; e que
+todo diretório de primeiro nível de `src/` está coberto por algum `srcGlobs`
+ou está em `SEM_FATIA` com um motivo não vazio — nunca os dois, nunca nenhum
+dos dois.
 
 ## Diretórios de `src/` sem fatia hoje
 

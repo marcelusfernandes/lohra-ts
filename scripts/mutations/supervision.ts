@@ -23,10 +23,19 @@ import {
   snapshotFiles,
   writeReport,
 } from "./harness.js";
-import type { Focus, MutationReport } from "./types.js";
+import type { Focus, Mutant, MutationReport } from "./types.js";
 import { supervisionMutants } from "./supervision-mutants.js";
+import { supervisionMutants2 } from "./supervision-mutants-2.js";
 
 const root = resolve(import.meta.dirname, "../..");
+
+// Issue #647 (grupo A de #637, item 6): o runner concatena os dois
+// catálogos da fatia `supervision` — `supervision-mutants-2.ts` vive num
+// arquivo separado (o `Files` da issue não autoriza crescer
+// `supervision-mutants.ts` além do teto de 800 linhas), mas roda na mesma
+// corrida de `npm run mutations:supervision` (mesmo padrão de
+// `context-window.ts`/`context-prompt-mutants.ts`, issue #646).
+const allMutants: readonly Mutant[] = [...supervisionMutants, ...supervisionMutants2];
 const evidenceDirectory = resolve(root, ".mutation-evidence/supervision");
 
 function headSha(): string {
@@ -58,15 +67,15 @@ export function main(): void {
   const sandbox = prepareArchiveSandbox(root, candidateSha);
   try {
     const files = [
-      ...new Set(supervisionMutants.flatMap((mutant) => mutant.edits.map((edit) => edit.file))),
+      ...new Set(allMutants.flatMap((mutant) => mutant.edits.map((edit) => edit.file))),
     ];
     const snapshot = snapshotFiles(sandbox, files);
 
     const foci = new Map<string, Focus>();
-    for (const mutant of supervisionMutants) foci.set(focusKey(mutant.focus), mutant.focus);
+    for (const mutant of allMutants) foci.set(focusKey(mutant.focus), mutant.focus);
     for (const focus of foci.values()) assertBaselineGreen(sandbox, focus);
 
-    const results = supervisionMutants.map((mutant) => {
+    const results = allMutants.map((mutant) => {
       restoreAll(sandbox, snapshot);
       for (const edit of mutant.edits) applyEditExactlyOnce(sandbox, edit, mutant.id);
       const outcome = runFocusedVitest(sandbox, mutant.focus);
