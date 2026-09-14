@@ -160,7 +160,11 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     return 2;
   }
 
-  const route = resolveAuthRoute(options.home);
+  const route = resolveAuthRoute(options.home); // #630: route.error guard mirrors chat.ts:157
+  if (route.error) {
+    options.stderr(`${route.error}\n`);
+    return 2;
+  }
   const provider = stringFlag(options.flags, "--provider");
 
   let model: string;

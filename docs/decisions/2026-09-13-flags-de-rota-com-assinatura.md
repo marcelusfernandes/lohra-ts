@@ -100,3 +100,14 @@ precedência sobre a detecção, e a fronteira "no provider configured"
 continua a mesma quando nada é detectado — só passa a significar "nem
 `doctor` nem `chat` acham um provedor", não mais "`chat` nunca olhou".
 `route.mode === "subscription"` não muda: a decisão (A) acima permanece.
+
+## Adendo (issue #630): `route.error` na preferência frustrada
+
+O gap que restava depois da #604/PR #629: `preference=subscription` com
+assinatura inativa faz `resolveAuthRoute` devolver `route.error`
+(`PREFER_SUB_ERROR`) — `chat.ts` já recusava com esse erro antes de ler
+`--provider` (`:157`), mas `dashboard.ts` nunca lia `route.error`, só
+`route.mode`, e subia usando o provedor detectado no ambiente onde `chat`
+recusava. `dashboard.ts` agora tem o mesmo guard, logo após
+`resolveAuthRoute` e antes de ler `--provider`: `route.error` ⇒ stderr
+byte-igual ao de `chat` no mesmo home, exit 2, com ou sem `--provider`.
