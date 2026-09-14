@@ -253,6 +253,13 @@ transporte da assinatura; `--model` sozinho, sem `--provider`, continua
 escolhendo o modelo da própria assinatura sem mudança
 (`docs/decisions/2026-09-13-flags-de-rota-com-assinatura.md`).
 
+Na rota `api_key` (sem assinatura ativa), sem `--provider`, `chat` e
+`dashboard` usam o provedor que `doctor` detecta (`detected_provider` —
+a primeira variável de API key configurada, ou `LOHRA_PROVIDER`
+explícito) em vez de recusar de cara; `--provider` explícito continua
+tendo precedência, e sem nenhuma chave configurada os dois comandos
+continuam concordando em "no provider configured" (issue #604).
+
 `chat --no-tools` desliga o REGISTRO das tools (nenhuma chega ao catálogo
 enviado ao provedor) — não a memória, o perfil de usuário nem o índice de
 skills do prompt: esses três continuam entrando no system prompt mesmo sob

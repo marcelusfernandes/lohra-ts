@@ -1,3 +1,5 @@
+import { AUTO_PROVIDER, resolveProviderName } from "../providers/resolve.js";
+
 export interface ProviderStatus {
   readonly provider: string;
   readonly display_name: string;
@@ -35,4 +37,28 @@ export function providerStatuses(
       configured: present.length > 0,
     };
   });
+}
+
+/** O que `snapshot.ts` chamava `detected` inline (`resolveProviderName(undefined,
+ * undefined, environment) !== AUTO_PROVIDER`, issue #604) — extraído para cá
+ * para `src/commands/provider-detectado.ts` reusar a MESMA regra sem
+ * duplicar a tabela de provedores. `error` carrega a mensagem de um
+ * `LOHRA_PROVIDER` desconhecido (a única forma de `resolveProviderName`
+ * lançar) — nunca engolida em silêncio (invariante 2 do CLAUDE.md). */
+export interface DetectedProvider {
+  readonly provider: string | null;
+  readonly error: string | null;
+}
+
+export function detectConfiguredProvider(
+  environment: Readonly<Record<string, string | undefined>>,
+): DetectedProvider {
+  try {
+    const resolved = resolveProviderName(undefined, undefined, environment);
+    return resolved === AUTO_PROVIDER
+      ? { provider: null, error: null }
+      : { provider: resolved, error: null };
+  } catch (error) {
+    return { provider: null, error: error instanceof Error ? error.message : String(error) };
+  }
 }
