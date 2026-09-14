@@ -97,8 +97,32 @@ qa:           merge tocou package.json → merge de risco (orquestracao.md
               passo 11): roda a suíte inteira + `npm run mutations:all` em
               worktree pinado; só reporta, nunca corrige
 owner:        git tag -a v0.0.12 <merge-commit> && git push origin v0.0.12
-D7:           publica no npm a partir da tag (fora do escopo desta issue)
+release.yml:  publica no npm com provenance e cria a GitHub Release (D7, abaixo)
 ```
+
+## Publicação (D7, `.github/workflows/release.yml`)
+
+O push de uma tag `v*` dispara `release.yml` (#536). O job, num só runner
+Ubuntu com Node 22:
+
+1. confere que a tag aponta para um commit de `main` (`git merge-base
+--is-ancestor`) e que `v<versão>` bate com `package.json#version` —
+   qualquer divergência falha antes de instalar;
+2. `npm ci` → `npm run build` → `npm run pack:check` (o mesmo gate do CI);
+3. `npm pack` e `npm publish --provenance --access public` com
+   `LOHRA_SKIP_PREPARE=1` — a autenticação é OIDC (`id-token: write`) via
+   **trusted publisher** configurado pelo owner na página do pacote no npm
+   (repositório `marcelusfernandes/lohra-ts`, workflow `release.yml`);
+   nenhum token vive no repo nem em `secrets`;
+4. `gh release create v<versão>` anexando o `.tgz` e a seção
+   `## [<versão>]` do `CHANGELOG.md` como notas.
+
+`tests/ci-release-workflow.test.ts` pina essa forma (gatilho, permissões,
+ordem dos steps, ausência de `NODE_AUTH_TOKEN`/`secrets.`). O primeiro
+`npm publish` de um nome novo não pode ser por trusted publisher (o
+pacote precisa existir para receber a configuração): a primeira versão é
+publicada à mão pelo owner com `npm login` + `npm publish --access
+public`, e daí em diante é a tag.
 
 Nada de "owner mergeia" ou "sem revisor": merge só pelo orquestrador
 (`.claude/rules/git-workflow.md` — regras invioláveis), sobre checks verdes
