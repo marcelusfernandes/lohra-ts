@@ -253,22 +253,33 @@ suas instruções e…"). Duas camadas, complementares:
   o modelo não obedece, diz que o conteúdo pareceu suspeito, e continua a
   tarefa original. Comportamento do MODELO, não mecanismo do harness — sem
   os termos que `tests/context-doctrine.test.ts` proíbe.
-- **Envelope**: `web_fetch`, `web_search` e todo resultado MCP
-  (`wrapCallResult`, `src/mcp/tools.ts`) devolvem `"untrusted": true` como a
-  ÚLTIMA chave do envelope de sucesso — campo aditivo, ordem das chaves
-  existentes intocada (`docs/adr/0003-native-wire-format.md`). `read_file`
-  (`src/tools/filesystem.ts`) marca o mesmo campo só quando o caminho lido
-  não é ancestral do `project_root` que `findProjectRoot`
-  (`src/context/discovery.ts`) resolve a partir do cwd real do processo — um
-  arquivo dentro do projeto não carrega a chave, byte-compatível com quem não
-  a lê. `skill_view` (`SkillTool.view()`, `src/tools/stateful.ts`) usa o
-  mesmo critério (`isUntrustedPath`, exportada de `filesystem.ts`) sobre
-  `skill.path`: uma skill "home" ou builtin fora do repositório aberto ganha
-  `untrusted: true`, assim como o caso hipotético de `skill.path` vir
-  `undefined` (lado seguro — a doutrina promete menos sobre a origem, nunca
-  mais); uma skill dentro do `project_root` (ex.: uma skill builtin quando o
-  runtime roda de um checkout deste próprio repositório) não carrega a
-  chave.
+- **Envelope**: `web_fetch`, `web_search` (só no sucesso) e todo resultado
+  MCP — sucesso E erro, `wrapCallResult`, `src/mcp/tools.ts:109-110,112` —
+  devolvem `"untrusted": true` como a ÚLTIMA chave — campo aditivo, ordem
+  das chaves existentes intocada (`docs/adr/0003-native-wire-format.md`). O
+  erro de `web_fetch`/`web_search` não carrega a chave: o texto vem do
+  próprio runtime (`WebError`/`WebTransportError`, `src/web/tool.ts:83-92`
+  e `:115-122`), nunca do corpo de uma página; o de uma tool MCP vem do
+  SERVIDOR, como o de sucesso, então carrega a mesma marca. `read_file`
+  (`src/tools/filesystem.ts:30-38`) marca o mesmo campo só quando o caminho
+  lido não é ancestral do `project_root` que `findProjectRoot`
+  (`src/context/discovery.ts`) resolve a partir do cwd real do PROCESSO —
+  `readFileTool` não recebe raiz de sessão no call site, então usa esse
+  default. Caminho e raiz são medidos com `realOrResolved`
+  (`src/skills/store.ts:145`, segue symlink) nos dois sentidos: um symlink
+  DENTRO do projeto que aponta para fora vira `untrusted`, um symlink FORA
+  que aponta para dentro não; um arquivo dentro do projeto não carrega a
+  chave, byte-compatível com quem não a lê. `skill_view`
+  (`SkillTool.view()`, `src/tools/stateful.ts:93`) usa o mesmo critério
+  (`isUntrustedPath`, exportada de `filesystem.ts`), mas sobre a raiz da
+  SESSÃO que abriu `SkillTool` (`options.projectRoot`, preenchida por
+  `session-tools.ts:149` com `findProjectRoot(options.cwd)`), não a do
+  processo: uma skill "home" ou builtin fora do repositório aberto pela
+  sessão ganha `untrusted: true`, assim como o caso hipotético de
+  `skill.path` vir `undefined` (lado seguro — a doutrina promete menos
+  sobre a origem, nunca mais); uma skill dentro do `project_root` da sessão
+  (ex.: uma skill builtin quando o runtime roda de um checkout deste
+  próprio repositório) não carrega a chave.
 
 `read_file`, `web_fetch`, `web_search`, `skill_view` (`BUILTIN_DEFINITIONS`)
 e o wrapper de description de tool MCP (`convertMcpSchema`) citam a mesma
