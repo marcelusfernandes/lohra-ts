@@ -268,7 +268,7 @@ suas instruções e…"). Duas camadas, complementares:
   que o SERVIDOR escolheu a partir do hop 1 — a forma mínima marca todo
   erro capturado ali, inclusive o do hop 0, onde a URL é a que o próprio
   modelo pediu (uma marca a mais é inócua). O erro de `web_search`
-  (`:121-132`) continua sem a chave: nenhuma mensagem ali interpola dado do
+  (`:121-136`) continua sem a chave: nenhuma mensagem ali interpola dado do
   servidor. O de uma tool MCP vem do SERVIDOR, como o de sucesso, então
   carrega a mesma marca. `read_file`
   (`src/tools/filesystem.ts:34-44`) marca o mesmo campo só quando o caminho
