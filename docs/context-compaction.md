@@ -282,12 +282,12 @@ sobre a #584 (PR #597):
    soma `calls`/`usage` de `summarize` e `title` num único contador —
    `aux_calls` conta as DUAS chamadas, não só o resumo, mas `2` no mesmo
    turno nunca acontece. Duas razões, uma atrás da outra: `attemptCompaction`
-   (`runtime.ts:246`) só dobra o histórico já PERSISTIDO — relê da própria
+   (`runtime.ts:232`) só dobra o histórico já PERSISTIDO — relê da própria
    sessão (`repository.loadMessages`) e, se não sobrar nada além da cauda
    mínima a manter, devolve `compacted: false` sem resumir nada
    (`src/conversation/compaction.ts`, `summarizedCount <= 0`); e
    `preflightCompact` só tenta essa dobra UMA vez por turno
-   (`context.compactedThisTurn`, `runtime.ts:236-243`) — a segunda
+   (`context.compactedThisTurn`, `runtime.ts:222-229`) — a segunda
    estouração do mesmo turno vira `ContextWindowExceededError` direto,
    nunca uma segunda chamada a `attemptCompaction`. Na prática: numa sessão
    NOVA (sem `--session`) sem estourar a janela, `aux_calls` mostra `1` (só
@@ -301,9 +301,12 @@ sobre a #584 (PR #597):
    que este `chat.ts` acabou de criar). `chat.ts` lê isso após `runTurn` (e,
    desde a #623, também antes —
    ver item 4) e passa a `successEnvelope(result, { auxCalls, auxUsage })` —
-   `usage_total` soma o uso do auxiliar (`addUsage`, agora exportado de
-   `runtime.ts`) e `aux_calls` só aparece quando > 0, sempre ao final, nunca
-   mudando ordem/contagem das chaves existentes.
+   `usage_total` soma o uso do auxiliar (`addUsage`, módulo folha
+   `src/conversation/usage.ts` desde a #650 — antes vivia em `runtime.ts`)
+   e `aux_calls` só aparece quando > 0, sempre ao final, nunca mudando
+   ordem/contagem das chaves existentes. Desde a #650, `errorEnvelope`
+   aceita o mesmo `extra` — ver a seção "Envelope de erro carrega o gasto
+   do auxiliar" mais abaixo.
 4. **Título persistido.** `title TEXT` já existia no schema base (sem
    migração); `SessionRepository.setTitle` grava o texto de
    `AuxClient.title()` numa sessão nova (sem `--session`), fail-open com
@@ -378,7 +381,7 @@ em produção; `aux_calls` nunca contava a chamada do título. Diagnosticado no
 comentário da issue #620.
 
 Correção: `chat.ts` gera o título ANTES de chamar `runtime.runTurn`, a
-partir do mesmo `input` que `result.input` ecoa (`runtime.ts:735` — os dois
+partir do mesmo `input` que `result.input` ecoa (`runtime.ts:734` — os dois
 são sempre o mesmo texto) — o transporte ainda está aberto nesse ponto. A
 persistência (`sessions.setTitle`) continua só depois de `result.sessionId`
 existir (o id que `runTurn` acabou de criar via `idSource`/`createSession`),
@@ -405,3 +408,54 @@ stderr) e o caminho de falha real do título (fixture que derruba só a
 chamada de 32 tokens do título — `AuxClient.title()` é a única chamada com
 esse `max_tokens` — mantendo o turno em `code: 0`, `aux_calls: 0`, título
 `null` e `title.failed` no stderr).
+
+## Envelope de erro carrega o gasto do auxiliar; `title.failed` nomeia o estágio (issue #650)
+
+Item 13 do épico #637 (grupo B), veredito da PR #625 (`non_blocking` 2,
+"gasto órfão no caminho de erro"): antes desta issue, um turno que falhava
+depois de um título gerado com sucesso (perfil com `defaultAuxModel`, sessão
+nova) perdia esse gasto auxiliar inteiro — `errorEnvelope` não tinha
+parâmetro `extra` nenhum. Hoje o call site (`src/commands/chat.ts:595-622`)
+constrói o envelope de erro com os campos do turno e, como segundo
+argumento, o `extra` aditivo descrito abaixo.
+
+`errorEnvelope` ganha o mesmo segundo parâmetro `extra?: AuxEnvelopeExtra`
+que `successEnvelope` já tinha desde a #587 (`src/conversation/envelope.ts:151,163,175`):
+`usage_total` soma `extra.auxUsage` via `addUsage`, e `aux_calls` só aparece
+quando `> 0`, sempre como a última chave — sem `extra` (ou com `auxCalls: 0`),
+o envelope fica byte-idêntico ao de antes da issue, mesma contagem de
+`Object.keys`. `chat.ts` passa `{ auxCalls: auxTelemetry.calls(), auxUsage:
+auxTelemetry.usage() }` quando `auxTelemetry` existe (`src/commands/chat.ts:619-621`).
+
+`addUsage` — usado pelos dois envelopes e por `ConversationRuntime` — deixa
+de morar em `runtime.ts` (que o exportava desde a #587) e de ter uma cópia
+duplicada em `aux.ts` (`aux.ts:52-66` antes desta issue, com um comentário
+explicando por que não podia importar de `runtime.ts` sem ciclo): as duas
+viram um módulo folha, `src/conversation/usage.ts`, sem import de nenhuma
+das duas — `runtime.ts`, `aux.ts` e `envelope.ts` importam dali.
+`src/conversation/index.ts` reexporta o módulo.
+
+`title.failed` (stderr, evento fail-open da issue #623) passa a nomear qual
+dos dois pontos falhou — mesmo prefixo fixo, então nenhum pino antigo por
+substring quebra: `title.failed stage=generate` quando a própria chamada do
+título falha (`src/commands/chat.ts:542-548`, nunca chega a persistir), e
+`title.failed stage=persist` quando o título foi gerado mas
+`sessions.setTitle` lança na escrita (`src/commands/chat.ts:569-571`).
+
+`ConversationCancelledError` ganha `partialCalls: number` (default `0`),
+espelhando `MaxIterationsError.partialCalls` (issue #594,
+`src/conversation/errors.ts:152,160,170`): quantas chamadas deste turno já
+tinham sido derrubadas por um steer-driven interrupt e absorvidas com
+`continue` antes deste cancelamento em voo. Só um call site passa o contador
+de verdade — o cancelamento em voo dentro do loop de iteração
+(`src/conversation/runtime.ts:513-527`); os dois throws pré-emissão do mesmo
+arquivo (`runtime.ts:423` e `runtime.ts:459`, sinal já abortado antes da
+chamada existir) ficam no default `0`, porque nenhuma chamada desta iteração
+chegou a ser emitida. `child-runner.ts` não lê este campo — `partial`/
+`usage_uncertain` ali continuam derivando só de `partialUsage !== null`
+(ver `docs/workflow-supervision.md`); `partialCalls` é dado adicional para
+quem quiser distinguir "cancelado depois de N chamadas reais" de "cancelado
+antes da primeira", não uma entrada nova nesse contrato existente.
+
+Mutante novo (o primeiro em `envelope.ts`) documentado em
+`docs/mutation-testing.md`.

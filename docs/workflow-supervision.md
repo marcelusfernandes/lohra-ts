@@ -486,7 +486,7 @@ ADR 0005 (`docs/adr/0005-abort-de-stream-em-voo.md`, aceita 2026-09-13):
 antes desta milestone, um cancel/steer/timeout que chegava enquanto um
 provedor estava respondendo esperava a resposta terminar, descartava o
 resultado e cobrava o run por todo token que o provedor gerou — os checks
-cooperativos (`signalAborted`, `runtime.ts:434,470`) só pegavam a folga
+cooperativos (`signalAborted`, `runtime.ts:423,459`) só pegavam a folga
 ENTRE chamadas, nunca uma chamada já em voo. Seis sub-issues (S1-S6)
 fecharam essa lacuna para os três gatilhos que já tinham um `AbortSignal`
 próprio; a doutrina completa, com o que ainda ficou aberto, está em
@@ -521,7 +521,7 @@ próprio; a doutrina completa, com o que ainda ficou aberto, está em
   disparo e esse `finally` encontra `entry.interrupt` já `null` e volta
   `{queued: true}` sem `interrupted: true`, nunca reportando uma segunda
   interrupção sobre uma chamada que já estava sendo derrubada. A chamada
-  interrompida vira `SteerInterrupt` (`runtime.ts:486`), o loop absorve com
+  interrompida vira `SteerInterrupt` (`runtime.ts:472`), o loop absorve com
   `continue` e tenta de novo com o texto do steer já injetado — o turno pode
   terminar `complete` mesmo assim, carregando `partial: true`/
   `usage_uncertain: true` (D3, `child-runner.ts:367-371`) porque `usageTotal`
@@ -558,7 +558,7 @@ próprio; a doutrina completa, com o que ainda ficou aberto, está em
 **O summarizer de compactação NÃO ganha o tratamento de abort em voo desta
 milestone.** `signal` chega até a chamada de resumo
 (`buildSummaryRequest`, `compaction.ts:303-318`, encaminhado por
-`runtime.ts:422-431`) — o pedido de rede É cancelado de verdade se o
+`runtime.ts:406-413`) — o pedido de rede É cancelado de verdade se o
 `signal` disparar durante ele — mas `attemptCompaction`
 (`compaction.ts:259-261`) embrulha QUALQUER erro do `summarize()`, abort
 incluso, em `CompactionFailedError` — nunca em `ConversationCancelledError`
