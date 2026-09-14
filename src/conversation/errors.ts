@@ -146,9 +146,13 @@ export class ConversationCancelledError extends ConversationError {
    * `partialCalls === 0` already carries. `child-runner.ts` is unchanged
    * by this: `partial`/`usageUncertain` there still derive from
    * `partialUsage !== null` alone (see that field's own doc) — this field
-   * is additional data for a caller that wants to tell "cancel after N
-   * real calls" apart from "cancel before the first", not a new input to
-   * that existing contract. */
+   * is additional data for a caller that wants to tell "cancel after some
+   * steer-torn-down calls were already absorbed this turn" apart from
+   * "cancel before any of that happened" — correção de atribuição na #670
+   * (veredito PR #656): the count is calls torn down and absorbed with
+   * `continue` (`runtime.ts:544`), never `apiCalls` (real, completed
+   * calls) — not a new input to the existing `partial`/`usageUncertain`
+   * contract. */
   public readonly partialCalls: number;
   public constructor(
     sessionId: string,
