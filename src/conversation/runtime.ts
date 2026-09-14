@@ -356,7 +356,7 @@ export class ConversationRuntime {
       const systemPrompt = this.promptSnapshot();
       this.options.repository.createSession({
         id: sessionId,
-        systemPrompt: systemPromptText(systemPrompt), // #586: repo persists flattened text only
+        systemPrompt, // #586 (2ª rodada): a repository que entende faixas persiste as três
         model: input.model,
         cwd: input.cwd,
       });

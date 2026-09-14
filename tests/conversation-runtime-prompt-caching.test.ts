@@ -1,18 +1,21 @@
-// Issue #586 (épico #575): `ConversationRuntime` reads whatever
+// Issue #586 (épico #575, 2ª rodada): `ConversationRuntime` reads whatever
 // `promptSnapshot()` returns -- a plain string (every caller before this
-// issue, and every real caller today: `chat.ts`/`dashboard.ts` still pass
-// `.text`) or the full `SystemPromptSnapshot` (`{stable, context, volatile}`)
-// -- and forwards it UNFLATTENED to `ModelRequest.system`, so a transport
-// that understands bands (`anthropic-messages.ts`) can mark its cache
-// breakpoint. The one place that still only ever wants a flat string is the
-// PERSISTED row (`ConversationRepository.createSession`, unchanged
-// interface) -- this file pins both halves. Molded on
+// issue) or the full `SystemPromptSnapshot` (`{stable, context, volatile}`,
+// now `chat.ts`/`dashboard.ts` for their own `ConversationRuntime`) -- and
+// forwards it UNFLATTENED both to `ModelRequest.system` (so a transport that
+// understands bands can mark its cache breakpoint) AND to
+// `ConversationRepository.createSession` (so a repository that understands
+// bands, `SqliteConversationRepository`, can persist the three columns
+// instead of only the flattened text). Flattening is the REPOSITORY's job
+// now, not runtime.ts's -- `tests/conversation-sqlite-prompt-caching.test.ts`
+// proves the real one does it; this file proves runtime.ts never flattens on
+// its own and never regresses a plain-string caller. Molded on
 // `tests/conversation-runtime-forced-tool.test.ts`'s fake repository/
 // transport shape; never touches that file or the capped
 // `tests/conversation-runtime.test.ts`.
 import { describe, expect, it } from "vitest";
 
-import { buildSystemPrompt, systemPromptText } from "../src/context/index.js";
+import { buildSystemPrompt } from "../src/context/index.js";
 import { ConversationRuntime } from "../src/conversation/index.js";
 import type {
   ConversationRepository,
@@ -20,7 +23,7 @@ import type {
   ModelTransport,
   TurnCommit,
 } from "../src/conversation/index.js";
-import type { NormalizedResponse } from "../src/transports/index.js";
+import type { NormalizedResponse, SystemBands } from "../src/transports/index.js";
 
 const usage = {
   inputTokens: 1,
@@ -31,16 +34,16 @@ const usage = {
 } as const;
 
 class MemoryRepository implements ConversationRepository {
-  readonly created: { readonly systemPrompt: string }[] = [];
+  readonly created: { readonly systemPrompt: string | SystemBands }[] = [];
   private readonly sessions = new Map<
     string,
-    { systemPrompt: string; model: string; cwd: string }
+    { systemPrompt: string | SystemBands; model: string; cwd: string }
   >();
   private readonly messages = new Map<string, Readonly<Record<string, unknown>>[]>();
 
   createSession(input: {
     readonly id: string;
-    readonly systemPrompt: string;
+    readonly systemPrompt: string | SystemBands;
     readonly model: string;
     readonly cwd: string;
   }): void {
@@ -112,7 +115,7 @@ describe("ConversationRuntime prompt caching plumbing (#586)", () => {
     });
   });
 
-  it("still persists a flattened string on createSession — the repository's own contract never widens", async () => {
+  it("passes the bands to createSession unflattened — a repository that understands them decides what to persist", async () => {
     const snapshot = buildSystemPrompt({
       identity: "Soul",
       doctrine: "DOCTRINE",
@@ -130,14 +133,18 @@ describe("ConversationRuntime prompt caching plumbing (#586)", () => {
     await runtime.runTurn({ input: "hi", provider: "anthropic", model: "m", cwd: "/tmp" });
 
     expect(repository.created).toHaveLength(1);
-    expect(repository.created[0]?.systemPrompt).toBe(systemPromptText(snapshot));
-    expect(typeof repository.created[0]?.systemPrompt).toBe("string");
+    expect(repository.created[0]?.systemPrompt).toMatchObject({
+      stable: snapshot.stable,
+      context: snapshot.context,
+      volatile: snapshot.volatile,
+    });
   });
 
   it("keeps a plain-string promptSnapshot byte-identical — every caller before this issue is unaffected", async () => {
     const transport = new QueueTransport();
+    const repository = new MemoryRepository();
     const runtime = new ConversationRuntime({
-      repository: new MemoryRepository(),
+      repository,
       transport,
       promptSnapshot: () => "FLAT SYSTEM TEXT",
       idSource: () => "s1",
@@ -147,5 +154,6 @@ describe("ConversationRuntime prompt caching plumbing (#586)", () => {
     await runtime.runTurn({ input: "hi", provider: "anthropic", model: "m", cwd: "/tmp" });
 
     expect(transport.requests[0]?.system).toBe("FLAT SYSTEM TEXT");
+    expect(repository.created[0]?.systemPrompt).toBe("FLAT SYSTEM TEXT");
   });
 });

@@ -1,6 +1,6 @@
 import type { CostEstimate } from "../pricing/index.js";
 import { SessionRepository } from "../state/index.js";
-import type { Usage } from "../transports/index.js";
+import type { SystemBands, Usage } from "../transports/index.js";
 import type {
   CompactionResult,
   ConversationRepository,
@@ -35,7 +35,7 @@ export class SqliteConversationRepository implements ConversationRepository {
 
   public createSession(input: {
     readonly id: string;
-    readonly systemPrompt: string;
+    readonly systemPrompt: string | SystemBands;
     readonly model: string;
     readonly cwd: string;
   }): void {
@@ -48,11 +48,17 @@ export class SqliteConversationRepository implements ConversationRepository {
     });
   }
 
+  /** Issue #586 (2ª rodada): restores the three prompt-caching bands via
+   * `SessionRepository.systemPromptBands` -- tolerant of a row created
+   * before this column existed (or from a plain-string `systemPrompt`): the
+   * whole `system_prompt` becomes `stable`, `context`/`volatile` empty, same
+   * migration rule the Anthropic transport uses for a flat string. */
   public session(id: string): StoredSession | null {
     const row = this.sessions.getSession(id);
-    if (row === null) return null;
+    const bands = this.sessions.systemPromptBands(id);
+    if (row === null || bands === null) return null;
     return {
-      systemPrompt: stringField(row, "system_prompt"),
+      systemPrompt: bands,
       model: stringField(row, "model"),
       cwd: stringField(row, "cwd"),
     };

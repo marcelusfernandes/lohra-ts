@@ -92,7 +92,14 @@ export interface CompactionResult {
 export interface ConversationRepository {
   createSession(input: {
     readonly id: string;
-    readonly systemPrompt: string;
+    /** Issue #586 (2ª rodada): widened alongside `StoredSession.systemPrompt`
+     * above so `SqliteConversationRepository.createSession` (in this issue's
+     * Files now) can persist the bands, not just the flattened text. Every
+     * OTHER implementer (`ChildConversationRepository`, `RequestRepository`,
+     * out of Files) keeps its own narrower `systemPrompt: string` method
+     * signature unchanged — method bivariance lets that satisfy this wider
+     * interface member without any edit there. */
+    readonly systemPrompt: string | SystemBands;
     readonly model: string;
     readonly cwd: string;
   }): void;
