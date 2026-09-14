@@ -276,7 +276,7 @@ suas instruções e…"). Duas camadas, complementares:
   (`src/context/discovery.ts`) resolve a partir do cwd real do PROCESSO —
   `readFileTool` não recebe raiz de sessão no call site, então usa esse
   default. Caminho e raiz são medidos com `realOrResolved`
-  (`src/skills/store.ts:167`, segue symlink) nos dois sentidos: um symlink
+  (`src/skills/store.ts:184`, segue symlink) nos dois sentidos: um symlink
   DENTRO do projeto que aponta para fora vira `untrusted`, um symlink FORA
   que aponta para dentro não; um arquivo dentro do projeto não carrega a
   chave, byte-compatível com quem não a lê. Desde a #670, um erro

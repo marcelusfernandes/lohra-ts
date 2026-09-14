@@ -126,11 +126,10 @@ export function parseSkillMd(content: string, path?: string): Skill {
 // symlink cycle) means the directory genuinely couldn't be read — `warn`
 // names `directory` and `code` before the visit returns empty-handed for
 // that subtree. The scan does NOT abort: `visit` is called once per root
-// from `SkillStore.scan()`'s loop over `this.roots`, and recursively per
-// subdirectory — one unreadable directory shouldn't hide skills
-// discoverable through sibling directories or the OTHER roots, same
-// best-effort posture `scanRoot` already has for a malformed `SKILL.md`
-// (`SkillFormatError` → skip, not abort).
+// from `SkillStore.scan()`'s loop over `this.roots` — one unreadable root
+// shouldn't hide skills discoverable through the OTHER roots (pinned by
+// the test below), same best-effort posture `scanRoot` already has for a
+// malformed `SKILL.md` (`SkillFormatError` → skip, not abort).
 function collectSkillFiles(root: string): string[] {
   const output: string[] = [];
   const visit = (directory: string): void => {
