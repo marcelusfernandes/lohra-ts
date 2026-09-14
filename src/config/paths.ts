@@ -33,8 +33,14 @@ export function resolvePaths(
     : process.platform === "win32"
       ? join(environment.LOCALAPPDATA || userHome, "lohra")
       : join(userHome, ".lohra");
+  // `rawProfile === undefined` é a única forma de "profile ausente" — uma
+  // string vazia (`LOHRA_PROFILE=""` exportada no shell, ou `--profile ""`
+  // via `src/cli.ts`) é uma configuração INVÁLIDA, não a ausência de uma:
+  // cai em `validateProfileName`, que já rejeita `length < 1` (issue #653
+  // item 2). Sem isso, `""` era falsy e caía silenciosamente no profile
+  // default do operador — contra o invariante "falha nunca é silenciosa".
   const rawProfile = environment.LOHRA_PROFILE;
-  const profile = rawProfile ? validateProfileName(rawProfile) : null;
+  const profile = rawProfile === undefined ? null : validateProfileName(rawProfile);
   const home = profile === null ? base : join(base, "profiles", profile);
   return { base, home, envFile: join(base, ".env"), profile };
 }
