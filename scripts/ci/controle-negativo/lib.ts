@@ -235,6 +235,42 @@ export function deveSerIgnorado(diff: readonly string[]): boolean {
   return diff.length > 0 && diff.every(ehArquivoDocsOuProcess);
 }
 
+// --- SKIP: PR de release (issue #694, bloqueava a #691) -------------------
+/**
+ * `true` quando `branch` casa `release/<x.y.z>` E `diff` não é vazio E todo
+ * arquivo do diff está em `{package.json, package-lock.json, CHANGELOG.md,
+ * README.md}` — a PR de release (`npm run release`, `docs/release.md`) não
+ * tem `prova/<slug>.ts` porque não há comportamento novo a controlar: o
+ * diff é só manifesto/lockfile/CHANGELOG/README. `run.ts` usa isto para um
+ * quarto SKIP, no mesmo ponto do SKIP por classe (`deveSerIgnorado`), ANTES
+ * de resolver o slug — sem isso, `resolverSlug` reprova com `falhaFechada`
+ * porque `release/x.y.z` não casa `<type>/<n>-<slug>` (`branchSlug`,
+ * `scripts/prova/slug.ts:13`).
+ *
+ * `README.md` entra no conjunto (rodada 2 da issue #694): `npm run
+ * release` (`scripts/release.ts`) não bumpa a linha «A versão atual é
+ * `x.y.z`.» do README — `tests/t22-docs.test.ts:50-51` pina essa frase
+ * contra `package.json`, então toda PR de release precisa editar
+ * `README.md:6` à mão para não quebrar esse teste (a #691 já tinha esse
+ * arquivo no diff). Sem `README.md` no conjunto, uma PR de release de
+ * verdade (4 arquivos) cairia de novo em `resolverSlug`.
+ */
+const RELEASE_BRANCH_RE = /^release\/\d+\.\d+\.\d+$/;
+const ARQUIVOS_DE_RELEASE = new Set([
+  "package.json",
+  "package-lock.json",
+  "CHANGELOG.md",
+  "README.md",
+]);
+
+export function ehPrDeRelease(branch: string, diff: readonly string[]): boolean {
+  return (
+    RELEASE_BRANCH_RE.test(branch) &&
+    diff.length > 0 &&
+    diff.every((arquivo) => ARQUIVOS_DE_RELEASE.has(arquivo))
+  );
+}
+
 // --- SKIP: só declaração de prova já existente editada (acréscimo à #62,
 // bloqueava a #65) -----------------------------------------------------
 const DECLARACAO_DE_PROVA_RE = /^prova\/[^/]+\.ts$/;
