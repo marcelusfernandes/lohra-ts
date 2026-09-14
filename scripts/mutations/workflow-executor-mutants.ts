@@ -20,6 +20,7 @@ export const focalTests = [
   "tests/parity/scenarios.test.ts",
   "tests/mutations-fixtures-workflow-executor.test.ts",
   "tests/workflow-fault-kinds.test.ts",
+  "tests/workflow-forced-fallback.test.ts",
 ] as const;
 
 export interface ExecutorMutant {
@@ -579,6 +580,45 @@ export const executorMutants: readonly ExecutorMutant[] = [
         before:
           "  if (!pausesRun(collected.errorKind)) recordFaultKind(result, collected.errorKind ?? null);",
         after: "  recordFaultKind(result, collected.errorKind ?? null);",
+      },
+    ],
+  },
+  {
+    // Issue #647 (grupo A de #637, item 1; follow-up do veredito da PR
+    // #609, rodada 2, veredito da PR #663): a forma de UM `edit` só
+    // (reverter `output = extractForcedOutput(...).output;` de volta a
+    // `({ output, usedFallback } = extractForcedOutput(...));`) é
+    // degenerada — `usedFallback` é `const` desde o commit 41f79f67
+    // (`const { output: forcedOutput, usedFallback } = ...; let output =
+    // forcedOutput;`), então essa reatribuição sozinha lança `TypeError:
+    // Assignment to constant variable.` em QUALQUER teste que alcance a
+    // linha, matando o mutante por crash, não pelo contrato de negócio (o
+    // veredito provou 7 falhas nos 6 arquivos antigos de `focalTests`, e as
+    // duas novas asserções falhavam por `expected 'failed' to be
+    // 'complete'`, nunca por `forcingFallbacks`). O mutante de verdade
+    // reverte o commit 41f79f67 INTEIRO (dois `edits`): a declaração de
+    // `usedFallback` também volta a `let`, então a reatribuição no
+    // re-collect é sintaticamente válida de novo — e recalcula
+    // `usedFallback` a cada `collect()`, "a última leitura vence" (o bug
+    // que #602/PR #609 corrigiu). Com os dois `edits`, os 6 arquivos
+    // antigos de `focalTests` continuam verdes (nenhum força `forced: true`
+    // com retry) e só `tests/workflow-forced-fallback.test.ts` (a)/(b)
+    // falham — por asserção sobre `forcingFallbacks`, não por crash.
+    id: "R1-recollect-fallback-last-wins",
+    mechanism:
+      "usedFallback goes back to being recomputed on every re-collect (last reading wins) instead of pinned to the 1st reading",
+    edits: [
+      {
+        file: engine,
+        before:
+          "      const { output: forcedOutput, usedFallback } = extractForcedOutput(collected, forced);\n      let output = forcedOutput;",
+        after: "      let { output, usedFallback } = extractForcedOutput(collected, forced);",
+      },
+      {
+        file: engine,
+        before:
+          "          output = extractForcedOutput(collected, forced).output; // #602: usedFallback keeps the 1st reading.",
+        after: "          ({ output, usedFallback } = extractForcedOutput(collected, forced));",
       },
     ],
   },

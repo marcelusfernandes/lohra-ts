@@ -11,7 +11,7 @@
 //      dos RUNNERS que reexportam um `Mutants` agregado sem serem, eles
 //      mesmos, o catálogo — um catálogo novo, de qualquer nome, sem entrada
 //      em `slices.json` reprova aqui;
-//   3. os `catalog` do JSON batem, como conjunto, com os quinze catálogos de
+//   3. os `catalog` do JSON batem, como conjunto, com os dezesseis catálogos de
 //      dado puro importados abaixo — um `catalog` novo no JSON sem import
 //      correspondente aqui (ou vice-versa) reprova, o que impede o número
 //      da contagem de driftar silenciosamente do JSON;
@@ -21,7 +21,7 @@
 //      bateria inteira para cada mutante em vez de afunilar por `focus`)
 //      bate exatamente com a união dos `focus.file` dos mutantes do(s)
 //      catálogo(s) da fatia;
-//   6. a contagem total de mutantes é a soma exata dos catálogos — os quinze
+//   6. a contagem total de mutantes é a soma exata dos catálogos — os dezesseis
 //      arquivos de dado puro (issue #186: `workflow-executor-mutants.ts`
 //      entrou nessa lista, extraído do runner que antes embutia o
 //      catálogo) são importados de verdade (`import` estático, sem efeito
@@ -85,6 +85,7 @@ import { doctorMutants } from "../scripts/mutations/doctor-mutants.js";
 import { orchestrationMutants } from "../scripts/mutations/orchestration.js";
 import { mutants as selfUpdateMutants } from "../scripts/mutations/self-update-mutants.js";
 import { supervisionMutants } from "../scripts/mutations/supervision-mutants.js";
+import { supervisionMutants2 } from "../scripts/mutations/supervision-mutants-2.js";
 import { mutants as auditLiveMutants } from "../scripts/mutations/workflow-audit-live-mutants.js";
 import { auditProducersMutants } from "../scripts/mutations/workflow-audit-producers-mutants.js";
 import { namedMutants } from "../scripts/mutations/workflow-durability-named.js";
@@ -159,7 +160,7 @@ interface CatalogEntry {
   readonly edits: readonly { readonly file: string }[];
 }
 
-/** Os quinze catálogos de dado puro, chave = caminho relativo à raiz do repo
+/** Os dezesseis catálogos de dado puro, chave = caminho relativo à raiz do repo
  * igual ao que aparece em `slices.json#catalog` -- a checagem de item 3 do
  * cabeçalho acima compara as CHAVES deste mapa contra a união dos
  * `catalog` do JSON, então um `catalog` novo no JSON sem entrada aqui (ou
@@ -189,6 +190,7 @@ const CATALOGOS: ReadonlyMap<string, readonly CatalogEntry[]> = new Map<
   ["scripts/mutations/context-prompt-mutants.ts", asCatalog(contextPromptMutants)],
   ["scripts/mutations/auth-mutants.ts", asCatalog(authMutants)],
   ["scripts/mutations/supervision-mutants.ts", asCatalog(supervisionMutants)],
+  ["scripts/mutations/supervision-mutants-2.ts", asCatalog(supervisionMutants2)],
   ["scripts/mutations/doctor-mutants.ts", asCatalog(doctorMutants)],
 ]);
 
@@ -491,8 +493,8 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 315 (soma dos quinze catálogos importados)", () => {
-    // Os quinze catálogos de dado puro, importados de verdade via CATALOGOS:
+  it("a contagem total de mutantes é 316 (soma dos dezesseis catálogos importados)", () => {
+    // Os dezesseis catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
     // `probe`). `workflow-executor-mutants.ts` (issue #186) foi o nono: antes
@@ -646,9 +648,18 @@ describe("scripts/mutations/slices.json", () => {
     // um mutante a `self-update-mutants.ts` (`src/commands/dashboard.ts`'s
     // fiação de doutrina) e um a `orchestration.ts`
     // (`src/orchestration/subagent-prompt.ts`'s fiação de doutrina): 297 + 16
-    // + 1 + 1 = 315.
+    // + 1 + 1 = 315. Issue #647 (grupo A de #637, itens 1 e 6) acrescenta
+    // `R1-recollect-fallback-last-wins` a `workflow-executor-mutants.ts`
+    // (`engine.ts`'s retry de validação de schema recomputava `usedFallback`
+    // a cada re-collect em vez de manter a 1ª leitura, #602 -- sem mutante
+    // porque `tests/workflow-forced-fallback.test.ts` não estava em
+    // `focalTests`/`focusFiles` de t15): 315 + 1 = 316. A mesma issue divide
+    // `supervision-mutants.ts` (no teto de 800 linhas) no décimo sexto
+    // catálogo, `supervision-mutants-2.ts`: os 8 mutantes N1-N4/V1/W1/X1/Y1
+    // migram byte-idênticos (41 -> 33 + 8), soma da fatia preservada -- o
+    // total geral não muda por causa da divisão, só pelo R1 acima.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 315;
+    const TOTAL_MUTANTS = 316;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -670,11 +681,12 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/media-catalog-other.ts": 7,
       "scripts/mutations/media-catalog-persistence.ts": 13,
       "scripts/mutations/self-update-mutants.ts": 9,
-      "scripts/mutations/workflow-executor-mutants.ts": 45,
+      "scripts/mutations/workflow-executor-mutants.ts": 46,
       "scripts/mutations/context-window.ts": 27,
       "scripts/mutations/context-prompt-mutants.ts": 16,
       "scripts/mutations/auth-mutants.ts": 13,
-      "scripts/mutations/supervision-mutants.ts": 41,
+      "scripts/mutations/supervision-mutants.ts": 33,
+      "scripts/mutations/supervision-mutants-2.ts": 8,
       "scripts/mutations/doctor-mutants.ts": 11,
     };
     expect(new Set(Object.keys(CONTAGEM_POR_CATALOGO))).toEqual(new Set(CATALOGOS.keys()));
@@ -682,7 +694,7 @@ describe("scripts/mutations/slices.json", () => {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(315);
+    expect(somaTabela).toBe(316);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {

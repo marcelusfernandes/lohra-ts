@@ -188,15 +188,16 @@ max_fanout`/`exceeds lifetime remaining`) cai no `unknown` do catch-all —
 
 A issue #519 (M16-S4, épico #490, última sub-issue da milestone "Abort de
 stream em voo") acrescenta 7 mutantes ao caminho de abort em voo já
-mergeado (S1-S3/S5/S6). `supervision-mutants.ts` ganha três: N1
-(`client.ts`'s `AnthropicMessagesClient.stream` deixa de encaminhar
-`signal` na request inicial), N2 (`child-runner.ts` troca o `usage` de uma
-folha cancelada por `null` no `catch` de `ConversationCancelledError` —
-reancorado pela issue #568 r2, veredito da PR #573: o anchor original
-mirava `error.partialUsage` direto num argumento de `zeroResult(...)`;
-hoje é `const usage = combineUsage(error.measuredUsage,
+mergeado (S1-S3/S5/S6). `supervision-mutants.ts` ganha três (issue #647
+moveu os três para o catálogo irmão, `supervision-mutants-2.ts` — ver seção
+própria abaixo): N1 (`client.ts`'s `AnthropicMessagesClient.stream` deixa de
+encaminhar `signal` na request inicial), N2 (`child-runner.ts` troca o
+`usage` de uma folha cancelada por `null` no `catch` de
+`ConversationCancelledError` — reancorado pela issue #568 r2, veredito da PR
+#573: o anchor original mirava `error.partialUsage` direto num argumento de
+`zeroResult(...)`; hoje é `const usage = combineUsage(error.measuredUsage,
 error.partialUsage);` que vira `const usage = null;`,
-`supervision-mutants.ts:711-712`) e N3 (`orchestration-runtime.ts`'s teto
+`supervision-mutants-2.ts:70`) e N3 (`orchestration-runtime.ts`'s teto
 de `collect()`'s `deadlineMs`
 alargado 10x) — 33 + 3 = 36. N3 originalmente mirava
 `CANCEL_SETTLE_TIMEOUT_MS = 0` (a sugestão da própria issue #519), verificado
@@ -266,7 +267,10 @@ estava lá, desde a issue #519).
 
 Issue #568 (M16 pós-revisão, épico #561, sub S3+S6; vereditos das PRs
 #528/#543, r2 de #556) acrescenta quatro a `workflow-audit-producers-mutants.ts`
-(NÃO `supervision-mutants.ts`, que já está no teto de 800 linhas):
+(NÃO `supervision-mutants.ts`, que já estava no teto de 800 linhas — desde a
+issue #647 o catálogo tem espaço de novo, mas a convenção passou a ser
+diferente: mutante novo da fatia `supervision` entra no irmão
+`supervision-mutants-2.ts`, seção própria abaixo):
 C1 (`orchestration-runtime.ts`'s `Promise.race` em `cancel()` vira um
 `await` direto de `this.core.collect(id, true)` — sem o teto, uma folha que
 nunca assenta trava `cancel()` para sempre) e C2 (o `ceiling.clear()` de
@@ -282,8 +286,9 @@ resultado "running" vazar como se tivesse assentado) são mortos por dois
 fatia `workflow-audit-live` ganha os dois arquivos: 270 + 4 = 274.
 
 Issue #569 (M16 pós-revisão, épico #561, S5) acrescenta dois a
-`context-window.ts` (não `supervision-mutants.ts`, que segue no teto de 800
-linhas, e não `core.ts` diretamente — o fix do item 2, disarm-on-fire em
+`context-window.ts` (não `supervision-mutants.ts`, que seguia no teto de 800
+linhas na época — nota da issue #568, acima; e não `core.ts` diretamente
+— o fix do item 2, disarm-on-fire em
 `OrchestrationCore.steer`, não tinha `focusFile` de `supervision` cobrindo
 `tests/orchestration-steer-interrupt.test.ts`, e `slices.json` está fora do
 `Files` da issue): `r-steer-interrupt-continue-ignores-outer-cancel` remove
@@ -316,6 +321,39 @@ nulificação de `entry.interrupt` DENTRO de `fire` (`core.ts`, "fire
 idempotente") antes de chamar `abort()` — morto pelo `it` já existente "a
 second steer while the first's interrupt is still in flight...".
 
+### `supervision-mutants-2.ts` (issue #647, grupo A de #637)
+
+Segundo catálogo da fatia `supervision` (8 mutantes): `supervision-mutants.ts`
+(issue #451) chegou a EXATAMENTE 800 linhas — as issues #568 e #569 (acima)
+já tinham desviado mutante para `workflow-audit-producers-mutants.ts` e
+`context-window.ts` só por causa disso — e o achado seguinte de M22/M23
+(#637, grupo A, item 6) não tinha mais onde morar sem apagar prosa. Um
+arquivo separado (não um `Files` que autorizasse crescer
+`supervision-mutants.ts` além do teto) porque `supervision.ts`'s `main()`
+concatena os dois catálogos numa só corrida de `npm run
+mutations:supervision` — mesmo padrão de `context-window.ts`/
+`context-prompt-mutants.ts` (issue #646).
+
+Recebe, movidos byte a byte (`before`/`after`/`focus` inalterados), os 8
+mutantes N1-N4/V1/W1/X1/Y1 que fechavam o catálogo original: N1
+(`client.ts`'s `AnthropicMessagesClient.stream` sem `signal` na request
+inicial, issue #519), N2 (`child-runner.ts` troca `usage` por `null` no
+`catch` de `ConversationCancelledError`, reancorado pela #568 r2), N3
+(`orchestration-runtime.ts`'s teto de `collect()`'s `deadlineMs` alargado
+10x, #521), N4 (`client.ts`'s `parseSse` volta a ser atômico no abort,
+#567), V1 (`validation.ts`'s `normalizeResumeId` — off-by-one no trim,
+#540), W1 (`accounting.ts`'s `foldNestedCounters` perde o prefixo do fold
+de faults aninhados, #540 r2), X1 (`child-runner.ts`'s guard de
+`MaxIterationsError.partialCalls`, #594 achado 1/2) e Y1 (`core.ts`'s `fire`
+idempotente, #594 achado 3). A soma da fatia não muda (41 = 33 + 8); a
+divisão é só de onde cada mutante mora — narrativa completa de cada um na
+seção `supervision-mutants.ts` acima, cronológica por issue.
+
+A partir desta issue, o próximo mutante da fatia `supervision` entra aqui,
+não em `supervision-mutants.ts` — que voltou a ter espaço (33/800), mas a
+convenção passa a ser a mesma de `context-window`: catálogo antigo fica
+estável, achado novo vai para o irmão.
+
 ### `workflow-executor-mutants.ts` (issue #418)
 
 `workflow-executor-mutants.ts` (issue #418) acrescentou
@@ -324,7 +362,38 @@ second steer while the first's interrupt is still in flight...".
 o sexto arquivo de `focalTests`/`focusFiles` da fatia (44 → 45). Issue #426
 generalizou a guarda de `!== QUOTA_EXHAUSTED` para `!pausesRun(...)`
 (`engine-utils.ts:487`, também cobre os três kinds de rota) — mesmo id de
-mutante, `before`/`after` re-ancorados na mesma PR.
+mutante, `before`/`after` re-ancorados na mesma PR. Issue #647 (grupo A de
+#637, item 1; follow-up do veredito da PR #609) acrescenta
+`R1-recollect-fallback-last-wins`: o retry de validação de schema
+(`engine.ts:333`) re-extrai `output` a cada re-collect mas precisa manter
+`usedFallback` pinado na 1ª leitura (#602) — sem esse pino, um nó cuja
+correção troca tool-por-prosa (ou vice-versa) deixaria a extração do retry
+sobrescrever a métrica. `tests/workflow-forced-fallback.test.ts` não estava
+em `focalTests`/`slices.json#focusFiles` até esta issue (achado do próprio
+veredito da PR #609, que não pôde incluir o mutante porque `slices.json`
+estava fora do `Files` daquela issue): sétimo arquivo da bateria (45 → 46).
+
+Rodada 1 da PR #663 propôs um `edit` só, revertendo `:333` de volta a
+`({ output, usedFallback } = extractForcedOutput(collected, forced));` —
+DEGENERADO: `usedFallback` é `const` desde o commit 41f79f67 (`const {
+output: forcedOutput, usedFallback } = extractForcedOutput(...); let output
+= forcedOutput;`), então reatribuir os dois nessa forma lança `TypeError:
+Assignment to constant variable.` em QUALQUER execução que alcance a linha
+— o mutante morria por crash nos 6 arquivos antigos da bateria (7 falhas
+observadas em sandbox pelo revisor), não pelo contrato de negócio; as duas
+asserções novas falhavam por `expected 'failed' to be 'complete'`, nunca
+por `forcingFallbacks`. Rodada 2 reverte o commit 41f79f67 INTEIRO, com
+DOIS `edits` no mesmo arquivo: `:293` volta a `let { output, usedFallback }
+= extractForcedOutput(collected, forced);` (a declaração some, `usedFallback`
+volta a `let`) e só ENTÃO `:333` volta à desestruturação — agora
+sintaticamente válida, porque a variável é `let` de novo. Sob os dois
+`edits`, os 6 arquivos antigos de `focalTests` continuam 100% verdes
+(nenhum força `forced: true` com retry) e só `tests/workflow-forced-fallback.test.ts`
+(a)/(b) falham, por asserção sobre `forcingFallbacks` (`expected 1 to be
++0` e `expected +0 to be 1`) — confirmado em sandbox (`git archive` do HEAD
+
+- os dois `after` aplicados) antes de rodar `npm run mutations:t15` de
+  verdade.
 
 ### `workflow-audit-producers-mutants.ts` (issue #370)
 
