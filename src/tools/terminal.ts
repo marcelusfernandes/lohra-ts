@@ -158,20 +158,3 @@ export async function terminalTool(
     });
   });
 }
-
-export const TERMINAL_SCHEMA = {
-  description:
-    "Run a shell command and return stdout, stderr, and the exit code. Prefer 'read_file' " +
-    "over 'cat' for a known file. Output truncated at 50,000 code points per stream. A " +
-    "fixed dangerous-pattern list (recursive delete, sudo, force push, ...) is refused " +
-    "automatically — final for this session: don't rephrase or retry, report the blocker.",
-  parameters: {
-    type: "object",
-    properties: {
-      command: { type: "string", description: "The shell command to run" },
-      timeout: { type: "integer", description: "Timeout in seconds (default 30)" },
-      cwd: { type: "string", description: "Working directory (optional)" },
-    },
-    required: ["command"],
-  },
-} as const;
