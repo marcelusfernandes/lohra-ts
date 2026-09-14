@@ -84,9 +84,10 @@ cada iteração do turno, antes de montar a chamada ao provedor:
    - Se não sobrar nada para resumir, devolve "nada compactado" (o caso
      fútil).
    - Caso contrário, resume o trecho antigo com o **transporte do próprio
-     turno** (mesmo modelo, prompt `SUMMARY_SYSTEM` de `src/agent/aux.ts`;
-     `options.summarize` pode injetar outro summarizer, por exemplo um
-     `AuxClient.summarizer()` futuro) e chama
+     turno** (mesmo modelo, prompt `SUMMARY_SYSTEM` de `src/agent/aux.ts`) OU,
+     desde a issue #587, com `options.summarize` injetado por
+     `chat.ts`/`dashboard.ts` a partir de `AuxClient.summarizer()` — seção
+     "Compactação e título pelo AuxClient" adiante — e chama
      `SessionRepository.compactHistory`, que reescreve tudo numa transação:
      desativa as mensagens antigas, insere **duas** mensagens novas —
      `buildSummaryMessages` (`src/conversation/compaction.ts`): uma
@@ -149,10 +150,6 @@ uso — uma janela real, não hipotética) em `CompressionLockNotHeldError`
 ## Fora de escopo desta issue
 
 - Compactação de folhas de workflow (issue #252, seção "Fora de escopo").
-- Um summarizer dedicado com modelo/preço próprios (`AuxClient`,
-  `src/agent/aux.ts`) — o caminho default reaproveita o transporte do
-  próprio turno; `options.summarize` é o ponto de injeção para quem quiser
-  ligar isso depois, sem mudar `commands/chat.ts`.
 - Cache do catálogo (`loadWindowsCache`, #249) na resolução da janela
   dentro do preflight — `resolveTurnContextWindow` passa `catalog: undefined`
   de propósito, então a resolução aqui nunca sobe além de `table`/`provider`/
@@ -167,13 +164,16 @@ uso — uma janela real, não hipotética) em `CompressionLockNotHeldError`
   exigiria levar o limiar/estimativa para dentro de `attemptCompaction`,
   fora do escopo M desta issue.
 - Um summarizer dedicado com modelo/preço próprios (`AuxClient`,
-  `src/agent/aux.ts`) continua fora de escopo (P11, issue #587, depende
-  desta) — o caminho default abaixo continua reaproveitando o transporte do
-  próprio turno. #587 também é quem deve levar o limiar/janela REAL do
-  turno (`resolveTurnContextWindow`, hoje só resolvido em
-  `src/conversation/runtime.ts`) para dentro de `attemptCompaction`; até lá,
-  o orçamento de truncamento do transcript (seção abaixo) usa um default
-  autocontido, não a janela real do provedor da chamada.
+  `src/agent/aux.ts`) e levar o limiar/janela REAL do turno para dentro de
+  `attemptCompaction` **não são mais fora de escopo** — a issue #587 (P11)
+  fechou os dois: `chat.ts`/`dashboard.ts` injetam `options.summarize` a
+  partir de `AuxClient.summarizer()` quando o perfil tem `defaultAuxModel`
+  (fallback ao summarizer default do próprio turno em caso de falha, evento
+  `compaction.aux_fallback`), e `ConversationRuntime.preflightCompact` passa
+  `maxTranscriptTokens` derivado de `resolveTurnContextWindow` a
+  `attemptCompaction` — o default autocontido de `compaction.ts` (seção
+  abaixo) só vale quando o chamador não passa esse campo. Ver "Compactação e
+  título pelo AuxClient (issue #587)" adiante.
 
 ## Compactação preserva pedidos e restrições verbatim (issue #584)
 
@@ -225,17 +225,15 @@ SUMMARY_SYSTEM })` prendia a constante contra si mesma e nunca pegaria uma
    do fold) no limite de turno mais próximo (`headAlignedKeepCount`, o
    espelho de `turnAlignedTailCount` andando para frente) — nunca separa um
    pedido da própria resposta nem uma mensagem `tool_calls` dos seus
-   resultados. Emite um `console.warn` (o "aviso") e devolve
+   resultados (issue #587 corrige um caso em que o fallback do próprio corte
+   podia violar essa regra — ver a seção do #587 adiante). Devolve
    `{ transcript, truncated, droppedMessages }`; `attemptCompaction` repassa
-   `truncated` como `transcriptTruncated` no `CompactionAttemptResult` (o
-   "evento" — dado de máquina, não um novo tipo em
-   `ConversationRuntimeEvent`, que vive em `src/conversation/types.ts`, fora
-   do `Files` desta issue). O orçamento default
-   (`DEFAULT_TRANSCRIPT_TOKEN_BUDGET`, metade de `DEFAULT_CONTEXT_WINDOW`) é
-   autocontido — não é a janela real do turno (ver a nota na seção "Fora de
-   escopo" acima); um `maxTranscriptTokens` explícito em
-   `CompactionAttemptInput` permite a um chamador futuro (#587) passar a
-   janela real.
+   `truncated` como `transcriptTruncated` no `CompactionAttemptResult`. O
+   orçamento default (`DEFAULT_TRANSCRIPT_TOKEN_BUDGET`, metade de
+   `DEFAULT_CONTEXT_WINDOW`) é autocontido — só vale quando o chamador não
+   passa `maxTranscriptTokens` explícito em `CompactionAttemptInput`; desde
+   o #587, `ConversationRuntime` sempre passa a janela real (seção
+   adiante).
 
 `SUMMARY_LEAD_TEXT` (`src/state/session-repository.ts`) também muda de
 português ("(resumo da conversa anterior a seguir)") para inglês
@@ -247,9 +245,59 @@ com o texto antigo na própria linha de `messages`, e `loadMessages`/
 ela carrega de volta byte a byte, sem quebrar (teste em
 `tests/conversation-compaction-verbatim.test.ts`).
 
-Fora de escopo desta issue (ver `#576` e `#587` na tabela do épico #575): o
-caso de eval "proibição sobrevive à compactação" com os dois oráculos —
+Fora de escopo desta issue (ver `#576` na tabela do épico #575): o caso de
+eval "proibição sobrevive à compactação" com os dois oráculos —
 `tests/fixtures/eval/**` e `scripts/eval/run.ts` ainda não existem em `main`
-(#576, harness de eval, ainda não mergeado); e ligar o `AuxClient` de verdade
+(#576, harness de eval, ainda não mergeado). Ligar o `AuxClient` de verdade
 ao caminho de produção, incluindo levar a janela real do turno para dentro
-de `attemptCompaction` (#587, depende desta issue).
+de `attemptCompaction`, era o item pendente desta lista — a issue #587
+fechou os dois (seção seguinte).
+
+## Compactação e título pelo AuxClient (issue #587)
+
+Fecha o ponto de injeção `options.summarize` que o #252 já previa e nunca
+tinha chamador de produção, mais cinco itens de um veredito de revisão
+sobre a #584 (PR #597):
+
+1. **`chat.ts`/`dashboard.ts` constroem um `AuxClient`** a partir do
+   `ClientPool` (mesmo provedor/cliente do turno, `defaultAuxModel` do
+   perfil) e passam `summarize: aux.summarizer()` ao `ConversationRuntime` —
+   ausente sem `defaultAuxModel`, byte-idêntico ao comportamento anterior.
+   `dashboard.ts` só liga o `ConversationRuntime` que o próprio arquivo
+   constrói (o job runner do cron); o caminho interativo da gateway WS
+   (`src/gateway/ws/connection.ts`) constrói o seu por turno e fica fora do
+   `Files` desta issue.
+2. **Falha do auxiliar cai para o transporte do turno.** `runTurn` envolve
+   `options.summarize` (quando presente) com `summarizeWithFallback`
+   (`src/agent/aux.ts`): uma falha do `AuxClient` emite
+   `"compaction.aux_fallback"` (o nome da causa em `code`) e usa o
+   summarizer default do próprio turno — nunca derruba o turno inteiro por
+   uma falha do auxiliar.
+3. **`aux_calls` aditivo no envelope `--json`.** `AuxClient.auxTelemetry()`
+   soma `calls`/`usage` de `summarize` e `title` num único contador;
+   `chat.ts` lê isso após `runTurn` e passa a `successEnvelope(result,
+{ auxCalls, auxUsage })` — `usage_total` soma o uso do auxiliar
+   (`addUsage`, agora exportado de `runtime.ts`) e `aux_calls` só aparece
+   quando > 0, sempre ao final, nunca mudando ordem/contagem das chaves
+   existentes.
+4. **Título persistido.** `title TEXT` já existia no schema base (sem
+   migração); `SessionRepository.setTitle` grava o texto de
+   `AuxClient.title()` numa sessão nova (sem `--session`), fail-open com
+   evento `title.failed` em stderr; `session_search` modo `browse` já
+   devolve o título porque `SessionSearchTool` repassa
+   `SearchRepository.listSessions()` verbatim.
+5. **Acréscimo do orquestrador** (veredito da PR #597/#584):
+   `maxTranscriptTokens` passado a `attemptCompaction` agora vem de
+   `Math.floor(resolution.tokens * TRANSCRIPT_WINDOW_FRACTION)` — a janela
+   REAL do perfil, não mais o default inerte de `compaction.ts`;
+   `buildTranscript` perdeu o `console.warn` hardcoded, e
+   `transcriptTruncated` ganhou consumidor de verdade
+   (`"compaction.transcript_truncated"`, emitido por `preflightCompact`
+   através do mesmo `eventSink` injetável de sempre); `headAlignedKeepCount`
+   tinha um bug real — o corte por budget podia manter uma mensagem
+   `assistant` com `tool_calls` sem manter seu `tool` correspondente (o
+   backward scan nunca examinava o índice 0) — corrigido com um fallback
+   seguro ("manter nada"), simétrico ao "manter tudo" de
+   `turnAlignedTailCount`; e `src/agent/aux.ts` ganhou mutante na fatia
+   `mutations:t23` (`docs/mutation-testing.md`), que antes não cobria
+   nenhum arquivo de `src/agent/`.

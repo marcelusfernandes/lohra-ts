@@ -5,6 +5,7 @@ import { estimatePartialUsage, estimateRequestTokens } from "../context/token-es
 import { emptyPartialStream, StreamAbortedError } from "../transports/index.js";
 import type { NormalizedResponse, ToolCall, Usage } from "../transports/index.js";
 import { runBounded } from "../tools/dispatch.js";
+import { summarizeWithFallback } from "../agent/aux.js";
 import {
   attemptCompaction,
   buildSummaryRequest,
@@ -14,6 +15,7 @@ import {
   DEFAULT_LOCK_RETRY_DELAY_MS,
   DEFAULT_LOCK_TTL_SECONDS,
   DEFAULT_MIN_KEEP_MESSAGES,
+  TRANSCRIPT_WINDOW_FRACTION,
 } from "./compaction.js";
 import {
   ConversationCancelledError,
@@ -56,14 +58,10 @@ function signalAborted(signal: AbortSignal): boolean {
 
 /**
  * Issue #518 (M16-S3, ADR 0005): narrow, deliberately NOT "any failure while
- * aborted" — a genuine provider failure that happens to arrive after the
- * signal fired is still a real failure (contra-assertion, `conversation-
- * runtime.test.ts`), never reclassified into a cancellation. Recognizes
+ * aborted" (contra-assertion, `conversation-runtime.test.ts`). Recognizes
  * exactly the shapes an in-flight abort can throw: `StreamAbortedError`
  * (native path), a raw `AbortError` (fetcher path), or `.cause === signal.
- * reason` (defense in depth, no live producer as of #567; covered by
- * `conversation-runtime-abort-forms.test.ts`). `signalAborted` gates all
- * three — the signal's own state is the one fact this function trusts.
+ * reason` (defense in depth). `signalAborted` gates all three.
  */
 function isAbortOf(error: unknown, signal: AbortSignal): boolean {
   if (!signalAborted(signal)) return false;
@@ -98,9 +96,9 @@ export interface ConversationRuntimeOptions {
    * constructs a ConversationRuntime — none of them need to change to get
    * it (`commands/chat.ts` in particular; see `src/conversation/compaction.ts`). */
   readonly environment?: Readonly<Record<string, string | undefined>>;
-  /** Overrides the default summarizer (a call to this runtime's own
-   * `transport` with `SUMMARY_SYSTEM`, `src/agent/aux.ts`). Injection point
-   * for a future `AuxClient.summarizer()` wiring — see `compaction.ts`. */
+  /** Overrides the default summarizer. Issue #587: chat.ts/dashboard.ts wire
+   * an `AuxClient.summarizer()` here; a failure falls open to the default
+   * via `summarizeWithFallback` (`src/agent/aux.ts`). */
   readonly summarize?: (transcript: string) => Promise<string>;
   readonly compactionHolder?: string;
   readonly minKeepMessages?: number;
@@ -126,7 +124,10 @@ function providerMessage(error: unknown): string {
   return String(error);
 }
 
-function addUsage(total: Usage | null, next: Usage | null): Usage | null {
+// Exported for envelope.ts's own aux usage merge (issue #587, `aux_calls`):
+// `options.summarize` stays opaque (no usage channel), so the caller merges
+// aux usage into the envelope separately, with this same addition.
+export function addUsage(total: Usage | null, next: Usage | null): Usage | null {
   if (next === null) return total;
   if (total === null) return { ...next };
   return {
@@ -169,27 +170,21 @@ export class ConversationRuntime {
 
   /**
    * Preflight compaction (issue #252): estimates what the next model call
-   * would cost in tokens (history + this turn so far + system + tools — the
-   * reviewer notes on PR #267/#270 are why system/tools are included here
-   * even though `estimateTokens` alone only sees `messages`) and, if it
-   * would overflow the resolved context window, compacts the *persisted*
-   * history under the session's `compression_locks` row. Mutates `messages`
-   * in place (a turn-scoped working array, never shared state) when it compacts.
+   * would cost in tokens (history + this turn so far + system + tools) and,
+   * if it would overflow the resolved context window, compacts the
+   * *persisted* history under the session's `compression_locks` row.
+   * Mutates `messages` in place (a turn-scoped working array) when it
+   * compacts.
    *
-   * Returns `null` when the current estimate already fits (the fast path:
-   * no lock, no I/O) OR when `repository` has no compaction capability at
-   * all (fail-open, issue #252 round 2 — see the comment on
-   * `ConversationRepository`'s compaction members, `src/conversation/types.ts`
-   * — emits `"compaction.unsupported"` first so the miss is observable,
-   * then sends the oversized request exactly like before #252 existed;
-   * `RequestRepository`, `src/server/service.ts`, is the real caller this
-   * protects — a fresh stateless instance per HTTP request has no session
-   * to lock or rewrite). Throws `ContextWindowExceededError` — the latch —
-   * when `repository` DOES support compaction and: the turn already
-   * compacted once and still doesn't fit; nothing was left in the
-   * persisted history to fold (compaction would be futile); or a
-   * compaction just ran and the *new* estimate still doesn't fit. There is
-   * never a second compaction attempt within one turn.
+   * Returns `null` when the estimate already fits (fast path) OR when
+   * `repository` has no compaction capability at all (fail-open, issue #252
+   * round 2 — emits `"compaction.unsupported"` first, then sends the
+   * oversized request; `RequestRepository`, `src/server/service.ts`, is the
+   * real caller this protects). Throws `ContextWindowExceededError` — the
+   * latch — when `repository` DOES support compaction and: the turn already
+   * compacted once and still doesn't fit; nothing was left to fold; or a
+   * compaction just ran and the *new* estimate still doesn't fit. Never a
+   * second compaction attempt within one turn.
    */
   private async preflightCompact(context: {
     readonly sessionId: string;
@@ -258,7 +253,13 @@ export class ConversationRuntime {
       lockRetryDelayMs: this.lockRetryDelayMs,
       sleep,
       minKeepMessages: this.minKeepMessages,
+      // Issue #587 item 1: the turn's REAL resolved window, not compaction.
+      // ts's DEFAULT_TRANSCRIPT_TOKEN_BUDGET (inert under 200k windows).
+      maxTranscriptTokens: Math.floor(resolution.tokens * TRANSCRIPT_WINDOW_FRACTION),
     });
+    // Issue #587 item 3: transcriptTruncated's one consumer -- an
+    // injectable event instead of compaction.ts's old console.warn (item 2).
+    if (outcome.transcriptTruncated) context.emit("compaction.transcript_truncated");
 
     if (!outcome.compacted) {
       throw new ContextWindowExceededError(
@@ -410,20 +411,25 @@ export class ConversationRuntime {
     let historyBoundary = history.length;
     let compactedThisTurn = false;
     let compactionSummary: CompactionSummary | null = null;
-    // Default summarizer: this runtime's own transport/model, with
-    // SUMMARY_SYSTEM (see buildSummaryRequest, src/conversation/compaction.ts)
-    // -- counted as real spend against this turn's apiCalls/usageTotal, same
-    // as any other provider call the turn makes.
+    // Default summarizer: this runtime's own transport/model (counted as
+    // real spend, same as any other provider call). Issue #587: also the
+    // fallback an injected `options.summarize` (an AuxClient's) falls open
+    // to on failure -- "compaction.aux_fallback" names the cause.
+    const defaultSummarize = async (transcript: string): Promise<string> => {
+      const summaryResponse = await this.options.transport.complete(
+        buildSummaryRequest({ transcript, model: input.model, signal }),
+      );
+      apiCalls += 1;
+      usageTotal = addUsage(usageTotal, summaryResponse.usage);
+      return (summaryResponse.content ?? "").trim();
+    };
+    const onAuxFallback = (error: unknown): void => {
+      emit("compaction.aux_fallback", error instanceof Error ? error.name : "UNKNOWN_CAUSE");
+    };
     const summarize =
-      this.options.summarize ??
-      (async (transcript: string): Promise<string> => {
-        const summaryResponse = await this.options.transport.complete(
-          buildSummaryRequest({ transcript, model: input.model, signal }),
-        );
-        apiCalls += 1;
-        usageTotal = addUsage(usageTotal, summaryResponse.usage);
-        return (summaryResponse.content ?? "").trim();
-      });
+      this.options.summarize === undefined
+        ? defaultSummarize
+        : summarizeWithFallback(this.options.summarize, defaultSummarize, onAuxFallback);
     try {
       for (let iteration = 1; iteration <= this.maxIterations; iteration += 1) {
         if (signalAborted(signal)) throw new ConversationCancelledError(sessionId, signal.reason);
@@ -498,10 +504,8 @@ export class ConversationRuntime {
           response = await this.options.transport.complete(request);
         } catch (error) {
           // The outer `signal` (external cancel/shutdown, S3) always takes
-          // precedence: if IT is the one aborted, this is a cancellation
-          // regardless of whether the per-call `call` controller also
-          // fired in the same race — never reclassified into `continue`
-          // below (contra-assertion,
+          // precedence over a same-race `call` controller fire — never
+          // reclassified into `continue` below (contra-assertion,
           // tests/conversation-runtime-injection.test.ts).
           if (isAbortOf(error, signal)) {
             const abortedCallUsage =
@@ -513,20 +517,11 @@ export class ConversationRuntime {
                   })
                 : null;
             // Issue #568 (r2, veredito da PR #573): `partialUsage` stays
-            // ONLY this call's own estimate (the contract `errors.ts`
-            // documents) — any earlier iteration of the SAME turn (a
-            // tool-call/pause loop) already completed — real, or a
-            // steer-absorbed one folding in its own estimate (#520,
-            // `:555-561` below) — OR this same iteration's own preflight
-            // compaction summarize call (issue #569, `:429-437`, `addUsage`
-            // at `:435`) — and is sitting in `usageTotal`; that
-            // rides along SEPARATELY as `measuredUsage` (see its own doc,
-            // `errors.ts`, for exactly what it can carry), never merged
-            // into `partialUsage` itself, so `child-runner.ts` can report
-            // the accumulated total without also marking a leaf "partial"
-            // for THIS call when nothing about it specifically was ever
-            // estimated (isAbortOf's 2nd/3rd form, no `StreamAbortedError`
-            // to estimate from).
+            // ONLY this call's own estimate (contract in `errors.ts`) —
+            // any earlier real or steer-absorbed spend this turn already
+            // made (`addUsage`, incl. a preflight summarize call) sits in
+            // `usageTotal`, which rides along SEPARATELY as `measuredUsage`,
+            // never merged into `partialUsage` itself.
             throw new ConversationCancelledError(sessionId, signal.reason, {
               partialUsage: abortedCallUsage,
               measuredUsage: usageTotal,

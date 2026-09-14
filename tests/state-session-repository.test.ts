@@ -122,6 +122,31 @@ describe("session repository", () => {
     close();
   });
 
+  // Issue #587 AC: "título persistido e devolvido por session_search browse"
+  // -- SessionSearchTool (src/tools/stateful.ts, out of this issue's Files)
+  // forwards SearchRepository.listSessions() verbatim, so proving `title`
+  // round-trips through setTitle/listSessions here IS the proof: no
+  // migration needed (`title TEXT` already on the base schema).
+  it("persists a title via setTitle and returns it from listSessions/getSession (issue #587)", () => {
+    const { repo, close } = repository();
+    repo.createSession({ id: "s1", source: "cli", startedAt: 1 });
+    expect(repo.listSessions()[0]?.title).toBeNull();
+
+    repo.setTitle("s1", "A short title");
+
+    expect(repo.listSessions()[0]?.title).toBe("A short title");
+    expect(repo.getSession("s1")?.title).toBe("A short title");
+    close();
+  });
+
+  it("setTitle on a nonexistent session id is a silent no-op, never a fault", () => {
+    const { repo, close } = repository();
+    expect(() => {
+      repo.setTitle("does-not-exist", "x");
+    }).not.toThrow();
+    close();
+  });
+
   it("caps lineage at the nearest 100 and handles FTS hit, blank, and malformed", () => {
     const { repo, close } = repository();
     let parent: string | null = null;

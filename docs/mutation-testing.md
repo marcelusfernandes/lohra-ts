@@ -164,8 +164,9 @@ cobre esse arquivo. Qualquer outra forma faz `globDir` lançar
 `srcGlobs: formato inesperado (esperava "src/<dir>/**" ou
 "src/<arquivo>.ts")`. Foi o que a issue #293 tropeçou ao propor um glob por
 arquivo para `compaction.ts`; a fatia `context-window` acabou com cinco
-`srcGlobs` de diretório inteiro (ver a tabela abaixo) — o passo 2 de "Como
-adicionar uma fatia" cita a mesma restrição.
+`srcGlobs` de diretório inteiro (seis desde a issue #587, que soma
+`src/agent/**` — ver a tabela abaixo) — o passo 2 de "Como adicionar uma
+fatia" cita a mesma restrição.
 
 | fatia                 | script                  | mutantes | catálogo(s)                                                                                                           |
 | --------------------- | ----------------------- | -------: | --------------------------------------------------------------------------------------------------------------------- |
@@ -175,19 +176,29 @@ adicionar uma fatia" cita a mesma restrição.
 | `media`               | `mutations:t21`         |       20 | `media-catalog-persistence.ts` (13) + `media-catalog-other.ts` (7)                                                    |
 | `web-tools`           | `mutations:t20`         |        9 | `web-tools-mutants.ts`                                                                                                |
 | `self-update`         | `mutations:self-update` |        8 | `self-update-mutants.ts`                                                                                              |
-| `context-window`      | `mutations:t23`         |       19 | `context-window.ts`                                                                                                   |
+| `context-window`      | `mutations:t23`         |       23 | `context-window.ts`                                                                                                   |
 | `auth`                | `mutations:auth`        |       13 | `auth-mutants.ts`                                                                                                     |
 | `supervision`         | `mutations:supervision` |       39 | `supervision-mutants.ts`                                                                                              |
 
-Total: 276. Os 12 mutantes de `workflow-durability-guard.ts` são
+Total: 280. Os 12 mutantes de `workflow-durability-guard.ts` são
 combinatórios: três conjuntos do guard de escrita possuída (`fence`,
 `holder`, `lease-validity`) × quatro categorias (`state`, `cache`,
 `node-cost`, `spend`) — um mutante por combinação, cada um escorado só no
 teste focal da sua categoria, mais os 2 mutantes do INSERT combinado
 cache+custo (`combined-cell-guard-removed`,
 `combined-cost-escapes-refusal`). `tests/mutations-slices.test.ts` importa os
-treze catálogos de dado puro estaticamente e prova essa soma (276) a cada
+treze catálogos de dado puro estaticamente e prova essa soma (280) a cada
 corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
+
+A issue #587 (P11, compactação/título pelo `AuxClient`) acrescenta 4 a
+`context-window.ts`: `t` (`compaction.ts`'s `headAlignedKeepCount` perde o
+fallback seguro "manter nada" — pode manter um `assistant` com `tool_calls`
+sem manter seu próprio `tool`), `u` (`runtime.ts` para de derivar
+`maxTranscriptTokens` da janela real, achado da própria issue: o default de
+`compaction.ts` é inerte sob 200k), `v` e `w` (`src/agent/aux.ts`'s
+`summarizeWithFallback` perde o `catch`, `auxTelemetry` para de contar
+chamadas) — `aux.ts` não tinha mutante em NENHUMA fatia até aqui (achado da
+QA de d56f9c9b): 19 + 4 = 23.
 
 `supervision-mutants.ts` (issue #451, milestone 14 — achado de QA/revisão de
 M10, épico #421) é o décimo terceiro catálogo, fatia nova: 227 + 19 = 246.
@@ -645,36 +656,37 @@ contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
 `workflow-audit-live-mutants` 32, `workflow-audit-producers-mutants` 31,
 `web-tools-mutants` 9, `media-catalog-other` 7, `media-catalog-persistence`
 13, `self-update-mutants` 8, `workflow-executor-mutants` 45,
-`context-window` 19, `auth-mutants` 13, `supervision-mutants` 39, soma 276) e
-a soma de 276 contra os treze catálogos importados; e que todo diretório de
+`context-window` 23, `auth-mutants` 13, `supervision-mutants` 39, soma 280) e
+a soma de 280 contra os treze catálogos importados; e que todo diretório de
 primeiro nível de `src/` está coberto por algum `srcGlobs` ou está em
 `SEM_FATIA` com um motivo não vazio — nunca os dois, nunca nenhum dos dois.
 
 ## Diretórios de `src/` sem fatia hoje
 
-Doze diretórios de primeiro nível de `src/` não têm catálogo de mutação:
-`agent`, `config`, `core`, `cron`, `doctor`, `events`, `memory`,
-`onboarding`, `pricing`, `serialization`, `server`, `skills` — listados em
+Onze diretórios de primeiro nível de `src/` não têm catálogo de mutação:
+`config`, `core`, `cron`, `doctor`, `events`, `memory`, `onboarding`,
+`pricing`, `serialization`, `server`, `skills` — listados em
 `tests/mutations-slices.test.ts` (`SEM_FATIA`), cada um com o motivo "sem
-catálogo de mutantes ainda". Os dezessete diretórios cobertos hoje:
+catálogo de mutantes ainda". Os dezoito diretórios cobertos hoje:
 `workflow`, `state`, `orchestration` (fatia `workflow-durability`, também
 `supervision` para `workflow`/`orchestration`); `cli`, `commands` (também em
 `workflow-audit-live` e `self-update`); `media`, `tools` (fatia `media`,
 também em `self-update`); `web` (fatia `web-tools`); `self-update`, `mcp`,
 `gateway` (fatia `self-update`); `conversation`, `context`, `providers`,
-`catalog` (fatia `context-window`, issue #293 — `state` também está em
-`srcGlobs` dessa fatia, já coberto por `workflow-durability`); `auth` (fatia
-`auth`, issue #354); `transports` (fatia `supervision`, issue #451 —
-primeira fatia a cobrir esse diretório).
+`catalog`, `agent` (fatia `context-window`, issue #293; `agent` desde a
+issue #587 — `state` também está em `srcGlobs` dessa fatia, já coberto por
+`workflow-durability`); `auth` (fatia `auth`, issue #354); `transports`
+(fatia `supervision`, issue #451 — primeira fatia a cobrir esse diretório).
 
 "Coberto" aqui quer dizer que `srcGlobs` cita o diretório inteiro
 (`src/<dir>/**`, forma acima) — a fatia **dispara** para qualquer mudança
-nesse diretório — não que todo arquivo dele tem mutante. Nos quatro
+nesse diretório — não que todo arquivo dele tem mutante. Nos cinco
 diretórios que a fatia `context-window` acrescentou, a cobertura por
 mutante é parcial hoje: `conversation` (2 de 9 arquivos mutados —
 `compaction.ts`, `runtime.ts`), `context` (1 de 4 — `token-estimate.ts`),
-`providers` (1 de 5 — `context-window.ts`) e `catalog` (1 de 5 —
-`windows-cache.ts`). `state` (1 arquivo mutado por essa fatia,
+`providers` (1 de 5 — `context-window.ts`), `catalog` (1 de 5 —
+`windows-cache.ts`) e `agent` (1 de 3 — `aux.ts`; `client-pool.ts` e
+`index.ts` seguem sem mutante). `state` (1 arquivo mutado por essa fatia,
 `session-repository.ts`) já estava coberto por `srcGlobs` da fatia
 `workflow-durability` antes de `context-window` existir, então não conta
 como cobertura nova.

@@ -39,9 +39,11 @@ import {
   AnthropicMessagesClient,
   buildClient,
   createResponsesClient,
+  getTransport,
   type ChatCompletionsClient,
   type ResponsesClient,
 } from "../transports/index.js";
+import { AuxClient } from "../agent/aux.js";
 import { ClientPool } from "../agent/client-pool.js";
 import { buildOrchestrationCore, orchestrationToolHandlers } from "../orchestration/chat-wiring.js";
 import { resolveFanout } from "../orchestration/fanout-config.js";
@@ -338,6 +340,22 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     codexHome: options.codexHome,
     environment: options.environment,
   });
+  // Issue #587 (AC1): wires the cron job runner's ConversationRuntime the
+  // same way chat.ts does — absent `defaultAuxModel` means byte-identical
+  // to before this issue. The interactive gateway WS path
+  // (`src/gateway/ws/connection.ts`, out of this issue's `Files`) builds
+  // its own ConversationRuntime per turn and is NOT reached by this wiring;
+  // a known, documented gap, not a silent one.
+  const auxTransport = profile.defaultAuxModel ? getTransport(profile.apiMode) : null;
+  const aux =
+    auxTransport === null
+      ? null
+      : new AuxClient({
+          client: poolClient,
+          transport: auxTransport,
+          chosenModel: model,
+          defaultAuxModel: profile.defaultAuxModel,
+        });
   const pricingOverrides = loadPriceOverrides(join(options.home, "pricing.json"));
   const orchestrationCore = buildOrchestrationCore({
     fanout: resolveFanout(undefined, undefined, options.environment),
@@ -450,6 +468,7 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
           maxTokens: profile.defaultMaxTokens,
           pricingOverrides,
           notices,
+          ...(aux === null ? {} : { summarize: aux.summarizer() }),
         });
         await runtime.runTurn({
           input: job.prompt,

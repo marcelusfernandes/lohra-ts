@@ -1,12 +1,24 @@
 import { jsonFloat, stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
 import type { CostEstimate } from "../pricing/index.js";
 import type { ToolCall, Usage } from "../transports/index.js";
+import { addUsage } from "./runtime.js";
 import type {
   CompactionSummary,
   ConversationTurnResult,
   ExecutedToolCall,
   SessionSummary,
 } from "./types.js";
+
+/** Issue #587: `aux_calls`/usage folded into a turn's envelope from OUTSIDE
+ * `ConversationTurnResult` -- `options.summarize` stays opaque (no usage
+ * channel on the runtime itself), so chat.ts/dashboard.ts read an
+ * `AuxTelemetry` (`src/agent/aux.ts`) after `runTurn` and pass its totals
+ * here. Absent/`auxCalls` `0` means byte-identical to every pre-#587
+ * envelope -- no key added at all (same convention as `compaction`). */
+export interface AuxEnvelopeExtra {
+  readonly auxCalls?: number;
+  readonly auxUsage?: Usage | null;
+}
 
 // Issue #252: only present when a compaction actually ran this turn --
 // absent (never a `null` key) otherwise, so every existing envelope
@@ -87,7 +99,8 @@ function executedToolCalls(
   }));
 }
 
-export function successEnvelope(result: ConversationTurnResult): string {
+export function successEnvelope(result: ConversationTurnResult, extra?: AuxEnvelopeExtra): string {
+  const auxCalls = extra?.auxCalls ?? 0;
   const value: Record<string, unknown> = {
     session_id: result.sessionId,
     model: result.model,
@@ -100,7 +113,7 @@ export function successEnvelope(result: ConversationTurnResult): string {
         ? executedToolCalls(result.toolCalls ?? [])
         : toolCalls(result.response.toolCalls),
     usage: usage(result.response.usage),
-    usage_total: usage(result.usageTotal),
+    usage_total: usage(addUsage(result.usageTotal, extra?.auxUsage ?? null)),
     cost: cost(result.cost),
     stop_reason: result.response.finishReason,
     completed: true,
@@ -111,6 +124,9 @@ export function successEnvelope(result: ConversationTurnResult): string {
   if (result.compaction !== undefined && result.compaction !== null) {
     value.compaction = compaction(result.compaction);
   }
+  // Issue #587 AC: additive, at the very end -- byte-compatible for any
+  // reader that doesn't know the key (existing keys keep their exact order).
+  if (auxCalls > 0) value.aux_calls = auxCalls;
   return `${stringifyJsonPreservingNumbers(value, 2)}\n`;
 }
 

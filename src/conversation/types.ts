@@ -130,6 +130,20 @@ export type ConversationRuntimeEvent = Readonly<{
      * `"COMPACTION_UNSUPPORTED"`. Never a fault -- see the comment on
      * `ConversationRepository`'s compaction members above. */
     | "compaction.unsupported"
+    /** Issue #587 acréscimo item 3: fires when `attemptCompaction`'s
+     * `buildTranscript` (compaction.ts) had to cut the folded prefix handed
+     * to the summarizer to fit its token budget -- the ONE consumer of
+     * `CompactionAttemptResult.transcriptTruncated`, which had none before
+     * this issue. Never a fault (invariant 2 is about SILENT loss, and the
+     * summary itself still gets produced from what's left). */
+    | "compaction.transcript_truncated"
+    /** Issue #587 acréscimo item 4 / AC: the injected `options.summarize`
+     * (an `AuxClient`'s, normally) threw -- the turn fell open to the
+     * default summarizer (this turn's own transport/model) via
+     * `summarizeWithFallback` (`src/agent/aux.ts`) instead of failing.
+     * Fail-open, never silent: `code` carries the failure's constructor
+     * name, same convention as `model.request.interrupted` below. */
+    | "compaction.aux_fallback"
     /** Issue #520 (M16-S5, ADR 0005): a call already in flight was torn
      * down by a steer-driven interrupt (`interruptSource`, `runTurn`'s own
      * option) rather than by `signal` itself -- the turn absorbs this with
