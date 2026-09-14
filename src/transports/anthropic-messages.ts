@@ -7,6 +7,7 @@ import type {
   ChatKwargs,
   FinishReason,
   NormalizedResponse,
+  SystemBands,
   ToolCall,
   Usage,
 } from "./types.js";
@@ -16,6 +17,84 @@ const record = (value: unknown): Record<string, unknown> =>
 const copy = <T>(value: T): T => structuredClone(value);
 const number = (value: unknown): number =>
   typeof value === "number" && Number.isFinite(value) ? value : 0;
+
+/** Issue #586 (épico #575): Anthropic's own ephemeral cache breakpoint
+ * marker — https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching. */
+const CACHE_CONTROL = { type: "ephemeral" } as const;
+
+/** One text segment on its way to becoming a `system` block. `cacheable`
+ * marks the `stable`/`context` zone (or a plain-string `system`, migration
+ * rule: a caller that hasn't been wired to pass bands yet gets its whole
+ * string treated as `stable`) — `cache_control` lands on the LAST cacheable
+ * segment, never on `volatile` (date/memory/skills — changes every call or
+ * session) nor on a trailing `role: "system"` message (dynamic per request,
+ * e.g. the compaction summarizer's own system prompt). */
+interface SystemSegment {
+  readonly text: string;
+  readonly cacheable: boolean;
+}
+
+function bandSegments(bands: SystemBands): SystemSegment[] {
+  const segments: SystemSegment[] = [];
+  if (bands.stable) segments.push({ text: bands.stable, cacheable: true });
+  if (bands.context) segments.push({ text: bands.context, cacheable: true });
+  if (bands.volatile) segments.push({ text: bands.volatile, cacheable: false });
+  return segments;
+}
+
+function systemSegments(system: BuildKwargsOptions["system"]): SystemSegment[] {
+  if (system === null || system === undefined) return [];
+  if (typeof system === "string") {
+    return system.length > 0 ? [{ text: system, cacheable: true }] : [];
+  }
+  return bandSegments(system);
+}
+
+function trailingSystemMessageSegments(
+  messages: readonly Readonly<Record<string, unknown>>[],
+): SystemSegment[] {
+  return messages
+    .filter((message) => message.role === "system")
+    .map((message) => message.content)
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .map((text) => ({ text, cacheable: false }));
+}
+
+/** Builds the `system` blocks array (or `null` when there's nothing to
+ * send, same as the pre-#586 `systems.length > 0` guard). Each block after
+ * the first is prefixed with the same `"\n\n"` the old flat-string join
+ * used, so concatenating every block's `text` with no separator reproduces
+ * that exact string — nothing changes in what the model reads (invariant 1,
+ * CLAUDE.md), only the wire shape. */
+function systemBlocks(options: BuildKwargsOptions): Record<string, unknown>[] | null {
+  const segments = [
+    ...systemSegments(options.system),
+    ...trailingSystemMessageSegments(options.messages),
+  ];
+  if (segments.length === 0) return null;
+  let breakpoint = -1;
+  segments.forEach((segment, index) => {
+    if (segment.cacheable) breakpoint = index;
+  });
+  return segments.map((segment, index) => {
+    const text = index === 0 ? segment.text : `\n\n${segment.text}`;
+    return index === breakpoint
+      ? { type: "text", text, cache_control: CACHE_CONTROL }
+      : { type: "text", text };
+  });
+}
+
+/** Marks the LAST tool definition with the same cache breakpoint (Anthropic
+ * caches everything before and including a marked block) — never mutates
+ * `defs`, returns a fresh array with only the last element replaced. */
+function cachedToolDefinitions(
+  tools: readonly Readonly<Record<string, unknown>>[],
+): Record<string, unknown>[] {
+  const defs = tools.map(toolDefinition);
+  if (defs.length === 0) return defs;
+  const lastIndex = defs.length - 1;
+  return [...defs.slice(0, lastIndex), { ...defs[lastIndex], cache_control: CACHE_CONTROL }];
+}
 
 function thinkingBlocks(message: Readonly<Record<string, unknown>>): unknown[] {
   const value = record(message.provider_data).thinking_blocks;
@@ -150,21 +229,17 @@ function normalizeUsage(value: unknown): Usage | null {
 
 export class AnthropicMessagesTransport {
   buildKwargs(options: BuildKwargsOptions): ChatKwargs {
-    const systems = [
-      options.system,
-      ...options.messages
-        .filter((message) => message.role === "system")
-        .map((message) => message.content),
-    ].filter((value): value is string => typeof value === "string" && value.length > 0);
     const result: Record<string, unknown> = {
       model: options.model,
       messages: convertMessages(options.messages),
       max_tokens: options.maxTokens || 4096,
     };
-    if (systems.length > 0) result.system = systems.join("\n\n");
+    const system = systemBlocks(options);
+    if (system !== null) result.system = system;
     if (options.temperature !== undefined && options.temperature !== null)
       result.temperature = options.temperature;
-    if (options.tools && options.tools.length > 0) result.tools = options.tools.map(toolDefinition);
+    if (options.tools && options.tools.length > 0)
+      result.tools = cachedToolDefinitions(options.tools);
     if (options.toolChoice !== undefined && options.toolChoice !== null)
       result.tool_choice = { type: "tool", name: options.toolChoice };
     return result;
