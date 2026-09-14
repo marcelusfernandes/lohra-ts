@@ -418,10 +418,13 @@ por default, `LOHRA_DOCTRINE=core|extended` sobrepõe. Detalhes em
 Essa doutrina inclui uma regra sobre conteúdo externo (issue #581): texto
 devolvido por `web_fetch`, um servidor MCP, um arquivo ou uma skill é dado,
 nunca instrução — mesmo quando lê como um comando dirigido ao modelo. No
-envelope, `web_fetch`, `web_search` e todo resultado MCP carregam
-`"untrusted": true` (campo aditivo, última chave); `read_file` e
-`skill_view` marcam o mesmo campo quando o caminho ou a skill lidos estão
-fora do diretório do projeto, e também quando `skill_view` não sabe de onde
+envelope, `web_fetch`/`web_search` no sucesso e todo resultado MCP no
+sucesso ou no erro carregam `"untrusted": true` (campo aditivo, última
+chave; o erro de `web_fetch`/`web_search` não carrega — texto nosso, não da
+página); `read_file` e `skill_view` marcam o mesmo campo quando o caminho
+ou a skill lidos, com symlinks resolvidos, estão fora da raiz do projeto —
+`read_file` mede a partir do cwd do processo, `skill_view` a partir da raiz
+da sessão que abriu a tool — e também quando `skill_view` não sabe de onde
 a skill veio (`skill.path === undefined`, lado seguro: a doutrina promete
 menos sobre a origem, nunca mais). As
 descriptions de `read_file`, `web_fetch`, `web_search`, `skill_view` e o
