@@ -6,10 +6,9 @@ import type { LohraPaths } from "../config/paths.js";
 import { readConfig, readTokens } from "../auth/store.js";
 import { resolveAuthRoute, subscriptionActive } from "../auth/credentials.js";
 import { readCodexTokens } from "../auth/codex.js";
-import { AUTO_PROVIDER, resolveProviderName } from "../providers/resolve.js";
 import { jsonFloat } from "../serialization/json-numbers.js";
 import type { DoctorEnvironment, OllamaStatus } from "./model.js";
-import { providerStatuses } from "./providers.js";
+import { detectConfiguredProvider, providerStatuses } from "./providers.js";
 
 const ollamaUrl = "http://localhost:11434/api/tags";
 
@@ -58,18 +57,12 @@ export function buildEnvironment(
   },
 ): DoctorEnvironment {
   const providers = providerStatuses(environment);
-  let detected: string | null = null;
-  let providerError: string | null = null;
-  let providerOrigin: "none" | "api-key" | "env-var" = "none";
-  try {
-    const resolved = resolveProviderName(undefined, undefined, environment);
-    if (resolved !== AUTO_PROVIDER) {
-      detected = resolved;
-      providerOrigin = (environment.LOHRA_PROVIDER ?? "").trim() ? "env-var" : "api-key";
-    }
-  } catch (error) {
-    providerError = error instanceof Error ? error.message : String(error);
-  }
+  // Issue #604: extraído para `detectConfiguredProvider` (`./providers.js`)
+  // -- `src/commands/provider-detectado.ts` reusa a mesma função para o
+  // provedor que `chat`/`dashboard` usam quando `--provider` está ausente.
+  const { provider: detected, error: providerError } = detectConfiguredProvider(environment);
+  const providerOrigin: "none" | "api-key" | "env-var" =
+    detected === null ? "none" : (environment.LOHRA_PROVIDER ?? "").trim() ? "env-var" : "api-key";
   const userHome = environment.HOME ?? "";
   const codexHome = environment.CODEX_HOME?.trim() || join(userHome, ".codex");
   const config = readConfig(paths.home);

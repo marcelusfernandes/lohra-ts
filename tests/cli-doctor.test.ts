@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -238,5 +239,117 @@ describe("lohra CLI bootstrap", () => {
     // (e.g. `cron frobnicate`) is what produces "invalid value", exercised
     // separately in tests/commands-cron.test.ts and the T18 cli-bilateral harness.
     expect(stderr.join("")).toContain("missing required argument: action");
+  });
+});
+
+describe("doctor × chat contract (issue #604): 'usable' significa a mesma coisa nos dois", () => {
+  function closeServer(server: Server): Promise<void> {
+    return new Promise((resolvePromise, reject) => {
+      server.close((error) => {
+        if (error === undefined) resolvePromise();
+        else reject(error);
+      });
+    });
+  }
+
+  it("home com chave fictícia e stub local: doctor usable:true, chat sem --provider completa", async () => {
+    // `anthropic` is one of `doctor`'s own known providers
+    // (`src/doctor/providers.ts`'s table, not the registry) -- unlike a
+    // freshly `registerProvider`-ed name, it is what `checks.ts`'s
+    // `environment.providers.find(...)` can actually match, so `doctor`'s
+    // own pass/fail check (not just `usable`) agrees too. Redirected to the
+    // local stub via `LOHRA_PROVIDER_BASE_URL`, same seam `chat.ts:239` and
+    // `dashboard.ts:240` already read.
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        const text = JSON.stringify({
+          id: "msg_t604_doctor",
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "ok" }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 1, output_tokens: 1 },
+        });
+        response.writeHead(200, {
+          "content-type": "application/json",
+          "content-length": String(Buffer.byteLength(text)),
+        });
+        response.end(text);
+      });
+    });
+    await new Promise<void>((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("missing test port");
+      const env = {
+        ...environment(),
+        ANTHROPIC_API_KEY: "sk-t604-fake",
+        LOHRA_PROVIDER_BASE_URL: `http://127.0.0.1:${String(address.port)}`,
+      };
+
+      const doctorStdout: string[] = [];
+      const doctorCode = await runCli(["doctor", "--json"], {
+        environment: env,
+        stdout: (value) => doctorStdout.push(value),
+        stderr: () => undefined,
+        probeOllama: () => Promise.resolve(false),
+      });
+      expect(doctorCode).toBe(0);
+      const doctorReport = JSON.parse(doctorStdout.join("")) as {
+        environment: { usable: boolean; detected_provider: string | null };
+      };
+      expect(doctorReport.environment.usable).toBe(true);
+      expect(doctorReport.environment.detected_provider).toBe("anthropic");
+
+      const chatStdout: string[] = [];
+      const chatCode = await runCli(["chat", "--json", "--no-input", "--no-tools", "oi"], {
+        environment: env,
+        stdout: (value) => chatStdout.push(value),
+        stderr: () => undefined,
+      });
+      const envelope = JSON.parse(chatStdout.join("")) as {
+        error: string | null;
+        api_calls: number;
+        completed: boolean;
+      };
+      expect(chatCode).toBe(0);
+      expect(envelope.error).toBeNull();
+      expect(envelope.api_calls).toBeGreaterThanOrEqual(1);
+      expect(envelope.completed).toBe(true);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("home vazio: os dois concordam -- doctor usable:false, chat cai na fronteira de sempre", async () => {
+    const env = environment();
+
+    const doctorStdout: string[] = [];
+    const doctorCode = await runCli(["doctor", "--json"], {
+      environment: env,
+      stdout: (value) => doctorStdout.push(value),
+      stderr: () => undefined,
+      probeOllama: () => Promise.resolve(false),
+    });
+    expect(doctorCode).toBe(2);
+    const doctorReport = JSON.parse(doctorStdout.join("")) as {
+      environment: { usable: boolean; detected_provider: string | null };
+    };
+    expect(doctorReport.environment.usable).toBe(false);
+    expect(doctorReport.environment.detected_provider).toBeNull();
+
+    const chatStdout: string[] = [];
+    const chatCode = await runCli(["chat", "--json", "--no-input", "oi"], {
+      environment: env,
+      stdout: (value) => chatStdout.push(value),
+      stderr: () => undefined,
+    });
+    expect(chatCode).toBe(2);
+    const envelope = JSON.parse(chatStdout.join("")) as { error: string | null };
+    expect(envelope.error).toBe(
+      "no provider configured — run `lohra init` (or `lohra doctor`); details on stderr",
+    );
   });
 });
