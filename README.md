@@ -690,3 +690,8 @@ O owner escolheu `typescript-mainline` para o novo capítulo em
 ([ADR 0003](docs/adr/0003-native-wire-format.md)). O runtime Python segue
 somente como referência histórica; nenhuma implementação é feita nele, e
 nenhuma saída deste runtime precisa reproduzir os bytes dele.
+
+## Licença
+
+O lohra-ts é distribuído sob a licença [MIT](LICENSE) (decisão do owner,
+issue #535).
