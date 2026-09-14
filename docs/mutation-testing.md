@@ -176,18 +176,18 @@ fatia" cita a mesma restrição.
 | `media`               | `mutations:t21`         |       20 | `media-catalog-persistence.ts` (13) + `media-catalog-other.ts` (7)                                                    |
 | `web-tools`           | `mutations:t20`         |        9 | `web-tools-mutants.ts`                                                                                                |
 | `self-update`         | `mutations:self-update` |        8 | `self-update-mutants.ts`                                                                                              |
-| `context-window`      | `mutations:t23`         |       24 | `context-window.ts`                                                                                                   |
+| `context-window`      | `mutations:t23`         |       25 | `context-window.ts`                                                                                                   |
 | `auth`                | `mutations:auth`        |       13 | `auth-mutants.ts`                                                                                                     |
 | `supervision`         | `mutations:supervision` |       41 | `supervision-mutants.ts`                                                                                              |
 
-Total: 283. Os 12 mutantes de `workflow-durability-guard.ts` são
+Total: 284. Os 12 mutantes de `workflow-durability-guard.ts` são
 combinatórios: três conjuntos do guard de escrita possuída (`fence`,
 `holder`, `lease-validity`) × quatro categorias (`state`, `cache`,
 `node-cost`, `spend`) — um mutante por combinação, cada um escorado só no
 teste focal da sua categoria, mais os 2 mutantes do INSERT combinado
 cache+custo (`combined-cell-guard-removed`,
 `combined-cost-escapes-refusal`). `tests/mutations-slices.test.ts` importa os
-treze catálogos de dado puro estaticamente e prova essa soma (283) a cada
+treze catálogos de dado puro estaticamente e prova essa soma (284) a cada
 corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
 
 A issue #587 (P11, compactação/título pelo `AuxClient`) acrescenta 4 a
@@ -204,7 +204,11 @@ acrescenta `x`: `aux.ts`'s `summaryBudgetFor` (o orçamento que
 `maxTokens` fixo em 1024 em vez de escalar com
 `summaryMaxTokens(estimateTokens(transcript))` — o mesmo orçamento que
 `buildSummaryRequest` (`compaction.ts`, issue #584) já usava para o
-summarizer default: 23 + 1 = 24.
+summarizer default: 23 + 1 = 24. A issue #608 (overlay de avisos: invariante
+1 pinado) acrescenta `y`: `runTurn` passa a anexar o overlay de avisos
+pendentes ao campo `system` do request (não só à mensagem do usuário, onde
+ele deve viver) — invariante 1 (prompt construído uma vez e congelado) quebra
+silenciosamente com um aviso pendente: 24 + 1 = 25.
 
 `supervision-mutants.ts` (issue #451, milestone 14 — achado de QA/revisão de
 M10, épico #421) é o décimo terceiro catálogo, fatia nova: 227 + 19 = 246.
@@ -677,13 +681,13 @@ cada entrada de `slices.json`; que todo catálogo descoberto por conteúdo em
 `focus.file` dos catálogos da fatia (exceto `media`/`workflow-executor`); que
 `srcGlobs` cobre todo `edits[].file` dos catálogos da fatia (item 2 acima); a
 contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
-(`tests/mutations-slices.test.ts:583-596` — hoje `workflow-durability-guard`
+(`tests/mutations-slices.test.ts:623-638` — hoje `workflow-durability-guard`
 14, `workflow-durability-named` 41, `orchestration` 5,
 `workflow-audit-live-mutants` 32, `workflow-audit-producers-mutants` 31,
 `web-tools-mutants` 9, `media-catalog-other` 7, `media-catalog-persistence`
 13, `self-update-mutants` 8, `workflow-executor-mutants` 45,
-`context-window` 24, `auth-mutants` 13, `supervision-mutants` 41, soma 283) e
-a soma de 283 contra os treze catálogos importados; e que todo diretório de
+`context-window` 25, `auth-mutants` 13, `supervision-mutants` 41, soma 284) e
+a soma de 284 contra os treze catálogos importados; e que todo diretório de
 primeiro nível de `src/` está coberto por algum `srcGlobs` ou está em
 `SEM_FATIA` com um motivo não vazio — nunca os dois, nunca nenhum dos dois.
 

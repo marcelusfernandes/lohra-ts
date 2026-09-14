@@ -59,6 +59,9 @@ const abortInFlightTests = "tests/transports-abort-in-flight.test.ts";
 const compactionTranscriptTests = "tests/conversation-compaction-transcript.test.ts";
 const runtimeAuxTests = "tests/conversation-runtime-aux.test.ts";
 const auxTests = "tests/client-pool-aux.test.ts";
+// Issue #608 AC3: invariant 1 (system prompt built once, frozen) pinned
+// byte-exact against a turn with an operator-notices overlay present.
+const runtimeNoticesTests = "tests/conversation-runtime-notices.test.ts";
 
 export const contextWindowMutants: readonly Mutant[] = [
   {
@@ -481,6 +484,25 @@ export const contextWindowMutants: readonly Mutant[] = [
         before:
           '  return summaryMaxTokens(estimateTokens([{ role: "user", content: transcript }]).tokens);\n',
         after: "  return 1024;\n",
+      },
+    ],
+  },
+  // --- issue #608 (overlay de avisos: invariante 1 pinado) ----------------
+  {
+    id: "y-request-system-overlay-leak",
+    category: "runtime",
+    mechanism:
+      "runTurn passa a anexar o overlay de avisos pendentes ao campo system do request (e não só à mensagem do usuário) — invariante 1 (prompt construído uma vez e congelado) quebra silenciosamente quando há um aviso pendente",
+    focus: {
+      file: runtimeNoticesTests,
+      test: "pins request.system byte-for-byte to the session's systemPrompt with an overlay present (invariant 1, #608 AC3)",
+    },
+    edits: [
+      {
+        file: runtime,
+        before: "          system: session.systemPrompt,\n",
+        after:
+          "          system: notices?.overlay == null ? session.systemPrompt : String(session.systemPrompt) + notices.overlay,\n",
       },
     ],
   },
