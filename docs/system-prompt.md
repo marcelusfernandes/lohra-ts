@@ -606,17 +606,19 @@ em vez de só a faixa `volatile`. É uma cache mais grossa, não ausente.
 `docs/decisions/2026-09-14-faixas-restauradas.md`): o limite acima —
 `ConversationRuntime.runTurn` descartava as faixas que `session()` restaurou
 do banco antes de montar a próxima requisição de uma sessão RETOMADA — não
-existe mais. `resolveTurnSession` (`src/conversation/runtime-session.ts:79-105`,
-extraído de `runtime.ts:349-366`, que estava em 796/800 linhas) decide: uma
-sessão RETOMADA cujo `volatile` restaurado não é vazio (`systemPromptBands`
-sempre anexa `Today's date is ...` a essa faixa quando entendeu faixas de
-verdade — o discriminador não tem falso positivo) usa as três faixas
-persistidas, byte-idênticas, e nunca chama `promptSnapshot()` de novo. Uma
-linha MIGRADA (`context`/`volatile` vazios — sessão anterior a #586, ou
-`createSession` chamado com uma string simples) continua caindo em
+existe mais. `resolveTurnSession` (`src/conversation/runtime-session.ts:58-87`,
+extraído de `runtime.ts:334-352`, que estava em 796/800 linhas) decide: uma
+sessão RETOMADA cujo `volatile` restaurado não é vazio (`buildSystemPrompt`
+sempre anexa `Today's date is ...` a essa faixa quando monta uma faixa nova
+— `src/context/system-prompt.ts:152` — então uma linha que já entendeu
+faixas sempre a carrega ali, e o discriminador não tem falso positivo) usa
+as três faixas persistidas, byte-idênticas, e nunca chama `promptSnapshot()`
+de novo. Uma linha MIGRADA (`context`/`volatile` vazios — sessão anterior a
+#586, ou `createSession` chamado com uma string simples) continua caindo em
 `promptSnapshot()`, como antes desta issue: não há faixas de verdade para
-reusar. Sessão NOVA (o caso descrito duas seções acima) segue igual:
-`promptSnapshot()` já era a única fonte ali.
+reusar. Sessão NOVA — a mesma citada acima nesta seção ("tanto numa sessão
+nova quanto numa retomada com `--session`") — segue igual: `promptSnapshot()`
+já era a única fonte ali.
 
 Três consequências nomeadas da leitura acima, não efeitos colaterais: a data
 em `volatile` fica congelada na criação da sessão — uma sessão retomada dias
