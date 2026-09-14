@@ -115,10 +115,16 @@ nunca passa essa opção. Issue #608 (épico #575 P13, "toda superfície")
 acrescenta o mesmo campo opcional a `GatewayWsDeps`
 (`src/gateway/ws/connection.ts`) — o único `ConversationRuntime` construído
 sob o gateway WS (`handlePromptSubmit`, um turno por `prompt.submit`) também
-sabe encaminhar o overlay quando o campo é populado; nenhum caller de
-produção o popula ainda (`dashboard.ts`, que constrói `GatewayWsDeps`, ficou
-fora do `Files` dessa issue) — o mecanismo existe, a fiação de produção é um
-follow-up.
+sabe encaminhar o overlay quando o campo é populado. Issue #651 (sub-issue
+C1 de #637) fia o caller de produção: `dashboard.ts` (o único que constrói
+`GatewayWsDeps`) passa a MESMA `createTurnNoticesPort` instance que o job
+runner do cron já usava (hoisteada uma vez, compartilhada entre as duas
+superfícies) — um aviso pendente chega a QUALQUER turno do dashboard hoje,
+cron ou WS. `serve` (`src/server/service.ts`) continua sem overlay: não
+tem `state.db` nem `LineageSource` (`RequestRepository` constrói um
+`ConversationRuntime` por request, sem sessão persistida) — se `serve`
+algum dia ganhar estado, o overlay entra junto; até lá é a única superfície
+de turno sem essa fiação, não um gap silencioso.
 
 Presente, em toda chamada a `runTurn`:
 

@@ -4,10 +4,11 @@
 // notices overlay (issue #589) — `commands/chat.ts`/`commands/dashboard.ts`'s
 // own cron-job runtime already did. `GatewayWsDeps.notices` is optional
 // (absent means byte-identical to every pre-#608 gateway turn, same
-// convention as `ConversationRuntimeOptions.notices` itself) — `dashboard.ts`
-// (not in this issue's Files) doesn't populate it yet; this proves the
-// mechanism `createGatewayUpgradeHandler` now offers, via a fake port
-// constructed directly in this test, same harness as
+// convention as `ConversationRuntimeOptions.notices` itself). Issue #651
+// wired `dashboard.ts` (the only production caller) to populate it on every
+// real WS turn — `tests/gateway/dashboard-ws-overlay.test.ts` proves THAT
+// caller; this file proves the MECHANISM `createGatewayUpgradeHandler` offers
+// via a fake port constructed directly here, same harness as
 // `tests/gateway/prompt-submit.test.ts`.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

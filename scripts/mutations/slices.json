@@ -99,7 +99,8 @@
       "tests/gateway/session-service.test.ts",
       "tests/session-tools.test.ts",
       "tests/tools-local.test.ts",
-      "tests/gateway/dashboard-prompt-contract.test.ts"
+      "tests/gateway/dashboard-prompt-contract.test.ts",
+      "tests/gateway/dashboard-ws-overlay.test.ts"
     ]
   },
   {

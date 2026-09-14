@@ -18,6 +18,12 @@
 // Issue #646 (sub-issue A1 de #637): `dashboard.ts`'s own doctrine wiring
 // (`doctrineText(resolveDoctrineTier(...))`, issue #579) não tinha mutante
 // em nenhuma fatia — `src/commands/**` já está no `srcGlobs` desta fatia.
+//
+// Issue #651 (sub-issue C1 de #637) acrescenta a décima e a décima primeira
+// entrada: `dashboard.ts` deixando de passar `notices` à gateway WS
+// (`T22-dashboard-notices-dropped`) e `connection.ts` descartando
+// `deps.summarize` (`T22-connection-summarize-dropped`) — os dois campos
+// que #608/#587 deixaram sem caller de produção na WS.
 import type { Mutant } from "./types.js";
 
 const repo = "src/self-update/repo.ts";
@@ -27,9 +33,11 @@ const mcpManager = "src/mcp/manager.ts";
 const sessionService = "src/gateway/session-service.ts";
 const sessionTools = "src/commands/session-tools.ts";
 const dashboard = "src/commands/dashboard.ts";
+const wsConnection = "src/gateway/ws/connection.ts";
 
 const selfUpdateFocus = "tests/self-update.test.ts";
 const dashboardPromptContractTests = "tests/gateway/dashboard-prompt-contract.test.ts";
+const dashboardWsOverlayTests = "tests/gateway/dashboard-ws-overlay.test.ts";
 
 export const mutants: readonly Mutant[] = [
   {
@@ -166,6 +174,38 @@ export const mutants: readonly Mutant[] = [
           "    resolveDoctrineTier({ providerName: profile.name, environment: options.environment }),\n" +
           "  );\n",
         after: '  const doctrine = "";\n',
+      },
+    ],
+  },
+  {
+    id: "T22-dashboard-notices-dropped",
+    category: "dashboard-notices-dropped",
+    mechanism: "family-a",
+    focus: {
+      file: dashboardWsOverlayTests,
+      test: "a pending global notice reaches a real WS turn's user message (never the system) and is acked after",
+    },
+    edits: [
+      {
+        file: dashboard,
+        before: "    notices,\n" + "    ...(aux === null ? {} : { summarize: aux.summarizer() }),",
+        after: "    ...(aux === null ? {} : { summarize: aux.summarizer() }),",
+      },
+    ],
+  },
+  {
+    id: "T22-connection-summarize-dropped",
+    category: "connection-summarize-dropped",
+    mechanism: "family-a",
+    focus: {
+      file: dashboardWsOverlayTests,
+      test: "with defaultAuxModel configured, a real WS turn's compaction request carries model === defaultAuxModel",
+    },
+    edits: [
+      {
+        file: wsConnection,
+        before: "      ...(deps.summarize === undefined ? {} : { summarize: deps.summarize }),",
+        after: "      ...{},",
       },
     ],
   },

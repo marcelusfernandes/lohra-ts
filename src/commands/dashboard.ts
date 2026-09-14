@@ -361,12 +361,10 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     codexHome: options.codexHome,
     environment: options.environment,
   });
-  // Issue #587 (AC1): wires the cron job runner's ConversationRuntime the
-  // same way chat.ts does — absent `defaultAuxModel` means byte-identical
-  // to before this issue. The interactive gateway WS path
-  // (`src/gateway/ws/connection.ts`, out of this issue's `Files`) builds
-  // its own ConversationRuntime per turn and is NOT reached by this wiring;
-  // a known, documented gap, not a silent one.
+  // Issue #587 (AC1), fiado à gateway WS pela #651: wires BOTH the cron job
+  // runner's ConversationRuntime and the interactive WS path's
+  // (`createGatewayUpgradeHandler` below) the same way — absent
+  // `defaultAuxModel` means byte-identical to before #587 on either surface.
   const auxTransport = profile.defaultAuxModel ? getTransport(profile.apiMode) : null;
   const aux =
     auxTransport === null
@@ -377,6 +375,17 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
           chosenModel: model,
           defaultAuxModel: profile.defaultAuxModel,
         });
+  // Issue #589 wired this into the cron job runner only, one instance per
+  // job run; issue #651 hoists it here (built ONCE, process-scoped) so the
+  // interactive WS path (`createGatewayUpgradeHandler` below) can share the
+  // SAME port instead of a caller-per-surface fork — same
+  // `toolBase.noticesRepository`/`sessions`/`toolBase.noticesSink.warn` as
+  // before, no behavior change for the cron job's own turns.
+  const notices = createTurnNoticesPort({
+    repository: toolBase.noticesRepository,
+    sessions,
+    warning: toolBase.noticesSink.warn,
+  });
   const pricingOverrides = loadPriceOverrides(join(options.home, "pricing.json"));
   const orchestrationCore = buildOrchestrationCore({
     fanout: resolveFanout(undefined, undefined, options.environment),
@@ -473,11 +482,8 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
       try {
         // Issue #589: same repository `workflow_notices` reads — a job
         // whose prior run left a pending notice overlays it here too.
-        const notices = createTurnNoticesPort({
-          repository: toolBase.noticesRepository,
-          sessions,
-          warning: toolBase.noticesSink.warn,
-        });
+        // Issue #651: `notices` is the ONE process-scoped port built above,
+        // shared with the WS path below — not a fresh one per job run.
         const runtime = new ConversationRuntime({
           repository: new SqliteConversationRepository(sessions),
           transport,
@@ -544,6 +550,11 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     createModelTransport,
     createConversationRepository: () => new SqliteConversationRepository(sessions),
     dispatchTool: toolRuntime.dispatch,
+    // Issue #608 (AC4) / #587 (AC1), fiados pela #651: every real WS turn
+    // now overlays pending operator notices and — with `defaultAuxModel` —
+    // compacts through the same `AuxClient` the cron job runtime uses.
+    notices,
+    ...(aux === null ? {} : { summarize: aux.summarizer() }),
   });
 
   // Mirrors the oracle's `dashboard --port <n>` flag (T12 baseline harness's
