@@ -96,6 +96,44 @@ describe("buildSubagentSystemPrompt: block presence and order (#583)", () => {
     }
   });
 
+  // Issue #641 (épico #637, grupo F, item 21): a suíte acima só prova
+  // presença/ausência — uma linha com um nome a mais ou em ordem diferente
+  // passaria (veredito PR #615, non_blocking 4). Os dois testes abaixo
+  // provam por igualdade: string inteira para uma lista fixa, e
+  // conjunto+ordem exatos contra `childToolDefinitions` para a lista real.
+  it("renders the tools paragraph as an exact string for a fixed tool list (#641)", () => {
+    const text = buildSubagentSystemPrompt({ toolNames: ["read_file", "write_file", "terminal"] });
+    const toolsParagraph = text
+      .split("\n\n")
+      .find((paragraph) => paragraph.startsWith("Tools available to you:"));
+    expect(toolsParagraph).toBe(
+      "Tools available to you: read_file, write_file, terminal — this list " +
+        "is exactly this turn's own tool array, though a workflow node can " +
+        "still force one additional call onto that array without renaming " +
+        "this list. Dangerous commands (recursive delete, force push, sudo, " +
+        "and similar) are refused automatically and finally here too, with " +
+        "no retry path around the refusal.",
+    );
+  });
+
+  it("names exactly the set and order childToolDefinitions produces, not just by presence (#641)", () => {
+    const text = buildSubagentSystemPrompt({ toolNames: CHILD_TOOL_NAMES });
+    const toolsParagraph = text
+      .split("\n\n")
+      .find((paragraph) => paragraph.startsWith("Tools available to you:"));
+    expect(toolsParagraph).toBeDefined();
+    const namesPart = (toolsParagraph ?? "")
+      .slice("Tools available to you: ".length)
+      .split(" — ")[0];
+    expect((namesPart ?? "").split(", ")).toEqual([...CHILD_TOOL_NAMES]);
+  });
+
+  it("never claims an MCP tool parenthetical or a blanket refusal the runner does not honor (#641)", () => {
+    const text = buildSubagentSystemPrompt({ toolNames: CHILD_TOOL_NAMES });
+    expect(text).not.toContain("plus any MCP tools listed in this turn's own tool array");
+    expect(text).not.toContain("any other tool name is refused");
+  });
+
   it("carries the three-sentinel return contract, naming all of result:/failed:/needs input:", () => {
     const text = buildSubagentSystemPrompt({ toolNames: CHILD_TOOL_NAMES });
     expect(text).toContain('"result: <summary>"');

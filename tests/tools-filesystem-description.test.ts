@@ -1,15 +1,17 @@
-// Issue #605 (épico #575, follow-up dos vereditos r1/r2 da PR #598):
-// `READ_FILE_SCHEMA`/`WRITE_FILE_SCHEMA` (`src/tools/filesystem.ts`)
-// mantinham o texto anterior à dieta do catálogo (#585) e divergiam da
-// entrada `read_file`/`write_file` que `BUILTIN_DEFINITIONS` de fato envia
-// ao modelo — exports mortos (nenhum handler os lê; só a schema estática
-// importa) com uma cópia desatualizada. Mesmo padrão anti-drift que
-// `tests/tools-terminal-description.test.ts` já fixou para `TERMINAL_SCHEMA`:
-// mantém as duas cópias (não apaga o export), mas prende que o texto é
-// idêntico ao que o catálogo realmente envia.
+// Issue #605 (épico #575, follow-up dos vereditos r1/r2 da PR #598): esta
+// suíte fixava `READ_FILE_SCHEMA`/`WRITE_FILE_SCHEMA` (`src/tools/
+// filesystem.ts`) contra a description real de `BUILTIN_DEFINITIONS` — um
+// teste anti-drift para dois exports que nenhum handler lê (nem
+// `readFileTool` nem `writeFileTool` leem `.description`; `builtin-
+// definitions.ts` é a única fonte que o runtime de fato envia ao modelo).
+// Issue #641 (épico #637, grupo F, item 21) apaga os dois exports — o
+// precedente que os mantinha vivos (o mesmo padrão em `TERMINAL_SCHEMA`,
+// `tests/tools-terminal-description.test.ts`) cai junto. O que resta prender
+// é só o catálogo (`BUILTIN_DEFINITIONS` continua a única fonte) e a
+// ausência dos dois símbolos.
 import { describe, expect, it } from "vitest";
 
-import { READ_FILE_SCHEMA, WRITE_FILE_SCHEMA } from "../src/tools/filesystem.js";
+import * as filesystem from "../src/tools/filesystem.js";
 import { BUILTIN_DEFINITIONS } from "../src/tools/builtin-definitions.js";
 
 function catalogDescription(name: string): string {
@@ -18,14 +20,22 @@ function catalogDescription(name: string): string {
   return entry.function.description;
 }
 
-describe("read_file description: the two catalog copies never drift apart (#605)", () => {
-  it("READ_FILE_SCHEMA and BUILTIN_DEFINITIONS describe read_file identically", () => {
-    expect(READ_FILE_SCHEMA.description).toBe(catalogDescription("read_file"));
+describe("read_file description lives only in BUILTIN_DEFINITIONS (#641)", () => {
+  it("BUILTIN_DEFINITIONS carries a non-empty read_file description", () => {
+    expect(catalogDescription("read_file").length).toBeGreaterThan(0);
+  });
+
+  it("no longer exports READ_FILE_SCHEMA — the catalog is the only source", () => {
+    expect("READ_FILE_SCHEMA" in filesystem).toBe(false);
   });
 });
 
-describe("write_file description: the two catalog copies never drift apart (#605)", () => {
-  it("WRITE_FILE_SCHEMA and BUILTIN_DEFINITIONS describe write_file identically", () => {
-    expect(WRITE_FILE_SCHEMA.description).toBe(catalogDescription("write_file"));
+describe("write_file description lives only in BUILTIN_DEFINITIONS (#641)", () => {
+  it("BUILTIN_DEFINITIONS carries a non-empty write_file description", () => {
+    expect(catalogDescription("write_file").length).toBeGreaterThan(0);
+  });
+
+  it("no longer exports WRITE_FILE_SCHEMA — the catalog is the only source", () => {
+    expect("WRITE_FILE_SCHEMA" in filesystem).toBe(false);
   });
 });

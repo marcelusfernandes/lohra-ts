@@ -91,6 +91,20 @@ function nextMessage(ws: WebSocket): Promise<string> {
   return new Promise((resolvePromise) => state.waiters.push(resolvePromise));
 }
 
+// Issue #641 (épico #637, grupo F, item 21): o `setTimeout(50)` fixo abaixo
+// era uma suposição de tempo, não um sinal de prontidão — troca por espera
+// ativa pela linha `Lohra dashboard:` que `runDashboard` escreve no stderr
+// assim que o listener está de pé (veredito PR #611, non_blocking 7).
+async function waitForStderrLine(lines: readonly string[], prefix: string): Promise<string> {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const found = lines.find((line) => line.startsWith(prefix));
+    if (found !== undefined) return found;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
+  }
+  throw new Error(`timed out waiting for a stderr line starting with "${prefix}"`);
+}
+
 describe("dashboard.ts's real prompt (issue #580 AC 3): same inputs as chat's snapshot()", () => {
   it("a real WS turn's system message carries identity, memory, user profile, and the skills index — none of which dashboard sent before this issue", async () => {
     const root = mkdtempSync(join(tmpdir(), "lohra-t580-dashboard-prompt-"));
@@ -100,6 +114,11 @@ describe("dashboard.ts's real prompt (issue #580 AC 3): same inputs as chat's sn
     mkdirSync(join(home, "memories"), { recursive: true });
     writeFileSync(join(home, "memories", "MEMORY.md"), "T580-MEMORY-MARKER");
     writeFileSync(join(home, "memories", "USER.md"), "T580-USER-PROFILE-MARKER");
+    // Issue #641 (épico #637, grupo F, item 21): loadSoul(<home>/SOUL.md)
+    // (src/memory/soul.ts:6) fica inexercitado sem isto — sem SOUL.md o
+    // prompt cai em DEFAULT_IDENTITY e dashboard.ts:296,318 nunca é provado
+    // (veredito PR #611, non_blocking 7-8).
+    writeFileSync(join(home, "SOUL.md"), "T580-SOUL-MARKER");
 
     const captured: CapturedRequest[] = [];
     const server = startCapturingServer(captured);
@@ -143,11 +162,10 @@ describe("dashboard.ts's real prompt (issue #580 AC 3): same inputs as chat's sn
         },
       };
       const donePromise = runDashboard(options);
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
-      const boundLine = stderrLines.find((line) => line.startsWith("Lohra dashboard:"));
-      const port = Number(boundLine?.match(/:(\d+)\n$/)?.[1]);
-      const wsLine = stderrLines.find((line) => line.startsWith("WebSocket:"));
-      const token = wsLine?.match(/token=([^\n]+)\n$/)?.[1];
+      const boundLine = await waitForStderrLine(stderrLines, "Lohra dashboard:");
+      const port = Number(boundLine.match(/:(\d+)\n$/)?.[1]);
+      const wsLine = await waitForStderrLine(stderrLines, "WebSocket:");
+      const token = wsLine.match(/token=([^\n]+)\n$/)?.[1];
       expect(token).toBeDefined();
 
       const ws = new WebSocket(`ws://127.0.0.1:${String(port)}/api/ws?token=${String(token)}`);
@@ -184,6 +202,7 @@ describe("dashboard.ts's real prompt (issue #580 AC 3): same inputs as chat's sn
       const content = typeof system?.content === "string" ? system.content : "";
       expect(content).toContain("<memory>\nT580-MEMORY-MARKER\n</memory>");
       expect(content).toContain("<user-profile>\nT580-USER-PROFILE-MARKER\n</user-profile>");
+      expect(content).toContain("T580-SOUL-MARKER");
       expect(content).toContain("workflow-authoring");
       expect(content).toContain("Harness:");
       expect(content).toContain("Report what you actually did");

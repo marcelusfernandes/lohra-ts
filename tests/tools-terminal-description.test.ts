@@ -4,13 +4,15 @@
 // sessão já aprovada, ou um callback que nunca é definido sob --json/
 // --no-input; ver src/commands/chat.ts). O modelo lia a frase, entendia que
 // um humano tinha recusado e retentava o mesmo comando ou uma variante.
-// Este teste de contrato prende a nova description (padrão anti-drift) nas
-// duas cópias que o catálogo mantém: `TERMINAL_SCHEMA` (terminal.ts) e a
-// entrada `terminal` de `BUILTIN_DEFINITIONS` (builtin-definitions.ts, a
-// lista que o runtime de fato envia ao modelo).
+// Issue #641 (épico #637, grupo F, item 21) apaga `TERMINAL_SCHEMA`
+// (`src/tools/terminal.ts`) — era um export morto mantido só para este
+// teste anti-drift comparar contra a entrada `terminal` de
+// `BUILTIN_DEFINITIONS`, a única lista que o runtime de fato envia ao
+// modelo. O que resta prender é o texto do catálogo em si e a ausência do
+// símbolo.
 import { describe, expect, it } from "vitest";
 
-import { TERMINAL_SCHEMA } from "../src/tools/terminal.js";
+import * as terminal from "../src/tools/terminal.js";
 import { BUILTIN_DEFINITIONS } from "../src/tools/builtin-definitions.js";
 
 function catalogTerminalDescription(): string {
@@ -19,10 +21,9 @@ function catalogTerminalDescription(): string {
   return entry.function.description;
 }
 
-describe.each([
-  ["TERMINAL_SCHEMA.description", TERMINAL_SCHEMA.description],
-  ["BUILTIN_DEFINITIONS terminal description", catalogTerminalDescription()],
-])("%s: dangerous-command refusal is automatic and final (#577)", (_label, description) => {
+describe("BUILTIN_DEFINITIONS terminal description: dangerous-command refusal is automatic and final (#577)", () => {
+  const description = catalogTerminalDescription();
+
   it("no longer promises human approval", () => {
     expect(description).not.toContain("require user approval");
   });
@@ -36,8 +37,8 @@ describe.each([
   });
 });
 
-describe("terminal description: the two catalog copies never drift apart (#577)", () => {
-  it("TERMINAL_SCHEMA and BUILTIN_DEFINITIONS describe the dangerous-command policy identically", () => {
-    expect(catalogTerminalDescription()).toBe(TERMINAL_SCHEMA.description);
+describe("terminal.ts no longer exports the dead TERMINAL_SCHEMA copy (#641)", () => {
+  it("BUILTIN_DEFINITIONS is the only source of the terminal description", () => {
+    expect("TERMINAL_SCHEMA" in terminal).toBe(false);
   });
 });
