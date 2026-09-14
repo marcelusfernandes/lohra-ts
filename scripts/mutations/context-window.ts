@@ -47,6 +47,12 @@ const sessionRepository = "src/state/session-repository.ts";
 // than getting a new one, since compaction moved to the `AuxClient` this
 // module exports.
 const aux = "src/agent/aux.ts";
+// Issue #650 (item 13, veredito da PR #625): `errorEnvelope`'s own `extra`
+// fold (aux_calls/usage_total, same convention as `successEnvelope`, issue
+// #587) had no mutant of its own -- `envelope.ts` joins this fatia's own
+// `srcGlobs` (`src/conversation/**`, already there for `runtime.ts`/
+// `errors.ts`).
+const envelope = "src/conversation/envelope.ts";
 
 const compactionTests = "tests/conversation-compaction.test.ts";
 const runtimeTests = "tests/conversation-runtime.test.ts";
@@ -62,6 +68,7 @@ const auxTests = "tests/client-pool-aux.test.ts";
 // Issue #608 AC3: invariant 1 (system prompt built once, frozen) pinned
 // byte-exact against a turn with an operator-notices overlay present.
 const runtimeNoticesTests = "tests/conversation-runtime-notices.test.ts";
+const envelopeTests = "tests/conversation-envelope.test.ts";
 
 export const contextWindowMutants: readonly Mutant[] = [
   {
@@ -503,6 +510,25 @@ export const contextWindowMutants: readonly Mutant[] = [
         before: "          system: session.systemPrompt,\n",
         after:
           "          system: notices?.overlay == null ? session.systemPrompt : String(session.systemPrompt) + notices.overlay,\n",
+      },
+    ],
+  },
+  // --- issue #650 (addUsage único, partialCalls no cancel, aux no erro) --
+  {
+    id: "z-error-envelope-extra-discarded",
+    category: "envelope",
+    mechanism:
+      "errorEnvelope para de somar extra.auxUsage ao usage_total — um turno que falha depois de um título bem-sucedido (defaultAuxModel) perde o gasto auxiliar do envelope de erro, igual ao bug original da #650",
+    focus: {
+      file: envelopeTests,
+      test: "adds aux_calls at the end for errorEnvelope too, only when extra is given (issue #650)",
+    },
+    edits: [
+      {
+        file: envelope,
+        before:
+          "    usage_total: usage(addUsage(input.usageTotal ?? input.usage ?? null, extra?.auxUsage ?? null)),\n",
+        after: "    usage_total: usage(input.usageTotal ?? input.usage ?? null),\n",
       },
     ],
   },
