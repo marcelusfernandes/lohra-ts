@@ -5,6 +5,19 @@
 // Anthropic, mesmo padrão de `tests/chat-audit-trail-wiring.test.ts`), que o
 // corpo da requisição chega com `system` em blocos e `cache_control` na
 // fronteira stable+context, não a string achatada de antes desta issue.
+//
+// Issue #624: a asserção original pinava `blocks[0]` -- só vale porque a
+// faixa `context` está vazia neste tmpdir; se algo cair em `context`, o
+// breakpoint migra para `blocks[1]` sem regressão real.
+// `assertSingleBreakpointBeforeDateBlock` localiza o bloco com
+// `cache_control` por busca, não por índice fixo, e prende a invariante que
+// importa: exatamente um bloco cacheado, imediatamente antes do bloco da
+// faixa `volatile` (a data, que nunca é vazia -- `buildSystemPrompt` sempre
+// anexa `Today's date is ...`). O segundo `it` roda o MESMO turno sem
+// `--no-tools`, exercitando o breakpoint de `cache_control` na última
+// definição de tool (`cachedToolDefinitions`,
+// `src/transports/anthropic-messages.ts`) -- ausente da integração até
+// agora, só coberto em unidade (`tests/transport-anthropic-messages.test.ts`).
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -27,6 +40,22 @@ function closeServer(server: Server): Promise<void> {
       else reject(error);
     });
   });
+}
+
+/** Issue #624: robust replacement for pinning `blocks[0]` -- finds the
+ * cache_control breakpoint by scanning (there must be EXACTLY one) and
+ * asserts it sits immediately before the block carrying the volatile
+ * band's date, wherever that lands once `context` stops being empty. */
+function assertSingleBreakpointBeforeDateBlock(blocks: readonly Record<string, unknown>[]): void {
+  const cachedIndexes = blocks
+    .map((block, index) => (block.cache_control === undefined ? -1 : index))
+    .filter((index) => index !== -1);
+  expect(cachedIndexes).toHaveLength(1);
+  const cachedIndex = cachedIndexes[0] as number;
+  const dateBlock = blocks[cachedIndex + 1];
+  expect(dateBlock).toBeDefined();
+  expect(dateBlock?.cache_control).toBeUndefined();
+  expect(String(dateBlock?.text)).toContain("Today's date is");
 }
 
 function anthropicResponse(): Readonly<Record<string, unknown>> {
@@ -118,13 +147,67 @@ describe("chat.ts passes the full SystemPromptSnapshot to the Anthropic transpor
       // and still what every OTHER caller passes) collapses to exactly ONE
       // block via the migration rule (the whole text treated as `stable`).
       // Bands split into stable (cacheable) + volatile (today's date —
-      // never empty) here, at least two blocks, only the FIRST cacheable.
+      // never empty) here, at least two blocks.
       expect(blocks.length).toBeGreaterThan(1);
-      expect(blocks[0]?.cache_control).toEqual({ type: "ephemeral" });
-      const lastBlock = blocks[blocks.length - 1];
-      expect(lastBlock?.cache_control).toBeUndefined();
-      expect(String(lastBlock?.text)).toContain("Today's date is");
+      assertSingleBreakpointBeforeDateBlock(blocks);
       for (const block of blocks) expect(block.type).toBe("text");
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("also marks cache_control on the last tool definition when tools are enabled (no --no-tools)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-t586-chat-tools-"));
+    roots.push(root);
+    let capturedBody: Readonly<Record<string, unknown>> | undefined;
+    const server = startServer((body) => {
+      capturedBody = body;
+    });
+    await new Promise<void>((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("missing test port");
+      const provider = "t624-chat-tools-anthropic-probe";
+      registerProvider({
+        name: provider,
+        apiMode: "anthropic_messages",
+        aliases: [],
+        displayName: "T624 chat tools Anthropic probe",
+        description: "Local stub for the Anthropic Messages wire (issue #624).",
+        signupUrl: "",
+        envVars: ["T624_CHAT_TOOLS_KEY"],
+        baseUrl: `http://127.0.0.1:${String(address.port)}`,
+        modelsUrl: "",
+        requiresApiKey: true,
+        supportsVision: false,
+        fallbackModels: ["t624-chat-tools-model"],
+        defaultMaxTokens: 256,
+        defaultAuxModel: "",
+      });
+      const result = await runChat({
+        input: "say hi",
+        flags: new Map<string, string | true>([
+          ["--provider", provider],
+          ["--model", "t624-chat-tools-model"],
+          ["--json", true],
+          ["--no-input", true],
+        ]),
+        environment: {
+          HOME: root,
+          PATH: process.env.PATH ?? "",
+          T624_CHAT_TOOLS_KEY: "test-key",
+        },
+        home: join(root, ".lohra"),
+        codexHome: join(root, ".codex"),
+        cwd: root,
+      });
+      expect(result.code).toBe(0);
+      expect(capturedBody).toBeDefined();
+      expect(Array.isArray(capturedBody?.tools)).toBe(true);
+      const tools = capturedBody?.tools as readonly Record<string, unknown>[];
+      expect(tools.length).toBeGreaterThan(0);
+      for (const tool of tools.slice(0, -1)) expect(tool.cache_control).toBeUndefined();
+      expect(tools[tools.length - 1]?.cache_control).toEqual({ type: "ephemeral" });
     } finally {
       await closeServer(server);
     }

@@ -8,6 +8,13 @@
 // `src/gateway/ws/connection.ts`, out of this issue's `Files`) is NOT
 // reached by this wiring and still only ever gets `.text` — documented gap
 // in `docs/system-prompt.md`, not exercised here.
+//
+// Issue #624: the original assertion pinned `blocks[0]` -- only true
+// because `context` is empty in this tmpdir; if anything ever lands in
+// `context`, the breakpoint moves to `blocks[1]` with no real regression.
+// `assertSingleBreakpointBeforeDateBlock` finds the cached block by
+// scanning instead, and pins the invariant that matters: exactly one
+// cached block, immediately before the `volatile` band's date.
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -44,6 +51,22 @@ function anthropicSseTurn(text: string): string {
     'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}',
     "",
   ].join("\n\n");
+}
+
+/** Issue #624: robust replacement for pinning `blocks[0]` -- finds the
+ * cache_control breakpoint by scanning (there must be EXACTLY one) and
+ * asserts it sits immediately before the block carrying the volatile
+ * band's date, wherever that lands once `context` stops being empty. */
+function assertSingleBreakpointBeforeDateBlock(blocks: readonly Record<string, unknown>[]): void {
+  const cachedIndexes = blocks
+    .map((block, index) => (block.cache_control === undefined ? -1 : index))
+    .filter((index) => index !== -1);
+  expect(cachedIndexes).toHaveLength(1);
+  const cachedIndex = cachedIndexes[0] as number;
+  const dateBlock = blocks[cachedIndex + 1];
+  expect(dateBlock).toBeDefined();
+  expect(dateBlock?.cache_control).toBeUndefined();
+  expect(String(dateBlock?.text)).toContain("Today's date is");
 }
 
 function startCapturingServer(onBody: (body: Readonly<Record<string, unknown>>) => void): Server {
@@ -141,7 +164,7 @@ describe("dashboard.ts cron runJob passes the full SystemPromptSnapshot to the A
       // flat string collapses to one block; the full snapshot splits stable
       // (cacheable) from volatile (today's date), at least two blocks.
       expect(blocks.length).toBeGreaterThan(1);
-      expect(blocks[0]?.cache_control).toEqual({ type: "ephemeral" });
+      assertSingleBreakpointBeforeDateBlock(blocks);
     } finally {
       await closeServer(server);
     }
