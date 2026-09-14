@@ -493,7 +493,7 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 316 (soma dos dezesseis catálogos importados)", () => {
+  it("a contagem total de mutantes é 318 (soma dos dezesseis catálogos importados)", () => {
     // Os dezesseis catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
@@ -657,9 +657,14 @@ describe("scripts/mutations/slices.json", () => {
     // `supervision-mutants.ts` (no teto de 800 linhas) no décimo sexto
     // catálogo, `supervision-mutants-2.ts`: os 8 mutantes N1-N4/V1/W1/X1/Y1
     // migram byte-idênticos (41 -> 33 + 8), soma da fatia preservada -- o
-    // total geral não muda por causa da divisão, só pelo R1 acima.
+    // total geral não muda por causa da divisão, só pelo R1 acima. A issue
+    // #651 (sub-issue C1 de #637) acrescenta dois a `self-update-mutants.ts`:
+    // `T22-dashboard-notices-dropped` (`dashboard.ts` deixa de passar
+    // `notices` à gateway WS) e `T22-connection-summarize-dropped`
+    // (`connection.ts` descarta `deps.summarize`) -- os dois campos que
+    // #608/#587 deixaram sem caller de produção na WS: 316 + 2 = 318.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 316;
+    const TOTAL_MUTANTS = 318;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -680,7 +685,7 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/web-tools-mutants.ts": 9,
       "scripts/mutations/media-catalog-other.ts": 7,
       "scripts/mutations/media-catalog-persistence.ts": 13,
-      "scripts/mutations/self-update-mutants.ts": 9,
+      "scripts/mutations/self-update-mutants.ts": 11,
       "scripts/mutations/workflow-executor-mutants.ts": 46,
       "scripts/mutations/context-window.ts": 27,
       "scripts/mutations/context-prompt-mutants.ts": 16,
@@ -694,7 +699,7 @@ describe("scripts/mutations/slices.json", () => {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(316);
+    expect(somaTabela).toBe(318);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {

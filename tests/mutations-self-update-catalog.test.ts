@@ -9,7 +9,10 @@
 //
 // Issue #646 (sub-issue A1 de #637) acrescenta a nona entrada:
 // `T22-dashboard-doctrine-dropped` (`src/commands/dashboard.ts`'s fiação de
-// doutrina, issue #579).
+// doutrina, issue #579). Issue #651 (sub-issue C1 de #637) acrescenta a
+// décima e a décima primeira: `T22-dashboard-notices-dropped` e
+// `T22-connection-summarize-dropped` (fiação do overlay de avisos e do
+// `summarize` do `AuxClient` no turno WS do gateway).
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -34,8 +37,8 @@ function realTestTitles(testSource: string): ReadonlySet<string> {
 }
 
 describe("catálogo de mutação self-update", () => {
-  it("tem exatamente 9 mutantes", () => {
-    expect(mutants).toHaveLength(9);
+  it("tem exatamente 11 mutantes", () => {
+    expect(mutants).toHaveLength(11);
   });
 
   it("ids são únicos", () => {
