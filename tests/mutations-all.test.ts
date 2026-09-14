@@ -112,9 +112,9 @@ describe("readSliceConfigs", () => {
     ]);
   });
 
-  it("lê o scripts/mutations/slices.json de verdade (nove fatias, script não-vazio)", () => {
+  it("lê o scripts/mutations/slices.json de verdade (dez fatias, script não-vazio)", () => {
     const configs = readSliceConfigs();
-    expect(configs).toHaveLength(9);
+    expect(configs).toHaveLength(10);
     for (const config of configs) {
       expect(config.slice.length).toBeGreaterThan(0);
       expect(config.script.length).toBeGreaterThan(0);

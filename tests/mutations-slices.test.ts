@@ -80,6 +80,7 @@ import { combinedMutants, guardMutants } from "../scripts/mutations/workflow-dur
 import { contextWindowMutants } from "../scripts/mutations/context-window.js";
 import { otherMediaMutants } from "../scripts/mutations/media-catalog-other.js";
 import { persistenceMutants } from "../scripts/mutations/media-catalog-persistence.js";
+import { doctorMutants } from "../scripts/mutations/doctor-mutants.js";
 import { orchestrationMutants } from "../scripts/mutations/orchestration.js";
 import { mutants as selfUpdateMutants } from "../scripts/mutations/self-update-mutants.js";
 import { supervisionMutants } from "../scripts/mutations/supervision-mutants.js";
@@ -118,6 +119,7 @@ const NAO_CATALOGO = new Set([
   "workflow-durability.ts",
   "workflow-executor.ts",
   "auth.ts",
+  "doctor.ts",
 ]);
 
 const CATALOG_EXPORT_PATTERN = /export const [A-Za-z_]*[Mm]utants\b/;
@@ -185,6 +187,7 @@ const CATALOGOS: ReadonlyMap<string, readonly CatalogEntry[]> = new Map<
   ["scripts/mutations/context-window.ts", asCatalog(contextWindowMutants)],
   ["scripts/mutations/auth-mutants.ts", asCatalog(authMutants)],
   ["scripts/mutations/supervision-mutants.ts", asCatalog(supervisionMutants)],
+  ["scripts/mutations/doctor-mutants.ts", asCatalog(doctorMutants)],
 ]);
 
 interface Slice {
@@ -236,11 +239,14 @@ function readSlices(): readonly Slice[] {
  * issue #154 (que só mapeia as seis fatias já migradas pelo passo 0 do
  * épico #13). Uma entrada aqui precisa continuar SEM cobertura em
  * `srcGlobs`; o teste abaixo reprova se as duas listas se sobrepõem. */
+// Issue #636 (fatia `doctor`) removeu "doctor" deste mapa: a fatia nova
+// cobre esse diretório via `srcGlobs`, então "doctor" não pode continuar
+// listado como sem catálogo -- o teste de overlap abaixo reprova se os dois
+// continuarem verdadeiros ao mesmo tempo.
 const SEM_FATIA: ReadonlyMap<string, string> = new Map([
   ["config", "sem catálogo de mutantes ainda"],
   ["core", "sem catálogo de mutantes ainda"],
   ["cron", "sem catálogo de mutantes ainda"],
-  ["doctor", "sem catálogo de mutantes ainda"],
   ["events", "sem catálogo de mutantes ainda"],
   ["memory", "sem catálogo de mutantes ainda"],
   ["onboarding", "sem catálogo de mutantes ainda"],
@@ -309,12 +315,13 @@ describe("scripts/mutations/slices.json", () => {
     expect(existsSync(slicesPath)).toBe(true);
   });
 
-  it("tem as nove fatias, cada uma com o schema esperado", () => {
+  it("tem as dez fatias, cada uma com o schema esperado", () => {
     const slices = readSlices();
     expect(slices.map((entry) => entry.slice).sort()).toEqual(
       [
         "auth",
         "context-window",
+        "doctor",
         "media",
         "self-update",
         "supervision",
@@ -482,7 +489,7 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 284 (soma dos treze catálogos importados)", () => {
+  it("a contagem total de mutantes é 295 (soma dos catorze catálogos importados)", () => {
     // Os doze catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
@@ -607,8 +614,21 @@ describe("scripts/mutations/slices.json", () => {
     // Issue #608 acrescenta y a `context-window.ts`: `runTurn` passa a
     // anexar o overlay de avisos pendentes ao campo `system` do request (em
     // vez de só à mensagem do usuário) -- invariante 1 pinado -- 283 + 1 = 284.
+    // A issue #636 (follow-up da QA de 846b0b7f e das PRs #629/#632/#634)
+    // acrescenta o décimo quarto catálogo, `doctor-mutants.ts` (fatia nova
+    // `doctor`): 11 mutantes cobrindo `src/doctor/snapshot.ts` (`route.error`
+    // ignorado, `subscription` tratado como `api_key`, `usable` sem
+    // `ollama.alive`, `usable` sem `hasApiKey`, `provider_origin: "none"`
+    // virando `"api-key"`), `src/doctor/checks.ts` (`isOllamaReady` com `||`,
+    // o Check `ollama-sem-chave` emitindo sem `auth_route === "api_key"`,
+    // emitindo com `chat_default_provider !== null`, `remedy` sem
+    // `--provider ollama`), `src/doctor/providers.ts`
+    // (`detectConfiguredProvider` devolvendo `AUTO_PROVIDER` como detectado)
+    // e `src/commands/provider-detectado.ts` (`detail` descartado no erro) --
+    // nenhum desses arquivos tinha mutante em nenhuma fatia até aqui: 284 +
+    // 11 = 295.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 284;
+    const TOTAL_MUTANTS = 295;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -634,13 +654,14 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/context-window.ts": 25,
       "scripts/mutations/auth-mutants.ts": 13,
       "scripts/mutations/supervision-mutants.ts": 41,
+      "scripts/mutations/doctor-mutants.ts": 11,
     };
     expect(new Set(Object.keys(CONTAGEM_POR_CATALOGO))).toEqual(new Set(CATALOGOS.keys()));
     for (const [path, mutants] of CATALOGOS) {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(284);
+    expect(somaTabela).toBe(295);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {

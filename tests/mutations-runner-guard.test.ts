@@ -48,6 +48,7 @@ const RUNNERS = [
   // de que importá-lo nunca dispara `main()` — a situação de
   // `context-window.ts` antes de #297.
   "scripts/mutations/supervision.ts",
+  "scripts/mutations/doctor.ts",
 ] as const;
 
 const GIT_SHIM = "#!/bin/sh\nprintf 'invoked\\n' >> \"$GIT_MARKER\"\nexit 1\n";

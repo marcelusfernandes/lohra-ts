@@ -156,5 +156,17 @@
       "tests/orchestration-tools.test.ts",
       "tests/workflow-nodes-tool.test.ts"
     ]
+  },
+  {
+    "slice": "doctor",
+    "script": "mutations:doctor",
+    "catalog": ["scripts/mutations/doctor-mutants.ts"],
+    "srcGlobs": ["src/doctor/**", "src/commands/**"],
+    "focusFiles": [
+      "tests/cli-doctor.test.ts",
+      "tests/doctor-checks-ollama.test.ts",
+      "tests/chat-provider-detectado.test.ts",
+      "tests/providers.test.ts"
+    ]
   }
 ]
