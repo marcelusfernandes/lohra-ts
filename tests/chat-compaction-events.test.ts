@@ -414,7 +414,12 @@ describe("runChat's title generation fails open without blocking the turn (issue
       });
 
       expect(result.code).toBe(0);
-      expect(result.stderr).toContain("title.failed");
+      // Issue #650 (item 13): `title.failed` now names WHICH stage failed —
+      // this is the title GENERATION failing (never reaches persistence),
+      // never `stage=persist`. The bare substring pin stays green too
+      // (`stage=generate` still contains `title.failed`).
+      expect(result.stderr).toContain("title.failed stage=generate");
+      expect(result.stderr).not.toContain("stage=persist");
       const envelope = JSON.parse(result.stdout) as { session_id: string; aux_calls?: number };
       expect(envelope.aux_calls ?? 0).toBe(0);
 
@@ -429,6 +434,120 @@ describe("runChat's title generation fails open without blocking the turn (issue
       } finally {
         connection.close();
       }
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  // Issue #650 (item 13, AC4): a NEW session with `defaultAuxModel` whose
+  // title call SUCCEEDS but whose own turn FAILS -- before this issue,
+  // `errorEnvelope` had no `extra` parameter at all, so the bounded aux
+  // spend (1 call, 32 max_tokens) simply vanished from the envelope
+  // (`chat.ts:589-611` built it with no aux fields). `stage=generate`
+  // pinned here too -- `stage=persist` is a real code path (`chat.ts`'s
+  // OTHER `title.failed` call site, reached only when `runTurn` itself
+  // succeeds and `sessions.setTitle` then throws) that this fixture never
+  // reaches, because the turn's own failure short-circuits straight to the
+  // error envelope before persistence is ever attempted -- `not.toContain`
+  // below is the distinguishing half of the AC, proven from the OTHER side
+  // by the sibling test above (title generation itself failing, same
+  // pin).
+  it("folds aux_calls/usage_total into the ERROR envelope when the turn itself fails after a successful title (issue #650)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-t650-chat-title-then-turn-failure-"));
+    roots.push(root);
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+          max_tokens?: number;
+        };
+        // `AuxClient.title()` is the ONE caller that passes `maxTokens: 32`
+        // -- the title call SUCCEEDS here (inverse of the sibling test
+        // above); the turn's OWN call (`defaultMaxTokens: 256`) fails.
+        if (body.max_tokens === 32) {
+          const payload = {
+            id: "chatcmpl-t650-title",
+            object: "chat.completion",
+            created: 0,
+            model: "t650-chat-title-then-turn-failure-model",
+            choices: [
+              { index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" },
+            ],
+            usage: { prompt_tokens: 3, completion_tokens: 1 },
+          };
+          const text = JSON.stringify(payload);
+          response.writeHead(200, {
+            "content-type": "application/json",
+            "content-length": String(Buffer.byteLength(text)),
+          });
+          response.end(text);
+          return;
+        }
+        const text = JSON.stringify({ error: { message: "t650 turn failure" } });
+        response.writeHead(400, {
+          "content-type": "application/json",
+          "content-length": String(Buffer.byteLength(text)),
+          "x-should-retry": "false",
+        });
+        response.end(text);
+      });
+    });
+    await new Promise<void>((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("missing test port");
+      const provider = "t650-chat-title-then-turn-failure-probe";
+      registerProvider({
+        name: provider,
+        apiMode: "chat_completions",
+        aliases: [],
+        displayName: "T650 chat title-then-turn failure probe",
+        description: "Local in-memory composition-root probe (issue #650).",
+        signupUrl: "",
+        envVars: [],
+        baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
+        modelsUrl: "",
+        requiresApiKey: false,
+        supportsVision: false,
+        fallbackModels: ["t650-chat-title-then-turn-failure-model"],
+        defaultMaxTokens: 256,
+        defaultAuxModel: "t650-chat-title-then-turn-failure-model",
+      });
+
+      const result = await runChat({
+        input: "hello there",
+        flags: new Map<string, string | true>([
+          ["--provider", provider],
+          ["--model", "t650-chat-title-then-turn-failure-model"],
+          ["--json", true],
+          ["--no-input", true],
+          ["--no-tools", true],
+        ]),
+        environment: {
+          HOME: root,
+          PATH: process.env.PATH ?? "",
+        },
+        home: join(root, ".lohra"),
+        codexHome: join(root, ".codex"),
+        cwd: root,
+      });
+
+      expect(result.code).toBe(1);
+      expect(result.stderr).not.toContain("title.failed");
+      expect(result.stderr).not.toContain("stage=persist");
+      const envelope = JSON.parse(result.stdout) as {
+        aux_calls?: number;
+        usage_total?: { input_tokens: number; output_tokens: number } | null;
+        completed: boolean;
+      };
+      expect(envelope.completed).toBe(false);
+      expect(envelope.aux_calls).toBe(1);
+      // No turn usage was ever measured (the turn's own call failed before
+      // any response came back) -- usage_total is exactly the title's own
+      // bounded spend, never null (issue #650: an orphaned aux spend used
+      // to vanish entirely from the error envelope).
+      expect(envelope.usage_total).toEqual({ input_tokens: 3, output_tokens: 1 });
     } finally {
       await closeServer(server);
     }

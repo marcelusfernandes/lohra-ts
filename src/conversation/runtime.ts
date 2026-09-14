@@ -7,6 +7,7 @@ import { emptyPartialStream, StreamAbortedError } from "../transports/index.js";
 import type { NormalizedResponse, SystemBands, ToolCall, Usage } from "../transports/index.js";
 import { runBounded } from "../tools/dispatch.js";
 import { summarizeWithFallback } from "../agent/aux.js";
+import { addUsage } from "./usage.js";
 import {
   attemptCompaction,
   buildSummaryRequest,
@@ -123,21 +124,6 @@ function validToolCall(call: ToolCall): boolean {
 function providerMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
-}
-
-// Exported for envelope.ts's own aux usage merge (issue #587, `aux_calls`):
-// `options.summarize` stays opaque (no usage channel), so the caller merges
-// aux usage into the envelope separately, with this same addition.
-export function addUsage(total: Usage | null, next: Usage | null): Usage | null {
-  if (next === null) return total;
-  if (total === null) return { ...next };
-  return {
-    inputTokens: total.inputTokens + next.inputTokens,
-    outputTokens: total.outputTokens + next.outputTokens,
-    cacheReadTokens: total.cacheReadTokens + next.cacheReadTokens,
-    cacheWriteTokens: total.cacheWriteTokens + next.cacheWriteTokens,
-    reasoningTokens: total.reasoningTokens + next.reasoningTokens,
-  };
 }
 
 export class ConversationRuntime {
@@ -528,6 +514,16 @@ export class ConversationRuntime {
               partialUsage: abortedCallUsage,
               measuredUsage: usageTotal,
               apiCalls: apiCalls + 1,
+              // Issue #650 (item 12): mirrors MaxIterationsError's own
+              // `partialCalls` (issue #594) — every call THIS turn already
+              // had torn down by a steer-driven interrupt and absorbed with
+              // `continue` before this in-flight external cancel threw. The
+              // two pre-issuance throws below (`signalAborted(signal)`
+              // top-of-loop and post-preflight checks) deliberately do NOT
+              // pass this option — they stay at the constructor default (0),
+              // never the running counter — because no call belonging to
+              // THIS iteration ever got as far as being issued at all.
+              partialCalls,
             });
           }
           // Issue #520 (D2/D3): the outer `signal` never fired, but THIS

@@ -1,7 +1,7 @@
 import { jsonFloat, stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
 import type { CostEstimate } from "../pricing/index.js";
 import type { ToolCall, Usage } from "../transports/index.js";
-import { addUsage } from "./runtime.js";
+import { addUsage } from "./usage.js";
 import type {
   CompactionSummary,
   ConversationTurnResult,
@@ -130,19 +130,27 @@ export function successEnvelope(result: ConversationTurnResult, extra?: AuxEnvel
   return `${stringifyJsonPreservingNumbers(value, 2)}\n`;
 }
 
-export function errorEnvelope(input: {
-  readonly sessionId: string;
-  readonly model: string | null;
-  readonly prompt: string;
-  readonly error: string;
-  readonly apiCalls: number;
-  readonly usage?: Usage | null;
-  readonly usageTotal?: Usage | null;
-  readonly cost?: CostEstimate | null;
-  readonly sessionSummary?: SessionSummary | null;
-  readonly stopReason?: string | null;
-  readonly toolCalls?: readonly ExecutedToolCall[];
-}): string {
+export function errorEnvelope(
+  input: {
+    readonly sessionId: string;
+    readonly model: string | null;
+    readonly prompt: string;
+    readonly error: string;
+    readonly apiCalls: number;
+    readonly usage?: Usage | null;
+    readonly usageTotal?: Usage | null;
+    readonly cost?: CostEstimate | null;
+    readonly sessionSummary?: SessionSummary | null;
+    readonly stopReason?: string | null;
+    readonly toolCalls?: readonly ExecutedToolCall[];
+  },
+  // Issue #650 (item 13, veredito da PR #625, non_blocking 2 "gasto órfão no
+  // caminho de erro"): mesmo `extra` aditivo que `successEnvelope` já tinha
+  // desde a #587 — absent/`auxCalls` `0` fica byte-idêntico a antes desta
+  // issue (nenhuma chave nova, mesma contagem de `Object.keys`).
+  extra?: AuxEnvelopeExtra,
+): string {
+  const auxCalls = extra?.auxCalls ?? 0;
   const value: Record<string, unknown> = {
     session_id: input.sessionId,
     model: input.model,
@@ -152,7 +160,7 @@ export function errorEnvelope(input: {
     reasoning: null,
     tool_calls: executedToolCalls(input.toolCalls ?? []),
     usage: usage(input.usage ?? null),
-    usage_total: usage(input.usageTotal ?? input.usage ?? null),
+    usage_total: usage(addUsage(input.usageTotal ?? input.usage ?? null, extra?.auxUsage ?? null)),
     cost: cost(input.cost ?? null),
     stop_reason: input.stopReason ?? null,
     completed: false,
@@ -161,5 +169,9 @@ export function errorEnvelope(input: {
   };
   if (input.sessionSummary !== undefined && input.sessionSummary !== null)
     value.session = session(input.sessionSummary);
+  // Issue #650 AC: additive, at the very end -- same convention as
+  // successEnvelope (issue #587) -- byte-compatible for any reader that
+  // doesn't know the key.
+  if (auxCalls > 0) value.aux_calls = auxCalls;
   return `${stringifyJsonPreservingNumbers(value, 2)}\n`;
 }

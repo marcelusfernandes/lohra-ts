@@ -1,5 +1,6 @@
 import { estimateTokens } from "../context/token-estimate.js";
 import { summaryMaxTokens } from "../conversation/summary-budget.js";
+import { addUsage } from "../conversation/usage.js";
 import type {
   ChatKwargs,
   NormalizedResponse,
@@ -47,22 +48,6 @@ interface AuxModelClient {
  * so the two paths agree on the same number for the same transcript. Pure. */
 function summaryBudgetFor(transcript: string): number {
   return summaryMaxTokens(estimateTokens([{ role: "user", content: transcript }]).tokens);
-}
-
-/** Same shape/semantics as `ConversationRuntime`'s own `addUsage`
- * (`src/conversation/runtime.ts`) -- duplicated, not imported, because
- * `runtime.ts` imports `summarizeWithFallback` below (issue #587): an
- * import the other way would cycle. */
-function addUsage(total: Usage | null, next: Usage | null): Usage | null {
-  if (next === null) return total;
-  if (total === null) return { ...next };
-  return {
-    inputTokens: total.inputTokens + next.inputTokens,
-    outputTokens: total.outputTokens + next.outputTokens,
-    cacheReadTokens: total.cacheReadTokens + next.cacheReadTokens,
-    cacheWriteTokens: total.cacheWriteTokens + next.cacheWriteTokens,
-    reasoningTokens: total.reasoningTokens + next.reasoningTokens,
-  };
 }
 
 /** Issue #587: `summarize`/`title` (unchanged below) discard `response.usage`

@@ -626,9 +626,11 @@ describe("scripts/mutations/slices.json", () => {
     // (`detectConfiguredProvider` devolvendo `AUTO_PROVIDER` como detectado)
     // e `src/commands/provider-detectado.ts` (`detail` descartado no erro) --
     // nenhum desses arquivos tinha mutante em nenhuma fatia até aqui: 284 +
-    // 11 = 295.
+    // 11 = 295. Issue #650 (item 13, veredito da PR #625) acrescenta z a
+    // `context-window.ts`: `errorEnvelope` para de somar `extra.auxUsage` a
+    // `usage_total` -- primeiro mutante em `envelope.ts`: 295 + 1 = 296.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 295;
+    const TOTAL_MUTANTS = 296;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -651,7 +653,7 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/media-catalog-persistence.ts": 13,
       "scripts/mutations/self-update-mutants.ts": 8,
       "scripts/mutations/workflow-executor-mutants.ts": 45,
-      "scripts/mutations/context-window.ts": 25,
+      "scripts/mutations/context-window.ts": 26,
       "scripts/mutations/auth-mutants.ts": 13,
       "scripts/mutations/supervision-mutants.ts": 41,
       "scripts/mutations/doctor-mutants.ts": 11,
@@ -661,7 +663,7 @@ describe("scripts/mutations/slices.json", () => {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(295);
+    expect(somaTabela).toBe(296);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {

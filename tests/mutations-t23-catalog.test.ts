@@ -44,6 +44,10 @@
 // o overlay de avisos pendentes ao campo `system` do request (não só à
 // mensagem do usuário) -- invariante 1 (prompt construído uma vez e
 // congelado) quebra silenciosamente com um aviso pendente: 24 + 1 = 25.
+//
+// Issue #650 (item 13, veredito da PR #625) acrescenta z, o primeiro em
+// `envelope.ts`: `errorEnvelope` para de somar `extra.auxUsage` a
+// `usage_total` -- o mesmo gasto órfão que a issue corrige: 25 + 1 = 26.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -62,8 +66,8 @@ function sourceOf(relativePath: string): string {
 }
 
 describe("mutations:t23 catalog (compaction, estimator, context window)", () => {
-  it("declara exatamente 25 mutantes", () => {
-    expect(contextWindowMutants).toHaveLength(25);
+  it("declara exatamente 26 mutantes", () => {
+    expect(contextWindowMutants).toHaveLength(26);
   });
 
   it("cada id de mutante é único", () => {
@@ -71,7 +75,7 @@ describe("mutations:t23 catalog (compaction, estimator, context window)", () => 
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("mira apenas compaction.ts (×5), runtime.ts (×6), token-estimate.ts (×3), context-window.ts (×2), windows-cache.ts (×2), session-repository.ts (×3), provider-model.ts (×1), aux.ts (×3)", () => {
+  it("mira apenas compaction.ts (×5), runtime.ts (×6), token-estimate.ts (×3), context-window.ts (×2), windows-cache.ts (×2), session-repository.ts (×3), provider-model.ts (×1), aux.ts (×3), envelope.ts (×1)", () => {
     // Conta MUTANTES por arquivo (não edits) -- cada mutante deste catálogo
     // tem um único edit, então as duas contagens coincidem aqui, mas o
     // padrão (Set por mutante) segue mutations-t20-catalog.test.ts, que
@@ -91,6 +95,7 @@ describe("mutations:t23 catalog (compaction, estimator, context window)", () => 
       "src/state/session-repository.ts": 3,
       "src/conversation/provider-model.ts": 1,
       "src/agent/aux.ts": 3,
+      "src/conversation/envelope.ts": 1,
     });
   });
 
