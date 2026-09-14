@@ -8,11 +8,11 @@
 
 `src/transports/error-kinds.ts:19` reserva `"timeout"` no vocabulário
 fechado (`ERROR_KINDS`, consumido por `NOTICE_KINDS` em
-`src/state/notices-repository.ts:24`). `classifyProviderError`
+`src/state/notices-repository.ts:25`). `classifyProviderError`
 (`src/transports/errors.ts:248-268`) — a função que mapeia uma falha crua de
 provedor para um `NoticeKind` — nunca devolve `"timeout"`: `ETIMEDOUT` está
 em `networkFaultCodes` (`errors.ts:21`), que classifica para
-`"route_fault"`. `buildTurnNotice` (`src/context/notices-overlay.ts:136-144`,
+`"route_fault"`. `buildTurnNotice` (`src/context/notices-overlay.ts:140-148`,
 issue #608) herda essa classificação para o aviso de turno morto. Medido em
 `tests/transport-error-kinds.test.ts`: nenhum teste do repositório produz um
 `ConversationError`/erro de provedor classificado como `"timeout"` hoje.
