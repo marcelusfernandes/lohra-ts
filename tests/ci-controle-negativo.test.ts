@@ -702,14 +702,27 @@ describe("commitsQueTocamTestes / commitAdicionaStub (git injetado — causa nun
 });
 
 describe("ehPrDeRelease (issue #694, bloqueava a #691)", () => {
-  it("SKIP: branch release/x.y.z + diff só de manifesto/lockfile/CHANGELOG", () => {
+  it("SKIP: branch release/x.y.z + diff só de manifesto/lockfile/CHANGELOG/README (rodada 2)", () => {
     expect(
-      ehPrDeRelease("release/0.0.12", ["package.json", "package-lock.json", "CHANGELOG.md"]),
+      ehPrDeRelease("release/0.0.12", [
+        "package.json",
+        "package-lock.json",
+        "CHANGELOG.md",
+        "README.md",
+      ]),
     ).toBe(true);
   });
 
-  it("não SKIP: branch release/x.y.z mas o diff toca src/", () => {
-    expect(ehPrDeRelease("release/0.0.12", ["package.json", "src/x.ts"])).toBe(false);
+  it("não SKIP: branch release/x.y.z, diff com os 4 arquivos do conjunto + src/ (rodada 2)", () => {
+    expect(
+      ehPrDeRelease("release/0.0.12", [
+        "package.json",
+        "package-lock.json",
+        "CHANGELOG.md",
+        "README.md",
+        "src/x.ts",
+      ]),
+    ).toBe(false);
   });
 
   it("não SKIP: branch não é release/x.y.z, mesmo com o diff de manifesto/lockfile/CHANGELOG", () => {

@@ -8,9 +8,12 @@
 // exit 0 ANTES de sequer resolver o slug:
 //   - PR de release (issue #694, bloqueava a #691): branch `release/<x.y.z>`
 //     E diff não vazio E todo arquivo ∈ {`package.json`, `package-lock.json`,
-//     `CHANGELOG.md`} — não há `prova/<slug>.ts` porque não há
-//     comportamento novo a controlar (`lib.ts#ehPrDeRelease`). Checado
-//     ANTES da classe docs/process abaixo porque `release/x.y.z` não casa
+//     `CHANGELOG.md`, `README.md`} — não há `prova/<slug>.ts` porque não há
+//     comportamento novo a controlar (`lib.ts#ehPrDeRelease`). `README.md`
+//     entra porque `npm run release` não bumpa a linha de versão do README
+//     (`tests/t22-docs.test.ts:50-51`) — é editada à mão em toda release.
+//     Checado ANTES da classe docs/process abaixo (que também cobre
+//     `README.md`, mas não os outros três) porque `release/x.y.z` não casa
 //     `<type>/<n>-<slug>` e reprovaria em `resolverSlug` sem este SKIP.
 //   - classes `docs`/`process`: TODO o diff cai em `docs/**`, `README.md`,
 //     `CLAUDE.md`, `AGENTS.md`, `.worktreeinclude`, `.claude/**`,
