@@ -8,6 +8,7 @@ import type { NormalizedResponse, SystemBands, ToolCall, Usage } from "../transp
 import { runBounded } from "../tools/dispatch.js";
 import { summarizeWithFallback } from "../agent/aux.js";
 import { addUsage } from "./usage.js";
+import { resolveTurnSession } from "./runtime-session.js";
 import {
   attemptCompaction,
   buildSummaryRequest,
@@ -331,25 +332,19 @@ export class ConversationRuntime {
      * exactly as it did before this option existed. */
     readonly interruptSource?: { readonly arm: (abort: () => void) => () => void };
   }): Promise<ConversationTurnResult> {
-    const sessionId = input.sessionId ?? this.options.idSource();
-    let session = this.options.repository.session(sessionId);
-    if (input.sessionId !== undefined && session === null) {
-      throw new ConversationError("SESSION_NOT_FOUND", `session not found: ${sessionId}`, {
-        sessionId,
-      });
-    }
-    if (session === null) {
-      const systemPrompt = this.promptSnapshot();
-      this.options.repository.createSession({
-        id: sessionId,
-        systemPrompt, // #586 (2ª rodada): a repository que entende faixas persiste as três
-        model: input.model,
-        cwd: input.cwd,
-      });
-      session = { systemPrompt, model: input.model, cwd: input.cwd };
-    } else {
-      session = { ...session, systemPrompt: this.promptSnapshot() };
-    }
+    // Issue #649: absorve inteiro o ramo que resolvia a sessão do turno —
+    // sessão nova, SESSION_NOT_FOUND para um id explícito ausente, e a
+    // decisão (invariante 1) entre reusar as faixas persistidas de uma
+    // sessão retomada ou recomputar via promptSnapshot() para uma linha
+    // migrada. `runtime-session.ts` tem seus próprios testes unitários.
+    const { sessionId, session } = resolveTurnSession({
+      repository: this.options.repository,
+      sessionId: input.sessionId,
+      idSource: this.options.idSource,
+      promptSnapshot: () => this.promptSnapshot(),
+      model: input.model,
+      cwd: input.cwd,
+    });
 
     // Issue #589: claimed once, up front — never re-claimed mid-turn, so a
     // notice that arrives while THIS turn is still running is left for the
