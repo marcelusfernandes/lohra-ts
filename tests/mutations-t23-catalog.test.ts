@@ -48,6 +48,12 @@
 // Issue #650 (item 13, veredito da PR #625) acrescenta z, o primeiro em
 // `envelope.ts`: `errorEnvelope` para de somar `extra.auxUsage` a
 // `usage_total` -- o mesmo gasto órfão que a issue corrige: 25 + 1 = 26.
+//
+// Issue #649 (sub-issue B1 de #637) acrescenta `aa`, o primeiro em
+// `runtime-session.ts` (extraído de `runtime.ts:349-366`, que estava em
+// 796/800 linhas): `resolveTurnSession` volta a substituir as faixas
+// restauradas de uma sessão retomada por `promptSnapshot()` -- invariante 1
+// quebra silenciosamente entre processos: 26 + 1 = 27.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -66,8 +72,8 @@ function sourceOf(relativePath: string): string {
 }
 
 describe("mutations:t23 catalog (compaction, estimator, context window)", () => {
-  it("declara exatamente 26 mutantes", () => {
-    expect(contextWindowMutants).toHaveLength(26);
+  it("declara exatamente 27 mutantes", () => {
+    expect(contextWindowMutants).toHaveLength(27);
   });
 
   it("cada id de mutante é único", () => {
@@ -75,7 +81,7 @@ describe("mutations:t23 catalog (compaction, estimator, context window)", () => 
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("mira apenas compaction.ts (×5), runtime.ts (×6), token-estimate.ts (×3), context-window.ts (×2), windows-cache.ts (×2), session-repository.ts (×3), provider-model.ts (×1), aux.ts (×3), envelope.ts (×1)", () => {
+  it("mira apenas compaction.ts (×5), runtime.ts (×6), token-estimate.ts (×3), context-window.ts (×2), windows-cache.ts (×2), session-repository.ts (×3), provider-model.ts (×1), aux.ts (×3), envelope.ts (×1), runtime-session.ts (×1)", () => {
     // Conta MUTANTES por arquivo (não edits) -- cada mutante deste catálogo
     // tem um único edit, então as duas contagens coincidem aqui, mas o
     // padrão (Set por mutante) segue mutations-t20-catalog.test.ts, que
@@ -96,6 +102,7 @@ describe("mutations:t23 catalog (compaction, estimator, context window)", () => 
       "src/conversation/provider-model.ts": 1,
       "src/agent/aux.ts": 3,
       "src/conversation/envelope.ts": 1,
+      "src/conversation/runtime-session.ts": 1,
     });
   });
 

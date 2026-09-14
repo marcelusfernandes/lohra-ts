@@ -172,7 +172,7 @@ describe("ConversationRuntime prompt caching plumbing (#586)", () => {
 // invariante 1 (CLAUDE.md), não a ausência de doutrina numa sessão que
 // nasceu sem ela.
 describe("ConversationRuntime reuses restored session bands on resume (#649)", () => {
-  it('forwards the RESTORED bands (A) to the transport, never this process\'s own promptSnapshot() (B), when the resumed session understood bands (volatile !== "")', async () => {
+  it("forwards the RESTORED bands (A) to the transport, never this process's own promptSnapshot() (B), when the resumed session understood bands (volatile not empty)", async () => {
     const bandsA: SystemBands = {
       stable: "STABLE A (persisted)",
       context: "CONTEXT A (persisted)",
