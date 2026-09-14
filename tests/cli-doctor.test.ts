@@ -553,10 +553,29 @@ describe("doctor × chat, chat_default_provider respeita a rota (issue #633)", (
       stdout: (value) => chatStdout.push(value),
       stderr: () => undefined,
     });
-    // A prova de que `chat` de fato tentou a rota subscription (Codex),
-    // e não a chave do `.env`: o client Responses foi acionado.
-    expect(postSpy).toHaveBeenCalled();
     expect(chatCode).not.toBe(0);
+    // `postSpy` sozinho não discrimina a rota: `ChatCompletionsClient`,
+    // `AnthropicMessagesClient` e `ResponsesClient` chamam o MESMO
+    // `NativeChatHttpPort.post` (transports/client.ts:377,551,666 ->
+    // providerPost -> http.post) -- a chave `ANTHROPIC_API_KEY` acima faria
+    // o client Anthropic chamar `post` igualmente se `chat.ts:184-230`
+    // regredisse para `detectChatProvider` em modo assinatura, com o mesmo
+    // `chatCode !== 0` (o mock rejeita os dois clientes do mesmo jeito). O
+    // que discrimina é qual `model` `chat.ts` estava tentando: o catch
+    // externo de `chat.ts` sempre ecoa o `model` de escopo externo que
+    // construía a requisição (mesma garantia que
+    // tests/chat-subscription-provider-flag.test.ts pina) -- na rota Codex é
+    // `readCodexModel(codexHome) ?? "gpt-5.5"` (chat.ts:231; este
+    // `codexHome` não tem `config.toml`, então cai no fallback "gpt-5.5");
+    // na rota Anthropic seria o fallback de `src/providers/registry.ts`
+    // ("claude-opus-4-8"), nunca "gpt-5.5". A URL interceptada reforça a
+    // mesma prova: só é `CODEX_PROVIDER.baseUrl` (hardcoded também em
+    // `SubscriptionCredentials.baseUrl`) na rota Codex.
+    expect(postSpy).toHaveBeenCalled();
+    const request = postSpy.mock.calls[0]?.[0] as { readonly url: string };
+    expect(request.url.startsWith(CODEX_PROVIDER.baseUrl)).toBe(true);
+    const chatEnvelope = JSON.parse(chatStdout.join("")) as { model: string | null };
+    expect(chatEnvelope.model).toBe("gpt-5.5");
 
     const doctorStdout: string[] = [];
     const doctorCode = await runCli(["doctor", "--json"], {

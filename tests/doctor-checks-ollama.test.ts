@@ -6,7 +6,7 @@
 //   ollama`, comando que falharia nesse mesmo estado. `isOllamaReady` é a
 //   única definição agora; os dois lados mudam juntos.
 // - `docs/provedores-deteccao.md` mostrava o `detail`/`remedy` do Check em
-//   duas linhas; `renderChecks` (`checks.ts:297`) emite o `detail` numa
+//   duas linhas; `renderChecks` (`checks.ts:318`) emite o `detail` numa
 //   única linha. O bloco da doc passa a ser a saída literal de
 //   `renderChecks` para esse Check.
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";

@@ -70,7 +70,7 @@ valem ao mesmo tempo: `auth_route === "api_key"`, `isOllamaReady(ollama)`
 vivo **e** com pelo menos um modelo puxado, não só `ollama.alive`) e
 `chat_default_provider === null`. Estado `warn` (não `fail`: `usable` já é
 `true`, e o exit code do `doctor` não muda por esta issue). Abaixo, a saída
-literal de `renderChecks` (`checks.ts:297`) para esse Check — uma linha de
+literal de `renderChecks` (`checks.ts:318`) para esse Check — uma linha de
 detalhe, uma de remédio, sem quebra interna (pino:
 `tests/doctor-checks-ollama.test.ts`):
 
