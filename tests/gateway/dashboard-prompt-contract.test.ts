@@ -210,4 +210,103 @@ describe("dashboard.ts's real prompt (issue #580 AC 3): same inputs as chat's sn
       await closeServer(server);
     }
   });
+
+  // Issue #648 (grupo A, item 7a de #637): same gap as chat/serve --
+  // `dashboard.ts:289-291` resolves `resolveDoctrineTier` once at boot, but
+  // no test ever checked that the resolved tier actually reaches the real
+  // WS turn's system message. This file already boots `runDashboard` for
+  // real and captures the upstream request (see the note at the top of this
+  // file), so the doctrine pin belongs here rather than in a new file
+  // (issue #648's own sequencing note: only a NEW file if #641 had not yet
+  // merged -- it has, PR #644).
+  it("a non-ollama provider defaults to extended: DOCTRINE_EXTENDED's own marker reaches the real WS turn's system message", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-t648-dashboard-doctrine-"));
+    roots.push(root);
+    const home = join(root, ".lohra");
+
+    const captured: CapturedRequest[] = [];
+    const server = startCapturingServer(captured);
+    await new Promise<void>((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("missing test port");
+      const provider = "t648-dashboard-doctrine-probe";
+      registerProvider({
+        name: provider,
+        apiMode: "chat_completions",
+        aliases: [],
+        displayName: "T648 dashboard doctrine probe",
+        description: "Local in-memory composition-root probe (issue #648).",
+        signupUrl: "",
+        envVars: [],
+        baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
+        modelsUrl: "",
+        requiresApiKey: false,
+        supportsVision: false,
+        fallbackModels: ["t648-dashboard-doctrine-model"],
+        defaultMaxTokens: 256,
+        defaultAuxModel: "",
+      });
+
+      const stderrLines: string[] = [];
+      let shutdown: (() => void) | undefined;
+      const options: DashboardCommandOptions = {
+        flags: new Map([
+          ["--provider", provider],
+          ["--model", "t648-dashboard-doctrine-model"],
+        ]),
+        environment: { HOME: root, PATH: process.env.PATH ?? "" },
+        home,
+        codexHome: join(root, ".codex"),
+        cwd: root,
+        stderr: (text) => stderrLines.push(text),
+        port: 0,
+        registerShutdownTrigger: (handler) => {
+          shutdown = handler;
+        },
+      };
+      const donePromise = runDashboard(options);
+      const boundLine = await waitForStderrLine(stderrLines, "Lohra dashboard:");
+      const port = Number(boundLine.match(/:(\d+)\n$/)?.[1]);
+      const wsLine = await waitForStderrLine(stderrLines, "WebSocket:");
+      const token = wsLine.match(/token=([^\n]+)\n$/)?.[1];
+      expect(token).toBeDefined();
+
+      const ws = new WebSocket(`ws://127.0.0.1:${String(port)}/api/ws?token=${String(token)}`);
+      await nextMessage(ws); // gateway.ready
+      ws.send(
+        JSON.stringify({ jsonrpc: "2.0", id: "create", method: "session.create", params: {} }),
+      );
+      const createResult = JSON.parse(await nextMessage(ws)) as {
+        result: { session_id: string };
+      };
+      await nextMessage(ws); // session.info
+      const sessionId = createResult.result.session_id;
+
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "prompt.submit",
+          params: { session_id: sessionId, text: "hi" },
+        }),
+      );
+      await nextMessage(ws); // rpc-ok
+      let complete = false;
+      while (!complete) {
+        const frame = JSON.parse(await nextMessage(ws)) as { params: { type: string } };
+        if (frame.params.type === "message.complete") complete = true;
+      }
+      ws.close();
+      shutdown?.();
+      await donePromise;
+
+      expect(captured.length).toBeGreaterThan(0);
+      const system = captured[0]?.messages.find((message) => message.role === "system");
+      const content = typeof system?.content === "string" ? system.content : "";
+      expect(content).toContain("One idea per sentence");
+    } finally {
+      await closeServer(server);
+    }
+  });
 });

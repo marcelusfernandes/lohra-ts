@@ -175,4 +175,23 @@ describe("buildSubagentSystemPrompt: block presence and order (#583)", () => {
     const viaSubagent = buildSubagentSystemPrompt().match(/Today's date is (.+)\.$/)?.[1];
     expect(viaSubagent).toBe(viaShared);
   });
+
+  // Issue #648 (grupo A, item 7c de #637; veredito PR #616, "efeito
+  // colateral fora do escopo nomeado"): `buildSubagentSystemPrompt` passes
+  // `{ cwd }` as `environmentHints` (subagent-prompt.ts:120) whenever a
+  // caller supplies `cwd`, and `buildSystemPrompt`'s own Environment block
+  // (system-prompt.ts:31-32) always closes with the snapshot note when at
+  // least one hint is present -- every real subagent prompt ends its
+  // Environment block with that note today, and nothing pinned it.
+  it("ends the Environment block with the session-start snapshot note when cwd is given (#648)", () => {
+    const text = buildSubagentSystemPrompt({ cwd: "/work/project", toolNames: CHILD_TOOL_NAMES });
+    expect(text).toContain(
+      "Snapshot taken at session start; it does not update during the conversation.",
+    );
+  });
+
+  it("omits the snapshot note entirely when no cwd is given (no Environment block at all)", () => {
+    const text = buildSubagentSystemPrompt({ toolNames: CHILD_TOOL_NAMES });
+    expect(text).not.toContain("Snapshot taken at session start");
+  });
 });
