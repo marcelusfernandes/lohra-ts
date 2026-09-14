@@ -18,7 +18,7 @@
 // definição de tool (`cachedToolDefinitions`,
 // `src/transports/anthropic-messages.ts`) -- ausente da integração até
 // agora, só coberto em unidade (`tests/transport-anthropic-messages.test.ts`).
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -208,6 +208,78 @@ describe("chat.ts passes the full SystemPromptSnapshot to the Anthropic transpor
       expect(tools.length).toBeGreaterThan(0);
       for (const tool of tools.slice(0, -1)) expect(tool.cache_control).toBeUndefined();
       expect(tools[tools.length - 1]?.cache_control).toEqual({ type: "ephemeral" });
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  // Issue #648 (grupo A, item 7e de #637; veredito PR #628, reason 3): every
+  // fixture above has an EMPTY `context` band -- no `AGENTS.md`/`CLAUDE.md`
+  // in the tmpdir `cwd` -- so the "breakpoint lands on `context` when it's
+  // the last cacheable segment" branch of `cachedSegments`
+  // (src/transports/anthropic-messages.ts:39-41) never ran against a real
+  // `runChat` turn. Seeding an `AGENTS.md` here makes `context` non-empty:
+  // stable, context, and volatile all become real segments, and the single
+  // cache breakpoint must move onto `context` -- the block immediately
+  // before the date block, whose own text carries the seeded content.
+  it("marks cache_control on the context band (not stable) when project instructions are present (#648)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-t648-chat-context-cache-"));
+    roots.push(root);
+    writeFileSync(join(root, "AGENTS.md"), "T648-AGENTS-MARKER");
+    let capturedBody: Readonly<Record<string, unknown>> | undefined;
+    const server = startServer((body) => {
+      capturedBody = body;
+    });
+    await new Promise<void>((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("missing test port");
+      const provider = "t648-chat-context-cache-probe";
+      registerProvider({
+        name: provider,
+        apiMode: "anthropic_messages",
+        aliases: [],
+        displayName: "T648 chat context-cache Anthropic probe",
+        description: "Local stub for the Anthropic Messages wire (issue #648).",
+        signupUrl: "",
+        envVars: ["T648_CHAT_CONTEXT_CACHE_KEY"],
+        baseUrl: `http://127.0.0.1:${String(address.port)}`,
+        modelsUrl: "",
+        requiresApiKey: true,
+        supportsVision: false,
+        fallbackModels: ["t648-chat-context-cache-model"],
+        defaultMaxTokens: 256,
+        defaultAuxModel: "",
+      });
+      const result = await runChat({
+        input: "say hi",
+        flags: new Map<string, string | true>([
+          ["--provider", provider],
+          ["--model", "t648-chat-context-cache-model"],
+          ["--json", true],
+          ["--no-input", true],
+          ["--no-tools", true],
+        ]),
+        environment: {
+          HOME: root,
+          PATH: process.env.PATH ?? "",
+          T648_CHAT_CONTEXT_CACHE_KEY: "test-key",
+        },
+        home: join(root, ".lohra"),
+        codexHome: join(root, ".codex"),
+        cwd: root,
+      });
+      expect(result.code).toBe(0);
+      expect(capturedBody).toBeDefined();
+      const system = capturedBody?.system;
+      expect(Array.isArray(system)).toBe(true);
+      const blocks = system as readonly Record<string, unknown>[];
+      // Non-empty context makes THREE segments (stable, context, volatile) --
+      // strictly more than the two the byte-compat fixtures above produce.
+      expect(blocks.length).toBeGreaterThan(2);
+      assertSingleBreakpointBeforeDateBlock(blocks);
+      const cachedIndex = blocks.findIndex((block) => block.cache_control !== undefined);
+      expect(String(blocks[cachedIndex]?.text)).toContain("T648-AGENTS-MARKER");
     } finally {
       await closeServer(server);
     }

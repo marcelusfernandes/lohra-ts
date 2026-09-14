@@ -15,7 +15,7 @@
 // `assertSingleBreakpointBeforeDateBlock` finds the cached block by
 // scanning instead, and pins the invariant that matters: exactly one
 // cached block, immediately before the `volatile` band's date.
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -165,6 +165,88 @@ describe("dashboard.ts cron runJob passes the full SystemPromptSnapshot to the A
       // (cacheable) from volatile (today's date), at least two blocks.
       expect(blocks.length).toBeGreaterThan(1);
       assertSingleBreakpointBeforeDateBlock(blocks);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  // Issue #648 (grupo A, item 7e de #637; veredito PR #628, reason 3): same
+  // gap as tests/chat-prompt-caching.test.ts, for dashboard.ts's cron path
+  // (dashboard.ts:285 also calls `loadProjectContext(options.cwd)`) --
+  // `context` was empty in every fixture above, so the breakpoint never
+  // moved off `stable`. Seeding an `AGENTS.md` in the cron job's `cwd` makes
+  // `context` the last cacheable segment.
+  it("marks cache_control on the context band (not stable) when project instructions are present (#648)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-t648-dashboard-context-cache-"));
+    roots.push(root);
+    writeFileSync(join(root, "AGENTS.md"), "T648-DASHBOARD-AGENTS-MARKER");
+    const home = join(root, ".lohra");
+    const captured: Readonly<Record<string, unknown>>[] = [];
+    const server = startCapturingServer((body) => captured.push(body));
+    await new Promise<void>((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("missing test port");
+      const provider = "t648-dashboard-context-cache-probe";
+      registerProvider({
+        name: provider,
+        apiMode: "anthropic_messages",
+        aliases: [],
+        displayName: "T648 dashboard context-cache Anthropic probe",
+        description: "Local stub for the Anthropic Messages SSE wire (issue #648).",
+        signupUrl: "",
+        envVars: ["T648_DASH_CONTEXT_CACHE_KEY"],
+        baseUrl: `http://127.0.0.1:${String(address.port)}`,
+        modelsUrl: "",
+        requiresApiKey: true,
+        supportsVision: false,
+        fallbackModels: ["t648-dashboard-context-cache-model"],
+        defaultMaxTokens: 256,
+        defaultAuxModel: "",
+      });
+
+      new CronStore(home).add({
+        name: "t648",
+        prompt: "say hi",
+        type: "once",
+        value: Date.now() / 1000 - 10,
+      });
+
+      let shutdown: (() => void) | undefined;
+      const options: DashboardCommandOptions = {
+        flags: new Map([
+          ["--provider", provider],
+          ["--model", "t648-dashboard-context-cache-model"],
+        ]),
+        environment: {
+          HOME: root,
+          PATH: process.env.PATH ?? "",
+          T648_DASH_CONTEXT_CACHE_KEY: "test-key",
+        },
+        home,
+        codexHome: join(root, ".codex"),
+        cwd: root,
+        stderr: () => undefined,
+        port: 0,
+        registerShutdownTrigger: (handler) => {
+          shutdown = handler;
+        },
+      };
+      const donePromise = runDashboard(options);
+      for (let attempt = 0; attempt < 50 && captured.length === 0; attempt += 1) {
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+      }
+      shutdown?.();
+      await donePromise;
+
+      expect(captured.length).toBeGreaterThan(0);
+      const system = captured[0]?.system;
+      expect(Array.isArray(system)).toBe(true);
+      const blocks = system as readonly Record<string, unknown>[];
+      expect(blocks.length).toBeGreaterThan(2);
+      assertSingleBreakpointBeforeDateBlock(blocks);
+      const cachedIndex = blocks.findIndex((block) => block.cache_control !== undefined);
+      expect(String(blocks[cachedIndex]?.text)).toContain("T648-DASHBOARD-AGENTS-MARKER");
     } finally {
       await closeServer(server);
     }
