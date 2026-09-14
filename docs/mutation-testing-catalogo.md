@@ -561,3 +561,39 @@ manda (achado A3, fora do escopo desta issue).
 `.text` inteiro de um prompt sem blocos opcionais, por igualdade
 (`toBe`) — até aqui a byte-compat era pinada só por ausência
 (`not.toContain`), nunca por igualdade exata (veredito da PR #614).
+
+### `self-update-mutants.ts` — dois mutantes da issue #651 (sub-issue C1 de #637)
+
+Décima e décima primeira entrada do catálogo (9 → 11): fecha o mesmo gap
+que `T22-dashboard-doctrine-dropped` (issue #646, acima) fechou para a
+doutrina — desta vez para os dois campos opcionais que #608 (AC4) e #587
+(AC1) tinham deixado sem caller de produção na gateway WS
+(`docs/operator-notices.md`, `docs/context-compaction.md`), achado da
+decomposição de #637 (grupo C, item 14, e o item de #641 "gateway WS não
+injeta summarize", veredito da PR #617).
+
+`T22-dashboard-notices-dropped`: `dashboard.ts`'s chamada a
+`createGatewayUpgradeHandler` deixa de passar `notices` (a mesma
+`createTurnNoticesPort` instance que o job runner do cron já usava, agora
+hoisteada e compartilhada entre as duas superfícies) — kill
+`tests/gateway/dashboard-ws-overlay.test.ts`, "a pending global notice
+reaches a real WS turn's user message (never the system) and is acked
+after": sem o campo, o aviso semeado nunca aparece na mensagem do usuário
+do turno WS real.
+
+`T22-connection-summarize-dropped`: `connection.ts`'s espalhamento
+condicional `...(deps.summarize === undefined ? {} : { summarize:
+deps.summarize })` vira `...{}` — kill
+`tests/gateway/dashboard-ws-overlay.test.ts`, "with defaultAuxModel
+configured, a real WS turn's compaction request carries model ===
+defaultAuxModel": sem o campo, a compactação preflight de um turno WS com
+`defaultAuxModel` configurado nunca chama o modelo auxiliar, caindo no
+summarizer padrão do próprio turno (o gap que #587 AC1 deixou nesta
+superfície).
+
+Os dois focam no arquivo novo `tests/gateway/dashboard-ws-overlay.test.ts`
+(harness de `runDashboard` real, molde de
+`tests/gateway/dashboard-prompt-contract.test.ts`) em vez do mecanismo
+isolado que `tests/gateway/ws-connection-notices.test.ts` já provava —
+essa distinção é o próprio ponto da issue #651: provar o CALLER de
+produção, não só o mecanismo que #608/#587 já deixaram pronto.
