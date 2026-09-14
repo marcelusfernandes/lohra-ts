@@ -45,6 +45,7 @@ export type {
   NormalizedResponse,
   PartialStream,
   StreamCallbacks,
+  SystemBands,
   ToolCall,
   Usage,
 } from "./types.js";

@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ClientPool } from "../src/agent/client-pool.js";
+import { systemPromptText } from "../src/context/system-prompt.js";
 import {
   ConversationCancelledError,
   ConversationRuntime,
@@ -239,7 +240,7 @@ describe("ConversationRuntime — isAbortOf's 3rd form and multi-iteration usage
     const secondRequest = requests[1];
     if (secondRequest === undefined) throw new Error("second request never issued");
     const expectedEstimate = estimatePartialUsage(partial, {
-      system: secondRequest.system,
+      system: systemPromptText(secondRequest.system),
       messages: secondRequest.messages,
       tools: secondRequest.tools,
     });

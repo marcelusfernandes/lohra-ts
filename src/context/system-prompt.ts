@@ -1,3 +1,5 @@
+import type { SystemBands } from "../transports/types.js";
+
 export const DEFAULT_IDENTITY =
   "You are Lohra, a self-improving AI assistant. You are helpful, " +
   "knowledgeable, and direct. You use tools to take real action and you " +
@@ -29,7 +31,14 @@ const PROJECT_INSTRUCTIONS_PREFIX =
 const ENVIRONMENT_SNAPSHOT_NOTE =
   "Snapshot taken at session start; it does not update during the conversation.";
 
-export class SystemPromptSnapshot {
+/** Same join rule `SystemPromptSnapshot.text` below has always used, pulled
+ * out so `systemPromptText` (issue #586) can reuse it byte-for-byte for a
+ * caller that only has the three bands, never the constructed snapshot. */
+function joinBands(bands: SystemBands): string {
+  return [bands.stable, bands.context, bands.volatile].filter(Boolean).join(SEPARATOR);
+}
+
+export class SystemPromptSnapshot implements SystemBands {
   readonly stable: string;
   readonly context: string;
   readonly volatile: string;
@@ -39,9 +48,22 @@ export class SystemPromptSnapshot {
     this.stable = stable;
     this.context = context;
     this.volatile = volatile;
-    this.text = [stable, context, volatile].filter(Boolean).join(SEPARATOR);
+    this.text = joinBands(this);
     Object.freeze(this);
   }
+}
+
+/** Issue #586 (épico #575): flattens a `ModelRequest.system`/
+ * `StoredSession.systemPrompt` value back to plain text for a consumer that
+ * only ever bills/estimates a single string (`estimateRequestTokens`,
+ * `estimatePartialUsage`, `src/context/token-estimate.ts` -- out of this
+ * issue's `Files`). A bare string is returned as-is (every caller before
+ * this issue, and every caller that hasn't been wired to pass bands yet --
+ * `src/commands/chat.ts`/`dashboard.ts` included); bands flatten with the
+ * exact same rule `SystemPromptSnapshot.text` uses, so a caller that DOES
+ * pass the full snapshot estimates identically to one that pre-flattened it. */
+export function systemPromptText(system: string | SystemBands): string {
+  return typeof system === "string" ? system : joinBands(system);
 }
 
 export interface SystemPromptInputs {

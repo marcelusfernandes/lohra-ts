@@ -1,8 +1,15 @@
 import type { CostEstimate } from "../pricing/index.js";
-import type { NormalizedResponse, Usage } from "../transports/index.js";
+import type { NormalizedResponse, SystemBands, Usage } from "../transports/index.js";
 
 export interface ModelRequest {
-  readonly system: string;
+  /** Issue #586 (épico #575): a plain string (every caller before this
+   * issue) is the whole prompt with no cache boundary; the three-band form
+   * lets a transport that understands it (`anthropic-messages.ts`) mark a
+   * breakpoint after `stable`+`context`. Passed straight through by
+   * `provider-model.ts`/`chat-completions-model.ts` to their own
+   * `BuildKwargsOptions.system` (same union there) -- neither needed
+   * editing for this widening. */
+  readonly system: string | SystemBands;
   readonly messages: readonly Readonly<Record<string, unknown>>[];
   readonly model: string;
   readonly temperature: number | null;
@@ -34,7 +41,12 @@ export interface ToolDispatcher {
 }
 
 export interface StoredSession {
-  readonly systemPrompt: string;
+  /** Issue #586: widened the same way as `ModelRequest.system` above --
+   * `SqliteConversationRepository.session()` (out of this issue's `Files`)
+   * still only ever returns the flattened string it reads from the single
+   * `system_prompt` column, which stays a valid member of this union with
+   * no change there. */
+  readonly systemPrompt: string | SystemBands;
   readonly model: string;
   readonly cwd: string;
 }
