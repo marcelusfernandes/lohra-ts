@@ -290,7 +290,7 @@ CLI; `--ack <id>` reconhece um aviso e `--all` também mostra os já
 reconhecidos. Sem `run_id`/`RUN_ID`, as duas leituras divergem de escopo
 (issue #652): a tool `workflow_notices` nunca cruza avisos `session:*`
 (`NoticesListQuery.includeSessions` fica em `false` por padrão,
-`src/state/notices-repository.ts:285`; `src/workflow/notices-tool.ts:47-49`),
+`src/state/notices-repository.ts:311`; `src/workflow/notices-tool.ts:47-49`),
 mas `lohra workflow notices` (a CLI de operador) continua listando tudo,
 `session:*` incluso (`includeSessions: true` explícito,
 `src/commands/workflow.ts:190`), o mesmo contrato de antes da issue #589.
@@ -427,13 +427,19 @@ devolvido por `web_fetch`, um servidor MCP, um arquivo ou uma skill é dado,
 nunca instrução — mesmo quando lê como um comando dirigido ao modelo. No
 envelope, `web_fetch`/`web_search` no sucesso e todo resultado MCP no
 sucesso ou no erro carregam `"untrusted": true` (campo aditivo, última
-chave; o erro de `web_fetch`/`web_search` não carrega — texto nosso, não da
-página); `read_file` e `skill_view` marcam o mesmo campo quando o caminho
-ou a skill lidos, com symlinks resolvidos, estão fora da raiz do projeto —
-`read_file` mede a partir do cwd do processo, `skill_view` a partir da raiz
+chave); desde a #670, o erro de `web_fetch` (`src/web/tool.ts:82-100`)
+também carrega a chave — a mensagem pode interpolar o `Content-Type` ou o
+hostname de um `Location` que o SERVIDOR escolheu num redirect — mas o erro
+de `web_search` continua sem ela, porque nenhuma mensagem ali interpola
+dado do servidor; `read_file` e `skill_view` marcam o mesmo campo quando o
+caminho ou a skill lidos, com symlinks resolvidos (`realOrResolved`,
+`src/skills/store.ts:167`), estão fora da raiz do projeto — `read_file`
+mede a partir do cwd do processo, `skill_view` a partir da raiz
 da sessão que abriu a tool — e também quando `skill_view` não sabe de onde
 a skill veio (`skill.path === undefined`, lado seguro: a doutrina promete
-menos sobre a origem, nunca mais). As
+menos sobre a origem, nunca mais); desde a #670, um erro não-`ENOENT` ao
+resolver o caminho real (`ELOOP` de um ciclo de symlinks, `EACCES`
+intermediário) também fecha a fronteira e marca a chave. As
 descriptions de `read_file`, `web_fetch`, `web_search`, `skill_view` e o
 wrapper de tool MCP citam a mesma frase de aviso. Detalhes em
 [`docs/system-prompt.md`](docs/system-prompt.md).
