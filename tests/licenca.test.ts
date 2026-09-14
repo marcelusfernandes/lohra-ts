@@ -4,6 +4,11 @@
 // teste pina o texto padrão da MIT License (SPDX `MIT`) e o campo
 // `package.json#license`, e confere que `LICENSE` continua na whitelist de
 // `files` — sem ela o tarball publicado (`npm pack`) fica sem licença.
+//
+// Issue #685: follow-up da PR #684 — `package.json#license` virou MIT, mas
+// `package-lock.json` (lido por ferramentas de SBOM/auditoria de licenças,
+// não pelo `npm pack`/`npm publish`) ficou com o metadado antigo na entrada
+// raiz (`packages[""]`). Este teste pina que os dois concordam.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,8 +22,20 @@ interface PackageJsonForm {
   readonly files?: readonly string[];
 }
 
+interface PackageLockForm {
+  readonly packages?: {
+    readonly [caminho: string]: {
+      readonly license?: string;
+    };
+  };
+}
+
 function lerPackageJson(): PackageJsonForm {
   return JSON.parse(readFileSync(join(RAIZ, "package.json"), "utf8")) as PackageJsonForm;
+}
+
+function lerPackageLock(): PackageLockForm {
+  return JSON.parse(readFileSync(join(RAIZ, "package-lock.json"), "utf8")) as PackageLockForm;
 }
 
 function lerLicense(): string {
@@ -32,6 +49,12 @@ describe("package.json#license — decisão do owner (issue #535)", () => {
 
   it("mantém LICENSE na whitelist de files", () => {
     expect(lerPackageJson().files).toContain("LICENSE");
+  });
+});
+
+describe('package-lock.json#packages[""].license — alinhado com package.json (issue #685)', () => {
+  it("declara MIT na entrada raiz", () => {
+    expect(lerPackageLock().packages?.[""]?.license).toBe("MIT");
   });
 });
 
