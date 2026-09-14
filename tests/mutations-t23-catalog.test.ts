@@ -39,6 +39,11 @@
 // `summaryMaxTokens(estimateTokens(transcript))`, igual ao bug original que
 // a issue corrige (o resumo pelo `AuxClient` truncava as seções verbatim que
 // a #584 existe para preservar): 23 + 1 = 24.
+//
+// Issue #608 acrescenta y, mais um em `runtime.ts`: `runTurn` passa a anexar
+// o overlay de avisos pendentes ao campo `system` do request (não só à
+// mensagem do usuário) -- invariante 1 (prompt construído uma vez e
+// congelado) quebra silenciosamente com um aviso pendente: 24 + 1 = 25.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -57,8 +62,8 @@ function sourceOf(relativePath: string): string {
 }
 
 describe("mutations:t23 catalog (compaction, estimator, context window)", () => {
-  it("declara exatamente 24 mutantes", () => {
-    expect(contextWindowMutants).toHaveLength(24);
+  it("declara exatamente 25 mutantes", () => {
+    expect(contextWindowMutants).toHaveLength(25);
   });
 
   it("cada id de mutante é único", () => {
@@ -66,7 +71,7 @@ describe("mutations:t23 catalog (compaction, estimator, context window)", () => 
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("mira apenas compaction.ts (×5), runtime.ts (×5), token-estimate.ts (×3), context-window.ts (×2), windows-cache.ts (×2), session-repository.ts (×3), provider-model.ts (×1), aux.ts (×3)", () => {
+  it("mira apenas compaction.ts (×5), runtime.ts (×6), token-estimate.ts (×3), context-window.ts (×2), windows-cache.ts (×2), session-repository.ts (×3), provider-model.ts (×1), aux.ts (×3)", () => {
     // Conta MUTANTES por arquivo (não edits) -- cada mutante deste catálogo
     // tem um único edit, então as duas contagens coincidem aqui, mas o
     // padrão (Set por mutante) segue mutations-t20-catalog.test.ts, que
@@ -79,7 +84,7 @@ describe("mutations:t23 catalog (compaction, estimator, context window)", () => 
     }
     expect(counts).toEqual({
       "src/conversation/compaction.ts": 5,
-      "src/conversation/runtime.ts": 5,
+      "src/conversation/runtime.ts": 6,
       "src/context/token-estimate.ts": 3,
       "src/providers/context-window.ts": 2,
       "src/catalog/windows-cache.ts": 2,

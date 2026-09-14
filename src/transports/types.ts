@@ -28,12 +28,14 @@ export interface NormalizedResponse {
  * (`src/context/system-prompt.ts`) already computes -- a transport that
  * understands this shape can mark a cache breakpoint after `stable`+
  * `context` and leave `volatile` (date, memory, skills -- changes every
- * call/session) uncached. A transport that doesn't (chat-completions,
- * responses) never receives this shape from any caller in this issue --
- * `BuildKwargsOptions.system` stays `string | null` for them in practice,
- * this union only widens the TYPE so every passthrough call site
- * (`conversation/provider-model.ts`, `conversation/chat-completions-model.ts`)
- * keeps compiling unchanged. */
+ * call/session) uncached. Correction (#608, achado da #624 sobre a PR #621):
+ * a transport that doesn't understand it (chat-completions, responses) DOES
+ * receive this shape today -- `chat.ts`/`dashboard.ts` pass the full
+ * `SystemPromptSnapshot` since #586's 2ª rodada, regardless of which
+ * transport ends up handling the call -- `BuildKwargsOptions.system` is
+ * `SystemBands` in practice for them too; each flattens it via
+ * `systemPromptText` (`src/transports/chat-completions.ts`,
+ * `src/transports/responses.ts`) rather than caching a breakpoint. */
 export interface SystemBands {
   readonly stable: string;
   readonly context: string;

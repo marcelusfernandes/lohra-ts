@@ -175,7 +175,9 @@ export class NoticesRepository {
   public append(scope: string, input: NoticeInput, ownership?: Ownership): PublicNotice | null {
     const parsed = parseScope(scope);
     if (parsed === null) {
-      this.warning(`notices: refused — invalid scope "${scope}" (expected "global" or "run:<id>")`);
+      this.warning(
+        `notices: refused — invalid scope "${scope}" (expected "global", "run:<id>", or "session:<id>")`,
+      );
       return null;
     }
     if (!NOTICE_KIND_SET.has(input.kind)) {

@@ -58,10 +58,12 @@ export class SystemPromptSnapshot implements SystemBands {
  * only ever bills/estimates a single string (`estimateRequestTokens`,
  * `estimatePartialUsage`, `src/context/token-estimate.ts` -- out of this
  * issue's `Files`). A bare string is returned as-is (every caller before
- * this issue, and every caller that hasn't been wired to pass bands yet --
- * `src/commands/chat.ts`/`dashboard.ts` included); bands flatten with the
- * exact same rule `SystemPromptSnapshot.text` uses, so a caller that DOES
- * pass the full snapshot estimates identically to one that pre-flattened it. */
+ * this issue). Correction (#608, achado da #624 sobre a PR #621):
+ * `src/commands/chat.ts`/`dashboard.ts` DO pass the full `SystemPromptSnapshot`
+ * (the three bands) since #586's 2ª rodada -- neither is an example of "hasn't
+ * been wired to pass bands yet" anymore. Bands flatten with the exact same
+ * rule `SystemPromptSnapshot.text` uses, so a caller that DOES pass the full
+ * snapshot estimates identically to one that pre-flattened it. */
 export function systemPromptText(system: string | SystemBands): string {
   return typeof system === "string" ? system : joinBands(system);
 }

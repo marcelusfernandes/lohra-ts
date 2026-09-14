@@ -121,7 +121,8 @@
       "tests/transports-abort-in-flight.test.ts",
       "tests/conversation-compaction-transcript.test.ts",
       "tests/conversation-runtime-aux.test.ts",
-      "tests/client-pool-aux.test.ts"
+      "tests/client-pool-aux.test.ts",
+      "tests/conversation-runtime-notices.test.ts"
     ]
   },
   {

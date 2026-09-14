@@ -482,7 +482,7 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 283 (soma dos treze catálogos importados)", () => {
+  it("a contagem total de mutantes é 284 (soma dos treze catálogos importados)", () => {
     // Os doze catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
@@ -604,8 +604,11 @@ describe("scripts/mutations/slices.json", () => {
     // 281. Issue #594 (residual de M21) acrescenta 2 a `supervision-mutants.
     // ts`: X1 (`child-runner.ts`'s guard `error.partialCalls > 0`, achado
     // 1/2) e Y1 (`core.ts`'s `fire` idempotente, achado 3) -- 281 + 2 = 283.
+    // Issue #608 acrescenta y a `context-window.ts`: `runTurn` passa a
+    // anexar o overlay de avisos pendentes ao campo `system` do request (em
+    // vez de só à mensagem do usuário) -- invariante 1 pinado -- 283 + 1 = 284.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 283;
+    const TOTAL_MUTANTS = 284;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -628,7 +631,7 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/media-catalog-persistence.ts": 13,
       "scripts/mutations/self-update-mutants.ts": 8,
       "scripts/mutations/workflow-executor-mutants.ts": 45,
-      "scripts/mutations/context-window.ts": 24,
+      "scripts/mutations/context-window.ts": 25,
       "scripts/mutations/auth-mutants.ts": 13,
       "scripts/mutations/supervision-mutants.ts": 41,
     };
@@ -637,7 +640,7 @@ describe("scripts/mutations/slices.json", () => {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(283);
+    expect(somaTabela).toBe(284);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {

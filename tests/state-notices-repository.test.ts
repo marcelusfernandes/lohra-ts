@@ -142,6 +142,24 @@ describe("NoticesRepository", () => {
     }
   });
 
+  it("names all three valid scope forms in the refusal warning (#608 menor 5)", () => {
+    const path = tempDbPath();
+    const connection = openStateDatabase(path);
+    try {
+      const warnings: string[] = [];
+      const notices = new NoticesRepository(connection.database, {
+        warning: (message) => warnings.push(message),
+      });
+      notices.append("weird-scope", { kind: "unknown", message: "x" });
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('"global"');
+      expect(warnings[0]).toContain('"run:<id>"');
+      expect(warnings[0]).toContain('"session:<id>"');
+    } finally {
+      connection.close();
+    }
+  });
+
   it("refuses a kind outside NOTICE_KINDS, named, never writes, never throws", () => {
     const path = tempDbPath();
     const connection = openStateDatabase(path);

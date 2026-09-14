@@ -377,8 +377,9 @@ export class ConversationRuntime {
       ...history,
       { role: "user", content: userContent },
     ];
+    // Issue #608: raw `input.input`, not `userContent` — never persist an overlay.
     const turnMessages: Readonly<Record<string, unknown>>[] = [
-      { role: "user", content: userContent },
+      { role: "user", content: input.input },
     ];
     const executedToolCalls: {
       id: string | null;
@@ -719,7 +720,7 @@ export class ConversationRuntime {
         turnMessages.push(finalAssistant);
         this.options.repository.commitTurn({
           sessionId,
-          user: { role: "user", content: userContent },
+          user: { role: "user", content: input.input },
           assistant: finalAssistant,
           messages: turnMessages,
           usage: usageTotal,
