@@ -1,4 +1,12 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -291,5 +299,54 @@ describe("skill store", () => {
     }
     expect(skills).toEqual([]);
     expect(lines).toHaveLength(0);
+  });
+
+  // Issue #681 (fatia de mutação `skills`, mutante SK4): `realOrResolved`
+  // needs the FIRST `realpathSync(current)` attempt to actually follow a
+  // symlink to its real target -- a mutant that swaps it for a pure
+  // `resolve()` (never throws, never follows a symlink) would return the
+  // literal, unresolved path instead.
+  it("realOrResolved follows a symlink to its real target, not just resolve() of the literal path", () => {
+    const base = root();
+    const target = join(base, "target-dir");
+    mkdirSync(target);
+    const link = join(base, "link-dir");
+    symlinkSync(target, link);
+    const nested = join(link, "nested.md");
+    expect(realOrResolved(nested)).toBe(join(realpathSync(target), "nested.md"));
+  });
+
+  // Issue #681 (mutante SK5): `parseSkillMd` requires `name` in the
+  // frontmatter -- a mutant that defaults it to `""` instead of throwing
+  // would silently accept a nameless skill.
+  it("parseSkillMd rejects frontmatter missing a name", () => {
+    const content = "---\ndescription: d\n---\nbody\n";
+    expect(() => parseSkillMd(content)).toThrow("SKILL.md frontmatter must define a 'name'");
+  });
+
+  // Issue #681 (mutante SK6): `unquote`'s `catch` around `JSON.parse` for a
+  // double-quoted scalar has to throw `SkillFormatError` -- a mutant that
+  // swallows it and returns the raw (still-quoted) text instead would hide
+  // a malformed frontmatter value.
+  it("unquote rejects an invalid double-quoted scalar instead of swallowing it", () => {
+    const content = '---\nname: bad\ndescription: "bad\\zscalar"\n---\nbody\n';
+    expect(() => parseSkillMd(content)).toThrow(
+      "invalid SKILL.md frontmatter: invalid quoted scalar",
+    );
+  });
+
+  // Issue #681 (mutante SK7): `within` (private) closes the boundary with
+  // `relative()` + a `".."`/separator check -- a mutant that degrades it to
+  // a bare string prefix (`resolvedPath.startsWith(resolvedRoot)`) would
+  // treat a SIBLING directory whose name happens to start with the root's
+  // name (`skills-extra` vs `skills`) as inside it. Observable through
+  // `SkillStore.index()`'s origin label: a skill under a `builtinRoots`
+  // entry that shares that broken prefix with `this.root` would misreport
+  // as `home` (no label) instead of `(builtin)`.
+  it("within closes the boundary at a directory separator, not a bare string prefix", () => {
+    const home = root();
+    skill(home, "skills-extra/b", "prefix-skill", "should stay builtin");
+    const store = new SkillStore(home, [], [join(home, "skills-extra")]);
+    expect(store.index()).toContain("**prefix-skill** (builtin)");
   });
 });
