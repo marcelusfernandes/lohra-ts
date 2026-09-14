@@ -487,7 +487,71 @@ RESULTADO, contra um provedor real (`npm run eval -- --provider <p>`), mede
 se o modelo de fato evita comandos de descoberta quando o ambiente já
 está no prompt.
 
+## Prompt caching real: faixas e breakpoints (issue #586, P10)
+
+`SystemPromptSnapshot` (`src/context/system-prompt.ts`) já desenhava três
+faixas (`stable`/`context`/`volatile`) desde a primeira issue do épico —
+esta issue é a primeira a ter um CONSUMIDOR que lê algo além de `.text`.
+
+### `ModelRequest.system`: string ou as três faixas
+
+`ModelRequest.system`/`BuildKwargsOptions.system`/`StoredSession.systemPrompt`
+aceitam `string | { stable, context, volatile }` (`SystemBands`,
+`src/transports/types.ts`). Um caller que só tem a string achatada (todo
+caller real hoje — `chat.ts`/`dashboard.ts` continuam passando
+`buildSystemPrompt(...).text`) não muda de comportamento nenhum; um caller
+que passa a `SystemPromptSnapshot` inteira dá ao transporte Anthropic o
+suficiente para marcar um breakpoint de cache. Nada no TEXTO que o modelo lê
+muda por causa disso (invariante 1, CLAUDE.md) — só a FORMA que
+`anthropic-messages.ts` manda pela wire.
+
+### `anthropic-messages.ts`: blocos + `cache_control`
+
+`buildKwargs` monta `system` como array de blocos de texto em vez da string
+junta de sempre. Regra de fronteira: `cache_control: {type: "ephemeral"}` no
+último bloco cacheável — a faixa `stable`, ou `context` quando presente,
+NUNCA `volatile` (data, memória, índice de skills: muda a cada chamada ou
+sessão) nem uma mensagem `role: "system"` extra (dinâmica por request, ex.:
+o prompt do sumarizador de compactação). Um `system` que chega como STRING
+simples (o caso de todo caller de hoje) é tratado como a faixa `stable`
+inteira — a mesma regra de migração que `SessionRepository.systemPromptBands`
+usa para uma linha de sessão anterior a esta issue — então o breakpoint
+ainda existe, só que cobre o prefixo inteiro em vez de só `stable+context`.
+A última definição de tool também ganha `cache_control` (Anthropic cacheia
+tudo até e incluindo o bloco marcado). Cada bloco depois do primeiro carrega
+o `"\n\n"` que a junção antiga usava — concatenar todo `block.text` sem
+separador reproduz bit a bit o que ia no `system` string de antes desta
+issue (`tests/transport-anthropic-messages.test.ts` prende isso).
+
+`chat-completions.ts` fica sem mudança de forma (o prefixo do provedor já
+cacheia automaticamente, sem `cache_control` explícito) — só ganhou um
+teste de que a ordem das tools é idêntica entre chamadas, pré-condição do
+cache de prefixo funcionar. `responses.ts` idem: `instructions` continua a
+mesma string junta (a API Responses não tem `cache_control` por bloco).
+
+### Sessão: as três colunas novas, migração tolerante
+
+`sessions` ganha `system_prompt_stable`/`system_prompt_context`/
+`system_prompt_volatile` (aditivas, NULL em toda linha anterior a esta
+issue) além da coluna `system_prompt` que já existia — `createSession`
+grava as duas formas quando recebe as faixas (a coluna achatada continua
+existindo para todo leitor que só conhece ela: `getSession`, `listSessions`,
+a lista de sessões do gateway). `SessionRepository.systemPromptBands(id)`
+restaura: linha com as colunas novas preenchidas devolve as três faixas;
+linha anterior a esta issue (só `system_prompt`) devolve o texto inteiro
+como `stable`, `context`/`volatile` vazios.
+
+Isso persiste a informação — mas `SqliteConversationRepository`
+(`src/conversation/sqlite-repository.ts`) e as duas superfícies que montam
+`ConversationRuntime` (`chat.ts`/`dashboard.ts`) ainda não foram fiadas para
+LER essas três colunas nem para passar `SystemPromptSnapshot` inteira a
+`promptSnapshot` (hoje passam `.text`) — ficou reportado na issue #586 como
+follow-up. Sem essa fiação, o benefício de cache observado hoje é
+INTRA-turno (a mesma chamada, iteração 2+, quando o `system` string simples
+vira um único bloco `stable` cacheável), não entre turnos/sessões
+diferentes.
+
 ## O que este documento ainda não cobre
 
-`prompt caching` — não existe no runtime hoje. Cada sub-issue do épico #575
-que o implementa atualiza este arquivo quando mergeia.
+Qualquer sub-issue do épico #575 ainda não mergeada atualiza este arquivo
+quando fechar — `prompt caching` (#586) acima é a última seção corrente.

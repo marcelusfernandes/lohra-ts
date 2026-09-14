@@ -96,6 +96,19 @@ sempre um erro nomeado (`LOHRA_CONTEXT_WINDOW_INVALID:<valor bruto>`) —
 ausente ou em branco é o único caso que devolve `null` (nenhum override, sem
 avisar nada, porque não configurar não é um erro).
 
+## Prompt caching e a janela efetiva (issue #586, P10)
+
+O prompt caching da rota Anthropic (`docs/system-prompt.md`, seção própria)
+não muda em nada como esta função resolve a janela — `estimateRequestTokens`
+(`src/context/token-estimate.ts`) segue contando o `system` inteiro
+(achatado via `systemPromptText` quando chega como as três faixas), sem
+desconto por cache: o preflight de compactação continua conservador mesmo
+quando o provedor de fato cobra menos pelo prefixo cacheado. A troca real é
+de CUSTO, não de tokens contados aqui: a primeira chamada de um prefixo
+(cache write) custa ~25% a mais que sem cache; só a partir da segunda
+chamada com o mesmo prefixo o cache read (bem mais barato que input normal)
+compensa — um turno de uma iteração só paga o prêmio, nunca o desconto.
+
 ## Fora de escopo desta issue
 
 - Esta função por si só não decide _quando_ compactar; quem decide é o
