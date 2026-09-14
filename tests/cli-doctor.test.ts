@@ -9,6 +9,7 @@ import { enable, setPreference, writeTokens } from "../src/auth/index.js";
 import { runCli } from "../src/cli.js";
 import { CODEX_PROVIDER } from "../src/providers/index.js";
 import { NativeChatHttpPort } from "../src/transports/index.js";
+import { VERSION } from "../src/version.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -34,7 +35,7 @@ describe("lohra CLI bootstrap", () => {
         stderr: () => undefined,
       }),
     ).toBe(0);
-    expect(version.join("")).toBe("lohra 0.0.11\n");
+    expect(version.join("")).toBe(`lohra ${VERSION}\n`);
 
     const hint: string[] = [];
     expect(
@@ -44,7 +45,7 @@ describe("lohra CLI bootstrap", () => {
         stderr: () => undefined,
       }),
     ).toBe(0);
-    expect(hint.join("")).toBe("lohra 0.0.11 — see `lohra --help`\n");
+    expect(hint.join("")).toBe(`lohra ${VERSION} — see \`lohra --help\`\n`);
   });
 
   it("emits invalid Unicode profile as UTF-8-direct JSON and raw UTF-8 stderr (issue #71)", async () => {

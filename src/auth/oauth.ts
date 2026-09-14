@@ -1,3 +1,5 @@
+import { VERSION } from "../version.js";
+
 import { OAuthError } from "./errors.js";
 import { accountIdFromToken } from "./jwt.js";
 import { OAuthTokens } from "./types.js";
@@ -18,7 +20,7 @@ export const defaultOAuthPost: OAuthPost = async (url, body) => {
   const response = await fetch(url, {
     method: "POST",
     headers: {
-      "User-Agent": "lohra/0.0.11",
+      "User-Agent": `lohra/${VERSION}`,
       ...(url === TOKEN_URL
         ? { "content-type": "application/x-www-form-urlencoded" }
         : { "content-type": "application/json" }),

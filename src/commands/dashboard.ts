@@ -1,3 +1,4 @@
+import { VERSION } from "../version.js";
 import { generateSessionToken } from "../gateway/auth.js";
 import { LEVELS } from "../cli/arg-validation.js";
 import { registerShutdownTrigger } from "../cli/shutdown-trigger.js";
@@ -70,7 +71,7 @@ import { CronStore } from "../cron/store.js";
 import { runSchedulerLoop } from "../cron/scheduler.js";
 import { RegistryToolDispatcher } from "../tools/index.js";
 
-const GATEWAY_VERSION = "0.0.11";
+const GATEWAY_VERSION = VERSION;
 const DEFAULT_PORT = 9119;
 const DEFAULT_HOST = "127.0.0.1";
 
