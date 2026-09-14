@@ -16,14 +16,23 @@ export interface DoctorEnvironment {
   readonly base: string;
   readonly base_auth_preference: AuthPreference;
   readonly base_subscription_active: boolean;
-  /** Issue #631: o que `detectChatProvider` (`src/commands/provider-detectado.ts`)
-   * devolveria para este mesmo ambiente — o provedor que `chat`/`dashboard`
-   * de fato usam sem `--provider` na rota `api_key`. Difere de
-   * `detected_provider` só em intenção, não em valor (mesma função por
-   * baixo): existe para o consumidor de `doctor --json` não precisar saber
-   * que `detected_provider` serve às duas perguntas. `null` quando nenhuma
-   * chave/`LOHRA_PROVIDER` está configurada — mesmo com `usable: true` só
-   * por `ollama.alive` (a fronteira #631 documenta). */
+  /** Issue #631 (valor), #633 (rota): o provedor que `chat`/`dashboard`
+   * sem `--provider` realmente usariam neste ambiente — nunca uma promessa
+   * independente da rota de auth (`src/doctor/snapshot.ts` calcula sobre o
+   * mesmo `route` que `chat.ts:157-163,184,230` consulta). Três casos,
+   * espelhando exatamente a ordem de decisão de `chat.ts`:
+   * - `route.error` (ex.: `preference=subscription` sem assinatura ativa) —
+   *   `chat`/`dashboard` caem direto na fronteira sem chamar
+   *   `detectChatProvider`; aqui é `null`.
+   * - `route.mode === "subscription"` — `chat.ts:230` usa `CODEX_PROVIDER`
+   *   (`src/providers/registry.ts`, `name: "openai-codex"`) sem consultar
+   *   nenhuma chave de API; aqui é `CODEX_PROVIDER.name` mesmo que uma
+   *   chave exista no `.env` (a rota tem precedência).
+   * - rota `api_key` sem erro — o mesmo `detectChatProvider`
+   *   (`src/commands/provider-detectado.ts`) que `chat`/`dashboard` chamam;
+   *   `null` quando nenhuma chave/`LOHRA_PROVIDER` está configurada, mesmo
+   *   com `usable: true` só por `ollama.alive` (a fronteira #631 documenta).
+   */
   readonly chat_default_provider: string | null;
   readonly codex_auth_present: boolean;
   readonly codex_home: string;
