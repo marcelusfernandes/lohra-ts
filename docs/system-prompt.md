@@ -580,22 +580,29 @@ em vez de só a faixa `volatile`. É uma cache mais grossa, não ausente.
 **Limite conhecido, fora do escopo desta issue (`runtime.ts` não está nos
 `Files`)**: `ConversationRuntime.runTurn` (`src/conversation/runtime.ts:365`)
 descarta as faixas que `session()` restaurou do banco antes de montar a
-próxima requisição — troca `session.systemPrompt` por
-`this.promptSnapshot()`, chamado de novo, tanto para sessão nova quanto
-para sessão retomada. Isso significa que a persistência das três colunas
+próxima requisição de uma sessão RETOMADA — troca `session.systemPrompt`
+por `this.promptSnapshot()`, chamado de novo (uma sessão NOVA, linha 356,
+nunca tinha faixas restauradas para descartar: `promptSnapshot()` já é a
+única fonte ali). Isso significa que a persistência das três colunas
 (`system_prompt_stable`/`_context`/`_volatile`) não é hoje o que alimenta o
-cache de um turno seguinte: o cache real depende de `promptSnapshot()` —
-a closure que `chat.ts`/`dashboard.ts` passam — reconstruir exatamente o
-mesmo texto que a chamada anterior construiu. Dentro do MESMO processo
-(mesma sessão de `chat --session`, ou o mesmo processo de `dashboard`) isso
-vale: nada no runtime muda `identity`/`doctrine`/`harness`/contexto de
-projeto no meio de uma sessão. Entre processos diferentes falando da MESMA
-sessão persistida (reabrir com `chat --session <id>` num processo novo,
-ou um turno do WS gateway lendo a sessão que o cron do dashboard criou), o
-cache só sobrevive se as faixas restauradas do banco forem
-byte-idênticas ao que a nova closure de `promptSnapshot()` computa — hoje
-sem garantia formal disso; reaproveitar as faixas restauradas (em vez de
-recomputar) é a issue própria referenciada em `## Fora de escopo` de #624.
+cache de um turno seguinte de uma sessão retomada: o cache real depende de
+`promptSnapshot()` — a closure que `chat.ts`/`dashboard.ts` passam —
+reconstruir exatamente o mesmo texto que a chamada anterior construiu.
+Dentro do MESMO processo (mesma sessão de `chat --session`, ou o mesmo
+processo de `dashboard`) isso vale: nada no runtime muda
+`identity`/`doctrine`/`harness`/contexto de projeto no meio de uma sessão.
+Entre processos diferentes falando da MESMA sessão persistida (reabrir com
+`chat --session <id>` num processo novo, ou um turno do WS gateway lendo a
+sessão que o cron do dashboard criou), o cache (o breakpoint da Anthropic
+cai depois de `stable`+`context`, nunca em `volatile`) só sobrevive se as
+faixas `stable`+`context` restauradas do banco forem byte-idênticas ao que
+a nova closure de `promptSnapshot()` computa para essas duas faixas — a
+faixa `volatile` (data, memória, skills) já muda de propósito a cada
+chamada e fica depois do breakpoint, então divergir ali nunca invalida o
+que foi cacheado. Hoje não há garantia formal de que `stable`+`context`
+sejam byte-idênticas entre processos; reaproveitar as faixas restauradas
+(em vez de recomputar) é a issue própria referenciada em
+`## Fora de escopo` de #624.
 
 ## O que este documento ainda não cobre
 

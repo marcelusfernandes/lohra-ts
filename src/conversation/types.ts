@@ -50,10 +50,12 @@ export interface StoredSession {
    * `stable`, `context`/`volatile` empty -- never the plain-string member
    * of this union). `ConversationRuntime.runTurn` (`runtime.ts:365`, out of
    * this issue's `Files`) discards these restored bands before building
-   * the next request either way, replacing them with a fresh
-   * `this.promptSnapshot()` call -- the limit that leaves open,
-   * documented in `docs/system-prompt.md`, is that reuse across processes
-   * depends on `promptSnapshot()` reconstructing byte-identical text. */
+   * the next request of a RESUMED session, replacing them with a fresh
+   * `this.promptSnapshot()` call -- the limit that leaves open, documented
+   * in `docs/system-prompt.md`, is that cache reuse across processes
+   * depends on `promptSnapshot()` reconstructing `stable`+`context`
+   * byte-identically (the only bands before the Anthropic breakpoint --
+   * `volatile` changing never invalidates the cache). */
   readonly systemPrompt: string | SystemBands;
   readonly model: string;
   readonly cwd: string;
