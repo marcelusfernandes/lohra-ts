@@ -107,12 +107,13 @@ describe("buildSubagentSystemPrompt: block presence and order (#583)", () => {
       .split("\n\n")
       .find((paragraph) => paragraph.startsWith("Tools available to you:"));
     expect(toolsParagraph).toBe(
-      "Tools available to you: read_file, write_file, terminal — this list " +
-        "is exactly this turn's own tool array, though a workflow node can " +
-        "still force one additional call onto that array without renaming " +
-        "this list. Dangerous commands (recursive delete, force push, sudo, " +
-        "and similar) are refused automatically and finally here too, with " +
-        "no retry path around the refusal.",
+      "Tools available to you: read_file, write_file, terminal — this is " +
+        "the same tool array this turn actually offers, though a workflow " +
+        "node forcing structured output can still append one more tool " +
+        "definition to it beyond what's named here. Dangerous commands " +
+        "(recursive delete, force push, sudo, and similar) are refused " +
+        "automatically and finally here too, with no retry path around the " +
+        "refusal.",
     );
   });
 
