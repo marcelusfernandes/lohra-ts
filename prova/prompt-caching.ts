@@ -21,6 +21,7 @@ export default {
     "tests/state-session-repository.test.ts",
     "tests/chat-prompt-caching.test.ts",
     "tests/dashboard-prompt-caching.test.ts",
+    "tests/orchestration-child-repository.test.ts",
     "tests/context.test.ts",
   ],
 } satisfies Declaracao;
