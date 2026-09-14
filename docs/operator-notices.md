@@ -111,7 +111,14 @@ recebe um `notices: TurnNoticesPort` (`src/context/notices-overlay.ts`,
 `createTurnNoticesPort`, wireado em `chat.ts`/`dashboard.ts` sobre o MESMO
 `noticesRepository` que `workflow_notices` já lê). Ausente, o turno é
 byte-idêntico a antes desta issue existir — todo teste anterior a #589
-nunca passa essa opção.
+nunca passa essa opção. Issue #608 (épico #575 P13, "toda superfície")
+acrescenta o mesmo campo opcional a `GatewayWsDeps`
+(`src/gateway/ws/connection.ts`) — o único `ConversationRuntime` construído
+sob o gateway WS (`handlePromptSubmit`, um turno por `prompt.submit`) também
+sabe encaminhar o overlay quando o campo é populado; nenhum caller de
+produção o popula ainda (`dashboard.ts`, que constrói `GatewayWsDeps`, ficou
+fora do `Files` dessa issue) — o mecanismo existe, a fiação de produção é um
+follow-up.
 
 Presente, em toda chamada a `runTurn`:
 
@@ -126,19 +133,37 @@ Presente, em toda chamada a `runTurn`:
 2. **Format** (`formatNoticeOverlay`): até 4.096 chars, cabeçalho
    `OPERATOR NOTICES (not the user speaking):` e marcador de fim; o que não
    coube fica de fora — nem no texto anexado, nem no `token` de ack, então
-   permanece pendente para o próximo claim.
+   permanece pendente para o próximo claim. Issue #608: a mensagem de cada
+   aviso é escapada primeiro — um `message` que contenha, literalmente, a
+   substring `"OPERATOR NOTICES"` (presente nos dois marcadores) tem um
+   zero-width space inserido no meio, então uma mensagem forjada por um
+   provedor ou por conteúdo externo não pode simular o fim do bloco.
 3. O bloco é anexado ao CONTEÚDO da mensagem do usuário do turno (nunca ao
    `systemPrompt` — a doutrina de P3/P4 já trata blocos do operador como não
-   sendo fala do usuário; aqui o cabeçalho reforça o mesmo texto).
+   sendo fala do usuário; aqui o cabeçalho reforça o mesmo texto) — e SÓ para
+   as chamadas ao modelo DESTE turno. Issue #608: `commitTurn` persiste o
+   `input` cru do usuário, sem o bloco — um aviso já reconhecido (acked) não
+   reaparece na história de um turno seguinte da mesma sessão; sem essa
+   separação, o overlay virava parte permanente do histórico e era reenviado
+   ao modelo em todo turno seguinte, mesmo já consumido.
 4. **Ack**, só depois de `commitTurn` gravar o turno: qualquer falha antes
-   disso pula direto para o `catch` de `runTurn`, que nunca chama `ack` — o
-   aviso claim(ado) e não confirmado reaparece no próximo claim exatamente
-   como se este turno nunca tivesse rodado (leitura sem lock: não há nada
-   para liberar explicitamente).
+   disso — incluindo o próprio `commitTurn` lançando — pula direto para o
+   `catch` de `runTurn`, que nunca chama `ack` — o aviso claim(ado) e não
+   confirmado reaparece no próximo claim exatamente como se este turno nunca
+   tivesse rodado (leitura sem lock: não há nada para liberar explicitamente).
 5. Turno morto (`turn.failed`): `publishFailure` grava um aviso em
-   `session:<sessionId>` com `kind` mapeado do `code` do erro (vocabulário
-   `NoticeKind` congelado — um código sem mapeamento vira `unknown`, nunca
-   um kind novo). O PRÓXIMO turno da mesma sessão é quem o vê, via claim.
+   `session:<sessionId>` com `kind` mapeado do `code` do erro pelo
+   vocabulário `NoticeKind` congelado (`CONTEXT_WINDOW_EXCEEDED` →
+   `context_length`, `CONVERSATION_CANCELLED` → `cancelled`). Issue #608:
+   quando o código não tem mapeamento exato (`MODEL_CALL_FAILED`,
+   `MAX_ITERATIONS`, o `TURN_FAILED` genérico), `buildTurnNotice` ainda tenta
+   `classifyProviderError` sobre a causa de provedor que a própria
+   `ConversationTurnFailedError` carrega (`.cause`, um nível abaixo do erro
+   que chega em `publishFailure`) — um turno morto por 5xx/`ECONNRESET`/
+   `ECONNREFUSED`/`ENOTFOUND` grava `route_fault`, por `429`/código de quota
+   grava `quota_exhausted`, em vez de sempre `unknown`. `unknown` só quando
+   NEM o código exato NEM a causa classificam algo. O PRÓXIMO turno da mesma
+   sessão é quem vê esse aviso, via claim.
 
 Toda operação do `TurnNoticesPort` falha aberta: um repositório de avisos
 quebrado nunca falta um turno que não tinha nada a ver com ele — só emite um

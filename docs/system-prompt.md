@@ -82,17 +82,27 @@ Com avisos pendentes, o que entra no turno:
   próximo claim.
 - Anexado ao CONTEÚDO da mensagem do usuário do turno — nunca ao
   `systemPrompt` (mesma doutrina de P3/P4: bloco do operador não é fala do
-  usuário; o cabeçalho reforça isso em texto).
+  usuário; o cabeçalho reforça isso em texto), e nunca persistido: issue #608
+  — `commitTurn` grava o `input` cru do usuário, sem o bloco, então um aviso
+  já reconhecido não reaparece na história (e não é reenviado ao modelo) num
+  turno seguinte da mesma sessão.
 - **Ack só depois de `commitTurn`** gravar o turno; qualquer falha antes
-  disso pula para o `catch` de `runTurn`, que nunca confirma — o aviso
-  reaparece no claim do próximo turno exatamente como se este nunca tivesse
-  rodado.
+  disso — incluindo o próprio `commitTurn` lançando (#608) — pula para o
+  `catch` de `runTurn`, que nunca confirma — o aviso reaparece no claim do
+  próximo turno exatamente como se este nunca tivesse rodado.
 - Um turno morto publica seu próprio aviso (`session:<sessionId>`, `kind`
-  mapeado de `ConversationError.code`) para o PRÓXIMO turno da mesma sessão
-  ver, via claim.
+  mapeado de `ConversationError.code` por igualdade exata; issue #608 —
+  quando o código não tem mapeamento exato, `buildTurnNotice` ainda tenta
+  `classifyProviderError` sobre a causa de provedor da própria
+  `ConversationTurnFailedError`, então `route_fault`/`quota_exhausted`
+  substituem `unknown` quando a causa é classificável) para o PRÓXIMO turno
+  da mesma sessão ver, via claim.
 
 Wireado sobre o MESMO `noticesRepository` que `workflow_notices` já lê, em
-`chat.ts` e no `runJob` do `dashboard.ts` — nenhuma superfície nova.
+`chat.ts` e no `runJob` do `dashboard.ts`. Issue #608 (épico #575 P13):
+`GatewayWsDeps.notices` (`src/gateway/ws/connection.ts`) oferece o mesmo
+mecanismo ao turno único que o gateway WS constrói por `prompt.submit` — sem
+caller de produção ainda (`dashboard.ts`, fora do `Files` dessa issue).
 
 ## Doutrina de comportamento (issue #579, P3)
 
