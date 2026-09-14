@@ -94,7 +94,16 @@ export type GatewayEventName =
   | "message.complete"
   | "tool.start"
   | "tool.complete"
-  | "session.forked";
+  | "session.forked"
+  // Issue #671: the WS socket's own event vocabulary gains this ONE
+  // compaction event (payload `{ code }`, the failure's name -- same
+  // convention `ConversationRuntimeEvent.code` already uses,
+  // `src/conversation/types.ts`). `session.compacted`/`compaction.unsupported`
+  // stay OUT of this closed union deliberately (`src/gateway/ws/connection.ts`'s
+  // own `encodeCompactionEventFrame` reaches the identical wire shape for
+  // those two without widening it) -- this entry is additive, not a
+  // reversal of that choice.
+  | "compaction.aux_fallback";
 
 export function encodeGatewayEventFrame(
   type: GatewayEventName,

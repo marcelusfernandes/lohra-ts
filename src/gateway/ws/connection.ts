@@ -277,13 +277,22 @@ async function handlePromptSubmit(
       // compaction (if any) still falls back to the turn's own transport,
       // byte-identical to every pre-#651 gateway turn.
       ...(deps.summarize === undefined ? {} : { summarize: deps.summarize }),
-      // Issue #287: forwards the two compaction events onto the socket as
-      // `event` frames (encodeCompactionEventFrame above) -- before this,
+      // Issue #287: forwards two compaction events onto the socket as
+      // `event` frames (encodeCompactionEventFrame above) -- before that,
       // `session.compacted`/`compaction.unsupported` only ever reached a
-      // test's own fake sink, never a real gateway ws client. Every other
-      // ConversationRuntimeEvent type is ignored here on purpose: this
-      // socket already has its own dedicated frames for turn/model
-      // progress (message.start/delta/complete, tool.start/complete).
+      // test's own fake sink, never a real gateway ws client. Issue #671
+      // adds a third: `compaction.aux_fallback` fires when a turn's
+      // injected `deps.summarize` (an `AuxClient`'s) throws and the turn
+      // falls open to its own transport (`summarizeWithFallback`,
+      // `src/agent/aux.ts`) -- before this issue the degradation was
+      // silent on this socket (invariant 2), visible only on the CLI's
+      // stderr (`commands/chat.ts`). Unlike the other two, this event IS
+      // in `GatewayEventName` (`../rpc/frame.ts`), so it goes straight
+      // through `encodeGatewayEventFrame` instead of the local helper.
+      // Every other ConversationRuntimeEvent type is ignored here on
+      // purpose: this socket already has its own dedicated frames for
+      // turn/model progress (message.start/delta/complete,
+      // tool.start/complete).
       eventSink: (event: ConversationRuntimeEvent) => {
         if (event.type === "session.compacted") {
           ws.send(
@@ -295,6 +304,12 @@ async function handlePromptSubmit(
           );
         } else if (event.type === "compaction.unsupported") {
           ws.send(encodeCompactionEventFrame("compaction.unsupported", event.sessionId, {}));
+        } else if (event.type === "compaction.aux_fallback") {
+          ws.send(
+            encodeGatewayEventFrame("compaction.aux_fallback", event.sessionId, {
+              code: event.code ?? "UNKNOWN_CAUSE",
+            }),
+          );
         }
       },
     });
