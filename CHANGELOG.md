@@ -1,5 +1,108 @@
 # Changelog
 
+## [0.0.12] - 2026-09-14
+
+### Added
+
+- feat(gateway): frame compaction.aux_fallback na WS; overlay não persistido e limiar derivado no teste (#673)
+- feat(dashboard): fia overlay de avisos e summarize no turno WS do gateway (#665)
+- feat(transports): prompt caching real nas faixas stable/context e nas tools (#621)
+- feat(conversation): compactação e título pelo AuxClient (#617)
+- feat(context): ambiente rico no prompt com snapshot de git (#616)
+- feat(orchestration): subagente com ambiente, tools e contrato de retorno (#615)
+- feat(context): moldura para memória, perfil e instruções do projeto (#614)
+- feat(tools): conteúdo externo é dado, não instrução (#612)
+- feat(context): bloco Harness por superfície e modo de execução (#611)
+- feat(context): doutrina no system prompt, núcleo curto por tier (#610)
+- feat(conversation): overlay de avisos operacionais no turno, sem chamar a tool (#606)
+- feat(conversation): resumo de compactação preserva pedidos verbatim (#597)
+
+### Fixed
+
+- fix(version): fonte única da versão lida do package.json em runtime (#693)
+- fix(skills): collectSkillFiles nomeia erro de readdirSync; intervalo do catch de web_search na doc (#679)
+- fix(m22): sobras F4 — ensureWithinRoots fail-closed, comentário de web_search, prova de skills e âncora da WS (#677)
+- fix(m22): residual F3 — notices, rowNumber, untrusted em web_fetch, realpath (#674)
+- fix(notices): list() sem sessões alheias, acked_at sem NaN e timeout reservado (#667)
+- fix(conversation): sessão retomada reusa as faixas persistidas do system prompt (#660)
+- fix(tools): untrusted no erro MCP, realpath e raiz da sessão em skill_view (#655)
+- fix(eval): pino sem bypass por newline e LOHRA_PROFILE vazio recusado (#656)
+- fix(dashboard): honra route.error igual ao chat (#630) (#638)
+- fix(doctor): chat_default_provider ignora a rota e o warn ollama-sem-chave recomenda Ollama sem modelo (#634)
+- fix(conversation): overlay de avisos não é persistido no histórico; kind do turno morto classificado; invariante 1 pinado; overlay em serve (#635)
+- fix(doctor): só Ollama vivo — usable diz sim e chat sem --provider cai na fronteira (#632)
+- fix(chat): doctor diz utilizável e chat sem --provider cai em «no provider configured» (#629)
+- fix(chat): título via AuxClient roda depois de runTurn fechar o transporte — CLIENT_CLOSED engolido (#625)
+- fix(compaction): resumo pelo AuxClient usa o mesmo orçamento de saída que o summarizer default (#622)
+- fix(state): acked_at de aviso reconhecido lê 0 na tool e na CLI (#613)
+- fix(workflow): re-collect após steer lê o tool call forçado, não a prosa; composeDispatch; toolCalls filtrado (#609)
+- fix(workflow): forcedTool descartado no spawn nunca chega à folha (#601)
+- fix(tools): terminal promete aprovação inexistente; negação é final (#592)
+- fix(workflow): prefixo sub[ref] uniforme entre node_id de artefato e faults na chave de dedup de colisão (#552)
+
+### Changed
+
+- refactor(conversation): addUsage único, partialCalls no cancel e aux no erro (#658)
+- refactor(prompt): exports mortos, ramo morto, REMINDER_LINE e linha de tools (#644)
+- refactor(tools): regras que a dieta deixou sem destino voltam ao catálogo/skill; filesystem.ts sem cópia divergente (#626)
+- refactor(tools): dieta do catálogo; manual de workflow vai para a skill (#598)
+
+### Docs
+
+- docs(decisions): reancorar src/skills/store.ts nas notas de skills (harness e untrusted) (#682)
+- docs(tools): untrusted no erro de web_fetch, workflow_notices sem sessões, INTEGER corrompido e realpath fail-closed (#670) (#676)
+- docs(m22): residual F3 — citações defasadas em compaction, supervision e prompt (#672)
+- docs(notices): avisos de sessão fora do list() sem escopo; CLI de operador inclui (#652) (#668)
+- docs(compaction): gateway WS recebe overlay de avisos e summarize do AuxClient (#651) (#666)
+- docs(system-prompt): sessão retomada reusa as faixas persistidas (#649) (#661)
+- docs(compaction): envelope de erro com aux_calls, title.failed com estágio e partialCalls no cancel (#650) (#659)
+- docs(system-prompt): erro MCP marcado e raiz da sessão em skill_view (#642) (#657)
+- docs(m22): corrige prosa falsa e citações datadas em docs, README e skill (#643)
+- docs(readme): dashboard honra route.error como o chat (#630) (#639)
+- docs: investigar abordagem e propor épicos de feedback loops (M12) (#600)
+- docs(skills): use-lohra-ts substitui a skill do Python; gatilhos (#593)
+- docs(m20): corrige contagem de engine.ts e âncora nested-fold-removed pós-#570 (#571)
+- docs(m16): corrige quatro imprecisões da nota do abort em voo (#564)
+- docs(m16): abort em voo — ADR citada em core.ts, partial em workflow-audit.md, nota de decisão e mutantes do caminho de abort (M16-S4) (#556)
+- docs: instalação por pacote — tarball hoje, npm quando publicado, plataformas e updater (D5) (#550)
+
+### Tests
+
+- test(mutations): fatia de mutação para src/skills/** (#683)
+- test(mutations): mutante do re-collect em t15 e irmão de supervision-mutants (#663)
+- test(m22): pinos de tier extended, --no-tools, HEAD destacado e oráculo (#664)
+- test(mutations): mutantes de doutrina, moldura, snapshot de git e resumo (#662)
+- test(mutations): fatia de mutação para src/doctor/** e provider-detectado (#645)
+- test(abort-em-voo): residual de M21 — partialCalls no MaxIterationsError, contra-casos pinados, mutante do fire e prosa (#627)
+- test(eval): isolamento do terminal in-process, profile próprio no modo provider e parser sem oráculo vazio (#618)
+- test(eval): harness de comportamento sobre o stub com dois oráculos (#595)
+- test(conversation): precedência cancel × interrupt discriminante, disarm ao disparar e MaxIterationsError com partial (#561 S5) (#591)
+- test(workflow): teto de cancel() com folha que nunca assenta, sonda fail-closed e 3ª forma de isAbortOf (#561 S3) (#573)
+- test(transports): abort em voo — parseSse tolerante a frame parcial, forma única pré-post() e usage null sem message_start (#561 S1) (#572)
+- test(media): flake em media-handlers — sufixo aleatório do mkdtemp casa a regex SECRET e redige o caminho (#566)
+
+### Chore
+
+- chore(processo): dogfooding disparado por substância, não por nome de arquivo (#688)
+- chore(licenca): alinhar package-lock.json#license com package.json (MIT) (#686)
+- chore(prompt-caching): medição real de cache_read_tokens, comentários obsoletos da #586 e asserção robusta do breakpoint (#628)
+- chore: limpeza pós-M18 — comentários falsos em audit-model/cache-preview/accounting/mutations-matrix, oráculos do canário e da precedência, mutante de normalizeResumeId (#570)
+- chore(deps): prebuilds Linux para node-pty (e política de rede do better-sqlite3) — instalação sem toolchain em Linux (D10) (#557)
+- chore(process): hooks por prepare, guard LOHRA_SKIP_PREPARE e prefixo release/ na tabela de branches (#554)
+- chore(prepare): guard por env para npm pack não instalar hooks no checkout real (D9) (#551)
+
+### CI
+
+- ci(controle-negativo): PR de release (release/x.y.z, só manifesto/CHANGELOG) é SKIP (#695)
+- ci(release): publica no npm com provenance e cria a Release a partir da tag (#689)
+- ci(controle-negativo): lefthook.yml na classe process e cabeçalho atualizado para prepare/LOHRA_SKIP_PREPARE (#565)
+- ci(pack-check): remove o env do node-gyp de mutations.yml, pina ci → build → pack:check e documenta os caches offline (#562) (#563)
+- ci(pack-check): job de instalação do tarball em Linux e macOS, Node 20/22 (#532) (#560)
+
+### Other
+
+- decisão(owner): licença de distribuição do lohra-ts (D6) (#684)
+
 Gerado por `scripts/release.ts` (issue #531) a partir de `git log
 --first-parent --merges` — sem `gh`/`gh api`, sem rede. Cada entrada é o
 título da PR mergeada (o corpo do merge commit), agrupada pelo tipo do

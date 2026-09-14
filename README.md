@@ -3,7 +3,7 @@
 [![ci](https://github.com/marcelusfernandes/lohra-ts/actions/workflows/ci.yml/badge.svg)](https://github.com/marcelusfernandes/lohra-ts/actions/workflows/ci.yml)
 
 Runtime TypeScript headless do Lohra, com CLI, gateway/dashboard, workflows
-duráveis, cron, MCP, ferramentas web e mídia. A versão atual é `0.0.11`.
+duráveis, cron, MCP, ferramentas web e mídia. A versão atual é `0.0.12`.
 
 O runtime nasceu como port validado contra o runtime Python pinado até
 2026-09-04; desde essa data, por decisão do owner, evolui de forma
