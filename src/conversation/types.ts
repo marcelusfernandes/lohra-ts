@@ -41,11 +41,14 @@ export interface ToolDispatcher {
 }
 
 export interface StoredSession {
-  /** Issue #586: widened the same way as `ModelRequest.system` above --
-   * `SqliteConversationRepository.session()` (out of this issue's `Files`)
-   * still only ever returns the flattened string it reads from the single
-   * `system_prompt` column, which stays a valid member of this union with
-   * no change there. */
+  /** Issue #586: widened the same way as `ModelRequest.system` above.
+   * Correction (#608, achado da #624 sobre a PR #621): since #586's 2ª
+   * rodada, `SqliteConversationRepository.session()` restores the three
+   * bands via `SessionRepository.systemPromptBands()`, tolerant of a row
+   * written before this column existed (or from a plain-string
+   * `systemPrompt`) -- it does NOT only ever return the flattened string
+   * anymore; the flat string stays a valid member of this union for that
+   * migration case, not as the only shape produced today. */
   readonly systemPrompt: string | SystemBands;
   readonly model: string;
   readonly cwd: string;
