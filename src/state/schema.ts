@@ -147,6 +147,14 @@ export const addedColumns = [
   // this column existed ("unstamped"). Never part of the lookup key
   // (`content_hash`/`run_id`); marks a replay, never invalidates it.
   ["workflow_node_cache", "identity_version", "TEXT"],
+  // Issue #586 (épico #575): the three prompt-caching bands
+  // (stable/context/volatile) alongside the flattened `system_prompt` that
+  // already existed — NULL on every row written before this column existed
+  // (SessionRepository.systemPromptBands treats that as "the whole
+  // `system_prompt` is `stable`", never a silent loss).
+  ["sessions", "system_prompt_stable", "TEXT"],
+  ["sessions", "system_prompt_context", "TEXT"],
+  ["sessions", "system_prompt_volatile", "TEXT"],
 ] as const;
 
 export const ftsSchema = `

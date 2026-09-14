@@ -35,7 +35,14 @@ describe("AnthropicMessagesTransport", () => {
     expect(result).toMatchObject({
       model: "claude",
       max_tokens: 4096,
-      system: "TOP\n\nHIST",
+      // Issue #586: system is now an array of text blocks with
+      // cache_control on the last cacheable one (the whole "TOP" string,
+      // treated as the stable band) — concatenating the two blocks' text
+      // still reproduces "TOP\n\nHIST", the pre-#586 joined string.
+      system: [
+        { type: "text", text: "TOP", cache_control: { type: "ephemeral" } },
+        { type: "text", text: "\n\nHIST" },
+      ],
       tool_choice: { type: "tool", name: "read" },
       tools: [
         {

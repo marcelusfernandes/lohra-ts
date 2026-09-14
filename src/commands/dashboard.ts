@@ -298,7 +298,16 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     [join(options.cwd, ".claude", "skills")],
     [builtinSkills],
   );
-  const systemPrompt = buildSystemPrompt({
+  // Issue #586 (épico #575, 2ª rodada): a snapshot inteira (não só `.text`)
+  // é o que o `runJob` do cron passa a `ConversationRuntime.promptSnapshot`
+  // abaixo — cache_control chega ao transporte Anthropic e às três colunas
+  // que SqliteConversationRepository grava. `sessionDefaults`/o path WS
+  // interativo (`createGatewayUpgradeHandler`, `src/gateway/**`, fora dos
+  // Files desta issue) continuam recebendo só `.text`: `GatewaySessionRegistry`
+  // (`src/gateway/session-service.ts`) declara `systemPrompt: string`, e
+  // widen esse contrato está fora de escopo aqui — gap já documentado em
+  // `docs/system-prompt.md`.
+  const systemPromptSnapshot = buildSystemPrompt({
     ...(identity === undefined ? {} : { identity }),
     doctrine,
     harness,
@@ -307,7 +316,8 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     ...(memory.memory ? { memorySnapshot: memory.memory } : {}),
     ...(memory.user ? { userProfile: memory.user } : {}),
     skillsIndex: skillStore.snapshot(),
-  }).text;
+  });
+  const systemPrompt = systemPromptSnapshot.text;
 
   const connection = openStateForEnvironment(options.environment);
   const sessions = new SessionRepository(connection.database, undefined, connection.ftsEnabled);
@@ -460,7 +470,7 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
         const runtime = new ConversationRuntime({
           repository: new SqliteConversationRepository(sessions),
           transport,
-          promptSnapshot: () => systemPrompt,
+          promptSnapshot: () => systemPromptSnapshot,
           toolDefinitions: sessionTools.toolDefinitions,
           toolDispatcher: new RegistryToolDispatcher(sessionTools.dispatch),
           idSource: () => randomUUID().replaceAll("-", ""),

@@ -249,3 +249,76 @@ describe("session repository", () => {
     close();
   });
 });
+
+// Issue #586 (épico #575): a sessão persiste as três faixas do prompt
+// caching (stable/context/volatile) além do texto achatado que
+// `system_prompt` sempre carregou -- uma linha antiga (só `system_prompt`,
+// colunas novas NULL) continua carregando, com a faixa inteira virando
+// `stable` (mesma regra de migração que o transporte Anthropic usa para um
+// `system` string simples).
+describe("session repository: prompt caching bands (#586)", () => {
+  it("persists the three bands and restores them via systemPromptBands", () => {
+    const { repo, close } = repository();
+    repo.createSession({
+      id: "s1",
+      systemPrompt: { stable: "STABLE", context: "CONTEXT", volatile: "VOLATILE" },
+      startedAt: 1,
+    });
+    expect(repo.systemPromptBands("s1")).toEqual({
+      stable: "STABLE",
+      context: "CONTEXT",
+      volatile: "VOLATILE",
+    });
+    close();
+  });
+
+  it("still flattens into system_prompt for any reader that only knows the single column", () => {
+    const { repo, database, close } = repository();
+    repo.createSession({
+      id: "s1",
+      systemPrompt: { stable: "STABLE", context: "CONTEXT", volatile: "" },
+      startedAt: 1,
+    });
+    const row = database.prepare("SELECT system_prompt FROM sessions WHERE id = ?").get("s1") as {
+      readonly system_prompt: string;
+    };
+    expect(row.system_prompt).toBe("STABLE\n\nCONTEXT");
+    close();
+  });
+
+  it("keeps writing a plain string when the caller hasn't been wired to pass bands", () => {
+    const { repo, close } = repository();
+    repo.createSession({ id: "s1", systemPrompt: "FLAT TEXT", startedAt: 1 });
+    expect(repo.systemPromptBands("s1")).toEqual({
+      stable: "FLAT TEXT",
+      context: "",
+      volatile: "",
+    });
+    close();
+  });
+
+  it("loads an old row (pre-#586, only system_prompt populated) as the whole stable band", () => {
+    const { database, repo, close } = repository();
+    // Simulates a row written before the new columns existed -- no
+    // createSession call goes through this path anymore, but a real
+    // pre-migration row on disk looks exactly like this.
+    database
+      .prepare(
+        `INSERT INTO sessions (id, source, system_prompt, started_at)
+         VALUES (?, 'cli', ?, ?)`,
+      )
+      .run("old", "OLD FLAT PROMPT", 5);
+    expect(repo.systemPromptBands("old")).toEqual({
+      stable: "OLD FLAT PROMPT",
+      context: "",
+      volatile: "",
+    });
+    close();
+  });
+
+  it("returns null for a session that doesn't exist", () => {
+    const { repo, close } = repository();
+    expect(repo.systemPromptBands("missing")).toBeNull();
+    close();
+  });
+});

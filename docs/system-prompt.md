@@ -487,7 +487,89 @@ RESULTADO, contra um provedor real (`npm run eval -- --provider <p>`), mede
 se o modelo de fato evita comandos de descoberta quando o ambiente já
 está no prompt.
 
+## Prompt caching real: faixas e breakpoints (issue #586, P10)
+
+`SystemPromptSnapshot` (`src/context/system-prompt.ts`) já desenhava três
+faixas (`stable`/`context`/`volatile`) desde a primeira issue do épico —
+esta issue é a primeira a ter um CONSUMIDOR que lê algo além de `.text`.
+
+### `ModelRequest.system`: string ou as três faixas
+
+`ModelRequest.system`/`BuildKwargsOptions.system`/`StoredSession.systemPrompt`
+aceitam `string | { stable, context, volatile }` (`SystemBands`,
+`src/transports/types.ts`). `chat.ts`'s `snapshot()` e o `systemPromptSnapshot`
+que `dashboard.ts` usa no `runJob` do cron passam a `SystemPromptSnapshot`
+inteira (não mais só `.text`) — a rota Anthropic dos dois comandos ganha o
+breakpoint de cache de verdade. Nada no TEXTO que o modelo lê muda por causa
+disso (invariante 1, CLAUDE.md) — só a FORMA que `anthropic-messages.ts`
+manda pela wire; `chat-completions.ts`/`responses.ts` achatam de volta para
+uma string antes de montar o request próprio (nenhum dos dois muda de forma
+na saída, só aceitam as faixas na entrada sem quebrar).
+
+### `anthropic-messages.ts`: blocos + `cache_control`
+
+`buildKwargs` monta `system` como array de blocos de texto em vez da string
+junta de sempre. Regra de fronteira: `cache_control: {type: "ephemeral"}` no
+último bloco cacheável — a faixa `stable`, ou `context` quando presente,
+NUNCA `volatile` (data, memória, índice de skills: muda a cada chamada ou
+sessão) nem uma mensagem `role: "system"` extra (dinâmica por request, ex.:
+o prompt do sumarizador de compactação). Um `system` que chega como STRING
+simples (o caso de todo caller de hoje) é tratado como a faixa `stable`
+inteira — a mesma regra de migração que `SessionRepository.systemPromptBands`
+usa para uma linha de sessão anterior a esta issue — então o breakpoint
+ainda existe, só que cobre o prefixo inteiro em vez de só `stable+context`.
+A última definição de tool também ganha `cache_control` (Anthropic cacheia
+tudo até e incluindo o bloco marcado). Cada bloco depois do primeiro carrega
+o `"\n\n"` que a junção antiga usava — concatenar todo `block.text` sem
+separador reproduz bit a bit o que ia no `system` string de antes desta
+issue (`tests/transport-anthropic-messages.test.ts` prende isso).
+
+`chat-completions.ts` fica sem mudança de forma NA SAÍDA (o prefixo do
+provedor já cacheia automaticamente, sem `cache_control` explícito) — ganhou
+um teste de que a ordem das tools é idêntica entre chamadas, pré-condição do
+cache de prefixo funcionar, e passou a achatar `options.system` via
+`systemPromptText` antes de montar a mensagem `role: "system"` (sem isso,
+um caller que passa as faixas — qualquer sessão roteada por um provedor
+`chat_completions`, não só Anthropic — vazaria o objeto cru como `content`;
+achado pela suíte inteira, `tests/eval-cases.test.ts`, não previsto na
+primeira rodada desta issue). `responses.ts` idem: `instructions` continua a
+mesma string junta (a API Responses não tem `cache_control` por bloco), e
+ganhou o mesmo achatamento — sem ele, `typeof value === "string"` descartava
+o system prompt inteiro em silêncio para as faixas (invariante 2).
+
+### Sessão: as três colunas novas, migração tolerante
+
+`sessions` ganha `system_prompt_stable`/`system_prompt_context`/
+`system_prompt_volatile` (aditivas, NULL em toda linha anterior a esta
+issue) além da coluna `system_prompt` que já existia — `createSession`
+grava as duas formas quando recebe as faixas (a coluna achatada continua
+existindo para todo leitor que só conhece ela: `getSession`, `listSessions`,
+a lista de sessões do gateway). `SessionRepository.systemPromptBands(id)`
+restaura: linha com as colunas novas preenchidas devolve as três faixas;
+linha anterior a esta issue (só `system_prompt`) devolve o texto inteiro
+como `stable`, `context`/`volatile` vazios.
+
+`SqliteConversationRepository` (`src/conversation/sqlite-repository.ts`,
+o wrapper que `chat.ts`/`dashboard.ts` constroem sobre um `SessionRepository`
+de verdade) lê `systemPromptBands(id)` em `session()` — toda sessão
+retomada volta com as três faixas, migração tolerante incluída
+(`tests/conversation-sqlite-prompt-caching.test.ts`). `chat.ts`'s `snapshot()`
+e o `runJob` do cron de `dashboard.ts` passam a `SystemPromptSnapshot`
+inteira a `ConversationRuntime.promptSnapshot` — as duas superfícies que
+montam `ConversationRuntime` diretamente ganham cache real, tanto numa
+sessão nova quanto numa retomada com `--session`
+(`tests/chat-prompt-caching.test.ts`/`tests/dashboard-prompt-caching.test.ts`,
+contra `runChat`/`runDashboard` reais com stub HTTP Anthropic).
+
+**Gap que permanece, documentado, não silencioso**: o path WS interativo do
+gateway (`createGatewayUpgradeHandler`, `src/gateway/ws/connection.ts`, fora
+dos `Files` desta issue) constrói sua própria `ConversationRuntime` por
+turno e recebe `sessionDefaults.systemPrompt` já achatado (`GatewaySessionRegistry`,
+`src/gateway/session-service.ts`, declara `systemPrompt: string` — alargar
+esse contrato é decisão de outra issue). Uma sessão de dashboard aberta pela
+UI web (não pelo cron) continua sem cache_control até essa issue acontecer.
+
 ## O que este documento ainda não cobre
 
-`prompt caching` — não existe no runtime hoje. Cada sub-issue do épico #575
-que o implementa atualiza este arquivo quando mergeia.
+Qualquer sub-issue do épico #575 ainda não mergeada atualiza este arquivo
+quando fechar — `prompt caching` (#586) acima é a última seção corrente.

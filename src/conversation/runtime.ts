@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 
 import { estimateCost, type CostEstimate } from "../pricing/index.js";
 import { estimatePartialUsage, estimateRequestTokens } from "../context/token-estimate.js";
+import { systemPromptText } from "../context/system-prompt.js";
 import { emptyPartialStream, StreamAbortedError } from "../transports/index.js";
-import type { NormalizedResponse, ToolCall, Usage } from "../transports/index.js";
+import type { NormalizedResponse, SystemBands, ToolCall, Usage } from "../transports/index.js";
 import { runBounded } from "../tools/dispatch.js";
 import { summarizeWithFallback } from "../agent/aux.js";
 import {
@@ -82,7 +83,7 @@ class SteerInterrupt extends Error {
 export interface ConversationRuntimeOptions {
   readonly repository: ConversationRepository;
   readonly transport: ModelTransport;
-  readonly promptSnapshot: () => string;
+  readonly promptSnapshot: () => string | SystemBands;
   readonly toolDispatcher?: ToolDispatcher;
   readonly toolDefinitions?: readonly unknown[];
   readonly eventSink?: (event: ConversationRuntimeEvent) => void;
@@ -141,7 +142,7 @@ export function addUsage(total: Usage | null, next: Usage | null): Usage | null 
 
 export class ConversationRuntime {
   private readonly maxIterations: number;
-  private prompt: string | undefined;
+  private prompt: string | SystemBands | undefined;
   // Identifies THIS runtime instance as a compression_locks holder (issue
   // #252) — stable for the lifetime of the instance, so a retry against the
   // same lock row after a transient failure is recognizable as the same
@@ -163,7 +164,7 @@ export class ConversationRuntime {
     this.lockRetryDelayMs = Math.max(0, options.lockRetryDelayMs ?? DEFAULT_LOCK_RETRY_DELAY_MS);
   }
 
-  private promptSnapshot(): string {
+  private promptSnapshot(): string | SystemBands {
     this.prompt ??= this.options.promptSnapshot();
     return this.prompt;
   }
@@ -216,7 +217,7 @@ export class ConversationRuntime {
       maxTokens: this.options.maxTokens ?? 0,
     });
     const estimateBefore = estimateRequestTokens({
-      system: context.session.systemPrompt,
+      system: systemPromptText(context.session.systemPrompt),
       messages: context.messages,
       tools,
     }).tokens;
@@ -273,7 +274,7 @@ export class ConversationRuntime {
 
     context.messages.splice(0, context.historyBoundary, ...outcome.history);
     const estimateAfter = estimateRequestTokens({
-      system: context.session.systemPrompt,
+      system: systemPromptText(context.session.systemPrompt),
       messages: context.messages,
       tools,
     }).tokens;
@@ -355,7 +356,7 @@ export class ConversationRuntime {
       const systemPrompt = this.promptSnapshot();
       this.options.repository.createSession({
         id: sessionId,
-        systemPrompt,
+        systemPrompt, // #586 (2ª rodada): a repository que entende faixas persiste as três
         model: input.model,
         cwd: input.cwd,
       });
@@ -511,7 +512,7 @@ export class ConversationRuntime {
             const abortedCallUsage =
               error instanceof StreamAbortedError
                 ? estimatePartialUsage(error.partial, {
-                    system: request.system,
+                    system: systemPromptText(request.system),
                     messages: request.messages,
                     tools: request.tools,
                   })
@@ -543,7 +544,7 @@ export class ConversationRuntime {
             usageTotal = addUsage(
               usageTotal,
               estimatePartialUsage(partial, {
-                system: request.system,
+                system: systemPromptText(request.system),
                 messages: request.messages,
                 tools: request.tools,
               }),

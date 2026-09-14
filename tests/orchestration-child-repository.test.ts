@@ -69,7 +69,17 @@ describe("ChildConversationRepository", () => {
     const repo = new ChildConversationRepository(sessions, "parent-1");
     repo.createSession({ id: "child-1", systemPrompt: "SYS", model: "m", cwd: "/tmp" });
 
-    expect(repo.session("child-1")).toEqual({ systemPrompt: "SYS", model: "m", cwd: "/tmp" });
+    // Issue #586 (épico #575): session() agora restaura as três faixas do
+    // prompt caching (SqliteConversationRepository.session() delega para
+    // SessionRepository.systemPromptBands) -- uma sessão criada com
+    // systemPrompt: string simples migra para {stable: <texto>, context:
+    // "", volatile: ""}, mesma regra que o transporte Anthropic usa para
+    // uma linha antiga.
+    expect(repo.session("child-1")).toEqual({
+      systemPrompt: { stable: "SYS", context: "", volatile: "" },
+      model: "m",
+      cwd: "/tmp",
+    });
     expect(repo.loadMessages("child-1")).toEqual([]);
 
     repo.commitTurn({
