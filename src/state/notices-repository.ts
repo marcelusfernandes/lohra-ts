@@ -115,13 +115,36 @@ function nullableRowNumber(value: unknown): number | null {
   return value === null || value === undefined ? null : rowNumber(value);
 }
 
+// Issue #670 (residual F3, veredito PR #667 item 2): `rowNumber` above
+// stays silent on purpose for its other two call sites — `append`'s own
+// `prior.next_seq` read (inside the transaction, which already has
+// `this.warning` for refusals) and `pruneScope`'s `reduce` over several
+// victim rows at once (no single row id to name). The three conversions
+// inside `parseNoticeRow` (`id`, `seq`, `fence`) DO have a row to name, so a
+// corrupted value gets a `warning` instead of vanishing into `0` silently —
+// same discipline `nullableRowReal` (issue #652) already applies to
+// `acked_at`.
+function checkedRowNumber(
+  value: unknown,
+  column: string,
+  id: number | string,
+  warn: (message: string) => void,
+): number {
+  const numeric = typeof value === "bigint" ? Number(value) : value;
+  if (typeof numeric === "number" && Number.isSafeInteger(numeric)) return numeric;
+  warn(`notices: ${column} ilegível na linha ${String(id)} — usando 0`);
+  return 0;
+}
+
 // Issue #603: `created_at`/`acked_at` são `REAL` (`schema.ts`) e `ack()`
 // grava `Date.now() / 1_000` — fracionário, quase sempre fora de
 // `Number.isSafeInteger` só por ter casas decimais. `rowNumber` existe para
 // colunas `INTEGER` (`id`, `seq`, `fence`, `next_seq`, `dropped_before_seq`)
-// onde um valor não inteiro É um dado corrompido e `0` é o fallback
-// correto; aplicado a um `REAL` fracionário legítimo, o mesmo fallback
-// destrói o instante do ack. `acked_at` precisa da MESMA conversão de
+// onde um valor não inteiro É um dado corrompido — `0` é o fallback, o
+// `warning` de `checkedRowNumber` (issue #670, acima) é o rastro para
+// quem tem `id`/`seq`/`fence` de uma linha para nomear; aplicado a um
+// `REAL` fracionário legítimo, o mesmo fallback destrói o instante do ack.
+// `acked_at` precisa da MESMA conversão de
 // `created_at` (linha abaixo, `Number(row.created_at)`), só com `null`
 // preservado — nunca `rowNumber`.
 // Issue #652 (veredito PR #635): `Number(value)` sobre um `acked_at`
@@ -173,17 +196,20 @@ function parseNoticeRow(
   row: Readonly<Record<string, unknown>>,
   warn: (message: string) => void,
 ): PublicNotice {
-  const id = rowNumber(row.id);
+  const id = checkedRowNumber(row.id, "id", String(row.id), warn);
   return Object.freeze({
     id,
     scope: String(row.scope),
-    seq: rowNumber(row.seq),
+    seq: checkedRowNumber(row.seq, "seq", id, warn),
     kind: String(row.kind) as NoticeKind,
     message: String(row.message),
     created_at: Number(row.created_at),
     acked_at: nullableRowReal(row.acked_at, id, warn),
     acked_by: typeof row.acked_by === "string" ? row.acked_by : null,
-    fence: nullableRowNumber(row.fence),
+    fence:
+      row.fence === null || row.fence === undefined
+        ? null
+        : checkedRowNumber(row.fence, "fence", id, warn),
   });
 }
 
