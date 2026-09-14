@@ -669,9 +669,17 @@ describe("scripts/mutations/slices.json", () => {
     // `session:*` para o modelo) e `ac` (`nullableRowReal` volta a
     // `Number(value)`, um `acked_at` ilegível vira `NaN` em silêncio) --
     // primeiros mutantes em `src/state/notices-repository.ts`: 318 + 2 =
-    // 320.
+    // 320. A issue #670 (residual F3) acrescenta três: `ad-notices-seq-
+    // corruption-silent` a `context-window.ts` (`parseNoticeRow` volta a
+    // devolver `seq: 0` sem `warn`, veredito PR #667 item 2),
+    // `j-fetch-error-loses-untrusted` a `web-tools-mutants.ts` (`tool.ts`
+    // para de marcar `untrusted` no erro de `web_fetch`, veredito PR #655
+    // item 1) e `T22-session-tools-skill-project-root-dropped` a
+    // `self-update-mutants.ts` (`session-tools.ts` deixa de passar
+    // `projectRoot` ao `SkillTool` da sessão, veredito PR #655 item 2):
+    // 320 + 3 = 323.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 320;
+    const TOTAL_MUTANTS = 323;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -689,12 +697,12 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/orchestration.ts": 6,
       "scripts/mutations/workflow-audit-live-mutants.ts": 32,
       "scripts/mutations/workflow-audit-producers-mutants.ts": 31,
-      "scripts/mutations/web-tools-mutants.ts": 9,
+      "scripts/mutations/web-tools-mutants.ts": 10,
       "scripts/mutations/media-catalog-other.ts": 7,
       "scripts/mutations/media-catalog-persistence.ts": 13,
-      "scripts/mutations/self-update-mutants.ts": 11,
+      "scripts/mutations/self-update-mutants.ts": 12,
       "scripts/mutations/workflow-executor-mutants.ts": 46,
-      "scripts/mutations/context-window.ts": 29,
+      "scripts/mutations/context-window.ts": 30,
       "scripts/mutations/context-prompt-mutants.ts": 16,
       "scripts/mutations/auth-mutants.ts": 13,
       "scripts/mutations/supervision-mutants.ts": 33,
@@ -706,7 +714,7 @@ describe("scripts/mutations/slices.json", () => {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(320);
+    expect(somaTabela).toBe(323);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {

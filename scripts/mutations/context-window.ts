@@ -601,6 +601,24 @@ export const contextWindowMutants: readonly Mutant[] = [
       },
     ],
   },
+  // --- issue #670 (residual F3, veredito PR #667 item 2) -----------------
+  {
+    id: "ad-notices-seq-corruption-silent",
+    category: "state",
+    mechanism:
+      "parseNoticeRow para de nomear um seq corrompido com um warning -- volta a devolver 0 em silêncio, igual ao defeito original de rowNumber() antes da checagem nomeada",
+    focus: {
+      file: noticesRepositoryTests,
+      test: "a corrupted seq reads back as 0 with a named warning (issue #670)",
+    },
+    edits: [
+      {
+        file: noticesRepository,
+        before: '    seq: checkedRowNumber(row.seq, "seq", id, warn),\n',
+        after: "    seq: rowNumber(row.seq),\n",
+      },
+    ],
+  },
 ];
 
 const root = resolve(import.meta.dirname, "../..");
