@@ -214,14 +214,10 @@ veredito da PR #625, non_blocking 2 "gasto órfão no caminho de erro")
 acrescenta `z`, o primeiro mutante em `envelope.ts`: `errorEnvelope` para de
 somar `extra.auxUsage` a `usage_total` — um turno que falha depois de um
 título bem-sucedido (`defaultAuxModel`) perdia esse gasto do envelope de
-erro: 25 + 1 = 26. A issue #649 (sub-issue B1 de #637: sessão retomada
-reusa as faixas persistidas do system prompt) acrescenta `aa`, o primeiro
-mutante em `src/conversation/runtime-session.ts` (módulo irmão extraído de
-`runtime.ts:349-366`, que estava em 796/800 linhas): `resolveTurnSession`
-volta a substituir as faixas restauradas de uma sessão retomada por
-`promptSnapshot()` — invariante 1 (prompt construído uma vez e
-congelado) quebra silenciosamente entre processos, mesmo bug que a issue
-corrige: 26 + 1 = 27.
+erro: 25 + 1 = 26. A issue #649 acrescenta `aa`, primeiro mutante em
+`runtime-session.ts`: `resolveTurnSession` recomputa via `promptSnapshot()`
+uma sessão retomada em vez de reusar as faixas persistidas; morto por
+`tests/conversation-runtime-prompt-caching.test.ts`: 26 + 1 = 27.
 
 `supervision-mutants.ts` (issue #451, milestone 14 — achado de QA/revisão de
 M10, épico #421) é o décimo terceiro catálogo, fatia nova: 227 + 19 = 246.
@@ -757,11 +753,10 @@ só sabe cobrir pelo diretório inteiro, não por um literal de arquivo aninhado
 (`src/<dir>/**`, forma acima) — a fatia **dispara** para qualquer mudança
 nesse diretório — não que todo arquivo dele tem mutante. Nos cinco
 diretórios que a fatia `context-window` acrescentou, a cobertura por
-mutante é parcial hoje: `conversation` (4 de 12 arquivos mutados —
-`compaction.ts`, `runtime.ts`, `envelope.ts`, `runtime-session.ts`),
-`context` (1 de 4 — `token-estimate.ts`),
-`providers` (1 de 5 — `context-window.ts`), `catalog` (1 de 5 —
-`windows-cache.ts`) e `agent` (1 de 3 — `aux.ts`; `client-pool.ts` e
+mutante é parcial hoje: `conversation` (4 de 12 — `compaction.ts`,
+`runtime.ts`, `envelope.ts`, `runtime-session.ts`), `context` (1 de 4 —
+`token-estimate.ts`), `providers` (1 de 5 — `context-window.ts`), `catalog`
+(1 de 5 — `windows-cache.ts`) e `agent` (1 de 3 — `aux.ts`; `client-pool.ts` e
 `index.ts` seguem sem mutante). `state` (1 arquivo mutado por essa fatia,
 `session-repository.ts`) já estava coberto por `srcGlobs` da fatia
 `workflow-durability` antes de `context-window` existir, então não conta
