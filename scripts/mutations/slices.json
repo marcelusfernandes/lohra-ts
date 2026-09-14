@@ -148,6 +148,7 @@
       "tests/workflow-templates.test.ts",
       "tests/workflow-cache-preview-writes.test.ts",
       "tests/transports-abort-in-flight.test.ts",
+      "tests/orchestration-child-runner.test.ts",
       "tests/orchestration-child-runner-abort.test.ts",
       "tests/orchestration-steer-interrupt.test.ts",
       "tests/workflow-orchestration-runtime-timeout.test.ts",

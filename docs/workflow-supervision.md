@@ -528,7 +528,7 @@ próprio; a doutrina completa, com o que ainda ficou aberto, está em
   (D3, `child-runner.ts:226-236`) porque `usageTotal` já inclui a parcela
   estimada da chamada abortada. Um `MaxIterationsError` cujo turno se
   esgota exatamente numa dessas chamadas absorvidas carrega o mesmo par
-  (`child-runner.ts:410-436`, agora via `error.partialCalls > 0` — issue #594
+  (`child-runner.ts:410-434`, agora via `error.partialCalls > 0` — issue #594
   substitui o `stopReason === "interrupted"` sozinho, achado 1: falso
   negativo quando o steer é absorvido numa iteração ANTERIOR à que bate o
   teto). `leaf.steered` ganha

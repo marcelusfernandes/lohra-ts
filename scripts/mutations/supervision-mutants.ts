@@ -1,12 +1,11 @@
-// Catálogo de 29 mutantes da fatia `supervision` (issue #451, milestone 14 —
+// Catálogo de 41 mutantes da fatia `supervision` (issue #451, milestone 14 —
 // achado de QA/revisão de M10, épico #421): `npm run mutations:all` seguia
 // 227/227 apesar de ~1.000 linhas novas em `src/workflow/{steer-tool,
 // leaf-read-tool,route-faults,route-override}.ts`, no bloco de steer de
 // `src/orchestration/core.ts`, no guard de `dead_turn` de
 // `src/orchestration/child-runner.ts` e no vocabulário de
 // `src/transports/error-kinds.ts`. Mesma mecânica A (git-archive + vitest
-// focado, `harness.ts`, issue #148); `mechanism: "family-a"` é só rótulo.
-//
+// focado, `harness.ts`, #148); `mechanism: "family-a"` é só rótulo.
 // Issue #484 (milestone 15, PRs #478/#482) acrescenta 9: 6 para
 // `cache-preview.ts` (#462) e 3 para `templates.ts` (#464). Rodada 2
 // (veredito da PR #497) acrescenta o mutante de `put()` (P6, abaixo,
@@ -765,16 +764,17 @@ export const supervisionMutants: readonly Mutant[] = [
     id: "X1-max-iterations-partial-guard-removed",
     category: "max-iterations-partial-guard-removed",
     mechanism: "family-a",
+    // Achado 2 (#594): remove a guarda -- TODO cap-hit vira partial.
     focus: {
-      file: childRunnerAbortFocus,
-      test: "a steer absorbed on iteration 1 whose cap is hit by a normally-completed iteration 2 reports partial/usageUncertain on the CollectResult, never a silent fully-measured claim",
+      file: "tests/orchestration-child-runner.test.ts",
+      test: "maps MaxIterationsError to status:'error' with the child's own leash, ignoring env (L10)",
     },
     edits: [
       {
         file: childRunner,
         before:
           "          return error.partialCalls > 0 ? { ...base, partial: true, usageUncertain: true } : base;",
-        after: "          return base;",
+        after: "          return { ...base, partial: true, usageUncertain: true };",
       },
     ],
   },
