@@ -119,9 +119,13 @@ export async function webSearchHandler(args: Readonly<Record<string, unknown>>):
       untrusted: true,
     });
   } catch (error) {
-    // Issue #642: mesmo motivo do erro de `webFetchHandler` acima — o texto
-    // é NOSSO (mensagem de `SearchUnavailable`/`WebError`, nunca o corpo de
-    // uma página de resultado), sem `untrusted`.
+    // Issue #675 (residual F4, veredito PR #674 item 2): ao contrário de
+    // `webFetchHandler` acima (que passou a marcar `untrusted: true` em
+    // #670), aqui NENHUMA mensagem interpola dado que o backend de busca
+    // devolveu — `SearchUnavailable` e `WebError` só carregam texto NOSSO
+    // (`search request failed: ...`, `search backend returned HTTP ...`,
+    // `search response exceeded ... bytes`, `src/web/search.ts:245,250,253`),
+    // nunca um cabeçalho ou corpo do servidor. `untrusted` continua fora.
     if (error instanceof SearchUnavailable) {
       return toolError(`search is unavailable right now: ${error.message}`, { query });
     }
