@@ -602,33 +602,35 @@ dia (e memória/skills, quando presentes) ficam DENTRO do mesmo bloco
 cacheado — o cache inteiro invalida a cada dia (ou a cada memória nova),
 em vez de só a faixa `volatile`. É uma cache mais grossa, não ausente.
 
-**Limite conhecido, fora do escopo desta issue (`runtime.ts` não está nos
-`Files`)**: `ConversationRuntime.runTurn` (`src/conversation/runtime.ts:365`)
-descarta as faixas que `session()` restaurou do banco antes de montar a
-próxima requisição de uma sessão RETOMADA — troca `session.systemPrompt`
-por `this.promptSnapshot()`, chamado de novo (uma sessão NOVA, linha 356,
-nunca tinha faixas restauradas para descartar: `promptSnapshot()` já é a
-única fonte ali). Isso significa que a persistência das três colunas
-(`system_prompt_stable`/`_context`/`_volatile`) não é hoje o que alimenta o
-cache de um turno seguinte de uma sessão retomada: o cache real depende de
-`promptSnapshot()` — a closure que `chat.ts`/`dashboard.ts` passam —
-reconstruir exatamente o mesmo texto que a chamada anterior construiu.
-Dentro do MESMO processo (mesma sessão de `chat --session`, ou o mesmo
-processo de `dashboard`) isso vale: nada no runtime muda
-`identity`/`doctrine`/`harness`/contexto de projeto no meio de uma sessão.
-Entre processos diferentes falando da MESMA sessão persistida (reabrir com
-`chat --session <id>` num processo novo, ou um turno do WS gateway lendo a
-sessão que o cron do dashboard criou), o cache (o breakpoint da Anthropic
-cai depois de `stable`+`context`, nunca em `volatile`) só sobrevive se as
-faixas `stable`+`context` restauradas do banco forem byte-idênticas ao que
-a nova closure de `promptSnapshot()` computa para essas duas faixas — a
-faixa `volatile` (data, memória, skills) pode mudar entre esses processos —
-dentro de um mesmo processo `promptSnapshot()` a memoiza (`runtime.ts:167-170`)
-— e fica depois do breakpoint, então divergir ali nunca invalida o que foi
-cacheado. Hoje não há garantia formal de que `stable`+`context`
-sejam byte-idênticas entre processos; reaproveitar as faixas restauradas
-(em vez de recomputar) é a issue própria referenciada em
-`## Fora de escopo` de #624.
+**Fechado pela issue #649** (sub-issue B1 de #637;
+`docs/decisions/2026-09-14-faixas-restauradas.md`): o limite acima —
+`ConversationRuntime.runTurn` descartava as faixas que `session()` restaurou
+do banco antes de montar a próxima requisição de uma sessão RETOMADA — não
+existe mais. `resolveTurnSession` (`src/conversation/runtime-session.ts:58-87`,
+extraído de `runtime.ts:334-352`, que estava em 796/800 linhas) decide: uma
+sessão RETOMADA cujo `volatile` restaurado não é vazio (`buildSystemPrompt`
+sempre anexa `Today's date is ...` a essa faixa quando monta uma faixa nova
+— `src/context/system-prompt.ts:152` — então uma linha que já entendeu
+faixas sempre a carrega ali, e o discriminador não tem falso positivo) usa
+as três faixas persistidas, byte-idênticas, e nunca chama `promptSnapshot()`
+de novo. Uma linha MIGRADA (`context`/`volatile` vazios — sessão anterior a
+#586, ou `createSession` chamado com uma string simples) continua caindo em
+`promptSnapshot()`, como antes desta issue: não há faixas de verdade para
+reusar. Sessão NOVA — a mesma citada acima nesta seção ("tanto numa sessão
+nova quanto numa retomada com `--session`") — segue igual: `promptSnapshot()`
+já era a única fonte ali.
+
+Três consequências nomeadas da leitura acima, não efeitos colaterais: a data
+em `volatile` fica congelada na criação da sessão — uma sessão retomada dias
+depois ainda lê a data de quando nasceu; memória/skills gravadas depois da
+criação da sessão não entram no prompt de uma sessão retomada (invariante 1,
+CLAUDE.md, agora vale ENTRE processos, não só dentro de um); e uma sessão
+criada sem doutrina (perfil fraco, `LOHRA_DOCTRINE=core`, ou pré-#579)
+continua sem doutrina ao ser retomada num binário que já a tem disponível —
+o item 10 do veredito da PR #610 fecha por construção, não por caso
+especial. A alternativa descartada (reusar só `stable`+`context` e
+recomputar `volatile` a cada turno, para a data ficar fresca) e o detalhe
+completo estão em `docs/decisions/2026-09-14-faixas-restauradas.md`.
 
 ## O que este documento ainda não cobre
 
