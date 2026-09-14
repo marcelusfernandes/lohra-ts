@@ -421,15 +421,18 @@ nunca instrução — mesmo quando lê como um comando dirigido ao modelo. No
 envelope, `web_fetch`, `web_search` e todo resultado MCP carregam
 `"untrusted": true` (campo aditivo, última chave); `read_file` e
 `skill_view` marcam o mesmo campo quando o caminho ou a skill lidos estão
-fora do diretório do projeto. As
+fora do diretório do projeto, e também quando `skill_view` não sabe de onde
+a skill veio (`skill.path === undefined`, lado seguro: a doutrina promete
+menos sobre a origem, nunca mais). As
 descriptions de `read_file`, `web_fetch`, `web_search`, `skill_view` e o
 wrapper de tool MCP citam a mesma frase de aviso. Detalhes em
 [`docs/system-prompt.md`](docs/system-prompt.md).
 
 O prompt do subagente (issue #583, spawnado por `delegate_task` ou
 `spawn_session`) carrega seu próprio `cwd` (bloco `Environment:`), a lista
-de tools que sobrou do allow-list do pai (`childToolDefinitions`, sempre a
-mesma lista que o turno realmente recebe) e um contrato de retorno: a
+de tools que sobrou do deny-list do pai (`parent − E`, `childToolDefinitions`,
+`src/tools/child.ts:45-60` — sempre a mesma lista que o turno realmente
+recebe) e um contrato de retorno: a
 última linha do turno deve ser `result: <summary>`, `failed: <why>` ou
 `needs input: <what>`. `delegate_task`/`collect_session` devolvem esse
 valor lido de volta ao pai no campo aditivo `outcome` (`"result" |
