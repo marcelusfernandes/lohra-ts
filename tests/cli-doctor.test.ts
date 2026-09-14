@@ -88,6 +88,29 @@ describe("lohra CLI bootstrap", () => {
     expect(stderr).toEqual([]);
   });
 
+  it("never reports a python check or fields — the runtime does not embed or call Python (issue #696)", async () => {
+    const stdout: string[] = [];
+    const env = environment();
+    expect(
+      await runCli(["doctor", "--json"], {
+        environment: env,
+        stdout: (v) => stdout.push(v),
+        stderr: () => undefined,
+        probeOllama: () => Promise.resolve(false),
+      }),
+    ).toBe(2);
+    const payload = stdout.join("");
+    expect(payload).not.toContain("python_version");
+    expect(payload).not.toContain("python_supported");
+    const report = JSON.parse(payload) as {
+      checks: ReadonlyArray<{ name: string }>;
+      environment: Record<string, unknown>;
+    };
+    expect(report.checks.some((check) => check.name === "python")).toBe(false);
+    expect(report.environment).not.toHaveProperty("python_version");
+    expect(report.environment).not.toHaveProperty("python_supported");
+  });
+
   it("distinguishes a live Ollama with models from a live empty daemon", async () => {
     const withModels: string[] = [];
     const empty: string[] = [];

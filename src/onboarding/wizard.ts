@@ -57,8 +57,6 @@ export interface OnboardingSnapshot {
   readonly providerOrigin: string;
   readonly providerNames: readonly string[];
   readonly presentProviderVars: readonly string[];
-  readonly pythonSupported: boolean;
-  readonly pythonVersion: string;
   readonly subscriptionActive: boolean;
 }
 
@@ -179,10 +177,6 @@ export function renderOnboardingReport(snapshot: OnboardingSnapshot): string {
     .join(", ");
   return `${[
     "Lohra — environment",
-    row(
-      "python",
-      `${snapshot.pythonVersion}${snapshot.pythonSupported ? "" : "  (unsupported: needs >=3.11,<3.14)"}`,
-    ),
     row("home", `${snapshot.home}  (profile: ${snapshot.activeProfile ?? "none"})`),
     row(".env", `${snapshot.envFile}  (${snapshot.envFilePresent ? "found" : "not found"})`),
     row("provider", provider),

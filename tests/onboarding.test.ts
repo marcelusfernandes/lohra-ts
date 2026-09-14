@@ -35,8 +35,6 @@ function snapshot(base: string, overrides: Partial<OnboardingSnapshot> = {}): On
     providerOrigin: "none",
     providerNames: ["anthropic", "openai", "ollama"],
     presentProviderVars: [],
-    pythonSupported: true,
-    pythonVersion: "3.12.10",
     subscriptionActive: false,
     ...overrides,
   };
@@ -189,6 +187,29 @@ describe("wizard", () => {
     expect(markerPresent(home)).toBe(true);
     expect(out).toContain("provider anthropic is selected, but ANTHROPIC_API_KEY is not set.");
     expect(err).toContain("ANTHROPIC_API_KEY (paste it, or Enter to skip) [skip]: ");
+  });
+
+  it("never prints a python line — the runtime does not embed or call Python (issue #696)", () => {
+    const base = root();
+    const home = join(base, "profile");
+    let out = "";
+    const result = runInit({
+      snapshot: snapshot(home),
+      base,
+      home,
+      environment: {},
+      noInput: true,
+      isTty: false,
+      prompter: new Prompter(
+        () => "",
+        () => undefined,
+      ),
+      writeOut: (text) => {
+        out += text;
+      },
+    });
+    expect(result).toBe(0);
+    expect(out.toLowerCase()).not.toContain("python");
   });
 
   it("writes marker directly and evaluates a configured provider", () => {
