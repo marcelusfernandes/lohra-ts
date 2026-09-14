@@ -368,13 +368,32 @@ mutante, `before`/`after` re-ancorados na mesma PR. Issue #647 (grupo A de
 (`engine.ts:333`) re-extrai `output` a cada re-collect mas precisa manter
 `usedFallback` pinado na 1ª leitura (#602) — sem esse pino, um nó cuja
 correção troca tool-por-prosa (ou vice-versa) deixaria a extração do retry
-sobrescrever a métrica. O mutante ("última leitura vence",
-`({ output, usedFallback } = extractForcedOutput(collected, forced))`) só
-morre com uma bateria que force `forced: true` E tenha `toolCalls` na
-retentativa — `tests/workflow-forced-fallback.test.ts` não estava em
-`focalTests`/`slices.json#focusFiles` até esta issue (achado do próprio
+sobrescrever a métrica. `tests/workflow-forced-fallback.test.ts` não estava
+em `focalTests`/`slices.json#focusFiles` até esta issue (achado do próprio
 veredito da PR #609, que não pôde incluir o mutante porque `slices.json`
 estava fora do `Files` daquela issue): sétimo arquivo da bateria (45 → 46).
+
+Rodada 1 da PR #663 propôs um `edit` só, revertendo `:333` de volta a
+`({ output, usedFallback } = extractForcedOutput(collected, forced));` —
+DEGENERADO: `usedFallback` é `const` desde o commit 41f79f67 (`const {
+output: forcedOutput, usedFallback } = extractForcedOutput(...); let output
+= forcedOutput;`), então reatribuir os dois nessa forma lança `TypeError:
+Assignment to constant variable.` em QUALQUER execução que alcance a linha
+— o mutante morria por crash nos 6 arquivos antigos da bateria (7 falhas
+observadas em sandbox pelo revisor), não pelo contrato de negócio; as duas
+asserções novas falhavam por `expected 'failed' to be 'complete'`, nunca
+por `forcingFallbacks`. Rodada 2 reverte o commit 41f79f67 INTEIRO, com
+DOIS `edits` no mesmo arquivo: `:293` volta a `let { output, usedFallback }
+= extractForcedOutput(collected, forced);` (a declaração some, `usedFallback`
+volta a `let`) e só ENTÃO `:333` volta à desestruturação — agora
+sintaticamente válida, porque a variável é `let` de novo. Sob os dois
+`edits`, os 6 arquivos antigos de `focalTests` continuam 100% verdes
+(nenhum força `forced: true` com retry) e só `tests/workflow-forced-fallback.test.ts`
+(a)/(b) falham, por asserção sobre `forcingFallbacks` (`expected 1 to be
++0` e `expected +0 to be 1`) — confirmado em sandbox (`git archive` do HEAD
+
+- os dois `after` aplicados) antes de rodar `npm run mutations:t15` de
+  verdade.
 
 ### `workflow-audit-producers-mutants.ts` (issue #370)
 

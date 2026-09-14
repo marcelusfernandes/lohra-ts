@@ -585,17 +585,35 @@ export const executorMutants: readonly ExecutorMutant[] = [
   },
   {
     // Issue #647 (grupo A de #637, item 1; follow-up do veredito da PR
-    // #609): the schema-validation retry loop re-extracts `output` on each
-    // re-collect but pins `usedFallback` to the FIRST reading (#602) — a
-    // node whose retry flips the tool-vs-prose split must not let the
-    // retry's own reading overwrite the metric. Killed only by a battery
-    // that forces `forced: true` with a toolCalls-bearing re-collect
-    // (`tests/workflow-forced-fallback.test.ts`, not in `focalTests` until
-    // this issue).
+    // #609, rodada 2, veredito da PR #663): a forma de UM `edit` só
+    // (reverter `output = extractForcedOutput(...).output;` de volta a
+    // `({ output, usedFallback } = extractForcedOutput(...));`) é
+    // degenerada — `usedFallback` é `const` desde o commit 41f79f67
+    // (`const { output: forcedOutput, usedFallback } = ...; let output =
+    // forcedOutput;`), então essa reatribuição sozinha lança `TypeError:
+    // Assignment to constant variable.` em QUALQUER teste que alcance a
+    // linha, matando o mutante por crash, não pelo contrato de negócio (o
+    // veredito provou 7 falhas nos 6 arquivos antigos de `focalTests`, e as
+    // duas novas asserções falhavam por `expected 'failed' to be
+    // 'complete'`, nunca por `forcingFallbacks`). O mutante de verdade
+    // reverte o commit 41f79f67 INTEIRO (dois `edits`): a declaração de
+    // `usedFallback` também volta a `let`, então a reatribuição no
+    // re-collect é sintaticamente válida de novo — e recalcula
+    // `usedFallback` a cada `collect()`, "a última leitura vence" (o bug
+    // que #602/PR #609 corrigiu). Com os dois `edits`, os 6 arquivos
+    // antigos de `focalTests` continuam verdes (nenhum força `forced: true`
+    // com retry) e só `tests/workflow-forced-fallback.test.ts` (a)/(b)
+    // falham — por asserção sobre `forcingFallbacks`, não por crash.
     id: "R1-recollect-fallback-last-wins",
     mechanism:
-      "the retry's own extraction overwrites usedFallback instead of keeping the 1st reading",
+      "usedFallback goes back to being recomputed on every re-collect (last reading wins) instead of pinned to the 1st reading",
     edits: [
+      {
+        file: engine,
+        before:
+          "      const { output: forcedOutput, usedFallback } = extractForcedOutput(collected, forced);\n      let output = forcedOutput;",
+        after: "      let { output, usedFallback } = extractForcedOutput(collected, forced);",
+      },
       {
         file: engine,
         before:
