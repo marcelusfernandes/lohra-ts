@@ -433,7 +433,7 @@ hostname de um `Location` que o SERVIDOR escolheu num redirect — mas o erro
 de `web_search` continua sem ela, porque nenhuma mensagem ali interpola
 dado do servidor; `read_file` e `skill_view` marcam o mesmo campo quando o
 caminho ou a skill lidos, com symlinks resolvidos (`realOrResolved`,
-`src/skills/store.ts:167`), estão fora da raiz do projeto — `read_file`
+`src/skills/store.ts:184`), estão fora da raiz do projeto — `read_file`
 mede a partir do cwd do processo, `skill_view` a partir da raiz
 da sessão que abriu a tool — e também quando `skill_view` não sabe de onde
 a skill veio (`skill.path === undefined`, lado seguro: a doutrina promete
