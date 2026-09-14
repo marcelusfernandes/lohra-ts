@@ -4,8 +4,14 @@
 // que os testes novos de uma PR reprovam contra a base da PR, para que
 // "teste primeiro" seja verificado por máquina, não só prometido no commit.
 //
-// SKIP por classe (ADR 0004 item 7, `lib.ts:114-160`) — três casos, todos
+// SKIP por classe (ADR 0004 item 7, `lib.ts:114-160`) — quatro casos, todos
 // exit 0 ANTES de sequer resolver o slug:
+//   - PR de release (issue #694, bloqueava a #691): branch `release/<x.y.z>`
+//     E diff não vazio E todo arquivo ∈ {`package.json`, `package-lock.json`,
+//     `CHANGELOG.md`} — não há `prova/<slug>.ts` porque não há
+//     comportamento novo a controlar (`lib.ts#ehPrDeRelease`). Checado
+//     ANTES da classe docs/process abaixo porque `release/x.y.z` não casa
+//     `<type>/<n>-<slug>` e reprovaria em `resolverSlug` sem este SKIP.
 //   - classes `docs`/`process`: TODO o diff cai em `docs/**`, `README.md`,
 //     `CLAUDE.md`, `AGENTS.md`, `.worktreeinclude`, `.claude/**`,
 //     `.github/**` ou `scripts/github/**` (`lib.ts#ehArquivoDocsOuProcess`/
@@ -136,6 +142,7 @@ import {
   deveSerIgnorado,
   ehCommitTestRed,
   ehDiffSoDoOverlay,
+  ehPrDeRelease,
   parseArgs,
   semHarnessNaBase,
   soArquivosDoOverlay,
@@ -571,6 +578,20 @@ function main(): void {
 
   const alterados = diffNomeStatus(root, base, head);
   const arquivosAlterados = alterados.map((item) => item.arquivo);
+
+  // Issue #694 (bloqueava a #691): PR de release (`release/<x.y.z>`, diff
+  // só de manifesto/lockfile/CHANGELOG) não tem `prova/<slug>.ts` — não há
+  // comportamento novo a controlar. SKIP antes de `resolverSlug`: sem isso,
+  // `release/x.y.z` reprova ali porque não casa `<type>/<n>-<slug>`
+  // (`branchSlug`, `scripts/prova/slug.ts:13`).
+  const branch = args.branch ?? git(root, ["branch", "--show-current"]).stdout.trim();
+  if (ehPrDeRelease(branch, arquivosAlterados)) {
+    const motivo = "SKIP — PR de release (só manifesto/CHANGELOG)";
+    escreverSummary(`## controle-negativo\n\n${motivo}.`);
+    process.stdout.write(`controle-negativo: ${motivo}\n`);
+    process.exit(0);
+  }
+
   if (deveSerIgnorado(arquivosAlterados)) {
     escreverSummary("## controle-negativo\n\nSKIP — PR de classe docs/process, nada a controlar.");
     process.stdout.write("controle-negativo: SKIP — PR de classe docs/process, nada a controlar\n");

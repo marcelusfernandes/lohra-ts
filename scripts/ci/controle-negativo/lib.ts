@@ -247,12 +247,16 @@ export function deveSerIgnorado(diff: readonly string[]): boolean {
  * `release/x.y.z` não casa `<type>/<n>-<slug>` (`branchSlug`,
  * `scripts/prova/slug.ts:13`).
  *
- * Stub (issue #694): ainda devolve sempre `false` — o teste em
- * `tests/ci-controle-negativo.test.ts` reprova por asserção contra este
- * stub (`test(red):`), não por erro estrutural.
  */
-export function ehPrDeRelease(_branch: string, _diff: readonly string[]): boolean {
-  return false;
+const RELEASE_BRANCH_RE = /^release\/\d+\.\d+\.\d+$/;
+const ARQUIVOS_DE_RELEASE = new Set(["package.json", "package-lock.json", "CHANGELOG.md"]);
+
+export function ehPrDeRelease(branch: string, diff: readonly string[]): boolean {
+  return (
+    RELEASE_BRANCH_RE.test(branch) &&
+    diff.length > 0 &&
+    diff.every((arquivo) => ARQUIVOS_DE_RELEASE.has(arquivo))
+  );
 }
 
 // --- SKIP: só declaração de prova já existente editada (acréscimo à #62,
