@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 
 import type { SessionRepository } from "../state/index.js";
 import { nullableInteger } from "../state/values.js";
+import { VERSION } from "../version.js";
 
-const GATEWAY_VERSION = "0.0.11";
+const GATEWAY_VERSION = VERSION;
 
 export interface CreateOrResurrectInput {
   readonly sessionId?: string;

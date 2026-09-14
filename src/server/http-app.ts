@@ -6,6 +6,8 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
+import { VERSION } from "../version.js";
+
 import { authorized } from "./auth.js";
 import { handleChatCompletions } from "./chat-handler.js";
 import { buildModelsList } from "./chat-format.js";
@@ -15,7 +17,7 @@ import { matchRoute } from "./routes.js";
 import { handleResponses } from "./responses-handler.js";
 import type { CompletionService } from "./service.js";
 
-const LOHRA_VERSION = "0.0.11";
+const LOHRA_VERSION = VERSION;
 
 export interface OpenAiServerOptions {
   readonly service: CompletionService;

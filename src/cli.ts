@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import { VERSION } from "./version.js";
 import { resolvePaths } from "./config/paths.js";
 import { applyEnvFile } from "./config/env-file.js";
 import { runModels } from "./commands/models.js";
@@ -73,7 +74,7 @@ import {
 // locally instead of growing that file's own record.
 const WORKFLOW_NOTICES_LEVEL: Level = { banner: "usage: lohra workflow notices [options]\n" };
 
-const version = "0.0.11";
+const version = VERSION;
 const commands = [
   "init",
   "doctor",

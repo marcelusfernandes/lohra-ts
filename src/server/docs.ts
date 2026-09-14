@@ -4,6 +4,7 @@
  * and the Swagger UI OAuth2 redirect page were removed; unknown routes,
  * including those, are a plain 404). */
 
+import { VERSION } from "../version.js";
 import { PRODUCT_PATHS } from "./routes.js";
 
 const OPERATION_IDS: Readonly<Record<string, string>> = {
@@ -24,7 +25,7 @@ export function openapiSchema(): Record<string, unknown> {
     info: {
       title: "Lohra OpenAI-compatible server",
       description: "OpenAI-compatible chat/completions surface exposed by `lohra serve`.",
-      version: "0.0.11",
+      version: VERSION,
     },
     paths,
   };
