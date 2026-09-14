@@ -185,5 +185,16 @@
       "tests/chat-provider-detectado.test.ts",
       "tests/providers.test.ts"
     ]
+  },
+  {
+    "slice": "skills",
+    "script": "mutations:skills",
+    "catalog": ["scripts/mutations/skills-mutants.ts"],
+    "srcGlobs": ["src/skills/**"],
+    "focusFiles": [
+      "tests/skills.test.ts",
+      "tests/skill-export.test.ts",
+      "tests/skills-builtin-contract.test.ts"
+    ]
   }
 ]

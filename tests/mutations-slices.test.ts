@@ -11,7 +11,7 @@
 //      dos RUNNERS que reexportam um `Mutants` agregado sem serem, eles
 //      mesmos, o catálogo — um catálogo novo, de qualquer nome, sem entrada
 //      em `slices.json` reprova aqui;
-//   3. os `catalog` do JSON batem, como conjunto, com os dezesseis catálogos de
+//   3. os `catalog` do JSON batem, como conjunto, com os dezessete catálogos de
 //      dado puro importados abaixo — um `catalog` novo no JSON sem import
 //      correspondente aqui (ou vice-versa) reprova, o que impede o número
 //      da contagem de driftar silenciosamente do JSON;
@@ -21,7 +21,7 @@
 //      bateria inteira para cada mutante em vez de afunilar por `focus`)
 //      bate exatamente com a união dos `focus.file` dos mutantes do(s)
 //      catálogo(s) da fatia;
-//   6. a contagem total de mutantes é a soma exata dos catálogos — os dezesseis
+//   6. a contagem total de mutantes é a soma exata dos catálogos — os dezessete
 //      arquivos de dado puro (issue #186: `workflow-executor-mutants.ts`
 //      entrou nessa lista, extraído do runner que antes embutia o
 //      catálogo) são importados de verdade (`import` estático, sem efeito
@@ -82,6 +82,7 @@ import { contextPromptMutants } from "../scripts/mutations/context-prompt-mutant
 import { otherMediaMutants } from "../scripts/mutations/media-catalog-other.js";
 import { persistenceMutants } from "../scripts/mutations/media-catalog-persistence.js";
 import { doctorMutants } from "../scripts/mutations/doctor-mutants.js";
+import { skillsMutants } from "../scripts/mutations/skills-mutants.js";
 import { orchestrationMutants } from "../scripts/mutations/orchestration.js";
 import { mutants as selfUpdateMutants } from "../scripts/mutations/self-update-mutants.js";
 import { supervisionMutants } from "../scripts/mutations/supervision-mutants.js";
@@ -122,6 +123,7 @@ const NAO_CATALOGO = new Set([
   "workflow-executor.ts",
   "auth.ts",
   "doctor.ts",
+  "skills.ts",
 ]);
 
 const CATALOG_EXPORT_PATTERN = /export const [A-Za-z_]*[Mm]utants\b/;
@@ -160,7 +162,7 @@ interface CatalogEntry {
   readonly edits: readonly { readonly file: string }[];
 }
 
-/** Os dezesseis catálogos de dado puro, chave = caminho relativo à raiz do repo
+/** Os dezessete catálogos de dado puro, chave = caminho relativo à raiz do repo
  * igual ao que aparece em `slices.json#catalog` -- a checagem de item 3 do
  * cabeçalho acima compara as CHAVES deste mapa contra a união dos
  * `catalog` do JSON, então um `catalog` novo no JSON sem entrada aqui (ou
@@ -192,6 +194,7 @@ const CATALOGOS: ReadonlyMap<string, readonly CatalogEntry[]> = new Map<
   ["scripts/mutations/supervision-mutants.ts", asCatalog(supervisionMutants)],
   ["scripts/mutations/supervision-mutants-2.ts", asCatalog(supervisionMutants2)],
   ["scripts/mutations/doctor-mutants.ts", asCatalog(doctorMutants)],
+  ["scripts/mutations/skills-mutants.ts", asCatalog(skillsMutants)],
 ]);
 
 interface Slice {
@@ -246,7 +249,8 @@ function readSlices(): readonly Slice[] {
 // Issue #636 (fatia `doctor`) removeu "doctor" deste mapa: a fatia nova
 // cobre esse diretório via `srcGlobs`, então "doctor" não pode continuar
 // listado como sem catálogo -- o teste de overlap abaixo reprova se os dois
-// continuarem verdadeiros ao mesmo tempo.
+// continuarem verdadeiros ao mesmo tempo. Issue #681 (fatia `skills`) faz o
+// mesmo com "skills".
 const SEM_FATIA: ReadonlyMap<string, string> = new Map([
   ["config", "sem catálogo de mutantes ainda"],
   ["core", "sem catálogo de mutantes ainda"],
@@ -257,7 +261,6 @@ const SEM_FATIA: ReadonlyMap<string, string> = new Map([
   ["pricing", "sem catálogo de mutantes ainda"],
   ["serialization", "sem catálogo de mutantes ainda"],
   ["server", "sem catálogo de mutantes ainda"],
-  ["skills", "sem catálogo de mutantes ainda"],
 ]);
 
 const DIR_GLOB = /^src\/([^/]+)\/\*\*$/;
@@ -319,7 +322,7 @@ describe("scripts/mutations/slices.json", () => {
     expect(existsSync(slicesPath)).toBe(true);
   });
 
-  it("tem as dez fatias, cada uma com o schema esperado", () => {
+  it("tem as onze fatias, cada uma com o schema esperado", () => {
     const slices = readSlices();
     expect(slices.map((entry) => entry.slice).sort()).toEqual(
       [
@@ -328,6 +331,7 @@ describe("scripts/mutations/slices.json", () => {
         "doctor",
         "media",
         "self-update",
+        "skills",
         "supervision",
         "web-tools",
         "workflow-audit-live",
@@ -493,8 +497,8 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 318 (soma dos dezesseis catálogos importados)", () => {
-    // Os dezesseis catálogos de dado puro, importados de verdade via CATALOGOS:
+  it("a contagem total de mutantes é 335 (soma dos dezessete catálogos importados)", () => {
+    // Os dezessete catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
     // `probe`). `workflow-executor-mutants.ts` (issue #186) foi o nono: antes
@@ -677,9 +681,24 @@ describe("scripts/mutations/slices.json", () => {
     // item 1) e `T22-session-tools-skill-project-root-dropped` a
     // `self-update-mutants.ts` (`session-tools.ts` deixa de passar
     // `projectRoot` ao `SkillTool` da sessão, veredito PR #655 item 2):
-    // 320 + 3 = 323.
+    // 320 + 3 = 323. A issue #681 (follow-up das QAs de 992edb74/c26486b7 e
+    // das PRs #675/#679) acrescenta o décimo sétimo catálogo,
+    // `skills-mutants.ts` (fatia nova `skills`): 12 mutantes cobrindo
+    // `src/skills/store.ts` (`collectSkillFiles` voltando a engolir o erro
+    // do `readdirSync`, avisando também em `ENOENT`, ou soltando o `code` da
+    // mensagem; `realOrResolved` usando `resolve()` em vez de
+    // `realpathSync()` no primeiro laço, deixando de seguir symlink;
+    // `parseSkillMd` aceitando frontmatter sem `name` e descartando
+    // `description`; `unquote` engolindo o erro de escalar mal-formado;
+    // `within` virando comparação por prefixo sem separador de diretório;
+    // `SkillStore`'s precedência de raízes invertida; `update` escrevendo
+    // direto no path de um skill `builtin` em vez de copiar para `home`;
+    // `delete` alcançando fora de `this.root`) e `src/skills/export.ts`
+    // (mensagem de erro do kit desconhecido perdendo o catálogo disponível)
+    // -- nenhum desses arquivos tinha mutante em nenhuma fatia até aqui:
+    // 323 + 12 = 335.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 323;
+    const TOTAL_MUTANTS = 335;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -708,13 +727,14 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/supervision-mutants.ts": 33,
       "scripts/mutations/supervision-mutants-2.ts": 8,
       "scripts/mutations/doctor-mutants.ts": 11,
+      "scripts/mutations/skills-mutants.ts": 12,
     };
     expect(new Set(Object.keys(CONTAGEM_POR_CATALOGO))).toEqual(new Set(CATALOGOS.keys()));
     for (const [path, mutants] of CATALOGOS) {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(323);
+    expect(somaTabela).toBe(335);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {
