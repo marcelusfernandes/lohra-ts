@@ -231,7 +231,7 @@ B diferem.
 | dois checkouts do Lohra                | entrada com campo `source` = caminho do checkout; o segundo vê que não foi ele que instalou e **avisa em vez de sobrescrever** | invisível: o carimbo diz a versão, não qual checkout                                                                                                        |
 | harness desinstalado                   | entrada órfã detectável e reportável                                                                                           | nada a reportar                                                                                                                                             |
 | sobrevive à perda do próprio registro  | não (manifesto apagado ⇒ o Lohra "esquece")                                                                                    | sim (o arquivo se descreve)                                                                                                                                 |
-| precedente no código                   | `~/.lohra/workflow_policy.json` e `~/.lohra/context-windows.json` já são registros JSON na base                                | `src/skills/store.ts:53-70` já renderiza frontmatter — mas com `version:`/`platforms:` **de topo**, que estão fora da spec                                  |
+| precedente no código                   | `~/.lohra/workflow_policy.json` e `~/.lohra/context-windows.json` já são registros JSON na base                                | `src/skills/store.ts:52-68` já renderiza frontmatter — mas com `version:`/`platforms:` **de topo**, que estão fora da spec                                  |
 
 **Escolha: A como fonte da verdade; B opcional, e só sob `metadata`.** A não
 depende de contrato de terceiro nenhum, e é o único dos dois que enxerga skill
@@ -469,7 +469,7 @@ funcionalidade que já existe é ativamente prejudicial.
    documentação de hoje com o disco de hoje; nenhum harness foi executado para
    confirmar de onde carrega. As versões desta máquina, para quem for repetir:
    `claude` 2.1.267, `codex-cli` 0.153.4, `opencode` 1.17.18, `pi` 0.84.3.
-7. **`src/skills/store.ts:53-70` escreve `version:` e `platforms:` como chaves de
+7. **`src/skills/store.ts:52-68` escreve `version:` e `platforms:` como chaves de
    topo**, que não existem na spec (`name`, `description`, `license`,
    `compatibility`, `metadata`, `allowed-tools`). Sem impacto enquanto essas
    skills ficam dentro do runtime; vira problema no dia em que alguma for
