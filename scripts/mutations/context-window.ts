@@ -77,6 +77,12 @@ const envelopeTests = "tests/conversation-envelope.test.ts";
 // Issue #649: sessão retomada reusa as faixas persistidas (invariante 1
 // entre processos, não só dentro de um).
 const runtimePromptCachingTests = "tests/conversation-runtime-prompt-caching.test.ts";
+// Issue #652 (sub-issue C2 de #637): `NoticesRepository` (`src/state/**`,
+// já em `srcGlobs` desta fatia por causa de `session-repository.ts`) ganha
+// seu primeiro mutante — escopo de `list()` sem `scope` e a leitura de
+// `acked_at`.
+const noticesRepository = "src/state/notices-repository.ts";
+const noticesRepositoryTests = "tests/state-notices-repository.test.ts";
 
 export const contextWindowMutants: readonly Mutant[] = [
   {
@@ -556,6 +562,42 @@ export const contextWindowMutants: readonly Mutant[] = [
         before:
           '  const restoredBandsUnderstood =\n    typeof persistedPrompt !== "string" && persistedPrompt.volatile !== "";\n',
         after: "  const restoredBandsUnderstood = false;\n",
+      },
+    ],
+  },
+  // --- issue #652 (sub-issue C2 de #637, veredito PR #635) ---------------
+  {
+    id: "ab-notices-list-unscoped-session-leak",
+    category: "state",
+    mechanism:
+      "NoticesRepository.list() sem scope volta a ignorar includeSessions -- a query sempre devolve session:* mesmo com includeSessions ausente/false, reabrindo o vazamento de sessão de chat alheia para o modelo de um run (issue #589)",
+    focus: {
+      file: noticesRepositoryTests,
+      test: "list() without scope excludes session:* by default; includeSessions:true brings it back (issue #652)",
+    },
+    edits: [
+      {
+        file: noticesRepository,
+        before: ", includeSessions ? 1 : 0,",
+        after: ", 1,",
+      },
+    ],
+  },
+  {
+    id: "ac-notices-acked-at-nan-silent",
+    category: "state",
+    mechanism:
+      "nullableRowReal para de checar Number.isFinite -- um acked_at ilegível volta a virar NaN em silêncio (serializa como null sem warning), igual ao bug original da issue #652",
+    focus: {
+      file: noticesRepositoryTests,
+      test: "a corrupted acked_at reads back as null with a named warning, never NaN (issue #652)",
+    },
+    edits: [
+      {
+        file: noticesRepository,
+        before:
+          "  if (!Number.isFinite(parsed)) {\n    warn(`notices: acked_at ilegível na linha ${String(id)}`);\n    return null;\n  }\n  return parsed;\n",
+        after: "  return parsed;\n",
       },
     ],
   },

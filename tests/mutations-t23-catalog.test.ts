@@ -54,6 +54,14 @@
 // 796/800 linhas): `resolveTurnSession` volta a substituir as faixas
 // restauradas de uma sessão retomada por `promptSnapshot()` -- invariante 1
 // quebra silenciosamente entre processos: 26 + 1 = 27.
+//
+// Issue #652 (sub-issue C2 de #637, veredito PR #635) acrescenta `ab` e
+// `ac`, os dois primeiros em `notices-repository.ts` (`src/state/**`, já
+// coberto pelo `srcGlobs` desta fatia por causa de `session-repository.ts`):
+// `ab` (`list()` sem `scope` volta a ignorar `includeSessions`, reabrindo o
+// vazamento de `session:*` para o modelo) e `ac` (`nullableRowReal` volta a
+// `Number(value)`, um `acked_at` ilegível vira `NaN` em silêncio): 27 + 2 =
+// 29.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -73,8 +81,8 @@ function sourceOf(relativePath: string): string {
 }
 
 describe("mutations:t23 catalog (compaction, estimator, context window)", () => {
-  it("declara exatamente 27 mutantes", () => {
-    expect(contextWindowMutants).toHaveLength(27);
+  it("declara exatamente 29 mutantes", () => {
+    expect(contextWindowMutants).toHaveLength(29);
   });
 
   it("cada id de mutante é único", () => {
@@ -82,7 +90,7 @@ describe("mutations:t23 catalog (compaction, estimator, context window)", () => 
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("mira apenas compaction.ts (×5), runtime.ts (×6), token-estimate.ts (×3), context-window.ts (×2), windows-cache.ts (×2), session-repository.ts (×3), provider-model.ts (×1), aux.ts (×3), envelope.ts (×1), runtime-session.ts (×1)", () => {
+  it("mira apenas compaction.ts (×5), runtime.ts (×6), token-estimate.ts (×3), context-window.ts (×2), windows-cache.ts (×2), session-repository.ts (×3), provider-model.ts (×1), aux.ts (×3), envelope.ts (×1), runtime-session.ts (×1), notices-repository.ts (×2)", () => {
     // Conta MUTANTES por arquivo (não edits) -- cada mutante deste catálogo
     // tem um único edit, então as duas contagens coincidem aqui, mas o
     // padrão (Set por mutante) segue mutations-t20-catalog.test.ts, que
@@ -104,6 +112,7 @@ describe("mutations:t23 catalog (compaction, estimator, context window)", () => 
       "src/agent/aux.ts": 3,
       "src/conversation/envelope.ts": 1,
       "src/conversation/runtime-session.ts": 1,
+      "src/state/notices-repository.ts": 2,
     });
   });
 

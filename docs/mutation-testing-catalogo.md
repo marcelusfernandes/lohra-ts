@@ -59,7 +59,17 @@ título bem-sucedido (`defaultAuxModel`) perdia esse gasto do envelope de
 erro: 25 + 1 = 26. A issue #649 acrescenta `aa`, primeiro mutante em
 `runtime-session.ts`: `resolveTurnSession` recomputa via `promptSnapshot()`
 uma sessão retomada em vez de reusar as faixas persistidas; morto por
-`tests/conversation-runtime-prompt-caching.test.ts`: 26 + 1 = 27.
+`tests/conversation-runtime-prompt-caching.test.ts`: 26 + 1 = 27. A issue
+#652 (sub-issue C2 de #637, veredito PR #635) acrescenta `ab` e `ac`, os
+dois primeiros mutantes em `src/state/notices-repository.ts` (já sob
+`srcGlobs` desta fatia por causa de `session-repository.ts`): `ab`
+(`NoticesRepository.list()` sem `scope` volta a ignorar `includeSessions` —
+a query passa a devolver `session:*` incondicionalmente, reabrindo o
+vazamento de uma sessão de chat alheia para o modelo de um run, issue #589)
+e `ac` (`nullableRowReal` volta a `Number(value)` sem checar
+`Number.isFinite` — um `acked_at` ilegível vira `NaN` em silêncio, que
+serializa como `null` sem nenhum `warning`); os dois mortos por
+`tests/state-notices-repository.test.ts`: 27 + 2 = 29.
 
 ### `supervision-mutants.ts` (issue #451)
 

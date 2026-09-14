@@ -662,9 +662,16 @@ describe("scripts/mutations/slices.json", () => {
     // `T22-dashboard-notices-dropped` (`dashboard.ts` deixa de passar
     // `notices` à gateway WS) e `T22-connection-summarize-dropped`
     // (`connection.ts` descarta `deps.summarize`) -- os dois campos que
-    // #608/#587 deixaram sem caller de produção na WS: 316 + 2 = 318.
+    // #608/#587 deixaram sem caller de produção na WS: 316 + 2 = 318. A
+    // issue #652 (sub-issue C2 de #637, veredito PR #635) acrescenta dois a
+    // `context-window.ts`: `ab` (`NoticesRepository.list()` sem `scope`
+    // volta a ignorar `includeSessions`, reabrindo o vazamento de
+    // `session:*` para o modelo) e `ac` (`nullableRowReal` volta a
+    // `Number(value)`, um `acked_at` ilegível vira `NaN` em silêncio) --
+    // primeiros mutantes em `src/state/notices-repository.ts`: 318 + 2 =
+    // 320.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 318;
+    const TOTAL_MUTANTS = 320;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -687,7 +694,7 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/media-catalog-persistence.ts": 13,
       "scripts/mutations/self-update-mutants.ts": 11,
       "scripts/mutations/workflow-executor-mutants.ts": 46,
-      "scripts/mutations/context-window.ts": 27,
+      "scripts/mutations/context-window.ts": 29,
       "scripts/mutations/context-prompt-mutants.ts": 16,
       "scripts/mutations/auth-mutants.ts": 13,
       "scripts/mutations/supervision-mutants.ts": 33,
@@ -699,7 +706,7 @@ describe("scripts/mutations/slices.json", () => {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(318);
+    expect(somaTabela).toBe(320);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {
