@@ -138,6 +138,33 @@ describe("ConversationRuntime notices overlay (#589)", () => {
     expect(repository.session("s1")?.systemPrompt).toBe("sys");
   });
 
+  it("pins request.system byte-for-byte to the session's systemPrompt with an overlay present (invariant 1, #608 AC3)", async () => {
+    const repository = new MemoryRepository();
+    const transport = new QueueTransport();
+    const notices = new FakeNotices();
+    notices.setClaimResult({
+      token: [7],
+      overlay: "OPERATOR NOTICES (not the user speaking):\n- [unknown] a pending notice",
+    });
+    const runtime = new ConversationRuntime({
+      repository,
+      transport,
+      promptSnapshot: () => "the frozen system prompt",
+      idSource: () => "s1",
+      clock: () => 1000,
+      notices,
+    });
+
+    await runtime.runTurn({ input: "hello", provider: "p", model: "m", cwd: "/tmp" });
+
+    // Byte-exact: the overlay lives ONLY in the user message (asserted
+    // above); `request.system` and the persisted session's own
+    // `systemPrompt` must be the UNCHANGED string `promptSnapshot()`
+    // produced, never that string plus the overlay appended.
+    expect(transport.requests[0]?.system).toBe("the frozen system prompt");
+    expect(repository.session("s1")?.systemPrompt).toBe("the frozen system prompt");
+  });
+
   it("acks the claimed token only after commitTurn lands (AC3)", async () => {
     const repository = new MemoryRepository();
     const transport = new QueueTransport();
