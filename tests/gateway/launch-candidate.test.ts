@@ -11,6 +11,7 @@ import {
 } from "../support/parity/gateway/launch-candidate.js";
 import { sendRawHttpRequest } from "../support/parity/gateway/raw-http-client.js";
 import { connectRawWs, WS_OPCODE } from "../support/parity/gateway/raw-ws-client.js";
+import { VERSION } from "../../src/version.js";
 
 // This is the first genuinely [processo-ts] + [socket-bilateral]-shaped
 // test in this session: a real, separately spawned `lohra dashboard`
@@ -71,7 +72,7 @@ describe("launchCandidateDashboard: a real subprocess, probed over raw sockets",
     });
     expect(restResponse.status).toBe(200);
     const body = JSON.parse(restResponse.body.toString("utf8")) as { ok: boolean; version: string };
-    expect(body).toEqual({ ok: true, version: "0.0.11", sessions: 0 });
+    expect(body).toEqual({ ok: true, version: VERSION, sessions: 0 });
 
     const wsClient = await connectRawWs("127.0.0.1", process_.port, "/api/ws");
     expect(wsClient.handshake.status).toBe(101);

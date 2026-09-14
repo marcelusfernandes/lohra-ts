@@ -6,6 +6,7 @@ import { createOpenAiServer } from "../src/server/http-app.js";
 import { CompletionService } from "../src/server/service.js";
 import type { ModelRequest, ModelTransport } from "../src/conversation/index.js";
 import type { NormalizedResponse } from "../src/transports/index.js";
+import { VERSION } from "../src/version.js";
 import type { Server } from "node:http";
 
 interface RawResponse {
@@ -132,7 +133,7 @@ describe("createOpenAiServer — end-to-end HTTP/SSE wiring", () => {
     expect(res.statusLine).toBe("HTTP/1.1 200 OK");
     expect(res.headers["content-type"]).toBe("application/json");
     expect(res.headers["transfer-encoding"]).toBeUndefined();
-    expect(res.body).toBe('{"ok":true,"version":"0.0.11"}');
+    expect(res.body).toBe(`{"ok":true,"version":"${VERSION}"}`);
   });
 
   it("HEAD /health is 405 (no auto-HEAD support)", async () => {

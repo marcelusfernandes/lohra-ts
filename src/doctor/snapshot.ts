@@ -9,6 +9,7 @@ import { readCodexTokens } from "../auth/codex.js";
 import { jsonFloat } from "../serialization/json-numbers.js";
 import { detectChatProvider } from "../commands/provider-detectado.js";
 import { CODEX_PROVIDER } from "../providers/index.js";
+import { VERSION } from "../version.js";
 import type { DoctorEnvironment, OllamaStatus } from "./model.js";
 import { detectConfiguredProvider, providerStatuses } from "./providers.js";
 
@@ -148,7 +149,7 @@ export async function probeOllamaDown(): Promise<OllamaStatus> {
   return await new Promise<OllamaStatus>((resolve) => {
     const request = get(
       targetUrl,
-      { headers: { accept: "*/*", "user-agent": "lohra-ts/0.0.11" }, timeout: 500 },
+      { headers: { accept: "*/*", "user-agent": `lohra-ts/${VERSION}` }, timeout: 500 },
       (response) => {
         const chunks: Buffer[] = [];
         response.on("data", (chunk: Buffer) => chunks.push(chunk));
