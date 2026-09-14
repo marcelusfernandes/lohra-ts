@@ -93,3 +93,14 @@ doutrina, memória ou skill precisa criar uma sessão nova — retomar a mesma
 - `scripts/mutations/context-window.ts`, mutante `aa-resumed-session-bands-
 recomputed`: reverte a regra para "sempre `promptSnapshot()`"; morto por
   `tests/conversation-runtime-prompt-caching.test.ts`.
+
+## Errata (2026-09-14)
+
+A seção `## Decisão` atribuiu o append de `Today's date is ...` à faixa
+`volatile` a `systemPromptBands` (`src/context/system-prompt.ts:151`).
+Quem anexa a data é `buildSystemPrompt` (`src/context/system-prompt.ts:152`,
+dentro do bloco que monta `volatile`); `SessionRepository.systemPromptBands`
+só lê e migra o que já foi persistido — é o discriminador correto (`volatile
+!== ""` só é verdade numa linha que passou por `buildSystemPrompt`), mas não
+é quem escreve a data. Texto original acima preservado; esta errata é a
+correção.

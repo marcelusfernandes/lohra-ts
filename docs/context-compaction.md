@@ -434,13 +434,14 @@ auxTelemetry.usage() }` quando `auxTelemetry` existe (`src/commands/chat.ts:619-
 
 `addUsage` — usado pelos dois envelopes e por `ConversationRuntime` — deixa
 de morar em `runtime.ts` (que o exportava desde a #587) e de ter uma cópia
-duplicada em `aux.ts` (`aux.ts:52-66` antes desta issue, com um comentário
+duplicada em `aux.ts` (`src/agent/aux.ts:52-66` antes desta issue, com um comentário
 explicando por que não podia importar de `runtime.ts` sem ciclo): as duas
 viram um módulo folha, `src/conversation/usage.ts`, sem import de nenhuma
 das duas — `runtime.ts`, `aux.ts` e `envelope.ts` importam dali.
 `src/conversation/index.ts` reexporta o módulo.
 
-`title.failed` (stderr, evento fail-open da issue #623) passa a nomear qual
+`title.failed` (stderr, evento fail-open desde a #587, `d2f02f2a`;
+exercitado para sessão nova na #623) passa a nomear qual
 dos dois pontos falhou — mesmo prefixo fixo, então nenhum pino antigo por
 substring quebra: `title.failed stage=generate` quando a própria chamada do
 título falha (`src/commands/chat.ts:542-548`, nunca chega a persistir), e
@@ -459,8 +460,9 @@ chamada existir) ficam no default `0`, porque nenhuma chamada desta iteração
 chegou a ser emitida. `child-runner.ts` não lê este campo — `partial`/
 `usage_uncertain` ali continuam derivando só de `partialUsage !== null`
 (ver `docs/workflow-supervision.md`); `partialCalls` é dado adicional para
-quem quiser distinguir "cancelado depois de N chamadas reais" de "cancelado
-antes da primeira", não uma entrada nova nesse contrato existente.
+quem quiser distinguir "cancelado depois de N chamadas absorvidas por steer"
+(`partialCalls += 1`, `runtime.ts:544`) de "cancelado antes de qualquer
+absorção", não uma entrada nova nesse contrato existente.
 
 Mutante novo (o primeiro em `envelope.ts`) documentado em
 `docs/mutation-testing.md`.

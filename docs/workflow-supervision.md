@@ -63,8 +63,9 @@ uma leitura que não terminou (#477).
 ## `workflow_leaf_read` — ler os turnos já assentados de um leaf vivo (#425, M10-S4)
 
 Lê os turnos que um leaf ainda rodando já COMMITOU — nunca o turno em voo,
-que só é gravado ao final (`conversation/runtime.ts:578-586`, comentário em
-`src/workflow/leaf-read-tool.ts:8-11`). Ao contrário de `workflow_audit`,
+que só é gravado ao final (`src/conversation/runtime.ts:712-719`,
+`commitTurn`; comentário em `src/workflow/leaf-read-tool.ts:8-11`). Ao
+contrário de `workflow_audit`,
 **não é metadata-only**: o conteúdo de um turno `tool` é a saída bruta e
 não redigida que o leaf realmente viu.
 
