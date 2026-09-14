@@ -10,7 +10,7 @@
 // tests/conversation-runtime.test.ts is pinned at exactly 800 lines -- the
 // `contratos` CI check refuses any file over that, so no test for this
 // issue could be added there either.
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SUMMARY_SYSTEM } from "../src/agent/aux.js";
 import {
@@ -101,6 +101,19 @@ describe("buildSummaryRequest (issue #584): maxTokens follows the transcript's o
 });
 
 describe("buildTranscript (issue #584 AC: tail truncation, never blowing the summary call's own budget)", () => {
+  // Issue #620 (acréscimo do orquestrador, item 4): #587 removed the old
+  // hardcoded `console.warn` here (TranscriptResult.truncated is the aviso
+  // now, read by ConversationRuntime.preflightCompact through the injectable
+  // eventSink) but the pin that buildTranscript never writes to the console
+  // at all -- fitting OR truncating -- was dropped along with it. Reposto.
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+  afterEach(() => {
+    warn.mockClear();
+    error.mockClear();
+  });
+
   it("returns the full transcript untouched, exactly as before this issue, when it fits the budget", () => {
     const messages = [...turn(1), ...turn(2)];
     const result = buildTranscript(messages, 1000);
@@ -114,6 +127,8 @@ describe("buildTranscript (issue #584 AC: tail truncation, never blowing the sum
         "assistant: answer 2",
       ].join("\n\n"),
     });
+    expect(warn).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
   });
 
   it("never truncates an empty transcript", () => {
@@ -139,6 +154,8 @@ describe("buildTranscript (issue #584 AC: tail truncation, never blowing the sum
     expect(result.transcript).not.toContain("question 2");
     expect(result.transcript).not.toContain("question 3");
     expect(result.transcript).toMatch(/4 more recent folded message\(s\) omitted/);
+    expect(warn).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
   });
 
   it("defaults to a budget derived from DEFAULT_CONTEXT_WINDOW when the caller passes none", () => {
