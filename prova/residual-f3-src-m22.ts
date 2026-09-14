@@ -15,5 +15,9 @@ export default {
     "tests/tools-stateful.test.ts",
     "tests/eval-cases.test.ts",
     "tests/mutations-slices.test.ts",
+    // Issue #675 (residual F4): o AC 6 de #670 pôs os testes de
+    // `within()`/ELOOP em `tests/skills.test.ts` — não declarado aqui até
+    // agora.
+    "tests/skills.test.ts",
   ],
 } satisfies Declaracao;
