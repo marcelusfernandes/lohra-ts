@@ -3,7 +3,7 @@ import type { IncomingMessage } from "node:http";
 
 import { WebSocketServer, type WebSocket } from "ws";
 
-import { ConversationRuntime } from "../../conversation/index.js";
+import { ConversationRuntime, type ConversationRuntimeOptions } from "../../conversation/index.js";
 import type {
   ConversationRepository,
   ConversationRuntimeEvent,
@@ -118,10 +118,19 @@ export interface GatewayWsDeps {
    * absent from every gateway turn before this — `dashboard.ts`'s own cron
    * job runtime already had it. Optional, same convention as
    * `ConversationRuntimeOptions.notices` itself: absent means byte-identical
-   * to every pre-#608 gateway turn. No production caller populates this yet
-   * (`dashboard.ts`, the only one that constructs `GatewayWsDeps`, is
-   * outside this issue's Files) — this is the mechanism, ready to wire. */
+   * to every pre-#608 gateway turn. Issue #651 fiada `dashboard.ts` (the
+   * only production caller of `createGatewayUpgradeHandler`): every real WS
+   * turn now populates this the same way the cron job runtime always did. */
   readonly notices?: TurnNoticesPort;
+  /** Issue #587 (AC1) wired `summarize` into the cron job runtime's
+   * `ConversationRuntime`; the interactive gateway WS path built its own
+   * runtime per turn and stayed outside that issue's `Files`, a documented
+   * gap (`docs/context-compaction.md`). Issue #651 closes it: optional, same
+   * convention as `notices` above — absent (no `defaultAuxModel` on the
+   * resolved provider profile) means byte-identical to every pre-#651
+   * gateway turn; present, `dashboard.ts` passes the same `AuxClient
+   * .summarizer()` the cron job runtime already used. */
+  readonly summarize?: ConversationRuntimeOptions["summarize"];
 }
 
 function fakeIncomingMessage(head: ParsedRequestHead): IncomingMessage {
@@ -257,10 +266,16 @@ async function handlePromptSubmit(
       idSource: () => sessionId,
       clock: () => Date.now() / 1000,
       maxTokens: resolveGatewayMaxTokens(deps.provider),
-      // Issue #608 (AC4): absent `deps.notices` (every caller today) means
+      // Issue #608 (AC4), fiado por #651: absent `deps.notices` means
       // `notices` is never even a key here -- exactOptionalPropertyTypes
       // forbids `notices: undefined` -- so this turn stays byte-identical.
       ...(deps.notices === undefined ? {} : { notices: deps.notices }),
+      // Issue #587 (AC1), fiado por #651: same convention -- absent
+      // `deps.summarize` (no `defaultAuxModel` on the resolved provider
+      // profile) means `summarize` is never even a key here, and this turn's
+      // compaction (if any) still falls back to the turn's own transport,
+      // byte-identical to every pre-#651 gateway turn.
+      ...(deps.summarize === undefined ? {} : { summarize: deps.summarize }),
       // Issue #287: forwards the two compaction events onto the socket as
       // `event` frames (encodeCompactionEventFrame above) -- before this,
       // `session.compacted`/`compaction.unsupported` only ever reached a
