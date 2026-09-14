@@ -176,19 +176,19 @@ fatia" cita a mesma restrição.
 | `media`               | `mutations:t21`         |       20 | `media-catalog-persistence.ts` (13) + `media-catalog-other.ts` (7)                                                    |
 | `web-tools`           | `mutations:t20`         |        9 | `web-tools-mutants.ts`                                                                                                |
 | `self-update`         | `mutations:self-update` |        8 | `self-update-mutants.ts`                                                                                              |
-| `context-window`      | `mutations:t23`         |       26 | `context-window.ts`                                                                                                   |
+| `context-window`      | `mutations:t23`         |       27 | `context-window.ts`                                                                                                   |
 | `auth`                | `mutations:auth`        |       13 | `auth-mutants.ts`                                                                                                     |
 | `supervision`         | `mutations:supervision` |       41 | `supervision-mutants.ts`                                                                                              |
 | `doctor`              | `mutations:doctor`      |       11 | `doctor-mutants.ts`                                                                                                   |
 
-Total: 296. Os 12 mutantes de `workflow-durability-guard.ts` são
+Total: 297. Os 12 mutantes de `workflow-durability-guard.ts` são
 combinatórios: três conjuntos do guard de escrita possuída (`fence`,
 `holder`, `lease-validity`) × quatro categorias (`state`, `cache`,
 `node-cost`, `spend`) — um mutante por combinação, cada um escorado só no
 teste focal da sua categoria, mais os 2 mutantes do INSERT combinado
 cache+custo (`combined-cell-guard-removed`,
 `combined-cost-escapes-refusal`). `tests/mutations-slices.test.ts` importa os
-catorze catálogos de dado puro estaticamente e prova essa soma (296) a cada
+catorze catálogos de dado puro estaticamente e prova essa soma (297) a cada
 corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
 
 A issue #587 (P11, compactação/título pelo `AuxClient`) acrescenta 4 a
@@ -214,7 +214,14 @@ veredito da PR #625, non_blocking 2 "gasto órfão no caminho de erro")
 acrescenta `z`, o primeiro mutante em `envelope.ts`: `errorEnvelope` para de
 somar `extra.auxUsage` a `usage_total` — um turno que falha depois de um
 título bem-sucedido (`defaultAuxModel`) perdia esse gasto do envelope de
-erro: 25 + 1 = 26.
+erro: 25 + 1 = 26. A issue #649 (sub-issue B1 de #637: sessão retomada
+reusa as faixas persistidas do system prompt) acrescenta `aa`, o primeiro
+mutante em `src/conversation/runtime-session.ts` (módulo irmão extraído de
+`runtime.ts:349-366`, que estava em 796/800 linhas): `resolveTurnSession`
+volta a substituir as faixas restauradas de uma sessão retomada por
+`promptSnapshot()` — invariante 1 (prompt construído uma vez e
+congelado) quebra silenciosamente entre processos, mesmo bug que a issue
+corrige: 26 + 1 = 27.
 
 `supervision-mutants.ts` (issue #451, milestone 14 — achado de QA/revisão de
 M10, épico #421) é o décimo terceiro catálogo, fatia nova: 227 + 19 = 246.
@@ -661,7 +668,7 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
    `true`.
 5. `npm test` roda `tests/mutations-slices.test.ts`, que reprova de duas
    formas se a contagem não for atualizada junto com o mutante novo: a soma
-   total (hoje 296, contra os catorze catálogos importados), e a linha do
+   total (hoje 297, contra os catorze catálogos importados), e a linha do
    catálogo tocado em `CONTAGEM_POR_CATALOGO`, uma tabela pinada por número
    literal — não derivada de `CATALOGOS.get(path).length` — para que uma
    troca compensatória entre dois catálogos (um ganha o que o outro perde,
@@ -718,8 +725,8 @@ contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
 `workflow-audit-live-mutants` 32, `workflow-audit-producers-mutants` 31,
 `web-tools-mutants` 9, `media-catalog-other` 7, `media-catalog-persistence`
 13, `self-update-mutants` 8, `workflow-executor-mutants` 45,
-`context-window` 26, `auth-mutants` 13, `supervision-mutants` 41,
-`doctor-mutants` 11, soma 296) e a soma de 296 contra os catorze catálogos
+`context-window` 27, `auth-mutants` 13, `supervision-mutants` 41,
+`doctor-mutants` 11, soma 297) e a soma de 297 contra os catorze catálogos
 importados; e que todo diretório de primeiro nível de `src/` está coberto por
 algum `srcGlobs` ou está em `SEM_FATIA` com um motivo não vazio — nunca os
 dois, nunca nenhum dos dois.
@@ -750,8 +757,9 @@ só sabe cobrir pelo diretório inteiro, não por um literal de arquivo aninhado
 (`src/<dir>/**`, forma acima) — a fatia **dispara** para qualquer mudança
 nesse diretório — não que todo arquivo dele tem mutante. Nos cinco
 diretórios que a fatia `context-window` acrescentou, a cobertura por
-mutante é parcial hoje: `conversation` (2 de 9 arquivos mutados —
-`compaction.ts`, `runtime.ts`), `context` (1 de 4 — `token-estimate.ts`),
+mutante é parcial hoje: `conversation` (4 de 12 arquivos mutados —
+`compaction.ts`, `runtime.ts`, `envelope.ts`, `runtime-session.ts`),
+`context` (1 de 4 — `token-estimate.ts`),
 `providers` (1 de 5 — `context-window.ts`), `catalog` (1 de 5 —
 `windows-cache.ts`) e `agent` (1 de 3 — `aux.ts`; `client-pool.ts` e
 `index.ts` seguem sem mutante). `state` (1 arquivo mutado por essa fatia,
