@@ -1,3 +1,5 @@
+import { estimateTokens } from "../context/token-estimate.js";
+import { summaryMaxTokens } from "../conversation/summary-budget.js";
 import type {
   ChatKwargs,
   NormalizedResponse,
@@ -32,6 +34,19 @@ export const TITLE_SYSTEM =
 
 interface AuxModelClient {
   create(kwargs: ChatKwargs): Promise<NormalizedResponse>;
+}
+
+/** Issue #620: the ONE call site both `summarize` (below) and `auxTelemetry
+ * ().summarize` route through, so a profile with `defaultAuxModel` gets the
+ * SAME `maxTokens` budget as `buildSummaryRequest`
+ * (`src/conversation/compaction.ts`, issue #584) for an identical transcript
+ * -- before this issue, this path always sent the fixed default `1024`
+ * regardless of the folded transcript's own size, truncating exactly the two
+ * verbatim sections `SUMMARY_SYSTEM` exists to preserve. Same message shape
+ * `buildSummaryRequest` estimates (`[{ role: "user", content: transcript }]`)
+ * so the two paths agree on the same number for the same transcript. Pure. */
+function summaryBudgetFor(transcript: string): number {
+  return summaryMaxTokens(estimateTokens([{ role: "user", content: transcript }]).tokens);
 }
 
 /** Same shape/semantics as `ConversationRuntime`'s own `addUsage`
@@ -97,7 +112,7 @@ export class AuxClient {
   }
 
   public summarize(transcript: string): Promise<string> {
-    return this.complete(SUMMARY_SYSTEM, transcript);
+    return this.complete(SUMMARY_SYSTEM, transcript, summaryBudgetFor(transcript));
   }
 
   public title(transcript: string): Promise<string> {
@@ -124,7 +139,10 @@ export class AuxClient {
       return completion.text;
     };
     return {
-      summarize: (transcript) => this.completeWithUsage(SUMMARY_SYSTEM, transcript).then(record),
+      summarize: (transcript) =>
+        this.completeWithUsage(SUMMARY_SYSTEM, transcript, summaryBudgetFor(transcript)).then(
+          record,
+        ),
       title: (transcript) => this.completeWithUsage(TITLE_SYSTEM, transcript, 32).then(record),
       calls: () => calls,
       usage: () => usage,
