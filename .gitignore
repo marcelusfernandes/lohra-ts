@@ -5,6 +5,7 @@ coverage/
 .env
 .DS_Store
 .mutation-evidence/
+.eval/
 .live-smoke-evidence/
 .lavish/
 lohra/

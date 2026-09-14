@@ -83,6 +83,16 @@ describe("parseEvalCase", () => {
     ).toThrow(/"mechanism" precisa ser array/);
   });
 
+  // Issue #607 item 4: `mechanism: []` passaria vacuamente por
+  // `evaluateMechanism` (todo `.every()` sobre array vazio é `true`) —
+  // um caso sem nenhuma assertion de mecanismo estaria sempre "verde" sem
+  // provar nada. `parseEvalCase` recusa isso na borda, antes do runner.
+  it("rejects a case with an empty mechanism array (would pass vacuously)", () => {
+    expect(() => parseEvalCase({ ...MINIMAL_CASE, mechanism: [] }, "fixture.json", "bad")).toThrow(
+      /"mechanism" precisa ter pelo menos uma assertion/,
+    );
+  });
+
   it("rejects a mechanism assertion with an unknown kind", () => {
     expect(() =>
       parseEvalCase(

@@ -181,21 +181,55 @@ function spawnCli(
  * `chat.ts` — descoberta de `AGENTS.md`/`CLAUDE.md`, escopo de skills de
  * projeto). Em modo subprocesso isso saía de graça (o `spawn` já dá ao
  * filho seu próprio cwd real); in-process, sem isso, um `cwd_fixture`
- * relativo (`tool-target.txt`) nunca seria encontrado. Restaura o cwd
- * anterior só quando a invocação de verdade se resolve — nunca no
- * `Promise.race`, que pode vencer primeiro por timeout enquanto a chamada
- * perdida segue lendo/escrevendo relativo ao `cwd` do caso. */
-async function runInProcess(
+ * relativo (`tool-target.txt`) nunca seria encontrado. `runInProcess`
+ * restaura o cwd (via `restoreProjectRootCwd`) só quando a invocação de
+ * verdade se resolve — nunca dentro do `Promise.race`, que pode vencer
+ * primeiro por timeout enquanto a chamada perdida segue lendo/escrevendo
+ * relativo ao `cwd` do caso. `runEvalCase` (abaixo) também chama
+ * `restoreProjectRootCwd` no seu próprio `finally`, então o cwd volta para
+ * a raiz do processo mesmo num timeout — a chamada perdida, se ainda
+ * rodar depois disso, passa a resolver caminho relativo contra a raiz do
+ * projeto (não mais contra o diretório do caso, já removido); seu
+ * resultado já foi descartado de qualquer forma, e a alternativa (não
+ * restaurar) era `ENOENT` para TODO caso seguinte (item 7 abaixo).
+ *
+ * Issue #607 item 7: o alvo de restauração NUNCA é um `process.cwd()`
+ * capturado de novo a cada chamada — é sempre `PROJECT_ROOT_CWD`, uma
+ * única captura feita no import deste módulo. Um `previousCwd`
+ * recapturado por chamada podia, sob um caso que estourasse `timeoutMs`
+ * (típico de `--provider` contra rede real), ficar apontando para o
+ * diretório temporário de um caso ANTERIOR já removido por `runEvalCase`
+ * (que fazia `rmSync` antes de qualquer chamada de volta a
+ * `process.chdir` ter rodado) — dependendo do timing e da plataforma,
+ * isso derrubava o runner de duas formas possíveis, ambas eliminadas por
+ * `PROJECT_ROOT_CWD`: (a) `process.cwd()` do PRÓXIMO caso lançando
+ * `ENOENT` (`uv_cwd`) por rodar com o cwd ativo do processo já apontando
+ * para um diretório apagado (reproduzido em
+ * `tests/eval-session-internals.test.ts`), ou (b) o `previousCwd` capturado
+ * daquele jeito sendo, ele mesmo, o caminho já removido, e um
+ * `process.chdir(previousCwd)` tardio (dentro de um `.finally` não
+ * aguardado, `void`) lançando `ENOENT` como rejeição não tratada. Em
+ * qualquer um dos dois casos o runner morria no meio do lote.
+ * `PROJECT_ROOT_CWD` nunca é removido pelo harness — restaurar para ele é
+ * sempre seguro, independente de quantos casos rodaram (ou travaram)
+ * desde então. */
+const PROJECT_ROOT_CWD = process.cwd();
+
+/** Só para teste (issue #607 item 7): `runInProcess` recebe o `invoke` real
+ * (`runCli`) por padrão — nenhum chamador de produção passa outro. */
+export type CliInvoker = typeof runCli;
+
+export async function runInProcess(
   argv: readonly string[],
   environment: Readonly<Record<string, string>>,
   cwd: string,
   timeoutMs: number,
+  invoke: CliInvoker = runCli,
 ): Promise<CliRunResult> {
   let stdout = "";
   let stderr = "";
-  const previousCwd = process.cwd();
   process.chdir(cwd);
-  const invocation = runCli(argv, {
+  const invocation = invoke(argv, {
     environment: { ...environment },
     cwd,
     isTty: false,
@@ -216,7 +250,7 @@ async function runInProcess(
     }),
   );
   void invocation.finally(() => {
-    process.chdir(previousCwd);
+    restoreProjectRootCwd();
   });
   const timeout = new Promise<CliRunResult>((resolve) => {
     setTimeout(() => {
@@ -226,12 +260,46 @@ async function runInProcess(
   return Promise.race([invocation, timeout]);
 }
 
+/** Melhor esforço, nunca uma rejeição não tratada (CLAUDE.md invariante 2:
+ * falha nunca silenciosa, mas também nunca fatal para o lote inteiro por
+ * uma restauração de cwd que já é só limpeza). `PROJECT_ROOT_CWD` nunca
+ * deveria sumir; se sumir mesmo assim, avisamos em stderr em vez de deixar
+ * o processo cair. */
+function restoreProjectRootCwd(): void {
+  try {
+    process.chdir(PROJECT_ROOT_CWD);
+  } catch (error) {
+    process.stderr.write(
+      `eval: não foi possível restaurar o cwd para ${PROJECT_ROOT_CWD}: ${String(error)}\n`,
+    );
+  }
+}
+
 function definedEntries(environment: NodeJS.ProcessEnv): Readonly<Record<string, string>> {
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(environment)) {
     if (value !== undefined) result[key] = value;
   }
   return result;
+}
+
+/** Ambiente do modo `--provider`: herdado do operador de propósito — as
+ * credenciais vivem em `~/.lohra/.env`, fora do repo (`src/config/paths.ts`)
+ * — mas SEMPRE isolado num profile próprio (issue #607 item 2). Sem isso,
+ * `resolvePaths` (`src/config/paths.ts:30-39`) resolve `home` para
+ * `~/.lohra` (o profile default do operador) e o baseline grava sessões no
+ * MESMO `state.db` das sessões reais dele. `.env` independe de profile
+ * (`envFile` é sempre `~/.lohra/.env`), então isolar o profile nunca esconde
+ * as credenciais. Um `LOHRA_PROFILE` já exportado pelo operador vence — o
+ * default é só para quem não escolheu nenhum, nunca uma imposição sobre uma
+ * escolha explícita. */
+export function buildProviderEnvironment(processEnv: NodeJS.ProcessEnv): Record<string, string> {
+  return {
+    ...definedEntries(processEnv),
+    LOHRA_PROFILE: processEnv.LOHRA_PROFILE ?? "eval",
+    LOHRA_NO_WIZARD: "1",
+    NO_COLOR: "1",
+  };
 }
 
 function parseEnvelope(stdout: string): {
@@ -377,11 +445,7 @@ export async function runEvalCase(
       mkdirSync(dirname(fixturePath), { recursive: true });
       writeFileSync(fixturePath, kase.cwdFixture.content);
     }
-    const environment: Record<string, string> = {
-      ...definedEntries(process.env),
-      LOHRA_NO_WIZARD: "1",
-      NO_COLOR: "1",
-    };
+    const environment = buildProviderEnvironment(process.env);
     const argv = [
       "chat",
       "--json",
@@ -403,6 +467,18 @@ export async function runEvalCase(
       requests: [],
     };
   } finally {
+    // Issue #607 item 7: restaura o cwd para a raiz do processo ANTES de
+    // remover `root` — nunca a ordem inversa. Um caso que estourou
+    // `timeoutMs` (`runCliOrSpawn` já retornou pelo braço do timeout) pode
+    // deixar `process.cwd()` ainda dentro de `root` enquanto a chamada
+    // perdida segue rodando em segundo plano (comentário de
+    // `runInProcess`); sem restaurar aqui, `rmSync` apagaria o diretório
+    // que ainda é o cwd ATIVO do processo antes que o `.finally` de
+    // `runInProcess` tivesse a chance de rodar — o mesmo sintoma que
+    // corrompia `previousCwd` de um caso seguinte (ver `PROJECT_ROOT_CWD`
+    // acima). Melhor esforço: nunca deixa uma falha aqui virar exceção
+    // não tratada que perderia o `rmSync` de limpeza.
+    restoreProjectRootCwd();
     rmSync(root, { recursive: true, force: true });
   }
 }
