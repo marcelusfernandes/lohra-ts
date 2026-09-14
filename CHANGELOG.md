@@ -93,6 +93,7 @@
 
 ### CI
 
+- ci(controle-negativo): PR de release (release/x.y.z, só manifesto/CHANGELOG) é SKIP (#695)
 - ci(release): publica no npm com provenance e cria a Release a partir da tag (#689)
 - ci(controle-negativo): lefthook.yml na classe process e cabeçalho atualizado para prepare/LOHRA_SKIP_PREPARE (#565)
 - ci(pack-check): remove o env do node-gyp de mutations.yml, pina ci → build → pack:check e documenta os caches offline (#562) (#563)
