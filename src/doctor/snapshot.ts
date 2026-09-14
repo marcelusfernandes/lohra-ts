@@ -8,6 +8,7 @@ import { resolveAuthRoute, subscriptionActive } from "../auth/credentials.js";
 import { readCodexTokens } from "../auth/codex.js";
 import { jsonFloat } from "../serialization/json-numbers.js";
 import { detectChatProvider } from "../commands/provider-detectado.js";
+import { CODEX_PROVIDER } from "../providers/index.js";
 import type { DoctorEnvironment, OllamaStatus } from "./model.js";
 import { detectConfiguredProvider, providerStatuses } from "./providers.js";
 
@@ -62,11 +63,6 @@ export function buildEnvironment(
   // -- `src/commands/provider-detectado.ts` reusa a mesma função para o
   // provedor que `chat`/`dashboard` usam quando `--provider` está ausente.
   const { provider: detected, error: providerError } = detectConfiguredProvider(environment);
-  // Issue #631: mesma chamada que `chat`/`dashboard` fazem sem `--provider`
-  // (`src/commands/chat.ts:161-163`) -- reusar a função, não repetir a
-  // regra, para `chat_default_provider` nunca divergir do que o `chat`
-  // realmente decide.
-  const chatDefaultProvider = detectChatProvider(environment).provider;
   const providerOrigin: "none" | "api-key" | "env-var" =
     detected === null ? "none" : (environment.LOHRA_PROVIDER ?? "").trim() ? "env-var" : "api-key";
   const userHome = environment.HOME ?? "";
@@ -78,6 +74,15 @@ export function buildEnvironment(
   const active = subscriptionActive(paths.home);
   const baseActive = subscriptionActive(paths.base);
   const route = resolveAuthRoute(paths.home);
+  // Issue #633: mirrors `chat.ts`'s own branching on this same `route`
+  // (`chat.ts:157-163,184,230`) instead of calling `detectChatProvider`
+  // unconditionally (the #631 bug this issue fixes) -- see the three cases
+  // documented on `chat_default_provider` in `./model.ts`.
+  const chatDefaultProvider = route.error
+    ? null
+    : route.mode === "subscription"
+      ? CODEX_PROVIDER.name
+      : detectChatProvider(environment).provider;
   const harnesses = [
     { name: "claude", home: join(userHome, ".claude") },
     { name: "codex", home: codexHome },

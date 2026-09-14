@@ -76,11 +76,25 @@ function countNamed(value: unknown, key: string, noun: string): string {
   return count === null ? "valid JSON" : `${String(count)} ${noun}`;
 }
 
+/**
+ * Issue #633: a única definição de "Ollama pronto" deste arquivo. Antes,
+ * `providerCheck` (abaixo) exigia `alive && models.length > 0` para tratar
+ * Ollama como um provedor utilizável, enquanto o Check `ollama-sem-chave`
+ * só olhava `alive` — um Ollama no ar sem nenhum modelo puxado acionava
+ * `provider: fail` (a leitura forte, correta) e, ao mesmo tempo, um `warn`
+ * recomendando `lohra chat --provider ollama` (a leitura fraca), comando
+ * que falharia nesse mesmo estado por falta de modelo. As duas leituras
+ * agora vêm desta função.
+ */
+export function isOllamaReady(ollama: DoctorEnvironment["ollama"]): boolean {
+  return ollama.alive && ollama.models.length > 0;
+}
+
 export function runChecks(environment: DoctorEnvironment): readonly Check[] {
   const provider = environment.providers.find(
     (entry) => entry.provider === environment.detected_provider,
   );
-  const ollamaReady = environment.ollama.alive && environment.ollama.models.length > 0;
+  const ollamaReady = isOllamaReady(environment.ollama);
   const envKeys = Object.keys(readEnvFile(environment.env_file)).sort();
   const foundHarnesses = environment.harnesses.filter(
     (entry) => entry.installed === true || entry.home_present === true,
@@ -138,9 +152,16 @@ export function runChecks(environment: DoctorEnvironment): readonly Check[] {
   // Check adianta a mesma instrução no relatório do `doctor`, no lugar exato
   // onde `providerCheck` (acima) já imprime "ollama (from keyless: ...)" —
   // um "ok" que, sozinho, sugere que basta rodar `ollama serve`.
+  //
+  // Issue #633: a condição usa `ollamaReady` (a mesma função de
+  // `providerCheck` acima), não só `environment.ollama.alive` -- com Ollama
+  // no ar mas nenhum modelo puxado, `ollamaReady` é `false` e este Check não
+  // emite: recomendar `--provider ollama` nesse estado seria um remédio que
+  // falha (sem modelo), e `providerCheck` já reporta `fail` por conta
+  // própria, sem precisar de um segundo aviso.
   const ollamaKeylessGap: Check | null =
     environment.auth_route === "api_key" &&
-    environment.ollama.alive &&
+    ollamaReady &&
     environment.chat_default_provider === null
       ? {
           name: "ollama-sem-chave",
