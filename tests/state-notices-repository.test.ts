@@ -441,6 +441,54 @@ describe("NoticesRepository", () => {
     }
   });
 
+  // Issue #670 (residual F3, veredito PR #667 item 2): `nullableRowReal`
+  // (issue #652) names a corrupted `acked_at` with a `warning`; the sibling
+  // `rowNumber` conversions (`id`, `seq`, `fence`, all `INTEGER` columns in
+  // `parseNoticeRow`) stayed silent — a corrupted `seq` just became `0`,
+  // and `workflow_notices_ack(0)` would forever answer `acked:false` with
+  // no trace of why. `seq` is written by this class's own `next_seq`
+  // counter (never a `bigint`/fraction), so the only way to reach this path
+  // for real is an out-of-band write — reproduced here with a raw SQL
+  // `UPDATE`, same technique as the `acked_at` test above.
+  it("a corrupted seq reads back as 0 with a named warning (issue #670)", () => {
+    const path = tempDbPath();
+    const connection = openStateDatabase(path);
+    try {
+      const warnings: string[] = [];
+      const notices = new NoticesRepository(connection.database, {
+        warning: (message) => warnings.push(message),
+      });
+      const written = notices.append("global", { kind: "unknown", message: "x" });
+      const id = (written as PublicNotice).id;
+      connection.database
+        .prepare("UPDATE operator_notices SET seq = ? WHERE id = ?")
+        .run("abc", id);
+
+      const page = notices.list({ scope: "global" });
+      const notice = page.notices.find((candidate) => candidate.id === id);
+      expect(notice?.seq).toBe(0);
+      expect(warnings).toEqual([`notices: seq ilegível na linha ${String(id)} — usando 0`]);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("an intact row never warns (guard for the seq check above, issue #670)", () => {
+    const path = tempDbPath();
+    const connection = openStateDatabase(path);
+    try {
+      const warnings: string[] = [];
+      const notices = new NoticesRepository(connection.database, {
+        warning: (message) => warnings.push(message),
+      });
+      notices.append("global", { kind: "unknown", message: "x" });
+      notices.list({ scope: "global" });
+      expect(warnings).toEqual([]);
+    } finally {
+      connection.close();
+    }
+  });
+
   it("exports the closed vocabulary and the scope cap constant", () => {
     expect(NOTICE_KINDS).toContain("quota_exhausted");
     expect(NOTICE_KINDS).toContain("stale_fence_write");
