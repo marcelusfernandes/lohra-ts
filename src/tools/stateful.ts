@@ -55,26 +55,31 @@ export class MemoryTool {
 
 // Issue #581 (épico #575, P5, rodada 1b): mesmo critério de `readFileTool`
 // (`src/tools/filesystem.ts`) — uma skill cujo arquivo (`skill.path`) não é
-// ancestral do project_root que `findProjectRoot` resolve a partir do cwd
-// real do processo é dado potencialmente de terceiro (skill "home"/builtin,
-// ou de um projeto diferente do que está aberto agora). `skill.path` é
-// sempre definido para uma skill vinda de `SkillStore.get()` (lida de disco
-// por `collectSkillFiles`/`parseSkillMd`) — o `undefined` só existe no tipo
-// `Skill` para permitir construção em memória fora do store; nesse caso
-// hipotético, marcar `untrusted` é o lado seguro (a doutrina promete menos
-// sobre a origem, nunca mais).
-function isUntrustedSkill(skill: Skill): boolean {
-  return skill.path === undefined || isUntrustedPath(skill.path);
+// ancestral do project_root é dado potencialmente de terceiro (skill
+// "home"/builtin, ou de um projeto diferente do que está aberto agora).
+// `skill.path` é sempre definido para uma skill vinda de `SkillStore.get()`
+// (lida de disco por `collectSkillFiles`/`parseSkillMd`) — o `undefined` só
+// existe no tipo `Skill` para permitir construção em memória fora do store;
+// nesse caso hipotético, marcar `untrusted` é o lado seguro (a doutrina
+// promete menos sobre a origem, nunca mais).
+//
+// Issue #642: `root` é a raiz da SESSÃO que abriu `SkillTool` (`options.
+// projectRoot`), nunca a do processo — `isUntrustedPath` cai no default
+// (`findProjectRoot(process.cwd())`) só quando `root` é `undefined`, o
+// mesmo comportamento de antes para quem não passa `projectRoot`.
+function isUntrustedSkill(skill: Skill, root?: string): boolean {
+  return skill.path === undefined || isUntrustedPath(skill.path, root);
 }
 
 export class SkillTool {
+  private readonly projectRoot: string | undefined;
+
   constructor(
     private readonly store: SkillStore,
-    // Issue #642: assinatura chega antes do comportamento — `projectRoot`
-    // ainda não é lido por `view()` neste commit (vermelho: os testes que
-    // dependem dele continuam falhando por asserção, não por compilação).
-    private readonly options: { readonly projectRoot?: string } = {},
-  ) {}
+    options: { readonly projectRoot?: string } = {},
+  ) {
+    this.projectRoot = options.projectRoot;
+  }
 
   view(args: ToolArguments): string {
     const name = text(args.name);
@@ -85,7 +90,7 @@ export class SkillTool {
       name: skill.name,
       version: skill.version,
       body: skill.body,
-      ...(isUntrustedSkill(skill) ? { untrusted: true } : {}),
+      ...(isUntrustedSkill(skill, this.projectRoot) ? { untrusted: true } : {}),
     });
   }
 

@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ModelTransport } from "../conversation/index.js";
+import { findProjectRoot } from "../context/discovery.js";
 import { CronStore } from "../cron/store.js";
 import { CronTool } from "../cron/tool.js";
 import { createMediaBindings, type ImageGenerationPort } from "../media/index.js";
@@ -140,6 +141,12 @@ export function composeSessionTools(options: {
   );
   const skillTool = new SkillTool(
     new SkillStore(options.home, [join(options.cwd, ".claude", "skills")], [builtinSkills]),
+    // Issue #642: a origem de uma skill precisa ser julgada pela raiz da
+    // SESSÃO (`options.cwd`, o cwd que esta composição recebeu), nunca a do
+    // PROCESSO — `isUntrustedSkill` caía em `findProjectRoot(process.cwd())`
+    // por padrão, que diverge de `options.cwd` em qualquer embedder ou eval
+    // que passe um cwd de sessão diferente do processo real.
+    { projectRoot: findProjectRoot(options.cwd) },
   );
   const listModels = new ListModelsTool(options.home, options.environment);
   const cronTool = new CronTool(new CronStore(options.home));
