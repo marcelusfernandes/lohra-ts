@@ -16,11 +16,13 @@ user-invocable: true
    Development se a branch foi criada com `gh issue develop`).
 3. Gates locais verdes: os cinco listados em `CLAUDE.md` ("Gates") e
    `npm run prova -- <slug>`.
-4. **Dogfooding real feito e positivo** quando a branch toca `src/`,
-   `package.json` ou o lockfile: uma execução de verdade do runtime (Codex
-   e/ou OpenRouter) com exit 0, `error: null` e `tool_calls` quando a tarefa
-   exige tool. Vai no Test plan da PR; se não toca, o test plan diz `N/A` e
-   por quê.
+4. **Dogfooding real feito e positivo** quando o gatilho por substância do
+   passo 4 de `.claude/rules/git-workflow.md` dispara (toca `src/`, ou chave
+   de `package.json` que o runtime/tarball leem, ou entrada do lockfile fora
+   do metadado da raiz): uma execução de verdade do runtime (Codex e/ou
+   OpenRouter) com exit 0, `error: null` e `tool_calls` quando a tarefa
+   exige tool. Vai no Test plan da PR; se o gatilho não dispara (só
+   metadado, como `license`), o test plan diz `N/A` citando a chave tocada.
 
 ## Passos
 

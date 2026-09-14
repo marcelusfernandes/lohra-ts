@@ -70,11 +70,24 @@ Sempre `<type>/<n>-<slug>`, com `<n>` = número da issue (exceção: `release/<v
    (a issue recebe `state:in-progress`)
 3. Implementar e commitar na branch: teste vermelho primeiro (`test(red):`),
    depois verde, commit a cada verde. Gates locais verdes.
-4. **Dogfooding real**: obrigatório quando a branch toca `src/`, `package.json`
-   ou o lockfile — exercitar o runtime de verdade (`lohra chat --json` via
-   Codex e/ou OpenRouter com uma tarefa que use tool) e registrar exit code,
-   `error` e `tool_calls` no test plan. Quando não toca, o test plan declara
-   `N/A` com o motivo. Testes verdes são necessários, não suficientes.
+4. **Dogfooding real**: obrigatório pelo gatilho abaixo — exercitar o runtime
+   de verdade (`lohra chat --json` via Codex e/ou OpenRouter com uma tarefa
+   que use tool) e registrar exit code, `error` e `tool_calls` no test plan.
+   Testes verdes são necessários, não suficientes. O gatilho é por
+   **substância**, não por nome de arquivo (decisão do owner, 2026-09-14,
+   #687):
+   - **Dispara** quando a branch toca `src/`; ou muda em `package.json` uma
+     chave que o runtime ou o tarball leem — `dependencies`,
+     `optionalDependencies`, `peerDependencies`, `bin`, `main`, `exports`,
+     `files`, `engines`, `version`, `scripts.postinstall`, `scripts.prepare`;
+     ou muda no lockfile qualquer linha fora do metadado da entrada raiz
+     (`packages[""]`).
+   - **Não dispara**: metadado de `package.json` (`license`, `description`,
+     `keywords`, `repository`, `author`, `homepage`, `bugs`), um script npm
+     novo ou alterado fora de `postinstall`/`prepare`, e a linha de metadado
+     da raiz do lockfile. Nesses casos o test plan declara `N/A` **citando a
+     chave tocada**; o revisor confere contra `git diff main...HEAD --
+package.json package-lock.json`.
 5. Push e PR pela skill `pr` (`Closes #N`, AC copiados, `state:in-review`).
    Quem implementa **para aqui** — nunca mergeia.
 6. O orquestrador lança o `revisor` (só leitura, nunca aplica label). O

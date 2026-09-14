@@ -41,7 +41,7 @@ trap 'rm -f "$BODY"' EXIT
   echo
   echo "## Test plan"; echo
   echo '- [ ] `npm run build`, `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test` verdes'
-  echo "- [ ] dogfooding real (Codex e/ou OpenRouter): exit 0, error null, tool_calls"; echo
+  echo "- [ ] dogfooding real (Codex e/ou OpenRouter): exit 0, error null, tool_calls — ou N/A citando a chave tocada (git-workflow.md passo 4)"; echo
   for n in $ISSUES; do
     IBODY=$(gh issue view "$n" --repo "$REPO" --json body -q .body)
     # secao.sh (#79): `##` ou `###` (formulário issue.yml); vai até o próximo

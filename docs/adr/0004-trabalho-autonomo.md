@@ -116,6 +116,19 @@ origin/main` only before the first push; after the branch is published,
     that touches none of those declares `N/A` with the reason (owner rule of
     2026-09-05).
 
+    > **Amendment 2026-09-14 (owner):** the trigger is by substance, not by
+    > file name («aprovado refinamento», #687, after #684/#685 spent rounds
+    > dogfooding a `license` field). It fires when the branch touches `src/`,
+    > or changes a `package.json` key the runtime or the tarball reads
+    > (`dependencies`, `optionalDependencies`, `peerDependencies`, `bin`,
+    > `main`, `exports`, `files`, `engines`, `version`, `scripts.postinstall`,
+    > `scripts.prepare`), or changes any lockfile line outside the root
+    > entry's metadata. Metadata (`license`, `description`, `keywords`,
+    > `repository`, `author`, `homepage`, `bugs`), an npm script other than
+    > `postinstall`/`prepare`, and the lockfile root metadata line declare
+    > `N/A` naming the key; the reviewer checks it against the diff. The
+    > canonical wording lives in `git-workflow.md` step 4.
+
 ## Cost accepted
 
 No human reviews a pull request in the normal path. Quality depends on the
