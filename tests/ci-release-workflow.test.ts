@@ -49,7 +49,7 @@ describe("release.yml — publicação por tag com provenance (D7/#536)", () => 
   });
 
   it("publica com o prepare desligado e anexa o .tgz à Release", () => {
-    expect(yaml).toContain("LOHRA_SKIP_PREPARE: \"1\"");
+    expect(yaml).toContain('LOHRA_SKIP_PREPARE: "1"');
     expect(yaml).toMatch(/gh release create[^\n]*\.tgz/u);
     expect(yaml).toMatch(/timeout-minutes: \d+/u);
   });
