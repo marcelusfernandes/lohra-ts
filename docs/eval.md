@@ -156,7 +156,8 @@ os testes exercitam.
 
 Sem `--provider`, o ambiente do processo (herdado ou não, dependendo do modo)
 é uma allowlist literal apontada para o stub local — nunca há rede possível
-(`scripts/eval/session.ts`). Com `--provider`, `run.ts` **e** `runEvalCase`
+(`scripts/eval/session.ts`) — exceto o `terminal` in-process, ver "Limite
+conhecido" abaixo. Com `--provider`, `run.ts` **e** `runEvalCase`
 (defesa em profundidade) recusam rodar quando `CI`/`GITHUB_ACTIONS` estiver
 setado com qualquer valor truthy (`scripts/eval/ci-guard.ts`), e o oráculo de
 mecanismo é pulado — não há stub interceptando a chamada real para capturar
