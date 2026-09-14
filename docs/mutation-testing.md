@@ -395,8 +395,12 @@ ADR 0005) acrescenta `N4-parse-sse-truncated-frame-atomic`: `parseSse`
 (`client.ts`) era atômico — um `SyntaxError` no último `data:` truncado por
 um abort em voo propagava para fora da função e descartava também os
 eventos já parseados com sucesso, deixando `partial.text` vazio mesmo com
-deltas completos antes do corte. N4 reverte o `try`/`catch` que passou a
-descartar só o frame truncado, morto pelo `it` novo de
+deltas completos antes do corte. N4 remove tanto o gate
+`options.tolerateTruncatedTail !== true` quanto o `try`/`catch` que passou a
+descartar só o frame truncado — não só o `try`/`catch` sozinho — voltando ao
+parse incondicional que lança para fora em qualquer frame malformado
+(caminho normal e caminho de abort tratados igual, como antes da issue
+#567); morto pelo `it` novo de
 `tests/transports-abort-in-flight.test.ts`, "ChatCompletionsClient.stream
 replays the deltas already parsed when the trailing SSE frame is truncated
 mid-abort (issue #567)" — 269 + 1 = 270. `focusFiles` da fatia
