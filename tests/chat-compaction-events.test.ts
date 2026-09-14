@@ -247,3 +247,190 @@ describe("runChat wires AuxClient telemetry: aux_calls in the envelope (issue #6
     }
   });
 });
+
+// Issue #623 (follow-up of the #620 comment above): the NEW-session case the
+// comment documented as blocked by a pre-existing bug -- `AuxClient.title()`
+// used to run AFTER `runTurn` returned, against a `modelTransport` that
+// `runTurn`'s own `finally` had already closed (`src/conversation/
+// runtime.ts:792`, same underlying `client` the `AuxClient` wraps,
+// `src/commands/chat.ts:371-390`) -- always threw `CLIENT_CLOSED`, silently
+// swallowed by `chat.ts`'s fail-open `catch` (`title.failed`). `chat.ts` now
+// generates the title from the turn's own `input` BEFORE calling `runTurn`
+// and persists it only after `result.sessionId` is known. On the base this
+// commit turns red (before the `chat.ts` fix): `aux_calls` stays `0`,
+// `title.failed` shows up on stderr, and the title is never persisted.
+describe("runChat generates and persists a title for a NEW session (issue #623)", () => {
+  it("pins aux_calls at 1 and persists the title on the happy path (no --session)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-t623-chat-title-"));
+    roots.push(root);
+    const { server } = startFixedReplyServer();
+    await new Promise<void>((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("missing test port");
+      const provider = "t623-chat-title-probe";
+      registerProvider({
+        name: provider,
+        apiMode: "chat_completions",
+        aliases: [],
+        displayName: "T623 chat title probe",
+        description: "Local in-memory composition-root probe (issue #623).",
+        signupUrl: "",
+        envVars: [],
+        baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
+        modelsUrl: "",
+        requiresApiKey: false,
+        supportsVision: false,
+        fallbackModels: ["t623-chat-title-model"],
+        defaultMaxTokens: 256,
+        defaultAuxModel: "t623-chat-title-model",
+      });
+
+      const result = await runChat({
+        input: "hello there",
+        flags: new Map<string, string | true>([
+          ["--provider", provider],
+          ["--model", "t623-chat-title-model"],
+          ["--json", true],
+          ["--no-input", true],
+          ["--no-tools", true],
+        ]),
+        environment: {
+          HOME: root,
+          PATH: process.env.PATH ?? "",
+        },
+        home: join(root, ".lohra"),
+        codexHome: join(root, ".codex"),
+        cwd: root,
+      });
+
+      expect(result.code).toBe(0);
+      expect(result.stderr).not.toContain("title.failed");
+      const envelope = JSON.parse(result.stdout) as { session_id: string; aux_calls?: number };
+      expect(envelope.aux_calls).toBe(1);
+
+      const connection = openStateDatabase(join(root, ".lohra", "state.db"));
+      try {
+        const sessions = new SessionRepository(
+          connection.database,
+          undefined,
+          connection.ftsEnabled,
+        );
+        expect(sessions.getSession(envelope.session_id)?.title ?? null).toBe("ok");
+      } finally {
+        connection.close();
+      }
+    } finally {
+      await closeServer(server);
+    }
+  });
+});
+
+// Issue #623 (invariant kept explicit): a REAL failure of the auxiliary
+// title call must stay fail-open -- the turn still succeeds and the
+// failure is named on stderr (`title.failed`), never silently dropped
+// (CLAUDE.md invariant 2) and never blocking the turn's own result.
+describe("runChat's title generation fails open without blocking the turn (issue #623)", () => {
+  it("keeps the turn successful when the title call itself fails", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-t623-chat-title-failure-"));
+    roots.push(root);
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+          max_tokens?: number;
+        };
+        // `AuxClient.title()` is the ONE caller that passes `maxTokens: 32`
+        // (`src/agent/aux.ts`) -- distinguishes the title call from the
+        // turn's own model call (`defaultMaxTokens: 256` below) on the same
+        // fixture server, without touching `aux.ts`.
+        if (body.max_tokens === 32) {
+          const text = JSON.stringify({ error: { message: "t623 title probe failure" } });
+          response.writeHead(400, {
+            "content-type": "application/json",
+            "content-length": String(Buffer.byteLength(text)),
+            "x-should-retry": "false",
+          });
+          response.end(text);
+          return;
+        }
+        const payload = {
+          id: "chatcmpl-t623-failure",
+          object: "chat.completion",
+          created: 0,
+          model: "t623-chat-title-failure-model",
+          choices: [
+            { index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" },
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: 1 },
+        };
+        const text = JSON.stringify(payload);
+        response.writeHead(200, {
+          "content-type": "application/json",
+          "content-length": String(Buffer.byteLength(text)),
+        });
+        response.end(text);
+      });
+    });
+    await new Promise<void>((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("missing test port");
+      const provider = "t623-chat-title-failure-probe";
+      registerProvider({
+        name: provider,
+        apiMode: "chat_completions",
+        aliases: [],
+        displayName: "T623 chat title failure probe",
+        description: "Local in-memory composition-root probe (issue #623).",
+        signupUrl: "",
+        envVars: [],
+        baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
+        modelsUrl: "",
+        requiresApiKey: false,
+        supportsVision: false,
+        fallbackModels: ["t623-chat-title-failure-model"],
+        defaultMaxTokens: 256,
+        defaultAuxModel: "t623-chat-title-failure-model",
+      });
+
+      const result = await runChat({
+        input: "hello there",
+        flags: new Map<string, string | true>([
+          ["--provider", provider],
+          ["--model", "t623-chat-title-failure-model"],
+          ["--json", true],
+          ["--no-input", true],
+          ["--no-tools", true],
+        ]),
+        environment: {
+          HOME: root,
+          PATH: process.env.PATH ?? "",
+        },
+        home: join(root, ".lohra"),
+        codexHome: join(root, ".codex"),
+        cwd: root,
+      });
+
+      expect(result.code).toBe(0);
+      expect(result.stderr).toContain("title.failed");
+      const envelope = JSON.parse(result.stdout) as { session_id: string; aux_calls?: number };
+      expect(envelope.aux_calls ?? 0).toBe(0);
+
+      const connection = openStateDatabase(join(root, ".lohra", "state.db"));
+      try {
+        const sessions = new SessionRepository(
+          connection.database,
+          undefined,
+          connection.ftsEnabled,
+        );
+        expect(sessions.getSession(envelope.session_id)?.title ?? null).toBeNull();
+      } finally {
+        connection.close();
+      }
+    } finally {
+      await closeServer(server);
+    }
+  });
+});
