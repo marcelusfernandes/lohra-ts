@@ -472,6 +472,14 @@ describe("dashboard.ts wires GatewayWsDeps.notices onto real WS turns (issue #60
           typeof message.content === "string" && message.content.includes("OPERATOR NOTICES"),
       );
       expect(overlayLeaked).toBe(false);
+      // Issue #675 (residual F4, veredito PR #674 item 4): a asserção acima
+      // é puramente negativa — passa até com histórico VAZIO, sem provar
+      // que `commitTurn` de fato persistiu o turno. Âncora positiva: o
+      // `user` cru submetido (`"hi"`, `:434`) tem que estar lá.
+      const rawUserPersisted = persistedHistory.some(
+        (message) => message.role === "user" && message.content === "hi",
+      );
+      expect(rawUserPersisted).toBe(true);
     } finally {
       await closeServer(server);
     }
