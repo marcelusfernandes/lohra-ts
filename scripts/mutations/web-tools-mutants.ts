@@ -6,11 +6,15 @@
 // vitest em sandbox (mesmo padrão do catálogo de mutantes de
 // workflow-durability, separado da orquestração).
 //
-// Os 9 mutantes são a migração do runner de paridade aposentado desta área
-// (368 linhas, fora de escopo): alvos `src/web/connector.ts` ×3, `tool.ts`
-// ×2, `fetch.ts` ×2, `search.ts`, `safety.ts`. Cada `focus` é um teste
-// TypeScript já existente em `tests/web-*.test.ts` que a mutação vira
+// Os primeiros 9 mutantes são a migração do runner de paridade aposentado
+// desta área (368 linhas, fora de escopo): alvos `src/web/connector.ts` ×3,
+// `tool.ts` ×2, `fetch.ts` ×2, `search.ts`, `safety.ts`. Cada `focus` é um
+// teste TypeScript já existente em `tests/web-*.test.ts` que a mutação vira
 // vermelho — nenhum mutante foi afrouxado para caber num teste mais fraco.
+// A issue #670 (residual F3, veredito PR #655 item 1) acrescenta o décimo
+// (`j-fetch-error-loses-untrusted`), primeiro mutante sobre a marca
+// `untrusted` que `webFetchHandler` passou a pôr em todo erro capturado:
+// `tool.ts` ×3.
 import type { Mutant } from "./types.js";
 
 const connector = "src/web/connector.ts";
@@ -177,15 +181,45 @@ export const webToolsMutants: readonly Mutant[] = [
     category: "tool",
     mechanism:
       "webFetchHandler troca a causa exata do WebError por um literal genérico ('fetch failed') — o envelope de erro perde a causa que o chamador precisa",
+    // Sem "(#670)" no fim: parênteses não escapados quebrariam o `-t` do
+    // vitest (mesmo motivo de `f-userinfo-accepted`/`h-ddg-byte-cap-removed`
+    // acima) — o prefixo já é único no arquivo.
     focus: {
       file: toolTests,
-      test: "delivers security causes as plain WebError envelopes",
+      test: "delivers security causes as plain WebError envelopes, marked untrusted",
     },
     edits: [
       {
         file: tool,
-        before: "    if (error instanceof WebError) return toolError(error.message, { url });\n",
-        after: '    if (error instanceof WebError) return toolError("fetch failed", { url });\n',
+        before:
+          "    if (error instanceof WebError) return toolError(error.message, { url, untrusted: true });\n",
+        after:
+          '    if (error instanceof WebError) return toolError("fetch failed", { url, untrusted: true });\n',
+      },
+    ],
+  },
+  // --- issue #670 (residual F3, veredito PR #655 item 1) ------------------
+  {
+    id: "j-fetch-error-loses-untrusted",
+    category: "tool",
+    mechanism:
+      "webFetchHandler para de marcar untrusted no erro de WebError/WebTransportError — um erro que ecoa Content-Type ou hostname de Location do servidor deixa de carregar a marca de origem",
+    focus: {
+      file: toolTests,
+      test: "marks untrusted a binary content-type carrying injected text",
+    },
+    edits: [
+      {
+        file: tool,
+        before:
+          "    if (error instanceof WebError) return toolError(error.message, { url, untrusted: true });\n",
+        after: "    if (error instanceof WebError) return toolError(error.message, { url });\n",
+      },
+      {
+        file: tool,
+        before:
+          "      return toolError(`could not fetch the page: ${error.message}`, { url, untrusted: true });\n",
+        after: "      return toolError(`could not fetch the page: ${error.message}`, { url });\n",
       },
     ],
   },

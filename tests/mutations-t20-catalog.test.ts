@@ -3,7 +3,7 @@
 // contrário de `web-tools.ts`, que roda o harness de verdade contra um
 // sandbox de `git archive`); este teste confere, num `npm test` normal e
 // rápido, o que só apareceria em `npm run mutations:t20` (bem mais lento):
-// os 9 mutantes existem, cada um mira um teste que existe de fato em
+// os 10 mutantes existem, cada um mira um teste que existe de fato em
 // `tests/web-*.test.ts`, e cada `before` ocorre exatamente uma vez, ao pé da
 // letra, no `src/web/**` de verdade — o mesmo padrão de
 // `tests/orchestration-child-runner-mutation-catalog.test.ts` (#112).
@@ -25,8 +25,8 @@ function sourceOf(relativePath: string): string {
 }
 
 describe("mutations:t20 catalog (src/web/**)", () => {
-  it("declara exatamente 9 mutantes", () => {
-    expect(webToolsMutants).toHaveLength(9);
+  it("declara exatamente 10 mutantes", () => {
+    expect(webToolsMutants).toHaveLength(10);
   });
 
   it("cada id de mutante é único", () => {
@@ -34,7 +34,7 @@ describe("mutations:t20 catalog (src/web/**)", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("mira apenas src/web/connector.ts (×3), fetch.ts (×2), safety.ts (×1), search.ts (×1), tool.ts (×2)", () => {
+  it("mira apenas src/web/connector.ts (×3), fetch.ts (×2), safety.ts (×1), search.ts (×1), tool.ts (×3)", () => {
     // Conta MUTANTES por arquivo (não edits): `d-automatic-redirects` tem 2
     // edits no mesmo arquivo (fetch.ts) e continua sendo 1 mutante.
     const counts: Record<string, number> = {};
@@ -48,7 +48,7 @@ describe("mutations:t20 catalog (src/web/**)", () => {
       "src/web/fetch.ts": 2,
       "src/web/safety.ts": 1,
       "src/web/search.ts": 1,
-      "src/web/tool.ts": 2,
+      "src/web/tool.ts": 3,
     });
   });
 

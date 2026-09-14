@@ -80,14 +80,21 @@ export async function webFetchHandler(args: Readonly<Record<string, unknown>>): 
     const outcome = await fetchUrl(url, webTransport);
     return toolResult(undefined, { url, text: htmlToText(outcome.text), untrusted: true });
   } catch (error) {
-    // Issue #642: ao contrário do erro de uma tool MCP (`src/mcp/tools.ts`,
-    // texto do SERVIDOR), o texto de erro aqui é NOSSO — `WebError.message`
-    // (`safety.ts:374-385`) e `WebTransportError.message` (`fetch.ts:127-153`)
-    // vêm do próprio runtime (timeout, DNS, allow-list, etc.), nunca do
-    // corpo da página — não ganham `untrusted`.
-    if (error instanceof WebError) return toolError(error.message, { url });
+    // Issue #670 (residual F3, veredito PR #655 item 1): ao contrário do
+    // que este comentário afirmava até aqui, o texto NÃO é sempre nosso —
+    // `safety.ts:432,436,441` interpola o hostname que o servidor mandou no
+    // `Location` a partir do hop 1 (`fetch.ts:129-136` revalida a cada
+    // hop), e `fetch.ts:35` interpola o `Content-Type` que o servidor
+    // devolveu. Distinguir por hop exigiria carregar proveniência em
+    // `WebError`/`WebTransportError`; a forma mínima marca TODO erro
+    // capturado aqui — inclusive o do hop 0, onde a URL é a que o próprio
+    // MODELO pediu e uma marca a mais é inócua. `untrusted` como ÚLTIMA
+    // chave, igual ao envelope de sucesso (`:81`, ADR 0003). `web_search`
+    // (abaixo) fica como está: nenhuma mensagem ali interpola dado do
+    // servidor.
+    if (error instanceof WebError) return toolError(error.message, { url, untrusted: true });
     if (error instanceof WebTransportError) {
-      return toolError(`could not fetch the page: ${error.message}`, { url });
+      return toolError(`could not fetch the page: ${error.message}`, { url, untrusted: true });
     }
     throw error;
   }
