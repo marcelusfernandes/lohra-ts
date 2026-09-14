@@ -22,6 +22,7 @@ import {
   ehArquivoDoOverlay,
   ehCommitTestRed,
   ehDeclaracaoDeProva,
+  ehPrDeRelease,
   parseArgs,
   semHarnessNaBase,
   soArquivosDoOverlay,
@@ -697,5 +698,27 @@ describe("commitsQueTocamTestes / commitAdicionaStub (git injetado — causa nun
         ["src/x.ts"],
       ),
     ).toThrow(/fatal: bad object/);
+  });
+});
+
+describe("ehPrDeRelease (issue #694, bloqueava a #691)", () => {
+  it("SKIP: branch release/x.y.z + diff só de manifesto/lockfile/CHANGELOG", () => {
+    expect(
+      ehPrDeRelease("release/0.0.12", ["package.json", "package-lock.json", "CHANGELOG.md"]),
+    ).toBe(true);
+  });
+
+  it("não SKIP: branch release/x.y.z mas o diff toca src/", () => {
+    expect(ehPrDeRelease("release/0.0.12", ["package.json", "src/x.ts"])).toBe(false);
+  });
+
+  it("não SKIP: branch não é release/x.y.z, mesmo com o diff de manifesto/lockfile/CHANGELOG", () => {
+    expect(ehPrDeRelease("fix/1-x", ["package.json", "package-lock.json", "CHANGELOG.md"])).toBe(
+      false,
+    );
+  });
+
+  it("não SKIP: branch release/x.y.z mas diff vazio (nada mudou, não 'release')", () => {
+    expect(ehPrDeRelease("release/0.0.12", [])).toBe(false);
   });
 });

@@ -235,6 +235,26 @@ export function deveSerIgnorado(diff: readonly string[]): boolean {
   return diff.length > 0 && diff.every(ehArquivoDocsOuProcess);
 }
 
+// --- SKIP: PR de release (issue #694, bloqueava a #691) -------------------
+/**
+ * `true` quando `branch` casa `release/<x.y.z>` E `diff` não é vazio E todo
+ * arquivo do diff está em `{package.json, package-lock.json, CHANGELOG.md}`
+ * — a PR de release (`npm run release`, `docs/release.md`) não tem
+ * `prova/<slug>.ts` porque não há comportamento novo a controlar: o diff é
+ * só manifesto/lockfile/CHANGELOG. `run.ts` usa isto para um quarto SKIP,
+ * no mesmo ponto do SKIP por classe (`deveSerIgnorado`), ANTES de resolver
+ * o slug — sem isso, `resolverSlug` reprova com `falhaFechada` porque
+ * `release/x.y.z` não casa `<type>/<n>-<slug>` (`branchSlug`,
+ * `scripts/prova/slug.ts:13`).
+ *
+ * Stub (issue #694): ainda devolve sempre `false` — o teste em
+ * `tests/ci-controle-negativo.test.ts` reprova por asserção contra este
+ * stub (`test(red):`), não por erro estrutural.
+ */
+export function ehPrDeRelease(_branch: string, _diff: readonly string[]): boolean {
+  return false;
+}
+
 // --- SKIP: só declaração de prova já existente editada (acréscimo à #62,
 // bloqueava a #65) -----------------------------------------------------
 const DECLARACAO_DE_PROVA_RE = /^prova\/[^/]+\.ts$/;
