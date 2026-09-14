@@ -25,15 +25,25 @@ const SUBAGENT_ISOLATION =
  * guarantee is that this sentence and the turn's own `toolDefinitions`
  * (`child-runner.ts`) always come from the SAME filter over the SAME parent
  * catalog, so the two can never name a different set of tools.
+ *
+ * Issue #641 (épico #637, grupo F, item 21): the caller (`chat-wiring.ts`)
+ * only threads `toolNames` when it is non-empty — `buildSubagentSystemPrompt`
+ * omits this whole block otherwise (see `toolNames.length === 0` below) —
+ * so `toolNames` is always non-empty here; there is no `"none"` branch to
+ * reach. The old text also promised "any other tool name is refused", which
+ * `child-runner.ts:263-265` contradicts for a leaf forced into structured
+ * output: `forcedDefinition` is appended to this same array without ever
+ * being named in this sentence.
  */
 function toolsLine(toolNames: readonly string[]): string {
-  const names = toolNames.length > 0 ? toolNames.join(", ") : "none";
+  const names = toolNames.join(", ");
   return (
-    `Tools available to you: ${names} (plus any MCP tools listed in this ` +
-    "turn's own tool array) — any other tool name is refused. Dangerous " +
-    "commands (recursive delete, force push, sudo, and similar) are " +
-    "refused automatically and finally here too, with no retry path around " +
-    "the refusal."
+    `Tools available to you: ${names} — this is the same tool array this ` +
+    "turn actually offers, though a workflow node forcing structured " +
+    "output can still append one more tool definition to it beyond what's " +
+    "named here. Dangerous commands (recursive delete, force push, sudo, " +
+    "and similar) are refused automatically and finally here too, with no " +
+    "retry path around the refusal."
   );
 }
 
