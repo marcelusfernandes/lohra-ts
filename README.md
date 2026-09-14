@@ -260,6 +260,13 @@ explícito) em vez de recusar de cara; `--provider` explícito continua
 tendo precedência, e sem nenhuma chave configurada os dois comandos
 continuam concordando em "no provider configured" (issue #604).
 
+Já com `auth_preference: "subscription"` e a assinatura inativa, `chat` e
+`dashboard` recusam de cara com o mesmo erro no stderr (`PREFER_SUB_ERROR`,
+que aponta `lohra auth enable` + `lohra auth login`, ou `lohra auth prefer
+auto` para voltar à chave) e o mesmo código de saída 2, com ou sem
+`--provider`; o `dashboard` nem chega a abrir porta (issue #630; adendo em
+`docs/decisions/2026-09-13-flags-de-rota-com-assinatura.md`).
+
 Ollama vivo sozinho (nenhuma chave, nenhum `LOHRA_PROVIDER`) não entra nessa
 detecção: `doctor --json` mostra `usable: true` (conta o daemon local) mas
 `chat_default_provider: null`, e `chat`/`dashboard` sem `--provider` ainda
