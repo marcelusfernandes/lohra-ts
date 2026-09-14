@@ -6,7 +6,7 @@ sobre o que deveria existir.
 
 ## Mecânica A — harness comum (`scripts/mutations/harness.ts`)
 
-Oito das nove fatias (todas menos `media`) seguem a mesma mecânica, extraída
+Nove das dez fatias (todas menos `media`) seguem a mesma mecânica, extraída
 para `harness.ts` (issue #148):
 
 1. `prepareArchiveSandbox(root, candidateSha)` — recusa se
@@ -146,7 +146,7 @@ interface MutationReport {
 
 ## `scripts/mutations/slices.json` e a contagem real por fatia
 
-Nove fatias, cada uma com `slice`, `script` (chave de `package.json#scripts`),
+Dez fatias, cada uma com `slice`, `script` (chave de `package.json#scripts`),
 `catalog` (arquivos de dado puro que a compõem), `srcGlobs` (o que em `src/`
 essa fatia cobre) e `focusFiles` (união dos `focus.file` dos mutantes, exceto
 `media`, que não tem `focus`, e `workflow-executor`, que usa a bateria
@@ -179,15 +179,16 @@ fatia" cita a mesma restrição.
 | `context-window`      | `mutations:t23`         |       25 | `context-window.ts`                                                                                                   |
 | `auth`                | `mutations:auth`        |       13 | `auth-mutants.ts`                                                                                                     |
 | `supervision`         | `mutations:supervision` |       41 | `supervision-mutants.ts`                                                                                              |
+| `doctor`              | `mutations:doctor`      |       10 | `doctor-mutants.ts`                                                                                                   |
 
-Total: 284. Os 12 mutantes de `workflow-durability-guard.ts` são
+Total: 294. Os 12 mutantes de `workflow-durability-guard.ts` são
 combinatórios: três conjuntos do guard de escrita possuída (`fence`,
 `holder`, `lease-validity`) × quatro categorias (`state`, `cache`,
 `node-cost`, `spend`) — um mutante por combinação, cada um escorado só no
 teste focal da sua categoria, mais os 2 mutantes do INSERT combinado
 cache+custo (`combined-cell-guard-removed`,
 `combined-cost-escapes-refusal`). `tests/mutations-slices.test.ts` importa os
-treze catálogos de dado puro estaticamente e prova essa soma (284) a cada
+catorze catálogos de dado puro estaticamente e prova essa soma (294) a cada
 corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
 
 A issue #587 (P11, compactação/título pelo `AuxClient`) acrescenta 4 a
@@ -552,6 +553,31 @@ do cache de janelas (`src/catalog/windows-cache.ts`) e o `compactHistory` da
 issue #252 — lock checado na transação, `message_count` líquido e o filtro
 `active` de `loadMessages` (`src/state/session-repository.ts`).
 
+`doctor-mutants.ts` (issue #636, follow-up da QA de 846b0b7f e das PRs
+#629/#632/#634) é a fatia mais nova: 10 mutantes cobrindo
+`src/doctor/snapshot.ts` (`route.error` ignorado na decisão de
+`chat_default_provider`, o modo `subscription` caindo em
+`detectChatProvider` como se fosse `api_key`, `usable` sem `ollama.alive`,
+`usable` sem `hasApiKey`), `src/doctor/checks.ts` (`isOllamaReady` com `||`
+em vez de `&&`, o Check `ollama-sem-chave` emitindo sem checar
+`auth_route === "api_key"`, emitindo com `chat_default_provider !== null`
+em vez de `=== null`, e o `remedy` desse Check sem `--provider ollama`),
+`src/doctor/providers.ts` (`detectConfiguredProvider` devolvendo
+`AUTO_PROVIDER` como se fosse um provedor detectado) e
+`src/commands/provider-detectado.ts` (`detail` descartado no caminho de
+erro, fail-open em vez de propagar a causa). `srcGlobs` é
+`["src/doctor/**", "src/commands/**"]` — o segundo glob existe só porque
+`src/commands/provider-detectado.ts` não é um arquivo de topo de `src/`
+("Forma dos `srcGlobs`", acima) e o diretório `commands` já era coberto por
+`workflow-audit-live`/`self-update`, então a fatia nova dispara em paralelo
+a essas, não em lugar delas. Um décimo primeiro mutante (inverter
+`provider_origin` "env-var"/"api-key" em `snapshot.ts`) foi cogitado e
+descartado: nenhum teste nos três arquivos de foco da fatia
+(`tests/cli-doctor.test.ts`, `tests/doctor-checks-ollama.test.ts`,
+`tests/chat-provider-detectado.test.ts`) distingue os dois valores — só
+`provider_origin: "none"` é pinado, em `tests/providers.test.ts`, fora do
+`Files` da issue #636.
+
 ## `npm run mutations:all` — o agregador (issue #155)
 
 `scripts/mutations/all.ts` lê `slices.json` e roda cada `script` por
@@ -675,38 +701,44 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
 `tests/mutations-slices.test.ts` prova, a cada corrida: o schema básico de
 cada entrada de `slices.json`; que todo catálogo descoberto por conteúdo em
 `scripts/mutations/` (item 1 acima) aparece em algum `catalog`; que os
-`catalog` do JSON batem, como conjunto, com os treze catálogos importados em
+`catalog` do JSON batem, como conjunto, com os catorze catálogos importados em
 `CATALOGOS`; que todo `script` existe em `package.json#scripts`; que todo
 `focusFiles`/`catalog` existe em disco; que `focusFiles` bate com a união de
 `focus.file` dos catálogos da fatia (exceto `media`/`workflow-executor`); que
 `srcGlobs` cobre todo `edits[].file` dos catálogos da fatia (item 2 acima); a
 contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
-(`tests/mutations-slices.test.ts:623-638` — hoje `workflow-durability-guard`
+(`tests/mutations-slices.test.ts` — hoje `workflow-durability-guard`
 14, `workflow-durability-named` 41, `orchestration` 5,
 `workflow-audit-live-mutants` 32, `workflow-audit-producers-mutants` 31,
 `web-tools-mutants` 9, `media-catalog-other` 7, `media-catalog-persistence`
 13, `self-update-mutants` 8, `workflow-executor-mutants` 45,
-`context-window` 25, `auth-mutants` 13, `supervision-mutants` 41, soma 284) e
-a soma de 284 contra os treze catálogos importados; e que todo diretório de
-primeiro nível de `src/` está coberto por algum `srcGlobs` ou está em
-`SEM_FATIA` com um motivo não vazio — nunca os dois, nunca nenhum dos dois.
+`context-window` 25, `auth-mutants` 13, `supervision-mutants` 41,
+`doctor-mutants` 10, soma 294) e a soma de 294 contra os catorze catálogos
+importados; e que todo diretório de primeiro nível de `src/` está coberto por
+algum `srcGlobs` ou está em `SEM_FATIA` com um motivo não vazio — nunca os
+dois, nunca nenhum dos dois.
 
 ## Diretórios de `src/` sem fatia hoje
 
-Onze diretórios de primeiro nível de `src/` não têm catálogo de mutação:
-`config`, `core`, `cron`, `doctor`, `events`, `memory`, `onboarding`,
+Dez diretórios de primeiro nível de `src/` não têm catálogo de mutação:
+`config`, `core`, `cron`, `events`, `memory`, `onboarding`,
 `pricing`, `serialization`, `server`, `skills` — listados em
 `tests/mutations-slices.test.ts` (`SEM_FATIA`), cada um com o motivo "sem
-catálogo de mutantes ainda". Os dezoito diretórios cobertos hoje:
+catálogo de mutantes ainda". Os dezenove diretórios cobertos hoje:
 `workflow`, `state`, `orchestration` (fatia `workflow-durability`, também
 `supervision` para `workflow`/`orchestration`); `cli`, `commands` (também em
-`workflow-audit-live` e `self-update`); `media`, `tools` (fatia `media`,
-também em `self-update`); `web` (fatia `web-tools`); `self-update`, `mcp`,
-`gateway` (fatia `self-update`); `conversation`, `context`, `providers`,
-`catalog`, `agent` (fatia `context-window`, issue #293; `agent` desde a
-issue #587 — `state` também está em `srcGlobs` dessa fatia, já coberto por
-`workflow-durability`); `auth` (fatia `auth`, issue #354); `transports`
-(fatia `supervision`, issue #451 — primeira fatia a cobrir esse diretório).
+`workflow-audit-live`, `self-update` e `doctor`); `media`, `tools` (fatia
+`media`, também em `self-update`); `web` (fatia `web-tools`); `self-update`,
+`mcp`, `gateway` (fatia `self-update`); `conversation`, `context`,
+`providers`, `catalog`, `agent` (fatia `context-window`, issue #293; `agent`
+desde a issue #587 — `state` também está em `srcGlobs` dessa fatia, já
+coberto por `workflow-durability`); `auth` (fatia `auth`, issue #354);
+`transports` (fatia `supervision`, issue #451 — primeira fatia a cobrir esse
+diretório); `doctor` (fatia `doctor`, issue #636 — primeira fatia a cobrir
+esse diretório; `commands` entra em `srcGlobs` dela só por causa de
+`src/commands/provider-detectado.ts`, que `scripts/github/mutations-matrix.ts`
+só sabe cobrir pelo diretório inteiro, não por um literal de arquivo aninhado
+— ver "Forma dos `srcGlobs`", acima).
 
 "Coberto" aqui quer dizer que `srcGlobs` cita o diretório inteiro
 (`src/<dir>/**`, forma acima) — a fatia **dispara** para qualquer mudança

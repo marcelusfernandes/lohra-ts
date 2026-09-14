@@ -80,6 +80,7 @@ import { combinedMutants, guardMutants } from "../scripts/mutations/workflow-dur
 import { contextWindowMutants } from "../scripts/mutations/context-window.js";
 import { otherMediaMutants } from "../scripts/mutations/media-catalog-other.js";
 import { persistenceMutants } from "../scripts/mutations/media-catalog-persistence.js";
+import { doctorMutants } from "../scripts/mutations/doctor-mutants.js";
 import { orchestrationMutants } from "../scripts/mutations/orchestration.js";
 import { mutants as selfUpdateMutants } from "../scripts/mutations/self-update-mutants.js";
 import { supervisionMutants } from "../scripts/mutations/supervision-mutants.js";
@@ -118,6 +119,7 @@ const NAO_CATALOGO = new Set([
   "workflow-durability.ts",
   "workflow-executor.ts",
   "auth.ts",
+  "doctor.ts",
 ]);
 
 const CATALOG_EXPORT_PATTERN = /export const [A-Za-z_]*[Mm]utants\b/;
@@ -185,6 +187,7 @@ const CATALOGOS: ReadonlyMap<string, readonly CatalogEntry[]> = new Map<
   ["scripts/mutations/context-window.ts", asCatalog(contextWindowMutants)],
   ["scripts/mutations/auth-mutants.ts", asCatalog(authMutants)],
   ["scripts/mutations/supervision-mutants.ts", asCatalog(supervisionMutants)],
+  ["scripts/mutations/doctor-mutants.ts", asCatalog(doctorMutants)],
 ]);
 
 interface Slice {
