@@ -276,7 +276,7 @@ of polling on their behalf.
 
 ### Previewing a resume, route pivots, and the artifact manifest
 
-- **`workflow_preview {run_id, route?}`** dry-runs a resume before you commit to one — no token spent, nothing written, and none of the run's route pivots consumed. Per top-level node it reports one of several outcomes, among them `replay` (a cached cell covers it) and `recompute {reason: "never_completed" | "identity_changed"}`, plus totals including `cells_replayed`, `tokens_saved`, `leaves_to_spawn`, `estimated_tokens_to_repay`, and `pivots_used` — the pivots this run has *already* spent, unaffected by the preview call itself. Call it before `run_workflow(resume_run_id=..., route=...)` to see whether a candidate route is worth spawning. A nested `workflow` node still previews as `unknown` today regardless of the real resume's outcome — it does not yet get the operator's template loader.
+- **`workflow_preview {run_id, route?}`** dry-runs a resume before you commit to one — no token spent, nothing written, and none of the run's route pivots consumed. Per top-level node it reports one of several outcomes: `replay` (a cached cell covers it), `recompute {reason: "never_completed" | "identity_changed"}`, `checkpoint_pending` (paused upstream on an unresolved checkpoint), `upstream_missing` (an input the node needs was never computed), `token_budget_exhausted` (the run's cap is already spent) and `no_leaves` (a `parallel` node whose branches resolved to an empty array) — plus totals including `cells_replayed`, `tokens_saved`, `leaves_to_spawn`, `estimated_tokens_to_repay`, and `pivots_used` — the pivots this run has *already* spent, unaffected by the preview call itself. Call it before `run_workflow(resume_run_id=..., route=...)` to see whether a candidate route is worth spawning. A nested `workflow` node still previews as `unknown` today regardless of the real resume's outcome — it does not yet get the operator's template loader.
 - **Resuming a `route_fault` pause onto a different route** works two ways: an explicit `route` (channel `operator`, always wins, even over the suggestion), or — resuming with no `route` at all — the operator's own `workflow_routes.json` (`<home>/workflow_routes.json`, an ordered per-dead-route fallback list). When it names an untried fallback for this exact dead route, `workflow_status`'s `lesson.suggested_route` carries it and the resume applies it on your behalf (channel `route_envelope`); with no matching entry, a route-less resume just stays on the current route. Both channels draw on the **same cap: 3 route pivots per run, total** — a 4th explicit `route` is refused. Every node a pivot actually rewrites is logged in `workflow_audit` as `node.rerouted {channel, pivot, from, to}`.
 - **The `artifacts` manifest** records every `write_file` a leaf calls with `ok: true` as `{node_id, sub_id, path, bytes}`, capped at 256 records per leaf. Two leaves in the same run writing the same `path` are never arbitrated — the last write wins on disk, silently — but the collision surfaces as an advisory entry in `workflow_status`'s `faults` (`"<node>: artifact path written by 2 leaves: <path>"`), never a `status` change. It is only checked within the current stretch: a collision against an earlier stretch, or against a parent run's artifacts from a nested `workflow` node, is not detected yet.
 
@@ -309,12 +309,32 @@ detail lives here.
   drain; the count appears only if the drain isn't done, and covers ANY run
   this process handles, not just this call's `run_id`. Event kinds worth
   knowing: `leaf.*`, `tool.*` (per call inside a leaf), `cache.*`,
-  `segment.*` (bracket a dead-owner resume), `node.paused`, `node.rerouted`.
-- **`fault_kinds`** — a typed subset of `faults`, never parsed from its
+  `segment.*` (bracket a dead-owner resume), `node.paused`, `node.rerouted`,
+  and `audit.gap {reason: "sink_failure" | "process_crash"}` — a dropped or
+  never-written span of durable events, telling a sink write failure apart
+  from the process dying mid-run.
+- **`fault_kinds`** — a typed subset of `faults`, listing each leaf failure's
+  `ErrorKind` in the order the failures occurred, never parsed from its
   text; `quota_exhausted` never appears here (it surfaces as pause reason
   `quota_exhausted` instead). **`partial_leaves`** counts leaves whose usage
   includes tokens ESTIMATED from a call aborted in flight (ADR 0005),
   always also counted in **`usage_uncertain_leaves`**.
+- **`sandbox_refusals`** counts tool calls the sandbox denied inside a leaf —
+  `read_file`/`write_file` outside the run's working scope, `write_file`
+  under a read-only root, `web_fetch` to a host outside the egress
+  allowlist, or any of those once the run is tainted. It is cumulative: a resume adds the new stretch's
+  count onto the run's PRIOR total, so `workflow_status` always reports the
+  run's total across every resume, never just the latest stretch's.
+- **Optional filters treat absence as absence, not as the literal value**,
+  but the two tools differ. `workflow_audit`'s `node_id`/`event_type`/
+  `sub_id`/`segment_id` treat `""` as "no filter"; its `attempt` and
+  `snapshot_seq` treat `0` as "no filter" (a real first attempt, `attempt:
+  0`, still shows up in an unfiltered read — it is just not isolatable by
+  that filter); its `limit` has no such case, `0` is refused outright.
+  `workflow_notices`'s `run_id` treats `""` as "no filter" and its `limit`
+  treats `0` as "no filter" — but `after_seq` is a real default (start of
+  the log) in BOTH tools, never an absence marker, so `after_seq: 0` reads
+  from the beginning rather than dropping the filter.
 
 ---
 

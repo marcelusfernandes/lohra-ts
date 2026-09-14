@@ -17,8 +17,8 @@ intocados (contrato pinado por hash SHA-256 em
 
 |                                    | antes da dieta (#585) | depois                             |
 | ---------------------------------- | --------------------- | ---------------------------------- |
-| chars de JSON do catálogo          | 43.951                | 21.916 (#582; teto de CI: 22.000)  |
-| tokens estimados (2,4 chars/token) | ~18.313               | ~9.132                             |
+| chars de JSON do catálogo          | 43.951                | 21.975 (#605; teto de CI: 22.000)  |
+| tokens estimados (2,4 chars/token) | ~18.313               | ~9.156                             |
 | % em tools de `workflow_*`         | 72%                   | reduzido, mesma proporção de tools |
 
 A regra de conversão (2,4 chars/token) é a mesma que
@@ -320,7 +320,7 @@ enquadramento "environment quirk" sem essa qualificação.
 As descriptions de `memory` e `skill_manage` (`BUILTIN_DEFINITIONS`) citam a
 mesma taxonomia (`tests/tools-memory-guidance.test.ts`, porta de
 `test_memory_guidance_taxonomy.py`) — o orçamento do catálogo (22.000
-chars, hoje em 21.916) foi mantido encolhendo prosa sem AC em outras 17
+chars, hoje em 21.975 após #605) foi mantido encolhendo prosa sem AC em outras 17
 descriptions
 (cronjob, vision_analyze, image_gen, spawn_session, steer_session,
 collect_session, workflow_list, workflow_pause, workflow_cancel,

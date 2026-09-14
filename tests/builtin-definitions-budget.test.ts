@@ -278,3 +278,75 @@ describe("workflow-authoring skill absorbed the manual moved out of descriptions
     expect(lines).toBeLessThanOrEqual(800);
   });
 });
+
+// Issue #605 (épico #575, follow-up dos vereditos r1/r2 da PR #598): cinco
+// regras que a dieta do catálogo (#585) deixou sem destino — nem na
+// description que o modelo lê, nem na skill. Cada `it` abaixo prende UMA.
+describe("cronjob: consent trigger for autonomous spend survives the diet (#605)", () => {
+  it("says the scheduled work is something the user asked to automate", () => {
+    const d = descriptionOf("cronjob");
+    expect(d).toMatch(/user asked (for|to automate)/i);
+  });
+});
+
+describe("workflow-authoring skill: sandbox_refusals definition and cross-resume total (#605)", () => {
+  const skill = readFileSync(
+    resolve(import.meta.dirname, "../assets/skills/workflow-authoring/SKILL.md"),
+    "utf8",
+  );
+
+  it("names the sandbox denial reasons: scope, read-only root, egress allowlist, tainted", () => {
+    expect(skill).toMatch(/working scope/i);
+    expect(skill).toMatch(/read-only root/i);
+    expect(skill).toMatch(/egress\s+allowlist/i);
+    expect(skill).toMatch(/run is tainted/i);
+  });
+
+  it("says sandbox_refusals stays the run's total across a resume", () => {
+    expect(skill).toMatch(/run's total across (every|a) resume/i);
+  });
+});
+
+describe("workflow-authoring skill: route knob refusal one level down is pinned (#238, #605)", () => {
+  const skill = readFileSync(
+    resolve(import.meta.dirname, "../assets/skills/workflow-authoring/SKILL.md"),
+    "utf8",
+  );
+
+  it("says a routing knob inside body/synthesize/branches is refused at validation as an unknown field", () => {
+    expect(skill).toMatch(/body[\s\S]{0,40}synthesize[\s\S]{0,40}branches/);
+    expect(skill).toContain("refused at validation");
+    expect(skill).toContain("unknown field");
+  });
+});
+
+describe("workflow-authoring skill: audit.gap, filter semantics, preview outcomes, fault order (#605)", () => {
+  const skill = readFileSync(
+    resolve(import.meta.dirname, "../assets/skills/workflow-authoring/SKILL.md"),
+    "utf8",
+  );
+
+  it("documents audit.gap's sink_failure/process_crash reasons", () => {
+    expect(skill).toContain("audit.gap");
+    expect(skill).toContain("sink_failure");
+    expect(skill).toContain("process_crash");
+  });
+
+  it("documents empty-string/zero-as-no-filter semantics for workflow_audit and workflow_notices", () => {
+    expect(skill).toMatch(/no filter/i);
+    expect(skill).toContain("workflow_audit");
+    expect(skill).toContain("workflow_notices");
+  });
+
+  it("documents workflow_preview outcomes beyond replay/recompute", () => {
+    expect(skill).toContain("checkpoint_pending");
+    expect(skill).toContain("upstream_missing");
+    expect(skill).toContain("no_leaves");
+    expect(skill).toContain("token_budget_exhausted");
+  });
+
+  it("documents fault_kinds listing each leaf's ErrorKind in order of occurrence", () => {
+    expect(skill).toContain("ErrorKind");
+    expect(skill).toMatch(/order the failures occurred|order of occurrence/i);
+  });
+});
