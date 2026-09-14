@@ -107,6 +107,26 @@ describe("workflow_notices / workflow_notices_ack tools (#402)", () => {
     }
   });
 
+  // Issue #652 (veredito PR #635, item 15a): the model-facing tool must
+  // never leak a chat session's own `session:*` notices (issue #589) into
+  // a run's unscoped listing — a namespace disjoint from `run:<id>`.
+  it("excludes session:* notices even without run_id — the model never sees another session's leak (issue #652)", async () => {
+    const { connection, base } = harness();
+    try {
+      const repository = new NoticesRepository(connection.database);
+      repository.append("global", { kind: "queue_overflow", message: "global one" });
+      repository.append("session:chat-1", { kind: "unknown", message: "session leak" });
+
+      const listed = JSON.parse(
+        await base.registry.dispatch("workflow_notices", {}),
+      ) as NoticesListEnvelope;
+      expect(listed.notices.map((notice) => notice.message)).toContain("global one");
+      expect(listed.notices.map((notice) => notice.message)).not.toContain("session leak");
+    } finally {
+      connection.close();
+    }
+  });
+
   it("acking an unknown id is not an error — it just reports acked:false", async () => {
     const { connection, base } = harness();
     try {

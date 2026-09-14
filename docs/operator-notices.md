@@ -60,7 +60,9 @@ passou pelo `NoticesSink`.
 `NOTICE_KINDS = [...ERROR_KINDS, ...STATE_NOTICE_KINDS]`
 (`src/state/notices-repository.ts:18-25`, issue #401): os 9 `ErrorKind` de
 `src/transports/error-kinds.ts` (`quota_exhausted`, `auth_failed`,
-`model_not_found`, `route_fault`, `sandbox_denied`, `timeout`, `cancelled`,
+`model_not_found`, `route_fault`, `sandbox_denied`, `timeout` (reservado; sem
+produtor hoje — ver
+`docs/decisions/2026-09-14-kind-timeout-reservado.md`), `cancelled`,
 `context_length`, `unknown` — vocabulário completo em
 `docs/workflow-audit.md#vocabulário-de-falhas-error_kind`) mais quatro
 específicos deste canal:
@@ -184,16 +186,23 @@ mais `global`; com `run_id`, só aquele escopo. `""` e `0` nos filtros
 opcionais significam ausência, o mesmo idioma que `workflow_audit` já usa
 desde #390. `workflow_notices_ack({id})` reconhece um aviso pelo `id`
 retornado por `workflow_notices` — `acked: false` para um `id` inexistente
-ou já reconhecido, nunca um erro.
+ou já reconhecido, nunca um erro. Issue #652: sem `run_id`, esta tool NUNCA
+inclui `session:*` (`NoticesListQuery.includeSessions` fica no default
+`false`) — o namespace de uma sessão de chat (issue #589) é disjunto de
+`run:<id>`, e o modelo de um run não tem por que ver o aviso de um turno
+morto de outra sessão de chat no mesmo `state.db`.
 
 `lohra workflow notices [RUN_ID] [--ack ID] [--all] [--after-seq N]
 [--json]` (`src/commands/workflow.ts`, branch `"notices"`) é a mesma leitura
-pela CLI: `RUN_ID` posicional escopa a `run:<id>`, omitido lista tudo;
-`--all` inclui os já reconhecidos; `--ack ID` reconhece e sai (`acked
-<id>`/`no notice <id> to ack`); sem `--json`, cada linha é `id  scope  kind
-[(acked)]  message`. Ao contrário da tool, o `--json` da CLI imprime a
-página crua do repositório, sem o envelope `integrity` (`refused_writes`
-vem no topo da página, não aninhado) — README documenta os dois comandos.
+pela CLI: `RUN_ID` posicional escopa a `run:<id>`, omitido lista tudo —
+inclusive `session:*` (esta branch passa `includeSessions: true`
+explicitamente, mantendo o contrato pré-#589 para o OPERADOR, ainda que a
+tool acima tenha deixado de fazer o mesmo); `--all` inclui os já
+reconhecidos; `--ack ID` reconhece e sai (`acked <id>`/`no notice <id> to
+ack`); sem `--json`, cada linha é `id  scope  kind [(acked)]  message`. Ao
+contrário da tool, o `--json` da CLI imprime a página crua do repositório,
+sem o envelope `integrity` (`refused_writes` vem no topo da página, não
+aninhado) — README documenta os dois comandos.
 
 `created_at` e `acked_at` são segundos desde a época Unix, fracionários
 (`Date.now() / 1_000`, a mesma unidade e precisão dos dois — coluna `REAL`

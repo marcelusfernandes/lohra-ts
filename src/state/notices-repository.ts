@@ -59,6 +59,15 @@ export interface NoticesListQuery {
   readonly afterSeq?: number;
   readonly includeAcked?: boolean;
   readonly limit?: number;
+  // Issue #652 (veredito PR #635): only meaningful when `scope` is absent —
+  // a `session:<id>` scoped query always returns its own rows regardless.
+  // Default `false`: an unscoped `list()` (the tool surface,
+  // `workflow-notices-tool.ts`, exposed to the MODEL inside a run) never
+  // leaks a chat session's own `session:*` notices, a namespace disjoint
+  // from `run:<id>` (issue #589). The CLI (`src/commands/workflow.ts`,
+  // read by the OPERATOR, not a run's model) sets this `true` to keep its
+  // pre-#589 "omitted lists everything" contract.
+  readonly includeSessions?: boolean;
 }
 
 export interface NoticesPage extends Readonly<Record<string, unknown>> {
@@ -115,8 +124,28 @@ function nullableRowNumber(value: unknown): number | null {
 // destrói o instante do ack. `acked_at` precisa da MESMA conversão de
 // `created_at` (linha abaixo, `Number(row.created_at)`), só com `null`
 // preservado — nunca `rowNumber`.
-function nullableRowReal(value: unknown): number | null {
-  return value === null || value === undefined ? null : Number(value);
+// Issue #652 (veredito PR #635): `Number(value)` sobre um `acked_at`
+// ilegível (ex.: um valor não numérico gravado por fora desta classe)
+// devolvia `NaN` em silêncio — `NaN` serializa como `null` em JSON, então o
+// dado corrompido desaparecia do envelope sem rastro (invariante 2:
+// nenhuma falha silenciosa). `Number.isFinite` nomeia a falha com um
+// `warning` (o mesmo canal que `append` já usa para recusas) e devolve
+// `null`, o mesmo valor público de "nunca reconhecido" — indistinguível
+// para quem lê a página, mas com a causa no stderr/log de quem instanciou
+// o repositório. Um `acked_at` fracionário legítimo (issue #603) continua
+// intacto: `Number.isFinite` é verdadeiro para qualquer `REAL` real.
+function nullableRowReal(
+  value: unknown,
+  id: number,
+  warn: (message: string) => void,
+): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    warn(`notices: acked_at ilegível na linha ${String(id)}`);
+    return null;
+  }
+  return parsed;
 }
 
 /**
@@ -140,15 +169,19 @@ function truncateMessage(message: string): string {
   return buffer.subarray(0, end).toString("utf8") + TRUNCATION_MARKER;
 }
 
-function parseNoticeRow(row: Readonly<Record<string, unknown>>): PublicNotice {
+function parseNoticeRow(
+  row: Readonly<Record<string, unknown>>,
+  warn: (message: string) => void,
+): PublicNotice {
+  const id = rowNumber(row.id);
   return Object.freeze({
-    id: rowNumber(row.id),
+    id,
     scope: String(row.scope),
     seq: rowNumber(row.seq),
     kind: String(row.kind) as NoticeKind,
     message: String(row.message),
     created_at: Number(row.created_at),
-    acked_at: nullableRowReal(row.acked_at),
+    acked_at: nullableRowReal(row.acked_at, id, warn),
     acked_by: typeof row.acked_by === "string" ? row.acked_by : null,
     fence: nullableRowNumber(row.fence),
   });
@@ -249,6 +282,7 @@ export class NoticesRepository {
   public list(query: NoticesListQuery = {}): NoticesPage {
     const scope = query.scope;
     const includeAcked = query.includeAcked ?? false;
+    const includeSessions = query.includeSessions ?? false;
     const after = Math.max(0, Math.trunc(query.afterSeq ?? 0));
     const requestedLimit = Math.trunc(query.limit ?? 50);
     const limit = Math.min(200, Math.max(1, requestedLimit));
@@ -268,14 +302,16 @@ export class NoticesRepository {
         return this.database
           .prepare(
             `SELECT * FROM operator_notices
-           WHERE (? = 1 OR acked_at IS NULL)
+           WHERE (? = 1 OR acked_at IS NULL) AND (? = 1 OR scope NOT LIKE 'session:%')
            ORDER BY id ASC LIMIT ?`,
           )
-          .all(includeAcked ? 1 : 0, limit + 1) as readonly Readonly<Record<string, unknown>>[];
+          .all(includeAcked ? 1 : 0, includeSessions ? 1 : 0, limit + 1) as readonly Readonly<
+          Record<string, unknown>
+        >[];
       })
       .deferred();
     const hasMore = rows.length > limit;
-    const page = rows.slice(0, limit).map(parseNoticeRow);
+    const page = rows.slice(0, limit).map((row) => parseNoticeRow(row, this.warning));
     const lastSeq = page.at(-1)?.seq ?? after;
     const droppedBeforeSeq = scope === undefined ? null : this.droppedBeforeSeqOf(scope);
     return Object.freeze({
@@ -311,7 +347,7 @@ export class NoticesRepository {
         `operator_notices: row ${String(id)} not found right after insert`,
       );
     }
-    return parseNoticeRow(row);
+    return parseNoticeRow(row, this.warning);
   }
 
   private droppedBeforeSeqOf(scope: string): number | null {

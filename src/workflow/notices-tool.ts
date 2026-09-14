@@ -44,6 +44,12 @@ export function parseNoticesQuery(args: ToolArguments): NoticesQueryResult {
   if (limit !== undefined && limit < 1)
     return Object.freeze({ error: "workflow_notices limit must be >= 1" });
   return Object.freeze({
+    // Issue #652: `includeSessions` is intentionally never set here — this
+    // handler is the MODEL-facing surface (`workflow_notices`), and
+    // `NoticesRepository.list`'s default (`includeSessions: false`) keeps
+    // an unscoped query from leaking another chat session's own
+    // `session:*` notices (issue #589) into a run's model. The operator
+    // CLI (`src/commands/workflow.ts`) is the one that opts in.
     query: Object.freeze({
       ...(hasText(args.run_id) ? { scope: `run:${args.run_id}` } : {}),
       afterSeq: after,
