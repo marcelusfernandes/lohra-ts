@@ -129,3 +129,9 @@ suggested_route}`; kind que pausa nunca entra em `faultKinds`; primeiro a
   PR #525). `error_kind`/`reason` uniforme para os três gatilhos
   (cancel/steer/timeout) segue genuinamente aberto — o timeout de folha
   (S6/#521) ainda fecha sem `error_kind` nem `usage`.
+- [2026-09-14 — Skills home/builtin fora do checkout sempre
+  `untrusted`](2026-09-14-skills-fora-do-checkout-untrusted.md) — decisão do
+  owner pendente sobre uma exceção para skill instalada pelo operador em
+  `home`; comportamento atual mantido (nenhuma exceção por origem) até essa
+  resposta, porque `skill_manage create` grava em `home` por default e o
+  caminho sozinho não distingue instalação manual de escrita da sessão.

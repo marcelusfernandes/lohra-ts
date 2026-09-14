@@ -139,7 +139,10 @@ function collectSkillFiles(root: string): string[] {
   return output.sort();
 }
 
-function realOrResolved(path: string): string {
+// Issue #642: exportada para `src/tools/filesystem.ts` reusar a MESMA régua
+// tolerante a ENOENT (sem duplicar) — `isUntrustedPath` media a fronteira do
+// projeto com `resolve()`, que não segue symlink.
+export function realOrResolved(path: string): string {
   const suffix: string[] = [];
   let current = path;
   for (;;) {

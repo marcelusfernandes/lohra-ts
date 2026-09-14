@@ -85,6 +85,19 @@ describe("stateful tool handlers", () => {
     expect("untrusted" in result).toBe(false);
   });
 
+  // Issue #642: `isUntrustedSkill` julgava a origem pela raiz do
+  // PROCESSO (`process.cwd()`), nunca a da sessão — uma sessão com `cwd`
+  // explícito (o que `session-tools.ts` passa via `findProjectRoot(options.cwd)`)
+  // via `new SkillTool(store, { projectRoot })` precisa julgar por essa
+  // raiz, não a do processo de teste.
+  it("judges skill origin by the session's projectRoot, not process.cwd() (#642)", () => {
+    const projectRoot = root();
+    const tool = new SkillTool(new SkillStore(projectRoot), { projectRoot });
+    tool.manage({ action: "create", name: "session-scoped", body: "body" });
+    const result = JSON.parse(tool.view({ name: "session-scoped" })) as Record<string, unknown>;
+    expect("untrusted" in result).toBe(false);
+  });
+
   it("implements discovery, browse and read boundaries", () => {
     const db = {
       searchMessages: (query: string, limit: number) => [{ query, limit }],

@@ -80,6 +80,11 @@ export async function webFetchHandler(args: Readonly<Record<string, unknown>>): 
     const outcome = await fetchUrl(url, webTransport);
     return toolResult(undefined, { url, text: htmlToText(outcome.text), untrusted: true });
   } catch (error) {
+    // Issue #642: ao contrário do erro de uma tool MCP (`src/mcp/tools.ts`,
+    // texto do SERVIDOR), o texto de erro aqui é NOSSO — `WebError.message`
+    // (`safety.ts:374-385`) e `WebTransportError.message` (`fetch.ts:127-153`)
+    // vêm do próprio runtime (timeout, DNS, allow-list, etc.), nunca do
+    // corpo da página — não ganham `untrusted`.
     if (error instanceof WebError) return toolError(error.message, { url });
     if (error instanceof WebTransportError) {
       return toolError(`could not fetch the page: ${error.message}`, { url });
@@ -107,6 +112,9 @@ export async function webSearchHandler(args: Readonly<Record<string, unknown>>):
       untrusted: true,
     });
   } catch (error) {
+    // Issue #642: mesmo motivo do erro de `webFetchHandler` acima — o texto
+    // é NOSSO (mensagem de `SearchUnavailable`/`WebError`, nunca o corpo de
+    // uma página de resultado), sem `untrusted`.
     if (error instanceof SearchUnavailable) {
       return toolError(`search is unavailable right now: ${error.message}`, { query });
     }

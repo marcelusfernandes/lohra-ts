@@ -123,15 +123,18 @@ describe("wrapCallResult", () => {
     );
   });
 
-  it("isError with text -> tool_error(text)", () => {
+  // Issue #642: um erro de servidor MCP carrega texto do SERVIDOR, não
+  // nosso — a mesma marca de origem que o envelope de sucesso (:109) já
+  // carrega precisa valer aqui, como última chave, nunca `false`.
+  it("isError with text -> tool_error(text, { untrusted: true }) (#642)", () => {
     expect(wrapCallResult({ content: [{ type: "text", text: "boom" }], isError: true })).toBe(
-      toolError("boom"),
+      toolError("boom", { untrusted: true }),
     );
   });
 
-  it("isError with empty content -> tool_error('MCP tool reported an error')", () => {
+  it("isError with empty content -> tool_error('MCP tool reported an error', { untrusted: true }) (#642)", () => {
     expect(wrapCallResult({ content: [], isError: true })).toBe(
-      toolError("MCP tool reported an error"),
+      toolError("MCP tool reported an error", { untrusted: true }),
     );
   });
 });

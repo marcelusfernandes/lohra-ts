@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -68,6 +68,34 @@ describe("filesystem tools", () => {
   it("omits 'untrusted' entirely for a path inside project_root", () => {
     const path = join(process.cwd(), "package.json");
     const result = JSON.parse(readFileTool({ path })) as Record<string, unknown>;
+    expect("untrusted" in result).toBe(false);
+  });
+
+  // Issue #642: `isUntrustedPath` media com `resolve()`, que não segue
+  // symlink — um symlink DENTRO do projeto apontando para fora do
+  // project_root era lido como confiável. `realOrResolved` (mesma régua de
+  // `src/skills/store.ts`) resolve o caminho real antes de medir a
+  // fronteira.
+  it("marks untrusted a symlink under project_root pointing outside of it (#642)", () => {
+    const outsideTarget = join(root(), "outside.txt");
+    writeFileSync(outsideTarget, "conteúdo de fora");
+    const linkDir = mkdtempSync(join(process.cwd(), "lohra-symlink-out-"));
+    roots.push(linkDir);
+    const link = join(linkDir, "link.txt");
+    symlinkSync(outsideTarget, link);
+    const result = JSON.parse(readFileTool({ path: link })) as { untrusted?: boolean };
+    expect(result.untrusted).toBe(true);
+  });
+
+  // Contra-caso: um symlink FORA do projeto (em tmp) apontando para um
+  // arquivo DENTRO do project_root não pode virar "untrusted" só porque o
+  // caminho literal do link mora fora — a régua é o arquivo real, não o
+  // link.
+  it("omits 'untrusted' for a symlink outside project_root pointing inside it (#642)", () => {
+    const linkDir = root();
+    const link = join(linkDir, "link-to-package-json");
+    symlinkSync(join(process.cwd(), "package.json"), link);
+    const result = JSON.parse(readFileTool({ path: link })) as Record<string, unknown>;
     expect("untrusted" in result).toBe(false);
   });
 
