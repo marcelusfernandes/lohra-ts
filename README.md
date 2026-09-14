@@ -287,7 +287,14 @@ workflow/audit, orquestração, cron, MCP, web e mídia. `notices` lê
 `operator_notices` — os avisos duráveis do canal (issue #400/#401), nunca só
 em memória — como tool (`workflow_notices`/`workflow_notices_ack`) e como
 CLI; `--ack <id>` reconhece um aviso e `--all` também mostra os já
-reconhecidos. Vocabulário de avisos, sink por processo, escopo e retenção em
+reconhecidos. Sem `run_id`/`RUN_ID`, as duas leituras divergem de escopo
+(issue #652): a tool `workflow_notices` nunca cruza avisos `session:*`
+(`NoticesListQuery.includeSessions` fica em `false` por padrão,
+`src/state/notices-repository.ts:285`; `src/workflow/notices-tool.ts:47-49`),
+mas `lohra workflow notices` (a CLI de operador) continua listando tudo,
+`session:*` incluso (`includeSessions: true` explícito,
+`src/commands/workflow.ts:190`), o mesmo contrato de antes da issue #589.
+Vocabulário de avisos, sink por processo, escopo e retenção em
 [docs/operator-notices.md](docs/operator-notices.md).
 
 `dashboard` aceita `--host` (default `127.0.0.1`, encaminhado ao bind real do
