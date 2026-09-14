@@ -9,6 +9,8 @@ import { WebSocket } from "ws";
 import { parseCommand } from "../../src/cli/arg-validation.js";
 import { DASHBOARD_SPEC } from "../../src/cli/arg-spec.js";
 import { runDashboard } from "../../src/commands/dashboard.js";
+import { runChat } from "../../src/commands/chat.js";
+import { setPreference } from "../../src/auth/index.js";
 import { waitUntilBound } from "../helpers/wait-until-bound.js";
 
 const roots: string[] = [];
@@ -148,6 +150,67 @@ describe("runDashboard: subscription mode without login (assertion 50)", () => {
     shutdown();
     await donePromise;
   });
+});
+
+describe("runDashboard: preference=subscription inativa honra route.error, igual ao chat (issue #630)", () => {
+  // Home com preference=subscription e sem auth_mode/acknowledged_tos_risk
+  // (default: authMode "api_key", acknowledgedTosRisk false) -- routeFor
+  // devolve { mode: "api_key", error: PREFER_SUB_ERROR } (credentials.ts:157),
+  // o mesmo estado que faz `chat` sair 2 (chat.ts:157).
+  function inactiveSubscriptionPreferenceHome(): string {
+    const home = tempHome();
+    setPreference(home, "subscription");
+    return home;
+  }
+
+  it.each([
+    { label: "sem --provider", argv: [] as const, chatFlags: new Map<string, string | true>() },
+    {
+      label: "com --provider anthropic",
+      argv: ["--provider", "anthropic"] as const,
+      chatFlags: new Map<string, string | true>([["--provider", "anthropic"]]),
+    },
+  ])(
+    "$label: dashboard sai 2 sem abrir porta, mesmo stderr que chat no mesmo home",
+    async ({ argv, chatFlags }) => {
+      const home = inactiveSubscriptionPreferenceHome();
+      const environment = { ANTHROPIC_API_KEY: "sk-test-key" };
+      const stderrLines: string[] = [];
+      const options: Parameters<typeof runDashboard>[0] = {
+        flags: parseCommand(DASHBOARD_SPEC, [...argv]).options,
+        environment,
+        home,
+        codexHome: join(home, "codex"),
+        cwd: tmpdir(),
+        stderr: (text: string) => stderrLines.push(text),
+        port: 0,
+      };
+      const { ready, shutdown } = waitUntilBound(options);
+      const donePromise = runDashboard(options);
+      // Se o guard existir, `donePromise` resolve sozinho antes de qualquer
+      // bind e `ready` nunca dispara -- a corrida abaixo só existe para não
+      // travar o teste na base (pré-fix), onde o dashboard sobe de verdade.
+      await Promise.race([ready, donePromise]);
+      shutdown();
+      const code = await donePromise;
+      expect(code).toBe(2);
+      const dashboardStderr = stderrLines.join("");
+      expect(dashboardStderr).toContain("preference=subscription");
+      expect(stderrLines.some((line) => line.startsWith("Lohra dashboard:"))).toBe(false);
+
+      const chatResult = await runChat({
+        input: "oi",
+        flags: chatFlags,
+        environment,
+        home,
+        codexHome: join(home, "codex"),
+        cwd: tmpdir(),
+      });
+      expect(chatResult.code).toBe(2);
+      // Asserção cruzada (AC3): byte-igual ao stderr do chat no mesmo home.
+      expect(dashboardStderr).toBe(chatResult.stderr);
+    },
+  );
 });
 
 describe("runDashboard: port already bound (assertion 55)", () => {
