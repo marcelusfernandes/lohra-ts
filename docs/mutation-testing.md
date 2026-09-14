@@ -179,16 +179,16 @@ fatia" cita a mesma restrição.
 | `context-window`      | `mutations:t23`         |       25 | `context-window.ts`                                                                                                   |
 | `auth`                | `mutations:auth`        |       13 | `auth-mutants.ts`                                                                                                     |
 | `supervision`         | `mutations:supervision` |       41 | `supervision-mutants.ts`                                                                                              |
-| `doctor`              | `mutations:doctor`      |       10 | `doctor-mutants.ts`                                                                                                   |
+| `doctor`              | `mutations:doctor`      |       11 | `doctor-mutants.ts`                                                                                                   |
 
-Total: 294. Os 12 mutantes de `workflow-durability-guard.ts` são
+Total: 295. Os 12 mutantes de `workflow-durability-guard.ts` são
 combinatórios: três conjuntos do guard de escrita possuída (`fence`,
 `holder`, `lease-validity`) × quatro categorias (`state`, `cache`,
 `node-cost`, `spend`) — um mutante por combinação, cada um escorado só no
 teste focal da sua categoria, mais os 2 mutantes do INSERT combinado
 cache+custo (`combined-cell-guard-removed`,
 `combined-cost-escapes-refusal`). `tests/mutations-slices.test.ts` importa os
-catorze catálogos de dado puro estaticamente e prova essa soma (294) a cada
+catorze catálogos de dado puro estaticamente e prova essa soma (295) a cada
 corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
 
 A issue #587 (P11, compactação/título pelo `AuxClient`) acrescenta 4 a
@@ -554,12 +554,13 @@ issue #252 — lock checado na transação, `message_count` líquido e o filtro
 `active` de `loadMessages` (`src/state/session-repository.ts`).
 
 `doctor-mutants.ts` (issue #636, follow-up da QA de 846b0b7f e das PRs
-#629/#632/#634) é a fatia mais nova: 10 mutantes cobrindo
+#629/#632/#634) é a fatia mais nova: 11 mutantes cobrindo
 `src/doctor/snapshot.ts` (`route.error` ignorado na decisão de
 `chat_default_provider`, o modo `subscription` caindo em
 `detectChatProvider` como se fosse `api_key`, `usable` sem `ollama.alive`,
-`usable` sem `hasApiKey`), `src/doctor/checks.ts` (`isOllamaReady` com `||`
-em vez de `&&`, o Check `ollama-sem-chave` emitindo sem checar
+`usable` sem `hasApiKey`, `provider_origin` reportando `"api-key"` em vez de
+`"none"` quando nada foi detectado), `src/doctor/checks.ts` (`isOllamaReady`
+com `||` em vez de `&&`, o Check `ollama-sem-chave` emitindo sem checar
 `auth_route === "api_key"`, emitindo com `chat_default_provider !== null`
 em vez de `=== null`, e o `remedy` desse Check sem `--provider ollama`),
 `src/doctor/providers.ts` (`detectConfiguredProvider` devolvendo
@@ -570,13 +571,14 @@ erro, fail-open em vez de propagar a causa). `srcGlobs` é
 `src/commands/provider-detectado.ts` não é um arquivo de topo de `src/`
 ("Forma dos `srcGlobs`", acima) e o diretório `commands` já era coberto por
 `workflow-audit-live`/`self-update`, então a fatia nova dispara em paralelo
-a essas, não em lugar delas. Um décimo primeiro mutante (inverter
-`provider_origin` "env-var"/"api-key" em `snapshot.ts`) foi cogitado e
-descartado: nenhum teste nos três arquivos de foco da fatia
+a essas, não em lugar delas. O mutante de `provider_origin` é o único cujo
+oráculo mora fora dos três arquivos de foco da própria fatia
 (`tests/cli-doctor.test.ts`, `tests/doctor-checks-ollama.test.ts`,
-`tests/chat-provider-detectado.test.ts`) distingue os dois valores — só
-`provider_origin: "none"` é pinado, em `tests/providers.test.ts`, fora do
-`Files` da issue #636.
+`tests/chat-provider-detectado.test.ts`): `tests/providers.test.ts`'s
+"exercises whitespace key and invalid provider through doctor" já pinava
+`provider_origin: "none"` para `LOHRA_PROVIDER` desconhecido, então
+`focusFiles` ganha esse quarto arquivo em vez de inventar um teste novo
+(fora do `Files` da issue #636).
 
 ## `npm run mutations:all` — o agregador (issue #155)
 
@@ -654,13 +656,12 @@ before, after }] }` (ou o shape `MediaMutant` para a fatia `media`).
    `true`.
 5. `npm test` roda `tests/mutations-slices.test.ts`, que reprova de duas
    formas se a contagem não for atualizada junto com o mutante novo: a soma
-   total (269 + o novo) contra os treze catálogos importados, e a linha do
-   catálogo tocado em `CONTAGEM_POR_CATALOGO`
-   (`tests/mutations-slices.test.ts:583-596`), uma tabela pinada por número
+   total (hoje 295, contra os catorze catálogos importados), e a linha do
+   catálogo tocado em `CONTAGEM_POR_CATALOGO`, uma tabela pinada por número
    literal — não derivada de `CATALOGOS.get(path).length` — para que uma
    troca compensatória entre dois catálogos (um ganha o que o outro perde,
-   soma preservada) não passe despercebida. As duas contagens (o literal
-   `269` e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
+   soma preservada) não passe despercebida. As duas contagens (o literal do
+   total e a linha do catálogo em `CONTAGEM_POR_CATALOGO`) precisam de
    atualização junto com o mutante novo.
 
 ## Como adicionar uma fatia
@@ -713,7 +714,7 @@ contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
 `web-tools-mutants` 9, `media-catalog-other` 7, `media-catalog-persistence`
 13, `self-update-mutants` 8, `workflow-executor-mutants` 45,
 `context-window` 25, `auth-mutants` 13, `supervision-mutants` 41,
-`doctor-mutants` 10, soma 294) e a soma de 294 contra os catorze catálogos
+`doctor-mutants` 11, soma 295) e a soma de 295 contra os catorze catálogos
 importados; e que todo diretório de primeiro nível de `src/` está coberto por
 algum `srcGlobs` ou está em `SEM_FATIA` com um motivo não vazio — nunca os
 dois, nunca nenhum dos dois.

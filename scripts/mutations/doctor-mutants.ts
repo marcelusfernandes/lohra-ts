@@ -1,18 +1,13 @@
 // Catálogo de mutação da fatia `doctor` (issue #636, follow-up da QA de
 // 846b0b7f e das PRs #629/#632/#634): `src/doctor/**` e
 // `src/commands/provider-detectado.ts` mudaram três vezes (#604, #631, #633)
-// sem nenhuma fatia de mutação cobrindo esse código -- os 10 mutantes abaixo
+// sem nenhuma fatia de mutação cobrindo esse código -- os 11 mutantes abaixo
 // fecham essa lacuna. Mecânica A (`harness.ts`), mesmo molde de
 // `self-update-mutants.ts`: cada mutante morre por um teste focado já
 // existente em `tests/**` (nenhum teste novo -- `tests/cli-doctor.test.ts`,
-// `tests/doctor-checks-ollama.test.ts` e `tests/chat-provider-detectado.test.ts`
-// não estão no `Files` desta issue).
-//
-// Um décimo primeiro mutante (inverter `provider_origin` "env-var"/"api-key"
-// em `snapshot.ts`) foi CONSIDERADO e descartado: nenhum teste nos três
-// arquivos de foco acima distingue os dois valores (só "none" é pinado, em
-// `tests/providers.test.ts`, fora do `Files` desta issue) -- adicioná-lo
-// sobreviveria, e a correção seria num teste fora do escopo autorizado.
+// `tests/doctor-checks-ollama.test.ts`, `tests/chat-provider-detectado.test.ts`
+// e `tests/providers.test.ts` não estão no `Files` desta issue; só são
+// citados como oráculo, nunca editados).
 import type { Mutant } from "./types.js";
 
 const snapshot = "src/doctor/snapshot.ts";
@@ -23,6 +18,7 @@ const providerDetectado = "src/commands/provider-detectado.ts";
 const cliDoctorFocus = "tests/cli-doctor.test.ts";
 const doctorChecksOllamaFocus = "tests/doctor-checks-ollama.test.ts";
 const chatProviderDetectadoFocus = "tests/chat-provider-detectado.test.ts";
+const providersFocus = "tests/providers.test.ts";
 
 export const doctorMutants: readonly Mutant[] = [
   {
@@ -192,6 +188,22 @@ export const doctorMutants: readonly Mutant[] = [
           "  const detection = detectConfiguredProvider(environment);\n  return { provider: detection.provider, detail: detection.error };",
         after:
           "  const detection = detectConfiguredProvider(environment);\n  return { provider: detection.provider, detail: null };",
+      },
+    ],
+  },
+  {
+    id: "D11-provider-origin-none-as-api-key",
+    category: "provider-origin-none-as-api-key",
+    mechanism: "family-a",
+    focus: {
+      file: providersFocus,
+      test: "exercises whitespace key and invalid provider through doctor",
+    },
+    edits: [
+      {
+        file: snapshot,
+        before: 'detected === null ? "none" :',
+        after: 'detected === null ? "api-key" :',
       },
     ],
   },

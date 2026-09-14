@@ -489,7 +489,7 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 294 (soma dos catorze catálogos importados)", () => {
+  it("a contagem total de mutantes é 295 (soma dos catorze catálogos importados)", () => {
     // Os doze catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
@@ -616,18 +616,19 @@ describe("scripts/mutations/slices.json", () => {
     // vez de só à mensagem do usuário) -- invariante 1 pinado -- 283 + 1 = 284.
     // A issue #636 (follow-up da QA de 846b0b7f e das PRs #629/#632/#634)
     // acrescenta o décimo quarto catálogo, `doctor-mutants.ts` (fatia nova
-    // `doctor`): 10 mutantes cobrindo `src/doctor/snapshot.ts` (`route.error`
+    // `doctor`): 11 mutantes cobrindo `src/doctor/snapshot.ts` (`route.error`
     // ignorado, `subscription` tratado como `api_key`, `usable` sem
-    // `ollama.alive`, `usable` sem `hasApiKey`), `src/doctor/checks.ts`
-    // (`isOllamaReady` com `||`, o Check `ollama-sem-chave` emitindo sem
-    // `auth_route === "api_key"`, emitindo com `chat_default_provider !==
-    // null`, `remedy` sem `--provider ollama`), `src/doctor/providers.ts`
+    // `ollama.alive`, `usable` sem `hasApiKey`, `provider_origin: "none"`
+    // virando `"api-key"`), `src/doctor/checks.ts` (`isOllamaReady` com `||`,
+    // o Check `ollama-sem-chave` emitindo sem `auth_route === "api_key"`,
+    // emitindo com `chat_default_provider !== null`, `remedy` sem
+    // `--provider ollama`), `src/doctor/providers.ts`
     // (`detectConfiguredProvider` devolvendo `AUTO_PROVIDER` como detectado)
     // e `src/commands/provider-detectado.ts` (`detail` descartado no erro) --
     // nenhum desses arquivos tinha mutante em nenhuma fatia até aqui: 284 +
-    // 10 = 294.
+    // 11 = 295.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 294;
+    const TOTAL_MUTANTS = 295;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -653,14 +654,14 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/context-window.ts": 25,
       "scripts/mutations/auth-mutants.ts": 13,
       "scripts/mutations/supervision-mutants.ts": 41,
-      "scripts/mutations/doctor-mutants.ts": 10,
+      "scripts/mutations/doctor-mutants.ts": 11,
     };
     expect(new Set(Object.keys(CONTAGEM_POR_CATALOGO))).toEqual(new Set(CATALOGOS.keys()));
     for (const [path, mutants] of CATALOGOS) {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(294);
+    expect(somaTabela).toBe(295);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {

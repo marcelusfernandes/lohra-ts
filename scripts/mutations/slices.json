@@ -165,7 +165,8 @@
     "focusFiles": [
       "tests/cli-doctor.test.ts",
       "tests/doctor-checks-ollama.test.ts",
-      "tests/chat-provider-detectado.test.ts"
+      "tests/chat-provider-detectado.test.ts",
+      "tests/providers.test.ts"
     ]
   }
 ]

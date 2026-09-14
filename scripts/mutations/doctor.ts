@@ -1,4 +1,4 @@
-// Runner de mutação dos 10 mutantes de `src/doctor/**` e
+// Runner de mutação dos 11 mutantes de `src/doctor/**` e
 // `src/commands/provider-detectado.ts` (issue #636). Molde de
 // `self-update.ts`: único sandbox de `git archive` (via
 // `prepareArchiveSandbox` do harness comum), um mutante de cada vez com
