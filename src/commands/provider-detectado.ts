@@ -11,6 +11,7 @@
 // precedência de um `--provider` explícito, e o modo `subscription`
 // (`docs/decisions/2026-09-13-flags-de-rota-com-assinatura.md`), continuam
 // decididos pelos chamadores antes de qualquer chamada a este módulo.
+import { detectConfiguredProvider } from "../doctor/providers.js";
 
 /** `provider` é o nome resolvido quando a detecção deu certo; `detail` só é
  * não-nulo quando a detecção lançou (ex.: `LOHRA_PROVIDER` aponta para um
@@ -23,7 +24,8 @@ export interface ChatProviderDetection {
 }
 
 export function detectChatProvider(
-  _environment: Readonly<Record<string, string | undefined>>,
+  environment: Readonly<Record<string, string | undefined>>,
 ): ChatProviderDetection {
-  throw new Error("not implemented: detectChatProvider");
+  const detection = detectConfiguredProvider(environment);
+  return { provider: detection.provider, detail: detection.error };
 }

@@ -271,8 +271,14 @@ describe("runChat sem --provider usa o provedor detectado na rota api_key (issue
       cwd: home,
     });
     expect(result.code).toBe(2);
+    // Same shape the explicit-`--provider bogus` case already uses
+    // (chat.ts): a generic short message on stdout, the actual unknown-name
+    // detail on stderr only.
     const envelope = envelopeOf(result.stdout);
-    expect(envelope.error).toContain("unknown provider 'bogus-t604'");
+    expect(envelope.error).toBe(
+      "no provider configured — run `lohra init` (or `lohra doctor`); details on stderr",
+    );
+    expect(result.stderr).toContain("unknown provider 'bogus-t604'");
   });
 
   it("home vazio continua devolvendo o envelope 'no provider configured' byte-igual (issue #604 AC 2, pino)", async () => {

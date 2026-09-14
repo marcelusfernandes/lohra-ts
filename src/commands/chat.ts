@@ -58,6 +58,7 @@ import {
 import type { ModelTransport } from "../conversation/index.js";
 import { formatProviderFailureMessage } from "../serialization/provider-error-message.js";
 import { runChatBoundary } from "./chat-boundary.js";
+import { detectChatProvider, type ChatProviderDetection } from "./provider-detectado.js";
 import { CHAT_TOOL_REGISTRY_FACTORIES } from "./chat-tools.js";
 import { subscriptionProviderRefusal } from "./subscription-guard.js";
 import { composeSessionTools, createSessionToolBase } from "./session-tools.js";
@@ -155,8 +156,17 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   const route = resolveAuthRoute(options.home);
   if (route.error)
     return runChatBoundary({ home: options.home, codexHome: options.codexHome, input });
-  if (provider === undefined && route.mode !== "subscription")
+  // Issue #604: `--provider`-less `api_key` route now uses `doctor`'s own
+  // `detected_provider` rule instead of always falling to the boundary.
+  const detected =
+    provider === undefined && route.mode !== "subscription"
+      ? detectChatProvider(options.environment)
+      : null;
+  if (detected?.provider === null) {
+    if (detected.detail !== null)
+      return initializationError(input, null, NO_PROVIDER_CONFIGURED_SHORT, detected.detail);
     return runChatBoundary({ home: options.home, codexHome: options.codexHome, input });
+  }
 
   // Minted up front so it's known before ClientPool/OrchestrationCore/
   // createChildRunner are constructed below (parent_session_id is fixed at
@@ -227,13 +237,16 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     });
     modelTransport = new ResponsesModel(client);
   } else {
-    const resolved = getProviderProfile(provider as string);
+    // Guard above already returned when both are null (issue #604).
+    const resolvedProviderName = provider ?? (detected as ChatProviderDetection).provider;
+    if (resolvedProviderName === null) throw new Error("internal: no provider resolved (#604)");
+    const resolved = getProviderProfile(resolvedProviderName);
     if (resolved === null)
       return initializationError(
         input,
         null,
         NO_PROVIDER_CONFIGURED_SHORT,
-        `unknown provider '${String(provider).toLowerCase()}' (known: ${knownProviderNames().join(", ")})`,
+        `unknown provider '${resolvedProviderName.toLowerCase()}' (known: ${knownProviderNames().join(", ")})`,
       );
     profile =
       options.environment.LOHRA_PROVIDER_BASE_URL === undefined
