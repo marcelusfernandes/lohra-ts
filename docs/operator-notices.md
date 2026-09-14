@@ -267,12 +267,24 @@ que zera qualquer valor com fração — um aviso reconhecido voltava com
 PR #635): a conversão anterior (`Number(...)` cru) devolvia `NaN` em
 silêncio para um `acked_at` ilegível gravado por fora desta classe — `NaN`
 serializa como `null` em JSON, então o dado corrompido desaparecia sem
-rastro. `nullableRowReal` (`src/state/notices-repository.ts:137-149`,
+rastro. `nullableRowReal` (`src/state/notices-repository.ts:160-172`,
 usada por `parseNoticeRow`) checa `Number.isFinite` e, quando falha, emite
 um `warning` (`notices: acked_at ilegível na linha <id>`) antes de devolver
 `null` — o mesmo valor público de "nunca reconhecido", mas com a causa
 registrada. Um `acked_at` fracionário legítimo (issue #603) continua
 intacto.
+
+Issue #670 (residual F3, veredito PR #667 item 2): a mesma lacuna existia
+para as colunas `INTEGER` `id`/`seq`/`fence` — `rowNumber` zera qualquer
+valor não inteiro em silêncio, sem nomear a linha. `checkedRowNumber`
+(`src/state/notices-repository.ts:127-137`, usada pelas três dentro de
+`parseNoticeRow`) troca o `0` silencioso por um `warning` (`notices:
+<coluna> ilegível na linha <id> — usando 0`) antes de devolver `0` — mesma
+disciplina de `nullableRowReal`, aplicada às colunas que têm um `id` de
+linha para nomear. `rowNumber` cru continua em uso, sem aviso, nos dois
+call sites sem um `id` de linha único para citar: a leitura de
+`prior.next_seq` dentro da transação de `append` e o `reduce` de
+`pruneScope` sobre várias linhas vítimas de uma vez.
 
 ## Retenção
 
