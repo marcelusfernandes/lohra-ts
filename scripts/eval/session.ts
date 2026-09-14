@@ -181,24 +181,38 @@ function spawnCli(
  * `chat.ts` — descoberta de `AGENTS.md`/`CLAUDE.md`, escopo de skills de
  * projeto). Em modo subprocesso isso saía de graça (o `spawn` já dá ao
  * filho seu próprio cwd real); in-process, sem isso, um `cwd_fixture`
- * relativo (`tool-target.txt`) nunca seria encontrado. Restaura o cwd
- * anterior só quando a invocação de verdade se resolve — nunca no
- * `Promise.race`, que pode vencer primeiro por timeout enquanto a chamada
- * perdida segue lendo/escrevendo relativo ao `cwd` do caso.
+ * relativo (`tool-target.txt`) nunca seria encontrado. `runInProcess`
+ * restaura o cwd (via `restoreProjectRootCwd`) só quando a invocação de
+ * verdade se resolve — nunca dentro do `Promise.race`, que pode vencer
+ * primeiro por timeout enquanto a chamada perdida segue lendo/escrevendo
+ * relativo ao `cwd` do caso. `runEvalCase` (abaixo) também chama
+ * `restoreProjectRootCwd` no seu próprio `finally`, então o cwd volta para
+ * a raiz do processo mesmo num timeout — a chamada perdida, se ainda
+ * rodar depois disso, passa a resolver caminho relativo contra a raiz do
+ * projeto (não mais contra o diretório do caso, já removido); seu
+ * resultado já foi descartado de qualquer forma, e a alternativa (não
+ * restaurar) era `ENOENT` para TODO caso seguinte (item 7 abaixo).
  *
- * Issue #607 item 7: o "cwd anterior" NUNCA é um `process.cwd()` capturado
- * de novo a cada chamada — é sempre `PROJECT_ROOT_CWD`, uma única captura
- * feita no import deste módulo. Um `previousCwd` recapturado por chamada
- * podia, sob um caso que estourasse `timeoutMs` (típico de `--provider`
- * contra rede real), ficar apontando para o diretório temporário de um
- * caso ANTERIOR já removido por `runEvalCase` (que fazia `rmSync` antes de
- * qualquer chamada de volta a `process.chdir` ter rodado) — o restore
- * tardio dessa chamada perdida então lançava `ENOENT` dentro de um
- * `.finally` não aguardado (`void`), virando uma rejeição não tratada que
- * derrubava o runner inteiro no meio do lote (reproduzido em
- * `tests/eval-session-internals.test.ts`). `PROJECT_ROOT_CWD` nunca é
- * removido pelo harness — restaurar para ele é sempre seguro,
- * independente de quantos casos rodaram (ou travaram) desde então. */
+ * Issue #607 item 7: o alvo de restauração NUNCA é um `process.cwd()`
+ * capturado de novo a cada chamada — é sempre `PROJECT_ROOT_CWD`, uma
+ * única captura feita no import deste módulo. Um `previousCwd`
+ * recapturado por chamada podia, sob um caso que estourasse `timeoutMs`
+ * (típico de `--provider` contra rede real), ficar apontando para o
+ * diretório temporário de um caso ANTERIOR já removido por `runEvalCase`
+ * (que fazia `rmSync` antes de qualquer chamada de volta a
+ * `process.chdir` ter rodado) — dependendo do timing e da plataforma,
+ * isso derrubava o runner de duas formas possíveis, ambas eliminadas por
+ * `PROJECT_ROOT_CWD`: (a) `process.cwd()` do PRÓXIMO caso lançando
+ * `ENOENT` (`uv_cwd`) por rodar com o cwd ativo do processo já apontando
+ * para um diretório apagado (reproduzido em
+ * `tests/eval-session-internals.test.ts`), ou (b) o `previousCwd` capturado
+ * daquele jeito sendo, ele mesmo, o caminho já removido, e um
+ * `process.chdir(previousCwd)` tardio (dentro de um `.finally` não
+ * aguardado, `void`) lançando `ENOENT` como rejeição não tratada. Em
+ * qualquer um dos dois casos o runner morria no meio do lote.
+ * `PROJECT_ROOT_CWD` nunca é removido pelo harness — restaurar para ele é
+ * sempre seguro, independente de quantos casos rodaram (ou travaram)
+ * desde então. */
 const PROJECT_ROOT_CWD = process.cwd();
 
 /** Só para teste (issue #607 item 7): `runInProcess` recebe o `invoke` real

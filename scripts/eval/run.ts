@@ -3,8 +3,11 @@
 // [--cli <path>]` — o CLI do harness. Sem `--provider`, roda contra o stub
 // local (nunca faz rede) e é o oráculo de mecanismo que
 // `tests/eval-cases.test.ts` também roda em `npm test`. Com `--provider
-// <p>`, roda contra um provedor real — e nunca em CI (`refuseNetworkInCi`),
-// sempre gravando em `docs/eval/<data>-<provedor|stub>/`.
+// <p>`, roda contra um provedor real — e nunca em CI (`refuseNetworkInCi`).
+// Sem `--tag`, grava em `.eval/<data>-<provedor|stub>/` (gitignorado); só
+// com `--tag <t>` grava em `docs/eval/<data>-<provedor|stub>-<t>/`
+// (`resolveOutDir`, issue #607 item 6) — commitar um baseline é sempre um
+// `--tag` explícito, nunca o default.
 //
 // Rodada 1b: por padrão, o CLI é invocado **in-process** via `runCli`
 // (`scripts/eval/session.ts`) — não depende de `dist/`, porque `npm test`
@@ -72,10 +75,13 @@ export interface ParsedArgs {
    * empacotado (ex.: `dist/cli.js`). Ausente == in-process (padrão, o modo
    * que `npm test` também exercita, sem depender de `dist/`). */
   readonly cli?: string;
-  /** `--tag <t>`: sufixo no diretório de saída (`docs/eval/<data>-<label>-<t>/`)
-   * — sem ele, duas corridas no mesmo dia (ex.: antes/depois de uma mudança
-   * de prompt) truncam a MESMA `results.jsonl` (`resetResultsFile`) e a
-   * comparação por SHA (`docs/eval.md`) fica impossível. */
+  /** `--tag <t>`: sufixo no diretório de saída — E o que decide se a
+   * corrida grava em `docs/eval/<data>-<label>-<t>/` (tracked, um baseline
+   * explícito) em vez do default `.eval/<data>-<label>/` (gitignorado,
+   * `resolveOutDir`, issue #607 item 6). Sem `--tag`, duas corridas no
+   * mesmo dia (ex.: antes/depois de uma mudança de prompt) também truncam
+   * a MESMA `results.jsonl` (`resetResultsFile`) e a comparação por SHA
+   * (`docs/eval.md`) fica impossível. */
   readonly tag?: string;
 }
 

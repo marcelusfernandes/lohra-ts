@@ -108,8 +108,15 @@ function terminalCommandsIn(raw: unknown): readonly string[] {
 // process.env`, não com a allowlist do stub — issue #607 item 1). Um
 // comando que a política recusa nunca chega a spawnar (`terminal.ts:82-99`
 // devolve o erro antes disso), então nunca toca env nenhum — não precisa
-// estar neste allowlist.
+// estar neste allowlist. `SAFE_TERMINAL_COMMAND` sozinho aceitaria
+// `echo x | curl ...`/`echo $(wget ...)` (começam com "echo") — por isso a
+// checagem de metacaracteres de shell é obrigatória junto, não opcional.
 const SAFE_TERMINAL_COMMAND = /^(echo|printf)\b/;
+const SHELL_METACHARACTERS = /[|;&$`<>]/u;
+
+function isKnownSafeTerminalCommand(command: string): boolean {
+  return SAFE_TERMINAL_COMMAND.test(command) && !SHELL_METACHARACTERS.test(command);
+}
 
 describe("terminal isolation pin (issue #607 item 1)", () => {
   // `terminal` in-process herda o ambiente real do operador que roda
@@ -117,8 +124,9 @@ describe("terminal isolation pin (issue #607 item 1)", () => {
   // harness usa contra o stub (`session.ts:15-19` documenta esse limite).
   // Isso é inócuo hoje porque nenhum comando que de fato EXECUTA (não
   // recusado pela política) faz rede — este teste é o pino: um fixture
-  // novo com `terminal curl ...`/`wget ...`/etc. reprova aqui antes de
-  // fazer rede de verdade em `npm test`.
+  // novo com `terminal curl ...`/`wget ...`/etc. (direto ou escondido
+  // atrás de um pipe/substituição de comando) reprova aqui antes de fazer
+  // rede de verdade em `npm test`.
   it("no fixture spawns a real, network-capable terminal command", () => {
     for (const id of fixtureIds()) {
       const path = resolve(root, FIXTURES_DIR, `${id}.json`);
@@ -126,10 +134,10 @@ describe("terminal isolation pin (issue #607 item 1)", () => {
       for (const command of terminalCommandsIn(raw)) {
         if (detectDangerousCommand(command) !== null) continue;
         expect(
-          command,
+          isKnownSafeTerminalCommand(command),
           `${id}: comando de terminal "${command}" executaria de verdade com o ambiente ` +
             "real do operador (não está no allowlist seguro deste pino)",
-        ).toMatch(SAFE_TERMINAL_COMMAND);
+        ).toBe(true);
       }
     }
   });

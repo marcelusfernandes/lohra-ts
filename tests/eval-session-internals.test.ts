@@ -29,13 +29,21 @@ afterEach(() => {
 });
 
 describe("runInProcess: restauração de cwd (issue #607 item 7)", () => {
-  // Reproduz o bug relatado (session.ts:219 antes da correção): um caso
-  // que estoura `timeoutMs` (a chamada real, `invokeSlow` aqui, segue
+  // Reproduz o bug relatado (session.ts, antes da correção, com o
+  // `previousCwd` de cada chamada recapturado via `process.cwd()`): um
+  // caso que estoura `timeoutMs` (a chamada real, `invokeSlow` aqui, segue
   // "rodando em segundo plano" sem nunca resolver dentro do teste) tem seu
-  // diretório temporário removido pelo CHAMADOR (como `runEvalCase` faz em
-  // `finally`) antes da restauração de cwd da chamada perdida rodar. Um
-  // segundo caso, independente, precisa terminar sem que essa restauração
-  // tardia derrube o processo com uma rejeição não tratada.
+  // diretório temporário removido pelo CHAMADOR (como `runEvalCase` fazia
+  // em `finally`, sem restaurar o cwd antes) — o cwd ATIVO do processo
+  // continua apontando para esse diretório já apagado. Contra o código
+  // antigo isso derrubava o teste de uma entre duas formas (dependente de
+  // timing/plataforma, ambas com a mesma causa raiz): o `process.cwd()` do
+  // PRÓXIMO caso lançando `ENOENT` (`uv_cwd`) — o que este teste
+  // efetivamente reproduziu localmente — ou um `process.chdir(previousCwd)`
+  // tardio da chamada perdida do caso A lançando `ENOENT` como rejeição
+  // não tratada (`unhandled`, abaixo) por `previousCwd` ter sido, ele
+  // mesmo, um caminho já removido. `PROJECT_ROOT_CWD` (a correção) elimina
+  // as duas.
   it("a slow call that outlives the timeout never corrupts a later case's cwd restore", async () => {
     const startedAt = process.cwd();
     const rootA = tempDir();
@@ -67,7 +75,11 @@ describe("runInProcess: restauração de cwd (issue #607 item 7)", () => {
       rmSync(rootA, { recursive: true, force: true });
 
       // Caso B roda a seguir, independente — nunca deveria falhar por
-      // causa de um estado deixado pelo caso A.
+      // causa de um estado deixado pelo caso A. Contra o código antigo,
+      // este `await` é justamente onde `process.cwd()` lançava `ENOENT`
+      // (o `it` inteiro falhava aqui, antes de chegar em qualquer
+      // `expect` — não é o `expect(unhandled)` abaixo que pegava essa
+      // manifestação específica).
       const resultB = await runInProcess([], {}, rootB, 1000, () => Promise.resolve(0));
       expect(resultB.exitCode).toBe(0);
       expect(resultB.timedOut).toBe(false);

@@ -195,11 +195,12 @@ profile, então isolar o profile nunca esconde credenciais.
 uma falhou) ou `"skipped"` (modo `--provider`: nenhuma assertion rodou,
 porque não existe stub capturando a requisição real para julgar). `"skipped"`
 nunca é tratado como passagem — `summary.json` conta `mechanismPassCount` e
-`mechanismSkippedCount` separadamente (o total menos essas duas contagens são
-falhas reais — não existe um `mechanismFailCount` próprio em `EvalSummary`,
-`scripts/eval/types.ts`), e o filtro de falha do CLI usa `=== false`, nunca
-uma checagem de "falsy" que confundiria `"skipped"` com uma falha real. Uma
-corrida `--provider` legítima e saudável mostra `mechanismSkippedCount` igual
+`mechanismSkippedCount` separadamente; `EvalSummary` (`scripts/eval/types.ts`)
+não tem um contador dedicado às falhas reais — quem precisar desse número
+calcula `total - mechanismPassCount - mechanismSkippedCount`. O filtro de
+falha do CLI usa `=== false`, nunca uma checagem de "falsy" que confundiria
+`"skipped"` com uma falha real. Uma corrida `--provider` legítima e saudável
+mostra `mechanismSkippedCount` igual
 ao total de casos e `mechanismPassCount: 0` — isso é o esperado, não um sinal
 de problema.
 
