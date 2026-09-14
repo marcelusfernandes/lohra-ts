@@ -427,7 +427,7 @@ fatia `workflow-audit-live` ganha os dois arquivos: 270 + 4 = 274.
 Issue #569 (M16 pós-revisão, épico #561, S5) acrescenta dois a
 `context-window.ts` (não `supervision-mutants.ts`, que segue no teto de 800
 linhas, e não `core.ts` diretamente — o fix do item 2, disarm-on-fire em
-`OrchestrationCore.steer`, não tem `focusFile` de `supervision` cobrindo
+`OrchestrationCore.steer`, não tinha `focusFile` de `supervision` cobrindo
 `tests/orchestration-steer-interrupt.test.ts`, e `slices.json` está fora do
 `Files` da issue): `r-steer-interrupt-continue-ignores-outer-cancel` remove
 o conjunto `&& !signalAborted(signal)` do `catch` de `runTurn`

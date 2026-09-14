@@ -583,7 +583,7 @@ describe("scripts/mutations/slices.json", () => {
     // (`runtime.ts`'s conjunto `&& !signalAborted(signal)` e `disarm?.()`
     // no `finally`, respectivamente) — `core.ts` teria sido o lar natural
     // do fix de item 2 (disarm-on-fire em `OrchestrationCore.steer`), mas
-    // nenhum focusFile de `supervision` cobre `tests/orchestration-steer-
+    // nenhum focusFile de `supervision` cobria `tests/orchestration-steer-
     // interrupt.test.ts` e `slices.json` está fora do `Files` da issue, e
     // `supervision-mutants.ts` segue no teto: 274 + 2 = 276. A issue #587
     // (P11, compactação/título pelo `AuxClient`) acrescenta quatro a

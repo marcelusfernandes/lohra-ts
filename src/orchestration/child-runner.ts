@@ -288,8 +288,10 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
       // leaf's own `model.request.interrupted`/`turn.*` events (`runtime.ts`)
       // never reach the `workflow_steer` audit path (`workflow/steer-tool.ts`)
       // this way. Documented, not fixed: wiring one is a real, separate
-      // change (what would consume it, `leaf.steered` already carries the
-      // `interrupted`/`partial` outcome via `CollectResult`) — out of this
+      // change — `interrupted` already reaches `leaf.steered` through
+      // `steer()`'s OWN outcome (`SteerOutcome`, never through this leaf's
+      // events), and `partial` already reaches `leaf.failed`/`leaf.completed`
+      // (`RunResult.partialLeaves`) through `CollectResult` — out of this
       // S-sized issue's scope (no contract change, `## Fora de escopo`).
       const runtime = new ConversationRuntime({
         repository,
