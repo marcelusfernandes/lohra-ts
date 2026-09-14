@@ -142,4 +142,27 @@ describe("environment snapshot hints (#588)", () => {
     expect(hints).not.toHaveProperty("git_status");
     expect(hints).not.toHaveProperty("git_recent");
   });
+
+  // Issue #648 (grupo A, item 7d de #637): `gitSnapshot` (discovery.ts:
+  // 216-219) falls back to `rev-parse --short HEAD` only when `symbolic-ref
+  // --short HEAD` fails -- true on a genuinely detached HEAD, never
+  // exercised by any fixture above (every one commits straight onto
+  // `main`). Every other test in this file pins ABSENCE of `git_branch`;
+  // this one pins the fallback VALUE itself.
+  it("falls back to the short commit SHA for git_branch on a detached HEAD", () => {
+    const repo = initRepo();
+    writeFileSync(join(repo, "a.txt"), "one\n");
+    git(repo, ["add", "a.txt"]);
+    git(repo, ["commit", "-q", "-m", "first commit"]);
+    git(repo, ["checkout", "--detach", "-q"]);
+
+    const shortSha = spawnSync("git", ["rev-parse", "--short", "HEAD"], {
+      cwd: repo,
+      encoding: "utf8",
+    }).stdout.trim();
+    expect(shortSha.length).toBeGreaterThan(0);
+
+    const { hints } = loadProjectContext(repo);
+    expect(hints.git_branch).toBe(shortSha);
+  });
 });
