@@ -6,6 +6,10 @@
 // `{file, test}` (não por título solto — renomear um teste sem atualizar o
 // catálogo tem que quebrar aqui) e a ausência de literais herdados do
 // diretório histórico de paridade.
+//
+// Issue #646 (sub-issue A1 de #637) acrescenta a nona entrada:
+// `T22-dashboard-doctrine-dropped` (`src/commands/dashboard.ts`'s fiação de
+// doutrina, issue #579).
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -30,8 +34,8 @@ function realTestTitles(testSource: string): ReadonlySet<string> {
 }
 
 describe("catálogo de mutação self-update", () => {
-  it("tem exatamente 8 mutantes", () => {
-    expect(mutants).toHaveLength(8);
+  it("tem exatamente 9 mutantes", () => {
+    expect(mutants).toHaveLength(9);
   });
 
   it("ids são únicos", () => {

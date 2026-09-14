@@ -60,6 +60,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { contextWindowMutants } from "../scripts/mutations/context-window.js";
+import { contextPromptMutants } from "../scripts/mutations/context-prompt-mutants.js";
 
 const root = resolve(__dirname, "..");
 
@@ -118,6 +119,57 @@ describe("mutations:t23 catalog (compaction, estimator, context window)", () => 
   });
 
   for (const mutant of contextWindowMutants) {
+    it(`${mutant.id}: cada "before" ocorre exatamente uma vez, verbatim, no arquivo mirado`, () => {
+      for (const edit of mutant.edits) {
+        expect(edit.before.length).toBeGreaterThan(0);
+        expect(occurrences(sourceOf(edit.file), edit.before), `${mutant.id} @ ${edit.file}`).toBe(
+          1,
+        );
+      }
+    });
+
+    it(`${mutant.id}: o foco existe em tests/ e o título do teste está lá, exatamente uma vez`, () => {
+      expect(mutant.focus.file).toMatch(/^tests\/.*\.test\.ts$/);
+      const testSource = sourceOf(mutant.focus.file);
+      expect(
+        occurrences(testSource, mutant.focus.test),
+        `${mutant.id}: "${mutant.focus.test}" não ocorre exatamente uma vez em ${mutant.focus.file}`,
+      ).toBe(1);
+    });
+  }
+});
+
+// Issue #646 (sub-issue A1 de #637): segundo catálogo da fatia
+// `context-window` — doutrina, moldura de memória/perfil/instruções, nota
+// de snapshot, git snapshot e as seções verbatim/truncamento de cauda do
+// resumo. Mesmas checagens do catálogo acima, sobre `contextPromptMutants`.
+describe("mutations:t23 catalog — context-prompt-mutants.ts (doctrine, prompt framing, git snapshot, summary verbatim)", () => {
+  it("declara exatamente 16 mutantes", () => {
+    expect(contextPromptMutants).toHaveLength(16);
+  });
+
+  it("cada id de mutante é único", () => {
+    const ids = contextPromptMutants.map((mutant) => mutant.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("mira apenas doctrine.ts (×4), system-prompt.ts (×5), discovery.ts (×4), aux.ts (×2), compaction.ts (×1)", () => {
+    const counts: Record<string, number> = {};
+    for (const mutant of contextPromptMutants) {
+      for (const file of new Set(mutant.edits.map((edit) => edit.file))) {
+        counts[file] = (counts[file] ?? 0) + 1;
+      }
+    }
+    expect(counts).toEqual({
+      "src/context/doctrine.ts": 4,
+      "src/context/system-prompt.ts": 5,
+      "src/context/discovery.ts": 4,
+      "src/agent/aux.ts": 2,
+      "src/conversation/compaction.ts": 1,
+    });
+  });
+
+  for (const mutant of contextPromptMutants) {
     it(`${mutant.id}: cada "before" ocorre exatamente uma vez, verbatim, no arquivo mirado`, () => {
       for (const edit of mutant.edits) {
         expect(edit.before.length).toBeGreaterThan(0);

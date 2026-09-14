@@ -156,6 +156,17 @@ describe("system prompt renderer", () => {
     }).toThrow(TypeError);
   });
 
+  // Issue #646 (sub-issue A1 de #637, veredito da PR #614): a byte-compat do
+  // prompt sem blocos opcionais era pinada só por AUSÊNCIA (`not.toContain`
+  // nos testes de moldura abaixo) — nunca por igualdade exata do `.text`
+  // inteiro. Um mutante que trocasse a ordem das faixas, o separador, ou
+  // inserisse um byte a mais sobreviveria a todos os `toContain`/`not.
+  // toContain` já existentes.
+  it("pins the whole .text of a prompt with no optional blocks by equality (issue #646)", () => {
+    const prompt = buildSystemPrompt({ identity: "Soul", today: "2030-01-02" });
+    expect(prompt.text).toBe("Soul\n\nToday's date is 2030-01-02.");
+  });
+
   it("places doctrine in the stable band, after identity and before Environment (issue #579)", () => {
     const prompt = buildSystemPrompt({
       identity: "Soul",

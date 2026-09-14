@@ -14,6 +14,10 @@
 // `tests/gateway/session-service.test.ts`, `tests/session-tools.test.ts`).
 //
 // Nenhum símbolo aqui depende de I/O; só dados.
+//
+// Issue #646 (sub-issue A1 de #637): `dashboard.ts`'s own doctrine wiring
+// (`doctrineText(resolveDoctrineTier(...))`, issue #579) não tinha mutante
+// em nenhuma fatia — `src/commands/**` já está no `srcGlobs` desta fatia.
 import type { Mutant } from "./types.js";
 
 const repo = "src/self-update/repo.ts";
@@ -22,8 +26,10 @@ const terminal = "src/tools/terminal.ts";
 const mcpManager = "src/mcp/manager.ts";
 const sessionService = "src/gateway/session-service.ts";
 const sessionTools = "src/commands/session-tools.ts";
+const dashboard = "src/commands/dashboard.ts";
 
 const selfUpdateFocus = "tests/self-update.test.ts";
+const dashboardPromptContractTests = "tests/gateway/dashboard-prompt-contract.test.ts";
 
 export const mutants: readonly Mutant[] = [
   {
@@ -141,6 +147,25 @@ export const mutants: readonly Mutant[] = [
         before:
           "    ...workflowToolHandlers(options.workflowService, options.base.auditRepository),",
         after: "    ...{},",
+      },
+    ],
+  },
+  {
+    id: "T22-dashboard-doctrine-dropped",
+    category: "dashboard-doctrine-dropped",
+    mechanism: "family-a",
+    focus: {
+      file: dashboardPromptContractTests,
+      test: "a real WS turn's system message carries identity, memory, user profile, and the skills index — none of which dashboard sent before this issue",
+    },
+    edits: [
+      {
+        file: dashboard,
+        before:
+          "  const doctrine = doctrineText(\n" +
+          "    resolveDoctrineTier({ providerName: profile.name, environment: options.environment }),\n" +
+          "  );\n",
+        after: '  const doctrine = "";\n',
       },
     ],
   },

@@ -33,6 +33,11 @@
 // Issue #149 (passo 0b do épico #13): migrado do módulo legado de
 // paridade para `scripts/mutations/**`, sem mudar id/mechanism/edits — só
 // o caminho e o tipo importado mudam.
+//
+// Issue #646 (sub-issue A1 de #637): `subagent-prompt.ts`'s own doctrine
+// wiring (sempre DOCTRINE_CORE, nunca a extensão — issue #579) não tinha
+// mutante em nenhuma fatia; `src/orchestration/**` já está no `srcGlobs`
+// desta fatia (`workflow-durability`).
 import type { Mutant } from "./types.js";
 
 const childRunner = "src/orchestration/child-runner.ts";
@@ -42,6 +47,8 @@ const workflowShutdownTests = "tests/workflow-shutdown.test.ts";
 const workflowProgressCoberturaTests = "tests/workflow-progress-cobertura.test.ts";
 const ownershipStore = "src/workflow/ownership-store.ts";
 const workflowDurableRootsTests = "tests/workflow-durable-roots.test.ts";
+const subagentPrompt = "src/orchestration/subagent-prompt.ts";
+const subagentPromptTests = "tests/orchestration-subagent-prompt.test.ts";
 
 export const orchestrationMutants: readonly Mutant[] = [
   {
@@ -131,6 +138,23 @@ export const orchestrationMutants: readonly Mutant[] = [
         before:
           "    write(`workflow: ${warning.cause} run=${warning.runId} fence=${String(warning.fence)}`);",
         after: "    write(`${warning.cause} run=${warning.runId} fence=${String(warning.fence)}`);",
+      },
+    ],
+  },
+  {
+    id: "as/subagent-prompt-doctrine-dropped",
+    category: "prompt",
+    mechanism:
+      "buildSubagentSystemPrompt para de passar DOCTRINE_CORE a buildSystemPrompt — um subagente perde a doutrina de comportamento inteira (issue #579)",
+    focus: {
+      file: subagentPromptTests,
+      test: "orders identity+isolation, doctrine, harness, Environment, tools contract, then the date",
+    },
+    edits: [
+      {
+        file: subagentPrompt,
+        before: "    doctrine: DOCTRINE_CORE,\n",
+        after: "    doctrine: undefined,\n",
       },
     ],
   },

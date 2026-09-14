@@ -34,6 +34,7 @@ import {
   snapshotFiles,
   writeReport,
 } from "./harness.js";
+import { contextPromptMutants } from "./context-prompt-mutants.js";
 import type { Focus, Mutant, MutationReport } from "./types.js";
 
 const compaction = "src/conversation/compaction.ts";
@@ -590,20 +591,26 @@ function assertBaselineGreen(directory: string, focus: Focus): void {
   }
 }
 
+// Issue #646 (sub-issue A1 de #637): o runner concatena os dois catálogos da
+// fatia `context-window` — `context-prompt-mutants.ts` vive num arquivo
+// separado (o `Files` da issue não autoriza crescer este arquivo além do
+// teto de 800 linhas), mas roda na mesma corrida de `npm run mutations:t23`.
+const allMutants: readonly Mutant[] = [...contextWindowMutants, ...contextPromptMutants];
+
 export function main(): void {
   const candidateSha = headSha();
   const sandbox = prepareArchiveSandbox(root, candidateSha);
   try {
     const files = [
-      ...new Set(contextWindowMutants.flatMap((mutant) => mutant.edits.map((edit) => edit.file))),
+      ...new Set(allMutants.flatMap((mutant) => mutant.edits.map((edit) => edit.file))),
     ];
     const snapshot = snapshotFiles(sandbox, files);
 
     const foci = new Map<string, Focus>();
-    for (const mutant of contextWindowMutants) foci.set(focusKey(mutant.focus), mutant.focus);
+    for (const mutant of allMutants) foci.set(focusKey(mutant.focus), mutant.focus);
     for (const focus of foci.values()) assertBaselineGreen(sandbox, focus);
 
-    const results = contextWindowMutants.map((mutant) => {
+    const results = allMutants.map((mutant) => {
       restoreAll(sandbox, snapshot);
       for (const edit of mutant.edits) applyEditExactlyOnce(sandbox, edit, mutant.id);
       const outcome = runFocusedVitest(sandbox, mutant.focus);
