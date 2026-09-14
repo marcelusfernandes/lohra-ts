@@ -173,8 +173,9 @@ describe("skill store", () => {
   // `within()` (private) is what `origin()`/`ensureWithinRoots()` build on
   // top of `realOrResolved` — it isn't exported, and `SkillStore.scan()`
   // never discovers a skill THROUGH a broken directory in the first place
-  // (`collectSkillFiles` skips symlink entries and swallows a `readdirSync`
-  // failure), so the flip can't be observed via a scanned skill's own
+  // (`collectSkillFiles` skips symlink entries and, since #678, warns and
+  // skips a `readdirSync` failure instead of discovering anything through
+  // it), so the flip can't be observed via a scanned skill's own
   // `origin`. `create()` under a `project` root broken by a symlink cycle
   // IS observable: `ensureWithinRoots` used to treat a root it couldn't
   // resolve as a match anyway (fail-open — `within` said "inside" for a
@@ -231,5 +232,64 @@ describe("skill store", () => {
           line.includes("ensureWithinRoots") && line.includes(parent) && line.includes("ELOOP"),
       ),
     ).toBe(true);
+  });
+
+  // Issue #678: `collectSkillFiles`'s own `catch { return; }` around
+  // `readdirSync` was the last fail-open swallow in this file after #670
+  // (`realOrResolved`) and #675 (`ensureWithinRoots`) started naming path
+  // and code — a skills dir broken by ELOOP/EACCES just vanished, no line
+  // on stderr. `scan()` iterates every root (`this.roots`), so one broken
+  // root shouldn't hide skills discoverable through the OTHER roots — the
+  // warn names it and the scan keeps going, best-effort, same as `origin()`
+  // already tolerates a root it can't fully resolve.
+  it("warns collectSkillFiles's own path and code on a readdirSync failure other than ENOENT, then keeps scanning (#678)", () => {
+    const home = root();
+    const base = root();
+    const loop = join(base, "loop");
+    symlinkSync(loop, loop);
+    skill(home, "ok", "ok-skill", "still found");
+    const store = new SkillStore(home, [loop]);
+    const original = process.stderr.write.bind(process.stderr);
+    const lines: string[] = [];
+    process.stderr.write = (chunk: string) => {
+      lines.push(chunk);
+      return true;
+    };
+    let skills;
+    try {
+      skills = store.scan();
+    } finally {
+      process.stderr.write = original;
+    }
+    expect(
+      lines.some(
+        (line) =>
+          line.includes("collectSkillFiles") && line.includes(loop) && line.includes("ELOOP"),
+      ),
+    ).toBe(true);
+    expect(skills.map((entry) => entry.name)).toContain("ok-skill");
+  });
+
+  // ENOENT stays tolerated — a skill root that doesn't exist yet (e.g. the
+  // home `skills/` dir before the first `create()`) is a legitimate,
+  // expected case, not a failure to name on stderr.
+  it("does not warn on ENOENT — a skill root that hasn't been created yet is tolerated", () => {
+    const home = root();
+    const missing = join(root(), "does-not-exist");
+    const store = new SkillStore(home, [missing]);
+    const original = process.stderr.write.bind(process.stderr);
+    const lines: string[] = [];
+    process.stderr.write = (chunk: string) => {
+      lines.push(chunk);
+      return true;
+    };
+    let skills;
+    try {
+      skills = store.scan();
+    } finally {
+      process.stderr.write = original;
+    }
+    expect(skills).toEqual([]);
+    expect(lines).toHaveLength(0);
   });
 });
