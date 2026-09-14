@@ -65,6 +65,16 @@ class MemoryRepository implements ConversationRepository {
   }
 }
 
+// Issue #608 (menor 5): the ONE fake that distinguishes "ack after commitTurn
+// lands" from "ack just before commitTurn is even called" — a transport
+// failure (used by the test right below) dies BEFORE commitTurn is ever
+// reached at all, so it can't tell the two apart on its own.
+class ThrowingCommitRepository extends MemoryRepository {
+  override commitTurn(): never {
+    throw new Error("commitTurn failed");
+  }
+}
+
 class QueueTransport implements ModelTransport {
   readonly requests: ModelRequest[] = [];
   private readonly responses: (() => Promise<NormalizedResponse>)[];
@@ -204,6 +214,29 @@ describe("ConversationRuntime notices overlay (#589)", () => {
     ).rejects.toThrow();
 
     expect(notices.ackCalls).toEqual([]);
+  });
+
+  it("never acks when commitTurn ITSELF throws — distinct from a failure before commitTurn is even reached (#608 menor 5)", async () => {
+    const repository = new ThrowingCommitRepository();
+    const transport = new QueueTransport();
+    const notices = new FakeNotices();
+    notices.setClaimResult({ token: [3], overlay: "OPERATOR NOTICES (not the user speaking):" });
+    const runtime = new ConversationRuntime({
+      repository,
+      transport,
+      promptSnapshot: () => "sys",
+      idSource: () => "s1",
+      clock: () => 1000,
+      notices,
+    });
+
+    await expect(
+      runtime.runTurn({ input: "hello", provider: "p", model: "m", cwd: "/tmp" }),
+    ).rejects.toThrow("commitTurn failed");
+
+    expect(notices.ackCalls).toEqual([]);
+    expect(notices.failureCalls).toHaveLength(1);
+    expect(notices.failureCalls[0]?.code).toBe("TURN_FAILED");
   });
 
   it("publishes a turn-failure notice with the failing code when the turn dies (AC4)", async () => {
