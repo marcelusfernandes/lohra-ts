@@ -19,6 +19,7 @@
 
 ### Fixed
 
+- fix(version): fonte única da versão lida do package.json em runtime (#693)
 - fix(skills): collectSkillFiles nomeia erro de readdirSync; intervalo do catch de web_search na doc (#679)
 - fix(m22): sobras F4 — ensureWithinRoots fail-closed, comentário de web_search, prova de skills e âncora da WS (#677)
 - fix(m22): residual F3 — notices, rowNumber, untrusted em web_fetch, realpath (#674)
@@ -99,7 +100,6 @@
 
 ### Other
 
-- Merge remote-tracking branch 'origin/main' into release/0.0.12
 - decisão(owner): licença de distribuição do lohra-ts (D6) (#684)
 
 Gerado por `scripts/release.ts` (issue #531) a partir de `git log
