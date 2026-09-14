@@ -33,6 +33,12 @@
 // janela real), v e w (`src/agent/aux.ts`'s `summarizeWithFallback` perde o
 // catch, `auxTelemetry` para de contar chamadas) — `aux.ts` entra no
 // `srcGlobs` desta fatia pela primeira vez: 19 + 4 = 23.
+//
+// Issue #620 (follow-up do veredito da PR #617) acrescenta x: `aux.ts`'s
+// `summaryBudgetFor` volta ao `maxTokens` fixo em 1024 em vez de escalar com
+// `summaryMaxTokens(estimateTokens(transcript))`, igual ao bug original que
+// a issue corrige (o resumo pelo `AuxClient` truncava as seções verbatim que
+// a #584 existe para preservar): 23 + 1 = 24.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -51,8 +57,8 @@ function sourceOf(relativePath: string): string {
 }
 
 describe("mutations:t23 catalog (compaction, estimator, context window)", () => {
-  it("declara exatamente 23 mutantes", () => {
-    expect(contextWindowMutants).toHaveLength(23);
+  it("declara exatamente 24 mutantes", () => {
+    expect(contextWindowMutants).toHaveLength(24);
   });
 
   it("cada id de mutante é único", () => {
@@ -60,7 +66,7 @@ describe("mutations:t23 catalog (compaction, estimator, context window)", () => 
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("mira apenas compaction.ts (×5), runtime.ts (×5), token-estimate.ts (×3), context-window.ts (×2), windows-cache.ts (×2), session-repository.ts (×3), provider-model.ts (×1), aux.ts (×2)", () => {
+  it("mira apenas compaction.ts (×5), runtime.ts (×5), token-estimate.ts (×3), context-window.ts (×2), windows-cache.ts (×2), session-repository.ts (×3), provider-model.ts (×1), aux.ts (×3)", () => {
     // Conta MUTANTES por arquivo (não edits) -- cada mutante deste catálogo
     // tem um único edit, então as duas contagens coincidem aqui, mas o
     // padrão (Set por mutante) segue mutations-t20-catalog.test.ts, que
@@ -79,7 +85,7 @@ describe("mutations:t23 catalog (compaction, estimator, context window)", () => 
       "src/catalog/windows-cache.ts": 2,
       "src/state/session-repository.ts": 3,
       "src/conversation/provider-model.ts": 1,
-      "src/agent/aux.ts": 2,
+      "src/agent/aux.ts": 3,
     });
   });
 

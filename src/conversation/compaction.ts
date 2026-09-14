@@ -32,6 +32,12 @@ import {
   CompressionLockBusyError,
   CompressionLockNotHeldError,
 } from "./errors.js";
+import {
+  SUMMARY_MAX_TOKENS_CEILING,
+  SUMMARY_MAX_TOKENS_DIVISOR,
+  SUMMARY_MAX_TOKENS_FLOOR,
+  summaryMaxTokens,
+} from "./summary-budget.js";
 import type { CompactionResult, ConversationRepository, ModelRequest } from "./types.js";
 
 /** Trailing messages a compaction never touches (issue #252 AC: "mantendo
@@ -43,23 +49,18 @@ export const DEFAULT_LOCK_TTL_SECONDS = 30;
 export const DEFAULT_LOCK_RETRIES = 3;
 export const DEFAULT_LOCK_RETRY_DELAY_MS = 25;
 
-/** Issue #584: a fixed `maxTokens: 1024` for the summary call fits a short
- * folded prefix and starves a long one -- exactly the case that needs the
- * two verbatim sections `SUMMARY_SYSTEM` now asks for the most. Proportional
- * to the folded transcript's own size, with a floor (never smaller than the
- * old fixed value, so a short history is no worse off) and a ceiling (the
- * summary is a means to keep the turn small, not a second transcript). */
-export const SUMMARY_MAX_TOKENS_FLOOR = 1024;
-export const SUMMARY_MAX_TOKENS_CEILING = 4096;
-export const SUMMARY_MAX_TOKENS_DIVISOR = 8;
-
-/**
- * `clamp(1024, ceil(foldedTokens / 8), 4096)` (issue #584 AC). Pure.
- */
-export function summaryMaxTokens(foldedTokens: number): number {
-  const proportional = Math.ceil(Math.max(0, foldedTokens) / SUMMARY_MAX_TOKENS_DIVISOR);
-  return Math.min(SUMMARY_MAX_TOKENS_CEILING, Math.max(SUMMARY_MAX_TOKENS_FLOOR, proportional));
-}
+// Issue #620: `summaryMaxTokens` (and its floor/ceiling/divisor, issue #584)
+// moved to `./summary-budget.js` -- a leaf module `AuxClient` (`../agent/
+// aux.ts`) also imports, so `AuxTelemetry.summarize` uses the SAME budget as
+// `buildSummaryRequest` below instead of a fixed `1024`. Reexported here
+// verbatim so every existing caller/test of this module keeps importing it
+// from `compaction.js`.
+export {
+  SUMMARY_MAX_TOKENS_CEILING,
+  SUMMARY_MAX_TOKENS_DIVISOR,
+  SUMMARY_MAX_TOKENS_FLOOR,
+  summaryMaxTokens,
+};
 
 /** Issue #584: fraction of the (best-guess) context window the transcript
  * handed to the summarizer may occupy before `buildTranscript` below starts

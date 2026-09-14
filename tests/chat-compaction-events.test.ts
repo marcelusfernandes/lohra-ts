@@ -147,3 +147,103 @@ describe("runChat wires eventSink: compaction events reach stderr (issue #287)",
     }
   });
 });
+
+// Issue #620 (item 5, veredito da PR #617): nothing exercised `chat.ts`'s
+// own `aux_calls` glue (`src/commands/chat.ts:519-537`) end to end -- a
+// profile WITH `defaultAuxModel` routes the summary through `AuxTelemetry`
+// (`src/agent/aux.ts`) instead of the turn's own default summarizer, and
+// `aux_calls` only shows up in the envelope through that path. Same
+// fixed-reply local server as above -- no real provider credit, the
+// auxiliary call lands on the identical HTTP fixture as the turn's own.
+//
+// Only the RESUMED-session case (`--session` given) is pinned here. A NEW
+// session (no `--session`) that ALSO compacts hits a genuine, pre-existing
+// bug outside this issue's `Files`: `ConversationRuntime.runTurn`'s own
+// `finally` unconditionally closes `modelTransport`
+// (`src/conversation/runtime.ts:792`), which for the parent's own turn
+// forwards straight to the underlying client's `close()`
+// (`ChatCompletionsModel.close`/`AnthropicMessagesModel.close`,
+// `src/conversation/provider-model.ts:34-35,60-61`) -- the SAME raw
+// `client` object `chat.ts` hands to `AuxClient` (`src/commands/chat.ts:
+// 378-382`). `auxTelemetry.title()` (`chat.ts:521`, only reached when
+// `--session` is absent) runs AFTER `runTurn` returns, on an already-closed
+// client, and throws `CLIENT_CLOSED` every time -- `chat.ts`'s own
+// fail-open `catch` (`title.failed`) swallows it, so today `aux_calls`
+// never reaches `2` and no title is ever persisted for a new session with a
+// `defaultAuxModel` profile, in production, independent of this issue. The
+// mid-turn `summarize` call is unaffected (it runs before `runTurn`'s own
+// `finally`). Reported on the issue instead of worked around here --
+// fixing it needs `chat.ts` (out of `Files`) or `runtime.ts` (owned by
+// #586).
+describe("runChat wires AuxClient telemetry: aux_calls in the envelope (issue #620)", () => {
+  it("pins aux_calls at 1 (summary only, no title) for a RESUMED session (--session given) that compacts", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-t620-chat-events-resumed-"));
+    roots.push(root);
+    const { server } = startFixedReplyServer();
+    await new Promise<void>((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("missing test port");
+      const provider = "t620-chat-events-probe-resumed";
+      registerProvider({
+        name: provider,
+        apiMode: "chat_completions",
+        aliases: [],
+        displayName: "T620 chat events probe (resumed session)",
+        description: "Local in-memory composition-root probe (issue #620).",
+        signupUrl: "",
+        envVars: [],
+        baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
+        modelsUrl: "",
+        requiresApiKey: false,
+        supportsVision: false,
+        fallbackModels: ["t287-chat-events-model"],
+        defaultMaxTokens: 256,
+        defaultAuxModel: "t287-chat-events-model",
+      });
+
+      const sessionId = "t620-chat-events-resumed-session";
+      seedLongHistory(root, sessionId);
+
+      const result = await runChat({
+        input: "continue",
+        flags: new Map<string, string | true>([
+          ["--provider", provider],
+          ["--model", "t287-chat-events-model"],
+          ["--json", true],
+          ["--no-input", true],
+          ["--no-tools", true],
+          ["--session", sessionId],
+        ]),
+        environment: {
+          HOME: root,
+          PATH: process.env.PATH ?? "",
+          LOHRA_CONTEXT_WINDOW: "8000",
+        },
+        home: join(root, ".lohra"),
+        codexHome: join(root, ".codex"),
+        cwd: root,
+      });
+
+      expect(result.code).toBe(0);
+      expect(result.stderr).toContain("session.compacted");
+      const envelope = JSON.parse(result.stdout) as { compaction?: unknown; aux_calls?: number };
+      expect(envelope.compaction).toBeDefined();
+      expect(envelope.aux_calls).toBe(1);
+
+      const connection = openStateDatabase(join(root, ".lohra", "state.db"));
+      try {
+        const sessions = new SessionRepository(
+          connection.database,
+          undefined,
+          connection.ftsEnabled,
+        );
+        expect(sessions.getSession(sessionId)?.title ?? null).toBeNull();
+      } finally {
+        connection.close();
+      }
+    } finally {
+      await closeServer(server);
+    }
+  });
+});

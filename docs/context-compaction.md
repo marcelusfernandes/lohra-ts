@@ -209,7 +209,12 @@ SUMMARY_SYSTEM })` prendia a constante contra si mesma e nunca pegaria uma
    recebido como parâmetro externo, para que a assinatura de
    `buildSummaryRequest` e o único chamador de produção hoje (o summarizer
    default em `ConversationRuntime.runTurn`, `src/conversation/runtime.ts`,
-   fora do `Files` desta issue) continuem exatamente como estão.
+   fora do `Files` desta issue) continuem exatamente como estão. Desde a
+   issue #620, `summaryMaxTokens` (e o piso/teto/divisor) vive em
+   `src/conversation/summary-budget.ts` — um módulo folha sem import de
+   `compaction.ts` nem de `agent/aux.ts` — e `compaction.ts` reexporta os
+   mesmos nomes; ver "Compactação pelo `AuxClient` usa o mesmo orçamento de
+   saída (issue #620)" adiante.
 
 3. **`buildTranscript` corta pela cauda quando o trecho excede um orçamento.**
    Um histórico dobrado muito acima da janela (por exemplo depois de um
@@ -274,12 +279,17 @@ sobre a #584 (PR #597):
    summarizer default do próprio turno — nunca derruba o turno inteiro por
    uma falha do auxiliar.
 3. **`aux_calls` aditivo no envelope `--json`.** `AuxClient.auxTelemetry()`
-   soma `calls`/`usage` de `summarize` e `title` num único contador;
-   `chat.ts` lê isso após `runTurn` e passa a `successEnvelope(result,
-{ auxCalls, auxUsage })` — `usage_total` soma o uso do auxiliar
-   (`addUsage`, agora exportado de `runtime.ts`) e `aux_calls` só aparece
-   quando > 0, sempre ao final, nunca mudando ordem/contagem das chaves
-   existentes.
+   soma `calls`/`usage` de `summarize` e `title` num único contador —
+   `aux_calls` conta as DUAS chamadas, não só o resumo: numa sessão NOVA
+   (sem `--session`) cujo turno compacta, `aux_calls` mostra `2` (resumo +
+   título); numa sessão RETOMADA (`--session` dado), só `1` (resumo — a
+   sessão já tem título ou nunca ganha um por essa via, já que
+   `AuxClient.title()` só roda para uma sessão que este `chat.ts` acabou de
+   criar). `chat.ts` lê isso após `runTurn` e passa a
+   `successEnvelope(result, { auxCalls, auxUsage })` — `usage_total` soma o
+   uso do auxiliar (`addUsage`, agora exportado de `runtime.ts`) e
+   `aux_calls` só aparece quando > 0, sempre ao final, nunca mudando
+   ordem/contagem das chaves existentes.
 4. **Título persistido.** `title TEXT` já existia no schema base (sem
    migração); `SessionRepository.setTitle` grava o texto de
    `AuxClient.title()` numa sessão nova (sem `--session`), fail-open com
@@ -301,3 +311,47 @@ sobre a #584 (PR #597):
    `turnAlignedTailCount`; e `src/agent/aux.ts` ganhou mutante na fatia
    `mutations:t23` (`docs/mutation-testing.md`), que antes não cobria
    nenhum arquivo de `src/agent/`.
+
+## Compactação pelo `AuxClient` usa o mesmo orçamento de saída (issue #620)
+
+Achado do veredito da PR #617 (#587): a #584 fez `buildSummaryRequest`
+calcular `summaryMaxTokens(foldedTokens)` em vez de um `maxTokens` fixo em
+1024, mas `AuxClient.summarize`/`AuxTelemetry.summarize` (o caminho que um
+perfil com `defaultAuxModel` usa desde a #587) continuavam chamando
+`completeWithUsage` com o default `maxTokens = 1024`, qualquer que fosse o
+tamanho do fold — nos oito perfis com `defaultAuxModel` (anthropic, openai,
+deepseek, groq, glm, kimi e os dois via Codex), um fold grande truncava
+exatamente as duas seções verbatim que a #584 existe para preservar.
+
+`summaryMaxTokens` (e `SUMMARY_MAX_TOKENS_FLOOR`/`_CEILING`/`_DIVISOR`, issue
+#584) move para `src/conversation/summary-budget.ts` — um módulo folha sem
+import de `compaction.ts` nem de `agent/aux.ts` (`compaction.ts` já importa
+`SUMMARY_SYSTEM` de `aux.ts`; o caminho inverso ciclaria) — importado por
+`compaction.ts` (que reexporta os mesmos nomes, byte-idênticos para todo
+chamador/teste existente) e por `AuxClient`. `AuxClient.summarize`
+(`summarizer()`, o injetado em `ConversationRuntime.options.summarize`) e
+`AuxTelemetry.summarize` passam a chamar
+`summaryMaxTokens(estimateTokens([{ role: "user", content: transcript }])
+.tokens)` — a mesma forma que `buildSummaryRequest` estima, então os dois
+caminhos concordam no mesmo número para o mesmo transcript, com ou sem
+`defaultAuxModel` configurado no perfil.
+
+Dois pinos menores do mesmo veredito, sem mudança de comportamento:
+`tests/conversation-compaction-verbatim.test.ts` repõe o spy de
+`console.warn`/`console.error` que prendia `buildTranscript` nunca
+escrevendo no console — perdido quando a #587 removeu o `console.warn`
+hardcoded (item 5 da seção anterior) sem repor o pino em si; e
+`tests/chat-compaction-events.test.ts` pina `aux_calls` ponta a ponta contra
+`chat.ts` (com um perfil de `defaultAuxModel` não vazio contra o mesmo
+servidor HTTP local, sem crédito real) para o caso de sessão RETOMADA
+(`--session` dado, `aux_calls: 1`). O caso de sessão NOVA (`aux_calls: 2`,
+resumo + título) fica documentado como bloqueado por um bug pré-existente e
+não corrigido por esta issue: `ConversationRuntime.runTurn`'s próprio
+`finally` fecha o `modelTransport` incondicionalmente
+(`src/conversation/runtime.ts:792`), o que fecha o `client` subjacente que
+`chat.ts` também passa ao `AuxClient`; `AuxClient.title()`
+(`src/commands/chat.ts:521`, só alcançado numa sessão nova) roda DEPOIS que
+`runTurn` retorna, contra um client já fechado, e sempre lança
+`CLIENT_CLOSED` — engolido pelo `catch` fail-open de `chat.ts` (evento
+`title.failed`). Discutido no comentário da issue #620; o conserto precisa
+tocar `chat.ts` ou `runtime.ts`, os dois fora do `Files` desta issue.

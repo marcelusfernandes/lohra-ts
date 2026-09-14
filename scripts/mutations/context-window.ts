@@ -465,6 +465,25 @@ export const contextWindowMutants: readonly Mutant[] = [
       },
     ],
   },
+  // --- issue #620 (veredito da PR #617: orçamento do resumo pelo AuxClient) --
+  {
+    id: "x-aux-summary-budget-fixed-default",
+    category: "aux",
+    mechanism:
+      "summaryBudgetFor volta ao maxTokens fixo em 1024 — o resumo feito pelo AuxClient (perfil com defaultAuxModel) para de escalar com o tamanho do fold, igual ao bug original da #620",
+    focus: {
+      file: auxTests,
+      test: "scales the summary call's maxTokens with the transcript's own size, like buildSummaryRequest (issue #620)",
+    },
+    edits: [
+      {
+        file: aux,
+        before:
+          '  return summaryMaxTokens(estimateTokens([{ role: "user", content: transcript }]).tokens);\n',
+        after: "  return 1024;\n",
+      },
+    ],
+  },
 ];
 
 const root = resolve(import.meta.dirname, "../..");
