@@ -11,6 +11,11 @@
 // precedência de um `--provider` explícito, e o modo `subscription`
 // (`docs/decisions/2026-09-13-flags-de-rota-com-assinatura.md`), continuam
 // decididos pelos chamadores antes de qualquer chamada a este módulo.
+//
+// Issue #631: `src/doctor/snapshot.ts` também chama esta função (não só
+// `chat.ts`/`dashboard.ts`) para preencher `chat_default_provider` — o
+// mesmo valor, calculado uma única vez, para o relatório do `doctor` nunca
+// prometer um provedor que o `chat` não vai de fato escolher.
 import { detectConfiguredProvider } from "../doctor/providers.js";
 
 /** `provider` é o nome resolvido quando a detecção deu certo; `detail` só é

@@ -7,6 +7,7 @@ import { readConfig, readTokens } from "../auth/store.js";
 import { resolveAuthRoute, subscriptionActive } from "../auth/credentials.js";
 import { readCodexTokens } from "../auth/codex.js";
 import { jsonFloat } from "../serialization/json-numbers.js";
+import { detectChatProvider } from "../commands/provider-detectado.js";
 import type { DoctorEnvironment, OllamaStatus } from "./model.js";
 import { detectConfiguredProvider, providerStatuses } from "./providers.js";
 
@@ -61,6 +62,11 @@ export function buildEnvironment(
   // -- `src/commands/provider-detectado.ts` reusa a mesma função para o
   // provedor que `chat`/`dashboard` usam quando `--provider` está ausente.
   const { provider: detected, error: providerError } = detectConfiguredProvider(environment);
+  // Issue #631: mesma chamada que `chat`/`dashboard` fazem sem `--provider`
+  // (`src/commands/chat.ts:161-163`) -- reusar a função, não repetir a
+  // regra, para `chat_default_provider` nunca divergir do que o `chat`
+  // realmente decide.
+  const chatDefaultProvider = detectChatProvider(environment).provider;
   const providerOrigin: "none" | "api-key" | "env-var" =
     detected === null ? "none" : (environment.LOHRA_PROVIDER ?? "").trim() ? "env-var" : "api-key";
   const userHome = environment.HOME ?? "";
@@ -93,6 +99,7 @@ export function buildEnvironment(
     base: paths.base,
     base_auth_preference: baseConfig?.preference ?? "auto",
     base_subscription_active: baseActive,
+    chat_default_provider: chatDefaultProvider,
     codex_auth_present: isFile(join(codexHome, "auth.json")),
     codex_home: codexHome,
     detected_provider: detected,

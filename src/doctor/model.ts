@@ -16,6 +16,15 @@ export interface DoctorEnvironment {
   readonly base: string;
   readonly base_auth_preference: AuthPreference;
   readonly base_subscription_active: boolean;
+  /** Issue #631: o que `detectChatProvider` (`src/commands/provider-detectado.ts`)
+   * devolveria para este mesmo ambiente — o provedor que `chat`/`dashboard`
+   * de fato usam sem `--provider` na rota `api_key`. Difere de
+   * `detected_provider` só em intenção, não em valor (mesma função por
+   * baixo): existe para o consumidor de `doctor --json` não precisar saber
+   * que `detected_provider` serve às duas perguntas. `null` quando nenhuma
+   * chave/`LOHRA_PROVIDER` está configurada — mesmo com `usable: true` só
+   * por `ollama.alive` (a fronteira #631 documenta). */
+  readonly chat_default_provider: string | null;
   readonly codex_auth_present: boolean;
   readonly codex_home: string;
   readonly detected_provider: string | null;

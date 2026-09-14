@@ -260,6 +260,14 @@ explícito) em vez de recusar de cara; `--provider` explícito continua
 tendo precedência, e sem nenhuma chave configurada os dois comandos
 continuam concordando em "no provider configured" (issue #604).
 
+Ollama vivo sozinho (nenhuma chave, nenhum `LOHRA_PROVIDER`) não entra nessa
+detecção: `doctor --json` mostra `usable: true` (conta o daemon local) mas
+`chat_default_provider: null`, e `chat`/`dashboard` sem `--provider` ainda
+caem na fronteira de sempre — a correção é `--provider ollama` ou
+`LOHRA_PROVIDER=ollama`, que o relatório humano do `doctor` já imprime
+quando é esse o caso (issue #631; tabela completa em
+[docs/provedores-deteccao.md](docs/provedores-deteccao.md)).
+
 `chat --no-tools` desliga o REGISTRO das tools (nenhuma chega ao catálogo
 enviado ao provedor) — não a memória, o perfil de usuário nem o índice de
 skills do prompt: esses três continuam entrando no system prompt mesmo sob

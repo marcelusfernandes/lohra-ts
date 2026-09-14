@@ -130,6 +130,26 @@ export function runChecks(environment: DoctorEnvironment): readonly Check[] {
                 detail: `${provider.provider} (from api-key: ${provider.present_vars[0] as string})`,
                 remedy: "",
               };
+  // Issue #631: `usable` conta `ollama.alive` (snapshot.ts:120-123) mesmo
+  // quando `chat_default_provider` é `null` -- na rota `api_key`, sem chave
+  // nem `LOHRA_PROVIDER`, `chat`/`dashboard` sem `--provider` ainda caem na
+  // fronteira "no provider configured" (`chat-boundary.ts`), que já lista o
+  // `--provider ollama` como opção 3 mas só quando o operador chega lá. Este
+  // Check adianta a mesma instrução no relatório do `doctor`, no lugar exato
+  // onde `providerCheck` (acima) já imprime "ollama (from keyless: ...)" —
+  // um "ok" que, sozinho, sugere que basta rodar `ollama serve`.
+  const ollamaKeylessGap: Check | null =
+    environment.auth_route === "api_key" &&
+    environment.ollama.alive &&
+    environment.chat_default_provider === null
+      ? {
+          name: "ollama-sem-chave",
+          state: "warn",
+          detail:
+            "usable é true só pelo Ollama (keyless) -- chat/dashboard sem --provider ainda caem em 'no provider configured'",
+          remedy: "lohra chat --provider ollama   # ou: export LOHRA_PROVIDER=ollama",
+        }
+      : null;
   const subscriptionCheck: Check = environment.subscription_active
     ? environment.auth_preference === "api_key"
       ? {
@@ -213,6 +233,7 @@ export function runChecks(environment: DoctorEnvironment): readonly Check[] {
   return [
     { name: "python", state: "ok", detail: "3.12.10 (supported: >=3.11,<3.14)", remedy: "" },
     providerCheck,
+    ...(ollamaKeylessGap === null ? [] : [ollamaKeylessGap]),
     subscriptionCheck,
     loginCheck,
     profileCheck,
