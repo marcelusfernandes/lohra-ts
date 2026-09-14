@@ -82,14 +82,21 @@ owner:        cria a issue "chore(release): v0.0.12" (skill issue)
 owner/agente: gh issue develop <N> --base main --name release/0.0.12
               (o push da ref nova é o lock da issue, como qualquer branch)
 agente:       npm run release -- patch          # ou minor/major/x.y.z
+agente:       edita README.md à mão: bump da linha "A versão atual é
+              `x.y.z`." (`tests/t22-docs.test.ts:50-51` pina contra
+              package.json; `scripts/release.ts` ainda não bumpa isso —
+              até que bumpe, é passo manual desta lista)
 agente:       git push -u origin release/0.0.12
 agente:       abre PR (Closes #N, AC copiados) — skill pr, state:in-review
 CI:           checks + provenance + escopo + contratos + controle-negativo +
               mutations (`.github/workflows/mutations.yml`, `on: pull_request`
               sem filtro de paths — required desde #225; o diff é só
-              package.json/package-lock.json/CHANGELOG.md, então `plan`
-              decide count 0, `mutate` é pulado e o resumo passa em segundos;
-              contratos/controle-negativo também não têm o que reprovar)
+              package.json/package-lock.json/CHANGELOG.md/README.md, então
+              `plan` decide count 0, `mutate` é pulado e o resumo passa em
+              segundos; contratos não tem o que reprovar; controle-negativo
+              faz SKIP por regra própria (`lib.ts#ehPrDeRelease`, #694)
+              quando a branch é `release/<x.y.z>` e o diff é só
+              manifesto/lockfile/CHANGELOG/README)
 revisor:      avalia como qualquer PR — AC, escopo, invariantes
 orquestrador: merge commit só com checks verdes + review:approved
               (gh pr merge --merge; Closes #N fecha a issue de tracking)
