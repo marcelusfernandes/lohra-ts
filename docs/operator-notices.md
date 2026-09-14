@@ -209,9 +209,16 @@ aninhado) — README documenta os dois comandos.
 nas duas, `src/state/schema.ts`). Issue #603: até essa correção, a leitura
 de `acked_at` passava pela conversão de coluna `INTEGER` (`rowNumber`),
 que zera qualquer valor com fração — um aviso reconhecido voltava com
-`acked_by` preenchido e `acked_at: 0` na tool e na CLI. `parseNoticeRow`
-(`src/state/notices-repository.ts`) hoje lê os dois campos com a mesma
-conversão (`Number(...)`, `null` preservado quando não reconhecido).
+`acked_by` preenchido e `acked_at: 0` na tool e na CLI. Issue #652 (veredito
+PR #635): a conversão anterior (`Number(...)` cru) devolvia `NaN` em
+silêncio para um `acked_at` ilegível gravado por fora desta classe — `NaN`
+serializa como `null` em JSON, então o dado corrompido desaparecia sem
+rastro. `nullableRowReal` (`src/state/notices-repository.ts:137-149`,
+usada por `parseNoticeRow`) checa `Number.isFinite` e, quando falha, emite
+um `warning` (`notices: acked_at ilegível na linha <id>`) antes de devolver
+`null` — o mesmo valor público de "nunca reconhecido", mas com a causa
+registrada. Um `acked_at` fracionário legítimo (issue #603) continua
+intacto.
 
 ## Retenção
 
