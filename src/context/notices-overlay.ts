@@ -13,12 +13,25 @@
 // this file does not have — tracked as a follow-up, not solved here.
 import type { NoticeKind } from "../state/notices-repository.js";
 import type { TurnNoticesClaim, TurnNoticesPort } from "../conversation/types.js";
+import { classifyProviderError } from "../transports/errors.js";
 
 export const NOTICE_OVERLAY_MAX_CHARS = 4096;
 const OVERLAY_BEGIN = "OPERATOR NOTICES (not the user speaking):";
 const OVERLAY_END = "END OPERATOR NOTICES";
 const GLOBAL_SCOPE = "global";
 const SESSION_SCOPE_PREFIX = "session:";
+// Issue #608 (menor #5): both markers above share this substring — a
+// `row.message` that contains it VERBATIM (a provider error message, a
+// tool's own error text, anything not authored by this file) could forge
+// the block's end from the model's point of view, letting whatever follows
+// it be read as ordinary content instead of an operator notice. A
+// zero-width space (U+200B) breaks the exact match while staying visually
+// identical; the two REAL markers this file emits never contain it.
+const MARKER_KEYWORD = "OPERATOR NOTICES";
+const ZERO_WIDTH_SPACE = "​";
+function escapeMarkerKeyword(message: string): string {
+  return message.split(MARKER_KEYWORD).join(`OPERATOR${ZERO_WIDTH_SPACE}NOTICES`);
+}
 
 export interface NoticeRow {
   readonly id: number;
@@ -82,7 +95,7 @@ export function formatNoticeOverlay(rows: readonly NoticeRow[]): {
   const lines: string[] = [];
   const included: NoticeRow[] = [];
   for (const row of ordered) {
-    const line = `- [${row.kind}] ${row.message}`;
+    const line = `- [${row.kind}] ${escapeMarkerKeyword(row.message)}`;
     const candidate = [OVERLAY_BEGIN, ...lines, line, OVERLAY_END].join("\n");
     if (candidate.length > NOTICE_OVERLAY_MAX_CHARS) break;
     lines.push(line);
@@ -101,13 +114,31 @@ const CODE_TO_KIND: ReadonlyArray<readonly [code: string, kind: NoticeKind]> = [
   ["CONVERSATION_CANCELLED", "cancelled"],
 ];
 
-/** Turn-death notice (AC4): a `NoticeKind` this runtime is already allowed
- * to write, mapped from `code` by exact match, `"unknown"` otherwise. */
+// Issue #608: `cause` here is the top-level `ConversationError` `runtime.ts`'s
+// `catch` passes to `publishFailure` — the PROVIDER error a route/quota fault
+// actually lives on sits one level down, at `cause.cause`
+// (`ConversationTurnFailedError`'s own constructor puts it there). A cause
+// with no `.cause` of its own (`MaxIterationsError`, a bare `Error`) is
+// classified as itself — `classifyProviderError` returns `null` for
+// anything that isn't a provider failure shape, which folds into `"unknown"`
+// below exactly like before this issue.
+function providerCauseOf(cause: unknown): unknown {
+  return cause instanceof Error && cause.cause !== undefined ? cause.cause : cause;
+}
+
+/** Turn-death notice (AC4, #608 AC2): `code` maps to its `NoticeKind` by
+ * exact match first (the frozen vocabulary above); failing that,
+ * `classifyProviderError` (`src/transports/errors.ts`) reads the underlying
+ * provider error a dead turn's `ConversationTurnFailedError` carries as its
+ * own `.cause` — `route_fault`/`quota_exhausted`/etc instead of a blanket
+ * `"unknown"` for a turn that died on a classifiable provider failure.
+ * `"unknown"` only when NEITHER source names a kind. */
 export function buildTurnNotice(
   code: string,
   cause: unknown,
 ): { readonly kind: NoticeKind; readonly message: string } {
-  const kind = CODE_TO_KIND.find(([marker]) => marker === code)?.[1] ?? "unknown";
+  const exact = CODE_TO_KIND.find(([marker]) => marker === code)?.[1];
+  const kind = exact ?? classifyProviderError(providerCauseOf(cause)) ?? "unknown";
   const detail = cause instanceof Error ? cause.message : String(cause);
   return { kind, message: `turn failed (${code}): ${detail}` };
 }
