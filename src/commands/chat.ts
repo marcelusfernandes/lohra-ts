@@ -540,8 +540,12 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       try {
         title = (await auxTelemetry.title(input)) || null;
       } catch (error) {
+        // Issue #650 (item 13): `stage=` tells this failure (the title call
+        // itself) apart from the OTHER `title.failed` call site below (the
+        // DB write that persists it) — same fixed `title.failed` prefix, so
+        // every pre-existing stderr substring pin stays green.
         compactionEvents.push(
-          `event: title.failed code=${error instanceof Error ? error.name : "UNKNOWN"}\n`,
+          `event: title.failed stage=generate code=${error instanceof Error ? error.name : "UNKNOWN"}\n`,
         );
       }
     }
@@ -564,7 +568,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
         sessions.setTitle(result.sessionId, title);
       } catch (error) {
         compactionEvents.push(
-          `event: title.failed code=${error instanceof Error ? error.name : "UNKNOWN"}\n`,
+          `event: title.failed stage=persist code=${error instanceof Error ? error.name : "UNKNOWN"}\n`,
         );
       }
     }
@@ -588,26 +592,34 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     const bounded = error instanceof MaxIterationsError ? error : null;
     return {
       code: 1,
-      stdout: errorEnvelope({
-        sessionId,
-        model,
-        prompt: input,
-        error: message,
-        apiCalls,
-        ...(incomplete === null && bounded === null
-          ? {}
-          : {
-              usage: (incomplete ?? bounded)?.usage ?? null,
-              ...(bounded === null
-                ? {}
-                : { usage: bounded.lastUsage ?? bounded.usage, usageTotal: bounded.usage }),
-              cost: (incomplete ?? bounded)?.cost ?? null,
-              sessionSummary: (incomplete ?? bounded)?.sessionSummary ?? null,
-              ...(bounded === null
-                ? {}
-                : { stopReason: bounded.stopReason, toolCalls: bounded.toolCalls }),
-            }),
-      }),
+      stdout: errorEnvelope(
+        {
+          sessionId,
+          model,
+          prompt: input,
+          error: message,
+          apiCalls,
+          ...(incomplete === null && bounded === null
+            ? {}
+            : {
+                usage: (incomplete ?? bounded)?.usage ?? null,
+                ...(bounded === null
+                  ? {}
+                  : { usage: bounded.lastUsage ?? bounded.usage, usageTotal: bounded.usage }),
+                cost: (incomplete ?? bounded)?.cost ?? null,
+                sessionSummary: (incomplete ?? bounded)?.sessionSummary ?? null,
+                ...(bounded === null
+                  ? {}
+                  : { stopReason: bounded.stopReason, toolCalls: bounded.toolCalls }),
+              }),
+        },
+        // Issue #650 (item 13): a turn that fails after a successful title
+        // call used to drop that bounded aux spend entirely from the
+        // envelope — same `extra` shape successEnvelope already reads.
+        auxTelemetry === undefined
+          ? undefined
+          : { auxCalls: auxTelemetry.calls(), auxUsage: auxTelemetry.usage() },
+      ),
       stderr: `${warningLines}${compactionEvents.join("")}${sessionId ? `session: ${sessionId}  (resume with --session ${sessionId})\n` : ""}error: ${message}\n`,
     };
   } finally {
