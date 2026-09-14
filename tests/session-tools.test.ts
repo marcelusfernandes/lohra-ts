@@ -75,4 +75,27 @@ describe("composeSessionTools", () => {
       "run_workflow needs a 'spec' object (with meta + nodes)",
     );
   });
+
+  // Issue #670 (residual F3, veredito PR #655 item 2): `composeSessionTools`
+  // wires `SkillTool` with `{ projectRoot: findProjectRoot(options.cwd) }`
+  // (`session-tools.ts:149`) so a skill's origin is judged against the
+  // SESSION's cwd (here, `root`, a tmpdir with no `.git`/`package.json`
+  // above it — `findProjectRoot` falls back to `root` itself). Drop that
+  // second argument and `isUntrustedSkill` falls back to
+  // `findProjectRoot(process.cwd())` — this REPO's root — and a skill
+  // created under the session's tmpdir would wrongly read as `untrusted`.
+  it("wires skill_view's origin to the session's own cwd, not the process's (#670)", async () => {
+    const { tools } = setup();
+    await tools.dispatch("skill_manage", {
+      action: "create",
+      name: "session-scoped",
+      body: "instructions",
+    });
+    const raw = await tools.dispatch("skill_view", { name: "session-scoped" });
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    expect(
+      "untrusted" in parsed,
+      "MUTATION_CAUSE:T22-session-tools-skill-project-root-dropped",
+    ).toBe(false);
+  });
 });
