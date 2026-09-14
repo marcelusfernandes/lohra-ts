@@ -89,7 +89,10 @@ CI:           checks + provenance + escopo + contratos + controle-negativo +
               sem filtro de paths — required desde #225; o diff é só
               package.json/package-lock.json/CHANGELOG.md, então `plan`
               decide count 0, `mutate` é pulado e o resumo passa em segundos;
-              contratos/controle-negativo também não têm o que reprovar)
+              contratos não tem o que reprovar; controle-negativo faz SKIP
+              por regra própria (`lib.ts#ehPrDeRelease`, #694) quando a
+              branch é `release/<x.y.z>` e o diff é só manifesto/lockfile/
+              CHANGELOG)
 revisor:      avalia como qualquer PR — AC, escopo, invariantes
 orquestrador: merge commit só com checks verdes + review:approved
               (gh pr merge --merge; Closes #N fecha a issue de tracking)
