@@ -13,8 +13,12 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { buildSystemPrompt, doctrineText } from "../src/context/index.js";
+import { ConversationRuntime } from "../src/conversation/index.js";
+import type { ModelRequest, ModelTransport } from "../src/conversation/index.js";
 import { SqliteConversationRepository } from "../src/conversation/sqlite-repository.js";
 import { openStateDatabase, SessionRepository } from "../src/state/index.js";
+import type { NormalizedResponse } from "../src/transports/index.js";
 
 const roots: string[] = [];
 
@@ -105,6 +109,108 @@ describe("SqliteConversationRepository prompt caching bands (#586)", () => {
   it("returns null for a session that doesn't exist", () => {
     const { repo, close } = repository();
     expect(repo.session("missing")).toBeNull();
+    close();
+  });
+});
+
+const usage = {
+  inputTokens: 1,
+  outputTokens: 1,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  reasoningTokens: 0,
+} as const;
+
+/** A second `ConversationRuntime` over the SAME `SqliteConversationRepository`
+ * simulates a second PROCESS resuming the session — each instance memoizes
+ * its own `promptSnapshot()` independently (`runtime.ts:153-156`), exactly
+ * like two real `chat --session` invocations. */
+class QueueTransport implements ModelTransport {
+  readonly requests: ModelRequest[] = [];
+  complete(request: ModelRequest): Promise<NormalizedResponse> {
+    this.requests.push(structuredClone(request));
+    return Promise.resolve({
+      content: "ok",
+      finishReason: "stop",
+      toolCalls: [],
+      reasoning: null,
+      usage,
+      providerData: null,
+    });
+  }
+  close(): void {
+    // no-op
+  }
+}
+
+// Issue #649 (sub-issue B1 de #637, AC3): a sessão retomada num SEGUNDO
+// ConversationRuntime (processo novo) usa o prompt P1 que a sessão
+// persistiu quando nasceu, byte-idêntico, mesmo que este segundo processo
+// tivesse computado um prompt P2 diferente (memória nova, doutrina
+// diferente, data diferente). Pino explícito das três consequências
+// nomeadas em `docs/decisions/2026-09-14-faixas-restauradas.md`: a data
+// congelada é a de P1 (a), e a doutrina de P1 (core, "sem doutrina") vence
+// mesmo com P2 disponível trazendo a doutrina extended (item 10 do veredito
+// da PR #610 fecha por construção).
+describe("ConversationRuntime resumed across two processes reuses P1 (#649)", () => {
+  it("a second ConversationRuntime resuming the session uses P1's bands (date and doctrine), never this process's own P2", async () => {
+    const { repo, close } = repository();
+    const p1 = buildSystemPrompt({
+      identity: "Soul",
+      doctrine: doctrineText("core"),
+      today: "2030-01-01",
+    });
+    const p2 = buildSystemPrompt({
+      identity: "Soul",
+      doctrine: doctrineText("extended"),
+      today: "2031-02-02",
+    });
+
+    const runtime1 = new ConversationRuntime({
+      repository: repo,
+      transport: new QueueTransport(),
+      promptSnapshot: () => p1,
+      idSource: () => "fixed-session",
+      clock: () => 1,
+    });
+    await runtime1.runTurn({ input: "hi", provider: "p", model: "m", cwd: "/tmp" });
+
+    const transport2 = new QueueTransport();
+    const runtime2 = new ConversationRuntime({
+      repository: repo,
+      transport: transport2,
+      promptSnapshot: () => p2,
+      idSource: () => {
+        throw new Error("idSource must not be called — sessionId is explicit");
+      },
+      clock: () => 2,
+    });
+    await runtime2.runTurn({
+      input: "hi again",
+      provider: "p",
+      model: "m",
+      cwd: "/tmp",
+      sessionId: "fixed-session",
+    });
+
+    const resumedSystem = transport2.requests[0]?.system;
+    // `resumedSystem` round-tripped through SQLite: a plain
+    // `{stable, context, volatile}`, not the `SystemPromptSnapshot` class
+    // instance `p1` is (`.text` is a getter, own-enumerable comparison would
+    // otherwise flag a shape difference that isn't a behavior difference).
+    expect(resumedSystem).toEqual({
+      stable: p1.stable,
+      context: p1.context,
+      volatile: p1.volatile,
+    });
+    const resumedText = JSON.stringify(resumedSystem);
+    // (a) the frozen date is P1's, not this process's own P2.
+    expect(resumedText).toContain("2030-01-01");
+    expect(resumedText).not.toContain("2031-02-02");
+    // (item 10) P1 was created with core-only doctrine; P2's extended-only
+    // text never reaches the resumed turn even though it's available here.
+    expect(resumedText).not.toContain("Diagnosing a problem is not the same as fixing it");
+
     close();
   });
 });
