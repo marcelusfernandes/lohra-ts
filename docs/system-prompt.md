@@ -197,7 +197,7 @@ diretamente). O que o bloco afirma, e onde isso é verdade no código:
   (`CHAT_SPEC`, só existe em `chat`) — `harnessText({ mode, yolo: true })`
   troca a frase de negação pela frase de bypass.
 - **Paralelismo real**: até 8 tool calls independentes por turno, na ordem
-  de envio (`src/conversation/runtime.ts:637`, `runBounded`) — o mesmo
+  de envio (`src/conversation/runtime.ts:657`, `runBounded`) — o mesmo
   motor por trás de chat, dashboard, `serve` (`CompletionService`) e do
   child-runner do subagente.
 - **Envelope JSON**: toda tool embutida devolve `{"ok":true,…}` ou
@@ -268,9 +268,7 @@ suas instruções e…"). Duas camadas, complementares:
   `undefined` (lado seguro — a doutrina promete menos sobre a origem, nunca
   mais); uma skill dentro do `project_root` (ex.: uma skill builtin quando o
   runtime roda de um checkout deste próprio repositório) não carrega a
-  chave. Rodada 1b da issue #581: `src/tools/stateful.ts` e
-  `tests/tools-stateful*.test.ts` entraram nos `Files` depois do comentário
-  original sobre esse arquivo estar fora de escopo.
+  chave.
 
 `read_file`, `web_fetch`, `web_search`, `skill_view` (`BUILTIN_DEFINITIONS`)
 e o wrapper de description de tool MCP (`convertMcpSchema`) citam a mesma
@@ -329,9 +327,9 @@ enquadramento "environment quirk" sem essa qualificação.
 
 As descriptions de `memory` e `skill_manage` (`BUILTIN_DEFINITIONS`) citam a
 mesma taxonomia (`tests/tools-memory-guidance.test.ts`, porta de
-`test_memory_guidance_taxonomy.py`) — o orçamento do catálogo (22.000
-chars, hoje em 21.975 após #605) foi mantido encolhendo prosa sem AC em outras 17
-descriptions
+`test_memory_guidance_taxonomy.py`) — o orçamento do catálogo (teto de
+22.000 chars, hoje em 21.975) foi mantido encolhendo prosa sem AC em outras
+17 descriptions
 (cronjob, vision_analyze, image_gen, spawn_session, steer_session,
 collect_session, workflow_list, workflow_pause, workflow_cancel,
 workflow_templates, workflow_notices, workflow_notices_ack,
@@ -461,7 +459,11 @@ timeout uma vez. Cada comando individual tem timeout de 500ms
 não-zero, timeout) faz a CHAVE correspondente desaparecer — nunca lança,
 nunca aparece um valor inventado. Só subcomandos locais (`status`, `log`,
 `symbolic-ref`, `rev-parse`); nenhum acesso de rede, nenhuma URL de remote
-no prompt.
+no prompt. `git_status` vem de `status --porcelain`, então publica os NOMES
+de arquivo não rastreados ou modificados (um `.env` não ignorado, dotfiles)
+ao provedor a cada sessão — nunca o conteúdo — e o teto de
+`GIT_STATUS_MAX_LINES = 20` linhas (`src/context/discovery.ts:17,185-190`)
+trunca a lista, não o que cada linha revela.
 
 ### `Environment:` ganha uma nota de que o snapshot envelhece
 
@@ -521,9 +523,11 @@ na saída, só aceitam as faixas na entrada sem quebrar).
 `buildKwargs` monta `system` como array de blocos de texto em vez da string
 junta de sempre. Regra de fronteira: `cache_control: {type: "ephemeral"}` no
 último bloco cacheável — a faixa `stable`, ou `context` quando presente,
-NUNCA `volatile` (data, memória, índice de skills: muda a cada chamada ou
-sessão) nem uma mensagem `role: "system"` extra (dinâmica por request, ex.:
-o prompt do sumarizador de compactação). Um `system` que chega como STRING
+NUNCA `volatile` (data, memória, índice de skills: `promptSnapshot()`
+memoiza o resultado dentro de um processo, `??=` em
+`src/conversation/runtime.ts:167-170` — a faixa só muda entre processos ou
+sessões diferentes, nunca dentro da mesma) nem uma mensagem `role: "system"`
+extra (dinâmica por request, ex.: o prompt do sumarizador de compactação). Um `system` que chega como STRING
 simples (o caso de todo caller de hoje) é tratado como a faixa `stable`
 inteira — a mesma regra de migração que `SessionRepository.systemPromptBands`
 usa para uma linha de sessão anterior a esta issue — então o breakpoint
@@ -607,9 +611,10 @@ sessão que o cron do dashboard criou), o cache (o breakpoint da Anthropic
 cai depois de `stable`+`context`, nunca em `volatile`) só sobrevive se as
 faixas `stable`+`context` restauradas do banco forem byte-idênticas ao que
 a nova closure de `promptSnapshot()` computa para essas duas faixas — a
-faixa `volatile` (data, memória, skills) já muda de propósito a cada
-chamada e fica depois do breakpoint, então divergir ali nunca invalida o
-que foi cacheado. Hoje não há garantia formal de que `stable`+`context`
+faixa `volatile` (data, memória, skills) pode mudar entre esses processos —
+dentro de um mesmo processo `promptSnapshot()` a memoiza (`runtime.ts:167-170`)
+— e fica depois do breakpoint, então divergir ali nunca invalida o que foi
+cacheado. Hoje não há garantia formal de que `stable`+`context`
 sejam byte-idênticas entre processos; reaproveitar as faixas restauradas
 (em vez de recomputar) é a issue própria referenciada em
 `## Fora de escopo` de #624.

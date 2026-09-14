@@ -280,20 +280,30 @@ sobre a #584 (PR #597):
    uma falha do auxiliar.
 3. **`aux_calls` aditivo no envelope `--json`.** `AuxClient.auxTelemetry()`
    soma `calls`/`usage` de `summarize` e `title` num único contador —
-   `aux_calls` conta as DUAS chamadas, não só o resumo: numa sessão NOVA
-   (sem `--session`) cujo turno compacta, `aux_calls` mostra `2` (resumo +
-   título — só alcançável hoje por um turno com várias idas e vindas de tool
-   calls que juntas estouram a janela, já que a primeira sessão não tem
-   histórico próprio para compactar sozinha); numa sessão nova comum (sem
-   compactar), `aux_calls` mostra `1` (só o título, issue #623); numa sessão
-   RETOMADA (`--session` dado), só `1` quando compacta (resumo — a sessão já
-   tem título ou nunca ganha um por essa via, já que `AuxClient.title()` só
-   roda para uma sessão que este `chat.ts` acabou de criar). `chat.ts` lê
-   isso após `runTurn` (e, desde a #623, também antes — ver item 4) e passa a
-   `successEnvelope(result, { auxCalls, auxUsage })` — `usage_total` soma o
-   uso do auxiliar (`addUsage`, agora exportado de `runtime.ts`) e
-   `aux_calls` só aparece quando > 0, sempre ao final, nunca mudando
-   ordem/contagem das chaves existentes.
+   `aux_calls` conta as DUAS chamadas, não só o resumo, mas `2` no mesmo
+   turno nunca acontece. Duas razões, uma atrás da outra: `attemptCompaction`
+   (`runtime.ts:246`) só dobra o histórico já PERSISTIDO — relê da própria
+   sessão (`repository.loadMessages`) e, se não sobrar nada além da cauda
+   mínima a manter, devolve `compacted: false` sem resumir nada
+   (`src/conversation/compaction.ts`, `summarizedCount <= 0`); e
+   `preflightCompact` só tenta essa dobra UMA vez por turno
+   (`context.compactedThisTurn`, `runtime.ts:236-243`) — a segunda
+   estouração do mesmo turno vira `ContextWindowExceededError` direto,
+   nunca uma segunda chamada a `attemptCompaction`. Na prática: numa sessão
+   NOVA (sem `--session`) sem estourar a janela, `aux_calls` mostra `1` (só
+   o título, issue #623); numa sessão NOVA cujo turno estouraria a janela,
+   não há histórico persistido para dobrar (é a primeira sessão) — o turno
+   falha com `ContextWindowExceededError` antes de completar, nunca chega a
+   reportar `aux_calls`; numa sessão RETOMADA (`--session` dado) que
+   compacta (há histórico persistido de turnos anteriores para dobrar),
+   `aux_calls` mostra `1` (só o resumo — a sessão já tem título ou nunca
+   ganha um por essa via, já que `AuxClient.title()` só roda para uma sessão
+   que este `chat.ts` acabou de criar). `chat.ts` lê isso após `runTurn` (e,
+   desde a #623, também antes —
+   ver item 4) e passa a `successEnvelope(result, { auxCalls, auxUsage })` —
+   `usage_total` soma o uso do auxiliar (`addUsage`, agora exportado de
+   `runtime.ts`) e `aux_calls` só aparece quando > 0, sempre ao final, nunca
+   mudando ordem/contagem das chaves existentes.
 4. **Título persistido.** `title TEXT` já existia no schema base (sem
    migração); `SessionRepository.setTitle` grava o texto de
    `AuxClient.title()` numa sessão nova (sem `--session`), fail-open com

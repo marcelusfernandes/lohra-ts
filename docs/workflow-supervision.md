@@ -512,28 +512,27 @@ próprio; a doutrina completa, com o que ainda ficou aberto, está em
 - **steer** (M16-S5/#520, decisão D2 adotada por default) — TODO `workflow_steer`
   numa folha ocupada com uma chamada de provedor genuinamente em voo
   interrompe essa chamada, nunca opt-in: `OrchestrationCore`'s
-  `entry.interrupt` (`core.ts:229`) é um hook armado só ENQUANTO essa
-  chamada está genuinamente em voo (`core.ts:499-523`), nunca pelo leaf
+  `entry.interrupt` (`core.ts:273`) é um hook armado só ENQUANTO essa
+  chamada está genuinamente em voo (`core.ts:540-566`), nunca pelo leaf
   inteiro — um steer que chega enquanto o leaf roda uma tool nunca vê hook
-  vivo e só enfileira. Issue #569 (item 2, veredito da PR #591): o hook é
-  zerado no INSTANTE em que dispara (`fire`, `core.ts:511-514`), não só
-  quando a chamada real assenta e o `finally` do `runTurn` desarma — um
-  segundo `steer()` chegando na janela entre o disparo e esse `finally`
-  encontra `entry.interrupt` já `null` e volta `{queued: true}` sem
-  `interrupted: true`, nunca reportando uma segunda interrupção sobre uma
-  chamada que já estava sendo derrubada. A chamada interrompida vira
-  `SteerInterrupt` (`runtime.ts:481-484`), o loop absorve com `continue` e
-  tenta de novo com o texto do steer já injetado — o turno pode terminar
-  `complete` mesmo assim, carregando `partial: true`/`usage_uncertain: true`
-  (D3, `child-runner.ts:226-236`) porque `usageTotal` já inclui a parcela
-  estimada da chamada abortada. Um `MaxIterationsError` cujo turno se
-  esgota exatamente numa dessas chamadas absorvidas carrega o mesmo par
-  (`child-runner.ts:412-436`, agora via `error.partialCalls > 0` — issue #594
-  substitui o `stopReason === "interrupted"` sozinho, achado 1: falso
-  negativo quando o steer é absorvido numa iteração ANTERIOR à que bate o
-  teto). `leaf.steered` ganha
-  `interrupted: true` (`audit-runtime.ts:437`) — nunca `error_kind`, porque
-  não há `leaf.failed` nenhum nesse caminho quando o turno completa.
+  vivo e só enfileira. O hook é zerado no INSTANTE em que dispara (`fire`,
+  `core.ts:556-558`), não só quando a chamada real assenta e o `finally` do
+  `runTurn` desarma — um segundo `steer()` chegando na janela entre o
+  disparo e esse `finally` encontra `entry.interrupt` já `null` e volta
+  `{queued: true}` sem `interrupted: true`, nunca reportando uma segunda
+  interrupção sobre uma chamada que já estava sendo derrubada. A chamada
+  interrompida vira `SteerInterrupt` (`runtime.ts:486`), o loop absorve com
+  `continue` e tenta de novo com o texto do steer já injetado — o turno pode
+  terminar `complete` mesmo assim, carregando `partial: true`/
+  `usage_uncertain: true` (D3, `child-runner.ts:367-371`) porque `usageTotal`
+  já inclui a parcela estimada da chamada abortada. Um `MaxIterationsError`
+  cujo turno se esgota exatamente numa dessas chamadas absorvidas carrega o
+  mesmo par (`child-runner.ts:412-436`, via `error.partialCalls > 0`,
+  substituindo um `stopReason === "interrupted"` sozinho: falso negativo
+  quando o steer é absorvido numa iteração ANTERIOR à que bate o teto).
+  `leaf.steered` ganha `interrupted: true` (`audit-runtime.ts:447`) — nunca
+  `error_kind`, porque não há `leaf.failed` nenhum nesse caminho quando o
+  turno completa.
 - **timeout** (M16-S6/#521) — `OrchestrationChildRuntime.collect` corre o
   `ChildResult` real contra um teto próprio (`options.timeoutSeconds`,
   `orchestration-runtime.ts:357-378`), nunca contra
