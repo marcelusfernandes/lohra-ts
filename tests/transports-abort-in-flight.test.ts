@@ -432,6 +432,11 @@ describe("stream() without an abort stays byte-identical (contra-assertion)", ()
       transport: new ChatCompletionsTransport(),
       http: new QueueHttp(body),
     });
-    await expect(client.stream({ model: "m", messages: [] })).rejects.toThrow();
+    // Issue #594 (achado 5, residual de M21): the malformed frame's own
+    // `JSON.parse` failure (`json-numbers.ts`) is a `SyntaxError` specifically
+    // -- pinning the class (not just "threw something") is what a mutant
+    // swallowing it into a different, silently-tolerated error type would
+    // otherwise survive.
+    await expect(client.stream({ model: "m", messages: [] })).rejects.toThrow(SyntaxError);
   });
 });

@@ -602,6 +602,7 @@ export class ConversationRuntime {
               executedToolCalls,
               response.usage,
               "pause",
+              partialCalls,
             );
           }
           continue;
@@ -693,6 +694,7 @@ export class ConversationRuntime {
               executedToolCalls,
               response.usage,
               "tool_calls",
+              partialCalls,
             );
           }
           continue;
@@ -780,6 +782,7 @@ export class ConversationRuntime {
         executedToolCalls,
         null,
         "interrupted",
+        partialCalls,
       );
     } catch (error) {
       const code = error instanceof ConversationError ? error.code : "TURN_FAILED";

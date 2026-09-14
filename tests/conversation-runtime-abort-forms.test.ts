@@ -18,9 +18,11 @@ import { systemPromptText } from "../src/context/system-prompt.js";
 import {
   ConversationCancelledError,
   ConversationRuntime,
+  MaxIterationsError,
   type ConversationRepository,
   type ModelRequest,
   type ModelTransport,
+  type ToolDispatcher,
   type TurnCommit,
 } from "../src/conversation/index.js";
 import { createChildRunner } from "../src/orchestration/child-runner.js";
@@ -251,6 +253,103 @@ describe("ConversationRuntime — isAbortOf's 3rd form and multi-iteration usage
     // this test pins the split at the source.
     expect(rejected.partialUsage).toEqual(expectedEstimate);
     expect(rejected.measuredUsage).toEqual(firstUsage);
+  });
+
+  // Issue #594 (achado 1, residual de M21): a steer-interrupt absorbed on an
+  // EARLIER iteration (its own estimate folded into `usageTotal`) whose cap
+  // is hit by a LATER, normally-COMPLETED iteration (`stopReason:
+  // "tool_calls"`, never "interrupted") used to report a silently "fully
+  // measured" `MaxIterationsError.usage` -- `partialCalls` (this issue's own
+  // fix, `errors.ts`) is the structural signal that survives regardless of
+  // which iteration's `stopReason` finally threw. RED before this issue:
+  // `MaxIterationsError` had no `partialCalls` field to read at all.
+  it("a steer absorbed on iteration 1 whose cap is hit by a normally-completed iteration 3 carries partialCalls > 0, never a silent fully-measured claim", async () => {
+    const repository = new MemoryRepository();
+    const { StreamAbortedError } = await import("../src/transports/index.js");
+    let signalStarted: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      signalStarted = resolve;
+    });
+    let calls = 0;
+    const toolCallResponse = response({
+      content: null,
+      finishReason: "tool_calls",
+      toolCalls: [{ id: "c1", name: "read_file", arguments: '{"path":"x"}', providerData: null }],
+      usage: {
+        inputTokens: 5,
+        outputTokens: 2,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningTokens: 0,
+      },
+    });
+    const transport: ModelTransport = {
+      complete: (request) => {
+        calls += 1;
+        if (calls === 1) {
+          // Iteration 1: hangs until the steer-driven PER-CALL controller
+          // fires (never the outer `signal`), then a real StreamAbortedError
+          // -- absorbed by the loop's own `continue` (runtime.ts), never
+          // thrown out of this turn.
+          return new Promise((_, reject) => {
+            request.signal.addEventListener(
+              "abort",
+              () => {
+                reject(
+                  new StreamAbortedError(
+                    {
+                      text: "steer-torn-down",
+                      reasoningChars: 0,
+                      toolArgumentChars: 0,
+                      usage: null,
+                    },
+                    { partialBody: new Uint8Array() },
+                  ),
+                );
+              },
+              { once: true },
+            );
+            signalStarted();
+          });
+        }
+        // Iterations 2 and 3: real, completed tool-call turns.
+        return Promise.resolve(toolCallResponse);
+      },
+      close: () => Promise.resolve(),
+    };
+    const toolDispatcher: ToolDispatcher = {
+      dispatch: () => Promise.resolve({ role: "tool", tool_call_id: "c1", content: "ok" }),
+    };
+    const runtime = new ConversationRuntime({
+      repository,
+      transport,
+      promptSnapshot: () => "p",
+      toolDefinitions: [{ type: "function", function: { name: "read_file", parameters: {} } }],
+      toolDispatcher,
+      idSource: () => "s",
+      clock: () => 1,
+      maxIterations: 3,
+    });
+    const hook: { armed: (() => void) | null } = { armed: null };
+    const interruptSource = {
+      arm: (abort: () => void): (() => void) => {
+        hook.armed = abort;
+        return () => undefined;
+      },
+    };
+    const turn = runtime.runTurn({
+      input: "x",
+      provider: "openai",
+      model: "m",
+      cwd: "/tmp",
+      interruptSource,
+    });
+    await started;
+    hook.armed?.(); // steer-interrupt on iteration 1, never the outer signal
+    await expect(turn).rejects.toBeInstanceOf(MaxIterationsError);
+    const rejected = (await turn.catch((caught: unknown) => caught)) as MaxIterationsError;
+    expect(rejected.stopReason).toBe("tool_calls");
+    expect(rejected.partialCalls).toBeGreaterThan(0);
   });
 });
 

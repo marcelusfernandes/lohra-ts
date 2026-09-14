@@ -58,6 +58,22 @@ export class MaxIterationsError extends ConversationError {
     }[] = [],
     public readonly lastUsage: Usage | null = null,
     public readonly stopReason: string = "tool_calls",
+    /** Issue #594 (achado 1, residual de M21): mirrors `ConversationTurnResult
+     * .partialCalls` (this same field's doc, `types.ts`) — how many of THIS
+     * turn's own calls were torn down by a steer-driven interrupt and
+     * absorbed with `continue` before the cap was hit, regardless of which
+     * iteration's `stopReason` finally threw. `usage` above already includes
+     * every one of those calls' own ESTIMATED spend (`estimatePartialUsage`,
+     * folded in per-call by `runtime.ts` before this ever throws); `0` means
+     * every call this turn actually made completed for real (a genuine
+     * cap-hit after real, completed iterations, `child-runner.ts`'s own
+     * consumer). Deriving `partial`/`usageUncertain` from THIS field instead
+     * of `stopReason === "interrupted"` alone fixes a false negative: a
+     * steer absorbed on an EARLIER iteration whose cap is hit by a LATER,
+     * normally-completed one (`stopReason: "pause"`/`"tool_calls"`) used to
+     * report a silently "fully measured" usage that in fact still carried an
+     * estimate. */
+    public readonly partialCalls: number = 0,
   ) {
     super("MAX_ITERATIONS", `max_iterations (${String(limit)}) reached without a final response`, {
       sessionId,
