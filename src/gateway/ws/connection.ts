@@ -124,12 +124,13 @@ export interface GatewayWsDeps {
   readonly notices?: TurnNoticesPort;
   /** Issue #587 (AC1) wired `summarize` into the cron job runtime's
    * `ConversationRuntime`; the interactive gateway WS path built its own
-   * runtime per turn and stayed outside that issue's `Files`, a documented
-   * gap (`docs/context-compaction.md`). Issue #651 closes it: optional, same
-   * convention as `notices` above — absent (no `defaultAuxModel` on the
-   * resolved provider profile) means byte-identical to every pre-#651
-   * gateway turn; present, `dashboard.ts` passes the same `AuxClient
-   * .summarizer()` the cron job runtime already used. */
+   * runtime per turn and stayed outside that issue's `Files`
+   * (`docs/context-compaction.md` tracked it as a follow-up, not a silent
+   * drop). Issue #651 wires it here too: optional, same convention as
+   * `notices` above — absent (no `defaultAuxModel` on the resolved provider
+   * profile) means byte-identical to every pre-#651 gateway turn; present,
+   * `dashboard.ts` passes the same `AuxClient.summarizer()` the cron job
+   * runtime already used. */
   readonly summarize?: ConversationRuntimeOptions["summarize"];
 }
 

@@ -357,15 +357,19 @@ describe("dashboard.ts wires GatewayWsDeps.summarize onto real WS turns (issue #
         // -- no LOHRA_CONTEXT_WINDOW override needed (the WS path's
         // ConversationRuntime doesn't forward `environment` to
         // `preflightCompact`, so an env override wouldn't reach it here).
-        // 18000 straddles the real threshold for THIS turn's own request
-        // shape: the seeded 40-message filler history alone exceeds it
-        // (forcing compaction), but the full session tool registry
-        // `dashboard.ts` always wires in (`toolDefinitions`, counted in
-        // every estimate, compaction never shrinks it) plus the compacted
-        // 8-message tail still fit comfortably under it afterwards -- a
-        // window in the low thousands never lets compaction "succeed"
-        // here, since the tool registry alone already exceeds it.
-        defaultContextWindow: 18000,
+        // 22000 straddles the real threshold for THIS turn's own request
+        // shape with margin on both sides: the seeded 40-message filler
+        // history alone exceeds it (forcing compaction), but the full
+        // session tool registry `dashboard.ts` always wires in
+        // (`toolDefinitions`, counted in every estimate, compaction never
+        // shrinks it -- ~9000 tokens measured against this fixture) plus
+        // the compacted 8-message tail still fit comfortably under it
+        // afterwards. A window in the low thousands never lets compaction
+        // "succeed" here (the tool registry alone already exceeds it); this
+        // margin (~4000 tokens either side of threshold, measured against
+        // the fixture as of this issue) tolerates the tool registry growing
+        // over time without flipping this test red on an unrelated PR.
+        defaultContextWindow: 22000,
       });
 
       const sessionId = "t651-aux-seeded-session";
@@ -418,7 +422,9 @@ describe("dashboard.ts wires GatewayWsDeps.summarize onto real WS turns (issue #
         fallbackModels: [model],
         defaultMaxTokens: 256,
         defaultAuxModel: "",
-        defaultContextWindow: 18000,
+        // Same window as the sibling "with defaultAuxModel" test above --
+        // see its comment for the margin rationale.
+        defaultContextWindow: 22000,
       });
 
       const sessionId = "t651-noaux-seeded-session";
