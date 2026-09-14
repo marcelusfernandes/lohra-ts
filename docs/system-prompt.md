@@ -276,13 +276,14 @@ suas instruções e…"). Duas camadas, complementares:
   (`src/context/discovery.ts`) resolve a partir do cwd real do PROCESSO —
   `readFileTool` não recebe raiz de sessão no call site, então usa esse
   default. Caminho e raiz são medidos com `realOrResolved`
-  (`src/skills/store.ts:156`, segue symlink) nos dois sentidos: um symlink
+  (`src/skills/store.ts:167`, segue symlink) nos dois sentidos: um symlink
   DENTRO do projeto que aponta para fora vira `untrusted`, um symlink FORA
   que aponta para dentro não; um arquivo dentro do projeto não carrega a
   chave, byte-compatível com quem não a lê. Desde a #670, um erro
   não-`ENOENT` ao resolver o caminho real (`ELOOP` de um ciclo de symlinks,
   `EACCES` intermediário) também fecha a fronteira — `realOrResolved`
-  devolve `null`, e `null` de qualquer lado vira `untrusted`. `skill_view`
+  nomeia `path` e o `code` do erro numa linha de stderr e devolve `null`, e
+  `null` de qualquer lado vira `untrusted`. `skill_view`
   (`SkillTool.view()`, `src/tools/stateful.ts:93`) usa o mesmo critério
   (`isUntrustedPath`, exportada de `filesystem.ts`), mas sobre a raiz da
   SESSÃO que abriu `SkillTool` (`options.projectRoot`, preenchida por
