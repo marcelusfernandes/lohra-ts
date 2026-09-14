@@ -254,12 +254,25 @@ export class SkillStore {
     return "project";
   }
 
+  // Issue #675 (residual do veredito PR #674 item 1): mesmo tratamento que
+  // #670 deu a `realOrResolved` acima — um erro NÃO-ENOENT ao resolver
+  // `parent` (ex.: `ELOOP` de um ciclo de symlinks) significa "a fronteira
+  // não pode ser estabelecida", nunca "assume fora e segue". Antes, o
+  // `catch` genérico devolvia `resolve(parent)` para QUALQUER erro —
+  // fail-open que `within()` fechava logo depois (não explorável hoje), mas
+  // silencioso: nada nomeava `parent`/`code`. `ENOENT` continua tolerante
+  // (a régua legítima de "diretório ainda não criado" do `create()`).
   private ensureWithinRoots(path: string, name: string): void {
     const parent = dirname(path);
     let resolvedParent: string;
     try {
       resolvedParent = realpathSync(parent);
-    } catch {
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") {
+        warn(`ensureWithinRoots: ${parent} unresolved (${code ?? "unknown error"})`);
+        throw new SkillValidationError(`refusing to write '${name}' outside known skill roots`);
+      }
       resolvedParent = resolve(parent);
     }
     const resolved = join(resolvedParent, basename(path));
