@@ -201,6 +201,45 @@ describe("ConversationRuntime notices overlay (#589)", () => {
     expect(notices.failureCalls[0]?.code).toBe("MODEL_CALL_FAILED");
   });
 
+  it("never persists the overlay into history, so a later turn never resends an acked notice (#608 AC1)", async () => {
+    const repository = new MemoryRepository();
+    const transport = new QueueTransport();
+    const notices = new FakeNotices();
+    notices.setClaimResult({
+      token: [9],
+      overlay: "OPERATOR NOTICES (not the user speaking):\n- [unknown] a pending notice",
+    });
+    const runtime = new ConversationRuntime({
+      repository,
+      transport,
+      promptSnapshot: () => "sys",
+      idSource: () => "s1",
+      clock: () => 1000,
+      notices,
+    });
+
+    await runtime.runTurn({ input: "hello", provider: "p", model: "m", cwd: "/tmp" });
+
+    // Persisted history (what a LATER turn's loadMessages would read back)
+    // never carries the overlay block — only the raw user input.
+    const persisted = repository.loadMessages("s1");
+    const persistedUser = persisted.find((message) => message.role === "user");
+    expect(persistedUser?.content).toBe("hello");
+    for (const message of persisted) {
+      expect(String(message.content)).not.toContain("OPERATOR NOTICES");
+    }
+
+    // The notice is already acked (real production behavior) — a second
+    // turn's own claim finds nothing pending.
+    notices.setClaimResult({ token: [], overlay: null });
+    await runtime.runTurn({ input: "again", provider: "p", model: "m", cwd: "/tmp" });
+
+    const secondRequest = transport.requests[1];
+    for (const message of secondRequest?.messages ?? []) {
+      expect(String(message.content)).not.toContain("OPERATOR NOTICES");
+    }
+  });
+
   it("is byte-identical to a turn without the notices option when there is nothing pending (AC5)", async () => {
     const repository = new MemoryRepository();
     const transportWithNotices = new QueueTransport();
