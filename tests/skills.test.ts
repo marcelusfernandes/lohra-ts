@@ -146,6 +146,30 @@ describe("skill store", () => {
     expect(realOrResolved(loop)).toBeNull();
   });
 
+  // Issue #670 (residual F3): `null` alone isn't enough for invariant 2
+  // (fault nunca silencioso) — nada além do valor de retorno teria dito por
+  // quê. `realOrResolved` nomeia `path` e `code` numa linha de stderr
+  // (mesmo padrão bare de `src/mcp/manager.ts`'s `warn`), a única saída
+  // disponível: nenhum chamador (`within`, `isUntrustedPath`) tem um canal
+  // de `warning` injetável hoje.
+  it("names the path and the errno code on stderr before returning null (#670)", () => {
+    const base = root();
+    const loop = join(base, "loop");
+    symlinkSync(loop, loop);
+    const original = process.stderr.write.bind(process.stderr);
+    const lines: string[] = [];
+    process.stderr.write = (chunk: string) => {
+      lines.push(chunk);
+      return true;
+    };
+    try {
+      expect(realOrResolved(loop)).toBeNull();
+    } finally {
+      process.stderr.write = original;
+    }
+    expect(lines.some((line) => line.includes(loop) && line.includes("ELOOP"))).toBe(true);
+  });
+
   // `within()` (private) is what `origin()`/`ensureWithinRoots()` build on
   // top of `realOrResolved` — it isn't exported, and `SkillStore.scan()`
   // never discovers a skill THROUGH a broken directory in the first place
