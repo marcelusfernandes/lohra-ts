@@ -268,10 +268,15 @@ sobre a #584 (PR #597):
    `ClientPool` (mesmo provedor/cliente do turno, `defaultAuxModel` do
    perfil) e passam `summarize: aux.summarizer()` ao `ConversationRuntime` —
    ausente sem `defaultAuxModel`, byte-idêntico ao comportamento anterior.
-   `dashboard.ts` só liga o `ConversationRuntime` que o próprio arquivo
-   constrói (o job runner do cron); o caminho interativo da gateway WS
-   (`src/gateway/ws/connection.ts`) constrói o seu por turno e fica fora do
-   `Files` desta issue.
+   Na #587, isso valia só para o `ConversationRuntime` que o próprio
+   `dashboard.ts` constrói (o job runner do cron); o caminho interativo da
+   gateway WS (`src/gateway/ws/connection.ts`) construía o seu por turno e
+   ficava fora do `Files` daquela issue. A issue #651 fechou esse ponto:
+   `dashboard.ts` passa o MESMO `aux.summarizer()` também como
+   `GatewayWsDeps.summarize` (`src/commands/dashboard.ts:557`), que
+   `src/gateway/ws/connection.ts:279` espalha condicionalmente no
+   `ConversationRuntime` do turno WS — ausente sem `defaultAuxModel`,
+   byte-idêntico a qualquer turno anterior à #651.
 2. **Falha do auxiliar cai para o transporte do turno.** `runTurn` envolve
    `options.summarize` (quando presente) com `summarizeWithFallback`
    (`src/agent/aux.ts`): uma falha do `AuxClient` emite

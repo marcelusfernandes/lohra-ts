@@ -101,8 +101,13 @@ Com avisos pendentes, o que entra no turno:
 Wireado sobre o MESMO `noticesRepository` que `workflow_notices` já lê, em
 `chat.ts` e no `runJob` do `dashboard.ts`. Issue #608 (épico #575 P13):
 `GatewayWsDeps.notices` (`src/gateway/ws/connection.ts`) oferece o mesmo
-mecanismo ao turno único que o gateway WS constrói por `prompt.submit` — sem
-caller de produção ainda (`dashboard.ts`, fora do `Files` dessa issue).
+mecanismo ao turno único que o gateway WS constrói por `prompt.submit`. A
+issue #651 fiou o caller de produção: `dashboard.ts` (o único que constrói
+`GatewayWsDeps`) hoisteia uma instância de `createTurnNoticesPort`
+(`src/commands/dashboard.ts:384`) e passa a mesma porta ao job runner do
+cron e a `GatewayWsDeps.notices` (`:556`), que
+`src/gateway/ws/connection.ts:273` espalha condicionalmente no turno WS —
+ausente, byte-idêntico a qualquer turno anterior à #651.
 
 ## Doutrina de comportamento (issue #579, P3)
 
