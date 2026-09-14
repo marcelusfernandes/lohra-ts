@@ -24,7 +24,7 @@ distingue hoje:
    `builtinRoots`) — é código do produto, versionado neste repositório,
    revisado como qualquer outro `src/`.
 2. Toda skill em `home` (`~/.lohra/skills`, `SkillStore.root`,
-   `src/skills/store.ts:172-188`) — o destino default de `skill_manage
+   `src/skills/store.ts:220-236`) — o destino default de `skill_manage
 create` quando `scope` não é `"project"` (`src/tools/stateful.ts:106-108`,
    `scope ?? "home"`).
 
