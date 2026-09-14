@@ -81,3 +81,22 @@ nunca silenciar a flag e seguir com uma rota diferente da pedida.
   `npm run mutations:auth` cobre só `src/auth/**`; não exercita
   `src/commands/chat.ts` nem `src/commands/dashboard.ts`, ao contrário do
   que uma versão anterior desta nota afirmava.
+
+## Adendo (issue #604): a rota `api_key` sem `--provider`
+
+Esta nota trata só de `route.mode === "subscription"`. A rota `api_key`
+(sem assinatura ativa) tinha um problema diferente, não coberto aqui até
+agora: `chat`/`dashboard` sem `--provider` caíam direto na fronteira "no
+provider configured" mesmo com uma chave de API válida no ambiente —
+`doctor` já reportava `usable: true` e `detected_provider` com o nome, mas
+nada em `chat.ts`/`dashboard.ts` consultava essa detecção antes de recusar.
+
+A issue #604 fecha essa lacuna: em `route.mode === "api_key"`, ausência de
+`--provider` agora reusa a mesma regra de `detected_provider`
+(`src/doctor/providers.ts`'s `detectConfiguredProvider`, extraída de
+`resolveProviderName` — nenhuma tabela nova) via
+`src/commands/provider-detectado.ts`. `--provider` explícito continua com
+precedência sobre a detecção, e a fronteira "no provider configured"
+continua a mesma quando nada é detectado — só passa a significar "nem
+`doctor` nem `chat` acham um provedor", não mais "`chat` nunca olhou".
+`route.mode === "subscription"` não muda: a decisão (A) acima permanece.
