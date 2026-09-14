@@ -247,7 +247,7 @@ describe("skill store", () => {
     const base = root();
     const loop = join(base, "loop");
     symlinkSync(loop, loop);
-    skill(home, "ok", "ok-skill", "still found");
+    skill(home, "skills/ok", "ok-skill", "still found");
     const store = new SkillStore(home, [loop]);
     const original = process.stderr.write.bind(process.stderr);
     const lines: string[] = [];
