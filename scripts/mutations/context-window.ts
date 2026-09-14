@@ -53,6 +53,10 @@ const aux = "src/agent/aux.ts";
 // `srcGlobs` (`src/conversation/**`, already there for `runtime.ts`/
 // `errors.ts`).
 const envelope = "src/conversation/envelope.ts";
+// Issue #649 (sub-issue B1 de #637): `resolveTurnSession` (extraído de
+// `runtime.ts:349-366`, que estava em 796/800 linhas) -- primeiro mutante
+// em `runtime-session.ts`, já coberto por `srcGlobs` (`src/conversation/**`).
+const runtimeSession = "src/conversation/runtime-session.ts";
 
 const compactionTests = "tests/conversation-compaction.test.ts";
 const runtimeTests = "tests/conversation-runtime.test.ts";
@@ -69,6 +73,9 @@ const auxTests = "tests/client-pool-aux.test.ts";
 // byte-exact against a turn with an operator-notices overlay present.
 const runtimeNoticesTests = "tests/conversation-runtime-notices.test.ts";
 const envelopeTests = "tests/conversation-envelope.test.ts";
+// Issue #649: sessão retomada reusa as faixas persistidas (invariante 1
+// entre processos, não só dentro de um).
+const runtimePromptCachingTests = "tests/conversation-runtime-prompt-caching.test.ts";
 
 export const contextWindowMutants: readonly Mutant[] = [
   {
@@ -529,6 +536,25 @@ export const contextWindowMutants: readonly Mutant[] = [
         before:
           "    usage_total: usage(addUsage(input.usageTotal ?? input.usage ?? null, extra?.auxUsage ?? null)),\n",
         after: "    usage_total: usage(input.usageTotal ?? input.usage ?? null),\n",
+      },
+    ],
+  },
+  // --- issue #649 (faixas restauradas de uma sessão retomada) ------------
+  {
+    id: "aa-resumed-session-bands-recomputed",
+    category: "runtime-session",
+    mechanism:
+      "resolveTurnSession volta a substituir as faixas restauradas de uma sessão retomada por promptSnapshot() -- invariante 1 (prompt congelado) quebra silenciosamente entre processos, igual ao bug original da #649",
+    focus: {
+      file: runtimePromptCachingTests,
+      test: "forwards the RESTORED bands (A) to the transport, never this process's own promptSnapshot() (B), when the resumed session understood bands (volatile not empty)",
+    },
+    edits: [
+      {
+        file: runtimeSession,
+        before:
+          '  const restoredBandsUnderstood =\n    typeof persistedPrompt !== "string" && persistedPrompt.volatile !== "";\n',
+        after: "  const restoredBandsUnderstood = false;\n",
       },
     ],
   },

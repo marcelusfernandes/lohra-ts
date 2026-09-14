@@ -135,3 +135,11 @@ suggested_route}`; kind que pausa nunca entra em `faultKinds`; primeiro a
   `home`; comportamento atual mantido (nenhuma exceção por origem) até essa
   resposta, porque `skill_manage create` grava em `home` por default e o
   caminho sozinho não distingue instalação manual de escrita da sessão.
+- [2026-09-14 — Sessão retomada: as faixas persistidas SÃO o prompt
+  congelado](2026-09-14-faixas-restauradas.md) — sessão retomada com
+  `volatile !== ""` usa as três faixas do repositório, byte-idênticas,
+  nunca `promptSnapshot()` deste processo; uma linha migrada
+  (`context`/`volatile` vazias) continua recomputando; três consequências
+  nomeadas: data congelada na criação, memória/skills posteriores fora,
+  sessão pré-doutrina continua sem doutrina ao ser retomada (item 10 do
+  veredito da PR #610 fecha por construção).

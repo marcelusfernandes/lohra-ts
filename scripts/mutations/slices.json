@@ -123,7 +123,8 @@
       "tests/conversation-runtime-aux.test.ts",
       "tests/client-pool-aux.test.ts",
       "tests/conversation-runtime-notices.test.ts",
-      "tests/conversation-envelope.test.ts"
+      "tests/conversation-envelope.test.ts",
+      "tests/conversation-runtime-prompt-caching.test.ts"
     ]
   },
   {

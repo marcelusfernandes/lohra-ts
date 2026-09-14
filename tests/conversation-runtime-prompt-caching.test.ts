@@ -54,6 +54,13 @@ class MemoryRepository implements ConversationRepository {
       cwd: input.cwd,
     });
   }
+  /** Issue #649: seeds a session directly, bypassing `createSession`, so a
+   * test can simulate a RESUMED session — one `session()` already restored
+   * from a prior process, with its own bands, independent of whatever this
+   * runtime instance's own `promptSnapshot` would compute. */
+  seed(id: string, session: { systemPrompt: string | SystemBands; model: string; cwd: string }) {
+    this.sessions.set(id, session);
+  }
   session(id: string) {
     return this.sessions.get(id) ?? null;
   }
@@ -155,5 +162,97 @@ describe("ConversationRuntime prompt caching plumbing (#586)", () => {
 
     expect(transport.requests[0]?.system).toBe("FLAT SYSTEM TEXT");
     expect(repository.created[0]?.systemPrompt).toBe("FLAT SYSTEM TEXT");
+  });
+});
+
+// Issue #649 (sub-issue B1 de #637): sessão RETOMADA usa as faixas
+// persistidas pelo repositório, byte-idênticas, em vez de descartá-las e
+// recomputar via `promptSnapshot()` — é o mesmo mecanismo do item 10 do
+// veredito da PR #610 visto do outro lado: a RECONSTRUÇÃO é que viola o
+// invariante 1 (CLAUDE.md), não a ausência de doutrina numa sessão que
+// nasceu sem ela.
+describe("ConversationRuntime reuses restored session bands on resume (#649)", () => {
+  it("forwards the RESTORED bands (A) to the transport, never this process's own promptSnapshot() (B), when the resumed session understood bands (volatile not empty)", async () => {
+    const bandsA: SystemBands = {
+      stable: "STABLE A (persisted)",
+      context: "CONTEXT A (persisted)",
+      volatile: "Today's date is 2020-01-01 (persisted).",
+    };
+    const bandsB: SystemBands = {
+      stable: "STABLE B (this process's own promptSnapshot)",
+      context: "CONTEXT B",
+      volatile: "Today's date is 2099-12-31 (this process).",
+    };
+    const repository = new MemoryRepository();
+    repository.seed("s1", { systemPrompt: bandsA, model: "m", cwd: "/tmp" });
+    const transport = new QueueTransport();
+    const runtime = new ConversationRuntime({
+      repository,
+      transport,
+      promptSnapshot: () => bandsB,
+      idSource: () => "unused",
+      clock: () => 1000,
+    });
+
+    await runtime.runTurn({
+      input: "hi",
+      provider: "anthropic",
+      model: "m",
+      cwd: "/tmp",
+      sessionId: "s1",
+    });
+
+    expect(transport.requests[0]?.system).toEqual(bandsA);
+  });
+
+  it("falls back to promptSnapshot() for a migrated session (context and volatile both empty) — no false positive on the volatile discriminator", async () => {
+    const migratedBands: SystemBands = { stable: "OLD FLAT PROMPT", context: "", volatile: "" };
+    const freshSnapshot: SystemBands = {
+      stable: "FRESH STABLE",
+      context: "FRESH CONTEXT",
+      volatile: "Today's date is 2030-06-15.",
+    };
+    const repository = new MemoryRepository();
+    repository.seed("s1", { systemPrompt: migratedBands, model: "m", cwd: "/tmp" });
+    const transport = new QueueTransport();
+    const runtime = new ConversationRuntime({
+      repository,
+      transport,
+      promptSnapshot: () => freshSnapshot,
+      idSource: () => "unused",
+      clock: () => 1000,
+    });
+
+    await runtime.runTurn({
+      input: "hi",
+      provider: "anthropic",
+      model: "m",
+      cwd: "/tmp",
+      sessionId: "s1",
+    });
+
+    expect(transport.requests[0]?.system).toEqual(freshSnapshot);
+  });
+
+  it("a brand-new session is unaffected — still promptSnapshot() + createSession with the three bands", async () => {
+    const snapshot: SystemBands = {
+      stable: "STABLE NEW",
+      context: "CONTEXT NEW",
+      volatile: "Today's date is 2030-01-02.",
+    };
+    const repository = new MemoryRepository();
+    const transport = new QueueTransport();
+    const runtime = new ConversationRuntime({
+      repository,
+      transport,
+      promptSnapshot: () => snapshot,
+      idSource: () => "s1",
+      clock: () => 1000,
+    });
+
+    await runtime.runTurn({ input: "hi", provider: "anthropic", model: "m", cwd: "/tmp" });
+
+    expect(transport.requests[0]?.system).toEqual(snapshot);
+    expect(repository.created[0]?.systemPrompt).toEqual(snapshot);
   });
 });
