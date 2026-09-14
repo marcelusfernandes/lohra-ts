@@ -322,7 +322,7 @@ async function submitAndCollectFrames(
     frames.push(frame);
     if (frame.params.type === "message.complete") {
       complete = true;
-      completion = frame.params.payload ?? frame;
+      completion = frame.params.payload ?? (frame as unknown as Readonly<Record<string, unknown>>);
     }
   }
   return { frames, completion };
@@ -348,7 +348,12 @@ function deriveDefaultContextWindow(home: string): number {
   const toolsTokens = estimateRequestTokens({
     system: "",
     messages: [],
-    tools: toolDefinitions,
+    // Same intent as `ConversationRuntime.preflightCompact`'s own cast for
+    // this exact field (`src/conversation/runtime.ts`): `ToolDefinition`
+    // has no index signature, but `estimateRequestTokens` only ever reads
+    // it as a plain record (`jsonLength`, structural, never a specific
+    // tool shape).
+    tools: toolDefinitions as unknown as readonly Readonly<Record<string, unknown>>[],
   }).tokens;
   return toolsTokens + CONTEXT_WINDOW_MARGIN_TOKENS;
 }

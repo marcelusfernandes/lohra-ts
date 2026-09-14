@@ -177,6 +177,60 @@ Toda operação do `TurnNoticesPort` falha aberta: um repositório de avisos
 quebrado nunca falta um turno que não tinha nada a ver com ele — só emite um
 `warning` (nunca silencioso, invariante 2).
 
+## Frame WS `compaction.aux_fallback` (issue #671)
+
+Vizinho do overlay acima (mesma superfície, o turno WS da gateway), mas um
+canal DIFERENTE: não é um `operator_notices` persistido, é um frame de
+evento no PRÓPRIO socket, para o cliente que está olhando o turno agora —
+mais perto de "Compactação e título pelo `AuxClient` (issue #587)" em
+`docs/context-compaction.md` (mecanismo) do que do resto desta página.
+Registrado aqui porque não existe `docs/gateway*.md` e porque este
+documento já é onde a fiação de `GatewayWsDeps`/
+`src/gateway/ws/connection.ts` é descrita (seção anterior).
+
+`ConversationRuntime.runTurn` (`src/conversation/runtime.ts`) emite
+`"compaction.aux_fallback"` (`code` = `error.name` da falha, ex.:
+`ProviderCallFailed`, `Error`) sempre que um `options.summarize` injetado
+(um `AuxClient.summarizer()`, normalmente) lança durante a compactação —
+o turno cai para o summarizer default do próprio transporte
+(`summarizeWithFallback`, `src/agent/aux.ts`) e continua, nunca falha por
+causa disso (fail-open, issue #587). Antes da #671, esse evento tinha dois
+consumidores: `commands/chat.ts` (uma linha em stderr,
+`event: compaction.aux_fallback code=...`) e o teste de unidade de
+`runtime.ts` — nenhum caminho de produção sob a gateway WS o via.
+
+A issue #671 acrescenta um terceiro: `GatewayEventName`
+(`src/gateway/rpc/frame.ts`) ganha `"compaction.aux_fallback"` como
+entrada ADITIVA ao vocabulário fechado do socket (`gateway.ready`,
+`session.info`, `message.*`, `tool.*`, `session.forked` continuam
+exatamente como estavam), e o `eventSink` que `handlePromptSubmit`
+(`src/gateway/ws/connection.ts`) passa ao `ConversationRuntime` do turno
+encaminha esse evento como frame:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "event",
+  "params": {
+    "type": "compaction.aux_fallback",
+    "session_id": "<sessionId>",
+    "payload": { "code": "ProviderCallFailed" }
+  }
+}
+```
+
+Ausente `options.summarize` (perfil sem `defaultAuxModel`), ou presente e
+bem-sucedido, este frame nunca aparece — byte-idêntico a todo turno WS
+anterior à #671. Presente e o auxiliar falha, é o ÚNICO sinal na UI
+interativa de que a compactação daquele turno degradou para o modelo do
+próprio turno — antes desta issue, o mesmo turno completava normalmente e
+a falha só existia no stderr do CLI (`commands/chat.ts`), nunca na
+gateway WS que o dashboard usa. Prova em
+`tests/gateway/dashboard-ws-overlay.test.ts` (`prova/aux-fallback-ws.ts`):
+um `AuxClient` real, com o stub HTTP do teste respondendo erro só ao
+request de resumo (por `model`, o único jeito de distinguir a chamada do
+`AuxClient` da chamada do próprio turno sem alterar `src/agent/aux.ts`).
+
 ## Leitura: tool e CLI
 
 `workflow_notices` (`src/workflow/notices-tool.ts`,
