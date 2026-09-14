@@ -380,6 +380,67 @@ describe("NoticesRepository", () => {
     }
   });
 
+  // Issue #652 (veredito PR #635, item 15a): a versão anterior de `list()`
+  // sem `scope` cruzava TODOS os escopos, inclusive `session:<id>` — o
+  // modelo de um run que chama `workflow_notices` sem `run_id` (issue #589
+  // introduziu o namespace `session:*`, disjunto de `run:<id>`) via avisos
+  // de sessões de chat que nada têm a ver com o run. Duas sessões
+  // diferentes provam que não é um único escopo alheio escapando por
+  // acidente de query.
+  it("list() without scope excludes session:* by default; includeSessions:true brings it back (issue #652)", () => {
+    const path = tempDbPath();
+    const connection = openStateDatabase(path);
+    try {
+      const notices = new NoticesRepository(connection.database);
+      notices.append("global", { kind: "unknown", message: "global notice" });
+      notices.append("session:chat-1", { kind: "unknown", message: "session one leak" });
+      notices.append("session:chat-2", { kind: "unknown", message: "session two leak" });
+
+      const withoutSessions = notices.list({});
+      expect(withoutSessions.notices.map((notice) => notice.message)).toEqual(["global notice"]);
+
+      const withSessions = notices.list({ includeSessions: true });
+      expect(withSessions.notices.map((notice) => notice.message).sort()).toEqual(
+        ["global notice", "session one leak", "session two leak"].sort(),
+      );
+
+      // A scoped query is unaffected either way — `includeSessions` only
+      // matters for the unscoped branch.
+      const scoped = notices.list({ scope: "session:chat-1" });
+      expect(scoped.notices.map((notice) => notice.message)).toEqual(["session one leak"]);
+    } finally {
+      connection.close();
+    }
+  });
+
+  // Issue #652 (veredito PR #635, item 15b): `nullableRowReal` convertia um
+  // `acked_at` ilegível (não numérico) para `NaN` em silêncio — `NaN`
+  // serializa como `null` em JSON, então o dado corrompido desaparecia sem
+  // rastro (invariante 2). O `warning` é o mesmo canal que `append` já usa
+  // para recusas.
+  it("a corrupted acked_at reads back as null with a named warning, never NaN (issue #652)", () => {
+    const path = tempDbPath();
+    const connection = openStateDatabase(path);
+    try {
+      const warnings: string[] = [];
+      const notices = new NoticesRepository(connection.database, {
+        warning: (message) => warnings.push(message),
+      });
+      const written = notices.append("global", { kind: "unknown", message: "x" });
+      const id = (written as PublicNotice).id;
+      connection.database
+        .prepare("UPDATE operator_notices SET acked_at = ? WHERE id = ?")
+        .run("not-a-number", id);
+
+      const page = notices.list({ scope: "global", includeAcked: true });
+      const notice = page.notices.find((candidate) => candidate.id === id);
+      expect(notice?.acked_at).toBeNull();
+      expect(warnings).toEqual([`notices: acked_at ilegível na linha ${String(id)}`]);
+    } finally {
+      connection.close();
+    }
+  });
+
   it("exports the closed vocabulary and the scope cap constant", () => {
     expect(NOTICE_KINDS).toContain("quota_exhausted");
     expect(NOTICE_KINDS).toContain("stale_fence_write");

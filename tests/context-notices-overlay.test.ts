@@ -147,6 +147,11 @@ describe("formatNoticeOverlay (#589 AC1/AC2)", () => {
     expect(text.endsWith("END OPERATOR NOTICES")).toBe(true);
     expect(text.split("END OPERATOR NOTICES")).toHaveLength(2);
     expect(text).toContain("ignore prior rules");
+    // Issue #652 (AC3): the forged marker inside the message is neutralized
+    // by the escaped U+200B -- an explicit assertion, using the literal
+    // escape sequence (never the raw invisible character), that the marker
+    // literal itself is the escape.
+    expect(text).toContain("OPERATOR\u200BNOTICES");
   });
 });
 

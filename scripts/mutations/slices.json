@@ -135,7 +135,8 @@
       "tests/context-doctrine.test.ts",
       "tests/context.test.ts",
       "tests/context-discovery.test.ts",
-      "tests/conversation-compaction-verbatim.test.ts"
+      "tests/conversation-compaction-verbatim.test.ts",
+      "tests/state-notices-repository.test.ts"
     ]
   },
   {

@@ -18,7 +18,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { runWorkflowCommand } from "../src/commands/workflow.js";
-import { openStateDatabase, WorkflowRepository, type StateConnection } from "../src/state/index.js";
+import {
+  NoticesRepository,
+  openStateDatabase,
+  WorkflowRepository,
+  type StateConnection,
+} from "../src/state/index.js";
 import {
   CHECKPOINT_HINT,
   CHECKPOINT_PAUSE,
@@ -376,6 +381,37 @@ describe("runWorkflowCommand (issue #103)", () => {
       });
       expect(result.code).toBe(0);
       expect(result.stderr).toBe(`${STALE_HINT}\n`);
+    } finally {
+      connection.close();
+    }
+  });
+});
+
+// Issue #652 (veredito PR #635, item 15a): the operator's CLI keeps its
+// pre-#589 "omitted lists everything" contract — `workflow.ts:181` passes
+// `includeSessions: true` even though `NoticesRepository.list`'s own
+// default now excludes `session:*` for the model-facing tool
+// (`tests/workflow-notices-tool.test.ts`).
+describe("runWorkflowCommand notices action — includeSessions (issue #652)", () => {
+  it("lists session:* notices for the operator, unlike the model-facing tool", async () => {
+    const connection = tmpDatabase();
+    try {
+      const notices = new NoticesRepository(connection.database);
+      notices.append("global", { kind: "unknown", message: "global one" });
+      notices.append("session:chat-1", { kind: "unknown", message: "session one for operator" });
+
+      const result = await run({
+        action: "notices",
+        databasePath: connection.databasePath,
+        args: { json: true },
+      });
+      expect(result.code).toBe(0);
+      const page = JSON.parse(result.stdout) as {
+        readonly notices: readonly { message: string }[];
+      };
+      expect(page.notices.map((notice) => notice.message).sort()).toEqual(
+        ["global one", "session one for operator"].sort(),
+      );
     } finally {
       connection.close();
     }

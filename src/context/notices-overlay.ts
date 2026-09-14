@@ -28,7 +28,11 @@ const SESSION_SCOPE_PREFIX = "session:";
 // zero-width space (U+200B) breaks the exact match while staying visually
 // identical; the two REAL markers this file emits never contain it.
 const MARKER_KEYWORD = "OPERATOR NOTICES";
-const ZERO_WIDTH_SPACE = "​";
+// Issue #652 (veredito PR #635, reason 3): escaped, not a raw U+200B in the
+// source — the character itself is invisible in most editors/diffs; the
+// escape is legible and behaves identically (`String.prototype.split`/
+// `join` on a code point, same as before).
+const ZERO_WIDTH_SPACE = "\u200B";
 function escapeMarkerKeyword(message: string): string {
   return message.split(MARKER_KEYWORD).join(`OPERATOR${ZERO_WIDTH_SPACE}NOTICES`);
 }

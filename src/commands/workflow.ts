@@ -178,9 +178,16 @@ export async function runWorkflowCommand(options: WorkflowCommandOptions): Promi
           : undefined;
       const afterSeq =
         typeof options.args.after_seq === "number" ? options.args.after_seq : undefined;
+      // Issue #652: the operator, not a run's model, reads this listing —
+      // `includeSessions: true` keeps the pre-#589 "omitted lists
+      // everything" contract for this CLI even though the model-facing
+      // tool (`workflow_notices`, `src/workflow/notices-tool.ts`) now
+      // defaults to excluding `session:*`. Has no effect when `runId` is
+      // given: a `run:<id>` scoped query always returns its own rows.
       const page = notices.list({
         ...(runId === undefined ? {} : { scope: `run:${runId}` }),
         includeAcked: options.args.all === true,
+        includeSessions: true,
         ...(afterSeq === undefined ? {} : { afterSeq }),
       });
       if (json) {
