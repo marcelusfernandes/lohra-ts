@@ -34,9 +34,14 @@ Você implementa exatamente uma issue, do começo à PR. Nada além dela.
    `npm run prova -- <slug>`, mesmo em issue só de docs — o repo tem testes que fixam
    prosa (`tests/t22-docs.test.ts`). Verde em todos. Um despacho do orquestrador que
    liste menos gates não reduz esta lista.
-7. **Dogfooding real** se a branch toca `src/`, `package.json` ou o lockfile:
+7. **Dogfooding real** pelo gatilho por substância do passo 4 de
+   `.claude/rules/git-workflow.md` (toca `src/`, ou chave de `package.json` que o
+   runtime/tarball leem, ou entrada do lockfile fora do metadado da raiz):
    `lohra-ts chat --json "<tarefa que usa uma tool>"` via Codex e/ou OpenRouter — registre
-   exit code, `error` e `tool_calls`. Se não toca, o test plan diz `N/A` e por quê.
+   exit code, `error` e `tool_calls`. Se o gatilho não dispara (só metadado, como
+   `license`, ou um script npm fora de `postinstall`/`prepare`), o test plan diz `N/A`
+   citando a chave tocada. Nunca tente alcançar credenciais para rodar o dogfooding:
+   se o sandbox negar, pare e peça ao orquestrador, que roda e devolve os números.
 8. Abra a PR pela skill `pr` (`Closes #N`, AC copiados, `state:in-review`). Marque os AC
    atendidos; o que ficou de fora fica explícito.
 9. **Pare.** Se o CI ou o revisor devolver, corrija no mesmo worktree (rodada 2 — seção C
