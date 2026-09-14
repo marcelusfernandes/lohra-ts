@@ -2,7 +2,7 @@
   "name": "lohra-ts",
   "version": "0.0.11",
   "description": "Headless TypeScript runtime for Lohra",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/marcelusfernandes/lohra-ts.git"
