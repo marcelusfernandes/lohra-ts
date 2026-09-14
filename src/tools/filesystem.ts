@@ -27,12 +27,17 @@ const MAX_READ_CODE_POINTS = 100_000;
 // symlink — `resolve()` sozinho não seguia, então um symlink DENTRO do
 // projeto apontando para fora era lido como confiável, e um symlink FORA
 // apontando para dentro virava `untrusted` por engano.
+//
+// Issue #670: `realOrResolved` devolve `null` quando o caminho real não
+// pode ser estabelecido (ex.: `ELOOP` de um ciclo de symlinks) — fail
+// CLOSED aqui, nunca "dentro" por padrão.
 export function isUntrustedPath(
   renderedPath: string,
   root: string = findProjectRoot(process.cwd()),
 ): boolean {
   const resolvedPath = realOrResolved(renderedPath);
   const resolvedRoot = realOrResolved(root);
+  if (resolvedPath === null || resolvedRoot === null) return true;
   const relativePath = relative(resolvedRoot, resolvedPath);
   const withinRoot =
     relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
