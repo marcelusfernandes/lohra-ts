@@ -262,19 +262,27 @@ suas instruções e…"). Duas camadas, complementares:
   MCP — sucesso E erro, `wrapCallResult`, `src/mcp/tools.ts:109-110,112` —
   devolvem `"untrusted": true` como a ÚLTIMA chave — campo aditivo, ordem
   das chaves existentes intocada (`docs/adr/0003-native-wire-format.md`). O
-  erro de `web_fetch`/`web_search` não carrega a chave: o texto vem do
-  próprio runtime (`WebError`/`WebTransportError`, `src/web/tool.ts:83-92`
-  e `:115-122`), nunca do corpo de uma página; o de uma tool MCP vem do
-  SERVIDOR, como o de sucesso, então carrega a mesma marca. `read_file`
-  (`src/tools/filesystem.ts:30-38`) marca o mesmo campo só quando o caminho
+  erro de `web_fetch` (`WebError`/`WebTransportError`, `src/web/tool.ts:82-100`)
+  carrega a chave desde a #670: a mensagem pode interpolar `Content-Type`
+  (`fetch.ts:35`) ou o hostname de um `Location` (`safety.ts:432,436,441`)
+  que o SERVIDOR escolheu a partir do hop 1 — a forma mínima marca todo
+  erro capturado ali, inclusive o do hop 0, onde a URL é a que o próprio
+  modelo pediu (uma marca a mais é inócua). O erro de `web_search`
+  (`:121-132`) continua sem a chave: nenhuma mensagem ali interpola dado do
+  servidor. O de uma tool MCP vem do SERVIDOR, como o de sucesso, então
+  carrega a mesma marca. `read_file`
+  (`src/tools/filesystem.ts:34-44`) marca o mesmo campo só quando o caminho
   lido não é ancestral do `project_root` que `findProjectRoot`
   (`src/context/discovery.ts`) resolve a partir do cwd real do PROCESSO —
   `readFileTool` não recebe raiz de sessão no call site, então usa esse
   default. Caminho e raiz são medidos com `realOrResolved`
-  (`src/skills/store.ts:145`, segue symlink) nos dois sentidos: um symlink
+  (`src/skills/store.ts:156`, segue symlink) nos dois sentidos: um symlink
   DENTRO do projeto que aponta para fora vira `untrusted`, um symlink FORA
   que aponta para dentro não; um arquivo dentro do projeto não carrega a
-  chave, byte-compatível com quem não a lê. `skill_view`
+  chave, byte-compatível com quem não a lê. Desde a #670, um erro
+  não-`ENOENT` ao resolver o caminho real (`ELOOP` de um ciclo de symlinks,
+  `EACCES` intermediário) também fecha a fronteira — `realOrResolved`
+  devolve `null`, e `null` de qualquer lado vira `untrusted`. `skill_view`
   (`SkillTool.view()`, `src/tools/stateful.ts:93`) usa o mesmo critério
   (`isUntrustedPath`, exportada de `filesystem.ts`), mas sobre a raiz da
   SESSÃO que abriu `SkillTool` (`options.projectRoot`, preenchida por
