@@ -29,7 +29,7 @@ describe("BUILTIN_DEFINITIONS workflow_notices description matches list()'s real
 
   it("matches the full text byte for byte", () => {
     expect(description).toBe(
-      "List durable operator notices (workflow faults, sink refusals, stale fence writes), so one a killed process left behind is still visible. Unacknowledged by default; include_acked also returns handled ones. Omit run_id to list global notices plus every run's — never another chat session's (session-scoped notices are only surfaced by the CLI).",
+      "List durable operator notices (workflow faults, sink refusals, stale fence writes), so one a killed process left behind is still visible. Unacknowledged by default; include_acked also returns handled ones. Omit run_id for global or run, not sessions.",
     );
   });
 });

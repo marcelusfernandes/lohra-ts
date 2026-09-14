@@ -632,7 +632,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "List durable operator notices (workflow faults, sink refusals, stale fence writes), so one a killed process left behind is still visible. Unacknowledged by default; include_acked also returns handled ones. Omit run_id for every scope.",
+        "List durable operator notices (workflow faults, sink refusals, stale fence writes), so one a killed process left behind is still visible. Unacknowledged by default; include_acked also returns handled ones. Omit run_id for global or run, not sessions.",
       parameters: {
         type: "object",
         properties: {
