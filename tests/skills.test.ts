@@ -192,4 +192,44 @@ describe("skill store", () => {
       /outside known skill roots/,
     );
   });
+
+  // Issue #675 (sobra do veredito da PR #674, item 1): `ensureWithinRoots`'s
+  // OWN `catch { resolvedParent = resolve(parent); }` was fail-open on any
+  // non-ENOENT `realpathSync(parent)` error — the exact shape `#670` removed
+  // from `realOrResolved` (`:167-183` above). The test right above already
+  // pins that a cyclic PROJECT ROOT ends up refused (`within()` closes the
+  // boundary on the root side right after), so the throw itself isn't new;
+  // what was silent is `ensureWithinRoots`'s OWN catch never naming the
+  // `parent` it couldn't resolve or the errno `code` — nothing on stderr
+  // came from `ensureWithinRoots` itself (only `within()`'s own
+  // `realOrResolved: <root> unresolved (...)` line, a different string).
+  // This pins THAT line, distinguished by an `ensureWithinRoots:` prefix and
+  // the exact `parent` path (`<loop>/x`, not the bare root `<loop>`).
+  it("ensureWithinRoots warns with its own parent path and code before failing closed (issue #675)", () => {
+    const home = root();
+    const base = root();
+    const loop = join(base, "loop");
+    symlinkSync(loop, loop);
+    const store = new SkillStore(home, [loop]);
+    const parent = join(loop, "x");
+    const original = process.stderr.write.bind(process.stderr);
+    const lines: string[] = [];
+    process.stderr.write = (chunk: string) => {
+      lines.push(chunk);
+      return true;
+    };
+    try {
+      expect(() => store.create("x", "d", "body", "1.0.0", "project")).toThrow(
+        SkillValidationError,
+      );
+    } finally {
+      process.stderr.write = original;
+    }
+    expect(
+      lines.some(
+        (line) =>
+          line.includes("ensureWithinRoots") && line.includes(parent) && line.includes("ELOOP"),
+      ),
+    ).toBe(true);
+  });
 });
