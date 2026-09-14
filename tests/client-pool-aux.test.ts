@@ -124,6 +124,55 @@ describe("AuxClient", () => {
     expect(create.mock.calls[0]?.[0]).not.toHaveProperty("max_tokens");
   });
 
+  // Issue #620 (follow-up of the PR #617 review, #587 item 1): a profile
+  // with `defaultAuxModel` routes the summary through `AuxTelemetry.
+  // summarize`, which called `completeWithUsage` with the plain default
+  // `maxTokens = 1024` -- the same fixed budget `buildSummaryRequest`
+  // (`src/conversation/compaction.ts`, issue #584) stopped using. A large
+  // folded transcript on this path got the two verbatim sections
+  // (`SUMMARY_SYSTEM`) truncated exactly where #584 exists to keep them
+  // intact, in the eight profiles that HAVE a `defaultAuxModel`. Same
+  // numbers as `tests/conversation-compaction-verbatim.test.ts`'s
+  // "scales maxTokens up for a large folded transcript" (50_000 chars ->
+  // 17248 estimated tokens -> ceil(17248 / 8) = 2156): both paths must
+  // agree on the SAME budget for the SAME transcript.
+  it("scales the summary call's maxTokens with the transcript's own size, like buildSummaryRequest (issue #620)", async () => {
+    const bodies: unknown[] = [];
+    const client = {
+      create: vi.fn((body: unknown) => {
+        bodies.push(body);
+        return Promise.resolve({
+          content: "recap",
+          finishReason: "stop",
+          toolCalls: [],
+          reasoning: null,
+          usage: null,
+          providerData: null,
+        } as const);
+      }),
+    };
+    const aux = new AuxClient({
+      client,
+      transport: new ChatCompletionsTransport(),
+      chosenModel: "chosen",
+      defaultAuxModel: "aux",
+    });
+    const transcript = "x".repeat(50_000);
+    await aux.auxTelemetry().summarize(transcript);
+    expect(bodies).toEqual([
+      expect.objectContaining({
+        model: "aux",
+        max_tokens: 2156,
+        messages: [
+          { role: "system", content: SUMMARY_SYSTEM },
+          { role: "user", content: transcript },
+        ],
+      }),
+    ]);
+    const maxTokens = (bodies[0] as { max_tokens: number }).max_tokens;
+    expect(maxTokens).toBeGreaterThan(1024);
+  });
+
   // Issue #587 (AC "usage da chamada auxiliar entra em usage_total... campo
   // aditivo aux_calls"): auxTelemetry() shares one counter/usage total
   // across BOTH summarize and title, for a caller to read after a turn.
