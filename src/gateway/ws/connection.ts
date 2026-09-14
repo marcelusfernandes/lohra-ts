@@ -8,6 +8,7 @@ import type {
   ConversationRepository,
   ConversationRuntimeEvent,
   ModelTransport,
+  TurnNoticesPort,
 } from "../../conversation/types.js";
 import { getProviderProfileIncludingCodex } from "../../providers/index.js";
 import type { ToolDefinition } from "../../tools/types.js";
@@ -113,6 +114,14 @@ export interface GatewayWsDeps {
   readonly createModelTransport: () => ModelTransport;
   readonly createConversationRepository: () => ConversationRepository;
   readonly dispatchTool: (name: string, argumentsJson: string) => Promise<string>;
+  /** Issue #608 (AC4, épico #575): the operator-notices overlay (#589),
+   * absent from every gateway turn before this — `dashboard.ts`'s own cron
+   * job runtime already had it. Optional, same convention as
+   * `ConversationRuntimeOptions.notices` itself: absent means byte-identical
+   * to every pre-#608 gateway turn. No production caller populates this yet
+   * (`dashboard.ts`, the only one that constructs `GatewayWsDeps`, is
+   * outside this issue's Files) — this is the mechanism, ready to wire. */
+  readonly notices?: TurnNoticesPort;
 }
 
 function fakeIncomingMessage(head: ParsedRequestHead): IncomingMessage {
@@ -248,6 +257,10 @@ async function handlePromptSubmit(
       idSource: () => sessionId,
       clock: () => Date.now() / 1000,
       maxTokens: resolveGatewayMaxTokens(deps.provider),
+      // Issue #608 (AC4): absent `deps.notices` (every caller today) means
+      // `notices` is never even a key here -- exactOptionalPropertyTypes
+      // forbids `notices: undefined` -- so this turn stays byte-identical.
+      ...(deps.notices === undefined ? {} : { notices: deps.notices }),
       // Issue #287: forwards the two compaction events onto the socket as
       // `event` frames (encodeCompactionEventFrame above) -- before this,
       // `session.compacted`/`compaction.unsupported` only ever reached a
