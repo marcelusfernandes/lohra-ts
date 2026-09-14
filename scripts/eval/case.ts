@@ -196,6 +196,13 @@ function parseOutcome(value: unknown, path: string): EvalOutcome {
 export function parseEvalCase(value: unknown, path: string, id: string): EvalCase {
   if (!isRecord(value)) fail(path, "o fixture não é um objeto JSON");
   if (!Array.isArray(value.mechanism)) fail(path, `"mechanism" precisa ser array`);
+  // Issue #607 item 4: mechanism: [] passaria vacuamente por
+  // evaluateMechanism (Array.every sobre array vazio é sempre true) — um
+  // caso sem nenhuma assertion de mecanismo estaria sempre "verde" sem
+  // provar nada.
+  if (value.mechanism.length === 0) {
+    fail(path, `"mechanism" precisa ter pelo menos uma assertion`);
+  }
   if (typeof value.budget_tokens !== "number" || value.budget_tokens <= 0) {
     fail(path, `"budget_tokens" precisa ser number positivo`);
   }
