@@ -148,6 +148,26 @@ function idsFor(split: EvalSplit, set: EvalCaseSet): readonly string[] {
   return [...split.dev, ...split.holdout];
 }
 
+/** Issue #607 item 6: sem `--tag`, duas corridas no mesmo dia contra o
+ * mesmo alvo produziam o MESMO nome de diretório que um baseline commitado
+ * manualmente naquele dia (`docs/eval/<data>-<label>/`) — `npm run eval`
+ * sem flags no dia de um baseline SOBRESCREVIA `results.jsonl`/`summary.json`
+ * tracked (só `generatedAt`/`elapsedMs` mudam, mas o diff é real). Sem
+ * `--tag`, a corrida agora grava em `.eval/` (gitignorado, fora do
+ * controle de versão) — nunca em `docs/eval/`, que fica reservado para uma
+ * corrida que o operador decidiu explicitamente promover a baseline
+ * (`--tag` torna o nome do diretório distinto de qualquer baseline sem
+ * tag). Commitar um baseline continua um ato explícito: mover o resultado
+ * de `.eval/` para `docs/eval/` é responsabilidade de quem decide isso, não
+ * do runner. */
+export function resolveOutDir(root: string, args: Pick<ParsedArgs, "provider" | "tag">): string {
+  const label = args.provider ?? "stub";
+  const date = new Date().toISOString().slice(0, 10);
+  const dirName = args.tag === undefined ? `${date}-${label}` : `${date}-${label}-${args.tag}`;
+  const base = args.tag === undefined ? ".eval" : "docs/eval";
+  return resolve(root, base, dirName);
+}
+
 async function main(): Promise<void> {
   const root = process.cwd();
   const args = parseArgs(process.argv.slice(2));
@@ -163,10 +183,7 @@ async function main(): Promise<void> {
 
   const split = loadSplit(root);
   const cases = loadCases(root, idsFor(split, args.set));
-  const label = args.provider ?? "stub";
-  const date = new Date().toISOString().slice(0, 10);
-  const dirName = args.tag === undefined ? `${date}-${label}` : `${date}-${label}-${args.tag}`;
-  const outDir = resolve(root, "docs/eval", dirName);
+  const outDir = resolveOutDir(root, args);
   const resultsPath = join(outDir, "results.jsonl");
   const summaryPath = join(outDir, "summary.json");
 
