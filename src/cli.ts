@@ -475,8 +475,6 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
       providerOrigin: doctor.provider_origin,
       providerNames: doctor.providers.map((provider) => provider.provider),
       presentProviderVars: doctor.providers.flatMap((provider) => provider.present_vars),
-      pythonSupported: doctor.python_supported,
-      pythonVersion: doctor.python_version,
       subscriptionActive: doctor.subscription_active,
     };
     return runInit({

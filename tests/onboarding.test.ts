@@ -35,8 +35,6 @@ function snapshot(base: string, overrides: Partial<OnboardingSnapshot> = {}): On
     providerOrigin: "none",
     providerNames: ["anthropic", "openai", "ollama"],
     presentProviderVars: [],
-    pythonSupported: true,
-    pythonVersion: "3.12.10",
     subscriptionActive: false,
     ...overrides,
   };

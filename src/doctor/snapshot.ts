@@ -124,8 +124,6 @@ export function buildEnvironment(
     provider_error: providerError,
     provider_origin: providerOrigin,
     providers,
-    python_supported: true,
-    python_version: "3.12.10",
     stderr_tty: isTty(process.stderr.isTTY),
     stdin_tty: isTty(process.stdin.isTTY),
     subscription_active: active,

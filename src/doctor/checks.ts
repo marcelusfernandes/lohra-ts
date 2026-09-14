@@ -252,7 +252,6 @@ export function runChecks(environment: DoctorEnvironment): readonly Check[] {
   }
 
   return [
-    { name: "python", state: "ok", detail: "3.12.10 (supported: >=3.11,<3.14)", remedy: "" },
     providerCheck,
     ...(ollamaKeylessGap === null ? [] : [ollamaKeylessGap]),
     subscriptionCheck,

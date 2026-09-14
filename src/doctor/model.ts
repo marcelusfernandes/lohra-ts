@@ -57,8 +57,6 @@ export interface DoctorEnvironment {
   readonly provider_error: string | null;
   readonly provider_origin: "api-key" | "env-var" | "none";
   readonly providers: readonly ProviderStatus[];
-  readonly python_supported: true;
-  readonly python_version: "3.12.10";
   readonly stderr_tty: boolean;
   readonly stdin_tty: boolean;
   readonly subscription_active: boolean;
