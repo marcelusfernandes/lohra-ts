@@ -327,7 +327,14 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   const mode: PromptMode =
     options.flags.has("--json") || options.flags.has("--no-input") ? "headless" : "interactive";
   const harness = harnessText({ mode, yolo: options.flags.has("--yolo") });
-  const snapshot = (): string => {
+  // Issue #586 (épico #575, 2ª rodada): devolve a SystemPromptSnapshot
+  // inteira, não mais só `.text` — ConversationRuntime.promptSnapshot já
+  // aceita `string | SystemBands`; a faixa cheia chega ao transporte
+  // Anthropic (cache_control em stable+context) e à persistência
+  // (SqliteConversationRepository grava as três colunas). `snapshot` não é
+  // usada em nenhum outro lugar deste arquivo, então este é o único call
+  // site afetado.
+  const snapshot = () => {
     const context = loadProjectContext(options.cwd);
     const identity = loadSoul(options.home);
     // Issue #580 AC 2: memória, perfil e índice de skills entram no prompt
@@ -344,7 +351,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       ...(memory.memory ? { memorySnapshot: memory.memory } : {}),
       ...(memory.user ? { userProfile: memory.user } : {}),
       skillsIndex: skillStore.snapshot(),
-    }).text;
+    });
   };
   approval.reset();
   approval.setYolo(options.flags.has("--yolo"));

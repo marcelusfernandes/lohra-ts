@@ -1,3 +1,4 @@
+import { systemPromptText } from "../context/system-prompt.js";
 import type {
   BuildKwargsOptions,
   ChatKwargs,
@@ -113,8 +114,17 @@ function status(value: unknown): FinishReason {
 
 export class ResponsesTransport {
   buildKwargs(options: BuildKwargsOptions): ChatKwargs {
+    // Issue #586: `instructions` never changes shape (still one joined
+    // string, no per-block cache_control on this API) -- a caller that
+    // passes the three bands gets flattened here first, same rule as
+    // chat-completions.ts, instead of `typeof value === "string"` silently
+    // dropping the whole system prompt (invariant 2: never a silent loss).
+    const flattenedSystem =
+      options.system === null || options.system === undefined
+        ? undefined
+        : systemPromptText(options.system);
     const systems = [
-      options.system,
+      flattenedSystem,
       ...options.messages
         .filter((message) => message.role === "system")
         .map((message) => message.content),

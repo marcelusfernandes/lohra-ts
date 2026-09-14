@@ -1,3 +1,4 @@
+import { systemPromptText } from "../context/system-prompt.js";
 import { stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
 import type {
   BuildKwargsOptions,
@@ -115,7 +116,17 @@ function normalizeUsage(value: unknown): Usage | null {
 export class ChatCompletionsTransport {
   buildKwargs(options: BuildKwargsOptions): ChatKwargs {
     const messages: Record<string, unknown>[] = [];
-    if (options.system) messages.push({ role: "system", content: options.system });
+    // Issue #586: this transport never changes shape (still one `role:
+    // "system"` message with a string `content`) -- a caller that passes
+    // the three bands (chat.ts/dashboard.ts's ConversationRuntime, wired
+    // for the Anthropic route) gets flattened here instead of a raw object
+    // leaking into the wire, exactly like every plain-string caller before
+    // this issue.
+    const systemText =
+      options.system === null || options.system === undefined
+        ? undefined
+        : systemPromptText(options.system);
+    if (systemText) messages.push({ role: "system", content: systemText });
     messages.push(...convertMessages(options.messages));
     const result: Record<string, unknown> = { model: options.model, messages };
     if (options.maxTokens !== undefined && options.maxTokens !== null)
