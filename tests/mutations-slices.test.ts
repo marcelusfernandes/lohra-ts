@@ -482,7 +482,7 @@ describe("scripts/mutations/slices.json", () => {
     }
   });
 
-  it("a contagem total de mutantes é 280 (soma dos treze catálogos importados)", () => {
+  it("a contagem total de mutantes é 281 (soma dos treze catálogos importados)", () => {
     // Os doze catálogos de dado puro, importados de verdade via CATALOGOS:
     // nenhum destes módulos chama `main()` no escopo do arquivo -- todos
     // exportam só arrays literais (mais, no caso da mídia, `expected`/
@@ -596,9 +596,14 @@ describe("scripts/mutations/slices.json", () => {
     // derruba o turno em vez de cair para o summarizer padrão) e w
     // (`auxTelemetry` para de contar chamadas bem-sucedidas) — `src/agent/**`
     // junta-se ao `srcGlobs` desta fatia (achado da própria issue: `aux.ts`
-    // não tinha mutante em NENHUMA fatia): 276 + 4 = 280.
+    // não tinha mutante em NENHUMA fatia): 276 + 4 = 280. A issue #620
+    // (follow-up do veredito da PR #617) acrescenta x a `context-window.ts`:
+    // `aux.ts`'s `summaryBudgetFor` volta ao `maxTokens` fixo em 1024 em vez
+    // de escalar com `summaryMaxTokens(estimateTokens(transcript))`, o mesmo
+    // orçamento que `buildSummaryRequest` já usava desde a #584 -- 280 + 1 =
+    // 281.
     const importedCount = [...CATALOGOS.values()].reduce((sum, mutants) => sum + mutants.length, 0);
-    const TOTAL_MUTANTS = 280;
+    const TOTAL_MUTANTS = 281;
     expect(importedCount).toBe(TOTAL_MUTANTS);
   });
 
@@ -621,7 +626,7 @@ describe("scripts/mutations/slices.json", () => {
       "scripts/mutations/media-catalog-persistence.ts": 13,
       "scripts/mutations/self-update-mutants.ts": 8,
       "scripts/mutations/workflow-executor-mutants.ts": 45,
-      "scripts/mutations/context-window.ts": 23,
+      "scripts/mutations/context-window.ts": 24,
       "scripts/mutations/auth-mutants.ts": 13,
       "scripts/mutations/supervision-mutants.ts": 39,
     };
@@ -630,7 +635,7 @@ describe("scripts/mutations/slices.json", () => {
       expect(mutants.length, `catálogo ${path}`).toBe(CONTAGEM_POR_CATALOGO[path]);
     }
     const somaTabela = Object.values(CONTAGEM_POR_CATALOGO).reduce((sum, n) => sum + n, 0);
-    expect(somaTabela).toBe(280);
+    expect(somaTabela).toBe(281);
   });
 
   it("todo diretório de primeiro nível de src/ está em algum srcGlobs ou em SEM_FATIA, nunca nos dois", () => {

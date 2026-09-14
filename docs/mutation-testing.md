@@ -176,18 +176,18 @@ fatia" cita a mesma restrição.
 | `media`               | `mutations:t21`         |       20 | `media-catalog-persistence.ts` (13) + `media-catalog-other.ts` (7)                                                    |
 | `web-tools`           | `mutations:t20`         |        9 | `web-tools-mutants.ts`                                                                                                |
 | `self-update`         | `mutations:self-update` |        8 | `self-update-mutants.ts`                                                                                              |
-| `context-window`      | `mutations:t23`         |       23 | `context-window.ts`                                                                                                   |
+| `context-window`      | `mutations:t23`         |       24 | `context-window.ts`                                                                                                   |
 | `auth`                | `mutations:auth`        |       13 | `auth-mutants.ts`                                                                                                     |
 | `supervision`         | `mutations:supervision` |       39 | `supervision-mutants.ts`                                                                                              |
 
-Total: 280. Os 12 mutantes de `workflow-durability-guard.ts` são
+Total: 281. Os 12 mutantes de `workflow-durability-guard.ts` são
 combinatórios: três conjuntos do guard de escrita possuída (`fence`,
 `holder`, `lease-validity`) × quatro categorias (`state`, `cache`,
 `node-cost`, `spend`) — um mutante por combinação, cada um escorado só no
 teste focal da sua categoria, mais os 2 mutantes do INSERT combinado
 cache+custo (`combined-cell-guard-removed`,
 `combined-cost-escapes-refusal`). `tests/mutations-slices.test.ts` importa os
-treze catálogos de dado puro estaticamente e prova essa soma (280) a cada
+treze catálogos de dado puro estaticamente e prova essa soma (281) a cada
 corrida — a contagem acima não pode driftar do JSON sem reprovar esse teste.
 
 A issue #587 (P11, compactação/título pelo `AuxClient`) acrescenta 4 a
@@ -198,7 +198,13 @@ sem manter seu próprio `tool`), `u` (`runtime.ts` para de derivar
 `compaction.ts` é inerte sob 200k), `v` e `w` (`src/agent/aux.ts`'s
 `summarizeWithFallback` perde o `catch`, `auxTelemetry` para de contar
 chamadas) — `aux.ts` não tinha mutante em NENHUMA fatia até aqui (achado da
-QA de d56f9c9b): 19 + 4 = 23.
+QA de d56f9c9b): 19 + 4 = 23. A issue #620 (follow-up do veredito da PR #617)
+acrescenta `x`: `aux.ts`'s `summaryBudgetFor` (o orçamento que
+`AuxClient.summarize`/`AuxTelemetry.summarize` passam ao resumo) volta ao
+`maxTokens` fixo em 1024 em vez de escalar com
+`summaryMaxTokens(estimateTokens(transcript))` — o mesmo orçamento que
+`buildSummaryRequest` (`compaction.ts`, issue #584) já usava para o
+summarizer default: 23 + 1 = 24.
 
 `supervision-mutants.ts` (issue #451, milestone 14 — achado de QA/revisão de
 M10, épico #421) é o décimo terceiro catálogo, fatia nova: 227 + 19 = 246.
@@ -656,8 +662,8 @@ contagem por catálogo contra a tabela pinada `CONTAGEM_POR_CATALOGO`
 `workflow-audit-live-mutants` 32, `workflow-audit-producers-mutants` 31,
 `web-tools-mutants` 9, `media-catalog-other` 7, `media-catalog-persistence`
 13, `self-update-mutants` 8, `workflow-executor-mutants` 45,
-`context-window` 23, `auth-mutants` 13, `supervision-mutants` 39, soma 280) e
-a soma de 280 contra os treze catálogos importados; e que todo diretório de
+`context-window` 24, `auth-mutants` 13, `supervision-mutants` 39, soma 281) e
+a soma de 281 contra os treze catálogos importados; e que todo diretório de
 primeiro nível de `src/` está coberto por algum `srcGlobs` ou está em
 `SEM_FATIA` com um motivo não vazio — nunca os dois, nunca nenhum dos dois.
 
