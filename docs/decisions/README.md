@@ -143,3 +143,11 @@ suggested_route}`; kind que pausa nunca entra em `faultKinds`; primeiro a
   nomeadas: data congelada na criação, memória/skills posteriores fora,
   sessão pré-doutrina continua sem doutrina ao ser retomada (item 10 do
   veredito da PR #610 fecha por construção).
+- [2026-09-14 — Kind `timeout` reservado, sem produtor
+  hoje](2026-09-14-kind-timeout-reservado.md) — `classifyProviderError`
+  continua mapeando `ETIMEDOUT` para `route_fault` (consumidor próprio em
+  `route-faults.ts`, ancorado em mutantes); `timeout` fica no vocabulário
+  fechado sem nenhum caminho de código que o produza; produtor legítimo
+  futuro seria um deadline do próprio runtime, não um erro de rede do
+  provedor; alternativa de produzir `timeout` em `buildTurnNotice` rejeitada
+  por criar dois kinds para a mesma causa.
