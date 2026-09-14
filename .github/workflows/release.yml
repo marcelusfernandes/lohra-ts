@@ -1,0 +1,74 @@
+name: release
+
+# D7 (#536, épico #529): push de tag `v*` → publica no npm com provenance
+# (OIDC via trusted publisher configurado pelo owner no npm — nenhum token
+# no repo) e cria a GitHub Release com o tarball. A tag é criada pelo owner
+# sobre o merge commit da PR de release em `main` (docs/release.md).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # `npm pack`/`npm publish` rodam o lifecycle `prepare`, que só instala
+      # hooks de git (scripts/prepare.mjs); mesmo guard de scripts/pack-check.ts.
+      LOHRA_SKIP_PREPARE: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing (OIDC) exige npm >= 11.5.1; o npm que vem com o
+      # Node 22 é 10.x.
+      - name: npm com trusted publishing
+        run: npm install -g npm@latest && npm --version
+      - name: a tag aponta para main e bate com package.json#version
+        run: |
+          git fetch origin main --quiet
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+            || { echo "::error::a tag $GITHUB_REF_NAME não aponta para um commit de main"; exit 1; }
+          TAG="${GITHUB_REF_NAME#v}"
+          VERSION="$(node -p "require('./package.json').version")"
+          [ "$TAG" = "$VERSION" ] \
+            || { echo "::error::tag v$TAG != package.json#version $VERSION"; exit 1; }
+      - name: install
+        run: npm ci
+      - name: build
+        run: npm run build
+      - name: pack:check
+        run: npm run pack:check
+      - name: pack
+        run: |
+          mkdir -p /tmp/pack
+          npm pack --pack-destination /tmp/pack
+          ls -la /tmp/pack
+      - name: publish (npm, provenance)
+        run: npm publish --provenance --access public
+      - name: notas da Release a partir do CHANGELOG
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" { on=1; print; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > /tmp/notes.md
+          [ -s /tmp/notes.md ] || echo "Sem seção [$VERSION] em CHANGELOG.md." > /tmp/notes.md
+      - name: GitHub Release com o tarball
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" /tmp/pack/*.tgz --title "$GITHUB_REF_NAME" --notes-file /tmp/notes.md
