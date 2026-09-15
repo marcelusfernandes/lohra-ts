@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.0.13] - 2026-09-15
+
+### Fixed
+
+- fix(doctor): remove o check python fixo de doctor e init (#697)
+
 ## [0.0.12] - 2026-09-14
 
 ### Added
