@@ -1,6 +1,6 @@
 # Reexecução e recortes da W5
 
-As execuções originais ocorreram em clones descartáveis da árvore `fa8aa4a572a8d84c3eea128a7ce67ab4eac796e1`, um por ABI (`npm ci` separado para Node 20.20.2 e 22.23.3). O clone Windows usou `git -c core.protectNTFS=false clone` por causa de `aux.ts` na árvore; isso não é uma afirmação de suporte. Os scripts locais `.mjs` ficaram em `%TEMP%\lohra-w705-agent`, fora do checkout. Os JSONs adjacentes guardam resultados compactos; logs brutos permaneceram só em temporário e seus SHA-256 constam nos JSONs. Não contêm banco, token ou dump de ambiente pessoal.
+As execuções originais ocorreram em clones descartáveis da árvore `fa8aa4a572a8d84c3eea128a7ce67ab4eac796e1`, um por ABI (`npm ci` separado para Node 20.20.2 e 22.23.3). O clone Windows usou `git -c core.protectNTFS=false clone` por causa de `aux.ts` na árvore; isso não é uma afirmação de suporte. Os scripts locais `.mjs` ficaram em `%TEMP%\lohra-w705-agent`, fora do checkout; sua fonte integral, com apenas o prefixo do caminho pessoal substituído, está em [probe-source.md](probe-source.md). Os JSONs adjacentes guardam resultados compactos; logs brutos permaneceram só em temporário e seus SHA-256 constam nos JSONs. Não contêm banco, token ou dump de ambiente pessoal.
 
 Para repetir o **corpus**, em PowerShell, a partir de cada clone com sua versão de Node e `npm ci` concluído:
 
@@ -32,4 +32,21 @@ Para **crash/resume**, A iniciou `tests/workers/workflow-launch-worker.ts <db> <
 
 Para **supervisão**, cada modo (`cancel`, `steer`, `shutdown`) usou um filho `node.exe --import <tsx-loader> <TEMP>/supervision-worker.mjs <clone> <db> <home> <mode>` em SQLite e home separados. Um `ChildRunner` stub ficou bloqueado após sinalizar pronto; após um `setImmediate` para registrar a folha ativa, o worker invocou respectivamente `service.cancel(runId)`, `core.steer(subId,'operator redirect')` ou `service.shutdown('signal')`. O stub resolveu com `usage={tokensIn:3,tokensOut:1}`, `usageUncertain=true`, `partial=true`; as sondas consultaram estado, spend e auditoria após o retorno. `steer` drenou um lembrete `<system-reminder>`; cancel/shutdown resultaram `cancelled`, steer `complete`; exit 0, gasto `3/1`, `partial_leaves=1` e nenhuma imagem de PID residual em `tasklist /FI "PID eq <pid>"` em ambos os Nodes. O worker temporário teve SHA-256 `734a23452a4f3d7d887dc77b2c99b832e8fe2a94f6eb12bc26676a7ba5a903c4`.
 
-As sondas acima podem ser reconstruídas a partir dessas chamadas e dos workers existentes, mas os scripts temporários completos não foram adicionados ao repositório, conforme escopo da #705. Isto limita a reprodução literal byte a byte; caso a equipe precise de um harness permanente, ele requer issue própria. Leituras estáticas ou métodos invocados diretamente não validam entrega de sinais nativos do console.
+Para repetir as sondas, extraia os blocos completos de [probe-source.md](probe-source.md) como `<TEMP>/lohra-w705-agent/<nome>.mjs`, substitua o marcador `C:/<TEMP>` pelo caminho local de `$env:TEMP` com barras `/` e prepare os clones ABI específicos em `<TEMP>/lohra-w705-agent/node20/repo` e `node22/repo`. Os executáveis portáteis esperados ficam em `<TEMP>/lohra-w701/node-v20.20.2-win-x64/node.exe` e `node-v22.23.3-win-x64/node.exe`; em outra disposição, atualize essas constantes nas fontes antes de executar. Então invoque os quatro runners da ABI desejada com seu `node.exe`: `run-corpus[-node20].mjs`, `run-lease-probe[-node20].mjs`, `run-crash-probe[-node20].mjs` e `run-supervision-probe[-node20].mjs`. Os runners Node 20 foram derivados por substituição do diretório `node22`/`node-v22.23.3-win-x64` pelos equivalentes Node 20; a etiqueta `nodeVersion` do `run-corpus-node20.mjs` permaneceu incorreta no metadado, mas o campo `command` e o clone apontam para Node 20. A transcrição preserva o comportamento executado, embora a redação do prefixo impeça equivalência byte a byte com as fontes temporárias originais. Os scripts do checkout referidos por ela permanecem na árvore medida; um harness permanente e automatizado exigiria issue própria. Leituras estáticas ou métodos invocados diretamente não validam entrega de sinais nativos do console.
+
+Hashes SHA-256 dos scripts temporários originais, antes da redação documental:
+
+| Script                             | SHA-256                                                            |
+| ---------------------------------- | ------------------------------------------------------------------ |
+| `lease-worker.mjs`                 | `1e81e9a0efb00dd825e7a575bf2c6f184cd73bfadb9ae8aea21853ecc23f094c` |
+| `read-run.mjs`                     | `2c52165bf991fa76ec34ad9ded7237eee3792c146cca3e491eb7c9c75b569d6f` |
+| `resume-audited.mjs`               | `5857c5bf22c1c42e4710089ad77499373f01a960a1e7ca0ca945aacba1f56d75` |
+| `run-corpus-node20.mjs`            | `71d81085b8f7f0f873b127b07c88dd8e7322251535121957ae014d265d6f1566` |
+| `run-corpus.mjs`                   | `dc52faf749f929b71f52790819ca5ff2ff7d5e169154bcd54f096ca617c9cbb4` |
+| `run-crash-probe-node20.mjs`       | `d00e38593fbb8ea7073fb4f26c1b2eff4b5dbac6f0a3a09be9a37f8bd7abe9c4` |
+| `run-crash-probe.mjs`              | `46afb7e9074399ebb591ccee25d15b2e0b2ccdedd58c6fa0b1204ec4a684f93c` |
+| `run-lease-probe-node20.mjs`       | `f9bae9d3a53c84bcba11eb8cc45929fa3df37b9f599981f7c882fed3fefbdfac` |
+| `run-lease-probe.mjs`              | `bee3fddf2a9b91ea7f0c5766516f892b6b25d7dc59cf108b16e0ba4b4b7a2d2d` |
+| `run-supervision-probe-node20.mjs` | `a31fa50ebfe9ebfb3c2dba8378dd25e0677dd03bf553c8c143d1218faca60893` |
+| `run-supervision-probe.mjs`        | `531e2dd6fbe8320d4f862495ce521d90f4913593110420008e9d4e1b1db415c9` |
+| `supervision-worker.mjs`           | `734a23452a4f3d7d887dc77b2c99b832e8fe2a94f6eb12bc26676a7ba5a903c4` |
