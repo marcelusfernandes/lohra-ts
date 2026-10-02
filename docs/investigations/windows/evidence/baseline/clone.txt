@@ -19,6 +19,12 @@ Saída: Cloning into '<TEMP>/lohra-w701/clone-workaround'...; exit 0.
 Comandos: git -C <clone> rev-parse HEAD; git -C <clone> status --porcelain;
 Test-Path <clone>/src/agent/aux.ts
 Saídas: SHA acima; status vazio; True. Exit code Git: 0.
+Conferência posterior (sem configurar core.protectNTFS no clone):
+  git -C <clone> config --show-origin --get core.protectNTFS -> saída vazia, exit 1
+  git -C <clone> status --porcelain -> saída vazia, exit 0
+  git -C <clone> ls-files --error-unmatch src/agent/aux.ts -> src/agent/aux.ts, exit 0
+  Test-Path <clone>/src/agent/aux.ts -> True
+Não foi executado `git config --local core.protectNTFS false` neste clone.
 
 Segundo clone com o mesmo contorno para Node 22, em <TEMP>/lohra-w701/clone-workaround-22:
 clone exit 0; mesmo SHA; status vazio.

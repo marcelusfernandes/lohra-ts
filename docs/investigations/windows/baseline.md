@@ -42,6 +42,12 @@ Evidências: [clone.txt](evidence/baseline/clone.txt),
 [node20.txt](evidence/baseline/node20.txt) e
 [node22.txt](evidence/baseline/node22.txt). Os clones da instalação foram
 independentes; a falha de clone padrão não foi sobrescrita nem reparada.
+No clone contornado, `core.protectNTFS` não foi gravado na configuração local:
+`git config --show-origin --get core.protectNTFS` teve saída vazia e exit 1.
+Mesmo assim, `git status --porcelain` teve saída vazia e exit 0, e
+`git ls-files --error-unmatch src/agent/aux.ts` encontrou o arquivo. O
+contorno medido foi apenas o `-c` no comando de clone, sem segundo passo
+oculto de configuração.
 
 Em ambos os `npm ci`, `scripts/prepare.mjs` imprimiu
 `instalar-git-hooks.sh falhou (exit null)` e
