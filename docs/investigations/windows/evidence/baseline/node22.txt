@@ -1,0 +1,27 @@
+W1 / Node v22.23.3, npm 10.9.9 / clone-workaround-22 / SHA fa8aa4a572a8d84c3eea128a7ce67ab4eac796e1
+
+Antes: PATH iniciado pelo diretório do Node portátil; HOME, USERPROFILE,
+npm_config_cache e npm_config_prefix sob <TEMP>/lohra-w701, exclusivos desta versão.
+Comando: <TEMP>/lohra-w701/node-v22.23.3-win-x64/npm.cmd ci
+Saída sanitizada relevante:
+  > lohra-ts@0.0.13 postinstall
+  > node scripts/postinstall.mjs
+  > lohra-ts@0.0.13 prepare
+  > node scripts/prepare.mjs
+  prepare: instalar-git-hooks.sh falhou (exit null)
+  prepare: lefthook install pre-commit falhou (exit null)
+  added 177 packages, and audited 178 packages in 10s
+Exit code: 0. Os hooks não tiveram sucesso observado.
+
+Comando: node -e 'const D=require("better-sqlite3");const d=new D(":memory:");console.log(JSON.stringify({module:"better-sqlite3",result:d.prepare("select 42 as n").get().n}));d.close()'
+Saída: {"module":"better-sqlite3","result":42}; exit 0.
+Comando PowerShell: $code='const p=require("node-pty");let data="";const child=p.spawn("cmd.exe",["/c","echo","pty-ok"],{name:"xterm",cols:80,rows:24,cwd:process.cwd(),env:process.env});const timer=setTimeout(()=>{console.log(JSON.stringify({module:"node-pty",outcome:"timeout"}));child.kill();process.exit(99)},5000);child.onData(x=>data+=x);child.onExit(e=>{clearTimeout(timer);console.log(JSON.stringify({module:"node-pty",exitCode:e.exitCode,containsExpected:data.includes("pty-ok")}));process.exit(e.exitCode)})'; & <node.exe> -e $code
+Saída JSON: {"module":"node-pty","exitCode":0,"containsExpected":true}; exit 0.
+
+Artefatos após npm ci (Test-Path):
+  node_modules/better-sqlite3/build/Release/better_sqlite3.node = True
+  node_modules/better-sqlite3/build/config.gypi = False
+  node_modules/node-pty/prebuilds/win32-x64/conpty.node = True
+  node_modules/node-pty/build/config.gypi = False
+O marcador de configuração do node-gyp não apareceu; não houve compilação
+nativa observável por esse mecanismo.
