@@ -1,0 +1,30 @@
+W1 / commit fa8aa4a572a8d84c3eea128a7ce67ab4eac796e1
+
+Clone padrão — diretório novo descartável, configuração Git padrão:
+Comando: git clone https://github.com/marcelusfernandes/lohra-ts.git <TEMP>/lohra-w701/clone-default
+Saída sanitizada:
+  Cloning into '<TEMP>/lohra-w701/clone-default'...
+  error: invalid path 'src/agent/aux.ts'
+  fatal: unable to checkout working tree
+  warning: Clone succeeded, but checkout failed.
+Exit code: 128.
+Comando: git -C <TEMP>/lohra-w701/clone-default rev-parse HEAD
+Saída: fa8aa4a572a8d84c3eea128a7ce67ab4eac796e1; exit 0.
+Observação: objetos foram baixados; `git status --short` listou arquivos D
+em massa porque o checkout não materializou a árvore. Não foi usado para npm.
+
+Clone com contorno — novo diretório descartável:
+Comando: git -c core.protectNTFS=false clone https://github.com/marcelusfernandes/lohra-ts.git <TEMP>/lohra-w701/clone-workaround
+Saída: Cloning into '<TEMP>/lohra-w701/clone-workaround'...; exit 0.
+Comandos: git -C <clone> rev-parse HEAD; git -C <clone> status --porcelain;
+Test-Path <clone>/src/agent/aux.ts
+Saídas: SHA acima; status vazio; True. Exit code Git: 0.
+Conferência posterior (sem configurar core.protectNTFS no clone):
+  git -C <clone> config --show-origin --get core.protectNTFS -> saída vazia, exit 1
+  git -C <clone> status --porcelain -> saída vazia, exit 0
+  git -C <clone> ls-files --error-unmatch src/agent/aux.ts -> src/agent/aux.ts, exit 0
+  Test-Path <clone>/src/agent/aux.ts -> True
+Não foi executado `git config --local core.protectNTFS false` neste clone.
+
+Segundo clone com o mesmo contorno para Node 22, em <TEMP>/lohra-w701/clone-workaround-22:
+clone exit 0; mesmo SHA; status vazio.

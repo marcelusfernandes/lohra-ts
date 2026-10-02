@@ -1,0 +1,27 @@
+W1 / 2026-10-02 / Windows 11 Pro 10.0.26200 x64 / PowerShell 7.6.5
+Git: git version 2.47.1.windows.1
+HEAD dos clones: fa8aa4a572a8d84c3eea128a7ce67ab4eac796e1
+
+Comando: Invoke-RestMethod https://nodejs.org/dist/index.json
+Resultado: versões mais recentes listadas das linhas 20 e 22: v20.20.2 e v22.23.3.
+Comandos por versão: Invoke-WebRequest https://nodejs.org/dist/<version>/node-<version>-win-x64.zip;
+Invoke-WebRequest https://nodejs.org/dist/<version>/SHASUMS256.txt;
+Get-FileHash -Algorithm SHA256 <zip>; comparação com linha do ZIP no SHASUMS256.txt;
+Expand-Archive <zip> <TEMP>/lohra-w701.
+Exit code: 0 para downloads, comparação e extração; mismatch lançaria erro.
+
+v20.20.2: SHA256 dc3700fdd57a63eedb8fd7e3c7baaa32e6a740a1b904167ff4204bc68ed8bf77
+Comando: <TEMP>/lohra-w701/node-v20.20.2-win-x64/node.exe --version
+Saída: v20.20.2; exit 0.
+Comando: <TEMP>/lohra-w701/node-v20.20.2-win-x64/npm.cmd --version
+Saída: 10.8.2; exit 0.
+
+v22.23.3: SHA256 2b0ff57b049cda1bbcea2240eec20467018713c1efe1f7360c2681859b90ed71
+Comando: <TEMP>/lohra-w701/node-v22.23.3-win-x64/node.exe --version
+Saída: v22.23.3; exit 0.
+Comando: <TEMP>/lohra-w701/node-v22.23.3-win-x64/npm.cmd --version
+Saída: 10.9.9; exit 0.
+
+Inventário de PATH sem dump de ambiente: make/g++/cl/msbuild ausentes;
+python/python3 resolvem para aliases WindowsApps; Git e Node preexistente presentes.
+Node preexistente: v22.23.2; npm preexistente: 10.9.8.
