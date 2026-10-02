@@ -1,0 +1,26 @@
+W6 controle Linux local, 2026-10-02.
+Container: lohra-windows-linux-control-20261002, usuário node, Node v22.23.3.
+Comando base: docker exec -u node -e LOHRA_CRON_MODULE_ROOT=/work
+  -e LOHRA_HOME=/tmp/w706-cron-control/profile-lohra
+  -e CODEX_HOME=/tmp/w706-cron-control/profile-codex
+  -e HOME=/tmp/w706-cron-control/profile-home
+  lohra-windows-linux-control-20261002 node /tmp/w706-cron-probe.mjs
+  <mode> /tmp/w706-cron-control/<mode>
+Arquivo cron-probe.mjs copiado do temp Windows com docker cp; mesmos bytes.
+Todos os comandos retornaram exit 0.
+
+git -C /work rev-parse HEAD: fa8aa4a572a8d84c3eea128a7ce67ab4eac796e1.
+SHA256 dist/cron/scheduler.js no Windows e Linux:
+5418db417a995635dd9fd66d81fb02fed9c0d4dec9d8576443ee9470956471c4
+SHA256 dist/cron/store.js no Windows e Linux:
+2dbcf1f84aa647bb1cc207a243e87d9382720ce41ea3523a82cef23dea0a199d
+
+failure: result ok=false; lastRunAt=100; diagnostics=[];
+toolHasSentinel=false; toolHasLastRunAt=true.
+race: workers PID 19066/19067, ambos code=0/result ok=true;
+runCount=2; distinctPids=2; lastRunAt=100.
+crash: childPid=19092; elapsedMs=10003; lockPersisted=true;
+error='cron store lock timed out waiting for <HOME>/cron/jobs.json.lock';
+afterManualRemoval=0.
+
+Conclusão do controle: os três fenômenos reproduziram fora do Windows.

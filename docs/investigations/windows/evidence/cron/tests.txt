@@ -1,0 +1,10 @@
+W6 corpus nativo direcionado, Windows 11 Pro x64, Node v20.20.2.
+Executado no clone descartável do SHA fa8aa4a572a8d84c3eea128a7ce67ab4eac796e1
+com LOHRA_HOME/CODEX_HOME/HOME/USERPROFILE temporários.
+Comando: <node20>/npm.cmd test -- --run tests/cron-scheduler.test.ts tests/cron-store.test.ts tests/commands-cron.test.ts
+Exit code: 1.
+Resumo Vitest: Test Files 1 failed | 2 passed (3); Tests 1 failed | 57 passed (58).
+Única falha: tests/cron-store.test.ts > readJobs > unreadable: fail-closed.
+Asserção esperava CronStoreError após chmodSync(jobsPath, 0o000), mas readJobs
+retornou sem lançar; linha 88. Classificação: teste POSIX de permissão não
+exercita ACL Windows; não confundir com falha do tick/lock medida nas sondas.
