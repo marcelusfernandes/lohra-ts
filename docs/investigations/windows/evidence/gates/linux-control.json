@@ -1,0 +1,47 @@
+{
+  "baselineSha": "fa8aa4a572a8d84c3eea128a7ce67ab4eac796e1",
+  "platform": "Docker Linux control, node:22-bookworm-slim, unprivileged node user for full suite",
+  "nodeVersion": "v22.23.3",
+  "npmVersion": "10.9.9",
+  "gates": [
+    {
+      "gate": "build",
+      "seconds": 8,
+      "exitCode": 0
+    },
+    {
+      "gate": "typecheck",
+      "seconds": 16,
+      "exitCode": 0
+    },
+    {
+      "gate": "lint",
+      "seconds": 94,
+      "exitCode": 0
+    },
+    {
+      "gate": "format:check",
+      "seconds": 38,
+      "exitCode": 0
+    },
+    {
+      "gate": "test (root user, diagnostic run)",
+      "seconds": 68,
+      "note": "3 permission tests failed because root bypasses chmod; not a product comparator",
+      "exitCode": 1
+    },
+    {
+      "gate": "test (node user)",
+      "seconds": 66,
+      "filesPassed": 318,
+      "testsPassed": 4216,
+      "exitCode": 0
+    }
+  ],
+  "logs": {
+    "controlScriptSha256": "d97faa6a8c6e943ed527c61aaa23b24b1501c44a227ee23aff52a12e25f6471b",
+    "nonrootTestSha256": "4233ebd63fde665bb053a67679580d7d32199e8d4986c8d8760307ab75711714",
+    "nonrootTestBytes": 101965
+  },
+  "provenance": "Run performed by coordinator /root, not this Windows agent; original logs retained in temporary control directory."
+}
