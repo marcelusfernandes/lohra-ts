@@ -3,12 +3,12 @@
   "platform": "Windows 11 x64 (OSDescription Microsoft Windows 10.0.26200)",
   "nodeVersion": "v20.20.2",
   "npmVersion": "10.8.2",
-  "executionRoot": "C:\\Users\\marce\\AppData\\Local\\Temp\\lohra-w702-agent\\node20",
+  "executionRoot": "<TEMP>\\lohra-w702-agent\\node20",
   "isolation": "HOME, USERPROFILE, TEMP, TMP, npm_config_cache, npm_config_prefix, LOHRA_HOME, CODEX_HOME apontam para diretórios exclusivos desta versão",
   "gates": [
     {
       "gate": "build",
-      "command": "C:\\Users\\marce\\AppData\\Local\\Temp\\lohra-w701\\node-v20.20.2-win-x64\\node.exe C:\\Users\\marce\\AppData\\Local\\Temp\\lohra-w701\\node-v20.20.2-win-x64\\node_modules\\npm\\bin\\npm-cli.js run build",
+      "command": "<TEMP>\\lohra-w701\\node-v20.20.2-win-x64\\node.exe <TEMP>\\lohra-w701\\node-v20.20.2-win-x64\\node_modules\\npm\\bin\\npm-cli.js run build",
       "exitCode": 0,
       "timedOut": false,
       "timeoutMs": 120000,
@@ -22,7 +22,7 @@
     },
     {
       "gate": "typecheck",
-      "command": "C:\\Users\\marce\\AppData\\Local\\Temp\\lohra-w701\\node-v20.20.2-win-x64\\node.exe C:\\Users\\marce\\AppData\\Local\\Temp\\lohra-w701\\node-v20.20.2-win-x64\\node_modules\\npm\\bin\\npm-cli.js run typecheck",
+      "command": "<TEMP>\\lohra-w701\\node-v20.20.2-win-x64\\node.exe <TEMP>\\lohra-w701\\node-v20.20.2-win-x64\\node_modules\\npm\\bin\\npm-cli.js run typecheck",
       "exitCode": 0,
       "timedOut": false,
       "timeoutMs": 120000,
@@ -36,7 +36,7 @@
     },
     {
       "gate": "lint",
-      "command": "C:\\Users\\marce\\AppData\\Local\\Temp\\lohra-w701\\node-v20.20.2-win-x64\\node.exe C:\\Users\\marce\\AppData\\Local\\Temp\\lohra-w701\\node-v20.20.2-win-x64\\node_modules\\npm\\bin\\npm-cli.js run lint",
+      "command": "<TEMP>\\lohra-w701\\node-v20.20.2-win-x64\\node.exe <TEMP>\\lohra-w701\\node-v20.20.2-win-x64\\node_modules\\npm\\bin\\npm-cli.js run lint",
       "exitCode": 0,
       "timedOut": false,
       "timeoutMs": 300000,
@@ -50,7 +50,7 @@
     },
     {
       "gate": "format:check",
-      "command": "C:\\Users\\marce\\AppData\\Local\\Temp\\lohra-w701\\node-v20.20.2-win-x64\\node.exe C:\\Users\\marce\\AppData\\Local\\Temp\\lohra-w701\\node-v20.20.2-win-x64\\node_modules\\npm\\bin\\npm-cli.js run format:check",
+      "command": "<TEMP>\\lohra-w701\\node-v20.20.2-win-x64\\node.exe <TEMP>\\lohra-w701\\node-v20.20.2-win-x64\\node_modules\\npm\\bin\\npm-cli.js run format:check",
       "exitCode": 1,
       "timedOut": false,
       "timeoutMs": 300000,
@@ -64,7 +64,7 @@
     },
     {
       "gate": "test",
-      "command": "C:\\Users\\marce\\AppData\\Local\\Temp\\lohra-w701\\node-v20.20.2-win-x64\\node.exe C:\\Users\\marce\\AppData\\Local\\Temp\\lohra-w701\\node-v20.20.2-win-x64\\node_modules\\npm\\bin\\npm-cli.js test -- --maxWorkers=4",
+      "command": "<TEMP>\\lohra-w701\\node-v20.20.2-win-x64\\node.exe <TEMP>\\lohra-w701\\node-v20.20.2-win-x64\\node_modules\\npm\\bin\\npm-cli.js test -- --maxWorkers=4",
       "exitCode": 1,
       "timedOut": false,
       "timeoutMs": 360000,
@@ -78,7 +78,7 @@
     },
     {
       "gate": "mutations:all",
-      "command": "C:\\Users\\marce\\AppData\\Local\\Temp\\lohra-w701\\node-v20.20.2-win-x64\\node.exe C:\\Users\\marce\\AppData\\Local\\Temp\\lohra-w701\\node-v20.20.2-win-x64\\node_modules\\npm\\bin\\npm-cli.js run mutations:all",
+      "command": "<TEMP>\\lohra-w701\\node-v20.20.2-win-x64\\node.exe <TEMP>\\lohra-w701\\node-v20.20.2-win-x64\\node_modules\\npm\\bin\\npm-cli.js run mutations:all",
       "exitCode": 1,
       "timedOut": false,
       "timeoutMs": 180000,
@@ -92,7 +92,7 @@
     },
     {
       "gate": "prova",
-      "command": "C:\\Users\\marce\\AppData\\Local\\Temp\\lohra-w701\\node-v20.20.2-win-x64\\node.exe C:\\Users\\marce\\AppData\\Local\\Temp\\lohra-w701\\node-v20.20.2-win-x64\\node_modules\\npm\\bin\\npm-cli.js run prova -- cancel-quiescente",
+      "command": "<TEMP>\\lohra-w701\\node-v20.20.2-win-x64\\node.exe <TEMP>\\lohra-w701\\node-v20.20.2-win-x64\\node_modules\\npm\\bin\\npm-cli.js run prova -- cancel-quiescente",
       "exitCode": 1,
       "timedOut": false,
       "timeoutMs": 180000,
