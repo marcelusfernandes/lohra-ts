@@ -1,0 +1,24 @@
+W7 / SHA fa8aa4a572a8d84c3eea128a7ce67ab4eac796e1
+Comando em cada clone com Node portátil e env/home isolados:
+<node-dir>/npm.cmd run pack:check
+
+Node 20.20.2: exit 1.
+Saída sanitizada: Error: PACK_COMMAND_FAILED:npm:unknown:null
+  at command (scripts/pack-check.ts:93)
+  at main (scripts/pack-check.ts:258)
+Node 22.23.3: exit 1.
+Saída sanitizada: Error: PACK_COMMAND_FAILED:npm:unknown:undefined
+  at command (scripts/pack-check.ts:93)
+  at main (scripts/pack-check.ts:258)
+
+O primeiro comando interno do pack-check em scripts/pack-check.ts:258 é
+command("npm", ["pack", ...]); não chega ao consumidor interno.
+Sonda isolada Node20:
+  node -e 'const r=require("node:child_process").spawnSync("npm",["--version"],{encoding:"utf8"});console.log(JSON.stringify({status:r.status,signal:r.signal,error:r.error?.code,stderr:r.stderr}))'
+  saída: {"status":null,"signal":null,"error":"ENOENT","stderr":null}; processo-sonda exit 0.
+  node -e 'const r=require("node:child_process").spawnSync("npm.cmd",["--version"],{encoding:"utf8"});console.log(JSON.stringify({status:r.status,signal:r.signal,error:r.error?.code,stderr:r.stderr,stdout:r.stdout}))'
+  saída: {"status":null,"signal":null,"error":"EINVAL","stderr":null,"stdout":null}; processo-sonda exit 0.
+Conclusão limitada: falha do harness na invocação de npm, não falha do tarball.
+scripts/pack-check.ts:54 espera pty.node para win32-x64; o pacote instalado
+contém conpty.node. Este segundo desajuste é inferido de código e artefato,
+pois o harness não avançou até essa asserção.

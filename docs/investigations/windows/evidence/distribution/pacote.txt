@@ -1,0 +1,22 @@
+W7 / 2026-10-02 / Windows 11 Pro x64 / SHA fa8aa4a572a8d84c3eea128a7ce67ab4eac796e1
+Dois clones independentes em <TEMP>/lohra-w707/source-20 e source-22.
+Ambos: git -c core.protectNTFS=false clone https://github.com/marcelusfernandes/lohra-ts.git <source>
+Clone exit 0; HEAD como acima. O clone padrão falha (W1), não medido como PASS aqui.
+
+Em cada clone: PATH iniciado pelo Node ZIP portátil apropriado; HOME,
+USERPROFILE, LOHRA_HOME, CODEX_HOME, npm_config_cache e npm_config_prefix
+temporários e separados por versão.
+Comando: <node-dir>/npm.cmd ci
+Exit 0 nos dois clones (177 pacotes); prepare reportou falha de hooks exit null,
+como em W1, sem impedir npm ci.
+Comando: <node-dir>/npm.cmd run build
+Saída: > tsc -p tsconfig.build.json; exit 0 nos dois.
+Test-Path dist/cli.js: True nos dois.
+Test-Path dist/index.js: False nos dois.
+Test-Path dist/index.d.ts: False nos dois.
+
+Comando: com LOHRA_SKIP_PREPARE=1, <node-dir>/npm.cmd pack --json --pack-destination <TEMP>/lohra-w707/pack-<versão>
+Exit 0 nos dois. Arquivo: lohra-ts-0.0.13.tgz.
+SHA-256 (Get-FileHash -Algorithm SHA256) nos dois:
+0cd55204309984263eb06ee860b36c41ad7ce71b42076642965b55ce98246f3f
+Tamanho: 842820 bytes nos dois. O mesmo SHA liga o consumidor ao artefato medido.

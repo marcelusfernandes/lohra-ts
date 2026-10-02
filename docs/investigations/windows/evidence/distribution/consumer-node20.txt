@@ -1,0 +1,30 @@
+W7 / Node v20.20.2, npm 10.8.2 / fonte fa8aa4a572a8d84c3eea128a7ce67ab4eac796e1
+Consumidor sem .git em <TEMP>/lohra-w707/consumer-20. HOME, USERPROFILE,
+LOHRA_HOME, CODEX_HOME, cache e prefixo npm temporários; PATH com Node20 primeiro.
+O log da primeira sonda exploratória sem LOHRA_HOME foi descartado e sobrescrito;
+somente a repetição isolada entra nesta evidência.
+
+Comando: <node20>/npm.cmd install --prefix <consumer-20> <pack-20>/lohra-ts-0.0.13.tgz
+Saída relevante: added 42 packages in 8s; exit 0.
+Arquivos gerados: node_modules/.bin/lohra, lohra.cmd, lohra.ps1.
+Comando PowerShell: & <consumer-20>/node_modules/.bin/lohra.ps1 --version
+Saída: lohra 0.0.13; exit 0.
+Comando cmd: cmd /d /c '"<consumer-20>/node_modules/.bin/lohra.cmd" --version'
+Saída: lohra 0.0.13; exit 0.
+Comando: & <consumer-20>/node_modules/.bin/lohra.ps1 doctor --json
+Saída resumida do JSON (não foi guardado dump): ok=false, environment.platform=win32,
+environment.home=<LOHRA_HOME temporário>, 11 checks; exit 2. Sem provedor configurado.
+Checks não-ok (somente nomes/estados): provider=fail, workflow_policy.json=warn.
+environment.codex_home=<CODEX_HOME temporário> confirmado na repetição isolada.
+
+Comando: node -e 'const{createRequire}=require("node:module");const r=createRequire(require.resolve("lohra-ts/package.json"));const D=r("better-sqlite3");const d=new D(":memory:");console.log(JSON.stringify({sqlite:d.prepare("select 42 as n").get().n}));d.close();const p=r("node-pty");let data="";const c=p.spawn("cmd.exe",["/c","echo","pty-ok"],{name:"xterm",cols:80,rows:24,cwd:process.cwd(),env:process.env});const t=setTimeout(()=>{console.log("PTY_TIMEOUT");c.kill();process.exit(99)},5000);c.onData(x=>data+=x);c.onExit(e=>{clearTimeout(t);console.log(JSON.stringify({ptyExit:e.exitCode,expected:data.includes("pty-ok")}));process.exit(e.exitCode)})'
+Saída: {"sqlite":42}; {"ptyExit":0,"expected":true}; exit 0.
+
+Comando: node --input-type=module -e 'import("lohra-ts").then(()=>console.log("IMPORT_OK")).catch(e=>{console.error(e.code+":"+e.message);process.exit(1)})'
+Saída sanitizada: ERR_MODULE_NOT_FOUND: Cannot find package '<consumer-20>/node_modules/lohra-ts/dist/index.js'; exit 1.
+Test-Path node_modules/lohra-ts/dist/index.js: False.
+Test-Path node_modules/lohra-ts/dist/index.d.ts: False.
+
+Comando: & <consumer-20>/node_modules/.bin/lohra.ps1 update --check
+Saída: lohra-ts 0.0.13 is up to date.; exit 0.
+Test-Path .git no consumidor: False.

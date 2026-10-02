@@ -1,0 +1,27 @@
+W7 / Node v22.23.3, npm 10.9.9 / fonte fa8aa4a572a8d84c3eea128a7ce67ab4eac796e1
+Consumidor sem .git em <TEMP>/lohra-w707/consumer-22. HOME, USERPROFILE,
+LOHRA_HOME, CODEX_HOME, cache e prefixo npm temporários; PATH com Node22 primeiro.
+
+Comando: <node22>/npm.cmd install --prefix <consumer-22> <pack-22>/lohra-ts-0.0.13.tgz
+Saída relevante: added 42 packages; exit 0.
+Arquivos gerados: node_modules/.bin/lohra, lohra.cmd, lohra.ps1.
+Comando PowerShell: & <consumer-22>/node_modules/.bin/lohra.ps1 --version
+Saída: lohra 0.0.13; exit 0.
+Comando cmd: cmd /d /c '"<consumer-22>/node_modules/.bin/lohra.cmd" --version'
+Saída: lohra 0.0.13; exit 0.
+Comando: & <consumer-22>/node_modules/.bin/lohra.ps1 doctor --json
+Saída resumida do JSON: ok=false, environment.platform=win32,
+environment.home=<LOHRA_HOME temporário>, 11 checks; exit 2. Sem provedor configurado.
+environment.codex_home=<CODEX_HOME temporário> confirmado na repetição isolada.
+
+Comando: node -e 'const{createRequire}=require("node:module");const r=createRequire(require.resolve("lohra-ts/package.json"));const D=r("better-sqlite3");const d=new D(":memory:");console.log(JSON.stringify({sqlite:d.prepare("select 42 as n").get().n}));d.close();const p=r("node-pty");let data="";const c=p.spawn("cmd.exe",["/c","echo","pty-ok"],{name:"xterm",cols:80,rows:24,cwd:process.cwd(),env:process.env});const t=setTimeout(()=>{console.log("PTY_TIMEOUT");c.kill();process.exit(99)},5000);c.onData(x=>data+=x);c.onExit(e=>{clearTimeout(t);console.log(JSON.stringify({ptyExit:e.exitCode,expected:data.includes("pty-ok")}));process.exit(e.exitCode)})'
+Saída: {"sqlite":42}; {"ptyExit":0,"expected":true}; exit 0.
+
+Comando: node --input-type=module -e 'import("lohra-ts").then(()=>console.log("IMPORT_OK")).catch(e=>{console.error(e.code+":"+e.message);process.exit(1)})'
+Saída sanitizada: ERR_MODULE_NOT_FOUND: Cannot find package '<consumer-22>/node_modules/lohra-ts/dist/index.js'; exit 1.
+Test-Path node_modules/lohra-ts/dist/index.js: False.
+Test-Path node_modules/lohra-ts/dist/index.d.ts: False.
+
+Comando: & <consumer-22>/node_modules/.bin/lohra.ps1 update --check
+Saída: lohra-ts 0.0.13 is up to date.; exit 0.
+Test-Path .git no consumidor: False.
