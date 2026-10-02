@@ -1,0 +1,36 @@
+W6, 2026-10-02, Windows 11 Pro x64, SHA fa8aa4a572a8d84c3eea128a7ce67ab4eac796e1.
+Node portátil oficial v20.20.2 e v22.23.3; dist de clones do mesmo SHA.
+Comando geral: <node.exe> <TEMP>/lohra-w706-20261002/cron-probe.mjs <mode> <TEMP>/lohra-w706-20261002/scenario-<node>-<mode>
+Cada processo com LOHRA_CRON_MODULE_ROOT=<clone daquele Node>, LOHRA_HOME,
+CODEX_HOME, HOME e USERPROFILE sob a raiz temporária; GetFullPath validou
+confinamento antes de criar cada cenário. Fonte exata em procedure.md.
+Todos os comandos abaixo retornaram exit 0; saídas reduzidas a campos de
+resultado, sem caminhos pessoais.
+
+Node20:
+single: result ok=true; lastRunAt=100; diagnostics=[]; CronTool list tem last_run_at.
+failure: result ok=false; lastRunAt=100; diagnostics=[]; CronTool list não contém STUB_SENTINEL.
+race: workers PID 46876/42552, ambos code=0/result ok=true; runCount=2;
+distinctPids=2; lastRunAt=100.
+shutdown: calls=1; waits=1; stopped=true.
+tick-error: listCalls=2; waits=1; diagnostics=[]; returnedNormally=true.
+crash: childPid=5472; elapsedMs=10024; lockPersisted=true;
+error='cron store lock timed out waiting for <HOME>/cron/jobs.json.lock';
+afterManualRemoval=0 (store.list voltou).
+Comando CLI: com LOHRA_HOME apontando para scenario-20-failure,
+<node20> <clone20>/dist/cli.js cron list
+Saída: <JOB_ID> [on] probe (once=100.0); exit 0. Sem status/cause/last_run_at.
+
+Node22:
+single: result ok=true; lastRunAt=100; diagnostics=[]; CronTool list tem last_run_at.
+failure: result ok=false; lastRunAt=100; diagnostics=[]; CronTool list não contém STUB_SENTINEL.
+race: workers PID 43612/64624, ambos code=0/result ok=true; runCount=2;
+distinctPids=2; lastRunAt=100.
+shutdown: calls=1; waits=1; stopped=true.
+tick-error: listCalls=2; waits=1; diagnostics=[]; returnedNormally=true.
+crash: childPid=41872; elapsedMs=10031; lockPersisted=true;
+error='cron store lock timed out waiting for <HOME>/cron/jobs.json.lock';
+afterManualRemoval=0 (store.list voltou).
+
+Primeira execução exploratória descartada por isolamento incorreto;
+nenhum resultado dessa execução está nesta tabela.
