@@ -1,0 +1,109 @@
+{
+  "baselineSha": "fa8aa4a572a8d84c3eea128a7ce67ab4eac796e1",
+  "platform": "Windows 11 x64 native",
+  "node": "v20.20.2",
+  "isolatedProfile": true,
+  "noProviderCalls": true,
+  "corpus": {
+    "status": "FAIL",
+    "exitCode": 1,
+    "timedOut": false,
+    "filesTotal": 7,
+    "filesPassed": 6,
+    "filesFailed": 1,
+    "testsTotal": 89,
+    "testsPassed": 87,
+    "testsFailed": 2,
+    "failedTestFile": "tests/workflow-service-durability.test.ts",
+    "failure": "EBUSY unlink state.db at rmSync cleanup, lines 1460 and 2193; afterEach repeats",
+    "stdoutSha256": "56789c117be4046febcc4c869c6a5711fae12bb41c2fa2f671aefef6c5405b1a",
+    "stderrSha256": "62c18e1feb7e8cc70465a20a5e0dbc12674446c30a4bd7f6793b470cb0862093"
+  },
+  "lease": {
+    "status": "PASS",
+    "ownerFence": 1,
+    "competingFence": null,
+    "takeoverFence": 2,
+    "oldOwnerWriteAccepted": false,
+    "oldOwnerReleaseAccepted": false,
+    "finalRowStatus": "complete",
+    "finalRowOwner": "procB",
+    "warning": "STALE_FENCE_WRITE",
+    "ownerExitCode": 0,
+    "contenderExitCode": 0,
+    "takeoverExitCode": 0
+  },
+  "crashResume": {
+    "status": "PASS",
+    "crashSignal": "SIGKILL",
+    "beforeStatus": "running",
+    "afterCrashStatus": "running",
+    "afterResumeStatus": "complete",
+    "cachedBefore": ["first"],
+    "cachedAfter": ["first", "second"],
+    "resumedSecondSpawns": 1,
+    "resumedExitCode": 0,
+    "auditEvents": [
+      "segment.completed",
+      "audit.gap",
+      "cache.replayed",
+      "segment.completed",
+      "workflow.done"
+    ]
+  },
+  "supervision": [
+    {
+      "mode": "cancel",
+      "status": "PASS",
+      "exitCode": 0,
+      "durableStatus": "cancelled",
+      "tokensIn": 3,
+      "tokensOut": 1,
+      "partialLeaves": 1,
+      "uncertainLeaves": 1,
+      "residualProcess": false,
+      "segmentCompletion": [
+        {
+          "status": "cancelled",
+          "reason": "cancelled",
+          "terminal": true
+        }
+      ]
+    },
+    {
+      "mode": "steer",
+      "status": "PASS",
+      "exitCode": 0,
+      "durableStatus": "complete",
+      "tokensIn": 3,
+      "tokensOut": 1,
+      "partialLeaves": 1,
+      "uncertainLeaves": 1,
+      "residualProcess": false,
+      "segmentCompletion": [
+        {
+          "status": "complete",
+          "terminal": true
+        }
+      ]
+    },
+    {
+      "mode": "shutdown",
+      "status": "PASS",
+      "exitCode": 0,
+      "durableStatus": "cancelled",
+      "tokensIn": 3,
+      "tokensOut": 1,
+      "partialLeaves": 1,
+      "uncertainLeaves": 1,
+      "residualProcess": false,
+      "segmentCompletion": [
+        {
+          "status": "interrupted",
+          "reason": "signal",
+          "terminal": true
+        }
+      ]
+    }
+  ]
+}
