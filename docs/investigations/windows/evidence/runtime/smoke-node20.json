@@ -1,0 +1,132 @@
+{
+  "environment": {
+    "node": "20.20.2",
+    "sha": "fa8aa4a572a8d84c3eea128a7ce67ab4eac796e1",
+    "isolation": "LOHRA_HOME,CODEX_HOME,HOME,USERPROFILE temp; local stub only"
+  },
+  "results": [
+    {
+      "name": "version",
+      "node": "20.20.2",
+      "exit": 0,
+      "output": "lohra 0.0.13"
+    },
+    {
+      "name": "doctor",
+      "node": "20.20.2",
+      "exit": 0,
+      "json": true
+    },
+    {
+      "name": "chat-tool",
+      "node": "20.20.2",
+      "exit": 0,
+      "json": true,
+      "completed": true,
+      "session": true,
+      "tool": "read_file",
+      "toolResultHasMarker": true,
+      "upstreamCalls": 2
+    },
+    {
+      "name": "chat-resume",
+      "node": "20.20.2",
+      "exit": 0,
+      "completed": true,
+      "sameSession": true,
+      "roles": "system,user,assistant,tool,assistant,user",
+      "systemPreserved": true
+    },
+    {
+      "name": "chat-compaction",
+      "node": "20.20.2",
+      "exit": 0,
+      "completed": true,
+      "compaction": {
+        "summarized_count": 18,
+        "kept_count": 8,
+        "estimate_before": 11445,
+        "estimate_after": 7025
+      },
+      "summaryCalls": 1,
+      "stderrEvent": true,
+      "error": null
+    },
+    {
+      "name": "gateway-http-auth",
+      "node": "20.20.2",
+      "started": true,
+      "noToken": 401,
+      "withToken": 200,
+      "statusOk": true
+    },
+    {
+      "name": "gateway-ws-auth",
+      "node": "20.20.2",
+      "badCloseCode": 4401
+    },
+    {
+      "name": "gateway-tool-events",
+      "node": "20.20.2",
+      "accepted": "streaming",
+      "completeStatus": "complete",
+      "events": [
+        "gateway.ready",
+        "message.start",
+        "tool.start",
+        "tool.complete",
+        "message.delta",
+        "message.complete"
+      ],
+      "toolMarker": true
+    },
+    {
+      "name": "gateway-interrupt-resume",
+      "node": "20.20.2",
+      "interruptOk": true,
+      "interrupted": "interrupted",
+      "acceptedAgain": "streaming",
+      "completedAgain": "complete"
+    },
+    {
+      "name": "gateway-shutdown",
+      "node": "20.20.2",
+      "exit": null,
+      "signal": "SIGTERM",
+      "portClosed": true
+    },
+    {
+      "name": "serve-routes",
+      "node": "20.20.2",
+      "health": 200,
+      "healthOk": true,
+      "models": 200,
+      "modelCount": 0,
+      "chat": 200,
+      "chatText": "STUB-FINAL",
+      "responses": 200,
+      "responsesStatus": "completed",
+      "responsesError": null
+    },
+    {
+      "name": "serve-occupied",
+      "node": "20.20.2",
+      "exit": 2,
+      "addressInUse": true
+    },
+    {
+      "name": "serve-shutdown",
+      "node": "20.20.2",
+      "exit": null,
+      "signal": "SIGTERM",
+      "portClosed": true
+    }
+  ],
+  "requestCounts": {
+    "total": 21,
+    "summary": 1,
+    "tool": 3,
+    "hold": 1,
+    "stream": 4
+  }
+}
