@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -129,6 +129,28 @@ describe("sandboxDispatch — fs", () => {
       "ERROR: path is outside the workflow working scope (sandbox denied)",
     );
     expect(existsSync(target)).toBe(false);
+  });
+
+  it("refuses a raw parent segment before symlink traversal can leave the root", () => {
+    const parent = realWorkspace();
+    const root = join(parent, "run");
+    const outside = join(parent, "outside");
+    const child = join(outside, "child");
+    mkdirSync(root);
+    mkdirSync(outside);
+    mkdirSync(child);
+    symlinkSync(child, join(root, "link"), "dir");
+    const rawPath = `${join(root, "link")}${sep}..${sep}probe.txt`;
+    const dispatch = sandboxDispatch((_name, args) => writeFileTool(args), {
+      workingRoot: root,
+      policy: { fsAllow: [], egressAllow: [] },
+      tainted: false,
+    });
+    expect(dispatch("write_file", { path: rawPath, content: "probe" })).toBe(
+      "ERROR: path is outside the workflow working scope (sandbox denied)",
+    );
+    expect(existsSync(join(root, "probe.txt"))).toBe(false);
+    expect(existsSync(join(outside, "probe.txt"))).toBe(false);
   });
 
   it("allows reads/writes inside the working root and denies outside with exact text", () => {
