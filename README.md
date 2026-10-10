@@ -53,6 +53,74 @@ Atualizar uma instalação existente: `lohra update` (ver "Self-update"
 abaixo). Notas de cada versão: [`CHANGELOG.md`](CHANGELOG.md); como uma
 release é cortada: [`docs/release.md`](docs/release.md).
 
+## Biblioteca headless
+
+A entrada `import "lohra-ts"` expõe somente `ConversationRuntime`,
+`SqliteConversationRepository`, `SessionRepository` e `openStateDatabase` como
+valores. Os tipos públicos são `ConversationRuntimeOptions`,
+`ConversationRepository`, `ModelTransport`, `ModelRequest`, `ToolDispatcher`,
+`ConversationRuntimeEvent`, `ConversationTurnResult`, `NormalizedResponse`,
+`SystemBands` e `StateConnection`. O import não abre o banco, lê credenciais,
+inicia a CLI ou conecta a um provedor. O consumidor escolhe explicitamente o
+caminho do estado, injeta transporte e ferramentas e fecha a conexão ao fim.
+
+Este exemplo faz um turno offline com resposta determinística; substitua o
+transporte pelo seu adaptador de modelo para uso real. Após instalar o pacote
+localmente, execute como módulo ESM:
+
+```js
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
+import {
+  ConversationRuntime,
+  SessionRepository,
+  SqliteConversationRepository,
+  openStateDatabase,
+} from "lohra-ts";
+
+const connection = openStateDatabase(join(process.cwd(), ".lohra", "state.db"));
+try {
+  const repository = new SqliteConversationRepository(
+    new SessionRepository(connection.database, undefined, connection.ftsEnabled),
+  );
+  const transport = {
+    async complete() {
+      return {
+        content: "resposta offline",
+        finishReason: "stop",
+        toolCalls: [],
+        reasoning: null,
+        usage: null,
+        providerData: null,
+      };
+    },
+    close() {},
+  };
+  const runtime = new ConversationRuntime({
+    repository,
+    transport,
+    promptSnapshot: () => "Responda com clareza.",
+    eventSink: (event) => console.error(event.type),
+    idSource: randomUUID,
+    clock: () => Date.now() / 1_000,
+    maxIterations: 2,
+  });
+  const turn = await runtime.runTurn({
+    input: "Olá",
+    provider: "offline",
+    model: "deterministic",
+    cwd: process.cwd(),
+  });
+  console.log(turn.response.content);
+} finally {
+  connection.close();
+}
+```
+
+`ModelTransport` e `ToolDispatcher` são portas de injeção; este exemplo não
+registra ferramentas nem faz chamadas de rede. Para retomar uma sessão, passe
+`turn.sessionId` em `runTurn` com o mesmo repositório de estado.
+
 Para desenvolver a partir do checkout:
 
 ```bash
