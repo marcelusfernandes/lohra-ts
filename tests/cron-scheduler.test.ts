@@ -84,6 +84,67 @@ describe("tick", () => {
     expect(store.get(job.id)?.last_run_at).toBe(100);
   });
 
+  it("diagnoses a callback failure by job and phase without exposing its message or prompt", async () => {
+    const secret = "PROMPT_SECRET_SENTINEL_761";
+    const job = store.add({ name: "n", prompt: secret, type: "once", value: 100 });
+    const diagnosed: string[] = [];
+    const failure = Object.assign(new Error(`provider key=${secret}`), { code: "ETIMEDOUT" });
+    const results = await tick(store, () => Promise.reject(failure), {
+      now: 100,
+      diagnostics: (message) => diagnosed.push(message),
+    });
+    expect(results).toEqual([{ jobId: job.id, ok: false }]);
+    expect(store.get(job.id)?.last_run_at).toBe(100);
+    expect(diagnosed).toEqual([`cron job ${job.id} phase=callback cause=ETIMEDOUT`]);
+    expect(diagnosed.join(" ")).not.toContain(secret);
+  });
+
+  it("reports an uncoded callback failure when diagnostics is omitted and does not retry once", async () => {
+    const secret = "UNCODED_SECRET_SENTINEL_761";
+    const job = store.add({ name: "n", prompt: secret, type: "once", value: 100 });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      expect(await tick(store, () => Promise.reject(new Error(secret)), { now: 100 })).toEqual([
+        { jobId: job.id, ok: false },
+      ]);
+      expect(warning).toHaveBeenCalledWith(`cron job ${job.id} phase=callback cause=Error`);
+      expect(warning.mock.calls.flat().join(" ")).not.toContain(secret);
+      expect(await tick(store, recorder([]), { now: 100 })).toEqual([]);
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  it("names a failed claim with its job id, then propagates the store error", async () => {
+    const secret = "STORE_SECRET_SENTINEL_761";
+    const job = store.add({ name: "n", prompt: secret, type: "once", value: 100 });
+    const diagnosed: string[] = [];
+    const failure = Object.assign(new Error(secret), { code: "EIO" });
+    vi.spyOn(store, "tryClaimDue").mockImplementationOnce(() => {
+      throw failure;
+    });
+    await expect(
+      tick(store, recorder([]), { now: 100, diagnostics: (message) => diagnosed.push(message) }),
+    ).rejects.toBe(failure);
+    expect(diagnosed).toEqual([`cron job ${job.id} phase=claim cause=EIO`]);
+    expect(diagnosed.join(" ")).not.toContain(secret);
+    expect(store.get(job.id)?.last_run_at).toBeNull();
+  });
+
+  it("does not swallow a failed diagnostics sink after a callback failure", async () => {
+    const job = store.add({ name: "n", prompt: "p", type: "once", value: 100 });
+    const sinkFailure = new Error("diagnostics sink unavailable");
+    await expect(
+      tick(store, alwaysFails, {
+        now: 100,
+        diagnostics: () => {
+          throw sinkFailure;
+        },
+      }),
+    ).rejects.toBe(sinkFailure);
+    expect(store.get(job.id)?.last_run_at).toBe(100);
+  });
+
   it("persists the claim before invoking the callback and passes the pre-claim snapshot", async () => {
     const job = store.add({ name: "n", prompt: "p", type: "once", value: 100 });
     const seen: Array<{ persisted: number | null; received: number | null }> = [];
@@ -225,5 +286,88 @@ describe("runSchedulerLoop", () => {
       },
     });
     expect(ticks).toBe(2);
+  });
+
+  it("reports a store failure with safe cause and continues for a bounded next tick", async () => {
+    const secret = "STORE_LOOP_SECRET_SENTINEL_761";
+    const stop = new ManualStop();
+    const diagnosed: string[] = [];
+    const list = store.list.bind(store);
+    let calls = 0;
+    vi.spyOn(store, "list").mockImplementation(() => {
+      calls += 1;
+      if (calls === 2) throw Object.assign(new Error(secret), { code: "EACCES" });
+      return list();
+    });
+    let waits = 0;
+    await runSchedulerLoop({
+      store,
+      runJob: recorder([]),
+      stop,
+      now: () => 100,
+      wait: () => {
+        waits += 1;
+        if (waits === 2) stop.trigger();
+        return Promise.resolve();
+      },
+      diagnostics: (message) => diagnosed.push(message),
+    });
+    expect(calls).toBe(3);
+    expect(waits).toBe(2);
+    expect(diagnosed).toEqual(["cron scheduler phase=tick cause=EACCES"]);
+    expect(diagnosed.join(" ")).not.toContain(secret);
+  });
+
+  it("uses the default warning sink when loop diagnostics is omitted", async () => {
+    const stop = new ManualStop();
+    const list = store.list.bind(store);
+    let calls = 0;
+    vi.spyOn(store, "list").mockImplementation(() => {
+      calls += 1;
+      if (calls === 2) throw new Error("PRIVATE_LOOP_MESSAGE_761");
+      return list();
+    });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await runSchedulerLoop({
+        store,
+        runJob: recorder([]),
+        stop,
+        wait: () => {
+          stop.trigger();
+          return Promise.resolve();
+        },
+      });
+      expect(warning).toHaveBeenCalledWith("cron scheduler phase=tick cause=Error");
+      expect(warning.mock.calls.flat().join(" ")).not.toContain("PRIVATE_LOOP_MESSAGE_761");
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  it("reports a fixed CronStoreError cause without disclosing its path", async () => {
+    const stop = new ManualStop();
+    const list = store.list.bind(store);
+    let calls = 0;
+    vi.spyOn(store, "list").mockImplementation(() => {
+      calls += 1;
+      if (calls === 2) {
+        throw new CronStoreError("PRIVATE_STORE_PATH_761", "content is not valid JSON");
+      }
+      return list();
+    });
+    const diagnosed: string[] = [];
+    await runSchedulerLoop({
+      store,
+      runJob: recorder([]),
+      stop,
+      wait: () => {
+        stop.trigger();
+        return Promise.resolve();
+      },
+      diagnostics: (message) => diagnosed.push(message),
+    });
+    expect(diagnosed).toEqual(["cron scheduler phase=tick cause=cron_store_invalid_json"]);
+    expect(diagnosed.join(" ")).not.toContain("PRIVATE_STORE_PATH_761");
   });
 });
