@@ -18,6 +18,7 @@ import {
   stringifyJsonPreservingNumbers,
 } from "../serialization/json-numbers.js";
 import { CronStoreError, CronValidationError } from "./errors.js";
+import { isDue } from "./schedule.js";
 import { withCronStoreGuard } from "./store-guard.js";
 import { validateJob } from "./validate.js";
 
@@ -220,9 +221,12 @@ function assertNoLegacyLock(path: string): void {
 }
 
 /** Hold the recoverable cross-process guard through read, mutation and atomic rename. */
-function withStoreLock<T extends CronJob[] | CronJob | boolean>(path: string, fn: () => T): T {
+function withStoreLock<T extends CronJob[] | CronJob | boolean | null>(
+  path: string,
+  fn: () => T,
+): T {
   assertNoLegacyLock(path);
-  return withCronStoreGuard<CronJob[] | CronJob | boolean>(path, () => {
+  return withCronStoreGuard<CronJob[] | CronJob | boolean | null>(path, () => {
     // Catch an old writer that acquired its lock while we waited for the guard.
     assertNoLegacyLock(path);
     return fn();
@@ -284,6 +288,21 @@ export class CronStore {
 
   public markRun(jobId: string, when: number): boolean {
     return this.mutate(jobId, (job) => ({ ...job, last_run_at: when }));
+  }
+
+  /** Return the pre-claim snapshot only after its occurrence marker is persisted. */
+  public tryClaimDue(jobId: string, now: number): CronJob | null {
+    return withStoreLock(this.path, () => {
+      const jobs = readJobs(this.path);
+      const index = jobs.findIndex((job) => job.id === jobId);
+      if (index < 0) return null;
+      const job = jobs[index] as CronJob;
+      if (!isDue(job, { now })) return null;
+      const out = jobs.slice();
+      out[index] = { ...job, last_run_at: now };
+      writeJobsAtomic(this.path, out);
+      return job;
+    });
   }
 
   private mutate(jobId: string, change: (job: CronJob) => CronJob): boolean {
