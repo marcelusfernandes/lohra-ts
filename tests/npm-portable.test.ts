@@ -18,6 +18,13 @@ function fixture(): { readonly root: string; readonly npmCli: string } {
 }
 
 describe("npm portable subprocess", () => {
+  it("runs npm from the active Node installation", () => {
+    const result = runNpmSync(["--version"], { timeoutMs: 10_000 });
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
   it("resolves the npm CLI beside the current Node installation on Windows and Unix", () => {
     const { root } = fixture();
     try {
