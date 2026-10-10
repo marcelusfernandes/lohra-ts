@@ -153,6 +153,22 @@ describe("sandboxDispatch — fs", () => {
     expect(existsSync(join(outside, "probe.txt"))).toBe(false);
   });
 
+  it("propagates unexpected filesystem validation errors with their cause", () => {
+    const root = realWorkspace();
+    const dispatch = sandboxDispatch(base, {
+      workingRoot: root,
+      policy: { fsAllow: [], egressAllow: [] },
+      tainted: false,
+    });
+    let error: unknown;
+    try {
+      dispatch("write_file", { path: `${root}${sep}\0bad`, content: "x" });
+    } catch (cause) {
+      error = cause;
+    }
+    expect(error).toMatchObject({ code: "ERR_INVALID_ARG_VALUE" });
+  });
+
   it("allows reads/writes inside the working root and denies outside with exact text", () => {
     const root = workspace();
     const dispatch = sandboxDispatch(base, {

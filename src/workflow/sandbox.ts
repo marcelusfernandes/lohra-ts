@@ -59,6 +59,11 @@ export type ToolDispatchLike = (name: string, args: Readonly<Record<string, unkn
 const FS_TOOLS: ReadonlySet<string> = new Set(["read_file", "write_file"]);
 const EGRESS_TOOLS: ReadonlySet<string> = new Set(["web_fetch", "web_search"]);
 
+function isUnresolvablePath(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP";
+}
+
 /**
  * Resolve `target` against the filesystem as far as the filesystem knows it:
  * walk up to the NEAREST EXISTING ancestor, resolve that for real, and re-attach
@@ -81,7 +86,10 @@ function resolvedAgainstFilesystem(target: string): string | null {
       // resolve such a link, deny instead of treating it as an absent leaf.
       lstatSync(current);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return null;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        if (isUnresolvablePath(error)) return null;
+        throw error;
+      }
       const parent = dirname(current);
       if (parent === current) return null;
       pending.unshift(basename(current));
@@ -91,8 +99,9 @@ function resolvedAgainstFilesystem(target: string): string | null {
     try {
       const real = realpathSync(current);
       return pending.length === 0 ? real : resolve(real, ...pending);
-    } catch {
-      return null;
+    } catch (error) {
+      if (isUnresolvablePath(error)) return null;
+      throw error;
     }
   }
 }
