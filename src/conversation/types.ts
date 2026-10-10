@@ -162,7 +162,7 @@ export type ConversationRuntimeEvent = Readonly<{
     /** Issue #587 acréscimo item 4 / AC: the injected `options.summarize`
      * (an `AuxClient`'s, normally) threw -- the turn fell open to the
      * default summarizer (this turn's own transport/model) via
-     * `summarizeWithFallback` (`src/agent/aux.ts`) instead of failing.
+     * `summarizeWithFallback` (`src/agent/auxiliary.ts`) instead of failing.
      * Fail-open, never silent: `code` carries the failure's constructor
      * name, same convention as `model.request.interrupted` below. */
     | "compaction.aux_fallback"

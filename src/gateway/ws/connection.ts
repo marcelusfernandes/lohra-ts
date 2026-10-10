@@ -284,7 +284,7 @@ async function handlePromptSubmit(
       // adds a third: `compaction.aux_fallback` fires when a turn's
       // injected `deps.summarize` (an `AuxClient`'s) throws and the turn
       // falls open to its own transport (`summarizeWithFallback`,
-      // `src/agent/aux.ts`) -- before this issue the degradation was
+      // `src/agent/auxiliary.ts`) -- before this issue the degradation was
       // silent on this socket (invariant 2), visible only on the CLI's
       // stderr (`commands/chat.ts`). Unlike the other two, this event IS
       // in `GatewayEventName` (`../rpc/frame.ts`), so it goes straight

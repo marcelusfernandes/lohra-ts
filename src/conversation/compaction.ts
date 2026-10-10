@@ -14,7 +14,7 @@
 // `parent_session_id`/`knownSessionIds` bookkeeping (which currently
 // *refuses* linked sessions as "subsession" for prompt submission) and the
 // CLI envelope -- much more new surface for the same outcome.
-import { SUMMARY_SYSTEM } from "../agent/aux.js";
+import { SUMMARY_SYSTEM } from "../agent/auxiliary.js";
 import { resolveContextWindowOverride } from "../config/context-window-env.js";
 import { estimateTokens } from "../context/token-estimate.js";
 import {
@@ -51,7 +51,7 @@ export const DEFAULT_LOCK_RETRY_DELAY_MS = 25;
 
 // Issue #620: `summaryMaxTokens` (and its floor/ceiling/divisor, issue #584)
 // moved to `./summary-budget.js` -- a leaf module `AuxClient` (`../agent/
-// aux.ts`) also imports, so `AuxTelemetry.summarize` uses the SAME budget as
+// auxiliary.ts`) also imports, so `AuxTelemetry.summarize` uses the SAME budget as
 // `buildSummaryRequest` below instead of a fixed `1024`. Reexported here
 // verbatim so every existing caller/test of this module keeps importing it
 // from `compaction.js`.
@@ -440,7 +440,7 @@ export async function attemptCompaction(
 
 /** Builds the request a default (no-op-injected) summarizer sends to the
  * turn's own transport/model -- reuses `SUMMARY_SYSTEM`
- * (`src/agent/aux.ts`), the same prompt `AuxClient.summarize` uses, without
+ * (`src/agent/auxiliary.ts`), the same prompt `AuxClient.summarize` uses, without
  * needing the raw provider client `AuxClient` itself requires (only
  * `commands/chat.ts` holds that today).
  *

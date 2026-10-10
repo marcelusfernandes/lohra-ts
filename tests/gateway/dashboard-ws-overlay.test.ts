@@ -69,7 +69,7 @@ function closeServer(server: Server): Promise<void> {
 // for the turn's own transport (`dashboard-prompt-contract.test.ts`'s own
 // note) — that transport is ALSO what the runtime's default (fallback)
 // summarizer reuses when no `summarize` option is wired. `AuxClient.create`
-// (`src/agent/aux.ts`), the real aux-model call, never sets `stream` at all
+// (`src/agent/auxiliary.ts`), the real aux-model call, never sets `stream` at all
 // (`ChatCompletionsClient.create`, unlike `.stream`). The two shapes never
 // collide on this one stub server: `body.stream` alone tells them apart.
 function sseTextTurn(text: string): string {
@@ -127,7 +127,7 @@ function startCapturingServer(captured: CapturedRequest[]): Server {
 // uses) -- `AuxClient.summarize` is the ONLY caller that ever names
 // `auxModel` on this fixture server (dashboard.ts's WS turn wires
 // `summarize`, never `title`), so this distinguishes the aux summary call
-// from the turn's own model call without touching `src/agent/aux.ts`.
+// from the turn's own model call without touching `src/agent/auxiliary.ts`.
 function startAuxFailingServer(auxModel: string, captured: CapturedRequest[]): Server {
   return createServer((request, response) => {
     const chunks: Buffer[] = [];

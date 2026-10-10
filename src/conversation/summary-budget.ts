@@ -1,9 +1,9 @@
 // Issue #620 (follow-up do veredito da PR #617, épico #575): `summaryMaxTokens`
 // (issue #584) vivia inteira em `compaction.ts`, que já importa `SUMMARY_SYSTEM`
-// de `../agent/aux.js` -- `aux.ts` importar `summaryMaxTokens` de volta de
+// de `../agent/auxiliary.js` -- `auxiliary.ts` importar `summaryMaxTokens` de volta de
 // `compaction.ts` cicla. Módulo folha: não importa `compaction.ts` nem
-// `aux.ts`, só é reexportado por `compaction.ts` para os chamadores/testes
-// que já a referenciavam de lá, e importado direto por `AuxClient` (`aux.ts`)
+// `auxiliary.ts`, só é reexportado por `compaction.ts` para os chamadores/testes
+// que já a referenciavam de lá, e importado direto por `AuxClient` (`auxiliary.ts`)
 // para que `AuxTelemetry.summarize` use o MESMO orçamento que
 // `buildSummaryRequest` (o summarizer default de `ConversationRuntime`) já
 // usava desde a #584 -- antes desta issue, um perfil com `defaultAuxModel`

@@ -12,7 +12,7 @@ import type {
 /** Issue #587: `aux_calls`/usage folded into a turn's envelope from OUTSIDE
  * `ConversationTurnResult` -- `options.summarize` stays opaque (no usage
  * channel on the runtime itself), so chat.ts/dashboard.ts read an
- * `AuxTelemetry` (`src/agent/aux.ts`) after `runTurn` and pass its totals
+ * `AuxTelemetry` (`src/agent/auxiliary.ts`) after `runTurn` and pass its totals
  * here. Absent/`auxCalls` `0` means byte-identical to every pre-#587
  * envelope -- no key added at all (same convention as `compaction`). */
 export interface AuxEnvelopeExtra {

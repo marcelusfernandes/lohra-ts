@@ -14,7 +14,7 @@ import { createTurnNoticesPort } from "../context/notices-overlay.js";
 import { readCodexModel } from "../auth/codex.js";
 import { resolveAuthRoute, resolveCredentials } from "../auth/credentials.js";
 import { RefreshFailedError, TokenPersistError } from "../auth/errors.js";
-import { AuxClient } from "../agent/aux.js";
+import { AuxClient } from "../agent/auxiliary.js";
 import { ClientPool } from "../agent/client-pool.js";
 import {
   AnthropicMessagesModel,
