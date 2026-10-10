@@ -127,4 +127,34 @@ describe("prepare portable hooks", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("installs in the shared Git hooks directory of a temporary linked worktree", () => {
+    const dir = checkout();
+    const linkedRoot = mkdtempSync(join(tmpdir(), "lohra-linked-hooks-"));
+    const linked = join(linkedRoot, "linked worktree");
+    try {
+      git(dir, [
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "initial",
+      ]);
+      git(dir, ["worktree", "add", "--detach", linked]);
+      mkdirSync(join(linked, ".claude", "hooks"), { recursive: true });
+      copyFileSync(prePushSource, join(linked, ".claude", "hooks", "git-pre-push"));
+      copyFileSync(shellInstaller, join(linked, ".claude", "hooks", "instalar-git-hooks.sh"));
+      const result = runPrepare(linked);
+      expect(result.status, result.stderr).toBe(0);
+      expect(installedPrePush(linked)).toBe(installedPrePush(dir));
+      expect(readFileSync(installedPrePush(dir), "utf8")).toBe(readFileSync(prePushSource, "utf8"));
+    } finally {
+      if (existsSync(linked)) git(dir, ["worktree", "remove", "--force", linked]);
+      rmSync(linkedRoot, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

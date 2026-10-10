@@ -111,6 +111,23 @@ describe("prepare.mjs — hooks no checkout de desenvolvimento", () => {
     expect(readFileSync(target, "utf8")).toBe(readFileSync(PRE_PUSH_SOURCE, "utf8"));
   });
 
+  it.skipIf(process.platform === "win32")(
+    "pre-push instalado continua recusando push para main",
+    () => {
+      const dir = checkoutComHooks();
+      const result = rodarScript(PREPARE, dir);
+      expect(result.status, result.stderr).toBe(0);
+      const hook = join(dir, ".git", "hooks", "pre-push");
+      const push = spawnSync("sh", [hook, "origin", "https://example.invalid/x.git"], {
+        input:
+          "refs/heads/x 1111111111111111111111111111111111111111 refs/heads/main 2222222222222222222222222222222222222222\n",
+        encoding: "utf8",
+      });
+      expect(push.status).toBe(1);
+      expect(push.stderr).toContain("proibido");
+    },
+  );
+
   it("chama apenas lefthook install pre-commit e preserva pre-push", () => {
     const dir = checkoutComHooks();
     const marker = join(dir, "lefthook-args.json");
