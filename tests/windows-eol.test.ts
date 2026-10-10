@@ -30,7 +30,7 @@ describe("Windows checkout line endings", () => {
       });
       for (const file of samples) {
         const line = listed.split("\n").find((entry) => entry.endsWith(`\t${file}`));
-        expect(line, file).toMatch(/i\/lf\s+w\/lf\s+attr\/.*eol=lf\t/);
+        expect(line, file).toMatch(/^i\/lf\s+w\/lf\s+attr\/.*\beol=lf\b/);
 
         const bytes = readFileSync(join(clone, file));
         expect(bytes.includes(Buffer.from("\r\n")), file).toBe(false);
