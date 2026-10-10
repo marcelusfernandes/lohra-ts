@@ -226,3 +226,57 @@ describe("CronStore — schema, atomicity, and mutation semantics", () => {
     expect(readJobs(jobsPath)).toHaveLength(1);
   });
 });
+
+describe("CronStore.tryClaimDue", () => {
+  it("returns the pre-claim snapshot only after persisting the once claim", () => {
+    const store = new CronStore(home);
+    const job = store.add({ name: "once", prompt: "p", type: "once", value: 100 });
+    expect(store.tryClaimDue(job.id, 100)).toEqual(job);
+    expect(store.get(job.id)?.last_run_at).toBe(100);
+    expect(store.tryClaimDue(job.id, 100)).toBeNull();
+  });
+
+  it("rechecks removal, disabled state and a changed due time after a stale list", () => {
+    const store = new CronStore(home);
+    const removed = store.add({ name: "removed", prompt: "p", type: "once", value: 100 });
+    const disabled = store.add({ name: "disabled", prompt: "p", type: "once", value: 100 });
+    const deferred = store.add({ name: "deferred", prompt: "p", type: "interval", value: 5 });
+    expect(store.list()).toHaveLength(3);
+    store.remove(removed.id);
+    store.setEnabled(disabled.id, false);
+    store.markRun(deferred.id, 100);
+    expect(store.tryClaimDue(removed.id, 100)).toBeNull();
+    expect(store.tryClaimDue(disabled.id, 100)).toBeNull();
+    expect(store.tryClaimDue(deferred.id, 399)).toBeNull();
+    expect(store.get(disabled.id)?.last_run_at).toBeNull();
+    expect(store.get(deferred.id)?.last_run_at).toBe(100);
+  });
+
+  it("allows only the next valid interval and cron windows", () => {
+    const store = new CronStore(home);
+    const interval = store.add({ name: "interval", prompt: "p", type: "interval", value: 5 });
+    expect(store.tryClaimDue(interval.id, 100)?.last_run_at).toBeNull();
+    expect(store.tryClaimDue(interval.id, 399)).toBeNull();
+    expect(store.tryClaimDue(interval.id, 400)?.last_run_at).toBe(100);
+
+    const cron = store.add({ name: "cron", prompt: "p", type: "cron", value: "* * * * *" });
+    const now = new Date(2026, 0, 15, 14, 30, 20).getTime() / 1000;
+    expect(store.tryClaimDue(cron.id, now)?.last_run_at).toBeNull();
+    expect(store.tryClaimDue(cron.id, now + 20)).toBeNull();
+    expect(store.tryClaimDue(cron.id, now + 60)?.last_run_at).toBe(now);
+  });
+
+  it("keeps a NaN-valued once job unreachable without marking it", () => {
+    const store = new CronStore(home);
+    const ghost = store.add({ name: "ghost", prompt: "p", type: "once", value: Number.NaN });
+    expect(store.tryClaimDue(ghost.id, 100)).toBeNull();
+    expect(store.get(ghost.id)?.last_run_at).toBeNull();
+  });
+
+  it("propagates corrupt-store errors instead of reporting a harmless miss", () => {
+    plant("{nope");
+    const store = new CronStore(home);
+    expect(() => store.tryClaimDue("x", 100)).toThrow(CronStoreError);
+    expect(readFileSync(jobsPath, "utf8")).toBe("{nope");
+  });
+});

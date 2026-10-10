@@ -286,6 +286,10 @@ export class CronStore {
     return this.mutate(jobId, (job) => ({ ...job, last_run_at: when }));
   }
 
+  public tryClaimDue(_jobId: string, _now: number): CronJob | null {
+    throw new Error("not implemented: tryClaimDue");
+  }
+
   private mutate(jobId: string, change: (job: CronJob) => CronJob): boolean {
     return withStoreLock(this.path, () => {
       const jobs = readJobs(this.path);
