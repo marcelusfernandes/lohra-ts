@@ -21,7 +21,7 @@ function messageAt(
 /** `request` é 1-indexado e por padrão mira a primeira requisição (o
  * comportamento histórico, preservado para todo fixture existente que não
  * declara `request`) — mas uma requisição de resumo de compactação
- * (`SUMMARY_SYSTEM`, `src/agent/aux.ts`) nunca é a primeira quando a
+ * (`SUMMARY_SYSTEM`, `src/agent/auxiliary.ts`) nunca é a primeira quando a
  * própria sessão compacta antes do turno real, e seu próprio system
  * prompt é o que precisa ser verificado nesse caso. */
 function systemContent(requests: readonly CapturedRequest[], request = 1): string {

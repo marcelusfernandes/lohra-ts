@@ -2,7 +2,7 @@
 // de #637): mutantes de doutrina (`src/context/doctrine.ts`), moldura de
 // memória/perfil/instruções e nota de snapshot (`src/context/
 // system-prompt.ts`), snapshot de git (`src/context/discovery.ts`) e as
-// seções verbatim/truncamento de cauda do resumo (`src/agent/aux.ts`,
+// seções verbatim/truncamento de cauda do resumo (`src/agent/auxiliary.ts`,
 // `src/conversation/compaction.ts`) — nenhum desses arquivos tinha mutante
 // em nenhuma fatia até aqui (achado de #637: cinco issues de prompt em M22
 // mergeadas sem mutante nenhum sobre o código novo).
@@ -19,7 +19,7 @@ import type { Mutant } from "./types.js";
 const doctrine = "src/context/doctrine.ts";
 const systemPrompt = "src/context/system-prompt.ts";
 const discovery = "src/context/discovery.ts";
-const aux = "src/agent/aux.ts";
+const aux = "src/agent/auxiliary.ts";
 const compaction = "src/conversation/compaction.ts";
 
 const doctrineTests = "tests/context-doctrine.test.ts";
@@ -258,7 +258,7 @@ export const contextPromptMutants: readonly Mutant[] = [
       },
     ],
   },
-  // --- src/agent/aux.ts / src/conversation/compaction.ts (issue #584/#587) -
+  // --- src/agent/auxiliary.ts / src/conversation/compaction.ts (issue #584/#587) -
   {
     id: "aux-summary-user-asks-verbatim-dropped",
     category: "aux",

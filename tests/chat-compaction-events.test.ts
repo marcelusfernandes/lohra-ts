@@ -151,7 +151,7 @@ describe("runChat wires eventSink: compaction events reach stderr (issue #287)",
 // Issue #620 (item 5, veredito da PR #617): nothing exercised `chat.ts`'s
 // own `aux_calls` glue (`src/commands/chat.ts:519-537`) end to end -- a
 // profile WITH `defaultAuxModel` routes the summary through `AuxTelemetry`
-// (`src/agent/aux.ts`) instead of the turn's own default summarizer, and
+// (`src/agent/auxiliary.ts`) instead of the turn's own default summarizer, and
 // `aux_calls` only shows up in the envelope through that path. Same
 // fixed-reply local server as above -- no real provider credit, the
 // auxiliary call lands on the identical HTTP fixture as the turn's own.
@@ -342,9 +342,9 @@ describe("runChat's title generation fails open without blocking the turn (issue
           max_tokens?: number;
         };
         // `AuxClient.title()` is the ONE caller that passes `maxTokens: 32`
-        // (`src/agent/aux.ts`) -- distinguishes the title call from the
+        // (`src/agent/auxiliary.ts`) -- distinguishes the title call from the
         // turn's own model call (`defaultMaxTokens: 256` below) on the same
-        // fixture server, without touching `aux.ts`.
+        // fixture server, without touching `auxiliary.ts`.
         if (body.max_tokens === 32) {
           const text = JSON.stringify({ error: { message: "t623 title probe failure" } });
           response.writeHead(400, {
