@@ -1,7 +1,7 @@
 # Contenção de caminhos no workflow
 
 - **Data:** 2026-10-09
-- **Origem:** issue #723, investigação Windows #706 e regressão de checkout
+- **Origem:** issue #723, investigação Windows #700 e regressão de checkout
   Windows em `tests/workflow-sandbox.test.ts`.
 
 ## Contexto
