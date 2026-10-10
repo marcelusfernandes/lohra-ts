@@ -11,9 +11,22 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CronStore, CronStoreError, readJobs } from "../src/cron/store.js";
+
+const renameFailure = vi.hoisted(() => ({ active: false }));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    renameSync: (...args: Parameters<typeof actual.renameSync>) => {
+      if (renameFailure.active)
+        throw Object.assign(new Error("synthetic rename failed"), { code: "EIO" });
+      actual.renameSync(...args);
+    },
+  };
+});
 
 let home: string;
 let jobsPath: string;
@@ -24,6 +37,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  renameFailure.active = false;
   rmSync(home, { recursive: true, force: true });
 });
 
@@ -219,6 +233,7 @@ describe("CronStore — schema, atomicity, and mutation semantics", () => {
       () => store.remove(job.id),
       () => store.setEnabled(job.id, false),
       () => store.markRun(job.id, 1),
+      () => store.tryClaimDue(job.id, 1),
     ]) {
       expect(operation).toThrow(/offline/u);
     }
@@ -278,5 +293,26 @@ describe("CronStore.tryClaimDue", () => {
     const store = new CronStore(home);
     expect(() => store.tryClaimDue("x", 100)).toThrow(CronStoreError);
     expect(readFileSync(jobsPath, "utf8")).toBe("{nope");
+  });
+
+  it("propagates an unreadable store path instead of reporting a harmless miss", () => {
+    plant("directory");
+    const store = new CronStore(home);
+    expect(() => store.tryClaimDue("x", 100)).toThrow(CronStoreError);
+    expect(existsSync(jobsPath)).toBe(true);
+  });
+
+  it("propagates a rename failure and leaves the occurrence unclaimed", () => {
+    const store = new CronStore(home);
+    const job = store.add({ name: "once", prompt: "p", type: "once", value: 100 });
+    const before = readFileSync(jobsPath, "utf8");
+    try {
+      renameFailure.active = true;
+      expect(() => store.tryClaimDue(job.id, 100)).toThrow("synthetic rename failed");
+    } finally {
+      renameFailure.active = false;
+    }
+    expect(readFileSync(jobsPath, "utf8")).toBe(before);
+    expect(store.tryClaimDue(job.id, 100)?.id).toBe(job.id);
   });
 });
