@@ -1,10 +1,38 @@
 import { describe, expect, it } from "vitest";
 
+import { montarResumo } from "../scripts/prova/resumo.js";
 import { normalizarRelatorioVitest } from "../scripts/prova/vitest-relatorio.js";
 
 const ROOT = "/repo";
 
 describe("normalizarRelatorioVitest", () => {
+  it("matches Windows reporter paths with catalog paths without accepting a missing file", () => {
+    const root = String.raw`C:\repo`;
+    for (const separator of ["\\", "/"]) {
+      const bruto = {
+        numTotalTests: 1,
+        testResults: [
+          {
+            name: `C:${separator}repo${separator}tests${separator}executed.test.ts`,
+            status: "passed",
+            assertionResults: [{ fullName: "runs", status: "passed" }],
+          },
+        ],
+      };
+      const resultado = normalizarRelatorioVitest(root, bruto);
+      expect(resultado.arquivos[0]?.arquivo).toBe("tests/executed.test.ts");
+      expect(montarResumo(["tests/executed.test.ts"], resultado)).toEqual({
+        ok: true,
+        total: 1,
+        falhas: [],
+      });
+      expect(montarResumo(["tests/missing.test.ts"], resultado).falhas).toContainEqual({
+        nome: "tests/missing.test.ts did not run",
+        motivo: "arquivo declarado não apareceu no relatório do vitest",
+      });
+    }
+  });
+
   it("normalizes absolute file names to root-relative paths and total", () => {
     const bruto = {
       numTotalTests: 2,
