@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -107,6 +108,27 @@ describe("sandboxDispatch — fs", () => {
     expect(dispatch("read_file", { path: outside })).toBe(denied);
     expect(dispatch("read_file", { path: join(parent, "run-extra", "file.txt") })).toBe(denied);
     expect(dispatch("read_file", { path: join(root, "escape", "secret.txt") })).toBe(denied);
+  });
+
+  it("refuses a dangling symlink before a real write can create its outside target", () => {
+    const parent = realWorkspace();
+    const root = join(parent, "run");
+    const outside = join(parent, "outside");
+    mkdirSync(root);
+    mkdirSync(outside);
+    const target = join(outside, "new.txt");
+    const link = join(root, "link.txt");
+    symlinkSync(target, link, "file");
+    expect(existsSync(link)).toBe(false);
+    const dispatch = sandboxDispatch((_name, args) => writeFileTool(args), {
+      workingRoot: root,
+      policy: { fsAllow: [], egressAllow: [] },
+      tainted: false,
+    });
+    expect(dispatch("write_file", { path: link, content: "escaped" })).toBe(
+      "ERROR: path is outside the workflow working scope (sandbox denied)",
+    );
+    expect(existsSync(target)).toBe(false);
   });
 
   it("allows reads/writes inside the working root and denies outside with exact text", () => {
