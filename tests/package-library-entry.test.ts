@@ -19,7 +19,7 @@ import type {
   ToolDispatcher,
 } from "../src/index.js";
 
-// This type-only fixture is checked by `typecheck` in the proof declaration.
+// This type-only fixture is checked by the standalone `npm run typecheck` gate.
 type PublicPorts = readonly [
   ConversationRepository,
   ConversationRuntimeOptions,
@@ -101,6 +101,68 @@ describe("package library entry", () => {
       } finally {
         connection.close();
       }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("runs the public composition from a plain JavaScript consumer", () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-library-js-"));
+    try {
+      const source = pathToFileURL(resolve("src/index.ts")).href;
+      const databasePath = join(root, "state.db");
+      const program = `
+        const { ConversationRuntime, SessionRepository, SqliteConversationRepository, openStateDatabase } =
+          await import(${JSON.stringify(source)});
+        const connection = openStateDatabase(${JSON.stringify(databasePath)});
+        try {
+          const repository = new SqliteConversationRepository(
+            new SessionRepository(connection.database, undefined, connection.ftsEnabled));
+          const runtime = new ConversationRuntime({
+            repository,
+            transport: {
+              complete: async () => ({ content: "js reply", finishReason: "stop", toolCalls: [],
+                reasoning: null, usage: null, providerData: null }),
+              close: () => {},
+            },
+            promptSnapshot: () => "fixed prompt",
+            idSource: () => "js-session",
+            clock: () => 1,
+            maxIterations: 2,
+          });
+          const turn = await runtime.runTurn({
+            input: "hello", provider: "offline", model: "deterministic", cwd: ${JSON.stringify(root)},
+          });
+          process.stdout.write(JSON.stringify({
+            output: turn.response.content,
+            messages: repository.loadMessages(turn.sessionId).length,
+          }));
+        } finally {
+          connection.close();
+        }
+      `;
+      const child = spawnSync(
+        process.execPath,
+        ["--import", import.meta.resolve("tsx"), "--input-type=module", "-e", program],
+        {
+          cwd: root,
+          env: {
+            ...process.env,
+            HOME: root,
+            USERPROFILE: root,
+            LOHRA_HOME: join(root, "lohra"),
+            CODEX_HOME: join(root, "codex"),
+          },
+          encoding: "utf8",
+          timeout: 15_000,
+          windowsHide: true,
+        },
+      );
+      expect(child.error).toBeUndefined();
+      expect(child.status).toBe(0);
+      expect(child.stderr).toBe("");
+      expect(JSON.parse(child.stdout)).toEqual({ output: "js reply", messages: 2 });
+      expect(existsSync(databasePath)).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
