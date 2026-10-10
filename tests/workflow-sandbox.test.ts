@@ -1,4 +1,5 @@
 import {
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -14,6 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { BUILTIN_DEFINITIONS } from "../src/tools/builtin-definitions.js";
 import { writeFileTool } from "../src/tools/filesystem.js";
 import {
+  isResolvedPathWithinRoot,
   isTaintingTool,
   loadPolicy,
   sandboxDispatch,
@@ -76,6 +78,37 @@ describe("loadPolicy", () => {
 });
 
 describe("sandboxDispatch — fs", () => {
+  it("compares resolved Windows roots by path components, including another drive", () => {
+    const root = String.raw`C:\work\run`;
+    expect(isResolvedPathWithinRoot(root, root)).toBe(true);
+    expect(isResolvedPathWithinRoot(String.raw`C:\work\run\child\file.txt`, root)).toBe(true);
+    expect(isResolvedPathWithinRoot(String.raw`C:\work\sibling\file.txt`, root)).toBe(false);
+    expect(isResolvedPathWithinRoot(String.raw`C:\work\run-extra\file.txt`, root)).toBe(false);
+    expect(isResolvedPathWithinRoot(String.raw`D:\work\run\file.txt`, root)).toBe(false);
+  });
+
+  it("allows the root and children while refusing siblings, prefixes and a symlink escape", () => {
+    const parent = realWorkspace();
+    const root = join(parent, "run");
+    const sibling = join(parent, "sibling");
+    mkdirSync(root);
+    mkdirSync(sibling);
+    const outside = join(sibling, "secret.txt");
+    writeFileSync(outside, "s");
+    symlinkSync(sibling, join(root, "escape"), "dir");
+    const dispatch = sandboxDispatch(base, {
+      workingRoot: root,
+      policy: { fsAllow: [], egressAllow: [] },
+      tainted: false,
+    });
+    const denied = "ERROR: path is outside the workflow working scope (sandbox denied)";
+    expect(dispatch("read_file", { path: root })).toContain("allowed");
+    expect(dispatch("read_file", { path: join(root, "child.txt") })).toContain("allowed");
+    expect(dispatch("read_file", { path: outside })).toBe(denied);
+    expect(dispatch("read_file", { path: join(parent, "run-extra", "file.txt") })).toBe(denied);
+    expect(dispatch("read_file", { path: join(root, "escape", "secret.txt") })).toBe(denied);
+  });
+
   it("allows reads/writes inside the working root and denies outside with exact text", () => {
     const root = workspace();
     const dispatch = sandboxDispatch(base, {

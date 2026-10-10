@@ -86,6 +86,10 @@ function resolvedAgainstFilesystem(target: string): string {
   }
 }
 
+export function isResolvedPathWithinRoot(_candidate: string, _root: string): boolean {
+  throw new Error("not implemented: Windows workflow path containment");
+}
+
 function isWithin(target: string, root: string): boolean {
   // Both sides are resolved so a link that leaves the root is refused, whether
   // the target exists, its parent exists, or neither does.
