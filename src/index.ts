@@ -1,4 +1,4 @@
-// Public headless embedding entry. The implementation follows the red regression.
+// Deliberate public surface for embedding the headless runtime.
 export { ConversationRuntime, type ConversationRuntimeOptions } from "./conversation/runtime.js";
 export { SqliteConversationRepository } from "./conversation/sqlite-repository.js";
 export { openStateDatabase, type StateConnection } from "./state/connection.js";
@@ -12,5 +12,3 @@ export type {
   ToolDispatcher,
 } from "./conversation/types.js";
 export type { NormalizedResponse, SystemBands } from "./transports/types.js";
-
-throw new Error("not implemented: public library entry");
