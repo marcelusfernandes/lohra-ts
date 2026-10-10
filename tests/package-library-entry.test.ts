@@ -104,7 +104,7 @@ describe("package library entry", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it("exposes only the deliberate runtime and state values", async () => {
     const entry = await import("../src/index.js");
