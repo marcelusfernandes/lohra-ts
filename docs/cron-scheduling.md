@@ -20,6 +20,8 @@ garantia de `fsync` para esse último cenário.
 Uma ocorrência `once` reivindicada não volta a ser devida. Um job `interval`
 pode ser reivindicado na próxima janela de intervalo, e `cron` no próximo
 minuto local válido. O marcador não impede sobreposição entre ocorrências
-distintas se uma execução anterior continuar ativa. O scheduler existente só
-passará a usar esta API na integração #760; até lá, a exclusividade aqui é da
-reivindicação no store, não do dispatch fim a fim.
+distintas se uma execução anterior continuar ativa. O scheduler chama
+`tryClaimDue` antes de `runJob` e só despacha o snapshot devolvido ao vencedor.
+Falha no callback produz `ok: false` e mantém a ocorrência consumida. A lista
+inicial é apenas uma descoberta de candidatos: remoção, desabilitação ou mudança
+de due antes do claim impedem o dispatch.
