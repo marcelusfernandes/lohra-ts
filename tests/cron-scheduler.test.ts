@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runSchedulerLoop, tick } from "../src/cron/scheduler.js";
 import { CronStore, CronStoreError } from "../src/cron/store.js";
@@ -82,6 +82,57 @@ describe("tick", () => {
     const results = await tick(store, alwaysFails, { now: 100 });
     expect(results).toEqual([{ jobId: job.id, ok: false }]);
     expect(store.get(job.id)?.last_run_at).toBe(100);
+  });
+
+  it("persists the claim before invoking the callback and passes the pre-claim snapshot", async () => {
+    const job = store.add({ name: "n", prompt: "p", type: "once", value: 100 });
+    const seen: Array<{ persisted: number | null; received: number | null }> = [];
+    await tick(
+      store,
+      (snapshot) => {
+        seen.push({
+          persisted: store.get(job.id)?.last_run_at ?? null,
+          received: snapshot.last_run_at,
+        });
+        return Promise.resolve();
+      },
+      { now: 100 },
+    );
+    expect(seen).toEqual([{ persisted: 100, received: null }]);
+  });
+
+  it("does not dispatch jobs removed or disabled after the candidate list", async () => {
+    const removed = store.add({ name: "removed", prompt: "p", type: "once", value: 100 });
+    const disabled = store.add({ name: "disabled", prompt: "p", type: "once", value: 100 });
+    const originalList = store.list.bind(store);
+    vi.spyOn(store, "list").mockImplementationOnce(() => {
+      const stale = originalList();
+      store.remove(removed.id);
+      store.setEnabled(disabled.id, false);
+      return stale;
+    });
+    const calls: string[] = [];
+    expect(await tick(store, recorder(calls), { now: 100 })).toEqual([]);
+    expect(calls).toEqual([]);
+    expect(store.get(disabled.id)?.last_run_at).toBeNull();
+  });
+
+  it("consumes a failed interval and cron occurrence but allows the next window", async () => {
+    const interval = store.add({ name: "interval", prompt: "p", type: "interval", value: 5 });
+    const cron = store.add({ name: "cron", prompt: "p", type: "cron", value: "* * * * *" });
+    const now = new Date(2026, 0, 15, 14, 30, 20).getTime() / 1000;
+    expect(await tick(store, alwaysFails, { now })).toEqual([
+      { jobId: interval.id, ok: false },
+      { jobId: cron.id, ok: false },
+    ]);
+    expect(await tick(store, recorder([]), { now: now + 20 })).toEqual([]);
+    expect(await tick(store, recorder([]), { now: now + 60 })).toEqual([
+      { jobId: cron.id, ok: true },
+    ]);
+    expect(await tick(store, recorder([]), { now: now + 300 })).toEqual([
+      { jobId: interval.id, ok: true },
+      { jobId: cron.id, ok: true },
+    ]);
   });
 
   it("a NaN-valued once job is never due, tick never calls runJob or marks it", async () => {
