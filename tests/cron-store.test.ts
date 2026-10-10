@@ -207,4 +207,22 @@ describe("CronStore — schema, atomicity, and mutation semantics", () => {
     const after = readFileSync(jobsPath, "utf8");
     expect(after).toBe(before);
   });
+
+  it("refuses a legacy lock with explicit offline migration instructions and never removes it", () => {
+    const store = new CronStore(home);
+    const job = store.add({ name: "n", prompt: "p", type: "interval", value: 5 });
+    mkdirSync(`${jobsPath}.lock`, { recursive: true });
+    for (const operation of [
+      () => store.list(),
+      () => store.get(job.id),
+      () => store.add({ name: "next", prompt: "p", type: "interval", value: 5 }),
+      () => store.remove(job.id),
+      () => store.setEnabled(job.id, false),
+      () => store.markRun(job.id, 1),
+    ]) {
+      expect(operation).toThrow(/offline/u);
+    }
+    expect(existsSync(`${jobsPath}.lock`)).toBe(true);
+    expect(readJobs(jobsPath)).toHaveLength(1);
+  });
 });
