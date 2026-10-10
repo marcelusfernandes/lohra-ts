@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, isAbsolute, posix, relative, resolve, sep, win32 } from "node:path";
 
 import type { WorkflowCacheOwnership } from "./cache.js";
 
@@ -86,8 +86,15 @@ function resolvedAgainstFilesystem(target: string): string {
   }
 }
 
-export function isResolvedPathWithinRoot(_candidate: string, _root: string): boolean {
-  throw new Error("not implemented: Windows workflow path containment");
+/** Compare resolved paths by components; Windows fixtures also run on Unix CI. */
+export function isResolvedPathWithinRoot(candidate: string, root: string): boolean {
+  const pathOps =
+    win32.isAbsolute(root) && !posix.isAbsolute(root) ? win32 : { isAbsolute, relative, sep };
+  const fromRoot = pathOps.relative(root, candidate);
+  return (
+    fromRoot === "" ||
+    (fromRoot !== ".." && !fromRoot.startsWith(`..${pathOps.sep}`) && !pathOps.isAbsolute(fromRoot))
+  );
 }
 
 function isWithin(target: string, root: string): boolean {
@@ -95,10 +102,7 @@ function isWithin(target: string, root: string): boolean {
   // the target exists, its parent exists, or neither does.
   const resolvedRoot = resolvedAgainstFilesystem(root);
   const candidate = resolvedAgainstFilesystem(target);
-  return (
-    candidate === resolvedRoot ||
-    candidate.startsWith(resolvedRoot.endsWith("/") ? resolvedRoot : `${resolvedRoot}/`)
-  );
+  return isResolvedPathWithinRoot(candidate, resolvedRoot);
 }
 
 function fsAllowed(rawPath: unknown, roots: readonly string[]): boolean {

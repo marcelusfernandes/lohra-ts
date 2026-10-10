@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -70,8 +70,8 @@ describe("loadPolicy", () => {
     );
     const policy = loadPolicy(join(root, "policy.json"));
     expect(policy.fsAllow).toEqual([
-      { path: "/rw/root", writable: true },
-      { path: "/ro/root", writable: false },
+      { path: resolve("/rw/root"), writable: true },
+      { path: resolve("/ro/root"), writable: false },
     ]);
     expect(policy.egressAllow).toEqual(["api.test"]);
   });
