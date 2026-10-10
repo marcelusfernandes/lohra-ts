@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 import {
   accessSync,
   constants,
+  lstatSync,
   mkdirSync,
   readFileSync,
   renameSync,
-  rmdirSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -18,6 +18,7 @@ import {
   stringifyJsonPreservingNumbers,
 } from "../serialization/json-numbers.js";
 import { CronStoreError, CronValidationError } from "./errors.js";
+import { withCronStoreGuard } from "./store-guard.js";
 import { validateJob } from "./validate.js";
 
 export interface CronJob {
@@ -30,9 +31,6 @@ export interface CronJob {
   readonly created_at: number;
   readonly last_run_at: number | null;
 }
-
-const LOCK_TIMEOUT_MS = 10_000;
-const LOCK_RETRY_MS = 20;
 
 type PathKind = "absent" | "file" | "directory" | "unreadable";
 
@@ -203,37 +201,32 @@ function writeJobsAtomic(path: string, jobs: readonly CronJob[]): void {
   renameSync(tmp, path);
 }
 
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+/**
+ * Refuse an anonymous lock left by the previous implementation. There is no safe way to
+ * distinguish a live old writer from an orphan, so removal requires an offline migration.
+ */
+function assertNoLegacyLock(path: string): void {
+  const lockPath = `${path}.lock`;
+  try {
+    lstatSync(lockPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw new Error(`cron store legacy lock check failed for ${lockPath}`, { cause: error });
+  }
+  throw new CronStoreError(
+    path,
+    `legacy lock ${lockPath} present; stop all old schedulers and follow docs/cron-lock-migration.md for offline migration (never remove a live lock)`,
+  );
 }
 
-/**
- * Exclusive, cross-process coordination per store path (the ADR's requirement beyond the
- * oracle's in-process-only `threading.RLock` — decision 5, `[processo-ts]` evidence, never
- * claimed as oracle parity). `mkdir` is atomic on POSIX; a concurrent holder sees `EEXIST` and
- * retries until the lock frees or the timeout elapses.
- */
-function withStoreLock<T>(path: string, fn: () => T): T {
-  const lockPath = `${path}.lock`;
-  mkdirSync(dirname(path), { recursive: true });
-  const deadline = Date.now() + LOCK_TIMEOUT_MS;
-  for (;;) {
-    try {
-      mkdirSync(lockPath);
-      break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      if (Date.now() > deadline) {
-        throw new Error(`cron store lock timed out waiting for ${lockPath}`, { cause: error });
-      }
-      sleepSync(LOCK_RETRY_MS);
-    }
-  }
-  try {
+/** Hold the recoverable cross-process guard through read, mutation and atomic rename. */
+function withStoreLock<T extends CronJob[] | CronJob | boolean>(path: string, fn: () => T): T {
+  assertNoLegacyLock(path);
+  return withCronStoreGuard<CronJob[] | CronJob | boolean>(path, () => {
+    // Catch an old writer that acquired its lock while we waited for the guard.
+    assertNoLegacyLock(path);
     return fn();
-  } finally {
-    rmdirSync(lockPath);
-  }
+  }) as T;
 }
 
 export class CronStore {

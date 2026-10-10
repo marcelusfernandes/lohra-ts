@@ -23,9 +23,12 @@ try {
     withCronStoreGuard(jobs, () => {
       if (mode === "hold-after-rename") {
         const raw = readFileSync(jobs, "utf8");
-        const parsed = JSON.parse(raw) as { jobs: unknown[] };
+        const parsed = JSON.parse(raw) as { jobs: Record<string, unknown>[] };
         const tmp = `${jobs}.${String(process.pid)}.tmp`;
-        writeFileSync(tmp, JSON.stringify({ jobs: [...parsed.jobs, parsed.jobs[0]] }));
+        writeFileSync(
+          tmp,
+          JSON.stringify({ jobs: [...parsed.jobs, { ...parsed.jobs[0], id: "after-rename" }] }),
+        );
         renameSync(tmp, jobs);
       }
       writeFileSync(ready, String(process.pid));
@@ -44,6 +47,7 @@ try {
   }
 } catch (error) {
   const cause = error instanceof Error && error.cause instanceof Error ? error.cause : null;
-  process.stderr.write(`${String(error)} cause=${cause ? String(cause) : "none"}\n`);
+  const code = cause && "code" in cause ? String(cause.code) : "none";
+  process.stderr.write(`${String(error)} cause=${cause ? String(cause) : "none"} code=${code}\n`);
   process.exitCode = 2;
 }
