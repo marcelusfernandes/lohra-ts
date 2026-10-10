@@ -1,5 +1,13 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -32,6 +40,72 @@ const publicPortsAreTyped = (_ports: PublicPorts): void => {};
 void publicPortsAreTyped;
 
 describe("package library entry", () => {
+  it("types a strict consumer using only published runtime dependencies", () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-library-types-"));
+    try {
+      const packageRoot = join(root, "node_modules", "lohra-ts");
+      const dist = join(packageRoot, "dist");
+      const tsc = resolve("node_modules/typescript/bin/tsc");
+      const build = spawnSync(
+        process.execPath,
+        [tsc, "-p", "tsconfig.build.json", "--outDir", dist],
+        { cwd: resolve(), encoding: "utf8", timeout: 120_000, windowsHide: true },
+      );
+      expect(build.error).toBeUndefined();
+      expect(build.status, build.stdout + build.stderr).toBe(0);
+
+      const manifest = JSON.parse(readFileSync(resolve("package.json"), "utf8")) as {
+        dependencies: Record<string, string>;
+      };
+      writeFileSync(join(packageRoot, "package.json"), readFileSync(resolve("package.json")));
+      for (const dependency of ["better-sqlite3", "@types/better-sqlite3"] as const) {
+        if (dependency in manifest.dependencies) {
+          const destination = join(root, "node_modules", dependency);
+          mkdirSync(resolve(destination, ".."), { recursive: true });
+          cpSync(resolve("node_modules", dependency), destination, { recursive: true });
+        }
+      }
+      // Node's declarations are the consumer's own development dependency.
+      for (const dependency of ["@types/node", "undici-types"] as const) {
+        const destination = join(root, "node_modules", dependency);
+        mkdirSync(resolve(destination, ".."), { recursive: true });
+        cpSync(resolve("node_modules", dependency), destination, { recursive: true });
+      }
+      writeFileSync(join(root, "package.json"), '{"type":"module","private":true}');
+      writeFileSync(
+        join(root, "tsconfig.json"),
+        JSON.stringify({
+          compilerOptions: {
+            module: "NodeNext",
+            moduleResolution: "NodeNext",
+            target: "ES2022",
+            strict: true,
+            skipLibCheck: false,
+            noEmit: true,
+          },
+          include: ["consumer.ts"],
+        }),
+      );
+      writeFileSync(
+        join(root, "consumer.ts"),
+        'import { type StateConnection, type ConversationRuntimeOptions } from "lohra-ts";\n' +
+          "declare const connection: StateConnection;\n" +
+          "declare const options: ConversationRuntimeOptions;\n" +
+          "void connection.database; void options.transport;\n",
+      );
+      const consumer = spawnSync(process.execPath, [tsc, "-p", join(root, "tsconfig.json")], {
+        cwd: root,
+        encoding: "utf8",
+        timeout: 30_000,
+        windowsHide: true,
+      });
+      expect(consumer.error).toBeUndefined();
+      expect(consumer.status, consumer.stdout + consumer.stderr).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("exposes only the deliberate runtime and state values", async () => {
     const entry = await import("../src/index.js");
     expect(Object.keys(entry).sort()).toEqual([
