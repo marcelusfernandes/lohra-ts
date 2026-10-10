@@ -2,7 +2,7 @@
 // forma solta) para `ResultadoVitest` (caminhos relativos à raiz, forma
 // fechada) — o que `montarResumo` consome. Puro: recebe o objeto já
 // parseado (`JSON.parse`) e a raiz para relativizar; não abre arquivo.
-import { relative } from "node:path";
+import { posix, relative, win32 } from "node:path";
 
 import type { ResultadoArquivo, ResultadoTeste, ResultadoVitest } from "./tipos.js";
 
@@ -51,7 +51,13 @@ function normalizarArquivo(root: string, bruto: unknown): ResultadoArquivo {
   if (typeof arquivo.name !== "string") {
     return falhaFormato("testResults[].name não é string");
   }
-  const caminho = relative(root, arquivo.name);
+  // The catalog uses repo-relative `/` paths on every platform. Use win32
+  // semantics for a Windows root even when this pure parser runs on Unix.
+  const caminhoRelativo =
+    win32.isAbsolute(root) && !posix.isAbsolute(root)
+      ? win32.relative(root, arquivo.name)
+      : relative(root, arquivo.name);
+  const caminho = caminhoRelativo.replaceAll("\\", "/");
   const assertionResults = arquivo.assertionResults;
   if (!Array.isArray(assertionResults)) {
     return falhaFormato("testResults[].assertionResults não é array");
