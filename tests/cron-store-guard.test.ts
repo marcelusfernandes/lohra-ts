@@ -11,9 +11,11 @@ const worker = resolve(import.meta.dirname, "workers", "cron-store-guard-worker.
 const tsxLoader = import.meta.resolve("tsx");
 const roots: string[] = [];
 const children = new Set<ChildProcessWithoutNullStreams>();
+const closes = new WeakMap<ChildProcessWithoutNullStreams, Promise<number | null>>();
 
-afterEach(() => {
+afterEach(async () => {
   for (const child of children) if (child.exitCode === null) child.kill("SIGKILL");
+  await Promise.all([...children].map(async (child) => await closes.get(child)));
   children.clear();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -48,6 +50,14 @@ function launch(
     },
   );
   children.add(child);
+  closes.set(
+    child,
+    new Promise((resolve) => {
+      child.once("close", (code) => {
+        resolve(code);
+      });
+    }),
+  );
   const output = { stdout: "", stderr: "" };
   child.stdout.on("data", (chunk: Buffer) => (output.stdout += chunk.toString("utf8")));
   child.stderr.on("data", (chunk: Buffer) => (output.stderr += chunk.toString("utf8")));
@@ -67,12 +77,9 @@ async function waitFor(
 }
 
 async function closeOf(child: ChildProcessWithoutNullStreams): Promise<number | null> {
-  if (child.exitCode !== null) return child.exitCode;
-  return await new Promise((resolve) => {
-    child.once("close", (code) => {
-      resolve(code);
-    });
-  });
+  const closed = closes.get(child);
+  if (!closed) throw new Error("worker close promise missing");
+  return await closed;
 }
 
 describe("cron store transactional guard", () => {
@@ -114,7 +121,8 @@ describe("cron store transactional guard", () => {
     );
     expect(await closeOf(b.child)).toBe(2);
     expect(b.output.stdout).not.toContain("ENTER");
-    expect(b.output.stderr).toMatch(/busy|locked|timeout/iu);
+    expect(b.output.stderr).toContain("timed out after 2000 ms");
+    expect(b.output.stderr).toContain("code=SQLITE_BUSY");
     expect(readFileSync(events, "utf8")).toBe("ENTER-A\n");
     writeFileSync(join(root, "release-A"), "go");
     expect(await closeOf(a.child)).toBe(0);
@@ -160,5 +168,19 @@ describe("cron store transactional guard", () => {
       expect(error).toBeInstanceOf(Error);
       expect((error as Error).cause).toBeInstanceOf(Error);
     }
+  });
+
+  it("rejects a thenable before releasing the transaction", () => {
+    const { jobs } = fixture();
+    const asyncCallback = () => Promise.resolve("must not run");
+    const compileTimeRejection = (): Promise<string> => {
+      // @ts-expect-error an asynchronous callback cannot hold a synchronous transaction
+      return withCronStoreGuard(jobs, asyncCallback);
+    };
+    void compileTimeRejection;
+    expect(() => withCronStoreGuard(jobs, asyncCallback as unknown as () => string)).toThrow(
+      "callback must be synchronous",
+    );
+    expect(withCronStoreGuard(jobs, () => "after rejection")).toBe("after rejection");
   });
 });
