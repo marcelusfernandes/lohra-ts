@@ -22,12 +22,42 @@ import {
   assertNoNativeCompileNeeded,
   assertStructuralMatch,
   extractLastToolResultContent,
+  packNpmCommand,
 } from "../scripts/pack-check.js";
 
 const COMPACT = '{"ok":true,"bytes_written":10,"path":"package-written/out.txt"}';
 // A forma exatamente como estava hardcoded na issue — com espaços — prova
 // que a comparação agora é imune à formatação, não só ao valor.
 const SPACED = '{"ok": true, "bytes_written": 10, "path": "package-written/out.txt"}';
+
+describe("pack npm command", () => {
+  let root: string | undefined;
+
+  afterEach(() => {
+    if (root !== undefined) rmSync(root, { recursive: true, force: true });
+    root = undefined;
+  });
+
+  it("runs real npm in a path with spaces, preserving argv, cwd, status and diagnostics", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "lohra pack npm "));
+    root = cwd;
+    writeFileSync(join(cwd, "package.json"), JSON.stringify({ name: "pack-portable-fixture" }));
+    const userconfig = join(cwd, "empty-npmrc");
+    writeFileSync(userconfig, "");
+    const env = {
+      ...process.env,
+      npm_config_cache: join(cwd, "npm-cache"),
+      npm_config_userconfig: userconfig,
+      npm_config_prefix: join(cwd, "npm-prefix"),
+    };
+    const result = packNpmCommand(["pkg", "get", "name"], { cwd, env }, 15_000);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toBe("pack-portable-fixture");
+    expect(() => packNpmCommand(["run", "missing-pack-script"], { cwd, env }, 15_000)).toThrow(
+      /PACK_COMMAND_FAILED:npm:1:[\s\S]*Missing script/u,
+    );
+  }, 40_000);
+});
 
 describe("assertStructuralMatch", () => {
   it("não lança quando os dois lados são estruturalmente iguais, mesmo com formatação diferente", () => {

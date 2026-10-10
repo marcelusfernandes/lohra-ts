@@ -96,6 +96,14 @@ function command(
   return result;
 }
 
+export function packNpmCommand(
+  _argv: readonly string[],
+  _options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+  _timeoutMs = 60_000,
+): ReturnType<typeof command> {
+  throw new Error("not implemented: portable pack npm command");
+}
+
 async function commandAsync(
   executable: string,
   argv: readonly string[],
