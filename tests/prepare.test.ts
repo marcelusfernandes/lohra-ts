@@ -116,4 +116,15 @@ describe("prepare portable hooks", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("reports a missing Git executable with its spawn cause", () => {
+    const dir = checkout();
+    try {
+      const result = runPrepare(dir, { PATH: join(dir, "no-executables") });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toMatch(/git hooks path.*ENOENT/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
