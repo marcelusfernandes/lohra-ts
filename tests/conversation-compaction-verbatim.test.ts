@@ -12,7 +12,7 @@
 // issue could be added there either.
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { SUMMARY_SYSTEM } from "../src/agent/aux.js";
+import { SUMMARY_SYSTEM } from "../src/agent/auxiliary.js";
 import {
   attemptCompaction,
   buildSummaryRequest,

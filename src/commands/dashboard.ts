@@ -45,7 +45,7 @@ import {
   type ChatCompletionsClient,
   type ResponsesClient,
 } from "../transports/index.js";
-import { AuxClient } from "../agent/aux.js";
+import { AuxClient } from "../agent/auxiliary.js";
 import { ClientPool } from "../agent/client-pool.js";
 import { buildOrchestrationCore, orchestrationToolHandlers } from "../orchestration/chat-wiring.js";
 import { resolveFanout } from "../orchestration/fanout-config.js";

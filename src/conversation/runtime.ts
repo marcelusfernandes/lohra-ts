@@ -6,7 +6,7 @@ import { systemPromptText } from "../context/system-prompt.js";
 import { emptyPartialStream, StreamAbortedError } from "../transports/index.js";
 import type { NormalizedResponse, SystemBands, ToolCall, Usage } from "../transports/index.js";
 import { runBounded } from "../tools/dispatch.js";
-import { summarizeWithFallback } from "../agent/aux.js";
+import { summarizeWithFallback } from "../agent/auxiliary.js";
 import { addUsage } from "./usage.js";
 import { resolveTurnSession } from "./runtime-session.js";
 import {
@@ -101,7 +101,7 @@ export interface ConversationRuntimeOptions {
   readonly environment?: Readonly<Record<string, string | undefined>>;
   /** Overrides the default summarizer. Issue #587: chat.ts/dashboard.ts wire
    * an `AuxClient.summarizer()` here; a failure falls open to the default
-   * via `summarizeWithFallback` (`src/agent/aux.ts`). */
+   * via `summarizeWithFallback` (`src/agent/auxiliary.ts`). */
   readonly summarize?: (transcript: string) => Promise<string>;
   readonly compactionHolder?: string;
   readonly minKeepMessages?: number;

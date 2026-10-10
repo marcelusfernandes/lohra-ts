@@ -30,11 +30,11 @@
 // Issue #587 (P11, compactação/título pelo AuxClient) acrescenta mais 4:
 // t (`compaction.ts`'s `headAlignedKeepCount` perde o fallback seguro
 // "manter nada"), u (`runtime.ts` para de derivar `maxTranscriptTokens` da
-// janela real), v e w (`src/agent/aux.ts`'s `summarizeWithFallback` perde o
-// catch, `auxTelemetry` para de contar chamadas) — `aux.ts` entra no
+// janela real), v e w (`src/agent/auxiliary.ts`'s `summarizeWithFallback` perde o
+// catch, `auxTelemetry` para de contar chamadas) — `auxiliary.ts` entra no
 // `srcGlobs` desta fatia pela primeira vez: 19 + 4 = 23.
 //
-// Issue #620 (follow-up do veredito da PR #617) acrescenta x: `aux.ts`'s
+// Issue #620 (follow-up do veredito da PR #617) acrescenta x: `auxiliary.ts`'s
 // `summaryBudgetFor` volta ao `maxTokens` fixo em 1024 em vez de escalar com
 // `summaryMaxTokens(estimateTokens(transcript))`, igual ao bug original que
 // a issue corrige (o resumo pelo `AuxClient` truncava as seções verbatim que
@@ -96,7 +96,7 @@ describe("mutations:t23 catalog (compaction, estimator, context window)", () => 
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("mira apenas compaction.ts (×5), runtime.ts (×6), token-estimate.ts (×3), context-window.ts (×2), windows-cache.ts (×2), session-repository.ts (×3), provider-model.ts (×1), aux.ts (×3), envelope.ts (×1), runtime-session.ts (×1), notices-repository.ts (×3)", () => {
+  it("mira apenas compaction.ts (×5), runtime.ts (×6), token-estimate.ts (×3), context-window.ts (×2), windows-cache.ts (×2), session-repository.ts (×3), provider-model.ts (×1), auxiliary.ts (×3), envelope.ts (×1), runtime-session.ts (×1), notices-repository.ts (×3)", () => {
     // Conta MUTANTES por arquivo (não edits) -- cada mutante deste catálogo
     // tem um único edit, então as duas contagens coincidem aqui, mas o
     // padrão (Set por mutante) segue mutations-t20-catalog.test.ts, que
@@ -115,7 +115,7 @@ describe("mutations:t23 catalog (compaction, estimator, context window)", () => 
       "src/catalog/windows-cache.ts": 2,
       "src/state/session-repository.ts": 3,
       "src/conversation/provider-model.ts": 1,
-      "src/agent/aux.ts": 3,
+      "src/agent/auxiliary.ts": 3,
       "src/conversation/envelope.ts": 1,
       "src/conversation/runtime-session.ts": 1,
       "src/state/notices-repository.ts": 3,
@@ -168,7 +168,7 @@ describe("mutations:t23 catalog — context-prompt-mutants.ts (doctrine, prompt 
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("mira apenas doctrine.ts (×4), system-prompt.ts (×5), discovery.ts (×4), aux.ts (×2), compaction.ts (×1)", () => {
+  it("mira apenas doctrine.ts (×4), system-prompt.ts (×5), discovery.ts (×4), auxiliary.ts (×2), compaction.ts (×1)", () => {
     const counts: Record<string, number> = {};
     for (const mutant of contextPromptMutants) {
       for (const file of new Set(mutant.edits.map((edit) => edit.file))) {
@@ -179,7 +179,7 @@ describe("mutations:t23 catalog — context-prompt-mutants.ts (doctrine, prompt 
       "src/context/doctrine.ts": 4,
       "src/context/system-prompt.ts": 5,
       "src/context/discovery.ts": 4,
-      "src/agent/aux.ts": 2,
+      "src/agent/auxiliary.ts": 2,
       "src/conversation/compaction.ts": 1,
     });
   });

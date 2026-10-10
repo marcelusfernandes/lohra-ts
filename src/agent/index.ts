@@ -1,2 +1,2 @@
-export * from "./aux.js";
+export * from "./auxiliary.js";
 export * from "./client-pool.js";

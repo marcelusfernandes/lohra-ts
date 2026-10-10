@@ -1,10 +1,10 @@
 // Issue #650 (épico #637, grupo B, item 11; veredito da PR #617,
 // non_blocking "addUsage duplicado"): prova que `addUsage` mora em UM lugar
 // só (`src/conversation/usage.ts`), que `runtime.ts` não a exporta mais, e
-// que `aux.ts` não carrega a cópia duplicada (`aux.ts:52-66` antes desta
+// que `auxiliary.ts` não carrega a cópia duplicada (`auxiliary.ts:52-66` antes desta
 // issue). RED na base: `usage.ts` não existe (import falha na coleta,
 // `not implemented` do stub se o arquivo existir vazio) e `addUsage` ainda
-// está em `runtime.ts`/`aux.ts`.
+// está em `runtime.ts`/`auxiliary.ts`.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -62,8 +62,8 @@ describe("conversation/usage — addUsage módulo folha (issue #650)", () => {
     expect(Object.hasOwn(runtimeModule, "addUsage")).toBe(false);
   });
 
-  it("aux.ts não carrega a cópia duplicada de addUsage (issue #650)", () => {
-    const source = sourceOf("src/agent/aux.ts");
+  it("auxiliary.ts não carrega a cópia duplicada de addUsage (issue #650)", () => {
+    const source = sourceOf("src/agent/auxiliary.ts");
     expect(/function addUsage/u.test(source)).toBe(false);
   });
 

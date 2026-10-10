@@ -607,13 +607,13 @@ describe("scripts/mutations/slices.json", () => {
     // separar um `tool_calls` do seu `tool`), u (`runtime.ts`'s
     // `maxTranscriptTokens` deixa de vir da janela real, voltando ao
     // default inerte de `compaction.ts`), v (`summarizeWithFallback`,
-    // `src/agent/aux.ts`, perde o `catch` — uma falha do `AuxClient`
+    // `src/agent/auxiliary.ts`, perde o `catch` — uma falha do `AuxClient`
     // derruba o turno em vez de cair para o summarizer padrão) e w
     // (`auxTelemetry` para de contar chamadas bem-sucedidas) — `src/agent/**`
-    // junta-se ao `srcGlobs` desta fatia (achado da própria issue: `aux.ts`
+    // junta-se ao `srcGlobs` desta fatia (achado da própria issue: `auxiliary.ts`
     // não tinha mutante em NENHUMA fatia): 276 + 4 = 280. A issue #620
     // (follow-up do veredito da PR #617) acrescenta x a `context-window.ts`:
-    // `aux.ts`'s `summaryBudgetFor` volta ao `maxTokens` fixo em 1024 em vez
+    // `auxiliary.ts`'s `summaryBudgetFor` volta ao `maxTokens` fixo em 1024 em vez
     // de escalar com `summaryMaxTokens(estimateTokens(transcript))`, o mesmo
     // orçamento que `buildSummaryRequest` já usava desde a #584 -- 280 + 1 =
     // 281. Issue #594 (residual de M21) acrescenta 2 a `supervision-mutants.
@@ -646,7 +646,7 @@ describe("scripts/mutations/slices.json", () => {
     // `context-prompt-mutants.ts` (mesma fatia `context-window`): 16
     // mutantes cobrindo `src/context/doctrine.ts` (4), `src/context/
     // system-prompt.ts` (5), `src/context/discovery.ts` (4) e `src/agent/
-    // aux.ts`/`src/conversation/compaction.ts` (3) — nenhum desses arquivos
+    // auxiliary.ts`/`src/conversation/compaction.ts` (3) — nenhum desses arquivos
     // tinha mutante em nenhuma fatia até aqui, apesar de cinco issues de
     // prompt (M22) terem mergeado código novo neles. A mesma issue acrescenta
     // um mutante a `self-update-mutants.ts` (`src/commands/dashboard.ts`'s

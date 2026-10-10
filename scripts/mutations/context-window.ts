@@ -43,11 +43,11 @@ const tokenEstimate = "src/context/token-estimate.ts";
 const contextWindow = "src/providers/context-window.ts";
 const windowsCache = "src/catalog/windows-cache.ts";
 const sessionRepository = "src/state/session-repository.ts";
-// Issue #587 acréscimo item 5: `src/agent/aux.ts` had no mutant in ANY
+// Issue #587 acréscimo item 5: `src/agent/auxiliary.ts` had no mutant in ANY
 // slice -- `src/agent/**` joins this fatia's own `srcGlobs` (below) rather
 // than getting a new one, since compaction moved to the `AuxClient` this
 // module exports.
-const aux = "src/agent/aux.ts";
+const aux = "src/agent/auxiliary.ts";
 // Issue #650 (item 13, veredito da PR #625): `errorEnvelope`'s own `extra`
 // fold (aux_calls/usage_total, same convention as `successEnvelope`, issue
 // #587) had no mutant of its own -- `envelope.ts` joins this fatia's own
