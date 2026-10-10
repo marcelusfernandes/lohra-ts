@@ -25,3 +25,18 @@ distintas se uma execução anterior continuar ativa. O scheduler chama
 Falha no callback produz `ok: false` e mantém a ocorrência consumida. A lista
 inicial é apenas uma descoberta de candidatos: remoção, desabilitação ou mudança
 de due antes do claim impedem o dispatch.
+
+Falhas de callback emitem `cron job <id> phase=callback cause=<causa>`; falha ao
+reivindicar emite `phase=claim` com o id e propaga; falhas de tick dentro do
+loop emitem `cron scheduler phase=tick cause=<causa>` e o loop aguarda o próximo
+intervalo. O diagnóstico usa o sink `diagnostics` quando fornecido e `console.warn`
+quando omitido. Um sink que falha propaga sua própria exceção. A validação
+inicial do store continua fora do loop e propaga imediatamente.
+
+O campo `cause` é limitado a códigos conhecidos de filesystem/SQLite,
+categorias fixas de `CronStoreError` ou ao tipo genérico `Error`/`TypeError`/
+`RangeError`/`unknown`. Mensagens livres, paths, prompt e configuração não são
+incluídos; códigos desconhecidos são reduzidos ao tipo. O id só é exibido se
+tiver o formato hexadecimal gerado pelo store, senão vira `unknown`. Essa
+sanitização permite identificar a fase e causas estruturadas sem registrar o
+texto potencialmente sensível de exceções externas.

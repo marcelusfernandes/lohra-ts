@@ -345,6 +345,26 @@ describe("runSchedulerLoop", () => {
     }
   });
 
+  it("propagates a loop diagnostics sink failure instead of swallowing it", async () => {
+    const job = store.add({ name: "n", prompt: "p", type: "once", value: 100 });
+    const sinkFailure = new Error("diagnostics sink unavailable");
+    await expect(
+      runSchedulerLoop({
+        store,
+        runJob: alwaysFails,
+        stop: new ManualStop(),
+        now: () => 100,
+        wait: () => {
+          throw new Error("loop should not wait after sink failure");
+        },
+        diagnostics: () => {
+          throw sinkFailure;
+        },
+      }),
+    ).rejects.toBe(sinkFailure);
+    expect(store.get(job.id)?.last_run_at).toBe(100);
+  });
+
   it("reports a fixed CronStoreError cause without disclosing its path", async () => {
     const stop = new ManualStop();
     const list = store.list.bind(store);
@@ -369,5 +389,33 @@ describe("runSchedulerLoop", () => {
     });
     expect(diagnosed).toEqual(["cron scheduler phase=tick cause=cron_store_invalid_json"]);
     expect(diagnosed.join(" ")).not.toContain("PRIVATE_STORE_PATH_761");
+  });
+
+  it("keeps a nested SQLite cause while dropping the wrapper message", async () => {
+    const stop = new ManualStop();
+    const list = store.list.bind(store);
+    let calls = 0;
+    vi.spyOn(store, "list").mockImplementation(() => {
+      calls += 1;
+      if (calls === 2) {
+        throw new Error("PRIVATE_SQLITE_WRAPPER_761", {
+          cause: Object.assign(new Error("PRIVATE_SQLITE_DETAIL_761"), { code: "SQLITE_BUSY" }),
+        });
+      }
+      return list();
+    });
+    const diagnosed: string[] = [];
+    await runSchedulerLoop({
+      store,
+      runJob: recorder([]),
+      stop,
+      wait: () => {
+        stop.trigger();
+        return Promise.resolve();
+      },
+      diagnostics: (message) => diagnosed.push(message),
+    });
+    expect(diagnosed).toEqual(["cron scheduler phase=tick cause=SQLITE_BUSY"]);
+    expect(diagnosed.join(" ")).not.toContain("PRIVATE_SQLITE_");
   });
 });
