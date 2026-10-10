@@ -15,8 +15,9 @@ Para migrar, faça uma janela **offline**:
 
 1. Pare todos os processos antigos que possam ler ou escrever esse `LOHRA_HOME`.
    Confirme fora do Lohra que não há outro scheduler antigo ativo.
-2. Faça backup de `cron/jobs.json` e confira que ele contém JSON válido. Não
-   altere seu conteúdo como parte da migração.
+2. Faça backup de `cron/jobs.json` sem alterar seus bytes. O store aceita o
+   valor legado `NaN` em um caso específico, então um parser JSON estrito não
+   serve como validação de integridade para todos os arquivos existentes.
 3. Somente após confirmar que nenhum processo antigo está ativo, inspecione e
    remova manualmente o diretório `cron/jobs.json.lock`, se existir. Se não for
    possível confirmar a parada de todos os escritores, mantenha o lock e não
