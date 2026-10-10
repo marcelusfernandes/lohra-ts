@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, posix, relative, resolve, sep, win32 } from "node:path";
 
@@ -71,18 +71,29 @@ const EGRESS_TOOLS: ReadonlySet<string> = new Set(["web_fetch", "web_search"]);
  * would land outside. Walking to the nearest existing ancestor resolves the
  * link itself and the answer comes out right.
  */
-function resolvedAgainstFilesystem(target: string): string {
+function resolvedAgainstFilesystem(target: string): string | null {
   const absolute = resolve(target);
   const pending: string[] = [];
   let current = absolute;
   for (;;) {
-    const real = existsSync(current) ? realpathSync(current) : null;
-    if (real !== null) return pending.length === 0 ? real : resolve(real, ...pending);
-    const parent = dirname(current);
-    // hit the filesystem root without finding anything that exists
-    if (parent === current) return absolute;
-    pending.unshift(basename(current));
-    current = parent;
+    try {
+      // lstat sees dangling links that existsSync hides. If realpath cannot
+      // resolve such a link, deny instead of treating it as an absent leaf.
+      lstatSync(current);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return null;
+      const parent = dirname(current);
+      if (parent === current) return null;
+      pending.unshift(basename(current));
+      current = parent;
+      continue;
+    }
+    try {
+      const real = realpathSync(current);
+      return pending.length === 0 ? real : resolve(real, ...pending);
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -102,6 +113,7 @@ function isWithin(target: string, root: string): boolean {
   // the target exists, its parent exists, or neither does.
   const resolvedRoot = resolvedAgainstFilesystem(root);
   const candidate = resolvedAgainstFilesystem(target);
+  if (resolvedRoot === null || candidate === null) return false;
   return isResolvedPathWithinRoot(candidate, resolvedRoot);
 }
 

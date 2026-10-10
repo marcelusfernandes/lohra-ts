@@ -19,6 +19,8 @@ recusa de egress e de filesystem em runs tainted.
   filhos são aceitos; irmãos, prefixos parecidos, outro drive e symlinks que
   escapam são recusados. Caminho para arquivo ainda não criado resolve o
   ancestral existente mais próximo, para cobrir symlink no meio do caminho.
+  Um symlink cujo alvo ainda não existe é recusado: `lstat` detecta o link e
+  a falha de `realpath` impede autorização pelo nome lexical.
 - O resultado da política é uma autorização **no dispatch dessas duas tools**.
   `terminal` não está em `FS_TOOLS` (`src/workflow/sandbox.ts:59,163`) e não é
   confinado por esta checagem. O processo filho tampouco recebe um sandbox do
@@ -38,7 +40,7 @@ por `fs_allow`/`egress_allow`.
 ## Evidência
 
 - `tests/workflow-sandbox.test.ts`: raiz, filho, irmão, prefixo, drive distinto
-  e escape por symlink; os testes preexistentes de egress seguem exigindo
-  recusa fora da allowlist.
+  e escape por symlink, inclusive alvo ainda inexistente com `write_file` real;
+  os testes preexistentes de egress seguem exigindo recusa fora da allowlist.
 - `npm run prova -- windows-workflow-root` declara os testes de sandbox e de
   recusas em `prova/windows-workflow-root.ts`.
