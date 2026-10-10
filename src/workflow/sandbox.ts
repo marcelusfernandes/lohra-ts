@@ -119,6 +119,9 @@ function isWithin(target: string, root: string): boolean {
 
 function fsAllowed(rawPath: unknown, roots: readonly string[]): boolean {
   if (typeof rawPath !== "string" || rawPath === "") return false;
+  // POSIX can traverse a symlink before `..`; resolve() would erase that
+  // segment before realpath sees the link. Refuse ambiguous raw traversal.
+  if (rawPath.split(/[\\/]/u).includes("..")) return false;
   return roots.some((root) => isWithin(rawPath, root));
 }
 
