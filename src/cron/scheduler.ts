@@ -7,14 +7,10 @@ export interface TickResult {
 }
 
 /**
- * One scheduler pass. Ports scheduler.py's `tick()` with a deliberate, ADR-driven difference:
- * the oracle's `job.get("id")` sits OUTSIDE the per-job try block, so a non-dict entry aborts the
- * WHOLE tick (contradicting its own docstring) — this is R7/assertion 36, `[oracle-only]` by
- * construction, since `store.list()` already throws CronStoreError before a malformed entry could
- * ever reach this loop. The candidate never has that state to reproduce.
- *
- * A failed `runJob` still marks `last_run_at` — deliberate in the oracle (avoids a retry storm at
- * the cost of skipping the window) and reproduced here, not "fixed".
+ * One scheduler pass. A list is only a candidate snapshot; each due candidate must win a fresh
+ * store claim before dispatch. The claim persists before the callback, so a failed callback
+ * consumes that occurrence and cannot trigger a retry storm. An invalid store still throws from
+ * `list()` before any candidate is considered.
  */
 export async function tick(
   store: CronStore,
@@ -34,13 +30,14 @@ export async function tick(
       }
       continue;
     }
+    const claimed = store.tryClaimDue(job.id, options.now);
+    if (claimed === null) continue;
     let ok = true;
     try {
-      await runJob(job);
+      await runJob(claimed);
     } catch {
       ok = false;
     }
-    store.markRun(job.id, options.now);
     results.push({ jobId: job.id, ok });
   }
   return results;
