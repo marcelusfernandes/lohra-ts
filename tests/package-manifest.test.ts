@@ -70,7 +70,7 @@ function npmPackDryRun(
   });
   if (resultado.error) {
     throw new Error(
-      `npm pack --dry-run --json não iniciou (${resultado.error.code ?? "spawn"}): ${resultado.error.message}`,
+      `npm pack --dry-run --json não iniciou: ${resultado.error.message}`,
       { cause: resultado.error },
     );
   }
