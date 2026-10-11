@@ -1,0 +1,14 @@
+{
+  "sha": "4f70966",
+  "node": "v20.20.2",
+  "mechanism": "conpty_ctrlc_with_active_ws",
+  "pid": 0,
+  "httpReady": true,
+  "wsOpen": true,
+  "exitWhileWsOpen": null,
+  "wsClosed": true,
+  "exitAfterWsClose": { "exitCode": 0, "signal": null },
+  "stateExisted": true,
+  "stateRemovable": true,
+  "banner": true
+}

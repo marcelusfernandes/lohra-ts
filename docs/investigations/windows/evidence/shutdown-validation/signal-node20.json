@@ -1,0 +1,9 @@
+{
+  "node": "v20.20.2",
+  "pid": 45468,
+  "sentCtrlC": true,
+  "exitCode": 0,
+  "marker": "SIGINT_HANDLER",
+  "elapsedMs": 1278,
+  "readyObserved": true
+}
