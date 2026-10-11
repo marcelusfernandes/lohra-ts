@@ -18,7 +18,7 @@ node node_modules/vitest/vitest.mjs run tests/workflow-service-durability.test.t
 
 Para isolar a correção de produto, repetir o corpus em clone do SHA histórico sem tocar no teste, substituindo **somente** `src/workflow/sandbox.ts` pelo conteúdo de `d39b99fddf6be58646d684994faac49e51a60cf9:src/workflow/sandbox.ts`. O arquivo contém a troca de comparação por prefixo com `/` para `relative()`/componentes da plataforma; após a substituição, o corpus passou 89/89 nos dois Nodes. O blob do teste permaneceu igual.
 
-O probe de handle abaixo foi executado no clone atual com `node node_modules/tsx/dist/cli.mjs <probe.mts>`. Ele fez `rmSync` deliberadamente **antes** de `close()` e depois dela, sobre arquivo temporário próprio. [Fonte executada, byte a byte](handle-probe-source.txt), SHA256 `BED595E50FE941D786AFB3671AA6B748662DA8B5A3FB6191B9545BB047AA1387` (o bloco abaixo é formatado para leitura).
+O probe de handle abaixo foi executado no clone atual com `node node_modules/tsx/dist/cli.mjs <probe.mts>`. Ele fez `rmSync` deliberadamente **antes** de `close()` e depois dela, sobre arquivo temporário próprio. [Fonte executada](handle-probe-source.txt); SHA256 da cópia Windows com CRLF: `BED595E50FE941D786AFB3671AA6B748662DA8B5A3FB6191B9545BB047AA1387` (Git normaliza EOL; o bloco abaixo é formatado para leitura).
 
 ```ts
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
@@ -56,7 +56,7 @@ if (openBefore !== true || beforeCode !== "EBUSY" || openAfter !== false || !rem
   process.exitCode = 1;
 ```
 
-Para desmascarar as asserções do SHA histórico, a fonte abaixo alterou somente **duas** cláusulas `finally` do teste em clone temporário; o repositório da issue permaneceu intacto. Em cada bloco acrescentou `if (connection.database.open) connection.close();` antes de `rmSync(root)`. Em Node 20/22 o mesmo subconjunto saiu 1 por asserção de paths, e não por `EBUSY`. [Fonte executada no Node 20, byte a byte](close-probe-source.txt), SHA256 `C727EF451FE8B0045A4E4F90D795987A9092249620F11F896F2E1378D4C87EEC` (o bloco abaixo é formatado para leitura). A sonda Node 22 usou a mesma substituição com o caminho do clone fixo em vez de `process.cwd()`; a mudança de path não toca o teste substituído.
+Para desmascarar as asserções do SHA histórico, a fonte abaixo alterou somente **duas** cláusulas `finally` do teste em clone temporário; o repositório da issue permaneceu intacto. Em cada bloco acrescentou `if (connection.database.open) connection.close();` antes de `rmSync(root)`. Em Node 20/22 o mesmo subconjunto saiu 1 por asserção de paths, e não por `EBUSY`. [Fonte executada no Node 20](close-probe-source.txt); SHA256 da cópia Windows com CRLF: `C727EF451FE8B0045A4E4F90D795987A9092249620F11F896F2E1378D4C87EEC` (Git normaliza EOL; o bloco abaixo é formatado para leitura). A sonda Node 22 usou a mesma substituição com o caminho do clone fixo em vez de `process.cwd()`; a mudança de path não toca o teste substituído.
 
 ```js
 import { readFileSync, writeFileSync } from "node:fs";
