@@ -51,7 +51,7 @@ describe("Windows terminal execution", () => {
     },
   );
 
-  it("reports a spawn failure with the missing shell as a cause", async () => {
+  it("reports a spawn failure with a concrete cause on each platform", async () => {
     workspace = mkdtempSync(join(tmpdir(), "lohra terminal spawn ü "));
     const missing = join(workspace, "missing-shell.exe");
     vi.stubEnv(process.platform === "win32" ? "ComSpec" : "SHELL", missing);
@@ -59,9 +59,21 @@ describe("Windows terminal execution", () => {
       { command: process.platform === "win32" ? "echo OUT" : "printf OUT", cwd: workspace },
       { approvalManager: new ApprovalManager() },
     );
-    const result = JSON.parse(response) as { error: string; command: string };
-    expect(result.error).toContain("could not run command:");
-    expect(result.error).toContain(missing);
+    const result = JSON.parse(response) as {
+      error?: string;
+      stderr?: string;
+      exit_code?: number;
+    };
+    if (process.platform === "win32") {
+      expect(result.error).toContain("could not run command:");
+      expect(result.error).toContain(missing);
+    } else {
+      // On POSIX, node-pty reports an execvp failure on the PTY stream after
+      // spawn rather than throwing synchronously.
+      expect(result.exit_code).toBe(1);
+      expect(result.stderr).toContain("execvp(3) failed");
+      expect(result.stderr).toContain("No such file or directory");
+    }
   });
 
   it("reports a shell syntax/command failure instead of an empty success", async () => {
