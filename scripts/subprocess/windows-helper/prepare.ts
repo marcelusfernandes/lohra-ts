@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 const EXE = "helper.exe";
 const MANIFEST = "manifest.json";
@@ -97,7 +97,17 @@ function digest(bytes: Buffer | string): string {
 }
 function absolute(path: string, code: string): string {
   if (!isAbsolute(path) || path.includes("\0")) throw new WindowsHelperPrepareError(code);
-  return resolve(path);
+  const resolved = resolve(path);
+  let parent = dirname(resolved);
+  try {
+    while (parent !== dirname(parent)) {
+      if (lstatSync(parent).isSymbolicLink()) throw new Error("reparse ancestor");
+      parent = dirname(parent);
+    }
+  } catch (cause) {
+    throw new WindowsHelperPrepareError(code, cause);
+  }
+  return resolved;
 }
 function bounded(value: number, maximum: number, code: string): number {
   if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {

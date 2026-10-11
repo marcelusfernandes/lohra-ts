@@ -149,6 +149,22 @@ describe("preparação explícita do helper Windows", () => {
     expect(readFileSync(marker, "utf8")).toBe("keep");
   });
 
+  it("recusa ancestral reparse antes de criar destino", () => {
+    const fixture = workspace();
+    const target = join(fixture.root, "target-parent");
+    const link = join(fixture.root, "linked-parent");
+    mkdirSync(target);
+    symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
+    expect(() =>
+      prepareWindowsHelper({
+        sources: [fixture.source],
+        outputDir: join(link, "new-output"),
+        compilerPath: fixture.compiler,
+      }),
+    ).toThrow(/DESTINATION_INVALID/u);
+    expect(existsSync(join(target, "new-output"))).toBe(false);
+  });
+
   it("distingue timeout, excesso de saída e falha de lançamento com causa", () => {
     for (const code of ["ETIMEDOUT", "ENOBUFS", "ENOENT"] as const) {
       const fixture = workspace();
