@@ -183,9 +183,18 @@ function runVitestReporterJson(directory: string, args: readonly string[]): RunO
   const scratch = mkdtempSync(join(tmpdir(), "lohra-vitest-out-"));
   const outputFile = join(scratch, "vitest.json");
   try {
+    const vitestPackage = join(directory, "node_modules/vitest");
+    const metadata: unknown = JSON.parse(readFileSync(join(vitestPackage, "package.json"), "utf8"));
+    const bin =
+      typeof metadata === "object" && metadata !== null && "bin" in metadata
+        ? metadata.bin
+        : undefined;
+    const entry =
+      typeof bin === "object" && bin !== null && "vitest" in bin ? bin.vitest : undefined;
+    if (typeof entry !== "string") throw new Error("installed vitest has no bin.vitest entrypoint");
     const result = spawnSync(
-      join(directory, "node_modules/.bin/vitest"),
-      vitestArgs(args, outputFile),
+      process.execPath,
+      [resolve(vitestPackage, entry), ...vitestArgs(args, outputFile)],
       {
         cwd: directory,
         encoding: "utf8",
