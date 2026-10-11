@@ -2,7 +2,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { startStub } from "./stub/server.js";
@@ -52,7 +52,13 @@ const NATIVE_MODULE_CHECKS: readonly NativeModuleCheck[] = [
   {
     module: "node-pty",
     prebuiltBinary: (platform, arch) =>
-      join("node_modules", "node-pty", "prebuilds", `${platform}-${arch}`, "pty.node"),
+      join(
+        "node_modules",
+        "node-pty",
+        "prebuilds",
+        `${platform}-${arch}`,
+        platform === "win32" ? "conpty.node" : "pty.node",
+      ),
     compiledMarker: join("node_modules", "node-pty", "build", "config.gypi"),
   },
 ];
@@ -77,6 +83,67 @@ export function assertNoNativeCompileNeeded(options: {
   }
 }
 
+/** Keep the native DLL in a child process: Windows cannot unlink a loaded .node during cleanup. */
+export function assertConsumerPtyWorks(consumerRoot: string): void {
+  const probe = String.raw`
+    const { createRequire } = require('node:module');
+    const { writeSync } = require('node:fs');
+    const { join } = require('node:path');
+    const cause = (error) => {
+      const code = typeof error?.code === 'string' ? error.code : undefined;
+      const name = typeof error?.name === 'string' ? error.name : 'unknown';
+      const message = typeof error?.message === 'string'
+        ? error.message.replace(/[\r\n]/g, ' ').slice(0, 240) : '';
+      return code ?? (message === '' ? name : name + ':' + message);
+    };
+    let pty;
+    try {
+      pty = createRequire(join(process.cwd(), 'package.json'))('node-pty');
+    } catch (error) {
+      writeSync(2, 'PACK_NATIVE_ADDON_LOAD_FAILED:node-pty:' + cause(error));
+      process.exit(1);
+    }
+    const marker = 'PACK_PTY_READY';
+    let terminal;
+    try {
+      terminal = pty.spawn(process.execPath, ['-e', "process.stdout.write('PACK_PTY_READY')"], {
+        name: 'xterm-256color', cols: 80, rows: 24,
+        cwd: process.cwd(), env: { ...process.env, TERM: 'xterm-256color' }
+      });
+    } catch (error) {
+      writeSync(2, 'PACK_PTY_SPAWN_FAILED:' + cause(error));
+      process.exit(1);
+    }
+    let output = '';
+    const timeout = setTimeout(() => {
+      terminal.kill();
+      writeSync(2, 'PACK_PTY_TIMEOUT');
+      process.exit(1);
+    }, 15000);
+    terminal.onData((chunk) => { output = (output + chunk).slice(-4096); });
+    terminal.onExit(({ exitCode }) => {
+      clearTimeout(timeout);
+      if (exitCode === 0 && output.includes(marker)) process.exit(0);
+      writeSync(2, 'PACK_PTY_FAILED:' + String(exitCode));
+      process.exit(1);
+    });
+  `;
+  const result = spawnSync(process.execPath, ["-e", probe], {
+    cwd: consumerRoot,
+    encoding: "utf8",
+    timeout: 20_000,
+    maxBuffer: 64 * 1024,
+  });
+  if (result.error !== undefined) {
+    throw new Error(`PACK_PTY_PROBE_FAILED:${result.error.message}`, { cause: result.error });
+  }
+  if (result.status !== 0) {
+    throw new Error(
+      `PACK_PTY_PROBE_FAILED:${String(result.status ?? result.signal)}:${result.stderr}`,
+    );
+  }
+}
+
 function command(
   executable: string,
   argv: readonly string[],
@@ -90,6 +157,12 @@ function command(
     timeout: timeoutMs,
     maxBuffer: 16 * 1024 * 1024,
   });
+  if (result.error !== undefined) {
+    const code = (result.error as NodeJS.ErrnoException).code ?? "unknown";
+    throw new Error(`PACK_COMMAND_FAILED:${executable}:${code}:${result.error.message}`, {
+      cause: result.error,
+    });
+  }
   if (result.status !== 0)
     throw new Error(
       `PACK_COMMAND_FAILED:${executable}:${String(result.status ?? result.signal ?? "unknown")}:${result.stderr}`,
@@ -148,7 +221,10 @@ async function commandAsync(
       });
       child.once("error", (error) => {
         clearTimeout(timeout);
-        reject(error);
+        const code = (error as NodeJS.ErrnoException).code ?? "unknown";
+        reject(
+          new Error(`PACK_COMMAND_FAILED:${executable}:${code}:${error.message}`, { cause: error }),
+        );
       });
       child.once("close", (code, signal) => {
         clearTimeout(timeout);
@@ -162,6 +238,36 @@ async function commandAsync(
       });
     },
   );
+}
+
+function installedCliPath(consumerRoot: string): string {
+  const packageRoot = resolve(consumerRoot, "node_modules", "lohra-ts");
+  const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as {
+    bin?: { lohra?: unknown };
+  };
+  const relativeBin = manifest.bin?.lohra;
+  if (typeof relativeBin !== "string") throw new Error("PACK_BIN_MISSING");
+  const binPath = resolve(packageRoot, relativeBin);
+  if (!binPath.startsWith(`${packageRoot}${sep}`) || !existsSync(binPath)) {
+    throw new Error("PACK_BIN_MISSING");
+  }
+  return binPath;
+}
+
+export function runConsumerCliSync(
+  consumerRoot: string,
+  argv: readonly string[],
+  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+): ReturnType<typeof command> {
+  return command(process.execPath, [installedCliPath(consumerRoot), ...argv], options);
+}
+
+export async function runConsumerCliAsync(
+  consumerRoot: string,
+  argv: readonly string[],
+  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+): Promise<{ readonly stdout: string; readonly stderr: string }> {
+  return await commandAsync(process.execPath, [installedCliPath(consumerRoot), ...argv], options);
 }
 
 /** Igualdade estrutural recursiva — nunca `JSON.stringify(a) === JSON.stringify(b)`
@@ -318,6 +424,7 @@ async function main(): Promise<void> {
       platform: process.platform,
       arch: process.arch,
     });
+    assertConsumerPtyWorks(installDirectory);
 
     const projected = join(root, "requests.jsonl");
     const raw = join(root, "requests-raw.jsonl");
@@ -383,8 +490,6 @@ async function main(): Promise<void> {
     const address = server.address();
     if (address === null || typeof address === "string")
       throw new Error("PACK_STUB_ADDRESS_MISSING");
-    const bin = resolve(installDirectory, "node_modules/.bin/lohra");
-    if (!existsSync(bin)) throw new Error("PACK_BIN_MISSING");
     const isolatedEnvironment: NodeJS.ProcessEnv = {
       PATH: `${dirname(process.execPath)}${delimiter}/bin`,
       HOME: home,
@@ -401,10 +506,13 @@ async function main(): Promise<void> {
       version?: unknown;
     };
     if (typeof manifest.version !== "string") throw new Error("PACK_MANIFEST_VERSION_MISSING");
-    const version = command(bin, ["--version"], { cwd: project, env: isolatedEnvironment });
+    const version = runConsumerCliSync(installDirectory, ["--version"], {
+      cwd: project,
+      env: isolatedEnvironment,
+    });
     if (version.stdout !== `lohra ${manifest.version}\n`) throw new Error("PACK_VERSION_MISMATCH");
-    const turn = await commandAsync(
-      bin,
+    const turn = await runConsumerCliAsync(
+      installDirectory,
       ["chat", "package smoke", "--json", "--provider", "ollama", "--model", "stub-coder:1b"],
       { cwd: project, env: isolatedEnvironment },
     );

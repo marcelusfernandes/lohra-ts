@@ -20,9 +20,12 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   assertNoNativeCompileNeeded,
+  assertConsumerPtyWorks,
   assertStructuralMatch,
   extractLastToolResultContent,
   packNpmCommand,
+  runConsumerCliAsync,
+  runConsumerCliSync,
 } from "../scripts/pack-check.js";
 
 const COMPACT = '{"ok":true,"bytes_written":10,"path":"package-written/out.txt"}';
@@ -69,6 +72,65 @@ describe("pack npm command", () => {
     }
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toMatch(/PACK_COMMAND_FAILED:npm:ENOENT:/u);
+    expect((failure as Error & { cause?: NodeJS.ErrnoException }).cause?.code).toBe("ENOENT");
+  });
+});
+
+describe("installed consumer CLI", () => {
+  let root: string | undefined;
+
+  afterEach(() => {
+    if (root !== undefined) rmSync(root, { recursive: true, force: true });
+    root = undefined;
+  });
+
+  function fixture(): string {
+    root = mkdtempSync(join(tmpdir(), "lohra pack cli "));
+    const installed = join(root, "node_modules", "lohra-ts");
+    mkdirSync(join(installed, "dist"), { recursive: true });
+    writeFileSync(
+      join(installed, "package.json"),
+      JSON.stringify({ bin: { lohra: "dist/cli.js" } }),
+    );
+    writeFileSync(
+      join(installed, "dist", "cli.js"),
+      "process.stdout.write(JSON.stringify({args:process.argv.slice(2),cwd:process.cwd()}))",
+    );
+    return root;
+  }
+
+  it("runs the installed JavaScript bin with Node and preserves arguments and cwd", () => {
+    const consumer = fixture();
+    const result = runConsumerCliSync(consumer, ["--version", "argument with spaces"], {
+      cwd: consumer,
+    });
+    expect(JSON.parse(result.stdout)).toEqual({
+      args: ["--version", "argument with spaces"],
+      cwd: consumer,
+    });
+  });
+
+  it("uses the same installed bin for async execution", async () => {
+    const consumer = fixture();
+    const result = await runConsumerCliAsync(consumer, ["chat", "argument with spaces"], {
+      cwd: consumer,
+    });
+    expect(JSON.parse(result.stdout)).toEqual({
+      args: ["chat", "argument with spaces"],
+      cwd: consumer,
+    });
+  });
+
+  it("preserves the spawnSync error code and cause when launch fails", () => {
+    const consumer = fixture();
+    let failure: unknown;
+    try {
+      runConsumerCliSync(consumer, ["--version"], { cwd: join(consumer, "missing") });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(/PACK_COMMAND_FAILED:.*:ENOENT:/u);
     expect((failure as Error & { cause?: NodeJS.ErrnoException }).cause?.code).toBe("ENOENT");
   });
 });
@@ -156,8 +218,8 @@ function betterSqlite3Binary(root: string): void {
   );
 }
 
-function nodePtyBinary(root: string, platform: string, arch: string): void {
-  writeFile(root, join("node_modules", "node-pty", "prebuilds", `${platform}-${arch}`, "pty.node"));
+function nodePtyBinary(root: string, platform: string, arch: string, binary = "pty.node"): void {
+  writeFile(root, join("node_modules", "node-pty", "prebuilds", `${platform}-${arch}`, binary));
 }
 
 describe("assertNoNativeCompileNeeded", () => {
@@ -205,6 +267,62 @@ describe("assertNoNativeCompileNeeded", () => {
     expect(() => {
       assertNoNativeCompileNeeded({ consumerRoot: root as string, platform: "linux", arch: "x64" });
     }).not.toThrow();
+  });
+
+  it("aceita conpty.node no Windows x64 mesmo sem pty.node", () => {
+    root = mkdtempSync(join(tmpdir(), "lohra-pack-native-"));
+    betterSqlite3Binary(root);
+    nodePtyBinary(root, "win32", "x64", "conpty.node");
+    expect(() => {
+      assertNoNativeCompileNeeded({ consumerRoot: root as string, platform: "win32", arch: "x64" });
+    }).not.toThrow();
+  });
+
+  it("recusa pty.node no Windows x64 quando conpty.node está ausente", () => {
+    root = mkdtempSync(join(tmpdir(), "lohra-pack-native-"));
+    betterSqlite3Binary(root);
+    nodePtyBinary(root, "win32", "x64");
+    expect(() => {
+      assertNoNativeCompileNeeded({ consumerRoot: root as string, platform: "win32", arch: "x64" });
+    }).toThrow(/PACK_NATIVE_PREBUILD_MISSING:node-pty/u);
+  });
+});
+
+describe("consumer PTY", () => {
+  it("carrega o addon instalado e cria um PTY real", () => {
+    expect(() => {
+      assertConsumerPtyWorks(process.cwd());
+    }).not.toThrow();
+  }, 20_000);
+
+  it("falha de modo explícito quando o addon não pode ser carregado", () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-pack-pty-missing-"));
+    try {
+      writeFileSync(join(root, "package.json"), "{}");
+      expect(() => {
+        assertConsumerPtyWorks(root);
+      }).toThrow(/PACK_NATIVE_ADDON_LOAD_FAILED:node-pty:MODULE_NOT_FOUND/u);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the spawn failure cause from a consumer addon", () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-pack-pty-failed-"));
+    try {
+      const addon = join(root, "node_modules", "node-pty");
+      mkdirSync(addon, { recursive: true });
+      writeFileSync(join(root, "package.json"), "{}");
+      writeFileSync(
+        join(addon, "index.js"),
+        "exports.spawn = () => { const error = new Error('sentinel'); error.code = 'PTY_SENTINEL'; throw error; };",
+      );
+      expect(() => {
+        assertConsumerPtyWorks(root);
+      }).toThrow(/PACK_PTY_SPAWN_FAILED:PTY_SENTINEL/u);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
