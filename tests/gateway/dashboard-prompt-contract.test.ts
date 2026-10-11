@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 
 import { runDashboard, type DashboardCommandOptions } from "../../src/commands/dashboard.js";
+import { resolvePaths } from "../../src/config/paths.js";
 import { registerProvider } from "../../src/providers/registry.js";
 
 const roots: string[] = [];
@@ -161,6 +162,7 @@ describe("dashboard.ts's real prompt (issue #580 AC 3): same inputs as chat's sn
           shutdown = handler;
         },
       };
+      expect(resolvePaths(options.environment).home).toBe(home);
       const donePromise = runDashboard(options);
       const boundLine = await waitForStderrLine(stderrLines, "Lohra dashboard:");
       const port = Number(boundLine.match(/:(\d+)\n$/)?.[1]);
@@ -265,6 +267,7 @@ describe("dashboard.ts's real prompt (issue #580 AC 3): same inputs as chat's sn
           shutdown = handler;
         },
       };
+      expect(resolvePaths(options.environment).home).toBe(home);
       const donePromise = runDashboard(options);
       const boundLine = await waitForStderrLine(stderrLines, "Lohra dashboard:");
       const port = Number(boundLine.match(/:(\d+)\n$/)?.[1]);
