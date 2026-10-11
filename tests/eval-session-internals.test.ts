@@ -84,7 +84,13 @@ describe("runInProcess: restauração de cwd (issue #607 item 7)", () => {
     } catch (error) {
       failure = { error };
     } finally {
-      if (slowPending) resolveSlow?.(0);
+      if (slowPending) {
+        resolveSlow?.(0);
+        // Deixa o `.finally` tardio de A completar antes de soltar o listener
+        // e os diretórios, inclusive quando uma asserção anterior falhou.
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      cleanupErrors.push(...unhandled);
       let restored = false;
       try {
         process.chdir(startedAt);
