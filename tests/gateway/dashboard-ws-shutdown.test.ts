@@ -213,15 +213,13 @@ describe("dashboard shutdown with active WebSockets", () => {
     });
     try {
       const closed = closedWebSocket(ws);
+      const outcomePromise = fixture.done.then(
+        () => "resolved",
+        (error: unknown) => error,
+      );
       fixture.shutdown();
       expect(await within(closed, 3_000)).not.toBe("timeout");
-      const outcome = await within(
-        fixture.done.then(
-          () => "resolved",
-          (error: unknown) => error,
-        ),
-        12_000,
-      );
+      const outcome = await within(outcomePromise, 12_000);
       expect(outcome).toBe(cause);
       await rebind(fixture.port);
       assertStateReleased(fixture);
@@ -247,14 +245,12 @@ describe("dashboard shutdown with active WebSockets", () => {
         return undefined;
       });
     try {
-      fixture.shutdown();
-      const outcome = await within(
-        fixture.done.then(
-          () => "resolved",
-          (error: unknown) => error,
-        ),
-        12_000,
+      const outcomePromise = fixture.done.then(
+        () => "resolved",
+        (error: unknown) => error,
       );
+      fixture.shutdown();
+      const outcome = await within(outcomePromise, 12_000);
       expect(outcome).toBeInstanceOf(AggregateError);
       expect((outcome as AggregateError).errors).toEqual([socketCause, serverCause]);
       await rebind(fixture.port);
