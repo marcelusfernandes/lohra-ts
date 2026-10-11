@@ -62,7 +62,7 @@ it("launches the candidate via --import tsx, never through tsx's cli.mjs wrapper
     { cwd?: string; env?: Record<string, string> },
   ];
   expect(command).toBe(process.execPath);
-  expect(args.some((arg) => arg.includes("tsx/dist/cli.mjs"))).toBe(false);
+  expect(args.some((arg) => /tsx[\\/]dist[\\/]cli\.mjs/u.test(arg))).toBe(false);
 
   // The candidate is launched via `--import <tsx loader>`, immediately
   // followed by the CLI entry and, unchanged, the same argv this function
@@ -70,11 +70,12 @@ it("launches the candidate via --import tsx, never through tsx's cli.mjs wrapper
   const importIndex = args.indexOf("--import");
   expect(importIndex).toBeGreaterThanOrEqual(0);
   expect(args[importIndex + 1]).toBe(import.meta.resolve("tsx"));
-  expect(args[importIndex + 2]).toBe(resolve(import.meta.dirname, "../..", "src/cli.ts"));
-
-  const entryIndex = args.findIndex((arg) => arg.endsWith("/src/cli.ts"));
-  expect(entryIndex).toBe(importIndex + 2);
-  expect(args.slice(entryIndex + 1)).toEqual([
+  const expectedEntry = resolve(import.meta.dirname, "../..", "src/cli.ts");
+  expect(args[importIndex + 2]).toBe(expectedEntry);
+  expect(args).toEqual([
+    "--import",
+    import.meta.resolve("tsx"),
+    expectedEntry,
     "dashboard",
     "--port",
     "0",
