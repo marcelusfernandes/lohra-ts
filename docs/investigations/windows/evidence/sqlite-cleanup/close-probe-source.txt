@@ -1,0 +1,22 @@
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+const path = join(process.cwd(), 'tests/workflow-service-durability.test.ts');
+let source = readFileSync(path, 'utf8');
+const titles = [
+  'the leaf dispatch of a launched run carries the OPERATOR policy, not the spec',
+  'installs one sandbox per ACQUISITION and disposes only its own',
+];
+for (const title of titles) {
+  const start = source.indexOf(`it("${title}"`);
+  if (start < 0) throw new Error(`missing ${title}`);
+  const next = source.indexOf('\n  it("', start + 4);
+  const end = next < 0 ? source.length : next;
+  const block = source.slice(start, end);
+  const needle = /(^    \} finally \{\r?\n)(^      rmSync\(root, \{ recursive: true, force: true \}\);)/gm;
+  const matches = [...block.matchAll(needle)];
+  if (matches.length !== 1) throw new Error(`expected one finally cleanup in ${title}, got ${matches.length}`);
+  const patched = block.replace(needle, '$1      if (connection.database.open) connection.close();\n$2');
+  source = source.slice(0, start) + patched + source.slice(end);
+}
+writeFileSync(path, source);
+console.log(JSON.stringify({ titles, inserted: (source.match(/if \(connection\.database\.open\) connection\.close\(\)/g) ?? []).length }));
