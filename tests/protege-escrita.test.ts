@@ -92,7 +92,10 @@ function lerComFalha(cwd: string, reader: "absent" | "failed-partial"): HookRun 
     const bin = path.join(cwd, "reader-failure-bin");
     mkdirSync(bin, { recursive: true });
     const fakeCat = path.join(bin, "cat");
-    writeFileSync(fakeCat, '#!/bin/sh\nprintf "partial-secret-value"\nexit 17\n');
+    writeFileSync(
+      fakeCat,
+      '#!/bin/sh\nprintf "partial-secret-value"\nprintf "reader-secret-value" >&2\nexit 17\n',
+    );
     chmodSync(fakeCat, 0o755);
     env.PATH = [bin, executableDir].join(path.delimiter);
   } else {
@@ -100,6 +103,8 @@ function lerComFalha(cwd: string, reader: "absent" | "failed-partial"): HookRun 
   }
   const readerProbe = spawnSync(shell, ["-c", "command -v cat"], { cwd, env, encoding: "utf8" });
   expect(readerProbe.status).toBe(reader === "absent" ? 1 : 0);
+  const nodeProbe = spawnSync(shell, ["-c", "command -v node"], { cwd, env, encoding: "utf8" });
+  expect(nodeProbe.status).toBe(0);
   const input = JSON.stringify({
     tool_name: "Write",
     tool_input: { file_path: path.join(cwd, "docs", "reference", "novo.md") },
@@ -154,6 +159,7 @@ describe("protege-escrita.sh", () => {
     const result = lerComFalha(root, "absent");
     expectDenied(result);
     expect(result.stdout).toMatch(/falha de leitura do payload/u);
+    expect(result.stdout).toMatch(/status 127/u);
     expect(result.stdout + result.stderr).not.toMatch(/payload-secret-value/u);
   });
 
@@ -161,7 +167,10 @@ describe("protege-escrita.sh", () => {
     const result = lerComFalha(root, "failed-partial");
     expectDenied(result);
     expect(result.stdout).toMatch(/falha de leitura do payload/u);
-    expect(result.stdout + result.stderr).not.toMatch(/partial-secret-value|payload-secret-value/u);
+    expect(result.stdout).toMatch(/status 17/u);
+    expect(result.stdout + result.stderr).not.toMatch(
+      /partial-secret-value|reader-secret-value|payload-secret-value/u,
+    );
   });
 
   it("caminho relativo a partir de um subdiretório: nega", () => {
