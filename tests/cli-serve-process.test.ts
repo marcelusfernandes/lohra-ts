@@ -69,9 +69,9 @@ interface ProcessObservation {
 async function observeServeProcess(
   buildArgs: (port: number) => readonly string[],
 ): Promise<ProcessObservation> {
+  const port = await allocatePort();
   const runtimeRoot = mkdtempSync(join(tmpdir(), "lohra-serve-parser-process-"));
   const home = join(runtimeRoot, "home");
-  const port = await allocatePort();
   const child = spawn(
     process.execPath,
     ["--import", "tsx", resolve(root, "src/cli.ts"), "serve", ...buildArgs(port)],
