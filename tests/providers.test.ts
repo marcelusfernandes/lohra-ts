@@ -176,7 +176,7 @@ describe("public provider commands", () => {
   it("lists absent, valid and broken tiers read-only", async () => {
     const home = root();
     const base = join(home, ".lohra");
-    const environment: Record<string, string> = { HOME: home };
+    const environment: Record<string, string> = { HOME: home, LOHRA_HOME: base };
     expect(environment.LOHRA_HOME).toBe(base);
     mkdirSync(base, { recursive: true });
     expect((await invoke(["tiers", "list"], environment)).code).toBe(0);

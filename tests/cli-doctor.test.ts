@@ -548,8 +548,14 @@ describe("doctor × chat, chat_default_provider respeita a rota (issue #633)", (
   it("assinatura ativa + chave no .env: chat_default_provider é o provedor que chat realmente usa nessa rota", async () => {
     const base = mkdtempSync(join(tmpdir(), "lohra-cli-test-t633-"));
     temporaryDirectories.push(base);
-    const env: Record<string, string> = { HOME: base, PATH: "/usr/bin:/bin", COLUMNS: "80" };
     const home = join(base, ".lohra");
+    const env: Record<string, string> = {
+      HOME: base,
+      LOHRA_HOME: home,
+      CODEX_HOME: join(base, "codex"),
+      PATH: "/usr/bin:/bin",
+      COLUMNS: "80",
+    };
     expect(env.LOHRA_HOME).toBe(home);
     expect(env.CODEX_HOME).toBe(join(base, "codex"));
     enable(home);
@@ -624,8 +630,14 @@ describe("doctor × chat, chat_default_provider respeita a rota (issue #633)", (
   it("route.error (preferência subscription inativa): chat_default_provider é null e o warn ollama-sem-chave não emite", async () => {
     const base = mkdtempSync(join(tmpdir(), "lohra-cli-test-t633-"));
     temporaryDirectories.push(base);
-    const env: Record<string, string> = { HOME: base, PATH: "/usr/bin:/bin", COLUMNS: "80" };
     const home = join(base, ".lohra");
+    const env: Record<string, string> = {
+      HOME: base,
+      LOHRA_HOME: home,
+      CODEX_HOME: join(base, "codex"),
+      PATH: "/usr/bin:/bin",
+      COLUMNS: "80",
+    };
     expect(env.LOHRA_HOME).toBe(home);
     expect(env.CODEX_HOME).toBe(join(base, "codex"));
     // `preference=subscription` sem `enable()`: subscriptionActive fica
