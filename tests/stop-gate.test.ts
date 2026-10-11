@@ -7,12 +7,12 @@
 // ignora todas e roda tsc/prova de verdade. A prova real não roda aqui: o caso
 // "sem bench" só prova que a seam é ignorada; a invocação real é a do próprio
 // turno do agente.
-import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { spawnProcessShell } from "./helpers/process-shell.js";
 
 const HOOK = fileURLToPath(new URL("../.claude/hooks/stop-gate.sh", import.meta.url));
 
@@ -39,7 +39,7 @@ function rodarHook(
   env: Record<string, string>,
   payload: Record<string, unknown> = {},
 ): HookRun {
-  const r = spawnSync("sh", [HOOK], {
+  const r = spawnProcessShell([HOOK], {
     input: JSON.stringify({ hook_event_name: "Stop", cwd: root, ...payload }),
     encoding: "utf8",
     env: { ...limparAmbiente(), ...env },
@@ -143,7 +143,7 @@ describe("stop-gate.sh", () => {
   });
 
   it("payload ilegível: avisa e segue (não é silêncio)", () => {
-    const r = spawnSync("sh", [HOOK], {
+    const r = spawnProcessShell([HOOK], {
       input: "{nope",
       encoding: "utf8",
       env: { ...limparAmbiente(), ...bench({ LOHRA_STOP_BRANCH: "main" }) },

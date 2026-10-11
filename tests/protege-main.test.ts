@@ -8,12 +8,21 @@
 // `LOHRA_PM_ARGS_OUT` (#77) recebe, uma por linha, a linha de comando `gh` que o
 // hook executaria (prova que `--repo` e o número da PR são repassados). Sem
 // o portão nenhuma seam é lida e o hook consulta os binários de verdade.
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  linkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { spawnProcessShell } from "./helpers/process-shell.js";
 
 const HOOK = fileURLToPath(new URL("../.claude/hooks/protege-main.sh", import.meta.url));
 
@@ -40,7 +49,7 @@ function limparAmbiente(): Record<string, string> {
 }
 
 function rodar(root: string, command: string, env: Record<string, string>): HookRun {
-  const r = spawnSync("sh", [HOOK], {
+  const r = spawnProcessShell([HOOK], {
     input: JSON.stringify({ tool_name: "Bash", tool_input: { command }, cwd: root }),
     encoding: "utf8",
     env: { ...limparAmbiente(), ...env },
@@ -69,12 +78,35 @@ function rodar(root: string, command: string, env: Record<string, string>): Hook
 // chamada real voltar a acontecer, o marcador não existe e o teste falha
 // alto, em vez de virar flake silencioso de novo.
 const GH_SHIM = "#!/bin/sh\nprintf 'invoked\\n' >> \"$GH_MARKER\"\nexit 1\n";
+let windowsGhRoot = "";
+let windowsGhExecutable = "";
 
-function stubGh(root: string): { readonly shimDir: string; readonly marker: string } {
+function stubGh(root: string): {
+  readonly shimDir: string;
+  readonly marker: string;
+  readonly extraEnv: Record<string, string>;
+} {
   const shimDir = path.join(root, "gh-stub");
   mkdirSync(shimDir);
   writeFileSync(path.join(shimDir, "gh"), GH_SHIM, { mode: 0o755 });
-  return { shimDir, marker: path.join(root, "gh-invoked.marker") };
+  const marker = path.join(root, "gh-invoked.marker");
+  if (process.platform !== "win32") return { shimDir, marker, extraEnv: {} };
+
+  // O Node interno do hook usa spawnSync("gh") sem shell; Windows só lança
+  // executáveis nativos nesse caminho. Um hardlink temporário para a cópia
+  // de Node preparada antes dos testes registra a
+  // chamada sem tocar o gh real; o preload é inerte no Node que roda o hook.
+  linkSync(windowsGhExecutable, path.join(shimDir, "gh.exe"));
+  const bootstrap = path.join(shimDir, "bootstrap.cjs");
+  writeFileSync(
+    bootstrap,
+    'if (require("node:path").basename(process.execPath).toLowerCase() === "gh.exe") {\n' +
+      '  require("node:fs").appendFileSync(process.env.GH_MARKER, "invoked\\n");\n' +
+      "  process.exit(1);\n}\n",
+  );
+  const preload = `--require "${bootstrap.replaceAll("\\", "/")}"`;
+  const nodeOptions = [process.env.NODE_OPTIONS, preload].filter(Boolean).join(" ");
+  return { shimDir, marker, extraEnv: { NODE_OPTIONS: nodeOptions } };
 }
 
 const CHECKS_VERDES = JSON.stringify([
@@ -107,6 +139,15 @@ function bench(extra: Record<string, string> = {}): Record<string, string> {
 
 describe("protege-main.sh", () => {
   let root = "";
+  beforeAll(() => {
+    if (process.platform !== "win32") return;
+    windowsGhRoot = mkdtempSync(path.join(tmpdir(), "gh-executable-"));
+    windowsGhExecutable = path.join(windowsGhRoot, "gh.exe");
+    copyFileSync(process.execPath, windowsGhExecutable);
+  });
+  afterAll(() => {
+    if (windowsGhRoot) rmSync(windowsGhRoot, { recursive: true, force: true });
+  });
   beforeEach(() => {
     root = mkdtempSync(path.join(tmpdir(), "protege-main-"));
   });
@@ -285,11 +326,12 @@ describe("protege-main.sh", () => {
 
     it("LOHRA_PM_ARGS_OUT sem LOHRA_BENCH não é lido: nada é gravado", () => {
       const saida = path.join(root, "args-sem-bench.txt");
-      const { shimDir, marker } = stubGh(root);
+      const { shimDir, marker, extraEnv } = stubGh(root);
       rodar(root, "gh pr merge 5 --repo o/r --merge", {
         LOHRA_PM_ARGS_OUT: saida,
-        PATH: `${shimDir}:${process.env.PATH ?? ""}`,
+        PATH: `${shimDir}${path.delimiter}${process.env.PATH ?? ""}`,
         GH_MARKER: marker,
+        ...extraEnv,
       });
       expect(existsSync(marker)).toBe(true);
       expect(existsSync(saida)).toBe(false);
@@ -297,12 +339,13 @@ describe("protege-main.sh", () => {
   });
 
   it("sem LOHRA_BENCH, nenhuma seam é lida: gh falha (stub) e o hook nega", () => {
-    const { shimDir, marker } = stubGh(root);
+    const { shimDir, marker, extraEnv } = stubGh(root);
     const r = rodar(root, "gh pr merge 5 --merge", {
       LOHRA_PM_CHECKS_JSON: CHECKS_VERDES,
       LOHRA_PM_VIEW_JSON: view(["review:approved"], ["src/x.ts"]),
-      PATH: `${shimDir}:${process.env.PATH ?? ""}`,
+      PATH: `${shimDir}${path.delimiter}${process.env.PATH ?? ""}`,
       GH_MARKER: marker,
+      ...extraEnv,
     });
     expect(existsSync(marker)).toBe(true);
     expect(r.status).toBe(2);
