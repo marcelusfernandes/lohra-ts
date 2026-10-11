@@ -14,14 +14,13 @@
 // roda em qualquer estado de `dist/` (CI roda `npm test` ANTES de
 // `npm run build`, README "Instalação" — ver `.github/workflows/ci.yml`),
 // por isso nenhuma asserção aqui depende do conteúdo de `dist/`.
-import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { resolveNpmCli } from "../scripts/subprocess/npm.js";
+import { resolveNpmCli, runNpmSync } from "../scripts/subprocess/npm.js";
 
 const RAIZ = fileURLToPath(new URL("..", import.meta.url));
 
@@ -54,16 +53,27 @@ function extrairArrayJson(stdout: string): string {
 function npmPackDryRun(
   options: { readonly nodeExecutable?: string; readonly npmExecPath?: string } = {},
 ): PackEntry {
-  void options;
   // Issue #544: `npm pack --dry-run --json` roda o lifecycle `prepare`
   // mesmo assim — este `env` pula a instalação dos hooks de git/lefthook no
   // checkout real (`scripts/prepare.mjs`), que este teste não deveria
   // disparar como efeito colateral.
-  const resultado = spawnSync("npm", ["pack", "--dry-run", "--json"], {
+  const resultado = runNpmSync(["pack", "--dry-run", "--json"], {
     cwd: RAIZ,
-    encoding: "utf8",
-    env: { ...process.env, LOHRA_SKIP_PREPARE: "1" },
+    timeoutMs: 60_000,
+    maxBuffer: 16 * 1024 * 1024,
+    ...(options.nodeExecutable !== undefined ? { nodeExecutable: options.nodeExecutable } : {}),
+    env: {
+      ...process.env,
+      ...(options.npmExecPath !== undefined ? { npm_execpath: options.npmExecPath } : {}),
+      LOHRA_SKIP_PREPARE: "1",
+    },
   });
+  if (resultado.error) {
+    throw new Error(
+      `npm pack --dry-run --json não iniciou (${resultado.error.code ?? "spawn"}): ${resultado.error.message}`,
+      { cause: resultado.error },
+    );
+  }
   if (resultado.status !== 0) {
     throw new Error(
       `npm pack --dry-run --json falhou (exit ${String(resultado.status)}): ${resultado.stderr}`,
