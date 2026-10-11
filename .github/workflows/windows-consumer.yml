@@ -1,0 +1,9 @@
+name: windows-consumer
+
+on: pull_request
+
+jobs:
+  consumer-windows:
+    runs-on: windows-latest
+    steps:
+      - run: node -e 'throw new Error("not implemented")'
