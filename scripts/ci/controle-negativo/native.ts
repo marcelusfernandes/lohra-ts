@@ -1,8 +1,17 @@
 /** Comparador opt-in: compila cada revisão ANTES de rodar a mesma prova final. */
 import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  readdirSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 import { montarResumo } from "../../prova/resumo.js";
@@ -275,13 +284,26 @@ function declaredUnits(proof: string): readonly string[] {
 }
 
 function assertRealHarness(root: string): void {
-  const raw: unknown = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-  const script = (raw as { scripts?: { prova?: unknown } }).scripts?.prova;
-  if (
-    typeof script !== "string" ||
-    !/^tsx (?:"[^"\r\n]+[/\\])?scripts[/\\]prova[/\\]run\.ts"?$/.test(script)
-  ) {
+  try {
+    const raw: unknown = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+    const script = (raw as { scripts?: { prova?: unknown } }).scripts?.prova;
+    const trusted = realpathSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), "../../prova/run.ts"),
+    );
+    if (script === "tsx scripts/prova/run.ts") {
+      const checkout = join(root, "scripts", "prova", "run.ts");
+      if (!lstatSync(checkout).isFile() || !readFileSync(checkout).equals(readFileSync(trusted))) {
+        throw new Error("harness relativo diverge");
+      }
+      return;
+    }
+    if (typeof script === "string" && script.startsWith('tsx "') && script.endsWith('"')) {
+      const target = script.slice(5, -1);
+      if (isAbsolute(target) && realpathSync(target) === trusted) return;
+    }
     throw new Error("NATIVE_HARNESS_INVALID");
+  } catch (cause) {
+    throw new Error("NATIVE_HARNESS_INVALID", { cause });
   }
 }
 
@@ -330,9 +352,12 @@ function proofAt(
     if (!existsSync(join(root, unit))) throw new Error("NATIVE_PROOF_UNIT_MISSING");
   const reportDir = join(root, ".prova", args.slug);
   rmSync(reportDir, { recursive: true, force: true });
-  const result = runProof(root, args.slug, {
-    LOHRA_NATIVE_HELPER_EXE: verifyWindowsHelper(artifact),
-  });
+  const result = runProof(
+    root,
+    args.slug,
+    { LOHRA_NATIVE_HELPER_EXE: verifyWindowsHelper(artifact) },
+    "harness-confiavel",
+  );
   if (
     result.error !== undefined ||
     result.signal !== null ||

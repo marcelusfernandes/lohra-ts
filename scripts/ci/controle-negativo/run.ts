@@ -113,6 +113,7 @@
 // quando há o que remover, sempre limpando o diretório temporário
 // (`rmSync`) de qualquer jeito.
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import {
   existsSync,
   mkdirSync,
@@ -125,7 +126,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { branchSlug } from "../../prova/slug.js";
 import { resolveNpmCli } from "../../subprocess/npm.js";
@@ -329,6 +330,7 @@ export function rodarProvaNaBase(
   tmpDir: string,
   slug: string,
   extraEnv: Readonly<Record<string, string>> = {},
+  modo: "npm" | "harness-confiavel" = "npm",
 ): ExecucaoProva {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
@@ -336,9 +338,18 @@ export function rodarProvaNaBase(
     ),
   );
   Object.assign(env, extraEnv);
-  let npmCli: string;
+  let executableArgs: string[];
   try {
-    npmCli = resolveNpmCli({ env });
+    if (modo === "harness-confiavel") {
+      const require = createRequire(import.meta.url);
+      const tsxPackage = require.resolve("tsx/package.json");
+      const tsxBin = (JSON.parse(readFileSync(tsxPackage, "utf8")) as { bin?: unknown }).bin;
+      if (typeof tsxBin !== "string") throw new Error("NATIVE_TSX_ENTRY_INVALID");
+      const harness = resolve(dirname(fileURLToPath(import.meta.url)), "../../prova/run.ts");
+      executableArgs = [resolve(dirname(tsxPackage), tsxBin), harness, slug];
+    } else {
+      executableArgs = [resolveNpmCli({ env }), "run", "-s", "prova", "--", slug];
+    }
   } catch (cause) {
     return {
       status: null,
@@ -346,7 +357,7 @@ export function rodarProvaNaBase(
       error: cause instanceof Error ? cause : new Error("NPM_CLI_RESOLVE_FAILED", { cause }),
     };
   }
-  const resultado = spawnSync(process.execPath, [npmCli, "run", "-s", "prova", "--", slug], {
+  const resultado = spawnSync(process.execPath, executableArgs, {
     cwd: tmpDir,
     stdio: "inherit",
     env,

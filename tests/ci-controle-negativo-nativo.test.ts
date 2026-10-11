@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import {
+  copyFileSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
@@ -315,6 +316,34 @@ describe("controle negativo nativo opt-in", () => {
       );
     },
     30_000,
+  );
+
+  it.runIf(process.platform === "win32")(
+    "aceita harness relativo idêntico e não executa lifecycle do package",
+    () => {
+      const repo = fixture();
+      const harnessDir = join(repo.root, "scripts", "prova");
+      mkdirSync(harnessDir, { recursive: true });
+      copyFileSync(resolve("scripts", "prova", "run.ts"), join(harnessDir, "run.ts"));
+      const marker = join(repo.root, "lifecycle-executado.txt");
+      const lifecycle = `node -e "require('node:fs').writeFileSync('${marker.replaceAll("\\", "/")}', 'falso')"`;
+      writeFileSync(
+        join(repo.root, "package.json"),
+        JSON.stringify({
+          private: true,
+          scripts: {
+            prova: "tsx scripts/prova/run.ts",
+            preprova: lifecycle,
+            postprova: lifecycle,
+          },
+        }),
+      );
+      git(repo.root, "add", "package.json", "scripts/prova/run.ts");
+      git(repo.root, "commit", "-qm", "test: prova relativa íntegra com lifecycle falso");
+      expect(runNative(argv({ ...repo, head: git(repo.root, "rev-parse", "HEAD") }))).toBe(0);
+      expect(existsSync(marker)).toBe(false);
+    },
+    90_000,
   );
 
   it.runIf(process.platform === "win32")(
