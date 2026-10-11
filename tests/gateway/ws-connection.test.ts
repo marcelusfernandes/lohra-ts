@@ -6,21 +6,50 @@ import { connect } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 
-import { openStateDatabase, SessionRepository } from "../../src/state/index.js";
+import {
+  openStateDatabase,
+  SessionRepository,
+  type StateConnection,
+} from "../../src/state/index.js";
 import { GatewaySessionRegistry } from "../../src/gateway/session-service.js";
 import { createGatewayUpgradeHandler } from "../../src/gateway/ws/connection.js";
 import { startGatewayHttpServer, type GatewayHttpServer } from "../../src/gateway/http/server.js";
 import { jsonResponse } from "../../src/gateway/http/response.js";
 
 const roots: string[] = [];
+const connections: StateConnection[] = [];
 let activeServer: GatewayHttpServer | null = null;
 
 afterEach(async () => {
+  const failures: unknown[] = [];
   if (activeServer !== null) {
-    await activeServer.close();
+    const server = activeServer;
     activeServer = null;
+    try {
+      await server.close();
+    } catch (error) {
+      failures.push(error);
+    }
   }
-  while (roots.length > 0) rmSync(roots.pop() as string, { recursive: true, force: true });
+  while (connections.length > 0) {
+    try {
+      connections.pop()?.close();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  while (roots.length > 0) {
+    try {
+      rmSync(roots.pop() as string, { recursive: true, force: true });
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1)
+    throw new AggregateError(failures, "gateway WS fixture cleanup failed", {
+      cause: failures[0],
+    });
 });
 
 const TOKEN = "the-expected-ws-token";
@@ -29,6 +58,7 @@ async function startServer(authRequired = true): Promise<GatewayHttpServer> {
   const root = mkdtempSync(join(tmpdir(), "lohra-gateway-ws-"));
   roots.push(root);
   const connection = openStateDatabase(join(root, "state.db"));
+  connections.push(connection);
   const sessions = new SessionRepository(connection.database, () => 1000, connection.ftsEnabled);
   const registry = new GatewaySessionRegistry(sessions);
   const onUpgrade = createGatewayUpgradeHandler({
