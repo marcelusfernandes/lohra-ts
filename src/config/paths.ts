@@ -10,6 +10,13 @@ export interface LohraPaths {
 
 const profilePattern = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
+export function resolveCodexHome(
+  _environment: Readonly<Record<string, string | undefined>>,
+  _systemHome: string = homedir(),
+): string {
+  throw new Error("not implemented");
+}
+
 export function validateProfileName(name: string): string {
   if (name.length < 1 || name.length > 64 || !profilePattern.test(name)) {
     throw new Error(
