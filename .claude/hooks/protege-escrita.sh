@@ -63,6 +63,14 @@ PE_PAYLOAD="$payload" node -e '
     let dir = start;
     for (;;) {
       const r = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd: dir, encoding: "utf8" });
+      if (r.error) {
+        let code = "UNKNOWN";
+        try {
+          const value = r.error.code;
+          if (typeof value === "string" && /^[A-Z][A-Z0-9_]{0,24}$/.test(value)) code = value;
+        } catch { /* causa ilegível também resulta em recusa explícita */ }
+        negar("falha ao lançar git (" + code + "); nego por segurança.");
+      }
       if (r.status !== 0) break;
       const top = realpath(r.stdout.trim()) || r.stdout.trim();
       tops.push(top);
