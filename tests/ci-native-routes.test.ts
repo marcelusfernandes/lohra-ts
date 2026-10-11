@@ -202,6 +202,8 @@ it(
       `export default { unit: [] };`,
       "const units = ['tests/npm-windows-job-core.test.ts']; export default { unit: units };",
       "export const unit = ['tests/npm-windows-job-core.test.ts'];",
+      `export default { unit: ["${unit}"] ;`,
+      `export default { unit: ["${unit}"] }; const = ;`,
     ]) {
       const { root, sha } = complete({ [proof]: text });
       expect(() => validateNativeRoutes(root, sha)).toThrow(/PROOF|UNITS/);
