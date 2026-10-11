@@ -39,6 +39,16 @@ const hypothesisIssue = (family) => {
   }
   if (family === "stub-driver-unresolved") return 810;
   if (family === "sqlite-unresolved:tests/workflow-leaf-read-tool.test.ts") return 811;
+  if (family.startsWith("unresolved:") && shellFiles.has(family.slice("unresolved:".length))) {
+    return 812;
+  }
+  if (
+    family === "sqlite-unresolved:tests/gateway/rpc-dispatch.test.ts" ||
+    family === "sqlite-unresolved:tests/gateway/raw-socket-primitives.test.ts"
+  ) {
+    return 813;
+  }
+  if (family === "sqlite-unresolved:tests/gateway/prompt-submit.test.ts") return 814;
   return null;
 };
 
