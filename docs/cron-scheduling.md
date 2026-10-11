@@ -40,3 +40,7 @@ incluídos; códigos desconhecidos são reduzidos ao tipo. O id só é exibido s
 tiver o formato hexadecimal gerado pelo store, senão vira `unknown`. Essa
 sanitização permite identificar a fase e causas estruturadas sem registrar o
 texto potencialmente sensível de exceções externas.
+Se um getter ou Proxy externo lança durante a inspeção de `code`, `cause`,
+`safeCause` ou tipo, a causa fixa `inspection_failed` identifica a falha da
+inspeção sem acessar novamente o objeto. Isso não absorve falhas do sink de
+`diagnostics`, que continuam propagando.

@@ -23,22 +23,28 @@ const STORE_CAUSES: ReadonlyMap<string, string> = new Map([
 
 /** Error messages and paths can contain prompts or credentials; emit only known causal fields. */
 function safeCause(error: unknown): string {
-  let current = error;
-  for (let depth = 0; depth < 4; depth += 1) {
-    if (current instanceof CronStoreError) {
-      return STORE_CAUSES.get(current.safeCause) ?? "CronStoreError";
+  try {
+    let current = error;
+    for (let depth = 0; depth < 4; depth += 1) {
+      if (current instanceof CronStoreError) {
+        return STORE_CAUSES.get(current.safeCause) ?? "CronStoreError";
+      }
+      if (current === null || typeof current !== "object") break;
+      if ("code" in current) {
+        const code = current.code;
+        if (typeof code === "string" && SAFE_ERROR_CODES.has(code)) return code;
+      }
+      if (!("cause" in current)) break;
+      current = current.cause;
     }
-    if (current === null || typeof current !== "object") break;
-    if ("code" in current) {
-      const code = current.code;
-      if (typeof code === "string" && SAFE_ERROR_CODES.has(code)) return code;
-    }
-    if (!("cause" in current)) break;
-    current = current.cause;
+    if (error instanceof TypeError) return "TypeError";
+    if (error instanceof RangeError) return "RangeError";
+    return error instanceof Error ? "Error" : "unknown";
+  } catch {
+    // A getter or Proxy trap on an external error may throw while inspecting it. Keep the
+    // diagnostic explicit without reading the hostile object again or exposing its message.
+    return "inspection_failed";
   }
-  if (error instanceof TypeError) return "TypeError";
-  if (error instanceof RangeError) return "RangeError";
-  return error instanceof Error ? "Error" : "unknown";
 }
 
 function safeJobId(jobId: string): string {
