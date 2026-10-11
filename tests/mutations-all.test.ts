@@ -103,6 +103,25 @@ async function waitForTimeoutFixture(dir: string): Promise<void> {
   throw new Error("TIMEOUT_FIXTURE_CHILD_STILL_RUNNING");
 }
 
+function timeoutChildSource(dir: string): string {
+  const stopPath = join(dir, "child.stop");
+  return `const fs=require('node:fs');
+    fs.writeFileSync(${JSON.stringify(join(dir, "child.pid"))},String(process.pid));
+    let finished=false;
+    const finish=()=>{
+      if(finished)return;
+      finished=true;
+      clearInterval(tick);
+      clearTimeout(fallback);
+      fs.writeFileSync(${JSON.stringify(join(dir, "child.done"))},'done');
+      process.exit(0);
+    };
+    const tick=setInterval(()=>{
+      if(fs.existsSync(${JSON.stringify(stopPath)}))finish();
+    },20);
+    const fallback=setTimeout(finish,5000);`;
+}
+
 /** Uma linha JSON de relatório de fatia, no mesmo formato que os seis
  * runners de `scripts/mutations/*.ts` já emitem. */
 function reportLine(overrides: Partial<Record<string, unknown>> = {}): string {
@@ -422,24 +441,10 @@ describe("realExecute", () => {
   it("MUTATION_ALL_TIMEOUT: mata o script que dorme além do timeout e marca error.code ETIMEDOUT", async () => {
     const dir = workdir();
     const stopPath = join(dir, "child.stop");
-    fakeNodeProject(
-      "sleep",
-      `const fs=require('node:fs');
-       fs.writeFileSync(${JSON.stringify(join(dir, "child.pid"))},String(process.pid));
-       const tick=setInterval(()=>{
-         if(fs.existsSync(${JSON.stringify(stopPath)})){
-           clearInterval(tick);
-           fs.writeFileSync(${JSON.stringify(join(dir, "child.done"))},'done');
-           process.exit(0);
-         }
-       },20);
-       setTimeout(()=>{},5000);`,
-      process.execPath,
-      dir,
-    );
-    const run = realExecute("sleep", { cwd: dir, timeoutMs: 300 });
+    fakeNodeProject("sleep", timeoutChildSource(dir), process.execPath, dir);
     let assertionFault: unknown;
     try {
+      const run = realExecute("sleep", { cwd: dir, timeoutMs: 300 });
       expect(run.status).toBeNull();
       expect(run.signal).toBe("SIGTERM");
       expect(run.error?.message).toMatch(/ETIMEDOUT/);
@@ -451,10 +456,8 @@ describe("realExecute", () => {
     // recebe STOP, confirma por marcador que o processo próprio saiu e só
     // então o afterEach tenta rm uma vez. Não afirma que npm matou a árvore.
     try {
-      if (process.platform === "win32") {
-        writeFileSync(stopPath, "stop", "utf8");
-        await waitForTimeoutFixture(dir);
-      }
+      writeFileSync(stopPath, "stop", "utf8");
+      if (process.platform === "win32") await waitForTimeoutFixture(dir);
     } catch (cleanupFault) {
       if (assertionFault !== undefined) {
         throw new AggregateError(
@@ -465,6 +468,19 @@ describe("realExecute", () => {
       throw cleanupFault;
     }
     if (assertionFault !== undefined) throw assertionFault;
+  }, 10_000);
+
+  it("fixture de timeout encerra o próprio filho após 5 s sem STOP", () => {
+    const dir = workdir();
+    fakeNodeProject("sleep", timeoutChildSource(dir), process.execPath, dir);
+    const child = spawnSync(process.execPath, [join(dir, "child.js")], {
+      timeout: 6_500,
+      encoding: "utf8",
+    });
+    expect(child.status).toBe(0);
+    expect(child.signal).toBeNull();
+    expect(child.error).toBeUndefined();
+    expect(readFileSync(join(dir, "child.done"), "utf8")).toBe("done");
   }, 10_000);
 
   // issue #196, rodada 2 (revisão da PR #200): `npm run <script>` sempre

@@ -47,11 +47,14 @@ As saídas nativas após lançar o filho são:
 
 Os testes unitários de `evaluateRun` para `KILLED`, `EXIT` e `NO_REPORT`
 continuam estritos. Nenhum sinal POSIX é inferido de `status=1` no Windows.
+Um teste novo executa a mesma fonte do filho sem STOP e exige término próprio,
+marcador de conclusão e `status=0` após 5 s; o foco ficou 43/43 nas duas ABIs.
 
 ## Limite da medição de timeout
 
-`realExecute` usa timeout de 300 ms. A fixture Windows escreve STOP apenas
-no diretório temporário próprio, observa por até 6 s o marcador de PID do
+`realExecute` usa timeout de 300 ms. A fixture escreve STOP apenas no
+diretório temporário próprio; o filho também encerra o próprio intervalo em
+até 5 s se STOP não chegar. No Windows, observa por até 6 s o marcador de PID do
 próprio filho, e, se ele iniciar, exige marcador de conclusão e saída antes da
 única tentativa de remover o diretório. Não encerra PID alheio nem faz retry
 de `rm`. Erro da asserção e erro do teardown são preservados juntos.
