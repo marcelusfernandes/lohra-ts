@@ -1,0 +1,18 @@
+[
+  {
+    "mutant": "models",
+    "status": 1,
+    "signal": null,
+    "error": null,
+    "assertionRed": true,
+    "restored": true
+  },
+  {
+    "mutant": "tiers",
+    "status": 1,
+    "signal": null,
+    "error": null,
+    "assertionRed": true,
+    "restored": true
+  }
+]

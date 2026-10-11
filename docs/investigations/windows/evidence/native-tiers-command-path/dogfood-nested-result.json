@@ -1,0 +1,10 @@
+{
+  "modelsExit": 1,
+  "tiersExit": 1,
+  "modelsSpawnError": null,
+  "tiersSpawnError": null,
+  "modelsExact": true,
+  "modelsStderrEmpty": true,
+  "tiersStdoutEmpty": true,
+  "tiersStderrExact": true
+}
