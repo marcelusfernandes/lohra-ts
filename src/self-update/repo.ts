@@ -21,8 +21,11 @@ const OUTPUT_LIMIT = 1_048_576;
 function bounded(value: string): { readonly value: string; readonly truncated: boolean } {
   const bytes = Buffer.from(value);
   if (bytes.byteLength <= OUTPUT_LIMIT) return { value: value.trim(), truncated: false };
+  // Stop at a UTF-8 boundary so replacement characters cannot exceed the byte limit.
+  let end = OUTPUT_LIMIT;
+  while (end > 0 && ((bytes[end] ?? 0) & 0xc0) === 0x80) end--;
   return {
-    value: bytes.subarray(0, OUTPUT_LIMIT).toString("utf8").trim(),
+    value: bytes.subarray(0, end).toString("utf8").trim(),
     truncated: true,
   };
 }
