@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { ClientPool } from "../src/agent/client-pool.js";
 import { getProviderProfile } from "../src/providers/index.js";
-import { openStateDatabase, SessionRepository } from "../src/state/index.js";
+import { openStateDatabase, SessionRepository, type StateConnection } from "../src/state/index.js";
 import { CHILD_EXCLUDED_TOOLS, childToolDefinitions } from "../src/tools/child.js";
 import { composeDispatch } from "../src/tools/dispatch.js";
 import type { RegistryDispatch, ToolDefinition } from "../src/tools/types.js";
@@ -124,19 +124,38 @@ class BarrierPort implements ChatHttpPort {
   }
 }
 
-const roots: string[] = [];
+const fixtures: Array<{ root: string; connection?: StateConnection }> = [];
 
 function setupSessions(): SessionRepository {
   const root = mkdtempSync(join(tmpdir(), "lohra-chat-wiring-"));
-  roots.push(root);
+  const fixture: { root: string; connection?: StateConnection } = { root };
+  fixtures.push(fixture);
   const connection = openStateDatabase(join(root, "state.db"));
+  fixture.connection = connection;
   const sessions = new SessionRepository(connection.database, () => 1000, connection.ftsEnabled);
   sessions.createSession({ id: "parent-1", source: "gateway" });
   return sessions;
 }
 
 afterEach(() => {
-  while (roots.length > 0) rmSync(roots.pop() as string, { recursive: true, force: true });
+  const cleanupErrors: unknown[] = [];
+  while (fixtures.length > 0) {
+    const fixture = fixtures.pop();
+    if (fixture === undefined) continue;
+    try {
+      fixture.connection?.close();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    try {
+      rmSync(fixture.root, { recursive: true, force: true });
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, "orchestration chat fixture cleanup failed");
+  }
 });
 
 describe("buildOrchestrationCore — wiring-level regression for fanout.maxParallel (assertion 24)", () => {
