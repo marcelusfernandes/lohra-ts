@@ -50,4 +50,18 @@ describe("self-update command runner", () => {
     expect(Buffer.byteLength(result.stdout)).toBeLessThanOrEqual(1_048_576);
     expect(Buffer.byteLength(result.stderr)).toBeLessThanOrEqual(1_048_576);
   });
+
+  it("retains the cause within the bound when stderr fills the spawn buffer", () => {
+    const result = defaultCommandRunner(
+      process.execPath,
+      ["-e", "process.stderr.write('PRE' + 'x'.repeat(2_000_000))"],
+      process.cwd(),
+    );
+
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("PRE");
+    expect(result.stderr).toContain("ENOBUFS");
+    expect(result.truncated).toBe(true);
+    expect(Buffer.byteLength(result.stderr)).toBeLessThanOrEqual(1_048_576);
+  });
 });
