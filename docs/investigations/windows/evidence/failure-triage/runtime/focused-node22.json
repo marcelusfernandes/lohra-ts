@@ -1,0 +1,93 @@
+{
+  "schema": 1,
+  "measuredSha": "4850b36079620f30f0d51621219f0e5fb4e646d2",
+  "node": "22.23.2",
+  "status": "FAIL",
+  "exit": 1,
+  "rawReporterSha256": "a27ab41e015088ebc5a1c4daf09bc5bb589b5ebb5ff8fa32acb163d60bbe4794",
+  "rawLogSha256": "44e89ed4a5f9db625643e517e007acb3021b91849da55f7611916ac3a890eb01",
+  "counts": {
+    "total": 8,
+    "passed": 5,
+    "failed": 3,
+    "pending": 0
+  },
+  "fileResults": 2,
+  "reconciliation": {
+    "total": true,
+    "passed": true,
+    "failed": true,
+    "pending": true,
+    "files": true
+  },
+  "files": [
+    {
+      "file": "tests/chat-compaction-events.test.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "id": "5e29088b780f55e5",
+          "test": "runChat wires eventSink: compaction events reach stderr (issue #287) prints \"session.compacted\" on stderr and keeps the envelope's own compaction key when a turn compacts",
+          "status": "passed",
+          "primary": null,
+          "secondaryCount": 0
+        },
+        {
+          "id": "a575da3db65b8926",
+          "test": "runChat wires AuxClient telemetry: aux_calls in the envelope (issue #620) pins aux_calls at 1 (summary only, no title) for a RESUMED session (--session given) that compacts",
+          "status": "passed",
+          "primary": null,
+          "secondaryCount": 0
+        },
+        {
+          "id": "d5a79ce3b64f7353",
+          "test": "runChat generates and persists a title for a NEW session (issue #623) pins aux_calls at 1 and persists the title on the happy path (no --session)",
+          "status": "passed",
+          "primary": null,
+          "secondaryCount": 0
+        },
+        {
+          "id": "28893cd131032dc4",
+          "test": "runChat's title generation fails open without blocking the turn (issue #623) keeps the turn successful when the title call itself fails",
+          "status": "passed",
+          "primary": null,
+          "secondaryCount": 0
+        },
+        {
+          "id": "335011ed32549f28",
+          "test": "runChat's title generation fails open without blocking the turn (issue #623) folds aux_calls/usage_total into the ERROR envelope when the turn itself fails after a successful title (issue #650)",
+          "status": "passed",
+          "primary": null,
+          "secondaryCount": 0
+        }
+      ]
+    },
+    {
+      "file": "tests/cli-serve-process.test.ts",
+      "status": "failed",
+      "tests": [
+        {
+          "id": "84c582c07b223226",
+          "test": "serve CLI parse result reaches the real process configuration exact options",
+          "status": "failed",
+          "primary": "AssertionError: expected null to be +0 // Object.is equality",
+          "secondaryCount": 0
+        },
+        {
+          "id": "63e8f6c5036b4dba",
+          "test": "serve CLI parse result reaches the real process configuration unambiguous abbreviated options",
+          "status": "failed",
+          "primary": "AssertionError: expected null to be +0 // Object.is equality",
+          "secondaryCount": 0
+        },
+        {
+          "id": "59e25c00ec6eff1d",
+          "test": "serve CLI parse result reaches the real process configuration inline value options",
+          "status": "failed",
+          "primary": "AssertionError: expected null to be +0 // Object.is equality",
+          "secondaryCount": 0
+        }
+      ]
+    }
+  ]
+}
