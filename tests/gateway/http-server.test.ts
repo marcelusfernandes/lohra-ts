@@ -110,4 +110,48 @@ describe("startGatewayHttpServer", () => {
     );
     expect(upgraded).toBe(true);
   });
+
+  it("releases an upgraded TCP socket at shutdown even if its handler never closes it", async () => {
+    let resolveUpgrade: (() => void) | undefined;
+    const upgraded = new Promise<void>((resolve) => {
+      resolveUpgrade = resolve;
+    });
+    activeServer = await startGatewayHttpServer({
+      host: "127.0.0.1",
+      port: 0,
+      onRequest: () => Promise.reject(new Error("unexpected request")),
+      onUpgrade: () => {
+        resolveUpgrade?.();
+      },
+    });
+    const client = connect(activeServer.port, "127.0.0.1", () => {
+      client.write(
+        "GET /api/ws HTTP/1.1\r\nHost: h\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+      );
+    });
+    client.on("error", () => {
+      // The server owns the forced close; the test observes the final close.
+    });
+    try {
+      await upgraded;
+      const closed = new Promise<void>((resolve) => {
+        client.once("close", () => {
+          resolve();
+        });
+      });
+      const result = await Promise.race([
+        activeServer.close().then(() => "closed"),
+        new Promise<string>((resolve) =>
+          setTimeout(() => {
+            resolve("timeout");
+          }, 6_000),
+        ),
+      ]);
+      expect(result).toBe("closed");
+      await closed;
+      activeServer = null;
+    } finally {
+      client.destroy();
+    }
+  }, 8_000);
 });

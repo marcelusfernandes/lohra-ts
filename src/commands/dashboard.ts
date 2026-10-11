@@ -602,13 +602,39 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
 
   if (requestedPort === 0) printBootLines(server.port);
 
-  return new Promise<number>((resolvePromise) => {
+  return new Promise<number>((resolvePromise, rejectPromise) => {
     const shutdown = (): void => {
-      void server.close().finally(() => {
-        void closeResources("signal").finally(() => {
+      void (async () => {
+        // Stop accepting new sockets before closing upgraded WebSockets. Both
+        // operations must settle before durable resources can be closed.
+        const [serverOutcome, upgradeOutcome] = await Promise.allSettled([
+          server.close(),
+          onUpgrade.close(),
+        ]);
+        const failures: unknown[] = [];
+        // A WebSocket close failure can itself keep the TCP listener open;
+        // report that original cause before a consequent listener timeout.
+        for (const outcome of [upgradeOutcome, serverOutcome]) {
+          if (outcome.status === "rejected") failures.push(outcome.reason as unknown);
+        }
+        try {
+          await closeResources("signal");
+        } catch (error) {
+          failures.push(error);
+        }
+        if (failures.length === 0) {
           resolvePromise(0);
-        });
-      });
+        } else if (failures.length === 1) {
+          const cause = failures[0];
+          rejectPromise(
+            cause instanceof Error ? cause : new Error("dashboard shutdown failed", { cause }),
+          );
+        } else {
+          rejectPromise(
+            new AggregateError(failures, "dashboard shutdown failed", { cause: failures[0] }),
+          );
+        }
+      })().catch(rejectPromise);
     };
     // Issue #428: the real (non-injected) default now covers SIGTERM too,
     // not just SIGINT — `registerShutdownTrigger` (`src/cli/`).
