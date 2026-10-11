@@ -4,5 +4,6 @@ export default {
   unit: [
     "tests/workflow-service-durability.test.ts",
     "tests/workflow-service-durability-cleanup.test.ts",
+    "tests/workflow-durability-focus-integrity.test.ts",
   ],
 } satisfies Declaracao;
