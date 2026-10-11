@@ -21,7 +21,8 @@ primeiro teste, que varre `src/`, passou. Logs da base estão em
 `F:/lohra-m25-825/logs-node22/baseline.log`.
 
 O teste novo compila (`npm run typecheck` exit 0 nos dois Nodes) e prende a
-representação usada em `SELF`. Antes da correção, a asserção recebeu
+representação usada em `SELF` contra o literal independente
+`tests/sem-python.test.ts`. Antes da correção, a asserção recebeu
 `tests\sem-python.test.ts` em vez de `tests/sem-python.test.ts`; focal exit 1,
 3 falhas/4 testes em cada ABI. Logs em `F:/lohra-m25-825/logs-node20/red.log`
 e `F:/lohra-m25-825/logs-node22/red.log`.
