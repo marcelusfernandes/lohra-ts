@@ -30,6 +30,14 @@ const root = (): string => {
   return path;
 };
 
+const nodeCommand = (script: string): string => {
+  const quote =
+    process.platform === "win32"
+      ? (value: string): string => `"${value.replaceAll('"', '""')}"`
+      : (value: string): string => `'${value.replaceAll("'", `'"'"'`)}'`;
+  return `${quote(process.execPath)} ${quote(script)}`;
+};
+
 afterEach(() => {
   for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true });
 });
@@ -175,11 +183,13 @@ describe("filesystem tools", () => {
 describe("terminal tool", () => {
   it("returns stdout, stderr and nonzero exits", async () => {
     const approval = new ApprovalManager();
+    const script = join(root(), "emit out err with spaces.mjs");
+    writeFileSync(
+      script,
+      'process.stdout.write("out"); process.stderr.write("err"); process.exit(7);',
+    );
     const result = JSON.parse(
-      await terminalTool(
-        { command: "printf out; printf err >&2; exit 7" },
-        { approvalManager: approval },
-      ),
+      await terminalTool({ command: nodeCommand(script) }, { approvalManager: approval }),
     ) as { stdout: string; stderr: string; exit_code: number };
     expect(result).toEqual({ ok: true, stdout: "out", stderr: "err", exit_code: 7 });
   });
@@ -205,35 +215,51 @@ describe("terminal tool", () => {
     ['{"command":"sleep 4","timeout":true}', "trues"],
     ['{"command":"sleep 4","timeout":0}', "0s"],
   ])("renders Python timeout semantics for %s", async (raw, rendered) => {
-    const started = rendered === "2.5s" ? join(root(), "terminal-child-started") : null;
-    const args = parseToolArguments(raw);
+    const directory = root();
+    const started = join(directory, "terminal-child-started");
+    const script = join(directory, "hold with spaces.mjs");
+    writeFileSync(
+      script,
+      `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(started)}, "started"); setTimeout(() => process.exit(0), 4000);`,
+    );
+    // Substitui somente a string command: 1, 1.0, 2.50, 1e0, true e 0
+    // permanecem os lexemas originais até parseToolArguments.
+    const args = parseToolArguments(raw.replace('"sleep 4"', JSON.stringify(nodeCommand(script))));
     const result = await terminalTool(args, { approvalManager: new ApprovalManager() });
-    if (started !== null) {
-      // A fixture deve ter iniciado; um shell que rejeita `sleep` não prova timeout.
+    if (rendered === "2.5s") {
+      // Um shell que rejeita o comando não prova timeout.
       expect(existsSync(started)).toBe(true);
     }
     expect(result).toContain(`command timed out after ${rendered}`);
   });
 
   it("treats null timeout as disabled", async () => {
+    const script = join(root(), "emit ok with spaces.mjs");
+    writeFileSync(script, 'process.stdout.write("ok");');
     const result = JSON.parse(
-      await terminalTool(parseToolArguments('{"command":"printf ok","timeout":null}'), {
-        approvalManager: new ApprovalManager(),
-      }),
+      await terminalTool(
+        parseToolArguments(
+          '{"command":"printf ok","timeout":null}'.replace(
+            '"printf ok"',
+            JSON.stringify(nodeCommand(script)),
+          ),
+        ),
+        { approvalManager: new ApprovalManager() },
+      ),
     ) as { stdout: string };
     expect(result.stdout).toBe("ok");
   });
 
   it("truncates each stream by code point", async () => {
     const directory = root();
-    const script = join(directory, "emit.mjs");
+    const script = join(directory, "emit Unicode with spaces.mjs");
     writeFileSync(
       script,
       'process.stdout.write("😀".repeat(50001)); process.stderr.write("😀".repeat(50001));',
     );
     const result = JSON.parse(
       await terminalTool(
-        { command: `node ${JSON.stringify(script)}` },
+        { command: nodeCommand(script) },
         { approvalManager: new ApprovalManager() },
       ),
     ) as { stdout: string; stderr: string };
