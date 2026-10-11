@@ -460,7 +460,7 @@ describe("notices-sink fiação (#401): runChat, a real STALE_FENCE_WRITE, and a
             ["--json", true],
             ["--no-input", true],
           ]),
-          environment: { HOME: root, PATH: process.env.PATH ?? "" },
+          environment: { HOME: root, LOHRA_HOME: join(root, ".lohra"), PATH: process.env.PATH ?? "" },
           home: join(root, ".lohra"),
           codexHome: join(root, ".codex"),
           cwd: root,
