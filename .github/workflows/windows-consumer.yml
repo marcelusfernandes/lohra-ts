@@ -1,0 +1,136 @@
+name: windows-consumer
+
+on: pull_request
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-consumer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  consumer-windows:
+    name: windows-consumer (Node ${{ matrix.node }})
+    runs-on: windows-latest
+    continue-on-error: true
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22"]
+    steps:
+      - uses: actions/checkout@v4
+        id: checkout
+        continue-on-error: true
+      - uses: actions/setup-node@v4
+        id: node
+        continue-on-error: true
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: installed tarball consumer and summary
+        if: always()
+        shell: pwsh
+        env:
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+          EXECUTION_SHA: ${{ github.sha }}
+          CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
+          NODE_OUTCOME: ${{ steps.node.outcome }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $nodeVersion = 'unavailable'
+          if (Get-Command node -ErrorAction SilentlyContinue) {
+            $nodeVersion = (& node --version | Select-Object -First 1)
+          }
+          $checkoutSha = 'unavailable'
+          if ($env:CHECKOUT_OUTCOME -eq 'success' -and (Get-Command git -ErrorAction SilentlyContinue)) {
+            try {
+              $resolved = & git rev-parse HEAD
+              if ($LASTEXITCODE -eq 0 -and $resolved -match '^[0-9a-fA-F]{40}$') {
+                $checkoutSha = $resolved
+              }
+            } catch {
+              Write-Host "git rev-parse HEAD failed: $($_.Exception.GetType().Name)"
+            }
+          }
+          $blocked = $env:CHECKOUT_OUTCOME -ne 'success' -or $env:NODE_OUTCOME -ne 'success'
+          if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) { $blocked = $true }
+          $failed = $blocked
+          $packValidated = $false
+          $causeMarker = 'none'
+          $rows = @()
+          $stages = @(
+            @{ Command = 'npm ci'; Arguments = @('ci') }
+            @{ Command = 'npm run build'; Arguments = @('run', 'build') }
+            @{ Command = 'npm run pack:check'; Arguments = @('run', 'pack:check') }
+          )
+          for ($index = 0; $index -lt $stages.Length; $index++) {
+            $stage = $stages[$index]
+            if ($blocked) {
+              $rows += "| $($stage.Command) | N/A | BLOCKED |"
+              continue
+            }
+            $code = -1
+            $outputPath = Join-Path $env:RUNNER_TEMP "windows-consumer-$index.log"
+            try {
+              & npm.cmd @($stage.Arguments) 1> $outputPath 2>&1
+              $code = $LASTEXITCODE
+              if ($null -eq $code) { $code = -1 }
+              if ($stage.Command -eq 'npm run pack:check') {
+                $tail = @(Get-Content -LiteralPath $outputPath -Tail 40)
+                $tag = [regex]::Match(($tail -join ' '), 'PACK_[A-Z0-9_]+').Value
+                if ($tag -ne '') { $causeMarker = $tag }
+                if ($code -eq 0) {
+                  $jsonLine = $tail | Where-Object { $_ -match '^\{.*\}$' } | Select-Object -Last 1
+                  $result = $jsonLine | ConvertFrom-Json -ErrorAction Stop
+                  if ($result.packed -eq $true -and $result.libraryImport -eq $true -and
+                      $result.libraryTypes -eq $true -and $result.libraryTurn -eq $true -and
+                      $result.version -eq $true -and $result.publicTurn -eq $true -and
+                      $result.sideEffect -eq $true -and $result.pythonOnPath -eq $false -and
+                      $result.posts -eq 2) {
+                    $packValidated = $true
+                  } else {
+                    $code = -1
+                    $causeMarker = 'PACK_CONSUMER_RESULT_INVALID'
+                  }
+                }
+              }
+            } catch {
+              $code = -1
+              $causeMarker = 'PACK_CONSUMER_COMMAND_ERROR'
+            } finally {
+              if (Test-Path -LiteralPath $outputPath) {
+                try { Remove-Item -LiteralPath $outputPath -Force -ErrorAction Stop }
+                catch { $code = -1; $causeMarker = 'PACK_CONSUMER_LOG_CLEANUP_FAILED' }
+              }
+            }
+            $classification = if ($code -eq 0) { 'PASS' } else { 'FAIL' }
+            $rows += "| $($stage.Command) | $code | $classification |"
+            if ($code -ne 0) { $failed = $true; $blocked = $true }
+          }
+          $componentStatus = if ($packValidated) { 'PASS' } else { 'BLOCKED' }
+          $summary = @(
+            '## Windows installed consumer (informative)'
+            "- Candidate SHA: ``$env:CANDIDATE_SHA``"
+            "- Workflow SHA: ``$env:EXECUTION_SHA``"
+            "- Checkout HEAD: ``$checkoutSha``"
+            "- OS/arch: ``$env:RUNNER_OS/$env:RUNNER_ARCH``"
+            "- Node: ``$nodeVersion`` (matrix ${{ matrix.node }})"
+            "- Checkout: $env:CHECKOUT_OUTCOME; setup-node: $env:NODE_OUTCOME"
+            "- Safe failure marker: ``$causeMarker``"
+            '| Command | Exit | Result |'
+            '| --- | ---: | --- |'
+          ) + $rows + @(
+            ''
+            '| Consumer contract | Result |'
+            '| --- | --- |'
+            "| Tarball install without .git | $componentStatus |"
+            "| better-sqlite3 prebuild | $componentStatus |"
+            "| node-pty prebuild and PTY | $componentStatus |"
+            "| CLI JS entry (version and offline turn) | $componentStatus |"
+            '- npm shim: NOT_TESTED (pack:check invokes the installed JS bin with process.execPath).'
+          )
+          $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          if ($failed) { exit 1 }
