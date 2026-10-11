@@ -76,13 +76,16 @@ function expectDenied(r: HookRun): void {
   expect(r.stderr).toMatch(/Bloqueado/u);
 }
 
-function lerComFalha(cwd: string, reader: "absent" | "failed-partial"): HookRun {
+function shellComPathControlado(): string {
   const resolvedShell = resolveProcessShell();
   // Git/bin/sh.exe injeta /usr/bin no PATH; o executável irmão em usr/bin
   // conserva o PATH controlado pela fixture.
   const directShell = path.resolve(path.dirname(resolvedShell), "..", "usr", "bin", "sh.exe");
-  const shell =
-    process.platform === "win32" && existsSync(directShell) ? directShell : resolvedShell;
+  return process.platform === "win32" && existsSync(directShell) ? directShell : resolvedShell;
+}
+
+function lerComFalha(cwd: string, reader: "absent" | "failed-partial"): HookRun {
+  const shell = shellComPathControlado();
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined && key.toLowerCase() !== "path") env[key] = value;
@@ -111,6 +114,87 @@ function lerComFalha(cwd: string, reader: "absent" | "failed-partial"): HookRun 
   const nodeProbe = spawnSync(shell, ["-c", "command -v node"], { cwd, env, encoding: "utf8" });
   expect(nodeProbe.error).toBeUndefined();
   expect(nodeProbe.status).toBe(0);
+  const input = JSON.stringify({
+    tool_name: "Write",
+    tool_input: { file_path: path.join(cwd, "docs", "reference", "novo.md") },
+    cwd,
+    token: "payload-secret-value",
+  });
+  const result = spawnSync(shell, [HOOK], { cwd, env, input, encoding: "utf8" });
+  if (result.error) throw result.error;
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr, shell };
+}
+
+function escreverComFalhaGit(cwd: string, failure: "ENOENT" | "EACCES"): HookRun {
+  const shell = shellComPathControlado();
+  const bin = path.join(cwd, "git-failure-bin");
+  mkdirSync(bin, { recursive: true });
+  const fakeCat = path.join(bin, "cat");
+  writeFileSync(
+    fakeCat,
+    '#!/bin/sh\nwhile IFS= read -r line || [ -n "$line" ]; do printf "%s\\n" "$line"; done\n',
+  );
+  chmodSync(fakeCat, 0o755);
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (
+      value !== undefined &&
+      key.toLowerCase() !== "path" &&
+      key !== "CLAUDE_PROJECT_DIR" &&
+      key !== "NODE_OPTIONS"
+    )
+      env[key] = value;
+  }
+  env.PATH = [bin, path.dirname(process.execPath)].join(path.delimiter);
+  if (failure === "EACCES") {
+    const preload = path.join(bin, "git-fault.cjs");
+    writeFileSync(
+      preload,
+      'const cp = require("node:child_process");\n' +
+        "const original = cp.spawnSync;\n" +
+        "cp.spawnSync = function(command, args, options) {\n" +
+        '  if (command === "git") return { status: null, stdout: "", stderr: "git-stderr-secret", error: Object.assign(new Error("git-message-secret"), { code: "EACCES" }) };\n' +
+        "  return original(command, args, options);\n" +
+        "};\n",
+    );
+    env.NODE_OPTIONS = `--require="${preload.replaceAll("\\", "/")}"`;
+  }
+  const lookup = (name: string) =>
+    spawnSync(shell, ["-c", `command -v ${name}`], { cwd, env, encoding: "utf8" });
+  for (const name of ["cat", "node"]) {
+    const probe = lookup(name);
+    expect(probe.error).toBeUndefined();
+    expect(probe.status).toBe(0);
+  }
+  const gitProbe = lookup("git");
+  expect(gitProbe.error).toBeUndefined();
+  expect(typeof gitProbe.status).toBe("number");
+  expect(gitProbe.status).not.toBe(0);
+  expect(gitProbe.stdout).toBe("");
+  const readerProbe = spawnSync(shell, ["-c", "cat"], {
+    cwd,
+    env,
+    input: "READER_OK",
+    encoding: "utf8",
+  });
+  expect(readerProbe.status).toBe(0);
+  expect(readerProbe.stdout).toBe("READER_OK\n");
+  if (failure === "ENOENT") {
+    const launch = spawnSync("git", ["--version"], { cwd, env, encoding: "utf8" });
+    expect(launch.status).toBeNull();
+    expect((launch.error as NodeJS.ErrnoException | undefined)?.code).toBe("ENOENT");
+  } else {
+    const launch = spawnSync(
+      process.execPath,
+      [
+        "-e",
+        'process.stdout.write(require("node:child_process").spawnSync("git", ["--version"]).error.code)',
+      ],
+      { cwd, env, encoding: "utf8" },
+    );
+    expect(launch.status).toBe(0);
+    expect(launch.stdout).toBe("EACCES");
+  }
   const input = JSON.stringify({
     tool_name: "Write",
     tool_input: { file_path: path.join(cwd, "docs", "reference", "novo.md") },
@@ -156,9 +240,33 @@ describe("protege-escrita.sh", () => {
   });
 
   it("docs/reference/** a partir da raiz: nega", () => {
+    const gitProbe = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    expect(gitProbe.error).toBeUndefined();
+    expect(gitProbe.status).toBe(0);
     const r = escrever(root, path.join(root, "docs", "reference", "novo.md"));
     expectDenied(r);
     expect(r.stderr).toMatch(/docs\/reference/u);
+  });
+
+  it("nega quando Git está ausente, com cat e node funcionais", () => {
+    const result = escreverComFalhaGit(root, "ENOENT");
+    expectDenied(result);
+    expect(result.stdout).toMatch(/git.*ENOENT/u);
+    expect(result.stdout + result.stderr).not.toMatch(
+      /payload-secret-value|git-message-secret|git-stderr-secret|\n\s+at /u,
+    );
+  });
+
+  it("nega outra falha controlada de lançamento sem expor mensagem ou stderr", () => {
+    const result = escreverComFalhaGit(root, "EACCES");
+    expectDenied(result);
+    expect(result.stdout).toMatch(/git.*EACCES/u);
+    expect(result.stdout + result.stderr).not.toMatch(
+      /payload-secret-value|git-message-secret|git-stderr-secret|\n\s+at /u,
+    );
   });
 
   it("nega quando o leitor cat está ausente, mesmo com node disponível", () => {
@@ -194,6 +302,13 @@ describe("protege-escrita.sh", () => {
   });
 
   it("fora de qualquer repo (scratchpad): permite", () => {
+    const gitProbe = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd: fora,
+      encoding: "utf8",
+    });
+    expect(gitProbe.error).toBeUndefined();
+    expect(typeof gitProbe.status).toBe("number");
+    expect(gitProbe.status).not.toBe(0);
     expect(escrever(root, path.join(fora, "nota.md")).status).toBe(0);
   });
 
