@@ -8,6 +8,7 @@ import { spawn as spawnPty } from "node-pty";
 import { ApprovalManager, approval, detectDangerousCommand } from "./approval.js";
 import { jsonNumberKind, type JsonNumberKind } from "./arguments.js";
 import { toolError, toolResult } from "./envelope.js";
+import { runWindowsTerminalBridge } from "./terminal-windows.js";
 import type { ToolArguments } from "./types.js";
 
 const DEFAULT_TIMEOUT_SECONDS = 30;
@@ -144,7 +145,7 @@ export async function terminalTool(
     });
   }
 
-  return executeTerminalPty(args);
+  return process.platform === "win32" ? runWindowsTerminalBridge(args) : executeTerminalPty(args);
 }
 
 // Internal PTY executor. The public terminalTool keeps the approval boundary above.
