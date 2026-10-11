@@ -157,7 +157,7 @@ describe("chat.ts wires { warning: auditWarning } into its own AuditTrail (issue
           ["--json", true],
           ["--no-input", true],
         ]),
-        environment: { HOME: root, PATH: process.env.PATH ?? "" },
+        environment: { HOME: root, LOHRA_HOME: join(root, ".lohra"), PATH: process.env.PATH ?? "" },
         home: join(root, ".lohra"),
         codexHome: join(root, ".codex"),
         cwd: root,
