@@ -166,14 +166,20 @@ describe("vision_analyze handler", () => {
       },
     });
     const envelope = await handler({ path });
-    // Não afirma sobre o caminho absoluto inteiro: o segmento pai
-    // "sk123456" é redigido de propósito pela regex SECRET
-    // (src/media/errors.ts:4) — é exatamente o comportamento que causava o
-    // flake (#558). A cauda determinística (join("fixture",
-    // "unreadable.png")) nunca cai sob a regex, porque ela não casa "/".
-    expect(envelope).toContain("failed to read image ");
-    expect(envelope).toContain(`${join("fixture", "unreadable.png")}: EACCES: permission denied`);
-    expect(envelope).not.toContain("at ");
+    const parsed = JSON.parse(envelope) as unknown;
+    expect(parsed).not.toBeNull();
+    expect(typeof parsed).toBe("object");
+    expect(Object.keys(parsed as Record<string, unknown>)).toEqual(["error"]);
+    const value = (parsed as Record<string, unknown>).error;
+    expect(typeof value).toBe("string");
+    const message = value as string;
+    expect(message).toContain("failed to read image ");
+    expect(message).toContain(`${join("fixture", "unreadable.png")}: EACCES: permission denied`);
+    expect(message).toContain("<redacted-secret>");
+    expect(message).not.toContain("sk123456");
+    expect(message).not.toContain("at ");
+    // O segmento pai "sk123456" é redigido; a cauda nativa e a causa
+    // continuam intactas no campo error já decodificado do JSON.
     expect(runner.requests).toHaveLength(0);
   });
 });
