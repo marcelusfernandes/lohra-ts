@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "node": "20.20.2",
+  "base": {
+    "sha": "0ab8ee524482612839264fe98f54c0c0bf93c4e7",
+    "exit": 1,
+    "reporterSha256": "d1fa893e67b8b059eac740d48e15e3f054990a608c4234409b77d22a0bcfc9a3",
+    "counts": {
+      "total": 19,
+      "passed": 17,
+      "failed": 2,
+      "pending": 0
+    },
+    "failures": [
+      {
+        "name": "state schema and connection resolves default, home override, and isolated profile database paths",
+        "primary": "AssertionError: expected '\\tmp\\u\\lohra\\state.db' to be '/tmp/u/.lohra/state.db' // Object.is equality"
+      },
+      {
+        "name": "createGatewayToolRuntime: RCE proof and dangerous-command deny (assertions 39-40) terminal executes a safe command for real",
+        "primary": "AssertionError: expected 'T12_TERMINAL_CANARY\\r\\n' to be 'T12_TERMINAL_CANARY\\n' // Object.is equality"
+      }
+    ]
+  },
+  "candidate": {
+    "codeSha": "2b160caaabeeae77208455d17e458340298a8d97",
+    "exit": 0,
+    "reporterSha256": "7e81fa4eb1953e9bdaa2adace210093d1f1423f48dac41785cd9285301c5f673",
+    "counts": {
+      "total": 19,
+      "passed": 19,
+      "failed": 0,
+      "pending": 0
+    },
+    "failures": [],
+    "proof": {
+      "exit": 0,
+      "ok": true,
+      "total": 19,
+      "failed": 0
+    },
+    "proofSha256": "7945bd451ad1c0a71bb2bcb1da61395ae80819499903fe0931a90ab3c2f9f256"
+  }
+}

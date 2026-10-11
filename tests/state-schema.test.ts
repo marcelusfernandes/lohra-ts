@@ -108,13 +108,22 @@ describe("state schema and connection", () => {
   });
 
   it("resolves default, home override, and isolated profile database paths", () => {
-    expect(stateDatabasePath({ HOME: "/tmp/u" })).toBe("/tmp/u/.lohra/state.db");
-    expect(stateDatabasePath({ HOME: "/tmp/u", LOHRA_HOME: "/tmp/base" })).toBe(
-      "/tmp/base/state.db",
+    const environment = { HOME: "/tmp/u", LOCALAPPDATA: "/tmp/local" };
+    const defaultBase =
+      process.platform === "win32" ? join("/tmp/local", "lohra") : join("/tmp/u", ".lohra");
+    expect(stateDatabasePath(environment)).toBe(join(defaultBase, "state.db"));
+    expect(stateDatabasePath({ HOME: "/tmp/u" })).toBe(
+      join("/tmp/u", process.platform === "win32" ? "lohra" : ".lohra", "state.db"),
+    );
+    expect(stateDatabasePath({ ...environment, LOHRA_PROFILE: "p1" })).toBe(
+      join(defaultBase, "profiles", "p1", "state.db"),
+    );
+    expect(stateDatabasePath({ ...environment, LOHRA_HOME: "/tmp/base" })).toBe(
+      join("/tmp/base", "state.db"),
     );
     expect(
-      stateDatabasePath({ HOME: "/tmp/u", LOHRA_HOME: "/tmp/base", LOHRA_PROFILE: "p1" }),
-    ).toBe("/tmp/base/profiles/p1/state.db");
+      stateDatabasePath({ ...environment, LOHRA_HOME: "/tmp/base", LOHRA_PROFILE: "p1" }),
+    ).toBe(join("/tmp/base", "profiles", "p1", "state.db"));
   });
 
   it("pins busy_timeout to 5000ms by default, hermetic to the host environment", () => {
