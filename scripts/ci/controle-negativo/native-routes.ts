@@ -23,7 +23,7 @@ interface TreeEntry {
 }
 
 function git(root: string, args: readonly string[]): Buffer {
-  const result = spawnSync("git", [...args], { cwd: root, maxBuffer: MAX_OUTPUT });
+  const result = spawnSync("git", [...args], { cwd: root, maxBuffer: MAX_OUTPUT, timeout: 15_000 });
   if (result.error || result.signal !== null || result.status !== 0) {
     throw new Error(
       `NATIVE_ROUTES_GIT: git ${args[0] ?? "unknown"}: ${(result.error?.message ?? result.stderr.toString("utf8").trim()) || String(result.signal ?? result.status)}`,

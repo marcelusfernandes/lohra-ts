@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -126,7 +126,9 @@ it("recusa traversal, path absoluto e duplicata entre rotas", () => {
 it("recusa symlink Git mesmo quando o destino existe", () => {
   const repo = complete();
   const link = "tests/fixtures/windows-helper/linked.cs";
-  symlinkSync("job-core-driver.cs", join(repo.root, link));
+  put(repo.root, ".link-target", "job-core-driver.cs");
+  const blob = git(repo.root, "hash-object", "-w", ".link-target");
+  git(repo.root, "update-index", "--add", "--cacheinfo", `120000,${blob},${link}`);
   put(
     repo.root,
     manifest,
@@ -134,11 +136,29 @@ it("recusa symlink Git mesmo quando o destino existe", () => {
       routes: { "windows-npm-job-core": { ...route, sources: [...route.sources, link] } },
     }),
   );
-  git(repo.root, "add", ".");
+  git(repo.root, "add", manifest);
   git(repo.root, "commit", "-qm", "link");
   expect(() => validateNativeRoutes(repo.root, git(repo.root, "rev-parse", "HEAD"))).toThrow(
     /REGULAR/,
   );
+});
+
+it("importa validador e parser reutilizado sem executar CLI ou prova", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      "tsx",
+      "--input-type=module",
+      "-e",
+      'await import("./scripts/ci/controle-negativo/native-routes.ts"); await import("./scripts/ci/controle-negativo/native.ts");',
+    ],
+    { cwd: process.cwd(), encoding: "utf8", timeout: 15_000 },
+  );
+  expect(result.error).toBeUndefined();
+  expect(result.status).toBe(0);
+  expect(result.stdout).toBe("");
+  expect(result.stderr).toBe("");
 });
 
 it("iguala units à declaração literal da prova e recusa prova dinâmica ou inválida", () => {
