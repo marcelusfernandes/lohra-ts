@@ -121,6 +121,11 @@ try {
 registra ferramentas nem faz chamadas de rede. Para retomar uma sessão, passe
 `turn.sessionId` em `runTurn` com o mesmo repositório de estado.
 
+`npm run pack:check` instala o tarball em um consumidor temporário sem `.git`,
+confere `main` e `types` (inclusive declarações transitivas), compila um exemplo
+TypeScript e executa um turno offline pela entrada pública. O mesmo check
+continua exercitando a CLI instalada e os addons nativos.
+
 Para desenvolver a partir do checkout:
 
 ```bash

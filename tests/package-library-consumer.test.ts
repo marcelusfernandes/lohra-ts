@@ -1,10 +1,14 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, expect, it } from "vitest";
 
-import { assertConsumerLibraryEntry, assertConsumerLibraryTypes } from "../scripts/pack-check.js";
+import {
+  assertConsumerLibraryEntry,
+  assertConsumerLibraryTurn,
+  assertConsumerLibraryTypes,
+} from "../scripts/pack-check.js";
 
 let root: string | undefined;
 
@@ -67,4 +71,19 @@ it("fails when a transitive declaration is absent even though main and types exi
   expect(() => {
     assertConsumerLibraryTypes(consumer, fixtureSource());
   }).toThrow(/PACK_LIBRARY_TYPES_FAILED/u);
+}, 20_000);
+
+it("rejects an installed main that exists but throws during library import", () => {
+  const { consumer, installed } = installedFixture();
+  writeFileSync(join(installed, "dist", "index.js"), 'throw new Error("INVALID_ENTRY_764");\n');
+  let failure: unknown;
+  try {
+    assertConsumerLibraryTurn(consumer, { ...process.env, HOME: consumer });
+  } catch (error) {
+    failure = error;
+  }
+  expect(failure).toBeInstanceOf(Error);
+  expect((failure as Error).message).toContain("PACK_LIBRARY_TURN_FAILED");
+  expect((failure as Error & { cause?: Error }).cause?.message).toContain("INVALID_ENTRY_764");
+  expect(existsSync(join(consumer, "pack-library-turn.mjs"))).toBe(false);
 }, 20_000);

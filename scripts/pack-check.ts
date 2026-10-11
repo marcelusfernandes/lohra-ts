@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -270,12 +270,156 @@ export async function runConsumerCliAsync(
   return await commandAsync(process.execPath, [installedCliPath(consumerRoot), ...argv], options);
 }
 
-export function assertConsumerLibraryEntry(_consumerRoot: string): void {
-  throw new Error("not implemented");
+export function assertConsumerLibraryEntry(consumerRoot: string): void {
+  const packageRoot = resolve(consumerRoot, "node_modules", "lohra-ts");
+  const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as {
+    main?: unknown;
+    types?: unknown;
+  };
+  for (const [field, marker] of [
+    ["main", "PACK_LIBRARY_MAIN_MISSING"],
+    ["types", "PACK_LIBRARY_TYPES_MISSING"],
+  ] as const) {
+    const relativePath = manifest[field];
+    if (typeof relativePath !== "string") throw new Error(marker);
+    const entry = resolve(packageRoot, relativePath);
+    if (!entry.startsWith(`${packageRoot}${sep}`) || !existsSync(entry)) {
+      throw new Error(marker);
+    }
+  }
 }
 
-export function assertConsumerLibraryTypes(_consumerRoot: string, _fixtureSource?: string): void {
-  throw new Error("not implemented");
+const LIBRARY_TYPES_FIXTURE = `
+import { randomUUID } from "node:crypto";
+import {
+  ConversationRuntime, SessionRepository, SqliteConversationRepository, openStateDatabase,
+  type ModelTransport, type ConversationTurnResult,
+} from "lohra-ts";
+const connection = openStateDatabase("state.db");
+const transport: ModelTransport = {
+  async complete() {
+    return { content: "offline", finishReason: "stop", toolCalls: [], reasoning: null,
+      usage: null, providerData: null };
+  },
+  close() {},
+};
+const repository = new SqliteConversationRepository(
+  new SessionRepository(connection.database, undefined, connection.ftsEnabled),
+);
+const runtime = new ConversationRuntime({ repository, transport,
+  promptSnapshot: () => "offline", idSource: randomUUID, clock: () => 0 });
+const turn: Promise<ConversationTurnResult> = runtime.runTurn({
+  input: "hello", provider: "offline", model: "fake", cwd: process.cwd(),
+});
+void turn;
+connection.close();
+`;
+
+export function assertConsumerLibraryTypes(
+  consumerRoot: string,
+  fixtureSource = LIBRARY_TYPES_FIXTURE,
+): void {
+  const fixture = join(consumerRoot, "pack-library-types.mts");
+  const typescriptCli = resolve(process.cwd(), "node_modules", "typescript", "bin", "tsc");
+  writeFileSync(fixture, fixtureSource);
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [
+        typescriptCli,
+        "--noEmit",
+        "--strict",
+        "--module",
+        "NodeNext",
+        "--moduleResolution",
+        "NodeNext",
+        "--target",
+        "ES2022",
+        "--types",
+        "node",
+        "--typeRoots",
+        resolve(process.cwd(), "node_modules", "@types"),
+        fixture,
+      ],
+      { cwd: consumerRoot, encoding: "utf8", timeout: 60_000, maxBuffer: 4 * 1024 * 1024 },
+    );
+    if (result.error !== undefined || result.status !== 0) {
+      const diagnostic = [result.error?.message, result.stdout, result.stderr]
+        .filter((part): part is string => typeof part === "string" && part !== "")
+        .join("\n")
+        .slice(-2_000);
+      throw new Error(
+        `PACK_LIBRARY_TYPES_FAILED:${String(result.status ?? result.signal ?? "spawn")}:${diagnostic}`,
+        result.error === undefined ? undefined : { cause: result.error },
+      );
+    }
+  } finally {
+    rmSync(fixture, { force: true });
+  }
+}
+
+/** Run the published entry as a separate, offline library consumer. */
+export function assertConsumerLibraryTurn(
+  consumerRoot: string,
+  environment: NodeJS.ProcessEnv,
+): void {
+  const fixture = join(consumerRoot, "pack-library-turn.mjs");
+  writeFileSync(
+    fixture,
+    `import { randomUUID } from "node:crypto";
+import { join } from "node:path";
+const { ConversationRuntime, SessionRepository, SqliteConversationRepository, openStateDatabase } =
+  await import("lohra-ts");
+const connection = openStateDatabase(join(process.cwd(), "library-state", "state.db"));
+let transportClosed = false;
+const transport = {
+  async complete() {
+    return { content: "library-offline-ok", finishReason: "stop", toolCalls: [],
+      reasoning: null, usage: null, providerData: null };
+  },
+  close() { transportClosed = true; },
+};
+let turn;
+try {
+  const repository = new SqliteConversationRepository(
+    new SessionRepository(connection.database, undefined, connection.ftsEnabled),
+  );
+  const runtime = new ConversationRuntime({ repository, transport,
+    promptSnapshot: () => "offline", idSource: randomUUID,
+    clock: () => Date.now() / 1000, maxIterations: 2 });
+  turn = await runtime.runTurn({ input: "offline request", provider: "offline",
+    model: "fake", cwd: process.cwd() });
+} finally {
+  try { await transport.close(); } finally { connection.close(); }
+}
+process.stdout.write(JSON.stringify({ content: turn.response.content,
+  sessionId: turn.sessionId, transportClosed, stateClosed: !connection.database.open }));
+`,
+  );
+  try {
+    let result: ReturnType<typeof command>;
+    try {
+      result = command(process.execPath, [fixture], { cwd: consumerRoot, env: environment });
+    } catch (cause) {
+      throw new Error("PACK_LIBRARY_TURN_FAILED", { cause });
+    }
+    const observed = JSON.parse(result.stdout) as {
+      content?: unknown;
+      sessionId?: unknown;
+      transportClosed?: unknown;
+      stateClosed?: unknown;
+    };
+    if (
+      observed.content !== "library-offline-ok" ||
+      typeof observed.sessionId !== "string" ||
+      observed.transportClosed !== true ||
+      observed.stateClosed !== true
+    ) {
+      throw new Error("PACK_LIBRARY_TURN_MISMATCH");
+    }
+  } finally {
+    rmSync(fixture, { force: true });
+  }
 }
 
 /** Igualdade estrutural recursiva — nunca `JSON.stringify(a) === JSON.stringify(b)`
@@ -510,6 +654,10 @@ async function main(): Promise<void> {
       LOHRA_NO_WIZARD: "1",
       LOHRA_PROVIDER_BASE_URL: `http://127.0.0.1:${String(address.port)}/v1`,
     };
+    if (existsSync(join(installDirectory, ".git"))) throw new Error("PACK_CONSUMER_HAS_GIT");
+    assertConsumerLibraryEntry(installDirectory);
+    assertConsumerLibraryTypes(installDirectory);
+    assertConsumerLibraryTurn(installDirectory, isolatedEnvironment);
     const manifest = JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf8")) as {
       version?: unknown;
     };
@@ -541,7 +689,7 @@ async function main(): Promise<void> {
     }
     if (projectedLogContent.length === 0) throw new Error("PACK_REQUEST_LOG_EMPTY");
     process.stdout.write(
-      `${JSON.stringify({ packed: true, version: true, publicTurn: true, sideEffect: true, pythonOnPath: false, posts: runtime.posts })}\n`,
+      `${JSON.stringify({ packed: true, libraryImport: true, libraryTypes: true, libraryTurn: true, version: true, publicTurn: true, sideEffect: true, pythonOnPath: false, posts: runtime.posts })}\n`,
     );
   } finally {
     if (server !== undefined) {
