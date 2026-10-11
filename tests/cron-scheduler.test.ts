@@ -184,6 +184,112 @@ describe("tick", () => {
     expect(diagnosed.join(" ")).not.toContain("PRIVATE_PATH_761");
   });
 
+  const hostileErrors: readonly [string, () => Error][] = [
+    [
+      "throwing code getter",
+      () => {
+        const error = new Error("PRIVATE_CODE_761");
+        Object.defineProperty(error, "code", {
+          get: () => {
+            throw new Error("PRIVATE_GETTER_761");
+          },
+        });
+        return error;
+      },
+    ],
+    [
+      "throwing cause getter",
+      () => {
+        const error = new Error("PRIVATE_CAUSE_761");
+        Object.defineProperty(error, "cause", {
+          get: () => {
+            throw new Error("PRIVATE_GETTER_761");
+          },
+        });
+        return error;
+      },
+    ],
+    [
+      "throwing store safeCause getter",
+      () => {
+        const error = new CronStoreError("PRIVATE_PATH_761", "read failed");
+        Object.defineProperty(error, "safeCause", {
+          get: () => {
+            throw new Error("PRIVATE_GETTER_761");
+          },
+        });
+        return error;
+      },
+    ],
+    [
+      "throwing proxy prototype trap",
+      () =>
+        new Proxy(new Error("PRIVATE_PROXY_761"), {
+          getPrototypeOf: () => {
+            throw new Error("PRIVATE_GETTER_761");
+          },
+        }),
+    ],
+    [
+      "throwing proxy property-existence trap",
+      () =>
+        new Proxy(new Error("PRIVATE_PROXY_761"), {
+          has: () => {
+            throw new Error("PRIVATE_GETTER_761");
+          },
+        }),
+    ],
+  ];
+
+  it.each(hostileErrors)(
+    "reports %s with a fixed inspection cause and keeps the next job",
+    async (_name, makeError) => {
+      const failed = store.add({
+        name: "failed",
+        prompt: "PRIVATE_PROMPT_761",
+        type: "once",
+        value: 100,
+      });
+      const next = store.add({ name: "next", prompt: "p", type: "once", value: 100 });
+      const diagnosed: string[] = [];
+      const result = await tick(
+        store,
+        (job) => (job.id === failed.id ? Promise.reject(makeError()) : Promise.resolve()),
+        {
+          now: 100,
+          diagnostics: (message) => diagnosed.push(message),
+        },
+      );
+      expect(result).toEqual([
+        { jobId: failed.id, ok: false },
+        { jobId: next.id, ok: true },
+      ]);
+      expect(diagnosed).toEqual([`cron job ${failed.id} phase=callback cause=inspection_failed`]);
+      expect(diagnosed.join(" ")).not.toContain("PRIVATE_");
+      expect(store.get(failed.id)?.last_run_at).toBe(100);
+      expect(await tick(store, recorder([]), { now: 100 })).toEqual([]);
+    },
+  );
+
+  it("still propagates a diagnostics sink failure after hostile error inspection", async () => {
+    store.add({ name: "n", prompt: "p", type: "once", value: 100 });
+    const error = new Error("PRIVATE_CODE_761");
+    Object.defineProperty(error, "code", {
+      get: () => {
+        throw new Error("PRIVATE_GETTER_761");
+      },
+    });
+    const sinkFailure = new Error("sink unavailable");
+    await expect(
+      tick(store, () => Promise.reject(error), {
+        now: 100,
+        diagnostics: () => {
+          throw sinkFailure;
+        },
+      }),
+    ).rejects.toBe(sinkFailure);
+  });
+
   it("persists the claim before invoking the callback and passes the pre-claim snapshot", async () => {
     const job = store.add({ name: "n", prompt: "p", type: "once", value: 100 });
     const seen: Array<{ persisted: number | null; received: number | null }> = [];
