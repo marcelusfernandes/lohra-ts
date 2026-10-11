@@ -4,6 +4,7 @@ As fontes abaixo foram executadas em F: e não alteram o repositório. A suíte 
 
 ## Runner PowerShell
 
+<!-- prettier-ignore -->
 ```powershell
 # Sonda externa de #751. Nao execute antes de fixar SHA com o orquestrador.
 # Resultados brutos ficam apenas em F:. Nao copia logs integrais para Git.
@@ -129,11 +130,11 @@ foreach ($entry in $runtime) {
   $all | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $runDir 'run.raw.json') -Encoding utf8
 }
 Write-Output $runDir
-
 ```
 
 ## Sanitização do reporter
 
+<!-- prettier-ignore -->
 ```js
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -174,7 +175,11 @@ function repoPath(absolute) {
 
 function primary(message) {
   const lines = sanitize(message).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  return lines.find((line) =>
+  // A child process can wrap its real module error in an AssertionError whose
+  // first non-empty line is only a Node internal frame. Prefer the explicit
+  // coded cause from the same failureMessage when it exists.
+  return lines.find((line) => /^Error \[[A-Z_]+\]:/.test(line)) ??
+    lines.find((line) =>
     /(?:Error|AssertionError|TypeError|ENOENT|EBUSY|failed|timeout)/i.test(line) &&
     !/^(?:AssertionError|Error):\s*$/.test(line)) ??
     lines.find((line) => /(?:Error|AssertionError|TypeError|ENOENT|EBUSY|failed|timeout)/i.test(line)) ??
@@ -291,11 +296,11 @@ const reconciliation = {
 const result = { schema: 1, sha, platform: 'win32-x64', node: nodeVersion, reported, observed, reconciliation, files, failures, suiteErrors, fileDiagnostics, unhandledErrorsStatus, unhandledErrors };
 writeFileSync(outputPath, JSON.stringify(result, null, 2) + '\n');
 if (Object.values(reconciliation).some((value) => !value)) process.exitCode = 2;
-
 ```
 
 ## Empacotamento da evidência
 
+<!-- prettier-ignore -->
 ```js
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -324,6 +329,7 @@ function sanitizeLog(line) {
 
 const summary = { schema: 1, sha: run.sha, host: run.host, status: {}, comparisons: {} };
 const failureSets = new Map();
+const fileSets = new Map();
 const gitVersion = execFileSync('git', ['--version'], { encoding: 'utf8' }).trim();
 for (const label of ['node20', 'node22']) {
   const execution = run.runs.find((item) => item.label === label);
@@ -337,7 +343,7 @@ for (const label of ['node20', 'node22']) {
     ...failure,
   }));
   jsonl(join(outputDir, `failures-${label}.jsonl`), failures);
-  jsonl(join(outputDir, `files-${label}.jsonl`), report.files);
+  fileSets.set(label, new Map(report.files.map((item) => [item.file, { status: item.status, assertions: item.assertions }])));
   const stderrPath = join(root, 'test.stderr.raw.log');
   const stderr = readFileSync(stderrPath, 'utf8');
   const diagnostics = stderr.split(/\r?\n/).map(sanitizeLog).filter(Boolean)
@@ -386,6 +392,12 @@ for (const label of ['node20', 'node22']) {
   summary.status[label] = metadata;
   failureSets.set(label, new Map(failures.map((failure) => [failure.id, failure])));
 }
+const fileNames = [...new Set([...fileSets.get('node20').keys(), ...fileSets.get('node22').keys()])].sort();
+jsonl(join(outputDir, 'files.jsonl'), fileNames.map((file) => ({
+  file,
+  node20: fileSets.get('node20').get(file) ?? null,
+  node22: fileSets.get('node22').get(file) ?? null,
+})));
 const left = failureSets.get('node20');
 const right = failureSets.get('node22');
 summary.comparisons.onlyNode20 = [...left].filter(([key]) => !right.has(key)).map(([, value]) => value);
@@ -394,5 +406,4 @@ summary.comparisons.sameTestDifferentSignature = [...left].filter(([key, value])
   .map(([key, value]) => ({ file: value.file, test: value.test, node20: value.signature, node22: right.get(key).signature }));
 json(join(outputDir, 'comparison.json'), summary.comparisons);
 console.log(JSON.stringify({ sha: run.sha, status: Object.fromEntries(Object.entries(summary.status).map(([label, item]) => [label, item.status])), onlyNode20: summary.comparisons.onlyNode20.length, onlyNode22: summary.comparisons.onlyNode22.length, sameTestDifferentSignature: summary.comparisons.sameTestDifferentSignature.length }));
-
 ```

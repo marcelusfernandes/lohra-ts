@@ -79,24 +79,6 @@
       "node22": "3c3fd8085609682d:Error: npm pack --dry-run --json falhou (exit null): undefined"
     },
     {
-      "file": "tests/parity/stub-driver.test.ts",
-      "test": "installs the dynamic-port redirect for candidate targets too",
-      "node20": "2356f5568be6b494:Error [ERR_MODULE_NOT_FOUND]: Cannot find module '<CLONE>\\scripts\\stub\\driver.ts' imported from <LOCAL_PATH>",
-      "node22": "0bb277b475f87a4f:AssertionError: node:internal/modules/esm/resolve:<LINE>"
-    },
-    {
-      "file": "tests/parity/stub-driver.test.ts",
-      "test": "kills a timed-out target tree and releases the stub port before returning",
-      "node20": "2356f5568be6b494:Error [ERR_MODULE_NOT_FOUND]: Cannot find module '<CLONE>\\scripts\\stub\\driver.ts' imported from <LOCAL_PATH>",
-      "node22": "0bb277b475f87a4f:AssertionError: node:internal/modules/esm/resolve:<LINE>"
-    },
-    {
-      "file": "tests/parity/stub-driver.test.ts",
-      "test": "kills a timed-out target tree even when 127.0.0.1:11434 is already occupied by another process",
-      "node20": "2356f5568be6b494:Error [ERR_MODULE_NOT_FOUND]: Cannot find module '<CLONE>\\scripts\\stub\\driver.ts' imported from <LOCAL_PATH>",
-      "node22": "0bb277b475f87a4f:AssertionError: node:internal/modules/esm/resolve:<LINE>"
-    },
-    {
       "file": "tests/self-update.test.ts",
       "test": "self-update default command runner runs the subprocess with shell:false, so each argument is passed literally",
       "node20": "745588df18c6356b:TypeError: The first argument must be of type string or an instance of Buffer, ArrayBuffer, or Array or an Array-like Object. Received null",
