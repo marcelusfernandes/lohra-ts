@@ -58,3 +58,19 @@ hook. Ainda falta medir se `fs.realpathSync.native` unifica ambas nesse runner.
 Uma sonda adicional registra somente os relativos convencional e `native`,
 sem divulgar o ambiente completo nem alterar a política. O host local não
 apresentou o alias `RUNNER~1`; o CI continua sendo a bancada discriminante.
+
+## Draft #869: comparação nativa confirmada
+
+No HEAD `f73e3aa`, os jobs Windows Node 20 (`114447209136`) e Node 22
+(`114447209355`) mediram, no mesmo processo e fixture, relativo convencional
+`../../../../../RUNNER~1/AppData/Local/Temp/protege-escrita-…/docs/reference/novo.md`
+e `nativeRelative: docs/reference/novo.md`. `gitStatus` permaneceu 0 e
+`settings` verdadeiro. Os logs estão em
+`F:/lohra-m25-864/ci-native-check-node20.log` e
+`F:/lohra-m25-864/ci-native-check-node22.log`. Esses resultados dão uma
+explicação causal para as sete permissões indevidas: o hook compara strings
+de caminhos equivalentes com grafias diferentes e nenhuma delas casa com
+`docs/reference/` sob a raiz textual. A troca para `fs.realpathSync.native`
+no helper de canonicalização do hook usa identidade de caminho fornecida pelo
+filesystem, sem substituir `~1` manualmente nem mudar a política. O CI após
+essa correção ainda precisa confirmar as sete recusas e três permissões.

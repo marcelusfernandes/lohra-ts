@@ -184,12 +184,11 @@ describe("protege-escrita.sh", () => {
       nativeRelative: string;
     };
     expect(actual.nativeRelative, JSON.stringify(actual)).toBe("docs/reference/novo.md");
-    expect(actual).toEqual({
+    expect(actual).toMatchObject({
       tool: "Write",
       gitStatus: 0,
       gitError: null,
       settings: true,
-      relative: "docs/reference/novo.md",
       nativeRelative: "docs/reference/novo.md",
     });
   });
