@@ -27,6 +27,7 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 
 import type { Declaracao, Falha, Resumo } from "./tipos.js";
+import { runNpmSync } from "../subprocess/npm.js";
 import { normalizarRelatorioVitest } from "./vitest-relatorio.js";
 import { montarResumo } from "./resumo.js";
 
@@ -110,12 +111,24 @@ async function main(): Promise<void> {
   const falhasExtras: Falha[] = [];
 
   if (declaracao.check === true) {
-    const npmBin = process.platform === "win32" ? "npm.cmd" : "npm";
-    const checkResult = spawnSync(npmBin, ["run", "typecheck"], { cwd: root, stdio: "inherit" });
+    const checkResult = runNpmSync(["run", "typecheck"], {
+      cwd: root,
+      timeoutMs: 120_000,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    if (checkResult.stdout !== "") process.stdout.write(checkResult.stdout);
+    if (checkResult.stderr !== "") process.stderr.write(checkResult.stderr);
     if (checkResult.status !== 0) {
+      const reason =
+        checkResult.error !== undefined
+          ? `spawn ${(checkResult.error as NodeJS.ErrnoException).code ?? "unknown"}: ${checkResult.error.message}`
+          : checkResult.signal !== null
+            ? `signal ${checkResult.signal}`
+            : `exit code ${String(checkResult.status)}`;
+      const diagnostic = checkResult.stderr.trim().slice(-2_000);
       falhasExtras.push({
         nome: "npm run typecheck",
-        motivo: `exit code ${String(checkResult.status)}`,
+        motivo: diagnostic === "" ? reason : `${reason}: ${diagnostic}`,
       });
     }
   }
