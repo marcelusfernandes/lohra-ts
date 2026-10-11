@@ -1,0 +1,10 @@
+normal: assigned=True resumed=True activeAfter=0 external=False failure=
+timeout: assigned=True resumed=True activeAfter=0 external=True failure=
+uncontained-control: assigned=False resumed=True activeAfter=0 external=False failure=
+create-failure: assigned=False resumed=False activeAfter=0 external=False failure=
+assign-failure: assigned=False resumed=False activeAfter=0 external=False failure=
+resume-failure: assigned=True resumed=False activeAfter=0 external=False failure=
+query-failure: assigned=True resumed=True activeAfter=0 external=False failure=
+termination-failure: assigned=True resumed=True activeAfter=0 external=False failure=
+atomic-normal: assigned=True resumed=True activeAfter=0 external=False failure=
+atomic-invalid-job: assigned=False resumed=False activeAfter=0 external=False failure=
