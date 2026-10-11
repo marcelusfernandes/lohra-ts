@@ -2,6 +2,7 @@
 // issue #79 (e #99: fences ignorados, bit de execução): `secao.sh` (extração de seção usada por `open-pr.sh`) e a
 // validação de seções de `create-issue.sh --dry-run`. Nenhum dos dois toca a
 // rede nesses caminhos; `create-issue.sh --dry-run` só imprime o comando.
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -13,6 +14,28 @@ const SECAO = fileURLToPath(new URL("../.claude/skills/pr/scripts/secao.sh", imp
 const CREATE = fileURLToPath(
   new URL("../.claude/skills/issue/scripts/create-issue.sh", import.meta.url),
 );
+const REPO = fileURLToPath(new URL("../", import.meta.url));
+
+function git(cwd: string, args: readonly string[]): string {
+  const result = spawnSync("git", [...args], { cwd, encoding: "utf8", shell: false });
+  if (result.error || result.status !== 0) {
+    throw new Error(
+      `git ${args[0] ?? ""} failed (status ${String(result.status)}): ${result.error?.message ?? result.stderr}`,
+    );
+  }
+  return result.stdout;
+}
+
+function assertGitExecutableMode(repo: string, file: string): void {
+  const entry = git(repo, ["ls-files", "--stage", "--", file]).trimEnd();
+  const match = /^(100[0-7]{3}) ([0-9a-f]{40}|[0-9a-f]{64}) 0\t(.+)$/u.exec(entry);
+  if (!match || match[3] !== file) {
+    throw new Error(`unexpected git index entry for ${file}: ${entry}`);
+  }
+  if (match[1] !== "100755") {
+    throw new Error(`git index mode for ${file} is ${String(match[1])}, expected 100755`);
+  }
+}
 
 function secao(
   nome: string,
@@ -97,7 +120,37 @@ describe("secao.sh", () => {
   });
 
   it("secao.sh tem bit de execução (modo 100755, como open-pr.sh)", () => {
-    expect(statSync(SECAO).mode & 0o111).not.toBe(0);
+    expect(() => {
+      assertGitExecutableMode(REPO, ".claude/skills/pr/scripts/secao.sh");
+    }).not.toThrow();
+    if (process.platform !== "win32") {
+      expect(statSync(SECAO).mode & 0o111).not.toBe(0);
+    }
+  });
+
+  it("rejeita 100644 e aceita 100755 no índice de uma fixture isolada", () => {
+    const repo = mkdtempSync(path.join(tmpdir(), "secao-index-"));
+    try {
+      git(repo, ["init", "--quiet"]);
+      writeFileSync(path.join(repo, "secao.sh"), "#!/bin/sh\nexit 0\n");
+      const blob = git(repo, ["hash-object", "-w", "secao.sh"]).trim();
+      git(repo, ["update-index", "--add", "--cacheinfo", `100644,${blob},secao.sh`]);
+      expect(() => {
+        assertGitExecutableMode(repo, "secao.sh");
+      }).toThrow(/100644.*100755/u);
+      git(repo, ["update-index", "--add", "--cacheinfo", `100755,${blob},secao.sh`]);
+      expect(() => {
+        assertGitExecutableMode(repo, "secao.sh");
+      }).not.toThrow();
+      expect(() => {
+        assertGitExecutableMode(repo, "missing.sh");
+      }).toThrow(/unexpected git index entry/u);
+      expect(() => {
+        assertGitExecutableMode(path.join(repo, "missing"), "secao.sh");
+      }).toThrow(/git ls-files failed/u);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 });
 
