@@ -48,9 +48,9 @@ caminho absoluto para testes portáteis, sem executá-lo.
 | Ambiente                                | SHA       | Resultado                                                                                                                                                                    |
 | --------------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Windows Node 20.20.2, clone ABI próprio | `112ab91` | `npm ci`, build, typecheck, lint, format e prova: exit 0; prova 15/15.                                                                                                       |
-| Windows Node 22.23.2, clone ABI próprio | `112ab91` | Mesmos cinco comandos: exit 0; prova 15/15.                                                                                                                                  |
+| Windows Node 22.23.2, clone ABI próprio | `112ab91` | Mesmos comandos: exit 0; prova 15/15.                                                                                                                                        |
 | Windows Node 20/22, clones ABI próprios | `1c3d255` | Prova repetida: 15/15, exit 0 em cada Node. A mudança desde `112ab91` é só a constante de caminho da fixture Linux.                                                          |
-| Linux não root, Node do container       | `1c3d255` | Suíte completa: 345 arquivos, 4541 testes PASS, 19 skips, exit 0 (241,39 s); prova 6/6, nove casos Windows não executados; controle negativo comum `structural-red`, exit 0. |
+| Linux não root, Node 22.23.3            | `1c3d255` | Suíte completa: 345 arquivos, 4541 testes PASS, 19 skips, exit 0 (241,39 s); prova 6/6, nove casos Windows não executados; controle negativo comum `structural-red`, exit 0. |
 
 Os quatro gates leves Linux (`build`, `typecheck`, `lint`, `format:check`)
 passaram em `112ab91` antes da correção exclusiva da fixture; o foco Linux e a
