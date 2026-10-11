@@ -69,10 +69,9 @@ function npmPackDryRun(
     },
   });
   if (resultado.error) {
-    throw new Error(
-      `npm pack --dry-run --json não iniciou: ${resultado.error.message}`,
-      { cause: resultado.error },
-    );
+    throw new Error(`npm pack --dry-run --json não iniciou: ${resultado.error.message}`, {
+      cause: resultado.error,
+    });
   }
   if (resultado.status !== 0) {
     throw new Error(
