@@ -58,6 +58,7 @@ import {
 import type { ModelTransport } from "../conversation/index.js";
 import { formatProviderFailureMessage } from "../serialization/provider-error-message.js";
 import { runChatBoundary } from "./chat-boundary.js";
+import { createChatSignalCancellation } from "./chat-signal-cancel.js";
 import { detectChatProvider, type ChatProviderDetection } from "./provider-detectado.js";
 import { CHAT_TOOL_REGISTRY_FACTORIES } from "./chat-tools.js";
 import { subscriptionProviderRefusal } from "./subscription-guard.js";
@@ -88,6 +89,7 @@ export interface ChatCommandOptions {
   readonly home: string;
   readonly codexHome: string;
   readonly cwd: string;
+  readonly registerShutdownTrigger?: (handler: () => void) => () => void;
 }
 
 type Result = Readonly<{ code: number; stdout: string; stderr: string }>;
@@ -522,7 +524,12 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     maxIterations: fanout.parentMaxIterations,
     pricingOverrides,
   });
+  let disposeSignal = (): void => undefined;
   try {
+    const cancellation = createChatSignalCancellation(options.registerShutdownTrigger);
+    disposeSignal = () => {
+      cancellation.dispose();
+    };
     const sessionId = stringFlag(options.flags, "--session");
     // Issue #623: generated BEFORE runTurn, from the same `input` the user
     // gave (byte-identical to `result.input`, `runtime.ts:735`, the value
@@ -554,6 +561,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       model,
       temperature,
       cwd: options.cwd,
+      signal: cancellation.signal,
       ...(sessionId === undefined ? {} : { sessionId }),
     });
     // Issue #587 AC ("ao criar a sessão... gerar e persistir title"):
@@ -622,6 +630,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
       stderr: `${warningLines}${compactionEvents.join("")}${sessionId ? `session: ${sessionId}  (resume with --session ${sessionId})\n` : ""}error: ${message}\n`,
     };
   } finally {
+    disposeSignal();
     approval.setCallback(null);
     approval.setYolo(false);
     approval.reset();
