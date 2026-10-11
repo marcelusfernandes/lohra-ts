@@ -77,9 +77,6 @@ export async function runWindowsTerminalBridge(
   args: ToolArguments,
   options: WindowsBridgeOptions = {},
 ): Promise<string> {
-  if (typeof args.command === "string") {
-    throw new Error("not implemented: reject malformed worker envelope");
-  }
   const command = args.command;
   if (typeof command !== "string" || command.length === 0) {
     return toolError("missing required argument 'command' (string)");

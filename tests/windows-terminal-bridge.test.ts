@@ -176,6 +176,38 @@ describe("Windows PTY bridge", () => {
   });
 
   it("bounds requests and responses before accepting a result", async () => {
+    const overhead =
+      Buffer.byteLength(
+        JSON.stringify({
+          version: 1,
+          args: { command: "", cwd: process.cwd() },
+          timeoutKind: null,
+        }),
+        "utf8",
+      ) + 1;
+    const largestCommand = "x".repeat(65_536 - overhead);
+    const boundaryWorker = worker(
+      `for await (const _ of process.stdin) {}
+       console.log(${JSON.stringify(JSON.stringify({ type: "ready" }))});
+       console.log(${JSON.stringify(
+         JSON.stringify({
+           type: "result",
+           value: JSON.stringify({ ok: true, stdout: "", stderr: "", exit_code: 0 }),
+         }),
+       )});`,
+    );
+    const boundaryResult = JSON.parse(
+      await runWindowsTerminalBridge({ command: largestCommand }, { workerUrl: boundaryWorker }),
+    ) as { ok: boolean };
+    expect(boundaryResult.ok).toBe(true);
+    const overBoundary = JSON.parse(
+      await runWindowsTerminalBridge(
+        { command: `${largestCommand}x` },
+        { workerUrl: boundaryWorker },
+      ),
+    ) as { error: string };
+    expect(overBoundary.error).toContain("request exceeds 65536 bytes");
+
     const oversizedRequest = JSON.parse(
       await runWindowsTerminalBridge({ command: "x".repeat(70_000) }),
     ) as { error: string };
