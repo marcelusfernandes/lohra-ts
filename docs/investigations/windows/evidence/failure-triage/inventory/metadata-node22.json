@@ -1,0 +1,132 @@
+{
+  "schema": 1,
+  "sha": "ebeb722f898bdb4cde5b7d7cef66fb40febf5c15",
+  "platform": "Windows 11 x64 native",
+  "osBuild": "10.0.26200",
+  "architecture": "x64",
+  "gitVersion": "git version 2.47.1.windows.1",
+  "node": "v22.23.2",
+  "npmVersion": "10.9.8",
+  "status": "FAIL",
+  "clone": "git clone --no-checkout; git checkout --detach SHA (no core.protectNTFS override)",
+  "gitConfig": {
+    "autocrlf": "true (system config)",
+    "protectNTFS": "unset (no override)"
+  },
+  "testCommand": "node.exe npm-cli.js test -- --maxWorkers=4 --reporter=json --outputFile=<TEMP>/vitest.raw.json",
+  "steps": {
+    "clone": {
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSha256": "3968ad17077c80103f76c2bc348f1c64d27caca5a40328b8a9f37e46d6795db1",
+      "exit": 0,
+      "timeout": false,
+      "hasExited": true,
+      "elapsedSeconds": 1.872
+    },
+    "checkout": {
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSha256": "7710577cc607c9ed9c2d6e6918a6405e2876fd2f855ede9872f154e234baeb5f",
+      "exit": 0,
+      "timeout": false,
+      "hasExited": true,
+      "elapsedSeconds": 0.356
+    },
+    "head": {
+      "stdoutSha256": "303e5886be1d4943a5b54bc968dd996c28b026c3b4b652c8c905b19ab685e47a",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exit": 0,
+      "timeout": false,
+      "hasExited": true,
+      "elapsedSeconds": 0.054
+    },
+    "status": {
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exit": 0,
+      "timeout": false,
+      "hasExited": true,
+      "elapsedSeconds": 0.161
+    },
+    "protectNtfs": {
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exit": 1,
+      "timeout": false,
+      "hasExited": true,
+      "elapsedSeconds": 0.065
+    },
+    "autocrlf": {
+      "stdoutSha256": "2f2c9049a7f323185d071fbb8beb43704435e07c7842c7fd588aa3d18197d6cd",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exit": 0,
+      "timeout": false,
+      "hasExited": true,
+      "elapsedSeconds": 0.069
+    },
+    "install": {
+      "stdoutSha256": "ac905a8fb77e5722ec000071922906691932168c19eb886947e71cec7d013943",
+      "stderrSha256": "f89c1c0878863004dbeaadb6419bec8d21d2d6e74b59a7cabee4d3dcb7a50283",
+      "exit": 0,
+      "timeout": false,
+      "hasExited": true,
+      "elapsedSeconds": 26.745
+    },
+    "test": {
+      "stdoutSha256": "9ac32607ea3f21adc701760cdc0546f0cea52498e786d7d7e704d6e31c8270c6",
+      "stderrSha256": "e2f5febbcf094606b3dc969de229e1aa9b0d48c087be550bc3614988a9ebf2d5",
+      "exit": 1,
+      "timeout": false,
+      "hasExited": true,
+      "elapsedSeconds": 112.498
+    },
+    "sanitize": {
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exit": 0,
+      "timeout": false,
+      "hasExited": true,
+      "elapsedSeconds": 0.095
+    }
+  },
+  "rawReporterSha256": "8f50bc04cece79888f495857459fbde6ad3331e5a48d8743f03dfbfe14ad0f0a",
+  "rawStderrSha256": "e2f5febbcf094606b3dc969de229e1aa9b0d48c087be550bc3614988a9ebf2d5",
+  "reported": {
+    "suitesTotal": 1153,
+    "suitesPassed": 1008,
+    "suitesFailed": 145,
+    "suitesPending": 0,
+    "fileResults": 336,
+    "testsTotal": 4389,
+    "testsPassed": 4156,
+    "testsFailed": 232,
+    "testsPending": 1,
+    "testsTodo": 0,
+    "success": false
+  },
+  "observed": {
+    "passed": 4156,
+    "failed": 232,
+    "pending": 0,
+    "skipped": 1,
+    "todo": 0,
+    "unknown": 0
+  },
+  "reconciliation": {
+    "unknownStatusesZero": true,
+    "fileResultsMatch": true,
+    "testsMatch": true,
+    "passedMatch": true,
+    "failedMatch": true,
+    "pendingMatch": true,
+    "todoMatch": true,
+    "failedAssertionsMatch": true,
+    "suiteErrorsMatch": true
+  },
+  "failedFileResults": 54,
+  "assertionFailures": 232,
+  "secondaryMessages": 17,
+  "collectionErrors": 0,
+  "fileDiagnostics": 0,
+  "unhandledErrorsStatus": "NOT_REPORTED",
+  "stderrDiagnostics": 7
+}

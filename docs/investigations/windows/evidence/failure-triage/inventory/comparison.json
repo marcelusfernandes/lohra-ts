@@ -1,0 +1,106 @@
+{
+  "onlyNode20": [],
+  "onlyNode22": [
+    {
+      "id": "904201a56f8b9f35",
+      "file": "tests/gateway/session-service.test.ts",
+      "test": "GatewaySessionRegistry busy tracking is not busy by default, then busy after markBusy, then not after clearBusy",
+      "message": "Error: EBUSY: resource busy or locked, unlink '<LOCAL_PATH>'",
+      "signature": "af5078bb3873c000:Error: EBUSY: resource busy or locked, unlink '<LOCAL_PATH>'",
+      "fileOperation": {
+        "operation": "unlink",
+        "targetBasename": "state.db"
+      },
+      "secondary": []
+    },
+    {
+      "id": "1835d46db637a1cc",
+      "file": "tests/gateway/session-service.test.ts",
+      "test": "GatewaySessionRegistry.canSubmitPrompt (L18/ADR-T12-04) is true for a normal, never-compressed session found via the DB, and this lazily caches it",
+      "message": "Error: EBUSY: resource busy or locked, unlink '<LOCAL_PATH>'",
+      "signature": "af5078bb3873c000:Error: EBUSY: resource busy or locked, unlink '<LOCAL_PATH>'",
+      "fileOperation": {
+        "operation": "unlink",
+        "targetBasename": "state.db"
+      },
+      "secondary": []
+    },
+    {
+      "id": "bb8374024ecb2cdb",
+      "file": "tests/mutations-all.test.ts",
+      "test": "realExecute devolve status != 0 (sem lançar) quando o script imprime relatório limpo e sai 3",
+      "message": "AssertionError: expected 1 to be 3 // Object.is equality",
+      "signature": "4f4fbf81d5e70434:AssertionError: expected 1 to be 3 // Object.is equality",
+      "fileOperation": null,
+      "secondary": []
+    }
+  ],
+  "sameTestDifferentSignature": [
+    {
+      "file": "tests/claude-skills-scripts.test.ts",
+      "test": "secao.sh heading `###` (formulário issue.yml) é aceito quando não há `##` com o nome",
+      "node20": "71ee487466321004:AssertionError: expected null to be '- `x`\\n' // Object.is equality",
+      "node22": "0b92d5fe1439efec:AssertionError: expected undefined to be '- `x`\\n' // Object.is equality"
+    },
+    {
+      "file": "tests/claude-skills-scripts.test.ts",
+      "test": "secao.sh heading dentro de bloco de código (fence) é ignorado — mesma regra do check `escopo`",
+      "node20": "71ee487466321004:AssertionError: expected null to be '- `x`\\n' // Object.is equality",
+      "node22": "0b92d5fe1439efec:AssertionError: expected undefined to be '- `x`\\n' // Object.is equality"
+    },
+    {
+      "file": "tests/claude-skills-scripts.test.ts",
+      "test": "secao.sh seção com `###` internos: os subtítulos ficam (corta só em heading de nível igual ou superior)",
+      "node20": "58bcc86e8a36e2d4:AssertionError: expected null to be '- Comando: `npm run prova -- x`\\n### …' // Object.is equality",
+      "node22": "d611f60e72791b28:AssertionError: expected undefined to be '- Comando: `npm run prova -- x`\\n### …' // Object.is equality"
+    },
+    {
+      "file": "tests/claude-skills-scripts.test.ts",
+      "test": "secao.sh última seção do corpo: vai até o fim, sem perder a última linha",
+      "node20": "d01e89e09e5cb417:AssertionError: expected null to be '- `src/a.ts`\\n- `tests/a.test.ts`\\n' // Object.is equality",
+      "node22": "ff49988d8f40ab6d:AssertionError: expected undefined to be '- `src/a.ts`\\n- `tests/a.test.ts`\\n' // Object.is equality"
+    },
+    {
+      "file": "tests/claude-skills-scripts.test.ts",
+      "test": "secao.sh um `#` de nível superior encerra a seção",
+      "node20": "71ee487466321004:AssertionError: expected null to be '- `x`\\n' // Object.is equality",
+      "node22": "0b92d5fe1439efec:AssertionError: expected undefined to be '- `x`\\n' // Object.is equality"
+    },
+    {
+      "file": "tests/package-manifest.test.ts",
+      "test": "npm pack --dry-run --json — tarball publicado (issue #530) inclui scripts/postinstall.mjs mas não scripts/prepare.mjs, e nenhum outro arquivo sob scripts/",
+      "node20": "6a24fdc515d2e7f4:Error: npm pack --dry-run --json falhou (exit null): null",
+      "node22": "3c3fd8085609682d:Error: npm pack --dry-run --json falhou (exit null): undefined"
+    },
+    {
+      "file": "tests/package-manifest.test.ts",
+      "test": "npm pack --dry-run --json — tarball publicado (issue #530) mantém README.md, LICENSE e docs/closeout.md na whitelist",
+      "node20": "6a24fdc515d2e7f4:Error: npm pack --dry-run --json falhou (exit null): null",
+      "node22": "3c3fd8085609682d:Error: npm pack --dry-run --json falhou (exit null): undefined"
+    },
+    {
+      "file": "tests/parity/stub-driver.test.ts",
+      "test": "installs the dynamic-port redirect for candidate targets too",
+      "node20": "2356f5568be6b494:Error [ERR_MODULE_NOT_FOUND]: Cannot find module '<CLONE>\\scripts\\stub\\driver.ts' imported from <LOCAL_PATH>",
+      "node22": "0bb277b475f87a4f:AssertionError: node:internal/modules/esm/resolve:<LINE>"
+    },
+    {
+      "file": "tests/parity/stub-driver.test.ts",
+      "test": "kills a timed-out target tree and releases the stub port before returning",
+      "node20": "2356f5568be6b494:Error [ERR_MODULE_NOT_FOUND]: Cannot find module '<CLONE>\\scripts\\stub\\driver.ts' imported from <LOCAL_PATH>",
+      "node22": "0bb277b475f87a4f:AssertionError: node:internal/modules/esm/resolve:<LINE>"
+    },
+    {
+      "file": "tests/parity/stub-driver.test.ts",
+      "test": "kills a timed-out target tree even when 127.0.0.1:11434 is already occupied by another process",
+      "node20": "2356f5568be6b494:Error [ERR_MODULE_NOT_FOUND]: Cannot find module '<CLONE>\\scripts\\stub\\driver.ts' imported from <LOCAL_PATH>",
+      "node22": "0bb277b475f87a4f:AssertionError: node:internal/modules/esm/resolve:<LINE>"
+    },
+    {
+      "file": "tests/self-update.test.ts",
+      "test": "self-update default command runner runs the subprocess with shell:false, so each argument is passed literally",
+      "node20": "745588df18c6356b:TypeError: The first argument must be of type string or an instance of Buffer, ArrayBuffer, or Array or an Array-like Object. Received null",
+      "node22": "5272596cf1907b47:TypeError: The first argument must be of type string or an instance of Buffer, ArrayBuffer, or Array or an Array-like Object. Received undefined"
+    }
+  ]
+}
