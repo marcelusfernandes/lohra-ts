@@ -74,3 +74,24 @@ de caminhos equivalentes com grafias diferentes e nenhuma delas casa com
 no helper de canonicalização do hook usa identidade de caminho fornecida pelo
 filesystem, sem substituir `~1` manualmente nem mudar a política. O CI após
 essa correção ainda precisa confirmar as sete recusas e três permissões.
+
+## TDD e confirmação focal no CI
+
+O commit de correção `882df38` usou `fs.realpathSync.native` no helper do hook.
+No run `38132586141`, `tests/protege-escrita.test.ts` passou 11/11 e
+`tests/process-shell.test.ts` passou 8/8 tanto em Node 20 (`114450120147`)
+quanto em Node 22 (`114450120108`). A job Windows completa continuou
+vermelha por outros testes, portanto esse resultado é **focal**, não aceite
+global da plataforma. Logs: `F:/lohra-m25-864/ci-fix-node20.log` e
+`F:/lohra-m25-864/ci-fix-node22.log`.
+
+O commit `test(red):` `40273a7` restaurou temporariamente o realpath
+convencional e fortaleceu os sete testes de recusa para verificar também
+envelope JSON, decisão `deny` e motivo em stderr. No run `38133066290`,
+Node 20 (`114451223462`) e Node 22 (`114451223466`) voltaram a ter
+exatamente sete falhas entre os onze casos do hook: cada recusa esperava
+status 2 e recebeu 0 com stdout/stderr vazios; as três permissões e a
+sonda passaram. O helper de shell passou 8/8. Logs:
+`F:/lohra-m25-864/ci-red-checkpoint-node20.log` e
+`F:/lohra-m25-864/ci-red-checkpoint-node22.log`. A restauração de `.native`
+no commit verde seguinte fecha o ciclo sem reescrever os SHAs anteriores.
