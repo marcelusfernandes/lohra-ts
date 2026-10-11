@@ -58,29 +58,23 @@ function quoteWindows(value: string): string {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
-function shellInvocation(
+export function terminalShellInvocation(
   command: string,
   stdoutPath: string,
   stderrPath: string,
-): Readonly<{ executable: string; args: readonly string[] }> {
-  if (process.platform === "win32") {
+  platform: NodeJS.Platform = process.platform,
+): Readonly<{ executable: string; args: string | string[] }> {
+  if (platform === "win32") {
     const executable = process.env.ComSpec ?? "cmd.exe";
     const wrapped = `(${command}) 1>${quoteWindows(stdoutPath)} 2>${quoteWindows(stderrPath)}`;
-    return { executable, args: ["/d", "/s", "/c", wrapped] };
+    // node-pty escapes embedded quotes when given argv[] on Windows. cmd.exe
+    // then sees invalid redirection syntax. Its command-line overload leaves
+    // the already quoted redirection paths intact.
+    return { executable, args: `/d /s /c ${wrapped}` };
   }
   const executable = process.env.SHELL ?? "/bin/sh";
   const wrapped = `(${command}) 1>${quotePosix(stdoutPath)} 2>${quotePosix(stderrPath)}`;
   return { executable, args: ["-lc", wrapped] };
-}
-
-/** Stub for the platform-specific command-line contract (#743, red phase). */
-export function terminalShellInvocation(
-  _command: string,
-  _stdoutPath: string,
-  _stderrPath: string,
-  _platform: NodeJS.Platform,
-): Readonly<{ executable: string; args: string | string[] }> {
-  throw new Error("not implemented");
 }
 
 export async function terminalTool(
@@ -118,7 +112,7 @@ export async function terminalTool(
   const captureRoot = mkdtempSync(join(tmpdir(), "lohra-terminal-"));
   const stdoutPath = join(captureRoot, "stdout");
   const stderrPath = join(captureRoot, "stderr");
-  const invocation = shellInvocation(command, stdoutPath, stderrPath);
+  const invocation = terminalShellInvocation(command, stdoutPath, stderrPath);
 
   return await new Promise<string>((resolve) => {
     let ptyOutput = "";
@@ -126,7 +120,7 @@ export async function terminalTool(
     let settled = false;
     let child;
     try {
-      child = spawnPty(invocation.executable, [...invocation.args], {
+      child = spawnPty(invocation.executable, invocation.args, {
         cwd: cwd ?? process.cwd(),
         env: process.env,
         cols: 80,

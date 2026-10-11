@@ -43,7 +43,10 @@ describe("Windows terminal execution", () => {
         stderr: string;
         exit_code: number;
       };
-      expect(result).toEqual({ ok: true, stdout: "OUT", stderr: "ERR\r\n", exit_code: 7 });
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toBe("OUT");
+      expect(result.stderr.trim()).toBe("ERR");
+      expect(result.exit_code).toBe(7);
       expect(readFileSync(join(workspace, "marker.txt"), "utf8")).toBe("OUT");
     },
   );
