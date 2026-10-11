@@ -1,0 +1,18 @@
+{
+  "source": "cancel-outcome.json; timestamps and state checked after public PTY Ctrl+C",
+  "candidate": "247d6c246956ac3c52e9e91f0781ee3a69842fc0",
+  "node": "22.23.2",
+  "platform": "win32",
+  "operationLimitMs": 30000,
+  "action": "Ctrl+C in public chat PTY after checkpoint and terminal operation started",
+  "firstPostCancelObservationMs": 6941,
+  "childPid": 75060,
+  "childAliveAtObservation": false,
+  "naturalCompletionMarker": false,
+  "checkpointSha256": "4CD84F5B5A87E7C32C422A3B306754FD250BFC0BB2BBEB3E512248FA5F1DE090",
+  "ptyExit": 1,
+  "cancelEnvelope": null,
+  "interruptedUserRows": 0,
+  "result": "PARTIAL: local operation stopped and checkpoint preserved; no explicit cancellation envelope or persisted notice",
+  "operatorCorrection": "Initial fixture was in a different directory from the session's frozen cwd; MODULE_NOT_FOUND was an operator setup error, corrected before this measurement"
+}
