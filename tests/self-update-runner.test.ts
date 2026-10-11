@@ -64,4 +64,16 @@ describe("self-update command runner", () => {
     expect(result.truncated).toBe(true);
     expect(Buffer.byteLength(result.stderr)).toBeLessThanOrEqual(1_048_576);
   });
+
+  it("keeps UTF-8 output inside the byte limit when truncation splits a character", () => {
+    const result = defaultCommandRunner(
+      process.execPath,
+      ["-e", "process.stdout.write('x'.repeat(1_048_575) + '😀')"],
+      process.cwd(),
+    );
+
+    expect(result.truncated).toBe(true);
+    expect(Buffer.byteLength(result.stdout)).toBeLessThanOrEqual(1_048_576);
+    expect(Buffer.byteLength(result.stderr)).toBeLessThanOrEqual(1_048_576);
+  });
 });
