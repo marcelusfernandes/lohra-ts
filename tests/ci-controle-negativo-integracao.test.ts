@@ -96,6 +96,8 @@ describe("controle-negativo/run.ts (subprocesso, repositório git descartável)"
           ["--root", dir, "--base", base, "--head", head, "--slug", slug],
           {
             TMPDIR: isolated,
+            TEMP: isolated,
+            TMP: isolated,
             npm_execpath: wrapper,
             REAL_NPM_CLI: resolveNpmCli(),
             NPM_CAPTURE_FILE: capture,
@@ -118,6 +120,25 @@ describe("controle-negativo/run.ts (subprocesso, repositório git descartável)"
       } finally {
         rmSync(isolated, { recursive: true, force: true });
       }
+    },
+    TIMEOUT_TESTE,
+  );
+
+  it(
+    "npm CLI inexistente falha com causa e ainda remove o worktree temporário",
+    () => {
+      const { dir, base, head, slug } = repoAssertionRed();
+      const before = gitCapture(dir, ["worktree", "list", "--porcelain"]);
+      const result = runControleNegativoComEnv(
+        ["--root", dir, "--base", base, "--head", head, "--slug", slug],
+        {
+          npm_execpath: join(dir, "missing npm cli.cjs"),
+        },
+      );
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("NPM_CLI_NOT_FOUND");
+      expect(result.stdout).not.toContain("assertion-red");
+      expect(gitCapture(dir, ["worktree", "list", "--porcelain"])).toBe(before);
     },
     TIMEOUT_TESTE,
   );
@@ -442,7 +463,7 @@ describe("controle-negativo/run.ts (subprocesso, repositório git descartável)"
       try {
         const result = runControleNegativoComEnv(
           ["--root", dir, "--base", baseInvalida, "--head", head, "--slug", slug],
-          { TMPDIR: tmpIsolado },
+          { TMPDIR: tmpIsolado, TEMP: tmpIsolado, TMP: tmpIsolado },
         );
 
         // Ruído concorrente simulado (mesma reprodução do commit
@@ -504,7 +525,7 @@ describe("controle-negativo/run.ts (subprocesso, repositório git descartável)"
       try {
         const result = runControleNegativoComEnv(
           ["--root", dir, "--base", base, "--head", head, "--slug", "soma"],
-          { TMPDIR: tmpIsolado },
+          { TMPDIR: tmpIsolado, TEMP: tmpIsolado, TMP: tmpIsolado },
         );
 
         expect(result.status, result.stderr).toBe(0);

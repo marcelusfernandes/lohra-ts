@@ -323,10 +323,18 @@ export function runControleNegativoComEnv(
   args: readonly string[],
   envExtra: Record<string, string>,
 ): SpawnSyncReturns<string> {
+  // Windows trata nomes de variáveis sem distinguir maiúsculas. Remova a
+  // variante herdada antes de aplicar o override para o filho receber uma só.
+  const overrides = new Set(Object.keys(envExtra).map((key) => key.toLowerCase()));
+  const env = Object.fromEntries(
+    Object.entries(envSemVitest()).filter(
+      ([key]) => process.platform !== "win32" || !overrides.has(key.toLowerCase()),
+    ),
+  );
   return spawnSync(process.execPath, ["--import", tsxLoader, runScript, ...args], {
     encoding: "utf8",
     timeout: TIMEOUT_TESTE,
-    env: { ...envSemVitest(), ...envExtra },
+    env: { ...env, ...envExtra },
   });
 }
 
