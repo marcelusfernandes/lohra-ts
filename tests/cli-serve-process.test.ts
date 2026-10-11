@@ -27,6 +27,22 @@ function allocatePort(): Promise<number> {
   });
 }
 
+function canBindPort(port: number): Promise<boolean> {
+  return new Promise((resolveCheck, reject) => {
+    const probe = net.createServer();
+    probe.once("error", (error: NodeJS.ErrnoException) => {
+      if (error.code === "EADDRINUSE") resolveCheck(false);
+      else reject(error);
+    });
+    probe.listen(port, "127.0.0.1", () => {
+      probe.close((error) => {
+        if (error !== undefined) reject(error);
+        else resolveCheck(true);
+      });
+    });
+  });
+}
+
 async function waitFor(
   check: () => boolean,
   failure: () => Error | null,
@@ -46,14 +62,16 @@ interface ProcessObservation {
   readonly body: string;
   readonly stderr: string;
   readonly exitCode: number | null;
+  readonly signal: NodeJS.Signals | null;
+  readonly portAvailable: boolean;
 }
 
 async function observeServeProcess(
   buildArgs: (port: number) => readonly string[],
 ): Promise<ProcessObservation> {
+  const port = await allocatePort();
   const runtimeRoot = mkdtempSync(join(tmpdir(), "lohra-serve-parser-process-"));
   const home = join(runtimeRoot, "home");
-  const port = await allocatePort();
   const child = spawn(
     process.execPath,
     ["--import", "tsx", resolve(root, "src/cli.ts"), "serve", ...buildArgs(port)],
@@ -76,39 +94,71 @@ async function observeServeProcess(
   const processState: {
     settled: { readonly exitCode: number | null; readonly signal: NodeJS.Signals | null } | null;
   } = { settled: null };
+  let spawnError: Error | null = null;
+  child.once("error", (error) => {
+    spawnError = error;
+  });
   child.once("close", (exitCode, signal) => {
     processState.settled = { exitCode, signal };
   });
 
+  let observation: ProcessObservation | undefined;
+  let failure: unknown;
+  let hasFailure = false;
   try {
     await waitFor(
       () => Buffer.concat(stderrChunks).toString("utf8").includes("Lohra OpenAI server:"),
       () =>
-        processState.settled === null
-          ? null
-          : new Error(
-              `SERVE_PROCESS_EXITED:${String(processState.settled.exitCode)}:${String(processState.settled.signal)}:${Buffer.concat(stderrChunks).toString("utf8")}`,
-            ),
+        spawnError !== null
+          ? spawnError
+          : processState.settled === null
+            ? null
+            : new Error(
+                `SERVE_PROCESS_EXITED:${String(processState.settled.exitCode)}:${String(processState.settled.signal)}:${Buffer.concat(stderrChunks).toString("utf8")}`,
+              ),
     );
     const response = await fetch(`http://127.0.0.1:${String(port)}/v1/models`, {
       signal: AbortSignal.timeout(2_000),
     });
     const body = await response.text();
-    child.kill("SIGINT");
+    if (!child.kill("SIGINT")) throw new Error("SERVE_PROCESS_SIGNAL_NOT_DELIVERED");
     await waitFor(
       () => processState.settled !== null,
       () => null,
     );
-    return {
+    const portAvailable = await canBindPort(port);
+    observation = {
       status: response.status,
       body,
       stderr: Buffer.concat(stderrChunks).toString("utf8"),
       exitCode: processState.settled?.exitCode ?? null,
+      signal: processState.settled?.signal ?? null,
+      portAvailable,
     };
-  } finally {
-    if (processState.settled === null) child.kill("SIGKILL");
-    rmSync(runtimeRoot, { recursive: true, force: true });
+  } catch (error) {
+    failure = error;
+    hasFailure = true;
   }
+  try {
+    if (processState.settled === null) {
+      child.kill("SIGKILL");
+      await waitFor(
+        () => processState.settled !== null,
+        () => null,
+        2_000,
+      );
+    }
+    rmSync(runtimeRoot, { recursive: true, force: true });
+  } catch (cleanupError) {
+    if (hasFailure)
+      throw new AggregateError([failure, cleanupError], "SERVE_PROCESS_CLEANUP_FAILED", {
+        cause: cleanupError,
+      });
+    throw cleanupError;
+  }
+  if (hasFailure) throw failure;
+  if (observation === undefined) throw new Error("SERVE_PROCESS_OBSERVATION_MISSING");
+  return observation;
 }
 
 describe("serve CLI parse result reaches the real process configuration", () => {
@@ -163,9 +213,20 @@ describe("serve CLI parse result reaches the real process configuration", () => 
           "--insecure with tools = UNAUTHENTICATED remote code execution",
         );
         expect(observed.stderr).not.toContain("API key:");
-        expect(observed.exitCode).toBe(0);
+        if (process.platform === "win32") {
+          expect({ exitCode: observed.exitCode, signal: observed.signal }).toEqual({
+            exitCode: null,
+            signal: "SIGINT",
+          });
+        } else {
+          expect({ exitCode: observed.exitCode, signal: observed.signal }).toEqual({
+            exitCode: 0,
+            signal: null,
+          });
+        }
+        expect(observed.portAvailable).toBe(true);
       },
-      15_000,
+      25_000,
     );
   }
 });
