@@ -301,7 +301,25 @@ describe("consumer PTY", () => {
       writeFileSync(join(root, "package.json"), "{}");
       expect(() => {
         assertConsumerPtyWorks(root);
-      }).toThrow(/PACK_NATIVE_ADDON_LOAD_FAILED:node-pty/u);
+      }).toThrow(/PACK_NATIVE_ADDON_LOAD_FAILED:node-pty:MODULE_NOT_FOUND/u);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the spawn failure cause from a consumer addon", () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-pack-pty-failed-"));
+    try {
+      const addon = join(root, "node_modules", "node-pty");
+      mkdirSync(addon, { recursive: true });
+      writeFileSync(join(root, "package.json"), "{}");
+      writeFileSync(
+        join(addon, "index.js"),
+        "exports.spawn = () => { const error = new Error('sentinel'); error.code = 'PTY_SENTINEL'; throw error; };",
+      );
+      expect(() => {
+        assertConsumerPtyWorks(root);
+      }).toThrow(/PACK_PTY_SPAWN_FAILED:PTY_SENTINEL/u);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
