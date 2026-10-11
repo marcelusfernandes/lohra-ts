@@ -126,12 +126,23 @@ function checked(
 
 function cleanOwn(
   owned: ReadonlyArray<Readonly<{ path: string; entry: Entry }>>,
+  unverified: Readonly<{ path: string; kind: "file" | "directory" }> | null,
   operations: WindowsProtectionOperations,
   primary: unknown,
 ): never {
   const cleanupErrors: unknown[] = [];
+  if (unverified) {
+    cleanupErrors.push(
+      new Error(
+        `Windows cleanup inconclusive: identity unverified for created ${unverified.kind}; retained ${unverified.path}`,
+      ),
+    );
+  }
   for (const { path, entry } of [...owned].reverse()) {
     try {
+      if (unverified && (unverified.path === path || unverified.path.startsWith(`${path}\\`))) {
+        throw new Error(`Windows cleanup skipped for ${path}: contains an unverified created path`);
+      }
       const current = operations.inspect(path);
       if (!current || current.identity !== entry.identity || current.kind !== entry.kind) {
         throw new Error(`Refusing cleanup after Windows path identity changed: ${path}`);
@@ -167,13 +178,16 @@ export function prepareWindowsPrivateDestination(
   if (directory === file) throw new Error("Windows private destination requires a file name");
   operations.volume(file);
   const owned: Array<{ path: string; entry: Entry }> = [];
+  let unverified: { path: string; kind: "file" | "directory" } | null = null;
   try {
     let dirEntry = inspectChain(directory, operations);
     if (!dirEntry) {
       operations.mkdir(directory);
+      unverified = { path: directory, kind: "directory" };
       dirEntry = inspectChain(directory, operations);
       if (!dirEntry) throw new Error(`Created Windows directory cannot be inspected: ${directory}`);
       owned.push({ path: directory, entry: dirEntry });
+      unverified = null;
       operations.protect(directory);
     }
     if (dirEntry.kind !== "directory")
@@ -183,9 +197,11 @@ export function prepareWindowsPrivateDestination(
     let fileEntry = inspectChain(file, operations);
     if (!fileEntry) {
       operations.createEmpty(file);
+      unverified = { path: file, kind: "file" };
       fileEntry = inspectChain(file, operations);
       if (!fileEntry) throw new Error(`Created Windows file cannot be inspected: ${file}`);
       owned.push({ path: file, entry: fileEntry });
+      unverified = null;
       operations.protect(file);
     }
     if (fileEntry.kind !== "file") {
@@ -231,6 +247,6 @@ export function prepareWindowsPrivateDestination(
       },
     };
   } catch (error) {
-    cleanOwn(owned, operations, error);
+    cleanOwn(owned, unverified, operations, error);
   }
 }

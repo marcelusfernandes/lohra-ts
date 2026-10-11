@@ -204,6 +204,33 @@ describe("windows private destination", () => {
     expect(state.events).not.toContain(`rmdir:${path}`);
   });
 
+  it("retains its verified directory when a new child's identity is unavailable", () => {
+    const state = fixture();
+    const inspect = state.operations.inspect.bind(state.operations);
+    state.operations.inspect = (path) => {
+      if (path === destination && state.entries.has(path))
+        throw new Error("file inspection denied");
+      return inspect(path);
+    };
+    try {
+      prepareWindowsPrivateDestination(destination, state.operations);
+      throw new Error("expected failure");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AggregateError);
+      const aggregate = error as AggregateError;
+      expect(aggregate.cause).toEqual(new Error("file inspection denied"));
+      expect(aggregate.errors.map(String)).toEqual([
+        "Error: file inspection denied",
+        expect.stringContaining(`retained ${destination}`),
+        expect.stringContaining(`cleanup skipped for ${directory}`),
+      ]);
+    }
+    expect(state.entries.has(destination)).toBe(true);
+    expect(state.entries.has(directory)).toBe(true);
+    expect(state.events).not.toContain(`unlink:${destination}`);
+    expect(state.events).not.toContain(`rmdir:${directory}`);
+  });
+
   it("removes its new directory after a file protection failure", () => {
     const state = fixture();
     state.operations.protect = (path) => {
