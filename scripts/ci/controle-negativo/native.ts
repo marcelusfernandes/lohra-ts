@@ -42,11 +42,13 @@ export interface NativeArgs {
 }
 
 export function parseNativeArgs(argv: readonly string[]): NativeArgs {
+  const modes = argv.filter((item) => item === "--native" || item === "--native-positive");
+  if (modes.length !== 1) throw new Error("NATIVE_ARGUMENTS");
   const values = new Map<string, string>();
   const sources: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
-    if (flag === "--native") continue;
+    if (flag === "--native" || flag === "--native-positive") continue;
     const value = argv[++i];
     if (
       flag === undefined ||
@@ -355,6 +357,7 @@ function proofAt(
   artifact: PreparedWindowsHelper,
   expectedRed: boolean,
   runProof: typeof rodarProvaNaBase,
+  reportOnFailure = false,
 ): number {
   assertRealHarness(root);
   const units = declaredUnits(join(root, "prova", `${args.slug}.ts`));
@@ -372,7 +375,7 @@ function proofAt(
     result.error !== undefined ||
     result.signal !== null ||
     result.status === null ||
-    result.status !== (expectedRed ? 1 : 0)
+    (result.status !== (expectedRed ? 1 : 0) && !(reportOnFailure && result.status === 1))
   ) {
     throw new Error(
       `NATIVE_PROOF_PROCESS: ${result.error?.message ?? String(result.signal ?? result.status)}`,
@@ -382,6 +385,8 @@ function proofAt(
   if (summary.total < 1 || (expectedRed ? classificar(summary) !== "assertion-red" : !summary.ok)) {
     throw new Error(`NATIVE_PROOF_RESULT: ${classificar(summary)} total=${String(summary.total)}`);
   }
+  if (result.status !== (expectedRed ? 1 : 0))
+    throw new Error(`NATIVE_PROOF_PROCESS: exit ${String(result.status)}`);
   return summary.total;
 }
 
@@ -391,52 +396,42 @@ export interface NativeRunHooks {
   readonly removeWorktree?: (root: string, path: string) => ExecucaoGit;
 }
 
-export function runNative(argv: readonly string[], hooks: NativeRunHooks = {}): number {
-  const args = parseNativeArgs(argv);
-  if (process.platform !== "win32") throw new Error("NATIVE_PLATFORM_WINDOWS_REQUIRED");
-  const redSha = selectNativeRed(args);
-  const headSha = fullSha(args.root, args.head);
-  const temp = mkdtempSync(join(tmpdir(), "lohra-native-negative-"));
-  const red = join(temp, "red");
-  const head = join(temp, "head");
-  let redAdded = false;
-  let headAdded = false;
+type CheckoutName = "red" | "head";
+
+/** O mesmo ciclo de vida possui ambas as rotas; cada invocação só limpa o que registrou. */
+function withNativeCheckouts(
+  args: NativeArgs,
+  revisions: readonly { readonly name: CheckoutName; readonly sha: string }[],
+  prefix: "lohra-native-negative-" | "lohra-native-positive-",
+  hooks: NativeRunHooks,
+  execute: (paths: ReadonlyMap<CheckoutName, string>, temp: string) => void,
+): void {
+  const temp = mkdtempSync(join(tmpdir(), prefix));
+  const paths = new Map<CheckoutName, string>();
+  const registered: string[] = [];
   let primary: unknown;
   try {
-    redAdded = worktreeAdd(args.root, red, redSha);
-    if (!redAdded) throw new Error("NATIVE_WORKTREE_RED");
-    headAdded = worktreeAdd(args.root, head, headSha);
-    if (!headAdded) throw new Error("NATIVE_WORKTREE_HEAD");
-    overlayFiles(args.root, headSha, redSha, red);
-    assertSameOverlay(red, head);
-    linkNodeModules(args.root, red);
-    linkNodeModules(args.root, head);
-    const redArtifact = compileAt(red, args, join(temp, "red-bin"));
-    const headArtifact = compileAt(head, args, join(temp, "head-bin"));
-    process.stdout.write(
-      `controle-negativo: compilado red=${redSha} manifest=${redArtifact.manifestSha256}\n`,
-    );
-    process.stdout.write(
-      `controle-negativo: compilado HEAD=${headSha} manifest=${headArtifact.manifestSha256}\n`,
-    );
-    const redTotal = proofAt(red, args, redArtifact, true, hooks.runProof ?? rodarProvaNaBase);
-    process.stdout.write(`controle-negativo: prova red assertion-red testes=${String(redTotal)}\n`);
-    const headTotal = proofAt(head, args, headArtifact, false, hooks.runProof ?? rodarProvaNaBase);
-    process.stdout.write(`controle-negativo: prova HEAD verde testes=${String(headTotal)}\n`);
+    for (const revision of revisions) {
+      const path = join(temp, revision.name);
+      if (!worktreeAdd(args.root, path, revision.sha))
+        throw new Error(`NATIVE_WORKTREE_${revision.name.toUpperCase()}`);
+      registered.push(path);
+      paths.set(revision.name, path);
+    }
+    execute(paths, temp);
   } catch (cause) {
     primary = cause;
   }
   const cleanupErrors: unknown[] = [];
-  for (const [path, added] of [
-    [head, headAdded],
-    [red, redAdded],
-  ] as const) {
-    if (added) {
+  for (const path of registered.reverse()) {
+    try {
       const result =
         hooks.removeWorktree?.(args.root, path) ??
         git(args.root, ["worktree", "remove", "--force", path]);
       if (result.error !== undefined || result.status !== 0)
         cleanupErrors.push(new Error(`NATIVE_CLEANUP_WORKTREE: ${causaGit(result)}`));
+    } catch (cause) {
+      cleanupErrors.push(new Error("NATIVE_CLEANUP_WORKTREE", { cause }));
     }
   }
   try {
@@ -450,8 +445,118 @@ export function runNative(argv: readonly string[], hooks: NativeRunHooks = {}): 
       `NATIVE_FAILED: ${String(primary)}; cleanup=${String(cleanupErrors.length)}`,
     );
   }
+}
+
+export function runNative(argv: readonly string[], hooks: NativeRunHooks = {}): number {
+  const args = parseNativeArgs(argv);
+  if (!argv.includes("--native")) throw new Error("NATIVE_ARGUMENTS");
+  if (process.platform !== "win32") throw new Error("NATIVE_PLATFORM_WINDOWS_REQUIRED");
+  const redSha = selectNativeRed(args);
+  const headSha = fullSha(args.root, args.head);
+  withNativeCheckouts(
+    args,
+    [
+      { name: "red", sha: redSha },
+      { name: "head", sha: headSha },
+    ],
+    "lohra-native-negative-",
+    hooks,
+    (paths, temp) => {
+      const red = paths.get("red");
+      const head = paths.get("head");
+      if (red === undefined || head === undefined) throw new Error("NATIVE_WORKTREE_INVARIANT");
+      overlayFiles(args.root, headSha, redSha, red);
+      assertSameOverlay(red, head);
+      linkNodeModules(args.root, red);
+      linkNodeModules(args.root, head);
+      const redArtifact = compileAt(red, args, join(temp, "red-bin"));
+      const headArtifact = compileAt(head, args, join(temp, "head-bin"));
+      process.stdout.write(
+        `controle-negativo: compilado red=${redSha} manifest=${redArtifact.manifestSha256}\n`,
+      );
+      process.stdout.write(
+        `controle-negativo: compilado HEAD=${headSha} manifest=${headArtifact.manifestSha256}\n`,
+      );
+      const redTotal = proofAt(red, args, redArtifact, true, hooks.runProof ?? rodarProvaNaBase);
+      process.stdout.write(
+        `controle-negativo: prova red assertion-red testes=${String(redTotal)}\n`,
+      );
+      const headTotal = proofAt(
+        head,
+        args,
+        headArtifact,
+        false,
+        hooks.runProof ?? rodarProvaNaBase,
+      );
+      process.stdout.write(`controle-negativo: prova HEAD verde testes=${String(headTotal)}\n`);
+    },
+  );
   process.stdout.write(
     `controle-negativo: nativo assertion-red ${redSha} / verde ${headSha} / ${args.slug} — PASS\n`,
   );
   return 0;
+}
+
+/** Positivo explícito: compila apenas HEAD; nunca fabrica um red C# de produção. */
+export function runNativePositive(argv: readonly string[], hooks: NativeRunHooks = {}): number {
+  let args: NativeArgs | undefined;
+  let headSha: string | undefined;
+  let phase = "argumentos";
+  try {
+    const parsed = parseNativeArgs(argv);
+    args = parsed;
+    if (!argv.includes("--native-positive") || parsed.red !== undefined)
+      throw new Error("NATIVE_POSITIVE_ARGUMENTS");
+    phase = "plataforma";
+    if (process.platform !== "win32") throw new Error("NATIVE_PLATFORM_WINDOWS_REQUIRED");
+    phase = "revisoes";
+    const baseSha = fullSha(parsed.root, parsed.base);
+    const resolvedHeadSha = fullSha(parsed.root, parsed.head);
+    headSha = resolvedHeadSha;
+    if (baseSha === resolvedHeadSha || !isAncestor(parsed.root, baseSha, resolvedHeadSha))
+      throw new Error("NATIVE_ANCESTRY");
+    phase = "fontes";
+    for (const source of parsed.sources)
+      checkedGit(parsed.root, ["cat-file", "-e", `${resolvedHeadSha}:${source}`]);
+    checkedGit(parsed.root, ["cat-file", "-e", `${resolvedHeadSha}:prova/${parsed.slug}.ts`]);
+    let total = 0;
+    phase = "checkout";
+    withNativeCheckouts(
+      parsed,
+      [{ name: "head", sha: resolvedHeadSha }],
+      "lohra-native-positive-",
+      hooks,
+      (paths, temp) => {
+        const head = paths.get("head");
+        if (head === undefined) throw new Error("NATIVE_WORKTREE_INVARIANT");
+        phase = "dependencias";
+        linkNodeModules(parsed.root, head);
+        phase = "compile-verify";
+        const artifact = compileAt(head, parsed, join(temp, "head-bin"));
+        process.stdout.write(
+          `controle-negativo: POSITIVE-ONLY fase=compile-verify HEAD=${resolvedHeadSha} manifest=${artifact.manifestSha256}\n`,
+        );
+        phase = "prova";
+        total = proofAt(head, parsed, artifact, false, hooks.runProof ?? rodarProvaNaBase, true);
+        process.stdout.write(
+          `controle-negativo: POSITIVE-ONLY fase=prova HEAD=${resolvedHeadSha} testes=${String(total)}\n`,
+        );
+        phase = "cleanup";
+      },
+    );
+    process.stdout.write(
+      `controle-negativo: POSITIVE-ONLY HEAD=${resolvedHeadSha} slug=${parsed.slug} fontes=${parsed.sources.join(",")} testes=${String(total)} — PASS\n`,
+    );
+    return 0;
+  } catch (cause) {
+    const errors: unknown[] = cause instanceof AggregateError ? cause.errors : [cause];
+    const details = errors
+      .map((error, index) => `${index === 0 ? "primaria" : "secundaria"}=${String(error)}`)
+      .join("; ");
+    throw new AggregateError(
+      errors,
+      `POSITIVE-ONLY FAIL HEAD=${headSha ?? "indisponível"} slug=${args?.slug ?? "indisponível"} fontes=${args?.sources.join(",") ?? "indisponível"} fase=${phase} causa=${details}`,
+      { cause },
+    );
+  }
 }
