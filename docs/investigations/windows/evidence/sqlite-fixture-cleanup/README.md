@@ -19,3 +19,9 @@ Each command exits **1 by design**: the original assertion must remain a failure
 | 22.23.2 | acquisition     | no / yes / yes                          | yes / no / no                                |
 
 All eight probe subprocesses exited 1. The base logs show `EBUSY` at the fixture's `rmSync` and again in `afterEach`; candidate logs show the intentional assertion failure without a secondary cleanup error. Their JSON reports and sanitized logs are adjacent to this note. A remaining fixture root count of zero after the candidate run means `state.db` was removed before process exit; no retry or skip was used.
+
+## Revisão após o contrato de tamanho
+
+A revisão extraiu somente os dois casos afetados para `tests/workflow-service-durability-cleanup.test.ts` e o helper compartilhado para `tests/workflow-service-durability.fixture.ts` no commit `292693484e3325bb8a3d8fba17d38f81b56f9537`. A prova declara agora o arquivo legado e o novo: 32 + 2 = 34 testes. O arquivo legado caiu de 2.336 linhas na base para 2.058, respeitando a regra de não crescimento para arquivos preexistentes acima de 800 linhas.
+
+`probe.mjs` escolhe o novo arquivo quando presente e mantém o arquivo original como fallback para reproduzir o vermelho na base. As quatro sondas `r2-green-*` foram executadas em clones descartáveis separados com Node 20.20.2 e 22.23.2. Cada subprocesso saiu com código 1 pela asserção proposital (`assertionSeen: true`), sem `EBUSY` e sem diretório ou `state.db` residual. Os logs da rodada anterior permanecem como evidência histórica do vermelho/verde antes da extração; a rodada 2 mede o layout final.
