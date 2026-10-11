@@ -143,6 +143,56 @@ describe("controle nativo positivo explícito", () => {
     100_000,
   );
 
+  it("identifica argumentos inválidos sem inventar SHA no erro final do CLI", () => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        resolveNpmCli({ env: process.env }),
+        "run",
+        "ci:controle-negativo",
+        "--",
+        "--native-positive",
+      ],
+      { encoding: "utf8", timeout: 30_000 },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("POSITIVE-ONLY");
+    expect(result.stderr).toContain("HEAD=indisponível");
+    expect(result.stderr).toContain("fase=argumentos");
+    expect(result.stderr).toContain("NATIVE_ARGUMENTS");
+  });
+
+  it.runIf(process.platform === "win32")(
+    "inclui HEAD, slug, fontes, fase e causa no FAIL real antes da compilação",
+    () => {
+      const repo = fixture();
+      const invalidCompiler = argv(repo);
+      invalidCompiler[invalidCompiler.indexOf("--compiler") + 1] = join(repo.root, "missing.exe");
+      const result = spawnSync(
+        process.execPath,
+        [
+          resolveNpmCli({ env: process.env }),
+          "run",
+          "ci:controle-negativo",
+          "--",
+          ...invalidCompiler,
+        ],
+        { encoding: "utf8", timeout: 30_000 },
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("POSITIVE-ONLY");
+      expect(result.stderr).toContain(`HEAD=${repo.head}`);
+      expect(result.stderr).toContain("slug=native-value");
+      expect(result.stderr).toContain("fontes=native/value.cs");
+      expect(result.stderr).toContain("fase=compile-verify");
+      expect(result.stderr).toContain("PREPARE_COMPILER_MISSING");
+      expect(result.stdout).not.toContain("— PASS");
+    },
+    40_000,
+  );
+
   it.runIf(process.platform === "win32")(
     "recusa compilador ou fonte C# ausente e código C# inválido antes da prova",
     () => {
@@ -259,6 +309,10 @@ describe("controle nativo positivo explícito", () => {
       } catch (error) {
         expect(error).toBeInstanceOf(AggregateError);
         expect(String(error)).toContain("NATIVE_PROOF_PROCESS");
+        expect(String(error)).toContain("POSITIVE-ONLY");
+        expect(String(error)).toContain(`HEAD=${repo.head}`);
+        expect(String(error)).toContain("fase=prova");
+        expect(String(error)).toContain("cleanup marker");
         expect(
           (error as AggregateError).errors.some((item: unknown) =>
             String(item).includes("cleanup marker"),
