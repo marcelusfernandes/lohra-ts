@@ -307,6 +307,7 @@ describe("protege-escrita.sh", () => {
       encoding: "utf8",
     });
     expect(gitProbe.error).toBeUndefined();
+    expect(typeof gitProbe.status).toBe("number");
     expect(gitProbe.status).not.toBe(0);
     expect(escrever(root, path.join(fora, "nota.md")).status).toBe(0);
   });
