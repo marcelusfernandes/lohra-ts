@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -52,7 +53,13 @@ const NATIVE_MODULE_CHECKS: readonly NativeModuleCheck[] = [
   {
     module: "node-pty",
     prebuiltBinary: (platform, arch) =>
-      join("node_modules", "node-pty", "prebuilds", `${platform}-${arch}`, "pty.node"),
+      join(
+        "node_modules",
+        "node-pty",
+        "prebuilds",
+        `${platform}-${arch}`,
+        platform === "win32" ? "conpty.node" : "pty.node",
+      ),
     compiledMarker: join("node_modules", "node-pty", "build", "config.gypi"),
   },
 ];
@@ -77,9 +84,43 @@ export function assertNoNativeCompileNeeded(options: {
   }
 }
 
-export async function assertConsumerPtyWorks(_consumerRoot: string): Promise<void> {
-  await Promise.resolve();
-  throw new Error("not implemented");
+export async function assertConsumerPtyWorks(consumerRoot: string): Promise<void> {
+  let pty: typeof import("node-pty");
+  try {
+    pty = createRequire(join(consumerRoot, "package.json"))(
+      "node-pty",
+    ) as typeof import("node-pty");
+  } catch (error) {
+    throw new Error("PACK_NATIVE_ADDON_LOAD_FAILED:node-pty", { cause: error });
+  }
+  const marker = "PACK_PTY_READY";
+  let terminal: ReturnType<typeof pty.spawn>;
+  try {
+    terminal = pty.spawn(process.execPath, ["-e", `process.stdout.write('${marker}')`], {
+      name: "xterm-256color",
+      cols: 80,
+      rows: 24,
+      cwd: consumerRoot,
+      env: { ...process.env, TERM: "xterm-256color" },
+    });
+  } catch (error) {
+    throw new Error("PACK_PTY_SPAWN_FAILED", { cause: error });
+  }
+  await new Promise<void>((resolvePty, rejectPty) => {
+    let output = "";
+    const timeout = setTimeout(() => {
+      terminal.kill();
+      rejectPty(new Error("PACK_PTY_TIMEOUT"));
+    }, 15_000);
+    terminal.onData((chunk) => {
+      output = (output + chunk).slice(-4096);
+    });
+    terminal.onExit(({ exitCode }) => {
+      clearTimeout(timeout);
+      if (exitCode === 0 && output.includes(marker)) resolvePty();
+      else rejectPty(new Error(`PACK_PTY_FAILED:${String(exitCode)}:${output}`));
+    });
+  });
 }
 
 function command(
@@ -323,6 +364,7 @@ async function main(): Promise<void> {
       platform: process.platform,
       arch: process.arch,
     });
+    await assertConsumerPtyWorks(installDirectory);
 
     const projected = join(root, "requests.jsonl");
     const raw = join(root, "requests-raw.jsonl");
