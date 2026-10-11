@@ -1,5 +1,13 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -102,6 +110,142 @@ describe("preparação explícita do helper Windows", () => {
     });
     writeFileSync(fixture.source, "changed");
     expect(() => verifyWindowsHelper(prepared)).toThrow(/STALE/u);
+  });
+
+  it("ordena fontes sem mutar a lista do chamador", () => {
+    const fixture = workspace();
+    const second = join(fixture.root, "a source.cs");
+    writeFileSync(second, "class Other {}");
+    const sources = [fixture.source, second];
+    prepareWindowsHelper({
+      sources,
+      outputDir: fixture.outputDir,
+      compilerPath: fixture.compiler,
+      runCompiler: (_command, argv) => {
+        expect(argv.slice(3)).toEqual([second, fixture.source]);
+        const out = argv.find((arg) => arg.startsWith("/out:"));
+        if (out === undefined) throw new Error("missing output");
+        writeFileSync(out.slice(5), "fixture");
+        return { status: 0, signal: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+      },
+    });
+    expect(sources).toEqual([fixture.source, second]);
+  });
+
+  it("recusa destino reparse sem tocar no alvo", () => {
+    const fixture = workspace();
+    const target = join(fixture.root, "target");
+    mkdirSync(target);
+    const marker = join(target, "marker");
+    writeFileSync(marker, "keep");
+    symlinkSync(target, fixture.outputDir, process.platform === "win32" ? "junction" : "dir");
+    expect(() =>
+      prepareWindowsHelper({
+        sources: [fixture.source],
+        outputDir: fixture.outputDir,
+        compilerPath: fixture.compiler,
+      }),
+    ).toThrow(/DESTINATION_EXISTS/u);
+    expect(readFileSync(marker, "utf8")).toBe("keep");
+  });
+
+  it("distingue timeout, excesso de saída e falha de lançamento com causa", () => {
+    for (const code of ["ETIMEDOUT", "ENOBUFS", "ENOENT"] as const) {
+      const fixture = workspace();
+      const error = Object.assign(new Error("compiler failure"), { code });
+      let observed: unknown;
+      try {
+        prepareWindowsHelper({
+          sources: [fixture.source],
+          outputDir: fixture.outputDir,
+          compilerPath: fixture.compiler,
+          timeoutMs: 1234,
+          maxBuffer: 4096,
+          runCompiler: (_command, _argv, options) => {
+            expect(options.timeout).toBe(1234);
+            expect(options.maxBuffer).toBe(4096);
+            return {
+              status: null,
+              signal: null,
+              stdout: Buffer.alloc(0),
+              stderr: Buffer.alloc(0),
+              error,
+            };
+          },
+        });
+      } catch (cause) {
+        observed = cause;
+      }
+      expect(observed).toMatchObject({
+        code:
+          code === "ETIMEDOUT"
+            ? "PREPARE_COMPILE_TIMEOUT"
+            : code === "ENOBUFS"
+              ? "PREPARE_COMPILE_OUTPUT_LIMIT"
+              : "PREPARE_COMPILE_LAUNCH",
+        cause: error,
+      });
+      expect(existsSync(fixture.outputDir)).toBe(false);
+    }
+  });
+
+  it("rejeita compilador que não produziu executável e remove só saída própria", () => {
+    const fixture = workspace();
+    expect(() =>
+      prepareWindowsHelper({
+        sources: [fixture.source],
+        outputDir: fixture.outputDir,
+        compilerPath: fixture.compiler,
+        runCompiler: () => ({
+          status: 0,
+          signal: null,
+          stdout: Buffer.alloc(0),
+          stderr: Buffer.alloc(0),
+        }),
+      }),
+    ).toThrow(/EXECUTABLE_MISSING/u);
+    expect(existsSync(fixture.outputDir)).toBe(false);
+    expect(existsSync(fixture.source)).toBe(true);
+  });
+
+  it("preserva falha primária quando limpeza encontra arquivo alheio", () => {
+    const fixture = workspace();
+    let observed: unknown;
+    try {
+      prepareWindowsHelper({
+        sources: [fixture.source],
+        outputDir: fixture.outputDir,
+        compilerPath: fixture.compiler,
+        runCompiler: (_command, _argv, options) => {
+          writeFileSync(join(options.cwd, "foreign"), "keep");
+          return { status: 7, signal: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+        },
+      });
+    } catch (cause) {
+      observed = cause;
+    }
+    expect(observed).toMatchObject({ code: "PREPARE_CLEANUP_FAILED" });
+    expect((observed as Error).cause).toBeInstanceOf(AggregateError);
+    expect(readFileSync(join(fixture.outputDir, "foreign"), "utf8")).toBe("keep");
+  });
+
+  it("verificador detecta exe adulterado e manifesto ausente", () => {
+    const fixture = workspace();
+    const prepared = prepareWindowsHelper({
+      sources: [fixture.source],
+      outputDir: fixture.outputDir,
+      compilerPath: fixture.compiler,
+      runCompiler: (_command, argv) => {
+        const out = argv.find((arg) => arg.startsWith("/out:"));
+        if (out === undefined) throw new Error("missing output");
+        writeFileSync(out.slice(5), "fixture");
+        return { status: 0, signal: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+      },
+    });
+    writeFileSync(prepared.executablePath, "changed");
+    expect(() => verifyWindowsHelper(prepared)).toThrow(/CORRUPT/u);
+    rmSync(prepared.manifestPath);
+    expect(() => verifyWindowsHelper(prepared)).toThrow(/MISSING/u);
   });
 
   it.runIf(process.platform === "win32")(
