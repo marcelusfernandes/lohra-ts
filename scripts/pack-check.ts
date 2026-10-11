@@ -107,6 +107,13 @@ export function packNpmCommand(
     timeoutMs,
     maxBuffer: 16 * 1024 * 1024,
   });
+  if (result.error !== undefined) {
+    const code = (result.error as NodeJS.ErrnoException).code ?? "unknown";
+    const stderr = result.stderr ? `:${result.stderr}` : "";
+    throw new Error(`PACK_COMMAND_FAILED:npm:${code}:${result.error.message}${stderr}`, {
+      cause: result.error,
+    });
+  }
   if (result.status !== 0)
     throw new Error(
       `PACK_COMMAND_FAILED:npm:${String(result.status ?? result.signal ?? "unknown")}:${result.stderr}`,
