@@ -32,7 +32,10 @@ const cases = {
 };
 const selected = cases[scenario];
 if (!selected) throw new Error(`unknown scenario: ${scenario}`);
-const testPath = join(cloneRoot, "tests", "workflow-service-durability.test.ts");
+const testFile = existsSync(join(cloneRoot, "tests", "workflow-service-durability-cleanup.test.ts"))
+  ? "workflow-service-durability-cleanup.test.ts"
+  : "workflow-service-durability.test.ts";
+const testPath = join(cloneRoot, "tests", testFile);
 const source = readFileSync(testPath, "utf8");
 const start = source.indexOf(`it("${selected.title}`);
 if (start < 0) throw new Error("target test not found");
@@ -51,14 +54,7 @@ mkdirSync(tempRoot, { recursive: true });
 const vitest = join(cloneRoot, "node_modules", "vitest", "vitest.mjs");
 const run = spawnSync(
   process.execPath,
-  [
-    vitest,
-    "run",
-    "tests/workflow-service-durability.test.ts",
-    "-t",
-    selected.title,
-    "--maxWorkers=1",
-  ],
+  [vitest, "run", `tests/${testFile}`, "-t", selected.title, "--maxWorkers=1"],
   {
     cwd: cloneRoot,
     env: {
