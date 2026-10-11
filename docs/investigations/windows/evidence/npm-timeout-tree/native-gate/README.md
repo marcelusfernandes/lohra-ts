@@ -14,7 +14,10 @@ npm run ci:controle-negativo -- --native --base <BASE> --head <HEAD> --slug <SLU
 ```
 
 O runner seleciona um único `test(red):` causal em `base..HEAD`; com vários,
-exige `--red <SHA>`. Cada worktree recebe uma preparação exclusiva via #898,
+exige `--red <SHA>`. `BASE` precisa ser ancestral de `HEAD`:
+`git merge-base --is-ancestor <BASE> <HEAD>` deve retornar 0. Se a base
+avançou, integre-a por merge antes desta rota; ela não avalia um histórico
+divergente. Cada worktree recebe uma preparação exclusiva via #898,
 verificada antes de executar Vitest. A prova lê o EXE somente por
 `LOHRA_NATIVE_HELPER_EXE` no processo filho. Falha de compilação nunca entra
 na classificação de asserções. O runner apaga resultados anteriores antes da
@@ -38,22 +41,22 @@ CI continuam como antes; o roteamento para Windows é trabalho separado.
 
 O commit vermelho da própria issue é `82038c3` (stub compilável; a prova
 falhou por asserção antes da implementação). O código e o corpus final estão
-em `1c3d255`; `112ab91` tem os mesmos arquivos de produção, mas a fixture
-portátil ainda usava um caminho de `csc.exe` Windows como entrada do parser
+em `096e534`; a fixture portátil em `112ab91` ainda usava um caminho de
+`csc.exe` Windows como entrada do parser
 Linux. A primeira suíte Linux nesse SHA terminou com **3 FAIL**
 `NATIVE_ARGUMENTS` nessa fixture; preservamos esse ensaio como falha de teste,
 não como prova de defeito Windows. `1c3d255` usa `/usr/bin/true` apenas como
 caminho absoluto para testes portáteis, sem executá-lo.
 
-| Ambiente                                | SHA       | Resultado                                                                                                                                                                    |
-| --------------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Windows Node 20.20.2, clone ABI próprio | `112ab91` | `npm ci`, build, typecheck, lint, format e prova: exit 0; prova 15/15.                                                                                                       |
-| Windows Node 22.23.2, clone ABI próprio | `112ab91` | Mesmos comandos: exit 0; prova 15/15.                                                                                                                                        |
-| Windows Node 20/22, clones ABI próprios | `1c3d255` | Prova repetida: 15/15, exit 0 em cada Node. A mudança desde `112ab91` é só a constante de caminho da fixture Linux.                                                          |
-| Linux não root, Node 22.23.3            | `1c3d255` | Suíte completa: 345 arquivos, 4541 testes PASS, 19 skips, exit 0 (241,39 s); prova 6/6, nove casos Windows não executados; controle negativo comum `structural-red`, exit 0. |
+| Ambiente                                | SHA       | Resultado                                                                                                                                                                                 |
+| --------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Windows Node 20.20.2, clone ABI próprio | `096e534` | `npm ci`, build, typecheck, lint, format e prova: exit 0; prova 16/16.                                                                                                                    |
+| Windows Node 22.23.2, clone ABI próprio | `096e534` | Mesmos comandos: exit 0; prova 16/16.                                                                                                                                                     |
+| Linux não root, Node 22.23.3            | `096e534` | Cinco gates: exit 0; suíte completa: 345 arquivos, 4542 testes PASS, 19 skips (218,48 s); prova 7/7, nove casos Windows não executados; controle negativo comum `structural-red`: exit 0. |
 
 Os quatro gates leves Linux (`build`, `typecheck`, `lint`, `format:check`)
 passaram em `112ab91` antes da correção exclusiva da fixture; o foco Linux e a
-suíte completa foram medidos novamente em `1c3d255`. Logs brutos e
-temporários isolados estão em `F:/lohra-m25-904/` fora do repositório, sem
+suíte completa foram medidos novamente em `1c3d255` e no código final
+`096e534`. Logs brutos e temporários isolados estão em `F:/lohra-m25-904/`
+fora do repositório, sem
 importá-los como evidência sanitizada versionada.
