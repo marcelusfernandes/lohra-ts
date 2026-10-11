@@ -11,5 +11,6 @@ export default {
     "tests/workflow-orchestration-runtime.test.ts",
     "tests/orchestration-child-runner.test.ts",
     "tests/workflow-service-durability.test.ts",
+    "tests/workflow-service-durability-cleanup.test.ts",
   ],
 } satisfies Declaracao;

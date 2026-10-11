@@ -26,6 +26,7 @@
     "focusFiles": [
       "tests/state-workflow-repository.test.ts",
       "tests/workflow-service-durability.test.ts",
+      "tests/workflow-service-durability-cleanup.test.ts",
       "tests/workflow-durability.test.ts",
       "tests/workflow-sandbox.test.ts",
       "tests/orchestration-child-runner.test.ts",
