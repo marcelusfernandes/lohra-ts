@@ -155,8 +155,8 @@
 {"id":"a8d7344935773027","nodes":["20","22"],"file":"tests/ci-controle-negativo-integracao.test.ts","family":"negative-npm","status":"confirmed","issue":802,"next":null}
 {"id":"a960904a06811c80","nodes":["20","22"],"file":"tests/chat-doctrine-tier.test.ts","family":"unresolved:tests/chat-doctrine-tier.test.ts","status":"INCONCLUSIVE","issue":null,"next":"focal-isolated:tests/chat-doctrine-tier.test.ts"}
 {"id":"aa384946ce7e4de9","nodes":["20","22"],"file":"tests/auth-core.test.ts","family":"unresolved:tests/auth-core.test.ts","status":"INCONCLUSIVE","issue":null,"next":"focal-isolated:tests/auth-core.test.ts"}
-{"id":"abfe004b862af296","nodes":["20","22"],"file":"tests/package-manifest.test.ts","family":"npm-pack-unresolved","status":"INCONCLUSIVE","issue":null,"next":"spawn-error-and-status"}
-{"id":"ac4fb499026c97d7","nodes":["20","22"],"file":"tests/package-manifest.test.ts","family":"npm-pack-unresolved","status":"INCONCLUSIVE","issue":null,"next":"spawn-error-and-status"}
+{"id":"abfe004b862af296","nodes":["20","22"],"file":"tests/package-manifest.test.ts","family":"npm-pack-unresolved","status":"INCONCLUSIVE","issue":815,"next":"spawn-error-and-status"}
+{"id":"ac4fb499026c97d7","nodes":["20","22"],"file":"tests/package-manifest.test.ts","family":"npm-pack-unresolved","status":"INCONCLUSIVE","issue":815,"next":"spawn-error-and-status"}
 {"id":"ac6b6441f496fb2a","nodes":["20","22"],"file":"tests/gateway/session-service.test.ts","family":"sqlite-session-fixture","status":"confirmed","issue":806,"next":null}
 {"id":"ad714e74532edd53","nodes":["20","22"],"file":"tests/gateway/prompt-submit.test.ts","family":"sqlite-unresolved:tests/gateway/prompt-submit.test.ts","status":"INCONCLUSIVE","issue":814,"next":"fixture-open-close"}
 {"id":"af076aad11fd3458","nodes":["20","22"],"file":"tests/stop-gate.test.ts","family":"unresolved:tests/stop-gate.test.ts","status":"INCONCLUSIVE","issue":812,"next":"sh-explicit-path-control"}
@@ -195,7 +195,7 @@
 {"id":"c4c477c8fb269858","nodes":["20","22"],"file":"tests/workflow-tiers.test.ts","family":"unresolved:tests/workflow-tiers.test.ts","status":"INCONCLUSIVE","issue":null,"next":"focal-isolated:tests/workflow-tiers.test.ts"}
 {"id":"c588a5c60e6f3e3b","nodes":["20","22"],"file":"tests/parity/stub-driver.test.ts","family":"stub-driver-unresolved","status":"INCONCLUSIVE","issue":810,"next":"url-path-vs-fileurltopath"}
 {"id":"c6e4abd1c3608c05","nodes":["20","22"],"file":"tests/gateway/session-service.test.ts","family":"sqlite-session-fixture","status":"confirmed","issue":806,"next":null}
-{"id":"c817a60567f16110","nodes":["20","22"],"file":"tests/self-update.test.ts","family":"unresolved:tests/self-update.test.ts","status":"INCONCLUSIVE","issue":null,"next":"focal-isolated:tests/self-update.test.ts"}
+{"id":"c817a60567f16110","nodes":["20","22"],"file":"tests/self-update.test.ts","family":"unresolved:tests/self-update.test.ts","status":"INCONCLUSIVE","issue":816,"next":"runner-spawn-error"}
 {"id":"c94cb269dbe82b5d","nodes":["20","22"],"file":"tests/gateway/prompt-submit.test.ts","family":"sqlite-unresolved:tests/gateway/prompt-submit.test.ts","status":"INCONCLUSIVE","issue":814,"next":"fixture-open-close"}
 {"id":"cbbba63e7aa0ff97","nodes":["20","22"],"file":"tests/media-persistence.test.ts","family":"posix-mode-observed","status":"INCONCLUSIVE","issue":null,"next":"acl-two-identities"}
 {"id":"cc8e71b4f9b94768","nodes":["20","22"],"file":"tests/gateway/prompt-submit.test.ts","family":"sqlite-unresolved:tests/gateway/prompt-submit.test.ts","status":"INCONCLUSIVE","issue":814,"next":"fixture-open-close"}

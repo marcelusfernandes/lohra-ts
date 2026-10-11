@@ -49,6 +49,8 @@ const hypothesisIssue = (family) => {
     return 813;
   }
   if (family === "sqlite-unresolved:tests/gateway/prompt-submit.test.ts") return 814;
+  if (family === "npm-pack-unresolved") return 815;
+  if (family === "unresolved:tests/self-update.test.ts") return 816;
   return null;
 };
 
@@ -79,6 +81,7 @@ function nextExperiment(family, file) {
   if (family === "signal-harness-unresolved") return "child-handler-vs-runner";
   if (family.startsWith("sqlite-unresolved:")) return "fixture-open-close";
   if (family === "npm-pack-unresolved") return "spawn-error-and-status";
+  if (family === "unresolved:tests/self-update.test.ts") return "runner-spawn-error";
   if (family === "stub-driver-unresolved") return "url-path-vs-fileurltopath";
   if (family === "state-path-unresolved") return "windows-home-path-contract";
   if (family.startsWith("line-ending:")) return "raw-output-eol-control";
