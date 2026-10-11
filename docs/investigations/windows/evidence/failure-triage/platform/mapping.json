@@ -1,0 +1,212 @@
+{
+  "inventorySha": "ebeb722f898bdb4cde5b7d7cef66fb40febf5c15",
+  "classification": "IDs candidates grouped by observed family, not common root cause",
+  "node20": {
+    "modePosixIds": [
+      "9615a59e06efa603",
+      "9ce274db144486e7",
+      "f9684bd9453e4c4f",
+      "cbbba63e7aa0ff97",
+      "917d0f7c4c289229"
+    ],
+    "signalHarnessIds": [
+      "33ee79e6b7e8887b",
+      "7d0c9281a3804cc2",
+      "1c97c7454e399dee",
+      "47765205f3bc4cdd"
+    ],
+    "signalServeIds": ["84c582c07b223226", "59e25c00ec6eff1d", "63e8f6c5036b4dba"],
+    "sqliteUnlinkStateDbIdsByFile": {
+      "tests/chat-doctrine-tier.test.ts": ["643bb2f592e209e2"],
+      "tests/gateway-compaction-events.test.ts": ["dfd37dbc25bd2f83", "a39df9cfa9531fdf"],
+      "tests/gateway-compaction.test.ts": ["b04d376691c9a768"],
+      "tests/gateway/prompt-submit.test.ts": [
+        "ad714e74532edd53",
+        "5307db362a7a3e5d",
+        "89c1ca4102aa87e8",
+        "1c33967a06de0dbf",
+        "2ff579dfbd81b530",
+        "8076944e9672e5f8",
+        "e75d707967726e0d",
+        "17ea35f8b12a5603",
+        "cc8e71b4f9b94768",
+        "e21d602488b9a6a5",
+        "85ebfdf3a2aeaad9",
+        "b0b0eb58a17a3d5e",
+        "0f4e87e8ce7476e4",
+        "5eecc2f5c31c392f",
+        "6a680f07b28b05fe",
+        "c94cb269dbe82b5d"
+      ],
+      "tests/gateway/raw-socket-primitives.test.ts": [
+        "e96b8aea3e290cec",
+        "5a8a762cda2677f2",
+        "2e1f3dababe8608c",
+        "d28285e2c4be3220",
+        "b00dd9763fe0428f",
+        "c3f9a945ed6bdbe8"
+      ],
+      "tests/gateway/rpc-dispatch.test.ts": [
+        "a6dcfc58f868a563",
+        "4ee9096b26913aae",
+        "b995eed20d1e2691",
+        "c3c91e8cb2effab2",
+        "2b7a80cb9b45bbad",
+        "5b0152d1f9e24834",
+        "9a268f9757eeb9a9",
+        "d1d072f93fc5663a"
+      ],
+      "tests/gateway/session-service.test.ts": [
+        "77768bcd07f6fa3c",
+        "f1e01a0c3eb18488",
+        "fc7a9ff37e117377",
+        "6223ad00fcfd14ac",
+        "fa848507a5213bf3",
+        "ac6b6441f496fb2a",
+        "9111171b51945dee",
+        "a799ccb0e8fdcecb",
+        "e85b7f1f87158035",
+        "0df0156cd6552f5a",
+        "144179afad283f67",
+        "c6e4abd1c3608c05",
+        "4d38637079104432",
+        "4c57e470c8a09410",
+        "6bbb80f581b3e975",
+        "af56fba3e7cbd023",
+        "3b4417479c56b6f6",
+        "5c35c52ec350171a",
+        "5cf42c2494c47987",
+        "46e68a998c320744"
+      ],
+      "tests/gateway/ws-connection-notices.test.ts": ["d8896c8ba3e8f538", "04ae1b596cf4dbd3"],
+      "tests/orchestration-chat-wiring.test.ts": [
+        "7a6345e3eab8f88b",
+        "344702ba10e8d3df",
+        "c129760c05adb84f",
+        "76393e35b58fed2f"
+      ],
+      "tests/session-tools.test.ts": ["f248b0d591354bd1", "9c122fa2e2020cff"],
+      "tests/workflow-leaf-read-tool.test.ts": [
+        "8838c98f23a87c59",
+        "a1cb7e2dab9043a5",
+        "5bdd601d89e13007",
+        "4235296df0027c7b",
+        "1d50e1351e7bd3c6",
+        "4f2a43f4828779f4",
+        "8d548b22bc5c9c62",
+        "c3111963bedb8b58",
+        "58c7faa77576c2cc",
+        "c239cf72da866882",
+        "b3c814a1844e7194",
+        "59cc46d1d96813fc",
+        "76607e8d33321aa8"
+      ],
+      "tests/workflow-templates.test.ts": ["8c16e685c1e4b78a", "bcd86834a92e8383"]
+    }
+  },
+  "node22": {
+    "modePosixIds": [
+      "9615a59e06efa603",
+      "9ce274db144486e7",
+      "f9684bd9453e4c4f",
+      "cbbba63e7aa0ff97",
+      "917d0f7c4c289229"
+    ],
+    "signalHarnessIds": [
+      "33ee79e6b7e8887b",
+      "7d0c9281a3804cc2",
+      "1c97c7454e399dee",
+      "47765205f3bc4cdd"
+    ],
+    "signalServeIds": ["84c582c07b223226", "59e25c00ec6eff1d", "63e8f6c5036b4dba"],
+    "sqliteUnlinkStateDbIdsByFile": {
+      "tests/chat-doctrine-tier.test.ts": ["643bb2f592e209e2"],
+      "tests/gateway-compaction-events.test.ts": ["dfd37dbc25bd2f83", "a39df9cfa9531fdf"],
+      "tests/gateway-compaction.test.ts": ["b04d376691c9a768"],
+      "tests/gateway/prompt-submit.test.ts": [
+        "ad714e74532edd53",
+        "5307db362a7a3e5d",
+        "89c1ca4102aa87e8",
+        "1c33967a06de0dbf",
+        "2ff579dfbd81b530",
+        "8076944e9672e5f8",
+        "e75d707967726e0d",
+        "17ea35f8b12a5603",
+        "cc8e71b4f9b94768",
+        "e21d602488b9a6a5",
+        "85ebfdf3a2aeaad9",
+        "b0b0eb58a17a3d5e",
+        "0f4e87e8ce7476e4",
+        "5eecc2f5c31c392f",
+        "6a680f07b28b05fe",
+        "c94cb269dbe82b5d"
+      ],
+      "tests/gateway/raw-socket-primitives.test.ts": [
+        "e96b8aea3e290cec",
+        "5a8a762cda2677f2",
+        "2e1f3dababe8608c",
+        "d28285e2c4be3220",
+        "b00dd9763fe0428f",
+        "c3f9a945ed6bdbe8"
+      ],
+      "tests/gateway/rpc-dispatch.test.ts": [
+        "a6dcfc58f868a563",
+        "4ee9096b26913aae",
+        "b995eed20d1e2691",
+        "c3c91e8cb2effab2",
+        "2b7a80cb9b45bbad",
+        "5b0152d1f9e24834",
+        "9a268f9757eeb9a9",
+        "d1d072f93fc5663a"
+      ],
+      "tests/gateway/session-service.test.ts": [
+        "904201a56f8b9f35",
+        "77768bcd07f6fa3c",
+        "f1e01a0c3eb18488",
+        "fc7a9ff37e117377",
+        "6223ad00fcfd14ac",
+        "fa848507a5213bf3",
+        "1835d46db637a1cc",
+        "ac6b6441f496fb2a",
+        "9111171b51945dee",
+        "a799ccb0e8fdcecb",
+        "e85b7f1f87158035",
+        "0df0156cd6552f5a",
+        "144179afad283f67",
+        "c6e4abd1c3608c05",
+        "4d38637079104432",
+        "4c57e470c8a09410",
+        "6bbb80f581b3e975",
+        "af56fba3e7cbd023",
+        "3b4417479c56b6f6",
+        "5c35c52ec350171a",
+        "5cf42c2494c47987",
+        "46e68a998c320744"
+      ],
+      "tests/gateway/ws-connection-notices.test.ts": ["d8896c8ba3e8f538", "04ae1b596cf4dbd3"],
+      "tests/orchestration-chat-wiring.test.ts": [
+        "7a6345e3eab8f88b",
+        "344702ba10e8d3df",
+        "c129760c05adb84f",
+        "76393e35b58fed2f"
+      ],
+      "tests/session-tools.test.ts": ["f248b0d591354bd1", "9c122fa2e2020cff"],
+      "tests/workflow-leaf-read-tool.test.ts": [
+        "8838c98f23a87c59",
+        "a1cb7e2dab9043a5",
+        "5bdd601d89e13007",
+        "4235296df0027c7b",
+        "1d50e1351e7bd3c6",
+        "4f2a43f4828779f4",
+        "8d548b22bc5c9c62",
+        "c3111963bedb8b58",
+        "58c7faa77576c2cc",
+        "c239cf72da866882",
+        "b3c814a1844e7194",
+        "59cc46d1d96813fc",
+        "76607e8d33321aa8"
+      ],
+      "tests/workflow-templates.test.ts": ["8c16e685c1e4b78a", "bcd86834a92e8383"]
+    }
+  }
+}
