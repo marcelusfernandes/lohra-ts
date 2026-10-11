@@ -49,6 +49,10 @@ it("records every command in canonical order, including failed or blocked stages
   }
   expect(job).toContain("$env:GITHUB_STEP_SUMMARY");
   expect(job).toContain("$env:CANDIDATE_SHA");
+  expect(job).toContain("EXECUTION_SHA: ${{ github.sha }}");
+  expect(job).toContain("$env:EXECUTION_SHA");
+  expect(job).toContain("git rev-parse HEAD");
+  expect(job).toContain("$checkoutSha");
   expect(job).toContain("$env:RUNNER_OS");
   expect(job).toContain("$env:RUNNER_ARCH");
   expect(job).toContain("node --version");
