@@ -1455,9 +1455,12 @@ describe("workflow service — leaf capability sandbox", () => {
       expect(
         Number((repository.getRunState(started.run_id) as Record<string, unknown>).tainted),
       ).toBe(1);
-      connection.close();
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      try {
+        connection.close();
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     }
   });
 
@@ -2113,6 +2116,7 @@ describe("workflow service — leaf capability sandbox", () => {
     const root = mkdtempSync(join(tmpdir(), "lohra-service-sandbox-"));
     roots.push(root);
     const connection = openStateDatabase(join(root, "state.db"));
+    let settleSecond: (() => Promise<void>) | null = null;
     try {
       const repository = new WorkflowRepository(connection.database);
       const locks = new LockRepository(connection.database);
@@ -2169,6 +2173,10 @@ describe("workflow service — leaf capability sandbox", () => {
       // stays in flight so it is the CURRENT stretch for the assertion below
       const second = service.start(null, {}, { resumeRunId: first.run_id });
       if ("error" in second) throw new Error(second.error);
+      settleSecond = async (): Promise<void> => {
+        openSecond();
+        await service.status(first.run_id, true);
+      };
       expect(runtime.installedFences()).toEqual([2]);
       // stretch 1's wrapper grants nothing now that stretch 2 owns the run —
       // even for a path inside stretch 1's own former working root
@@ -2185,12 +2193,19 @@ describe("workflow service — leaf capability sandbox", () => {
           path: join(root, "runs", first.run_id, "work-2", "x.txt"),
         }),
       ).toBe("allowed:write_file");
-      openSecond();
-      await service.status(first.run_id, true);
+      await settleSecond();
+      settleSecond = null;
       expect(runtime.disposedFences()).toEqual([1, 2]);
-      connection.close();
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      try {
+        if (settleSecond !== null) await settleSecond();
+      } finally {
+        try {
+          connection.close();
+        } finally {
+          rmSync(root, { recursive: true, force: true });
+        }
+      }
     }
   });
 
