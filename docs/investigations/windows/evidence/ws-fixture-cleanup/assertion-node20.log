@@ -1,0 +1,7 @@
+JSON report written to <EVIDENCE>/assertion-node20-vitest.json
+
+
+AssertionError: expected 'gateway.ready' to be 'PROBE_WRONG_GATEWAY_READY' // Object.is equality
+    at <CLONE>/tests/gateway/ws-connection.test.ts:176:31
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at file:///<CLONE>/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20

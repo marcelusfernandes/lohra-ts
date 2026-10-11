@@ -1,0 +1,14 @@
+JSON report written to <EVIDENCE>/setup-node20-vitest.json
+
+
+Error: PROBE_SETUP_FAILURE
+    at startServer (<CLONE>/tests/gateway/ws-connection.test.ts:79:39)
+    at <CLONE>/tests/gateway/ws-connection.test.ts:171:26
+    at file:///<CLONE>/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11
+    at file:///<CLONE>/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26
+    at file:///<CLONE>/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20
+    at new Promise (<anonymous>)
+    at runWithCancel (file:///<CLONE>/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)
+    at file:///<CLONE>/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///<CLONE>/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)
