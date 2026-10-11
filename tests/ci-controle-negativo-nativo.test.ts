@@ -1,5 +1,13 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -255,6 +263,53 @@ describe("controle negativo nativo opt-in", () => {
       writeFileSync(join(repo.root, "fake-report.cjs"), "process.exit(0);\n");
       git(repo.root, "add", "package.json", "fake-report.cjs");
       git(repo.root, "commit", "-qm", "test: relatório falso");
+      expect(() => runNative(argv({ ...repo, head: git(repo.root, "rev-parse", "HEAD") }))).toThrow(
+        /NATIVE_HARNESS_INVALID/,
+      );
+    },
+    30_000,
+  );
+
+  it.runIf(process.platform === "win32")(
+    "recusa script externo com o mesmo sufixo antes de executar relatório falso",
+    () => {
+      const repo = fixture();
+      const fakeRoot = mkdtempSync(join(tmpdir(), "native-harness-fake-"));
+      ownDirs.push(fakeRoot);
+      const fakeDir = join(fakeRoot, "scripts", "prova");
+      mkdirSync(fakeDir, { recursive: true });
+      const marker = join(fakeRoot, "executado.txt");
+      writeFileSync(
+        join(fakeDir, "run.ts"),
+        `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(marker)}, "falso");`,
+      );
+      writeFileSync(
+        join(repo.root, "package.json"),
+        JSON.stringify({ private: true, scripts: { prova: `tsx "${join(fakeDir, "run.ts")}"` } }),
+      );
+      git(repo.root, "add", "package.json");
+      git(repo.root, "commit", "-qm", "test: apontar prova para harness externo falso");
+      expect(() => runNative(argv({ ...repo, head: git(repo.root, "rev-parse", "HEAD") }))).toThrow(
+        /NATIVE_HARNESS_INVALID/,
+      );
+      expect(existsSync(marker)).toBe(false);
+    },
+    30_000,
+  );
+
+  it.runIf(process.platform === "win32")(
+    "recusa harness relativo adulterado no checkout",
+    () => {
+      const repo = fixture();
+      const fakeDir = join(repo.root, "scripts", "prova");
+      mkdirSync(fakeDir, { recursive: true });
+      writeFileSync(join(fakeDir, "run.ts"), "process.exit(0);\n");
+      writeFileSync(
+        join(repo.root, "package.json"),
+        JSON.stringify({ private: true, scripts: { prova: "tsx scripts/prova/run.ts" } }),
+      );
+      git(repo.root, "add", "package.json", "scripts/prova/run.ts");
+      git(repo.root, "commit", "-qm", "test: adulterar harness relativo");
       expect(() => runNative(argv({ ...repo, head: git(repo.root, "rev-parse", "HEAD") }))).toThrow(
         /NATIVE_HARNESS_INVALID/,
       );
