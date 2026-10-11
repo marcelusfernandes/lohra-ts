@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { startStub } from "./stub/server.js";
 import type { StubRuntime } from "./stub/types.js";
 import { prepareOfflineTarballConsumer } from "./offline-tarball-install.js";
+import { runNpmSync } from "./subprocess/npm.js";
 
 /**
  * Issue #532: verifica que a instalação do consumidor usou os binários
@@ -92,6 +93,30 @@ function command(
   if (result.status !== 0)
     throw new Error(
       `PACK_COMMAND_FAILED:${executable}:${String(result.status ?? result.signal ?? "unknown")}:${result.stderr}`,
+    );
+  return result;
+}
+
+export function packNpmCommand(
+  argv: readonly string[],
+  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+  timeoutMs = 60_000,
+): ReturnType<typeof command> {
+  const result = runNpmSync(argv, {
+    ...options,
+    timeoutMs,
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  if (result.error !== undefined) {
+    const code = (result.error as NodeJS.ErrnoException).code ?? "unknown";
+    const stderr = result.stderr ? `:${result.stderr}` : "";
+    throw new Error(`PACK_COMMAND_FAILED:npm:${code}:${result.error.message}${stderr}`, {
+      cause: result.error,
+    });
+  }
+  if (result.status !== 0)
+    throw new Error(
+      `PACK_COMMAND_FAILED:npm:${String(result.status ?? result.signal ?? "unknown")}:${result.stderr}`,
     );
   return result;
 }
@@ -255,7 +280,7 @@ async function main(): Promise<void> {
     // nada — este `env` pula a instalação dos hooks de git/lefthook no
     // checkout real (`scripts/prepare.mjs`), que só faz sentido em
     // desenvolvimento, nunca ao empacotar.
-    const packed = command("npm", ["pack", "--json", "--pack-destination", packDirectory], {
+    const packed = packNpmCommand(["pack", "--json", "--pack-destination", packDirectory], {
       env: { ...process.env, LOHRA_SKIP_PREPARE: "1" },
     });
     const packResult = JSON.parse(packed.stdout) as readonly { filename: string }[];
@@ -263,8 +288,7 @@ async function main(): Promise<void> {
     if (filename === undefined) throw new Error("PACK_TARBALL_MISSING");
     const tarball = join(packDirectory, filename);
     prepareOfflineTarballConsumer({ project: process.cwd(), consumer: installDirectory, tarball });
-    command(
-      "npm",
+    packNpmCommand(
       ["ci", "--offline", "--no-audit", "--no-fund"],
       {
         cwd: installDirectory,
