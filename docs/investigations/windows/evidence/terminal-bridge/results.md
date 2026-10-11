@@ -22,6 +22,13 @@ usaram homes, cache e TEMP próprios em F:, sem credenciais.
 | Controle negativo `2e9e7c4`                   | Linux                                              | Exit 0, `structural-red — PASS`; base estruturalmente vermelha e commit `test(red)` válido no range.                                                                   |
 | `mutations:self-update` `2e9e7c4`             | Linux                                              | Exit 0, 12/12 mortos, 0 sobreviventes, `restoreGreen:true`; inclui T22-node-pty-bypass.                                                                                |
 
+Dogfooding real: build iniciado em `2e9e7c4`; CLI dist executada em
+`cef097c854847069e4522a51a97c746654ff364b`, cujo `src/` e testes são
+idênticos. Windows Node 22.23.2 retornou exit 0, signal/spawnError nulos,
+`error:null`, uma chamada `read_file` e marcador `WINDOWS_BRIDGE_858_OK`.
+Evidência externa `F:/lohra-858/dogfood-result.json`, `dogfood.mjs` e
+`dogfood-build.log`. Esta chamada pública ainda não percorre a bridge.
+
 O segundo vermelho adicionou cobertura do envelope com `error` não textual. O
 verde restaurou a produção byte a byte e adicionou a fronteira exata da
 requisição: JSON mais `\n` de 65.536 bytes é aceito; um byte a mais retorna
