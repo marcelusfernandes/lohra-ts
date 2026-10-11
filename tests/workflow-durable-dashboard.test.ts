@@ -300,13 +300,14 @@ describe("dashboard.ts composition root (issue #101, AC 4): run_workflow via run
 
       const stderrLines: string[] = [];
       let shutdown: (() => void) | undefined;
+      const home = join(root, ".lohra");
       const options: DashboardCommandOptions = {
         flags: new Map([
           ["--provider", provider],
           ["--model", "t101-durable-dashboard-model"],
         ]),
-        environment: { HOME: root, PATH: process.env.PATH ?? "" },
-        home: join(root, ".lohra"),
+        environment: { HOME: root, LOHRA_HOME: home, PATH: process.env.PATH ?? "" },
+        home,
         codexHome: join(root, ".codex"),
         cwd: root,
         stderr: (text) => stderrLines.push(text),
@@ -413,13 +414,14 @@ describe("dashboard.ts composition root (issue #129): shutdown() releases a stil
 
       const stderrLines: string[] = [];
       let shutdown: (() => void) | undefined;
+      const home = join(root, ".lohra");
       const options: DashboardCommandOptions = {
         flags: new Map([
           ["--provider", provider],
           ["--model", "t129-shutdown-dashboard-model"],
         ]),
-        environment: { HOME: root, PATH: process.env.PATH ?? "" },
-        home: join(root, ".lohra"),
+        environment: { HOME: root, LOHRA_HOME: home, PATH: process.env.PATH ?? "" },
+        home,
         codexHome: join(root, ".codex"),
         cwd: root,
         stderr: (text) => stderrLines.push(text),
