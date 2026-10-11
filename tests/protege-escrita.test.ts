@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { spawnProcessShell } from "./helpers/process-shell.js";
+import { resolveProcessShell, spawnProcessShell } from "./helpers/process-shell.js";
 
 const HOOK = fileURLToPath(new URL("../.claude/hooks/protege-escrita.sh", import.meta.url));
 
@@ -24,18 +24,47 @@ function git(cwd: string, ...args: readonly string[]): void {
 interface HookRun {
   readonly status: number | null;
   readonly stderr: string;
+  readonly stdout: string;
+  readonly shell: string;
 }
 
 function escrever(cwd: string, filePath: string, toolName = "Write"): HookRun {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env))
     if (v !== undefined && k !== "CLAUDE_PROJECT_DIR") env[k] = v;
-  const r = spawnProcessShell([HOOK], {
-    input: JSON.stringify({ tool_name: toolName, tool_input: { file_path: filePath }, cwd }),
-    encoding: "utf8",
-    env,
-  });
-  return { status: r.status, stderr: r.stderr };
+  const shell = resolveProcessShell(env);
+  const r = spawnProcessShell(
+    [HOOK],
+    {
+      input: JSON.stringify({ tool_name: toolName, tool_input: { file_path: filePath }, cwd }),
+      encoding: "utf8",
+      env,
+    },
+    shell,
+  );
+  return { status: r.status, stderr: r.stderr, stdout: r.stdout, shell };
+}
+
+function expectDenied(r: HookRun): void {
+  const msysFlag = (name: string): "unset" | "wildcard" | "set-other" => {
+    const value = process.env[name];
+    return value === undefined || value === "" ? "unset" : value === "*" ? "wildcard" : "set-other";
+  };
+  expect(
+    r.status,
+    JSON.stringify({
+      ...r,
+      msysNoPathconv: msysFlag("MSYS_NO_PATHCONV"),
+      msysArgConvExcl: msysFlag("MSYS2_ARG_CONV_EXCL"),
+      msysEnvConvExcl: msysFlag("MSYS2_ENV_CONV_EXCL"),
+    }),
+  ).toBe(2);
+  const denial = JSON.parse(r.stdout) as {
+    hookSpecificOutput: { permissionDecision: string; permissionDecisionReason: string };
+  };
+  expect(denial.hookSpecificOutput.permissionDecision).toBe("deny");
+  expect(denial.hookSpecificOutput.permissionDecisionReason).toMatch(/Bloqueado/u);
+  expect(r.stderr).toMatch(/Bloqueado/u);
 }
 
 describe("protege-escrita.sh", () => {
@@ -73,17 +102,17 @@ describe("protege-escrita.sh", () => {
 
   it("docs/reference/** a partir da raiz: nega", () => {
     const r = escrever(root, path.join(root, "docs", "reference", "novo.md"));
-    expect(r.status).toBe(2);
+    expectDenied(r);
     expect(r.stderr).toMatch(/docs\/reference/u);
   });
 
   it("caminho relativo a partir de um subdiretório: nega", () => {
-    expect(escrever(path.join(root, "src"), "../docs/reference/novo.md").status).toBe(2);
+    expectDenied(escrever(path.join(root, "src"), "../docs/reference/novo.md"));
   });
 
   it("lohra/** com cwd dentro do repo aninhado: nega (raiz é o projeto, que tem settings.json)", () => {
     const r = escrever(path.join(root, "lohra"), path.join(root, "lohra", "x.py"));
-    expect(r.status).toBe(2);
+    expectDenied(r);
     expect(r.stderr).toMatch(/lohra/u);
   });
 
@@ -97,29 +126,76 @@ describe("protege-escrita.sh", () => {
 
   it("symlink dentro do repo que resolve para docs/reference: nega", () => {
     const r = escrever(root, path.join(root, "atalho", "novo.md"));
-    expect(r.status).toBe(2);
+    expectDenied(r);
   });
 
   it("symlink dentro do repo que resolve para FORA de qualquer repo: nega (caminho textual está dentro)", () => {
     const r = escrever(root, path.join(root, "fuga", "x.md"));
-    expect(r.status).toBe(2);
+    expectDenied(r);
     expect(r.stderr).toMatch(/symlink/u);
   });
 
   it("worktree de agente em .claude/worktrees/w: docs/reference lá dentro é negado, com cwd na raiz do projeto", () => {
     const alvo = path.join(root, ".claude", "worktrees", "w", "docs", "reference", "novo.md");
     const r = escrever(root, alvo);
-    expect(r.status).toBe(2);
+    expectDenied(r);
     expect(r.stderr).toMatch(/docs\/reference/u);
   });
 
   it("worktree de agente: com cwd no próprio worktree também nega; src/ lá dentro permite", () => {
     const w = path.join(root, ".claude", "worktrees", "w");
-    expect(escrever(w, path.join(w, "docs", "reference", "novo.md")).status).toBe(2);
+    expectDenied(escrever(w, path.join(w, "docs", "reference", "novo.md")));
     expect(escrever(w, path.join(w, "src", "c.ts")).status).toBe(0);
   });
 
   it("ferramenta que não escreve (Read): sai 0", () => {
     expect(escrever(root, path.join(root, "docs", "reference", "old.md"), "Read").status).toBe(0);
+  });
+
+  it("diagnostica Git e caminho canônico no mesmo transporte do hook", () => {
+    const probe = path.join(root, "write-hook-root-probe.sh");
+    writeFileSync(
+      probe,
+      [
+        "#!/bin/sh",
+        "payload=$(cat)",
+        'PE_PAYLOAD="$payload" node -e \'',
+        'const fs=require("fs"),path=require("path"),{spawnSync}=require("child_process");',
+        'const j=JSON.parse(process.env.PE_PAYLOAD||"");',
+        "const dir=fs.realpathSync(path.dirname(j.tool_input.file_path));",
+        'const g=spawnSync("git",["rev-parse","--show-toplevel"],{cwd:dir,encoding:"utf8"});',
+        "const top=g.status===0?fs.realpathSync(g.stdout.trim()):null;",
+        'const rel=top?path.relative(top,path.join(dir,path.basename(j.tool_input.file_path))).split(path.sep).join("/"):null;',
+        "const nativeDir=fs.realpathSync.native(path.dirname(j.tool_input.file_path));",
+        "const nativeTop=g.status===0?fs.realpathSync.native(g.stdout.trim()):null;",
+        'const nativeRel=nativeTop?path.relative(nativeTop,path.join(nativeDir,path.basename(j.tool_input.file_path))).split(path.sep).join("/"):null;',
+        'process.stdout.write(JSON.stringify({tool:j.tool_name,gitStatus:g.status,gitError:g.error?.code??null,settings:top?fs.existsSync(path.join(top,".claude","settings.json")):false,relative:rel,nativeRelative:nativeRel}));',
+        "'",
+        "",
+      ].join("\n"),
+    );
+    const input = JSON.stringify({
+      tool_name: "Write",
+      tool_input: { file_path: path.join(root, "docs", "reference", "novo.md") },
+      cwd: root,
+    });
+    const result = spawnProcessShell([probe], { input, encoding: "utf8" });
+    expect(result.status, JSON.stringify({ stdout: result.stdout, stderr: result.stderr })).toBe(0);
+    const actual = JSON.parse(result.stdout) as {
+      tool: string;
+      gitStatus: number;
+      gitError: string | null;
+      settings: boolean;
+      relative: string;
+      nativeRelative: string;
+    };
+    expect(actual.nativeRelative, JSON.stringify(actual)).toBe("docs/reference/novo.md");
+    expect(actual).toMatchObject({
+      tool: "Write",
+      gitStatus: 0,
+      gitError: null,
+      settings: true,
+      nativeRelative: "docs/reference/novo.md",
+    });
   });
 });

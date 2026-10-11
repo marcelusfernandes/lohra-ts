@@ -38,7 +38,9 @@ PE_PAYLOAD="$payload" node -e '
     process.stderr.write(reason + "\n");
     process.exit(2);
   };
-  const realpath = (p) => { try { return fs.realpathSync(p); } catch { return null; } };
+  // O realpath JS pode preservar um alias 8.3 (RUNNER~1) que o Git expande.
+  // O nativo devolve a mesma grafia canônica para alvo e raiz no Windows.
+  const realpath = (p) => { try { return fs.realpathSync.native(p); } catch { return null; } };
 
   const cwdReal = realpath(cwd);
   if (cwdReal === null) negar("não consegui resolver o caminho real de cwd (" + cwd + "); nego por segurança.");
