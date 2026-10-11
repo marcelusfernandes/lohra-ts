@@ -24,6 +24,8 @@ import {
   assertStructuralMatch,
   extractLastToolResultContent,
   packNpmCommand,
+  runConsumerCliAsync,
+  runConsumerCliSync,
 } from "../scripts/pack-check.js";
 
 const COMPACT = '{"ok":true,"bytes_written":10,"path":"package-written/out.txt"}';
@@ -70,6 +72,65 @@ describe("pack npm command", () => {
     }
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toMatch(/PACK_COMMAND_FAILED:npm:ENOENT:/u);
+    expect((failure as Error & { cause?: NodeJS.ErrnoException }).cause?.code).toBe("ENOENT");
+  });
+});
+
+describe("installed consumer CLI", () => {
+  let root: string | undefined;
+
+  afterEach(() => {
+    if (root !== undefined) rmSync(root, { recursive: true, force: true });
+    root = undefined;
+  });
+
+  function fixture(): string {
+    root = mkdtempSync(join(tmpdir(), "lohra pack cli "));
+    const installed = join(root, "node_modules", "lohra-ts");
+    mkdirSync(join(installed, "dist"), { recursive: true });
+    writeFileSync(
+      join(installed, "package.json"),
+      JSON.stringify({ bin: { lohra: "dist/cli.js" } }),
+    );
+    writeFileSync(
+      join(installed, "dist", "cli.js"),
+      "process.stdout.write(JSON.stringify({args:process.argv.slice(2),cwd:process.cwd()}))",
+    );
+    return root;
+  }
+
+  it("runs the installed JavaScript bin with Node and preserves arguments and cwd", () => {
+    const consumer = fixture();
+    const result = runConsumerCliSync(consumer, ["--version", "argument with spaces"], {
+      cwd: consumer,
+    });
+    expect(JSON.parse(result.stdout)).toEqual({
+      args: ["--version", "argument with spaces"],
+      cwd: consumer,
+    });
+  });
+
+  it("uses the same installed bin for async execution", async () => {
+    const consumer = fixture();
+    const result = await runConsumerCliAsync(consumer, ["chat", "argument with spaces"], {
+      cwd: consumer,
+    });
+    expect(JSON.parse(result.stdout)).toEqual({
+      args: ["chat", "argument with spaces"],
+      cwd: consumer,
+    });
+  });
+
+  it("preserves the spawnSync error code and cause when launch fails", () => {
+    const consumer = fixture();
+    let failure: unknown;
+    try {
+      runConsumerCliSync(consumer, ["--version"], { cwd: join(consumer, "missing") });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(/PACK_COMMAND_FAILED:.*:ENOENT:/u);
     expect((failure as Error & { cause?: NodeJS.ErrnoException }).cause?.code).toBe("ENOENT");
   });
 });

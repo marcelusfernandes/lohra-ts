@@ -224,6 +224,23 @@ async function commandAsync(
   );
 }
 
+export function runConsumerCliSync(
+  _consumerRoot: string,
+  _argv: readonly string[],
+  _options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+): ReturnType<typeof command> {
+  throw new Error("not implemented");
+}
+
+export async function runConsumerCliAsync(
+  _consumerRoot: string,
+  _argv: readonly string[],
+  _options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+): Promise<{ readonly stdout: string; readonly stderr: string }> {
+  await Promise.resolve();
+  throw new Error("not implemented");
+}
+
 /** Igualdade estrutural recursiva — nunca `JSON.stringify(a) === JSON.stringify(b)`
  * (ordem de chaves não importa) nem comparação de string. */
 function deepEqual(a: unknown, b: unknown): boolean {
