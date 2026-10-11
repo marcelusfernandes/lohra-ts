@@ -259,6 +259,7 @@ describe("prepareArchiveSandbox", () => {
 
   it("arquiva exatamente a SHA pedida, não o working tree", () => {
     const dir = novoRepoGit();
+    git(dir, ["config", "--local", "core.autocrlf", "false"]);
     writeFileSync(join(dir, "a.txt"), "versao-1\n");
     git(dir, ["add", "-A"]);
     git(dir, ["commit", "-q", "-m", "v1"]);
