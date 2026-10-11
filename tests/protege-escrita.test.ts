@@ -59,6 +59,12 @@ function expectDenied(r: HookRun): void {
       msysEnvConvExcl: msysFlag("MSYS2_ENV_CONV_EXCL"),
     }),
   ).toBe(2);
+  const denial = JSON.parse(r.stdout) as {
+    hookSpecificOutput: { permissionDecision: string; permissionDecisionReason: string };
+  };
+  expect(denial.hookSpecificOutput.permissionDecision).toBe("deny");
+  expect(denial.hookSpecificOutput.permissionDecisionReason).toMatch(/Bloqueado/u);
+  expect(r.stderr).toMatch(/Bloqueado/u);
 }
 
 describe("protege-escrita.sh", () => {
