@@ -84,6 +84,11 @@ describe("profiles", () => {
       stderr: "",
     });
     const created = runProfile("create", "team_a", { base, activeProfile: null });
+    expect(created).toEqual({
+      code: 0,
+      stdout: `created profile 'team_a' at ${join(base, "profiles", "team_a")}\n`,
+      stderr: "",
+    });
     expect(created.stdout).toBe(`created profile 'team_a' at ${base}/profiles/team_a\n`);
     expect(runProfile("create", "team_a", { base, activeProfile: null })).toEqual(created);
     expect(runProfile("list", undefined, { base, activeProfile: "team_a" }).stdout).toBe(
