@@ -4,7 +4,11 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { openStateDatabase, SessionRepository, type StateConnection } from "../../src/state/index.js";
+import {
+  openStateDatabase,
+  SessionRepository,
+  type StateConnection,
+} from "../../src/state/index.js";
 import { GatewaySessionRegistry } from "../../src/gateway/session-service.js";
 import {
   DOCUMENTED_AND_ABSENT_RPC_METHODS,
