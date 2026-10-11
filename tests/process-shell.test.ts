@@ -1,11 +1,91 @@
-import { describe, expect, it } from "vitest";
-import { spawnProcessShell } from "./helpers/process-shell.js";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  ProcessShellLaunchError,
+  resolveProcessShell,
+  spawnProcessShell,
+} from "./helpers/process-shell.js";
 
 describe("shell das bancadas de processo", () => {
+  let root = "";
+  beforeEach(() => {
+    root = mkdtempSync(path.join(tmpdir(), "process-shell-"));
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it("lança o shell real e preserva stdout, stderr e status", () => {
     const result = spawnProcessShell(["-c", "printf out; printf err >&2"], { encoding: "utf8" });
     expect(result.status).toBe(0);
     expect(result.stdout).toBe("out");
     expect(result.stderr).toBe("err");
+  });
+
+  it("preserva stdin, cwd e ambiente sem mutar o objeto do chamador", () => {
+    const cwd = path.join(root, "diretório com espaços");
+    mkdirSync(cwd);
+    writeFileSync(path.join(cwd, "marker"), "arquivo");
+    const env = { ...process.env, TEST_MARKER: "ambiente" };
+    const snapshot = { ...env };
+    const result = spawnProcessShell(
+      [
+        "-c",
+        'read line; printf "%s:%s:" "$line" "$TEST_MARKER"; cat marker; printf aviso >&2; exit 7',
+      ],
+      { cwd, input: "entrada\n", env, encoding: "utf8" },
+    );
+    expect(result.status).toBe(7);
+    expect(result.stdout).toBe("entrada:ambiente:arquivo");
+    expect(result.stderr).toBe("aviso");
+    expect(env).toEqual(snapshot);
+  });
+
+  it("identifica o shell a partir de um diretório com espaços, sem drive fixo", () => {
+    const prefix = path.join(root, "git com espaços");
+    const bin = path.join(prefix, "bin");
+    mkdirSync(bin, { recursive: true });
+    const shell = path.join(bin, process.platform === "win32" ? "sh.exe" : "sh");
+    writeFileSync(shell, "fixture");
+    if (process.platform === "win32") {
+      const cmd = path.join(prefix, "cmd");
+      mkdirSync(cmd);
+      writeFileSync(path.join(cmd, "git.exe"), "fixture");
+      expect(resolveProcessShell({ Path: path.join(root, "sem-shell"), PATH: cmd })).toBe(shell);
+    } else {
+      expect(resolveProcessShell({ PATH: bin })).toBe(shell);
+    }
+  });
+
+  it("executa caminho absoluto com espaços sem camada extra de shell", () => {
+    const bin = path.join(root, "bin com espaços");
+    mkdirSync(bin);
+    const nodeCopy = path.join(bin, path.basename(process.execPath));
+    copyFileSync(process.execPath, nodeCopy);
+    if (process.platform !== "win32") chmodSync(nodeCopy, 0o755);
+    const result = spawnProcessShell(
+      ["-e", "process.stdout.write('espaços')"],
+      { encoding: "utf8" },
+      nodeCopy,
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("espaços");
+  });
+
+  it("shell ausente preserva ENOENT como causa explícita", () => {
+    const emptyPath = path.join(root, "vazio");
+    mkdirSync(emptyPath);
+    expect(() => resolveProcessShell({ PATH: emptyPath })).toThrow(ProcessShellLaunchError);
+    const missing = path.join(root, "ausente", "sh");
+    expect(() => spawnProcessShell(["-c", "printf x"], { encoding: "utf8" }, missing)).toThrow(
+      ProcessShellLaunchError,
+    );
+    try {
+      spawnProcessShell(["-c", "printf x"], { encoding: "utf8" }, missing);
+    } catch (error) {
+      expect(error).toMatchObject({ status: null, cause: { code: "ENOENT" } });
+    }
   });
 });

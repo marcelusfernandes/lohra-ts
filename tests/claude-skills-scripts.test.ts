@@ -2,12 +2,12 @@
 // issue #79 (e #99: fences ignorados, bit de execução): `secao.sh` (extração de seção usada por `open-pr.sh`) e a
 // validação de seções de `create-issue.sh --dry-run`. Nenhum dos dois toca a
 // rede nesses caminhos; `create-issue.sh --dry-run` só imprime o comando.
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { spawnProcessShell } from "./helpers/process-shell.js";
 
 const SECAO = fileURLToPath(new URL("../.claude/skills/pr/scripts/secao.sh", import.meta.url));
 const CREATE = fileURLToPath(
@@ -18,7 +18,7 @@ function secao(
   nome: string,
   corpo: string,
 ): { readonly status: number | null; readonly out: string } {
-  const r = spawnSync("sh", [SECAO, nome], { input: corpo, encoding: "utf8" });
+  const r = spawnProcessShell([SECAO, nome], { input: corpo, encoding: "utf8" });
   return { status: r.status, out: r.stdout };
 }
 
@@ -141,8 +141,7 @@ describe("create-issue.sh --dry-run", () => {
   } {
     const arquivo = path.join(dir, `corpo-${String(Math.random()).slice(2)}.md`);
     writeFileSync(arquivo, corpo);
-    const r = spawnSync(
-      "sh",
+    const r = spawnProcessShell(
       [CREATE, "--title", "chore: x", "--body-file", arquivo, "--milestone", "M", "--dry-run"],
       { encoding: "utf8" },
     );

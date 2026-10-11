@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { spawnProcessShell } from "./helpers/process-shell.js";
 
 const HOOK = fileURLToPath(new URL("../.claude/hooks/protege-escrita.sh", import.meta.url));
 
@@ -29,7 +30,7 @@ function escrever(cwd: string, filePath: string, toolName = "Write"): HookRun {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env))
     if (v !== undefined && k !== "CLAUDE_PROJECT_DIR") env[k] = v;
-  const r = spawnSync("sh", [HOOK], {
+  const r = spawnProcessShell([HOOK], {
     input: JSON.stringify({ tool_name: toolName, tool_input: { file_path: filePath }, cwd }),
     encoding: "utf8",
     env,
