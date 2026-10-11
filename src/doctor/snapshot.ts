@@ -2,7 +2,7 @@ import { accessSync, constants, statSync } from "node:fs";
 import { get } from "node:http";
 import { delimiter, join } from "node:path";
 
-import type { LohraPaths } from "../config/paths.js";
+import { resolveCodexHome, resolveUserHome, type LohraPaths } from "../config/paths.js";
 import { readConfig, readTokens } from "../auth/store.js";
 import { resolveAuthRoute, subscriptionActive } from "../auth/credentials.js";
 import { readCodexTokens } from "../auth/codex.js";
@@ -66,8 +66,8 @@ export function buildEnvironment(
   const { provider: detected, error: providerError } = detectConfiguredProvider(environment);
   const providerOrigin: "none" | "api-key" | "env-var" =
     detected === null ? "none" : (environment.LOHRA_PROVIDER ?? "").trim() ? "env-var" : "api-key";
-  const userHome = environment.HOME ?? "";
-  const codexHome = environment.CODEX_HOME?.trim() || join(userHome, ".codex");
+  const userHome = resolveUserHome(environment);
+  const codexHome = resolveCodexHome(environment);
   const config = readConfig(paths.home);
   const baseConfig = readConfig(paths.base);
   const own = readTokens(paths.home);

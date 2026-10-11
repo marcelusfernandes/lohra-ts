@@ -5,7 +5,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { VERSION } from "./version.js";
-import { resolvePaths } from "./config/paths.js";
+import { resolveCodexHome, resolvePaths } from "./config/paths.js";
 import { applyEnvFile } from "./config/env-file.js";
 import { runModels } from "./commands/models.js";
 import { runTiers } from "./commands/tiers.js";
@@ -386,7 +386,7 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     return 2;
   }
   applyEnvFile(paths.envFile, environment);
-  const codexHome = environment.CODEX_HOME?.trim() || join(environment.HOME ?? "", ".codex");
+  const codexHome = resolveCodexHome(environment);
   const normalizeProbe = async (): Promise<OllamaStatus> => {
     const value = await (io.probeOllama ?? probeOllamaDown)();
     return typeof value === "boolean"

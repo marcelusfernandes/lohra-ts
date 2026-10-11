@@ -10,6 +10,20 @@ export interface LohraPaths {
 
 const profilePattern = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
+export function resolveUserHome(
+  environment: Readonly<Record<string, string | undefined>>,
+  systemHome: string = homedir(),
+): string {
+  return environment.HOME || systemHome;
+}
+
+export function resolveCodexHome(
+  environment: Readonly<Record<string, string | undefined>>,
+  systemHome: string = homedir(),
+): string {
+  return environment.CODEX_HOME?.trim() || join(resolveUserHome(environment, systemHome), ".codex");
+}
+
 export function validateProfileName(name: string): string {
   if (name.length < 1 || name.length > 64 || !profilePattern.test(name)) {
     throw new Error(
@@ -27,7 +41,7 @@ function expandUser(path: string, userHome: string): string {
 export function resolvePaths(
   environment: Readonly<Record<string, string | undefined>>,
 ): LohraPaths {
-  const userHome = environment.HOME || homedir();
+  const userHome = resolveUserHome(environment);
   const base = environment.LOHRA_HOME
     ? expandUser(environment.LOHRA_HOME, userHome)
     : process.platform === "win32"

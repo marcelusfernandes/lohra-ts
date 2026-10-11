@@ -326,6 +326,11 @@ transporte da assinatura; `--model` sozinho, sem `--provider`, continua
 escolhendo o modelo da própria assinatura sem mudança
 (`docs/decisions/2026-09-13-flags-de-rota-com-assinatura.md`).
 
+No Windows, `chat` e `doctor` procuram o login em `CODEX_HOME` quando definido;
+caso contrário, usam `.codex` dentro de `HOME` ou do home do sistema quando
+`HOME` está ausente ou vazio. `LOHRA_HOME` controla somente o estado do Lohra
+e não muda o local do login Codex.
+
 Na rota `api_key` (sem assinatura ativa), sem `--provider`, `chat` e
 `dashboard` usam o provedor que `doctor` detecta (`detected_provider` —
 a primeira variável de API key configurada, ou `LOHRA_PROVIDER`
