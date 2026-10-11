@@ -145,6 +145,45 @@ describe("tick", () => {
     expect(store.get(job.id)?.last_run_at).toBe(100);
   });
 
+  it("reads a mutable error code once before publishing the validated value", async () => {
+    const job = store.add({ name: "n", prompt: "p", type: "once", value: 100 });
+    const failure = new Error("PRIVATE_ERROR_MESSAGE_761");
+    let codeReads = 0;
+    Object.defineProperty(failure, "code", {
+      get: () => {
+        codeReads += 1;
+        return codeReads <= 2 ? "EIO" : "PRIVATE_GETTER_SECRET_761";
+      },
+    });
+    const diagnosed: string[] = [];
+    expect(
+      await tick(store, () => Promise.reject(failure), {
+        now: 100,
+        diagnostics: (message) => diagnosed.push(message),
+      }),
+    ).toEqual([{ jobId: job.id, ok: false }]);
+    expect(diagnosed).toEqual([`cron job ${job.id} phase=callback cause=EIO`]);
+    expect(codeReads).toBe(1);
+    expect(diagnosed.join(" ")).not.toContain("PRIVATE_");
+  });
+
+  it("does not use inherited object properties as CronStoreError causes", async () => {
+    const job = store.add({ name: "n", prompt: "p", type: "once", value: 100 });
+    const diagnosed: string[] = [];
+    expect(
+      await tick(
+        store,
+        () => Promise.reject(new CronStoreError("PRIVATE_PATH_761", "constructor")),
+        {
+          now: 100,
+          diagnostics: (message) => diagnosed.push(message),
+        },
+      ),
+    ).toEqual([{ jobId: job.id, ok: false }]);
+    expect(diagnosed).toEqual([`cron job ${job.id} phase=callback cause=CronStoreError`]);
+    expect(diagnosed.join(" ")).not.toContain("PRIVATE_PATH_761");
+  });
+
   it("persists the claim before invoking the callback and passes the pre-claim snapshot", async () => {
     const job = store.add({ name: "n", prompt: "p", type: "once", value: 100 });
     const seen: Array<{ persisted: number | null; received: number | null }> = [];
