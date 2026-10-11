@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -139,6 +140,34 @@ describe("filesystem tools", () => {
     expect(readFileSync(path, "utf8")).toBe("café 😀");
     expect(writeFileTool({ path })).toBe('{"error":"missing required argument \'content\'"}');
     expect(writeFileTool({ path, content: 1 })).toBe('{"error":"\'content\' must be a string"}');
+  });
+
+  it("refuses a native read-only file while a writable control still accepts content", () => {
+    const directory = root();
+    const allowedPath = join(directory, "allowed.txt");
+    const deniedPath = join(directory, "read-only.txt");
+    writeFileSync(deniedPath, "KEEP-ME");
+
+    expect(JSON.parse(writeFileTool({ path: allowedPath, content: "new content" }))).toEqual({
+      ok: true,
+      bytes_written: 11,
+      path: allowedPath,
+    });
+    expect(readFileSync(allowedPath, "utf8")).toBe("new content");
+
+    // On Windows chmod removes the write attribute; on POSIX it removes write
+    // permission for the non-root test process. Neither case models read ACLs.
+    chmodSync(deniedPath, 0o444);
+    try {
+      const refused = JSON.parse(writeFileTool({ path: deniedPath, content: "overwrite" })) as {
+        error: string;
+      };
+      expect(refused.error).toContain(`could not write ${deniedPath}`);
+      expect(refused.error).toMatch(/\b(?:EPERM|EACCES)\b/u);
+      expect(readFileSync(deniedPath, "utf8")).toBe("KEEP-ME");
+    } finally {
+      chmodSync(deniedPath, 0o666);
+    }
   });
 });
 
