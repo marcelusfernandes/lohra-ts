@@ -54,6 +54,84 @@ jobs:
         id: format
         run: npm run format:check
 
+  # Informativo até o baseline Windows fechar (#749): mostra falhas por etapa
+  # sem alterar os checks obrigatórios nem a ordem do job Linux acima.
+  windows-checks:
+    if: github.event_name == 'pull_request'
+    name: windows-checks (Node ${{ matrix.node }})
+    runs-on: windows-latest
+    continue-on-error: true
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22"]
+    steps:
+      - uses: actions/checkout@v4
+        id: checkout
+        continue-on-error: true
+      - uses: actions/setup-node@v4
+        id: node
+        continue-on-error: true
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: native gates and summary
+        if: always()
+        shell: pwsh
+        env:
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
+          NODE_OUTCOME: ${{ steps.node.outcome }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $nodeVersion = 'unavailable'
+          if (Get-Command node -ErrorAction SilentlyContinue) {
+            $nodeVersion = (& node --version | Select-Object -First 1)
+          }
+          $blocked = $env:CHECKOUT_OUTCOME -ne 'success' -or $env:NODE_OUTCOME -ne 'success'
+          if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) { $blocked = $true }
+          $failed = $blocked
+          $rows = @()
+          $stages = @(
+            @{ Command = 'npm ci'; Arguments = @('ci') }
+            @{ Command = 'npm run build'; Arguments = @('run', 'build') }
+            @{ Command = 'npm run typecheck'; Arguments = @('run', 'typecheck') }
+            @{ Command = 'npm run lint'; Arguments = @('run', 'lint') }
+            @{ Command = 'npm run format:check'; Arguments = @('run', 'format:check') }
+            @{ Command = 'npm test'; Arguments = @('test') }
+          )
+          foreach ($stage in $stages) {
+            if ($blocked) {
+              $rows += "| $($stage.Command) | N/A | BLOCKED |"
+              continue
+            }
+            $code = -1
+            try {
+              & npm.cmd @($stage.Arguments)
+              $code = $LASTEXITCODE
+            } catch {
+              Write-Host "npm launch failed: $($_.Exception.GetType().Name)"
+            }
+            if ($null -eq $code) { $code = -1 }
+            $classification = if ($code -eq 0) { 'PASS' } else { 'FAIL' }
+            $rows += "| $($stage.Command) | $code | $classification |"
+            if ($code -ne 0) { $failed = $true }
+            if ($stage.Command -eq 'npm ci' -and $code -ne 0) { $blocked = $true }
+          }
+          $summary = @(
+            '## Windows gates (informative)'
+            "- SHA: ``$env:CANDIDATE_SHA``"
+            "- OS/arch: ``$env:RUNNER_OS/$env:RUNNER_ARCH``"
+            "- Node: ``$nodeVersion`` (matrix ${{ matrix.node }})"
+            "- Checkout: $env:CHECKOUT_OUTCOME; setup-node: $env:NODE_OUTCOME"
+            '| Command | Exit | Result |'
+            '| --- | ---: | --- |'
+          ) + $rows
+          $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          if ($failed) { exit 1 }
+
   provenance:
     runs-on: ubuntu-latest
     steps:
