@@ -68,6 +68,10 @@ const SPAWN_LIKE_PYTHON_RE =
   /\b(?:spawn|spawnSync|exec|execFile|execSync|execFileSync)\s*\([^)]*python/iu;
 
 describe("suíte sem python3", () => {
+  it("representa o próprio arquivo como os caminhos varridos", () => {
+    expect(SELF).toBe(relativePath(resolve(import.meta.dirname, "sem-python.test.ts")));
+  });
+
   it("nenhum arquivo em src/ menciona o literal python3", () => {
     const hits = listTsFiles("src").flatMap((file) => {
       const path = relativePath(file);
