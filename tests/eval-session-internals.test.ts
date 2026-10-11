@@ -29,21 +29,10 @@ afterEach(() => {
 });
 
 describe("runInProcess: restauração de cwd (issue #607 item 7)", () => {
-  // Reproduz o bug relatado (session.ts, antes da correção, com o
-  // `previousCwd` de cada chamada recapturado via `process.cwd()`): um
-  // caso que estoura `timeoutMs` (a chamada real, `invokeSlow` aqui, segue
-  // "rodando em segundo plano" sem nunca resolver dentro do teste) tem seu
-  // diretório temporário removido pelo CHAMADOR (como `runEvalCase` fazia
-  // em `finally`, sem restaurar o cwd antes) — o cwd ATIVO do processo
-  // continua apontando para esse diretório já apagado. Contra o código
-  // antigo isso derrubava o teste de uma entre duas formas (dependente de
-  // timing/plataforma, ambas com a mesma causa raiz): o `process.cwd()` do
-  // PRÓXIMO caso lançando `ENOENT` (`uv_cwd`) — o que este teste
-  // efetivamente reproduziu localmente — ou um `process.chdir(previousCwd)`
-  // tardio da chamada perdida do caso A lançando `ENOENT` como rejeição
-  // não tratada (`unhandled`, abaixo) por `previousCwd` ter sido, ele
-  // mesmo, um caminho já removido. `PROJECT_ROOT_CWD` (a correção) elimina
-  // as duas.
+  // A expira, mas sua invocação fica pendente. B começa enquanto o cwd ainda
+  // aponta para A: uma restauração que recaptura previousCwd por chamada
+  // voltaria para A, enquanto PROJECT_ROOT_CWD volta à raiz estável.
+  // A fixture só remove cada raiz após restaurar o cwd, como runEvalCase.
   it("a slow call that outlives the timeout never corrupts a later case's cwd restore", async () => {
     const startedAt = process.cwd();
     const rootA = tempDir();
@@ -54,13 +43,15 @@ describe("runInProcess: restauração de cwd (issue #607 item 7)", () => {
       unhandled.push(reason);
     };
     process.on("unhandledRejection", onUnhandledRejection);
+    let resolveSlow: ((exitCode: number) => void) | undefined;
+    let slowPending = false;
+    let failure: { error: unknown } | undefined;
+    const cleanupErrors: unknown[] = [];
     try {
-      let resolveSlow: (exitCode: number) => void = () => {
-        throw new Error("resolveSlow chamado antes de ser atribuído");
-      };
       const slow = new Promise<number>((resolve) => {
         resolveSlow = resolve;
       });
+      slowPending = true;
       const invokeSlow: CliInvoker = () => slow;
 
       // Caso A: a chamada nunca resolve dentro do timeout minúsculo —
@@ -68,38 +59,61 @@ describe("runInProcess: restauração de cwd (issue #607 item 7)", () => {
       // ainda pendente (igual a uma chamada de provedor real travada).
       const resultA = await runInProcess([], {}, rootA, 5, invokeSlow);
       expect(resultA.timedOut).toBe(true);
+      expect(process.cwd()).toBe(rootA);
 
-      // O chamador (`runEvalCase`, em produção) remove o diretório do caso
-      // A assim que ele "termina" — mesmo com a chamada real ainda presa
-      // em segundo plano e o cwd do processo ainda podendo apontar para lá.
-      rmSync(rootA, { recursive: true, force: true });
-
-      // Caso B roda a seguir, independente — nunca deveria falhar por
-      // causa de um estado deixado pelo caso A. Contra o código antigo,
-      // este `await` é justamente onde `process.cwd()` lançava `ENOENT`
-      // (o `it` inteiro falhava aqui, antes de chegar em qualquer
-      // `expect` — não é o `expect(unhandled)` abaixo que pegava essa
-      // manifestação específica).
+      // B começa antes de A resolver; não restauramos A prematuramente,
+      // pois isso deixaria previousCwd dinâmico indistinguível.
       const resultB = await runInProcess([], {}, rootB, 1000, () => Promise.resolve(0));
       expect(resultB.exitCode).toBe(0);
       expect(resultB.timedOut).toBe(false);
-      // B precisa restaurar a raiz estável, não o cwd de A capturado ao entrar em B.
-      // A ainda está pendente aqui, portanto esta checagem distingue previousCwd dinâmico.
+      expect(slowPending).toBe(true);
       expect(process.cwd()).toBe(startedAt);
+
+      // O chamador restaura antes de remover qualquer cwd temporário ativo.
+      process.chdir(startedAt);
+      rmSync(rootA, { recursive: true, force: true });
       rmSync(rootB, { recursive: true, force: true });
 
-      // A chamada perdida do caso A finalmente resolve — seu `.finally`
-      // (não aguardado por ninguém) tenta restaurar o cwd agora. Antes da
-      // correção, isso reaplicava `process.chdir(previousCwd)` com
-      // `previousCwd` já potencialmente inválido; hoje sempre restaura
-      // para a raiz do processo, que nunca é removida pelo harness.
-      resolveSlow(0);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // Só agora a invocação tardia de A resolve e executa seu `.finally`.
+      resolveSlow?.(0);
+      slowPending = false;
+      await new Promise<void>((resolve) => setImmediate(resolve));
 
       expect(unhandled).toEqual([]);
       expect(process.cwd()).toBe(startedAt);
+    } catch (error) {
+      failure = { error };
     } finally {
+      if (slowPending) resolveSlow?.(0);
+      let restored = false;
+      try {
+        process.chdir(startedAt);
+        restored = true;
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+      if (restored) {
+        for (const root of [rootA, rootB]) {
+          try {
+            rmSync(root, { recursive: true, force: true });
+          } catch (error) {
+            cleanupErrors.push(error);
+          }
+        }
+      }
       process.off("unhandledRejection", onUnhandledRejection);
+    }
+    if (failure !== undefined) {
+      if (cleanupErrors.length > 0) {
+        throw new AggregateError(
+          [failure.error, ...cleanupErrors],
+          "Falha e limpeza do cwd de eval",
+        );
+      }
+      throw failure.error;
+    }
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(cleanupErrors, "Falha na limpeza do cwd de eval");
     }
   });
 });
