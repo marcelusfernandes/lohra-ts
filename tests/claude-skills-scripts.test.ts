@@ -26,13 +26,15 @@ function git(cwd: string, args: readonly string[]): string {
   return result.stdout;
 }
 
-function gitExecutableMode(repo: string, file: string): boolean {
+function assertGitExecutableMode(repo: string, file: string): void {
   const entry = git(repo, ["ls-files", "--stage", "--", file]).trimEnd();
   const match = /^(100[0-7]{3}) ([0-9a-f]{40}|[0-9a-f]{64}) 0\t(.+)$/u.exec(entry);
   if (!match || match[3] !== file) {
     throw new Error(`unexpected git index entry for ${file}: ${entry}`);
   }
-  return match[1] === "100755";
+  if (match[1] !== "100755") {
+    throw new Error(`git index mode for ${file} is ${match[1]}, expected 100755`);
+  }
 }
 
 function secao(
@@ -118,7 +120,7 @@ describe("secao.sh", () => {
   });
 
   it("secao.sh tem bit de execução (modo 100755, como open-pr.sh)", () => {
-    expect(gitExecutableMode(REPO, ".claude/skills/pr/scripts/secao.sh")).toBe(true);
+    expect(() => assertGitExecutableMode(REPO, ".claude/skills/pr/scripts/secao.sh")).not.toThrow();
     if (process.platform !== "win32") {
       expect(statSync(SECAO).mode & 0o111).not.toBe(0);
     }
@@ -131,11 +133,13 @@ describe("secao.sh", () => {
       writeFileSync(path.join(repo, "secao.sh"), "#!/bin/sh\nexit 0\n");
       const blob = git(repo, ["hash-object", "-w", "secao.sh"]).trim();
       git(repo, ["update-index", "--add", "--cacheinfo", `100644,${blob},secao.sh`]);
-      expect(gitExecutableMode(repo, "secao.sh")).toBe(false);
+      expect(() => assertGitExecutableMode(repo, "secao.sh")).toThrow(/100644.*100755/u);
       git(repo, ["update-index", "--add", "--cacheinfo", `100755,${blob},secao.sh`]);
-      expect(gitExecutableMode(repo, "secao.sh")).toBe(true);
-      expect(() => gitExecutableMode(repo, "missing.sh")).toThrow(/unexpected git index entry/u);
-      expect(() => gitExecutableMode(path.join(repo, "missing"), "secao.sh")).toThrow(
+      expect(() => assertGitExecutableMode(repo, "secao.sh")).not.toThrow();
+      expect(() => assertGitExecutableMode(repo, "missing.sh")).toThrow(
+        /unexpected git index entry/u,
+      );
+      expect(() => assertGitExecutableMode(path.join(repo, "missing"), "secao.sh")).toThrow(
         /git ls-files failed/u,
       );
     } finally {
