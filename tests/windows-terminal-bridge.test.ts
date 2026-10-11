@@ -151,6 +151,20 @@ describe("Windows PTY bridge", () => {
     ) as { error: string };
     expect(wrongType.error).toContain("invalid tool envelope");
 
+    const wrongError = JSON.parse(
+      await runWindowsTerminalBridge(
+        { command: "echo OUT" },
+        {
+          workerUrl: worker(
+            `console.log('{"type":"ready"}'); console.log(${JSON.stringify(
+              JSON.stringify({ type: "result", value: JSON.stringify({ error: 7 }) }),
+            )});`,
+          ),
+        },
+      ),
+    ) as { error: string };
+    expect(wrongError.error).toContain("invalid tool envelope");
+
     const crashBeforeReady = JSON.parse(
       await runWindowsTerminalBridge(
         { command: "echo OUT" },
