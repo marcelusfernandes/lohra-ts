@@ -1,0 +1,60 @@
+{
+  "codeSha": "8837363f7c0a95a9019ef50e45385e135196bdb0",
+  "integrityTestSha": "83c27ffa693cf1f319d0b38dbf597290b417911f",
+  "totalMutantsBefore": 61,
+  "totalMutantsAfter": 61,
+  "invariantHashBeforeAndAfter": "52733d5a868da8eb85c38ea528494db839767e6640822a15c365f58d20d05d94",
+  "staleBefore": [
+    "i2/spec-widens-policy",
+    "s/superseded-stretch-keeps-granting",
+    "ab/taint-frozen-before-the-leaves-run"
+  ],
+  "staleAfter": [],
+  "integrityTest": {
+    "file": "tests/workflow-durability-focus-integrity.test.ts",
+    "redSha": "d802a97dcf9f53c2cfc83c378bf1fe27cf520599",
+    "redNode20": { "exitCode": 1, "failed": 1, "cause": "AssertionError: i2/spec-widens-policy" },
+    "redNode22": { "exitCode": 1, "failed": 1, "cause": "AssertionError: i2/spec-widens-policy" },
+    "greenNode20": { "proofPassed": 35 },
+    "greenNode22": { "proofPassed": 35 },
+    "negativeControl": { "exitCode": 0, "classification": "assertion-red" }
+  },
+  "finalLinux": {
+    "codeSha": "83c27ffa693cf1f319d0b38dbf597290b417911f",
+    "testFilesPassed": 342,
+    "testsPassed": 4507,
+    "testsSkipped": 8,
+    "proofsPassed": {
+      "windows-sqlite-fixture-cleanup": 35,
+      "leaf-sandbox-runtime": 54,
+      "mutations-t15-t16": 109
+    }
+  },
+  "negativeFocus": {
+    "oldFile": "tests/workflow-service-durability.test.ts",
+    "pattern": "carries the OPERATOR policy, not the spec",
+    "node20": { "exitCode": 0, "passed": 0, "skipped": 32 },
+    "node22": { "exitCode": 0, "passed": 0, "skipped": 32 }
+  },
+  "mutationsT16": {
+    "killed": 61,
+    "total": 61,
+    "survivors": [],
+    "restoreGreen": true,
+    "retargetedFocus": [
+      { "id": "i2/spec-widens-policy", "baselineRanTests": 1, "mutantRanTests": 1, "killed": true },
+      {
+        "id": "s/superseded-stretch-keeps-granting",
+        "baselineRanTests": 1,
+        "mutantRanTests": 1,
+        "killed": true
+      },
+      {
+        "id": "ab/taint-frozen-before-the-leaves-run",
+        "baselineRanTests": 1,
+        "mutantRanTests": 1,
+        "killed": true
+      }
+    ]
+  }
+}

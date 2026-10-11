@@ -1,0 +1,38 @@
+
+ RUN  v4.1.11 <CLONE>
+
+ ❯ tests/workflow-service-durability.test.ts (34 tests | 1 failed | 33 skipped) 77ms
+     × installs one sandbox per ACQUISITION and disposes only its own 74ms
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 33 skipped (34)
+   Start at  23:27:22
+   Duration  6.46s (transform 3.85s, setup 0ms, import 5.29s, tests 77ms, environment 0ms)
+
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/workflow-service-durability.test.ts > workflow service — leaf capability sandbox > installs one sandbox per ACQUISITION and disposes only its own
+Error: EBUSY: resource busy or locked, unlink '<TEMP>\lohra-service-sandbox-MbFGkH\state.db'
+ ❯ tests/workflow-service-durability.test.ts:2193:7
+    2191|       connection.close();
+    2192|     } finally {
+    2193|       rmSync(root, { recursive: true, force: true });
+       |       ^
+    2194|     }
+    2195|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/workflow-service-durability.test.ts > workflow service — leaf capability sandbox > installs one sandbox per ACQUISITION and disposes only its own
+Error: EBUSY: resource busy or locked, unlink '<TEMP>\lohra-service-sandbox-MbFGkH\state.db'
+ ❯ tests/workflow-service-durability.test.ts:33:28
+     31|
+     32| afterEach(() => {
+     33|   while (roots.length > 0) rmSync(roots.pop() as string, { recursive: …
+       |                            ^
+     34| });
+     35|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯

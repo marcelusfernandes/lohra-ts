@@ -1,0 +1,38 @@
+
+ RUN  v4.1.11 <CLONE>
+
+ ❯ tests/workflow-service-durability.test.ts (34 tests | 1 failed | 33 skipped) 92ms
+     × the leaf dispatch of a launched run carries the OPERATOR policy, not the spec 90ms
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 33 skipped (34)
+   Start at  23:26:20
+   Duration  1.01s (transform 520ms, setup 0ms, import 708ms, tests 92ms, environment 0ms)
+
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/workflow-service-durability.test.ts > workflow service — leaf capability sandbox > the leaf dispatch of a launched run carries the OPERATOR policy, not the spec
+Error: EBUSY: resource busy or locked, unlink '<TEMP>\lohra-service-sandbox-VtcLeD\state.db'
+ ❯ tests/workflow-service-durability.test.ts:1460:7
+    1458|       connection.close();
+    1459|     } finally {
+    1460|       rmSync(root, { recursive: true, force: true });
+       |       ^
+    1461|     }
+    1462|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/workflow-service-durability.test.ts > workflow service — leaf capability sandbox > the leaf dispatch of a launched run carries the OPERATOR policy, not the spec
+Error: EBUSY: resource busy or locked, unlink '<TEMP>\lohra-service-sandbox-VtcLeD\state.db'
+ ❯ tests/workflow-service-durability.test.ts:33:28
+     31|
+     32| afterEach(() => {
+     33|   while (roots.length > 0) rmSync(roots.pop() as string, { recursive: …
+       |                            ^
+     34| });
+     35|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯

@@ -1,0 +1,41 @@
+
+ RUN  v4.1.11 <CLONE>
+
+ ❯ tests/workflow-service-durability.test.ts (34 tests | 1 failed | 33 skipped) 83ms
+     × the leaf dispatch of a launched run carries the OPERATOR policy, not the spec 81ms
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 33 skipped (34)
+   Start at  23:30:19
+   Duration  1.35s (transform 778ms, setup 0ms, import 1.04s, tests 83ms, environment 0ms)
+
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/workflow-service-durability.test.ts > workflow service — leaf capability sandbox > the leaf dispatch of a launched run carries the OPERATOR policy, not the spec
+AssertionError: expected [ { …(2) }, { …(2) }, { …(2) }, …(7) ] to deeply equal [ { …(2) }, { …(2) }, { …(2) }, …(7) ]
+
+- Expected
++ Received
+
+@@ -1,8 +1,8 @@
+  [
+    {
+-     "out": "PROBE_WRONG_ALLOWED_VALUE",
++     "out": "allowed:write_file",
+      "step": "inside-working-root",
+    },
+    {
+      "out": "ERROR: path is outside the workflow working scope (sandbox denied)",
+      "step": "outside-every-root",
+
+ ❯ tests/workflow-service-durability.test.ts:1424:23
+    1422|       runId = started.run_id;
+    1423|       await service.status(started.run_id, true);
+    1424|       expect(results).toEqual([
+       |                       ^
+    1425|         // inside the run's own scratch root: allowed
+    1426|         { step: "inside-working-root", out: "PROBE_WRONG_ALLOWED_VALUE…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯

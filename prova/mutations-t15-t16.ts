@@ -8,6 +8,8 @@ export default {
     "tests/workflow-progress-cobertura.test.ts",
     "tests/workflow-shutdown.test.ts",
     "tests/workflow-service-durability.test.ts",
+    "tests/workflow-service-durability-cleanup.test.ts",
+    "tests/workflow-durability-focus-integrity.test.ts",
     "tests/workflow-durable-roots.test.ts",
     "tests/mutations-harness.test.ts",
     "tests/mutations-fixtures-workflow-executor.test.ts",
