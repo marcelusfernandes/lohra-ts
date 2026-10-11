@@ -83,6 +83,9 @@ describe("runInProcess: restauração de cwd (issue #607 item 7)", () => {
       const resultB = await runInProcess([], {}, rootB, 1000, () => Promise.resolve(0));
       expect(resultB.exitCode).toBe(0);
       expect(resultB.timedOut).toBe(false);
+      // B precisa restaurar a raiz estável, não o cwd de A capturado ao entrar em B.
+      // A ainda está pendente aqui, portanto esta checagem distingue previousCwd dinâmico.
+      expect(process.cwd()).toBe(startedAt);
       rmSync(rootB, { recursive: true, force: true });
 
       // A chamada perdida do caso A finalmente resolve — seu `.finally`
