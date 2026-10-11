@@ -1,0 +1,89 @@
+{
+  "issue": 728,
+  "environment": {
+    "os": "Microsoft Windows 11 Pro 10.0.26200",
+    "arch": "x64",
+    "temporaryRoots": "isolated on F:",
+    "provider": "none",
+    "nodeVersions": ["20.20.2", "22.23.2"]
+  },
+  "sources": {
+    "historical": "fa8aa4a572a8d84c3eea128a7ce67ab4eac796e1",
+    "pathFix": "d39b99fddf6be58646d684994faac49e51a60cf9",
+    "current": "364a78171d8047fa1d23bd7ba635332a32e7b705",
+    "unchangedTestBlob": "3ee1e2e592446418edc412f2e1ff919c971a0ed5"
+  },
+  "command": "node node_modules/vitest/vitest.mjs run tests/workflow-cross-process.test.ts tests/workflow-durability.test.ts tests/workflow-shutdown.test.ts tests/workflow-service-durability.test.ts tests/state-locks.test.ts tests/workflow-steer-tool.test.ts tests/orchestration-child-runner-abort.test.ts --maxWorkers=2",
+  "runs": [
+    {
+      "tree": "historical unmodified",
+      "node": "20.20.2",
+      "exit": 1,
+      "passed": 87,
+      "failed": 2,
+      "causeShown": "EBUSY unlink state.db in test finally and afterEach"
+    },
+    {
+      "tree": "historical unmodified",
+      "node": "22.23.2",
+      "exit": 1,
+      "passed": 87,
+      "failed": 2,
+      "causeShown": "EBUSY unlink state.db in test finally and afterEach"
+    },
+    {
+      "tree": "historical with only d39b99f sandbox.ts",
+      "node": "20.20.2",
+      "exit": 0,
+      "passed": 89,
+      "failed": 0
+    },
+    {
+      "tree": "historical with only d39b99f sandbox.ts",
+      "node": "22.23.2",
+      "exit": 0,
+      "passed": 89,
+      "failed": 0
+    },
+    { "tree": "current unmodified", "node": "20.20.2", "exit": 0, "passed": 89, "failed": 0 },
+    { "tree": "current unmodified", "node": "22.23.2", "exit": 0, "passed": 89, "failed": 0 }
+  ],
+  "minimal": {
+    "selection": "-t 'the leaf dispatch of a launched run|installs one sandbox per ACQUISITION'",
+    "historicalNode20": { "exit": 1, "failed": 2, "skipped": 32, "causeShown": "EBUSY" },
+    "currentNode20": { "exit": 0, "passed": 2, "skipped": 32 },
+    "currentNode22": { "exit": 0, "passed": 2, "skipped": 32 }
+  },
+  "unmaskedHistorical": [
+    {
+      "node": "20.20.2",
+      "exit": 1,
+      "failed": 2,
+      "causeShown": "expected allowed:write_file, got path outside workflow working scope; no EBUSY"
+    },
+    {
+      "node": "22.23.2",
+      "exit": 1,
+      "failed": 2,
+      "causeShown": "expected allowed:write_file, got path outside workflow working scope; no EBUSY"
+    }
+  ],
+  "handleProbe": [
+    {
+      "node": "20.20.2",
+      "exit": 0,
+      "openBefore": true,
+      "unlinkBeforeClose": "EBUSY",
+      "openAfter": false,
+      "removedAfterClose": true
+    },
+    {
+      "node": "22.23.2",
+      "exit": 0,
+      "openBefore": true,
+      "unlinkBeforeClose": "EBUSY",
+      "openAfter": false,
+      "removedAfterClose": true
+    }
+  ]
+}
