@@ -21,8 +21,8 @@ describe("profile paths and env file", () => {
     expect(paths.base).toBe("/custom");
     expect(paths).toEqual({
       base: "/custom",
-      home: "/custom/profiles/myprof",
-      envFile: "/custom/.env",
+      home: join("/custom", "profiles", "myprof"),
+      envFile: join("/custom", ".env"),
       profile: "myprof",
     });
   });

@@ -35,7 +35,7 @@ describe("project discovery", () => {
     writeFileSync(join(nested, "AGENTS.md"), "near agents");
     expect(findProjectRoot(nested)).toBe(realpathSync(repo));
     expect(discoverInstructions(nested)).toEqual([
-      ["backend/pkg/AGENTS.md", "near agents"],
+      [join("backend", "pkg", "AGENTS.md"), "near agents"],
       ["CLAUDE.md", "root claude"],
     ]);
   });
