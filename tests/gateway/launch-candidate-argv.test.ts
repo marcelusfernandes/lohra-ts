@@ -7,6 +7,7 @@
 // determinística, e não duplique o teste de subprocesso real em
 // `launch-candidate.test.ts`.
 import { EventEmitter } from "node:events";
+import { resolve } from "node:path";
 
 import { afterEach, expect, it, vi } from "vitest";
 
@@ -69,6 +70,7 @@ it("launches the candidate via --import tsx, never through tsx's cli.mjs wrapper
   const importIndex = args.indexOf("--import");
   expect(importIndex).toBeGreaterThanOrEqual(0);
   expect(args[importIndex + 1]).toBe(import.meta.resolve("tsx"));
+  expect(args[importIndex + 2]).toBe(resolve(import.meta.dirname, "../..", "src/cli.ts"));
 
   const entryIndex = args.findIndex((arg) => arg.endsWith("/src/cli.ts"));
   expect(entryIndex).toBe(importIndex + 2);

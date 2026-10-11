@@ -86,6 +86,7 @@ describe("launchCandidateDashboard: a real subprocess, probed over raw sockets",
 
     const result = await process_.kill("SIGINT");
     activeProcess = null;
+    expect(result.signal).toBe(process.platform === "win32" ? "SIGINT" : null);
     expect(result.exitCode).toBe(0);
   }, 30_000);
 });
