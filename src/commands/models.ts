@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 import { buildCatalog } from "../catalog/catalog.js";
 import type { CatalogHttpClient } from "../catalog/catalog.js";
 import type { OllamaStatus } from "../doctor/model.js";
@@ -29,7 +31,7 @@ export async function runModels(
         }
       : { code: 2, stdout: "", stderr: `error: ${message}\n` };
   }
-  const tiers = readTiers(`${options.home}/workflow_tiers.json`);
+  const tiers = readTiers(join(options.home, "workflow_tiers.json"));
   if (tiers instanceof TiersError) {
     return options.json
       ? {
