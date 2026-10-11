@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -99,10 +99,12 @@ describe("child tool hardening", () => {
   it("keeps a dangerous child command denied when the parent approval is yolo", async () => {
     const root = mkdtempSync(join(tmpdir(), "lohra-child-yolo-"));
     const target = join(root, "target.txt");
-    writeFileSync(target, "sentinel", { mode: 0o600 });
-    chmodSync(target, 0o600);
+    writeFileSync(target, "sentinel");
     approval.setYolo(true);
-    const dispatch = createChildDispatch((_name, args) => terminalTool(args));
+    const base = vi.fn((_name: string, args: Readonly<Record<string, unknown>>) =>
+      terminalTool(args),
+    );
+    const dispatch = createChildDispatch(base);
     const command = `chmod 755 ${JSON.stringify(target)}`;
 
     try {
@@ -113,7 +115,8 @@ describe("child tool hardening", () => {
         command,
         refusal: "final",
       });
-      expect(statSync(target).mode & 0o777).toBe(0o600);
+      expect(base).not.toHaveBeenCalled();
+      expect(readFileSync(target, "utf8")).toBe("sentinel");
     } finally {
       approval.setYolo(false);
       approval.setCallback(null);
