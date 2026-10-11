@@ -195,6 +195,19 @@ it(
     });
     expect(() => selectNativeRoute(root, two, changed)).toThrow(/MULTIPLE/);
 
+    git("checkout", "-qb", "transfer", two);
+    const added = "scripts/subprocess/windows-helper/native/added.cs";
+    const transfer = commit("move source ownership", {
+      [manifest]: JSON.stringify({
+        routes: {
+          [slug]: { ...route, sources: [added, driver] },
+          other: { ...other, sources: [source, ...other.sources] },
+        },
+      }),
+      [added]: "// added",
+    });
+    expect(() => selectNativeRoute(root, two, transfer)).toThrow(/MULTIPLE/);
+
     git("checkout", "-qb", "left", origin);
     const left = commit("left", { "LEFT.md": "left" });
     git("checkout", "-qb", "right", origin);
