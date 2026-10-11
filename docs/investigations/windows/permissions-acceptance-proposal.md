@@ -1,10 +1,12 @@
 # Proposta de critério de permissões no Windows (#852)
 
-**Estado: proposta para decisão do owner, não contrato vigente nem aceite de
-Windows.** Este documento não altera produto, testes, ACLs ou contas. A
-confidencialidade NTFS entre duas identidades continua **INCONCLUSIVE**. Qualquer
-mudança normativa ou experimento que aplique ACL/crie identidades requer
-aprovação humana específica antes da execução.
+**Estado: proposta histórica; política aprovada pelo owner em 2026-10-11 e
+registrada na [ADR 0006](../../adr/0006-windows-file-protection.md) (#895).**
+Este documento não altera produto, testes, ACLs ou contas e não é aceite de
+Windows. A confidencialidade NTFS entre duas identidades continua
+**INCONCLUSIVE**. A aprovação da política não autorizou executar a bancada,
+criar identidades, aplicar ACLs ou migrar homes existentes; essas ações exigem
+decisão própria antes da execução.
 
 ## O que sabemos e o que falta medir
 
@@ -38,10 +40,12 @@ mantém **INCONCLUSIVE**. O [focal #753](failure-triage-platform.md) teve 7/46
 falhas de permissões nos dois Nodes, incluindo esses dois ramos não explicados
 pelos bits. Nada aqui atribui a eles uma causa de ACL.
 
-## Contrato recomendado, sujeito à aprovação
+## Proposta que fundamentou a política aprovada
 
-Para Windows, proponho definir proteção por **acesso efetivo de identidades
-distintas**, sem converter `0600`/`0644` em uma fórmula de DACL. O processo
+A [ADR 0006](../../adr/0006-windows-file-protection.md) aprovou o critério de
+proteção por **acesso efetivo de identidades distintas**, sem converter
+`0600`/`0644` em uma fórmula de DACL. O detalhamento de implementação abaixo
+continua proposto, sem autorização de experimento ou aceite. O processo
 Lohra sob a identidade dona deve conseguir ler e atualizar seu estado. Outra
 identidade local padrão, sem privilégios administrativos, não deve ler nem
 escrever arquivos classificados como sensíveis. Não se promete isolamento
@@ -87,10 +91,11 @@ Se criar, aplicar ou verificar a proteção falhar, o comportamento recomendado
 seguir silenciosamente. Depois de uma falha parcial, liberar descritores e
 tentar limpar **somente** temporários próprios; preservar a causa primária e
 relatar também falha de cleanup sem incluir payload. Nunca usar `chmod`
-best-effort como condição de sucesso de confidencialidade. Isso mudaria o
-comportamento atual de `.env` e precisa da aprovação normativa antes de código.
+best-effort como condição de sucesso de confidencialidade. A política foi
+aprovada; alterar o comportamento atual de `.env` ainda requer implementação
+em issue própria e prova do contrato.
 
-Alternativas para decisão:
+Alternativas avaliadas na proposta:
 
 | Opção                                                                          | Custo e consequência                                                                                                                                           |
 | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -157,19 +162,21 @@ seu `EACCES` unitário com os limites já declarados. Não se acrescenta skip
 para esconder os IDs do inventário.
 
 Estes recortes **S são propostas**, sem issues criadas ou trabalho iniciado.
-As frentes que mudam contrato dependem de decisão humana primeiro:
+O gate de política foi concluído na ADR 0006. A bancada entre identidades
+continua sem autorização e as frentes de implementação dependem de issues
+próprias:
 
-| Recorte                                              | AC verificável                                                                                                                                                                  | Files propostos                                                                                                        | Proof proposto                                                                      |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Decisão de política (gate humano, não implementação) | Owner escolhe identidade autorizada, exceções de administração, mídia pública/privada, migração e resposta a falha; aprova ou rejeita execução da bancada de duas identidades.  | Uma ADR nova **somente após** aprovação; nenhum arquivo nesta issue.                                                   | Registro explícito da decisão e limites; sem teste artificial.                      |
-| S1 — bancada dummy NTFS, após autorização            | Dois tokens não elevados: A lê/escreve, B não lê/escreve arquivo sensível, controle público B legível; temporário/rename e cleanup delimitados, Node 20/22, causas sanitizadas. | `scripts/probes/windows-permissions/**`, `docs/investigations/windows/evidence/permissions-two-identities/**`          | Sonda nativa com manifesto, JSON sanitizado e exit; não substitui gates do produto. |
-| S2 — proteção Windows antes dos bytes                | Criar/verificar área e arquivos sensíveis antes da escrita; falha de ACL ou home incompatível bloqueia persistência com causa; testam-se herança e rename.                      | `src/security/windows-file-protection.ts`, `tests/windows-file-protection.test.ts`, `prova/windows-file-protection.ts` | TDD + prova e cinco gates; bancada S1 confirma acesso efetivo.                      |
-| S3 — integração auth/lease                           | `auth.json`, `oauth.json`, temporário e lock preservam atomicidade/fence e política aprovada; migração de home existente e erro de proteção são explícitos.                     | `src/auth/json-file.ts`, `src/auth/lease.ts`, `tests/auth-core.test.ts`, `prova/windows-auth-protection.ts`            | Prova focal Node 20/22 + Linux, mutações da fatia e controles S1.                   |
-| S4 — integração `.env`                               | Remover janela de bytes em `0o666` na política Windows aprovada; falha de proteção não vira sucesso silencioso, conteúdo/idempotência preservados.                              | `src/onboarding/env-write.ts`, `tests/onboarding.test.ts`, `prova/windows-env-protection.ts`                           | TDD de falha antes/depois do primeiro byte, prova e gates; controles S1.            |
-| S5 — fixture de mídia por classificação              | Preservar assertions POSIX `0644` e conteúdo/atomicidade; no Windows medir leitura/escrita conforme política de mídia aprovada, sem inferir segredo a partir de bits.           | `tests/media-persistence.test.ts`, `prova/windows-media-access.ts`                                                     | Testes focais e prova em ambas as plataformas; controle de B quando autorizado.     |
+| Recorte                                              | AC verificável                                                                                                                                                                                          | Files propostos                                                                                                        | Proof proposto                                                                      |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Decisão de política (gate humano, não implementação) | Política aprovada pelo owner em 2026-10-11: identidade dona, outra identidade padrão, exceções de administração, mídia privada por padrão e falha explícita; execução da bancada segue sem autorização. | [ADR 0006](../../adr/0006-windows-file-protection.md), #895; nenhuma alteração de produto nesta issue.                 | Registro explícito da decisão e limites; sem teste artificial.                      |
+| S1 — bancada dummy NTFS, após autorização            | Dois tokens não elevados: A lê/escreve, B não lê/escreve arquivo sensível, controle público B legível; temporário/rename e cleanup delimitados, Node 20/22, causas sanitizadas.                         | `scripts/probes/windows-permissions/**`, `docs/investigations/windows/evidence/permissions-two-identities/**`          | Sonda nativa com manifesto, JSON sanitizado e exit; não substitui gates do produto. |
+| S2 — proteção Windows antes dos bytes                | Criar/verificar área e arquivos sensíveis antes da escrita; falha de ACL ou home incompatível bloqueia persistência com causa; testam-se herança e rename.                                              | `src/security/windows-file-protection.ts`, `tests/windows-file-protection.test.ts`, `prova/windows-file-protection.ts` | TDD + prova e cinco gates; bancada S1 confirma acesso efetivo.                      |
+| S3 — integração auth/lease                           | `auth.json`, `oauth.json`, temporário e lock preservam atomicidade/fence e política aprovada; migração de home existente e erro de proteção são explícitos.                                             | `src/auth/json-file.ts`, `src/auth/lease.ts`, `tests/auth-core.test.ts`, `prova/windows-auth-protection.ts`            | Prova focal Node 20/22 + Linux, mutações da fatia e controles S1.                   |
+| S4 — integração `.env`                               | Remover janela de bytes em `0o666` na política Windows aprovada; falha de proteção não vira sucesso silencioso, conteúdo/idempotência preservados.                                                      | `src/onboarding/env-write.ts`, `tests/onboarding.test.ts`, `prova/windows-env-protection.ts`                           | TDD de falha antes/depois do primeiro byte, prova e gates; controles S1.            |
+| S5 — fixture de mídia por classificação              | Preservar assertions POSIX `0644` e conteúdo/atomicidade; no Windows medir leitura/escrita conforme política de mídia aprovada, sem inferir segredo a partir de bits.                                   | `tests/media-persistence.test.ts`, `prova/windows-media-access.ts`                                                     | Testes focais e prova em ambas as plataformas; controle de B quando autorizado.     |
 
 Esta PR é somente documental. Prova executável e dogfooding real são **N/A**:
 não há mudança em `src/**`, testes ou chaves de pacote lidas pelo runtime.
 Os cinco gates canônicos em Linux e o CI da classe docs verificam integridade
-do repositório, não confidencialidade NTFS. Até decisão, implementação e
-bancada autorizada, #736 não deve usar este documento como aceite Windows.
+do repositório, não confidencialidade NTFS. Até implementação e bancada
+autorizada, #736 não deve usar este documento como aceite Windows.
