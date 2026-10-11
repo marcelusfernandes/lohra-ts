@@ -2,11 +2,11 @@
 // issue #79 (e #99: fences ignorados, bit de execução): `secao.sh` (extração de seção usada por `open-pr.sh`) e a
 // validação de seções de `create-issue.sh --dry-run`. Nenhum dos dois toca a
 // rede nesses caminhos; `create-issue.sh --dry-run` só imprime o comando.
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawnProcessShell } from "./helpers/process-shell.js";
 
@@ -16,16 +16,23 @@ const CREATE = fileURLToPath(
 );
 const REPO = fileURLToPath(new URL("../", import.meta.url));
 
-function gitExecutableMode(_repo: string, _file: string): boolean {
-  throw new Error("not implemented");
-}
-
 function git(cwd: string, args: readonly string[]): string {
   const result = spawnSync("git", [...args], { cwd, encoding: "utf8", shell: false });
   if (result.error || result.status !== 0) {
-    throw new Error(`git ${args[0] ?? ""} failed: ${result.error?.message ?? result.stderr}`);
+    throw new Error(
+      `git ${args[0] ?? ""} failed (status ${String(result.status)}): ${result.error?.message ?? result.stderr}`,
+    );
   }
   return result.stdout;
+}
+
+function gitExecutableMode(repo: string, file: string): boolean {
+  const entry = git(repo, ["ls-files", "--stage", "--", file]).trimEnd();
+  const match = /^(100[0-7]{3}) ([0-9a-f]{40}|[0-9a-f]{64}) 0\t(.+)$/u.exec(entry);
+  if (!match || match[3] !== file) {
+    throw new Error(`unexpected git index entry for ${file}: ${entry}`);
+  }
+  return match[1] === "100755";
 }
 
 function secao(
@@ -127,6 +134,10 @@ describe("secao.sh", () => {
       expect(gitExecutableMode(repo, "secao.sh")).toBe(false);
       git(repo, ["update-index", "--add", "--cacheinfo", `100755,${blob},secao.sh`]);
       expect(gitExecutableMode(repo, "secao.sh")).toBe(true);
+      expect(() => gitExecutableMode(repo, "missing.sh")).toThrow(/unexpected git index entry/u);
+      expect(() => gitExecutableMode(path.join(repo, "missing"), "secao.sh")).toThrow(
+        /git ls-files failed/u,
+      );
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
