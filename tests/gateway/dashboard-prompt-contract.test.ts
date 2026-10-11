@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 
 import { runDashboard, type DashboardCommandOptions } from "../../src/commands/dashboard.js";
+import { resolvePaths } from "../../src/config/paths.js";
 import { registerProvider } from "../../src/providers/registry.js";
 
 const roots: string[] = [];
@@ -151,7 +152,7 @@ describe("dashboard.ts's real prompt (issue #580 AC 3): same inputs as chat's sn
           ["--provider", provider],
           ["--model", "t580-dashboard-prompt-model"],
         ]),
-        environment: { HOME: root, PATH: process.env.PATH ?? "" },
+        environment: { HOME: root, LOHRA_HOME: home, PATH: process.env.PATH ?? "" },
         home,
         codexHome: join(root, ".codex"),
         cwd: root,
@@ -161,6 +162,7 @@ describe("dashboard.ts's real prompt (issue #580 AC 3): same inputs as chat's sn
           shutdown = handler;
         },
       };
+      expect(resolvePaths(options.environment).home).toBe(home);
       const donePromise = runDashboard(options);
       const boundLine = await waitForStderrLine(stderrLines, "Lohra dashboard:");
       const port = Number(boundLine.match(/:(\d+)\n$/)?.[1]);
@@ -223,6 +225,9 @@ describe("dashboard.ts's real prompt (issue #580 AC 3): same inputs as chat's sn
     const root = mkdtempSync(join(tmpdir(), "lohra-t648-dashboard-doctrine-"));
     roots.push(root);
     const home = join(root, ".lohra");
+    // O consumidor de mídia exige o parent já existente; openState não deve
+    // ser a etapa implícita que prepara esta fixture.
+    mkdirSync(home, { recursive: true });
 
     const captured: CapturedRequest[] = [];
     const server = startCapturingServer(captured);
@@ -255,7 +260,7 @@ describe("dashboard.ts's real prompt (issue #580 AC 3): same inputs as chat's sn
           ["--provider", provider],
           ["--model", "t648-dashboard-doctrine-model"],
         ]),
-        environment: { HOME: root, PATH: process.env.PATH ?? "" },
+        environment: { HOME: root, LOHRA_HOME: home, PATH: process.env.PATH ?? "" },
         home,
         codexHome: join(root, ".codex"),
         cwd: root,
@@ -265,6 +270,7 @@ describe("dashboard.ts's real prompt (issue #580 AC 3): same inputs as chat's sn
           shutdown = handler;
         },
       };
+      expect(resolvePaths(options.environment).home).toBe(home);
       const donePromise = runDashboard(options);
       const boundLine = await waitForStderrLine(stderrLines, "Lohra dashboard:");
       const port = Number(boundLine.match(/:(\d+)\n$/)?.[1]);
