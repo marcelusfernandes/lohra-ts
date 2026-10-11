@@ -39,8 +39,26 @@ import type {
 } from "../src/workflow/runtime.js";
 
 const roots: string[] = [];
+const connections: ReturnType<typeof openStateDatabase>[] = [];
 afterEach(() => {
-  while (roots.length > 0) rmSync(roots.pop() as string, { recursive: true, force: true });
+  const failures: unknown[] = [];
+  for (const connection of connections.splice(0).reverse()) {
+    try {
+      connection.close();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  for (const root of roots.splice(0).reverse()) {
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length > 1)
+    throw new AggregateError(failures, "workflow templates fixture cleanup failed");
+  if (failures.length === 1) throw failures[0];
 });
 
 function operatorHome(prefix: string): string {
@@ -107,6 +125,7 @@ function neverSpawnRuntime(): ChildRuntime {
  * doesn't run one, but `composeSessionTools` still needs a real instance. */
 function setupComposedTools(home: string): ReturnType<typeof composeSessionTools> {
   const connection = openStateDatabase(join(home, "state.db"));
+  connections.push(connection);
   const sessions = new SessionRepository(connection.database, () => 1000, connection.ftsEnabled);
   const base = createSessionToolBase(connection.database, {});
   const workflowService = new WorkflowService({ runtime: neverSpawnRuntime() });
@@ -240,6 +259,7 @@ describe("WorkflowService built like chat.ts, with a real templateLoader (#464)"
   it("refuses a ref outside TEMPLATE_REF's shape at launch, never spawning", async () => {
     const home = operatorHome("lohra-templates-service-refuse-");
     const connection = openStateDatabase(join(home, "state.db"));
+    connections.push(connection);
     const repository = new WorkflowRepository(connection.database);
     const locks = new LockRepository(connection.database);
     const { templateLoader } = await importTemplates();
@@ -266,13 +286,13 @@ describe("WorkflowService built like chat.ts, with a real templateLoader (#464)"
       expect(started.error).toContain("../x");
       expect(started.error).toContain("invalid ref format");
     }
-    connection.close();
   });
 
   it("sub1/sub2 sharing one ref via the REAL loader don't collide (#332 in production)", async () => {
     const home = operatorHome("lohra-templates-service-siblings-");
     writeTemplate(home, "inner", innerAgentSpec);
     const connection = openStateDatabase(join(home, "state.db"));
+    connections.push(connection);
     const repository = new WorkflowRepository(connection.database);
     const locks = new LockRepository(connection.database);
     const runtime = new LabeledRuntime();
@@ -307,7 +327,6 @@ describe("WorkflowService built like chat.ts, with a real templateLoader (#464)"
     expect(outputs.sub1).toBeDefined();
     expect(outputs.sub2).toBeDefined();
     expect(outputs.sub1).not.toEqual(outputs.sub2);
-    connection.close();
   });
 });
 
