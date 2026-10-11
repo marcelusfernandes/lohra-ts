@@ -109,8 +109,8 @@ export const mutants: readonly Mutant[] = [
     edits: [
       {
         file: terminal,
-        before: "child = spawnPty(invocation.executable, [...invocation.args], {",
-        after: "child = spawnPty(process.execPath, [...invocation.args], {",
+        before: "child = spawnPty(invocation.executable, invocation.args, {",
+        after: "child = spawnPty(process.execPath, invocation.args, {",
       },
     ],
   },
