@@ -347,25 +347,25 @@ describe("prepareArchiveSandbox", () => {
 // caminho passado e sempre usava `/dev/stdout`.
 function fakeVitestQueEscreveNoOutputFile(json: string): string {
   return [
-    "#!/bin/sh",
-    'for arg in "$@"; do',
-    '  case "$arg" in',
-    '    --outputFile=*) file="${arg#--outputFile=}" ;;',
-    "  esac",
-    "done",
-    'if [ "$file" = "/dev/stdout" ]; then exit 1; fi',
-    `printf '%s' '${json}' > "$file"`,
+    'import { writeFileSync } from "node:fs";',
+    'const output = process.argv.find((arg) => arg.startsWith("--outputFile="))?.slice(13);',
+    'if (output === "/dev/stdout") process.exit(1);',
+    `if (output) writeFileSync(output, ${JSON.stringify(json)});`,
   ].join("\n");
+}
+
+function installFakeVitest(directory: string, source: string): void {
+  const packageDir = join(directory, "node_modules/vitest");
+  mkdirSync(packageDir, { recursive: true });
+  writeFileSync(join(packageDir, "package.json"), '{"bin":{"vitest":"./vitest.mjs"}}');
+  writeFileSync(join(packageDir, "vitest.mjs"), source);
 }
 
 describe("runVitestFiles", () => {
   it("roda múltiplos arquivos sem `-t` e devolve o outcome agregado, lido do --outputFile (#191)", () => {
     const dir = mkdtempSync(join(tmpdir(), "mutations-harness-runfiles-"));
     workdirs.push(dir);
-    mkdirSync(join(dir, "node_modules/.bin"), { recursive: true });
-    writeFileSync(join(dir, "node_modules/.bin/vitest"), fakeVitestQueEscreveNoOutputFile("{}"), {
-      mode: 0o755,
-    });
+    installFakeVitest(dir, fakeVitestQueEscreveNoOutputFile("{}"));
 
     const outcome = runVitestFiles(dir, ["tests/a.test.ts", "tests/b.test.ts"]);
     expect(outcome).toEqual({ exitCode: 0, failedTests: [], ranTests: 0 });
@@ -389,15 +389,13 @@ describe("runVitestReporterJson lê o relatório de --outputFile, não de /dev/s
   it("vitest falso escreve o json no --outputFile e nada em stdout: outcome lido do arquivo", () => {
     const dir = mkdtempSync(join(tmpdir(), "mutations-harness-outputfile-"));
     workdirs.push(dir);
-    mkdirSync(join(dir, "node_modules/.bin"), { recursive: true });
-    writeFileSync(
-      join(dir, "node_modules/.bin/vitest"),
+    installFakeVitest(
+      dir,
       fakeVitestQueEscreveNoOutputFile(
         JSON.stringify({
           testResults: [{ assertionResults: [{ status: "failed", fullName: "x falha" }] }],
         }),
       ),
-      { mode: 0o755 },
     );
 
     const outcome = runVitestFiles(dir, ["tests/a.test.ts"]);
@@ -407,8 +405,7 @@ describe("runVitestReporterJson lê o relatório de --outputFile, não de /dev/s
   it("vitest falso que não escreve o --outputFile: 'vitest produced no JSON report'", () => {
     const dir = mkdtempSync(join(tmpdir(), "mutations-harness-outputfile-ausente-"));
     workdirs.push(dir);
-    mkdirSync(join(dir, "node_modules/.bin"), { recursive: true });
-    writeFileSync(join(dir, "node_modules/.bin/vitest"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    installFakeVitest(dir, "process.exit(1);");
 
     expect(() => runVitestFiles(dir, ["tests/a.test.ts"])).toThrow(
       /vitest produced no json report/i,
@@ -440,8 +437,7 @@ describe("escapeFocusTest (#362)", () => {
 // que o `-t` chega escapado a ponto de casar um título com metacaracteres.
 function fakeVitestQueSimulaFiltroDeTitulo(): string {
   return [
-    "#!/usr/bin/env node",
-    "const fs = require('node:fs');",
+    "import * as fs from 'node:fs';",
     "const args = process.argv.slice(2);",
     "const tIndex = args.indexOf('-t');",
     "const pattern = args[tIndex + 1];",
@@ -460,10 +456,7 @@ describe("runFocusedVitest escapa focus.test antes do -t (#362)", () => {
   it("um título com ( e . casa literalmente, não como regex crua", () => {
     const dir = mkdtempSync(join(tmpdir(), "mutations-harness-focus-literal-"));
     workdirs.push(dir);
-    mkdirSync(join(dir, "node_modules/.bin"), { recursive: true });
-    writeFileSync(join(dir, "node_modules/.bin/vitest"), fakeVitestQueSimulaFiltroDeTitulo(), {
-      mode: 0o755,
-    });
+    installFakeVitest(dir, fakeVitestQueSimulaFiltroDeTitulo());
 
     const titulo = "lease (mtime antigo) é tomada, v1.2";
     const originalEnv = process.env.FAKE_VITEST_TITLE;

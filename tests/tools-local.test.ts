@@ -134,9 +134,8 @@ describe("filesystem tools", () => {
 
   it("writes parent directories, UTF-8 bytes, and validates content", () => {
     const path = join(root(), "sub", "out.txt");
-    expect(writeFileTool({ path, content: "café 😀" })).toBe(
-      `{"ok":true,"bytes_written":10,"path":"${path}"}`,
-    );
+    const response = writeFileTool({ path, content: "café 😀" });
+    expect(JSON.parse(response)).toEqual({ ok: true, bytes_written: 10, path });
     expect(readFileSync(path, "utf8")).toBe("café 😀");
     expect(writeFileTool({ path })).toBe('{"error":"missing required argument \'content\'"}');
     expect(writeFileTool({ path, content: 1 })).toBe('{"error":"\'content\' must be a string"}');
@@ -159,10 +158,12 @@ describe("terminal tool", () => {
     const directory = root();
     const sentinel = join(directory, "sentinel");
     const command = `sudo touch ${sentinel}`;
-    expect(await terminalTool({ command }, { approvalManager: new ApprovalManager() })).toBe(
-      `{"error":"command refused by the dangerous-command policy (elevated privileges (sudo))",` +
-        `"command":"${command}","refusal":"final"}`,
-    );
+    const response = await terminalTool({ command }, { approvalManager: new ApprovalManager() });
+    expect(JSON.parse(response)).toEqual({
+      error: "command refused by the dangerous-command policy (elevated privileges (sudo))",
+      command,
+      refusal: "final",
+    });
     expect(() => readFileSync(sentinel)).toThrow();
   });
 
