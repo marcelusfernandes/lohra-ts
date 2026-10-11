@@ -436,8 +436,8 @@ describe("oauth and credentials", () => {
       if (failure === "injected") {
         expect(failedOpen.calls).toBe(1);
         expect(existsSync(failedOpen.matched)).toBe(false);
+        expect(existsSync(`${tokenPath(home)}.lock`)).toBe(false);
       }
-      expect(existsSync(`${tokenPath(home)}.lock`)).toBe(false);
       expect(caught).toBeInstanceOf(Error);
       const error = caught as Error;
       expect(error.name).toBe("TokenPersistError");
