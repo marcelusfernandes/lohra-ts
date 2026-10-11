@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "node": "22.23.2",
+  "base": {
+    "sha": "e1eba4e28273979b5defd5917e4396b279d2c3c7",
+    "exit": 1,
+    "reporterSha256": "1e0eafa20893aa1bbe4afe77e24ed011dd149167a64e4bdfd20e0c2c01b360bf",
+    "counts": {
+      "total": 4,
+      "passed": 1,
+      "failed": 3,
+      "pending": 0
+    },
+    "failures": [
+      {
+        "name": "kills a timed-out target tree and releases the stub port before returning",
+        "causeCode": "ERR_MODULE_NOT_FOUND",
+        "observedStatus": 1
+      },
+      {
+        "name": "kills a timed-out target tree even when 127.0.0.1:11434 is already occupied by another process",
+        "causeCode": "ERR_MODULE_NOT_FOUND",
+        "observedStatus": 1
+      },
+      {
+        "name": "installs the dynamic-port redirect for candidate targets too",
+        "causeCode": "ERR_MODULE_NOT_FOUND",
+        "observedStatus": 1
+      }
+    ]
+  },
+  "candidate": {
+    "codeSha": "885fa5691f9ea7bd9f35ed71120f87cef0836083",
+    "exit": 0,
+    "reporterSha256": "39260de2339b636380ca5b33b88476be9d998b7b5dd8686f6e8523829753bded",
+    "counts": {
+      "total": 4,
+      "passed": 4,
+      "failed": 0,
+      "pending": 0
+    },
+    "failures": [],
+    "proof": {
+      "exit": 0,
+      "ok": true,
+      "total": 4,
+      "failed": 0
+    },
+    "proofSha256": "213e195596c863197d01f1753da9d28d6df2ce97088176f2acb4e5bffbb52388"
+  }
+}
