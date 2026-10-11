@@ -67,17 +67,16 @@ export function resolveProcessShell(
 }
 
 function childEnvironment(env: NodeJS.ProcessEnv, shellPath: string): NodeJS.ProcessEnv {
-  const child: NodeJS.ProcessEnv = { ...env };
+  const child: NodeJS.ProcessEnv = {};
   // Em Windows, um objeto plano pode trazer `Path` herdado e `PATH` sobrescrito.
   // A última chave deve vencer, como no spread usado pela bancada.
   const pathKey =
-    Object.keys(child)
+    Object.keys(env)
       .filter((key) => key.toLowerCase() === "path")
       .at(-1) ?? "PATH";
-  if (process.platform === "win32") {
-    for (const key of Object.keys(child)) {
-      if (key.toLowerCase() === "path" && key !== pathKey) delete child[key];
-    }
+  for (const [key, value] of Object.entries(env)) {
+    if (process.platform === "win32" && key.toLowerCase() === "path" && key !== pathKey) continue;
+    child[key] = value;
   }
   child[pathKey] = [path.dirname(shellPath), child[pathKey] ?? ""]
     .filter(Boolean)
