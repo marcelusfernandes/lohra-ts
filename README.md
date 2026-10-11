@@ -381,6 +381,12 @@ nesse caso (análise em `docs/gate-decision.md`). Um
 `LOHRA_DASHBOARD_SESSION_TOKEN` vazio ou só espaços também é recusado antes
 de qualquer bind, em vez de valer como token válido.
 
+Ao receber Ctrl-C (SIGINT), `dashboard` encerra as conexões WebSocket ativas
+sem exigir que os clientes as fechem antes. Clientes que não cooperam são
+encerrados dentro de um prazo limitado. Quando a limpeza termina, o listener
+é liberado, a conexão SQLite é fechada e o comando sai com código 0; se a
+limpeza falhar, reporta erro com a causa do fechamento.
+
 Um run de `run_workflow` sobrevive ao processo que o lançou: `chat`/
 `dashboard` gravam cada nó concluído (`workflow_node_cache`), o estado do run
 e a trilha de auditoria no `state.db` da sessão sob um lease com TTL, não em
