@@ -160,7 +160,10 @@ describe("protege-escrita.sh", () => {
         'const g=spawnSync("git",["rev-parse","--show-toplevel"],{cwd:dir,encoding:"utf8"});',
         "const top=g.status===0?fs.realpathSync(g.stdout.trim()):null;",
         'const rel=top?path.relative(top,path.join(dir,path.basename(j.tool_input.file_path))).split(path.sep).join("/"):null;',
-        'process.stdout.write(JSON.stringify({tool:j.tool_name,gitStatus:g.status,gitError:g.error?.code??null,settings:top?fs.existsSync(path.join(top,".claude","settings.json")):false,relative:rel}));',
+        "const nativeDir=fs.realpathSync.native(path.dirname(j.tool_input.file_path));",
+        "const nativeTop=g.status===0?fs.realpathSync.native(g.stdout.trim()):null;",
+        'const nativeRel=nativeTop?path.relative(nativeTop,path.join(nativeDir,path.basename(j.tool_input.file_path))).split(path.sep).join("/"):null;',
+        'process.stdout.write(JSON.stringify({tool:j.tool_name,gitStatus:g.status,gitError:g.error?.code??null,settings:top?fs.existsSync(path.join(top,".claude","settings.json")):false,relative:rel,nativeRelative:nativeRel}));',
         "'",
         "",
       ].join("\n"),
@@ -172,12 +175,22 @@ describe("protege-escrita.sh", () => {
     });
     const result = spawnProcessShell([probe], { input, encoding: "utf8" });
     expect(result.status, JSON.stringify({ stdout: result.stdout, stderr: result.stderr })).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual({
+    const actual = JSON.parse(result.stdout) as {
+      tool: string;
+      gitStatus: number;
+      gitError: string | null;
+      settings: boolean;
+      relative: string;
+      nativeRelative: string;
+    };
+    expect(actual.nativeRelative, JSON.stringify(actual)).toBe("docs/reference/novo.md");
+    expect(actual).toEqual({
       tool: "Write",
       gitStatus: 0,
       gitError: null,
       settings: true,
       relative: "docs/reference/novo.md",
+      nativeRelative: "docs/reference/novo.md",
     });
   });
 });

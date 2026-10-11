@@ -38,3 +38,23 @@ No candidato diagnóstico, `npm run typecheck` e o foco
 `tests/protege-escrita.test.ts` + `tests/process-shell.test.ts` saíram 0 em
 Node 20/22 locais (19/19 testes). Este resultado é local; não reclassifica
 as sete falhas observadas nos dois jobs do CI.
+
+## Draft #869: assinatura nas duas ABIs do runner
+
+No HEAD `f7495148`, os jobs Windows Node 20 (`114444442869`) e Node 22
+(`114444443143`) repetiram as sete recusas com status 0, stdout e stderr
+vazios. O shell resolvido foi `C:\Program Files\Git\bin\sh.exe`; as três
+flags de conversão MSYS observadas estavam ausentes. O teste de transporte
+stdin → `PE_PAYLOAD` passou. A sonda de raiz recebeu `Write`, Git saiu 0 e
+`.claude/settings.json` existia, mas o relativo retornou
+`../../../../../RUNNER~1/AppData/Local/Temp/protege-escrita-…/docs/reference/novo.md`
+em vez de `docs/reference/novo.md`. Logs integrais sanitizados fora do repo:
+`F:/lohra-m25-864/ci-draft-node20.log` e
+`F:/lohra-m25-864/ci-draft-node22.log`.
+
+O resultado prova que grafias distintas do ancestral da fixture (alias
+Windows 8.3 versus caminho usado pelo Git) rompem a comparação lexical do
+hook. Ainda falta medir se `fs.realpathSync.native` unifica ambas nesse runner.
+Uma sonda adicional registra somente os relativos convencional e `native`,
+sem divulgar o ambiente completo nem alterar a política. O host local não
+apresentou o alias `RUNNER~1`; o CI continua sendo a bancada discriminante.
