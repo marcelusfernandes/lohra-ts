@@ -1,0 +1,11 @@
+{
+  "scenario": "acquisition",
+  "node": "v22.23.2",
+  "platform": "win32",
+  "childExit": 1,
+  "childError": null,
+  "assertionSeen": false,
+  "busySeen": true,
+  "remainingFixtureRoots": 1,
+  "remainingStateDb": 1
+}
