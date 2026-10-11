@@ -91,3 +91,22 @@ it(
   },
   timeoutMs,
 );
+
+it(
+  "keeps Vitest execution fail-closed by removing a prior report before a startup crash",
+  () => {
+    const dir = fixture(0);
+    const first = runFixture(dir);
+    expect(first.status, first.stderr).toBe(0);
+    const resultDir = join(dir, ".prova", "npmfixture");
+    writeFileSync(join(dir, "vitest.config.ts"), 'throw new Error("BROKEN_VITEST_742");\n');
+
+    const second = runFixture(dir);
+
+    expect(second.status).toBe(1);
+    expect(second.stderr).toMatch(/vitest não produziu relatório/u);
+    expect(() => readFileSync(join(resultDir, "vitest.json"), "utf8")).toThrow();
+    expect(() => readFileSync(join(resultDir, "resumo.json"), "utf8")).toThrow();
+  },
+  timeoutMs,
+);
