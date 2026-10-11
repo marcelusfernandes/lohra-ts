@@ -19,8 +19,11 @@ export class ProcessShellLaunchError extends Error {
 function isFile(file: string): boolean {
   try {
     return statSync(file).isFile();
-  } catch {
-    return false;
+  } catch (error) {
+    const cause = error instanceof Error ? error : new Error(String(error));
+    const code = (cause as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return false;
+    throw new ProcessShellLaunchError(`falha ao inspecionar shell: ${cause.message}`, cause);
   }
 }
 

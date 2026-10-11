@@ -88,4 +88,15 @@ describe("shell das bancadas de processo", () => {
       expect(error).toMatchObject({ status: null, cause: { code: "ENOENT" } });
     }
   });
+
+  it("falha de inspeção do shell preserva a causa em vez de virar ausência", () => {
+    const invalidPath = path.join(root, "invalid\0path");
+    try {
+      resolveProcessShell({ PATH: invalidPath });
+      throw new Error("a inspeção deveria falhar");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ProcessShellLaunchError);
+      expect(error).toMatchObject({ cause: { code: "ERR_INVALID_ARG_VALUE" } });
+    }
+  });
 });
