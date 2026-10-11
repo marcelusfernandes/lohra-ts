@@ -465,6 +465,9 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
   let wakeScheduler: (() => void) | undefined;
   const schedulerLoop = runSchedulerLoop({
     store: cronStore,
+    diagnostics: (message) => {
+      options.stderr(`${message}\n`);
+    },
     stop: { isSet: () => schedulerStopped },
     wait: (milliseconds) =>
       new Promise<void>((resolveWait) => {
