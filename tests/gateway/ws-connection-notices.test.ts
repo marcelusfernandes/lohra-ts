@@ -17,7 +17,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 
-import { openStateDatabase, SessionRepository, type StateConnection } from "../../src/state/index.js";
+import {
+  openStateDatabase,
+  SessionRepository,
+  type StateConnection,
+} from "../../src/state/index.js";
 import { SqliteConversationRepository } from "../../src/conversation/index.js";
 import type {
   ModelRequest,
