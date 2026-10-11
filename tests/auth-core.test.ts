@@ -38,6 +38,34 @@ import {
   writeTokens,
 } from "../src/auth/index.js";
 
+const failedOpen = vi.hoisted(() => ({
+  path: "",
+  matched: "",
+  prefix: false,
+  armed: false,
+  calls: 0,
+}));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    openSync: (...args: Parameters<typeof actual.openSync>) => {
+      const [path, flags] = args;
+      if (
+        failedOpen.armed &&
+        typeof path === "string" &&
+        flags === "wx" &&
+        (failedOpen.prefix ? path.startsWith(failedOpen.path) : path === failedOpen.path)
+      ) {
+        failedOpen.calls += 1;
+        failedOpen.matched = path;
+        throw Object.assign(new Error("injected auth EIO failure"), { code: "EIO" });
+      }
+      return actual.openSync(...args);
+    },
+  };
+});
+
 const roots: string[] = [];
 const root = (): string => {
   const value = mkdtempSync(join(tmpdir(), "lohra-auth-test-"));
@@ -46,6 +74,11 @@ const root = (): string => {
 };
 
 afterEach(() => {
+  failedOpen.armed = false;
+  failedOpen.path = "";
+  failedOpen.matched = "";
+  failedOpen.prefix = false;
+  failedOpen.calls = 0;
   for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true });
   vi.unstubAllGlobals();
 });
@@ -363,58 +396,63 @@ describe("oauth and credentials", () => {
   // mensagem) por asserção — sem importar o símbolo novo, para o commit
   // vermelho compilar contra a base.
   it("names a write failure after a successful refresh differently from RefreshFailedError, issue 354", async () => {
-    const home = root();
-    enable(home);
-    writeTokens(home, {
-      accessToken: "old-access",
-      refreshToken: "old-refresh",
-      accountId: "acct-t354-write",
-      expiresAt: 1_300,
-    });
-    let caught: unknown;
-    try {
-      await resolveCredentials(home, {
-        now: 1_000,
-        codexHome: join(home, "codex"),
-        oauthPost: () => {
-          // The lock file (`oauth.json.lock`) and the token file
-          // (`oauth.json`) live in the same directory — chmod'ing `home`
-          // BEFORE the call would also block acquiring the lease, never
-          // reaching `writeTokens` at all. Flipping it here, inside the
-          // POST, isolates the write failure: the lease is already held
-          // (created while `home` was still writable) by the time this
-          // runs, and the refresh response itself is fine.
-          chmodSync(home, 0o500);
-          return Promise.resolve([
-            200,
-            { access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 },
-          ]);
-        },
+    for (const failure of process.platform === "win32" ? ["injected"] : ["chmod", "injected"]) {
+      const home = root();
+      enable(home);
+      writeTokens(home, {
+        accessToken: "old-access",
+        refreshToken: "old-refresh",
+        accountId: "acct-t354-write",
+        expiresAt: 1_300,
       });
-    } catch (error) {
-      caught = error;
-    } finally {
-      chmodSync(home, 0o700);
+      let posts = 0;
+      let caught: unknown;
+      try {
+        await resolveCredentials(home, {
+          now: 1_000,
+          codexHome: join(home, "codex"),
+          oauthPost: () => {
+            posts += 1;
+            // The lease already exists: fail only the subsequent token write.
+            if (failure === "chmod") chmodSync(home, 0o500);
+            else {
+              failedOpen.path = `${tokenPath(home)}.tmp-`;
+              failedOpen.prefix = true;
+              failedOpen.armed = true;
+            }
+            return Promise.resolve([
+              200,
+              { access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 },
+            ]);
+          },
+        });
+      } catch (error) {
+        caught = error;
+      } finally {
+        failedOpen.armed = false;
+        if (failure === "chmod") chmodSync(home, 0o700);
+      }
+      expect(posts).toBe(1);
+      if (failure === "injected") {
+        expect(failedOpen.calls).toBe(1);
+        expect(existsSync(failedOpen.matched)).toBe(false);
+        expect(existsSync(`${tokenPath(home)}.lock`)).toBe(false);
+      }
+      expect(caught).toBeInstanceOf(Error);
+      const error = caught as Error;
+      expect(error.name).toBe("TokenPersistError");
+      expect(error.name).not.toBe("RefreshFailedError");
+      expect(error.message).not.toContain("old-access");
+      expect(error.message).not.toContain("new-access");
+      expect(error.message).not.toContain("new-refresh");
+      if (failure === "injected") expect(error.message).toContain("EIO");
+      // The rotated token is lost when chat exits; recovery is auth login.
+      expect(error.message).toContain(tokenPath(home));
+      expect(error.message).toContain("check permissions/disk space");
+      expect(error.message).toContain("run `lohra auth login` again");
+      expect(error.message).not.toContain("retry the command");
+      expect(error.message).not.toContain("not lost until the process exits");
     }
-    expect(caught).toBeInstanceOf(Error);
-    const error = caught as Error;
-    expect(error.name).toBe("TokenPersistError");
-    expect(error.name).not.toBe("RefreshFailedError");
-    expect(error.message).not.toContain("old-access");
-    expect(error.message).not.toContain("new-access");
-    expect(error.message).not.toContain("new-refresh");
-    // Veredito da PR #359 (#357) e da rodada 1 da PR #361 (#356): a
-    // mensagem antiga terminava em "retry the command; the refresh token
-    // in memory is not lost until the process exits" -- falso no caminho
-    // do `chat`, onde o processo sai logo depois deste throw (#357 tornou
-    // o erro terminal) e o refresh_token rotacionado em memória se perde
-    // com ele. A recuperação de verdade é `auth login`, não repetir o
-    // comando.
-    expect(error.message).toContain(tokenPath(home));
-    expect(error.message).toContain("check permissions/disk space");
-    expect(error.message).toContain("run `lohra auth login` again");
-    expect(error.message).not.toContain("retry the command");
-    expect(error.message).not.toContain("not lost until the process exits");
   });
 
   // Cobre a mitigação de #351 (`credentials.ts`, catch de `performRefresh`):
@@ -681,40 +719,53 @@ describe("ramos de parada sem teste (#356)", () => {
   });
 
   it("acquireFileLease lançando um erro que não é EEXIST vira TokenPersistError, não RefreshFailedError", async () => {
-    const home = root();
-    enable(home);
-    writeTokens(home, {
-      accessToken: "old-access",
-      refreshToken: "old-refresh",
-      accountId: "acct-t356-lease-throws",
-      expiresAt: 900,
-    });
-    // `home` sem permissão de escrita: `mkdirSync` recursivo num diretório
-    // que já existe não precisa escrever e passa, mas `openSync(lockPath,
-    // "wx")` dentro de `createLeaseFile` falha com EACCES -- um erro que
-    // não é EEXIST, então `acquireFileLease` propaga em vez de devolver
-    // `false`.
-    chmodSync(home, 0o500);
-    let caught: unknown;
-    try {
-      await resolveCredentials(home, {
-        now: 1_000,
-        codexHome: join(home, "codex"),
-        oauthPost: () =>
-          Promise.resolve([
-            200,
-            { access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 },
-          ]),
+    for (const failure of process.platform === "win32" ? ["injected"] : ["chmod", "injected"]) {
+      const home = root();
+      enable(home);
+      writeTokens(home, {
+        accessToken: "old-access",
+        refreshToken: "old-refresh",
+        accountId: "acct-t356-lease-throws",
+        expiresAt: 900,
       });
-    } catch (error) {
-      caught = error;
-    } finally {
-      chmodSync(home, 0o700);
+      if (failure === "chmod") chmodSync(home, 0o500);
+      else {
+        failedOpen.path = `${tokenPath(home)}.lock`;
+        failedOpen.prefix = false;
+        failedOpen.armed = true;
+      }
+      let posts = 0;
+      let caught: unknown;
+      try {
+        await resolveCredentials(home, {
+          now: 1_000,
+          codexHome: join(home, "codex"),
+          oauthPost: () => {
+            posts += 1;
+            return Promise.resolve([
+              200,
+              { access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 },
+            ]);
+          },
+        });
+      } catch (error) {
+        caught = error;
+      } finally {
+        failedOpen.armed = false;
+        if (failure === "chmod") chmodSync(home, 0o700);
+      }
+      expect(posts).toBe(0);
+      if (failure === "injected") {
+        expect(failedOpen.calls).toBe(1);
+        expect(failedOpen.matched).toBe(`${tokenPath(home)}.lock`);
+        expect(existsSync(failedOpen.matched)).toBe(false);
+      }
+      expect(caught).toBeInstanceOf(Error);
+      const error = caught as Error;
+      expect(error.name).toBe("TokenPersistError");
+      expect(error.name).not.toBe("RefreshFailedError");
+      expect(error.message).not.toContain("old-access");
+      if (failure === "injected") expect(error.message).toContain("EIO");
     }
-    expect(caught).toBeInstanceOf(Error);
-    const error = caught as Error;
-    expect(error.name).toBe("TokenPersistError");
-    expect(error.name).not.toBe("RefreshFailedError");
-    expect(error.message).not.toContain("old-access");
   });
 });
