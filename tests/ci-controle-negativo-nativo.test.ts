@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  declaredUnitsText,
   parseNativeArgs,
   runNative,
   selectNativeRed,
@@ -23,7 +24,19 @@ function git(root: string, ...args: string[]): string {
   return result.stdout.trim();
 }
 
-function fixture(): { root: string; base: string; red: string; head: string } {
+function fixture(
+  options: {
+    redSource?: string;
+    testBody?: string;
+    headOnlyModule?: boolean;
+    headDriver?: boolean;
+  } = {},
+): {
+  root: string;
+  base: string;
+  red: string;
+  head: string;
+} {
   const root = mkdtempSync(join(tmpdir(), "native-gate-fixture-"));
   ownDirs.push(root);
   const repo = resolve(".");
@@ -48,14 +61,18 @@ function fixture(): { root: string; base: string; red: string; head: string } {
   mkdirSync(join(root, "prova"));
   writeFileSync(
     join(root, "native", "value.cs"),
-    'using System; class Program { static void Main() { Console.Write("RED"); } }',
+    options.redSource ??
+      'using System; class Program { static void Main() { Console.Write("RED"); } }',
   );
   writeFileSync(
     join(root, "tests", "native-value.test.ts"),
-    `
+    options.testBody ??
+      `
 import { spawnSync } from "node:child_process";
 import { expect, it } from "vitest";
+${options.headOnlyModule ? 'import { marker } from "../src/head-only.js";' : ""}
 it("observa o valor compilado", () => {
+  ${options.headOnlyModule ? 'expect(marker).toBe("HEAD");' : ""}
   const exe = process.env.LOHRA_NATIVE_HELPER_EXE;
   if (!exe) throw new Error("artefato ausente");
   const result = spawnSync(exe, [], { encoding: "utf8", timeout: 3000 });
@@ -72,9 +89,23 @@ it("observa o valor compilado", () => {
   git(root, "add", "native", "tests", "prova");
   git(root, "commit", "-qm", "test(red): medir saída C#");
   const red = git(root, "rev-parse", "HEAD");
+  if (options.headOnlyModule) {
+    mkdirSync(join(root, "src"));
+    writeFileSync(join(root, "src", "head-only.ts"), 'export const marker = "HEAD";\n');
+    git(root, "add", "src/head-only.ts");
+  }
+  if (options.headDriver) {
+    writeFileSync(
+      join(root, "tests", "driver.cs"),
+      'public static class Driver { public const string Value = "GREEN"; }\n',
+    );
+    git(root, "add", "tests/driver.cs");
+  }
   writeFileSync(
     join(root, "native", "value.cs"),
-    'using System; class Program { static void Main() { Console.Write("GREEN"); } }',
+    options.headDriver
+      ? "using System; class Program { static void Main() { Console.Write(Driver.Value); } }"
+      : 'using System; class Program { static void Main() { Console.Write("GREEN"); } }',
   );
   git(root, "add", "native/value.cs");
   git(root, "commit", "-qm", "fix: devolver valor esperado");
@@ -125,6 +156,20 @@ describe("controle negativo nativo opt-in", () => {
     expect(() => parseNativeArgs(["--base", "a", "--base", "b"])).toThrow(/NATIVE_ARGUMENTS/);
   });
 
+  it("lê somente a declaração efetiva e recusa expressão dinâmica/computed", () => {
+    expect(
+      declaredUnitsText(
+        '/* unit: ["tests/fake.test.ts"] */ export default { unit: ["tests/real.test.ts"] }',
+      ),
+    ).toEqual(["tests/real.test.ts"]);
+    expect(() => declaredUnitsText("export default { unit: [...other] }")).toThrow(
+      /NATIVE_PROOF_DECLARATION/,
+    );
+    expect(() =>
+      declaredUnitsText('export default { unit: ["tests/one.test.ts"], ["unit"]: [] }'),
+    ).toThrow(/NATIVE_PROOF_DECLARATION/);
+  });
+
   it("escolhe o commit test(red) causal e recusa SHA fora do intervalo", () => {
     const repo = fixture();
     expect(selectNativeRed(parseNativeArgs(argv(repo)))).toBe(repo.red);
@@ -154,13 +199,139 @@ describe("controle negativo nativo opt-in", () => {
   });
 
   it.runIf(process.platform === "win32")(
-    "recusa falha real do compilador como setup, sem classificá-la como assertion-red",
+    "recusa C# inválido como setup, sem classificá-lo como assertion-red",
+    () => {
+      const repo = fixture({ redSource: "this is not valid C#" });
+      expect(() => runNative(argv(repo))).toThrow(/PREPARE_COMPILE_FAILED/);
+    },
+    30_000,
+  );
+
+  it.runIf(process.platform === "win32")(
+    "recusa compilador ausente antes da prova",
     () => {
       const repo = fixture();
-      const missing = join(repo.root, "missing-csc.exe");
       const args = argv(repo);
-      args[args.length - 1] = missing;
+      args[args.length - 1] = join(repo.root, "missing-csc.exe");
       expect(() => runNative(args)).toThrow(/PREPARE_COMPILER_MISSING/);
+    },
+    30_000,
+  );
+
+  it.runIf(process.platform === "win32")(
+    "recusa falso vermelho e vermelho estrutural",
+    () => {
+      const falseRed = fixture({
+        redSource:
+          'using System; class Program { static void Main() { Console.Write("GREEN"); } } // red variant',
+      });
+      expect(() => runNative(argv(falseRed))).toThrow(/NATIVE_PROOF_PROCESS/);
+      const structural = fixture({ headOnlyModule: true });
+      expect(() => runNative(argv(structural))).toThrow(/NATIVE_PROOF_RESULT/);
+    },
+    60_000,
+  );
+
+  it.runIf(process.platform === "win32")(
+    "recusa relatório produzido por outro script",
+    () => {
+      const repo = fixture();
+      writeFileSync(
+        join(repo.root, "package.json"),
+        JSON.stringify({ private: true, scripts: { prova: "node fake-report.cjs" } }),
+      );
+      writeFileSync(join(repo.root, "fake-report.cjs"), "process.exit(0);\n");
+      git(repo.root, "add", "package.json", "fake-report.cjs");
+      git(repo.root, "commit", "-qm", "test: relatório falso");
+      expect(() => runNative(argv({ ...repo, head: git(repo.root, "rev-parse", "HEAD") }))).toThrow(
+        /NATIVE_HARNESS_INVALID/,
+      );
+    },
+    30_000,
+  );
+
+  it.runIf(process.platform === "win32")(
+    "aplica driver C# final do overlay, mantendo fonte de produto de cada SHA",
+    () => {
+      const repo = fixture({ headDriver: true });
+      expect(runNative([...argv(repo), "--source", "tests/driver.cs"])).toBe(0);
+    },
+    90_000,
+  );
+
+  it.runIf(process.platform === "win32")(
+    "recusa zero teste executado apesar da unidade declarada",
+    () => {
+      const repo = fixture({
+        testBody: 'import { it } from "vitest"; it.skip("não executado", () => {});',
+      });
+      expect(() => runNative(argv(repo))).toThrow(/NATIVE_PROOF_RESULT/);
+    },
+    30_000,
+  );
+
+  it.runIf(process.platform === "win32")(
+    "recusa prazo/erro de processo e relatório ausente",
+    () => {
+      const repo = fixture();
+      expect(() =>
+        runNative(argv(repo), {
+          runProof: () => ({
+            status: null,
+            signal: null,
+            error: Object.assign(new Error("proof timeout"), { code: "ETIMEDOUT" }),
+          }),
+        }),
+      ).toThrow(/NATIVE_PROOF_PROCESS.*timeout/);
+      expect(() =>
+        runNative(argv(repo), { runProof: () => ({ status: 1, signal: null }) }),
+      ).toThrow(/NATIVE_REPORT_MISSING_OR_LARGE/);
+      expect(() =>
+        runNative(argv(repo), {
+          runProof: (root, slug) => {
+            const out = join(root, ".prova", slug);
+            mkdirSync(out, { recursive: true });
+            writeFileSync(join(out, "vitest.json"), "{invalid JSON");
+            writeFileSync(join(out, "resumo.json"), '{"ok":false,"total":1,"falhas":[]}');
+            return { status: 1, signal: null };
+          },
+        }),
+      ).toThrow(/NATIVE_REPORT_INVALID/);
+    },
+    30_000,
+  );
+
+  it.runIf(process.platform === "win32")(
+    "preserva falha primária e de cleanup sem worktree registrado",
+    () => {
+      const repo = fixture({ redSource: "invalid C#" });
+      let removals = 0;
+      try {
+        runNative(argv(repo), {
+          removeWorktree: (root, path) => {
+            const result = spawnSync("git", ["worktree", "remove", "--force", path], {
+              cwd: root,
+              encoding: "utf8",
+            });
+            expect(result.status).toBe(0);
+            removals++;
+            return { status: 1, stdout: "", stderr: "cleanup marker", signal: null };
+          },
+        });
+        throw new Error("expected native failure");
+      } catch (error) {
+        expect(error).toBeInstanceOf(AggregateError);
+        expect(String(error)).toContain("PREPARE_COMPILE_FAILED");
+        expect(
+          (error as AggregateError).errors.some((item: unknown) =>
+            String(item).includes("cleanup marker"),
+          ),
+        ).toBe(true);
+      }
+      expect(removals).toBe(2);
+      expect(git(repo.root, "worktree", "list", "--porcelain")).not.toContain(
+        "lohra-native-negative-",
+      );
     },
     30_000,
   );
