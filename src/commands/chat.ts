@@ -492,6 +492,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     sessions,
     warning: sessionToolBase.noticesSink.warn,
   });
+  let activeSignal: AbortSignal | null = null;
   const runtime = new ConversationRuntime({
     repository,
     transport: modelTransport,
@@ -515,7 +516,13 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     ...(useTools
       ? {
           toolDefinitions: tools.toolDefinitions,
-          toolDispatcher: new RegistryToolDispatcher(tools.dispatch),
+          toolDispatcher: new RegistryToolDispatcher((name, args) =>
+            tools.dispatch(
+              name,
+              args,
+              name === "terminal" && activeSignal !== null ? { signal: activeSignal } : undefined,
+            ),
+          ),
         }
       : {}),
     idSource: () => parentSessionId,
@@ -530,6 +537,7 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     disposeSignal = () => {
       cancellation.dispose();
     };
+    activeSignal = cancellation.signal;
     const sessionId = stringFlag(options.flags, "--session");
     // Issue #623: generated BEFORE runTurn, from the same `input` the user
     // gave (byte-identical to `result.input`, `runtime.ts:735`, the value

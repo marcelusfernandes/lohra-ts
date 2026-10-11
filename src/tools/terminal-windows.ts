@@ -102,6 +102,7 @@ export async function runWindowsTerminalBridge(
   } catch (error) {
     return fault(command, `invalid request: ${detail(error)}`);
   }
+  if (options.signal?.aborted) return fault(command, "cancelled by signal before spawn");
   let child: ChildProcessWithoutNullStreams;
   try {
     const entry = workerEntrypoint(options);
@@ -128,7 +129,8 @@ export async function runWindowsTerminalBridge(
   let cleanupTimer: NodeJS.Timeout | null = null;
   let resultTimer: NodeJS.Timeout | null = null;
   let resultSeen = false;
-  return await new Promise<string>((resolve) => {
+  let removeAbortListener = (): void => undefined;
+  const pending = new Promise<string>((resolve) => {
     const clearTimers = (): void => {
       if (startTimer !== null) clearTimeout(startTimer);
       if (runTimer !== null) clearTimeout(runTimer);
@@ -149,6 +151,14 @@ export async function runWindowsTerminalBridge(
         );
       }, CLEANUP_DEADLINE);
     };
+    const onAbort = (): void => {
+      stop("cancelled by signal");
+    };
+    if (options.signal !== undefined) {
+      options.signal.addEventListener("abort", onAbort, { once: true });
+      removeAbortListener = () => options.signal?.removeEventListener("abort", onAbort);
+      if (options.signal.aborted) onAbort();
+    }
     startTimer = setTimeout(() => {
       stop("worker did not become ready within 5000ms");
     }, START_DEADLINE);
@@ -288,5 +298,8 @@ export async function runWindowsTerminalBridge(
       }
     });
     child.stdin.end(`${request}\n`);
+  });
+  return await pending.finally(() => {
+    removeAbortListener();
   });
 }

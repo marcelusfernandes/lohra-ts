@@ -323,11 +323,12 @@ Em `chat`, Ctrl+C ou SIGTERM solicita o cancelamento do turno. Quando a
 operação em andamento se encerra cooperativamente, o comando sai com erro;
 `--json` informa `completed: false`, `error: "conversation cancelled"` e
 `session_id`. Retome com `lohra chat --session ID "..."`: o próximo turno
-recebe um aviso de cancelamento da sessão. Ferramentas em andamento ainda não
-recebem `AbortSignal` do dispatcher, portanto uma ferramenta que não retorna
-pode atrasar a saída. O turno interrompido não é gravado como concluído nem
-tem seu histórico parcial persistido; confirme os efeitos da ferramenta antes
-de pedir que ela seja executada de novo.
+recebe um aviso de cancelamento da sessão. No Windows, a ferramenta `terminal`
+encerra sua própria árvore de processos ao receber o sinal e aguarda a limpeza;
+outras ferramentas em andamento podem atrasar a saída. O turno interrompido
+não é gravado como concluído nem tem seu histórico parcial persistido;
+confirme os efeitos da ferramenta antes de pedir que ela seja executada de
+novo.
 
 Com uma assinatura Codex ativa e `auth_preference: "auto"`, `chat` recusa um
 `--provider` explícito antes de qualquer rede (`initializationError` citando

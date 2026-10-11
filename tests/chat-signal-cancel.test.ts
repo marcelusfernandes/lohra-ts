@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,7 +13,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function fixture(holdFirst: boolean, failureStatus?: number) {
+function fixture(holdFirst: boolean, failureStatus?: number, toolCommand?: string) {
   const root = mkdtempSync(join(tmpdir(), "lohra-chat-signal-"));
   roots.push(root);
   const requests: string[] = [];
@@ -31,6 +31,39 @@ function fixture(holdFirst: boolean, failureStatus?: number) {
       if (failureStatus !== undefined) {
         response.writeHead(failureStatus, { "content-type": "application/json" });
         response.end(JSON.stringify({ error: { message: "real upstream fault" } }));
+        return;
+      }
+      if (toolCommand !== undefined && requests.length === 1) {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            id: "chatcmpl-signal-tool",
+            object: "chat.completion",
+            created: 0,
+            model: "signal-model",
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: null,
+                  tool_calls: [
+                    {
+                      id: "terminal-1",
+                      type: "function",
+                      function: {
+                        name: "terminal",
+                        arguments: JSON.stringify({ command: toolCommand, timeout: 30 }),
+                      },
+                    },
+                  ],
+                },
+                finish_reason: "tool_calls",
+              },
+            ],
+            usage: { prompt_tokens: 1, completion_tokens: 1 },
+          }),
+        );
         return;
       }
       response.writeHead(200, { "content-type": "application/json" });
@@ -100,6 +133,7 @@ function options(
   provider: string,
   register: (handler: () => void) => () => void,
   sessionId?: string,
+  withTools = false,
 ) {
   return {
     input: "trabalho interrompível",
@@ -108,7 +142,7 @@ function options(
       ["--model", "signal-model"],
       ["--json", true],
       ["--no-input", true],
-      ["--no-tools", true],
+      ...(withTools ? [["--yolo", true] as const] : [["--no-tools", true] as const]),
       ...(sessionId === undefined ? [] : [["--session", sessionId] as const]),
     ]),
     environment: { HOME: root, LOHRA_HOME: join(root, ".lohra"), PATH: process.env.PATH ?? "" },
@@ -117,6 +151,14 @@ function options(
     cwd: root,
     registerShutdownTrigger: register,
   };
+}
+
+async function waitForFile(path: string): Promise<void> {
+  for (let index = 0; index < 300; index += 1) {
+    if (existsSync(path)) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("terminal tool did not start");
 }
 
 async function close(server: Server): Promise<void> {
@@ -202,4 +244,42 @@ describe("chat signal cancellation (#920)", () => {
       await close(server);
     }
   });
+
+  it.skipIf(process.platform !== "win32")(
+    "cancels a running terminal tool before another model call",
+    async () => {
+      const markerRoot = mkdtempSync(join(tmpdir(), "lohra-chat-terminal-signal-"));
+      roots.push(markerRoot);
+      const scriptPath = join(markerRoot, "held.cjs");
+      const marker = join(markerRoot, "started");
+      writeFileSync(
+        scriptPath,
+        `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "started"); setTimeout(() => {}, 30000);`,
+      );
+      const command = `node "${scriptPath.replaceAll("\\", "/")}"`;
+      const { root, server, requests } = fixture(false, undefined, command);
+      const provider = await start(server);
+      const signal = signalRegistration();
+      try {
+        const turn = runChat(options(root, provider, signal.register, undefined, true));
+        await waitForFile(marker);
+        const started = performance.now();
+        signal.fire();
+        const result = await turn;
+        const envelope = JSON.parse(result.stdout) as {
+          session_id: string;
+          completed: boolean;
+          error: string;
+        };
+        expect(performance.now() - started).toBeLessThan(10_000);
+        expect(result.code).toBe(1);
+        expect(envelope).toMatchObject({ completed: false, error: "conversation cancelled" });
+        expect(envelope.session_id).not.toBe("");
+        expect(requests).toHaveLength(1);
+      } finally {
+        await close(server);
+      }
+    },
+    15_000,
+  );
 });
