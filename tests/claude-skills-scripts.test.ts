@@ -33,7 +33,7 @@ function assertGitExecutableMode(repo: string, file: string): void {
     throw new Error(`unexpected git index entry for ${file}: ${entry}`);
   }
   if (match[1] !== "100755") {
-    throw new Error(`git index mode for ${file} is ${match[1]}, expected 100755`);
+    throw new Error(`git index mode for ${file} is ${String(match[1])}, expected 100755`);
   }
 }
 
@@ -120,7 +120,9 @@ describe("secao.sh", () => {
   });
 
   it("secao.sh tem bit de execução (modo 100755, como open-pr.sh)", () => {
-    expect(() => assertGitExecutableMode(REPO, ".claude/skills/pr/scripts/secao.sh")).not.toThrow();
+    expect(() => {
+      assertGitExecutableMode(REPO, ".claude/skills/pr/scripts/secao.sh");
+    }).not.toThrow();
     if (process.platform !== "win32") {
       expect(statSync(SECAO).mode & 0o111).not.toBe(0);
     }
@@ -133,15 +135,19 @@ describe("secao.sh", () => {
       writeFileSync(path.join(repo, "secao.sh"), "#!/bin/sh\nexit 0\n");
       const blob = git(repo, ["hash-object", "-w", "secao.sh"]).trim();
       git(repo, ["update-index", "--add", "--cacheinfo", `100644,${blob},secao.sh`]);
-      expect(() => assertGitExecutableMode(repo, "secao.sh")).toThrow(/100644.*100755/u);
+      expect(() => {
+        assertGitExecutableMode(repo, "secao.sh");
+      }).toThrow(/100644.*100755/u);
       git(repo, ["update-index", "--add", "--cacheinfo", `100755,${blob},secao.sh`]);
-      expect(() => assertGitExecutableMode(repo, "secao.sh")).not.toThrow();
-      expect(() => assertGitExecutableMode(repo, "missing.sh")).toThrow(
-        /unexpected git index entry/u,
-      );
-      expect(() => assertGitExecutableMode(path.join(repo, "missing"), "secao.sh")).toThrow(
-        /git ls-files failed/u,
-      );
+      expect(() => {
+        assertGitExecutableMode(repo, "secao.sh");
+      }).not.toThrow();
+      expect(() => {
+        assertGitExecutableMode(repo, "missing.sh");
+      }).toThrow(/unexpected git index entry/u);
+      expect(() => {
+        assertGitExecutableMode(path.join(repo, "missing"), "secao.sh");
+      }).toThrow(/git ls-files failed/u);
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
