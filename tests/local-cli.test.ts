@@ -48,14 +48,14 @@ describe("local context public CLI", () => {
     const env = environment();
     const destination = join(env.HOME as string, "export");
     const result = await invoke(["skill", "export", "use-lohra", "--to", destination], env);
+    const skillFile = join(destination, "use-lohra", "SKILL.md");
+    expect(result.stdout).toBe(`wrote ${skillFile}\n`);
     expect(result).toEqual({
       code: 0,
       stdout: `wrote ${destination}/use-lohra/SKILL.md\n`,
       stderr: "",
     });
-    expect(readFileSync(join(destination, "use-lohra", "SKILL.md"), "utf8")).toContain(
-      "name: use-lohra",
-    );
+    expect(readFileSync(skillFile, "utf8")).toContain("name: use-lohra");
   });
 
   it("runs init read-only without creating home", async () => {
