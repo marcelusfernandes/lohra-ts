@@ -1,0 +1,74 @@
+[
+  {
+    "node": "node20",
+    "artifact": "permission.log",
+    "sha256": "880234468D88E517CFECACDC140A1B94FBD13C740EE505EBCB86CA845B1B8EB1",
+    "bytes": 83
+  },
+  {
+    "node": "node20",
+    "artifact": "permission-vitest.json",
+    "sha256": "F6A87B5F936C7AC8EF20C4E70CC7C0F34F537776F422A21005350E5004D107F1",
+    "bytes": 19420
+  },
+  {
+    "node": "node20",
+    "artifact": "signal.log",
+    "sha256": "9EA5251802FEFEC227EBE3C9CC9F9C6119BA95FFD73B9ABF8D1F85E48C6A3DD6",
+    "bytes": 79
+  },
+  {
+    "node": "node20",
+    "artifact": "signal-vitest.json",
+    "sha256": "2418F35C3327DBD7DDD0A1EBC5BF771776B13A22CA6FA003800A9576B0ACE380",
+    "bytes": 19486
+  },
+  {
+    "node": "node20",
+    "artifact": "sqlite.log",
+    "sha256": "AA6696DA72F25695D1ECCD19FAA61868586846FCCF84EC8F4600140B241B8999",
+    "bytes": 79
+  },
+  {
+    "node": "node20",
+    "artifact": "sqlite-vitest.json",
+    "sha256": "7B37CF189DA6C05805D01D423CE9F7B410937AB38CD8F1C5B374B613AA06D6EB",
+    "bytes": 23517
+  },
+  {
+    "node": "node22",
+    "artifact": "permission.log",
+    "sha256": "C783718E9D422897DE3D3483002387DD99153ECDF1FCEDCE6AD818A0A597A483",
+    "bytes": 83
+  },
+  {
+    "node": "node22",
+    "artifact": "permission-vitest.json",
+    "sha256": "FDB275E344D847A2F856EFB16AE6EBA2DD98717E20863CC3ADDADB08F3F4AAE4",
+    "bytes": 19403
+  },
+  {
+    "node": "node22",
+    "artifact": "signal.log",
+    "sha256": "701C00F5461AC4DC78CAA589AA50D2562F5EB6DC7FEF83D8D77ABFFFA30CCA5B",
+    "bytes": 79
+  },
+  {
+    "node": "node22",
+    "artifact": "signal-vitest.json",
+    "sha256": "5F522BC80C2BF925F0040E56367384383FE515C245349EF2A9D9FC033193585D",
+    "bytes": 20444
+  },
+  {
+    "node": "node22",
+    "artifact": "sqlite.log",
+    "sha256": "A4424BE7E272ECBBC76BD7AC553FD3392FC3FF510EBBCF8D8E8DBCBDB16F2AFE",
+    "bytes": 79
+  },
+  {
+    "node": "node22",
+    "artifact": "sqlite-vitest.json",
+    "sha256": "65DE1A9491F746863B67BAE111C0C13B1ABA73A1EE92956B2F5FE035D19B335B",
+    "bytes": 22852
+  }
+]

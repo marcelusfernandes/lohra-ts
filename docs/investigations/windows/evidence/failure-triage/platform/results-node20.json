@@ -1,0 +1,99 @@
+{
+  "label": "node20",
+  "node": "v20.20.2",
+  "cloneSha": "4850b36079620f30f0d51621219f0e5fb4e646d2",
+  "scenarios": [
+    {
+      "scenario": "permission",
+      "exitCode": 0,
+      "result": {
+        "scenario": "permission",
+        "node": "v20.20.2",
+        "platform": "win32",
+        "modeAfterCreate": 438,
+        "readOnlyAttributeAfterCreate": false,
+        "accessRuleCountAfterCreate": 4,
+        "accessRulesProtected": false,
+        "readAllowed": true,
+        "allowedWrite": true,
+        "modeAfterReadOnly": 292,
+        "readOnlyAttributeAfterReadOnly": true,
+        "descriptorUnchanged": true,
+        "accessRuleCountAfterReadOnly": 4,
+        "deniedWrite": {
+          "name": "Error",
+          "code": "EPERM",
+          "syscall": "open"
+        },
+        "contentsAfterDeniedWrite": "allowed",
+        "fileBasename": "dummy.txt"
+      }
+    },
+    {
+      "scenario": "signal-int",
+      "exitCode": 0,
+      "result": {
+        "scenario": "signal-int",
+        "node": "v20.20.2",
+        "platform": "win32",
+        "requestedSignal": "SIGINT",
+        "childPidRecorded": true,
+        "ready": true,
+        "delivered": true,
+        "forced": false,
+        "close": {
+          "code": null,
+          "signal": "SIGINT"
+        },
+        "handlerMarker": null,
+        "childStdoutMarkers": ["READY"],
+        "childStderrPresent": false
+      }
+    },
+    {
+      "scenario": "signal-term",
+      "exitCode": 0,
+      "result": {
+        "scenario": "signal-term",
+        "node": "v20.20.2",
+        "platform": "win32",
+        "requestedSignal": "SIGTERM",
+        "childPidRecorded": true,
+        "ready": true,
+        "delivered": true,
+        "forced": false,
+        "close": {
+          "code": null,
+          "signal": "SIGTERM"
+        },
+        "handlerMarker": null,
+        "childStdoutMarkers": ["READY"],
+        "childStderrPresent": false
+      }
+    },
+    {
+      "scenario": "sqlite",
+      "exitCode": 0,
+      "result": {
+        "scenario": "sqlite",
+        "node": "v20.20.2",
+        "platform": "win32",
+        "addonLoaded": true,
+        "whileOpen": {
+          "removed": false,
+          "error": {
+            "name": "Error",
+            "code": "EBUSY",
+            "syscall": "unlink"
+          }
+        },
+        "existsAfterOpenRemoval": true,
+        "afterClose": {
+          "removed": true,
+          "error": null
+        },
+        "remainingFiles": []
+      }
+    }
+  ]
+}

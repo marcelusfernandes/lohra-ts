@@ -1,0 +1,40 @@
+{
+  "label": "node20",
+  "node": "v20.20.2",
+  "cloneSha": "4850b36079620f30f0d51621219f0e5fb4e646d2",
+  "groups": [
+    {
+      "group": "permission",
+      "files": ["tests/auth-core.test.ts", "tests/media-persistence.test.ts"],
+      "exitCode": 1,
+      "counts": {
+        "total": 46,
+        "passed": 39,
+        "failed": 7,
+        "pending": 0
+      }
+    },
+    {
+      "group": "signal",
+      "files": ["tests/mutations-all.test.ts", "tests/cli-serve-process.test.ts"],
+      "exitCode": 1,
+      "counts": {
+        "total": 44,
+        "passed": 36,
+        "failed": 8,
+        "pending": 0
+      }
+    },
+    {
+      "group": "sqlite",
+      "files": ["tests/gateway/session-service.test.ts"],
+      "exitCode": 1,
+      "counts": {
+        "total": 22,
+        "passed": 0,
+        "failed": 22,
+        "pending": 0
+      }
+    }
+  ]
+}
