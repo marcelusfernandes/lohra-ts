@@ -228,9 +228,23 @@ describe("assertNoNativeCompileNeeded", () => {
 });
 
 describe("consumer PTY", () => {
-  it("carrega o addon instalado e cria um PTY real", async () => {
-    await expect(assertConsumerPtyWorks(process.cwd())).resolves.toBeUndefined();
+  it("carrega o addon instalado e cria um PTY real", () => {
+    expect(() => {
+      assertConsumerPtyWorks(process.cwd());
+    }).not.toThrow();
   }, 20_000);
+
+  it("falha de modo explícito quando o addon não pode ser carregado", () => {
+    const root = mkdtempSync(join(tmpdir(), "lohra-pack-pty-missing-"));
+    try {
+      writeFileSync(join(root, "package.json"), "{}");
+      expect(() => {
+        assertConsumerPtyWorks(root);
+      }).toThrow(/PACK_NATIVE_ADDON_LOAD_FAILED:node-pty/u);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 // Issue #549: `node-pty@1.1.0` (o pin anterior) só publica prebuilds

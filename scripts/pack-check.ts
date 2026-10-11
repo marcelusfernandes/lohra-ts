@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -84,43 +83,58 @@ export function assertNoNativeCompileNeeded(options: {
   }
 }
 
-export async function assertConsumerPtyWorks(consumerRoot: string): Promise<void> {
-  let pty: typeof import("node-pty");
-  try {
-    pty = createRequire(join(consumerRoot, "package.json"))(
-      "node-pty",
-    ) as typeof import("node-pty");
-  } catch (error) {
-    throw new Error("PACK_NATIVE_ADDON_LOAD_FAILED:node-pty", { cause: error });
-  }
-  const marker = "PACK_PTY_READY";
-  let terminal: ReturnType<typeof pty.spawn>;
-  try {
-    terminal = pty.spawn(process.execPath, ["-e", `process.stdout.write('${marker}')`], {
-      name: "xterm-256color",
-      cols: 80,
-      rows: 24,
-      cwd: consumerRoot,
-      env: { ...process.env, TERM: "xterm-256color" },
-    });
-  } catch (error) {
-    throw new Error("PACK_PTY_SPAWN_FAILED", { cause: error });
-  }
-  await new Promise<void>((resolvePty, rejectPty) => {
-    let output = "";
+/** Keep the native DLL in a child process: Windows cannot unlink a loaded .node during cleanup. */
+export function assertConsumerPtyWorks(consumerRoot: string): void {
+  const probe = String.raw`
+    const { createRequire } = require('node:module');
+    const { writeSync } = require('node:fs');
+    const { join } = require('node:path');
+    let pty;
+    try {
+      pty = createRequire(join(process.cwd(), 'package.json'))('node-pty');
+    } catch {
+      writeSync(2, 'PACK_NATIVE_ADDON_LOAD_FAILED:node-pty');
+      process.exit(1);
+    }
+    const marker = 'PACK_PTY_READY';
+    let terminal;
+    try {
+      terminal = pty.spawn(process.execPath, ['-e', "process.stdout.write('PACK_PTY_READY')"], {
+        name: 'xterm-256color', cols: 80, rows: 24,
+        cwd: process.cwd(), env: { ...process.env, TERM: 'xterm-256color' }
+      });
+    } catch {
+      writeSync(2, 'PACK_PTY_SPAWN_FAILED');
+      process.exit(1);
+    }
+    let output = '';
     const timeout = setTimeout(() => {
       terminal.kill();
-      rejectPty(new Error("PACK_PTY_TIMEOUT"));
-    }, 15_000);
-    terminal.onData((chunk) => {
-      output = (output + chunk).slice(-4096);
-    });
+      writeSync(2, 'PACK_PTY_TIMEOUT');
+      process.exit(1);
+    }, 15000);
+    terminal.onData((chunk) => { output = (output + chunk).slice(-4096); });
     terminal.onExit(({ exitCode }) => {
       clearTimeout(timeout);
-      if (exitCode === 0 && output.includes(marker)) resolvePty();
-      else rejectPty(new Error(`PACK_PTY_FAILED:${String(exitCode)}:${output}`));
+      if (exitCode === 0 && output.includes(marker)) process.exit(0);
+      writeSync(2, 'PACK_PTY_FAILED:' + String(exitCode));
+      process.exit(1);
     });
+  `;
+  const result = spawnSync(process.execPath, ["-e", probe], {
+    cwd: consumerRoot,
+    encoding: "utf8",
+    timeout: 20_000,
+    maxBuffer: 64 * 1024,
   });
+  if (result.error !== undefined) {
+    throw new Error(`PACK_PTY_PROBE_FAILED:${result.error.message}`, { cause: result.error });
+  }
+  if (result.status !== 0) {
+    throw new Error(
+      `PACK_PTY_PROBE_FAILED:${String(result.status ?? result.signal)}:${result.stderr}`,
+    );
+  }
 }
 
 function command(
@@ -364,7 +378,7 @@ async function main(): Promise<void> {
       platform: process.platform,
       arch: process.arch,
     });
-    await assertConsumerPtyWorks(installDirectory);
+    assertConsumerPtyWorks(installDirectory);
 
     const projected = join(root, "requests.jsonl");
     const raw = join(root, "requests-raw.jsonl");
