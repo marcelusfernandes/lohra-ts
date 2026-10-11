@@ -18,10 +18,19 @@ import { jsonResponse } from "../../src/gateway/http/response.js";
 
 const roots: string[] = [];
 const connections: StateConnection[] = [];
+const clients = new Set<WebSocket>();
 let activeServer: GatewayHttpServer | null = null;
 
 afterEach(async () => {
   const failures: unknown[] = [];
+  for (const client of clients) {
+    try {
+      client.terminate();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  clients.clear();
   if (activeServer !== null) {
     const server = activeServer;
     activeServer = null;
@@ -53,6 +62,15 @@ afterEach(async () => {
 });
 
 const TOKEN = "the-expected-ws-token";
+
+function connectClient(url: string): WebSocket {
+  const client = new WebSocket(url);
+  clients.add(client);
+  client.once("close", () => {
+    clients.delete(client);
+  });
+  return client;
+}
 
 async function startServer(authRequired = true): Promise<GatewayHttpServer> {
   const root = mkdtempSync(join(tmpdir(), "lohra-gateway-ws-"));
@@ -151,7 +169,7 @@ function waitClose(ws: WebSocket): Promise<{ code: number; reason: string }> {
 describe("gateway WS: handshake always completes to 101 (assertion 19)", () => {
   it("valid token: connects, then receives gateway.ready", async () => {
     const server = await startServer();
-    const ws = new WebSocket(`ws://127.0.0.1:${String(server.port)}/api/ws?token=${TOKEN}`);
+    const ws = connectClient(`ws://127.0.0.1:${String(server.port)}/api/ws?token=${TOKEN}`);
     const ready = JSON.parse(await nextMessage(ws)) as {
       params: { type: string; session_id: null; payload: unknown };
     };
@@ -162,7 +180,7 @@ describe("gateway WS: handshake always completes to 101 (assertion 19)", () => {
 
   it("missing/invalid token: upgrade still completes, then closes with 4401 empty reason", async () => {
     const server = await startServer();
-    const ws = new WebSocket(`ws://127.0.0.1:${String(server.port)}/api/ws`);
+    const ws = connectClient(`ws://127.0.0.1:${String(server.port)}/api/ws`);
     let opened = false;
     ws.once("open", () => {
       opened = true;
@@ -177,7 +195,7 @@ describe("gateway WS: handshake always completes to 101 (assertion 19)", () => {
 describe("gateway WS: query multiplicity (assertion 20)", () => {
   it("good then bad -> last wins -> rejected", async () => {
     const server = await startServer();
-    const ws = new WebSocket(
+    const ws = connectClient(
       `ws://127.0.0.1:${String(server.port)}/api/ws?token=${TOKEN}&token=wrong`,
     );
     const closed = await waitClose(ws);
@@ -186,7 +204,7 @@ describe("gateway WS: query multiplicity (assertion 20)", () => {
 
   it("bad then good -> last wins -> accepted", async () => {
     const server = await startServer();
-    const ws = new WebSocket(
+    const ws = connectClient(
       `ws://127.0.0.1:${String(server.port)}/api/ws?token=wrong&token=${TOKEN}`,
     );
     const message = await nextMessage(ws);
@@ -220,7 +238,7 @@ describe("gateway WS: path sweep, forbidden at HTTP level (assertion 23)", () =>
 describe("gateway WS: --insecure mode opens without a token", () => {
   it("no token in the query, WS still opens and emits gateway.ready", async () => {
     const server = await startServer(false);
-    const ws = new WebSocket(`ws://127.0.0.1:${String(server.port)}/api/ws`);
+    const ws = connectClient(`ws://127.0.0.1:${String(server.port)}/api/ws`);
     const message = await nextMessage(ws);
     expect(parseEventFrame(message).params.type).toBe("gateway.ready");
     ws.close();
@@ -230,7 +248,7 @@ describe("gateway WS: --insecure mode opens without a token", () => {
 describe("gateway WS: binary frame kills the socket with no close code (assertion 24)", () => {
   it("client observes an abrupt close, no close frame semantics, other behavior unaffected", async () => {
     const server = await startServer();
-    const ws = new WebSocket(`ws://127.0.0.1:${String(server.port)}/api/ws?token=${TOKEN}`);
+    const ws = connectClient(`ws://127.0.0.1:${String(server.port)}/api/ws?token=${TOKEN}`);
     await nextMessage(ws); // gateway.ready
     const closed = waitClose(ws);
     ws.send(Buffer.from([1, 2, 3]));
@@ -244,7 +262,7 @@ describe("gateway WS: binary frame kills the socket with no close code (assertio
 describe("gateway WS: RPC round trip over a real socket (assertions 27-32)", () => {
   it("session.create -> {session_id} + a session.info event, then session.list/history/interrupt", async () => {
     const server = await startServer();
-    const ws = new WebSocket(`ws://127.0.0.1:${String(server.port)}/api/ws?token=${TOKEN}`);
+    const ws = connectClient(`ws://127.0.0.1:${String(server.port)}/api/ws?token=${TOKEN}`);
     await nextMessage(ws); // gateway.ready
 
     ws.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "session.create", params: {} }));
@@ -289,7 +307,7 @@ describe("gateway WS: RPC round trip over a real socket (assertions 27-32)", () 
 
   it("unknown method -> -32601", async () => {
     const server = await startServer();
-    const ws = new WebSocket(`ws://127.0.0.1:${String(server.port)}/api/ws?token=${TOKEN}`);
+    const ws = connectClient(`ws://127.0.0.1:${String(server.port)}/api/ws?token=${TOKEN}`);
     await nextMessage(ws);
     ws.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "session.steer", params: {} }));
     const response = JSON.parse(await nextMessage(ws)) as {
@@ -301,7 +319,7 @@ describe("gateway WS: RPC round trip over a real socket (assertions 27-32)", () 
 
   it("malformed frame -> -32700 with id:null", async () => {
     const server = await startServer();
-    const ws = new WebSocket(`ws://127.0.0.1:${String(server.port)}/api/ws?token=${TOKEN}`);
+    const ws = connectClient(`ws://127.0.0.1:${String(server.port)}/api/ws?token=${TOKEN}`);
     await nextMessage(ws);
     ws.send("{nope");
     const response = JSON.parse(await nextMessage(ws)) as { id: null; error: { code: number } };
