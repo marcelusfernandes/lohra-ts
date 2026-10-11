@@ -57,6 +57,20 @@ describe("pack npm command", () => {
       /PACK_COMMAND_FAILED:npm:1:[\s\S]*Missing script/u,
     );
   }, 40_000);
+
+  it("reports a failed spawn with its original cause", () => {
+    root = mkdtempSync(join(tmpdir(), "lohra pack npm "));
+    const missingCwd = join(root, "missing");
+    let failure: unknown;
+    try {
+      packNpmCommand(["pkg", "get", "name"], { cwd: missingCwd }, 15_000);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(/PACK_COMMAND_FAILED:npm:ENOENT:/u);
+    expect((failure as Error & { cause?: NodeJS.ErrnoException }).cause?.code).toBe("ENOENT");
+  });
 });
 
 describe("assertStructuralMatch", () => {
