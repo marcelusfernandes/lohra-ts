@@ -1,15 +1,15 @@
 import {
   chmodSync,
   copyFileSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   ProcessShellLaunchError,
   resolveProcessShell,
@@ -18,6 +18,17 @@ import {
 
 describe("shell das bancadas de processo", () => {
   let root = "";
+  let executableRoot = "";
+  let executableCopy = "";
+  beforeAll(() => {
+    executableRoot = mkdtempSync(path.join(tmpdir(), "process-shell-executable-"));
+    executableCopy = path.join(executableRoot, path.basename(process.execPath));
+    copyFileSync(process.execPath, executableCopy);
+    if (process.platform !== "win32") chmodSync(executableCopy, 0o755);
+  });
+  afterAll(() => {
+    if (executableRoot) rmSync(executableRoot, { recursive: true, force: true });
+  });
   beforeEach(() => {
     root = mkdtempSync(path.join(tmpdir(), "process-shell-"));
   });
@@ -71,8 +82,7 @@ describe("shell das bancadas de processo", () => {
     const bin = path.join(root, "bin com espaços");
     mkdirSync(bin);
     const nodeCopy = path.join(bin, path.basename(process.execPath));
-    copyFileSync(process.execPath, nodeCopy);
-    if (process.platform !== "win32") chmodSync(nodeCopy, 0o755);
+    linkSync(executableCopy, nodeCopy);
     const result = spawnProcessShell(
       ["-e", "process.stdout.write('espaços')"],
       { encoding: "utf8" },
@@ -91,8 +101,13 @@ describe("shell das bancadas de processo", () => {
     const preferred = path.join(preferredDir, executable);
     const competing = path.join(shellDir, executable);
     const shell = path.join(shellDir, path.basename(process.execPath));
-    for (const target of [preferred, competing, shell]) {
-      symlinkSync(process.execPath, target, "file");
+    linkSync(executableCopy, shell);
+    if (process.platform === "win32") {
+      linkSync(executableCopy, preferred);
+      linkSync(executableCopy, competing);
+    } else {
+      writeFileSync(preferred, "#!/bin/sh\nprintf preferred\n", { mode: 0o755 });
+      writeFileSync(competing, "#!/bin/sh\nprintf competing\n", { mode: 0o755 });
     }
 
     const env = {
@@ -108,7 +123,10 @@ describe("shell das bancadas de processo", () => {
       shell,
     );
     expect(result.status).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual({ status: 0, stdout: preferred });
+    expect(JSON.parse(result.stdout)).toEqual({
+      status: 0,
+      stdout: process.platform === "win32" ? preferred : "preferred",
+    });
   });
 
   it("shell ausente preserva ENOENT como causa explícita", () => {

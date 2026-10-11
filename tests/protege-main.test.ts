@@ -15,12 +15,13 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  linkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { spawnProcessShell } from "./helpers/process-shell.js";
 
 const HOOK = fileURLToPath(new URL("../.claude/hooks/protege-main.sh", import.meta.url));
@@ -77,6 +78,8 @@ function rodar(root: string, command: string, env: Record<string, string>): Hook
 // chamada real voltar a acontecer, o marcador não existe e o teste falha
 // alto, em vez de virar flake silencioso de novo.
 const GH_SHIM = "#!/bin/sh\nprintf 'invoked\\n' >> \"$GH_MARKER\"\nexit 1\n";
+let windowsGhRoot = "";
+let windowsGhExecutable = "";
 
 function stubGh(root: string): {
   readonly shimDir: string;
@@ -90,9 +93,10 @@ function stubGh(root: string): {
   if (process.platform !== "win32") return { shimDir, marker, extraEnv: {} };
 
   // O Node interno do hook usa spawnSync("gh") sem shell; Windows só lança
-  // executáveis nativos nesse caminho. A cópia temporária de Node registra a
+  // executáveis nativos nesse caminho. Um hardlink temporário para a cópia
+  // de Node preparada antes dos testes registra a
   // chamada sem tocar o gh real; o preload é inerte no Node que roda o hook.
-  copyFileSync(process.execPath, path.join(shimDir, "gh.exe"));
+  linkSync(windowsGhExecutable, path.join(shimDir, "gh.exe"));
   const bootstrap = path.join(shimDir, "bootstrap.cjs");
   writeFileSync(
     bootstrap,
@@ -135,6 +139,15 @@ function bench(extra: Record<string, string> = {}): Record<string, string> {
 
 describe("protege-main.sh", () => {
   let root = "";
+  beforeAll(() => {
+    if (process.platform !== "win32") return;
+    windowsGhRoot = mkdtempSync(path.join(tmpdir(), "gh-executable-"));
+    windowsGhExecutable = path.join(windowsGhRoot, "gh.exe");
+    copyFileSync(process.execPath, windowsGhExecutable);
+  });
+  afterAll(() => {
+    if (windowsGhRoot) rmSync(windowsGhRoot, { recursive: true, force: true });
+  });
   beforeEach(() => {
     root = mkdtempSync(path.join(tmpdir(), "protege-main-"));
   });
