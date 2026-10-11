@@ -46,7 +46,19 @@ function escrever(cwd: string, filePath: string, toolName = "Write"): HookRun {
 }
 
 function expectDenied(r: HookRun): void {
-  expect(r.status, JSON.stringify(r)).toBe(2);
+  const msysFlag = (name: string): "unset" | "wildcard" | "set-other" => {
+    const value = process.env[name];
+    return value === undefined || value === "" ? "unset" : value === "*" ? "wildcard" : "set-other";
+  };
+  expect(
+    r.status,
+    JSON.stringify({
+      ...r,
+      msysNoPathconv: msysFlag("MSYS_NO_PATHCONV"),
+      msysArgConvExcl: msysFlag("MSYS2_ARG_CONV_EXCL"),
+      msysEnvConvExcl: msysFlag("MSYS2_ENV_CONV_EXCL"),
+    }),
+  ).toBe(2);
 }
 
 describe("protege-escrita.sh", () => {
@@ -132,5 +144,40 @@ describe("protege-escrita.sh", () => {
 
   it("ferramenta que não escreve (Read): sai 0", () => {
     expect(escrever(root, path.join(root, "docs", "reference", "old.md"), "Read").status).toBe(0);
+  });
+
+  it("diagnostica Git e caminho canônico no mesmo transporte do hook", () => {
+    const probe = path.join(root, "write-hook-root-probe.sh");
+    writeFileSync(
+      probe,
+      [
+        "#!/bin/sh",
+        "payload=$(cat)",
+        'PE_PAYLOAD="$payload" node -e \'',
+        'const fs=require("fs"),path=require("path"),{spawnSync}=require("child_process");',
+        'const j=JSON.parse(process.env.PE_PAYLOAD||"");',
+        "const dir=fs.realpathSync(path.dirname(j.tool_input.file_path));",
+        'const g=spawnSync("git",["rev-parse","--show-toplevel"],{cwd:dir,encoding:"utf8"});',
+        "const top=g.status===0?fs.realpathSync(g.stdout.trim()):null;",
+        'const rel=top?path.relative(top,path.join(dir,path.basename(j.tool_input.file_path))).split(path.sep).join("/"):null;',
+        'process.stdout.write(JSON.stringify({tool:j.tool_name,gitStatus:g.status,gitError:g.error?.code??null,settings:top?fs.existsSync(path.join(top,".claude","settings.json")):false,relative:rel}));',
+        "'",
+        "",
+      ].join("\n"),
+    );
+    const input = JSON.stringify({
+      tool_name: "Write",
+      tool_input: { file_path: path.join(root, "docs", "reference", "novo.md") },
+      cwd: root,
+    });
+    const result = spawnProcessShell([probe], { input, encoding: "utf8" });
+    expect(result.status, JSON.stringify({ stdout: result.stdout, stderr: result.stderr })).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      tool: "Write",
+      gitStatus: 0,
+      gitError: null,
+      settings: true,
+      relative: "docs/reference/novo.md",
+    });
   });
 });

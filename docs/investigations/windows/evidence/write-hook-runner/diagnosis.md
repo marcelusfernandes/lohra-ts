@@ -23,12 +23,18 @@ independente de fail-open; ainda **não** há evidência de que `cat` estivesse
 ausente no runner, cujo teste `process-shell` passou. Nenhuma política foi
 alterada nesta etapa.
 
-O próximo sinal discriminante é um teste de script que mede o roundtrip
-JSON sob `spawnProcessShell`, mais stdout/stderr/status/shell da chamada
-real quando uma recusa falhar. Não captura ambiente completo nem payload
-sensível; os inputs são caminhos dummy em diretórios temporários próprios.
+O próximo sinal discriminante usa dois scripts temporários: um mede o
+roundtrip JSON sob `spawnProcessShell`; o outro usa o mesmo transporte para
+medir `git rev-parse`, a existência de `.claude/settings.json` e a rota
+canônica `docs/reference/novo.md`. As falhas de recusa também exibem
+stdout/stderr/status/shell da chamada real. Não captura ambiente completo
+nem payload sensível; os inputs são caminhos dummy em diretórios próprios.
+As flags `MSYS_NO_PATHCONV`, `MSYS2_ARG_CONV_EXCL` e
+`MSYS2_ENV_CONV_EXCL` são relatadas apenas como ausentes, `*` ou outro valor
+presente; as três estavam ausentes no processo local da medição. O shell
+resolvido aparece por caminho para distinguir Git Bash de outro pacote.
 
-No primeiro candidato diagnóstico, `npm run typecheck` e o foco
+No candidato diagnóstico, `npm run typecheck` e o foco
 `tests/protege-escrita.test.ts` + `tests/process-shell.test.ts` saíram 0 em
-Node 20/22 locais (18/18 testes). Este resultado é local; não reclassifica
+Node 20/22 locais (19/19 testes). Este resultado é local; não reclassifica
 as sete falhas observadas nos dois jobs do CI.
