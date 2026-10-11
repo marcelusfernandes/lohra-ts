@@ -64,4 +64,13 @@ HEAD `71d34e6`, teve exit 0 com `SKIP` explícito: diff só em `tests/**` e
 nativa e o commit `test(red):` são evidências independentes. Logs completos
 e `results.tsv` em `F:/lohra-m25-811/linux-evidence/`.
 
+A suíte Linux anterior de #802 tinha 4389 testes passados (mais os mesmos
+quatro skips). A comparação por arquivo dos logs mostra somente
+`tests/prova-declaracoes.test.ts` diferente: 609 testes antes, 613 agora.
+Esse teste gera duas assertions por declaração de prova; desde #802 entraram
+exatamente os slugs `windows-session-fixture-cleanup` (#806) e
+`windows-leaf-read-fixture-cleanup` (#811), somando quatro testes. Os demais
+335 arquivos mantiveram sua contagem. O clone Linux estava limpo no SHA
+`71d34e6`, sem arquivos de sonda sob `tests/`.
+
 CI e revisão independente: pendentes neste checkpoint.
