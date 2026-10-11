@@ -463,11 +463,15 @@ describe("realExecute", () => {
         throw new AggregateError(
           [assertionFault, cleanupFault],
           "TIMEOUT_FIXTURE_AND_ASSERTION_FAILED",
+          { cause: cleanupFault },
         );
       }
       throw cleanupFault;
     }
-    if (assertionFault !== undefined) throw assertionFault;
+    if (assertionFault !== undefined) {
+      if (assertionFault instanceof Error) throw assertionFault;
+      throw new Error("TIMEOUT_ASSERTION_FAILED", { cause: assertionFault });
+    }
   }, 10_000);
 
   it("fixture de timeout encerra o próprio filho após 5 s sem STOP", () => {
