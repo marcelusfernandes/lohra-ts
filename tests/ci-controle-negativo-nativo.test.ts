@@ -201,6 +201,15 @@ describe("controle negativo nativo opt-in", () => {
     );
   });
 
+  it("ignora test(red) alheio e mantém o único candidato causal", () => {
+    const repo = fixture();
+    writeFileSync(join(repo.root, "notes.txt"), "red alheio\n");
+    git(repo.root, "add", "notes.txt");
+    git(repo.root, "commit", "-qm", "test(red): outro assunto");
+    const head = git(repo.root, "rev-parse", "HEAD");
+    expect(selectNativeRed(parseNativeArgs(argv({ ...repo, head })))).toBe(repo.red);
+  });
+
   it.runIf(process.platform === "win32")(
     "recusa C# inválido como setup, sem classificá-lo como assertion-red",
     () => {

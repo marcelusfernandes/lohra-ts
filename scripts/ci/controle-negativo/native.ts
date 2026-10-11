@@ -116,12 +116,22 @@ export function selectNativeRed(args: NativeArgs): string {
   const head = fullSha(args.root, args.head);
   if (base === head || !isAncestor(args.root, base, head)) throw new Error("NATIVE_ANCESTRY");
   const lines = checkedGit(args.root, ["log", "--format=%H%x01%s", `${base}..${head}`]);
+  const declared = declaredUnitsText(
+    checkedGit(args.root, ["show", `${head}:prova/${args.slug}.ts`]),
+  );
   const candidates = lines
     .split("\n")
     .filter(Boolean)
     .flatMap((line) => {
       const [sha, subject] = line.split("\x01");
       return sha && subject?.startsWith("test(red):") ? [sha] : [];
+    })
+    .filter((sha) => {
+      const changed = gitDiffNameStatus(args.root, `${sha}^`, sha).map((entry) => entry.arquivo);
+      return (
+        changed.some((path) => args.sources.includes(path) && !path.startsWith("tests/")) &&
+        changed.some((path) => declared.includes(path) || path === `prova/${args.slug}.ts`)
+      );
     });
   const red = args.red
     ? fullSha(args.root, args.red)
@@ -135,16 +145,6 @@ export function selectNativeRed(args: NativeArgs): string {
     !isAncestor(args.root, red, head)
   ) {
     throw new Error(`NATIVE_RED_SELECTION: ${String(candidates.length)} candidates`);
-  }
-  const changed = gitDiffNameStatus(args.root, `${red}^`, red).map((entry) => entry.arquivo);
-  const declared = declaredUnitsText(
-    checkedGit(args.root, ["show", `${head}:prova/${args.slug}.ts`]),
-  );
-  if (
-    !changed.some((path) => args.sources.includes(path) && !path.startsWith("tests/")) ||
-    !changed.some((path) => declared.includes(path) || path === `prova/${args.slug}.ts`)
-  ) {
-    throw new Error("NATIVE_RED_CONTENT: fonte e teste/prova exigidos");
   }
   for (const source of args.sources) {
     for (const sha of source.startsWith("tests/") ? [head] : [red, head]) {
