@@ -16,10 +16,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CronStore, CronStoreError, readJobs } from "../src/cron/store.js";
 
 const renameFailure = vi.hoisted(() => ({ active: false }));
+const accessFailure = vi.hoisted(() => ({ active: false, path: "" }));
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
   return {
     ...actual,
+    accessSync: (...args: Parameters<typeof actual.accessSync>) => {
+      if (accessFailure.active && args[0] === accessFailure.path)
+        throw Object.assign(new Error("synthetic access denied"), { code: "EACCES" });
+      actual.accessSync(...args);
+    },
     renameSync: (...args: Parameters<typeof actual.renameSync>) => {
       if (renameFailure.active)
         throw Object.assign(new Error("synthetic rename failed"), { code: "EIO" });
@@ -38,6 +44,8 @@ beforeEach(() => {
 
 afterEach(() => {
   renameFailure.active = false;
+  accessFailure.active = false;
+  accessFailure.path = "";
   rmSync(home, { recursive: true, force: true });
 });
 
@@ -55,7 +63,14 @@ function plant(kind: string): void {
   }
   if (kind === "unreadable") {
     writeFileSync(jobsPath, '{"jobs": []}');
-    chmodSync(jobsPath, 0o000);
+    if (process.platform === "win32") {
+      // chmod 000 does not deny reads on Windows. Inject EACCES narrowly at
+      // accessSync to test CronStore's fail-closed branch, not native ACLs.
+      accessFailure.active = true;
+      accessFailure.path = jobsPath;
+    } else {
+      chmodSync(jobsPath, 0o000);
+    }
     return;
   }
   writeFileSync(jobsPath, kind);
@@ -100,9 +115,20 @@ describe("readJobs — the 16-form fail-closed boundary (Emenda E2/E3)", () => {
     plant("unreadable");
     try {
       expect(() => readJobs(jobsPath)).toThrow(CronStoreError);
+      try {
+        readJobs(jobsPath);
+        expect.unreachable();
+      } catch (error) {
+        expect(error).toBeInstanceOf(CronStoreError);
+        expect((error as CronStoreError).safeCause).toBe("path is not readable");
+      }
     } finally {
-      chmodSync(jobsPath, 0o644);
+      accessFailure.active = false;
+      accessFailure.path = "";
+      if (process.platform !== "win32") chmodSync(jobsPath, 0o644);
     }
+    expect(readFileSync(jobsPath, "utf8")).toBe('{"jobs": []}');
+    expect(readJobs(jobsPath)).toEqual([]);
   });
 
   it("nan_literal: NOT fail-closed — well-formed entry, semantically unreachable value (Emenda E3)", () => {
