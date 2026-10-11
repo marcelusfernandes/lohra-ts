@@ -76,7 +76,9 @@ it("recusa C# omitido sob ambas as raízes gerenciadas", () => {
   for (const path of [source, driver]) {
     const { root, sha } = complete({
       [manifest]: JSON.stringify({
-        routes: { core: { ...route, sources: [path === source ? driver : source] } },
+        routes: {
+          "windows-npm-job-core": { ...route, sources: [path === source ? driver : source] },
+        },
       }),
     });
     expect(() => validateNativeRoutes(root, sha)).toThrow(/UNDECLARED.*\.cs/);
@@ -90,7 +92,7 @@ it("recusa fontes ausentes, duplicadas e fora das raízes", () => {
     [source, driver, "other.cs"],
   ]) {
     const { root, sha } = complete({
-      [manifest]: JSON.stringify({ routes: { core: { ...route, sources } } }),
+      [manifest]: JSON.stringify({ routes: { "windows-npm-job-core": { ...route, sources } } }),
     });
     expect(() => validateNativeRoutes(root, sha)).toThrow();
   }
@@ -103,13 +105,20 @@ it("recusa traversal, path absoluto e duplicata entre rotas", () => {
   ]) {
     const { root, sha } = complete({
       [manifest]: JSON.stringify({
-        routes: { core: { ...route, sources: [source, driver, bad] } },
+        routes: { "windows-npm-job-core": { ...route, sources: [source, driver, bad] } },
       }),
     });
     expect(() => validateNativeRoutes(root, sha)).toThrow(/PATH/);
   }
   const { root, sha } = complete({
-    [manifest]: JSON.stringify({ routes: { a: route, b: route } }),
+    [manifest]: JSON.stringify({
+      routes: {
+        "windows-npm-job-core": route,
+        other: { proof: "prova/other.ts", units: ["tests/other.test.ts"], sources: [source] },
+      },
+    }),
+    "prova/other.ts": 'export default { unit: ["tests/other.test.ts"] };',
+    "tests/other.test.ts": "// other",
   });
   expect(() => validateNativeRoutes(root, sha)).toThrow(/DUPLICATE/);
 });
@@ -121,7 +130,9 @@ it("recusa symlink Git mesmo quando o destino existe", () => {
   put(
     repo.root,
     manifest,
-    JSON.stringify({ routes: { core: { ...route, sources: [...route.sources, link] } } }),
+    JSON.stringify({
+      routes: { "windows-npm-job-core": { ...route, sources: [...route.sources, link] } },
+    }),
   );
   git(repo.root, "add", ".");
   git(repo.root, "commit", "-qm", "link");
@@ -145,7 +156,7 @@ it("iguala units à declaração literal da prova e recusa prova dinâmica ou in
 it("recusa manifesto, proof e unit pendurados ou não regulares", () => {
   for (const path of [proof, unit]) {
     const files = {
-      [manifest]: JSON.stringify({ routes: { core: route } }),
+      [manifest]: JSON.stringify({ routes: { "windows-npm-job-core": route } }),
       [source]: "// source",
       [driver]: "// driver",
       [proof]: `export default { unit: ["${unit}"] };`,
