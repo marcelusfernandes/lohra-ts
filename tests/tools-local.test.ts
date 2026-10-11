@@ -1,5 +1,6 @@
 import {
   chmodSync,
+  existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -204,8 +205,13 @@ describe("terminal tool", () => {
     ['{"command":"sleep 4","timeout":true}', "trues"],
     ['{"command":"sleep 4","timeout":0}', "0s"],
   ])("renders Python timeout semantics for %s", async (raw, rendered) => {
+    const started = rendered === "2.5s" ? join(root(), "terminal-child-started") : null;
     const args = parseToolArguments(raw);
     const result = await terminalTool(args, { approvalManager: new ApprovalManager() });
+    if (started !== null) {
+      // A fixture deve ter iniciado; um shell que rejeita `sleep` não prova timeout.
+      expect(existsSync(started)).toBe(true);
+    }
     expect(result).toContain(`command timed out after ${rendered}`);
   });
 
