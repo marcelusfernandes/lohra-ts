@@ -40,7 +40,7 @@ import { describe, expect, it } from "vitest";
 // repositório (nenhuma delas usa esse indireto).
 
 const root = resolve(import.meta.dirname, "..");
-const SELF = relative(root, resolve(import.meta.dirname, "sem-python.test.ts"));
+const SELF = relativePath(resolve(import.meta.dirname, "sem-python.test.ts"));
 
 function listTsFiles(dir: string): string[] {
   const base = resolve(root, dir);

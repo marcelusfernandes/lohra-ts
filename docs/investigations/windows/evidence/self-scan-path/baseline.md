@@ -25,3 +25,31 @@ representação usada em `SELF`. Antes da correção, a asserção recebeu
 `tests\sem-python.test.ts` em vez de `tests/sem-python.test.ts`; focal exit 1,
 3 falhas/4 testes em cada ABI. Logs em `F:/lohra-m25-825/logs-node20/red.log`
 e `F:/lohra-m25-825/logs-node22/red.log`.
+
+## Correção e controle negativo
+
+`SELF` agora usa `relativePath(...)`, a mesma função usada pelos caminhos
+varridos. Os três casos existentes, `listTsFiles("src")`, `listTsFiles("tests")`,
+detectores e `ALLOWED_PYTHON3_LITERAL_FILES` ficaram intactos. A asserção
+adicional verifica a equivalência de caminhos; o focal passou 4/4 em ambas as
+ABIs. Build, typecheck, lint e format:check saíram 0 em cada clone. A prova
+`npm run prova -- windows-self-scan-path` retornou, em ambos:
+
+```json
+{ "ok": true, "total": 4, "falhas": [] }
+```
+
+Para o controle negativo, cada clone criou **somente**
+`tests/sem-python-negative-825.ts` com o texto
+`export const blockedIdentifier = 'runPythonProcess';`. O comando focal acima
+falhou com exit 1 e um único hit
+`tests/sem-python-negative-825.ts: runPythonProcess`; os outros três casos
+passaram. A fixture própria foi removida por caminho literal em `finally`.
+O mesmo comando repetido saiu 0 com 4/4, sem resíduo da fixture. Nenhum
+interpretador Python foi invocado. Os logs locais estão em
+`F:/lohra-m25-825/logs-node{20,22}/{negative,restored,proof}.log`.
+
+Esta sonda altera arquivos apenas nos clones descartáveis da respectiva ABI;
+não há skip, nova entrada na allowlist ou exclusão de outro arquivo no teste
+versionado. O controle negativo mecânico do CI pode classificar a PR como
+test-only e registrar SKIP; esta injeção externa é o teste de detecção real.
