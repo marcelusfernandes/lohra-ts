@@ -489,39 +489,64 @@ export function runNative(argv: readonly string[], hooks: NativeRunHooks = {}): 
 
 /** Positivo explícito: compila apenas HEAD; nunca fabrica um red C# de produção. */
 export function runNativePositive(argv: readonly string[], hooks: NativeRunHooks = {}): number {
-  const args = parseNativeArgs(argv);
-  if (!argv.includes("--native-positive") || args.red !== undefined)
-    throw new Error("NATIVE_POSITIVE_ARGUMENTS");
-  if (process.platform !== "win32") throw new Error("NATIVE_PLATFORM_WINDOWS_REQUIRED");
-  const baseSha = fullSha(args.root, args.base);
-  const headSha = fullSha(args.root, args.head);
-  if (baseSha === headSha || !isAncestor(args.root, baseSha, headSha))
-    throw new Error("NATIVE_ANCESTRY");
-  for (const source of args.sources)
-    checkedGit(args.root, ["cat-file", "-e", `${headSha}:${source}`]);
-  checkedGit(args.root, ["cat-file", "-e", `${headSha}:prova/${args.slug}.ts`]);
-  let total = 0;
-  withNativeCheckouts(
-    args,
-    [{ name: "head", sha: headSha }],
-    "lohra-native-positive-",
-    hooks,
-    (paths, temp) => {
-      const head = paths.get("head");
-      if (head === undefined) throw new Error("NATIVE_WORKTREE_INVARIANT");
-      linkNodeModules(args.root, head);
-      const artifact = compileAt(head, args, join(temp, "head-bin"));
-      process.stdout.write(
-        `controle-negativo: POSITIVE-ONLY fase=compile-verify HEAD=${headSha} manifest=${artifact.manifestSha256}\n`,
-      );
-      total = proofAt(head, args, artifact, false, hooks.runProof ?? rodarProvaNaBase, true);
-      process.stdout.write(
-        `controle-negativo: POSITIVE-ONLY fase=prova HEAD=${headSha} testes=${String(total)}\n`,
-      );
-    },
-  );
-  process.stdout.write(
-    `controle-negativo: POSITIVE-ONLY HEAD=${headSha} slug=${args.slug} fontes=${args.sources.join(",")} testes=${String(total)} — PASS\n`,
-  );
-  return 0;
+  let args: NativeArgs | undefined;
+  let headSha: string | undefined;
+  let phase = "argumentos";
+  try {
+    const parsed = parseNativeArgs(argv);
+    args = parsed;
+    if (!argv.includes("--native-positive") || parsed.red !== undefined)
+      throw new Error("NATIVE_POSITIVE_ARGUMENTS");
+    phase = "plataforma";
+    if (process.platform !== "win32") throw new Error("NATIVE_PLATFORM_WINDOWS_REQUIRED");
+    phase = "revisoes";
+    const baseSha = fullSha(parsed.root, parsed.base);
+    const resolvedHeadSha = fullSha(parsed.root, parsed.head);
+    headSha = resolvedHeadSha;
+    if (baseSha === resolvedHeadSha || !isAncestor(parsed.root, baseSha, resolvedHeadSha))
+      throw new Error("NATIVE_ANCESTRY");
+    phase = "fontes";
+    for (const source of parsed.sources)
+      checkedGit(parsed.root, ["cat-file", "-e", `${resolvedHeadSha}:${source}`]);
+    checkedGit(parsed.root, ["cat-file", "-e", `${resolvedHeadSha}:prova/${parsed.slug}.ts`]);
+    let total = 0;
+    phase = "checkout";
+    withNativeCheckouts(
+      parsed,
+      [{ name: "head", sha: resolvedHeadSha }],
+      "lohra-native-positive-",
+      hooks,
+      (paths, temp) => {
+        const head = paths.get("head");
+        if (head === undefined) throw new Error("NATIVE_WORKTREE_INVARIANT");
+        phase = "dependencias";
+        linkNodeModules(parsed.root, head);
+        phase = "compile-verify";
+        const artifact = compileAt(head, parsed, join(temp, "head-bin"));
+        process.stdout.write(
+          `controle-negativo: POSITIVE-ONLY fase=compile-verify HEAD=${resolvedHeadSha} manifest=${artifact.manifestSha256}\n`,
+        );
+        phase = "prova";
+        total = proofAt(head, parsed, artifact, false, hooks.runProof ?? rodarProvaNaBase, true);
+        process.stdout.write(
+          `controle-negativo: POSITIVE-ONLY fase=prova HEAD=${resolvedHeadSha} testes=${String(total)}\n`,
+        );
+        phase = "cleanup";
+      },
+    );
+    process.stdout.write(
+      `controle-negativo: POSITIVE-ONLY HEAD=${resolvedHeadSha} slug=${parsed.slug} fontes=${parsed.sources.join(",")} testes=${String(total)} — PASS\n`,
+    );
+    return 0;
+  } catch (cause) {
+    const errors: unknown[] = cause instanceof AggregateError ? cause.errors : [cause];
+    const details = errors
+      .map((error, index) => `${index === 0 ? "primaria" : "secundaria"}=${String(error)}`)
+      .join("; ");
+    throw new AggregateError(
+      errors,
+      `POSITIVE-ONLY FAIL HEAD=${headSha ?? "indisponível"} slug=${args?.slug ?? "indisponível"} fontes=${args?.sources.join(",") ?? "indisponível"} fase=${phase} causa=${details}`,
+      { cause },
+    );
+  }
 }
