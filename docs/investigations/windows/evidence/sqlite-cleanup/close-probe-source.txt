@@ -20,4 +20,3 @@ for (const title of titles) {
 }
 writeFileSync(path, source);
 console.log(JSON.stringify({ titles, inserted: (source.match(/if \(connection\.database\.open\) connection\.close\(\)/g) ?? []).length }));
-

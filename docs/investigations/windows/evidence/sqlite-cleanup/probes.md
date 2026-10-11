@@ -56,7 +56,7 @@ if (openBefore !== true || beforeCode !== "EBUSY" || openAfter !== false || !rem
   process.exitCode = 1;
 ```
 
-Para desmascarar as asserções do SHA histórico, a fonte abaixo alterou somente **duas** cláusulas `finally` do teste em clone temporário; o repositório da issue permaneceu intacto. Em cada bloco acrescentou `if (connection.database.open) connection.close();` antes de `rmSync(root)`. Em Node 20/22 o mesmo subconjunto saiu 1 por asserção de paths, e não por `EBUSY`. [Fonte executada no Node 20](close-probe-source.txt); SHA256 da cópia Windows com CRLF: `C727EF451FE8B0045A4E4F90D795987A9092249620F11F896F2E1378D4C87EEC` (Git normaliza EOL; o bloco abaixo é formatado para leitura). A sonda Node 22 usou a mesma substituição com o caminho do clone fixo em vez de `process.cwd()`; a mudança de path não toca o teste substituído.
+Para desmascarar as asserções do SHA histórico, a fonte abaixo alterou somente **duas** cláusulas `finally` do teste em clone temporário; o repositório da issue permaneceu intacto. Em cada bloco acrescentou `if (connection.database.open) connection.close();` antes de `rmSync(root)`. Em Node 20/22 o mesmo subconjunto saiu 1 por asserção de paths, e não por `EBUSY`. [Fonte reproduzível do Node 20](close-probe-source.txt); SHA256 da cópia Windows executada com CRLF e uma linha vazia final: `C727EF451FE8B0045A4E4F90D795987A9092249620F11F896F2E1378D4C87EEC` (Git normaliza EOL e a cópia versionada remove a linha vazia; o bloco abaixo é formatado para leitura). A sonda Node 22 usou a mesma substituição com o caminho do clone fixo em vez de `process.cwd()`; a mudança de path não toca o teste substituído.
 
 ```js
 import { readFileSync, writeFileSync } from "node:fs";
