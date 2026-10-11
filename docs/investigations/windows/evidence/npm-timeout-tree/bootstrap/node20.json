@@ -1,0 +1,26 @@
+{
+  "platform": "win32",
+  "architecture": "x64",
+  "node": "v20.20.2",
+  "compiler": "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe",
+  "compilerArgs": [
+    "/nologo",
+    "/target:exe",
+    "/out:<RUN_ROOT>\\output & literal\\helper.exe",
+    "<RUN_ROOT>\\hello & literal.cs"
+  ],
+  "sourceSha256": "ab5d0bad696b2df7da1e1869cda918979d0064eee9baa2e6e7f392d22074516d",
+  "compilerSha256": "46809206887326d2d24db1eff1f3064de972c3451abe766b49111450a5e08e00",
+  "executableSha256": "7c0238ba01ce9e9bbf92d7790a7e07e5327809c24f21fc2693632ea38b57dc03",
+  "manifestSha256": "c9f441137f0ed896424393e1c8d3ae9375386ada8e6c747284b8f5b3cc5546f8",
+  "compileMs": 260.86019999999996,
+  "launchMs": 92.45549999999992,
+  "launch": {
+    "status": 7,
+    "signal": null,
+    "errorCode": null,
+    "stdout": "LOHRA_898_OK",
+    "stderr": ""
+  },
+  "exact": true
+}
