@@ -138,6 +138,7 @@ import {
   type ExecucaoGit,
 } from "../lib/git.js";
 import { appendSummary } from "../lib/summary.js";
+import { runNative } from "./native.js";
 import {
   type Args,
   arquivosDeTeste,
@@ -226,7 +227,7 @@ function diffNomeStatus(root: string, base: string, head: string): readonly Arqu
  * chama e vazaria `tmpDir` (o próprio `mkdtempSync`, que já rodou antes
  * desta função).
  */
-function worktreeAdd(root: string, tmpDir: string, base: string): boolean {
+export function worktreeAdd(root: string, tmpDir: string, base: string): boolean {
   const resultado = git(root, ["worktree", "add", "--detach", tmpDir, base]);
   if (resultado.error !== undefined || resultado.status !== 0) {
     process.stderr.write(`controle-negativo: git worktree add falhou: ${causaGit(resultado)}\n`);
@@ -298,7 +299,7 @@ function mostrarArquivoGit(root: string, head: string, arquivo: string): Mostrar
  * encontra nem o próprio vitest/tsx. Sem source em `root` (impossível em
  * produção; possível num repositório fake de teste), é um no-op — a
  * ausência de resumo.json depois vira falha explícita, não PASS silencioso. */
-function linkNodeModules(root: string, tmpDir: string): void {
+export function linkNodeModules(root: string, tmpDir: string): void {
   const origem = join(root, "node_modules");
   const destino = join(tmpDir, "node_modules");
   if (!existsSync(origem) || existsSync(destino)) return;
@@ -324,12 +325,17 @@ interface ExecucaoProva {
  * curto o bastante para não esconder um job travado por horas. */
 export const TIMEOUT_PROVA_MS = 10 * 60 * 1000;
 
-function rodarProvaNaBase(tmpDir: string, slug: string): ExecucaoProva {
+export function rodarProvaNaBase(
+  tmpDir: string,
+  slug: string,
+  extraEnv: Readonly<Record<string, string>> = {},
+): ExecucaoProva {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
       ([chave]) => !chave.startsWith("VITEST") && chave !== "LOHRA_PROVA_OUT",
     ),
   );
+  Object.assign(env, extraEnv);
   let npmCli: string;
   try {
     npmCli = resolveNpmCli({ env });
@@ -580,6 +586,9 @@ function rodarCheck(
 }
 
 function main(): void {
+  if (process.argv.slice(2).includes("--native")) {
+    process.exit(runNative(process.argv.slice(2)));
+  }
   const args = parseArgs(process.argv.slice(2));
   if (args.base === undefined || args.head === undefined) {
     falhaFechada(
