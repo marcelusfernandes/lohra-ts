@@ -550,6 +550,8 @@ describe("doctor × chat, chat_default_provider respeita a rota (issue #633)", (
     temporaryDirectories.push(base);
     const env: Record<string, string> = { HOME: base, PATH: "/usr/bin:/bin", COLUMNS: "80" };
     const home = join(base, ".lohra");
+    expect(env.LOHRA_HOME).toBe(home);
+    expect(env.CODEX_HOME).toBe(join(base, "codex"));
     enable(home);
     writeTokens(home, {
       accessToken: "fresh-access-t633",
@@ -624,6 +626,8 @@ describe("doctor × chat, chat_default_provider respeita a rota (issue #633)", (
     temporaryDirectories.push(base);
     const env: Record<string, string> = { HOME: base, PATH: "/usr/bin:/bin", COLUMNS: "80" };
     const home = join(base, ".lohra");
+    expect(env.LOHRA_HOME).toBe(home);
+    expect(env.CODEX_HOME).toBe(join(base, "codex"));
     // `preference=subscription` sem `enable()`: subscriptionActive fica
     // false (authMode continua "api_key"), então `routeFor` devolve
     // `{ mode: "api_key", error: PREFER_SUB_ERROR }` (credentials.ts:157) --

@@ -176,8 +176,10 @@ describe("public provider commands", () => {
   it("lists absent, valid and broken tiers read-only", async () => {
     const home = root();
     const base = join(home, ".lohra");
+    const environment: Record<string, string> = { HOME: home };
+    expect(environment.LOHRA_HOME).toBe(base);
     mkdirSync(base, { recursive: true });
-    expect((await invoke(["tiers", "list"], { HOME: home })).code).toBe(0);
+    expect((await invoke(["tiers", "list"], environment)).code).toBe(0);
     writeFileSync(
       join(base, "workflow_tiers.json"),
       JSON.stringify({
@@ -185,17 +187,17 @@ describe("public provider commands", () => {
         big: { provider: "anthropic", model: "b" },
       }),
     );
-    const valid = await invoke(["tiers", "list"], { HOME: home });
+    const valid = await invoke(["tiers", "list"], environment);
     expect(valid.stdout).toBe("small: openai/m/low\nbig: anthropic/b\n");
     writeFileSync(join(base, "workflow_tiers.json"), "[");
-    expect((await invoke(["tiers", "list"], { HOME: home })).code).toBe(1);
+    expect((await invoke(["tiers", "list"], environment)).code).toBe(1);
     writeFileSync(join(base, "workflow_tiers.json"), JSON.stringify({ custom: { model: "m" } }));
-    expect((await invoke(["tiers", "list"], { HOME: home })).code).toBe(1);
+    expect((await invoke(["tiers", "list"], environment)).code).toBe(1);
     writeFileSync(
       join(base, "workflow_tiers.json"),
       JSON.stringify({ custom: { model: "ignored" }, small: "shorthand-model" }),
     );
-    const rejected = await invoke(["tiers", "list"], { HOME: home });
+    const rejected = await invoke(["tiers", "list"], environment);
     expect(rejected.code).toBe(1);
     expect(rejected.stderr).toContain("custom");
   });
