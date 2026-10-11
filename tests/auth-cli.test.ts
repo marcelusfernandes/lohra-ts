@@ -47,6 +47,7 @@ async function invoke(argv: readonly string[], environment: Record<string, strin
 describe("public auth surfaces", () => {
   it("renders insertion-order auth status and enables only with explicit acknowledgement", async () => {
     const value = fixture();
+    expect(value.environment.LOHRA_HOME).toBe(value.home);
     const off = await invoke(["auth", "status", "--no-input"], value.environment);
     expect(off).toEqual({
       code: 0,
