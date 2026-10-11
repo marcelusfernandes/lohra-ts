@@ -17,7 +17,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 
-import { openStateDatabase, SessionRepository } from "../../src/state/index.js";
+import {
+  openStateDatabase,
+  SessionRepository,
+  type StateConnection,
+} from "../../src/state/index.js";
 import { SqliteConversationRepository } from "../../src/conversation/index.js";
 import type {
   ModelRequest,
@@ -31,15 +35,45 @@ import { createGatewayUpgradeHandler } from "../../src/gateway/ws/connection.js"
 import { startGatewayHttpServer, type GatewayHttpServer } from "../../src/gateway/http/server.js";
 import { jsonResponse } from "../../src/gateway/http/response.js";
 
-const roots: string[] = [];
+const fixtures: Array<{ root: string; connection?: StateConnection }> = [];
 let activeServer: GatewayHttpServer | null = null;
+const openSockets: WebSocket[] = [];
 
 afterEach(async () => {
-  if (activeServer !== null) {
-    await activeServer.close();
-    activeServer = null;
+  const cleanupErrors: unknown[] = [];
+  while (openSockets.length > 0) {
+    try {
+      openSockets.pop()?.terminate();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
   }
-  while (roots.length > 0) rmSync(roots.pop() as string, { recursive: true, force: true });
+  if (activeServer !== null) {
+    const server = activeServer;
+    activeServer = null;
+    try {
+      await server.close();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+  while (fixtures.length > 0) {
+    const fixture = fixtures.pop();
+    if (fixture === undefined) continue;
+    try {
+      fixture.connection?.close();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    try {
+      rmSync(fixture.root, { recursive: true, force: true });
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, "gateway WS notices fixture cleanup failed");
+  }
 });
 
 const TOKEN = "the-ws-notices-token";
@@ -94,8 +128,10 @@ async function startServer(notices?: TurnNoticesPort): Promise<{
   readonly transport: RecordingTransport;
 }> {
   const root = mkdtempSync(join(tmpdir(), "lohra-gateway-ws-notices-"));
-  roots.push(root);
+  const fixture: { root: string; connection?: StateConnection } = { root };
+  fixtures.push(fixture);
   const connection = openStateDatabase(join(root, "state.db"));
+  fixture.connection = connection;
   const sessions = new SessionRepository(connection.database, undefined, connection.ftsEnabled);
   const registry = new GatewaySessionRegistry(sessions);
   const transport = new RecordingTransport();
@@ -156,6 +192,7 @@ async function connectAndCreateSession(
   server: GatewayHttpServer,
 ): Promise<{ readonly ws: WebSocket; readonly sessionId: string }> {
   const ws = new WebSocket(`ws://127.0.0.1:${String(server.port)}/api/ws?token=${TOKEN}`);
+  openSockets.push(ws);
   await nextMessage(ws); // gateway.ready
   ws.send(JSON.stringify({ jsonrpc: "2.0", id: "create", method: "session.create", params: {} }));
   const createResult = JSON.parse(await nextMessage(ws)) as { result: { session_id: string } };

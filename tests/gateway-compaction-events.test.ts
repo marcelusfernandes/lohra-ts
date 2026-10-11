@@ -28,21 +28,53 @@ import {
   resolveGatewayMaxTokens,
 } from "../src/gateway/ws/connection.js";
 import { CODEX_PROVIDER } from "../src/providers/index.js";
-import { openStateDatabase, SessionRepository } from "../src/state/index.js";
+import { openStateDatabase, SessionRepository, type StateConnection } from "../src/state/index.js";
 import type { NormalizedResponse } from "../src/transports/index.js";
 
-const roots: string[] = [];
+const fixtures: Array<{ root: string; connection?: StateConnection }> = [];
 let activeServer: GatewayHttpServer | null = null;
 const openSockets: WebSocket[] = [];
 
 afterEach(async () => {
-  vi.unstubAllEnvs();
-  while (openSockets.length > 0) openSockets.pop()?.close();
-  if (activeServer !== null) {
-    await activeServer.close();
-    activeServer = null;
+  const cleanupErrors: unknown[] = [];
+  try {
+    vi.unstubAllEnvs();
+  } catch (error) {
+    cleanupErrors.push(error);
   }
-  while (roots.length > 0) rmSync(roots.pop() as string, { recursive: true, force: true });
+  while (openSockets.length > 0) {
+    try {
+      openSockets.pop()?.terminate();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+  if (activeServer !== null) {
+    const server = activeServer;
+    activeServer = null;
+    try {
+      await server.close();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+  while (fixtures.length > 0) {
+    const fixture = fixtures.pop();
+    if (fixture === undefined) continue;
+    try {
+      fixture.connection?.close();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    try {
+      rmSync(fixture.root, { recursive: true, force: true });
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, "gateway compaction events fixture cleanup failed");
+  }
 });
 
 describe("resolveGatewayMaxTokens", () => {
@@ -128,8 +160,10 @@ async function startServer(options: StartServerOptions = {}): Promise<{
   readonly sessions: SessionRepository;
 }> {
   const root = mkdtempSync(join(tmpdir(), "lohra-gateway-events-"));
-  roots.push(root);
+  const fixture: { root: string; connection?: StateConnection } = { root };
+  fixtures.push(fixture);
   const connection = openStateDatabase(join(root, "state.db"));
+  fixture.connection = connection;
   const sessions = new SessionRepository(connection.database, undefined, connection.ftsEnabled);
   const registry = new GatewaySessionRegistry(sessions);
   const compactable = options.compactable ?? true;
