@@ -1,0 +1,22 @@
+{
+  "platform": "win32",
+  "arch": "x64",
+  "node": "v20.20.2",
+  "sha": "fa8aa4a",
+  "unaligned": {
+    "suppliedHome": ".lohra",
+    "resolvedHome": "lohra",
+    "statePath": "lohra/state.db",
+    "existsAfterStateOpen": true,
+    "suppliedHomeExists": false,
+    "lstat": { "code": "ENOENT", "syscall": "lstat" },
+    "media": { "code": "ENOENT", "syscall": "lstat" }
+  },
+  "aligned": {
+    "resolvedHome": ".lohra",
+    "statePath": ".lohra/state.db",
+    "suppliedHomeExists": true,
+    "lstat": "PASS",
+    "media": ".lohra/images"
+  }
+}

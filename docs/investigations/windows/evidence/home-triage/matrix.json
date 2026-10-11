@@ -1,0 +1,87 @@
+{
+  "os": "Windows 11 Pro 10.0.26200.0 x64",
+  "historical_sha": "fa8aa4a572a8d84c3eea128a7ce67ab4eac796e1",
+  "current_sha": "3b25a36c9aef520d06ad90aa3da8bd4ae09fbbb1",
+  "corpus": "tests/chat-compaction-events.test.ts",
+  "intervention": "Only add LOHRA_HOME: join(root, \".lohra\") to the five test environment objects in disposable clones; production source unchanged.",
+  "runs": [
+    {
+      "sha": "fa8aa4a572a8d84c3eea128a7ce67ab4eac796e1",
+      "node": "20.20.2",
+      "original": {
+        "exit": 1,
+        "passed": 0,
+        "failed": 5,
+        "codes": ["ENOENT", "EBUSY", "SESSION_NOT_FOUND"]
+      },
+      "aligned": { "exit": 0, "passed": 5, "failed": 0 },
+      "probe": {
+        "exit": 0,
+        "unaligned_lstat": "ENOENT",
+        "unaligned_media": "ENOENT",
+        "aligned_lstat": "PASS",
+        "aligned_media": "PASS"
+      }
+    },
+    {
+      "sha": "fa8aa4a572a8d84c3eea128a7ce67ab4eac796e1",
+      "node": "22.23.2",
+      "original": {
+        "exit": 1,
+        "passed": 0,
+        "failed": 5,
+        "codes": ["ENOENT", "EBUSY", "SESSION_NOT_FOUND"]
+      },
+      "aligned": { "exit": 0, "passed": 5, "failed": 0 },
+      "probe": {
+        "exit": 0,
+        "unaligned_lstat": "ENOENT",
+        "unaligned_media": "ENOENT",
+        "aligned_lstat": "PASS",
+        "aligned_media": "PASS"
+      }
+    },
+    {
+      "sha": "3b25a36c9aef520d06ad90aa3da8bd4ae09fbbb1",
+      "node": "20.20.2",
+      "original": {
+        "exit": 1,
+        "passed": 0,
+        "failed": 5,
+        "codes": ["ENOENT", "EBUSY", "SESSION_NOT_FOUND"]
+      },
+      "aligned": { "exit": 0, "passed": 5, "failed": 0 },
+      "probe": {
+        "exit": 0,
+        "unaligned_lstat": "ENOENT",
+        "unaligned_media": "ENOENT",
+        "aligned_lstat": "PASS",
+        "aligned_media": "PASS"
+      }
+    },
+    {
+      "sha": "3b25a36c9aef520d06ad90aa3da8bd4ae09fbbb1",
+      "node": "22.23.2",
+      "original": {
+        "exit": 1,
+        "passed": 0,
+        "failed": 5,
+        "codes": ["ENOENT", "EBUSY", "SESSION_NOT_FOUND"]
+      },
+      "aligned": { "exit": 0, "passed": 5, "failed": 0 },
+      "probe": {
+        "exit": 0,
+        "unaligned_lstat": "ENOENT",
+        "unaligned_media": "ENOENT",
+        "aligned_lstat": "PASS",
+        "aligned_media": "PASS"
+      }
+    }
+  ],
+  "not_measured": [
+    "full_windows_suite",
+    "live_provider",
+    "other_ENOENT_cases_outside_focal_corpus",
+    "other_EBUSY_cases"
+  ]
+}
