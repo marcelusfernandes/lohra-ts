@@ -1,0 +1,30 @@
+
+ RUN  v4.1.11 <CLONE>
+
+ ❯ tests/workflow-service-durability.test.ts (34 tests | 1 failed | 33 skipped) 71ms
+     × installs one sandbox per ACQUISITION and disposes only its own 68ms
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 33 skipped (34)
+   Start at  23:30:24
+   Duration  1.82s (transform 573ms, setup 0ms, import 1.52s, tests 71ms, environment 0ms)
+
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/workflow-service-durability.test.ts > workflow service — leaf capability sandbox > installs one sandbox per ACQUISITION and disposes only its own
+AssertionError: expected 'ERROR: workflow stretch is no longer …' to be 'PROBE_WRONG_DENIAL_VALUE' // Object.is equality
+
+Expected: "PROBE_WRONG_DENIAL_VALUE"
+Received: "ERROR: workflow stretch is no longer current (sandbox denied)"
+
+ ❯ tests/workflow-service-durability.test.ts:2188:9
+    2186|           path: join(root, "runs", first.run_id, "work-1", "x.txt"),
+    2187|         }),
+    2188|       ).toBe("PROBE_WRONG_DENIAL_VALUE");
+       |         ^
+    2189|       // stretch 2's own wrapper still works, in its own root
+    2190|       mkdirSync(join(root, "runs", first.run_id, "work-2"), { recursiv…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
