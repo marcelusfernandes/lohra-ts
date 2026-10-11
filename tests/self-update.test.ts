@@ -67,14 +67,22 @@ describe("self-update repository discovery", () => {
 
 describe("self-update default command runner", () => {
   it("runs the subprocess with shell:false, so each argument is passed literally", () => {
-    // Com shell:false, spawnSync nunca reinterpreta metacaracteres de shell
-    // nos argumentos — "echo" recebe cada um deles como uma string literal e
-    // o imprime tal como veio, numa linha só. Com shell:true, node junta
-    // comando+args com espaço e entrega a /bin/sh -c, que reinterpreta "&&"
-    // como separador de comandos e produz duas linhas.
-    const result = defaultCommandRunner("echo", ["marker", "&&", "echo", "injected"], "/");
+    const result = defaultCommandRunner(
+      process.execPath,
+      [
+        "-e",
+        "process.stdout.write(JSON.stringify(process.argv.slice(1)))",
+        "marker",
+        "&&",
+        "echo",
+        "injected",
+      ],
+      process.cwd(),
+    );
     expect(result.code, "MUTATION_CAUSE:T22-updater-shell").toBe(0);
-    expect(result.stdout, "MUTATION_CAUSE:T22-updater-shell").toBe("marker && echo injected");
+    expect(result.stdout, "MUTATION_CAUSE:T22-updater-shell").toBe(
+      JSON.stringify(["marker", "&&", "echo", "injected"]),
+    );
   });
 });
 
