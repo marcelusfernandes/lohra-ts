@@ -73,6 +73,16 @@ function shellInvocation(
   return { executable, args: ["-lc", wrapped] };
 }
 
+/** Stub for the platform-specific command-line contract (#743, red phase). */
+export function terminalShellInvocation(
+  _command: string,
+  _stdoutPath: string,
+  _stderrPath: string,
+  _platform: NodeJS.Platform,
+): Readonly<{ executable: string; args: string | string[] }> {
+  throw new Error("not implemented");
+}
+
 export async function terminalTool(
   args: ToolArguments,
   options: TerminalOptions = {},
