@@ -8,6 +8,12 @@ export interface ChatSignalCancellation {
 export function createChatSignalCancellation(
   register: (handler: () => void) => () => void = registerShutdownTrigger,
 ): ChatSignalCancellation {
-  void register;
-  throw new Error("not implemented: chat signal cancellation");
+  const controller = new AbortController();
+  const unregister = register(() => {
+    controller.abort(new Error("chat interrupted by SIGINT or SIGTERM"));
+  });
+  return {
+    signal: controller.signal,
+    dispose: unregister,
+  };
 }

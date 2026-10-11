@@ -13,7 +13,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function fixture(holdFirst: boolean) {
+function fixture(holdFirst: boolean, failureStatus?: number) {
   const root = mkdtempSync(join(tmpdir(), "lohra-chat-signal-"));
   roots.push(root);
   const requests: string[] = [];
@@ -28,6 +28,11 @@ function fixture(holdFirst: boolean) {
       requests.push(Buffer.concat(chunks).toString("utf8"));
       receivedFirst();
       if (holdFirst && requests.length === 1) return;
+      if (failureStatus !== undefined) {
+        response.writeHead(failureStatus, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { message: "real upstream fault" } }));
+        return;
+      }
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
@@ -134,6 +139,23 @@ describe("chat signal cancellation (#920)", () => {
       expect(result.code).toBe(0);
       expect(JSON.parse(result.stdout)).toMatchObject({ completed: true, error: null });
       expect(signal.armed()).toBe(false);
+      expect(signal.removals()).toBe(1);
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("keeps a real provider failure causal when no signal fired", async () => {
+    const { root, server } = fixture(false, 503);
+    const provider = await start(server);
+    const signal = signalRegistration();
+    try {
+      const result = await runChat(options(root, provider, signal.register));
+      const envelope = JSON.parse(result.stdout) as { error: string; completed: boolean };
+      expect(result.code).toBe(1);
+      expect(envelope.completed).toBe(false);
+      expect(envelope.error).toContain("503");
+      expect(envelope.error).not.toMatch(/cancel/i);
       expect(signal.removals()).toBe(1);
     } finally {
       await close(server);
