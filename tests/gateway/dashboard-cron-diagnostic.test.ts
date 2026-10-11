@@ -91,7 +91,11 @@ it("sends a scheduled callback failure to dashboard stderr without exposing inpu
     expect(diagnostic).not.toContain(prompt);
     expect(diagnostic).not.toContain(credential);
     expect(diagnostic).not.toContain(providerDetail);
-    expect(stdout.mock.calls.flat().join("")).not.toContain("phase=callback");
+    const stdoutText = stdout.mock.calls.flat().join("");
+    expect(stdoutText).not.toContain("phase=callback");
+    expect(stdoutText).not.toContain(prompt);
+    expect(stdoutText).not.toContain(credential);
+    expect(stdoutText).not.toContain(providerDetail);
     expect(consoleWarning.mock.calls.flat().join("")).not.toContain("phase=callback");
   } finally {
     shutdown?.();
