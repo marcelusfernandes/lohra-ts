@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -60,6 +61,10 @@ function runPrepare(dir: string, extraEnv: NodeJS.ProcessEnv = {}) {
 
 function installedPrePush(dir: string): string {
   return resolve(dir, git(dir, ["rev-parse", "--git-path", "hooks/pre-push"]));
+}
+
+function sameHookFile(first: string, second: string): boolean {
+  return resolve(first) === resolve(second);
 }
 
 describe("prepare portable hooks", () => {
@@ -149,11 +154,44 @@ describe("prepare portable hooks", () => {
       copyFileSync(shellInstaller, join(linked, ".claude", "hooks", "instalar-git-hooks.sh"));
       const result = runPrepare(linked);
       expect(result.status, result.stderr).toBe(0);
-      expect(installedPrePush(linked)).toBe(installedPrePush(dir));
+      expect(sameHookFile(installedPrePush(linked), installedPrePush(dir))).toBe(true);
       expect(readFileSync(installedPrePush(dir), "utf8")).toBe(readFileSync(prePushSource, "utf8"));
     } finally {
       if (existsSync(linked)) git(dir, ["worktree", "remove", "--force", linked]);
       rmSync(linkedRoot, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("recognizes two paths to the same hook file through a controlled alias", () => {
+    const dir = mkdtempSync(join(tmpdir(), "lohra-prepare-alias-"));
+    const actual = join(dir, "actual");
+    const alias = join(dir, "alias");
+    try {
+      mkdirSync(actual);
+      writeFileSync(join(actual, "pre-push"), "same hook bytes");
+      symlinkSync(actual, alias, process.platform === "win32" ? "junction" : "dir");
+      const actualHook = join(actual, "pre-push");
+      const aliasHook = join(alias, "pre-push");
+      expect(resolve(actualHook)).not.toBe(resolve(aliasHook));
+      expect(sameHookFile(actualHook, aliasHook)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects distinct hook files even when their bytes are identical", () => {
+    const dir = mkdtempSync(join(tmpdir(), "lohra-prepare-distinct-"));
+    try {
+      const first = join(dir, "first", "pre-push");
+      const second = join(dir, "second", "pre-push");
+      mkdirSync(dirname(first));
+      mkdirSync(dirname(second));
+      writeFileSync(first, "same hook bytes");
+      writeFileSync(second, "same hook bytes");
+      expect(readFileSync(first, "utf8")).toBe(readFileSync(second, "utf8"));
+      expect(sameHookFile(first, second)).toBe(false);
+    } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
