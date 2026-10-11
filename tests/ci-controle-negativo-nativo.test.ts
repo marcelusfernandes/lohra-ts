@@ -113,7 +113,10 @@ it("observa o valor compilado", () => {
   return { root, base, red, head };
 }
 
-const compiler = "C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe";
+const compiler =
+  process.platform === "win32"
+    ? "C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
+    : "/usr/bin/true"; // Só o parser/seleção portáteis; Linux não compila EXE.
 function argv(repo: ReturnType<typeof fixture>): string[] {
   return [
     "--native",
