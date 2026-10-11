@@ -39,17 +39,19 @@ export const defaultCommandRunner: CommandRunner = (executable, args, cwd) => {
   const rawStdout: unknown = result.stdout;
   const rawStderr: unknown = result.stderr;
   const stdout = bounded(typeof rawStdout === "string" ? rawStdout : "");
-  const stderr = bounded(
-    (typeof rawStderr === "string" ? rawStderr : "") || result.error?.message || "",
-  );
+  const stderrOutput = typeof rawStderr === "string" ? rawStderr : "";
+  const spawnError = result.error as NodeJS.ErrnoException | undefined;
+  // Keep the spawn cause at the front: maxBuffer may have already filled a stream.
+  const diagnostic = spawnError ? `${spawnError.code ?? "spawn error"}: ${spawnError.message}` : "";
+  const stderr = bounded([diagnostic, stderrOutput].filter(Boolean).join("\n"));
   return {
     code: result.status ?? 1,
     stdout: stdout.value,
     stderr: stderr.value,
-    ...((result.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT"
-      ? { timedOut: true }
+    ...(spawnError?.code === "ETIMEDOUT" ? { timedOut: true } : {}),
+    ...(stdout.truncated || stderr.truncated || spawnError?.code === "ENOBUFS"
+      ? { truncated: true }
       : {}),
-    ...(stdout.truncated || stderr.truncated ? { truncated: true } : {}),
   };
 };
 
