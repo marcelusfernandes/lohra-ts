@@ -74,6 +74,7 @@ async function runProbe(environment: Readonly<Record<string, string | undefined>
   readonly captured: CapturedRequest[];
 }> {
   const root = mkdtempSync(join(tmpdir(), "lohra-t648-chat-doctrine-"));
+  const home = join(root, ".lohra");
   roots.push(root);
   const captured: CapturedRequest[] = [];
   const server = startCapturingServer(captured);
@@ -112,8 +113,8 @@ async function runProbe(environment: Readonly<Record<string, string | undefined>
         ["--no-input", true],
         ["--no-tools", true],
       ]),
-      environment: { HOME: root, PATH: process.env.PATH ?? "", ...environment },
-      home: join(root, ".lohra"),
+      environment: { HOME: root, PATH: process.env.PATH ?? "", ...environment, LOHRA_HOME: home },
+      home,
       codexHome: join(root, ".codex"),
       cwd: root,
     });
@@ -140,6 +141,7 @@ describe("chat.ts wires the resolved doctrine tier into the real request (issue 
 
   it("an invalid LOHRA_DOCTRINE fails closed with a named error instead of silently falling back", async () => {
     const root = mkdtempSync(join(tmpdir(), "lohra-t648-chat-doctrine-bad-"));
+    const home = join(root, ".lohra");
     roots.push(root);
     const server = startCapturingServer([]);
     await new Promise<void>((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
@@ -176,10 +178,11 @@ describe("chat.ts wires the resolved doctrine tier into the real request (issue 
           ]),
           environment: {
             HOME: root,
+            LOHRA_HOME: home,
             PATH: process.env.PATH ?? "",
             LOHRA_DOCTRINE: "loud",
           },
-          home: join(root, ".lohra"),
+          home,
           codexHome: join(root, ".codex"),
           cwd: root,
         }),
