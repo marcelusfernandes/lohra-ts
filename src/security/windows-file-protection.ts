@@ -151,7 +151,9 @@ function cleanOwn(
 }
 
 /**
- * Prepares an empty destination. The caller owns writing and rename. Each check is
+ * Creates an empty destination or verifies an existing protected destination.
+ * Direct writing requires empty; a nonempty destination can only be replaced
+ * through caller-owned rename of a verified protected sibling. Each check is
  * path-based; concurrent replacement after a check still requires a caller-held
  * lease/fence. Native ACL checks are metadata checks, not cross-token access proof.
  */
@@ -186,8 +188,8 @@ export function prepareWindowsPrivateDestination(
       owned.push({ path: file, entry: fileEntry });
       operations.protect(file);
     }
-    if (fileEntry.kind !== "file" || fileEntry.size !== 0n) {
-      throw new Error(`Windows private destination must be an empty regular file: ${file}`);
+    if (fileEntry.kind !== "file") {
+      throw new Error(`Windows private destination must be a regular file: ${file}`);
     }
     checked(file, "file", fileEntry.identity, operations);
     const directoryIdentity = dirEntry.identity;
@@ -209,9 +211,7 @@ export function prepareWindowsPrivateDestination(
           throw new Error("Windows publication source must be a distinct sibling");
         }
         checked(directory, "directory", directoryIdentity, operations);
-        const target = checked(file, "file", destinationIdentity, operations);
-        if (target.size !== 0n)
-          throw new Error("Windows publication destination is no longer empty");
+        checked(file, "file", destinationIdentity, operations);
         const sourceEntry = inspectChain(stage, operations);
         if (!sourceEntry || sourceEntry.kind !== "file")
           throw new Error("Windows publication source is not a regular file");

@@ -5,6 +5,9 @@ import { spawnSync } from "node:child_process";
 const ACL_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
 try {
+  $utf8 = [System.Text.UTF8Encoding]::new($false)
+  [Console]::InputEncoding = $utf8
+  [Console]::OutputEncoding = $utf8
   $request = ConvertFrom-Json -InputObject ([Console]::In.ReadToEnd())
   $path = [string]$request.path
   $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
@@ -58,6 +61,7 @@ try {
         throw 'Windows DACL grants access to an unapproved identity'
       }
       if ($sid -eq $identity.Value -and
+          ($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -eq 0 -and
           ($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -eq [System.Security.AccessControl.FileSystemRights]::FullControl) {
         $ownerCanUpdate = $true
       }

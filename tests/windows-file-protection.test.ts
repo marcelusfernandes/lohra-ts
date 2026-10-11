@@ -68,6 +68,15 @@ describe("windows private destination", () => {
     expect(state.events).toEqual([]);
   });
 
+  it("accepts Unicode path components without rewriting the path", () => {
+    const state = fixture();
+    const unicodeDirectory = "C:\\café";
+    const unicodeFile = `${unicodeDirectory}\\privado-ç.json`;
+    prepareWindowsPrivateDestination(unicodeFile, state.operations);
+    expect(state.events).toContain(`protect:${unicodeDirectory}`);
+    expect(state.events).toContain(`protect:${unicodeFile}`);
+  });
+
   it("protects and verifies a new directory before creating the empty file", () => {
     const state = fixture();
     const guard = prepareWindowsPrivateDestination(destination, state.operations);
@@ -95,14 +104,40 @@ describe("windows private destination", () => {
     expect(state.entries.has(destination)).toBe(false);
   });
 
-  it("refuses an existing nonempty destination and preserves its contents", () => {
+  it("refuses an incompatible existing destination and preserves its contents", () => {
     const state = fixture();
     state.add(directory, "directory");
     state.protectedPaths.add(directory);
     state.add(destination, "file", 7n);
-    expect(() => prepareWindowsPrivateDestination(destination, state.operations)).toThrow(/empty/);
+    expect(() => prepareWindowsPrivateDestination(destination, state.operations)).toThrow(
+      /incompatible ACL/,
+    );
     expect(state.entries.get(destination)?.size).toBe(7n);
     expect(state.events).not.toContain(`protect:${destination}`);
+  });
+
+  it("preserves a compatible existing destination until verified atomic replacement", () => {
+    const state = fixture();
+    state.add(directory, "directory");
+    state.protectedPaths.add(directory);
+    state.add(destination, "file", 7n);
+    state.protectedPaths.add(destination);
+    const guard = prepareWindowsPrivateDestination(destination, state.operations);
+    expect(state.entries.get(destination)?.size).toBe(7n);
+    expect(state.events).not.toContain(`create:${destination}`);
+    expect(state.events).not.toContain(`protect:${destination}`);
+    expect(() => {
+      guard.verifyBeforeWrite();
+    }).toThrow(/empty/);
+    state.add(stage, "file", 9n);
+    state.protectedPaths.add(stage);
+    guard.verifyBeforePublication(stage);
+    const stagedEntry = state.entries.get(stage);
+    if (!stagedEntry) throw new Error("missing test stage");
+    state.entries.set(destination, stagedEntry);
+    state.entries.delete(stage);
+    guard.verifyAfterPublication();
+    expect(state.entries.get(destination)?.size).toBe(9n);
   });
 
   it("refuses a link in the path before ACL changes", () => {
