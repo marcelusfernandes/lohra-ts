@@ -172,6 +172,38 @@ describe("windows private destination", () => {
     expect(state.events).toContain(`unlink:${destination}`);
   });
 
+  it.each([
+    { path: directory, kind: "directory" },
+    { path: destination, kind: "file" },
+  ] as const)("reports an unverified created $kind without deleting it", ({ path, kind }) => {
+    const state = fixture();
+    if (kind === "file") {
+      state.add(directory, "directory");
+      state.protectedPaths.add(directory);
+    }
+    const inspect = state.operations.inspect.bind(state.operations);
+    state.operations.inspect = (candidate) => {
+      if (candidate === path && state.entries.has(path)) throw new Error("inspection denied");
+      return inspect(candidate);
+    };
+    try {
+      prepareWindowsPrivateDestination(destination, state.operations);
+      throw new Error("expected failure");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AggregateError);
+      const aggregate = error as AggregateError;
+      expect(aggregate.cause).toEqual(new Error("inspection denied"));
+      expect(aggregate.errors.map(String)).toEqual([
+        "Error: inspection denied",
+        expect.stringMatching(/cleanup inconclusive.*identity.*unverified/i),
+      ]);
+      expect(String(aggregate.errors[1])).toContain(path);
+    }
+    expect(state.entries.has(path)).toBe(true);
+    expect(state.events).not.toContain(`unlink:${path}`);
+    expect(state.events).not.toContain(`rmdir:${path}`);
+  });
+
   it("removes its new directory after a file protection failure", () => {
     const state = fixture();
     state.operations.protect = (path) => {
