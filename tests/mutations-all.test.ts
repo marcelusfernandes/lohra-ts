@@ -4,7 +4,7 @@
 // `execute` falso, no espírito de `tests/mutations-harness.test.ts` (#148/
 // #149), que testa o harness comum sem rodar mutação de verdade.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -352,6 +352,21 @@ describe("runAllSlices", () => {
 // cada cenário abaixo roda dentro de um `package.json` falso, num diretório
 // temporário — nunca o `package.json` do repo.
 describe("realExecute", () => {
+  it("executa um Node cujo caminho contém espaços e preserva saída 3 com relatório limpo", () => {
+    const dir = workdir();
+    const nodePath = join(dir, process.platform === "win32" ? "node com espacos.exe" : "node com espacos");
+    copyFileSync(process.execPath, nodePath);
+    if (process.platform !== "win32") chmodSync(nodePath, 0o755);
+    const project = fakeProjectDir({
+      clean3: `${nodePath} -e "console.log(JSON.stringify({suite:'x',candidateSha:'d',killed:1,total:1,survivors:[],restoreGreen:true}));process.exit(3)"`,
+    });
+    const run = realExecute("clean3", { cwd: project, timeoutMs: 5000 });
+    expect(run.status).toBe(3);
+    expect(run.signal).toBeNull();
+    expect(run.error).toBeUndefined();
+    expect(extractJsonLine(run.stdout, "ctx")).toContain('"suite":"x"');
+  });
+
   it("MUTATION_ALL_TIMEOUT: mata o script que dorme além do timeout e marca error.code ETIMEDOUT", () => {
     const dir = fakeProjectDir({
       sleep: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
