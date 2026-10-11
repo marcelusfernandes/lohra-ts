@@ -144,6 +144,15 @@ export async function terminalTool(
     });
   }
 
+  return executeTerminalPty(args);
+}
+
+// Internal PTY executor. The public terminalTool keeps the approval boundary above.
+export async function executeTerminalPty(args: ToolArguments): Promise<string> {
+  const command = args.command;
+  if (!command || typeof command !== "string") {
+    return toolError("missing required argument 'command' (string)");
+  }
   const timeout = Object.hasOwn(args, "timeout") ? args.timeout : DEFAULT_TIMEOUT_SECONDS;
   const timeoutMs = timeoutMilliseconds(timeout);
   const cwd = args.cwd === undefined || args.cwd === null ? undefined : renderArgument(args.cwd);
