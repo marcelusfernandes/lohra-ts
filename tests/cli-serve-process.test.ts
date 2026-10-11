@@ -46,6 +46,8 @@ interface ProcessObservation {
   readonly body: string;
   readonly stderr: string;
   readonly exitCode: number | null;
+  readonly signal: NodeJS.Signals | null;
+  readonly portAvailable: boolean;
 }
 
 async function observeServeProcess(
@@ -104,6 +106,8 @@ async function observeServeProcess(
       body,
       stderr: Buffer.concat(stderrChunks).toString("utf8"),
       exitCode: processState.settled?.exitCode ?? null,
+      signal: null,
+      portAvailable: false,
     };
   } finally {
     if (processState.settled === null) child.kill("SIGKILL");
@@ -163,7 +167,18 @@ describe("serve CLI parse result reaches the real process configuration", () => 
           "--insecure with tools = UNAUTHENTICATED remote code execution",
         );
         expect(observed.stderr).not.toContain("API key:");
-        expect(observed.exitCode).toBe(0);
+        if (process.platform === "win32") {
+          expect({ exitCode: observed.exitCode, signal: observed.signal }).toEqual({
+            exitCode: null,
+            signal: "SIGINT",
+          });
+        } else {
+          expect({ exitCode: observed.exitCode, signal: observed.signal }).toEqual({
+            exitCode: 0,
+            signal: null,
+          });
+        }
+        expect(observed.portAvailable).toBe(true);
       },
       15_000,
     );
