@@ -1,6 +1,7 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { closeSync, existsSync, mkdtempSync, openSync, readSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 
 import { spawn as spawnPty } from "node-pty";
 
@@ -17,9 +18,47 @@ export interface TerminalOptions {
 }
 
 function appendBounded(current: string, chunk: string): string {
-  const remaining = MAX_OUTPUT_CODE_POINTS - Array.from(current).length;
+  let remaining = MAX_OUTPUT_CODE_POINTS - Array.from(current).length;
   if (remaining <= 0) return current;
-  return current + Array.from(chunk).slice(0, remaining).join("");
+  let added = "";
+  for (const point of chunk) {
+    if (remaining === 0) break;
+    added += point;
+    remaining -= 1;
+  }
+  return current + added;
+}
+
+function readBoundedFile(path: string): string {
+  const fd = openSync(path, "r");
+  let output = "";
+  let failure: string | null = null;
+  try {
+    const decoder = new StringDecoder("utf8");
+    const buffer = Buffer.allocUnsafe(8_192);
+    while (Array.from(output).length < MAX_OUTPUT_CODE_POINTS) {
+      const bytes = readSync(fd, buffer, 0, buffer.length, null);
+      if (bytes === 0) {
+        output = appendBounded(output, decoder.end());
+        break;
+      }
+      output = appendBounded(output, decoder.write(buffer.subarray(0, bytes)));
+    }
+  } catch (error) {
+    failure = `read failed: ${errorDetail(error)}`;
+  }
+  try {
+    closeSync(fd);
+  } catch (error) {
+    const closeFailure = `close failed: ${errorDetail(error)}`;
+    failure = failure === null ? closeFailure : `${failure}; ${closeFailure}`;
+  }
+  if (failure !== null) throw new Error(failure);
+  return output;
+}
+
+function errorDetail(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function renderArgument(value: unknown): string {
@@ -118,6 +157,7 @@ export async function terminalTool(
     let ptyOutput = "";
     let timedOut = false;
     let settled = false;
+    let killRequested = false;
     let child;
     try {
       child = spawnPty(invocation.executable, invocation.args, {
@@ -128,37 +168,98 @@ export async function terminalTool(
         name: "xterm-256color",
       });
     } catch (error) {
-      rmSync(captureRoot, { recursive: true, force: true });
-      const detail = error instanceof Error ? error.message : String(error);
-      resolve(toolError(`could not run command: ${detail}`, { command }));
+      let message = `could not run command: ${errorDetail(error)}`;
+      try {
+        rmSync(captureRoot, { recursive: true, force: true });
+      } catch (cleanupError) {
+        message += `; capture cleanup failed: ${errorDetail(cleanupError)}`;
+      }
+      resolve(toolError(message, { command }));
       return;
     }
-    child.onData((chunk) => {
+    const dataSubscription = child.onData((chunk) => {
       ptyOutput = appendBounded(ptyOutput, chunk);
     });
-    const timer =
-      timeoutMs === null
-        ? null
-        : setTimeout(() => {
-            timedOut = true;
-            child.kill();
-          }, timeoutMs);
-    child.onExit(({ exitCode }) => {
+    let timer: NodeJS.Timeout | null = null;
+    let exitWatchdog: NodeJS.Timeout | null = null;
+    let exitSubscription: { dispose(): void } | null = null;
+    const finish = (exitCode: number | null, lifecycleFailure?: string): void => {
       if (settled) return;
       settled = true;
       if (timer !== null) clearTimeout(timer);
-      const stdout = existsSync(stdoutPath)
-        ? appendBounded("", readFileSync(stdoutPath, "utf8"))
-        : "";
-      const stderr = existsSync(stderrPath)
-        ? appendBounded("", readFileSync(stderrPath, "utf8"))
-        : ptyOutput;
-      rmSync(captureRoot, { recursive: true, force: true });
+      if (exitWatchdog !== null) clearTimeout(exitWatchdog);
+      const failures = lifecycleFailure === undefined ? [] : [lifecycleFailure];
+      const attempt = (label: string, action: () => void): void => {
+        try {
+          action();
+        } catch (error) {
+          failures.push(`${label}: ${errorDetail(error)}`);
+        }
+      };
+      attempt("data listener cleanup failed", () => {
+        dataSubscription.dispose();
+      });
+      const subscription = exitSubscription;
+      if (subscription !== null) {
+        attempt("exit listener cleanup failed", () => {
+          subscription.dispose();
+        });
+      }
+      let stdout = "";
+      let stderr = ptyOutput;
+      if (existsSync(stdoutPath)) {
+        attempt("stdout capture read failed", () => {
+          stdout = readBoundedFile(stdoutPath);
+        });
+      }
+      if (existsSync(stderrPath)) {
+        attempt("stderr capture read failed", () => {
+          stderr = readBoundedFile(stderrPath);
+        });
+      }
+      // node-pty closes the ConPTY socket on natural exit but retains its
+      // output worker. kill() after onExit disposes that worker as well.
+      if (process.platform === "win32" && !killRequested) {
+        killRequested = true;
+        attempt("PTY cleanup failed", () => {
+          child.kill();
+        });
+      }
+      attempt("capture cleanup failed", () => {
+        rmSync(captureRoot, { recursive: true, force: true });
+      });
       if (timedOut) {
-        resolve(toolError(`command timed out after ${timeoutLabel(args, timeout)}s`, { command }));
+        const cause = failures.length === 0 ? "" : `; ${failures.join("; ")}`;
+        resolve(
+          toolError(`command timed out after ${timeoutLabel(args, timeout)}s${cause}`, { command }),
+        );
+        return;
+      }
+      if (failures.length > 0 || exitCode === null) {
+        resolve(toolError(`could not finish command: ${failures.join("; ")}`, { command }));
         return;
       }
       resolve(toolResult(undefined, { stdout, stderr, exit_code: exitCode }));
+    };
+    exitSubscription = child.onExit(({ exitCode }) => {
+      finish(exitCode);
     });
+    if (timeoutMs !== null) {
+      timer = setTimeout(() => {
+        timedOut = true;
+        killRequested = true;
+        try {
+          child.kill();
+        } catch (error) {
+          finish(null, `PTY termination failed: ${errorDetail(error)}`);
+          return;
+        }
+        if (!settled) {
+          exitWatchdog = setTimeout(() => {
+            finish(null, "PTY did not exit after termination");
+          }, 5_000);
+        }
+      }, timeoutMs);
+    }
   });
 }
