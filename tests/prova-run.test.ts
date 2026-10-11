@@ -117,7 +117,7 @@ describe("prova run.ts (subprocess)", () => {
       const dir = makeWorkdir();
       const result = runProva(dir, "absent");
       expect(result.status).toBe(1);
-      expect(result.stderr).toContain("prova/absent.ts");
+      expect(result.stderr).toContain(join("prova", "absent.ts"));
     },
     SPAWN_TIMEOUT_MS,
   );

@@ -42,7 +42,6 @@
 // `os.constants.signals` (128+n sem sinal conhecido cai para o literal
 // `128+n`) — sem nenhum `process.platform` no runtime nem nos testes.
 //
-import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { constants as osConstants } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -50,6 +49,7 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 
 import { canonicalJson, sha256 } from "./canonical.js";
+import { runNpmSync } from "../subprocess/npm.js";
 
 function isStringArray(value: unknown): value is readonly string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
@@ -303,19 +303,24 @@ export interface RealExecuteOptions {
  * `status`/`signal`/`error` é de `evaluateRun`. */
 export function realExecute(script: string, options: RealExecuteOptions = {}): RunResult {
   const { cwd = ROOT, timeoutMs = RUN_TIMEOUT_MS } = options;
-  const result = spawnSync("npm", ["run", script], {
-    cwd,
-    encoding: "utf8",
-    timeout: timeoutMs,
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  return {
-    status: result.status,
-    signal: result.signal,
-    stdout: result.stdout,
-    stderr: result.stderr,
-    ...(result.error !== undefined ? { error: result.error } : {}),
-  };
+  try {
+    const result = runNpmSync(["run", script], { cwd, timeoutMs, maxBuffer: 64 * 1024 * 1024 });
+    return {
+      status: result.status,
+      signal: result.signal,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      ...(result.error !== undefined ? { error: result.error } : {}),
+    };
+  } catch (cause) {
+    return {
+      status: null,
+      signal: null,
+      stdout: "",
+      stderr: "",
+      error: cause instanceof Error ? cause : new Error(String(cause)),
+    };
+  }
 }
 
 function main(): AllMutationsReport {
