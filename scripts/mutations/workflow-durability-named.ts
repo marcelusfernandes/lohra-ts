@@ -37,7 +37,6 @@ const normalizer = "scripts/mutations/fixtures/normalize-evidence.mjs";
 
 const repositoryTests = "tests/state-workflow-repository.test.ts";
 const serviceTests = "tests/workflow-service-durability.test.ts";
-const cleanupTests = "tests/workflow-service-durability-cleanup.test.ts";
 const durabilityTests = "tests/workflow-durability.test.ts";
 const sandboxTests = "tests/workflow-sandbox.test.ts";
 const tiersTests = "tests/workflow-tiers.test.ts";
@@ -200,7 +199,7 @@ export const namedMutants: readonly Mutant[] = [
     category: "sandbox",
     mechanism:
       "the launched run merges fs_allow/egress_allow out of the SPEC into the operator policy",
-    focus: { file: cleanupTests, test: "carries the OPERATOR policy, not the spec" },
+    focus: { file: serviceTests, test: "carries the OPERATOR policy, not the spec" },
     edits: [
       {
         file: service,
@@ -311,7 +310,7 @@ export const namedMutants: readonly Mutant[] = [
     category: "sandbox",
     mechanism:
       "an older acquisition's leaf wrapper keeps granting capability after a newer acquisition owns the run",
-    focus: { file: cleanupTests, test: "installs one sandbox per ACQUISITION" },
+    focus: { file: serviceTests, test: "installs one sandbox per ACQUISITION" },
     edits: [
       {
         file: service,
@@ -434,7 +433,7 @@ export const namedMutants: readonly Mutant[] = [
     category: "sandbox",
     mechanism:
       "the terminal line records the taint read before the engine started, losing taint a leaf picked up",
-    focus: { file: cleanupTests, test: "carries the OPERATOR policy, not the spec" },
+    focus: { file: serviceTests, test: "carries the OPERATOR policy, not the spec" },
     edits: [
       {
         file: service,
