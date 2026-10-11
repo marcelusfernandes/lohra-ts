@@ -267,8 +267,18 @@ describe("prepareArchiveSandbox", () => {
     git(dir, ["add", "-A"]);
     git(dir, ["commit", "-q", "-m", "v2"]);
 
+    const blobV1 = spawnSync("git", ["show", `${shaV1}:a.txt`], { cwd: dir });
+    const blobV2 = spawnSync("git", ["show", "HEAD:a.txt"], { cwd: dir });
+    expect(blobV1.status).toBe(0);
+    expect(blobV2.status).toBe(0);
+    expect(blobV1.stdout.toString("hex")).toBe(Buffer.from("versao-1\n").toString("hex"));
+    expect(blobV2.stdout.toString("hex")).toBe(Buffer.from("versao-2\n").toString("hex"));
+
     const sandbox = prepareArchiveSandbox(dir, shaV1);
     workdirs.push(sandbox);
+    expect(readFileSync(join(sandbox, "a.txt")).toString("hex")).toBe(
+      Buffer.from("versao-1\n").toString("hex"),
+    );
     expect(readFileSync(join(sandbox, "a.txt"), "utf8")).toBe("versao-1\n");
   });
 
