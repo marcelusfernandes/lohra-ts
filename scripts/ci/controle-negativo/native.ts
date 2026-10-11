@@ -211,6 +211,16 @@ function assertSameOverlay(red: string, head: string): void {
 
 /** A lista vem da declaração executada, não de um comentário ou expressão dinâmica. */
 export function declaredUnitsText(text: string): readonly string[] {
+  // O parser recupera erros e ainda pode expor um export literal parcial.
+  // Diagnósticos públicos recusam sintaxe inválida sem executar a prova.
+  const syntax = ts.transpileModule(text, {
+    fileName: "prova.ts",
+    reportDiagnostics: true,
+    compilerOptions: { target: ts.ScriptTarget.Latest, module: ts.ModuleKind.ESNext },
+  });
+  if (syntax.diagnostics?.some((item) => item.category === ts.DiagnosticCategory.Error)) {
+    throw new Error("NATIVE_PROOF_DECLARATION");
+  }
   const source = ts.createSourceFile("prova.ts", text, ts.ScriptTarget.Latest, true);
   const exports = source.statements.filter(ts.isExportAssignment);
   if (exports.length !== 1) throw new Error("NATIVE_PROOF_DECLARATION");
