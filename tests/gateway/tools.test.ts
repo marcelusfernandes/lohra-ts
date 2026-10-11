@@ -28,7 +28,9 @@ describe("createGatewayToolRuntime: RCE proof and dangerous-command deny (assert
       await runtime.dispatch("terminal", JSON.stringify({ command: "echo T12_TERMINAL_CANARY" })),
     ) as { ok: boolean; stdout: string; exit_code: number };
     expect(result.ok).toBe(true);
-    expect(result.stdout).toBe("T12_TERMINAL_CANARY\n");
+    expect(result.stdout).toBe(
+      process.platform === "win32" ? "T12_TERMINAL_CANARY\r\n" : "T12_TERMINAL_CANARY\n",
+    );
     expect(result.exit_code).toBe(0);
   });
 

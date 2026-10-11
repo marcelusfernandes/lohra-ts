@@ -1,0 +1,9 @@
+{
+  "node": "v22.23.2",
+  "pid": 6460,
+  "sentCtrlC": true,
+  "exitCode": 0,
+  "marker": "SIGINT_HANDLER",
+  "elapsedMs": 1291,
+  "readyObserved": true
+}

@@ -16,6 +16,43 @@ afterEach(() => {
 });
 
 describe("Windows terminal execution", () => {
+  it("routes an approved Windows command through the bridge after the dangerous-command check", async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform");
+    const bridged = '{"ok":true,"stdout":"OUT\\r\\n","stderr":"","exit_code":0}';
+    const bridge = vi.fn(() => Promise.resolve(bridged));
+    vi.doMock("../src/tools/terminal-windows.js", () => ({ runWindowsTerminalBridge: bridge }));
+    vi.doMock("node-pty", () => ({
+      spawn: () => {
+        throw new Error("direct PTY invoked");
+      },
+    }));
+    vi.resetModules();
+    Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
+    try {
+      const { terminalTool: isolatedTool } = await import("../src/tools/terminal.js");
+      const approved = await isolatedTool(
+        { command: "echo OUT" },
+        { approvalManager: new ApprovalManager() },
+      );
+      expect(approved).toBe(bridged);
+      expect(bridge).toHaveBeenCalledOnce();
+      const refused = JSON.parse(
+        await isolatedTool(
+          { command: "sudo echo OUT" },
+          { approvalManager: new ApprovalManager() },
+        ),
+      ) as { error: string; refusal: string };
+      expect(refused.error).toContain("dangerous-command policy");
+      expect(refused.refusal).toBe("final");
+      expect(bridge).toHaveBeenCalledOnce();
+    } finally {
+      if (platform !== undefined) Object.defineProperty(process, "platform", platform);
+      vi.doUnmock("node-pty");
+      vi.doUnmock("../src/tools/terminal-windows.js");
+      vi.resetModules();
+    }
+  });
+
   it("passes a raw cmd command line to node-pty without escaping redirection quotes", () => {
     const stdout = String.raw`C:\capture space ü\stdout`;
     const stderr = String.raw`C:\capture space ü\stderr`;

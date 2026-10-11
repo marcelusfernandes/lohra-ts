@@ -1,0 +1,14 @@
+{"node":"20","order":1,"family":"path-eloop","attribution":"UNATTRIBUTED_DIAGNOSTIC","next":"isolated-skill-path"}
+{"node":"20","order":2,"family":"path-eloop","attribution":"UNATTRIBUTED_DIAGNOSTIC","next":"isolated-skill-path"}
+{"node":"20","order":3,"family":"path-eloop","attribution":"UNATTRIBUTED_DIAGNOSTIC","next":"isolated-skill-path"}
+{"node":"20","order":4,"family":"path-eloop","attribution":"UNATTRIBUTED_DIAGNOSTIC","next":"isolated-skill-path"}
+{"node":"20","order":5,"family":"path-eloop","attribution":"UNATTRIBUTED_DIAGNOSTIC","next":"isolated-skill-path"}
+{"node":"20","order":6,"family":"mcp-shadowing","attribution":"UNATTRIBUTED_DIAGNOSTIC","next":"isolated-mcp-registry"}
+{"node":"20","order":7,"family":"path-eloop","attribution":"UNATTRIBUTED_DIAGNOSTIC","next":"isolated-skill-path"}
+{"node":"22","order":1,"family":"path-eloop","attribution":"UNATTRIBUTED_DIAGNOSTIC","next":"isolated-skill-path"}
+{"node":"22","order":2,"family":"path-eloop","attribution":"UNATTRIBUTED_DIAGNOSTIC","next":"isolated-skill-path"}
+{"node":"22","order":3,"family":"path-eloop","attribution":"UNATTRIBUTED_DIAGNOSTIC","next":"isolated-skill-path"}
+{"node":"22","order":4,"family":"path-eloop","attribution":"UNATTRIBUTED_DIAGNOSTIC","next":"isolated-skill-path"}
+{"node":"22","order":5,"family":"path-eloop","attribution":"UNATTRIBUTED_DIAGNOSTIC","next":"isolated-skill-path"}
+{"node":"22","order":6,"family":"mcp-shadowing","attribution":"UNATTRIBUTED_DIAGNOSTIC","next":"isolated-mcp-registry"}
+{"node":"22","order":7,"family":"path-eloop","attribution":"UNATTRIBUTED_DIAGNOSTIC","next":"isolated-skill-path"}

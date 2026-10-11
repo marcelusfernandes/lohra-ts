@@ -1,0 +1,11 @@
+{
+  "scenario": "setup",
+  "node": "v22.23.2",
+  "platform": "win32",
+  "childExit": 1,
+  "childError": null,
+  "originalCauseSeen": true,
+  "busySeen": false,
+  "remainingFixtureRoots": 0,
+  "remainingStateDb": 0
+}

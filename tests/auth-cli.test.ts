@@ -12,14 +12,16 @@ const fixture = (): { home: string; codexHome: string; environment: Record<strin
   const root = mkdtempSync(join(tmpdir(), "lohra-auth-cli-"));
   roots.push(root);
   const home = join(root, "home");
+  const lohraHome = join(home, ".lohra");
   const codexHome = join(root, "codex");
   mkdirSync(home, { recursive: true });
   mkdirSync(codexHome, { recursive: true });
   return {
-    home: join(home, ".lohra"),
+    home: lohraHome,
     codexHome,
     environment: {
       HOME: home,
+      LOHRA_HOME: lohraHome,
       CODEX_HOME: codexHome,
       PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
       TZ: "UTC",
@@ -47,6 +49,7 @@ async function invoke(argv: readonly string[], environment: Record<string, strin
 describe("public auth surfaces", () => {
   it("renders insertion-order auth status and enables only with explicit acknowledgement", async () => {
     const value = fixture();
+    expect(value.environment.LOHRA_HOME).toBe(value.home);
     const off = await invoke(["auth", "status", "--no-input"], value.environment);
     expect(off).toEqual({
       code: 0,
@@ -144,7 +147,7 @@ describe("public auth surfaces", () => {
     });
     expect(payload.checks.slice(0, 3).map((check) => check.detail)).toEqual([
       "OpenAI/Codex subscription (opt-in, ToS-gray)",
-      `active (OpenAI/Codex) — ${value.home}/auth.json`,
+      `active (OpenAI/Codex) — ${join(value.home, "auth.json")}`,
       "own OAuth token valid until 2033-05-18 03:33",
     ]);
   });

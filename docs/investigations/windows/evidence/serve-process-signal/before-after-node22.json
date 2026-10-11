@@ -1,0 +1,73 @@
+{
+  "schema": 1,
+  "node": "22.23.2",
+  "base": {
+    "sha": "ee6db18070b13a8c973edee622d07cccaed88ea8",
+    "exit": 1,
+    "rawReporterSha256": "174624f9b667418d21728e3f78d1d5e195b3df00087a792fa2a52193e84e7011",
+    "rawLogSha256": "ed92223d211e32ed3162804388b286588ea20be79e95613ad44a16c0c3fed45b",
+    "counts": {
+      "total": 3,
+      "passed": 0,
+      "failed": 3,
+      "pending": 0
+    },
+    "tests": [
+      {
+        "name": "serve CLI parse result reaches the real process configuration exact options",
+        "status": "failed",
+        "primary": "AssertionError: expected null to be +0 // Object.is equality",
+        "secondaryCount": 0
+      },
+      {
+        "name": "serve CLI parse result reaches the real process configuration unambiguous abbreviated options",
+        "status": "failed",
+        "primary": "AssertionError: expected null to be +0 // Object.is equality",
+        "secondaryCount": 0
+      },
+      {
+        "name": "serve CLI parse result reaches the real process configuration inline value options",
+        "status": "failed",
+        "primary": "AssertionError: expected null to be +0 // Object.is equality",
+        "secondaryCount": 0
+      }
+    ]
+  },
+  "candidate": {
+    "codeSha": "7aa3b8e2cbcbe5714999ebb2b60b1e3858805df1",
+    "exit": 0,
+    "proof": {
+      "ok": true,
+      "total": 3,
+      "failed": 0
+    },
+    "rawReporterSha256": "b1fda57b581d607a18e89773d300194a20f27d20b5097b9d34c45c6aaf321554",
+    "rawLogSha256": "35f1790be587dadae40ea56152ba8e1e2b2a6033c393341881dd2cee3024c9ce",
+    "counts": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "pending": 0
+    },
+    "tests": [
+      {
+        "name": "serve CLI parse result reaches the real process configuration exact options",
+        "status": "passed",
+        "primary": null,
+        "secondaryCount": 0
+      },
+      {
+        "name": "serve CLI parse result reaches the real process configuration unambiguous abbreviated options",
+        "status": "passed",
+        "primary": null,
+        "secondaryCount": 0
+      },
+      {
+        "name": "serve CLI parse result reaches the real process configuration inline value options",
+        "status": "passed",
+        "primary": null,
+        "secondaryCount": 0
+      }
+    ]
+  }
+}

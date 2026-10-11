@@ -1,0 +1,59 @@
+{
+  "source": "temporary logging of result.code and result.stderr in disposable clones; assertions otherwise unchanged",
+  "historical_node20": {
+    "resumed_cases": [
+      {
+        "session_id": "t287-chat-events-session",
+        "code": 1,
+        "error": "session not found: t287-chat-events-session"
+      },
+      {
+        "session_id": "t620-chat-events-resumed-session",
+        "code": 1,
+        "error": "session not found: t620-chat-events-resumed-session"
+      }
+    ]
+  },
+  "historical_node22": {
+    "resumed_cases": [
+      {
+        "session_id": "t287-chat-events-session",
+        "code": 1,
+        "error": "session not found: t287-chat-events-session"
+      },
+      {
+        "session_id": "t620-chat-events-resumed-session",
+        "code": 1,
+        "error": "session not found: t620-chat-events-resumed-session"
+      }
+    ]
+  },
+  "current_node22": {
+    "resumed_cases": [
+      {
+        "session_id": "t287-chat-events-session",
+        "code": 1,
+        "error": "session not found: t287-chat-events-session"
+      },
+      {
+        "session_id": "t620-chat-events-resumed-session",
+        "code": 1,
+        "error": "session not found: t620-chat-events-resumed-session"
+      }
+    ]
+  },
+  "current_node20": {
+    "resumed_cases": [
+      {
+        "session_id": "t287-chat-events-session",
+        "code": 1,
+        "error": "session not found: t287-chat-events-session"
+      },
+      {
+        "session_id": "t620-chat-events-resumed-session",
+        "code": 1,
+        "error": "session not found: t620-chat-events-resumed-session"
+      }
+    ]
+  }
+}

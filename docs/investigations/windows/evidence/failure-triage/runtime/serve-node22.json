@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "measuredSha": "4850b36079620f30f0d51621219f0e5fb4e646d2",
+  "probeStatus": "PASS_DIAGNOSTIC",
+  "commandExit": 0,
+  "rawLogSha256": "53944f385a7c02f293e0ea1a818057eef7966bc2e7696b69faf814806a2e8686",
+  "node": "v22.23.2",
+  "platform": "win32",
+  "stage": "complete",
+  "status": 200,
+  "listShape": true,
+  "warningTools": true,
+  "warningInsecure": true,
+  "printedApiKey": false,
+  "killReturned": true,
+  "exit": {
+    "code": null,
+    "signal": "SIGINT"
+  },
+  "portRebind": true,
+  "timedOut": false,
+  "spawnError": null,
+  "elapsedMs": 2128
+}

@@ -293,6 +293,12 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     options.environment,
   );
   const warningLines = fanout.warnings.map((warning) => `${warning}\n`).join("");
+  // Resolve once before acquiring the state database. An invalid override
+  // must fail without leaving a connection outside the turn's finally block.
+  // The system prompt still receives this frozen value for the whole session.
+  const doctrine = doctrineText(
+    resolveDoctrineTier({ providerName: profile.name, environment: options.environment }),
+  );
   const connection = openStateForEnvironment(options.environment);
   const sessions = new SessionRepository(connection.database, undefined, connection.ftsEnabled);
   // Issue #401: the ownership store is built AFTER `sessionToolBase` (it
@@ -321,13 +327,6 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     options.home,
     [join(options.cwd, ".claude", "skills")],
     [builtinSkills],
-  );
-  // Issue #579 (épico #575, P3): resolvido uma vez por sessão, aqui — nunca
-  // dentro de `snapshot` — porque o system prompt é construído uma vez por
-  // sessão e congelado (invariante 1 do CLAUDE.md); `profile` já está fixo
-  // neste ponto (linha 251 acima).
-  const doctrine = doctrineText(
-    resolveDoctrineTier({ providerName: profile.name, environment: options.environment }),
   );
   // Issue #580 (épico #575, P4): "headless" sob --json/--no-input (nenhum
   // humano observando este turno em tempo real, sem stdin para retomar uma

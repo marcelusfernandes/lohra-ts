@@ -1,0 +1,16 @@
+{
+  "sha": "4f70966",
+  "node": "v20.20.2",
+  "command": "serve",
+  "mechanism": "ctrlc",
+  "pid": 37900,
+  "httpStatus": 200,
+  "exit": { "exitCode": 0, "signal": null },
+  "portClosed": true,
+  "stateExisted": false,
+  "stateRemovable": null,
+  "cleanup": true,
+  "stubRequests": 0,
+  "elapsedMs": 1898,
+  "banner": true
+}

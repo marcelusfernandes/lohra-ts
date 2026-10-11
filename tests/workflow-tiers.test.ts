@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -326,6 +326,22 @@ describe("WorkflowService — the operator tier map reaches the WorkflowEngine (
 });
 
 describe("lohra tiers — fail-closed CLI", () => {
+  it("reports the native tier path when home ends with a separator", async () => {
+    const home = root();
+    const path = tiersPath(home);
+    writeFileSync(path, "[");
+    const result = await runTiers({
+      action: "list",
+      noInput: true,
+      home: `${home}${sep}`,
+      environment: {},
+      probeOllama: () => Promise.reject(new Error("must not be called")),
+    });
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain(path);
+  });
+
   it("exits 1 with the error on stderr for a broken tier file", async () => {
     const home = root();
     writeFileSync(tiersPath(home), "[");

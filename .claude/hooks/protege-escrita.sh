@@ -11,7 +11,14 @@
 # não der para canonicalizar cwd. Portado do Apollo (protege-escrita.sh), sem as
 # regras de dono único que não existem aqui.
 set -u
-payload=$(cat)
+if payload=$(cat 2>/dev/null); then
+  :
+else
+  reader_status=$?
+  reason="Bloqueado por .claude/hooks/protege-escrita.sh: falha de leitura do payload (status $reader_status); nego por segurança (fail-closed)."
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}' "$reason"
+  echo "$reason" >&2; exit 2
+fi
 # FAIL-CLOSED sem node: este hook é a ÚNICA camada que protege docs/reference/ e
 # lohra/ (não há pre-push, ruleset nem Action para escrita de arquivo).
 if ! command -v node >/dev/null 2>&1; then
@@ -38,7 +45,9 @@ PE_PAYLOAD="$payload" node -e '
     process.stderr.write(reason + "\n");
     process.exit(2);
   };
-  const realpath = (p) => { try { return fs.realpathSync(p); } catch { return null; } };
+  // O realpath JS pode preservar um alias 8.3 (RUNNER~1) que o Git expande.
+  // O nativo devolve a mesma grafia canônica para alvo e raiz no Windows.
+  const realpath = (p) => { try { return fs.realpathSync.native(p); } catch { return null; } };
 
   const cwdReal = realpath(cwd);
   if (cwdReal === null) negar("não consegui resolver o caminho real de cwd (" + cwd + "); nego por segurança.");
@@ -54,6 +63,14 @@ PE_PAYLOAD="$payload" node -e '
     let dir = start;
     for (;;) {
       const r = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd: dir, encoding: "utf8" });
+      if (r.error) {
+        let code = "UNKNOWN";
+        try {
+          const value = r.error.code;
+          if (typeof value === "string" && /^[A-Z][A-Z0-9_]{0,24}$/.test(value)) code = value;
+        } catch { /* causa ilegível também resulta em recusa explícita */ }
+        negar("falha ao lançar git (" + code + "); nego por segurança.");
+      }
       if (r.status !== 0) break;
       const top = realpath(r.stdout.trim()) || r.stdout.trim();
       tops.push(top);

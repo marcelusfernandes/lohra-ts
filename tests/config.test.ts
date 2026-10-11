@@ -17,14 +17,14 @@ afterEach(() => {
 
 describe("profile paths and env file", () => {
   it("uses LOHRA_HOME verbatim and keeps .env at the base when profiled", () => {
-    expect(resolvePaths({ HOME: "/user", LOHRA_HOME: "/custom", LOHRA_PROFILE: "myprof" })).toEqual(
-      {
-        base: "/custom",
-        home: "/custom/profiles/myprof",
-        envFile: "/custom/.env",
-        profile: "myprof",
-      },
-    );
+    const paths = resolvePaths({ HOME: "/user", LOHRA_HOME: "/custom", LOHRA_PROFILE: "myprof" });
+    expect(paths.base).toBe("/custom");
+    expect(paths).toEqual({
+      base: "/custom",
+      home: join("/custom", "profiles", "myprof"),
+      envFile: join("/custom", ".env"),
+      profile: "myprof",
+    });
   });
 
   it("rejects traversal, Unicode and oversized profile names", () => {

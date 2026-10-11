@@ -1,0 +1,22 @@
+[
+  {
+    "mode": "inherited",
+    "coreAutocrlfEffective": "true",
+    "coreAutocrlfLocal": null,
+    "blobV1Hex": "76657273616f2d310a",
+    "blobV2Hex": "76657273616f2d320a",
+    "archiveRequestedV1Hex": "76657273616f2d310d0a",
+    "headIsV2": true,
+    "clean": true
+  },
+  {
+    "mode": "local-false",
+    "coreAutocrlfEffective": "false",
+    "coreAutocrlfLocal": "false",
+    "blobV1Hex": "76657273616f2d310a",
+    "blobV2Hex": "76657273616f2d320a",
+    "archiveRequestedV1Hex": "76657273616f2d310a",
+    "headIsV2": true,
+    "clean": true
+  }
+]

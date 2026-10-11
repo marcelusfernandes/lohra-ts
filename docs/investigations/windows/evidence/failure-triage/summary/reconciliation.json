@@ -1,0 +1,95 @@
+{
+  "inventorySha": "ebeb722f898bdb4cde5b7d7cef66fb40febf5c15",
+  "assertions": {
+    "20": 229,
+    "22": 232
+  },
+  "fileResults": 336,
+  "failedFiles": {
+    "20": 54,
+    "22": 54
+  },
+  "uniqueIds": 232,
+  "sharedIds": 229,
+  "onlyNode20": 0,
+  "onlyNode22": 3,
+  "secondary": {
+    "20": 17,
+    "22": 17
+  },
+  "stderr": {
+    "20": 7,
+    "22": 7
+  },
+  "byStatus": {
+    "confirmed": 42,
+    "INCONCLUSIVE": 190
+  },
+  "byNodeStatus": {
+    "20": {
+      "confirmed": 40,
+      "INCONCLUSIVE": 189
+    },
+    "22": {
+      "confirmed": 42,
+      "INCONCLUSIVE": 190
+    }
+  },
+  "byFamily": {
+    "line-ending:tests/gateway/tools.test.ts": 1,
+    "line-ending:tests/mutations-harness.test.ts": 1,
+    "negative-npm": 17,
+    "npm-pack-unresolved": 2,
+    "posix-mode-observed": 5,
+    "serve-child-kill": 3,
+    "signal-harness-unresolved": 4,
+    "sqlite-session-fixture": 22,
+    "sqlite-unresolved:tests/chat-doctrine-tier.test.ts": 1,
+    "sqlite-unresolved:tests/gateway-compaction-events.test.ts": 2,
+    "sqlite-unresolved:tests/gateway-compaction.test.ts": 1,
+    "sqlite-unresolved:tests/gateway/prompt-submit.test.ts": 16,
+    "sqlite-unresolved:tests/gateway/raw-socket-primitives.test.ts": 6,
+    "sqlite-unresolved:tests/gateway/rpc-dispatch.test.ts": 8,
+    "sqlite-unresolved:tests/gateway/ws-connection-notices.test.ts": 2,
+    "sqlite-unresolved:tests/orchestration-chat-wiring.test.ts": 4,
+    "sqlite-unresolved:tests/session-tools.test.ts": 2,
+    "sqlite-unresolved:tests/workflow-leaf-read-tool.test.ts": 13,
+    "sqlite-unresolved:tests/workflow-templates.test.ts": 2,
+    "state-path-unresolved": 1,
+    "stub-driver-unresolved": 3,
+    "unresolved:tests/auth-cli.test.ts": 3,
+    "unresolved:tests/auth-core.test.ts": 2,
+    "unresolved:tests/chat-audit-trail-wiring.test.ts": 1,
+    "unresolved:tests/chat-doctrine-tier.test.ts": 2,
+    "unresolved:tests/chat-prompt-caching.test.ts": 4,
+    "unresolved:tests/chat-provider-detectado.test.ts": 2,
+    "unresolved:tests/claude-skills-scripts.test.ts": 12,
+    "unresolved:tests/cli-doctor.test.ts": 2,
+    "unresolved:tests/config.test.ts": 1,
+    "unresolved:tests/context.test.ts": 1,
+    "unresolved:tests/eval-cases.test.ts": 1,
+    "unresolved:tests/eval-session-internals.test.ts": 1,
+    "unresolved:tests/gateway/dashboard-prompt-contract.test.ts": 1,
+    "unresolved:tests/gateway/dashboard-ws-overlay.test.ts": 4,
+    "unresolved:tests/gateway/launch-candidate-argv.test.ts": 1,
+    "unresolved:tests/gateway/launch-candidate.test.ts": 1,
+    "unresolved:tests/local-cli.test.ts": 1,
+    "unresolved:tests/media-handlers.test.ts": 1,
+    "unresolved:tests/models.test.ts": 2,
+    "unresolved:tests/mutations-all.test.ts": 2,
+    "unresolved:tests/onboarding.test.ts": 2,
+    "unresolved:tests/protege-escrita.test.ts": 10,
+    "unresolved:tests/protege-main.test.ts": 24,
+    "unresolved:tests/providers.test.ts": 1,
+    "unresolved:tests/self-update.test.ts": 1,
+    "unresolved:tests/sem-python.test.ts": 2,
+    "unresolved:tests/stop-gate.test.ts": 17,
+    "unresolved:tests/tools-local.test.ts": 3,
+    "unresolved:tests/workflow-audit-live.test.ts": 2,
+    "unresolved:tests/workflow-durable-chat.test.ts": 2,
+    "unresolved:tests/workflow-durable-dashboard.test.ts": 2,
+    "unresolved:tests/workflow-live-tail.test.ts": 2,
+    "unresolved:tests/workflow-notices-sink.test.ts": 1,
+    "unresolved:tests/workflow-tiers.test.ts": 2
+  }
+}

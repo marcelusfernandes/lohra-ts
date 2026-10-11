@@ -6,7 +6,7 @@
 // check first).
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -28,6 +28,22 @@ function neverProbe(): Promise<never> {
 }
 
 describe("runModels — fail-closed tier reading (#261)", () => {
+  it("reports the native tier path when home ends with a separator", async () => {
+    const home = root();
+    const path = join(home, "workflow_tiers.json");
+    writeFileSync(path, "[");
+    const result = await runModels({
+      json: true,
+      home: `${home}${sep}`,
+      environment: {},
+      probeOllama: neverProbe,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe("");
+    const parsed = JSON.parse(result.stdout) as { readonly error?: string };
+    expect(parsed.error).toContain(path);
+  });
+
   it("exits 1 on stderr, not stdout, for a broken workflow_tiers.json (text mode)", async () => {
     const home = root();
     writeFileSync(join(home, "workflow_tiers.json"), "[");

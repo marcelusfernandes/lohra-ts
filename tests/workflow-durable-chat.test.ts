@@ -269,6 +269,7 @@ describe("chat.ts composition root (issue #101, AC 3): run_workflow via runChat 
         defaultMaxTokens: 256,
         defaultAuxModel: "",
       });
+      const home = join(root, ".lohra");
       const result = await runChat({
         input: "run the durable-chat workflow",
         flags: new Map<string, string | true>([
@@ -277,8 +278,8 @@ describe("chat.ts composition root (issue #101, AC 3): run_workflow via runChat 
           ["--json", true],
           ["--no-input", true],
         ]),
-        environment: { HOME: root, PATH: process.env.PATH ?? "" },
-        home: join(root, ".lohra"),
+        environment: { HOME: root, LOHRA_HOME: home, PATH: process.env.PATH ?? "" },
+        home,
         codexHome: join(root, ".codex"),
         cwd: root,
       });
@@ -325,6 +326,7 @@ describe("chat.ts composition root (issue #121, AC 2): shutdown() releases a sti
         defaultMaxTokens: 256,
         defaultAuxModel: "",
       });
+      const home = join(root, ".lohra");
       const result = await runChat({
         input: "run the shutdown-roots workflow",
         flags: new Map<string, string | true>([
@@ -333,8 +335,8 @@ describe("chat.ts composition root (issue #121, AC 2): shutdown() releases a sti
           ["--json", true],
           ["--no-input", true],
         ]),
-        environment: { HOME: root, PATH: process.env.PATH ?? "" },
-        home: join(root, ".lohra"),
+        environment: { HOME: root, LOHRA_HOME: home, PATH: process.env.PATH ?? "" },
+        home,
         codexHome: join(root, ".codex"),
         cwd: root,
       });

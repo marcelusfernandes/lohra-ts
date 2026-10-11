@@ -6,8 +6,9 @@ import { StringDecoder } from "node:string_decoder";
 import { spawn as spawnPty } from "node-pty";
 
 import { ApprovalManager, approval, detectDangerousCommand } from "./approval.js";
-import { jsonNumberKind } from "./arguments.js";
+import { jsonNumberKind, type JsonNumberKind } from "./arguments.js";
 import { toolError, toolResult } from "./envelope.js";
+import { runWindowsTerminalBridge } from "./terminal-windows.js";
 import type { ToolArguments } from "./types.js";
 
 const DEFAULT_TIMEOUT_SECONDS = 30;
@@ -71,10 +72,10 @@ function renderArgument(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function timeoutLabel(args: ToolArguments, timeout: unknown): string {
+function timeoutLabel(args: ToolArguments, timeout: unknown, kind?: JsonNumberKind | null): string {
   if (typeof timeout === "boolean") return JSON.stringify(timeout);
   if (typeof timeout === "number") {
-    if (jsonNumberKind(args, "timeout") === "float" && Number.isInteger(timeout)) {
+    if ((kind ?? jsonNumberKind(args, "timeout")) === "float" && Number.isInteger(timeout)) {
       return timeout.toFixed(1);
     }
     return String(timeout);
@@ -144,6 +145,18 @@ export async function terminalTool(
     });
   }
 
+  return process.platform === "win32" ? runWindowsTerminalBridge(args) : executeTerminalPty(args);
+}
+
+// Internal PTY executor. The public terminalTool keeps the approval boundary above.
+export async function executeTerminalPty(
+  args: ToolArguments,
+  timeoutKind?: JsonNumberKind | null,
+): Promise<string> {
+  const command = args.command;
+  if (!command || typeof command !== "string") {
+    return toolError("missing required argument 'command' (string)");
+  }
   const timeout = Object.hasOwn(args, "timeout") ? args.timeout : DEFAULT_TIMEOUT_SECONDS;
   const timeoutMs = timeoutMilliseconds(timeout);
   const cwd = args.cwd === undefined || args.cwd === null ? undefined : renderArgument(args.cwd);
@@ -231,7 +244,12 @@ export async function terminalTool(
       if (timedOut) {
         const cause = failures.length === 0 ? "" : `; ${failures.join("; ")}`;
         resolve(
-          toolError(`command timed out after ${timeoutLabel(args, timeout)}s${cause}`, { command }),
+          toolError(
+            `command timed out after ${timeoutLabel(args, timeout, timeoutKind)}s${cause}`,
+            {
+              command,
+            },
+          ),
         );
         return;
       }

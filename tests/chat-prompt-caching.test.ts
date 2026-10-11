@@ -130,6 +130,7 @@ describe("chat.ts passes the full SystemPromptSnapshot to the Anthropic transpor
         ]),
         environment: {
           HOME: root,
+          LOHRA_HOME: join(root, ".lohra"),
           PATH: process.env.PATH ?? "",
           T586_CHAT_KEY: "test-key",
         },
@@ -194,6 +195,7 @@ describe("chat.ts passes the full SystemPromptSnapshot to the Anthropic transpor
         ]),
         environment: {
           HOME: root,
+          LOHRA_HOME: join(root, ".lohra"),
           PATH: process.env.PATH ?? "",
           T624_CHAT_TOOLS_KEY: "test-key",
         },
@@ -262,6 +264,7 @@ describe("chat.ts passes the full SystemPromptSnapshot to the Anthropic transpor
         ]),
         environment: {
           HOME: root,
+          LOHRA_HOME: join(root, ".lohra"),
           PATH: process.env.PATH ?? "",
           T648_CHAT_CONTEXT_CACHE_KEY: "test-key",
         },
@@ -326,6 +329,7 @@ describe("chat.ts resumed session sends the request Anthropic byte-identical to 
       });
       const baseEnvironment = {
         HOME: root,
+        LOHRA_HOME: join(root, ".lohra"),
         PATH: process.env.PATH ?? "",
         T649_CHAT_RESUME_KEY: "test-key",
       };

@@ -1,0 +1,32 @@
+{
+  "node": "node22",
+  "readOnlyAttribute": false,
+  "accessRuleCount": 4,
+  "accessRulesProtected": false,
+  "aces": [
+    {
+      "principalClass": "ADMINISTRATORS",
+      "type": "Allow",
+      "rights": "FullControl",
+      "inherited": true
+    },
+    {
+      "principalClass": "SYSTEM",
+      "type": "Allow",
+      "rights": "FullControl",
+      "inherited": true
+    },
+    {
+      "principalClass": "AUTHENTICATED_USERS",
+      "type": "Allow",
+      "rights": "Modify, Synchronize",
+      "inherited": true
+    },
+    {
+      "principalClass": "USERS",
+      "type": "Allow",
+      "rights": "ReadAndExecute, Synchronize",
+      "inherited": true
+    }
+  ]
+}

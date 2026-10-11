@@ -38,11 +38,22 @@ describe("Windows terminal lifecycle", () => {
         const script = join(workspace, "run-tool.mjs");
         writeFileSync(
           script,
-          `const { terminalTool } = await import(${JSON.stringify(moduleUrl)});\n` +
+          `import { mkdtempSync, rmSync } from "node:fs";\n` +
+            `import { tmpdir } from "node:os";\n` +
+            `import { join } from "node:path";\n` +
+            `const { terminalTool } = await import(${JSON.stringify(moduleUrl)});\n` +
             `const { ApprovalManager } = await import(${JSON.stringify(approvalUrl)});\n` +
-            `const result = await terminalTool({ command: "echo OUT" }, ` +
-            `{ approvalManager: new ApprovalManager() });\n` +
-            `console.log("TOOL_RESPONSE=" + result);\n`,
+            `const before = process.cwd();\n` +
+            `const caller = mkdtempSync(join(tmpdir(), "lohra859-caller-"));\n` +
+            `process.chdir(caller);\n` +
+            `let response;\n` +
+            `try { response = JSON.parse(await terminalTool({ command: "echo LOHRA859_OK", cwd: before }, ` +
+            `{ approvalManager: new ApprovalManager() })); }\n` +
+            `finally { process.chdir(before); }\n` +
+            `let released = false; let releaseError = null;\n` +
+            `try { rmSync(caller, { recursive: true, force: true }); released = true; }\n` +
+            `catch (error) { releaseError = error.code ?? String(error); }\n` +
+            `console.log("CWD_RESPONSE=" + JSON.stringify({ response, released, releaseError }));\n`,
         );
         const observed = await new Promise<{
           code: number | null;
@@ -50,7 +61,7 @@ describe("Windows terminal lifecycle", () => {
           stdout: string;
           stderr: string;
         }>((resolve, reject) => {
-          const child = spawn(process.execPath, ["--import", "tsx", script], {
+          const child = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), script], {
             cwd: process.cwd(),
             env: { ...process.env, TEMP: workspace, TMP: workspace },
             windowsHide: true,
@@ -76,8 +87,27 @@ describe("Windows terminal lifecycle", () => {
         expect(observed.timedOut).toBe(false);
         expect(observed.code).toBe(0);
         expect(observed.stderr).toBe("");
-        expect(observed.stdout).toContain('TOOL_RESPONSE={"ok":true,"stdout":"OUT');
-        expect(observed.stdout.match(/TOOL_RESPONSE=/g)).toHaveLength(1);
+        const responses = observed.stdout
+          .split(/\r?\n/)
+          .filter((line) => line.startsWith("CWD_RESPONSE="));
+        expect(responses).toHaveLength(1);
+        const response = responses[0];
+        if (response === undefined) throw new Error("missing cwd response");
+        const parsed = JSON.parse(response.slice("CWD_RESPONSE=".length)) as {
+          response: { ok: boolean; stdout: string; stderr: string; exit_code: number };
+          released: boolean;
+          releaseError: string | null;
+        };
+        expect(
+          parsed.response,
+          JSON.stringify({ released: parsed.released, releaseError: parsed.releaseError }),
+        ).toEqual({
+          ok: true,
+          stdout: "LOHRA859_OK\r\n",
+          stderr: "",
+          exit_code: 0,
+        });
+        expect(parsed.released, parsed.releaseError ?? "").toBe(true);
         expect(readdirSync(workspace).filter((name) => name.startsWith("lohra-terminal-"))).toEqual(
           [],
         );

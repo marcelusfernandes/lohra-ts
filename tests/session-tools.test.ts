@@ -15,9 +15,27 @@ import { openStateDatabase, SessionRepository } from "../src/state/index.js";
 import { WorkflowService, type ChildRuntime } from "../src/workflow/index.js";
 
 const roots: string[] = [];
+const connections: ReturnType<typeof openStateDatabase>[] = [];
 
 afterEach(() => {
-  while (roots.length > 0) rmSync(roots.pop() as string, { recursive: true, force: true });
+  const failures: unknown[] = [];
+  for (const connection of connections.splice(0).reverse()) {
+    try {
+      connection.close();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  for (const root of roots.splice(0).reverse()) {
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length > 1)
+    throw new AggregateError(failures, "session tools fixture cleanup failed");
+  if (failures.length === 1) throw failures[0];
 });
 
 function neverSpawningRuntime(): ChildRuntime {
@@ -41,6 +59,7 @@ function setup(): { readonly tools: ReturnType<typeof composeSessionTools> } {
   const root = mkdtempSync(join(tmpdir(), "lohra-session-tools-"));
   roots.push(root);
   const connection = openStateDatabase(join(root, "state.db"));
+  connections.push(connection);
   const sessions = new SessionRepository(connection.database, () => 1000, connection.ftsEnabled);
   const base = createSessionToolBase(connection.database, {});
   const workflowService = new WorkflowService({ runtime: neverSpawningRuntime() });

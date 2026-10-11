@@ -128,6 +128,7 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 
 import { branchSlug } from "../../prova/slug.js";
+import { resolveNpmCli } from "../../subprocess/npm.js";
 import {
   causaGit,
   git,
@@ -324,17 +325,27 @@ interface ExecucaoProva {
 export const TIMEOUT_PROVA_MS = 10 * 60 * 1000;
 
 function rodarProvaNaBase(tmpDir: string, slug: string): ExecucaoProva {
-  const npmBin = process.platform === "win32" ? "npm.cmd" : "npm";
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
       ([chave]) => !chave.startsWith("VITEST") && chave !== "LOHRA_PROVA_OUT",
     ),
   );
-  const resultado = spawnSync(npmBin, ["run", "-s", "prova", "--", slug], {
+  let npmCli: string;
+  try {
+    npmCli = resolveNpmCli({ env });
+  } catch (cause) {
+    return {
+      status: null,
+      signal: null,
+      error: cause instanceof Error ? cause : new Error("NPM_CLI_RESOLVE_FAILED", { cause }),
+    };
+  }
+  const resultado = spawnSync(process.execPath, [npmCli, "run", "-s", "prova", "--", slug], {
     cwd: tmpDir,
     stdio: "inherit",
     env,
     timeout: TIMEOUT_PROVA_MS,
+    shell: false,
   });
   return {
     status: resultado.status,

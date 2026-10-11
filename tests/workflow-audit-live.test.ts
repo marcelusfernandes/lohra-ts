@@ -142,7 +142,7 @@ describe("T17 metadata-only audit", () => {
           ["--json", true],
           ["--no-input", true],
         ]),
-        environment: { HOME: root, PATH: process.env.PATH ?? "" },
+        environment: { HOME: root, LOHRA_HOME: join(root, ".lohra"), PATH: process.env.PATH ?? "" },
         home: join(root, ".lohra"),
         codexHome: join(root, ".codex"),
         cwd: root,
@@ -1164,7 +1164,7 @@ describe("T17 workflow CLI", () => {
     const stdout: string[] = [];
     const stderr: string[] = [];
     const value: CliIo = {
-      environment: { HOME: root, PATH: process.env.PATH ?? "" },
+      environment: { HOME: root, LOHRA_HOME: join(root, ".lohra"), PATH: process.env.PATH ?? "" },
       stdout: (text) => stdout.push(text),
       stderr: (text) => stderr.push(text),
     };

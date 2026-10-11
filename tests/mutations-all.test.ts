@@ -4,12 +4,22 @@
 // `execute` falso, no espírito de `tests/mutations-harness.test.ts` (#148/
 // #149), que testa o harness comum sem rodar mutação de verdade.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { runNpmSync } from "../scripts/subprocess/npm.js";
 import {
   buildReport,
   evaluateRun,
@@ -46,14 +56,70 @@ function workdir(): string {
 /** Um diretório temporário com o próprio `package.json` (`scripts`) — para
  * `realExecute` de verdade sem tocar o `package.json` do repo (issue #196,
  * `Files` não inclui `package.json`). */
-function fakeProjectDir(scripts: Record<string, string>): string {
-  const dir = workdir();
+function fakeNodeProject(
+  script: string,
+  source: string,
+  nodeExecutable = process.execPath,
+  dir = workdir(),
+): string {
+  const childPath = join(dir, "child.js");
+  writeFileSync(childPath, source, "utf8");
+  // npm usa cmd.exe no Windows: `call` mantém as aspas do executável com
+  // espaços sem fazer o shell interpretar C:\Program como outro comando.
+  const nodeCommand = `${process.platform === "win32" ? "call " : ""}"${nodeExecutable}" "${childPath}"`;
   writeFileSync(
     join(dir, "package.json"),
-    JSON.stringify({ name: "fake-mutations-all-project", version: "0.0.0", scripts }),
+    JSON.stringify({
+      name: "fake-mutations-all-project",
+      version: "0.0.0",
+      scripts: { [script]: nodeCommand },
+    }),
     "utf8",
   );
   return dir;
+}
+
+async function waitForTimeoutFixture(dir: string): Promise<void> {
+  const pidPath = join(dir, "child.pid");
+  const donePath = join(dir, "child.done");
+  const startDeadline = Date.now() + 6_000;
+  while (!existsSync(pidPath) && Date.now() < startDeadline) await delay(50);
+  if (!existsSync(pidPath)) return;
+
+  const pid = Number(readFileSync(pidPath, "utf8"));
+  if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error("TIMEOUT_FIXTURE_BAD_PID");
+  const exitDeadline = Date.now() + 1_000;
+  while (Date.now() < exitDeadline) {
+    if (existsSync(donePath)) {
+      try {
+        process.kill(pid, 0);
+      } catch (cause) {
+        if ((cause as NodeJS.ErrnoException).code === "ESRCH") return;
+        throw cause;
+      }
+    }
+    await delay(50);
+  }
+  throw new Error("TIMEOUT_FIXTURE_CHILD_STILL_RUNNING");
+}
+
+function timeoutChildSource(dir: string): string {
+  const stopPath = join(dir, "child.stop");
+  return `const fs=require('node:fs');
+    fs.writeFileSync(${JSON.stringify(join(dir, "child.pid"))},String(process.pid));
+    let finished=false;
+    const finish=()=>{
+      if(finished)return;
+      finished=true;
+      clearInterval(tick);
+      clearTimeout(fallback);
+      fs.writeFileSync(${JSON.stringify(join(dir, "child.done"))},'done');
+      process.exit(0);
+    };
+    const tick=setInterval(()=>{
+      if(fs.existsSync(${JSON.stringify(stopPath)}))finish();
+    },20);
+    const fallback=setTimeout(finish,5000);`;
 }
 
 /** Uma linha JSON de relatório de fatia, no mesmo formato que os seis
@@ -219,11 +285,10 @@ describe("evaluateRun", () => {
     );
   });
 
-  // issue #196, rodada 2 (revisão da PR #200): `npm run <script>` sempre
-  // passa por um shell entre `spawnSync` e o script; no Linux da CI, esse
-  // shell converte morte por sinal em `status` 128+n em vez de propagar
-  // `signal` (137 = 128+SIGKILL, 143 = 128+SIGTERM) — no macOS o sinal chega
-  // direto. `evaluateRun` trata os dois caminhos como o mesmo fault.
+  // issue #196: o shell POSIX pode converter sinal em status 128+n. No
+  // Windows medido, cmd.exe retorna status 1 sem signal: o filho imprime o
+  // marcador antes de morrer e evaluateRun falha por NO_REPORT, sem inventar
+  // um SIGKILL que a API não informou.
   it("lança MUTATION_ALL_KILLED:SIGKILL quando status é 137 (128+SIGKILL) sem signal", () => {
     expect(() => evaluateRun(exitRun(137), "ctx")).toThrow(/^MUTATION_ALL_KILLED:ctx:SIGKILL$/);
   });
@@ -352,15 +417,74 @@ describe("runAllSlices", () => {
 // cada cenário abaixo roda dentro de um `package.json` falso, num diretório
 // temporário — nunca o `package.json` do repo.
 describe("realExecute", () => {
-  it("MUTATION_ALL_TIMEOUT: mata o script que dorme além do timeout e marca error.code ETIMEDOUT", () => {
-    const dir = fakeProjectDir({
-      sleep: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+  it("executa um Node cujo caminho contém espaços e preserva saída 3 com relatório limpo", () => {
+    const dir = workdir();
+    const nodePath = join(
+      dir,
+      process.platform === "win32" ? "node com espacos.exe" : "node com espacos",
+    );
+    copyFileSync(process.execPath, nodePath);
+    if (process.platform !== "win32") chmodSync(nodePath, 0o755);
+    fakeNodeProject(
+      "clean3",
+      "console.log(JSON.stringify({suite:'x',candidateSha:'d',killed:1,total:1,survivors:[],restoreGreen:true}));process.exit(3)",
+      nodePath,
+      dir,
+    );
+    const run = realExecute("clean3", { cwd: dir, timeoutMs: 5000 });
+    expect(run.status).toBe(3);
+    expect(run.signal).toBeNull();
+    expect(run.error).toBeUndefined();
+    expect(extractJsonLine(run.stdout, "ctx")).toContain('"suite":"x"');
+  });
+
+  it("MUTATION_ALL_TIMEOUT: mata o script que dorme além do timeout e marca error.code ETIMEDOUT", async () => {
+    const dir = workdir();
+    const stopPath = join(dir, "child.stop");
+    fakeNodeProject("sleep", timeoutChildSource(dir), process.execPath, dir);
+    let assertionFault: unknown;
+    try {
+      const run = realExecute("sleep", { cwd: dir, timeoutMs: 300 });
+      expect(run.status).toBeNull();
+      expect(run.signal).toBe("SIGTERM");
+      expect(run.error?.message).toMatch(/ETIMEDOUT/);
+      expect((run.error as NodeJS.ErrnoException | undefined)?.code).toBe("ETIMEDOUT");
+    } catch (cause) {
+      assertionFault = cause;
+    }
+    // npm/cmd pode lançar o filho mesmo depois de ETIMEDOUT (#877). A fixture
+    // recebe STOP, confirma por marcador que o processo próprio saiu e só
+    // então o afterEach tenta rm uma vez. Não afirma que npm matou a árvore.
+    try {
+      writeFileSync(stopPath, "stop", "utf8");
+      if (process.platform === "win32") await waitForTimeoutFixture(dir);
+    } catch (cleanupFault) {
+      if (assertionFault !== undefined) {
+        throw new AggregateError(
+          [assertionFault, cleanupFault],
+          "TIMEOUT_FIXTURE_AND_ASSERTION_FAILED",
+          { cause: cleanupFault },
+        );
+      }
+      throw cleanupFault;
+    }
+    if (assertionFault !== undefined) {
+      if (assertionFault instanceof Error) throw assertionFault;
+      throw new Error("TIMEOUT_ASSERTION_FAILED", { cause: assertionFault });
+    }
+  }, 10_000);
+
+  it("fixture de timeout encerra o próprio filho após 5 s sem STOP", () => {
+    const dir = workdir();
+    fakeNodeProject("sleep", timeoutChildSource(dir), process.execPath, dir);
+    const child = spawnSync(process.execPath, [join(dir, "child.js")], {
+      timeout: 6_500,
+      encoding: "utf8",
     });
-    const run = realExecute("sleep", { cwd: dir, timeoutMs: 300 });
-    expect(run.status).toBeNull();
-    expect(run.signal).toBe("SIGTERM");
-    expect(run.error?.message).toMatch(/ETIMEDOUT/);
-    expect((run.error as NodeJS.ErrnoException | undefined)?.code).toBe("ETIMEDOUT");
+    expect(child.status).toBe(0);
+    expect(child.signal).toBeNull();
+    expect(child.error).toBeUndefined();
+    expect(readFileSync(join(dir, "child.done"), "utf8")).toBe("done");
   }, 10_000);
 
   // issue #196, rodada 2 (revisão da PR #200): `npm run <script>` sempre
@@ -372,18 +496,28 @@ describe("realExecute", () => {
   // subprocesso real, no describe abaixo), e é isso que se prova aqui —
   // qualquer forma bruta que `realExecute` devolva vira o mesmo fault.
   it("morte por sinal do script (direta ou convertida em 128+n pelo shell) vira MUTATION_ALL_KILLED:SIGKILL", () => {
-    const dir = fakeProjectDir({
-      killself: `${process.execPath} -e "process.kill(process.pid, 'SIGKILL')"`,
-    });
+    const dir = fakeNodeProject(
+      "killself",
+      "console.log('SIGNAL_CHILD_STARTED');process.kill(process.pid, 'SIGKILL')",
+    );
     const run = realExecute("killself", { cwd: dir, timeoutMs: 5000 });
     expect(run.error).toBeUndefined();
-    expect(() => evaluateRun(run, "ctx")).toThrow(/^MUTATION_ALL_KILLED:ctx:SIGKILL$/);
+    expect(run.stdout).toContain("SIGNAL_CHILD_STARTED");
+    if (process.platform === "win32") {
+      expect(run.status).toBe(1);
+      expect(run.signal).toBeNull();
+      expect(run.stderr).toBe("");
+      expect(() => evaluateRun(run, "ctx")).toThrow(/^MUTATION_ALL_NO_REPORT:ctx$/);
+    } else {
+      expect(() => evaluateRun(run, "ctx")).toThrow(/^MUTATION_ALL_KILLED:ctx:SIGKILL$/);
+    }
   });
 
   it("devolve status != 0 (sem lançar) quando o script imprime relatório limpo e sai 3", () => {
-    const dir = fakeProjectDir({
-      clean3: `${process.execPath} -e "console.log(JSON.stringify({suite:'x',candidateSha:'d',killed:1,total:1,survivors:[],restoreGreen:true}));process.exit(3)"`,
-    });
+    const dir = fakeNodeProject(
+      "clean3",
+      "console.log(JSON.stringify({suite:'x',candidateSha:'d',killed:1,total:1,survivors:[],restoreGreen:true}));process.exit(3)",
+    );
     const run = realExecute("clean3", { cwd: dir, timeoutMs: 5000 });
     expect(run.status).toBe(3);
     expect(run.signal).toBeNull();
@@ -398,44 +532,86 @@ function toRunResult(raw: { status: number | null; signal: NodeJS.Signals | null
   return { status: raw.status, signal: raw.signal, stdout: "", stderr: "" };
 }
 
-// issue #196, rodada 2 (revisão da PR #200): os dois caminhos possíveis de
-// morte por sinal, cada um reproduzido com subprocesso real e sem nenhum
-// `process.platform` — o comportamento de cada construção (com ou sem shell
-// no meio) é determinístico em qualquer POSIX, então os dois testes passam
-// tanto no Linux da CI quanto no macOS de desenvolvimento.
+function shellSignalRun(signal: "SIGKILL" | "SIGTERM"): RunResult {
+  const dir = fakeNodeProject(
+    "signal",
+    `console.log('SIGNAL_CHILD_STARTED');process.kill(process.pid, '${signal}')`,
+  );
+  if (process.platform === "win32") {
+    // O shell intermediário do npm é cmd.exe, que reporta status 1 sem
+    // NodeJS.Signals quando o filho se mata. A ausência de relatório falha.
+    return realExecute("signal", { cwd: dir, timeoutMs: 5000 });
+  }
+  const raw = spawnSync("sh", ["-c", `"${process.execPath}" "${join(dir, "child.js")}"; exit $?`], {
+    timeout: 5000,
+    encoding: "utf8",
+  });
+  return {
+    status: raw.status,
+    signal: raw.signal,
+    stdout: raw.stdout,
+    stderr: raw.stderr,
+    ...(raw.error !== undefined ? { error: raw.error } : {}),
+  };
+}
+
+// issue #196: sinal direto e via shell continuam provados no POSIX. No
+// Windows, o status e a ausência de signal são assertados como observados,
+// e a falta de relatório permanece falha.
 describe("evaluateRun (sinal de subprocesso real)", () => {
   it("sinal direto, sem intermediário: spawnSync devolve status null, signal SIGKILL", () => {
-    const raw = spawnSync(process.execPath, ["-e", "process.kill(process.pid, 'SIGKILL')"], {
-      timeout: 5000,
-    });
-    expect(raw.status).toBeNull();
-    expect(raw.signal).toBe("SIGKILL");
-    expect(() => evaluateRun(toRunResult(raw), "ctx")).toThrow(/^MUTATION_ALL_KILLED:ctx:SIGKILL$/);
+    const raw = spawnSync(
+      process.execPath,
+      ["-e", "console.log('SIGNAL_CHILD_STARTED');process.kill(process.pid, 'SIGKILL')"],
+      {
+        timeout: 5000,
+        encoding: "utf8",
+      },
+    );
+    expect(raw.error).toBeUndefined();
+    expect(raw.stdout).toContain("SIGNAL_CHILD_STARTED");
+    if (process.platform === "win32") {
+      expect(raw.status).toBe(1);
+      expect(raw.signal).toBeNull();
+      expect(() => evaluateRun(toRunResult(raw), "ctx")).toThrow(/^MUTATION_ALL_NO_REPORT:ctx$/);
+    } else {
+      expect(raw.status).toBeNull();
+      expect(raw.signal).toBe("SIGKILL");
+      expect(() => evaluateRun(toRunResult(raw), "ctx")).toThrow(
+        /^MUTATION_ALL_KILLED:ctx:SIGKILL$/,
+      );
+    }
   });
 
   it("sinal convertido em 128+n pelo shell intermediário (sh -c): status 137, signal null", () => {
-    // `; exit $?` força o `sh` a aguardar o filho (em vez de substituir o
-    // próprio processo por ele) e a propagar o `$?` observado — no POSIX,
-    // um filho morto pelo sinal N sai com status 128+N.
-    const raw = spawnSync(
-      "sh",
-      ["-c", `${process.execPath} -e "process.kill(process.pid, 'SIGKILL')"; exit $?`],
-      { timeout: 5000 },
-    );
-    expect(raw.status).toBe(137);
+    const raw = shellSignalRun("SIGKILL");
+    expect(raw.error).toBeUndefined();
+    expect(raw.stdout).toContain("SIGNAL_CHILD_STARTED");
     expect(raw.signal).toBeNull();
-    expect(() => evaluateRun(toRunResult(raw), "ctx")).toThrow(/^MUTATION_ALL_KILLED:ctx:SIGKILL$/);
+    if (process.platform === "win32") {
+      expect(raw.status).toBe(1);
+      expect(raw.stderr).toBe("");
+      expect(() => evaluateRun(raw, "ctx")).toThrow(/^MUTATION_ALL_NO_REPORT:ctx$/);
+    } else {
+      // `; exit $?` força o sh a aguardar e propagar 128 + sinal.
+      expect(raw.status).toBe(137);
+      expect(() => evaluateRun(raw, "ctx")).toThrow(/^MUTATION_ALL_KILLED:ctx:SIGKILL$/);
+    }
   });
 
   it("SIGTERM convertido em 128+n pelo shell intermediário: status 143, signal null", () => {
-    const raw = spawnSync(
-      "sh",
-      ["-c", `${process.execPath} -e "process.kill(process.pid, 'SIGTERM')"; exit $?`],
-      { timeout: 5000 },
-    );
-    expect(raw.status).toBe(143);
+    const raw = shellSignalRun("SIGTERM");
+    expect(raw.error).toBeUndefined();
+    expect(raw.stdout).toContain("SIGNAL_CHILD_STARTED");
     expect(raw.signal).toBeNull();
-    expect(() => evaluateRun(toRunResult(raw), "ctx")).toThrow(/^MUTATION_ALL_KILLED:ctx:SIGTERM$/);
+    if (process.platform === "win32") {
+      expect(raw.status).toBe(1);
+      expect(raw.stderr).toBe("");
+      expect(() => evaluateRun(raw, "ctx")).toThrow(/^MUTATION_ALL_NO_REPORT:ctx$/);
+    } else {
+      expect(raw.status).toBe(143);
+      expect(() => evaluateRun(raw, "ctx")).toThrow(/^MUTATION_ALL_KILLED:ctx:SIGTERM$/);
+    }
   });
 });
 
@@ -443,7 +619,8 @@ describe("evaluateRun (sinal de subprocesso real)", () => {
 // 1`) também não tinha teste. Roda `npm run mutations:all` de verdade, num
 // subprocesso, apontado (via `MUTATIONS_ALL_SLICES_PATH`) para um
 // `slices.json` falso — nunca o `scripts/mutations/slices.json` real, nem
-// `package.json` do repo.
+// `package.json` do repo. O lançador portátil chama o npm pelo CLI JS, sem
+// depender do wrapper npm.cmd que spawnSync não executa sem shell no Windows.
 describe("entrypoint (subprocesso real, mutations:all)", () => {
   it("sai 1 nomeando a fatia quando o script da fatia falsa não existe", () => {
     const dir = workdir();
@@ -453,10 +630,9 @@ describe("entrypoint (subprocesso real, mutations:all)", () => {
       JSON.stringify([{ slice: "fatia-fake", script: "mutations-all-diag-nao-existe" }]),
       "utf8",
     );
-    const result = spawnSync("npm", ["run", "mutations:all"], {
+    const result = runNpmSync(["run", "mutations:all"], {
       cwd: repoRoot,
-      encoding: "utf8",
-      timeout: 60_000,
+      timeoutMs: 60_000,
       env: { ...process.env, MUTATIONS_ALL_SLICES_PATH: slicesPath },
     });
     expect(result.status).toBe(1);

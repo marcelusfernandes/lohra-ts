@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { buildCatalog } from "../catalog/catalog.js";
 import type { OllamaStatus } from "../doctor/model.js";
 import { MODEL_TIERS, readTiers, TiersError } from "../workflow/tiers.js";
@@ -10,7 +11,7 @@ export async function runTiers(options: {
   readonly environment: Record<string, string>;
   readonly probeOllama: () => Promise<OllamaStatus>;
 }): Promise<{ readonly code: number; readonly stdout: string; readonly stderr: string }> {
-  const path = `${options.home}/workflow_tiers.json`;
+  const path = join(options.home, "workflow_tiers.json");
   if (options.action === "list") {
     const tiers = readTiers(path);
     if (tiers instanceof TiersError) {

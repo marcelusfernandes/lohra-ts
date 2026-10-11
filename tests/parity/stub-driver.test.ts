@@ -12,12 +12,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { expect, it } from "vitest";
 
 import { completion } from "../../scripts/stub/server.js";
 
-const driver = new URL("../../scripts/stub/driver.ts", import.meta.url);
+const driverPath = fileURLToPath(new URL("../../scripts/stub/driver.ts", import.meta.url));
 const tsxLoader = import.meta.resolve("tsx");
 
 it("keeps usage in default completions and omits it only when requested", () => {
@@ -84,7 +85,7 @@ it("kills a timed-out target tree and releases the stub port before returning", 
       }),
     );
 
-    const result = spawnSync(process.execPath, ["--import", tsxLoader, driver.pathname, config], {
+    const result = spawnSync(process.execPath, ["--import", tsxLoader, driverPath, config], {
       cwd: root,
       encoding: "utf8",
       timeout: 5_000,
@@ -153,7 +154,7 @@ it("kills a timed-out target tree even when 127.0.0.1:11434 is already occupied 
       }),
     );
 
-    const result = spawnSync(process.execPath, ["--import", tsxLoader, driver.pathname, config], {
+    const result = spawnSync(process.execPath, ["--import", tsxLoader, driverPath, config], {
       cwd: root,
       encoding: "utf8",
       timeout: 5_000,
@@ -216,7 +217,7 @@ it("installs the dynamic-port redirect for candidate targets too", () => {
       }),
     );
 
-    const result = spawnSync(process.execPath, ["--import", tsxLoader, driver.pathname, config], {
+    const result = spawnSync(process.execPath, ["--import", tsxLoader, driverPath, config], {
       cwd: root,
       encoding: "utf8",
       timeout: 10_000,

@@ -1,0 +1,16 @@
+{
+  "sha": "4f70966",
+  "node": "v20.20.2",
+  "command": "dashboard",
+  "mechanism": "sigterm",
+  "pid": 42560,
+  "httpStatus": 200,
+  "exit": { "exitCode": null, "signal": "SIGTERM" },
+  "portClosed": true,
+  "stateExisted": true,
+  "stateRemovable": true,
+  "cleanup": true,
+  "stubRequests": 0,
+  "elapsedMs": 926,
+  "banner": true
+}

@@ -21,8 +21,11 @@ const OUTPUT_LIMIT = 1_048_576;
 function bounded(value: string): { readonly value: string; readonly truncated: boolean } {
   const bytes = Buffer.from(value);
   if (bytes.byteLength <= OUTPUT_LIMIT) return { value: value.trim(), truncated: false };
+  // Stop at a UTF-8 boundary so replacement characters cannot exceed the byte limit.
+  let end = OUTPUT_LIMIT;
+  while (end > 0 && ((bytes[end] ?? 0) & 0xc0) === 0x80) end--;
   return {
-    value: bytes.subarray(0, OUTPUT_LIMIT).toString("utf8").trim(),
+    value: bytes.subarray(0, end).toString("utf8").trim(),
     truncated: true,
   };
 }
@@ -35,16 +38,23 @@ export const defaultCommandRunner: CommandRunner = (executable, args, cwd) => {
     shell: false,
     env: process.env,
   });
-  const stdout = bounded(result.stdout);
-  const stderr = bounded(result.stderr);
+  // spawnSync may omit both streams when launch fails, despite the string overload.
+  const rawStdout: unknown = result.stdout;
+  const rawStderr: unknown = result.stderr;
+  const stdout = bounded(typeof rawStdout === "string" ? rawStdout : "");
+  const stderrOutput = typeof rawStderr === "string" ? rawStderr : "";
+  const spawnError = result.error as NodeJS.ErrnoException | undefined;
+  // Keep the spawn cause at the front: maxBuffer may have already filled a stream.
+  const diagnostic = spawnError ? `${spawnError.code ?? "spawn error"}: ${spawnError.message}` : "";
+  const stderr = bounded([diagnostic, stderrOutput].filter(Boolean).join("\n"));
   return {
     code: result.status ?? 1,
     stdout: stdout.value,
     stderr: stderr.value,
-    ...((result.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT"
-      ? { timedOut: true }
+    ...(spawnError?.code === "ETIMEDOUT" ? { timedOut: true } : {}),
+    ...(stdout.truncated || stderr.truncated || spawnError?.code === "ENOBUFS"
+      ? { truncated: true }
       : {}),
-    ...(stdout.truncated || stderr.truncated ? { truncated: true } : {}),
   };
 };
 

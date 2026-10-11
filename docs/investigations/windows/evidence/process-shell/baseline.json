@@ -1,0 +1,45 @@
+{
+  "baseSha": "51d87cf5f93e7c28ad51a0a4ceb911e5f6d0bf28",
+  "platform": "Windows 11 x64",
+  "clones": "ABI-separated disposable clones on F:",
+  "isolation": "TEMP/TMP, HOME, USERPROFILE, LOHRA_HOME, CODEX_HOME outside Git clones",
+  "nodes": [
+    {
+      "node": "20.20.2",
+      "npmCiExit": 0,
+      "total": 64,
+      "passed": 1,
+      "failed": 63,
+      "byFile": {
+        "protege-main": 24,
+        "stop-gate": 17,
+        "claude-skills-scripts": 12,
+        "protege-escrita": 10
+      },
+      "shellProbe": {
+        "status": null,
+        "error": "ENOENT",
+        "gitStatus": 0
+      }
+    },
+    {
+      "node": "22.23.2",
+      "npmCiExit": 0,
+      "total": 64,
+      "passed": 1,
+      "failed": 63,
+      "byFile": {
+        "protege-main": 24,
+        "stop-gate": 17,
+        "claude-skills-scripts": 12,
+        "protege-escrita": 10
+      },
+      "shellProbe": {
+        "status": null,
+        "error": "ENOENT",
+        "gitStatus": 0
+      }
+    }
+  ],
+  "note": "63 assertions failed after shell launch failed; per-ID causality requires the candidate run."
+}

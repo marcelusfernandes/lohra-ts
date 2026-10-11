@@ -17,8 +17,8 @@ export type RequestHandler = (request: IncomingHttpRequest) => Promise<OutgoingH
 // Invoked for a GET request carrying `Connection: Upgrade` / `Upgrade:
 // websocket`. Receives the still-open raw socket plus any bytes already
 // read past the header terminator (the RFC6455 "head" the ws library
-// expects for handleUpgrade). The handler owns the socket from here on --
-// this server never touches it again for that connection.
+// expects for handleUpgrade). The handler owns the WebSocket protocol from
+// here on; the TCP server retains the socket only for bounded shutdown.
 export type UpgradeHandler = (head: ParsedRequestHead, socket: Socket, extra: Buffer) => void;
 
 function isUpgradeRequest(head: ParsedRequestHead): boolean {
@@ -106,8 +106,16 @@ export async function startGatewayHttpServer(input: {
   readonly onRequest: RequestHandler;
   readonly onUpgrade: UpgradeHandler;
 }): Promise<GatewayHttpServer> {
+  const upgradedSockets = new Set<Socket>();
   const server = createServer((socket) => {
-    const state = new ConnectionState(socket, input.onRequest, input.onUpgrade);
+    socket.once("close", () => {
+      upgradedSockets.delete(socket);
+    });
+    const onUpgrade: UpgradeHandler = (head, upgradedSocket, extra) => {
+      upgradedSockets.add(upgradedSocket);
+      input.onUpgrade(head, upgradedSocket, extra);
+    };
+    const state = new ConnectionState(socket, input.onRequest, onUpgrade);
     socket.on("data", (chunk: Buffer) => {
       state.feed(chunk);
     });
@@ -126,15 +134,31 @@ export async function startGatewayHttpServer(input: {
 
   const address = server.address();
   const boundPort = typeof address === "object" && address !== null ? address.port : input.port;
+  let closePromise: Promise<void> | undefined;
 
   return {
     server,
     port: boundPort,
-    close: () =>
-      new Promise<void>((resolvePromise) => {
-        server.close(() => {
-          resolvePromise();
+    close: () => {
+      closePromise ??= new Promise<void>((resolvePromise, reject) => {
+        // Upgraded sockets are still owned by this TCP server even though the
+        // WebSocket handler owns their protocol. Let it send close frames;
+        // force any peer that will not release its socket after the deadline.
+        const forceTimer = setTimeout(() => {
+          for (const socket of upgradedSockets) socket.destroy();
+        }, 3_000);
+        const deadlineTimer = setTimeout(() => {
+          for (const socket of upgradedSockets) socket.destroy();
+          reject(new Error("gateway server did not close before shutdown deadline"));
+        }, 5_000);
+        server.close((error) => {
+          clearTimeout(forceTimer);
+          clearTimeout(deadlineTimer);
+          if (error) reject(error);
+          else resolvePromise();
         });
-      }),
+      });
+      return closePromise;
+    },
   };
 }

@@ -1,0 +1,19 @@
+{
+  "candidate": "611f33381a17dd1b1ed0fe9cbda213117c201247",
+  "node": "v22.23.2",
+  "exit": 0,
+  "signal": null,
+  "spawnError": null,
+  "parsed": true,
+  "errorNull": true,
+  "toolCalls": ["terminal"],
+  "toolOk": true,
+  "toolExit": 0,
+  "toolStdout": true,
+  "toolStdoutLineEnding": "LF",
+  "toolStderrEmpty": true,
+  "replyMarker": true,
+  "stderrBytes": 100,
+  "nestedWarningsSuppressed": true,
+  "fixtureRetained": "<OWN_FIXTURE>"
+}

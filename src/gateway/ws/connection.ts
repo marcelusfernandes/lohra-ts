@@ -15,6 +15,7 @@ import type { ToolDefinition } from "../../tools/types.js";
 import { timingSafeTokenEqual } from "../auth.js";
 import { logGatewayFailure } from "../failure-log.js";
 import type { ParsedRequestHead } from "../http/request-parser.js";
+import type { UpgradeHandler } from "../http/server.js";
 import type { GatewaySessionRegistry } from "../session-service.js";
 import { GatewayEventingToolDispatcher, driveGatewayTurn } from "../turn.js";
 import { dispatchSyncRpc, type SessionDefaults } from "../rpc/dispatch.js";
@@ -399,12 +400,22 @@ async function handleTextMessage(ws: WebSocket, text: string, deps: GatewayWsDep
   }
 }
 
-export function createGatewayUpgradeHandler(
-  deps: GatewayWsDeps,
-): (head: ParsedRequestHead, socket: Socket, extra: Buffer) => void {
-  const wss = new WebSocketServer({ noServer: true });
+export type GatewayUpgradeHandler = UpgradeHandler & { close(): Promise<void> };
 
-  return (head, socket, extra) => {
+const WS_CLOSE_GRACE_MS = 1_000;
+const WS_CLOSE_DEADLINE_MS = 2_000;
+
+export function createGatewayUpgradeHandler(deps: GatewayWsDeps): GatewayUpgradeHandler {
+  const wss = new WebSocketServer({ noServer: true });
+  const sockets = new Map<WebSocket, Socket>();
+  let closing = false;
+  let closePromise: Promise<void> | undefined;
+
+  const onUpgrade: UpgradeHandler = (head, socket, extra) => {
+    if (closing) {
+      socket.destroy();
+      return;
+    }
     const { path, query } = splitPathAndQuery(head.path);
 
     if (path !== WS_PATH || FORBIDDEN_WS_PATHS.has(path)) {
@@ -413,6 +424,14 @@ export function createGatewayUpgradeHandler(
     }
 
     wss.handleUpgrade(fakeIncomingMessage(head), socket, extra, (ws) => {
+      sockets.set(ws, socket);
+      ws.once("close", () => {
+        sockets.delete(ws);
+      });
+      if (closing) {
+        ws.terminate();
+        return;
+      }
       if (!isAuthorized(query, deps.auth)) {
         ws.close(4401, "");
         return;
@@ -440,4 +459,81 @@ export function createGatewayUpgradeHandler(
       });
     });
   };
+
+  const close = (): Promise<void> => {
+    closePromise ??= (async () => {
+      closing = true;
+      const failures: unknown[] = [];
+      await Promise.all(
+        [...sockets].map(
+          ([ws, socket]) =>
+            new Promise<void>((resolve) => {
+              if (ws.readyState === ws.CLOSED) {
+                resolve();
+                return;
+              }
+              let settled = false;
+              const finish = (): void => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(graceTimer);
+                clearTimeout(deadlineTimer);
+                ws.off("close", finish);
+                ws.off("error", onError);
+                resolve();
+              };
+              const onError = (error: Error): void => {
+                failures.push(error);
+                socket.destroy();
+              };
+              ws.once("close", finish);
+              ws.on("error", onError);
+              const graceTimer = setTimeout(() => {
+                try {
+                  ws.terminate();
+                } catch (error) {
+                  failures.push(error);
+                  socket.destroy();
+                }
+              }, WS_CLOSE_GRACE_MS);
+              const deadlineTimer = setTimeout(() => {
+                failures.push(new Error("websocket did not close before shutdown deadline"));
+                socket.destroy();
+                finish();
+              }, WS_CLOSE_DEADLINE_MS);
+              try {
+                ws.close(1001, "server shutdown");
+              } catch (error) {
+                failures.push(error);
+                socket.destroy();
+              }
+            }),
+        ),
+      );
+      let closeTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await new Promise<void>((resolve, reject) => {
+          closeTimer = setTimeout(() => {
+            reject(new Error("websocket server did not close before shutdown deadline"));
+          }, WS_CLOSE_DEADLINE_MS);
+          wss.close((error) => {
+            if (error) reject(error);
+            else resolve();
+          });
+        });
+      } catch (error) {
+        failures.push(error);
+      } finally {
+        clearTimeout(closeTimer);
+      }
+      if (failures.length === 1) throw failures[0];
+      if (failures.length > 1)
+        throw new AggregateError(failures, "gateway websocket shutdown failed", {
+          cause: failures[0],
+        });
+    })();
+    return closePromise;
+  };
+
+  return Object.assign(onUpgrade, { close });
 }

@@ -155,6 +155,7 @@ describe("runChat sem --provider usa o provedor detectado na rota api_key (issue
         ]),
         environment: {
           HOME: home,
+          LOHRA_HOME: join(home, ".lohra"),
           PATH: process.env.PATH ?? "",
           T604_DETECTADO_KEY: "test-key",
         },
@@ -238,6 +239,7 @@ describe("runChat sem --provider usa o provedor detectado na rota api_key (issue
         ]),
         environment: {
           HOME: home,
+          LOHRA_HOME: join(home, ".lohra"),
           PATH: process.env.PATH ?? "",
           T604_UNWANTED_KEY: "test-key-unwanted",
           T604_EXPLICIT_KEY: "test-key-explicit",
@@ -265,7 +267,7 @@ describe("runChat sem --provider usa o provedor detectado na rota api_key (issue
         ["--no-input", true],
         ["--no-tools", true],
       ]),
-      environment: { HOME: home, LOHRA_PROVIDER: "bogus-t604" },
+      environment: { HOME: home, LOHRA_HOME: join(home, ".lohra"), LOHRA_PROVIDER: "bogus-t604" },
       home: join(home, ".lohra"),
       codexHome: join(home, ".codex"),
       cwd: home,
@@ -289,7 +291,7 @@ describe("runChat sem --provider usa o provedor detectado na rota api_key (issue
         ["--json", true],
         ["--no-input", true],
       ]),
-      environment: { HOME: home },
+      environment: { HOME: home, LOHRA_HOME: join(home, ".lohra") },
       home: join(home, ".lohra"),
       codexHome: join(home, ".codex"),
       cwd: home,

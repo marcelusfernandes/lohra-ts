@@ -1,0 +1,7 @@
+{"source":"stderr","category":"UNATTRIBUTED_DIAGNOSTIC","order":1,"message":"realOrResolved: <LOCAL_PATH> unresolved (ELOOP)"}
+{"source":"stderr","category":"UNATTRIBUTED_DIAGNOSTIC","order":2,"message":"collectSkillFiles: <LOCAL_PATH> unreadable (ELOOP)"}
+{"source":"stderr","category":"UNATTRIBUTED_DIAGNOSTIC","order":3,"message":"ensureWithinRoots: <LOCAL_PATH> unresolved (ELOOP)"}
+{"source":"stderr","category":"UNATTRIBUTED_DIAGNOSTIC","order":4,"message":"collectSkillFiles: <LOCAL_PATH> unreadable (ELOOP)"}
+{"source":"stderr","category":"UNATTRIBUTED_DIAGNOSTIC","order":5,"message":"ensureWithinRoots: <LOCAL_PATH> unresolved (ELOOP)"}
+{"source":"stderr","category":"UNATTRIBUTED_DIAGNOSTIC","order":6,"message":"MCP tool \"mcp_fix_file\" shadows an existing \"mcp_fix_file\" — skipped"}
+{"source":"stderr","category":"UNATTRIBUTED_DIAGNOSTIC","order":7,"message":"realOrResolved: <LOCAL_PATH> unresolved (ELOOP)"}
