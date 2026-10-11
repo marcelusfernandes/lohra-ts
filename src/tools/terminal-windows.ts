@@ -13,6 +13,7 @@ const START_DEADLINE = 5_000;
 const CLEANUP_DEADLINE = 5_000;
 
 export interface WindowsBridgeOptions {
+  readonly signal?: AbortSignal;
   /** Test seam for protocol failures; terminalTool never supplies it. */
   readonly workerUrl?: URL;
   readonly nodeExecutable?: string;
