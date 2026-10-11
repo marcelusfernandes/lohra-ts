@@ -223,7 +223,7 @@ async function bootDashboard(
       ["--provider", provider],
       ["--model", model],
     ]),
-    environment: { HOME: root, PATH: process.env.PATH ?? "" },
+    environment: { HOME: root, LOHRA_HOME: home, PATH: process.env.PATH ?? "" },
     home,
     codexHome: join(root, ".codex"),
     cwd: root,
@@ -417,8 +417,9 @@ describe("dashboard.ts wires GatewayWsDeps.notices onto real WS turns (issue #60
       });
 
       // Seeded BEFORE the boot, on the exact same state.db `runDashboard`
-      // opens (`{HOME: root}` with no `LOHRA_HOME` override resolves to
-      // `join(root, ".lohra")`, #653's rule). Closed before boot: no
+      // opens: the helper passes LOHRA_HOME=home explicitly. Without it,
+      // Windows defaults to HOME/lohra while POSIX defaults to HOME/.lohra.
+      // Closed before boot: no
       // concurrent writer contends with `runDashboard`'s own connection.
       const seedConnection = openStateDatabase(join(home, "state.db"));
       const seededNotice = new NoticesRepository(seedConnection.database).append("global", {
