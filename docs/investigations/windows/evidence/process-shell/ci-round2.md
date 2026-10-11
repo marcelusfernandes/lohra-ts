@@ -42,7 +42,7 @@ acesso ao `gh` real. A cópia e os links são criados sob o mesmo `tmpdir()`;
 `afterAll` remove a cópia. Na repetição concorrente, a prova ficou em
 **70/71** por ABI, com apenas o bit executável de `secao.sh` em NTFS (#823)
 ainda vermelho. Logs:
-`F:/lohra-m25-812/node{20,22}/ci-round2-prova-symlink.log`.
+`F:/lohra-m25-812/node{20,22}/ci-round2-prova-hardlink.log`.
 
 O ambiente do filho continua sendo uma cópia: o `PATH` global não é alterado.
 Em POSIX, `Path` é uma variável distinta e não é tratada como `PATH`; no
