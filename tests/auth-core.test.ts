@@ -371,12 +371,14 @@ describe("oauth and credentials", () => {
       accountId: "acct-t354-write",
       expiresAt: 1_300,
     });
+    let posts = 0;
     let caught: unknown;
     try {
       await resolveCredentials(home, {
         now: 1_000,
         codexHome: join(home, "codex"),
         oauthPost: () => {
+          posts += 1;
           // The lock file (`oauth.json.lock`) and the token file
           // (`oauth.json`) live in the same directory — chmod'ing `home`
           // BEFORE the call would also block acquiring the lease, never
@@ -396,6 +398,7 @@ describe("oauth and credentials", () => {
     } finally {
       chmodSync(home, 0o700);
     }
+    expect(posts).toBe(1);
     expect(caught).toBeInstanceOf(Error);
     const error = caught as Error;
     expect(error.name).toBe("TokenPersistError");
@@ -695,22 +698,26 @@ describe("ramos de parada sem teste (#356)", () => {
     // não é EEXIST, então `acquireFileLease` propaga em vez de devolver
     // `false`.
     chmodSync(home, 0o500);
+    let posts = 0;
     let caught: unknown;
     try {
       await resolveCredentials(home, {
         now: 1_000,
         codexHome: join(home, "codex"),
-        oauthPost: () =>
-          Promise.resolve([
+        oauthPost: () => {
+          posts += 1;
+          return Promise.resolve([
             200,
             { access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 },
-          ]),
+          ]);
+        },
       });
     } catch (error) {
       caught = error;
     } finally {
       chmodSync(home, 0o700);
     }
+    expect(posts).toBe(0);
     expect(caught).toBeInstanceOf(Error);
     const error = caught as Error;
     expect(error.name).toBe("TokenPersistError");
