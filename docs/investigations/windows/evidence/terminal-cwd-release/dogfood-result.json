@@ -1,0 +1,18 @@
+{
+  "candidate": "1372d4e67cec7866f38764a1c79ece99a090a17e",
+  "node": "v22.23.2",
+  "exit": 0,
+  "signal": null,
+  "spawnError": null,
+  "parsed": true,
+  "errorNull": true,
+  "toolCalls": ["terminal"],
+  "toolOk": true,
+  "toolExit": 0,
+  "toolStdout": true,
+  "toolStderrEmpty": true,
+  "replyMarker": true,
+  "stderrBytes": 100,
+  "removed": true,
+  "cleanupError": null
+}
