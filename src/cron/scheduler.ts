@@ -11,26 +11,27 @@ const SAFE_ERROR_CODES: ReadonlySet<string> = new Set([
   "SQLITE_IOERR",
 ]);
 
-const STORE_CAUSES: Readonly<Record<string, string>> = {
-  "path is a directory, not a file": "cron_store_directory",
-  "path is not readable": "cron_store_unreadable",
-  "read failed": "cron_store_read_failed",
-  "content is not valid JSON": "cron_store_invalid_json",
-  "root is not an object": "cron_store_invalid_root",
-  "'jobs' field is not a list": "cron_store_invalid_jobs",
-  "a job entry is malformed": "cron_store_malformed_job",
-};
+const STORE_CAUSES: ReadonlyMap<string, string> = new Map([
+  ["path is a directory, not a file", "cron_store_directory"],
+  ["path is not readable", "cron_store_unreadable"],
+  ["read failed", "cron_store_read_failed"],
+  ["content is not valid JSON", "cron_store_invalid_json"],
+  ["root is not an object", "cron_store_invalid_root"],
+  ["'jobs' field is not a list", "cron_store_invalid_jobs"],
+  ["a job entry is malformed", "cron_store_malformed_job"],
+]);
 
 /** Error messages and paths can contain prompts or credentials; emit only known causal fields. */
 function safeCause(error: unknown): string {
   let current = error;
   for (let depth = 0; depth < 4; depth += 1) {
     if (current instanceof CronStoreError) {
-      return STORE_CAUSES[current.safeCause] ?? "CronStoreError";
+      return STORE_CAUSES.get(current.safeCause) ?? "CronStoreError";
     }
     if (current === null || typeof current !== "object") break;
-    if ("code" in current && typeof current.code === "string") {
-      if (SAFE_ERROR_CODES.has(current.code)) return current.code;
+    if ("code" in current) {
+      const code = current.code;
+      if (typeof code === "string" && SAFE_ERROR_CODES.has(code)) return code;
     }
     if (!("cause" in current)) break;
     current = current.cause;
