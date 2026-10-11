@@ -49,11 +49,11 @@ contra administrador, SYSTEM, privilégios de backup, malware no mesmo token ou
 um processo que já recebeu os bytes. Esses limites devem acompanhar qualquer
 declaração de suporte.
 
-| Classe                                                                    | Leitura/escrita recomendada                                                                                                                                                                                                        | Publicação e verificação                                                                                                                                                                    |
-| ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `auth.json`, `oauth.json`, `.env` e temporários que contenham esses bytes | Identidade dona: ler e atualizar. Outra identidade local padrão: nem ler nem escrever. Acesso de SYSTEM/administradores pode ser necessário para administração/backup, mas fica fora da garantia de confidencialidade.             | Diretório/arquivo protegidos **antes** do primeiro byte; confirmar DACL e tentativas com outro token antes de considerar a operação concluída. Rename deve preservar o contrato no destino. |
-| `oauth.json.lock` e outros locks sob home de credenciais                  | Identidade dona: criar/ler/remover segundo lease existente. Outra identidade: sem escrita que permita interferir no fence; manter dentro do diretório protegido.                                                                   | Testar exclusão e limpeza sem enfraquecer `EEXIST`/falha explícita. Não inferir segredo no payload do lock, mas evitar que ele dê acesso ao home.                                           |
-| Imagens de mídia **explicitamente classificadas não secretas**            | Identidade dona: ler/escrever. Leitura por outra identidade só se o produto escolher publicação local explícita; escrita por outra identidade: negar. Se a mídia puder conter conteúdo privado, usar a classe sensível por padrão. | Preservar os testes POSIX de stage `0600` e final `0644`. Não tornar a mídia legível a terceiros no Windows apenas para imitar `stat.mode`.                                                 |
+| Classe                                                                    | Leitura/escrita recomendada                                                                                                                                                                                                        | Publicação e verificação                                                                                                                                                                            |
+| ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth.json`, `oauth.json`, `.env` e temporários que contenham esses bytes | Identidade dona: ler e atualizar. Outra identidade local padrão: nem ler nem escrever. Acesso de SYSTEM/administradores pode ser necessário para administração/backup, mas fica fora da garantia de confidencialidade.             | Diretório/arquivo protegidos **antes** do primeiro byte; o runtime aplica e verifica metadados conforme a política, inclusive após rename. A bancada de aceite mede acesso efetivo com outro token. |
+| `oauth.json.lock` e outros locks sob home de credenciais                  | Identidade dona: criar/ler/remover segundo lease existente. Outra identidade: sem escrita que permita interferir no fence; manter dentro do diretório protegido.                                                                   | Testar exclusão e limpeza sem enfraquecer `EEXIST`/falha explícita. Não inferir segredo no payload do lock, mas evitar que ele dê acesso ao home.                                                   |
+| Imagens de mídia **explicitamente classificadas não secretas**            | Identidade dona: ler/escrever. Leitura por outra identidade só se o produto escolher publicação local explícita; escrita por outra identidade: negar. Se a mídia puder conter conteúdo privado, usar a classe sensível por padrão. | Preservar os testes POSIX de stage `0600` e final `0644`. Não tornar a mídia legível a terceiros no Windows apenas para imitar `stat.mode`.                                                         |
 
 O caminho de implementação recomendado é um diretório de estado protegido,
 resolvido a partir do home efetivo, antes de criar qualquer temporário com
@@ -65,6 +65,11 @@ obrigatórios. Diretórios intermediários criados pela aplicação também entr
 na verificação; symlink/reparse, volume sem semântica NTFS comprovada ou caminho
 cuja identidade não se consegue resolver não devem receber segredos por
 suposição.
+
+Os testes entre identidades pertencem à bancada de validação, não a cada
+operação do runtime: a aplicação aplica/verifica a proteção do caminho e seus
+metadados segundo a política aprovada, sem criar uma segunda sessão ou token
+para cada escrita.
 
 Para um `LOHRA_HOME` customizado ou home já existente, a aplicação futura
 deverá inspecionar apenas metadados de caminho/descritor antes de usar o local.
@@ -98,7 +103,10 @@ Alternativas para decisão:
 
 Antes de qualquer execução, o owner precisa aprovar **expressamente** criar
 duas identidades locais descartáveis, aplicar/restaurar DACL **somente** em
-fixtures novas e executar processos sob ambas. Uma chamada composta anterior
+fixtures novas e executar processos sob ambas. A bancada preferida é uma VM
+Windows 11 descartável ou host de testes dedicado; usar este host pessoal só
+se o owner o escolher expressamente, com recursos e descarte delimitados.
+Esta proposta não autoriza criar contas no host atual. Uma chamada composta anterior
 com `icacls`, sonda e cleanup foi rejeitada pela revisão automática **antes**
 de executar, sem motivo granular; esta proposta não presume que ACL em si foi
 bloqueada nem autoriza contorno por outra API. Sem aprovação e capacidade
@@ -124,7 +132,10 @@ demonstrada, o resultado permanece **NOT_MEASURED/INCONCLUSIVE**.
 4. Injetar, só na fixture, falhas de criar/verificar proteção, de rename e de
    cleanup; confirmar ausência de novo arquivo sensível publicado, causa
    original visível e nenhum resíduo novo sem inventário. Repetir em Node 20
-   e 22, Windows 11 x64, com limite de tempo/processos e sem provider/rede.
+   e 22, Windows 11 x64, com no máximo 2 processos de sonda simultâneos,
+   30 segundos por cenário, 5 minutos por ABI e 1 MiB de saída sanitizada por
+   ABI; se exceder qualquer limite, terminar apenas filhos próprios e marcar
+   o cenário INCONCLUSIVE com causa. Sem provider/rede.
 5. Encerrar apenas filhos lançados pela bancada; conferir manifesto, caminhos
    resolvidos, handles fechados e contagem de arquivos antes/depois. Limpar
    só recursos próprios mediante autorização recebida, registrando falhas de
