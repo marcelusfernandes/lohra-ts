@@ -120,6 +120,12 @@ export function selectNativeRoute(
     touched.add(slug);
     if (change.path.startsWith(PRODUCTION)) productionChanged = true;
   }
+  if (manifestChanged) {
+    for (const [candidateSlug, current] of Object.entries(after)) {
+      const previous = before[candidateSlug];
+      if (!previous || !sameSources(previous, current)) touched.add(candidateSlug);
+    }
+  }
 
   // Fan-out futuro precisa de uma issue própria e limite explícito; não escolher por ordem.
   if (touched.size > 1) throw new Error(`NATIVE_ROUTE_MULTIPLE: ${[...touched].join(",")}`);
