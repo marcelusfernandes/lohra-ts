@@ -102,9 +102,14 @@ function lerComFalha(cwd: string, reader: "absent" | "failed-partial"): HookRun 
     env.PATH = executableDir;
   }
   const readerProbe = spawnSync(shell, ["-c", "command -v cat"], { cwd, env, encoding: "utf8" });
-  if (reader === "absent") expect(readerProbe.status).not.toBe(0);
-  else expect(readerProbe.status).toBe(0);
+  expect(readerProbe.error).toBeUndefined();
+  expect(typeof readerProbe.status).toBe("number");
+  if (reader === "absent") {
+    expect(readerProbe.status).not.toBe(0);
+    expect(readerProbe.stdout).toBe("");
+  } else expect(readerProbe.status).toBe(0);
   const nodeProbe = spawnSync(shell, ["-c", "command -v node"], { cwd, env, encoding: "utf8" });
+  expect(nodeProbe.error).toBeUndefined();
   expect(nodeProbe.status).toBe(0);
   const input = JSON.stringify({
     tool_name: "Write",
