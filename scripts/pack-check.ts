@@ -270,6 +270,14 @@ export async function runConsumerCliAsync(
   return await commandAsync(process.execPath, [installedCliPath(consumerRoot), ...argv], options);
 }
 
+export function assertConsumerLibraryEntry(_consumerRoot: string): void {
+  throw new Error("not implemented");
+}
+
+export function assertConsumerLibraryTypes(_consumerRoot: string, _fixtureSource?: string): void {
+  throw new Error("not implemented");
+}
+
 /** Igualdade estrutural recursiva — nunca `JSON.stringify(a) === JSON.stringify(b)`
  * (ordem de chaves não importa) nem comparação de string. */
 function deepEqual(a: unknown, b: unknown): boolean {
