@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { spawnProcessShell } from "./helpers/process-shell.js";
+import { resolveProcessShell, spawnProcessShell } from "./helpers/process-shell.js";
 
 const HOOK = fileURLToPath(new URL("../.claude/hooks/protege-escrita.sh", import.meta.url));
 
@@ -24,18 +24,29 @@ function git(cwd: string, ...args: readonly string[]): void {
 interface HookRun {
   readonly status: number | null;
   readonly stderr: string;
+  readonly stdout: string;
+  readonly shell: string;
 }
 
 function escrever(cwd: string, filePath: string, toolName = "Write"): HookRun {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env))
     if (v !== undefined && k !== "CLAUDE_PROJECT_DIR") env[k] = v;
-  const r = spawnProcessShell([HOOK], {
-    input: JSON.stringify({ tool_name: toolName, tool_input: { file_path: filePath }, cwd }),
-    encoding: "utf8",
-    env,
-  });
-  return { status: r.status, stderr: r.stderr };
+  const shell = resolveProcessShell(env);
+  const r = spawnProcessShell(
+    [HOOK],
+    {
+      input: JSON.stringify({ tool_name: toolName, tool_input: { file_path: filePath }, cwd }),
+      encoding: "utf8",
+      env,
+    },
+    shell,
+  );
+  return { status: r.status, stderr: r.stderr, stdout: r.stdout, shell };
+}
+
+function expectDenied(r: HookRun): void {
+  expect(r.status, JSON.stringify(r)).toBe(2);
 }
 
 describe("protege-escrita.sh", () => {
@@ -73,17 +84,17 @@ describe("protege-escrita.sh", () => {
 
   it("docs/reference/** a partir da raiz: nega", () => {
     const r = escrever(root, path.join(root, "docs", "reference", "novo.md"));
-    expect(r.status).toBe(2);
+    expectDenied(r);
     expect(r.stderr).toMatch(/docs\/reference/u);
   });
 
   it("caminho relativo a partir de um subdiretório: nega", () => {
-    expect(escrever(path.join(root, "src"), "../docs/reference/novo.md").status).toBe(2);
+    expectDenied(escrever(path.join(root, "src"), "../docs/reference/novo.md"));
   });
 
   it("lohra/** com cwd dentro do repo aninhado: nega (raiz é o projeto, que tem settings.json)", () => {
     const r = escrever(path.join(root, "lohra"), path.join(root, "lohra", "x.py"));
-    expect(r.status).toBe(2);
+    expectDenied(r);
     expect(r.stderr).toMatch(/lohra/u);
   });
 
@@ -97,25 +108,25 @@ describe("protege-escrita.sh", () => {
 
   it("symlink dentro do repo que resolve para docs/reference: nega", () => {
     const r = escrever(root, path.join(root, "atalho", "novo.md"));
-    expect(r.status).toBe(2);
+    expectDenied(r);
   });
 
   it("symlink dentro do repo que resolve para FORA de qualquer repo: nega (caminho textual está dentro)", () => {
     const r = escrever(root, path.join(root, "fuga", "x.md"));
-    expect(r.status).toBe(2);
+    expectDenied(r);
     expect(r.stderr).toMatch(/symlink/u);
   });
 
   it("worktree de agente em .claude/worktrees/w: docs/reference lá dentro é negado, com cwd na raiz do projeto", () => {
     const alvo = path.join(root, ".claude", "worktrees", "w", "docs", "reference", "novo.md");
     const r = escrever(root, alvo);
-    expect(r.status).toBe(2);
+    expectDenied(r);
     expect(r.stderr).toMatch(/docs\/reference/u);
   });
 
   it("worktree de agente: com cwd no próprio worktree também nega; src/ lá dentro permite", () => {
     const w = path.join(root, ".claude", "worktrees", "w");
-    expect(escrever(w, path.join(w, "docs", "reference", "novo.md")).status).toBe(2);
+    expectDenied(escrever(w, path.join(w, "docs", "reference", "novo.md")));
     expect(escrever(w, path.join(w, "src", "c.ts")).status).toBe(0);
   });
 

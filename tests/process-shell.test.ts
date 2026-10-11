@@ -62,6 +62,39 @@ describe("shell das bancadas de processo", () => {
     expect(env).toEqual(snapshot);
   });
 
+  it("preserva JSON do stdin quando o shell executa um arquivo de script", () => {
+    const probe = path.join(root, "transport-probe.sh");
+    writeFileSync(
+      probe,
+      [
+        "#!/bin/sh",
+        "payload=$(cat)",
+        'PE_PAYLOAD="$payload" node -e \'',
+        'const raw = process.env.PE_PAYLOAD || "";',
+        "let value; try { value = JSON.parse(raw); } catch { process.stderr.write(`payload-invalid length=${raw.length}`); process.exit(3); }",
+        "process.stdout.write(JSON.stringify({tool: value.tool_name, file: value.tool_input?.file_path, cwd: value.cwd}));",
+        "'",
+        "",
+      ].join("\n"),
+    );
+    const payload = {
+      tool_name: "Write",
+      tool_input: { file_path: path.join(root, "dummy.txt") },
+      cwd: root,
+    };
+    const result = spawnProcessShell([probe], {
+      input: JSON.stringify(payload),
+      cwd: root,
+      encoding: "utf8",
+    });
+    expect(result.status, JSON.stringify({ stdout: result.stdout, stderr: result.stderr })).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      tool: payload.tool_name,
+      file: payload.tool_input.file_path,
+      cwd: payload.cwd,
+    });
+  });
+
   it("identifica o shell a partir de um diretório com espaços, sem drive fixo", () => {
     const prefix = path.join(root, "git com espaços");
     const bin = path.join(prefix, "bin");
