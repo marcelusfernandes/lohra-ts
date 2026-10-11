@@ -45,17 +45,7 @@ afterEach(async () => {
     const owned = activeProcess;
     activeProcess = null;
     try {
-      const stopping = owned.kill("SIGKILL");
-      try {
-        await within(stopping, 3_000, "DASHBOARD_CLEANUP_TIMEOUT");
-      } catch (firstError) {
-        try {
-          process.kill(owned.pid, "SIGKILL");
-          await within(stopping, 2_000, "DASHBOARD_CLEANUP_FALLBACK_TIMEOUT");
-        } catch (fallbackError) {
-          failures.push(new AggregateError([firstError, fallbackError], "owned dashboard cleanup"));
-        }
-      }
+      await within(owned.kill("SIGKILL"), 3_000, "DASHBOARD_CLEANUP_TIMEOUT");
     } catch (error) {
       failures.push(error);
     }
@@ -160,7 +150,7 @@ describe("launchCandidateDashboard: a real subprocess, probed over raw sockets",
     expect(readyEvent.params.type).toBe("gateway.ready");
     wsClient.close();
 
-    const result = await process_.kill("SIGINT");
+    const result = await within(process_.kill("SIGINT"), 5_000, "DASHBOARD_SIGINT_TIMEOUT");
     activeProcess = null;
     expect(result).toEqual(
       process.platform === "win32"
