@@ -75,13 +75,15 @@ function childEnvironment(env: NodeJS.ProcessEnv, shellPath: string): NodeJS.Pro
   // A última chave deve vencer, como no spread usado pela bancada.
   const pathKey =
     Object.keys(env)
-      .filter((key) => key.toLowerCase() === "path")
+      .filter((key) =>
+        process.platform === "win32" ? key.toLowerCase() === "path" : key === "PATH",
+      )
       .at(-1) ?? "PATH";
   for (const [key, value] of Object.entries(env)) {
     if (process.platform === "win32" && key.toLowerCase() === "path" && key !== pathKey) continue;
     child[key] = value;
   }
-  child[pathKey] = [path.dirname(shellPath), child[pathKey] ?? ""]
+  child[pathKey] = [child[pathKey] ?? "", path.dirname(shellPath)]
     .filter(Boolean)
     .join(path.delimiter);
   return child;

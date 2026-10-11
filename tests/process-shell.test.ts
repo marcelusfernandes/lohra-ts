@@ -1,4 +1,12 @@
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -72,6 +80,35 @@ describe("shell das bancadas de processo", () => {
     );
     expect(result.status).toBe(0);
     expect(result.stdout).toBe("espaços");
+  });
+
+  it("preserva a precedência do PATH do chamador diante do diretório do shell", () => {
+    const preferredDir = path.join(root, "shim prioritário");
+    const shellDir = path.join(root, "shell com concorrente");
+    mkdirSync(preferredDir);
+    mkdirSync(shellDir);
+    const executable = process.platform === "win32" ? "gh.exe" : "gh";
+    const preferred = path.join(preferredDir, executable);
+    const competing = path.join(shellDir, executable);
+    const shell = path.join(shellDir, path.basename(process.execPath));
+    for (const target of [preferred, competing, shell]) {
+      symlinkSync(process.execPath, target, "file");
+    }
+
+    const env = {
+      ...process.env,
+      PATH: `${preferredDir}${path.delimiter}${process.env.PATH ?? ""}`,
+    };
+    const result = spawnProcessShell(
+      [
+        "-e",
+        "const {spawnSync}=require('node:child_process');const r=spawnSync('gh',['-e','process.stdout.write(process.execPath)'],{encoding:'utf8'});process.stdout.write(JSON.stringify({status:r.status,stdout:r.stdout,error:r.error?.code}))",
+      ],
+      { encoding: "utf8", env },
+      shell,
+    );
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ status: 0, stdout: preferred });
   });
 
   it("shell ausente preserva ENOENT como causa explícita", () => {
