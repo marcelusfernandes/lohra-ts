@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -64,7 +65,7 @@ function installedPrePush(dir: string): string {
 }
 
 function sameHookFile(first: string, second: string): boolean {
-  return resolve(first) === resolve(second);
+  return realpathSync.native(first) === realpathSync.native(second);
 }
 
 describe("prepare portable hooks", () => {
