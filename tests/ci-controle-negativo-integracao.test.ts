@@ -42,6 +42,8 @@ import { join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { resolveNpmCli } from "../scripts/subprocess/npm.js";
+
 import {
   commitTudo,
   escreverTeste,
@@ -64,6 +66,62 @@ import {
 afterEach(limparWorkdirs);
 
 describe("controle-negativo/run.ts (subprocesso, repositório git descartável)", () => {
+  it(
+    "usa o npm CLI indicado mesmo com espaço no caminho e preserva argv, cwd, stdio e ambiente filtrado",
+    () => {
+      const { dir, base, head, slug } = repoAssertionRed();
+      const isolated = mkdtempSync(join(tmpdir(), "negative npm with spaces "));
+      const wrapper = join(isolated, "npm cli probe.cjs");
+      const capture = join(isolated, "capture.json");
+      writeFileSync(
+        wrapper,
+        [
+          'const { spawnSync } = require("node:child_process");',
+          'const { writeFileSync } = require("node:fs");',
+          "writeFileSync(process.env.NPM_CAPTURE_FILE, JSON.stringify({",
+          "  argv: process.argv.slice(2),",
+          "  cwd: process.cwd(),",
+          "  vitest: process.env.VITEST_FAKE_SENTINEL ?? null,",
+          "  provaOut: process.env.LOHRA_PROVA_OUT ?? null,",
+          "}));",
+          "const result = spawnSync(process.execPath, [process.env.REAL_NPM_CLI, ...process.argv.slice(2)], {",
+          '  cwd: process.cwd(), env: process.env, stdio: "inherit", shell: false,',
+          "});",
+          "process.exit(result.status ?? 79);",
+          "",
+        ].join("\n"),
+      );
+      try {
+        const result = runControleNegativoComEnv(
+          ["--root", dir, "--base", base, "--head", head, "--slug", slug],
+          {
+            TMPDIR: isolated,
+            npm_execpath: wrapper,
+            REAL_NPM_CLI: resolveNpmCli(),
+            NPM_CAPTURE_FILE: capture,
+            VITEST_FAKE_SENTINEL: "must-not-reach-prova",
+            LOHRA_PROVA_OUT: "must-not-reach-prova",
+          },
+        );
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.stdout).toContain("assertion-red");
+        const observed = JSON.parse(readFileSync(capture, "utf8")) as {
+          readonly argv: string[];
+          readonly cwd: string;
+          readonly vitest: string | null;
+          readonly provaOut: string | null;
+        };
+        expect(observed.argv).toEqual(["run", "-s", "prova", "--", slug]);
+        expect(observed.cwd).toContain(isolated);
+        expect(observed.vitest).toBeNull();
+        expect(observed.provaOut).toBeNull();
+      } finally {
+        rmSync(isolated, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT_TESTE,
+  );
+
   it(
     "assertion-red: exit 0, e o worktree temporário é removido",
     () => {
