@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { openStateDatabase, SessionRepository } from "../../src/state/index.js";
+import { openStateDatabase, SessionRepository, type StateConnection } from "../../src/state/index.js";
 import { GatewaySessionRegistry } from "../../src/gateway/session-service.js";
 import { createGatewayUpgradeHandler } from "../../src/gateway/ws/connection.js";
 import { startGatewayHttpServer, type GatewayHttpServer } from "../../src/gateway/http/server.js";
@@ -24,23 +24,47 @@ import {
 // correctly using nothing but hand-rolled HTTP/RFC6455 parsing, they're
 // trustworthy for the harness scripts built on top of them.
 
-const roots: string[] = [];
+const fixtures: Array<{ root: string; connection?: StateConnection }> = [];
 let activeServer: GatewayHttpServer | null = null;
 
 afterEach(async () => {
+  const cleanupErrors: unknown[] = [];
   if (activeServer !== null) {
-    await activeServer.close();
+    const server = activeServer;
     activeServer = null;
+    try {
+      await server.close();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
   }
-  while (roots.length > 0) rmSync(roots.pop() as string, { recursive: true, force: true });
+  while (fixtures.length > 0) {
+    const fixture = fixtures.pop();
+    if (fixture === undefined) continue;
+    try {
+      fixture.connection?.close();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    try {
+      rmSync(fixture.root, { recursive: true, force: true });
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, "gateway raw-socket fixture cleanup failed");
+  }
 });
 
 const TOKEN = "the-raw-socket-token";
 
 async function startServer(authRequired = true): Promise<GatewayHttpServer> {
   const root = mkdtempSync(join(tmpdir(), "lohra-gateway-raw-socket-"));
-  roots.push(root);
+  const fixture: { root: string; connection?: StateConnection } = { root };
+  fixtures.push(fixture);
   const connection = openStateDatabase(join(root, "state.db"));
+  fixture.connection = connection;
   const sessions = new SessionRepository(connection.database, () => 1000, connection.ftsEnabled);
   const registry = new GatewaySessionRegistry(sessions);
   const routeContext: RouteContext = {
