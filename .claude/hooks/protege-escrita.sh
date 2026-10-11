@@ -11,7 +11,14 @@
 # não der para canonicalizar cwd. Portado do Apollo (protege-escrita.sh), sem as
 # regras de dono único que não existem aqui.
 set -u
-payload=$(cat)
+if payload=$(cat 2>/dev/null); then
+  :
+else
+  reader_status=$?
+  reason="Bloqueado por .claude/hooks/protege-escrita.sh: falha de leitura do payload (status $reader_status); nego por segurança (fail-closed)."
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}' "$reason"
+  echo "$reason" >&2; exit 2
+fi
 # FAIL-CLOSED sem node: este hook é a ÚNICA camada que protege docs/reference/ e
 # lohra/ (não há pre-push, ruleset nem Action para escrita de arquivo).
 if ! command -v node >/dev/null 2>&1; then
