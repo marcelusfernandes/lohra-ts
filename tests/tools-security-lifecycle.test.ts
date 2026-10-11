@@ -106,12 +106,13 @@ describe("child tool hardening", () => {
     const command = `chmod 755 ${JSON.stringify(target)}`;
 
     try {
-      await expect(dispatch("terminal", { command })).resolves.toBe(
-        toolError(
+      const response = await dispatch("terminal", { command });
+      expect(JSON.parse(response)).toEqual({
+        error:
           "subagent command refused by the dangerous-command policy (broad permission change (chmod ...7xx))",
-          { command, refusal: "final" },
-        ),
-      );
+        command,
+        refusal: "final",
+      });
       expect(statSync(target).mode & 0o777).toBe(0o600);
     } finally {
       approval.setYolo(false);

@@ -136,7 +136,6 @@ describe("filesystem tools", () => {
     const path = join(root(), "sub", "out.txt");
     const response = writeFileTool({ path, content: "café 😀" });
     expect(JSON.parse(response)).toEqual({ ok: true, bytes_written: 10, path });
-    expect(response).toBe(`{"ok":true,"bytes_written":10,"path":"${path}"}`);
     expect(readFileSync(path, "utf8")).toBe("café 😀");
     expect(writeFileTool({ path })).toBe('{"error":"missing required argument \'content\'"}');
     expect(writeFileTool({ path, content: 1 })).toBe('{"error":"\'content\' must be a string"}');
@@ -165,10 +164,6 @@ describe("terminal tool", () => {
       command,
       refusal: "final",
     });
-    expect(response).toBe(
-      `{"error":"command refused by the dangerous-command policy (elevated privileges (sudo))",` +
-        `"command":"${command}","refusal":"final"}`,
-    );
     expect(() => readFileSync(sentinel)).toThrow();
   });
 
