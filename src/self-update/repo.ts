@@ -35,8 +35,13 @@ export const defaultCommandRunner: CommandRunner = (executable, args, cwd) => {
     shell: false,
     env: process.env,
   });
-  const stdout = bounded(result.stdout);
-  const stderr = bounded(result.stderr);
+  // spawnSync may omit both streams when launch fails, despite the string overload.
+  const rawStdout: unknown = result.stdout;
+  const rawStderr: unknown = result.stderr;
+  const stdout = bounded(typeof rawStdout === "string" ? rawStdout : "");
+  const stderr = bounded(
+    (typeof rawStderr === "string" ? rawStderr : "") || result.error?.message || "",
+  );
   return {
     code: result.status ?? 1,
     stdout: stdout.value,
