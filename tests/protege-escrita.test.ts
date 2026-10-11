@@ -7,7 +7,16 @@
 // worktree a raiz é o worktree (senão `.claude/worktrees/w/docs/reference/x` não
 // casaria), dentro de `lohra/` a raiz é o projeto (lohra/ não tem settings).
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -67,6 +76,41 @@ function expectDenied(r: HookRun): void {
   expect(r.stderr).toMatch(/Bloqueado/u);
 }
 
+function lerComFalha(cwd: string, reader: "absent" | "failed-partial"): HookRun {
+  const resolvedShell = resolveProcessShell();
+  // Git/bin/sh.exe injeta /usr/bin no PATH; o executável irmão em usr/bin
+  // conserva o PATH controlado pela fixture.
+  const directShell = path.resolve(path.dirname(resolvedShell), "..", "usr", "bin", "sh.exe");
+  const shell =
+    process.platform === "win32" && existsSync(directShell) ? directShell : resolvedShell;
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && key.toLowerCase() !== "path") env[key] = value;
+  }
+  const executableDir = path.dirname(process.execPath);
+  if (reader === "failed-partial") {
+    const bin = path.join(cwd, "reader-failure-bin");
+    mkdirSync(bin, { recursive: true });
+    const fakeCat = path.join(bin, "cat");
+    writeFileSync(fakeCat, '#!/bin/sh\nprintf "partial-secret-value"\nexit 17\n');
+    chmodSync(fakeCat, 0o755);
+    env.PATH = [bin, executableDir].join(path.delimiter);
+  } else {
+    env.PATH = executableDir;
+  }
+  const readerProbe = spawnSync(shell, ["-c", "command -v cat"], { cwd, env, encoding: "utf8" });
+  expect(readerProbe.status).toBe(reader === "absent" ? 1 : 0);
+  const input = JSON.stringify({
+    tool_name: "Write",
+    tool_input: { file_path: path.join(cwd, "docs", "reference", "novo.md") },
+    cwd,
+    token: "payload-secret-value",
+  });
+  const result = spawnSync(shell, [HOOK], { cwd, env, input, encoding: "utf8" });
+  if (result.error) throw result.error;
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr, shell };
+}
+
 describe("protege-escrita.sh", () => {
   let root = "";
   let fora = "";
@@ -104,6 +148,20 @@ describe("protege-escrita.sh", () => {
     const r = escrever(root, path.join(root, "docs", "reference", "novo.md"));
     expectDenied(r);
     expect(r.stderr).toMatch(/docs\/reference/u);
+  });
+
+  it("nega quando o leitor cat está ausente, mesmo com node disponível", () => {
+    const result = lerComFalha(root, "absent");
+    expectDenied(result);
+    expect(result.stdout).toMatch(/falha de leitura do payload/u);
+    expect(result.stdout + result.stderr).not.toMatch(/payload-secret-value/u);
+  });
+
+  it("nega quando cat emite saída parcial e termina com status não-zero", () => {
+    const result = lerComFalha(root, "failed-partial");
+    expectDenied(result);
+    expect(result.stdout).toMatch(/falha de leitura do payload/u);
+    expect(result.stdout + result.stderr).not.toMatch(/partial-secret-value|payload-secret-value/u);
   });
 
   it("caminho relativo a partir de um subdiretório: nega", () => {
