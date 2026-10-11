@@ -4,24 +4,43 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { openStateDatabase, SessionRepository } from "../../src/state/index.js";
+import { openStateDatabase, SessionRepository, type StateConnection } from "../../src/state/index.js";
 import { GatewaySessionRegistry } from "../../src/gateway/session-service.js";
 
-const roots: string[] = [];
+const fixtures: Array<{ root: string; connection?: StateConnection }> = [];
 
 function setup(): {
   readonly registry: GatewaySessionRegistry;
   readonly sessions: SessionRepository;
 } {
   const root = mkdtempSync(join(tmpdir(), "lohra-gateway-session-"));
-  roots.push(root);
+  const fixture: { root: string; connection?: StateConnection } = { root };
+  fixtures.push(fixture);
   const connection = openStateDatabase(join(root, "state.db"));
+  fixture.connection = connection;
   const sessions = new SessionRepository(connection.database, () => 1000, connection.ftsEnabled);
   return { registry: new GatewaySessionRegistry(sessions), sessions };
 }
 
 afterEach(() => {
-  while (roots.length > 0) rmSync(roots.pop() as string, { recursive: true, force: true });
+  const cleanupErrors: unknown[] = [];
+  while (fixtures.length > 0) {
+    const fixture = fixtures.pop();
+    if (fixture === undefined) continue;
+    try {
+      fixture.connection?.close();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    try {
+      rmSync(fixture.root, { recursive: true, force: true });
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, "gateway session fixture cleanup failed");
+  }
 });
 
 describe("GatewaySessionRegistry.createOrResurrect", () => {
