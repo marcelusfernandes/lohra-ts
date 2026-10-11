@@ -126,6 +126,7 @@ describe("runChat wires eventSink: compaction events reach stderr (issue #287)",
         ]),
         environment: {
           HOME: root,
+          LOHRA_HOME: join(root, ".lohra"),
           PATH: process.env.PATH ?? "",
           // Issue #580: absolute-token ceiling calibrated against a prompt
           // every #575 sub-issue grows (doctrine, then the Harness block) —
@@ -217,6 +218,7 @@ describe("runChat wires AuxClient telemetry: aux_calls in the envelope (issue #6
         ]),
         environment: {
           HOME: root,
+          LOHRA_HOME: join(root, ".lohra"),
           PATH: process.env.PATH ?? "",
           LOHRA_CONTEXT_WINDOW: "8000",
         },
@@ -297,6 +299,7 @@ describe("runChat generates and persists a title for a NEW session (issue #623)"
         ]),
         environment: {
           HOME: root,
+          LOHRA_HOME: join(root, ".lohra"),
           PATH: process.env.PATH ?? "",
         },
         home: join(root, ".lohra"),
@@ -406,6 +409,7 @@ describe("runChat's title generation fails open without blocking the turn (issue
         ]),
         environment: {
           HOME: root,
+          LOHRA_HOME: join(root, ".lohra"),
           PATH: process.env.PATH ?? "",
         },
         home: join(root, ".lohra"),
@@ -526,6 +530,7 @@ describe("runChat's title generation fails open without blocking the turn (issue
         ]),
         environment: {
           HOME: root,
+          LOHRA_HOME: join(root, ".lohra"),
           PATH: process.env.PATH ?? "",
         },
         home: join(root, ".lohra"),
