@@ -151,3 +151,7 @@ suggested_route}`; kind que pausa nunca entra em `faultKinds`; primeiro a
   futuro seria um deadline do próprio runtime, não um erro de rede do
   provedor; alternativa de produzir `timeout` em `buildTurnNotice` rejeitada
   por criar dois kinds para a mesma causa.
+- [2026-10-09 — Contenção de caminhos no
+  workflow](2026-10-09-workflow-path-containment.md) — `read_file`/`write_file`
+  usam comparação de componentes e caminhos reais em Windows; `terminal` não
+  recebe sandbox de sistema operacional nem é limitado por `fs_allow`.

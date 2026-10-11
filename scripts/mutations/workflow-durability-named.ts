@@ -175,8 +175,8 @@ export const namedMutants: readonly Mutant[] = [
     edits: [
       {
         file: sandbox,
-        before: "    const real = existsSync(current) ? realpathSync(current) : null;",
-        after: "    const real = existsSync(current) ? current : null;",
+        before: "      const real = realpathSync(current);",
+        after: "      const real = current;",
       },
     ],
   },

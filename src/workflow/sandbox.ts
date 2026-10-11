@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, isAbsolute, posix, relative, resolve, sep, win32 } from "node:path";
 
 import type { WorkflowCacheOwnership } from "./cache.js";
 
@@ -59,6 +59,11 @@ export type ToolDispatchLike = (name: string, args: Readonly<Record<string, unkn
 const FS_TOOLS: ReadonlySet<string> = new Set(["read_file", "write_file"]);
 const EGRESS_TOOLS: ReadonlySet<string> = new Set(["web_fetch", "web_search"]);
 
+function isUnresolvablePath(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP";
+}
+
 /**
  * Resolve `target` against the filesystem as far as the filesystem knows it:
  * walk up to the NEAREST EXISTING ancestor, resolve that for real, and re-attach
@@ -71,19 +76,45 @@ const EGRESS_TOOLS: ReadonlySet<string> = new Set(["web_fetch", "web_search"]);
  * would land outside. Walking to the nearest existing ancestor resolves the
  * link itself and the answer comes out right.
  */
-function resolvedAgainstFilesystem(target: string): string {
+function resolvedAgainstFilesystem(target: string): string | null {
   const absolute = resolve(target);
   const pending: string[] = [];
   let current = absolute;
   for (;;) {
-    const real = existsSync(current) ? realpathSync(current) : null;
-    if (real !== null) return pending.length === 0 ? real : resolve(real, ...pending);
-    const parent = dirname(current);
-    // hit the filesystem root without finding anything that exists
-    if (parent === current) return absolute;
-    pending.unshift(basename(current));
-    current = parent;
+    try {
+      // lstat sees dangling links that existsSync hides. If realpath cannot
+      // resolve such a link, deny instead of treating it as an absent leaf.
+      lstatSync(current);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        if (isUnresolvablePath(error)) return null;
+        throw error;
+      }
+      const parent = dirname(current);
+      if (parent === current) return null;
+      pending.unshift(basename(current));
+      current = parent;
+      continue;
+    }
+    try {
+      const real = realpathSync(current);
+      return pending.length === 0 ? real : resolve(real, ...pending);
+    } catch (error) {
+      if (isUnresolvablePath(error)) return null;
+      throw error;
+    }
   }
+}
+
+/** Compare resolved paths by components; Windows fixtures also run on Unix CI. */
+export function isResolvedPathWithinRoot(candidate: string, root: string): boolean {
+  const pathOps =
+    win32.isAbsolute(root) && !posix.isAbsolute(root) ? win32 : { isAbsolute, relative, sep };
+  const fromRoot = pathOps.relative(root, candidate);
+  return (
+    fromRoot === "" ||
+    (fromRoot !== ".." && !fromRoot.startsWith(`..${pathOps.sep}`) && !pathOps.isAbsolute(fromRoot))
+  );
 }
 
 function isWithin(target: string, root: string): boolean {
@@ -91,14 +122,15 @@ function isWithin(target: string, root: string): boolean {
   // the target exists, its parent exists, or neither does.
   const resolvedRoot = resolvedAgainstFilesystem(root);
   const candidate = resolvedAgainstFilesystem(target);
-  return (
-    candidate === resolvedRoot ||
-    candidate.startsWith(resolvedRoot.endsWith("/") ? resolvedRoot : `${resolvedRoot}/`)
-  );
+  if (resolvedRoot === null || candidate === null) return false;
+  return isResolvedPathWithinRoot(candidate, resolvedRoot);
 }
 
 function fsAllowed(rawPath: unknown, roots: readonly string[]): boolean {
   if (typeof rawPath !== "string" || rawPath === "") return false;
+  // POSIX can traverse a symlink before `..`; resolve() would erase that
+  // segment before realpath sees the link. Refuse ambiguous raw traversal.
+  if (rawPath.split(/[\\/]/u).includes("..")) return false;
   return roots.some((root) => isWithin(rawPath, root));
 }
 

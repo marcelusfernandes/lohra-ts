@@ -1,4 +1,6 @@
 import {
+  existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -7,13 +9,14 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import { BUILTIN_DEFINITIONS } from "../src/tools/builtin-definitions.js";
 import { writeFileTool } from "../src/tools/filesystem.js";
 import {
+  isResolvedPathWithinRoot,
   isTaintingTool,
   loadPolicy,
   sandboxDispatch,
@@ -68,14 +71,104 @@ describe("loadPolicy", () => {
     );
     const policy = loadPolicy(join(root, "policy.json"));
     expect(policy.fsAllow).toEqual([
-      { path: "/rw/root", writable: true },
-      { path: "/ro/root", writable: false },
+      { path: resolve("/rw/root"), writable: true },
+      { path: resolve("/ro/root"), writable: false },
     ]);
     expect(policy.egressAllow).toEqual(["api.test"]);
   });
 });
 
 describe("sandboxDispatch — fs", () => {
+  it("compares resolved Windows roots by path components, including another drive", () => {
+    const root = String.raw`C:\work\run`;
+    expect(isResolvedPathWithinRoot(root, root)).toBe(true);
+    expect(isResolvedPathWithinRoot(String.raw`C:\work\run\child\file.txt`, root)).toBe(true);
+    expect(isResolvedPathWithinRoot(String.raw`C:\work\sibling\file.txt`, root)).toBe(false);
+    expect(isResolvedPathWithinRoot(String.raw`C:\work\run-extra\file.txt`, root)).toBe(false);
+    expect(isResolvedPathWithinRoot(String.raw`D:\work\run\file.txt`, root)).toBe(false);
+  });
+
+  it("allows the root and children while refusing siblings, prefixes and a symlink escape", () => {
+    const parent = realWorkspace();
+    const root = join(parent, "run");
+    const sibling = join(parent, "sibling");
+    mkdirSync(root);
+    mkdirSync(sibling);
+    const outside = join(sibling, "secret.txt");
+    writeFileSync(outside, "s");
+    symlinkSync(sibling, join(root, "escape"), "dir");
+    const dispatch = sandboxDispatch(base, {
+      workingRoot: root,
+      policy: { fsAllow: [], egressAllow: [] },
+      tainted: false,
+    });
+    const denied = "ERROR: path is outside the workflow working scope (sandbox denied)";
+    expect(dispatch("read_file", { path: root })).toContain("allowed");
+    expect(dispatch("read_file", { path: join(root, "child.txt") })).toContain("allowed");
+    expect(dispatch("read_file", { path: outside })).toBe(denied);
+    expect(dispatch("read_file", { path: join(parent, "run-extra", "file.txt") })).toBe(denied);
+    expect(dispatch("read_file", { path: join(root, "escape", "secret.txt") })).toBe(denied);
+  });
+
+  it("refuses a dangling symlink before a real write can create its outside target", () => {
+    const parent = realWorkspace();
+    const root = join(parent, "run");
+    const outside = join(parent, "outside");
+    mkdirSync(root);
+    mkdirSync(outside);
+    const target = join(outside, "new.txt");
+    const link = join(root, "link.txt");
+    symlinkSync(target, link, "file");
+    expect(existsSync(link)).toBe(false);
+    const dispatch = sandboxDispatch((_name, args) => writeFileTool(args), {
+      workingRoot: root,
+      policy: { fsAllow: [], egressAllow: [] },
+      tainted: false,
+    });
+    expect(dispatch("write_file", { path: link, content: "escaped" })).toBe(
+      "ERROR: path is outside the workflow working scope (sandbox denied)",
+    );
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it("refuses a raw parent segment before symlink traversal can leave the root", () => {
+    const parent = realWorkspace();
+    const root = join(parent, "run");
+    const outside = join(parent, "outside");
+    const child = join(outside, "child");
+    mkdirSync(root);
+    mkdirSync(outside);
+    mkdirSync(child);
+    symlinkSync(child, join(root, "link"), "dir");
+    const rawPath = `${join(root, "link")}${sep}..${sep}probe.txt`;
+    const dispatch = sandboxDispatch((_name, args) => writeFileTool(args), {
+      workingRoot: root,
+      policy: { fsAllow: [], egressAllow: [] },
+      tainted: false,
+    });
+    expect(dispatch("write_file", { path: rawPath, content: "probe" })).toBe(
+      "ERROR: path is outside the workflow working scope (sandbox denied)",
+    );
+    expect(existsSync(join(root, "probe.txt"))).toBe(false);
+    expect(existsSync(join(outside, "probe.txt"))).toBe(false);
+  });
+
+  it("propagates unexpected filesystem validation errors with their cause", () => {
+    const root = realWorkspace();
+    const dispatch = sandboxDispatch(base, {
+      workingRoot: root,
+      policy: { fsAllow: [], egressAllow: [] },
+      tainted: false,
+    });
+    let error: unknown;
+    try {
+      dispatch("write_file", { path: `${root}${sep}\0bad`, content: "x" });
+    } catch (cause) {
+      error = cause;
+    }
+    expect(error).toMatchObject({ code: "ERR_INVALID_ARG_VALUE" });
+  });
+
   it("allows reads/writes inside the working root and denies outside with exact text", () => {
     const root = workspace();
     const dispatch = sandboxDispatch(base, {
