@@ -44,7 +44,7 @@ function literalTestNames(file: string): readonly string[] {
 }
 
 describe("workflow durability mutation focus integrity", () => {
-  it("runs the three extracted sandbox mutants against two real test cases", () => {
+  it("maps the three extracted sandbox mutants to two declared test cases", () => {
     const selected = namedMutants.filter((mutant) => retargetedIds.some((id) => id === mutant.id));
     expect(selected.map((mutant) => mutant.id).sort()).toEqual([...retargetedIds].sort());
     expect(
@@ -55,7 +55,7 @@ describe("workflow durability mutation focus integrity", () => {
       const names = literalTestNames(mutant.focus.file);
       expect(
         names.some((name) => name.includes(mutant.focus.test)),
-        mutant.id,
+        `${mutant.id}: ${mutant.focus.file} / ${mutant.focus.test}`,
       ).toBe(true);
     }
   });
