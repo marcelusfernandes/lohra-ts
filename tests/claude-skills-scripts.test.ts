@@ -6,6 +6,7 @@ import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawnProcessShell } from "./helpers/process-shell.js";
 
@@ -13,6 +14,19 @@ const SECAO = fileURLToPath(new URL("../.claude/skills/pr/scripts/secao.sh", imp
 const CREATE = fileURLToPath(
   new URL("../.claude/skills/issue/scripts/create-issue.sh", import.meta.url),
 );
+const REPO = fileURLToPath(new URL("../", import.meta.url));
+
+function gitExecutableMode(_repo: string, _file: string): boolean {
+  throw new Error("not implemented");
+}
+
+function git(cwd: string, args: readonly string[]): string {
+  const result = spawnSync("git", [...args], { cwd, encoding: "utf8", shell: false });
+  if (result.error || result.status !== 0) {
+    throw new Error(`git ${args[0] ?? ""} failed: ${result.error?.message ?? result.stderr}`);
+  }
+  return result.stdout;
+}
 
 function secao(
   nome: string,
@@ -97,7 +111,25 @@ describe("secao.sh", () => {
   });
 
   it("secao.sh tem bit de execução (modo 100755, como open-pr.sh)", () => {
-    expect(statSync(SECAO).mode & 0o111).not.toBe(0);
+    expect(gitExecutableMode(REPO, ".claude/skills/pr/scripts/secao.sh")).toBe(true);
+    if (process.platform !== "win32") {
+      expect(statSync(SECAO).mode & 0o111).not.toBe(0);
+    }
+  });
+
+  it("rejeita 100644 e aceita 100755 no índice de uma fixture isolada", () => {
+    const repo = mkdtempSync(path.join(tmpdir(), "secao-index-"));
+    try {
+      git(repo, ["init", "--quiet"]);
+      writeFileSync(path.join(repo, "secao.sh"), "#!/bin/sh\nexit 0\n");
+      const blob = git(repo, ["hash-object", "-w", "secao.sh"]).trim();
+      git(repo, ["update-index", "--add", "--cacheinfo", `100644,${blob},secao.sh`]);
+      expect(gitExecutableMode(repo, "secao.sh")).toBe(false);
+      git(repo, ["update-index", "--add", "--cacheinfo", `100755,${blob},secao.sh`]);
+      expect(gitExecutableMode(repo, "secao.sh")).toBe(true);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 });
 
