@@ -445,3 +445,8 @@ export function runNative(argv: readonly string[], hooks: NativeRunHooks = {}): 
   );
   return 0;
 }
+
+/** Stub compilável: a prova da rota positiva precede a implementação. */
+export function runNativePositive(_argv: readonly string[], _hooks: NativeRunHooks = {}): number {
+  throw new Error("NATIVE_POSITIVE_NOT_IMPLEMENTED");
+}

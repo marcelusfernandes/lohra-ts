@@ -139,7 +139,7 @@ import {
   type ExecucaoGit,
 } from "../lib/git.js";
 import { appendSummary } from "../lib/summary.js";
-import { runNative } from "./native.js";
+import { runNative, runNativePositive } from "./native.js";
 import {
   type Args,
   arquivosDeTeste,
@@ -597,6 +597,9 @@ function rodarCheck(
 }
 
 function main(): void {
+  if (process.argv.slice(2).includes("--native-positive")) {
+    process.exit(runNativePositive(process.argv.slice(2)));
+  }
   if (process.argv.slice(2).includes("--native")) {
     process.exit(runNative(process.argv.slice(2)));
   }
