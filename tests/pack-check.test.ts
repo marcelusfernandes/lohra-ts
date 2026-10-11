@@ -20,6 +20,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   assertNoNativeCompileNeeded,
+  assertConsumerPtyWorks,
   assertStructuralMatch,
   extractLastToolResultContent,
   packNpmCommand,
@@ -156,8 +157,8 @@ function betterSqlite3Binary(root: string): void {
   );
 }
 
-function nodePtyBinary(root: string, platform: string, arch: string): void {
-  writeFile(root, join("node_modules", "node-pty", "prebuilds", `${platform}-${arch}`, "pty.node"));
+function nodePtyBinary(root: string, platform: string, arch: string, binary = "pty.node"): void {
+  writeFile(root, join("node_modules", "node-pty", "prebuilds", `${platform}-${arch}`, binary));
 }
 
 describe("assertNoNativeCompileNeeded", () => {
@@ -206,6 +207,30 @@ describe("assertNoNativeCompileNeeded", () => {
       assertNoNativeCompileNeeded({ consumerRoot: root as string, platform: "linux", arch: "x64" });
     }).not.toThrow();
   });
+
+  it("aceita conpty.node no Windows x64 mesmo sem pty.node", () => {
+    root = mkdtempSync(join(tmpdir(), "lohra-pack-native-"));
+    betterSqlite3Binary(root);
+    nodePtyBinary(root, "win32", "x64", "conpty.node");
+    expect(() => {
+      assertNoNativeCompileNeeded({ consumerRoot: root as string, platform: "win32", arch: "x64" });
+    }).not.toThrow();
+  });
+
+  it("recusa pty.node no Windows x64 quando conpty.node está ausente", () => {
+    root = mkdtempSync(join(tmpdir(), "lohra-pack-native-"));
+    betterSqlite3Binary(root);
+    nodePtyBinary(root, "win32", "x64");
+    expect(() => {
+      assertNoNativeCompileNeeded({ consumerRoot: root as string, platform: "win32", arch: "x64" });
+    }).toThrow(/PACK_NATIVE_PREBUILD_MISSING:node-pty/u);
+  });
+});
+
+describe("consumer PTY", () => {
+  it("carrega o addon instalado e cria um PTY real", async () => {
+    await expect(assertConsumerPtyWorks(process.cwd())).resolves.toBeUndefined();
+  }, 20_000);
 });
 
 // Issue #549: `node-pty@1.1.0` (o pin anterior) só publica prebuilds

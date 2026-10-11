@@ -77,6 +77,11 @@ export function assertNoNativeCompileNeeded(options: {
   }
 }
 
+export async function assertConsumerPtyWorks(_consumerRoot: string): Promise<void> {
+  await Promise.resolve();
+  throw new Error("not implemented");
+}
+
 function command(
   executable: string,
   argv: readonly string[],
