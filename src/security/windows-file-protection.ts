@@ -214,7 +214,7 @@ export function prepareWindowsPrivateDestination(
   operations.volume(file);
   const owned: Array<{ path: string; entry: Entry }> = [];
   let unverified: PendingCreation | null = null;
-  let verifiedContention = false;
+  let exclusiveContention = false;
   try {
     let dirEntry = inspectChain(directory, operations);
     if (!dirEntry && options.existing) {
@@ -238,6 +238,14 @@ export function prepareWindowsPrivateDestination(
 
     let fileEntry = inspectChain(file, operations);
     const createdFile = fileEntry === null;
+    if (options.exclusive && fileEntry) {
+      // The other creator may still be applying its ACL. EEXIST means only
+      // that this exclusive create lost; it grants no guard over that file.
+      exclusiveContention = true;
+      throw Object.assign(new Error(`Windows private destination already exists: ${file}`), {
+        code: "EEXIST",
+      });
+    }
     if (options.existing && createdFile) {
       throw Object.assign(new Error(`Windows private destination is missing: ${file}`), {
         code: "ENOENT",
@@ -249,12 +257,10 @@ export function prepareWindowsPrivateDestination(
         operations.createEmpty(file);
       } catch (error) {
         if (options.exclusive && isCode(error, "EEXIST")) {
-          const contender = inspectChain(file, operations);
-          if (contender && contender.kind === "file") {
-            checked(file, "file", contender.identity, operations);
-            unverified = null;
-            verifiedContention = true;
-          }
+          // wx established contention; never inspect ACL, own or clean the
+          // file created by the winner while its protection is incomplete.
+          unverified = null;
+          exclusiveContention = true;
         }
         throw error;
       }
@@ -269,12 +275,6 @@ export function prepareWindowsPrivateDestination(
       throw new Error(`Windows private destination must be a regular file: ${file}`);
     }
     checked(file, "file", fileEntry.identity, operations);
-    if (options.exclusive && !createdFile) {
-      verifiedContention = true;
-      throw Object.assign(new Error(`Windows private destination already exists: ${file}`), {
-        code: "EEXIST",
-      });
-    }
     const directoryIdentity = dirEntry.identity;
     const destinationIdentity = fileEntry.identity;
     let stagedIdentity: string | null = null;
@@ -350,7 +350,7 @@ export function prepareWindowsPrivateDestination(
       },
     };
   } catch (error) {
-    if (verifiedContention) throw error;
+    if (exclusiveContention) throw error;
     cleanOwn(owned, unverified, operations, error);
   }
 }

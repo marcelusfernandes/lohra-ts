@@ -255,6 +255,20 @@ describe("Windows auth integration through fake protection ports", () => {
     expect(readFileSync(path, "utf8")).toContain("holder-a");
   });
 
+  it("treats a just-created empty lock as busy while its ACL is incomplete", () => {
+    const home = root();
+    const path = join(home, "oauth.json.lock");
+    writeFileSync(path, "");
+    const events: string[] = [];
+    const protection: LeaseProtectionOperations = {
+      platform: "win32",
+      prepare: fakeProtection(events),
+    };
+    expect(acquireFileLease(path, "contender", 10, Date.now() / 1000, protection)).toBe(false);
+    expect(readFileSync(path, "utf8")).toBe("");
+    expect(events).toEqual([`prepare:${path}:exclusive`]);
+  });
+
   it("keeps protection and cleanup causes when lock acquisition fails", async () => {
     const home = root();
     const primary = new Error("ACL denied");

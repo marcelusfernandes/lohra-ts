@@ -118,19 +118,18 @@ describe("windows private destination", () => {
     }
   });
 
-  it("reports EEXIST only for a verified existing exclusive destination", () => {
+  it("reports EEXIST for an existing exclusive destination before its ACL is ready", () => {
     const state = fixture();
     state.add(directory, "directory");
     state.protectedPaths.add(directory);
     state.add(destination, "file", 5n);
     expect(() =>
       prepareWindowsPrivateDestination(destination, state.operations, { exclusive: true }),
-    ).toThrow(/incompatible ACL/);
-    state.protectedPaths.add(destination);
-    expect(() =>
-      prepareWindowsPrivateDestination(destination, state.operations, { exclusive: true }),
     ).toThrow(expect.objectContaining({ code: "EEXIST" }));
     expect(state.entries.get(destination)?.size).toBe(5n);
+    expect(state.events).not.toContain(`verify:${destination}`);
+    expect(state.events).not.toContain(`protect:${destination}`);
+    expect(state.events).not.toContain(`unlink:${destination}`);
   });
 
   it("requires an existing lock without creating an empty replacement", () => {
@@ -158,13 +157,14 @@ describe("windows private destination", () => {
     state.protectedPaths.add(directory);
     state.operations.createEmpty = (path) => {
       state.add(path, "file");
-      state.protectedPaths.add(path);
       throw Object.assign(new Error("already created by contender"), { code: "EEXIST" });
     };
     expect(() =>
       prepareWindowsPrivateDestination(destination, state.operations, { exclusive: true }),
     ).toThrow(expect.objectContaining({ code: "EEXIST" }));
     expect(state.entries.has(destination)).toBe(true);
+    expect(state.events).not.toContain(`verify:${destination}`);
+    expect(state.events).not.toContain(`protect:${destination}`);
     expect(state.events).not.toContain(`unlink:${destination}`);
   });
 
