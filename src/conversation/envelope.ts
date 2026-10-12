@@ -6,6 +6,7 @@ import type {
   CompactionSummary,
   ConversationTurnResult,
   ExecutedToolCall,
+  SessionNotice,
   SessionSummary,
 } from "./types.js";
 
@@ -18,6 +19,7 @@ import type {
 export interface AuxEnvelopeExtra {
   readonly auxCalls?: number;
   readonly auxUsage?: Usage | null;
+  readonly sessionNotices?: readonly SessionNotice[];
 }
 
 // Issue #252: only present when a compaction actually ran this turn --
@@ -127,6 +129,7 @@ export function successEnvelope(result: ConversationTurnResult, extra?: AuxEnvel
   // Issue #587 AC: additive, at the very end -- byte-compatible for any
   // reader that doesn't know the key (existing keys keep their exact order).
   if (auxCalls > 0) value.aux_calls = auxCalls;
+  if ((extra?.sessionNotices?.length ?? 0) > 0) value.session_notices = extra?.sessionNotices;
   return `${stringifyJsonPreservingNumbers(value, 2)}\n`;
 }
 
@@ -173,5 +176,6 @@ export function errorEnvelope(
   // successEnvelope (issue #587) -- byte-compatible for any reader that
   // doesn't know the key.
   if (auxCalls > 0) value.aux_calls = auxCalls;
+  if ((extra?.sessionNotices?.length ?? 0) > 0) value.session_notices = extra?.sessionNotices;
   return `${stringifyJsonPreservingNumbers(value, 2)}\n`;
 }

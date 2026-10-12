@@ -28,7 +28,7 @@ import {
   SqliteConversationRepository,
   successEnvelope,
 } from "../conversation/index.js";
-import type { ConversationRuntimeEvent } from "../conversation/index.js";
+import type { ConversationRuntimeEvent, SessionNotice } from "../conversation/index.js";
 import { OpenAIImagesAdapter } from "../media/index.js";
 import { registerConfiguredMcpServers } from "../mcp/index.js";
 import type { MCPManager } from "../mcp/index.js";
@@ -487,10 +487,22 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   // Issue #589: the SAME `noticesRepository` `workflow_notices` already
   // reads from — a pending notice this turn overlays is the one an
   // operator would otherwise only see by calling that tool.
+  const sessionNotices: SessionNotice[] = [];
   const notices = createTurnNoticesPort({
     repository: sessionToolBase.noticesRepository,
     sessions,
     warning: sessionToolBase.noticesSink.warn,
+    onClaimedCancellation: (rows) => {
+      sessionNotices.push(...rows);
+    },
+  });
+  const noticeText = (): string =>
+    sessionNotices.map((row) => `Lohra session notice: ${row.message}\n`).join("");
+  const envelopeExtra = () => ({
+    ...(auxTelemetry === undefined
+      ? {}
+      : { auxCalls: auxTelemetry.calls(), auxUsage: auxTelemetry.usage() }),
+    ...(sessionNotices.length === 0 ? {} : { sessionNotices: [...sessionNotices] }),
   });
   let activeSignal: AbortSignal | null = null;
   const runtime = new ConversationRuntime({
@@ -590,13 +602,8 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     return {
       code: 0,
       stdout: options.flags.has("--json")
-        ? successEnvelope(
-            result,
-            auxTelemetry === undefined
-              ? undefined
-              : { auxCalls: auxTelemetry.calls(), auxUsage: auxTelemetry.usage() },
-          )
-        : `${result.response.content ?? ""}\n`,
+        ? successEnvelope(result, envelopeExtra())
+        : `${noticeText()}${result.response.content ?? ""}\n`,
       stderr: `${warningLines}${compactionEvents.join("")}session: ${result.sessionId}  (resume with --session ${result.sessionId})\n`,
     };
   } catch (error) {
@@ -631,11 +638,9 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
         // Issue #650 (item 13): a turn that fails after a successful title
         // call used to drop that bounded aux spend entirely from the
         // envelope — same `extra` shape successEnvelope already reads.
-        auxTelemetry === undefined
-          ? undefined
-          : { auxCalls: auxTelemetry.calls(), auxUsage: auxTelemetry.usage() },
+        envelopeExtra(),
       ),
-      stderr: `${warningLines}${compactionEvents.join("")}${sessionId ? `session: ${sessionId}  (resume with --session ${sessionId})\n` : ""}error: ${message}\n`,
+      stderr: `${warningLines}${compactionEvents.join("")}${sessionId ? `session: ${sessionId}  (resume with --session ${sessionId})\n` : ""}${options.flags.has("--json") ? "" : noticeText()}error: ${message}\n`,
     };
   } finally {
     disposeSignal();
