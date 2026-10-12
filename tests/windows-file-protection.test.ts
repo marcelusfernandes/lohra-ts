@@ -231,6 +231,31 @@ describe("windows private destination", () => {
     expect(state.events).not.toContain(`rmdir:${directory}`);
   });
 
+  it("reports a possible residual when empty file creation throws after creating it", () => {
+    const state = fixture();
+    state.add(directory, "directory");
+    state.protectedPaths.add(directory);
+    state.operations.createEmpty = (path) => {
+      state.add(path, "file");
+      throw new Error("close failed after create");
+    };
+    try {
+      prepareWindowsPrivateDestination(destination, state.operations);
+      throw new Error("expected failure");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AggregateError);
+      const aggregate = error as AggregateError;
+      expect(aggregate.cause).toEqual(new Error("close failed after create"));
+      expect(aggregate.errors.map(String)).toEqual([
+        "Error: close failed after create",
+        expect.stringMatching(/cleanup inconclusive.*possible residual/i),
+      ]);
+      expect(String(aggregate.errors[1])).toContain(destination);
+    }
+    expect(state.entries.has(destination)).toBe(true);
+    expect(state.events).not.toContain(`unlink:${destination}`);
+  });
+
   it("removes its new directory after a file protection failure", () => {
     const state = fixture();
     state.operations.protect = (path) => {
