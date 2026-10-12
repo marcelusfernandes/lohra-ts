@@ -1,12 +1,13 @@
 # #757 — cancelamento e retomada de tarefa real no Windows
 
-**Estado após as medições de 2026-10-11/12: PARTIAL.** O Ctrl+C público agora
-interrompe a operação local em menos de 2 s, preserva o arquivo concluído e
-devolve um envelope explícito de cancelamento. [#920](https://github.com/marcelusfernandes/lohra-ts/issues/920)
-foi integrada pela [PR #922](https://github.com/marcelusfernandes/lohra-ts/pull/922).
-A retomada lê o arquivo sem repetir a operação, mas ainda não identifica de
-forma confiável a tarefa interrompida. O aceite desta issue depende de uma
-solução e medição positivas para [#923](https://github.com/marcelusfernandes/lohra-ts/issues/923).
+**Estado após as medições de 2026-10-11/12: PASS funcional restrito ao CLI
+instalado, no candidato `bd1181e` de [#923](https://github.com/marcelusfernandes/lohra-ts/issues/923).**
+O Ctrl+C público interrompeu a operação local em 1.882 ms, preservou o arquivo
+concluído e devolveu um envelope explícito de cancelamento. Na retomada, a CLI
+apresentou o aviso registrado pelo Lohra antes da resposta do modelo; o JSON
+expôs `session_notices`. A integração de #923 ainda depende de PR e merge.
+[#920](https://github.com/marcelusfernandes/lohra-ts/issues/920) já foi integrada
+pela [PR #922](https://github.com/marcelusfernandes/lohra-ts/pull/922).
 
 ## Ambiente e recorte
 
@@ -87,18 +88,48 @@ integrais. Os candidatos de #923 são locais; nenhum dos dois constitui
 aceite. O aviso contextual/factual foi concatenado ao conteúdo de um turno
 com papel `user` no runtime, sem origem autenticável distinta para o modelo.
 As respostas suspeitando de um “aviso de operador” são compatíveis com esse
-limite, mas os três ensaios não demonstram qual apresentação futura será
-suficiente. A escolha do comportamento público de aviso segue em #923.
+limite. A escolha posterior do owner foi apresentar o estado de cancelamento
+deterministicamente na CLI, separado da resposta do modelo. Esses ensaios
+permanecem registrados como falhas das abordagens anteriores.
+
+## Aceite funcional no candidato de #923
+
+O candidato `bd1181e5e7ccc86b3d3c9a628bfd106061f2c990` executou **uma**
+nova sequência real com pacote instalado, provider Codex `gpt-6-sol`, Node 22
+e Ctrl+C pelo ConPTY público. Depois de criar `entrega-aviso.txt` e iniciar a
+operação local limitada a 30 s, o cancelamento retornou em 1.882 ms, exit 1,
+`completed=false`, `error="conversation cancelled"`. O child próprio estava
+encerrado, não houve conclusão natural e o arquivo permaneceu intacto.
+
+Na retomada humana, a primeira linha foi identificada como `Lohra session
+notice`, indicou o pedido cancelado, `write_file` retornado sem avaliação de
+sucesso, `terminal` em voo com resultado desconhecido e ausência de turno
+assistant concluído. A resposta do modelo veio **depois** e confirmou o
+conteúdo do arquivo. A saída humana terminou com código 0. A retomada JSON
+do mesmo evento retornou exit 0, `completed=true`, `error=null`, uma chamada
+`read_file` e `session_notices` com `id=5`, `kind="cancelled"` e o aviso da
+sessão. Para conferir as duas apresentações do mesmo cancelamento, foi usado
+um snapshot isolado do estado da sessão e das configurações de autenticação;
+nem o snapshot nem seus dados foram copiados para este repositório. Não houve
+segunda operação de cancelamento para essa conferência.
+
+O resultado de produto agora independe de o modelo interpretar o aviso como
+autoritativo: o estado é apresentado pela CLI com origem identificada. A
+[projeção sanitizada](evidence/implementation-validation/runtime/notice-observation.json)
+registra a sequência, as duas saídas e seus limites. A TUI ainda não existe;
+esta medição não demonstra sua apresentação futura.
 
 ## Aceite e próximos passos
 
 Os critérios de ambiente, tarefa real, Ctrl+C com erro explícito dentro de
 10 s, encerramento do child próprio, preservação de artefato e retomada
-operacional têm evidência positiva. O aviso persistido e reconhecido demonstra
-o caminho técnico de notificação, mas a resposta ao usuário continua errada ou
-incerta. O critério de estado compreensível permanece **FAIL** e bloqueia o
-aceite integral de #757. A próxima medição depende da decisão de produto e da
-correção de #923; não há necessidade de repetir as partes já comprovadas.
+operacional têm evidência positiva. O critério de estado compreensível passa
+**pela apresentação determinística da CLI no candidato #923**, não pela
+interpretação do modelo; portanto o resultado funcional restrito de #757 é
+**PASS**. A publicação da documentação e o fechamento da issue ainda dependem
+da integração de #923. A evidência cobre uma execução e a árvore de processo
+própria observada; não estabelece garantia geral sobre todos os processos,
+portas ou chamadas remotas já enviadas.
 
 Esta rodada não aceita cron, compactação, gateway amplo, crash/lease ou
 proteção entre identidades. Esses limites continuam em [#736](https://github.com/marcelusfernandes/lohra-ts/issues/736)

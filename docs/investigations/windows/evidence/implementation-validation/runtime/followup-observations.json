@@ -76,5 +76,5 @@
       }
     }
   ],
-  "acceptance757": "PARTIAL: cancellation and artifact preservation pass; understandable resumed state fails"
+  "acceptance757AtTheseCandidates": "PARTIAL: cancellation and artifact preservation pass; model-dependent explanation fails"
 }

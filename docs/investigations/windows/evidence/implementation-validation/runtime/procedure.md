@@ -52,7 +52,24 @@ em [followup-observations.json](followup-observations.json). Suas fontes locais
 são `cancel-{final,context,factual}-meta.json` e os respectivos
 `cancel-{final,context,factual}-resume.json` no diretório de evidências externo.
 
-O resultado de #757 segue **PARTIAL**. #923 ainda precisa de uma solução de
-produto com medição positiva. Estas execuções não medem cancelamento de
-chamada remota já enviada, cron, gateway amplo, compactação, crash/lease ou
-ACL entre identidades.
+O candidato `bd1181e` de #923 aplicou a escolha explícita do owner: mostrar
+o aviso de sessão na apresentação determinística da CLI, antes da resposta
+do modelo, e em `session_notices` no envelope JSON. Uma execução real
+cancelou em 1.882 ms com exit 1 e `conversation cancelled`; child encerrado,
+sem conclusão natural, `entrega-aviso.txt` íntegro. A retomada humana exibiu
+o aviso primeiro e terminou com exit 0. A apresentação JSON do mesmo evento
+foi conferida a partir de snapshot independente do estado e de três arquivos
+de configuração de autenticação, sem segunda operação de cancelamento. Ela
+terminou com exit 0, `completed=true`, `error=null`, somente `read_file` e
+`session_notices` contendo `id=5`, `kind=cancelled`. Nenhum conteúdo desse
+snapshot foi copiado. Projeção:
+[notice-observation.json](notice-observation.json). Fontes externas:
+`cancel-notice-meta.json`, `cancel-notice.json`, `notice-resume-human.txt`,
+`notice-resume-human.exit.txt`, `notice-resume-json.json` e
+`notice-resume-json.exit.txt`.
+
+O resultado funcional restrito de #757 é **PASS no CLI instalado candidato**,
+conforme a apresentação escolhida pelo owner; #923 ainda precisa de PR e
+merge. O resultado não depende de o modelo interpretar o aviso. Estas
+execuções não medem TUI, cancelamento de chamada remota já enviada, cron,
+gateway amplo, compactação, crash/lease ou ACL entre identidades.
