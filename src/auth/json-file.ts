@@ -52,7 +52,7 @@ function windowsAuthWriteFailure(path: string, cause: unknown): Error {
   );
 }
 
-export function atomicWrite0600(
+export function atomicWritePrivate0600(
   path: string,
   data: string,
   operations: AtomicWriteOperations = defaultOperations,
@@ -112,6 +112,15 @@ export function atomicWrite0600(
       throw windowsAuthWriteFailure(path, error);
     }
   }
+  atomicWrite0600(path, data, operations);
+}
+
+/** Atomic mode-0600 writer for data that does not require the private auth ACL policy. */
+export function atomicWrite0600(
+  path: string,
+  data: string,
+  operations: AtomicWriteOperations = defaultOperations,
+): void {
   operations.mkdir(dirname(path));
   const temporary = `${path}.tmp-${String(operations.pid)}-${String(operations.now())}`;
   let descriptor: number | null = null;

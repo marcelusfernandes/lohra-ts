@@ -156,6 +156,18 @@ describe("auth stores", () => {
     ]);
   });
 
+  it("keeps generic 0600 writes available for nonsecret cache data on Windows", () => {
+    const recorded = recordingOperations();
+    atomicWrite0600("C:\\cache\\context-windows.json", "{}", {
+      ...recorded.operations,
+      platform: "win32",
+      prepare: () => {
+        throw new Error("private ACL must not run for the nonsecret cache");
+      },
+    });
+    expect(recorded.events).toEqual(["mkdir", "open:wx:600", "write", "fsync", "close", "rename"]);
+  });
+
   it("fails closed and preserves unknown fields while writing mode 0600", () => {
     const home = root();
     expect(readConfig(home)).toBeNull();

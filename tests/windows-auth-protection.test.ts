@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { atomicWrite0600, type AtomicWriteOperations } from "../src/auth/json-file.js";
+import { atomicWritePrivate0600, type AtomicWriteOperations } from "../src/auth/json-file.js";
 import { acquireFileLease, type LeaseProtectionOperations } from "../src/auth/lease.js";
 import { refreshUnderLease } from "../src/auth/credentials.js";
 import { OAuthTokens } from "../src/auth/types.js";
@@ -123,9 +123,9 @@ describe("Windows auth integration through fake protection ports", () => {
       pid: 1,
       now: () => 2,
     };
-    atomicWrite0600(path, "old-fictional-token", operations);
+    atomicWritePrivate0600(path, "old-fictional-token", operations);
     events.length = 0;
-    atomicWrite0600(path, "new-fictional-token", operations);
+    atomicWritePrivate0600(path, "new-fictional-token", operations);
     expect(readFileSync(path, "utf8")).toBe("new-fictional-token");
     expect(events).toEqual([
       `prepare:${path}:existing`,
@@ -176,7 +176,7 @@ describe("Windows auth integration through fake protection ports", () => {
     };
     let caught: unknown;
     try {
-      atomicWrite0600(path, "new-fictional-token", operations);
+      atomicWritePrivate0600(path, "new-fictional-token", operations);
     } catch (error) {
       caught = error;
     }
@@ -225,7 +225,7 @@ describe("Windows auth integration through fake protection ports", () => {
     };
     let caught: unknown;
     try {
-      atomicWrite0600(path, "new-fictional-token", operations);
+      atomicWritePrivate0600(path, "new-fictional-token", operations);
     } catch (error) {
       caught = error;
     }

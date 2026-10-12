@@ -4,7 +4,10 @@ import {
   prepareWindowsPrivateDestination,
   type WindowsProtectionOperations,
 } from "../src/security/windows-file-protection.js";
-import { windowsPowerShellCommand } from "../src/security/windows-file-protection-native.js";
+import {
+  runWindowsAclBatch,
+  windowsPowerShellCommand,
+} from "../src/security/windows-file-protection-native.js";
 
 const directory = "C:\\vault";
 const destination = `${directory}\\secret.json`;
@@ -74,6 +77,44 @@ function fixture() {
 }
 
 describe("windows private destination", () => {
+  it("rejects empty, oversized and mixed-action ACL batches before launching a backend", () => {
+    expect(() => {
+      runWindowsAclBatch([]);
+    }).toThrow(/one to three/);
+    expect(() => {
+      runWindowsAclBatch(Array.from({ length: 4 }, () => ({ action: "verify", path: directory })));
+    }).toThrow(/one to three/);
+    expect(() => {
+      runWindowsAclBatch([
+        { action: "protect", path: directory },
+        { action: "verify", path: destination },
+      ]);
+    }).toThrow(/one to three/);
+  });
+  it("verifies a publication group only after inspecting all identities and reinspects all afterwards", () => {
+    const state = fixture();
+    const destinationGuard = prepareWindowsPrivateDestination(destination, state.operations);
+    prepareWindowsPrivateDestination(stage, state.operations, { exclusive: true });
+    const events: string[] = [];
+    const inspect = (path: string) => state.entries.get(path) ?? null;
+    Object.assign(state.operations, {
+      inspect: (path: string) => {
+        events.push(`inspect:${path}`);
+        return inspect(path);
+      },
+      verifyMany: (paths: readonly string[]) => {
+        events.push(`verifyMany:${paths.join(",")}`);
+        expect(paths).toEqual([directory, destination, stage]);
+      },
+    });
+    destinationGuard.verifyBeforePublication(stage);
+    const batch = events.indexOf(`verifyMany:${directory},${destination},${stage}`);
+    expect(batch).toBeGreaterThan(0);
+    for (const path of [directory, destination, stage]) {
+      expect(events.indexOf(`inspect:${path}`)).toBeLessThan(batch);
+      expect(events.lastIndexOf(`inspect:${path}`)).toBeGreaterThan(batch);
+    }
+  });
   it("acquires a new protected file exclusively and removes only its own identity", () => {
     const state = fixture();
     const guard = prepareWindowsPrivateDestination(destination, state.operations, {

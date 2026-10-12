@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { win32 } from "node:path";
 
-import { runWindowsAcl } from "./windows-file-protection-native.js";
+import { runWindowsAcl, runWindowsAclBatch } from "./windows-file-protection-native.js";
 
 type Entry = Readonly<{ kind: "file" | "directory" | "link"; identity: string; size: bigint }>;
 type PendingCreation = Readonly<{
@@ -29,6 +29,7 @@ export interface WindowsProtectionOperations {
   close(descriptor: number): void;
   protect(path: string): void;
   verify(path: string): void;
+  verifyMany?: (paths: readonly string[]) => void;
   removeFile(path: string): void;
   removeDirectory(path: string): void;
 }
@@ -77,6 +78,9 @@ const nativeOperations: WindowsProtectionOperations = {
   },
   verify: (path) => {
     runWindowsAcl("verify", path);
+  },
+  verifyMany: (paths) => {
+    runWindowsAclBatch(paths.map((path) => ({ action: "verify", path })));
   },
   removeFile: unlinkSync,
   removeDirectory: rmdirSync,
@@ -140,16 +144,32 @@ function checked(
   identity: string,
   operations: WindowsProtectionOperations,
 ): Entry {
-  const before = inspectChain(path, operations);
-  if (!before || before.kind !== kind || before.identity !== identity) {
-    throw new Error(`Windows destination identity changed: ${path}`);
+  const entry = checkedMany([{ path, kind, identity }], operations)[0];
+  if (!entry) throw new Error(`Windows destination cannot be inspected: ${path}`);
+  return entry;
+}
+
+function checkedMany(
+  expected: ReadonlyArray<Readonly<{ path: string; kind: Entry["kind"]; identity: string }>>,
+  operations: WindowsProtectionOperations,
+): Entry[] {
+  if (expected.length < 1 || expected.length > 3)
+    throw new Error("Windows ACL verification group must contain one to three paths");
+  for (const { path, kind, identity } of expected) {
+    const before = inspectChain(path, operations);
+    if (!before || before.kind !== kind || before.identity !== identity) {
+      throw new Error(`Windows destination identity changed: ${path}`);
+    }
   }
-  operations.verify(path);
-  const after = inspectChain(path, operations);
-  if (!after || after.kind !== kind || after.identity !== identity) {
-    throw new Error(`Windows destination identity changed during ACL verification: ${path}`);
-  }
-  return after;
+  if (operations.verifyMany) operations.verifyMany(expected.map(({ path }) => path));
+  else for (const { path } of expected) operations.verify(path);
+  return expected.map(({ path, kind, identity }) => {
+    const after = inspectChain(path, operations);
+    if (!after || after.kind !== kind || after.identity !== identity) {
+      throw new Error(`Windows destination identity changed during ACL verification: ${path}`);
+    }
+    return after;
+  });
 }
 
 function cleanOwn(
@@ -281,13 +301,25 @@ export function prepareWindowsPrivateDestination(
     let stagedPath: string | null = null;
     return {
       verifyBeforeWrite: () => {
-        checked(directory, "directory", directoryIdentity, operations);
-        const entry = checked(file, "file", destinationIdentity, operations);
+        const [, entry] = checkedMany(
+          [
+            { path: directory, kind: "directory", identity: directoryIdentity },
+            { path: file, kind: "file", identity: destinationIdentity },
+          ],
+          operations,
+        );
+        if (!entry) throw new Error(`Windows destination cannot be inspected: ${file}`);
         if (entry.size !== 0n) throw new Error(`Windows destination is no longer empty: ${file}`);
       },
       openOwnedForWrite: () => {
-        checked(directory, "directory", directoryIdentity, operations);
-        const entry = checked(file, "file", destinationIdentity, operations);
+        const [, entry] = checkedMany(
+          [
+            { path: directory, kind: "directory", identity: directoryIdentity },
+            { path: file, kind: "file", identity: destinationIdentity },
+          ],
+          operations,
+        );
+        if (!entry) throw new Error(`Windows destination cannot be inspected: ${file}`);
         if (entry.size !== 0n) throw new Error(`Windows destination is no longer empty: ${file}`);
         const descriptor = operations.openWrite(file);
         try {
@@ -324,22 +356,32 @@ export function prepareWindowsPrivateDestination(
         ) {
           throw new Error("Windows publication source must be a distinct sibling");
         }
-        checked(directory, "directory", directoryIdentity, operations);
-        checked(file, "file", destinationIdentity, operations);
         const sourceEntry = inspectChain(stage, operations);
         if (!sourceEntry || sourceEntry.kind !== "file")
           throw new Error("Windows publication source is not a regular file");
         if (sourceEntry.identity === destinationIdentity)
           throw new Error("Windows publication source aliases destination");
-        checked(stage, "file", sourceEntry.identity, operations);
+        checkedMany(
+          [
+            { path: directory, kind: "directory", identity: directoryIdentity },
+            { path: file, kind: "file", identity: destinationIdentity },
+            { path: stage, kind: "file", identity: sourceEntry.identity },
+          ],
+          operations,
+        );
         stagedIdentity = sourceEntry.identity;
         stagedPath = stage;
       },
       verifyAfterPublication: () => {
         if (!stagedIdentity || !stagedPath)
           throw new Error("Windows publication was not verified before rename");
-        checked(directory, "directory", directoryIdentity, operations);
-        checked(file, "file", stagedIdentity, operations);
+        checkedMany(
+          [
+            { path: directory, kind: "directory", identity: directoryIdentity },
+            { path: file, kind: "file", identity: stagedIdentity },
+          ],
+          operations,
+        );
         if (inspectChain(stagedPath, operations))
           throw new Error("Windows publication source still exists");
       },
