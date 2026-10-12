@@ -4,6 +4,11 @@ import { win32 } from "node:path";
 import { runWindowsAcl } from "./windows-file-protection-native.js";
 
 type Entry = Readonly<{ kind: "file" | "directory" | "link"; identity: string; size: bigint }>;
+type PendingCreation = Readonly<{
+  path: string;
+  kind: "file" | "directory";
+  creation: "attempted" | "confirmed";
+}>;
 
 export interface WindowsProtectionOperations {
   readonly platform: string;
@@ -126,7 +131,7 @@ function checked(
 
 function cleanOwn(
   owned: ReadonlyArray<Readonly<{ path: string; entry: Entry }>>,
-  unverified: Readonly<{ path: string; kind: "file" | "directory" }> | null,
+  unverified: PendingCreation | null,
   operations: WindowsProtectionOperations,
   primary: unknown,
 ): never {
@@ -134,7 +139,9 @@ function cleanOwn(
   if (unverified) {
     cleanupErrors.push(
       new Error(
-        `Windows cleanup inconclusive: identity unverified for created ${unverified.kind}; retained ${unverified.path}`,
+        unverified.creation === "confirmed"
+          ? `Windows cleanup inconclusive: identity unverified for created ${unverified.kind}; retained ${unverified.path}`
+          : `Windows cleanup inconclusive: identity unverified after attempted ${unverified.kind} creation; possible residual at ${unverified.path}`,
       ),
     );
   }
@@ -178,12 +185,13 @@ export function prepareWindowsPrivateDestination(
   if (directory === file) throw new Error("Windows private destination requires a file name");
   operations.volume(file);
   const owned: Array<{ path: string; entry: Entry }> = [];
-  let unverified: { path: string; kind: "file" | "directory" } | null = null;
+  let unverified: PendingCreation | null = null;
   try {
     let dirEntry = inspectChain(directory, operations);
     if (!dirEntry) {
+      unverified = { path: directory, kind: "directory", creation: "attempted" };
       operations.mkdir(directory);
-      unverified = { path: directory, kind: "directory" };
+      unverified = { path: directory, kind: "directory", creation: "confirmed" };
       dirEntry = inspectChain(directory, operations);
       if (!dirEntry) throw new Error(`Created Windows directory cannot be inspected: ${directory}`);
       owned.push({ path: directory, entry: dirEntry });
@@ -196,8 +204,9 @@ export function prepareWindowsPrivateDestination(
 
     let fileEntry = inspectChain(file, operations);
     if (!fileEntry) {
+      unverified = { path: file, kind: "file", creation: "attempted" };
       operations.createEmpty(file);
-      unverified = { path: file, kind: "file" };
+      unverified = { path: file, kind: "file", creation: "confirmed" };
       fileEntry = inspectChain(file, operations);
       if (!fileEntry) throw new Error(`Created Windows file cannot be inspected: ${file}`);
       owned.push({ path: file, entry: fileEntry });

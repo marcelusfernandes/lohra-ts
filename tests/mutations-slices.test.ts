@@ -259,6 +259,7 @@ const SEM_FATIA: ReadonlyMap<string, string> = new Map([
   ["memory", "sem catálogo de mutantes ainda"],
   ["onboarding", "sem catálogo de mutantes ainda"],
   ["pricing", "sem catálogo de mutantes ainda"],
+  ["security", "proteção Windows #915 tem prova focal; sem catálogo de mutantes ainda"],
   ["serialization", "sem catálogo de mutantes ainda"],
   ["server", "sem catálogo de mutantes ainda"],
 ]);
