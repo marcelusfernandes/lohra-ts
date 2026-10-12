@@ -26,6 +26,7 @@ export interface WindowsFileProtection {
   verifyBeforeWrite(): void;
   verifyBeforePublication(source: string): void;
   verifyAfterPublication(): void;
+  removeOwned(): void;
 }
 
 const nativeOperations: WindowsProtectionOperations = {
@@ -178,7 +179,9 @@ function cleanOwn(
 export function prepareWindowsPrivateDestination(
   destination: string,
   operations: WindowsProtectionOperations = nativeOperations,
+  options: { readonly exclusive?: boolean } = {},
 ): WindowsFileProtection {
+  if (options.exclusive) throw new Error("not implemented");
   const file = validPath(destination);
   if (operations.platform !== "win32") throw new Error("Windows file protection requires Windows");
   const directory = win32.dirname(file);
@@ -253,6 +256,9 @@ export function prepareWindowsPrivateDestination(
         checked(file, "file", stagedIdentity, operations);
         if (inspectChain(stagedPath, operations))
           throw new Error("Windows publication source still exists");
+      },
+      removeOwned: () => {
+        throw new Error("not implemented");
       },
     };
   } catch (error) {

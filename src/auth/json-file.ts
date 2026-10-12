@@ -9,9 +9,14 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 
+import {
+  prepareWindowsPrivateDestination,
+  type WindowsFileProtection,
+} from "../security/windows-file-protection.js";
+
 export interface AtomicWriteOperations {
   readonly mkdir: (path: string) => void;
-  readonly open: (path: string, flags: "wx", mode: number) => number;
+  readonly open: (path: string, flags: "wx" | "r+", mode: number) => number;
   readonly write: (descriptor: number, bytes: Buffer, offset: number) => number;
   readonly fsync: (descriptor: number) => void;
   readonly close: (descriptor: number) => void;
@@ -19,6 +24,11 @@ export interface AtomicWriteOperations {
   readonly unlink: (path: string) => void;
   readonly pid: number;
   readonly now: () => number;
+  readonly platform?: string;
+  readonly prepare?: (
+    path: string,
+    options?: { readonly exclusive?: boolean },
+  ) => WindowsFileProtection;
 }
 
 const defaultOperations: AtomicWriteOperations = {
@@ -31,6 +41,8 @@ const defaultOperations: AtomicWriteOperations = {
   unlink: unlinkSync,
   pid: process.pid,
   now: Date.now,
+  platform: process.platform,
+  prepare: (path, options) => prepareWindowsPrivateDestination(path, undefined, options),
 };
 
 export function atomicWrite0600(
@@ -38,6 +50,9 @@ export function atomicWrite0600(
   data: string,
   operations: AtomicWriteOperations = defaultOperations,
 ): void {
+  if ((operations.platform ?? process.platform) === "win32") {
+    throw new Error("not implemented");
+  }
   operations.mkdir(dirname(path));
   const temporary = `${path}.tmp-${String(operations.pid)}-${String(operations.now())}`;
   let descriptor: number | null = null;

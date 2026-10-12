@@ -16,6 +16,24 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 
+import {
+  prepareWindowsPrivateDestination,
+  type WindowsFileProtection,
+} from "../security/windows-file-protection.js";
+
+export interface LeaseProtectionOperations {
+  readonly platform: string;
+  readonly prepare: (
+    path: string,
+    options?: { readonly exclusive?: boolean },
+  ) => WindowsFileProtection;
+}
+
+const defaultProtection: LeaseProtectionOperations = {
+  platform: process.platform,
+  prepare: (path, options) => prepareWindowsPrivateDestination(path, undefined, options),
+};
+
 interface LeaseRecord {
   readonly holder: string;
   readonly expiresAt: number;
@@ -111,7 +129,9 @@ export function acquireFileLease(
   holder: string,
   ttlSeconds: number,
   now = Date.now() / 1000,
+  protection: LeaseProtectionOperations = defaultProtection,
 ): boolean {
+  if (protection.platform === "win32") throw new Error("not implemented");
   try {
     createLeaseFile(path, { holder, expiresAt: now + ttlSeconds });
     return true;

@@ -54,6 +54,51 @@ function fixture() {
 }
 
 describe("windows private destination", () => {
+  it("acquires a new protected file exclusively and removes only its own identity", () => {
+    const state = fixture();
+    const guard = prepareWindowsPrivateDestination(destination, state.operations, {
+      exclusive: true,
+    });
+    guard.verifyBeforeWrite();
+    expect(state.events.indexOf(`protect:${destination}`)).toBeLessThan(
+      state.events.lastIndexOf(`verify:${destination}`),
+    );
+    guard.removeOwned();
+    expect(state.entries.has(destination)).toBe(false);
+  });
+
+  it("reports EEXIST only for a verified existing exclusive destination", () => {
+    const state = fixture();
+    state.add(directory, "directory");
+    state.protectedPaths.add(directory);
+    state.add(destination, "file", 5n);
+    expect(() =>
+      prepareWindowsPrivateDestination(destination, state.operations, { exclusive: true }),
+    ).toThrow(/incompatible ACL/);
+    state.protectedPaths.add(destination);
+    expect(() =>
+      prepareWindowsPrivateDestination(destination, state.operations, { exclusive: true }),
+    ).toThrow(expect.objectContaining({ code: "EEXIST" }));
+    expect(state.entries.get(destination)?.size).toBe(5n);
+  });
+
+  it("refuses to remove a replaced file or a preexisting destination", () => {
+    const state = fixture();
+    const guard = prepareWindowsPrivateDestination(destination, state.operations, {
+      exclusive: true,
+    });
+    state.add(destination, "file");
+    expect(() => {
+      guard.removeOwned();
+    }).toThrow(/identity changed/);
+    expect(state.entries.has(destination)).toBe(true);
+    state.protectedPaths.add(destination);
+    const existing = prepareWindowsPrivateDestination(destination, state.operations);
+    expect(() => {
+      existing.removeOwned();
+    }).toThrow(/not owned/);
+  });
+
   it("uses the native PowerShell binary and a matching child-only module path", () => {
     const environment = Object.freeze({
       SystemRoot: "C:\\Windows",
