@@ -120,6 +120,62 @@ function turn(runtime: ConversationRuntime, input: string, signal?: AbortSignal)
 }
 
 describe("cancelled task context (#923)", () => {
+  it("delivers only current-session cancellation to an opted-in renderer, preserving other overlays", () => {
+    const rows: NoticeRow[] = [
+      { id: 1, scope: "global", kind: "cancelled", message: "global cancellation" },
+      { id: 2, scope: "session:ancestor", kind: "cancelled", message: "ancestor cancellation" },
+      { id: 3, scope: "session:session-a", kind: "cancelled", message: "current cancellation" },
+      { id: 4, scope: "session:other", kind: "cancelled", message: "other cancellation" },
+      { id: 5, scope: "session:session-a", kind: "route_fault", message: "route failure" },
+    ];
+    const delivered: NoticeRow[] = [];
+    const acked: number[] = [];
+    const port = createTurnNoticesPort({
+      repository: {
+        list: ({ scope }) => ({ notices: rows.filter((row) => row.scope === scope) }),
+        ack: (id) => {
+          acked.push(id);
+          return true;
+        },
+        append: () => null,
+      },
+      sessions: { lineageRootToTip: () => ["ancestor", "session-a"] },
+      onClaimedCancellation: (claimed) => delivered.push(...claimed),
+    });
+    const claim = port.claim("session-a");
+    expect(delivered.map((row) => row.message)).toEqual(["current cancellation"]);
+    expect(claim.overlay).toContain("global cancellation");
+    expect(claim.overlay).toContain("ancestor cancellation");
+    expect(claim.overlay).toContain("route failure");
+    expect(claim.overlay).not.toContain("current cancellation");
+    expect(claim.overlay).not.toContain("other cancellation");
+    port.ack(claim.token);
+    expect(acked.sort()).toEqual([1, 2, 3, 5]);
+  });
+
+  it("warns and keeps a cancellation pending when renderer delivery throws", () => {
+    const warnings: string[] = [];
+    const port = createTurnNoticesPort({
+      repository: {
+        list: () => ({
+          notices: [{ id: 1, scope: "session:session-a", kind: "cancelled", message: "pending" }],
+        }),
+        ack: () => {
+          throw new Error("unexpected ack");
+        },
+        append: () => null,
+      },
+      sessions: { lineageRootToTip: () => ["session-a"] },
+      onClaimedCancellation: () => {
+        throw new Error("renderer unavailable");
+      },
+      warning: (message) => warnings.push(message),
+    });
+    const claim = port.claim("session-a");
+    expect(claim).toEqual({ token: [], overlay: null });
+    expect(warnings.join(" ")).toContain("renderer unavailable");
+  });
+
   it("shows the recent interrupted request beside an older distinct error on resume, then acks", async () => {
     const repository = new MemoryRepository();
     repository.createSession({

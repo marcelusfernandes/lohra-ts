@@ -158,6 +158,7 @@ export interface TurnNoticesPortOptions {
   readonly actor?: string;
   readonly now?: () => number;
   readonly warning?: (message: string) => void;
+  readonly onClaimedCancellation?: (rows: readonly NoticeRow[]) => void;
 }
 
 const NO_CLAIM: TurnNoticesClaim = { token: [], overlay: null };
