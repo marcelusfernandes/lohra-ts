@@ -16,6 +16,24 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 
+import {
+  prepareWindowsPrivateDestination,
+  type WindowsFileProtection,
+} from "../security/windows-file-protection.js";
+
+export interface LeaseProtectionOperations {
+  readonly platform: string;
+  readonly prepare: (
+    path: string,
+    options?: { readonly exclusive?: boolean; readonly existing?: boolean },
+  ) => WindowsFileProtection;
+}
+
+const defaultProtection: LeaseProtectionOperations = {
+  platform: process.platform,
+  prepare: (path, options) => prepareWindowsPrivateDestination(path, undefined, options),
+};
+
 interface LeaseRecord {
   readonly holder: string;
   readonly expiresAt: number;
@@ -39,13 +57,61 @@ function readLeaseRecord(path: string): LeaseRecord | null {
   }
 }
 
-function createLeaseFile(path: string, record: LeaseRecord): void {
+function writeLeaseBytes(descriptor: number, record: LeaseRecord): void {
+  const bytes = Buffer.from(JSON.stringify(record), "utf8");
+  let offset = 0;
+  while (offset < bytes.length) offset += writeSync(descriptor, bytes, offset);
+}
+
+function createLeaseFile(
+  path: string,
+  holder: string,
+  ttlSeconds: number,
+  now: number | undefined,
+  protection: LeaseProtectionOperations,
+): void {
+  if (protection.platform === "win32") {
+    const guard = protection.prepare(path, { exclusive: true });
+    let descriptor: number | null = null;
+    try {
+      descriptor = guard.openOwnedForWrite();
+      // The native ACL checks can be slow; the lease starts once they finish.
+      writeLeaseBytes(descriptor, {
+        holder,
+        expiresAt: (now ?? Date.now() / 1000) + ttlSeconds,
+      });
+      closeSync(descriptor);
+      descriptor = null;
+      return;
+    } catch (error) {
+      const cleanupErrors: unknown[] = [];
+      if (descriptor !== null) {
+        try {
+          closeSync(descriptor);
+        } catch (closeError) {
+          cleanupErrors.push(closeError);
+        }
+      }
+      try {
+        guard.removeOwned();
+      } catch (removeError) {
+        cleanupErrors.push(removeError);
+      }
+      if (cleanupErrors.length > 0) {
+        throw new AggregateError([error, ...cleanupErrors], "Windows lease and cleanup failed", {
+          cause: error,
+        });
+      }
+      throw error;
+    }
+  }
   mkdirSync(dirname(path), { recursive: true });
   const descriptor = openSync(path, "wx", 0o600);
   try {
-    const bytes = Buffer.from(JSON.stringify(record), "utf8");
-    let offset = 0;
-    while (offset < bytes.length) offset += writeSync(descriptor, bytes, offset);
+    writeLeaseBytes(descriptor, {
+      holder,
+      expiresAt: (now ?? Date.now() / 1000) + ttlSeconds,
+    });
   } finally {
     closeSync(descriptor);
   }
@@ -110,18 +176,26 @@ export function acquireFileLease(
   path: string,
   holder: string,
   ttlSeconds: number,
-  now = Date.now() / 1000,
+  now?: number,
+  protection: LeaseProtectionOperations = defaultProtection,
 ): boolean {
   try {
-    createLeaseFile(path, { holder, expiresAt: now + ttlSeconds });
+    createLeaseFile(path, holder, ttlSeconds, now, protection);
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   }
-  if (isLeaseAlive(path, ttlSeconds, now)) return false;
+  if (isLeaseAlive(path, ttlSeconds, now ?? Date.now() / 1000)) return false;
+  if (protection.platform === "win32") {
+    try {
+      protection.prepare(path, { existing: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
   unlinkIfExists(path);
   try {
-    createLeaseFile(path, { holder, expiresAt: now + ttlSeconds });
+    createLeaseFile(path, holder, ttlSeconds, now, protection);
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
@@ -136,7 +210,19 @@ export function acquireFileLease(
  * checagem, `releaseFileLease` do dono original removeria a lease VIVA do
  * novo dono, e um terceiro entraria sem exclusão nenhuma.
  */
-export function releaseFileLease(path: string, holder: string): void {
+export function releaseFileLease(
+  path: string,
+  holder: string,
+  protection: LeaseProtectionOperations = defaultProtection,
+): void {
+  if (protection.platform === "win32") {
+    try {
+      protection.prepare(path, { existing: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+  }
   const existing = readLeaseRecord(path);
   if (existing === null || existing.holder !== holder) return;
   unlinkIfExists(path);

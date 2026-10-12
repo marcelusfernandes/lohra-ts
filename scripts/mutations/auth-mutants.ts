@@ -92,9 +92,9 @@ export const mutants: readonly Mutant[] = [
       {
         file: credentials,
         before:
-          "    throw new TokenPersistError(\n      `the login refresh succeeded but saving it to ${tokenPath(home)} failed",
+          "    const failure = new TokenPersistError(\n      `the login refresh succeeded but saving it to ${tokenPath(home)} failed",
         after:
-          "    throw new RefreshFailedError(\n      `the login refresh succeeded but saving it to ${tokenPath(home)} failed",
+          "    const failure = new RefreshFailedError(\n      `the login refresh succeeded but saving it to ${tokenPath(home)} failed",
       },
     ],
   },
@@ -109,8 +109,8 @@ export const mutants: readonly Mutant[] = [
     edits: [
       {
         file: lease,
-        before: "  if (isLeaseAlive(path, ttlSeconds, now)) return false;",
-        after: "  if (isLeaseAlive(path, ttlSeconds, now)) return true;",
+        before: "  if (isLeaseAlive(path, ttlSeconds, now ?? Date.now() / 1000)) return false;",
+        after: "  if (isLeaseAlive(path, ttlSeconds, now ?? Date.now() / 1000)) return true;",
       },
     ],
   },
@@ -173,9 +173,9 @@ export const mutants: readonly Mutant[] = [
     edits: [
       {
         file: credentials,
-        before: "if (underLease !== null && !isExpiringSoon(underLease, now)) return underLease;",
+        before: "underLease !== null && !isExpiringSoon(underLease, now)\n            ? underLease",
         after:
-          "if (false && underLease !== null && !isExpiringSoon(underLease, now)) return underLease;",
+          "false && underLease !== null && !isExpiringSoon(underLease, now)\n            ? underLease",
       },
     ],
   },
@@ -207,9 +207,9 @@ export const mutants: readonly Mutant[] = [
       {
         file: credentials,
         before:
-          "      throw new TokenPersistError(\n        `could not create the refresh lease at ${lockPath}",
+          "      const failure = new TokenPersistError(\n        `could not create the refresh lease at ${lockPath}",
         after:
-          "      throw new RefreshFailedError(\n        `could not create the refresh lease at ${lockPath}",
+          "      const failure = new RefreshFailedError(\n        `could not create the refresh lease at ${lockPath}",
       },
     ],
   },

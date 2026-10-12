@@ -3,7 +3,12 @@ import { randomUUID } from "node:crypto";
 import { readCodexTokens } from "./codex.js";
 import { RefreshFailedError, SubscriptionError, TokenPersistError } from "./errors.js";
 import { isExpired } from "./jwt.js";
-import { acquireFileLease, releaseFileLease, waitForFileLease } from "./lease.js";
+import {
+  acquireFileLease,
+  releaseFileLease,
+  waitForFileLease,
+  type LeaseProtectionOperations,
+} from "./lease.js";
 import { defaultOAuthPost, oauthRefreshTokens, type OAuthPost } from "./oauth.js";
 import { readConfig, readTokens, tokenPath, writeTokens } from "./store.js";
 import { OAuthTokens, SubscriptionCredentials, type AuthRoute } from "./types.js";
@@ -57,9 +62,11 @@ async function performRefresh(
     // lost until the process exits". The only thing that survives is what
     // made it to disk — the caller's actual recovery is `auth login`, not
     // a retry of the same command.
-    throw new TokenPersistError(
+    const failure = new TokenPersistError(
       `the login refresh succeeded but saving it to ${tokenPath(home)} failed (${error instanceof Error ? error.message : String(error)}) — check permissions/disk space and run \`lohra auth login\` again if the previous refresh token was already rotated`,
     );
+    failure.cause = error;
+    throw failure;
   }
   return updated;
 }
@@ -90,6 +97,7 @@ export async function refreshUnderLease(
   own: OAuthTokens,
   now: number,
   oauthPost: OAuthPost,
+  protection?: LeaseProtectionOperations,
 ): Promise<OAuthTokens> {
   const lockPath = `${tokenPath(home)}.lock`;
   const attempts = 2;
@@ -97,7 +105,13 @@ export async function refreshUnderLease(
     const holder = `${String(process.pid)}:${randomUUID()}`;
     let acquired: boolean;
     try {
-      acquired = acquireFileLease(lockPath, holder, REFRESH_LEASE_TTL_SECONDS);
+      acquired = acquireFileLease(
+        lockPath,
+        holder,
+        REFRESH_LEASE_TTL_SECONDS,
+        undefined,
+        protection,
+      );
     } catch (error) {
       // Not "lease held by someone else" (that path returns false, never
       // throws) — a real I/O failure creating the lock file itself, most
@@ -105,29 +119,63 @@ export async function refreshUnderLease(
       // `writeTokens`. Same named error, so callers don't need to
       // distinguish "couldn't lock" from "couldn't save" — both mean
       // "the refresh worked, disk didn't cooperate".
-      throw new TokenPersistError(
+      const failure = new TokenPersistError(
         `could not create the refresh lease at ${lockPath} (${error instanceof Error ? error.message : String(error)}) — check permissions on ${home}`,
       );
+      failure.cause = error;
+      throw failure;
     }
     if (acquired) {
+      let refreshed: OAuthTokens | null = null;
+      let primaryFailure: unknown;
+      let failed = false;
       try {
         const underLease = readTokens(home);
-        if (underLease !== null && !isExpiringSoon(underLease, now)) return underLease;
-        return await performRefresh(home, own, oauthPost);
-      } finally {
-        try {
-          releaseFileLease(lockPath, holder);
-        } catch {
-          // Best-effort cleanup (same stance as the tmp-file unlink in
-          // json-file.ts:55-59): a lock that can't be unlinked expires via
-          // its own TTL and is stolen by the next `acquireFileLease`. A
-          // cleanup failure here must neither mask the fault
-          // `performRefresh` just raised nor turn a *successful* refresh
-          // into one — home turning unwritable between acquiring the
-          // lease and releasing it (ex.: the same disk failure that made
-          // `writeTokens` throw `TokenPersistError`) is exactly that case.
-        }
+        refreshed =
+          underLease !== null && !isExpiringSoon(underLease, now)
+            ? underLease
+            : await performRefresh(home, own, oauthPost);
+      } catch (error) {
+        primaryFailure = error;
+        failed = true;
       }
+      let cleanupFailure: unknown;
+      let cleanupFailed = false;
+      try {
+        releaseFileLease(lockPath, holder, protection);
+      } catch (error) {
+        cleanupFailure = error;
+        cleanupFailed = true;
+      }
+      if (cleanupFailed && failed) {
+        if (primaryFailure instanceof Error) {
+          const originalCause = primaryFailure.cause;
+          primaryFailure.cause =
+            originalCause === undefined
+              ? cleanupFailure
+              : new AggregateError(
+                  [originalCause, cleanupFailure],
+                  "login refresh cause and lease cleanup failed — check the private destination",
+                  { cause: originalCause },
+                );
+          throw primaryFailure;
+        }
+        throw new AggregateError(
+          [primaryFailure, cleanupFailure],
+          "login refresh and lease cleanup failed — check the private destination",
+          { cause: primaryFailure },
+        );
+      }
+      if (cleanupFailed) {
+        const error = new TokenPersistError(
+          `login refreshed, but lease cleanup at ${lockPath} failed — check the private destination`,
+        );
+        error.cause = cleanupFailure;
+        throw error;
+      }
+      if (failed) throw primaryFailure;
+      if (refreshed === null) throw new Error("login refresh completed without a token");
+      return refreshed;
     }
     await waitForFileLease(lockPath, {
       maxWaitMs: REFRESH_LEASE_TTL_SECONDS * 1000,

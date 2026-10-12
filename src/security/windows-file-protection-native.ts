@@ -33,9 +33,11 @@ try {
   $utf8 = [System.Text.UTF8Encoding]::new($false)
   [Console]::InputEncoding = $utf8
   [Console]::OutputEncoding = $utf8
-  $request = ConvertFrom-Json -InputObject ([Console]::In.ReadToEnd())
-  $path = [string]$request.path
+  $batch = ConvertFrom-Json -InputObject ([Console]::In.ReadToEnd())
   $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+  foreach ($request in @($batch.requests)) {
+  try {
+  $path = [string]$request.path
   if ($request.action -eq 'volume') {
     $drive = New-Object System.IO.DriveInfo ([System.IO.Path]::GetPathRoot($path))
     if ($drive.DriveType -ne [System.IO.DriveType]::Fixed -or $drive.DriveFormat -ne 'NTFS') {
@@ -93,6 +95,10 @@ try {
     }
     if (-not $ownerCanUpdate) { throw 'Windows owner lacks full control' }
   }
+  } catch {
+    throw "Windows ACL $($request.action) failed at $([string]$request.path): $($_.Exception.Message)"
+  }
+  }
   [Console]::Out.Write('OK')
 } catch {
   [Console]::Error.Write($_.Exception.Message)
@@ -100,14 +106,26 @@ try {
 }
 `;
 
-export function runWindowsAcl(action: "volume" | "protect" | "verify", path: string): void {
+export type WindowsAclRequest = Readonly<{
+  action: "volume" | "protect" | "verify";
+  path: string;
+}>;
+
+export function runWindowsAclBatch(requests: readonly WindowsAclRequest[]): void {
+  if (
+    requests.length < 1 ||
+    requests.length > 3 ||
+    (requests.length > 1 && requests.some(({ action }) => action !== "verify"))
+  ) {
+    throw new Error("Windows ACL batch must contain one to three verifications or one action");
+  }
   const script = Buffer.from(ACL_SCRIPT, "utf16le").toString("base64");
   const command = windowsPowerShellCommand(process.env);
   const result = spawnSync(
     command.executable,
     ["-NoProfile", "-NonInteractive", "-EncodedCommand", script],
     {
-      input: JSON.stringify({ action, path }),
+      input: JSON.stringify({ requests }),
       encoding: "utf8",
       env: command.environment,
       windowsHide: true,
@@ -115,11 +133,14 @@ export function runWindowsAcl(action: "volume" | "protect" | "verify", path: str
       maxBuffer: 64 * 1024,
     },
   );
-  if (result.error)
-    throw new Error(`Windows ACL ${action} mechanism failed`, { cause: result.error });
+  if (result.error) throw new Error("Windows ACL mechanism failed", { cause: result.error });
   if (result.status !== 0 || result.stdout !== "OK") {
     throw new Error(
-      `Windows ACL ${action} failed (exit ${String(result.status)}, signal ${String(result.signal)}): ${result.stderr.trim() || "unverified result"}`,
+      `Windows ACL batch failed (exit ${String(result.status)}, signal ${String(result.signal)}): ${result.stderr.trim() || "unverified result"}`,
     );
   }
+}
+
+export function runWindowsAcl(action: WindowsAclRequest["action"], path: string): void {
+  runWindowsAclBatch([{ action, path }]);
 }

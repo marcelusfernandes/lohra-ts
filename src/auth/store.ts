@@ -2,7 +2,7 @@ import { existsSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
 import { jsonFloat, stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
-import { atomicWrite0600 } from "./json-file.js";
+import { atomicWritePrivate0600 } from "./json-file.js";
 import {
   OAuthTokens,
   type AuthPreference,
@@ -68,7 +68,7 @@ export function writeConfig(home: string, config: SubscriptionConfig): void {
     acknowledged_tos_risk: config.acknowledgedTosRisk,
     preference: config.preference,
   };
-  atomicWrite0600(authPath(home), stringifyJsonPreservingNumbers(root, 2));
+  atomicWritePrivate0600(authPath(home), stringifyJsonPreservingNumbers(root, 2));
 }
 
 export function readTokens(home: string): OAuthTokens | null {
@@ -91,7 +91,7 @@ export function readTokens(home: string): OAuthTokens | null {
 }
 
 export function writeTokens(home: string, tokens: OAuthTokensValue): void {
-  atomicWrite0600(
+  atomicWritePrivate0600(
     tokenPath(home),
     stringifyJsonPreservingNumbers(
       {

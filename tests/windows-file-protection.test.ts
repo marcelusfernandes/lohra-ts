@@ -4,7 +4,10 @@ import {
   prepareWindowsPrivateDestination,
   type WindowsProtectionOperations,
 } from "../src/security/windows-file-protection.js";
-import { windowsPowerShellCommand } from "../src/security/windows-file-protection-native.js";
+import {
+  runWindowsAclBatch,
+  windowsPowerShellCommand,
+} from "../src/security/windows-file-protection-native.js";
 
 const directory = "C:\\vault";
 const destination = `${directory}\\secret.json`;
@@ -17,6 +20,8 @@ function fixture() {
     { kind: "file" | "directory" | "link"; identity: string; size: bigint }
   >();
   const protectedPaths = new Set<string>();
+  const descriptors = new Map<number, string>();
+  let nextDescriptor = 100;
   const events: string[] = [];
   const add = (path: string, kind: "file" | "directory" | "link", size = 0n) => {
     entries.set(path, { kind, identity: String(nextId++), size });
@@ -32,6 +37,24 @@ function fixture() {
     createEmpty: (path) => {
       events.push(`create:${path}`);
       add(path, "file");
+    },
+    openWrite: (path) => {
+      events.push(`open:${path}`);
+      const identity = entries.get(path)?.identity;
+      if (!identity) throw new Error("missing fake file");
+      const descriptor = nextDescriptor++;
+      descriptors.set(descriptor, identity);
+      return descriptor;
+    },
+    descriptorIdentity: (descriptor) => {
+      events.push(`fstat:${String(descriptor)}`);
+      const identity = descriptors.get(descriptor);
+      if (!identity) throw new Error("missing fake descriptor");
+      return identity;
+    },
+    close: (descriptor) => {
+      events.push(`close:${String(descriptor)}`);
+      descriptors.delete(descriptor);
     },
     protect: (path) => {
       events.push(`protect:${path}`);
@@ -54,6 +77,155 @@ function fixture() {
 }
 
 describe("windows private destination", () => {
+  it("rejects empty, oversized and mixed-action ACL batches before launching a backend", () => {
+    expect(() => {
+      runWindowsAclBatch([]);
+    }).toThrow(/one to three/);
+    expect(() => {
+      runWindowsAclBatch(Array.from({ length: 4 }, () => ({ action: "verify", path: directory })));
+    }).toThrow(/one to three/);
+    expect(() => {
+      runWindowsAclBatch([
+        { action: "protect", path: directory },
+        { action: "verify", path: destination },
+      ]);
+    }).toThrow(/one to three/);
+  });
+  it("verifies a publication group only after inspecting all identities and reinspects all afterwards", () => {
+    const state = fixture();
+    const destinationGuard = prepareWindowsPrivateDestination(destination, state.operations);
+    prepareWindowsPrivateDestination(stage, state.operations, { exclusive: true });
+    const events: string[] = [];
+    const inspect = (path: string) => state.entries.get(path) ?? null;
+    Object.assign(state.operations, {
+      inspect: (path: string) => {
+        events.push(`inspect:${path}`);
+        return inspect(path);
+      },
+      verifyMany: (paths: readonly string[]) => {
+        events.push(`verifyMany:${paths.join(",")}`);
+        expect(paths).toEqual([directory, destination, stage]);
+      },
+    });
+    destinationGuard.verifyBeforePublication(stage);
+    const batch = events.indexOf(`verifyMany:${directory},${destination},${stage}`);
+    expect(batch).toBeGreaterThan(0);
+    for (const path of [directory, destination, stage]) {
+      expect(events.indexOf(`inspect:${path}`)).toBeLessThan(batch);
+      expect(events.lastIndexOf(`inspect:${path}`)).toBeGreaterThan(batch);
+    }
+  });
+  it("acquires a new protected file exclusively and removes only its own identity", () => {
+    const state = fixture();
+    const guard = prepareWindowsPrivateDestination(destination, state.operations, {
+      exclusive: true,
+    });
+    guard.verifyBeforeWrite();
+    expect(state.events.indexOf(`protect:${destination}`)).toBeLessThan(
+      state.events.lastIndexOf(`verify:${destination}`),
+    );
+    guard.removeOwned();
+    expect(state.entries.has(destination)).toBe(false);
+  });
+
+  it("opens only the verified file identity and closes a mismatched descriptor", () => {
+    const state = fixture();
+    const guard = prepareWindowsPrivateDestination(destination, state.operations, {
+      exclusive: true,
+    });
+    state.operations.descriptorIdentity = () => "different-file";
+    expect(() => guard.openOwnedForWrite()).toThrow(/open file identity changed/);
+    expect(state.events).toContain(`close:100`);
+  });
+
+  it("reports both identity mismatch and failed descriptor close", () => {
+    const state = fixture();
+    const guard = prepareWindowsPrivateDestination(destination, state.operations, {
+      exclusive: true,
+    });
+    state.operations.descriptorIdentity = () => "different-file";
+    state.operations.close = () => {
+      throw new Error("descriptor close denied");
+    };
+    try {
+      guard.openOwnedForWrite();
+      throw new Error("expected open failure");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AggregateError);
+      expect((error as AggregateError).errors.map(String)).toEqual([
+        expect.stringContaining("open file identity changed"),
+        "Error: descriptor close denied",
+      ]);
+    }
+  });
+
+  it("reports EEXIST for an existing exclusive destination before its ACL is ready", () => {
+    const state = fixture();
+    state.add(directory, "directory");
+    state.protectedPaths.add(directory);
+    state.add(destination, "file", 5n);
+    expect(() =>
+      prepareWindowsPrivateDestination(destination, state.operations, { exclusive: true }),
+    ).toThrow(expect.objectContaining({ code: "EEXIST" }));
+    expect(state.entries.get(destination)?.size).toBe(5n);
+    expect(state.events).not.toContain(`verify:${destination}`);
+    expect(state.events).not.toContain(`protect:${destination}`);
+    expect(state.events).not.toContain(`unlink:${destination}`);
+  });
+
+  it("requires an existing lock without creating an empty replacement", () => {
+    const state = fixture();
+    state.add(directory, "directory");
+    state.protectedPaths.add(directory);
+    expect(() =>
+      prepareWindowsPrivateDestination(destination, state.operations, { existing: true }),
+    ).toThrow(expect.objectContaining({ code: "ENOENT" }));
+    expect(state.entries.has(destination)).toBe(false);
+  });
+
+  it("never creates a directory while verifying an absent existing lock", () => {
+    const state = fixture();
+    expect(() =>
+      prepareWindowsPrivateDestination(destination, state.operations, { existing: true }),
+    ).toThrow(expect.objectContaining({ code: "ENOENT" }));
+    expect(state.events).toEqual(["volume"]);
+    expect(state.entries.size).toBe(0);
+  });
+
+  it("keeps EEXIST when another process wins the exclusive create race", () => {
+    const state = fixture();
+    state.add(directory, "directory");
+    state.protectedPaths.add(directory);
+    state.operations.createEmpty = (path) => {
+      state.add(path, "file");
+      throw Object.assign(new Error("already created by contender"), { code: "EEXIST" });
+    };
+    expect(() =>
+      prepareWindowsPrivateDestination(destination, state.operations, { exclusive: true }),
+    ).toThrow(expect.objectContaining({ code: "EEXIST" }));
+    expect(state.entries.has(destination)).toBe(true);
+    expect(state.events).not.toContain(`verify:${destination}`);
+    expect(state.events).not.toContain(`protect:${destination}`);
+    expect(state.events).not.toContain(`unlink:${destination}`);
+  });
+
+  it("refuses to remove a replaced file or a preexisting destination", () => {
+    const state = fixture();
+    const guard = prepareWindowsPrivateDestination(destination, state.operations, {
+      exclusive: true,
+    });
+    state.add(destination, "file");
+    expect(() => {
+      guard.removeOwned();
+    }).toThrow(/identity changed/);
+    expect(state.entries.has(destination)).toBe(true);
+    state.protectedPaths.add(destination);
+    const existing = prepareWindowsPrivateDestination(destination, state.operations);
+    expect(() => {
+      existing.removeOwned();
+    }).toThrow(/not owned/);
+  });
+
   it("uses the native PowerShell binary and a matching child-only module path", () => {
     const environment = Object.freeze({
       SystemRoot: "C:\\Windows",
