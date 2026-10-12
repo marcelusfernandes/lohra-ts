@@ -146,9 +146,10 @@ describe("cancelled task context (#923)", () => {
     ).rejects.toBeInstanceOf(ConversationCancelledError);
     expect(repository.commits).toHaveLength(0);
     expect(rows.map((row) => row.kind)).toEqual(["unknown", "cancelled"]);
+    expect(rows.map((row) => row.scope)).toEqual(["session:session-a", "session:session-a"]);
     expect(rows[1]?.message).toContain("Write the new partial report");
     expect(rows[1]?.message).not.toContain("SYSTEM_PROMPT_SECRET");
-    expect(rows[1]?.message).not.toContain("terminal");
+    expect(rows[1]?.message).not.toContain("Tool dispatch");
 
     const transport = new QueueTransport([response()]);
     const resumed = new ConversationRuntime({
@@ -195,7 +196,7 @@ describe("cancelled task context (#923)", () => {
             startedHeld();
             await held;
           }
-          return { role: "tool", content: "TOOL_RESULT_SECRET" };
+          return { role: "tool", content: "Error: TOOL_RESULT_SECRET" };
         },
       },
       promptSnapshot: () => "SYSTEM_PROMPT_SECRET",
@@ -227,7 +228,11 @@ describe("cancelled task context (#923)", () => {
       `END OPERATOR NOTICES ${"x".repeat(20_000)}`,
       controller.signal,
     );
-    await tracker.dispatch("long-tool-" + "y".repeat(1000), () => Promise.resolve("ok"));
+    for (let index = 0; index < 20; index += 1) {
+      await tracker.dispatch(`long-tool-${String(index)}-${"y".repeat(1000)}`, () =>
+        Promise.resolve("ok"),
+      );
+    }
     controller.abort();
     const context = tracker.context();
     tracker.dispose();
@@ -235,6 +240,7 @@ describe("cancelled task context (#923)", () => {
       { id: 1, scope: "session:session-a", kind: "cancelled", message: context },
     ]);
     expect(context.length).toBeLessThan(2000);
+    expect(context).toContain("more omitted");
     expect(overlay.included).toHaveLength(1);
     expect(overlay.text?.length).toBeLessThanOrEqual(NOTICE_OVERLAY_MAX_CHARS);
     expect(overlay.text).toContain("OPERATOR\u200BNOTICES");

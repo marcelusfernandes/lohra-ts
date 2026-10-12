@@ -249,5 +249,10 @@ export interface TurnNoticesClaim {
 export interface TurnNoticesPort {
   claim(sessionId: string): TurnNoticesClaim;
   ack(token: readonly number[]): void;
-  publishFailure(sessionId: string, code: string, cause: unknown): void;
+  publishFailure(
+    sessionId: string,
+    code: string,
+    cause: unknown,
+    cancellationContext?: string,
+  ): void;
 }

@@ -8,6 +8,7 @@ import type { NormalizedResponse, SystemBands, ToolCall, Usage } from "../transp
 import { runBounded } from "../tools/dispatch.js";
 import { summarizeWithFallback } from "../agent/auxiliary.js";
 import { addUsage } from "./usage.js";
+import { createCancellationNoticeTracker } from "./cancellation-notice.js";
 import { resolveTurnSession } from "./runtime-session.js";
 import {
   attemptCompaction,
@@ -413,6 +414,7 @@ export class ConversationRuntime {
       this.options.summarize === undefined
         ? defaultSummarize
         : summarizeWithFallback(this.options.summarize, defaultSummarize, onAuxFallback);
+    const cancellation = createCancellationNoticeTracker(input.input, signal);
     try {
       for (let iteration = 1; iteration <= this.maxIterations; iteration += 1) {
         if (signalAborted(signal)) throw new ConversationCancelledError(sessionId, signal.reason);
@@ -645,8 +647,8 @@ export class ConversationRuntime {
           } as const;
           messages.push(assistantToolMessage);
           turnMessages.push({ ...assistantToolMessage, content: response.content ?? "" });
-          const toolMessages = await runBounded(response.toolCalls, 8, async (call) =>
-            toolDispatcher.dispatch(call),
+          const toolMessages = await runBounded(response.toolCalls, 8, (call) =>
+            cancellation.dispatch(call.name, () => toolDispatcher.dispatch(call)),
           );
           if (signalAborted(signal)) throw new ConversationCancelledError(sessionId, signal.reason);
           for (let index = 0; index < response.toolCalls.length; index += 1) {
@@ -783,9 +785,15 @@ export class ConversationRuntime {
       // Issue #589 AC4: the dead turn publishes its own notice — the NEXT
       // turn's own claim (this session's `session:<id>` scope) is what
       // surfaces it, since this one never reaches the ack above.
-      this.options.notices?.publishFailure(sessionId, code, error);
+      this.options.notices?.publishFailure(
+        sessionId,
+        code,
+        error,
+        error instanceof ConversationCancelledError ? cancellation.context() : undefined,
+      );
       throw error;
     } finally {
+      cancellation.dispose();
       await this.options.transport.close();
     }
   }

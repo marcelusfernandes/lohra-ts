@@ -140,11 +140,16 @@ function providerCauseOf(cause: unknown): unknown {
 export function buildTurnNotice(
   code: string,
   cause: unknown,
+  cancellationContext?: string,
 ): { readonly kind: NoticeKind; readonly message: string } {
   const exact = CODE_TO_KIND.find(([marker]) => marker === code)?.[1];
   const kind = exact ?? classifyProviderError(providerCauseOf(cause)) ?? "unknown";
   const detail = cause instanceof Error ? cause.message : String(cause);
-  return { kind, message: `turn failed (${code}): ${detail}` };
+  const context = code === "CONVERSATION_CANCELLED" ? cancellationContext : undefined;
+  return {
+    kind,
+    message: `turn failed (${code}): ${detail}${context === undefined ? "" : `; ${context}`}`,
+  };
 }
 
 export interface TurnNoticesPortOptions {
@@ -186,9 +191,14 @@ export function createTurnNoticesPort(options: TurnNoticesPortOptions): TurnNoti
         }
       }
     },
-    publishFailure(sessionId: string, code: string, cause: unknown): void {
+    publishFailure(
+      sessionId: string,
+      code: string,
+      cause: unknown,
+      cancellationContext?: string,
+    ): void {
       try {
-        const { kind, message } = buildTurnNotice(code, cause);
+        const { kind, message } = buildTurnNotice(code, cause, cancellationContext);
         options.repository.append(`${SESSION_SCOPE_PREFIX}${sessionId}`, { kind, message });
       } catch (error) {
         warn(`notices overlay: publishFailure failed for session ${sessionId} — ${String(error)}`);
