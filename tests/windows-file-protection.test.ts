@@ -4,6 +4,7 @@ import {
   prepareWindowsPrivateDestination,
   type WindowsProtectionOperations,
 } from "../src/security/windows-file-protection.js";
+import { windowsPowerShellCommand } from "../src/security/windows-file-protection-native.js";
 
 const directory = "C:\\vault";
 const destination = `${directory}\\secret.json`;
@@ -53,6 +54,23 @@ function fixture() {
 }
 
 describe("windows private destination", () => {
+  it("uses the native PowerShell binary and a matching child-only module path", () => {
+    const environment = Object.freeze({
+      SystemRoot: "C:\\Windows",
+      PSModulePath: "C:\\Program Files\\PowerShell\\7\\Modules",
+      CUSTOM_MARKER: "retained",
+    });
+    const command = windowsPowerShellCommand(environment);
+    expect(command.executable).toBe(
+      "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    );
+    expect(command.environment.PSModulePath).toBe(
+      "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules",
+    );
+    expect(command.environment.CUSTOM_MARKER).toBe("retained");
+    expect(environment.PSModulePath).toBe("C:\\Program Files\\PowerShell\\7\\Modules");
+  });
+
   it("rejects a relative path before creating a destination", () => {
     expect(() => prepareWindowsPrivateDestination("relative/private.json")).toThrow(/absolute/i);
   });

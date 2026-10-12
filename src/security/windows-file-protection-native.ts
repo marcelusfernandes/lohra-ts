@@ -1,5 +1,12 @@
 import { spawnSync } from "node:child_process";
 
+export function windowsPowerShellCommand(_environment: NodeJS.ProcessEnv): {
+  executable: string;
+  environment: NodeJS.ProcessEnv;
+} {
+  throw new Error("not implemented: windowsPowerShellCommand");
+}
+
 // Fixed script: paths travel on stdin as JSON, never as shell fragments.
 // Set-Acl/Get-Acl and DriveInfo are supported Windows PowerShell/.NET APIs.
 const ACL_SCRIPT = String.raw`
