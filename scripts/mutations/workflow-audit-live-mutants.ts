@@ -397,7 +397,15 @@ export const mutants: readonly Mutant[] = [
     edits: [
       {
         file: chat,
-        before: "toolDispatcher: new RegistryToolDispatcher(tools.dispatch),",
+        before: [
+          "toolDispatcher: new RegistryToolDispatcher((name, args) =>",
+          "            tools.dispatch(",
+          "              name,",
+          "              args,",
+          '              name === "terminal" && activeSignal !== null ? { signal: activeSignal } : undefined,',
+          "            ),",
+          "          ),",
+        ].join("\n"),
         after:
           "toolDispatcher: new RegistryToolDispatcher(((registry) => registry.dispatch.bind(registry))(CHAT_TOOL_REGISTRY_FACTORIES.failSafe(connection.database, options.environment))),",
       },
