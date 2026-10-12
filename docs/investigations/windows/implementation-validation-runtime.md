@@ -1,10 +1,12 @@
 # #757 — cancelamento e retomada de tarefa real no Windows
 
-**Estado em 2026-10-11: PARTIAL.** O cancelamento público por Ctrl+C parou a
-operação local e preservou o arquivo concluído, mas a CLI saiu com código 1 sem
-envelope de cancelamento. A retomada funcionou, porém não recebeu aviso da
-interrupção. O aceite desta issue depende da correção focal [#920](https://github.com/marcelusfernandes/lohra-ts/issues/920)
-e da repetição apenas do passo afetado com o pacote corrigido.
+**Estado após as medições de 2026-10-11/12: PARTIAL.** O Ctrl+C público agora
+interrompe a operação local em menos de 2 s, preserva o arquivo concluído e
+devolve um envelope explícito de cancelamento. [#920](https://github.com/marcelusfernandes/lohra-ts/issues/920)
+foi integrada pela [PR #922](https://github.com/marcelusfernandes/lohra-ts/pull/922).
+A retomada lê o arquivo sem repetir a operação, mas ainda não identifica de
+forma confiável a tarefa interrompida. O aceite desta issue depende de uma
+solução e medição positivas para [#923](https://github.com/marcelusfernandes/lohra-ts/issues/923).
 
 ## Ambiente e recorte
 
@@ -30,7 +32,7 @@ As [projeções sanitizadas](evidence/implementation-validation/runtime/procedur
 registram comandos, observações e limites. Transcrições integrais, `auth.json`,
 `.env` e `state.db` não integram esta documentação.
 
-## Resultado observado
+## Primeira medição, antes de #920
 
 | Verificação                             | Observado                                                                                          | Situação                       |
 | --------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------ |
@@ -53,20 +55,50 @@ O processo local estava encerrado no primeiro controle, dentro do limite de
 10 s, e o arquivo concluído permaneceu íntegro. A evidência não demonstra
 cancelamento de chamadas remotas já enviadas nem reembolso do provider. Também
 não generaliza a observação de um child para todos os recursos do runtime.
-Como o turno não produziu envelope nem aviso persistido, não é possível marcar
-a jornada completa como aprovada.
+Naquela versão, o turno não produziu envelope nem aviso persistido. A falha de
+produto foi corrigida em #920; as repetições abaixo medem o comportamento novo.
+
+## Repetições focais com o pacote instalado
+
+O candidato `a8c44ceed3edc0a65d9f839d16ac7686075605af` de #920, depois
+integrado no merge `2c5e7c49f019219778d82d21a43e363d3b2ac603`, foi
+exercitado com provider real, Node 22 e o CLI instalado. O controlador enviou
+o byte de Ctrl+C pelo ConPTY público depois de `write_file` e do início do
+`terminal` local. O JSON saiu com `completed=false`,
+`error="conversation cancelled"` e a mesma sessão, em 1.430 ms; o processo
+próprio estava encerrado, não houve conclusão natural de 30 s e
+`entrega-final.txt` permaneceu íntegro. O aviso `cancelled` dessa execução foi
+persistido e recebeu ack na retomada. Ainda assim, o modelo explicou uma
+falha antiga `MODULE_NOT_FOUND` ao responder sobre a execução mais recente.
+
+Duas variações focais de #923 repetiram apenas cancelamento e retomada:
+
+| Candidato                                | Ctrl+C → saída | Operação e arquivo                                 | Resposta na retomada                                          |
+| ---------------------------------------- | -------------: | -------------------------------------------------- | ------------------------------------------------------------- |
+| `a8c44ce` (#920, depois integrado)       |       1.430 ms | Child encerrado; `entrega-final.txt` preservado    | Leu o arquivo, mas atribuiu a execução recente ao erro antigo |
+| `87221df` (#923 local, aviso contextual) |       1.426 ms | Child encerrado; `entrega-contexto.txt` preservado | Leu o arquivo, mas tratou o aviso como suspeito               |
+| `ec5a2b3` (#923 local, aviso factual)    |       1.922 ms | Child encerrado; `entrega-factual.txt` preservado  | Leu o arquivo, mas tratou o aviso como suspeito               |
+
+Em todas as retomadas houve exit 0, `completed=true`, `error=null` e somente
+`read_file`; não houve replay de `terminal`. As [projeções das três
+medições](evidence/implementation-validation/runtime/followup-observations.json)
+preservam os fatos necessários sem prompts, IDs de sessão ou transcrições
+integrais. Os candidatos de #923 são locais; nenhum dos dois constitui
+aceite. O aviso contextual/factual foi concatenado ao conteúdo de um turno
+com papel `user` no runtime, sem origem autenticável distinta para o modelo.
+As respostas suspeitando de um “aviso de operador” são compatíveis com esse
+limite, mas os três ensaios não demonstram qual apresentação futura será
+suficiente. A escolha do comportamento público de aviso segue em #923.
 
 ## Aceite e próximos passos
 
-Os critérios de ambiente, tarefa real, preservação de artefato e retomada
-operacional têm evidência positiva. Ficam pendentes confirmação explícita de
-cancelamento, estado correto no turno seguinte e verificação de que nenhuma
-nova chamada de ferramenta começa após o cancelamento observado. [#920](https://github.com/marcelusfernandes/lohra-ts/issues/920)
-liga o sinal público ao `AbortSignal` e ao mecanismo de aviso já existente;
-somente uma repetição da sequência `write_file` → operação limitada → Ctrl+C →
-retomada com o pacote corrigido pode preencher esses critérios. O relatório
-será atualizado com o SHA, saída, prazo e estado reais dessa repetição antes
-de propor o fechamento de #757.
+Os critérios de ambiente, tarefa real, Ctrl+C com erro explícito dentro de
+10 s, encerramento do child próprio, preservação de artefato e retomada
+operacional têm evidência positiva. O aviso persistido e reconhecido demonstra
+o caminho técnico de notificação, mas a resposta ao usuário continua errada ou
+incerta. O critério de estado compreensível permanece **FAIL** e bloqueia o
+aceite integral de #757. A próxima medição depende da decisão de produto e da
+correção de #923; não há necessidade de repetir as partes já comprovadas.
 
 Esta rodada não aceita cron, compactação, gateway amplo, crash/lease ou
 proteção entre identidades. Esses limites continuam em [#736](https://github.com/marcelusfernandes/lohra-ts/issues/736)

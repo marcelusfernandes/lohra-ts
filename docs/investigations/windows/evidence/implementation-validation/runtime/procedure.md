@@ -35,7 +35,24 @@ A primeira tentativa da etapa 2 usou a fixture em pasta diferente do cwd
 congelado da sessão e falhou com `MODULE_NOT_FOUND`. Ela foi corrigida antes
 da medição de Ctrl+C; não é evidência de falha do runtime.
 
-O resultado é **PARTIAL**. A correção #920 e a repetição do passo 2–4 com
-pacote corrigido ainda não foram registradas aqui. Este procedimento não
-mede cancelamento de chamada remota já enviada, cron, gateway amplo,
-compactação, crash/lease ou ACL entre identidades.
+Depois, o candidato `a8c44ce` de #920 repetiu somente o trecho afetado com o
+pacote instalado. Ctrl+C via ConPTY público retornou em 1.430 ms, exit 1,
+`completed=false` e `error="conversation cancelled"`; child encerrado,
+sem conclusão natural, `entrega-final.txt` preservado. O notice `cancelled`
+foi persistido e recebeu ack. A retomada leu o arquivo com `read_file`, sem
+replay, mas interpretou a falha antiga como execução recente. #920 foi
+integrada pela PR #922 no merge `2c5e7c4`.
+
+Os candidatos locais `87221df` e `ec5a2b3` de #923 repetiram a sequência
+focal em 1.426 ms e 1.922 ms. Ambos encerraram o child e preservaram o
+arquivo; ambos tiveram retomada operacional com `read_file`, sem replay.
+As respostas, porém, trataram o aviso de operador como suspeito e não
+identificaram com segurança a interrupção recente. Os dados projetados estão
+em [followup-observations.json](followup-observations.json). Suas fontes locais
+são `cancel-{final,context,factual}-meta.json` e os respectivos
+`cancel-{final,context,factual}-resume.json` no diretório de evidências externo.
+
+O resultado de #757 segue **PARTIAL**. #923 ainda precisa de uma solução de
+produto com medição positiva. Estas execuções não medem cancelamento de
+chamada remota já enviada, cron, gateway amplo, compactação, crash/lease ou
+ACL entre identidades.
