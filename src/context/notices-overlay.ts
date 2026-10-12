@@ -12,7 +12,7 @@
 // route-fault eval scenario the issue describes needs a run→session link
 // this file does not have — tracked as a follow-up, not solved here.
 import type { NoticeKind } from "../state/notices-repository.js";
-import type { TurnNoticesClaim, TurnNoticesPort } from "../conversation/types.js";
+import type { SessionNotice, TurnNoticesClaim, TurnNoticesPort } from "../conversation/types.js";
 import { classifyProviderError } from "../transports/errors.js";
 
 export const NOTICE_OVERLAY_MAX_CHARS = 4096;
@@ -158,7 +158,21 @@ export interface TurnNoticesPortOptions {
   readonly actor?: string;
   readonly now?: () => number;
   readonly warning?: (message: string) => void;
-  readonly onClaimedCancellation?: (rows: readonly NoticeRow[]) => void;
+  readonly onClaimedCancellation?: (rows: readonly SessionNotice[]) => void;
+}
+
+const RENDERED_NOTICE_MESSAGE_MAX_CHARS = 2000;
+function renderedCancellation(row: NoticeRow): NoticeRow {
+  const clean = row.message
+    .replace(/[\p{Cc}\p{Cf}]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const chars = Array.from(clean);
+  const message =
+    chars.length > RENDERED_NOTICE_MESSAGE_MAX_CHARS
+      ? `${chars.slice(0, RENDERED_NOTICE_MESSAGE_MAX_CHARS).join("")}…`
+      : clean;
+  return { id: row.id, scope: row.scope, kind: row.kind, message };
 }
 
 const NO_CLAIM: TurnNoticesClaim = { token: [], overlay: null };
@@ -176,8 +190,34 @@ export function createTurnNoticesPort(options: TurnNoticesPortOptions): TurnNoti
       try {
         const owners = options.sessions.lineageRootToTip(sessionId);
         const rows = claimLineageNotices(options.repository, owners);
-        const { text, included } = formatNoticeOverlay(rows);
-        return { token: included.map((row) => row.id), overlay: text };
+        if (options.onClaimedCancellation === undefined) {
+          const { text, included } = formatNoticeOverlay(rows);
+          return { token: included.map((row) => row.id), overlay: text };
+        }
+        const ownScope = `${SESSION_SCOPE_PREFIX}${sessionId}`;
+        const ownCancellation = (row: NoticeRow): boolean =>
+          row.scope === ownScope && row.kind === "cancelled";
+        const { text, included } = formatNoticeOverlay(rows.filter((row) => !ownCancellation(row)));
+        const rendered = formatNoticeOverlay(
+          rows.filter(ownCancellation).map(renderedCancellation),
+        ).included;
+        let deliveredIds: readonly number[] = [];
+        if (rendered.length > 0) {
+          const copies: readonly SessionNotice[] = Object.freeze(
+            rendered.map((row) =>
+              Object.freeze({ id: row.id, kind: "cancelled", message: row.message }),
+            ),
+          );
+          try {
+            options.onClaimedCancellation(copies);
+            deliveredIds = copies.map((row) => row.id);
+          } catch (error) {
+            warn(
+              `notices overlay: cancellation delivery failed for session ${sessionId} — ${String(error)}`,
+            );
+          }
+        }
+        return { token: [...included.map((row) => row.id), ...deliveredIds], overlay: text };
       } catch (error) {
         warn(`notices overlay: claim failed for session ${sessionId} — ${String(error)}`);
         return NO_CLAIM;

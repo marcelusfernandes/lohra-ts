@@ -246,6 +246,13 @@ export interface TurnNoticesClaim {
   readonly overlay: string | null;
 }
 
+/** Bounded cancellation record delivered to a local renderer on session resume. */
+export interface SessionNotice {
+  readonly id: number;
+  readonly kind: "cancelled";
+  readonly message: string;
+}
+
 export interface TurnNoticesPort {
   claim(sessionId: string): TurnNoticesClaim;
   ack(token: readonly number[]): void;

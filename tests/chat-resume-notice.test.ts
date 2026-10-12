@@ -159,6 +159,7 @@ describe("CLI cancelled task notice (#923)", () => {
       expect(resumed.stdout).not.toMatch(/\nFAKE_STATUS/);
       expect(requests[1]).not.toContain("CONVERSATION_CANCELLED");
       expect(requests[1]).not.toContain("Write the report");
+      expect(requests).toHaveLength(2);
 
       const afterAck = await runChat(options(root, provider, "And now?", sessionId, false));
       expect(afterAck.stdout).toBe("model answer\n");

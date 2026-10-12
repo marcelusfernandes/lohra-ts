@@ -204,7 +204,7 @@ describe("chat signal cancellation (#920)", () => {
     }
   });
 
-  it("cancels an in-flight call, reports its session, and overlays the notice on resume", async () => {
+  it("cancels an in-flight call, reports its session, and presents the notice on resume", async () => {
     const { root, server, requests, firstRequest } = fixture(true);
     const provider = await start(server);
     const signal = signalRegistration();
@@ -232,13 +232,20 @@ describe("chat signal cancellation (#920)", () => {
       );
       expect(resumed.code).toBe(0);
       expect(requests).toHaveLength(2);
-      expect(requests[1]).toContain("OPERATOR NOTICES");
-      expect(requests[1]).toContain("cancelled");
+      const resumedEnvelope = JSON.parse(resumed.stdout) as {
+        session_notices?: readonly { readonly kind: string; readonly message: string }[];
+      };
+      expect(resumedEnvelope.session_notices?.[0]?.kind).toBe("cancelled");
+      expect(resumedEnvelope.session_notices?.[0]?.message).toContain("trabalho interrompível");
+      expect(requests[1]).not.toContain("CONVERSATION_CANCELLED");
 
       const afterAck = await runChat(
         options(root, provider, signalRegistration().register, envelope.session_id),
       );
       expect(afterAck.code).toBe(0);
+      expect(JSON.parse(afterAck.stdout) as Record<string, unknown>).not.toHaveProperty(
+        "session_notices",
+      );
       expect(requests[2]).not.toContain("OPERATOR NOTICES");
     } finally {
       await close(server);

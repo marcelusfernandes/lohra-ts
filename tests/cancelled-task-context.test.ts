@@ -6,6 +6,7 @@ import type {
   ConversationRepository,
   ModelRequest,
   ModelTransport,
+  SessionNotice,
   StoredSession,
   TurnCommit,
 } from "../src/conversation/types.js";
@@ -128,7 +129,7 @@ describe("cancelled task context (#923)", () => {
       { id: 4, scope: "session:other", kind: "cancelled", message: "other cancellation" },
       { id: 5, scope: "session:session-a", kind: "route_fault", message: "route failure" },
     ];
-    const delivered: NoticeRow[] = [];
+    const delivered: SessionNotice[] = [];
     const acked: number[] = [];
     const port = createTurnNoticesPort({
       repository: {
