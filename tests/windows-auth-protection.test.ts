@@ -242,6 +242,40 @@ describe("Windows auth integration through fake protection ports", () => {
     expect(readFileSync(path, "utf8")).toContain("holder-a");
   });
 
+  it("keeps protection and cleanup causes when lock acquisition fails", async () => {
+    const home = root();
+    const primary = new Error("ACL denied");
+    const protectionFailure = new AggregateError(
+      [primary, new Error("cleanup denied")],
+      "Windows protection and cleanup failed",
+      { cause: primary },
+    );
+    const protection: LeaseProtectionOperations = {
+      platform: "win32",
+      prepare: () => {
+        throw protectionFailure;
+      },
+    };
+    const own = new OAuthTokens("old-fictional-token", "fictional-refresh", "account", 900);
+    let caught: unknown;
+    try {
+      await refreshUnderLease(
+        home,
+        own,
+        1_000,
+        () => {
+          throw new Error("refresh should not be called");
+        },
+        protection,
+      );
+    } catch (error) {
+      caught = error;
+    }
+    expect((caught as Error).name).toBe("TokenPersistError");
+    expect((caught as Error).cause).toBe(protectionFailure);
+    expect((caught as Error).message).not.toContain("old-fictional-token");
+  });
+
   it("reports failed release after a successful reread without leaking the token", async () => {
     const home = root();
     writeFileSync(

@@ -62,9 +62,11 @@ async function performRefresh(
     // lost until the process exits". The only thing that survives is what
     // made it to disk — the caller's actual recovery is `auth login`, not
     // a retry of the same command.
-    throw new TokenPersistError(
+    const failure = new TokenPersistError(
       `the login refresh succeeded but saving it to ${tokenPath(home)} failed (${error instanceof Error ? error.message : String(error)}) — check permissions/disk space and run \`lohra auth login\` again if the previous refresh token was already rotated`,
     );
+    failure.cause = error;
+    throw failure;
   }
   return updated;
 }
@@ -117,9 +119,11 @@ export async function refreshUnderLease(
       // `writeTokens`. Same named error, so callers don't need to
       // distinguish "couldn't lock" from "couldn't save" — both mean
       // "the refresh worked, disk didn't cooperate".
-      throw new TokenPersistError(
+      const failure = new TokenPersistError(
         `could not create the refresh lease at ${lockPath} (${error instanceof Error ? error.message : String(error)}) — check permissions on ${home}`,
       );
+      failure.cause = error;
+      throw failure;
     }
     if (acquired) {
       let refreshed: OAuthTokens | null = null;
