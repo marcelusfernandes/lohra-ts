@@ -3,7 +3,38 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync } from "node:fs";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// Ordinary tmpdir fixtures are not private Windows destinations. Keep their
+// real file round-trips with an explicit fake private-writer port; the Windows
+// protection contract itself is exercised in windows-env-protection.test.ts.
+vi.mock("../src/onboarding/env-write.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/onboarding/env-write.js")>();
+  const { atomicWrite0600 } = await import("../src/auth/json-file.js");
+  return {
+    ...actual,
+    upsertEnvFile: (
+      path: string,
+      updates: Readonly<Record<string, string>>,
+      ops?: Parameters<typeof actual.upsertEnvFile>[2],
+    ) => {
+      if (process.platform !== "win32" || ops !== undefined)
+        return actual.upsertEnvFile(path, updates, ops);
+      const forbidden = () => {
+        throw new Error("legacy .env writer used by Windows fixture");
+      };
+      return actual.upsertEnvFile(path, updates, {
+        platform: "win32",
+        privateWrite: (target, body) => {
+          atomicWrite0600(target, body);
+        },
+        writeText: forbidden,
+        chmod600: forbidden,
+        replace: forbidden,
+      });
+    },
+  };
+});
 
 import {
   Prompter,
@@ -48,7 +79,7 @@ describe(".env writer", () => {
     const first = upsertEnvFile(path, { A: "two words", B: "hash#value" });
     expect(first).toEqual(["A", "B"]);
     expect(readFileSync(path, "utf8")).toBe('# keep\nA="two words"\nOTHER=x\nB="hash#value"\n');
-    expect(statSync(path).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
     const before = statSync(path).mtimeMs;
     expect(upsertEnvFile(path, { A: "two words", B: "hash#value" })).toEqual([]);
     expect(statSync(path).mtimeMs).toBe(before);

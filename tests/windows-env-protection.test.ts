@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { atomicWritePrivate0600, type AtomicWriteOperations } from "../src/auth/json-file.js";
 import { upsertEnvFile, type EnvWriteOperations } from "../src/onboarding/env-write.js";
 
 const roots: string[] = [];
@@ -52,6 +53,82 @@ afterEach(() => {
 });
 
 describe("Windows .env protection integration", () => {
+  it("protects destination and temporary before the first byte and verifies rename", () => {
+    const state = fixture();
+    const events: string[] = [];
+    let persisted = "";
+    const atomic: AtomicWriteOperations = {
+      platform: "win32",
+      pid: 17,
+      now: () => 23,
+      mkdir: () => {
+        throw new Error("Windows must not use recursive mkdir");
+      },
+      open: () => {
+        throw new Error("Windows must use the protected descriptor");
+      },
+      prepare: (path) => {
+        events.push(`protect:${path}`);
+        return {
+          verifyBeforeWrite: () => undefined,
+          openOwnedForWrite: () => {
+            events.push(`open:${path}`);
+            return 7;
+          },
+          verifyBeforePublication: (source) => {
+            events.push(`before-rename:${source}`);
+          },
+          verifyAfterPublication: () => {
+            events.push("after-rename");
+          },
+          removeOwned: () => {
+            events.push(`remove:${path}`);
+          },
+        };
+      },
+      write: (_descriptor, bytes, offset) => {
+        events.push("first-byte");
+        persisted += bytes.subarray(offset).toString("utf8");
+        return bytes.length - offset;
+      },
+      fsync: () => {
+        events.push("fsync");
+      },
+      close: () => {
+        events.push("close");
+      },
+      rename: () => {
+        events.push("rename");
+      },
+      unlink: () => {
+        throw new Error("unexpected generic cleanup");
+      },
+    };
+    const operations: EnvWriteOperations = {
+      ...state.operations,
+      privateWrite: (path, body) => {
+        atomicWritePrivate0600(path, body, atomic);
+      },
+    };
+    expect(upsertEnvFile(state.path, { OPENAI_API_KEY: "fictional" }, operations)).toEqual([
+      "OPENAI_API_KEY",
+    ]);
+    expect(persisted).toBe("OPENAI_API_KEY=fictional\n");
+    expect(events.slice(0, 2)).toEqual([
+      `protect:${state.path}`,
+      `protect:${state.path}.tmp-17-23`,
+    ]);
+    expect(events.indexOf("first-byte")).toBeGreaterThan(
+      events.indexOf(`open:${state.path}.tmp-17-23`),
+    );
+    expect(events.indexOf("first-byte")).toBeLessThan(events.indexOf("rename"));
+    expect(events.indexOf("fsync")).toBeLessThan(events.indexOf("rename"));
+    expect(events.indexOf("before-rename:" + `${state.path}.tmp-17-23`)).toBeLessThan(
+      events.indexOf("rename"),
+    );
+    expect(events.at(-1)).toBe("after-rename");
+  });
+
   it("passes rendered fictitious keys to the private writer and keeps comments and idempotence", () => {
     const state = fixture();
     state.setContent(
@@ -126,6 +203,31 @@ describe("Windows .env protection integration", () => {
       expect((error as Error).cause).toBe(protectionFailure);
     }
     expect(state.content()).toBe("# keep\nOPENAI_API_KEY=fictional-old\n");
+  });
+
+  it("retains the writer's cleanup cause without including the fictitious value", () => {
+    const state = fixture();
+    state.setContent("OPENAI_API_KEY=fictional-old\n");
+    const primary = new Error("protection failed");
+    const cleanup = new Error("owned stage cleanup failed");
+    const combined = new AggregateError([primary, cleanup], "write and cleanup failed", {
+      cause: primary,
+    });
+    const operations: EnvWriteOperations = {
+      ...state.operations,
+      privateWrite: () => {
+        throw combined;
+      },
+    };
+    try {
+      upsertEnvFile(state.path, { OPENAI_API_KEY: "fictional-new" }, operations);
+      throw new Error("expected cleanup failure");
+    } catch (error) {
+      expect((error as Error).message).not.toContain("fictional-new");
+      expect((error as Error).cause).toBe(combined);
+      expect(combined.errors).toEqual([primary, cleanup]);
+    }
+    expect(state.content()).toBe("OPENAI_API_KEY=fictional-old\n");
   });
 
   it("reports post-publication verification failure without claiming a rollback", () => {
