@@ -47,6 +47,12 @@ function fakeProtection(events: string[]) {
         events.push(`before-write:${path}`);
         if (!existsSync(path)) throw new Error("missing protected destination");
       },
+      openOwnedForWrite: () => {
+        events.push(`before-write:${path}`);
+        if (!existsSync(path)) throw new Error("missing protected destination");
+        events.push("open:r+");
+        return openSync(path, "r+");
+      },
       verifyBeforePublication: (source) => {
         events.push(`before-rename:${source}`);
         if (!existsSync(path) || !existsSync(source)) throw new Error("missing publication path");
@@ -184,7 +190,7 @@ describe("Windows auth integration through fake protection ports", () => {
         if (options?.exclusive !== true) return guard;
         return {
           ...guard,
-          verifyBeforeWrite: () => {
+          openOwnedForWrite: () => {
             throw new Error("stage ACL revoked");
           },
           removeOwned: () => {

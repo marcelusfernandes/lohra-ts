@@ -74,8 +74,7 @@ function createLeaseFile(
     const guard = protection.prepare(path, { exclusive: true });
     let descriptor: number | null = null;
     try {
-      guard.verifyBeforeWrite();
-      descriptor = openSync(path, "r+");
+      descriptor = guard.openOwnedForWrite();
       // The native ACL checks can be slow; the lease starts once they finish.
       writeLeaseBytes(descriptor, {
         holder,

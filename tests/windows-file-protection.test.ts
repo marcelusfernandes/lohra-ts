@@ -17,6 +17,8 @@ function fixture() {
     { kind: "file" | "directory" | "link"; identity: string; size: bigint }
   >();
   const protectedPaths = new Set<string>();
+  const descriptors = new Map<number, string>();
+  let nextDescriptor = 100;
   const events: string[] = [];
   const add = (path: string, kind: "file" | "directory" | "link", size = 0n) => {
     entries.set(path, { kind, identity: String(nextId++), size });
@@ -32,6 +34,24 @@ function fixture() {
     createEmpty: (path) => {
       events.push(`create:${path}`);
       add(path, "file");
+    },
+    openWrite: (path) => {
+      events.push(`open:${path}`);
+      const identity = entries.get(path)?.identity;
+      if (!identity) throw new Error("missing fake file");
+      const descriptor = nextDescriptor++;
+      descriptors.set(descriptor, identity);
+      return descriptor;
+    },
+    descriptorIdentity: (descriptor) => {
+      events.push(`fstat:${String(descriptor)}`);
+      const identity = descriptors.get(descriptor);
+      if (!identity) throw new Error("missing fake descriptor");
+      return identity;
+    },
+    close: (descriptor) => {
+      events.push(`close:${String(descriptor)}`);
+      descriptors.delete(descriptor);
     },
     protect: (path) => {
       events.push(`protect:${path}`);
@@ -65,6 +85,37 @@ describe("windows private destination", () => {
     );
     guard.removeOwned();
     expect(state.entries.has(destination)).toBe(false);
+  });
+
+  it("opens only the verified file identity and closes a mismatched descriptor", () => {
+    const state = fixture();
+    const guard = prepareWindowsPrivateDestination(destination, state.operations, {
+      exclusive: true,
+    });
+    state.operations.descriptorIdentity = () => "different-file";
+    expect(() => guard.openOwnedForWrite()).toThrow(/open file identity changed/);
+    expect(state.events).toContain(`close:100`);
+  });
+
+  it("reports both identity mismatch and failed descriptor close", () => {
+    const state = fixture();
+    const guard = prepareWindowsPrivateDestination(destination, state.operations, {
+      exclusive: true,
+    });
+    state.operations.descriptorIdentity = () => "different-file";
+    state.operations.close = () => {
+      throw new Error("descriptor close denied");
+    };
+    try {
+      guard.openOwnedForWrite();
+      throw new Error("expected open failure");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AggregateError);
+      expect((error as AggregateError).errors.map(String)).toEqual([
+        expect.stringContaining("open file identity changed"),
+        "Error: descriptor close denied",
+      ]);
+    }
   });
 
   it("reports EEXIST only for a verified existing exclusive destination", () => {

@@ -73,8 +73,7 @@ export function atomicWrite0600(
     let published = false;
     try {
       stage = prepare(temporary, { exclusive: true });
-      stage.verifyBeforeWrite();
-      descriptor = operations.open(temporary, "r+", 0o600);
+      descriptor = stage.openOwnedForWrite();
       const bytes = Buffer.from(data, "utf8");
       let offset = 0;
       while (offset < bytes.length) offset += operations.write(descriptor, bytes, offset);

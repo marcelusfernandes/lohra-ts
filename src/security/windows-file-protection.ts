@@ -1,4 +1,12 @@
-import { closeSync, lstatSync, mkdirSync, openSync, rmdirSync, unlinkSync } from "node:fs";
+import {
+  closeSync,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  rmdirSync,
+  unlinkSync,
+} from "node:fs";
 import { win32 } from "node:path";
 
 import { runWindowsAcl } from "./windows-file-protection-native.js";
@@ -16,6 +24,9 @@ export interface WindowsProtectionOperations {
   inspect(path: string): Entry | null;
   mkdir(path: string): void;
   createEmpty(path: string): void;
+  openWrite(path: string): number;
+  descriptorIdentity(descriptor: number): string;
+  close(descriptor: number): void;
   protect(path: string): void;
   verify(path: string): void;
   removeFile(path: string): void;
@@ -24,6 +35,7 @@ export interface WindowsProtectionOperations {
 
 export interface WindowsFileProtection {
   verifyBeforeWrite(): void;
+  openOwnedForWrite(): number;
   verifyBeforePublication(source: string): void;
   verifyAfterPublication(): void;
   removeOwned(): void;
@@ -54,6 +66,12 @@ const nativeOperations: WindowsProtectionOperations = {
   createEmpty: (path) => {
     closeSync(openSync(path, "wx", 0o600));
   },
+  openWrite: (path) => openSync(path, "r+"),
+  descriptorIdentity: (descriptor) => {
+    const stat = fstatSync(descriptor, { bigint: true });
+    return `${String(stat.dev)}:${String(stat.ino)}`;
+  },
+  close: closeSync,
   protect: (path) => {
     runWindowsAcl("protect", path);
   },
@@ -178,7 +196,9 @@ function cleanOwn(
  * Direct writing requires empty; a nonempty destination can only be replaced
  * through caller-owned rename of a verified protected sibling. Each check is
  * path-based; concurrent replacement after a check still requires a caller-held
- * lease/fence. Native ACL checks are metadata checks, not cross-token access proof.
+ * lease/fence. openOwnedForWrite binds the first write to the inspected file
+ * descriptor, but cannot make later path checks atomic with another process.
+ * Native ACL checks are metadata checks, not cross-token access proof.
  */
 export function prepareWindowsPrivateDestination(
   destination: string,
@@ -264,6 +284,37 @@ export function prepareWindowsPrivateDestination(
         checked(directory, "directory", directoryIdentity, operations);
         const entry = checked(file, "file", destinationIdentity, operations);
         if (entry.size !== 0n) throw new Error(`Windows destination is no longer empty: ${file}`);
+      },
+      openOwnedForWrite: () => {
+        checked(directory, "directory", directoryIdentity, operations);
+        const entry = checked(file, "file", destinationIdentity, operations);
+        if (entry.size !== 0n) throw new Error(`Windows destination is no longer empty: ${file}`);
+        const descriptor = operations.openWrite(file);
+        try {
+          if (operations.descriptorIdentity(descriptor) !== destinationIdentity) {
+            throw new Error(`Windows open file identity changed: ${file}`);
+          }
+          const current = inspectChain(file, operations);
+          if (!current || current.identity !== destinationIdentity || current.kind !== "file") {
+            throw new Error(`Windows destination identity changed after open: ${file}`);
+          }
+          return descriptor;
+        } catch (error) {
+          let closeFailure: unknown;
+          let closeFailed = false;
+          try {
+            operations.close(descriptor);
+          } catch (closeError) {
+            closeFailure = closeError;
+            closeFailed = true;
+          }
+          if (closeFailed) {
+            throw new AggregateError([error, closeFailure], "Windows open and close failed", {
+              cause: error,
+            });
+          }
+          throw error;
+        }
       },
       verifyBeforePublication: (source) => {
         const stage = validPath(source);
