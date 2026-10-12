@@ -648,6 +648,7 @@ export class ConversationRuntime {
           const toolMessages = await runBounded(response.toolCalls, 8, async (call) =>
             toolDispatcher.dispatch(call),
           );
+          if (signalAborted(signal)) throw new ConversationCancelledError(sessionId, signal.reason);
           for (let index = 0; index < response.toolCalls.length; index += 1) {
             const call = response.toolCalls[index];
             const toolMessage = toolMessages[index];

@@ -16,6 +16,7 @@ const MAX_OUTPUT_CODE_POINTS = 50_000;
 
 export interface TerminalOptions {
   readonly approvalManager?: ApprovalManager;
+  readonly signal?: AbortSignal;
 }
 
 function appendBounded(current: string, chunk: string): string {
@@ -145,7 +146,9 @@ export async function terminalTool(
     });
   }
 
-  return process.platform === "win32" ? runWindowsTerminalBridge(args) : executeTerminalPty(args);
+  return process.platform === "win32"
+    ? runWindowsTerminalBridge(args, options.signal === undefined ? {} : { signal: options.signal })
+    : executeTerminalPty(args);
 }
 
 // Internal PTY executor. The public terminalTool keeps the approval boundary above.
