@@ -58,6 +58,7 @@ describe("windows private destination", () => {
     const environment = Object.freeze({
       SystemRoot: "C:\\Windows",
       PSModulePath: "C:\\Program Files\\PowerShell\\7\\Modules",
+      PSMODULEPATH: "C:\\other-incompatible-modules",
       CUSTOM_MARKER: "retained",
     });
     const command = windowsPowerShellCommand(environment);
@@ -68,7 +69,16 @@ describe("windows private destination", () => {
       "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules",
     );
     expect(command.environment.CUSTOM_MARKER).toBe("retained");
+    expect(
+      Object.keys(command.environment).filter((name) => name.toLowerCase() === "psmodulepath"),
+    ).toEqual(["PSModulePath"]);
     expect(environment.PSModulePath).toBe("C:\\Program Files\\PowerShell\\7\\Modules");
+  });
+
+  it("fails closed when the native PowerShell root is unavailable", () => {
+    expect(() => windowsPowerShellCommand({ PSModulePath: "C:\\PowerShell\\7" })).toThrow(
+      /SystemRoot/,
+    );
   });
 
   it("rejects a relative path before creating a destination", () => {

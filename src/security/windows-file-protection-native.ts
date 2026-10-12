@@ -1,10 +1,28 @@
 import { spawnSync } from "node:child_process";
+import { win32 } from "node:path";
 
-export function windowsPowerShellCommand(_environment: NodeJS.ProcessEnv): {
+export function windowsPowerShellCommand(environment: NodeJS.ProcessEnv): {
   executable: string;
   environment: NodeJS.ProcessEnv;
 } {
-  throw new Error("not implemented: windowsPowerShellCommand");
+  const systemRoot = Object.entries(environment).find(
+    ([name]) => name.toLowerCase() === "systemroot",
+  )?.[1];
+  if (
+    !systemRoot ||
+    !/^[A-Za-z]:\\/.test(systemRoot) ||
+    win32.normalize(systemRoot) !== systemRoot
+  ) {
+    throw new Error("Windows ACL mechanism requires an absolute SystemRoot");
+  }
+  const nativeRoot = win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0");
+  const childEnvironment = Object.fromEntries(
+    Object.entries(environment).filter(([name]) => name.toLowerCase() !== "psmodulepath"),
+  );
+  return {
+    executable: win32.join(nativeRoot, "powershell.exe"),
+    environment: { ...childEnvironment, PSModulePath: win32.join(nativeRoot, "Modules") },
+  };
 }
 
 // Fixed script: paths travel on stdin as JSON, never as shell fragments.
@@ -84,12 +102,14 @@ try {
 
 export function runWindowsAcl(action: "volume" | "protect" | "verify", path: string): void {
   const script = Buffer.from(ACL_SCRIPT, "utf16le").toString("base64");
+  const command = windowsPowerShellCommand(process.env);
   const result = spawnSync(
-    "powershell.exe",
+    command.executable,
     ["-NoProfile", "-NonInteractive", "-EncodedCommand", script],
     {
       input: JSON.stringify({ action, path }),
       encoding: "utf8",
+      env: command.environment,
       windowsHide: true,
       timeout: 15_000,
       maxBuffer: 64 * 1024,
