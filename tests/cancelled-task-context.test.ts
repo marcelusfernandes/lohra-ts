@@ -148,6 +148,7 @@ describe("cancelled task context (#923)", () => {
     expect(rows.map((row) => row.kind)).toEqual(["unknown", "cancelled"]);
     expect(rows.map((row) => row.scope)).toEqual(["session:session-a", "session:session-a"]);
     expect(rows[1]?.message).toContain("Write the new partial report");
+    expect(rows[1]?.message).toContain("No assistant turn was committed");
     expect(rows[1]?.message).not.toContain("SYSTEM_PROMPT_SECRET");
     expect(rows[1]?.message).not.toContain("Tool dispatch");
 
@@ -215,7 +216,9 @@ describe("cancelled task context (#923)", () => {
     expect(rows[0]?.kind).toBe("cancelled");
     expect(message).toMatch(/returned[^\n]*write_file/i);
     expect(message).toMatch(/in flight[^\n]*terminal/i);
-    expect(message).toMatch(/unknown.*verif|verif.*unknown/i);
+    expect(message).toContain("outcome unknown");
+    expect(message).toContain("File side effects may already exist");
+    expect(message).not.toMatch(/verify state|do not automatically replay/i);
     expect(message).not.toContain("TOOL_ARGUMENT_SECRET");
     expect(message).not.toContain("TOOL_RESULT_SECRET");
     expect(message).not.toContain("SYSTEM_PROMPT_SECRET");

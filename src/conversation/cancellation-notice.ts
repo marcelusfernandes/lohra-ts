@@ -61,21 +61,24 @@ export function createCancellationNoticeTracker(
     },
     context(): string {
       const snapshot = atAbort ?? capture();
-      const details = [`Interrupted request: ${JSON.stringify(request || "(empty request)")}.`];
+      const details = [
+        `Turn status: cancelled (CONVERSATION_CANCELLED). Cancelled request (excerpt): ${JSON.stringify(request || "(empty request)")}.`,
+      ];
       if (snapshot.returnedCount > 0) {
         const extra = snapshot.returnedCount - snapshot.returned.length;
         details.push(
-          `Tool dispatch returned (success not guaranteed): ${snapshot.returned.map((name) => JSON.stringify(name)).join(", ")}${extra > 0 ? `, ${String(extra)} more omitted` : ""}.`,
+          `Tool dispatch returned before cancellation (success not assessed): ${snapshot.returned.map((name) => JSON.stringify(name)).join(", ")}${extra > 0 ? `, ${String(extra)} more omitted` : ""}.`,
         );
       }
       if (snapshot.inFlight.length > 0) {
         details.push(
-          `Tool dispatch in flight at cancellation (outcome unknown; verify): ${snapshot.inFlight.map((name) => JSON.stringify(name)).join(", ")}.`,
+          `Tool dispatch in flight when cancelled (outcome unknown): ${snapshot.inFlight.map((name) => JSON.stringify(name)).join(", ")}.`,
         );
       }
-      details.push(
-        "This turn was interrupted. Files already written may exist; verify state before continuing. Do not automatically replay actions.",
-      );
+      details.push("No assistant turn was committed.");
+      if (snapshot.returnedCount > 0 || snapshot.inFlight.length > 0) {
+        details.push("File side effects may already exist.");
+      }
       return details.join(" ");
     },
     dispose(): void {
