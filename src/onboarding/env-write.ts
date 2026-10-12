@@ -1,6 +1,7 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
+import { atomicWritePrivate0600 } from "../auth/json-file.js";
 import { parseEnvText } from "../config/env-file.js";
 
 const needsQuotes = [" ", "\t", "#", "'", '"'] as const;
@@ -9,6 +10,9 @@ export interface EnvWriteOperations {
   readonly writeText: (path: string, body: string) => void;
   readonly chmod600: (path: string) => void;
   readonly replace: (source: string, destination: string) => void;
+  readonly platform?: string;
+  readonly readText?: (path: string) => string;
+  readonly privateWrite?: (path: string, body: string) => void;
 }
 
 const operations: EnvWriteOperations = {
@@ -69,11 +73,13 @@ function render(text: string, updates: Readonly<Record<string, string>>): string
   return `${lines.join("\n")}\n`;
 }
 
-function read(path: string): string {
+function read(path: string, ops: EnvWriteOperations): string {
   try {
-    return readFileSync(path, "utf8");
-  } catch {
-    return "";
+    return (ops.readText ?? ((target) => readFileSync(target, "utf8")))(path);
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT")
+      return "";
+    throw new Error(`Could not read .env at ${path}`, { cause: error });
   }
 }
 
@@ -82,13 +88,24 @@ export function upsertEnvFile(
   updates: Readonly<Record<string, string>>,
   ops: EnvWriteOperations = operations,
 ): string[] {
-  const text = read(path);
+  const text = read(path, ops);
   const current = parseEnvText(text);
   const changed = Object.fromEntries(
     Object.entries(updates).filter(([key, value]) => current[key] !== value),
   );
   const keys = Object.keys(changed);
   if (keys.length === 0) return [];
+  if ((ops.platform ?? process.platform) === "win32") {
+    try {
+      (ops.privateWrite ?? atomicWritePrivate0600)(path, render(text, changed));
+    } catch (error) {
+      throw new Error(
+        `Could not save private .env at ${path} — check that the destination is a private fixed NTFS path accessible to your account`,
+        { cause: error },
+      );
+    }
+    return keys;
+  }
   mkdirSync(dirname(path), { recursive: true });
   const temporary = `${path}.${String(process.pid)}.tmp`;
   try {
