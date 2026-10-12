@@ -6,6 +6,7 @@ import {
   readFileSync,
   rmSync,
   unlinkSync,
+  writeFileSync,
   writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,6 +15,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { atomicWrite0600, type AtomicWriteOperations } from "../src/auth/json-file.js";
 import { acquireFileLease, type LeaseProtectionOperations } from "../src/auth/lease.js";
+import { refreshUnderLease } from "../src/auth/credentials.js";
+import { OAuthTokens } from "../src/auth/types.js";
 import type { WindowsFileProtection } from "../src/security/windows-file-protection.js";
 
 const roots: string[] = [];
@@ -31,7 +34,7 @@ function fakeProtection(events: string[]) {
   const owned = new Set<string>();
   const prepare = (
     path: string,
-    options?: { readonly exclusive?: boolean },
+    options?: { readonly exclusive?: boolean; readonly existing?: boolean },
   ): WindowsFileProtection => {
     events.push(`prepare:${path}:${options?.exclusive === true ? "exclusive" : "existing"}`);
     if (options?.exclusive === true || !existsSync(path)) {
@@ -152,11 +155,67 @@ describe("Windows auth integration through fake protection ports", () => {
       pid: 1,
       now: () => 2,
     };
-    expect(() => {
+    let caught: unknown;
+    try {
       atomicWrite0600(path, "new-fictional-token", operations);
-    }).toThrow(/protection and cleanup failed/);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain("check that the destination");
+    expect((caught as Error).cause).toBeInstanceOf(AggregateError);
+    expect(((caught as Error).cause as AggregateError).errors.map(String)).toEqual([
+      "Error: ACL denied",
+      "Error: cleanup denied",
+    ]);
     expect(readFileSync(path, "utf8")).toBe("old-fictional-token");
     expect(events).toEqual([`prepare:${path}:existing`]);
+  });
+
+  it("reports stage cleanup failure without replacing valid credentials", () => {
+    const home = root();
+    const path = join(home, "oauth.json");
+    writeFileSync(path, "old-fictional-token");
+    const prepare = fakeProtection([]);
+    const operations: AtomicWriteOperations = {
+      platform: "win32",
+      prepare: (target, options) => {
+        const guard = prepare(target, options);
+        if (options?.exclusive !== true) return guard;
+        return {
+          ...guard,
+          verifyBeforeWrite: () => {
+            throw new Error("stage ACL revoked");
+          },
+          removeOwned: () => {
+            throw new Error("stage cleanup denied");
+          },
+        };
+      },
+      mkdir: () => {},
+      open: openSync,
+      write: (descriptor, bytes, offset) => writeSync(descriptor, bytes, offset),
+      fsync: () => {},
+      close: closeSync,
+      rename: () => {
+        throw new Error("must not publish");
+      },
+      unlink: unlinkSync,
+      pid: 1,
+      now: () => 2,
+    };
+    let caught: unknown;
+    try {
+      atomicWrite0600(path, "new-fictional-token", operations);
+    } catch (error) {
+      caught = error;
+    }
+    expect((caught as Error).cause).toBeInstanceOf(AggregateError);
+    expect(((caught as Error).cause as AggregateError).errors.map(String)).toEqual([
+      "Error: stage ACL revoked",
+      "Error: stage cleanup denied",
+    ]);
+    expect(readFileSync(path, "utf8")).toBe("old-fictional-token");
   });
 
   it("acquires a protected lock exclusively and reports EEXIST as contention", () => {
@@ -175,5 +234,88 @@ describe("Windows auth integration through fake protection ports", () => {
     expect(events.slice(0, 2)).toEqual([`prepare:${path}:exclusive`, `before-write:${path}`]);
     expect(acquireFileLease(path, "holder-b", 10, 1_000, protection)).toBe(false);
     expect(readFileSync(path, "utf8")).toContain("holder-a");
+  });
+
+  it("reports failed release after a successful reread without leaking the token", async () => {
+    const home = root();
+    writeFileSync(
+      join(home, "oauth.json"),
+      JSON.stringify({
+        access_token: "fresh-fictional-token",
+        refresh_token: "fictional-refresh",
+        account_id: "fictional-account",
+        expires_at: 10_000,
+      }),
+    );
+    const events: string[] = [];
+    const prepare = fakeProtection(events);
+    const protection: LeaseProtectionOperations = {
+      platform: "win32",
+      prepare: (path, options) => {
+        if (options?.existing === true) throw new Error("ACL verification denied");
+        return prepare(path, options);
+      },
+    };
+    const own = new OAuthTokens("old-fictional-token", "old-refresh", "account", 900);
+    let caught: unknown;
+    try {
+      await refreshUnderLease(
+        home,
+        own,
+        1_000,
+        () => {
+          throw new Error("refresh should not be called");
+        },
+        protection,
+      );
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).name).toBe("TokenPersistError");
+    expect((caught as Error).cause).toEqual(new Error("ACL verification denied"));
+    expect((caught as Error).message).not.toContain("fresh-fictional-token");
+  });
+
+  it("retains the primary refresh fault alongside failed lock cleanup", async () => {
+    const home = root();
+    writeFileSync(
+      join(home, "oauth.json"),
+      JSON.stringify({
+        access_token: "stale-fictional-token",
+        refresh_token: "fictional-refresh",
+        account_id: "fictional-account",
+        expires_at: 900,
+      }),
+    );
+    const prepare = fakeProtection([]);
+    const protection: LeaseProtectionOperations = {
+      platform: "win32",
+      prepare: (path, options) => {
+        if (options?.existing === true) throw new Error("cleanup denied");
+        return prepare(path, options);
+      },
+    };
+    const own = new OAuthTokens("stale-fictional-token", "fictional-refresh", "account", 900);
+    let caught: unknown;
+    try {
+      await refreshUnderLease(
+        home,
+        own,
+        1_000,
+        () => Promise.reject(new Error("POST failed")),
+        protection,
+      );
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(AggregateError);
+    const aggregate = caught as AggregateError;
+    expect(aggregate.errors.map((error: Error) => error.message)).toEqual([
+      expect.stringContaining("could not refresh the login"),
+      "cleanup denied",
+    ]);
+    expect(aggregate.cause).toBe(aggregate.errors[0]);
+    expect(aggregate.message).not.toContain("stale-fictional-token");
   });
 });

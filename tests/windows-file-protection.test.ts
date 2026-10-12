@@ -82,6 +82,41 @@ describe("windows private destination", () => {
     expect(state.entries.get(destination)?.size).toBe(5n);
   });
 
+  it("requires an existing lock without creating an empty replacement", () => {
+    const state = fixture();
+    state.add(directory, "directory");
+    state.protectedPaths.add(directory);
+    expect(() =>
+      prepareWindowsPrivateDestination(destination, state.operations, { existing: true }),
+    ).toThrow(expect.objectContaining({ code: "ENOENT" }));
+    expect(state.entries.has(destination)).toBe(false);
+  });
+
+  it("never creates a directory while verifying an absent existing lock", () => {
+    const state = fixture();
+    expect(() =>
+      prepareWindowsPrivateDestination(destination, state.operations, { existing: true }),
+    ).toThrow(expect.objectContaining({ code: "ENOENT" }));
+    expect(state.events).toEqual(["volume"]);
+    expect(state.entries.size).toBe(0);
+  });
+
+  it("keeps EEXIST when another process wins the exclusive create race", () => {
+    const state = fixture();
+    state.add(directory, "directory");
+    state.protectedPaths.add(directory);
+    state.operations.createEmpty = (path) => {
+      state.add(path, "file");
+      state.protectedPaths.add(path);
+      throw Object.assign(new Error("already created by contender"), { code: "EEXIST" });
+    };
+    expect(() =>
+      prepareWindowsPrivateDestination(destination, state.operations, { exclusive: true }),
+    ).toThrow(expect.objectContaining({ code: "EEXIST" }));
+    expect(state.entries.has(destination)).toBe(true);
+    expect(state.events).not.toContain(`unlink:${destination}`);
+  });
+
   it("refuses to remove a replaced file or a preexisting destination", () => {
     const state = fixture();
     const guard = prepareWindowsPrivateDestination(destination, state.operations, {

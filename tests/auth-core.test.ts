@@ -100,6 +100,7 @@ describe("auth stores", () => {
     return {
       events,
       operations: {
+        platform: "linux",
         mkdir: () => {
           fail("mkdir");
         },

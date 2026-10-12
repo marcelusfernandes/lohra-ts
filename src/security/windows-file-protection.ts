@@ -68,6 +68,10 @@ function isMissing(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
+function isCode(error: unknown, code: string): boolean {
+  return error instanceof Error && "code" in error && error.code === code;
+}
+
 function validPath(path: string): string {
   if (!/^[A-Za-z]:\\/.test(path) || !win32.isAbsolute(path)) {
     throw new Error("Windows private destination requires an absolute local drive path");
@@ -179,9 +183,10 @@ function cleanOwn(
 export function prepareWindowsPrivateDestination(
   destination: string,
   operations: WindowsProtectionOperations = nativeOperations,
-  options: { readonly exclusive?: boolean } = {},
+  options: { readonly exclusive?: boolean; readonly existing?: boolean } = {},
 ): WindowsFileProtection {
-  if (options.exclusive) throw new Error("not implemented");
+  if (options.exclusive && options.existing)
+    throw new Error("Windows destination cannot require both exclusive and existing modes");
   const file = validPath(destination);
   if (operations.platform !== "win32") throw new Error("Windows file protection requires Windows");
   const directory = win32.dirname(file);
@@ -189,8 +194,14 @@ export function prepareWindowsPrivateDestination(
   operations.volume(file);
   const owned: Array<{ path: string; entry: Entry }> = [];
   let unverified: PendingCreation | null = null;
+  let verifiedContention = false;
   try {
     let dirEntry = inspectChain(directory, operations);
+    if (!dirEntry && options.existing) {
+      throw Object.assign(new Error(`Windows private destination is missing: ${file}`), {
+        code: "ENOENT",
+      });
+    }
     if (!dirEntry) {
       unverified = { path: directory, kind: "directory", creation: "attempted" };
       operations.mkdir(directory);
@@ -206,9 +217,27 @@ export function prepareWindowsPrivateDestination(
     checked(directory, "directory", dirEntry.identity, operations);
 
     let fileEntry = inspectChain(file, operations);
+    const createdFile = fileEntry === null;
+    if (options.existing && createdFile) {
+      throw Object.assign(new Error(`Windows private destination is missing: ${file}`), {
+        code: "ENOENT",
+      });
+    }
     if (!fileEntry) {
       unverified = { path: file, kind: "file", creation: "attempted" };
-      operations.createEmpty(file);
+      try {
+        operations.createEmpty(file);
+      } catch (error) {
+        if (options.exclusive && isCode(error, "EEXIST")) {
+          const contender = inspectChain(file, operations);
+          if (contender && contender.kind === "file") {
+            checked(file, "file", contender.identity, operations);
+            unverified = null;
+            verifiedContention = true;
+          }
+        }
+        throw error;
+      }
       unverified = { path: file, kind: "file", creation: "confirmed" };
       fileEntry = inspectChain(file, operations);
       if (!fileEntry) throw new Error(`Created Windows file cannot be inspected: ${file}`);
@@ -220,6 +249,12 @@ export function prepareWindowsPrivateDestination(
       throw new Error(`Windows private destination must be a regular file: ${file}`);
     }
     checked(file, "file", fileEntry.identity, operations);
+    if (options.exclusive && !createdFile) {
+      verifiedContention = true;
+      throw Object.assign(new Error(`Windows private destination already exists: ${file}`), {
+        code: "EEXIST",
+      });
+    }
     const directoryIdentity = dirEntry.identity;
     const destinationIdentity = fileEntry.identity;
     let stagedIdentity: string | null = null;
@@ -258,10 +293,13 @@ export function prepareWindowsPrivateDestination(
           throw new Error("Windows publication source still exists");
       },
       removeOwned: () => {
-        throw new Error("not implemented");
+        if (!createdFile) throw new Error(`Windows private destination is not owned: ${file}`);
+        checked(file, "file", destinationIdentity, operations);
+        operations.removeFile(file);
       },
     };
   } catch (error) {
+    if (verifiedContention) throw error;
     cleanOwn(owned, unverified, operations, error);
   }
 }
