@@ -1,11 +1,13 @@
 # #757 — cancelamento e retomada de tarefa real no Windows
 
 **Estado após as medições de 2026-10-11/12: PASS funcional restrito ao CLI
-instalado, no candidato `bd1181e` de [#923](https://github.com/marcelusfernandes/lohra-ts/issues/923).**
+instalado.** O candidato `bd1181e` de [#923](https://github.com/marcelusfernandes/lohra-ts/issues/923)
+foi integrado pela [PR #924](https://github.com/marcelusfernandes/lohra-ts/pull/924)
+no merge `d7ae0a9d6fa41054425d6ca3cdc208f113d5ab6f`.
 O Ctrl+C público interrompeu a operação local em 1.882 ms, preservou o arquivo
 concluído e devolveu um envelope explícito de cancelamento. Na retomada, a CLI
 apresentou o aviso registrado pelo Lohra antes da resposta do modelo; o JSON
-expôs `session_notices`. A integração de #923 ainda depende de PR e merge.
+expôs `session_notices`.
 [#920](https://github.com/marcelusfernandes/lohra-ts/issues/920) já foi integrada
 pela [PR #922](https://github.com/marcelusfernandes/lohra-ts/pull/922).
 
@@ -92,7 +94,7 @@ limite. A escolha posterior do owner foi apresentar o estado de cancelamento
 deterministicamente na CLI, separado da resposta do modelo. Esses ensaios
 permanecem registrados como falhas das abordagens anteriores.
 
-## Aceite funcional no candidato de #923
+## Aceite funcional com #923 integrado
 
 O candidato `bd1181e5e7ccc86b3d3c9a628bfd106061f2c990` executou **uma**
 nova sequência real com pacote instalado, provider Codex `gpt-6-sol`, Node 22
@@ -106,8 +108,9 @@ notice`, indicou o pedido cancelado, `write_file` retornado sem avaliação de
 sucesso, `terminal` em voo com resultado desconhecido e ausência de turno
 assistant concluído. A resposta do modelo veio **depois** e confirmou o
 conteúdo do arquivo. A saída humana terminou com código 0. A retomada JSON
-do mesmo evento retornou exit 0, `completed=true`, `error=null`, uma chamada
-`read_file` e `session_notices` com `id=5`, `kind="cancelled"` e o aviso da
+do mesmo evento retornou exit 0, `completed=true`, `error=null`, duas chamadas
+ao provider, uma chamada de ferramenta `read_file` e `session_notices` com
+`id=5`, `kind="cancelled"` e o aviso da
 sessão. Para conferir as duas apresentações do mesmo cancelamento, foi usado
 um snapshot isolado do estado da sessão e das configurações de autenticação;
 nem o snapshot nem seus dados foram copiados para este repositório. Não houve
@@ -126,8 +129,8 @@ Os critérios de ambiente, tarefa real, Ctrl+C com erro explícito dentro de
 operacional têm evidência positiva. O critério de estado compreensível passa
 **pela apresentação determinística da CLI no candidato #923**, não pela
 interpretação do modelo; portanto o resultado funcional restrito de #757 é
-**PASS**. A publicação da documentação e o fechamento da issue ainda dependem
-da integração de #923. A evidência cobre uma execução e a árvore de processo
+**PASS**. #923 já foi integrada; este relatório é a evidência para a PR
+documental de fechamento de #757. A evidência cobre uma execução e a árvore de processo
 própria observada; não estabelece garantia geral sobre todos os processos,
 portas ou chamadas remotas já enviadas.
 

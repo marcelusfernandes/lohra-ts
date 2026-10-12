@@ -1,7 +1,8 @@
 {
   "source": "cancel-notice-meta.json, cancel-notice.json, notice-resume-human.txt, notice-resume-human.exit.txt, notice-resume-json.json, notice-resume-json.exit.txt in external evidence directory",
   "candidate": "bd1181e5e7ccc86b3d3c9a628bfd106061f2c990",
-  "candidateStatus": "local; PR and merge pending",
+  "candidateStatus": "merged in PR #924",
+  "mergedAs": "d7ae0a9d6fa41054425d6ca3cdc208f113d5ab6f",
   "environment": {
     "platform": "Windows x64",
     "node": "22.23.2",
@@ -33,10 +34,11 @@
     "error": null,
     "toolCalls": ["read_file"],
     "terminalReplayed": false,
+    "apiCalls": 2,
     "sessionNotices": [{ "id": 5, "kind": "cancelled" }]
   },
   "sameCancelledEvent": true,
   "jsonValidation": "Independent state and auth-settings snapshot; no second cancellation operation; snapshot not copied",
-  "acceptance757": "PASS for installed CLI candidate and owner-selected deterministic notice presentation; #923 merge pending",
+  "acceptance757": "PASS for installed CLI and owner-selected deterministic notice presentation; #923 merged",
   "limits": "No TUI, remote-call cancellation, cross-identity protection, or broad Windows support claim"
 }

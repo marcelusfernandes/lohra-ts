@@ -60,7 +60,8 @@ sem conclusão natural, `entrega-aviso.txt` íntegro. A retomada humana exibiu
 o aviso primeiro e terminou com exit 0. A apresentação JSON do mesmo evento
 foi conferida a partir de snapshot independente do estado e de três arquivos
 de configuração de autenticação, sem segunda operação de cancelamento. Ela
-terminou com exit 0, `completed=true`, `error=null`, somente `read_file` e
+terminou com exit 0, `completed=true`, `error=null`, duas chamadas ao provider,
+somente `read_file` como ferramenta e
 `session_notices` contendo `id=5`, `kind=cancelled`. Nenhum conteúdo desse
 snapshot foi copiado. Projeção:
 [notice-observation.json](notice-observation.json). Fontes externas:
@@ -68,8 +69,9 @@ snapshot foi copiado. Projeção:
 `notice-resume-human.exit.txt`, `notice-resume-json.json` e
 `notice-resume-json.exit.txt`.
 
-O resultado funcional restrito de #757 é **PASS no CLI instalado candidato**,
-conforme a apresentação escolhida pelo owner; #923 ainda precisa de PR e
-merge. O resultado não depende de o modelo interpretar o aviso. Estas
+O resultado funcional restrito de #757 é **PASS no CLI instalado**,
+conforme a apresentação escolhida pelo owner. #923 foi integrada pela PR #924
+no merge `d7ae0a9d6fa41054425d6ca3cdc208f113d5ab6f`. O resultado não
+depende de o modelo interpretar o aviso. Estas
 execuções não medem TUI, cancelamento de chamada remota já enviada, cron,
 gateway amplo, compactação, crash/lease ou ACL entre identidades.
