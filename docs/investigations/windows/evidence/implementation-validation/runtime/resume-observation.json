@@ -1,0 +1,15 @@
+{
+  "source": "cancel-resume.json and read-only message-count query",
+  "sameSession": true,
+  "exit": 0,
+  "completed": true,
+  "error": null,
+  "toolCalls": ["read_file"],
+  "terminalReplayed": false,
+  "checkpointRead": true,
+  "resumeUserRows": 1,
+  "modelReportedInterruptionFromUserPrompt": true,
+  "modelReferencedEarlierFixtureError": true,
+  "persistedCancellationNotice": false,
+  "result": "Resume operational, but interrupted work lacked an explicit persisted cancellation state"
+}

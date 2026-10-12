@@ -1,0 +1,23 @@
+{
+  "source": "product-outcome.json and installed-package chat envelopes",
+  "date": "2026-10-11",
+  "platform": "Windows x64",
+  "node": "22.23.2",
+  "package": "lohra-ts 0.0.13",
+  "candidate": "247d6c246956ac3c52e9e91f0781ee3a69842fc0",
+  "mergedCommit": "7f99afd3499bd9cced0033c505625c5a85d80acd",
+  "provider": "Codex gpt-6-sol",
+  "doctor": { "exit": 0, "usable": true },
+  "task": {
+    "tools": ["read_file", "write_file", "terminal"],
+    "total": 124.5,
+    "units": 15,
+    "filesVerified": true
+  },
+  "continuity": {
+    "sameSessionRemembers": true,
+    "sameSessionReadFile": true,
+    "separateHomeHasNoCode": true
+  },
+  "scope": "Earlier #913 outcome reused; cancellation measured separately"
+}
