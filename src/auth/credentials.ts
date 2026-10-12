@@ -148,6 +148,18 @@ export async function refreshUnderLease(
         cleanupFailed = true;
       }
       if (cleanupFailed && failed) {
+        if (primaryFailure instanceof Error) {
+          const originalCause = primaryFailure.cause;
+          primaryFailure.cause =
+            originalCause === undefined
+              ? cleanupFailure
+              : new AggregateError(
+                  [originalCause, cleanupFailure],
+                  "login refresh cause and lease cleanup failed — check the private destination",
+                  { cause: originalCause },
+                );
+          throw primaryFailure;
+        }
         throw new AggregateError(
           [primaryFailure, cleanupFailure],
           "login refresh and lease cleanup failed — check the private destination",

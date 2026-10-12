@@ -11,13 +11,25 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { atomicWrite0600, type AtomicWriteOperations } from "../src/auth/json-file.js";
 import { acquireFileLease, type LeaseProtectionOperations } from "../src/auth/lease.js";
 import { refreshUnderLease } from "../src/auth/credentials.js";
 import { OAuthTokens } from "../src/auth/types.js";
 import type { WindowsFileProtection } from "../src/security/windows-file-protection.js";
+
+const injectedWrite = vi.hoisted(() => ({ armed: false }));
+vi.mock("../src/auth/store.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/auth/store.js")>();
+  return {
+    ...actual,
+    writeTokens: (...args: Parameters<typeof actual.writeTokens>) => {
+      if (injectedWrite.armed) throw new Error("injected EACCES");
+      actual.writeTokens(...args);
+    },
+  };
+});
 
 const roots: string[] = [];
 const root = (): string => {
@@ -27,6 +39,7 @@ const root = (): string => {
 };
 
 afterEach(() => {
+  injectedWrite.armed = false;
   for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true });
 });
 
@@ -349,13 +362,64 @@ describe("Windows auth integration through fake protection ports", () => {
     } catch (error) {
       caught = error;
     }
-    expect(caught).toBeInstanceOf(AggregateError);
-    const aggregate = caught as AggregateError;
-    expect(aggregate.errors.map((error: Error) => error.message)).toEqual([
-      expect.stringContaining("could not refresh the login"),
-      "cleanup denied",
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).name).toBe("RefreshFailedError");
+    expect((caught as Error).message).toContain("could not refresh the login");
+    expect((caught as Error).message).toContain("run `lohra auth login` again");
+    expect((caught as Error).cause).toEqual(new Error("cleanup denied"));
+    expect((caught as Error).message).not.toContain("stale-fictional-token");
+  });
+
+  it("keeps TokenPersistError and its guidance when saving and lock cleanup both fail", async () => {
+    const home = root();
+    writeFileSync(
+      join(home, "oauth.json"),
+      JSON.stringify({
+        access_token: "stale-fictional-token",
+        refresh_token: "fictional-refresh",
+        account_id: "fictional-account",
+        expires_at: 900,
+      }),
+    );
+    const prepare = fakeProtection([]);
+    const protection: LeaseProtectionOperations = {
+      platform: "win32",
+      prepare: (path, options) => {
+        if (options?.existing === true) throw new Error("cleanup denied");
+        return prepare(path, options);
+      },
+    };
+    injectedWrite.armed = true;
+    const own = new OAuthTokens("stale-fictional-token", "fictional-refresh", "account", 900);
+    let caught: unknown;
+    try {
+      await refreshUnderLease(
+        home,
+        own,
+        1_000,
+        () =>
+          Promise.resolve([
+            200,
+            {
+              access_token: "fresh-fictional-token",
+              refresh_token: "new-refresh",
+              expires_in: 3600,
+            },
+          ]),
+        protection,
+      );
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).name).toBe("TokenPersistError");
+    expect((caught as Error).message).toContain("check permissions/disk space");
+    expect((caught as Error).message).toContain("run `lohra auth login` again");
+    expect((caught as Error).cause).toBeInstanceOf(AggregateError);
+    expect(((caught as Error).cause as AggregateError).errors.map(String)).toEqual([
+      "Error: injected EACCES",
+      "Error: cleanup denied",
     ]);
-    expect(aggregate.cause).toBe(aggregate.errors[0]);
-    expect(aggregate.message).not.toContain("stale-fictional-token");
+    expect((caught as Error).message).not.toContain("fresh-fictional-token");
   });
 });
