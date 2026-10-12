@@ -9,6 +9,9 @@ export interface EnvWriteOperations {
   readonly writeText: (path: string, body: string) => void;
   readonly chmod600: (path: string) => void;
   readonly replace: (source: string, destination: string) => void;
+  readonly platform?: string;
+  readonly readText?: (path: string) => string;
+  readonly privateWrite?: (path: string, body: string) => void;
 }
 
 const operations: EnvWriteOperations = {
