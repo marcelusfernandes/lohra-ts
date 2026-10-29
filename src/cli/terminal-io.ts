@@ -108,8 +108,8 @@ export function terminalInput(
         const line = Buffer.from(bytes).toString("utf8");
         try {
           write("\n");
-        } catch {
-          fail("terminal prompt output failed");
+        } catch (cause) {
+          fail("terminal prompt output failed", cause);
           return;
         }
         bytes = [];
@@ -152,7 +152,7 @@ export function terminalInput(
       input.resume();
       write("Input is hidden. Press Enter to submit; Ctrl+C to cancel.\n");
     } catch (cause) {
-      fail("terminal input failed; configuration interrupted");
+      fail("terminal input failed; configuration interrupted", cause);
       throw new TerminalInputError("terminal input failed; configuration interrupted", { cause });
     }
   }

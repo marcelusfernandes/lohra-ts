@@ -1,7 +1,7 @@
 import { PassThrough } from "node:stream";
 import type { ReadStream } from "node:tty";
 import { describe, expect, it, vi } from "vitest";
-import { terminalInput } from "../src/cli/terminal-io.js";
+import { TerminalInputError, terminalInput } from "../src/cli/terminal-io.js";
 
 function fixture(tty = true) {
   const stream = Object.assign(new PassThrough(), {
@@ -15,6 +15,28 @@ function fixture(tty = true) {
 }
 
 describe("terminal input", () => {
+  it("preserves the newline writer failure cause without exposing its message", async () => {
+    const { stream, input: unused } = fixture();
+    unused.close();
+    const original = new Error("fixture-private-output-detail");
+    const input = terminalInput(stream as unknown as ReadStream, true, (value) => {
+      if (value === "\n") throw original;
+    });
+    try {
+      const pending = input.readLine();
+      stream.write("fixture-answer\r");
+      const failure: unknown = await pending.catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(TerminalInputError);
+      if (!(failure instanceof TerminalInputError)) throw new Error("expected terminal failure");
+      expect(failure.message).toBe("terminal prompt output failed");
+      expect(failure.cause === original).toBe(true);
+      expect(String(failure).includes(original.message)).toBe(false);
+      expect(stream.isRaw).toBe(false);
+      expect(stream.listenerCount("data")).toBe(0);
+    } finally {
+      input.close();
+    }
+  });
   it("settles pending input even when raw mode restoration fails", async () => {
     const { stream, input } = fixture();
     const pending = input.readLine();
