@@ -11,10 +11,72 @@ function fixture(tty = true) {
       this.isRaw = value;
     }),
   });
-  return { stream, input: terminalInput(stream as unknown as ReadStream, true) };
+  return { stream, input: terminalInput(stream as unknown as ReadStream, true, () => undefined) };
 }
 
 describe("terminal input", () => {
+  it("settles pending input even when raw mode restoration fails", async () => {
+    const { stream, input } = fixture();
+    const pending = input.readLine();
+    stream.setRawMode.mockImplementation(() => {
+      throw new Error("fixture restoration failure");
+    });
+    stream.emit("end");
+    await expect(pending).rejects.toThrow("restoration failed");
+    expect(stream.listenerCount("data")).toBe(0);
+    expect(() => {
+      input.close();
+    }).toThrow("restoration failed");
+  });
+  it("expires a human-scale five minute idle read and removes its timer", async () => {
+    vi.useFakeTimers();
+    const { stream, input } = fixture();
+    try {
+      const pending = input.readLine();
+      const rejection = expect(pending).rejects.toThrow("timed out");
+      await vi.advanceTimersByTimeAsync(300000);
+      await rejection;
+      expect(vi.getTimerCount()).toBe(0);
+      expect(stream.isRaw).toBe(false);
+    } finally {
+      input.close();
+      vi.useRealTimers();
+    }
+  });
+  it("rejects an EOF in the same chunk as a submitted answer", async () => {
+    const { stream, input } = fixture();
+    const pending = input.readLine();
+    stream.write("fixture\r\u0004");
+    await expect(pending).rejects.toThrow("EOF");
+    input.close();
+  });
+  it("handles SIGINT and restores the original raw mode", async () => {
+    const { stream, input } = fixture();
+    stream.isRaw = true;
+    // The adapter captured false at construction; a separate instance captures true.
+    input.close();
+    const rawInput = terminalInput(stream as unknown as ReadStream, true, () => undefined);
+    const before = process.listenerCount("SIGINT");
+    const pending = rawInput.readLine();
+    process.emit("SIGINT");
+    await expect(pending).rejects.toThrow("cancelled");
+    expect(process.listenerCount("SIGINT")).toBe(before);
+    expect(stream.isRaw).toBe(true);
+  });
+  it("handles Unicode backspace and bounds queued lines and session bytes", async () => {
+    const first = fixture();
+    const answer = first.input.readLine();
+    first.stream.write("cafétr\b\b\b\n");
+    expect(await answer).toBe("caf");
+    first.input.close();
+    for (const chunk of ["\n".repeat(35), "x".repeat(65537)]) {
+      const f = fixture();
+      const pending = f.input.readLine();
+      f.stream.write(chunk);
+      await expect(pending).rejects.toThrow("limit");
+      f.input.close();
+    }
+  });
   it("reads real stream bytes without echo and restores raw mode/listeners", async () => {
     const { stream, input } = fixture();
     const pending = input.readLine();
@@ -25,7 +87,7 @@ describe("terminal input", () => {
     expect(stream.isRaw).toBe(false);
     expect(stream.listenerCount("data")).toBe(0);
   });
-  it.each(["\u0003", "\u0004"])("rejects cancellation/EOF explicitly", async (byte) => {
+  it.each(["\u0003", "\u0004", "\u001a"])("rejects cancellation/EOF explicitly", async (byte) => {
     const { stream, input } = fixture();
     const pending = input.readLine();
     stream.write(byte);
