@@ -175,7 +175,7 @@ describe("wizard", () => {
     ).toBe(false);
   });
 
-  it("treats EOF and junk as the prompt default", () => {
+  it("treats blank injected answers and junk as the prompt default", async () => {
     let output = "";
     const empty = new Prompter(
       () => "",
@@ -183,24 +183,24 @@ describe("wizard", () => {
         output += text;
       },
     );
-    expect(empty.ask("provider", "anthropic")).toBe("anthropic");
-    expect(empty.confirm("configure?", false)).toBe(false);
+    expect(await empty.ask("provider", "anthropic")).toBe("anthropic");
+    expect(await empty.confirm("configure?", false)).toBe(false);
     const junk = new Prompter(
       () => "maybe",
       () => undefined,
     );
-    expect(junk.confirm("configure?", true)).toBe(true);
+    expect(await junk.confirm("configure?", true)).toBe(true);
     expect(output).toContain("provider [anthropic]: ");
   });
 
-  it("writes a partial env and marker when credential input reaches EOF", () => {
+  it("writes a partial env and marker when injected credential input is blank", async () => {
     const base = root();
     const home = join(base, "profile");
     const answers = ["anthropic"];
     let err = "";
     let out = "";
     const environment: Record<string, string> = {};
-    const result = runInit({
+    const result = await runInit({
       snapshot: snapshot(home),
       base,
       home,
@@ -224,11 +224,11 @@ describe("wizard", () => {
     expect(err).toContain("ANTHROPIC_API_KEY (paste it, or Enter to skip) [skip]: ");
   });
 
-  it("never prints a python line — the runtime does not embed or call Python (issue #696)", () => {
+  it("never prints a python line — the runtime does not embed or call Python (issue #696)", async () => {
     const base = root();
     const home = join(base, "profile");
     let out = "";
-    const result = runInit({
+    const result = await runInit({
       snapshot: snapshot(home),
       base,
       home,

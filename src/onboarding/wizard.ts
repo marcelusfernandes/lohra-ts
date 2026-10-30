@@ -62,34 +62,30 @@ export interface OnboardingSnapshot {
 
 export class Prompter {
   constructor(
-    private readonly reader: () => string,
+    private readonly reader: () => string | Promise<string>,
     private readonly writer: (text: string) => void,
   ) {}
 
-  private read(): string {
-    try {
-      return (this.reader() || "").trim();
-    } catch {
-      return "";
-    }
+  private async read(): Promise<string> {
+    return ((await this.reader()) || "").trim();
   }
 
-  ask(label: string, defaultValue = ""): string {
+  async ask(label: string, defaultValue = ""): Promise<string> {
     try {
       this.writer(`${label} [${defaultValue || "skip"}]: `);
     } catch {
       // A broken prompt stream does not make onboarding fatal.
     }
-    return this.read() || defaultValue;
+    return (await this.read()) || defaultValue;
   }
 
-  confirm(label: string, defaultValue: boolean): boolean {
+  async confirm(label: string, defaultValue: boolean): Promise<boolean> {
     try {
       this.writer(`${label} [${defaultValue ? "Y/n" : "y/N"}]: `);
     } catch {
       // A broken prompt stream does not make onboarding fatal.
     }
-    const answer = this.read().toLowerCase();
+    const answer = (await this.read()).toLowerCase();
     if (answer === "y" || answer === "yes") return true;
     if (answer === "n" || answer === "no") return false;
     return defaultValue;
@@ -230,17 +226,17 @@ export function evaluateOnboarding(
   return [true, `ready — provider ${provider}${model ? `, model ${model}` : ""}.`];
 }
 
-export function runConfigure(options: {
+export async function runConfigure(options: {
   readonly snapshot: OnboardingSnapshot;
   readonly prompter: Prompter;
   readonly base: string;
   readonly environment: Record<string, string>;
   readonly writeOut: (text: string) => void;
-}): string[] {
+}): Promise<string[]> {
   const updates: Record<string, string> = {};
   const suggested =
     options.snapshot.detectedProvider || (options.snapshot.ollama.alive ? "ollama" : "");
-  let chosen = options.prompter.ask(
+  let chosen = await options.prompter.ask(
     `provider (${options.snapshot.providerNames.join("/")})`,
     suggested,
   );
@@ -256,30 +252,30 @@ export function runConfigure(options: {
     !profile.envVars.some((name) => options.environment[name])
   ) {
     const variable = profile.envVars[0] as string;
-    const key = options.prompter.ask(`${variable} (paste it, or Enter to skip)`);
+    const key = await options.prompter.ask(`${variable} (paste it, or Enter to skip)`);
     if (key) updates[variable] = key;
   } else if (profile !== null) {
     const current =
       (options.environment.LOHRA_MODEL ?? "").trim() || profile.fallbackModels[0] || "";
     const suggestedModel =
       current || (chosen === "ollama" ? (options.snapshot.ollama.models[0] ?? "") : "");
-    const model = options.prompter.ask("default model", suggestedModel);
+    const model = await options.prompter.ask("default model", suggestedModel);
     if (model && model !== current) updates.LOHRA_MODEL = model;
   }
+  const present = options.snapshot.harnesses.filter(
+    (harness) => harness.installed || harness.homePresent,
+  );
+  const exportKit =
+    present.length > 0 &&
+    (await options.prompter.confirm(
+      `export the use-lohra kit to ${present.map((harness) => harness.name).join(", ")}?`,
+      false,
+    ));
   const written = Object.keys(updates).length
     ? upsertEnvFile(join(options.base, ".env"), updates)
     : [];
   Object.assign(options.environment, updates);
-  const present = options.snapshot.harnesses.filter(
-    (harness) => harness.installed || harness.homePresent,
-  );
-  if (
-    present.length > 0 &&
-    options.prompter.confirm(
-      `export the use-lohra kit to ${present.map((harness) => harness.name).join(", ")}?`,
-      false,
-    )
-  ) {
+  if (exportKit) {
     for (const harness of present) {
       const destination = join(harness.home, "skills");
       try {
@@ -295,7 +291,7 @@ export function runConfigure(options: {
   return written;
 }
 
-export function runInit(options: {
+export async function runInit(options: {
   readonly snapshot: OnboardingSnapshot;
   readonly base: string;
   readonly home: string;
@@ -304,13 +300,13 @@ export function runInit(options: {
   readonly isTty: boolean;
   readonly prompter: Prompter;
   readonly writeOut: (text: string) => void;
-}): number {
+}): Promise<number> {
   options.writeOut(renderOnboardingReport(options.snapshot));
   if (options.noInput || !options.snapshot.interactive || !options.isTty) {
     options.writeOut(`${evaluateOnboarding(options.snapshot, options.environment)[1]}\n`);
     return 0;
   }
-  runConfigure(options);
+  await runConfigure(options);
   writeMarker(options.home);
   return 0;
 }

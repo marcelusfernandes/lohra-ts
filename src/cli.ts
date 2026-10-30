@@ -4,6 +4,8 @@ import { join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import { TerminalInputError, terminalInput } from "./cli/terminal-io.js";
+
 import { VERSION } from "./version.js";
 import { resolveCodexHome, resolvePaths } from "./config/paths.js";
 import { applyEnvFile } from "./config/env-file.js";
@@ -173,7 +175,7 @@ export interface CliIo {
   readonly stderr: (value: string) => void;
   readonly probeOllama?: () => Promise<boolean | OllamaStatus>;
   readonly isTty?: boolean;
-  readonly readLine?: () => string;
+  readonly readLine?: () => string | Promise<string>;
   readonly oauthPost?: OAuthPost;
   readonly cwd?: string;
 }
@@ -187,6 +189,7 @@ function defaultIo(): CliIo {
     ),
     stdout: (value) => process.stdout.write(value),
     stderr: (value) => process.stderr.write(value),
+    isTty: process.stdin.isTTY && process.stderr.isTTY,
   };
 }
 
@@ -477,16 +480,27 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
       presentProviderVars: doctor.providers.flatMap((provider) => provider.present_vars),
       subscriptionActive: doctor.subscription_active,
     };
-    return runInit({
-      snapshot: onboarding,
-      base: paths.base,
-      home: paths.home,
-      environment,
-      noInput: parsed.options.has("--no-input"),
-      isTty: io.isTty ?? false,
-      prompter: new Prompter(io.readLine ?? (() => ""), io.stderr),
-      writeOut: io.stdout,
-    });
+    const terminal = supplied === undefined ? terminalInput() : undefined;
+    try {
+      if (!parsed.options.has("--no-input")) terminal?.start();
+      return await runInit({
+        snapshot: onboarding,
+        base: paths.base,
+        home: paths.home,
+        environment,
+        noInput: parsed.options.has("--no-input"),
+        isTty: io.isTty ?? terminal?.isTty ?? false,
+        prompter: new Prompter(io.readLine ?? terminal?.readLine ?? (() => ""), io.stderr),
+        writeOut: io.stdout,
+      });
+    } catch (error) {
+      if (!(error instanceof TerminalInputError)) throw error;
+      io.stderr(`${error.message}\n`);
+      io.stderr("init interrupted; configuration was not completed. Re-run lohra init.\n");
+      return 2;
+    } finally {
+      terminal?.close();
+    }
   }
   if (command === "auth") {
     const action = parsed.positionals[0] as string;
