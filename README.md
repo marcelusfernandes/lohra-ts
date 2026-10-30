@@ -53,23 +53,11 @@ Atualizar uma instalação existente: `lohra update` (ver "Self-update"
 abaixo). Notas de cada versão: [`CHANGELOG.md`](CHANGELOG.md); como uma
 release é cortada: [`docs/release.md`](docs/release.md).
 
-### Configuração inicial
-
-Após instalar, execute em um terminal interativo:
-
-```bash
-lohra init
-```
-
-Com stdin e stderr em TTY, o assistente pede o provider e, quando necessária,
-a chave de API. A entrada fica oculta; pressione Enter para enviar cada resposta.
-Se a chave já estiver configurada, o assistente oferece o modelo padrão;
-para ajustar o modelo após salvar uma chave nova, execute `lohra init` novamente.
-
-`lohra init --no-input` e stdin sem TTY apenas exibem o relatório, sem perguntas
-nem gravação de configuração. Ctrl+C ou EOF interrompem explicitamente a sessão,
-sem anunciar configuração concluída. No Windows, a gravação recusa um home
-preexistente com proteção incompatível; o comando não migra suas permissões.
+Após instalar, `lohra init` com stdin/stderr em TTY pede provider/chave com entrada oculta.
+Com chave configurada, oferece modelo; rode novamente após salvar uma chave nova.
+`lohra init --no-input` ou stdin sem TTY só exibem relatório, sem gravar.
+Ctrl+C ou EOF interrompem explicitamente, sem anunciar conclusão.
+No Windows, homes preexistentes incompatíveis são recusados, sem migração.
 
 ## Biblioteca headless
 
