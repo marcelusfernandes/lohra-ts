@@ -53,6 +53,12 @@ Atualizar uma instalação existente: `lohra update` (ver "Self-update"
 abaixo). Notas de cada versão: [`CHANGELOG.md`](CHANGELOG.md); como uma
 release é cortada: [`docs/release.md`](docs/release.md).
 
+Após instalar, `lohra init` com stdin/stderr em TTY pede provider/chave com entrada oculta.
+Com chave configurada, oferece modelo; rode novamente após salvar uma chave nova.
+`lohra init --no-input` ou stdin sem TTY só exibem relatório, sem gravar.
+Ctrl+C ou EOF interrompem explicitamente, sem anunciar conclusão.
+No Windows, homes preexistentes incompatíveis são recusados, sem migração.
+
 ## Biblioteca headless
 
 A entrada `import "lohra-ts"` expõe somente `ConversationRuntime`,
