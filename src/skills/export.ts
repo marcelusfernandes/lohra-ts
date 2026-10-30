@@ -5,13 +5,13 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../../assets/skills", import.meta.url));
 
 export function listExportable(): string[] {
-  return existsSync(join(root, "use-lohra", "SKILL.md")) ? ["use-lohra"] : [];
+  return ["use-lohra", "use-lohra-ts"].filter((name) => existsSync(join(root, name, "SKILL.md")));
 }
 
 export function readExportable(name: string): string {
   const path = join(root, name, "SKILL.md");
   if (!existsSync(path)) {
-    throw new Error(`no exportable skill '${name}' — available: ['use-lohra']`);
+    throw new Error(`no exportable skill '${name}' — available: ['use-lohra', 'use-lohra-ts']`);
   }
   return readFileSync(path, "utf8");
 }
