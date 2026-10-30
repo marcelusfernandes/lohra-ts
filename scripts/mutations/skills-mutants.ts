@@ -197,7 +197,8 @@ export const skillsMutants: readonly Mutant[] = [
     edits: [
       {
         file: exportModule,
-        before: "    throw new Error(`no exportable skill '${name}' — available: ['use-lohra']`);",
+        before:
+          "    throw new Error(`no exportable skill '${name}' — available: ['use-lohra', 'use-lohra-ts']`);",
         after: "    throw new Error(`no exportable skill '${name}'`);",
       },
     ],
