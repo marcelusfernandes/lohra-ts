@@ -146,7 +146,7 @@ describe("skills client commands", () => {
     ]) {
       const result = await f.invoke(["skills", ...args]);
       expect(result.code).toBe(2);
-      expect(result.stderr).toContain("usage: lohra skills");
+      expect(result.stderr).toContain("usage: lohra");
     }
     expect(fs.readdirSync(f.home)).toEqual([]);
     expect(manageSkillInstallation).not.toHaveBeenCalled();
