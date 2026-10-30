@@ -194,6 +194,7 @@ export const LEVELS = {
   profile: level("profile"),
   auth: level("auth"),
   skill: level("skill"),
+  skills: level("skills"),
   skillExport: level("skill export"),
   workflow: level("workflow"),
   workflowList: level("workflow list"),

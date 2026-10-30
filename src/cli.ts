@@ -18,6 +18,7 @@ import { runServe } from "./commands/serve.js";
 import { runWorkflowCommand } from "./commands/workflow.js";
 import { runDashboard } from "./commands/dashboard.js";
 import { runUpdate } from "./commands/update.js";
+import { runSkills } from "./commands/skills.js";
 import { readCodexModel } from "./auth/codex.js";
 import { subscriptionActive } from "./auth/credentials.js";
 import type { OAuthPost } from "./auth/oauth.js";
@@ -91,6 +92,7 @@ const commands = [
   "auth",
   "skill",
   "update",
+  "skills",
 ] as const;
 
 const SPEC_BY_COMMAND: Readonly<
@@ -331,6 +333,8 @@ export async function runCli(argv: readonly string[], supplied?: CliIo): Promise
     return 0;
   }
   const command = argv[0] as string;
+  // Global skill management is independent of Lohra profiles, auth and providers.
+  if (command === "skills") return runSkills(argv.slice(1), io);
   if (
     command !== "doctor" &&
     command !== "models" &&
