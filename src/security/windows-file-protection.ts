@@ -211,13 +211,59 @@ function cleanOwn(
   throw primary;
 }
 
+/**
+ * Creates the Lohra home or profile directory already protected, so the first
+ * credential written there finds a directory that passes verification. Each
+ * missing level (top-down) is created, protected and verified before the next
+ * one. A level that already exists is never inspected for ACL nor modified
+ * (ADR 0006): the sensitive write verifies it and refuses an incompatible one.
+ * On failure only what this call created is removed, and the primary cause is
+ * kept. Path-based like the rest of this module: concurrent replacement still
+ * requires the caller-held lease/fence.
+ */
 export function ensureWindowsPrivateDirectory(
   directory: string,
   operations: WindowsProtectionOperations = nativeOperations,
 ): void {
-  void directory;
-  void operations;
-  throw new Error("not implemented: ensureWindowsPrivateDirectory");
+  if (operations.platform !== "win32") throw new Error("Windows file protection requires Windows");
+  const target = win32.resolve(directory);
+  if (operations.inspect(target)) return;
+  validPath(target);
+  operations.volume(target);
+  const owned: Array<{ path: string; entry: Entry }> = [];
+  let unverified: PendingCreation | null = null;
+  try {
+    const root = win32.parse(target).root;
+    let cursor = root;
+    for (const part of target.slice(root.length).split("\\")) {
+      cursor = win32.join(cursor, part);
+      if (inspectChain(cursor, operations)) continue;
+      unverified = { path: cursor, kind: "directory", creation: "attempted" };
+      try {
+        operations.mkdir(cursor);
+      } catch (error) {
+        if (!isCode(error, "EEXIST")) throw error;
+        // Another process created it first: not ours, never protect or remove.
+        unverified = null;
+        continue;
+      }
+      unverified = { path: cursor, kind: "directory", creation: "confirmed" };
+      const created = inspectChain(cursor, operations);
+      if (!created) throw new Error(`Created Windows directory cannot be inspected: ${cursor}`);
+      owned.push({ path: cursor, entry: created });
+      unverified = null;
+      operations.protect(cursor);
+      checked(cursor, "directory", created.identity, operations);
+    }
+  } catch (error) {
+    try {
+      cleanOwn(owned, unverified, operations, error);
+    } catch (failure) {
+      throw new Error(`Could not create a private Windows directory at ${target}`, {
+        cause: failure,
+      });
+    }
+  }
 }
 
 /**

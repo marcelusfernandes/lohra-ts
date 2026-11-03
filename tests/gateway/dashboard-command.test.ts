@@ -158,7 +158,10 @@ describe("runDashboard: preference=subscription inativa honra route.error, igual
   // devolve { mode: "api_key", error: PREFER_SUB_ERROR } (credentials.ts:157),
   // o mesmo estado que faz `chat` sair 2 (chat.ts:157).
   function inactiveSubscriptionPreferenceHome(): string {
-    const home = tempHome();
+    // O Lohra cria o home ao gravar a preferência (no Windows, já protegido):
+    // um filho inexistente do mkdtemp, não o diretório preexistente com ACL
+    // herdada que a ADR 0006 manda recusar.
+    const home = join(tempHome(), "home");
     setPreference(home, "subscription");
     return home;
   }

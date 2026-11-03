@@ -1,6 +1,7 @@
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   statSync,
@@ -67,10 +68,21 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 const roots: string[] = [];
+// Home que o Lohra cria: um filho inexistente do mkdtemp. No Windows, gravar
+// credencial num diretório preexistente com ACL herdada é recusado (ADR 0006);
+// o home criado pelo próprio escritor já nasce protegido.
 const root = (): string => {
   const value = mkdtempSync(join(tmpdir(), "lohra-auth-test-"));
   roots.push(value);
-  return value;
+  return join(value, "home");
+};
+
+// O Lohra cria o home e o lock ao adquirir a lease; o conteúdo é esvaziado no
+// lugar (a ACL protegida do arquivo permanece), simulando a janela entre o
+// open("wx") e a escrita do registro.
+const plantEmptyLock = (lockPath: string): void => {
+  expect(acquireFileLease(lockPath, "seed", 60)).toBe(true);
+  writeFileSync(lockPath, "");
 };
 
 afterEach(() => {
@@ -82,6 +94,16 @@ afterEach(() => {
   for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true });
   vi.unstubAllGlobals();
 });
+
+// No Windows o EIO injetado chega como causa do erro que o escritor privado
+// lança ("Could not save private credentials"), não na mensagem dele.
+const causeChain = (error: unknown): string => {
+  const messages: string[] = [];
+  for (let cursor = error; cursor instanceof Error; cursor = cursor.cause) {
+    messages.push(cursor.message);
+  }
+  return messages.join("\n");
+};
 
 const jwt = (payload: object): string => {
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -171,6 +193,9 @@ describe("auth stores", () => {
   it("fails closed and preserves unknown fields while writing mode 0600", () => {
     const home = root();
     expect(readConfig(home)).toBeNull();
+    // O Lohra cria o home e o auth.json; o conteúdo com campos desconhecidos é
+    // trocado no lugar, sem alterar a ACL protegida do arquivo.
+    writeConfig(home, { authMode: "api_key", acknowledgedTosRisk: false, preference: "auto" });
     writeFileSync(
       join(home, "auth.json"),
       '{"neighbor":{"x":1},"openai":{"future":"keep","preference":"api_key"}}',
@@ -191,11 +216,15 @@ describe("auth stores", () => {
     >;
     expect(raw.neighbor).toEqual({ x: 1 });
     expect(raw.openai?.future).toBe("keep");
-    expect(statSync(join(home, "auth.json")).mode & 0o777).toBe(0o600);
+    // No Windows o modo POSIX não prova nada; a ACL é verificada pelo escritor.
+    if (process.platform !== "win32") {
+      expect(statSync(join(home, "auth.json")).mode & 0o777).toBe(0o600);
+    }
   });
 
   it("keeps mode and active independent and preference case-sensitive", () => {
     const home = root();
+    mkdirSync(home);
     writeFileSync(
       join(home, "auth.json"),
       '{"openai":{"auth_mode":"subscription","acknowledged_tos_risk":"true","preference":"AUTO"}}',
@@ -221,7 +250,9 @@ describe("auth stores", () => {
       expiresAt: 123,
     });
     expect(readTokens(home)).toMatchObject({ accessToken: "access-dummy", expiresAt: 123 });
-    expect(statSync(join(home, "oauth.json")).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect(statSync(join(home, "oauth.json")).mode & 0o777).toBe(0o600);
+    }
   });
 });
 
@@ -458,7 +489,7 @@ describe("oauth and credentials", () => {
       expect(error.message).not.toContain("old-access");
       expect(error.message).not.toContain("new-access");
       expect(error.message).not.toContain("new-refresh");
-      if (failure === "injected") expect(error.message).toContain("EIO");
+      if (failure === "injected") expect(causeChain(error)).toContain("EIO");
       // The rotated token is lost when chat exits; recovery is auth login.
       expect(error.message).toContain(tokenPath(home));
       expect(error.message).toContain("check permissions/disk space");
@@ -559,7 +590,7 @@ describe("lease fail-closed com lock ilegível (#356)", () => {
     const lockPath = join(home, "oauth.json.lock");
     // Simula a janela: o arquivo existe (como logo depois do `open("wx")`),
     // mas o conteúdo ainda não foi escrito.
-    writeFileSync(lockPath, "");
+    plantEmptyLock(lockPath);
     expect(acquireFileLease(lockPath, "holder-b", 5)).toBe(false);
     // Passado o TTL (recuando o mtime do próprio arquivo, não o relógio do
     // teste — é o único relógio que um lock ilegível tem), a lease órfã
@@ -656,13 +687,15 @@ describe("ramos de parada sem teste (#356)", () => {
   // TTL por `mtime` -- exatamente o fail-open que o fail-closed do
   // `acquireFileLease` fecha do outro lado.
   it("com lock ilegível persistente, o perdedor espera o TTL do mtime em vez de voltar imediatamente", async () => {
+    const home = root();
+    const lockPath = join(home, "oauth.json.lock");
+    // Lock vazio/ilegível: mtime = "agora". Criado antes dos timers falsos,
+    // porque criar o home protegido no Windows leva segundos reais e o relógio
+    // falso, parado, ficaria atrás do mtime (useFakeTimers preserva a hora real
+    // como ponto de partida).
+    plantEmptyLock(lockPath);
     vi.useFakeTimers();
     try {
-      const home = root();
-      const lockPath = join(home, "oauth.json.lock");
-      // Lock vazio/ilegível: mtime = "agora" no relógio falso (useFakeTimers
-      // preserva a hora real como ponto de partida).
-      writeFileSync(lockPath, "");
       const sleep = vi.fn((ms: number) => {
         vi.advanceTimersByTime(ms);
         return Promise.resolve();
@@ -778,7 +811,7 @@ describe("ramos de parada sem teste (#356)", () => {
       expect(error.name).toBe("TokenPersistError");
       expect(error.name).not.toBe("RefreshFailedError");
       expect(error.message).not.toContain("old-access");
-      if (failure === "injected") expect(error.message).toContain("EIO");
+      if (failure === "injected") expect(causeChain(error)).toContain("EIO");
     }
   });
 });
