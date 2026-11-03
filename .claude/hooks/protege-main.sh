@@ -34,6 +34,11 @@
 # hook OU escritas no próprio comando, ex.: `LOHRA_PERMITE_PUSH_MAIN=1 git push`):
 #   LOHRA_PERMITE_PUSH_MAIN=1   libera o item 2 (nunca o 1)
 #   LOHRA_MERGE_LIVRE=1         libera o item 6 (nunca o 4 nem o 5)
+#   LOHRA_MERGE_AUTORIZADO=<n>  libera só os checks não verdes do item 6, e só para
+#                               `gh pr merge <n>` com o número exato; a label, a PR
+#                               sem checks e os itens 4/5 continuam negados (#944).
+#                               Uso: OK explícito do owner para aquela PR, citado no
+#                               comentário de merge.
 #
 # LIMITE DECLARADO (rodada 3, PR #38): o hook lê comandos em POSIÇÃO DE COMANDO —
 # início, ou depois de ; | & && || ( ) { } crase e quebra de linha — com os
@@ -104,6 +109,9 @@ PM_PAYLOAD="$payload" node -e '
   const valvula = (nome) => process.env[nome] === "1" || new RegExp("(?:^|[\\s;&|(){}`])" + nome + "=1(?=\\s)").test(cmd);
   const PERMITE_MAIN = valvula("LOHRA_PERMITE_PUSH_MAIN");
   const MERGE_LIVRE = valvula("LOHRA_MERGE_LIVRE");
+  // Válvula por PR (#944): o número escrito no comando prevalece sobre o do ambiente.
+  const mAutorizado = cmd.match(/(?:^|[\s;&|(){}`])LOHRA_MERGE_AUTORIZADO=(\S*)(?=\s)/);
+  const MERGE_AUTORIZADO = mAutorizado ? mAutorizado[1] : String(process.env.LOHRA_MERGE_AUTORIZADO || "");
 
   // Segmentos em posição de comando (ver LIMITE DECLARADO no cabeçalho).
   const PALAVRAS = /^(?:(?:if|elif|while|until|then|do|else|!)\s+)*/;
@@ -174,7 +182,13 @@ PM_PAYLOAD="$payload" node -e '
       if (!Array.isArray(lista)) negar("não consegui ler os checks da PR (" + (checks.err || "sem saída").trim().slice(0, 160) + ").");
       if (lista.length === 0) negar("a PR não tem nenhum check registrado; sem CI não há merge autônomo. (LOHRA_MERGE_LIVRE=1 só para bootstrap.)");
       const ruins = lista.filter((c) => !["SUCCESS", "SKIPPED", "NEUTRAL"].includes(String(c.state).toUpperCase()));
-      if (ruins.length) negar("checks não verdes: " + ruins.map((c) => c.name + "=" + c.state).join(", ") + ".");
+      if (ruins.length) {
+        const naoVerdes = ruins.map((c) => c.name + "=" + c.state).join(", ");
+        if (!MERGE_AUTORIZADO) negar("checks não verdes: " + naoVerdes + ".");
+        if (!/^\d+$/.test(alvo) || alvo !== MERGE_AUTORIZADO)
+          negar("checks não verdes: " + naoVerdes + "; LOHRA_MERGE_AUTORIZADO=" + MERGE_AUTORIZADO + " vale só para a PR nomeada no gh pr merge (aqui: " + (alvo || "nenhuma") + ").");
+        process.stderr.write("protege-main: merge da PR #" + alvo + " autorizado pelo owner (LOHRA_MERGE_AUTORIZADO) com checks não verdes: " + naoVerdes + "; os obrigatórios seguem com o ruleset.\n");
+      }
       const argsView = ["gh", "pr", "view", ...ref, ...repo, "--json", "labels,reviewDecision,files,changedFiles"];
       registrarArgs(argsView);
       const viewSeam = seam("VIEW_JSON");
