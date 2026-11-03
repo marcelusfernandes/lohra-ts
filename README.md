@@ -307,7 +307,8 @@ job. Quando reprovam:
 Os comandos top-level públicos, na ordem exibida pelo help, são:
 
 `init`, `doctor`, `chat`, `dashboard`, `serve`, `cron`, `workflow`, `models`,
-`tiers`, `profile`, `auth`, `skill` e `update`.
+`tiers`, `profile`, `auth`, `skill`, `skills` e `update`.
+Gestão global: [`skills add/remove`](docs/skills-management.md).
 
 Exemplos:
 

@@ -151,6 +151,15 @@ export const SKILL_EXPORT_SPEC = spec(
   [{ name: "name", required: true }],
 );
 
+/** Global integrations: no Lohra profile/provider flags or credential loading. */
+export const SKILLS_SPEC = spec(
+  [],
+  [
+    { name: "action", required: true, choices: ["add", "remove"] },
+    { name: "client", required: true },
+  ],
+);
+
 // `"notices"` is APPENDED last, never inserted earlier: the invalid-choice
 // error text is built by joining this array (`arg-validation.ts`'s
 // `invalidChoice` case), and `tests/workflow-audit-live.test.ts`'s
@@ -265,6 +274,7 @@ export const COMMAND_SUMMARY: Readonly<Record<string, string>> = {
   profile: "list or create named profiles",
   auth: "manage authentication for the current profile",
   skill: "export a bundled skill to a directory",
+  skills: "add/update or remove the managed Lohra skill for a client",
   update: "check or fast-forward the installed Lohra git checkout",
 };
 
@@ -301,6 +311,10 @@ export const SUBCOMMAND_HELP = {
     login: "start the OAuth login flow",
     logout: "clear stored OAuth credentials",
     prefer: "set the preferred auth route",
+  },
+  skills: {
+    add: "install or update the bundled TypeScript kit for a client",
+    remove: "remove only the intact managed Lohra installation",
   },
   skill: {
     export: "write a bundled skill's files to a directory",

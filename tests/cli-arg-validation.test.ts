@@ -206,7 +206,7 @@ describe("runCli — the usage + `lohra: error:` molde, exit 2 (AC: one test per
     expect(result.code).toBe(2);
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe(
-      `${TOP_LEVEL_USAGE}lohra: error: unknown command "nope"; available commands: init, doctor, chat, dashboard, serve, cron, workflow, models, tiers, profile, auth, skill, update\n`,
+      `${TOP_LEVEL_USAGE}lohra: error: unknown command "nope"; available commands: init, doctor, chat, dashboard, serve, cron, workflow, models, tiers, profile, auth, skill, update, skills\n`,
     );
   });
 
@@ -265,7 +265,7 @@ describe("runCli — byte-exact against these captures", () => {
       label: "lohra --profile foo (unknown command 'foo', not unexpected --profile)",
       argv: ["--profile", "foo"],
       code: 2,
-      stderr: `${TOP_LEVEL_USAGE}lohra: error: unknown command "foo"; available commands: init, doctor, chat, dashboard, serve, cron, workflow, models, tiers, profile, auth, skill, update\n`,
+      stderr: `${TOP_LEVEL_USAGE}lohra: error: unknown command "foo"; available commands: init, doctor, chat, dashboard, serve, cron, workflow, models, tiers, profile, auth, skill, update, skills\n`,
     },
     {
       label: "tiers --frobnicate (required tiers_cmd, tiers-level usage)",
@@ -450,6 +450,7 @@ describe("--help — exit 0, lists options with a description (AC)", () => {
       "auth",
       "skill",
       "update",
+      "skills",
     ]) {
       expect(result.stdout).toMatch(new RegExp(`^\\s+${name}\\s+\\S`, "mu"));
     }
