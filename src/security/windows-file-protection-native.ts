@@ -27,7 +27,7 @@ export function windowsPowerShellCommand(environment: NodeJS.ProcessEnv): {
 
 // Fixed script: paths travel on stdin as JSON, never as shell fragments.
 // Set-Acl/Get-Acl and DriveInfo are supported Windows PowerShell/.NET APIs.
-const ACL_SCRIPT = String.raw`
+export const ACL_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
 try {
   $utf8 = [System.Text.UTF8Encoding]::new($false)
@@ -110,6 +110,21 @@ export type WindowsAclRequest = Readonly<{
   action: "volume" | "protect" | "verify";
   path: string;
 }>;
+
+export class WindowsUnsupportedVolumeError extends Error {}
+
+export function aclBatchFailure(
+  requests: readonly WindowsAclRequest[],
+  status: number | null,
+  signal: NodeJS.Signals | null,
+  stderr: string,
+): Error {
+  void requests;
+  void status;
+  void signal;
+  void stderr;
+  throw new Error("not implemented: aclBatchFailure");
+}
 
 export function runWindowsAclBatch(requests: readonly WindowsAclRequest[]): void {
   if (

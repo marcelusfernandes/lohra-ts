@@ -16,6 +16,11 @@ import {
   prepareWindowsPrivateDestination,
   type WindowsProtectionOperations,
 } from "../src/security/windows-file-protection.js";
+import {
+  ACL_SCRIPT,
+  aclBatchFailure,
+  WindowsUnsupportedVolumeError,
+} from "../src/security/windows-file-protection-native.js";
 import { openStateDatabase } from "../src/state/connection.js";
 
 vi.mock("../src/security/windows-file-protection.js", async (importOriginal) => {
@@ -40,6 +45,8 @@ function fixture(present: readonly string[] = []) {
     verify: new Map<string, Error>(),
     removeDirectory: new Map<string, Error>(),
     contender: new Set<string>(),
+    mkdir: new Map<string, Error>(),
+    volume: null as Error | null,
   };
   const add = (path: string, kind: Kind = "directory") => {
     entries.set(path, { kind, identity: String(nextId++), size: 0n });
@@ -47,10 +54,15 @@ function fixture(present: readonly string[] = []) {
   for (const path of present) add(path);
   const operations: WindowsProtectionOperations = {
     platform: "win32",
-    volume: () => events.push("volume"),
+    volume: () => {
+      events.push("volume");
+      if (failures.volume) throw failures.volume;
+    },
     inspect: (path) => entries.get(path) ?? null,
     mkdir: (path) => {
       events.push(`mkdir:${path}`);
+      const failure = failures.mkdir.get(path);
+      if (failure) throw failure;
       add(path);
       if (failures.contender.has(path)) {
         throw Object.assign(new Error("created by contender"), { code: "EEXIST" });
@@ -231,18 +243,123 @@ describe("ensureWindowsPrivateDirectory", () => {
     expect(state.protectedPaths.has(profile)).toBe(true);
   });
 
-  it("refuses other platforms and unverifiable paths before touching the disk", () => {
+  it("refuses another platform before touching the disk", () => {
     const state = fixture();
     expect(() => {
       ensureWindowsPrivateDirectory(base, { ...state.operations, platform: "linux" });
     }).toThrow(/requires Windows/);
-    expect(() => {
-      ensureWindowsPrivateDirectory("\\\\server\\share\\lohra", state.operations);
-    }).toThrow(/absolute local drive path/);
-    expect(() => {
-      ensureWindowsPrivateDirectory("C:\\RUNNER~1\\lohra", state.operations);
-    }).toThrow(/ambiguous path component/);
     expect(state.events).toEqual([]);
+  });
+
+  describe("a path or volume that cannot be protected", () => {
+    const short = "C:\\RUNNER~1";
+    const unc = "\\\\server\\share\\lohra";
+
+    it.each([
+      {
+        label: "8.3",
+        path: `${short}\\a\\lohra`,
+        created: [short, `${short}\\a`],
+        reason: /ambiguous/,
+      },
+      { label: "UNC", path: unc, created: [], reason: /absolute local drive path/ },
+    ])(
+      "creates a $label path unprotected, as before, and refuses credentials there",
+      (scenario) => {
+        const state = fixture();
+        ensureWindowsPrivateDirectory(scenario.path, state.operations);
+        expect(state.events).toEqual([...scenario.created, scenario.path].map((p) => `mkdir:${p}`));
+        expect(state.protectedPaths.size).toBe(0);
+
+        expect(() =>
+          prepareWindowsPrivateDestination(`${scenario.path}\\auth.json`, state.operations),
+        ).toThrow(scenario.reason);
+        expect(state.entries.has(`${scenario.path}\\auth.json`)).toBe(false);
+      },
+    );
+
+    it("creates the levels unprotected when the volume is not a fixed NTFS one", () => {
+      const state = fixture();
+      state.failures.volume = new WindowsUnsupportedVolumeError("not a fixed NTFS volume");
+      ensureWindowsPrivateDirectory(profile, state.operations);
+      expect(state.events).toEqual([
+        "volume",
+        ...[base, profiles, profile].map((p) => `mkdir:${p}`),
+      ]);
+      expect(state.protectedPaths.size).toBe(0);
+    });
+
+    it("keeps the mkdir failure and the concurrent creator semantics of a plain mkdir", () => {
+      const denied = Object.assign(new Error("denied"), { code: "EACCES" });
+      const refused = fixture();
+      refused.failures.mkdir.set(short, denied);
+      expect(() => {
+        ensureWindowsPrivateDirectory(`${short}\\lohra`, refused.operations);
+      }).toThrow(expect.objectContaining({ code: "EACCES" }));
+
+      const raced = fixture();
+      raced.failures.contender.add(short);
+      ensureWindowsPrivateDirectory(`${short}\\lohra`, raced.operations);
+      expect(raced.entries.has(`${short}\\lohra`)).toBe(true);
+    });
+
+    it("does not treat a volume check that failed for another reason as unprotectable", () => {
+      const state = fixture();
+      const primary = new Error("powershell unavailable");
+      state.failures.volume = primary;
+      const error = createdWith(() => {
+        ensureWindowsPrivateDirectory(base, state.operations);
+      });
+      expect(error.message).toContain(base);
+      expect(error.cause).toBe(primary);
+      expect(state.events).toEqual(["volume"]);
+    });
+
+    it("still fails closed when protect fails on a supported volume", () => {
+      const state = fixture();
+      state.failures.protect.set(base, new Error("owner differs"));
+      expect(() => {
+        ensureWindowsPrivateDirectory(base, state.operations);
+      }).toThrow(/private Windows directory/);
+      expect(state.entries.has(base)).toBe(false);
+    });
+  });
+});
+
+describe("native ACL runner", () => {
+  const request = [{ action: "volume", path: "D:\\x" }] as const;
+  const refusal =
+    "Windows ACL volume failed at D:\\x: Private destinations require a fixed NTFS volume";
+
+  it("classifies only a refused volume as an unsupported one", () => {
+    const unsupported = aclBatchFailure(request, 1, null, refusal);
+    expect(unsupported).toBeInstanceOf(WindowsUnsupportedVolumeError);
+    expect(unsupported.message).toBe(`Windows ACL batch failed (exit 1, signal null): ${refusal}`);
+
+    const unrelated = aclBatchFailure(
+      request,
+      1,
+      null,
+      "Windows ACL volume failed at D:\\x: no drive",
+    );
+    expect(unrelated).not.toBeInstanceOf(WindowsUnsupportedVolumeError);
+    const notVolume = aclBatchFailure([{ action: "protect", path: "D:\\x" }], 1, null, refusal);
+    expect(notVolume).not.toBeInstanceOf(WindowsUnsupportedVolumeError);
+    expect(aclBatchFailure(request, null, "SIGTERM", " ").message).toBe(
+      "Windows ACL batch failed (exit null, signal SIGTERM): unverified result",
+    );
+  });
+
+  it("makes the current user the owner before applying a protected DACL, only when it differs", () => {
+    const protectBranch = ACL_SCRIPT.indexOf("$request.action -eq 'protect'");
+    const setOwner = ACL_SCRIPT.indexOf("$acl.SetOwner($identity)");
+    const setAcl = ACL_SCRIPT.indexOf("Set-Acl -LiteralPath $path -AclObject $acl");
+    expect(protectBranch).toBeGreaterThan(-1);
+    expect(setOwner).toBeGreaterThan(protectBranch);
+    expect(setOwner).toBeLessThan(setAcl);
+    expect(ACL_SCRIPT.slice(protectBranch, setOwner)).toMatch(
+      /GetOwner\(\[System\.Security\.Principal\.SecurityIdentifier\]\)\.Value -ne \$identity\.Value\)\s*\{\s*$/,
+    );
   });
 });
 
