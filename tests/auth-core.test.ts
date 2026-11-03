@@ -90,9 +90,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// No Windows o EIO injetado é a causa do "Could not save private credentials".
-const causeChain = (error: unknown): string =>
-  error instanceof Error ? `${error.message}\n${causeChain(error.cause)}` : "";
+// Onde está o EIO injetado: no Windows, na causa do "Could not save private credentials".
+const causeChain = (error: unknown, deep = process.platform === "win32"): string =>
+  error instanceof Error ? `${error.message}\n${deep ? causeChain(error.cause) : ""}` : "";
 
 const jwt = (payload: object): string => {
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
