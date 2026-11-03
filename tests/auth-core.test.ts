@@ -68,18 +68,13 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 const roots: string[] = [];
-// Home que o Lohra cria: um filho inexistente do mkdtemp. No Windows, gravar
-// credencial num diretório preexistente com ACL herdada é recusado (ADR 0006);
-// o home criado pelo próprio escritor já nasce protegido.
+// Home que o Lohra cria: filho inexistente do mkdtemp (a ADR 0006 recusa o preexistente).
 const root = (): string => {
   const value = mkdtempSync(join(tmpdir(), "lohra-auth-test-"));
   roots.push(value);
   return join(value, "home");
 };
 
-// O Lohra cria o home e o lock ao adquirir a lease; o conteúdo é esvaziado no
-// lugar (a ACL protegida do arquivo permanece), simulando a janela entre o
-// open("wx") e a escrita do registro.
 const plantEmptyLock = (lockPath: string): void => {
   expect(acquireFileLease(lockPath, "seed", 60)).toBe(true);
   writeFileSync(lockPath, "");
@@ -95,15 +90,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// No Windows o EIO injetado chega como causa do erro que o escritor privado
-// lança ("Could not save private credentials"), não na mensagem dele.
-const causeChain = (error: unknown): string => {
-  const messages: string[] = [];
-  for (let cursor = error; cursor instanceof Error; cursor = cursor.cause) {
-    messages.push(cursor.message);
-  }
-  return messages.join("\n");
-};
+// No Windows o EIO injetado é a causa do "Could not save private credentials".
+const causeChain = (error: unknown): string =>
+  error instanceof Error ? `${error.message}\n${causeChain(error.cause)}` : "";
 
 const jwt = (payload: object): string => {
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -193,8 +182,7 @@ describe("auth stores", () => {
   it("fails closed and preserves unknown fields while writing mode 0600", () => {
     const home = root();
     expect(readConfig(home)).toBeNull();
-    // O Lohra cria o home e o auth.json; o conteúdo com campos desconhecidos é
-    // trocado no lugar, sem alterar a ACL protegida do arquivo.
+    // O Lohra cria o auth.json; o conteúdo é trocado no lugar (ACL protegida intacta).
     writeConfig(home, { authMode: "api_key", acknowledgedTosRisk: false, preference: "auto" });
     writeFileSync(
       join(home, "auth.json"),
@@ -217,9 +205,8 @@ describe("auth stores", () => {
     expect(raw.neighbor).toEqual({ x: 1 });
     expect(raw.openai?.future).toBe("keep");
     // No Windows o modo POSIX não prova nada; a ACL é verificada pelo escritor.
-    if (process.platform !== "win32") {
+    if (process.platform !== "win32")
       expect(statSync(join(home, "auth.json")).mode & 0o777).toBe(0o600);
-    }
   });
 
   it("keeps mode and active independent and preference case-sensitive", () => {
@@ -250,9 +237,8 @@ describe("auth stores", () => {
       expiresAt: 123,
     });
     expect(readTokens(home)).toMatchObject({ accessToken: "access-dummy", expiresAt: 123 });
-    if (process.platform !== "win32") {
+    if (process.platform !== "win32")
       expect(statSync(join(home, "oauth.json")).mode & 0o777).toBe(0o600);
-    }
   });
 });
 
@@ -689,10 +675,7 @@ describe("ramos de parada sem teste (#356)", () => {
   it("com lock ilegível persistente, o perdedor espera o TTL do mtime em vez de voltar imediatamente", async () => {
     const home = root();
     const lockPath = join(home, "oauth.json.lock");
-    // Lock vazio/ilegível: mtime = "agora". Criado antes dos timers falsos,
-    // porque criar o home protegido no Windows leva segundos reais e o relógio
-    // falso, parado, ficaria atrás do mtime (useFakeTimers preserva a hora real
-    // como ponto de partida).
+    // Lock ilegível criado antes dos timers falsos: criar o home leva segundos reais no Windows.
     plantEmptyLock(lockPath);
     vi.useFakeTimers();
     try {
