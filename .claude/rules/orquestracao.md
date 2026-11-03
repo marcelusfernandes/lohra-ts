@@ -46,6 +46,12 @@ ADRs (OK explícito), segredos e variáveis, ruleset/proteção da `main`,
 publicação no registry, qualquer `state:blocked`, apagar branch ou reescrever
 histórico. Fora disso, ninguém espera ninguém.
 
+O hook `protege-main.sh` nega merge com **qualquer** check não verde, inclusive
+os informativos fora do ruleset. Com os obrigatórios verdes e `review:approved`,
+um informativo vermelho só passa com OK explícito do owner para aquela PR, via
+`LOHRA_MERGE_AUTORIZADO=<n>` (`.claude/hooks/README.md`), citado no comentário
+de merge.
+
 ## O que o orquestrador nunca faz
 
 Implementar (delega); mergear sem as duas condições; `gh pr merge --admin`;
