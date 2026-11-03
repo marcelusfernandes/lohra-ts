@@ -85,14 +85,23 @@ escopo declarado é bug; fora dele, não é.
 
 ## Válvulas
 
-| válvula                     | libera                             | nunca libera          |
-| --------------------------- | ---------------------------------- | --------------------- |
-| `LOHRA_PERMITE_PUSH_MAIN=1` | push em `main` (camadas 1 e 2)     | force-push            |
-| `LOHRA_MERGE_LIVRE=1`       | `gh pr merge` sem checks/label (1) | `gh pr merge --admin` |
+| válvula                      | libera                                    | nunca libera                                                           |
+| ---------------------------- | ----------------------------------------- | ---------------------------------------------------------------------- |
+| `LOHRA_PERMITE_PUSH_MAIN=1`  | push em `main` (camadas 1 e 2)            | force-push                                                             |
+| `LOHRA_MERGE_LIVRE=1`        | `gh pr merge` sem checks/label (1)        | `gh pr merge --admin`                                                  |
+| `LOHRA_MERGE_AUTORIZADO=<n>` | `gh pr merge <n>` com check não verde (1) | outra PR, falta de `review:approved`, PR sem checks, `--admin`, squash |
 
 Valem no ambiente do hook ou escritas no próprio comando
 (`LOHRA_PERMITE_PUSH_MAIN=1 git push …`). São para bootstrap e operação humana
 consciente; um agente não deveria precisar delas.
+
+`LOHRA_MERGE_AUTORIZADO=<n>` (#944) existe porque o hook exige **todos** os
+checks verdes, inclusive os informativos fora do ruleset (hoje, os jobs
+Windows). Ela vale só para o número exato passado a `gh pr merge`, e o hook
+lista no stderr os checks não verdes que deixou passar; os obrigatórios
+continuam garantidos pelo ruleset no servidor. O orquestrador só a usa com OK
+explícito do owner, no chat, para aquela PR, e cita esse OK no comentário de
+merge.
 
 ## Testar por pipe
 

@@ -40,7 +40,8 @@ function limparAmbiente(): Record<string, string> {
       k === "LOHRA_BENCH" ||
       k.startsWith("LOHRA_PM_") ||
       k === "LOHRA_PERMITE_PUSH_MAIN" ||
-      k === "LOHRA_MERGE_LIVRE"
+      k === "LOHRA_MERGE_LIVRE" ||
+      k === "LOHRA_MERGE_AUTORIZADO"
     )
       continue;
     limpo[k] = v;
@@ -307,6 +308,60 @@ describe("protege-main.sh", () => {
           bench({ LOHRA_PM_CHECKS_JSON: CHECKS_VERMELHOS, LOHRA_MERGE_LIVRE: "1" }),
         ).status,
       ).toBe(0);
+    });
+
+    describe("LOHRA_MERGE_AUTORIZADO=<n> (#944)", () => {
+      const autorizado = (extra: Record<string, string> = {}) =>
+        bench({ LOHRA_PM_CHECKS_JSON: CHECKS_VERMELHOS, LOHRA_MERGE_AUTORIZADO: "5", ...extra });
+
+      it("mesma PR, check vermelho e review:approved: permite e lista o check no stderr", () => {
+        const r = rodar(root, "gh pr merge 5 --merge", autorizado());
+        expect(r.status).toBe(0);
+        expect(r.stderr).toMatch(/PR #5 autorizad/u);
+        expect(r.stderr).toMatch(/checks \(20\)=FAILURE/u);
+      });
+
+      it("escrita no próprio comando tem o mesmo efeito que no ambiente", () => {
+        const r = rodar(
+          root,
+          "LOHRA_MERGE_AUTORIZADO=5 gh pr merge 5 --merge",
+          bench({ LOHRA_PM_CHECKS_JSON: CHECKS_VERMELHOS }),
+        );
+        expect(r.status).toBe(0);
+        expect(r.stderr).toMatch(/PR #5 autorizad/u);
+      });
+
+      it("outra PR: nega citando a PR autorizada", () => {
+        const r = rodar(root, "gh pr merge 5 --merge", autorizado({ LOHRA_MERGE_AUTORIZADO: "6" }));
+        expect(r.status).toBe(2);
+        expect(r.stderr).toMatch(/LOHRA_MERGE_AUTORIZADO=6/u);
+      });
+
+      it("merge sem número explícito da PR: nega", () => {
+        expect(rodar(root, "gh pr merge --merge", autorizado()).status).toBe(2);
+      });
+
+      it("sem review:approved e fora de docs: nega pela label", () => {
+        const r = rodar(
+          root,
+          "gh pr merge 5 --merge",
+          autorizado({ LOHRA_PM_VIEW_JSON: view([], ["src/x.ts"]) }),
+        );
+        expect(r.status).toBe(2);
+        expect(r.stderr).toMatch(/review:approved/u);
+      });
+
+      it("PR sem nenhum check registrado: nega", () => {
+        const r = rodar(root, "gh pr merge 5 --merge", autorizado({ LOHRA_PM_CHECKS_JSON: "[]" }));
+        expect(r.status).toBe(2);
+        expect(r.stderr).toMatch(/nenhum check/u);
+      });
+
+      it("nunca libera --admin, --squash nem --rebase", () => {
+        expect(rodar(root, "gh pr merge 5 --admin", autorizado()).status).toBe(2);
+        expect(rodar(root, "gh pr merge 5 --squash", autorizado()).status).toBe(2);
+        expect(rodar(root, "gh pr merge 5 --rebase", autorizado()).status).toBe(2);
+      });
     });
 
     it("--repo é repassado ao gh (LOHRA_PM_ARGS_OUT registra os argumentos sob LOHRA_BENCH)", () => {
