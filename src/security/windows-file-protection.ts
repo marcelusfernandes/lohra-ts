@@ -211,6 +211,15 @@ function cleanOwn(
   throw primary;
 }
 
+export function ensureWindowsPrivateDirectory(
+  directory: string,
+  operations: WindowsProtectionOperations = nativeOperations,
+): void {
+  void directory;
+  void operations;
+  throw new Error("not implemented: ensureWindowsPrivateDirectory");
+}
+
 /**
  * Creates an empty destination or verifies an existing protected destination.
  * Direct writing requires empty; a nonempty destination can only be replaced
