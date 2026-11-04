@@ -318,15 +318,19 @@ export class OrchestrationChildRuntime implements ChildRuntime {
       reached.value = true;
       return base(toolName, toolArgs, kwargs);
     };
-    const dispatch = this.wrapDispatchFor(request.causalContext.runId)(
-      createChildDispatch(spiedBase),
-      subId,
-    );
+    // Inside the async function so that an installation whose `wrap` throws
+    // while it is being composed lands in `threw` below, like a dispatch that
+    // throws — the port never throws.
+    const run = async (): Promise<string> =>
+      await this.wrapDispatchFor(request.causalContext.runId)(
+        createChildDispatch(spiedBase),
+        subId,
+      )(name, Object.freeze({ ...request.args }));
     const deadlineMs = callDeadlineMs(request.timeoutSeconds);
     const deadline = settleCeiling(deadlineMs);
     try {
       const raced = await Promise.race([
-        dispatch(name, Object.freeze({ ...request.args })).then(
+        run().then(
           (output): CallRace => ({ kind: "settled", output }),
           (error: unknown): CallRace => ({ kind: "threw", error }),
         ),

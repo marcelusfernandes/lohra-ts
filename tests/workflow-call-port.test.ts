@@ -337,6 +337,34 @@ describe("OrchestrationChildRuntime.callTool — through the installation's wrap
     expect(result.output).toContain("socket hang up");
   });
 
+  it("an installation whose wrap throws (while composing, or on the call) is a named `error`, never a throw, and never dispatches", async () => {
+    const base = spyBase();
+    const runtime = new OrchestrationChildRuntime(makeCore(), base.dispatch);
+    runtime.installLeafSandbox({
+      runId: "compose",
+      fence: 1,
+      wrap: () => {
+        throw new Error("wrap exploded");
+      },
+    });
+    const composing = await runtime.callTool(request("compose", "read_file", { path: "/x" }));
+    expect(composing.status).toBe("error");
+    expect(composing.output).toMatch(/^ERROR: /);
+    expect(composing.output).toContain("wrap exploded");
+
+    runtime.installLeafSandbox({
+      runId: "onCall",
+      fence: 1,
+      wrap: () => () => {
+        throw new Error("check exploded");
+      },
+    });
+    const onCall = await runtime.callTool(request("onCall", "read_file", { path: "/x" }));
+    expect(onCall.status).toBe("error");
+    expect(onCall.output).toContain("check exploded");
+    expect(base.calls).toEqual([]);
+  });
+
   it("a denial leaves nothing behind per call (the synthetic sub_id never accumulates a refusal counter)", async () => {
     const base = spyBase();
     const runtime = new OrchestrationChildRuntime(makeCore(), base.dispatch);
