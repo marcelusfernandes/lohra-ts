@@ -1,6 +1,7 @@
 import {
   closeSync,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -289,6 +290,35 @@ describe("media privacy on Windows (ADR 0006)", () => {
     ).rejects.toBe(failure);
     expect(readFileSync(final, "utf8")).toBe("FOREIGN");
     expect(readdirSync(plan.outDir)).toEqual([png("a")]);
+  });
+
+  it("never removes a foreign file that carries the identity of the replaced destination placeholder", async () => {
+    // O rename destrói o placeholder vazio do destino. Um arquivo alheio que reaproveite o
+    // inode liberado não pode ser apagado na limpeza. O link rígido torna isso determinístico:
+    // mantém o inode do placeholder vivo, e o "alheio" recebe exatamente essa identidade.
+    const directory = root();
+    const plan = createOutputPlan(join(directory, "images"));
+    const final = join(plan.outDir, png("a"));
+    const alias = join(directory, "placeholder-alias");
+    const failure = new Error("published ACL changed");
+    const state = fixture((step) => {
+      if (step === "open") linkSync(final, alias);
+      if (step !== "verify-after") return;
+      rmSync(final);
+      linkSync(alias, final);
+      throw failure;
+    });
+    await expect(
+      persistGeneratedImages({
+        plan,
+        payloads: [payload("secret")],
+        requested: 1,
+        uuid: ids("a"),
+        windowsProtection: state.protection,
+      }),
+    ).rejects.toBe(failure);
+    expect(readdirSync(plan.outDir)).toEqual([png("a")]);
+    expect(statSync(final).size).toBe(0);
   });
 
   it("keeps the root identity check: a swapped root gets no destination or stage", async () => {
