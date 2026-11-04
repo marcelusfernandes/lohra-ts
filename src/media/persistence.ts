@@ -27,6 +27,7 @@ import {
   MAX_DATA_URI_BASE64_CHARS,
 } from "./constants.js";
 import { decodeStrictBase64 } from "./base64.js";
+import type { WindowsFileProtection } from "../security/windows-file-protection.js";
 
 export const MEDIA_TOCTOU_LIMITATION =
   "Node does not expose portable openat/renameat2; observable checkpoints are fail-closed, but an unobservable path swap between a check and a path syscall cannot be eliminated.";
@@ -115,6 +116,15 @@ function imageId(source: () => string): string {
   return value;
 }
 
+/** Windows file protection used for media (ADR 0006); injectable so the flow runs off Windows. */
+export interface MediaWindowsProtection {
+  readonly ensureDirectory: (directory: string) => void;
+  readonly prepare: (
+    path: string,
+    options?: { readonly exclusive?: boolean },
+  ) => WindowsFileProtection;
+}
+
 interface OwnedPath {
   readonly path: string;
   readonly dev: number;
@@ -173,7 +183,10 @@ export async function persistGeneratedImages(options: {
   readonly afterRootPreflight?: () => void | Promise<void>;
   readonly beforePublish?: (index: number, path: string) => void | Promise<void>;
   readonly faultAfterBytes?: number;
+  readonly windowsProtection?: MediaWindowsProtection;
 }): Promise<readonly string[]> {
+  if (options.windowsProtection !== undefined)
+    throw new Error("not implemented: windowsProtection");
   if (options.payloads.length > options.requested)
     throw new Error(
       `provider returned ${String(options.payloads.length)} images for requested ${String(options.requested)}`,
