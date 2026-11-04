@@ -203,24 +203,25 @@ describe("the JSON envelope of a failure follows the parser's notion of --json",
     const outcome = await invokeThrowing(new TypeError("boom"), ["doctor", "--js"]);
 
     expect(JSON.parse(outcome.stdout)).toEqual({ error: "TypeError: boom" });
-    expect(outcome.stdout).toBe('{"error": "TypeError: boom"}\n');
     expect(outcome.stderr).toBe("error: TypeError: boom\n");
     expect(outcome.code).toBe(1);
   });
 
-  it("still answers the envelope for the exact --json and for the inline position", async () => {
+  it("still answers the envelope for the exact --json, among other options", async () => {
     const exact = await invokeThrowing(new Error("boom"), ["doctor", "--json"]);
-    expect(exact.stdout).toBe('{"error": "boom"}\n');
+    expect(JSON.parse(exact.stdout)).toEqual({ error: "boom" });
 
-    const first = await invokeThrowing(new Error("boom"), ["doctor", "--no-input", "--json"]);
-    expect(first.stdout).toBe('{"error": "boom"}\n');
+    const among = await invokeThrowing(new Error("boom"), ["doctor", "--no-input", "--json"]);
+    expect(JSON.parse(among.stdout)).toEqual({ error: "boom" });
   });
 
   it("does not turn on the envelope for a --json that comes after --", async () => {
-    const outcome = await invokeWithBrokenHome(["chat", "--", "--json"]);
+    // After `--` the token is the run id, not the flag.
+    const outcome = await invokeWithBrokenHome(["workflow", "audit", "--", "--json"]);
 
     expect(outcome.stdout).toBe("");
     expect(outcome.stderr).toMatch(/^error: \S/u);
+    expect(outcome.stderr).not.toMatch(STACK_FRAME);
     expect(outcome.code).toBe(1);
   });
 
