@@ -310,8 +310,10 @@ interface ProcessRun {
 }
 
 /** Loaded before the CLI in the child: it leaves a server listening (the leaked
- * handle), can release it later, can make `http.get` throw a long chain, and
- * records every call to `process.exit` in a file instead of the streams. */
+ * handle), can release it some time after the first output (so the handle is
+ * still open when the command finishes, however slow the start), can make
+ * `http.get` throw a long chain, and records every call to `process.exit` in a
+ * file instead of the streams. */
 const PRELOAD = `
 import { appendFileSync } from "node:fs";
 import http from "node:http";
@@ -327,7 +329,17 @@ process.exit = (code) => {
 
 const server = net.createServer().listen(0, "127.0.0.1");
 const release = process.env.LOHRA_TEST_RELEASE_MS;
-if (release !== undefined) setTimeout(() => server.close(), Number(release));
+if (release !== undefined) {
+  const write = process.stdout.write.bind(process.stdout);
+  let released = false;
+  process.stdout.write = (...args) => {
+    if (!released) {
+      released = true;
+      setTimeout(() => server.close(), Number(release));
+    }
+    return write(...args);
+  };
+}
 
 const depth = process.env.LOHRA_TEST_CHAIN_DEPTH;
 if (depth !== undefined) {
@@ -342,7 +354,13 @@ if (depth !== undefined) {
 }
 `;
 
-const WATCHDOG_MS = 3_000;
+const WATCHDOG_MS = 5_000;
+
+/** The default 5 s covers the work of the test, not a cold start of `tsx` in a
+ * busy machine, which every process test pays; the watchdog above, not this
+ * number, is what bounds how long the child may outlive its report. Same
+ * convention as the other tests that start the CLI (`cli-serve-process`). */
+const PROCESS_TEST_TIMEOUT_MS = 20_000;
 
 /** Runs the real CLI in a child process. The watchdog starts when the first
  * byte of output arrives (the report is out) and kills a child that is still
@@ -414,48 +432,60 @@ async function runProcess(
 }
 
 describe("a command that fails while a handle is still open", () => {
-  it("ends with the reported code and the whole report, and answers the abbreviated envelope", async () => {
-    const run = await runProcess(["doctor", "--js"], {
-      LOHRA_OLLAMA_CONNECT_URL: "not a url",
-    });
+  it(
+    "ends with the reported code and the whole report, and answers the abbreviated envelope",
+    async () => {
+      const run = await runProcess(["doctor", "--js"], {
+        LOHRA_OLLAMA_CONNECT_URL: "not a url",
+      });
 
-    expect(run.hungAfterReport).toBe(false);
-    expect(run.code).toBe(1);
-    const envelope = JSON.parse(run.stdout) as { error: string };
-    expect(envelope.error).toMatch(/^TypeError: \S/u);
-    expect(run.stderr).toBe(`error: ${envelope.error}\n`);
-    expect(run.exitCalls).toEqual(["exit(1)"]);
-  });
+      expect(run.hungAfterReport).toBe(false);
+      expect(run.code).toBe(1);
+      const envelope = JSON.parse(run.stdout) as { error: string };
+      expect(envelope.error).toMatch(/^TypeError: \S/u);
+      expect(run.stderr).toBe(`error: ${envelope.error}\n`);
+      expect(run.exitCalls).toEqual(["exit(1)"]);
+    },
+    PROCESS_TEST_TIMEOUT_MS,
+  );
 
-  it("does not cut a long report when it forces the end", async () => {
-    const depth = 300;
-    const run = await runProcess(["doctor"], { LOHRA_TEST_CHAIN_DEPTH: String(depth) });
+  it(
+    "does not cut a long report when it forces the end",
+    async () => {
+      const depth = 300;
+      const run = await runProcess(["doctor"], { LOHRA_TEST_CHAIN_DEPTH: String(depth) });
 
-    expect(run.hungAfterReport).toBe(false);
-    expect(run.code).toBe(1);
-    const expected = [
-      `error: level ${String(depth)} ${"x".repeat(200)}`,
-      ...Array.from(
-        { length: depth - 1 },
-        (_, index) => `caused by: level ${String(depth - 1 - index)} ${"x".repeat(200)}`,
-      ),
-      "caused by: root of the chain",
-      "",
-    ];
-    expect(run.stderr).toBe(expected.join("\n"));
-    expect(run.stdout).toBe("");
-    expect(run.exitCalls).toEqual(["exit(1)"]);
-  });
+      expect(run.hungAfterReport).toBe(false);
+      expect(run.code).toBe(1);
+      const expected = [
+        `error: level ${String(depth)} ${"x".repeat(200)}`,
+        ...Array.from(
+          { length: depth - 1 },
+          (_, index) => `caused by: level ${String(depth - 1 - index)} ${"x".repeat(200)}`,
+        ),
+        "caused by: root of the chain",
+        "",
+      ];
+      expect(run.stderr).toBe(expected.join("\n"));
+      expect(run.stdout).toBe("");
+      expect(run.exitCalls).toEqual(["exit(1)"]);
+    },
+    PROCESS_TEST_TIMEOUT_MS,
+  );
 });
 
 describe("a command that succeeds while a handle is still open", () => {
-  it("is left to end by itself, with no forced process.exit", async () => {
-    const run = await runProcess(["--version"], { LOHRA_TEST_RELEASE_MS: "1500" });
+  it(
+    "is left to end by itself, with no forced process.exit",
+    async () => {
+      const run = await runProcess(["--version"], { LOHRA_TEST_RELEASE_MS: "1500" });
 
-    expect(run.hungAfterReport).toBe(false);
-    expect(run.code).toBe(0);
-    expect(run.stdout).toMatch(/^lohra \S+\n$/u);
-    expect(run.stderr).toBe("");
-    expect(run.exitCalls).toEqual([]);
-  });
+      expect(run.hungAfterReport).toBe(false);
+      expect(run.code).toBe(0);
+      expect(run.stdout).toMatch(/^lohra \S+\n$/u);
+      expect(run.stderr).toBe("");
+      expect(run.exitCalls).toEqual([]);
+    },
+    PROCESS_TEST_TIMEOUT_MS,
+  );
 });
