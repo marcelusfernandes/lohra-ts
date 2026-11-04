@@ -57,7 +57,8 @@ Após instalar, `lohra init` com stdin/stderr em TTY pede provider/chave com ent
 Com chave configurada, oferece modelo; rode novamente após salvar uma chave nova.
 `lohra init --no-input` ou stdin sem TTY só exibem relatório, sem gravar.
 Ctrl+C ou EOF interrompem explicitamente, sem anunciar conclusão.
-No Windows, homes preexistentes incompatíveis são recusados, sem migração.
+No Windows, o home e o profile que o Lohra cria nascem protegidos quando o caminho permite;
+homes preexistentes incompatíveis recusam credenciais, sem migração: [detalhes](docs/windows-home.md).
 
 ## Biblioteca headless
 
