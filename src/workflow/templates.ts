@@ -12,6 +12,7 @@ import { basename, join } from "node:path";
 import { toolError, toolResult } from "../tools/envelope.js";
 import type { ToolArguments, ToolHandler } from "../tools/types.js";
 import type { WorkflowLoader } from "./engine-contract.js";
+import { EMPTY_TEMPLATE_STATS, type TemplateStats } from "./template-stats.js";
 import { validateSpec } from "./schema.js";
 import { isValidationError } from "./types.js";
 
@@ -98,6 +99,9 @@ export interface TemplateListing {
   readonly nodes?: number;
   readonly origin?: TemplateOrigin;
   readonly description?: string;
+  /** #973: the template's scoreboard — present whenever the caller passes
+   * stats (the tool and the CLI always do); `runs: 0` if never run. */
+  readonly stats?: TemplateStats;
   readonly error?: string;
 }
 
@@ -115,7 +119,10 @@ export function templateOrigin(meta: Readonly<Record<string, unknown>>): Templat
  * per entry: a broken file never drops silently, it surfaces as
  * `{ref, error}`. An absent directory is a legitimate empty library, not an
  * error (mirrors `readTiers`'s `ENOENT` → `{}`, #234). */
-export function listTemplates(home: string): readonly TemplateListing[] {
+export function listTemplates(
+  home: string,
+  stats?: ReadonlyMap<string, TemplateStats>,
+): readonly TemplateListing[] {
   const dir = join(home, OPERATOR_TEMPLATES_DIR);
   if (!existsSync(dir)) return Object.freeze([]);
   const entries: TemplateListing[] = [];
@@ -142,6 +149,7 @@ export function listTemplates(home: string): readonly TemplateListing[] {
         nodes: spec.nodes.length,
         origin: templateOrigin(spec.meta),
         ...(typeof description === "string" && description !== "" ? { description } : {}),
+        ...(stats === undefined ? {} : { stats: stats.get(ref) ?? EMPTY_TEMPLATE_STATS }),
       });
     } catch (error) {
       entries.push({ ref, error: error instanceof Error ? error.message : String(error) });
@@ -161,10 +169,27 @@ export function listTemplates(home: string): readonly TemplateListing[] {
  * round-trips. Validation still runs, and still refuses before either
  * shape ever leaves this function — "validated" describes the CHECK, not
  * the shape returned. */
-export function workflowTemplatesHandler(home: string): ToolHandler {
+export function workflowTemplatesHandler(
+  home: string,
+  stats?: () => ReadonlyMap<string, TemplateStats>,
+): ToolHandler {
   return (args: ToolArguments): string => {
     const name = args.name;
-    if (name === undefined) return toolResult(undefined, { templates: listTemplates(home) });
+    if (name === undefined) {
+      // #973: a scoreboard that cannot be read never hides the library —
+      // the listing still answers, and says why the stats are missing.
+      let scoreboard: ReadonlyMap<string, TemplateStats> | undefined;
+      let statsError: string | undefined;
+      try {
+        scoreboard = stats?.();
+      } catch (error) {
+        statsError = error instanceof Error ? error.message : String(error);
+      }
+      return toolResult(undefined, {
+        templates: listTemplates(home, scoreboard),
+        ...(statsError === undefined ? {} : { stats_error: statsError }),
+      });
+    }
     if (typeof name !== "string" || name === "")
       return toolError("'name' must be a non-empty string");
     let raw: unknown;

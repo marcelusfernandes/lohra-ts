@@ -557,9 +557,10 @@ matters yourself and put it in `args`.
 ## 8. Before you author: check the library
 
 Call **`workflow_templates`** first. Without `name` it lists every `.json` under `<home>/workflows/`:
-`{templates: [{ref, name?, nodes?, origin?, description?, error?}]}` — `ref` is the filename without
+`{templates: [{ref, name?, nodes?, origin?, description?, stats?, error?}]}` — `ref` is the filename without
 `.json`, the same `ref` a `{type: "workflow", ref}` node resolves through; `origin` is `"agent"` for a
-template saved with `workflow_save`, else `"operator"`. An `error` entry is a file the loader rejected
+template saved with `workflow_save`, else `"operator"`; `stats` is its scoreboard (runs by status, last use,
+avg tokens) — prefer a template that keeps finishing `complete`. An `error` entry is a file the loader rejected
 (bad `ref`, invalid JSON, invalid spec) — never dropped silently. `name` fetches one validated `{ref, spec}`.
 
 **Run one as-is**: `run_workflow {template: "<ref>", args}` — never re-send its spec; the run records `template_ref`
@@ -568,8 +569,7 @@ template saved with `workflow_save`, else `"operator"`. An `error` entry is a fi
 **Save one worth repeating**: once a run you authored finished `complete` and the task will come back,
 `workflow_save {run_id, ref, description}` stores the spec that ran under a **new** `ref` (never overwrites),
 with `meta.origin`/`meta.description`, revalidated like a launch — use `${args.x}` inputs so it takes new ones.
-Named refusals, nothing written: run not `complete`, `ref` taken, description empty or over 1024 chars,
-over 256 KB, or 100 agent-saved templates already. Don't save a one-off.
+Named refusals, nothing written: run not `complete`, `ref` taken, description empty or over 1024 chars, over 256 KB, or 100 agent-saved templates already. Don't save a one-off.
 
 ---
 

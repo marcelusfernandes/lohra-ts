@@ -428,13 +428,18 @@ describe("composeSessionTools wires workflow_save end to end (#970)", () => {
     const listed = JSON.parse(await tools.dispatch("workflow_templates", {})) as {
       templates?: readonly Record<string, unknown>[];
     };
-    expect(listed.templates).toContainEqual({
-      ref: "triage",
-      name: "triage",
-      nodes: 2,
-      origin: "agent",
-      description: "triage open bugs",
-    });
+    // #973: the composed tool also carries the scoreboard — the source run was
+    // inline, so the saved template itself has never run.
+    expect(listed.templates).toContainEqual(
+      expect.objectContaining({
+        ref: "triage",
+        name: "triage",
+        nodes: 2,
+        origin: "agent",
+        description: "triage open bugs",
+        stats: expect.objectContaining({ runs: 0 }) as unknown,
+      }),
+    );
 
     const again = JSON.parse(
       await tools.dispatch("workflow_save", { run_id: runId, ref: "triage", description: "d" }),

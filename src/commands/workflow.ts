@@ -1,10 +1,17 @@
 import type Database from "better-sqlite3";
+import { dirname, join } from "node:path";
 
 import { AuditRepository } from "../state/audit-repository.js";
 import { openStateDatabase } from "../state/connection.js";
 import { NoticesRepository, type PublicNotice } from "../state/notices-repository.js";
 import { WorkflowRepository } from "../state/workflow-repository.js";
 import { parseAuditQuery } from "../workflow/audit-query.js";
+import { readTemplateStats, type TemplateStats } from "../workflow/template-stats.js";
+import {
+  listTemplates,
+  OPERATOR_TEMPLATES_DIR,
+  type TemplateListing,
+} from "../workflow/templates.js";
 import type { PublicAuditEvent } from "../workflow/audit-model.js";
 import { productionWarningSink } from "../workflow/ownership-store.js";
 import {
@@ -18,8 +25,11 @@ import {
 } from "../workflow/service.js";
 
 export interface WorkflowCommandOptions {
-  readonly action: "list" | "watch" | "audit" | "notices";
+  readonly action: "list" | "watch" | "audit" | "notices" | "templates";
   readonly databasePath: string;
+  /** #973: the operator home whose `workflows/` library `templates` lists —
+   * defaults to the database's own directory (`<home>/state.db`). */
+  readonly home?: string;
   readonly args: Readonly<Record<string, unknown>>;
   readonly stdout: (value: string) => void;
   readonly stderr: (value: string) => void;
@@ -77,6 +87,25 @@ function renderAuditLine(event: PublicAuditEvent): string {
   const segmentId =
     typeof identity.segment_id === "string" ? ` ${identity.segment_id.slice(0, 8)}` : "";
   return `${String(event.seq)}  ${event.event_type}  ${nodePath}${subId}${segmentId}`.trimEnd();
+}
+
+function lastUsed(stats: TemplateStats): string {
+  return stats.last_used_at === null
+    ? "never"
+    : new Date(stats.last_used_at * 1_000).toISOString().slice(0, 16).replace("T", " ");
+}
+
+/** `ref  origin  runs  complete  degraded/failed  last  avg tok  name` — one
+ * line per template for `lohra workflow templates` (issue #973); a file the
+ * loader rejected keeps its line, with the reason, never dropped. */
+function renderTemplateLine(entry: TemplateListing): string {
+  if (entry.error !== undefined) return `${entry.ref}  error: ${entry.error}`;
+  const stats = entry.stats;
+  const score =
+    stats === undefined
+      ? ""
+      : `  ${String(stats.runs)} runs  ${String(stats.complete)} complete  ${String(stats.degraded)}/${String(stats.failed)} degraded/failed  last ${lastUsed(stats)}  ~${String(stats.avg_tokens)} tok`;
+  return `${entry.ref}  ${entry.origin ?? "operator"}${score}  ${entry.name ?? ""}`.trimEnd();
 }
 
 /** `id  scope  kind  [acked]  message` — one line per notice, for the text
@@ -196,6 +225,18 @@ export async function runWorkflowCommand(options: WorkflowCommandOptions): Promi
         options.stdout("no notices\n");
       } else {
         for (const notice of page.notices) options.stdout(`${renderNoticeLine(notice)}\n`);
+      }
+      return 0;
+    }
+    if (options.action === "templates") {
+      const home = options.home ?? dirname(options.databasePath);
+      const templates = listTemplates(home, readTemplateStats(repository));
+      if (options.args.json === true) {
+        options.stdout(`${JSON.stringify({ templates }, null, 2)}\n`);
+      } else if (templates.length === 0) {
+        options.stdout(`no workflow templates in ${join(home, OPERATOR_TEMPLATES_DIR)}\n`);
+      } else {
+        for (const entry of templates) options.stdout(`${renderTemplateLine(entry)}\n`);
       }
       return 0;
     }

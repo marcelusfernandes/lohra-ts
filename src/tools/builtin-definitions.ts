@@ -567,7 +567,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "List validated workflow templates (the operator's and those saved with workflow_save: origin, description), or fetch one by 'name' for its full spec. Check before authoring: run one as-is with run_workflow(template=ref), or adapt it. 'ref' is the filename without extension.",
+        "List validated workflow templates (operator's and workflow_save's: origin, description, run stats), or fetch one by 'name' for its full spec. Check before authoring: run one as-is with run_workflow(template=ref), or adapt it. 'ref' is the filename without extension.",
       parameters: {
         type: "object",
         properties: {

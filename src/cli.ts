@@ -56,6 +56,7 @@ import {
   WORKFLOW_AUDIT_SPEC,
   WORKFLOW_LIST_SPEC,
   WORKFLOW_NOTICES_SPEC,
+  WORKFLOW_TEMPLATES_SPEC,
   WORKFLOW_SPEC,
   WORKFLOW_WATCH_SPEC,
   type CommandSpec,
@@ -229,7 +230,7 @@ function resolveParse(io: CliIo, command: string, rest: readonly string[]): Pars
     // `M9-workflow-run-accepted` anchor intact (issue #402's Files never
     // include `scripts/`); `knownActions` is the actual (wider) check.
     const actions = ["list", "watch", "audit"] as const;
-    const knownActions: readonly string[] = [...actions, "notices"];
+    const knownActions: readonly string[] = [...actions, "notices", "templates"];
     if (!knownActions.includes(action ?? "")) {
       const outer = parseCommand(WORKFLOW_SPEC, rest);
       io.stderr(
@@ -247,7 +248,9 @@ function resolveParse(io: CliIo, command: string, rest: readonly string[]): Pars
           ? WORKFLOW_WATCH_SPEC
           : action === "notices"
             ? WORKFLOW_NOTICES_SPEC
-            : WORKFLOW_AUDIT_SPEC;
+            : action === "templates"
+              ? WORKFLOW_TEMPLATES_SPEC
+              : WORKFLOW_AUDIT_SPEC;
     // Issue #402: `workflow notices` isn't in `arg-validation.ts`'s `LEVELS`
     // (outside this issue's Files) — a plain `Level` literal here, same
     // shape (`{banner}`), is enough for `renderError`/`renderHelp`.
@@ -258,7 +261,9 @@ function resolveParse(io: CliIo, command: string, rest: readonly string[]): Pars
           ? LEVELS.workflowWatch
           : action === "notices"
             ? WORKFLOW_NOTICES_LEVEL
-            : LEVELS.workflowAudit;
+            : action === "templates"
+              ? LEVELS.workflowTemplates
+              : LEVELS.workflowAudit;
     const inner = parseCommand(childSpec, rest.slice(1));
     if (inner.error !== null) {
       io.stderr(renderError(inner.error, level));
@@ -504,11 +509,12 @@ async function runCommand(
       : value;
   };
   if (command === "workflow") {
-    const action = argv[1] as "list" | "watch" | "audit" | "notices";
+    const action = argv[1] as "list" | "watch" | "audit" | "notices" | "templates";
     const option = (name: string): unknown => parsed.options.get(name);
     return runWorkflowCommand({
       action,
       databasePath: join(paths.home, "state.db"),
+      home: paths.home,
       stdout: io.stdout,
       stderr: io.stderr,
       args: {

@@ -200,6 +200,7 @@ export const LEVELS = {
   workflowList: level("workflow list"),
   workflowWatch: level("workflow watch"),
   workflowAudit: level("workflow audit"),
+  workflowTemplates: level("workflow templates"),
   update: level("update"),
 } as const satisfies Record<string, Level>;
 
