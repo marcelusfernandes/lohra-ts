@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -14,9 +14,19 @@ import {
 } from "../src/media/index.js";
 import type { NormalizedResponse } from "../src/transports/index.js";
 
+// No Windows a mídia passa pela proteção privada (ADR 0006); cada chamada ACL real
+// abriria um powershell.exe (~0,5 s, #942). A DACL real é provada em
+// windows-media-protection.test.ts; aqui só o ACL nativo vira no-op.
+vi.mock("../src/security/windows-file-protection-native.js", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  runWindowsAcl: (): void => undefined,
+  runWindowsAclBatch: (): void => undefined,
+}));
+
 const roots: string[] = [];
 const root = (): string => {
-  const value = mkdtempSync(join(tmpdir(), "lohra-media-handlers-"));
+  // Nome longo: um componente 8.3 (RUNNER~1) não é um caminho privável.
+  const value = mkdtempSync(join(realpathSync.native(tmpdir()), "lohra-media-handlers-"));
   roots.push(value);
   return value;
 };

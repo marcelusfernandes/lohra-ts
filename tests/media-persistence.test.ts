@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -24,22 +25,61 @@ import {
   persistGeneratedImages,
 } from "../src/media/index.js";
 
+// No Windows a mídia passa pela proteção privada (ADR 0006) de verdade: caminhos,
+// identidades e fs reais. Só o ACL nativo é substituído por um registro, porque
+// cada chamada abriria um powershell.exe (~0,5 s, #942) e estouraria o tempo
+// destes testes; a DACL real é provada em windows-media-protection.test.ts.
+// Fora do Windows o mock nunca é chamado.
+const acl = vi.hoisted(() => ({ calls: [] as Array<{ action: string; path: string }> }));
+vi.mock("../src/security/windows-file-protection-native.js", async (importOriginal) => {
+  const original = await importOriginal<Record<string, unknown>>();
+  return {
+    ...original,
+    runWindowsAcl: (action: string, path: string): void => {
+      acl.calls.push({ action, path });
+    },
+    runWindowsAclBatch: (requests: ReadonlyArray<{ action: string; path: string }>): void => {
+      acl.calls.push(...requests);
+    },
+  };
+});
+
 const roots: string[] = [];
 const root = (): string => {
-  const value = mkdtempSync(join(tmpdir(), "lohra-media-persist-"));
+  // Nome longo: um componente 8.3 (RUNNER~1) não é um caminho privável.
+  const value = mkdtempSync(join(realpathSync.native(tmpdir()), "lohra-media-persist-"));
   roots.push(value);
   return value;
 };
 
 afterEach(() => {
+  acl.calls.length = 0;
   for (const value of roots.splice(0)) rmSync(value, { recursive: true, force: true });
 });
+
+/** POSIX: modo final 0644. Windows: modo não diz nada, a DACL foi protegida e verificada por último. */
+function expectPublishedAccess(path: string): void {
+  if (process.platform === "win32") {
+    const actions = acl.calls.filter((call) => call.path === path).map((call) => call.action);
+    expect(actions).toContain("protect");
+    expect(actions.at(-1)).toBe("verify");
+    return;
+  }
+  expect(lstatSync(path).mode & 0o777).toBe(0o644);
+}
 
 describe("staged image persistence", () => {
   it("uses the contract-required atomic rename primitive", () => {
     const source = readFileSync(new URL("../src/media/persistence.ts", import.meta.url), "utf8");
     expect(source).toContain("renameSync(temp, final);");
     expect(source).not.toContain("linkSync(temp, final);");
+  });
+
+  it("keeps the POSIX stage at 0600 and publishes at IMAGE_FILE_MODE", () => {
+    const source = readFileSync(new URL("../src/media/persistence.ts", import.meta.url), "utf8");
+    expect(source).toContain('openSync(temp, "wx", 0o600)');
+    expect(source).toContain("fchmodSync(fd, IMAGE_FILE_MODE);");
+    expect(source).toContain("chmodSync(temp, IMAGE_FILE_MODE);");
   });
 
   it.each([0o022, 0o077])(
@@ -57,7 +97,7 @@ describe("staged image persistence", () => {
         expect(paths).toEqual([
           join(createOutputPlan(join(directory, "images")).outDir, `${"d".repeat(32)}.png`),
         ]);
-        expect(lstatSync(paths[0] ?? "").mode & 0o777).toBe(0o644);
+        expectPublishedAccess(paths[0] ?? "");
         expect(readFileSync(paths[0] ?? "", "utf8")).toBe("png");
       } finally {
         process.umask(old);
@@ -279,7 +319,7 @@ describe("staged image persistence", () => {
         chmodSync(decoy, 0o600);
       },
     });
-    expect(lstatSync(paths[0] ?? "").mode & 0o777).toBe(0o644);
+    expectPublishedAccess(paths[0] ?? "");
   });
 
   it("fails closed with zero residue when outDir is replaced without a symlink", async () => {
