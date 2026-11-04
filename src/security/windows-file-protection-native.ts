@@ -35,6 +35,12 @@ const UNSUPPORTED_VOLUME = "Private destinations require a fixed NTFS volume";
 // process and prints a progress record that reaches stderr as CLIXML, and
 // ConvertFrom-Json alone costs about as much as the rest of the script. The one
 // cmdlet left is Set-Acl in the protect branch, with progress silenced.
+//
+// What `protect` applies and `verify` checks is strict: no inheritance, only the
+// approved identities. A `verify` line may end in `preexisting` for an object that
+// existed before Lohra touched it, which is only read, never changed (ADR 0006): it
+// may inherit its rules, as long as every one is an Allow for approved identities.
+// The strict checks below stay as they are, and run for `protect` as well.
 export const ACL_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -50,6 +56,41 @@ function Read-Acl([string]$target) {
   }
   return [System.IO.File]::GetAccessControl($target)
 }
+# The check of an object that existed before Lohra: its inherited rules are fine when every
+# rule is an Allow for the user, SYSTEM or Administrators (the same approved identities as the
+# strict checks below), the user is the owner and has full control. Anything else is refused;
+# the refusal names who else has access, by name and SID or by SID when it does not translate.
+function Assert-Preexisting($acl, [string]$me) {
+  if ($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $me) {
+    throw 'Windows file owner differs from the current identity'
+  }
+  $grants = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+  if ($grants.Count -eq 0) { throw 'Windows DACL is empty or unavailable' }
+  $others = @()
+  $seen = @()
+  $mine = $false
+  foreach ($grant in $grants) {
+    if ($grant.AccessControlType -ne 'Allow') { throw 'Deny access rule cannot be verified' }
+    $who = $grant.IdentityReference
+    if ($who.Value -eq $me) {
+      if (($grant.PropagationFlags -band $inheritOnly) -eq 0 -and
+          ($grant.FileSystemRights -band $fullControl) -eq $fullControl) {
+        $mine = $true
+      }
+    } elseif ($who.Value -ne 'S-1-5-18' -and $who.Value -ne 'S-1-5-32-544' -and $seen -notcontains $who.Value) {
+      $seen += $who.Value
+      try {
+        $others += "$($who.Translate([System.Security.Principal.NTAccount]).Value) ($($who.Value))"
+      } catch {
+        $others += $who.Value
+      }
+    }
+  }
+  if ($others.Count -gt 0) {
+    throw "Windows DACL grants access to unapproved identities: $($others -join ', '). Move or rename this path so Lohra recreates it protected, or point LOHRA_HOME at a new path, then save the credential again"
+  }
+  if (-not $mine) { throw 'Windows owner lacks full control' }
+}
 try {
   [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
   $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
@@ -61,10 +102,15 @@ try {
   $request = @{
     action = $fields[0]
     path = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($fields[1]))
+    preexisting = ($fields.Length -gt 2)
   }
   try {
   $path = [string]$request.path
   if (@('volume', 'protect', 'verify') -notcontains $request.action) { throw 'Unknown ACL action' }
+  # The one option: only a verification may be of a preexisting object, never protect.
+  if ($request.preexisting -and ($fields[2] -ne 'preexisting' -or $request.action -ne 'verify')) {
+    throw 'Unknown ACL option'
+  }
   if ($request.action -eq 'volume') {
     $drive = [System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($path))
     if ($drive.DriveType -ne 'Fixed' -or $drive.DriveFormat -ne 'NTFS') {
@@ -79,6 +125,11 @@ try {
       $cursor = [System.IO.Path]::GetDirectoryName($cursor)
     }
     $acl = Read-Acl $path
+    if ($request.preexisting) {
+      Assert-Preexisting $acl $identity.Value
+      $done++
+      continue
+    }
     if ($request.action -eq 'protect') {
       # A process created by an elevated administrator owns what it creates as the
       # Administrators group; the policy requires the current user as owner.
@@ -141,6 +192,8 @@ try {
 export type WindowsAclRequest = Readonly<{
   action: "volume" | "protect" | "verify";
   path: string;
+  /** `verify` only: the object existed before Lohra touched it (see ACL_SCRIPT). */
+  preexisting?: boolean;
 }>;
 
 /** The volume is not one where a private destination can be protected. */
@@ -184,12 +237,21 @@ export function assertAclBatch(requests: readonly WindowsAclRequest[]): void {
       "Windows ACL batch must contain one to three requests: one action, or verifications optionally led by a volume check",
     );
   }
+  if (requests.some(({ action, preexisting }) => preexisting === true && action !== "verify")) {
+    throw new Error("Windows ACL preexisting flag applies only to a verification");
+  }
 }
 
-/** The stdin the ACL script reads: one `action base64(path)` line per request. */
+/**
+ * The stdin the ACL script reads: one `action base64(path)` line per request, with
+ * a third field `preexisting` on the verifications of an object that already existed.
+ */
 export function encodeAclRequests(requests: readonly WindowsAclRequest[]): string {
   return requests
-    .map(({ action, path }) => `${action} ${Buffer.from(path, "utf8").toString("base64")}\n`)
+    .map(
+      ({ action, path, preexisting }) =>
+        `${action} ${Buffer.from(path, "utf8").toString("base64")}${preexisting === true ? " preexisting" : ""}\n`,
+    )
     .join("");
 }
 
