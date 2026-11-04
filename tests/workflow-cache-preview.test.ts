@@ -627,8 +627,7 @@ describe("builtin registry — workflow_preview (#462 AC)", () => {
   it("registers 'workflow_preview' as the 29th tool", async () => {
     const { createBuiltinRegistry } = await import("../src/tools/builtins.js");
     const registry = createBuiltinRegistry();
-    // #970: `workflow_save` came after it, as the 30th.
-    expect(registry.generation).toBe(30);
+    expect(registry.generation).toBe(30); // #970: workflow_save came after it, as the 30th
     const names = registry.getDefinitions().map((definition) => definition.function.name);
     expect(names).toContain("workflow_preview");
     expect(names.indexOf("workflow_preview")).toBe(28);
