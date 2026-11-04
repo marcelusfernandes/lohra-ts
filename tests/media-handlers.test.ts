@@ -14,6 +14,15 @@ import {
 } from "../src/media/index.js";
 import type { NormalizedResponse } from "../src/transports/index.js";
 
+// No Windows a mídia passa pela proteção privada (ADR 0006); cada chamada ACL real
+// abriria um powershell.exe (~0,5 s, #942). A DACL real é provada em
+// windows-media-protection.test.ts; aqui só o ACL nativo vira no-op.
+vi.mock("../src/security/windows-file-protection-native.js", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  runWindowsAcl: (): void => undefined,
+  runWindowsAclBatch: (): void => undefined,
+}));
+
 const roots: string[] = [];
 const root = (): string => {
   const value = mkdtempSync(join(tmpdir(), "lohra-media-handlers-"));
