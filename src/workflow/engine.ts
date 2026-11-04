@@ -148,15 +148,16 @@ export class WorkflowEngine {
 
   /** What a strategy outside this file may touch (`FlowDeps`, `flow-strategies.ts`). */
   private flowDeps(): FlowDeps {
+    const { runId, nodeScope, runtime, budget, control, result, tiers, cache } = this;
     return Object.freeze({
-      runId: this.runId,
-      nodeScope: this.nodeScope,
-      runtime: this.runtime,
-      budget: this.budget,
-      control: this.control,
-      result: this.result,
-      tiers: this.tiers,
-      cache: this.cache,
+      runId,
+      nodeScope,
+      runtime,
+      budget,
+      control,
+      result,
+      tiers,
+      cache,
       checkpointAnswers: this.checkpointAnswers,
       collectLeaf: this.collectLeaf.bind(this),
       causal: this.causal.bind(this),

@@ -760,12 +760,13 @@ describe("FlowDeps is enough for the S2/S3/S4/S6 nodes — no engine.ts change (
   });
 
   it("S6 call: an exhausted lifetime is a cap trip, with no attempt made", async () => {
-    const result = await runWith(callLike, {
-      runtime: new ScriptedRuntime(),
-      budget: new Budget({ lifetime: 0 }),
-    });
+    const budget = new Budget({ lifetime: 1 });
+    budget.charge();
+    const result = await runWith(callLike, { runtime: new ScriptedRuntime(), budget });
     expect(result.capTrips).toBe(1);
     expect(result.outputs.n).toBeNull();
+    expect(result.faults[0]).toContain("lifetime remaining 0");
+    expect(budget.lifetimeRemaining).toBe(0);
   });
 
   it("S6 call: a run that is already paused makes no attempt", async () => {
