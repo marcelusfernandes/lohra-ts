@@ -109,10 +109,15 @@ export function resolveValue(value: unknown, context: unknown): unknown {
   return value;
 }
 
+/**
+ * The value `${reference}` would render, before it is stringified: a thin layer over
+ * `lookup`, so a JSON string and an array index are traversed exactly like in a
+ * prompt, and an absent field is `null`. `reference` is the bare path (`scan.score`),
+ * not the `${...}` wrapper, and an invalid one throws like `resolveValue` does.
+ */
 export function readPath(reference: string, context: unknown): unknown {
-  void reference;
-  void context;
-  throw new Error("not implemented: readPath");
+  if (!isValidRef(reference)) throw new InvalidReferenceError(reference);
+  return lookup(reference, context);
 }
 
 export function resolveStrict(value: unknown, context: unknown): readonly [unknown, string | null] {
