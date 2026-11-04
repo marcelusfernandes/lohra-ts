@@ -13,6 +13,7 @@ import {
   runWindowsAcl,
   runWindowsAclBatch,
   WindowsUnsupportedVolumeError,
+  type WindowsAclRequest,
 } from "./windows-file-protection-native.js";
 
 type Entry = Readonly<{ kind: "file" | "directory" | "link"; identity: string; size: bigint }>;
@@ -24,6 +25,17 @@ type PendingCreation = Readonly<{
 
 export interface WindowsProtectionOperations {
   readonly platform: string;
+  /**
+   * True when `protect` also verifies the ACL it applied (the native backend
+   * does), so the module rechecks only the identity right after it instead of
+   * verifying again. Absent: `protect` is followed by `verify`, as before.
+   */
+  readonly protectVerifies?: boolean;
+  /**
+   * Runs the requests in order in one backend round trip (one process). Absent:
+   * each request goes through `volume`, `protect` or `verify`, in the same order.
+   */
+  batch?: (requests: readonly WindowsAclRequest[]) => void;
   volume(path: string): void;
   inspect(path: string): Entry | null;
   mkdir(path: string): void;

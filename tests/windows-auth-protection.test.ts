@@ -17,7 +17,11 @@ import { atomicWritePrivate0600, type AtomicWriteOperations } from "../src/auth/
 import { acquireFileLease, type LeaseProtectionOperations } from "../src/auth/lease.js";
 import { refreshUnderLease } from "../src/auth/credentials.js";
 import { OAuthTokens } from "../src/auth/types.js";
-import type { WindowsFileProtection } from "../src/security/windows-file-protection.js";
+import {
+  prepareWindowsPrivateDestination,
+  type WindowsFileProtection,
+  type WindowsProtectionOperations,
+} from "../src/security/windows-file-protection.js";
 
 const injectedWrite = vi.hoisted(() => ({ armed: false }));
 vi.mock("../src/auth/store.js", async (importOriginal) => {
@@ -84,6 +88,206 @@ function fakeProtection(events: string[]) {
   };
   return prepare;
 }
+
+// Issue #942: the credential write keeps every identity and ACL check of the
+// sequence while it opens fewer backend processes. The real protection module
+// runs over an in-memory backend that, like the real one, applies and verifies
+// in `protect` and groups requests into one trip (one process) per `batch`.
+describe("Windows credential write, check by check", () => {
+  const vault = "C:\\vault";
+  const target = `${vault}\\auth.json`;
+  const staged = `${target}.tmp-1-2`;
+
+  function memoryWrite(existing: boolean) {
+    let nextId = 1;
+    const entries = new Map<
+      string,
+      { kind: "file" | "directory"; identity: string; size: bigint }
+    >();
+    const protectedPaths = new Set<string>();
+    const descriptors = new Map<number, string>();
+    const timeline: string[] = [];
+    const log: string[] = [];
+    let trips = 0;
+    const add = (path: string, kind: "file" | "directory") => {
+      entries.set(path, { kind, identity: String(nextId++), size: 0n });
+    };
+    if (existing) {
+      add(vault, "directory");
+      add(target, "file");
+      protectedPaths.add(vault).add(target);
+    }
+    const trip = (requests: readonly string[]) => {
+      trips += 1;
+      timeline.push(`trip ${requests.join(" + ")}`);
+      log.push(`trip:${String(trips)}`);
+    };
+    const mutate = (entry: string) => {
+      timeline.push(entry);
+      log.push(entry);
+    };
+    const operations: WindowsProtectionOperations = {
+      platform: "win32",
+      protectVerifies: true,
+      volume: () => {},
+      inspect: (path) => {
+        log.push(`inspect:${path}`);
+        return entries.get(path) ?? null;
+      },
+      mkdir: (path) => {
+        mutate(`mkdir ${path}`);
+        add(path, "directory");
+      },
+      createEmpty: (path) => {
+        mutate(`create ${path}`);
+        add(path, "file");
+      },
+      openWrite: (path) => {
+        const descriptor = 100 + descriptors.size;
+        descriptors.set(descriptor, entries.get(path)?.identity ?? "missing");
+        return descriptor;
+      },
+      descriptorIdentity: (descriptor) => descriptors.get(descriptor) ?? "missing",
+      close: () => {},
+      protect: (path) => {
+        trip([`protect ${path}`]);
+        protectedPaths.add(path);
+      },
+      verify: () => {
+        throw new Error("every verification goes through a batch");
+      },
+      batch: (requests) => {
+        trip(requests.map(({ action, path }) => `${action} ${path}`));
+        for (const { action, path } of requests) {
+          if (action === "verify" && !protectedPaths.has(path)) {
+            throw new Error(`incompatible ACL: ${path}`);
+          }
+        }
+      },
+      removeFile: (path) => {
+        entries.delete(path);
+      },
+      removeDirectory: (path) => {
+        entries.delete(path);
+      },
+    };
+    const write: AtomicWriteOperations = {
+      platform: "win32",
+      prepare: (path, options) => prepareWindowsPrivateDestination(path, operations, options),
+      mkdir: () => {
+        throw new Error("Windows must not pre-create an unprotected directory");
+      },
+      open: () => {
+        throw new Error("the protection module opens the stage");
+      },
+      write: (_descriptor, bytes, offset) => {
+        mutate("write");
+        return bytes.length - offset;
+      },
+      fsync: () => {},
+      close: () => {},
+      rename: (source, destination) => {
+        mutate("rename");
+        const moved = entries.get(source);
+        if (!moved) throw new Error("missing staged file");
+        entries.set(destination, moved);
+        entries.delete(source);
+      },
+      unlink: () => {},
+      pid: 1,
+      now: () => 2,
+    };
+    return { write, timeline, log, entries, protectedPaths };
+  }
+
+  // Every identity a trip verifies or protects is observed after the last change
+  // before it and again right after it, before the next change.
+  function expectIdentityAroundEveryTrip(log: readonly string[], timeline: readonly string[]) {
+    const segments: string[][] = [[]];
+    for (const entry of log) {
+      if (entry.startsWith("trip:")) segments.push([]);
+      else segments[segments.length - 1]?.push(entry);
+    }
+    const isChange = (entry: string) => /^(mkdir|create|write|rename)/.test(entry);
+    const trips = timeline.filter((entry) => entry.startsWith("trip "));
+    trips.forEach((entry, index) => {
+      for (const request of entry.slice("trip ".length).split(" + ")) {
+        const [action, path] = [
+          request.slice(0, request.indexOf(" ")),
+          request.slice(request.indexOf(" ") + 1),
+        ];
+        if (action === "volume") continue;
+        const before = segments[index] ?? [];
+        const after = segments[index + 1] ?? [];
+        const lastChange = before.map(isChange).lastIndexOf(true);
+        expect(
+          before.lastIndexOf(`inspect:${path}`),
+          `before trip ${String(index + 1)}: ${request}`,
+        ).toBeGreaterThan(lastChange);
+        const firstChange = after.findIndex(isChange);
+        const firstInspect = after.indexOf(`inspect:${path}`);
+        expect(firstInspect, `after trip ${String(index + 1)}: ${request}`).toBeGreaterThanOrEqual(
+          0,
+        );
+        if (firstChange >= 0) expect(firstInspect).toBeLessThan(firstChange);
+      }
+    });
+  }
+
+  it("creates a private home and credential in eight trips, none of its checks dropped", () => {
+    const state = memoryWrite(false);
+    atomicWritePrivate0600(target, "fictional-token", state.write);
+    expect(state.timeline).toEqual([
+      `trip volume ${target}`,
+      `mkdir ${vault}`,
+      `trip protect ${vault}`,
+      `create ${target}`,
+      `trip protect ${target}`,
+      `trip volume ${staged} + verify ${vault}`,
+      `create ${staged}`,
+      `trip protect ${staged}`,
+      `trip verify ${vault} + verify ${staged}`,
+      "write",
+      `trip verify ${vault} + verify ${target} + verify ${staged}`,
+      "rename",
+      `trip verify ${vault} + verify ${target}`,
+    ]);
+    expectIdentityAroundEveryTrip(state.log, state.timeline);
+    expect(state.entries.has(staged)).toBe(false);
+  });
+
+  it("renews an existing credential in six trips, none of its checks dropped", () => {
+    const state = memoryWrite(true);
+    atomicWritePrivate0600(target, "fictional-token", state.write);
+    expect(state.timeline).toEqual([
+      `trip volume ${target} + verify ${vault} + verify ${target}`,
+      `trip volume ${staged} + verify ${vault}`,
+      `create ${staged}`,
+      `trip protect ${staged}`,
+      `trip verify ${vault} + verify ${staged}`,
+      "write",
+      `trip verify ${vault} + verify ${target} + verify ${staged}`,
+      "rename",
+      `trip verify ${vault} + verify ${target}`,
+    ]);
+    expectIdentityAroundEveryTrip(state.log, state.timeline);
+  });
+
+  it("refuses a directory whose rules are not verified before creating anything in it", () => {
+    const state = memoryWrite(true);
+    state.protectedPaths.delete(vault);
+    let caught: unknown;
+    try {
+      atomicWritePrivate0600(target, "fictional-token", state.write);
+    } catch (error) {
+      caught = error;
+    }
+    expect((caught as Error).message).toContain("check that the destination");
+    expect(String((caught as Error).cause)).toContain(`incompatible ACL: ${vault}`);
+    expect(state.timeline.some((entry) => entry.startsWith("create "))).toBe(false);
+    expect(state.timeline).toEqual([`trip volume ${target} + verify ${vault} + verify ${target}`]);
+  });
+});
 
 describe("Windows auth integration through fake protection ports", () => {
   it("protects the stage before bytes and checks both sides of atomic rename", () => {

@@ -141,6 +141,18 @@ export function aclBatchFailure(
   return refusedVolume ? new WindowsUnsupportedVolumeError(message) : new Error(message);
 }
 
+/** Throws unless the batch is one action, or verifications optionally led by a volume check. */
+export function assertAclBatch(requests: readonly WindowsAclRequest[]): void {
+  void requests;
+  throw new Error("not implemented: assertAclBatch");
+}
+
+/** The stdin the ACL script reads: one `action base64(path)` line per request. */
+export function encodeAclRequests(requests: readonly WindowsAclRequest[]): string {
+  void requests;
+  throw new Error("not implemented: encodeAclRequests");
+}
+
 export function runWindowsAclBatch(requests: readonly WindowsAclRequest[]): void {
   if (
     requests.length < 1 ||
