@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { inspect } from "node:util";
 
 import { TerminalInputError, terminalInput } from "./cli/terminal-io.js";
 
@@ -318,7 +319,46 @@ function resolveParse(io: CliIo, command: string, rest: readonly string[]): Pars
   return parsed;
 }
 
+/** The message of `error` and of everything it was caused by (`cause`, and the
+ * members of an `AggregateError`), outermost first. Each object appears once,
+ * so a cycle or a cause shared by two levels does not repeat or loop. */
+function failureMessages(error: unknown, seen: Set<object>): string[] {
+  if (typeof error !== "object" || error === null) return [String(error)];
+  if (seen.has(error)) return [];
+  seen.add(error);
+  const causes: unknown[] = [];
+  if ("cause" in error && error.cause !== undefined) causes.push(error.cause);
+  if (error instanceof AggregateError) {
+    const members: readonly unknown[] = error.errors;
+    causes.push(...members);
+  }
+  return [
+    error instanceof Error ? error.message : inspect(error, { breakLength: Infinity }),
+    ...causes.flatMap((cause) => failureMessages(cause, seen)),
+  ];
+}
+
+/** A failure that reaches the entry point is reported, not rethrown: the user
+ * reads `error: <message>` plus one `caused by:` line per level (the guidance
+ * of a refusal lives in the causes), never a Node stack trace. Nothing is
+ * dropped, and the exit code is non-zero. */
+function reportFailure(error: unknown, io: CliIo, json: boolean): number {
+  const [message, ...causes] = failureMessages(error, new Set());
+  const report = [message, ...causes.map((cause) => `caused by: ${cause}`)].join("\n");
+  if (json) io.stdout(`${stringifyJsonPreservingNumbers({ error: report })}\n`);
+  io.stderr(`error: ${report}\n`);
+  return 1;
+}
+
 export async function runCli(argv: readonly string[], supplied?: CliIo): Promise<number> {
+  try {
+    return await runCommand(argv, supplied);
+  } catch (error) {
+    return reportFailure(error, supplied ?? defaultIo(), argv.includes("--json"));
+  }
+}
+
+async function runCommand(argv: readonly string[], supplied?: CliIo): Promise<number> {
   const io = supplied ?? defaultIo();
   if (argv[0] === "--version") {
     io.stdout(`lohra ${version}\n`);

@@ -160,6 +160,10 @@ describe("a failure that reaches the CLI entry point", () => {
 
     const wrapped = await invokeThrowing(new Error("wrapper", { cause: "bare cause" }));
     expect(wrapped.stderr).toBe("error: wrapper\ncaused by: bare cause\n");
+
+    const object = await invokeThrowing({ code: "E_ODD" });
+    expect(object.stderr).toBe("error: { code: 'E_ODD' }\n");
+    expect(object.code).not.toBe(0);
   });
 
   it("shows where a private write was refused and the guidance in the first two lines", async () => {
