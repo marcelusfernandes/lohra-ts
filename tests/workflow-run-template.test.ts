@@ -183,14 +183,8 @@ describe("WorkflowService.start({template}) (#971)", () => {
   });
 
   it.each([
-    ["with 'spec'", triage, {}, /'template' and 'spec' are mutually exclusive/, false],
-    [
-      "with 'resume_run_id'",
-      null,
-      { resumeRunId: "r1" },
-      /not accepted with 'resume_run_id'/,
-      false,
-    ],
+    ["with 'spec'", triage, {}, /'template' and 'spec' are mutually exclusive/],
+    ["with 'resume_run_id'", null, { resumeRunId: "r1" }, /not accepted with 'resume_run_id'/],
   ])("refuses 'template' %s before anything starts", (_label, spec, extra, message) => {
     const f = fixture("lohra-run-template-excl-");
     const started = f.service.start(spec, {}, { template: "triage", ...extra });

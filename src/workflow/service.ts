@@ -605,6 +605,7 @@ export class WorkflowService {
       durable: false,
       warn: this.warn,
       onEvent: this.onEvent,
+      templateRef: options.origin?.ref ?? null, // #972
     });
     const rt = auditedRuntimeFor(this.runtime, this.auditTrail, () => null, false, this.warn);
     const engine = new WorkflowEngine({
@@ -764,6 +765,7 @@ export class WorkflowService {
       durable: true,
       warn: this.warn,
       onEvent: this.onEvent,
+      templateRef: options.origin?.ref ?? null, // #972
     });
     // The operator capability policy is loaded per launch from operator
     // config, never from the spec. The leaves of this stretch reach it through

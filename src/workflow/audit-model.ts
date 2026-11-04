@@ -104,6 +104,12 @@ const BOOLEAN_FIELDS = new Set([
   "interrupted",
 ]);
 const PATH_FIELDS = new Set(["node_path", "branch_path"]);
+// Issue #972 (épico #969): `workflow.plan`'s `template_ref` — a library
+// filename stem, kept in clear ONLY when it has `TEMPLATE_REF`'s exact shape
+// (`src/workflow/templates.ts`, not imported: this module stays a leaf);
+// anything else under that key is excluded like any other string.
+const REF_FIELDS = new Set(["template_ref"]);
+const TEMPLATE_REF_SHAPE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 // Issue #460 (M11-S2, épico #458): `node.rerouted`'s `from`/`to` — nested
 // `{provider, model}` objects, not a flattened `from_provider`/`from_model`
 // (decision recorded in `docs/decisions/2026-09-13-canal-route-envelope.md`)
@@ -363,6 +369,7 @@ function safeValue(value: unknown, key: string, depth: number): unknown {
     return NUMBER_FIELDS.has(key) && Number.isFinite(value) ? value : undefined;
   if (typeof value === "string") {
     if (IDENTITY_FIELDS.has(key)) return clipped(value, 128);
+    if (REF_FIELDS.has(key)) return TEMPLATE_REF_SHAPE.test(value) ? value : rawMarker(value);
     const allowed = SAFE_STRING_VALUES[key];
     if (allowed !== undefined) return allowed.has(value) ? value : rawMarker(value);
     return Object.freeze({
@@ -408,6 +415,7 @@ function safeValue(value: unknown, key: string, depth: number): unknown {
       !PATH_FIELDS.has(childKey) &&
       !CONTAINER_FIELDS.has(childKey) &&
       !OPAQUE_FIELDS.has(childKey) &&
+      !REF_FIELDS.has(childKey) &&
       SAFE_STRING_VALUES[childKey] === undefined
     ) {
       Object.defineProperty(out, childKey, {

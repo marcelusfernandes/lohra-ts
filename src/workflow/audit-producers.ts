@@ -36,6 +36,9 @@ export interface WorkflowAuditProducersDeps {
    * unconditionally — unlike the ledger write, it is never gated on
    * ownership (it always was, `service.ts:474` on main). */
   readonly onEvent: ((event: WorkflowEvent) => void) | undefined;
+  /** #972: the template this run was started from (#971), announced on
+   * every `plan`; `null`/omitted for an inline spec. */
+  readonly templateRef?: string | null;
 }
 
 export interface WorkflowAuditProducers {
@@ -177,7 +180,7 @@ export function recordAuditEvent(
 export function createWorkflowAuditProducers(
   deps: WorkflowAuditProducersDeps,
 ): WorkflowAuditProducers {
-  const { trail, live, runId, segmentId, ownershipOf, durable, warn, onEvent } = deps;
+  const { trail, live, runId, segmentId, ownershipOf, durable, warn, onEvent, templateRef } = deps;
   const failClosed: AuditFailClosedDeps = { trail, ownershipOf, durable, warn };
   // `announceNodePaused`'s fallback identity (quota/budget/user_requested —
   // never the checkpoint reason, which carries its own `node_id`): the last
@@ -233,6 +236,8 @@ export function createWorkflowAuditProducers(
     budget: Readonly<{ total: number; spent: number; remaining: number }> | null,
   ): void {
     const nodes = spec.nodes.map((node) => node.id);
+    const origin =
+      templateRef === null || templateRef === undefined ? {} : { template_ref: templateRef };
     live.emit(
       Object.freeze({
         kind: "plan",
@@ -240,11 +245,12 @@ export function createWorkflowAuditProducers(
         name: spec.name,
         nodes,
         ...(budget === null ? {} : { budget }),
+        ...origin,
       }),
     );
     record({
       event_type: "workflow.plan",
-      payload: { name: spec.name, budget, node_path: nodes },
+      payload: { name: spec.name, budget, node_path: nodes, ...origin },
     });
   }
 

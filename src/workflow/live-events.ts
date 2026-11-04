@@ -11,6 +11,9 @@ export type WorkflowLiveEvent = Readonly<{
   readonly budget?: Readonly<Record<string, unknown>>;
   readonly nodes?: readonly string[];
   readonly fault?: string;
+  /** #972: on `plan` only — the library template the run was started from
+   * (`run_workflow {template}`, #971); omitted for an inline spec. */
+  readonly template_ref?: string;
 }>;
 
 export class WorkflowLiveEvents {
