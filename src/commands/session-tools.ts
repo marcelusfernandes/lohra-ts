@@ -45,6 +45,8 @@ import { workflowPreviewHandler } from "../workflow/cache-preview.js";
 // Issue #464: `templateLoader` — same production loader `WorkflowService`
 // (`chat.ts`/`dashboard.ts`) resolves nested `workflow` nodes with.
 import { templateLoader } from "../workflow/templates.js";
+// Issue #970: same convention — `workflowSaveHandler` lives in its own module.
+import { workflowSaveHandler } from "../workflow/template-save.js";
 
 export interface SessionToolBase {
   readonly registry: ToolRegistry;
@@ -190,6 +192,13 @@ export function composeSessionTools(options: {
     // — same reason `workflow_preview` above is registered here rather than
     // in `createSessionToolBase`.
     workflow_templates: workflowTemplatesHandler(options.home),
+    // Issue #970: writes into the SAME library `workflow_templates` reads,
+    // from the durable row of a run the live service knows.
+    workflow_save: workflowSaveHandler(
+      options.home,
+      (runId) => options.workflowService.durableRun(runId),
+      templateLoader(options.home),
+    ),
     ...options.orchestrationHandlers,
     ...media.handlers,
   });

@@ -446,7 +446,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Run a dynamic multi-agent workflow as a declarative spec \u2014 a DAG of sub-agents pursuing a goal autonomously. Use for wide/adversarial/long-resumable work; for one self-contained task use 'delegate_task' instead. 'spec' is {meta{name}, schemas?, nodes:[{id, type, ...}]}. Node types (CLOSED set of 10): agent, parallel, pipeline, loop_until_dry, verify, judge_panel, workflow, gate, completeness_check, checkpoint. Branches in the same run share ONE working filesystem root \u2014 one file per leaf, aggregate downstream, never write the SAME file from parallel branches. 'min_success_ratio' (pipeline) and 'budget' (loop_until_dry) are real caps. Prefer 'tier' over a hard-coded 'model'. Returns a run_id \u2014 poll with workflow_status. Load the workflow-authoring skill before authoring.",
+        "Run a dynamic multi-agent workflow as a declarative spec \u2014 a DAG of sub-agents pursuing a goal autonomously. Use for wide/adversarial/long-resumable work; for one self-contained task use 'delegate_task' instead. 'spec' is {meta{name}, schemas?, nodes:[{id, type, ...}]}. Node types (CLOSED set of 10): agent, parallel, pipeline, loop_until_dry, verify, judge_panel, workflow, gate, completeness_check, checkpoint. Branches in the same run share ONE working filesystem root \u2014 one file per leaf, aggregate downstream, never write the SAME file from parallel branches. 'min_success_ratio' (pipeline) and 'budget' (loop_until_dry) are real caps. Prefer 'tier' over a hard-coded 'model'. Returns a run_id \u2014 poll with workflow_status. Load the workflow-authoring skill before authoring; save a complete run worth repeating with workflow_save.",
       parameters: {
         type: "object",
         properties: {
@@ -562,7 +562,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "List validated workflow templates, or fetch one by 'name' for its full spec. Prefer adapting one over authoring fresh. 'ref' is the filename without extension.",
+        "List validated workflow templates (the operator's and those saved with workflow_save: origin, description), or fetch one by 'name' for its full spec. Check before authoring; adapt one over starting fresh. 'ref' is the filename without extension.",
       parameters: {
         type: "object",
         properties: {
@@ -784,6 +784,23 @@ export const BUILTIN_DEFINITIONS = [
         required: ["run_id"],
       },
       name: "workflow_preview",
+    },
+  },
+  {
+    type: "function",
+    function: {
+      description:
+        "Save a 'complete' workflow run's spec as a reusable template under a NEW 'ref' (never overwrites; a new version is a new ref). Save only a shape worth repeating; it then shows in workflow_templates.",
+      parameters: {
+        type: "object",
+        properties: {
+          run_id: { type: "string", description: "A run whose status is 'complete'." },
+          ref: { type: "string", description: "New template name: [a-z0-9][a-z0-9_-]{0,63}." },
+          description: { type: "string", description: "What it is for (max 1024 chars)." },
+        },
+        required: ["run_id", "ref", "description"],
+      },
+      name: "workflow_save",
     },
   },
 ] as const satisfies readonly ToolDefinition[];

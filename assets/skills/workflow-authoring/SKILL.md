@@ -557,18 +557,32 @@ matters yourself and put it in `args`.
 ## 8. Before you author: check the library
 
 Call **`workflow_templates`** first. Without `name` it lists every `.json`
-under the operator's `<home>/workflows/` directory:
-`{templates: [{ref, name?, nodes?, error?}]}`. `ref` is the filename without
-`.json` — the same `ref` a `{type: "workflow", ref}` node resolves through.
-An entry with `name` and `nodes` is a template the loader validated clean; an
-entry with `error` instead is a file the loader rejected (invalid `ref`
-format, invalid JSON, or a spec that fails validation) — it never drops
-silently from the list. Pass
-`name` to fetch one template's full, validated spec: `{ref, spec}`. There is
-no history of past runs and no priors distilled from anything — the library
-is exactly the operator's saved files, nothing more.
+under `<home>/workflows/`:
+`{templates: [{ref, name?, nodes?, origin?, description?, error?}]}`. `ref` is
+the filename without `.json` — the same `ref` a `{type: "workflow", ref}` node
+resolves through. `origin` is `"agent"` for a template saved with
+`workflow_save` (below) and `"operator"` for one the operator wrote by hand;
+`description` says what it is for. An entry with `name` and `nodes` is a
+template the loader validated clean; an entry with `error` instead is a file
+the loader rejected (invalid `ref` format, invalid JSON, or a spec that fails
+validation) — it never drops silently from the list. Pass `name` to fetch one
+template's full, validated spec: `{ref, spec}`.
 
 Adapt, don't copy blindly: keep the shape, replace the prompts and schemas.
+
+### Keep a workflow worth repeating: `workflow_save`
+
+When a run you authored finished **`complete`** and the same kind of task will
+come back, save it: `workflow_save {run_id, ref, description}`. It stores the
+spec that actually ran (from the run's own durable row) under a **new** `ref`,
+adds `meta.origin` and `meta.description`, and revalidates it exactly like a
+launch. Write the spec with `${args.x}` inputs before you run it, so the saved
+template takes new inputs next time. Don't save a one-off.
+
+Every refusal is named and writes nothing: the run is not `complete`, the `ref`
+is taken (a save never overwrites — a new version is a new `ref`), the
+description is empty or over 1024 characters, the template is over 256 KB, or
+the library already holds 100 templates you saved.
 
 ---
 

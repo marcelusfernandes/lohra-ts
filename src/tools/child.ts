@@ -26,6 +26,7 @@ export const CHILD_EXCLUDED_TOOLS = Object.freeze([
   "workflow_pause",
   "workflow_cancel",
   "workflow_templates",
+  "workflow_save",
   "list_models",
 ] as const);
 

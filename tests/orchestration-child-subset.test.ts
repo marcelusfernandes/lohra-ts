@@ -52,8 +52,9 @@ const REAL_24_TOOL_NAMES: readonly string[] = [
 
 describe("child toolset subset relation (errata E2)", () => {
   it("uses the complete, unique 19-name oracle exclusion set", () => {
-    expect(CHILD_EXCLUDED_TOOLS).toHaveLength(24);
-    expect(new Set(CHILD_EXCLUDED_TOOLS).size).toBe(24);
+    // #970: +workflow_save — the orchestrator's own library write, never a leaf's.
+    expect(CHILD_EXCLUDED_TOOLS).toHaveLength(25);
+    expect(new Set(CHILD_EXCLUDED_TOOLS).size).toBe(25);
   });
 
   const catalogs: Record<string, readonly ToolDefinition[]> = {

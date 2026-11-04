@@ -1107,6 +1107,12 @@ export class WorkflowService {
     return liveRuntimeOf(this.runs, runId); // #424: workflow_steer's only way to reach a run's decorator
   }
 
+  /** #970: the durable row of one run — `workflow_save` reads the spec and
+   * status a template is saved from (`null` without a store, or unknown id). */
+  durableRun(runId: string): DurableRunView | null {
+    return this.durableOf(runId);
+  }
+
   // --- reads: live + durable ---------------------------------------------------
 
   async status(

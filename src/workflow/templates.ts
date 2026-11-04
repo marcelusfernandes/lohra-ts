@@ -86,11 +86,29 @@ export function templateLoader(home: string): WorkflowLoader {
   };
 }
 
+/** `meta.origin.by` of a template the agent saved (`workflow_save`,
+ * `template-save.ts`, #970); anything else is the operator's own file. */
+export const AGENT_ORIGIN = "agent";
+
+export type TemplateOrigin = "agent" | "operator";
+
 export interface TemplateListing {
   readonly ref: string;
   readonly name?: string;
   readonly nodes?: number;
+  readonly origin?: TemplateOrigin;
+  readonly description?: string;
   readonly error?: string;
+}
+
+/** #970: who wrote a template and what it is for, from its own `meta`. */
+export function templateOrigin(meta: Readonly<Record<string, unknown>>): TemplateOrigin {
+  const origin = meta.origin;
+  return origin !== null &&
+    typeof origin === "object" &&
+    (origin as Readonly<Record<string, unknown>>).by === AGENT_ORIGIN
+    ? "agent"
+    : "operator";
 }
 
 /** Directory listing of every `.json` under `<home>/workflows/` — fail-closed
@@ -117,7 +135,14 @@ export function listTemplates(home: string): readonly TemplateListing[] {
         entries.push({ ref, error: spec.message });
         continue;
       }
-      entries.push({ ref, name: spec.name, nodes: spec.nodes.length });
+      const description = spec.meta.description;
+      entries.push({
+        ref,
+        name: spec.name,
+        nodes: spec.nodes.length,
+        origin: templateOrigin(spec.meta),
+        ...(typeof description === "string" && description !== "" ? { description } : {}),
+      });
     } catch (error) {
       entries.push({ ref, error: error instanceof Error ? error.message : String(error) });
     }

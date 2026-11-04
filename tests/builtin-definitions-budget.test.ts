@@ -32,7 +32,10 @@ import { describe, expect, it } from "vitest";
 
 import { BUILTIN_DEFINITIONS } from "../src/tools/builtin-definitions.js";
 
-const CATALOG_BUDGET_CHARS = 22_000;
+// #969 (épico): +`workflow_save` (#970) and `run_workflow`'s `template` (#971)
+// — the orchestrator keeps and reruns the workflows it builds. Raised by what
+// those two cost, not by a round number.
+const CATALOG_BUDGET_CHARS = 23_000;
 
 function findTool(name: string): (typeof BUILTIN_DEFINITIONS)[number] {
   const tool = BUILTIN_DEFINITIONS.find((definition) => definition.function.name === name);
@@ -118,10 +121,14 @@ const PRE_DIET_PARAMETERS_HASH: Record<(typeof PRE_DIET_NAMES)[number], string> 
   workflow_preview: "f5269e11d7d1c3e51a88b8047a81e2f63b31692baeeb94ce83229522463c0bd6",
 };
 
+// Tools added after the diet go at the END, never between the pre-diet ones.
+const ADDED_AFTER_DIET = ["workflow_save"] as const; // #970
+
 describe("BUILTIN_DEFINITIONS structural contract (#585)", () => {
   it("keeps declaration order and every name unchanged by the diet", () => {
     expect(BUILTIN_DEFINITIONS.map((definition) => definition.function.name)).toEqual([
       ...PRE_DIET_NAMES,
+      ...ADDED_AFTER_DIET,
     ]);
   });
 

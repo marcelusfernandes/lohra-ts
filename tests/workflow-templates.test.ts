@@ -249,7 +249,13 @@ describe("listTemplates (#464)", () => {
     writeFileSync(join(dir, "broken.json"), "{not json", "utf8");
     const { listTemplates } = await importTemplates();
     const listing = listTemplates(home);
-    expect(listing).toContainEqual({ ref: "inner", name: "inner-agent", nodes: 1 });
+    // #970: every valid entry now says who wrote it — no `meta.origin` is the operator's.
+    expect(listing).toContainEqual({
+      ref: "inner",
+      name: "inner-agent",
+      nodes: 1,
+      origin: "operator",
+    });
     const broken = listing.find((entry) => entry.ref === "broken");
     expect(broken?.error).toContain("is not valid JSON");
   });
