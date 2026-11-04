@@ -55,6 +55,21 @@ Em home existente ou customizado incompatível, o comportamento sensível deve
 falhar com causa até existir um caminho protegido comprovado; esta decisão não
 autoriza modificar ACLs preexistentes nem migrar o home.
 
+> **Emenda 2026-11-04 (owner):** um diretório preexistente (home, base,
+> profile ou pasta de imagens) é compatível quando todas as regras da DACL,
+> herdadas ou não, são `Allow` para a identidade dona, SYSTEM (`S-1-5-18`) ou
+> Administradores (`S-1-5-32-544`), o dono é o usuário atual e ele tem controle
+> total. Essas identidades já estão fora da garantia do item 1. Herança com
+> qualquer outra identidade, regra `Deny`, dono diferente, reparse point ou
+> volume que não seja NTFS fixo continua incompatível. A recusa diz quais
+> identidades não aprovadas têm acesso e como obter um home protegido: mover ou
+> renomear a pasta para o Lohra recriá-la, ou apontar `LOHRA_HOME` para um
+> caminho novo. Os objetos que o Lohra cria continuam nascendo protegidos, sem
+> herança, e o Lohra segue sem modificar ACLs preexistentes nem migrar o home.
+> Custo aceito: a herança acompanha mudanças futuras no diretório pai. Toda
+> gravação verifica de novo e recusa se surgir uma identidade não aprovada, mas
+> a leitura nesse intervalo fica exposta. Decisão registrada na #947.
+
 ## Consequências e limites do aceite
 
 A implementação e a validação ainda são trabalho futuro. A aprovação da
