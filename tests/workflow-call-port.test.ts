@@ -41,6 +41,14 @@ import type {
 import { TaintTracker } from "../src/workflow/sandbox.js";
 import { WorkflowService } from "../src/workflow/service.js";
 
+// `isCallTool` stays the real one except where a test says otherwise: the
+// composition test below pretends the allow-list was widened by mistake, to
+// prove `createChildDispatch` still stands behind it.
+vi.mock("../src/workflow/call-tools.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/workflow/call-tools.js")>();
+  return { ...actual, isCallTool: vi.fn(actual.isCallTool) };
+});
+
 const roots: string[] = [];
 
 afterEach(() => {
@@ -204,6 +212,21 @@ describe("OrchestrationChildRuntime.callTool — refused before any dispatch", (
       expect(result.output).toContain("read_file");
     }
     expect(wrapped).toEqual([]);
+    expect(base.calls).toEqual([]);
+  });
+
+  it("defense in depth: even if the allow-list were widened by mistake, createChildDispatch still refuses a child-excluded tool and a dangerous command before the base", async () => {
+    const base = spyBase();
+    const runtime = new OrchestrationChildRuntime(makeCore(), base.dispatch);
+    runtime.installLeafSandbox({ runId: "r1", fence: 1, wrap: passThrough });
+    const widened = vi.mocked(isCallTool);
+    widened.mockReturnValueOnce(true);
+    const excluded = await runtime.callTool(request("r1", "delegate_task", { goal: "x" }));
+    expect(excluded.status).toBe("denied");
+    expect(excluded.output).toContain("not available to subagents");
+    widened.mockReturnValueOnce(true);
+    const dangerous = await runtime.callTool(request("r1", "terminal", { command: "rm -rf /" }));
+    expect(dangerous.status).toBe("denied");
     expect(base.calls).toEqual([]);
   });
 
