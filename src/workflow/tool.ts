@@ -56,10 +56,16 @@ export class WorkflowTool {
     const spec = args.spec;
     if (spec !== undefined && record(spec) === null)
       return toolError("'spec' must be an object (with meta + nodes)");
-    // #971: a saved template by `ref`, instead of re-sending its spec.
-    const template = args.template;
-    if (template !== undefined && (typeof template !== "string" || template === ""))
-      return toolError("'template' must be a non-empty string (a ref from workflow_templates)");
+    // #971: a saved template by `ref`, instead of re-sending its spec. An
+    // empty one is absence — a strict-schema caller (Codex `strict: true`)
+    // fills every optional field (same idiom as `workflow_audit`, #390).
+    const rawTemplate = args.template;
+    const template =
+      rawTemplate === null || (typeof rawTemplate === "string" && rawTemplate.trim() === "")
+        ? undefined
+        : rawTemplate;
+    if (template !== undefined && typeof template !== "string")
+      return toolError("'template' must be a string (a ref from workflow_templates)");
     if (spec === undefined && resumeRunId === undefined && template === undefined)
       return toolError(
         "run_workflow needs a 'spec' object (with meta + nodes) or a 'template' ref",

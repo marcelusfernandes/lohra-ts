@@ -347,6 +347,23 @@ describe("workflowTemplatesHandler (#464)", () => {
     expect(parsed.templates.map((entry) => entry.ref)).toContain("inner");
   });
 
+  // Dogfood of #969: Codex (`strict: true`) sent `{name: ""}` eleven times in a
+  // row and never saw the library — an empty/null `name` now lists.
+  it.each([[""], ["   "], [null]])(
+    "lists when 'name' is %j — a strict-schema caller's way of omitting it",
+    async (name) => {
+      const home = operatorHome("lohra-templates-tool-strict-");
+      writeTemplate(home, "inner", innerAgentSpec);
+      const { workflowTemplatesHandler } = await importTemplates();
+      const parsed = JSON.parse(await workflowTemplatesHandler(home)({ name })) as {
+        templates?: readonly { ref: string }[];
+        error?: string;
+      };
+      expect(parsed.error).toBeUndefined();
+      expect(parsed.templates?.map((entry) => entry.ref)).toEqual(["inner"]);
+    },
+  );
+
   it("returns the validated spec for a known 'name'", async () => {
     const home = operatorHome("lohra-templates-tool-get-");
     writeTemplate(home, "inner", innerAgentSpec);

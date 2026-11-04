@@ -305,6 +305,20 @@ describe("run_workflow tool surface (#971)", () => {
     });
   }
 
+  it("treats an empty 'template' as absent — a strict-schema caller fills every field", async () => {
+    const f = fixture("lohra-run-template-tool-strict-");
+    const tools = composed(f);
+    const started = JSON.parse(
+      await tools.dispatch("run_workflow", { spec: triage, template: "", args: { repo: "x" } }),
+    ) as { run_id?: string; error?: string };
+    expect(started.error).toBeUndefined();
+    const status = JSON.parse(
+      await tools.dispatch("workflow_status", { run_id: started.run_id, wait: true }),
+    ) as Record<string, unknown>;
+    expect(status.status).toBe("complete");
+    expect("template_ref" in status).toBe(false);
+  });
+
   it("run_workflow {template} starts the run and workflow_status shows template_ref", async () => {
     const f = fixture("lohra-run-template-tool-");
     const tools = composed(f);
@@ -319,8 +333,8 @@ describe("run_workflow tool surface (#971)", () => {
   });
 
   it.each([
-    [{ template: "" }, /'template' must be a non-empty string/],
-    [{ template: 7 }, /'template' must be a non-empty string/],
+    [{ template: "" }, /needs a 'spec' object \(with meta \+ nodes\) or a 'template' ref/],
+    [{ template: 7 }, /'template' must be a string/],
     [{ template: "triage", spec: triage }, /'template' and 'spec' are mutually exclusive/],
     [{ template: "missing" }, /invalid workflow spec: template 'missing' not found/],
   ])("answers a named toolError for %o", async (args, message) => {

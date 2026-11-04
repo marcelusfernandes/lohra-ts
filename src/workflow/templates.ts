@@ -175,7 +175,11 @@ export function workflowTemplatesHandler(
 ): ToolHandler {
   return (args: ToolArguments): string => {
     const name = args.name;
-    if (name === undefined) {
+    // Dogfood of #969: a strict-schema caller (Codex `strict: true`) fills
+    // every optional field, so "list" arrives as `name: ""` — the same
+    // `""`-as-absence idiom `workflow_audit`/`workflow_notices` follow (#390).
+    // Before this, such a caller could never list the library at all.
+    if (name === undefined || name === null || (typeof name === "string" && name.trim() === "")) {
       // #973: a scoreboard that cannot be read never hides the library —
       // the listing still answers, and says why the stats are missing.
       let scoreboard: ReadonlyMap<string, TemplateStats> | undefined;
@@ -190,8 +194,7 @@ export function workflowTemplatesHandler(
         ...(statsError === undefined ? {} : { stats_error: statsError }),
       });
     }
-    if (typeof name !== "string" || name === "")
-      return toolError("'name' must be a non-empty string");
+    if (typeof name !== "string") return toolError("'name' must be a string (a template ref)");
     let raw: unknown;
     try {
       raw = templateLoader(home)(name);
