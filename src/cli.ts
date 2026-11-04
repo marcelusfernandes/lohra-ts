@@ -350,6 +350,22 @@ function reportFailure(error: unknown, io: CliIo, json: boolean): number {
   return 1;
 }
 
+export interface FlushableStream {
+  readonly destroyed: boolean;
+  readonly writable: boolean;
+  write(chunk: string, callback: () => void): unknown;
+}
+
+export interface FailureExit {
+  readonly streams: readonly FlushableStream[];
+  readonly exit: (code: number) => void;
+  readonly graceMs: number;
+}
+
+export function endAfterFailure(_code: number, _exit?: Partial<FailureExit>): NodeJS.Timeout {
+  throw new Error("not implemented: endAfterFailure");
+}
+
 export async function runCli(argv: readonly string[], supplied?: CliIo): Promise<number> {
   try {
     return await runCommand(argv, supplied);
