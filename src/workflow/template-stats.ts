@@ -102,6 +102,17 @@ export interface TemplateStatsSource {
   templateRunStats(limit: number): readonly TemplateRunStatusRow[];
 }
 
-export function readTemplateStats(source: TemplateStatsSource): ReadonlyMap<string, TemplateStats> {
-  return foldTemplateStats(source.templateRunStats(TEMPLATE_STATS_ROW_LIMIT));
+/** The scoreboard plus whether the row cap cut it short — a truncated
+ * scoreboard is said so, never passed off as complete. */
+export interface TemplateScoreboard {
+  readonly byRef: ReadonlyMap<string, TemplateStats>;
+  readonly truncated: boolean;
+}
+
+export function readTemplateStats(
+  source: TemplateStatsSource,
+  limit: number = TEMPLATE_STATS_ROW_LIMIT,
+): TemplateScoreboard {
+  const rows = source.templateRunStats(limit);
+  return { byRef: foldTemplateStats(rows), truncated: rows.length >= limit };
 }

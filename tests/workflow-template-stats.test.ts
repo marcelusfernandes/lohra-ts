@@ -9,6 +9,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { runCli, type CliIo } from "../src/cli.js";
 import { composeSessionTools, createSessionToolBase } from "../src/commands/session-tools.js";
 import { runWorkflowCommand } from "../src/commands/workflow.js";
 import { usage } from "../src/pricing/usage.js";
@@ -28,6 +29,7 @@ import { WorkflowService } from "../src/workflow/service.js";
 import {
   EMPTY_TEMPLATE_STATS,
   foldTemplateStats,
+  readTemplateStats,
   type TemplateStats,
 } from "../src/workflow/template-stats.js";
 import {
@@ -196,6 +198,18 @@ describe("WorkflowRepository.templateRunStats (#973)", () => {
     const f = await seeded("lohra-template-stats-limit-");
     expect(new WorkflowRepository(f.connection.database).templateRunStats(1)).toHaveLength(1);
   });
+
+  it("says when the row cap cut the scoreboard short (review R2)", async () => {
+    const f = await seeded("lohra-template-stats-truncated-");
+    const repository = new WorkflowRepository(f.connection.database);
+    expect(readTemplateStats(repository, 1).truncated).toBe(true);
+    expect(readTemplateStats(repository).truncated).toBe(false);
+    const handler = workflowTemplatesHandler(f.home, () => readTemplateStats(repository, 1));
+    const parsed = JSON.parse(await handler({})) as { stats_truncated?: boolean };
+    expect(parsed.stats_truncated).toBe(true);
+    const full = workflowTemplatesHandler(f.home, () => readTemplateStats(repository));
+    expect("stats_truncated" in (JSON.parse(await full({})) as object)).toBe(false);
+  });
 });
 
 describe("workflow_templates with the scoreboard (#973)", () => {
@@ -254,6 +268,53 @@ describe("workflow_templates with the scoreboard (#973)", () => {
   it("listTemplates without stats keeps the pre-#973 shape (no stats key)", () => {
     const f = fixture("lohra-template-stats-nostats-");
     expect(listTemplates(f.home).every((entry) => !("stats" in entry))).toBe(true);
+  });
+});
+
+describe("lohra workflow templates through the real CLI parser (#973, review R2)", () => {
+  async function invoke(
+    argv: readonly string[],
+    home: string,
+  ): Promise<{ code: number; out: string; err: string }> {
+    let out = "";
+    let err = "";
+    const io: CliIo = {
+      environment: { LOHRA_HOME: home, HOME: home, PATH: process.env.PATH ?? "" },
+      stdout: (value) => {
+        out += value;
+      },
+      stderr: (value) => {
+        err += value;
+      },
+      probeOllama: () => Promise.resolve(false),
+    };
+    const code = await runCli(argv, io);
+    return { code, out, err };
+  }
+
+  it("lohra workflow --help lists the templates action", async () => {
+    const home = mkdtempSync(join(tmpdir(), "lohra-template-stats-help-"));
+    roots.push(home);
+    const { code, out } = await invoke(["workflow", "--help"], home);
+    expect(code).toBe(0);
+    expect(out).toMatch(/^\s+templates\s+list workflow templates with their run scoreboard$/mu);
+  });
+
+  it("dispatches `workflow templates --json` and refuses an unknown flag with exit 2", async () => {
+    const home = mkdtempSync(join(tmpdir(), "lohra-template-stats-parse-"));
+    roots.push(home);
+    mkdirSync(join(home, "workflows"), { recursive: true });
+    writeFileSync(join(home, "workflows", "unused.json"), JSON.stringify(unused), "utf8");
+    const ok = await invoke(["workflow", "templates", "--json"], home);
+    expect(ok.code).toBe(0);
+    const parsed = JSON.parse(ok.out) as { templates: readonly Record<string, unknown>[] };
+    expect(parsed.templates.map((entry) => entry.ref)).toEqual(["unused"]);
+    const bad = await invoke(["workflow", "templates", "--bogus"], home);
+    expect(bad.code).toBe(2);
+    expect(bad.err).toContain('unexpected argument "--bogus"');
+    const wrong = await invoke(["workflow", "nope"], home);
+    expect(wrong.code).toBe(2);
+    expect(wrong.err).toContain("choose from list, watch, audit, notices, templates");
   });
 });
 

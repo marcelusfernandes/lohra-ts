@@ -434,7 +434,7 @@ export class WorkflowService {
       ...options,
       ...routeOverrideOption(routed.override),
       rerouted: routed.rerouted,
-      origin: launchOrigin(template, explicitSpec, prior),
+      origin: launchOrigin(template, explicitSpec, prior, rawSpec),
     };
     const budget = options.tokenBudget;
     if (

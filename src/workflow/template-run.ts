@@ -57,14 +57,22 @@ export function resolveTemplateLaunch(
 }
 
 /** The origin a launch records: the template it was started from; on a
- * resume that replays its own spec, the origin it already had; on a resume
- * that sends a different spec, none — it no longer runs that template. */
+ * resume that replays its own spec — or re-sends that very template, same
+ * hash — the origin it already had; on a resume that sends a different spec,
+ * none: it no longer runs that template. */
 export function launchOrigin(
   template: { readonly origin: RunTemplateOrigin } | null,
   explicitSpec: boolean,
   prior: { readonly template_ref: string | null; readonly template_hash: string | null } | null,
+  rawSpec?: unknown,
 ): RunTemplateOrigin | null {
   if (template !== null) return template.origin;
-  if (explicitSpec || prior === null || prior.template_ref === null) return null;
-  return { ref: prior.template_ref, hash: prior.template_hash ?? "" };
+  if (prior === null || prior.template_ref === null) return null;
+  const origin = { ref: prior.template_ref, hash: prior.template_hash ?? "" };
+  if (!explicitSpec) return origin;
+  return prior.template_hash !== null &&
+    rawSpec !== undefined &&
+    templateHash(rawSpec) === prior.template_hash
+    ? origin
+    : null;
 }

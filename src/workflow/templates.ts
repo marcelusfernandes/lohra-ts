@@ -12,7 +12,11 @@ import { basename, join } from "node:path";
 import { toolError, toolResult } from "../tools/envelope.js";
 import type { ToolArguments, ToolHandler } from "../tools/types.js";
 import type { WorkflowLoader } from "./engine-contract.js";
-import { EMPTY_TEMPLATE_STATS, type TemplateStats } from "./template-stats.js";
+import {
+  EMPTY_TEMPLATE_STATS,
+  type TemplateScoreboard,
+  type TemplateStats,
+} from "./template-stats.js";
 import { validateSpec } from "./schema.js";
 import { isValidationError } from "./types.js";
 
@@ -171,7 +175,7 @@ export function listTemplates(
  * the shape returned. */
 export function workflowTemplatesHandler(
   home: string,
-  stats?: () => ReadonlyMap<string, TemplateStats>,
+  stats?: () => TemplateScoreboard,
 ): ToolHandler {
   return (args: ToolArguments): string => {
     const name = args.name;
@@ -182,7 +186,7 @@ export function workflowTemplatesHandler(
     if (name === undefined || name === null || (typeof name === "string" && name.trim() === "")) {
       // #973: a scoreboard that cannot be read never hides the library —
       // the listing still answers, and says why the stats are missing.
-      let scoreboard: ReadonlyMap<string, TemplateStats> | undefined;
+      let scoreboard: TemplateScoreboard | undefined;
       let statsError: string | undefined;
       try {
         scoreboard = stats?.();
@@ -190,7 +194,8 @@ export function workflowTemplatesHandler(
         statsError = error instanceof Error ? error.message : String(error);
       }
       return toolResult(undefined, {
-        templates: listTemplates(home, scoreboard),
+        templates: listTemplates(home, scoreboard?.byRef),
+        ...(scoreboard?.truncated === true ? { stats_truncated: true } : {}),
         ...(statsError === undefined ? {} : { stats_error: statsError }),
       });
     }

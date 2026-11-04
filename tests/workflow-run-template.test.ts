@@ -196,8 +196,10 @@ describe("WorkflowService.start({template}) (#971)", () => {
   it.each([
     ["an absent ref", "missing", /template 'missing' not found/],
     ["an invalid ref", "../x", /invalid ref format/],
+    ["a template that is not valid JSON", "broken", /template 'broken' at .* is not valid JSON/],
   ])("refuses %s as an invalid spec, never spawning", (_label, ref, message) => {
     const f = fixture("lohra-run-template-bad-");
+    writeFileSync(join(f.home, "workflows", "broken.json"), "{not json", "utf8");
     const started = f.service.start(null, {}, { template: ref });
     expect("error" in started).toBe(true);
     if ("error" in started) {
@@ -205,6 +207,7 @@ describe("WorkflowService.start({template}) (#971)", () => {
       expect(started.invalid_spec).toBe(true);
     }
     expect(f.runtime.requests).toHaveLength(0);
+    expect(new WorkflowRepository(f.connection.database).recentRunStates(10)).toHaveLength(0);
   });
 
   it("refuses a template whose spec fails validation", () => {
@@ -272,6 +275,7 @@ describe("templateHash/launchOrigin (#971)", () => {
         template: { origin: { ref: string; hash: string } } | null,
         explicitSpec: boolean,
         prior: { template_ref: string | null; template_hash: string | null } | null,
+        rawSpec?: unknown,
       ) => { ref: string; hash: string } | null;
     };
     expect(module.templateHash(triage)).toBe(sha256(triage));
@@ -282,6 +286,13 @@ describe("templateHash/launchOrigin (#971)", () => {
       hash: "hb",
     });
     expect(module.launchOrigin(null, true, { template_ref: "b", template_hash: "hb" })).toBeNull();
+    // Review R2: re-sending the very template (same hash) keeps the origin.
+    const same = { template_ref: "triage", template_hash: sha256(triage) };
+    expect(module.launchOrigin(null, true, same, triage)).toEqual({
+      ref: "triage",
+      hash: sha256(triage),
+    });
+    expect(module.launchOrigin(null, true, same, { ...triage, meta: { name: "x" } })).toBeNull();
     expect(module.launchOrigin(null, false, null)).toBeNull();
   });
 });

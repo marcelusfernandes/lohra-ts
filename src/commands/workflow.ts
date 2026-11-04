@@ -230,9 +230,13 @@ export async function runWorkflowCommand(options: WorkflowCommandOptions): Promi
     }
     if (options.action === "templates") {
       const home = options.home ?? dirname(options.databasePath);
-      const templates = listTemplates(home, readTemplateStats(repository));
+      const scoreboard = readTemplateStats(repository);
+      const templates = listTemplates(home, scoreboard.byRef);
+      const truncated = scoreboard.truncated ? { stats_truncated: true } : {};
+      if (scoreboard.truncated)
+        options.stderr("template stats truncated at the row cap — counts are incomplete\n");
       if (options.args.json === true) {
-        options.stdout(`${JSON.stringify({ templates }, null, 2)}\n`);
+        options.stdout(`${JSON.stringify({ templates, ...truncated }, null, 2)}\n`);
       } else if (templates.length === 0) {
         options.stdout(`no workflow templates in ${join(home, OPERATOR_TEMPLATES_DIR)}\n`);
       } else {

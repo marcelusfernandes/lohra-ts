@@ -76,9 +76,11 @@ function errorCode(error: unknown): string | undefined {
 }
 
 /** Templates in `dir` whose `meta.origin.by` is the agent's. A file that
- * cannot be read or parsed is not counted: it already surfaces as
- * `{ref, error}` in `listTemplates`, and no valid save could have produced
- * it (saves are validated and atomic). */
+ * cannot be READ refuses the save (it might be the agent's, and the cap must
+ * never under-count silently); a file that is not valid JSON is never an
+ * agent save (saves are validated and atomic) and already surfaces as
+ * `{ref, error}` in `listTemplates`. Two concurrent saves at the cap can
+ * still land one over it — bounded, since each needs its own complete run. */
 export function countAgentTemplates(dir: string): number {
   let names: string[];
   try {
@@ -90,11 +92,21 @@ export function countAgentTemplates(dir: string): number {
   let count = 0;
   for (const name of names) {
     if (!name.endsWith(".json")) continue;
+    let content: string;
+    try {
+      content = readFileSync(join(dir, name), "utf8");
+    } catch (error) {
+      if (errorCode(error) === "ENOENT") continue; // removed since the listing
+      throw new TemplateSaveError(
+        `template library entry ${join(dir, name)} could not be read — the ${String(MAX_AGENT_TEMPLATES)}-template cap cannot be checked`,
+        error,
+      );
+    }
     let raw: unknown;
     try {
-      raw = JSON.parse(readFileSync(join(dir, name), "utf8")) as unknown;
+      raw = JSON.parse(content) as unknown;
     } catch {
-      continue;
+      continue; // not valid JSON: never an agent save (see above)
     }
     const origin = record(record(record(raw)?.meta)?.origin);
     if (origin?.by === AGENT_ORIGIN) count += 1;

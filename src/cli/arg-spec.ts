@@ -298,6 +298,7 @@ export const SUBCOMMAND_HELP = {
     watch: "follow a running workflow",
     audit: "inspect the event log of one run",
     notices: "list or acknowledge durable operator notices",
+    templates: "list workflow templates with their run scoreboard",
   },
   tiers: {
     list: "list configured tiers",

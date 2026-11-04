@@ -298,6 +298,38 @@ describe("saveTemplate (#970)", () => {
   });
 });
 
+describe("the agent-template cap never under-counts silently (#970, review R2)", () => {
+  it("refuses the save when a library entry cannot be read", async () => {
+    const home = operatorHome("lohra-save-unreadable-");
+    // A directory named like a template: readFileSync fails (EISDIR) — the
+    // same refusal an EBUSY/EPERM file gets on Windows.
+    mkdirSync(join(libraryDir(home), "locked.json"), { recursive: true });
+    const { saveTemplate } = await importSave();
+    expect(() =>
+      saveTemplate(home, completeRun, undefined, {
+        runId: "run-1",
+        ref: "triage",
+        description: "d",
+      }),
+    ).toThrow(/locked\.json could not be read — the 100-template cap cannot be checked/);
+    expect(existsSync(join(libraryDir(home), "triage.json"))).toBe(false);
+  });
+
+  it("does not count a file that is not valid JSON (never an agent save)", async () => {
+    const home = operatorHome("lohra-save-badjson-");
+    mkdirSync(libraryDir(home), { recursive: true });
+    writeFileSync(join(libraryDir(home), "broken.json"), "{not json", "utf8");
+    const { saveTemplate } = await importSave();
+    expect(
+      saveTemplate(home, completeRun, undefined, {
+        runId: "run-1",
+        ref: "triage",
+        description: "d",
+      }).ref,
+    ).toBe("triage");
+  });
+});
+
 describe("publishTemplateFile (#970)", () => {
   it("of two publishes of one ref, exactly one wins and no temporary file is left", async () => {
     const home = operatorHome("lohra-save-race-");
