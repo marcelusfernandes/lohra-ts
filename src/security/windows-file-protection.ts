@@ -44,7 +44,11 @@ export interface WindowsProtectionOperations {
   descriptorIdentity(descriptor: number): string;
   close(descriptor: number): void;
   protect(path: string): void;
-  verify(path: string): void;
+  /**
+   * `preexisting` is true for an object that existed before Lohra touched it in
+   * this call: it may inherit its rules when they grant only approved identities.
+   */
+  verify(path: string, preexisting?: boolean): void;
   verifyMany?: (paths: readonly string[]) => void;
   removeFile(path: string): void;
   removeDirectory(path: string): void;

@@ -141,6 +141,8 @@ try {
 export type WindowsAclRequest = Readonly<{
   action: "volume" | "protect" | "verify";
   path: string;
+  /** `verify` only: the object existed before Lohra touched it (see ACL_SCRIPT). */
+  preexisting?: boolean;
 }>;
 
 /** The volume is not one where a private destination can be protected. */
