@@ -12,6 +12,11 @@ import { basename, join } from "node:path";
 import { toolError, toolResult } from "../tools/envelope.js";
 import type { ToolArguments, ToolHandler } from "../tools/types.js";
 import type { WorkflowLoader } from "./engine-contract.js";
+import {
+  EMPTY_TEMPLATE_STATS,
+  type TemplateScoreboard,
+  type TemplateStats,
+} from "./template-stats.js";
 import { validateSpec } from "./schema.js";
 import { isValidationError } from "./types.js";
 
@@ -86,18 +91,42 @@ export function templateLoader(home: string): WorkflowLoader {
   };
 }
 
+/** `meta.origin.by` of a template the agent saved (`workflow_save`,
+ * `template-save.ts`, #970); anything else is the operator's own file. */
+export const AGENT_ORIGIN = "agent";
+
+export type TemplateOrigin = "agent" | "operator";
+
 export interface TemplateListing {
   readonly ref: string;
   readonly name?: string;
   readonly nodes?: number;
+  readonly origin?: TemplateOrigin;
+  readonly description?: string;
+  /** #973: the template's scoreboard — present whenever the caller passes
+   * stats (the tool and the CLI always do); `runs: 0` if never run. */
+  readonly stats?: TemplateStats;
   readonly error?: string;
+}
+
+/** #970: who wrote a template and what it is for, from its own `meta`. */
+export function templateOrigin(meta: Readonly<Record<string, unknown>>): TemplateOrigin {
+  const origin = meta.origin;
+  return origin !== null &&
+    typeof origin === "object" &&
+    (origin as Readonly<Record<string, unknown>>).by === AGENT_ORIGIN
+    ? "agent"
+    : "operator";
 }
 
 /** Directory listing of every `.json` under `<home>/workflows/` — fail-closed
  * per entry: a broken file never drops silently, it surfaces as
  * `{ref, error}`. An absent directory is a legitimate empty library, not an
  * error (mirrors `readTiers`'s `ENOENT` → `{}`, #234). */
-export function listTemplates(home: string): readonly TemplateListing[] {
+export function listTemplates(
+  home: string,
+  stats?: ReadonlyMap<string, TemplateStats>,
+): readonly TemplateListing[] {
   const dir = join(home, OPERATOR_TEMPLATES_DIR);
   if (!existsSync(dir)) return Object.freeze([]);
   const entries: TemplateListing[] = [];
@@ -117,7 +146,15 @@ export function listTemplates(home: string): readonly TemplateListing[] {
         entries.push({ ref, error: spec.message });
         continue;
       }
-      entries.push({ ref, name: spec.name, nodes: spec.nodes.length });
+      const description = spec.meta.description;
+      entries.push({
+        ref,
+        name: spec.name,
+        nodes: spec.nodes.length,
+        origin: templateOrigin(spec.meta),
+        ...(typeof description === "string" && description !== "" ? { description } : {}),
+        ...(stats === undefined ? {} : { stats: stats.get(ref) ?? EMPTY_TEMPLATE_STATS }),
+      });
     } catch (error) {
       entries.push({ ref, error: error instanceof Error ? error.message : String(error) });
     }
@@ -136,12 +173,33 @@ export function listTemplates(home: string): readonly TemplateListing[] {
  * round-trips. Validation still runs, and still refuses before either
  * shape ever leaves this function — "validated" describes the CHECK, not
  * the shape returned. */
-export function workflowTemplatesHandler(home: string): ToolHandler {
+export function workflowTemplatesHandler(
+  home: string,
+  stats?: () => TemplateScoreboard,
+): ToolHandler {
   return (args: ToolArguments): string => {
     const name = args.name;
-    if (name === undefined) return toolResult(undefined, { templates: listTemplates(home) });
-    if (typeof name !== "string" || name === "")
-      return toolError("'name' must be a non-empty string");
+    // Dogfood of #969: a strict-schema caller (Codex `strict: true`) fills
+    // every optional field, so "list" arrives as `name: ""` — the same
+    // `""`-as-absence idiom `workflow_audit`/`workflow_notices` follow (#390).
+    // Before this, such a caller could never list the library at all.
+    if (name === undefined || name === null || (typeof name === "string" && name.trim() === "")) {
+      // #973: a scoreboard that cannot be read never hides the library —
+      // the listing still answers, and says why the stats are missing.
+      let scoreboard: TemplateScoreboard | undefined;
+      let statsError: string | undefined;
+      try {
+        scoreboard = stats?.();
+      } catch (error) {
+        statsError = error instanceof Error ? error.message : String(error);
+      }
+      return toolResult(undefined, {
+        templates: listTemplates(home, scoreboard?.byRef),
+        ...(scoreboard?.truncated === true ? { stats_truncated: true } : {}),
+        ...(statsError === undefined ? {} : { stats_error: statsError }),
+      });
+    }
+    if (typeof name !== "string") return toolError("'name' must be a string (a template ref)");
     let raw: unknown;
     try {
       raw = templateLoader(home)(name);

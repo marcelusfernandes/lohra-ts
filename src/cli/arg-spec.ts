@@ -173,7 +173,7 @@ export const WORKFLOW_SPEC = spec(COMMON_FLAGS, [
   {
     name: "workflow_cmd",
     required: true,
-    choices: ["list", "watch", "audit"].concat("notices"),
+    choices: ["list", "watch", "audit"].concat("notices", "templates"),
   },
 ]);
 export const WORKFLOW_LIST_SPEC = spec([{ name: "--limit", takesValue: true, type: "int" }]);
@@ -207,6 +207,9 @@ export const WORKFLOW_NOTICES_SPEC = spec(
   ],
   [{ name: "run_id", required: false }],
 );
+
+// Issue #973: `lohra workflow templates` — the library with its scoreboard.
+export const WORKFLOW_TEMPLATES_SPEC = spec([{ name: "--json", takesValue: false }]);
 
 export const UPDATE_SPEC = spec([
   { name: "--check", takesValue: false },
@@ -295,6 +298,7 @@ export const SUBCOMMAND_HELP = {
     watch: "follow a running workflow",
     audit: "inspect the event log of one run",
     notices: "list or acknowledge durable operator notices",
+    templates: "list workflow templates with their run scoreboard",
   },
   tiers: {
     list: "list configured tiers",

@@ -9,7 +9,7 @@ import { CronTool } from "../cron/tool.js";
 import { createMediaBindings, type ImageGenerationPort } from "../media/index.js";
 import { MemoryStore } from "../memory/index.js";
 import type { Ownership, SessionRepository } from "../state/index.js";
-import { AuditRepository, NoticesRepository } from "../state/index.js";
+import { AuditRepository, NoticesRepository, WorkflowRepository } from "../state/index.js";
 import { SkillStore } from "../skills/index.js";
 import {
   createBuiltinRegistry,
@@ -45,6 +45,9 @@ import { workflowPreviewHandler } from "../workflow/cache-preview.js";
 // Issue #464: `templateLoader` — same production loader `WorkflowService`
 // (`chat.ts`/`dashboard.ts`) resolves nested `workflow` nodes with.
 import { templateLoader } from "../workflow/templates.js";
+// Issue #970: same convention — `workflowSaveHandler` lives in its own module.
+import { workflowSaveHandler } from "../workflow/template-save.js";
+import { readTemplateStats } from "../workflow/template-stats.js";
 
 export interface SessionToolBase {
   readonly registry: ToolRegistry;
@@ -189,7 +192,17 @@ export function composeSessionTools(options: {
     // Issue #464: needs `options.home` (the operator template library root)
     // — same reason `workflow_preview` above is registered here rather than
     // in `createSessionToolBase`.
-    workflow_templates: workflowTemplatesHandler(options.home),
+    // Issue #973: + the per-template scoreboard from the same state database.
+    workflow_templates: workflowTemplatesHandler(options.home, () =>
+      readTemplateStats(new WorkflowRepository(options.base.database)),
+    ),
+    // Issue #970: writes into the SAME library `workflow_templates` reads,
+    // from the durable row of a run the live service knows.
+    workflow_save: workflowSaveHandler(
+      options.home,
+      (runId) => options.workflowService.durableRun(runId),
+      templateLoader(options.home),
+    ),
     ...options.orchestrationHandlers,
     ...media.handlers,
   });

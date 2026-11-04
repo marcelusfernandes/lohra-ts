@@ -249,7 +249,13 @@ describe("listTemplates (#464)", () => {
     writeFileSync(join(dir, "broken.json"), "{not json", "utf8");
     const { listTemplates } = await importTemplates();
     const listing = listTemplates(home);
-    expect(listing).toContainEqual({ ref: "inner", name: "inner-agent", nodes: 1 });
+    // #970: every valid entry now says who wrote it — no `meta.origin` is the operator's.
+    expect(listing).toContainEqual({
+      ref: "inner",
+      name: "inner-agent",
+      nodes: 1,
+      origin: "operator",
+    });
     const broken = listing.find((entry) => entry.ref === "broken");
     expect(broken?.error).toContain("is not valid JSON");
   });
@@ -340,6 +346,23 @@ describe("workflowTemplatesHandler (#464)", () => {
     const parsed = JSON.parse(raw) as { templates: readonly { ref: string }[] };
     expect(parsed.templates.map((entry) => entry.ref)).toContain("inner");
   });
+
+  // Dogfood of #969: Codex (`strict: true`) sent `{name: ""}` eleven times in a
+  // row and never saw the library — an empty/null `name` now lists.
+  it.each([[""], ["   "], [null]])(
+    "lists when 'name' is %j — a strict-schema caller's way of omitting it",
+    async (name) => {
+      const home = operatorHome("lohra-templates-tool-strict-");
+      writeTemplate(home, "inner", innerAgentSpec);
+      const { workflowTemplatesHandler } = await importTemplates();
+      const parsed = JSON.parse(await workflowTemplatesHandler(home)({ name })) as {
+        templates?: readonly { ref: string }[];
+        error?: string;
+      };
+      expect(parsed.error).toBeUndefined();
+      expect(parsed.templates?.map((entry) => entry.ref)).toEqual(["inner"]);
+    },
+  );
 
   it("returns the validated spec for a known 'name'", async () => {
     const home = operatorHome("lohra-templates-tool-get-");

@@ -91,7 +91,7 @@ describe("composeSessionTools", () => {
     // `composeSessionTools` deixar de espalhar `workflowToolHandlers(...)`,
     // é essa mensagem que volta em vez da validação real do WorkflowTool.
     expect(parsed.error, "MUTATION_CAUSE:T22-hotspot-workflow-handler").toBe(
-      "run_workflow needs a 'spec' object (with meta + nodes)",
+      "run_workflow needs a 'spec' object (with meta + nodes) or a 'template' ref",
     );
   });
 

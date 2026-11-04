@@ -56,8 +56,20 @@ export class WorkflowTool {
     const spec = args.spec;
     if (spec !== undefined && record(spec) === null)
       return toolError("'spec' must be an object (with meta + nodes)");
-    if (spec === undefined && resumeRunId === undefined)
-      return toolError("run_workflow needs a 'spec' object (with meta + nodes)");
+    // #971: a saved template by `ref`, instead of re-sending its spec. An
+    // empty one is absence — a strict-schema caller (Codex `strict: true`)
+    // fills every optional field (same idiom as `workflow_audit`, #390).
+    const rawTemplate = args.template;
+    const template =
+      rawTemplate === null || (typeof rawTemplate === "string" && rawTemplate.trim() === "")
+        ? undefined
+        : rawTemplate;
+    if (template !== undefined && typeof template !== "string")
+      return toolError("'template' must be a string (a ref from workflow_templates)");
+    if (spec === undefined && resumeRunId === undefined && template === undefined)
+      return toolError(
+        "run_workflow needs a 'spec' object (with meta + nodes) or a 'template' ref",
+      );
     const runArgs = args.args;
     if (runArgs !== undefined && record(runArgs) === null)
       return toolError("'args' must be an object of run inputs (referenced as ${args.x})");
@@ -103,6 +115,7 @@ export class WorkflowTool {
       ...(tokenBudget === undefined ? {} : { tokenBudget }),
       ...(resumeRunId === undefined ? {} : { resumeRunId }),
       ...(routeOverride === undefined ? {} : { routeOverride }),
+      ...(template === undefined ? {} : { template }),
     });
     if ("error" in out)
       return out.invalid_spec === true

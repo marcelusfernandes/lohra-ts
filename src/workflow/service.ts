@@ -15,11 +15,9 @@ import {
 import { WorkflowEngine } from "./engine.js";
 import { AutoResumeScheduler, LeaseHeartbeat, type Timer } from "./durability.js";
 import {
-  artifactsOf,
   CHECKPOINT_PAUSE,
   liveRuntimeOf,
   nextPivots,
-  pauseFields,
   progressJsonOf,
   rawSpecOf,
   resultView,
@@ -37,9 +35,8 @@ export {
   USER_PAUSE_HINT,
 } from "./service-rollup.js";
 import { recordRouteFaultNotice, ROUTE_FAULT_REASON, withSuggestedRoute } from "./route-faults.js";
-import { pausePayloadOf, pivotResume, pivotsOf, registrationPayload } from "./route-override.js";
+import { pausePayloadOf, pivotResume, registrationPayload } from "./route-override.js";
 import { OPERATOR_ROUTES_FILE, readRoutes, RoutesError, type RouteEnvelope } from "./routes.js";
-import { loadsOr } from "./jsonio.js";
 import type { ChildRuntime, LeafSandboxHandle, LeafToolDispatch } from "./runtime.js";
 import { validateNestedRefs, validateSpec } from "./schema.js";
 import { ValidationError, type WorkflowSpec } from "./types.js";
@@ -60,7 +57,8 @@ import type { LockRepository } from "../state/locks.js";
 import type { AuditTrail } from "./audit-trail.js";
 import { auditEnabled } from "./audit-model.js";
 import { WorkflowLiveEvents, type WorkflowLiveEvent } from "./live-events.js";
-import { isErrorKind, type ErrorKind } from "../transports/error-kinds.js";
+import { launchOrigin, resolveTemplateLaunch } from "./template-run.js";
+import { durableFromRow, durableRollup, type DurableRunView } from "./durable-view.js";
 export const RUN_LEASE_TTL = 900;
 /** The operator capability policy, read from the operator home per launch. */
 export const OPERATOR_POLICY_FILE = "workflow_policy.json";
@@ -103,111 +101,8 @@ export class FenceMemory {
 
 export const RECOVERED_FAULT = "recovered after process loss";
 export const QUOTA_PAUSE = "quota_exhausted";
-export const STALE_HINT =
-  "the process that was running this workflow was lost before it finished; the " +
-  "cells it completed are kept — run_workflow(resume_run_id=...) continues it";
-const BUSY_HINT = "another process is running this workflow right now";
-
-export interface DurableRunView {
-  readonly run_id: string;
-  readonly name: string;
-  readonly owner: string | null;
-  readonly status: string;
-  readonly pause_reason: string | null;
-  readonly checkpoint: Record<string, unknown> | null;
-  readonly resume_at: number | null;
-  readonly attempts: number;
-  readonly leaf_respawns: number;
-  readonly sandbox_refusals: number;
-  readonly prior_faults: readonly string[];
-  readonly prior_fault_kinds: readonly ErrorKind[];
-  readonly prior_degraded: boolean;
-  readonly tainted: boolean;
-  readonly spec: Record<string, unknown> | null;
-  readonly args: Readonly<Record<string, unknown>>;
-  readonly token_budget: number | null;
-  /** #427: past route pivots this run has already spent — folded forward
-   * on every terminal write (`pausePayloadOf`, route-override.ts). */
-  readonly pivots: readonly { provider?: string; model?: string }[]; // RouteOverride's shape, inlined (#446)
-  /** #463: the write-file manifest/collision faults folded forward the
-   * same way `pivots` above is (`pausePayloadOf`, route-override.ts). */
-  readonly artifacts: readonly { node_id: string; sub_id: string; path: string; bytes: number }[];
-  readonly artifact_faults: readonly string[];
-  readonly progress: Record<string, unknown> | null;
-  readonly audit_segment_id: string | null;
-  readonly updated_at: number;
-}
-
-export function durableFromRow(row: Readonly<Record<string, unknown>>): DurableRunView {
-  const payload = loadsOr(row.pause_payload_json, {}) as Record<string, unknown>;
-  const faults = payload.prior_faults;
-  const faultKinds = payload.prior_fault_kinds;
-  const artifactFaults = payload.artifact_faults;
-  const checkpoint = payload.checkpoint;
-  const progress = loadsOr(row.progress_json, null);
-  const spec = loadsOr(row.spec_json, null);
-  const args = loadsOr(row.args_json, {});
-  return {
-    run_id: String(row.run_id),
-    name: typeof row.name === "string" ? row.name : "",
-    owner: typeof row.owner === "string" ? row.owner : null,
-    status: typeof row.status === "string" ? row.status : "running",
-    pause_reason: typeof row.pause_reason === "string" ? row.pause_reason : null,
-    checkpoint:
-      checkpoint !== null && typeof checkpoint === "object"
-        ? (checkpoint as Record<string, unknown>)
-        : null,
-    resume_at: typeof payload.resume_at === "number" ? payload.resume_at : null,
-    attempts: Number(payload.attempts ?? 0),
-    leaf_respawns: Number(payload.leaf_respawns ?? 0),
-    sandbox_refusals: Number(payload.sandbox_refusals ?? 0),
-    prior_faults: Array.isArray(faults) ? faults.map((fault) => String(fault)) : [],
-    prior_fault_kinds: Array.isArray(faultKinds) ? faultKinds.map(String).filter(isErrorKind) : [],
-    prior_degraded: payload.prior_degraded === true,
-    tainted: Number(row.tainted ?? 0) === 1,
-    spec: spec !== null && typeof spec === "object" ? (spec as Record<string, unknown>) : null,
-    args: args !== null && typeof args === "object" ? (args as Record<string, unknown>) : {},
-    token_budget:
-      row.token_budget === null || row.token_budget === undefined ? null : Number(row.token_budget),
-    pivots: pivotsOf(payload),
-    artifacts: artifactsOf(payload),
-    artifact_faults: Array.isArray(artifactFaults) ? artifactFaults.map(String) : [],
-    progress:
-      progress !== null && typeof progress === "object"
-        ? (progress as Record<string, unknown>)
-        : null,
-    audit_segment_id:
-      row.audit_segment_id === null || row.audit_segment_id === undefined
-        ? null
-        : (row.audit_segment_id as string),
-    updated_at: Number(row.updated_at ?? 0),
-  };
-}
-
-export function durableRollup(
-  view: DurableRunView,
-  spentTotal: number,
-  stale: boolean,
-): Readonly<Record<string, unknown>> {
-  const out: Record<string, unknown> = { run_id: view.run_id, status: view.status };
-  const pause = pauseFields(view);
-  if (pause !== null) Object.assign(out, pause);
-  out.tokens_spent_total = spentTotal;
-  out.leaf_respawns = view.leaf_respawns;
-  out.sandbox_refusals = view.sandbox_refusals;
-  if (view.progress !== null && Number(view.progress.total ?? 0) > 0) out.progress = view.progress;
-  if (view.prior_faults.length > 0) out.faults_total = [...view.prior_faults];
-  if (view.prior_fault_kinds.length > 0) out.fault_kinds_total = [...view.prior_fault_kinds];
-  if (view.pivots.length > 0) out.pivots = [...view.pivots];
-  if (view.artifacts.length > 0) out.artifacts = [...view.artifacts];
-  if (view.artifact_faults.length > 0) out.artifact_faults = [...view.artifact_faults];
-  if (view.name !== "") out.name = view.name;
-  if (view.status === "running") {
-    out.stale = stale;
-    out.hint = stale ? STALE_HINT : BUSY_HINT;
-  }
-  return Object.freeze(out);
-}
+// #969: moved to durable-view.ts (zero-growth ceiling) — re-exported unchanged.
+export { STALE_HINT, durableFromRow, durableRollup, type DurableRunView } from "./durable-view.js";
 
 export function busyErrorMessage(runId: string, expiry: number | null, now: number): string {
   const remaining = expiry !== null ? Math.max(0, Math.trunc(expiry - now)) : 0;
@@ -306,6 +201,7 @@ interface RunRecord {
   settled: boolean;
   interruptCause: "signal" | null; // set by runShutdown before cancelling a live record (#428) — announceStretchEnd tells segment.completed apart from a plain cancel
   pivots?: readonly { provider?: string; model?: string }[]; // #448: nextPivots(...) — set like `runtime` above
+  templateRef?: string | null; // #971: launchOrigin(...).ref — set like `pivots` above
 }
 
 function defaultServiceTimer(delay: number, fire: () => void): Timer {
@@ -497,9 +393,17 @@ export class WorkflowService {
     // below (fresh, durable) reach the same map without reloading it (#258).
     let options: WorkflowLaunchOptionsWithTiers = { ...callerOptions, tiers, routes };
     const resumeRunId = options.resumeRunId;
-    const explicitSpec = rawSpec !== undefined && rawSpec !== null;
+    // #971: a launch by `template` loads the spec here, then takes the same
+    // validation/launch path an inline spec does.
+    const template = resolveTemplateLaunch(this.loader, options.template, rawSpec, resumeRunId);
+    if (template !== null && "error" in template)
+      return Object.freeze({
+        error: template.error,
+        ...(template.invalidSpec === true ? { invalid_spec: true } : {}),
+      });
+    const explicitSpec = template !== null || (rawSpec !== undefined && rawSpec !== null);
     const prior = resumeRunId === undefined ? null : this.durableOf(resumeRunId);
-    let specCandidate: unknown = rawSpec;
+    let specCandidate: unknown = template === null ? rawSpec : template.raw;
     if (!explicitSpec) {
       if (resumeRunId === undefined) {
         return Object.freeze({ error: "run_workflow needs a 'spec' object (with meta + nodes)" });
@@ -526,7 +430,12 @@ export class WorkflowService {
     const routed = pivotResume(parsed, options, priorPivot);
     if (!routed.ok) return Object.freeze({ error: routed.error });
     parsed = routed.spec;
-    options = { ...options, ...routeOverrideOption(routed.override), rerouted: routed.rerouted };
+    options = {
+      ...options,
+      ...routeOverrideOption(routed.override),
+      rerouted: routed.rerouted,
+      origin: launchOrigin(template, explicitSpec, prior, rawSpec),
+    };
     const budget = options.tokenBudget;
     if (
       budget !== undefined &&
@@ -584,6 +493,7 @@ export class WorkflowService {
       durable: false,
       warn: this.warn,
       onEvent: this.onEvent,
+      templateRef: options.origin?.ref ?? null, // #972
     });
     const rt = auditedRuntimeFor(this.runtime, this.auditTrail, () => null, false, this.warn);
     const engine = new WorkflowEngine({
@@ -599,6 +509,7 @@ export class WorkflowService {
     producers.announceStretchStart(1, parsed, engine.budget.snapshot());
     const record = Object.assign(this.makeRecord(runId, parsed.name, engine), { runtime: rt });
     record.pivots = nextPivots([], options.routeOverride); // #448: no durable store here
+    record.templateRef = options.origin?.ref ?? null;
     this.runs.set(runId, record);
     void engine
       .run(parsed, args)
@@ -742,6 +653,7 @@ export class WorkflowService {
       durable: true,
       warn: this.warn,
       onEvent: this.onEvent,
+      templateRef: options.origin?.ref ?? null, // #972
     });
     // The operator capability policy is loaded per launch from operator
     // config, never from the spec. The leaves of this stretch reach it through
@@ -853,6 +765,8 @@ export class WorkflowService {
             tainted: taintedFlag,
             progressJson: progressJsonOf(engine.progress()),
             auditSegmentId: segmentId,
+            templateRef: options.origin?.ref ?? null,
+            templateHash: options.origin?.hash ?? null,
             updatedAt: ownership.now,
             fence: ownership.fence,
             holder: ownership.holder,
@@ -860,6 +774,7 @@ export class WorkflowService {
           });
     const record = Object.assign(this.makeRecord(runId, parsed.name, engine), { runtime: rt });
     record.pivots = nextPivots(priorView?.pivots ?? [], options.routeOverride); // #448
+    record.templateRef = options.origin?.ref ?? null;
     // Hand this acquisition back exactly once, never by throwing: each step below is independent, so one that fails cannot skip the ones after it or stop the run from publishing a bounded result. The heartbeat stops FIRST — a tick that outlived the release would put the lease back and leave the run looking alive with nobody in it — and the release itself is conditioned on THIS acquisition's fence, so a takeover by the same holder cannot be deleted by it.
     let finished = false;
     const finishStretch = (): void => {
@@ -1107,6 +1022,12 @@ export class WorkflowService {
     return liveRuntimeOf(this.runs, runId); // #424: workflow_steer's only way to reach a run's decorator
   }
 
+  /** #970: the durable row of one run — `workflow_save` reads the spec and
+   * status a template is saved from (`null` without a store, or unknown id). */
+  durableRun(runId: string): DurableRunView | null {
+    return this.durableOf(runId);
+  }
+
   // --- reads: live + durable ---------------------------------------------------
 
   async status(
@@ -1272,6 +1193,8 @@ export class WorkflowService {
       tainted: view.tainted,
       progressJson: view.progress === null ? null : JSON.stringify(view.progress),
       auditSegmentId: view.audit_segment_id,
+      templateRef: view.template_ref,
+      templateHash: view.template_hash,
       updatedAt: store.ownershipOf().now,
       fence: null,
       holder: null,

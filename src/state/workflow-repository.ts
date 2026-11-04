@@ -21,11 +21,25 @@ export interface RunStateFields {
   readonly tainted: boolean;
   readonly progressJson: string | null;
   readonly auditSegmentId: string | null;
+  /** #971: the run's template origin — every writer passes what it knows;
+   * omitted means none (an inline spec). */
+  readonly templateRef?: string | null;
+  readonly templateHash?: string | null;
   readonly updatedAt: number;
   readonly fence: number | null;
   readonly holder: string | null;
   readonly now: number;
   readonly requireUnleased?: boolean;
+}
+
+/** #973: one (template, status) group of runs — `foldTemplateStats`
+ * (`src/workflow/template-stats.ts`) turns these into the scoreboard. */
+export interface TemplateRunStatusRow {
+  readonly template_ref: string;
+  readonly status: string;
+  readonly runs: number;
+  readonly last_used_at: number;
+  readonly tokens: number;
 }
 
 export interface CacheCostInput {
@@ -109,8 +123,8 @@ export class WorkflowRepository {
       const sql = `INSERT OR REPLACE INTO workflow_run_state
          (run_id, name, owner, status, pause_reason, pause_payload_json,
           spec_json, args_json, token_budget, tainted, progress_json,
-          audit_segment_id, updated_at)
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          audit_segment_id, template_ref, template_hash, updated_at)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
          WHERE NOT EXISTS (
            SELECT 1 FROM workflow_run_locks WHERE run_id = ? AND expires_at > ?
          )`;
@@ -127,6 +141,8 @@ export class WorkflowRepository {
         fields.tainted ? 1 : 0,
         fields.progressJson,
         fields.auditSegmentId,
+        fields.templateRef ?? null,
+        fields.templateHash ?? null,
         fields.updatedAt,
         runId,
         fields.now,
@@ -149,8 +165,8 @@ export class WorkflowRepository {
       `INSERT OR REPLACE INTO workflow_run_state
        (run_id, name, owner, status, pause_reason, pause_payload_json,
         spec_json, args_json, token_budget, tainted, progress_json,
-        audit_segment_id, updated_at)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`,
+        audit_segment_id, template_ref, template_hash, updated_at)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`,
       [
         runId,
         fields.name,
@@ -164,6 +180,8 @@ export class WorkflowRepository {
         fields.tainted ? 1 : 0,
         fields.progressJson,
         fields.auditSegmentId,
+        fields.templateRef ?? null,
+        fields.templateHash ?? null,
         fields.updatedAt,
       ],
       { fence: fields.fence ?? -1, holder: fields.holder ?? "", now: fields.now },
@@ -183,6 +201,32 @@ export class WorkflowRepository {
     return this.database
       .prepare("SELECT * FROM workflow_run_state ORDER BY updated_at DESC LIMIT ?")
       .all(Math.max(0, Math.trunc(limit))) as readonly Record<string, unknown>[];
+  }
+
+  /** #973: runs started from a library template, grouped by template and
+   * status, with their last update and summed token spend — inline runs
+   * (`template_ref IS NULL`) never enter the scoreboard. */
+  public templateRunStats(limit: number): readonly TemplateRunStatusRow[] {
+    const rows = this.database
+      .prepare(
+        `SELECT s.template_ref AS template_ref, s.status AS status, COUNT(*) AS runs,
+                MAX(s.updated_at) AS last_used_at,
+                SUM(COALESCE(p.tokens_in, 0) + COALESCE(p.tokens_out, 0)) AS tokens
+           FROM workflow_run_state s
+           LEFT JOIN workflow_run_spend p ON p.run_id = s.run_id
+          WHERE s.template_ref IS NOT NULL
+          GROUP BY s.template_ref, s.status
+          ORDER BY s.template_ref, s.status
+          LIMIT ?`,
+      )
+      .all(Math.max(0, Math.trunc(limit))) as readonly Record<string, unknown>[];
+    return rows.map((row) => ({
+      template_ref: String(row.template_ref),
+      status: String(row.status),
+      runs: Number(row.runs ?? 0),
+      last_used_at: Number(row.last_used_at ?? 0),
+      tokens: Number(row.tokens ?? 0),
+    }));
   }
 
   public runStatesByPause(pauseReason: string, limit: number): readonly Record<string, unknown>[] {

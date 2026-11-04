@@ -359,9 +359,9 @@ export const namedMutants: readonly Mutant[] = [
       {
         file: repository,
         before:
-          "         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?\n         WHERE NOT EXISTS (\n           SELECT 1 FROM workflow_run_locks WHERE run_id = ? AND expires_at > ?\n         )`;",
+          "         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?\n         WHERE NOT EXISTS (\n           SELECT 1 FROM workflow_run_locks WHERE run_id = ? AND expires_at > ?\n         )`;",
         after:
-          "         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?\n         WHERE NOT EXISTS (\n           SELECT 1 FROM workflow_run_fence WHERE run_id = ? AND fence > -1\n         )\n         AND NOT EXISTS (\n           SELECT 1 FROM workflow_run_locks WHERE run_id = ? AND expires_at > ?\n         )`;",
+          "         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?\n         WHERE NOT EXISTS (\n           SELECT 1 FROM workflow_run_fence WHERE run_id = ? AND fence > -1\n         )\n         AND NOT EXISTS (\n           SELECT 1 FROM workflow_run_locks WHERE run_id = ? AND expires_at > ?\n         )`;",
       },
       {
         file: repository,

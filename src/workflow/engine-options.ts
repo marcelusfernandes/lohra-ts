@@ -2,6 +2,7 @@ import type { RunControl, WorkflowEngineOptions, WorkflowLoader } from "./engine
 import type { ChildRuntime } from "./runtime.js";
 import type { RerouteRecord, RouteOverride } from "./route-override.js";
 import type { RouteEnvelope } from "./routes.js";
+import type { RunTemplateOrigin } from "./template-run.js";
 import type { TierMap } from "./tiers.js";
 
 /**
@@ -17,6 +18,9 @@ export interface WorkflowLaunchOptions {
   /** #427: only meaningful together with `resumeRunId` — `pivotResume`
    * (route-override.ts) refuses it otherwise. */
   readonly routeOverride?: RouteOverride;
+  /** #971: run the library template with this `ref` instead of an inline
+   * `spec` (`resolveTemplateLaunch`, template-run.ts). */
+  readonly template?: string;
 }
 
 /** `WorkflowLaunchOptions` plus the operator tier map and the operator's
@@ -33,6 +37,9 @@ export interface WorkflowLaunchOptionsWithTiers extends WorkflowLaunchOptions {
    * `pivots` already carries the applied override); `service.ts`'s
    * `launchDurable` reads it once, to call `announceRerouted`. */
   readonly rerouted?: readonly RerouteRecord[];
+  /** #971: the template this launch records as its origin (`launchOrigin`,
+   * template-run.ts) — `null` for an inline spec. */
+  readonly origin?: RunTemplateOrigin | null;
 }
 
 /**

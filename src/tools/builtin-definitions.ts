@@ -1,4 +1,5 @@
 import type { ToolDefinition } from "./types.js";
+import { WORKFLOW_SAVE_DEFINITION } from "./workflow-save-definition.js";
 
 // Built-in tool schema registry. Definition and key order is a contract:
 // consumers rely on this exact shape and ordering.
@@ -446,7 +447,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Run a dynamic multi-agent workflow as a declarative spec \u2014 a DAG of sub-agents pursuing a goal autonomously. Use for wide/adversarial/long-resumable work; for one self-contained task use 'delegate_task' instead. 'spec' is {meta{name}, schemas?, nodes:[{id, type, ...}]}. Node types (CLOSED set of 10): agent, parallel, pipeline, loop_until_dry, verify, judge_panel, workflow, gate, completeness_check, checkpoint. Branches in the same run share ONE working filesystem root \u2014 one file per leaf, aggregate downstream, never write the SAME file from parallel branches. 'min_success_ratio' (pipeline) and 'budget' (loop_until_dry) are real caps. Prefer 'tier' over a hard-coded 'model'. Returns a run_id \u2014 poll with workflow_status. Load the workflow-authoring skill before authoring.",
+        "Run a dynamic multi-agent workflow as a declarative spec \u2014 a DAG of sub-agents pursuing a goal autonomously. Use for wide/adversarial/long-resumable work; for one self-contained task use 'delegate_task' instead. 'spec' is {meta{name}, schemas?, nodes:[{id, type, ...}]}. Node types (CLOSED set of 10): agent, parallel, pipeline, loop_until_dry, verify, judge_panel, workflow, gate, completeness_check, checkpoint. Branches in the same run share ONE working filesystem root \u2014 one file per leaf, aggregate downstream, never write the SAME file from parallel branches. 'min_success_ratio' (pipeline) and 'budget' (loop_until_dry) are real caps. Prefer 'tier' over a hard-coded 'model'. Returns a run_id \u2014 poll with workflow_status. Load the workflow-authoring skill before authoring; save a complete run worth repeating with workflow_save, rerun it with template.",
       parameters: {
         type: "object",
         properties: {
@@ -454,6 +455,11 @@ export const BUILTIN_DEFINITIONS = [
             type: "object",
             description:
               "The workflow spec: {meta:{name}, schemas?, nodes:[{id, type, ...}]}. type is one of: agent, parallel, pipeline, loop_until_dry, verify, judge_panel, workflow, gate, completeness_check, checkpoint (see this tool's description for their fields).",
+          },
+          template: {
+            type: "string",
+            description:
+              "Run a saved template by 'ref' (from workflow_templates) instead of 'spec'; the run records it as its origin.",
           },
           args: {
             type: "object",
@@ -562,7 +568,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "List validated workflow templates, or fetch one by 'name' for its full spec. Prefer adapting one over authoring fresh. 'ref' is the filename without extension.",
+        "List validated workflow templates (operator's and workflow_save's: origin, description, run stats), or fetch one by 'name' for its full spec. Check before authoring: run one as-is with run_workflow(template=ref), or adapt it. 'ref' is the filename without extension.",
       parameters: {
         type: "object",
         properties: {
@@ -786,4 +792,5 @@ export const BUILTIN_DEFINITIONS = [
       name: "workflow_preview",
     },
   },
+  WORKFLOW_SAVE_DEFINITION, // #970 — own module: this file stays under 800 lines
 ] as const satisfies readonly ToolDefinition[];

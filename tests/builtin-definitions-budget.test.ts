@@ -32,7 +32,10 @@ import { describe, expect, it } from "vitest";
 
 import { BUILTIN_DEFINITIONS } from "../src/tools/builtin-definitions.js";
 
-const CATALOG_BUDGET_CHARS = 22_000;
+// #969 (épico): +`workflow_save` (#970) and `run_workflow`'s `template` (#971)
+// — the orchestrator keeps and reruns the workflows it builds. Raised by what
+// those two cost, not by a round number.
+const CATALOG_BUDGET_CHARS = 23_000;
 
 function findTool(name: string): (typeof BUILTIN_DEFINITIONS)[number] {
   const tool = BUILTIN_DEFINITIONS.find((definition) => definition.function.name === name);
@@ -103,7 +106,8 @@ const PRE_DIET_PARAMETERS_HASH: Record<(typeof PRE_DIET_NAMES)[number], string> 
   spawn_session: "d276d907eab47a6089b912230b38c3fab1df253866c927103cfb5ff50c9cb6ca",
   steer_session: "d8f9cf9d98a06340bd1c21e3f2fb262ad3b38fc7a56e5d54ce683ae09b8130db",
   collect_session: "82c248236313a962fa02c24bac2ce64f2660cd605b3e618c329f76df05a295f1",
-  run_workflow: "902b6770847d714d3b20c04591d4cd43d3f9561f4a29a69d583a0db225b7cc08",
+  // #971: +`template` (run a saved template by ref) — a deliberate schema change.
+  run_workflow: "e0d36f1421fb9abb6c09d9644bc6168ce8c77b0263a5128b4185318ff22f517e",
   workflow_status: "4d792c11305edb0fe22443a5428e1946ca966d393e79f9ec0c392ccb570ac6ae",
   workflow_list: "8243f0af367f188a376f2c17b5eabe872a2f7a979813e0d4e2be6d594c2aa259",
   workflow_pause: "dffb37dbcca421f16f632f20a90caa589da2fcf7de07ece11dddd990780a30b8",
@@ -118,10 +122,14 @@ const PRE_DIET_PARAMETERS_HASH: Record<(typeof PRE_DIET_NAMES)[number], string> 
   workflow_preview: "f5269e11d7d1c3e51a88b8047a81e2f63b31692baeeb94ce83229522463c0bd6",
 };
 
+// Tools added after the diet go at the END, never between the pre-diet ones.
+const ADDED_AFTER_DIET = ["workflow_save"] as const; // #970
+
 describe("BUILTIN_DEFINITIONS structural contract (#585)", () => {
   it("keeps declaration order and every name unchanged by the diet", () => {
     expect(BUILTIN_DEFINITIONS.map((definition) => definition.function.name)).toEqual([
       ...PRE_DIET_NAMES,
+      ...ADDED_AFTER_DIET,
     ]);
   });
 
