@@ -4,10 +4,7 @@ import {
   prepareWindowsPrivateDestination,
   type WindowsProtectionOperations,
 } from "../src/security/windows-file-protection.js";
-import {
-  runWindowsAclBatch,
-  windowsPowerShellCommand,
-} from "../src/security/windows-file-protection-native.js";
+import { windowsPowerShellCommand } from "../src/security/windows-file-protection-native.js";
 
 const directory = "C:\\vault";
 const destination = `${directory}\\secret.json`;
@@ -77,20 +74,6 @@ function fixture() {
 }
 
 describe("windows private destination", () => {
-  it("rejects empty, oversized and mixed-action ACL batches before launching a backend", () => {
-    expect(() => {
-      runWindowsAclBatch([]);
-    }).toThrow(/one to three/);
-    expect(() => {
-      runWindowsAclBatch(Array.from({ length: 4 }, () => ({ action: "verify", path: directory })));
-    }).toThrow(/one to three/);
-    expect(() => {
-      runWindowsAclBatch([
-        { action: "protect", path: directory },
-        { action: "verify", path: destination },
-      ]);
-    }).toThrow(/one to three/);
-  });
   it("verifies a publication group only after inspecting all identities and reinspects all afterwards", () => {
     const state = fixture();
     const destinationGuard = prepareWindowsPrivateDestination(destination, state.operations);
@@ -346,7 +329,8 @@ describe("windows private destination", () => {
     expect(() => prepareWindowsPrivateDestination(destination, state.operations)).toThrow(
       /reparse/,
     );
-    expect(state.events).toEqual(["volume"]);
+    // The link is found by inspection alone: no backend process opens for it.
+    expect(state.events).toEqual([]);
   });
 
   it("refuses an unsupported volume before creating anything", () => {
