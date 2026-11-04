@@ -384,7 +384,7 @@ $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
   [System.Security.AccessControl.AccessControlType]$env:LOHRA_TEST_TYPE
 )
 $acl.AddAccessRule($rule)
-Set-Acl -LiteralPath $env:LOHRA_TEST_TARGET -AclObject $acl
+[System.IO.Directory]::SetAccessControl($env:LOHRA_TEST_TARGET, $acl)
 `;
   const script = (text: string) => Buffer.from(text, "utf16le").toString("base64");
   // Adds a rule on a throwaway folder (the real mechanism has no verb for it).
@@ -452,7 +452,13 @@ Set-Acl -LiteralPath $env:LOHRA_TEST_TARGET -AclObject $acl
       atomicWritePrivate0600(file, "fictional-token");
       expect(readFileSync(file, "utf8")).toBe("fictional-token");
       expect(readdirSync(home)).toEqual(["auth.json"]);
-      runWindowsAclBatch([{ action: "verify", path: file }]);
+      // The write verified the published file strictly (it is the protected stage) and left
+      // the preexisting home as it was: it still only inherits.
+      expect(
+        failureOf(() => {
+          verify(home, false);
+        }).message,
+      ).toContain("Inherited access rules remain enabled");
     },
   );
 
@@ -461,7 +467,6 @@ Set-Acl -LiteralPath $env:LOHRA_TEST_TARGET -AclObject $acl
     writeFileSync(join(home, "oauth.json"), "{}");
     writeTokens(home, new OAuthTokens("fictional-access", "fictional-refresh", "account", 2000));
     expect(readTokens(home)?.accessToken).toBe("fictional-access");
-    runWindowsAclBatch([{ action: "verify", path: join(home, "oauth.json") }]);
   });
 
   owned("lists every unapproved identity, by name and SID or by SID alone, and what to do", () => {

@@ -99,8 +99,9 @@ const nativeOperations: WindowsProtectionOperations = {
   protect: (path) => {
     runWindowsAcl("protect", path);
   },
-  verify: (path) => {
-    runWindowsAcl("verify", path);
+  verify: (path, preexisting) => {
+    if (preexisting === true) runWindowsAclBatch([{ action: "verify", path, preexisting: true }]);
+    else runWindowsAcl("verify", path);
   },
   removeFile: unlinkSync,
   removeDirectory: rmdirSync,
@@ -168,6 +169,7 @@ function inspectChain(path: string, operations: WindowsProtectionOperations): En
 /**
  * Runs the requests in one backend round trip when the operations offer `batch`
  * (one process on Windows); otherwise one call per request, in the same order.
+ * `verifyMany` cannot carry the preexisting flag, so it only takes strict groups.
  */
 function runAcl(
   requests: readonly WindowsAclRequest[],
@@ -175,10 +177,16 @@ function runAcl(
 ): void {
   if (operations.batch) {
     operations.batch(requests);
-  } else if (operations.verifyMany && requests.every(({ action }) => action === "verify")) {
+  } else if (
+    operations.verifyMany &&
+    requests.every(({ action, preexisting }) => action === "verify" && preexisting !== true)
+  ) {
     operations.verifyMany(requests.map(({ path }) => path));
   } else {
-    for (const { action, path } of requests) operations[action](path);
+    for (const { action, path, preexisting } of requests) {
+      if (action === "verify" && preexisting === true) operations.verify(path, true);
+      else operations[action](path);
+    }
   }
 }
 
@@ -188,8 +196,9 @@ function checked(
   identity: string,
   operations: WindowsProtectionOperations,
   leading: readonly WindowsAclRequest[] = [],
+  preexisting = false,
 ): Entry {
-  const entry = checkedMany([{ path, kind, identity }], operations, leading)[0];
+  const entry = checkedMany([{ path, kind, identity, preexisting }], operations, leading)[0];
   if (!entry) throw new Error(`Windows destination cannot be inspected: ${path}`);
   return entry;
 }
@@ -216,12 +225,26 @@ function afterProtect(
 }
 
 /**
+ * What a path is expected to be, and how strictly its ACL is verified. Strict (the
+ * default) is what `protect` leaves: no inheritance. `preexisting` is for an object
+ * that existed before this call touched it; it is only read, never changed, and may
+ * inherit its rules when they grant only the approved identities. What the call
+ * itself creates or protects is never `preexisting`.
+ */
+type Expected = Readonly<{
+  path: string;
+  kind: Entry["kind"];
+  identity: string;
+  preexisting?: boolean;
+}>;
+
+/**
  * Inspects every identity, verifies them in one round trip (optionally after
  * `leading` requests such as the volume check, which gates the verification),
  * and inspects every identity again.
  */
 function checkedMany(
-  expected: ReadonlyArray<Readonly<{ path: string; kind: Entry["kind"]; identity: string }>>,
+  expected: readonly Expected[],
   operations: WindowsProtectionOperations,
   leading: readonly WindowsAclRequest[] = [],
 ): Entry[] {
@@ -234,7 +257,14 @@ function checkedMany(
     }
   }
   runAcl(
-    [...leading, ...expected.map(({ path }) => ({ action: "verify" as const, path }))],
+    [
+      ...leading,
+      ...expected.map(({ path, preexisting }) =>
+        preexisting === true
+          ? { action: "verify" as const, path, preexisting: true }
+          : { action: "verify" as const, path },
+      ),
+    ],
     operations,
   );
   return expected.map(({ path, kind, identity }) => {
@@ -387,6 +417,12 @@ export function ensureWindowsPrivateDirectory(
  * lease/fence. openOwnedForWrite binds the first write to the inspected file
  * descriptor, but cannot make later path checks atomic with another process.
  * Native ACL checks are metadata checks, not cross-token access proof.
+ *
+ * Two verifications, by what the call found. A directory or destination that
+ * already existed is only read, never changed: it may inherit its rules, as long
+ * as every rule is an Allow for the user, SYSTEM or Administrators (the refusal
+ * of any other identity names it and says what to do). What the call creates
+ * (and so protects), the stage included, keeps the strict check: no inheritance.
  */
 export function prepareWindowsPrivateDestination(
   destination: string,
@@ -437,11 +473,17 @@ export function prepareWindowsPrivateDestination(
     if (directoryProtected) {
       afterProtect(directory, "directory", dirEntry.identity, operations);
     } else {
-      const group: Array<{ path: string; kind: Entry["kind"]; identity: string }> = [
-        { path: directory, kind: "directory", identity: dirEntry.identity },
+      // Both existed before this call: verified for what they are, never changed.
+      const group: Expected[] = [
+        { path: directory, kind: "directory", identity: dirEntry.identity, preexisting: true },
       ];
       if (existingFile?.kind === "file") {
-        group.push({ path: file, kind: "file", identity: existingFile.identity });
+        group.push({
+          path: file,
+          kind: "file",
+          identity: existingFile.identity,
+          preexisting: true,
+        });
         fileVerified = true;
       }
       checkedMany(group, operations, leading);
@@ -486,31 +528,33 @@ export function prepareWindowsPrivateDestination(
       throw new Error(`Windows private destination must be a regular file: ${file}`);
     }
     if (createdFile) afterProtect(file, "file", fileEntry.identity, operations);
-    else if (!fileVerified) checked(file, "file", fileEntry.identity, operations);
+    else if (!fileVerified) checked(file, "file", fileEntry.identity, operations, [], true);
     const directoryIdentity = dirEntry.identity;
     const destinationIdentity = fileEntry.identity;
+    // How each is verified from here on. What this call created and protected (the
+    // directory, the destination) keeps the strict check; what it found, the other.
+    const directoryCheck: Expected = {
+      path: directory,
+      kind: "directory",
+      identity: directoryIdentity,
+      preexisting: !directoryProtected,
+    };
+    const destinationCheck: Expected = {
+      path: file,
+      kind: "file",
+      identity: destinationIdentity,
+      preexisting: !createdFile,
+    };
     let stagedIdentity: string | null = null;
     let stagedPath: string | null = null;
     return {
       verifyBeforeWrite: () => {
-        const [, entry] = checkedMany(
-          [
-            { path: directory, kind: "directory", identity: directoryIdentity },
-            { path: file, kind: "file", identity: destinationIdentity },
-          ],
-          operations,
-        );
+        const [, entry] = checkedMany([directoryCheck, destinationCheck], operations);
         if (!entry) throw new Error(`Windows destination cannot be inspected: ${file}`);
         if (entry.size !== 0n) throw new Error(`Windows destination is no longer empty: ${file}`);
       },
       openOwnedForWrite: () => {
-        const [, entry] = checkedMany(
-          [
-            { path: directory, kind: "directory", identity: directoryIdentity },
-            { path: file, kind: "file", identity: destinationIdentity },
-          ],
-          operations,
-        );
+        const [, entry] = checkedMany([directoryCheck, destinationCheck], operations);
         if (!entry) throw new Error(`Windows destination cannot be inspected: ${file}`);
         if (entry.size !== 0n) throw new Error(`Windows destination is no longer empty: ${file}`);
         const descriptor = operations.openWrite(file);
@@ -553,10 +597,11 @@ export function prepareWindowsPrivateDestination(
           throw new Error("Windows publication source is not a regular file");
         if (sourceEntry.identity === destinationIdentity)
           throw new Error("Windows publication source aliases destination");
+        // The stage is the caller's own protected file: always strict.
         checkedMany(
           [
-            { path: directory, kind: "directory", identity: directoryIdentity },
-            { path: file, kind: "file", identity: destinationIdentity },
+            directoryCheck,
+            destinationCheck,
             { path: stage, kind: "file", identity: sourceEntry.identity },
           ],
           operations,
@@ -567,11 +612,9 @@ export function prepareWindowsPrivateDestination(
       verifyAfterPublication: () => {
         if (!stagedIdentity || !stagedPath)
           throw new Error("Windows publication was not verified before rename");
+        // What now sits at the destination is that protected stage, not what it replaced.
         checkedMany(
-          [
-            { path: directory, kind: "directory", identity: directoryIdentity },
-            { path: file, kind: "file", identity: stagedIdentity },
-          ],
+          [directoryCheck, { path: file, kind: "file", identity: stagedIdentity }],
           operations,
         );
         if (inspectChain(stagedPath, operations))
