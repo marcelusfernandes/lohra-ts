@@ -32,6 +32,8 @@ import type { AuditTrail } from "./audit-trail.js";
 import { OrchestrationChildRuntime } from "./orchestration-runtime.js";
 import type {
   Awaitable,
+  CallToolRequest,
+  CallToolResult,
   CausalContext,
   ChildCollectOptions,
   ChildResult,
@@ -571,6 +573,13 @@ export function auditedChildRuntime(
             causalContext?: CausalContext,
             source: "engine" | "operator" = "engine",
           ): Promise<SteerOutcome | null> => deliverSteer(id, prompt, causalContext, source),
+        }),
+    ...(inner.callTool === undefined
+      ? {}
+      : {
+          callTool: (_request: CallToolRequest): Promise<CallToolResult> => {
+            throw new Error("not implemented: AuditedChildRuntime.callTool");
+          },
         }),
     // Issue #367: `installLeafSandbox` hands `inner` a WRAPPED installation —
     // `wrap` produces `tool.*` around whatever the caller's OWN policy wrap

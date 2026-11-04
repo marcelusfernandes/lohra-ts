@@ -3,9 +3,12 @@ import type {
   CollectOutcome,
   OrchestrationCore,
 } from "../orchestration/core.js";
+import type { RegistryDispatch } from "../tools/types.js";
 import { toolError } from "./sandbox.js";
 import type {
   ArtifactRecord,
+  CallToolRequest,
+  CallToolResult,
   CausalContext,
   ChildCollectOptions,
   ChildResult,
@@ -252,7 +255,15 @@ export class OrchestrationChildRuntime implements ChildRuntime {
     { readonly runId: string; readonly list: ArtifactRecord[]; dropped: number }
   >();
 
-  public constructor(private readonly core: OrchestrationCore) {}
+  public constructor(
+    private readonly core: OrchestrationCore,
+    private readonly baseDispatch?: RegistryDispatch,
+  ) {}
+
+  public callTool(_request: CallToolRequest): Promise<CallToolResult> {
+    void this.baseDispatch;
+    throw new Error("not implemented: OrchestrationChildRuntime.callTool");
+  }
 
   public installLeafSandbox(installation: LeafSandboxInstallation): LeafSandboxHandle {
     this.installations.set(installation.runId, installation);
