@@ -99,10 +99,8 @@ export function upsertEnvFile(
     try {
       (ops.privateWrite ?? atomicWritePrivate0600)(path, render(text, changed));
     } catch (error) {
-      throw new Error(
-        `Could not save private .env at ${path} — check that the destination is a private fixed NTFS path accessible to your account`,
-        { cause: error },
-      );
+      // Says only where the write was refused; the reason is in `cause`.
+      throw new Error(`Could not save private .env at ${path}`, { cause: error });
     }
     return keys;
   }

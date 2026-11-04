@@ -282,7 +282,7 @@ describe("Windows credential write, check by check", () => {
     } catch (error) {
       caught = error;
     }
-    expect((caught as Error).message).toContain("check that the destination");
+    expect((caught as Error).message).toBe(`Could not save private credentials at ${target}`);
     expect(String((caught as Error).cause)).toContain(`incompatible ACL: ${vault}`);
     expect(state.timeline.some((entry) => entry.startsWith("create "))).toBe(false);
     expect(state.timeline).toEqual([`trip volume ${target} + verify ${vault} + verify ${target}`]);
@@ -385,7 +385,7 @@ describe("Windows auth integration through fake protection ports", () => {
       caught = error;
     }
     expect(caught).toBeInstanceOf(Error);
-    expect((caught as Error).message).toContain("check that the destination");
+    expect((caught as Error).message).toBe(`Could not save private credentials at ${path}`);
     expect((caught as Error).cause).toBeInstanceOf(AggregateError);
     expect(((caught as Error).cause as AggregateError).errors.map(String)).toEqual([
       "Error: ACL denied",

@@ -46,10 +46,9 @@ const defaultOperations: AtomicWriteOperations = {
 };
 
 function windowsAuthWriteFailure(path: string, cause: unknown): Error {
-  return new Error(
-    `Could not save private credentials at ${path} — check that the destination is a private fixed NTFS path accessible to your account`,
-    { cause },
-  );
+  // Says only where the write was refused: the reason, and what to do about it,
+  // is in `cause` (and the CLI prints every level of it).
+  return new Error(`Could not save private credentials at ${path}`, { cause });
 }
 
 export function atomicWritePrivate0600(
