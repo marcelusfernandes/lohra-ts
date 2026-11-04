@@ -29,11 +29,13 @@
 import type { AuditInput } from "./audit-model.js";
 import { recordAuditEvent, type AuditFailClosedDeps } from "./audit-producers.js";
 import type { AuditTrail } from "./audit-trail.js";
+import { callSubId } from "./call-tools.js";
 import { OrchestrationChildRuntime } from "./orchestration-runtime.js";
 import type {
   Awaitable,
   CallToolRequest,
   CallToolResult,
+  CallToolStatus,
   CausalContext,
   ChildCollectOptions,
   ChildResult,
@@ -206,6 +208,19 @@ async function probeSettledAfterCancel(
 const KNOWN_TOOL_NAMES = new Set<string>(
   BUILTIN_DEFINITIONS.map((definition) => definition.function.name),
 );
+
+/** How each `CallToolStatus` closes a model-free call's `tool.completed` (#978)
+ * — the same vocabulary a leaf's call already uses: a sandbox/install/
+ * allow-list refusal is `sandbox_denied`, a deadline is `cancelled` (the call
+ * was abandoned, as `close()` does for a leaf's orphaned dispatch), a tool's
+ * own failure carries no reason. */
+const CALL_COMPLETED: Readonly<Record<CallToolStatus, Readonly<Record<string, unknown>>>> =
+  Object.freeze({
+    ok: Object.freeze({ status: "success" }),
+    error: Object.freeze({ status: "error" }),
+    denied: Object.freeze({ status: "error", reason: "sandbox_denied" }),
+    timeout: Object.freeze({ status: "error", reason: "cancelled" }),
+  });
 
 /**
  * Wraps ONE acquisition's real policy wrap (`policyWrap`, e.g. service.ts's
@@ -453,6 +468,55 @@ export function auditedChildRuntime(
     return outcome;
   }
 
+  // Issue #978 (épico #976 §6): a model-free call has no leaf, so it has no
+  // `open` entry, no `leaf.*` and no `pending` counter to touch — it writes its
+  // own `tool.started`/`tool.completed` pair, keyed by the calling node
+  // (`node_id`, `segment_id`, `attempt`) and a SYNTHETIC `sub_id`
+  // (`callSubId`). The pair is exactly ONE because the sandbox wrap that
+  // `installLeafSandbox` below hands `inner` finds no `open` entry for that
+  // `sub_id` and so audits nothing itself. Every outcome closes the pair
+  // (`CALL_COMPLETED`); an `inner` that throws — a bug in the port, which
+  // promises not to — closes it as an error and the failure propagates.
+  const innerCallTool = inner.callTool?.bind(inner);
+  const auditCall =
+    (
+      call: (request: CallToolRequest) => Awaitable<CallToolResult>,
+    ): ((request: CallToolRequest) => Promise<CallToolResult>) =>
+    async (request) => {
+      const cc = request.causalContext;
+      const identity = {
+        segment_id: cc.segmentId,
+        node_id: cc.nodePath.at(-1) ?? null,
+        sub_id: callSubId(cc),
+        attempt: cc.attempt,
+      };
+      record(cc.runId, {
+        event_type: "tool.started",
+        ...identity,
+        payload: {
+          tool_name_state: KNOWN_TOOL_NAMES.has(request.name) ? "known_tool" : "unknown_tool",
+          fields: Object.keys(request.args).length,
+        },
+      });
+      let result: CallToolResult;
+      try {
+        result = await call(request);
+      } catch (error) {
+        record(cc.runId, {
+          event_type: "tool.completed",
+          ...identity,
+          payload: CALL_COMPLETED.error,
+        });
+        throw error;
+      }
+      record(cc.runId, {
+        event_type: "tool.completed",
+        ...identity,
+        payload: CALL_COMPLETED[result.status],
+      });
+      return result;
+    };
+
   const runtime: AuditedChildRuntime = {
     async spawn(request: ChildSpawnRequest): Promise<string> {
       const id = await inner.spawn(request);
@@ -574,13 +638,11 @@ export function auditedChildRuntime(
             source: "engine" | "operator" = "engine",
           ): Promise<SteerOutcome | null> => deliverSteer(id, prompt, causalContext, source),
         }),
-    ...(inner.callTool === undefined
-      ? {}
-      : {
-          callTool: (_request: CallToolRequest): Promise<CallToolResult> => {
-            throw new Error("not implemented: AuditedChildRuntime.callTool");
-          },
-        }),
+    // Issue #978: a model-free call exists on THIS instance only when `inner`
+    // has one (conditional spread — `exactOptionalPropertyTypes`: omitted,
+    // never `undefined`), so a caller never sees a permission `inner` did not
+    // grant. See `auditCall` above for the ledger contract.
+    ...(innerCallTool === undefined ? {} : { callTool: auditCall(innerCallTool) }),
     // Issue #367: `installLeafSandbox` hands `inner` a WRAPPED installation —
     // `wrap` produces `tool.*` around whatever the caller's OWN policy wrap
     // (e.g. service.ts's `stretchToolDispatch`) decides, keyed by `open` (the

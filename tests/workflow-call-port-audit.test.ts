@@ -101,7 +101,7 @@ interface Rig {
   readonly events: () => Promise<
     readonly {
       readonly type: string;
-      readonly node_id: unknown;
+      readonly node_path: unknown;
       readonly sub_id: unknown;
       readonly attempt: unknown;
       readonly segment_id: unknown;
@@ -151,7 +151,7 @@ function rig(
       await trail.flush();
       return audit.query({ runId: RUN, limit: 100 }).events.map((event) => ({
         type: event.event_type,
-        node_id: event.identity.node_id,
+        node_path: event.identity.node_path,
         sub_id: event.identity.sub_id,
         attempt: event.identity.attempt,
         segment_id: event.identity.segment_id,
@@ -184,7 +184,8 @@ describe("AuditedChildRuntime.callTool — the tool.* pair", () => {
       const events = await t.events();
       expect(events.map((event) => event.type)).toEqual(["tool.started", "tool.completed"]);
       for (const event of events) {
-        expect(event.node_id).toBe("fetch");
+        // the ledger publishes the calling node's id as a one-element `node_path`
+        expect(event.node_path).toEqual(["fetch"]);
         expect(event.sub_id).toBe("call:fetch:0:1");
         expect(event.attempt).toBe(1);
         expect(event.segment_id).toBe("seg-call");

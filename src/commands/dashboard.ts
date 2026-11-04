@@ -388,12 +388,15 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
     warning: toolBase.noticesSink.warn,
   });
   const pricingOverrides = loadPriceOverrides(join(options.home, "pricing.json"));
+  // Issue #978: one dispatch for the leaves' composition AND the runtime's
+  // model-free `callTool` (`OrchestrationChildRuntime` below).
+  const baseDispatch = toolBase.registry.dispatch.bind(toolBase.registry);
   const orchestrationCore = buildOrchestrationCore({
     fanout: resolveFanout(undefined, undefined, options.environment),
     sessions,
     parentSessionId: randomUUID().replaceAll("-", ""),
     clientPool,
-    baseDispatch: toolBase.registry.dispatch.bind(toolBase.registry),
+    baseDispatch,
     parentToolDefinitions: toolBase.registry.getDefinitions(),
     defaultModel: model,
     cwd: options.cwd,
@@ -421,7 +424,7 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
   });
   ownershipRef.store = store;
   const workflowService = new WorkflowService({
-    runtime: new OrchestrationChildRuntime(orchestrationCore),
+    runtime: new OrchestrationChildRuntime(orchestrationCore, baseDispatch),
     environment: options.environment,
     homeRoot: options.home,
     loader: templateLoader(options.home),
