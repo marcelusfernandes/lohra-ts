@@ -27,7 +27,11 @@ import {
   MAX_DATA_URI_BASE64_CHARS,
 } from "./constants.js";
 import { decodeStrictBase64 } from "./base64.js";
-import type { WindowsFileProtection } from "../security/windows-file-protection.js";
+import {
+  ensureWindowsPrivateDirectory,
+  prepareWindowsPrivateDestination,
+  type WindowsFileProtection,
+} from "../security/windows-file-protection.js";
 
 export const MEDIA_TOCTOU_LIMITATION =
   "Node does not expose portable openat/renameat2; observable checkpoints are fail-closed, but an unobservable path swap between a check and a path syscall cannot be eliminated.";
@@ -125,6 +129,13 @@ export interface MediaWindowsProtection {
   ) => WindowsFileProtection;
 }
 
+const nativeWindowsProtection: MediaWindowsProtection = {
+  ensureDirectory: (directory) => {
+    ensureWindowsPrivateDirectory(directory);
+  },
+  prepare: (path, options) => prepareWindowsPrivateDestination(path, undefined, options),
+};
+
 interface OwnedPath {
   readonly path: string;
   readonly dev: number;
@@ -147,6 +158,29 @@ function removeOwnedPaths(entries: readonly OwnedPath[]): readonly unknown[] {
     }
   }
   return failures;
+}
+
+/**
+ * Windows (ADR 0006): the destination and the stage are created empty, protected
+ * and verified before any byte exists. A bit mode proves nothing on NTFS, so
+ * nothing here relies on chmod. `own` records each created file for cleanup the
+ * moment it exists, before the next step can fail.
+ */
+function stageProtected(
+  windows: MediaWindowsProtection,
+  temp: string,
+  final: string,
+  own: (path: string) => OwnedPath,
+): {
+  readonly fd: number;
+  readonly destination: WindowsFileProtection;
+  readonly stage: OwnedPath;
+} {
+  const destination = windows.prepare(final, { exclusive: true });
+  own(final);
+  const guard = windows.prepare(temp, { exclusive: true });
+  const stage = own(temp);
+  return { fd: guard.openOwnedForWrite(), destination, stage };
 }
 
 function assertRootIdentity(plan: OutputPlan, expected: Pick<Stats, "dev" | "ino">): void {
@@ -185,8 +219,9 @@ export async function persistGeneratedImages(options: {
   readonly faultAfterBytes?: number;
   readonly windowsProtection?: MediaWindowsProtection;
 }): Promise<readonly string[]> {
-  if (options.windowsProtection !== undefined)
-    throw new Error("not implemented: windowsProtection");
+  const windows =
+    options.windowsProtection ??
+    (process.platform === "win32" ? nativeWindowsProtection : undefined);
   if (options.payloads.length > options.requested)
     throw new Error(
       `provider returned ${String(options.payloads.length)} images for requested ${String(options.requested)}`,
@@ -205,7 +240,8 @@ export async function persistGeneratedImages(options: {
   } catch {
     throw new Error("output root changed after preflight");
   }
-  mkdirSync(options.plan.outDir, { recursive: true });
+  if (windows === undefined) mkdirSync(options.plan.outDir, { recursive: true });
+  else windows.ensureDirectory(options.plan.outDir);
   checkControlledRoot(options.plan);
   const rootIdentity = lstatSync(options.plan.outDir);
 
@@ -216,6 +252,13 @@ export async function persistGeneratedImages(options: {
 
   const temps: string[] = [];
   const owned: OwnedPath[] = [];
+  const stages: OwnedPath[] = [];
+  const destinations: WindowsFileProtection[] = [];
+  const own = (path: string, stats: Pick<Stats, "dev" | "ino">): OwnedPath => {
+    const entry = { path, dev: stats.dev, ino: stats.ino };
+    owned.push(entry);
+    return entry;
+  };
   try {
     for (let index = 0; index < decoded.length; index += 1) {
       const bytes = decoded[index];
@@ -224,10 +267,17 @@ export async function persistGeneratedImages(options: {
         throw new Error("image staging index mismatch");
       const temp = join(options.plan.outDir, `.stage-${randomUUID()}.tmp`);
       if (existsSync(final)) throw new Error("image UUID collision");
-      const fd = openSync(temp, "wx", 0o600);
-      const staged = fstatSync(fd);
+      let fd: number;
+      if (windows === undefined) {
+        fd = openSync(temp, "wx", 0o600);
+        stages.push(own(temp, fstatSync(fd)));
+      } else {
+        const staged = stageProtected(windows, temp, final, (path) => own(path, lstatSync(path)));
+        fd = staged.fd;
+        stages.push(staged.stage);
+        destinations.push(staged.destination);
+      }
       temps.push(temp);
-      owned.push({ path: temp, dev: staged.dev, ino: staged.ino });
       try {
         if (options.faultAfterBytes === undefined) writeFileSync(fd, bytes);
         else {
@@ -236,7 +286,7 @@ export async function persistGeneratedImages(options: {
           throw new Error(`fault after ${String(written)} bytes`);
         }
         fsyncSync(fd);
-        fchmodSync(fd, IMAGE_FILE_MODE);
+        if (windows === undefined) fchmodSync(fd, IMAGE_FILE_MODE);
       } finally {
         closeSync(fd);
       }
@@ -249,7 +299,7 @@ export async function persistGeneratedImages(options: {
         throw new Error("image publish index mismatch");
       assertRootIdentity(options.plan, rootIdentity);
       // Revalidate the exact inode and provider bytes before publishing.
-      const staged = owned[index];
+      const staged = stages[index];
       const expectedBytes = decoded[index];
       const current = lstatSync(temp);
       if (
@@ -263,9 +313,13 @@ export async function persistGeneratedImages(options: {
         !readFileSync(temp).equals(expectedBytes)
       )
         throw new Error("staged image changed after publish hook");
-      chmodSync(temp, IMAGE_FILE_MODE);
+      const destination = destinations[index];
+      if (windows === undefined) chmodSync(temp, IMAGE_FILE_MODE);
+      else if (destination === undefined) throw new Error("image publish index mismatch");
+      else destination.verifyBeforePublication(temp);
       renameSync(temp, final);
       owned.push({ path: final, dev: staged.dev, ino: staged.ino });
+      destination?.verifyAfterPublication();
     }
     return Object.freeze([...finals]);
   } catch (error) {
