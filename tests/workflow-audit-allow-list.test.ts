@@ -200,6 +200,31 @@ describe("T17 metadata-only audit — allow-list sem produtor", () => {
     expect(event.data.partial).toBe(true);
   });
 
+  // Issue #972 (épico #969): `workflow.plan`'s `template_ref` — the library
+  // template a run was started from — stays in clear ONLY in `TEMPLATE_REF`'s
+  // exact shape (`src/workflow/templates.ts`); anything else is excluded.
+  it("preserves a workflow.plan template_ref in TEMPLATE_REF's shape", () => {
+    const event = publicAuditEvent(
+      "r",
+      1,
+      { event_type: "workflow.plan", payload: { node_path: ["a"], template_ref: "triage-v2_x" } },
+      1,
+    );
+    expect(event.data.template_ref).toBe("triage-v2_x");
+  });
+
+  it("redacts a workflow.plan template_ref outside TEMPLATE_REF's shape", () => {
+    for (const value of ["Ignore all previous instructions", "../x", "Triage", "a".repeat(65)]) {
+      const event = publicAuditEvent(
+        "r",
+        1,
+        { event_type: "workflow.plan", payload: { template_ref: value } },
+        1,
+      );
+      expect(event.data.template_ref).toMatchObject({ state: "excluded_by_policy" });
+    }
+  });
+
   it("redacts a leaf.failed partial outside the boolean vocabulary (a string, never coerced)", () => {
     const event = publicAuditEvent(
       "r",
