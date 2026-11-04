@@ -22,10 +22,8 @@ import {
   VERIFY_SCHEMA,
 } from "./engine-contract.js";
 import {
-  applyCheckpointAnswer,
   asRecord,
   buildCausalContext,
-  checkpointPausePayload,
   clampInteger,
   collectBranchWithRetries,
   combine,
@@ -37,7 +35,6 @@ import {
   recollectLeafTimeout,
   recordGroupReplayCost,
   renderValue,
-  resolveCheckpoint,
   resolveLeafRequestOptions,
   resolveNodeSchema,
   resultUsage,
@@ -52,7 +49,7 @@ import {
   verifyPrompt,
 } from "./engine-utils.js";
 import { idleRunControl } from "./engine-options.js";
-import type { FlowStrategy } from "./flow-strategies.js";
+import { FLOW_STRATEGIES, type FlowDeps, type FlowStrategy } from "./flow-strategies.js";
 import { topologicalOrder } from "./graph.js";
 import { ROUTE_FAULT_REASON, sealRunStatus, type RouteLesson } from "./route-faults.js";
 import { overrideNestedSpec } from "./route-override.js";
@@ -129,11 +126,13 @@ export class WorkflowEngine {
     this.strategies.set("loop_until_dry", (engine, node, context) => engine.runLoop(node, context));
     this.strategies.set("workflow", (engine, node, context) => engine.runNested(node, context));
     this.strategies.set("gate", (engine, node, context) => engine.runGate(node, context));
-    this.strategies.set("completeness_check", (engine, node, context) =>
-      engine.runCompleteness(node, context),
-    );
-    this.strategies.set("checkpoint", (engine, node, context) =>
-      Promise.resolve(engine.runCheckpoint(node, context)),
+    for (const [type, strategy] of Object.entries(FLOW_STRATEGIES))
+      this.installFlow(type, strategy);
+  }
+
+  private installFlow(type: string, strategy: FlowStrategy): void {
+    this.strategies.set(type, (engine, node, context) =>
+      strategy(engine.flowDeps(), node, context),
     );
   }
 
@@ -144,9 +143,31 @@ export class WorkflowEngine {
 
   /** Deliberate test seam for proving that `FlowDeps` alone is enough to write a node. */
   setFlowStrategyForTest(type: string, strategy: FlowStrategy): void {
-    void type;
-    void strategy;
-    throw new Error("not implemented: setFlowStrategyForTest");
+    this.installFlow(type, strategy);
+  }
+
+  /** What a strategy outside this file may touch (`FlowDeps`, `flow-strategies.ts`). */
+  private flowDeps(): FlowDeps {
+    return Object.freeze({
+      runId: this.runId,
+      nodeScope: this.nodeScope,
+      runtime: this.runtime,
+      budget: this.budget,
+      control: this.control,
+      result: this.result,
+      tiers: this.tiers,
+      cache: this.cache,
+      checkpointAnswers: this.checkpointAnswers,
+      collectLeaf: this.collectLeaf.bind(this),
+      causal: this.causal.bind(this),
+      cell: this.cell.bind(this),
+      cacheGet: this.cacheGet.bind(this),
+      cachePut: this.cachePut.bind(this),
+      schemaOf: this.schemaOf.bind(this),
+      pause: this.pause.bind(this),
+      recordFault: this.recordFault.bind(this),
+      noteItems: this.noteItems.bind(this),
+    });
   }
 
   progress(): ProgressSnapshot {
@@ -196,6 +217,11 @@ export class WorkflowEngine {
   recordFault(message: string): void {
     this.result.faults.push(message);
     this.emit({ kind: "fault", nodeId: this.currentNode, text: message });
+  }
+
+  private noteItems(nodeId: string, done: number, total: number): void {
+    this.progressTracker.noteItems(nodeId, done, total);
+    this.emit({ kind: "items", nodeId, done, total });
   }
 
   private pause(
@@ -504,8 +530,7 @@ export class WorkflowEngine {
     if (!Array.isArray(items)) return null;
     const itemValues = items as readonly unknown[];
     if (itemValues.length > 0) this.budget.checkFanout(itemValues.length);
-    this.progressTracker.noteItems(node.id, 0, items.length);
-    this.emit({ kind: "items", nodeId: node.id, done: 0, total: items.length });
+    this.noteItems(node.id, 0, items.length);
     let done = 0;
     let expired = false;
     const outputs: unknown[] = Array.from({ length: itemValues.length }, () => null);
@@ -594,8 +619,7 @@ export class WorkflowEngine {
           previous = settled;
         }
         done += 1;
-        this.progressTracker.noteItems(node.id, done, items.length);
-        this.emit({ kind: "items", nodeId: node.id, done, total: items.length });
+        this.noteItems(node.id, done, items.length);
         outputs[itemIndex] = previous;
         return previous;
       }),
@@ -932,53 +956,6 @@ export class WorkflowEngine {
       feedback = `\n\nReviewer feedback: ${renderValue(verdict?.feedback ?? "revise")}`;
     }
     this.recordFault(`${node.id}: gate exhausted ${String(attempts)} attempts`);
-    return null;
-  }
-
-  private async runCompleteness(
-    node: Node,
-    context: Readonly<Record<string, unknown>>,
-  ): Promise<unknown> {
-    const task = strictResolve(node.fields.task, context);
-    const results = strictResolve(node.fields.results, context);
-    if (task === null || results === null) return null;
-    const schema = Object.freeze({
-      type: "object",
-      required: ["complete", "missing"],
-      properties: {
-        complete: { type: "boolean" },
-        missing: { type: "array", items: { type: "string" } },
-      },
-    });
-    const hash = this.cell([
-      node.id,
-      "completeness_check",
-      task,
-      results,
-      ...routingIdentity(node, this.tiers),
-    ]);
-    const cached = this.cacheGet(hash);
-    if (cached !== CACHE_MISS) return cached;
-    const leaf = await this.collectLeaf(
-      node,
-      `Task: ${renderValue(task)}\nResults: ${renderValue(results)}`,
-      schema,
-      { role: "completeness", cellId: hash },
-    );
-    if (leaf.output !== null) this.cachePut(hash, node.id, leaf.output, leaf.usage);
-    return leaf.output;
-  }
-
-  private runCheckpoint(node: Node, context: Readonly<Record<string, unknown>>): unknown {
-    const prompt = strictResolve(node.fields.prompt, context);
-    if (prompt === null) return null;
-    const hash = this.cell([node.id, "checkpoint", prompt]);
-    const cached = this.cacheGet(hash);
-    if (cached !== CACHE_MISS) return cached;
-    const resolved = resolveCheckpoint(this.checkpointAnswers, this.nodeScope, node.id);
-    if (resolved.matched)
-      return applyCheckpointAnswer(this.cache, this.runId, hash, resolved.scoped, resolved.answer);
-    this.pause("checkpoint", resolved.message, checkpointPausePayload(node, resolved, prompt));
     return null;
   }
 }
