@@ -174,13 +174,14 @@ function stageProtected(
 ): {
   readonly fd: number;
   readonly destination: WindowsFileProtection;
+  readonly placeholder: OwnedPath;
   readonly stage: OwnedPath;
 } {
   const destination = windows.prepare(final, { exclusive: true });
-  own(final);
+  const placeholder = own(final);
   const guard = windows.prepare(temp, { exclusive: true });
   const stage = own(temp);
-  return { fd: guard.openOwnedForWrite(), destination, stage };
+  return { fd: guard.openOwnedForWrite(), destination, placeholder, stage };
 }
 
 function assertRootIdentity(plan: OutputPlan, expected: Pick<Stats, "dev" | "ino">): void {
@@ -240,8 +241,9 @@ export async function persistGeneratedImages(options: {
   } catch {
     throw new Error("output root changed after preflight");
   }
-  if (windows === undefined) mkdirSync(options.plan.outDir, { recursive: true });
-  else windows.ensureDirectory(options.plan.outDir);
+  // Windows creates a missing root already protected; the shared mkdir is then a no-op.
+  windows?.ensureDirectory(options.plan.outDir);
+  mkdirSync(options.plan.outDir, { recursive: true });
   checkControlledRoot(options.plan);
   const rootIdentity = lstatSync(options.plan.outDir);
 
@@ -253,11 +255,19 @@ export async function persistGeneratedImages(options: {
   const temps: string[] = [];
   const owned: OwnedPath[] = [];
   const stages: OwnedPath[] = [];
-  const destinations: WindowsFileProtection[] = [];
+  const destinations: Array<{
+    readonly guard: WindowsFileProtection;
+    readonly placeholder: OwnedPath;
+  }> = [];
   const own = (path: string, stats: Pick<Stats, "dev" | "ino">): OwnedPath => {
     const entry = { path, dev: stats.dev, ino: stats.ino };
     owned.push(entry);
     return entry;
+  };
+  const release = (entry: OwnedPath): void => {
+    const position = owned.indexOf(entry);
+    if (position < 0) throw new Error("image ownership record missing");
+    owned.splice(position, 1);
   };
   try {
     for (let index = 0; index < decoded.length; index += 1) {
@@ -275,7 +285,7 @@ export async function persistGeneratedImages(options: {
         const staged = stageProtected(windows, temp, final, (path) => own(path, lstatSync(path)));
         fd = staged.fd;
         stages.push(staged.stage);
-        destinations.push(staged.destination);
+        destinations.push({ guard: staged.destination, placeholder: staged.placeholder });
       }
       temps.push(temp);
       try {
@@ -316,10 +326,15 @@ export async function persistGeneratedImages(options: {
       const destination = destinations[index];
       if (windows === undefined) chmodSync(temp, IMAGE_FILE_MODE);
       else if (destination === undefined) throw new Error("image publish index mismatch");
-      else destination.verifyBeforePublication(temp);
+      else destination.guard.verifyBeforePublication(temp);
       renameSync(temp, final);
       owned.push({ path: final, dev: staged.dev, ino: staged.ino });
-      destination?.verifyAfterPublication();
+      if (destination !== undefined) {
+        // The rename destroyed the empty placeholder. Its identity must not outlive it: a
+        // foreign file that reuses the freed inode would otherwise be removed as ours.
+        release(destination.placeholder);
+        destination.guard.verifyAfterPublication();
+      }
     }
     return Object.freeze([...finals]);
   } catch (error) {
