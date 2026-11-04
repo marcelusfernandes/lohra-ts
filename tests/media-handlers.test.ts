@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -25,7 +25,8 @@ vi.mock("../src/security/windows-file-protection-native.js", async (importOrigin
 
 const roots: string[] = [];
 const root = (): string => {
-  const value = mkdtempSync(join(tmpdir(), "lohra-media-handlers-"));
+  // Nome longo: um componente 8.3 (RUNNER~1) não é um caminho privável.
+  const value = mkdtempSync(join(realpathSync.native(tmpdir()), "lohra-media-handlers-"));
   roots.push(value);
   return value;
 };
