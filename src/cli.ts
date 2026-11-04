@@ -3,8 +3,8 @@ import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { inspect } from "node:util";
 
+import { failureReportLines } from "./cli/failure-messages.js";
 import { TerminalInputError, terminalInput } from "./cli/terminal-io.js";
 
 import { VERSION } from "./version.js";
@@ -319,46 +319,103 @@ function resolveParse(io: CliIo, command: string, rest: readonly string[]): Pars
   return parsed;
 }
 
-/** The message of `error` and of everything it was caused by (`cause`, and the
- * members of an `AggregateError`), outermost first. Each object appears once,
- * so a cycle or a cause shared by two levels does not repeat or loop. */
-function failureMessages(error: unknown, seen: Set<object>): string[] {
-  if (typeof error !== "object" || error === null) return [String(error)];
-  if (seen.has(error)) return [];
-  seen.add(error);
-  const causes: unknown[] = [];
-  if ("cause" in error && error.cause !== undefined) causes.push(error.cause);
-  if (error instanceof AggregateError) {
-    const members: readonly unknown[] = error.errors;
-    causes.push(...members);
-  }
-  return [
-    error instanceof Error ? error.message : inspect(error, { breakLength: Infinity }),
-    ...causes.flatMap((cause) => failureMessages(cause, seen)),
-  ];
-}
-
 /** A failure that reaches the entry point is reported, not rethrown: the user
  * reads `error: <message>` plus one `caused by:` line per level (the guidance
  * of a refusal lives in the causes), never a Node stack trace. Nothing is
  * dropped, and the exit code is non-zero. */
 function reportFailure(error: unknown, io: CliIo, json: boolean): number {
-  const [message, ...causes] = failureMessages(error, new Set());
-  const report = [message, ...causes.map((cause) => `caused by: ${cause}`)].join("\n");
+  const report = failureReportLines(error).join("\n");
   if (json) io.stdout(`${stringifyJsonPreservingNumbers({ error: report })}\n`);
   io.stderr(`error: ${report}\n`);
   return 1;
 }
 
-export async function runCli(argv: readonly string[], supplied?: CliIo): Promise<number> {
+/** How long a command that failed gets to end by itself, once its report is
+ * out, before the process is ended with the reported code. */
+const FAILURE_EXIT_GRACE_MS = 500;
+
+export interface FlushableStream {
+  readonly destroyed: boolean;
+  readonly writable: boolean;
+  write(chunk: string, callback: () => void): unknown;
+}
+
+export interface FailureExit {
+  readonly streams: readonly FlushableStream[];
+  readonly exit: (code: number) => void;
+  readonly graceMs: number;
+}
+
+/** Resolves once everything already written to `stream` has left the process.
+ * On Windows a TTY write is asynchronous, so a `process.exit` straight after
+ * the report could cut it; an empty write is queued behind the report and its
+ * callback runs when the report is out. */
+function flushed(stream: FlushableStream): Promise<void> {
+  return new Promise((done) => {
+    if (stream.destroyed || !stream.writable) done();
+    else
+      stream.write("", () => {
+        done();
+      });
+  });
+}
+
+/** A command that failed can leave a handle open (a server that did not close,
+ * a timer), and the event loop would then keep the process alive after the
+ * report. This ends it with `code`, but only after `graceMs` (a process that
+ * can end by itself does, and the timer is `unref`ed so it never holds one)
+ * and only after stdout and stderr have flushed, so the report is never cut.
+ * Called for a reported failure only; a success is left to end on its own. */
+export function endAfterFailure(code: number, override: Partial<FailureExit> = {}): NodeJS.Timeout {
+  const {
+    streams = [process.stdout, process.stderr],
+    exit = (value: number) => process.exit(value),
+    graceMs = FAILURE_EXIT_GRACE_MS,
+  } = override;
+  const timer = setTimeout(() => {
+    void Promise.all(streams.map(flushed)).then(() => {
+      exit(code);
+    });
+  }, graceMs);
+  timer.unref();
+  return timer;
+}
+
+export interface CliOutcome {
+  readonly code: number;
+  /** The command threw and `runCli` reported it (as opposed to a code the
+   * command returned). */
+  readonly failed: boolean;
+}
+
+/** `runCli` plus whether the command failed, which the process entry point
+ * needs to decide on ending the process after the report. */
+export async function runCliOutcome(
+  argv: readonly string[],
+  supplied?: CliIo,
+): Promise<CliOutcome> {
+  // Set by the single parse that accepted the arguments, so the failure report
+  // honours exactly the `--json` the parser saw (`--js` yes, `-- --json` no).
+  let json = false;
   try {
-    return await runCommand(argv, supplied);
+    const code = await runCommand(argv, supplied, (requested) => {
+      json = requested;
+    });
+    return { code, failed: false };
   } catch (error) {
-    return reportFailure(error, supplied ?? defaultIo(), argv.includes("--json"));
+    return { code: reportFailure(error, supplied ?? defaultIo(), json), failed: true };
   }
 }
 
-async function runCommand(argv: readonly string[], supplied?: CliIo): Promise<number> {
+export async function runCli(argv: readonly string[], supplied?: CliIo): Promise<number> {
+  return (await runCliOutcome(argv, supplied)).code;
+}
+
+async function runCommand(
+  argv: readonly string[],
+  supplied: CliIo | undefined,
+  announceJson: (json: boolean) => void,
+): Promise<number> {
   const io = supplied ?? defaultIo();
   if (argv[0] === "--version") {
     io.stdout(`lohra ${version}\n`);
@@ -420,6 +477,7 @@ async function runCommand(argv: readonly string[], supplied?: CliIo): Promise<nu
   if (parsed === null) return 2;
 
   const json = parsed.options.has("--json");
+  announceJson(json);
   const profileValue = parsed.options.get("--profile") as string | undefined;
   const environment = { ...io.environment };
   if (profileValue !== undefined) environment.LOHRA_PROFILE = profileValue;
@@ -667,5 +725,7 @@ if (
   process.argv[1] !== undefined &&
   realpathSync(resolve(process.argv[1])) === realpathSync(resolve(fileURLToPath(import.meta.url)))
 ) {
-  process.exitCode = await runCli(process.argv.slice(2));
+  const outcome = await runCliOutcome(process.argv.slice(2));
+  process.exitCode = outcome.code;
+  if (outcome.failed) endAfterFailure(outcome.code);
 }
