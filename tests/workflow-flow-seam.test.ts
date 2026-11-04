@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { usage } from "../src/pricing/usage.js";
 import { Budget } from "../src/workflow/budget.js";
 import { contentHash, MemoryWorkflowCache } from "../src/workflow/cache.js";
 import {
@@ -25,6 +26,7 @@ import {
   type FlowDeps,
   type FlowStrategy,
 } from "../src/workflow/flow-strategies.js";
+import { makeBodyLeafRunner } from "../src/workflow/leaf-options.js";
 import { NODE_TYPES } from "../src/workflow/nodes.js";
 import { evaluatePredicate } from "../src/workflow/predicates.js";
 import { readPath } from "../src/workflow/refs.js";
@@ -37,11 +39,12 @@ import type {
 } from "../src/workflow/runtime.js";
 import { NODE_VALIDATORS, validateGate } from "../src/workflow/schema-nodes.js";
 import { validateSpec } from "../src/workflow/schema.js";
-import { Node, SpecIssue, type WorkflowSpec } from "../src/workflow/types.js";
+import { Node, type SpecIssue, type WorkflowSpec } from "../src/workflow/types.js";
 
 const NAME = "flow-seam";
+const DEAD = Symbol("dead leaf");
 
-/** Hands out the scripted outputs in order; a `failed` once the script runs dry. */
+/** Hands out the scripted outputs in order; a `failed` for `DEAD` or once the script runs dry. */
 class ScriptedRuntime implements ChildRuntime {
   readonly spawned: ChildSpawnRequest[] = [];
   private readonly pending: unknown[];
@@ -56,20 +59,10 @@ class ScriptedRuntime implements ChildRuntime {
   }
 
   collect(_id: string, _options: ChildCollectOptions): ChildResult {
-    if (this.pending.length === 0) return { status: "failed", output: "script exhausted" };
-    return {
-      status: "complete",
-      output: this.pending.shift(),
-      usage: {
-        inputTokens: 1,
-        outputTokens: 1,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-        reasoningTokens: 0,
-      },
-      provider: "stub",
-      model: "canned",
-    };
+    const next = this.pending.shift();
+    if (next === undefined || next === DEAD) return { status: "failed", output: "dead leaf" };
+    const tokens = usage({ inputTokens: 1, outputTokens: 1 });
+    return { status: "complete", output: next, usage: tokens, provider: "stub", model: "canned" };
   }
 
   steer(): void {}
@@ -111,244 +104,19 @@ function parsed(raw: unknown): WorkflowSpec {
 const spec = (nodes: readonly Record<string, unknown>[]): WorkflowSpec =>
   parsed({ meta: { name: NAME }, nodes });
 
-const COMPLETENESS_OUTPUT = { complete: true, missing: [] };
+interface Options {
+  readonly runtime?: ScriptedRuntime;
+  readonly cache?: MemoryWorkflowCache;
+  readonly control?: RunControl;
+  readonly budget?: Budget;
+  readonly nodeScope?: readonly string[];
+  readonly checkpointAnswers?: Readonly<Record<string, unknown>>;
+  readonly events?: WorkflowEvent[];
+}
 
-describe("FLOW_STRATEGIES (#977)", () => {
-  it("carries completeness_check and checkpoint — the two types migrated as the seam's proof", () => {
-    expect(Object.keys(FLOW_STRATEGIES).sort()).toEqual(["checkpoint", "completeness_check"]);
-    for (const strategy of Object.values(FLOW_STRATEGIES)) expect(typeof strategy).toBe("function");
-  });
-
-  it("only names node types the spec accepts, and NODE_TYPES did not change", () => {
-    for (const type of Object.keys(FLOW_STRATEGIES)) expect(NODE_TYPES.has(type)).toBe(true);
-    expect([...NODE_TYPES].sort()).toEqual([
-      "agent",
-      "checkpoint",
-      "completeness_check",
-      "gate",
-      "judge_panel",
-      "loop_until_dry",
-      "parallel",
-      "pipeline",
-      "verify",
-      "workflow",
-    ]);
-  });
-
-  it("is frozen, so a node cannot register itself behind the table's back", () => {
-    expect(Object.isFrozen(FLOW_STRATEGIES)).toBe(true);
-  });
-
-  it("no longer lives in engine.ts, which does not define those strategies", () => {
-    const source = readFileSync(
-      fileURLToPath(new URL("../src/workflow/engine.ts", import.meta.url)),
-      "utf8",
-    );
-    expect(source).not.toMatch(/runCompleteness|runCheckpoint/u);
-    expect(source).toContain("FLOW_STRATEGIES");
-  });
-});
-
-describe("cell hashes are unchanged by the migration (#977)", () => {
-  const completeness = (extra: Record<string, unknown> = {}) =>
-    spec([
-      { id: "c", type: "completeness_check", task: "ship it", results: "found two", ...extra },
-    ]);
-  const checkpoint = spec([{ id: "cp", type: "checkpoint", prompt: "go on?" }]);
-
-  describe("completeness_check", () => {
-    const parts = ["c", "completeness_check", "ship it", "found two"];
-
-    it("a cell written under the pre-seam formula is a hit: no leaf spawns", async () => {
-      const cache = new MemoryWorkflowCache();
-      cache.put("run", contentHash(NAME, null, ...parts), "c", COMPLETENESS_OUTPUT, null);
-      const runtime = new ScriptedRuntime();
-      const result = await new WorkflowEngine({ runtime, cache, runId: "run" }).run(completeness());
-      expect(runtime.spawned).toHaveLength(0);
-      expect(result.outputs.c).toEqual(COMPLETENESS_OUTPUT);
-    });
-
-    it("a miss reads and writes exactly that hash, owned by the node", async () => {
-      const cache = new RecordingCache();
-      const runtime = new ScriptedRuntime([COMPLETENESS_OUTPUT]);
-      const result = await new WorkflowEngine({ runtime, cache, runId: "run" }).run(completeness());
-      const hash = contentHash(NAME, null, ...parts);
-      expect(runtime.spawned).toHaveLength(1);
-      expect(runtime.spawned[0]?.causalContext).toMatchObject({
-        role: "completeness",
-        cellId: hash,
-        nodePath: ["c"],
-      });
-      expect(cache.gets).toEqual([{ hash, nodeId: "c" }]);
-      expect(cache.puts).toEqual([{ hash, nodeId: "c", output: COMPLETENESS_OUTPUT }]);
-      expect(result.outputs.c).toEqual(COMPLETENESS_OUTPUT);
-    });
-
-    it("routing knobs still fold into the cell, after the task and the results", async () => {
-      const cache = new MemoryWorkflowCache();
-      cache.put(
-        "run",
-        contentHash(NAME, null, ...parts, "m-1", null, null),
-        "c",
-        COMPLETENESS_OUTPUT,
-        null,
-      );
-      const runtime = new ScriptedRuntime();
-      const result = await new WorkflowEngine({ runtime, cache, runId: "run" }).run(
-        completeness({ model: "m-1" }),
-      );
-      expect(runtime.spawned).toHaveLength(0);
-      expect(result.outputs.c).toEqual(COMPLETENESS_OUTPUT);
-    });
-
-    it("a nested engine puts its node scope right after the spec identity", async () => {
-      const cache = new RecordingCache();
-      const runtime = new ScriptedRuntime([COMPLETENESS_OUTPUT]);
-      await new WorkflowEngine({ runtime, cache, runId: "run", nodeScope: ["sub"] }).run(
-        completeness(),
-      );
-      expect(cache.puts).toEqual([
-        {
-          hash: contentHash(NAME, null, "sub", ...parts),
-          nodeId: "sub.c",
-          output: COMPLETENESS_OUTPUT,
-        },
-      ]);
-    });
-
-    it("a resolved ${ref} hashes its value, not the reference", async () => {
-      const cache = new MemoryWorkflowCache();
-      cache.put(
-        "run",
-        contentHash(NAME, null, "c", "completeness_check", "ship it", "from args"),
-        "c",
-        COMPLETENESS_OUTPUT,
-        null,
-      );
-      const runtime = new ScriptedRuntime();
-      const result = await new WorkflowEngine({ runtime, cache, runId: "run" }).run(
-        spec([{ id: "c", type: "completeness_check", task: "ship it", results: "${args.found}" }]),
-        { found: "from args" },
-      );
-      expect(runtime.spawned).toHaveLength(0);
-      expect(result.outputs.c).toEqual(COMPLETENESS_OUTPUT);
-    });
-
-    it("an upstream null still short-circuits to null with no leaf", async () => {
-      const runtime = new ScriptedRuntime();
-      const result = await new WorkflowEngine({ runtime }).run(
-        spec([{ id: "c", type: "completeness_check", task: "ship it", results: "${args.found}" }]),
-        { found: null },
-      );
-      expect(runtime.spawned).toHaveLength(0);
-      expect(result.outputs.c).toBeNull();
-    });
-  });
-
-  describe("checkpoint", () => {
-    const parts = ["cp", "checkpoint", "go on?"];
-
-    it("a cell written under the pre-seam formula is a hit: no pause, no answer needed", async () => {
-      const cache = new MemoryWorkflowCache();
-      cache.put("run", contentHash(NAME, null, ...parts), "cp", "earlier answer", null);
-      const control = idleRunControl();
-      const result = await new WorkflowEngine({
-        runtime: new ScriptedRuntime(),
-        cache,
-        control,
-        runId: "run",
-      }).run(checkpoint);
-      expect(control.paused).toBe(false);
-      expect(result.outputs.cp).toBe("earlier answer");
-    });
-
-    it("an answer is cached under that hash, owned by the SCOPED checkpoint id", async () => {
-      const cache = new RecordingCache();
-      const result = await new WorkflowEngine({
-        runtime: new ScriptedRuntime(),
-        cache,
-        runId: "run",
-        checkpointAnswers: { cp: "yes" },
-      }).run(checkpoint);
-      expect(result.outputs.cp).toBe("yes");
-      expect(cache.puts).toEqual([
-        { hash: contentHash(NAME, null, ...parts), nodeId: "cp", output: "yes" },
-      ]);
-    });
-
-    it("a nested engine scopes both the hash and the owner", async () => {
-      const cache = new RecordingCache();
-      await new WorkflowEngine({
-        runtime: new ScriptedRuntime(),
-        cache,
-        runId: "run",
-        nodeScope: ["sub"],
-        checkpointAnswers: { "sub.cp": "scoped yes" },
-      }).run(checkpoint);
-      expect(cache.puts).toEqual([
-        { hash: contentHash(NAME, null, "sub", ...parts), nodeId: "sub.cp", output: "scoped yes" },
-      ]);
-    });
-
-    it("an empty answer is cached too — the checkpoint does not ask twice", async () => {
-      const cache = new RecordingCache();
-      const result = await new WorkflowEngine({
-        runtime: new ScriptedRuntime(),
-        cache,
-        runId: "run",
-        checkpointAnswers: { cp: "" },
-      }).run(checkpoint);
-      expect(result.outputs.cp).toBe("");
-      expect(cache.puts).toHaveLength(1);
-    });
-
-    it("an unanswered checkpoint pauses with the scoped node id and the prompt", async () => {
-      const control = idleRunControl();
-      const result = await new WorkflowEngine({
-        runtime: new ScriptedRuntime(),
-        control,
-        nodeScope: ["sub"],
-      }).run(checkpoint);
-      expect(result.status).toBe("paused");
-      expect(control.pauseReason).toBe("checkpoint");
-      expect(control.pausePayload).toEqual({ node_id: "sub.cp", prompt: "go on?" });
-      expect(result.faults).toEqual(["cp: checkpoint waiting for answer"]);
-      expect(result.outputs.cp).toBeNull();
-    });
-  });
-});
-
-describe("a strategy that throws is isolated, as before the seam (#977)", () => {
-  it("records an engine fault naming the node and keeps the run going", async () => {
-    const engine = new WorkflowEngine({
-      runtime: new ScriptedRuntime(),
-      logError: () => undefined,
-    });
-    engine.setFlowStrategyForTest("agent", () => Promise.reject(new Error("boom")));
-    const result = await engine.run(spec([{ id: "a", type: "agent", prompt: "x" }]));
-    expect(result.outputs.a).toBeNull();
-    expect(result.engineFaults).toBe(1);
-    expect(result.faults).toEqual(["a: engine fault: Error: boom"]);
-  });
-});
-
-/** A node type's whole life in `FlowDeps` terms: the strategy gets deps, never the engine. */
-function runWith(
-  strategy: FlowStrategy,
-  options: {
-    readonly runtime: ChildRuntime;
-    readonly args?: Readonly<Record<string, unknown>>;
-    readonly cache?: MemoryWorkflowCache;
-    readonly control?: RunControl;
-    readonly budget?: Budget;
-    readonly nodeScope?: readonly string[];
-    readonly checkpointAnswers?: Readonly<Record<string, unknown>>;
-    readonly events?: WorkflowEvent[];
-    readonly node?: Record<string, unknown>;
-  },
-) {
-  const engine = new WorkflowEngine({
-    runtime: options.runtime,
+function engineFor(options: Options): WorkflowEngine {
+  return new WorkflowEngine({
+    runtime: options.runtime ?? new ScriptedRuntime(),
     runId: "run",
     logError: () => undefined,
     ...(options.cache === undefined ? {} : { cache: options.cache }),
@@ -362,15 +130,167 @@ function runWith(
       ? {}
       : { onEvent: (event: WorkflowEvent) => options.events?.push(event) }),
   });
-  engine.setFlowStrategyForTest("agent", strategy);
-  return engine.run(
-    spec([{ id: "n", type: "agent", prompt: "x", ...options.node }]),
-    options.args ?? {},
-  );
 }
 
+/** One `agent` node whose strategy is replaced by `strategy`: it gets deps, never the engine. */
+function runWith(
+  strategy: FlowStrategy,
+  options: Options & { readonly args?: Readonly<Record<string, unknown>> } = {},
+) {
+  const engine = engineFor(options);
+  engine.setFlowStrategyForTest("agent", strategy);
+  return engine.run(spec([{ id: "n", type: "agent", prompt: "x" }]), options.args ?? {});
+}
+
+describe("FLOW_STRATEGIES (#977)", () => {
+  it("carries completeness_check and checkpoint, frozen, and only for types the spec accepts", () => {
+    expect(Object.keys(FLOW_STRATEGIES).sort()).toEqual(["checkpoint", "completeness_check"]);
+    expect(Object.isFrozen(FLOW_STRATEGIES)).toBe(true);
+    for (const type of Object.keys(FLOW_STRATEGIES)) expect(NODE_TYPES.has(type)).toBe(true);
+  });
+
+  it("leaves NODE_TYPES as it was: no new node in this issue", () => {
+    expect([...NODE_TYPES].sort().join(",")).toBe(
+      "agent,checkpoint,completeness_check,gate,judge_panel,loop_until_dry,parallel,pipeline,verify,workflow",
+    );
+  });
+
+  it("no longer lives in engine.ts, which installs the table instead", () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("../src/workflow/engine.ts", import.meta.url)),
+      "utf8",
+    );
+    expect(source).not.toMatch(/runCompleteness|runCheckpoint/u);
+    expect(source).toContain("FLOW_STRATEGIES");
+  });
+
+  it("a strategy that throws is isolated as an engine fault, as before the seam", async () => {
+    const engine = engineFor({});
+    engine.setFlowStrategyForTest("agent", () => Promise.reject(new Error("boom")));
+    const result = await engine.run(spec([{ id: "a", type: "agent", prompt: "x" }]));
+    expect(result.outputs.a).toBeNull();
+    expect(result.engineFaults).toBe(1);
+    expect(result.faults).toEqual(["a: engine fault: Error: boom"]);
+  });
+});
+
+describe("cell hashes are unchanged by the migration (#977)", () => {
+  const OUTPUT = { complete: true, missing: [] };
+  const completeness = (extra: Record<string, unknown> = {}) =>
+    spec([
+      { id: "c", type: "completeness_check", task: "ship it", results: "found two", ...extra },
+    ]);
+  const checkpoint = spec([{ id: "cp", type: "checkpoint", prompt: "go on?" }]);
+
+  describe("completeness_check", () => {
+    const parts = ["c", "completeness_check", "ship it", "found two"];
+
+    it("a cell written under the pre-seam formula is a hit: no leaf spawns", async () => {
+      const cache = new MemoryWorkflowCache();
+      cache.put("run", contentHash(NAME, null, ...parts), "c", OUTPUT, null);
+      const runtime = new ScriptedRuntime();
+      const result = await engineFor({ runtime, cache }).run(completeness());
+      expect(runtime.spawned).toHaveLength(0);
+      expect(result.outputs.c).toEqual(OUTPUT);
+    });
+
+    it("a miss reads and writes exactly that hash, owned by the node", async () => {
+      const cache = new RecordingCache();
+      const runtime = new ScriptedRuntime([OUTPUT]);
+      const result = await engineFor({ runtime, cache }).run(completeness());
+      const hash = contentHash(NAME, null, ...parts);
+      expect(runtime.spawned).toHaveLength(1);
+      expect(runtime.spawned[0]?.causalContext).toMatchObject({
+        role: "completeness",
+        cellId: hash,
+        nodePath: ["c"],
+      });
+      expect(cache.gets).toEqual([{ hash, nodeId: "c" }]);
+      expect(cache.puts).toEqual([{ hash, nodeId: "c", output: OUTPUT }]);
+      expect(result.outputs.c).toEqual(OUTPUT);
+    });
+
+    it("routing knobs still fold into the cell, after the task and the results", async () => {
+      const cache = new MemoryWorkflowCache();
+      cache.put("run", contentHash(NAME, null, ...parts, "m-1", null, null), "c", OUTPUT, null);
+      const runtime = new ScriptedRuntime();
+      const result = await engineFor({ runtime, cache }).run(completeness({ model: "m-1" }));
+      expect(runtime.spawned).toHaveLength(0);
+      expect(result.outputs.c).toEqual(OUTPUT);
+    });
+
+    it("a nested engine puts its node scope right after the spec identity", async () => {
+      const cache = new RecordingCache();
+      const runtime = new ScriptedRuntime([OUTPUT]);
+      await engineFor({ runtime, cache, nodeScope: ["sub"] }).run(completeness());
+      expect(cache.puts).toEqual([
+        { hash: contentHash(NAME, null, "sub", ...parts), nodeId: "sub.c", output: OUTPUT },
+      ]);
+    });
+
+    it("a resolved ${ref} hashes its value, and an upstream null spawns nothing", async () => {
+      const cache = new MemoryWorkflowCache();
+      const hash = contentHash(NAME, null, "c", "completeness_check", "ship it", "from args");
+      cache.put("run", hash, "c", OUTPUT, null);
+      const runtime = new ScriptedRuntime();
+      const nodes = [
+        { id: "c", type: "completeness_check", task: "ship it", results: "${args.found}" },
+      ];
+      const hit = await engineFor({ runtime, cache }).run(spec(nodes), { found: "from args" });
+      const nul = await engineFor({ runtime }).run(spec(nodes), { found: null });
+      expect(hit.outputs.c).toEqual(OUTPUT);
+      expect(nul.outputs.c).toBeNull();
+      expect(runtime.spawned).toHaveLength(0);
+    });
+  });
+
+  describe("checkpoint", () => {
+    const parts = ["cp", "checkpoint", "go on?"];
+
+    it("a cell written under the pre-seam formula is a hit: no pause, no answer needed", async () => {
+      const cache = new MemoryWorkflowCache();
+      cache.put("run", contentHash(NAME, null, ...parts), "cp", "earlier answer", null);
+      const control = idleRunControl();
+      const result = await engineFor({ cache, control }).run(checkpoint);
+      expect(control.paused).toBe(false);
+      expect(result.outputs.cp).toBe("earlier answer");
+    });
+
+    it("an answer is cached under that hash, owned by the checkpoint id — even an empty one", async () => {
+      const hash = contentHash(NAME, null, ...parts);
+      for (const answer of ["yes", ""]) {
+        const cache = new RecordingCache();
+        const result = await engineFor({ cache, checkpointAnswers: { cp: answer } }).run(
+          checkpoint,
+        );
+        expect(result.outputs.cp).toBe(answer);
+        expect(cache.puts).toEqual([{ hash, nodeId: "cp", output: answer }]);
+      }
+    });
+
+    it("a nested engine scopes both the hash and the owner", async () => {
+      const cache = new RecordingCache();
+      const checkpointAnswers = { "sub.cp": "scoped yes" };
+      await engineFor({ cache, nodeScope: ["sub"], checkpointAnswers }).run(checkpoint);
+      expect(cache.puts).toEqual([
+        { hash: contentHash(NAME, null, "sub", ...parts), nodeId: "sub.cp", output: "scoped yes" },
+      ]);
+    });
+
+    it("an unanswered checkpoint pauses with the scoped node id and the prompt", async () => {
+      const control = idleRunControl();
+      const result = await engineFor({ control, nodeScope: ["sub"] }).run(checkpoint);
+      expect(result.status).toBe("paused");
+      expect(control.pauseReason).toBe("checkpoint");
+      expect(control.pausePayload).toEqual({ node_id: "sub.cp", prompt: "go on?" });
+      expect(result.faults).toEqual(["cp: checkpoint waiting for answer"]);
+      expect(result.outputs.cp).toBeNull();
+    });
+  });
+});
+
 describe("FlowDeps (#977)", () => {
-  it("is exactly the surface the flow nodes need, and it is frozen", async () => {
+  it("is exactly the surface the flow nodes need, bound and frozen", async () => {
     let captured: FlowDeps | null = null;
     const runtime = new ScriptedRuntime();
     const budget = new Budget();
@@ -381,29 +301,11 @@ describe("FlowDeps (#977)", () => {
       },
       { runtime, budget, nodeScope: ["sub"], checkpointAnswers: { a: 1 } },
     );
-    expect(captured).not.toBeNull();
     const deps = captured as unknown as FlowDeps;
     expect(Object.keys(deps).sort()).toEqual(
-      [
-        "budget",
-        "cache",
-        "cachePut",
-        "cacheGet",
-        "causal",
-        "cell",
-        "checkpointAnswers",
-        "collectLeaf",
-        "control",
-        "nodeScope",
-        "noteItems",
-        "pause",
-        "recordFault",
-        "result",
-        "runId",
-        "runtime",
-        "schemaOf",
-        "tiers",
-      ].sort(),
+      "budget,cache,cacheGet,cachePut,causal,cell,checkpointAnswers,collectLeaf,control,nodeScope,noteItems,pause,recordFault,result,runId,runtime,schemaOf,tiers"
+        .split(",")
+        .sort(),
     );
     expect(Object.isFrozen(deps)).toBe(true);
     expect(deps.runtime).toBe(runtime);
@@ -420,7 +322,7 @@ describe("FlowDeps (#977)", () => {
         cells.push(deps.cell(["n", "probe", 1]), deps.cell([]));
         return Promise.resolve(null);
       },
-      { runtime: new ScriptedRuntime(), nodeScope: ["sub"] },
+      { nodeScope: ["sub"] },
     );
     expect(cells).toEqual([
       contentHash(NAME, null, "sub", "n", "probe", 1),
@@ -428,20 +330,20 @@ describe("FlowDeps (#977)", () => {
     ]);
   });
 
-  it("cacheGet reports a miss with CACHE_MISS and a hit with the stored output, even a null", async () => {
+  it("cacheGet is CACHE_MISS or the stored output; cachePut skips an empty one", async () => {
     const seen: unknown[] = [];
     const cache = new RecordingCache();
     await runWith(
       (deps) => {
         const hash = deps.cell(["n"]);
         seen.push(deps.cacheGet(hash));
-        deps.cachePut(hash, "n", { v: 1 }, { ...ZERO_USAGE });
+        deps.cachePut(hash, "n", { v: 1 }, usage());
         seen.push(deps.cacheGet(hash));
-        deps.cachePut(deps.cell(["empty"]), "n", "", { ...ZERO_USAGE });
+        deps.cachePut(deps.cell(["empty"]), "n", "", usage());
         seen.push(deps.cacheGet(deps.cell(["empty"])));
         return Promise.resolve(null);
       },
-      { runtime: new ScriptedRuntime(), cache },
+      { cache },
     );
     expect(seen).toEqual([CACHE_MISS, { v: 1 }, CACHE_MISS]);
     expect(cache.puts).toEqual([
@@ -449,67 +351,45 @@ describe("FlowDeps (#977)", () => {
     ]);
   });
 
-  it("noteItems moves the progress counter and emits an items event", async () => {
+  it("noteItems, recordFault and pause reach the live events and the run", async () => {
     const events: WorkflowEvent[] = [];
-    await runWith(
+    const control = idleRunControl();
+    const result = await runWith(
       (deps) => {
         deps.noteItems("n", 0, 3);
         deps.noteItems("n", 2, 3);
+        deps.recordFault("n: something with a cause");
+        deps.pause("escalated", "n: needs a person", { node_id: "n", kind: "risk" });
         return Promise.resolve(null);
       },
-      { runtime: new ScriptedRuntime(), events },
+      { events, control },
     );
     expect(events.filter((event) => event.kind === "items")).toEqual([
       { kind: "items", nodeId: "n", done: 0, total: 3 },
       { kind: "items", nodeId: "n", done: 2, total: 3 },
     ]);
-  });
-
-  it("pause latches the run as paused with the reason, the message and the payload", async () => {
-    const control = idleRunControl();
-    const result = await runWith(
-      (deps) => {
-        deps.pause("escalated", "n: needs a person", { node_id: "n", kind: "risk" });
-        return Promise.resolve(null);
-      },
-      { runtime: new ScriptedRuntime(), control },
-    );
-    expect(result.status).toBe("paused");
-    expect(result.pauseReason).toBe("escalated");
-    expect(result.faults).toEqual(["n: needs a person"]);
-    expect(control.pausePayload).toEqual({ node_id: "n", kind: "risk" });
-  });
-
-  it("recordFault lands in the run's faults and the live fault event", async () => {
-    const events: WorkflowEvent[] = [];
-    const result = await runWith(
-      (deps) => {
-        deps.recordFault("n: something with a cause");
-        return Promise.resolve(null);
-      },
-      { runtime: new ScriptedRuntime(), events },
-    );
-    expect(result.faults).toEqual(["n: something with a cause"]);
     expect(events).toContainEqual({
       kind: "fault",
       nodeId: "n",
       text: "n: something with a cause",
     });
+    expect(result.status).toBe("paused");
+    expect(result.pauseReason).toBe("escalated");
+    expect(result.faults).toEqual(["n: something with a cause", "n: needs a person"]);
+    expect(control.pausePayload).toEqual({ node_id: "n", kind: "risk" });
   });
 
   it("causal builds the context a runtime port needs: run, segment, node path, cell, role", async () => {
     let context: unknown = null;
-    let runId = "";
     await runWith(
       (deps) => {
-        runId = deps.runId;
         context = deps.causal("call", "cell-1", { attempt: 2, itemIndex: 4 });
         return Promise.resolve(null);
       },
-      { runtime: new ScriptedRuntime(), nodeScope: ["sub"] },
+      { nodeScope: ["sub"] },
     );
     expect(context).toMatchObject({
-      runId,
+      runId: "run",
       nodePath: ["sub", "n"],
       cellId: "cell-1",
       role: "call",
@@ -521,12 +401,7 @@ describe("FlowDeps (#977)", () => {
 
   it("schemaOf resolves an inline schema, a named one, and a sub-object's own", async () => {
     const got: unknown[] = [];
-    const raw = {
-      meta: { name: NAME },
-      schemas: { VERDICT: { type: "object" } },
-      nodes: [{ id: "n", type: "agent", prompt: "x", schema_ref: "VERDICT" }],
-    };
-    const engine = new WorkflowEngine({ runtime: new ScriptedRuntime() });
+    const engine = engineFor({});
     engine.setFlowStrategyForTest("agent", (deps, node) => {
       got.push(
         deps.schemaOf(node),
@@ -535,31 +410,28 @@ describe("FlowDeps (#977)", () => {
       );
       return Promise.resolve(null);
     });
-    await engine.run(parsed(raw));
+    await engine.run(
+      parsed({
+        meta: { name: NAME },
+        schemas: { VERDICT: { type: "object" } },
+        nodes: [{ id: "n", type: "agent", prompt: "x", schema_ref: "VERDICT" }],
+      }),
+    );
     expect(got).toEqual([{ type: "object" }, { type: "string" }, null]);
   });
 });
 
-const ZERO_USAGE = {
-  inputTokens: 0,
-  outputTokens: 0,
-  cacheReadTokens: 0,
-  cacheWriteTokens: 0,
-  reasoningTokens: 0,
-};
-
 describe("FlowDeps is enough for the S2/S3/S4/S6 nodes — no engine.ts change (#977)", () => {
-  // S2: `switch` picks ONE case by the value of a state field and runs one leaf.
+  // S2: `switch` picks ONE case by the value of a state field and runs one leaf of its body.
   const switchLike: FlowStrategy = async (deps, node, context) => {
     const chosen = readPath("args.pick", context);
     const hash = deps.cell([node.id, "switch", chosen, ...routingIdentity(node, deps.tiers)]);
     const cached = deps.cacheGet(hash);
     if (cached !== CACHE_MISS) return { case: chosen, matched: true, output: cached };
-    const leaf = await deps.collectLeaf(node, `case ${String(chosen)}`, deps.schemaOf(node), {
-      role: "switch.case",
-      cellId: hash,
-      itemIndex: 1,
-    });
+    // `deps` stands in for the `BodyLeafDeps` the body runner takes: a case's own retries work.
+    const runBody = makeBodyLeafRunner(deps, node, { prompt: "case", retries: 1 });
+    const options = { role: "switch.case", cellId: hash, itemIndex: 1 };
+    const leaf = await runBody(`case ${String(chosen)}`, deps.schemaOf(node), options);
     if (leaf.output !== null) deps.cachePut(hash, node.id, leaf.output, leaf.usage);
     return { case: chosen, matched: leaf.output !== null, output: leaf.output };
   };
@@ -583,6 +455,14 @@ describe("FlowDeps is enough for the S2/S3/S4/S6 nodes — no engine.ts change (
     expect(rerun.outputs.n).toEqual({ case: "c", matched: true, output: "other" });
   });
 
+  it("S2 switch: the body runner respawns a dead leaf through the same deps", async () => {
+    const runtime = new ScriptedRuntime([DEAD, "second try"]);
+    const result = await runWith(switchLike, { runtime, args: { pick: "b" } });
+    expect(runtime.spawned).toHaveLength(2);
+    expect(result.outputs.n).toEqual({ case: "b", matched: true, output: "second try" });
+    expect(result.leafRespawns).toBe(1);
+  });
+
   // S3: `loop` runs one cell per round until a predicate holds, capped by max_rounds.
   const MAX_ROUNDS = 3;
   const loopLike: FlowStrategy = async (deps, node, context) => {
@@ -595,11 +475,8 @@ describe("FlowDeps is enough for the S2/S3/S4/S6 nodes — no engine.ts change (
       if (cached !== CACHE_MISS) {
         last = cached;
       } else {
-        const leaf = await deps.collectLeaf(node, `round ${String(round)}`, null, {
-          role: "loop.round",
-          cellId: hash,
-          attempt: round,
-        });
+        const options = { role: "loop.round", cellId: hash, attempt: round };
+        const leaf = await deps.collectLeaf(node, `round ${String(round)}`, null, options);
         if (leaf.output === null) return null;
         deps.cachePut(hash, node.id, leaf.output, leaf.usage);
         last = leaf.output;
@@ -619,28 +496,24 @@ describe("FlowDeps is enough for the S2/S3/S4/S6 nodes — no engine.ts change (
     const result = await runWith(loopLike, { runtime, events });
     expect(result.outputs.n).toEqual({ last: "stop", rounds: 2, until_met: true });
     expect(runtime.spawned).toHaveLength(2);
-    expect(
-      events
-        .filter((event) => event.kind === "items")
-        .map((event) => `${String(event.done)}/${String(event.total)}`),
-    ).toEqual(["0/3", "1/3", "2/3"]);
+    const items = events.filter((event) => event.kind === "items");
+    expect(items.map((event) => `${String(event.done)}/${String(event.total)}`)).toEqual([
+      "0/3",
+      "1/3",
+      "2/3",
+    ]);
     expect(result.faults).toEqual([]);
   });
 
   it("S3 loop: the cap ends it with a named fault", async () => {
-    const result = await runWith(loopLike, {
-      runtime: new ScriptedRuntime(["go", "go", "go"]),
-    });
+    const result = await runWith(loopLike, { runtime: new ScriptedRuntime(["go", "go", "go"]) });
     expect(result.outputs.n).toEqual({ last: "go", rounds: 3, until_met: false });
     expect(result.faults).toEqual(["n: reached max_rounds 3 without until"]);
   });
 
   it("S3 loop: checkFanout up front rejects before round 0, counted as a cap trip", async () => {
     const runtime = new ScriptedRuntime(["go"]);
-    const result = await runWith(loopLike, {
-      runtime,
-      budget: new Budget({ maxFanout: 2 }),
-    });
+    const result = await runWith(loopLike, { runtime, budget: new Budget({ maxFanout: 2 }) });
     expect(runtime.spawned).toHaveLength(0);
     expect(result.capTrips).toBe(1);
     expect(result.outputs.n).toBeNull();
@@ -683,11 +556,7 @@ describe("FlowDeps is enough for the S2/S3/S4/S6 nodes — no engine.ts change (
 
   it("S4 escalate: a false predicate costs nothing and does not pause", async () => {
     const control = idleRunControl();
-    const result = await runWith(escalateLike, {
-      runtime: new ScriptedRuntime(),
-      control,
-      args: { risky: false },
-    });
+    const result = await runWith(escalateLike, { control, args: { risky: false } });
     expect(result.outputs.n).toEqual({ escalated: false });
     expect(control.paused).toBe(false);
   });
@@ -695,7 +564,6 @@ describe("FlowDeps is enough for the S2/S3/S4/S6 nodes — no engine.ts change (
   it("S4 escalate: a true predicate pauses with the scoped id in the payload", async () => {
     const control = idleRunControl();
     const result = await runWith(escalateLike, {
-      runtime: new ScriptedRuntime(),
       control,
       nodeScope: ["sub"],
       args: { risky: true },
@@ -711,24 +579,15 @@ describe("FlowDeps is enough for the S2/S3/S4/S6 nodes — no engine.ts change (
 
   it("S4 escalate: the answer arrives through checkpointAnswers and is cached, so it never asks twice", async () => {
     const cache = new MemoryWorkflowCache();
-    const answered = await runWith(escalateLike, {
-      runtime: new ScriptedRuntime(),
-      cache,
-      args: { risky: true },
-      checkpointAnswers: { n: "approved" },
-    });
+    const args = { risky: true };
+    const answered = await runWith(escalateLike, { cache, args, checkpointAnswers: { n: "ok" } });
     expect(answered.status).toBe("complete");
-    expect(answered.outputs.n).toEqual({ escalated: true, answer: "approved" });
+    expect(answered.outputs.n).toEqual({ escalated: true, answer: "ok" });
 
     const control = idleRunControl();
-    const again = await runWith(escalateLike, {
-      runtime: new ScriptedRuntime(),
-      cache,
-      control,
-      args: { risky: true },
-    });
+    const again = await runWith(escalateLike, { cache, control, args });
     expect(control.paused).toBe(false);
-    expect(again.outputs.n).toEqual({ escalated: true, answer: "approved" });
+    expect(again.outputs.n).toEqual({ escalated: true, answer: "ok" });
   });
 
   // S6: `call` runs a tool with no model; each attempt is one fan-out slot and one charge.
@@ -756,30 +615,25 @@ describe("FlowDeps is enough for the S2/S3/S4/S6 nodes — no engine.ts change (
     expect(out.runtime).toBe(runtime);
     expect(out.remaining).toBe(4);
     expect(out.attemptContext).toMatchObject({ role: "call", nodePath: ["n"], attempt: 0 });
-    expect(budget.lifetimeRemaining).toBe(4);
   });
 
-  it("S6 call: an exhausted lifetime is a cap trip, with no attempt made", async () => {
-    const budget = new Budget({ lifetime: 1 });
-    budget.charge();
-    const result = await runWith(callLike, { runtime: new ScriptedRuntime(), budget });
-    expect(result.capTrips).toBe(1);
-    expect(result.outputs.n).toBeNull();
-    expect(result.faults[0]).toContain("lifetime remaining 0");
-    expect(budget.lifetimeRemaining).toBe(0);
-  });
+  it("S6 call: an exhausted lifetime is a cap trip, and a stopped run makes no attempt", async () => {
+    const spent = new Budget({ lifetime: 1 });
+    spent.charge();
+    const trip = await runWith(callLike, { budget: spent });
+    expect(trip.capTrips).toBe(1);
+    expect(trip.outputs.n).toBeNull();
+    expect(trip.faults[0]).toContain("lifetime remaining 0");
 
-  it("S6 call: a run that is already paused makes no attempt", async () => {
     const control = idleRunControl();
     control.paused = true;
-    const budget = new Budget({ lifetime: 5 });
-    await runWith(callLike, { runtime: new ScriptedRuntime(), budget, control });
-    expect(budget.lifetimeRemaining).toBe(5);
+    const fresh = new Budget({ lifetime: 5 });
+    await runWith(callLike, { budget: fresh, control });
+    expect(fresh.lifetimeRemaining).toBe(5);
   });
 });
 
 describe("validateGate lives in schema-nodes.ts (#977)", () => {
-  const gate = (fields: Record<string, unknown>): Node => new Node("g", "gate", fields);
   const run = (node: Node): SpecIssue[] => {
     const issues: SpecIssue[] = [];
     validateGate(node, issues);
@@ -792,14 +646,13 @@ describe("validateGate lives in schema-nodes.ts (#977)", () => {
   });
 
   it("accepts a well formed gate and ignores every other type", () => {
-    expect(run(gate({ body: { prompt: "draft" }, validator: "is it good?" }))).toEqual([]);
-    const other: SpecIssue[] = [];
-    validateGate(new Node("a", "agent", { prompt: "x" }), other);
-    expect(other).toEqual([]);
+    const gate = new Node("g", "gate", { body: { prompt: "draft" }, validator: "is it good?" });
+    expect(run(gate)).toEqual([]);
+    expect(run(new Node("a", "agent", { prompt: "x" }))).toEqual([]);
   });
 
   it("refuses a body without a prompt, a blank validator and a bad attempts count", () => {
-    const issues = run(gate({ body: {}, validator: " ", attempts: 9 }));
+    const issues = run(new Node("g", "gate", { body: {}, validator: " ", attempts: 9 }));
     expect(issues.map((issue) => issue.field)).toEqual(["body", "validator", "attempts"]);
     expect(issues.every((issue) => issue.rule === "field_value" && issue.nodeId === "g")).toBe(
       true,
