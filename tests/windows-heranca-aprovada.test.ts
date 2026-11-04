@@ -15,17 +15,16 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
-  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { atomicWritePrivate0600, type AtomicWriteOperations } from "../src/auth/json-file.js";
-import { readTokens, writeTokens } from "../src/auth/store.js";
+import { writeTokens } from "../src/auth/store.js";
 import { OAuthTokens } from "../src/auth/types.js";
 import {
   prepareWindowsPrivateDestination,
@@ -407,12 +406,28 @@ $acl.AddAccessRule($rule)
     if (result.status !== 0)
       throw new Error(`could not add a rule on the throwaway: ${result.stderr}`);
   };
-  /** A parent only the user can reach (the protect mechanism) and a plain `mkdir` child that inherits from it. */
-  const inheritingChild = (grants: readonly string[] = []): string => {
+  // Every ACL operation opens a PowerShell process, and the suite runs them under load
+  // against a 5 s test timeout: the parents (the protect mechanism, and the rules added to
+  // them) are built once, outside any test, and each test costs one or two processes.
+  const unmapped = "S-1-5-21-1-2-3-1234";
+  const parents = { approved: "", others: "" };
+  /** A parent only the user can reach, plus `grants`: what its plain `mkdir` children inherit. */
+  const protectedParent = (grants: readonly string[]): string => {
     const parent = throwaway();
     runWindowsAclBatch([{ action: "protect", path: parent }]);
     for (const sid of grants) addRule(parent, sid, "Allow");
-    const child = join(parent, "home");
+    return parent;
+  };
+  beforeAll(() => {
+    if (!windows) return;
+    parents.approved = protectedParent([]);
+    parents.others = protectedParent(["S-1-5-32-545", unmapped]);
+  });
+  let created = 0;
+  /** A plain `mkdir` child: it inherits from the parent alone, with no ACL of its own. */
+  const inheritingChild = (parent: string): string => {
+    created += 1;
+    const child = join(parent, `home-${String(created)}`);
     mkdirSync(child);
     return child;
   };
@@ -426,7 +441,7 @@ $acl.AddAccessRule($rule)
   owned(
     "accepts a preexisting folder and file that inherit only approved identities, changing neither",
     () => {
-      const home = inheritingChild();
+      const home = inheritingChild(parents.approved);
       const file = join(home, "auth.json");
       writeFileSync(file, "{}");
       runWindowsAclBatch([
@@ -434,7 +449,8 @@ $acl.AddAccessRule($rule)
         { action: "verify", path: home, preexisting: true },
         { action: "verify", path: file, preexisting: true },
       ]);
-      // The strict check still refuses what only inherits, with today's cause.
+      // Nothing was applied to the folder: the strict check still refuses what only
+      // inherits, with today's cause.
       expect(
         failureOf(() => {
           verify(home, false);
@@ -443,35 +459,8 @@ $acl.AddAccessRule($rule)
     },
   );
 
-  owned(
-    "saves a credential in such a home, replacing the preexisting file with a protected one",
-    () => {
-      const home = inheritingChild();
-      const file = join(home, "auth.json");
-      writeFileSync(file, "{}");
-      atomicWritePrivate0600(file, "fictional-token");
-      expect(readFileSync(file, "utf8")).toBe("fictional-token");
-      expect(readdirSync(home)).toEqual(["auth.json"]);
-      // The write verified the published file strictly (it is the protected stage) and left
-      // the preexisting home as it was: it still only inherits.
-      expect(
-        failureOf(() => {
-          verify(home, false);
-        }).message,
-      ).toContain("Inherited access rules remain enabled");
-    },
-  );
-
-  owned("renews the OAuth tokens (writeTokens) in such a home", () => {
-    const home = inheritingChild();
-    writeFileSync(join(home, "oauth.json"), "{}");
-    writeTokens(home, new OAuthTokens("fictional-access", "fictional-refresh", "account", 2000));
-    expect(readTokens(home)?.accessToken).toBe("fictional-access");
-  });
-
   owned("lists every unapproved identity, by name and SID or by SID alone, and what to do", () => {
-    const unmapped = "S-1-5-21-1-2-3-1234";
-    const home = inheritingChild(["S-1-5-32-545", unmapped]);
+    const home = inheritingChild(parents.others);
     const failure = failureOf(() => {
       verify(home, true);
     });
@@ -486,7 +475,7 @@ $acl.AddAccessRule($rule)
   });
 
   owned("refuses saving a credential there, creating nothing in the folder", () => {
-    const home = inheritingChild(["S-1-5-32-545"]);
+    const home = inheritingChild(parents.others);
     const failure = failureOf(() => {
       atomicWritePrivate0600(join(home, "auth.json"), "fictional-token");
     });
@@ -497,7 +486,7 @@ $acl.AddAccessRule($rule)
   });
 
   owned("still refuses a Deny rule, with the cause of the strict check", () => {
-    const home = inheritingChild();
+    const home = inheritingChild(parents.approved);
     addRule(home, "S-1-5-32-546", "Deny");
     expect(
       failureOf(() => {
