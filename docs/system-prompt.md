@@ -17,7 +17,7 @@ intocados (contrato pinado por hash SHA-256 em
 
 |                                    | antes da dieta (#585) | depois                             |
 | ---------------------------------- | --------------------- | ---------------------------------- |
-| chars de JSON do catálogo          | 43.951                | 21.975 (#605; teto de CI: 22.000)  |
+| chars de JSON do catálogo          | 43.951                | 22.934 (#969; teto de CI: 23.000)  |
 | tokens estimados (2,4 chars/token) | ~18.313               | ~9.156                             |
 | % em tools de `workflow_*`         | 72%                   | reduzido, mesma proporção de tools |
 
