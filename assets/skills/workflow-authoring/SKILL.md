@@ -556,33 +556,20 @@ matters yourself and put it in `args`.
 
 ## 8. Before you author: check the library
 
-Call **`workflow_templates`** first. Without `name` it lists every `.json`
-under `<home>/workflows/`:
-`{templates: [{ref, name?, nodes?, origin?, description?, error?}]}`. `ref` is
-the filename without `.json` — the same `ref` a `{type: "workflow", ref}` node
-resolves through. `origin` is `"agent"` for a template saved with
-`workflow_save` (below) and `"operator"` for one the operator wrote by hand;
-`description` says what it is for. An entry with `name` and `nodes` is a
-template the loader validated clean; an entry with `error` instead is a file
-the loader rejected (invalid `ref` format, invalid JSON, or a spec that fails
-validation) — it never drops silently from the list. Pass `name` to fetch one
-template's full, validated spec: `{ref, spec}`.
+Call **`workflow_templates`** first. Without `name` it lists every `.json` under `<home>/workflows/`:
+`{templates: [{ref, name?, nodes?, origin?, description?, error?}]}` — `ref` is the filename without
+`.json`, the same `ref` a `{type: "workflow", ref}` node resolves through; `origin` is `"agent"` for a
+template saved with `workflow_save`, else `"operator"`. An `error` entry is a file the loader rejected
+(bad `ref`, invalid JSON, invalid spec) — never dropped silently. `name` fetches one validated `{ref, spec}`.
 
-Adapt, don't copy blindly: keep the shape, replace the prompts and schemas.
+**Run one as-is**: `run_workflow {template: "<ref>", args}` — never re-send its spec; the run records `template_ref`
+(see `workflow_status`); refused with `spec`/`resume_run_id`. Close but not right? Adapt it and launch as `spec`.
 
-### Keep a workflow worth repeating: `workflow_save`
-
-When a run you authored finished **`complete`** and the same kind of task will
-come back, save it: `workflow_save {run_id, ref, description}`. It stores the
-spec that actually ran (from the run's own durable row) under a **new** `ref`,
-adds `meta.origin` and `meta.description`, and revalidates it exactly like a
-launch. Write the spec with `${args.x}` inputs before you run it, so the saved
-template takes new inputs next time. Don't save a one-off.
-
-Every refusal is named and writes nothing: the run is not `complete`, the `ref`
-is taken (a save never overwrites — a new version is a new `ref`), the
-description is empty or over 1024 characters, the template is over 256 KB, or
-the library already holds 100 templates you saved.
+**Save one worth repeating**: once a run you authored finished `complete` and the task will come back,
+`workflow_save {run_id, ref, description}` stores the spec that ran under a **new** `ref` (never overwrites),
+with `meta.origin`/`meta.description`, revalidated like a launch — use `${args.x}` inputs so it takes new ones.
+Named refusals, nothing written: run not `complete`, `ref` taken, description empty or over 1024 chars,
+over 256 KB, or 100 agent-saved templates already. Don't save a one-off.
 
 ---
 

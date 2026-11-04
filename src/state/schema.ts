@@ -155,6 +155,11 @@ export const addedColumns = [
   ["sessions", "system_prompt_stable", "TEXT"],
   ["sessions", "system_prompt_context", "TEXT"],
   ["sessions", "system_prompt_volatile", "TEXT"],
+  // Issue #971 (épico #969): the library template a run was started from
+  // (`run_workflow {template}`) and the sha256 of that template as loaded —
+  // NULL for an inline spec and for every row written before these existed.
+  ["workflow_run_state", "template_ref", "TEXT"],
+  ["workflow_run_state", "template_hash", "TEXT"],
 ] as const;
 
 export const ftsSchema = `

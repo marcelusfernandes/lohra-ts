@@ -21,6 +21,10 @@ export interface RunStateFields {
   readonly tainted: boolean;
   readonly progressJson: string | null;
   readonly auditSegmentId: string | null;
+  /** #971: the run's template origin — every writer passes what it knows;
+   * omitted means none (an inline spec). */
+  readonly templateRef?: string | null;
+  readonly templateHash?: string | null;
   readonly updatedAt: number;
   readonly fence: number | null;
   readonly holder: string | null;
@@ -109,8 +113,8 @@ export class WorkflowRepository {
       const sql = `INSERT OR REPLACE INTO workflow_run_state
          (run_id, name, owner, status, pause_reason, pause_payload_json,
           spec_json, args_json, token_budget, tainted, progress_json,
-          audit_segment_id, updated_at)
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          audit_segment_id, template_ref, template_hash, updated_at)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
          WHERE NOT EXISTS (
            SELECT 1 FROM workflow_run_locks WHERE run_id = ? AND expires_at > ?
          )`;
@@ -127,6 +131,8 @@ export class WorkflowRepository {
         fields.tainted ? 1 : 0,
         fields.progressJson,
         fields.auditSegmentId,
+        fields.templateRef ?? null,
+        fields.templateHash ?? null,
         fields.updatedAt,
         runId,
         fields.now,
@@ -149,8 +155,8 @@ export class WorkflowRepository {
       `INSERT OR REPLACE INTO workflow_run_state
        (run_id, name, owner, status, pause_reason, pause_payload_json,
         spec_json, args_json, token_budget, tainted, progress_json,
-        audit_segment_id, updated_at)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`,
+        audit_segment_id, template_ref, template_hash, updated_at)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`,
       [
         runId,
         fields.name,
@@ -164,6 +170,8 @@ export class WorkflowRepository {
         fields.tainted ? 1 : 0,
         fields.progressJson,
         fields.auditSegmentId,
+        fields.templateRef ?? null,
+        fields.templateHash ?? null,
         fields.updatedAt,
       ],
       { fence: fields.fence ?? -1, holder: fields.holder ?? "", now: fields.now },

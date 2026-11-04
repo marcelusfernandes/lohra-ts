@@ -627,16 +627,17 @@ describe("builtin registry — workflow_preview (#462 AC)", () => {
   it("registers 'workflow_preview' as the 29th tool", async () => {
     const { createBuiltinRegistry } = await import("../src/tools/builtins.js");
     const registry = createBuiltinRegistry();
-    expect(registry.generation).toBe(29);
+    // #970: `workflow_save` came after it, as the 30th.
+    expect(registry.generation).toBe(30);
     const names = registry.getDefinitions().map((definition) => definition.function.name);
     expect(names).toContain("workflow_preview");
-    expect(names.at(-1)).toBe("workflow_preview");
+    expect(names.indexOf("workflow_preview")).toBe(28);
   });
 
   it("is excluded from the child subagent toolset", async () => {
     const { CHILD_EXCLUDED_TOOLS } = await import("../src/tools/child.js");
     expect(CHILD_EXCLUDED_TOOLS).toContain("workflow_preview");
-    expect(CHILD_EXCLUDED_TOOLS).toHaveLength(24);
+    expect(CHILD_EXCLUDED_TOOLS).toHaveLength(25); // #970: +workflow_save
   });
 
   it("fails safe when dispatched without a session WorkflowService/database", async () => {

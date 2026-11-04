@@ -61,6 +61,7 @@ import type { AuditTrail } from "./audit-trail.js";
 import { auditEnabled } from "./audit-model.js";
 import { WorkflowLiveEvents, type WorkflowLiveEvent } from "./live-events.js";
 import { isErrorKind, type ErrorKind } from "../transports/error-kinds.js";
+import { launchOrigin, resolveTemplateLaunch } from "./template-run.js";
 export const RUN_LEASE_TTL = 900;
 /** The operator capability policy, read from the operator home per launch. */
 export const OPERATOR_POLICY_FILE = "workflow_policy.json";
@@ -135,6 +136,9 @@ export interface DurableRunView {
   readonly artifact_faults: readonly string[];
   readonly progress: Record<string, unknown> | null;
   readonly audit_segment_id: string | null;
+  /** #971: the library template the run was started from (`null` inline). */
+  readonly template_ref: string | null;
+  readonly template_hash: string | null;
   readonly updated_at: number;
 }
 
@@ -180,6 +184,8 @@ export function durableFromRow(row: Readonly<Record<string, unknown>>): DurableR
       row.audit_segment_id === null || row.audit_segment_id === undefined
         ? null
         : (row.audit_segment_id as string),
+    template_ref: typeof row.template_ref === "string" ? row.template_ref : null,
+    template_hash: typeof row.template_hash === "string" ? row.template_hash : null,
     updated_at: Number(row.updated_at ?? 0),
   };
 }
@@ -202,6 +208,7 @@ export function durableRollup(
   if (view.artifacts.length > 0) out.artifacts = [...view.artifacts];
   if (view.artifact_faults.length > 0) out.artifact_faults = [...view.artifact_faults];
   if (view.name !== "") out.name = view.name;
+  if (view.template_ref !== null) out.template_ref = view.template_ref; // #971
   if (view.status === "running") {
     out.stale = stale;
     out.hint = stale ? STALE_HINT : BUSY_HINT;
@@ -306,6 +313,7 @@ interface RunRecord {
   settled: boolean;
   interruptCause: "signal" | null; // set by runShutdown before cancelling a live record (#428) — announceStretchEnd tells segment.completed apart from a plain cancel
   pivots?: readonly { provider?: string; model?: string }[]; // #448: nextPivots(...) — set like `runtime` above
+  templateRef?: string | null; // #971: launchOrigin(...).ref — set like `pivots` above
 }
 
 function defaultServiceTimer(delay: number, fire: () => void): Timer {
@@ -497,9 +505,17 @@ export class WorkflowService {
     // below (fresh, durable) reach the same map without reloading it (#258).
     let options: WorkflowLaunchOptionsWithTiers = { ...callerOptions, tiers, routes };
     const resumeRunId = options.resumeRunId;
-    const explicitSpec = rawSpec !== undefined && rawSpec !== null;
+    // #971: a launch by `template` loads the spec here, then takes the same
+    // validation/launch path an inline spec does.
+    const template = resolveTemplateLaunch(this.loader, options.template, rawSpec, resumeRunId);
+    if (template !== null && "error" in template)
+      return Object.freeze({
+        error: template.error,
+        ...(template.invalidSpec === true ? { invalid_spec: true } : {}),
+      });
+    const explicitSpec = template !== null || (rawSpec !== undefined && rawSpec !== null);
     const prior = resumeRunId === undefined ? null : this.durableOf(resumeRunId);
-    let specCandidate: unknown = rawSpec;
+    let specCandidate: unknown = template === null ? rawSpec : template.raw;
     if (!explicitSpec) {
       if (resumeRunId === undefined) {
         return Object.freeze({ error: "run_workflow needs a 'spec' object (with meta + nodes)" });
@@ -526,7 +542,12 @@ export class WorkflowService {
     const routed = pivotResume(parsed, options, priorPivot);
     if (!routed.ok) return Object.freeze({ error: routed.error });
     parsed = routed.spec;
-    options = { ...options, ...routeOverrideOption(routed.override), rerouted: routed.rerouted };
+    options = {
+      ...options,
+      ...routeOverrideOption(routed.override),
+      rerouted: routed.rerouted,
+      origin: launchOrigin(template, explicitSpec, prior),
+    };
     const budget = options.tokenBudget;
     if (
       budget !== undefined &&
@@ -599,6 +620,7 @@ export class WorkflowService {
     producers.announceStretchStart(1, parsed, engine.budget.snapshot());
     const record = Object.assign(this.makeRecord(runId, parsed.name, engine), { runtime: rt });
     record.pivots = nextPivots([], options.routeOverride); // #448: no durable store here
+    record.templateRef = options.origin?.ref ?? null;
     this.runs.set(runId, record);
     void engine
       .run(parsed, args)
@@ -853,6 +875,8 @@ export class WorkflowService {
             tainted: taintedFlag,
             progressJson: progressJsonOf(engine.progress()),
             auditSegmentId: segmentId,
+            templateRef: options.origin?.ref ?? null,
+            templateHash: options.origin?.hash ?? null,
             updatedAt: ownership.now,
             fence: ownership.fence,
             holder: ownership.holder,
@@ -860,6 +884,7 @@ export class WorkflowService {
           });
     const record = Object.assign(this.makeRecord(runId, parsed.name, engine), { runtime: rt });
     record.pivots = nextPivots(priorView?.pivots ?? [], options.routeOverride); // #448
+    record.templateRef = options.origin?.ref ?? null;
     // Hand this acquisition back exactly once, never by throwing: each step below is independent, so one that fails cannot skip the ones after it or stop the run from publishing a bounded result. The heartbeat stops FIRST — a tick that outlived the release would put the lease back and leave the run looking alive with nobody in it — and the release itself is conditioned on THIS acquisition's fence, so a takeover by the same holder cannot be deleted by it.
     let finished = false;
     const finishStretch = (): void => {
@@ -1278,6 +1303,8 @@ export class WorkflowService {
       tainted: view.tainted,
       progressJson: view.progress === null ? null : JSON.stringify(view.progress),
       auditSegmentId: view.audit_segment_id,
+      templateRef: view.template_ref,
+      templateHash: view.template_hash,
       updatedAt: store.ownershipOf().now,
       fence: null,
       holder: null,

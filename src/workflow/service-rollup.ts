@@ -66,6 +66,19 @@ interface LiveRunLike {
   readonly name: string;
   readonly engine: Readonly<{ budget: Budget; progress(): ProgressSnapshot }>;
   readonly pivots?: readonly RouteOverride[];
+  /** #971: the library template this run was started from, if any. */
+  readonly templateRef?: string | null;
+}
+
+/** #971: `template_ref` is OMITTED for an inline spec — same absence idiom
+ * as `withPivots`, so the live and durable envelopes agree. */
+function withTemplate(
+  view: Readonly<Record<string, unknown>>,
+  templateRef: string | null | undefined,
+): Readonly<Record<string, unknown>> {
+  return templateRef === null || templateRef === undefined
+    ? view
+    : { ...view, template_ref: templateRef };
 }
 
 /** #448: `pivots` is OMITTED (never a bare `[]`) for a run that never
@@ -130,45 +143,48 @@ export function resultView(
   result: RunResult,
 ): Readonly<Record<string, unknown>> {
   return Object.freeze(
-    withArtifacts(
-      withPivots(
-        {
-          run_id: record.id,
-          name: record.name,
-          status: result.status,
-          outputs: structuredClone(result.outputs),
-          faults: Object.freeze([
-            ...result.faults,
-            ...result.sandboxFaults,
-            ...result.artifactFaults,
-          ]),
-          null_count: result.nullCount,
-          leaf_respawns: result.leafRespawns,
-          validation_retries: result.validationRetries,
-          cap_trips: result.capTrips,
-          engine_faults: result.engineFaults,
-          nodes_total: result.nodesTotal,
-          tokens_in: result.tokensIn,
-          tokens_out: result.tokensOut,
-          cache_read_tokens: result.cacheReadTokens,
-          cache_write_tokens: result.cacheWriteTokens,
-          reasoning_tokens: result.reasoningTokens,
-          forcing_fallbacks: result.forcingFallbacks,
-          pause_reason: result.pauseReason,
-          checkpoint: result.checkpoint,
-          token_budget: record.engine.budget.snapshot(),
-          null_rate: result.nullRate,
-          usage_uncertain_leaves: result.usageUncertainLeaves,
-          // #517 (M16-S2, ADR 0005): always a SUBSET of `usage_uncertain_leaves`
-          // above — a leaf whose usage includes an ESTIMATED spend from a
-          // call aborted in flight.
-          partial_leaves: result.partialLeaves,
-          sandbox_refusals: result.sandboxRefusals,
-          fault_kinds: [...result.faultKinds],
-        },
-        record.pivots ?? [],
+    withTemplate(
+      withArtifacts(
+        withPivots(
+          {
+            run_id: record.id,
+            name: record.name,
+            status: result.status,
+            outputs: structuredClone(result.outputs),
+            faults: Object.freeze([
+              ...result.faults,
+              ...result.sandboxFaults,
+              ...result.artifactFaults,
+            ]),
+            null_count: result.nullCount,
+            leaf_respawns: result.leafRespawns,
+            validation_retries: result.validationRetries,
+            cap_trips: result.capTrips,
+            engine_faults: result.engineFaults,
+            nodes_total: result.nodesTotal,
+            tokens_in: result.tokensIn,
+            tokens_out: result.tokensOut,
+            cache_read_tokens: result.cacheReadTokens,
+            cache_write_tokens: result.cacheWriteTokens,
+            reasoning_tokens: result.reasoningTokens,
+            forcing_fallbacks: result.forcingFallbacks,
+            pause_reason: result.pauseReason,
+            checkpoint: result.checkpoint,
+            token_budget: record.engine.budget.snapshot(),
+            null_rate: result.nullRate,
+            usage_uncertain_leaves: result.usageUncertainLeaves,
+            // #517 (M16-S2, ADR 0005): always a SUBSET of `usage_uncertain_leaves`
+            // above — a leaf whose usage includes an ESTIMATED spend from a
+            // call aborted in flight.
+            partial_leaves: result.partialLeaves,
+            sandbox_refusals: result.sandboxRefusals,
+            fault_kinds: [...result.faultKinds],
+          },
+          record.pivots ?? [],
+        ),
+        result.artifacts,
       ),
-      result.artifacts,
+      record.templateRef,
     ),
   );
 }
@@ -198,15 +214,18 @@ export function progressJsonOf(progress: ProgressSnapshot): string | null {
  * derivation of `nextPivots`'s append rule. */
 export function runningView(record: LiveRunLike): Readonly<Record<string, unknown>> {
   return Object.freeze(
-    withPivots(
-      {
-        run_id: record.id,
-        name: record.name,
-        status: "running",
-        progress: record.engine.progress(),
-        token_budget: record.engine.budget.snapshot(),
-      },
-      record.pivots ?? [],
+    withTemplate(
+      withPivots(
+        {
+          run_id: record.id,
+          name: record.name,
+          status: "running",
+          progress: record.engine.progress(),
+          token_budget: record.engine.budget.snapshot(),
+        },
+        record.pivots ?? [],
+      ),
+      record.templateRef,
     ),
   );
 }
