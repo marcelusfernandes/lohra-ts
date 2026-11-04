@@ -326,7 +326,8 @@ sem separador de caminho, sem `..`, nunca escapa do diretório).
 
 - **`workflow_templates` é real**, não mais o stub `failSafe` de antes do
   #464: sem `name`, lista todo `.json` do diretório (`listTemplates`) —
-  cada entrada `{ref, name?, nodes?, error?}`, um arquivo quebrado ou cujo
+  cada entrada `{ref, name?, nodes?, origin?, description?, stats?, error?}`
+  (os três do meio desde o #969, seção abaixo), um arquivo quebrado ou cujo
   nome de arquivo não é um `ref` válido vira `{ref, error}`, nunca cai
   silenciosamente da lista; com `name`, carrega e VALIDA esse template
   (`validateSpec`), citando os mesmos erros que `run_workflow` citaria.
@@ -344,6 +345,62 @@ loader unavailable"` em produção; o #244 já validava um `ref` na CARGA da
   partir daqui.
 - **`workflow_preview` recebe este MESMO loader desde o #484** — ver a
   seção acima (`session-tools.ts:177-181`).
+
+## A biblioteca do orquestrador: guardar, rodar por nome e contar (#969)
+
+O orquestrador sempre pôde montar um workflow inline no `run_workflow`. Desde
+o épico #969 (PR #974) ele também guarda os que deram certo, roda um guardado
+pelo nome e vê como cada um se sai. A biblioteca é a mesma
+`<home>/workflows/`.
+
+- **`workflow_save {run_id, ref, description}`** (#970,
+  `src/workflow/template-save.ts`) salva o spec de um run **`complete`**,
+  lido da própria linha durável, como `<ref>.json`. Grava também
+  `meta.origin = {by: "agent", run_id, saved_at}` e `meta.description`, e
+  revalida tudo com `validateSpec`/`validateNestedRefs`, como um launch faria.
+  A criação é atômica e **nunca sobrescreve**: um temporário no mesmo
+  diretório e um `link` exclusivo, que falha com `EEXIST` em vez de substituir.
+  Uma versão nova é um `ref` novo.
+  - Toda recusa é nomeada e não grava nada: run desconhecido ou não
+    `complete`, `ref` inválido ou já existente, descrição vazia ou acima de
+    1024 caracteres, template acima de 256 KB, 100 templates do agente
+    (`MAX_AGENT_TEMPLATES`), ou uma entrada da biblioteca que não pode ser
+    lida (o teto nunca subconta em silêncio).
+  - Leaves não recebem a tool (`CHILD_EXCLUDED_TOOLS`).
+- **`run_workflow {template: "<ref>", args}`** (#971,
+  `src/workflow/template-run.ts`) carrega o template e segue exatamente o
+  caminho de um spec inline: validação, tetos e `token_budget`.
+  - É recusado junto com `spec` ou `resume_run_id`.
+  - O run grava `template_ref` e `template_hash` (sha256 do template **como
+    carregado**, então uma edição só de formatação não muda o hash) em
+    `workflow_run_state`. As colunas novas vêm por `addedColumns`, nas duas
+    escritas da linha: o launch sob fence e o cancel sem dono.
+  - Um resume que replays o próprio spec, ou reenvia o mesmo template
+    (mesmo hash), mantém a origem. Um resume com outro spec a limpa.
+  - `workflow_status` mostra `template_ref`, e o campo fica omitido num spec
+    inline.
+- **Origem no protocolo de eventos** (#972): o evento live `plan` e o
+  `workflow.plan` do ledger levam `template_ref`, sem tipo de evento novo. O
+  ledger só guarda o valor em claro se ele tiver o formato exato de
+  `TEMPLATE_REF`; qualquer outro valor nessa chave fica `excluded_by_policy`.
+- **Placar** (#973, `src/workflow/template-stats.ts`): uma consulta sobre
+  `workflow_run_state` e `workflow_run_spend`, sem tabela nova e com
+  `LIMIT`, dá por template os runs por status, o último uso e os tokens
+  médios.
+  - `workflow_templates` traz `stats` em cada entrada (`runs: 0` para um
+    template nunca usado). Se o placar não puder ser lido, a listagem
+    continua e vem com `stats_error`. Se o `LIMIT` cortar o placar, vem com
+    `stats_truncated: true`.
+  - `lohra workflow templates [--json]` mostra o mesmo ao operador, uma linha
+    por template.
+- **Chamador com schema estrito** (Codex `strict: true`): ele preenche todo
+  campo opcional, por isso `workflow_templates {name: ""}` lista e
+  `run_workflow {template: ""}` é ausência. É o mesmo idioma de `""` como
+  ausência do `workflow_audit` (#390), e foi achado no dogfooding real do
+  #969.
+- **Fora daqui**: promoção e rebaixamento automáticos de template, a
+  definição de "a mesma tarefa" e o roteamento dos casos comuns para um
+  template continuam na exploração #949, que tem o placar como insumo.
 
 ## Manifesto de artefatos: `artifacts`/`artifact_faults` por run (#463, M11-S5)
 

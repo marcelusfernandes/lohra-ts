@@ -462,10 +462,10 @@ vivo já assentou (conteúdo bruto, não redigido — diferente de
 diferente com `run_workflow(resume_run_id=..., route={provider?, model?})`.
 `workflow_preview {run_id, route?}` faz o dry-run desse resume — o que
 replayaria, o que recomputaria e por quê — sem gastar token, sem escrever
-nada e sem consumir um dos 3 pivôs de rota do run; `workflow_templates`
-lista e carrega a biblioteca de specs do operador
-(`~/.lohra/workflows/<ref>.json`), a mesma que um nó `{type: "workflow",
-ref}` referencia. Detalhes, tetos e o que cada um NÃO faz em
+nada e sem consumir um dos 3 pivôs de rota do run. `workflow_templates` lista a biblioteca
+(`~/.lohra/workflows/<ref>.json`): specs do operador e os que o orquestrador guardou com
+`workflow_save` a partir de um run `complete`, com origem e placar de runs; `run_workflow {template}`
+roda um pelo nome e `lohra workflow templates` mostra o placar. Detalhes, tetos e o que cada um NÃO faz em
 [`docs/workflow-supervision.md`](docs/workflow-supervision.md).
 
 A tool `list_models` reporta `context_window` por modelo — a janela de
