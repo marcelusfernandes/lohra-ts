@@ -28,6 +28,19 @@ LOHRA_SQLITE_BUSY_TIMEOUT_MS=abc   # StateError: SQLITE_BUSY_TIMEOUT_INVALID
 (uso de teste, para isolar do processo real). `openStateDatabase(path,
 options)` sem `options.environment` cai para `process.env`.
 
+## Diretório do estado no Windows
+
+No Windows, `openStateDatabase` cria o diretório do `state.db` que ainda não
+existe com acesso só do dono, sem herança, nível a nível, em vez do `mkdir`
+comum (`src/state/connection.ts:124`). Vale também para quem importa
+`openStateDatabase` do pacote (`src/index.ts:4`): abrir o estado num diretório
+novo abre processos `powershell.exe`. Em caminho ou volume que não pode ser
+protegido (componente 8.3, UNC, volume não fixo ou não NTFS) a criação cai no
+`mkdir` comum e o estado abre como antes. Diretório que já existe não é
+alterado. Fora do Windows segue `mkdirSync` recursivo
+(`src/state/connection.ts:125`). Regras e limites em
+[windows-home.md](windows-home.md).
+
 ## Detecção de BUSY
 
 `AuditRepository` usa `isBusyError(error)` (chamado pelo retry de
