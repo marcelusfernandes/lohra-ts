@@ -57,8 +57,8 @@ Após instalar, `lohra init` com stdin/stderr em TTY pede provider/chave com ent
 Com chave configurada, oferece modelo; rode novamente após salvar uma chave nova.
 `lohra init --no-input` ou stdin sem TTY só exibem relatório, sem gravar.
 Ctrl+C ou EOF interrompem explicitamente, sem anunciar conclusão.
-No Windows, o home, o profile e a pasta de imagens que o Lohra cria nascem protegidos quando o caminho permite;
-credencial ou imagem em pasta preexistente incompatível, ou em caminho sem proteção possível, é recusada, sem migração: [detalhes](docs/windows-home.md).
+No Windows, o home, o profile e a pasta de imagens que o Lohra cria nascem protegidos quando o caminho permite; uma pasta que já existe é aceita se só herda o usuário, o SYSTEM e os Administradores.
+Com acesso de outra identidade, credencial e imagem são recusadas e a mensagem lista quem é e diz o que fazer; caminho sem proteção possível também é recusado. Sem migração: [detalhes](docs/windows-home.md).
 
 ## Biblioteca headless
 
