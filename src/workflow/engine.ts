@@ -6,6 +6,7 @@ import { foldNestedCounters, RunResult, addUsageToResult } from "./accounting.js
 import { Budget, FanoutRejected, TokenBudgetExhausted } from "./budget.js";
 import { contentHash, MemoryWorkflowCache, type WorkflowCache } from "./cache.js";
 import {
+  CACHE_MISS,
   EMPTY_OUTPUT_CORRECTION,
   GATE_VERDICT_SCHEMA,
   JUDGE_SCORE_SCHEMA,
@@ -51,6 +52,7 @@ import {
   verifyPrompt,
 } from "./engine-utils.js";
 import { idleRunControl } from "./engine-options.js";
+import type { FlowStrategy } from "./flow-strategies.js";
 import { topologicalOrder } from "./graph.js";
 import { ROUTE_FAULT_REASON, sealRunStatus, type RouteLesson } from "./route-faults.js";
 import { overrideNestedSpec } from "./route-override.js";
@@ -138,6 +140,13 @@ export class WorkflowEngine {
   /** Deliberate test seam for proving engine-fault isolation. */
   setStrategyForTest(type: string, strategy: Strategy): void {
     this.strategies.set(type, strategy);
+  }
+
+  /** Deliberate test seam for proving that `FlowDeps` alone is enough to write a node. */
+  setFlowStrategyForTest(type: string, strategy: FlowStrategy): void {
+    void type;
+    void strategy;
+    throw new Error("not implemented: setFlowStrategyForTest");
   }
 
   progress(): ProgressSnapshot {
@@ -973,5 +982,3 @@ export class WorkflowEngine {
     return null;
   }
 }
-
-const CACHE_MISS = Symbol("cache-miss");

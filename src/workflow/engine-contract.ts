@@ -13,6 +13,8 @@ export const PIPELINE_TIMEOUT_SECONDS = 1800;
 export const MAX_WORKFLOW_DEPTH = 1;
 export const DEFAULT_LEAF_MAX_ITERATIONS = 50;
 export const EMPTY_OUTPUT_CORRECTION = "Your previous answer was empty. Produce a complete answer.";
+/** What `cacheGet` returns on a miss — a sentinel, because a hit may legitimately carry `null`. */
+export const CACHE_MISS = Symbol("cache-miss");
 export const VERIFY_SCHEMA = Object.freeze({
   type: "object",
   properties: Object.freeze({

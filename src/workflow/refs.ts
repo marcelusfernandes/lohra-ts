@@ -109,6 +109,12 @@ export function resolveValue(value: unknown, context: unknown): unknown {
   return value;
 }
 
+export function readPath(reference: string, context: unknown): unknown {
+  void reference;
+  void context;
+  throw new Error("not implemented: readPath");
+}
+
 export function resolveStrict(value: unknown, context: unknown): readonly [unknown, string | null] {
   assertValid(value);
   for (const reference of findRefs(value)) {

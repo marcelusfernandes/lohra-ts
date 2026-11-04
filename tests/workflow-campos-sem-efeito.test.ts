@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -696,8 +696,13 @@ describe("NODE_SPECS anti-drift (#238)", () => {
     new RegExp(`\\.fields\\.${field}\\b|["']${field}["']`);
 
   it("reads every field NODE_SPECS declares somewhere outside its own declaration", () => {
+    // Every `src/workflow/*.ts` but `nodes.ts`: that file DECLARES each field as a quoted
+    // string, so it would satisfy the `["']field["']` branch on its own and prove nothing.
+    // A fixed list went stale once strategies moved out of `engine.ts` (#977, `flow-*.ts`).
     const root = new URL("../src/workflow/", import.meta.url);
-    const files = ["engine.ts", "engine-utils.ts", "schema.ts", "types.ts", "graph.ts", "refs.ts"];
+    const files = readdirSync(root).filter((file) => file.endsWith(".ts") && file !== "nodes.ts");
+    expect(files).toEqual(expect.arrayContaining(["engine.ts", "flow-strategies.ts", "schema.ts"]));
+    expect(files).not.toContain("nodes.ts");
     const source = files
       .map((file) => readFileSync(fileURLToPath(new URL(file, root)), "utf8"))
       .join("\n");
