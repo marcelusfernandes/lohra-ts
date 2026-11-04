@@ -28,34 +28,57 @@ export function windowsPowerShellCommand(environment: NodeJS.ProcessEnv): {
 // The one volume refusal the callers may tell apart from a failed check.
 const UNSUPPORTED_VOLUME = "Private destinations require a fixed NTFS volume";
 
-// Fixed script: paths travel on stdin as JSON, never as shell fragments.
-// Set-Acl/Get-Acl and DriveInfo are supported Windows PowerShell/.NET APIs.
+// Fixed script. Requests arrive on stdin, one `action base64(path)` line each:
+// paths travel as data, never as shell fragments. Every read goes through .NET
+// (DriveInfo, File/Directory.GetAttributes and GetAccessControl) instead of
+// cmdlets: a cmdlet autoloads its module, which costs tens of milliseconds per
+// process and prints a progress record that reaches stderr as CLIXML, and
+// ConvertFrom-Json alone costs about as much as the rest of the script. The one
+// cmdlet left is Set-Acl in the protect branch, with progress silenced.
 export const ACL_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+# Flag values of FileAttributes, PropagationFlags and FileSystemRights, as numbers:
+# a type literal per use costs about 30 ms of every verification process.
+$reparsePoint = 0x400
+$directory = 0x10
+$inheritOnly = 2
+$fullControl = 0x1F01FF
+function Read-Acl([string]$target) {
+  if (([System.IO.File]::GetAttributes($target) -band $directory) -ne 0) {
+    return [System.IO.Directory]::GetAccessControl($target)
+  }
+  return [System.IO.File]::GetAccessControl($target)
+}
 try {
-  $utf8 = [System.Text.UTF8Encoding]::new($false)
-  [Console]::InputEncoding = $utf8
-  [Console]::OutputEncoding = $utf8
-  $batch = ConvertFrom-Json -InputObject ([Console]::In.ReadToEnd())
+  [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
   $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
-  foreach ($request in @($batch.requests)) {
+  $done = 0
+  foreach ($line in [Console]::In.ReadToEnd().Split([char]10)) {
+  $line = $line.Trim()
+  if ($line.Length -eq 0) { continue }
+  $fields = $line.Split([char]32)
+  $request = @{
+    action = $fields[0]
+    path = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($fields[1]))
+  }
   try {
   $path = [string]$request.path
+  if (@('volume', 'protect', 'verify') -notcontains $request.action) { throw 'Unknown ACL action' }
   if ($request.action -eq 'volume') {
-    $drive = New-Object System.IO.DriveInfo ([System.IO.Path]::GetPathRoot($path))
-    if ($drive.DriveType -ne [System.IO.DriveType]::Fixed -or $drive.DriveFormat -ne 'NTFS') {
+    $drive = [System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($path))
+    if ($drive.DriveType -ne 'Fixed' -or $drive.DriveFormat -ne 'NTFS') {
       throw '${UNSUPPORTED_VOLUME}'
     }
   } else {
     $cursor = $path
     while ($cursor -ne [System.IO.Path]::GetPathRoot($cursor)) {
-      $item = Get-Item -LiteralPath $cursor -Force
-      if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+      if (([System.IO.File]::GetAttributes($cursor) -band $reparsePoint) -ne 0) {
         throw 'Windows reparse point is not verifiable'
       }
       $cursor = [System.IO.Path]::GetDirectoryName($cursor)
     }
-    $acl = Get-Acl -LiteralPath $path
+    $acl = Read-Acl $path
     if ($request.action -eq 'protect') {
       # A process created by an elevated administrator owns what it creates as the
       # Administrators group; the policy requires the current user as owner.
@@ -78,7 +101,7 @@ try {
       )
       $acl.AddAccessRule($rule)
       Set-Acl -LiteralPath $path -AclObject $acl
-      $acl = Get-Acl -LiteralPath $path
+      $acl = Read-Acl $path
     }
     if (-not $acl.AreAccessRulesProtected) { throw 'Inherited access rules remain enabled' }
     $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier])
@@ -88,7 +111,7 @@ try {
     $ownerCanUpdate = $false
     foreach ($rule in $rules) {
       if ($rule.IsInherited) { throw 'Inherited access rule remains' }
-      if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) {
+      if ($rule.AccessControlType -ne 'Allow') {
         throw 'Deny access rule cannot be verified'
       }
       $sid = $rule.IdentityReference.Value
@@ -96,18 +119,19 @@ try {
         throw 'Windows DACL grants access to an unapproved identity'
       }
       if ($sid -eq $identity.Value -and
-          ($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -eq 0 -and
-          ($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -eq [System.Security.AccessControl.FileSystemRights]::FullControl) {
+          ($rule.PropagationFlags -band $inheritOnly) -eq 0 -and
+          ($rule.FileSystemRights -band $fullControl) -eq $fullControl) {
         $ownerCanUpdate = $true
       }
     }
     if (-not $ownerCanUpdate) { throw 'Windows owner lacks full control' }
   }
+  $done++
   } catch {
     throw "Windows ACL $($request.action) failed at $([string]$request.path): $($_.Exception.Message)"
   }
   }
-  [Console]::Out.Write('OK')
+  [Console]::Out.Write("OK $done")
 } catch {
   [Console]::Error.Write($_.Exception.Message)
   exit 1
@@ -141,33 +165,43 @@ export function aclBatchFailure(
   return refusedVolume ? new WindowsUnsupportedVolumeError(message) : new Error(message);
 }
 
-/** Throws unless the batch is one action, or verifications optionally led by a volume check. */
+const ACTIONS: ReadonlySet<string> = new Set(["volume", "protect", "verify"]);
+
+/**
+ * One process may run one action of any kind, or up to three verifications
+ * optionally led by a volume check (the check that gates the first one). Never
+ * a protect next to anything else, and never unbounded.
+ */
 export function assertAclBatch(requests: readonly WindowsAclRequest[]): void {
-  void requests;
-  throw new Error("not implemented: assertAclBatch");
+  const verifications = requests.slice(requests[0]?.action === "volume" ? 1 : 0);
+  const shaped =
+    requests.length >= 1 &&
+    requests.length <= 3 &&
+    requests.every(({ action }) => ACTIONS.has(action)) &&
+    (requests.length === 1 || verifications.every(({ action }) => action === "verify"));
+  if (!shaped) {
+    throw new Error(
+      "Windows ACL batch must contain one to three requests: one action, or verifications optionally led by a volume check",
+    );
+  }
 }
 
 /** The stdin the ACL script reads: one `action base64(path)` line per request. */
 export function encodeAclRequests(requests: readonly WindowsAclRequest[]): string {
-  void requests;
-  throw new Error("not implemented: encodeAclRequests");
+  return requests
+    .map(({ action, path }) => `${action} ${Buffer.from(path, "utf8").toString("base64")}\n`)
+    .join("");
 }
 
 export function runWindowsAclBatch(requests: readonly WindowsAclRequest[]): void {
-  if (
-    requests.length < 1 ||
-    requests.length > 3 ||
-    (requests.length > 1 && requests.some(({ action }) => action !== "verify"))
-  ) {
-    throw new Error("Windows ACL batch must contain one to three verifications or one action");
-  }
+  assertAclBatch(requests);
   const script = Buffer.from(ACL_SCRIPT, "utf16le").toString("base64");
   const command = windowsPowerShellCommand(process.env);
   const result = spawnSync(
     command.executable,
     ["-NoProfile", "-NonInteractive", "-EncodedCommand", script],
     {
-      input: JSON.stringify({ requests }),
+      input: encodeAclRequests(requests),
       encoding: "utf8",
       env: command.environment,
       windowsHide: true,
@@ -176,7 +210,8 @@ export function runWindowsAclBatch(requests: readonly WindowsAclRequest[]): void
     },
   );
   if (result.error) throw new Error("Windows ACL mechanism failed", { cause: result.error });
-  if (result.status !== 0 || result.stdout !== "OK") {
+  // The script counts what it ran: fewer than asked is an unverified result.
+  if (result.status !== 0 || result.stdout !== `OK ${String(requests.length)}`) {
     throw aclBatchFailure(requests, result.status, result.signal, result.stderr);
   }
 }

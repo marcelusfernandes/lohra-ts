@@ -60,6 +60,9 @@ export interface WindowsFileProtection {
 
 const nativeOperations: WindowsProtectionOperations = {
   platform: process.platform,
+  // The native `protect` script applies the ACL and then runs the same checks as `verify`.
+  protectVerifies: true,
+  batch: runWindowsAclBatch,
   volume: (path) => {
     runWindowsAcl("volume", path);
   },
@@ -94,9 +97,6 @@ const nativeOperations: WindowsProtectionOperations = {
   },
   verify: (path) => {
     runWindowsAcl("verify", path);
-  },
-  verifyMany: (paths) => {
-    runWindowsAclBatch(paths.map((path) => ({ action: "verify", path })));
   },
   removeFile: unlinkSync,
   removeDirectory: rmdirSync,
@@ -161,20 +161,65 @@ function inspectChain(path: string, operations: WindowsProtectionOperations): En
   return null;
 }
 
+/**
+ * Runs the requests in one backend round trip when the operations offer `batch`
+ * (one process on Windows); otherwise one call per request, in the same order.
+ */
+function runAcl(
+  requests: readonly WindowsAclRequest[],
+  operations: WindowsProtectionOperations,
+): void {
+  if (operations.batch) {
+    operations.batch(requests);
+  } else if (operations.verifyMany && requests.every(({ action }) => action === "verify")) {
+    operations.verifyMany(requests.map(({ path }) => path));
+  } else {
+    for (const { action, path } of requests) operations[action](path);
+  }
+}
+
 function checked(
   path: string,
   kind: Entry["kind"],
   identity: string,
   operations: WindowsProtectionOperations,
+  leading: readonly WindowsAclRequest[] = [],
 ): Entry {
-  const entry = checkedMany([{ path, kind, identity }], operations)[0];
+  const entry = checkedMany([{ path, kind, identity }], operations, leading)[0];
   if (!entry) throw new Error(`Windows destination cannot be inspected: ${path}`);
   return entry;
 }
 
+/**
+ * What follows `protect`. A backend whose `protect` already verifies what it
+ * applied needs no second verification, only the identity recheck (the path
+ * still names what was just created); any other backend verifies as before.
+ */
+function afterProtect(
+  path: string,
+  kind: Entry["kind"],
+  identity: string,
+  operations: WindowsProtectionOperations,
+): void {
+  if (!operations.protectVerifies) {
+    checked(path, kind, identity, operations);
+    return;
+  }
+  const entry = inspectChain(path, operations);
+  if (!entry || entry.kind !== kind || entry.identity !== identity) {
+    throw new Error(`Windows destination identity changed during ACL protection: ${path}`);
+  }
+}
+
+/**
+ * Inspects every identity, verifies them in one round trip (optionally after
+ * `leading` requests such as the volume check, which gates the verification),
+ * and inspects every identity again.
+ */
 function checkedMany(
   expected: ReadonlyArray<Readonly<{ path: string; kind: Entry["kind"]; identity: string }>>,
   operations: WindowsProtectionOperations,
+  leading: readonly WindowsAclRequest[] = [],
 ): Entry[] {
   if (expected.length < 1 || expected.length > 3)
     throw new Error("Windows ACL verification group must contain one to three paths");
@@ -184,8 +229,10 @@ function checkedMany(
       throw new Error(`Windows destination identity changed: ${path}`);
     }
   }
-  if (operations.verifyMany) operations.verifyMany(expected.map(({ path }) => path));
-  else for (const { path } of expected) operations.verify(path);
+  runAcl(
+    [...leading, ...expected.map(({ path }) => ({ action: "verify" as const, path }))],
+    operations,
+  );
   return expected.map(({ path, kind, identity }) => {
     const after = inspectChain(path, operations);
     if (!after || after.kind !== kind || after.identity !== identity) {
@@ -238,7 +285,7 @@ function cleanOwn(
 function canBeProtected(target: string, operations: WindowsProtectionOperations): boolean {
   if (pathRefusal(target) !== null) return false;
   try {
-    operations.volume(target);
+    runAcl([{ action: "volume", path: target }], operations);
     return true;
   } catch (error) {
     if (error instanceof WindowsUnsupportedVolumeError) return false;
@@ -315,7 +362,7 @@ export function ensureWindowsPrivateDirectory(
       owned.push({ path: cursor, entry: created });
       unverified = null;
       operations.protect(cursor);
-      checked(cursor, "directory", created.identity, operations);
+      afterProtect(cursor, "directory", created.identity, operations);
     }
   } catch (error) {
     try {
@@ -348,18 +395,26 @@ export function prepareWindowsPrivateDestination(
   if (operations.platform !== "win32") throw new Error("Windows file protection requires Windows");
   const directory = win32.dirname(file);
   if (directory === file) throw new Error("Windows private destination requires a file name");
-  operations.volume(file);
   const owned: Array<{ path: string; entry: Entry }> = [];
   let unverified: PendingCreation | null = null;
   let exclusiveContention = false;
   try {
+    // The volume check gates every verification and creation below. Alone when
+    // the directory is missing (it must precede mkdir and ENOENT); otherwise it
+    // rides in the round trip of the first verification, and so does an existing
+    // regular destination (not for an exclusive create, which never verifies it).
+    let leading: readonly WindowsAclRequest[] = [{ action: "volume", path: file }];
     let dirEntry = inspectChain(directory, operations);
-    if (!dirEntry && options.existing) {
-      throw Object.assign(new Error(`Windows private destination is missing: ${file}`), {
-        code: "ENOENT",
-      });
-    }
+    let existingFile: Entry | null | undefined;
+    let directoryProtected = false;
     if (!dirEntry) {
+      runAcl(leading, operations);
+      leading = [];
+      if (options.existing) {
+        throw Object.assign(new Error(`Windows private destination is missing: ${file}`), {
+          code: "ENOENT",
+        });
+      }
       unverified = { path: directory, kind: "directory", creation: "attempted" };
       operations.mkdir(directory);
       unverified = { path: directory, kind: "directory", creation: "confirmed" };
@@ -368,12 +423,27 @@ export function prepareWindowsPrivateDestination(
       owned.push({ path: directory, entry: dirEntry });
       unverified = null;
       operations.protect(directory);
+      directoryProtected = true;
+    } else if (!options.exclusive) {
+      existingFile = inspectChain(file, operations);
     }
     if (dirEntry.kind !== "directory")
       throw new Error(`Windows private path is not a directory: ${directory}`);
-    checked(directory, "directory", dirEntry.identity, operations);
+    let fileVerified = false;
+    if (directoryProtected) {
+      afterProtect(directory, "directory", dirEntry.identity, operations);
+    } else {
+      const group: Array<{ path: string; kind: Entry["kind"]; identity: string }> = [
+        { path: directory, kind: "directory", identity: dirEntry.identity },
+      ];
+      if (existingFile?.kind === "file") {
+        group.push({ path: file, kind: "file", identity: existingFile.identity });
+        fileVerified = true;
+      }
+      checkedMany(group, operations, leading);
+    }
 
-    let fileEntry = inspectChain(file, operations);
+    let fileEntry = existingFile === undefined ? inspectChain(file, operations) : existingFile;
     const createdFile = fileEntry === null;
     if (options.exclusive && fileEntry) {
       // The other creator may still be applying its ACL. EEXIST means only
@@ -411,7 +481,8 @@ export function prepareWindowsPrivateDestination(
     if (fileEntry.kind !== "file") {
       throw new Error(`Windows private destination must be a regular file: ${file}`);
     }
-    checked(file, "file", fileEntry.identity, operations);
+    if (createdFile) afterProtect(file, "file", fileEntry.identity, operations);
+    else if (!fileVerified) checked(file, "file", fileEntry.identity, operations);
     const directoryIdentity = dirEntry.identity;
     const destinationIdentity = fileEntry.identity;
     let stagedIdentity: string | null = null;

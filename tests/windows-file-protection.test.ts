@@ -433,7 +433,8 @@ describe("windows private destination", () => {
     expect(() => prepareWindowsPrivateDestination(destination, state.operations)).toThrow(
       /reparse/,
     );
-    expect(state.events).toEqual(["volume"]);
+    // The link is found by inspection alone: no backend process opens for it.
+    expect(state.events).toEqual([]);
   });
 
   it("refuses an unsupported volume before creating anything", () => {
