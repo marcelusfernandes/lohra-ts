@@ -25,9 +25,12 @@ export function windowsPowerShellCommand(environment: NodeJS.ProcessEnv): {
   };
 }
 
+// The one volume refusal the callers may tell apart from a failed check.
+const UNSUPPORTED_VOLUME = "Private destinations require a fixed NTFS volume";
+
 // Fixed script: paths travel on stdin as JSON, never as shell fragments.
 // Set-Acl/Get-Acl and DriveInfo are supported Windows PowerShell/.NET APIs.
-const ACL_SCRIPT = String.raw`
+export const ACL_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
 try {
   $utf8 = [System.Text.UTF8Encoding]::new($false)
@@ -41,7 +44,7 @@ try {
   if ($request.action -eq 'volume') {
     $drive = New-Object System.IO.DriveInfo ([System.IO.Path]::GetPathRoot($path))
     if ($drive.DriveType -ne [System.IO.DriveType]::Fixed -or $drive.DriveFormat -ne 'NTFS') {
-      throw 'Private destinations require a fixed NTFS volume'
+      throw '${UNSUPPORTED_VOLUME}'
     }
   } else {
     $cursor = $path
@@ -54,6 +57,11 @@ try {
     }
     $acl = Get-Acl -LiteralPath $path
     if ($request.action -eq 'protect') {
+      # A process created by an elevated administrator owns what it creates as the
+      # Administrators group; the policy requires the current user as owner.
+      if ($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $identity.Value) {
+        $acl.SetOwner($identity)
+      }
       $acl.SetAccessRuleProtection($true, $false)
       foreach ($rule in @($acl.Access)) { $acl.PurgeAccessRules($rule.IdentityReference) }
       if ($acl -is [System.Security.AccessControl.DirectorySecurity]) {
@@ -111,6 +119,28 @@ export type WindowsAclRequest = Readonly<{
   path: string;
 }>;
 
+/** The volume is not one where a private destination can be protected. */
+export class WindowsUnsupportedVolumeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WindowsUnsupportedVolumeError";
+  }
+}
+
+export function aclBatchFailure(
+  requests: readonly WindowsAclRequest[],
+  status: number | null,
+  signal: NodeJS.Signals | null,
+  stderr: string,
+): Error {
+  const message = `Windows ACL batch failed (exit ${String(status)}, signal ${String(signal)}): ${stderr.trim() || "unverified result"}`;
+  const refusedVolume =
+    requests.length === 1 &&
+    requests[0]?.action === "volume" &&
+    stderr.includes(UNSUPPORTED_VOLUME);
+  return refusedVolume ? new WindowsUnsupportedVolumeError(message) : new Error(message);
+}
+
 export function runWindowsAclBatch(requests: readonly WindowsAclRequest[]): void {
   if (
     requests.length < 1 ||
@@ -135,9 +165,7 @@ export function runWindowsAclBatch(requests: readonly WindowsAclRequest[]): void
   );
   if (result.error) throw new Error("Windows ACL mechanism failed", { cause: result.error });
   if (result.status !== 0 || result.stdout !== "OK") {
-    throw new Error(
-      `Windows ACL batch failed (exit ${String(result.status)}, signal ${String(result.signal)}): ${result.stderr.trim() || "unverified result"}`,
-    );
+    throw aclBatchFailure(requests, result.status, result.signal, result.stderr);
   }
 }
 

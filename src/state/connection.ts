@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 
 import { resolvePaths } from "../config/paths.js";
+import { ensureWindowsPrivateDirectory } from "../security/windows-file-protection.js";
 import { StateError } from "./errors.js";
 import {
   addedColumns,
@@ -117,7 +118,11 @@ export function openStateDatabase(
   options: StateConnectionOptions = {},
 ): StateConnection {
   const busyTimeoutMs = resolveBusyTimeoutMs(options.environment ?? process.env);
-  mkdirSync(dirname(path), { recursive: true });
+  // No Windows o home nasce protegido (ADR 0006); sem isso o primeiro comando
+  // sem credencial o deixaria com ACL herdada e toda gravação sensível seria
+  // recusada. Diretório já existente continua intocado.
+  if (process.platform === "win32") ensureWindowsPrivateDirectory(dirname(path));
+  else mkdirSync(dirname(path), { recursive: true });
   const database = new Database(path);
   database.defaultSafeIntegers(true);
   try {

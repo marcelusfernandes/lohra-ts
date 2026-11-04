@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { subscriptionActive } from "../auth/credentials.js";
 import { validateProfileName } from "../config/paths.js";
+import { ensureWindowsPrivateDirectory } from "../security/windows-file-protection.js";
 
 const subdirectories = ["memories", "skills", "cron", "logs", "plugins"] as const;
 
@@ -13,6 +14,10 @@ export interface CommandResult {
 }
 
 export function ensureHome(home: string): string {
+  // No Windows o diretório do profile (e o base, se ainda não existir) nasce
+  // protegido para aceitar credenciais depois (ADR 0006); os subdiretórios
+  // herdam do pai protegido e não guardam credencial diretamente.
+  if (process.platform === "win32") ensureWindowsPrivateDirectory(home);
   for (const directory of subdirectories) mkdirSync(join(home, directory), { recursive: true });
   return home;
 }

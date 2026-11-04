@@ -9,7 +9,11 @@ import {
 } from "node:fs";
 import { win32 } from "node:path";
 
-import { runWindowsAcl, runWindowsAclBatch } from "./windows-file-protection-native.js";
+import {
+  runWindowsAcl,
+  runWindowsAclBatch,
+  WindowsUnsupportedVolumeError,
+} from "./windows-file-protection-native.js";
 
 type Entry = Readonly<{ kind: "file" | "directory" | "link"; identity: string; size: bigint }>;
 type PendingCreation = Readonly<{
@@ -94,12 +98,13 @@ function isCode(error: unknown, code: string): boolean {
   return error instanceof Error && "code" in error && error.code === code;
 }
 
-function validPath(path: string): string {
+/** Why a path cannot be a private destination, or null when it can. */
+function pathRefusal(path: string): string | null {
   if (!/^[A-Za-z]:\\/.test(path) || !win32.isAbsolute(path)) {
-    throw new Error("Windows private destination requires an absolute local drive path");
+    return "Windows private destination requires an absolute local drive path";
   }
   if (win32.normalize(path) !== path || path.includes("/") || path.includes("\0")) {
-    throw new Error("Windows private destination has an ambiguous path");
+    return "Windows private destination has an ambiguous path";
   }
   const segments = path.slice(3).split("\\");
   if (
@@ -112,8 +117,14 @@ function validPath(path: string): string {
         /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(segment),
     )
   ) {
-    throw new Error("Windows private destination has an ambiguous path component");
+    return "Windows private destination has an ambiguous path component";
   }
+  return null;
+}
+
+function validPath(path: string): string {
+  const refusal = pathRefusal(path);
+  if (refusal !== null) throw new Error(refusal);
   return path;
 }
 
@@ -209,6 +220,100 @@ function cleanOwn(
     });
   }
   throw primary;
+}
+
+/** False only when the path or the volume is one where protection cannot apply. */
+function canBeProtected(target: string, operations: WindowsProtectionOperations): boolean {
+  if (pathRefusal(target) !== null) return false;
+  try {
+    operations.volume(target);
+    return true;
+  } catch (error) {
+    if (error instanceof WindowsUnsupportedVolumeError) return false;
+    throw error;
+  }
+}
+
+/** What `mkdirSync(target, { recursive: true })` did before: no ACL work at all. */
+function createUnprotected(target: string, operations: WindowsProtectionOperations): void {
+  const root = win32.parse(target).root;
+  let cursor = root;
+  for (const part of target.slice(root.length).split("\\")) {
+    cursor = win32.join(cursor, part);
+    if (operations.inspect(cursor)) continue;
+    try {
+      operations.mkdir(cursor);
+    } catch (error) {
+      if (!isCode(error, "EEXIST")) throw error;
+    }
+  }
+}
+
+/**
+ * Creates the Lohra home or profile directory already protected, so the first
+ * credential written there finds a directory that passes verification. Each
+ * missing level (top-down) is created, protected and verified before the next
+ * one. A level that already exists is never inspected for ACL nor modified
+ * (ADR 0006): the sensitive write verifies it and refuses an incompatible one.
+ * On failure only what this call created is removed, and the primary cause is
+ * kept. A path or volume that cannot be protected (8.3 or ambiguous component,
+ * UNC, a volume that is not fixed NTFS) is created unprotected, as before, so
+ * the commands that hold no credential keep opening; the credential write there
+ * stays refused by prepareWindowsPrivateDestination. Any other failure of the
+ * checks propagates. Path-based like the rest of this module: concurrent
+ * replacement still requires the caller-held lease/fence.
+ */
+export function ensureWindowsPrivateDirectory(
+  directory: string,
+  operations: WindowsProtectionOperations = nativeOperations,
+): void {
+  if (operations.platform !== "win32") throw new Error("Windows file protection requires Windows");
+  const target = win32.resolve(directory);
+  if (operations.inspect(target)) return;
+  let protectable: boolean;
+  try {
+    protectable = canBeProtected(target, operations);
+  } catch (error) {
+    throw new Error(`Could not create a private Windows directory at ${target}`, { cause: error });
+  }
+  if (!protectable) {
+    createUnprotected(target, operations);
+    return;
+  }
+  const owned: Array<{ path: string; entry: Entry }> = [];
+  let unverified: PendingCreation | null = null;
+  try {
+    const root = win32.parse(target).root;
+    let cursor = root;
+    for (const part of target.slice(root.length).split("\\")) {
+      cursor = win32.join(cursor, part);
+      if (inspectChain(cursor, operations)) continue;
+      unverified = { path: cursor, kind: "directory", creation: "attempted" };
+      try {
+        operations.mkdir(cursor);
+      } catch (error) {
+        if (!isCode(error, "EEXIST")) throw error;
+        // Another process created it first: not ours, never protect or remove.
+        unverified = null;
+        continue;
+      }
+      unverified = { path: cursor, kind: "directory", creation: "confirmed" };
+      const created = inspectChain(cursor, operations);
+      if (!created) throw new Error(`Created Windows directory cannot be inspected: ${cursor}`);
+      owned.push({ path: cursor, entry: created });
+      unverified = null;
+      operations.protect(cursor);
+      checked(cursor, "directory", created.identity, operations);
+    }
+  } catch (error) {
+    try {
+      cleanOwn(owned, unverified, operations, error);
+    } catch (failure) {
+      throw new Error(`Could not create a private Windows directory at ${target}`, {
+        cause: failure,
+      });
+    }
+  }
 }
 
 /**
