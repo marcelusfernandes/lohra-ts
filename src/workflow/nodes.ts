@@ -10,6 +10,10 @@ export const MAX_LOOP_ROUNDS = 16;
 export const MAX_ESCALATE_SUMMARY = 2000;
 /** What an `escalate` `kind` must look like: a short lowercase tag, never text that could carry a `${ref}`. */
 export const ESCALATE_KIND = /^[a-z][a-z0-9_]{0,31}$/u;
+/** The most keys a `call` may pass to its tool in `args`: a handful of arguments, never a payload. */
+export const MAX_CALL_ARGS = 16;
+/** The deadline of one `call` attempt when the node names no `timeout`, in seconds (the ceiling is 120). */
+export const DEFAULT_CALL_TIMEOUT_SECONDS = 30;
 /**
  * The node types a human answers by `checkpoint_answers[node_id]`: each pauses the run, never
  * resumes on its own, and turns the answer into its (cached) output. One set, so the places that

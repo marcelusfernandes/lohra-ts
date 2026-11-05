@@ -9,6 +9,8 @@
 // skill reprova aqui. Issue #980 (S3): a seção do `loop` e a tabela de
 // predicados. Issue #981 (S4): a seção do `escalate`, o ponteiro do `SKILL.md`
 // principal alargado para os quatro blocos e o motivo `escalated` na seção 6.
+// Issue #982 (S6): a seção do `call`, com a allow-list, os limites e o formato do fault vindos
+// do código (`CALL_TOOLS`, `MAX_CALL_ARGS`, `MAX_CALL_TIMEOUT_SECONDS`, `MAX_NODE_RETRIES`).
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -16,11 +18,15 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { parseSkillMd, SkillStore } from "../src/skills/store.js";
+import { CALL_TOOLS, MAX_CALL_TIMEOUT_SECONDS } from "../src/workflow/call-tools.js";
 import {
   ANSWER_NODE_TYPES,
+  DEFAULT_CALL_TIMEOUT_SECONDS,
   ESCALATE_KIND,
+  MAX_CALL_ARGS,
   MAX_ESCALATE_SUMMARY,
   MAX_LOOP_ROUNDS,
+  MAX_NODE_RETRIES,
   MAX_SWITCH_CASES,
   NODE_SPECS,
   ROUTING_FIELDS,
@@ -195,7 +201,7 @@ describe("the loop section matches the code (#980)", () => {
 
   it("every ```json example in the skill is a spec the validator accepts", () => {
     const blocks = [...companion.matchAll(/```json\n([\s\S]*?)\n```/gu)].map((match) => match[1]);
-    expect(blocks.length).toBeGreaterThanOrEqual(3);
+    expect(blocks.length).toBeGreaterThanOrEqual(4);
     const types = blocks.flatMap((block) => {
       const result = validateSpec(JSON.parse(block ?? "null"));
       expect(result).toBeInstanceOf(WorkflowSpec);
@@ -204,15 +210,16 @@ describe("the loop section matches the code (#980)", () => {
     expect(types).toContain("switch");
     expect(types).toContain("loop");
     expect(types).toContain("escalate");
+    expect(types).toContain("call");
   });
 });
 describe("the escalate section matches the code (#981)", () => {
   const start = companion.indexOf("## 3. `escalate`");
-  const end = companion.indexOf("## 4. Checklist");
+  const end = companion.indexOf("## 4. `call`");
   const section = companion.slice(start, end);
   const sectionFlat = section.replace(/\s+/gu, " ");
 
-  it("has its own section, between the loop and the checklist", () => {
+  it("has its own section, between the loop and the call section", () => {
     expect(start).toBeGreaterThan(companion.indexOf("## 2. `loop`"));
     expect(end).toBeGreaterThan(start);
   });
@@ -292,6 +299,106 @@ describe("the escalate section matches the code (#981)", () => {
 
   it("the skill's description offers it", () => {
     expect(parseSkillMd(companion).description).toContain("escalate");
+  });
+});
+
+describe("the call section matches the code (#982)", () => {
+  const start = companion.indexOf("## 4. `call`");
+  const end = companion.indexOf("## 5. Checklist");
+  const section = companion.slice(start, end);
+  const sectionFlat = section.replace(/\s+/gu, " ");
+
+  it("has its own section, between the escalate section and the checklist", () => {
+    expect(start).toBeGreaterThan(companion.indexOf("## 3. `escalate`"));
+    expect(end).toBeGreaterThan(start);
+  });
+
+  it("names every tool the allow-list has, and the ones that stay out", () => {
+    for (const tool of CALL_TOOLS) expect(section).toContain(`\`${tool}\``);
+    for (const tool of ["web_search", "write_file", "terminal"])
+      expect(section, tool).toContain(`\`${tool}\``);
+    expect(sectionFlat).toMatch(/not allowed|are refused|stay out|left out/u);
+  });
+
+  it("states the limits that the code holds: the args, the deadline and the retries", () => {
+    expect(sectionFlat).toContain(`up to ${String(MAX_CALL_ARGS)} keys`);
+    expect(sectionFlat).toContain(`at most ${String(MAX_CALL_TIMEOUT_SECONDS)} seconds`);
+    expect(sectionFlat).toContain(`${String(DEFAULT_CALL_TIMEOUT_SECONDS)} seconds`);
+    expect(sectionFlat).toContain(`0 to ${String(MAX_NODE_RETRIES)} retries`);
+  });
+
+  it("names every field of the node, and says there are no routing knobs", () => {
+    const spec = NODE_SPECS.call;
+    expect(spec).toBeDefined();
+    const own = (spec?.fields ?? []).filter((field) => !["required", "depends_on"].includes(field));
+    expect(own.sort()).toEqual(["args", "retries", "timeout", "tool"]);
+    for (const field of own) expect(section).toContain(`\`${field}\``);
+    for (const knob of ROUTING_FIELDS) expect(section).toContain(`\`${knob}\``);
+    expect(sectionFlat).toMatch(/no routing knobs?|refuses? (the )?routing knobs?/u);
+  });
+
+  it("says what a later node reads: the tool's own envelope, field by field", () => {
+    for (const field of ["ok", "data", "truncated", "text", "untrusted"])
+      expect(section, field).toContain(`\`${field}\``);
+    expect(section).toContain("${fetch.text}");
+    expect(sectionFlat).toMatch(/envelope/u);
+  });
+
+  it("says it costs no model: no leaf, no token, nothing in the per-node cost", () => {
+    expect(sectionFlat).toMatch(/no leaf/u);
+    expect(sectionFlat).toMatch(/no tokens?/u);
+    expect(sectionFlat).toContain("per-node cost");
+  });
+
+  it("says each attempt is charged to the run's limits, and what a refusal looks like", () => {
+    expect(sectionFlat).toMatch(/each attempt/u);
+    expect(sectionFlat).toContain("cap_trips");
+    expect(sectionFlat).toContain("lifetime");
+  });
+
+  it("says which outcomes are retried and which never are", () => {
+    expect(sectionFlat).toMatch(/`error` and `timeout`[^.]*retried/u);
+    expect(sectionFlat).toMatch(/`denied`[^.]*never retried/u);
+  });
+
+  it("documents the failure modes: the fault format, a dead upstream, a missing port and a stopped run", () => {
+    expect(section).toContain("<id>: call <tool> <status> after <n> attempts: <cause>");
+    expect(sectionFlat).toContain("upstream null");
+    expect(sectionFlat).toContain("no value for");
+    expect(sectionFlat).toContain("engine fault");
+    expect(sectionFlat).toMatch(/stopped|paused or cancelled/u);
+    expect(sectionFlat).toMatch(/before any call/u);
+  });
+
+  it("says it goes through the same sandbox as a leaf, and what the policy limits", () => {
+    expect(section).toContain("workflow_policy.json");
+    expect(section).toContain("fs_allow");
+    expect(section).toContain("egress_allow");
+    expect(sectionFlat).toMatch(/same sandbox/u);
+  });
+
+  it("says what the ledger shows: tool.started and tool.completed, and no leaf", () => {
+    expect(section).toContain("tool.started");
+    expect(section).toContain("tool.completed");
+    expect(section).toContain("leaf.started");
+  });
+
+  it("says how a resume, the cell and the preview behave", () => {
+    expect(sectionFlat).toMatch(/not called again|never called again/u);
+    expect(sectionFlat).toMatch(/`timeout` and `retries` are not part of the cell/u);
+    expect(sectionFlat).toMatch(/failed call leaves no cell/u);
+    expect(section).toContain("would_call");
+    expect(section).toContain("leaves_to_spawn");
+  });
+
+  it("says when not to use it: a page that needs judgement is a leaf, a write is a leaf", () => {
+    expect(sectionFlat).toMatch(/needs? judg(e)?ment|has to be read/u);
+    expect(section).toContain("`agent`");
+  });
+
+  it("the skill's description offers it, and the checklist has a list for it", () => {
+    expect(parseSkillMd(companion).description).toContain("call");
+    expect(companion.slice(end)).toContain("For a `call`:");
   });
 });
 

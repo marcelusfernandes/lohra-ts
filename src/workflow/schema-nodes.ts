@@ -290,6 +290,11 @@ export function validateEscalate(node: Node, issues: SpecIssue[]): void {
   }
 }
 
+/** Stub of issue #982: the `call` node's validator lands in the green commit. */
+export function validateCall(_node: Node, _issues: SpecIssue[]): never {
+  throw new Error("not implemented: validateCall");
+}
+
 export const NODE_VALIDATORS: ReadonlyMap<string, NodeValidator> = new Map([
   ["gate", validateGate],
   ["switch", validateSwitch],

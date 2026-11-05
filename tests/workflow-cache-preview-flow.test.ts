@@ -33,6 +33,7 @@ import { previewResume, type PreviewNodeOutcome } from "../src/workflow/cache-pr
 import { AuditTrail } from "../src/workflow/audit-trail.js";
 import { WorkflowService, type OwnershipStore } from "../src/workflow/service.js";
 import type {
+  CallToolRequest,
   ChildResult,
   ChildRuntime,
   ChildSpawnRequest,
@@ -94,7 +95,7 @@ function completingRuntime(behavior: Behavior): ChildRuntime {
   };
 }
 
-function harness() {
+function harness(extra: Partial<ChildRuntime> = {}) {
   const behavior: Behavior = { failRound: null };
   const root = mkdtempSync(join(tmpdir(), "lohra-switch-flow-"));
   roots.push(root);
@@ -112,7 +113,7 @@ function harness() {
     database: connection.database,
   };
   const service = new WorkflowService({
-    runtime: completingRuntime(behavior),
+    runtime: { ...completingRuntime(behavior), ...extra },
     auditTrail: new AuditTrail(audit),
     store,
   });
@@ -727,6 +728,68 @@ describe("workflow_preview over an escalate (#981)", () => {
       expect(outcomeOf(result.nodes, "review").outcome).toBe("upstream_missing");
     } finally {
       h.close();
+    }
+  });
+});
+
+// Issue #982 (S6): o `call` no ledger, no resume e no preview — `tool.*` sem `leaf.*`, a célula
+// reaproveitada sem chamar a tool, e `would_call` sem somar em `leaves_to_spawn`.
+describe("a call in the ledger, the resume and the preview (#982)", () => {
+  const callSpec = {
+    meta: { name: "call-flow" },
+    nodes: [{ id: "page", type: "call", tool: "web_fetch", args: { url: "${args.url}" } }],
+  };
+  const port = (ok: boolean) => {
+    const urls: string[] = [];
+    const output = ok ? '{"ok":true}' : '{"error":"boom"}';
+    const callTool = (request: CallToolRequest) => {
+      urls.push(String(request.args.url));
+      return { status: ok ? ("ok" as const) : ("error" as const), output };
+    };
+    return { urls, callTool };
+  };
+
+  it("leaves tool.started/tool.completed and no leaf; a resume replays the cell and calls nothing", async () => {
+    const { urls, callTool } = port(true);
+    const h = harness({ callTool });
+    try {
+      const runId = await launch(h, callSpec, { url: "u1" });
+      const events = eventsOf(h, runId, "page");
+      expect(ofType(events, "tool.started")).toHaveLength(1);
+      expect(ofType(events, "tool.completed")).toHaveLength(1);
+      expect(ofType(events, "leaf.started")).toEqual([]);
+      expect(ofType(events, "cache.stored")).toHaveLength(1);
+      const segment = await resume(h, runId, { url: "u1" });
+      expect(ofType(eventsOf(h, runId, "page", segment), "cache.replayed")).toHaveLength(1);
+      expect(urls).toEqual(["u1"]);
+    } finally {
+      h.close();
+    }
+  });
+
+  it("previews a stored call as replay, and a call that never completed as would_call", async () => {
+    const stored = port(true);
+    const done = harness({ callTool: stored.callTool });
+    const broken = port(false);
+    const failed = harness({ callTool: broken.callTool });
+    try {
+      const replay = await done.preview(await launch(done, callSpec, { url: "u1" }));
+      if ("error" in replay) throw new Error(replay.error);
+      expect(outcomeOf(replay.nodes, "page").outcome).toBe("replay");
+
+      const started = failed.service.start(callSpec, { url: "u2" });
+      if ("error" in started) throw new Error(started.error);
+      await failed.service.status(started.run_id, true);
+      const preview = await failed.preview(started.run_id);
+      if ("error" in preview) throw new Error(preview.error);
+      expect(outcomeOf(preview.nodes, "page").outcome).toBe("would_call");
+      expect(preview.leaves_to_spawn).toBe(0);
+      expect(preview.engine_faults).toBe(0);
+      expect(broken.urls).toEqual(["u2"]);
+      expect(ofType(eventsOf(failed, started.run_id, "page"), "cache.stored")).toEqual([]);
+    } finally {
+      done.close();
+      failed.close();
     }
   });
 });
