@@ -208,10 +208,11 @@ decides whether to stop.
 | `max_rounds`                          | A whole number, **1 to 16 rounds**. There is no default and no "unlimited": a loop without it is refused at validation.                                                                                                                               |
 | `model`, `tier`, `effort`, `provider` | The routing knobs go **on the node**, and every round inherits them. Inside `body` they are refused, as in a `gate`.                                                                                                                                  |
 
-`max_rounds` is required, and it is a **cap you pay for up front**: the whole cap counts
-against the run's fan-out and lifetime limits before round 0 starts, even if `until` holds
-on round 0. A `max_rounds` the run cannot afford is rejected at once, naming the limit, and
-nothing is spawned. Size it for the worst case you can stand, not for the average.
+`max_rounds` is required, and it is a **cap checked up front**: the whole cap is measured
+against the run's fan-out limit and its remaining lifetime before round 0 starts, even if
+`until` holds on round 0. A `max_rounds` the run cannot afford is rejected at once, naming
+the limit, and nothing is spawned; the leaves themselves are only paid for as rounds run.
+Size it for the worst case you can stand, not for the average.
 
 ### The locals
 
@@ -353,7 +354,8 @@ For a `loop`:
 
 1. Is the condition something a predicate can test on one field of the output? If not, compute
    that field in the body's `schema`.
-2. Is `max_rounds` the worst case I can afford (1 to 16)? It is charged up front.
+2. Is `max_rounds` the worst case I can afford (1 to 16)? It is checked against the run's limits up
+   front.
 3. Does the body prompt use `${round}` or `${so_far}` so each round builds on the last, instead
    of repeating the same request?
 4. Is `${last}` used only inside `until`?
