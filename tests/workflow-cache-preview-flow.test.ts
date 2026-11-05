@@ -641,6 +641,32 @@ describe("workflow_preview over an escalate (#981)", () => {
     }
   });
 
+  it("an escalate that failed on a dead upstream is upstream_missing even when another one pauses the run", async () => {
+    const h = harness();
+    try {
+      // Really: the scan answers 9, so `review` pauses the run. Under a route that moves the scan
+      // the preview's scan dies, `review` is `upstream null` (null, with that fault) and does not
+      // pause — and `late`, which holds while the run has no `flag`, is the node that stops it.
+      const raw = reviewSpec({}, { provider: "p1" });
+      (raw.nodes as Record<string, unknown>[]).push({
+        id: "late",
+        type: "escalate",
+        when: { not: { of: { field_true: { path: "${args.flag}" } } } },
+        kind: "late_review",
+        summary: "later",
+        depends_on: ["review"],
+      });
+      const { runId } = await launchLoop(h, raw);
+      const result = await h.preview(runId, { provider: "p2" });
+      if ("error" in result) throw new Error(result.error);
+      expect(outcomeOf(result.nodes, "scan").outcome).toBe("recompute");
+      expect(outcomeOf(result.nodes, "review").outcome).toBe("upstream_missing");
+      expect(outcomeOf(result.nodes, "late").outcome).toBe("escalation_pending");
+    } finally {
+      h.close();
+    }
+  });
+
   it("an answered escalate previews as replay", async () => {
     const h = harness();
     try {

@@ -208,7 +208,7 @@ describe("a resume without the answer is refused before it takes anything (#981)
       expect("error" in resumed).toBe(true);
       if (!("error" in resumed)) throw new Error("expected a refusal");
       expect(resumed.error).toContain("waiting for an answer");
-      expect(resumed.error).toContain("review");
+      expect(resumed.error).toContain("is paused at escalation 'review'");
       expect(resumed.error).toContain(SUMMARY);
       expect(resumed.error).toContain('checkpoint_answers: {"review"');
 
@@ -220,6 +220,25 @@ describe("a resume without the answer is refused before it takes anything (#981)
       expect(still.status).toBe("paused");
       expect(still.reason).toBe("escalated");
       expect(still.attempts).toBe(1);
+    } finally {
+      h.close();
+    }
+  });
+
+  it("a checkpoint pause is still refused in the same words, with its prompt", async () => {
+    const h = harness();
+    try {
+      const raw = {
+        meta: { name: "checkpoint-refusal" },
+        nodes: [{ id: "cp", type: "checkpoint", prompt: "go on?" }],
+      };
+      const { runId } = await launch(h, raw, {});
+      const resumed = h.newService().start(null, {}, { resumeRunId: runId });
+      expect("error" in resumed).toBe(true);
+      if (!("error" in resumed)) throw new Error("expected a refusal");
+      expect(resumed.error).toContain("is paused at checkpoint 'cp'");
+      expect(resumed.error).toContain("waiting for an answer: go on?");
+      expect(resumed.error).toContain('checkpoint_answers: {"cp"');
     } finally {
       h.close();
     }
