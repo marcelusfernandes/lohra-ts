@@ -346,7 +346,11 @@ function classifyNode(node: Node, ctx: ClassifyContext): PreviewNodeOutcome {
   // #979: a `switch` that took a `null` case ran — and had no leaf to replay or pay, so it
   // is `no_leaves`, ahead of a token-budget pause that never touched it.
   if (switchTakesNoLeaf(node, output)) {
-    return { node_id: node.id, type: node.type, outcome: "no_leaves" };
+    // A named binding, not the literal return: the `parallel` return below is the unique
+    // anchor of mutant P9 (`supervision-mutants.ts`), and an identical line here would make it
+    // ambiguous.
+    const outcome: PreviewOutcome = "no_leaves";
+    return { node_id: node.id, type: node.type, outcome };
   }
   if (pauseReason === TOKEN_BUDGET_PAUSE) {
     return { node_id: node.id, type: node.type, outcome: "token_budget_exhausted" };
