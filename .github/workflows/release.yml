@@ -4,16 +4,28 @@ name: release
 # (OIDC via trusted publisher configurado pelo owner no npm — nenhum token
 # no repo) e cria a GitHub Release com o tarball. A tag é criada pelo owner
 # sobre o merge commit da PR de release em `main` (docs/release.md).
+#
+# workflow_dispatch republica uma tag `v*` que já existe. O arquivo de
+# workflow usado é o da ref em que o dispatch roda (em geral `main`); o
+# checkout é a tag, então o tarball continua sendo o da tag. Não move nem
+# recria a tag. "Re-run" de um run antigo reexecuta o YAML daquele commit,
+# não este arquivo.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag v* já existente (ex.: v0.1.0). O tarball é o da tag; o workflow é o desta ref."
+        required: true
+        type: string
 
 permissions:
   contents: write
   id-token: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -25,24 +37,52 @@ jobs:
       # hooks de git (scripts/prepare.mjs); mesmo guard de scripts/pack-check.ts.
       LOHRA_SKIP_PREPARE: "1"
     steps:
+      # Valida antes do checkout: o ref vai para `actions/checkout` e para
+      # shell. Só tags v* com um alfabeto fechado.
+      - name: tag da release
+        id: release_tag
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "$RELEASE_TAG" in
+            v*) ;;
+            *) echo "::error::ref '$RELEASE_TAG' não é uma tag v*"; exit 1 ;;
+          esac
+          printf '%s\n' "$RELEASE_TAG" | grep -Eq '^v[0-9A-Za-z._+-]+$' \
+            || { echo "::error::tag '$RELEASE_TAG' tem caracteres fora de v[0-9A-Za-z._+-]"; exit 1; }
+          echo "name=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
         with:
+          ref: ${{ steps.release_tag.outputs.name }}
           fetch-depth: 0
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
           registry-url: https://registry.npmjs.org
       # Trusted publishing (OIDC) exige npm >= 11.5.1; o npm que vem com o
-      # Node 22 é 10.x.
-      - name: npm com trusted publishing
-        run: npm install -g npm@latest && npm --version
+      # Node 22 é 10.x. O dist-tag latest no run 42035117059 instalou o npm
+      # 12.2.2, cujo `npm pack --json` deixou de ser um array e passou a ser
+      # um objeto indexado pelo nome do pacote (`{ "lohra-ts": { filename } }`).
+      # `scripts/pack-check.ts` da tag lê `[0].filename` e lança
+      # PACK_TARBALL_MISSING. A linha 11 ainda emite o array. Pin exato.
+      - name: npm 11 com trusted publishing
+        run: npm install -g npm@11.21.2 && npm --version
       - name: a tag aponta para main e bate com package.json#version
+        env:
+          RELEASE_TAG: ${{ steps.release_tag.outputs.name }}
         run: |
+          set -euo pipefail
           git fetch origin main --quiet
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
-            || { echo "::error::a tag $GITHUB_REF_NAME não aponta para um commit de main"; exit 1; }
-          TAG="${GITHUB_REF_NAME#v}"
+          git fetch origin tag "$RELEASE_TAG" --force --quiet
+          git merge-base --is-ancestor HEAD origin/main \
+            || { echo "::error::a tag $RELEASE_TAG não aponta para um commit de main"; exit 1; }
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/${RELEASE_TAG}^{}")" ] \
+            || { echo "::error::HEAD não é o commit da tag $RELEASE_TAG"; exit 1; }
+          TAG="${RELEASE_TAG#v}"
           VERSION="$(node -p "require('./package.json').version")"
           [ "$TAG" = "$VERSION" ] \
             || { echo "::error::tag v$TAG != package.json#version $VERSION"; exit 1; }
@@ -60,8 +100,11 @@ jobs:
       - name: publish (npm, provenance)
         run: npm publish --provenance --access public
       - name: notas da Release a partir do CHANGELOG
+        env:
+          RELEASE_TAG: ${{ steps.release_tag.outputs.name }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
           awk -v v="$VERSION" '
             $0 ~ "^## \\[" v "\\]" { on=1; print; next }
             on && /^## \[/ { exit }
@@ -71,4 +114,5 @@ jobs:
       - name: GitHub Release com o tarball
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" /tmp/pack/*.tgz --title "$GITHUB_REF_NAME" --notes-file /tmp/notes.md
+          RELEASE_TAG: ${{ steps.release_tag.outputs.name }}
+        run: gh release create "$RELEASE_TAG" /tmp/pack/*.tgz --title "$RELEASE_TAG" --notes-file /tmp/notes.md
