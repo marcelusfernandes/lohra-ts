@@ -11,7 +11,8 @@
 //      chave `description` pode mudar) — checado por hash SHA-256 de
 //      `JSON.stringify(parameters)` por tool, não pelo texto completo, para
 //      não duplicar o catálogo inteiro dentro do teste;
-//   3. que `run_workflow` mantém a lista fechada de 10 node types e o
+//   3. que `run_workflow` mantém a lista fechada de node types (derivada de
+//      `NODE_TYPES`, #979, e dita uma vez só) e o
 //      ponteiro para a skill, sem o manual (exemplo de spec, glossário de
 //      campos) que agora só vive lá;
 //   4. o padrão prescritivo (quando usar / quando não / limite) nas sete
@@ -31,6 +32,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { BUILTIN_DEFINITIONS } from "../src/tools/builtin-definitions.js";
+import { NODE_TYPES } from "../src/workflow/nodes.js";
 
 // #969 (épico): +`workflow_save` (#970) and `run_workflow`'s `template` (#971)
 // — the orchestrator keeps and reruns the workflows it builds. Raised by what
@@ -107,7 +109,9 @@ const PRE_DIET_PARAMETERS_HASH: Record<(typeof PRE_DIET_NAMES)[number], string> 
   steer_session: "d8f9cf9d98a06340bd1c21e3f2fb262ad3b38fc7a56e5d54ce683ae09b8130db",
   collect_session: "82c248236313a962fa02c24bac2ce64f2660cd605b3e618c329f76df05a295f1",
   // #971: +`template` (run a saved template by ref) — a deliberate schema change.
-  run_workflow: "e0d36f1421fb9abb6c09d9644bc6168ce8c77b0263a5128b4185318ff22f517e",
+  // #979: `spec` no longer repeats the node list (it lives once, derived from
+  // `NODE_TYPES`, in the tool description) — a deliberate schema change.
+  run_workflow: "aec85fcbb8845194ebcf2d07b1ce29f947021dd60a8a42bdfb441371d608e28e",
   workflow_status: "4d792c11305edb0fe22443a5428e1946ca966d393e79f9ec0c392ccb570ac6ae",
   workflow_list: "8243f0af367f188a376f2c17b5eabe872a2f7a979813e0d4e2be6d594c2aa259",
   workflow_pause: "dffb37dbcca421f16f632f20a90caa589da2fcf7de07ece11dddd990780a30b8",
@@ -158,22 +162,31 @@ describe("BUILTIN_DEFINITIONS token budget (#585)", () => {
 describe("run_workflow: closed node list and skill pointer survive the diet (#585)", () => {
   const description = (): string => descriptionOf("run_workflow");
 
-  it("still names the closed set of 10 node types", () => {
-    const nodeTypes = [
-      "agent",
-      "parallel",
-      "pipeline",
-      "loop_until_dry",
-      "verify",
-      "judge_panel",
-      "workflow",
-      "gate",
-      "completeness_check",
-      "checkpoint",
-    ];
-    for (const nodeType of nodeTypes) {
-      expect(description()).toContain(nodeType);
+  // #979: the list is DERIVED from `NODE_TYPES` (`src/workflow/nodes.ts`), so a
+  // node type added there reaches the model with no second edit — and the
+  // count, the order and the names are all checked against that one source.
+  it("names the closed set of node types, derived from NODE_TYPES", () => {
+    const nodeTypes = [...NODE_TYPES];
+    expect(nodeTypes).toContain("switch");
+    expect(description()).toContain(
+      `Node types (CLOSED set of ${String(nodeTypes.length)}): ${nodeTypes.join(", ")}.`,
+    );
+  });
+
+  it("names the node types once: the spec parameter points at the description, not a second list", () => {
+    const parameters = findTool("run_workflow").function.parameters as {
+      properties: { spec: { description: string } };
+    };
+    const specDescription = parameters.properties.spec.description;
+    // "workflow" is both a node type and an ordinary word here, so look for the list itself
+    // (two names in a row) and for the names that are only ever identifiers.
+    const [first, second] = [...NODE_TYPES];
+    expect(specDescription).not.toContain(`${String(first)}, ${String(second)}`);
+    for (const nodeType of NODE_TYPES) {
+      if (nodeType.includes("_")) expect(specDescription).not.toContain(nodeType);
     }
+    expect(specDescription).toContain("node types");
+    expect(specDescription.length).toBeLessThan(160);
   });
 
   it("still points at the workflow-authoring skill before authoring", () => {

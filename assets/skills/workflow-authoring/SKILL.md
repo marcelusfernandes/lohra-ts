@@ -35,7 +35,7 @@ tool calls, do it yourself — a workflow costs a process, a pool and real token
 | A single leaf of work | `agent` | One prompt, one sub-agent, optional validated JSON back |
 
 Composition beats cleverness: most good specs are two or three nodes — a wide
-node, then one `agent` that reads its output and writes the answer.
+node, then one `agent` that reads its output and writes the answer. To branch on a value in the state (`switch`), load the `workflow-flow-control` skill.
 
 ### What each node returns
 

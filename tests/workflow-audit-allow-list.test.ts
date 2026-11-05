@@ -225,6 +225,29 @@ describe("T17 metadata-only audit — allow-list sem produtor", () => {
     }
   });
 
+  // Issue #979 (S2, épico #976): `switch.case` é a 12ª role de um leaf
+  // (`engine`/`flow-switch.ts`). Sem a entrada em SAFE_STRING_VALUES.role o
+  // ledger redigia a role do leaf do `switch` como `excluded_by_policy`: o
+  // oráculo positivo prende a entrada, e o negativo prende que a allow-list
+  // continua FECHADA (vizinhos próximos não passam).
+  it("preserves a leaf.started role 'switch.case' and its item_index", () => {
+    const event = publicAuditEvent(
+      "r",
+      1,
+      { event_type: "leaf.started", payload: { role: "switch.case", item_index: 2 } },
+      1,
+    );
+    expect(event.data.role).toBe("switch.case");
+    expect(event.data.item_index).toBe(2);
+  });
+
+  it("redacts a leaf.started role next to 'switch.case' that is not on the allow-list", () => {
+    for (const role of ["switch.other", "Switch.case", "switch", "switch.case "]) {
+      const event = publicAuditEvent("r", 1, { event_type: "leaf.started", payload: { role } }, 1);
+      expect(event.data.role).toEqual({ state: "excluded_by_policy", characters: role.length });
+    }
+  });
+
   it("redacts a leaf.failed partial outside the boolean vocabulary (a string, never coerced)", () => {
     const event = publicAuditEvent(
       "r",

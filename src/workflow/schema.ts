@@ -96,7 +96,7 @@ interface SchemaSubObject {
  * Agent-shaped sub-objects where `schema`/`schema_ref` are meaningful
  * because the engine's `schemaOf` (`engine.ts:347-355`) reads them off this
  * same object at runtime: `loop_until_dry.body`, `gate.body`,
- * `judge_panel.synthesize` and each `pipeline.stages[*]`. A `parallel`
+ * `judge_panel.synthesize`, each `switch.cases[*]` (#979) and each `pipeline.stages[*]`. A `parallel`
  * branch that is itself an object is scanned too (#238) — the engine still
  * renders it wholesale into the leaf prompt (`renderValue` in `engine.ts`'s
  * `runParallel`), unchanged by this scan; a string/ref branch, the common
@@ -108,6 +108,14 @@ function schemaBearingSubObjects(node: Node): readonly SchemaSubObject[] {
   if (node.type === "gate" || node.type === "loop_until_dry") {
     const body = record(node.fields.body);
     if (body !== null) targets.push({ fieldPrefix: "body.", fields: body, routingAllowed: false });
+  }
+  if (node.type === "switch") {
+    for (const [name, value] of Object.entries(record(node.fields.cases) ?? {})) {
+      const body = record(value);
+      if (body !== null) {
+        targets.push({ fieldPrefix: `cases.${name}.`, fields: body, routingAllowed: false });
+      }
+    }
   }
   if (node.type === "judge_panel") {
     const synthesize = record(node.fields.synthesize);
