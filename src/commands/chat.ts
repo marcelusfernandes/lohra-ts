@@ -437,7 +437,9 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
   });
   ownershipRef.store = store;
   const workflowService = new WorkflowService({
-    runtime: new OrchestrationChildRuntime(orchestrationCore),
+    // Issue #978: the SAME `baseDispatch` the leaves' composition gets — the
+    // port `callTool` composes it with the sandbox wrap, never around it.
+    runtime: new OrchestrationChildRuntime(orchestrationCore, baseDispatch),
     environment: options.environment,
     homeRoot: options.home,
     loader: templateLoader(options.home),

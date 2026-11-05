@@ -3,9 +3,21 @@ import type {
   CollectOutcome,
   OrchestrationCore,
 } from "../orchestration/core.js";
+import { createChildDispatch } from "../tools/child.js";
+import type { RegistryDispatch } from "../tools/types.js";
+import {
+  CALL_TOOLS,
+  callDeadlineMs,
+  callSubId,
+  classifyCallOutput,
+  isCallTool,
+  isOkEnvelope,
+} from "./call-tools.js";
 import { toolError } from "./sandbox.js";
 import type {
   ArtifactRecord,
+  CallToolRequest,
+  CallToolResult,
   CausalContext,
   ChildCollectOptions,
   ChildResult,
@@ -92,12 +104,13 @@ function readPending(value: string): Promise<string> | undefined {
   return candidate instanceof PendingDispatch ? candidate.promise : undefined;
 }
 
-/** Parses `onToolSettled`'s `ok` from the tool envelope's own leading
- * `{"ok":...` (never the rest of the payload) — real envelopes come from
- * `toolResult`/`toolError`, src/tools/envelope.ts. */
-function okFromEnvelope(result: string): boolean {
-  return result.startsWith('{"ok":true');
-}
+/** How a `callTool` race ended — the dispatch settling, the dispatch
+ * throwing, or the deadline winning. Never a thrown error: `callTool` turns
+ * each into a `CallToolResult`. */
+type CallRace =
+  | { readonly kind: "settled"; readonly output: string }
+  | { readonly kind: "threw"; readonly error: unknown }
+  | { readonly kind: "timeout" };
 
 /** #463: the write-file manifest's own parse — only for `name ===
  * "write_file"` (every other tool never pays this `JSON.parse`), and only
@@ -146,7 +159,7 @@ function writeFileArtifactOf(result: string): ArtifactRecord | null {
  * `installation.wrap`. After the real dispatch settles (never for a sync
  * denial — that path returns before `pending` exists), `onToolSettled` fires
  * with `ok` parsed from the tool envelope's own leading `{"ok":...` (never
- * the rest of the payload) — see `okFromEnvelope` above.
+ * the rest of the payload) — see `isOkEnvelope` (call-tools.ts).
  *
  * `onRefusal` (#246) is THIS leaf's own counting side channel: every
  * synchronous denial (never a `PendingDispatch`) fires it, keyed by `subId`.
@@ -177,7 +190,7 @@ function adaptSandboxWrap(
         return out;
       }
       const result = await pending;
-      installation.onToolSettled?.(leaf, okFromEnvelope(result));
+      installation.onToolSettled?.(leaf, isOkEnvelope(result));
       if (name === "write_file") {
         const artifact = writeFileArtifactOf(result);
         if (artifact !== null) onArtifact(subId, artifact);
@@ -252,7 +265,96 @@ export class OrchestrationChildRuntime implements ChildRuntime {
     { readonly runId: string; readonly list: ArtifactRecord[]; dropped: number }
   >();
 
-  public constructor(private readonly core: OrchestrationCore) {}
+  public constructor(
+    private readonly core: OrchestrationCore,
+    private readonly baseDispatch?: RegistryDispatch,
+  ) {}
+
+  /**
+   * Issue #978 (épico #976 §6): one read-only tool call WITHOUT a model,
+   * through exactly the composition a leaf's call gets in
+   * `createChildRunner` — `wrapDispatchFor(runId)(createChildDispatch(base),
+   * subId)` — so the sandbox (`fs_allow`/`egress_allow`), the taint and the
+   * stretch's fence judge it, never a parallel path beside them. The
+   * installation consulted is the run's CURRENT one, resolved now (a retired
+   * stretch is denied by its own wrap; a run with none, by `denyAllDispatch`).
+   *
+   * Order is fixed and every step is fail-closed: (1) a name outside
+   * `CALL_TOOLS` is denied before anything is resolved or dispatched; (2) a
+   * runtime built without `baseDispatch` answers a named `error`; (3) the
+   * composed dispatch runs under a deadline of at most 120 s. `reached` —
+   * whether the REAL base was called — is what tells a denial from a tool's
+   * own failure; it is spied on the innermost dispatch, so a refusal by
+   * `createChildDispatch` counts as a denial too.
+   *
+   * Never throws. A dispatch that outlives the deadline is left to finish on
+   * its own (nothing here can abort it) and its late outcome is dropped: the
+   * verdict, `timeout`, was already reported with its cause. The timer is
+   * cleared whichever way the race ends. `args` are frozen into a copy, so
+   * the object the sandbox checked is the object dispatched.
+   */
+  public async callTool(request: CallToolRequest): Promise<CallToolResult> {
+    const { name } = request;
+    if (!isCallTool(name)) {
+      return {
+        status: "denied",
+        output: toolError(
+          `'${name}' cannot be called without a model (allowed: ${CALL_TOOLS.join(", ")})`,
+        ),
+      };
+    }
+    const base = this.baseDispatch;
+    if (base === undefined) {
+      return {
+        status: "error",
+        output: toolError(
+          `this runtime has no baseDispatch — '${name}' cannot be called without a model`,
+        ),
+      };
+    }
+    const subId = callSubId(request.causalContext);
+    const reached = { value: false };
+    const spiedBase: RegistryDispatch = (toolName, toolArgs, kwargs) => {
+      reached.value = true;
+      return base(toolName, toolArgs, kwargs);
+    };
+    // Inside the async function so that an installation whose `wrap` throws
+    // while it is being composed lands in `threw` below, like a dispatch that
+    // throws — the port never throws.
+    const run = async (): Promise<string> =>
+      await this.wrapDispatchFor(request.causalContext.runId)(
+        createChildDispatch(spiedBase),
+        subId,
+      )(name, Object.freeze({ ...request.args }));
+    const deadlineMs = callDeadlineMs(request.timeoutSeconds);
+    const deadline = settleCeiling(deadlineMs);
+    try {
+      const raced = await Promise.race([
+        run().then(
+          (output): CallRace => ({ kind: "settled", output }),
+          (error: unknown): CallRace => ({ kind: "threw", error }),
+        ),
+        deadline.promise.then((): CallRace => ({ kind: "timeout" })),
+      ]);
+      if (raced.kind === "timeout") {
+        return {
+          status: "timeout",
+          output: toolError(`'${name}' did not finish within ${String(deadlineMs / 1000)} s`),
+        };
+      }
+      if (raced.kind === "threw") {
+        const detail = raced.error instanceof Error ? raced.error.message : String(raced.error);
+        return { status: "error", output: toolError(`'${name}' failed: ${detail}`) };
+      }
+      return classifyCallOutput(reached.value, raced.output);
+    } finally {
+      deadline.clear();
+      // A synchronous denial counts a "refusal" under this call's synthetic id
+      // (`adaptSandboxWrap`). That counter is a leaf's; nothing reads it for a
+      // call, and left behind it would grow by one entry per denied call.
+      this.refusalCounts.delete(subId);
+    }
+  }
 
   public installLeafSandbox(installation: LeafSandboxInstallation): LeafSandboxHandle {
     this.installations.set(installation.runId, installation);

@@ -136,6 +136,32 @@ export type SteerOutcome = Readonly<{
   interrupted?: boolean;
 }>;
 
+/** How a model-free tool call ended (issue #978, épico #976 §6). `denied` is
+ * the sandbox/install/allow-list answering BEFORE any dispatch — never
+ * retried; `error` is the tool (or the dispatch) failing after it was
+ * reached; `timeout` is the deadline winning the race. */
+export type CallToolStatus = "ok" | "error" | "denied" | "timeout";
+
+/** One model-free tool call. `causalContext` is the calling node's own
+ * identity (the same shape a leaf spawn carries): `runId` picks the
+ * acquisition's sandbox, the rest keys the ledger's `tool.*` pair. */
+export interface CallToolRequest {
+  readonly name: string;
+  readonly args: Readonly<Record<string, unknown>>;
+  /** Deadline in seconds; a runtime caps it (`call-tools.ts`, 120 s) and
+   * never runs a call without one. */
+  readonly timeoutSeconds: number;
+  readonly causalContext: CausalContext;
+}
+
+/** `output` is the tool's own envelope, verbatim, for `ok`/`error`; for
+ * `denied`/`timeout` (and an `error` the runtime itself raises) it is the
+ * `ERROR: …` text naming the cause — never empty. */
+export interface CallToolResult {
+  readonly status: CallToolStatus;
+  readonly output: string;
+}
+
 /** Provider-free port consumed by the workflow core. */
 export interface ChildRuntime {
   spawn(request: ChildSpawnRequest): Awaitable<string>;
@@ -177,4 +203,16 @@ export interface ChildRuntime {
    * run leaves unsandboxed.
    */
   installLeafSandbox?(installation: LeafSandboxInstallation): LeafSandboxHandle;
+  /**
+   * Issue #978 (épico #976 §6): call ONE read-only tool without a model, through
+   * the SAME sandbox (`fs_allow`/`egress_allow`), taint and fence a leaf's tool
+   * call goes through — never beside it. Optional, same shape as
+   * `steerOutcome?`: a runtime that omits it has no model-free call at all, and
+   * a caller must treat "absent" as a named error, never as permission.
+   *
+   * Never throws: every outcome — including a refused name, a missing
+   * installation, a dispatch that throws and a deadline — is a
+   * `CallToolResult`.
+   */
+  callTool?(request: CallToolRequest): Awaitable<CallToolResult>;
 }
