@@ -11,7 +11,11 @@
 //     answer}`, fica em cache (hash pinado) e o nó nunca pergunta de novo — a
 //     resposta é do primeiro run, mesmo com outra no resume; um `summary` ou um
 //     `kind` mudado é outra pergunta;
-//   - a falha é nomeada: upstream null no `when` e no `summary`; um `summary`
+//   - a falha FECHA para a pessoa (rodada 2): um `when` que não dá para avaliar
+//     (a raiz de um caminho é um nó morto) vale como verdadeiro; um `summary` que
+//     lê um valor ausente sai como o template cru atrás de `[unrendered]`, e um em
+//     branco atrás de `[empty summary]`; em todos o run pausa `escalated`, o nó
+//     seguinte não é spawnado, e o fault nomeia o que faltou. Um `summary`
 //     renderizado acima de 2000 caracteres é cortado com `…`;
 //   - dentro de um `workflow` aninhado o id vem escopado e a colisão (com a raiz,
 //     com um irmão, entre `checkpoint` e `escalate`) é recusada como no checkpoint.
@@ -292,10 +296,17 @@ describe("the validation of an escalate (#981)", () => {
     });
   });
 
-  it.each(["model", "tier", "effort", "provider"])(
+  // A VALID value for each knob (a `tier` outside small/medium/big would add a second issue of
+  // its own), so what is refused is the field, and only the field.
+  it.each([
+    ["model", "some-model"],
+    ["tier", "big"],
+    ["effort", "low"],
+    ["provider", "some-provider"],
+  ])(
     "a routing knob (%s) is refused: the node spawns nothing, so there is nothing to route",
-    (knob) => {
-      expect(shape(escalateIssues({ [knob]: "x" }))).toContain(`unknown_field:${knob}`);
+    (knob, value) => {
+      expect(shape(escalateIssues({ [knob]: value }))).toEqual([`unknown_field:${knob}`]);
     },
   );
 
@@ -505,26 +516,160 @@ describe("an answer resumes it, once (#981)", () => {
   });
 });
 
-describe("a failure is named (#981)", () => {
-  it("a dead upstream read by `when` is `<id>: upstream null`, with no pause and no cell", async () => {
+// The node exists to put a person in front of a decision, so no failure of its own may skip the
+// person: whatever cannot be read pauses the run, says what could not be read, and leaves the
+// nodes that depend on it unspawned.
+describe("a failure never skips the person (#981, round 2)", () => {
+  const MISSING = "Risk ${scan.risk}: ${scan.reason}";
+  const shipped = (runtime: ScriptedRuntime): boolean =>
+    runtime.spawned.some((request) => request.prompt === "Ship hello");
+
+  it("a summary that reads a value that is not there pauses with the template, marked, and names the ref", async () => {
+    const runtime = new ScriptedRuntime([{ risk: 9 }, "shipped"]);
     const cache = new RecordingCache();
-    const result = await run(new ScriptedRuntime([DEAD, DEAD, DEAD]), chain(), ARGS, { cache });
+    const result = await run(runtime, chain({ summary: MISSING }), ARGS, { cache });
+    expect(result.status).toBe("paused");
+    expect(result.pauseReason).toBe("escalated");
+    expect(result.checkpoint).toEqual({
+      node_id: "review",
+      kind: "high_risk",
+      summary: `[unrendered] ${MISSING}`,
+    });
     expect(result.outputs.review).toBeNull();
-    expect(result.faults).toContain("review: upstream null");
-    expect(result.pauseReason).toBeNull();
-    expect(result.status).not.toBe("paused");
+    expect(shipped(runtime)).toBe(false);
+    expect(runtime.spawned).toHaveLength(1);
+    expect(result.faults).toHaveLength(1);
+    expect(result.faults[0]).toMatch(/^review: escalated for review/u);
+    expect(result.faults[0]).toContain("no value for ${scan.reason}");
+    expect(result.faults[0]).not.toContain("${scan.risk}");
+    expect(result.faults[0]).not.toContain("upstream null");
     expect(cache.of("review").puts).toEqual([]);
   });
 
-  it("a dead upstream read only by `summary` is `<id>: upstream null` once `when` holds", async () => {
-    const workflow = spec([
-      SCAN,
-      review({ when: { field_true: { path: "${args.flag}" } }, summary: "Look at ${scan.note}" }),
-    ]);
-    const result = await run(new ScriptedRuntime([DEAD, DEAD, DEAD]), workflow, { flag: true });
+  it.each([
+    ["a field the scan did not give", { risk: 9 }],
+    ["a field the scan gave as null", { risk: 9, reason: null }],
+  ])("%s is the same: the person is asked, never skipped", async (_label, scan) => {
+    const runtime = new ScriptedRuntime([scan, "shipped"]);
+    const result = await run(runtime, chain({ summary: MISSING }), ARGS);
+    expect(result.status).toBe("paused");
+    expect((result.checkpoint as { summary: string }).summary).toBe(`[unrendered] ${MISSING}`);
+    expect(shipped(runtime)).toBe(false);
+  });
+
+  it("names every ref that is missing, once each", async () => {
+    const summary = "${scan.a} then ${scan.b} and again ${scan.a}";
+    const result = await run(new ScriptedRuntime([{ risk: 9 }]), chain({ summary }), ARGS);
+    expect(result.faults[0]).toContain("no value for ${scan.a}, ${scan.b}");
+  });
+
+  it("the answer resumes it: the output keeps the marked template, and the dependents run", async () => {
+    const cache = new RecordingCache();
+    await run(new ScriptedRuntime([{ risk: 9 }]), chain({ summary: MISSING }), ARGS, { cache });
+    const second = new ScriptedRuntime(["shipped"]);
+    const done = await run(second, chain({ summary: MISSING }), ARGS, {
+      cache,
+      answers: { review: "go" },
+    });
+    expect(done.status).toBe("complete");
+    expect(done.faults).toEqual([]);
+    expect(done.outputs.review).toEqual({
+      escalated: true,
+      kind: "high_risk",
+      summary: `[unrendered] ${MISSING}`,
+      answer: "go",
+    });
+    expect(second.spawned.map((request) => request.prompt)).toEqual(["Ship hello"]);
+  });
+
+  it("a ref a prompt would render — an array index, a field of a JSON string — is not missing", async () => {
+    const scan = { risk: 9, items: ["alpha"], note: '{"a":"beta"}' };
+    const summary = "${scan.items.0} ${scan.note.a}";
+    const result = await run(new ScriptedRuntime([scan]), chain({ summary }), ARGS);
+    expect(result.status).toBe("paused");
+    expect(result.checkpoint).toMatchObject({ summary: "alpha beta" });
+    expect(result.faults).toHaveLength(1);
+    expect(result.faults[0]).not.toContain("summary not rendered");
+  });
+
+  it.each([
+    ["an empty string", "${scan.note}", ""],
+    ["blank text around an empty string", "  ${scan.note}  ", ""],
+    ["whitespace only", "${scan.note}", " \n\t"],
+  ])(
+    "a summary that renders as %s pauses with the template, marked, and says it is empty",
+    async (_label, summary, note) => {
+      const runtime = new ScriptedRuntime([{ risk: 9, note }, "shipped"]);
+      const result = await run(runtime, chain({ summary }), ARGS);
+      expect(result.status).toBe("paused");
+      expect(result.pauseReason).toBe("escalated");
+      expect(result.checkpoint).toEqual({
+        node_id: "review",
+        kind: "high_risk",
+        summary: `[empty summary] ${summary}`,
+      });
+      expect(result.faults[0]).toContain("summary rendered empty");
+      expect(shipped(runtime)).toBe(false);
+    },
+  );
+
+  it("a `when` that reads a dead node is held to be true: the run pauses, the summary and the faults say why", async () => {
+    const runtime = new ScriptedRuntime([DEAD, DEAD, "shipped"]);
+    const cache = new RecordingCache();
+    const result = await run(runtime, chain(), ARGS, { cache });
+    expect(result.status).toBe("paused");
+    expect(result.pauseReason).toBe("escalated");
+    expect(result.checkpoint).toEqual({
+      node_id: "review",
+      kind: "high_risk",
+      summary:
+        "[condition not evaluated: 'scan' has no value] [unrendered] Risk ${scan.risk} on ${args.text}",
+    });
     expect(result.outputs.review).toBeNull();
+    expect(shipped(runtime)).toBe(false);
     expect(result.faults).toContain("review: upstream null");
-    expect(result.pauseReason).toBeNull();
+    expect(
+      result.faults.some((fault) =>
+        /^review: escalated for review \(high_risk\) .*'when' could not be evaluated: 'scan' has no value \(upstream null\)/u.test(
+          fault,
+        ),
+      ),
+    ).toBe(true);
+    expect(cache.of("review").puts).toEqual([]);
+  });
+
+  it("…and a person can still answer it: same marked summary, and the dependents run", async () => {
+    const cache = new RecordingCache();
+    await run(new ScriptedRuntime([DEAD, DEAD]), chain(), ARGS, { cache });
+    const second = new ScriptedRuntime([DEAD, DEAD, "shipped"]);
+    const done = await run(second, chain(), ARGS, { cache, answers: { review: "go" } });
+    expect(done.pauseReason).toBeNull();
+    expect(done.outputs.review).toEqual({
+      escalated: true,
+      kind: "high_risk",
+      summary:
+        "[condition not evaluated: 'scan' has no value] [unrendered] Risk ${scan.risk} on ${args.text}",
+      answer: "go",
+    });
+    expect(shipped(second)).toBe(true);
+  });
+
+  it("a name the run does not have (a fan-out's ${item} at the top level) is 'no value' too", async () => {
+    const workflow = spec([
+      review({ when: { field_true: { path: "${item.ok}" } }, summary: "no item here" }),
+    ]);
+    const result = await run(new ScriptedRuntime(), workflow, ARGS);
+    expect(result.status).toBe("paused");
+    expect(result.checkpoint).toMatchObject({
+      summary: "[condition not evaluated: 'item' has no value] no item here",
+    });
+    expect(result.faults).toContain("review: upstream null");
+  });
+
+  it("a root that is there but lacks the field is only a value: the condition does not hold, the run goes on", async () => {
+    const result = await run(new ScriptedRuntime([{ other: 1 }, "shipped"]), chain(), ARGS);
+    expect(result.outputs.review).toEqual({ escalated: false });
+    expect(result.status).toBe("complete");
   });
 
   it("a summary longer than 2000 characters once its refs are filled is cut, with a visible ellipsis", async () => {

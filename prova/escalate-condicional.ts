@@ -6,7 +6,7 @@
 // - `tests/workflow-escalate.test.ts`: a validação (`when`, `kind`, `summary`,
 //   sem roteamento nem `default`) e o motor — `{escalated:false}` sem leaf nem
 //   célula, a pausa com `{node_id, kind, summary}`, a resposta que vira saída em
-//   cache (hash pinado), o que nunca pergunta de novo, a falha nomeada e o id
+//   cache (hash pinado), o que nunca pergunta de novo, a falha que fecha para a pessoa e o id
 //   escopado/colisão num `workflow` aninhado.
 // - `tests/workflow-escalate-durable.test.ts`: o caminho durável — status ao vivo
 //   e frio com motivo, escalation e hint; resume sem resposta recusado sem lease,

@@ -641,12 +641,13 @@ describe("workflow_preview over an escalate (#981)", () => {
     }
   });
 
-  it("an escalate that failed on a dead upstream is upstream_missing even when another one pauses the run", async () => {
+  it("an escalate whose condition cannot be read pauses the preview too, but it is upstream_missing, not pending — and what follows is not claimed", async () => {
     const h = harness();
     try {
       // Really: the scan answers 9, so `review` pauses the run. Under a route that moves the scan
-      // the preview's scan dies, `review` is `upstream null` (null, with that fault) and does not
-      // pause — and `late`, which holds while the run has no `flag`, is the node that stops it.
+      // the preview's scan dies, so `review` cannot read its `when`: it fails closed (pauses, with
+      // the `upstream null` fault) instead of letting `late` through. The outcome is the one every
+      // node downstream of a recompute gets, not `escalation_pending`.
       const raw = reviewSpec({}, { provider: "p1" });
       (raw.nodes as Record<string, unknown>[]).push({
         id: "late",
@@ -661,7 +662,22 @@ describe("workflow_preview over an escalate (#981)", () => {
       if ("error" in result) throw new Error(result.error);
       expect(outcomeOf(result.nodes, "scan").outcome).toBe("recompute");
       expect(outcomeOf(result.nodes, "review").outcome).toBe("upstream_missing");
-      expect(outcomeOf(result.nodes, "late").outcome).toBe("escalation_pending");
+      expect(outcomeOf(result.nodes, "late").outcome).toBe("unknown");
+    } finally {
+      h.close();
+    }
+  });
+
+  it("an escalate whose summary cannot render is still escalation_pending: the person would be asked", async () => {
+    const h = harness();
+    try {
+      const raw = reviewSpec({ summary: "Risk ${scan.risk}: ${scan.reason}" });
+      const { runId, status } = await launchLoop(h, raw);
+      expect(status).toBe("paused");
+      const result = await h.preview(runId);
+      if ("error" in result) throw new Error(result.error);
+      expect(outcomeOf(result.nodes, "review").outcome).toBe("escalation_pending");
+      expect(outcomeOf(result.nodes, "ship").outcome).toBe("unknown");
     } finally {
       h.close();
     }

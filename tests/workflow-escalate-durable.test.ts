@@ -196,6 +196,70 @@ describe("a durable escalation pauses the run and says so (#981)", () => {
   });
 });
 
+describe("a summary that cannot render still stops the run for a person (#981, round 2)", () => {
+  const TEMPLATE = "Risk ${scan.risk}: ${scan.reason}";
+  const broken = (): Record<string, unknown> => {
+    const raw = spec();
+    const nodes = raw.nodes as Record<string, unknown>[];
+    return {
+      ...raw,
+      nodes: nodes.map((n) => (n.id === "review" ? { ...n, summary: TEMPLATE } : n)),
+    };
+  };
+
+  it("pauses as escalated with the marked template, names the missing ref, and runs nothing after it", async () => {
+    const h = harness();
+    try {
+      const { runId, live } = await launch(h, broken());
+      expect(live.status).toBe("paused");
+      expect(live.pause_reason).toBe("escalated");
+      expect(live.escalation).toEqual({
+        node_id: "review",
+        kind: "high_risk",
+        summary: `[unrendered] ${TEMPLATE}`,
+      });
+      expect((live.faults as string[]).join("\n")).toContain("no value for ${scan.reason}");
+      expect(h.spawned.map((request) => request.prompt)).toEqual(["Scan hello"]);
+
+      const view = await cold(h, runId);
+      expect(view.reason).toBe("escalated");
+      expect(view.escalation).toMatchObject({ summary: `[unrendered] ${TEMPLATE}` });
+    } finally {
+      h.close();
+    }
+  });
+
+  it("a resume without the answer is refused with the marked summary; the answer lets the run finish", async () => {
+    const h = harness();
+    try {
+      const { runId } = await launch(h, broken());
+      const refused = h.newService().start(null, {}, { resumeRunId: runId });
+      expect("error" in refused).toBe(true);
+      if (!("error" in refused)) throw new Error("expected a refusal");
+      expect(refused.error).toContain(`[unrendered] ${TEMPLATE}`);
+
+      const service = h.newService();
+      const resumed = service.start(
+        null,
+        {},
+        { resumeRunId: runId, checkpointAnswers: { review: "go" } },
+      );
+      if ("error" in resumed) throw new Error(resumed.error);
+      const final = (await service.status(runId, true)) as Record<string, unknown>;
+      expect(final.status).toBe("complete");
+      expect((final.outputs as Record<string, unknown>).review).toEqual({
+        escalated: true,
+        kind: "high_risk",
+        summary: `[unrendered] ${TEMPLATE}`,
+        answer: "go",
+      });
+      expect(h.spawned.map((request) => request.prompt)).toEqual(["Scan hello", "Ship hello"]);
+    } finally {
+      h.close();
+    }
+  });
+});
+
 describe("a resume without the answer is refused before it takes anything (#981)", () => {
   it("names the node, the summary and the answer to send; the run stays as it was", async () => {
     const h = harness();

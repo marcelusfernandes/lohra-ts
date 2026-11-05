@@ -264,6 +264,20 @@ describe("the escalate section matches the code (#981)", () => {
     expect(section).toContain("…");
   });
 
+  it("says it fails closed: a condition it cannot check, a summary it cannot write or that is blank, all pause", () => {
+    expect(sectionFlat).toMatch(/fails? \*\*closed\*\*/u);
+    expect(section).toContain("[condition not evaluated:");
+    expect(section).toContain("[unrendered]");
+    expect(section).toContain("[empty summary]");
+    expect(section).toContain("no value for ${scan.reason}");
+    expect(sectionFlat).toContain("summary rendered empty");
+    expect(sectionFlat).toMatch(/held to be true/u);
+    expect(sectionFlat).toMatch(/do not run/u);
+    // the old promise, that a failure here lets the run go on, must be gone
+    expect(sectionFlat).not.toMatch(/does \*\*not\*\* pause/u);
+    expect(sectionFlat).not.toMatch(/the run does not pause/u);
+  });
+
   it("says how a resume, the cell and the preview behave", () => {
     expect(sectionFlat).toMatch(/never asks again/u);
     expect(sectionFlat).toMatch(/new question|different question/u);
