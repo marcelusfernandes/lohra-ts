@@ -99,6 +99,16 @@ export function loopBodyCellParts(
   ];
 }
 
+/** What a body leaf's spawn is told: its role and cell, the retry attempt, and — for a node that
+ * picks one of several bodies (`switch`, #979) — which one (`itemIndex`, the ledger's
+ * `item_index`). Absent means the single-body case `gate`/`loop_until_dry` have always been. */
+export interface BodyLeafOptions {
+  readonly role: string;
+  readonly cellId: string;
+  readonly attempt?: number;
+  readonly itemIndex?: number;
+}
+
 /** What `makeBodyLeafRunner` needs from the engine — `collectLeaf` bound by the
  * caller so `this` stays correct (same pattern `ParallelBranchDeps` already
  * uses in `engine-utils.ts`), `control` to stop a retry loop once the run
@@ -111,7 +121,7 @@ export interface BodyLeafDeps {
     node: Node,
     prompt: string,
     schema: Readonly<Record<string, unknown>> | null,
-    options: { readonly role: string; readonly cellId: string; readonly attempt?: number },
+    options: BodyLeafOptions,
   ) => Promise<LeafExecution>;
 }
 
@@ -120,11 +130,12 @@ export interface BodyLeafDeps {
 export type BodyLeafRunner = (
   prompt: string,
   schema: Readonly<Record<string, unknown>> | null,
-  options: { readonly role: string; readonly cellId: string; readonly attempt?: number },
+  options: BodyLeafOptions,
 ) => Promise<LeafExecution>;
 
 /**
- * Builds `gate.body`/`loop_until_dry.body`'s leaf spawner ONCE per node run
+ * Builds `gate.body`/`loop_until_dry.body`'s (and, #979, the chosen `switch` case's)
+ * leaf spawner ONCE per node run
  * (`runGate`/`runLoop` call this before their attempt/round loop, not inside
  * it): `body`'s own `tool_less`/`timeout`/`max_iterations` merged onto the
  * node every spawn uses (`mergeBodyIntoNode`), and `body.retries` (0-3,

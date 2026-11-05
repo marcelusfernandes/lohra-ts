@@ -69,6 +69,7 @@ import {
   durableFromRow,
   TOKEN_BUDGET_PAUSE,
 } from "./service.js";
+import { switchTakesNoLeaf } from "./flow-switch.js";
 import { validateSpec } from "./schema.js";
 import { isValidationError, type Node, type WorkflowSpec } from "./types.js";
 
@@ -341,6 +342,11 @@ function classifyNode(node: Node, ctx: ClassifyContext): PreviewNodeOutcome {
       (node.type === "parallel" && !hasNodeFault(node.id, faults)))
   ) {
     return { node_id: node.id, type: node.type, outcome: "upstream_missing" };
+  }
+  // #979: a `switch` that took a `null` case ran — and had no leaf to replay or pay, so it
+  // is `no_leaves`, ahead of a token-budget pause that never touched it.
+  if (switchTakesNoLeaf(node, output)) {
+    return { node_id: node.id, type: node.type, outcome: "no_leaves" };
   }
   if (pauseReason === TOKEN_BUDGET_PAUSE) {
     return { node_id: node.id, type: node.type, outcome: "token_budget_exhausted" };

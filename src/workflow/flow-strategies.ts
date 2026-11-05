@@ -11,6 +11,7 @@ import {
   routingIdentity,
   strictResolve,
 } from "./engine-utils.js";
+import { runSwitch } from "./flow-switch.js";
 import type { CausalContext, ChildRuntime } from "./runtime.js";
 import type { TierMap } from "./tiers.js";
 import type { Node } from "./types.js";
@@ -148,4 +149,5 @@ function runCheckpoint(
 export const FLOW_STRATEGIES: Readonly<Record<string, FlowStrategy>> = Object.freeze({
   completeness_check: runCompleteness,
   checkpoint: (deps, node, context) => Promise.resolve(runCheckpoint(deps, node, context)),
+  switch: runSwitch,
 });

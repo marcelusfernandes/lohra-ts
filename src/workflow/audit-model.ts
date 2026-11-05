@@ -230,10 +230,12 @@ const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object
     "unavailable",
     "user_requested",
   ]),
-  // Issue #366: the eleven roles a leaf's `causalContext.role` ever carries
+  // Issue #366: the roles a leaf's `causalContext.role` ever carries
   // (`engine.ts:456,555,649,702,723,767,812,911,924,966`;
   // `engine-utils.ts:393` for `parallel.branch`) — closed, so a role outside
   // this list is a bug, not a private string, and stays safe by construction.
+  // Issue #979 (épico #976): + `switch.case`, the leaf of the case a `switch`
+  // picked (`flow-switch.ts`); `loop` reuses `loop.round`.
   role: new Set([
     "agent",
     "completeness",
@@ -245,6 +247,7 @@ const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object
     "loop.round",
     "parallel.branch",
     "pipeline.stage",
+    "switch.case",
     "verify.skeptic",
   ]),
   error_kind: ERROR_KIND_SET,
