@@ -581,9 +581,11 @@ field of it (`${settings.data.mode}`); a prompt can only take the whole `${setti
   attempt, never a `leaf.started`.
 - **The same sandbox as a leaf.** The call goes through the same sandbox as a leaf's tool call: the
   operator's `workflow_policy.json` limits `read_file` to `fs_allow` and `web_fetch` to
-  `egress_allow`, a retired stretch is refused, and a `web_fetch` taints the run exactly as it does
-  in a leaf. Once the run is tainted the sandbox denies the filesystem and egress calls that come
-  after, so put every `read_file` before the first `web_fetch`.
+  `egress_allow`, a retired stretch is refused, and a `web_fetch` taints the session exactly as it
+  does in a leaf. Once it is tainted the sandbox denies every filesystem and egress call that comes
+  after — a second `web_fetch` included, in this run and in any other run of the same session — with
+  `tainted run: web egress is disabled for leaves`. Put every `read_file` before the first
+  `web_fetch`, and expect one `web_fetch` per session.
 - **Each attempt is charged.** Each attempt takes one slot of the run's spawn limit (`lifetime`),
   as a leaf does, and no tokens. When the limit is gone the node is `null`, the run counts a
   `cap_trips`, and the tool is not called.
@@ -680,6 +682,7 @@ For a `call`:
    `upstream null`?
 4. Is `timeout` the longest wait I accept (at most 120 seconds), and `retries` right for a host that
    can be slow (0 to 3)?
-5. Do the `read_file` calls come before the first `web_fetch`, since a `web_fetch` taints the run?
+5. Do the `read_file` calls come before the first `web_fetch`, since a `web_fetch` taints the
+   session and no second one is allowed?
 6. Does the node that judges the text `depends_on` the `call` and read `${fetch.text}`, not the
    whole envelope?
