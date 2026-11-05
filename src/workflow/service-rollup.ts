@@ -169,52 +169,54 @@ export function resultView(
   record: LiveRunLike,
   result: RunResult,
 ): Readonly<Record<string, unknown>> {
+  return Object.freeze(withEscalation(liveView(record, result), result));
+}
+
+/** The envelope `resultView` starts from — everything but the escalation (#981). */
+function liveView(record: LiveRunLike, result: RunResult): Readonly<Record<string, unknown>> {
   return Object.freeze(
-    withEscalation(
-      withTemplate(
-        withArtifacts(
-          withPivots(
-            {
-              run_id: record.id,
-              name: record.name,
-              status: result.status,
-              outputs: structuredClone(result.outputs),
-              faults: Object.freeze([
-                ...result.faults,
-                ...result.sandboxFaults,
-                ...result.artifactFaults,
-              ]),
-              null_count: result.nullCount,
-              leaf_respawns: result.leafRespawns,
-              validation_retries: result.validationRetries,
-              cap_trips: result.capTrips,
-              engine_faults: result.engineFaults,
-              nodes_total: result.nodesTotal,
-              tokens_in: result.tokensIn,
-              tokens_out: result.tokensOut,
-              cache_read_tokens: result.cacheReadTokens,
-              cache_write_tokens: result.cacheWriteTokens,
-              reasoning_tokens: result.reasoningTokens,
-              forcing_fallbacks: result.forcingFallbacks,
-              pause_reason: result.pauseReason,
-              checkpoint: result.checkpoint,
-              token_budget: record.engine.budget.snapshot(),
-              null_rate: result.nullRate,
-              usage_uncertain_leaves: result.usageUncertainLeaves,
-              // #517 (M16-S2, ADR 0005): always a SUBSET of `usage_uncertain_leaves`
-              // above — a leaf whose usage includes an ESTIMATED spend from a
-              // call aborted in flight.
-              partial_leaves: result.partialLeaves,
-              sandbox_refusals: result.sandboxRefusals,
-              fault_kinds: [...result.faultKinds],
-            },
-            record.pivots ?? [],
-          ),
-          result.artifacts,
+    withTemplate(
+      withArtifacts(
+        withPivots(
+          {
+            run_id: record.id,
+            name: record.name,
+            status: result.status,
+            outputs: structuredClone(result.outputs),
+            faults: Object.freeze([
+              ...result.faults,
+              ...result.sandboxFaults,
+              ...result.artifactFaults,
+            ]),
+            null_count: result.nullCount,
+            leaf_respawns: result.leafRespawns,
+            validation_retries: result.validationRetries,
+            cap_trips: result.capTrips,
+            engine_faults: result.engineFaults,
+            nodes_total: result.nodesTotal,
+            tokens_in: result.tokensIn,
+            tokens_out: result.tokensOut,
+            cache_read_tokens: result.cacheReadTokens,
+            cache_write_tokens: result.cacheWriteTokens,
+            reasoning_tokens: result.reasoningTokens,
+            forcing_fallbacks: result.forcingFallbacks,
+            pause_reason: result.pauseReason,
+            checkpoint: result.checkpoint,
+            token_budget: record.engine.budget.snapshot(),
+            null_rate: result.nullRate,
+            usage_uncertain_leaves: result.usageUncertainLeaves,
+            // #517 (M16-S2, ADR 0005): always a SUBSET of `usage_uncertain_leaves`
+            // above — a leaf whose usage includes an ESTIMATED spend from a
+            // call aborted in flight.
+            partial_leaves: result.partialLeaves,
+            sandbox_refusals: result.sandboxRefusals,
+            fault_kinds: [...result.faultKinds],
+          },
+          record.pivots ?? [],
         ),
-        record.templateRef,
+        result.artifacts,
       ),
-      result,
+      record.templateRef,
     ),
   );
 }
