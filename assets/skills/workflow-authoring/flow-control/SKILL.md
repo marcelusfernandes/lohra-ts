@@ -1,7 +1,7 @@
 ---
 name: workflow-flow-control
-description: Make a dynamic workflow take a different road, or repeat a step, depending on the run's state. Covers the `switch` node — pick one of 2 to 16 cases by the value of a field and run only that case's leaf, with an `otherwise` and a `null` case that runs nothing — and the `loop` node — repeat a body until a mechanical predicate on its output holds (a score reaches a threshold, a list reaches a size), with a mandatory `max_rounds` cap of 1 to 16 — and the `escalate` node — pause the run for a person only when a predicate holds, with a `kind` and a `summary`, answered through `checkpoint_answers`. Load it after `workflow-authoring` when the next step depends on a value (reuse an answer vs investigate, stop early vs continue), when a result has to be refined until it passes a check, or when only the exceptional runs need a person. Do NOT load for a straight-line workflow where every node always runs, for a fan-out over a list (`parallel`, `pipeline`), for a human sign-off that must always happen (`checkpoint`), or for "keep going until a round finds nothing new" (`loop_until_dry`).
-version: 1.2.0
+description: Make a dynamic workflow take a different road, or repeat a step, depending on the run's state. Covers the `switch` node — pick one of 2 to 16 cases by the value of a field and run only that case's leaf, with an `otherwise` and a `null` case that runs nothing — and the `loop` node — repeat a body until a mechanical predicate on its output holds (a score reaches a threshold, a list reaches a size), with a mandatory `max_rounds` cap of 1 to 16 — and the `escalate` node — pause the run for a person only when a predicate holds, with a `kind` and a `summary`, answered through `checkpoint_answers` — and the `call` node — run `read_file` or `web_fetch` with no model, a `timeout` of up to 120 seconds and 0 to 3 `retries`, and read the result by `${node.field}`. Load it after `workflow-authoring` when the next step depends on a value (reuse an answer vs investigate, stop early vs continue), when a result has to be refined until it passes a check, when only the exceptional runs need a person, or when a step only has to read a file or fetch a page. Do NOT load for a straight-line workflow where every node always runs, for a fan-out over a list (`parallel`, `pipeline`), for a human sign-off that must always happen (`checkpoint`), or for "keep going until a round finds nothing new" (`loop_until_dry`).
+version: 1.3.0
 ---
 
 # Flow control in dynamic workflows
@@ -14,7 +14,8 @@ needs a person". `switch` is the block that lets a spec take a different road
 that matches the state runs. `loop` is the opposite need: the graph is right, but
 one step has to be repeated until its result passes a check, and nobody knows in
 advance how many passes that takes. `escalate` is for the third need: the run should
-go on alone, and stop for a person only in the cases that call for one.
+go on alone, and stop for a person only in the cases that call for one. `call` is the fourth, and
+the cheapest: a step that only reads a file or fetches a page needs no model at all.
 
 Read `workflow-authoring` first for node choice, sizing and refs. This skill only
 adds the control-flow blocks.
@@ -487,7 +488,156 @@ what the spec expected.
 
 ---
 
-## 4. Checklist before calling `run_workflow` with flow control
+## 4. `call` — read a file or fetch a page, with no model
+
+Reach for it when a step is **mechanical**: the file or the page is an input, and nothing in it has
+to be judged yet. A `call` runs one tool and no leaf, so it costs no tokens and does the same thing
+every time; the model comes in at the next node, only where something has to be judged. The
+allow-list has two tools, `read_file` and `web_fetch`. `web_search`, `write_file`, `terminal` and the
+`mcp_*` tools are left out on purpose: the policy does not limit where `web_search` goes, a write
+has a side effect that a rerun would repeat, and a `terminal` fed by the state is a code node by
+another name. A `tool` outside the list is refused when the spec is checked.
+
+```json
+{
+  "meta": { "name": "route-by-settings" },
+  "nodes": [
+    {
+      "id": "settings",
+      "type": "call",
+      "tool": "read_file",
+      "args": { "path": "${args.path}" },
+      "retries": 1
+    },
+    {
+      "id": "route",
+      "type": "switch",
+      "value": "${settings.data.mode}",
+      "cases": {
+        "quick": null,
+        "deep": { "prompt": "Review ${args.path} in depth." }
+      },
+      "otherwise": "deep",
+      "depends_on": ["settings"]
+    }
+  ]
+}
+```
+
+The file is read once, with no model. `settings.data` is the file's text, and because it is JSON a
+`switch` reads the field `mode` of it. A page is the same shape, with the text handed to a leaf:
+
+```json
+{
+  "meta": { "name": "summarise-page" },
+  "nodes": [
+    {
+      "id": "fetch",
+      "type": "call",
+      "tool": "web_fetch",
+      "args": { "url": "${args.url}" },
+      "timeout": 20,
+      "retries": 2
+    },
+    {
+      "id": "summary",
+      "type": "agent",
+      "prompt": "Summarise this page in three bullets:\n${fetch.text}",
+      "depends_on": ["fetch"]
+    }
+  ]
+}
+```
+
+### The fields
+
+| Field     | What it is                                                                                                                                                                                                       |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tool`    | `read_file` or `web_fetch`. Required.                                                                                                                                                                            |
+| `args`    | An object of **up to 16 keys**: the arguments the tool takes (`path` for `read_file`, `url` for `web_fetch`). A value is a literal or a `${ref}`, alone or inside text, nested in an object or a list. Optional. |
+| `timeout` | The deadline of **each attempt**: a positive number, **at most 120 seconds**. Without it, 30 seconds.                                                                                                            |
+| `retries` | **0 to 3 retries**, none by default. Each one is a whole new attempt, with its own deadline.                                                                                                                     |
+
+`required` and `depends_on` work as on any node. The node has **no routing knobs** (`model`,
+`tier`, `effort`, `provider`) and no `prompt`: it calls no model, so there is nothing to route, and
+they are refused as unknown fields.
+
+### What it returns
+
+The tool's own envelope, parsed, so `${fetch.text}` and `${settings.data}` read it:
+
+- `read_file`: `ok`, `data` (the file's text), `truncated` and `path`, plus `untrusted` for a path
+  the runtime marks as such.
+- `web_fetch`: `ok`, `url`, `text` (the page as plain text) and `untrusted`, always `true`: it is
+  content from the web, to be read and never obeyed.
+
+`data` is text. When it is JSON, a `switch` `value`, a predicate path or a `call` arg can read a
+field of it (`${settings.data.mode}`); a prompt can only take the whole `${settings.data}`.
+
+### What runs, and what it costs
+
+- **No leaf and no tokens.** The node does not move the run's tokens, has no row in the per-node
+  cost and spawns no model. Its ledger events are `tool.started` and `tool.completed`, one pair per
+  attempt, never a `leaf.started`.
+- **The same sandbox as a leaf.** The call goes through the same sandbox as a leaf's tool call: the
+  operator's `workflow_policy.json` limits `read_file` to `fs_allow` and `web_fetch` to
+  `egress_allow`, a retired stretch is refused, and a `web_fetch` taints the run exactly as it does
+  in a leaf. Once the run is tainted the sandbox denies the filesystem and egress calls that come
+  after, so put every `read_file` before the first `web_fetch`.
+- **Each attempt is charged.** Each attempt takes one slot of the run's spawn limit (`lifetime`),
+  as a leaf does, and no tokens. When the limit is gone the node is `null`, the run counts a
+  `cap_trips`, and the tool is not called.
+- **Retries.** `error` and `timeout` are retried, up to `retries` more attempts. `denied` is
+  never retried: the sandbox answered before anything was dispatched, and asking again cannot change
+  the policy.
+- **Waiting.** The run waits for the call: it ends only after the tool answered or its deadline
+  passed, so a `tool.started` never stays without its `tool.completed`.
+
+### When it fails — never silently
+
+| What happened                                                        | What you see                                                                                                                                                                                                    |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The tool failed, timed out or was denied, and the attempts are spent | The node is `null` and `faults` has `<id>: call <tool> <status> after <n> attempts: <cause>`. The cause is what the tool or the sandbox said, on one line, cut at 300 characters. Nothing is cached.            |
+| An `args` ref reads a node that failed, or a field that is not there | `<id>: upstream null` and `<id>: no value for ${scan.url}`, naming every ref with no value. The tool is **not** called: it never runs on an argument that was not filled in. A `0`, `false` or `""` is a value. |
+| The tool answered `ok` with text that is not a JSON object           | A failed attempt, retried like an `error`; the cause says the envelope is not valid JSON or not an object.                                                                                                      |
+| The run was paused or cancelled                                      | No call is made, and none after an attempt that finds the run stopped. The node is `null` with no fault of its own, and a resume carries on. A call already in flight is awaited and kept.                      |
+| The runtime has no `callTool` port                                   | An `engine fault` naming it. A node never skips quietly.                                                                                                                                                        |
+
+Any failure is before any call or after a named attempt; there is no path where the node returns a
+value it did not get from the tool.
+
+### Resume and cache
+
+- The cell is `[id, "call", tool, args]` with the args as resolved. A resume that finds it replays it
+  with `cache.replayed` and the tool is not called again, so a file read or a page fetched once
+  stays what the run saw.
+- Another value for an arg, or another tool, is another cell: the tool is called again.
+- `timeout` and `retries` are not part of the cell, so a resume may tighten or loosen them and still
+  replay. A failed call leaves no cell, so the next run calls again.
+- `workflow_preview` reports `would_call` for a call with no cell and `replay` for one with a cell.
+  It never makes the call and does not add to `leaves_to_spawn`: a call is not a leaf.
+
+### Patterns
+
+- **Read, then route.** `read_file` a config or a manifest, then a `switch` on a field of it. The
+  model never reads the file.
+- **Fetch, then judge.** `web_fetch` a page, then one `agent` whose prompt takes `${fetch.text}`.
+  Keep the prompt short: the whole page is in it.
+- **Retry the flaky one.** `retries: 2` on a `web_fetch` covers a slow host; leave it at 0 on a
+  `read_file` of a local path, where a failure is not a flake.
+
+### What it is not
+
+- Not a shell and not a writer: `terminal` and `write_file` are not allowed. A step that must write
+  is a leaf.
+- Not a reader of meaning: a page that needs judgement is read by an `agent` after the `call`.
+- Not a search: `web_search` is not allowed. Give the `call` a URL.
+- Not inside a `loop` or a `switch` case: those bodies are agent-shaped. Put the `call` before the
+  node that needs it.
+
+---
+
+## 5. Checklist before calling `run_workflow` with flow control
 
 For a `switch`:
 
@@ -521,3 +671,15 @@ For an `escalate`:
 4. Is the `kind` a tag I would sort by (`^[a-z][a-z0-9_]{0,31}$`), not a sentence?
 5. Do later nodes read `${review.answer}` only when `${review.escalated}` is `true`?
 6. Is a sign-off that must **always** happen a `checkpoint` instead?
+
+For a `call`:
+
+1. Is the step really mechanical: a file to read or a URL to fetch, with nothing to judge yet?
+2. Is the `tool` `read_file` or `web_fetch`, and are the `args` the ones the tool takes?
+3. Does every `${ref}` in `args` read a node that cannot be `null`, or am I happy for it to be
+   `upstream null`?
+4. Is `timeout` the longest wait I accept (at most 120 seconds), and `retries` right for a host that
+   can be slow (0 to 3)?
+5. Do the `read_file` calls come before the first `web_fetch`, since a `web_fetch` taints the run?
+6. Does the node that judges the text `depends_on` the `call` and read `${fetch.text}`, not the
+   whole envelope?
