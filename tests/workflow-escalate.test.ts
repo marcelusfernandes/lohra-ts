@@ -560,7 +560,8 @@ describe("a failure never skips the person (#981, round 2)", () => {
   it("names every ref that is missing, once each", async () => {
     const summary = "${scan.a} then ${scan.b} and again ${scan.a}";
     const result = await run(new ScriptedRuntime([{ risk: 9 }]), chain({ summary }), ARGS);
-    expect(result.faults[0]).toContain("no value for ${scan.a}, ${scan.b}");
+    // At the END of the fault: a repeated ${scan.a} would follow it.
+    expect(result.faults[0]).toMatch(/no value for \$\{scan\.a\}, \$\{scan\.b\}$/u);
   });
 
   it("the answer resumes it: the output keeps the marked template, and the dependents run", async () => {
