@@ -283,10 +283,13 @@ describe("an answer completes the run, once (#981)", () => {
         answer: "approved",
       });
 
-      const again = h.newService().start(null, {}, { resumeRunId: runId });
+      // A third stretch, with no answer at all: the stored cell answers, nothing pauses or spawns.
+      const later = h.newService();
+      const again = later.start(null, {}, { resumeRunId: runId });
       if ("error" in again) throw new Error(again.error);
-      const replayed = (await h.newService().status(runId, true)) as Record<string, unknown>;
+      const replayed = (await later.status(runId, true)) as Record<string, unknown>;
       expect(replayed.status).toBe("complete");
+      expect((replayed.outputs as Record<string, unknown>).review).toEqual(outputs.review);
       expect(h.spawned).toHaveLength(2);
     } finally {
       h.close();

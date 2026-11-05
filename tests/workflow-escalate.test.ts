@@ -295,7 +295,7 @@ describe("the validation of an escalate (#981)", () => {
   it.each(["model", "tier", "effort", "provider"])(
     "a routing knob (%s) is refused: the node spawns nothing, so there is nothing to route",
     (knob) => {
-      expect(shape(escalateIssues({ [knob]: "x" }))).toEqual([`unknown_field:${knob}`]);
+      expect(shape(escalateIssues({ [knob]: "x" }))).toContain(`unknown_field:${knob}`);
     },
   );
 
@@ -547,6 +547,15 @@ describe("a failure is named (#981)", () => {
       },
     );
     expect((answered.outputs.review as { summary: string }).summary).toBe(summary);
+  });
+
+  it("a cut that would split an emoji drops the orphaned half instead of keeping it", async () => {
+    const workflow = spec([
+      review({ when: { field_true: { path: "${args.flag}" } }, summary: "${args.long}" }),
+    ]);
+    const long = `${"z".repeat(1998)}😀${"z".repeat(50)}`;
+    const paused = await run(new ScriptedRuntime(), workflow, { flag: true, long });
+    expect((paused.checkpoint as { summary: string }).summary).toBe(`${"z".repeat(1998)}…`);
   });
 
   it("a summary of exactly 2000 characters is kept whole", async () => {

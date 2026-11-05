@@ -16,6 +16,8 @@ export const ESCALATE_KIND = /^[a-z][a-z0-9_]{0,31}$/u;
  * must treat them alike (the answer-key collision scan, the durable resume guard) cannot drift.
  */
 export const ANSWER_NODE_TYPES: ReadonlySet<string> = new Set(["checkpoint", "escalate"]);
+/** The `pause_reason` of a run an `escalate` stopped; the ledger's `node.paused` carries it too. */
+export const ESCALATED_PAUSE = "escalated";
 
 const COMMON = ["required", "depends_on"] as const;
 export const ROUTING_FIELDS = ["model", "tier", "effort", "provider"] as const;

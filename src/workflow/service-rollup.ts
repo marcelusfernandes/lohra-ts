@@ -10,6 +10,7 @@ import type { Budget } from "./budget.js";
 import type { RunArtifact, RunResult } from "./accounting.js";
 import type { AuditedChildRuntime } from "./audit-runtime.js";
 import type { ProgressSnapshot } from "./progress.js";
+import { ESCALATED_PAUSE } from "./nodes.js";
 import type { RouteOverride } from "./route-override.js";
 import { ROUTE_FAULT_REASON } from "./route-faults.js";
 import type { WorkflowSpec } from "./types.js";
@@ -25,8 +26,8 @@ export { nextPivots, artifactsOf } from "./route-override.js";
 // re-exported from service.ts (`export { … } from "./service-rollup.js"`)
 // so `commands/workflow.ts` and existing tests keep importing them from
 // `service.js` unchanged.
+export { ESCALATED_PAUSE };
 export const CHECKPOINT_PAUSE = "checkpoint";
-export const ESCALATED_PAUSE = "escalated";
 export const TOKEN_BUDGET_PAUSE = "token_budget_exhausted";
 export const USER_PAUSE = "user_requested";
 export const TOKEN_BUDGET_HINT =
@@ -37,11 +38,17 @@ export const CHECKPOINT_HINT =
   'run_workflow(resume_run_id=..., checkpoint_answers={"<node_id>": ' +
   '<answer>}) — a nested checkpoint\'s node_id is scoped (e.g. "sub.confirm"); ' +
   "a checkpoint that declared a 'default' takes it if you resume without one — if the payload carries 'rename_hint', resuming with the SAME node_id only pauses again — rename one of the two checkpoint ids in the spec instead";
-export const ESCALATED_HINT = "not implemented: ESCALATED_HINT";
-/** Stub: the real guard lands with the green commit. */
-export function isAnswerPause(_reason: string | null): boolean {
-  throw new Error("not implemented: isAnswerPause");
-}
+export const ESCALATED_HINT =
+  "this run is paused for your review — an escalate node's condition held. Read the " +
+  "escalation {node_id, kind, summary}, decide, and answer with " +
+  'run_workflow(resume_run_id=..., checkpoint_answers={"<node_id>": <answer>}) — a nested ' +
+  'escalate\'s node_id is scoped (e.g. "sub.review"). There is no default: nothing will resume it ' +
+  "on its own, and a resume without the answer is refused — if the escalation carries " +
+  "'rename_hint', resuming with the SAME node_id only pauses again — rename one of the two ids in " +
+  "the spec instead";
+/** Whether a paused run waits for a human answer in `checkpoint_answers`: a checkpoint or an escalation. */
+export const isAnswerPause = (reason: string | null): boolean =>
+  reason === CHECKPOINT_PAUSE || reason === ESCALATED_PAUSE;
 export const USER_PAUSE_HINT =
   "you paused this run; nothing will resume it on its own — its " +
   "finished nodes are kept, so run_workflow(resume_run_id=...) " +
@@ -97,6 +104,17 @@ function withPivots(
   return pivots.length === 0 ? view : { ...view, pivots: [...pivots] };
 }
 
+/** #981: a run an `escalate` stopped shows its payload as `escalation`, with the hint, in the live
+ * view as `pauseFields` does in the durable one — the generic `checkpoint` key still carries it. */
+function withEscalation(
+  view: Readonly<Record<string, unknown>>,
+  result: RunResult,
+): Readonly<Record<string, unknown>> {
+  return result.pauseReason === ESCALATED_PAUSE
+    ? { ...view, escalation: result.checkpoint, hint: ESCALATED_HINT }
+    : view;
+}
+
 /** #463: molde `withPivots` — omitted (never a bare `[]`) for a run whose
  * leaves never wrote anything. */
 function withArtifacts(
@@ -133,6 +151,9 @@ export function pauseFields(view: PausedRunLike): Readonly<Record<string, unknow
   } else if (view.pause_reason === CHECKPOINT_PAUSE) {
     fields.checkpoint = view.checkpoint;
     fields.hint = CHECKPOINT_HINT;
+  } else if (view.pause_reason === ESCALATED_PAUSE) {
+    fields.escalation = view.checkpoint;
+    fields.hint = ESCALATED_HINT;
   } else if (view.pause_reason === USER_PAUSE) {
     fields.hint = USER_PAUSE_HINT;
   } else if (view.pause_reason === ROUTE_FAULT_REASON) fields.lesson = view.checkpoint;
@@ -149,48 +170,51 @@ export function resultView(
   result: RunResult,
 ): Readonly<Record<string, unknown>> {
   return Object.freeze(
-    withTemplate(
-      withArtifacts(
-        withPivots(
-          {
-            run_id: record.id,
-            name: record.name,
-            status: result.status,
-            outputs: structuredClone(result.outputs),
-            faults: Object.freeze([
-              ...result.faults,
-              ...result.sandboxFaults,
-              ...result.artifactFaults,
-            ]),
-            null_count: result.nullCount,
-            leaf_respawns: result.leafRespawns,
-            validation_retries: result.validationRetries,
-            cap_trips: result.capTrips,
-            engine_faults: result.engineFaults,
-            nodes_total: result.nodesTotal,
-            tokens_in: result.tokensIn,
-            tokens_out: result.tokensOut,
-            cache_read_tokens: result.cacheReadTokens,
-            cache_write_tokens: result.cacheWriteTokens,
-            reasoning_tokens: result.reasoningTokens,
-            forcing_fallbacks: result.forcingFallbacks,
-            pause_reason: result.pauseReason,
-            checkpoint: result.checkpoint,
-            token_budget: record.engine.budget.snapshot(),
-            null_rate: result.nullRate,
-            usage_uncertain_leaves: result.usageUncertainLeaves,
-            // #517 (M16-S2, ADR 0005): always a SUBSET of `usage_uncertain_leaves`
-            // above — a leaf whose usage includes an ESTIMATED spend from a
-            // call aborted in flight.
-            partial_leaves: result.partialLeaves,
-            sandbox_refusals: result.sandboxRefusals,
-            fault_kinds: [...result.faultKinds],
-          },
-          record.pivots ?? [],
+    withEscalation(
+      withTemplate(
+        withArtifacts(
+          withPivots(
+            {
+              run_id: record.id,
+              name: record.name,
+              status: result.status,
+              outputs: structuredClone(result.outputs),
+              faults: Object.freeze([
+                ...result.faults,
+                ...result.sandboxFaults,
+                ...result.artifactFaults,
+              ]),
+              null_count: result.nullCount,
+              leaf_respawns: result.leafRespawns,
+              validation_retries: result.validationRetries,
+              cap_trips: result.capTrips,
+              engine_faults: result.engineFaults,
+              nodes_total: result.nodesTotal,
+              tokens_in: result.tokensIn,
+              tokens_out: result.tokensOut,
+              cache_read_tokens: result.cacheReadTokens,
+              cache_write_tokens: result.cacheWriteTokens,
+              reasoning_tokens: result.reasoningTokens,
+              forcing_fallbacks: result.forcingFallbacks,
+              pause_reason: result.pauseReason,
+              checkpoint: result.checkpoint,
+              token_budget: record.engine.budget.snapshot(),
+              null_rate: result.nullRate,
+              usage_uncertain_leaves: result.usageUncertainLeaves,
+              // #517 (M16-S2, ADR 0005): always a SUBSET of `usage_uncertain_leaves`
+              // above — a leaf whose usage includes an ESTIMATED spend from a
+              // call aborted in flight.
+              partial_leaves: result.partialLeaves,
+              sandbox_refusals: result.sandboxRefusals,
+              fault_kinds: [...result.faultKinds],
+            },
+            record.pivots ?? [],
+          ),
+          result.artifacts,
         ),
-        result.artifacts,
+        record.templateRef,
       ),
-      record.templateRef,
+      result,
     ),
   );
 }

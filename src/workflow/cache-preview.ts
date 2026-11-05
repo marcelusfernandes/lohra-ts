@@ -69,7 +69,9 @@ import {
   durableFromRow,
   TOKEN_BUDGET_PAUSE,
 } from "./service.js";
+import { escalateDidNotFire } from "./flow-escalate.js";
 import { switchTakesNoLeaf } from "./flow-switch.js";
+import { ESCALATED_PAUSE } from "./nodes.js";
 import { validateSpec } from "./schema.js";
 import { isValidationError, type Node, type WorkflowSpec } from "./types.js";
 
@@ -89,6 +91,7 @@ export type PreviewOutcome =
   | "replay"
   | "recompute"
   | "checkpoint_pending"
+  | "escalation_pending"
   | "upstream_missing"
   | "token_budget_exhausted"
   | "nested"
@@ -329,6 +332,17 @@ function classifyNode(node: Node, ctx: ClassifyContext): PreviewNodeOutcome {
     return { node_id: node.id, type: node.type, outcome: "checkpoint_pending" };
   }
   const output = outputs[node.id];
+  // #981: only the escalate that stopped the run is pending — its output is the `null` the pause
+  // left behind. One the run never reached has no key at all (a later one may not even fire), and
+  // one that failed has its own `upstream null` fault, which is `upstream_missing` below.
+  if (
+    node.type === "escalate" &&
+    pauseReason === ESCALATED_PAUSE &&
+    output === null &&
+    !faults.includes(`${node.id}: upstream null`)
+  ) {
+    return { node_id: node.id, type: node.type, outcome: "escalation_pending" };
+  }
   // #515: a `parallel` whose `branches` never resolved to an array (e.g. a
   // template over a failed upstream) is checked HERE, ahead of
   // `token_budget_exhausted` below — the same precedence `agent`'s own
@@ -344,8 +358,9 @@ function classifyNode(node: Node, ctx: ClassifyContext): PreviewNodeOutcome {
     return { node_id: node.id, type: node.type, outcome: "upstream_missing" };
   }
   // #979: a `switch` that took a `null` case ran — and had no leaf to replay or pay, so it
-  // is `no_leaves`, ahead of a token-budget pause that never touched it.
-  if (switchTakesNoLeaf(node, output)) {
+  // is `no_leaves`, ahead of a token-budget pause that never touched it. #981: so is an
+  // `escalate` whose `when` did not hold.
+  if (switchTakesNoLeaf(node, output) || escalateDidNotFire(node, output)) {
     // A named binding, not the literal return: the `parallel` return below is the unique
     // anchor of mutant P9 (`supervision-mutants.ts`), and an identical line here would make it
     // ambiguous.

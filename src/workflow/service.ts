@@ -15,7 +15,7 @@ import {
 import { WorkflowEngine } from "./engine.js";
 import { AutoResumeScheduler, LeaseHeartbeat, type Timer } from "./durability.js";
 import {
-  CHECKPOINT_PAUSE,
+  isAnswerPause,
   liveRuntimeOf,
   nextPivots,
   progressJsonOf,
@@ -561,18 +561,18 @@ export class WorkflowService {
       !explicitSpec &&
       priorView !== null &&
       priorView.status === "paused" &&
-      priorView.pause_reason === CHECKPOINT_PAUSE
+      isAnswerPause(priorView.pause_reason)
     ) {
       const pending = priorView.checkpoint ?? {};
       const nodeId = pending.node_id;
       if (typeof nodeId === "string" && nodeId !== "" && !(nodeId in answers)) {
         if ("default" in pending) answers[nodeId] = pending.default;
         else {
-          const promptText = typeof pending.prompt === "string" ? pending.prompt : "";
-          const nodeIdText: string = typeof nodeId === "string" ? nodeId : JSON.stringify(nodeId);
+          const asked = pending.prompt ?? pending.summary; // a checkpoint's prompt, an escalation's summary
+          const promptText = typeof asked === "string" ? asked : "";
           return Object.freeze({
             error:
-              `workflow run '${resumeRunId as string}' is paused at checkpoint '${nodeIdText}' ` +
+              `workflow run '${resumeRunId as string}' is paused at ${priorView.pause_reason === "escalated" ? "escalation" : "checkpoint"} '${nodeId}' ` +
               `and is waiting for an answer: ${promptText}\n` +
               `    e.g. checkpoint_answers: {"${nodeId}": "<your answer>"}`,
           });

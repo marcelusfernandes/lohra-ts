@@ -543,9 +543,11 @@ describe("the ledger records the escalation, with no leaf and no cell of its own
       expect(paused[0]?.data.reason).toBe("escalated");
       expect(paused[0]?.identity.node_path).toEqual(["review"]);
 
+      // The lookup misses (as a checkpoint's does), but nothing is stored before the answer.
       const events = eventsOf(h, runId, "review");
       expect(ofType(events, "leaf.started")).toEqual([]);
-      expect(events.filter((event) => event.type.startsWith("cache."))).toEqual([]);
+      expect(ofType(events, "cache.stored")).toEqual([]);
+      expect(ofType(events, "cache.missed")).toHaveLength(1);
       expect(ofType(events, "workflow.node").at(-1)?.data).toMatchObject({
         state: "null",
       });

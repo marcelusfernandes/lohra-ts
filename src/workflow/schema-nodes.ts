@@ -1,4 +1,10 @@
-import { MAX_GATE_ATTEMPTS, MAX_LOOP_ROUNDS, MAX_SWITCH_CASES } from "./nodes.js";
+import {
+  ESCALATE_KIND,
+  MAX_ESCALATE_SUMMARY,
+  MAX_GATE_ATTEMPTS,
+  MAX_LOOP_ROUNDS,
+  MAX_SWITCH_CASES,
+} from "./nodes.js";
 import { pathRef, validatePredicate } from "./predicates.js";
 import { findRefs, isValidRef } from "./refs.js";
 import { SpecIssue, type Node } from "./types.js";
@@ -241,10 +247,47 @@ export function validateRefTargets(
   }
 }
 
-/** Stub: the real validation lands with the green commit. */
-export function validateEscalate(node: Node, _issues: SpecIssue[]): void {
+/**
+ * `escalate` (#981): `when` is a predicate (`validatePredicate`, the same table `loop.until`
+ * uses; no `last`, no locals of its own), `kind` is a short lowercase tag the reviewer sorts the
+ * escalation by (`ESCALATE_KIND`; no `${ref}` can match it, so it is never templated), and
+ * `summary` is the text a person reads, 1 to `MAX_ESCALATE_SUMMARY` characters, where a `${ref}`
+ * is allowed (it is cut at the same cap once the refs are filled in). The node has no routing
+ * knobs — it spawns nothing — and no `default`: an escalation always waits for a person, and
+ * `schema.ts` refuses both as unknown fields because `NODE_SPECS.escalate` does not list them. A
+ * missing field is `missing_field`, reported once by `schema.ts`.
+ */
+export function validateEscalate(node: Node, issues: SpecIssue[]): void {
   if (node.type !== "escalate") return;
-  throw new Error("not implemented: validateEscalate");
+  const { when, kind, summary } = node.fields;
+  if (when !== undefined) issues.push(...validatePredicate(when, node.id, "when"));
+  if (kind !== undefined && !(typeof kind === "string" && ESCALATE_KIND.test(kind))) {
+    issue(
+      issues,
+      "field_value",
+      `'kind' must be a short lowercase tag matching ${ESCALATE_KIND.source} — the class of case the reviewer sorts by, never text`,
+      node.id,
+      "kind",
+      'kind: "high_risk"',
+    );
+  }
+  if (
+    summary !== undefined &&
+    !(
+      typeof summary === "string" &&
+      summary.trim() !== "" &&
+      summary.length <= MAX_ESCALATE_SUMMARY
+    )
+  ) {
+    issue(
+      issues,
+      "field_value",
+      `'summary' must be 1 to ${String(MAX_ESCALATE_SUMMARY)} characters of text a person reads (a \${ref} is allowed; the text is cut at the same cap once its refs are filled in)`,
+      node.id,
+      "summary",
+      'summary: "Risk ${scan.risk} on ${args.text}"',
+    );
+  }
 }
 
 export const NODE_VALIDATORS: ReadonlyMap<string, NodeValidator> = new Map([
