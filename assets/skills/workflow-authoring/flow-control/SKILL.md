@@ -404,6 +404,8 @@ a person.
 - `when` holds and a person answered: `{escalated: true, kind, summary, answer}`. The answer can
   be any JSON value, `false` and `""` included.
 - `when` holds and nobody has answered: the node is `null` and the run ends `paused`.
+- `when` cannot be checked, or the `summary` cannot be written: it fails **closed** — the run
+  ends `paused` as above, never past the node (see "When it fails").
 
 A later node can read `${review.escalated}` and, once it is `true`, `${review.answer}`. A `switch`
 on `${review.escalated}` is the clean way to use the answer only when there is one.
@@ -438,12 +440,19 @@ answering the wrong node. If the scoped key is itself a root node's id, the repl
 
 ### When it fails — never silently
 
-| What happened                                          | What you see                                                                                                                                        |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A node that `when` reads failed (its root is `null`)   | `<id>: upstream null`; the node is `null` and the run does **not** pause. A root that is there but lacks the field is only a value, not this fault. |
-| The `summary` reads a `null`                           | `<id>: upstream null`, once `when` holds; the node is `null` and the run does not pause.                                                            |
-| The summary is longer than 2000 characters once filled | It is cut at 2000 characters and ends with `…`, in the reply and in the output alike: it is cut, never dropped.                                     |
-| The answer key collides with another node's            | The pause fault names the collision and the reply's `node_id` is the scoped key to use.                                                             |
+| What happened                                                                         | What you see                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A node that `when` reads failed (its root is `null`), or a root the run does not have | The condition cannot be checked, so it is **held to be true** and the run pauses `escalated`. The summary opens with `[condition not evaluated: '<node>' has no value]`, and `faults` has `<id>: upstream null` plus the pause fault, which names the node. A root that is there but lacks the field is only a value (`gte` on nothing does not hold): that is not this case. |
+| The `summary` reads a value that is not there (a missing field, a `null`)             | The run pauses `escalated`. The summary goes out as the raw template behind `[unrendered]` — `[unrendered] Risk ${scan.risk}: ${scan.reason}` — and the pause fault names every `${ref}` with no value (`no value for ${scan.reason}`). Nodes that `depends_on` the escalate do not run.                                                                                      |
+| The summary renders blank                                                             | The run pauses `escalated`, with the raw template behind `[empty summary]`; the pause fault says `summary rendered empty`. It never goes out with an empty summary.                                                                                                                                                                                                           |
+| The summary is longer than 2000 characters once filled                                | It is cut at 2000 characters and ends with `…`, in the reply and in the output alike: it is cut, never dropped.                                                                                                                                                                                                                                                               |
+| The answer key collides with another node's                                           | The pause fault names the collision and the reply's `node_id` is the scoped key to use.                                                                                                                                                                                                                                                                                       |
+
+The rule behind the first three rows: an `escalate` exists to put a person in front of a decision,
+so a failure of its own **fails closed** — the run stops for a person, with the marker in the
+summary saying what could not be read, instead of going on without review. The person's answer
+is cached with the marked summary and the run continues; read the marker to know the case was not
+what the spec expected.
 
 ### Resume and cache
 
