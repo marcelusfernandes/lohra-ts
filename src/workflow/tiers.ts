@@ -7,7 +7,10 @@ export interface Tier {
   readonly provider?: string;
   readonly effort?: string;
 }
-export type TierMap = Readonly<Partial<Record<ModelTierName, Tier>>>;
+export type TierMap = Readonly<Partial<Record<ModelTierName, Tier>>> & {
+  /** #987: the tier a node or sub-agent with no model of its own falls to. */
+  readonly execution?: ModelTierName;
+};
 
 /** The operator tier map, read from the operator home per launch (#234). */
 export const OPERATOR_TIERS_FILE = "workflow_tiers.json";
@@ -145,6 +148,11 @@ export function readTiers(path: string): TierMap | TiersError {
     result[name] = tier;
   }
   return result;
+}
+
+export function executionTier(tiers: TierMap): never {
+  void tiers;
+  throw new Error("not implemented: executionTier");
 }
 
 export function writeTiers(path: string, tiers: TierMap): void {

@@ -30,6 +30,7 @@ import {
   retryAfterSeconds,
 } from "../transports/index.js";
 import { ChildConversationRepository } from "./child-repository.js";
+import type { TierMap, TiersError } from "../workflow/tiers.js";
 import type { ChildRunner, CollectResult, SpawnConfig } from "./core.js";
 import { NonClosingTransport } from "./non-closing-transport.js";
 import { parseOutcomeSentinel } from "./outcome-sentinel.js";
@@ -55,6 +56,8 @@ export interface CreateChildRunnerOptions {
    * too. Absent means the built-in price table only, same as the parent
    * when no pricing.json exists. */
   readonly pricingOverrides?: ConversationRuntimeOptions["pricingOverrides"];
+  /** #987: the operator tier map, read per spawn. */
+  readonly tiers?: () => TierMap | TiersError;
 }
 
 function nonEmpty(value: string | undefined): string | null {
