@@ -11,6 +11,7 @@ import {
   routingIdentity,
   strictResolve,
 } from "./engine-utils.js";
+import { runLoopUntil } from "./flow-loop.js";
 import { runSwitch } from "./flow-switch.js";
 import type { CausalContext, ChildRuntime } from "./runtime.js";
 import type { TierMap } from "./tiers.js";
@@ -150,4 +151,5 @@ export const FLOW_STRATEGIES: Readonly<Record<string, FlowStrategy>> = Object.fr
   completeness_check: runCompleteness,
   checkpoint: (deps, node, context) => Promise.resolve(runCheckpoint(deps, node, context)),
   switch: runSwitch,
+  loop: runLoopUntil,
 });

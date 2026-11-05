@@ -143,9 +143,16 @@ export function validateSwitch(node: Node, issues: SpecIssue[]): void {
   }
 }
 
+/** `loop` (#980). Stub until the green commit. */
+export function validateLoop(node: Node, _issues: SpecIssue[]): void {
+  if (node.type !== "loop") return;
+  throw new Error("not implemented: validateLoop");
+}
+
 export const NODE_VALIDATORS: ReadonlyMap<string, NodeValidator> = new Map([
   ["gate", validateGate],
   ["switch", validateSwitch],
+  ["loop", validateLoop],
 ]);
 
 /** Runs the validator of `node.type`, if that type has one. */
