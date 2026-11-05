@@ -18,7 +18,7 @@ lohra --version
 lohra doctor
 ```
 
-`lohra-ts` is a public npm package. `0.0.12` was published on 2026-09-14. This git cut is `0.1.0`. Pushing the tag after merge is what publishes that version and opens the GitHub Release ([docs/release.md](docs/release.md)).
+Current version: `0.1.0`. Changes since `0.0.12` are in the CHANGELOG.
 
 Windows is in progress and is not a supported platform. A green Linux run is not a Windows promise. What the runtime already does with a Windows home, credentials, and generated images is in [docs/windows-home.md](docs/windows-home.md).
 
