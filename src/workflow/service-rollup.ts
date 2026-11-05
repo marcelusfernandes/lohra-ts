@@ -26,6 +26,7 @@ export { nextPivots, artifactsOf } from "./route-override.js";
 // so `commands/workflow.ts` and existing tests keep importing them from
 // `service.js` unchanged.
 export const CHECKPOINT_PAUSE = "checkpoint";
+export const ESCALATED_PAUSE = "escalated";
 export const TOKEN_BUDGET_PAUSE = "token_budget_exhausted";
 export const USER_PAUSE = "user_requested";
 export const TOKEN_BUDGET_HINT =
@@ -36,6 +37,11 @@ export const CHECKPOINT_HINT =
   'run_workflow(resume_run_id=..., checkpoint_answers={"<node_id>": ' +
   '<answer>}) — a nested checkpoint\'s node_id is scoped (e.g. "sub.confirm"); ' +
   "a checkpoint that declared a 'default' takes it if you resume without one — if the payload carries 'rename_hint', resuming with the SAME node_id only pauses again — rename one of the two checkpoint ids in the spec instead";
+export const ESCALATED_HINT = "not implemented: ESCALATED_HINT";
+/** Stub: the real guard lands with the green commit. */
+export function isAnswerPause(_reason: string | null): boolean {
+  throw new Error("not implemented: isAnswerPause");
+}
 export const USER_PAUSE_HINT =
   "you paused this run; nothing will resume it on its own — its " +
   "finished nodes are kept, so run_workflow(resume_run_id=...) " +

@@ -202,6 +202,30 @@ describe("run_workflow: closed node list and skill pointer survive the diet (#58
   });
 });
 
+// #981 (S4): o `escalate` pausa pelo mesmo canal do `checkpoint`, e o modelo só descobre isso
+// pelas descrições. Elas mudam DENTRO das linhas que já existiam (o arquivo está no teto de 800
+// linhas) e o catálogo continua no orçamento.
+describe("the escalate pause is told where the model looks for it (#981)", () => {
+  const answers = (): string => {
+    const parameters = findTool("run_workflow").function.parameters as {
+      properties: { checkpoint_answers: { description: string } };
+    };
+    return parameters.properties.checkpoint_answers.description;
+  };
+
+  it("checkpoint_answers answers the 'escalate' nodes as well as the 'checkpoint' ones", () => {
+    expect(answers()).toMatch(/'checkpoint' and 'escalate' nodes/u);
+    expect(answers()).toContain("SCOPED");
+  });
+
+  it("workflow_status says an escalate pause carries {node_id, kind, summary}, with reason 'escalated'", () => {
+    const d = descriptionOf("workflow_status");
+    expect(d).toContain("escalated");
+    expect(d).toContain("{node_id, kind, summary}");
+    expect(d).toContain("A checkpoint pause carries {node_id, prompt, default?, rename_hint?}");
+  });
+});
+
 // Rodada 2 (revisor, PR #598): sandbox_refusals é regra de comportamento
 // (o modelo precisa saber que não flipa `status` sozinho), não manual — tem
 // que continuar na description, não só na skill.

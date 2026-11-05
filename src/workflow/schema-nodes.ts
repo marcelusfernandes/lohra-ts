@@ -241,10 +241,17 @@ export function validateRefTargets(
   }
 }
 
+/** Stub: the real validation lands with the green commit. */
+export function validateEscalate(node: Node, _issues: SpecIssue[]): void {
+  if (node.type !== "escalate") return;
+  throw new Error("not implemented: validateEscalate");
+}
+
 export const NODE_VALIDATORS: ReadonlyMap<string, NodeValidator> = new Map([
   ["gate", validateGate],
   ["switch", validateSwitch],
   ["loop", validateLoop],
+  ["escalate", validateEscalate],
 ]);
 
 /** Runs the validator of `node.type`, if that type has one. */

@@ -11,6 +11,7 @@ import {
   routingIdentity,
   strictResolve,
 } from "./engine-utils.js";
+import { runEscalate } from "./flow-escalate.js";
 import { runLoopUntil } from "./flow-loop.js";
 import { runSwitch } from "./flow-switch.js";
 import type { CausalContext, ChildRuntime } from "./runtime.js";
@@ -152,4 +153,5 @@ export const FLOW_STRATEGIES: Readonly<Record<string, FlowStrategy>> = Object.fr
   checkpoint: (deps, node, context) => Promise.resolve(runCheckpoint(deps, node, context)),
   switch: runSwitch,
   loop: runLoopUntil,
+  escalate: (deps, node, context) => Promise.resolve(runEscalate(deps, node, context)),
 });

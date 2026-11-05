@@ -14,6 +14,9 @@
 // Issue #980 (S3): o mesmo para o `loop` — um `leaf.started{role:"loop.round",
 // attempt:r}` e um `cache.stored` por rodada, o resume que continua da rodada em
 // que parou (`cache.replayed` nas feitas, só a próxima gasta leaf) e o preview.
+// Issue #981 (S4): o mesmo para o `escalate` — o `node.paused{reason:"escalated"}` do
+// ledger sem leaf nem célula, a célula só depois de respondido, o preview
+// (`escalation_pending` no nó que parou o run, `no_leaves` no que não disparou).
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -72,6 +75,8 @@ function completingRuntime(behavior: Behavior): ChildRuntime {
     },
     collect: (id: string): ChildResult => {
       const prompt = prompts.get(id) ?? "";
+      if (prompt.startsWith("scan"))
+        return { status: "complete", output: { risk: 9 }, usage: USAGE };
       if (prompt.startsWith("refine")) {
         const round = Number(/round (\d+)/u.exec(prompt)?.[1] ?? "0");
         if (round === behavior.failRound) return { status: "failed", output: "dead leaf" };
@@ -489,6 +494,193 @@ describe("workflow_preview over a loop (#980)", () => {
       expect(outcomeOf(result.nodes, "refine").outcome).toBe("recompute");
       expect(result.leaves_to_spawn).toBe(1);
       expect(result.engine_faults).toBe(0);
+    } finally {
+      h.close();
+    }
+  });
+});
+const reviewSpec = (
+  extra: Record<string, unknown> = {},
+  scan: Record<string, unknown> = {},
+): Record<string, unknown> => ({
+  meta: { name: "escalate-flow" },
+  nodes: [
+    { id: "scan", type: "agent", prompt: "scan the change", ...scan },
+    {
+      id: "review",
+      type: "escalate",
+      when: { gte: { path: "${scan.risk}", n: 7 } },
+      kind: "high_risk",
+      summary: "Risk ${scan.risk}",
+      ...extra,
+    },
+    { id: "ship", type: "agent", prompt: "ship it", depends_on: ["review"] },
+  ],
+});
+
+/** A `review` that never fires: the scan answers 9 and the bar is 10. */
+const calmSpec = (): Record<string, unknown> =>
+  reviewSpec({ when: { gte: { path: "${scan.risk}", n: 10 } } });
+
+const nodePaused = (runId: string, h: Harness): readonly Seen[] =>
+  ofType(
+    h.audit.query({ runId, limit: 500 }).events.map((event) => ({
+      type: event.event_type,
+      data: event.data,
+      identity: event.identity,
+    })),
+    "node.paused",
+  );
+
+describe("the ledger records the escalation, with no leaf and no cell of its own (#981)", () => {
+  it("one node.paused{reason:escalated} under the node, and nothing else of its own", async () => {
+    const h = harness();
+    try {
+      const { runId, status } = await launchLoop(h, reviewSpec());
+      expect(status).toBe("paused");
+      const paused = nodePaused(runId, h);
+      expect(paused).toHaveLength(1);
+      expect(paused[0]?.data.reason).toBe("escalated");
+      expect(paused[0]?.identity.node_path).toEqual(["review"]);
+
+      const events = eventsOf(h, runId, "review");
+      expect(ofType(events, "leaf.started")).toEqual([]);
+      expect(events.filter((event) => event.type.startsWith("cache."))).toEqual([]);
+      expect(ofType(events, "workflow.node").at(-1)?.data).toMatchObject({
+        state: "null",
+      });
+    } finally {
+      h.close();
+    }
+  });
+
+  it("the answer stores one cell and asks no leaf; the next resume only replays it", async () => {
+    const h = harness();
+    try {
+      const first = await launchLoop(h, reviewSpec());
+      const answered = h.service.start(
+        null,
+        {},
+        { resumeRunId: first.runId, checkpointAnswers: { review: "approved" } },
+      );
+      if ("error" in answered) throw new Error(answered.error);
+      expect(await settle(h, first.runId)).toBe("complete");
+      const row = h.repository.getRunState(first.runId) as Record<string, unknown>;
+      const events = eventsOf(h, first.runId, "review", String(row.audit_segment_id));
+      expect(ofType(events, "cache.stored")).toHaveLength(1);
+      expect(ofType(events, "leaf.started")).toEqual([]);
+      expect(nodePaused(first.runId, h)).toHaveLength(1);
+
+      const again = await resumeLoop(h, first.runId);
+      expect(again.status).toBe("complete");
+      const replayed = eventsOf(h, first.runId, "review", again.segment);
+      expect(ofType(replayed, "cache.replayed")).toHaveLength(1);
+      expect(ofType(replayed, "leaf.started")).toEqual([]);
+      expect(nodePaused(first.runId, h)).toHaveLength(1);
+    } finally {
+      h.close();
+    }
+  });
+
+  it("a review that does not fire leaves no event of its own but its node state, and no pause", async () => {
+    const h = harness();
+    try {
+      const { runId, status } = await launchLoop(h, calmSpec());
+      expect(status).toBe("complete");
+      const events = eventsOf(h, runId, "review");
+      expect(ofType(events, "leaf.started")).toEqual([]);
+      expect(events.filter((event) => event.type.startsWith("cache."))).toEqual([]);
+      expect(ofType(events, "workflow.node").at(-1)?.data).toMatchObject({
+        state: "complete",
+      });
+      expect(nodePaused(runId, h)).toEqual([]);
+    } finally {
+      h.close();
+    }
+  });
+});
+
+describe("workflow_preview over an escalate (#981)", () => {
+  it("the node that stopped the run is escalation_pending; what comes after it is not claimed", async () => {
+    const h = harness();
+    try {
+      const { runId } = await launchLoop(h, reviewSpec());
+      const result = await h.preview(runId);
+      if ("error" in result) throw new Error(result.error);
+      expect(outcomeOf(result.nodes, "review").outcome).toBe("escalation_pending");
+      expect(outcomeOf(result.nodes, "scan").outcome).toBe("replay");
+      expect(outcomeOf(result.nodes, "ship").outcome).toBe("unknown");
+      expect(result.leaves_to_spawn).toBe(0);
+      expect(result.engine_faults).toBe(0);
+    } finally {
+      h.close();
+    }
+  });
+
+  it("an escalate the run never reached is not pending: only the one that paused it is", async () => {
+    const h = harness();
+    try {
+      const raw = reviewSpec();
+      (raw.nodes as Record<string, unknown>[]).push({
+        id: "late",
+        type: "escalate",
+        when: { gte: { path: "${scan.risk}", n: 1 } },
+        kind: "late_review",
+        summary: "later",
+        depends_on: ["review"],
+      });
+      const { runId } = await launchLoop(h, raw);
+      const result = await h.preview(runId);
+      if ("error" in result) throw new Error(result.error);
+      expect(outcomeOf(result.nodes, "review").outcome).toBe("escalation_pending");
+      expect(outcomeOf(result.nodes, "late").outcome).toBe("unknown");
+    } finally {
+      h.close();
+    }
+  });
+
+  it("an answered escalate previews as replay", async () => {
+    const h = harness();
+    try {
+      const first = await launchLoop(h, reviewSpec());
+      const answered = h.service.start(
+        null,
+        {},
+        { resumeRunId: first.runId, checkpointAnswers: { review: "approved" } },
+      );
+      if ("error" in answered) throw new Error(answered.error);
+      expect(await settle(h, first.runId)).toBe("complete");
+      const result = await h.preview(first.runId);
+      if ("error" in result) throw new Error(result.error);
+      expect(outcomeOf(result.nodes, "review").outcome).toBe("replay");
+      expect(result.leaves_to_spawn).toBe(0);
+    } finally {
+      h.close();
+    }
+  });
+
+  it("an escalate that did not fire is no_leaves — there is nothing to replay or to pay", async () => {
+    const h = harness();
+    try {
+      const { runId } = await launchLoop(h, calmSpec());
+      const result = await h.preview(runId);
+      if ("error" in result) throw new Error(result.error);
+      expect(outcomeOf(result.nodes, "review").outcome).toBe("no_leaves");
+      expect(result.leaves_to_spawn).toBe(0);
+      expect(result.engine_faults).toBe(0);
+    } finally {
+      h.close();
+    }
+  });
+
+  it("a when that reads an upstream the preview would have to recompute is upstream_missing", async () => {
+    const h = harness();
+    try {
+      const { runId } = await launchLoop(h, reviewSpec({}, { provider: "p1" }));
+      const result = await h.preview(runId, { provider: "p2" });
+      if ("error" in result) throw new Error(result.error);
+      expect(outcomeOf(result.nodes, "scan").outcome).toBe("recompute");
+      expect(outcomeOf(result.nodes, "review").outcome).toBe("upstream_missing");
     } finally {
       h.close();
     }

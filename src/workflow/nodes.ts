@@ -6,6 +6,16 @@ export const MAX_NODE_MAX_ITERATIONS = 128;
 export const MAX_SWITCH_CASES = 16;
 /** The most rounds a `loop` may run (and the least is 1): the cap is mandatory, never a default. */
 export const MAX_LOOP_ROUNDS = 16;
+/** The most characters an `escalate` summary may carry (1 to this), before and after its refs are filled in. */
+export const MAX_ESCALATE_SUMMARY = 2000;
+/** What an `escalate` `kind` must look like: a short lowercase tag, never text that could carry a `${ref}`. */
+export const ESCALATE_KIND = /^[a-z][a-z0-9_]{0,31}$/u;
+/**
+ * The node types a human answers by `checkpoint_answers[node_id]`: each pauses the run, never
+ * resumes on its own, and turns the answer into its (cached) output. One set, so the places that
+ * must treat them alike (the answer-key collision scan, the durable resume guard) cannot drift.
+ */
+export const ANSWER_NODE_TYPES: ReadonlySet<string> = new Set(["checkpoint", "escalate"]);
 
 const COMMON = ["required", "depends_on"] as const;
 export const ROUTING_FIELDS = ["model", "tier", "effort", "provider"] as const;
@@ -89,6 +99,7 @@ export const NODE_SPECS: Readonly<Record<string, NodeSpec>> = Object.freeze({
   checkpoint: spec(["prompt", "default"], ["prompt"]),
   switch: spec(["value", "cases", "otherwise"], ["value", "cases"], true),
   loop: spec(["body", "until", "max_rounds"], ["body", "until", "max_rounds"], true),
+  escalate: spec(["when", "kind", "summary"], ["when", "kind", "summary"]),
 });
 
 export const NODE_TYPES: ReadonlySet<string> = new Set(Object.keys(NODE_SPECS));

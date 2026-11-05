@@ -248,6 +248,29 @@ describe("T17 metadata-only audit — allow-list sem produtor", () => {
     }
   });
 
+  // Issue #981 (S4, épico #976): `escalated` é o 6º valor de `node.paused`'s
+  // reason (checkpoint/quota_exhausted/token_budget_exhausted/user_requested/
+  // route_fault). Sem a entrada em SAFE_STRING_VALUES.reason o ledger redigia a
+  // pausa do `escalate` como `excluded_by_policy`: o oráculo positivo prende a
+  // entrada, e o negativo prende que a allow-list continua FECHADA.
+  it("preserves node.paused reason 'escalated' — never excluded_by_policy", () => {
+    const event = publicAuditEvent(
+      "r",
+      1,
+      { event_type: "node.paused", node_id: "review", payload: { reason: "escalated" } },
+      1,
+    );
+    expect(event.event_type).toBe("node.paused");
+    expect(event.data.reason).toBe("escalated");
+  });
+
+  it("redacts a node.paused reason next to 'escalated' that is not on the allow-list", () => {
+    for (const reason of ["escalate", "Escalated", "escalated ", "escalation", "review"]) {
+      const event = publicAuditEvent("r", 1, { event_type: "node.paused", payload: { reason } }, 1);
+      expect(event.data.reason).toEqual({ state: "excluded_by_policy", characters: reason.length });
+    }
+  });
+
   it("redacts a leaf.failed partial outside the boolean vocabulary (a string, never coerced)", () => {
     const event = publicAuditEvent(
       "r",
