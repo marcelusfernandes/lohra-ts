@@ -2,8 +2,6 @@
 
 [![ci](https://github.com/marcelusfernandes/lohra-ts/actions/workflows/ci.yml/badge.svg)](https://github.com/marcelusfernandes/lohra-ts/actions/workflows/ci.yml)
 
-A versão atual é `0.1.0`.
-
 lohra-ts is a headless TypeScript agent runtime. One package gives you a CLI, a local gateway and dashboard, durable workflows, cron, MCP tools, and a skill kit for Claude, Codex, OpenCode, and Pi. The npm package is `lohra-ts`. The command it installs is `lohra`.
 
 The package does not bundle or call Python. Since 2026-09-04 it is developed on its own, apart from the historical Python Lohra.
@@ -70,7 +68,7 @@ How to choose a node, how refs work, and how to read `complete`, `degraded`, `fa
 
 ## Surfaces
 
-Os comandos top-level públicos, na ordem exibida pelo help, são `init`, `doctor`, `chat`, `dashboard`, `serve`, `cron`, `workflow`, `models`, `tiers`, `profile`, `auth`, `skill`, `skills` e `update`.
+The public top-level commands, in help order, are `init`, `doctor`, `chat`, `dashboard`, `serve`, `cron`, `workflow`, `models`, `tiers`, `profile`, `auth`, `skill`, `skills`, and `update`.
 
 | Command                  | What it is                                                                                 |
 | ------------------------ | ------------------------------------------------------------------------------------------ |
@@ -125,7 +123,7 @@ MCP servers are read from `mcp.json` in the Lohra home when `chat` or `dashboard
 - [docs/gate-decision-t22.md](docs/gate-decision-t22.md)
 - [docs/adr/0003-native-wire-format.md](docs/adr/0003-native-wire-format.md)
 
-O owner escolheu `typescript-mainline` para o novo capítulo em [docs/gate-decision-t22.md](docs/gate-decision-t22.md) (2026-09-03). Live provider and SDK smokes remain `NOT_MEASURED` without credentials.
+The owner chose `typescript-mainline` for this runtime in [docs/gate-decision-t22.md](docs/gate-decision-t22.md) (2026-09-03). Live provider and SDK smokes remain `NOT_MEASURED` without credentials.
 
 ## License
 

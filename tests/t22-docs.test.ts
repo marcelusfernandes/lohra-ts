@@ -48,7 +48,7 @@ describe("T22 public documentation", () => {
   it("documents the exact public CLI and current package", () => {
     const readme = read("README.md");
     expect(readme, "MUTATION_CAUSE:T22-docs-current-version").toContain(
-      `A versão atual é \`${packageJson.version}\`.`,
+      `Current version: \`${packageJson.version}\`. Changes since \`0.0.12\` are in the CHANGELOG.`,
     );
 
     // Fonte da verdade dos comandos públicos é `COMMAND_SUMMARY`
@@ -58,7 +58,7 @@ describe("T22 public documentation", () => {
     const lastCommand = expectedCommands.at(-1);
     expect(lastCommand, "COMMAND_SUMMARY não pode ficar vazio").toBeDefined();
     const commandsBlockRe = new RegExp(
-      `Os comandos top-level públicos[\\s\\S]*?\`${String(lastCommand)}\`\\.`,
+      `The public top-level commands[\\s\\S]*?\`${String(lastCommand)}\`\\.`,
       "u",
     );
     const documented = commandsBlockRe
@@ -93,7 +93,7 @@ describe("T22 public documentation", () => {
 
     expect(readme).toContain("NOT_MEASURED");
     expect(readme, "MUTATION_CAUSE:T22-docs-architecture-decided").toContain(
-      "O owner escolheu `typescript-mainline`",
+      "The owner chose `typescript-mainline`",
     );
   });
 

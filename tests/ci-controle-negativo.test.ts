@@ -743,6 +743,7 @@ describe("ehPrDeRelease (issue #694, bloqueava a #691)", () => {
         "CHANGELOG.md",
         "README.md",
         "tests/version.test.ts",
+        "tests/t22-docs.test.ts",
         "tests/ci-controle-negativo.test.ts",
         "scripts/ci/controle-negativo/lib.ts",
       ]),
