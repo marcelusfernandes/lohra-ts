@@ -1,6 +1,5 @@
 import { MAX_WORKFLOW_DEPTH, type WorkflowLoader } from "./engine-contract.js";
 import {
-  MAX_GATE_ATTEMPTS,
   MAX_NODE_MAX_ITERATIONS,
   MAX_NODE_RETRIES,
   MAX_STATIC_FANOUT,
@@ -10,16 +9,12 @@ import {
   SUB_OBJECT_FIELDS,
 } from "./nodes.js";
 import { findRefs, invalidRefs, isValidRef } from "./refs.js";
+import { issue, record, validateByType } from "./schema-nodes.js";
 import { Node, SpecIssue, ValidationError, WorkflowSpec } from "./types.js";
 
 export interface ValidateSpecOptions {
   readonly supportedTypes?: ReadonlySet<string>;
 }
-
-const record = (value: unknown): Record<string, unknown> | null =>
-  value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
 
 /**
  * Resolve `fields.schema` the same way `schema_ref` resolves a name: an
@@ -228,17 +223,6 @@ const allowedExample = (fields: readonly string[]): string =>
     .sort()
     .map((field) => `'${field}'`)
     .join(", ")}]`;
-
-function issue(
-  issues: SpecIssue[],
-  rule: string,
-  message: string,
-  nodeId: string | null = null,
-  field: string | null = null,
-  example: string | null = null,
-): void {
-  issues.push(new SpecIssue({ rule, message, nodeId, field, example }));
-}
 
 function stringArray(value: unknown): readonly string[] {
   return Array.isArray(value)
@@ -525,53 +509,6 @@ function validateTier(node: Node, issues: SpecIssue[]): void {
   validateStageTiers(node, issues);
 }
 
-function validateGate(node: Node, issues: SpecIssue[]): void {
-  if (node.type !== "gate") return;
-  const body = record(node.fields.body);
-  const prompt = body?.prompt;
-  const promptPresent =
-    typeof prompt === "string"
-      ? prompt.trim() !== ""
-      : prompt !== undefined && prompt !== null && prompt !== false && prompt !== 0;
-  if (body === null || !("prompt" in body) || !promptPresent) {
-    issue(
-      issues,
-      "field_value",
-      "'body' must be an agent-shaped object with a 'prompt' (add 'schema'/'schema_ref' to get validated JSON back)",
-      node.id,
-      "body",
-      'body: {prompt: "Draft the migration plan"}',
-    );
-  }
-  if (typeof node.fields.validator !== "string" || node.fields.validator.trim() === "") {
-    issue(
-      issues,
-      "field_value",
-      "'validator' must be the prompt a reviewer leaf answers {ok, feedback} to (the candidate is appended for you)",
-      node.id,
-      "validator",
-      'validator: "Does the plan name every affected file?"',
-    );
-  }
-  const attempts = node.fields.attempts;
-  if (
-    attempts !== undefined &&
-    (!Number.isInteger(attempts) ||
-      typeof attempts !== "number" ||
-      attempts < 1 ||
-      attempts > MAX_GATE_ATTEMPTS)
-  ) {
-    issue(
-      issues,
-      "field_value",
-      "'attempts' must be a whole number between 1 and 3",
-      node.id,
-      "attempts",
-      "attempts: 2",
-    );
-  }
-}
-
 function staticFanout(node: Node): number | null {
   const fields = node.fields;
   const literal =
@@ -667,7 +604,7 @@ export function validateSpec(
   for (const node of nodes) {
     validateLifecycle(node, issues);
     validateTier(node, issues);
-    validateGate(node, issues);
+    validateByType(node, issues);
     validateMinSuccessRatio(node, issues);
     validateLoopBudget(node, issues);
     validatePipelineStageShapes(node, issues);
