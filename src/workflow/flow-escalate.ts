@@ -1,15 +1,9 @@
 import { CACHE_MISS } from "./engine-contract.js";
-import {
-  applyCheckpointAnswer,
-  asRecord,
-  renderValue,
-  resolveCheckpoint,
-  strictResolve,
-} from "./engine-utils.js";
+import { applyCheckpointAnswer, asRecord, renderValue, resolveCheckpoint } from "./engine-utils.js";
 import type { FlowDeps } from "./flow-strategies.js";
 import { ESCALATED_PAUSE, MAX_ESCALATE_SUMMARY } from "./nodes.js";
 import { evaluatePredicate, type Predicate } from "./predicates.js";
-import { findRefs } from "./refs.js";
+import { findRefs, readPath, resolveValue } from "./refs.js";
 import type { Node } from "./types.js";
 
 /**
@@ -31,11 +25,18 @@ import type { Node } from "./types.js";
  *   `0`, `false`, `null`) is an answer. A collision (a root or sibling id that owns the same
  *   key) is refused and named, exactly as for a checkpoint.
  * - **Cell.** `[id, "escalate", kind, summary]`, written only once there is an answer. The
- *   summary is in the identity (rendered): when the case in front of the reviewer changes, it
- *   is another question. `when` is not — it is read before the lookup.
- * - **Failure.** A root of `when` that failed (`null`), or a `summary` that reads one, is
- *   `<id>: upstream null` and the node is `null` without a pause. A rendered summary longer
- *   than `MAX_ESCALATE_SUMMARY` is cut with a trailing `…`, never silently dropped.
+ *   summary is in the identity (as the reviewer sees it): when the case in front of the
+ *   reviewer changes, it is another question. `when` is not — it is read before the lookup.
+ * - **Fails closed.** A node that exists to put a person in front of a decision never lets a
+ *   failure skip the person. A `when` that cannot be evaluated because the root of a path is a
+ *   dead node (or has no value at all) is treated as holding: the run pauses, the summary opens
+ *   with `[condition not evaluated: …]`, and the faults carry `<id>: upstream null` plus the
+ *   pause fault that names the dead nodes. A `summary` that reads a value that is not there
+ *   goes out as the raw template behind `[unrendered]`, and one that renders blank behind
+ *   `[empty summary]`; the pause fault names the `${ref}` that is missing, or says it is empty.
+ *   A rendered summary longer than `MAX_ESCALATE_SUMMARY` is cut with a trailing `…`. (A path
+ *   whose root is there but lacks the field is only a value, as everywhere else: `gte` on
+ *   nothing does not hold.)
  * - **Budget.** Zero leaves: nothing to gate or charge.
  */
 export function runEscalate(
@@ -50,18 +51,18 @@ export function runEscalate(
       `escalate '${node.id}' has no valid 'when', 'kind' or 'summary': validateEscalate refuses it`,
     );
 
-  if (readsDeadUpstream(when, context)) {
-    deps.recordFault(`${node.id}: upstream null`);
-    return null;
-  }
-  if (!evaluatePredicate(when as unknown as Predicate, context)) return NOT_ESCALATED;
+  const dead = deadRoots(when, context);
+  if (dead.length === 0 && !evaluatePredicate(when as unknown as Predicate, context))
+    return NOT_ESCALATED;
 
-  const resolved = strictResolve(template, context);
-  if (resolved === null) {
-    deps.recordFault(`${node.id}: upstream null`);
-    return null;
-  }
-  const summary = clamp(renderValue(resolved));
+  const rendered = renderSummary(template, context);
+  const unevaluated = dead.length > 0;
+  const named = dead.map((root) => `'${root}'`).join(", ");
+  const summary = clamp(
+    unevaluated
+      ? `[condition not evaluated: ${named} has no value] ${rendered.text}`
+      : rendered.text,
+  );
   const hash = deps.cell([node.id, "escalate", kind, summary]);
   const cached = deps.cacheGet(hash);
   if (cached !== CACHE_MISS) return cached;
@@ -75,11 +76,21 @@ export function runEscalate(
       answer.scoped,
       Object.freeze({ escalated: true, kind, summary, answer: answer.answer }),
     );
+  if (unevaluated) deps.recordFault(`${node.id}: upstream null`);
+  const notes = [
+    ...(unevaluated
+      ? [`'when' could not be evaluated: ${named} has no value (upstream null)`]
+      : []),
+    ...rendered.notes,
+  ];
   deps.pause(
     ESCALATED_PAUSE,
-    answer.collision === "none"
-      ? `${node.id}: escalated for review (${kind}) — waiting for an answer`
-      : answer.message,
+    [
+      answer.collision === "none"
+        ? `${node.id}: escalated for review (${kind}) — waiting for an answer`
+        : answer.message,
+      ...notes,
+    ].join("; "),
     Object.freeze({
       node_id: answer.scoped,
       kind,
@@ -106,6 +117,40 @@ export function escalateDidNotFire(node: Node, output: unknown): boolean {
 
 const NOT_ESCALATED: unknown = Object.freeze({ escalated: false });
 
+const UNRENDERED = "[unrendered]";
+const EMPTY_SUMMARY = "[empty summary]";
+
+interface RenderedSummary {
+  /** What goes in the payload (before the cut): the rendered text, or the raw template, marked. */
+  readonly text: string;
+  /** Why it is not the rendered text, for the pause fault; empty when it rendered. */
+  readonly notes: readonly string[];
+}
+
+/**
+ * The summary as the template says it, or — when it cannot be said — the template itself behind
+ * a mark, never a blank and never a skipped review. A `${ref}` is missing when it reads `null`
+ * the way a prompt would (`readPath`: a JSON string and an array index are traversed, an absent
+ * field is `null`), and every missing one is named.
+ */
+function renderSummary(
+  template: string,
+  context: Readonly<Record<string, unknown>>,
+): RenderedSummary {
+  const missing = [...new Set(findRefs(template).filter((ref) => readPath(ref, context) === null))];
+  if (missing.length > 0)
+    return {
+      text: `${UNRENDERED} ${template}`,
+      notes: [
+        `summary not rendered: no value for ${missing.map((ref) => `\${${ref}}`).join(", ")}`,
+      ],
+    };
+  const text = renderValue(resolveValue(template, context));
+  return text.trim() === ""
+    ? { text: `${EMPTY_SUMMARY} ${template}`, notes: ["summary rendered empty"] }
+    : { text, notes: [] };
+}
+
 const ELLIPSIS = "…";
 
 /**
@@ -121,16 +166,17 @@ function clamp(text: string): string {
 }
 
 /**
- * Whether some path of `when` starts at a node that failed. Every path of a validated predicate
- * is exactly one `${ref}` (operands carry none), so the refs found in it are its paths, `not.of`
- * included. A root absent from the context counts as `null`, as in `switch` and `loop`.
+ * The roots of `when`'s paths that hold no value — a node that failed (`null`), or a name the
+ * context does not have — in order, once each. Every path of a validated predicate is exactly one
+ * `${ref}` (operands carry none), so the refs found in it are its paths, `not.of` included. A root
+ * that is there but lacks the field is not listed: that is only a value, as in `switch` and `loop`.
  */
-function readsDeadUpstream(
+function deadRoots(
   when: Readonly<Record<string, unknown>>,
   context: Readonly<Record<string, unknown>>,
-): boolean {
-  return findRefs(when).some((reference) => {
-    const root = reference.split(".", 1)[0] ?? reference;
-    return (Object.hasOwn(context, root) ? context[root] : null) === null;
-  });
+): readonly string[] {
+  const roots = findRefs(when)
+    .map((reference) => reference.split(".", 1)[0] ?? reference)
+    .filter((root) => (Object.hasOwn(context, root) ? context[root] : null) === null);
+  return [...new Set(roots)];
 }

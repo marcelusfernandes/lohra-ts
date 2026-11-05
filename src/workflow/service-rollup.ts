@@ -46,9 +46,13 @@ export const ESCALATED_HINT =
   "on its own, and a resume without the answer is refused — if the escalation carries " +
   "'rename_hint', resuming with the SAME node_id only pauses again — rename one of the two ids in " +
   "the spec instead";
-/** Whether a paused run waits for a human answer in `checkpoint_answers`: a checkpoint or an escalation. */
-export const isAnswerPause = (reason: string | null): boolean =>
-  reason === CHECKPOINT_PAUSE || reason === ESCALATED_PAUSE;
+/**
+ * What a run paused for a human answer in `checkpoint_answers` waits at, as the word a message
+ * uses (`checkpoint` or `escalation`); `null` for any other pause. The durable resume guard
+ * (`service.ts`, at its line ceiling) asks "is it one?" and "which?" with this single name.
+ */
+export const answerPauseNoun = (reason: string | null): "checkpoint" | "escalation" | null =>
+  reason === CHECKPOINT_PAUSE ? "checkpoint" : reason === ESCALATED_PAUSE ? "escalation" : null;
 export const USER_PAUSE_HINT =
   "you paused this run; nothing will resume it on its own — its " +
   "finished nodes are kept, so run_workflow(resume_run_id=...) " +
