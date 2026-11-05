@@ -248,12 +248,13 @@ export function deveSerIgnorado(diff: readonly string[]): boolean {
  * `scripts/prova/slug.ts:13`).
  *
  * `README.md` entra no conjunto (rodada 2 da issue #694): `npm run
- * release` (`scripts/release.ts`) não bumpa a linha «A versão atual é
- * `x.y.z`.» do README — `tests/t22-docs.test.ts:50-51` pina essa frase
- * contra `package.json`, então toda PR de release precisa editar
- * `README.md:6` à mão para não quebrar esse teste (a #691 já tinha esse
- * arquivo no diff). Sem `README.md` no conjunto, uma PR de release de
- * verdade (4 arquivos) cairia de novo em `resolverSlug`.
+ * release` (`scripts/release.ts`) não bumpa a linha de versão do README —
+ * `tests/t22-docs.test.ts` pina `Current version: \`x.y.z\`.` contra
+ * `package.json`, então toda PR de release precisa manter essa frase no
+ * README. Sem `README.md` no conjunto, uma PR de release de verdade
+ * cairia de novo em `resolverSlug`. O corte `0.1.0` também carrega a
+ * guarda de versão, o teste que pina o README em inglês, e este
+ * allow-list: o documento OpenAPI do gateway fica em `"0.1.0"`.
  */
 const RELEASE_BRANCH_RE = /^release\/\d+\.\d+\.\d+$/;
 const ARQUIVOS_DE_RELEASE = new Set([
@@ -261,6 +262,17 @@ const ARQUIVOS_DE_RELEASE = new Set([
   "package-lock.json",
   "CHANGELOG.md",
   "README.md",
+  // O documento OpenAPI do gateway fixa `info.version` em `"0.1.0"`
+  // (`src/gateway/http/routes.ts`), e o teste do gateway diz que isso não é
+  // a versão do pacote. Quando `package.json` também é `0.1.0`, a guarda de
+  // `tests/version.test.ts` precisa ignorar essa única linha — senão
+  // `npm test` reprova o bump. Estes arquivos são essa guarda, o pino do
+  // README em inglês, e o conjunto que deixa a PR de release carregá-los.
+  // `src/**` continua fora.
+  "tests/version.test.ts",
+  "tests/t22-docs.test.ts",
+  "tests/ci-controle-negativo.test.ts",
+  "scripts/ci/controle-negativo/lib.ts",
 ]);
 
 export function ehPrDeRelease(branch: string, diff: readonly string[]): boolean {
