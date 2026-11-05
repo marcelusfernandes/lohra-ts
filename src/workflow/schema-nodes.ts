@@ -72,6 +72,10 @@ export function validateGate(node: Node, issues: SpecIssue[]): void {
   }
 }
 
+export const validateSwitch: NodeValidator = () => {
+  throw new Error("not implemented: validateSwitch");
+};
+
 export const NODE_VALIDATORS: ReadonlyMap<string, NodeValidator> = new Map([
   ["gate", validateGate],
 ]);

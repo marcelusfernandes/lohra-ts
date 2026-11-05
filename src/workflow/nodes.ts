@@ -2,6 +2,8 @@ export const MAX_STATIC_FANOUT = 64;
 export const MAX_NODE_RETRIES = 3;
 export const MAX_GATE_ATTEMPTS = 3;
 export const MAX_NODE_MAX_ITERATIONS = 128;
+/** The most cases a `switch` may name (and the least is 2): a branch table, not a fan-out. */
+export const MAX_SWITCH_CASES = 16;
 
 const COMMON = ["required", "depends_on"] as const;
 export const ROUTING_FIELDS = ["model", "tier", "effort", "provider"] as const;
