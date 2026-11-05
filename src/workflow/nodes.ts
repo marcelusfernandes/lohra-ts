@@ -23,6 +23,9 @@ export const ROUTING_FIELDS = ["model", "tier", "effort", "provider"] as const;
  * `judge_panel.synthesize` and `parallel.branches[*]` still spawn with the
  * OUTER node unmodified (`runJudgePanel`/`runParallel` pass `node`, never the
  * sub-object, to `collectLeaf`), so routing there really has no reader.
+ * `switch.cases[*]` (#979) merges onto the node like `gate.body` does
+ * (`makeBodyLeafRunner`), and its routing is refused for the same design reason:
+ * the knobs go on the `switch` node, which every case inherits.
  */
 export const SUB_OBJECT_FIELDS = [
   "prompt",
@@ -82,6 +85,7 @@ export const NODE_SPECS: Readonly<Record<string, NodeSpec>> = Object.freeze({
   gate: spec(["body", "validator", "attempts"], ["body", "validator"], true),
   completeness_check: spec(["task", "results"], ["task", "results"], true),
   checkpoint: spec(["prompt", "default"], ["prompt"]),
+  switch: spec(["value", "cases", "otherwise"], ["value", "cases"], true),
 });
 
 export const NODE_TYPES: ReadonlySet<string> = new Set(Object.keys(NODE_SPECS));

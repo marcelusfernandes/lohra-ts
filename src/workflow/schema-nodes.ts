@@ -1,4 +1,5 @@
-import { MAX_GATE_ATTEMPTS } from "./nodes.js";
+import { MAX_GATE_ATTEMPTS, MAX_SWITCH_CASES } from "./nodes.js";
+import { pathRef } from "./predicates.js";
 import { SpecIssue, type Node } from "./types.js";
 
 /**
@@ -25,15 +26,19 @@ export function issue(
   issues.push(new SpecIssue({ rule, message, nodeId, field, example }));
 }
 
+/** An agent-shaped body: an object carrying a `prompt` that is not blank (or falsy). */
+function hasPrompt(body: Record<string, unknown> | null): boolean {
+  if (body === null || !("prompt" in body)) return false;
+  const prompt = body.prompt;
+  return typeof prompt === "string"
+    ? prompt.trim() !== ""
+    : prompt !== undefined && prompt !== null && prompt !== false && prompt !== 0;
+}
+
 export function validateGate(node: Node, issues: SpecIssue[]): void {
   if (node.type !== "gate") return;
   const body = record(node.fields.body);
-  const prompt = body?.prompt;
-  const promptPresent =
-    typeof prompt === "string"
-      ? prompt.trim() !== ""
-      : prompt !== undefined && prompt !== null && prompt !== false && prompt !== 0;
-  if (body === null || !("prompt" in body) || !promptPresent) {
+  if (!hasPrompt(body)) {
     issue(
       issues,
       "field_value",
@@ -72,12 +77,75 @@ export function validateGate(node: Node, issues: SpecIssue[]): void {
   }
 }
 
-export const validateSwitch: NodeValidator = () => {
-  throw new Error("not implemented: validateSwitch");
-};
+const SWITCH_CASES_EXAMPLE =
+  'cases:\n  reuse: null\n  investigate: {prompt: "Dig into ${args.text}"}';
+
+/**
+ * `switch` (#979): `value` is exactly one `${ref}` (read with `readPath`, so it sees what a
+ * prompt would render); `cases` maps 2 to `MAX_SWITCH_CASES` names to `null` (a branch that
+ * runs nothing) or to an agent-shaped body with a `prompt`; `otherwise` names one of them.
+ * A case body's own fields, knobs and schemas are checked by `schema.ts`
+ * (`schemaBearingSubObjects`) like any agent-shaped sub-object, and a routing knob inside a
+ * case is refused there — it goes on the node. A missing `value`/`cases` is `missing_field`.
+ */
+export function validateSwitch(node: Node, issues: SpecIssue[]): void {
+  if (node.type !== "switch") return;
+  const { value, cases: rawCases, otherwise } = node.fields;
+  if (value !== undefined && pathRef(value) === null) {
+    issue(
+      issues,
+      "field_value",
+      "'value' must be exactly one ${ref} to the field the switch reads — no text around it, no expression",
+      node.id,
+      "value",
+      'value: "${scan.verdict}"',
+    );
+  }
+  const cases = record(rawCases);
+  const names = cases === null ? [] : Object.keys(cases);
+  if (
+    rawCases !== undefined &&
+    (cases === null || names.length < 2 || names.length > MAX_SWITCH_CASES)
+  ) {
+    issue(
+      issues,
+      "field_value",
+      `'cases' must be a mapping of 2 to ${String(MAX_SWITCH_CASES)} case names, each null (runs nothing) or an agent-shaped object with a 'prompt'`,
+      node.id,
+      "cases",
+      SWITCH_CASES_EXAMPLE,
+    );
+  }
+  for (const name of names) {
+    const body = cases?.[name];
+    if (body === null || hasPrompt(record(body))) continue;
+    issue(
+      issues,
+      "field_value",
+      `'cases.${name}' must be null (a branch that runs nothing) or an agent-shaped object with a 'prompt'`,
+      node.id,
+      `cases.${name}`,
+      `cases:\n  ${name}: {prompt: "Dig into the cause"}`,
+    );
+  }
+  if (
+    otherwise !== undefined &&
+    (typeof otherwise !== "string" || cases === null || !Object.hasOwn(cases, otherwise))
+  ) {
+    issue(
+      issues,
+      "field_value",
+      "'otherwise' must name one of the 'cases' — the one that runs when no case matches the value",
+      node.id,
+      "otherwise",
+      'otherwise: "investigate"',
+    );
+  }
+}
 
 export const NODE_VALIDATORS: ReadonlyMap<string, NodeValidator> = new Map([
   ["gate", validateGate],
+  ["switch", validateSwitch],
 ]);
 
 /** Runs the validator of `node.type`, if that type has one. */
