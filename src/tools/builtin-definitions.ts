@@ -1,5 +1,10 @@
+import { NODE_TYPES } from "../workflow/nodes.js";
 import type { ToolDefinition } from "./types.js";
 import { WORKFLOW_SAVE_DEFINITION } from "./workflow-save-definition.js";
+
+// The closed node list lives ONCE, in `NODE_TYPES` (#979): a node type added there reaches the
+// model with no second edit, and the `spec` parameter below points here instead of repeating it.
+const NODE_TYPE_LIST = `Node types (CLOSED set of ${String(NODE_TYPES.size)}): ${[...NODE_TYPES].join(", ")}.`;
 
 // Built-in tool schema registry. Definition and key order is a contract:
 // consumers rely on this exact shape and ordering.
@@ -446,15 +451,14 @@ export const BUILTIN_DEFINITIONS = [
   {
     type: "function",
     function: {
-      description:
-        "Run a dynamic multi-agent workflow as a declarative spec \u2014 a DAG of sub-agents pursuing a goal autonomously. Use for wide/adversarial/long-resumable work; for one self-contained task use 'delegate_task' instead. 'spec' is {meta{name}, schemas?, nodes:[{id, type, ...}]}. Node types (CLOSED set of 10): agent, parallel, pipeline, loop_until_dry, verify, judge_panel, workflow, gate, completeness_check, checkpoint. Branches in the same run share ONE working filesystem root \u2014 one file per leaf, aggregate downstream, never write the SAME file from parallel branches. 'min_success_ratio' (pipeline) and 'budget' (loop_until_dry) are real caps. Prefer 'tier' over a hard-coded 'model'. Returns a run_id \u2014 poll with workflow_status. Load the workflow-authoring skill before authoring; save a complete run worth repeating with workflow_save, rerun it with template.",
+      description: `Run a dynamic multi-agent workflow as a declarative spec \u2014 a DAG of sub-agents pursuing a goal autonomously. Use for wide/adversarial/long-resumable work; for one self-contained task use 'delegate_task' instead. 'spec' is {meta{name}, schemas?, nodes:[{id, type, ...}]}. ${NODE_TYPE_LIST} Branches in the same run share ONE working filesystem root \u2014 one file per leaf, aggregate downstream, never write the SAME file from parallel branches. 'min_success_ratio' (pipeline) and 'budget' (loop_until_dry) are real caps. Prefer 'tier' over a hard-coded 'model'. Returns a run_id \u2014 poll with workflow_status. Load the workflow-authoring skill before authoring; save a complete run worth repeating with workflow_save, rerun it with template.`,
       parameters: {
         type: "object",
         properties: {
           spec: {
             type: "object",
             description:
-              "The workflow spec: {meta:{name}, schemas?, nodes:[{id, type, ...}]}. type is one of: agent, parallel, pipeline, loop_until_dry, verify, judge_panel, workflow, gate, completeness_check, checkpoint (see this tool's description for their fields).",
+              "The workflow spec: {meta:{name}, schemas?, nodes:[{id, type, ...}]}. 'type' is one of the closed set of node types named in this tool's description.",
           },
           template: {
             type: "string",

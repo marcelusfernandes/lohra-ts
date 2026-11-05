@@ -11,7 +11,8 @@
 //      chave `description` pode mudar) — checado por hash SHA-256 de
 //      `JSON.stringify(parameters)` por tool, não pelo texto completo, para
 //      não duplicar o catálogo inteiro dentro do teste;
-//   3. que `run_workflow` mantém a lista fechada de 10 node types e o
+//   3. que `run_workflow` mantém a lista fechada de node types (derivada de
+//      `NODE_TYPES`, #979, e dita uma vez só) e o
 //      ponteiro para a skill, sem o manual (exemplo de spec, glossário de
 //      campos) que agora só vive lá;
 //   4. o padrão prescritivo (quando usar / quando não / limite) nas sete
@@ -177,7 +178,13 @@ describe("run_workflow: closed node list and skill pointer survive the diet (#58
       properties: { spec: { description: string } };
     };
     const specDescription = parameters.properties.spec.description;
-    for (const nodeType of NODE_TYPES) expect(specDescription).not.toContain(nodeType);
+    // "workflow" is both a node type and an ordinary word here, so look for the list itself
+    // (two names in a row) and for the names that are only ever identifiers.
+    const [first, second] = [...NODE_TYPES];
+    expect(specDescription).not.toContain(`${String(first)}, ${String(second)}`);
+    for (const nodeType of NODE_TYPES) {
+      if (nodeType.includes("_")) expect(specDescription).not.toContain(nodeType);
+    }
     expect(specDescription).toContain("node types");
     expect(specDescription.length).toBeLessThan(160);
   });

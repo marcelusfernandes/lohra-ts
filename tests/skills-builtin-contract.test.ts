@@ -67,8 +67,12 @@ describe("skills-builtin-contract: gatilho, anti-gatilho e flags reais", () => {
   it("descriptions de use-lohra-ts e workflow-authoring têm gatilho e anti-gatilho", () => {
     const useLohraTs = parseSkillMd(read("assets/skills/use-lohra-ts/SKILL.md"));
     const workflowAuthoring = parseSkillMd(read("assets/skills/workflow-authoring/SKILL.md"));
+    // #979: a skill companheira mora dentro do builtin root de `workflow-authoring`.
+    const flowControl = parseSkillMd(
+      read("assets/skills/workflow-authoring/flow-control/SKILL.md"),
+    );
 
-    for (const skill of [useLohraTs, workflowAuthoring]) {
+    for (const skill of [useLohraTs, workflowAuthoring, flowControl]) {
       expect(skill.description.length, `${skill.name} sem description`).toBeGreaterThan(0);
       expect(skill.description, `${skill.name} sem anti-gatilho ("Do NOT")`).toMatch(/Do NOT/u);
     }

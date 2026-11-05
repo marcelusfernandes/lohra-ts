@@ -14,6 +14,8 @@ import { describe, expect, it } from "vitest";
 
 import { parseSkillMd, SkillStore } from "../src/skills/store.js";
 import { MAX_SWITCH_CASES, NODE_SPECS, ROUTING_FIELDS } from "../src/workflow/nodes.js";
+import { validateSpec } from "../src/workflow/schema.js";
+import { WorkflowSpec } from "../src/workflow/types.js";
 
 const root = resolve(import.meta.dirname, "..");
 const builtinRoot = resolve(root, "assets/skills/workflow-authoring");
@@ -97,5 +99,14 @@ describe("the switch section matches the code (#979)", () => {
 
   it("names the preview outcome for a null case", () => {
     expect(companion).toContain("no_leaves");
+  });
+
+  it("its worked example is a spec the validator accepts, so it cannot drift from the schema", () => {
+    const block = /```json\n([\s\S]*?)\n```/u.exec(companion)?.[1];
+    expect(block, "the skill should carry a ```json example").toBeDefined();
+    const result = validateSpec(JSON.parse(block ?? "null"));
+    expect(result).toBeInstanceOf(WorkflowSpec);
+    const nodes = (result as WorkflowSpec).nodes;
+    expect(nodes.map((node) => node.type)).toEqual(["agent", "switch"]);
   });
 });
