@@ -218,7 +218,7 @@ re-parse it in natural language — that is where null rates come from.
     the replayed cells are not charged twice.
   - **`user_requested`** — you paused it yourself with `workflow_pause`. Nothing resumes it on its
     own either (`resume_at` is `null`): `run_workflow(resume_run_id=...)` continues it whenever you want.
-  - **`escalated`** — an `escalate` node's `when` held: the reply has `escalation{node_id, kind, summary}`.
+  - **`escalated`** — an `escalate` node's `when` held (or could not be checked — it fails closed): the reply has `escalation{node_id, kind, summary}`.
     Answer with `checkpoint_answers`, as for a `checkpoint`; nothing resumes it on its own.
 - **`resume_run_id` is cheap.** Cells that *completed* are content-addressed and
   replay from cache, carrying what they cost so the resume does not re-bill
