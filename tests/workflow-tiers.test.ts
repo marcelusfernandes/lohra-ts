@@ -7,7 +7,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { openStateDatabase, WorkflowRepository, LockRepository } from "../src/state/index.js";
 import { runTiers } from "../src/commands/tiers.js";
 import * as tiersModule from "../src/workflow/tiers.js";
-import { readTiers, TiersError, writeTiers } from "../src/workflow/tiers.js";
+import {
+  executionTier,
+  readTiers,
+  TiersError,
+  writeTiers,
+  type TierMap,
+} from "../src/workflow/tiers.js";
 import { WorkflowService } from "../src/workflow/service.js";
 import type {
   ChildResult,
@@ -384,5 +390,135 @@ describe("lohra tiers — fail-closed CLI", () => {
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain(tiersPath(home));
     expect(result.stderr).not.toContain("broken JSON");
+  });
+});
+
+// Issue #987: a chave `execution` — o tier que nó e sub-agente sem modelo próprio usam.
+function tiersFileOf(home: string, content: unknown): string {
+  const path = tiersPath(home);
+  writeFileSync(path, JSON.stringify(content));
+  return path;
+}
+
+const SMALL: TierMap = {
+  small: { model: "x-small", provider: "p-small", effort: "low" },
+  medium: { model: "x-medium" },
+  big: { model: "x-big" },
+  execution: "small",
+};
+
+describe("readTiers — a chave `execution` (#987)", () => {
+  it("accepts `execution` naming a tier defined in the same file", () => {
+    const path = tiersFileOf(root(), { small: { model: "m-small" }, execution: "small" });
+    expect(readTiers(path)).toEqual({ small: { model: "m-small" }, execution: "small" });
+  });
+
+  it("keeps a file without the key exactly as before (no `execution` property)", () => {
+    const path = tiersFileOf(root(), { small: "m-small" });
+    const result = readTiers(path);
+    expect(result).toEqual({ small: { model: "m-small" } });
+    expect(Object.keys(result)).toEqual(["small"]);
+  });
+
+  it("refuses a name outside small/medium/big with a named TiersError", () => {
+    const path = tiersFileOf(root(), { small: "m", execution: "huge" });
+    const result = readTiers(path);
+    expect(result).toBeInstanceOf(TiersError);
+    const message = (result as TiersError).message;
+    expect((result as TiersError).path).toBe(path);
+    expect(message).toContain("'execution' must");
+    expect(message).toContain("'huge'");
+    expect(message).toContain("small, medium, big");
+  });
+
+  it("refuses a tier that the file does not define", () => {
+    const path = tiersFileOf(root(), { small: "m", execution: "medium" });
+    const result = readTiers(path);
+    expect(result).toBeInstanceOf(TiersError);
+    expect((result as TiersError).message).toContain("execution");
+    expect((result as TiersError).message).toContain("'medium'");
+    expect((result as TiersError).message).toContain("not defined");
+  });
+
+  it("refuses `execution` with no tier at all in the file", () => {
+    const result = readTiers(tiersFileOf(root(), { execution: "small" }));
+    expect(result).toBeInstanceOf(TiersError);
+    expect((result as TiersError).message).toContain("not defined");
+  });
+
+  it.each([[42], [null], [""], [["small"]], [{ tier: "small" }], [true]])(
+    "refuses a non-string or empty `execution` (%j)",
+    (value) => {
+      const result = readTiers(tiersFileOf(root(), { small: "m", execution: value }));
+      expect(result).toBeInstanceOf(TiersError);
+      expect((result as TiersError).message).toContain("'execution' must");
+    },
+  );
+
+  it("reports a broken tier before the `execution` that points at it", () => {
+    const result = readTiers(tiersFileOf(root(), { small: {}, execution: "small" }));
+    expect(result).toBeInstanceOf(TiersError);
+    expect((result as TiersError).message).toContain("no usable field");
+  });
+
+  it("names `execution` among the accepted keys when a top-level key is unknown", () => {
+    const result = readTiers(tiersFileOf(root(), { foo: { model: "m" } }));
+    expect(result).toBeInstanceOf(TiersError);
+    expect((result as TiersError).message).toContain("small, medium, big, execution");
+  });
+
+  it("round-trips through writeTiers", () => {
+    const path = join(root(), "workflow_tiers.json");
+    writeTiers(path, { big: { model: "b" }, execution: "big" });
+    expect(readTiers(path)).toEqual({ big: { model: "b" }, execution: "big" });
+  });
+});
+
+describe("executionTier", () => {
+  it("is the tier that `execution` names", () => {
+    expect(executionTier(SMALL)).toEqual({ model: "x-small", provider: "p-small", effort: "low" });
+    expect(executionTier({ ...SMALL, execution: "big" })).toEqual({ model: "x-big" });
+  });
+
+  it("is undefined without the key, or when the named tier is not in the map", () => {
+    expect(executionTier({})).toBeUndefined();
+    expect(executionTier({ small: { model: "m" } })).toBeUndefined();
+    expect(executionTier({ small: { model: "m" }, execution: "big" })).toBeUndefined();
+  });
+});
+
+describe("lohra tiers list — mostra o `execution` (#987)", () => {
+  const list = (home: string): ReturnType<typeof runTiers> =>
+    runTiers({
+      action: "list",
+      noInput: true,
+      home,
+      environment: {},
+      probeOllama: () => Promise.reject(new Error("must not be called")),
+    });
+
+  it("prints the execution tier after the tiers", async () => {
+    const home = root();
+    tiersFileOf(home, { small: { provider: "openai", model: "m-small" }, execution: "small" });
+    const result = await list(home);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe("small: openai/m-small\nexecution: small\n");
+  });
+
+  it("prints nothing about it when the key is absent", async () => {
+    const home = root();
+    tiersFileOf(home, { small: "m-small" });
+    const result = await list(home);
+    expect(result.stdout).toBe("small: m-small\n");
+  });
+
+  it("exits 1 with the TiersError when `execution` names an undefined tier", async () => {
+    const home = root();
+    const path = tiersFileOf(home, { small: "m-small", execution: "big" });
+    const result = await list(home);
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain(path);
+    expect(result.stderr).toContain("execution");
   });
 });
