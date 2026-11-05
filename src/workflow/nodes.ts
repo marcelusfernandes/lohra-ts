@@ -4,6 +4,8 @@ export const MAX_GATE_ATTEMPTS = 3;
 export const MAX_NODE_MAX_ITERATIONS = 128;
 /** The most cases a `switch` may name (and the least is 2): a branch table, not a fan-out. */
 export const MAX_SWITCH_CASES = 16;
+/** The most rounds a `loop` may run (and the least is 1): the cap is mandatory, never a default. */
+export const MAX_LOOP_ROUNDS = 16;
 
 const COMMON = ["required", "depends_on"] as const;
 export const ROUTING_FIELDS = ["model", "tier", "effort", "provider"] as const;
@@ -23,9 +25,9 @@ export const ROUTING_FIELDS = ["model", "tier", "effort", "provider"] as const;
  * `judge_panel.synthesize` and `parallel.branches[*]` still spawn with the
  * OUTER node unmodified (`runJudgePanel`/`runParallel` pass `node`, never the
  * sub-object, to `collectLeaf`), so routing there really has no reader.
- * `switch.cases[*]` (#979) merges onto the node like `gate.body` does
- * (`makeBodyLeafRunner`), and its routing is refused for the same design reason:
- * the knobs go on the `switch` node, which every case inherits.
+ * `switch.cases[*]` (#979) and `loop.body` (#980) merge onto the node like `gate.body`
+ * does (`makeBodyLeafRunner`), and their routing is refused for the same design reason:
+ * the knobs go on the `switch`/`loop` node, which every case and every round inherits.
  */
 export const SUB_OBJECT_FIELDS = [
   "prompt",
@@ -86,6 +88,7 @@ export const NODE_SPECS: Readonly<Record<string, NodeSpec>> = Object.freeze({
   completeness_check: spec(["task", "results"], ["task", "results"], true),
   checkpoint: spec(["prompt", "default"], ["prompt"]),
   switch: spec(["value", "cases", "otherwise"], ["value", "cases"], true),
+  loop: spec(["body", "until", "max_rounds"], ["body", "until", "max_rounds"], true),
 });
 
 export const NODE_TYPES: ReadonlySet<string> = new Set(Object.keys(NODE_SPECS));

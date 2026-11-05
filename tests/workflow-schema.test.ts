@@ -21,13 +21,14 @@ const agent = (fields: Record<string, unknown> = {}): Record<string, unknown> =>
 });
 
 describe("workflow node registry", () => {
-  it("keeps the closed registry and boundaries (#979: + switch)", () => {
+  it("keeps the closed registry and boundaries (#979: + switch, #980: + loop)", () => {
     expect([...NODE_TYPES].sort()).toEqual([
       "agent",
       "checkpoint",
       "completeness_check",
       "gate",
       "judge_panel",
+      "loop",
       "loop_until_dry",
       "parallel",
       "pipeline",
@@ -53,6 +54,7 @@ describe("workflow node registry", () => {
       completeness_check: { required: ["results", "task"], routing: true },
       gate: { required: ["body", "validator"], routing: true },
       judge_panel: { required: ["attempts", "judges", "synthesize"], routing: true },
+      loop: { required: ["body", "max_rounds", "until"], routing: true },
       loop_until_dry: {
         required: ["body", "max_rounds", "stop_after_k_empty"],
         routing: true,

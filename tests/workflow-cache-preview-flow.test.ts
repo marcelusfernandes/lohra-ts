@@ -11,6 +11,9 @@
 //   - Preview: `replay`, `recompute` (a rota mexeu na identidade) e, para um
 //     caso `null`, `no_leaves`; um `value` que lê um upstream que teria de
 //     rodar de novo é `upstream_missing`.
+// Issue #980 (S3): o mesmo para o `loop` — um `leaf.started{role:"loop.round",
+// attempt:r}` e um `cache.stored` por rodada, o resume que continua da rodada em
+// que parou (`cache.replayed` nas feitas, só a próxima gasta leaf) e o preview.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -47,8 +50,17 @@ const USAGE = {
   reasoningTokens: 0,
 };
 
-/** Every leaf completes at once; a prompt that starts with `classify` answers `{kind: "investigate"}`. */
-function completingRuntime(): ChildRuntime {
+/**
+ * Every leaf completes at once; a prompt that starts with `classify` answers `{kind:
+ * "investigate"}`, and one that starts with `refine` answers a note that grows with the round it
+ * names (`round 0` is 3, `round 1` is 6, `round 2` is 9) — unless `behavior.failRound` is that
+ * round, whose leaf dies.
+ */
+interface Behavior {
+  failRound: number | null;
+}
+
+function completingRuntime(behavior: Behavior): ChildRuntime {
   const prompts = new Map<string, string>();
   let seq = 0;
   return {
@@ -58,12 +70,19 @@ function completingRuntime(): ChildRuntime {
       prompts.set(id, request.prompt);
       return id;
     },
-    collect: (id: string): ChildResult => ({
-      status: "complete",
-      output:
-        prompts.get(id)?.startsWith("classify") === true ? { kind: "investigate" } : { ok: true },
-      usage: USAGE,
-    }),
+    collect: (id: string): ChildResult => {
+      const prompt = prompts.get(id) ?? "";
+      if (prompt.startsWith("refine")) {
+        const round = Number(/round (\d+)/u.exec(prompt)?.[1] ?? "0");
+        if (round === behavior.failRound) return { status: "failed", output: "dead leaf" };
+        return { status: "complete", output: { score: 3 * round + 3 }, usage: USAGE };
+      }
+      return {
+        status: "complete",
+        output: prompt.startsWith("classify") ? { kind: "investigate" } : { ok: true },
+        usage: USAGE,
+      };
+    },
     steer: () => undefined,
     cancel: () => undefined,
     installLeafSandbox: (): LeafSandboxHandle => ({ dispose: () => undefined }),
@@ -71,6 +90,7 @@ function completingRuntime(): ChildRuntime {
 }
 
 function harness() {
+  const behavior: Behavior = { failRound: null };
   const root = mkdtempSync(join(tmpdir(), "lohra-switch-flow-"));
   roots.push(root);
   const connection = openStateDatabase(join(root, "state.db"));
@@ -87,7 +107,7 @@ function harness() {
     database: connection.database,
   };
   const service = new WorkflowService({
-    runtime: completingRuntime(),
+    runtime: completingRuntime(behavior),
     auditTrail: new AuditTrail(audit),
     store,
   });
@@ -95,6 +115,7 @@ function harness() {
     service,
     repository,
     audit,
+    behavior,
     preview: (runId: string, route?: { readonly provider: string }) =>
       previewResume({
         database: connection.database,
@@ -157,6 +178,7 @@ async function resume(h: Harness, runId: string, args: Record<string, unknown>):
 interface Seen {
   readonly type: string;
   readonly data: Readonly<Record<string, unknown>>;
+  readonly identity: Readonly<Record<string, unknown>>;
 }
 
 function eventsOf(h: Harness, runId: string, nodeId: string, segmentId?: string): readonly Seen[] {
@@ -167,7 +189,7 @@ function eventsOf(h: Harness, runId: string, nodeId: string, segmentId?: string)
   });
   return page.events
     .filter((event) => (event.identity.node_path as readonly string[] | undefined)?.[0] === nodeId)
-    .map((event) => ({ type: event.event_type, data: event.data }));
+    .map((event) => ({ type: event.event_type, data: event.data, identity: event.identity }));
 }
 
 const ofType = (events: readonly Seen[], type: string): readonly Seen[] =>
@@ -310,6 +332,163 @@ describe("workflow_preview over a switch (#979)", () => {
       if ("error" in result) throw new Error(result.error);
       expect(outcomeOf(result.nodes, "up").outcome).toBe("recompute");
       expect(outcomeOf(result.nodes, "sw").outcome).toBe("upstream_missing");
+    } finally {
+      h.close();
+    }
+  });
+});
+
+const REFINE_BODY = { prompt: "refine round ${round}, so far ${so_far}" };
+
+/** Grows 3, 6, 9 per round (`completingRuntime`): `gte 8` holds on the third. */
+const refineSpec = (extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+  meta: { name: "loop-flow" },
+  nodes: [
+    { id: "free", type: "agent", prompt: "unpinned" },
+    {
+      id: "refine",
+      type: "loop",
+      provider: "p1",
+      body: REFINE_BODY,
+      until: { gte: { path: "${last.score}", n: 8 } },
+      max_rounds: 5,
+      ...extra,
+    },
+  ],
+});
+
+/** Waits for the run to stop, whatever the status: a loop that stops short is `failed`/`degraded`. */
+async function settle(h: Harness, runId: string): Promise<string> {
+  const status = (await h.service.status(runId, true)) as { status: string };
+  return status.status;
+}
+
+async function launchLoop(h: Harness, raw: unknown): Promise<{ runId: string; status: string }> {
+  const started = h.service.start(raw, {});
+  if ("error" in started) throw new Error(started.error);
+  return { runId: started.run_id, status: await settle(h, started.run_id) };
+}
+
+async function resumeLoop(h: Harness, runId: string): Promise<{ segment: string; status: string }> {
+  const resumed = h.service.start(null, {}, { resumeRunId: runId });
+  if ("error" in resumed) throw new Error(resumed.error);
+  const status = await settle(h, runId);
+  const row = h.repository.getRunState(runId) as Record<string, unknown>;
+  return { segment: String(row.audit_segment_id), status };
+}
+
+describe("the ledger holds one leaf per round (#980)", () => {
+  it("leaf.started{loop.round, attempt: r} and a cache.stored for each round that ran, and no more", async () => {
+    const h = harness();
+    try {
+      const { runId, status } = await launchLoop(h, refineSpec());
+      expect(status).toBe("complete");
+      const events = eventsOf(h, runId, "refine");
+      const started = ofType(events, "leaf.started");
+      expect(started.map((event) => event.data.role)).toEqual([
+        "loop.round",
+        "loop.round",
+        "loop.round",
+      ]);
+      expect(started.map((event) => event.identity.attempt)).toEqual([0, 1, 2]);
+      expect(ofType(events, "leaf.completed")).toHaveLength(3);
+      expect(ofType(events, "cache.stored")).toHaveLength(3);
+      // The node already holds the earlier rounds' cells by the time a later round misses, which
+      // is all `identity_changed` means for a node with one cell per round (the skill says so).
+      expect(ofType(events, "cache.missed").map((event) => event.data.reason)).toEqual([
+        "never_completed",
+        "identity_changed",
+        "identity_changed",
+      ]);
+      expect(ofType(events, "workflow.node").at(-1)?.data).toMatchObject({ state: "complete" });
+    } finally {
+      h.close();
+    }
+  });
+
+  it("a loop that holds on round 0 leaves a single leaf and no trace of the rounds that never ran", async () => {
+    const h = harness();
+    try {
+      const raw = refineSpec({ until: { gte: { path: "${last.score}", n: 1 } } });
+      const { runId } = await launchLoop(h, raw);
+      const events = eventsOf(h, runId, "refine");
+      expect(ofType(events, "leaf.started")).toHaveLength(1);
+      expect(ofType(events, "cache.stored")).toHaveLength(1);
+    } finally {
+      h.close();
+    }
+  });
+});
+
+describe("a resume continues from the round it stopped at (#980)", () => {
+  it("rounds 0 and 1 are cache.replayed with no leaf; only round 2 runs, and the loop completes", async () => {
+    const h = harness();
+    try {
+      h.behavior.failRound = 2;
+      const first = await launchLoop(h, refineSpec());
+      expect(first.status).not.toBe("complete");
+      expect(ofType(eventsOf(h, first.runId, "refine"), "leaf.started")).toHaveLength(3);
+
+      h.behavior.failRound = null;
+      const second = await resumeLoop(h, first.runId);
+      expect(second.status).toBe("complete");
+      const events = eventsOf(h, first.runId, "refine", second.segment);
+      expect(ofType(events, "cache.replayed")).toHaveLength(2);
+      const started = ofType(events, "leaf.started");
+      expect(started).toHaveLength(1);
+      expect(started[0]?.data).toMatchObject({ role: "loop.round" });
+      expect(started[0]?.identity.attempt).toBe(2);
+      expect(ofType(events, "cache.stored")).toHaveLength(1);
+    } finally {
+      h.close();
+    }
+  });
+
+  it("a resume of a loop that finished replays every round and spawns nothing", async () => {
+    const h = harness();
+    try {
+      const first = await launchLoop(h, refineSpec());
+      const second = await resumeLoop(h, first.runId);
+      const events = eventsOf(h, first.runId, "refine", second.segment);
+      expect(ofType(events, "cache.replayed")).toHaveLength(3);
+      expect(ofType(events, "leaf.started")).toEqual([]);
+    } finally {
+      h.close();
+    }
+  });
+});
+
+describe("workflow_preview over a loop (#980)", () => {
+  it("replay when nothing moved, recompute when the route moved the cells", async () => {
+    const h = harness();
+    try {
+      const { runId } = await launchLoop(h, refineSpec());
+      const same = await h.preview(runId);
+      if ("error" in same) throw new Error(same.error);
+      expect(outcomeOf(same.nodes, "refine").outcome).toBe("replay");
+      expect(same.leaves_to_spawn).toBe(0);
+      expect(same.engine_faults).toBe(0);
+
+      const moved = await h.preview(runId, { provider: "p2" });
+      if ("error" in moved) throw new Error(moved.error);
+      expect(outcomeOf(moved.nodes, "refine").outcome).toBe("recompute");
+      expect(outcomeOf(moved.nodes, "free").outcome).toBe("replay");
+      expect(moved.leaves_to_spawn).toBeGreaterThanOrEqual(1);
+    } finally {
+      h.close();
+    }
+  });
+
+  it("a loop that stopped at round 2 previews as recompute: the replayed rounds do not hide the one still to run", async () => {
+    const h = harness();
+    try {
+      h.behavior.failRound = 2;
+      const { runId } = await launchLoop(h, refineSpec());
+      const result = await h.preview(runId);
+      if ("error" in result) throw new Error(result.error);
+      expect(outcomeOf(result.nodes, "refine").outcome).toBe("recompute");
+      expect(result.leaves_to_spawn).toBe(1);
+      expect(result.engine_faults).toBe(0);
     } finally {
       h.close();
     }

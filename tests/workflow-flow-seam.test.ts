@@ -143,20 +143,21 @@ function runWith(
 }
 
 describe("FLOW_STRATEGIES (#977)", () => {
-  // #979 (S2): `switch` is the first node a later issue adds through the table.
-  it("carries completeness_check, checkpoint and switch, frozen, and only for types the spec accepts", () => {
+  // #979 (S2): `switch` is the first node a later issue adds through the table; #980 (S3): `loop`.
+  it("carries completeness_check, checkpoint, loop and switch, frozen, and only for types the spec accepts", () => {
     expect(Object.keys(FLOW_STRATEGIES).sort()).toEqual([
       "checkpoint",
       "completeness_check",
+      "loop",
       "switch",
     ]);
     expect(Object.isFrozen(FLOW_STRATEGIES)).toBe(true);
     for (const type of Object.keys(FLOW_STRATEGIES)) expect(NODE_TYPES.has(type)).toBe(true);
   });
 
-  it("NODE_TYPES is the ten types the seam started with plus the nodes added through it: switch", () => {
+  it("NODE_TYPES is the ten types the seam started with plus the nodes added through it: switch, loop", () => {
     expect([...NODE_TYPES].sort().join(",")).toBe(
-      "agent,checkpoint,completeness_check,gate,judge_panel,loop_until_dry,parallel,pipeline,switch,verify,workflow",
+      "agent,checkpoint,completeness_check,gate,judge_panel,loop,loop_until_dry,parallel,pipeline,switch,verify,workflow",
     );
   });
 
