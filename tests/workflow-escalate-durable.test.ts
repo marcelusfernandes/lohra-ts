@@ -9,6 +9,9 @@
 //     rodou não roda de novo; um resume depois disso não pergunta de novo;
 //   - `when` falso conclui direto, sem pausa;
 //   - dentro de um `workflow` aninhado a chave é a escopada (`sub.review`), e a recusa a nomeia;
+//   - no motor, o id escopado do aninhado e a colisão (com a raiz, com um irmão, entre
+//     `checkpoint` e `escalate` nos dois sentidos, com o `rename_hint`), como no checkpoint;
+//   - um `summary` que não renderiza continua parando o run para a pessoa (rodada 2);
 //   - `lohra workflow list` mostra o motivo e o `kind`; `watch` imprime o hint no stderr.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,6 +27,9 @@ import {
   WorkflowRepository,
 } from "../src/state/index.js";
 import { AuditTrail } from "../src/workflow/audit-trail.js";
+import { WorkflowEngine } from "../src/workflow/engine.js";
+import { validateSpec } from "../src/workflow/schema.js";
+import type { WorkflowSpec } from "../src/workflow/types.js";
 import { ESCALATED_HINT, ESCALATED_PAUSE } from "../src/workflow/service-rollup.js";
 import { WorkflowService, type OwnershipStore } from "../src/workflow/service.js";
 import type {
@@ -516,5 +522,177 @@ describe("lohra workflow shows the escalation (#981)", () => {
     } finally {
       h.close();
     }
+  });
+});
+
+/** The engine alone, over a runtime that is never asked for a leaf: these specs hold no agent. */
+function nestedSpec(nodes: readonly Record<string, unknown>[]): WorkflowSpec {
+  const result = validateSpec({ meta: { name: "escalate-nested" }, nodes });
+  if ("issues" in result) throw new Error(result.message);
+  return result;
+}
+
+function runNested(
+  workflow: WorkflowSpec,
+  args: Record<string, unknown>,
+  options: {
+    readonly loader: (ref: string) => unknown;
+    readonly answers?: Record<string, unknown>;
+  },
+) {
+  return new WorkflowEngine({
+    runtime: completingRuntime([]),
+    runId: "run",
+    logError: () => undefined,
+    loader: options.loader,
+    ...(options.answers === undefined ? {} : { checkpointAnswers: options.answers }),
+  }).run(workflow, args);
+}
+
+describe("inside a nested workflow the id is scoped, at the engine (#981)", () => {
+  const inner = {
+    meta: { name: "inner" },
+    nodes: [
+      {
+        id: "review",
+        type: "escalate",
+        when: { field_true: { path: "${args.flag}" } },
+        kind: "inner_review",
+        summary: "inner case",
+      },
+    ],
+  };
+  const loader = (_ref: string): unknown => inner;
+  const sub = (id = "sub", extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+    id,
+    type: "workflow",
+    ref: "inner",
+    args: { flag: true },
+    ...extra,
+  });
+  const rootReview = {
+    id: "review",
+    type: "escalate",
+    when: { field_true: { path: "${args.flag}" } },
+    kind: "root_review",
+    summary: "root case",
+  };
+
+  it("reports the scoped id <workflow>.<escalate> and takes the answer under that key", async () => {
+    const workflow = nestedSpec([sub()]);
+    const paused = await runNested(workflow, {}, { loader });
+    expect(paused.status).toBe("paused");
+    expect(paused.pauseReason).toBe("escalated");
+    expect(paused.checkpoint).toEqual({
+      node_id: "sub.review",
+      kind: "inner_review",
+      summary: "inner case",
+    });
+
+    const done = await runNested(workflow, {}, { loader, answers: { "sub.review": "ok" } });
+    expect(done.status).toBe("complete");
+    expect(done.outputs.sub).toEqual({
+      review: { escalated: true, kind: "inner_review", summary: "inner case", answer: "ok" },
+    });
+  });
+
+  it("the bare id still works while nothing else owns it", async () => {
+    const done = await runNested(nestedSpec([sub()]), {}, { loader, answers: { review: "ok" } });
+    expect(done.status).toBe("complete");
+    expect((done.outputs.sub as { review: { answer: string } }).review.answer).toBe("ok");
+  });
+
+  it("a bare id that the root also owns is refused for the child, and named", async () => {
+    const workflow = nestedSpec([rootReview, sub("sub", { depends_on: ["review"] })]);
+    const result = await runNested(workflow, { flag: true }, { loader, answers: { review: "r" } });
+    expect(result.outputs.review).toMatchObject({ escalated: true, answer: "r" });
+    expect(result.status).toBe("paused");
+    expect(result.pauseReason).toBe("escalated");
+    expect(result.checkpoint).toMatchObject({ node_id: "sub.review" });
+    expect(
+      result.faults.some((fault) => fault.includes("collides") && fault.includes("sub.review")),
+    ).toBe(true);
+
+    const done = await runNested(
+      workflow,
+      { flag: true },
+      {
+        loader,
+        answers: { review: "r", "sub.review": "c" },
+      },
+    );
+    expect(done.status).toBe("complete");
+    expect((done.outputs.sub as { review: { answer: string } }).review.answer).toBe("c");
+  });
+
+  it("two sibling workflows that share the inner id are ambiguous for the bare id (#319)", async () => {
+    const workflow = nestedSpec([sub("one"), sub("two")]);
+    const refused = await runNested(workflow, {}, { loader, answers: { review: "x" } });
+    expect(refused.status).toBe("paused");
+    expect(refused.checkpoint).toMatchObject({ node_id: "one.review" });
+    expect(refused.faults.some((fault) => fault.includes("collides"))).toBe(true);
+
+    const done = await runNested(
+      workflow,
+      {},
+      {
+        loader,
+        answers: { "one.review": "a", "two.review": "b" },
+      },
+    );
+    expect(done.status).toBe("complete");
+    expect((done.outputs.one as { review: { answer: string } }).review.answer).toBe("a");
+    expect((done.outputs.two as { review: { answer: string } }).review.answer).toBe("b");
+  });
+
+  it("a checkpoint at the root and an escalate in the child share the answer key space", async () => {
+    const workflow = nestedSpec([
+      { id: "review", type: "checkpoint", prompt: "root?" },
+      sub("sub", { depends_on: ["review"] }),
+    ]);
+    const result = await runNested(workflow, {}, { loader, answers: { review: "yes" } });
+    expect(result.outputs.review).toBe("yes");
+    expect(result.status).toBe("paused");
+    expect(result.pauseReason).toBe("escalated");
+    expect(result.checkpoint).toMatchObject({ node_id: "sub.review" });
+    expect(result.faults.some((fault) => fault.includes("collides"))).toBe(true);
+  });
+
+  it("an escalate at the root and a checkpoint in the child do too", async () => {
+    const childCheckpoint = {
+      meta: { name: "inner-checkpoint" },
+      nodes: [{ id: "review", type: "checkpoint", prompt: "child?" }],
+    };
+    const workflow = nestedSpec([rootReview, sub("sub", { depends_on: ["review"] })]);
+    const result = await runNested(
+      workflow,
+      { flag: true },
+      {
+        loader: () => childCheckpoint,
+        answers: { review: "yes" },
+      },
+    );
+    expect(result.outputs.review).toMatchObject({ escalated: true, answer: "yes" });
+    expect(result.status).toBe("paused");
+    expect(result.pauseReason).toBe("checkpoint");
+    expect(result.checkpoint).toMatchObject({ node_id: "sub.review" });
+  });
+
+  it("a root id spelled like the scoped key is a dead end the payload says so about (rename_hint)", async () => {
+    const dotted = { ...rootReview, id: "sub.review" };
+    const workflow = nestedSpec([dotted, sub("sub", { depends_on: ["sub.review"] })]);
+    const result = await runNested(
+      workflow,
+      { flag: true },
+      {
+        loader,
+        answers: { "sub.review": "x" },
+      },
+    );
+    expect(result.status).toBe("paused");
+    expect(result.checkpoint).toMatchObject({ node_id: "sub.review", kind: "inner_review" });
+    const hint = (result.checkpoint as { rename_hint?: string }).rename_hint;
+    expect(hint).toContain("sub.review");
+    expect(hint).toContain("escalate");
   });
 });
