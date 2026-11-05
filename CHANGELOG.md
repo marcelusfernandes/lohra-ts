@@ -1,5 +1,168 @@
 # Changelog
 
+## [0.1.0] - 2026-11-05
+
+The registry version this cut follows is published npm `0.0.12` (2026-09-14). The grouped lists under Added through CI are every first-parent merge on `main` after that release merge (`43e8ab06`, PR #691) through `ef00bac4` (PR #992). There is no `v*` tag in the repository, so the cutoff is that merge rather than `git tag`. The in-repo `[0.0.13]` section further down was not published; its `doctor` fix is also listed here. Each grouped line is the merge title, unchanged. A parenthetical number is the pull request, and an issue number appears when the title already included one.
+
+### Highlights
+
+- **Skills on clients (M13), through #940.** Shipped: map global clients and export the TypeScript kit (#932, PR #936), install, update, and remove only the managed kit (#933, PR #937), and `lohra skills add` / `lohra skills remove` for Claude, Codex, OpenCode, and Pi (#934, PR #940). Not in this cut, deferred to 0.1.1: keyboard client selection in `init` (#938) and choosing the default provider explicitly in `init` (#939).
+- **Windows (M25): in progress, not a support promise.** Hardening has landed and the milestone is still open. Already on `main`, among other fixes: private destinations before a write (#921), home and profile created protected (#943), private credential saves (#926) and a shorter save (#953), a pre-existing home accepted when it inherits only approved identities (#959), and private media files (#952). Validation and subprocess work remain open. macOS and Linux are the supported platforms. Full Windows support is not promised, and this cut does not make the Windows CI jobs required.
+- **Workflow templates (M26).** PR #974 (epic #969) landed the four pieces together: `workflow_save` stores a run that finished `complete` (#970), `run_workflow` with `{template}` runs that ref and records the origin (#971), plan events carry the origin (#972), and `workflow_templates` plus `lohra workflow templates` show the scoreboard (#973). Docs for that library: PR #975. Saving happens when something asks `workflow_save`. Nothing promotes a template on its own, and there is no learning loop.
+- **Flow-control nodes (M27).** Mechanical predicates (#977, PR #984). A model-free `callTool` goes through the leaf sandbox (#978, PR #983). `switch` picks one case by a field value (#979, PR #985). `loop` repeats until a predicate holds, with a required `max_rounds` cap of 1 to 16 (#980, PR #986). `escalate` is fail-closed: it has no default resume, and a condition that cannot be evaluated pauses for a person instead of skipping them (#981, PR #988). `call` runs `read_file` or `web_fetch` only, with a bounded timeout and retries (#982, PR #990). A node or sub-agent that names no model of its own uses the default execution tier (#987, PR #989). Docs: #991, PR #992.
+
+### Added
+
+- feat(workflow): nó call chama read_file ou web_fetch sem modelo, com timeout e retries limitados (#982) (#990)
+- feat(workflow): tier padrão de execução para nós e sub-agentes sem modelo próprio (#989)
+- feat(workflow): nó escalate pausa o run para revisão quando um predicado vale (#988)
+- feat(workflow): nó loop repete um corpo até um predicado, com max_rounds obrigatório (#986)
+- feat(workflow): nó switch escolhe um caso pelo valor de um campo do estado (#985)
+- feat(workflow): predicados mecânicos sobre o estado e costura de estratégias fora de engine.ts (#984)
+- feat(workflow): porta de chamada de tool sem modelo pelo sandbox do leaf (#978) (#983)
+- feat(workflow): orquestrador guarda e reusa os workflows que constrói (#969) (#974)
+- feat(cli): gerenciar skills globais por cliente com add e remove (#940)
+- feat(skills): instalar atualizar e remover apenas o kit gerenciado (#937)
+- feat(skills): mapear clientes globais e exportar o kit TypeScript (#936)
+- feat(windows): proteger destinos privados antes de gravar (#921)
+- feat(ci): selecionar rota nativa pelo diff histórico (#912)
+- feat(ci): executar validação nativa positiva explícita (#911)
+- feat(ci): validar manifesto nativo por árvore Git (#910)
+- feat(ci): medir controle negativo nativo em red e HEAD (#905)
+- feat(subprocess): preparar artefato Windows fora do deadline (#902)
+- feat(subprocess): definir codec limitado do helper Windows (#901)
+- feat(cron): reivindicar ocorrência atomicamente no store (#768)
+- feat(cron): criar guarda transacional curta para jobs.json (#748)
+
+### Fixed
+
+- fix(cli): terminar depois de reportar a falha e reportá-la com o tipo (#968)
+- fix(cli): mostrar recusa de gravação privada sem stack trace e com a orientação (#964) (#965)
+- fix(windows): aceitar home com herança só de identidades aprovadas e orientar a recusa (#959)
+- fix(media): manter arquivos de mídia privados no Windows (#918) (#952)
+- fix(windows): criar home e profile já protegidos antes das credenciais (#943)
+- fix(cli): conectar lohra init ao terminal interativo (#929)
+- fix(onboarding): proteger .env antes de salvar no Windows (#928)
+- fix(auth): salvar credenciais privadas no Windows (#926)
+- fix(chat): mostrar tarefa interrompida ao retomar sessão (#924)
+- fix(chat): registrar cancelamento por Ctrl+C na sessão (#922)
+- fix(auth): encontrar login Codex no Windows sem HOME (#914)
+- fix(hooks): negar escrita quando Git falha ao iniciar (#889)
+- fix(hooks): negar operação quando a leitura do payload falha (#879)
+- fix(hooks): resolver aliases Windows antes de proteger escrita (#869)
+- fix(cli): compor caminho nativo do arquivo de tiers (#874)
+- fix(terminal): aguardar liberação do cwd na ferramenta (#871)
+- fix(terminal): isolar PTY Windows em bridge interna (#867)
+- fix(chat): validar doutrina antes de abrir o estado (#855)
+- fix(update): preserva causa quando subprocesso não inicia (#837)
+- fix(ci): executar npm portável no controle negativo (#808)
+- fix(dashboard): encerrar WebSockets ativos no shutdown (#798)
+- fix(mutations): iniciar Vitest portavelmente no harness (#786)
+- fix(terminal): liberar ConPTY e limitar captura no Windows (#782)
+- fix(prova): executar typecheck com npm portátil (#781)
+- fix(mutations): usar lançador npm portátil (#780)
+- fix(dashboard): exibir diagnóstico de falha do cron (#778)
+- fix(pack): validar prebuild ConPTY no Windows (#777)
+- fix(terminal): preservar quoting do cmd no Windows (#776)
+- fix(cron): preservar causa de falhas no diagnóstico (#774)
+- fix(pack): usar lançador npm portátil no consumidor (#775)
+- fix(workflow): validar contenção de caminhos Windows (#772)
+- fix(prepare): diagnosticar instalação de hooks no Windows (#773)
+- fix(scripts): executar npm pelo Node corrente sem shell (#771)
+- fix(cron): executar apenas a ocorrência reivindicada (#770)
+- fix(package): expor entrada pública do núcleo headless (#767)
+- fix(prova): normalizar caminhos do relatório no Windows (#769)
+- fix(windows): preservar LF no checkout (#766)
+- fix(cron): integrar guarda recuperável nas operações do store (#765)
+- fix(windows): permitir clone sem contorno de nome reservado (#747)
+- fix(doctor): remove o check python fixo de doctor e init (#697)
+
+### Changed
+
+- perf(windows): salvar credenciais sem esperar 5 a 8 segundos (#953)
+
+### Docs
+
+- docs(workflow): documentar call, switch, loop, escalate e o tier de execução (#992)
+- docs(workflow): biblioteca do orquestrador — guardar, rodar por nome e contar (#969) (#975)
+- docs(windows): documente pasta preexistente que herda identidades aprovadas (#962)
+- docs(adr): emendar a ADR 0006 para aceitar herança só de identidades aprovadas (#958)
+- docs(windows): documente a mídia privada e o custo de ACL após #952 e #953 (#955)
+- docs(windows): documente home, profile e credenciais após a #943 (#948)
+- docs(cli): documentar configuração pelo terminal (#930)
+- docs(windows): validar cancelamento e retomada de tarefa real (#925)
+- docs(windows): registrar política aprovada de proteção de arquivos (#896)
+- docs(windows): medir ownership de processos npm (#888)
+- docs(windows): propor contrato de permissões para aceite (#860)
+- docs(windows): deduplicar causas e vincular correções (#819)
+- docs(windows): triar permissões sinais e cleanup (#807)
+- docs(windows): separa falhas de serve e compactação (#805)
+- docs(windows): inventaria falhas residuais por teste e Node (#803)
+- docs(dashboard): explicar encerramento de WebSockets (#800)
+- docs(windows): medir encerramento gracioso dos servidores (#795)
+- docs(windows): isolar falhas de home na compactação (#793)
+- docs(windows): identificar causa do EBUSY no SQLite (#788)
+- docs(windows): consolidar evidências e plano de implementação (#716)
+- docs(windows): validar workflows e durabilidade entre processos (#715)
+- docs(windows): validar chat, sessões e gateway nativos (#713)
+- docs(windows): investigar cron, locks e falhas do agendador (#714)
+- docs(windows): medir build, testes e gates no Windows (#712)
+- docs(windows): validar tarball, instalação da CLI e atualização (#711)
+- docs(windows): investigar terminal, arquivos e cancelamento (#710)
+- docs(windows): validar clone, instalação e ambiente nativo (#709)
+
+### Tests
+
+- test(windows): prenda o ramo da herança aceita no script de ACL (#960) (#963)
+- test(auth): induzir falhas de persistência sem chmod no Windows (#903)
+- test(sqlite): preservar causa e cleanup em falha de fixture (#796)
+- test(onboarding): esperar caminho nativo de perfil (#894)
+- test(dashboard): validar launcher e encerramento nativos (#893)
+- test(dashboard): alinhar home da fixture de prompt (#892)
+- test(terminal): usar processos controlados nas fixtures (#891)
+- test(eval): restaurar cwd da fixture no Windows (#890)
+- test(cli): alinhar home das fixtures doctor e providers (#887)
+- test(windows): ajustar expectativas públicas de caminhos (#886)
+- test(auth): alinhar home da fixture da CLI (#881)
+- test(mutations): torna fixtures de subprocessos portáveis (#880)
+- test(windows): corrigir expectativas de caminhos em config e contexto (#878)
+- test(mutations): isolar EOL da fixture de archive (#876)
+- test(prepare): comparar identidade real do hook compartilhado (#875)
+- test(sqlite): fechar bancos de sessão templates e compactação (#872)
+- test(workflow): alinhar home das fixtures de auditoria (#870)
+- test(orchestration): fechar banco da fixture de composição (#868)
+- test(dashboard): alinhar home da fixture de overlay WS (#865)
+- test(windows): normalizar caminho do próprio meta-teste (#862)
+- test(workflow): alinhar home das fixtures duráveis (#861)
+- test(workflow): alinhar home de live tail e notices (#857)
+- test(package): executar npm portável na fixture de tarball (#856)
+- test(chat): alinhar home das fixtures integradas (#845)
+- test(skills): validar modo executável de forma portável (#844)
+- test(gateway): fechar bancos das fixtures de eventos WS (#843)
+- test(process): resolver shell nas bancadas Windows (#832)
+- test(gateway): fechar banco da fixture prompt.submit (#834)
+- test(stub): converte URL do driver para caminho nativo (#833)
+- test(gateway): fechar bancos das fixtures RPC e sockets (#831)
+- test(windows): respeita caminhos e saída nativos nas expectativas (#824)
+- test(workflow): fechar conexão da fixture leaf-read (#822)
+- test(cli): distingue terminação de limpeza no Windows (#818)
+- test(gateway): fechar conexão da fixture de sessões (#817)
+- test(gateway): fechar SQLite nas fixtures WebSocket (#801)
+- test(chat): isolar home dos testes de compactação no Windows (#797)
+- test(windows): validar permissões com semântica nativa (#790)
+- test(windows): comparar caminhos em envelopes JSON parseados (#785)
+- test(pack): validar consumidor real da biblioteca (#783)
+
+### Chore
+
+- chore(release): v0.0.13 (#699)
+
+### CI
+
+- ci(hooks): liberar merge autorizado pelo owner com check informativo vermelho (#945)
+- ci(windows): observar consumidor de tarball em job separado (#791)
+- ci(windows): registrar gates nativos informativos em Node 20/22 (#784)
+
 ## [0.0.13] - 2026-09-15
 
 ### Fixed

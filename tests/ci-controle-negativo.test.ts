@@ -734,4 +734,29 @@ describe("ehPrDeRelease (issue #694, bloqueava a #691)", () => {
   it("não SKIP: branch release/x.y.z mas diff vazio (nada mudou, não 'release')", () => {
     expect(ehPrDeRelease("release/0.0.12", [])).toBe(false);
   });
+
+  it("SKIP: release/0.1.0 também carrega a guarda da versão do pacote e este allow-list", () => {
+    expect(
+      ehPrDeRelease("release/0.1.0", [
+        "package.json",
+        "package-lock.json",
+        "CHANGELOG.md",
+        "README.md",
+        "tests/version.test.ts",
+        "tests/ci-controle-negativo.test.ts",
+        "scripts/ci/controle-negativo/lib.ts",
+      ]),
+    ).toBe(true);
+  });
+
+  it("não SKIP: release com a guarda da versão e um arquivo de src/", () => {
+    expect(
+      ehPrDeRelease("release/0.1.0", [
+        "package.json",
+        "README.md",
+        "tests/version.test.ts",
+        "src/gateway/http/routes.ts",
+      ]),
+    ).toBe(false);
+  });
 });

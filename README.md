@@ -2,799 +2,131 @@
 
 [![ci](https://github.com/marcelusfernandes/lohra-ts/actions/workflows/ci.yml/badge.svg)](https://github.com/marcelusfernandes/lohra-ts/actions/workflows/ci.yml)
 
-Runtime TypeScript headless do Lohra, com CLI, gateway/dashboard, workflows
-duráveis, cron, MCP, ferramentas web e mídia. A versão atual é `0.0.13`.
+A versão atual é `0.1.0`.
 
-O runtime nasceu como port validado contra o runtime Python pinado até
-2026-09-04; desde essa data, por decisão do owner, evolui de forma
-independente do Python ([ADR 0003](docs/adr/0003-native-wire-format.md)). O
-pacote de produção não embute nem chama Python, pip, uv ou poetry; o Python
-aparece apenas no histórico de paridade do repositório de desenvolvimento.
+lohra-ts is a headless TypeScript agent runtime. One package gives you a CLI, a local gateway and dashboard, durable workflows, cron, MCP tools, and a skill kit for Claude, Codex, OpenCode, and Pi. The npm package is `lohra-ts`. The command it installs is `lohra`.
 
-## Instalação
+The package does not bundle or call Python. Since 2026-09-04 it is developed on its own, apart from the historical Python Lohra.
 
-Requer Node.js 20 ou 22, em macOS ou Linux — Windows está fora de suporte
-nesta milestone (épico #529). O pacote ainda não está publicado no npm (D8,
-gate do owner — `docs/adr/0004-trabalho-autonomo.md` item 9); hoje a
-instalação é por tarball, a partir de um checkout:
+## Install
+
+Node.js 20 or newer, on macOS or Linux.
 
 ```bash
-npm ci
-npm run build
-npm pack
-npm install -g ./lohra-ts-<versão>.tgz
+npm i -g lohra-ts
 lohra --version
-lohra doctor --json
+lohra doctor
 ```
 
-Quando o workflow de publicação (D7, issue #536) anexar o `.tgz` a uma
-GitHub Release, essa também será uma forma de instalar — ainda não existe.
-Quando uma versão estiver no npm, instalar fica em `npm i -g lohra-ts`
-(sem `@<versão>` fixa) — frase condicionada: nenhuma versão está lá hoje.
+`lohra-ts` is a public npm package. `0.0.12` was published on 2026-09-14. This git cut is `0.1.0`. Pushing the tag after merge is what publishes that version and opens the GitHub Release ([docs/release.md](docs/release.md)).
 
-Em Linux, o addon nativo `node-pty` (terminal local) não tem prebuild —
-`node_modules/node-pty/prebuilds/` só traz `darwin-arm64`, `darwin-x64`,
-`win32-arm64` e `win32-x64` (issue #549, D10) — então `npm install` compila
-com `node-gyp`, exigindo toolchain nativo (`python3`, `make`, `g++`; ver
-"Desenvolvimento" abaixo). `better-sqlite3` baixa um binário pré-compilado
-na instalação (`prebuild-install`, `node_modules/better-sqlite3/package.json`
-script `install`) — precisa de rede no momento do `npm install`/`npm ci`.
+Windows is in progress and is not a supported platform. A green Linux run is not a Windows promise. What the runtime already does with a Windows home, credentials, and generated images is in [docs/windows-home.md](docs/windows-home.md).
 
-A instalação de um pacote de consumidor (tarball, GitHub Release ou npm)
-executa só o `postinstall` (`scripts/postinstall.mjs`): um `chmod` no
-`spawn-helper` do prebuild do `node-pty`, cujo bit de execução se perde na
-extração do tarball em alguns ambientes — nenhum outro script roda. O
-`prepare` (`scripts/prepare.mjs`) não faz parte do pacote publicado (não
-está em `files` do `package.json`) e só roda em checkout com `.git` — em
-`npm run build && npm pack` acima ele já rodou via `npm ci`.
+If the Python Lohra is also on `PATH`, the first `lohra` wins. `lohra doctor --json` is this runtime's own report.
 
-Atualizar uma instalação existente: `lohra update` (ver "Self-update"
-abaixo). Notas de cada versão: [`CHANGELOG.md`](CHANGELOG.md); como uma
-release é cortada: [`docs/release.md`](docs/release.md).
+On the macOS and Linux runners that `pack-check` covers, `better-sqlite3` and `node-pty` are expected to come from prebuilds, not a local compile.
 
-Após instalar, `lohra init` com stdin/stderr em TTY pede provider/chave com entrada oculta.
-Com chave configurada, oferece modelo; rode novamente após salvar uma chave nova.
-`lohra init --no-input` ou stdin sem TTY só exibem relatório, sem gravar.
-Ctrl+C ou EOF interrompem explicitamente, sem anunciar conclusão.
-No Windows, o home, o profile e a pasta de imagens que o Lohra cria nascem protegidos quando o caminho permite; uma pasta que já existe é aceita se só herda o usuário, o SYSTEM e os Administradores.
-Com acesso de outra identidade, credencial e imagem são recusadas e a mensagem lista quem é e diz o que fazer; caminho sem proteção possível também é recusado. Sem migração: [detalhes](docs/windows-home.md).
+## First session
 
-## Biblioteca headless
+On a TTY, `lohra init` asks which provider to use. Terminal answers are hidden: the prompt says so, and Ctrl+C or EOF stops setup without claiming it finished. If that provider needs a key that is not set, init asks for it. If a key is already set, it asks for a default model. It may also offer to copy the legacy `use-lohra` kit into harness directories it already sees. That is not the client installer below.
 
-A entrada `import "lohra-ts"` expõe somente `ConversationRuntime`,
-`SqliteConversationRepository`, `SessionRepository` e `openStateDatabase` como
-valores. Os tipos públicos são `ConversationRuntimeOptions`,
-`ConversationRepository`, `ModelTransport`, `ModelRequest`, `ToolDispatcher`,
-`ConversationRuntimeEvent`, `ConversationTurnResult`, `NormalizedResponse`,
-`SystemBands` e `StateConnection`. O import não abre o banco, lê credenciais,
-inicia a CLI ou conecta a um provedor. O consumidor escolhe explicitamente o
-caminho do estado, injeta transporte e ferramentas e fecha a conexão ao fim.
-
-Este exemplo faz um turno offline com resposta determinística; substitua o
-transporte pelo seu adaptador de modelo para uso real. Após instalar o pacote
-localmente, execute como módulo ESM:
-
-```js
-import { randomUUID } from "node:crypto";
-import { join } from "node:path";
-import {
-  ConversationRuntime,
-  SessionRepository,
-  SqliteConversationRepository,
-  openStateDatabase,
-} from "lohra-ts";
-
-const connection = openStateDatabase(join(process.cwd(), ".lohra", "state.db"));
-try {
-  const repository = new SqliteConversationRepository(
-    new SessionRepository(connection.database, undefined, connection.ftsEnabled),
-  );
-  const transport = {
-    async complete() {
-      return {
-        content: "resposta offline",
-        finishReason: "stop",
-        toolCalls: [],
-        reasoning: null,
-        usage: null,
-        providerData: null,
-      };
-    },
-    close() {},
-  };
-  const runtime = new ConversationRuntime({
-    repository,
-    transport,
-    promptSnapshot: () => "Responda com clareza.",
-    eventSink: (event) => console.error(event.type),
-    idSource: randomUUID,
-    clock: () => Date.now() / 1_000,
-    maxIterations: 2,
-  });
-  const turn = await runtime.runTurn({
-    input: "Olá",
-    provider: "offline",
-    model: "deterministic",
-    cwd: process.cwd(),
-  });
-  console.log(turn.response.content);
-} finally {
-  connection.close();
-}
-```
-
-`ModelTransport` e `ToolDispatcher` são portas de injeção; este exemplo não
-registra ferramentas nem faz chamadas de rede. Para retomar uma sessão, passe
-`turn.sessionId` em `runTurn` com o mesmo repositório de estado.
-
-`npm run pack:check` instala o tarball em um consumidor temporário sem `.git`,
-confere `main` e `types` (inclusive declarações transitivas), compila um exemplo
-TypeScript e executa um turno offline pela entrada pública. O mesmo check
-continua exercitando a CLI instalada e os addons nativos.
-
-Para desenvolver a partir do checkout:
+`lohra init --no-input`, or a run whose stdin is not a terminal, only prints the report and writes nothing.
 
 ```bash
-npm ci
-npm run build
-npm run typecheck
-npm test
-npm run lint
-npm run format:check
+lohra init
+lohra chat "What is in this directory?"
 ```
 
-Em sessões de Claude Code, `.claude/settings.json` formata e aplica `eslint --fix` em cada
-arquivo editado (hook `PostToolUse`) e libera sem prompt os comandos read-only acima; o gate
-continua sendo `npm run lint` + `npm run format:check`.
+`lohra chat` is one turn. `--json` prints a machine-readable result. Resume with `lohra chat --session ID "..."`.
 
-`npm test` roda a suíte inteira independente de `npm run build`: nenhum arquivo de teste
-importa de `dist/` (`npm ci && npm test` já passa em checkout limpo). `npm run typecheck` e
-`npm run lint`, ao contrário, exigem `dist/` — alguns scripts de paridade sob `scripts/`
-importam o pacote compilado de propósito (smoke tests do artefato publicado), por isso a
-ordem acima mantém `npm run build` antes deles.
-
-## Desenvolvimento
-
-`npm run doutor` confere se esta máquina tem o que o checkout precisa — Node
-≥ 20, `python3`/`make`/`g++` (só em Linux, build nativo do `node-pty`), `gh`
-autenticado, e os dois hooks locais (`git-pre-push`, `pre-commit` do
-lefthook) instalados. Cada falta vem com o comando que resolve; sai `1` se
-sobrar alguma:
-
-```
-FALTA  gh — gh não encontrado no PATH
-       resolve com: brew install gh && gh auth login
-```
-
-`npm ci`/`npm install` (`scripts/prepare.mjs`, script `prepare` — roda só em
-checkout com `.git`, nunca em instalação de consumidor a partir do
-tarball/registry) instalam dois hooks nativos do git neste checkout:
-
-- `git-pre-push` — camada 2 da proteção da `main` (`.claude/hooks/README.md`):
-  nega push direto em `main`/`master` e qualquer push não fast-forward.
-- `pre-commit` do [lefthook](https://lefthook.dev) (`lefthook.yml`):
-  `prettier --check` e `eslint` nos arquivos staged (`.ts`/`.mjs`/`.js`,
-  `prettier` cobre também `.md`/`.yml`/`.json`) — um commit desformatado é
-  recusado antes de chegar ao CI. `lefthook install` sem argumento instala
-  todos os hooks do `lefthook.yml` e faz backup dos existentes; usamos
-  `install pre-commit` para que o `pre-push` nativo continue sendo o de
-  `.claude/hooks/git-pre-push`.
-
-Mutation testing (mecânicas do harness, formato do catálogo, contagem por
-fatia e como adicionar um mutante ou uma fatia nova) está em
-[docs/mutation-testing.md](docs/mutation-testing.md).
-
-## Prova por issue
-
-Cada issue declara sua prova em `prova/<slug>.ts` (`<slug>` é o mesmo da branch
-`<type>/<n>-<slug>`, ver `.claude/rules/git-workflow.md`):
-
-```ts
-export default { unit: ["tests/x.test.ts", "tests/y.test.ts"] } satisfies Declaracao;
-```
-
-`unit` lista os arquivos de teste que a issue cobre (caminhos relativos à
-raiz; precisam existir). `check` (opcional, default `false`) também roda
-`npm run typecheck` antes do vitest. `tests/prova-declaracoes.test.ts` varre
-todas as `prova/*.ts` a cada `npm test` e reprova, citando slug e caminho, se
-alguma delas declarar em `unit` um arquivo inexistente, fora de `tests/` ou
-sem sufixo `.test.ts` — apagar ou mover um teste declarado por uma prova
-antiga não passa em silêncio.
-
-```bash
-npm run prova -- <slug>
-```
-
-roda **só** os arquivos declarados (não a suíte inteira) e escreve
-`.prova/<slug>/resumo.json` — `{ ok, total, falhas }`, onde `total` é o
-número de testes **executados** (`passed`/`failed`; testes `skip`/`todo`
-individuais não contam para `total` e não viram falha — nunca rodaram) e
-cada `falhas[]` tem `{ nome, motivo }`. Três formas de falha explícita, além
-de um teste reprovado: um arquivo declarado que o vitest não reportou (fora
-do `include`, ou nunca alcançado) vira `"<arquivo> did not run"`; um arquivo
-que rodou mas cujos testes são **todos** `skip`/`todo` (nenhum de fato
-executou) vira `"<arquivo> ran zero tests"` — skip **parcial**, com pelo
-menos um teste executado no arquivo, continua verde; e um processo do
-vitest que sai com código diferente de zero e, mesmo assim, produziria um
-relatório "ok" vira `"vitest run"` em vez de `ok:true`. Nenhuma dessas três
-passa em silêncio. `vitest.json` e `resumo.json` de uma execução anterior
-do mesmo slug são apagados antes de cada execução (não o diretório
-`.prova/<slug>/` inteiro) — o relatório de uma corrida anterior nunca
-sobrevive para ser lido como se fosse desta; ambos são gerados de novo a
-cada execução e `.prova/` é ignorado por git, prettier e eslint.
-`LOHRA_PROVA_OUT` redireciona a saída para `<LOHRA_PROVA_OUT>/<slug>/` em
-vez de `.prova/<slug>/` (evita corrida entre execuções concorrentes do
-mesmo slug) — o hook `Stop` (#46) ignora essa variável e sempre lê
-`.prova/<slug>/resumo.json`, então ela serve para uma segunda execução em
-paralelo fora do caminho que o hook observa, não para redirecioná-lo. Sem
-`prova/<slug>.ts`, ou com um arquivo declarado inexistente, o comando sai
-com `exit 1` citando o caminho.
-
-## CI
-
-Toda PR passa por cinco checks (`.github/workflows/ci.yml`) mais `mutations`
-(`.github/workflows/mutations.yml`, #225); `main` só recebe
-merge commit com todos verdes e `review:approved` (ADR 0004):
-
-| check                | prova                                                                                                                                                                                                    | reproduzir localmente                                                                    |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `checks (20)`/`(22)` | suíte inteira (antes do build, #108), depois build, typecheck, lint, format em Node 20 e 22                                                                                                              | `npm test && npm run build && npm run typecheck && npm run lint && npm run format:check` |
-| `provenance`         | todo SHA aprovado em `docs/provenance.json` é ancestral do HEAD (push estrito; PR tolera `pending` com `--pending-ok`, #160)                                                                             | `npm run provenance:check`                                                               |
-| `escopo`             | o diff cabe nos globs de `## Files` da issue ligada por `Closes #N` (mais `authorised:` que só o orquestrador põe)                                                                                       | `npm run ci:escopo -- --files-file f --issue-body-file i --pr-body-file p`               |
-| `contratos`          | nada em `docs/reference/**`/`lohra/**`; sem import de `python-json`/`python-repr` (após #17); arquivo ≤ 800 linhas, ou já assim na base e sem crescer (#93), ou com `@generated` na primeira linha (#91) | `npm run ci:contratos -- --files-file f [--apos-17]`                                     |
-| `controle-negativo`  | os testes do diff (overlay do diff inteiro em `tests/**`+`prova/**`, helpers/fixtures inclusos — #123), aplicados sobre a base da PR, reprovam (`npm run prova -- <slug>` na base)                       | `npm run ci:controle-negativo -- --base <sha> --head <sha>`                              |
-
-O workflow `mutations.yml` (#156; check required `mutations` desde #225) roda
-em toda `pull_request`: o job `plan` roda `scripts/github/mutations-matrix.ts`
-(lê `scripts/mutations/slices.json` e o diff `base...head`; mudança em
-`scripts/mutations/**` seleciona todas as fatias), o job `mutate` roda o
-`script` de cada fatia selecionada (`mutations:t15`, `t16`, …) com o
-`.mutation-evidence/` como artefato `mutation-evidence-<fatia>`, e o job-resumo
-`mutations` (nome fixo, o que o ruleset exige) passa quando `mutate` terminou
-verde ou foi pulado (diff sem `src/`: `count: 0`, ~20 s) e falha quando alguma
-fatia falhou. Reproduzir localmente a seleção:
-`npx tsx scripts/github/mutations-matrix.ts --files-file f`.
-
-Os três últimos rodam só em `pull_request` e escrevem um bloco no summary do
-job. Quando reprovam:
-
-- `escopo` lista os arquivos fora dos globs. Ou a issue passa a declarar o
-  glob em `## Files`, ou o orquestrador (só ele) escreve
-  `authorised: ` + glob em crase na seção `## Files` da PR. Issue anterior ao
-  padrão (#44) sem `## Files` reprova toda PR com uma mensagem citando o
-  número da issue: o orquestrador acrescenta a seção à issue antes de
-  reivindicá-la. Uma PR sem `Closes #N` no corpo (exceções do
-  `git-workflow.md` — typo, arquivo pequeno, mudança exploratória) também
-  passa quando `authorised:` cobre o diff inteiro, sem precisar de issue
-  linkada; `authorised:` dentro de um bloco de código (fence) nunca conta.
-- `contratos` lista `regra: arquivo — motivo`; erro de uso (flag desconhecida)
-  ou de infraestrutura (evento malformado, `GITHUB_STEP_SUMMARY` inválido,
-  `git` ausente) sai com exit 2, nunca um exit 1 indistinguível de violação.
-  `arquivo-grande` compara `linhas(head)` com `linhas(base)` (#93): arquivo
-  já acima de 800 linhas na base que só é editado, sem crescer, passa; que
-  cresce ou que é novo reprova, citando as duas contagens quando há base
-  (`1216 → 1220 linhas (> 800; a base já tinha 1216)`). O modo dry-run
-  (`--files-file`, usado no comando de reprodução local acima) não conhece a
-  base do CI: trata todo arquivo como novo, fail-closed, e avisa disso no
-  stderr. Arquivo com `@generated` na primeira linha fica isento do limite —
-  tabela de dados gerada (`src/web/html5-entities.ts`), não código escrito à
-  mão; o marcador em qualquer outro lugar do arquivo não conta (#91).
-- `controle-negativo` reprova em `vacuous-pass` (o teste novo já passa na base
-  sem a implementação: escreva primeiro o teste que reprova, commit
-  `test(red):`), em `structural-red` sem um commit `test(red):` válido no range
-  (um que toque os testes do diff e adicione um stub que lança — um stub só
-  dentro de um comentário não conta), em PR de feature sem `prova/<slug>.ts`,
-  e quando a base não consegue rodar a prova (`package.json` ilegível, sem
-  `resumo.json`, `npm run prova` sem terminar dentro de 10 minutos). Base sem
-  harness (`package.json` ausente, ou sem `scripts.prova` — o harness #42
-  ainda não existia naquele commit) é PASS logado no summary, não falha.
-  Fora do checkout de CI (sem `--branch`), uma branch local que não segue
-  `<type>/<n>-<slug>` reprova pedindo `--slug`/`--branch` explícito. PR só de
-  `docs`/`process` é SKIP; PR cujo diff (tirando `docs`/`process`) cai
-  inteiro em `tests/**`/`prova/**` (fixtures contam nesse "inteiro"), com
-  pelo menos um `tests/**\/*.test.ts` especificamente (nunca uma fixture)
-  EDITADO (não criado, não deletado no head), também é SKIP — o overlay reproduz o próprio HEAD (base+overlay ≡ head) e o
-  mecanismo nunca discrimina vermelho de verde; o revisor confere o commit
-  `test(red):` manualmente. Um `tests/**` inteiramente NOVO (nenhum editado)
-  também vira `vacuous-pass` por construção — sem `src/**` no diff, o
-  mecanismo não tem como discriminar mesmo com um teste de verdade; em vez
-  de reprovar sempre, aceita um commit `test(red):` que toque os testes do
-  diff como controle manual (SKIP citando o sha), e reprova citando a
-  exigência quando esse commit não existe (issue #117).
-
-## CLI
-
-Os comandos top-level públicos, na ordem exibida pelo help, são:
-
-`init`, `doctor`, `chat`, `dashboard`, `serve`, `cron`, `workflow`, `models`,
-`tiers`, `profile`, `auth`, `skill`, `skills` e `update`.
-Gestão global: [`skills add/remove`](docs/skills-management.md).
-
-Exemplos:
-
-```bash
-lohra chat "Resuma este projeto" --json
-lohra dashboard --insecure --port 8000
-lohra dashboard --no-open --host 127.0.0.1 --port 9130
-lohra cron list
-lohra workflow list
-lohra workflow watch RUN_ID
-lohra workflow watch RUN_ID --events
-lohra workflow audit RUN_ID
-lohra workflow notices RUN_ID --json
-lohra workflow notices --ack ID
-lohra update --check
-```
-
-Em `chat`, Ctrl+C ou SIGTERM solicita o cancelamento do turno. Quando a
-operação em andamento se encerra cooperativamente, o comando sai com erro;
-`--json` informa `completed: false`, `error: "conversation cancelled"` e
-`session_id`. Retome com `lohra chat --session ID "..."`: o próximo turno
-recebe um aviso de cancelamento da sessão. No Windows, a ferramenta `terminal`
-encerra sua própria árvore de processos ao receber o sinal e aguarda a limpeza;
-outras ferramentas em andamento podem atrasar a saída. O turno interrompido
-não é gravado como concluído nem tem seu histórico parcial persistido;
-confirme os efeitos da ferramenta antes de pedir que ela seja executada de
-novo.
-
-Com uma assinatura Codex ativa e `auth_preference: "auto"`, `chat` recusa um
-`--provider` explícito antes de qualquer rede (`initializationError` citando
-`lohra auth prefer api_key`) em vez de mandar o `--model` alheio ao
-transporte da assinatura; `--model` sozinho, sem `--provider`, continua
-escolhendo o modelo da própria assinatura sem mudança
-(`docs/decisions/2026-09-13-flags-de-rota-com-assinatura.md`).
-
-No Windows, `chat` e `doctor` procuram o login em `CODEX_HOME` quando definido;
-caso contrário, usam `.codex` dentro de `HOME` ou do home do sistema quando
-`HOME` está ausente ou vazio. `LOHRA_HOME` controla somente o estado do Lohra
-e não muda o local do login Codex.
-
-Na rota `api_key` (sem assinatura ativa), sem `--provider`, `chat` e
-`dashboard` usam o provedor que `doctor` detecta (`detected_provider` —
-a primeira variável de API key configurada, ou `LOHRA_PROVIDER`
-explícito) em vez de recusar de cara; `--provider` explícito continua
-tendo precedência, e sem nenhuma chave configurada os dois comandos
-continuam concordando em "no provider configured" (issue #604).
-
-Já com `auth_preference: "subscription"` e a assinatura inativa, `chat` e
-`dashboard` recusam de cara com o mesmo erro no stderr (`PREFER_SUB_ERROR`,
-que aponta `lohra auth enable` + `lohra auth login`, ou `lohra auth prefer
-auto` para voltar à chave) e o mesmo código de saída 2, com ou sem
-`--provider`; o `dashboard` nem chega a abrir porta (issue #630; adendo em
-`docs/decisions/2026-09-13-flags-de-rota-com-assinatura.md`).
-
-Ollama vivo sozinho (nenhuma chave, nenhum `LOHRA_PROVIDER`) não entra nessa
-detecção: `doctor --json` mostra `usable: true` (conta o daemon local) mas
-`chat_default_provider: null`, e `chat`/`dashboard` sem `--provider` ainda
-caem na fronteira de sempre — a correção é `--provider ollama` ou
-`LOHRA_PROVIDER=ollama`, que o relatório humano do `doctor` já imprime
-quando é esse o caso (issue #631; tabela completa em
-[docs/provedores-deteccao.md](docs/provedores-deteccao.md)).
-
-`chat --no-tools` desliga o REGISTRO das tools (nenhuma chega ao catálogo
-enviado ao provedor) — não a memória, o perfil de usuário nem o índice de
-skills do prompt: esses três continuam entrando no system prompt mesmo sob
-`--no-tools` (issue #580), porque são conhecimento sobre a sessão e o
-operador, não uma capacidade de agir.
-
-`workflow` possui somente `list`, `watch`, `audit` e `notices`; não existe
-`workflow run`. Chat e dashboard compartilham a mesma composition root para
-workflow/audit, orquestração, cron, MCP, web e mídia. `notices` lê
-`operator_notices` — os avisos duráveis do canal (issue #400/#401), nunca só
-em memória — como tool (`workflow_notices`/`workflow_notices_ack`) e como
-CLI; `--ack <id>` reconhece um aviso e `--all` também mostra os já
-reconhecidos. Sem `run_id`/`RUN_ID`, as duas leituras divergem de escopo
-(issue #652): a tool `workflow_notices` nunca cruza avisos `session:*`
-(`NoticesListQuery.includeSessions` fica em `false` por padrão,
-`src/state/notices-repository.ts:311`; `src/workflow/notices-tool.ts:47-49`),
-mas `lohra workflow notices` (a CLI de operador) continua listando tudo,
-`session:*` incluso (`includeSessions: true` explícito,
-`src/commands/workflow.ts:190`), o mesmo contrato de antes da issue #589.
-Vocabulário de avisos, sink por processo, escopo e retenção em
-[docs/operator-notices.md](docs/operator-notices.md).
-
-`dashboard` aceita `--host` (default `127.0.0.1`, encaminhado ao bind real do
-servidor HTTP/WS — mesmo precedente de forma do `--host` de `serve`) e
-`--no-open` (aceito; no-op, já que este dashboard nunca abre browser — o
-flag existe para a invocação do app desktop não morrer em argumento não
-reconhecido). Um `--host` fora de loopback (`127.0.0.1`, `localhost`, `::1`)
-combinado com `--insecure` é recusado antes de qualquer bind — sem
-`--insecure` o token de sessão já é exigido por padrão, então nada muda
-nesse caso (análise em `docs/gate-decision.md`). Um
-`LOHRA_DASHBOARD_SESSION_TOKEN` vazio ou só espaços também é recusado antes
-de qualquer bind, em vez de valer como token válido.
-
-Ao receber Ctrl-C (SIGINT), `dashboard` encerra as conexões WebSocket ativas
-sem exigir que os clientes as fechem antes. Clientes que não cooperam são
-encerrados dentro de um prazo limitado. Quando a limpeza termina, o listener
-é liberado, a conexão SQLite é fechada e o comando sai com código 0; se a
-limpeza falhar, reporta erro com a causa do fechamento.
-
-Um run de `run_workflow` sobrevive ao processo que o lançou: `chat`/
-`dashboard` gravam cada nó concluído (`workflow_node_cache`), o estado do run
-e a trilha de auditoria no `state.db` da sessão sob um lease com TTL, não em
-memória. Se esse processo morrer no meio de um run, `lohra workflow list`,
-`watch` e `audit` — de qualquer terminal, contra o mesmo `state.db` — ainda
-enxergam o run; `watch` mostra o sufixo `(stale)` quando o lease expirou
-(o processo que o mantinha desapareceu). `run_workflow(resume_run_id=...)`
-retoma o run reaproveitando o cache: os nós já concluídos não são
-reexecutados, só o trabalho que ainda faltava quando o processo anterior
-parou (issue #103, `tests/workflow-cross-process.test.ts`).
-
-`list` e `watch` mostram por que um run pausou: a linha de status ganha um
-sufixo `(<pause_reason>)` — `checkpoint`, `escalated`, `token_budget_exhausted`,
-`user_requested`, `quota_exhausted` ou `route_fault` — e,
-quando o gasto de tokens excede `token_budget`, o campo de tokens ganha
-`(+N over)` (`1100/1000 tok (+100 over)`). `watch` ainda escreve no stderr a
-dica de retomada certa (a mesma que `run_workflow` devolve como `hint`)
-assim que o run termina pausado; `quota_exhausted` não tem dica porque
-retoma sozinho, sem ação do operador, e `route_fault` também não tem `hint`
-— em vez disso o run carrega `lesson` (o nó, o kind e a rota recusada, e,
-desde a milestone 11, uma `suggested_route` quando o operador pré-autorizou
-um fallback em `workflow_routes.json`), e a retomada certa é
-`run_workflow(resume_run_id=..., route={provider?, model?})` numa rota
-diferente — ou, sem `route`, aplicando a sugestão do envelope sozinha
-(issue #245, `tests/workflow-command.test.ts`; `route_fault`, o envelope e o
-pivô de rota em [`docs/workflow-supervision.md`](docs/workflow-supervision.md)).
-
-Um run em voo tem duas caudas independentes. Em processo — o mesmo que
-lançou ou retomou o run —, `workflow_status` devolve `live_tail`
-(`{events, next_cursor, dropped}`): os últimos eventos que esse processo
-observou, limitados por memória (no máximo 256 eventos ou 64 KiB
-serializados, o que vier primeiro; `dropped` conta quantos caíram do
-ring quando o teto foi cruzado). Passe o `next_cursor` da resposta anterior
-como `after_index` para pedir só o que é novo; um run só durável — visto
-de outro processo — nunca carrega `live_tail`. Fora do processo,
-`lohra workflow watch RUN_ID --events` segue o ledger durável
-(`workflow_audit`) por cursor: a cada iteração do polling já existente,
-imprime uma linha por evento novo (`seq  event_type  node_path  sub_id?
-segment_id`) além da linha de status, sem repetir o que já mostrou; sem
-`--events` o comportamento é o de sempre (issue #369). Tabela completa de
-eventos, identidade causal, ciclo de segmento e fail-closed em
-`docs/workflow-audit.md`.
-
-Três tools deixam intervir num run em voo sem esperar ele pausar sozinho:
-`workflow_steer` entrega uma mensagem ao próximo turno de um leaf vivo
-(por `node_id` ou `sub_id`); `workflow_leaf_read` lê os turnos que um leaf
-vivo já assentou (conteúdo bruto, não redigido — diferente de
-`workflow_audit`); e um run pausado com `route_fault` retoma numa rota
-diferente com `run_workflow(resume_run_id=..., route={provider?, model?})`.
-`workflow_preview {run_id, route?}` faz o dry-run desse resume — o que
-replayaria, o que recomputaria e por quê — sem gastar token, sem escrever
-nada e sem consumir um dos 3 pivôs de rota do run. `workflow_templates` lista a biblioteca
-(`~/.lohra/workflows/<ref>.json`): specs do operador e os que o orquestrador guardou com
-`workflow_save` a partir de um run `complete`, com origem e placar de runs; `run_workflow {template}`
-roda um pelo nome e `lohra workflow templates` mostra o placar. O orquestrador também
-monta workflows com `call` (lê um arquivo ou uma página sem modelo), `switch`, `loop`
-(`max_rounds` de 1 a 16) e `escalate` (pausa o run só quando uma condição vale), que a
-skill `workflow-flow-control` ensina. O `call` só lê a pasta de trabalho do run e as de
-`fs_allow` (`workflow_policy.json`); `"execution"` em `workflow_tiers.json` define o tier
-de quem não nomeia modelo. Detalhes, tetos e limites em [`docs/workflow-supervision.md`](docs/workflow-supervision.md).
-
-A tool `list_models` reporta `context_window` por modelo — a janela de
-contexto que o próprio provedor expõe em `/models` (`context_length` no
-OpenRouter; `max_input_tokens`/`context_window` em outros; `null`, nunca
-inventado, quando o provedor não informa nada). O resultado de cada busca
-ao vivo é guardado em `~/.lohra/context-windows.json`, um envelope
-versionado (`{"schema_version":1,"updated_at":...,"providers":{...}}`) que
-sobrevive a um reinício e serve de fallback quando um provedor não responde
-na busca seguinte — a tool não é read-only por causa disso. A escrita funde
-por modelo, não substitui o provedor inteiro: um `null` desta busca nunca
-apaga um número já conhecido daquele modelo, mas um número novo sempre
-vence, mesmo sobre um número antigo diferente. O teto de 2000 modelos por
-provedor e 8 MB no arquivo inteiro vale nos dois sentidos — na escrita e na
-leitura —, então um arquivo que ficou acima do teto (versão anterior,
-edição manual) é aparado de volta, não fica preso acima do teto para
-sempre. O nome é próprio deste runtime, não `model_windows.json` — o lohra
-Python já usa esse caminho num formato plano sem versão e descarta
-qualquer coisa que fuja dele, então dividir o arquivo faria os dois
-runtimes invalidarem o cache um do outro a cada uso. Um arquivo estranho no
-caminho deste runtime (sem `schema_version`, JSON inválido, maior que o
-teto) é tratado como formato desconhecido — nunca lido, refeito na próxima
-busca ao vivo (issue #249; fusão por modelo, teto simétrico e leitura
-congelada, issue #264).
-
-Antes de cada chamada ao modelo, `chat` estima quantos tokens o histórico
-mais o prompt de sistema e as definições de tool vão consumir e compara
-contra a janela efetiva do modelo (mesma resolução acima). Se estourar,
-compacta: resume as mensagens mais antigas com o próprio modelo da conversa
-e reescreve o histórico da sessão no lugar, mantendo as últimas mensagens
-intactas — o prompt de sistema nunca muda. Se, mesmo depois de compactar, o
-turno ainda não couber, ou se um turno já compactou uma vez e estoura de
-novo, o turno falha com um erro nomeado (`CONTEXT_WINDOW_EXCEEDED`) em vez
-de tentar compactar de novo — nunca um laço. Detalhes e a decisão de design
-em `docs/context-compaction.md` (issue #252).
-
-As 29 definições de tool (`src/tools/builtin-definitions.ts`) são reenviadas
-inteiras a cada iteração do turno. A issue #585 fez dieta nas descriptions
-— manual movido para a skill `workflow-authoring`, descriptions das tools
-básicas (`read_file`, `write_file`, `terminal`, `web_fetch`, `web_search`,
-`session_search`, `skill_view`) reescritas no padrão "quando usar / quando
-não / limite" — sem tocar schema, ordem ou nome de nenhuma tool: o catálogo
-caiu de 43.951 para menos de 22.000 chars de JSON (~18k para ~9k tokens pela
-regra de 2,4 chars/token deste runtime), piso pago em toda chamada mesmo
-quando a tarefa nunca usa workflow. Um teste de orçamento
-(`tests/builtin-definitions-budget.test.ts`) prende o teto em CI. Detalhes
-do piso por chamada e das faixas do prompt em
-[`docs/system-prompt.md`](docs/system-prompt.md).
-
-O system prompt também carrega uma doutrina de comportamento própria
-(`src/context/doctrine.ts`, issue #579): relatar o observado (uma falha de
-subagente ou workflow é falha do próprio modelo a relatar), tratar o escopo
-pedido como o entregável, e nunca terminar um turno em plano, pergunta ou
-promessa. Um núcleo universal (~400 tokens) vai para todo perfil de
-provedor; uma extensão de forma e julgamento (~370 tokens adicionais) só
-para perfis marcados "fortes" — `ollama` é o único perfil builtin sem ela
-por default, `LOHRA_DOCTRINE=core|extended` sobrepõe. Detalhes em
-[`docs/system-prompt.md`](docs/system-prompt.md).
-
-Essa doutrina inclui uma regra sobre conteúdo externo (issue #581): texto
-devolvido por `web_fetch`, um servidor MCP, um arquivo ou uma skill é dado,
-nunca instrução — mesmo quando lê como um comando dirigido ao modelo. No
-envelope, `web_fetch`/`web_search` no sucesso e todo resultado MCP no
-sucesso ou no erro carregam `"untrusted": true` (campo aditivo, última
-chave); desde a #670, o erro de `web_fetch` (`src/web/tool.ts:82-100`)
-também carrega a chave — a mensagem pode interpolar o `Content-Type` ou o
-hostname de um `Location` que o SERVIDOR escolheu num redirect — mas o erro
-de `web_search` continua sem ela, porque nenhuma mensagem ali interpola
-dado do servidor; `read_file` e `skill_view` marcam o mesmo campo quando o
-caminho ou a skill lidos, com symlinks resolvidos (`realOrResolved`,
-`src/skills/store.ts:184`), estão fora da raiz do projeto — `read_file`
-mede a partir do cwd do processo, `skill_view` a partir da raiz
-da sessão que abriu a tool — e também quando `skill_view` não sabe de onde
-a skill veio (`skill.path === undefined`, lado seguro: a doutrina promete
-menos sobre a origem, nunca mais); desde a #670, um erro não-`ENOENT` ao
-resolver o caminho real (`ELOOP` de um ciclo de symlinks, `EACCES`
-intermediário) também fecha a fronteira e marca a chave. As
-descriptions de `read_file`, `web_fetch`, `web_search`, `skill_view` e o
-wrapper de tool MCP citam a mesma frase de aviso. Detalhes em
-[`docs/system-prompt.md`](docs/system-prompt.md).
-
-O prompt do subagente (issue #583, spawnado por `delegate_task` ou
-`spawn_session`) carrega seu próprio `cwd` (bloco `Environment:`), a lista
-de tools que sobrou do deny-list do pai (`parent − E`, `childToolDefinitions`,
-`src/tools/child.ts:45-60` — sempre a mesma lista que o turno realmente
-recebe) e um contrato de retorno: a
-última linha do turno deve ser `result: <summary>`, `failed: <why>` ou
-`needs input: <what>`. `delegate_task`/`collect_session` devolvem esse
-valor lido de volta ao pai no campo aditivo `outcome` (`"result" |
-"failed" | "needs_input" | null`, última chave do envelope) — `null` quando
-o filho não terminou com a sentinela, nunca um erro. Detalhes em
-[`docs/system-prompt.md`](docs/system-prompt.md).
-
-### Erros e `--help`
-
-O texto de erro e de ajuda da CLI é próprio deste produto — não é um
-mimetismo do `argparse` nem de qualquer outra biblioteca, e pode mudar sem
-ADR (`docs/adr/0003-native-wire-format.md`, "Human-facing text", item 5).
-Exit codes, esses sim, são contrato e não mudam.
-
-Todo uso incorreto (comando desconhecido, opção desconhecida, opção sem
-valor, valor inválido) imprime duas linhas em `stderr` e sai com **exit 2**:
-
-```
-usage: lohra <comando> [options]
-lohra: error: <mensagem>
-```
-
-Exemplos:
-
-```
-$ lohra nope
-usage: lohra <command> [options]
-lohra: error: unknown command "nope"; available commands: init, doctor, chat, dashboard, serve, cron, workflow, models, tiers, profile, auth, skill, update
-
-$ lohra chat --model
-usage: lohra chat [options]
-lohra: error: option --model needs a value
-
-$ lohra cron --interval x
-usage: lohra cron [options]
-lohra: error: option --interval expects an integer, got "x"
-```
-
-`lohra --help` e `lohra <comando> --help` (exit 0) listam, respectivamente,
-todos os comandos e as opções/sub-ações de um comando, cada uma com uma
-frase de descrição.
-
-### Envelope `--json`
-
-Todo comando com `--json` (`chat`, `doctor`, `models`, …) e `auth status`
-(sempre JSON, sem flag própria) emitem o corpo com `JSON.stringify` nativo,
-não um mimetismo de `json.dumps` (`docs/adr/0003-native-wire-format.md`,
-seção "JSON output"):
-
-- Chaves em ordem de inserção — nunca ordenadas por code point.
-- Caracteres não-ASCII saem como UTF-8 literal; não há escape `\uXXXX` além
-  do que o próprio `JSON.stringify` já faz para caracteres de controle.
-- Compacto (separadores padrão de `JSON.stringify`) onde a saída sempre foi
-  compacta; indentado com 2 espaços (`JSON.stringify(valor, null, 2)`) onde
-  já era indentado antes — `chat --json`, `auth status`, o arquivo
-  `auth.json`/`oauth.json` e o `jobs.json` do cron.
-- `NaN`/`Infinity`/`-Infinity` nunca aparecem como literal na saída: um
-  número não-finito numa fronteira de serialização é erro com causa
-  (`TypeError`), não um byte silenciosamente inválido. O cron store é a
-  única exceção documentada — uma agenda `once` não-finita (`nan_literal`,
-  Emenda E3) continua sendo aceita e relida, mas é persistida como um
-  objeto JSON-safe, nunca como o token bare `NaN`.
-
-Qualquer consumidor que faça `JSON.parse` (em vez de comparar bytes) não é
-afetado: os nomes e tipos de campo do envelope não mudaram, só a forma dos
-bytes.
-
-### Servidor (`lohra serve`)
-
-`lohra serve` expõe uma superfície compatível com a API da OpenAI:
-`GET /health`, `GET /v1/models`, `POST /v1/chat/completions`,
-`POST /v1/responses` e `GET /openapi.json` (documento OpenAPI mínimo, com
-`operationId` em cada rota). Rotas desconhecidas — incluindo `/docs`,
-`/redoc` e `/docs/oauth2-redirect`, removidas na issue #74 — respondem 404
-como qualquer outra.
-
-Todo corpo de requisição inválido nas duas rotas `POST` responde **422** no
-envelope de erro da própria API, não em um formato específico de framework
-(`docs/adr/0003-native-wire-format.md`, item 6 "HTTP server"):
+A workflow does not start from the CLI. There is no `lohra workflow run`. Ask for one in a turn; the agent calls `run_workflow`. The smallest spec is one `agent` node:
 
 ```json
 {
-  "error": {
-    "message": "model: field is required",
-    "type": "invalid_request_error",
-    "param": "model",
-    "code": "validation_error",
-    "details": [{ "path": ["body", "model"], "message": "field is required" }]
-  }
+  "meta": { "name": "note" },
+  "nodes": [
+    {
+      "id": "draft",
+      "type": "agent",
+      "prompt": "Write a one-paragraph note about this repository."
+    }
+  ]
 }
 ```
 
-`message` e `param` refletem o primeiro item de `details` (`param` é o
-`path` sem o prefixo `"body"`, em notação `campo[índice].subcampo`; `null`
-quando a falha é do corpo inteiro). `details` é uma extensão própria deste
-servidor e traz todas as falhas encontradas, cada uma com `path`, `message`
-e, quando há um valor de fato recebido, `received`. Corpo ausente
-(`Content-Length: 0`) responde com `details: [{"path": ["body"], "message":
-"request body is required"}]`; JSON malformado responde com uma mensagem que
-embute a causa: `"request body is not valid JSON: <causa>"`. As coerções
-sempre aceitas por este servidor (`temperature`/`max_tokens` como string
-numérica, `stream` como `"true"`/`0`/`1`/…) continuam aceitas — só a forma do
-erro mudou.
+Then read the durable run from any terminal, against the same state database:
 
-### Memória e perfil do usuário
+```bash
+lohra workflow list
+lohra workflow watch RUN_ID
+lohra workflow templates
+```
 
-A tool `memory` grava fatos duráveis em dois arquivos por `LOHRA_HOME`
-(`~/.lohra/memories/MEMORY.md`, notas do agente; `USER.md`, perfil do
-usuário; `target: "user"` na chamada escreve no segundo). Cada chamada
-carrega em `buildSystemPrompt` como `<memory>`/`<user-profile>`, prefixados
-com uma frase que diz o que o bloco é e como usar (issue #582, épico #575,
-P6): a memória vem marcada como podendo ter envelhecido ("verify a file,
-flag, or command still exists before relying on it"), o perfil como "who
-the user is and how they prefer to work". Os dois somem do prompt quando o
-arquivo correspondente está vazio — nenhuma tag sem conteúdo.
+`workflow` only reads state. It does not call a model. Its subcommands are `list`, `watch`, `audit`, `notices`, and `templates`.
 
-A regra de quando salvar vive em `DOCTRINE_CORE`
-(`src/context/doctrine.ts`), não só na description da tool `memory` (que
-some sob `--no-tools`): salvar uma correção do usuário, uma preferência ou
-uma convenção do projeto — nunca progresso de tarefa nem o que o
-repositório já registra. Antes de culpar uma falha no "ambiente" (uma
-quota, um timeout), o modelo precisa de evidência do próprio turno; sem
-ela, a causa é a própria escolha do modelo (**agência**, não
-**ambiente** — decision note #54). A mesma taxonomia está nas descriptions
-de `memory` e `skill_manage` (`src/tools/builtin-definitions.ts`) —
-`tests/tools-memory-guidance.test.ts` prende as duas contra o
-enquadramento "environment quirk" sem essa qualificação.
+`workflow_save` stores a run that finished `complete`. `run_workflow` with `template` set to that name runs it again. `lohra workflow templates` prints the scoreboard. Nothing promotes a template by itself, and there is no learning loop.
 
-`AGENTS.md` e `CLAUDE.md` byte-idênticos no mesmo diretório (comum: os dois
-existem para harnesses diferentes lerem as mesmas instruções) entram no
-prompt como um único `<context-file>`, com o label composto
-(`"AGENTS.md = CLAUDE.md"`) e um prefixo próprio ("Project instructions
-below override default behavior for work inside this project.") —
-`src/context/discovery.ts`'s `discoverInstructions`.
+How to choose a node, how refs work, and how to read `complete`, `degraded`, `failed`, and `paused`: [assets/skills/workflow-authoring/SKILL.md](assets/skills/workflow-authoring/SKILL.md). `switch`, `loop` (required `max_rounds`, 1 to 16), fail-closed `escalate`, and model-free `call` (`read_file` or `web_fetch` only): [assets/skills/workflow-authoring/flow-control/SKILL.md](assets/skills/workflow-authoring/flow-control/SKILL.md). The same behavior is summarized in [docs/workflow-supervision.md](docs/workflow-supervision.md).
 
-### Skills
+## Surfaces
 
-`lohra skill export <nome> --to <destino>` copia o `SKILL.md` de
-`assets/skills/<nome>` para `<destino>/<nome>/SKILL.md`. Duas skills vivem
-nesse diretório:
+Os comandos top-level públicos, na ordem exibida pelo help, são `init`, `doctor`, `chat`, `dashboard`, `serve`, `cron`, `workflow`, `models`, `tiers`, `profile`, `auth`, `skill`, `skills` e `update`.
 
-- `use-lohra-ts` — a skill exportável deste runtime, escrita para um harness
-  externo (Claude Code, Codex) que vai delegar trabalho a `lohra chat`. Cita
-  só flags que existem em `src/cli/arg-spec.ts` (`tests/skills-builtin-contract.test.ts`
-  prende isso).
-- `workflow-authoring` — nunca exportada; é builtin **deste** próprio
-  runtime (`SkillStore` em `src/commands/chat.ts` e
-  `src/commands/session-tools.ts` a carregam como `builtinRoot`), porque
-  documenta `run_workflow`, uma tool que só existe dentro de uma sessão do
-  próprio `lohra chat`.
+| Command                  | What it is                                                                                 |
+| ------------------------ | ------------------------------------------------------------------------------------------ |
+| `init`, `doctor`, `chat` | Set up, check the profile, take one turn.                                                  |
+| `dashboard`              | Local HTTP and WebSocket gateway. It prints a URL and does not open a browser.             |
+| `serve`                  | OpenAI-compatible HTTP server.                                                             |
+| `cron`                   | Scheduled jobs: `list`, `add`, `remove`, `pause`, `resume`.                                |
+| `workflow`               | Read durable runs. It does not start one.                                                  |
+| `models`, `tiers`        | Models and tiers for the current provider.                                                 |
+| `profile`, `auth`        | Named profiles, and API-key or Codex-subscription auth.                                    |
+| `skill`, `skills`        | Export one bundled skill, or install the managed kit into a client.                        |
+| `update`                 | On an npm install, compare with the public registry. On a git checkout, fast-forward only. |
 
-A `description` de cada `SKILL.md` é o único gatilho que um harness vê antes
-de carregar o corpo inteiro no contexto — `use-lohra-ts` e
-`workflow-authoring` declaram gatilho e anti-gatilho ("Do NOT load...") na
-própria description. `use-lohra` (a skill do Lohra **Python**, mesmo
-diretório) segue exportável para quem delega àquele runtime, mas com
-description e um aviso no corpo marcando-a como legado para este —
-`docs/decisions/2026-09-10-skills-harness.md` registra a decisão e o que
-segue pendente (política de instalação/atualização, issue #255).
+How `doctor` and `chat` choose a provider when you pass no `--provider`: [docs/provedores-deteccao.md](docs/provedores-deteccao.md).
 
-O frontmatter de um `SKILL.md` aceita `name`, `description` e `version`; um
-`platforms:` legado (fora da spec do agentskills.io, nunca filtrado por
-nada neste runtime) ainda é tolerado ao ler — só não é mais escrito nem
-exposto por `parseSkillMd`.
+### Clients
 
-## Self-update
+`lohra skills add` copies this package's skill kit into a client. It does not install the client, and it does not change Lohra's provider.
 
-Em um checkout Git, `lohra update --check` faz fetch e mede o upstream sem
-mover `HEAD`. `lohra update` recusa árvore suja, detached HEAD, upstream ausente
-e divergência; quando permitido, usa apenas fast-forward. Mudanças em manifests
-de dependências produzem uma recomendação de `npm install`; `--reinstall`
-executa npm por executable/argv, sem shell — só vale nesse caminho (checkout
-git); fora dele é ignorado, sem erro.
+```bash
+lohra skills add "Claude Code"
+lohra skills add Codex
+lohra skills add OpenCode
+lohra skills add Pi
+```
 
-Uma instalação por tarball/npm não contém `.git` — `lohra update` e
-`lohra update --check` consultam `registry.npmjs.org/lohra-ts/latest`
-(timeout de 5 s, sem retry) e comparam com a versão instalada
-(`src/commands/update-registry.ts`). Sem uma versão mais nova (`equal` ou
-`older`), os dois imprimem que já está atualizado e saem `0`. Com uma versão
-mais nova: `--check` imprime a versão disponível e o comando de instalação
-sem executar nada; `update` sem `--yes` imprime só
-`npm install -g lohra-ts@<versão>` e sai `0`; com `--yes` executa esse
-comando por executable/argv (sem shell). Qualquer falha de rede ou resposta
-inesperada do registry é fail-closed, nomeando a causa, e sai `1` (código
-diferente do caminho git, que usa `2` numa recusa). Hoje, antes de D8
-publicar uma versão, `registry.npmjs.org/lohra-ts/latest` responde 404 —
-`lohra update`/`--check` fora de um checkout imprime `could not check for
-updates: npm registry responded with status 404` em stderr e sai `1`.
+`Claude` is accepted. Names are case-insensitive. Paths, updates, and removal: [docs/skills-management.md](docs/skills-management.md). `lohra init` does not yet pick those clients from a keyboard list.
 
-## Limites e superfícies não medidas
+MCP servers are read from `mcp.json` in the Lohra home when `chat` or `dashboard` starts. A missing file is ignored. A malformed file fails closed.
 
-- Budgets, fan-out, filas de audit e retenção são limitados e falham de forma
-  explícita.
-- Estado cross-process usa SQLite/WAL com lease e fencing.
-- URLs web passam por proteção SSRF, resolução pinada e revalidação por hop.
-- Subsessões de orquestração não podem ser promovidas a sessões privilegiadas
-  do gateway.
-- Registro e refresh MCP são transacionais por lote.
-- Smokes de providers/SDKs reais permanecem `NOT_MEASURED` sem credenciais; os
-  gates normais são offline e usam fixtures locais.
-- O CI (`.github/workflows/ci.yml`) mede `ubuntu-latest` × Node 20/22 (Linux
-  x64): build, typecheck, lint, format:check e test em todo push na `main` e
-  toda PR, mais o job `provenance` que exige que cada SHA aprovado em
-  `docs/provenance.json` seja ancestral do HEAD (formato, script e flags em
-  [`docs/provenance.md`](docs/provenance.md)). Windows nativo e macOS Node 20
-  permanecem `NOT_MEASURED`; spoof de plataforma não conta como evidência.
+### Library
 
-## Histórico de paridade
+`import "lohra-ts"` exports `ConversationRuntime`, `SqliteConversationRepository`, `SessionRepository`, and `openStateDatabase`. The import does not open a database, read credentials, start the CLI, or connect to a provider. You pass the state path, the model transport, and the tools.
 
-Até 2026-09-04 o runtime era desenvolvido como port validado bilateralmente
-contra o oracle Python pinado no SHA `16b4785d803ad0ca364a8a67346a04f949fbf592`
-([ADR 0003](docs/adr/0003-native-wire-format.md)). O aggregate de closeout
-comparava um inventário fechado nos dois sentidos, executava cada suíte
-não-live duas vezes e recusava scripts ausentes, órfãos, skips, resultados não
-determinísticos ou mutantes sobreviventes; evidence ficava em
-`.parity-evidence/` (gitignored). Desde essa data a validação contra o Python
-deixou de ser critério de aceite: as fixtures capturadas na fase de paridade
-são hoje o corpus de regressão do runtime (39 cenários e os manifests T15/T20
-em `tests/fixtures/parity/`, suporte em `tests/support/parity/`). O harness
-bilateral (`scripts/parity/`, 475 arquivos, 70 scripts npm com prefixo
-`parity`/`probe`) foi apagado em #167 (PR #212, 2026-09-08); o stub de
-servidor/driver que sobrou vive em `scripts/stub/{driver,server,types}.ts`.
+## Not in 0.1.0
 
-`mutations:closeout` foi retirado do `package.json` em #153: os 8 mutantes
-que miravam `src/` migraram para `mutations:self-update` (hoje agregado por
-`npm run mutations:all`, ver [docs/mutation-testing.md](docs/mutation-testing.md));
-os outros 27, exclusivos do closeout T22, foram aposentados com registro em
-`docs/regression-inventory.md`. O relatório completo dos 23 tickets, SHAs e
-dívidas do fechamento está em [docs/closeout.md](docs/closeout.md).
+- **Windows as a supported platform.** Milestone 25 hardening is in progress. The `windows-checks` job is informative (`continue-on-error`). This release does not make it required.
+- **A terminal UI.** The Ink TUI is not shipped (milestone 23 is still the open investigation). `dashboard` is the local gateway, not that UI.
+- **Automatic template promotion or a learning loop.** A template is written only when `workflow_save` is asked to keep a completed run.
+- **Keyboard client selection and an explicit default provider inside `init`.** Those are #938 and #939, left for 0.1.1. `lohra skills add` is what installs the kit today.
 
-## Decisão arquitetural
+## More
 
-O owner escolheu `typescript-mainline` para o novo capítulo em
-[docs/gate-decision-t22.md](docs/gate-decision-t22.md) (2026-09-03) e, em
-2026-09-04, encerrou a obrigação de paridade com o Python
-([ADR 0003](docs/adr/0003-native-wire-format.md)). O runtime Python segue
-somente como referência histórica; nenhuma implementação é feita nele, e
-nenhuma saída deste runtime precisa reproduzir os bytes dele.
+- [CHANGELOG.md](CHANGELOG.md) — merges since published npm `0.0.12`
+- [docs/release.md](docs/release.md) — how a version is cut and published
+- [docs/skills-management.md](docs/skills-management.md)
+- [docs/provedores-deteccao.md](docs/provedores-deteccao.md)
+- [docs/system-prompt.md](docs/system-prompt.md)
+- [docs/workflow-supervision.md](docs/workflow-supervision.md)
+- [docs/workflow-audit.md](docs/workflow-audit.md)
+- [docs/windows-home.md](docs/windows-home.md)
+- [docs/gate-decision-t22.md](docs/gate-decision-t22.md)
+- [docs/adr/0003-native-wire-format.md](docs/adr/0003-native-wire-format.md)
 
-## Licença
+O owner escolheu `typescript-mainline` para o novo capítulo em [docs/gate-decision-t22.md](docs/gate-decision-t22.md) (2026-09-03). Live provider and SDK smokes remain `NOT_MEASURED` without credentials.
 
-O lohra-ts é distribuído sob a licença [MIT](LICENSE) (decisão do owner,
-issue #535).
+## License
+
+[MIT](LICENSE).
