@@ -30,6 +30,7 @@ import {
   retryAfterSeconds,
 } from "../transports/index.js";
 import { ChildConversationRepository } from "./child-repository.js";
+import { executionTier, TiersError, type Tier, type TierMap } from "../workflow/tiers.js";
 import type { ChildRunner, CollectResult, SpawnConfig } from "./core.js";
 import { NonClosingTransport } from "./non-closing-transport.js";
 import { parseOutcomeSentinel } from "./outcome-sentinel.js";
@@ -55,10 +56,40 @@ export interface CreateChildRunnerOptions {
    * too. Absent means the built-in price table only, same as the parent
    * when no pricing.json exists. */
   readonly pricingOverrides?: ConversationRuntimeOptions["pricingOverrides"];
+  /**
+   * #987: the operator tier map (`workflow_tiers.json`), read per spawn by the
+   * same fail-closed reader the workflow service uses (`readTiers`). Its
+   * `execution` tier is the model a `delegate_task`/`spawn_session` child
+   * runs on when its task names none. Absent means no tier map at all: the
+   * child inherits `defaultModel`, exactly as before this issue.
+   */
+  readonly tiers?: () => TierMap | TiersError;
 }
 
 function nonEmpty(value: string | undefined): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+/**
+ * #987: the execution tier a child with no model of its own falls to — the
+ * tier map is read HERE, per spawn, so a broken `workflow_tiers.json` throws
+ * its `TiersError` into `createChildRunner`'s resolution `try`, which turns it
+ * into a failed child with the named message (never a silent fallback to the
+ * orchestrator's model). Not read at all when the task names a `model`, which
+ * always wins, nor for a workflow leaf (`wrapDispatch` is set only by
+ * `OrchestrationChildRuntime`): the engine already resolved its routing
+ * (`routingOf`), where an explicit `tier` that has no model must keep
+ * meaning "the orchestrator's", not "the execution tier's".
+ */
+function executionDefault(
+  config: SpawnConfig,
+  load: (() => TierMap | TiersError) | undefined,
+): Tier | undefined {
+  if (load === undefined || config.wrapDispatch !== undefined || nonEmpty(config.model) !== null)
+    return undefined;
+  const tiers = load();
+  if (tiers instanceof TiersError) throw tiers;
+  return executionTier(tiers);
 }
 
 function buildTransport(client: ClosableClient, streaming: boolean): ModelTransport {
@@ -208,8 +239,9 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
     const fallbackProvider = nonEmpty(config.provider) ?? "unknown";
     const fallbackModel = nonEmpty(config.model) ?? options.defaultModel;
     try {
-      const providerOverride = nonEmpty(config.provider);
-      const modelOverride = nonEmpty(config.model);
+      const inherited = executionDefault(config, options.tiers);
+      const providerOverride = nonEmpty(config.provider) ?? inherited?.provider ?? null;
+      const modelOverride = nonEmpty(config.model) ?? inherited?.model ?? null;
       const configured = await configureFor(options.clientPool, {
         provider: providerOverride,
         model: modelOverride,
@@ -223,7 +255,7 @@ export function createChildRunner(options: CreateChildRunnerOptions): ChildRunne
           : await options.clientPool.get(null);
       const model =
         (configured?.["model"] as string | undefined) ?? modelOverride ?? options.defaultModel;
-      const effort = nonEmpty(config.effort);
+      const effort = nonEmpty(config.effort) ?? inherited?.effort ?? null;
       const maxIterations = config.maxIterations ?? options.childMaxIterations;
       // Issue #578: `forcedDefinition` is `null` for the common case (no
       // schema forced on this leaf) — `toolDefinitions`/`runTurn`'s own

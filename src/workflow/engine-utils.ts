@@ -17,7 +17,7 @@ import { isEmptyOutput } from "./output-validation.js";
 import { resolveValue } from "./refs.js";
 import type { Awaitable, CausalContext, ChildResult } from "./runtime.js";
 import { resolveInlineSchema, validateSpec } from "./schema.js";
-import type { TierMap } from "./tiers.js";
+import { executionIdentity, tierOf, type TierMap } from "./tiers.js";
 import { Node, ValidationError } from "./types.js";
 export interface Routing {
   readonly provider?: string;
@@ -155,8 +155,7 @@ export function resultUsage(result: ChildResult): Usage {
 }
 
 export function routingOf(node: Node, tiers: TierMap): Routing {
-  const tier =
-    typeof node.fields.tier === "string" ? tiers[node.fields.tier as keyof TierMap] : undefined;
+  const tier = tierOf(node.fields, tiers);
   return {
     ...(typeof node.fields.provider === "string"
       ? { provider: node.fields.provider }
@@ -291,6 +290,8 @@ export function buildCausalContext(
 }
 
 export function routingIdentity(node: Node, tiers: TierMap): readonly unknown[] {
+  const inherited = executionIdentity(node.fields, tiers);
+  if (inherited !== null) return inherited;
   if (!["model", "tier", "effort", "provider"].some((field) => Object.hasOwn(node.fields, field)))
     return [];
   const resolved = routingOf(node, tiers);

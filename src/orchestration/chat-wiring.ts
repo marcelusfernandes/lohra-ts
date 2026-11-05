@@ -5,6 +5,7 @@ import type { ConversationRuntimeOptions } from "../conversation/index.js";
 import type { SessionRepository } from "../state/index.js";
 import { childToolDefinitions } from "../tools/child.js";
 import type { RegistryDispatch, ToolDefinition, ToolHandler } from "../tools/types.js";
+import { readTiers } from "../workflow/tiers.js";
 import { createChildRunner } from "./child-runner.js";
 import { OrchestrationCore } from "./core.js";
 import type { FanoutResolution } from "./fanout-config.js";
@@ -50,6 +51,12 @@ export interface BuildOrchestrationCoreOptions {
    * applies to a child's persisted cost the same way it applies to the
    * parent's. */
   readonly pricingOverrides?: ConversationRuntimeOptions["pricingOverrides"];
+  /** #987: where `workflow_tiers.json` lives (`<home>/workflow_tiers.json`,
+   * the file `WorkflowService` reads). Each child spawn reads it through
+   * `readTiers`: its `execution` tier is the model a `delegate_task` child
+   * with no `model` of its own runs on, and a broken file fails that child by
+   * name. Absent means no tier map: children inherit `defaultModel`. */
+  readonly tiersPath?: string;
 }
 
 /**
@@ -62,6 +69,7 @@ export interface BuildOrchestrationCoreOptions {
  * that's not a regression test that runs in CI.
  */
 export function buildOrchestrationCore(options: BuildOrchestrationCoreOptions): OrchestrationCore {
+  const tiersPath = options.tiersPath;
   return new OrchestrationCore({
     runChild: createChildRunner({
       sessions: options.sessions,
@@ -75,6 +83,8 @@ export function buildOrchestrationCore(options: BuildOrchestrationCoreOptions): 
       clock: () => Date.now() / 1000,
       childMaxIterations: 50,
       pricingOverrides: options.pricingOverrides,
+      // Re-read per spawn (like `WorkflowService` per launch): an edit of the file applies to the next child.
+      ...(tiersPath === undefined ? {} : { tiers: () => readTiers(tiersPath) }),
     }),
     idSource: () => randomUUID().replaceAll("-", ""),
     maxSubsessions: options.fanout.maxSubsessions,
