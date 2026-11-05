@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { ClientPool } from "../src/agent/client-pool.js";
 import { runTiers } from "../src/commands/tiers.js";
+import { buildOrchestrationCore } from "../src/orchestration/chat-wiring.js";
 import { createChildRunner } from "../src/orchestration/child-runner.js";
 import type { SpawnConfig } from "../src/orchestration/core.js";
 import { getProviderProfile } from "../src/providers/index.js";
@@ -272,6 +273,8 @@ function parsed(raw: unknown) {
   return result;
 }
 
+const SWITCH_CASES = { a: { prompt: "dig" }, b: null };
+
 /** Cada tipo de nó que gera leaf, com o nó sem model/tier e o equivalente com `tier: "big"`
  * onde o tipo aceita roteamento (`parallel` não aceita: `branches` nunca tem tier). */
 const NODES: readonly (readonly [
@@ -320,12 +323,60 @@ const NODES: readonly (readonly [
       tier: "big",
     },
   ],
+  [
+    "verify",
+    { id: "n", type: "verify", finding: "claim", skeptics: 1 },
+    { id: "n", type: "verify", finding: "claim", skeptics: 1, tier: "big" },
+  ],
+  [
+    "judge_panel",
+    { id: "n", type: "judge_panel", attempts: ["draft"], judges: 1, synthesize: null },
+    { id: "n", type: "judge_panel", attempts: ["draft"], judges: 1, synthesize: null, tier: "big" },
+  ],
+  [
+    "completeness_check",
+    { id: "n", type: "completeness_check", task: "ship it", results: "found two" },
+    { id: "n", type: "completeness_check", task: "ship it", results: "found two", tier: "big" },
+  ],
+  [
+    "switch",
+    { id: "n", type: "switch", value: "${args.kind}", cases: SWITCH_CASES },
+    {
+      id: "n",
+      type: "switch",
+      value: "${args.kind}",
+      cases: SWITCH_CASES,
+      tier: "big",
+    },
+  ],
+  [
+    "loop",
+    {
+      id: "n",
+      type: "loop",
+      body: { prompt: "r ${round}" },
+      until: { gte: { path: "${last.score}", n: 8 } },
+      max_rounds: 1,
+    },
+    {
+      id: "n",
+      type: "loop",
+      body: { prompt: "r ${round}" },
+      until: { gte: { path: "${last.score}", n: 8 } },
+      max_rounds: 1,
+      tier: "big",
+    },
+  ],
 ];
+
+/** Arguments da execução: `switch.value` lê `${args.kind}`. */
+const ARGS = { kind: "a" };
 
 async function modelsOf(node: Record<string, unknown>): Promise<readonly (string | undefined)[]> {
   const runtime = new RecordingRuntime();
   await new WorkflowEngine({ runtime, tiers: SMALL }).run(
     parsed({ meta: { name: "exec-engine" }, nodes: [node] }),
+    ARGS,
   );
   return runtime.spawned.map((request) => request.model);
 }
@@ -335,6 +386,7 @@ describe("WorkflowEngine — todo tipo de nó que gera leaf usa o tier de execu�
     const runtime = new RecordingRuntime();
     await new WorkflowEngine({ runtime, tiers: SMALL }).run(
       parsed({ meta: { name: "exec-default" }, nodes: [bare] }),
+      ARGS,
     );
     expect(runtime.spawned.length).toBeGreaterThan(0);
     for (const request of runtime.spawned) {
@@ -597,6 +649,80 @@ describe("createChildRunner — sub-agente sem model usa o tier de execução (#
     const result = await run({ prompt: "go", wrapDispatch: (base) => base });
     expect(result.model).toBe("orchestrator-model");
     expect(port.body().model).toBe("orchestrator-model");
+  });
+});
+
+describe("buildOrchestrationCore — tiersPath chega ao runner dos filhos (#987)", () => {
+  function wired(tiersPath: string | undefined): {
+    readonly settle: (prompt: string) => Promise<{ status: string; model: string; output: string }>;
+    readonly port: QueuePort;
+  } {
+    const connection = openStateDatabase(join(root(), "state.db"));
+    closers.push(() => {
+      connection.close();
+    });
+    const sessions = new SessionRepository(connection.database, () => 1000, connection.ftsEnabled);
+    sessions.createSession({ id: "parent-1", source: "gateway" });
+    const profile = getProviderProfile("openai");
+    if (profile === null) throw new Error("openai profile missing");
+    const port = new QueuePort();
+    const client = new ChatCompletionsClient({
+      baseUrl: "http://parent.invalid/v1",
+      apiKey: "k",
+      transport: new ChatCompletionsTransport(),
+      http: port,
+    });
+    const core = buildOrchestrationCore({
+      fanout: { maxParallel: 4, maxSubsessions: 200, parentMaxIterations: 90, warnings: [] },
+      sessions,
+      parentSessionId: "parent-1",
+      clientPool: new ClientPool(profile, client, { home: "/tmp", environment: {} }),
+      baseDispatch: () => Promise.resolve("unused"),
+      parentToolDefinitions: [],
+      defaultModel: "orchestrator-model",
+      cwd: "/tmp",
+      ...(tiersPath === undefined ? {} : { tiersPath }),
+    });
+    return {
+      port,
+      settle: async (prompt) => {
+        const { subId } = core.spawn({ prompt });
+        const outcome = await core.collect(subId, true);
+        if (outcome.kind !== "settled") throw new Error("expected the turn to settle");
+        return outcome.result;
+      },
+    };
+  }
+
+  it("a delegated child runs on the execution tier of the file, read again on every spawn", async () => {
+    const home = root();
+    const path = tiersFile(home, { small: { model: "x-small" }, big: "x-big", execution: "small" });
+    const { settle, port } = wired(path);
+    expect((await settle("one")).model).toBe("x-small");
+    tiersFile(home, { small: { model: "x-small" }, big: "x-big", execution: "big" });
+    expect((await settle("two")).model).toBe("x-big");
+    expect(port.requests).toHaveLength(2);
+  });
+
+  it("a missing file is a map with no `execution`: the child keeps the orchestrator's model", async () => {
+    const { settle } = wired(join(root(), "workflow_tiers.json"));
+    expect((await settle("go")).model).toBe("orchestrator-model");
+  });
+
+  it("a broken file fails the child by name, with no call to the model", async () => {
+    const home = root();
+    const path = join(home, "workflow_tiers.json");
+    writeFileSync(path, "[");
+    const { settle, port } = wired(path);
+    const result = await settle("go");
+    expect(result.status).toBe("error");
+    expect(result.output).toContain(path);
+    expect(port.requests).toHaveLength(0);
+  });
+
+  it("without tiersPath the child keeps the orchestrator's model, as before", async () => {
+    const { settle } = wired(undefined);
+    expect((await settle("go")).model).toBe("orchestrator-model");
   });
 });
 

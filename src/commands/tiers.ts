@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { buildCatalog } from "../catalog/catalog.js";
 import type { OllamaStatus } from "../doctor/model.js";
-import { MODEL_TIERS, readTiers, TiersError } from "../workflow/tiers.js";
+import { EXECUTION_KEY, MODEL_TIERS, readTiers, TiersError } from "../workflow/tiers.js";
 
 export async function runTiers(options: {
   readonly action: string;
@@ -38,6 +38,8 @@ export async function runTiers(options: {
           `${name}: ${[tier.provider, tier.model, tier.effort].filter(Boolean).join("/")}`,
         );
     }
+    // Issue #987: the tier a node or sub-agent with no model of its own falls to.
+    if (tiers.execution !== undefined) lines.push(`${EXECUTION_KEY}: ${tiers.execution}`);
     return { code: 0, stdout: `${lines.join("\n")}\n`, stderr: "" };
   }
   if (options.action !== "suggest")

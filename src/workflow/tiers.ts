@@ -15,6 +15,9 @@ export type TierMap = Readonly<Partial<Record<ModelTierName, Tier>>> & {
 /** The operator tier map, read from the operator home per launch (#234). */
 export const OPERATOR_TIERS_FILE = "workflow_tiers.json";
 const TIER_FIELDS: readonly string[] = ["model", "provider", "effort"];
+/** #987: the one top-level key that is not a tier — it names one. */
+export const EXECUTION_KEY = "execution";
+const ROUTE_FIELDS: readonly string[] = ["model", "tier", "effort", "provider"];
 
 /** Named, fail-closed error for a `workflow_tiers.json` that exists but
  * cannot be trusted — cites the path and, in `cause`, why (#234). */
@@ -105,12 +108,12 @@ export function readTiers(path: string): TierMap | TiersError {
   const root = object(parsed);
   if (root === null) return new TiersError(path, `root must be an object, got ${typeName(parsed)}`);
   for (const key of Object.keys(root)) {
-    if ((MODEL_TIERS as readonly string[]).includes(key)) continue;
+    if (key === EXECUTION_KEY || (MODEL_TIERS as readonly string[]).includes(key)) continue;
     const suggestion = closestTierName(key);
     return new TiersError(
       path,
       suggestion === undefined
-        ? `unknown top-level key '${key}' (expected one of: ${MODEL_TIERS.join(", ")})`
+        ? `unknown top-level key '${key}' (expected one of: ${[...MODEL_TIERS, EXECUTION_KEY].join(", ")})`
         : `unknown top-level key '${key}' — did you mean '${suggestion}'?`,
     );
   }
@@ -147,12 +150,64 @@ export function readTiers(path: string): TierMap | TiersError {
     }
     result[name] = tier;
   }
-  return result;
+  if (!(EXECUTION_KEY in root)) return result;
+  const execution = executionName(root[EXECUTION_KEY], result);
+  return typeof execution === "string"
+    ? { ...result, execution }
+    : new TiersError(path, execution.reason);
 }
 
-export function executionTier(tiers: TierMap): never {
-  void tiers;
-  throw new Error("not implemented: executionTier");
+/** #987: `execution` must name one of the tiers this same file defines — a
+ * name outside `MODEL_TIERS`, a non-string, or a tier left undefined would
+ * make every node and sub-agent with no model of its own fall back to
+ * nothing, silently. Returns the tier name, or the reason it was refused. */
+function executionName(
+  value: unknown,
+  defined: TierMap,
+): ModelTierName | { readonly reason: string } {
+  const names = MODEL_TIERS.join(", ");
+  if (typeof value !== "string")
+    return { reason: `'${EXECUTION_KEY}' must be a tier name (${names}), got ${typeName(value)}` };
+  const name = MODEL_TIERS.find((tier) => tier === value);
+  if (name === undefined)
+    return { reason: `'${EXECUTION_KEY}' must name one of ${names}, got '${value}'` };
+  return defined[name] === undefined
+    ? { reason: `'${EXECUTION_KEY}' names tier '${name}', which is not defined in this file` }
+    : name;
+}
+
+/** #987: the tier that `execution` names, or `undefined` when the map has no
+ * such key (or, for a hand-built map, the tier it names is not in it). */
+export function executionTier(tiers: TierMap): Tier | undefined {
+  return tiers.execution === undefined ? undefined : tiers[tiers.execution];
+}
+
+/** The tier a node's routing resolves through: the one it names (`tier`),
+ * else — when it names no `model` either — the execution tier (#987). An
+ * explicit `model` or `tier` on the node always wins; an explicit tier the
+ * map does not define resolves to nothing, never to the execution tier. */
+export function tierOf(
+  fields: Readonly<Record<string, unknown>>,
+  tiers: TierMap,
+): Tier | undefined {
+  if (typeof fields.tier === "string") {
+    const named = MODEL_TIERS.find((name) => name === fields.tier);
+    return named === undefined ? undefined : tiers[named];
+  }
+  return typeof fields.model === "string" ? undefined : executionTier(tiers);
+}
+
+/** #987: the `[model, effort, provider]` a cell identity carries for a node
+ * that declares no route field at all, when the execution tier decides its
+ * routing; `null` when it does not — no `execution`, or the node names its
+ * own route — so the caller keeps its identity exactly as before. */
+export function executionIdentity(
+  fields: Readonly<Record<string, unknown>>,
+  tiers: TierMap,
+): readonly unknown[] | null {
+  const tier = executionTier(tiers);
+  if (tier === undefined || ROUTE_FIELDS.some((field) => Object.hasOwn(fields, field))) return null;
+  return [tier.model ?? null, tier.effort ?? null, tier.provider ?? null];
 }
 
 export function writeTiers(path: string, tiers: TierMap): void {

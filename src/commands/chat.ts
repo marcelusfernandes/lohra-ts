@@ -65,6 +65,7 @@ import { subscriptionProviderRefusal } from "./subscription-guard.js";
 import { composeSessionTools, createSessionToolBase } from "./session-tools.js";
 import {
   AuditTrail,
+  OPERATOR_TIERS_FILE,
   OrchestrationChildRuntime,
   productionOwnershipStore,
   templateLoader,
@@ -414,6 +415,8 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     defaultModel: model,
     cwd: options.cwd,
     pricingOverrides,
+    // Issue #987: the `execution` tier of the same file the workflow service reads.
+    tiersPath: join(options.home, OPERATOR_TIERS_FILE),
   });
   // Issue #369: the ring buffer is per-process, per-service; `push` never
   // throws (a bad event never aborts the run it watches), so wiring it
